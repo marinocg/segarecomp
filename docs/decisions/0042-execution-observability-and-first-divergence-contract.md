@@ -1,0 +1,125 @@
+# ADR 0042: Execution observability and first-divergence diagnosis contract
+
+- Status: Accepted
+- Date: 2026-09-20
+- Task: SEG-020-T001 (research/contract only; no product implementation)
+
+## Context
+
+SEG-020 lets a developer find where generated-native execution first differed from a trusted
+reference, with guest/generated provenance and the owning layer (CPU vs Genesis device). This ADR
+audits the existing seams, freezes reuse decisions and the minimal neutral concepts, and states what
+is deliberately not generalized. Code citations are to the tree at this commit.
+Non-goals: GUI/GDB/LLDB replacement, reverse execution, persistent trace database, replay engine,
+universal CPU state/IR/event bus, interpreter, JIT, runtime opcode decoding, Z80/SH-2 work.
+
+## 1. Anchor audit
+
+| Anchor | Code | Verdict |
+| --- | --- | --- |
+| `InstructionProvenance` / `DecodeSource` (cpu variant, program address, image offset, raw bytes, length) | `libs/core/include/segarecomp/core/provenance.hpp` | **Reuse as-is** as the guest-provenance record. |
+| M68k static program records (`M68kStaticBlock` holds `InstructionProvenance` list, `M68kStaticEdge`, `M68kStaticCall`) | `libs/cpu/m68k/include/segarecomp/cpu/m68k/static_program.hpp` | **Extend** (T002): read-only projection for closure facts; no structural change. |
+| `M68kOperationEffect` (register write masks, memory/stack/PC effect kinds) | `libs/cpu/m68k/.../effects.hpp` | **Reuse as-is** as the source of the bounded effect projection (Section 5). Its footprint-completeness flag gates what may be compared. |
+| M68k cycle timing owner | `libs/cpu/m68k/.../timing.hpp`, ADR-0041 | **Reuse as-is**; not compared (Section 6). |
+| `genesis_runtime_retire_m68k_instruction` | `platforms/genesis/runtime/runtime.h` | **Reuse as-is**: sole instruction-boundary seam; the checkpoint/history hook attaches here. |
+| `recent_pc_history` circular buffer (capacity 64) + `genesis_write_ephemeral_pc_history` | `runtime.h` (`GenesisRuntime`, `GENESIS_RECENT_PC_HISTORY_CAPACITY`), ADR-0040 | **Extend** (T003): generalize the bounded ring into typed events; keep its exclusion from stable serializations and its ephemeral-channel-only transport. |
+| `ephemeral_frontier` / `--diagnose-frontier` / `parse_ephemeral_pc_history` | `tools/genesis_startup_bridge.py` | **Extend** (T007): remains the single private diagnosis assembly; parse failure must never fail a run. |
+| `checkpoint_evidence.h` (`GenesisCpuEvidence`, `GenesisRamEvidence`, `GenesisDeviceEvidence`, `GenesisTransactionEvidence`, digests) and the oracle `tests/oracle/genesis/checkpoint_oracle.*` | `platforms/genesis/runtime/checkpoint_evidence.h`, ADR-0012 | **Reuse as-is for Genesis device/RAM evidence** (T006); **extend** only via a minimal M68k-owned digest type for CPU-only checkpoints (T004). `GenesisCheckpointPcClass` is UNKNOWN-only today and is not relied on. |
+| Musashi differential harnesses | `tests/m68k_*_musashi_differential_test.py`, pinned rev `313ebf1b...` | **Reuse as-is** as the trusted reference; new comparison code is test/tool-side only and skips gracefully when the pin is unset. |
+| `tools/genesis_frontier_debug.py` (LLDB/GDB stop inspection) | `tools/genesis_frontier_debug.py` | **Reuse as-is; replace-not-allowed.** Stays a private-session tool; not a durable-evidence path. |
+
+Any anchor not listed as extended is not modified by SEG-020.
+
+## 2. Checkpoint boundary granularity
+
+Decision: **instruction boundary** (one retired MC68000 instruction), matching ADR-0041 where
+architectural effects commit before retirement. Block granularity is rejected: generated C is
+block/PC-keyed but Musashi steps by instruction, so a block boundary could not name the first
+differing instruction. Boundary index N is the count of retired instructions since reset. Data lives
+in the M68k-owned record; the Genesis retirement seam only forwards. Unresolved: whether an
+exception-entry retirement counts as its own boundary is labeled **UNRESOLVED-T004** (default: the
+faulting instruction's boundary reports the exception state).
+
+## 3. Sequential compare vs bisection
+
+Decision: **sequential lockstep compare** with a bounded window. The tool advances generated and
+oracle in lockstep by boundary index and reports the last matching boundary N and first differing
+boundary N+1. Bounded bisection is **deferred**: it requires re-execution from checkpoints/replay, which is
+a non-goal. The compare stops at the divergence or at a caller-supplied boundary limit; the limit is
+mandatory.
+
+## 4. Bounded history event categories (justified now)
+
+Only: (a) retired-instruction PC/provenance key, (b) control transfer taken (kind: direct, computed,
+call, return, exception entry), (c) Genesis device-visible access (bus kind, width, direction,
+device/region class — never values beyond what ADR-0012 already permits durably). Capacity is a
+compile-time constant, ring semantics, oldest-overwritten, no allocation. Deferred: interrupt
+timing events, DMA phase events, sound events, register-value histories.
+
+## 5. Architectural effect comparison
+
+Decision: compare a **minimal projection** of existing structures, not a new universal state:
+`D0-D7`, `A0-A7`/USP-SSP as the runtime holds them, `SR`, `PC`, and a bounded list of memory writes
+(address, width, value) produced through `M68kOperationEffect`'s memory/stack effect kinds, plus a
+trap/exception marker (vector number). An instruction whose
+`register_write_footprint_complete` is false, or whose memory effect is not representable, makes the
+boundary compare **"unsupported for comparison"** — never "equal". Writes into RAM are additionally
+covered by a RAM digest at checkpoint granularity (T004 decides digest cadence). Field-level
+differences name the field; first differing **domain** is `cpu` when any projection field differs,
+else `genesis-device` when device evidence differs, else `none`.
+
+## 6. Timing
+
+Decision: **no cycle comparison**. Generated cycles come from the CPU timing owner but Musashi's
+cycle accounting is not certified equal for every form; no canonical, already-correct,
+Musashi-comparable value exists and none is necessary for first-divergence on state. Deferred until
+a task needs timing-divergence diagnosis.
+
+## 7. Image / module identity without module machinery
+
+Decision: identity is `(cpu variant, image identity, program address)` where image identity is the
+existing `image_offset` plus the ROM SHA-256 already carried by `GenesisCheckpointIdentity`
+(`rom_sha256`). No module registry, loader graph or Sega-CD/Saturn concept is introduced. Multi-image
+safety (SEG-018) is preserved by keeping the image key an opaque value owned by the platform.
+
+## 8. Static closure counts
+
+Decision: **deferred unless trivially derivable.** Counts of blocks, instructions, edges and calls
+are directly derivable from `M68kStaticBlock`/`M68kStaticEdge`/`M68kStaticCall`; T002 may report exactly
+those. Unresolved-target, pruned, and immutable-AOT membership counts are **not** promised
+(they depend on discovery internals, ADR-0010/0038/0039); no closure framework is created.
+
+## 9. Opt-in mechanism
+
+Decision: a **generation-time option** (CLI flag on the existing generator command family, like
+`--immutable-rom-aot`) that compiles diagnostic hooks into generated C. With the option off, the
+emitted C must be byte-identical to today's output; T004 adds a golden/identity test. Hooks only
+observe: they never alter dispatch, guest state, timing, or become generation input. No runtime flag
+can enable them in a diagnostics-off binary.
+
+## 10. Ownership and privacy
+
+- M68k diagnostic types/digests: `libs/cpu/m68k`; Genesis events/state: `platforms/genesis/runtime`
+  and device code; neutral seam only in `libs/core` if two consumers exist (today none: none added).
+  Guarded by the existing dependency tests (`architecture_dependency_test.py`,
+  `cpu_m68k_no_genesis_dependency_test.py`).
+- Commercial runs: addresses, bytes, disassembly, values and traces stay in the ephemeral channel;
+  durable output (ADR-0004/0005/0012) is normalized classes only. Complete traces and bundles are never
+  committed. Deterministic output: identical inputs/options give byte-identical reports.
+
+## 11. Explicitly not generalized
+
+Universal CPU state or `ICpu`; observable-device hierarchy; event bus; Z80/SH-2 observability
+(Z80 is the first future consumer of any neutral seam — none is created now); rendering diagnosis;
+persistent traces; bisection/replay; timing comparison; module machinery.
+
+## 12. Dependencies of later tasks
+
+- T002: sections 1, 7, 8. T003: sections 4, 9, 10. T004: sections 2, 5, 9.
+- T005: sections 2, 3, 5 and the Musashi pin. T006: sections 1 (checkpoint_evidence), 5 (domain
+  rule), 10. T007: sections 1 (bridge), 9, 10. T008: all, plus the unresolved items above.
+
+## 13. Unresolved / deferred
+
+- UNRESOLVED-T004: boundary numbering across exception entry.
+- Deferred: bisection, timing, interrupt/DMA/sound events, closure counts beyond block/edge/call.
