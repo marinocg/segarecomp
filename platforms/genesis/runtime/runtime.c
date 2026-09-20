@@ -1958,6 +1958,11 @@ int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc,
     return 0;
   }
   *handler_pc_out = result.next_pc;
+  /* SEG-020-T004: generated DIV lowering returns the handler transfer directly and never
+     reaches genesis_runtime_retire_m68k_instruction, so the faulting instruction's diagnostic
+     boundary is completed here (exactly once; runtime->pc is already the handler entry, the
+     frame writes and vector-5 trap are pending). No retirement, scheduler tick or IRQ admission. */
+  if (runtime->m68k_checkpoint.enabled) genesis_m68k_checkpoint_finalize(runtime);
   return 1;
 }
 

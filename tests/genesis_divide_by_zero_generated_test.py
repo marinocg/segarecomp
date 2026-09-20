@@ -46,6 +46,50 @@ def main():
         # vector-5 itself neither consumes pending state nor resets it.
         assert "d3=305419896 d7=85 pc=258 sr=41728 tick=238 pending=0" in run.stderr, run.stderr
 
+        # SEG-020-T004: the same emitted DIVS.W-by-zero -> handler path, stepped one guest step at
+        # a time with the opt-in M68k checkpoint enabled. The emitted DIV lowering returns the handler
+        # transfer straight after genesis_raise_divide_by_zero (no retire call), so the raise must
+        # itself complete exactly one boundary. Step 1 = faulting DIV, step 2 = handler MOVEQ.
+        def stepped(enable):
+            body = generated.replace(
+                "runtime.divide_by_zero_handler_present = 1; ",
+                "runtime.divide_by_zero_handler_present = 1; " + ("runtime.m68k_checkpoint.enabled = 1; " if enable else ""), 1)
+            step_anchor = re.search(r"result = genesis_runtime_run\([^;]*\);", body)
+            assert step_anchor is not None
+            harness = (
+                ' { unsigned i; result = (GenesisControlTransfer){0}; for (i = 0; i < 2U; ++i) { result = genesis_runtime_step(&runtime, genesis_bridge_dispatch);'
+                ' const GenesisM68kCheckpoint *c = &runtime.m68k_checkpoint;'
+                ' fprintf(stderr, "step=%u kind=%d next=%u valid=%u boundary=%llu last=%u pending=%u unsup=%u sr=%u a7=%u pc=%u e0=%u/%u e1=%u/%u e2=%u/%u/%u\\n",'
+                ' i, (int)result.kind, (unsigned)result.next_pc, (unsigned)c->valid, (unsigned long long)c->boundary,'
+                ' (unsigned)c->last_effect_count, (unsigned)c->effect_count, (unsigned)c->last_unsupported,'
+                ' (unsigned)c->sr, (unsigned)c->a[7], (unsigned)c->pc,'
+                ' (unsigned)c->last_effects[0].kind, (unsigned)c->last_effects[0].width,'
+                ' (unsigned)c->last_effects[1].kind, (unsigned)c->last_effects[1].width,'
+                ' (unsigned)c->last_effects[2].kind, (unsigned)c->last_effects[2].value, (unsigned)c->last_effects[2].address); } }')
+            body = body[:step_anchor.start()] + harness + body[step_anchor.end():]
+            src = temp / ("stepped_on.c" if enable else "stepped_off.c")
+            src.write_text(body)
+            exe = temp / src.stem
+            built = subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
+                                    "-I", str(pathlib.Path(root) / "platforms/genesis/runtime"), str(src),
+                                    str(pathlib.Path(root) / "platforms/genesis/runtime/runtime.c"), "-o", str(exe)],
+                                   text=True, capture_output=True, env=env)
+            assert built.returncode == 0, built.stderr
+            ran = subprocess.run([exe], text=True, capture_output=True)
+            return [l for l in ran.stderr.splitlines() if l.startswith("step=")]
+
+        on = stepped(True)
+        assert len(on) == 2, on
+        # Step 0: transfers to the vector-5 handler (0x120 = 288); exactly one completed boundary with
+        # two WORD/LONG frame writes (kind 1, widths 2 and 4) and the vector-5 trap (kind 2, value 5,
+        # handler entry 288); pending accumulator empty; state is the post-exception state.
+        assert "kind=0 next=288 valid=1 boundary=1 last=3 pending=0 unsup=0" in on[0], on[0]
+        assert "pc=288 e0=1/2 e1=1/4 e2=2/5/288" in on[0], on[0]
+        # Step 1: the handler's first instruction is a fresh boundary that inherits no DIV effects.
+        assert "valid=1 boundary=2 last=0 pending=0 unsup=0" in on[1], on[1]
+        off = stepped(False)
+        assert all("valid=0 boundary=0 last=0 pending=0" in l for l in off), off
+
         # This separate synthetic dispatcher has no vector-5 table entry. It
         # proves emitted DIV lowering reaches the runtime helper: its typed
         # fail-closed divide-by-zero result must leave the generated dispatcher

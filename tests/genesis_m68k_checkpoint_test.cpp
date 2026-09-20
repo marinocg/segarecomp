@@ -83,17 +83,28 @@ int main() {
     uint32_t handler = 0;
     GenesisRuntimeStop stop{};
     check(genesis_raise_divide_by_zero(&trap, 0x2FEU, &handler, &stop) == 1, "trap raised");
-    // Restore every M68k register so only the effects (frame writes + trap) differ.
+    // Real generated route: DIV lowering returns the handler transfer straight after the raise
+    // (no retire call), so the raise itself must have completed exactly one boundary.
+    check(trap.m68k_checkpoint.valid == 1U && trap.m68k_checkpoint.boundary == 1U, "one boundary at raise");
+    check(trap.m68k_checkpoint.effect_count == 0U && trap.m68k_checkpoint.unsupported_for_comparison == 0U,
+          "pending accumulator empty after boundary");
+    check(trap.m68k_checkpoint.pc == 0x300U, "boundary holds post-exception PC");
     GenesisRuntime restore = trap;
-    restore.a[7] = plain.a[7];
-    restore.sr = plain.sr;
-    genesis_runtime_retire_m68k_instruction(&restore, 4U, 0x300U);
     check(restore.m68k_checkpoint.last_effect_count == 3U, "two frame writes + trap effect");
     check(restore.m68k_checkpoint.last_effects[2].kind == GENESIS_M68K_EFFECT_TRAP &&
               restore.m68k_checkpoint.last_effects[2].value == 5U,
           "trap effect carries vector 5");
     check(genesis_m68k_checkpoint_digest(&restore) != genesis_m68k_checkpoint_digest(&plain),
           "wrong trap with registers unchanged changes digest");
+    // Handler's first instruction does not inherit the DIV effects.
+    genesis_runtime_retire_m68k_instruction(&trap, 4U, 0x302U);
+    check(trap.m68k_checkpoint.boundary == 2U && trap.m68k_checkpoint.last_effect_count == 0U,
+          "handler instruction starts with a clean effect set");
+    // Removing the trap effect (registers equal) is detected.
+    GenesisM68kCheckpoint removed = restore.m68k_checkpoint;
+    removed.last_effect_count = 2U;
+    check(genesis_m68k_checkpoint_compare(&restore.m68k_checkpoint, &removed) == GENESIS_M68K_CHECKPOINT_DIFFERENT,
+          "removed trap effect is different");
     // A different vector for the identical state also differs.
     GenesisRuntime other = restore;
     other.m68k_checkpoint.last_effects[2].value = 30U;

@@ -154,3 +154,9 @@ serialization; RAM/device state and cycle counts are excluded. More than eight e
 or an invalid boundary, is `unsupported for comparison` and never compares equal.
 `genesis_m68k_checkpoint_write_detail` expands the last boundary to field level on request. No effect
 values are persisted; the digest is ephemeral diagnostic output.
+
+The synchronous divide-by-zero route returns the handler transfer without calling the retire seam, so
+`genesis_raise_divide_by_zero` completes the faulting DIV instruction's boundary itself (post-exception
+state, two frame writes, vector-5 trap effect). It is the same boundary class as an ordinary retired
+instruction: no second retirement, scheduler tick or IRQ admission occurs, and the handler's first
+instruction begins the next boundary with an empty effect set.
