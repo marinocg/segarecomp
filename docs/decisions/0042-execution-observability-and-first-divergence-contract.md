@@ -179,3 +179,10 @@ than the order-sensitive FNV digest. A boundary flagged unsupported is reported
 a perturbed MOVEQ result) is applied only to temporary copies of the emitted C / runtime source inside
 `tests/m68k_first_divergence_test.py`; no production flag or hook exists. Device-domain comparison is
 T006.
+
+Known limits (T005): (a) effects within one boundary are compared as a multiset, so a swap of two
+writes to the same address and width with different values inside one instruction is not detected;
+(b) the oracle's exception-entry recognition treats any aligned longword data read below 0x400 while
+stepping as a vector fetch, so a genuine low-memory longword data read would be a false `effect:trap`
+divergence — acceptable for the synthetic fixtures, to be revisited before real-ROM use; (c) more than
+64 oracle effects in one boundary is flagged unsupported.
