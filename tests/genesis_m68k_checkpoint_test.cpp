@@ -94,24 +94,44 @@ int main() {
     check(restore.m68k_checkpoint.last_effects[2].kind == GENESIS_M68K_EFFECT_TRAP &&
               restore.m68k_checkpoint.last_effects[2].value == 5U,
           "trap effect carries vector 5");
-    check(genesis_m68k_checkpoint_digest(&restore) != genesis_m68k_checkpoint_digest(&plain),
-          "wrong trap with registers unchanged changes digest");
     // Handler's first instruction does not inherit the DIV effects.
     genesis_runtime_retire_m68k_instruction(&trap, 4U, 0x302U);
     check(trap.m68k_checkpoint.boundary == 2U && trap.m68k_checkpoint.last_effect_count == 0U,
           "handler instruction starts with a clean effect set");
-    // Removing the trap effect (registers equal) is detected.
-    GenesisM68kCheckpoint removed = restore.m68k_checkpoint;
-    removed.last_effect_count = 2U;
-    check(genesis_m68k_checkpoint_compare(&restore.m68k_checkpoint, &removed) == GENESIS_M68K_CHECKPOINT_DIFFERENT,
-          "removed trap effect is different");
-    // A different vector for the identical state also differs.
-    GenesisRuntime other = restore;
-    other.m68k_checkpoint.last_effects[2].value = 30U;
-    other.m68k_checkpoint.digest = 0U;
-    check(genesis_m68k_checkpoint_compare(&restore.m68k_checkpoint, &other.m68k_checkpoint) ==
-              GENESIS_M68K_CHECKPOINT_DIFFERENT,
-          "field-level compare sees vector difference");
+    // Field-level collision guard: equal digests but a differing vector field are still DIFFERENT.
+    GenesisM68kCheckpoint forged = restore.m68k_checkpoint;
+    forged.last_effects[2].value = 30U;
+    check(forged.digest == restore.m68k_checkpoint.digest, "setup: digest deliberately unchanged");
+    check(genesis_m68k_checkpoint_compare(&restore.m68k_checkpoint, &forged) == GENESIS_M68K_CHECKPOINT_DIFFERENT,
+          "field compare catches differing vector despite equal digest");
+  }
+
+  // Trap-only digest difference: identical D/A/USP/SR/PC and identical write effects; the only
+  // difference is the pending trap occurrence (absent / vector 5 / vector 30) at the boundary.
+  {
+    auto boundary = [](int trap_vector) {
+      GenesisRuntime r = make(true);
+      r.d[2] = 7U;
+      write_ram(&r, 0xFF0100U, GENESIS_ACCESS_WORD, 0x1234U);  // identical write effect
+      if (trap_vector != 0) {
+        GenesisM68kCheckpoint &cp = r.m68k_checkpoint;
+        cp.effects[cp.effect_count++] = GenesisM68kEffect{GENESIS_M68K_EFFECT_TRAP, 0U, 0x300U,
+                                                          static_cast<uint32_t>(trap_vector)};
+      }
+      genesis_runtime_retire_m68k_instruction(&r, 4U, 0x300U);
+      return r;
+    };
+    const GenesisRuntime none = boundary(0), v5 = boundary(5), v30 = boundary(30);
+    for (const GenesisRuntime *r : {&v5, &v30}) {
+      check(none.pc == r->pc && none.sr == r->sr && none.usp == r->usp && none.a[7] == r->a[7] &&
+                none.d[2] == r->d[2] && none.m68k_checkpoint.sr == r->m68k_checkpoint.sr &&
+                none.m68k_checkpoint.pc == r->m68k_checkpoint.pc,
+            "setup: CPU state identical");
+    }
+    check(genesis_m68k_checkpoint_digest(&none) != genesis_m68k_checkpoint_digest(&v5), "trap occurrence changes digest");
+    check(genesis_m68k_checkpoint_digest(&v5) != genesis_m68k_checkpoint_digest(&v30), "trap vector changes digest");
+    check(genesis_m68k_checkpoint_compare(&none.m68k_checkpoint, &v5.m68k_checkpoint) ==
+              GENESIS_M68K_CHECKPOINT_DIFFERENT, "trap-only compare differs");
   }
 
   // Compare semantics + unsupported-for-comparison never equal.
