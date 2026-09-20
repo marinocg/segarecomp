@@ -601,6 +601,58 @@ typedef enum GenesisM68kCheckpointComparison {
   GENESIS_M68K_CHECKPOINT_UNSUPPORTED = 2  /* never equal */
 } GenesisM68kCheckpointComparison;
 
+/* SEG-020-T006: opt-in Genesis device checkpoint, finalized at the same
+   instruction boundary as GenesisM68kCheckpoint. Device evolution is reduced
+   to per-component FNV-1a 64 digests (VDP registers/port, VDP DMA, VRAM, CRAM,
+   VSRAM, interrupt, PSG, Z80 bus flags, Z80 RAM, controller I/O) plus a bounded
+   list of device *command/interrupt events* of that boundary: writes into a
+   device region (region class, width, address, value), the VBLANK pending
+   rising edge and IRQ6 admission. Fixed capacity; more than
+   GENESIS_DEVICE_CHECKPOINT_EVENT_CAPACITY events in one boundary makes the
+   boundary `unsupported for comparison` (never equal). No M68k state is owned
+   here and nothing is persisted. Disabled (`enabled == 0`, every
+   diagnostics-off binary) it is never read or written. Large-memory digests
+   are recomputed only when a device write or DMA activity may have changed
+   them (`mem_dirty`). */
+#define GENESIS_DEVICE_CHECKPOINT_EVENT_CAPACITY 8
+#define GENESIS_DEVICE_COMPONENT_COUNT 10
+typedef enum GenesisDeviceEventKind {
+  GENESIS_DEVICE_EVENT_WRITE = 1,        /* region, width, address, value */
+  GENESIS_DEVICE_EVENT_VBLANK_RAISE = 2, /* value = rising-edge count in the boundary */
+  GENESIS_DEVICE_EVENT_IRQ_ADMIT = 3     /* value = interrupt level (6) */
+} GenesisDeviceEventKind;
+typedef struct GenesisDeviceEvent {
+  uint8_t kind;    /* GenesisDeviceEventKind */
+  uint8_t region;  /* WRITE: GenesisHistoryRegion class; otherwise 0 */
+  uint8_t width;   /* WRITE: 1/2/4 */
+  uint32_t address;
+  uint32_t value;
+} GenesisDeviceEvent;
+typedef struct GenesisDeviceCheckpoint {
+  uint8_t enabled;
+  uint8_t valid;
+  uint8_t unsupported_for_comparison;
+  uint8_t event_count;
+  GenesisDeviceEvent events[GENESIS_DEVICE_CHECKPOINT_EVENT_CAPACITY];
+  uint8_t mem_dirty;            /* internal: memory digests need recomputation */
+  uint8_t prev_dma_busy;        /* internal */
+  uint8_t prev_vblank_pending;  /* internal */
+  uint32_t prev_vblank_transition_count; /* internal */
+  uint64_t boundary;
+  uint64_t digest;              /* over all components + last events */
+  uint64_t component[GENESIS_DEVICE_COMPONENT_COUNT];
+  uint8_t last_unsupported;
+  uint8_t last_event_count;
+  GenesisDeviceEvent last_events[GENESIS_DEVICE_CHECKPOINT_EVENT_CAPACITY];
+} GenesisDeviceCheckpoint;
+
+typedef enum GenesisDeviceCheckpointComparison {
+  GENESIS_DEVICE_CHECKPOINT_EQUAL = 0,
+  GENESIS_DEVICE_CHECKPOINT_EVENT_DIFFERENT = 1, /* device command/interrupt events differ */
+  GENESIS_DEVICE_CHECKPOINT_STATE_DIFFERENT = 2, /* same events, device state differs */
+  GENESIS_DEVICE_CHECKPOINT_UNSUPPORTED = 3      /* never equal */
+} GenesisDeviceCheckpointComparison;
+
 typedef struct GenesisRuntime {
   uint32_t d[8];
   uint32_t a[8];
@@ -679,6 +731,8 @@ typedef struct GenesisRuntime {
   GenesisExecutionHistory execution_history;
   /* SEG-020-T004: opt-in M68k state checkpoint (see GenesisM68kCheckpoint). */
   GenesisM68kCheckpoint m68k_checkpoint;
+  /* SEG-020-T006: opt-in Genesis device checkpoint (see GenesisDeviceCheckpoint). */
+  GenesisDeviceCheckpoint device_checkpoint;
   /* SEG-007-T255: host-owned optional observer (NULL = absent); non-semantic. */
   GenesisLiveFrameObserver *live_frame_observer;
 } GenesisRuntime;
@@ -1259,6 +1313,16 @@ GenesisM68kCheckpointComparison genesis_m68k_checkpoint_compare(const GenesisM68
                                                                 const GenesisM68kCheckpoint *b);
 /* Field-level detail of the last boundary as one JSON line (ephemeral, on request). */
 int genesis_m68k_checkpoint_write_detail(FILE *output, const GenesisRuntime *runtime);
+
+/* SEG-020-T006. Compare two device checkpoints. Events are compared before state so that a
+ * device command difference is reported as such; `*component_out` (may be NULL) receives the
+ * first differing component name ("events" or a component digest name). */
+GenesisDeviceCheckpointComparison genesis_device_checkpoint_compare(const GenesisDeviceCheckpoint *a,
+                                                                    const GenesisDeviceCheckpoint *b,
+                                                                    const char **component_out);
+const char *genesis_device_component_name(unsigned index);
+/* Last boundary as one JSON line {"device_checkpoint":...} (ephemeral, on request). */
+int genesis_device_checkpoint_write_detail(FILE *output, const GenesisRuntime *runtime);
 
 #ifdef __cplusplus
 }

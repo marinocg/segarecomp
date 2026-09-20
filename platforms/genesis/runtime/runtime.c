@@ -1600,9 +1600,12 @@ static uint64_t genesis_m68k_digest_fields(const GenesisM68kCheckpoint *cp) {
   return h;
 }
 
+static void genesis_device_checkpoint_finalize(GenesisRuntime *runtime);
+
 static void genesis_m68k_checkpoint_finalize(GenesisRuntime *runtime) {
   GenesisM68kCheckpoint *cp = &runtime->m68k_checkpoint;
   unsigned i;
+  if (runtime->device_checkpoint.enabled) genesis_device_checkpoint_finalize(runtime);
   for (i = 0; i < 8U; ++i) {
     cp->d[i] = runtime->d[i];
     cp->a[i] = runtime->a[i];
@@ -1677,6 +1680,179 @@ static uint8_t genesis_history_device_region(uint32_t address) {
   return 0U;
 }
 
+/* SEG-020-T006: opt-in Genesis device checkpoint. Pure side-channel; see runtime.h. */
+static const char *const genesis_device_component_names[GENESIS_DEVICE_COMPONENT_COUNT] = {
+    "vdp_registers", "vdp_dma", "vdp_vram", "vdp_cram", "vdp_vsram",
+    "interrupt",     "psg",     "z80_bus",  "z80_ram", "controller_io"};
+
+const char *genesis_device_component_name(unsigned index) {
+  return index < GENESIS_DEVICE_COMPONENT_COUNT ? genesis_device_component_names[index] : "unknown";
+}
+
+static void genesis_device_event_note(GenesisRuntime *runtime, uint8_t kind, uint8_t region, uint8_t width,
+                                      uint32_t address, uint32_t value) {
+  GenesisDeviceCheckpoint *cp = &runtime->device_checkpoint;
+  if (kind == GENESIS_DEVICE_EVENT_WRITE) cp->mem_dirty = 1U;
+  if (cp->event_count >= GENESIS_DEVICE_CHECKPOINT_EVENT_CAPACITY) {
+    cp->unsupported_for_comparison = 1U;
+    return;
+  }
+  cp->events[cp->event_count].kind = kind;
+  cp->events[cp->event_count].region = region;
+  cp->events[cp->event_count].width = width;
+  cp->events[cp->event_count].address = address;
+  cp->events[cp->event_count].value = value;
+  ++cp->event_count;
+}
+
+static uint64_t genesis_fnv_buffer(uint64_t h, const uint8_t *bytes, size_t count) {
+  size_t i;
+  for (i = 0; i < count; ++i) {
+    h ^= bytes[i];
+    h *= UINT64_C(0x100000001B3);
+  }
+  return h;
+}
+
+static void genesis_device_checkpoint_finalize(GenesisRuntime *runtime) {
+  GenesisDeviceCheckpoint *cp = &runtime->device_checkpoint;
+  const GenesisDeviceState *d = &runtime->devices;
+  const uint64_t basis = UINT64_C(0xCBF29CE484222325);
+  const uint8_t dma_busy = d->vdp.dma.phase == GENESIS_VDP_DMA_BUSY ? 1U : 0U;
+  uint64_t h;
+  unsigned i;
+  /* Interrupt events derived from the interrupt state delta of this boundary. */
+  {
+    const uint32_t raised = d->interrupt.vblank_transition_count - cp->prev_vblank_transition_count;
+    if (raised != 0U) genesis_device_event_note(runtime, GENESIS_DEVICE_EVENT_VBLANK_RAISE, 0U, 0U, 0U, raised);
+    if ((cp->prev_vblank_pending != 0U || raised != 0U) && d->interrupt.vblank_pending == 0U)
+      genesis_device_event_note(runtime, GENESIS_DEVICE_EVENT_IRQ_ADMIT, 0U, 0U, 0U, 6U);
+  }
+  cp->prev_vblank_transition_count = d->interrupt.vblank_transition_count;
+  cp->prev_vblank_pending = d->interrupt.vblank_pending;
+
+  h = basis;
+  for (i = 0; i < GENESIS_VDP_REGISTER_COUNT; ++i) h = genesis_fnv_bytes(h, d->vdp.registers[i], 2U);
+  h = genesis_fnv_bytes(h, d->vdp.control_port_awaiting_second_word, 1U);
+  h = genesis_fnv_bytes(h, d->vdp.control_port_first_word, 2U);
+  h = genesis_fnv_bytes(h, d->vdp.addressed_pointer, 4U);
+  h = genesis_fnv_bytes(h, d->vdp.auto_increment_value, 2U);
+  h = genesis_fnv_bytes(h, d->vdp.status_register, 2U);
+  h = genesis_fnv_bytes(h, d->vdp.data_port_transfer_code, 1U);
+  h = genesis_fnv_bytes(h, d->vdp.data_port_transfer_code_valid, 1U);
+  cp->component[0] = h;
+  h = basis;
+  h = genesis_fnv_bytes(h, (uint64_t)d->vdp.dma.phase, 1U);
+  h = genesis_fnv_bytes(h, (uint64_t)d->vdp.dma.kind, 1U);
+  h = genesis_fnv_bytes(h, d->vdp.dma.source_address, 4U);
+  h = genesis_fnv_bytes(h, d->vdp.dma.remaining_length, 4U);
+  h = genesis_fnv_bytes(h, d->vdp.dma.fill_byte_count, 4U);
+  h = genesis_fnv_bytes(h, d->vdp.dma.transfer_access_count, 4U);
+  h = genesis_fnv_bytes(h, d->vdp.dma.write_target_code, 1U);
+  cp->component[1] = h;
+  if (!cp->valid || cp->mem_dirty || dma_busy || cp->prev_dma_busy) {
+    cp->component[2] = genesis_fnv_buffer(basis, d->vdp.vram, GENESIS_VDP_VRAM_BYTES);
+    cp->component[3] = genesis_fnv_buffer(basis, d->vdp.cram, GENESIS_VDP_CRAM_BYTES);
+    cp->component[4] = genesis_fnv_buffer(basis, d->vdp.vsram, GENESIS_VDP_VSRAM_BYTES);
+    cp->component[8] = genesis_fnv_buffer(basis, d->z80_bus.z80_ram, GENESIS_Z80_RAM_BYTES);
+  }
+  cp->mem_dirty = 0U;
+  cp->prev_dma_busy = dma_busy;
+  h = basis;
+  h = genesis_fnv_bytes(h, d->interrupt.vblank_pending, 1U);
+  h = genesis_fnv_bytes(h, d->interrupt.vblank_status_read_count, 4U);
+  h = genesis_fnv_bytes(h, d->interrupt.vblank_transition_count, 4U);
+  h = genesis_fnv_bytes(h, d->interrupt.checkpoint_entered, 1U);
+  h = genesis_fnv_bytes(h, d->interrupt.vblank_transition_count_at_checkpoint_entry, 4U);
+  cp->component[5] = h;
+  h = basis;
+  h = genesis_fnv_bytes(h, d->psg.latched_channel, 1U);
+  h = genesis_fnv_bytes(h, d->psg.latched_volume, 1U);
+  h = genesis_fnv_bytes(h, d->psg.latch_valid, 1U);
+  for (i = 0; i < 3U; ++i) h = genesis_fnv_bytes(h, d->psg.tone_period[i], 2U);
+  for (i = 0; i < 4U; ++i) h = genesis_fnv_bytes(h, d->psg.attenuation[i], 1U);
+  h = genesis_fnv_bytes(h, d->psg.noise_control, 1U);
+  cp->component[6] = h;
+  h = basis;
+  h = genesis_fnv_bytes(h, d->z80_bus.bus_requested, 1U);
+  h = genesis_fnv_bytes(h, d->z80_bus.bus_granted, 1U);
+  h = genesis_fnv_bytes(h, d->z80_bus.reset_asserted, 1U);
+  cp->component[7] = h;
+  h = basis;
+  for (i = 0; i < 3U; ++i) {
+    h = genesis_fnv_bytes(h, d->controller_io.data[i], 1U);
+    h = genesis_fnv_bytes(h, d->controller_io.ctrl[i], 1U);
+  }
+  cp->component[9] = h;
+
+  cp->last_event_count = cp->event_count;
+  cp->last_unsupported = cp->unsupported_for_comparison;
+  for (i = 0; i < cp->event_count; ++i) cp->last_events[i] = cp->events[i];
+  for (; i < GENESIS_DEVICE_CHECKPOINT_EVENT_CAPACITY; ++i) cp->last_events[i] = (GenesisDeviceEvent){0};
+  h = basis;
+  for (i = 0; i < GENESIS_DEVICE_COMPONENT_COUNT; ++i) h = genesis_fnv_bytes(h, cp->component[i], 8U);
+  h = genesis_fnv_bytes(h, cp->last_event_count, 1U);
+  for (i = 0; i < cp->last_event_count; ++i) {
+    h = genesis_fnv_bytes(h, cp->last_events[i].kind, 1U);
+    h = genesis_fnv_bytes(h, cp->last_events[i].region, 1U);
+    h = genesis_fnv_bytes(h, cp->last_events[i].width, 1U);
+    h = genesis_fnv_bytes(h, cp->last_events[i].address, 4U);
+    h = genesis_fnv_bytes(h, cp->last_events[i].value, 4U);
+  }
+  h = genesis_fnv_bytes(h, cp->last_unsupported, 1U);
+  cp->digest = h;
+  cp->boundary = cp->valid ? cp->boundary + 1U : 1U;
+  cp->valid = 1U;
+  cp->event_count = 0U;
+  cp->unsupported_for_comparison = 0U;
+}
+
+GenesisDeviceCheckpointComparison genesis_device_checkpoint_compare(const GenesisDeviceCheckpoint *a,
+                                                                    const GenesisDeviceCheckpoint *b,
+                                                                    const char **component_out) {
+  unsigned i;
+  if (component_out != 0) *component_out = 0;
+  if (a == 0 || b == 0 || !a->valid || !b->valid || a->last_unsupported || b->last_unsupported)
+    return GENESIS_DEVICE_CHECKPOINT_UNSUPPORTED;
+  if (a->last_event_count != b->last_event_count) {
+    if (component_out != 0) *component_out = "events";
+    return GENESIS_DEVICE_CHECKPOINT_EVENT_DIFFERENT;
+  }
+  for (i = 0; i < a->last_event_count; ++i)
+    if (a->last_events[i].kind != b->last_events[i].kind || a->last_events[i].region != b->last_events[i].region ||
+        a->last_events[i].width != b->last_events[i].width ||
+        a->last_events[i].address != b->last_events[i].address ||
+        a->last_events[i].value != b->last_events[i].value) {
+      if (component_out != 0) *component_out = "events";
+      return GENESIS_DEVICE_CHECKPOINT_EVENT_DIFFERENT;
+    }
+  for (i = 0; i < GENESIS_DEVICE_COMPONENT_COUNT; ++i)
+    if (a->component[i] != b->component[i]) {
+      if (component_out != 0) *component_out = genesis_device_component_names[i];
+      return GENESIS_DEVICE_CHECKPOINT_STATE_DIFFERENT;
+    }
+  return GENESIS_DEVICE_CHECKPOINT_EQUAL;
+}
+
+int genesis_device_checkpoint_write_detail(FILE *output, const GenesisRuntime *runtime) {
+  const GenesisDeviceCheckpoint *cp;
+  unsigned i;
+  if (output == 0 || runtime == 0) return 1;
+  cp = &runtime->device_checkpoint;
+  if (!cp->valid) return fputs("{\"device_checkpoint\":null}\n", output) < 0;
+  fprintf(output, "{\"device_checkpoint\":{\"boundary\":%llu,\"digest\":\"%016llx\",\"unsupported\":%u,\"components\":{",
+          (unsigned long long)cp->boundary, (unsigned long long)cp->digest, (unsigned)cp->last_unsupported);
+  for (i = 0; i < GENESIS_DEVICE_COMPONENT_COUNT; ++i)
+    fprintf(output, "%s\"%s\":\"%016llx\"", i ? "," : "", genesis_device_component_names[i],
+            (unsigned long long)cp->component[i]);
+  fputs("},\"events\":[", output);
+  for (i = 0; i < cp->last_event_count; ++i)
+    fprintf(output, "%s{\"k\":%u,\"r\":%u,\"w\":%u,\"a\":%u,\"v\":%u}", i ? "," : "", (unsigned)cp->last_events[i].kind,
+            (unsigned)cp->last_events[i].region, (unsigned)cp->last_events[i].width,
+            (unsigned)cp->last_events[i].address, (unsigned)cp->last_events[i].value);
+  return fputs("]}}\n", output) < 0;
+}
+
 GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, GenesisBusKind bus_kind, uint32_t address,
                                                  GenesisAccessWidth width, GenesisAccessDirection direction,
                                                  uint32_t *value, GenesisRuntimeStop *stop_out) {
@@ -1695,6 +1871,13 @@ GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, Genesi
       value != 0)
     genesis_m68k_effect_note(runtime, GENESIS_M68K_EFFECT_WRITE, (uint8_t)width, address,
                              width == GENESIS_ACCESS_LONG ? *value : *value & (width == GENESIS_ACCESS_WORD ? 0xFFFFU : 0xFFU));
+  if (status == GENESIS_ACCESS_OK && runtime != 0 && runtime->device_checkpoint.enabled && is_write_kind &&
+      value != 0) {
+    const uint8_t device_region = genesis_history_device_region(address);
+    if (device_region != 0U)
+      genesis_device_event_note(runtime, GENESIS_DEVICE_EVENT_WRITE, device_region, (uint8_t)width, address,
+                                width == GENESIS_ACCESS_LONG ? *value : *value & (width == GENESIS_ACCESS_WORD ? 0xFFFFU : 0xFFU));
+  }
   if (status == GENESIS_ACCESS_OK && runtime != 0 && runtime->execution_history.detail_enabled) {
     const uint8_t region = genesis_history_device_region(address);
     if (region != 0U)
