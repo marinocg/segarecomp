@@ -22,7 +22,7 @@ def _instrumented_source(generated_c):
         '(unsigned)runtime.pc, (unsigned)runtime.d[0], (unsigned)runtime.d[1], '
         '(unsigned)runtime.devices.interrupt.vblank_transition_count, '
         '(unsigned long long)runtime.scheduler.master_ticks, '
-        '(unsigned)runtime.recent_pc_history_count, (unsigned)runtime.a[7]);')
+        '(unsigned)runtime.execution_history.total_recorded, (unsigned)runtime.a[7]);')
     return seeded[:drive_call.end()] + instrumentation + seeded[drive_call.end():]
 
 

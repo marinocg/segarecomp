@@ -63,6 +63,11 @@ target_link_libraries(genesis_recent_pc_history_tests PRIVATE segarecomp::runtim
 target_compile_features(genesis_recent_pc_history_tests PRIVATE cxx_std_20)
 segarecomp_enable_warnings(genesis_recent_pc_history_tests)
 add_test(NAME genesis_recent_pc_history_tests COMMAND genesis_recent_pc_history_tests)
+add_executable(genesis_execution_history_tests genesis_execution_history_test.cpp)
+target_link_libraries(genesis_execution_history_tests PRIVATE segarecomp::runtime_genesis)
+target_compile_features(genesis_execution_history_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_execution_history_tests)
+add_test(NAME genesis_execution_history_tests COMMAND genesis_execution_history_tests)
 # SEG-007-T252 / ADR-0040: asserts this runtime translation unit references
 # no wall-clock/sleep symbol -- headless/automated execution is full-speed
 # by construction.
@@ -432,6 +437,9 @@ add_test(NAME genesis_startup_bridge_c6_accepted_loop_test COMMAND ${Python3_EXE
 # compiled synthetic fixture.
 add_test(NAME genesis_ephemeral_pc_history_transport_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_ephemeral_pc_history_transport_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME genesis_execution_history_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_execution_history_generated_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_startup_bridge_c6_persistence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_startup_bridge_c6_persistence_test.py

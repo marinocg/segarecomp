@@ -9,6 +9,15 @@
 
 namespace segarecomp {
 namespace {
+// SEG-020-T003: stack accesses route with their existing bus kind only when the
+// generation-time diagnostics option is on; otherwise the emitted text is unchanged.
+std::string stack_route_open(const M68kMemoryEmissionContext &ctx, const char *bus_kind) {
+  if (!ctx.execution_history_hooks) return "genesis_route_access(" + std::string(ctx.runtime_object) + ", ";
+  return "genesis_route_access_bus(" + std::string(ctx.runtime_object) + ", " + bus_kind + ", ";
+}
+}  // namespace
+
+namespace {
 
 std::string hex(std::uint32_t value, unsigned width) {
   std::ostringstream out;
@@ -77,7 +86,7 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
                  << "if (" << a7 << " < UINT32_C(0x" << hex(ctx.linear_memory_begin, 8) << ") || " << a7
                  << " > UINT32_C(0x" << hex(ctx.linear_memory_end - 4U, 8) << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
                  << ctx.runtime_source << ", 1U, " << a7 << ", GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ); "
-                 << "if (genesis_route_access(" << ctx.runtime_object << ", " << a7
+                 << "if (" << stack_route_open(ctx, "GENESIS_BUS_STACK_READ") << a7
                  << ", GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ, &m68k_observed_return, &m68k_route_stop) != GENESIS_ACCESS_OK) { "
                  << "m68k_route_stop.provenance.has_instruction_provenance = 1U; m68k_route_stop.provenance.instruction = *"
                  << ctx.runtime_source << "; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = "
@@ -113,8 +122,8 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
                  << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
                  << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);\n"
                  << "    { const uint32_t m68k_new_a7 = " << a7 << " - UINT32_C(4);\n"
-                 << "      if (genesis_route_access(" << ctx.runtime_object
-                 << ", m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) {\n"
+                 << "      if (" << stack_route_open(ctx, "GENESIS_BUS_STACK_WRITE")
+                 << "m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) {\n"
                  << "        m68k_route_stop.provenance.has_instruction_provenance = 1U; m68k_route_stop.provenance.instruction = *"
                  << ctx.runtime_source
                  << "; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = m68k_new_a7; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_WRITE;\n"
@@ -130,7 +139,7 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
                        << " > UINT32_C(0x" << hex(ctx.linear_memory_end, 8) << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
                        << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE); "
                        << "{ const uint32_t m68k_new_a7 = " << a7 << " - UINT32_C(4); "
-                       << "if (genesis_route_access(" << ctx.runtime_object << ", m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) { "
+                       << "if (" << stack_route_open(ctx, "GENESIS_BUS_STACK_WRITE") << "m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) { "
                        << "m68k_route_stop.provenance.has_instruction_provenance = 1U; m68k_route_stop.provenance.instruction = *"
                        << ctx.runtime_source << "; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = m68k_new_a7; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_WRITE; "
                        << ctx.runtime_provenance_helper << "(&m68k_route_stop, " << ctx.runtime_source

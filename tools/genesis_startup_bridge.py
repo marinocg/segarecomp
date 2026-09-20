@@ -391,7 +391,9 @@ def parse_ephemeral_pc_history(data: bytes) -> list[str] | None:
         text = data.decode()
     except UnicodeDecodeError:
         return None
-    if not text.endswith("\n") or text.count("\n") != 1:
+    # SEG-020-T003: line 1 is the PC array; an optional line 2 is the typed
+    # execution history (parsed separately). Any other shape is "unavailable".
+    if not text.endswith("\n") or text.count("\n") not in (1, 2):
         return None
     line = text.splitlines()[0]
     try:
@@ -403,6 +405,39 @@ def parse_ephemeral_pc_history(data: bytes) -> list[str] | None:
     if not isinstance(history, list) or any(not hexadecimal(value, 8) for value in history):
         return None
     return history
+
+
+def parse_ephemeral_execution_history(data: bytes) -> list[dict] | None:
+    """SEG-020-T003: parse the optional second line of the ephemeral channel.
+
+    Present only for binaries generated with --provenance-diagnostics. Any
+    absence or malformation returns None and can never fail a run.
+    """
+    if not data:
+        return None
+    try:
+        lines = data.decode().split("\n")
+    except UnicodeDecodeError:
+        return None
+    if len(lines) != 3 or lines[2] != "":
+        return None
+    try:
+        history = json.loads(lines[1])
+    except json.JSONDecodeError:
+        return None
+    if json.dumps(history, separators=(",", ":"), ensure_ascii=False) != lines[1]:
+        return None
+    if not isinstance(history, list) or any(not isinstance(event, dict) or "b" not in event or "k" not in event
+                                            for event in history):
+        return None
+    return history
+
+
+def with_execution_history(frontier: dict, ephemeral_bytes: bytes | None) -> dict:
+    history = parse_ephemeral_execution_history(ephemeral_bytes if ephemeral_bytes is not None else b"")
+    if history:
+        frontier["execution_history"] = history
+    return frontier
 
 
 def valid_sanitized(report: dict, digest: str) -> bool:
@@ -1322,7 +1357,7 @@ def main() -> int:
             driver_result = "offline_inventory_incomplete"
         stitch_metrics = offline_inventory_stitch_metrics(executable.parent)
         recent_pc_history = parse_ephemeral_pc_history(ephemeral_bytes if ephemeral_bytes is not None else b"")
-        ephemeral = ephemeral_frontier(full, executable, recent_pc_history)
+        ephemeral = with_execution_history(ephemeral_frontier(full, executable, recent_pc_history), ephemeral_bytes)
         if stitch_metrics:
             ephemeral["offline_inventory_stitch_metrics"] = stitch_metrics
         sys.stderr.write("EPHEMERAL_FRONTIER " +
@@ -1458,7 +1493,7 @@ def main() -> int:
         recent_pc_history = parse_ephemeral_pc_history(ephemeral_bytes if ephemeral_bytes is not None else b"")
         sys.stderr.write(
             "EPHEMERAL_FRONTIER " +
-            json.dumps(ephemeral_frontier(full, executable, recent_pc_history), separators=(",", ":")) +
+            json.dumps(with_execution_history(ephemeral_frontier(full, executable, recent_pc_history), ephemeral_bytes), separators=(",", ":")) +
             "\n")
     if full_path is not None:
         try: full = parse_canonical_full(full_path.read_bytes())

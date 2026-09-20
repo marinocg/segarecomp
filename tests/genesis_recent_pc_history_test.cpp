@@ -38,15 +38,10 @@ GenesisControlTransfer make_continue(uint32_t next_pc) {
 }
 
 std::vector<uint32_t> ordered_history(const GenesisRuntime &runtime) {
-  std::vector<uint32_t> ordered;
-  const uint8_t count = runtime.recent_pc_history_count;
-  const uint8_t oldest = static_cast<uint8_t>(
-      count < GENESIS_RECENT_PC_HISTORY_CAPACITY ? 0U : runtime.recent_pc_history_next);
-  for (uint8_t index = 0U; index < count; ++index) {
-    const uint8_t slot = static_cast<uint8_t>((oldest + index) % GENESIS_RECENT_PC_HISTORY_CAPACITY);
-    ordered.push_back(runtime.recent_pc_history[slot]);
-  }
-  return ordered;
+  // SEG-020-T003: the recent-PC view is a projection of the single typed ring.
+  uint32_t projected[GENESIS_RECENT_PC_HISTORY_CAPACITY];
+  const uint32_t count = genesis_recent_pc_history_project(&runtime, projected);
+  return std::vector<uint32_t>(projected, projected + count);
 }
 
 // A synthetic dispatcher that always advances PC by 4 (a simple, honest,
