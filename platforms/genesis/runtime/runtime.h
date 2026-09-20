@@ -575,6 +575,11 @@ typedef struct GenesisRuntime {
   uint32_t recent_pc_history[64];
   uint8_t recent_pc_history_count;   /* number of valid entries, saturates at 64 */
   uint8_t recent_pc_history_next;    /* circular write index, wraps at 64 */
+  /* SEG-020-T003 / ADR-0042 section 4: host-owned OPTIONAL execution-history
+     ring (NULL = disabled, the default). Diagnostic-only, write-only from the
+     runtime's perspective: recording never influences dispatch, guest state,
+     timing or generation. Excluded from every stable serialization. */
+  struct GenesisExecutionHistory *execution_history;
   /* SEG-007-T255: host-owned optional observer (NULL = absent); non-semantic. */
   GenesisLiveFrameObserver *live_frame_observer;
 } GenesisRuntime;
@@ -582,6 +587,22 @@ typedef struct GenesisRuntime {
 /* SEG-007-T252 / ADR-0040 correction: capacity of `GenesisRuntime.
    recent_pc_history` -- diagnostic-only, see the field's own doc comment. */
 #define GENESIS_RECENT_PC_HISTORY_CAPACITY 64
+
+/* SEG-020-T003: fixed compile-time capacity, overwrite-oldest, no allocation.
+   One event = one retired M68k instruction boundary, recorded at
+   `genesis_runtime_retire_m68k_instruction` (the sole instruction-boundary
+   seam). `sequence` is the deterministic retire ordinal (0-based, counts
+   overflowed events too). Other ADR-0042 categories are deferred. */
+#define GENESIS_EXECUTION_HISTORY_CAPACITY 128
+typedef struct GenesisExecutionHistoryEvent {
+  uint64_t sequence;
+  uint32_t next_pc;
+  uint32_t m68k_cycles;
+} GenesisExecutionHistoryEvent;
+typedef struct GenesisExecutionHistory {
+  GenesisExecutionHistoryEvent events[GENESIS_EXECUTION_HISTORY_CAPACITY];
+  uint64_t total_recorded; /* also the next sequence number */
+} GenesisExecutionHistory;
 
 typedef enum GenesisAccessWidth {
   GENESIS_ACCESS_BYTE = 1,
@@ -1128,6 +1149,11 @@ int genesis_write_full_report(FILE *output, const GenesisRuntime *runtime,
  */
 int genesis_write_ephemeral_pc_history(FILE *output, const GenesisRuntime *runtime,
                                        const GenesisControlTransfer *result);
+
+/* SEG-020-T003: local-diagnostic-only writer; emits a bare JSON array of the
+ * retained events oldest -> newest (`[]` when disabled/empty). Ephemeral
+ * channel only, like genesis_write_ephemeral_pc_history. Deterministic. */
+int genesis_write_ephemeral_execution_history(FILE *output, const GenesisRuntime *runtime);
 
 #ifdef __cplusplus
 }

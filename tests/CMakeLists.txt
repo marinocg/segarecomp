@@ -63,6 +63,11 @@ target_link_libraries(genesis_recent_pc_history_tests PRIVATE segarecomp::runtim
 target_compile_features(genesis_recent_pc_history_tests PRIVATE cxx_std_20)
 segarecomp_enable_warnings(genesis_recent_pc_history_tests)
 add_test(NAME genesis_recent_pc_history_tests COMMAND genesis_recent_pc_history_tests)
+add_executable(genesis_execution_history_tests genesis_execution_history_test.cpp)
+target_link_libraries(genesis_execution_history_tests PRIVATE segarecomp::runtime_genesis)
+target_compile_features(genesis_execution_history_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_execution_history_tests)
+add_test(NAME genesis_execution_history_tests COMMAND genesis_execution_history_tests)
 # SEG-007-T252 / ADR-0040: asserts this runtime translation unit references
 # no wall-clock/sleep symbol -- headless/automated execution is full-speed
 # by construction.

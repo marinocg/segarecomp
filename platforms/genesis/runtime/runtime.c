@@ -1930,6 +1930,15 @@ GenesisControlTransfer genesis_runtime_retire_m68k_instruction(GenesisRuntime *r
   result.kind = GENESIS_CONTINUE_AT_PC;
   result.next_pc = next_pc;
   runtime->pc = next_pc;
+  if (runtime->execution_history != 0) { /* SEG-020-T003 pure side-channel append */
+    GenesisExecutionHistory *history = runtime->execution_history;
+    GenesisExecutionHistoryEvent *event =
+        &history->events[history->total_recorded % GENESIS_EXECUTION_HISTORY_CAPACITY];
+    event->sequence = history->total_recorded;
+    event->next_pc = next_pc;
+    event->m68k_cycles = m68k_cycles;
+    ++history->total_recorded;
+  }
   if (genesis_irq6_scheduler_and_admit(runtime, m68k_cycles, &result) == 2) return result;
   return result;
 }
@@ -2681,6 +2690,25 @@ int genesis_write_ephemeral_pc_history(FILE *output, const GenesisRuntime *runti
       const uint8_t slot = (uint8_t)((oldest + history_index) % GENESIS_RECENT_PC_HISTORY_CAPACITY);
       if (fprintf(output, "%s\"0x%08x\"", history_index == 0U ? "" : ",",
                  runtime->recent_pc_history[slot]) < 0) return 1;
+    }
+  }
+  return fputs("]\n", output) == EOF;
+}
+
+int genesis_write_ephemeral_execution_history(FILE *output, const GenesisRuntime *runtime) {
+  uint64_t first = 0U;
+  uint64_t index;
+  const GenesisExecutionHistory *history;
+  if (output == 0 || runtime == 0) return 1;
+  history = runtime->execution_history;
+  if (fputc('[', output) == EOF) return 1;
+  if (history != 0) {
+    if (history->total_recorded > GENESIS_EXECUTION_HISTORY_CAPACITY)
+      first = history->total_recorded - GENESIS_EXECUTION_HISTORY_CAPACITY;
+    for (index = first; index < history->total_recorded; ++index) {
+      const GenesisExecutionHistoryEvent *event = &history->events[index % GENESIS_EXECUTION_HISTORY_CAPACITY];
+      if (fprintf(output, "%s{\"seq\":%llu,\"next_pc\":\"0x%08x\",\"cycles\":%u}", index == first ? "" : ",",
+                  (unsigned long long)event->sequence, event->next_pc, event->m68k_cycles) < 0) return 1;
     }
   }
   return fputs("]\n", output) == EOF;
