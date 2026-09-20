@@ -14,14 +14,17 @@ void check(bool ok, const char *what) {
 }
 
 std::string dump(const GenesisRuntime &runtime) {
-  char *buffer = nullptr;
-  size_t size = 0;
-  FILE *file = open_memstream(&buffer, &size);
+  FILE *file = std::tmpfile();
+  check(file != nullptr, "tmpfile");
+  if (file == nullptr) return {};
   const int rc = genesis_write_ephemeral_execution_history(file, &runtime);
-  std::fclose(file);
-  std::string out(buffer, size);
-  std::free(buffer);
   check(rc == 0, "writer succeeds");
+  std::rewind(file);
+  std::string out;
+  char chunk[4096];
+  size_t got;
+  while ((got = std::fread(chunk, 1, sizeof chunk, file)) > 0) out.append(chunk, got);
+  std::fclose(file);
   return out;
 }
 
