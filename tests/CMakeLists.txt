@@ -782,3 +782,8 @@ foreach(_t IN LISTS _segarecomp_all_tests)
       "CCC_OVERRIDE_OPTIONS=set:#^-D_CRT_SECURE_NO_WARNINGS ^-D_CRT_NONSTDC_NO_WARNINGS")
   endif()
 endforeach()
+
+# SEG-020-T005: first-divergence diagnosis (generated M68k boundaries vs pinned Musashi).
+add_test(NAME m68k_first_divergence_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_first_divergence_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
