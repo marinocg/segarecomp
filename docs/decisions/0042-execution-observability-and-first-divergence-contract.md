@@ -35,7 +35,7 @@ Any anchor not listed as extended is not modified by SEG-020.
 Decision: **instruction boundary** (one retired MC68000 instruction), matching ADR-0041 where
 architectural effects commit before retirement. Block granularity is rejected: generated C is
 block/PC-keyed but Musashi steps by instruction, so a block boundary could not name the first
-differing instruction. Boundary index N is the count of retired instructions since reset. Data lives
+differing instruction. Boundary index N is the count of retired instructions since reset. Blocks remain static/provenance context only; there is no second, block-level checkpoint system. Data lives
 in the M68k-owned record; the Genesis retirement seam only forwards. Unresolved: whether an
 exception-entry retirement counts as its own boundary is labeled **UNRESOLVED-T004** (default: the
 faulting instruction's boundary reports the exception state).
@@ -58,15 +58,19 @@ timing events, DMA phase events, sound events, register-value histories.
 
 ## 5. Architectural effect comparison
 
-Decision: compare a **minimal projection** of existing structures, not a new universal state:
-`D0-D7`, `A0-A7`/USP-SSP as the runtime holds them, `SR`, `PC`, and a bounded list of memory writes
-(address, width, value) produced through `M68kOperationEffect`'s memory/stack effect kinds, plus a
-trap/exception marker (vector number). An instruction whose
-`register_write_footprint_complete` is false, or whose memory effect is not representable, makes the
-boundary compare **"unsupported for comparison"** — never "equal". Writes into RAM are additionally
+Decision: compare a **minimal projection**, not a new universal state: `D0-D7`, `A0-A7`/USP-SSP as
+the runtime holds them, `SR`, `PC`, a bounded list of memory writes (address, width, value), and a
+trap/exception marker (vector number).
+Ownership split: `M68kOperationEffect` supplies only the **static** effect classification and register
+write footprint (memory/stack/PC effect kinds, `register_write_footprint_complete`); it is not an execution
+result and must not become one. Concrete runtime-dependent addresses and values are observed at the
+existing execution/write path by a **minimal diagnostics-only observation** captured there when
+diagnostics are enabled (T004 chooses the seam). If an effect cannot be completely and reliably
+observed (incomplete footprint, unobservable write), that boundary is
+**"unsupported for comparison"** — never "equal". Writes into RAM are additionally
 covered by a RAM digest at checkpoint granularity (T004 decides digest cadence). Field-level
 differences name the field; first differing **domain** is `cpu` when any projection field differs,
-else `genesis-device` when device evidence differs, else `none`.
+else `device` when device evidence differs, else `none`.
 
 ## 6. Timing
 
@@ -77,10 +81,13 @@ a task needs timing-divergence diagnosis.
 
 ## 7. Image / module identity without module machinery
 
-Decision: identity is `(cpu variant, image identity, program address)` where image identity is the
-existing `image_offset` plus the ROM SHA-256 already carried by `GenesisCheckpointIdentity`
-(`rom_sha256`). No module registry, loader graph or Sega-CD/Saturn concept is introduced. Multi-image
-safety (SEG-018) is preserved by keeping the image key an opaque value owned by the platform.
+Decision: **image identity** is the existing platform-owned ROM identity — currently the ROM SHA-256
+carried by `GenesisCheckpointIdentity` (`rom_sha256`). **Image offset** (`DecodeSource::image_offset`)
+is a position within that image, not an identity. The guest diagnostic identity is
+`(cpu variant, platform-owned image identity, guest address / image offset as needed)`, composed at the
+reporting boundary. Multi-image safety (SEG-018) is preserved because two images never share an
+identity. No module registry, loader graph, universal `ImageIdentity` type, or Sega-CD/Saturn concept is
+introduced.
 
 ## 8. Static closure counts
 
