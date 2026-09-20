@@ -9,7 +9,7 @@ target_link_libraries(segarecomp_codegen_c11 PUBLIC segarecomp::base segarecomp:
 target_include_directories(segarecomp_codegen_c11 PUBLIC include)
 segarecomp_enable_warnings(segarecomp_codegen_c11)
 
-add_library(segarecomp_codegen_c11_m68k src/m68k.cpp src/direct_flow.cpp)
+add_library(segarecomp_codegen_c11_m68k src/m68k.cpp src/direct_flow.cpp src/provenance_diagnostics.cpp)
 add_library(segarecomp::codegen_c11_m68k ALIAS segarecomp_codegen_c11_m68k)
 target_link_libraries(segarecomp_codegen_c11_m68k PUBLIC segarecomp::codegen_c11 segarecomp::cpu_m68k)
 segarecomp_enable_warnings(segarecomp_codegen_c11_m68k)

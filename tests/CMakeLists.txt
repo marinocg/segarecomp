@@ -722,6 +722,10 @@ add_test(
 add_test(NAME genesis_bridge_defaults_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_bridge_defaults_test.py)
 
+add_executable(codegen_c11_provenance_diagnostics_tests codegen_c11_provenance_diagnostics_test.cpp)
+target_link_libraries(codegen_c11_provenance_diagnostics_tests PRIVATE segarecomp::codegen_c11_m68k)
+segarecomp_enable_warnings(codegen_c11_provenance_diagnostics_tests)
+add_test(NAME codegen_c11_provenance_diagnostics_tests COMMAND codegen_c11_provenance_diagnostics_tests)
 # SEG-018-T001: tier labels. `full` = every normal hermetic test (parallel-safe),
 # `fast` = representative hermetic subset of `full`, `extended` = external or
 # environment-heavy checks kept out of the ordinary gate. Selection is explicit
