@@ -553,6 +553,7 @@ std::string emit_m68k_general_startup_runtime_block_c(const FrontendAnalysis &an
       << "static GenesisControlTransfer genesis_block_" << std::uppercase << std::hex << std::setw(8)
       << std::setfill('0') << block.id.entry.value << "(GenesisRuntime *runtime) {\n";
   GenesisM68kEmissionContext memory{};
+  memory.execution_history_hooks = g_execution_history_hooks;
   memory.program_counter = "runtime->pc";
   out << emit_m68k_operation_c(moveq, "runtime->d", "runtime->sr", "  ", &memory);
   out << emit_m68k_operation_c(branch, "runtime->d", "runtime->sr", "  ", &memory);
@@ -756,6 +757,7 @@ std::string emit_m68k_general_startup_runtime_c_with_policy(
     out << "static GenesisControlTransfer genesis_block_" << std::uppercase << std::hex << std::setw(8)
         << std::setfill('0') << entry << "(GenesisRuntime *runtime) {\n";
     GenesisM68kEmissionContext memory{};
+  memory.execution_history_hooks = g_execution_history_hooks;
     memory.program_counter = "runtime->pc";
     memory.address_registers = "runtime->a";
     memory.user_stack_pointer = "runtime->usp";
@@ -1141,7 +1143,7 @@ std::optional<std::string> build_genesis_frontier_stop_function(
               << "      if (runtime->a[7] < UINT32_C(" << hex(m68k_startup_ram_begin + 4U, 8) << ") || runtime->a[7] > UINT32_C("
               << hex(m68k_startup_ram_end, 8) << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, &source, 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);\n"
               << "      { const uint32_t m68k_new_a7 = runtime->a[7] - UINT32_C(4);\n"
-              << "        if (genesis_route_access(runtime, m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) {\n"
+              << "        if (" << (g_execution_history_hooks ? "genesis_route_access_bus(runtime, GENESIS_BUS_STACK_WRITE, " : "genesis_route_access(runtime, ") << "m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) {\n"
               << "          m68k_route_stop.provenance.has_instruction_provenance = 1U; m68k_route_stop.provenance.instruction = source; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = m68k_new_a7; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_WRITE;\n"
               << "          { GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop = m68k_route_stop; return transfer; }\n"
               << "        }\n"
@@ -1703,6 +1705,7 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
       entry.operation.kind == M68kIrKind::multiply_unsigned_word)
     out << "  uint16_t m68k_timing_mul_source = UINT16_C(0);\n";
   GenesisM68kEmissionContext memory{};
+  memory.execution_history_hooks = g_execution_history_hooks;
   memory.program_counter = "pc";
   memory.address_registers = "runtime->a";
   memory.user_stack_pointer = "runtime->usp";
@@ -4266,6 +4269,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
     out << "  default: return genesis_internal_dispatch_inconsistency_stop(runtime);\n"
         << "  }\n";
     GenesisM68kEmissionContext memory{};
+  memory.execution_history_hooks = g_execution_history_hooks;
     memory.program_counter = "runtime->pc";
     memory.address_registers = "runtime->a";
     memory.user_stack_pointer = "runtime->usp";
@@ -5316,6 +5320,7 @@ std::string emit_m68k_general_startup_bridge_c(const FrontendAnalysis &analysis,
     for (const auto &provenance : block.instructions) {
       const auto *operation = operations.at(provenance.source.address.value);
       GenesisM68kEmissionContext memory{};
+  memory.execution_history_hooks = g_execution_history_hooks;
       memory.program_counter = "runtime->pc"; memory.address_registers = "runtime->a";
       memory.runtime_routing = true; memory.runtime_object = "runtime";
       if (operation->kind == M68kIrKind::call_general || operation->kind == M68kIrKind::bsr_call) {

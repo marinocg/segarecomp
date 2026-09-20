@@ -544,6 +544,7 @@ typedef struct GenesisExecutionHistoryEvent {
   uint8_t detail;   /* TRANSFER: GenesisHistoryTransferKind; ACCESS: GenesisHistoryRegion */
   uint8_t width;    /* ACCESS: 1/2/4 */
   uint8_t direction; /* ACCESS: GenesisAccessDirection value (0 read, 1 write) */
+  uint8_t bus;      /* ACCESS: existing GenesisBusKind */
 } GenesisExecutionHistoryEvent;
 typedef struct GenesisExecutionHistory {
   GenesisExecutionHistoryEvent events[GENESIS_EXECUTION_HISTORY_CAPACITY];
@@ -1020,6 +1021,13 @@ GenesisAccessResultKind genesis_route_access(GenesisRuntime *runtime, uint32_t a
                                               GenesisAccessDirection direction,
                                               uint32_t *value,
                                               GenesisRuntimeStop *stop_out);
+
+/* SEG-020-T003: same boundary with the caller-owned existing bus kind (stack
+ * accesses); `genesis_route_access` itself is a DATA_READ/DATA_WRITE access. A
+ * kind whose direction disagrees with `direction` fails closed like any invalid access. */
+GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, GenesisBusKind bus_kind, uint32_t address,
+                                                 GenesisAccessWidth width, GenesisAccessDirection direction,
+                                                 uint32_t *value, GenesisRuntimeStop *stop_out);
 
 /* Defensive finite-dispatch failure.  It never mutates the runtime. */
 GenesisControlTransfer genesis_internal_dispatch_inconsistency_stop(GenesisRuntime *runtime);

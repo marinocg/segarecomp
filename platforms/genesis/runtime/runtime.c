@@ -1541,7 +1541,8 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
 
 /* SEG-020-T003: single bounded typed history append. Pure side-channel. */
 static void genesis_history_append(GenesisRuntime *runtime, GenesisHistoryEventKind kind, uint32_t pc,
-                                   uint32_t next_pc, uint8_t detail, uint8_t width, uint8_t direction) {
+                                   uint32_t next_pc, uint8_t detail, uint8_t width, uint8_t direction,
+                                   uint8_t bus) {
   GenesisExecutionHistory *history = &runtime->execution_history;
   GenesisExecutionHistoryEvent *event = &history->events[history->total_recorded % GENESIS_EXECUTION_HISTORY_CAPACITY];
   event->boundary = history->retired_count;
@@ -1551,6 +1552,7 @@ static void genesis_history_append(GenesisRuntime *runtime, GenesisHistoryEventK
   event->detail = detail;
   event->width = width;
   event->direction = direction;
+  event->bus = bus;
   ++history->total_recorded;
 }
 
@@ -1567,18 +1569,36 @@ static uint8_t genesis_history_device_region(uint32_t address) {
   return 0U;
 }
 
+GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, GenesisBusKind bus_kind, uint32_t address,
+                                                 GenesisAccessWidth width, GenesisAccessDirection direction,
+                                                 uint32_t *value, GenesisRuntimeStop *stop_out) {
+  GenesisAccessResultKind status;
+  const int is_read_kind = bus_kind == GENESIS_BUS_INSTRUCTION_READ || bus_kind == GENESIS_BUS_DATA_READ ||
+                           bus_kind == GENESIS_BUS_STACK_READ;
+  const int is_write_kind = bus_kind == GENESIS_BUS_DATA_WRITE || bus_kind == GENESIS_BUS_STACK_WRITE;
+  if ((!is_read_kind && !is_write_kind) || (is_read_kind && direction != GENESIS_ACCESS_READ) ||
+      (is_write_kind && direction != GENESIS_ACCESS_WRITE)) {
+    if (stop_out != 0) *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION,
+                                                        GENESIS_DIAG_UNMAPPED_DATA_ACCESS);
+    return GENESIS_ACCESS_FAIL;
+  }
+  status = genesis_route_access_unrecorded(runtime, address, width, direction, value, stop_out);
+  if (status == GENESIS_ACCESS_OK && runtime != 0 && runtime->execution_history.detail_enabled) {
+    const uint8_t region = genesis_history_device_region(address);
+    if (region != 0U)
+      genesis_history_append(runtime, GENESIS_HISTORY_ACCESS, 0U, 0U, region, (uint8_t)width, (uint8_t)direction,
+                             (uint8_t)bus_kind);
+  }
+  return status;
+}
+
 GenesisAccessResultKind genesis_route_access(GenesisRuntime *runtime, uint32_t address,
                                               GenesisAccessWidth width,
                                               GenesisAccessDirection direction, uint32_t *value,
                                               GenesisRuntimeStop *stop_out) {
-  const GenesisAccessResultKind status =
-      genesis_route_access_unrecorded(runtime, address, width, direction, value, stop_out);
-  if (status == GENESIS_ACCESS_OK && runtime != 0 && runtime->execution_history.detail_enabled) {
-    const uint8_t region = genesis_history_device_region(address);
-    if (region != 0U)
-      genesis_history_append(runtime, GENESIS_HISTORY_ACCESS, 0U, 0U, region, (uint8_t)width, (uint8_t)direction);
-  }
-  return status;
+  return genesis_route_access_bus(runtime,
+                                  direction == GENESIS_ACCESS_WRITE ? GENESIS_BUS_DATA_WRITE : GENESIS_BUS_DATA_READ,
+                                  address, width, direction, value, stop_out);
 }
 
 
@@ -1678,12 +1698,12 @@ int genesis_exception_return(GenesisRuntime *runtime, uint32_t *restored_pc_out,
     return 0;
   }
   /* Neither routed read mutates any runtime field; commit happens only below. */
-  if (genesis_route_access(runtime, sp, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &saved_sr,
+  if (genesis_route_access_bus(runtime, GENESIS_BUS_STACK_READ, sp, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &saved_sr,
                            &routed) != GENESIS_ACCESS_OK) {
     *stop_out = routed;
     return 0;
   }
-  if (genesis_route_access(runtime, sp + 2U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ, &saved_pc,
+  if (genesis_route_access_bus(runtime, GENESIS_BUS_STACK_READ, sp + 2U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ, &saved_pc,
                            &routed) != GENESIS_ACCESS_OK) {
     *stop_out = routed;
     return 0;
@@ -1766,7 +1786,7 @@ static int genesis_construct_exception_frame_and_transfer(GenesisRuntime *runtim
      through the routed-write boundary. */
   saved_sr = runtime->sr;
   routed_value = saved_sr;
-  if (genesis_route_access(runtime, frame_base, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE,
+  if (genesis_route_access_bus(runtime, GENESIS_BUS_STACK_WRITE, frame_base, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE,
                            &routed_value, &routed) != GENESIS_ACCESS_OK) {
     *result = (GenesisControlTransfer){0};
     result->kind = GENESIS_STOP;
@@ -1775,7 +1795,7 @@ static int genesis_construct_exception_frame_and_transfer(GenesisRuntime *runtim
     return 0;
   }
   routed_value = return_pc;
-  if (genesis_route_access(runtime, frame_base + 2U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE,
+  if (genesis_route_access_bus(runtime, GENESIS_BUS_STACK_WRITE, frame_base + 2U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE,
                            &routed_value, &routed) != GENESIS_ACCESS_OK) {
     *result = (GenesisControlTransfer){0};
     result->kind = GENESIS_STOP;
@@ -1792,7 +1812,7 @@ static int genesis_construct_exception_frame_and_transfer(GenesisRuntime *runtim
   runtime->pc = handler_entry;
   if (runtime->execution_history.detail_enabled)
     genesis_history_append(runtime, GENESIS_HISTORY_TRANSFER, 0U, handler_entry,
-                           GENESIS_HISTORY_TRANSFER_EXCEPTION_ENTRY, 0U, 0U);
+                           GENESIS_HISTORY_TRANSFER_EXCEPTION_ENTRY, 0U, 0U, 0U);
   return 1;
 }
 
@@ -1936,7 +1956,7 @@ GenesisControlTransfer genesis_runtime_step(GenesisRuntime *runtime, GenesisDisp
      documented boundary, before dispatch() runs. Pure side-channel append --
      no guest state, dispatch selection, or timing is read from or affected by
      this recording. */
-  genesis_history_append(runtime, GENESIS_HISTORY_DISPATCH, runtime->pc, 0U, 0U, 0U, 0U);
+  genesis_history_append(runtime, GENESIS_HISTORY_DISPATCH, runtime->pc, 0U, 0U, 0U, 0U, 0U);
   /* SEG-007-T175 DEFENSIVE mechanism only (see the PRIMARY synchronous
      drain documented above genesis_vdp_drain_memory_to_vdp_dma_body /
      inside genesis_route_access's VDP branch, which now drains a
@@ -1981,8 +2001,8 @@ GenesisControlTransfer genesis_runtime_retire_m68k_instruction_at(GenesisRuntime
                                                                   uint32_t m68k_cycles, uint32_t next_pc) {
   if (runtime != 0 && runtime->execution_history.detail_enabled) {
     if (transfer_kind != GENESIS_HISTORY_TRANSFER_NONE && next_pc != fallthrough_pc)
-      genesis_history_append(runtime, GENESIS_HISTORY_TRANSFER, 0U, next_pc, (uint8_t)transfer_kind, 0U, 0U);
-    genesis_history_append(runtime, GENESIS_HISTORY_RETIRED, retired_pc, next_pc, 0U, 0U, 0U);
+      genesis_history_append(runtime, GENESIS_HISTORY_TRANSFER, 0U, next_pc, (uint8_t)transfer_kind, 0U, 0U, 0U);
+    genesis_history_append(runtime, GENESIS_HISTORY_RETIRED, retired_pc, next_pc, 0U, 0U, 0U, 0U);
     ++runtime->execution_history.retired_count;
   }
   return genesis_runtime_retire_m68k_instruction(runtime, m68k_cycles, next_pc);
@@ -2784,9 +2804,9 @@ int genesis_write_ephemeral_pc_history(FILE *output, const GenesisRuntime *runti
         rc = fprintf(output, "%s{\"b\":%llu,\"k\":\"transfer\",\"t\":%u,\"next\":\"0x%08x\"}", sep,
                      (unsigned long long)event->boundary, (unsigned)event->detail, event->next_pc);
       else
-        rc = fprintf(output, "%s{\"b\":%llu,\"k\":\"access\",\"r\":%u,\"w\":%u,\"d\":%u}", sep,
-                     (unsigned long long)event->boundary, (unsigned)event->detail, (unsigned)event->width,
-                     (unsigned)event->direction);
+        rc = fprintf(output, "%s{\"b\":%llu,\"k\":\"access\",\"bk\":%u,\"r\":%u,\"w\":%u,\"d\":%u}", sep,
+                     (unsigned long long)event->boundary, (unsigned)event->bus, (unsigned)event->detail,
+                     (unsigned)event->width, (unsigned)event->direction);
       if (rc < 0) return 1;
     }
     if (fputs("]\n", output) == EOF) return 1;

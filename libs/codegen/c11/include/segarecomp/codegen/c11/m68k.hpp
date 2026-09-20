@@ -98,6 +98,8 @@ struct M68kMemoryEmissionContext {
   // watchdog's guarded note emission. No emitter path reads or writes them
   // any longer, so they have been removed from this context entirely.
   bool runtime_routing{};
+  // SEG-020-T003: generation-time diagnostics option; stack accesses then carry their bus kind.
+  bool execution_history_hooks{};
   std::string_view runtime_object;
   std::string_view runtime_source;
   std::string_view runtime_provenance_helper;

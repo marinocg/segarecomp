@@ -99,9 +99,24 @@ int main() {
   size_t expected = (rd == GENESIS_ACCESS_OK ? 1U : 0U) + (wr == GENESIS_ACCESS_OK ? 1U : 0U);
   check(expected >= 1U, "setup: at least one synthetic VDP access is admitted");
   check(count_of(dt, "\"k\":\"access\"") == expected, "one access event per admitted device access; RAM not recorded");
-  if (rd == GENESIS_ACCESS_OK) check(dt.find("{\"b\":0,\"k\":\"access\",\"r\":4,\"w\":2,\"d\":0}") != std::string::npos, "VDP read event");
-  if (wr == GENESIS_ACCESS_OK) check(dt.find("\"r\":4,\"w\":2,\"d\":1}") != std::string::npos, "VDP write event");
+  if (rd == GENESIS_ACCESS_OK) check(dt.find("{\"b\":0,\"k\":\"access\",\"bk\":2,\"r\":4,\"w\":2,\"d\":0}") != std::string::npos, "VDP read event");
+  if (wr == GENESIS_ACCESS_OK) check(dt.find("\"bk\":3,\"r\":4,\"w\":2,\"d\":1}") != std::string::npos, "VDP write event");
   check(dt.find("1234") == std::string::npos && dt.find("deadbeef") == std::string::npos, "no values recorded");
+
+  // Bus kind: stack accesses keep their existing kind; generic seam is data; mismatches fail closed.
+  GenesisRuntime k{};
+  k.execution_history.detail_enabled = 1U;
+  uint32_t kv = 0U;
+  GenesisRuntimeStop ks{};
+  const auto sw = genesis_route_access_bus(&k, GENESIS_BUS_STACK_WRITE, 0x00C00004U, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &kv, &ks);
+  const auto sr = genesis_route_access_bus(&k, GENESIS_BUS_STACK_READ, 0x00C00004U, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &kv, &ks);
+  const auto bad = genesis_route_access_bus(&k, GENESIS_BUS_STACK_READ, 0x00C00004U, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &kv, &ks);
+  check(bad == GENESIS_ACCESS_FAIL, "bus kind/direction mismatch fails closed");
+  const std::string kt = dump(k, GENESIS_STOP);
+  if (sw == GENESIS_ACCESS_OK) check(kt.find("\"bk\":5,\"r\":4,\"w\":2,\"d\":1}") != std::string::npos, "stack write kind");
+  if (sr == GENESIS_ACCESS_OK) check(kt.find("\"bk\":4,\"r\":4,\"w\":2,\"d\":0}") != std::string::npos, "stack read kind");
+  check(count_of(kt, "\"k\":\"access\"") == (sw == GENESIS_ACCESS_OK ? 1U : 0U) + (sr == GENESIS_ACCESS_OK ? 1U : 0U), "failed access not recorded");
+  check(rd == GENESIS_ACCESS_OK || wr == GENESIS_ACCESS_OK, "setup: data accesses admitted");
 
   // 3: disabled does not alter results; detail events absent, and the typed line is absent.
   GenesisRuntime off{};

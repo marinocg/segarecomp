@@ -40,6 +40,7 @@ def main() -> int:
         off = subprocess.run(base, text=True, capture_output=True, check=True).stdout
         require("execution_history" not in off and "_retire_m68k_instruction_at" not in off,
                 "diagnostics-off C must contain no history hooks")
+        require("genesis_route_access_bus" not in off, "diagnostics-off C must not use bus-kind routing")
         with tempfile.TemporaryDirectory(dir=root / "build", prefix="exec-history-") as output:
             out_dir = pathlib.Path(output)
             status, _, executable = bridge.generate_and_compile(base + ["--provenance-diagnostics"], compiler, root,
