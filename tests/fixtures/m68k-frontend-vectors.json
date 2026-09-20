@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "ownership": "project-authored synthetic fixture",
+  "fixture_id": "synthetic/SEG-004/two-scc-units-v1",
+  "image": {"source_id": "synthetic/SEG-004/two-scc-units-v1/image", "byte_length": 12, "bytes": "7002600c7001538066fa60f8", "sha256": "d722d08d765dc5416a8eb8f156347240e00d1875ecb6bc5650b38ad8c3b464dc"},
+  "claims": [
+    {"name": "unit_zero", "target_begin": "00000100", "target_end": "00000104", "image_begin": "0000000000000000", "image_end": "0000000000000004"},
+    {"name": "unit_one", "target_begin": "00000110", "target_end": "00000118", "image_begin": "0000000000000004", "image_end": "000000000000000C"}
+  ],
+  "analysis_entries": ["00000100"],
+  "canonical_scc_regression": {
+    "fixture_id": "synthetic/SEG-004/canonical-scc-order-v1",
+    "selected_forms_only": true,
+    "analysis_entries_discovery_order": ["00000110", "00000100"],
+    "analysis_entries_reordered": ["00000100", "00000110"],
+    "expected_units": [
+      {"ordinal": 0, "id": "m68k_unit_00000000", "entry": "00000100", "members": ["00000100"]},
+      {"ordinal": 1, "id": "m68k_unit_00000001", "entry": "00000110", "members": ["00000110", "00000116"], "provenance_addresses": ["00000110", "00000112", "00000114", "00000116"]}
+    ]
+  },
+  "frontend_pre_read_negatives": [
+    {"id":"invalid-image-source-id", "category":"invalid_frontend_image_source_id"},
+    {"id":"image-byte-length-mismatch", "category":"frontend_image_byte_length_mismatch"},
+    {"id":"invalid-mapping-span", "category":"invalid_mapping_claim"},
+    {"id":"odd-source", "category":"odd_instruction_address"},
+    {"id":"conflicting-source", "category":"conflicting_address_mapping"},
+    {"id":"unmapped-source", "category":"unmapped_instruction_address"},
+    {"id":"truncated-primary", "category":"truncated_instruction"},
+    {"id":"truncated-extension-adjacent-claim", "category":"truncated_instruction"}
+  ],
+  "vectors": [
+    {"id": "inter-unit-transfer", "entry": "00000100", "sr": "2700", "d0": "11111111", "budget": "0000000000000002", "block_instruction_counts": [2, 3], "boundaries": [{"d0":"11111111","sr":"2700","pc":"00000100"},{"d0":"00000002","sr":"2700","pc":"00000110"},{"d0":"00000000","sr":"2704","pc":"00000116"}]},
+    {"id": "unit-one-direct", "entry": "00000110", "sr": "2700", "d0": "AAAAAAAA", "budget": "0000000000000001", "block_instruction_counts": [3], "boundaries": [{"d0":"AAAAAAAA","sr":"2700","pc":"00000110"},{"d0":"00000000","sr":"2704","pc":"00000116"}]},
+    {"id": "unit-one-bra", "entry": "00000116", "sr": "2700", "d0": "DEADBEEF", "budget": "0000000000000001", "block_instruction_counts": [1], "boundaries": [{"d0":"DEADBEEF","sr":"2700","pc":"00000116"},{"d0":"DEADBEEF","sr":"2700","pc":"00000110"}]}
+  ],
+  "entry_validation_negatives": [
+    {"id":"fixture-mismatch","category":"vector_fixture_id_mismatch"},
+    {"id":"hash-mismatch","category":"vector_image_sha256_mismatch"},
+    {"id":"cpu-mismatch","category":"vector_cpu_variant_mismatch"},
+    {"id":"space-mismatch","category":"vector_execution_entry_space_mismatch"},
+    {"id":"odd-entry","category":"odd_instruction_address"},
+    {"id":"unmapped-entry","category":"unmapped_instruction_address"},
+    {"id":"inside-instruction-entry-odd-precedence","category":"odd_instruction_address"},
+    {"id":"inside-block-entry","category":"execution_entry_inside_discovered_block"},
+    {"id":"not-block-start-entry","category":"execution_entry_not_discovered_block_start"}
+  ]
+}

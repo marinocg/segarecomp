@@ -1,0 +1,89 @@
+name: segarecomp-ghidra
+
+services:
+  ghidra:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.ghidra
+    image: segarecomp/ghidra-mcp-headless:6.0.0
+    environment:
+      GHIDRA_MCP_ALLOW_SCRIPTS: "0"
+      GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN:?run tools/ghidra.py init}
+      GHIDRA_MCP_FILE_ROOT: /inputs
+      GHIDRA_MCP_PORT: "8089"
+      JAVA_OPTS: -Xmx4g -XX:+UseG1GC
+    expose:
+      - "8089"
+    volumes:
+      - ghidra-data:/data
+      - ghidra-projects:/projects
+      - ${GHIDRA_INPUT_DIR:?run tools/ghidra.py init}:/inputs:ro
+      # SEG-007-T179 / ADR-0025: deterministic offline whole-ROM analysis
+      # post-scripts, mounted read-only. Never writable from the container.
+      - ./scripts:/scripts:ro
+    networks:
+      - backend
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8089/check_connection"]
+      interval: 10s
+      timeout: 5s
+      start_period: 90s
+      retries: 12
+
+  bridge:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: Dockerfile.bridge
+    image: segarecomp/ghidra-mcp-bridge:6.0.0
+    environment:
+      GHIDRA_MCP_AUTH_TOKEN: ${GHIDRA_MCP_AUTH_TOKEN:?run tools/ghidra.py init}
+      GHIDRA_MCP_REQUIRE_PROGRAM_SELECTORS: "1"
+      # The pinned bridge only auto-connects to / accepts a loopback instance URL
+      # (Expected http://<127.0.0.1|localhost|::1>:<port>). Sharing the ghidra
+      # service network namespace below makes 127.0.0.1:8089 the Ghidra REST
+      # server, so the supported loopback URL and the container split both hold.
+      GHIDRA_MCP_URL: http://127.0.0.1:8089
+      GHIDRA_SERVER_URL: http://127.0.0.1:8089
+    command: ["sleep", "infinity"]
+    depends_on:
+      ghidra:
+        condition: service_healthy
+    # network_mode: service:ghidra shares the ghidra container's network
+    # namespace. It is mutually exclusive with a `networks:` list and with
+    # `ports:`/`expose:`; the internal `backend` network is still reached
+    # transitively through the ghidra service. No host port is published.
+    network_mode: "service:ghidra"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import socket; socket.create_connection(('127.0.0.1', 8089), 3).close()",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+networks:
+  backend:
+    internal: true
+
+volumes:
+  ghidra-data:
+  ghidra-projects:

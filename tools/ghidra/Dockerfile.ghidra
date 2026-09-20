@@ -1,0 +1,87 @@
+# syntax=docker/dockerfile:1
+# Build the pinned upstream server source locally so its container hardening
+# remains under project control.
+FROM eclipse-temurin:21-jdk AS builder
+
+ARG GHIDRA_MCP_REVISION=8cd2078e10b9ba28b188cb84ce5b9051a904b995
+ARG GHIDRA_VERSION=12.1.2
+ARG GHIDRA_DATE=20260605
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    maven \
+    unzip \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone https://github.com/bethington/ghidra-mcp.git /build \
+    && git -C /build checkout --detach "$GHIDRA_MCP_REVISION" \
+    && test "$(git -C /build rev-parse HEAD)" = "$GHIDRA_MCP_REVISION"
+
+WORKDIR /opt
+RUN wget -q \
+    "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/ghidra_${GHIDRA_VERSION}_PUBLIC_${GHIDRA_DATE}.zip" \
+    -O ghidra.zip || \
+    wget -q \
+    "https://github.com/NationalSecurityAgency/ghidra/releases/download/Ghidra_${GHIDRA_VERSION}_build/ghidra_${GHIDRA_VERSION}_PUBLIC.zip" \
+    -O ghidra.zip
+RUN unzip -q ghidra.zip && rm ghidra.zip && mv ghidra_* ghidra
+
+RUN mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/Generic/lib/Generic.jar -DgroupId=ghidra -DartifactId=Generic -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/SoftwareModeling/lib/SoftwareModeling.jar -DgroupId=ghidra -DartifactId=SoftwareModeling -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/Project/lib/Project.jar -DgroupId=ghidra -DartifactId=Project -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/Docking/lib/Docking.jar -DgroupId=ghidra -DartifactId=Docking -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/Utility/lib/Utility.jar -DgroupId=ghidra -DartifactId=Utility -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/Gui/lib/Gui.jar -DgroupId=ghidra -DartifactId=Gui -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/FileSystem/lib/FileSystem.jar -DgroupId=ghidra -DartifactId=FileSystem -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/Help/lib/Help.jar -DgroupId=ghidra -DartifactId=Help -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Features/Base/lib/Base.jar -DgroupId=ghidra -DartifactId=Base -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Features/Decompiler/lib/Decompiler.jar -DgroupId=ghidra -DartifactId=Decompiler -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/DB/lib/DB.jar -DgroupId=ghidra -DartifactId=DB -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Framework/Emulation/lib/Emulation.jar -DgroupId=ghidra -DartifactId=Emulation -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Debug/Debugger-api/lib/Debugger-api.jar -DgroupId=ghidra -DartifactId=Debugger-api -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Debug/Framework-TraceModeling/lib/Framework-TraceModeling.jar -DgroupId=ghidra -DartifactId=Framework-TraceModeling -Dversion=${GHIDRA_VERSION} -Dpackaging=jar \
+    && mvn -q install:install-file -Dfile=/opt/ghidra/Ghidra/Debug/Debugger-rmi-trace/lib/Debugger-rmi-trace.jar -DgroupId=ghidra -DartifactId=Debugger-rmi-trace -Dversion=${GHIDRA_VERSION} -Dpackaging=jar
+
+WORKDIR /build
+RUN mvn clean package -P headless -DskipTests -q
+
+FROM eclipse-temurin:21-jdk
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /opt/ghidra /opt/ghidra
+COPY --from=builder /build/target/GhidraMCP-*.jar /app/GhidraMCP.jar
+COPY --from=builder /build/docker/entrypoint.sh /app/entrypoint.sh
+
+RUN set -eux; \
+    EXT_DIR="/opt/ghidra/Extensions/Ghidra"; \
+    JYTHON_ZIP="$(ls "$EXT_DIR"/*_Jython.zip 2>/dev/null | head -n1)"; \
+    test -n "$JYTHON_ZIP"; \
+    mkdir -p /opt/ghidra/Ghidra/Extensions /data /projects; \
+    unzip -q "$JYTHON_ZIP" -d /opt/ghidra/Ghidra/Extensions/; \
+    sed -i 's/\r$//' /app/entrypoint.sh; \
+    chmod +x /app/entrypoint.sh
+
+# The current Temurin base image already uses ID 1000.  Use a dedicated,
+# unreserved service identity while retaining non-root execution.
+RUN groupadd --gid 10001 ghidra \
+    && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/ghidra ghidra \
+    && chown -R ghidra:ghidra /app /data /projects /home/ghidra
+
+ENV GHIDRA_HOME=/opt/ghidra
+ENV GHIDRA_MCP_PORT=8089
+ENV JAVA_OPTS="-Xmx4g -XX:+UseG1GC"
+ENV HOME=/home/ghidra
+USER ghidra
+
+EXPOSE 8089
+VOLUME ["/data", "/projects"]
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:${GHIDRA_MCP_PORT}/check_connection || exit 1
+WORKDIR /app
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["--port", "8089"]

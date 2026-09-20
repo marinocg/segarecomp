@@ -1,0 +1,10 @@
+# SEG-007-T254: optional SDL3 presenter for the Genesis viewer; never linked by headless targets.
+option(SEGARECOMP_ENABLE_SDL3_VIEWER "Build the optional SDL3 Genesis viewer presenter" OFF)
+if(SEGARECOMP_ENABLE_SDL3_VIEWER)
+  find_package(SDL3 REQUIRED CONFIG)
+  add_library(segarecomp_viewer_genesis_sdl3 STATIC viewer.c viewer_sdl3.c)
+  target_include_directories(segarecomp_viewer_genesis_sdl3 PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(segarecomp_viewer_genesis_sdl3 PUBLIC segarecomp::runtime_genesis SDL3::SDL3)
+  set_target_properties(segarecomp_viewer_genesis_sdl3 PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES)
+  segarecomp_enable_warnings(segarecomp_viewer_genesis_sdl3)
+endif()

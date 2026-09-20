@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "ownership": "project-authored; no commercial content",
+  "absolute_word": {
+    "lower_rom": {"instruction": "4A387FFF", "image_length": 32768, "writes": {"00007FFF": "80"}, "expected_d0": "11111111", "expected_a7": "00FF0100", "expected_pc": "00000104", "expected_sr": "2718"},
+    "upper_ram_read": {"instruction": "34388000", "image_length": 512, "ram_seed": [{"address": "00FF8000", "value": "80010000"}], "expected_d2": "33338001", "expected_pc": "00000104", "expected_sr": "2718"},
+    "upper_ram_write": {"instruction": "31C08000", "image_length": 512, "ram_seed": [], "expected_pc": "00000104", "expected_sr": "2710"},
+    "absolute_long_rejected": {"instruction": "4AB9FFFF8000", "image_length": 512, "category": "effective_address_not_24bit"}
+  },
+  "a7_byte_ordering": {
+    "postincrement": {"instruction": "101F", "image_length": 512, "a7": "00FF0100", "ram_seed": [{"address": "00FF0100", "value": "A1B2C3D4"}, {"address": "00FF0102", "value": "5E6F7081"}], "expected_d0": "111111A1", "expected_a7": "00FF0102"},
+    "predecrement": {"instruction": "1027", "image_length": 512, "a7": "00FF0102", "ram_seed": [{"address": "00FF0100", "value": "D4C3B2A1"}, {"address": "00FF0102", "value": "5E6F7081"}], "expected_d0": "111111D4", "expected_a7": "00FF0100"}
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "ownership": "Project-authored synthetic MC68000 MOVEQ oracle inputs; no commercial content.",
+  "schema": 1,
+  "vectors": [
+    {"id":"zero-d0","image_hex":"7000","sha256":"882a20e6379eb83aecb916f4b9ea79c1e6c08a0d80f6ad1dc9a9421758246001","pc":"00000100","offset":"0000000000000000","sr":"A71F","d":["11111111","22222222","33333333","44444444","55555555","66666666","77777777","88888888"]},
+    {"id":"positive-one-d1","image_hex":"7201","sha256":"4153001a2df16384a120a448b481570b50a834ac872b61e53c505e804a3c1524","pc":"00000100","offset":"0000000000000000","sr":"2710","d":["89ABCDEF","10203040","55667788","99AABBCC","DDEEFF00","13579BDF","2468ACE0","0BADF00D"]},
+    {"id":"positive-max-d2","image_hex":"747F","sha256":"f77e8cd6e958c49778f552ef8161d354712b1becbb0b9db668c5bbbceb89064f","pc":"00000100","offset":"0000000000000000","sr":"A70F","d":["00000001","FFFFFFFF","7FFFFFFF","80000000","01234567","89ABCDEF","CAFEBABE","DEADC0DE"]},
+    {"id":"negative-one-d3","image_hex":"76FF","sha256":"0a96d4dccc0ef12855c37a238ab9561cbb70b42c4f048da8e37daa8bfef63f01","pc":"00000100","offset":"0000000000000000","sr":"2704","d":["FEEDFACE","C001D00D","31415926","27182818","0000FFFF","FFFF0000","12345678","87654321"]},
+    {"id":"negative-min-d4","image_hex":"7880","sha256":"5b10ebd5bab6452d26998d79831269695d1c139ae68d3af1737f4ab9cf13dc30","pc":"00000100","offset":"0000000000000000","sr":"2307","d":["AAAAAAAA","55555555","0F0F0F0F","F0F0F0F0","01020304","A0B0C0D0","0C0FFEE0","600DCAFE"]},
+    {"id":"positive-d5","image_hex":"7A42","sha256":"217375b7503b126e9d49d825cd11e745e44f4e6ec26b02c7c5ff71ae1d22b22b","pc":"00000100","offset":"0000000000000000","sr":"A315","d":["ABCDEF01","23456789","13572468","24681357","FACEB00C","BAADF00D","10293847","56473829"]},
+    {"id":"zero-d6","image_hex":"7C00","sha256":"d34e9cd20975de76f07459cd78e5f80eea529cccfc79996b3a9361478ad544f2","pc":"00000100","offset":"0000000000000000","sr":"070A","d":["0A0B0C0D","1A1B1C1D","2A2B2C2D","3A3B3C3D","4A4B4C4D","5A5B5C5D","6A6B6C6D","7A7B7C7D"]},
+    {"id":"negative-d7","image_hex":"7E81","sha256":"fcc3f207164d2916b22ccecbfbd215baa57ee64d5af2943b5c502feb09849922","pc":"00000100","offset":"0000000000000000","sr":"8001","d":["DEADBEEF","0123ABCD","4567EF01","89AB2345","CDEF6789","13579ACE","2468BDF0","0DDC0FFE"]}
+  ]
+}

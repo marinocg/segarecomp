@@ -1,0 +1,20 @@
+{
+  "fixture_id": "synthetic/SEG-007-T014/general-startup-two-call-frames",
+  "image_length": 384,
+  "sha256": "a42a330ea269663ae7ab57475fbddede60a1f348b187a01ad49a767e18193ede",
+  "writes": {
+    "000000": "00FF0100",
+    "000004": "00000160",
+    "000100": "53454741204D45474120445249564520",
+    "000160": "4EB90000016E4EB90000017060FE4E754E75"
+  },
+  "title": "SYNTHETIC SEG-007 GENERAL",
+  "expected": {
+    "general_result": "accepted",
+    "decoded": 5,
+    "blocks": 5,
+    "edges": 5,
+    "frames": 2,
+    "fixed_category": "startup_graph_mismatch"
+  }
+}

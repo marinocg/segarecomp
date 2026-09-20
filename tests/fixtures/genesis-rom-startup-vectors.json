@@ -1,0 +1,34 @@
+{
+  "fixture_id": "synthetic/SEG-005/recognized-reset-jsr-rts-v2",
+  "image_length": 378,
+  "sha256": "825e60ffd0a3bebf73766c0a3cb4477312488d7efd8eeb815caf2ac846443fea",
+  "writes": {
+    "000000": "00FF0100",
+    "000004": "00000160",
+    "000100": "53454741204D45474120445249564520",
+    "000160": "702A23C000FF00004EB900000178223900FF0000",
+    "000178": "4E75"
+  },
+  "title": "SYNTHETIC SEG-005 STARTUP",
+  "expected": {"d0": "0000002A", "d1": "0000002A", "a7": "00FF0100", "pc": "00000174", "bus_records": 9, "boundaries": 6},
+  "accepted_bus": [
+    [0, "00000160", "702A"], [1, "00000162", "23C000FF0000"], [2, "00FF0000", "0000002A"],
+    [3, "00000168", "4EB900000178"], [4, "00FF00FC", "0000016E"], [5, "00000178", "4E75"],
+    [6, "00FF00FC", "0000016E"], [7, "0000016E", "223900FF0000"], [8, "00FF0000", "0000002A"]
+  ],
+  "negative_recipes": {
+    "primary-truncated": {"category": "truncated_instruction", "available_bytes": 1, "requested_length": 2, "complete_instruction": false, "primary_provenance": false, "failing_bus_records": 0},
+    "extension-truncated-store": {"category": "truncated_instruction", "available_bytes": 4, "requested_length": 6, "complete_instruction": false, "primary_provenance": true, "failing_bus_records": 0},
+    "extension-truncated-jsr": {"category": "truncated_instruction", "available_bytes": 4, "requested_length": 6, "complete_instruction": false, "primary_provenance": true, "failing_bus_records": 0},
+    "illegal-primary": {"category": "illegal_instruction", "failing_bus_records": 0},
+    "unsupported-primary": {"category": "valid_but_unsupported_instruction", "failing_bus_records": 0},
+    "rom-write": {"category": "rom_write_prohibited", "failing_bus_records": 1},
+    "odd-data": {"category": "odd_effective_address", "failing_bus_records": 1},
+    "unmapped-data": {"category": "unmapped_data_access", "failing_bus_records": 1},
+    "invalid-stack-alignment": {"category": "invalid_stack_alignment", "failing_bus_records": 1},
+    "invalid-stack-range": {"category": "invalid_stack_range", "failing_bus_records": 1},
+    "return-target-mismatch": {"category": "return_target_mismatch", "failing_bus_records": 2},
+    "return-context-missing": {"category": "return_context_missing", "failing_bus_records": 2},
+    "unsupported-form": {"category": "unsupported_instruction_form", "failing_bus_records": 0}
+  }
+}

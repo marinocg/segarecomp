@@ -1,0 +1,112 @@
+name: ci
+
+on:
+  pull_request:
+    # ready_for_review re-triggers the run when a draft is promoted.
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    # Save Actions quota: draft PRs do not run the matrix (pushes to main always do).
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (AppleClang + Ninja)
+            os: macos-latest
+          - name: Linux (GCC + Ninja)
+            os: ubuntu-24.04
+          - name: Windows (LLVM/Clang + Ninja)
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Ninja (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Install Ninja (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+      - name: Windows MSVC environment (for the LLVM/Clang route)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Select Windows compiler
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo "CC=clang" >> "$GITHUB_ENV"
+          echo "CXX=clang++" >> "$GITHUB_ENV"
+      - name: Record toolchain versions
+        shell: bash
+        run: |
+          cmake --version | head -1
+          ninja --version
+          python --version
+          ${CXX:-c++} --version | head -2
+          ${CC:-cc} --version | head -2
+      - name: Configure
+        run: cmake --preset dev
+      - name: Build
+        run: cmake --build --preset dev -- -k 0
+      - name: Fast tests
+        run: ctest --preset fast
+      - name: Full hermetic tests
+        # Run without the developer preset's stop-on-failure so CI reports every failing test.
+        run: ctest --test-dir build/dev -L "^full$" -j 4 --output-on-failure --no-tests=error
+
+  sdl3-viewer:
+    # Save Actions quota: draft PRs do not run the matrix (pushes to main always do).
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # The optional SDL3 presenter must configure and build on every host; SDL3 is
+    # provisioned through vcpkg (preinstalled on hosted runners), never vendored.
+    name: SDL3 viewer (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+          - name: Linux
+            os: ubuntu-24.04
+          - name: Windows
+            os: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Ninja and SDL3 build prerequisites (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Install Ninja and SDL3 build prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: >
+          sudo apt-get update && sudo apt-get install -y ninja-build pkg-config autoconf autoconf-archive automake libtool libltdl-dev
+          libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxfixes-dev
+          libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev libdrm-dev libgbm-dev
+          libgl1-mesa-dev libegl1-mesa-dev libasound2-dev libpulse-dev libudev-dev
+          libdbus-1-dev libdecor-0-dev libibus-1.0-dev
+      - name: Windows MSVC environment
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Install SDL3 (macOS/Linux/Windows via vcpkg)
+        shell: bash
+        run: |
+          "$VCPKG_INSTALLATION_ROOT/vcpkg" install sdl3
+      - name: Configure with the SDL3 viewer
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then export CC=clang CXX=clang++; fi
+          hint="-DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          cmake -S . -B build/sdl3 -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+            -DSEGARECOMP_WARNINGS_AS_ERRORS=ON -DSEGARECOMP_ENABLE_SDL3_VIEWER=ON -DBUILD_TESTING=OFF $hint
+      - name: Build the SDL3 viewer target
+        run: cmake --build build/sdl3 --target segarecomp_viewer_genesis_sdl3

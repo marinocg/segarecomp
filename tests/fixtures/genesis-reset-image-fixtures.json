@@ -1,0 +1,1615 @@
+{
+  "fixture_policy": "Project-owned synthetic zero-filled arrays; W32 writes big-endian bytes and all unlisted bytes remain zero.",
+  "report_field_order": [
+    "outcome",
+    "diagnostic",
+    "exit_class",
+    "input_size",
+    "size_limit",
+    "raw_region_status",
+    "raw_region",
+    "reset_ssp_range",
+    "reset_pc_range",
+    "initial_ssp",
+    "initial_pc_word",
+    "initial_pc",
+    "entry_address",
+    "entry_image_offset",
+    "pc_alignment",
+    "pc_mapping",
+    "source_provenance"
+  ],
+  "report_expectation_policy": "Every fixture records its complete ordered canonical report object. The reports are contract expectations, not production-derived values.",
+  "fixtures": [
+    {
+      "id": "empty",
+      "purpose": "Empty-input boundary",
+      "construction": "zero_fill(0)",
+      "size": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_SSP_TRUNCATED",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_SSP_TRUNCATED",
+        "exit_class": "input_rejected",
+        "input_size": 0,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            0
+          ],
+          "image_range": [
+            0,
+            0
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "unavailable"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "unavailable"
+        },
+        "initial_ssp": null,
+        "initial_pc_word": null,
+        "initial_pc": null,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "not_checked",
+        "pc_mapping": "not_checked",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "unavailable",
+            "bytes": null,
+            "word": null
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "unavailable",
+            "bytes": null,
+            "word": null
+          }
+        }
+      }
+    },
+    {
+      "id": "ssp-one-byte",
+      "purpose": "SSP truncation representative",
+      "construction": "zero_fill(1); byte(0,0x12)",
+      "size": 1,
+      "sha256": "f299791cddd3d6664f6670842812ef6053eb6501bd6282a476bbbf3ee91e750c",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_SSP_TRUNCATED",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_SSP_TRUNCATED",
+        "exit_class": "input_rejected",
+        "input_size": 1,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            1
+          ],
+          "image_range": [
+            0,
+            1
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "unavailable"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "unavailable"
+        },
+        "initial_ssp": null,
+        "initial_pc_word": null,
+        "initial_pc": null,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "not_checked",
+        "pc_mapping": "not_checked",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "unavailable",
+            "bytes": null,
+            "word": null
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "unavailable",
+            "bytes": null,
+            "word": null
+          }
+        }
+      }
+    },
+    {
+      "id": "ssp-two-bytes",
+      "purpose": "SSP truncation representative",
+      "construction": "zero_fill(2); bytes(0,1234)",
+      "size": 2,
+      "sha256": "3a103a4e5729ad68c02a678ae39accfbc0ae208096437401b7ceab63cca0622f",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_SSP_TRUNCATED",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_SSP_TRUNCATED",
+        "exit_class": "input_rejected",
+        "input_size": 2,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            2
+          ],
+          "image_range": [
+            0,
+            2
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "unavailable"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "unavailable"
+        },
+        "initial_ssp": null,
+        "initial_pc_word": null,
+        "initial_pc": null,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "not_checked",
+        "pc_mapping": "not_checked",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "unavailable",
+            "bytes": null,
+            "word": null
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "unavailable",
+            "bytes": null,
+            "word": null
+          }
+        }
+      }
+    },
+    {
+      "id": "ssp-three-bytes",
+      "purpose": "SSP word one byte short",
+      "construction": "zero_fill(3); bytes(0,123456)",
+      "size": 3,
+      "sha256": "bf7cbe09d71a1bcc373ab9a764917f730a6ed951ffa1a7399b7abd8f8fd73cb4",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_SSP_TRUNCATED",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_SSP_TRUNCATED",
+        "exit_class": "input_rejected",
+        "input_size": 3,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            3
+          ],
+          "image_range": [
+            0,
+            3
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "unavailable"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "unavailable"
+        },
+        "initial_ssp": null,
+        "initial_pc_word": null,
+        "initial_pc": null,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "not_checked",
+        "pc_mapping": "not_checked",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "unavailable",
+            "bytes": null,
+            "word": null
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "unavailable",
+            "bytes": null,
+            "word": null
+          }
+        }
+      }
+    },
+    {
+      "id": "ssp-only",
+      "purpose": "PC begins at image end",
+      "construction": "zero_fill(4); W32(0,0x12345678)",
+      "size": 4,
+      "sha256": "b2ed992186a5cb19f6668aade821f502c1d00970dfd0e35128d51bac4649916c",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_PC_TRUNCATED",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_PC_TRUNCATED",
+        "exit_class": "input_rejected",
+        "input_size": 4,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            4
+          ],
+          "image_range": [
+            0,
+            4
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "unavailable"
+        },
+        "initial_ssp": 305419896,
+        "initial_pc_word": null,
+        "initial_pc": null,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "not_checked",
+        "pc_mapping": "not_checked",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              18,
+              52,
+              86,
+              120
+            ],
+            "word": 305419896
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "unavailable",
+            "bytes": null,
+            "word": null
+          }
+        }
+      }
+    },
+    {
+      "id": "pc-one-byte",
+      "purpose": "PC truncation representative",
+      "construction": "zero_fill(5); W32(0,0x12345678)",
+      "size": 5,
+      "sha256": "367119ea64bce8247631617b0f9fa9a3933aed64f0ef38e900c55d8c925c1e1b",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_PC_TRUNCATED",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_PC_TRUNCATED",
+        "exit_class": "input_rejected",
+        "input_size": 5,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            5
+          ],
+          "image_range": [
+            0,
+            5
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "unavailable"
+        },
+        "initial_ssp": 305419896,
+        "initial_pc_word": null,
+        "initial_pc": null,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "not_checked",
+        "pc_mapping": "not_checked",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              18,
+              52,
+              86,
+              120
+            ],
+            "word": 305419896
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "unavailable",
+            "bytes": null,
+            "word": null
+          }
+        }
+      }
+    },
+    {
+      "id": "pc-two-bytes",
+      "purpose": "PC truncation representative",
+      "construction": "zero_fill(6); W32(0,0x12345678)",
+      "size": 6,
+      "sha256": "a6e2eb51f4991dd6ea4640c10ad01bcc4e32033f2e3e02adcc9a9829ca241708",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_PC_TRUNCATED",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_PC_TRUNCATED",
+        "exit_class": "input_rejected",
+        "input_size": 6,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            6
+          ],
+          "image_range": [
+            0,
+            6
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "unavailable"
+        },
+        "initial_ssp": 305419896,
+        "initial_pc_word": null,
+        "initial_pc": null,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "not_checked",
+        "pc_mapping": "not_checked",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              18,
+              52,
+              86,
+              120
+            ],
+            "word": 305419896
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "unavailable",
+            "bytes": null,
+            "word": null
+          }
+        }
+      }
+    },
+    {
+      "id": "pc-three-bytes",
+      "purpose": "PC word one byte short",
+      "construction": "zero_fill(7); W32(0,0x12345678)",
+      "size": 7,
+      "sha256": "51d93f6a778776e29e17abbf96654eacd16675ba2877c11a1b515b15abcb253a",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_PC_TRUNCATED",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_PC_TRUNCATED",
+        "exit_class": "input_rejected",
+        "input_size": 7,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            7
+          ],
+          "image_range": [
+            0,
+            7
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "unavailable"
+        },
+        "initial_ssp": 305419896,
+        "initial_pc_word": null,
+        "initial_pc": null,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "not_checked",
+        "pc_mapping": "not_checked",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              18,
+              52,
+              86,
+              120
+            ],
+            "word": 305419896
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "unavailable",
+            "bytes": null,
+            "word": null
+          }
+        }
+      }
+    },
+    {
+      "id": "valid-be32-entry",
+      "purpose": "Big-endian in-image entry",
+      "construction": "zero_fill(8); W32(0,0x00FF0000); W32(4,0x00000006)",
+      "size": 8,
+      "sha256": "d434fbbe16357551a19793a3d0ad9c734260c2d7340ce7144765234f2e376dde",
+      "outcome": "accepted",
+      "diagnostic": "GENESIS_RESET_IMAGE_ACCEPTED",
+      "expected_report": {
+        "outcome": "accepted",
+        "diagnostic": "GENESIS_RESET_IMAGE_ACCEPTED",
+        "exit_class": "success",
+        "input_size": 8,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            8
+          ],
+          "image_range": [
+            0,
+            8
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "available"
+        },
+        "initial_ssp": 16711680,
+        "initial_pc_word": 6,
+        "initial_pc": 6,
+        "entry_address": 6,
+        "entry_image_offset": 6,
+        "pc_alignment": "even",
+        "pc_mapping": "mapped",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              255,
+              0,
+              0
+            ],
+            "word": 16711680
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              0,
+              6
+            ],
+            "word": 6
+          }
+        }
+      }
+    },
+    {
+      "id": "pc-high-byte",
+      "purpose": "No PC truncation",
+      "construction": "zero_fill(8); W32(4,0x01000000)",
+      "size": 8,
+      "sha256": "01acecb507abfe1a354aa8064f4af5d3f1acd019e37db3c11c97523b71c76e9d",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_PC_NOT_24BIT",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_PC_NOT_24BIT",
+        "exit_class": "input_rejected",
+        "input_size": 8,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            8
+          ],
+          "image_range": [
+            0,
+            8
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "available"
+        },
+        "initial_ssp": 0,
+        "initial_pc_word": 16777216,
+        "initial_pc": null,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "not_checked",
+        "pc_mapping": "not_checked",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "word": 0
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              1,
+              0,
+              0,
+              0
+            ],
+            "word": 16777216
+          }
+        }
+      }
+    },
+    {
+      "id": "pc-high-byte-and-odd",
+      "purpose": "Width precedes alignment",
+      "construction": "zero_fill(8); W32(4,0x01000001)",
+      "size": 8,
+      "sha256": "ae0e3b2b8a8a11b1d1a6c638df363ce48695d37cedd63a6d104660ecaadee782",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_PC_NOT_24BIT",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_PC_NOT_24BIT",
+        "exit_class": "input_rejected",
+        "input_size": 8,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            8
+          ],
+          "image_range": [
+            0,
+            8
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "available"
+        },
+        "initial_ssp": 0,
+        "initial_pc_word": 16777217,
+        "initial_pc": null,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "not_checked",
+        "pc_mapping": "not_checked",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "word": 0
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              1,
+              0,
+              0,
+              1
+            ],
+            "word": 16777217
+          }
+        }
+      }
+    },
+    {
+      "id": "pc-odd",
+      "purpose": "68000 alignment",
+      "construction": "zero_fill(8); W32(4,0x00000007)",
+      "size": 8,
+      "sha256": "a3eb8db89fc5123ccfd49585059f292bc40a1c0d550b860f24f84efb4760fbf2",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_PC_ODD",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_PC_ODD",
+        "exit_class": "input_rejected",
+        "input_size": 8,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            8
+          ],
+          "image_range": [
+            0,
+            8
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "available"
+        },
+        "initial_ssp": 0,
+        "initial_pc_word": 7,
+        "initial_pc": 7,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "odd",
+        "pc_mapping": "not_checked",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "word": 0
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              0,
+              7
+            ],
+            "word": 7
+          }
+        }
+      }
+    },
+    {
+      "id": "pc-odd-unmapped",
+      "purpose": "Alignment precedes mapping",
+      "construction": "zero_fill(8); W32(4,0x00000009)",
+      "size": 8,
+      "sha256": "5924513516a5993435ec4a240610304aca7d4acf1f2de5ce6812a8c43610c6e6",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_PC_ODD",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_PC_ODD",
+        "exit_class": "input_rejected",
+        "input_size": 8,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            8
+          ],
+          "image_range": [
+            0,
+            8
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "available"
+        },
+        "initial_ssp": 0,
+        "initial_pc_word": 9,
+        "initial_pc": 9,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "odd",
+        "pc_mapping": "not_checked",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "word": 0
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              0,
+              9
+            ],
+            "word": 9
+          }
+        }
+      }
+    },
+    {
+      "id": "pc-at-image-end",
+      "purpose": "End-exclusive mapping",
+      "construction": "zero_fill(8); W32(4,0x00000008)",
+      "size": 8,
+      "sha256": "4c0e071832d527694adea57b50dd7b2164c2a47c02940dcf26fa07c44d6d222a",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_PC_UNMAPPED",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_PC_UNMAPPED",
+        "exit_class": "input_rejected",
+        "input_size": 8,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            8
+          ],
+          "image_range": [
+            0,
+            8
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "available"
+        },
+        "initial_ssp": 0,
+        "initial_pc_word": 8,
+        "initial_pc": 8,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "even",
+        "pc_mapping": "unmapped",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "word": 0
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              0,
+              8
+            ],
+            "word": 8
+          }
+        }
+      }
+    },
+    {
+      "id": "pc-even-unmapped",
+      "purpose": "No fabricated bytes",
+      "construction": "zero_fill(8); W32(4,0x0000000A)",
+      "size": 8,
+      "sha256": "8d85f8467240628a94819b26bee26e3a9b2804334c63482deacec8d64ab4e1e7",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_PC_UNMAPPED",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_PC_UNMAPPED",
+        "exit_class": "input_rejected",
+        "input_size": 8,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            8
+          ],
+          "image_range": [
+            0,
+            8
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "available"
+        },
+        "initial_ssp": 0,
+        "initial_pc_word": 10,
+        "initial_pc": 10,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "even",
+        "pc_mapping": "unmapped",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "word": 0
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              0,
+              10
+            ],
+            "word": 10
+          }
+        }
+      }
+    },
+    {
+      "id": "four-mebibyte-last-even",
+      "purpose": "Largest accepted image",
+      "construction": "zero_fill(0x400000); W32(4,0x003FFFFE)",
+      "size": 4194304,
+      "sha256": "3510cb5f2d05c2efaa35cb042966dfe5c7417d1f705d5fe39fbd42fc2986dde1",
+      "outcome": "accepted",
+      "diagnostic": "GENESIS_RESET_IMAGE_ACCEPTED",
+      "expected_report": {
+        "outcome": "accepted",
+        "diagnostic": "GENESIS_RESET_IMAGE_ACCEPTED",
+        "exit_class": "success",
+        "input_size": 4194304,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            4194304
+          ],
+          "image_range": [
+            0,
+            4194304
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "available"
+        },
+        "initial_ssp": 0,
+        "initial_pc_word": 4194302,
+        "initial_pc": 4194302,
+        "entry_address": 4194302,
+        "entry_image_offset": 4194302,
+        "pc_alignment": "even",
+        "pc_mapping": "mapped",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "word": 0
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              63,
+              255,
+              254
+            ],
+            "word": 4194302
+          }
+        }
+      }
+    },
+    {
+      "id": "four-mebibyte-window-end",
+      "purpose": "Window end does not mirror",
+      "construction": "zero_fill(0x400000); W32(4,0x00400000)",
+      "size": 4194304,
+      "sha256": "f48d90b74fc2ca96859d64129f924ac8ce9e8b49a667553798cf2a3b639e2b08",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_RESET_PC_UNMAPPED",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_RESET_PC_UNMAPPED",
+        "exit_class": "input_rejected",
+        "input_size": 4194304,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            4194304
+          ],
+          "image_range": [
+            0,
+            4194304
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "available"
+        },
+        "initial_ssp": 0,
+        "initial_pc_word": 4194304,
+        "initial_pc": 4194304,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "even",
+        "pc_mapping": "unmapped",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "word": 0
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              64,
+              0,
+              0
+            ],
+            "word": 4194304
+          }
+        }
+      }
+    },
+    {
+      "id": "over-limit",
+      "purpose": "Size precedence",
+      "construction": "zero_fill(0x400001); W32(0,0); W32(4,0)",
+      "size": 4194305,
+      "sha256": "95e441ca65cd41fa01b2a71799e79fd60db59ed34f13af32a91e85f90378676c",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_IMAGE_SIZE_LIMIT",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_IMAGE_SIZE_LIMIT",
+        "exit_class": "input_rejected",
+        "input_size": 4194305,
+        "size_limit": 4194304,
+        "raw_region_status": "not_constructed",
+        "raw_region": null,
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "unexamined"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "unexamined"
+        },
+        "initial_ssp": null,
+        "initial_pc_word": null,
+        "initial_pc": null,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "unexamined",
+        "pc_mapping": "unexamined",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "unexamined",
+            "bytes": null,
+            "word": null
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "unexamined",
+            "bytes": null,
+            "word": null
+          }
+        }
+      }
+    },
+    {
+      "id": "over-limit-unexamined-vectors",
+      "purpose": "Size prevents vector reads",
+      "construction": "zero_fill(0x400001)",
+      "size": 4194305,
+      "sha256": "95e441ca65cd41fa01b2a71799e79fd60db59ed34f13af32a91e85f90378676c",
+      "outcome": "rejected",
+      "diagnostic": "GENESIS_IMAGE_SIZE_LIMIT",
+      "expected_report": {
+        "outcome": "rejected",
+        "diagnostic": "GENESIS_IMAGE_SIZE_LIMIT",
+        "exit_class": "input_rejected",
+        "input_size": 4194305,
+        "size_limit": 4194304,
+        "raw_region_status": "not_constructed",
+        "raw_region": null,
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "unexamined"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "unexamined"
+        },
+        "initial_ssp": null,
+        "initial_pc_word": null,
+        "initial_pc": null,
+        "entry_address": null,
+        "entry_image_offset": null,
+        "pc_alignment": "unexamined",
+        "pc_mapping": "unexamined",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "unexamined",
+            "bytes": null,
+            "word": null
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "unexamined",
+            "bytes": null,
+            "word": null
+          }
+        }
+      }
+    },
+    {
+      "id": "recognized-genesis-composite",
+      "purpose": "Public analyze classification and reset composite",
+      "construction": "zero_fill(0x200); W32(0,0x00FF0000); W32(4,0x00000150); ASCII(0x100,'SEGA GENESIS    '); ASCII(0x120,'SYNTHETIC RESET') then space-pad title to 48",
+      "size": 512,
+      "sha256": "b322fad569c24a6a4a6bb64d9ec8a48a0b7ed3be0bf58104666f1242690daa6d",
+      "outcome": "accepted",
+      "diagnostic": "GENESIS_RESET_IMAGE_ACCEPTED",
+      "expected_report": {
+        "outcome": "accepted",
+        "diagnostic": "GENESIS_RESET_IMAGE_ACCEPTED",
+        "exit_class": "success",
+        "input_size": 512,
+        "size_limit": 4194304,
+        "raw_region_status": "constructed",
+        "raw_region": {
+          "name": "raw_cartridge_rom",
+          "cpu_address_range": [
+            0,
+            512
+          ],
+          "image_range": [
+            0,
+            512
+          ],
+          "permissions": [
+            "read",
+            "execute"
+          ],
+          "mapping": "identity_non_mirrored"
+        },
+        "reset_ssp_range": {
+          "start": 0,
+          "end": 4,
+          "status": "available"
+        },
+        "reset_pc_range": {
+          "start": 4,
+          "end": 8,
+          "status": "available"
+        },
+        "initial_ssp": 16711680,
+        "initial_pc_word": 336,
+        "initial_pc": 336,
+        "entry_address": 336,
+        "entry_image_offset": 336,
+        "pc_alignment": "even",
+        "pc_mapping": "mapped",
+        "source_provenance": {
+          "input": "raw_image",
+          "byte_order": "big_endian",
+          "source_ids": [
+            "M1",
+            "M2",
+            "M3",
+            "S1",
+            "S2"
+          ],
+          "ssp": {
+            "offset": 0,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              255,
+              0,
+              0
+            ],
+            "word": 16711680
+          },
+          "pc": {
+            "offset": 4,
+            "length": 4,
+            "status": "available",
+            "bytes": [
+              0,
+              0,
+              1,
+              80
+            ],
+            "word": 336
+          }
+        }
+      }
+    }
+  ]
+}

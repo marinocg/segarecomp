@@ -1,0 +1,62 @@
+#!/usr/bin/env python3
+"""SEG-007-T180 / ADR-0026: the offline-inventory stitch metrics line is parsed
+from the emitter's stderr string fully in-process. No artifact is written into
+the compare-runs out-dir surface, so the expected-artifacts allowlist is
+unaffected, and the normalized counts still reach ONE_SHOT_SUMMARY /
+EPHEMERAL_FRONTIER when the inventory is non-empty.
+"""
+from __future__ import annotations
+
+import importlib.util
+import pathlib
+import sys
+import unittest
+
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    "genesis_startup_bridge", ROOT / "tools" / "genesis_startup_bridge.py")
+assert SPEC and SPEC.loader
+bridge = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(bridge)
+
+
+class OfflineInventoryStitchMetricsTest(unittest.TestCase):
+    def test_parse_extracts_counts_only(self) -> None:
+        stderr = (
+            "some unrelated warning\n"
+            "segarecomp: offline inventory stitch: candidates=7 admitted_units=4 "
+            "rejected_entry_decode=1 stitched_direct_edges=9 overlap_agree=3 "
+            "overlap_conflict=0 local_discovery=12 aggregate_discovery=20\n"
+        )
+        metrics = bridge.parse_offline_inventory_stitch_metrics(stderr)
+        self.assertEqual(metrics["candidates"], 7)
+        self.assertEqual(metrics["admitted_units"], 4)
+        self.assertEqual(metrics["overlap_conflict"], 0)
+        self.assertEqual(metrics["aggregate_discovery"], 20)
+        # No token here is a hex address; every value round-trips as an int.
+        self.assertTrue(all(isinstance(v, int) for v in metrics.values()))
+
+    def test_parse_returns_empty_without_marker(self) -> None:
+        self.assertEqual(bridge.parse_offline_inventory_stitch_metrics("nothing here\n"), {})
+        self.assertEqual(bridge.parse_offline_inventory_stitch_metrics(""), {})
+
+    def test_cache_lookup_by_resolved_dir_no_file_touch(self) -> None:
+        out_dir = pathlib.Path("/tmp/seg007-t180-stitch-cache-probe").resolve()
+        key = str(out_dir)
+        bridge._OFFLINE_INVENTORY_STITCH_METRICS_BY_DIR[key] = {"candidates": 2, "admitted_units": 1}
+        try:
+            got = bridge.offline_inventory_stitch_metrics(pathlib.Path("/tmp/seg007-t180-stitch-cache-probe"))
+            self.assertEqual(got, {"candidates": 2, "admitted_units": 1})
+            self.assertFalse((out_dir / "emitter.stderr.txt").exists())
+        finally:
+            bridge._OFFLINE_INVENTORY_STITCH_METRICS_BY_DIR.pop(key, None)
+
+    def test_cache_miss_is_empty(self) -> None:
+        self.assertEqual(
+            bridge.offline_inventory_stitch_metrics(pathlib.Path("/tmp/seg007-t180-absent-dir")), {})
+
+
+if __name__ == "__main__":
+    # CMake passes the segarecomp binary / C compiler / source-root as trailing
+    # args (shared add_test pattern); this module-only test ignores them.
+    unittest.main(argv=[sys.argv[0]])

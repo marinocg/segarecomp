@@ -1,0 +1,64 @@
+{
+  "schema": 1,
+  "ownership": "project-authored synthetic SEG-003 direct-flow oracle vectors; no commercial or third-party image data",
+  "oracle": "musashi@313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd",
+  "vectors": [
+    {
+      "id": "loop-bne-taken-and-fallthrough",
+      "provenance": "synthetic/SEG-003/direct-loop-v1",
+      "image_hex": "7002538066FC60FA",
+      "sha256": "a47da47425be5b3ed345cb96295ae2618ad4e5ead18a918d7d64551337f97749",
+      "pc": "00000100",
+      "offset": "0000000000000000",
+      "sr": "2700",
+      "budget": "0000000000000004",
+      "d": ["11111111", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888"],
+      "block_instruction_counts": [1, 2, 2, 1],
+      "expected_blocks": [
+        {"entry": "00000100", "raw_instructions": ["7002"]},
+        {"entry": "00000102", "raw_instructions": ["5380", "66FC"]},
+        {"entry": "00000106", "raw_instructions": ["60FA"]}
+      ],
+      "expected_edges": [
+        {"kind": "fallthrough", "condition": "always", "source_block": "00000100", "source_address": "00000100", "target": "00000102"},
+        {"kind": "bne_taken", "condition": "z_clear", "source_block": "00000102", "source_address": "00000104", "target": "00000102"},
+        {"kind": "bne_fallthrough", "condition": "z_set", "source_block": "00000102", "source_address": "00000104", "target": "00000106"},
+        {"kind": "bra_taken", "condition": "always", "source_block": "00000106", "source_address": "00000106", "target": "00000102"}
+      ],
+      "expected_boundary_blocks": ["00000100", "00000100", "00000102", "00000102", "00000106"],
+      "expected_boundary_states": [
+        {"d": ["11111111", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888"], "pc": "00000100", "sr": "2700"},
+        {"d": ["00000002", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888"], "pc": "00000102", "sr": "2700"},
+        {"d": ["00000001", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888"], "pc": "00000102", "sr": "2700"},
+        {"d": ["00000000", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888"], "pc": "00000106", "sr": "2704"},
+        {"d": ["00000000", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888"], "pc": "00000102", "sr": "2704"}
+      ]
+    },
+    {
+      "id": "bne-fallthrough",
+      "provenance": "synthetic/SEG-003/direct-loop-v1",
+      "image_hex": "7002538066FC60FA",
+      "sha256": "a47da47425be5b3ed345cb96295ae2618ad4e5ead18a918d7d64551337f97749",
+      "pc": "00000102",
+      "offset": "0000000000000002",
+      "sr": "2700",
+      "budget": "0000000000000002",
+      "d": ["00000001", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888"],
+      "block_instruction_counts": [2, 1],
+      "expected_blocks": [
+        {"entry": "00000102", "raw_instructions": ["5380", "66FC"]},
+        {"entry": "00000106", "raw_instructions": ["60FA"]}
+      ],
+      "expected_edges": [
+        {"kind": "bne_fallthrough", "condition": "z_set", "source_block": "00000102", "source_address": "00000104", "target": "00000106"},
+        {"kind": "bra_taken", "condition": "always", "source_block": "00000106", "source_address": "00000106", "target": "00000102"}
+      ],
+      "expected_boundary_blocks": ["00000102", "00000102", "00000106"],
+      "expected_boundary_states": [
+        {"d": ["00000001", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888"], "pc": "00000102", "sr": "2700"},
+        {"d": ["00000000", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888"], "pc": "00000106", "sr": "2704"},
+        {"d": ["00000000", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888"], "pc": "00000102", "sr": "2704"}
+      ]
+    }
+  ]
+}

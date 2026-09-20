@@ -1,0 +1,15 @@
+{
+  "ownership": "Project-authored synthetic MOVEQ byte vectors; no commercial content.",
+  "schema": 1,
+  "seed_d": ["11111111", "22222222", "33333333", "44444444", "55555555", "66666666", "77777777", "88888888"],
+  "fixtures": [
+    {"id":"zero-d0","image_hex":"7000","sha256":"882a20e6379eb83aecb916f4b9ea79c1e6c08a0d80f6ad1dc9a9421758246001","pc":"00000100","offset":"0000000000000000","sr":"A71F","d":["11111111","22222222","33333333","44444444","55555555","66666666","77777777","88888888"],"expected_d":["00000000","22222222","33333333","44444444","55555555","66666666","77777777","88888888"],"expected_sr":"A714"},
+    {"id":"positive-max-d5","image_hex":"7A7F","sha256":"d722330687fe2c5050f51dc73efac00f3bf2ab86346778bb95bc3aa7c83957d3","pc":"00000100","offset":"0000000000000000","sr":"001B","d":["11111111","22222222","33333333","44444444","55555555","66666666","77777777","88888888"],"expected_d":["11111111","22222222","33333333","44444444","55555555","0000007F","77777777","88888888"],"expected_sr":"0010"},
+    {"id":"negative-one-d7","image_hex":"7EFF","sha256":"534c537dcadcee2477f7eac36121885a1772e4f3420d6fe80eff9b3152509ead","pc":"00000100","offset":"0000000000000000","sr":"2704","d":["11111111","22222222","33333333","44444444","55555555","66666666","77777777","88888888"],"expected_d":["11111111","22222222","33333333","44444444","55555555","66666666","77777777","FFFFFFFF"],"expected_sr":"2708"},
+    {"id":"negative-min-d4","image_hex":"7880","sha256":"5b10ebd5bab6452d26998d79831269695d1c139ae68d3af1737f4ab9cf13dc30","pc":"00000100","offset":"0000000000000000","sr":"200F","d":["11111111","22222222","33333333","44444444","55555555","66666666","77777777","88888888"],"expected_d":["11111111","22222222","33333333","44444444","FFFFFF80","66666666","77777777","88888888"],"expected_sr":"2008"},
+    {"id":"odd","image_hex":"7000","sha256":"882a20e6379eb83aecb916f4b9ea79c1e6c08a0d80f6ad1dc9a9421758246001","pc":"00000101","offset":"0000000000000000","expected_category":"odd_instruction_address","expected_available":2,"expected_instruction_length":null},
+    {"id":"truncated","image_hex":"70","sha256":"148de9c5a7a44d19e56cd9ae1a554bf67847afb0c58f6e12fa29ac7ddfca9940","pc":"00000100","offset":"0000000000000000","expected_category":"truncated_instruction","expected_available":1,"expected_instruction_length":null},
+    {"id":"illegal","image_hex":"4AFC","sha256":"3bde2f6cecd078ac886c99e03e1803de1926ed3ae687d158e1cc7a071285256d","pc":"00000100","offset":"0000000000000000","expected_category":"illegal_instruction","expected_available":2,"expected_instruction_length":2},
+    {"id":"unsupported","image_hex":"6000","sha256":"f3df0a62b10f205b0f29768aa3d69e777154caaa179f64aabb0a4899c666b017","pc":"00000100","offset":"0000000000000000","expected_category":"valid_but_unsupported_instruction","expected_available":2,"expected_instruction_length":2}
+  ]
+}

@@ -1,0 +1,20 @@
+FROM python:3.12.11-slim-bookworm@sha256:c00fc7b44d844b6da22861ec24af43968a5200eac4ec607b4725d585165d6b49
+
+ARG BRIDGE_URL=https://github.com/bethington/ghidra-mcp/releases/download/v6.0.0/ghidra_mcp_bridge-6.0.0-py3-none-any.whl
+ARG BRIDGE_SHA256=71939a890009826664720166d8f786f3a2ea2460f7effcd83c73759ba4241334
+
+COPY bridge-constraints.txt /tmp/bridge-constraints.txt
+
+RUN python3 -c "import urllib.request; urllib.request.urlretrieve('${BRIDGE_URL}', '/tmp/ghidra_mcp_bridge-6.0.0-py3-none-any.whl')" \
+    && echo "${BRIDGE_SHA256}  /tmp/ghidra_mcp_bridge-6.0.0-py3-none-any.whl" | sha256sum -c - \
+    && pip install --no-cache-dir --constraint /tmp/bridge-constraints.txt \
+       /tmp/ghidra_mcp_bridge-6.0.0-py3-none-any.whl \
+    && rm /tmp/ghidra_mcp_bridge-6.0.0-py3-none-any.whl /tmp/bridge-constraints.txt \
+    && groupadd --gid 10001 bridge \
+    && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin bridge
+
+USER bridge
+WORKDIR /home/bridge
+
+ENTRYPOINT []
+CMD ["sleep", "infinity"]

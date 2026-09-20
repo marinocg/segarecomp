@@ -1,0 +1,2760 @@
+[
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 2926,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 13,
+    "provenance": {
+      "tool": "ghidra",
+      "tool_version": "SEG-007-T164-correction-cycle-2",
+      "timestamp": "2026-09-04T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 6478,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 7,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 15452,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 20048,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 20336,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 21494,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 10,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 21840,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 22052,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 23030,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 23254,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 25110,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 7,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 25310,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 7,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 28112,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 7,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 28142,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 28234,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 28418,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 28574,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 28594,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 28824,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 28930,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 28952,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 29048,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 29106,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 29210,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 29266,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 29400,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 29494,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 31920,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 32320,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 32602,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 13,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 33310,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 33582,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 34776,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 34924,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 35138,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 35674,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 35882,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 36096,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 36208,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 36356,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 36656,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 21,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 37924,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 38142,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 38264,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 38892,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 38968,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 39232,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 39732,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 8,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 40132,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 40468,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 40676,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 41254,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 41748,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 42538,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 42670,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 43826,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 44008,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 44210,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 44306,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 44742,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 8,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 44978,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 45546,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 46034,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 46322,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 46730,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 47174,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 7,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 47528,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 47830,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 48444,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 48864,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 49940,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 50374,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 50560,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 9,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 51132,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 11,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 51556,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 8,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 52790,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 8,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 53078,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 53342,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 53452,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 53550,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 55528,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 56048,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 12,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 56694,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 56776,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 57352,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 57508,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 57826,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 58024,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 58134,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 11,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 58360,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 9,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 58606,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 59358,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 59504,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 59674,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 59870,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 60260,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 60822,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 61058,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 61368,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 61548,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 61894,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 63016,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 63204,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 63560,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 63676,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 64676,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 65030,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 65274,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 11,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 65718,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 65798,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 66196,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 66518,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 14,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 67472,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 67972,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 68120,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 68354,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 68586,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 10,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 69002,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 69120,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 69312,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 69538,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 69714,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 69844,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 70164,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 70484,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 70696,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 70922,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 71280,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 72196,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 72292,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 72924,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 73490,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 73698,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 73902,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 8,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 74234,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 8,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 74642,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 75442,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 76460,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 76786,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 76992,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 14,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 81062,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 9,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 82278,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 82530,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 82686,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 86184,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 87280,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 87708,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 87870,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 88458,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 88584,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 89120,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 89480,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 90118,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 90452,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 90818,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 91448,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 91802,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 92482,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 7,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 92874,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 93762,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 94572,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 94834,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "seg-007-t206-bounded-development-time-semantic-analysis",
+      "tool_version": "1",
+      "timestamp": "2026-09-11T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 96014,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 96188,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 7,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 97010,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 97860,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 98062,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 8,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 98878,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 8,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 99064,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 99266,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 100024,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 100170,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 100550,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 8,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 100780,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 101636,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 102652,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 7,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 102848,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 103162,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 103750,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 103784,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 104096,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 104512,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 104718,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 104930,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 105326,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 6,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 105830,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 10,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 106112,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 8,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 107612,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 11,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 107920,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 108520,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 5,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 108960,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 3,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 109400,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 11,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 113056,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 4,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 113180,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 114758,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 7,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 116054,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  },
+  {
+    "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+    "kind": "logical_table_descriptor",
+    "base_address": 118568,
+    "entry_width_bytes": 2,
+    "stride_bytes": 2,
+    "entry_count": 2,
+    "provenance": {
+      "tool": "segarecomp-rev00-logical-table-audit",
+      "tool_version": "segarecomp+structural-v1",
+      "timestamp": "2026-09-12T00:00:00Z",
+      "human_reviewed": false
+    }
+  }
+]

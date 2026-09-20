@@ -1,0 +1,570 @@
+{
+  "schema": 1,
+  "ownership": "Project-authored synthetic TST.L (xxx).L adversarial byte recipes for SEG-007-T009; no commercial content and no commercially derived bytes. Every image is constructed from the recipe recorded with it, and every opcode word used is an ordinary public Motorola encoding. The three accepted vectors carrying contract_recorded_sha256 reproduce docs/references/tst-l-absolute-long-contract.md's recorded accepted recipes verbatim so fixture drift is caught; every other vector is newly authored here as an adversarial superset of tests/fixtures/tst-l-fixtures.json, which this manifest never reads or modifies.",
+  "recipe": "Each image is image_length bytes (hexadecimal) of 0x00, with every writes entry's uppercase hexadecimal bytes stored at its hexadecimal image offset; sha256 is the SHA-256 of exactly those constructed bytes. Every image places the instruction at the manifest-level entry_image_offset 0x100 with the manifest-level entry PC 0x00000100, except where a rejection entry carries its own entry_pc/entry_image_offset pair (identity-mapped, so both name the same source address) to reach a precedence step the manifest-level even entry address makes unreachable.",
+  "oracle": "musashi@313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd",
+  "entry_pc": "00000100",
+  "entry_image_offset": "0000000000000100",
+  "expected_pc": "00000106",
+  "seed_d": [
+    "11111111",
+    "22222222",
+    "33333333",
+    "44444444",
+    "55555555",
+    "66666666",
+    "77777777",
+    "88888888"
+  ],
+  "accepted": [
+    {
+      "id": "rom-zero",
+      "purpose": "Z set from a zero ROM operand with the seed X bit set; reproduces the contract's recorded 'zero' recipe so fixture drift is caught.",
+      "image_length": "000204",
+      "writes": {
+        "000100": "4AB900000200",
+        "000200": "00000000"
+      },
+      "sha256": "32207f6f7540030671bdd53f5403f49cbaa42f1b906efb5a47be899fb590b0b1",
+      "seed_sr": "271F",
+      "region": "raw_cartridge_rom",
+      "operand_address": "00000200",
+      "operand_value": "00000000",
+      "ram_seed": [],
+      "expected_sr": "2714",
+      "contract_recorded_sha256": "32207f6f7540030671bdd53f5403f49cbaa42f1b906efb5a47be899fb590b0b1"
+    },
+    {
+      "id": "rom-positive-max",
+      "purpose": "Largest positive operand: N and Z both clear; reproduces the contract's recorded 'positive-max' recipe.",
+      "image_length": "000204",
+      "writes": {
+        "000100": "4AB900000200",
+        "000200": "7FFFFFFF"
+      },
+      "sha256": "8cd33c30981199ad3b4269969d291650560a5c75fc423b4cf1590f8376d2317c",
+      "seed_sr": "271F",
+      "region": "raw_cartridge_rom",
+      "operand_address": "00000200",
+      "operand_value": "7FFFFFFF",
+      "ram_seed": [],
+      "expected_sr": "2710",
+      "contract_recorded_sha256": "8cd33c30981199ad3b4269969d291650560a5c75fc423b4cf1590f8376d2317c"
+    },
+    {
+      "id": "rom-negative-lsb-set",
+      "purpose": "Reproduces the contract's recorded 'negative-lsb-set' recipe (operand 80000001) verbatim, pinning the third recorded contract hash.",
+      "image_length": "000204",
+      "writes": {
+        "000100": "4AB900000200",
+        "000200": "80000001"
+      },
+      "sha256": "5ac32f832b0a938696808e9488cfceb7441ab22374239d3d24a931f54604a714",
+      "seed_sr": "271F",
+      "region": "raw_cartridge_rom",
+      "operand_address": "00000200",
+      "operand_value": "80000001",
+      "ram_seed": [],
+      "expected_sr": "2718",
+      "contract_recorded_sha256": "5ac32f832b0a938696808e9488cfceb7441ab22374239d3d24a931f54604a714"
+    },
+    {
+      "id": "rom-negative-msb-only",
+      "purpose": "Sign-bit boundary: only bit 31 is set, so N must be set while Z stays clear.",
+      "image_length": "000204",
+      "writes": {
+        "000100": "4AB900000200",
+        "000200": "80000000"
+      },
+      "sha256": "d3f558ddb9db788d976c7b0188fe651f592d5aa8557b83d52799de9e46528f5b",
+      "seed_sr": "271F",
+      "region": "raw_cartridge_rom",
+      "operand_address": "00000200",
+      "operand_value": "80000000",
+      "ram_seed": [],
+      "expected_sr": "2718"
+    },
+    {
+      "id": "rom-all-ones",
+      "purpose": "All bits set with a clear seed X bit, proving X is preserved as clear rather than copied from N or forced to one.",
+      "image_length": "000204",
+      "writes": {
+        "000100": "4AB900000200",
+        "000200": "FFFFFFFF"
+      },
+      "sha256": "9aa8e73e0f7df94874abd214264ed4bf019849c7da9a5b1e3e70cd409370fae6",
+      "seed_sr": "2700",
+      "region": "raw_cartridge_rom",
+      "operand_address": "00000200",
+      "operand_value": "FFFFFFFF",
+      "ram_seed": [],
+      "expected_sr": "2708"
+    },
+    {
+      "id": "rom-positive-one",
+      "purpose": "Smallest non-zero positive operand with a clear seed X bit: every CCR bit ends clear.",
+      "image_length": "000204",
+      "writes": {
+        "000100": "4AB900000200",
+        "000200": "00000001"
+      },
+      "sha256": "939a8424db614bcf7efa1165e16816b05f4d5dd34bdfdbf4b860dee3b7fbb68e",
+      "seed_sr": "2700",
+      "region": "raw_cartridge_rom",
+      "operand_address": "00000200",
+      "operand_value": "00000001",
+      "ram_seed": [],
+      "expected_sr": "2700"
+    },
+    {
+      "id": "rom-operand-overlaps-instruction",
+      "purpose": "The absolute-long operand address is the instruction address itself. The ROM operand is therefore the first four instruction bytes (4AB90000), proving the independent oracle attests a data read that overlaps code rather than masking it as the extension fetch.",
+      "image_length": "000106",
+      "writes": {
+        "000100": "4AB900000100"
+      },
+      "sha256": "becb08876e8480748feb7e20032e9a19646820b5ee87dfcd4eae08febfa6fd1c",
+      "seed_sr": "271F",
+      "region": "raw_cartridge_rom",
+      "operand_address": "00000100",
+      "operand_value": "4AB90000",
+      "ram_seed": [],
+      "expected_sr": "2710"
+    },
+    {
+      "id": "rom-operand-at-image-end",
+      "purpose": "Inclusive raw_cartridge_rom upper bound: the operand's four bytes immediately follow the instruction and end exactly at the image end.",
+      "image_length": "00010A",
+      "writes": {
+        "000100": "4AB900000106",
+        "000106": "DEADBEEF"
+      },
+      "sha256": "b2177a39e9ebc5566680506f3df12f952c8de449d6c137becadf4628c23005b7",
+      "seed_sr": "271F",
+      "region": "raw_cartridge_rom",
+      "operand_address": "00000106",
+      "operand_value": "DEADBEEF",
+      "ram_seed": [],
+      "expected_sr": "2718"
+    },
+    {
+      "id": "ram-window-low",
+      "purpose": "Inclusive synthetic_work_ram lower bound: the first four-byte slot of the window.",
+      "image_length": "000106",
+      "writes": {
+        "000100": "4AB900FF0000"
+      },
+      "sha256": "ba1dae8e8e2f49a75ce24e5e716b66c0d8002e6a93e7ce6b361c70444368a3c3",
+      "seed_sr": "271F",
+      "region": "synthetic_work_ram",
+      "operand_address": "00FF0000",
+      "operand_value": "00000000",
+      "ram_seed": [
+        {
+          "address": "00FF0000",
+          "value": "00000000"
+        }
+      ],
+      "expected_sr": "2714"
+    },
+    {
+      "id": "ram-window-high",
+      "purpose": "Inclusive synthetic_work_ram upper bound: the last four-byte-aligned slot of the window.",
+      "image_length": "000106",
+      "writes": {
+        "000100": "4AB900FFFFFC"
+      },
+      "sha256": "dc32d1a68d5b3276e8afae6aa582e1349e2f2f4a1868168d679d392efd1616a8",
+      "seed_sr": "2700",
+      "region": "synthetic_work_ram",
+      "operand_address": "00FFFFFC",
+      "operand_value": "80000001",
+      "ram_seed": [
+        {
+          "address": "00FFFFFC",
+          "value": "80000001"
+        }
+      ],
+      "expected_sr": "2708"
+    },
+    {
+      "id": "ram-mid",
+      "purpose": "Interior synthetic_work_ram slot, proving the RAM lowering path is not bound-specific.",
+      "image_length": "000106",
+      "writes": {
+        "000100": "4AB900FF0010"
+      },
+      "sha256": "07a21f2e91d0b94ef546770e18ecb6c4dda7227d3843ac2269bf82c202b4b644",
+      "seed_sr": "271F",
+      "region": "synthetic_work_ram",
+      "operand_address": "00FF0010",
+      "operand_value": "7FFFFFFF",
+      "ram_seed": [
+        {
+          "address": "00FF0010",
+          "value": "7FFFFFFF"
+        }
+      ],
+      "expected_sr": "2710"
+    }
+  ],
+  "rejections": [
+    {
+      "id": "odd-instruction-address",
+      "purpose": "Contract precedence step 2: an odd source address is rejected before any byte is read. The complete selected primary 4AB9 00000200 sits at the odd entry offset and its four ROM operand bytes at 0x00000200 are inside the image, so were step 2 absent the instruction would decode and resolve; nothing but the odd entry address can explain the rejection, and no provenance exists because no word was ever fetched.",
+      "image_length": "000204",
+      "writes": {
+        "000101": "4AB900000200",
+        "000200": "7FFFFFFF"
+      },
+      "sha256": "503ca6a176dbb4385a63ddd69edbed37811ff4b36f067248bf6e2ab06e604b14",
+      "seed_sr": "271F",
+      "entry_pc": "00000101",
+      "entry_image_offset": "0000000000000101",
+      "expected_stage": "decode",
+      "expected_category": "odd_instruction_address",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": null
+    },
+    {
+      "id": "illegal-primary",
+      "purpose": "The source-defined ILLEGAL word is rejected at step 5, before TST primary classification can see it.",
+      "image_length": "000102",
+      "writes": {
+        "000100": "4AFC"
+      },
+      "sha256": "c1dab4680bc54a50399d76a2a5ec2e80e63c958bd22beafe8086ebc86ef1b991",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "illegal_instruction",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 2
+    },
+    {
+      "id": "tas-data-register",
+      "purpose": "TAS reserves size field 0b11 inside the same opcode byte and is not a TST form: unrelated complete primary, not an unsupported TST form.",
+      "image_length": "000102",
+      "writes": {
+        "000100": "4AC0"
+      },
+      "sha256": "41b2fe61d26cb210952743e4008e81f25e76a9c1f5e58c091a751565f54fd007",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "valid_but_unsupported_instruction",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 2
+    },
+    {
+      "id": "tas-absolute-long",
+      "purpose": "TAS with the selected absolute-long addressing mode is still not a TST form.",
+      "image_length": "000102",
+      "writes": {
+        "000100": "4AF9"
+      },
+      "sha256": "f62507a8fdc9964553d5d1eb338c25b8e7b118ef0d47056a053ac3fe7fcaa5bc",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "valid_but_unsupported_instruction",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 2
+    },
+    {
+      "id": "tst-l-data-register",
+      "purpose": "Selected TST family and size, unselected data-register addressing mode.",
+      "image_length": "000102",
+      "writes": {
+        "000100": "4A80"
+      },
+      "sha256": "05ab690cecce954578f710652fbfa89cf49217b71ccf4ff276ec048c5c062b7c",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "valid_but_unsupported_instruction",
+      "expected_unsupported_instruction_form": true,
+      "expected_provenance_length": 2
+    },
+    {
+      "id": "tst-w-absolute-long",
+      "purpose": "Selected TST family and addressing mode, unselected word size.",
+      "image_length": "000102",
+      "writes": {
+        "000100": "4A79"
+      },
+      "sha256": "2d1561ff323a889a2c001603088849dec1c2679f029c3a7e1c8cfa6f23e7b42a",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "valid_but_unsupported_instruction",
+      "expected_unsupported_instruction_form": true,
+      "expected_provenance_length": 2
+    },
+    {
+      "id": "tst-b-absolute-long",
+      "purpose": "Selected TST family and addressing mode, unselected byte size.",
+      "image_length": "000102",
+      "writes": {
+        "000100": "4A39"
+      },
+      "sha256": "7c820c8eb083fa4e3181fbd6427646df5679bef3227138ffffb83f662385b05a",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "valid_but_unsupported_instruction",
+      "expected_unsupported_instruction_form": true,
+      "expected_provenance_length": 2
+    },
+    {
+      "id": "tst-l-absolute-short",
+      "purpose": "Selected TST family and size, unselected absolute-short addressing mode.",
+      "image_length": "000102",
+      "writes": {
+        "000100": "4AB8"
+      },
+      "sha256": "13ff8d86357155c4b9fadca39eded6c6d8ce27e94f7b3db3a41a5f56b329e0de",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "valid_but_unsupported_instruction",
+      "expected_unsupported_instruction_form": true,
+      "expected_provenance_length": 2
+    },
+    {
+      "id": "tst-l-address-indirect",
+      "purpose": "Selected TST family and size, unselected address-register-indirect mode.",
+      "image_length": "000102",
+      "writes": {
+        "000100": "4A91"
+      },
+      "sha256": "083d32531ec40150a52a32904dce63cfc11b4f69ccd8dc28bb7aa2cec55c8727",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "valid_but_unsupported_instruction",
+      "expected_unsupported_instruction_form": true,
+      "expected_provenance_length": 2
+    },
+    {
+      "id": "unrelated-primary",
+      "purpose": "A complete primary from an unrelated family (BRA.S) is not an unsupported TST form.",
+      "image_length": "000102",
+      "writes": {
+        "000100": "6002"
+      },
+      "sha256": "26ad000d0129bab4d8d3ef0291739fb29384f8889655012a29681de75dcfe1d8",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "valid_but_unsupported_instruction",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 2
+    },
+    {
+      "id": "truncated-primary",
+      "purpose": "One available byte: no primary word may be manufactured and no provenance exists.",
+      "image_length": "000101",
+      "writes": {
+        "000100": "4A"
+      },
+      "sha256": "96d2656c461f38ba4d7649e0cfbb088b03e18dbf47b825f636766d9eeeed6822",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "truncated_instruction",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": null
+    },
+    {
+      "id": "truncated-extension-2",
+      "purpose": "Selected primary with no extension byte available: provenance length stays 2.",
+      "image_length": "000102",
+      "writes": {
+        "000100": "4AB9"
+      },
+      "sha256": "2e51db637ae09014a6ce2a42dda6e1c4a7ed5dadfe63ea62e44a745f3433c51e",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "truncated_instruction",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 2
+    },
+    {
+      "id": "truncated-extension-3",
+      "purpose": "Selected primary with one extension byte available: provenance length stays 2.",
+      "image_length": "000103",
+      "writes": {
+        "000100": "4AB9"
+      },
+      "sha256": "f8093d18b03c2d1380892a03129c76a0ce6d4263e6e01e824b37685a663575d2",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "truncated_instruction",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 2
+    },
+    {
+      "id": "truncated-extension-4",
+      "purpose": "Selected primary with two extension bytes available: provenance length stays 2.",
+      "image_length": "000104",
+      "writes": {
+        "000100": "4AB9"
+      },
+      "sha256": "02db1bbf09ff1d9d4d3baee7d6f0a2526b6e62f7fd5b34a72a0b6d9d021b72f9",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "truncated_instruction",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 2
+    },
+    {
+      "id": "truncated-extension-5",
+      "purpose": "Selected primary with three extension bytes available: provenance length stays 2.",
+      "image_length": "000105",
+      "writes": {
+        "000100": "4AB9"
+      },
+      "sha256": "fef2349b45652716a671ba56794bf7a8b2a75d62a42fd606e0a9e05d4d64f613",
+      "seed_sr": "271F",
+      "expected_stage": "decode",
+      "expected_category": "truncated_instruction",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 2
+    },
+    {
+      "id": "ea-not-24-bit",
+      "purpose": "A nonzero high address byte fails the shared 24-bit alignment predicate first.",
+      "image_length": "000106",
+      "writes": {
+        "000100": "4AB901000200"
+      },
+      "sha256": "7e162b39360bc4ea98f35dd33ca281eaf3b695ae24093f489fc5b02ab8b995f9",
+      "seed_sr": "271F",
+      "expected_stage": "effective_address",
+      "expected_category": "effective_address_not_24bit",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 6,
+      "expected_complete_raw_bytes": "4AB901000200",
+      "expected_effective_address": "0x01000200"
+    },
+    {
+      "id": "ea-odd",
+      "purpose": "An odd operand address is rejected before any region resolution.",
+      "image_length": "000106",
+      "writes": {
+        "000100": "4AB900000201"
+      },
+      "sha256": "cd1ad29a6f0966424f6e12c641f07cf0b7770d2b2ffe63f2b6e0d4b7c8766bce",
+      "seed_sr": "271F",
+      "expected_stage": "effective_address",
+      "expected_category": "odd_effective_address",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 6,
+      "expected_complete_raw_bytes": "4AB900000201",
+      "expected_effective_address": "0x00000201"
+    },
+    {
+      "id": "ea-unmapped",
+      "purpose": "An even 24-bit address in neither selected region is unmapped_data_access.",
+      "image_length": "000106",
+      "writes": {
+        "000100": "4AB900A00000"
+      },
+      "sha256": "2cb4dcf678a74d3e40b1c4c84e2337827e9ae0dfe77165670fef946bf3f0cede",
+      "seed_sr": "271F",
+      "expected_stage": "effective_address",
+      "expected_category": "unmapped_data_access",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 6,
+      "expected_complete_raw_bytes": "4AB900A00000",
+      "expected_effective_address": "0x00A00000"
+    },
+    {
+      "id": "ea-not-24-bit-and-odd",
+      "purpose": "Precedence tie the contract's step 8 requires an implementation test to enforce: not-24-bit must win over odd.",
+      "image_length": "000106",
+      "writes": {
+        "000100": "4AB901000201"
+      },
+      "sha256": "4be9f524ef972d43a1ac8568d5de366acf1a74eabd2d1d739ae1148d38ef7886",
+      "seed_sr": "271F",
+      "expected_stage": "effective_address",
+      "expected_category": "effective_address_not_24bit",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 6,
+      "expected_complete_raw_bytes": "4AB901000201",
+      "expected_effective_address": "0x01000201"
+    },
+    {
+      "id": "ea-odd-and-unmapped",
+      "purpose": "Precedence tie: odd must win over unmapped.",
+      "image_length": "000106",
+      "writes": {
+        "000100": "4AB900A00001"
+      },
+      "sha256": "93744d4b7b7165bd30c0e55dab645e73fff8b18a10343ef9524dee80dc3f8a17",
+      "seed_sr": "271F",
+      "expected_stage": "effective_address",
+      "expected_category": "odd_effective_address",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 6,
+      "expected_complete_raw_bytes": "4AB900A00001",
+      "expected_effective_address": "0x00A00001"
+    },
+    {
+      "id": "ea-not-24-bit-and-unmapped",
+      "purpose": "Precedence tie: not-24-bit must win over unmapped.",
+      "image_length": "000106",
+      "writes": {
+        "000100": "4AB9FF000000"
+      },
+      "sha256": "617b4f13d1b8d9517ff46903e5b56dee3157e61da33f15bcde335dbb4f27bb98",
+      "seed_sr": "271F",
+      "expected_stage": "effective_address",
+      "expected_category": "effective_address_not_24bit",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 6,
+      "expected_complete_raw_bytes": "4AB9FF000000",
+      "expected_effective_address": "0xFF000000"
+    },
+    {
+      "id": "ea-straddles-image-end",
+      "purpose": "Only two of the four operand bytes lie inside the image: no partial or out-of-bounds ROM read may be performed.",
+      "image_length": "00010A",
+      "writes": {
+        "000100": "4AB900000108"
+      },
+      "sha256": "d667fd1cdc62cf5b3cbd31ecc83fdefffc61c724fd2fae48b7b48e800d6a0ba8",
+      "seed_sr": "271F",
+      "expected_stage": "effective_address",
+      "expected_category": "unmapped_data_access",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 6,
+      "expected_complete_raw_bytes": "4AB900000108",
+      "expected_effective_address": "0x00000108"
+    },
+    {
+      "id": "ea-just-below-ram-window",
+      "purpose": "The last four-byte slot below the synthetic_work_ram window is outside both regions.",
+      "image_length": "000106",
+      "writes": {
+        "000100": "4AB900FEFFFC"
+      },
+      "sha256": "34dfd87be84f09be08fa8b1b26c4b0e72d16a24d42d26287cd76fd4fcb34d9f2",
+      "seed_sr": "271F",
+      "expected_stage": "effective_address",
+      "expected_category": "unmapped_data_access",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 6,
+      "expected_complete_raw_bytes": "4AB900FEFFFC",
+      "expected_effective_address": "0x00FEFFFC"
+    },
+    {
+      "id": "ea-crosses-ram-window-end",
+      "purpose": "An operand needing bytes past 0x01000000 is outside the inclusive RAM upper bound.",
+      "image_length": "000106",
+      "writes": {
+        "000100": "4AB900FFFFFE"
+      },
+      "sha256": "e026170535e7bb3386e27af6e7ab5758f7783435831257a346fcff423cecedb2",
+      "seed_sr": "271F",
+      "expected_stage": "effective_address",
+      "expected_category": "unmapped_data_access",
+      "expected_unsupported_instruction_form": false,
+      "expected_provenance_length": 6,
+      "expected_complete_raw_bytes": "4AB900FFFFFE",
+      "expected_effective_address": "0x00FFFFFE"
+    }
+  ]
+}

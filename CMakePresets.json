@@ -1,0 +1,120 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "dev",
+      "displayName": "Development",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/dev",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "BUILD_TESTING": "ON",
+        "SEGARECOMP_WARNINGS_AS_ERRORS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      },
+      "execution": {
+        "jobs": 8,
+        "noTestsAction": "error"
+      }
+    },
+    {
+      "name": "fast",
+      "inherits": "dev",
+      "filter": {
+        "include": {
+          "label": "^fast$"
+        }
+      }
+    },
+    {
+      "name": "full",
+      "inherits": "dev",
+      "filter": {
+        "include": {
+          "label": "^full$"
+        }
+      }
+    },
+    {
+      "name": "extended",
+      "inherits": "dev",
+      "filter": {
+        "include": {
+          "label": "^extended$"
+        }
+      }
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "dev-build",
+      "displayName": "Configure and build",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "dev"
+        },
+        {
+          "type": "build",
+          "name": "dev"
+        }
+      ]
+    },
+    {
+      "name": "dev-fast",
+      "displayName": "Configure, build, fast tests",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "dev"
+        },
+        {
+          "type": "build",
+          "name": "dev"
+        },
+        {
+          "type": "test",
+          "name": "fast"
+        }
+      ]
+    },
+    {
+      "name": "dev-full",
+      "displayName": "Configure, build, full hermetic tests",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "dev"
+        },
+        {
+          "type": "build",
+          "name": "dev"
+        },
+        {
+          "type": "test",
+          "name": "full"
+        }
+      ]
+    }
+  ]
+}

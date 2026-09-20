@@ -1,0 +1,146 @@
+{
+  "schema": 1,
+  "ownership": "Project-authored synthetic architecture baseline manifest; no commercial or local-path content.",
+  "probes": [
+    {
+      "name": "analysis_genesis_general_startup",
+      "description": "Analysis-only pipeline stage: genesis-general-startup CLI JSON report over the synthetic two-call-frame reset image in tests/fixtures/genesis-general-startup-vectors.json.",
+      "fields": {
+        "fixture_id": "synthetic/SEG-007-T014/general-startup-two-call-frames",
+        "report": {
+          "result": "accepted",
+          "profile": "general_startup",
+          "decoded": 5,
+          "blocks": 5,
+          "edges": 5,
+          "frames": 2
+        }
+      },
+      "canonical_sha256": "22754dcee8bea1e28436e1312b256e2c02fb1d60aa0f1ce930eb9e7546fe4dc0",
+      "informational": {}
+    },
+    {
+      "name": "legacy_moveq_slice",
+      "description": "Retained legacy pipeline surface: emit-moveq-c generated C, compiled and executed, over the project-authored zero-d0 vector in tests/fixtures/moveq-fixtures.json.",
+      "fields": {
+        "fixture_id": "synthetic/moveq-fixtures/zero-d0",
+        "executed_state": {
+          "schema": 1,
+          "d": [
+            "00000000",
+            "22222222",
+            "33333333",
+            "44444444",
+            "55555555",
+            "66666666",
+            "77777777",
+            "88888888"
+          ],
+          "pc": "00000102",
+          "sr": "A714",
+          "stop_reason": "instruction_budget_exhausted"
+        }
+      },
+      "canonical_sha256": "1f54068a4508b1cfa5264e501a7b09466bb5e6c6d41123e299fe5739f4e37be3",
+      "informational": {
+        "generated_c_sha256": "67c28b58263873dcb58466f70ccdb7ccd0dae9138db4015184e0fb977e721434"
+      }
+    },
+    {
+      "name": "bridge_synthetic_c4_full_chain",
+      "description": "Full generate/compile/execute pipeline stage: tools/genesis_startup_bridge.py --mode synthetic over the project-authored CTRL1/CTRL2 TST.L-then-RESET synthetic image, capturing the sanitized and full runtime reports.",
+      "fields": {
+        "entry": "00000b00",
+        "sanitized_report": {
+          "schema_version": 1,
+          "report_kind": "sanitized",
+          "rom_sha256": "a37147ba6b78a2b605c13521766be997e5e068efc6403ec446d7aaa88857efbc",
+          "result": "stop",
+          "stop_class": "unsupported_cpu_form",
+          "diagnostic_category": "valid_but_unsupported_instruction",
+          "cpu_dimensions": {
+            "family": "reset",
+            "size": "none",
+            "addressing_mode_class": "implied"
+          },
+          "c4_lowering_dimensions": null
+        },
+        "full_report": {
+          "schema_version": 1,
+          "report_kind": "full",
+          "rom_sha256": "a37147ba6b78a2b605c13521766be997e5e068efc6403ec446d7aaa88857efbc",
+          "result": "stop",
+          "runtime": {
+            "d": [
+              "0x00000000",
+              "0x00000000",
+              "0x00000000",
+              "0x00000000",
+              "0x00000000",
+              "0x00000000",
+              "0x00000000",
+              "0x00000000"
+            ],
+            "a": [
+              "0x00000000",
+              "0x00000000",
+              "0x00000000",
+              "0x00000000",
+              "0x00000000",
+              "0x00000000",
+              "0x00000000",
+              "0x00ff0004"
+            ],
+            "usp": "0x00000000",
+            "sr": "0x0004",
+            "pc": "0x00000b06",
+            "work_ram_sha256": "de2f256064a0af797747c2b97505dc0b9f3df0de4f489eac731c23ae9ca9cc31",
+            "work_ram_length": 65536
+          },
+          "stop_class": "unsupported_cpu_form",
+          "diagnostic_category": "valid_but_unsupported_instruction",
+          "c4_lowering_dimensions": null,
+          "provenance": {
+            "has_instruction_provenance": true,
+            "instruction": {
+              "cpu_variant": "mc68000",
+              "source_address": "0x00000b06",
+              "image_offset": 6,
+              "primary_bytes": "4e70",
+              "length": 2
+            },
+            "has_access": false,
+            "access_address": "0x00000000",
+            "access_width": null,
+            "access_direction": null,
+            "mapping_claim_count": 1,
+            "mapping_claims": [
+              {
+                "name": "raw_cartridge_rom",
+                "target_begin": "0x00000b00",
+                "target_end": "0x00000b08",
+                "image_begin": 0,
+                "image_end": 8
+              }
+            ],
+            "bus_access_count": 1,
+            "bus_accesses": [
+              {
+                "ordinal": 0,
+                "kind": "instruction_read",
+                "address": "0x00000b06",
+                "raw_bytes": "4e70",
+                "raw_byte_count": 2,
+                "region": "raw_cartridge_rom"
+              }
+            ]
+          }
+        }
+      },
+      "canonical_sha256": "6ae36ae664fdab83da09950e6d2d4b916adb6e1b8f9f6fd1941dfd4013c93da6",
+      "informational": {
+        "generated_c_sha256": "12918b558b22ef550a9a947856b0776b342803e36bbe5d7ac5df5ac4a9ff4b55"
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+Checks: >-
+  bugprone-*,
+  clang-analyzer-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*
+WarningsAsErrors: ''
+HeaderFilterRegex: '^(include|src|tests)/'
+CheckOptions:
+  readability-identifier-length.IgnoredVariableNames: 'i|j|it'
