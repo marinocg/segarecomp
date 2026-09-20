@@ -1134,6 +1134,9 @@ def main() -> int:
     parser.add_argument("--external-hints")
     parser.add_argument("--immutable-rom-aot", action="store_true",
                         help="opt in to complete aligned immutable-ROM AOT enumeration")
+    parser.add_argument("--provenance-diagnostics", action="store_true",
+                        help="SEG-020-T002: opt in to the generated provenance lookup; the table is "
+                             "extracted to <out-dir>/provenance-diagnostics.c (ephemeral, not for commit)")
     # ADR-0013 Decision §7c: optional generic checkpoint/resume path. Only
     # meaningful for the multi-round Phase-B expansion loop (commercial mode
     # with --diagnose-frontier); every other caller shape is unaffected.
@@ -1216,6 +1219,8 @@ def main() -> int:
         emitter_command += ["--external-hints", args.external_hints]
     if args.immutable_rom_aot:
         emitter_command += ["--immutable-rom-aot"]
+    if args.provenance_diagnostics:
+        emitter_command += ["--provenance-diagnostics"]
     viewer_sdl3 = None
     if args.viewer:
         # Fail clearly before any generation/guest execution; never fall back to headless.
@@ -1267,6 +1272,12 @@ def main() -> int:
                  else "strict_c11_compile_failed"}, separators=(",", ":")) + "\n")
             return status
         assert executable is not None
+        if args.provenance_diagnostics and generated_bytes is not None:
+            marker = b"\n/* SEG-020-T002 provenance diagnostics"
+            start = generated_bytes.find(marker)
+            if start >= 0:
+                (out_dir / "provenance-diagnostics.c").write_bytes(generated_bytes[start:])
+                sys.stderr.write("PROVENANCE_DIAGNOSTICS " + str(out_dir / "provenance-diagnostics.c") + "\n")
         # SEG-007-T252 / ADR-0040 correction: the canonical/headless one-shot
         # route never silently falls through to the generated binary's own
         # lower-level zero-argument default (128) when the operator omits
