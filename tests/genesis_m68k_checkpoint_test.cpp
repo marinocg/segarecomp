@@ -1,0 +1,158 @@
+// SEG-020-T004: opt-in M68k state checkpoint/digest. Project-authored synthetic values only.
+#include "runtime.h"
+
+#include <cstdint>
+#include <cstdio>
+#include <string>
+
+namespace {
+int failures = 0;
+void check(bool ok, const char *what) {
+  if (!ok) { std::printf("FAIL: %s\n", what); ++failures; }
+}
+
+GenesisRuntime make(bool enabled) {
+  GenesisRuntime r{};
+  r.m68k_checkpoint.enabled = enabled ? 1U : 0U;
+  r.sr = 0x2700U;
+  r.a[7] = 0xFFFF00U;
+  return r;
+}
+
+void write_ram(GenesisRuntime *r, uint32_t addr, GenesisAccessWidth w, uint32_t v) {
+  GenesisRuntimeStop stop{};
+  check(genesis_route_access(r, addr, w, GENESIS_ACCESS_WRITE, &v, &stop) == GENESIS_ACCESS_OK, "ram write");
+}
+
+// One synthetic instruction: optional register perturbations, a write, retire.
+uint64_t run(void (*perturb)(GenesisRuntime *), GenesisM68kCheckpoint *out = nullptr) {
+  GenesisRuntime r = make(true);
+  r.d[1] = 5U;
+  write_ram(&r, 0xFF0100U, GENESIS_ACCESS_WORD, 0x1234U);
+  if (perturb) perturb(&r);
+  genesis_runtime_retire_m68k_instruction(&r, 4U, 0x202U);
+  if (out) *out = r.m68k_checkpoint;
+  return genesis_m68k_checkpoint_digest(&r);
+}
+}  // namespace
+
+int main() {
+  const uint64_t base = run(nullptr);
+  check(base != 0U, "digest present");
+  check(run(nullptr) == base, "stable digest for identical runs");
+
+  // Single-field perturbations each change the digest.
+  check(run([](GenesisRuntime *r) { r->d[3] ^= 1U; }) != base, "D perturbation");
+  check(run([](GenesisRuntime *r) { r->d[7] ^= 0x80000000U; }) != base, "D7 perturbation");
+  check(run([](GenesisRuntime *r) { r->a[2] += 2U; }) != base, "A perturbation");
+  check(run([](GenesisRuntime *r) { r->usp += 4U; }) != base, "USP perturbation");
+  check(run([](GenesisRuntime *r) { r->sr ^= 1U; }) != base, "flag (C) perturbation");
+  check(run([](GenesisRuntime *r) { r->sr ^= 0x0700U; }) != base, "SR mask perturbation");
+  // PC via different next_pc.
+  {
+    GenesisRuntime r = make(true);
+    r.d[1] = 5U;
+    write_ram(&r, 0xFF0100U, GENESIS_ACCESS_WORD, 0x1234U);
+    genesis_runtime_retire_m68k_instruction(&r, 4U, 0x204U);
+    check(genesis_m68k_checkpoint_digest(&r) != base, "PC perturbation");
+  }
+  // Wrong memory write value / address / width with registers unchanged.
+  for (int variant = 0; variant < 3; ++variant) {
+    GenesisRuntime r = make(true);
+    r.d[1] = 5U;
+    write_ram(&r, variant == 1 ? 0xFF0102U : 0xFF0100U, variant == 2 ? GENESIS_ACCESS_BYTE : GENESIS_ACCESS_WORD,
+              variant == 0 ? 0x1235U : 0x1234U);
+    genesis_runtime_retire_m68k_instruction(&r, 4U, 0x202U);
+    check(genesis_m68k_checkpoint_digest(&r) != base, "wrong memory write changes digest");
+  }
+  // Missing write also differs.
+  {
+    GenesisRuntime r = make(true);
+    r.d[1] = 5U;
+    genesis_runtime_retire_m68k_instruction(&r, 4U, 0x202U);
+    check(genesis_m68k_checkpoint_digest(&r) != base, "missing write changes digest");
+  }
+
+  // Trap/exception with registers unchanged: divide-by-zero entry vs plain write-free retire.
+  {
+    GenesisRuntime plain = make(true);
+    genesis_runtime_retire_m68k_instruction(&plain, 4U, 0x300U);
+    GenesisRuntime trap = make(true);
+    trap.divide_by_zero_handler_present = 1U;
+    trap.divide_by_zero_handler_entry = 0x300U;
+    uint32_t handler = 0;
+    GenesisRuntimeStop stop{};
+    check(genesis_raise_divide_by_zero(&trap, 0x2FEU, &handler, &stop) == 1, "trap raised");
+    // Restore every M68k register so only the effects (frame writes + trap) differ.
+    GenesisRuntime restore = trap;
+    restore.a[7] = plain.a[7];
+    restore.sr = plain.sr;
+    genesis_runtime_retire_m68k_instruction(&restore, 4U, 0x300U);
+    check(restore.m68k_checkpoint.last_effect_count == 3U, "two frame writes + trap effect");
+    check(restore.m68k_checkpoint.last_effects[2].kind == GENESIS_M68K_EFFECT_TRAP &&
+              restore.m68k_checkpoint.last_effects[2].value == 5U,
+          "trap effect carries vector 5");
+    check(genesis_m68k_checkpoint_digest(&restore) != genesis_m68k_checkpoint_digest(&plain),
+          "wrong trap with registers unchanged changes digest");
+    // A different vector for the identical state also differs.
+    GenesisRuntime other = restore;
+    other.m68k_checkpoint.last_effects[2].value = 30U;
+    other.m68k_checkpoint.digest = 0U;
+    check(genesis_m68k_checkpoint_compare(&restore.m68k_checkpoint, &other.m68k_checkpoint) ==
+              GENESIS_M68K_CHECKPOINT_DIFFERENT,
+          "field-level compare sees vector difference");
+  }
+
+  // Compare semantics + unsupported-for-comparison never equal.
+  {
+    GenesisM68kCheckpoint x, y;
+    run(nullptr, &x);
+    run(nullptr, &y);
+    check(genesis_m68k_checkpoint_compare(&x, &y) == GENESIS_M68K_CHECKPOINT_EQUAL, "equal boundaries");
+    GenesisRuntime r = make(true);
+    for (unsigned i = 0; i <= GENESIS_M68K_CHECKPOINT_EFFECT_CAPACITY; ++i)
+      write_ram(&r, 0xFF0200U + 2U * i, GENESIS_ACCESS_WORD, i);
+    genesis_runtime_retire_m68k_instruction(&r, 4U, 0x202U);
+    check(r.m68k_checkpoint.last_unsupported == 1U, "overflow marks unsupported");
+    check(genesis_m68k_checkpoint_compare(&r.m68k_checkpoint, &r.m68k_checkpoint) ==
+              GENESIS_M68K_CHECKPOINT_UNSUPPORTED,
+          "unsupported boundary is never equal even to itself");
+    check(r.m68k_checkpoint.effect_count == 0U && r.m68k_checkpoint.unsupported_for_comparison == 0U,
+          "pending state reset after boundary");
+    GenesisM68kCheckpoint none{};
+    check(genesis_m68k_checkpoint_compare(&none, &none) == GENESIS_M68K_CHECKPOINT_UNSUPPORTED, "invalid unsupported");
+  }
+
+  // Disabled: no observable change (checkpoint block stays all-zero, behavior identical).
+  {
+    GenesisRuntime off = make(false);
+    GenesisRuntime on = make(true);
+    write_ram(&off, 0xFF0100U, GENESIS_ACCESS_WORD, 0x1234U);
+    write_ram(&on, 0xFF0100U, GENESIS_ACCESS_WORD, 0x1234U);
+    const GenesisControlTransfer a = genesis_runtime_retire_m68k_instruction(&off, 4U, 0x202U);
+    const GenesisControlTransfer b = genesis_runtime_retire_m68k_instruction(&on, 4U, 0x202U);
+    check(a.kind == b.kind && a.next_pc == b.next_pc && off.pc == on.pc && off.sr == on.sr, "same behavior");
+    check(genesis_m68k_checkpoint_digest(&off) == 0U && !off.m68k_checkpoint.valid &&
+              off.m68k_checkpoint.effect_count == 0U,
+          "disabled records nothing");
+  }
+
+  // Detail on request.
+  {
+    GenesisRuntime r = make(true);
+    write_ram(&r, 0xFF0100U, GENESIS_ACCESS_LONG, 0xDEADBEEFU);
+    genesis_runtime_retire_m68k_instruction(&r, 4U, 0x202U);
+    FILE *f = std::tmpfile();
+    check(f != nullptr && genesis_m68k_checkpoint_write_detail(f, &r) == 0, "detail written");
+    std::rewind(f);
+    char buf[2048] = {0};
+    const size_t n = std::fread(buf, 1, sizeof buf - 1, f);
+    std::fclose(f);
+    const std::string s(buf, n);
+    check(s.find("\"boundary\":1") != std::string::npos && s.find("\"effects\":[{\"k\":1,\"w\":4") != std::string::npos,
+          "detail has fields and effect");
+  }
+
+  if (failures == 0) std::printf("OK\n");
+  return failures == 0 ? 0 : 1;
+}
