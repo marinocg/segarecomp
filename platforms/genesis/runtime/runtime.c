@@ -1556,6 +1556,114 @@ static void genesis_history_append(GenesisRuntime *runtime, GenesisHistoryEventK
   ++history->total_recorded;
 }
 
+
+/* SEG-020-T004: opt-in M68k checkpoint. Pure side-channel; see runtime.h. */
+static void genesis_m68k_effect_note(GenesisRuntime *runtime, uint8_t kind, uint8_t width, uint32_t address,
+                                     uint32_t value) {
+  GenesisM68kCheckpoint *cp = &runtime->m68k_checkpoint;
+  if (cp->effect_count >= GENESIS_M68K_CHECKPOINT_EFFECT_CAPACITY) {
+    cp->unsupported_for_comparison = 1U;
+    return;
+  }
+  cp->effects[cp->effect_count].kind = kind;
+  cp->effects[cp->effect_count].width = width;
+  cp->effects[cp->effect_count].address = address;
+  cp->effects[cp->effect_count].value = value;
+  ++cp->effect_count;
+}
+
+static uint64_t genesis_fnv_bytes(uint64_t h, uint64_t v, unsigned n) {
+  unsigned i;
+  for (i = 0; i < n; ++i) {
+    h ^= (uint8_t)(v >> (8U * i));
+    h *= UINT64_C(0x100000001B3);
+  }
+  return h;
+}
+
+static uint64_t genesis_m68k_digest_fields(const GenesisM68kCheckpoint *cp) {
+  uint64_t h = UINT64_C(0xCBF29CE484222325);
+  unsigned i;
+  for (i = 0; i < 8U; ++i) h = genesis_fnv_bytes(h, cp->d[i], 4U);
+  for (i = 0; i < 8U; ++i) h = genesis_fnv_bytes(h, cp->a[i], 4U);
+  h = genesis_fnv_bytes(h, cp->usp, 4U);
+  h = genesis_fnv_bytes(h, cp->sr, 2U);
+  h = genesis_fnv_bytes(h, cp->pc, 4U);
+  h = genesis_fnv_bytes(h, cp->last_effect_count, 1U);
+  for (i = 0; i < cp->last_effect_count; ++i) {
+    h = genesis_fnv_bytes(h, cp->last_effects[i].kind, 1U);
+    h = genesis_fnv_bytes(h, cp->last_effects[i].width, 1U);
+    h = genesis_fnv_bytes(h, cp->last_effects[i].address, 4U);
+    h = genesis_fnv_bytes(h, cp->last_effects[i].value, 4U);
+  }
+  h = genesis_fnv_bytes(h, cp->last_unsupported, 1U);
+  return h;
+}
+
+static void genesis_m68k_checkpoint_finalize(GenesisRuntime *runtime) {
+  GenesisM68kCheckpoint *cp = &runtime->m68k_checkpoint;
+  unsigned i;
+  for (i = 0; i < 8U; ++i) {
+    cp->d[i] = runtime->d[i];
+    cp->a[i] = runtime->a[i];
+  }
+  cp->usp = runtime->usp;
+  cp->sr = runtime->sr;
+  cp->pc = runtime->pc;
+  cp->last_effect_count = cp->effect_count;
+  cp->last_unsupported = cp->unsupported_for_comparison;
+  for (i = 0; i < cp->effect_count; ++i) cp->last_effects[i] = cp->effects[i];
+  for (; i < GENESIS_M68K_CHECKPOINT_EFFECT_CAPACITY; ++i) cp->last_effects[i] = (GenesisM68kEffect){0};
+  cp->digest = genesis_m68k_digest_fields(cp);
+  cp->boundary = cp->valid ? cp->boundary + 1U : 1U;
+  cp->valid = 1U;
+  cp->effect_count = 0U;
+  cp->unsupported_for_comparison = 0U;
+}
+
+uint64_t genesis_m68k_checkpoint_digest(const GenesisRuntime *runtime) {
+  return runtime != 0 && runtime->m68k_checkpoint.valid ? runtime->m68k_checkpoint.digest : 0U;
+}
+
+GenesisM68kCheckpointComparison genesis_m68k_checkpoint_compare(const GenesisM68kCheckpoint *a,
+                                                                const GenesisM68kCheckpoint *b) {
+  unsigned i;
+  if (a == 0 || b == 0 || !a->valid || !b->valid || a->last_unsupported || b->last_unsupported)
+    return GENESIS_M68K_CHECKPOINT_UNSUPPORTED;
+  if (a->digest != b->digest) return GENESIS_M68K_CHECKPOINT_DIFFERENT;
+  /* Digest collision guard: fields must agree too. */
+  for (i = 0; i < 8U; ++i)
+    if (a->d[i] != b->d[i] || a->a[i] != b->a[i]) return GENESIS_M68K_CHECKPOINT_DIFFERENT;
+  if (a->usp != b->usp || a->sr != b->sr || a->pc != b->pc || a->last_effect_count != b->last_effect_count)
+    return GENESIS_M68K_CHECKPOINT_DIFFERENT;
+  for (i = 0; i < a->last_effect_count; ++i)
+    if (a->last_effects[i].kind != b->last_effects[i].kind || a->last_effects[i].width != b->last_effects[i].width ||
+        a->last_effects[i].address != b->last_effects[i].address ||
+        a->last_effects[i].value != b->last_effects[i].value)
+      return GENESIS_M68K_CHECKPOINT_DIFFERENT;
+  return GENESIS_M68K_CHECKPOINT_EQUAL;
+}
+
+int genesis_m68k_checkpoint_write_detail(FILE *output, const GenesisRuntime *runtime) {
+  const GenesisM68kCheckpoint *cp;
+  unsigned i;
+  if (output == 0 || runtime == 0) return 1;
+  cp = &runtime->m68k_checkpoint;
+  if (!cp->valid) return fputs("{\"m68k_checkpoint\":null}\n", output) < 0;
+  fprintf(output, "{\"m68k_checkpoint\":{\"boundary\":%llu,\"digest\":\"%016llx\",\"unsupported\":%u,\"pc\":%u,\"sr\":%u,\"usp\":%u,\"d\":[",
+          (unsigned long long)cp->boundary, (unsigned long long)cp->digest, (unsigned)cp->last_unsupported,
+          (unsigned)cp->pc, (unsigned)cp->sr, (unsigned)cp->usp);
+  for (i = 0; i < 8U; ++i) fprintf(output, "%s%u", i ? "," : "", (unsigned)cp->d[i]);
+  fputs("],\"a\":[", output);
+  for (i = 0; i < 8U; ++i) fprintf(output, "%s%u", i ? "," : "", (unsigned)cp->a[i]);
+  fputs("],\"effects\":[", output);
+  for (i = 0; i < cp->last_effect_count; ++i)
+    fprintf(output, "%s{\"k\":%u,\"w\":%u,\"a\":%u,\"v\":%u}", i ? "," : "", (unsigned)cp->last_effects[i].kind,
+            (unsigned)cp->last_effects[i].width, (unsigned)cp->last_effects[i].address,
+            (unsigned)cp->last_effects[i].value);
+  return fputs("]}}\n", output) < 0;
+}
+
 /* Device-visible classification only (work RAM and cartridge ROM are not
    device accesses); same predicate order as the router. 0 = not a device. */
 static uint8_t genesis_history_device_region(uint32_t address) {
@@ -1583,6 +1691,10 @@ GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, Genesi
     return GENESIS_ACCESS_FAIL;
   }
   status = genesis_route_access_unrecorded(runtime, address, width, direction, value, stop_out);
+  if (status == GENESIS_ACCESS_OK && runtime != 0 && runtime->m68k_checkpoint.enabled && is_write_kind &&
+      value != 0)
+    genesis_m68k_effect_note(runtime, GENESIS_M68K_EFFECT_WRITE, (uint8_t)width, address,
+                             width == GENESIS_ACCESS_LONG ? *value : *value & (width == GENESIS_ACCESS_WORD ? 0xFFFFU : 0xFFU));
   if (status == GENESIS_ACCESS_OK && runtime != 0 && runtime->execution_history.detail_enabled) {
     const uint8_t region = genesis_history_device_region(address);
     if (region != 0U)
@@ -1810,6 +1922,8 @@ static int genesis_construct_exception_frame_and_transfer(GenesisRuntime *runtim
   if (is_irq6_frame) genesis_note_irq6_exception_frame(runtime, frame_base);
   result->next_pc = handler_entry;
   runtime->pc = handler_entry;
+  if (runtime->m68k_checkpoint.enabled)
+    genesis_m68k_effect_note(runtime, GENESIS_M68K_EFFECT_TRAP, 0U, handler_entry, is_irq6_frame ? 30U : 5U);
   if (runtime->execution_history.detail_enabled)
     genesis_history_append(runtime, GENESIS_HISTORY_TRANSFER, 0U, handler_entry,
                            GENESIS_HISTORY_TRANSFER_EXCEPTION_ENTRY, 0U, 0U, 0U);
@@ -1844,6 +1958,11 @@ int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc,
     return 0;
   }
   *handler_pc_out = result.next_pc;
+  /* SEG-020-T004: generated DIV lowering returns the handler transfer directly and never
+     reaches genesis_runtime_retire_m68k_instruction, so the faulting instruction's diagnostic
+     boundary is completed here (exactly once; runtime->pc is already the handler entry, the
+     frame writes and vector-5 trap are pending). No retirement, scheduler tick or IRQ admission. */
+  if (runtime->m68k_checkpoint.enabled) genesis_m68k_checkpoint_finalize(runtime);
   return 1;
 }
 
@@ -1991,7 +2110,8 @@ GenesisControlTransfer genesis_runtime_retire_m68k_instruction(GenesisRuntime *r
   result.kind = GENESIS_CONTINUE_AT_PC;
   result.next_pc = next_pc;
   runtime->pc = next_pc;
-  if (genesis_irq6_scheduler_and_admit(runtime, m68k_cycles, &result) == 2) return result;
+  (void)genesis_irq6_scheduler_and_admit(runtime, m68k_cycles, &result);
+  if (runtime->m68k_checkpoint.enabled) genesis_m68k_checkpoint_finalize(runtime);
   return result;
 }
 

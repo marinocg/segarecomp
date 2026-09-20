@@ -553,6 +553,54 @@ typedef struct GenesisExecutionHistory {
   uint8_t detail_enabled;   /* 0 in every diagnostics-off binary */
 } GenesisExecutionHistory;
 
+/* SEG-020-T004: opt-in M68k state checkpoint. Genesis-local (no CPU-neutral
+   representation). M68k-owned state = D0-D7, A0-A7, USP, SR (incl. flags), PC;
+   RAM, bus and Genesis device state are NOT included. Per retired instruction
+   boundary the digest also covers the instruction's externally visible
+   architectural effects: every successful memory write (address/width/value)
+   and every exception/trap entry (vector number, handler entry). Cycle/timing
+   state is not part of the digest. When more than
+   GENESIS_M68K_CHECKPOINT_EFFECT_CAPACITY effects occur in one boundary they
+   cannot all be observed and the boundary is `unsupported for comparison`
+   (never equal). Disabled (`enabled == 0`, the value in every diagnostics-off
+   binary) it is never read or written. Digest = FNV-1a 64 over a fixed
+   little-endian field serialization. */
+#define GENESIS_M68K_CHECKPOINT_EFFECT_CAPACITY 8
+typedef enum GenesisM68kEffectKind {
+  GENESIS_M68K_EFFECT_WRITE = 1,
+  GENESIS_M68K_EFFECT_TRAP = 2
+} GenesisM68kEffectKind;
+typedef struct GenesisM68kEffect {
+  uint8_t kind;    /* GenesisM68kEffectKind */
+  uint8_t width;   /* WRITE: 1/2/4; TRAP: 0 */
+  uint32_t address; /* WRITE: guest address; TRAP: handler entry PC */
+  uint32_t value;   /* WRITE: value written (masked to width); TRAP: vector number */
+} GenesisM68kEffect;
+typedef struct GenesisM68kCheckpoint {
+  uint8_t enabled;
+  uint8_t valid;                  /* a boundary has completed */
+  uint8_t unsupported_for_comparison;
+  uint8_t effect_count;
+  GenesisM68kEffect effects[GENESIS_M68K_CHECKPOINT_EFFECT_CAPACITY];
+  /* Last completed boundary (field-level detail on request). */
+  uint64_t boundary;              /* ordinal of the last completed boundary */
+  uint64_t digest;                /* compact digest of the fields below */
+  uint32_t d[8];
+  uint32_t a[8];
+  uint32_t usp;
+  uint16_t sr;
+  uint32_t pc;
+  uint8_t last_unsupported;
+  uint8_t last_effect_count;
+  GenesisM68kEffect last_effects[GENESIS_M68K_CHECKPOINT_EFFECT_CAPACITY];
+} GenesisM68kCheckpoint;
+
+typedef enum GenesisM68kCheckpointComparison {
+  GENESIS_M68K_CHECKPOINT_EQUAL = 0,
+  GENESIS_M68K_CHECKPOINT_DIFFERENT = 1,
+  GENESIS_M68K_CHECKPOINT_UNSUPPORTED = 2  /* never equal */
+} GenesisM68kCheckpointComparison;
+
 typedef struct GenesisRuntime {
   uint32_t d[8];
   uint32_t a[8];
@@ -629,6 +677,8 @@ typedef struct GenesisRuntime {
      DISPATCH event kind and `genesis_write_ephemeral_pc_history` is a
      projection of this ring. Same exclusion rules as documented above. */
   GenesisExecutionHistory execution_history;
+  /* SEG-020-T004: opt-in M68k state checkpoint (see GenesisM68kCheckpoint). */
+  GenesisM68kCheckpoint m68k_checkpoint;
   /* SEG-007-T255: host-owned optional observer (NULL = absent); non-semantic. */
   GenesisLiveFrameObserver *live_frame_observer;
 } GenesisRuntime;
@@ -1200,6 +1250,15 @@ GenesisControlTransfer genesis_runtime_retire_m68k_instruction_at(GenesisRuntime
                                                                   uint32_t fallthrough_pc,
                                                                   GenesisHistoryTransferKind transfer_kind,
                                                                   uint32_t m68k_cycles, uint32_t next_pc);
+
+/* SEG-020-T004: last completed boundary's compact digest; 0 when none. */
+uint64_t genesis_m68k_checkpoint_digest(const GenesisRuntime *runtime);
+/* Two boundaries are equal iff both are valid, neither is unsupported for
+ * comparison, and digests plus all fields agree. */
+GenesisM68kCheckpointComparison genesis_m68k_checkpoint_compare(const GenesisM68kCheckpoint *a,
+                                                                const GenesisM68kCheckpoint *b);
+/* Field-level detail of the last boundary as one JSON line (ephemeral, on request). */
+int genesis_m68k_checkpoint_write_detail(FILE *output, const GenesisRuntime *runtime);
 
 #ifdef __cplusplus
 }
