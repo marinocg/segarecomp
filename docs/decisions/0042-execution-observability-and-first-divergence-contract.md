@@ -172,17 +172,19 @@ over the generated `genesis_m68k_checkpoint_write_detail` lines with a mandatory
 reports last matching boundary N, first differing boundary N+1, the pc of the differing instruction
 (the previous boundary's resulting pc, or `--initial-pc`), each differing field (register, SR, PC,
 USP, `effect:write@addr/wN`, `effect:trap`), the caller-supplied image identity and domain `cpu`.
-Because Musashi pushes an exception frame PC-first while generated code pushes SR-first, write order
-inside one boundary is not compared (the write multiset is), so the field-level path is used rather
-than the order-sensitive FNV digest. A boundary flagged unsupported is reported
+Because Musashi pushes an exception frame PC-first while generated code pushes SR-first, the order
+between writes to different (address, width) destinations inside one boundary is not compared; the
+order of repeated writes to the same destination is (grouped by destination, per-group sequence kept),
+so the field-level path is used rather than the order-sensitive FNV digest. Musashi vector-table reads
+are only candidates: an exception entry is recorded (vector = address/4, handler = value read) only
+when the same stepped instruction also wrote the MC68000 six-byte frame (SR word at the resulting A7,
+PC long at A7+2) and exactly one candidate read equals the resulting PC. An ordinary aligned low-memory
+longword read is not a trap; a frame without a unique matching vector read, or a moved stack with a
+matching read but no recognizable frame, marks the boundary unsupported rather than guessing. A boundary flagged unsupported is reported
 `unsupported_for_comparison`, never equal. Test-only fault injection (a perturbed stacked-SR write and
 a perturbed MOVEQ result) is applied only to temporary copies of the emitted C / runtime source inside
 `tests/m68k_first_divergence_test.py`; no production flag or hook exists. Device-domain comparison is
 T006.
 
-Known limits (T005): (a) effects within one boundary are compared as a multiset, so a swap of two
-writes to the same address and width with different values inside one instruction is not detected;
-(b) the oracle's exception-entry recognition treats any aligned longword data read below 0x400 while
-stepping as a vector fetch, so a genuine low-memory longword data read would be a false `effect:trap`
-divergence — acceptable for the synthetic fixtures, to be revisited before real-ROM use; (c) more than
-64 oracle effects in one boundary is flagged unsupported.
+Known limits (T005): more than 64 oracle effects or vector-read candidates in one boundary is flagged
+unsupported; only the basic MC68000 six-byte frame is recognized (other frame formats are unsupported).

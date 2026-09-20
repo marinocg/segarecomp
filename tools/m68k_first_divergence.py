@@ -19,8 +19,9 @@ list of ``{"k":1,"w":width,"a":address,"v":value}`` memory writes and
 
 Comparison rules (ADR-0042 sections 2, 3, 5): sequential lockstep with a mandatory boundary
 limit (no bisection/replay); registers, SR, PC, USP, memory writes and exception entries are
-compared, cycle counts and device state are not. The order of writes *within* one boundary is
-not compared (exception-frame push order legitimately differs between cores); the multiset is.
+compared, cycle counts and device state are not. The order between writes to *different*
+destinations within one boundary is not compared (exception-frame push order legitimately differs
+between cores); the order of repeated writes to the same (address, width) is.
 A boundary flagged unsupported is never reported equal. First differing domain is ``cpu`` when
 any compared field differs. Nothing here can perturb generated code: fault injection used by
 tests lives only in the tests' temporary copies.
@@ -61,10 +62,11 @@ def parse_stream(text: str) -> list[dict]:
 
 
 def _effect_map(record: dict) -> dict[str, dict]:
-    """Canonical, order-insensitive effect view: key -> effect (duplicates get #n)."""
+    """Canonical effect view: key -> effect. Order between distinct destinations (kind, address,
+    width) is ignored; repeated writes to one destination keep their sequence (``#n`` suffix)."""
     counts: dict[str, int] = {}
     mapped: dict[str, dict] = {}
-    for effect in sorted(record.get("effects", []), key=lambda e: (e["k"], e["a"], e["w"], e["v"])):
+    for effect in record.get("effects", []):
         base = ("write@%08X/w%d" % (effect["a"], effect["w"])) if effect["k"] == 1 else "trap"
         n = counts.get(base, 0)
         counts[base] = n + 1
@@ -166,6 +168,7 @@ ORACLE_SOURCE = r'''#include <stdint.h>
 static uint8_t *rom; static uint32_t rom_size; static uint8_t ram[RAM_SIZE];
 typedef struct { unsigned k, w, a, v; } Effect;
 static Effect effects[MAX_EFFECTS]; static unsigned effect_count;
+static Effect vec[MAX_EFFECTS]; static unsigned vec_count; /* aligned low longword data reads: candidates only */
 static int stepping;
 static unsigned int read8(unsigned int a) {
   if (a < rom_size) return rom[a];
@@ -176,9 +179,9 @@ unsigned int m68k_read_memory_8(unsigned int a) { return read8(a); }
 unsigned int m68k_read_memory_16(unsigned int a) { return (read8(a) << 8U) | read8(a + 1U); }
 unsigned int m68k_read_memory_32(unsigned int a) {
   const unsigned int v = (m68k_read_memory_16(a) << 16U) | m68k_read_memory_16(a + 2U);
-  /* Exception-vector fetch: an aligned data longword read from the vector table while stepping. */
-  if (stepping && a < 0x400U && (a & 3U) == 0U && effect_count < MAX_EFFECTS)
-    effects[effect_count++] = (Effect){2U, 0U, v, a >> 2U};
+  /* Candidate vector fetch only; classified after the instruction against the exception frame. */
+  if (stepping && a < 0x400U && (a & 3U) == 0U && vec_count < MAX_EFFECTS)
+    vec[vec_count++] = (Effect){2U, 0U, v, a >> 2U};
   return v;
 }
 unsigned int m68k_read_immediate_16(unsigned int a) { return m68k_read_memory_16(a); }
@@ -211,13 +214,27 @@ int main(int argc, char **argv) {
   steps = strtoul(argv[5], 0, 0);
   (void)m68k_execute(1); /* drain the pending reset cycles; executes no instruction */
   for (i = 1; i <= steps; ++i) {
-    effect_count = 0; stepping = 1; (void)m68k_execute(1); stepping = 0;
+    unsigned unsupported, shape = 0U, match = 0U, first = 0U, frame_sp, frame_sp_before, j;
+    frame_sp_before = m68k_get_reg(NULL, M68K_REG_A7);
+    effect_count = 0; vec_count = 0; stepping = 1; (void)m68k_execute(1); stepping = 0;
+    unsupported = effect_count >= MAX_EFFECTS || vec_count >= MAX_EFFECTS;
+    /* MC68000 group-1/2 exception frame: SR word at SP, PC long at SP+2, resulting A7 == SP. */
+    frame_sp = m68k_get_reg(NULL, M68K_REG_A7);
+    for (k = 0; k < effect_count; ++k)
+      if (effects[k].k == 1U && effects[k].w == 2U && effects[k].a == frame_sp)
+        for (j = 0; j < effect_count; ++j)
+          if (effects[j].k == 1U && effects[j].w == 4U && effects[j].a == frame_sp + 2U) shape = 1U;
+    for (k = 0; k < vec_count; ++k)
+      if (vec[k].a == m68k_get_reg(NULL, M68K_REG_PC)) { ++match; first = k; }
+    if (shape && match == 1U && effect_count < MAX_EFFECTS) effects[effect_count++] = vec[first];
+    else if (shape && vec_count != 0U) unsupported = 1U; /* frame but no unique matching vector fetch */
+    else if (!shape && match != 0U && frame_sp != frame_sp_before) unsupported = 1U; /* stack moved without a recognizable frame */
     printf("{\"boundary\":%lu,\"pc\":%u,\"sr\":%u,\"usp\":%u,\"d\":[", i, m68k_get_reg(NULL, M68K_REG_PC),
            m68k_get_reg(NULL, M68K_REG_SR) & 0xFFFFU, m68k_get_reg(NULL, M68K_REG_USP));
     for (k = 0; k < 8; ++k) printf("%s%u", k ? "," : "", m68k_get_reg(NULL, (m68k_register_t)(M68K_REG_D0 + k)));
     printf("],\"a\":[");
     for (k = 0; k < 8; ++k) printf("%s%u", k ? "," : "", m68k_get_reg(NULL, (m68k_register_t)(M68K_REG_A0 + k)));
-    printf("],\"unsupported\":%u,\"effects\":[", effect_count >= MAX_EFFECTS ? 1U : 0U);
+    printf("],\"unsupported\":%u,\"effects\":[", unsupported ? 1U : 0U);
     for (k = 0; k < effect_count; ++k)
       printf("%s{\"k\":%u,\"w\":%u,\"a\":%u,\"v\":%u}", k ? "," : "", effects[k].k, effects[k].w, effects[k].a, effects[k].v);
     printf("]}\n");

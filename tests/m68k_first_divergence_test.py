@@ -56,6 +56,25 @@ def synthetic_semantics():
     a = rec(1, 0x120, effects=[dict(k=1, w=2, a=8, v=1), dict(k=1, w=4, a=10, v=2)])
     b = rec(1, 0x120, effects=[dict(k=1, w=4, a=10, v=2), dict(k=1, w=2, a=8, v=1)])
     assert fd.compare_streams([a], [b], 4, 0x100)["result"] == "no_divergence"
+    # Repeated writes to one (address, width) keep their sequence; distinct destinations do not.
+    w = lambda a, v, width=2: dict(k=1, w=width, a=a, v=v)
+    ab = rec(1, 0x120, effects=[w(8, 0xA), w(8, 0xB)])
+    ba = rec(1, 0x120, effects=[w(8, 0xB), w(8, 0xA)])
+    r = fd.compare_streams([ab], [ba], 4, 0x100)
+    assert r["result"] == "diverged" and r["domain"] == "cpu" and r["first_differing_boundary"] == 1, r
+    assert [f["field"] for f in r["fields"]] == ["effect:write@00000008/w2", "effect:write@00000008/w2#1"], r
+    assert fd.compare_streams([ab], [dict(ab)], 4, 0x100)["result"] == "no_divergence"
+    # Interleaved with another destination: still order-insensitive across destinations.
+    mixed1 = rec(1, 0x120, effects=[w(8, 0xA), w(16, 1), w(8, 0xB)])
+    mixed2 = rec(1, 0x120, effects=[w(16, 1), w(8, 0xA), w(8, 0xB)])
+    assert fd.compare_streams([mixed1], [mixed2], 4, 0x100)["result"] == "no_divergence"
+    # Missing / extra duplicate write.
+    once = rec(1, 0x120, effects=[w(8, 0xA)])
+    twice = rec(1, 0x120, effects=[w(8, 0xA), w(8, 0xA)])
+    for g, o in ((once, twice), (twice, once)):
+        r = fd.compare_streams([g], [o], 4, 0x100)
+        assert r["result"] == "diverged" and [f["field"] for f in r["fields"]] == ["effect:write@00000008/w2#1"], r
+    assert fd.render(fd.compare_streams([ab], [ba], 4, 0x100)) == fd.render(fd.compare_streams([ab], [ba], 4, 0x100))
     # Unsupported is never equal; stream length mismatch; mandatory positive limit; determinism.
     r = fd.compare_streams([rec(1, 2, unsupported=1)], [rec(1, 2)], 4, 0x100)
     assert r["result"] == "unsupported_for_comparison" and r["first_differing_boundary"] == 1, r
@@ -152,6 +171,20 @@ def main():
         assert len(oracle) == 4, oracle_out
         again = fd.run_oracle(pathlib.Path(checkout), compiler, image, 0x100, 0xFF8000, 0x2700, 4)
         assert again == oracle_out, "oracle stream is deterministic"
+
+        # Ordinary aligned longword data read below 0x400 is not an exception; TRAP #0 still is.
+        low = bytearray(0x400)
+        low[0x80:0x84] = (0x140).to_bytes(4, "big")            # vector 32 -> handler 0x140
+        low[0x10:0x14] = (0xDEADBEEF).to_bytes(4, "big")       # ordinary low data
+        low[0x100:0x106] = bytes([0x20, 0x39, 0x00, 0x00, 0x00, 0x10])  # MOVE.L $10.L,D0
+        low[0x106:0x108] = bytes([0x4E, 0x40])                 # TRAP #0
+        low[0x140:0x142] = bytes([0x4E, 0x71])
+        low_stream = fd.parse_stream(fd.run_oracle(pathlib.Path(checkout), compiler, bytes(low), 0x100, 0xFF8000, 0x2700, 2))
+        assert low_stream[0]["effects"] == [] and low_stream[0]["d"][0] == 0xDEADBEEF and not low_stream[0]["unsupported"], low_stream[0]
+        assert low_stream[0]["pc"] == 0x106, low_stream[0]
+        assert not low_stream[1]["unsupported"] and low_stream[1]["pc"] == 0x140, low_stream[1]
+        assert [e for e in low_stream[1]["effects"] if e["k"] == 2] == [dict(k=2, w=0, a=0x140, v=32)], low_stream[1]
+        assert sum(1 for e in low_stream[1]["effects"] if e["k"] == 1) == 2, low_stream[1]
 
         base = fd.compare_streams(fd.parse_stream(clean), oracle, 16, 0x100, "synthetic")
         assert base["result"] == "no_divergence" and base["domain"] == "none" and base["compared_boundaries"] == 4, base
