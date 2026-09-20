@@ -160,3 +160,31 @@ The synchronous divide-by-zero route returns the handler transfer without callin
 state, two frame writes, vector-5 trap effect). It is the same boundary class as an ordinary retired
 instruction: no second retirement, scheduler tick or IRQ admission occurs, and the handler's first
 instruction begins the next boundary with an empty effect set.
+
+## 16. T005 implementation note (M68k/Musashi first-divergence diagnosis)
+
+`tools/m68k_first_divergence.py` is the tool-side workflow (no production, generation or runtime
+change). `oracle` builds the pinned, unmodified Musashi core (pin and clean-tree checks as the other
+differential tests) and emits one boundary record per retired instruction using `m68k_execute(1)`;
+memory writes come from the write callbacks and an exception entry is recognized as an aligned
+vector-table longword data read while stepping. `compare` runs the section 3 sequential lockstep
+over the generated `genesis_m68k_checkpoint_write_detail` lines with a mandatory boundary limit and
+reports last matching boundary N, first differing boundary N+1, the pc of the differing instruction
+(the previous boundary's resulting pc, or `--initial-pc`), each differing field (register, SR, PC,
+USP, `effect:write@addr/wN`, `effect:trap`), the caller-supplied image identity and domain `cpu`.
+Because Musashi pushes an exception frame PC-first while generated code pushes SR-first, the order
+between writes to different (address, width) destinations inside one boundary is not compared; the
+order of repeated writes to the same destination is (grouped by destination, per-group sequence kept),
+so the field-level path is used rather than the order-sensitive FNV digest. Musashi vector-table reads
+are only candidates: an exception entry is recorded (vector = address/4, handler = value read) only
+when the same stepped instruction also wrote the MC68000 six-byte frame (SR word at the resulting A7,
+PC long at A7+2) and exactly one candidate read equals the resulting PC. An ordinary aligned low-memory
+longword read is not a trap; a frame without a unique matching vector read, or a moved stack with a
+matching read but no recognizable frame, marks the boundary unsupported rather than guessing. A boundary flagged unsupported is reported
+`unsupported_for_comparison`, never equal. Test-only fault injection (a perturbed stacked-SR write and
+a perturbed MOVEQ result) is applied only to temporary copies of the emitted C / runtime source inside
+`tests/m68k_first_divergence_test.py`; no production flag or hook exists. Device-domain comparison is
+T006.
+
+Known limits (T005): more than 64 oracle effects or vector-read candidates in one boundary is flagged
+unsupported; only the basic MC68000 six-byte frame is recognized (other frame formats are unsupported).
