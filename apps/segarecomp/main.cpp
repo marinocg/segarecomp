@@ -249,7 +249,7 @@ int main(int argc, char **argv) {
                   << " rejected_count=" << (aligned_start_count - accepted_count) << '\n';
       }
       if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) {
-        std::cout << segarecomp::emit_m68k_general_startup_bridge_c(*partial, digest_value);
+        std::cout << segarecomp::emit_m68k_general_startup_bridge_c(*partial, digest_value, provenance_diagnostics);
         if (provenance_diagnostics) {
           const auto &a = partial->accepted_prefix;
           std::cout << segarecomp::emit_m68k_provenance_diagnostic_c(segarecomp::build_m68k_provenance_diagnostic_projection(
@@ -258,7 +258,7 @@ int main(int argc, char **argv) {
         return 0;
       }
       if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result)) {
-        std::cout << segarecomp::emit_m68k_general_startup_bridge_c(*accepted, digest_value);
+        std::cout << segarecomp::emit_m68k_general_startup_bridge_c(*accepted, digest_value, provenance_diagnostics);
         if (provenance_diagnostics)
           std::cout << segarecomp::emit_m68k_provenance_diagnostic_c(segarecomp::build_m68k_provenance_diagnostic_projection(
               digest_value, accepted->decoded, accepted->static_blocks, accepted->static_edges, calls_of(accepted->static_frames)));

@@ -55,8 +55,10 @@ struct GenesisM68kEmissionContext : M68kMemoryEmissionContext {
 [[nodiscard]] std::string emit_m68k_general_startup_runtime_c(const FrontendAnalysis &analysis);
 [[nodiscard]] std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &partial);
 [[nodiscard]] M68kC4Preflight preflight_m68k_general_startup_c4(const FrontendPartialProgram &partial);
-[[nodiscard]] std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &partial, std::string_view rom_sha256);
-[[nodiscard]] std::string emit_m68k_general_startup_bridge_c(const FrontendAnalysis &analysis, std::string_view rom_sha256);
+[[nodiscard]] std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &partial, std::string_view rom_sha256,
+                                                                    bool execution_history_hooks = false);
+[[nodiscard]] std::string emit_m68k_general_startup_bridge_c(const FrontendAnalysis &analysis, std::string_view rom_sha256,
+                                                                    bool execution_history_hooks = false);
 [[nodiscard]] std::string emit_m68k_frontend_c(const FrontendAnalysis &analysis, const DirectFlowState &initial, std::uint64_t budget);
 
 } // namespace segarecomp

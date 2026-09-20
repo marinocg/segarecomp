@@ -502,6 +502,56 @@ typedef struct GenesisLiveFrameObserver {
 } GenesisLiveFrameObserver;
 
 /* Fixed pure-C11 persistent state ABI for generated Genesis startup blocks. */
+/* SEG-020-T003 / ADR-0042 section 4: ONE fixed-capacity, allocation-free,
+   overwrite-oldest, Genesis-local typed history. Event categories are exactly:
+   DISPATCH (the pre-existing PC-about-to-dispatch record, always kept),
+   and -- only when `detail_enabled` (set solely by generated code emitted with
+   the generation-time `--provenance-diagnostics` option) -- RETIRED
+   instruction, taken control TRANSFER and device-visible ACCESS. Events carry
+   `boundary`, the ordinal of the instruction boundary at which they were
+   observed (device accesses/transfer/retire of one instruction share it; an
+   exception entry observed inside retirement carries the following ordinal).
+   No values or payloads are ever recorded. */
+#define GENESIS_EXECUTION_HISTORY_CAPACITY 256
+#define GENESIS_RECENT_PC_HISTORY_CAPACITY 64
+typedef enum GenesisHistoryEventKind {
+  GENESIS_HISTORY_DISPATCH = 1,
+  GENESIS_HISTORY_RETIRED = 2,
+  GENESIS_HISTORY_TRANSFER = 3,
+  GENESIS_HISTORY_ACCESS = 4
+} GenesisHistoryEventKind;
+typedef enum GenesisHistoryTransferKind {
+  GENESIS_HISTORY_TRANSFER_NONE = 0,
+  GENESIS_HISTORY_TRANSFER_DIRECT = 1,
+  GENESIS_HISTORY_TRANSFER_COMPUTED = 2,
+  GENESIS_HISTORY_TRANSFER_CALL = 3,
+  GENESIS_HISTORY_TRANSFER_RETURN = 4,
+  GENESIS_HISTORY_TRANSFER_EXCEPTION_ENTRY = 5
+} GenesisHistoryTransferKind;
+typedef enum GenesisHistoryRegion {
+  GENESIS_HISTORY_REGION_CONTROLLER_IO = 1,
+  GENESIS_HISTORY_REGION_PSG = 2,
+  GENESIS_HISTORY_REGION_YM2612 = 3,
+  GENESIS_HISTORY_REGION_VDP = 4,
+  GENESIS_HISTORY_REGION_Z80_BUS = 5,
+  GENESIS_HISTORY_REGION_Z80_RAM_WINDOW = 6
+} GenesisHistoryRegion;
+typedef struct GenesisExecutionHistoryEvent {
+  uint64_t boundary;
+  uint32_t pc;      /* DISPATCH/RETIRED: guest PC. Others: 0. */
+  uint32_t next_pc; /* RETIRED: selected successor. TRANSFER: selected target. Others: 0. */
+  uint8_t kind;     /* GenesisHistoryEventKind */
+  uint8_t detail;   /* TRANSFER: GenesisHistoryTransferKind; ACCESS: GenesisHistoryRegion */
+  uint8_t width;    /* ACCESS: 1/2/4 */
+  uint8_t direction; /* ACCESS: GenesisAccessDirection value (0 read, 1 write) */
+} GenesisExecutionHistoryEvent;
+typedef struct GenesisExecutionHistory {
+  GenesisExecutionHistoryEvent events[GENESIS_EXECUTION_HISTORY_CAPACITY];
+  uint64_t total_recorded;  /* events ever appended (overflow included) */
+  uint64_t retired_count;   /* current instruction-boundary ordinal */
+  uint8_t detail_enabled;   /* 0 in every diagnostics-off binary */
+} GenesisExecutionHistory;
+
 typedef struct GenesisRuntime {
   uint32_t d[8];
   uint32_t a[8];
@@ -572,37 +622,16 @@ typedef struct GenesisRuntime {
      diagnostic assembly to read and then discard -- never asserted present by
      any schema validator, never printed to the sanitized stdout report, and
      never reachable via `--full-report-path`/`--full-report-fd`. */
-  uint32_t recent_pc_history[64];
-  uint8_t recent_pc_history_count;   /* number of valid entries, saturates at 64 */
-  uint8_t recent_pc_history_next;    /* circular write index, wraps at 64 */
-  /* SEG-020-T003 / ADR-0042 section 4: host-owned OPTIONAL execution-history
-     ring (NULL = disabled, the default). Diagnostic-only, write-only from the
-     runtime's perspective: recording never influences dispatch, guest state,
-     timing or generation. Excluded from every stable serialization. */
-  struct GenesisExecutionHistory *execution_history;
+  /* SEG-020-T003 / ADR-0042 section 4: the single bounded typed execution
+     history (see GenesisExecutionHistory above). It subsumes the former
+     independent recent-PC ring: the PC-about-to-dispatch convention is now the
+     DISPATCH event kind and `genesis_write_ephemeral_pc_history` is a
+     projection of this ring. Same exclusion rules as documented above. */
+  GenesisExecutionHistory execution_history;
   /* SEG-007-T255: host-owned optional observer (NULL = absent); non-semantic. */
   GenesisLiveFrameObserver *live_frame_observer;
 } GenesisRuntime;
 
-/* SEG-007-T252 / ADR-0040 correction: capacity of `GenesisRuntime.
-   recent_pc_history` -- diagnostic-only, see the field's own doc comment. */
-#define GENESIS_RECENT_PC_HISTORY_CAPACITY 64
-
-/* SEG-020-T003: fixed compile-time capacity, overwrite-oldest, no allocation.
-   One event = one retired M68k instruction boundary, recorded at
-   `genesis_runtime_retire_m68k_instruction` (the sole instruction-boundary
-   seam). `sequence` is the deterministic retire ordinal (0-based, counts
-   overflowed events too). Other ADR-0042 categories are deferred. */
-#define GENESIS_EXECUTION_HISTORY_CAPACITY 128
-typedef struct GenesisExecutionHistoryEvent {
-  uint64_t sequence;
-  uint32_t next_pc;
-  uint32_t m68k_cycles;
-} GenesisExecutionHistoryEvent;
-typedef struct GenesisExecutionHistory {
-  GenesisExecutionHistoryEvent events[GENESIS_EXECUTION_HISTORY_CAPACITY];
-  uint64_t total_recorded; /* also the next sequence number */
-} GenesisExecutionHistory;
 
 typedef enum GenesisAccessWidth {
   GENESIS_ACCESS_BYTE = 1,
@@ -1150,10 +1179,19 @@ int genesis_write_full_report(FILE *output, const GenesisRuntime *runtime,
 int genesis_write_ephemeral_pc_history(FILE *output, const GenesisRuntime *runtime,
                                        const GenesisControlTransfer *result);
 
-/* SEG-020-T003: local-diagnostic-only writer; emits a bare JSON array of the
- * retained events oldest -> newest (`[]` when disabled/empty). Ephemeral
- * channel only, like genesis_write_ephemeral_pc_history. Deterministic. */
-int genesis_write_ephemeral_execution_history(FILE *output, const GenesisRuntime *runtime);
+/* SEG-020-T003: projects up to GENESIS_RECENT_PC_HISTORY_CAPACITY most recent
+ * DISPATCH PCs from the single typed ring, oldest -> newest; returns the count. */
+uint32_t genesis_recent_pc_history_project(const GenesisRuntime *runtime,
+                                           uint32_t out[GENESIS_RECENT_PC_HISTORY_CAPACITY]);
+
+/* SEG-020-T003: retire one instruction and, when detail history is enabled,
+ * record RETIRED (`retired_pc` -> `next_pc`) plus a TRANSFER event when
+ * `transfer_kind != NONE` and `next_pc != fallthrough_pc`. `retired_pc` and
+ * `fallthrough_pc` are generation-time constants, never decoded at runtime. */
+GenesisControlTransfer genesis_runtime_retire_m68k_instruction_at(GenesisRuntime *runtime, uint32_t retired_pc,
+                                                                  uint32_t fallthrough_pc,
+                                                                  GenesisHistoryTransferKind transfer_kind,
+                                                                  uint32_t m68k_cycles, uint32_t next_pc);
 
 #ifdef __cplusplus
 }

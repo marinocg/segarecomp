@@ -16,6 +16,34 @@ namespace segarecomp {
 namespace {
 using Address = std::uint32_t;
 std::string hex(std::uint64_t value, unsigned width) { std::ostringstream out; out << "0x" << std::uppercase << std::hex << std::setw(static_cast<int>(width)) << std::setfill('0') << value; return out.str(); }
+// SEG-020-T003: generation-time-only (`--provenance-diagnostics`) execution-history
+// hooks. When false the emitted C is byte-identical to the diagnostics-off output.
+thread_local bool g_execution_history_hooks = false;
+struct ExecutionHistoryHooksScope {
+  explicit ExecutionHistoryHooksScope(bool enabled) : previous(g_execution_history_hooks) {
+    g_execution_history_hooks = enabled;
+  }
+  ~ExecutionHistoryHooksScope() { g_execution_history_hooks = previous; }
+  bool previous;
+};
+const char *history_transfer_kind(M68kIrKind kind) {
+  switch (kind) {
+  case M68kIrKind::branch_ne_short: case M68kIrKind::branch_always_short: case M68kIrKind::general_branch:
+  case M68kIrKind::dbcc_loop: return "GENESIS_HISTORY_TRANSFER_DIRECT";
+  case M68kIrKind::jump_general: return "GENESIS_HISTORY_TRANSFER_COMPUTED";
+  case M68kIrKind::call_general: case M68kIrKind::bsr_call: return "GENESIS_HISTORY_TRANSFER_CALL";
+  case M68kIrKind::return_from_subroutine: case M68kIrKind::return_from_exception:
+    return "GENESIS_HISTORY_TRANSFER_RETURN";
+  default: return "GENESIS_HISTORY_TRANSFER_NONE";
+  }
+}
+// Retire callee + leading arguments: the classic call when hooks are off, else
+// the `_at` variant with statically-known retired/fallthrough PCs (never decoded at runtime).
+std::string retire_call_open(std::uint32_t address, std::uint32_t length, M68kIrKind kind) {
+  if (!g_execution_history_hooks) return "genesis_runtime_retire_m68k_instruction(runtime, ";
+  return "genesis_runtime_retire_m68k_instruction_at(runtime, UINT32_C(" + hex(address, 8) + "), UINT32_C(" +
+         hex(address + length, 8) + "), " + history_transfer_kind(kind) + ", ";
+}
 bool same(const M68kProgramAddress &a, const M68kProgramAddress &b) { return a.space == b.space && a.value == b.value; }
 bool less(const M68kProgramAddress &a, const M68kProgramAddress &b) { return a.space != b.space ? static_cast<unsigned>(a.space) < static_cast<unsigned>(b.space) : a.value < b.value; }
 [[maybe_unused]] bool less(const BlockId &a, const BlockId &b) { return less(a.entry, b.entry); }
@@ -1710,7 +1738,7 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   memory.continuation = address + entry.decoded.provenance.length.value;
   out << emit_m68k_operation_c(entry.operation, "runtime->d", "runtime->sr", "  ", &memory)
       << "  runtime->pc = pc;\n"
-      << "  return genesis_runtime_retire_m68k_instruction(runtime, ";
+      << "  return " << retire_call_open(address, entry.decoded.provenance.length.value, entry.operation.kind);
   out << *cycle_expression;
   out << ", runtime->pc);\n}\n";
   return out.str();
@@ -5029,7 +5057,8 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
       default:
         return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
       }
-      out << "    { const uint32_t m68k_retirement_pc = runtime->pc; GenesisControlTransfer retired = genesis_runtime_retire_m68k_instruction(runtime, ";
+      out << "    { const uint32_t m68k_retirement_pc = runtime->pc; GenesisControlTransfer retired = "
+          << retire_call_open(provenance.source.address.value, provenance.length.value, found->second->kind);
       out << *retirement_cycles;
       out << ", runtime->pc); if (retired.kind != GENESIS_CONTINUE_AT_PC || retired.next_pc != m68k_retirement_pc) return retired; }\n  }\n";
     }
@@ -5106,7 +5135,8 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
 }
 
 std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &partial,
-                                                   std::string_view rom_sha256) {
+                                                   std::string_view rom_sha256, bool execution_history_hooks) {
+  const ExecutionHistoryHooksScope hooks_scope(execution_history_hooks);
   if (!valid_bridge_rom_sha256(rom_sha256))
     return "/* translation rejected: invalid bridge ROM SHA-256 */\n";
   // SEG-007-T064: GENESIS_BRIDGE_REPORT_METADATA carries exactly one static
@@ -5201,6 +5231,7 @@ std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &par
       hex(partial.accepted_prefix.startup_ingress->initial_ssp, 8),
       hex(partial.accepted_prefix.startup_ingress->entry.value, 8), irq6_handler_hex,
       divide_by_zero_handler_hex);
+  if (g_execution_history_hooks) source += "runtime.execution_history.detail_enabled = 1; ";
   if (owned_region_count != 0U) {
     source += "  runtime.owned_regions = genesis_owned_cartridge_regions;\n";
     source += "  runtime.owned_region_count = UINT32_C(" + std::to_string(owned_region_count) + ");\n";
@@ -5210,7 +5241,8 @@ std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &par
 }
 
 std::string emit_m68k_general_startup_bridge_c(const FrontendAnalysis &analysis,
-                                                   std::string_view rom_sha256) {
+                                                   std::string_view rom_sha256, bool execution_history_hooks) {
+  const ExecutionHistoryHooksScope hooks_scope(execution_history_hooks);
   if (!valid_bridge_rom_sha256(rom_sha256))
     return "/* translation rejected: invalid bridge ROM SHA-256 */\n";
   if (!analysis.completion) {
@@ -5219,9 +5251,10 @@ std::string emit_m68k_general_startup_bridge_c(const FrontendAnalysis &analysis,
     if (!source.starts_with("#include \"runtime.h\"")) return source;
     source.replace(0U, emit_genesis_runtime_c11_include().size(),
                    emit_genesis_bridge_c11_prelude(rom_sha256, "GENESIS_CPU_DIMENSIONS_NONE"));
-    source += emit_genesis_bridge_c11_main(hex(analysis.startup_ingress->initial_ssp, 8),
-                                           hex(analysis.startup_ingress->entry.value, 8),
-                                           "genesis_dispatch");
+    source += emit_genesis_bridge_c11_main_open(hex(analysis.startup_ingress->initial_ssp, 8),
+                                                hex(analysis.startup_ingress->entry.value, 8));
+    if (g_execution_history_hooks) source += "runtime.execution_history.detail_enabled = 1; ";
+    source += emit_genesis_bridge_c11_main_finish("genesis_dispatch");
     return source;
   }
   if (!analysis.startup_ingress || analysis.profile != M68kFrontendProfile::general_startup ||
@@ -5311,6 +5344,7 @@ std::string emit_m68k_general_startup_bridge_c(const FrontendAnalysis &analysis,
   const auto slot = m68k_startup_ram_offset(ssp);
   out << "  return genesis_internal_dispatch_inconsistency_stop(runtime);\n}\n"
        << emit_genesis_bridge_c11_main_open(hex(ssp, 8), hex(analysis.startup_ingress->entry.value, 8))
+       << (g_execution_history_hooks ? "runtime.execution_history.detail_enabled = 1; " : "")
        << "runtime.work_ram[" << slot << "] = " << byte_literal(completion.sentinel_return_pc.value >> 24U) << "; runtime.work_ram[" << slot + 1U << "] = " << byte_literal(completion.sentinel_return_pc.value >> 16U) << "; runtime.work_ram[" << slot + 2U << "] = " << byte_literal(completion.sentinel_return_pc.value >> 8U) << "; runtime.work_ram[" << slot + 3U << "] = " << byte_literal(completion.sentinel_return_pc.value) << "; "
        << emit_genesis_bridge_c11_main_finish("genesis_dispatch");
   return out.str();

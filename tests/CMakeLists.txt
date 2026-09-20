@@ -438,6 +438,9 @@ add_test(NAME genesis_startup_bridge_c6_accepted_loop_test COMMAND ${Python3_EXE
 add_test(NAME genesis_ephemeral_pc_history_transport_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_ephemeral_pc_history_transport_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME genesis_execution_history_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_execution_history_generated_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_startup_bridge_c6_persistence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_startup_bridge_c6_persistence_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

@@ -1298,7 +1298,7 @@ static int genesis_z80_ram_window_access(GenesisDeviceState *devices, uint32_t a
   return 0;
 }
 
-GenesisAccessResultKind genesis_route_access(GenesisRuntime *runtime, uint32_t address,
+static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *runtime, uint32_t address,
                                               GenesisAccessWidth width,
                                               GenesisAccessDirection direction, uint32_t *value,
                                               GenesisRuntimeStop *stop_out) {
@@ -1539,6 +1539,48 @@ GenesisAccessResultKind genesis_route_access(GenesisRuntime *runtime, uint32_t a
   return GENESIS_ACCESS_FAIL;
 }
 
+/* SEG-020-T003: single bounded typed history append. Pure side-channel. */
+static void genesis_history_append(GenesisRuntime *runtime, GenesisHistoryEventKind kind, uint32_t pc,
+                                   uint32_t next_pc, uint8_t detail, uint8_t width, uint8_t direction) {
+  GenesisExecutionHistory *history = &runtime->execution_history;
+  GenesisExecutionHistoryEvent *event = &history->events[history->total_recorded % GENESIS_EXECUTION_HISTORY_CAPACITY];
+  event->boundary = history->retired_count;
+  event->pc = pc;
+  event->next_pc = next_pc;
+  event->kind = (uint8_t)kind;
+  event->detail = detail;
+  event->width = width;
+  event->direction = direction;
+  ++history->total_recorded;
+}
+
+/* Device-visible classification only (work RAM and cartridge ROM are not
+   device accesses); same predicate order as the router. 0 = not a device. */
+static uint8_t genesis_history_device_region(uint32_t address) {
+  if (address < UINT32_C(0x00400000) || genesis_is_work_ram(address, 1U)) return 0U;
+  if (genesis_is_device(address)) return GENESIS_HISTORY_REGION_CONTROLLER_IO;
+  if (genesis_is_psg_region(address)) return GENESIS_HISTORY_REGION_PSG;
+  if (genesis_is_ym2612_region(address)) return GENESIS_HISTORY_REGION_YM2612;
+  if (genesis_is_vdp_region(address)) return GENESIS_HISTORY_REGION_VDP;
+  if (genesis_is_z80_bus_region(address)) return GENESIS_HISTORY_REGION_Z80_BUS;
+  if (genesis_is_z80_ram_window_region(address)) return GENESIS_HISTORY_REGION_Z80_RAM_WINDOW;
+  return 0U;
+}
+
+GenesisAccessResultKind genesis_route_access(GenesisRuntime *runtime, uint32_t address,
+                                              GenesisAccessWidth width,
+                                              GenesisAccessDirection direction, uint32_t *value,
+                                              GenesisRuntimeStop *stop_out) {
+  const GenesisAccessResultKind status =
+      genesis_route_access_unrecorded(runtime, address, width, direction, value, stop_out);
+  if (status == GENESIS_ACCESS_OK && runtime != 0 && runtime->execution_history.detail_enabled) {
+    const uint8_t region = genesis_history_device_region(address);
+    if (region != 0U)
+      genesis_history_append(runtime, GENESIS_HISTORY_ACCESS, 0U, 0U, region, (uint8_t)width, (uint8_t)direction);
+  }
+  return status;
+}
+
 
 GenesisControlTransfer genesis_internal_dispatch_inconsistency_stop(GenesisRuntime *runtime) {
   GenesisControlTransfer transfer = {0};
@@ -1748,6 +1790,9 @@ static int genesis_construct_exception_frame_and_transfer(GenesisRuntime *runtim
   if (is_irq6_frame) genesis_note_irq6_exception_frame(runtime, frame_base);
   result->next_pc = handler_entry;
   runtime->pc = handler_entry;
+  if (runtime->execution_history.detail_enabled)
+    genesis_history_append(runtime, GENESIS_HISTORY_TRANSFER, 0U, handler_entry,
+                           GENESIS_HISTORY_TRANSFER_EXCEPTION_ENTRY, 0U, 0U);
   return 1;
 }
 
@@ -1891,11 +1936,7 @@ GenesisControlTransfer genesis_runtime_step(GenesisRuntime *runtime, GenesisDisp
      documented boundary, before dispatch() runs. Pure side-channel append --
      no guest state, dispatch selection, or timing is read from or affected by
      this recording. */
-  runtime->recent_pc_history[runtime->recent_pc_history_next] = runtime->pc;
-  runtime->recent_pc_history_next =
-      (uint8_t)((runtime->recent_pc_history_next + 1U) % GENESIS_RECENT_PC_HISTORY_CAPACITY);
-  if (runtime->recent_pc_history_count < GENESIS_RECENT_PC_HISTORY_CAPACITY)
-    ++runtime->recent_pc_history_count;
+  genesis_history_append(runtime, GENESIS_HISTORY_DISPATCH, runtime->pc, 0U, 0U, 0U, 0U);
   /* SEG-007-T175 DEFENSIVE mechanism only (see the PRIMARY synchronous
      drain documented above genesis_vdp_drain_memory_to_vdp_dma_body /
      inside genesis_route_access's VDP branch, which now drains a
@@ -1930,17 +1971,21 @@ GenesisControlTransfer genesis_runtime_retire_m68k_instruction(GenesisRuntime *r
   result.kind = GENESIS_CONTINUE_AT_PC;
   result.next_pc = next_pc;
   runtime->pc = next_pc;
-  if (runtime->execution_history != 0) { /* SEG-020-T003 pure side-channel append */
-    GenesisExecutionHistory *history = runtime->execution_history;
-    GenesisExecutionHistoryEvent *event =
-        &history->events[history->total_recorded % GENESIS_EXECUTION_HISTORY_CAPACITY];
-    event->sequence = history->total_recorded;
-    event->next_pc = next_pc;
-    event->m68k_cycles = m68k_cycles;
-    ++history->total_recorded;
-  }
   if (genesis_irq6_scheduler_and_admit(runtime, m68k_cycles, &result) == 2) return result;
   return result;
+}
+
+GenesisControlTransfer genesis_runtime_retire_m68k_instruction_at(GenesisRuntime *runtime, uint32_t retired_pc,
+                                                                  uint32_t fallthrough_pc,
+                                                                  GenesisHistoryTransferKind transfer_kind,
+                                                                  uint32_t m68k_cycles, uint32_t next_pc) {
+  if (runtime != 0 && runtime->execution_history.detail_enabled) {
+    if (transfer_kind != GENESIS_HISTORY_TRANSFER_NONE && next_pc != fallthrough_pc)
+      genesis_history_append(runtime, GENESIS_HISTORY_TRANSFER, 0U, next_pc, (uint8_t)transfer_kind, 0U, 0U);
+    genesis_history_append(runtime, GENESIS_HISTORY_RETIRED, retired_pc, next_pc, 0U, 0U, 0U);
+    ++runtime->execution_history.retired_count;
+  }
+  return genesis_runtime_retire_m68k_instruction(runtime, m68k_cycles, next_pc);
 }
 
 /*
@@ -2677,39 +2722,74 @@ int genesis_write_full_report(FILE *output, const GenesisRuntime *runtime,
    history, oldest -> newest, hex-formatted exactly like every other PC field
    in genesis_write_full_report. Emits `[]` when `result` is not a
    GENESIS_RUNNER_RESOURCE_LIMIT stop or the history is empty. */
+uint32_t genesis_recent_pc_history_project(const GenesisRuntime *runtime,
+                                           uint32_t out[GENESIS_RECENT_PC_HISTORY_CAPACITY]) {
+  const GenesisExecutionHistory *history;
+  uint64_t total;
+  uint64_t index;
+  uint64_t first;
+  uint32_t count = 0U;
+  uint32_t keep;
+  if (runtime == 0 || out == 0) return 0U;
+  history = &runtime->execution_history;
+  total = history->total_recorded;
+  first = total > GENESIS_EXECUTION_HISTORY_CAPACITY ? total - GENESIS_EXECUTION_HISTORY_CAPACITY : 0U;
+  for (index = first; index < total; ++index)
+    if (history->events[index % GENESIS_EXECUTION_HISTORY_CAPACITY].kind == GENESIS_HISTORY_DISPATCH) ++count;
+  keep = count < GENESIS_RECENT_PC_HISTORY_CAPACITY ? count : GENESIS_RECENT_PC_HISTORY_CAPACITY;
+  count -= keep; /* dispatch events to skip */
+  keep = 0U;
+  for (index = first; index < total; ++index) {
+    const GenesisExecutionHistoryEvent *event = &history->events[index % GENESIS_EXECUTION_HISTORY_CAPACITY];
+    if (event->kind != GENESIS_HISTORY_DISPATCH) continue;
+    if (count != 0U) { --count; continue; }
+    out[keep++] = event->pc;
+  }
+  return keep;
+}
+
+/* Line 1: the recent-PC array (unchanged transport, RESOURCE_LIMIT only).
+   Line 2 (only when detail history is enabled, any result kind): the typed
+   history, oldest -> newest, no values/payloads. */
 int genesis_write_ephemeral_pc_history(FILE *output, const GenesisRuntime *runtime,
                                        const GenesisControlTransfer *result) {
-  uint8_t history_index;
-  uint8_t oldest;
+  uint32_t pcs[GENESIS_RECENT_PC_HISTORY_CAPACITY];
+  uint32_t count;
+  uint32_t index;
   if (output == 0 || runtime == 0 || result == 0) return 1;
   if (fputc('[', output) == EOF) return 1;
   if (result->kind == GENESIS_RUNNER_RESOURCE_LIMIT) {
-    oldest = (uint8_t)(runtime->recent_pc_history_count < GENESIS_RECENT_PC_HISTORY_CAPACITY
-                       ? 0U : runtime->recent_pc_history_next);
-    for (history_index = 0U; history_index < runtime->recent_pc_history_count; ++history_index) {
-      const uint8_t slot = (uint8_t)((oldest + history_index) % GENESIS_RECENT_PC_HISTORY_CAPACITY);
-      if (fprintf(output, "%s\"0x%08x\"", history_index == 0U ? "" : ",",
-                 runtime->recent_pc_history[slot]) < 0) return 1;
-    }
+    count = genesis_recent_pc_history_project(runtime, pcs);
+    for (index = 0U; index < count; ++index)
+      if (fprintf(output, "%s\"0x%08x\"", index == 0U ? "" : ",", pcs[index]) < 0) return 1;
   }
-  return fputs("]\n", output) == EOF;
-}
-
-int genesis_write_ephemeral_execution_history(FILE *output, const GenesisRuntime *runtime) {
-  uint64_t first = 0U;
-  uint64_t index;
-  const GenesisExecutionHistory *history;
-  if (output == 0 || runtime == 0) return 1;
-  history = runtime->execution_history;
-  if (fputc('[', output) == EOF) return 1;
-  if (history != 0) {
-    if (history->total_recorded > GENESIS_EXECUTION_HISTORY_CAPACITY)
-      first = history->total_recorded - GENESIS_EXECUTION_HISTORY_CAPACITY;
-    for (index = first; index < history->total_recorded; ++index) {
-      const GenesisExecutionHistoryEvent *event = &history->events[index % GENESIS_EXECUTION_HISTORY_CAPACITY];
-      if (fprintf(output, "%s{\"seq\":%llu,\"next_pc\":\"0x%08x\",\"cycles\":%u}", index == first ? "" : ",",
-                  (unsigned long long)event->sequence, event->next_pc, event->m68k_cycles) < 0) return 1;
+  if (fputs("]\n", output) == EOF) return 1;
+  if (runtime->execution_history.detail_enabled) {
+    const GenesisExecutionHistory *history = &runtime->execution_history;
+    const uint64_t total = history->total_recorded;
+    const uint64_t first = total > GENESIS_EXECUTION_HISTORY_CAPACITY ? total - GENESIS_EXECUTION_HISTORY_CAPACITY : 0U;
+    uint64_t event_index;
+    if (fputc('[', output) == EOF) return 1;
+    for (event_index = first; event_index < total; ++event_index) {
+      const GenesisExecutionHistoryEvent *event = &history->events[event_index % GENESIS_EXECUTION_HISTORY_CAPACITY];
+      const char *sep = event_index == first ? "" : ",";
+      int rc = 0;
+      if (event->kind == GENESIS_HISTORY_DISPATCH)
+        rc = fprintf(output, "%s{\"b\":%llu,\"k\":\"dispatch\",\"pc\":\"0x%08x\"}", sep,
+                     (unsigned long long)event->boundary, event->pc);
+      else if (event->kind == GENESIS_HISTORY_RETIRED)
+        rc = fprintf(output, "%s{\"b\":%llu,\"k\":\"retired\",\"pc\":\"0x%08x\",\"next\":\"0x%08x\"}", sep,
+                     (unsigned long long)event->boundary, event->pc, event->next_pc);
+      else if (event->kind == GENESIS_HISTORY_TRANSFER)
+        rc = fprintf(output, "%s{\"b\":%llu,\"k\":\"transfer\",\"t\":%u,\"next\":\"0x%08x\"}", sep,
+                     (unsigned long long)event->boundary, (unsigned)event->detail, event->next_pc);
+      else
+        rc = fprintf(output, "%s{\"b\":%llu,\"k\":\"access\",\"r\":%u,\"w\":%u,\"d\":%u}", sep,
+                     (unsigned long long)event->boundary, (unsigned)event->detail, (unsigned)event->width,
+                     (unsigned)event->direction);
+      if (rc < 0) return 1;
     }
+    if (fputs("]\n", output) == EOF) return 1;
   }
-  return fputs("]\n", output) == EOF;
+  return 0;
 }
