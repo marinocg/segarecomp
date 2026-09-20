@@ -130,3 +130,14 @@ persistent traces; bisection/replay; timing comparison; module machinery.
 
 - UNRESOLVED-T004: boundary numbering across exception entry.
 - Deferred: bisection, timing, interrupt/DMA/sound events, closure counts beyond block/edge/call.
+
+## 14. T002 implementation note
+
+`segarecomp emit-general-startup-bridge-c ... --provenance-diagnostics` (opt-in, default off) appends a
+deterministic C lookup (`segarecomp_provenance_diag_table`: guest PC, image offset, block entry,
+M68k form id = `M68kInstructionKind` ordinal) plus the platform-supplied image SHA-256 and static
+closure counts (blocks, instructions, edges, calls — the section 8 subset only). Owner:
+`libs/codegen/c11/.../provenance_diagnostics.hpp` (M68k lowering layer, Genesis-free). Raw instruction
+bytes are never projected and `InstructionProvenance`/`DecodeSource` are unchanged. With the flag off the
+output is byte-identical (the diagnostic text is a pure suffix). Unresolved/pruned/AOT-membership counts
+remain deferred.

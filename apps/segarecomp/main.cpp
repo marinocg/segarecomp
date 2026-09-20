@@ -2,6 +2,7 @@
 #include "segarecomp/direct_flow.hpp"
 #include "segarecomp/moveq.hpp"
 #include "segarecomp/codegen/c11/genesis_frontend.hpp"
+#include "segarecomp/codegen/c11/provenance_diagnostics.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
 #include "segarecomp/rom.hpp"
 
@@ -29,7 +30,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-rom-aot]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-rom-aot] [--provenance-diagnostics]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
                "  segarecomp probe-genesis-startup-mapping <address-hex8> <width-decimal> <image-length-hex16>\n";
@@ -77,6 +78,8 @@ int main(int argc, char **argv) {
       // Explicit non-default gate for complete mapping-derived immutable-ROM
       // AOT enumeration. No caller address/range enters this source.
       bool immutable_rom_aot = false;
+      // SEG-020-T002: opt-in provenance diagnostic table appended to the generated C.
+      bool provenance_diagnostics = false;
       for (int index = 4; index < argc;) {
         const std::string_view option = argv[index];
         if (option == "--reset-entry") {
@@ -85,6 +88,10 @@ int main(int argc, char **argv) {
         } else if (option == "--immutable-rom-aot") {
           if (immutable_rom_aot) { print_usage(std::cerr); return 2; }
           immutable_rom_aot = true;
+          ++index;
+        } else if (option == "--provenance-diagnostics") {
+          if (provenance_diagnostics) { print_usage(std::cerr); return 2; }
+          provenance_diagnostics = true;
           ++index;
         } else if (option == "--entry" || option == "--mapping-base") {
           if (index + 1 >= argc) { print_usage(std::cerr); return 2; }
@@ -222,6 +229,11 @@ int main(int argc, char **argv) {
       // for any seed, exactly as it always has for the round-1 entry.
       for (const auto seed : analysis_seeds)
         program->runtime_confirmed_seeds.push_back({segarecomp::TargetAddressSpace::m68k_program, seed});
+      const auto calls_of = [](const std::vector<segarecomp::M68kStaticFrame> &frames) {
+        std::vector<segarecomp::M68kStaticCall> calls;
+        for (const auto &frame : frames) calls.push_back(frame.call);
+        return calls;
+      };
       const auto result = segarecomp::analyze_m68k_frontend(*program);
       if (immutable_rom_aot) {
         std::uint64_t aligned_start_count = 0U;
@@ -238,10 +250,18 @@ int main(int argc, char **argv) {
       }
       if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) {
         std::cout << segarecomp::emit_m68k_general_startup_bridge_c(*partial, digest_value);
+        if (provenance_diagnostics) {
+          const auto &a = partial->accepted_prefix;
+          std::cout << segarecomp::emit_m68k_provenance_diagnostic_c(segarecomp::build_m68k_provenance_diagnostic_projection(
+              digest_value, a.decoded, a.static_blocks, a.static_edges, calls_of(a.static_frames)));
+        }
         return 0;
       }
       if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result)) {
         std::cout << segarecomp::emit_m68k_general_startup_bridge_c(*accepted, digest_value);
+        if (provenance_diagnostics)
+          std::cout << segarecomp::emit_m68k_provenance_diagnostic_c(segarecomp::build_m68k_provenance_diagnostic_projection(
+              digest_value, accepted->decoded, accepted->static_blocks, accepted->static_edges, calls_of(accepted->static_frames)));
         return 0;
       }
       std::cerr << segarecomp::format_m68k_frontend_result(result) << '\n';
