@@ -44,5 +44,10 @@ int main() {
   CHECK(c1.find(a) != std::string::npos);
   CHECK(c1.find("0xab") == std::string::npos && c1.find("0xcd") == std::string::npos && c1.find("0x5a") == std::string::npos);
   CHECK(c1.find("0xAB") == std::string::npos && c1.find("0x5A") == std::string::npos);
+  // Image offsets above 32 bits must be preserved exactly.
+  blocks[0].instructions[0].source.image_offset.value = UINT64_C(0x0000000100000123);
+  const auto wide = emit_m68k_provenance_diagnostic_c(build_m68k_provenance_diagnostic_projection(a, decoded, blocks, {}, {}));
+  CHECK(wide.find("uint64_t image_offset;") != std::string::npos);
+  CHECK(wide.find("0x100000123ULL") != std::string::npos);
   return 0;
 }

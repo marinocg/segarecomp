@@ -41,7 +41,7 @@ std::string emit_m68k_provenance_diagnostic_c(const M68kProvenanceDiagnosticProj
   std::ostringstream out;
   out << "\n/* SEG-020-T002 provenance diagnostics (opt-in; no raw bytes) */\n"
       << "#include <stddef.h>\n#include <stdint.h>\n"
-      << "typedef struct segarecomp_provenance_diag_entry { uint32_t guest_pc; uint32_t image_offset; uint32_t block_entry; uint32_t form_id; } segarecomp_provenance_diag_entry;\n"
+      << "typedef struct segarecomp_provenance_diag_entry { uint32_t guest_pc; uint64_t image_offset; uint32_t block_entry; uint32_t form_id; } segarecomp_provenance_diag_entry;\n"
       << "const char segarecomp_provenance_diag_cpu[] = \"mc68000\";\n"
       << "const char segarecomp_provenance_diag_image_sha256[] = \"" << projection.image_sha256 << "\";\n"
       << "const uint64_t segarecomp_static_closure_blocks = " << projection.closure.blocks << "ULL;\n"
@@ -50,9 +50,9 @@ std::string emit_m68k_provenance_diagnostic_c(const M68kProvenanceDiagnosticProj
       << "const uint64_t segarecomp_static_closure_calls = " << projection.closure.calls << "ULL;\n"
       << "const size_t segarecomp_provenance_diag_count = " << projection.entries.size() << "U;\n"
       << "const segarecomp_provenance_diag_entry segarecomp_provenance_diag_table[" << (projection.entries.empty() ? 1U : projection.entries.size()) << "] = {\n";
-  if (projection.entries.empty()) out << "  {0U, 0U, 0U, 0xFFFFFFFFU}\n";
+  if (projection.entries.empty()) out << "  {0U, 0ULL, 0U, 0xFFFFFFFFU}\n";
   for (const auto &entry : projection.entries)
-    out << "  {0x" << std::hex << entry.guest_pc << "U, 0x" << static_cast<std::uint32_t>(entry.image_offset) << "U, 0x"
+    out << "  {0x" << std::hex << entry.guest_pc << "U, 0x" << entry.image_offset << "ULL, 0x"
         << entry.block_entry << "U, 0x" << entry.form_id << "U},\n" << std::dec;
   out << "};\n";
   return out.str();
