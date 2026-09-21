@@ -409,12 +409,15 @@ address from the source's updated LOCAL (`m68k_move_src_ea`) instead of the live
 
 - destination `(An)` / `d16(An)` reading the same register: `m68k_move_dst_ea = m68k_move_src_ea (+ d16)`, routed write, no
   destination commit;
+- destination `(d8,An,Xn)` where the base An, an address-register index Xn (word or long), or both name the source
+  register: `m68k_move_dst_ea` is formed from `m68k_move_src_ea` for each such register and from the live array for any
+  other register, so the index sees the post-update value (A7 byte step of 2 included); no destination commit;
 - destination `(An)+` / `-(An)` on the same register: `m68k_move_dst_ea` starts from `m68k_move_src_ea`, is stepped as
   usual, and its commit is emitted last so `(An)+,(An)+` nets two steps.
 
 Every live-register commit is still emitted textually after both routed accesses, so a runtime stop leaves the
 pre-instruction register file. Evidence: `tests/m68k_routed_lowering_test.py` runs the routed and direct lowerings on
-identical vectors (every size, both source update kinds, all four destination kinds, A7 byte stepping) and requires
+identical vectors (every size, both source update kinds, the (An)/d16(An)/(An)+/-(An) destination kinds, and the (d8,An,Xn) destination with base and/or word address-register index on the source register, A7 byte stepping; the routed environment biases every An by the work-RAM base, so a long An index is verified structurally instead of by state comparison) and requires
 identical D/A/SR/PC/memory; the direct lowering is Musashi-validated by `tests/fixtures/m68k-conformance-vectors.json`.
 The same amendment lowers NOT with an auto-updating destination through the NEG/ADD single-local commit (one routed
 read and one routed write at the same address, one commit after both).

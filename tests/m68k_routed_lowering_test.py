@@ -39,6 +39,9 @@ def unary_word(base, size, mode, reg):
     return "%04X" % (base | (UNARY_SIZE[size] << 6) | (mode << 3) | reg)
 
 
+LONG_AN_INDEX = []
+
+
 def cases():
     out = []
     # MOVE alias shapes: (An)+ / -(An) source, every destination kind that reads an address register.
@@ -47,6 +50,25 @@ def cases():
             for dst_mode, ext in ((2, ""), (3, ""), (4, ""), (5, "0010"), (5, "FFF0")):
                 for src_reg, dst_reg in ((0, 0), (0, 1), (7, 7), (7, 0), (0, 7), (3, 3)):
                     out.append(move_word(size, src_mode, src_reg, dst_mode, dst_reg) + ext)
+    # MOVE alias shapes with an indexed (d8,An,Xn) destination: the base An, an address-register index Xn, or both
+    # name the auto-updating source register (which the destination EA must observe after the update).
+    for size in "bwl":
+        for src_mode in (3, 4):
+            for src_reg in (0, 3, 7):
+                other = 1
+                for dst_reg, idx_a, idx_reg, idx_long in (
+                        (src_reg, False, 0, False), (src_reg, False, 2, True),   # base only (index is Dn)
+                        (other, True, src_reg, False), (other, True, src_reg, True),  # index only
+                        (src_reg, True, src_reg, False), (src_reg, True, src_reg, True),  # both
+                        (src_reg, True, other, True), (src_reg, True, other, False)):  # base + other An index
+                    ext = (0x8000 if idx_a else 0) | (idx_reg << 12) | (0x0800 if idx_long else 0) | 0x04
+                    word = move_word(size, src_mode, src_reg, 6, dst_reg) + "%04X" % ext
+                    if idx_a and idx_long:
+                        # The routed environment biases every An by the work-RAM base, so base + a long An index
+                        # cannot be compared against the unbiased direct window; these are checked structurally.
+                        LONG_AN_INDEX.append(word)
+                    else:
+                        out.append(word)
     # MOVE with a non-aliasing memory destination, indexed operands and an immediate source. Absolute and
     # PC-relative operands are excluded by construction: they address cartridge/ROM space or the sign-extended
     # top of the address space, which the work-RAM-only routed environment and the 1 MiB direct window cannot
@@ -67,6 +89,7 @@ def cases():
             for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
                 for reg in ((1, 7) if mode in (3, 4) else (1,)):
                     out.append(unary_word(base, size, mode, reg) + ext)
+    LONG_AN_INDEX[:] = sorted(set(LONG_AN_INDEX))
     return sorted(set(out))
 
 
@@ -138,6 +161,13 @@ with tempfile.TemporaryDirectory() as tmp:
     routed_status = emit(["--routed"], codes, tmp / "routed.c")
     bad = [c for c in codes if direct_status.get(c) != "ok" or routed_status.get(c) != "ok"]
     check(not bad, "encodings that do not emit on both routes: %s" % bad[:12])
+    # Long An-indexed destinations behind an auto-updating source: the destination address must be derived from
+    # the source's updated local, never from the live (stale) register array.
+    emit_status = emit(["--routed"], LONG_AN_INDEX, tmp / "long_index.c")
+    check(all(emit_status.get(c) == "ok" for c in LONG_AN_INDEX), "long An-index alias shapes must emit")
+    text = (tmp / "long_index.c").read_text()
+    check(text.count("const uint32_t m68k_move_dst_ea = (uint32_t)(") == len(LONG_AN_INDEX) * 1 and
+          "(int32_t)m68k_move_src_ea" in text, "long An-index alias shapes must use the updated source local")
     (tmp / "driver.c").write_text(DRIVER)
     flags = ["-std=c11", "-O0", "-Wall", "-Wextra", "-Wno-type-limits", "-pedantic", "-Werror", "-I", str(RUNTIME_DIR)]
     objs = []

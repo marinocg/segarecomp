@@ -3034,6 +3034,26 @@
    }
   },
   {
+   "id": "move.ea_ea.b.postinc.index_an",
+   "form": "move.ea_ea.b.postinc.index",
+   "bind": {
+    "x": "ea.src",
+    "y": "eaM.dst"
+   },
+   "ext": [
+    "8004",
+    "8804",
+    "9004",
+    "9804",
+    "E004",
+    "F804"
+   ],
+   "profile": "move_even",
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
    "id": "move.ea_ea.b.postinc.postinc",
    "form": "move.ea_ea.b.postinc.postinc",
    "bind": {
@@ -3138,6 +3158,26 @@
    },
    "ext": [
     "1004"
+   ],
+   "profile": "move_even",
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
+   "id": "move.ea_ea.b.predec.index_an",
+   "form": "move.ea_ea.b.predec.index",
+   "bind": {
+    "x": "ea.src",
+    "y": "eaM.dst"
+   },
+   "ext": [
+    "8004",
+    "8804",
+    "9004",
+    "9804",
+    "E004",
+    "F804"
    ],
    "profile": "move_even",
    "init": {
@@ -4296,6 +4336,26 @@
    }
   },
   {
+   "id": "move.ea_ea.l.postinc.index_an",
+   "form": "move.ea_ea.l.postinc.index",
+   "bind": {
+    "x": "ea.src",
+    "y": "eaM.dst"
+   },
+   "ext": [
+    "8004",
+    "8804",
+    "9004",
+    "9804",
+    "E004",
+    "F804"
+   ],
+   "profile": "move_even",
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
    "id": "move.ea_ea.l.postinc.postinc",
    "form": "move.ea_ea.l.postinc.postinc",
    "bind": {
@@ -4400,6 +4460,26 @@
    },
    "ext": [
     "1004"
+   ],
+   "profile": "move_even",
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
+   "id": "move.ea_ea.l.predec.index_an",
+   "form": "move.ea_ea.l.predec.index",
+   "bind": {
+    "x": "ea.src",
+    "y": "eaM.dst"
+   },
+   "ext": [
+    "8004",
+    "8804",
+    "9004",
+    "9804",
+    "E004",
+    "F804"
    ],
    "profile": "move_even",
    "init": {
@@ -5558,6 +5638,26 @@
    }
   },
   {
+   "id": "move.ea_ea.w.postinc.index_an",
+   "form": "move.ea_ea.w.postinc.index",
+   "bind": {
+    "x": "ea.src",
+    "y": "eaM.dst"
+   },
+   "ext": [
+    "8004",
+    "8804",
+    "9004",
+    "9804",
+    "E004",
+    "F804"
+   ],
+   "profile": "move_even",
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
    "id": "move.ea_ea.w.postinc.postinc",
    "form": "move.ea_ea.w.postinc.postinc",
    "bind": {
@@ -5662,6 +5762,26 @@
    },
    "ext": [
     "1004"
+   ],
+   "profile": "move_even",
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
+   "id": "move.ea_ea.w.predec.index_an",
+   "form": "move.ea_ea.w.predec.index",
+   "bind": {
+    "x": "ea.src",
+    "y": "eaM.dst"
+   },
+   "ext": [
+    "8004",
+    "8804",
+    "9004",
+    "9804",
+    "E004",
+    "F804"
    ],
    "profile": "move_even",
    "init": {

@@ -1169,8 +1169,17 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
             operation.destination_ea.mode == M68kEaMode::address_postinc ||
             operation.destination_ea.mode == M68kEaMode::address_indirect ||
             operation.destination_ea.mode == M68kEaMode::address_disp16;
-        const bool destination_aliases_source_local = source_mutating && destination_reads_same_register_address &&
-            operation.source_ea.reg == operation.destination_ea.reg;
+        // (d8,An,Xn): both the base An and an address-register index Xn read
+        // the source's post-update value when they name the source register.
+        const auto &dea = operation.destination_ea;
+        const bool destination_index_uses_source =
+            source_mutating && dea.mode == M68kEaMode::address_index8 &&
+            (dea.reg == operation.source_ea.reg ||
+             (dea.index_is_address && dea.index_reg == operation.source_ea.reg));
+        const bool destination_aliases_source_local =
+            source_mutating &&
+            ((destination_reads_same_register_address && operation.source_ea.reg == dea.reg) ||
+             destination_index_uses_source);
         const bool aliasing_rejected = false;
         if (!aliasing_rejected) {
           unsigned temp_ordinal = 0U;
@@ -1223,12 +1232,24 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
           // register into a second, distinct local (Q3 already rejected the
           // only way it could ever alias the source's register) and applies
           // predecrement before the access, mirroring the source above.
-          if (ok && destination_aliases_source_local && !destination_mutating) {
+          if (ok && destination_aliases_source_local && !destination_mutating && !destination_index_uses_source) {
             // Non-mutating (An)/d16(An) destination reading the source's updated register.
             body << "const uint32_t m68k_move_dst_ea = m68k_move_src_ea";
             if (operation.destination_ea.mode == M68kEaMode::address_disp16)
               body << " + (uint32_t)(int32_t)(int16_t)" << static_cast<int>(operation.destination_ea.displacement);
             body << ";\n";
+          }
+          if (ok && destination_index_uses_source) {
+            const auto reg_expr = [&](bool is_address, unsigned n) {
+              if (is_address && n == static_cast<unsigned>(operation.source_ea.reg)) return std::string("m68k_move_src_ea");
+              return std::string(is_address ? memory->address_registers : data_registers) + "[" + std::to_string(n) + "]";
+            };
+            const auto index_value = reg_expr(dea.index_is_address, static_cast<unsigned>(dea.index_reg));
+            body << "const uint32_t m68k_move_dst_ea = (uint32_t)("
+                 << reg_expr(true, static_cast<unsigned>(dea.reg)) << " + "
+                 << (dea.index_is_long ? "(int32_t)" + index_value
+                                       : "(int32_t)(int16_t)(uint16_t)" + index_value)
+                 << " + (int32_t)(int8_t)" << static_cast<int>(dea.displacement) << ");\n";
           }
           if (ok && destination_mutating) {
             body << "uint32_t m68k_move_dst_ea = "
