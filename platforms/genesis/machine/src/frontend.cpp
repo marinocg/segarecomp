@@ -3785,7 +3785,23 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
                                  decoded->second.kind == M68kInstructionKind::branch ||
                                  decoded->second.kind == M68kInstructionKind::bsr ||
                                  decoded->second.kind == M68kInstructionKind::dbcc;
-        if (is_transfer) break;
+        if (is_transfer) {
+          // A terminal direct branch/DBcc/BSR whose discovery never recorded a single outgoing edge belongs to
+          // a walk that did not complete (its decoded bytes survived, its control edges did not). Retaining it
+          // as a "completed" block would hand C4 a branch terminal with no successor (an incomplete static edge
+          // that rejects the entire program as soon as any retained code reaches it), so it is incomplete.
+          const auto kind = decoded->second.kind;
+          const bool edge_bearing_terminal =
+              kind == M68kInstructionKind::bne_short || kind == M68kInstructionKind::bra_short ||
+              kind == M68kInstructionKind::branch || kind == M68kInstructionKind::bsr ||
+              kind == M68kInstructionKind::dbcc;
+          if (completed_blocks_only && edge_bearing_terminal &&
+              std::none_of(discovered_edges.begin(), discovered_edges.end(), [&](const M68kStaticEdge &edge) {
+                return edge.source_instruction.source.address.value == pc;
+              }))
+            complete = false;
+          break;
+        }
         // SEG-007-T040 (C3): a straight-line block whose very next address is
         // the known frontier (the one instruction discovery separately
         // failed on) is exactly as cleanly terminated as one merging into an

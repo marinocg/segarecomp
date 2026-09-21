@@ -210,7 +210,7 @@ update N/Z (V/C cleared, X preserved); commit the live An in one statement after
 same-register aliasing hazard (the other operand is never An). The C4 classifier and the decoded-instruction pre-gate no
 longer emit `requires_architecture_decision` rows for these shapes; immutable-ROM AOT admission
 (`m68k_operation_is_immutable_rom_aot_safe`) is family-level for all six mnemonics. Remaining declined auto-update shapes:
-MULS/MULU/DIVS/DIVU sources (SEG-021-T010) and bit-test destinations.
+MULS/MULU/DIVS/DIVU sources (SEG-021-T010); the bit-test destinations declined at T007 are lowered by SEG-021-T008 (below).
 
 ## SEG-021-T008: BTST / BCHG / BCLR / BSET
 
@@ -224,3 +224,7 @@ last. A routed stop returns before any architectural write; byte on A7 steps by 
 mnemonics; legality (incl. `(d8,An,Xn)`, and for BTST `d16(PC)`, `(d8,PC,Xn)` and dynamic `#imm`) is owned by decode.
 `tests/m68k_routed_lowering_test.py` proves routed-vs-direct equality and stop atomicity for every auto-updating shape.
 Remaining declined auto-update shapes: MULS/MULU/DIVS/DIVU sources (SEG-021-T010).
+
+AOT admission additionally requires the shared retirement-timing seam to account for the operation
+(`m68k_instruction_cycles`): the dynamic `BTST Dn,#<data>` form has no published static timing row and is declined at
+analysis time rather than admitted and rejected by codegen (which invalidated the whole immutable-ROM AOT program).

@@ -9,6 +9,7 @@
 #include "segarecomp/device/sega/genesis/controller_io.hpp"
 #include "segarecomp/machine/genesis/address_types.hpp"
 #include "segarecomp/cpu/m68k/c4.hpp"
+#include "segarecomp/cpu/m68k/timing.hpp"
 #include "segarecomp/recompiler/frontend.hpp"
 
 #include <array>
@@ -730,7 +731,11 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // returns before any architectural write; auto-updating destinations use the operation-local deferred
     // address-register commit (c4-add-family-auto-update-commit-contract.md); BTST never writes back. The
     // emitter fails closed on any shape it cannot lower and operand-mode legality is owned by decode.
-    return true;
+    // The one shared retirement-timing seam must also account for the operation: a candidate with no
+    // published static timing row (the dynamic `BTST Dn,#<data>` form) is declined here, at analysis time,
+    // exactly like every other codegen-side requirement, so the analysis and codegen boundaries agree and
+    // one unaccounted candidate can never invalidate the whole immutable-ROM AOT program.
+    return m68k_instruction_cycles(operation).has_value();
   case M68kIrKind::return_from_subroutine:
     // SEG-007-T246: existing-authority integration, not a new architecture.
     // When the whole-program `runtime_return_target_set` (ADR-0011 Decision

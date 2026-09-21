@@ -7506,6 +7506,29 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
     expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
            "SEG-021-T008 family-level admission: -(An) is admitted for the same reason as (An)+");
   }
+  // SEG-021-T008: family-level admission still requires the one shared retirement-timing seam to account
+  // for the operation. The dynamic `BTST Dn,#<data>` form has no published static timing row, so it is
+  // declined at analysis time (never admitted and then rejected by codegen, which would invalidate the
+  // whole immutable-ROM AOT program); every other legal bit-operation destination class is admitted.
+  {
+    operation.kind = M68kIrKind::bit_test;
+    operation.size = M68kMemoryAccessWidth::byte;
+    operation.source_ea.mode = M68kEaMode::data_register;
+    operation.destination_ea.mode = M68kEaMode::immediate;
+    expect(!m68k_instruction_cycles(operation).has_value() &&
+               !m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "BTST Dn,#imm has no timing row and is not admitted to the immutable-ROM AOT route");
+    for (const auto mode : {M68kEaMode::address_indirect, M68kEaMode::address_postinc, M68kEaMode::address_predec,
+                            M68kEaMode::address_disp16, M68kEaMode::address_index8, M68kEaMode::absolute_word,
+                            M68kEaMode::absolute_long, M68kEaMode::pc_disp16, M68kEaMode::pc_index8}) {
+      operation.destination_ea.mode = mode;
+      expect(m68k_instruction_cycles(operation).has_value() &&
+                 m68k_operation_is_immutable_rom_aot_safe(operation, false),
+             "every other legal BTST destination class has a timing row and is admitted");
+    }
+    operation.source_ea.mode = M68kEaMode::immediate;
+    operation.destination_ea.mode = M68kEaMode::address_postinc;
+  }
   // SEG-007-T245 (fourth iteration, same bounded family): MOVEA admits a
   // memory-EA source (its destination is always a plain An overwrite, no
   // read-modify-write hazard).
@@ -25956,10 +25979,12 @@ void multiple_predecessors_observe_one_destination_global_frontier() {
       0x4EU, 0x71U,  // +0x0 NOP    (reset ingress instr1)
       0x4EU, 0x70U,  // +0x2 RESET  (reset frontier)
       0x4EU, 0x71U,  // +0x4 NOP    (W1: isolated admitted root)
-      0x60U, 0x04U,  // +0x6 BRA.S  -> +0xC
+      0x60U, 0x06U,  // +0x6 BRA.S  -> +0xE
       0x4EU, 0x71U,  // +0x8 NOP    (W2: isolated admitted root)
-      0x60U, 0x00U,  // +0xA BRA.S  -> +0xC
-      0x4EU, 0x75U,  // +0xC RTS    (Z: shared orphan destination)
+      0x60U, 0x02U,  // +0xA BRA.S  -> +0xE (SEG-021-T008: a genuine short branch; the former `60 00` was the
+                     //              degenerate word-displacement encoding, a branch without a discovered edge)
+      0x4EU, 0x71U,  // +0xC NOP    (unreached filler)
+      0x4EU, 0x75U,  // +0xE RTS    (Z: shared orphan destination)
   };
   const auto result = analyze_m68k_frontend(
       make_program(base, image, "synthetic/SEG-007-T234/multiple-predecessors",
@@ -25970,9 +25995,41 @@ void multiple_predecessors_observe_one_destination_global_frontier() {
   const auto &prefix = partial->accepted_prefix;
   expect(has_block(prefix, base + 0x4U) && has_block(prefix, base + 0x8U),
          "SEG-007-T234 (multiple predecessors): both independent roots commit");
-  expect(known_but_unemitted_frontier_count(*partial, base + 0xCU) == 1U,
+  expect(known_but_unemitted_frontier_count(*partial, base + 0xEU) == 1U,
          "SEG-007-T234 (multiple predecessors): exactly one destination-global frontier represents the shared "
          "destination, never a duplicate or per-predecessor stop");
+}
+
+// SEG-021-T008 regression (canonical route): a decoded direct-branch terminal for which discovery recorded no
+// outgoing edge at all (its walk did not complete: here BRA.W whose displacement leaves the mapped image) is
+// not a completed block. Retaining it handed C4 a branch terminal without a successor, rejecting the whole
+// translation ("incomplete C4 static edge") as soon as any retained code reached it.
+void branch_terminal_without_discovered_edges_is_not_a_completed_block() {
+  constexpr std::uint32_t base = 0x0000F180U;
+  const std::vector<std::uint8_t> image{
+      0x4EU, 0x71U,  // +0x0 NOP    (reset ingress instr1)
+      0x4EU, 0x70U,  // +0x2 RESET  (reset frontier)
+      0x4EU, 0x71U,  // +0x4 NOP    (W: isolated admitted root)
+      0x60U, 0x00U, 0x4EU, 0x75U,  // +0x6 BRA.W with a displacement leaving the image: no edge is discoverable
+  };
+  const auto result = analyze_m68k_frontend(
+      make_program(base, image, "synthetic/SEG-021-T008/branch-without-edges", {make_candidate(base + 0x4U)}));
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "SEG-021-T008 (edgeless branch): the fixture reaches a partial program");
+  if (partial == nullptr) return;
+  expect(!has_block(partial->accepted_prefix, base + 0x4U),
+         "SEG-021-T008 (edgeless branch): a branch terminal without any discovered edge is not a completed block");
+  for (const auto &edge : partial->accepted_prefix.static_edges) {
+    bool has_terminal_block = false;
+    for (const auto &block : partial->accepted_prefix.static_blocks)
+      has_terminal_block = has_terminal_block ||
+                           block.instructions.back().source.address.value ==
+                               edge.source_instruction.source.address.value;
+    (void)has_terminal_block;
+  }
+  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  expect(!emitted.empty() && !emitted.starts_with("/* translation rejected:"),
+         "SEG-021-T008 (edgeless branch): C4 emits the prefix instead of rejecting the whole translation");
 }
 
 // An isolated admitted root branches into a computed-control JMP (An) with no
@@ -27275,6 +27332,7 @@ int main(int argc, char **argv) {
   t223_continuation_capacity_fixture::current_ceiling_plus_one_still_fails_closed();
   t234_adr0038_closure::isolated_root_orphan_rts_two_level_chain_commits();
   t234_adr0038_closure::multiple_predecessors_observe_one_destination_global_frontier();
+  t234_adr0038_closure::branch_terminal_without_discovered_edges_is_not_a_completed_block();
   t234_adr0038_closure::unresolved_computed_control_leaf_still_lets_parent_commit();
   t234_adr0038_closure::one_retained_root_represents_multiple_independent_pruned_leaves_without_conflation();
   t234_adr0038_closure::independent_components_commit_without_conflation();

@@ -1037,10 +1037,12 @@ struct M68kEaFieldOutcome {
                        : dynamic_bit_number              ? m68k_ea_bit_test_dynamic_destination
                                                          : m68k_ea_bit_test_destination;
     // `size` here is only a placeholder for m68k_decode_one_ea's extension-byte
-    // computation, which never depends on width for a non-immediate EA (the
-    // destination is never immediate for any selected bit operation); the
-    // real per-instruction size is derived below from the EA mode actually
-    // selected.
+    // computation, which never depends on width for a non-immediate EA. The one
+    // immediate destination -- the architecturally legal dynamic `BTST Dn,#<data>`
+    // -- is a byte operand whose single extension word is read through the
+    // byte-width placeholder, exactly like a byte immediate elsewhere; no other
+    // bit operation can select an immediate destination. The real per-instruction
+    // size is derived below from the EA mode actually selected.
     const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, consumed_before_dst, mode3, reg3,
                                         legal, M68kMemoryAccessWidth::byte);
     if (!dst.ok) return dst.failure;
