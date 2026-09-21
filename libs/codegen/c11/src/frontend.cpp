@@ -1722,6 +1722,10 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   // per-instruction wiring is needed here.
   memory.runtime_routing = true;
   memory.runtime_object = "runtime";
+  // SEG-021-T005: an isolated AOT candidate has no whole-program absolute-
+  // operand fact; absolute and d16(PC) source reads take the runtime-routed
+  // read (never a folded constant).
+  memory.test_operand_access = M68kOperandAccess::runtime_routed;
   if (entry.operation.kind == M68kIrKind::multiply_signed_word ||
       entry.operation.kind == M68kIrKind::multiply_unsigned_word)
     memory.timing_mul_source = "m68k_timing_mul_source";
@@ -2194,11 +2198,9 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     // destination_read and destination_write facts.
     if (operation.destination_ea.mode != M68kEaMode::data_register &&
         operation.destination_ea.mode != M68kEaMode::address_register) {
-      if (const auto update = m68k_c4_auto_update_class(operation.destination_ea.mode);
-          update != M68kC4AutoUpdateClass::none) {
-        add(M68kC4OperandRole::destination, operation.destination_ea.mode, update,
-            M68kC4GapClass::requires_architecture_decision, "deferred address commit");
-      } else {
+      // SEG-021-T005: an auto-updating destination is lowered by the NOT
+      // deferred-address-commit path in emit_m68k_operation_c (no gap row).
+      if (m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none) {
         check_fact(operation.destination_ea, M68kC4OperandRole::destination,
                    M68kStaticMemoryFactRole::destination_read);
         check_fact(operation.destination_ea, M68kC4OperandRole::destination,
@@ -2220,7 +2222,10 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     const auto fact_role = operation.kind == M68kIrKind::test_operand ? M68kStaticMemoryFactRole::source_read
                                                                        : M68kStaticMemoryFactRole::destination_write;
     if (const auto update = m68k_c4_auto_update_class(ea.mode); update != M68kC4AutoUpdateClass::none) {
-      add(role, ea.mode, update, M68kC4GapClass::requires_architecture_decision, "deferred address commit");
+      // SEG-021-T005: TST lowers its own auto-updating operand through the deferred address-register
+      // commit (test_operand case of emit_m68k_operation_c); only the ANDI/ORI/EORI destinations still decline.
+      if (operation.kind != M68kIrKind::test_operand)
+        add(role, ea.mode, update, M68kC4GapClass::requires_architecture_decision, "deferred address commit");
     } else {
       check_fact(ea, role, fact_role);
     }
@@ -3026,6 +3031,8 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
       if (kind != M68kInstructionKind::move && kind != M68kInstructionKind::add &&
           kind != M68kInstructionKind::adda && kind != M68kInstructionKind::addq &&
           kind != M68kInstructionKind::clr && kind != M68kInstructionKind::movea &&
+          // SEG-021-T005: `tst` and `not` lower their own auto-updating operand (deferred commit).
+          kind != M68kInstructionKind::tst && kind != M68kInstructionKind::not_operand &&
           (ea.mode == M68kEaMode::address_predec || ea.mode == M68kEaMode::address_postinc))
         return false;
       return !m68k_is_statically_foldable_control_ea(ea) || facts.contains({address, role});

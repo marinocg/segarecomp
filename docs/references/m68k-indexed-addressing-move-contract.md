@@ -4,7 +4,7 @@
 
 One bounded addressing-mode extension of the already-supported `MOVE` / `MOVEA` family: address
 register indirect with index and 8-bit displacement — `(d8,An,Xn)` — **brief-format extension word
-only**, as a source operand. This is not a new instruction kind and introduces no new IR kind, no new
+only**, as a MOVE/MOVEA source and as a MOVE, CLR, NOT and TST destination/operand. This is not a new instruction kind and introduces no new IR kind, no new
 persistent runtime state, and no new diagnostic / frontier class.
 
 ## Encoding (Motorola *M68000 Family Programmer's Reference Manual*, brief-format extension word)
@@ -51,18 +51,25 @@ extension.
 - Decode: `m68k_parse_ea_field` (`src/cpu/m68k/decode.cpp`) parses the brief-format word into
   `M68kEaMode::address_index8` with `index_reg` / `index_is_address` / `index_is_long` on the
   existing `M68kEffectiveAddress`. Extension-word bounds are checked exactly like `d16(An)`.
-- Legality: `m68k_ea_index8` is exposed through a dedicated `m68k_ea_move_primary_source` mask
-  (`m68k_ea_move_source | m68k_ea_index8`) consumed by MOVE/MOVEA decode only. The shared
-  `m68k_ea_move_source` set — which also gates the ADD/SUB/CMP/AND/OR source operand — is left
-  unchanged, so an indexed source on any non-MOVE family instruction stays
-  `valid_but_unsupported_instruction`. Indexed `MOVE` **destinations**
-  remain `valid_but_unsupported_instruction` (not wired through the C4 static-memory-fact /
-  runtime-routed destination machinery), mirroring the SEG-007-T088 / T116 / T118 scope-narrowing
-  precedent.
+- Legality (SEG-021-T005 family contract, encoded from the Motorola manual, independent of any
+  test dataset). MOVE/MOVEA source classes (`m68k_ea_move_family_source`): `Dn`; `An` (word/long only,
+  never byte); `(An)`; `(An)+`; `-(An)`; `d16(An)`; brief `(d8,An,Xn)`; absolute.W; absolute.L;
+  `d16(PC)`; brief `(d8,PC,Xn)`; immediate. Plain MOVE destination classes
+  (`m68k_ea_move_family_destination`): `Dn`; `(An)`; `(An)+`; `-(An)`; `d16(An)`; brief `(d8,An,Xn)`;
+  absolute.W; absolute.L. The MOVEA destination is always the fixed `An`. CLR/NOT use the
+  data-alterable set including `(d8,An,Xn)` (`m68k_ea_clr_not_operand`), TST the same without
+  An/PC-relative/immediate (`m68k_ea_tst_operand`). The masks are shared only by these five
+  mnemonics; the older shared `m68k_ea_move_source` set that gates ADD/SUB/CMP/AND/OR sources is
+  unchanged. Indexed MOVE destinations are supported and flow through the same routed/C4 and
+  immutable-ROM AOT lowering as every other memory destination.
 - Lift / effect: unchanged — the decoded EA is carried through to `write_move` / `write_movea` as an
   unresolved fact, exactly like every other memory EA mode.
-- C11 lowering: `m68k_emit_runtime_ea_address` gains the `address_index8` arm; `m68k_emit_ea_read`
-  routes it through the same runtime bus-address / `genesis_route_access` path as
-  `(An)` / `d16(An)`.
-- Decode profiles: accepted only by `general_startup`; `genesis_startup` and `direct_flow` continue
-  to reject the form.
+- C11 lowering: `m68k_emit_runtime_ea_address` has the `address_index8` arm; `m68k_emit_ea_read`
+  and `m68k_emit_ea_write` route it through the same runtime bus-address / `genesis_route_access`
+  path as `(An)` / `d16(An)`. When an auto-updating `(An)+`/`-(An)` MOVE source names the same
+  address register as the destination's `(d8,An,Xn)` base or address-register index, the destination
+  address is formed from the source's updated local, and architectural register writes stay deferred
+  until both routed accesses succeed (see the C4 MOVE commit contract, Q3).
+- Decode profiles: the family legality above is what the `general_startup` profile decodes;
+  the narrower `genesis_startup`/`direct_flow` profiles are unchanged by T005. Scaled-index /
+  full-format extension words remain rejected fail-closed.

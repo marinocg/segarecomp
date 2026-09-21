@@ -657,87 +657,30 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
   case M68kIrKind::load_effective_address:
     return operation.destination_ea.mode == M68kEaMode::address_register;
   case M68kIrKind::write_clr:
-    // SEG-007-T249 (continuation, same bounded family and architectural
-    // seam T245 opened -- consumed and corrected in this same task rather
-    // than split into a premature successor): CLR's own shared C4 lowering
-    // (`emit_m68k_operation_c`'s `write_clr` case, libs/codegen/c11/src/m68k.cpp)
-    // already has two branches: an auto-updating `(An)+`/`-(An)` destination
-    // (SEG-007-T157/ADR-0019's own deferred-address-register-commit
-    // technique, unrelated to this admission), and a plain, non-auto-
-    // updating destination that routes a single WRITE of the constant zero
-    // through the exact same `m68k_emit_ea_write` boundary every other
-    // admitted plain-destination carve-out in this predicate already
-    // reuses. `d16(An)` (`address_disp16`) never mutates any address
-    // register in that write path, so recomputing its EA needs no
-    // deferred-commit machinery and no Q3-style aliasing hazard (CLR has no
-    // source operand at all -- nothing to alias against). A routed-write
-    // failure returns from inside `m68k_emit_ea_write`'s own generated
-    // write statement, strictly before the fixed N=0/Z=1/V=0/C=0 CCR update
-    // and the PC advance that follow it in the shared lowering, so a failed
-    // access never exposes a partial CCR update or a partial PC advance.
-    // CLR's own decode-stage destination legalization
-    // (`m68k_ea_data_alterable`, `m68k_decode_general_clr`) is the exact
-    // same mask the general add/subtract/logical family above uses, and it
-    // never legalizes the brief-format indexed `address_index8` form as a
-    // destination -- so, mirroring that family's own bounded scope,
-    // `address_index8` is deliberately NOT admitted here either (an
-    // unreachable claim CLR's own decode never produces). Kept as its own
-    // dedicated case, independent from `logical_not`/`negate_word`/`read_
-    // status_register` below (none of which have been independently
-    // examined for a memory destination in this task), rather than
-    // broadening their shared grouped case merely because CLR itself is
-    // safe. Every other memory destination ((An), (An)+, -(An), absolute,
-    // address_index8) remains excluded pending its own independent proof;
-    // the auto-updating (An)+/-(An) destination path is unaffected by this
-    // admission (this predicate is never consulted for that already-
-    // distinct deferred-commit branch's own shape).
-    return destination_register() || operation.destination_ea.mode == M68kEaMode::address_disp16;
+  case M68kIrKind::logical_not:
+  case M68kIrKind::test_operand:
+  case M68kIrKind::write_move:
+  case M68kIrKind::write_movea:
+    // SEG-021-T005: MOVE/MOVEA/CLR/NOT/TST family-level admission. Every
+    // legal EA mode of these five mnemonics lowers through the shared C4
+    // routed read/write primitives with no CFG edge, call frame, return
+    // target or static memory fact: `emit_immutable_rom_aot_body` selects
+    // runtime-routed access for absolute and d16(PC) reads, so no resolver
+    // fact is required. Auto-updating operands use the operation-local
+    // deferred address-register commit (c4-add-family-auto-update-commit-
+    // contract.md), which returns from a failed routed access before any
+    // architectural state changes; the emitter itself fails closed on any
+    // shape it cannot lower (the C4 route-admission gate is unchanged).
+    // Legality of the operand modes is owned by decode, not by this
+    // predicate.
+    return true;
   case M68kIrKind::negate_word:
     // Only the independently reached non-auto-updating d16(An) RMW form is
     // AOT-safe. Legal auto-updating forms use the normal routed lowering but
     // remain outside immutable-ROM AOT admission.
     return destination_register() || operation.destination_ea.mode == M68kEaMode::address_disp16;
-  case M68kIrKind::logical_not:
   case M68kIrKind::read_status_register:
     return destination_register();
-  case M68kIrKind::test_operand:
-    if (storage_free(operation.source_ea)) return true;
-    // SEG-007-T245 (fifth iteration, same bounded family, same
-    // architectural seam): TST is read-only by construction (its shared C4
-    // lowering, `case M68kIrKind::test_operand:` in
-    // libs/codegen/c11/src/m68k.cpp, only ever emits condition-code updates and
-    // a PC advance) and its non-mutating `d16(An)` source needs no
-    // address-register mutation at all -- one ordinary routed read through
-    // the same shared, already-proven `m68k_emit_ea_read` this task's other
-    // carve-outs above already reuse. Every mutating memory form ((An)+,
-    // -(An)) stays excluded pending its own independent proof.
-    // SEG-007-T248 (sixth iteration, same bounded family, same
-    // architectural seam): the brief-format indexed `(d8,An,Xn)` source
-    // (`address_index8`) is admitted alongside `address_disp16` on the same
-    // reasoning. `m68k_emit_runtime_ea_address`'s `address_index8` branch
-    // (libs/codegen/c11/src/m68k.cpp) computes the effective address purely from
-    // already-decoded extension-word fields (base `An`, index `Xn`, index
-    // size/sign-extension, signed `d8`) and current register-file state,
-    // emitting no prelude/postlude -- exactly like `address_disp16`, it
-    // mutates no address register at all, so there is no deferred-commit
-    // machinery, no Q3-style aliasing hazard, and no static
-    // `memory.test_operand_region` fact to supply (that fact is only
-    // required by `m68k_emit_ea_read`'s separate `absolute_word`/
-    // `absolute_long`/`pc_disp16` branch, never reached here). Both modes
-    // share the exact same `m68k_emit_ea_read` switch arm
-    // (`address_indirect`/`address_postinc`/`address_predec`/
-    // `address_index8`/`pc_index8`/`address_disp16`), which always routes
-    // through `m68k_emit_routed_read`/`genesis_route_access`; a failed route
-    // returns a `GENESIS_STOP` transfer from within that read's own prelude
-    // statement, strictly before the CCR-update/PC-advance block
-    // `emit_m68k_operation_c`'s `test_operand` case emits, so a routed-read
-    // failure can never partially mutate CCR or PC. The PC-relative sibling
-    // `pc_index8` remains excluded: it is a distinct addressing-mode class
-    // this predicate has not examined, and no other memory-EA `test_operand`
-    // source (mutating `(An)+`/`-(An)`, absolute, `pc_disp16`) is admitted by
-    // this change.
-    return operation.source_ea.mode == M68kEaMode::address_disp16 ||
-           operation.source_ea.mode == M68kEaMode::address_index8;
   case M68kIrKind::write_status_register:
   case M68kIrKind::write_condition_codes:
   case M68kIrKind::multiply_signed_word:
@@ -876,190 +819,6 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     return storage_free(operation.source_ea) &&
            (storage_free(operation.destination_ea) ||
             operation.destination_ea.mode == M68kEaMode::address_index8);
-  case M68kIrKind::write_move: {
-    if (storage_free(operation.source_ea) && storage_free(operation.destination_ea)) return true;
-    // SEG-007-T245: narrow, independently-proven-safe extension. A MOVE
-    // whose destination is a plain data register and whose source is a
-    // register-indirect memory read ((An), (An)+, -(An)) needs no CFG edge,
-    // block, frame, call, return, or static resolver fact: its existing
-    // shared C4 lowering (emit_m68k_operation_c's write_move case,
-    // libs/codegen/c11/src/m68k.cpp) always routes the memory access through
-    // genesis_route_access, and for a mutating source defers the address-
-    // register commit until strictly after that routed access has already
-    // succeeded (docs/architecture/c4-move-predecrement-postincrement-
-    // commit-contract.md, SEG-007-T069/T070, already adversarially
-    // validated) -- a GENESIS_STOP from a failed route always returns
-    // before any architectural state, including the address register, is
-    // mutated. This depends only on `memory->runtime_routing` (which
-    // `emit_immutable_rom_aot_body` now sets), never on any retained CFG
-    // fact. Every other memory-EA MOVE shape (memory destination, indexed/
-    // displacement addressing, MOVEA) remains excluded pending its own
-    // independent proof.
-    if (operation.destination_ea.mode == M68kEaMode::data_register &&
-        (operation.source_ea.mode == M68kEaMode::address_indirect ||
-         operation.source_ea.mode == M68kEaMode::address_postinc ||
-         operation.source_ea.mode == M68kEaMode::address_predec))
-      return true;
-    // SEG-007-T245 (second iteration, same bounded family): the symmetric
-    // write direction. A MOVE whose source is a plain register/immediate and
-    // whose destination is `d16(An)` needs no address-register mutation at
-    // all -- write_move's own emitter never treats `address_disp16` as a
-    // mutating operand, so it lowers through the same shared, already-
-    // routed, non-mutating EA read/write primitives (m68k_emit_materialized_
-    // ea_read / m68k_emit_ea_write) every ordinary CFG-rooted MOVE already
-    // uses, with no deferred-commit/Q3-aliasing machinery involved at all.
-    // Every other memory destination ((An), (An)+, -(An)) remains excluded
-    // pending its own independent proof.
-    // SEG-007-T248 (seventh iteration, same bounded family, same
-    // architectural seam): `address_index8` is admitted alongside
-    // `address_disp16` here too, on the exact same reasoning as this task's
-    // own `test_operand` carve-out above. `m68k_emit_ea_write`'s shared
-    // `address_indirect`/`address_postinc`/`address_predec`/`address_disp16`/
-    // `address_index8` switch arm (libs/codegen/c11/src/m68k.cpp) treats
-    // `address_index8` identically to `address_disp16`: it mutates no
-    // address register (no prelude/postlude), so a storage-free source
-    // needs no deferred-commit machinery, no Q3 aliasing check, and no
-    // static fact at all -- the write-direction symmetric case of this
-    // task's own read-direction (`test_operand`) admission. Every other
-    // memory destination ((An), (An)+, -(An)) remains excluded pending its
-    // own independent proof, exactly as before.
-    if (storage_free(operation.source_ea) &&
-        (operation.destination_ea.mode == M68kEaMode::address_disp16 ||
-         operation.destination_ea.mode == M68kEaMode::address_index8))
-      return true;
-    // SEG-007-T246 (sixth iteration, same bounded family, same
-    // architectural seam): the memory-to-memory shape -- a mutating
-    // register-indirect ((An)+/-(An)) source paired with a `d16(An)`
-    // destination on a *distinct* address register -- needs only the same
-    // already-adversarially-validated operation-local deferred-address-
-    // commit mechanism (Q1-Q5 above, SEG-007-T069/T070) every other
-    // mutating-operand carve-out in this family already reuses: the source's
-    // routed read is fully committed (or a GENESIS_STOP has already
-    // returned) before the destination's own routed write ever executes,
-    // and the destination's non-mutating `d16(An)` computation never reads
-    // the source's address register, so there is no cross-operand ordering
-    // hazard to resolve. The one case this predicate must NOT admit is the
-    // exact same-register aliasing shape `emit_m68k_operation_c`'s own Q3
-    // check (libs/codegen/c11/src/m68k.cpp) already rejects outright (a `d16(An)`
-    // destination always "reads" its own address register's current value,
-    // so a source and destination sharing that register number would race
-    // the deferred source commit against the destination's EA snapshot with
-    // no differential evidence for the composed result) -- replicated here
-    // register-number-aware, using the same `M68kIrOperation` fields Q3
-    // itself reads, so the predicate can never admit a shape the emitter
-    // would otherwise reject.
-    if ((operation.source_ea.mode == M68kEaMode::address_postinc ||
-         operation.source_ea.mode == M68kEaMode::address_predec) &&
-        operation.destination_ea.mode == M68kEaMode::address_disp16 &&
-        operation.source_ea.reg != operation.destination_ea.reg)
-      return true;
-    // SEG-007-T247 (tenth iteration, same bounded family, same architectural
-    // seam): an `absolute_word`/`absolute_long` MOVE destination needs no
-    // deferred-commit machinery and no cross-operand aliasing check at all,
-    // whatever its (non-absolute) source shape is. `m68k_emit_ea_write`'s
-    // absolute branch (libs/codegen/c11/src/m68k.cpp) only ever consults
-    // `memory->runtime_routing` -- never `memory.test_operand_region`, unlike
-    // the READ side's own absolute case -- and, being a compile-time-
-    // constant address, never reads or mutates any address register, so it
-    // can never alias a mutating source's register the way `write_move`'s
-    // own Q3 check (`destination_reads_same_register_address`, defined only
-    // over `address_predec`/`address_postinc`/`address_indirect`/
-    // `address_disp16` destinations) already guards against for other
-    // shapes. A mutating source (`(An)+`/`-(An)`) still lowers through the
-    // existing operation-local deferred-address-commit path (Q1-Q5 above,
-    // SEG-007-T069/T070): its own routed read is fully committed (or a
-    // GENESIS_STOP has already returned) before the absolute destination's
-    // own routed write ever executes, and that check's
-    // `destination_reads_same_register_address` is unconditionally false for
-    // an absolute destination, so `aliasing_rejected` can never trigger.
-    // Every other admitted source shape (storage-free, `(An)`, `d16(An)`)
-    // lowers through the plain shared `m68k_emit_materialized_ea_read`/
-    // `m68k_emit_ea_write` else-branch, identical in shape to this family's
-    // own `d16(An)`-destination precedent (SEG-007-T245's second iteration).
-    // An absolute or `d16(PC)` SOURCE, and the brief-format indexed
-    // `(d8,An,Xn)`/`(d8,PC,Xn)` source forms, all remain excluded:
-    // `m68k_emit_ea_read`'s absolute/`pc_disp16` branch requires a
-    // `memory.test_operand_region` fact `emit_immutable_rom_aot_body` never
-    // populates for an AOT candidate today, and indexed addressing is an
-    // independent, unexamined shape this task does not attempt -- both
-    // architecture-adjacent extensions left for their own independent proof.
-    if (operation.destination_ea.mode == M68kEaMode::absolute_word ||
-        operation.destination_ea.mode == M68kEaMode::absolute_long) {
-      switch (operation.source_ea.mode) {
-      case M68kEaMode::data_register:
-      case M68kEaMode::address_register:
-      case M68kEaMode::immediate:
-      case M68kEaMode::address_indirect:
-      case M68kEaMode::address_postinc:
-      case M68kEaMode::address_predec:
-      case M68kEaMode::address_disp16:
-        return true;
-      default:
-        return false;
-      }
-    }
-    // SEG-007-T247 (eleventh iteration, same bounded family, same
-    // architectural seam): a plain register-indirect `(An)` source paired
-    // with a `d16(An)` destination needs no deferred-commit machinery, no
-    // Q3 same-register-aliasing check, and no `memory.test_operand_region`
-    // fact at all -- strictly simpler than both of this family's already-
-    // proven related carve-outs. Unlike the mutating memory-to-memory shape
-    // above (SEG-007-T246, sixth iteration), `address_indirect` never
-    // mutates any address register in `m68k_emit_ea_read`
-    // (libs/codegen/c11/src/m68k.cpp), so there is no deferred source commit to
-    // race against the destination's own non-mutating `d16(An)` EA
-    // computation -- the same-register-aliasing hazard Q3
-    // (`destination_reads_same_register_address`) exists specifically to
-    // guard a *mutating* source, and simply cannot arise here regardless of
-    // whether the source and destination share a register number. Unlike an
-    // absolute source (SEG-007-T247's own tenth iteration, read direction),
-    // this is a pure register-relative EA, so `m68k_emit_ea_read`'s
-    // absolute/`pc_disp16` branch and its `memory.test_operand_region`
-    // dependency are never reached either. Both operands lower through the
-    // same shared, already-routed, non-mutating EA primitives
-    // (`m68k_emit_materialized_ea_read` / `m68k_emit_ea_write`) every other
-    // storage-free carve-out in this family already reuses, with no
-    // register-distinctness restriction required.
-    if (operation.source_ea.mode == M68kEaMode::address_indirect &&
-        operation.destination_ea.mode == M68kEaMode::address_disp16)
-      return true;
-    // SEG-007-T249 (continuation, same bounded family/seam T245 opened;
-    // consumed and corrected in this same task rather than split into a
-    // premature successor): a `d16(An)` source paired with a `d16(An)`
-    // destination needs the exact same nothing T247's eleventh iteration
-    // already established for an `(An)` source -- `address_disp16` never
-    // mutates any address register in either `m68k_emit_ea_read`'s or
-    // `m68k_emit_ea_write`'s own switch arm (libs/codegen/c11/src/m68k.cpp), so
-    // there is no deferred source commit to race against the destination's
-    // own non-mutating EA computation, and Q3's same-register-aliasing
-    // check exists specifically to guard a *mutating* source -- it cannot
-    // arise here regardless of whether the source and destination share a
-    // register number, identically to the `(An)`-source case immediately
-    // above. Both operands lower through the same shared, already-routed,
-    // non-mutating EA primitives every other storage-free/`(An)`-source
-    // carve-out in this family already reuses.
-    if (operation.source_ea.mode == M68kEaMode::address_disp16 &&
-        operation.destination_ea.mode == M68kEaMode::address_disp16)
-      return true;
-    return false;
-  }
-  case M68kIrKind::write_movea: {
-    if (storage_free(operation.source_ea) && storage_free(operation.destination_ea)) return true;
-    // SEG-007-T245 (fourth iteration, same bounded family, same
-    // architectural seam): MOVEA's destination is always a plain An
-    // overwrite (no read-modify-write, no fixed-register aliasing hazard
-    // the way ADDA has); a memory-EA source needs only the same shared,
-    // already-adversarially-validated deferred-address-commit mechanism
-    // (SEG-007-T192, docs/architecture/c4-move-predecrement-postincrement-
-    // commit-contract.md) write_move's own read-direction carve-out above
-    // already reuses for a mutating source, or the plain shared
-    // `m68k_emit_ea_read` for a non-mutating one (`(An)`/`d16(An)`) -- no
-    // new mechanism either way.
-    return operation.source_ea.mode == M68kEaMode::address_indirect ||
-           operation.source_ea.mode == M68kEaMode::address_postinc ||
-           operation.source_ea.mode == M68kEaMode::address_predec ||
-           operation.source_ea.mode == M68kEaMode::address_disp16;
-  }
   case M68kIrKind::bit_change:
   case M68kIrKind::bit_clear:
   case M68kIrKind::bit_set:

@@ -6,7 +6,12 @@
 // (`undecodable`, `not_lifted`, `no_emission`, `length_mismatch`). It holds no instruction knowledge and
 // never invents an emission: an unsupported encoding is reported, not approximated.
 //
-//   m68k_conformance_emitter --out FILE.c < encodings.txt
+//   m68k_conformance_emitter [--routed] --out FILE.c < encodings.txt
+//
+// --routed (SEG-021-T005): emit the Genesis runtime-routed lowering (the route C4 and the immutable-ROM AOT
+// candidates use) as `GenesisControlTransfer rf_<CODE>(GenesisRuntime *)` plus `rf_table`, for the hermetic
+// routed-versus-direct differential test (tests/m68k_routed_lowering_test.py).
+#include "segarecomp/codegen/c11/genesis_frontend.hpp"
 #include "segarecomp/codegen/c11/m68k.hpp"
 #include "segarecomp/cpu/m68k/decode.hpp"
 #include "segarecomp/cpu/m68k/ir.hpp"
@@ -44,9 +49,11 @@ bool parse_hex(const std::string &text, std::vector<std::uint8_t> &out) {
 
 int main(int argc, char **argv) {
   std::string out_path;
+  bool routed_mode = false;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
+    else if (arg == "--routed") routed_mode = true;
     else { std::cerr << "usage: m68k_conformance_emitter --out FILE.c < encodings\n"; return 2; }
   }
   if (out_path.empty()) { std::cerr << "--out is required\n"; return 2; }
@@ -71,6 +78,23 @@ int main(int argc, char **argv) {
                                                           : decoded->raw_bytes.size();
     if (length != image.size()) { std::cout << line << " length_mismatch\n"; continue; }
     if (!m68k_operation_has_complete_c_emission(operation)) { std::cout << line << " no_emission\n"; continue; }
+    if (routed_mode) {
+      M68kMemoryEmissionContext routed{"runtime->work_ram", "runtime->a", "frame_ids", "frame_continuations",
+                                       "frame_depth", 0U, M68kOperandAccess::runtime_routed, 0U, {}, {}};
+      routed.user_stack_pointer = "runtime->usp";
+      routed.runtime_routing = true;
+      routed.runtime_object = "runtime";
+      routed.linear_memory_begin = 0x00FF0000U;
+      routed.linear_memory_end = 0x01000000U;
+      routed.runtime_emitter = &genesis_m68k_runtime_c_emitter();
+      const auto routed_body = emit_m68k_operation_c(operation, "runtime->d", "runtime->sr", "  ", &routed);
+      if (routed_body.find_first_not_of(" \n") == std::string::npos) { std::cout << line << " no_emission\n"; continue; }
+      functions << "static GenesisControlTransfer rf_" << line << "(GenesisRuntime *runtime) {\n" << routed_body
+                << "  { GenesisControlTransfer done = {0}; done.kind = GENESIS_CONTINUE_AT_PC; done.next_pc = pc; return done; }\n}\n";
+      table << "  {\"" << line << "\", rf_" << line << "},\n";
+      std::cout << line << " ok\n";
+      continue;
+    }
     M68kMemoryEmissionContext memory{"s->ram", "s->a", "frame_ids", "frame_continuations", "frame_depth", 0U,
                                      M68kOperandAccess::linear_memory, 0U, {}, {}};
     memory.linear_memory_begin = 0U;
@@ -84,6 +108,18 @@ int main(int argc, char **argv) {
     std::cout << line << " ok\n";
   }
   std::ofstream out(out_path);
+  if (routed_mode) {
+    out << "#include \"runtime.h\"\n"
+           "extern uint32_t frame_ids[64]; extern uint32_t frame_continuations[64]; extern uint32_t frame_depth;\n"
+           "static GenesisControlTransfer genesis_static_stop(GenesisStopClass c, GenesisDiagnosticCategory d, const GenesisInstructionProvenance *p, uint8_t h, uint32_t a, GenesisAccessWidth w, GenesisAccessDirection x) { GenesisControlTransfer t = {0}; t.kind = GENESIS_STOP; t.stop.stop_class = c; t.stop.diagnostic_category = d; t.stop.provenance.has_instruction_provenance = 1U; t.stop.provenance.instruction = *p; t.stop.provenance.has_access = h; t.stop.provenance.access_address = a; t.stop.provenance.access_width = w; t.stop.provenance.access_direction = x; return t; }\n"
+           "static void genesis_attach_route_provenance(GenesisRuntimeStop *stop, const GenesisInstructionProvenance *p) { (void)stop; (void)p; }\n"
+           "#define pc runtime->pc\n"
+        << functions.str()
+        << "typedef struct { const char *code; GenesisControlTransfer (*fn)(GenesisRuntime *); } rf_entry;\n"
+           "const rf_entry rf_table[] = {\n" << table.str() << "  {NULL, NULL}\n};\n"
+           "int rf_touch(void) { return ((void)genesis_static_stop, (void)genesis_attach_route_provenance, (int)(frame_ids[0] + frame_continuations[0] + frame_depth)); }\n";
+    return out ? 0 : 1;
+  }
   out << "#include <stdint.h>\n#include <stddef.h>\n"
          "typedef struct { uint32_t d[8]; uint32_t a[8]; uint16_t sr; uint32_t pc; uint32_t usp; uint8_t ram[0x100000]; } cap_state;\n"
          "extern uint32_t frame_ids[64]; extern uint32_t frame_continuations[64]; extern uint32_t frame_depth; /* owned and reset per vector by the runner */\n"

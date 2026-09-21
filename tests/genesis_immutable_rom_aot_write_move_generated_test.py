@@ -350,7 +350,8 @@ def main() -> None:
     assert "genesis_aot_00000C20" in generated.stdout
     assert "genesis_aot_00000C24" in generated.stdout
     assert "genesis_aot_00000C28" in generated.stdout
-    assert "genesis_aot_00000C2C" not in generated.stdout
+    # SEG-021-T005: the same-register aliasing form is admitted (destination EA derived from the updated source local).
+    assert "genesis_aot_00000C2C" in generated.stdout
     assert "genesis_aot_00000C42" in generated.stdout
     assert "genesis_route_access(runtime," in generated.stdout
 
