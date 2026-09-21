@@ -188,3 +188,33 @@ T006.
 
 Known limits (T005): more than 64 oracle effects or vector-read candidates in one boundary is flagged
 unsupported; only the basic MC68000 six-byte frame is recognized (other frame formats are unsupported).
+
+## 17. T006 implementation note (Genesis device diagnostics)
+
+`GenesisDeviceCheckpoint` (`platforms/genesis/runtime`, Genesis-owned; enabled by the same
+generation-time `--provenance-diagnostics` option as the M68k checkpoint, otherwise never read or
+written) is finalized at the same instruction-boundary seam (inside the M68k finalize, so the two
+share boundary numbering and the divide-by-zero boundary completion). It reduces the existing
+`GenesisDeviceState` to ten FNV-1a 64 component digests (VDP registers/port, VDP DMA, VRAM, CRAM,
+VSRAM, interrupt, PSG, Z80 bus flags, Z80 RAM, controller I/O). The large-memory digests are
+recomputed only when a device-region write or DMA activity may have changed them. Only three event
+kinds were added, each because it changes a diagnosis: a write into a device region (region class,
+width, address, value, observed at the existing `genesis_route_access_bus` write path), the VBLANK
+pending rising edge and the IRQ6 admission (both derived from the interrupt-state delta of the
+boundary). No DMA phase, sound, Z80-bus or read events. Capacity is
+`GENESIS_DEVICE_CHECKPOINT_EVENT_CAPACITY` (8) per boundary with no allocation and no history: only
+the last boundary is kept; more events in one boundary make it `unsupported for comparison`. Nothing
+is persisted and device values stay in the ephemeral diagnostic channel.
+
+`tools/genesis_device_divergence.py compare` applies the section 5 domain rule over generated versus
+expected streams (`genesis_m68k_checkpoint_write_detail` and `genesis_device_checkpoint_write_detail`
+lines): per boundary, presence/ordinal and the CPU unsupported check come first (an unsupported CPU boundary on either side is `unsupported_for_comparison`, domain `none`, never a confident `cpu` divergence, as in T005), then all CPU fields are compared (domain `cpu`, T005 field rules); only when
+they all match are device records compared, giving domain `device` classified `device_command`
+(event lists differ, named `event:write@region/addr/wN`, `event:vblank_raise`, `event:irq_admit`,
+`event:order`) or `device_state` (events agree, a component digest differs, named `state:<component>`).
+Because device writes are also memory writes, a wrong command *value* differs in the CPU effects first;
+`device` is reported when CPU state, effects and registers are equivalent and only device events
+(interrupts) or device evolution (VRAM/DMA/etc.) differ. The expected device stream is supplied by
+the caller (a reference/previous run or a synthetic expectation); no independent device oracle is
+introduced. Test-only device faults live in the tests' drivers (`tests/genesis_device_checkpoint_test.cpp`,
+`tests/genesis_device_divergence_test.py`), never in production code.

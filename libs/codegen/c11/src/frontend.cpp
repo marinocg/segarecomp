@@ -5235,7 +5235,7 @@ std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &par
       hex(partial.accepted_prefix.startup_ingress->initial_ssp, 8),
       hex(partial.accepted_prefix.startup_ingress->entry.value, 8), irq6_handler_hex,
       divide_by_zero_handler_hex);
-  if (g_execution_history_hooks) source += "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; ";
+  if (g_execution_history_hooks) source += "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; ";
   if (owned_region_count != 0U) {
     source += "  runtime.owned_regions = genesis_owned_cartridge_regions;\n";
     source += "  runtime.owned_region_count = UINT32_C(" + std::to_string(owned_region_count) + ");\n";
@@ -5257,7 +5257,7 @@ std::string emit_m68k_general_startup_bridge_c(const FrontendAnalysis &analysis,
                    emit_genesis_bridge_c11_prelude(rom_sha256, "GENESIS_CPU_DIMENSIONS_NONE"));
     source += emit_genesis_bridge_c11_main_open(hex(analysis.startup_ingress->initial_ssp, 8),
                                                 hex(analysis.startup_ingress->entry.value, 8));
-    if (g_execution_history_hooks) source += "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; ";
+    if (g_execution_history_hooks) source += "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; ";
     source += emit_genesis_bridge_c11_main_finish("genesis_dispatch");
     return source;
   }
@@ -5349,7 +5349,7 @@ std::string emit_m68k_general_startup_bridge_c(const FrontendAnalysis &analysis,
   const auto slot = m68k_startup_ram_offset(ssp);
   out << "  return genesis_internal_dispatch_inconsistency_stop(runtime);\n}\n"
        << emit_genesis_bridge_c11_main_open(hex(ssp, 8), hex(analysis.startup_ingress->entry.value, 8))
-       << (g_execution_history_hooks ? "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; " : "")
+       << (g_execution_history_hooks ? "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; " : "")
        << "runtime.work_ram[" << slot << "] = " << byte_literal(completion.sentinel_return_pc.value >> 24U) << "; runtime.work_ram[" << slot + 1U << "] = " << byte_literal(completion.sentinel_return_pc.value >> 16U) << "; runtime.work_ram[" << slot + 2U << "] = " << byte_literal(completion.sentinel_return_pc.value >> 8U) << "; runtime.work_ram[" << slot + 3U << "] = " << byte_literal(completion.sentinel_return_pc.value) << "; "
        << emit_genesis_bridge_c11_main_finish("genesis_dispatch");
   return out.str();

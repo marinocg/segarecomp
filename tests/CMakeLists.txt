@@ -73,6 +73,12 @@ target_link_libraries(genesis_m68k_checkpoint_tests PRIVATE segarecomp::runtime_
 target_compile_features(genesis_m68k_checkpoint_tests PRIVATE cxx_std_20)
 segarecomp_enable_warnings(genesis_m68k_checkpoint_tests)
 add_test(NAME genesis_m68k_checkpoint_tests COMMAND genesis_m68k_checkpoint_tests)
+
+add_executable(genesis_device_checkpoint_tests genesis_device_checkpoint_test.cpp)
+target_link_libraries(genesis_device_checkpoint_tests PRIVATE segarecomp::runtime_genesis)
+target_compile_features(genesis_device_checkpoint_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_device_checkpoint_tests)
+add_test(NAME genesis_device_checkpoint_tests COMMAND genesis_device_checkpoint_tests)
 # SEG-007-T252 / ADR-0040: asserts this runtime translation unit references
 # no wall-clock/sleep symbol -- headless/automated execution is full-speed
 # by construction.
@@ -188,6 +194,10 @@ add_test(NAME genesis_viewer_tests COMMAND genesis_viewer_tests)
 add_test(NAME genesis_viewer_generated_integration_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_viewer_generated_integration_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+
+# SEG-020-T006: CPU vs Genesis device first-divergence classification.
+add_test(NAME genesis_device_divergence_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_device_divergence_test.py ${CMAKE_C_COMPILER})
 add_test(NAME genesis_virtual_timing_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_virtual_timing_generated_test.py
   ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime

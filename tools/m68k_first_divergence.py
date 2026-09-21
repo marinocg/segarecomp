@@ -53,6 +53,8 @@ def parse_stream(text: str) -> list[dict]:
         if not line:
             continue
         record = json.loads(line)
+        if "device_checkpoint" in record:
+            continue  # SEG-020-T006 device lines belong to genesis_device_divergence.py
         if "m68k_checkpoint" in record:
             record = record["m68k_checkpoint"]
         if record is None:
