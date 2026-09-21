@@ -123,3 +123,56 @@ gap rows unchanged.
 - No change to the shared `m68k_emit_ea_read` / `m68k_emit_ea_write` /
   `m68k_emit_runtime_ea_address` / `m68k_emit_routed_read` / `m68k_emit_routed_write` primitives.
 - No new `M68kIrKind`, persistent state, interpreter/JIT, or runtime opcode decode.
+
+## SEG-021-T004 operand/update mechanism inventory (evidence, no emitter change)
+
+The legal-form matrix was exercised through the T003 harness (direct linear route, generated-native vs pinned
+Musashi) for every legal ordinary auto-update shape of the emitted families: MOVE `(An)+`/`-(An)` as source,
+destination and both (same or different An), MOVEA/ADDA/SUBA/CMPA with `(An)+`/`-(An)` source including the
+destination An equal to the pointer An, ADD/SUB/CMP `<ea>,Dn` auto sources, ADD/SUB/AND/OR/EOR `Dn,<ea>`,
+ADDI/SUBI/ANDI/ORI/EORI/CMPI, ADDQ/SUBQ, CLR/TST/NOT/NEG memory RMW with auto destinations, byte-A7 stepping
+(step 2) and word/long, both stack modes. Every one already matches Musashi (D/A/PC/SR/USP/SSP, byte memory
+writes), so no legal ordinary shape is declined and no emitted output changed. Decision per shape:
+
+| shape | mechanism | reason |
+| --- | --- | --- |
+| single auto operand, read-only (TST, CMP, MUL/DIV, MOVEA/ADDA source) | shared `m68k_emit_ea_read` / `m68k_emit_materialized_ea_read` | one address, one mutation ordered by the shared primitive |
+| single auto destination RMW (AND/OR/EOR/NOT/CLR/NEG/bit/shift) | shared read-then-write with mode demoted to `(An)` | the read owns the mutation; the write reuses the computed address |
+| ADD-family / SUBI routed auto-commit, MOVE/MOVEA routed commit | family-local (unchanged) | runtime-routed access may stop; the routed contracts require one local address and one commit after all routed accesses; these paths are not exercised by the linear harness and stay under their Genesis/contract tests |
+| same An in both operands (MOVE, ADDA with An dest) | already handled by the existing local snapshot | value read at the pre-mutation snapshot; harness rows with in-window pointer values match Musashi |
+
+Not merged into one universal helper: the families differ in routed-stop commit order, so a merge would change
+byte-comparable routed output without evidence of a defect. Remaining declines are missing families rather than
+shape declines, including CMPM, ADDX/SUBX, ABCD/SBCD and NEGX (owned by SEG-021-T014/T015; NBCD, Scc and TAS by T015/T016), which have no decoded `M68kIrKind` (harness reports `unsupported`).
+
+### MOVEM (`M68kIrKind::movem_transfer`): decision — no change, retain the family-specific mechanism
+
+MOVEM is inventoried explicitly as a row of the T004 shape table. Its existing mechanism is retained:
+
+- Register-mask ordering is architectural MOVEM behavior owned by `m68k_movem_transfer_order`
+  (`libs/cpu/m68k/src/effects.cpp`); it is consumed by effects, static discovery and the emitter, and legitimately
+  stays family-specific.
+- Ordinary `(An)` / `d16(An)` sequences snapshot the effective base once, so a selected load into the base An cannot
+  alter later transfer addresses.
+- Register-to-memory `-(An)`: the original architectural An is snapshotted into one working EA; the working EA is
+  decremented before each transfer, every transfer address derives from that local, architectural An is not mutated
+  incrementally, and it receives one final writeback. When the base An is in the mask, its stored value is the
+  original architectural value.
+- Memory-to-register `(An)+`: one snapshot of the original An; each transfer reads at the working EA and increments
+  it afterwards, so a transient load into the base An cannot affect later addresses; one final unconditional
+  architectural An writeback follows all transfers.
+- MOVEM is word/long only, so the byte-A7 step-by-2 exception does not apply.
+
+Why it is not folded into a shared single-EA/two-EA update helper: MOVEM has a register mask ordering, several
+accesses over one working EA, base-register-in-mask semantics and a final-writeback rule that none of the
+one-address-one-mutation shapes share; a universal helper would be less clear than this owner. Existing evidence: the
+pinned-Musashi Batch C differential (`tests/m68k_batch_c_musashi_differential_test.py`, C5a ordinary forms plus
+base-alias correction, C5b predecrement, C5c1 postincrement), the routed-startup generated test
+`tests/genesis_startup_runtime_c4_movem_adjacent_lea_test.py` and
+`c4-movem-adjacent-lea-constant-propagation-contract.md`. Completing/auditing every legal MOVEM form (and adding its
+T003 rows) belongs to SEG-021-T012; T004 adds no MOVEM mode or matrix.
+
+Final T004 conclusion: ordinary single-EA forms use the existing shared EA helpers; MOVE source/destination
+alias/update uses its existing deferred commit; MOVEM keeps its working-EA/mask/order/final-writeback mechanism;
+CMPM and ADDX/SUBX memory forms are future family-local paired postincrement/predecrement work in SEG-021-T014, and
+ABCD/SBCD in SEG-021-T015. No new shared production mechanism is required.

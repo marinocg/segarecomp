@@ -201,8 +201,10 @@ def put_memory(state: dict, address: int, value: int, size: int, row: dict) -> N
     state["mem"].append((address, (value & ((1 << (8 * size)) - 1)).to_bytes(size, "big")))
 
 
-def profile_cases(profile: dict, aliased: bool, has_x: bool, needs_y: bool, table: dict):
-    """(x, y, sr) cases. With no bound operand a profile is state-only: one case per SR seed."""
+def profile_cases(profile: dict, aliased: bool, has_x: bool, needs_y: bool, table: dict, alias_pointer: bool = False):
+    """(x, y, sr) cases. With no bound operand a profile is state-only: one case per SR seed. ``alias_pointer`` means the
+    aliased register is an address register whose bound value is also the memory pointer of another operand
+    (SEG-021-T004: ADDA (An)+,An, MOVE.L An,(An)+, ...): the pair values must then be in-window pointers."""
     if not has_x:
         pairs = [(0, 0)]
     else:
@@ -217,6 +219,8 @@ def profile_cases(profile: dict, aliased: bool, has_x: bool, needs_y: bool, tabl
             raise ValueError("unknown profile kind %r" % profile["kind"])
         if aliased and needs_y:  # x and y name the same register: only consistent x == y states exist
             pairs = sorted({(x, x) for x, _ in pairs})
+        if alias_pointer:
+            pairs = [(int(v, 16), int(v, 16)) for v in table["values"]["alias_pointer"]]
     for sr in profile["sr"]:
         for x, y in pairs:
             yield x, y, int(sr, 16)
@@ -243,12 +247,18 @@ def expand_row(row: dict, table: dict, forms: dict) -> list[dict]:
             probe = initial_state(row, 0x2700)
             keys = [bind_operand(spec, word, ext, row, form, probe, 0, 1) for spec in bind.values()]
             aliased = len(keys) > 1 and len({k for k in keys if k[0] in "da"}) < len([k for k in keys if k[0] in "da"])
-            for index, (x, y, sr) in enumerate(profile_cases(profile, aliased, "x" in bind, "y" in bind, table)):
+            assigns_a = any(spec.startswith("a@") or (spec.partition(".")[2] in ("src", "dst") and
+                            form[spec.partition(".")[2]] == "an") for spec in bind.values())
+            alias_pointer = aliased and assigns_a and any(k[0] == "a" for k in keys)
+            for index, (x, y, sr) in enumerate(profile_cases(profile, aliased, "x" in bind, "y" in bind, table,
+                                                              alias_pointer)):
                 state = initial_state(row, sr)
                 sync_stacks(state)
                 for phase in (1, 2):
                     for role, spec in bind.items():
                         bind_operand(spec, word, ext, row, form, state, x if role == "x" else y, phase)
+                if state["a"][7] != (state["ssp"] if sr & 0x2000 else state["usp"]):  # an A7 operand value is the stack
+                    state["ssp" if sr & 0x2000 else "usp"] = state["a"][7]
                 vectors.append({"id": "%s:%04X:%d" % (row["id"], word, len(vectors)), "row": row["id"], "word": word,
                                 "code": "%04X%s" % (word, ext.hex().upper()), "sr": sr, "usp": state["usp"],
                                 "ssp": state["ssp"], "d": state["d"], "a": state["a"], "mem": state["mem"],
