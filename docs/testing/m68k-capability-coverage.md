@@ -12,23 +12,23 @@ Denominator: 1526 legal forms, 45816 legal primary words. A form passes a stage 
 
 | stage | applicable forms | passing forms | percent | passing words |
 | --- | ---: | ---: | ---: | ---: |
-| decode | 1526 | 1230 | 80.60% | 41732 |
-| lift | 1526 | 1230 | 80.60% | 41732 |
-| effects | 1526 | 1224 | 80.21% | 41698 |
-| ea_footprint_declared | 1526 | 756 | 49.54% | 26651 |
-| ccr_sr_effect_declared | 1193 | 1053 | 88.26% | 33900 |
+| decode | 1526 | 1224 | 80.21% | 41348 |
+| lift | 1526 | 1224 | 80.21% | 41348 |
+| effects | 1526 | 1218 | 79.82% | 41314 |
+| ea_footprint_declared | 1526 | 750 | 49.15% | 26267 |
+| ccr_sr_effect_declared | 1193 | 1047 | 87.76% | 33516 |
 | exception_privilege_modeled | 852 | 4 | 0.47% | 144 |
-| timing_model_present | 1526 | 1118 | 73.26% | 34116 |
-| emit | 1526 | 1203 | 78.83% | 40865 |
-| compile | 1526 | 1203 | 78.83% | 40865 |
-| native_exec | 1526 | 1202 | 78.77% | 40864 |
-| route_runtime_routed_admitted | 1526 | 1168 | 76.54% | 39122 |
-| route_runtime_routed_compiles | 1526 | 1168 | 76.54% | 39122 |
-| route_runtime_routed_executes | 1526 | 779 | 51.05% | 36892 |
-| route_immutable_rom_aot | 1526 | 913 | 59.83% | 34555 |
-| route_static_discovery | 1526 | 1204 | 78.90% | 37614 |
+| timing_model_present | 1526 | 1112 | 72.87% | 33732 |
+| emit | 1526 | 1197 | 78.44% | 40481 |
+| compile | 1526 | 1197 | 78.44% | 40481 |
+| native_exec | 1526 | 1196 | 78.37% | 40480 |
+| route_runtime_routed_admitted | 1526 | 1162 | 76.15% | 38738 |
+| route_runtime_routed_compiles | 1526 | 1162 | 76.15% | 38738 |
+| route_runtime_routed_executes | 1526 | 773 | 50.66% | 36508 |
+| route_immutable_rom_aot | 1526 | 907 | 59.44% | 34171 |
+| route_static_discovery | 1526 | 1198 | 78.51% | 37230 |
 
-`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1202 of 1526 forms, 78.77%. It is a structural bar, not a correctness claim.
+`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1196 of 1526 forms, 78.37%. It is a structural bar, not a correctness claim.
 
 ## Independently validated coverage (existing pinned-Musashi differential evidence)
 
@@ -65,7 +65,7 @@ Validated primary words per aspect: ccr 21603, ea 10758, semantic 24780, timing 
 | binary_coded_decimal | 12 | 0 | 0.00% |
 | bit_manipulation | 77 | 58 | 75.32% |
 | data_movement | 357 | 342 | 95.80% |
-| integer_arithmetic | 500 | 440 | 88.00% |
+| integer_arithmetic | 500 | 434 | 86.80% |
 | logical | 228 | 206 | 90.35% |
 | program_control | 193 | 55 | 28.50% |
 | shift_and_rotate | 104 | 96 | 92.31% |
@@ -80,7 +80,7 @@ Validated primary words per aspect: ccr 21603, ea 10758, semantic 24780, timing 
 | mnemonic | family | forms | unsupported | first failing stage (forms) |
 | --- | --- | ---: | ---: | --- |
 | ABCD | binary_coded_decimal | 2 | 2 | decode 2 |
-| ADDX | integer_arithmetic | 6 | 3 | decode 3 |
+| ADDX | integer_arithmetic | 6 | 6 | decode 6 |
 | AND | logical | 54 | 5 | decode 5 |
 | ANDI | system_control | 26 | 5 | decode 5 |
 | ASL | shift_and_rotate | 13 | 1 | decode 1 |
@@ -122,7 +122,7 @@ Validated primary words per aspect: ccr 21603, ea 10758, semantic 24780, timing 
 | RTS | program_control | 1 | 1 | native_exec 1 |
 | SBCD | binary_coded_decimal | 2 | 2 | decode 2 |
 | STOP | system_control | 1 | 1 | decode 1 |
-| SUBX | integer_arithmetic | 6 | 3 | decode 3 |
+| SUBX | integer_arithmetic | 6 | 6 | decode 6 |
 | Scc | program_control | 128 | 128 | decode 128 |
 | TAS | bit_manipulation | 8 | 8 | decode 8 |
 | TRAP | system_control | 1 | 1 | decode 1 |

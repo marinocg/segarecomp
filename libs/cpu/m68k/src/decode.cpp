@@ -614,7 +614,7 @@ struct M68kEaFieldOutcome {
       const auto size = m68k_size_from_tst_clr_field(static_cast<std::uint8_t>(opmode - 4U));
       const M68kEffectiveAddress src{M68kEaMode::data_register, destination, 0, 0, 0, 0};
       const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg,
-                                           m68k_ea_data_alterable_with_index, size);
+                                           m68k_ea_reverse_arithmetic_destination, size);
       if (!dst.ok) return dst.failure;
       return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::sub, size, src, dst.ea,
                                         dst.extension_bytes);
@@ -680,7 +680,7 @@ struct M68kEaFieldOutcome {
       const auto size = m68k_size_from_tst_clr_field(static_cast<std::uint8_t>(opmode - 4U));
       const M68kEffectiveAddress src{M68kEaMode::data_register, destination, 0, 0, 0, 0};
       const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg,
-                                           m68k_ea_data_alterable_with_index, size);
+                                           m68k_ea_reverse_arithmetic_destination, size);
       if (!dst.ok) return dst.failure;
       return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::add, size, src, dst.ea,
                                         dst.extension_bytes);

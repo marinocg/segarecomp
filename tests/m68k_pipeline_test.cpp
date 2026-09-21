@@ -4067,6 +4067,13 @@ void general_startup_decode_accepts_pc_indexed_move_source() {
   {
     // The shared ADD/SUB/CMP/AND/OR `m68k_ea_move_source` gate stays
     // unwidened: ADD.W (4,PC,D0.W),D2 (0xD47B 0x0004) must stay fail-closed.
+    // SEG-021-T006: reverse-opmode Dn/An encodings are ADDX/SUBX, never ADD/SUB Dn,Dn.
+    for (const auto &word : {std::vector<std::uint8_t>{0xD3U, 0x00U}, std::vector<std::uint8_t>{0x93U, 0x00U},
+                            std::vector<std::uint8_t>{0xD3U, 0x08U}}) {
+      const auto addx = decode_general(word);
+      expect(std::get_if<M68kDecodedInstruction>(&addx) == nullptr,
+             "an ADDX/SUBX encoding no longer decodes as ADD/SUB (SEG-021-T006)");
+    }
     // SEG-021-T006: ADD/SUB/CMP admit every base-MC68000 source mode, including (d8,PC,Xn).
     const auto result = decode_general({0xD4U, 0x7BU, 0x00U, 0x04U});
     expect(std::get_if<M68kDecodedInstruction>(&result) != nullptr,
@@ -19701,7 +19708,7 @@ int emit_general_startup_runtime_c4_subtract_source(std::string_view forge = {})
   else if (subi_dest_fold)
     image = {0x04U, 0x79U, 0x00U, 0xFFU, 0x00U, 0xFFU, 0x00U, 0x80U, 0x4EU, 0x70U};  // SUBI.W #0x00FF,(0x00FF0080).L; RESET
   else
-    image = {0x93U, 0x00U, 0x4EU, 0x70U};                               // SUB.B D1,D0; RESET
+    image = {0x90U, 0x01U, 0x4EU, 0x70U};                               // SUB.B D1,D0; RESET (0x9300 is SUBX)
   program.image = {"synthetic-c4-subtract", image, 0U};
   program.image.byte_length = program.image.bytes.size();
   program.mapping_claims = {{"synthetic-c4-subtract", {{}, 0xB00U},
