@@ -1129,10 +1129,17 @@ DIAGNOSIS_SCHEMA = 1
 _DIVERGENCE_DOMAINS = ("cpu", "device", "none")
 _DIVERGENCE_CLASSES = ("device_command", "device_state")
 _DIVERGENCE_RESULTS = ("diverged", "no_divergence", "unsupported_for_comparison")
-_FIELD_PLAIN = re.compile(
-    r"^(d[0-7]|a[0-7]|usp|sr|pc|boundary_presence|boundary_ordinal|unsupported|device_boundary_presence|"
-    r"device_boundary_ordinal|device_unsupported|event:order|event:vblank_raise|event:irq_admit|"
-    r"effect:trap|state:[a-z0-9_]{1,32})\Z")
+# Closed vocabulary of field classes emitted by tools/m68k_first_divergence.py (T005) and
+# tools/genesis_device_divergence.py (T006). Anything else reduces to exactly "other".
+_FIELD_PLAIN = frozenset(
+    ["d%d" % i for i in range(8)] + ["a%d" % i for i in range(8)] +
+    ["usp", "sr", "pc", "boundary_presence", "boundary_ordinal", "unsupported", "device_boundary_presence",
+     "device_boundary_ordinal", "device_unsupported", "event:order", "event:vblank_raise", "event:irq_admit",
+     "effect:trap"] +
+    ["state:" + c for c in ("vdp_registers", "vdp_dma", "vdp_vram", "vdp_cram", "vdp_vsram", "interrupt", "psg",
+                            "z80_bus", "z80_ram", "controller_io")])
+_DEVICE_REGIONS = frozenset(("controller_io", "psg", "ym2612", "vdp", "z80_bus", "z80_ram_window"))
+_ACCESS_WIDTHS = frozenset(("w1", "w2", "w4"))
 
 
 def load_divergence_report(path: pathlib.Path) -> dict | None:
@@ -1148,16 +1155,16 @@ def load_divergence_report(path: pathlib.Path) -> dict | None:
 
 
 def durable_field_class(name: object) -> str:
-    """Reduce a differing-field name to a class carrying no address or value."""
+    """Reduce a differing-field name to a closed class; never echoes any input substring."""
     if not isinstance(name, str):
         return "other"
-    if _FIELD_PLAIN.match(name):
+    if name in _FIELD_PLAIN:
         return name
-    match = re.match(r"^effect:write@[0-9A-Fa-f]+/(w[0-9]+)(?:#[0-9]+)?\Z", name)
-    if match:
+    match = re.match(r"^effect:write@[0-9A-Fa-f]{1,8}/(w[0-9]+)(?:#[0-9]+)?\Z", name)
+    if match and match.group(1) in _ACCESS_WIDTHS:
         return "effect:write/" + match.group(1)
-    match = re.match(r"^event:write@([a-z0-9_]{1,32})/[0-9A-Fa-f]+/(w[0-9]+)(?:#[0-9]+)?\Z", name)
-    if match:
+    match = re.match(r"^event:write@([a-z0-9_]+)/[0-9A-Fa-f]{1,8}/(w[0-9]+)(?:#[0-9]+)?\Z", name)
+    if match and match.group(1) in _DEVICE_REGIONS and match.group(2) in _ACCESS_WIDTHS:
         return "event:write@%s/%s" % match.groups()
     return "other"
 
