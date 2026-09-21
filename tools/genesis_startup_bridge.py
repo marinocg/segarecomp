@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -1119,6 +1120,96 @@ def ephemeral_frontier(full: dict, executable: pathlib.Path,
     }
 
 
+# SEG-020-T007 / ADR-0042 sections 1, 10: the single private diagnosis assembly. It only *combines*
+# already-existing evidence (sanitized stop category, ephemeral frontier/provenance/history and, on
+# request, the divergence report produced by tools/m68k_first_divergence.py or
+# tools/genesis_device_divergence.py) and derives one reduced, non-reconstructable projection.
+# Parse failure of an optional input never fails a run. Nothing here reaches generated code.
+DIAGNOSIS_SCHEMA = 1
+_DIVERGENCE_DOMAINS = ("cpu", "device", "none")
+_DIVERGENCE_CLASSES = ("device_command", "device_state")
+_DIVERGENCE_RESULTS = ("diverged", "no_divergence", "unsupported_for_comparison")
+# Closed vocabulary of field classes emitted by tools/m68k_first_divergence.py (T005) and
+# tools/genesis_device_divergence.py (T006). Anything else reduces to exactly "other".
+_FIELD_PLAIN = frozenset(
+    ["d%d" % i for i in range(8)] + ["a%d" % i for i in range(8)] +
+    ["usp", "sr", "pc", "boundary_presence", "boundary_ordinal", "unsupported", "device_boundary_presence",
+     "device_boundary_ordinal", "device_unsupported", "event:order", "event:vblank_raise", "event:irq_admit",
+     "effect:trap"] +
+    ["state:" + c for c in ("vdp_registers", "vdp_dma", "vdp_vram", "vdp_cram", "vdp_vsram", "interrupt", "psg",
+                            "z80_bus", "z80_ram", "controller_io")])
+_DEVICE_REGIONS = frozenset(("controller_io", "psg", "ym2612", "vdp", "z80_bus", "z80_ram_window"))
+_ACCESS_WIDTHS = frozenset(("w1", "w2", "w4"))
+
+
+def load_divergence_report(path: pathlib.Path) -> dict | None:
+    """Read a divergence report; any missing/malformed input is 'unavailable', never an error."""
+    try:
+        report = json.loads(path.read_text())
+    except (OSError, ValueError, RecursionError):
+        return None
+    if (not isinstance(report, dict) or report.get("domain") not in _DIVERGENCE_DOMAINS or
+            report.get("result") not in _DIVERGENCE_RESULTS):
+        return None
+    return report
+
+
+def durable_field_class(name: object) -> str:
+    """Reduce a differing-field name to a closed class; never echoes any input substring."""
+    if not isinstance(name, str):
+        return "other"
+    if name in _FIELD_PLAIN:
+        return name
+    match = re.match(r"^effect:write@[0-9A-Fa-f]{1,8}/(w[0-9]+)(?:#[0-9]+)?\Z", name)
+    if match and match.group(1) in _ACCESS_WIDTHS:
+        return "effect:write/" + match.group(1)
+    match = re.match(r"^event:write@([a-z0-9_]+)/[0-9A-Fa-f]{1,8}/(w[0-9]+)(?:#[0-9]+)?\Z", name)
+    if match and match.group(1) in _DEVICE_REGIONS and match.group(2) in _ACCESS_WIDTHS:
+        return "event:write@%s/%s" % match.groups()
+    return "other"
+
+
+def durable_diagnosis(sanitized: dict, divergence: dict | None) -> dict:
+    """Non-reconstructable projection safe for durable/CI output: classes and ordinals only."""
+    result: dict = {"schema": DIAGNOSIS_SCHEMA, "report_kind": "diagnosis_classes",
+                    "result": sanitized.get("result"), "stop_class": sanitized.get("stop_class"),
+                    "diagnostic_category": sanitized.get("diagnostic_category")}
+    if divergence is None:
+        result["divergence"] = None
+        return result
+    projected: dict = {"result": divergence["result"], "domain": divergence["domain"]}
+    if divergence.get("classification") in _DIVERGENCE_CLASSES:
+        projected["classification"] = divergence["classification"]
+    for key in ("last_matching_boundary", "first_differing_boundary"):
+        if isinstance(divergence.get(key), int) and not isinstance(divergence.get(key), bool):
+            projected[key] = divergence[key]
+    fields = divergence.get("fields")
+    if isinstance(fields, list):
+        projected["differing_fields"] = sorted({durable_field_class(f.get("field")) for f in fields
+                                                if isinstance(f, dict)})
+    result["divergence"] = projected
+    return result
+
+
+def combined_diagnosis(sanitized: dict, frontier: dict, divergence: dict | None) -> dict:
+    """Ephemeral one-stop report (private session only): stop + frontier + optional divergence."""
+    return {"schema": DIAGNOSIS_SCHEMA, "report_kind": "ephemeral_diagnosis",
+            "stop": {"result": sanitized.get("result"), "stop_class": sanitized.get("stop_class"),
+                     "diagnostic_category": sanitized.get("diagnostic_category")},
+            "frontier": frontier, "divergence": divergence}
+
+
+def write_combined_diagnosis(divergence_path: str | None, sanitized: dict, frontier: dict) -> None:
+    """Emit EPHEMERAL_DIAGNOSIS (private) and DIAGNOSIS_CLASSES (durable-safe) when requested."""
+    if not divergence_path:
+        return
+    divergence = load_divergence_report(pathlib.Path(divergence_path))
+    sys.stderr.write("EPHEMERAL_DIAGNOSIS " + json.dumps(
+        combined_diagnosis(sanitized, frontier, divergence), sort_keys=True, separators=(",", ":")) + "\n")
+    sys.stderr.write("DIAGNOSIS_CLASSES " + json.dumps(
+        durable_diagnosis(sanitized, divergence), sort_keys=True, separators=(",", ":")) + "\n")
+
+
 def default_segarecomp(root: pathlib.Path, os_name: str = os.name) -> pathlib.Path:
     suffix = ".exe" if os_name == "nt" else ""
     return root / "build" / "dev" / "apps" / "segarecomp" / f"segarecomp{suffix}"
@@ -1155,6 +1246,10 @@ def main() -> int:
     parser.add_argument("--compare-runs", action="store_true")
     parser.add_argument("--diagnose-frontier", action="store_true",
                         help="emit bounded commercial-derived attribution to stderr for this private session")
+    parser.add_argument("--divergence-report",
+                        help="with --diagnose-frontier: fold a first-divergence report (JSON from "
+                             "tools/m68k_first_divergence.py or tools/genesis_device_divergence.py) into one "
+                             "combined ephemeral diagnosis plus a durable-safe class projection")
     parser.add_argument("--build-profile", choices=("auto", "debug", "optimized", "quick"), default="auto",
                         help="generated-program host profile: debug=-O0 -g (low-level debugging), "
                              "optimized=-O2, quick=-O0. auto: optimized for --viewer (long-running), "
@@ -1205,6 +1300,7 @@ def main() -> int:
             (args.mapping_base is not None and args.entry is None) or
             (args.full_report_path and args.compare_runs) or
             (args.diagnose_frontier and (args.compare_runs or args.full_report_path)) or
+            (args.divergence_report and not args.diagnose_frontier) or
             (args.checkpoint and not (args.mode == "commercial" and args.diagnose_frontier)) or
             # SEG-007-T179 / ADR-0025: --one-shot is the canonical assisted
             # route only; it hard-rejects any expansion/checkpoint/seed input
@@ -1362,6 +1458,7 @@ def main() -> int:
             ephemeral["offline_inventory_stitch_metrics"] = stitch_metrics
         sys.stderr.write("EPHEMERAL_FRONTIER " +
                          json.dumps(ephemeral, separators=(",", ":")) + "\n")
+        write_combined_diagnosis(args.divergence_report, report, ephemeral)
         one_shot_summary = {"runtime_confirmed_seed_count": 0, "generation_attempts": 1,
                             "compile_attempts": 1,
                             "driver_result": driver_result, "frontier_class": frontier_class}
@@ -1431,6 +1528,7 @@ def main() -> int:
             "EPHEMERAL_FRONTIER " +
             json.dumps(expansion_frontier, separators=(",", ":")) +
             "\n")
+        write_combined_diagnosis(args.divergence_report, report, expansion_frontier)
         # The loop's own normalized summary (round count, terminal driver/stop
         # class, final seed-set size): never a raw address, never printed to
         # stdout, never durable evidence on its own.
@@ -1491,10 +1589,9 @@ def main() -> int:
         if full is None or report_sha_status(full, digest) or not valid_full(full, report, digest):
             return 5
         recent_pc_history = parse_ephemeral_pc_history(ephemeral_bytes if ephemeral_bytes is not None else b"")
-        sys.stderr.write(
-            "EPHEMERAL_FRONTIER " +
-            json.dumps(with_execution_history(ephemeral_frontier(full, executable, recent_pc_history), ephemeral_bytes), separators=(",", ":")) +
-            "\n")
+        single_frontier = with_execution_history(ephemeral_frontier(full, executable, recent_pc_history), ephemeral_bytes)
+        sys.stderr.write("EPHEMERAL_FRONTIER " + json.dumps(single_frontier, separators=(",", ":")) + "\n")
+        write_combined_diagnosis(args.divergence_report, report, single_frontier)
     if full_path is not None:
         try: full = parse_canonical_full(full_path.read_bytes())
         except OSError: return 5

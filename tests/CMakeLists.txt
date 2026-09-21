@@ -198,6 +198,9 @@ add_test(NAME genesis_viewer_generated_integration_test COMMAND ${Python3_EXECUT
 # SEG-020-T006: CPU vs Genesis device first-divergence classification.
 add_test(NAME genesis_device_divergence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_device_divergence_test.py ${CMAKE_C_COMPILER})
+# SEG-020-T007: unified failure-diagnosis assembly and durable-safe projection.
+add_test(NAME genesis_failure_diagnosis_workflow_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_failure_diagnosis_workflow_test.py)
 add_test(NAME genesis_virtual_timing_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_virtual_timing_generated_test.py
   ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}/platforms/genesis/runtime
