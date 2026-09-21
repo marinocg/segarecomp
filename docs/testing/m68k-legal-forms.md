@@ -44,3 +44,9 @@ partition is recorded with its resolution in `tests/fixtures/m68k-word-sweep-dis
 (currently one explained Musashi quirk: the unguarded 68040 MOVE16 handler at 0xF620-0xF627; zero
 unexplained). The test skips cleanly unless `SEGARECOMP_M68K_MULS_WORD_MUSASHI_CHECKOUT` names the pinned
 checkout. Regenerate the fixture with `python3 tests/tools/m68k_word_sweep.py --compiler cc --write-fixture`.
+
+## Coverage measurement (SEG-021-T002)
+
+`tools/m68k_capability_coverage.py` consumes this dataset and reports, per stage and admission route, how many
+legal forms the real pipeline handles; see `docs/testing/m68k-capability-coverage.md` (generated) and the
+ratchet `tests/m68k_capability_ratchet_test.py`. It is the only product tool permitted to consume the dataset.

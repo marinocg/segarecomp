@@ -1,0 +1,708 @@
+{
+ "description": "Existing pinned-Musashi differential evidence, by exact primary word. Batch B/C words are the first word of each accepted vector in the two fixtures; single-vector tests are listed explicitly. SEG-021 family tasks extend this manifest; semantic_validated for a form requires every primary word of the form to be listed. Timing validation is empty: no existing test compares generated timing against an oracle.",
+ "schema": 1,
+ "semantic_validated_words": {
+  "0001": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0041": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0090": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0100": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "0140": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "0201": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0250": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0281": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0300": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "0312": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "031F": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "0340": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "035A": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "0380": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "03A2": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "03A7": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "03C0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "03DA": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "03DF": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "0401": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0441": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0490": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0601": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0641": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0690": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0800": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "0813": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "0840": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "0853": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "0880": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "0893": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "08C0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "08D3": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "0A01": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0A41": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0A81": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0C01": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0C41": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "0CB9": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "247B": [
+   "tests/m68k_pc_indexed_move_musashi_differential_test.py"
+  ],
+  "40C3": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "44C2": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "45F0": [
+   "tests/m68k_indexed_lea_musashi_differential_test.py"
+  ],
+  "45FB": [
+   "tests/m68k_pc_indexed_lea_musashi_differential_test.py"
+  ],
+  "4840": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4842": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4845": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4847": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4852": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4857": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4878": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4881": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4883": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4886": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4891": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4892": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48A0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48A1": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48B8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48C1": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48C4": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48C7": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48D1": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48E0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48E1": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48E7": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48EB": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4C90": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4C91": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4C92": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4C98": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4C99": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4CA8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4CD0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4CD8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4CD9": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4CDF": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4CF9": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4E53": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4E55": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4E57": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4E5B": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4E5F": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4E71": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "5000": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "5041": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "5048": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "5082": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "5089": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "50C8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "5100": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "5141": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "5148": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "5182": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "5189": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "51C8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "56C8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "5CC8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6000": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6010": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "60F0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "60FF": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6100": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6110": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "61F0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "61FF": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6210": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6310": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6410": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6510": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6600": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6700": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6710": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "67FF": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6810": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6910": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6A10": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6B10": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6C10": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6D10": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6E10": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "6F10": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "8190": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "8200": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "8240": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "867B": [
+   "tests/m68k_pc_indexed_logical_musashi_differential_test.py"
+  ],
+  "86C2": [
+   "tests/m68k_divu_word_musashi_differential_test.py"
+  ],
+  "87C2": [
+   "tests/m68k_divs_word_musashi_differential_test.py"
+  ],
+  "9190": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "9198": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "91A0": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "9200": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "9240": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "92C0": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "93C0": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "B079": [
+   "tests/m68k_cmp_absolute_source_musashi_differential_test.py"
+  ],
+  "B100": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "B140": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "B190": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "B1D8": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "B200": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "B240": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "B290": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "B2C0": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "B3C0": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "C190": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "C200": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "C240": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "C67B": [
+   "tests/m68k_pc_indexed_logical_musashi_differential_test.py"
+  ],
+  "C6C2": [
+   "tests/m68k_mulu_word_musashi_differential_test.py"
+  ],
+  "C7C2": [
+   "tests/m68k_muls_word_musashi_differential_test.py"
+  ],
+  "D190": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "D1D8": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "D200": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "D240": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "D248": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "D288": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "D2C0": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "D3C0": [
+   "tests/m68k_batch_b_musashi_differential_test.py"
+  ],
+  "D6F1": [
+   "tests/m68k_indexed_arithmetic_musashi_differential_test.py"
+  ],
+  "E008": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E010": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E018": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E030": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E0D0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E0D9": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E0F9": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E100": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E108": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E110": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E118": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E130": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E138": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E1A0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E1A8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E1D0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E1E1": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E1F8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E200": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E210": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E218": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E230": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E238": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E26A": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E270": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E278": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E2A0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E2A8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E2B0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E2B8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E2D0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E2DB": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E2E0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E2EA": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E300": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E308": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E310": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E318": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E320": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E330": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E338": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E348": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E358": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E370": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E378": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E3A0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E3A8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E3B0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E3B8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E3D0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E3D8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E3F8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E4A0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E4D0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E4E3": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E4F8": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E500": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E5A0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E5D0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E5DB": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E5E1": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E660": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E6D0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E6D9": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E6E2": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E768": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E7D0": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E7EA": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "E7F9": [
+   "tests/m68k_batch_c_musashi_differential_test.py"
+  ]
+ },
+ "sources": [
+  "tests/m68k_batch_b_musashi_differential_test.py",
+  "tests/m68k_batch_c_musashi_differential_test.py",
+  "tests/m68k_cmp_absolute_source_musashi_differential_test.py",
+  "tests/m68k_divs_word_musashi_differential_test.py",
+  "tests/m68k_divu_word_musashi_differential_test.py",
+  "tests/m68k_indexed_arithmetic_musashi_differential_test.py",
+  "tests/m68k_indexed_lea_musashi_differential_test.py",
+  "tests/m68k_muls_word_musashi_differential_test.py",
+  "tests/m68k_mulu_word_musashi_differential_test.py",
+  "tests/m68k_pc_indexed_lea_musashi_differential_test.py",
+  "tests/m68k_pc_indexed_logical_musashi_differential_test.py",
+  "tests/m68k_pc_indexed_move_musashi_differential_test.py"
+ ],
+ "timing_validated_words": []
+}
