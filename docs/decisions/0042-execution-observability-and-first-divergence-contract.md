@@ -218,3 +218,12 @@ Because device writes are also memory writes, a wrong command *value* differs in
 the caller (a reference/previous run or a synthetic expectation); no independent device oracle is
 introduced. Test-only device faults live in the tests' drivers (`tests/genesis_device_checkpoint_test.cpp`,
 `tests/genesis_device_divergence_test.py`), never in production code.
+
+## 15. T007 implementation note
+
+The bridge remains the single private diagnosis assembly. `--divergence-report <json>` (valid only
+with `--diagnose-frontier`) folds a T005/T006 divergence report into `EPHEMERAL_DIAGNOSIS` (private)
+and emits `DIAGNOSIS_CLASSES`, the sole durable-safe projection (classes and ordinals; addresses,
+values, PCs, image identity dropped; unknown field names become `other`). No new tool, flag in
+generated code, or persisted trace was added; `genesis_frontier_debug.py` is unchanged. Workflow:
+`docs/development/failure-diagnosis.md`; test: `tests/genesis_failure_diagnosis_workflow_test.py`.
