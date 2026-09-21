@@ -175,7 +175,8 @@ int main(int argc, char **argv) {
         routed.linear_memory_end = 0x01000000U;
         routed.runtime_emitter = &genesis_m68k_runtime_c_emitter();
         const auto routed_body = emit_m68k_operation_c(operation, "runtime->d", "runtime->sr", "  ", &routed);
-        emit_routed = !routed_body.empty();
+        // An indentation-only body is a declined operation (the emitter writes the indent before it knows).
+        emit_routed = routed_body.find_first_not_of(" \n") != std::string::npos;
         if (emit_routed && !emit_dir.empty()) {
           const auto name = "rw_" + hex4(word);
           routed_writer.add(name, "static GenesisControlTransfer " + name + "(GenesisRuntime *runtime) {\n" + routed_body +

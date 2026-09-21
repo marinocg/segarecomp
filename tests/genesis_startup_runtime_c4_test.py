@@ -1826,15 +1826,16 @@ def main():
   assert not_first.stdout.count("genesis_route_access(") == 4
   assert "not_result = ~(" in not_first.stdout
   assert "#define pc runtime->pc" in not_first.stdout and "#undef pc" in not_first.stdout
-  # An auto-updating destination has no deferred-address-commit contract for
-  # the logical family (matching AND/OR/EOR/ANDI/ORI/EORI): a clean
-  # requires_architecture_decision decline, never an unsound predecrement
-  # write.
+  # SEG-021-T005: an auto-updating NOT destination is lowered through the NEG/ADD-style operation-local deferred
+  # address-register commit (one snapshot local, routed read + routed write at one address, one commit after both).
   not_predecrement = subprocess.run([executable, "--emit-general-startup-runtime-c4-not-predecrement"], text=True, capture_output=True)
   assert not_predecrement.returncode == 0
-  assert "GENESIS_STOP_C4_LOWERING_GAP" in not_predecrement.stdout
-  assert "GENESIS_C4_LOWERING_DIMENSIONS_LOGICAL_NOT_AUTO_UPDATE" in not_predecrement.stdout
-  assert "not_result =" not in not_predecrement.stdout
+  assert "GENESIS_STOP_C4_LOWERING_GAP" not in not_predecrement.stdout
+  assert "GENESIS_C4_LOWERING_DIMENSIONS_LOGICAL_NOT_AUTO_UPDATE" not in not_predecrement.stdout
+  assert "m68k_not_auto_ea -= UINT32_C(" in not_predecrement.stdout
+  assert "not_result = ~(" in not_predecrement.stdout
+  assert not_predecrement.stdout.count("genesis_route_access(") == 2
+  assert not_predecrement.stdout.rindex("m68k_not_auto_ea;") > not_predecrement.stdout.rindex("genesis_route_access(")
   # A represented NOT with a statically foldable memory destination and no
   # retained resolver fact fails closed to an emitted C4 lowering-gap stop,
   # never a naive unrouted write.
@@ -1926,18 +1927,22 @@ def main():
   assert "runtime->work_ram" not in move_autoupdate.stdout
   assert move_autoupdate.stdout.count("genesis_route_access(") == 6
   assert "runtime->a[4] = m68k_move_src_ea;\nruntime->a[5] = m68k_move_dst_ea;" in move_autoupdate.stdout
-  # Q3: the same-register aliasing shapes must still be rejected -- proving
-  # they are declined, not silently mis-lowered -- while the reverse
-  # asymmetric shape remains representable.
+  # Q3 (SEG-021-T005): the same-register aliasing shapes are lowered (destination EA derived from the source's
+  # updated address-register local; live commits after both routed accesses), not declined.
   reject_same_register = subprocess.run(
       [executable, "--emit-general-startup-runtime-c4-move-autoupdate-reject-same-register"], text=True, capture_output=True)
   assert reject_same_register.returncode == 0
-  assert reject_same_register.stdout == "/* translation rejected: C4 write_move operand combination is not representable */\n"
+  assert not reject_same_register.stdout.startswith("/* translation rejected:")
+  assert reject_same_register.stdout.count("genesis_route_access(") == 2
+  assert "m68k_move_dst_ea = m68k_move_src_ea;" in reject_same_register.stdout
+  assert reject_same_register.stdout.rindex("runtime->a[0] = m68k_move_src_ea;") < reject_same_register.stdout.rindex("runtime->a[0] = m68k_move_dst_ea;")
   reject_source_indirect_same_register = subprocess.run(
       [executable, "--emit-general-startup-runtime-c4-move-autoupdate-reject-source-indirect-same-register"],
       text=True, capture_output=True)
   assert reject_source_indirect_same_register.returncode == 0
-  assert reject_source_indirect_same_register.stdout == "/* translation rejected: C4 write_move operand combination is not representable */\n"
+  assert not reject_source_indirect_same_register.stdout.startswith("/* translation rejected:")
+  assert reject_source_indirect_same_register.stdout.count("genesis_route_access(") == 2
+  assert "m68k_move_dst_ea = m68k_move_src_ea;" in reject_source_indirect_same_register.stdout
   accept_reverse_asymmetric = subprocess.run(
       [executable, "--emit-general-startup-runtime-c4-move-autoupdate-accept-reverse-asymmetric"], text=True, capture_output=True)
   assert accept_reverse_asymmetric.returncode == 0

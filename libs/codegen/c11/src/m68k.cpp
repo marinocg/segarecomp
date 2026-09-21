@@ -335,7 +335,7 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
 // The write-side counterpart, used by MOVE/CLR destinations. Only ever
 // called with a mode from `m68k_ea_data_alterable` (Dn plus the six memory
 // modes) or, since SEG-007-T176, plain MOVE's own widened
-// `m68k_ea_move_primary_destination` (that same set plus the brief-format
+// `m68k_ea_move_family_destination` (that same set plus the brief-format
 // indexed `address_index8` mode); address_register/immediate/pc_disp16 are
 // never legal destinations and are not handled here. A statically-resolved absolute destination is
 // linear memory, a device register window (SEG-007-T113), or a
@@ -594,6 +594,30 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
   case M68kIrKind::test_operand: {
     if (memory != nullptr) {
       unsigned temp_ordinal = 0U;
+      // SEG-021-T005: an auto-updating TST operand is lowered by the operation-local deferred address-register
+      // commit (docs/architecture/c4-add-family-auto-update-commit-contract.md Q2/Q5): one snapshot local, one
+      // routed read, one live-register commit after the read (a stop returns before it).
+      if (memory->runtime_routing && (operation.source_ea.mode == M68kEaMode::address_predec ||
+                                      operation.source_ea.mode == M68kEaMode::address_postinc)) {
+        const auto reg = static_cast<unsigned>(operation.source_ea.reg);
+        const auto width = static_cast<std::uint32_t>(operation.size);
+        const auto step = (reg == 7U && operation.size == M68kMemoryAccessWidth::byte) ? 2U : width;
+        const auto an_expr = std::string(memory->address_registers) + "[" + std::to_string(reg) + "]";
+        std::ostringstream body;
+        body << "uint32_t m68k_test_auto_ea = " << an_expr << ";\n";
+        if (operation.source_ea.mode == M68kEaMode::address_predec)
+          body << "m68k_test_auto_ea -= UINT32_C(" << step << ");\n";
+        std::string test_source;
+        m68k_emit_routed_read(body, "m68k_test_auto_ea", operation.size, *memory, test_source, temp_ordinal);
+        if (operation.source_ea.mode == M68kEaMode::address_postinc)
+          body << "m68k_test_auto_ea += UINT32_C(" << step << ");\n";
+        body << "{ const uint32_t test_value = " << m68k_sign_extend_expr(test_source, operation.size) << "; ";
+        M68kMoveResultCcrSpecification::emit_c_update(body, status_register, "test_value");
+        body << " }\n" << an_expr << " = m68k_test_auto_ea;\n";
+        output << "{\n" << body.str() << memory->program_counter << " += UINT32_C("
+               << operation.provenance.length.value << ");\n}\n";
+        break;
+      }
       std::ostringstream prelude;
       const auto read = m68k_emit_ea_read(operation.source_ea, operation.size, data_registers, *memory, prelude,
                                           temp_ordinal);
@@ -1129,25 +1153,25 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
       // ever produce a predecrement/postincrement write_move operand today,
       // the C4 general-startup emitter, always sets runtime_routing).
       if (memory->runtime_routing && (source_mutating || destination_mutating)) {
-        // Q3: a MOVE whose source is the mutating operand and whose
-        // destination's own EA computation reads that same address register
-        // -- whether the destination is itself address_predec/
-        // address_postinc, or a non-mutating address_indirect/
-        // address_disp16 that still reads the register's current (would-be
-        // -stale) value -- has no differential evidence for its composed
-        // aliasing value here; reject it outright, before any C is emitted
-        // for this instruction (the same "no output for this operation"
-        // convention every other declined EA combination in this switch
-        // already uses). The reverse asymmetric shape (destination
-        // mutating, source a non-mutating reference to the same register)
-        // is unaffected and remains representable below.
+        // Q3 (SEG-021-T005, superseding the former outright decline): a MOVE
+        // whose source is the mutating operand and whose destination's EA
+        // computation reads that same address register -- (An), d16(An),
+        // (An)+ or -(An) -- observes the register AFTER the source's
+        // auto-update (the MC68000 completes the source EA calculation before
+        // it forms the destination EA; pinned Musashi agrees). The routed
+        // lowering keeps every architectural write deferred: the destination
+        // address is derived from the source's updated LOCAL
+        // (`m68k_move_src_ea`), never from the live register, and the live
+        // commits stay after both routed accesses (destination commit last,
+        // so `(An)+,(An)+` nets two steps, exactly as the hardware does).
         const bool destination_reads_same_register_address =
             operation.destination_ea.mode == M68kEaMode::address_predec ||
             operation.destination_ea.mode == M68kEaMode::address_postinc ||
             operation.destination_ea.mode == M68kEaMode::address_indirect ||
             operation.destination_ea.mode == M68kEaMode::address_disp16;
-        const bool aliasing_rejected = source_mutating && destination_reads_same_register_address &&
+        const bool destination_aliases_source_local = source_mutating && destination_reads_same_register_address &&
             operation.source_ea.reg == operation.destination_ea.reg;
+        const bool aliasing_rejected = false;
         if (!aliasing_rejected) {
           unsigned temp_ordinal = 0U;
           std::ostringstream body;
@@ -1199,8 +1223,18 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
           // register into a second, distinct local (Q3 already rejected the
           // only way it could ever alias the source's register) and applies
           // predecrement before the access, mirroring the source above.
+          if (ok && destination_aliases_source_local && !destination_mutating) {
+            // Non-mutating (An)/d16(An) destination reading the source's updated register.
+            body << "const uint32_t m68k_move_dst_ea = m68k_move_src_ea";
+            if (operation.destination_ea.mode == M68kEaMode::address_disp16)
+              body << " + (uint32_t)(int32_t)(int16_t)" << static_cast<int>(operation.destination_ea.displacement);
+            body << ";\n";
+          }
           if (ok && destination_mutating) {
-            body << "uint32_t m68k_move_dst_ea = " << an_expr(operation.destination_ea) << ";\n";
+            body << "uint32_t m68k_move_dst_ea = "
+                 << (destination_aliases_source_local ? std::string("m68k_move_src_ea")
+                                                      : an_expr(operation.destination_ea))
+                 << ";\n";
             if (operation.destination_ea.mode == M68kEaMode::address_predec)
               body << "m68k_move_dst_ea -= UINT32_C(" << step_for(operation.destination_ea) << ");\n";
           }
@@ -1214,7 +1248,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
             // m68k_emit_routed_write for a mutating destination (postinc
             // applied to the local strictly after the access), or the
             // untouched, shared m68k_emit_ea_write for a non-mutating one.
-            if (destination_mutating) {
+            if (destination_mutating || destination_aliases_source_local) {
               m68k_emit_routed_write(body, "m68k_move_dst_ea", operation.size, *memory, "move_value", temp_ordinal);
               if (operation.destination_ea.mode == M68kEaMode::address_postinc)
                 body << "m68k_move_dst_ea += UINT32_C(" << step_for(operation.destination_ea) << ");\n";
@@ -1444,22 +1478,40 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
   }
   case M68kIrKind::logical_not: {
     if (memory != nullptr) {
-      // SEG-007-T168: NOT shares AND/OR/EOR's declined-auto-update shape --
-      // the logical family carries no deferred-address-commit contract
-      // (matching ANDI/ORI/EORI and this family's own sibling AND/OR/EOR).
-      // In the C4 routed context an auto-updating destination is declined
-      // cleanly via M68kC4GapClass::requires_architecture_decision before
-      // this body ever runs (classify_m68k_c4_gap_shapes); this guard is a
-      // defensive fail-closed backstop, mirroring the identical guard on the
-      // logical_and/logical_or/exclusive_or case above. The non-routed
-      // batch-B static-slice path still lowers an auto-updating destination
-      // through the shared EA primitives (the read applies the single
-      // pointer mutation; the write is retargeted to `address_indirect`
-      // below so it is never re-applied).
+      // SEG-007-T168 / SEG-021-T005: NOT is a one-address RMW. In the routed
+      // context an auto-updating destination uses the deferred address-register
+      // commit below; the non-routed path lowers it through the shared EA
+      // primitives (the read applies the single pointer mutation; the write is
+      // retargeted to `address_indirect` further down so it is never re-applied).
+      // SEG-021-T005: an auto-updating NOT destination is lowered by the same
+      // operation-local deferred address-register commit NEG and the ADD family use
+      // (docs/architecture/c4-add-family-auto-update-commit-contract.md Q2/Q5): one
+      // snapshot local, one routed read and one routed write at the same
+      // address, the single live-register commit strictly after both accesses.
       if (memory->runtime_routing &&
           (operation.destination_ea.mode == M68kEaMode::address_predec ||
-           operation.destination_ea.mode == M68kEaMode::address_postinc))
+           operation.destination_ea.mode == M68kEaMode::address_postinc)) {
+        const auto reg = static_cast<unsigned>(operation.destination_ea.reg);
+        const auto width = static_cast<std::uint32_t>(operation.size);
+        const auto step = (reg == 7U && operation.size == M68kMemoryAccessWidth::byte) ? 2U : width;
+        const auto an_expr = std::string(memory->address_registers) + "[" + std::to_string(reg) + "]";
+        unsigned temp_ordinal = 0U;
+        std::ostringstream body;
+        body << "uint32_t m68k_not_auto_ea = " << an_expr << ";\n";
+        if (operation.destination_ea.mode == M68kEaMode::address_predec)
+          body << "m68k_not_auto_ea -= UINT32_C(" << step << ");\n";
+        std::string not_destination;
+        m68k_emit_routed_read(body, "m68k_not_auto_ea", operation.size, *memory, not_destination, temp_ordinal);
+        body << "{ const uint32_t not_result = ~(" << not_destination << "); ";
+        m68k_emit_routed_write(body, "m68k_not_auto_ea", operation.size, *memory, "not_result", temp_ordinal);
+        if (operation.destination_ea.mode == M68kEaMode::address_postinc)
+          body << "m68k_not_auto_ea += UINT32_C(" << step << ");\n";
+        M68kLogicalResultSpecification::emit_c_update(body, status_register, "not_result", operation.size);
+        body << " }\n" << an_expr << " = m68k_not_auto_ea;\n";
+        output << "{\n" << body.str() << memory->program_counter << " += UINT32_C("
+               << operation.provenance.length.value << ");\n}\n";
         break;
+      }
       unsigned temp_ordinal = 0U;
       std::ostringstream prelude;
       const auto destination = m68k_emit_ea_read(operation.destination_ea, operation.size, data_registers,

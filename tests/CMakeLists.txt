@@ -836,6 +836,12 @@ add_test(NAME m68k_capability_coverage_unit_test COMMAND ${Python3_EXECUTABLE}
 add_test(NAME m68k_conformance_harness_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_conformance_harness_test.py
   $<TARGET_FILE:m68k_conformance_emitter> ${CMAKE_C_COMPILER})
+# SEG-021-T005: routed-versus-direct lowering differential (deferred address-register commit paths).
+add_test(NAME m68k_routed_lowering_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_routed_lowering_test.py
+  $<TARGET_FILE:m68k_conformance_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST m68k_routed_lowering_test APPEND PROPERTY LABELS full fast)
+set_property(TEST m68k_routed_lowering_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST m68k_conformance_harness_test APPEND PROPERTY LABELS full fast)
 set_property(TEST m68k_conformance_harness_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST m68k_capability_ratchet_test m68k_capability_coverage_unit_test APPEND PROPERTY LABELS full fast)

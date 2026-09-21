@@ -12,34 +12,34 @@ Denominator: 1526 legal forms, 45816 legal primary words. A form passes a stage 
 
 | stage | applicable forms | passing forms | percent | passing words |
 | --- | ---: | ---: | ---: | ---: |
-| decode | 1526 | 1194 | 78.24% | 41108 |
-| lift | 1526 | 1194 | 78.24% | 41108 |
-| effects | 1526 | 1188 | 77.85% | 41074 |
-| ea_footprint_declared | 1526 | 465 | 30.47% | 18765 |
-| ccr_sr_effect_declared | 1193 | 1021 | 85.58% | 33308 |
+| decode | 1526 | 1200 | 78.64% | 41156 |
+| lift | 1526 | 1200 | 78.64% | 41156 |
+| effects | 1526 | 1194 | 78.24% | 41122 |
+| ea_footprint_declared | 1526 | 561 | 36.76% | 20191 |
+| ccr_sr_effect_declared | 1193 | 1027 | 86.09% | 33356 |
 | exception_privilege_modeled | 852 | 4 | 0.47% | 144 |
-| timing_model_present | 1526 | 1082 | 70.90% | 33492 |
-| emit | 1526 | 1167 | 76.47% | 40241 |
-| compile | 1526 | 1167 | 76.47% | 40241 |
-| native_exec | 1526 | 1166 | 76.41% | 40240 |
-| route_runtime_routed_admitted | 1526 | 1194 | 78.24% | 41108 |
-| route_runtime_routed_compiles | 1526 | 1194 | 78.24% | 41108 |
-| route_runtime_routed_executes | 1526 | 820 | 53.74% | 38998 |
-| route_immutable_rom_aot | 1526 | 397 | 26.02% | 19367 |
-| route_static_discovery | 1526 | 1168 | 76.54% | 36990 |
+| timing_model_present | 1526 | 1088 | 71.30% | 33540 |
+| emit | 1526 | 1173 | 76.87% | 40289 |
+| compile | 1526 | 1173 | 76.87% | 40289 |
+| native_exec | 1526 | 1172 | 76.80% | 40288 |
+| route_runtime_routed_admitted | 1526 | 1134 | 74.31% | 38290 |
+| route_runtime_routed_compiles | 1526 | 1134 | 74.31% | 38290 |
+| route_runtime_routed_executes | 1526 | 760 | 49.80% | 36180 |
+| route_immutable_rom_aot | 1526 | 662 | 43.38% | 26345 |
+| route_static_discovery | 1526 | 1174 | 76.93% | 37038 |
 
-`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1166 of 1526 forms, 76.41%. It is a structural bar, not a correctness claim.
+`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1172 of 1526 forms, 76.80%. It is a structural bar, not a correctness claim.
 
 ## Independently validated coverage (existing pinned-Musashi differential evidence)
 
 | stage | applicable forms | passing forms | percent | passing words |
 | --- | ---: | ---: | ---: | ---: |
-| semantic_validated | 1526 | 252 | 16.51% | 11438 |
-| ccr_sr_validated | 1193 | 214 | 17.94% | 9510 |
-| ea_side_effect_validated | 381 | 190 | 49.87% | 8674 |
+| semantic_validated | 1526 | 560 | 36.70% | 18270 |
+| ccr_sr_validated | 1193 | 508 | 42.58% | 16006 |
+| ea_side_effect_validated | 381 | 256 | 67.19% | 10546 |
 | timing_validated | 1526 | 0 | 0.00% | 0 |
 
-Validated primary words per aspect: ccr 9714, ea 8886, semantic 11633, timing 0. Forms with at least one validated word: ccr 375, ea 359, semantic 404, timing 0. Sources: tests/fixtures/m68k-conformance-vectors.json, tests/m68k_batch_b_musashi_differential_test.py, tests/m68k_batch_c_musashi_differential_test.py, tests/m68k_cmp_absolute_source_musashi_differential_test.py, tests/m68k_divs_word_musashi_differential_test.py, tests/m68k_divu_word_musashi_differential_test.py, tests/m68k_indexed_arithmetic_musashi_differential_test.py, tests/m68k_indexed_lea_musashi_differential_test.py, tests/m68k_muls_word_musashi_differential_test.py, tests/m68k_mulu_word_musashi_differential_test.py, tests/m68k_pc_indexed_lea_musashi_differential_test.py, tests/m68k_pc_indexed_logical_musashi_differential_test.py, tests/m68k_pc_indexed_move_musashi_differential_test.py.
+Validated primary words per aspect: ccr 16210, ea 10758, semantic 18464, timing 0. Forms with at least one validated word: ccr 669, ea 425, semantic 711, timing 0. Sources: tests/fixtures/m68k-conformance-vectors.json, tests/m68k_batch_b_musashi_differential_test.py, tests/m68k_batch_c_musashi_differential_test.py, tests/m68k_cmp_absolute_source_musashi_differential_test.py, tests/m68k_divs_word_musashi_differential_test.py, tests/m68k_divu_word_musashi_differential_test.py, tests/m68k_indexed_arithmetic_musashi_differential_test.py, tests/m68k_indexed_lea_musashi_differential_test.py, tests/m68k_muls_word_musashi_differential_test.py, tests/m68k_mulu_word_musashi_differential_test.py, tests/m68k_pc_indexed_lea_musashi_differential_test.py, tests/m68k_pc_indexed_logical_musashi_differential_test.py, tests/m68k_pc_indexed_move_musashi_differential_test.py.
 
 ## Stage definitions (public entry points only)
 
@@ -50,7 +50,7 @@ Validated primary words per aspect: ccr 9714, ea 8886, semantic 11633, timing 0.
 - `exception_privilege_modeled` (structural): applicable to forms listing exception/privilege classes; per concrete word (TRAP #n needs vector 32+n) it passes only if the effect contract, which carries one synchronous-exception vector, represents every required class. Forms that can raise several classes remain unsupported.
 - `timing_model_present` (structural): `m68k_instruction_cycles` returns a value (existence of an entry, not correctness; see `timing_validated`).
 - `emit / compile / native_exec` (structural (direct route)): `emit_m68k_operation_c` (linear-memory context) produces C; batched units compile under strict C11 (`-std=c11 -Wall -Wextra -Wno-type-limits -pedantic -Werror`); the function runs to normal completion in one native binary, each word from the identical restored baseline state (a runtime stop code, crash or hang fails the word).
-- `route_runtime_routed_admitted / compiles / executes` (structural (runtime-routed route)): the Genesis runtime-routed lowering emits non-empty C (admitted); that C compiles under the same strict flags against the real `platforms/genesis/runtime` header (compiles); it runs against the real runtime linked from `runtime.c`, from a restored baseline with work RAM only, and continues at PC rather than stopping (executes). Whole-program C4 preflight facts are not exercised, so absolute-address forms stop at the runtime memory gate under the fixed extension pattern.
+- `route_runtime_routed_admitted / compiles / executes` (structural (runtime-routed route)): the Genesis runtime-routed lowering emits a non-empty operation body (admitted; an indentation-only body is a declined operation, not an admission); that C compiles under the same strict flags against the real `platforms/genesis/runtime` header (compiles); it runs against the real runtime linked from `runtime.c`, from a restored baseline with work RAM only, and continues at PC rather than stopping (executes). Whole-program C4 preflight facts are not exercised, so absolute-address forms stop at the runtime memory gate under the fixed extension pattern.
 - `route_immutable_rom_aot` (structural): `m68k_operation_is_immutable_rom_aot_safe` admits the form.
 - `route_static_discovery` (structural): the CPU-owned static discovery walks the form to a clean end.
 - `semantic_validated` (validated): every word has existing pinned-Musashi differential evidence comparing the result state.
@@ -65,8 +65,8 @@ Validated primary words per aspect: ccr 9714, ea 8886, semantic 11633, timing 0.
 | binary_coded_decimal | 12 | 0 | 0.00% |
 | bit_manipulation | 77 | 58 | 75.32% |
 | data_movement | 357 | 342 | 95.80% |
-| integer_arithmetic | 500 | 407 | 81.40% |
-| logical | 228 | 203 | 89.04% |
+| integer_arithmetic | 500 | 410 | 82.00% |
+| logical | 228 | 206 | 90.35% |
 | program_control | 193 | 55 | 28.50% |
 | shift_and_rotate | 104 | 96 | 92.31% |
 | system_control | 55 | 5 | 9.09% |
@@ -93,7 +93,6 @@ Validated primary words per aspect: ccr 9714, ea 8886, semantic 11633, timing 0.
 | BSET | bit_manipulation | 16 | 2 | decode 2 |
 | BTST | bit_manipulation | 21 | 5 | decode 5 |
 | CHK | system_control | 11 | 11 | decode 11 |
-| CLR | integer_arithmetic | 24 | 3 | decode 3 |
 | CMP | integer_arithmetic | 35 | 3 | decode 3 |
 | CMPA | integer_arithmetic | 24 | 2 | decode 2 |
 | CMPI | integer_arithmetic | 24 | 3 | decode 3 |
@@ -116,7 +115,6 @@ Validated primary words per aspect: ccr 9714, ea 8886, semantic 11633, timing 0.
 | NBCD | binary_coded_decimal | 8 | 8 | decode 8 |
 | NEG | integer_arithmetic | 24 | 3 | decode 3 |
 | NEGX | integer_arithmetic | 24 | 24 | decode 24 |
-| NOT | logical | 24 | 3 | decode 3 |
 | OR | logical | 54 | 5 | decode 5 |
 | ORI | system_control | 26 | 5 | decode 5 |
 | PEA | data_movement | 7 | 2 | decode 2 |

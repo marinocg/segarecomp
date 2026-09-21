@@ -79,3 +79,18 @@ table's declared words. After a manifest change regenerate the T002 snapshot wit
 
 Fault injection lives only in the test's temporary copies of the emitted C (`mutate=`); production paths cannot
 perturb generated code.
+
+## SEG-021-T005: MOVE / MOVEA / CLR / NOT / TST rows and the routed differential
+
+Rows exist for every legal ordinary form of the five mnemonics (all EA classes, sizes and register aliases; the
+primary words enumerate every register combination, including A7 byte stepping). Extension data is literal table
+data: `disp` `0010`, brief `index` `1004` (D1, word index, preset `d1`), `absw` `4000`, `absl` `00020000`, `pcdisp` `0010`,
+`pcindex` `1040`, and two immediates per size (zero and negative). Rows involving an index register use the
+`move_even` profile (even values only, so no vector forms an odd word address, which Musashi would answer with an
+address-error exception this harness does not model). MOVE to/from SR/CCR/USP forms are out of scope (T009/T018).
+
+The conformance emitter is the direct linear-memory lowering. `tests/m68k_routed_lowering_test.py` (emitter `--routed`)
+runs the Genesis runtime-routed lowering, the route C4 and the immutable-ROM AOT candidates use, against the direct
+lowering on identical vectors, so the routed deferred-commit code inherits the Musashi evidence. Absolute and
+PC-relative operands are outside that test by construction (they address cartridge space or the sign-extended top
+of the address space, which the work-RAM-only routed environment cannot host) and are covered by the direct rows only.

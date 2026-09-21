@@ -51,7 +51,7 @@ extension.
 - Decode: `m68k_parse_ea_field` (`src/cpu/m68k/decode.cpp`) parses the brief-format word into
   `M68kEaMode::address_index8` with `index_reg` / `index_is_address` / `index_is_long` on the
   existing `M68kEffectiveAddress`. Extension-word bounds are checked exactly like `d16(An)`.
-- Legality: `m68k_ea_index8` is exposed through a dedicated `m68k_ea_move_primary_source` mask
+- Legality: `m68k_ea_index8` is exposed through a dedicated `m68k_ea_move_family_source` mask
   (`m68k_ea_move_source | m68k_ea_index8`) consumed by MOVE/MOVEA decode only. The shared
   `m68k_ea_move_source` set — which also gates the ADD/SUB/CMP/AND/OR source operand — is left
   unchanged, so an indexed source on any non-MOVE family instruction stays

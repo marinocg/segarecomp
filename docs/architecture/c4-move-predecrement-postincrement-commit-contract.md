@@ -398,3 +398,23 @@ unguarded single-operand hazard already present today in `compare`/`subtract`/`a
 families/`write_movea`/`push_effective_address`/`link_frame`/`unlink_frame`/the four `bit_*` kinds
 (listed in the Q1 table for completeness only). Any of those remain open for a separately scoped,
 separately evidenced future task.
+
+## SEG-021-T005 amendment: Q3 same-register aliasing is lowered, not declined
+
+Q3's outright decline of a mutating source whose address register also feeds the destination EA is superseded for
+the routed lowering. The MC68000 completes the source EA calculation (including its auto-update) before it forms the
+destination EA (pinned Musashi agrees; the direct lowering was already validated against it by the T003/T004 rows).
+The routed lowering now keeps every architectural write deferred exactly as Q2 requires, and derives the destination
+address from the source's updated LOCAL (`m68k_move_src_ea`) instead of the live register:
+
+- destination `(An)` / `d16(An)` reading the same register: `m68k_move_dst_ea = m68k_move_src_ea (+ d16)`, routed write, no
+  destination commit;
+- destination `(An)+` / `-(An)` on the same register: `m68k_move_dst_ea` starts from `m68k_move_src_ea`, is stepped as
+  usual, and its commit is emitted last so `(An)+,(An)+` nets two steps.
+
+Every live-register commit is still emitted textually after both routed accesses, so a runtime stop leaves the
+pre-instruction register file. Evidence: `tests/m68k_routed_lowering_test.py` runs the routed and direct lowerings on
+identical vectors (every size, both source update kinds, all four destination kinds, A7 byte stepping) and requires
+identical D/A/SR/PC/memory; the direct lowering is Musashi-validated by `tests/fixtures/m68k-conformance-vectors.json`.
+The same amendment lowers NOT with an auto-updating destination through the NEG/ADD single-local commit (one routed
+read and one routed write at the same address, one commit after both).

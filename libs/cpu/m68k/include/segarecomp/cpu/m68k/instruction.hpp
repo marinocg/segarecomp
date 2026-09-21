@@ -209,23 +209,27 @@ inline constexpr M68kEaLegalMask m68k_ea_memory_alterable =
 inline constexpr M68kEaLegalMask m68k_ea_move_source =
     m68k_ea_dn | m68k_ea_an | m68k_ea_an_indirect | m68k_ea_an_postinc | m68k_ea_an_predec | m68k_ea_an_disp16 |
     m68k_ea_absolute_word | m68k_ea_absolute_long | m68k_ea_pc_disp16 | m68k_ea_immediate;
-// SEG-007-T120: brief-format (d8,An,Xn) is legal as a MOVE/MOVEA *primary*
-// source on the base MC68000. It is deliberately kept out of the shared
-// `m68k_ea_move_source` set (which also gates the ADD/SUB/CMP/AND/OR source
-// operand) so this task's decode-surface change stays limited to the
-// runtime-reached MOVE family; the destination-alterable sets likewise stay
-// without it (an indexed MOVE destination is not reached and not wired).
-// SEG-007-T136: brief-format PC-relative indexed addressing, `(d8,PC,Xn)`,
-// is likewise legal as a MOVE/MOVEA primary source on the base MC68000
-// (M68000PM/AD Rev. 1 MOVE/MOVEA source table). This mask is consumed only
-// at the MOVE-family decode call site (never merged into the shared
-// `m68k_ea_move_source` ADD/SUB/CMP/AND/OR gate, and never merged into
-// `m68k_ea_jsr_jmp_control_modes`/`m68k_ea_lea_control_modes`, which keep
-// their own distinct, narrower control-EA legality per ADR-0009): a MOVE
-// source read is a plain runtime-routed data read through the existing
-// owned-cartridge-region mechanism, never a computed control-flow target.
-inline constexpr M68kEaLegalMask m68k_ea_move_primary_source =
-    m68k_ea_move_source | m68k_ea_index8 | m68k_ea_pc_index8;
+// SEG-021-T005: MOVE/MOVEA/CLR/NOT/TST family-level legal-EA contract, written
+// from the Motorola M68000 Family Programmer's Reference Manual (MOVE, MOVEA,
+// CLR, NOT, TST entries, base MC68000 columns) and independent of any game
+// history or of the T001 legal-form dataset (production never reads it).
+//   MOVE/MOVEA source: every mode -- Dn, An (word/long only; byte An is
+//     rejected by the MOVE decoder), (An), (An)+, -(An), d16(An), (d8,An,Xn),
+//     abs.W, abs.L, d16(PC), (d8,PC,Xn), #imm.
+//   MOVE destination: data alterable -- Dn, (An), (An)+, -(An), d16(An),
+//     (d8,An,Xn), abs.W, abs.L (MOVEA's destination is the fixed An field).
+//   CLR/NOT operand: data alterable, same eight modes as the MOVE destination.
+//   TST operand: data alterable on the base MC68000 (no An, PC-relative or
+//     immediate; those are 68020+).
+inline constexpr M68kEaLegalMask m68k_ea_move_family_source =
+    m68k_ea_dn | m68k_ea_an | m68k_ea_an_indirect | m68k_ea_an_postinc | m68k_ea_an_predec | m68k_ea_an_disp16 |
+    m68k_ea_index8 | m68k_ea_absolute_word | m68k_ea_absolute_long | m68k_ea_pc_disp16 | m68k_ea_pc_index8 |
+    m68k_ea_immediate;
+inline constexpr M68kEaLegalMask m68k_ea_data_alterable_with_index =
+    m68k_ea_dn | m68k_ea_an_indirect | m68k_ea_an_postinc | m68k_ea_an_predec | m68k_ea_an_disp16 | m68k_ea_index8 |
+    m68k_ea_absolute_word | m68k_ea_absolute_long;
+inline constexpr M68kEaLegalMask m68k_ea_move_family_destination = m68k_ea_data_alterable_with_index;
+inline constexpr M68kEaLegalMask m68k_ea_clr_not_operand = m68k_ea_data_alterable_with_index;
 // SEG-007-T137: brief-format address-register indexed addressing,
 // `(d8,An,Xn)`, is likewise a legal source operand for the shared
 // ADD/SUB/CMP/AND/OR/ADDA/SUBA/CMPA register-form family on the base
@@ -239,37 +243,15 @@ inline constexpr M68kEaLegalMask m68k_ea_move_primary_source =
 // family's decode call sites; it is never merged into
 // `m68k_ea_jsr_jmp_control_modes`/`m68k_ea_lea_control_modes`, which keep
 // their own distinct, narrower control-EA legality per ADR-0009, and it is
-// kept separate from `m68k_ea_move_primary_source` (MOVE/MOVEA's own primary
+// kept separate from `m68k_ea_move_family_source` (MOVE/MOVEA's own primary
 // source set, which also admits the PC-relative indexed form this family
 // does not).
 inline constexpr M68kEaLegalMask m68k_ea_arithmetic_logical_indexed_source =
     m68k_ea_move_source | m68k_ea_index8;
-// SEG-007-T176: brief-format address-register indexed addressing,
-// `(d8,An,Xn)`, is likewise a legal plain-MOVE *destination* on the base
-// MC68000 (M68000PM/AD Rev. 1 MOVE destination-operand table lists every
-// data-alterable mode `m68k_ea_data_alterable` already carries plus this
-// brief-format indexed mode; MOVEA's destination is always the fixed An
-// register and never consults this mask at all). SEG-007-T120's own doc
-// comment on `m68k_ea_move_primary_source` above previously noted "the
-// destination-alterable sets likewise stay without it (an indexed MOVE
-// destination is not reached and not wired)" -- that gap is closed here,
-// narrowly, for plain MOVE's destination only. This mask is consumed only
-// at plain MOVE's own destination decode call site (never merged into the
-// shared `m68k_ea_data_alterable` set CLR/NOT/ADD-reverse/AND-reverse/
-// OR-reverse/EOR destinations all still use unchanged, and never merged
-// into any control-EA mask): a destination write through this mode is a
-// plain runtime-routed data write via the existing shared
-// `m68k_emit_runtime_ea_address` helper (already computing this exact
-// address for the identical mode's source-read use since SEG-007-T120) and
-// the existing owned-cartridge-region write mechanism (ADR-0006), never a
-// computed control-flow target, so it introduces no new EA-computation or
-// dispatch logic.
-inline constexpr M68kEaLegalMask m68k_ea_move_primary_destination =
-    m68k_ea_data_alterable | m68k_ea_index8;
 // SEG-007-T248: ADDQ/SUBQ's data-alterable (non-An) destination set, widened
 // to also admit the brief-format `(d8,An,Xn)` indexed mode -- the same base-
 // MC68000 addressing-mode extension MOVE's own destination mask already
-// applies (`m68k_ea_move_primary_destination` above). ADDQ/SUBQ's An
+// applies (`m68k_ea_move_family_destination` above). ADDQ/SUBQ's An
 // destination case is decoded through a separate, unrelated `m68k_ea_an`
 // mask (never index8-eligible) and is unaffected by this addition.
 inline constexpr M68kEaLegalMask m68k_ea_addq_subq_destination =
@@ -290,9 +272,7 @@ inline constexpr M68kEaLegalMask m68k_ea_addq_subq_destination =
 // shared C4 lowering and `m68k_emit_ea_read`/`m68k_emit_runtime_ea_address`
 // already handle `address_index8` identically to `address_disp16` (see
 // SEG-007-T120/T136 and this same task's AOT-safety-predicate carve-out).
-inline constexpr M68kEaLegalMask m68k_ea_tst_operand =
-    m68k_ea_dn | m68k_ea_an_indirect | m68k_ea_an_postinc | m68k_ea_an_predec | m68k_ea_an_disp16 |
-    m68k_ea_absolute_word | m68k_ea_absolute_long | m68k_ea_index8;
+inline constexpr M68kEaLegalMask m68k_ea_tst_operand = m68k_ea_data_alterable_with_index;
 // SEG-007-T025 (Batch C, C3): BTST's project-selected read-only destination
 // set. BTST is architecturally broader than BCHG/BCLR/BSET (it may also
 // read via d16(PC), which the three mutating forms may never target), but

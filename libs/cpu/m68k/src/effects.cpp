@@ -645,6 +645,11 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
       operation.kind == M68kIrKind::add_quick || operation.kind == M68kIrKind::add_immediate ||
       operation.kind == M68kIrKind::add ||
       operation.kind == M68kIrKind::write_move ||
+      // SEG-021-T005: MOVEA (An write via `address_register_write`), CLR/NOT (Dn
+      // destination mask) and TST (no register write) have exhaustively
+      // represented D/A footprints, including decoded EA auto-updates.
+      operation.kind == M68kIrKind::write_movea || operation.kind == M68kIrKind::write_clr ||
+      operation.kind == M68kIrKind::logical_not || operation.kind == M68kIrKind::test_operand ||
       operation.kind == M68kIrKind::compare || operation.kind == M68kIrKind::compare_address ||
       operation.kind == M68kIrKind::general_branch;
   if (operation.kind == M68kIrKind::push_effective_address || operation.kind == M68kIrKind::return_from_subroutine ||

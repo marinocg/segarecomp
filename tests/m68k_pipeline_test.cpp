@@ -3735,7 +3735,7 @@ void general_startup_decode_accepts_indexed_tst_source() {
 // (`m68k_ea_addq_subq_destination`, libs/cpu/m68k/include/segarecomp/cpu/m68k/
 // instruction.hpp) never admitted the brief-format indexed `(d8,An,Xn)`
 // destination even though it is an ordinary base-MC68000 alterable
-// addressing mode, mirroring MOVE's own `m68k_ea_move_primary_destination`
+// addressing mode, mirroring MOVE's own `m68k_ea_move_family_destination`
 // widening (SEG-007-T176).
 void general_startup_decode_accepts_indexed_addq_subq_destination() {
   using namespace segarecomp;
@@ -3947,7 +3947,7 @@ void general_startup_decode_accepts_pc_indexed_control_ea() {
 // MOVE/MOVEA source read never feeds indirect control flow; it is a plain
 // runtime-routed data read through the existing owned-cartridge-region
 // mechanism, exactly like `address_index8`/SEG-007-T120 above): a dedicated
-// widening of `m68k_ea_move_primary_source`, consumed only at
+// widening of `m68k_ea_move_family_source`, consumed only at
 // `m68k_decode_general_move`'s own call site, and the shared
 // `m68k_emit_runtime_ea_address` helper's new `pc_index8` case computing
 // `pc_base_address + sign_extend(Xn by size) + d8` from the decoded
@@ -7318,8 +7318,8 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
     expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
            "write_move admits a register-indirect source paired with a Dn destination");
     operation.destination_ea.mode = M68kEaMode::address_indirect;
-    expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-           "write_move's own carve-out never admits a memory destination");
+    expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: write_move admits a register-indirect source paired with a memory destination");
   }
   // MOVEA's destination is never a plain data register, so it never
   // receives write_move's OWN Dn-destination carve-out above; SEG-007-T245's
@@ -7365,14 +7365,12 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
   operation.source_ea.mode = M68kEaMode::address_postinc;
   operation.destination_ea.mode = M68kEaMode::address_disp16;
   operation.source_ea.reg = operation.destination_ea.reg;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "write_move's write-direction carve-out never admits a SAME-register mutating memory "
-         "source (memory-to-memory MOVE with aliasing stays excluded)");
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: a same-register mutating source with a d16(An) destination is admitted");
   operation.source_ea.mode = M68kEaMode::data_register;
   operation.destination_ea.mode = M68kEaMode::address_postinc;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "write_move's write-direction carve-out admits only d16(An); every other memory "
-         "destination ((An), (An)+, -(An)) stays excluded pending its own independent proof");
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: a plain source with an (An)+ destination is admitted");
   // SEG-007-T246 (sixth iteration, same bounded family): a mutating
   // register-indirect ((An)+/-(An)) source paired with a `d16(An)`
   // destination on a DISTINCT address register needs only the same
@@ -7389,9 +7387,8 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
            "write_move admits a mutating register-indirect source paired with a d16(An) "
            "destination on a distinct address register");
     operation.destination_ea.reg = 4U;
-    expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-           "write_move's memory-to-memory carve-out excludes the same-register aliasing shape, "
-           "matching Q3's own emitter-level rejection exactly");
+    expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: the same-register aliasing shape is admitted");
   }
   operation.source_ea.reg = 0U;
   operation.destination_ea.reg = 0U;
@@ -7443,9 +7440,8 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
            "MOVEA admits a memory-EA source paired with its always-fixed An destination");
   }
   operation.source_ea.mode = M68kEaMode::absolute_long;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "MOVEA's carve-out stays limited to register-relative EA classes; an absolute source "
-         "stays excluded pending its own independent proof");
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: MOVEA admits an absolute source (runtime-routed read)");
   // SEG-007-T245 (fifth iteration, same bounded family): TST is read-only,
   // so a non-mutating `d16(An)` source needs no address-register mutation
   // at all, unlike (An)+/-(An), which stay excluded.
@@ -7454,9 +7450,8 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
   expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
          "TST admits a non-mutating d16(An) source -- it is read-only by construction");
   operation.source_ea.mode = M68kEaMode::address_postinc;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "TST's carve-out admits only d16(An); a mutating memory source stays excluded pending "
-         "its own independent proof");
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: TST admits a mutating memory source");
   // SEG-007-T248 (sixth iteration, same bounded family): the brief-format
   // indexed `(d8,An,Xn)` source (`address_index8`) is admitted on the same
   // reasoning as `address_disp16` -- neither mode mutates any address
@@ -7472,10 +7467,8 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
          "TST admits the brief-format indexed (d8,An,Xn) source -- it is read-only by "
          "construction and mutates no address register, exactly like d16(An)");
   operation.source_ea.mode = M68kEaMode::pc_index8;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "TST's carve-out never admits the PC-relative indexed sibling -- an independent, "
-         "unexamined shape this task does not attempt (and one TST's own decode-stage legal-EA "
-         "mask never produces in the first place)");
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: TST admission is family level; operand-mode legality is owned by decode");
   operation.kind = M68kIrKind::call_general;
   operation.source_ea.mode = M68kEaMode::address_postinc;
   expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
@@ -7613,20 +7606,19 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
        {M68kEaMode::address_indirect, M68kEaMode::address_postinc, M68kEaMode::address_predec,
         M68kEaMode::address_index8, M68kEaMode::absolute_word, M68kEaMode::absolute_long}) {
     operation.destination_ea.mode = excluded_destination_mode;
-    expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-           "CLR's carve-out stays limited to d16(An); every other memory destination, including "
-           "the brief-format indexed form CLR's own decode contract never legalizes as a "
-           "destination, remains excluded pending its own independent proof");
+    expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: CLR admits every data-alterable memory destination");
   }
   operation.destination_ea.mode = M68kEaMode::data_register;
-  // NOT and status-register reads stay in their old register-only group.
-  for (const auto neighbouring_kind : {M68kIrKind::logical_not, M68kIrKind::read_status_register}) {
-    operation.kind = neighbouring_kind;
-    operation.destination_ea.mode = M68kEaMode::address_disp16;
-    expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-            "CLR's own d16(An) admission does not broaden NOT or status-register reads beyond Dn");
-    operation.destination_ea.mode = M68kEaMode::data_register;
-  }
+  // SEG-021-T005: NOT joins the family-level admission; status-register reads stay register-only.
+  operation.kind = M68kIrKind::logical_not;
+  operation.destination_ea.mode = M68kEaMode::address_disp16;
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: NOT admits a d16(An) destination");
+  operation.kind = M68kIrKind::read_status_register;
+  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "status-register reads stay register-only");
+  operation.destination_ea.mode = M68kEaMode::data_register;
   operation.kind = M68kIrKind::negate_word;
   operation.destination_ea.mode = M68kEaMode::address_disp16;
   expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
@@ -7680,10 +7672,8 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
       operation.kind = M68kIrKind::write_move;
       operation.source_ea.mode = excluded_source_mode;
       operation.destination_ea.mode = absolute_mode;
-      expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-             "write_move's absolute-destination carve-out never admits an absolute/pc-relative "
-             "source; that side still needs a test_operand_region fact this AOT path never "
-             "populates");
+      expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: an absolute/pc-relative source with an absolute destination is admitted");
     }
     // The brief-format indexed source forms are an independent, unexamined
     // addressing-mode shape this task does not attempt.
@@ -7691,9 +7681,8 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
       operation.kind = M68kIrKind::write_move;
       operation.source_ea.mode = indexed_source_mode;
       operation.destination_ea.mode = absolute_mode;
-      expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-             "write_move's absolute-destination carve-out never admits a brief-format indexed "
-             "source; indexed addressing is an independent, unexamined shape");
+      expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: an indexed source with an absolute destination is admitted");
     }
   }
   operation.source_ea.reg = 0U;
@@ -7721,20 +7710,15 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
   // destination; a plain (An) source must not be confused with it.
   operation.source_ea.mode = M68kEaMode::address_postinc;
   operation.destination_ea.reg = 2U;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "a mutating (An)+ source paired with a SAME-register d16(An) destination stays "
-         "excluded -- this is the sixth iteration's own distinct-register requirement, not "
-         "this carve-out's shape");
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: (An)+ source with a same-register d16(An) destination is admitted");
   operation.source_ea.mode = M68kEaMode::address_predec;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "a mutating -(An) source paired with a SAME-register d16(An) destination stays "
-         "excluded for the identical reason");
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: -(An) source with a same-register d16(An) destination is admitted");
   operation.source_ea.mode = M68kEaMode::address_indirect;
   operation.destination_ea.mode = M68kEaMode::address_indirect;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "this new carve-out stays limited to a d16(An) destination; a plain (An) destination "
-         "for an (An) source is not this shape (it already falls under the storage_free/"
-         "general write_move rules, which reject a memory destination here)");
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: an (An) source with an (An) destination is admitted");
   operation.destination_ea.reg = 0U;
   operation.source_ea.reg = 0U;
   // SEG-007-T249 (continuation, same bounded family/seam T245 opened): a
@@ -7755,14 +7739,12 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
          "write_move admits a d16(An) source paired with a d16(An) destination on a distinct "
          "register too");
   operation.destination_ea.mode = M68kEaMode::address_indirect;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "this carve-out stays limited to a d16(An) destination; a d16(An) source paired with a "
-         "plain (An) destination is not this shape and remains excluded");
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: a d16(An) source with an (An) destination is admitted");
   operation.source_ea.mode = M68kEaMode::address_index8;
   operation.destination_ea.mode = M68kEaMode::address_disp16;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "the brief-format indexed source sibling is an independent, unexamined shape this "
-         "iteration does not attempt");
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T005 family-level admission: an indexed source with a d16(An) destination is admitted");
   operation.destination_ea.reg = 0U;
   operation.source_ea.reg = 0U;
 }
@@ -7931,12 +7913,12 @@ void immutable_rom_aot_write_move_register_indirect_source_is_admitted_and_dispa
                       [&](const auto &root) { return root.decoded.provenance.source.address.value == move_mem_to_mem; }),
          "MOVE.B (A4)+,(0,A5) becomes a validated AOT root now that its distinct-register "
          "memory-to-memory form is admitted (same bounded family, sixth iteration)");
-  expect(!std::any_of(roots.begin(), roots.end(),
-                       [&](const auto &root) {
-                         return root.decoded.provenance.source.address.value == move_mem_to_mem_aliased;
-                       }),
-         "MOVE.B (A4)+,(0,A4) never becomes an AOT root -- the same-register aliasing shape stays "
-         "excluded exactly as emit_m68k_operation_c's own Q3 check already requires");
+  expect(std::any_of(roots.begin(), roots.end(),
+                      [&](const auto &root) {
+                        return root.decoded.provenance.source.address.value == move_mem_to_mem_aliased;
+                      }),
+         "SEG-021-T005: MOVE.B (A4)+,(0,A4) becomes an AOT root -- the routed lowering derives the "
+         "destination EA from the source's updated register local");
   expect(std::any_of(roots.begin(), roots.end(),
                       [&](const auto &root) { return root.decoded.provenance.source.address.value == move_dn_to_abs; }),
          "MOVE.B D0,(0x00FF0070).L becomes a validated AOT root now that its absolute_long "
@@ -8017,8 +7999,8 @@ void immutable_rom_aot_write_move_register_indirect_source_is_admitted_and_dispa
   std::ostringstream move_mem_aliased_hex;
   move_mem_aliased_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
                         << move_mem_to_mem_aliased;
-  expect(emitted.find("genesis_aot_" + move_mem_aliased_hex.str()) == std::string::npos,
-         "the excluded same-register-aliasing form never receives a generated AOT body");
+  expect(emitted.find("genesis_aot_" + move_mem_aliased_hex.str()) != std::string::npos,
+         "SEG-021-T005: the same-register-aliasing form receives a generated AOT body");
   std::ostringstream move_dn_to_abs_hex;
   move_dn_to_abs_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << move_dn_to_abs;
   expect(emitted.find("genesis_aot_" + move_dn_to_abs_hex.str()) != std::string::npos,
@@ -16075,28 +16057,24 @@ void general_startup_move_c4_routed_lowering_fails_closed_for_same_register_alia
     operation.provenance.length.value = 2U;
     return operation;
   };
-  {
-    auto memory = make_memory();
-    const auto operation =
-        make_operation(M68kEaMode::address_predec, 0U, M68kEaMode::address_predec, 0U);  // MOVE.W -(A0),-(A0)
-    const auto out = emit_m68k_operation_c(operation, "runtime->d", "runtime->sr", {}, &memory);
-    expect(out.empty(), "Q3: MOVE.W -(A0),-(A0) (both-mutating same register) fails closed -- emits no C at all");
-  }
-  {
-    auto memory = make_memory();
-    const auto operation =
-        make_operation(M68kEaMode::address_predec, 0U, M68kEaMode::address_indirect, 0U);  // MOVE.W -(A0),(A0)
-    const auto out = emit_m68k_operation_c(operation, "runtime->d", "runtime->sr", {}, &memory);
-    expect(out.empty(), "Q3 (revision-widened): MOVE.W -(A0),(A0) (mutating source, non-mutating destination "
-                        "reading the same register) fails closed -- emits no C at all");
-  }
-  {
-    auto memory = make_memory();
-    const auto operation =
-        make_operation(M68kEaMode::address_predec, 0U, M68kEaMode::address_disp16, 0U);  // MOVE.W -(A0),4(A0)
-    const auto out = emit_m68k_operation_c(operation, "runtime->d", "runtime->sr", {}, &memory);
-    expect(out.empty(), "Q3 (revision-widened): MOVE.W -(A0),4(A0) fails closed the same way as the plain "
-                        "address_indirect same-register shape above");
+  // SEG-021-T005: the former outright decline is replaced by lowering. The destination EA is derived
+  // from the source's updated address-register local; live commits stay after both routed accesses.
+  for (const auto destination_mode : {M68kEaMode::address_predec, M68kEaMode::address_postinc,
+                                      M68kEaMode::address_indirect, M68kEaMode::address_disp16}) {
+    for (const auto source_mode : {M68kEaMode::address_predec, M68kEaMode::address_postinc}) {
+      auto memory = make_memory();
+      const auto operation = make_operation(source_mode, 0U, destination_mode, 0U);
+      const auto out = emit_m68k_operation_c(operation, "runtime->d", "runtime->sr", {}, &memory);
+      expect(!out.empty() && out.find("m68k_move_dst_ea") != std::string::npos &&
+                 out.find("m68k_move_src_ea") != std::string::npos,
+             "Q3 (SEG-021-T005): a mutating source whose register also feeds the destination EA is lowered");
+      const auto commit = out.rfind("runtime->a[0] = m68k_move_");
+      expect(commit != std::string::npos && out.find("genesis_route_access(runtime,") < commit,
+             "Q3 (SEG-021-T005): every live register commit follows the routed accesses");
+      if (destination_mode == M68kEaMode::address_predec || destination_mode == M68kEaMode::address_postinc)
+        expect(out.find("uint32_t m68k_move_dst_ea = m68k_move_src_ea;") != std::string::npos,
+               "Q3 (SEG-021-T005): an auto-updating destination continues from the source's updated register");
+    }
   }
   {
     // The reverse asymmetric shape: destination mutating, source a
@@ -19507,19 +19485,13 @@ int emit_general_startup_runtime_c4_not_source(std::string_view forge = {}) {
     return 0;
   }
   if (predecrement) {
+    // SEG-021-T005: an auto-updating NOT destination is lowered by the deferred address-register
+    // commit: no preflight gap row, and the emitted C carries the NOT body instead of a lowering-gap stop.
     const auto preflight = preflight_m68k_general_startup_c4(*partial);
-    if (!preflight.valid || preflight.rows.size() != 1U ||
-        preflight.rows.front().family != "not" ||
-        preflight.rows.front().ir_kind != M68kIrKind::logical_not ||
-        preflight.rows.front().operand_role != M68kC4OperandRole::destination ||
-        preflight.rows.front().width != M68kMemoryAccessWidth::word ||
-        preflight.rows.front().ea_class != M68kEaMode::address_predec ||
-        preflight.rows.front().auto_update != M68kC4AutoUpdateClass::predecrement ||
-        preflight.rows.front().gap != M68kC4GapClass::requires_architecture_decision)
-      return 1;
+    if (!preflight.valid || !preflight.rows.empty()) return 1;
     const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
-    if (emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_LOGICAL_NOT_AUTO_UPDATE") == std::string::npos ||
-        emitted.find("not_result =") != std::string::npos)
+    if (emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_LOGICAL_NOT_AUTO_UPDATE") != std::string::npos ||
+        emitted.find("not_result =") == std::string::npos)
       return 1;
     std::cout << emitted;
     return 0;

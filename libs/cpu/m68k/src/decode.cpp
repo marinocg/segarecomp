@@ -405,14 +405,14 @@ struct M68kEaFieldOutcome {
   const auto dst_reg3 = static_cast<std::uint8_t>((word >> 9U) & 0x7U);
   if (dst_mode3 == 1U && size != M68kMemoryAccessWidth::byte) {
     const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, src_mode3, src_reg3,
-                                         m68k_ea_move_primary_source, size);
+                                         m68k_ea_move_family_source, size);
     if (!src.ok) return src.failure;
     const M68kEffectiveAddress destination{M68kEaMode::address_register, dst_reg3, 0, 0, 0, 0};
     return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::movea, size, src.ea,
                                        destination, src.extension_bytes);
   }
   const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, src_mode3, src_reg3,
-                                       m68k_ea_move_primary_source, size);
+                                       m68k_ea_move_family_source, size);
   if (!src.ok) return src.failure;
   if (size == M68kMemoryAccessWidth::byte && src.ea.mode == M68kEaMode::address_register) {
     // "For byte size operation, address register direct is not allowed"
@@ -424,7 +424,7 @@ struct M68kEaFieldOutcome {
     return rejected;
   }
   const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, src.extension_bytes, dst_mode3,
-                                       dst_reg3, m68k_ea_move_primary_destination, size);
+                                       dst_reg3, m68k_ea_move_family_destination, size);
   if (!dst.ok) return dst.failure;
   return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::move, size, src.ea, dst.ea,
                                      src.extension_bytes + dst.extension_bytes);
@@ -498,7 +498,7 @@ struct M68kEaFieldOutcome {
   const auto size = m68k_size_from_tst_clr_field(static_cast<std::uint8_t>((word >> 6U) & 0x3U));
   const auto mode3 = static_cast<std::uint8_t>((word >> 3U) & 0x7U);
   const auto reg3 = static_cast<std::uint8_t>(word & 0x7U);
-  const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3, m68k_ea_data_alterable, size);
+  const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3, m68k_ea_clr_not_operand, size);
   if (!dst.ok) return dst.failure;
   return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::clr, size, {}, dst.ea,
                                      dst.extension_bytes);
@@ -516,7 +516,7 @@ struct M68kEaFieldOutcome {
   const auto size = m68k_size_from_tst_clr_field(static_cast<std::uint8_t>((word >> 6U) & 0x3U));
   const auto mode3 = static_cast<std::uint8_t>((word >> 3U) & 0x7U);
   const auto reg3 = static_cast<std::uint8_t>(word & 0x7U);
-  const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3, m68k_ea_data_alterable, size);
+  const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3, m68k_ea_clr_not_operand, size);
   if (!dst.ok) return dst.failure;
   return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::not_operand, size, {}, dst.ea,
                                      dst.extension_bytes);
