@@ -2135,9 +2135,7 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     // BTST's read-only destination above), so this branch checks the
     // destination_write fact -- the same "read side threaded from the write
     // fact" RMW shape already established for SUBQ/SUBI/write_clr, not
-    // BTST's own destination_read shape. An auto-updating destination is
-    // declined cleanly (this family carries no deferred-address-commit
-    // contract, matching BTST/the logical family).
+    // BTST's own destination_read shape.
     // SEG-021-T008: an auto-updating destination lowers through the bit-family deferred address commit.
     if (m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
