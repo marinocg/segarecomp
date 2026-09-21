@@ -89,6 +89,17 @@ def cases():
             for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
                 for reg in ((1, 7) if mode in (3, 4) else (1,)):
                     out.append(unary_word(base, size, mode, reg) + ext)
+    # SEG-021-T009: memory-word ASL/ASR/LSL/LSR/ROXL/ROXR/ROL/ROR (count fixed at 1): every legal memory-alterable
+    # destination class incl. (An)+ / -(An) (deferred address commit) and (d8,An,Xn).
+    for family in range(4):
+        for direction in (0, 1):
+            base = 0xE0C0 | (family << 9) | (direction << 8)
+            for mode, ext in ((2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
+                for reg in ((1, 7) if mode in (3, 4) else (1,)):
+                    word = "%04X" % (base | (mode << 3) | reg) + ext
+                    out.append(word)
+                    if mode in (3, 4):
+                        AUTO_CODES.add(word)
     out += arithmetic_cases()
     LONG_AN_INDEX[:] = sorted(set(LONG_AN_INDEX))
     return sorted(set(out))

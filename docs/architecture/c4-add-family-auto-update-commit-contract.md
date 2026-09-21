@@ -228,3 +228,12 @@ Remaining declined auto-update shapes: MULS/MULU/DIVS/DIVU sources (SEG-021-T010
 AOT admission additionally requires the shared retirement-timing seam to account for the operation
 (`m68k_instruction_cycles`): the dynamic `BTST Dn,#<data>` form has no published static timing row and is declined at
 analysis time rather than admitted and rejected by codegen (which invalidated the whole immutable-ROM AOT program).
+
+## SEG-021-T009 extension: memory-word shift/rotate
+
+ASL/ASR/LSL/LSR/ROL/ROR/ROXL/ROXR memory-word forms (count fixed at 1) are a one-address read-modify-write like NOT/NEG. In
+the routed (C4/AOT) context an auto-updating `(An)+`/`-(An)` destination uses the same operation-local deferred commit:
+one snapshot local (`m68k_shift_auto_ea`), one routed read and one routed write at it, and the single live-register
+commit strictly after both accesses, so a routed stop leaves no partial architectural mutation. Non-auto-updating
+destinations, including `(d8,An,Xn)`, use the shared routed read/write primitives; foldable absolute destinations retain
+their destination_read/destination_write facts exactly as NOT does.

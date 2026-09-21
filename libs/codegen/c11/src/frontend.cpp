@@ -1419,6 +1419,9 @@ bool valid_c4_static_memory_fact(
                                 : M68kMemoryAccessDirection::write;
     }
     break;
+  // SEG-021-T009: the memory-word shift/rotate forms are one-address RMW operations with the same
+  // destination_read/destination_write shape as NOT (the register form never carries a fact).
+  case M68kInstructionKind::shift_rotate:
   case M68kInstructionKind::not_operand:
     // SEG-007-T168: NOT has no second operand at all (unlike SUBQ's
     // quick-immediate source); its sole destination is a full RMW operand,
@@ -1819,6 +1822,10 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   // (this family reads AND writes its destination, matching SUBQ/SUBI's own
   // "read side threaded from the write fact" RMW shape rather than BTST's
   // read-only one).
+  // SEG-021-T009: memory-word shift/rotate is a represented C4 kind: a one-address RMW lowered through
+  // the shared routed read/write primitives (auto-updating destinations via the operation-local
+  // deferred address-register commit); gap shapes are classified below like NOT's.
+  case M68kIrKind::shift_rotate_memory:
   case M68kIrKind::bit_change:
   case M68kIrKind::bit_clear:
   case M68kIrKind::bit_set:
@@ -2148,7 +2155,7 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     // destination still needs its retained fact exactly as before.
     if (m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
-  } else if (operation.kind == M68kIrKind::logical_not) {
+  } else if (operation.kind == M68kIrKind::logical_not || operation.kind == M68kIrKind::shift_rotate_memory) {
     // SEG-007-T168: NOT has no source operand at all (unlike the sibling
     // logical family AND/OR/EOR/ANDI/ORI/EORI, which always carry one, just
     // never a memory one for the immediate forms). Its sole destination is
@@ -2341,6 +2348,8 @@ std::optional<std::string_view> c4_lowering_dimension_literal(M68kIrKind kind, M
     // SEG-007-T168: represented NOT with a statically foldable memory
     // destination and no retained resolver fact.
     case M68kIrKind::logical_not: return "GENESIS_C4_LOWERING_DIMENSIONS_LOGICAL_NOT_MISSING_FACT";
+    // SEG-021-T009: represented memory-word shift/rotate with a foldable destination and no retained fact.
+    case M68kIrKind::shift_rotate_memory: return "GENESIS_C4_LOWERING_DIMENSIONS_SHIFT_ROTATE_MEMORY_MISSING_FACT";
     // SEG-007-T170: represented SUB/SUBI with a statically foldable memory
     // operand and no retained resolver fact (mirrors ADD_MISSING_FACT).
     case M68kIrKind::subtract: return "GENESIS_C4_LOWERING_DIMENSIONS_SUBTRACT_MISSING_FACT";
@@ -2438,6 +2447,7 @@ M68kC4Preflight preflight_m68k_general_startup_c4(const FrontendPartialProgram &
     case M68kIrKind::test_operand: return "tst";
     case M68kIrKind::write_clr: return "clr";
     case M68kIrKind::logical_not: return "not";
+    case M68kIrKind::shift_rotate_memory: return "shift_rotate_memory";
     case M68kIrKind::multiply_signed_word: return "muls";
     case M68kIrKind::multiply_unsigned_word: return "mulu";
     case M68kIrKind::divide_signed_word: return "divs";
@@ -2795,6 +2805,8 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
         expected_direction = M68kMemoryAccessDirection::write;
       }
       break;
+    // SEG-021-T009: memory-word shift/rotate: same one-address RMW fact shape as NOT.
+    case M68kInstructionKind::shift_rotate:
     case M68kInstructionKind::not_operand:
       // SEG-007-T168: NOT has no second operand at all (unlike AND/OR/EOR);
       // its sole destination is a full RMW operand needing both
@@ -2999,6 +3011,8 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
           // SEG-021-T008: BTST/BCHG/BCLR/BSET lower their own auto-updating destination (deferred commit).
           kind != M68kInstructionKind::btst && kind != M68kInstructionKind::bchg &&
           kind != M68kInstructionKind::bclr && kind != M68kInstructionKind::bset &&
+          // SEG-021-T009: memory-word shifts/rotates lower their own auto-updating destination.
+          kind != M68kInstructionKind::shift_rotate &&
           (ea.mode == M68kEaMode::address_predec || ea.mode == M68kEaMode::address_postinc))
         return false;
       return !m68k_is_statically_foldable_control_ea(ea) || facts.contains({address, role});
@@ -3052,6 +3066,13 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
                         M68kInstructionKind::not_operand) ||
           !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
                         M68kInstructionKind::not_operand))) ||
+        // SEG-021-T009: memory-word shift/rotate: one-address RMW like NOT.
+        (instruction->kind == M68kInstructionKind::shift_rotate &&
+         instruction->destination_ea.mode != M68kEaMode::data_register &&
+         (!require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_read,
+                        M68kInstructionKind::shift_rotate) ||
+          !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
+                        M68kInstructionKind::shift_rotate))) ||
         ((instruction->kind == M68kInstructionKind::cmpa ||
           instruction->kind == M68kInstructionKind::adda ||
           instruction->kind == M68kInstructionKind::suba ||
@@ -4658,6 +4679,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
         out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
         break;
       }
+      case M68kIrKind::shift_rotate_memory:
       case M68kIrKind::logical_not: {
         // SEG-007-T168: NOT has no second operand at all (unlike SUBQ's
         // quick-immediate source); its sole destination is a full RMW
