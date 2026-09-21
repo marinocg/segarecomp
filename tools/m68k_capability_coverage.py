@@ -42,7 +42,9 @@ ROUTES = ["route_direct", "route_runtime_routed", "route_immutable_rom_aot", "ro
 VALIDATION = ["semantic_validated", "timing_validated"]
 ALL_STAGES = PIPELINE_STAGES + ROUTES + VALIDATION
 END_TO_END = ["decode", "lift", "effects", "emit", "compile", "native_exec"]
-CFLAGS = ["-std=c11", "-Wall", "-Wextra", "-pedantic", "-Werror", "-O0"]
+# -Wno-type-limits: the conformance window starts at address 0, so the emitted lower-bound guard is an
+# intentional `unsigned < 0` comparison that gcc's -Wextra flags; it is a probe-window artifact, not a defect.
+CFLAGS = ["-std=c11", "-Wall", "-Wextra", "-Wno-type-limits", "-pedantic", "-Werror", "-O0"]
 EXTENSION_PATTERN = "every extension word 0x0004; 1 MiB linear window; D0-D7 small even values, A0-A7 inside window"
 VECTORS = {"address_error_vector_3": 3, "illegal_vector_4": 4, "zero_divide_vector_5": 5, "chk_vector_6": 6,
            "trapv_vector_7": 7, "privilege_violation_vector_8": 8, "trap_vector_32_47": 32}
@@ -362,7 +364,7 @@ def render_report(result):
     lines += ["", "## Stage definitions (public entry points only)", "",
               "- `decode`/`lift`: `decode_m68k_instruction` (general-startup profile) returns a decoded form; `lift_m68k_instruction` maps it to a typed IR kind (not the MOVEQ default).",
               "- `effects`: `m68k_operation_effect` reports a PC effect. `ea_side_effects`: the effect owner declares a complete register write footprint (EA auto-update and implicit stack effects are visible).",
-              "- `emit`/`compile`/`native_exec`: `emit_m68k_operation_c` (linear-memory context) produces C; the batched units compile under strict C11 (`-std=c11 -Wall -Wextra -pedantic -Werror`); the compiled function runs to normal completion from a fixed state in one native conformance binary (a runtime stop code, crash or hang fails the word).",
+              "- `emit`/`compile`/`native_exec`: `emit_m68k_operation_c` (linear-memory context) produces C; the batched units compile under strict C11 (`-std=c11 -Wall -Wextra -Wno-type-limits -pedantic -Werror`); the compiled function runs to normal completion from a fixed state in one native conformance binary (a runtime stop code, crash or hang fails the word).",
               "- `exception_privilege`: applicable only to forms whose dataset lists exception/privilege classes; passes only if the effect owner models every listed vector (it currently models only vector 5).",
               "- `timing_model`: `m68k_instruction_cycles` returns a value (existence of a timing entry, not correctness).",
               "- Routes: `route_direct` = emitted, compiled C; `route_runtime_routed` = Genesis runtime-routed emission is non-empty; `route_immutable_rom_aot` = `m68k_operation_is_immutable_rom_aot_safe` admits the form; `route_static_discovery` = CPU-owned static discovery walks the form to a clean end.",

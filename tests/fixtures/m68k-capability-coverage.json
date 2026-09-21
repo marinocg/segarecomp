@@ -2320,7 +2320,7 @@
   "unlk.an.none.an.none": "111011101110100"
  },
  "measurement": {
-  "compiler_flags": "-std=c11 -Wall -Wextra -pedantic -Werror -O0",
+  "compiler_flags": "-std=c11 -Wall -Wextra -Wno-type-limits -pedantic -Werror -O0",
   "end_to_end_structural_stages": [
    "decode",
    "lift",

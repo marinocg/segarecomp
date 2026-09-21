@@ -46,7 +46,7 @@ Denominator: 1526 legal forms, 45816 legal primary words. A form passes a stage 
 
 - `decode`/`lift`: `decode_m68k_instruction` (general-startup profile) returns a decoded form; `lift_m68k_instruction` maps it to a typed IR kind (not the MOVEQ default).
 - `effects`: `m68k_operation_effect` reports a PC effect. `ea_side_effects`: the effect owner declares a complete register write footprint (EA auto-update and implicit stack effects are visible).
-- `emit`/`compile`/`native_exec`: `emit_m68k_operation_c` (linear-memory context) produces C; the batched units compile under strict C11 (`-std=c11 -Wall -Wextra -pedantic -Werror`); the compiled function runs to normal completion from a fixed state in one native conformance binary (a runtime stop code, crash or hang fails the word).
+- `emit`/`compile`/`native_exec`: `emit_m68k_operation_c` (linear-memory context) produces C; the batched units compile under strict C11 (`-std=c11 -Wall -Wextra -Wno-type-limits -pedantic -Werror`); the compiled function runs to normal completion from a fixed state in one native conformance binary (a runtime stop code, crash or hang fails the word).
 - `exception_privilege`: applicable only to forms whose dataset lists exception/privilege classes; passes only if the effect owner models every listed vector (it currently models only vector 5).
 - `timing_model`: `m68k_instruction_cycles` returns a value (existence of a timing entry, not correctness).
 - Routes: `route_direct` = emitted, compiled C; `route_runtime_routed` = Genesis runtime-routed emission is non-empty; `route_immutable_rom_aot` = `m68k_operation_is_immutable_rom_aot_safe` admits the form; `route_static_discovery` = CPU-owned static discovery walks the form to a clean end.
