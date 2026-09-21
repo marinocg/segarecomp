@@ -71,7 +71,8 @@ def form(mnemonic, family, form_id, size, src, dst, words, variant="", privilege
     exc = set(exceptions)
     if privilege == "supervisor": exc.add("privilege_violation_vector_8")
     mem = src in MEMORY_CLASSES or dst in MEMORY_CLASSES
-    if mem and size in ("w", "l"): exc.add("address_error_vector_3")
+    # LEA computes an address only and MOVEP uses byte accesses: neither can raise an odd-address error.
+    if mem and size in ("w", "l") and mnemonic not in ("LEA", "MOVEP"): exc.add("address_error_vector_3")
     if implicit in ("implicit_sp_push", "implicit_sp_pop", "implicit_sp_frame"): exc.add("address_error_vector_3")
     row_id = ".".join(p for p in (mnemonic.lower(), form_id, size or "none", src, dst, variant) if p)
     row = {
@@ -216,7 +217,8 @@ def build_forms():
     form("MOVE", "system_control", "usp_an", "l", "usp", "an", [0x4E68 | a for a in R8], privilege="supervisor")
     # --- program control ---
     for c in CONTROL:
-        form("JMP", "program_control", "ea", "none", c, "none", [0x4EC0 | e for e in ea_values(c)])
+        form("JMP", "program_control", "ea", "none", c, "none", [0x4EC0 | e for e in ea_values(c)],
+             exceptions=("address_error_vector_3",))  # odd jump target faults on the fetch
         form("JSR", "program_control", "ea", "none", c, "none", [0x4E80 | e for e in ea_values(c)], implicit="implicit_sp_push")
     for cond in range(16):
         cn = CONDITIONS[cond]
