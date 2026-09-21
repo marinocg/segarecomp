@@ -846,19 +846,17 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         const auto dn_expr = [&](unsigned reg) {
           return std::string(data_registers) + "[" + std::to_string(reg) + "]";
         };
-        // Q3 (MOVE contract) reasoning carried to ADDA: an ADDA whose source is
-        // the auto-updating operand and whose An destination is that same
-        // register (e.g. `ADDA.L (A0)+,A0`) composes the source's own
-        // auto-update with the sum write into one register, and this
-        // repository has no differential evidence for that composed value.
-        // Decline it -- emit no C for this instruction (the same "no output"
-        // convention every other declined EA combination uses); the C4 gap
-        // classifier keeps this shape a clean lowering-gap stop, never a
-        // guessed semantic or a partial mutation.
-        const bool aliasing_declined =
+        // SEG-021-T006: `ADDA <ea>,An` whose auto-updating source register is the
+        // destination register itself. Motorola PRM/Musashi order: the source EA is
+        // evaluated (auto-update applied) first, then the destination is read, so the
+        // destination operand is the already-updated register and the sum write wins
+        // over the auto-update. The deferred-commit local models this exactly: the
+        // destination operand is the local after its adjustment and the final live
+        // register commit is skipped (the sum write is the last architectural write).
+        const bool alias_same_register =
             address_destination && add_auto_source &&
             static_cast<unsigned>(operation.source_ea.reg) == static_cast<unsigned>(operation.destination_ea.reg);
-        if (!aliasing_declined) {
+        {
           unsigned temp_ordinal = 0U;
           std::ostringstream body;
           bool ok = true;
@@ -871,7 +869,9 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
             m68k_emit_routed_read(body, "m68k_add_auto_ea", operation.size, *memory, add_source_expr, temp_ordinal);
             if (auto_ea.mode == M68kEaMode::address_postinc)
               body << "m68k_add_auto_ea += UINT32_C(" << step << ");\n";
-            add_destination_expr = address_destination
+            add_destination_expr = alias_same_register
+                                       ? std::string("m68k_add_auto_ea")
+                                   : address_destination
                                        ? an_expr(static_cast<unsigned>(operation.destination_ea.reg))
                                        : dn_expr(static_cast<unsigned>(operation.destination_ea.reg));
           } else {
@@ -913,7 +913,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
           if (ok) {
             // The single deferred live-register-file commit, strictly after
             // every routed access above.
-            body << an_expr(static_cast<unsigned>(auto_ea.reg)) << " = m68k_add_auto_ea;\n";
+            if (!alias_same_register) body << an_expr(static_cast<unsigned>(auto_ea.reg)) << " = m68k_add_auto_ea;\n";
             output << "{\n" << body.str() << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
           }
         }

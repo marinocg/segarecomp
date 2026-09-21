@@ -644,6 +644,11 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
   effect.register_write_footprint_complete = operation.kind == M68kIrKind::no_operation ||
       operation.kind == M68kIrKind::add_quick || operation.kind == M68kIrKind::add_immediate ||
       operation.kind == M68kIrKind::add ||
+      // SEG-021-T006: the rest of the ADD/SUB/CMP families share the same exhaustively
+      // represented footprint (Dn mask, `address_register_write`, decoded EA auto-updates).
+      operation.kind == M68kIrKind::add_address || operation.kind == M68kIrKind::subtract ||
+      operation.kind == M68kIrKind::subtract_immediate || operation.kind == M68kIrKind::subtract_quick ||
+      operation.kind == M68kIrKind::subtract_address || operation.kind == M68kIrKind::compare_immediate ||
       operation.kind == M68kIrKind::write_move ||
       // SEG-021-T005: MOVEA (An write via `address_register_write`), CLR/NOT (Dn
       // destination mask) and TST (no register write) have exhaustively

@@ -89,8 +89,67 @@ def cases():
             for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
                 for reg in ((1, 7) if mode in (3, 4) else (1,)):
                     out.append(unary_word(base, size, mode, reg) + ext)
+    out += arithmetic_cases()
     LONG_AN_INDEX[:] = sorted(set(LONG_AN_INDEX))
     return sorted(set(out))
+
+
+# SEG-021-T006: ADD/ADDA/ADDI/ADDQ, SUB/SUBA/SUBI/SUBQ and CMP/CMPA/CMPI. Every legal auto-update, indexed,
+# displacement, immediate and register form goes through both lowerings. The routed environment biases every An
+# by the work-RAM base, so shapes that consume an An VALUE as data (An as a source operand of ADD/SUB/CMP/ADDA/
+# SUBA, and CMPA, whose flags compare the biased An) cannot be compared against the unbiased direct window; they
+# are emit-checked on both routes only (ARITH_EMIT_ONLY) and validated against Musashi by the direct rows.
+ARITH_EMIT_ONLY = []
+ARITH_BASES = {"add": 0xD000, "sub": 0x9000, "cmp": 0xB000}
+EA_EXT = {2: "", 3: "", 4: "", 5: "0010", 6: "1804"}
+
+
+def arithmetic_cases():
+    out = []
+    imm = {"b": "00A5", "w": "8001", "l": "80000001"}
+    for name, base in ARITH_BASES.items():
+        for size, opmode in (("b", 0), ("w", 1), ("l", 2)):
+            # <ea>,Dn: register, memory (every auto-update / displacement / indexed class) and immediate sources.
+            for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
+                for reg in ((1, 7) if mode in (3, 4) else (1,)):
+                    for dn in (2, 1):
+                        out.append("%04X" % (base | (dn << 9) | (opmode << 6) | (mode << 3) | reg) + ext)
+            out.append("%04X" % (base | (2 << 9) | (opmode << 6) | (7 << 3) | 4) + imm[size].rjust(4 if size != "l" else 8, "0"))
+            if size != "b":
+                for reg in (1, 7):
+                    ARITH_EMIT_ONLY.append("%04X" % (base | (2 << 9) | (opmode << 6) | (1 << 3) | reg))
+            # Dn,<ea> (ADD/SUB only): read-modify-write memory destinations.
+            if name != "cmp":
+                for mode, ext in ((2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
+                    for reg in ((1, 7) if mode in (3, 4) else (1,)):
+                        for dn in (2, 1, 7):
+                            out.append("%04X" % (base | (dn << 9) | ((opmode + 4) << 6) | (mode << 3) | reg) + ext)
+        # ADDA/SUBA/CMPA: word/long, every memory source; destination An may alias an auto-updating source.
+        for size, opmode in (("w", 3), ("l", 7)):
+            for mode, ext in ((2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
+                for reg in ((1, 7) if mode in (3, 4) else (1,)):
+                    for an in (2, reg, 0):
+                        word = "%04X" % (base | (an << 9) | (opmode << 6) | (mode << 3) | reg) + ext
+                        (ARITH_EMIT_ONLY if name == "cmp" else out).append(word)
+            for mode in (0, 1):
+                ARITH_EMIT_ONLY.append("%04X" % (base | (2 << 9) | (opmode << 6) | (mode << 3) | 1))
+            out_imm = "%04X" % (base | (2 << 9) | (opmode << 6) | (7 << 3) | 4) + ("8001" if size == "w" else "80000001")
+            (ARITH_EMIT_ONLY if name == "cmp" else out).append(out_imm)
+    # ADDI/SUBI/CMPI and ADDQ/SUBQ: every destination class, sizes b/w/l.
+    for name, base, quick in (("add", 0x0600, 0x5000), ("sub", 0x0400, 0x5100), ("cmp", 0x0C00, None)):
+        for size, sf in (("b", 0), ("w", 1), ("l", 2)):
+            immw = {"b": "00A5", "w": "8001", "l": "80000001"}[size]
+            for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
+                for reg in ((1, 7) if mode in (3, 4) else (1,)):
+                    out.append("%04X" % (base | (sf << 6) | (mode << 3) | reg) + immw + ext)
+                    if quick is not None:
+                        for q in (1, 0):
+                            out.append("%04X" % (quick | (q << 9) | (sf << 6) | (mode << 3) | reg) + ext)
+            if quick is not None and size != "b":
+                for q in (1, 0):
+                    for reg in (1, 7):  # ADDQ/SUBQ to An: word/long, no CCR change
+                        out.append("%04X" % (quick | (q << 9) | (sf << 6) | (1 << 3) | reg))
+    return out
 
 
 DRIVER = r'''
@@ -161,6 +220,11 @@ with tempfile.TemporaryDirectory() as tmp:
     routed_status = emit(["--routed"], codes, tmp / "routed.c")
     bad = [c for c in codes if direct_status.get(c) != "ok" or routed_status.get(c) != "ok"]
     check(not bad, "encodings that do not emit on both routes: %s" % bad[:12])
+    emit_only = sorted(set(ARITH_EMIT_ONLY))
+    direct_only = emit([], emit_only, tmp / "arith_direct.c")
+    routed_only = emit(["--routed"], emit_only, tmp / "arith_routed.c")
+    check(all(direct_only.get(c) == "ok" and routed_only.get(c) == "ok" for c in emit_only),
+          "An-value arithmetic shapes must emit on both routes")
     # Long An-indexed destinations behind an auto-updating source: the destination address must be derived from
     # the source's updated local, never from the live (stale) register array.
     emit_status = emit(["--routed"], LONG_AN_INDEX, tmp / "long_index.c")

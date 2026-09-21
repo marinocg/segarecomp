@@ -555,7 +555,7 @@ struct M68kEaFieldOutcome {
     const auto size = address_compare ? (opmode == 3U ? M68kMemoryAccessWidth::word : M68kMemoryAccessWidth::long_word) :
         m68k_size_from_tst_clr_field(opmode);
     const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg,
-                                         m68k_ea_arithmetic_logical_indexed_source, size);
+                                         m68k_ea_add_sub_cmp_source, size);
     if (!src.ok) return src.failure;
     if (!address_compare && size == M68kMemoryAccessWidth::byte && src.ea.mode == M68kEaMode::address_register) {
       auto rejected = reject(DecodeOutcome::valid_but_unsupported_instruction, source, available, 2U, true);
@@ -575,7 +575,7 @@ struct M68kEaFieldOutcome {
   const auto imm = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, 7U, 4U, m68k_ea_immediate, size);
   if (!imm.ok) return imm.failure;
   const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, imm.extension_bytes, mode, reg,
-                                       m68k_ea_data_alterable, size);
+                                       m68k_ea_data_alterable_with_index, size);
   if (!dst.ok) return dst.failure;
   auto decoded = m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::cmpi, size, imm.ea, dst.ea,
                                              imm.extension_bytes + dst.extension_bytes);
@@ -598,7 +598,7 @@ struct M68kEaFieldOutcome {
       const auto size = address_subtract ? (opmode == 3U ? M68kMemoryAccessWidth::word : M68kMemoryAccessWidth::long_word)
                                          : m68k_size_from_tst_clr_field(opmode);
       const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg,
-                                           m68k_ea_arithmetic_logical_indexed_source, size);
+                                           m68k_ea_add_sub_cmp_source, size);
       if (!src.ok) return src.failure;
       if (!address_subtract && size == M68kMemoryAccessWidth::byte && src.ea.mode == M68kEaMode::address_register) {
         auto rejected = reject(DecodeOutcome::valid_but_unsupported_instruction, source, available, 2U, true);
@@ -614,7 +614,7 @@ struct M68kEaFieldOutcome {
       const auto size = m68k_size_from_tst_clr_field(static_cast<std::uint8_t>(opmode - 4U));
       const M68kEffectiveAddress src{M68kEaMode::data_register, destination, 0, 0, 0, 0};
       const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg,
-                                           m68k_ea_data_alterable, size);
+                                           m68k_ea_data_alterable_with_index, size);
       if (!dst.ok) return dst.failure;
       return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::sub, size, src, dst.ea,
                                         dst.extension_bytes);
@@ -625,7 +625,7 @@ struct M68kEaFieldOutcome {
     const auto imm = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, 7U, 4U, m68k_ea_immediate, size);
     if (!imm.ok) return imm.failure;
     const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, imm.extension_bytes, mode, reg,
-                                         m68k_ea_data_alterable, size);
+                                         m68k_ea_data_alterable_with_index, size);
     if (!dst.ok) return dst.failure;
     return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::subi, size, imm.ea, dst.ea,
                                       imm.extension_bytes + dst.extension_bytes);
@@ -664,10 +664,10 @@ struct M68kEaFieldOutcome {
       // ADD.B excludes An, while ADD.W/L accept it. ADDA remains a distinct
       // instruction family because its destination and CCR semantics differ.
       const auto source_legal = address_add
-          ? m68k_ea_arithmetic_logical_indexed_source
+          ? m68k_ea_add_sub_cmp_source
           : (size == M68kMemoryAccessWidth::byte
-                 ? static_cast<M68kEaLegalMask>(m68k_ea_arithmetic_logical_indexed_source & ~m68k_ea_an)
-                 : m68k_ea_arithmetic_logical_indexed_source);
+                 ? static_cast<M68kEaLegalMask>(m68k_ea_add_sub_cmp_source & ~m68k_ea_an)
+                 : m68k_ea_add_sub_cmp_source);
       const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg,
                                            source_legal, size);
       if (!src.ok) return src.failure;
@@ -680,7 +680,7 @@ struct M68kEaFieldOutcome {
       const auto size = m68k_size_from_tst_clr_field(static_cast<std::uint8_t>(opmode - 4U));
       const M68kEffectiveAddress src{M68kEaMode::data_register, destination, 0, 0, 0, 0};
       const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg,
-                                           m68k_ea_data_alterable, size);
+                                           m68k_ea_data_alterable_with_index, size);
       if (!dst.ok) return dst.failure;
       return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::add, size, src, dst.ea,
                                         dst.extension_bytes);
@@ -691,7 +691,7 @@ struct M68kEaFieldOutcome {
     const auto imm = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, 7U, 4U, m68k_ea_immediate, size);
     if (!imm.ok) return imm.failure;
     const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, imm.extension_bytes, mode, reg,
-                                         m68k_ea_data_alterable, size);
+                                         m68k_ea_data_alterable_with_index, size);
     if (!dst.ok) return dst.failure;
     return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::addi, size, imm.ea, dst.ea,
                                       imm.extension_bytes + dst.extension_bytes);
