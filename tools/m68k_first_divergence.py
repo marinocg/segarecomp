@@ -260,8 +260,11 @@ def _toolchain_env() -> dict:
     return env
 
 
-def build_oracle(checkout: pathlib.Path, compiler: str, workdir: pathlib.Path) -> pathlib.Path:
-    """Build the oracle runner from the pinned, unmodified Musashi checkout."""
+def build_oracle(checkout: pathlib.Path, compiler: str, workdir: pathlib.Path,
+                 source_path: pathlib.Path | None = None, include_dirs: tuple = ()) -> pathlib.Path:
+    """Build the oracle runner from the pinned, unmodified Musashi checkout. By default the embedded
+    single-step boundary runner is compiled; ``source_path`` substitutes another runner source (the
+    SEG-021-T003 conformance harness) built against the identical pinned core."""
     if _checked(["git", "-C", str(checkout), "rev-parse", "HEAD"]).stdout.strip() != MUSASHI_PIN:
         raise RuntimeError("Musashi checkout is not the pinned revision")
     if subprocess.run(["git", "-C", str(checkout), "diff", "--quiet", "HEAD", "--"]).returncode != 0:
@@ -272,10 +275,15 @@ def build_oracle(checkout: pathlib.Path, compiler: str, workdir: pathlib.Path) -
               str(checkout / "m68kmake.c"), "-o", str(generator)], env=env)
     shutil.copyfile(checkout / "m68k_in.c", workdir / "m68k_in.c")
     _checked([str(generator)], cwd=workdir, env=env)
-    source = workdir / "oracle.c"
-    source.write_text(ORACLE_SOURCE)
+    if source_path is None:
+        source = workdir / "oracle.c"
+        source.write_text(ORACLE_SOURCE)
+    else:
+        source = source_path
     binary = workdir / "oracle"
     _checked([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-Wno-error=unused-variable", "-pedantic",
+              f'-DMUSASHI_GIT_REVISION="{MUSASHI_PIN}"',
+              *[arg for d in include_dirs for arg in ("-I", str(d))],
               "-I", str(workdir), "-I", str(checkout), "-I", str(checkout / "softfloat"), str(source),
               str(checkout / "m68kcpu.c"), str(workdir / "m68kops.c"), str(checkout / "softfloat/softfloat.c"),
               "-o", str(binary)], env=env)

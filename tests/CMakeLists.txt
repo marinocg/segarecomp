@@ -822,11 +822,22 @@ add_executable(m68k_capability_probe tools/m68k_capability_probe.cpp)
 target_link_libraries(m68k_capability_probe PRIVATE segarecomp::machine_genesis segarecomp::codegen_c11_genesis)
 target_compile_features(m68k_capability_probe PRIVATE cxx_std_20)
 segarecomp_enable_warnings(m68k_capability_probe)
+# SEG-021-T003: emitter driver of the table-driven generated-native differential conformance harness
+# (driven by tools/m68k_conformance.py and tests/m68k_conformance_harness_test.py).
+add_executable(m68k_conformance_emitter tools/m68k_conformance_emitter.cpp)
+target_link_libraries(m68k_conformance_emitter PRIVATE segarecomp::machine_genesis segarecomp::codegen_c11_genesis)
+target_compile_features(m68k_conformance_emitter PRIVATE cxx_std_20)
+segarecomp_enable_warnings(m68k_conformance_emitter)
 add_test(NAME m68k_capability_ratchet_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_capability_ratchet_test.py
   $<TARGET_FILE:m68k_capability_probe> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME m68k_capability_coverage_unit_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_capability_coverage_unit_test.py ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME m68k_conformance_harness_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_conformance_harness_test.py
+  $<TARGET_FILE:m68k_conformance_emitter> ${CMAKE_C_COMPILER})
+set_property(TEST m68k_conformance_harness_test APPEND PROPERTY LABELS full fast)
+set_property(TEST m68k_conformance_harness_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST m68k_capability_ratchet_test m68k_capability_coverage_unit_test APPEND PROPERTY LABELS full fast)
 set_property(TEST m68k_capability_coverage_unit_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST m68k_capability_ratchet_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")

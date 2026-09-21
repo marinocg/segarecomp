@@ -49,4 +49,6 @@ checkout. Regenerate the fixture with `python3 tests/tools/m68k_word_sweep.py --
 
 `tools/m68k_capability_coverage.py` consumes this dataset and reports, per stage and admission route, how many
 legal forms the real pipeline handles; see `docs/testing/m68k-capability-coverage.md` (generated) and the
-ratchet `tests/m68k_capability_ratchet_test.py`. It is the only product tool permitted to consume the dataset.
+ratchet `tests/m68k_capability_ratchet_test.py`. Together with `tools/m68k_conformance.py`
+(SEG-021-T003, see `docs/testing/m68k-conformance-harness.md`, which takes each form's exact primary words from
+`word_ranges`) it is one of the only two product tools permitted to consume the dataset.
