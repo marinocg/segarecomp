@@ -800,3 +800,8 @@ endforeach()
 add_test(NAME m68k_first_divergence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_first_divergence_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+
+# SEG-020-T008: registered after the label loop, so label it explicitly (full gate coverage of the
+# CPU-domain first-divergence demonstration; it skips the Musashi comparison when the pin is unset).
+set_property(TEST m68k_first_divergence_test APPEND PROPERTY LABELS full)
+set_property(TEST m68k_first_divergence_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
