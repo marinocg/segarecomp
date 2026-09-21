@@ -726,7 +726,7 @@ struct M68kEaFieldOutcome {
     const auto imm = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, 7U, 4U, m68k_ea_immediate, size);
     if (!imm.ok) return imm.failure;
     const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, imm.extension_bytes, mode, reg,
-                                        m68k_ea_data_alterable, size);
+                                        m68k_ea_logical_immediate_destination, size);
     if (!dst.ok) return dst.failure;
     return m68k_finish_general_decode(source, image, offset, bytes, kind, size, imm.ea, dst.ea,
                                       imm.extension_bytes + dst.extension_bytes);
@@ -757,8 +757,8 @@ struct M68kEaFieldOutcome {
       // the MOVE-family `(d8,PC,Xn)` source (SEG-007-T136) and the
       // `(d8,An,Xn)` logical source (SEG-007-T137); no new EA math or
       // dispatch is introduced.
-      auto source_legal = static_cast<M68kEaLegalMask>(m68k_ea_arithmetic_logical_indexed_source & ~m68k_ea_an);
-      if (size == M68kMemoryAccessWidth::word) source_legal |= m68k_ea_pc_index8;
+      // SEG-021-T007: the full manual source set applies to every size (byte/long `(d8,PC,Xn)` included).
+      const auto source_legal = m68k_ea_and_or_source;
       const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg, source_legal, size);
       if (!src.ok) return src.failure;
       return m68k_finish_general_decode(source, image, offset, bytes, kind, size, src.ea,
@@ -766,7 +766,7 @@ struct M68kEaFieldOutcome {
     }
     const auto size = m68k_size_from_tst_clr_field(static_cast<std::uint8_t>(opmode - 4U));
     const M68kEffectiveAddress src{M68kEaMode::data_register, destination, 0, 0, 0, 0};
-    const auto legal = eor_only ? m68k_ea_data_alterable : m68k_ea_memory_alterable;
+    const auto legal = eor_only ? m68k_ea_eor_destination : m68k_ea_and_or_reverse_destination;
     const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg, legal, size);
     if (!dst.ok) return dst.failure;
     return m68k_finish_general_decode(source, image, offset, bytes, kind, size, src, dst.ea, dst.extension_bytes);

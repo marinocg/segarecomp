@@ -257,6 +257,16 @@ inline constexpr M68kEaLegalMask m68k_ea_add_sub_cmp_source = m68k_ea_move_famil
 // ADDX/SUBX, a different instruction owned by a later task, never an ADD/SUB Dn,Dn form.
 inline constexpr M68kEaLegalMask m68k_ea_reverse_arithmetic_destination =
     m68k_ea_data_alterable_with_index & ~m68k_ea_dn;
+// SEG-021-T007: AND/OR source set, written from the Motorola M68000 Family Programmer's Reference
+// Manual (base MC68000 columns; independent of the T001 dataset): every data addressing mode --
+// all modes except An -- for every size, including `(d8,An,Xn)`, `(d8,PC)`, `(d8,PC,Xn)` and #imm.
+inline constexpr M68kEaLegalMask m68k_ea_and_or_source = m68k_ea_move_family_source & ~m68k_ea_an;
+// AND/OR `Dn,<ea>` (opmode 4-6): memory alterable only (Dn/An encodings of that opmode range are
+// ABCD/SBCD/EXG, not AND/OR); EOR `Dn,<ea>` and ANDI/ORI/EORI destinations: data alterable.
+inline constexpr M68kEaLegalMask m68k_ea_and_or_reverse_destination =
+    m68k_ea_data_alterable_with_index & ~m68k_ea_dn;
+inline constexpr M68kEaLegalMask m68k_ea_eor_destination = m68k_ea_data_alterable_with_index;
+inline constexpr M68kEaLegalMask m68k_ea_logical_immediate_destination = m68k_ea_data_alterable_with_index;
 // SEG-007-T248: ADDQ/SUBQ's data-alterable (non-An) destination set, widened
 // to also admit the brief-format `(d8,An,Xn)` indexed mode -- the same base-
 // MC68000 addressing-mode extension MOVE's own destination mask already

@@ -516,6 +516,72 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
   output << " += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
   return true;
 }
+
+// SEG-021-T007: runtime-routed lowering of an auto-updating ((An)+ / -(An)) operand of AND/OR/EOR and
+// ANDI/ORI/EORI, by the same operation-local deferred-address commit technique as
+// m68k_emit_routed_arith_auto_update: An is snapshotted into one local, pre/post-adjusted on the local
+// only, every routed access uses it, and the live register is committed in one statement strictly after
+// every routed access and the destination write (a routed stop returns before any architectural write).
+// Legal forms carry at most one auto-updating operand and the other operand is Dn or an immediate.
+// Returns false when the operation has no auto-updating operand or is not routed.
+[[nodiscard]] bool m68k_emit_routed_logical_auto_update(std::ostringstream &output, const M68kIrOperation &operation,
+                                                       std::string_view data_registers,
+                                                       std::string_view status_register,
+                                                       const M68kMemoryEmissionContext &memory) {
+  if (!memory.runtime_routing) return false;
+  const auto is_auto = [](const M68kEffectiveAddress &ea) {
+    return ea.mode == M68kEaMode::address_predec || ea.mode == M68kEaMode::address_postinc;
+  };
+  const bool source_auto = is_auto(operation.source_ea);
+  const bool destination_auto = is_auto(operation.destination_ea);
+  if (!source_auto && !destination_auto) return false;
+  const bool is_and = operation.kind == M68kIrKind::logical_and || operation.kind == M68kIrKind::logical_and_immediate;
+  const bool is_or = operation.kind == M68kIrKind::logical_or || operation.kind == M68kIrKind::logical_or_immediate;
+  const char *op = is_and ? "&" : (is_or ? "|" : "^");
+  const auto &auto_ea = source_auto ? operation.source_ea : operation.destination_ea;
+  const auto width = static_cast<std::uint32_t>(operation.size);
+  const std::uint32_t step =
+      (static_cast<unsigned>(auto_ea.reg) == 7U && operation.size == M68kMemoryAccessWidth::byte) ? 2U : width;
+  const auto an_expr = [&](unsigned reg) { return std::string(memory.address_registers) + "[" + std::to_string(reg) + "]"; };
+  const std::string local = "m68k_logical_auto_ea";
+  const auto &other = source_auto ? operation.destination_ea : operation.source_ea;
+  if (other.mode != M68kEaMode::data_register && other.mode != M68kEaMode::immediate) return true;
+  unsigned temp_ordinal = 0U;
+  std::ostringstream body;
+  body << "uint32_t " << local << " = " << an_expr(auto_ea.reg) << ";\n";
+  if (auto_ea.mode == M68kEaMode::address_predec) body << local << " -= UINT32_C(" << step << ");\n";
+  const auto other_expr = [&](const M68kEffectiveAddress &ea) -> std::string {
+    if (ea.mode == M68kEaMode::data_register) return std::string(data_registers) + "[" + std::to_string(ea.reg) + "]";
+    return "UINT32_C(0x" + hex(ea.immediate_value, 8) + ")";
+  };
+  std::string source_expr;
+  std::string destination_expr;
+  if (source_auto) {
+    m68k_emit_routed_read(body, local, operation.size, memory, source_expr, temp_ordinal);
+    if (auto_ea.mode == M68kEaMode::address_postinc) body << local << " += UINT32_C(" << step << ");\n";
+    destination_expr = other_expr(other);
+  } else {
+    source_expr = other_expr(other);
+    m68k_emit_routed_read(body, local, operation.size, memory, destination_expr, temp_ordinal);
+  }
+  body << "{ const uint32_t logical_source = " << source_expr << "; const uint32_t logical_destination = "
+       << destination_expr << "; const uint32_t logical_result = logical_destination " << op << " logical_source; ";
+  if (destination_auto) {
+    m68k_emit_routed_write(body, local, operation.size, memory, "logical_result", temp_ordinal);
+    if (auto_ea.mode == M68kEaMode::address_postinc) body << local << " += UINT32_C(" << step << ");\n";
+  } else {
+    std::ostringstream write_prelude;
+    const auto write = m68k_emit_ea_write(operation.destination_ea, operation.size, data_registers, memory,
+                                          "logical_result", write_prelude, temp_ordinal);
+    if (!write.ok) return true;
+    body << write_prelude.str() << write.expression << ' ';
+  }
+  M68kLogicalResultSpecification::emit_c_update(body, status_register, "logical_result", operation.size);
+  body << " }\n" << an_expr(auto_ea.reg) << " = " << local << ";\n";
+  // Same PC statement as the ordinary logical body below (`pc` is a macro in the routed bridge).
+  output << "{\n" << body.str() << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
+  return true;
+}
 } // namespace
 
 // This is the sole per-operation C-lowering definition for every accepted
@@ -998,24 +1064,9 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
   case M68kIrKind::exclusive_or:
   case M68kIrKind::exclusive_or_immediate: {
     if (memory != nullptr) {
-      // SEG-007-T167: in the C4 routed context (`memory->runtime_routing`) the
-      // logical family carries no deferred-address-commit contract, so an
-      // auto-updating (`(An)+`/`-(An)`) source or destination is declined
-      // cleanly -- classify_m68k_c4_gap_shapes reports it as
-      // M68kC4GapClass::requires_architecture_decision and the C4 emitter
-      // rejects the whole prefix before this body runs; this guard is a
-      // defensive fail-closed backstop (emit nothing rather than the earlier
-      // dead "treat predec/postinc as plain indirect" write). The non-routed
-      // batch-B static-slice path is unaffected: it keeps lowering an
-      // auto-updating operand through the shared EA primitives, whose read
-      // side performs the single pointer adjustment and whose write side is
-      // retargeted to `address_indirect` below so it is never re-applied.
-      if (memory->runtime_routing &&
-          (operation.source_ea.mode == M68kEaMode::address_predec ||
-           operation.source_ea.mode == M68kEaMode::address_postinc ||
-           operation.destination_ea.mode == M68kEaMode::address_predec ||
-           operation.destination_ea.mode == M68kEaMode::address_postinc))
-        break;
+      // SEG-021-T007: routed auto-updating operands lower through the operation-local deferred
+      // address-commit helper above (like the add/sub/compare families); other shapes fall through.
+      if (m68k_emit_routed_logical_auto_update(output, operation, data_registers, status_register, *memory)) break;
       unsigned temp_ordinal = 0U;
       std::ostringstream prelude;
       const auto source = m68k_emit_materialized_ea_read(operation.source_ea, operation.size, data_registers,

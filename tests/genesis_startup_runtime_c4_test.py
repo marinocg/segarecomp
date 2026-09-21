@@ -1284,18 +1284,22 @@ def main():
   assert "genesis_c4_lowering_stop_" not in logical_reg_first.stdout
   assert "logical_result =" in logical_reg_first.stdout
   c4_dim_outputs["logical_register"] = logical_reg_first.stdout
-  for flag, key, dim in (
-      ("c4-logical-predecrement", "logical_predecrement", "LOGICAL_OR_AUTO_UPDATE"),
-      ("c4-logical-ori-predecrement", "logical_ori_predecrement", "LOGICAL_OR_IMMEDIATE_AUTO_UPDATE")):
+  # SEG-021-T007: an auto-updating OR/ORI operand is now lowered by the logical-family deferred
+  # address-commit helper: no lowering-gap stop, a routed read+write and one live-register commit.
+  for flag, key in (
+      ("c4-logical-predecrement", "logical_predecrement"),
+      ("c4-logical-ori-predecrement", "logical_ori_predecrement")):
     run_first = subprocess.run([executable, f"--emit-general-startup-runtime-{flag}"], text=True, capture_output=True)
     run_second = subprocess.run([executable, f"--emit-general-startup-runtime-{flag}"], text=True, capture_output=True)
     assert run_first.returncode == run_second.returncode == 0, key
     assert run_first.stdout == run_second.stdout, key
     assert not run_first.stdout.startswith("/* translation rejected:"), key
-    assert "GENESIS_STOP_C4_LOWERING_GAP" in run_first.stdout, key
-    assert f"GENESIS_C4_LOWERING_DIMENSIONS_{dim}" in run_first.stdout, key
-    assert "GENESIS_C4_LOWERING_DIMENSIONS_OTHER" not in run_first.stdout, key
-    assert "logical_result =" not in run_first.stdout, key  # adversarial: no naive unrouted write
+    assert "GENESIS_STOP_C4_LOWERING_GAP" not in run_first.stdout, key
+    assert "genesis_c4_lowering_stop_" not in run_first.stdout, key
+    assert "uint32_t m68k_logical_auto_ea = runtime->a[0];" in run_first.stdout, key
+    assert run_first.stdout.count("runtime->a[0] = m68k_logical_auto_ea;") == 1, key
+    assert run_first.stdout.index("runtime->a[0] = m68k_logical_auto_ea;") > run_first.stdout.rindex("genesis_route_access(runtime, "), key
+    assert "logical_result =" in run_first.stdout, key
     c4_dim_outputs[key] = run_first.stdout
   # SEG-007-T167 CORRECTION 1: the end-to-end foldable-memory logical-family
   # fact pipeline. A foldable-control memory OR source / OR read-modify-write
@@ -1800,12 +1804,14 @@ def main():
   assert "runtime->work_ram" not in andi_first.stdout
   assert andi_first.stdout.count("genesis_route_access(") == 4
   assert "#define pc runtime->pc" in andi_first.stdout and "#undef pc" in andi_first.stdout
-  # ANDI's conservative auto-update boundary is classified by preflight before
-  # require_fact can select its old generic rejection.
+  # SEG-021-T007: an auto-updating ANDI destination is lowered by the logical-family operation-local deferred
+  # address-register commit (one snapshot local, routed read + write, one commit after both).
   andi_predecrement = subprocess.run([executable, "--emit-general-startup-runtime-c4-andi-predecrement"], text=True, capture_output=True)
   assert andi_predecrement.returncode == 0
-  assert "GENESIS_STOP_C4_LOWERING_GAP" in andi_predecrement.stdout
-  assert "GENESIS_C4_LOWERING_DIMENSIONS_ANDI_AUTO_UPDATE" in andi_predecrement.stdout
+  assert "GENESIS_STOP_C4_LOWERING_GAP" not in andi_predecrement.stdout
+  assert "GENESIS_C4_LOWERING_DIMENSIONS_ANDI_AUTO_UPDATE" not in andi_predecrement.stdout
+  assert "m68k_logical_auto_ea -= UINT32_C(" in andi_predecrement.stdout
+  assert andi_predecrement.stdout.rindex("m68k_logical_auto_ea;") > andi_predecrement.stdout.rindex("genesis_route_access(")
   # The generic retained-fact validation must reject malformed ANDI-owned
   # facts before emission, just as it does for the previously covered C4
   # destination-read/write instruction families.

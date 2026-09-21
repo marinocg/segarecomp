@@ -560,23 +560,24 @@ void logical_word_pc_indexed_source_decodes_lifts_and_stays_bounded() {
              or_word.source_ea.index_is_address && !or_word.source_ea.index_is_long &&
              lift_m68k_instruction(or_word).kind == M68kIrKind::logical_or,
          "OR.W (d8,PC,An.W),Dn decodes and lifts to logical_or");
-  // Fail-closed neighbours that share the (d8,PC,Xn) source EA: byte and long
-  // size for the lowered AND/OR EA->Dn form, and the adjacent word MULS.W
-  // <ea>,Dn opmode (0xC000 block, opmode 7) which SEG-007-T220 deliberately
-  // keeps declining for exactly this brief-format PC-relative indexed source
-  // (MULS.W's register-direct/immediate forms are supported -- see
-  // M68kInstructionKind::multiply_signed_word -- but `m68k_ea_pc_index8` is
-  // not in its legal source set). Each must still surface a source-
-  // provenanced valid_but_unsupported rejection, never a silent decode.
-  for (const auto &bytes : std::array<std::vector<std::uint8_t>, 4>{{
-           {0xC6U, 0x3BU, 0x28U, 0x08U},  // AND.B  (0x08,PC,D2.L),D3
-           {0xC6U, 0xBBU, 0x28U, 0x08U},  // AND.L  (0x08,PC,D2.L),D3
-           {0x86U, 0x3BU, 0x28U, 0x08U},  // OR.B   (0x08,PC,D2.L),D3
-           {0xC7U, 0xFBU, 0x28U, 0x08U},  // MULS.W (0x08,PC,D2.L),D3 (pc_index8 source declined)
+  // SEG-021-T007: byte and long AND/OR `(d8,PC,Xn),Dn` are legal base-MC68000 forms (Motorola manual,
+  // AND/OR source-operand tables) and now decode and lift like the word form.
+  for (const auto &[bytes, kind, size] : std::array<std::tuple<std::vector<std::uint8_t>, M68kIrKind, M68kMemoryAccessWidth>, 3>{{
+           {{0xC6U, 0x3BU, 0x28U, 0x08U}, M68kIrKind::logical_and, M68kMemoryAccessWidth::byte},   // AND.B (d8,PC,D2.L),D3
+           {{0xC6U, 0xBBU, 0x28U, 0x08U}, M68kIrKind::logical_and, M68kMemoryAccessWidth::long_word},  // AND.L
+           {{0x86U, 0x3BU, 0x28U, 0x08U}, M68kIrKind::logical_or, M68kMemoryAccessWidth::byte},    // OR.B
        }}) {
-    const auto rejected = std::get<RejectedM68kDecode>(decode(bytes));
+    const auto decoded = std::get<M68kDecodedInstruction>(decode(bytes));
+    expect(decoded.size == size && decoded.source_ea.mode == M68kEaMode::pc_index8 &&
+               lift_m68k_instruction(decoded).kind == kind,
+           "byte/long AND/OR (d8,PC,Xn),Dn decode and lift through the shared logical EA set");
+  }
+  // The adjacent word MULS.W <ea>,Dn opmode keeps declining `(d8,PC,Xn)` (MULS.W is owned by SEG-021-T010; its
+  // legal source set does not include `m68k_ea_pc_index8` yet): a source-provenanced valid_but_unsupported rejection.
+  {
+    const auto rejected = std::get<RejectedM68kDecode>(decode({0xC7U, 0xFBU, 0x28U, 0x08U}));
     expect(rejected.outcome == DecodeOutcome::valid_but_unsupported_instruction && rejected.has_provenance,
-           "byte/long size and the adjacent word-multiply opmode of PC-relative indexed logical fail closed");
+           "the adjacent word-multiply opmode of PC-relative indexed source still fails closed");
   }
 }
 
@@ -4520,11 +4521,15 @@ void general_startup_decode_accepts_indexed_arithmetic_source() {
     const auto result = decode_general({0xD4U, 0x7BU, 0x00U, 0x04U});
     expect(std::get_if<M68kDecodedInstruction>(&result) != nullptr,
            "the PC-relative indexed source decodes for ADD (SEG-021-T006)");
+    // SEG-021-T007: legal for AND/OR as well (every size); the MULS/MULU/DIVS/DIVU source sets stay narrow.
     const auto logical = decode_general({0x84U, 0xBBU, 0x00U, 0x00U, 0x00U, 0x04U});
-    const auto *logical_rejected = std::get_if<RejectedM68kDecode>(&logical);
-    expect(logical_rejected != nullptr &&
-               logical_rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction,
-           "the PC-relative indexed form remains fail-closed for the logical family");
+    expect(std::get_if<M68kDecodedInstruction>(&logical) != nullptr,
+           "the PC-relative indexed source decodes for OR (SEG-021-T007)");
+    const auto multiply = decode_general({0xC1U, 0xFBU, 0x00U, 0x00U});
+    const auto *multiply_rejected = std::get_if<RejectedM68kDecode>(&multiply);
+    expect(multiply_rejected != nullptr &&
+               multiply_rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction,
+           "the PC-relative indexed form remains fail-closed for MULS.W");
   }
   {
     // The destination-alterable sets (ADD/SUB/AND/OR reverse-memory forms,
@@ -6716,9 +6721,11 @@ constexpr std::uint32_t base = 0x00000C00U;
 // +0x08 BRA.S -> base                -- V2: a second, independent instance
 //                                      of the same safe shape.
 // +0x0A FFFF                        -- INVALID: illegal opcode, never decodes
-// +0x0C AND.B (0,PC,D0.W),D0        -- an ISA-legal-looking form this
-//                                      project's decoder deliberately excludes
-//                                      for byte size (SEG-007-T198 scope) --
+// +0x0C MULS.W (0,PC,D0.W),D0       -- an ISA-legal form this project's
+//                                      decoder still excludes (SEG-021-T010
+//                                      owns MULS/MULU source EA completion;
+//                                      AND/OR byte/long PC-indexed sources
+//                                      decode since SEG-021-T007) --
 //                                      never becomes a candidate root either
 // +0x10 NOP ; +0x12 RTS             -- OVERLAP_A / OVERLAP_B: two
 //                                      independently valid, genuinely
@@ -6735,7 +6742,7 @@ const std::vector<std::uint8_t> image{
     0x60U, 0xF8U,              // +0x06 BRA.S -8 -> base (V1)
     0x60U, 0xF6U,              // +0x08 BRA.S -10 -> base (V2)
     0xFFU, 0xFFU,              // +0x0A invalid opcode
-    0xC0U, 0x3BU, 0x00U, 0x00U,  // +0x0C AND.B (0,PC,D0.W),D0 (excluded form)
+    0xC1U, 0xFBU, 0x00U, 0x00U,  // +0x0C MULS.W (0,PC,D0.W),D0 (excluded form)
     0x60U, 0x00U,              // +0x10 BRA.W (OVERLAP_A)
     0x4EU, 0x71U,              // +0x12 extension word / NOP (OVERLAP_B)
     0x76U, 0x05U,              // +0x14 byte-identical data / MOVEQ #5,D3
@@ -7288,7 +7295,7 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
   operation.destination_ea.mode = M68kEaMode::address_register;
   expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
          "LEA computes an address without reading memory or fabricating a target");
-  operation.kind = M68kIrKind::logical_and;
+  operation.kind = M68kIrKind::multiply_signed_word;
   operation.source_ea.mode = M68kEaMode::address_indirect;
   operation.destination_ea.mode = M68kEaMode::data_register;
   expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
@@ -7567,55 +7574,25 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
        {M68kIrKind::add, M68kIrKind::add_immediate, M68kIrKind::subtract, M68kIrKind::subtract_immediate,
         M68kIrKind::logical_and, M68kIrKind::logical_and_immediate, M68kIrKind::logical_or,
         M68kIrKind::logical_or_immediate, M68kIrKind::exclusive_or, M68kIrKind::exclusive_or_immediate}) {
-    // SEG-021-T006: ADD/SUB(I) are admitted for every legal operand class (family-level admission); the
-    // logical kinds keep their narrower carve-outs below.
-    const bool arithmetic_kind = family_kind == M68kIrKind::add || family_kind == M68kIrKind::add_immediate ||
-                                 family_kind == M68kIrKind::subtract ||
-                                 family_kind == M68kIrKind::subtract_immediate;
+    // SEG-021-T006 / SEG-021-T007: ADD/SUB(I) and AND/OR/EOR(I) are admitted for every legal operand class
+    // (family-level admission).
     operation.kind = family_kind;
     operation.source_ea.mode = M68kEaMode::data_register;
     operation.destination_ea.mode = M68kEaMode::address_disp16;
     expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
            "the general ADD/SUB/AND/OR/EOR family admits a plain register/immediate source "
            "paired with a d16(An) read-modify-write destination");
-    if (arithmetic_kind) {
-      for (const auto mode : {M68kEaMode::address_indirect, M68kEaMode::address_postinc, M68kEaMode::address_predec,
-                              M68kEaMode::address_index8, M68kEaMode::absolute_word, M68kEaMode::absolute_long}) {
-        operation.source_ea.mode = M68kEaMode::data_register;
-        operation.destination_ea.mode = mode;
-        expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
-               "SEG-021-T006: ADD/SUB admit every legal memory destination class");
-        operation.source_ea.mode = mode;
-        operation.destination_ea.mode = M68kEaMode::data_register;
-        expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
-               "SEG-021-T006: ADD/SUB admit every legal memory source class");
-      }
-      continue;
-    }
-    // Every other memory destination stays excluded pending its own
-    // independent proof; an auto-updating, plain-indirect, or brief-format
-    // indexed destination is an unexamined (address_index8) or unreachable
-    // (the others) shape for this family.
-    for (const auto excluded_destination_mode :
-         {M68kEaMode::address_indirect, M68kEaMode::address_postinc, M68kEaMode::address_predec,
-          M68kEaMode::address_index8}) {
-      operation.kind = family_kind;
+    for (const auto mode : {M68kEaMode::address_indirect, M68kEaMode::address_postinc, M68kEaMode::address_predec,
+                            M68kEaMode::address_index8, M68kEaMode::absolute_word, M68kEaMode::absolute_long}) {
       operation.source_ea.mode = M68kEaMode::data_register;
-      operation.destination_ea.mode = excluded_destination_mode;
-      expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-             "the general ADD/SUB/AND/OR/EOR family's admission stays limited to d16(An); every "
-             "other memory destination, including the brief-format indexed form this family's own "
-             "decode contract never legalizes as a destination, remains excluded");
+      operation.destination_ea.mode = mode;
+      expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+             "ADD/SUB/AND/OR/EOR admit every legal memory destination class");
+      operation.source_ea.mode = mode;
+      operation.destination_ea.mode = M68kEaMode::data_register;
+      expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+             "ADD/SUB/AND/OR/EOR admit every legal memory source class");
     }
-    // A memory-EA source is an independent, unexamined shape this task does
-    // not attempt: it remains excluded even when paired with an otherwise-
-    // admitted memory destination.
-    operation.kind = family_kind;
-    operation.source_ea.mode = M68kEaMode::address_disp16;
-    operation.destination_ea.mode = M68kEaMode::data_register;
-    expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-           "the general ADD/SUB/AND/OR/EOR family never admits a memory-EA source -- only the "
-           "destination side was examined by this task");
   }
   operation.source_ea.mode = M68kEaMode::immediate;
   operation.destination_ea.mode = M68kEaMode::address_disp16;
@@ -18471,15 +18448,15 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
       // subtracting from it before.
        ? std::vector<std::uint8_t>{0x42U, 0x58U, 0x4EU, 0x70U}
        : c4_prefix
-       // MOVEQ #1,D0; AND.W (A1)+,D1 (auto-updating logical-family lowering-gap
-       // cut: the logical family carries no deferred-commit contract, so it
-       // stays a requires_architecture_decision decline -- this fixture's
+       // MOVEQ #1,D0; BTST D1,(A1)+ (auto-updating BTST lowering-gap
+       // cut: the bit-test family carries no deferred-commit contract, so it
+       // stays a requires_architecture_decision decline (SEG-021-T007 lowers the logical family's) -- this fixture's
        // block-cut/prefix-retention mechanics only need some still-declined
        // shape; ADDA aliasing, CLR and SUB/CMP auto-update are all lowered now);
        // BRA.S +2; padding; RESET.  The cut must retain
        // MOVEQ, omit the declined AND and the terminal BRA, and make
        // RESET's block unreachable from the emitted program-control graph.
-        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0xC2U, 0x59U, 0x60U, 0x02U,
+        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x03U, 0x19U, 0x60U, 0x02U,
                                      0x00U, 0x00U, 0x4EU, 0x70U}
         : c4_dim_compare
        // SEG-007-T146: CMP.B D1,D0; RESET.  `compare` is now C4-represented:
@@ -18602,28 +18579,28 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
         // A second C4 cut is statically retained beyond the first cut's
         // terminal branch.  It has no emitted caller and therefore must not
         // leave an unused static stop function in strict-C11 output.  Uses
-        // the same still-declined logical-family auto-update cut as
+        // the same still-declined BTST auto-update cut as
         // c4_prefix above (see its comment).
-        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0xC2U, 0x59U, 0x60U, 0x02U,
-                                     0x00U, 0x00U, 0xC2U, 0x59U, 0x4EU, 0x70U}
+        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x03U, 0x19U, 0x60U, 0x02U,
+                                     0x00U, 0x00U, 0x03U, 0x19U, 0x4EU, 0x70U}
         : c4_multi_blocks
        // BNE.S selects either of two separately reachable ADDA-same-register-
        // aliasing cut blocks (see c4_prefix's comment above for why this
        // fixture no longer uses CLR.B -(A0)). Both cut sinks are terminal and
        // neither becomes a dispatch arm.
-       ? std::vector<std::uint8_t>{0x66U, 0x04U, 0xC2U, 0x59U, 0x60U, 0x02U,
-                                    0xC2U, 0x59U, 0x4EU, 0x70U}
+       ? std::vector<std::uint8_t>{0x66U, 0x04U, 0x03U, 0x19U, 0x60U, 0x02U,
+                                    0x03U, 0x19U, 0x4EU, 0x70U}
        : c4_same_block
        // Two candidates in one block: only the first can own the local cut.
-       ? std::vector<std::uint8_t>{0xC2U, 0x59U, 0xC2U, 0x59U, 0x60U, 0x02U,
+       ? std::vector<std::uint8_t>{0x03U, 0x19U, 0x03U, 0x19U, 0x60U, 0x02U,
                                     0x00U, 0x00U, 0x4EU, 0x70U}
        : c4_backward_block
        // BRA.S +8 (0xB00 -> 0xB0A); dead filler; MOVEQ #1,D0 then the
-       // still-declined auto-update (AND.W (A1)+,D1) cut at 0xB04/0xB06 -- reached only via
+       // still-declined auto-update (BTST D1,(A1)+) cut at 0xB04/0xB06 -- reached only via
        // 0xB0A's own BRA.S -8 backward edge, discovered strictly after the
        // higher-address block.
        ? std::vector<std::uint8_t>{0x60U, 0x08U, 0x00U, 0x00U, 0x70U, 0x01U,
-                                    0xC2U, 0x59U, 0x4EU, 0x70U, 0x60U, 0xF8U}
+                                    0x03U, 0x19U, 0x4EU, 0x70U, 0x60U, 0xF8U}
       : routed_write
       ? std::vector<std::uint8_t>{0x42U, 0x90U, 0x60U, 0x06U, 0x00U, 0x00U,
                                   0x00U, 0x00U, 0x00U, 0x00U, 0x4EU, 0x70U}
@@ -19446,16 +19423,9 @@ int emit_general_startup_runtime_c4_andi_source(std::string_view forge = {}) {
     return 0;
   }
   if (predecrement) {
+    // SEG-021-T007: ANDI's auto-updating destination is lowered by the logical-family deferred address commit.
     const auto preflight = preflight_m68k_general_startup_c4(*partial);
-    if (!preflight.valid || preflight.rows.size() != 1U ||
-        preflight.rows.front().family != "andi" ||
-        preflight.rows.front().ir_kind != M68kIrKind::logical_and_immediate ||
-        preflight.rows.front().operand_role != M68kC4OperandRole::destination ||
-        preflight.rows.front().width != M68kMemoryAccessWidth::word ||
-        preflight.rows.front().ea_class != M68kEaMode::address_predec ||
-        preflight.rows.front().auto_update != M68kC4AutoUpdateClass::predecrement ||
-        preflight.rows.front().gap != M68kC4GapClass::requires_architecture_decision)
-      return 1;
+    if (!preflight.valid || !preflight.rows.empty()) return 1;
   }
   if (!forge.empty() && !predecrement) return 1;
   if (partial->accepted_prefix.static_blocks.size() != 1U || partial->frontiers.size() != 1U) return 1;
@@ -19603,17 +19573,16 @@ int emit_general_startup_runtime_c4_logical_source(std::string_view forge = {}) 
     return 0;
   }
   if (predecrement || ori_predecrement) {
+    // SEG-021-T007: an auto-updating OR/ORI operand is lowered by the logical-family deferred-address-commit
+    // helper: zero preflight gap rows, a routed RMW body, no lowering-gap stop, and one live-register commit.
     const auto preflight = preflight_m68k_general_startup_c4(*partial);
-    const auto expected_kind = ori_predecrement ? M68kIrKind::logical_or_immediate : M68kIrKind::logical_or;
-    if (!preflight.valid || preflight.rows.size() != 1U ||
-        preflight.rows.front().ir_kind != expected_kind ||
-        preflight.rows.front().auto_update != M68kC4AutoUpdateClass::predecrement ||
-        preflight.rows.front().gap != M68kC4GapClass::requires_architecture_decision)
-      return 1;
+    if (!preflight.valid || !preflight.rows.empty()) return 1;
     const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
-    const std::string_view dim = ori_predecrement ? "GENESIS_C4_LOWERING_DIMENSIONS_LOGICAL_OR_IMMEDIATE_AUTO_UPDATE"
-                                                  : "GENESIS_C4_LOWERING_DIMENSIONS_LOGICAL_OR_AUTO_UPDATE";
-    if (emitted.find(dim) == std::string::npos || emitted.find("logical_result =") != std::string::npos) return 1;
+    if (emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_") != std::string::npos ||
+        emitted.find("translation rejected") != std::string::npos ||
+        emitted.find("logical_result =") == std::string::npos ||
+        emitted.find("runtime->a[0] = m68k_logical_auto_ea;") == std::string::npos)
+      return 1;
     std::cout << emitted;
     return 0;
   }
@@ -19668,7 +19637,8 @@ int emit_general_startup_runtime_c4_logical_source(std::string_view forge = {}) 
   return 0;
 }
 
-// SEG-021-T006: C4 admission regression. Every legal auto-updating ADDA/SUB/SUBA/SUBQ/CMP/CMPA/CMPI shape must
+// SEG-021-T006/T007: C4 admission regression. Every legal auto-updating ADDA/SUB/SUBA/SUBQ/CMP/CMPA/CMPI and
+// AND/OR/EOR/ANDI/ORI/EORI shape must
 // pass the real C4 preflight with ZERO gap rows (never requires_architecture_decision) and emit a routed body with
 // no lowering-gap stop and one deferred live-register commit. This exercises the classifier the routed-emitter
 // metric (`route_runtime_routed_admitted`) does not.
@@ -19690,6 +19660,16 @@ int c4_arithmetic_auto_update_admission() {
       {"CMPA.L -(A1),A2", {0xB5U, 0xE1U}, "runtime->a[1] = m68k_cmp_auto_ea;", true},
       {"CMPI.W #1,(A0)+", {0x0CU, 0x58U, 0x00U, 0x01U}, "runtime->a[0] = m68k_cmp_auto_ea;", true},
       {"CMPI.B #1,-(A7)", {0x0CU, 0x27U, 0x00U, 0x01U}, "runtime->a[7] = m68k_cmp_auto_ea;", true},
+      // SEG-021-T007: the logical family's routed auto-update operands (one deferred live-register commit).
+      {"AND.W (A1)+,D2", {0xC4U, 0x59U}, "runtime->a[1] = m68k_logical_auto_ea;", true},
+      {"AND.B -(A0),D2", {0xC4U, 0x20U}, "runtime->a[0] = m68k_logical_auto_ea;", true},
+      {"AND.B D2,-(A7)", {0xC5U, 0x27U}, "runtime->a[7] = m68k_logical_auto_ea;", true},
+      {"OR.L D2,(A1)+", {0x85U, 0x99U}, "runtime->a[1] = m68k_logical_auto_ea;", true},
+      {"OR.W -(A1),D2", {0x84U, 0x61U}, "runtime->a[1] = m68k_logical_auto_ea;", true},
+      {"EOR.W D2,-(A1)", {0xB5U, 0x61U}, "runtime->a[1] = m68k_logical_auto_ea;", true},
+      {"ANDI.W #1,(A0)+", {0x02U, 0x58U, 0x00U, 0x01U}, "runtime->a[0] = m68k_logical_auto_ea;", true},
+      {"ORI.B #1,-(A7)", {0x00U, 0x27U, 0x00U, 0x01U}, "runtime->a[7] = m68k_logical_auto_ea;", true},
+      {"EORI.L #1,(A1)+", {0x0AU, 0x99U, 0x00U, 0x00U, 0x00U, 0x01U}, "runtime->a[1] = m68k_logical_auto_ea;", true},
   };
   int failures = 0;
   for (const auto &test_case : cases) {
@@ -20261,14 +20241,14 @@ int emit_general_startup_runtime_c4_all_gaps_source() {
   using namespace segarecomp;
   FrontendProgram program{};
   program.profile = M68kFrontendProfile::general_startup;
-  // ANDI.B #0xFF,-(A0); MULS.W -(A0),D1; RESET. SEG-021-T006: SUBA (like MOVEA before it) now lowers its
-  // auto-updating source, so the second still-declined family is MULS, whose auto-updating source has no
+  // MULU.W -(A0),D1; MULS.W -(A0),D1; RESET. SEG-021-T007: ANDI (like SUBA in T006 and MOVEA before it) now lowers its
+  // auto-updating operand, so the still-declined families are MULU and MULS, whose auto-updating source has no
   // deferred-commit contract (owned by SEG-021-T010). The fixture keeps its original purpose: two
   // independently retained requires_architecture_decision auto-update gaps from different families never collapse.
-  program.image = {"synthetic-c4-all-gaps", {0x02U, 0x60U, 0x00U, 0xFFU,
+  program.image = {"synthetic-c4-all-gaps", {0xC2U, 0xE0U,
                                                0xC3U, 0xE0U, 0x4EU, 0x70U}, 0U};
   program.image.byte_length = program.image.bytes.size();
-  program.mapping_claims = {{"synthetic-c4-all-gaps", {{}, 0xB00U}, {{}, 0xB08U}, {0U}, {8U}}};
+  program.mapping_claims = {{"synthetic-c4-all-gaps", {{}, 0xB00U}, {{}, 0xB06U}, {0U}, {6U}}};
   program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
@@ -20286,12 +20266,13 @@ int emit_general_startup_runtime_c4_all_gaps_source() {
                  right.auto_update, right.gap, right.predecessor))
       return 1;
   }
-  const auto &andi = first.rows[0];
-  const auto &muls = first.rows[1];
-  if (andi.family != "andi" || andi.ir_kind != M68kIrKind::logical_and_immediate ||
-      andi.operand_role != M68kC4OperandRole::destination ||
-      andi.auto_update != M68kC4AutoUpdateClass::predecrement ||
-      andi.gap != M68kC4GapClass::requires_architecture_decision ||
+  // Rows are sorted by IR kind (signed multiply precedes unsigned multiply).
+  const auto &muls = first.rows[0];
+  const auto &mulu = first.rows[1];
+  if (mulu.ir_kind != M68kIrKind::multiply_unsigned_word ||
+      mulu.operand_role != M68kC4OperandRole::source ||
+      mulu.auto_update != M68kC4AutoUpdateClass::predecrement ||
+      mulu.gap != M68kC4GapClass::requires_architecture_decision ||
       muls.ir_kind != M68kIrKind::multiply_signed_word ||
       muls.operand_role != M68kC4OperandRole::source ||
       muls.auto_update != M68kC4AutoUpdateClass::predecrement ||
@@ -26812,9 +26793,9 @@ int main(int argc, char **argv) {
   expect(emit_general_startup_runtime_c4_logical_source("missing-fact") == 0,
          "C4 logical family: foldable-memory operand without a retained fact fails closed");
   expect(emit_general_startup_runtime_c4_logical_source("predecrement") == 0,
-         "C4 logical family: auto-updating OR operand is a clean architecture-decision decline");
+         "C4 logical family: auto-updating OR operand lowers through the deferred address commit (zero gap rows)");
   expect(emit_general_startup_runtime_c4_logical_source("ori-predecrement") == 0,
-         "C4 logical family: auto-updating ORI operand is a clean architecture-decision decline");
+         "C4 logical family: auto-updating ORI operand lowers through the deferred address commit (zero gap rows)");
   // SEG-007-T167 CORRECTION 1: the end-to-end foldable-memory fact pipeline.
   expect(emit_general_startup_runtime_c4_logical_source("source-fold") == 0,
          "C4 logical family: foldable-memory OR source consumes its discovery fact, zero gap rows, routed read");

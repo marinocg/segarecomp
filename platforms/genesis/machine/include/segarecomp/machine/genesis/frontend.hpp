@@ -713,55 +713,13 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
   case M68kIrKind::logical_or_immediate:
   case M68kIrKind::exclusive_or:
   case M68kIrKind::exclusive_or_immediate:
-    // SEG-007-T249 (bounded family inventory, ninth/tenth iteration of the
-    // same bounded family T245 opened): the general (non-quick) ADD/SUB/
-    // AND/OR/EOR read-modify-write memory-destination gap. Each of these
-    // kinds' shared, plain (non-auto-updating) C4 lowering -- the fallback
-    // body reached whenever the add-family's own deferred-address-commit
-    // branch is not entered (add/add_address/add_immediate: the `if
-    // (memory->runtime_routing && add_auto_kind && (add_auto_source ||
-    // add_auto_destination))` guard around line 869; subtract/subtract_
-    // address: the same shared body starting at line 776, reached whenever
-    // `subtract_immediate_auto_destination` is false; logical_and/logical_
-    // or/exclusive_or: the single shared body starting at line 989, which
-    // already declines only a predec/postinc operand under runtime routing)
-    // -- routes a plain, non-auto-updating destination through the exact
-    // same `m68k_emit_ea_read` (RMW read side) then `m68k_emit_ea_write`
-    // (write side, using the destination's own unchanged EA -- `address_
-    // disp16` is never retargeted from predec/postinc, since it is neither
-    // of those) pattern T248's own `add_quick`/`subtract_quick` carve-out
-    // already independently verified is safe and fact-free: no
-    // address-register mutation, no deferred-commit machinery, no
-    // Q3-style aliasing hazard (recomputing the same non-mutating EA twice
-    // -- once for the read, once for the write -- is idempotent since An
-    // never changes), and no static fact of any kind. A routed-read failure
-    // returns before the write is ever emitted; a routed-write failure
-    // returns before the CCR-update/PC-advance statement that follows it,
-    // so neither can partially mutate architectural state. Only `address_
-    // disp16` is admitted here, unlike ADDQ/SUBQ's own sibling
-    // `address_index8` carve-out above: this whole family's shared
-    // "Dn,<ea>"-direction / immediate-form destination decode (`src/cpu/
-    // m68k/decode.cpp`, every `m68k_decode_general_add`/`_subtract`/`_and`/
-    // `_or`/`_eor` reverse/immediate-destination call site) is legalized
-    // through `m68k_ea_data_alterable` or `m68k_ea_memory_alterable`,
-    // neither of which ever includes `address_index8` -- unlike ADDQ/SUBQ's
-    // own distinct `m68k_ea_addq_subq_destination` legal set. Admitting
-    // `address_index8` here would therefore be an unreachable, unexamined
-    // claim this family's own decode contract never actually produces; this
-    // task admits only the addressing-mode class its own inventory confirms
-    // decode can legally reach. `add_address`/`subtract_address`'s own
-    // destination is always a plain address-register overwrite (never a
-    // memory write at all -- decode.cpp fixes ADDA/SUBA's destination to
-    // `address_register`), so this admission is a no-op for those two kinds
-    // and changes nothing about their existing behavior. The source stays
-    // storage_free-only: no memory-EA source shape has been examined for
-    // this family in this task, so that side is unchanged and still
-    // excluded pending its own independent proof. Every other memory
-    // destination ((An), (An)+, -(An), absolute, pc_disp16, address_index8)
-    // remains excluded pending its own independent proof.
-    return storage_free(operation.source_ea) &&
-           (storage_free(operation.destination_ea) ||
-            operation.destination_ea.mode == M68kEaMode::address_disp16);
+    // SEG-021-T007: AND/OR/EOR and ANDI/ORI/EORI family-level admission (supersedes the per-EA-mode
+    // carve-outs of SEG-007-T249). Every legal EA mode of these mnemonics lowers through the shared C4
+    // routed read/write primitives with no CFG edge, call frame, return target or static memory fact;
+    // a failed routed access returns before any architectural write; auto-updating operands use the
+    // operation-local deferred address-register commit (c4-add-family-auto-update-commit-contract.md).
+    // The emitter fails closed on any shape it cannot lower and operand-mode legality is owned by decode.
+    return true;
   case M68kIrKind::bit_change:
   case M68kIrKind::bit_clear:
   case M68kIrKind::bit_set:

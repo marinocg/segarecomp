@@ -196,3 +196,18 @@ The C4 classifier (`classify_m68k_c4_gap_shapes`) and the decoded-instruction pr
 produce `requires_architecture_decision` rows for these shapes; `c4_arithmetic_auto_update_admission` in
 `tests/m68k_pipeline_test.cpp` proves zero preflight rows and a routed body for ADDA/SUB/SUBA/SUBQ/CMP/CMPA/CMPI
 auto-updating forms. Logical, MUL/DIV, bit-test and ANDI classifier rows are unchanged.
+
+## SEG-021-T007: AND / OR / EOR and ANDI / ORI / EORI
+
+The logical family joins the same technique through `m68k_emit_routed_logical_auto_update`
+(`libs/codegen/c11/src/m68k.cpp`), used only by the routed lowering. Legal forms carry at most one auto-updating operand and
+the other operand is always Dn or an instruction-embedded immediate: `AND/OR <auto>,Dn`, `AND/OR Dn,<auto>`, `EOR Dn,<auto>`
+and `ANDI/ORI/EORI #n,<auto>`. Steps: snapshot the touched An into `m68k_logical_auto_ea`; predecrement the local; routed read
+from the local; (for a source operand) postincrement the local right after the read; compute the result; write it (routed
+write of the local for a memory destination, ordinary Dn write otherwise); postincrement the local after a destination write;
+update N/Z (V/C cleared, X preserved); commit the live An in one statement after every routed access; advance PC last. A
+`GENESIS_STOP` returns from inside the failing access, before any architectural write. BYTE on A7 steps by 2. There is no
+same-register aliasing hazard (the other operand is never An). The C4 classifier and the decoded-instruction pre-gate no
+longer emit `requires_architecture_decision` rows for these shapes; immutable-ROM AOT admission
+(`m68k_operation_is_immutable_rom_aot_safe`) is family-level for all six mnemonics. Remaining declined auto-update shapes:
+MULS/MULU/DIVS/DIVU sources (SEG-021-T010) and bit-test destinations.
