@@ -1,0 +1,75 @@
+# MC68000 generated-native differential conformance harness (SEG-021-T003)
+
+One reusable harness for every legal base-MC68000 form: deterministic synthetic vectors go through
+decode -> lift -> emitted strict-C11 -> compile -> generated-native execute, and the identical vector runs one
+instruction on the pinned Musashi core. Results are compared with the SEG-020 machinery
+(`tools/m68k_first_divergence.py`, ADR-0042: boundary schema, `compare_streams`, `field_differences`).
+
+Files: `tools/m68k_conformance.py` (driver), `tests/tools/m68k_conformance_emitter.cpp` (public-entry-point emitter),
+`tests/tools/m68k_conformance_runner.c` / `m68k_conformance_oracle.c` / `m68k_conformance_common.h` (both sides,
+shared memory image and output schema), `tests/fixtures/m68k-conformance-vectors.json` (the table),
+`tests/m68k_conformance_harness_test.py`.
+
+## Validating a family = adding table rows
+
+Validating a family normally means adding table rows, not changing the harness. A row names a legal form id of
+`tests/fixtures/m68k-legal-forms.json` (which supplies the exact primary words) and uses this small vocabulary:
+
+| key | meaning |
+| --- | --- |
+| `form` | T001 form id; every concrete primary word of the form is exercised |
+| `ext` | ordered literal extension suffixes (hex, whole words; default one empty suffix). Each tested encoding is `primary word + suffix`, e.g. `["0010","FFF0"]` displacements, `["7FFF"]` immediate, `["00012000"]` absolute.L, `["1804"]` brief index, `["00FF"]` MOVEM mask, `["2700"]` STOP SR. No assembler: the bytes are literal table data |
+| `bind` | optional `x`/`y` operand bindings (omit for no-operand/control rows) |
+| `init` | optional register presets, e.g. `{"d1":"00000010"}` (an index register value) |
+| `src_ext_bytes` | optional extension length of an immediate source operand when it is not the size default |
+| `profile` / `full_profile` / `full_words` | vector profile per word; `full_profile` for the listed words |
+
+Operand specs (`bind_operand`, MC68000 architectural shapes only, no per-mnemonic logic): `d@S` / `a@S` register in
+opcode bits S..S+2; `ea.src` / `ea.dst` the EA in opcode bits 0..5 with class from the form (Dn, An, (An), (An)+,
+-(An), d16(An), d8(An,Xn), abs.W, abs.L, d16(PC), d8(PC,Xn), #imm; extension words come from the suffix, the source
+EA's extension precedes the destination's); `eaM.dst` the MOVE-style destination field; `pi@S` / `pd@S` an (An)+ /
+-(An) operand for two-auto-update shapes (CMPM, ADDX/SUBX). Profiles are `single`, `cross`, `pair_list` (values
+crossed with SR seeds) or `state` (SR seeds only, for rows without operands). Committed profiles cover zero,
+negative, carry/borrow, signed overflow, X/C interaction (SR 2700/2710/271F), boundary values with garbage upper
+bits, register aliasing, A7 byte auto-update (adjusts by two) and supervisor/user state (`state_modes`).
+
+Execution mode and stacks: the SR seed selects supervisor (bit 13) or user state. The vector carries USP and SSP
+explicitly; A7 is the active pointer (SSP in supervisor state, USP in user state). Both the generated and the
+Musashi runner start from exactly that state and report `usp`/`ssp`; in user mode both report the active stack
+pointer as USP. A row that current production cannot execute reports `unsupported`; the harness never rejects a row
+because of its mode.
+
+Extension-bearing and no-operand canaries are ordinary committed rows validated against Musashi:
+`neg.unary.w.none.disp` (d16(An), two suffixes), `addi.imm_ea.w.imm.dn` (immediate suffixes) and
+`nop.none.none.none.none` (no operand, supervisor and user). `tests/m68k_conformance_harness_test.py` additionally
+expands (without crediting) two-auto-update, displacement, brief-indexed, absolute, PC-relative, immediate, STOP, LINK,
+MOVEM, Bcc and TRAP shapes to prove later family tasks only add rows.
+
+## Compared state
+
+D0-D7, A0-A7 (A7 = active stack pointer), PC, SR/CCR, USP, SSP, byte-granular memory writes against the initial
+image (memory RMW results, auto-updated EA memory and exception stacked frames) and the exception-vector hook: vectors
+2..255 are seeded to distinct handler addresses (`CF_HANDLER(v)`); when the final PC is a handler a `k=2` effect
+records the vector number (TRAP #0..#15 = 32..47, user vectors above), so exception families reuse the same rows and
+comparison. Timing is not compared. Exception instruction semantics are not implemented by this harness.
+
+## Limits (measured, not hidden)
+
+A credited primary word means the vectors declared by its row (all suffixes, all profile cases) matched Musashi;
+it is NOT semantic exhaustiveness (a handful of extension values, fixed baseline registers and memory pattern).
+Family tasks own deeper family-specific vector expansion. A write that does not change a byte is invisible. The
+generated model has one active A7 plus USP, so SSP is shadowed by the runner. Timing is out of scope. Only a fully
+passing row can credit the T002 manifest (`update_manifest` only adds credit and never removes it).
+
+## Oracle policy
+
+Pinned Musashi (revision in the table, checked by `build_oracle`) is found through
+`--musashi-checkout` or `SEGARECOMP_M68K_CONFORMANCE_MUSASHI_CHECKOUT` (the older checkout variables are accepted
+as fallbacks). Without it the oracle comparison is skipped, never failed; emit/compile/execute/determinism still run.
+`--update-manifest` refuses to run without the oracle and adds only fully validated rows to
+`tests/fixtures/m68k-validation-manifest.json`; the test asserts the manifest words attributed to the table equal the
+table's declared words. After a manifest change regenerate the T002 snapshot with
+`python3 tools/m68k_capability_coverage.py --probe <probe> --update-snapshot`.
+
+Fault injection lives only in the test's temporary copies of the emitted C (`mutate=`); production paths cannot
+perturb generated code.

@@ -90,10 +90,11 @@ def test_independence():
         check(token not in dataset_text, "dataset references production legality/oracle token %r" % token)
     hits = scan_tree_for(ROOT, FORBIDDEN_IN_PRODUCTION, PRODUCTION_DIRS, PRODUCTION_FILES)
     check(not hits, "production references the test-side dataset/tool: %r" % hits[:5])
-    # SEG-021-T002: the coverage measurement is the one product-side tool permitted to consume the dataset
-    # (see docs/testing/m68k-legal-forms.md); it is itself covered by tests/m68k_capability_ratchet_test.py.
+    # SEG-021-T002/T003: the coverage measurement and the conformance harness are the only product-side tools
+    # permitted to consume the dataset (see docs/testing/m68k-legal-forms.md); they are covered by
+    # tests/m68k_capability_ratchet_test.py and tests/m68k_conformance_harness_test.py.
     other_tools = [p for p in (ROOT / "tools").glob("*")
-                   if p.is_file() and p != TOOL and p.name != "m68k_capability_coverage.py"]
+                   if p.is_file() and p != TOOL and p.name not in ("m68k_capability_coverage.py", "m68k_conformance.py")]
     for p in other_tools:
         if p.suffix in SOURCE_SUFFIXES:
             text = p.read_text(errors="replace").lower()
