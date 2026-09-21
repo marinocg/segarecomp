@@ -100,6 +100,14 @@ class FailureDiagnosisWorkflowTest(unittest.TestCase):
         self.assertIsNone(json.loads(lines[1].split(" ", 1)[1])["divergence"])
         self.assertEqual(self.capture(None), [])
 
+    def test_pathological_and_oversized_inputs_degrade(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "deep.json"
+            path.write_text("[" * 100000)
+            self.assertIsNone(bridge.load_divergence_report(path))
+        self.assertEqual(bridge.durable_field_class("state:" + "a" * 500), "other")
+        self.assertEqual(bridge.durable_field_class("pc\n"), "other")
+
     def test_cli_requires_diagnose_frontier(self) -> None:
         completed = subprocess.run(
             [sys.executable, str(ROOT / "tools/genesis_startup_bridge.py"), "--rom", "x.md", "--mode", "synthetic",

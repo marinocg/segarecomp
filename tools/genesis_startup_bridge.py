@@ -1132,14 +1132,14 @@ _DIVERGENCE_RESULTS = ("diverged", "no_divergence", "unsupported_for_comparison"
 _FIELD_PLAIN = re.compile(
     r"^(d[0-7]|a[0-7]|usp|sr|pc|boundary_presence|boundary_ordinal|unsupported|device_boundary_presence|"
     r"device_boundary_ordinal|device_unsupported|event:order|event:vblank_raise|event:irq_admit|"
-    r"effect:trap|state:[a-z0-9_]+)$")
+    r"effect:trap|state:[a-z0-9_]{1,32})\Z")
 
 
 def load_divergence_report(path: pathlib.Path) -> dict | None:
     """Read a divergence report; any missing/malformed input is 'unavailable', never an error."""
     try:
         report = json.loads(path.read_text())
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+    except (OSError, ValueError, RecursionError):
         return None
     if (not isinstance(report, dict) or report.get("domain") not in _DIVERGENCE_DOMAINS or
             report.get("result") not in _DIVERGENCE_RESULTS):
@@ -1153,10 +1153,10 @@ def durable_field_class(name: object) -> str:
         return "other"
     if _FIELD_PLAIN.match(name):
         return name
-    match = re.match(r"^effect:write@[0-9A-Fa-f]+/(w[0-9]+)(?:#[0-9]+)?$", name)
+    match = re.match(r"^effect:write@[0-9A-Fa-f]+/(w[0-9]+)(?:#[0-9]+)?\Z", name)
     if match:
         return "effect:write/" + match.group(1)
-    match = re.match(r"^event:write@([a-z0-9_]+)/[0-9A-Fa-f]+/(w[0-9]+)(?:#[0-9]+)?$", name)
+    match = re.match(r"^event:write@([a-z0-9_]{1,32})/[0-9A-Fa-f]+/(w[0-9]+)(?:#[0-9]+)?\Z", name)
     if match:
         return "event:write@%s/%s" % match.groups()
     return "other"
