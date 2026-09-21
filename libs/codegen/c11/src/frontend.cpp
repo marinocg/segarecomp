@@ -2126,12 +2126,9 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     if (m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_read);
   } else if (operation.kind == M68kIrKind::bit_test) {
-    if (const auto update = m68k_c4_auto_update_class(operation.destination_ea.mode); update != M68kC4AutoUpdateClass::none) {
-      add(M68kC4OperandRole::destination, operation.destination_ea.mode, update,
-          M68kC4GapClass::requires_architecture_decision, "deferred address commit");
-    } else {
+    // SEG-021-T008: an auto-updating destination lowers through the bit-family deferred address commit.
+    if (m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_read);
-    }
   } else if (operation.kind == M68kIrKind::bit_change || operation.kind == M68kIrKind::bit_clear ||
              operation.kind == M68kIrKind::bit_set) {
     // SEG-007-T209: BCHG/BCLR/BSET read-modify-write their destination (unlike
@@ -2141,12 +2138,9 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     // BTST's own destination_read shape. An auto-updating destination is
     // declined cleanly (this family carries no deferred-address-commit
     // contract, matching BTST/the logical family).
-    if (const auto update = m68k_c4_auto_update_class(operation.destination_ea.mode); update != M68kC4AutoUpdateClass::none) {
-      add(M68kC4OperandRole::destination, operation.destination_ea.mode, update,
-          M68kC4GapClass::requires_architecture_decision, "deferred address commit");
-    } else {
+    // SEG-021-T008: an auto-updating destination lowers through the bit-family deferred address commit.
+    if (m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
-    }
   } else if (operation.kind == M68kIrKind::write_clr) {
     // SEG-007-T157 / ADR-0019 Stage B: an auto-updating `(An)+` / `-(An)`
     // CLR destination is now lowered by the established deferred-address-
@@ -3004,6 +2998,9 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
           // SEG-021-T006: SUBA, CMP, CMPA and CMPI lower their own auto-updating operand (deferred commit).
           kind != M68kInstructionKind::suba && kind != M68kInstructionKind::cmp &&
           kind != M68kInstructionKind::cmpa && kind != M68kInstructionKind::cmpi &&
+          // SEG-021-T008: BTST/BCHG/BCLR/BSET lower their own auto-updating destination (deferred commit).
+          kind != M68kInstructionKind::btst && kind != M68kInstructionKind::bchg &&
+          kind != M68kInstructionKind::bclr && kind != M68kInstructionKind::bset &&
           (ea.mode == M68kEaMode::address_predec || ea.mode == M68kEaMode::address_postinc))
         return false;
       return !m68k_is_statically_foldable_control_ea(ea) || facts.contains({address, role});

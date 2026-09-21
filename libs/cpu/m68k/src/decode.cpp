@@ -1031,7 +1031,11 @@ struct M68kEaFieldOutcome {
   const auto reg3 = static_cast<std::uint8_t>(word & 0x7U);
   const auto finish = [&](M68kInstructionKind kind, const M68kEffectiveAddress &bit_number_ea,
                           std::uint32_t consumed_before_dst) -> std::optional<M68kDecodeResult> {
-    const auto legal = kind == M68kInstructionKind::btst ? m68k_ea_bit_test_destination : m68k_ea_data_alterable;
+    // SEG-021-T008: full manual legality (see instruction.hpp); a dynamic BTST also admits #imm.
+    const bool dynamic_bit_number = bit_number_ea.mode == M68kEaMode::data_register;
+    const auto legal = kind != M68kInstructionKind::btst ? m68k_ea_bit_modify_destination
+                       : dynamic_bit_number              ? m68k_ea_bit_test_dynamic_destination
+                                                         : m68k_ea_bit_test_destination;
     // `size` here is only a placeholder for m68k_decode_one_ea's extension-byte
     // computation, which never depends on width for a non-immediate EA (the
     // destination is never immediate for any selected bit operation); the

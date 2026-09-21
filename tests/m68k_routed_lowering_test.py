@@ -178,6 +178,16 @@ def arithmetic_cases():
             for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
                 for reg in ((1, 7) if mode in (3, 4) else (1,)):
                     add("%04X" % (base | (sf << 6) | (mode << 3) | reg) + immw + ext, (mode,))
+    # SEG-021-T008: BTST/BCHG/BCLR/BSET, dynamic (Dn) and static (#n) bit numbers, every legal destination class
+    # incl. auto-updating ones (A7 byte stepping) and (d8,An,Xn). PC-relative/immediate BTST destinations are covered
+    # by the Musashi-validated conformance rows and the routed coverage compile stages.
+    for opmode, imm_selector in ((4, 0), (5, 1), (6, 2), (7, 3)):
+        for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
+            for reg in ((1, 7) if mode in (3, 4) else (1,)):
+                for dn in (2, 1):
+                    add("%04X" % (0x0000 | (dn << 9) | (opmode << 6) | (mode << 3) | reg) + ext, (mode,))
+                for bit in ("0000", "0007", "0008", "001F", "0020"):
+                    add("%04X" % (0x0800 | (imm_selector << 6) | (mode << 3) | reg) + bit + ext, (mode,))
     return out
 
 

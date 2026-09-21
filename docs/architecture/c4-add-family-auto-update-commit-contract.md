@@ -211,3 +211,16 @@ same-register aliasing hazard (the other operand is never An). The C4 classifier
 longer emit `requires_architecture_decision` rows for these shapes; immutable-ROM AOT admission
 (`m68k_operation_is_immutable_rom_aot_safe`) is family-level for all six mnemonics. Remaining declined auto-update shapes:
 MULS/MULU/DIVS/DIVU sources (SEG-021-T010) and bit-test destinations.
+
+## SEG-021-T008: BTST / BCHG / BCLR / BSET
+
+The bit-operation family joins the same technique through `m68k_emit_routed_bit_auto_update` (routed lowering only). The bit
+number is Dn or an instruction-embedded immediate (never memory); only the destination can auto-update. Steps: materialize the
+bit number; snapshot the touched An into `m68k_bit_auto_ea`; predecrement the local; routed read from the local; compute the
+result and Z from the ORIGINAL tested bit (modulo 32 for Dn, 8 for memory); for BCHG/BCLR/BSET a routed write of the local
+(BTST never writes back); postincrement the local; commit the live An in one statement after every routed access; advance PC
+last. A routed stop returns before any architectural write; byte on A7 steps by 2. The C4 classifier no longer emits
+`requires_architecture_decision` rows for these shapes and immutable-ROM AOT admission is family-level for all four
+mnemonics; legality (incl. `(d8,An,Xn)`, and for BTST `d16(PC)`, `(d8,PC,Xn)` and dynamic `#imm`) is owned by decode.
+`tests/m68k_routed_lowering_test.py` proves routed-vs-direct equality and stop atomicity for every auto-updating shape.
+Remaining declined auto-update shapes: MULS/MULU/DIVS/DIVU sources (SEG-021-T010).

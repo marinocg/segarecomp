@@ -125,57 +125,57 @@
   "bit_manipulation": {
    "ccr_sr_effect_declared": {
     "applicable_forms": 77,
-    "passing_forms": 58,
-    "passing_words": 1521,
-    "percent_forms": "75.32"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "ccr_sr_validated": {
     "applicable_forms": 77,
-    "passing_forms": 0,
-    "passing_words": 0,
-    "percent_forms": "0.00"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "compile": {
     "applicable_forms": 77,
-    "passing_forms": 58,
-    "passing_words": 1521,
-    "percent_forms": "75.32"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "decode": {
     "applicable_forms": 77,
-    "passing_forms": 58,
-    "passing_words": 1521,
-    "percent_forms": "75.32"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "ea_footprint_declared": {
     "applicable_forms": 77,
-    "passing_forms": 0,
-    "passing_words": 0,
-    "percent_forms": "0.00"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "ea_side_effect_validated": {
     "applicable_forms": 18,
-    "passing_forms": 0,
-    "passing_words": 0,
-    "percent_forms": "0.00"
+    "passing_forms": 16,
+    "passing_words": 576,
+    "percent_forms": "88.89"
    },
    "effects": {
     "applicable_forms": 77,
-    "passing_forms": 58,
-    "passing_words": 1521,
-    "percent_forms": "75.32"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "emit": {
     "applicable_forms": 77,
-    "passing_forms": 58,
-    "passing_words": 1521,
-    "percent_forms": "75.32"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "end_to_end_structural": {
     "applicable_forms": 77,
-    "passing_forms": 58,
-    "passing_words": 1521,
-    "percent_forms": "75.32"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "exception_privilege_modeled": {
     "applicable_forms": 0,
@@ -185,57 +185,57 @@
    },
    "lift": {
     "applicable_forms": 77,
-    "passing_forms": 58,
-    "passing_words": 1521,
-    "percent_forms": "75.32"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "native_exec": {
     "applicable_forms": 77,
-    "passing_forms": 58,
-    "passing_words": 1521,
-    "percent_forms": "75.32"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "route_immutable_rom_aot": {
     "applicable_forms": 77,
-    "passing_forms": 16,
-    "passing_words": 576,
-    "percent_forms": "20.78"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "route_runtime_routed_admitted": {
     "applicable_forms": 77,
-    "passing_forms": 58,
-    "passing_words": 1521,
-    "percent_forms": "75.32"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "route_runtime_routed_compiles": {
     "applicable_forms": 77,
-    "passing_forms": 58,
-    "passing_words": 1521,
-    "percent_forms": "75.32"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "route_runtime_routed_executes": {
     "applicable_forms": 77,
-    "passing_forms": 40,
-    "passing_words": 1440,
-    "percent_forms": "51.95"
+    "passing_forms": 49,
+    "passing_words": 1736,
+    "percent_forms": "63.64"
    },
    "route_static_discovery": {
     "applicable_forms": 77,
-    "passing_forms": 58,
-    "passing_words": 1521,
-    "percent_forms": "75.32"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "semantic_validated": {
     "applicable_forms": 77,
-    "passing_forms": 0,
-    "passing_words": 0,
-    "percent_forms": "0.00"
+    "passing_forms": 69,
+    "passing_words": 1826,
+    "percent_forms": "89.61"
    },
    "timing_model_present": {
     "applicable_forms": 77,
-    "passing_forms": 58,
-    "passing_words": 1521,
-    "percent_forms": "75.32"
+    "passing_forms": 68,
+    "passing_words": 1818,
+    "percent_forms": "88.31"
    },
    "timing_validated": {
     "applicable_forms": 77,
@@ -1256,79 +1256,79 @@
   "bcc.disp8.b.none.target.pl": "1111-00111111100--0",
   "bcc.disp8.b.none.target.vc": "1111-00111111100--0",
   "bcc.disp8.b.none.target.vs": "1111-00111111100--0",
-  "bchg.dn_ea.b.dn.absl": "11101-11111100100-0",
-  "bchg.dn_ea.b.dn.absw": "11101-11111100100-0",
-  "bchg.dn_ea.b.dn.disp": "11101-11111110100-0",
-  "bchg.dn_ea.b.dn.ind": "11101-11111111100-0",
-  "bchg.dn_ea.b.dn.index": "00000-00000000000-0",
-  "bchg.dn_ea.b.dn.postinc": "11101-1111111010000",
-  "bchg.dn_ea.b.dn.predec": "11101-1111111010000",
-  "bchg.dn_ea.l.dn.dn": "11101-11111111100-0",
-  "bchg.imm_ea.b.imm.absl": "11101-11111100100-0",
-  "bchg.imm_ea.b.imm.absw": "11101-11111100100-0",
-  "bchg.imm_ea.b.imm.disp": "11101-11111110100-0",
-  "bchg.imm_ea.b.imm.ind": "11101-11111111100-0",
-  "bchg.imm_ea.b.imm.index": "00000-00000000000-0",
-  "bchg.imm_ea.b.imm.postinc": "11101-1111111010000",
-  "bchg.imm_ea.b.imm.predec": "11101-1111111010000",
-  "bchg.imm_ea.l.imm.dn": "11101-11111111100-0",
-  "bclr.dn_ea.b.dn.absl": "11101-11111100100-0",
-  "bclr.dn_ea.b.dn.absw": "11101-11111100100-0",
-  "bclr.dn_ea.b.dn.disp": "11101-11111110100-0",
-  "bclr.dn_ea.b.dn.ind": "11101-11111111100-0",
-  "bclr.dn_ea.b.dn.index": "00000-00000000000-0",
-  "bclr.dn_ea.b.dn.postinc": "11101-1111111010000",
-  "bclr.dn_ea.b.dn.predec": "11101-1111111010000",
-  "bclr.dn_ea.l.dn.dn": "11101-11111111100-0",
-  "bclr.imm_ea.b.imm.absl": "11101-11111100100-0",
-  "bclr.imm_ea.b.imm.absw": "11101-11111100100-0",
-  "bclr.imm_ea.b.imm.disp": "11101-11111110100-0",
-  "bclr.imm_ea.b.imm.ind": "11101-11111111100-0",
-  "bclr.imm_ea.b.imm.index": "00000-00000000000-0",
-  "bclr.imm_ea.b.imm.postinc": "11101-1111111010000",
-  "bclr.imm_ea.b.imm.predec": "11101-1111111010000",
-  "bclr.imm_ea.l.imm.dn": "11101-11111111100-0",
+  "bchg.dn_ea.b.dn.absl": "11111-11111101111-0",
+  "bchg.dn_ea.b.dn.absw": "11111-11111101111-0",
+  "bchg.dn_ea.b.dn.disp": "11111-11111111111-0",
+  "bchg.dn_ea.b.dn.ind": "11111-11111111111-0",
+  "bchg.dn_ea.b.dn.index": "11111-11111111111-0",
+  "bchg.dn_ea.b.dn.postinc": "11111-1111111111110",
+  "bchg.dn_ea.b.dn.predec": "11111-1111111111110",
+  "bchg.dn_ea.l.dn.dn": "11111-11111111111-0",
+  "bchg.imm_ea.b.imm.absl": "11111-11111101111-0",
+  "bchg.imm_ea.b.imm.absw": "11111-11111101111-0",
+  "bchg.imm_ea.b.imm.disp": "11111-11111111111-0",
+  "bchg.imm_ea.b.imm.ind": "11111-11111111111-0",
+  "bchg.imm_ea.b.imm.index": "11111-11111111111-0",
+  "bchg.imm_ea.b.imm.postinc": "11111-1111111111110",
+  "bchg.imm_ea.b.imm.predec": "11111-1111111111110",
+  "bchg.imm_ea.l.imm.dn": "11111-11111111111-0",
+  "bclr.dn_ea.b.dn.absl": "11111-11111101111-0",
+  "bclr.dn_ea.b.dn.absw": "11111-11111101111-0",
+  "bclr.dn_ea.b.dn.disp": "11111-11111111111-0",
+  "bclr.dn_ea.b.dn.ind": "11111-11111111111-0",
+  "bclr.dn_ea.b.dn.index": "11111-11111111111-0",
+  "bclr.dn_ea.b.dn.postinc": "11111-1111111111110",
+  "bclr.dn_ea.b.dn.predec": "11111-1111111111110",
+  "bclr.dn_ea.l.dn.dn": "11111-11111111111-0",
+  "bclr.imm_ea.b.imm.absl": "11111-11111101111-0",
+  "bclr.imm_ea.b.imm.absw": "11111-11111101111-0",
+  "bclr.imm_ea.b.imm.disp": "11111-11111111111-0",
+  "bclr.imm_ea.b.imm.ind": "11111-11111111111-0",
+  "bclr.imm_ea.b.imm.index": "11111-11111111111-0",
+  "bclr.imm_ea.b.imm.postinc": "11111-1111111111110",
+  "bclr.imm_ea.b.imm.predec": "11111-1111111111110",
+  "bclr.imm_ea.l.imm.dn": "11111-11111111111-0",
   "bra.disp16.w.none.target": "1111-01111111111--0",
   "bra.disp8.b.none.target": "1111-01111111100--0",
-  "bset.dn_ea.b.dn.absl": "11101-11111100100-0",
-  "bset.dn_ea.b.dn.absw": "11101-11111100100-0",
-  "bset.dn_ea.b.dn.disp": "11101-11111110100-0",
-  "bset.dn_ea.b.dn.ind": "11101-11111111100-0",
-  "bset.dn_ea.b.dn.index": "00000-00000000000-0",
-  "bset.dn_ea.b.dn.postinc": "11101-1111111010000",
-  "bset.dn_ea.b.dn.predec": "11101-1111111010000",
-  "bset.dn_ea.l.dn.dn": "11101-11111111100-0",
-  "bset.imm_ea.b.imm.absl": "11101-11111100100-0",
-  "bset.imm_ea.b.imm.absw": "11101-11111100100-0",
-  "bset.imm_ea.b.imm.disp": "11101-11111110100-0",
-  "bset.imm_ea.b.imm.ind": "11101-11111111100-0",
-  "bset.imm_ea.b.imm.index": "00000-00000000000-0",
-  "bset.imm_ea.b.imm.postinc": "11101-1111111010000",
-  "bset.imm_ea.b.imm.predec": "11101-1111111010000",
-  "bset.imm_ea.l.imm.dn": "11101-11111111100-0",
+  "bset.dn_ea.b.dn.absl": "11111-11111101111-0",
+  "bset.dn_ea.b.dn.absw": "11111-11111101111-0",
+  "bset.dn_ea.b.dn.disp": "11111-11111111111-0",
+  "bset.dn_ea.b.dn.ind": "11111-11111111111-0",
+  "bset.dn_ea.b.dn.index": "11111-11111111111-0",
+  "bset.dn_ea.b.dn.postinc": "11111-1111111111110",
+  "bset.dn_ea.b.dn.predec": "11111-1111111111110",
+  "bset.dn_ea.l.dn.dn": "11111-11111111111-0",
+  "bset.imm_ea.b.imm.absl": "11111-11111101111-0",
+  "bset.imm_ea.b.imm.absw": "11111-11111101111-0",
+  "bset.imm_ea.b.imm.disp": "11111-11111111111-0",
+  "bset.imm_ea.b.imm.ind": "11111-11111111111-0",
+  "bset.imm_ea.b.imm.index": "11111-11111111111-0",
+  "bset.imm_ea.b.imm.postinc": "11111-1111111111110",
+  "bset.imm_ea.b.imm.predec": "11111-1111111111110",
+  "bset.imm_ea.l.imm.dn": "11111-11111111111-0",
   "bsr.disp16.w.none.target": "1110-01111111111-10",
   "bsr.disp8.b.none.target": "1110-01111111100-00",
-  "btst.dn_ea.b.dn.absl": "11101-11111100100-0",
-  "btst.dn_ea.b.dn.absw": "11101-11111100100-0",
-  "btst.dn_ea.b.dn.disp": "11101-11111110100-0",
-  "btst.dn_ea.b.dn.imm": "00000-00000000000-0",
-  "btst.dn_ea.b.dn.ind": "11101-11111111100-0",
-  "btst.dn_ea.b.dn.index": "00000-00000000000-0",
-  "btst.dn_ea.b.dn.pcdisp": "11101-11111100100-0",
-  "btst.dn_ea.b.dn.pcindex": "00000-00000000000-0",
-  "btst.dn_ea.b.dn.postinc": "11101-1111111010000",
-  "btst.dn_ea.b.dn.predec": "11101-1111111010000",
-  "btst.dn_ea.l.dn.dn": "11101-11111111100-0",
-  "btst.imm_ea.b.imm.absl": "11101-11111100100-0",
-  "btst.imm_ea.b.imm.absw": "11101-11111100100-0",
-  "btst.imm_ea.b.imm.disp": "11101-11111110100-0",
-  "btst.imm_ea.b.imm.ind": "11101-11111111100-0",
-  "btst.imm_ea.b.imm.index": "00000-00000000000-0",
-  "btst.imm_ea.b.imm.pcdisp": "11101-11111100100-0",
-  "btst.imm_ea.b.imm.pcindex": "00000-00000000000-0",
-  "btst.imm_ea.b.imm.postinc": "11101-1111111010000",
-  "btst.imm_ea.b.imm.predec": "11101-1111111010000",
-  "btst.imm_ea.l.imm.dn": "11101-11111111100-0",
+  "btst.dn_ea.b.dn.absl": "11111-11111101111-0",
+  "btst.dn_ea.b.dn.absw": "11111-11111101111-0",
+  "btst.dn_ea.b.dn.disp": "11111-11111111111-0",
+  "btst.dn_ea.b.dn.imm": "11111-01111111111-0",
+  "btst.dn_ea.b.dn.ind": "11111-11111111111-0",
+  "btst.dn_ea.b.dn.index": "11111-11111111111-0",
+  "btst.dn_ea.b.dn.pcdisp": "11111-11111101111-0",
+  "btst.dn_ea.b.dn.pcindex": "11111-11111101111-0",
+  "btst.dn_ea.b.dn.postinc": "11111-1111111111110",
+  "btst.dn_ea.b.dn.predec": "11111-1111111111110",
+  "btst.dn_ea.l.dn.dn": "11111-11111111111-0",
+  "btst.imm_ea.b.imm.absl": "11111-11111101111-0",
+  "btst.imm_ea.b.imm.absw": "11111-11111101111-0",
+  "btst.imm_ea.b.imm.disp": "11111-11111111111-0",
+  "btst.imm_ea.b.imm.ind": "11111-11111111111-0",
+  "btst.imm_ea.b.imm.index": "11111-11111111111-0",
+  "btst.imm_ea.b.imm.pcdisp": "11111-11111101111-0",
+  "btst.imm_ea.b.imm.pcindex": "11111-11111101111-0",
+  "btst.imm_ea.b.imm.postinc": "11111-1111111111110",
+  "btst.imm_ea.b.imm.predec": "11111-1111111111110",
+  "btst.imm_ea.l.imm.dn": "11111-11111111111-0",
   "chk.ea_dn.w.absl.dn": "00000000000000000-0",
   "chk.ea_dn.w.absw.dn": "00000000000000000-0",
   "chk.ea_dn.w.disp.dn": "00000000000000000-0",
@@ -2549,57 +2549,57 @@
  "totals": {
   "ccr_sr_effect_declared": {
    "applicable_forms": 1193,
-   "passing_forms": 1069,
-   "passing_words": 34196,
-   "percent_forms": "89.61"
+   "passing_forms": 1080,
+   "passing_words": 34501,
+   "percent_forms": "90.53"
   },
   "ccr_sr_validated": {
    "applicable_forms": 1193,
-   "passing_forms": 865,
-   "passing_words": 25561,
-   "percent_forms": "72.51"
+   "passing_forms": 934,
+   "passing_words": 27387,
+   "percent_forms": "78.29"
   },
   "compile": {
    "applicable_forms": 1526,
-   "passing_forms": 1219,
-   "passing_words": 41161,
-   "percent_forms": "79.88"
+   "passing_forms": 1230,
+   "passing_words": 41466,
+   "percent_forms": "80.60"
   },
   "decode": {
    "applicable_forms": 1526,
-   "passing_forms": 1246,
-   "passing_words": 42028,
-   "percent_forms": "81.65"
+   "passing_forms": 1257,
+   "passing_words": 42333,
+   "percent_forms": "82.37"
   },
   "ea_footprint_declared": {
    "applicable_forms": 1526,
-   "passing_forms": 954,
-   "passing_words": 32477,
-   "percent_forms": "62.52"
+   "passing_forms": 1023,
+   "passing_words": 34303,
+   "percent_forms": "67.04"
   },
   "ea_side_effect_validated": {
    "applicable_forms": 381,
-   "passing_forms": 256,
-   "passing_words": 10546,
-   "percent_forms": "67.19"
+   "passing_forms": 272,
+   "passing_words": 11122,
+   "percent_forms": "71.39"
   },
   "effects": {
    "applicable_forms": 1526,
-   "passing_forms": 1240,
-   "passing_words": 41994,
-   "percent_forms": "81.26"
+   "passing_forms": 1251,
+   "passing_words": 42299,
+   "percent_forms": "81.98"
   },
   "emit": {
    "applicable_forms": 1526,
-   "passing_forms": 1219,
-   "passing_words": 41161,
-   "percent_forms": "79.88"
+   "passing_forms": 1230,
+   "passing_words": 41466,
+   "percent_forms": "80.60"
   },
   "end_to_end_structural": {
    "applicable_forms": 1526,
-   "passing_forms": 1218,
-   "passing_words": 41160,
-   "percent_forms": "79.82"
+   "passing_forms": 1229,
+   "passing_words": 41465,
+   "percent_forms": "80.54"
   },
   "exception_privilege_modeled": {
    "applicable_forms": 852,
@@ -2609,57 +2609,57 @@
   },
   "lift": {
    "applicable_forms": 1526,
-   "passing_forms": 1246,
-   "passing_words": 42028,
-   "percent_forms": "81.65"
+   "passing_forms": 1257,
+   "passing_words": 42333,
+   "percent_forms": "82.37"
   },
   "native_exec": {
    "applicable_forms": 1526,
-   "passing_forms": 1218,
-   "passing_words": 41160,
-   "percent_forms": "79.82"
+   "passing_forms": 1229,
+   "passing_words": 41465,
+   "percent_forms": "80.54"
   },
   "route_immutable_rom_aot": {
    "applicable_forms": 1526,
-   "passing_forms": 1069,
-   "passing_words": 39037,
-   "percent_forms": "70.05"
+   "passing_forms": 1122,
+   "passing_words": 40287,
+   "percent_forms": "73.53"
   },
   "route_runtime_routed_admitted": {
    "applicable_forms": 1526,
-   "passing_forms": 1232,
-   "passing_words": 41482,
-   "percent_forms": "80.73"
+   "passing_forms": 1243,
+   "passing_words": 41787,
+   "percent_forms": "81.45"
   },
   "route_runtime_routed_compiles": {
    "applicable_forms": 1526,
-   "passing_forms": 1232,
-   "passing_words": 41482,
-   "percent_forms": "80.73"
+   "passing_forms": 1243,
+   "passing_words": 41787,
+   "percent_forms": "81.45"
   },
   "route_runtime_routed_executes": {
    "applicable_forms": 1526,
-   "passing_forms": 839,
-   "passing_words": 39220,
-   "percent_forms": "54.98"
+   "passing_forms": 848,
+   "passing_words": 39516,
+   "percent_forms": "55.57"
   },
   "route_static_discovery": {
    "applicable_forms": 1526,
-   "passing_forms": 1220,
-   "passing_words": 37910,
-   "percent_forms": "79.95"
+   "passing_forms": 1231,
+   "passing_words": 38215,
+   "percent_forms": "80.67"
   },
   "semantic_validated": {
    "applicable_forms": 1526,
-   "passing_forms": 949,
-   "passing_words": 28753,
-   "percent_forms": "62.19"
+   "passing_forms": 1018,
+   "passing_words": 30579,
+   "percent_forms": "66.71"
   },
   "timing_model_present": {
    "applicable_forms": 1526,
-   "passing_forms": 1134,
-   "passing_words": 34412,
-   "percent_forms": "74.31"
+   "passing_forms": 1144,
+   "passing_words": 34709,
+   "percent_forms": "74.97"
   },
   "timing_validated": {
    "applicable_forms": 1526,
@@ -2713,42 +2713,6 @@
    "forms": 13,
    "mnemonic": "ASR",
    "unsupported_forms": 1
-  },
-  {
-   "family": "bit_manipulation",
-   "first_failing_stage": {
-    "decode": 2
-   },
-   "forms": 16,
-   "mnemonic": "BCHG",
-   "unsupported_forms": 2
-  },
-  {
-   "family": "bit_manipulation",
-   "first_failing_stage": {
-    "decode": 2
-   },
-   "forms": 16,
-   "mnemonic": "BCLR",
-   "unsupported_forms": 2
-  },
-  {
-   "family": "bit_manipulation",
-   "first_failing_stage": {
-    "decode": 2
-   },
-   "forms": 16,
-   "mnemonic": "BSET",
-   "unsupported_forms": 2
-  },
-  {
-   "family": "bit_manipulation",
-   "first_failing_stage": {
-    "decode": 5
-   },
-   "forms": 21,
-   "mnemonic": "BTST",
-   "unsupported_forms": 5
   },
   {
    "family": "system_control",
@@ -3081,9 +3045,9 @@
  ],
  "validation": {
   "forms_with_at_least_one_validated_word": {
-   "ccr": 990,
-   "ea": 425,
-   "semantic": 1059,
+   "ccr": 1042,
+   "ea": 437,
+   "semantic": 1111,
    "timing": 0
   },
   "manifest_sources": [
@@ -3102,9 +3066,9 @@
    "tests/m68k_pc_indexed_move_musashi_differential_test.py"
   ],
   "validated_words": {
-   "ccr": 25729,
-   "ea": 10758,
-   "semantic": 28906,
+   "ccr": 27534,
+   "ea": 11328,
+   "semantic": 30711,
    "timing": 0
   }
  }
