@@ -208,7 +208,7 @@ is persisted and device values stay in the ephemeral diagnostic channel.
 
 `tools/genesis_device_divergence.py compare` applies the section 5 domain rule over generated versus
 expected streams (`genesis_m68k_checkpoint_write_detail` and `genesis_device_checkpoint_write_detail`
-lines): per boundary all CPU fields are compared first (domain `cpu`, T005 field rules); only when
+lines): per boundary, presence/ordinal and the CPU unsupported check come first (an unsupported CPU boundary on either side is `unsupported_for_comparison`, domain `none`, never a confident `cpu` divergence, as in T005), then all CPU fields are compared (domain `cpu`, T005 field rules); only when
 they all match are device records compared, giving domain `device` classified `device_command`
 (event lists differ, named `event:write@region/addr/wN`, `event:vblank_raise`, `event:irq_admit`,
 `event:order`) or `device_state` (events agree, a component digest differs, named `state:<component>`).

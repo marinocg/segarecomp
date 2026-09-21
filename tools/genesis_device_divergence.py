@@ -14,7 +14,7 @@ emits per boundary (``genesis_m68k_checkpoint_write_detail`` and
                                 IRQ6 admission).
 
 Rules (ADR-0042 sections 3, 5, 10): sequential lockstep with a mandatory positive boundary limit;
-at each boundary the CPU fields are compared first, and only when every CPU field matches are
+at each boundary CPU presence/ordinal/unsupported checks come first (unsupported fails closed, domain ``none``), then the CPU fields are compared, and only when every CPU field matches are
 device records compared. First differing domain is therefore ``cpu`` when any CPU field differs,
 else ``device``, else ``none``. A device difference is classified ``device_command`` (the event
 lists differ: a command or interrupt event happened, or not, or differently) or ``device_state``
@@ -130,15 +130,16 @@ def compare(cpu_generated: list[dict], cpu_expected: list[dict], device_generate
             failure.update(domain="cpu", result="diverged", fields=[{
                 "field": "boundary_ordinal", "generated": cg.get("boundary"), "expected": ce.get("boundary")}])
             return failure
+        if cg.get("unsupported") or ce.get("unsupported"):
+            # Fail closed (ADR-0042 section 5): incomplete CPU effect evidence is never a confident divergence.
+            failure.update(domain="none", result="unsupported_for_comparison", fields=[{
+                "field": "unsupported", "generated": bool(cg.get("unsupported")),
+                "expected": bool(ce.get("unsupported"))}])
+            return failure
         cpu_fields = [{"field": f["field"], "generated": f["generated"], "expected": f["oracle"]}
                       for f in cpu_tool.field_differences(cg, ce)]
         if cpu_fields:
             failure.update(domain="cpu", result="diverged", fields=cpu_fields)
-            return failure
-        if cg.get("unsupported") or ce.get("unsupported"):
-            failure.update(domain="none", result="unsupported_for_comparison", fields=[{
-                "field": "unsupported", "generated": bool(cg.get("unsupported")),
-                "expected": bool(ce.get("unsupported"))}])
             return failure
         if dg is None or de is None:
             failure.update(domain="device", classification="device_state", result="diverged", fields=[{

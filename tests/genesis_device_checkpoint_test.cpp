@@ -39,13 +39,16 @@ void program(GenesisRuntime *r) {
 }
 
 std::string detail(const GenesisRuntime &r, bool device) {
-  char *buffer = nullptr;
-  size_t size = 0;
-  FILE *f = open_memstream(&buffer, &size);
+  FILE *f = std::tmpfile();  // portable capture (no POSIX-only open_memstream)
+  check(f != nullptr, "tmpfile");
+  if (f == nullptr) return {};
   if (device) genesis_device_checkpoint_write_detail(f, &r); else genesis_m68k_checkpoint_write_detail(f, &r);
-  fclose(f);
-  std::string out(buffer, size);
-  std::free(buffer);
+  std::rewind(f);
+  std::string out;
+  char chunk[256];
+  size_t n;
+  while ((n = std::fread(chunk, 1, sizeof chunk, f)) > 0) out.append(chunk, n);
+  std::fclose(f);
   return out;
 }
 }  // namespace

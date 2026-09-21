@@ -136,6 +136,11 @@ def main():
     assert [f["field"] for f in r["fields"]] == ["event:order"], r
 
     # Unsupported is never equal; presence; limit; determinism.
+    # Unsupported CPU boundary fails closed even when visible registers also differ (either side).
+    bad_regs = cpu(1, 0x102, d=[0, 0, 0, 0, 0, 0, 0, 7], unsupported=1)
+    for g, e in (([bad_regs] + cpus[1:], cpus), (cpus, [bad_regs] + cpus[1:])):
+        r = dd.compare(g, e, devs, devs, 8, 0x100)
+        assert (r["result"], r["domain"], r["first_differing_boundary"]) == ("unsupported_for_comparison", "none", 1), r
     r = dd.compare(cpus, cpus, [dev(1, unsupported=1)] + devs[1:], devs, 8, 0x100)
     assert r["result"] == "unsupported_for_comparison" and r["domain"] == "none", r
     r = dd.compare(cpus, cpus, devs[:2], devs, 8, 0x100)
