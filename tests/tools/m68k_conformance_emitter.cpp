@@ -6,7 +6,7 @@
 // (`undecodable`, `not_lifted`, `no_emission`, `length_mismatch`). It holds no instruction knowledge and
 // never invents an emission: an unsupported encoding is reported, not approximated.
 //
-//   m68k_conformance_emitter [--routed] --out FILE.c < encodings.txt
+//   m68k_conformance_emitter [--routed|--window] --out FILE.c < encodings.txt
 //
 // --routed (SEG-021-T005): emit the Genesis runtime-routed lowering (the route C4 and the immutable-ROM AOT
 // candidates use) as `GenesisControlTransfer rf_<CODE>(GenesisRuntime *)` plus `rf_table`, for the hermetic
@@ -50,10 +50,12 @@ bool parse_hex(const std::string &text, std::vector<std::uint8_t> &out) {
 int main(int argc, char **argv) {
   std::string out_path;
   bool routed_mode = false;
+  bool window_mode = false;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
     else if (arg == "--routed") routed_mode = true;
+    else if (arg == "--window") window_mode = true;
     else { std::cerr << "usage: m68k_conformance_emitter --out FILE.c < encodings\n"; return 2; }
   }
   if (out_path.empty()) { std::cerr << "--out is required\n"; return 2; }
@@ -97,8 +99,10 @@ int main(int argc, char **argv) {
     }
     M68kMemoryEmissionContext memory{"s->ram", "s->a", "frame_ids", "frame_continuations", "frame_depth", 0U,
                                      M68kOperandAccess::linear_memory, 0U, {}, {}};
-    memory.linear_memory_begin = 0U;
-    memory.linear_memory_end = 0x100000U;
+    // --window (SEG-021-T006): host the direct lowering's linear window at the work-RAM addresses
+    // (0x00FF0000..) so the routed-versus-direct test can compare real architectural address values.
+    memory.linear_memory_begin = window_mode ? 0x00FF0000U : 0U;
+    memory.linear_memory_end = window_mode ? 0x01000000U : 0x100000U;
     memory.user_stack_pointer = "s->usp";
     const auto body = emit_m68k_operation_c(operation, "s->d", "s->sr", "  ", &memory);
     if (body.empty()) { std::cout << line << " no_emission\n"; continue; }

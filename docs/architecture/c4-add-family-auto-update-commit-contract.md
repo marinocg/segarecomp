@@ -174,3 +174,25 @@ Final T004 conclusion: ordinary single-EA forms use the existing shared EA helpe
 alias/update uses its existing deferred commit; MOVEM keeps its working-EA/mask/order/final-writeback mechanism;
 CMPM and ADDX/SUBX memory forms are future family-local paired postincrement/predecrement work in SEG-021-T014, and
 ABCD/SBCD in SEG-021-T015. No new shared production mechanism is required.
+
+## SEG-021-T006: SUB / SUBA / SUBQ / SUBI and CMP / CMPA / CMPI
+
+The same operation-local technique now covers the subtract and compare families through one arithmetic-family-local
+helper (`m68k_emit_routed_arith_auto_update`, `libs/codegen/c11/src/m68k.cpp`), used only by the routed lowering
+(`memory->runtime_routing`; the direct linear lowering is unchanged and Musashi-validated). Legal forms carry at most one
+auto-updating operand: `SUB <auto>,Dn`, `SUB Dn,<auto>`, `SUBQ/SUBI #n,<auto>`, `SUBA <auto>,An`, `CMP <auto>,Dn`,
+`CMPA <auto>,An`, `CMPI #n,<auto>`. Steps: snapshot the touched An into a local; predecrement the local; routed read (and
+for a memory RMW destination the routed write) from the local; postincrement the local strictly after the accesses; update
+the result/CCR; commit the live An in one statement after every routed access; advance PC last. A `GENESIS_STOP` returns from
+inside the failing access, before any architectural write, so D/A/SR/PC/memory keep their pre-instruction values
+(`tests/m68k_routed_lowering_test.py` forces the stop for every auto-updating shape). BYTE on A7 steps by 2.
+
+Same-register aliases (the pinned-Musashi SUBA/CMPA rows include them, e.g. `93D9`, `B3D9`): the source auto-update is applied first and
+the aliased An destination operand is the already-updated register. `SUBA <auto>(An),An` then writes the difference to that An
+(the difference write wins: no trailing commit, exactly like ADDA). `CMPA <auto>(An),An` writes no result, so the auto-updated An is
+committed (the source auto-update stays architectural).
+
+The C4 classifier (`classify_m68k_c4_gap_shapes`) and the decoded-instruction pre-gate in `frontend.cpp` no longer
+produce `requires_architecture_decision` rows for these shapes; `c4_arithmetic_auto_update_admission` in
+`tests/m68k_pipeline_test.cpp` proves zero preflight rows and a routed body for ADDA/SUB/SUBA/SUBQ/CMP/CMPA/CMPI
+auto-updating forms. Logical, MUL/DIV, bit-test and ANDI classifier rows are unchanged.

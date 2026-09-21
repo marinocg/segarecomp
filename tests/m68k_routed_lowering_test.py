@@ -96,16 +96,24 @@ def cases():
 
 # SEG-021-T006: ADD/ADDA/ADDI/ADDQ, SUB/SUBA/SUBI/SUBQ and CMP/CMPA/CMPI. Every legal auto-update, indexed,
 # displacement, immediate and register form goes through both lowerings. The routed environment biases every An
-# by the work-RAM base, so shapes that consume an An VALUE as data (An as a source operand of ADD/SUB/CMP/ADDA/
-# SUBA, and CMPA, whose flags compare the biased An) cannot be compared against the unbiased direct window; they
-# are emit-checked on both routes only (ARITH_EMIT_ONLY) and validated against Musashi by the direct rows.
-ARITH_EMIT_ONLY = []
+# by the work-RAM base; the direct lowering is therefore emitted with --window (its linear window sits at the same
+# work-RAM addresses), so both sides see identical architectural An values and shapes that consume an An VALUE as data
+# (An sources, ADDA/SUBA/CMPA and their aliases) compare exactly. AUTO_CODES (every auto-updating shape)
+# additionally run in the routed-stop atomicity check (unmapped pointer: the routed access stops and NO
+# architectural state may change).
+AUTO_CODES = set()
 ARITH_BASES = {"add": 0xD000, "sub": 0x9000, "cmp": 0xB000}
-EA_EXT = {2: "", 3: "", 4: "", 5: "0010", 6: "1804"}
 
 
 def arithmetic_cases():
     out = []
+
+    def add(word, mode_pair=()):
+        """mode_pair: the EA modes of the instruction's operands; auto when 3 or 4 is among them."""
+        out.append(word)
+        if any(m in (3, 4) for m in mode_pair):
+            AUTO_CODES.add(word)
+
     imm = {"b": "00A5", "w": "8001", "l": "80000001"}
     for name, base in ARITH_BASES.items():
         for size, opmode in (("b", 0), ("w", 1), ("l", 2)):
@@ -113,42 +121,41 @@ def arithmetic_cases():
             for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
                 for reg in ((1, 7) if mode in (3, 4) else (1,)):
                     for dn in (2, 1):
-                        out.append("%04X" % (base | (dn << 9) | (opmode << 6) | (mode << 3) | reg) + ext)
-            out.append("%04X" % (base | (2 << 9) | (opmode << 6) | (7 << 3) | 4) + imm[size].rjust(4 if size != "l" else 8, "0"))
+                        add("%04X" % (base | (dn << 9) | (opmode << 6) | (mode << 3) | reg) + ext, (mode,))
+            add("%04X" % (base | (2 << 9) | (opmode << 6) | (7 << 3) | 4) + imm[size].rjust(4 if size != "l" else 8, "0"))
             if size != "b":
                 for reg in (1, 7):
-                    ARITH_EMIT_ONLY.append("%04X" % (base | (2 << 9) | (opmode << 6) | (1 << 3) | reg))
+                    add("%04X" % (base | (2 << 9) | (opmode << 6) | (1 << 3) | reg), ())
             # Dn,<ea> (ADD/SUB only): read-modify-write memory destinations.
             if name != "cmp":
                 for mode, ext in ((2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
                     for reg in ((1, 7) if mode in (3, 4) else (1,)):
                         for dn in (2, 1, 7):
-                            out.append("%04X" % (base | (dn << 9) | ((opmode + 4) << 6) | (mode << 3) | reg) + ext)
+                            add("%04X" % (base | (dn << 9) | ((opmode + 4) << 6) | (mode << 3) | reg) + ext, (mode,))
         # ADDA/SUBA/CMPA: word/long, every memory source; destination An may alias an auto-updating source.
         for size, opmode in (("w", 3), ("l", 7)):
             for mode, ext in ((2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
                 for reg in ((1, 7) if mode in (3, 4) else (1,)):
                     for an in (2, reg, 0):
-                        word = "%04X" % (base | (an << 9) | (opmode << 6) | (mode << 3) | reg) + ext
-                        (ARITH_EMIT_ONLY if name == "cmp" else out).append(word)
+                        add("%04X" % (base | (an << 9) | (opmode << 6) | (mode << 3) | reg) + ext, (mode,))
             for mode in (0, 1):
-                ARITH_EMIT_ONLY.append("%04X" % (base | (2 << 9) | (opmode << 6) | (mode << 3) | 1))
-            out_imm = "%04X" % (base | (2 << 9) | (opmode << 6) | (7 << 3) | 4) + ("8001" if size == "w" else "80000001")
-            (ARITH_EMIT_ONLY if name == "cmp" else out).append(out_imm)
+                add("%04X" % (base | (2 << 9) | (opmode << 6) | (mode << 3) | 1), ())
+            add("%04X" % (base | (2 << 9) | (opmode << 6) | (7 << 3) | 4) + ("8001" if size == "w" else "80000001"),
+                ())
     # ADDI/SUBI/CMPI and ADDQ/SUBQ: every destination class, sizes b/w/l.
     for name, base, quick in (("add", 0x0600, 0x5000), ("sub", 0x0400, 0x5100), ("cmp", 0x0C00, None)):
         for size, sf in (("b", 0), ("w", 1), ("l", 2)):
             immw = {"b": "00A5", "w": "8001", "l": "80000001"}[size]
             for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
                 for reg in ((1, 7) if mode in (3, 4) else (1,)):
-                    out.append("%04X" % (base | (sf << 6) | (mode << 3) | reg) + immw + ext)
+                    add("%04X" % (base | (sf << 6) | (mode << 3) | reg) + immw + ext, (mode,))
                     if quick is not None:
                         for q in (1, 0):
-                            out.append("%04X" % (quick | (q << 9) | (sf << 6) | (mode << 3) | reg) + ext)
+                            add("%04X" % (quick | (q << 9) | (sf << 6) | (mode << 3) | reg) + ext, (mode,))
             if quick is not None and size != "b":
                 for q in (1, 0):
                     for reg in (1, 7):  # ADDQ/SUBQ to An: word/long, no CCR change
-                        out.append("%04X" % (quick | (q << 9) | (sf << 6) | (1 << 3) | reg))
+                        add("%04X" % (quick | (q << 9) | (sf << 6) | (1 << 3) | reg))
     return out
 
 
@@ -169,8 +176,8 @@ static GenesisRuntime routed;
 static uint8_t image[0x10000];
 int main(int argc, char **argv) {
   FILE *f; char code[64]; unsigned sr; int mismatches = 0, changed = 0, total = 0;
+  const int stop_mode = argc > 2 && !strcmp(argv[2], "stop");
   uint32_t seed = 0x1234567u;
-  (void)argc;
   if (!(f = fopen(argv[1], "r"))) return 2;
   for (unsigned i = 0; i < sizeof image; ++i) { seed = seed * 1664525u + 1013904223u; image[i] = (uint8_t)(seed >> 24); }
   while (fscanf(f, "%63s %x", code, &sr) == 2) {
@@ -183,21 +190,43 @@ int main(int argc, char **argv) {
     if (!cf || !rf) { printf("MISSING %s\n", code); ++mismatches; continue; }
     memset(&direct, 0, sizeof direct); memset(&routed, 0, sizeof routed);
     memcpy(direct.ram, image, sizeof image); memcpy(routed.work_ram, image, sizeof image);
-    for (i = 0; i < 8; ++i) { direct.d[i] = routed.d[i] = d[i]; direct.a[i] = a[i]; routed.a[i] = a[i] + 0x00FF0000u; }
-    direct.sr = routed.sr = (uint16_t)sr; direct.usp = usp; routed.usp = usp + 0x00FF0000u; direct.pc = routed.pc = 0x2000u;
+    /* The direct lowering is emitted with --window: its linear window sits at the work-RAM addresses, so both sides
+     * see identical architectural An values (no bias) and identical memory. */
+    for (i = 0; i < 8; ++i) {
+      direct.d[i] = routed.d[i] = d[i];
+      direct.a[i] = routed.a[i] = a[i] + 0x00FF0000u;
+    }
+    direct.sr = routed.sr = (uint16_t)sr; direct.usp = routed.usp = usp + 0x00FF0000u;
+    direct.pc = routed.pc = 0x2000u;
     memset(frame_ids, 0, sizeof frame_ids); memset(frame_continuations, 0, sizeof frame_continuations); frame_depth = 0;
+    if (stop_mode) {
+      /* Routed-stop atomicity: every An points at an unmapped address, so the first routed access stops. The stop
+       * must leave D/A/SR/PC/memory exactly at the pre-instruction boundary (no partial auto-update, no result). */
+      static GenesisRuntime before;
+      for (i = 0; i < 8; ++i) routed.a[i] = 0x00500000u + i * 0x100u;
+      routed.usp = 0x00500800u;
+      memcpy(&before, &routed, sizeof routed);
+      { GenesisControlTransfer t = rf->fn(&routed);
+        ++total;
+        if (t.kind == GENESIS_CONTINUE_AT_PC) { printf("NOSTOP %s\n", code); ++mismatches; continue; }
+        if (memcmp(before.d, routed.d, sizeof routed.d) || memcmp(before.a, routed.a, sizeof routed.a) ||
+            before.sr != routed.sr || before.pc != routed.pc || before.usp != routed.usp ||
+            memcmp(before.work_ram, routed.work_ram, sizeof image)) { printf("PARTIAL %s\n", code); ++mismatches; } }
+      continue;
+    }
     (void)cf->fn(&direct);
     { GenesisControlTransfer t = rf->fn(&routed);
       if (t.kind != GENESIS_CONTINUE_AT_PC) { printf("STOP %s\n", code); ++mismatches; continue; } }
     { int bad = 0;
       for (i = 0; i < 8; ++i) {
         if (direct.d[i] != routed.d[i]) bad = 1;
-        /* an A register holds either an address (routed side offset by the work-RAM base) or loaded data */
-        if (direct.a[i] != routed.a[i] && direct.a[i] != routed.a[i] - 0x00FF0000u) bad = 1;
+        if (direct.a[i] != routed.a[i]) bad = 1;
       }
-      if (direct.sr != routed.sr || direct.pc != routed.pc || memcmp(direct.ram, routed.work_ram, sizeof image) != 0) bad = 1;
+      if (direct.sr != routed.sr || direct.pc != routed.pc || direct.usp != routed.usp ||
+          memcmp(direct.ram, routed.work_ram, sizeof image) != 0) bad = 1;
       ++total;
-      if (memcmp(direct.ram, image, sizeof image) != 0 || memcmp(direct.a, a, sizeof a) != 0) ++changed;
+      if (memcmp(direct.ram, image, sizeof image) != 0) ++changed;
+      else for (i = 0; i < 8; ++i) if (direct.a[i] != a[i] + 0x00FF0000u) ++changed;
       if (bad) { printf("DIFF %s\n", code); ++mismatches; } }
   }
   printf("total=%d changed=%d mismatches=%d\n", total, changed, mismatches);
@@ -216,15 +245,10 @@ def emit(mode_args, codes, out):
 codes = cases()
 with tempfile.TemporaryDirectory() as tmp:
     tmp = pathlib.Path(tmp)
-    direct_status = emit([], codes, tmp / "direct.c")
+    direct_status = emit(["--window"], codes, tmp / "direct.c")
     routed_status = emit(["--routed"], codes, tmp / "routed.c")
     bad = [c for c in codes if direct_status.get(c) != "ok" or routed_status.get(c) != "ok"]
     check(not bad, "encodings that do not emit on both routes: %s" % bad[:12])
-    emit_only = sorted(set(ARITH_EMIT_ONLY))
-    direct_only = emit([], emit_only, tmp / "arith_direct.c")
-    routed_only = emit(["--routed"], emit_only, tmp / "arith_routed.c")
-    check(all(direct_only.get(c) == "ok" and routed_only.get(c) == "ok" for c in emit_only),
-          "An-value arithmetic shapes must emit on both routes")
     # Long An-indexed destinations behind an auto-updating source: the destination address must be derived from
     # the source's updated local, never from the live (stale) register array.
     emit_status = emit(["--routed"], LONG_AN_INDEX, tmp / "long_index.c")
@@ -247,18 +271,31 @@ with tempfile.TemporaryDirectory() as tmp:
     exe = tmp / "differential"
     proc = subprocess.run([CC, "-o", str(exe), *objs, str(runtime_obj)], capture_output=True, text=True)
     check(proc.returncode == 0, "link failed: " + proc.stderr[:800])
-    lines = []
-    for code in codes:
-        for sr in (0x2700, 0x271F, 0x2710):
-            # small values keep every brief-format index register (word or long) inside the 64 KiB image
-            d = [0x10 + i * 4 + ((sr & 0x1F) & ~1) + ((0x9E3779B1 * (i + 1)) & 0x300) for i in range(8)]
-            a = [0x4000 + i * 0x400 for i in range(8)]
-            a[7] = 0x7000
-            lines.append("%s %X %s %s %X" % (code, sr, " ".join("%X" % x for x in d), " ".join("%X" % x for x in a),
-                                            0x7800))
-    (tmp / "cases.txt").write_text("\n".join(lines) + "\n")
-    run = subprocess.run([str(exe), str(tmp / "cases.txt")], capture_output=True, text=True)
-    print(run.stdout[-1500:])
+    def case_lines(selected):
+        lines = []
+        for code in selected:
+            for sr in (0x2700, 0x271F, 0x2710):
+                # small values keep every brief-format index register (word or long) inside the 64 KiB image
+                d = [0x10 + i * 4 + ((sr & 0x1F) & ~1) + ((0x9E3779B1 * (i + 1)) & 0x300) for i in range(8)]
+                a = [0x4000 + i * 0x400 for i in range(8)]
+                a[7] = 0x7000
+                lines.append("%s %X %s %s %X" % (code, sr, " ".join("%X" % x for x in d),
+                                                " ".join("%X" % x for x in a), 0x7800))
+        return "\n".join(lines) + "\n"
+
+    def run_mode(name, selected, mode):
+        path = tmp / (name + ".txt")
+        path.write_text(case_lines(selected))
+        run = subprocess.run([str(exe), str(path), *([mode] if mode else [])], capture_output=True, text=True)
+        print(name, run.stdout[-1500:])
+        return run
+
+    stops = sorted(AUTO_CODES)
+    run = run_mode("cases", codes, None)
     check(run.returncode == 0, "routed lowering diverges from the direct (Musashi-validated) lowering")
     check("changed=0 " not in run.stdout, "vacuous run: no vector changed any state")
-print("m68k routed lowering differential test: PASS (%d encodings)" % len(codes))
+    # Routed-stop atomicity: every auto-updating arithmetic shape, with the routed access forced to stop.
+    run = run_mode("stops", stops, "stop")
+    check(run.returncode == 0, "a routed-access stop left partial architectural state (or did not stop)")
+    check("total=0 " not in run.stdout and len(stops) > 100, "vacuous stop run")
+print("m68k routed lowering differential test: PASS (%d encodings, %d stop-checked)" % (len(codes), len(stops)))

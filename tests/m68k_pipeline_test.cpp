@@ -255,7 +255,7 @@ void addition_forms_decode_and_share_flags() {
 // local back to the live register file in exactly one statement placed
 // strictly after every routed access. A GENESIS_STOP from any routed access
 // returns before that commit, so the register always keeps its pre-instruction
-// value. The ADDA same-register aliasing shape declines cleanly with no body.
+// value. The ADDA same-register aliasing shape (SEG-021-T006) uses the updated local as its destination operand and skips the trailing commit.
 void add_family_auto_update_defers_single_address_commit() {
   using namespace segarecomp;
   GenesisM68kEmissionContext memory{};
@@ -18345,7 +18345,7 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
   // shift_rotate_register (immediate, not just data-register) also lowers.
   const bool c4_dim_shift_rotate_register_immediate = forge == "c4-dim-shift-rotate-register-immediate";
   const bool c4_dim_shift_rotate_memory = forge == "c4-dim-shift-rotate-memory";
-  const bool c4_dim_add_auto_update = forge == "c4-dim-add-auto-update";
+  const bool c4_dim_bit_test_auto_update = forge == "c4-dim-bit-test-auto-update";
   // SEG-007-T153: ADDQ (`add_quick`) is now C4-represented, reusing the
   // shared `add` emission body already present before this task. The
   // data-register-destination form (ADDQ.W #1,D0) and the
@@ -18471,15 +18471,15 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
       // subtracting from it before.
        ? std::vector<std::uint8_t>{0x42U, 0x58U, 0x4EU, 0x70U}
        : c4_prefix
-       // MOVEQ #1,D0; ADDA.W (A1)+,A1 (same-register-aliasing lowering-gap
-       // cut, per SEG-007-T157 / ADR-0019 Stage B -- CLR.B -(A0) is no
-       // longer a gap now that its own auto-update destination is fully
-       // lowered, so this fixture's unrelated block-cut/prefix-retention
-       // mechanics reuse the still-declined ADDA same-register-aliasing
-       // shape instead); BRA.S +2; padding; RESET.  The cut must retain
-       // MOVEQ, omit the aliasing ADDA and the terminal BRA, and make
+       // MOVEQ #1,D0; AND.W (A1)+,D1 (auto-updating logical-family lowering-gap
+       // cut: the logical family carries no deferred-commit contract, so it
+       // stays a requires_architecture_decision decline -- this fixture's
+       // block-cut/prefix-retention mechanics only need some still-declined
+       // shape; ADDA aliasing, CLR and SUB/CMP auto-update are all lowered now);
+       // BRA.S +2; padding; RESET.  The cut must retain
+       // MOVEQ, omit the declined AND and the terminal BRA, and make
        // RESET's block unreachable from the emitted program-control graph.
-        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0xD2U, 0xD9U, 0x60U, 0x02U,
+        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0xC2U, 0x59U, 0x60U, 0x02U,
                                      0x00U, 0x00U, 0x4EU, 0x70U}
         : c4_dim_compare
        // SEG-007-T146: CMP.B D1,D0; RESET.  `compare` is now C4-represented:
@@ -18517,19 +18517,17 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
        // M68kInstructionKind::shift_rotate and differing only in
        // destination_ea.mode.
         ? std::vector<std::uint8_t>{0xE0U, 0xD0U, 0x4EU, 0x70U}
-        : c4_dim_add_auto_update
-       // SEG-007-T145: ADDA.W (A1)+,A1 (source postincrement whose An
-       // destination is that same register); RESET.  Ordinary add-family
-       // auto-update operands are now lowered by the deferred-address-commit
-       // path, but this same-register aliasing shape has no differential
-       // evidence for its composed value and stays a clean lowering-gap
-       // decline -- still M68kC4GapClass::requires_architecture_decision.
-       // Formerly this comment also noted its distinctness from `write_clr`'s
+        : c4_dim_bit_test_auto_update
+       // SEG-021-T006: BTST.B D1,(A1)+ (auto-updating bit-test operand, which
+       // carries no deferred-commit contract and stays a clean
+       // M68kC4GapClass::requires_architecture_decision decline); RESET.  This
+       // fixture formerly used the ADDA same-register aliasing shape, now
+       // lowered.  Formerly this comment also noted its distinctness from `write_clr`'s
        // own CLR_AUTO_UPDATE literal; SEG-007-T157 / ADR-0019 Stage B fully
        // lowers CLR's auto-update destination, so that literal is no longer
        // produced at all (see the "predecrement" fixture above, now a
        // positive lowering proof instead of a gap proof).
-        ? std::vector<std::uint8_t>{0xD2U, 0xD9U, 0x4EU, 0x70U}
+        ? std::vector<std::uint8_t>{0x03U, 0x19U, 0x4EU, 0x70U}
         : c4_dim_add_quick
        // SEG-007-T153: ADDQ.W #1,D0 (0x5240: quick immediate #1, destination
        // Dn direct); RESET.  Exercises the shared `add` emission body's
@@ -18604,28 +18602,28 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
         // A second C4 cut is statically retained beyond the first cut's
         // terminal branch.  It has no emitted caller and therefore must not
         // leave an unused static stop function in strict-C11 output.  Uses
-        // the same still-declined ADDA same-register-aliasing cut as
+        // the same still-declined logical-family auto-update cut as
         // c4_prefix above (see its comment).
-        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0xD2U, 0xD9U, 0x60U, 0x02U,
-                                     0x00U, 0x00U, 0xD2U, 0xD9U, 0x4EU, 0x70U}
+        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0xC2U, 0x59U, 0x60U, 0x02U,
+                                     0x00U, 0x00U, 0xC2U, 0x59U, 0x4EU, 0x70U}
         : c4_multi_blocks
        // BNE.S selects either of two separately reachable ADDA-same-register-
        // aliasing cut blocks (see c4_prefix's comment above for why this
        // fixture no longer uses CLR.B -(A0)). Both cut sinks are terminal and
        // neither becomes a dispatch arm.
-       ? std::vector<std::uint8_t>{0x66U, 0x04U, 0xD2U, 0xD9U, 0x60U, 0x02U,
-                                    0xD2U, 0xD9U, 0x4EU, 0x70U}
+       ? std::vector<std::uint8_t>{0x66U, 0x04U, 0xC2U, 0x59U, 0x60U, 0x02U,
+                                    0xC2U, 0x59U, 0x4EU, 0x70U}
        : c4_same_block
        // Two candidates in one block: only the first can own the local cut.
-       ? std::vector<std::uint8_t>{0xD2U, 0xD9U, 0xD2U, 0xD9U, 0x60U, 0x02U,
+       ? std::vector<std::uint8_t>{0xC2U, 0x59U, 0xC2U, 0x59U, 0x60U, 0x02U,
                                     0x00U, 0x00U, 0x4EU, 0x70U}
        : c4_backward_block
        // BRA.S +8 (0xB00 -> 0xB0A); dead filler; MOVEQ #1,D0 then the
-       // ADDA same-register-aliasing cut at 0xB04/0xB06 -- reached only via
+       // still-declined auto-update (AND.W (A1)+,D1) cut at 0xB04/0xB06 -- reached only via
        // 0xB0A's own BRA.S -8 backward edge, discovered strictly after the
        // higher-address block.
        ? std::vector<std::uint8_t>{0x60U, 0x08U, 0x00U, 0x00U, 0x70U, 0x01U,
-                                    0xD2U, 0xD9U, 0x4EU, 0x70U, 0x60U, 0xF8U}
+                                    0xC2U, 0x59U, 0x4EU, 0x70U, 0x60U, 0xF8U}
       : routed_write
       ? std::vector<std::uint8_t>{0x42U, 0x90U, 0x60U, 0x06U, 0x00U, 0x00U,
                                   0x00U, 0x00U, 0x00U, 0x00U, 0x4EU, 0x70U}
@@ -18795,7 +18793,7 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
               !c4_multi_blocks && !c4_same_block && !c4_backward_block && !c4_dim_compare &&
               !c4_dim_compare_immediate && !c4_dim_compare_immediate_absolute && !c4_dim_shift_rotate_register &&
               !c4_dim_shift_rotate_register_immediate && !c4_dim_shift_rotate_memory &&
-              !c4_dim_add_auto_update && !c4_dim_add_quick && !c4_dim_add_quick_address &&
+              !c4_dim_bit_test_auto_update && !c4_dim_add_quick && !c4_dim_add_quick_address &&
               !c4_dim_add_quick_indirect && !c4_dim_add_quick_disp && !c4_dim_add_quick_postinc &&
               !c4_dim_add_quick_predec && !c4_dim_add_quick_absolute &&
               !c4_dim_sign_extend_word && !c4_dim_sign_extend_long &&
@@ -19670,6 +19668,69 @@ int emit_general_startup_runtime_c4_logical_source(std::string_view forge = {}) 
   return 0;
 }
 
+// SEG-021-T006: C4 admission regression. Every legal auto-updating ADDA/SUB/SUBA/SUBQ/CMP/CMPA/CMPI shape must
+// pass the real C4 preflight with ZERO gap rows (never requires_architecture_decision) and emit a routed body with
+// no lowering-gap stop and one deferred live-register commit. This exercises the classifier the routed-emitter
+// metric (`route_runtime_routed_admitted`) does not.
+int c4_arithmetic_auto_update_admission() {
+  using namespace segarecomp;
+  struct Case { const char *name; std::vector<std::uint8_t> code; const char *commit; bool commit_expected; };
+  const std::vector<Case> cases{
+      {"ADDA.W (A1)+,A1", {0xD2U, 0xD9U}, "runtime->a[1] = m68k_add_auto_ea;", false},
+      {"ADDA.L -(A1),A1", {0xD3U, 0xE1U}, "runtime->a[1] = m68k_add_auto_ea;", false},
+      {"SUB.W (A1)+,D2", {0x94U, 0x59U}, "runtime->a[1] = m68k_sub_auto_ea;", true},
+      {"SUB.B -(A0),D2", {0x94U, 0x20U}, "runtime->a[0] = m68k_sub_auto_ea;", true},
+      {"SUB.L D2,(A1)+", {0x95U, 0x99U}, "runtime->a[1] = m68k_sub_auto_ea;", true},
+      {"SUBQ.W #1,-(A0)", {0x53U, 0x60U}, "runtime->a[0] = m68k_sub_auto_ea;", true},
+      {"SUBA.W (A1)+,A2", {0x94U, 0xD9U}, "runtime->a[1] = m68k_sub_auto_ea;", true},
+      {"SUBA.L -(A1),A1", {0x93U, 0xE1U}, "runtime->a[1] = m68k_sub_auto_ea;", false},
+      {"CMP.W (A1)+,D2", {0xB4U, 0x59U}, "runtime->a[1] = m68k_cmp_auto_ea;", true},
+      {"CMP.L -(A0),D2", {0xB4U, 0xA0U}, "runtime->a[0] = m68k_cmp_auto_ea;", true},
+      {"CMPA.W (A1)+,A1", {0xB2U, 0xD9U}, "runtime->a[1] = m68k_cmp_auto_ea;", true},
+      {"CMPA.L -(A1),A2", {0xB5U, 0xE1U}, "runtime->a[1] = m68k_cmp_auto_ea;", true},
+      {"CMPI.W #1,(A0)+", {0x0CU, 0x58U, 0x00U, 0x01U}, "runtime->a[0] = m68k_cmp_auto_ea;", true},
+      {"CMPI.B #1,-(A7)", {0x0CU, 0x27U, 0x00U, 0x01U}, "runtime->a[7] = m68k_cmp_auto_ea;", true},
+  };
+  int failures = 0;
+  for (const auto &test_case : cases) {
+    FrontendProgram program{};
+    program.profile = M68kFrontendProfile::general_startup;
+    auto image = test_case.code;
+    image.push_back(0x4EU);
+    image.push_back(0x70U);  // RESET
+    program.image = {"synthetic-c4-arith-auto", image, 0U};
+    program.image.byte_length = program.image.bytes.size();
+    program.mapping_claims = {{"synthetic-c4-arith-auto", {{}, 0xB00U},
+                                {{}, static_cast<std::uint32_t>(0xB00U + program.image.bytes.size())},
+                                {0U}, {program.image.bytes.size()}}};
+    program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+    const auto result = analyze_m68k_frontend(program);
+    const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+    bool ok = partial != nullptr;
+    if (ok) {
+      const auto preflight = preflight_m68k_general_startup_c4(*partial);
+      ok = preflight.valid && preflight.rows.empty();
+      const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+      ok = ok && emitted.find("translation rejected") == std::string::npos &&
+           emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_") == std::string::npos &&
+           emitted.find("genesis_route_access") != std::string::npos &&
+           (emitted.find(test_case.commit) != std::string::npos) == test_case.commit_expected;
+    }
+    if (!ok) {
+      std::cerr << "C4 arithmetic auto-update admission failed: " << test_case.name << "\n";
+      if (partial != nullptr) {
+        const auto pf = preflight_m68k_general_startup_c4(*partial);
+        std::cerr << " preflight valid=" << pf.valid << " rows=" << pf.rows.size();
+        const auto em = emit_m68k_general_startup_runtime_c(*partial);
+        std::cerr << " rejected=" << (em.find("translation rejected") != std::string::npos)
+                  << " dim=" << (em.find("GENESIS_C4_LOWERING_DIMENSIONS_") != std::string::npos) << "\n" << em.substr(0, 1500) << "\n";
+      }
+      ++failures;
+    }
+  }
+  return failures == 0 ? 0 : 1;
+}
+
 // SEG-007-T170: the C4 subtract-family missing-dispatcher batch (SUB + SUBI).
 // Mirrors the logical-family harness above: a register-only reached shape
 // emits with no retained fact; a foldable-memory RMW destination with its
@@ -19735,18 +19796,14 @@ int emit_general_startup_runtime_c4_subtract_source(std::string_view forge = {})
     return 0;
   }
   if (predecrement) {
-    // Plain SUB with an auto-updating operand remains a clean
-    // requires_architecture_decision decline (out of SEG-007-T202's bounded
-    // scope): no C4 body, no unsound predecrement/postincrement write.
+    // SEG-021-T006: plain SUB with an auto-updating operand is now fully lowered by the arithmetic-family
+    // deferred-address-commit path -- zero preflight rows, routed read + write, one deferred commit.
     const auto preflight = preflight_m68k_general_startup_c4(*partial);
-    if (!preflight.valid || preflight.rows.size() != 1U ||
-        preflight.rows.front().ir_kind != M68kIrKind::subtract ||
-        preflight.rows.front().auto_update != M68kC4AutoUpdateClass::predecrement ||
-        preflight.rows.front().gap != M68kC4GapClass::requires_architecture_decision)
-      return 1;
+    if (!preflight.valid || !preflight.rows.empty()) return 1;
     const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
-    if (emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_SUBTRACT_AUTO_UPDATE") == std::string::npos ||
-        emitted.find("sub_result =") != std::string::npos)
+    if (emitted.find("sub_result =") == std::string::npos ||
+        emitted.find("genesis_c4_lowering_stop_") != std::string::npos ||
+        emitted.find("runtime->a[0] = m68k_sub_auto_ea;") == std::string::npos)
       return 1;
     std::cout << emitted;
     return 0;
@@ -20204,17 +20261,12 @@ int emit_general_startup_runtime_c4_all_gaps_source() {
   using namespace segarecomp;
   FrontendProgram program{};
   program.profile = M68kFrontendProfile::general_startup;
-  // ANDI.B #0xFF,-(A0); SUBA.W -(A0),A1; RESET. SEG-007-T192: the second
-  // instruction was previously an auto-updating MOVEA (a
-  // requires_architecture_decision gap of its own), but write_movea's
-  // auto-updating source is now lowered by its own deferred-address-commit
-  // path (see write_movea's block-emission case), so it no longer produces a
-  // gap row here. SUBA keeps this fixture's original purpose -- proving two
-  // independently retained requires_architecture_decision auto-update gaps
-  // from different families never collapse -- since SUBA's own auto-updating
-  // source remains a separately scoped, unimplemented gap.
+  // ANDI.B #0xFF,-(A0); MULS.W -(A0),D1; RESET. SEG-021-T006: SUBA (like MOVEA before it) now lowers its
+  // auto-updating source, so the second still-declined family is MULS, whose auto-updating source has no
+  // deferred-commit contract (owned by SEG-021-T010). The fixture keeps its original purpose: two
+  // independently retained requires_architecture_decision auto-update gaps from different families never collapse.
   program.image = {"synthetic-c4-all-gaps", {0x02U, 0x60U, 0x00U, 0xFFU,
-                                               0x92U, 0xE0U, 0x4EU, 0x70U}, 0U};
+                                               0xC3U, 0xE0U, 0x4EU, 0x70U}, 0U};
   program.image.byte_length = program.image.bytes.size();
   program.mapping_claims = {{"synthetic-c4-all-gaps", {{}, 0xB00U}, {{}, 0xB08U}, {0U}, {8U}}};
   program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
@@ -20235,15 +20287,15 @@ int emit_general_startup_runtime_c4_all_gaps_source() {
       return 1;
   }
   const auto &andi = first.rows[0];
-  const auto &suba = first.rows[1];
+  const auto &muls = first.rows[1];
   if (andi.family != "andi" || andi.ir_kind != M68kIrKind::logical_and_immediate ||
       andi.operand_role != M68kC4OperandRole::destination ||
       andi.auto_update != M68kC4AutoUpdateClass::predecrement ||
       andi.gap != M68kC4GapClass::requires_architecture_decision ||
-      suba.family != "suba" || suba.ir_kind != M68kIrKind::subtract_address ||
-      suba.operand_role != M68kC4OperandRole::source ||
-      suba.auto_update != M68kC4AutoUpdateClass::predecrement ||
-      suba.gap != M68kC4GapClass::requires_architecture_decision)
+      muls.ir_kind != M68kIrKind::multiply_signed_word ||
+      muls.operand_role != M68kC4OperandRole::source ||
+      muls.auto_update != M68kC4AutoUpdateClass::predecrement ||
+      muls.gap != M68kC4GapClass::requires_architecture_decision)
     return 1;
   std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
@@ -26529,8 +26581,8 @@ int main(int argc, char **argv) {
     return emit_general_startup_runtime_c4_frontier_source("c4-dim-shift-rotate-register-immediate");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-shift-rotate-memory")
     return emit_general_startup_runtime_c4_frontier_source("c4-dim-shift-rotate-memory");
-  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-add-auto-update")
-    return emit_general_startup_runtime_c4_frontier_source("c4-dim-add-auto-update");
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-bit-test-auto-update")
+    return emit_general_startup_runtime_c4_frontier_source("c4-dim-bit-test-auto-update");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-add-quick")
     return emit_general_startup_runtime_c4_frontier_source("c4-dim-add-quick");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-add-quick-address")
@@ -26776,12 +26828,14 @@ int main(int argc, char **argv) {
   // Register-only reached shape emits; a fact-cleared foldable-memory RMW
   // destination fails closed; an auto-updating operand is a clean decline
   // with no unsound predecrement/postincrement write.
+  expect(c4_arithmetic_auto_update_admission() == 0,
+         "C4 admission: every auto-updating ADDA/SUB/SUBA/SUBQ/CMP/CMPA/CMPI shape has zero gap rows (SEG-021-T006)");
   expect(emit_general_startup_runtime_c4_subtract_source() == 0,
          "C4 subtract family: register-only reached shape is represented and emits");
   expect(emit_general_startup_runtime_c4_subtract_source("missing-fact") == 0,
          "C4 subtract family: foldable-memory RMW destination without a retained fact fails closed");
   expect(emit_general_startup_runtime_c4_subtract_source("predecrement") == 0,
-         "C4 subtract family: auto-updating SUB operand is a clean architecture-decision decline");
+         "C4 subtract family: auto-updating SUB operand is lowered by the deferred-commit path (SEG-021-T006)");
   expect(emit_general_startup_runtime_c4_subtract_source("subi-predecrement") == 0,
          "C4 subtract family: auto-updating SUBI predecrement destination is now lowered by the deferred-commit path");
   expect(emit_general_startup_runtime_c4_subtract_source("subi-postincrement") == 0,

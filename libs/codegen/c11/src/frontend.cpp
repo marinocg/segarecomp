@@ -1892,8 +1892,8 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   // classify_m68k_c4_gap_shapes below exactly as the add/compare families do.
   // An auto-updating (`(An)+`/`-(An)`) operand is declined cleanly via
   // M68kC4GapClass::requires_architecture_decision -- the logical family
-  // carries no deferred-address-commit contract, matching the compare family
-  // and this family's own already-represented sibling ANDI.
+  // carries no deferred-address-commit contract, matching its already-
+  // represented sibling ANDI (the compare/SUB families gained theirs in SEG-021-T006).
   case M68kIrKind::logical_and:
   case M68kIrKind::logical_or:
   case M68kIrKind::logical_or_immediate:
@@ -2063,33 +2063,27 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
       check_add_ea(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
     }
   } else if (operation.kind == M68kIrKind::add_address) {
-    // SEG-007-T145: ADDA with an auto-updating source is lowered by the
-    // add-family deferred-address-commit path, except the same-register
-    // aliasing shape `ADDA <auto>(An),An` (destination An == source An), which
-    // has no differential evidence for its composed value and stays a clean
-    // lowering-gap decline (the same requires_architecture_decision shape).
-    if (const auto update = m68k_c4_auto_update_class(operation.source_ea.mode);
-        update != M68kC4AutoUpdateClass::none) {
-      if (static_cast<unsigned>(operation.source_ea.reg) == static_cast<unsigned>(operation.destination_ea.reg))
-        add(M68kC4OperandRole::source, operation.source_ea.mode, update,
-            M68kC4GapClass::requires_architecture_decision, "deferred address commit");
-    } else {
+    // SEG-007-T145 / SEG-021-T006: ADDA with an auto-updating source, including the same-register
+    // aliasing shape `ADDA <auto>(An),An` (Musashi-pinned order, lowered by the add-family deferred-
+    // address-commit path), is fully lowered and produces no gap row.
+    if (m68k_c4_auto_update_class(operation.source_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.source_ea, M68kC4OperandRole::source, M68kStaticMemoryFactRole::source_read);
-    }
-  } else if (operation.kind == M68kIrKind::subtract_address ||
-             operation.kind == M68kIrKind::compare_address ||
-             operation.kind == M68kIrKind::compare ||
-             operation.kind == M68kIrKind::multiply_signed_word ||
+  } else if (operation.kind == M68kIrKind::subtract_address || operation.kind == M68kIrKind::compare_address ||
+             operation.kind == M68kIrKind::compare) {
+    // SEG-021-T006: SUBA/CMPA/CMP with an auto-updating source are lowered by the arithmetic-family
+    // deferred-address-commit helper in emit_m68k_operation_c (routed: one An snapshot, commit after
+    // every routed access, PC last); they are no longer requires_architecture_decision gaps. A non-
+    // auto-update foldable source still needs its retained fact.
+    if (m68k_c4_auto_update_class(operation.source_ea.mode) == M68kC4AutoUpdateClass::none)
+      check_fact(operation.source_ea, M68kC4OperandRole::source, M68kStaticMemoryFactRole::source_read);
+  } else if (operation.kind == M68kIrKind::multiply_signed_word ||
              operation.kind == M68kIrKind::multiply_unsigned_word ||
              operation.kind == M68kIrKind::divide_signed_word ||
              operation.kind == M68kIrKind::divide_unsigned_word) {
-    // SEG-007-T146: plain `CMP <ea>,Dn` shares SUBA/CMPA's source-operand gap
-    // shape exactly -- its data-register destination never needs a fact. An
-    // auto-updating source is declined cleanly to the established frontier
-    // (the compare family carries no deferred-address-commit contract).
-    // SEG-007-T220: MULS.W <ea>,Dn shares this exact same read-only-source,
-    // fixed-Dn-destination shape (the compare family carries no
-    // deferred-address-commit contract either, and MULS's destination is
+    // SEG-007-T220: MULS.W <ea>,Dn (and MULU/DIVS/DIVU) share a read-only-source,
+    // fixed-Dn-destination shape. An auto-updating source is declined cleanly to the
+    // established frontier (these kinds carry no deferred-address-commit contract;
+    // CMP/SUBA/CMPA gained theirs in SEG-021-T006). Their destination is
     // architecturally always Dn, never needing a fact).
     if (const auto update = m68k_c4_auto_update_class(operation.source_ea.mode); update != M68kC4AutoUpdateClass::none) {
       add(M68kC4OperandRole::source, operation.source_ea.mode, update, M68kC4GapClass::requires_architecture_decision,
@@ -2098,36 +2092,16 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
       check_fact(operation.source_ea, M68kC4OperandRole::source, M68kStaticMemoryFactRole::source_read);
     }
   } else if (operation.kind == M68kIrKind::subtract) {
-    // SEG-007-T170: SUB (`<ea>,Dn` or `Dn,<ea>`) shares ADD's two-operand
-    // shape, but this family's shared lowering body (emit_m68k_operation_c,
-    // the same case block as the already-represented SUBA/SUBQ siblings)
-    // still uses the pre-add-family-fix naive read-then-fixed-address-write
-    // technique for an auto-updating operand, not the add-family
-    // deferred-address-commit path. Extending deferred-commit into that
-    // shared multi-kind body is a larger cross-cutting change than the
-    // bounded task that resolved this row (T170) took on, so an
-    // auto-updating operand is instead declined cleanly via
-    // requires_architecture_decision, mirroring this family's own
-    // already-represented sibling SUBA (subtract_address, directly above)
-    // and the compare/logical families' identical declined-auto-update
-    // policy. `subtract_immediate` (SUBI) is classified separately below
-    // (SEG-007-T202): its own destination-only auto-update shape is now
-    // lowered through the same deferred-commit path, no longer declined here.
-    if (const auto update = m68k_c4_auto_update_class(operation.source_ea.mode); update != M68kC4AutoUpdateClass::none) {
-      add(M68kC4OperandRole::source, operation.source_ea.mode, update, M68kC4GapClass::requires_architecture_decision,
-          "deferred address commit");
-    } else {
+    // SEG-007-T170 / SEG-021-T006: SUB (`<ea>,Dn` or `Dn,<ea>`) shares ADD's two-operand shape; an
+    // auto-updating operand is lowered by the arithmetic-family deferred-address-commit helper (routed
+    // C4 context), so it produces no gap row. A non-auto foldable EA still needs its retained facts.
+    if (m68k_c4_auto_update_class(operation.source_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.source_ea, M68kC4OperandRole::source, M68kStaticMemoryFactRole::source_read);
-    }
     if (operation.destination_ea.mode != M68kEaMode::data_register &&
-        operation.destination_ea.mode != M68kEaMode::address_register) {
-      if (const auto update = m68k_c4_auto_update_class(operation.destination_ea.mode); update != M68kC4AutoUpdateClass::none) {
-        add(M68kC4OperandRole::destination, operation.destination_ea.mode, update,
-            M68kC4GapClass::requires_architecture_decision, "deferred address commit");
-      } else {
-        check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_read);
-        check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
-      }
+        operation.destination_ea.mode != M68kEaMode::address_register &&
+        m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none) {
+      check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_read);
+      check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
     }
   } else if (operation.kind == M68kIrKind::subtract_immediate) {
     // SEG-007-T202: an auto-updating ((An)+/-(An)) SUBI destination is now
@@ -2146,15 +2120,11 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
     }
   } else if (operation.kind == M68kIrKind::compare_immediate) {
-    // SEG-007-T146: `CMPI #imm,<ea>` has an immediate source; its destination
-    // is read (never written) to form the CCR-only result, mirroring BTST's
-    // destination-read gap shape. An auto-updating destination is declined.
-    if (const auto update = m68k_c4_auto_update_class(operation.destination_ea.mode); update != M68kC4AutoUpdateClass::none) {
-      add(M68kC4OperandRole::destination, operation.destination_ea.mode, update,
-          M68kC4GapClass::requires_architecture_decision, "deferred address commit");
-    } else {
+    // SEG-007-T146 / SEG-021-T006: `CMPI #imm,<ea>` has an immediate source; its destination is read
+    // (never written) to form the CCR-only result. An auto-updating destination is lowered by the
+    // arithmetic-family deferred-address-commit helper and produces no gap row.
+    if (m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_read);
-    }
   } else if (operation.kind == M68kIrKind::bit_test) {
     if (const auto update = m68k_c4_auto_update_class(operation.destination_ea.mode); update != M68kC4AutoUpdateClass::none) {
       add(M68kC4OperandRole::destination, operation.destination_ea.mode, update,
@@ -2315,9 +2285,10 @@ std::optional<std::string_view> c4_lowering_dimension_literal(M68kIrKind kind, M
     // SEG-007-T145: `add` auto-update operands are now lowered by the
     // deferred-address-commit path, so `classify_m68k_c4_gap_shapes` no longer
     // produces this (add, requires_architecture_decision) pair; the literal is
-    // retained for the stable GenesisC4LoweringDimensions enumeration only. The
-    // sole remaining add-family lowering-gap shape is ADDA same-register
-    // aliasing, which maps to ADDA_AUTO_UPDATE below.
+    // retained for the stable GenesisC4LoweringDimensions enumeration only.
+    // SEG-021-T006: the ADDA same-register aliasing shape is lowered too, so the
+    // ADD/ADDA/SUB/SUBA/CMP/CMPA/CMPI auto-update literals below are likewise
+    // retained for the stable enumeration only.
     case M68kIrKind::add: return "GENESIS_C4_LOWERING_DIMENSIONS_ADD_AUTO_UPDATE";
     case M68kIrKind::write_clr: return "GENESIS_C4_LOWERING_DIMENSIONS_CLR_AUTO_UPDATE";
     case M68kIrKind::write_movea: return "GENESIS_C4_LOWERING_DIMENSIONS_MOVEA_AUTO_UPDATE";
@@ -3004,11 +2975,11 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
       // SEG-007-T070: `move` lowers its own predecrement/postincrement operand.
       // SEG-007-T145: the `add`/`adda` family likewise now lowers an
       // auto-updating operand itself (the add-family deferred-address-commit
-      // path plus its own ADDA same-register aliasing decline), so this gate
+      // path; SEG-021-T006 also lowers the ADDA same-register alias), so this gate
       // defers all representability/aliasing validation for those kinds to
       // that path, exactly like `move`. The rejection stays unconditional for
-      // `tst`/`clr`/`andi`/`suba`/`cmpa`/`btst`, whose own auto-update gap is
-      // a separately scoped follow-on.
+      // `andi`/`btst`, whose own auto-update gap is a separately scoped
+      // follow-on (SEG-021-T006 lowers SUBA/CMP/CMPA/CMPI's).
       // SEG-007-T153: `addq` joins `move`/`add`/`adda` here -- ADDQ lowers its
       // own auto-updating destination through the add-family
       // deferred-address-commit path, so this gate defers representability
@@ -3017,7 +2988,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
       // auto-updating CLR destination is now lowered by its own
       // deferred-address-register-commit path (see write_clr's block-
       // emission case below), so this unconditional pre-rejection no longer
-      // applies to it either. `tst`/`andi`/`suba`/`cmpa`/`btst` remain
+      // applies to it either. `andi`/`btst` remain
       // unconditionally rejected here; their own auto-update gap stays a
       // separately scoped follow-on.
       // SEG-007-T192: `movea` joins the same list -- an auto-updating MOVEA
@@ -3033,6 +3004,9 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
           kind != M68kInstructionKind::clr && kind != M68kInstructionKind::movea &&
           // SEG-021-T005: `tst` and `not` lower their own auto-updating operand (deferred commit).
           kind != M68kInstructionKind::tst && kind != M68kInstructionKind::not_operand &&
+          // SEG-021-T006: SUBA, CMP, CMPA and CMPI lower their own auto-updating operand (deferred commit).
+          kind != M68kInstructionKind::suba && kind != M68kInstructionKind::cmp &&
+          kind != M68kInstructionKind::cmpa && kind != M68kInstructionKind::cmpi &&
           (ea.mode == M68kEaMode::address_predec || ea.mode == M68kEaMode::address_postinc))
         return false;
       return !m68k_is_statically_foldable_control_ea(ea) || facts.contains({address, role});

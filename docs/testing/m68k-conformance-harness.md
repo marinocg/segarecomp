@@ -103,6 +103,7 @@ and the ADDA/SUBA `(An)+`/`-(An)` same-register alias). Extension conventions ar
 two (byte/word) or three encodings per size. Legality is encoded in `libs/cpu/m68k` from the Motorola manual
 (`m68k_ea_add_sub_cmp_source`, `m68k_ea_data_alterable_with_index`) and never reads the T001 dataset. All 787 rows match the
 pinned Musashi. `m68k_routed_lowering_test.py` additionally compares the routed lowering to the direct one for every
-legal shape whose operands survive the routed work-RAM address bias; shapes that consume an An *value* as data (An as an
-ADD/SUB/CMP/ADDA/SUBA source, all of CMPA) are emit-checked on both routes only. The immutable-ROM AOT predicate now admits
+legal shape (the direct lowering is emitted with the emitter's `--window` option so its linear window sits at the
+work-RAM addresses and both sides see identical An values, including An sources and CMPA), and forces a routed-access stop for
+every auto-updating shape to prove no partial architectural mutation. The immutable-ROM AOT predicate now admits
 the whole family (the emitter still fails closed on a shape it cannot lower).

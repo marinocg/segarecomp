@@ -1256,7 +1256,7 @@ def main():
   c4_dim_outputs = {}
   for flag, forge in (
       ("c4-dim-shift-rotate-memory", "shift_rotate_memory"),
-      ("c4-dim-add-auto-update", "add_auto_update")):
+      ("c4-dim-bit-test-auto-update", "bit_test_auto_update")):
     run_first = subprocess.run([executable, f"--emit-general-startup-runtime-{flag}"], text=True, capture_output=True)
     run_second = subprocess.run([executable, f"--emit-general-startup-runtime-{flag}"], text=True, capture_output=True)
     assert run_first.returncode == run_second.returncode == 0, forge
@@ -1713,14 +1713,14 @@ def main():
   # the deferred-address-commit path; the sole remaining add-family lowering
   # gap is the ADDA same-register aliasing decline, which serialises to the
   # distinct ADDA_AUTO_UPDATE literal.
-  assert c4_dim_shapes["add_auto_update"] == "ADDA_AUTO_UPDATE"
+  assert c4_dim_shapes["bit_test_auto_update"] == "BIT_TEST_AUTO_UPDATE"
   # SEG-007-T157 / ADR-0019 Stage B: write_clr's own auto-update shape
   # (formerly the distinct CLR_AUTO_UPDATE lowering-gap literal, proven by the
   # predecrement fixture above) is no longer a gap at all -- it is fully
   # lowered -- so it can no longer collide with the add family's own
   # ADDA_AUTO_UPDATE literal; this is inherently true rather than needing a
   # live re-check.
-  assert c4_dim_shapes["add_auto_update"] != "CLR_AUTO_UPDATE"
+  assert c4_dim_shapes["bit_test_auto_update"] != "CLR_AUTO_UPDATE"
   # SEG-007-T067: C4's new movem_transfer routed lowering. Deterministic
   # two-run byte-identical output, no rejection, and every transfer routed
   # through genesis_route_access -- never a private RAM-array index (the
@@ -2020,7 +2020,7 @@ def main():
                           ("subtract-subi-dest-fold", c4_dim_outputs["subtract_subi_dest_fold"]),
                           ("subtract-address-source-fold", c4_dim_outputs["subtract_address_source_fold"]),
                           ("dim-shift-rotate-memory", c4_dim_outputs["shift_rotate_memory"]),
-                          ("dim-add-auto-update", c4_dim_outputs["add_auto_update"]),
+                          ("dim-bit-test-auto-update", c4_dim_outputs["bit_test_auto_update"]),
                           ("dim-logical-register", c4_dim_outputs["logical_register"]),
                           ("dim-logical-predecrement", c4_dim_outputs["logical_predecrement"]),
                           ("dim-logical-ori-predecrement", c4_dim_outputs["logical_ori_predecrement"]),
