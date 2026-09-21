@@ -653,6 +653,9 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
       operation.kind == M68kIrKind::logical_and || operation.kind == M68kIrKind::logical_and_immediate ||
       operation.kind == M68kIrKind::logical_or || operation.kind == M68kIrKind::logical_or_immediate ||
       operation.kind == M68kIrKind::exclusive_or || operation.kind == M68kIrKind::exclusive_or_immediate ||
+      // SEG-021-T008: BTST/BCHG/BCLR/BSET: Dn destination mask (never BTST) plus decoded EA auto-updates.
+      operation.kind == M68kIrKind::bit_test || operation.kind == M68kIrKind::bit_change ||
+      operation.kind == M68kIrKind::bit_clear || operation.kind == M68kIrKind::bit_set ||
       operation.kind == M68kIrKind::write_move ||
       // SEG-021-T005: MOVEA (An write via `address_register_write`), CLR/NOT (Dn
       // destination mask) and TST (no register write) have exhaustively

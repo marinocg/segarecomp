@@ -9,6 +9,7 @@
 #include "segarecomp/device/sega/genesis/controller_io.hpp"
 #include "segarecomp/machine/genesis/address_types.hpp"
 #include "segarecomp/cpu/m68k/c4.hpp"
+#include "segarecomp/cpu/m68k/timing.hpp"
 #include "segarecomp/recompiler/frontend.hpp"
 
 #include <array>
@@ -720,44 +721,21 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // operation-local deferred address-register commit (c4-add-family-auto-update-commit-contract.md).
     // The emitter fails closed on any shape it cannot lower and operand-mode legality is owned by decode.
     return true;
+  case M68kIrKind::bit_test:
   case M68kIrKind::bit_change:
   case M68kIrKind::bit_clear:
   case M68kIrKind::bit_set:
-    if (storage_free(operation.source_ea) && storage_free(operation.destination_ea)) return true;
-    // SEG-007-T246 (seventh iteration, same bounded family, same
-    // architectural seam): BCHG/BCLR/BSET admit a plain `(An)` destination
-    // (mode `address_indirect`; never `(An)+`/`-(An)`), the exact same
-    // shape BTST's own carve-out below already proves safe for its
-    // read-only destination, extended here to the write side. Unlike
-    // `(An)+`/`-(An)`, plain `(An)` never mutates any address register in
-    // either `m68k_emit_ea_read` or `m68k_emit_ea_write`'s shared
-    // `m68k_emit_runtime_ea_address` helper (`case M68kEaMode::address_
-    // indirect:` there emits no prelude/postlude at all) -- so the ordinary
-    // routed read followed by the ordinary routed write needs no deferred-
-    // commit machinery of any kind: there is no register state a failed
-    // access could ever leave partially mutated. `(An)+`/`-(An)` stay fully
-    // excluded: that same shared helper DOES mutate the live address
-    // register directly in its predecrement prelude / postincrement
-    // postlude (never a deferred local), so a routed-access failure there
-    // could leave a real partial mutation -- an independent proof (or a
-    // deferred-commit extension) this task does not attempt.
-    return storage_free(operation.source_ea) && operation.destination_ea.mode == M68kEaMode::address_indirect;
-  case M68kIrKind::bit_test:
-    if (storage_free(operation.source_ea) && storage_free(operation.destination_ea)) return true;
-    // SEG-007-T245 (third iteration, same bounded family, same architectural
-    // seam): BTST is read-only by construction -- it never writes its
-    // destination_ea (emit_m68k_operation_c's shared bit_test/bit_change/
-    // bit_clear/bit_set case only ever writes back for the three mutating
-    // kinds), so a plain `(An)` destination (no auto-increment/-decrement,
-    // hence no address-register mutation of any kind, deferred or
-    // otherwise) needs strictly less machinery than write_move's own
-    // read-direction carve-out above: one ordinary routed read through the
-    // same shared, already-proven `m68k_emit_ea_read`. SEG-007-T246
-    // extends the same plain-`(An)`-only reasoning to the write side for
-    // bit_change/bit_clear/bit_set above (their own destination write and
-    // any auto-updating destination beyond plain `(An)` remain unproven for
-    // this fact-free contract).
-    return storage_free(operation.source_ea) && operation.destination_ea.mode == M68kEaMode::address_indirect;
+    // SEG-021-T008: BTST/BCHG/BCLR/BSET family-level admission (supersedes the per-EA-mode carve-outs of
+    // SEG-007-T245/T246). Every legal destination mode lowers through the shared C4 routed read/write
+    // primitives with no CFG edge, call frame, return target or static memory fact; a failed routed access
+    // returns before any architectural write; auto-updating destinations use the operation-local deferred
+    // address-register commit (c4-add-family-auto-update-commit-contract.md); BTST never writes back. The
+    // emitter fails closed on any shape it cannot lower and operand-mode legality is owned by decode.
+    // The one shared retirement-timing seam must also account for the operation: a candidate with no
+    // published static timing row (the dynamic `BTST Dn,#<data>` form) is declined here, at analysis time,
+    // exactly like every other codegen-side requirement, so the analysis and codegen boundaries agree and
+    // one unaccounted candidate can never invalidate the whole immutable-ROM AOT program.
+    return m68k_instruction_cycles(operation).has_value();
   case M68kIrKind::return_from_subroutine:
     // SEG-007-T246: existing-authority integration, not a new architecture.
     // When the whole-program `runtime_return_target_set` (ADR-0011 Decision

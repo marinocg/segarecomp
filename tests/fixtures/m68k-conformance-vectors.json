@@ -157,6 +157,113 @@
     "2700",
     "271F"
    ]
+  },
+  "bit_sweep": {
+   "kind": "pair_list",
+   "pairs": [
+    [
+     "00000000",
+     "00000000"
+    ],
+    [
+     "00000001",
+     "FFFFFFFF"
+    ],
+    [
+     "00000007",
+     "00000080"
+    ],
+    [
+     "00000008",
+     "0000FF00"
+    ],
+    [
+     "0000001F",
+     "7FFFFFFF"
+    ],
+    [
+     "00000020",
+     "00000001"
+    ],
+    [
+     "00000021",
+     "80000000"
+    ],
+    [
+     "FFFFFFFF",
+     "12345680"
+    ]
+   ],
+   "sr": [
+    "2700",
+    "271F"
+   ]
+  },
+  "bit_full": {
+   "kind": "pair_list",
+   "pairs": [
+    [
+     "00000000",
+     "00000000"
+    ],
+    [
+     "00000000",
+     "00000001"
+    ],
+    [
+     "00000000",
+     "FFFFFFFE"
+    ],
+    [
+     "00000007",
+     "00000080"
+    ],
+    [
+     "00000007",
+     "0000007F"
+    ],
+    [
+     "00000008",
+     "00000100"
+    ],
+    [
+     "00000008",
+     "FFFFFEFF"
+    ],
+    [
+     "0000001F",
+     "80000000"
+    ],
+    [
+     "0000001F",
+     "7FFFFFFF"
+    ],
+    [
+     "00000020",
+     "00000001"
+    ],
+    [
+     "00000020",
+     "FFFFFFFE"
+    ],
+    [
+     "00000021",
+     "00000002"
+    ],
+    [
+     "000000FF",
+     "80808080"
+    ],
+    [
+     "FFFFFFFF",
+     "12345680"
+    ]
+   ],
+   "sr": [
+    "2700",
+    "2710",
+    "271F"
+   ]
   }
  },
  "rows": [
@@ -3884,6 +3991,1343 @@
     "0260",
     "0264",
     "0267"
+   ]
+  },
+  {
+   "id": "bchg.dn_ea.b.dn.absl",
+   "form": "bchg.dn_ea.b.dn.absl",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "00020000"
+   ],
+   "full_words": [
+    "0179",
+    "0F79",
+    "0979"
+   ]
+  },
+  {
+   "id": "bchg.dn_ea.b.dn.absw",
+   "form": "bchg.dn_ea.b.dn.absw",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "4000"
+   ],
+   "full_words": [
+    "0178",
+    "0F78",
+    "0978"
+   ]
+  },
+  {
+   "id": "bchg.dn_ea.b.dn.disp",
+   "form": "bchg.dn_ea.b.dn.disp",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "0010"
+   ],
+   "full_words": [
+    "016F",
+    "0168",
+    "0F6F"
+   ]
+  },
+  {
+   "id": "bchg.dn_ea.b.dn.ind",
+   "form": "bchg.dn_ea.b.dn.ind",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "0157",
+    "0150",
+    "0F57"
+   ]
+  },
+  {
+   "id": "bchg.dn_ea.b.dn.index",
+   "form": "bchg.dn_ea.b.dn.index",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "init": {
+    "d1": "00000010"
+   },
+   "ext": [
+    "1004"
+   ],
+   "full_words": [
+    "0177",
+    "0170",
+    "0F77"
+   ]
+  },
+  {
+   "id": "bchg.dn_ea.b.dn.postinc",
+   "form": "bchg.dn_ea.b.dn.postinc",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "015F",
+    "0158",
+    "0F5F"
+   ]
+  },
+  {
+   "id": "bchg.dn_ea.b.dn.predec",
+   "form": "bchg.dn_ea.b.dn.predec",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "0167",
+    "0160",
+    "0F67"
+   ]
+  },
+  {
+   "id": "bchg.dn_ea.l.dn.dn",
+   "form": "bchg.dn_ea.l.dn.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "0140",
+    "0341",
+    "0141",
+    "0142"
+   ]
+  },
+  {
+   "id": "bchg.imm_ea.b.imm.absl",
+   "form": "bchg.imm_ea.b.imm.absl",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "000000020000",
+    "000700020000",
+    "000800020000",
+    "001F00020000",
+    "002000020000",
+    "00FF00020000"
+   ],
+   "full_words": [
+    "0879"
+   ]
+  },
+  {
+   "id": "bchg.imm_ea.b.imm.absw",
+   "form": "bchg.imm_ea.b.imm.absw",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00004000",
+    "00074000",
+    "00084000",
+    "001F4000",
+    "00204000",
+    "00FF4000"
+   ],
+   "full_words": [
+    "0878"
+   ]
+  },
+  {
+   "id": "bchg.imm_ea.b.imm.disp",
+   "form": "bchg.imm_ea.b.imm.disp",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00000010",
+    "00070010",
+    "00080010",
+    "001F0010",
+    "00200010",
+    "00FF0010"
+   ],
+   "full_words": [
+    "0868",
+    "086F",
+    "086C"
+   ]
+  },
+  {
+   "id": "bchg.imm_ea.b.imm.ind",
+   "form": "bchg.imm_ea.b.imm.ind",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "0850",
+    "0857",
+    "0854"
+   ]
+  },
+  {
+   "id": "bchg.imm_ea.b.imm.index",
+   "form": "bchg.imm_ea.b.imm.index",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00001004",
+    "00071004",
+    "00081004",
+    "001F1004",
+    "00201004",
+    "00FF1004"
+   ],
+   "init": {
+    "d1": "00000010"
+   },
+   "full_words": [
+    "0870",
+    "0877",
+    "0874"
+   ]
+  },
+  {
+   "id": "bchg.imm_ea.b.imm.postinc",
+   "form": "bchg.imm_ea.b.imm.postinc",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "0858",
+    "085F",
+    "085C"
+   ]
+  },
+  {
+   "id": "bchg.imm_ea.b.imm.predec",
+   "form": "bchg.imm_ea.b.imm.predec",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "0860",
+    "0867",
+    "0864"
+   ]
+  },
+  {
+   "id": "bchg.imm_ea.l.imm.dn",
+   "form": "bchg.imm_ea.l.imm.dn",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "0840",
+    "0847",
+    "0844"
+   ]
+  },
+  {
+   "id": "bclr.dn_ea.b.dn.absl",
+   "form": "bclr.dn_ea.b.dn.absl",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "00020000"
+   ],
+   "full_words": [
+    "01B9",
+    "0FB9",
+    "09B9"
+   ]
+  },
+  {
+   "id": "bclr.dn_ea.b.dn.absw",
+   "form": "bclr.dn_ea.b.dn.absw",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "4000"
+   ],
+   "full_words": [
+    "01B8",
+    "0FB8",
+    "09B8"
+   ]
+  },
+  {
+   "id": "bclr.dn_ea.b.dn.disp",
+   "form": "bclr.dn_ea.b.dn.disp",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "0010"
+   ],
+   "full_words": [
+    "01AF",
+    "01A8",
+    "0FAF"
+   ]
+  },
+  {
+   "id": "bclr.dn_ea.b.dn.ind",
+   "form": "bclr.dn_ea.b.dn.ind",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "0197",
+    "0190",
+    "0F97"
+   ]
+  },
+  {
+   "id": "bclr.dn_ea.b.dn.index",
+   "form": "bclr.dn_ea.b.dn.index",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "init": {
+    "d1": "00000010"
+   },
+   "ext": [
+    "1004"
+   ],
+   "full_words": [
+    "01B7",
+    "01B0",
+    "0FB7"
+   ]
+  },
+  {
+   "id": "bclr.dn_ea.b.dn.postinc",
+   "form": "bclr.dn_ea.b.dn.postinc",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "019F",
+    "0198",
+    "0F9F"
+   ]
+  },
+  {
+   "id": "bclr.dn_ea.b.dn.predec",
+   "form": "bclr.dn_ea.b.dn.predec",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "01A7",
+    "01A0",
+    "0FA7"
+   ]
+  },
+  {
+   "id": "bclr.dn_ea.l.dn.dn",
+   "form": "bclr.dn_ea.l.dn.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "0180",
+    "0381",
+    "0181",
+    "0182"
+   ]
+  },
+  {
+   "id": "bclr.imm_ea.b.imm.absl",
+   "form": "bclr.imm_ea.b.imm.absl",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "000000020000",
+    "000700020000",
+    "000800020000",
+    "001F00020000",
+    "002000020000",
+    "00FF00020000"
+   ],
+   "full_words": [
+    "08B9"
+   ]
+  },
+  {
+   "id": "bclr.imm_ea.b.imm.absw",
+   "form": "bclr.imm_ea.b.imm.absw",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00004000",
+    "00074000",
+    "00084000",
+    "001F4000",
+    "00204000",
+    "00FF4000"
+   ],
+   "full_words": [
+    "08B8"
+   ]
+  },
+  {
+   "id": "bclr.imm_ea.b.imm.disp",
+   "form": "bclr.imm_ea.b.imm.disp",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00000010",
+    "00070010",
+    "00080010",
+    "001F0010",
+    "00200010",
+    "00FF0010"
+   ],
+   "full_words": [
+    "08A8",
+    "08AF",
+    "08AC"
+   ]
+  },
+  {
+   "id": "bclr.imm_ea.b.imm.ind",
+   "form": "bclr.imm_ea.b.imm.ind",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "0890",
+    "0897",
+    "0894"
+   ]
+  },
+  {
+   "id": "bclr.imm_ea.b.imm.index",
+   "form": "bclr.imm_ea.b.imm.index",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00001004",
+    "00071004",
+    "00081004",
+    "001F1004",
+    "00201004",
+    "00FF1004"
+   ],
+   "init": {
+    "d1": "00000010"
+   },
+   "full_words": [
+    "08B0",
+    "08B7",
+    "08B4"
+   ]
+  },
+  {
+   "id": "bclr.imm_ea.b.imm.postinc",
+   "form": "bclr.imm_ea.b.imm.postinc",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "0898",
+    "089F",
+    "089C"
+   ]
+  },
+  {
+   "id": "bclr.imm_ea.b.imm.predec",
+   "form": "bclr.imm_ea.b.imm.predec",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "08A0",
+    "08A7",
+    "08A4"
+   ]
+  },
+  {
+   "id": "bclr.imm_ea.l.imm.dn",
+   "form": "bclr.imm_ea.l.imm.dn",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "0880",
+    "0887",
+    "0884"
+   ]
+  },
+  {
+   "id": "bset.dn_ea.b.dn.absl",
+   "form": "bset.dn_ea.b.dn.absl",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "00020000"
+   ],
+   "full_words": [
+    "01F9",
+    "0FF9",
+    "09F9"
+   ]
+  },
+  {
+   "id": "bset.dn_ea.b.dn.absw",
+   "form": "bset.dn_ea.b.dn.absw",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "4000"
+   ],
+   "full_words": [
+    "01F8",
+    "0FF8",
+    "09F8"
+   ]
+  },
+  {
+   "id": "bset.dn_ea.b.dn.disp",
+   "form": "bset.dn_ea.b.dn.disp",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "0010"
+   ],
+   "full_words": [
+    "01EF",
+    "01E8",
+    "0FEF"
+   ]
+  },
+  {
+   "id": "bset.dn_ea.b.dn.ind",
+   "form": "bset.dn_ea.b.dn.ind",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "01D7",
+    "01D0",
+    "0FD7"
+   ]
+  },
+  {
+   "id": "bset.dn_ea.b.dn.index",
+   "form": "bset.dn_ea.b.dn.index",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "init": {
+    "d1": "00000010"
+   },
+   "ext": [
+    "1004"
+   ],
+   "full_words": [
+    "01F7",
+    "01F0",
+    "0FF7"
+   ]
+  },
+  {
+   "id": "bset.dn_ea.b.dn.postinc",
+   "form": "bset.dn_ea.b.dn.postinc",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "01DF",
+    "01D8",
+    "0FDF"
+   ]
+  },
+  {
+   "id": "bset.dn_ea.b.dn.predec",
+   "form": "bset.dn_ea.b.dn.predec",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "01E7",
+    "01E0",
+    "0FE7"
+   ]
+  },
+  {
+   "id": "bset.dn_ea.l.dn.dn",
+   "form": "bset.dn_ea.l.dn.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "01C0",
+    "03C1",
+    "01C1",
+    "01C2"
+   ]
+  },
+  {
+   "id": "bset.imm_ea.b.imm.absl",
+   "form": "bset.imm_ea.b.imm.absl",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "000000020000",
+    "000700020000",
+    "000800020000",
+    "001F00020000",
+    "002000020000",
+    "00FF00020000"
+   ],
+   "full_words": [
+    "08F9"
+   ]
+  },
+  {
+   "id": "bset.imm_ea.b.imm.absw",
+   "form": "bset.imm_ea.b.imm.absw",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00004000",
+    "00074000",
+    "00084000",
+    "001F4000",
+    "00204000",
+    "00FF4000"
+   ],
+   "full_words": [
+    "08F8"
+   ]
+  },
+  {
+   "id": "bset.imm_ea.b.imm.disp",
+   "form": "bset.imm_ea.b.imm.disp",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00000010",
+    "00070010",
+    "00080010",
+    "001F0010",
+    "00200010",
+    "00FF0010"
+   ],
+   "full_words": [
+    "08E8",
+    "08EF",
+    "08EC"
+   ]
+  },
+  {
+   "id": "bset.imm_ea.b.imm.ind",
+   "form": "bset.imm_ea.b.imm.ind",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "08D0",
+    "08D7",
+    "08D4"
+   ]
+  },
+  {
+   "id": "bset.imm_ea.b.imm.index",
+   "form": "bset.imm_ea.b.imm.index",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00001004",
+    "00071004",
+    "00081004",
+    "001F1004",
+    "00201004",
+    "00FF1004"
+   ],
+   "init": {
+    "d1": "00000010"
+   },
+   "full_words": [
+    "08F0",
+    "08F7",
+    "08F4"
+   ]
+  },
+  {
+   "id": "bset.imm_ea.b.imm.postinc",
+   "form": "bset.imm_ea.b.imm.postinc",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "08D8",
+    "08DF",
+    "08DC"
+   ]
+  },
+  {
+   "id": "bset.imm_ea.b.imm.predec",
+   "form": "bset.imm_ea.b.imm.predec",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "08E0",
+    "08E7",
+    "08E4"
+   ]
+  },
+  {
+   "id": "bset.imm_ea.l.imm.dn",
+   "form": "bset.imm_ea.l.imm.dn",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "08C0",
+    "08C7",
+    "08C4"
+   ]
+  },
+  {
+   "id": "btst.dn_ea.b.dn.absl",
+   "form": "btst.dn_ea.b.dn.absl",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "00020000"
+   ],
+   "full_words": [
+    "0139",
+    "0F39",
+    "0939"
+   ]
+  },
+  {
+   "id": "btst.dn_ea.b.dn.absw",
+   "form": "btst.dn_ea.b.dn.absw",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "4000"
+   ],
+   "full_words": [
+    "0138",
+    "0F38",
+    "0938"
+   ]
+  },
+  {
+   "id": "btst.dn_ea.b.dn.disp",
+   "form": "btst.dn_ea.b.dn.disp",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "0010"
+   ],
+   "full_words": [
+    "012F",
+    "0128",
+    "0F2F"
+   ]
+  },
+  {
+   "id": "btst.dn_ea.b.dn.imm",
+   "form": "btst.dn_ea.b.dn.imm",
+   "bind": {
+    "x": "d@9"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "0012"
+   ],
+   "full_words": [
+    "013C",
+    "0F3C",
+    "093C"
+   ]
+  },
+  {
+   "id": "btst.dn_ea.b.dn.ind",
+   "form": "btst.dn_ea.b.dn.ind",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "0117",
+    "0110",
+    "0F17"
+   ]
+  },
+  {
+   "id": "btst.dn_ea.b.dn.index",
+   "form": "btst.dn_ea.b.dn.index",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "init": {
+    "d1": "00000010"
+   },
+   "ext": [
+    "1004"
+   ],
+   "full_words": [
+    "0137",
+    "0130",
+    "0F37"
+   ]
+  },
+  {
+   "id": "btst.dn_ea.b.dn.pcdisp",
+   "form": "btst.dn_ea.b.dn.pcdisp",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "0010"
+   ],
+   "full_words": [
+    "013A",
+    "0F3A",
+    "093A"
+   ]
+  },
+  {
+   "id": "btst.dn_ea.b.dn.pcindex",
+   "form": "btst.dn_ea.b.dn.pcindex",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "ext": [
+    "1040"
+   ],
+   "full_words": [
+    "013B",
+    "0F3B",
+    "093B"
+   ]
+  },
+  {
+   "id": "btst.dn_ea.b.dn.postinc",
+   "form": "btst.dn_ea.b.dn.postinc",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "011F",
+    "0118",
+    "0F1F"
+   ]
+  },
+  {
+   "id": "btst.dn_ea.b.dn.predec",
+   "form": "btst.dn_ea.b.dn.predec",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "0127",
+    "0120",
+    "0F27"
+   ]
+  },
+  {
+   "id": "btst.dn_ea.l.dn.dn",
+   "form": "btst.dn_ea.l.dn.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.dst"
+   },
+   "profile": "bit_sweep",
+   "full_profile": "bit_full",
+   "full_words": [
+    "0100",
+    "0301",
+    "0101",
+    "0102"
+   ]
+  },
+  {
+   "id": "btst.imm_ea.b.imm.absl",
+   "form": "btst.imm_ea.b.imm.absl",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "000000020000",
+    "000700020000",
+    "000800020000",
+    "001F00020000",
+    "002000020000",
+    "00FF00020000"
+   ],
+   "full_words": [
+    "0839"
+   ]
+  },
+  {
+   "id": "btst.imm_ea.b.imm.absw",
+   "form": "btst.imm_ea.b.imm.absw",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00004000",
+    "00074000",
+    "00084000",
+    "001F4000",
+    "00204000",
+    "00FF4000"
+   ],
+   "full_words": [
+    "0838"
+   ]
+  },
+  {
+   "id": "btst.imm_ea.b.imm.disp",
+   "form": "btst.imm_ea.b.imm.disp",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00000010",
+    "00070010",
+    "00080010",
+    "001F0010",
+    "00200010",
+    "00FF0010"
+   ],
+   "full_words": [
+    "0828",
+    "082F",
+    "082C"
+   ]
+  },
+  {
+   "id": "btst.imm_ea.b.imm.ind",
+   "form": "btst.imm_ea.b.imm.ind",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "0810",
+    "0817",
+    "0814"
+   ]
+  },
+  {
+   "id": "btst.imm_ea.b.imm.index",
+   "form": "btst.imm_ea.b.imm.index",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00001004",
+    "00071004",
+    "00081004",
+    "001F1004",
+    "00201004",
+    "00FF1004"
+   ],
+   "init": {
+    "d1": "00000010"
+   },
+   "full_words": [
+    "0830",
+    "0837",
+    "0834"
+   ]
+  },
+  {
+   "id": "btst.imm_ea.b.imm.pcdisp",
+   "form": "btst.imm_ea.b.imm.pcdisp",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00000010",
+    "00070010",
+    "00080010",
+    "001F0010",
+    "00200010",
+    "00FF0010"
+   ],
+   "full_words": [
+    "083A"
+   ]
+  },
+  {
+   "id": "btst.imm_ea.b.imm.pcindex",
+   "form": "btst.imm_ea.b.imm.pcindex",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "00001040",
+    "00071040",
+    "00081040",
+    "001F1040",
+    "00201040",
+    "00FF1040"
+   ],
+   "full_words": [
+    "083B"
+   ]
+  },
+  {
+   "id": "btst.imm_ea.b.imm.postinc",
+   "form": "btst.imm_ea.b.imm.postinc",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "0818",
+    "081F",
+    "081C"
+   ]
+  },
+  {
+   "id": "btst.imm_ea.b.imm.predec",
+   "form": "btst.imm_ea.b.imm.predec",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "0820",
+    "0827",
+    "0824"
+   ]
+  },
+  {
+   "id": "btst.imm_ea.l.imm.dn",
+   "form": "btst.imm_ea.l.imm.dn",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "unary_sweep",
+   "full_profile": "unary_full",
+   "ext": [
+    "0000",
+    "0007",
+    "0008",
+    "001F",
+    "0020",
+    "00FF"
+   ],
+   "full_words": [
+    "0800",
+    "0807",
+    "0804"
    ]
   },
   {

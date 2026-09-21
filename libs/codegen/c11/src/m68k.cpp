@@ -582,6 +582,58 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
   output << "{\n" << body.str() << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
   return true;
 }
+
+// SEG-021-T008: runtime-routed lowering of an auto-updating ((An)+ / -(An)) destination of
+// BTST/BCHG/BCLR/BSET by the same operation-local deferred-address commit technique as the
+// arithmetic and logical families: An is snapshotted into one local, pre/post-adjusted on the local
+// only, the routed read and (for BCHG/BCLR/BSET) the routed write use it, and the live register is
+// committed in one statement strictly after every routed access (a routed stop returns before any
+// architectural write). The bit number is materialized first; it is Dn or an immediate, never memory.
+// BTST never writes back but still commits the auto-update. Returns false when the destination is not
+// auto-updating or the context is not routed (the caller's ordinary path then applies unchanged).
+[[nodiscard]] bool m68k_emit_routed_bit_auto_update(std::ostringstream &output, const M68kIrOperation &operation,
+                                                    std::string_view data_registers,
+                                                    std::string_view status_register,
+                                                    const M68kMemoryEmissionContext &memory) {
+  if (!memory.runtime_routing) return false;
+  const auto &ea = operation.destination_ea;
+  if (ea.mode != M68kEaMode::address_predec && ea.mode != M68kEaMode::address_postinc) return false;
+  if (operation.source_ea.mode != M68kEaMode::data_register && operation.source_ea.mode != M68kEaMode::immediate)
+    return true;
+  const auto width = static_cast<std::uint32_t>(operation.size);
+  const std::uint32_t step =
+      (static_cast<unsigned>(ea.reg) == 7U && operation.size == M68kMemoryAccessWidth::byte) ? 2U : width;
+  const std::string an = std::string(memory.address_registers) + "[" + std::to_string(ea.reg) + "]";
+  const std::string local = "m68k_bit_auto_ea";
+  unsigned temp_ordinal = 0U;
+  std::ostringstream prelude;
+  const auto bit_number = m68k_emit_materialized_ea_read(operation.source_ea, M68kMemoryAccessWidth::long_word,
+                                                          data_registers, memory, prelude, temp_ordinal);
+  if (!bit_number.ok) return true;
+  std::ostringstream body;
+  body << prelude.str() << "uint32_t " << local << " = " << an << ";\n";
+  if (ea.mode == M68kEaMode::address_predec) body << local << " -= UINT32_C(" << step << ");\n";
+  std::string destination_expr;
+  m68k_emit_routed_read(body, local, operation.size, memory, destination_expr, temp_ordinal);
+  const auto bit_kind = operation.kind == M68kIrKind::bit_test ? M68kBitOperationKind::test
+                        : operation.kind == M68kIrKind::bit_change ? M68kBitOperationKind::change
+                        : operation.kind == M68kIrKind::bit_clear ? M68kBitOperationKind::clear
+                                                                   : M68kBitOperationKind::set;
+  body << "{ ";
+  M68kBitOperationSpecification::emit_c_update(body, bit_kind, destination_expr, bit_number.expression,
+                                                operation.size, "bit_index", "bit_mask", "bit_set", "bit_result");
+  body << ' ';
+  if (operation.kind != M68kIrKind::bit_test)
+    m68k_emit_routed_write(body, local, operation.size, memory, "bit_result", temp_ordinal);
+  else
+    body << "(void)bit_result; ";
+  M68kBitTestCcrSpecification::emit_c_update(body, status_register, "bit_set");
+  body << " }\n";
+  if (ea.mode == M68kEaMode::address_postinc) body << local << " += UINT32_C(" << step << ");\n";
+  body << an << " = " << local << ";\n";
+  output << "{\n" << body.str() << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
+  return true;
+}
 } // namespace
 
 // This is the sole per-operation C-lowering definition for every accepted
@@ -1929,6 +1981,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     // (contract: "BTST is read-only" -- "addressing-mode effects, not
     // destination mutation").
     if (memory != nullptr) {
+      if (m68k_emit_routed_bit_auto_update(output, operation, data_registers, status_register, *memory)) break;
       unsigned temp_ordinal = 0U;
       std::ostringstream prelude;
       const auto bit_number = m68k_emit_materialized_ea_read(operation.source_ea, M68kMemoryAccessWidth::long_word,

@@ -1255,8 +1255,7 @@ def main():
   c4_dim_shapes = {}
   c4_dim_outputs = {}
   for flag, forge in (
-      ("c4-dim-shift-rotate-memory", "shift_rotate_memory"),
-      ("c4-dim-bit-test-auto-update", "bit_test_auto_update")):
+      ("c4-dim-shift-rotate-memory", "shift_rotate_memory"),):
     run_first = subprocess.run([executable, f"--emit-general-startup-runtime-{flag}"], text=True, capture_output=True)
     run_second = subprocess.run([executable, f"--emit-general-startup-runtime-{flag}"], text=True, capture_output=True)
     assert run_first.returncode == run_second.returncode == 0, forge
@@ -1267,6 +1266,24 @@ def main():
     c4_dim_shapes[forge] = c4_dimension(run_first.stdout)
     c4_dim_outputs[forge] = run_first.stdout
   assert len(set(c4_dim_shapes.values())) == len(c4_dim_shapes), c4_dim_shapes  # every shape distinct
+  # SEG-021-T008: an auto-updating BTST destination (BTST D1,(A1)+) is lowered by the bit-family deferred
+  # address-commit helper: no lowering-gap stop, one routed read, no write-back, one live-register commit
+  # strictly after the routed access.
+  bt_first = subprocess.run([executable, "--emit-general-startup-runtime-c4-dim-bit-test-auto-update"],
+                            text=True, capture_output=True)
+  bt_second = subprocess.run([executable, "--emit-general-startup-runtime-c4-dim-bit-test-auto-update"],
+                             text=True, capture_output=True)
+  assert bt_first.returncode == bt_second.returncode == 0
+  assert bt_first.stdout == bt_second.stdout
+  assert not bt_first.stdout.startswith("/* translation rejected:")
+  assert "GENESIS_STOP_C4_LOWERING_GAP" not in bt_first.stdout
+  assert "genesis_c4_lowering_stop_" not in bt_first.stdout
+  assert "uint32_t m68k_bit_auto_ea = runtime->a[1];" in bt_first.stdout
+  assert "m68k_bit_auto_ea += UINT32_C(1);" in bt_first.stdout
+  assert bt_first.stdout.count("runtime->a[1] = m68k_bit_auto_ea;") == 1
+  assert bt_first.stdout.index("runtime->a[1] = m68k_bit_auto_ea;") > bt_first.stdout.rindex("genesis_route_access(runtime, ")
+  assert bt_first.stdout.count("genesis_route_access(") == 1  # read only: BTST never writes back
+  c4_dim_outputs["bit_test_auto_update"] = bt_first.stdout
   # SEG-007-T167: the C4 logical-family missing-dispatcher batch
   # (AND/OR/EOR + ORI/EORI). The register-only reached shape (byte OR
   # `<ea>,Dn`, both operands data registers) now lowers to a real dispatcher
@@ -1717,14 +1734,12 @@ def main():
   # the deferred-address-commit path; the sole remaining add-family lowering
   # gap is the ADDA same-register aliasing decline, which serialises to the
   # distinct ADDA_AUTO_UPDATE literal.
-  assert c4_dim_shapes["bit_test_auto_update"] == "BIT_TEST_AUTO_UPDATE"
   # SEG-007-T157 / ADR-0019 Stage B: write_clr's own auto-update shape
   # (formerly the distinct CLR_AUTO_UPDATE lowering-gap literal, proven by the
   # predecrement fixture above) is no longer a gap at all -- it is fully
   # lowered -- so it can no longer collide with the add family's own
   # ADDA_AUTO_UPDATE literal; this is inherently true rather than needing a
   # live re-check.
-  assert c4_dim_shapes["bit_test_auto_update"] != "CLR_AUTO_UPDATE"
   # SEG-007-T067: C4's new movem_transfer routed lowering. Deterministic
   # two-run byte-identical output, no rejection, and every transfer routed
   # through genesis_route_access -- never a private RAM-array index (the

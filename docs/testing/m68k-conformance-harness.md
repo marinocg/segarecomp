@@ -49,7 +49,8 @@ Aliasing of an address-register operand value with a memory pointer (ADDA `(An)+
 register value is also the pointer, so such rows take pair values from the table's `values.alias_pointer` (in-window
 addresses) instead of the profile pairs; an A7 operand value also becomes the active stack pointer of the vector.
 Rows exist for every legal ordinary form of MOVE/MOVEA/ADD/SUB/CMP/ADDA/SUBA/CMPA/AND/OR/EOR (SEG-021-T007: all sizes and
-EAs, incl. `(d8,PC,Xn)` sources and indexed destinations)/immediate/quick/unary families; CMPM, ADDX/SUBX and NEGX rows are absent because production has no decoder for them yet.
+EAs, incl. `(d8,PC,Xn)` sources and indexed destinations)/immediate/quick/unary and (SEG-021-T008) BTST/BCHG/BCLR/BSET families (every legal EA, bit numbers 0/7/8/31/32/33/255 and
+Dn aliasing; profiles `bit_sweep`/`bit_full`, static bit numbers as literal suffixes); CMPM, ADDX/SUBX and NEGX rows are absent because production has no decoder for them yet.
 
 ## Compared state
 
@@ -107,3 +108,9 @@ legal shape (the direct lowering is emitted with the emitter's `--window` option
 work-RAM addresses and both sides see identical An values, including An sources and CMPA), and forces a routed-access stop for
 every auto-updating shape to prove no partial architectural mutation. The immutable-ROM AOT predicate now admits
 the whole family (the emitter still fails closed on a shape it cannot lower).
+
+## Timing coverage of the bit operations (SEG-021-T008)
+
+`m68k_instruction_cycles` has a published static row for every legal BTST/BCHG/BCLR/BSET form except the dynamic
+`BTST Dn,#<data>` form (`btst.dn_ea.b.dn.imm`), which is recorded as timing-unsupported: no row is asserted without a
+verified Motorola table cell. Timing is not compared by this harness (`timing_validated` stays 0).

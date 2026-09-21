@@ -4390,6 +4390,58 @@ void general_startup_decode_accepts_pc_indexed_lea_source() {
 // existing `address_index8` decode contract (SEG-007-T120) and the existing
 // shared `m68k_emit_runtime_ea_address` helper: no parallel EA-computation
 // logic, no new IR kind, no widening of the JMP/JSR/LEA control-EA masks.
+// SEG-021-T008: BTST/BCHG/BCLR/BSET decode legality, written from the Motorola manual's addressing-mode
+// tables (independent of the T001 dataset): BCHG/BCLR/BSET take every data-alterable mode incl. (d8,An,Xn);
+// BTST additionally d16(PC), (d8,PC,Xn) and (dynamic bit number only) #imm; nothing else, MOVEP stays out.
+void bit_operation_decode_covers_the_full_legal_ea_set_and_rejects_illegal_ones() {
+  using namespace segarecomp;
+  const auto decode_general = [](const std::vector<std::uint8_t> &bytes) {
+    return decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup);
+  };
+  const auto decodes = [&](const std::vector<std::uint8_t> &bytes, M68kInstructionKind kind,
+                           M68kEaMode destination, M68kMemoryAccessWidth size) {
+    const auto result = decode_general(bytes);
+    const auto *decoded = std::get_if<M68kDecodedInstruction>(&result);
+    return decoded != nullptr && decoded->kind == kind && decoded->destination_ea.mode == destination &&
+           decoded->size == size;
+  };
+  const auto rejects = [&](const std::vector<std::uint8_t> &bytes) {
+    const auto result = decode_general(bytes);
+    const auto *rejected = std::get_if<RejectedM68kDecode>(&result);
+    return rejected != nullptr && rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction;
+  };
+  using K = M68kInstructionKind;
+  using W = M68kMemoryAccessWidth;
+  // Dynamic bit number (D2), (d8,A1,D1.W) indexed destination: every mnemonic.
+  expect(decodes({0x05U, 0x31U, 0x10U, 0x04U}, K::btst, M68kEaMode::address_index8, W::byte), "BTST D2,(d8,A1,Xn)");
+  expect(decodes({0x05U, 0x71U, 0x10U, 0x04U}, K::bchg, M68kEaMode::address_index8, W::byte), "BCHG D2,(d8,A1,Xn)");
+  expect(decodes({0x05U, 0xB1U, 0x10U, 0x04U}, K::bclr, M68kEaMode::address_index8, W::byte), "BCLR D2,(d8,A1,Xn)");
+  expect(decodes({0x05U, 0xF1U, 0x10U, 0x04U}, K::bset, M68kEaMode::address_index8, W::byte), "BSET D2,(d8,A1,Xn)");
+  // Static bit number, indexed destination.
+  expect(decodes({0x08U, 0x31U, 0x00U, 0x07U, 0x10U, 0x04U}, K::btst, M68kEaMode::address_index8, W::byte),
+         "BTST #7,(d8,A1,Xn)");
+  expect(decodes({0x08U, 0xF1U, 0x00U, 0x1FU, 0x10U, 0x04U}, K::bset, M68kEaMode::address_index8, W::byte),
+         "BSET #31,(d8,A1,Xn)");
+  // BTST-only sources: d16(PC), (d8,PC,Xn) for both bit-number forms; #imm for the dynamic form only.
+  expect(decodes({0x05U, 0x3AU, 0x00U, 0x10U}, K::btst, M68kEaMode::pc_disp16, W::byte), "BTST D2,d16(PC)");
+  expect(decodes({0x05U, 0x3BU, 0x10U, 0x40U}, K::btst, M68kEaMode::pc_index8, W::byte), "BTST D2,(d8,PC,Xn)");
+  expect(decodes({0x08U, 0x3AU, 0x00U, 0x07U, 0x00U, 0x10U}, K::btst, M68kEaMode::pc_disp16, W::byte),
+         "BTST #7,d16(PC)");
+  expect(decodes({0x08U, 0x3BU, 0x00U, 0x07U, 0x10U, 0x40U}, K::btst, M68kEaMode::pc_index8, W::byte),
+         "BTST #7,(d8,PC,Xn)");
+  expect(decodes({0x05U, 0x3CU, 0x00U, 0x12U}, K::btst, M68kEaMode::immediate, W::byte), "BTST D2,#imm");
+  // Illegal destinations: An direct (also the MOVEP collision), immediate for the static/mutating forms, and
+  // PC-relative for the mutating forms.
+  expect(rejects({0x05U, 0x09U, 0x00U, 0x10U}), "MOVEP-shaped BTST D2,An stays rejected");
+  expect(rejects({0x05U, 0x79U, 0x00U, 0x10U}) || rejects({0x05U, 0x49U, 0x00U, 0x10U}), "BCHG D2,An rejects");
+  expect(rejects({0x08U, 0x3CU, 0x00U, 0x07U, 0x00U, 0x12U}), "static BTST #n,#imm is not a legal form");
+  expect(rejects({0x05U, 0x7CU, 0x00U, 0x12U}), "BCHG D2,#imm is not a legal form");
+  expect(rejects({0x05U, 0xBAU, 0x00U, 0x10U}), "BCLR D2,d16(PC) is not a legal form");
+  expect(rejects({0x05U, 0xFBU, 0x10U, 0x40U}), "BSET D2,(d8,PC,Xn) is not a legal form");
+  expect(rejects({0x08U, 0xBAU, 0x00U, 0x07U, 0x00U, 0x10U}), "BCLR #n,d16(PC) is not a legal form");
+  expect(rejects({0x08U, 0xFBU, 0x00U, 0x07U, 0x10U, 0x40U}), "BSET #n,(d8,PC,Xn) is not a legal form");
+}
+
 void general_startup_decode_accepts_indexed_arithmetic_source() {
   using namespace segarecomp;
   const auto decode_general = [](const std::vector<std::uint8_t> &bytes) {
@@ -7428,9 +7480,9 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
   expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
          "BTST admits a plain (An) destination -- it is read-only by construction");
   operation.destination_ea.mode = M68kEaMode::address_postinc;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "BTST's carve-out admits only plain (An); an auto-updating destination stays excluded "
-         "pending its own independent proof");
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T008 family-level admission: an auto-updating BTST destination lowers through the deferred "
+         "address-register commit");
   // SEG-007-T246 (seventh iteration, same bounded family): BCHG/BCLR/BSET
   // admit the same plain `(An)` destination as BTST's own carve-out,
   // extended to the write side -- plain `(An)` never mutates any address
@@ -7447,13 +7499,35 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
     expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
            "BCHG/BCLR/BSET admit a plain (An) destination -- no address register is ever mutated");
     operation.destination_ea.mode = M68kEaMode::address_postinc;
-    expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-           "BCHG/BCLR/BSET's carve-out admits only plain (An); an auto-updating destination stays "
-           "excluded pending its own independent proof");
+    expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "SEG-021-T008 family-level admission: an auto-updating BCHG/BCLR/BSET destination lowers through the "
+           "deferred address-register commit");
     operation.destination_ea.mode = M68kEaMode::address_predec;
-    expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-           "BCHG/BCLR/BSET's carve-out excludes -(An) too, for the identical partial-mutation "
-           "reason as (An)+");
+    expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "SEG-021-T008 family-level admission: -(An) is admitted for the same reason as (An)+");
+  }
+  // SEG-021-T008: family-level admission still requires the one shared retirement-timing seam to account
+  // for the operation. The dynamic `BTST Dn,#<data>` form has no published static timing row, so it is
+  // declined at analysis time (never admitted and then rejected by codegen, which would invalidate the
+  // whole immutable-ROM AOT program); every other legal bit-operation destination class is admitted.
+  {
+    operation.kind = M68kIrKind::bit_test;
+    operation.size = M68kMemoryAccessWidth::byte;
+    operation.source_ea.mode = M68kEaMode::data_register;
+    operation.destination_ea.mode = M68kEaMode::immediate;
+    expect(!m68k_instruction_cycles(operation).has_value() &&
+               !m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "BTST Dn,#imm has no timing row and is not admitted to the immutable-ROM AOT route");
+    for (const auto mode : {M68kEaMode::address_indirect, M68kEaMode::address_postinc, M68kEaMode::address_predec,
+                            M68kEaMode::address_disp16, M68kEaMode::address_index8, M68kEaMode::absolute_word,
+                            M68kEaMode::absolute_long, M68kEaMode::pc_disp16, M68kEaMode::pc_index8}) {
+      operation.destination_ea.mode = mode;
+      expect(m68k_instruction_cycles(operation).has_value() &&
+                 m68k_operation_is_immutable_rom_aot_safe(operation, false),
+             "every other legal BTST destination class has a timing row and is admitted");
+    }
+    operation.source_ea.mode = M68kEaMode::immediate;
+    operation.destination_ea.mode = M68kEaMode::address_postinc;
   }
   // SEG-007-T245 (fourth iteration, same bounded family): MOVEA admits a
   // memory-EA source (its destination is always a plain An overwrite, no
@@ -18448,15 +18522,14 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
       // subtracting from it before.
        ? std::vector<std::uint8_t>{0x42U, 0x58U, 0x4EU, 0x70U}
        : c4_prefix
-       // MOVEQ #1,D0; BTST D1,(A1)+ (auto-updating BTST lowering-gap
-       // cut: the bit-test family carries no deferred-commit contract, so it
-       // stays a requires_architecture_decision decline (SEG-021-T007 lowers the logical family's) -- this fixture's
-       // block-cut/prefix-retention mechanics only need some still-declined
-       // shape; ADDA aliasing, CLR, SUB/CMP and (SEG-021-T007) AND/OR/EOR auto-update are all lowered now);
+       // MOVEQ #1,D0; ASR.W (A0) (memory-form shift/rotate: a still-declined C4 lowering-gap shape --
+       // this fixture's block-cut/prefix-retention mechanics only need some still-declined shape; ADDA
+       // aliasing, CLR, SUB/CMP, AND/OR/EOR (SEG-021-T007) and BTST/BCHG/BCLR/BSET (SEG-021-T008)
+       // auto-update are all lowered now);
        // BRA.S +2; padding; RESET.  The cut must retain
-       // MOVEQ, omit the declined BTST and the terminal BRA, and make
+       // MOVEQ, omit the declined ASR.W and the terminal BRA, and make
        // RESET's block unreachable from the emitted program-control graph.
-        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x03U, 0x19U, 0x60U, 0x02U,
+        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0xE0U, 0xD0U, 0x60U, 0x02U,
                                      0x00U, 0x00U, 0x4EU, 0x70U}
         : c4_dim_compare
        // SEG-007-T146: CMP.B D1,D0; RESET.  `compare` is now C4-represented:
@@ -18495,9 +18568,8 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
        // destination_ea.mode.
         ? std::vector<std::uint8_t>{0xE0U, 0xD0U, 0x4EU, 0x70U}
         : c4_dim_bit_test_auto_update
-       // SEG-021-T006/T007: BTST D1,(A1)+ (0x0319; auto-updating bit-test operand, which
-       // carries no deferred-commit contract and stays a clean
-       // M68kC4GapClass::requires_architecture_decision decline); RESET.  This
+       // SEG-021-T006/T007/T008: BTST D1,(A1)+ (0x0319; auto-updating bit-test operand, now
+       // lowered by the bit-family deferred address-register commit: no gap row); RESET.  This
        // fixture formerly used the ADDA same-register aliasing shape, now
        // lowered.  Formerly this comment also noted its distinctness from `write_clr`'s
        // own CLR_AUTO_UPDATE literal; SEG-007-T157 / ADR-0019 Stage B fully
@@ -18579,28 +18651,28 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
         // A second C4 cut is statically retained beyond the first cut's
         // terminal branch.  It has no emitted caller and therefore must not
         // leave an unused static stop function in strict-C11 output.  Uses
-        // the same still-declined BTST auto-update cut as
+        // the same still-declined ASR.W (A0) cut as
         // c4_prefix above (see its comment).
-        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x03U, 0x19U, 0x60U, 0x02U,
-                                     0x00U, 0x00U, 0x03U, 0x19U, 0x4EU, 0x70U}
+        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0xE0U, 0xD0U, 0x60U, 0x02U,
+                                     0x00U, 0x00U, 0xE0U, 0xD0U, 0x4EU, 0x70U}
         : c4_multi_blocks
-       // BNE.S selects either of two separately reachable BTST D1,(A1)+
+       // BNE.S selects either of two separately reachable ASR.W (A0)
        // cut blocks (see c4_prefix's comment above for why this
        // fixture no longer uses CLR.B -(A0) or ADDA/AND auto-update). Both cut sinks are terminal and
        // neither becomes a dispatch arm.
-       ? std::vector<std::uint8_t>{0x66U, 0x04U, 0x03U, 0x19U, 0x60U, 0x02U,
-                                    0x03U, 0x19U, 0x4EU, 0x70U}
+       ? std::vector<std::uint8_t>{0x66U, 0x04U, 0xE0U, 0xD0U, 0x60U, 0x02U,
+                                    0xE0U, 0xD0U, 0x4EU, 0x70U}
        : c4_same_block
        // Two candidates in one block: only the first can own the local cut.
-       ? std::vector<std::uint8_t>{0x03U, 0x19U, 0x03U, 0x19U, 0x60U, 0x02U,
+       ? std::vector<std::uint8_t>{0xE0U, 0xD0U, 0xE0U, 0xD0U, 0x60U, 0x02U,
                                     0x00U, 0x00U, 0x4EU, 0x70U}
        : c4_backward_block
        // BRA.S +8 (0xB00 -> 0xB0A); dead filler; MOVEQ #1,D0 then the
-       // still-declined auto-update (BTST D1,(A1)+) cut at 0xB04/0xB06 -- reached only via
+       // still-declined ASR.W (A0) cut at 0xB04/0xB06 -- reached only via
        // 0xB0A's own BRA.S -8 backward edge, discovered strictly after the
        // higher-address block.
        ? std::vector<std::uint8_t>{0x60U, 0x08U, 0x00U, 0x00U, 0x70U, 0x01U,
-                                    0x03U, 0x19U, 0x4EU, 0x70U, 0x60U, 0xF8U}
+                                    0xE0U, 0xD0U, 0x4EU, 0x70U, 0x60U, 0xF8U}
       : routed_write
       ? std::vector<std::uint8_t>{0x42U, 0x90U, 0x60U, 0x06U, 0x00U, 0x00U,
                                   0x00U, 0x00U, 0x00U, 0x00U, 0x4EU, 0x70U}
@@ -20088,13 +20160,19 @@ int emit_general_startup_runtime_c4_bit_manipulation_source(std::string_view kin
   }
   if (predecrement) {
     const auto preflight = preflight_m68k_general_startup_c4(*partial);
-    if (!preflight.valid || preflight.rows.size() != 1U ||
-        preflight.rows.front().auto_update != M68kC4AutoUpdateClass::predecrement ||
-        preflight.rows.front().gap != M68kC4GapClass::requires_architecture_decision)
-      return 1;
+    // SEG-021-T008: the auto-updating destination lowers through the bit-family deferred address commit
+    // (one snapshot local, routed read + routed write, one live-register commit strictly after both).
+    if (!preflight.valid || !preflight.rows.empty()) return 1;
     const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
-    if (emitted.find(std::string(dimension) + "_AUTO_UPDATE") == std::string::npos ||
-        emitted.find("bit_result") != std::string::npos)
+    const auto commit = emitted.find("runtime->a[0] = m68k_bit_auto_ea;");
+    if (emitted.find("translation rejected") != std::string::npos ||
+        emitted.find("genesis_c4_lowering_stop_") != std::string::npos ||
+        emitted.find("uint32_t m68k_bit_auto_ea = runtime->a[0];") == std::string::npos ||
+        emitted.find("m68k_bit_auto_ea -= UINT32_C(1);") == std::string::npos ||
+        emitted.find("bit_result") == std::string::npos || commit == std::string::npos ||
+        emitted.find("runtime->a[0] = m68k_bit_auto_ea;", commit + 1U) != std::string::npos ||
+        commit < emitted.rfind("genesis_route_access(") ||
+        emitted.find("genesis_route_access(") == emitted.rfind("genesis_route_access("))
       return 1;
     std::cout << emitted;
     return 0;
@@ -25901,10 +25979,12 @@ void multiple_predecessors_observe_one_destination_global_frontier() {
       0x4EU, 0x71U,  // +0x0 NOP    (reset ingress instr1)
       0x4EU, 0x70U,  // +0x2 RESET  (reset frontier)
       0x4EU, 0x71U,  // +0x4 NOP    (W1: isolated admitted root)
-      0x60U, 0x04U,  // +0x6 BRA.S  -> +0xC
+      0x60U, 0x06U,  // +0x6 BRA.S  -> +0xE
       0x4EU, 0x71U,  // +0x8 NOP    (W2: isolated admitted root)
-      0x60U, 0x00U,  // +0xA BRA.S  -> +0xC
-      0x4EU, 0x75U,  // +0xC RTS    (Z: shared orphan destination)
+      0x60U, 0x02U,  // +0xA BRA.S  -> +0xE (SEG-021-T008: a genuine short branch; the former `60 00` was the
+                     //              degenerate word-displacement encoding, a branch without a discovered edge)
+      0x4EU, 0x71U,  // +0xC NOP    (unreached filler)
+      0x4EU, 0x75U,  // +0xE RTS    (Z: shared orphan destination)
   };
   const auto result = analyze_m68k_frontend(
       make_program(base, image, "synthetic/SEG-007-T234/multiple-predecessors",
@@ -25915,9 +25995,41 @@ void multiple_predecessors_observe_one_destination_global_frontier() {
   const auto &prefix = partial->accepted_prefix;
   expect(has_block(prefix, base + 0x4U) && has_block(prefix, base + 0x8U),
          "SEG-007-T234 (multiple predecessors): both independent roots commit");
-  expect(known_but_unemitted_frontier_count(*partial, base + 0xCU) == 1U,
+  expect(known_but_unemitted_frontier_count(*partial, base + 0xEU) == 1U,
          "SEG-007-T234 (multiple predecessors): exactly one destination-global frontier represents the shared "
          "destination, never a duplicate or per-predecessor stop");
+}
+
+// SEG-021-T008 regression (canonical route): a decoded direct-branch terminal for which discovery recorded no
+// outgoing edge at all (its walk did not complete: here BRA.W whose displacement leaves the mapped image) is
+// not a completed block. Retaining it handed C4 a branch terminal without a successor, rejecting the whole
+// translation ("incomplete C4 static edge") as soon as any retained code reached it.
+void branch_terminal_without_discovered_edges_is_not_a_completed_block() {
+  constexpr std::uint32_t base = 0x0000F180U;
+  const std::vector<std::uint8_t> image{
+      0x4EU, 0x71U,  // +0x0 NOP    (reset ingress instr1)
+      0x4EU, 0x70U,  // +0x2 RESET  (reset frontier)
+      0x4EU, 0x71U,  // +0x4 NOP    (W: isolated admitted root)
+      0x60U, 0x00U, 0x4EU, 0x75U,  // +0x6 BRA.W with a displacement leaving the image: no edge is discoverable
+  };
+  const auto result = analyze_m68k_frontend(
+      make_program(base, image, "synthetic/SEG-021-T008/branch-without-edges", {make_candidate(base + 0x4U)}));
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "SEG-021-T008 (edgeless branch): the fixture reaches a partial program");
+  if (partial == nullptr) return;
+  expect(!has_block(partial->accepted_prefix, base + 0x4U),
+         "SEG-021-T008 (edgeless branch): a branch terminal without any discovered edge is not a completed block");
+  for (const auto &edge : partial->accepted_prefix.static_edges) {
+    bool has_terminal_block = false;
+    for (const auto &block : partial->accepted_prefix.static_blocks)
+      has_terminal_block = has_terminal_block ||
+                           block.instructions.back().source.address.value ==
+                               edge.source_instruction.source.address.value;
+    (void)has_terminal_block;
+  }
+  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  expect(!emitted.empty() && !emitted.starts_with("/* translation rejected:"),
+         "SEG-021-T008 (edgeless branch): C4 emits the prefix instead of rejecting the whole translation");
 }
 
 // An isolated admitted root branches into a computed-control JMP (An) with no
@@ -26840,7 +26952,7 @@ int main(int argc, char **argv) {
     expect(emit_general_startup_runtime_c4_bit_manipulation_source(kind, "missing-fact") == 0,
            "C4 bit-manipulation family: foldable-memory RMW destination without a retained fact fails closed");
     expect(emit_general_startup_runtime_c4_bit_manipulation_source(kind, "predecrement") == 0,
-           "C4 bit-manipulation family: auto-updating operand is a clean architecture-decision decline");
+           "C4 bit-manipulation family: auto-updating operand lowers via the deferred address-register commit");
     expect(emit_general_startup_runtime_c4_bit_manipulation_source(kind, "dest-fold") == 0,
            "C4 bit-manipulation family: foldable-memory RMW destination consumes its discovery fact, routed read+write");
   }
@@ -26950,6 +27062,7 @@ int main(int argc, char **argv) {
   general_startup_decode_accepts_indexed_lea_source();
   general_startup_decode_accepts_pc_indexed_lea_source();
   general_startup_decode_accepts_indexed_arithmetic_source();
+  bit_operation_decode_covers_the_full_legal_ea_set_and_rejects_illegal_ones();
   general_startup_retains_indexed_adda_before_a_later_cpu_frontier();
   general_startup_resolves_a_pc_indexed_jsr_through_its_proven_candidate_set();
   general_startup_admits_a_far_indirect_candidate_via_its_own_independent_root_walk();
@@ -27219,6 +27332,7 @@ int main(int argc, char **argv) {
   t223_continuation_capacity_fixture::current_ceiling_plus_one_still_fails_closed();
   t234_adr0038_closure::isolated_root_orphan_rts_two_level_chain_commits();
   t234_adr0038_closure::multiple_predecessors_observe_one_destination_global_frontier();
+  t234_adr0038_closure::branch_terminal_without_discovered_edges_is_not_a_completed_block();
   t234_adr0038_closure::unresolved_computed_control_leaf_still_lets_parent_commit();
   t234_adr0038_closure::one_retained_root_represents_multiple_independent_pruned_leaves_without_conflation();
   t234_adr0038_closure::independent_components_commit_without_conflation();

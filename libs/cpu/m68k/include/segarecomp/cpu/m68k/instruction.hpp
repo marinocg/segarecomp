@@ -301,7 +301,17 @@ inline constexpr M68kEaLegalMask m68k_ea_tst_operand = m68k_ea_data_alterable_wi
 // contract's bit-operation section for the exact scope decision. This is
 // exactly `m68k_ea_data_alterable` (Dn plus the six memory-alterable T023
 // forms BCHG/BCLR/BSET also use) plus `m68k_ea_pc_disp16`.
-inline constexpr M68kEaLegalMask m68k_ea_bit_test_destination = m68k_ea_data_alterable | m68k_ea_pc_disp16;
+// SEG-021-T008: bit-operation legal-EA contract, written from the Motorola M68000 Family Programmer's
+// Reference Manual (BTST/BCHG/BCLR/BSET entries, base MC68000 columns; independent of the T001 dataset):
+//   BCHG/BCLR/BSET (both bit-number forms): data alterable -- Dn, (An), (An)+, -(An), d16(An), (d8,An,Xn),
+//     abs.W, abs.L (never An, PC-relative or immediate).
+//   BTST with a static (#n) bit number: the data-alterable set plus d16(PC) and (d8,PC,Xn); no immediate.
+//   BTST with a dynamic (Dn) bit number: the static set plus #imm.
+inline constexpr M68kEaLegalMask m68k_ea_bit_modify_destination = m68k_ea_data_alterable_with_index;
+inline constexpr M68kEaLegalMask m68k_ea_bit_test_destination =
+    m68k_ea_data_alterable_with_index | m68k_ea_pc_disp16 | m68k_ea_pc_index8;
+inline constexpr M68kEaLegalMask m68k_ea_bit_test_dynamic_destination =
+    m68k_ea_bit_test_destination | m68k_ea_immediate;
 // SEG-007-T025 (Batch C, C5a/C5b/C5c): MOVEM's legal EA sets, verified
 // against M68000PM/AD Rev. 1 Sec 4 MOVEM entry and pinned Musashi's
 // m68k_in.c opcode table ("re ." row legend "A..DXWL...": An indirect,
