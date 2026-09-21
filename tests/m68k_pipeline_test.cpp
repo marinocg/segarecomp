@@ -18452,9 +18452,9 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
        // cut: the bit-test family carries no deferred-commit contract, so it
        // stays a requires_architecture_decision decline (SEG-021-T007 lowers the logical family's) -- this fixture's
        // block-cut/prefix-retention mechanics only need some still-declined
-       // shape; ADDA aliasing, CLR and SUB/CMP auto-update are all lowered now);
+       // shape; ADDA aliasing, CLR, SUB/CMP and (SEG-021-T007) AND/OR/EOR auto-update are all lowered now);
        // BRA.S +2; padding; RESET.  The cut must retain
-       // MOVEQ, omit the declined AND and the terminal BRA, and make
+       // MOVEQ, omit the declined BTST and the terminal BRA, and make
        // RESET's block unreachable from the emitted program-control graph.
         ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x03U, 0x19U, 0x60U, 0x02U,
                                      0x00U, 0x00U, 0x4EU, 0x70U}
@@ -18495,7 +18495,7 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
        // destination_ea.mode.
         ? std::vector<std::uint8_t>{0xE0U, 0xD0U, 0x4EU, 0x70U}
         : c4_dim_bit_test_auto_update
-       // SEG-021-T006: BTST.B D1,(A1)+ (auto-updating bit-test operand, which
+       // SEG-021-T006/T007: BTST D1,(A1)+ (0x0319; auto-updating bit-test operand, which
        // carries no deferred-commit contract and stays a clean
        // M68kC4GapClass::requires_architecture_decision decline); RESET.  This
        // fixture formerly used the ADDA same-register aliasing shape, now
@@ -18584,9 +18584,9 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
         ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x03U, 0x19U, 0x60U, 0x02U,
                                      0x00U, 0x00U, 0x03U, 0x19U, 0x4EU, 0x70U}
         : c4_multi_blocks
-       // BNE.S selects either of two separately reachable ADDA-same-register-
-       // aliasing cut blocks (see c4_prefix's comment above for why this
-       // fixture no longer uses CLR.B -(A0)). Both cut sinks are terminal and
+       // BNE.S selects either of two separately reachable BTST D1,(A1)+
+       // cut blocks (see c4_prefix's comment above for why this
+       // fixture no longer uses CLR.B -(A0) or ADDA/AND auto-update). Both cut sinks are terminal and
        // neither becomes a dispatch arm.
        ? std::vector<std::uint8_t>{0x66U, 0x04U, 0x03U, 0x19U, 0x60U, 0x02U,
                                     0x03U, 0x19U, 0x4EU, 0x70U}
