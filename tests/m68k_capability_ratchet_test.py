@@ -7,7 +7,7 @@ usage: m68k_capability_ratchet_test.py <probe-executable> <c-compiler> <product-
 
 Rules: no form may drop a stage or route; determinism (two runs byte-identical); improvements require a
 deliberate snapshot regeneration (`tools/m68k_capability_coverage.py --update-snapshot`), except for the
-compiler-dependent stages (compile, native_exec, route_direct), where an improvement is only reported.
+compiler-dependent stages (`COMPILER_DEPENDENT` in the tool), where an improvement is only reported.
 """
 import importlib.util
 import json
@@ -21,7 +21,6 @@ TOOL = ROOT / "tools" / "m68k_capability_coverage.py"
 SNAPSHOT = ROOT / "tests" / "fixtures" / "m68k-capability-coverage.json"
 REPORT = ROOT / "docs" / "testing" / "m68k-capability-coverage.md"
 MANIFEST = ROOT / "tests" / "fixtures" / "m68k-validation-manifest.json"
-COMPILER_DEPENDENT = {"compile", "native_exec", "route_direct"}
 PRODUCTION_DIRS = ("libs", "platforms", "apps")
 FORBIDDEN_IN_PRODUCTION = ("m68k_capability", "m68k-capability", "m68k_legal_forms", "m68k-legal-forms")
 FORBIDDEN_IN_TOOL = ("libs/cpu", "cpu/m68k/", "ea_mask", "eamask", "m68k_decode")
@@ -55,18 +54,7 @@ check(current["measurement"]["stage_order"] == snapshot["measurement"]["stage_or
 stages = snapshot["measurement"]["stage_order"]
 check(sorted(current["form_masks"]) == sorted(snapshot["form_masks"]), "form set changed")
 
-drops, improvements, tolerated = [], [], []
-for form_id, old in snapshot["form_masks"].items():
-    new = current["form_masks"][form_id]
-    for stage, o, n in zip(stages, old, new):
-        if o == n:
-            continue
-        if o == "1" and n == "0":
-            drops.append("%s: %s dropped" % (form_id, stage))
-        elif stage in COMPILER_DEPENDENT and o == "0" and n == "1":
-            tolerated.append("%s: %s improved" % (form_id, stage))
-        else:
-            improvements.append("%s: %s %s -> %s" % (form_id, stage, o, n))
+drops, improvements, tolerated = tool.diff_masks(snapshot["form_masks"], current["form_masks"], stages)
 check(not drops, "capability regression (%d): %s" % (len(drops), "; ".join(drops[:10])))
 check(not improvements, "coverage changed without a deliberate snapshot update (%d): %s; run "
       "tools/m68k_capability_coverage.py --update-snapshot" % (len(improvements), "; ".join(improvements[:10])))
@@ -80,11 +68,18 @@ check(REPORT.read_text(encoding="utf-8") == tool.render_report(snapshot), "repor
 manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 _, forms = tool.load_forms()
 legal = {w for f in forms for w in tool.expand(f)}
-listed = {int(w, 16) for w in manifest["semantic_validated_words"]}
-check(listed <= legal, "manifest lists a word that is not a legal primary word")
+for key in ("semantic_validated_words", "ccr_sr_validated_words", "ea_side_effect_validated_words"):
+    check({int(w, 16) for w in manifest[key]} <= legal, "manifest %s lists a non-legal primary word" % key)
+semantic = {int(w, 16) for w in manifest["semantic_validated_words"]}
+check({int(w, 16) for w in manifest["ccr_sr_validated_words"]} <= semantic, "ccr aspect must be a subset of semantic")
+check({int(w, 16) for w in manifest["ea_side_effect_validated_words"]} <= semantic, "ea aspect must be a subset of semantic")
+# Batch B/C compare d, a, pc, sr and ram, so every vector word carries all three aspects.
 for name in ("m68k-batch-b-musashi-vectors", "m68k-batch-c-musashi-vectors"):
     vectors = json.loads((ROOT / "tests" / "fixtures" / (name + ".json")).read_text(encoding="utf-8"))["accepted"]
-    check({int(v["code_hex"][:4], 16) for v in vectors} <= listed, name + " words missing from manifest")
+    words = {int(v["code_hex"][:4], 16) for v in vectors}
+    for key in ("semantic_validated_words", "ccr_sr_validated_words", "ea_side_effect_validated_words"):
+        check(words <= {int(w, 16) for w in manifest[key]}, "%s words missing from manifest %s" % (name, key))
+check(manifest["timing_validated_words"] == [], "no timing oracle test exists; timing manifest must stay empty until one does")
 
 # Independence in both directions.
 tool_text = TOOL.read_text(encoding="utf-8")

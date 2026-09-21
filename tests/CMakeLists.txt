@@ -825,5 +825,8 @@ segarecomp_enable_warnings(m68k_capability_probe)
 add_test(NAME m68k_capability_ratchet_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_capability_ratchet_test.py
   $<TARGET_FILE:m68k_capability_probe> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
-set_property(TEST m68k_capability_ratchet_test APPEND PROPERTY LABELS full fast)
+add_test(NAME m68k_capability_coverage_unit_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_capability_coverage_unit_test.py ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST m68k_capability_ratchet_test m68k_capability_coverage_unit_test APPEND PROPERTY LABELS full fast)
+set_property(TEST m68k_capability_coverage_unit_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST m68k_capability_ratchet_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")

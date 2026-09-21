@@ -5,9 +5,10 @@
 // under one fixed, documented extension-word pattern.
 //
 // stdout: one line per primary word:
-//   XXXX decode lift effects ea_footprint timing emit_direct emit_routed aot static exception_vector
-// (each field 0/1). With --emit-dir, direct-route C for every emitting word is written as batched
-// translation units chunk_NNN.c (bounded functions per unit) for compilation/execution by the driver.
+//   XXXX decode lift effects ea_footprint ccr_declared timing emit_direct emit_routed aot static exception_vector
+// (each field 0/1 except exception_vector). With --emit-dir, direct-route C for every emitting word is
+// written as batched translation units chunk_NNN.c, and Genesis runtime-routed C as rchunk_NNN.c (bounded
+// functions per unit), for compilation/execution by the driver.
 #include "segarecomp/codegen/c11/genesis_frontend.hpp"
 #include "segarecomp/codegen/c11/m68k.hpp"
 #include "segarecomp/cpu/m68k/decode.hpp"
@@ -89,6 +90,40 @@ std::string hex4(unsigned value) {
 
 } // namespace
 
+namespace {
+
+// One batched-translation-unit writer; `prefix` is chunk (direct) or rchunk (runtime-routed).
+struct ChunkWriter {
+  std::string dir, prefix, header, fn_type, touch;
+  std::vector<std::string> functions, names;
+  std::size_t index = 0;
+  void add(const std::string &name, std::string function) {
+    names.push_back(name);
+    functions.push_back(std::move(function));
+    if (functions.size() >= kFunctionsPerChunk) flush();
+  }
+  void flush() {
+    if (dir.empty() || functions.empty()) return;
+    std::ostringstream digits;
+    digits << std::setw(3) << std::setfill('0') << index++;
+    const auto suffix = digits.str();
+    std::ofstream out(dir + "/" + prefix + "_" + suffix + ".c");
+    out << header;
+    for (const auto &fn : functions) out << fn;
+    out << "int cap_touch_" << suffix << "(void) { return " << touch << "; }\n";
+    out << "typedef " << fn_type << " (*cap_fn)(" << (prefix == "chunk" ? "cap_state" : "GenesisRuntime") << " *);\n"
+        << "const cap_fn cap_table_" << suffix << "[] = {";
+    for (const auto &n : names) out << n << ",";
+    out << "};\nconst unsigned short cap_words_" << suffix << "[] = {";
+    for (const auto &n : names) out << "0x" << n.substr(n.size() - 4U) << ",";
+    out << "};\nconst unsigned cap_count_" << suffix << " = " << names.size() << ";\n";
+    functions.clear();
+    names.clear();
+  }
+};
+
+} // namespace
+
 int main(int argc, char **argv) {
   std::string emit_dir;
   for (int i = 1; i < argc; ++i) {
@@ -96,28 +131,19 @@ int main(int argc, char **argv) {
     if (arg == "--emit-dir" && i + 1 < argc) emit_dir = argv[++i];
     else { std::cerr << "usage: m68k_capability_probe [--emit-dir DIR]\n"; return 2; }
   }
-  std::vector<std::string> functions;
-  std::vector<std::string> names;
-  std::size_t chunk_index = 0;
-  const auto flush_chunk = [&] {
-    if (emit_dir.empty() || functions.empty()) return;
-    std::ostringstream name;
-    name << emit_dir << "/chunk_" << std::setw(3) << std::setfill('0') << chunk_index++ << ".c";
-    std::ofstream out(name.str());
-    out << "#include <stdint.h>\n#include <stddef.h>\n"
-           "typedef struct { uint32_t d[8]; uint32_t a[8]; uint16_t sr; uint32_t pc; uint32_t usp; uint8_t ram[0x100000]; } cap_state;\n"
-           "static uint32_t frame_ids[64]; static uint32_t frame_continuations[64]; static uint32_t frame_depth;\n";
-    for (const auto &fn : functions) out << fn;
-    const auto suffix = name.str().substr(name.str().size() - 5U, 3U);
-    out << "int cap_touch_" << suffix << "(void) { return (int)(frame_ids[0] + frame_continuations[0] + frame_depth); }\n";
-    out << "typedef int (*cap_fn)(cap_state *);\nconst cap_fn cap_table_" << suffix << "[] = {";
-    for (const auto &n : names) out << n << ",";
-    out << "};\nconst unsigned short cap_words_" << suffix << "[] = {";
-    for (const auto &n : names) out << "0x" << n.substr(2) << ",";
-    out << "};\nconst unsigned cap_count_" << suffix << " = " << names.size() << ";\n";
-    functions.clear();
-    names.clear();
-  };
+  ChunkWriter direct{emit_dir, "chunk",
+      "#include <stdint.h>\n#include <stddef.h>\n"
+      "typedef struct { uint32_t d[8]; uint32_t a[8]; uint16_t sr; uint32_t pc; uint32_t usp; uint8_t ram[0x100000]; } cap_state;\n"
+      "static uint32_t frame_ids[64]; static uint32_t frame_continuations[64]; static uint32_t frame_depth;\n",
+      "int", "(int)(frame_ids[0] + frame_continuations[0] + frame_depth)", {}, {}, 0};
+  ChunkWriter routed_writer{emit_dir, "rchunk",
+      "#include \"runtime.h\"\n"
+      "static uint32_t frame_ids[64]; static uint32_t frame_continuations[64]; static uint32_t frame_depth;\n"
+      "/* The generated-program prelude helpers the routed lowering calls (mirrors the emitted definitions). */\n"
+      "static GenesisControlTransfer genesis_static_stop(GenesisStopClass c, GenesisDiagnosticCategory d, const GenesisInstructionProvenance *p, uint8_t h, uint32_t a, GenesisAccessWidth w, GenesisAccessDirection x) { GenesisControlTransfer t = {0}; t.kind = GENESIS_STOP; t.stop.stop_class = c; t.stop.diagnostic_category = d; t.stop.provenance.has_instruction_provenance = 1U; t.stop.provenance.instruction = *p; t.stop.provenance.has_access = h; t.stop.provenance.access_address = a; t.stop.provenance.access_width = w; t.stop.provenance.access_direction = x; return t; }\n"
+      "static void genesis_attach_route_provenance(GenesisRuntimeStop *stop, const GenesisInstructionProvenance *p) { (void)stop; (void)p; }\n"
+      "#define pc runtime->pc\n",
+      "GenesisControlTransfer", "((void)genesis_static_stop, (void)genesis_attach_route_provenance, (int)(frame_ids[0] + frame_continuations[0] + frame_depth))", {}, {}, 0};
 
   for (unsigned word = 0; word < 0x10000U; ++word) {
     const auto image = make_image(static_cast<std::uint16_t>(word));
@@ -126,7 +152,7 @@ int main(int argc, char **argv) {
     const auto decoded_result =
         decode_m68k_instruction(std::span<const std::uint8_t>(image), source, M68kDecodeProfile::general_startup);
     const auto *decoded = std::get_if<M68kDecodedInstruction>(&decoded_result);
-    bool decode = decoded != nullptr, lift = false, effects = false, footprint = false, timing = false;
+    bool decode = decoded != nullptr, lift = false, effects = false, footprint = false, ccr = false, timing = false;
     unsigned exception_vector = 0U;
     bool emit_direct = false, emit_routed = false, aot = false, statik = false;
     if (decode) {
@@ -135,18 +161,26 @@ int main(int argc, char **argv) {
       const auto effect = m68k_operation_effect(operation);
       effects = lift && effect.pc != M68kPcEffectKind::none;
       footprint = lift && effect.register_write_footprint_complete;
+      ccr = lift && effect.affects_condition_codes;
       exception_vector = lift && effect.may_raise_synchronous_exception ? effect.exception_vector : 0U;
       timing = lift && m68k_instruction_cycles(operation).has_value();
       emit_direct = lift && m68k_operation_has_complete_c_emission(operation);
       if (lift) {
-        M68kMemoryEmissionContext routed{"ram", "a", "frame_ids", "frame_continuations", "frame_depth", 0U,
-                                         M68kOperandAccess::runtime_routed, 0U, {}, {}};
+        M68kMemoryEmissionContext routed{"runtime->work_ram", "runtime->a", "frame_ids", "frame_continuations",
+                                         "frame_depth", 0U, M68kOperandAccess::runtime_routed, 0U, {}, {}};
         routed.user_stack_pointer = "runtime->usp";
         routed.runtime_routing = true;
         routed.runtime_object = "runtime";
-        routed.program_counter = "runtime->pc";
+        routed.linear_memory_begin = 0x00FF0000U;
+        routed.linear_memory_end = 0x01000000U;
         routed.runtime_emitter = &genesis_m68k_runtime_c_emitter();
-        emit_routed = !emit_m68k_operation_c(operation, "runtime->d", "runtime->sr", {}, &routed).empty();
+        const auto routed_body = emit_m68k_operation_c(operation, "runtime->d", "runtime->sr", "  ", &routed);
+        emit_routed = !routed_body.empty();
+        if (emit_routed && !emit_dir.empty()) {
+          const auto name = "rw_" + hex4(word);
+          routed_writer.add(name, "static GenesisControlTransfer " + name + "(GenesisRuntime *runtime) {\n" + routed_body +
+              "  { GenesisControlTransfer done = {0}; done.kind = GENESIS_CONTINUE_AT_PC; done.next_pc = pc; return done; }\n}\n");
+        }
         aot = m68k_operation_is_immutable_rom_aot_safe(operation, true);
         const auto length = static_cast<std::size_t>(operation.provenance.length.value);
         auto flat = std::vector<std::uint8_t>(image.begin(), image.begin() + static_cast<std::ptrdiff_t>(
@@ -166,15 +200,14 @@ int main(int argc, char **argv) {
         memory.user_stack_pointer = "s->usp";
         const auto body = emit_m68k_operation_c(operation, "s->d", "s->sr", "  ", &memory);
         const auto name = "w_" + hex4(word);
-        functions.push_back("static int " + name + "(cap_state *s) {\n  uint32_t pc = s->pc;\n" + body +
-                            "  s->pc = pc;\n  return 0;\n}\n");
-        names.push_back(name);
-        if (functions.size() >= kFunctionsPerChunk) flush_chunk();
+        direct.add(name, "static int " + name + "(cap_state *s) {\n  uint32_t pc = s->pc;\n" + body +
+                             "  s->pc = pc;\n  return 0;\n}\n");
       }
     }
-    std::printf("%s %d %d %d %d %d %d %d %d %d %u\n", hex4(word).c_str(), decode, lift, effects, footprint,
+    std::printf("%s %d %d %d %d %d %d %d %d %d %d %u\n", hex4(word).c_str(), decode, lift, effects, footprint, ccr,
                 timing, emit_direct, emit_routed, aot, statik, exception_vector);
   }
-  flush_chunk();
+  direct.flush();
+  routed_writer.flush();
   return 0;
 }
