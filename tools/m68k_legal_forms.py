@@ -310,6 +310,22 @@ def build_partition(words_by_priv):
     return cls
 
 
+def to_ranges(words):
+    """Sorted unique words -> inclusive [lo, hi] runs (deterministic, lossless)."""
+    runs = []
+    for w in sorted(set(words)):
+        if runs and runs[-1][1] + 1 == w:
+            runs[-1][1] = w
+        else:
+            runs.append([w, w])
+    return runs
+
+
+def expand_ranges(ranges):
+    """Inverse of to_ranges: the exact concrete primary opcode words a form represents."""
+    return [w for lo, hi in ranges for w in range(lo, hi + 1)]
+
+
 def derive():
     ROWS.clear()
     _WORD_OWNER.clear()
@@ -334,7 +350,9 @@ def derive():
     assert sum(counts.values()) == 0x10000
     assert set(families) == set(FAMILIES), families.keys()
     columns = ["id", "mnemonic", "family", "form", "size", "src", "dst", "variant", "privilege",
-               "exceptions", "auto_update", "words"]
+               "exceptions", "auto_update", "words", "word_ranges"]
+    for r in ROWS:
+        r["word_ranges"] = to_ranges(r["_words"])
     data = {
         "schema": SCHEMA,
         "dataset": "m68k-legal-forms",
@@ -359,6 +377,11 @@ def derive():
             "primary_word_partition": "letters " + ", ".join("%s=%s" % kv for kv in sorted(LEGEND.items())),
         },
         "ea_classes": {k: EA_DESCRIPTIONS[k] for k in ALL},
+        "concrete_encodings": "each form row's 'word_ranges' is the exact, disjoint set of concrete primary opcode words "
+                              "(inclusive [lo,hi] runs, ascending) that the aggregate form represents; register numbers, "
+                              "quick/count/data8/vector operand values and conditions are therefore preserved. A consumer "
+                              "may declare an aggregate form supported only if every listed word passes; 'words' is the "
+                              "expanded size of the ranges",
         "form_columns": columns,
         "forms": [[r[c] for c in columns] for r in ROWS],
         "family_counts": families,
@@ -400,8 +423,14 @@ def default_output():
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--output", type=pathlib.Path, default=default_output())
+    ap.add_argument("--expand", metavar="FORM_ID", help="print the concrete primary words of a form id (hex) from --output")
     ap.add_argument("--check", action="store_true", help="fail if the output differs from a fresh derivation")
     args = ap.parse_args(argv)
+    if args.expand:
+        d = json.loads(args.output.read_text())
+        rows = {r[0]: dict(zip(d["form_columns"], r)) for r in d["forms"]}
+        print("\n".join("%04X" % w for w in expand_ranges(rows[args.expand]["word_ranges"])))
+        return 0
     text = render(derive())
     if args.check:
         return 0 if args.output.read_bytes() == text.encode("utf-8") else 1

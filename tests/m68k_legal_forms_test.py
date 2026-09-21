@@ -164,6 +164,65 @@ def test_counts_and_vocabulary():
     check(part[0xA0][0] == "A" and part[0xF0][0] == "F", "line A/F classes")
 
 
+def _rows():
+    data = json.loads(FIXTURE.read_text())
+    return data, [dict(zip(data["form_columns"], r)) for r in data["forms"]]
+
+
+def test_concrete_encoding_mapping():
+    """Every aggregate form maps unambiguously to its exact concrete primary encodings."""
+    data, rows = _rows()
+    check("word_ranges" in data["form_columns"] and "concrete_encodings" in data, "concrete-encoding contract missing")
+    owner = {}
+    for r in rows:
+        prev_hi = -2
+        total = 0
+        for lo, hi in r["word_ranges"]:
+            check(0 <= lo <= hi <= 0xFFFF and lo > prev_hi + 1, "%s: ranges not ascending/non-adjacent/in-bounds" % r["id"])
+            prev_hi = hi
+            total += hi - lo + 1
+            for w in range(lo, hi + 1):
+                check(w not in owner, "word %04X owned by both %s and %s" % (w, owner.get(w), r["id"]))
+                owner[w] = r["id"]
+        check(total == r["words"], "%s: ranges expand to %d words, row says %d" % (r["id"], total, r["words"]))
+    letters = "".join(data["primary_word_partition"]["rows"])
+    legal = {w for w, c in enumerate(letters) if c in "LP"}
+    check(set(owner) == legal, "union of form encodings != legal partition (holes or extras)")
+    check(len(owner) == EXPECTED_LEGAL_WORDS, "concrete legal word count")
+    by_id = {r["id"]: r for r in rows}
+    for w, c in enumerate(letters):
+        if c in "LP":
+            check((by_id[owner[w]]["privilege"] == "supervisor") == (c == "P"), "privilege disagrees at %04X" % w)
+
+
+def test_register_count_condition_variants_enumerable():
+    _, rows = _rows()
+    by_id = {r["id"]: r for r in rows}
+
+    def words(fid):
+        return {w for lo, hi in by_id[fid]["word_ranges"] for w in range(lo, hi + 1)}
+
+    # register identity: ADDQ.W #q,An covers every An (incl. A0, A5, A7) and every quick value 1..8
+    addq = words("addq.quick_ea.w.quick.an.quick1to8")
+    for a in (0, 5, 7):
+        for q in range(8):
+            check(0x5048 | q << 9 | a in addq, "ADDQ.W An=%d quick=%d missing" % (a, q))
+    # data8: every MOVEQ immediate for every Dn
+    moveq = words("moveq.imm8_dn.l.imm8.dn.data8")
+    check(len(moveq) == 2048 and all(0x7000 | d << 9 | i in moveq for d in range(8) for i in (0, 0x7F, 0x80, 0xFF)), "MOVEQ data8/Dn")
+    # conditions stay fully distinguishable: 14 Bcc conditions, pairwise disjoint, distinct condition field
+    bcc = [r for r in rows if r["mnemonic"] == "Bcc"]
+    conds = {r["variant"] for r in bcc}
+    check(len(conds) == 14, "Bcc must expose 14 conditions (BRA/BSR are separate forms)")
+    for c in conds:
+        fields = {(w >> 8) & 0xF for r in bcc if r["variant"] == c for lo, hi in r["word_ranges"] for w in range(lo, hi + 1)}
+        check(len(fields) == 1, "Bcc condition %s spans multiple condition fields" % c)
+    # the expansion CLI agrees with the fixture
+    r = subprocess.run([sys.executable, str(TOOL), "--output", str(FIXTURE), "--expand", "moveq.imm8_dn.l.imm8.dn.data8"],
+                       capture_output=True, text=True)
+    check(r.returncode == 0 and sorted(int(x, 16) for x in r.stdout.split()) == sorted(moveq), "--expand disagrees with fixture")
+
+
 def test_sweep_fixture_shape():
     fx = json.loads(SWEEP_FIXTURE.read_text())
     check(fx["unexplained_disagreements"] == 0, "sweep fixture records unexplained disagreements")
@@ -174,7 +233,8 @@ def test_sweep_fixture_shape():
 
 def main():
     for t in (test_independence, test_independence_detectors_bite, test_reproducible,
-              test_counts_and_vocabulary, test_sweep_fixture_shape):
+              test_counts_and_vocabulary, test_concrete_encoding_mapping,
+              test_register_count_condition_variants_enumerable, test_sweep_fixture_shape):
         t()
     print("m68k legal-form dataset tests passed")
     return 0

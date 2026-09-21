@@ -1,0 +1,3 @@
+# Keep generated/fixture data byte-stable across platforms (Windows autocrlf otherwise rewrites line endings).
+tests/fixtures/m68k-*.json text eol=lf
+tools/m68k_legal_forms.py text eol=lf
