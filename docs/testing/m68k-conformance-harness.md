@@ -45,6 +45,12 @@ Extension-bearing and no-operand canaries are ordinary committed rows validated 
 expands (without crediting) two-auto-update, displacement, brief-indexed, absolute, PC-relative, immediate, STOP, LINK,
 MOVEM, Bcc and TRAP shapes to prove later family tasks only add rows.
 
+Aliasing of an address-register operand value with a memory pointer (ADDA `(An)+,An`, MOVE.L `An,(An)+`): the bound
+register value is also the pointer, so such rows take pair values from the table's `values.alias_pointer` (in-window
+addresses) instead of the profile pairs; an A7 operand value also becomes the active stack pointer of the vector.
+Rows exist for every legal ordinary auto-update shape of MOVE/MOVEA/ADD/SUB/CMP/ADDA/SUBA/CMPA/logical/immediate/quick/
+unary families; CMPM, ADDX/SUBX and NEGX rows are absent because production has no decoder for them yet.
+
 ## Compared state
 
 D0-D7, A0-A7 (A7 = active stack pointer), PC, SR/CCR, USP, SSP, byte-granular memory writes against the initial

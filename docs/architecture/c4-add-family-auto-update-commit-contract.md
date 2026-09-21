@@ -123,3 +123,24 @@ gap rows unchanged.
 - No change to the shared `m68k_emit_ea_read` / `m68k_emit_ea_write` /
   `m68k_emit_runtime_ea_address` / `m68k_emit_routed_read` / `m68k_emit_routed_write` primitives.
 - No new `M68kIrKind`, persistent state, interpreter/JIT, or runtime opcode decode.
+
+## SEG-021-T004 operand/update mechanism inventory (evidence, no emitter change)
+
+The legal-form matrix was exercised through the T003 harness (direct linear route, generated-native vs pinned
+Musashi) for every legal ordinary auto-update shape of the emitted families: MOVE `(An)+`/`-(An)` as source,
+destination and both (same or different An), MOVEA/ADDA/SUBA/CMPA with `(An)+`/`-(An)` source including the
+destination An equal to the pointer An, ADD/SUB/CMP `<ea>,Dn` auto sources, ADD/SUB/AND/OR/EOR `Dn,<ea>`,
+ADDI/SUBI/ANDI/ORI/EORI/CMPI, ADDQ/SUBQ, CLR/TST/NOT/NEG memory RMW with auto destinations, byte-A7 stepping
+(step 2) and word/long, both stack modes. Every one already matches Musashi (D/A/PC/SR/USP/SSP, byte memory
+writes), so no legal ordinary shape is declined and no emitted output changed. Decision per shape:
+
+| shape | mechanism | reason |
+| --- | --- | --- |
+| single auto operand, read-only (TST, CMP, MUL/DIV, MOVEA/ADDA source) | shared `m68k_emit_ea_read` / `m68k_emit_materialized_ea_read` | one address, one mutation ordered by the shared primitive |
+| single auto destination RMW (AND/OR/EOR/NOT/CLR/NEG/bit/shift) | shared read-then-write with mode demoted to `(An)` | the read owns the mutation; the write reuses the computed address |
+| ADD-family / SUBI routed auto-commit, MOVE/MOVEA routed commit | family-local (unchanged) | runtime-routed access may stop; the routed contracts require one local address and one commit after all routed accesses; these paths are not exercised by the linear harness and stay under their Genesis/contract tests |
+| same An in both operands (MOVE, ADDA with An dest) | already handled by the existing local snapshot | value read at the pre-mutation snapshot; harness rows with in-window pointer values match Musashi |
+
+Not merged into one universal helper: the families differ in routed-stop commit order, so a merge would change
+byte-comparable routed output without evidence of a defect. Remaining declines are missing families rather than
+shape declines: CMPM, ADDX/SUBX, ABCD/SBCD and NEGX have no decoded `M68kIrKind` (harness reports `unsupported`).
