@@ -156,6 +156,28 @@ def arithmetic_cases():
                 for q in (1, 0):
                     for reg in (1, 7):  # ADDQ/SUBQ to An: word/long, no CCR change
                         add("%04X" % (quick | (q << 9) | (sf << 6) | (1 << 3) | reg))
+    # SEG-021-T007: AND/OR/EOR and ANDI/ORI/EORI, every legal source/destination class incl. auto-updating ones.
+    for name, base in (("and", 0xC000), ("or", 0x8000), ("eor", 0xB000)):
+        for size, opmode in (("b", 0), ("w", 1), ("l", 2)):
+            if name != "eor":
+                for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
+                    for reg in ((1, 7) if mode in (3, 4) else (1,)):
+                        for dn in (2, 1):
+                            add("%04X" % (base | (dn << 9) | (opmode << 6) | (mode << 3) | reg) + ext, (mode,))
+                add("%04X" % (base | (2 << 9) | (opmode << 6) | (7 << 3) | 4) + imm[size].rjust(4 if size != "l" else 8, "0"))
+            # Dn,<ea>: read-modify-write (AND/OR memory alterable; EOR also Dn).
+            for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
+                if mode == 0 and name != "eor":
+                    continue
+                for reg in ((1, 7) if mode in (3, 4) else (1,)):
+                    for dn in (2, 1, 7):
+                        add("%04X" % (base | (dn << 9) | ((opmode + 4) << 6) | (mode << 3) | reg) + ext, (mode,))
+    for name, base in (("andi", 0x0200), ("ori", 0x0000), ("eori", 0x0A00)):
+        for size, sf in (("b", 0), ("w", 1), ("l", 2)):
+            immw = {"b": "00A5", "w": "8001", "l": "80000001"}[size]
+            for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
+                for reg in ((1, 7) if mode in (3, 4) else (1,)):
+                    add("%04X" % (base | (sf << 6) | (mode << 3) | reg) + immw + ext, (mode,))
     return out
 
 

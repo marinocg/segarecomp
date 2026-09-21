@@ -2194,8 +2194,9 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     if (const auto update = m68k_c4_auto_update_class(ea.mode); update != M68kC4AutoUpdateClass::none) {
       // SEG-021-T005: TST lowers its own auto-updating operand through the deferred address-register
       // commit (test_operand case of emit_m68k_operation_c); only the ANDI/ORI/EORI destinations still decline.
-      if (operation.kind != M68kIrKind::test_operand)
-        add(role, ea.mode, update, M68kC4GapClass::requires_architecture_decision, "deferred address commit");
+      // SEG-021-T007: ANDI/ORI/EORI destinations likewise lower through the logical-family deferred
+      // address-register commit helper; no gap row for any of the three.
+      (void)update;
     } else {
       check_fact(ea, role, fact_role);
     }
@@ -2210,18 +2211,10 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     // non-auto foldable memory source needs source_read; a non-auto foldable
     // memory RMW destination needs destination_read + destination_write,
     // mirroring `add`'s own destination shape.
-    bool declined = false;
-    if (const auto update = m68k_c4_auto_update_class(operation.source_ea.mode); update != M68kC4AutoUpdateClass::none) {
-      add(M68kC4OperandRole::source, operation.source_ea.mode, update,
-          M68kC4GapClass::requires_architecture_decision, "deferred address commit");
-      declined = true;
-    }
-    if (const auto update = m68k_c4_auto_update_class(operation.destination_ea.mode);
-        update != M68kC4AutoUpdateClass::none) {
-      add(M68kC4OperandRole::destination, operation.destination_ea.mode, update,
-          M68kC4GapClass::requires_architecture_decision, "deferred address commit");
-      declined = true;
-    }
+    // SEG-021-T007: an auto-updating operand is lowered by the logical-family deferred-address-commit
+    // helper (emit_m68k_operation_c, routed): no gap row. A non-auto foldable operand still needs its facts.
+    const bool declined = m68k_c4_auto_update_class(operation.source_ea.mode) != M68kC4AutoUpdateClass::none ||
+                          m68k_c4_auto_update_class(operation.destination_ea.mode) != M68kC4AutoUpdateClass::none;
     if (!declined) {
       check_fact(operation.source_ea, M68kC4OperandRole::source, M68kStaticMemoryFactRole::source_read);
       if (operation.destination_ea.mode != M68kEaMode::data_register &&
@@ -3004,6 +2997,10 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
           kind != M68kInstructionKind::clr && kind != M68kInstructionKind::movea &&
           // SEG-021-T005: `tst` and `not` lower their own auto-updating operand (deferred commit).
           kind != M68kInstructionKind::tst && kind != M68kInstructionKind::not_operand &&
+          // SEG-021-T007: AND/OR/EOR and ANDI/ORI/EORI lower their own auto-updating operand (deferred commit).
+          kind != M68kInstructionKind::logical_and && kind != M68kInstructionKind::logical_or &&
+          kind != M68kInstructionKind::eor && kind != M68kInstructionKind::andi &&
+          kind != M68kInstructionKind::ori && kind != M68kInstructionKind::eori &&
           // SEG-021-T006: SUBA, CMP, CMPA and CMPI lower their own auto-updating operand (deferred commit).
           kind != M68kInstructionKind::suba && kind != M68kInstructionKind::cmp &&
           kind != M68kInstructionKind::cmpa && kind != M68kInstructionKind::cmpi &&
