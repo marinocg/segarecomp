@@ -94,3 +94,16 @@ runs the Genesis runtime-routed lowering, the route C4 and the immutable-ROM AOT
 lowering on identical vectors, so the routed deferred-commit code inherits the Musashi evidence. Absolute and
 PC-relative operands are outside that test by construction (they address cartridge space or the sign-extended top
 of the address space, which the work-RAM-only routed environment cannot host) and are covered by the direct rows only.
+
+## SEG-021-T006: ADD / ADDA / ADDI / ADDQ, SUB / SUBA / SUBI / SUBQ, CMP / CMPA / CMPI rows
+
+Rows exist for every legal form of the eleven mnemonics (all sizes, directions and EA classes including brief-indexed
+and PC-relative-indexed sources, indexed and absolute RMW destinations, immediate and quick forms, ADDQ/SUBQ to An,
+and the ADDA/SUBA `(An)+`/`-(An)` same-register alias). Extension conventions are those of T005; immediate forms use
+two (byte/word) or three encodings per size. Legality is encoded in `libs/cpu/m68k` from the Motorola manual
+(`m68k_ea_add_sub_cmp_source`, `m68k_ea_data_alterable_with_index`) and never reads the T001 dataset. All 787 rows match the
+pinned Musashi. `m68k_routed_lowering_test.py` additionally compares the routed lowering to the direct one for every
+legal shape (the direct lowering is emitted with the emitter's `--window` option so its linear window sits at the
+work-RAM addresses and both sides see identical An values, including An sources and CMPA), and forces a routed-access stop for
+every auto-updating shape to prove no partial architectural mutation. The immutable-ROM AOT predicate now admits
+the whole family (the emitter still fails closed on a shape it cannot lower).

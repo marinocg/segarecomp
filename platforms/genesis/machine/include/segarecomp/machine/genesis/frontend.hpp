@@ -689,47 +689,24 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
   case M68kIrKind::compare:
   case M68kIrKind::compare_immediate:
   case M68kIrKind::compare_address:
-    // SEG-007-T249 (bounded family inventory, consuming T248's continuation
-    // handoff): compare never writes back -- `emit_m68k_operation_c`'s
-    // shared `compare`/`compare_immediate`/`compare_address` case
-    // (libs/codegen/c11/src/m68k.cpp) only ever routes BOTH operands through
-    // `m68k_emit_materialized_ea_read`/`m68k_emit_ea_read`, then performs a
-    // condition-code update and a PC advance -- it never invokes
-    // `m68k_emit_ea_write` at all, so it carries none of the destination
-    // read-modify-write risk the add/subtract/logical family below still
-    // has. Its admission can therefore be exactly as broad, independently
-    // for EITHER operand, as `test_operand`'s own already-proven-safe list
-    // (`address_disp16`, `address_index8`): neither mode ever mutates any
-    // address register, and a failed routed read returns strictly before
-    // the CCR-update/PC-advance statements that follow it, so a routed-read
-    // failure can never partially mutate architectural state. `compare`/
-    // `compare_address` (CMP/CMPA)'s own destination is always a fixed
-    // Dn/An register (`m68k_decode_general_compare`'s `dst` is always
-    // `{address_register-or-data_register, destination}` -- already
-    // storage_free), and their source is legalized through `m68k_ea_
-    // arithmetic_logical_indexed_source`, which legally reaches both
-    // `address_disp16` and `address_index8` -- this is the actually
-    // reachable shape this admission widens. `compare_immediate` (CMPI)'s
-    // source is always the instruction-embedded immediate (already
-    // storage_free), and its destination is legalized through `m68k_ea_
-    // data_alterable`, which reaches `address_disp16` but never `address_
-    // index8` -- so this predicate's own `address_index8`-for-destination
-    // clause is a harmless, never-reached combination for CMPI specifically
-    // (decode never produces it), symmetric with `test_operand`'s own
-    // uniform treatment of both addressing-mode classes.
-    {
-      const auto compare_operand_safe = [&](const M68kEffectiveAddress &ea) {
-        return storage_free(ea) || ea.mode == M68kEaMode::address_disp16 ||
-               ea.mode == M68kEaMode::address_index8;
-      };
-      return compare_operand_safe(operation.source_ea) && compare_operand_safe(operation.destination_ea);
-    }
   case M68kIrKind::add:
   case M68kIrKind::add_address:
   case M68kIrKind::add_immediate:
+  case M68kIrKind::add_quick:
   case M68kIrKind::subtract:
   case M68kIrKind::subtract_address:
   case M68kIrKind::subtract_immediate:
+  case M68kIrKind::subtract_quick:
+    // SEG-021-T006: ADD/ADDA/ADDI/ADDQ, SUB/SUBA/SUBI/SUBQ and CMP/CMPA/CMPI family-level
+    // admission (supersedes the per-EA-mode carve-outs of SEG-007-T248/T249). Every legal
+    // EA mode of these mnemonics lowers through the shared C4 routed read/write primitives
+    // with no CFG edge, call frame, return target or static memory fact: a failed routed
+    // access returns before any architectural write; auto-updating operands use the
+    // operation-local deferred address-register commit (c4-add-family-auto-update-commit-
+    // contract.md); compare never writes back. The emitter itself fails closed on any
+    // shape it cannot lower (the C4 route-admission gate is unchanged), and legality of the
+    // operand modes is owned by decode, not by this predicate.
+    return true;
   case M68kIrKind::logical_and:
   case M68kIrKind::logical_and_immediate:
   case M68kIrKind::logical_or:
@@ -785,40 +762,6 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     return storage_free(operation.source_ea) &&
            (storage_free(operation.destination_ea) ||
             operation.destination_ea.mode == M68kEaMode::address_disp16);
-  case M68kIrKind::add_quick:
-  case M68kIrKind::subtract_quick:
-    // SEG-007-T248 (eighth iteration, same bounded family, same
-    // architectural seam): ADDQ/SUBQ's own decode contract
-    // (libs/cpu/m68k/src/decode.cpp) always overrides `source_ea` to
-    // `M68kEaMode::immediate` (the instruction-embedded quick data field),
-    // never a real EA read, so `storage_free(source_ea)` is unconditionally
-    // true here and carries no additional risk regardless of destination.
-    // The read-modify-write destination is admitted for `address_index8` on
-    // the same reasoning as `write_move`/`test_operand` above: both
-    // `add_quick`'s and `subtract_quick`'s shared C4 lowering
-    // (libs/codegen/c11/src/m68k.cpp) route their plain (non-auto-updating)
-    // memory destination through the exact same `m68k_emit_ea_read` (RMW
-    // read side) then `m68k_emit_ea_write` (write side, using the
-    // destination's own unchanged EA -- `address_index8` is neither
-    // `address_predec` nor `address_postinc`, so it is never rewritten to
-    // `address_indirect` the way those two auto-updating modes are) --
-    // identical to every other admitted `address_index8` shape: no address-
-    // register mutation, no deferred-commit machinery, no Q3-style aliasing
-    // hazard (recomputing the same non-mutating EA twice, once for the read
-    // and once for the write, is idempotent since neither An nor Xn ever
-    // changes), and no static fact of any kind. A routed-read failure
-    // returns before the write is ever emitted; a routed-write failure
-    // returns before the CCR-update/PC-advance statement that follows it,
-    // so neither can partially mutate architectural state. Every other
-    // memory destination ((An), (An)+, -(An), d16(An)) remains excluded
-    // pending its own independent proof, and the auto-updating (An)+/-(An)
-    // destination path above is unaffected (this predicate is never
-    // consulted for that already-distinct deferred-commit branch's own
-    // shape, since `address_index8` never matches `address_predec`/
-    // `address_postinc`).
-    return storage_free(operation.source_ea) &&
-           (storage_free(operation.destination_ea) ||
-            operation.destination_ea.mode == M68kEaMode::address_index8);
   case M68kIrKind::bit_change:
   case M68kIrKind::bit_clear:
   case M68kIrKind::bit_set:

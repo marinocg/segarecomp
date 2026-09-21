@@ -409,6 +409,113 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
   }
   return result;
 }
+
+// SEG-021-T006: runtime-routed lowering of an auto-updating ((An)+ / -(An)) operand of the
+// SUB/SUBA/SUBQ/SUBI and CMP/CMPA/CMPI families through the operation-local deferred-address
+// commit technique of docs/architecture/c4-add-family-auto-update-commit-contract.md: the
+// touched An is snapshotted into one local, predecrement/postincrement act on that local only,
+// every routed access uses it, and the live register is committed in one statement strictly after
+// every routed access (a runtime stop returns from inside the access, before any architectural
+// write, leaving the guest at the pre-instruction boundary). Legal forms carry at most one auto-
+// updating operand. Returns false when the operation has no auto-updating operand or is not
+// routed (the caller's ordinary path then applies unchanged).
+[[nodiscard]] bool m68k_emit_routed_arith_auto_update(std::ostringstream &output, const M68kIrOperation &operation,
+                                                     std::string_view data_registers,
+                                                     std::string_view status_register,
+                                                     const M68kMemoryEmissionContext &memory) {
+  if (!memory.runtime_routing) return false;
+  const auto is_auto = [](const M68kEffectiveAddress &ea) {
+    return ea.mode == M68kEaMode::address_predec || ea.mode == M68kEaMode::address_postinc;
+  };
+  const bool source_auto = is_auto(operation.source_ea);
+  const bool destination_auto = is_auto(operation.destination_ea);
+  if (!source_auto && !destination_auto) return false;
+  const bool compare = operation.kind == M68kIrKind::compare || operation.kind == M68kIrKind::compare_immediate ||
+                       operation.kind == M68kIrKind::compare_address;
+  const bool address_operation =
+      operation.kind == M68kIrKind::subtract_address || operation.kind == M68kIrKind::compare_address;
+  const char *prefix = compare ? "cmp" : "sub";
+  const auto &auto_ea = source_auto ? operation.source_ea : operation.destination_ea;
+  const auto width = static_cast<std::uint32_t>(operation.size);
+  const std::uint32_t step =
+      (static_cast<unsigned>(auto_ea.reg) == 7U && operation.size == M68kMemoryAccessWidth::byte) ? 2U : width;
+  const auto an_expr = [&](unsigned reg) { return std::string(memory.address_registers) + "[" + std::to_string(reg) + "]"; };
+  const auto dn_expr = [&](unsigned reg) { return std::string(data_registers) + "[" + std::to_string(reg) + "]"; };
+  const std::string local = std::string("m68k_") + prefix + "_auto_ea";
+  // Decode fixes the other operand to Dn/An or an instruction-embedded immediate; anything else is declined
+  // (no output), never guessed.
+  const auto &other = source_auto ? operation.destination_ea : operation.source_ea;
+  if (other.mode != M68kEaMode::data_register && other.mode != M68kEaMode::address_register &&
+      other.mode != M68kEaMode::immediate)
+    return true;
+  const bool alias = source_auto && address_operation &&
+                     other.mode == M68kEaMode::address_register && other.reg == auto_ea.reg;
+  unsigned temp_ordinal = 0U;
+  std::ostringstream body;
+  body << "uint32_t " << local << " = " << an_expr(auto_ea.reg) << ";\n";
+  if (auto_ea.mode == M68kEaMode::address_predec) body << local << " -= UINT32_C(" << step << ");\n";
+  const auto other_expr = [&](const M68kEffectiveAddress &ea) -> std::string {
+    if (ea.mode == M68kEaMode::data_register) return dn_expr(ea.reg);
+    if (ea.mode == M68kEaMode::address_register) return an_expr(ea.reg);
+    return "UINT32_C(0x" + hex(ea.immediate_value, 8) + ")";
+  };
+  std::string source_expr;
+  std::string destination_expr;
+  if (source_auto) {
+    m68k_emit_routed_read(body, local, operation.size, memory, source_expr, temp_ordinal);
+    if (auto_ea.mode == M68kEaMode::address_postinc) body << local << " += UINT32_C(" << step << ");\n";
+    // Motorola/Musashi order: the source auto-update is applied first, so an aliased An destination operand
+    // is the already-updated register (pinned by the direct SUBA/CMPA alias rows).
+    destination_expr = alias ? local : other_expr(other);
+  } else {
+    source_expr = other_expr(other);
+    m68k_emit_routed_read(body, local, operation.size, memory, destination_expr, temp_ordinal);
+  }
+  const bool word_address = address_operation && operation.size == M68kMemoryAccessWidth::word;
+  const std::string source_value = word_address ? m68k_sign_extend_expr(source_expr, operation.size) : source_expr;
+  const auto arithmetic_size = address_operation ? M68kMemoryAccessWidth::long_word : operation.size;
+  body << "{ const uint32_t " << prefix << "_source = " << source_value << "; const uint32_t " << prefix
+       << "_destination = " << destination_expr << "; ";
+  if (compare) {
+    M68kSubtractionResultSpecification::emit_c_update(body, status_register, std::string(prefix) + "_source",
+                                                      std::string(prefix) + "_destination", arithmetic_size,
+                                                      m68k_operation_effect(operation).extend_flag_policy);
+    if (destination_auto && auto_ea.mode == M68kEaMode::address_postinc)
+      body << local << " += UINT32_C(" << step << ");\n";
+    body << " }\n";
+  } else {
+    body << "const uint32_t sub_result = sub_destination - sub_source; ";
+    if (operation.kind == M68kIrKind::subtract_address) {
+      body << an_expr(operation.destination_ea.reg) << " = sub_result; }\n";
+    } else if (destination_auto) {
+      m68k_emit_routed_write(body, local, operation.size, memory, "sub_result", temp_ordinal);
+      if (auto_ea.mode == M68kEaMode::address_postinc) body << local << " += UINT32_C(" << step << ");\n";
+      M68kSubtractionResultSpecification::emit_c_update(body, status_register, "sub_source", "sub_destination",
+                                                        operation.size, M68kExtendFlagPolicy::from_carry);
+      body << " }\n";
+    } else {
+      std::ostringstream write_prelude;
+      const auto write = m68k_emit_ea_write(operation.destination_ea, operation.size, data_registers, memory,
+                                            "sub_result", write_prelude, temp_ordinal);
+      if (!write.ok) return true;
+      body << write_prelude.str() << write.expression << ' ';
+      M68kSubtractionResultSpecification::emit_c_update(body, status_register, "sub_source", "sub_destination",
+                                                        operation.size, M68kExtendFlagPolicy::from_carry);
+      body << " }\n";
+    }
+  }
+  // The single deferred live-register commit, strictly after every routed access. It is skipped only when the
+  // arithmetic result itself is written to that same An (SUBA aliasing): the sum write is the last write.
+  if (!(alias && operation.kind == M68kIrKind::subtract_address))
+    body << an_expr(auto_ea.reg) << " = " << local << ";\n";
+  output << "{\n" << body.str();
+  if (compare || !memory.pc_macro_bridge_active)
+    output << (compare ? std::string("pc") : std::string(memory.program_counter));
+  else
+    output << "pc";
+  output << " += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
+  return true;
+}
 } // namespace
 
 // This is the sole per-operation C-lowering definition for every accepted
@@ -645,6 +752,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
   case M68kIrKind::compare_immediate:
   case M68kIrKind::compare_address: {
     if (memory != nullptr) {
+      if (m68k_emit_routed_arith_auto_update(output, operation, data_registers, status_register, *memory)) break;
       unsigned temp_ordinal = 0U;
       std::ostringstream prelude;
       const auto source = m68k_emit_materialized_ea_read(operation.source_ea, operation.size, data_registers, *memory,
@@ -673,74 +781,9 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
   case M68kIrKind::subtract_quick:
   case M68kIrKind::subtract_address: {
     if (memory != nullptr) {
-      // SEG-007-T202: SUBI (`subtract_immediate`) with an auto-updating
-      // ((An)+/-(An)) destination is lowered through the same deferred-
-      // single-address-commit technique the add family already uses
-      // (docs/architecture/c4-add-family-auto-update-commit-contract.md),
-      // applied here to the bounded SUBI subset only: SUBI's source is
-      // always the instruction-embedded immediate (never an EA read, never
-      // auto-updating), so only the destination's own auto-update needs
-      // deferral -- the exact "strict subset" shape the add-family contract
-      // already documents for ADDQ. `subtract`/`subtract_address`/
-      // `subtract_quick` are unchanged: this branch is entered only for
-      // `subtract_immediate` with an auto-updating destination while routed
-      // (`memory->runtime_routing`); every other kind and shape falls
-      // through unchanged to the existing shared body below.
-      const bool subtract_immediate_auto_destination =
-          operation.kind == M68kIrKind::subtract_immediate &&
-          (operation.destination_ea.mode == M68kEaMode::address_predec ||
-           operation.destination_ea.mode == M68kEaMode::address_postinc);
-      if (memory->runtime_routing && subtract_immediate_auto_destination) {
-        const M68kEffectiveAddress &auto_ea = operation.destination_ea;
-        const auto width = static_cast<std::uint32_t>(operation.size);
-        const std::uint32_t step =
-            (static_cast<unsigned>(auto_ea.reg) == 7U && operation.size == M68kMemoryAccessWidth::byte) ? 2U : width;
-        const auto an_expr = [&](unsigned reg) {
-          return std::string(memory->address_registers) + "[" + std::to_string(reg) + "]";
-        };
-        unsigned temp_ordinal = 0U;
-        std::ostringstream body;
-        // Snapshot the touched address register into one local, never the
-        // live array. Predecrement is applied to that local immediately,
-        // before either access; postincrement is applied strictly after.
-        // The A7-with-byte-size steps-by-2 exception mirrors
-        // m68k_emit_runtime_ea_address / the MOVE and add-family contracts.
-        body << "uint32_t m68k_sub_auto_ea = " << an_expr(static_cast<unsigned>(auto_ea.reg)) << ";\n";
-        if (auto_ea.mode == M68kEaMode::address_predec)
-          body << "m68k_sub_auto_ea -= UINT32_C(" << step << ");\n";
-        std::string sub_destination_expr;
-        // Both the read and the write below must target the *same*
-        // (pre-postincrement) address: postincrement is deferred to strictly
-        // after the write, mirroring the add-family's own destination-auto
-        // RMW case and the CLR auto-update lowering (write first, then bump
-        // the local). Applying the increment between the read and the write
-        // would make the routed write land at the wrong (post-increment)
-        // address.
-        m68k_emit_routed_read(body, "m68k_sub_auto_ea", operation.size, *memory, sub_destination_expr, temp_ordinal);
-        body << "{ const uint32_t sub_source = UINT32_C(0x" << hex(operation.source_ea.immediate_value, 8)
-             << "); const uint32_t sub_destination = " << sub_destination_expr
-             << "; const uint32_t sub_result = sub_destination - sub_source; ";
-        m68k_emit_routed_write(body, "m68k_sub_auto_ea", operation.size, *memory, "sub_result", temp_ordinal);
-        if (auto_ea.mode == M68kEaMode::address_postinc)
-          body << "m68k_sub_auto_ea += UINT32_C(" << step << ");\n";
-        M68kSubtractionResultSpecification::emit_c_update(body, status_register, "sub_source", "sub_destination",
-                                                           operation.size, M68kExtendFlagPolicy::from_carry);
-        body << " }\n";
-        // The single deferred live-register-file commit, strictly after
-        // every routed access above: any runtime stop from either routed
-        // access above returns from inside that access's own generated
-        // statement, textually before this commit, so the touched address
-        // register always retains its exact pre-instruction value on a
-        // routed-access stop -- no partial decrement/increment is ever
-        // observable.
-        body << an_expr(static_cast<unsigned>(auto_ea.reg)) << " = m68k_sub_auto_ea;\n";
-        output << "{\n" << body.str();
-        if (memory->pc_macro_bridge_active)
-          output << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
-        else
-          output << memory->program_counter << " += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
-        break;
-      }
+      // SEG-007-T202 / SEG-021-T006: every routed auto-updating SUB-family operand (SUB, SUBA, SUBQ, SUBI) is
+      // lowered by the deferred-address-commit helper above; other shapes fall through unchanged.
+      if (m68k_emit_routed_arith_auto_update(output, operation, data_registers, status_register, *memory)) break;
       unsigned temp_ordinal = 0U;
       std::ostringstream prelude;
       const auto source = m68k_emit_materialized_ea_read(operation.source_ea, operation.size, data_registers, *memory,
@@ -846,19 +889,17 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         const auto dn_expr = [&](unsigned reg) {
           return std::string(data_registers) + "[" + std::to_string(reg) + "]";
         };
-        // Q3 (MOVE contract) reasoning carried to ADDA: an ADDA whose source is
-        // the auto-updating operand and whose An destination is that same
-        // register (e.g. `ADDA.L (A0)+,A0`) composes the source's own
-        // auto-update with the sum write into one register, and this
-        // repository has no differential evidence for that composed value.
-        // Decline it -- emit no C for this instruction (the same "no output"
-        // convention every other declined EA combination uses); the C4 gap
-        // classifier keeps this shape a clean lowering-gap stop, never a
-        // guessed semantic or a partial mutation.
-        const bool aliasing_declined =
+        // SEG-021-T006: `ADDA <ea>,An` whose auto-updating source register is the
+        // destination register itself. Motorola PRM/Musashi order: the source EA is
+        // evaluated (auto-update applied) first, then the destination is read, so the
+        // destination operand is the already-updated register and the sum write wins
+        // over the auto-update. The deferred-commit local models this exactly: the
+        // destination operand is the local after its adjustment and the final live
+        // register commit is skipped (the sum write is the last architectural write).
+        const bool alias_same_register =
             address_destination && add_auto_source &&
             static_cast<unsigned>(operation.source_ea.reg) == static_cast<unsigned>(operation.destination_ea.reg);
-        if (!aliasing_declined) {
+        {
           unsigned temp_ordinal = 0U;
           std::ostringstream body;
           bool ok = true;
@@ -871,7 +912,9 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
             m68k_emit_routed_read(body, "m68k_add_auto_ea", operation.size, *memory, add_source_expr, temp_ordinal);
             if (auto_ea.mode == M68kEaMode::address_postinc)
               body << "m68k_add_auto_ea += UINT32_C(" << step << ");\n";
-            add_destination_expr = address_destination
+            add_destination_expr = alias_same_register
+                                       ? std::string("m68k_add_auto_ea")
+                                   : address_destination
                                        ? an_expr(static_cast<unsigned>(operation.destination_ea.reg))
                                        : dn_expr(static_cast<unsigned>(operation.destination_ea.reg));
           } else {
@@ -913,7 +956,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
           if (ok) {
             // The single deferred live-register-file commit, strictly after
             // every routed access above.
-            body << an_expr(static_cast<unsigned>(auto_ea.reg)) << " = m68k_add_auto_ea;\n";
+            if (!alias_same_register) body << an_expr(static_cast<unsigned>(auto_ea.reg)) << " = m68k_add_auto_ea;\n";
             output << "{\n" << body.str() << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
           }
         }

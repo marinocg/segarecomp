@@ -69,18 +69,16 @@ instruction's lowering returns before the commit — the touched address registe
 exact pre-instruction value; no partial decrement/increment is ever observable. This is the same
 reasoning that already makes `movem_transfer`'s and `write_move`'s single-register cases correct.
 
-### Q3 — `ADDA <auto>(An),An` where the destination `An` equals the source register: declined
+### Q3 — `ADDA <auto>(An),An` where the destination `An` equals the source register: supported (SEG-021-T006)
 
 `ADDA.L (A0)+,A0` / `ADDA.W -(A0),A0` compose the source operand's own auto-update with the sum
-write into the same architectural register. Real MC68000 hardware resolves this by fully applying the
-source auto-update before the destination write, but this repository has no differential
-(Musashi-oracle or otherwise) evidence for that composed value, and the project charter requires
-"Never claim instruction support without differential or fixture-based evidence." Following the MOVE
-contract's Q3 reasoning verbatim, this shape is **declined**, not given a guessed combined semantic:
-`emit_m68k_operation_c` emits no C for the instruction, and `classify_m68k_c4_gap_shapes` keeps it a
-clean `requires_architecture_decision` C4 lowering-gap stop (the `ADDA_AUTO_UPDATE` dimension). No
-partial mutation, no guessed value. A future task may revisit this if differential evidence becomes
-available.
+write into the same architectural register. The composed value is now backed by differential evidence
+(pinned Musashi, `adda.ea_an.{w,l}.{postinc,predec}.an` rows with `alias_pointer` values, all words including
+A7): the source auto-update is applied first, the destination operand is then the already-updated register, and
+the sum write is the last write. The lowering models this with the deferred-commit local: the destination operand
+is `m68k_add_auto_ea` after its adjustment and the final live-register commit is skipped (the sum write wins). The
+routed lowering is compared against the direct one by `tests/m68k_routed_lowering_test.py`. The earlier decline
+(and its `ADDA_AUTO_UPDATE` gap dimension) remains only as the generic fallback for a shape the emitter cannot lower.
 
 `M68kIrKind::add` can never reach this shape (its non-auto operand is always a data register).
 
@@ -176,3 +174,25 @@ Final T004 conclusion: ordinary single-EA forms use the existing shared EA helpe
 alias/update uses its existing deferred commit; MOVEM keeps its working-EA/mask/order/final-writeback mechanism;
 CMPM and ADDX/SUBX memory forms are future family-local paired postincrement/predecrement work in SEG-021-T014, and
 ABCD/SBCD in SEG-021-T015. No new shared production mechanism is required.
+
+## SEG-021-T006: SUB / SUBA / SUBQ / SUBI and CMP / CMPA / CMPI
+
+The same operation-local technique now covers the subtract and compare families through one arithmetic-family-local
+helper (`m68k_emit_routed_arith_auto_update`, `libs/codegen/c11/src/m68k.cpp`), used only by the routed lowering
+(`memory->runtime_routing`; the direct linear lowering is unchanged and Musashi-validated). Legal forms carry at most one
+auto-updating operand: `SUB <auto>,Dn`, `SUB Dn,<auto>`, `SUBQ/SUBI #n,<auto>`, `SUBA <auto>,An`, `CMP <auto>,Dn`,
+`CMPA <auto>,An`, `CMPI #n,<auto>`. Steps: snapshot the touched An into a local; predecrement the local; routed read (and
+for a memory RMW destination the routed write) from the local; postincrement the local strictly after the accesses; update
+the result/CCR; commit the live An in one statement after every routed access; advance PC last. A `GENESIS_STOP` returns from
+inside the failing access, before any architectural write, so D/A/SR/PC/memory keep their pre-instruction values
+(`tests/m68k_routed_lowering_test.py` forces the stop for every auto-updating shape). BYTE on A7 steps by 2.
+
+Same-register aliases (the pinned-Musashi SUBA/CMPA rows include them, e.g. `93D9`, `B3D9`): the source auto-update is applied first and
+the aliased An destination operand is the already-updated register. `SUBA <auto>(An),An` then writes the difference to that An
+(the difference write wins: no trailing commit, exactly like ADDA). `CMPA <auto>(An),An` writes no result, so the auto-updated An is
+committed (the source auto-update stays architectural).
+
+The C4 classifier (`classify_m68k_c4_gap_shapes`) and the decoded-instruction pre-gate in `frontend.cpp` no longer
+produce `requires_architecture_decision` rows for these shapes; `c4_arithmetic_auto_update_admission` in
+`tests/m68k_pipeline_test.cpp` proves zero preflight rows and a routed body for ADDA/SUB/SUBA/SUBQ/CMP/CMPA/CMPI
+auto-updating forms. Logical, MUL/DIV, bit-test and ANDI classifier rows are unchanged.

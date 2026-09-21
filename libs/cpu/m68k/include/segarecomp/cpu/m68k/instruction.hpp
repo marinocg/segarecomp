@@ -248,6 +248,15 @@ inline constexpr M68kEaLegalMask m68k_ea_clr_not_operand = m68k_ea_data_alterabl
 // does not).
 inline constexpr M68kEaLegalMask m68k_ea_arithmetic_logical_indexed_source =
     m68k_ea_move_source | m68k_ea_index8;
+// SEG-021-T006: ADD/ADDA/SUB/SUBA/CMP/CMPA source set, written from the Motorola
+// M68000 Family Programmer's Reference Manual (base MC68000 columns; independent of the
+// T001 dataset): every addressing mode, i.e. exactly `m68k_ea_move_family_source`. ADD/SUB/CMP
+// (ordinary, reverse and immediate forms) destinations are `m68k_ea_data_alterable_with_index`.
+inline constexpr M68kEaLegalMask m68k_ea_add_sub_cmp_source = m68k_ea_move_family_source;
+// ADD/SUB `Dn,<ea>` (opmode 4-6): memory alterable only. The Dn (and An) encodings of this opmode range are
+// ADDX/SUBX, a different instruction owned by a later task, never an ADD/SUB Dn,Dn form.
+inline constexpr M68kEaLegalMask m68k_ea_reverse_arithmetic_destination =
+    m68k_ea_data_alterable_with_index & ~m68k_ea_dn;
 // SEG-007-T248: ADDQ/SUBQ's data-alterable (non-An) destination set, widened
 // to also admit the brief-format `(d8,An,Xn)` indexed mode -- the same base-
 // MC68000 addressing-mode extension MOVE's own destination mask already
