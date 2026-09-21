@@ -1,0 +1,45 @@
+{
+ "dataset": "m68k-word-sweep-disagreements",
+ "disagreements": [
+  {
+   "category": "musashi_implementation_quirk",
+   "first_word": "F620",
+   "last_word": "F627",
+   "manual_class": "line_f_reserved_exception",
+   "musashi_supervisor_vector": "none",
+   "musashi_user_vector": "none",
+   "resolution": "0xF620-0xF627 is the 68040 MOVE16 (Ax)+,(Ay)+ encoding. Musashi's move16 handler carries no CPU-type guard, so the 68000 core executes it instead of raising line-F vector 11. The manual partition (line-F reserved exception on a base MC68000) is correct; Musashi is wrong for this range only.",
+   "words": 8
+  }
+ ],
+ "notes": "68010+/68020+ words are class illegal_post_68000_encoding and must raise vector 4 on the 68000 core; every such word agrees. Legal forms may raise their own defined exceptions (ILLEGAL=4, DIVU/DIVS zero divisor=5, TRAP=32-47) and are treated as agreement.",
+ "outcome_matrix": {
+  "illegal_post_68000_encoding|4|4": 2249,
+  "illegal_reserved_unassigned|4|4": 9279,
+  "legal_privileged|none|8": 75,
+  "legal_user|32-47|32-47": 16,
+  "legal_user|4|4": 1,
+  "legal_user|5|5": 848,
+  "legal_user|none|none": 44876,
+  "line_a_reserved_exception|10|10": 4096,
+  "line_f_reserved_exception|11|11": 4088,
+  "line_f_reserved_exception|none|none": 8
+ },
+ "schema": 1,
+ "scope": "primary opcode words only; not evidence of extension-word or EA-form legality",
+ "sweep_config": {
+  "address_registers": "A0-A6 = 0x00002000",
+  "cpu_type": "M68K_CPU_TYPE_68000",
+  "cycles_per_word": 1,
+  "data_registers": "D0-D7 = 0x00000000",
+  "extension_bytes": "all 0x00 (every byte other than the opcode word reads 0x00; writes discarded)",
+  "musashi_revision": "313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd",
+  "opcode_pc": "0x00001000",
+  "outcome": "exception vector whose handler address the PC reached after one instruction, or none",
+  "stack_pointers": "ISP = 0x00004000, USP = 0x00006000 (SR written without stack swap)",
+  "supervisor_run_sr": "0x2700",
+  "user_run_sr": "0x0700",
+  "vectors": "vector v (2..255) -> 0x00008000 + 8*v; reset vector SSP=0x4000 PC=0x1000"
+ },
+ "unexplained_disagreements": 0
+}

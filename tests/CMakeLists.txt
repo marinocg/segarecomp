@@ -796,6 +796,16 @@ foreach(_t IN LISTS _segarecomp_all_tests)
   endif()
 endforeach()
 
+# SEG-021-T001: independent legal base-MC68000 form dataset (test-side expectation only) and its
+# pinned-Musashi primary-word cross-check. The crosscheck skips cleanly (exit 0) unless
+# SEGARECOMP_M68K_MULS_WORD_MUSASHI_CHECKOUT points at the pinned checkout.
+add_test(NAME m68k_legal_forms_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_legal_forms_test.py ${PROJECT_SOURCE_DIR})
+add_test(NAME m68k_legal_forms_musashi_crosscheck_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_legal_forms_musashi_crosscheck_test.py ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST m68k_legal_forms_test m68k_legal_forms_musashi_crosscheck_test APPEND PROPERTY LABELS full fast)
+set_property(TEST m68k_legal_forms_test m68k_legal_forms_musashi_crosscheck_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
 # SEG-020-T005: first-divergence diagnosis (generated M68k boundaries vs pinned Musashi).
 add_test(NAME m68k_first_divergence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_first_divergence_test.py
