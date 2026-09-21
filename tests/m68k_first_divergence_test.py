@@ -121,10 +121,12 @@ def main():
         '#include "runtime.h"\n'
         "static GenesisControlTransfer harness_retire(GenesisRuntime *r, uint32_t c, uint32_t n) {\n"
         "  GenesisControlTransfer t = genesis_runtime_retire_m68k_instruction(r, c, n);\n"
-        "  genesis_m68k_checkpoint_write_detail(stderr, r); return t; }\n"
+        "  genesis_m68k_checkpoint_write_detail(stderr, r);\n"
+        "  return t; }\n"
         "static int harness_raise(GenesisRuntime *r, uint32_t f, uint32_t *h, GenesisRuntimeStop *s) {\n"
         "  int rc = genesis_raise_divide_by_zero(r, f, h, s);\n"
-        "  if (rc == 1) genesis_m68k_checkpoint_write_detail(stderr, r); return rc; }\n"
+        "  if (rc == 1) { genesis_m68k_checkpoint_write_detail(stderr, r); }\n"
+        "  return rc; }\n"
         "#define genesis_runtime_retire_m68k_instruction harness_retire\n"
         "#define genesis_raise_divide_by_zero harness_raise\n")
 
