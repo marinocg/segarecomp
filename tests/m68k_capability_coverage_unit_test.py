@@ -99,6 +99,47 @@ for order in ([0x0001, 0x0002], [0x0002, 0x0001]):
         results.append(result[0x0002])
 check(results == [0, 0], "a memory/register-writing probe leaked state into the next probe: %r" % results)
 
+# --- emitted file-scope call-frame state and the routed runner are restored per word too ---------------
+def frame_chunk(workdir, routed, order):
+    if routed:
+        header = ['#include "runtime.h"', "extern uint32_t frame_ids[64]; extern uint32_t frame_continuations[64]; extern uint32_t frame_depth;"]
+        sig, ret = "static GenesisControlTransfer %s(GenesisRuntime *s) {", "GenesisControlTransfer t = {0}; t.kind = %s; return t;"
+        funcs = {
+            0x0001: [sig % "rw_0001", "  frame_depth += 1U; frame_ids[0] = 9U; s->d[0] = 0xDEADBEEFU; s->work_ram[0x100] = 0x55U;",
+                     "  " + ret % "GENESIS_CONTINUE_AT_PC", "}"],
+            0x0002: [sig % "rw_0002", "  const int leaked = frame_depth != 0U || frame_ids[0] != 0U || s->d[0] == 0xDEADBEEFU || s->work_ram[0x100] == 0x55U;",
+                     "  " + ret % "(leaked ? GENESIS_STOP : GENESIS_CONTINUE_AT_PC)", "}"],
+        }
+        tail = ["int cap_touch_000(void) { return 0; }", "typedef GenesisControlTransfer (*cap_fn)(GenesisRuntime *);"]
+        path = workdir / "rchunk_000.c"
+    else:
+        header = ["#include <stdint.h>", "typedef struct { uint32_t d[8]; uint32_t a[8]; uint16_t sr; uint32_t pc; uint32_t usp; uint8_t ram[0x100000]; } cap_state;",
+                  "extern uint32_t frame_ids[64]; extern uint32_t frame_continuations[64]; extern uint32_t frame_depth;"]
+        funcs = {
+            0x0001: ["static int w_0001(cap_state *s) {", "  (void)s; frame_depth += 1U; frame_ids[0] = 9U; return 0;", "}"],
+            0x0002: ["static int w_0002(cap_state *s) {", "  (void)s; return (frame_depth != 0U || frame_ids[0] != 0U) ? 7 : 0;", "}"],
+        }
+        tail = ["int cap_touch_000(void) { return 0; }", "typedef int (*cap_fn)(cap_state *);"]
+        path = workdir / "chunk_000.c"
+    cov.write(path, cov.build_chunk(header, [funcs[w] for w in order], tail, "000"))
+    check(not cov.compile_chunk(CC, path, cov.RUNTIME_DIR if routed else None), "frame control chunk compiles")
+    return path
+
+
+with tempfile.TemporaryDirectory() as tmp:
+    runtime_obj = pathlib.Path(tmp) / "runtime.o"
+    subprocess.run([CC, "-std=c11", "-O0", "-I", str(cov.RUNTIME_DIR), "-c", str(cov.RUNTIME_DIR / "runtime.c"),
+                    "-o", str(runtime_obj)], check=True, capture_output=True)
+    for routed in (False, True):
+        for order in ([0x0001, 0x0002], [0x0002, 0x0001]):
+            with tempfile.TemporaryDirectory() as sub:
+                work = pathlib.Path(sub)
+                chunk = frame_chunk(work, routed, order)
+                result, crashed = cov.native_exec(CC, work, [chunk], routed=routed,
+                                                  extra_objects=[runtime_obj] if routed else ())
+                check(not crashed and result[0x0002] == 0,
+                      "%s runner leaked frame/register/RAM state into the next probe: %r" % ("routed" if routed else "direct", result))
+
 # --- compile bisection: a failing function is removed, the survivors recompile and run -------------
 with tempfile.TemporaryDirectory() as tmp:
     work = pathlib.Path(tmp)

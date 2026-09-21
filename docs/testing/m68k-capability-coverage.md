@@ -21,14 +21,14 @@ Denominator: 1526 legal forms, 45816 legal primary words. A form passes a stage 
 | timing_model_present | 1526 | 1082 | 70.90% | 33492 |
 | emit | 1526 | 1167 | 76.47% | 40241 |
 | compile | 1526 | 1167 | 76.47% | 40241 |
-| native_exec | 1526 | 1163 | 76.21% | 39983 |
+| native_exec | 1526 | 1166 | 76.41% | 40240 |
 | route_runtime_routed_admitted | 1526 | 1194 | 78.24% | 41108 |
 | route_runtime_routed_compiles | 1526 | 1194 | 78.24% | 41108 |
 | route_runtime_routed_executes | 1526 | 820 | 53.74% | 38998 |
 | route_immutable_rom_aot | 1526 | 397 | 26.02% | 19367 |
 | route_static_discovery | 1526 | 1168 | 76.54% | 36990 |
 
-`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1163 of 1526 forms, 76.21%. It is a structural bar, not a correctness claim.
+`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1166 of 1526 forms, 76.41%. It is a structural bar, not a correctness claim.
 
 ## Independently validated coverage (existing pinned-Musashi differential evidence)
 
@@ -67,7 +67,7 @@ Validated primary words per aspect: ccr 225, ea 218, semantic 229, timing 0. For
 | data_movement | 357 | 342 | 95.80% |
 | integer_arithmetic | 500 | 407 | 81.40% |
 | logical | 228 | 203 | 89.04% |
-| program_control | 193 | 52 | 26.94% |
+| program_control | 193 | 55 | 28.50% |
 | shift_and_rotate | 104 | 96 | 92.31% |
 | system_control | 55 | 5 | 9.09% |
 
@@ -91,7 +91,6 @@ Validated primary words per aspect: ccr 225, ea 218, semantic 229, timing 0. For
 | BCHG | bit_manipulation | 16 | 2 | decode 2 |
 | BCLR | bit_manipulation | 16 | 2 | decode 2 |
 | BSET | bit_manipulation | 16 | 2 | decode 2 |
-| BSR | program_control | 2 | 1 | native_exec 1 |
 | BTST | bit_manipulation | 21 | 5 | decode 5 |
 | CHK | system_control | 11 | 11 | decode 11 |
 | CLR | integer_arithmetic | 24 | 3 | decode 3 |
@@ -106,7 +105,7 @@ Validated primary words per aspect: ccr 225, ea 218, semantic 229, timing 0. For
 | EXG | data_movement | 3 | 3 | decode 3 |
 | ILLEGAL | system_control | 1 | 1 | decode 1 |
 | JMP | program_control | 7 | 4 | decode 1, effects 3 |
-| JSR | program_control | 7 | 6 | decode 1, effects 3, native_exec 2 |
+| JSR | program_control | 7 | 4 | decode 1, effects 3 |
 | LSL | shift_and_rotate | 13 | 1 | decode 1 |
 | LSR | shift_and_rotate | 13 | 1 | decode 1 |
 | MOVE | system_control | 312 | 27 | decode 27 |

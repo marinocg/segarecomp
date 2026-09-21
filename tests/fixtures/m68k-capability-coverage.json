@@ -661,9 +661,9 @@
    },
    "end_to_end_structural": {
     "applicable_forms": 193,
-    "passing_forms": 52,
-    "passing_words": 3974,
-    "percent_forms": "26.94"
+    "passing_forms": 55,
+    "passing_words": 4231,
+    "percent_forms": "28.50"
    },
    "exception_privilege_modeled": {
     "applicable_forms": 64,
@@ -679,9 +679,9 @@
    },
    "native_exec": {
     "applicable_forms": 193,
-    "passing_forms": 52,
-    "passing_words": 3974,
-    "percent_forms": "26.94"
+    "passing_forms": 55,
+    "passing_words": 4231,
+    "percent_forms": "28.50"
    },
    "route_immutable_rom_aot": {
     "applicable_forms": 193,
@@ -1307,7 +1307,7 @@
   "bset.imm_ea.b.imm.predec": "11101-1111111010000",
   "bset.imm_ea.l.imm.dn": "11101-11111111100-0",
   "bsr.disp16.w.none.target": "1110-01111111111-10",
-  "bsr.disp8.b.none.target": "1110-01110111100-00",
+  "bsr.disp8.b.none.target": "1110-01111111100-00",
   "btst.dn_ea.b.dn.absl": "11101-11111100100-0",
   "btst.dn_ea.b.dn.absw": "11101-11111100100-0",
   "btst.dn_ea.b.dn.disp": "11101-11111110100-0",
@@ -1551,12 +1551,12 @@
   "jmp.ea.none.index.none": "0000-00000000000--0",
   "jmp.ea.none.pcdisp.none": "1110-01111111110--0",
   "jmp.ea.none.pcindex.none": "1100-01000111000--0",
-  "jsr.ea.none.absl.none": "1110-01110111100-00",
+  "jsr.ea.none.absl.none": "1110-01111111100-00",
   "jsr.ea.none.absw.none": "1110-01111111100-00",
   "jsr.ea.none.disp.none": "1100-01000111000-00",
   "jsr.ea.none.ind.none": "1100-01000111000-00",
   "jsr.ea.none.index.none": "0000-00000000000-00",
-  "jsr.ea.none.pcdisp.none": "1110-01110111110-00",
+  "jsr.ea.none.pcdisp.none": "1110-01111111110-00",
   "jsr.ea.none.pcindex.none": "1100-01000111000-00",
   "lea.ea_an.l.absl.an": "1110--1111111110--0",
   "lea.ea_an.l.absw.an": "1110--1111111110--0",
@@ -2597,9 +2597,9 @@
   },
   "end_to_end_structural": {
    "applicable_forms": 1526,
-   "passing_forms": 1163,
-   "passing_words": 39983,
-   "percent_forms": "76.21"
+   "passing_forms": 1166,
+   "passing_words": 40240,
+   "percent_forms": "76.41"
   },
   "exception_privilege_modeled": {
    "applicable_forms": 852,
@@ -2615,9 +2615,9 @@
   },
   "native_exec": {
    "applicable_forms": 1526,
-   "passing_forms": 1163,
-   "passing_words": 39983,
-   "percent_forms": "76.21"
+   "passing_forms": 1166,
+   "passing_words": 40240,
+   "percent_forms": "76.41"
   },
   "route_immutable_rom_aot": {
    "applicable_forms": 1526,
@@ -2778,15 +2778,6 @@
    "unsupported_forms": 2
   },
   {
-   "family": "program_control",
-   "first_failing_stage": {
-    "native_exec": 1
-   },
-   "forms": 2,
-   "mnemonic": "BSR",
-   "unsupported_forms": 1
-  },
-  {
    "family": "bit_manipulation",
    "first_failing_stage": {
     "decode": 5
@@ -2919,12 +2910,11 @@
    "family": "program_control",
    "first_failing_stage": {
     "decode": 1,
-    "effects": 3,
-    "native_exec": 2
+    "effects": 3
    },
    "forms": 7,
    "mnemonic": "JSR",
-   "unsupported_forms": 6
+   "unsupported_forms": 4
   },
   {
    "family": "shift_and_rotate",

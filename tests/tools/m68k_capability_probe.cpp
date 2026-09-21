@@ -134,11 +134,11 @@ int main(int argc, char **argv) {
   ChunkWriter direct{emit_dir, "chunk",
       "#include <stdint.h>\n#include <stddef.h>\n"
       "typedef struct { uint32_t d[8]; uint32_t a[8]; uint16_t sr; uint32_t pc; uint32_t usp; uint8_t ram[0x100000]; } cap_state;\n"
-      "static uint32_t frame_ids[64]; static uint32_t frame_continuations[64]; static uint32_t frame_depth;\n",
+      "extern uint32_t frame_ids[64]; extern uint32_t frame_continuations[64]; extern uint32_t frame_depth; /* owned and reset per word by the runner */\n",
       "int", "(int)(frame_ids[0] + frame_continuations[0] + frame_depth)", {}, {}, 0};
   ChunkWriter routed_writer{emit_dir, "rchunk",
       "#include \"runtime.h\"\n"
-      "static uint32_t frame_ids[64]; static uint32_t frame_continuations[64]; static uint32_t frame_depth;\n"
+      "extern uint32_t frame_ids[64]; extern uint32_t frame_continuations[64]; extern uint32_t frame_depth; /* owned and reset per word by the runner */\n"
       "/* The generated-program prelude helpers the routed lowering calls (mirrors the emitted definitions). */\n"
       "static GenesisControlTransfer genesis_static_stop(GenesisStopClass c, GenesisDiagnosticCategory d, const GenesisInstructionProvenance *p, uint8_t h, uint32_t a, GenesisAccessWidth w, GenesisAccessDirection x) { GenesisControlTransfer t = {0}; t.kind = GENESIS_STOP; t.stop.stop_class = c; t.stop.diagnostic_category = d; t.stop.provenance.has_instruction_provenance = 1U; t.stop.provenance.instruction = *p; t.stop.provenance.has_access = h; t.stop.provenance.access_address = a; t.stop.provenance.access_width = w; t.stop.provenance.access_direction = x; return t; }\n"
       "static void genesis_attach_route_provenance(GenesisRuntimeStop *stop, const GenesisInstructionProvenance *p) { (void)stop; (void)p; }\n"

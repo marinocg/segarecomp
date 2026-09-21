@@ -71,6 +71,7 @@ typedef struct { uint32_t d[8]; uint32_t a[8]; uint16_t sr; uint32_t pc; uint32_
 typedef int (*cap_fn)(cap_state *);
 %(externs)s
 static cap_state baseline, state;
+uint32_t frame_ids[64], frame_continuations[64], frame_depth; /* emitted call-frame state, reset for every word */
 static const cap_fn *tables[] = {%(tables)s};
 static const unsigned short *words[] = {%(words)s};
 static const unsigned *counts[] = {%(counts)s};
@@ -84,6 +85,7 @@ int main(int argc, char **argv) {
       const unsigned w = words[c][k];
       if (w < start) continue;
       memcpy(&state, &baseline, sizeof state); /* every word starts from the identical full baseline state */
+      memset(frame_ids, 0, sizeof frame_ids); memset(frame_continuations, 0, sizeof frame_continuations); frame_depth = 0U;
       const int rc = tables[c][k](&state);
       printf("%%04X %%d\n", w, rc);
       fflush(stdout);
@@ -100,6 +102,7 @@ ROUTED_RUNNER = r"""#include "runtime.h"
 typedef GenesisControlTransfer (*cap_fn)(GenesisRuntime *);
 %(externs)s
 static GenesisRuntime baseline, runtime_state;
+uint32_t frame_ids[64], frame_continuations[64], frame_depth; /* emitted call-frame state, reset for every word */
 static const cap_fn *tables[] = {%(tables)s};
 static const unsigned short *words[] = {%(words)s};
 static const unsigned *counts[] = {%(counts)s};
@@ -113,6 +116,7 @@ int main(int argc, char **argv) {
       const unsigned w = words[c][k];
       if (w < start) continue;
       memcpy(&runtime_state, &baseline, sizeof runtime_state);
+      memset(frame_ids, 0, sizeof frame_ids); memset(frame_continuations, 0, sizeof frame_continuations); frame_depth = 0U;
       const GenesisControlTransfer t = tables[c][k](&runtime_state);
       printf("%%04X %%d\n", w, t.kind == GENESIS_CONTINUE_AT_PC ? 0 : 1);
       fflush(stdout);
