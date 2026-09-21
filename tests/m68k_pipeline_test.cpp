@@ -316,8 +316,16 @@ void add_family_auto_update_defers_single_address_commit() {
     const auto *sel = std::get_if<M68kDecodedInstruction>(&decoded);
     expect(sel != nullptr, "ADDA.W (A1)+,A1 decodes");
     if (sel != nullptr)
-      expect(emit_m68k_operation_c(lift_m68k_instruction(*sel), "runtime->d", "runtime->sr", "  ", &memory) == "  ",
-             "ADDA same-register aliasing declines to an empty body (clean lowering-gap, no guessed semantic)");
+    {
+      // SEG-021-T006: the alias is lowered (Musashi-validated order): the destination operand is the
+      // already-updated local and the final live-register commit is skipped (the sum write wins).
+      const auto text = emit_m68k_operation_c(lift_m68k_instruction(*sel), "runtime->d", "runtime->sr", "  ", &memory);
+      expect(text.find("m68k_add_auto_ea") != std::string::npos &&
+                 text.find("const uint32_t add_destination = m68k_add_auto_ea;") != std::string::npos &&
+                 text.find("runtime->a[1] = m68k_add_auto_ea;") == std::string::npos &&
+                 text.find("runtime->a[1] = add_result;") != std::string::npos,
+             "ADDA same-register aliasing lowers with the updated local as destination and no trailing commit");
+    }
   }
 }
 
@@ -4059,10 +4067,10 @@ void general_startup_decode_accepts_pc_indexed_move_source() {
   {
     // The shared ADD/SUB/CMP/AND/OR `m68k_ea_move_source` gate stays
     // unwidened: ADD.W (4,PC,D0.W),D2 (0xD47B 0x0004) must stay fail-closed.
+    // SEG-021-T006: ADD/SUB/CMP admit every base-MC68000 source mode, including (d8,PC,Xn).
     const auto result = decode_general({0xD4U, 0x7BU, 0x00U, 0x04U});
-    const auto *rejected = std::get_if<RejectedM68kDecode>(&result);
-    expect(rejected != nullptr && rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction,
-           "a PC-indexed source on a non-MOVE-family instruction remains fail-closed");
+    expect(std::get_if<M68kDecodedInstruction>(&result) != nullptr,
+           "a PC-indexed source decodes for the ADD/SUB/CMP families (SEG-021-T006)");
   }
   {
     // A PC-indexed MOVE destination is not wired (MOVE has no alterable
@@ -4501,19 +4509,24 @@ void general_startup_decode_accepts_indexed_arithmetic_source() {
     // (4,PC,D0.W),D2 (0xD47B 0x0004) still stays fail-closed (mirrors the
     // existing T136 negative coverage; pc_index8 is a distinct EA mode never
     // merged into `m68k_ea_arithmetic_logical_indexed_source`).
+    // SEG-021-T006: legal for ADD/SUB/CMP; the logical family stays narrow.
     const auto result = decode_general({0xD4U, 0x7BU, 0x00U, 0x04U});
-    const auto *rejected = std::get_if<RejectedM68kDecode>(&result);
-    expect(rejected != nullptr && rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction,
-           "the PC-relative indexed form remains fail-closed for the arithmetic/logical family");
+    expect(std::get_if<M68kDecodedInstruction>(&result) != nullptr,
+           "the PC-relative indexed source decodes for ADD (SEG-021-T006)");
+    const auto logical = decode_general({0x84U, 0xBBU, 0x00U, 0x00U, 0x00U, 0x04U});
+    const auto *logical_rejected = std::get_if<RejectedM68kDecode>(&logical);
+    expect(logical_rejected != nullptr &&
+               logical_rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction,
+           "the PC-relative indexed form remains fail-closed for the logical family");
   }
   {
     // The destination-alterable sets (ADD/SUB/AND/OR reverse-memory forms,
     // EOR) stay unwidened: an indexed destination is not representable and
     // not wired. ADD.W D2,(0x10,A0,D1.W) (0xD570 0x1010) stays fail-closed.
+    // SEG-021-T006: ADD/SUB reverse forms legally take an indexed destination.
     const auto result = decode_general({0xD5U, 0x70U, 0x10U, 0x10U});
-    const auto *rejected = std::get_if<RejectedM68kDecode>(&result);
-    expect(rejected != nullptr && rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction,
-           "an indexed destination on the reverse memory-alterable arithmetic forms remains fail-closed");
+    expect(std::get_if<M68kDecodedInstruction>(&result) != nullptr,
+           "an indexed destination decodes on the reverse ADD form (SEG-021-T006)");
   }
   {
     // genesis_startup and direct_flow still reject the indexed ADDA form.
@@ -7268,7 +7281,7 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
   operation.destination_ea.mode = M68kEaMode::address_register;
   expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
          "LEA computes an address without reading memory or fabricating a target");
-  operation.kind = M68kIrKind::add;
+  operation.kind = M68kIrKind::logical_and;
   operation.source_ea.mode = M68kEaMode::address_indirect;
   operation.destination_ea.mode = M68kEaMode::data_register;
   expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
@@ -7294,9 +7307,9 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
     }
     operation.source_ea.mode = M68kEaMode::data_register;
     operation.destination_ea.mode = M68kEaMode::address_postinc;
-    expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-           "compare's admission stays limited to d16(An) and address_index8; an auto-updating "
-           "operand remains excluded pending its own independent proof");
+    expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "SEG-021-T006: compare admits every legal EA mode, including an auto-updating operand "
+           "(the compare lowering never writes back)");
   }
   operation.source_ea.mode = M68kEaMode::immediate;
   operation.destination_ea.mode = M68kEaMode::data_register;
@@ -7526,10 +7539,13 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
     operation.destination_ea.mode = M68kEaMode::address_index8;
     expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
            "ADDQ/SUBQ admit a brief-format indexed (d8,An,Xn) read-modify-write destination");
-    operation.destination_ea.mode = M68kEaMode::address_disp16;
-    expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-           "ADDQ/SUBQ's indexed carve-out stays limited to address_index8; every other memory "
-           "destination (including d16(An)) remains excluded pending its own independent proof");
+    for (const auto mode : {M68kEaMode::address_disp16, M68kEaMode::address_indirect, M68kEaMode::address_postinc,
+                            M68kEaMode::address_predec, M68kEaMode::absolute_long})
+      {
+        operation.destination_ea.mode = mode;
+        expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+               "SEG-021-T006: ADDQ/SUBQ admit every legal memory destination class");
+      }
   }
   // SEG-007-T249 (ninth iteration, same bounded family): the general
   // (non-quick) ADD/SUB/AND/OR/EOR read-modify-write memory-destination
@@ -7544,12 +7560,31 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
        {M68kIrKind::add, M68kIrKind::add_immediate, M68kIrKind::subtract, M68kIrKind::subtract_immediate,
         M68kIrKind::logical_and, M68kIrKind::logical_and_immediate, M68kIrKind::logical_or,
         M68kIrKind::logical_or_immediate, M68kIrKind::exclusive_or, M68kIrKind::exclusive_or_immediate}) {
+    // SEG-021-T006: ADD/SUB(I) are admitted for every legal operand class (family-level admission); the
+    // logical kinds keep their narrower carve-outs below.
+    const bool arithmetic_kind = family_kind == M68kIrKind::add || family_kind == M68kIrKind::add_immediate ||
+                                 family_kind == M68kIrKind::subtract ||
+                                 family_kind == M68kIrKind::subtract_immediate;
     operation.kind = family_kind;
     operation.source_ea.mode = M68kEaMode::data_register;
     operation.destination_ea.mode = M68kEaMode::address_disp16;
     expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
            "the general ADD/SUB/AND/OR/EOR family admits a plain register/immediate source "
            "paired with a d16(An) read-modify-write destination");
+    if (arithmetic_kind) {
+      for (const auto mode : {M68kEaMode::address_indirect, M68kEaMode::address_postinc, M68kEaMode::address_predec,
+                              M68kEaMode::address_index8, M68kEaMode::absolute_word, M68kEaMode::absolute_long}) {
+        operation.source_ea.mode = M68kEaMode::data_register;
+        operation.destination_ea.mode = mode;
+        expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+               "SEG-021-T006: ADD/SUB admit every legal memory destination class");
+        operation.source_ea.mode = mode;
+        operation.destination_ea.mode = M68kEaMode::data_register;
+        expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+               "SEG-021-T006: ADD/SUB admit every legal memory source class");
+      }
+      continue;
+    }
     // Every other memory destination stays excluded pending its own
     // independent proof; an auto-updating, plain-indirect, or brief-format
     // indexed destination is an unexamined (address_index8) or unreachable
