@@ -87,7 +87,7 @@ primary words enumerate every register combination, including A7 byte stepping).
 data: `disp` `0010`, brief `index` `1004` (D1, word index, preset `d1`), `absw` `4000`, `absl` `00020000`, `pcdisp` `0010`,
 `pcindex` `1040`, and two immediates per size (zero and negative). Rows involving an index register use the
 `move_even` profile (even values only, so no vector forms an odd word address, which Musashi would answer with an
-address-error exception this harness does not model). MOVE to/from SR/CCR/USP forms are out of scope (T009/T018).
+address-error exception this harness does not model). MOVE to/from SR/CCR/USP forms are out of scope for T005 (owned by SEG-021-T018).
 
 The conformance emitter is the direct linear-memory lowering. `tests/m68k_routed_lowering_test.py` (emitter `--routed`)
 runs the Genesis runtime-routed lowering, the route C4 and the immutable-ROM AOT candidates use, against the direct

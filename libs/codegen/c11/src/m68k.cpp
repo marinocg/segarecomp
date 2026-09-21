@@ -1180,136 +1180,135 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
             source_mutating &&
             ((destination_reads_same_register_address && operation.source_ea.reg == dea.reg) ||
              destination_index_uses_source);
-        const bool aliasing_rejected = false;
-        if (!aliasing_rejected) {
-          unsigned temp_ordinal = 0U;
-          std::ostringstream body;
-          bool ok = true;
-          const auto width = static_cast<std::uint32_t>(operation.size);
-          // Matches m68k_emit_runtime_ea_address's own step formula exactly
-          // (the A7-with-byte-size steps-by-2 stack-pointer-alignment
-          // exception), since MOVE, unlike MOVEM, has a legal BYTE
-          // predecrement/postincrement form.
-          const auto step_for = [&](const M68kEffectiveAddress &ea) {
-            return (static_cast<unsigned>(ea.reg) == 7U && operation.size == M68kMemoryAccessWidth::byte) ? 2U
-                                                                                                            : width;
-          };
-          const auto an_expr = [&](const M68kEffectiveAddress &ea) {
-            return std::string(memory->address_registers) + "[" + std::to_string(static_cast<unsigned>(ea.reg)) + "]";
-          };
-          // SEG-007-T252 / ADR-0040: the former SEG-007-T155/ADR-0017 and
-          // SEG-007-T157/ADR-0019 guarded watchdog-progress notes for an
-          // auto-updating write_move destination/source have been removed --
-          // termination/progress policy now belongs to the runner
-          // (the runner's dispatch allowance), never to a
-          // CPU/codegen-proven data-transform cursor fact. The routed
-          // read/write and `An` commit below are unaffected guest semantics.
-          // Q2 step 1-2: source, if mutating, snapshots its own address
-          // register into a dedicated local (never the live array), applies
-          // predecrement to that local before the access, and routes the
-          // read through m68k_emit_routed_read; postincrement is applied to
-          // the local strictly after the access. A non-mutating source
-          // still routes through the untouched, shared m68k_emit_ea_read.
-          std::string source_expr;
-          if (source_mutating) {
-            body << "uint32_t m68k_move_src_ea = " << an_expr(operation.source_ea) << ";\n";
-            if (operation.source_ea.mode == M68kEaMode::address_predec)
-              body << "m68k_move_src_ea -= UINT32_C(" << step_for(operation.source_ea) << ");\n";
-            m68k_emit_routed_read(body, "m68k_move_src_ea", operation.size, *memory, source_expr, temp_ordinal);
-            if (operation.source_ea.mode == M68kEaMode::address_postinc)
-              body << "m68k_move_src_ea += UINT32_C(" << step_for(operation.source_ea) << ");\n";
+        unsigned temp_ordinal = 0U;
+        std::ostringstream body;
+        bool ok = true;
+        const auto width = static_cast<std::uint32_t>(operation.size);
+        // Matches m68k_emit_runtime_ea_address's own step formula exactly
+        // (the A7-with-byte-size steps-by-2 stack-pointer-alignment
+        // exception), since MOVE, unlike MOVEM, has a legal BYTE
+        // predecrement/postincrement form.
+        const auto step_for = [&](const M68kEffectiveAddress &ea) {
+          return (static_cast<unsigned>(ea.reg) == 7U && operation.size == M68kMemoryAccessWidth::byte) ? 2U
+                                                                                                          : width;
+        };
+        const auto an_expr = [&](const M68kEffectiveAddress &ea) {
+          return std::string(memory->address_registers) + "[" + std::to_string(static_cast<unsigned>(ea.reg)) + "]";
+        };
+        // SEG-007-T252 / ADR-0040: the former SEG-007-T155/ADR-0017 and
+        // SEG-007-T157/ADR-0019 guarded watchdog-progress notes for an
+        // auto-updating write_move destination/source have been removed --
+        // termination/progress policy now belongs to the runner
+        // (the runner's dispatch allowance), never to a
+        // CPU/codegen-proven data-transform cursor fact. The routed
+        // read/write and `An` commit below are unaffected guest semantics.
+        // Q2 step 1-2: source, if mutating, snapshots its own address
+        // register into a dedicated local (never the live array), applies
+        // predecrement to that local before the access, and routes the
+        // read through m68k_emit_routed_read; postincrement is applied to
+        // the local strictly after the access. A non-mutating source
+        // still routes through the untouched, shared m68k_emit_ea_read.
+        std::string source_expr;
+        if (source_mutating) {
+          body << "uint32_t m68k_move_src_ea = " << an_expr(operation.source_ea) << ";\n";
+          if (operation.source_ea.mode == M68kEaMode::address_predec)
+            body << "m68k_move_src_ea -= UINT32_C(" << step_for(operation.source_ea) << ");\n";
+          m68k_emit_routed_read(body, "m68k_move_src_ea", operation.size, *memory, source_expr, temp_ordinal);
+          if (operation.source_ea.mode == M68kEaMode::address_postinc)
+            body << "m68k_move_src_ea += UINT32_C(" << step_for(operation.source_ea) << ");\n";
+        } else {
+          const auto read =
+              m68k_emit_ea_read(operation.source_ea, operation.size, data_registers, *memory, body, temp_ordinal);
+          if (!read.ok) {
+            ok = false;
           } else {
-            const auto read =
-                m68k_emit_ea_read(operation.source_ea, operation.size, data_registers, *memory, body, temp_ordinal);
-            if (!read.ok) {
+            source_expr = read.expression;
+            body << read.postlude;
+          }
+        }
+        // Q2 step 3: destination, if mutating, snapshots its own address
+        // register into a second, distinct local and applies predecrement
+        // before the access, mirroring the source above. Same-register
+        // source/destination aliasing is accepted (Q3): the destination EA
+        // reads the source's updated local, and the live register commits stay
+        // deferred until both routed accesses have succeeded.
+        if (ok && destination_aliases_source_local && !destination_mutating && !destination_index_uses_source) {
+          // Non-mutating (An)/d16(An) destination reading the source's updated register.
+          body << "const uint32_t m68k_move_dst_ea = m68k_move_src_ea";
+          if (operation.destination_ea.mode == M68kEaMode::address_disp16)
+            body << " + (uint32_t)(int32_t)(int16_t)" << static_cast<int>(operation.destination_ea.displacement);
+          body << ";\n";
+        }
+        if (ok && destination_index_uses_source) {
+          const auto reg_expr = [&](bool is_address, unsigned n) {
+            if (is_address && n == static_cast<unsigned>(operation.source_ea.reg)) return std::string("m68k_move_src_ea");
+            return std::string(is_address ? memory->address_registers : data_registers) + "[" + std::to_string(n) + "]";
+          };
+          const auto index_value = reg_expr(dea.index_is_address, static_cast<unsigned>(dea.index_reg));
+          body << "const uint32_t m68k_move_dst_ea = (uint32_t)("
+               << reg_expr(true, static_cast<unsigned>(dea.reg)) << " + "
+               << (dea.index_is_long ? "(int32_t)" + index_value
+                                     : "(int32_t)(int16_t)(uint16_t)" + index_value)
+               << " + (int32_t)(int8_t)" << static_cast<int>(dea.displacement) << ");\n";
+        }
+        if (ok && destination_mutating) {
+          body << "uint32_t m68k_move_dst_ea = "
+               << (destination_aliases_source_local ? std::string("m68k_move_src_ea")
+                                                    : an_expr(operation.destination_ea))
+               << ";\n";
+          if (operation.destination_ea.mode == M68kEaMode::address_predec)
+            body << "m68k_move_dst_ea -= UINT32_C(" << step_for(operation.destination_ea) << ");\n";
+        }
+        if (ok) {
+          // `move_value` retains the operand's raw (not sign-extended)
+          // bits for the actual data write, exactly as real MOVE never
+          // sign-extends; only the separate CCR feed below is sign-
+          // extended.
+          body << "{ const uint32_t move_value = " << source_expr << "; ";
+          // Q2 step 4: destination write, routed through
+          // m68k_emit_routed_write for a mutating destination (postinc
+          // applied to the local strictly after the access), or the
+          // untouched, shared m68k_emit_ea_write for a non-mutating one.
+          if (destination_mutating || destination_aliases_source_local) {
+            m68k_emit_routed_write(body, "m68k_move_dst_ea", operation.size, *memory, "move_value", temp_ordinal);
+            if (operation.destination_ea.mode == M68kEaMode::address_postinc)
+              body << "m68k_move_dst_ea += UINT32_C(" << step_for(operation.destination_ea) << ");\n";
+          } else {
+            std::ostringstream write_prelude;
+            const auto write = m68k_emit_ea_write(operation.destination_ea, operation.size, data_registers,
+                                                  *memory, "move_value", write_prelude, temp_ordinal);
+            if (!write.ok) {
               ok = false;
             } else {
-              source_expr = read.expression;
-              body << read.postlude;
+              body << write_prelude.str() << write.expression << " ";
             }
-          }
-          // Q2 step 3: destination, if mutating, snapshots its own address
-          // register into a second, distinct local (Q3 already rejected the
-          // only way it could ever alias the source's register) and applies
-          // predecrement before the access, mirroring the source above.
-          if (ok && destination_aliases_source_local && !destination_mutating && !destination_index_uses_source) {
-            // Non-mutating (An)/d16(An) destination reading the source's updated register.
-            body << "const uint32_t m68k_move_dst_ea = m68k_move_src_ea";
-            if (operation.destination_ea.mode == M68kEaMode::address_disp16)
-              body << " + (uint32_t)(int32_t)(int16_t)" << static_cast<int>(operation.destination_ea.displacement);
-            body << ";\n";
-          }
-          if (ok && destination_index_uses_source) {
-            const auto reg_expr = [&](bool is_address, unsigned n) {
-              if (is_address && n == static_cast<unsigned>(operation.source_ea.reg)) return std::string("m68k_move_src_ea");
-              return std::string(is_address ? memory->address_registers : data_registers) + "[" + std::to_string(n) + "]";
-            };
-            const auto index_value = reg_expr(dea.index_is_address, static_cast<unsigned>(dea.index_reg));
-            body << "const uint32_t m68k_move_dst_ea = (uint32_t)("
-                 << reg_expr(true, static_cast<unsigned>(dea.reg)) << " + "
-                 << (dea.index_is_long ? "(int32_t)" + index_value
-                                       : "(int32_t)(int16_t)(uint16_t)" + index_value)
-                 << " + (int32_t)(int8_t)" << static_cast<int>(dea.displacement) << ");\n";
-          }
-          if (ok && destination_mutating) {
-            body << "uint32_t m68k_move_dst_ea = "
-                 << (destination_aliases_source_local ? std::string("m68k_move_src_ea")
-                                                      : an_expr(operation.destination_ea))
-                 << ";\n";
-            if (operation.destination_ea.mode == M68kEaMode::address_predec)
-              body << "m68k_move_dst_ea -= UINT32_C(" << step_for(operation.destination_ea) << ");\n";
           }
           if (ok) {
-            // `move_value` retains the operand's raw (not sign-extended)
-            // bits for the actual data write, exactly as real MOVE never
-            // sign-extends; only the separate CCR feed below is sign-
-            // extended.
-            body << "{ const uint32_t move_value = " << source_expr << "; ";
-            // Q2 step 4: destination write, routed through
-            // m68k_emit_routed_write for a mutating destination (postinc
-            // applied to the local strictly after the access), or the
-            // untouched, shared m68k_emit_ea_write for a non-mutating one.
-            if (destination_mutating || destination_aliases_source_local) {
-              m68k_emit_routed_write(body, "m68k_move_dst_ea", operation.size, *memory, "move_value", temp_ordinal);
-              if (operation.destination_ea.mode == M68kEaMode::address_postinc)
-                body << "m68k_move_dst_ea += UINT32_C(" << step_for(operation.destination_ea) << ");\n";
-            } else {
-              std::ostringstream write_prelude;
-              const auto write = m68k_emit_ea_write(operation.destination_ea, operation.size, data_registers,
-                                                    *memory, "move_value", write_prelude, temp_ordinal);
-              if (!write.ok) {
-                ok = false;
-              } else {
-                body << write_prelude.str() << write.expression << " ";
-              }
-            }
-            if (ok) {
-              M68kMoveResultCcrSpecification::emit_c_update(body, status_register,
-                                                            m68k_sign_extend_expr("move_value", operation.size));
-            }
-            body << " }\n";
+            M68kMoveResultCcrSpecification::emit_c_update(body, status_register,
+                                                          m68k_sign_extend_expr("move_value", operation.size));
           }
-          if (ok) {
-            // Q2 step 5 / Q5: both live-register-array writeback statements
-            // are placed here, strictly after both the source access's and
-            // the destination access's routed statements have already been
-            // emitted above -- never one immediately after its own
-            // operand's access. A runtime stop reached by either routed
-            // access above returns from inside that access's own generated
-            // statement, so neither writeback below is ever reached unless
-            // both accesses have already succeeded.
-            if (source_mutating) body << an_expr(operation.source_ea) << " = m68k_move_src_ea;\n";
-            if (destination_mutating) body << an_expr(operation.destination_ea) << " = m68k_move_dst_ea;\n";
-            // SEG-007-T252 / ADR-0040: the former SEG-007-T155/ADR-0017 WRITE
-            // and SEG-007-T157/ADR-0019 READ guarded watchdog-progress notes,
-            // previously emitted here after the routed write and the `An`
-            // commit above, have been removed -- termination/progress policy
-            // now belongs to the runner, never to this per-instruction cursor
-            // fact. The routed accesses and register commits above are
-            // unaffected guest semantics.
-            output << "{\n" << body.str();
-            output << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
-          }
+          body << " }\n";
+        }
+        if (ok) {
+          // Q2 step 5 / Q5: both live-register-array writeback statements
+          // are placed here, strictly after both the source access's and
+          // the destination access's routed statements have already been
+          // emitted above -- never one immediately after its own
+          // operand's access. A runtime stop reached by either routed
+          // access above returns from inside that access's own generated
+          // statement, so neither writeback below is ever reached unless
+          // both accesses have already succeeded.
+          if (source_mutating) body << an_expr(operation.source_ea) << " = m68k_move_src_ea;\n";
+          if (destination_mutating) body << an_expr(operation.destination_ea) << " = m68k_move_dst_ea;\n";
+          // SEG-007-T252 / ADR-0040: the former SEG-007-T155/ADR-0017 WRITE
+          // and SEG-007-T157/ADR-0019 READ guarded watchdog-progress notes,
+          // previously emitted here after the routed write and the `An`
+          // commit above, have been removed -- termination/progress policy
+          // now belongs to the runner, never to this per-instruction cursor
+          // fact. The routed accesses and register commits above are
+          // unaffected guest semantics.
+          output << "{\n" << body.str();
+          output << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
         }
       } else {
         unsigned temp_ordinal = 0U;
