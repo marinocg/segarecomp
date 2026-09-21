@@ -143,4 +143,4 @@ writes), so no legal ordinary shape is declined and no emitted output changed. D
 
 Not merged into one universal helper: the families differ in routed-stop commit order, so a merge would change
 byte-comparable routed output without evidence of a defect. Remaining declines are missing families rather than
-shape declines: CMPM, ADDX/SUBX, ABCD/SBCD and NEGX have no decoded `M68kIrKind` (harness reports `unsupported`).
+shape declines, including CMPM, ADDX/SUBX, ABCD/SBCD and NEGX (owned by SEG-021-T014/T015; NBCD, Scc and TAS by T015/T016), which have no decoded `M68kIrKind` (harness reports `unsupported`).
