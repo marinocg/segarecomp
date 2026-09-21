@@ -375,9 +375,9 @@
    },
    "ccr_sr_validated": {
     "applicable_forms": 448,
-    "passing_forms": 49,
-    "passing_words": 2401,
-    "percent_forms": "10.94"
+    "passing_forms": 51,
+    "passing_words": 2417,
+    "percent_forms": "11.38"
    },
    "compile": {
     "applicable_forms": 500,
@@ -471,9 +471,9 @@
    },
    "semantic_validated": {
     "applicable_forms": 500,
-    "passing_forms": 49,
-    "passing_words": 2401,
-    "percent_forms": "9.80"
+    "passing_forms": 51,
+    "passing_words": 2417,
+    "percent_forms": "10.20"
    },
    "timing_model_present": {
     "applicable_forms": 500,
@@ -1085,7 +1085,7 @@
   "addi.imm_ea.w.imm.absl": "11111011111100100-0",
   "addi.imm_ea.w.imm.absw": "11111011111100100-0",
   "addi.imm_ea.w.imm.disp": "11111011111111100-0",
-  "addi.imm_ea.w.imm.dn": "11111-11111111100-0",
+  "addi.imm_ea.w.imm.dn": "11111-11111111111-0",
   "addi.imm_ea.w.imm.ind": "11111011111110100-0",
   "addi.imm_ea.w.imm.index": "00000000000000000-0",
   "addi.imm_ea.w.imm.postinc": "1111101111111010000",
@@ -2009,7 +2009,7 @@
   "neg.unary.l.none.predec": "1110101111111011110",
   "neg.unary.w.none.absl": "11101011111100100-0",
   "neg.unary.w.none.absw": "11101011111100100-0",
-  "neg.unary.w.none.disp": "11101011111111100-0",
+  "neg.unary.w.none.disp": "11101011111111111-0",
   "neg.unary.w.none.dn": "11101-11111111111-0",
   "neg.unary.w.none.ind": "11101011111110111-0",
   "neg.unary.w.none.index": "00000000000000000-0",
@@ -2555,9 +2555,9 @@
   },
   "ccr_sr_validated": {
    "applicable_forms": 1193,
-   "passing_forms": 54,
-   "passing_words": 2406,
-   "percent_forms": "4.53"
+   "passing_forms": 56,
+   "passing_words": 2422,
+   "percent_forms": "4.69"
   },
   "compile": {
    "applicable_forms": 1526,
@@ -2651,9 +2651,9 @@
   },
   "semantic_validated": {
    "applicable_forms": 1526,
-   "passing_forms": 62,
-   "passing_words": 2414,
-   "percent_forms": "4.06"
+   "passing_forms": 64,
+   "passing_words": 2430,
+   "percent_forms": "4.19"
   },
   "timing_model_present": {
    "applicable_forms": 1526,
@@ -3207,9 +3207,9 @@
  ],
  "validation": {
   "forms_with_at_least_one_validated_word": {
-   "ccr": 219,
+   "ccr": 220,
    "ea": 197,
-   "semantic": 223,
+   "semantic": 224,
    "timing": 0
   },
   "manifest_sources": [
@@ -3228,9 +3228,9 @@
    "tests/m68k_pc_indexed_move_musashi_differential_test.py"
   ],
   "validated_words": {
-   "ccr": 2614,
+   "ccr": 2629,
    "ea": 1416,
-   "semantic": 2618,
+   "semantic": 2633,
    "timing": 0
   }
  }

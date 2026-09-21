@@ -96,6 +96,8 @@ def field_differences(generated: dict, oracle: dict) -> list[dict]:
     for i in range(8):
         scalar("a%d" % i, generated["a"][i], oracle["a"][i])
     scalar("usp", generated["usp"], oracle["usp"])
+    if "ssp" in generated and "ssp" in oracle:  # SEG-021-T003 conformance streams carry the supervisor stack too
+        scalar("ssp", generated["ssp"], oracle["ssp"])
     scalar("sr", generated["sr"], oracle["sr"])
     scalar("pc", generated["pc"], oracle["pc"])
     gm, om = _effect_map(generated), _effect_map(oracle)

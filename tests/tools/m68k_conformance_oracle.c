@@ -1,6 +1,7 @@
 /* SEG-021-T003: pinned-Musashi oracle runner. Executes exactly one instruction per vector from the same
  * bit-identical memory image as the generated-native runner and prints the same boundary-schema JSON.
- * Supervisor-mode vectors only (SR bit 13 set); test/development oracle, never linked into generated code. */
+ * Supervisor and user initial state are both represented (explicit USP and SSP); test/development oracle, never
+ * linked into generated code. */
 #include "m68k_conformance_common.h"
 #include "m68k.h"
 #ifndef MUSASHI_GIT_REVISION
@@ -32,15 +33,18 @@ int main(int argc, char **argv) {
   m68k_init(); m68k_set_cpu_type(M68K_CPU_TYPE_68000);
   while (fgets(line, sizeof line, f)) {
     unsigned d[8], a[8];
-    if (!cf_parse(line, &v) || !(v.sr & 0x2000U)) { fprintf(stderr, "bad or user-mode vector line\n"); return 2; }
+    if (!cf_parse(line, &v)) { fprintf(stderr, "bad vector line\n"); return 2; }
     cf_init_memory(ram, &v); memcpy(before, ram, sizeof before);
     m68k_pulse_reset();
-    for (i = 0; i < 8U; ++i) { m68k_set_reg((m68k_register_t)(M68K_REG_D0 + i), v.d[i]); m68k_set_reg((m68k_register_t)(M68K_REG_A0 + i), v.a[i]); }
-    m68k_set_reg(M68K_REG_SR, v.sr); m68k_set_reg(M68K_REG_A7, v.a[7]); m68k_set_reg(M68K_REG_USP, v.usp); m68k_set_reg(M68K_REG_PC, CF_CODE_BASE);
+    m68k_set_reg(M68K_REG_SR, v.sr); /* first: selects (and swaps to) the requested stack, then seed both stacks explicitly */
+    m68k_set_reg(M68K_REG_USP, v.usp); m68k_set_reg(M68K_REG_ISP, v.ssp);
+    for (i = 0; i < 8U; ++i) m68k_set_reg((m68k_register_t)(M68K_REG_D0 + i), v.d[i]);
+    for (i = 0; i < 7U; ++i) m68k_set_reg((m68k_register_t)(M68K_REG_A0 + i), v.a[i]);
+    m68k_set_reg(M68K_REG_PC, CF_CODE_BASE);
     (void)m68k_execute(1); /* drain the pending reset cycles; executes no instruction */
     (void)m68k_execute(1); /* exactly one instruction (or one exception entry) */
     for (i = 0; i < 8U; ++i) { d[i] = m68k_get_reg(NULL, (m68k_register_t)(M68K_REG_D0 + i)); a[i] = m68k_get_reg(NULL, (m68k_register_t)(M68K_REG_A0 + i)); }
-    cf_print(&v, before, ram, m68k_get_reg(NULL, M68K_REG_PC), m68k_get_reg(NULL, M68K_REG_SR), m68k_get_reg(NULL, M68K_REG_USP), d, a);
+    cf_print(&v, before, ram, m68k_get_reg(NULL, M68K_REG_PC), m68k_get_reg(NULL, M68K_REG_SR), m68k_get_reg(NULL, M68K_REG_USP), m68k_get_reg(NULL, M68K_REG_ISP), d, a);
   }
   fclose(f); return 0;
 }

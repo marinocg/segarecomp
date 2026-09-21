@@ -12,28 +12,54 @@ shared memory image and output schema), `tests/fixtures/m68k-conformance-vectors
 
 ## Validating a family = adding table rows
 
-A row names a legal form id of `tests/fixtures/m68k-legal-forms.json`, which supplies the exact primary words.
-It states the EA role (`ea`: `src`/`dst`), how the vector values bind to operands (`bind`: `d@S` = data register
-in word bits S..S+2, `ea` = the word's own EA), a sweep `profile` for every word and a `full_profile` for the
-listed `full_words` (distinct registers, aliased registers, A7). Profiles are `single`, `cross` or `pair_list`
-over named value sets crossed with SR seeds. Boundaries covered by the committed profiles: zero, negative,
-carry/borrow, signed overflow, X/C interaction (SR 2700/2710/271F), byte/word/long boundary values, garbage upper
-bits, register aliasing and A7 byte auto-update (adjusts by two). No runner change is needed.
-Operand binding currently covers Dn, (An), (An)+ and -(An); new EA classes are added once in `bind_operand`.
+Validating a family normally means adding table rows, not changing the harness. A row names a legal form id of
+`tests/fixtures/m68k-legal-forms.json` (which supplies the exact primary words) and uses this small vocabulary:
+
+| key | meaning |
+| --- | --- |
+| `form` | T001 form id; every concrete primary word of the form is exercised |
+| `ext` | ordered literal extension suffixes (hex, whole words; default one empty suffix). Each tested encoding is `primary word + suffix`, e.g. `["0010","FFF0"]` displacements, `["7FFF"]` immediate, `["00012000"]` absolute.L, `["1804"]` brief index, `["00FF"]` MOVEM mask, `["2700"]` STOP SR. No assembler: the bytes are literal table data |
+| `bind` | optional `x`/`y` operand bindings (omit for no-operand/control rows) |
+| `init` | optional register presets, e.g. `{"d1":"00000010"}` (an index register value) |
+| `src_ext_bytes` | optional extension length of an immediate source operand when it is not the size default |
+| `profile` / `full_profile` / `full_words` | vector profile per word; `full_profile` for the listed words |
+
+Operand specs (`bind_operand`, MC68000 architectural shapes only, no per-mnemonic logic): `d@S` / `a@S` register in
+opcode bits S..S+2; `ea.src` / `ea.dst` the EA in opcode bits 0..5 with class from the form (Dn, An, (An), (An)+,
+-(An), d16(An), d8(An,Xn), abs.W, abs.L, d16(PC), d8(PC,Xn), #imm; extension words come from the suffix, the source
+EA's extension precedes the destination's); `eaM.dst` the MOVE-style destination field; `pi@S` / `pd@S` an (An)+ /
+-(An) operand for two-auto-update shapes (CMPM, ADDX/SUBX). Profiles are `single`, `cross`, `pair_list` (values
+crossed with SR seeds) or `state` (SR seeds only, for rows without operands). Committed profiles cover zero,
+negative, carry/borrow, signed overflow, X/C interaction (SR 2700/2710/271F), boundary values with garbage upper
+bits, register aliasing, A7 byte auto-update (adjusts by two) and supervisor/user state (`state_modes`).
+
+Execution mode and stacks: the SR seed selects supervisor (bit 13) or user state. The vector carries USP and SSP
+explicitly; A7 is the active pointer (SSP in supervisor state, USP in user state). Both the generated and the
+Musashi runner start from exactly that state and report `usp`/`ssp`; in user mode both report the active stack
+pointer as USP. A row that current production cannot execute reports `unsupported`; the harness never rejects a row
+because of its mode.
+
+Extension-bearing and no-operand canaries are ordinary committed rows validated against Musashi:
+`neg.unary.w.none.disp` (d16(An), two suffixes), `addi.imm_ea.w.imm.dn` (immediate suffixes) and
+`nop.none.none.none.none` (no operand, supervisor and user). `tests/m68k_conformance_harness_test.py` additionally
+expands (without crediting) two-auto-update, displacement, brief-indexed, absolute, PC-relative, immediate, STOP, LINK,
+MOVEM, Bcc and TRAP shapes to prove later family tasks only add rows.
 
 ## Compared state
 
-D0-D7, A0-A7 (A7 = SSP), PC, SR/CCR, USP, byte-granular memory writes against the initial image (this covers
-memory RMW results, auto-updated EA memory and exception stacked frames) and the exception-vector hook: when the
-final PC is a vector handler address (vectors 2..31 are seeded to distinct handlers) a `k=2` effect records the
-vector number, so exception families reuse the same rows and comparison. Timing is not compared.
+D0-D7, A0-A7 (A7 = active stack pointer), PC, SR/CCR, USP, SSP, byte-granular memory writes against the initial
+image (memory RMW results, auto-updated EA memory and exception stacked frames) and the exception-vector hook: vectors
+2..255 are seeded to distinct handler addresses (`CF_HANDLER(v)`); when the final PC is a handler a `k=2` effect
+records the vector number (TRAP #0..#15 = 32..47, user vectors above), so exception families reuse the same rows and
+comparison. Timing is not compared. Exception instruction semantics are not implemented by this harness.
 
 ## Limits (measured, not hidden)
 
-Vectors run in supervisor mode (user-mode/USP-swap semantics need a family-owned binder). A write that does not
-change a byte is invisible. Only a fully passing row (every word, every vector) can credit the T002 manifest.
-Extension-word forms are outside the current binder, so manifest credit is only meaningful for single-word forms
-(the T002 baseline fixes extension words to 0x0004).
+A credited primary word means the vectors declared by its row (all suffixes, all profile cases) matched Musashi;
+it is NOT semantic exhaustiveness (a handful of extension values, fixed baseline registers and memory pattern).
+Family tasks own deeper family-specific vector expansion. A write that does not change a byte is invisible. The
+generated model has one active A7 plus USP, so SSP is shadowed by the runner. Timing is out of scope. Only a fully
+passing row can credit the T002 manifest (`update_manifest` only adds credit and never removes it).
 
 ## Oracle policy
 

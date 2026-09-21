@@ -93,16 +93,22 @@
     "2700",
     "271F"
    ]
+  },
+  "state_modes": {
+   "kind": "state",
+   "sr": [
+    "2700",
+    "0004"
+   ]
   }
  },
  "rows": [
   {
    "id": "add.dn_ea.b.dn.ind",
    "form": "add.dn_ea.b.dn.ind",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -116,10 +122,9 @@
   {
    "id": "add.dn_ea.b.dn.postinc",
    "form": "add.dn_ea.b.dn.postinc",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -133,10 +138,9 @@
   {
    "id": "add.dn_ea.b.dn.predec",
    "form": "add.dn_ea.b.dn.predec",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -150,10 +154,9 @@
   {
    "id": "add.dn_ea.l.dn.ind",
    "form": "add.dn_ea.l.dn.ind",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -167,10 +170,9 @@
   {
    "id": "add.dn_ea.l.dn.postinc",
    "form": "add.dn_ea.l.dn.postinc",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -184,10 +186,9 @@
   {
    "id": "add.dn_ea.l.dn.predec",
    "form": "add.dn_ea.l.dn.predec",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -201,10 +202,9 @@
   {
    "id": "add.dn_ea.w.dn.ind",
    "form": "add.dn_ea.w.dn.ind",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -218,10 +218,9 @@
   {
    "id": "add.dn_ea.w.dn.postinc",
    "form": "add.dn_ea.w.dn.postinc",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -235,10 +234,9 @@
   {
    "id": "add.dn_ea.w.dn.predec",
    "form": "add.dn_ea.w.dn.predec",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -252,9 +250,8 @@
   {
    "id": "add.ea_dn.b.dn.dn",
    "form": "add.ea_dn.b.dn.dn",
-   "ea": "src",
    "bind": {
-    "x": "ea",
+    "x": "ea.src",
     "y": "d@9"
    },
    "profile": "alu_sweep",
@@ -269,9 +266,8 @@
   {
    "id": "add.ea_dn.l.dn.dn",
    "form": "add.ea_dn.l.dn.dn",
-   "ea": "src",
    "bind": {
-    "x": "ea",
+    "x": "ea.src",
     "y": "d@9"
    },
    "profile": "alu_sweep",
@@ -286,9 +282,8 @@
   {
    "id": "add.ea_dn.w.dn.dn",
    "form": "add.ea_dn.w.dn.dn",
-   "ea": "src",
    "bind": {
-    "x": "ea",
+    "x": "ea.src",
     "y": "d@9"
    },
    "profile": "alu_sweep",
@@ -301,11 +296,34 @@
    ]
   },
   {
+   "id": "addi.imm_ea.w.imm.dn",
+   "form": "addi.imm_ea.w.imm.dn",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "ext": [
+    "7FFF",
+    "8000",
+    "0001"
+   ],
+   "profile": "unary_full",
+   "full_profile": "unary_full",
+   "full_words": [
+    "0640",
+    "0641",
+    "0642",
+    "0643",
+    "0644",
+    "0645",
+    "0646",
+    "0647"
+   ]
+  },
+  {
    "id": "addq.quick_ea.b.quick.dn.quick1to8",
    "form": "addq.quick_ea.b.quick.dn.quick1to8",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -319,9 +337,8 @@
   {
    "id": "addq.quick_ea.b.quick.ind.quick1to8",
    "form": "addq.quick_ea.b.quick.ind.quick1to8",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -335,9 +352,8 @@
   {
    "id": "addq.quick_ea.b.quick.postinc.quick1to8",
    "form": "addq.quick_ea.b.quick.postinc.quick1to8",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -351,9 +367,8 @@
   {
    "id": "addq.quick_ea.b.quick.predec.quick1to8",
    "form": "addq.quick_ea.b.quick.predec.quick1to8",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -367,9 +382,8 @@
   {
    "id": "addq.quick_ea.l.quick.dn.quick1to8",
    "form": "addq.quick_ea.l.quick.dn.quick1to8",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -383,9 +397,8 @@
   {
    "id": "addq.quick_ea.l.quick.ind.quick1to8",
    "form": "addq.quick_ea.l.quick.ind.quick1to8",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -399,9 +412,8 @@
   {
    "id": "addq.quick_ea.l.quick.postinc.quick1to8",
    "form": "addq.quick_ea.l.quick.postinc.quick1to8",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -415,9 +427,8 @@
   {
    "id": "addq.quick_ea.l.quick.predec.quick1to8",
    "form": "addq.quick_ea.l.quick.predec.quick1to8",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -431,9 +442,8 @@
   {
    "id": "addq.quick_ea.w.quick.dn.quick1to8",
    "form": "addq.quick_ea.w.quick.dn.quick1to8",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -447,9 +457,8 @@
   {
    "id": "addq.quick_ea.w.quick.ind.quick1to8",
    "form": "addq.quick_ea.w.quick.ind.quick1to8",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -463,9 +472,8 @@
   {
    "id": "addq.quick_ea.w.quick.postinc.quick1to8",
    "form": "addq.quick_ea.w.quick.postinc.quick1to8",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -479,9 +487,8 @@
   {
    "id": "addq.quick_ea.w.quick.predec.quick1to8",
    "form": "addq.quick_ea.w.quick.predec.quick1to8",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -495,9 +502,8 @@
   {
    "id": "neg.unary.b.none.dn",
    "form": "neg.unary.b.none.dn",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -515,9 +521,8 @@
   {
    "id": "neg.unary.b.none.ind",
    "form": "neg.unary.b.none.ind",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -535,9 +540,8 @@
   {
    "id": "neg.unary.b.none.postinc",
    "form": "neg.unary.b.none.postinc",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -555,9 +559,8 @@
   {
    "id": "neg.unary.b.none.predec",
    "form": "neg.unary.b.none.predec",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -575,9 +578,8 @@
   {
    "id": "neg.unary.l.none.dn",
    "form": "neg.unary.l.none.dn",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -595,9 +597,8 @@
   {
    "id": "neg.unary.l.none.ind",
    "form": "neg.unary.l.none.ind",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -615,9 +616,8 @@
   {
    "id": "neg.unary.l.none.postinc",
    "form": "neg.unary.l.none.postinc",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -635,9 +635,8 @@
   {
    "id": "neg.unary.l.none.predec",
    "form": "neg.unary.l.none.predec",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -653,11 +652,33 @@
    ]
   },
   {
+   "id": "neg.unary.w.none.disp",
+   "form": "neg.unary.w.none.disp",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "ext": [
+    "0010",
+    "FFF0"
+   ],
+   "profile": "unary_full",
+   "full_profile": "unary_full",
+   "full_words": [
+    "4468",
+    "4469",
+    "446A",
+    "446B",
+    "446C",
+    "446D",
+    "446E",
+    "446F"
+   ]
+  },
+  {
    "id": "neg.unary.w.none.dn",
    "form": "neg.unary.w.none.dn",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -675,9 +696,8 @@
   {
    "id": "neg.unary.w.none.ind",
    "form": "neg.unary.w.none.ind",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -695,9 +715,8 @@
   {
    "id": "neg.unary.w.none.postinc",
    "form": "neg.unary.w.none.postinc",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -715,9 +734,8 @@
   {
    "id": "neg.unary.w.none.predec",
    "form": "neg.unary.w.none.predec",
-   "ea": "dst",
    "bind": {
-    "x": "ea"
+    "x": "ea.dst"
    },
    "profile": "unary_sweep",
    "full_profile": "unary_full",
@@ -733,12 +751,16 @@
    ]
   },
   {
+   "id": "nop.none.none.none.none",
+   "form": "nop.none.none.none.none",
+   "profile": "state_modes"
+  },
+  {
    "id": "sub.dn_ea.b.dn.ind",
    "form": "sub.dn_ea.b.dn.ind",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -752,10 +774,9 @@
   {
    "id": "sub.dn_ea.b.dn.postinc",
    "form": "sub.dn_ea.b.dn.postinc",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -769,10 +790,9 @@
   {
    "id": "sub.dn_ea.b.dn.predec",
    "form": "sub.dn_ea.b.dn.predec",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -786,10 +806,9 @@
   {
    "id": "sub.dn_ea.l.dn.ind",
    "form": "sub.dn_ea.l.dn.ind",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -803,10 +822,9 @@
   {
    "id": "sub.dn_ea.l.dn.postinc",
    "form": "sub.dn_ea.l.dn.postinc",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -820,10 +838,9 @@
   {
    "id": "sub.dn_ea.l.dn.predec",
    "form": "sub.dn_ea.l.dn.predec",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -837,10 +854,9 @@
   {
    "id": "sub.dn_ea.w.dn.ind",
    "form": "sub.dn_ea.w.dn.ind",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -854,10 +870,9 @@
   {
    "id": "sub.dn_ea.w.dn.postinc",
    "form": "sub.dn_ea.w.dn.postinc",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -871,10 +886,9 @@
   {
    "id": "sub.dn_ea.w.dn.predec",
    "form": "sub.dn_ea.w.dn.predec",
-   "ea": "dst",
    "bind": {
     "x": "d@9",
-    "y": "ea"
+    "y": "ea.dst"
    },
    "profile": "alu_sweep",
    "full_profile": "alu_full",
@@ -888,9 +902,8 @@
   {
    "id": "sub.ea_dn.b.dn.dn",
    "form": "sub.ea_dn.b.dn.dn",
-   "ea": "src",
    "bind": {
-    "x": "ea",
+    "x": "ea.src",
     "y": "d@9"
    },
    "profile": "alu_sweep",
@@ -905,9 +918,8 @@
   {
    "id": "sub.ea_dn.l.dn.dn",
    "form": "sub.ea_dn.l.dn.dn",
-   "ea": "src",
    "bind": {
-    "x": "ea",
+    "x": "ea.src",
     "y": "d@9"
    },
    "profile": "alu_sweep",
@@ -922,9 +934,8 @@
   {
    "id": "sub.ea_dn.w.dn.dn",
    "form": "sub.ea_dn.w.dn.dn",
-   "ea": "src",
    "bind": {
-    "x": "ea",
+    "x": "ea.src",
     "y": "d@9"
    },
    "profile": "alu_sweep",
