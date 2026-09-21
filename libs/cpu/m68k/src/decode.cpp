@@ -745,18 +745,7 @@ struct M68kEaFieldOutcome {
     if (opmode <= 2U) {
       if (eor_only) return std::nullopt;
       const auto size = m68k_size_from_tst_clr_field(opmode);
-      // SEG-007-T198: brief-format PC-relative indexed addressing `(d8,PC,Xn)`
-      // is an architecturally legal source for the ordinary `AND`/`OR
-      // <ea>,Dn` register form on the base MC68000 (M68000PM/AD Rev. 1 §4
-      // AND/OR source-operand tables). This project scopes it to the
-      // word-size EA->Dn direction only: the runtime-reached form. Byte/long
-      // `(d8,PC,Xn)` and the reverse `Dn,<ea>` memory-RMW direction stay
-      // fail-closed with a source-provenanced `valid_but_unsupported`
-      // rejection. The EA computation (`pc_base + sign_extend(Xn) + d8`) and
-      // its runtime-routed read are the generic ones already established for
-      // the MOVE-family `(d8,PC,Xn)` source (SEG-007-T136) and the
-      // `(d8,An,Xn)` logical source (SEG-007-T137); no new EA math or
-      // dispatch is introduced.
+      // SEG-007-T198 introduced word-size `(d8,PC,Xn)`; SEG-021-T007 widened to the full manual set.
       // SEG-021-T007: the full manual source set applies to every size (byte/long `(d8,PC,Xn)` included).
       const auto source_legal = m68k_ea_and_or_source;
       const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg, source_legal, size);
