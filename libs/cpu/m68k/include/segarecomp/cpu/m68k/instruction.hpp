@@ -261,6 +261,14 @@ inline constexpr M68kEaLegalMask m68k_ea_reverse_arithmetic_destination =
 // Manual (base MC68000 columns; independent of the T001 dataset): every data addressing mode --
 // all modes except An -- for every size, including `(d8,An,Xn)`, `(d8,PC)`, `(d8,PC,Xn)` and #imm.
 inline constexpr M68kEaLegalMask m68k_ea_and_or_source = m68k_ea_move_family_source & ~m68k_ea_an;
+// SEG-021-T010: MULS.W/MULU.W/DIVS.W/DIVU.W source set, written from the Motorola M68000 Family
+// Programmer's Reference Manual (base MC68000 columns; independent of the T001 dataset): every data
+// addressing mode -- all modes except An -- exactly the same formula as `m68k_ea_and_or_source`
+// above (both families' source-operand tables list the identical eleven non-An modes, including
+// `(d8,PC,Xn)`). Previously excluded `m68k_ea_pc_index8` as an unevidenced non-goal; T010 widens it
+// to the full legal set the manual specifies, matching every other T021 family task's own "encode
+// legality independently of runtime-reached evidence" precedent.
+inline constexpr M68kEaLegalMask m68k_ea_mul_div_source = m68k_ea_move_family_source & ~m68k_ea_an;
 // AND/OR `Dn,<ea>` (opmode 4-6): memory alterable only (Dn/An encodings of that opmode range are
 // ABCD/SBCD/EXG, not AND/OR); EOR `Dn,<ea>` and ANDI/ORI/EORI destinations: data alterable.
 inline constexpr M68kEaLegalMask m68k_ea_and_or_reverse_destination =
@@ -615,18 +623,11 @@ enum class M68kInstructionKind {
   // family (`logical_and`/`eor`, opmode field bits 8-6), but is decoded
   // separately: `m68k_decode_general_logical`'s shared `decode_register_
   // logical` helper explicitly declines opmode 3 (MULU) and opmode 7 (MULS)
-  // for every family, so MULS/MULU never reach that shared body. Only the
-  // reached form, MULS.W (opmode 111), is selected; MULU.W (opmode 011)
-  // remains unsupported. The legal source EA set is exactly the same
-  // "data addressing modes without An-direct" set the AND/OR/EOR
-  // register-form source already uses for opmode<=2
-  // (`m68k_ea_arithmetic_logical_indexed_source & ~m68k_ea_an`), per the
-  // manual's MULS source-operand table -- deliberately excluding
-  // `m68k_ea_pc_index8`: the brief-format PC-relative indexed source stays
-  // an established fail-closed non-goal for this exact opcode line/opmode
-  // (an existing regression pins this down), matching the evidenced
-  // runtime-reached shape (register-direct/immediate), not a speculative
-  // widening. `source_ea`
+  // for every family, so MULS/MULU never reach that shared body. SEG-021-T010:
+  // the legal source EA set is `m68k_ea_mul_div_source` -- every data
+  // addressing mode except An-direct, including `(d8,An,Xn)` and `(d8,PC,Xn)`,
+  // per the manual's MULS source-operand table (the same formula
+  // `m68k_ea_and_or_source` already uses). `source_ea`
   // carries the decoded word-size source; `destination_ea` carries the
   // fixed `{data_register, Dn}` destination (the manual's MULS is always
   // Dn-destination, never a memory destination) -- matching the existing
@@ -643,11 +644,10 @@ enum class M68kInstructionKind {
   // 0xC0C0-0xC0FF/0xCEC0-0xCEFF depending on Dn) -- the unsigned sibling of
   // `multiply_signed_word` on the exact same opcode line/opmode field
   // (opmode 011, the form `decode_register_logical`'s shared body already
-  // declines for every logical family). Same legal source EA set, same
-  // fixed `{data_register, Dn}` destination, same word-size source /
-  // full-32-bit-Dn-write shape, and the same excluded `m68k_ea_pc_index8`
-  // non-goal as MULS.W -- see that entry's doc comment for the shared
-  // rationale, not repeated here. CCR: N/Z from the full 32-bit unsigned
+  // declines for every logical family). Same `m68k_ea_mul_div_source` legal
+  // source EA set, same fixed `{data_register, Dn}` destination, same
+  // word-size source / full-32-bit-Dn-write shape as MULS.W -- see that
+  // entry's doc comment for the shared rationale, not repeated here. CCR: N/Z from the full 32-bit unsigned
   // product, V=0, C=0, X unaffected -- reuses `M68kLogicalResultSpecification`
   // exactly like MULS.W.
   multiply_unsigned_word,
@@ -656,8 +656,8 @@ enum class M68kInstructionKind {
   // dividend / signed 16-bit sign-extended source-EA divisor, per the public
   // Motorola M68000 Family Programmer's Reference Manual DIVS entry (see
   // docs/decisions/0037-synchronous-mc68000-divide-by-zero-vector-5-
-  // exception-entry.md). Same legal source EA set / excluded
-  // `m68k_ea_pc_index8` non-goal as MULS.W/MULU.W. `source_ea` carries the
+  // exception-entry.md). Same `m68k_ea_mul_div_source` legal source EA set
+  // as MULS.W/MULU.W. `source_ea` carries the
   // decoded word-size divisor; `destination_ea` is always
   // `{data_register, Dn}` (the full 32-bit dividend/result register).
   // Divisor == 0: raises the synchronous vector-5 CPU exception (ADR-0037);

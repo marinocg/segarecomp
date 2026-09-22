@@ -359,6 +359,55 @@
     "2710",
     "271F"
    ]
+  },
+  "muldiv_sweep": {
+   "kind": "pair_list",
+   "pairs": [
+    [
+     "00000000",
+     "00000000"
+    ],
+    [
+     "00000001",
+     "00000000"
+    ],
+    [
+     "0000FFFF",
+     "00000001"
+    ],
+    [
+     "00007FFF",
+     "00000002"
+    ],
+    [
+     "00008000",
+     "00000002"
+    ],
+    [
+     "FFFFFFFF",
+     "FFFF8000"
+    ],
+    [
+     "00000001",
+     "7FFFFFFF"
+    ],
+    [
+     "00000002",
+     "80000000"
+    ],
+    [
+     "00000000",
+     "12345678"
+    ],
+    [
+     "0000ABCD",
+     "00030002"
+    ]
+   ],
+   "sr": [
+    "2700",
+    "271F"
+   ]
   }
  },
  "rows": [
@@ -12687,6 +12736,264 @@
     "3067",
     "3261"
    ]
+  },
+  {
+   "id": "muls.ea_dn.w.absl.dn",
+   "form": "muls.ea_dn.w.absl.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep",
+   "ext": [
+    "00020000"
+   ]
+  },
+  {
+   "id": "muls.ea_dn.w.absw.dn",
+   "form": "muls.ea_dn.w.absw.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep",
+   "ext": [
+    "4000"
+   ]
+  },
+  {
+   "id": "muls.ea_dn.w.disp.dn",
+   "form": "muls.ea_dn.w.disp.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep",
+   "ext": [
+    "0010"
+   ]
+  },
+  {
+   "id": "muls.ea_dn.w.dn.dn",
+   "form": "muls.ea_dn.w.dn.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep"
+  },
+  {
+   "id": "muls.ea_dn.w.imm.dn",
+   "form": "muls.ea_dn.w.imm.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep",
+   "ext": [
+    "0000",
+    "8000",
+    "FFFF",
+    "7FFF"
+   ]
+  },
+  {
+   "id": "muls.ea_dn.w.ind.dn",
+   "form": "muls.ea_dn.w.ind.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep"
+  },
+  {
+   "id": "muls.ea_dn.w.index.dn",
+   "form": "muls.ea_dn.w.index.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "move_even",
+   "init": {
+    "d1": "00000010"
+   },
+   "ext": [
+    "1004"
+   ]
+  },
+  {
+   "id": "muls.ea_dn.w.pcdisp.dn",
+   "form": "muls.ea_dn.w.pcdisp.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep",
+   "ext": [
+    "0010"
+   ]
+  },
+  {
+   "id": "muls.ea_dn.w.pcindex.dn",
+   "form": "muls.ea_dn.w.pcindex.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "move_even",
+   "init": {
+    "d1": "00000010"
+   },
+   "ext": [
+    "1040"
+   ]
+  },
+  {
+   "id": "muls.ea_dn.w.postinc.dn",
+   "form": "muls.ea_dn.w.postinc.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep"
+  },
+  {
+   "id": "muls.ea_dn.w.predec.dn",
+   "form": "muls.ea_dn.w.predec.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep"
+  },
+  {
+   "id": "mulu.ea_dn.w.absl.dn",
+   "form": "mulu.ea_dn.w.absl.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep",
+   "ext": [
+    "00020000"
+   ]
+  },
+  {
+   "id": "mulu.ea_dn.w.absw.dn",
+   "form": "mulu.ea_dn.w.absw.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep",
+   "ext": [
+    "4000"
+   ]
+  },
+  {
+   "id": "mulu.ea_dn.w.disp.dn",
+   "form": "mulu.ea_dn.w.disp.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep",
+   "ext": [
+    "0010"
+   ]
+  },
+  {
+   "id": "mulu.ea_dn.w.dn.dn",
+   "form": "mulu.ea_dn.w.dn.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep"
+  },
+  {
+   "id": "mulu.ea_dn.w.imm.dn",
+   "form": "mulu.ea_dn.w.imm.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep",
+   "ext": [
+    "0000",
+    "8000",
+    "FFFF",
+    "7FFF"
+   ]
+  },
+  {
+   "id": "mulu.ea_dn.w.ind.dn",
+   "form": "mulu.ea_dn.w.ind.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep"
+  },
+  {
+   "id": "mulu.ea_dn.w.index.dn",
+   "form": "mulu.ea_dn.w.index.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "move_even",
+   "init": {
+    "d1": "00000010"
+   },
+   "ext": [
+    "1004"
+   ]
+  },
+  {
+   "id": "mulu.ea_dn.w.pcdisp.dn",
+   "form": "mulu.ea_dn.w.pcdisp.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep",
+   "ext": [
+    "0010"
+   ]
+  },
+  {
+   "id": "mulu.ea_dn.w.pcindex.dn",
+   "form": "mulu.ea_dn.w.pcindex.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "move_even",
+   "init": {
+    "d1": "00000010"
+   },
+   "ext": [
+    "1040"
+   ]
+  },
+  {
+   "id": "mulu.ea_dn.w.postinc.dn",
+   "form": "mulu.ea_dn.w.postinc.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep"
+  },
+  {
+   "id": "mulu.ea_dn.w.predec.dn",
+   "form": "mulu.ea_dn.w.predec.dn",
+   "bind": {
+    "x": "ea.src",
+    "y": "d@9"
+   },
+   "profile": "muldiv_sweep"
   },
   {
    "id": "neg.unary.b.none.dn",

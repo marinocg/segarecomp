@@ -684,9 +684,21 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     return destination_register();
   case M68kIrKind::write_status_register:
   case M68kIrKind::write_condition_codes:
+    return storage_free(operation.source_ea);
   case M68kIrKind::multiply_signed_word:
   case M68kIrKind::multiply_unsigned_word:
-    return storage_free(operation.source_ea);
+    // SEG-021-T010: family-level admission, widened from the prior storage-free-only source
+    // restriction. Every legal source EA lowers through the shared C4 routed read primitives with
+    // no CFG edge, call frame, return target or static memory fact -- the same MOVE-family
+    // precedent above (`m68k_emit_materialized_ea_read`/`m68k_emit_runtime_ea_address` handle
+    // absolute/PC-relative/indexed reads identically for every family that uses them). Auto-updating
+    // sources use the operation-local deferred address-register commit
+    // (`m68k_emit_routed_muldiv_auto_update`), which returns from a failed routed access before any
+    // architectural write, exactly like the MOVE/logical/bit families. The dynamic retirement
+    // expression (`m68k_retirement_cycle_expression`) already accounts for every EA mode via
+    // `m68k_effective_address_cycles`, so no timing gap is introduced. Legality of the source EA
+    // itself is owned by decode (`m68k_ea_mul_div_source`), not by this predicate.
+    return true;
   case M68kIrKind::compare:
   case M68kIrKind::compare_immediate:
   case M68kIrKind::compare_address:

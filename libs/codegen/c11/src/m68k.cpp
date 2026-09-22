@@ -634,6 +634,65 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
   output << "{\n" << body.str() << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
   return true;
 }
+
+// SEG-021-T010: runtime-routed lowering of an auto-updating ((An)+ / -(An)) SOURCE of
+// MULS.W/MULU.W/DIVS.W/DIVU.W, the source-side counterpart of `m68k_emit_routed_bit_auto_update`
+// above (same operation-local deferred-address commit technique). The destination is always Dn
+// (decode.cpp fixes it): it never auto-updates and is read/written directly, never routed. The
+// auto-update commits immediately after the routed source read/postincrement, exactly matching the
+// real MC68000's own fetch-then-operate ordering -- the source operand (including its own
+// auto-update) is fully consumed before MULS/MULU compute their product or DIVS/DIVU's divisor==0
+// check below may raise the synchronous vector-5 exception (ADR-0037); the auto-update is
+// unconditional even when that exception is later raised. Returns false when the source is not
+// auto-updating or the context is not routed (the caller's ordinary path then applies unchanged).
+[[nodiscard]] bool m68k_emit_routed_muldiv_auto_update(std::ostringstream &output, const M68kIrOperation &operation,
+                                                        std::string_view data_registers,
+                                                        std::string_view status_register,
+                                                        const M68kMemoryEmissionContext &memory) {
+  if (!memory.runtime_routing) return false;
+  const auto &ea = operation.source_ea;
+  if (ea.mode != M68kEaMode::address_predec && ea.mode != M68kEaMode::address_postinc) return false;
+  const auto width = static_cast<std::uint32_t>(operation.size);
+  const std::uint32_t step =
+      (static_cast<unsigned>(ea.reg) == 7U && operation.size == M68kMemoryAccessWidth::byte) ? 2U : width;
+  const std::string an = std::string(memory.address_registers) + "[" + std::to_string(ea.reg) + "]";
+  const std::string local = "m68k_muldiv_auto_ea";
+  const std::string dn = std::string(data_registers) + "[" + std::to_string(operation.destination_ea.reg) + "]";
+  unsigned temp_ordinal = 0U;
+  std::ostringstream body;
+  body << "uint32_t " << local << " = " << an << ";\n";
+  if (ea.mode == M68kEaMode::address_predec) body << local << " -= UINT32_C(" << step << ");\n";
+  std::string source_expr;
+  m68k_emit_routed_read(body, local, operation.size, memory, source_expr, temp_ordinal);
+  if (ea.mode == M68kEaMode::address_postinc) body << local << " += UINT32_C(" << step << ");\n";
+  body << an << " = " << local << ";\n";
+  if (operation.kind == M68kIrKind::multiply_signed_word || operation.kind == M68kIrKind::multiply_unsigned_word) {
+    const bool is_signed = operation.kind == M68kIrKind::multiply_signed_word;
+    const std::string prefix = is_signed ? "muls" : "mulu";
+    const std::string signed_type = is_signed ? "int32_t" : "uint32_t";
+    const std::string narrow_cast = is_signed ? "(int32_t)(int16_t)(" : "(uint32_t)(uint16_t)(";
+    const std::string result_var = prefix + "_auto_result";
+    body << "{ const " << signed_type << ' ' << prefix << "_auto_source = " << narrow_cast << source_expr
+         << "); const " << signed_type << ' ' << prefix << "_auto_destination = " << narrow_cast << dn
+         << "); const uint32_t " << result_var << " = (uint32_t)(" << prefix << "_auto_source * " << prefix
+         << "_auto_destination); " << dn << " = " << result_var << "; ";
+    M68kLogicalResultSpecification::emit_c_update(body, status_register, result_var, M68kMemoryAccessWidth::long_word);
+    body << " }\n";
+  } else {
+    const bool is_signed = operation.kind == M68kIrKind::divide_signed_word;
+    body << "{ const uint16_t divide_auto_divisor = (uint16_t)(" << source_expr << "); "
+         << "if (divide_auto_divisor == 0U) { "
+         << emit_runtime(memory).divide_by_zero(memory,
+                operation.provenance.source.address.value + operation.provenance.length.value)
+         << "else { ";
+    std::ostringstream divide_body;
+    M68kDivisionResultSpecification::emit_c_update(divide_body, status_register, dn, std::string("divide_auto_divisor"),
+                                                    is_signed, std::string("divide_auto_result"));
+    body << divide_body.str() << " if (!divide_auto_result_overflow) " << dn << " = divide_auto_result; } }\n";
+  }
+  output << "{\n" << body.str() << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
+  return true;
+}
 } // namespace
 
 // This is the sole per-operation C-lowering definition for every accepted
@@ -1149,18 +1208,9 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
   }
   case M68kIrKind::multiply_signed_word: {
     if (memory != nullptr) {
-      // SEG-007-T220: MULS.W <ea>,Dn shares the logical family's own
-      // declined-auto-update source treatment (no deferred-address-commit
-      // contract for this family either) -- classify_m68k_c4_gap_shapes
-      // reports an auto-updating source as
-      // M68kC4GapClass::requires_architecture_decision and the C4 emitter
-      // rejects the whole prefix before this body runs; this guard is a
-      // defensive fail-closed backstop, matching the logical family's own
-      // identical guard immediately above.
-      if (memory->runtime_routing &&
-          (operation.source_ea.mode == M68kEaMode::address_predec ||
-           operation.source_ea.mode == M68kEaMode::address_postinc))
-        break;
+      // SEG-021-T010: routed auto-updating sources lower through the operation-local
+      // deferred address-commit helper above (like the logical/bit families).
+      if (m68k_emit_routed_muldiv_auto_update(output, operation, data_registers, status_register, *memory)) break;
       unsigned temp_ordinal = 0U;
       std::ostringstream prelude;
       // The source is read at word size and sign-extended (the manual's
@@ -1194,15 +1244,13 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
   }
   case M68kIrKind::multiply_unsigned_word: {
     // SEG-007-T222: MULU.W <ea>,Dn -- unsigned sibling of multiply_signed_word
-    // immediately above; shares every structural treatment (declined
-    // auto-update source guard, word-size source/destination read, full
-    // 32-bit Dn write, M68kLogicalResultSpecification CCR update), evaluated
-    // as an unsigned product rather than a signed one.
+    // immediately above; shares every structural treatment (word-size
+    // source/destination read, full 32-bit Dn write,
+    // M68kLogicalResultSpecification CCR update), evaluated as an unsigned
+    // product rather than a signed one.
     if (memory != nullptr) {
-      if (memory->runtime_routing &&
-          (operation.source_ea.mode == M68kEaMode::address_predec ||
-           operation.source_ea.mode == M68kEaMode::address_postinc))
-        break;
+      // SEG-021-T010: see multiply_signed_word above.
+      if (m68k_emit_routed_muldiv_auto_update(output, operation, data_registers, status_register, *memory)) break;
       unsigned temp_ordinal = 0U;
       std::ostringstream prelude;
       const auto source = m68k_emit_materialized_ea_read(operation.source_ea, operation.size, data_registers,
@@ -1232,13 +1280,11 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
   case M68kIrKind::divide_unsigned_word: {
     // SEG-007-T222 / ADR-0037: DIVS.W/DIVU.W <ea>,Dn. Only meaningful in the
     // runtime-routed C4 context (the vector-5 raise helper needs a live
-    // `the platform runtime object`); the same declined-auto-update source guard as
-    // MULS.W/MULU.W applies (no deferred-address-commit contract for this
-    // family either).
+    // `the platform runtime object`).
     if (memory != nullptr && memory->runtime_routing) {
-      if (operation.source_ea.mode == M68kEaMode::address_predec ||
-          operation.source_ea.mode == M68kEaMode::address_postinc)
-        break;
+      // SEG-021-T010: routed auto-updating sources lower through the operation-local deferred
+      // address-commit helper above (see multiply_signed_word).
+      if (m68k_emit_routed_muldiv_auto_update(output, operation, data_registers, status_register, *memory)) break;
       const bool is_signed = operation.kind == M68kIrKind::divide_signed_word;
       unsigned temp_ordinal = 0U;
       std::ostringstream prelude;
