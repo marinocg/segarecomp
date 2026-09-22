@@ -176,6 +176,21 @@ control retains its stronger existing membership owner (for example RTS uses
 the whole-program return-target set), so this check neither creates a second
 CFG/target database nor weakens any dynamic-control guard.
 
+A bounded production diagnosis reproduced the ordering gap with a
+runtime-selected identity that classified generically as a legal decoded
+PC-indexed dynamic jump. That identity was absent from discovery, unit
+admission, semantic partitioning, retained blocks, and typed frontiers.
+Immutable-ROM enumeration decoded it, but the existing AOT contract rejected
+both its dynamic source-EA class and its lack of complete isolated C emission;
+it therefore never became an AOT identity and was never later pruned. A
+separate admitted AOT producer nevertheless had a fixed `advance` effect whose
+exact-PC obligation selected that identity. The final consistency rule above
+now converts precisely this cross-stage absence into the producer's typed,
+source-provenanced stop. This is the durable public classification only;
+address-specific evidence came from temporary local tracing, is not retained,
+and supplies no fixture, target fact, or basis for broadening dynamic-jump AOT
+admission here.
+
 The generated stop uses the matching `known_but_unemitted_target` diagnostic
 category and locally attaches mapping/instruction-fetch provenance from the
 same validated AOT decoded record and unique mapping already accepted for

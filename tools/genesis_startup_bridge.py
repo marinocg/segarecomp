@@ -1057,9 +1057,7 @@ def parse_offline_inventory_stitch_metrics(stderr_text: str) -> dict:
     overlap agree/conflict, and local/aggregate discovery sizes) -- never a raw
     address. Returns an empty dict when no such line was present.
     """
-    return _parse_marked_metrics_line(
-        stderr_text, "segarecomp: offline inventory stitch: ",
-        frozenset({"adr0038_retained_block_delta"}))
+    return _parse_marked_metrics_line(stderr_text, "segarecomp: offline inventory stitch: ")
 
 
 def parse_offline_inventory_partition_metrics(stderr_text: str) -> dict:
@@ -1075,10 +1073,13 @@ def parse_offline_inventory_partition_metrics(stderr_text: str) -> dict:
     `diagnostic_frontier_count_after_bounding`,
     `residual_frontier_obligation_count`,
     `retained_block_count_before_pruning`, `retained_block_count_after_pruning`,
-    `ingress_retained`). Every value is a count or 0/1 flag -- never a raw
-    address. Returns an empty dict when no such line was present.
+    `ingress_retained`). `adr0038_retained_block_delta` is the sole signed
+    value; all other values remain unsigned counts or 0/1 flags. No value is a
+    raw address. Returns an empty dict when no such line was present.
     """
-    return _parse_marked_metrics_line(stderr_text, "segarecomp: offline inventory partition: ")
+    return _parse_marked_metrics_line(
+        stderr_text, "segarecomp: offline inventory partition: ",
+        frozenset({"adr0038_retained_block_delta"}))
 
 
 def parse_offline_inventory_emission_metrics(stderr_text: str) -> dict:
