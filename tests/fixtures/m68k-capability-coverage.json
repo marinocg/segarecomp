@@ -735,57 +735,57 @@
   "shift_and_rotate": {
    "ccr_sr_effect_declared": {
     "applicable_forms": 104,
-    "passing_forms": 96,
-    "passing_words": 3344,
-    "percent_forms": "92.31"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "ccr_sr_validated": {
     "applicable_forms": 104,
-    "passing_forms": 5,
-    "passing_words": 5,
-    "percent_forms": "4.81"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "compile": {
     "applicable_forms": 104,
-    "passing_forms": 96,
-    "passing_words": 3344,
-    "percent_forms": "92.31"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "decode": {
     "applicable_forms": 104,
-    "passing_forms": 96,
-    "passing_words": 3344,
-    "percent_forms": "92.31"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "ea_footprint_declared": {
     "applicable_forms": 104,
-    "passing_forms": 0,
-    "passing_words": 0,
-    "percent_forms": "0.00"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "ea_side_effect_validated": {
     "applicable_forms": 16,
-    "passing_forms": 0,
-    "passing_words": 0,
-    "percent_forms": "0.00"
+    "passing_forms": 16,
+    "passing_words": 128,
+    "percent_forms": "100.00"
    },
    "effects": {
     "applicable_forms": 104,
-    "passing_forms": 96,
-    "passing_words": 3344,
-    "percent_forms": "92.31"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "emit": {
     "applicable_forms": 104,
-    "passing_forms": 96,
-    "passing_words": 3344,
-    "percent_forms": "92.31"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "end_to_end_structural": {
     "applicable_forms": 104,
-    "passing_forms": 96,
-    "passing_words": 3344,
-    "percent_forms": "92.31"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "exception_privilege_modeled": {
     "applicable_forms": 56,
@@ -795,57 +795,57 @@
    },
    "lift": {
     "applicable_forms": 104,
-    "passing_forms": 96,
-    "passing_words": 3344,
-    "percent_forms": "92.31"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "native_exec": {
     "applicable_forms": 104,
-    "passing_forms": 96,
-    "passing_words": 3344,
-    "percent_forms": "92.31"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "route_immutable_rom_aot": {
     "applicable_forms": 104,
-    "passing_forms": 48,
-    "passing_words": 3072,
-    "percent_forms": "46.15"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "route_runtime_routed_admitted": {
     "applicable_forms": 104,
-    "passing_forms": 96,
-    "passing_words": 3344,
-    "percent_forms": "92.31"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "route_runtime_routed_compiles": {
     "applicable_forms": 104,
-    "passing_forms": 96,
-    "passing_words": 3344,
-    "percent_forms": "92.31"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "route_runtime_routed_executes": {
     "applicable_forms": 104,
-    "passing_forms": 80,
-    "passing_words": 3328,
-    "percent_forms": "76.92"
+    "passing_forms": 88,
+    "passing_words": 3392,
+    "percent_forms": "84.62"
    },
    "route_static_discovery": {
     "applicable_forms": 104,
-    "passing_forms": 96,
-    "passing_words": 3344,
-    "percent_forms": "92.31"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "semantic_validated": {
     "applicable_forms": 104,
-    "passing_forms": 5,
-    "passing_words": 5,
-    "percent_forms": "4.81"
+    "passing_forms": 104,
+    "passing_words": 3408,
+    "percent_forms": "100.00"
    },
    "timing_model_present": {
     "applicable_forms": 104,
-    "passing_forms": 48,
-    "passing_words": 272,
-    "percent_forms": "46.15"
+    "passing_forms": 56,
+    "passing_words": 336,
+    "percent_forms": "53.85"
    },
    "timing_validated": {
     "applicable_forms": 104,
@@ -1202,32 +1202,32 @@
   "andi.imm_ea.w.imm.postinc": "1111101111111111110",
   "andi.imm_ea.w.imm.predec": "1111101111111111110",
   "andi.imm_sr.w.imm.sr": "00000000000000000-0",
-  "asl.dn_dn.b.dn.dn": "11101-01111111100-0",
-  "asl.dn_dn.l.dn.dn": "11101-01111111100-0",
-  "asl.dn_dn.w.dn.dn": "11101-01111111100-0",
-  "asl.imm_dn.b.count1to8.dn.count1to8": "11101-01111111100-0",
-  "asl.imm_dn.l.count1to8.dn.count1to8": "11101-01111111100-0",
-  "asl.imm_dn.w.count1to8.dn.count1to8": "11101-01111111100-0",
-  "asl.mem.w.none.absl": "11101011111100100-0",
-  "asl.mem.w.none.absw": "11101011111100111-0",
-  "asl.mem.w.none.disp": "11101011111110100-0",
-  "asl.mem.w.none.ind": "11101011111110100-0",
-  "asl.mem.w.none.index": "00000000000000000-0",
-  "asl.mem.w.none.postinc": "1110101111111010000",
-  "asl.mem.w.none.predec": "1110101111111010000",
-  "asr.dn_dn.b.dn.dn": "11101-01111111100-0",
-  "asr.dn_dn.l.dn.dn": "11101-01111111100-0",
-  "asr.dn_dn.w.dn.dn": "11101-01111111100-0",
-  "asr.imm_dn.b.count1to8.dn.count1to8": "11101-01111111100-0",
-  "asr.imm_dn.l.count1to8.dn.count1to8": "11101-01111111100-0",
-  "asr.imm_dn.w.count1to8.dn.count1to8": "11101-01111111100-0",
-  "asr.mem.w.none.absl": "11101011111100111-0",
-  "asr.mem.w.none.absw": "11101011111100100-0",
-  "asr.mem.w.none.disp": "11101011111110100-0",
-  "asr.mem.w.none.ind": "11101011111110100-0",
-  "asr.mem.w.none.index": "00000000000000000-0",
-  "asr.mem.w.none.postinc": "1110101111111010000",
-  "asr.mem.w.none.predec": "1110101111111010000",
+  "asl.dn_dn.b.dn.dn": "11111-01111111111-0",
+  "asl.dn_dn.l.dn.dn": "11111-01111111111-0",
+  "asl.dn_dn.w.dn.dn": "11111-01111111111-0",
+  "asl.imm_dn.b.count1to8.dn.count1to8": "11111-01111111111-0",
+  "asl.imm_dn.l.count1to8.dn.count1to8": "11111-01111111111-0",
+  "asl.imm_dn.w.count1to8.dn.count1to8": "11111-01111111111-0",
+  "asl.mem.w.none.absl": "11111011111101111-0",
+  "asl.mem.w.none.absw": "11111011111101111-0",
+  "asl.mem.w.none.disp": "11111011111111111-0",
+  "asl.mem.w.none.ind": "11111011111111111-0",
+  "asl.mem.w.none.index": "11111011111111111-0",
+  "asl.mem.w.none.postinc": "1111101111111111110",
+  "asl.mem.w.none.predec": "1111101111111111110",
+  "asr.dn_dn.b.dn.dn": "11111-01111111111-0",
+  "asr.dn_dn.l.dn.dn": "11111-01111111111-0",
+  "asr.dn_dn.w.dn.dn": "11111-01111111111-0",
+  "asr.imm_dn.b.count1to8.dn.count1to8": "11111-01111111111-0",
+  "asr.imm_dn.l.count1to8.dn.count1to8": "11111-01111111111-0",
+  "asr.imm_dn.w.count1to8.dn.count1to8": "11111-01111111111-0",
+  "asr.mem.w.none.absl": "11111011111101111-0",
+  "asr.mem.w.none.absw": "11111011111101111-0",
+  "asr.mem.w.none.disp": "11111011111111111-0",
+  "asr.mem.w.none.ind": "11111011111111111-0",
+  "asr.mem.w.none.index": "11111011111111111-0",
+  "asr.mem.w.none.postinc": "1111101111111111110",
+  "asr.mem.w.none.predec": "1111101111111111110",
   "bcc.disp16.w.none.target.cc": "1111-00111111110--0",
   "bcc.disp16.w.none.target.cs": "1111-00111111110--0",
   "bcc.disp16.w.none.target.eq": "1111-00111111111--0",
@@ -1566,32 +1566,32 @@
   "lea.ea_an.l.pcdisp.an": "1110--1111111110--0",
   "lea.ea_an.l.pcindex.an": "1110--1111111110--0",
   "link.an_disp16.w.an.disp16": "1110-01111111010-00",
-  "lsl.dn_dn.b.dn.dn": "11101-01111111100-0",
-  "lsl.dn_dn.l.dn.dn": "11101-01111111100-0",
-  "lsl.dn_dn.w.dn.dn": "11101-01111111100-0",
-  "lsl.imm_dn.b.count1to8.dn.count1to8": "11101-01111111100-0",
-  "lsl.imm_dn.l.count1to8.dn.count1to8": "11101-01111111100-0",
-  "lsl.imm_dn.w.count1to8.dn.count1to8": "11101-01111111100-0",
-  "lsl.mem.w.none.absl": "11101011111100100-0",
-  "lsl.mem.w.none.absw": "11101011111100111-0",
-  "lsl.mem.w.none.disp": "11101011111110100-0",
-  "lsl.mem.w.none.ind": "11101011111110100-0",
-  "lsl.mem.w.none.index": "00000000000000000-0",
-  "lsl.mem.w.none.postinc": "1110101111111010000",
-  "lsl.mem.w.none.predec": "1110101111111010000",
-  "lsr.dn_dn.b.dn.dn": "11101-01111111100-0",
-  "lsr.dn_dn.l.dn.dn": "11101-01111111100-0",
-  "lsr.dn_dn.w.dn.dn": "11101-01111111100-0",
-  "lsr.imm_dn.b.count1to8.dn.count1to8": "11101-01111111100-0",
-  "lsr.imm_dn.l.count1to8.dn.count1to8": "11101-01111111100-0",
-  "lsr.imm_dn.w.count1to8.dn.count1to8": "11101-01111111100-0",
-  "lsr.mem.w.none.absl": "11101011111100100-0",
-  "lsr.mem.w.none.absw": "11101011111100100-0",
-  "lsr.mem.w.none.disp": "11101011111110100-0",
-  "lsr.mem.w.none.ind": "11101011111110100-0",
-  "lsr.mem.w.none.index": "00000000000000000-0",
-  "lsr.mem.w.none.postinc": "1110101111111010000",
-  "lsr.mem.w.none.predec": "1110101111111010000",
+  "lsl.dn_dn.b.dn.dn": "11111-01111111111-0",
+  "lsl.dn_dn.l.dn.dn": "11111-01111111111-0",
+  "lsl.dn_dn.w.dn.dn": "11111-01111111111-0",
+  "lsl.imm_dn.b.count1to8.dn.count1to8": "11111-01111111111-0",
+  "lsl.imm_dn.l.count1to8.dn.count1to8": "11111-01111111111-0",
+  "lsl.imm_dn.w.count1to8.dn.count1to8": "11111-01111111111-0",
+  "lsl.mem.w.none.absl": "11111011111101111-0",
+  "lsl.mem.w.none.absw": "11111011111101111-0",
+  "lsl.mem.w.none.disp": "11111011111111111-0",
+  "lsl.mem.w.none.ind": "11111011111111111-0",
+  "lsl.mem.w.none.index": "11111011111111111-0",
+  "lsl.mem.w.none.postinc": "1111101111111111110",
+  "lsl.mem.w.none.predec": "1111101111111111110",
+  "lsr.dn_dn.b.dn.dn": "11111-01111111111-0",
+  "lsr.dn_dn.l.dn.dn": "11111-01111111111-0",
+  "lsr.dn_dn.w.dn.dn": "11111-01111111111-0",
+  "lsr.imm_dn.b.count1to8.dn.count1to8": "11111-01111111111-0",
+  "lsr.imm_dn.l.count1to8.dn.count1to8": "11111-01111111111-0",
+  "lsr.imm_dn.w.count1to8.dn.count1to8": "11111-01111111111-0",
+  "lsr.mem.w.none.absl": "11111011111101111-0",
+  "lsr.mem.w.none.absw": "11111011111101111-0",
+  "lsr.mem.w.none.disp": "11111011111111111-0",
+  "lsr.mem.w.none.ind": "11111011111111111-0",
+  "lsr.mem.w.none.index": "11111011111111111-0",
+  "lsr.mem.w.none.postinc": "1111101111111111110",
+  "lsr.mem.w.none.predec": "1111101111111111110",
   "move.an_usp.l.an.usp": "1110-01111111110--0",
   "move.ea_ccr.w.absl.ccr": "00000000000000000-0",
   "move.ea_ccr.w.absw.ccr": "00000000000000000-0",
@@ -2152,58 +2152,58 @@
   "pea.ea.l.pcdisp.none": "1110-01111111010-00",
   "pea.ea.l.pcindex.none": "0000-00000000000-00",
   "reset.none.none.none.none": "0000-00000000000--0",
-  "rol.dn_dn.b.dn.dn": "11101-01111111100-0",
-  "rol.dn_dn.l.dn.dn": "11101-01111111100-0",
-  "rol.dn_dn.w.dn.dn": "11101-01111111100-0",
-  "rol.imm_dn.b.count1to8.dn.count1to8": "11101-01111111100-0",
-  "rol.imm_dn.l.count1to8.dn.count1to8": "11101-01111111100-0",
-  "rol.imm_dn.w.count1to8.dn.count1to8": "11101-01111111100-0",
-  "rol.mem.w.none.absl": "11101011111100111-0",
-  "rol.mem.w.none.absw": "11101011111100100-0",
-  "rol.mem.w.none.disp": "11101011111110100-0",
-  "rol.mem.w.none.ind": "11101011111110100-0",
-  "rol.mem.w.none.index": "00000000000000000-0",
-  "rol.mem.w.none.postinc": "1110101111111010000",
-  "rol.mem.w.none.predec": "1110101111111010000",
-  "ror.dn_dn.b.dn.dn": "11101-01111111100-0",
-  "ror.dn_dn.l.dn.dn": "11101-01111111100-0",
-  "ror.dn_dn.w.dn.dn": "11101-01111111100-0",
-  "ror.imm_dn.b.count1to8.dn.count1to8": "11101-01111111100-0",
-  "ror.imm_dn.l.count1to8.dn.count1to8": "11101-01111111100-0",
-  "ror.imm_dn.w.count1to8.dn.count1to8": "11101-01111111100-0",
-  "ror.mem.w.none.absl": "11101011111100100-0",
-  "ror.mem.w.none.absw": "11101011111100100-0",
-  "ror.mem.w.none.disp": "11101011111110100-0",
-  "ror.mem.w.none.ind": "11101011111110100-0",
-  "ror.mem.w.none.index": "00000000000000000-0",
-  "ror.mem.w.none.postinc": "1110101111111010000",
-  "ror.mem.w.none.predec": "1110101111111010000",
-  "roxl.dn_dn.b.dn.dn": "11101-01111111100-0",
-  "roxl.dn_dn.l.dn.dn": "11101-01111111100-0",
-  "roxl.dn_dn.w.dn.dn": "11101-01111111100-0",
-  "roxl.imm_dn.b.count1to8.dn.count1to8": "11101-01111111100-0",
-  "roxl.imm_dn.l.count1to8.dn.count1to8": "11101-01111111100-0",
-  "roxl.imm_dn.w.count1to8.dn.count1to8": "11101-01111111100-0",
-  "roxl.mem.w.none.absl": "11101011111100100-0",
-  "roxl.mem.w.none.absw": "11101011111100100-0",
-  "roxl.mem.w.none.disp": "11101011111110100-0",
-  "roxl.mem.w.none.ind": "11101011111110100-0",
-  "roxl.mem.w.none.index": "00000000000000000-0",
-  "roxl.mem.w.none.postinc": "1110101111111010000",
-  "roxl.mem.w.none.predec": "1110101111111010000",
-  "roxr.dn_dn.b.dn.dn": "11101-01111111100-0",
-  "roxr.dn_dn.l.dn.dn": "11101-01111111100-0",
-  "roxr.dn_dn.w.dn.dn": "11101-01111111100-0",
-  "roxr.imm_dn.b.count1to8.dn.count1to8": "11101-01111111100-0",
-  "roxr.imm_dn.l.count1to8.dn.count1to8": "11101-01111111100-0",
-  "roxr.imm_dn.w.count1to8.dn.count1to8": "11101-01111111100-0",
-  "roxr.mem.w.none.absl": "11101011111100100-0",
-  "roxr.mem.w.none.absw": "11101011111100111-0",
-  "roxr.mem.w.none.disp": "11101011111110100-0",
-  "roxr.mem.w.none.ind": "11101011111110100-0",
-  "roxr.mem.w.none.index": "00000000000000000-0",
-  "roxr.mem.w.none.postinc": "1110101111111010000",
-  "roxr.mem.w.none.predec": "1110101111111010000",
+  "rol.dn_dn.b.dn.dn": "11111-01111111111-0",
+  "rol.dn_dn.l.dn.dn": "11111-01111111111-0",
+  "rol.dn_dn.w.dn.dn": "11111-01111111111-0",
+  "rol.imm_dn.b.count1to8.dn.count1to8": "11111-01111111111-0",
+  "rol.imm_dn.l.count1to8.dn.count1to8": "11111-01111111111-0",
+  "rol.imm_dn.w.count1to8.dn.count1to8": "11111-01111111111-0",
+  "rol.mem.w.none.absl": "11111011111101111-0",
+  "rol.mem.w.none.absw": "11111011111101111-0",
+  "rol.mem.w.none.disp": "11111011111111111-0",
+  "rol.mem.w.none.ind": "11111011111111111-0",
+  "rol.mem.w.none.index": "11111011111111111-0",
+  "rol.mem.w.none.postinc": "1111101111111111110",
+  "rol.mem.w.none.predec": "1111101111111111110",
+  "ror.dn_dn.b.dn.dn": "11111-01111111111-0",
+  "ror.dn_dn.l.dn.dn": "11111-01111111111-0",
+  "ror.dn_dn.w.dn.dn": "11111-01111111111-0",
+  "ror.imm_dn.b.count1to8.dn.count1to8": "11111-01111111111-0",
+  "ror.imm_dn.l.count1to8.dn.count1to8": "11111-01111111111-0",
+  "ror.imm_dn.w.count1to8.dn.count1to8": "11111-01111111111-0",
+  "ror.mem.w.none.absl": "11111011111101111-0",
+  "ror.mem.w.none.absw": "11111011111101111-0",
+  "ror.mem.w.none.disp": "11111011111111111-0",
+  "ror.mem.w.none.ind": "11111011111111111-0",
+  "ror.mem.w.none.index": "11111011111111111-0",
+  "ror.mem.w.none.postinc": "1111101111111111110",
+  "ror.mem.w.none.predec": "1111101111111111110",
+  "roxl.dn_dn.b.dn.dn": "11111-01111111111-0",
+  "roxl.dn_dn.l.dn.dn": "11111-01111111111-0",
+  "roxl.dn_dn.w.dn.dn": "11111-01111111111-0",
+  "roxl.imm_dn.b.count1to8.dn.count1to8": "11111-01111111111-0",
+  "roxl.imm_dn.l.count1to8.dn.count1to8": "11111-01111111111-0",
+  "roxl.imm_dn.w.count1to8.dn.count1to8": "11111-01111111111-0",
+  "roxl.mem.w.none.absl": "11111011111101111-0",
+  "roxl.mem.w.none.absw": "11111011111101111-0",
+  "roxl.mem.w.none.disp": "11111011111111111-0",
+  "roxl.mem.w.none.ind": "11111011111111111-0",
+  "roxl.mem.w.none.index": "11111011111111111-0",
+  "roxl.mem.w.none.postinc": "1111101111111111110",
+  "roxl.mem.w.none.predec": "1111101111111111110",
+  "roxr.dn_dn.b.dn.dn": "11111-01111111111-0",
+  "roxr.dn_dn.l.dn.dn": "11111-01111111111-0",
+  "roxr.dn_dn.w.dn.dn": "11111-01111111111-0",
+  "roxr.imm_dn.b.count1to8.dn.count1to8": "11111-01111111111-0",
+  "roxr.imm_dn.l.count1to8.dn.count1to8": "11111-01111111111-0",
+  "roxr.imm_dn.w.count1to8.dn.count1to8": "11111-01111111111-0",
+  "roxr.mem.w.none.absl": "11111011111101111-0",
+  "roxr.mem.w.none.absw": "11111011111101111-0",
+  "roxr.mem.w.none.disp": "11111011111111111-0",
+  "roxr.mem.w.none.ind": "11111011111111111-0",
+  "roxr.mem.w.none.index": "11111011111111111-0",
+  "roxr.mem.w.none.postinc": "1111101111111111110",
+  "roxr.mem.w.none.predec": "1111101111111111110",
   "rte.none.none.none.none": "1110001000111010000",
   "rtr.none.none.none.none": "0000000000000000000",
   "rts.none.none.none.none": "1110-01110110110-00",
@@ -2549,57 +2549,57 @@
  "totals": {
   "ccr_sr_effect_declared": {
    "applicable_forms": 1193,
-   "passing_forms": 1080,
-   "passing_words": 34501,
-   "percent_forms": "90.53"
+   "passing_forms": 1088,
+   "passing_words": 34565,
+   "percent_forms": "91.20"
   },
   "ccr_sr_validated": {
    "applicable_forms": 1193,
-   "passing_forms": 934,
-   "passing_words": 27387,
-   "percent_forms": "78.29"
+   "passing_forms": 1033,
+   "passing_words": 30790,
+   "percent_forms": "86.59"
   },
   "compile": {
    "applicable_forms": 1526,
-   "passing_forms": 1230,
-   "passing_words": 41466,
-   "percent_forms": "80.60"
+   "passing_forms": 1238,
+   "passing_words": 41530,
+   "percent_forms": "81.13"
   },
   "decode": {
    "applicable_forms": 1526,
-   "passing_forms": 1257,
-   "passing_words": 42333,
-   "percent_forms": "82.37"
+   "passing_forms": 1265,
+   "passing_words": 42397,
+   "percent_forms": "82.90"
   },
   "ea_footprint_declared": {
    "applicable_forms": 1526,
-   "passing_forms": 1023,
-   "passing_words": 34303,
-   "percent_forms": "67.04"
+   "passing_forms": 1127,
+   "passing_words": 37711,
+   "percent_forms": "73.85"
   },
   "ea_side_effect_validated": {
    "applicable_forms": 381,
-   "passing_forms": 272,
-   "passing_words": 11122,
-   "percent_forms": "71.39"
+   "passing_forms": 288,
+   "passing_words": 11250,
+   "percent_forms": "75.59"
   },
   "effects": {
    "applicable_forms": 1526,
-   "passing_forms": 1251,
-   "passing_words": 42299,
-   "percent_forms": "81.98"
+   "passing_forms": 1259,
+   "passing_words": 42363,
+   "percent_forms": "82.50"
   },
   "emit": {
    "applicable_forms": 1526,
-   "passing_forms": 1230,
-   "passing_words": 41466,
-   "percent_forms": "80.60"
+   "passing_forms": 1238,
+   "passing_words": 41530,
+   "percent_forms": "81.13"
   },
   "end_to_end_structural": {
    "applicable_forms": 1526,
-   "passing_forms": 1229,
-   "passing_words": 41465,
-   "percent_forms": "80.54"
+   "passing_forms": 1237,
+   "passing_words": 41529,
+   "percent_forms": "81.06"
   },
   "exception_privilege_modeled": {
    "applicable_forms": 852,
@@ -2609,57 +2609,57 @@
   },
   "lift": {
    "applicable_forms": 1526,
-   "passing_forms": 1257,
-   "passing_words": 42333,
-   "percent_forms": "82.37"
+   "passing_forms": 1265,
+   "passing_words": 42397,
+   "percent_forms": "82.90"
   },
   "native_exec": {
    "applicable_forms": 1526,
-   "passing_forms": 1229,
-   "passing_words": 41465,
-   "percent_forms": "80.54"
+   "passing_forms": 1237,
+   "passing_words": 41529,
+   "percent_forms": "81.06"
   },
   "route_immutable_rom_aot": {
    "applicable_forms": 1526,
-   "passing_forms": 1121,
-   "passing_words": 40279,
-   "percent_forms": "73.46"
+   "passing_forms": 1177,
+   "passing_words": 40615,
+   "percent_forms": "77.13"
   },
   "route_runtime_routed_admitted": {
    "applicable_forms": 1526,
-   "passing_forms": 1243,
-   "passing_words": 41787,
-   "percent_forms": "81.45"
+   "passing_forms": 1251,
+   "passing_words": 41851,
+   "percent_forms": "81.98"
   },
   "route_runtime_routed_compiles": {
    "applicable_forms": 1526,
-   "passing_forms": 1243,
-   "passing_words": 41787,
-   "percent_forms": "81.45"
+   "passing_forms": 1251,
+   "passing_words": 41851,
+   "percent_forms": "81.98"
   },
   "route_runtime_routed_executes": {
    "applicable_forms": 1526,
-   "passing_forms": 848,
-   "passing_words": 39516,
-   "percent_forms": "55.57"
+   "passing_forms": 856,
+   "passing_words": 39580,
+   "percent_forms": "56.09"
   },
   "route_static_discovery": {
    "applicable_forms": 1526,
-   "passing_forms": 1231,
-   "passing_words": 38215,
-   "percent_forms": "80.67"
+   "passing_forms": 1239,
+   "passing_words": 38279,
+   "percent_forms": "81.19"
   },
   "semantic_validated": {
    "applicable_forms": 1526,
-   "passing_forms": 1018,
-   "passing_words": 30579,
-   "percent_forms": "66.71"
+   "passing_forms": 1117,
+   "passing_words": 33982,
+   "percent_forms": "73.20"
   },
   "timing_model_present": {
    "applicable_forms": 1526,
-   "passing_forms": 1144,
-   "passing_words": 34709,
-   "percent_forms": "74.97"
+   "passing_forms": 1152,
+   "passing_words": 34773,
+   "percent_forms": "75.49"
   },
   "timing_validated": {
    "applicable_forms": 1526,
@@ -2695,24 +2695,6 @@
    "forms": 26,
    "mnemonic": "ANDI",
    "unsupported_forms": 2
-  },
-  {
-   "family": "shift_and_rotate",
-   "first_failing_stage": {
-    "decode": 1
-   },
-   "forms": 13,
-   "mnemonic": "ASL",
-   "unsupported_forms": 1
-  },
-  {
-   "family": "shift_and_rotate",
-   "first_failing_stage": {
-    "decode": 1
-   },
-   "forms": 13,
-   "mnemonic": "ASR",
-   "unsupported_forms": 1
   },
   {
    "family": "system_control",
@@ -2798,24 +2780,6 @@
    "forms": 7,
    "mnemonic": "JSR",
    "unsupported_forms": 4
-  },
-  {
-   "family": "shift_and_rotate",
-   "first_failing_stage": {
-    "decode": 1
-   },
-   "forms": 13,
-   "mnemonic": "LSL",
-   "unsupported_forms": 1
-  },
-  {
-   "family": "shift_and_rotate",
-   "first_failing_stage": {
-    "decode": 1
-   },
-   "forms": 13,
-   "mnemonic": "LSR",
-   "unsupported_forms": 1
   },
   {
    "family": "system_control",
@@ -2917,42 +2881,6 @@
    "unsupported_forms": 1
   },
   {
-   "family": "shift_and_rotate",
-   "first_failing_stage": {
-    "decode": 1
-   },
-   "forms": 13,
-   "mnemonic": "ROL",
-   "unsupported_forms": 1
-  },
-  {
-   "family": "shift_and_rotate",
-   "first_failing_stage": {
-    "decode": 1
-   },
-   "forms": 13,
-   "mnemonic": "ROR",
-   "unsupported_forms": 1
-  },
-  {
-   "family": "shift_and_rotate",
-   "first_failing_stage": {
-    "decode": 1
-   },
-   "forms": 13,
-   "mnemonic": "ROXL",
-   "unsupported_forms": 1
-  },
-  {
-   "family": "shift_and_rotate",
-   "first_failing_stage": {
-    "decode": 1
-   },
-   "forms": 13,
-   "mnemonic": "ROXR",
-   "unsupported_forms": 1
-  },
-  {
    "family": "system_control",
    "first_failing_stage": {
     "emit": 1
@@ -3045,9 +2973,9 @@
  ],
  "validation": {
   "forms_with_at_least_one_validated_word": {
-   "ccr": 1042,
-   "ea": 437,
-   "semantic": 1111,
+   "ccr": 1091,
+   "ea": 443,
+   "semantic": 1160,
    "timing": 0
   },
   "manifest_sources": [
@@ -3066,9 +2994,9 @@
    "tests/m68k_pc_indexed_move_musashi_differential_test.py"
   ],
   "validated_words": {
-   "ccr": 27534,
-   "ea": 11328,
-   "semantic": 30711,
+   "ccr": 30873,
+   "ea": 11446,
+   "semantic": 34050,
    "timing": 0
   }
  }

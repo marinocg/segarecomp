@@ -797,11 +797,17 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // BSR's target is always foldable (a relative displacement, never a
     // runtime-only EA) -- the exact same reasoning as call_general above.
     return true;
+  case M68kIrKind::shift_rotate_memory:
+    // SEG-021-T009: memory-word shift/rotate family-level admission. Every legal destination mode lowers
+    // through the shared C4 routed read/write primitives with no CFG edge, call frame, return target or
+    // static memory fact; a failed routed access returns before any architectural write; auto-updating
+    // destinations use the operation-local deferred address-register commit. Like every other family the
+    // one shared retirement-timing seam must account for the operation.
+    return m68k_instruction_cycles(operation).has_value();
   case M68kIrKind::push_effective_address:
   case M68kIrKind::link_frame:
   case M68kIrKind::unlink_frame:
   case M68kIrKind::movem_transfer:
-  case M68kIrKind::shift_rotate_memory:
   case M68kIrKind::divide_signed_word:
   case M68kIrKind::divide_unsigned_word:
     return false;

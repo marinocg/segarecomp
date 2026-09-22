@@ -1416,12 +1416,10 @@ struct M68kEaFieldOutcome {
   const auto mode3 = static_cast<std::uint8_t>((word >> 3U) & 0x7U);
   const auto reg3 = static_cast<std::uint8_t>(word & 0x7U);
   // Contract "exact base-MC68000 C7 matrix": legal EA is exactly
-  // `m68k_ea_memory_alterable` -- (An)/(An)+/-(An)/d16(An)/absolute.w/
-  // absolute.l -- the same set EOR/AND/OR's reverse memory-destination forms
-  // already use, deliberately excluding Dn/An-direct/PC-relative/immediate/
-  // indexed. Size is always WORD; there is no BYTE or LONG memory form.
+  // `m68k_ea_shift_memory_destination` (SEG-021-T009) -- (An)/(An)+/-(An)/d16(An)/(d8,An,Xn)/absolute.w/
+  // absolute.l, deliberately excluding Dn/An-direct/PC-relative/immediate. Size is always WORD; there is no BYTE or LONG memory form.
   const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3,
-                                       m68k_ea_memory_alterable, M68kMemoryAccessWidth::word);
+                                       m68k_ea_shift_memory_destination, M68kMemoryAccessWidth::word);
   if (!dst.ok) return dst.failure;
   // `source_ea` is deliberately left default/unused: the memory form has no
   // decoded count operand at all (always exactly 1), unlike every register

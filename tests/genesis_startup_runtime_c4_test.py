@@ -1255,7 +1255,7 @@ def main():
   c4_dim_shapes = {}
   c4_dim_outputs = {}
   for flag, forge in (
-      ("c4-dim-shift-rotate-memory", "shift_rotate_memory"),):
+      ("c4-dim-push-effective-address", "push_effective_address"),):
     run_first = subprocess.run([executable, f"--emit-general-startup-runtime-{flag}"], text=True, capture_output=True)
     run_second = subprocess.run([executable, f"--emit-general-startup-runtime-{flag}"], text=True, capture_output=True)
     assert run_first.returncode == run_second.returncode == 0, forge
@@ -1266,6 +1266,23 @@ def main():
     c4_dim_shapes[forge] = c4_dimension(run_first.stdout)
     c4_dim_outputs[forge] = run_first.stdout
   assert len(set(c4_dim_shapes.values())) == len(c4_dim_shapes), c4_dim_shapes  # every shape distinct
+  # SEG-021-T009: an auto-updating memory-word shift (ASR.W (A1)+) is lowered by the deferred address-commit
+  # helper: no lowering-gap stop, one routed read and one routed write at the snapshot address, one live-register
+  # commit strictly after both accesses.
+  sh_first = subprocess.run([executable, "--emit-general-startup-runtime-c4-dim-shift-memory-auto-update"],
+                            text=True, capture_output=True)
+  sh_second = subprocess.run([executable, "--emit-general-startup-runtime-c4-dim-shift-memory-auto-update"],
+                             text=True, capture_output=True)
+  assert sh_first.returncode == sh_second.returncode == 0
+  assert sh_first.stdout == sh_second.stdout
+  assert not sh_first.stdout.startswith("/* translation rejected:")
+  assert "GENESIS_STOP_C4_LOWERING_GAP" not in sh_first.stdout
+  assert "genesis_c4_lowering_stop_" not in sh_first.stdout
+  assert "uint32_t m68k_shift_auto_ea = runtime->a[1];" in sh_first.stdout
+  assert "m68k_shift_auto_ea += UINT32_C(2);" in sh_first.stdout
+  assert sh_first.stdout.count("runtime->a[1] = m68k_shift_auto_ea;") == 1
+  assert sh_first.stdout.index("runtime->a[1] = m68k_shift_auto_ea;") > sh_first.stdout.rindex("genesis_route_access(runtime, ")
+  assert sh_first.stdout.count("genesis_route_access(") == 2  # one routed read, one routed write
   # SEG-021-T008: an auto-updating BTST destination (BTST D1,(A1)+) is lowered by the bit-family deferred
   # address-commit helper: no lowering-gap stop, one routed read, no write-back, one live-register commit
   # strictly after the routed access.
@@ -1729,7 +1746,7 @@ def main():
   # corrupting the bare identifier into a doubled prefix -- must never appear.
   assert "runtime->runtime->pc" not in suba_source_fold_first.stdout
   c4_dim_outputs["subtract_address_source_fold"] = suba_source_fold_first.stdout
-  assert c4_dim_shapes["shift_rotate_memory"] == "SHIFT_ROTATE_MEMORY_MISSING_DISPATCHER"
+  assert c4_dim_shapes["push_effective_address"] == "PUSH_EFFECTIVE_ADDRESS_MISSING_DISPATCHER"
   # SEG-007-T145: ordinary add-family auto-update operands are now lowered by
   # the deferred-address-commit path; the sole remaining add-family lowering
   # gap is the ADDA same-register aliasing decline, which serialises to the
@@ -2040,7 +2057,7 @@ def main():
                           ("subtract-dest-fold", c4_dim_outputs["subtract_dest_fold"]),
                           ("subtract-subi-dest-fold", c4_dim_outputs["subtract_subi_dest_fold"]),
                           ("subtract-address-source-fold", c4_dim_outputs["subtract_address_source_fold"]),
-                          ("dim-shift-rotate-memory", c4_dim_outputs["shift_rotate_memory"]),
+                          ("dim-push-effective-address", c4_dim_outputs["push_effective_address"]),
                           ("dim-bit-test-auto-update", c4_dim_outputs["bit_test_auto_update"]),
                           ("dim-logical-register", c4_dim_outputs["logical_register"]),
                           ("dim-logical-predecrement", c4_dim_outputs["logical_predecrement"]),

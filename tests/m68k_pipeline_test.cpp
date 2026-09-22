@@ -4442,6 +4442,61 @@ void bit_operation_decode_covers_the_full_legal_ea_set_and_rejects_illegal_ones(
   expect(rejects({0x08U, 0xFBU, 0x00U, 0x07U, 0x10U, 0x40U}), "BSET #n,(d8,PC,Xn) is not a legal form");
 }
 
+// SEG-021-T009: memory-word shift/rotate decode legality, written from the Motorola manual (memory alterable
+// including (d8,An,Xn); never Dn/An/PC-relative/immediate) and family-level immutable-ROM AOT admission.
+void shift_rotate_memory_decode_legality_and_aot_admission() {
+  using namespace segarecomp;
+  const auto decode_general = [](const std::vector<std::uint8_t> &bytes) {
+    return decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup);
+  };
+  using K = M68kShiftRotateKind;
+  const std::pair<std::uint16_t, K> families[] = {
+      {0xE0C0U, K::asr}, {0xE1C0U, K::asl}, {0xE2C0U, K::lsr}, {0xE3C0U, K::lsl},
+      {0xE4C0U, K::roxr}, {0xE5C0U, K::roxl}, {0xE6C0U, K::ror}, {0xE7C0U, K::rol}};
+  for (const auto &[base, kind] : families) {
+    const auto word = [&](std::uint16_t ea, std::initializer_list<std::uint8_t> ext) {
+      std::vector<std::uint8_t> bytes{static_cast<std::uint8_t>((base | ea) >> 8U), static_cast<std::uint8_t>((base | ea) & 0xFFU)};
+      bytes.insert(bytes.end(), ext.begin(), ext.end());
+      return decode_general(bytes);
+    };
+    const auto accepts = [&](std::uint16_t ea, std::initializer_list<std::uint8_t> ext, M68kEaMode mode) {
+      const auto result = word(ea, ext);
+      const auto *decoded = std::get_if<M68kDecodedInstruction>(&result);
+      return decoded != nullptr && decoded->kind == M68kInstructionKind::shift_rotate &&
+             decoded->shift_rotate_kind == kind && decoded->destination_ea.mode == mode &&
+             decoded->size == M68kMemoryAccessWidth::word;
+    };
+    const auto rejects = [&](std::uint16_t ea, std::initializer_list<std::uint8_t> ext) {
+      const auto result = word(ea, ext);
+      return std::get_if<RejectedM68kDecode>(&result) != nullptr;
+    };
+    expect(accepts(0x30U, {0x10U, 0x04U}, M68kEaMode::address_index8), "memory shift (d8,An,Xn) is legal");
+    expect(accepts(0x10U, {}, M68kEaMode::address_indirect), "memory shift (An) is legal");
+    expect(accepts(0x19U, {}, M68kEaMode::address_postinc), "memory shift (An)+ is legal");
+    expect(accepts(0x21U, {}, M68kEaMode::address_predec), "memory shift -(An) is legal");
+    expect(accepts(0x28U, {0x00U, 0x10U}, M68kEaMode::address_disp16), "memory shift d16(An) is legal");
+    expect(accepts(0x38U, {0x40U, 0x00U}, M68kEaMode::absolute_word), "memory shift abs.W is legal");
+    expect(accepts(0x39U, {0x00U, 0x02U, 0x00U, 0x00U}, M68kEaMode::absolute_long), "memory shift abs.L is legal");
+    expect(rejects(0x08U, {}), "memory-form encoding with An direct is not a shift");
+    expect(rejects(0x3AU, {0x00U, 0x10U}), "memory shift d16(PC) is illegal");
+    expect(rejects(0x3BU, {0x10U, 0x40U}), "memory shift (d8,PC,Xn) is illegal");
+    expect(rejects(0x3CU, {0x00U, 0x12U}), "memory shift #imm is illegal");
+  }
+  // Family-level AOT admission requires the shared retirement-timing row; every legal class has one.
+  M68kIrOperation operation{};
+  operation.kind = M68kIrKind::shift_rotate_memory;
+  operation.size = M68kMemoryAccessWidth::word;
+  operation.shift_rotate_kind = K::roxl;
+  for (const auto mode : {M68kEaMode::address_indirect, M68kEaMode::address_postinc, M68kEaMode::address_predec,
+                          M68kEaMode::address_disp16, M68kEaMode::address_index8, M68kEaMode::absolute_word,
+                          M68kEaMode::absolute_long}) {
+    operation.destination_ea.mode = mode;
+    expect(m68k_instruction_cycles(operation).has_value() &&
+               m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "every legal memory-word shift/rotate destination class is admitted to the immutable-ROM AOT route");
+  }
+}
+
 void general_startup_decode_accepts_indexed_arithmetic_source() {
   using namespace segarecomp;
   const auto decode_general = [](const std::vector<std::uint8_t> &bytes) {
@@ -18395,8 +18450,9 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
   // above, proving the emitter's other legal source_ea mode for
   // shift_rotate_register (immediate, not just data-register) also lowers.
   const bool c4_dim_shift_rotate_register_immediate = forge == "c4-dim-shift-rotate-register-immediate";
-  const bool c4_dim_shift_rotate_memory = forge == "c4-dim-shift-rotate-memory";
+  const bool c4_dim_push_effective_address = forge == "c4-dim-push-effective-address";
   const bool c4_dim_bit_test_auto_update = forge == "c4-dim-bit-test-auto-update";
+  const bool c4_dim_shift_memory_auto_update = forge == "c4-dim-shift-memory-auto-update";
   // SEG-007-T153: ADDQ (`add_quick`) is now C4-represented, reusing the
   // shared `add` emission body already present before this task. The
   // data-register-destination form (ADDQ.W #1,D0) and the
@@ -18522,14 +18578,14 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
       // subtracting from it before.
        ? std::vector<std::uint8_t>{0x42U, 0x58U, 0x4EU, 0x70U}
        : c4_prefix
-       // MOVEQ #1,D0; ASR.W (A0) (memory-form shift/rotate: a still-declined C4 lowering-gap shape --
+       // MOVEQ #1,D0; PEA (A0) (a still-declined C4 lowering-gap shape --
        // this fixture's block-cut/prefix-retention mechanics only need some still-declined shape; ADDA
        // aliasing, CLR, SUB/CMP, AND/OR/EOR (SEG-021-T007) and BTST/BCHG/BCLR/BSET (SEG-021-T008)
        // auto-update are all lowered now);
        // BRA.S +2; padding; RESET.  The cut must retain
-       // MOVEQ, omit the declined ASR.W and the terminal BRA, and make
+       // MOVEQ, omit the declined PEA and the terminal BRA, and make
        // RESET's block unreachable from the emitted program-control graph.
-        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0xE0U, 0xD0U, 0x60U, 0x02U,
+        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x48U, 0x50U, 0x60U, 0x02U,
                                      0x00U, 0x00U, 0x4EU, 0x70U}
         : c4_dim_compare
        // SEG-007-T146: CMP.B D1,D0; RESET.  `compare` is now C4-represented:
@@ -18560,13 +18616,14 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
        // direct); RESET.  Proves the emitter's other legal source_ea mode
        // for `shift_rotate_register` (immediate, not a count register).
         ? std::vector<std::uint8_t>{0xE3U, 0x48U, 0x4EU, 0x70U}
-        : c4_dim_shift_rotate_memory
-       // ASR.W (A0) (memory form: destination is a memory-alterable EA,
-       // never Dn direct); RESET.  Must serialize to a distinct literal
-       // from the register form above despite decoding to the identical
-       // M68kInstructionKind::shift_rotate and differing only in
-       // destination_ea.mode.
-        ? std::vector<std::uint8_t>{0xE0U, 0xD0U, 0x4EU, 0x70U}
+        : c4_dim_push_effective_address
+       // PEA (A0); RESET.  SEG-021-T009 lowers the memory-word shift/rotate forms, so this
+       // dimension fixture now uses another still-unrepresented kind (PEA, missing dispatcher).
+        ? std::vector<std::uint8_t>{0x48U, 0x50U, 0x4EU, 0x70U}
+        : c4_dim_shift_memory_auto_update
+       // SEG-021-T009: ASR.W (A1)+ (0xE0D9; auto-updating memory-word shift, lowered by the deferred
+       // address-register commit: no gap row); RESET.
+        ? std::vector<std::uint8_t>{0xE0U, 0xD9U, 0x4EU, 0x70U}
         : c4_dim_bit_test_auto_update
        // SEG-021-T006/T007/T008: BTST D1,(A1)+ (0x0319; auto-updating bit-test operand, now
        // lowered by the bit-family deferred address-register commit: no gap row); RESET.  This
@@ -18651,28 +18708,28 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
         // A second C4 cut is statically retained beyond the first cut's
         // terminal branch.  It has no emitted caller and therefore must not
         // leave an unused static stop function in strict-C11 output.  Uses
-        // the same still-declined ASR.W (A0) cut as
+        // the same still-declined PEA (A0) cut as
         // c4_prefix above (see its comment).
-        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0xE0U, 0xD0U, 0x60U, 0x02U,
-                                     0x00U, 0x00U, 0xE0U, 0xD0U, 0x4EU, 0x70U}
+        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x48U, 0x50U, 0x60U, 0x02U,
+                                     0x00U, 0x00U, 0x48U, 0x50U, 0x4EU, 0x70U}
         : c4_multi_blocks
-       // BNE.S selects either of two separately reachable ASR.W (A0)
+       // BNE.S selects either of two separately reachable PEA (A0)
        // cut blocks (see c4_prefix's comment above for why this
        // fixture no longer uses CLR.B -(A0) or ADDA/AND auto-update). Both cut sinks are terminal and
        // neither becomes a dispatch arm.
-       ? std::vector<std::uint8_t>{0x66U, 0x04U, 0xE0U, 0xD0U, 0x60U, 0x02U,
-                                    0xE0U, 0xD0U, 0x4EU, 0x70U}
+       ? std::vector<std::uint8_t>{0x66U, 0x04U, 0x48U, 0x50U, 0x60U, 0x02U,
+                                    0x48U, 0x50U, 0x4EU, 0x70U}
        : c4_same_block
        // Two candidates in one block: only the first can own the local cut.
-       ? std::vector<std::uint8_t>{0xE0U, 0xD0U, 0xE0U, 0xD0U, 0x60U, 0x02U,
+       ? std::vector<std::uint8_t>{0x48U, 0x50U, 0x48U, 0x50U, 0x60U, 0x02U,
                                     0x00U, 0x00U, 0x4EU, 0x70U}
        : c4_backward_block
        // BRA.S +8 (0xB00 -> 0xB0A); dead filler; MOVEQ #1,D0 then the
-       // still-declined ASR.W (A0) cut at 0xB04/0xB06 -- reached only via
+       // still-declined PEA (A0) cut at 0xB04/0xB06 -- reached only via
        // 0xB0A's own BRA.S -8 backward edge, discovered strictly after the
        // higher-address block.
        ? std::vector<std::uint8_t>{0x60U, 0x08U, 0x00U, 0x00U, 0x70U, 0x01U,
-                                    0xE0U, 0xD0U, 0x4EU, 0x70U, 0x60U, 0xF8U}
+                                    0x48U, 0x50U, 0x4EU, 0x70U, 0x60U, 0xF8U}
       : routed_write
       ? std::vector<std::uint8_t>{0x42U, 0x90U, 0x60U, 0x06U, 0x00U, 0x00U,
                                   0x00U, 0x00U, 0x00U, 0x00U, 0x4EU, 0x70U}
@@ -18841,8 +18898,8 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
     else if (!forge.empty() && !rom_fold && !routed_write && !ram_route && !predecrement && !clr_postinc && !c4_prefix && !c4_pruned_stop &&
               !c4_multi_blocks && !c4_same_block && !c4_backward_block && !c4_dim_compare &&
               !c4_dim_compare_immediate && !c4_dim_compare_immediate_absolute && !c4_dim_shift_rotate_register &&
-              !c4_dim_shift_rotate_register_immediate && !c4_dim_shift_rotate_memory &&
-              !c4_dim_bit_test_auto_update && !c4_dim_add_quick && !c4_dim_add_quick_address &&
+              !c4_dim_shift_rotate_register_immediate && !c4_dim_push_effective_address &&
+              !c4_dim_bit_test_auto_update && !c4_dim_shift_memory_auto_update && !c4_dim_add_quick && !c4_dim_add_quick_address &&
               !c4_dim_add_quick_indirect && !c4_dim_add_quick_disp && !c4_dim_add_quick_postinc &&
               !c4_dim_add_quick_predec && !c4_dim_add_quick_absolute &&
               !c4_dim_sign_extend_word && !c4_dim_sign_extend_long &&
@@ -26672,8 +26729,10 @@ int main(int argc, char **argv) {
     return emit_general_startup_runtime_c4_frontier_source("c4-dim-shift-rotate-register");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-shift-rotate-register-immediate")
     return emit_general_startup_runtime_c4_frontier_source("c4-dim-shift-rotate-register-immediate");
-  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-shift-rotate-memory")
-    return emit_general_startup_runtime_c4_frontier_source("c4-dim-shift-rotate-memory");
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-push-effective-address")
+    return emit_general_startup_runtime_c4_frontier_source("c4-dim-push-effective-address");
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-shift-memory-auto-update")
+    return emit_general_startup_runtime_c4_frontier_source("c4-dim-shift-memory-auto-update");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-bit-test-auto-update")
     return emit_general_startup_runtime_c4_frontier_source("c4-dim-bit-test-auto-update");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-add-quick")
@@ -27063,6 +27122,7 @@ int main(int argc, char **argv) {
   general_startup_decode_accepts_pc_indexed_lea_source();
   general_startup_decode_accepts_indexed_arithmetic_source();
   bit_operation_decode_covers_the_full_legal_ea_set_and_rejects_illegal_ones();
+  shift_rotate_memory_decode_legality_and_aot_admission();
   general_startup_retains_indexed_adda_before_a_later_cpu_frontier();
   general_startup_resolves_a_pc_indexed_jsr_through_its_proven_candidate_set();
   general_startup_admits_a_far_indirect_candidate_via_its_own_independent_root_walk();

@@ -2521,6 +2521,36 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     // (contract: "shared memory/device routing" -- no
     // `shift_read16`/`shift_write16`).
     if (memory != nullptr) {
+      // SEG-021-T009: in the routed context an auto-updating destination uses the operation-local deferred
+      // address-register commit shared by NOT/NEG and the ADD family: one snapshot local, one routed read and
+      // one routed write at that address, the single live-register commit strictly after both accesses (a
+      // routed stop returns before any architectural write).
+      if (memory->runtime_routing && (operation.destination_ea.mode == M68kEaMode::address_predec ||
+                                      operation.destination_ea.mode == M68kEaMode::address_postinc)) {
+        const auto reg = static_cast<unsigned>(operation.destination_ea.reg);
+        const std::uint32_t step = reg == 7U && operation.size == M68kMemoryAccessWidth::byte
+                                       ? 2U : static_cast<std::uint32_t>(operation.size);
+        const auto an_expr = std::string(memory->address_registers) + "[" + std::to_string(reg) + "]";
+        unsigned temp_ordinal = 0U;
+        std::ostringstream body;
+        body << "uint32_t m68k_shift_auto_ea = " << an_expr << ";\n";
+        if (operation.destination_ea.mode == M68kEaMode::address_predec)
+          body << "m68k_shift_auto_ea -= UINT32_C(" << step << ");\n";
+        std::string shift_destination;
+        m68k_emit_routed_read(body, "m68k_shift_auto_ea", operation.size, *memory, shift_destination, temp_ordinal);
+        body << "{\n";
+        const auto result_local = M68kShiftRotateSpecification::emit_c_update(
+            body, operation.shift_rotate_kind, shift_destination, "UINT32_C(1)", operation.size, status_register,
+            temp_ordinal);
+        m68k_emit_routed_write(body, "m68k_shift_auto_ea", operation.size, *memory, result_local, temp_ordinal);
+        body << "}\n";
+        if (operation.destination_ea.mode == M68kEaMode::address_postinc)
+          body << "m68k_shift_auto_ea += UINT32_C(" << step << ");\n";
+        body << an_expr << " = m68k_shift_auto_ea;\n";
+        output << "{\n" << body.str() << memory->program_counter << " += UINT32_C("
+               << operation.provenance.length.value << ");\n}\n";
+        break;
+      }
       unsigned temp_ordinal = 0U;
       std::ostringstream prelude;
       const auto destination = m68k_emit_ea_read(operation.destination_ea, operation.size, data_registers, *memory,

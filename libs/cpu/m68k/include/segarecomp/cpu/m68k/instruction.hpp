@@ -312,6 +312,12 @@ inline constexpr M68kEaLegalMask m68k_ea_bit_test_destination =
     m68k_ea_data_alterable_with_index | m68k_ea_pc_disp16 | m68k_ea_pc_index8;
 inline constexpr M68kEaLegalMask m68k_ea_bit_test_dynamic_destination =
     m68k_ea_bit_test_destination | m68k_ea_immediate;
+// SEG-021-T009: memory-word shift/rotate legality, written from the Motorola M68000 Family Programmer's
+// Reference Manual (ASL/ASR/LSL/LSR/ROL/ROR/ROXL/ROXR memory forms, base MC68000 columns; independent of the
+// T001 dataset): memory alterable -- (An), (An)+, -(An), d16(An), (d8,An,Xn), abs.W, abs.L; never Dn/An,
+// PC-relative or immediate. The operand is always a word and the count is fixed at 1.
+inline constexpr M68kEaLegalMask m68k_ea_shift_memory_destination =
+    m68k_ea_data_alterable_with_index & ~m68k_ea_dn;
 // SEG-007-T025 (Batch C, C5a/C5b/C5c): MOVEM's legal EA sets, verified
 // against M68000PM/AD Rev. 1 Sec 4 MOVEM entry and pinned Musashi's
 // m68k_in.c opcode table ("re ." row legend "A..DXWL...": An indirect,

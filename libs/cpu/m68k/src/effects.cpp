@@ -563,6 +563,7 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
     // CCR is affected and copies the already-decoded destination fact
     // through unresolved.
     effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.destination_ea;
     effect.resolved_destination_ea = operation.destination_ea;
     effect.affects_condition_codes = true;
     effect.pc = M68kPcEffectKind::advance;
@@ -660,6 +661,8 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
       // SEG-021-T005: MOVEA (An write via `address_register_write`), CLR/NOT (Dn
       // destination mask) and TST (no register write) have exhaustively
       // represented D/A footprints, including decoded EA auto-updates.
+      // SEG-021-T009: register-form (Dn mask) and memory-word (decoded EA auto-updates) shifts/rotates.
+      operation.kind == M68kIrKind::shift_rotate_register || operation.kind == M68kIrKind::shift_rotate_memory ||
       operation.kind == M68kIrKind::write_movea || operation.kind == M68kIrKind::write_clr ||
       operation.kind == M68kIrKind::logical_not || operation.kind == M68kIrKind::test_operand ||
       operation.kind == M68kIrKind::compare || operation.kind == M68kIrKind::compare_address ||

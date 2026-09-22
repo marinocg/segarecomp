@@ -114,3 +114,21 @@ the whole family (the emitter still fails closed on a shape it cannot lower).
 `m68k_instruction_cycles` has a published static row for every legal BTST/BCHG/BCLR/BSET form except the dynamic
 `BTST Dn,#<data>` form (`btst.dn_ea.b.dn.imm`), which is recorded as timing-unsupported: no row is asserted without a
 verified Motorola table cell. Timing is not compared by this harness (`timing_validated` stays 0).
+
+## SEG-021-T009: shift and rotate rows
+
+Rows exist for every legal ASL/ASR/LSL/LSR/ROL/ROR/ROXL/ROXR form (104): register forms with an immediate count 1-8
+or a Dn count (all sizes) and the memory-word forms over every memory-alterable EA including `(d8,An,Xn)`. The register
+destination is bound with `d@0` (bits 3-5 of these words are count-source/family bits, not an EA mode, so `ea.dst` does
+not apply). Dn-count rows use the `shift_count` profile (counts 0/1/7/8/9/15/16/31/32/33/63/64/65/255 against values
+that exercise ASL overflow and rotate-through-X chains, with SR seeds 2700/2710/271F for X-carry chains); immediate and
+memory rows use `shift_imm` (the `shift` value set includes 0x40/0xC0/0x4000/0xC000/0x40000000/0xC0000000 sign-change
+boundaries). All 104 rows (147168 vectors) match the pinned Musashi with zero divergences. Legality is encoded in
+`libs/cpu/m68k` (`m68k_ea_shift_memory_destination`) from the Motorola manual and never reads the T001 dataset.
+`m68k_routed_lowering_test.py` compares the routed lowering (deferred address commit for `(An)+`/`-(An)`) with the direct
+lowering for every memory-word shape.
+
+Timing: memory-word forms have a published static row (`8 + EA`, table 8-1) and are admitted to the immutable-ROM AOT
+route; the register forms' retirement time depends on the runtime count (`6/8 + 2n`) and is emitted as a dynamic
+retirement expression, so `m68k_instruction_cycles` (static) records them as timing-unsupported (owned by SEG-021-T021).
+Timing is not compared by this harness.

@@ -4444,6 +4444,16 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
                       M68kMemoryAccessDirection::write);
         }
         break;
+      case M68kInstructionKind::shift_rotate:
+        // SEG-021-T009: a memory-word shift/rotate is a one-address RMW operand exactly like NOT (retaining
+        // both facts for a foldable absolute destination); the register form has no memory operand.
+        if (decoded.destination_ea.mode != M68kEaMode::data_register) {
+          retain_fact(decoded, decoded.destination_ea, M68kStaticMemoryFactRole::destination_read,
+                      M68kMemoryAccessDirection::read);
+          retain_fact(decoded, decoded.destination_ea, M68kStaticMemoryFactRole::destination_write,
+                      M68kMemoryAccessDirection::write);
+        }
+        break;
       case M68kInstructionKind::not_operand:
         // SEG-007-T168: NOT has no second operand at all (unlike SUBQ's
         // quick-immediate source, and unlike ANDI/ORI/EORI, which do carry
