@@ -996,15 +996,18 @@ def run_expansion_loop(base_emitter_command: list[str], compiler: pathlib.Path, 
 _OFFLINE_INVENTORY_STITCH_METRICS_BY_DIR: dict[str, dict] = {}
 
 
-def _parse_marked_metrics_line(stderr_text: str, marker: str) -> dict:
+def _parse_marked_metrics_line(
+        stderr_text: str, marker: str, signed_integer_keys: frozenset[str] = frozenset()) -> dict:
     """Parse a normalized `<marker>key=value ...` stderr line into a dict.
 
     Shared by every `parse_offline_inventory_*_metrics` function below: each
     emitter/frontend metrics line uses the identical `key=value` shape, so one
-    generic tokenizer covers all of them. Every value is either a non-negative
-    integer count/flag or a bracketed comma-separated list of such counts --
-    never a raw address. Returns an empty dict when no line with `marker` was
-    present.
+    generic tokenizer covers all of them. Values are non-negative integer
+    counts/flags or bracketed lists of counts except for explicitly named
+    signed scalar deltas. Signed values accept only the canonical optional
+    leading minus form; unsigned metrics keep their stricter handling. No
+    value is a raw address. Returns an empty dict when no line with `marker`
+    was present.
     """
     for line in stderr_text.splitlines():
         index = line.find(marker)
@@ -1013,7 +1016,9 @@ def _parse_marked_metrics_line(stderr_text: str, marker: str) -> dict:
         metrics: dict[str, int | list[int]] = {}
         for token in line[index + len(marker):].split():
             key, sep, value = token.partition("=")
-            if sep and value.isdigit():
+            signed_integer = (key in signed_integer_keys and value.startswith("-") and
+                              len(value) > 1 and all("0" <= digit <= "9" for digit in value[1:]))
+            if sep and (value.isdigit() or signed_integer):
                 metrics[key] = int(value)
             elif sep and value.startswith("[") and value.endswith("]"):
                 items = value[1:-1].split(",") if len(value) > 2 else []
@@ -1033,7 +1038,9 @@ def parse_offline_inventory_stitch_metrics(stderr_text: str) -> dict:
     overlap agree/conflict, and local/aggregate discovery sizes) -- never a raw
     address. Returns an empty dict when no such line was present.
     """
-    return _parse_marked_metrics_line(stderr_text, "segarecomp: offline inventory stitch: ")
+    return _parse_marked_metrics_line(
+        stderr_text, "segarecomp: offline inventory stitch: ",
+        frozenset({"adr0038_retained_block_delta"}))
 
 
 def parse_offline_inventory_partition_metrics(stderr_text: str) -> dict:

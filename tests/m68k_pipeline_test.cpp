@@ -7674,8 +7674,10 @@ void immutable_rom_aot_full_source_is_mapping_derived_and_fail_closed() {
     if (partial != nullptr) {
       const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
       expect(emitted.find("if (runtime->pc == UINT32_C(0x00000C64)) {") != std::string::npos &&
-                 emitted.find("GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET, "
-                              "GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET") != std::string::npos,
+                  emitted.find("frontier.stop.stop_class = GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET") !=
+                      std::string::npos &&
+                  emitted.find("frontier.stop.diagnostic_category = "
+                               "GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET") != std::string::npos,
              "an AOT producer whose exact next PC has no final representation owns a typed post-retirement frontier");
       expect(emitted.find("if (runtime->pc == UINT32_C(0x00000C14)) {") == std::string::npos,
              "the adjacent AOT producer whose exact next PC is compiled retains ordinary dispatch");

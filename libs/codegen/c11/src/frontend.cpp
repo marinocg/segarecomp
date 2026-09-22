@@ -577,6 +577,9 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
                                          const std::vector<std::uint32_t> &unrepresented_exact_pcs);
 std::optional<std::vector<Address>> immutable_rom_aot_exact_pc_obligations(
     const FrontendAnalysis::ImmutableRomAotEntry &entry);
+std::optional<std::map<Address, std::vector<Address>>> immutable_rom_aot_unrepresented_exact_pcs(
+    const std::map<Address, const FrontendAnalysis::ImmutableRomAotEntry *> &entries,
+    const std::set<Address> &represented_exact_pcs);
 
 std::string emit_m68k_general_startup_runtime_c_with_policy(
     const FrontendAnalysis &analysis, M68kGeneralStartupBlockEmissionPolicy policy) {
@@ -643,6 +646,7 @@ std::string emit_m68k_general_startup_runtime_c_with_policy(
   if (bound_operations.size() != decoded.size() ||
       !blocks.contains(analysis.startup_ingress->entry.value))
     return "/* translation rejected: invalid C3 static block */\n";
+  std::map<Address, std::vector<Address>> aot_unrepresented_exact_pcs;
   {
     std::set<Address> represented;
     for (const auto &[address, block] : blocks) {
@@ -653,13 +657,10 @@ std::string emit_m68k_general_startup_runtime_c_with_policy(
       (void)entry;
       represented.insert(address);
     }
-    for (const auto &[address, entry] : *aot_entries) {
-      (void)address;
-      const auto obligations = immutable_rom_aot_exact_pc_obligations(*entry);
-      if (!obligations || !std::ranges::all_of(
-                              *obligations, [&](Address target) { return represented.contains(target); }))
-        return "/* translation rejected: C3 immutable-ROM AOT PC obligation is unrepresented */\n";
-    }
+    const auto unrepresented = immutable_rom_aot_unrepresented_exact_pcs(*aot_entries, represented);
+    if (!unrepresented)
+      return "/* translation rejected: C3 immutable-ROM AOT PC effect has no consistency owner */\n";
+    aot_unrepresented_exact_pcs = *unrepresented;
   }
 
   std::map<Address, const M68kStaticMemoryFact *> ram_move_facts;
@@ -850,7 +851,8 @@ std::string emit_m68k_general_startup_runtime_c_with_policy(
   // (same criterion, `validated_immutable_rom_aot_entries` above) -- an
   // empty return-target vector is always the correct, harmless value here.
   for (const auto &[address, entry] : *aot_entries)
-    if (!blocks.contains(address)) out << emit_immutable_rom_aot_body(*entry, {}, {});
+    if (!blocks.contains(address))
+      out << emit_immutable_rom_aot_body(*entry, {}, aot_unrepresented_exact_pcs[address]);
   out << "static GenesisControlTransfer genesis_dispatch(GenesisRuntime *runtime) {\n";
   for (const auto &[entry, block] : blocks) {
     out << "  if (runtime->pc == UINT32_C(0x" << std::uppercase << std::hex << std::setw(8)
@@ -1772,6 +1774,27 @@ std::optional<std::vector<Address>> immutable_rom_aot_exact_pc_obligations(
   return result;
 }
 
+// Compare exact AOT PC assignments with the caller's final dispatch/frontier
+// authority. This is deliberately not a graph: C3 and C4 supply their existing
+// represented-address sets, and this helper only identifies the post-retirement
+// mismatch each producer must turn into a truthful typed stop.
+std::optional<std::map<Address, std::vector<Address>>> immutable_rom_aot_unrepresented_exact_pcs(
+    const std::map<Address, const FrontendAnalysis::ImmutableRomAotEntry *> &entries,
+    const std::set<Address> &represented_exact_pcs) {
+  std::map<Address, std::vector<Address>> result;
+  for (const auto &[address, entry] : entries) {
+    const auto obligations = immutable_rom_aot_exact_pc_obligations(*entry);
+    if (!obligations) return std::nullopt;
+    for (const auto target : *obligations)
+      if (!represented_exact_pcs.contains(target)) result[address].push_back(target);
+    if (result.contains(address) &&
+        (entry->source_mapping.name.size() > genesis_frontier_max_name_length ||
+         entry->decoded.raw_bytes.size() > genesis_frontier_max_raw_bytes))
+      return std::nullopt;
+  }
+  return result;
+}
+
 std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotEntry &entry,
                                           const std::vector<std::uint32_t> &runtime_return_targets,
                                           const std::vector<std::uint32_t> &unrepresented_exact_pcs) {
@@ -1850,9 +1873,12 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
       out << "runtime->pc == UINT32_C(" << hex(unrepresented_exact_pcs[index], 8) << ")";
     }
     out << ") {\n"
-        << "      GenesisControlTransfer frontier = genesis_static_stop("
-           "GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET, GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET, "
-           "&source, 0U, UINT32_C(0), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ);\n"
+        << "      GenesisControlTransfer frontier = {0};\n"
+        << "      frontier.kind = GENESIS_STOP;\n"
+        << "      frontier.stop.stop_class = GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET;\n"
+        << "      frontier.stop.diagnostic_category = GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET;\n"
+        << "      frontier.stop.provenance.has_instruction_provenance = UINT8_C(1);\n"
+        << "      frontier.stop.provenance.instruction = source;\n"
         << "      frontier.stop.provenance.mapping_claim_count = UINT8_C(1);\n"
         << "      frontier.stop.provenance.mapping_claims[0].name_length = UINT8_C(" << claim.name.size()
         << ");\n";
@@ -3891,23 +3917,13 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
   // second graph: represented targets dispatch normally; each absent exact
   // target becomes a source-provenanced post-retirement typed frontier in its
   // producer body. Dynamic-control membership guards remain unchanged.
-  std::map<Address, std::vector<Address>> aot_unrepresented_exact_pcs;
-  {
-    std::set<Address> represented_exact_pcs = frontier_addresses;
-    represented_exact_pcs.insert(emitted_code_addresses.begin(), emitted_code_addresses.end());
-    for (const auto &[address, entry] : *aot_entries) {
-      const auto obligations = immutable_rom_aot_exact_pc_obligations(*entry);
-      if (!obligations)
-        return "/* translation rejected: immutable-ROM AOT PC effect has no consistency owner */\n";
-      for (const auto target : *obligations)
-        if (!represented_exact_pcs.contains(target))
-          aot_unrepresented_exact_pcs[address].push_back(target);
-      if (aot_unrepresented_exact_pcs.contains(address) &&
-          (entry->source_mapping.name.size() > genesis_frontier_max_name_length ||
-           entry->decoded.raw_bytes.size() > genesis_frontier_max_raw_bytes))
-        return "/* translation rejected: invalid immutable-ROM AOT frontier provenance */\n";
-    }
-  }
+  std::set<Address> represented_exact_pcs = frontier_addresses;
+  represented_exact_pcs.insert(emitted_code_addresses.begin(), emitted_code_addresses.end());
+  const auto aot_unrepresented_exact_pcs_result =
+      immutable_rom_aot_unrepresented_exact_pcs(*aot_entries, represented_exact_pcs);
+  if (!aot_unrepresented_exact_pcs_result)
+    return "/* translation rejected: immutable-ROM AOT PC effect or frontier provenance has no consistency owner */\n";
+  auto aot_unrepresented_exact_pcs = *aot_unrepresented_exact_pcs_result;
   const std::vector<std::uint32_t> emitted_code_address_set(emitted_code_addresses.begin(),
                                                              emitted_code_addresses.end());
   const auto aot_emits = [&](M68kIrKind kind) {

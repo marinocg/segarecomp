@@ -8,6 +8,7 @@ ephemeral data is non-fatal for the parser.
 """
 import hashlib
 import importlib.util
+import json
 import pathlib
 import sys
 import subprocess
@@ -19,6 +20,32 @@ assert SPEC and SPEC.loader
 bridge = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bridge)
 ENTRY = "00012340"
+
+AOT_FRONTIER_HARNESS = r'''
+#include <assert.h>
+#define main genesis_generated_main
+#include "bridge.generated.c"
+#undef main
+
+int main(void) {
+  GenesisRuntime runtime = {0};
+  GenesisReportMetadata metadata = {0};
+  static const char digest[] = "@DIGEST@";
+  runtime.pc = UINT32_C(0x00012348);
+  GenesisControlTransfer transfer = genesis_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_STOP);
+  assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
+  assert(transfer.stop.diagnostic_category == GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET);
+  assert(transfer.stop.provenance.has_instruction_provenance != 0U);
+  assert(transfer.stop.provenance.instruction.source_address == UINT32_C(0x00012348));
+  assert(transfer.stop.provenance.mapping_claim_count == UINT8_C(1));
+  assert(transfer.stop.provenance.bus_access_count == UINT8_C(1));
+  assert(transfer.stop.provenance.bus_accesses[0].address == UINT32_C(0x00012348));
+  assert(transfer.stop.provenance.bus_accesses[0].raw_byte_count == UINT8_C(4));
+  metadata.cpu_dimensions = GENESIS_CPU_DIMENSIONS_NONE;
+  return genesis_write_sanitized_report(&transfer, digest, &metadata);
+}
+'''
 
 
 def require(condition: bool, message: str) -> None:
@@ -64,6 +91,43 @@ def main() -> int:
                     "GENESIS_HISTORY_TRANSFER_DIRECT, " in generated, "AOT BRA retire carries static PC/transfer kind")
             require("genesis_runtime_retire_m68k_instruction_at(runtime, UINT32_C(0x00012344), UINT32_C(0x00012348), "
                     "GENESIS_HISTORY_TRANSFER_NONE, " in generated, "non-transfer AOT retire carries static PC")
+            mismatch_body = generated.split(
+                "genesis_aot_00012348(GenesisRuntime *runtime) {", 1
+            )[1].split("static GenesisControlTransfer genesis_aot_", 1)[0]
+            require(mismatch_body.count("GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET") == 1,
+                    "C3 AOT exact-PC mismatch must have one local typed frontier")
+            repeated = subprocess.run(base + ["--provenance-diagnostics"], text=True, capture_output=True, check=True)
+            require(repeated.stdout == generated, "C3 AOT frontier generation must be deterministic")
+
+            # Compile a strict-C11 harness around the generated C and select the
+            # admitted AOT-only identity whose exact successor is absent. This
+            # exercises the C3 policy's local post-retirement stop and the same
+            # canonical serializer used by generated main.
+            harness = out_dir / "aot-frontier-harness.c"
+            harness.write_text(AOT_FRONTIER_HARNESS.replace("@DIGEST@", digest), encoding="utf-8")
+            frontier_executable = out_dir / "aot-frontier"
+            runtime_dir = root / "platforms/genesis/runtime"
+            built = subprocess.run(
+                [str(compiler), "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic",
+                 "-I", str(runtime_dir), "-I", str(out_dir), str(harness),
+                 str(runtime_dir / "runtime.c"), "-o", str(frontier_executable)],
+                text=True, capture_output=True,
+            )
+            require(built.returncode == 0, f"strict C11 C3 AOT frontier compile failed: {built.stderr}")
+            first_frontier = subprocess.run([str(frontier_executable)], text=True, capture_output=True)
+            second_frontier = subprocess.run([str(frontier_executable)], text=True, capture_output=True)
+            require(first_frontier.returncode == 0, f"C3 AOT frontier execution failed: {first_frontier.stderr}")
+            require(first_frontier.stdout == second_frontier.stdout and second_frontier.returncode == 0,
+                    "C3 AOT frontier report must be deterministic")
+            frontier_report = json.loads(first_frontier.stdout)
+            require(frontier_report.get("result") == "stop", f"unexpected AOT frontier {frontier_report}")
+            require(frontier_report.get("stop_class") == "known_but_unemitted_target",
+                    f"unexpected AOT stop {frontier_report}")
+            require(frontier_report.get("diagnostic_category") == "known_but_unemitted_target",
+                    f"unexpected AOT diagnostic {frontier_report}")
+            require(frontier_report.get("cpu_dimensions") is None and
+                    frontier_report.get("c4_lowering_dimensions") is None,
+                    f"unexpected AOT report dimensions {frontier_report}")
             frontier = bridge.with_execution_history({"report_kind": "ephemeral_frontier"}, ephemeral)
             require(frontier.get("execution_history") == history, "frontier carries the history")
             # Diagnostics-off binary emits only the PC line.

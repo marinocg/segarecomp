@@ -40,6 +40,28 @@ class OfflineInventoryStitchMetricsTest(unittest.TestCase):
         self.assertEqual(bridge.parse_offline_inventory_stitch_metrics("nothing here\n"), {})
         self.assertEqual(bridge.parse_offline_inventory_stitch_metrics(""), {})
 
+    def test_parse_adr0038_retained_block_delta_growth_zero_and_shrinkage(self) -> None:
+        marker = "segarecomp: offline inventory stitch: "
+        for spelling, expected in (("7", 7), ("0", 0), ("-3", -3)):
+            with self.subTest(spelling=spelling):
+                self.assertEqual(
+                    bridge.parse_offline_inventory_stitch_metrics(
+                        f"{marker}adr0038_retained_block_delta={spelling} candidates=1\n"),
+                    {"adr0038_retained_block_delta": expected, "candidates": 1})
+
+    def test_parse_rejects_malformed_or_signed_unsigned_metrics(self) -> None:
+        marker = "segarecomp: offline inventory stitch: "
+        for spelling in ("-", "+1", "--1", "-1.0"):
+            with self.subTest(spelling=spelling):
+                self.assertEqual(
+                    bridge.parse_offline_inventory_stitch_metrics(
+                        f"{marker}adr0038_retained_block_delta={spelling} candidates=1\n"),
+                    {"candidates": 1})
+        self.assertEqual(
+            bridge.parse_offline_inventory_stitch_metrics(
+                f"{marker}candidates=-1 adr0038_retained_block_delta=-2\n"),
+            {"adr0038_retained_block_delta": -2})
+
     def test_cache_lookup_by_resolved_dir_no_file_touch(self) -> None:
         out_dir = pathlib.Path("/tmp/seg007-t180-stitch-cache-probe").resolve()
         key = str(out_dir)
