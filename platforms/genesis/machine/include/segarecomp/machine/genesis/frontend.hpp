@@ -631,6 +631,29 @@ inline bool is_semantic_partition_boundary_address(const FrontendAnalysis &analy
 // before. Every other call/return/jump/exception-control form remains
 // excluded until its own existing semantic owner can establish the same
 // fact-free (or, for RTS, existing-whole-program-authority) contract.
+// SEG-021-T027: the smallest explicit admission-context signal for the
+// runtime-owned brief PC-indexed indirect JMP/JSR (`(d8,PC,Xn)`, word index
+// only -- never address-register-indexed, never long-indexed). This exact
+// EA shape is the one `jump_general`/`call_general` source form
+// `m68k_operation_effect` genuinely never folds to a static
+// `M68kPcEffectKind::direct_target` (ADR-0009; the target is only ever
+// known at runtime), yet it already has a complete, existing generated-
+// native emission owner: the shared dynamic-indirect branch in
+// `emit_m68k_operation_c` (libs/codegen/c11/src/m68k.cpp) that computes the
+// same runtime EA and checks it against the caller-supplied
+// `indirect_candidate_targets` membership set via
+// `m68k_indirect_target_member`, exactly as the ordinary C4 route already
+// does for this shape. Isolated here (rather than folded into
+// `m68k_operation_is_immutable_rom_aot_safe` below) so the AOT admission
+// call site can use it to bypass ONLY the generic `has_complete_c_emission`
+// probe's `pc != M68kPcEffectKind::none` requirement for this one narrow
+// shape, never weakening that requirement for any other kind.
+inline bool m68k_operation_is_runtime_owned_indirect_jump(const M68kIrOperation &operation) {
+  if (operation.kind != M68kIrKind::jump_general && operation.kind != M68kIrKind::call_general) return false;
+  const auto &ea = operation.source_ea;
+  return ea.mode == M68kEaMode::pc_index8 && !ea.index_is_address && !ea.index_is_long;
+}
+
 inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &operation,
                                                       bool runtime_return_target_authority_available) {
   const auto storage_free = [](const M68kEffectiveAddress &ea) {
@@ -785,7 +808,12 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // they need the same proven-candidate-membership machinery JSR's own
     // indirect forms already require (ADR-0009), an independent question
     // this task does not attempt for JMP.
-    return m68k_is_statically_foldable_control_ea(operation.source_ea);
+    // SEG-021-T027: the brief PC-indexed indirect form (word index only)
+    // now reuses that exact existing ADR-0009 membership machinery via
+    // `m68k_operation_is_runtime_owned_indirect_jump` above -- see that
+    // predicate's own doc comment. `(An)`/`d16(An)` remain excluded.
+    return m68k_is_statically_foldable_control_ea(operation.source_ea) ||
+           m68k_operation_is_runtime_owned_indirect_jump(operation);
   case M68kIrKind::call_general:
     // SEG-007-T246 (ninth iteration, same bounded family, same
     // architectural seam): a foldable-target JSR needs no whole-program
@@ -805,7 +833,14 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // source forms stay excluded, matching JMP's own scope; the callee
     // itself is validated independently at dispatch time, exactly like
     // every other represented-or-not target in this AOT model.
-    return m68k_is_statically_foldable_control_ea(operation.source_ea);
+    // SEG-021-T027: the brief PC-indexed indirect form (word index only)
+    // reuses the identical existing target-computation/membership owner
+    // JSR's own ADR-0009 form already established -- `emit_immutable_rom_
+    // aot_body` already sets `memory.continuation` generically for every
+    // admitted call_general candidate above, so no new stack/call-frame/
+    // return-target architecture is introduced.
+    return m68k_is_statically_foldable_control_ea(operation.source_ea) ||
+           m68k_operation_is_runtime_owned_indirect_jump(operation);
   case M68kIrKind::bsr_call:
     // BSR's target is always foldable (a relative displacement, never a
     // runtime-only EA) -- the exact same reasoning as call_general above.

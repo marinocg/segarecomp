@@ -582,7 +582,8 @@ std::optional<std::map<Address, const FrontendAnalysis::ImmutableRomAotEntry *>>
 validated_immutable_rom_aot_entries(const FrontendAnalysis &analysis);
 std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotEntry &entry,
                                          const std::vector<std::uint32_t> &runtime_return_targets,
-                                         const std::vector<std::uint32_t> &unrepresented_exact_pcs);
+                                         const std::vector<std::uint32_t> &unrepresented_exact_pcs,
+                                         const std::vector<std::uint32_t> &indirect_candidate_targets = {});
 std::optional<std::vector<Address>> immutable_rom_aot_exact_pc_obligations(
     const FrontendAnalysis::ImmutableRomAotEntry &entry);
 std::optional<std::map<Address, std::vector<Address>>> immutable_rom_aot_unrepresented_exact_pcs(
@@ -655,6 +656,14 @@ std::string emit_m68k_general_startup_runtime_c_with_policy(
       !blocks.contains(analysis.startup_ingress->entry.value))
     return "/* translation rejected: invalid C3 static block */\n";
   std::map<Address, std::vector<Address>> aot_unrepresented_exact_pcs;
+  // SEG-021-T027: this exact block/AOT-entry union is already this C3
+  // profile's own final compiled-address authority (it is the only set
+  // `immutable_rom_aot_unrepresented_exact_pcs` below checks exact PC
+  // obligations against); a sorted copy is retained past this scope to
+  // double as the runtime-owned dynamic-indirect-control membership
+  // authority passed to `emit_immutable_rom_aot_body` -- never a second,
+  // parallel target set.
+  std::vector<std::uint32_t> c3_represented_addresses;
   {
     std::set<Address> represented;
     for (const auto &[address, block] : blocks) {
@@ -669,6 +678,7 @@ std::string emit_m68k_general_startup_runtime_c_with_policy(
     if (!unrepresented)
       return "/* translation rejected: C3 immutable-ROM AOT PC effect has no consistency owner */\n";
     aot_unrepresented_exact_pcs = *unrepresented;
+    c3_represented_addresses.assign(represented.begin(), represented.end());
   }
 
   std::map<Address, const M68kStaticMemoryFact *> ram_move_facts;
@@ -860,7 +870,8 @@ std::string emit_m68k_general_startup_runtime_c_with_policy(
   // empty return-target vector is always the correct, harmless value here.
   for (const auto &[address, entry] : *aot_entries)
     if (!blocks.contains(address))
-      out << emit_immutable_rom_aot_body(*entry, {}, aot_unrepresented_exact_pcs[address]);
+      out << emit_immutable_rom_aot_body(*entry, {}, aot_unrepresented_exact_pcs[address],
+                                         c3_represented_addresses);
   out << "static GenesisControlTransfer genesis_dispatch(GenesisRuntime *runtime) {\n";
   for (const auto &[entry, block] : blocks) {
     out << "  if (runtime->pc == UINT32_C(0x" << std::uppercase << std::hex << std::setw(8)
@@ -1732,8 +1743,19 @@ validated_immutable_rom_aot_entries(const FrontendAnalysis &analysis) {
     // PC-keyed identity absent from generated dispatch.
     if (!m68k_retirement_cycle_expression(entry.operation)) return std::nullopt;
     const auto *selected = select_unique_affine_mapping(analysis.mapping_claims, entry.decoded.provenance);
+    // SEG-021-T027: `m68k_operation_has_complete_c_emission`'s generic probe
+    // requires `m68k_operation_effect(...).pc != M68kPcEffectKind::none`,
+    // which the runtime-owned brief PC-indexed indirect JMP/JSR genuinely
+    // never sets (ADR-0009: its target is runtime-only). That shape
+    // nonetheless has a complete existing emission owner --
+    // `m68k_operation_is_runtime_owned_indirect_jump` (platforms/genesis/
+    // machine/include/.../frontend.hpp) is the narrow, explicit bypass for
+    // exactly this shape; every other kind still requires the unmodified
+    // `has_complete_c_emission` probe.
+    const bool has_complete_emission = m68k_operation_has_complete_c_emission(entry.operation) ||
+                                        m68k_operation_is_runtime_owned_indirect_jump(entry.operation);
     if (!m68k_operation_is_immutable_rom_aot_safe(entry.operation, return_target_authority_available) ||
-        !m68k_operation_has_complete_c_emission(entry.operation) ||
+        !has_complete_emission ||
         !independently_decoded_and_lifted(entry.decoded, entry.operation) || selected == nullptr ||
         selected->name != "raw_cartridge_rom" || selected->name != entry.source_mapping.name ||
         selected->target_begin.value != entry.source_mapping.target_begin.value ||
@@ -1773,8 +1795,23 @@ std::optional<std::vector<Address>> immutable_rom_aot_exact_pc_obligations(
     // emit_m68k_operation_c validates the observed stack PC against the
     // existing whole-program runtime-return authority before assigning it.
     break;
-  case M68kPcEffectKind::observed_exception_return:
   case M68kPcEffectKind::none:
+    // SEG-021-T027: the only admitted AOT candidate that ever reaches this
+    // function with `effect.pc == none` is the runtime-owned brief
+    // PC-indexed indirect JMP/JSR (`m68k_operation_is_immutable_rom_aot_
+    // safe` rejects every other kind before an entry can ever reach
+    // `aot_entries` with this effect shape). Exactly like `observed_stack_
+    // return` above, its target already has a stronger existing runtime
+    // membership owner (`m68k_indirect_target_member` against the caller's
+    // final compiled-address authority, checked inside `emit_m68k_
+    // operation_c`'s own unchanged dynamic-indirect lowering) -- it
+    // deliberately contributes no exact-PC obligation here, never a second
+    // target-proof mechanism. Any other kind reaching `none` would be a
+    // genuine analysis/codegen boundary inconsistency and must still fail
+    // loud.
+    if (operation.kind == M68kIrKind::jump_general || operation.kind == M68kIrKind::call_general) break;
+    return std::nullopt;
+  case M68kPcEffectKind::observed_exception_return:
     return std::nullopt;
   }
   std::sort(result.begin(), result.end());
@@ -1805,7 +1842,8 @@ std::optional<std::map<Address, std::vector<Address>>> immutable_rom_aot_unrepre
 
 std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotEntry &entry,
                                           const std::vector<std::uint32_t> &runtime_return_targets,
-                                          const std::vector<std::uint32_t> &unrepresented_exact_pcs) {
+                                          const std::vector<std::uint32_t> &unrepresented_exact_pcs,
+                                          const std::vector<std::uint32_t> &indirect_candidate_targets) {
   const auto address = entry.decoded.provenance.source.address.value;
   const auto cycle_expression = m68k_retirement_cycle_expression(entry.operation);
   if (!cycle_expression)
@@ -1837,6 +1875,19 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   // per-instruction wiring is needed here.
   memory.runtime_routing = true;
   memory.runtime_object = "runtime";
+  // SEG-021-T027: the runtime-owned brief PC-indexed indirect JMP/JSR
+  // (`(d8,PC,Xn)`, word index only) reuses the exact existing
+  // `jump_general`/`call_general` dynamic-indirect branch in
+  // `emit_m68k_operation_c` (libs/codegen/c11/src/m68k.cpp) verbatim -- the
+  // same runtime EA computation and the same `m68k_indirect_target_member`
+  // membership check the ordinary C4 route already performs for this exact
+  // shape (ADR-0009). That branch only ever consults
+  // `indirect_candidate_targets` when its own EA-shape guard already
+  // matches (`pc_index8`/`(An)`-indirect), so supplying the caller's
+  // already-computed final compiled-address authority here is harmless for
+  // every other admitted operation kind, which never reaches that branch at
+  // all.
+  memory.indirect_candidate_targets = indirect_candidate_targets;
   // SEG-021-T005: an isolated AOT candidate has no whole-program absolute-
   // operand fact; absolute and d16(PC) source reads take the runtime-routed
   // read (never a folded constant).
@@ -5304,7 +5355,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
   for (const auto &[address, entry] : *aot_entries)
     if (!ordinary_compiled_owners.contains(address))
       out << emit_immutable_rom_aot_body(*entry, immutable_rom_aot_runtime_return_targets,
-                                         aot_unrepresented_exact_pcs[address]);
+                                         aot_unrepresented_exact_pcs[address], emitted_code_address_set);
   out << "static const GenesisCompiledEntryRecord genesis_compiled_entries[] = {\n";
   for (const auto address : emitted_code_addresses) {
     out << "  { UINT32_C(" << hex(address, 8) << "), ";

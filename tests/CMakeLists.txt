@@ -329,6 +329,9 @@ add_test(NAME genesis_immutable_rom_aot_negate_disp16_generated_test COMMAND ${P
 add_test(NAME genesis_immutable_rom_aot_pea_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_pea_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME genesis_immutable_rom_aot_jmp_pc_indexed_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_jmp_pc_indexed_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME m68k_indirect_control_musashi_differential_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_indirect_control_musashi_differential_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER})
