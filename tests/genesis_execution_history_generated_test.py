@@ -22,6 +22,9 @@ SPEC.loader.exec_module(bridge)
 ENTRY = "00012340"
 
 AOT_FRONTIER_HARNESS = r'''
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 200809L
+#endif
 #include <assert.h>
 #define main genesis_generated_main
 #include "bridge.generated.c"

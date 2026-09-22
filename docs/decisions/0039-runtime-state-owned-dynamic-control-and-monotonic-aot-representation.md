@@ -176,6 +176,28 @@ control retains its stronger existing membership owner (for example RTS uses
 the whole-program return-target set), so this check neither creates a second
 CFG/target database nor weakens any dynamic-control guard.
 
+The ownership chain is deliberately producer-local rather than a new
+whole-program graph:
+
+| Stage | Existing owner or set | Authority and invalidation |
+| --- | --- | --- |
+| Static discovery | discovered instruction starts and candidate units | Proposes ordinary CFG-backed work only; later rejection, pruning, or replacement invalidates the proposal. |
+| Retained graph | ADR-0038 retained blocks and typed frontiers | Owns ordinary retained execution and its unresolved exits after transactional closure; scratch rebuilds replace stale edges and frontier facts. |
+| Independent immutable AOT admission | `immutable_rom_aot_entries` | Owns only independently decoded, validated, lowerable immutable-ROM starts admitted after retained-graph closure; it creates no CFG edge or reachability claim. |
+| Per-operation PC production | `M68kOperationEffect` | Classifies each admitted producer's fixed `advance`, direct, or conditional exact outputs. Runtime-derived outputs remain with their stronger runtime membership owner. |
+| Final consumers | final compiled/emitted addresses plus typed-frontier destinations | A fixed output is represented only if one of these final cut-aware authorities consumes it. Earlier discovery or retained-graph membership is insufficient. |
+| Producer-local mismatch | the emitting AOT entry | After retirement and before common dispatch, converts a classified but unrepresented exact output to source-provenanced `known_but_unemitted_target`; unclassifiable effects reject generation. |
+| Common dispatcher | sorted final compiled-address lookup | Dispatches represented PCs only. It remains a defensive backstop, not the owner of missing producer obligations. |
+
+The reproduced divergence did not involve stale pruning or late-indirect
+authority: the missing destination was never discovered, admitted, retained,
+or pruned, and the producing AOT entry had a fixed sequential effect rather
+than a late-indirect target set. Existing ADR-0038 scratch-rebuild and
+transactional-closure rules continue to invalidate stale retained edges;
+SEG-007-T190 fixtures independently prove stale late-indirect proofs widen or
+change fail closed. Those paths therefore remain covered by their existing
+owners and are not duplicated by this producer-local check.
+
 A bounded production diagnosis reproduced the ordering gap with a
 runtime-selected identity that classified generically as a legal decoded
 PC-indexed dynamic jump. That identity was absent from discovery, unit
