@@ -569,8 +569,9 @@ struct FrontendAnalysis { M68kFrontendProfile profile{M68kFrontendProfile::direc
     // 5); component-only proposals removed with their owners are not retained
     // component nodes. `adr0038_peeled_node_count` is the deduplicated retained
     // component-node total.
-    // `adr0038_retained_block_delta` is the actual total prefix block
-    // growth over the exact pre-ADR-0038 prefix. `adr0038_ordinary_retained_
+    // `adr0038_retained_block_delta` is the signed total prefix block change
+    // from the exact pre-ADR-0038 prefix (closure may grow or shrink it).
+    // `adr0038_ordinary_retained_
     // graph_node_count` is the distinct graph-state count; with typed and
     // unresolved nodes it sums to graph_node_count. `adr0038_typed_frontier_count` is the number
     // that ended as a validated destination-global `known_but_unemitted_
@@ -590,7 +591,7 @@ struct FrontendAnalysis { M68kFrontendProfile profile{M68kFrontendProfile::direc
     std::uint32_t adr0038_peeled_component_count{};
     std::vector<std::uint32_t> adr0038_peeled_component_sizes{};
     std::uint32_t adr0038_peeled_node_count{};
-    std::uint32_t adr0038_retained_block_delta{};
+    std::int64_t adr0038_retained_block_delta{};
     std::uint32_t adr0038_ordinary_retained_graph_node_count{};
     std::uint32_t adr0038_typed_frontier_count{};
     std::uint32_t adr0038_unresolved_node_count{};

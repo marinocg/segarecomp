@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SEG-007-T238: strict-C11 compile/execute proof for the build-time-only,
+"""SEG-007-T238/SEG-021-T026: strict-C11 compile/execute proof for the build-time-only,
 explicitly opt-in broad aligned-M68k-ROM AOT representation experiment.
 
 Proves the ONE observable contract the experiment's seam guarantees on a
@@ -9,6 +9,7 @@ static precompiled-entry lookup, and the generated runtime never fetches or
 decodes a target byte to do it.
 """
 
+import json
 import pathlib
 import subprocess
 import sys
@@ -24,6 +25,8 @@ HARNESS = r'''
 int main(void) {
   GenesisRuntime runtime = {0};
   GenesisControlTransfer transfer;
+  GenesisReportMetadata metadata = {0};
+  static const char digest[] = "0000000000000000000000000000000000000000000000000000000000000000";
 
   /* The ordinary CFG root remains selectable beside the independent AOT
      identities. Its (A1) read supplies the dynamic JSR destination. */
@@ -79,7 +82,29 @@ int main(void) {
   assert(transfer.kind == GENESIS_CONTINUE_AT_PC);
   assert(runtime.d[3] == UINT32_C(5));
 
-  return 0;
+  /* SEG-021-T026 actual-cause regression. The final valid AOT identity is a
+     MULS whose exact sequential PC has no compiled entry or pre-existing
+     frontier. Its semantics retire, then its generation-time-derived
+     relation frontier fails closed with source provenance instead of handing
+     an unrepresented PC to the internal dispatcher. The NOP->MOVEQ case above
+     is the positive near-neighbor: its exact successor is compiled and still
+     returns CONTINUE_AT_PC normally. */
+  runtime.pc = UINT32_C(0x00000C62);
+  runtime.d[2] = UINT32_C(2);
+  runtime.d[3] = UINT32_C(3);
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_STOP);
+  assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
+  assert(transfer.stop.diagnostic_category == GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET);
+  assert(transfer.stop.provenance.has_instruction_provenance != 0U);
+  assert(transfer.stop.provenance.instruction.source_address == UINT32_C(0x00000C62));
+  assert(runtime.pc == UINT32_C(0x00000C64));
+
+  /* Exercise the same serializer used by generated main. An AOT-only source
+     must carry the accepted mapping/fetch provenance required for canonical
+     reporting; success prints one sanitized JSON line and returns zero. */
+  metadata.cpu_dimensions = GENESIS_CPU_DIMENSIONS_NONE;
+  return genesis_write_sanitized_report(&transfer, digest, &metadata);
 }
 '''
 
@@ -96,6 +121,32 @@ def main() -> None:
     assert "while (low < high)" in generated.stdout
     assert "GenesisCompiledEntry entry = genesis_compiled_entry_lookup(runtime->pc)" in generated.stdout
     assert "if (runtime->pc == UINT32_C(0x00000C06))" not in generated.stdout
+    assert "GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET" in generated.stdout
+    attachment = generated.stdout.split(
+        "void genesis_attach_route_provenance", 1
+    )[1].split("GenesisControlTransfer genesis_static_stop", 1)[0]
+    mismatch_body = generated.stdout.split(
+        "genesis_aot_00000C62(GenesisRuntime *runtime) {", 1
+    )[1].split("static const GenesisCompiledEntryRecord", 1)[0]
+    assert "source->source_address == UINT32_C(0x00000C62)" not in attachment
+    assert attachment.count("source->source_address ==") == 1
+    assert mismatch_body.count(
+        "frontier.stop.provenance.mapping_claim_count = UINT8_C(1)"
+    ) == 1
+    assert mismatch_body.count(
+        "frontier.stop.provenance.bus_access_count = UINT8_C(1)"
+    ) == 1
+    # Fixture-local output-size ratchet: the prior broad AOT attachment table
+    # duplicated provenance for every aligned identity and crossed this bound.
+    # Local mismatch producers keep the complete generated source bounded.
+    assert len(generated.stdout.encode("utf-8")) < 100_000
+
+    repeated = subprocess.run(
+        [emitter, "--emit-experiment-aligned-aot"],
+        text=True, capture_output=True,
+    )
+    assert repeated.returncode == 0, repeated.stderr
+    assert repeated.stdout == generated.stdout
 
     with tempfile.TemporaryDirectory() as temporary:
         path = pathlib.Path(temporary)
@@ -112,6 +163,14 @@ def main() -> None:
         assert built.returncode == 0, built.stderr
         ran = subprocess.run([str(executable)], text=True, capture_output=True)
         assert ran.returncode == 0, ran.stderr
+        report = json.loads(ran.stdout)
+        assert report["schema_version"] == 1
+        assert report["report_kind"] == "sanitized"
+        assert report["result"] == "stop"
+        assert report["stop_class"] == "known_but_unemitted_target"
+        assert report["diagnostic_category"] == "known_but_unemitted_target"
+        assert report["cpu_dimensions"] is None
+        assert report["c4_lowering_dimensions"] is None
 
     print("genesis_experiment_aligned_aot_generated_test: OK")
 

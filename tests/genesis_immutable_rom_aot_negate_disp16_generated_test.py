@@ -22,21 +22,24 @@ int main(void) {
   runtime.a[5] = UINT32_C(0x00FF0070); runtime.sr = UINT16_C(0x0010);
   runtime.work_ram[0x70] = UINT8_C(1);
   transfer = genesis_bridge_dispatch(&runtime);
-  assert(transfer.kind == GENESIS_CONTINUE_AT_PC && transfer.next_pc == UINT32_C(0x00000F0C));
+  assert(transfer.kind == GENESIS_STOP && runtime.pc == UINT32_C(0x00000F0C));
+  assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
   assert(runtime.work_ram[0x70] == UINT8_C(0xff));
   assert(runtime.a[5] == UINT32_C(0x00FF0070) && runtime.sr == UINT16_C(0x0019));
   /* Zero proves Z and NEG's carry-derived X clearing separately. */
   runtime = (GenesisRuntime){0}; runtime.pc = UINT32_C(0x00000F08);
   runtime.a[5] = UINT32_C(0x00FF0074); runtime.sr = UINT16_C(0x0010);
   transfer = genesis_bridge_dispatch(&runtime);
-  assert(transfer.kind == GENESIS_CONTINUE_AT_PC && runtime.sr == UINT16_C(0x0004));
+  assert(transfer.kind == GENESIS_STOP && runtime.sr == UINT16_C(0x0004));
+  assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
   assert(runtime.a[5] == UINT32_C(0x00FF0074));
   /* The signed minimum stays negative and proves V together with N/C/X. */
   runtime = (GenesisRuntime){0}; runtime.pc = UINT32_C(0x00000F08);
   runtime.a[5] = UINT32_C(0x00FF0078); runtime.sr = UINT16_C(0x0010);
   runtime.work_ram[0x78] = UINT8_C(0x80);
   transfer = genesis_bridge_dispatch(&runtime);
-  assert(transfer.kind == GENESIS_CONTINUE_AT_PC && runtime.work_ram[0x78] == UINT8_C(0x80));
+  assert(transfer.kind == GENESIS_STOP && runtime.work_ram[0x78] == UINT8_C(0x80));
+  assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
   assert(runtime.sr == UINT16_C(0x001B) && runtime.a[5] == UINT32_C(0x00FF0078));
   /* An unrouted address fails the read: neither write nor architectural commit occurs. */
   runtime = (GenesisRuntime){0}; runtime.pc = UINT32_C(0x00000F08);

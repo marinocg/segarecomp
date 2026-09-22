@@ -64,8 +64,9 @@ int main(void) {
   runtime.d[0] = UINT32_C(0x00000000);
   runtime.work_ram[0x74] = UINT8_C(0x80);
   transfer = genesis_bridge_dispatch(&runtime);
-  assert(transfer.kind == GENESIS_CONTINUE_AT_PC);
-  assert(transfer.next_pc == UINT32_C(0x00000C4A));
+  assert(transfer.kind == GENESIS_STOP);
+  assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
+  assert(runtime.pc == UINT32_C(0x00000C4A));
   assert(runtime.sr == UINT16_C(0x0008));
   /* Neither the base nor the index register mutates -- address_index8 emits
      no prelude/postlude of any kind. */
@@ -80,8 +81,9 @@ int main(void) {
   runtime.d[0] = UINT32_C(0x00000002);
   runtime.work_ram[0x76] = UINT8_C(0x00);
   transfer = genesis_bridge_dispatch(&runtime);
-  assert(transfer.kind == GENESIS_CONTINUE_AT_PC);
-  assert(transfer.next_pc == UINT32_C(0x00000C4A));
+  assert(transfer.kind == GENESIS_STOP);
+  assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
+  assert(runtime.pc == UINT32_C(0x00000C4A));
   assert(runtime.sr == UINT16_C(0x0004));
   assert(runtime.a[6] == UINT32_C(0x00FF0070));
   assert(runtime.d[0] == UINT32_C(0x00000002));

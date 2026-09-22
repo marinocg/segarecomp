@@ -151,3 +151,36 @@ the pre-existing wall-clock ceiling. The replacement changes lookup shape,
 not identity or execution semantics, and all resource ceilings remain
 unchanged. The capability remains an explicit generic opt-in while its larger
 source/object cost is visible; ordinary mode output is unchanged.
+
+### Exact PC obligations of independent AOT entries
+
+SEG-021-T026 closes an ordering gap exposed after the experiment. Immutable-ROM
+AOT entries are populated after static discovery and ADR-0038 retention, so an
+entry's exact PC assignments were not part of those passes' authoritative edge
+or frontier obligations. The final generated program could consequently
+contain a valid AOT body whose sequential or direct successor had neither a
+compiled entry nor a typed frontier; executing that body then reached the
+defensive internal-dispatch-inconsistency stop even though the earlier static
+inventory truthfully reported no obligation of its own left unrepresented.
+
+The final cut-aware compiled-address set and existing typed-frontier set remain
+the only target authorities. At generation time, codegen derives each AOT
+entry's fixed successors from the shared `M68kOperationEffect`: ordinary
+advance, direct branch/jump/call target, and both outcomes of conditional
+branch/DBcc. A represented successor dispatches unchanged. An exact successor
+absent from both existing authorities receives a relation-specific,
+source-provenanced `known_but_unemitted_target` stop in that AOT producer after
+the instruction retires; it is never handed to the dispatcher. An effect that
+cannot be classified this way rejects generation closed. Runtime-derived
+control retains its stronger existing membership owner (for example RTS uses
+the whole-program return-target set), so this check neither creates a second
+CFG/target database nor weakens any dynamic-control guard.
+
+The generated stop uses the matching `known_but_unemitted_target` diagnostic
+category and locally attaches mapping/instruction-fetch provenance from the
+same validated AOT decoded record and unique mapping already accepted for
+emission. Only an AOT producer with a non-empty unrepresented exact-PC set
+emits this attachment; ordinary retained sources keep the existing global
+attachment function unchanged, and all other AOT identities add no provenance
+text. This makes sanitized/full reporting valid without a runtime ROM read, a
+second provenance authority, or a whole-ROM attachment switch.

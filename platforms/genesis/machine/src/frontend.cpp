@@ -5627,7 +5627,8 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
             stitch_metrics.adr0038_peeled_component_sizes = peeled_component_sizes;
             stitch_metrics.adr0038_peeled_node_count = static_cast<std::uint32_t>(peeled_nodes.size());
             stitch_metrics.adr0038_retained_block_delta =
-                static_cast<std::uint32_t>(prefix->static_blocks.size() - pre_adr0038_prefix_block_count);
+                static_cast<std::int64_t>(prefix->static_blocks.size()) -
+                static_cast<std::int64_t>(pre_adr0038_prefix_block_count);
             stitch_metrics.adr0038_ordinary_retained_graph_node_count =
                 static_cast<std::uint32_t>(converged_ordinary_retained.size());
             stitch_metrics.adr0038_typed_frontier_count =
@@ -5697,7 +5698,7 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
                    "adr0038_graph_node_count=%u adr0038_graph_edge_count=%u adr0038_graph_root_count=%u "
                    "adr0038_graph_leaf_count=%u adr0038_graph_max_depth=%u adr0038_cyclic=%u "
                    "adr0038_closure_rounds=%u adr0038_peeled_component_count=%u "
-                    "adr0038_peeled_node_count=%u adr0038_retained_block_delta=%u "
+                    "adr0038_peeled_node_count=%u adr0038_retained_block_delta=%lld "
                     "adr0038_ordinary_retained_graph_node_count=%u "
                    "adr0038_typed_frontier_count=%u adr0038_unresolved_node_count=%u "
                     "adr0038_ceiling_exhausted=%u",
@@ -5723,7 +5724,7 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
                    stitch_metrics.adr0038_graph_max_depth, stitch_metrics.adr0038_cyclic,
                    stitch_metrics.adr0038_closure_rounds,
                    stitch_metrics.adr0038_peeled_component_count, stitch_metrics.adr0038_peeled_node_count,
-                    stitch_metrics.adr0038_retained_block_delta,
+                    static_cast<long long>(stitch_metrics.adr0038_retained_block_delta),
                     stitch_metrics.adr0038_ordinary_retained_graph_node_count,
                     stitch_metrics.adr0038_typed_frontier_count,
                     stitch_metrics.adr0038_unresolved_node_count, stitch_metrics.adr0038_ceiling_exhausted);
