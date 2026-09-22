@@ -2309,7 +2309,12 @@ std::optional<std::string_view> c4_lowering_dimension_literal(M68kIrKind kind, M
     // mirroring their own already-represented sibling SUBA above.
     case M68kIrKind::subtract: return "GENESIS_C4_LOWERING_DIMENSIONS_SUBTRACT_AUTO_UPDATE";
     case M68kIrKind::subtract_immediate: return "GENESIS_C4_LOWERING_DIMENSIONS_SUBTRACT_IMMEDIATE_AUTO_UPDATE";
-    // SEG-007-T220: MULS.W shares CMP's declined-auto-update shape.
+    // SEG-021-T010: MULS/MULU/DIVS/DIVU auto-update operands are now lowered by
+    // `m68k_emit_routed_muldiv_auto_update`'s deferred-address-commit path, so
+    // `classify_m68k_c4_gap_shapes` no longer produces this (kind,
+    // requires_architecture_decision) pair for any of the four mnemonics; these four
+    // literals are retained for the stable GenesisC4LoweringDimensions enumeration only,
+    // the same precedent the ADD-family literals above already establish.
     case M68kIrKind::multiply_signed_word: return "GENESIS_C4_LOWERING_DIMENSIONS_MULS_AUTO_UPDATE";
     case M68kIrKind::multiply_unsigned_word: return "GENESIS_C4_LOWERING_DIMENSIONS_MULU_AUTO_UPDATE";
     case M68kIrKind::divide_signed_word: return "GENESIS_C4_LOWERING_DIMENSIONS_DIVS_AUTO_UPDATE";
