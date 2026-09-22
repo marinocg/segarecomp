@@ -763,59 +763,51 @@ struct M68kEaFieldOutcome {
   if (auto decoded = decode_register_logical(0xC000U, M68kInstructionKind::logical_and, false)) return decoded;
   if (auto decoded = decode_register_logical(0x8000U, M68kInstructionKind::logical_or, false)) return decoded;
   if (auto decoded = decode_register_logical(0xB000U, M68kInstructionKind::eor, true)) return decoded;
-  // SEG-007-T220: MULS.W <ea>,Dn -- the same 1100-line opcode family as AND
-  // above, opmode 111 (`decode_register_logical` explicitly declines opmode
-  // 3/7 for every family, so it never reaches that shared body). See
-  // M68kInstructionKind::multiply_signed_word's own doc comment for the full
-  // opcode/EA-legality/CCR contract. MULU.W (opmode 011) stays unsupported:
-  // no runtime-reached evidence motivates it yet. Deliberately excludes
-  // `m68k_ea_pc_index8`: the brief-format PC-relative indexed source is an
-  // already-established fail-closed non-goal for this exact opcode line/
-  // opmode (general_startup_decoder_rejects_the_pc_relative_indexed_logical_
-  // fail_closed_neighbours's own "adjacent word MULS.W opmode" regression),
-  // and the runtime-reached form this task resolves is register-direct/
-  // immediate, not indexed -- widening past the evidenced need is exactly
-  // the speculative decode-surface growth this project's scope discipline
-  // declines.
+  // SEG-007-T220 / SEG-021-T010: MULS.W <ea>,Dn -- the same 1100-line opcode
+  // family as AND above, opmode 111 (`decode_register_logical` explicitly
+  // declines opmode 3/7 for every family, so it never reaches that shared
+  // body). See M68kInstructionKind::multiply_signed_word's own doc comment
+  // for the full opcode/EA-legality/CCR contract; the legal source EA set is
+  // `m68k_ea_mul_div_source` (every mode except An-direct, including
+  // `(d8,An,Xn)` and `(d8,PC,Xn)`).
   if ((word & 0xF1C0U) == 0xC1C0U) {
-    const auto source_legal = static_cast<M68kEaLegalMask>(m68k_ea_arithmetic_logical_indexed_source & ~m68k_ea_an);
-    const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg, source_legal,
-                                         M68kMemoryAccessWidth::word);
+    const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg,
+                                         m68k_ea_mul_div_source, M68kMemoryAccessWidth::word);
     if (!src.ok) return src.failure;
     return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::multiply_signed_word,
                                        M68kMemoryAccessWidth::word, src.ea,
                                        {M68kEaMode::data_register, destination, 0, 0, 0, 0}, src.extension_bytes);
   }
-  // SEG-007-T222: MULU.W <ea>,Dn -- opmode 011 sibling of MULS.W above, same
-  // opcode line (1100). See M68kInstructionKind::multiply_unsigned_word's own
-  // doc comment for the full contract.
+  // SEG-007-T222 / SEG-021-T010: MULU.W <ea>,Dn -- opmode 011 sibling of
+  // MULS.W above, same opcode line (1100). See
+  // M68kInstructionKind::multiply_unsigned_word's own doc comment for the
+  // full contract.
   if ((word & 0xF1C0U) == 0xC0C0U) {
-    const auto source_legal = static_cast<M68kEaLegalMask>(m68k_ea_arithmetic_logical_indexed_source & ~m68k_ea_an);
-    const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg, source_legal,
-                                         M68kMemoryAccessWidth::word);
+    const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg,
+                                         m68k_ea_mul_div_source, M68kMemoryAccessWidth::word);
     if (!src.ok) return src.failure;
     return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::multiply_unsigned_word,
                                        M68kMemoryAccessWidth::word, src.ea,
                                        {M68kEaMode::data_register, destination, 0, 0, 0, 0}, src.extension_bytes);
   }
-  // SEG-007-T222: DIVS.W <ea>,Dn -- opcode line 1000 (0x8), opmode 111. See
-  // M68kInstructionKind::divide_signed_word's own doc comment for the full
-  // opcode/EA-legality/CCR/exception contract (ADR-0037).
+  // SEG-007-T222 / SEG-021-T010: DIVS.W <ea>,Dn -- opcode line 1000 (0x8),
+  // opmode 111. See M68kInstructionKind::divide_signed_word's own doc
+  // comment for the full opcode/EA-legality/CCR/exception contract
+  // (ADR-0037).
   if ((word & 0xF1C0U) == 0x81C0U) {
-    const auto source_legal = static_cast<M68kEaLegalMask>(m68k_ea_arithmetic_logical_indexed_source & ~m68k_ea_an);
-    const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg, source_legal,
-                                         M68kMemoryAccessWidth::word);
+    const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg,
+                                         m68k_ea_mul_div_source, M68kMemoryAccessWidth::word);
     if (!src.ok) return src.failure;
     return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::divide_signed_word,
                                        M68kMemoryAccessWidth::word, src.ea,
                                        {M68kEaMode::data_register, destination, 0, 0, 0, 0}, src.extension_bytes);
   }
-  // SEG-007-T222: DIVU.W <ea>,Dn -- opcode line 1000 (0x8), opmode 011. See
-  // M68kInstructionKind::divide_unsigned_word's own doc comment.
+  // SEG-007-T222 / SEG-021-T010: DIVU.W <ea>,Dn -- opcode line 1000 (0x8),
+  // opmode 011. See M68kInstructionKind::divide_unsigned_word's own doc
+  // comment.
   if ((word & 0xF1C0U) == 0x80C0U) {
-    const auto source_legal = static_cast<M68kEaLegalMask>(m68k_ea_arithmetic_logical_indexed_source & ~m68k_ea_an);
-    const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg, source_legal,
-                                         M68kMemoryAccessWidth::word);
+    const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode, reg,
+                                         m68k_ea_mul_div_source, M68kMemoryAccessWidth::word);
     if (!src.ok) return src.failure;
     return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::divide_unsigned_word,
                                        M68kMemoryAccessWidth::word, src.ea,

@@ -132,3 +132,30 @@ Timing: memory-word forms have a published static row (`8 + EA`, table 8-1) and 
 route; the register forms' retirement time depends on the runtime count (`6/8 + 2n`) and is emitted as a dynamic
 retirement expression, so `m68k_instruction_cycles` (static) records them as timing-unsupported (owned by SEG-021-T021).
 Timing is not compared by this harness.
+
+## SEG-021-T010: MULS.W/MULU.W/DIVS.W/DIVU.W source-EA completion
+
+Legality is `m68k_ea_mul_div_source` (every mode except An-direct, including `(d8,An,Xn)` and, newly, `(d8,PC,Xn)` --
+the exact same formula `m68k_ea_and_or_source` already uses), written from the Motorola manual's MULS/MULU/DIVS/DIVU
+source-operand tables and independent of the T001 dataset.
+
+MULS.W/MULU.W rows exist for all 11 legal source forms (`dn`, `ind`, `postinc`, `predec`, `disp`, `index`, `absw`,
+`absl`, `pcdisp`, `pcindex`, `imm`) using a dedicated `muldiv_sweep` profile (zero, sign edges 0x7FFF/0x8000/0xFFFF,
+boundary dividend/multiplicand values 0x7FFFFFFF/0x80000000, and a generic non-power-of-two case); the `index`/
+`pcindex` rows use the existing `move_even` profile instead (its bounded low-word values avoid the destination-Dn/
+index-Xn register-aliasing address overflow `muldiv_sweep`'s wider values would otherwise trigger against the
+conformance harness's fixed 1 MiB window when the opcode's Dn field happens to equal the brief extension word's own
+index register -- a genuine test-harness constraint, not an instruction-semantic one). All MULS.W/MULU.W rows match
+the pinned Musashi.
+
+DIVS.W/DIVU.W have NO T003 table rows: both kinds only ever emit through the Genesis runtime-routed C4 lowering
+(`memory->runtime_routing`, needed for the vector-5 divide-by-zero raise, ADR-0037) -- this predates T010 and its
+Scope explicitly keeps that path unchanged. The T003 harness's default emitter mode is always the direct/
+non-routed linear-memory lowering, so DIVS.W/DIVU.W structurally cannot be exercised or credited through it (every
+declared table word must be Musashi-validated to update the manifest); this is the acceptance criterion's own
+"as applicable" carve-out, not a gap. `m68k_pipeline_test.cpp` proves the widened `(d8,PC,Xn)` DIVS.W/DIVU.W forms
+decode and lift correctly; the shared `m68k_emit_materialized_ea_read`/`m68k_emit_runtime_ea_address` EA-read
+mechanism they reuse verbatim is the identical one MULS.W's own T003 rows already validate against Musashi end to
+end. DIVS.W/DIVU.W's own divisor-zero/overflow/quotient-remainder value semantics (independent of which EA mode
+supplies the divisor) are covered by `tests/m68k_divs_word_musashi_differential_test.py` and
+`tests/m68k_divu_word_musashi_differential_test.py`.

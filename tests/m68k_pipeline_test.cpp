@@ -572,12 +572,37 @@ void logical_word_pc_indexed_source_decodes_lifts_and_stays_bounded() {
                lift_m68k_instruction(decoded).kind == kind,
            "byte/long AND/OR (d8,PC,Xn),Dn decode and lift through the shared logical EA set");
   }
-  // The adjacent word MULS.W <ea>,Dn opmode keeps declining `(d8,PC,Xn)` (MULS.W is owned by SEG-021-T010; its
-  // legal source set does not include `m68k_ea_pc_index8` yet): a source-provenanced valid_but_unsupported rejection.
+  // SEG-021-T010: the adjacent word MULS.W <ea>,Dn opmode now admits `(d8,PC,Xn)` too -- its legal
+  // source set (`m68k_ea_mul_div_source`) matches AND/OR's own `m68k_ea_and_or_source` formula.
   {
-    const auto rejected = std::get<RejectedM68kDecode>(decode({0xC7U, 0xFBU, 0x28U, 0x08U}));
-    expect(rejected.outcome == DecodeOutcome::valid_but_unsupported_instruction && rejected.has_provenance,
-           "the adjacent word-multiply opmode of PC-relative indexed source still fails closed");
+    const auto muls_pcindex = std::get<M68kDecodedInstruction>(decode({0xC7U, 0xFBU, 0x28U, 0x08U}));
+    expect(muls_pcindex.kind == M68kInstructionKind::multiply_signed_word &&
+               muls_pcindex.size == M68kMemoryAccessWidth::word &&
+               muls_pcindex.source_ea.mode == M68kEaMode::pc_index8 &&
+               lift_m68k_instruction(muls_pcindex).kind == M68kIrKind::multiply_signed_word,
+           "MULS.W (d8,PC,Xn),Dn now decodes and lifts through the widened mul/div source set");
+  }
+  // SEG-021-T010: DIVS.W/DIVU.W <ea>,Dn share the exact same `m68k_ea_mul_div_source` widening.
+  // DIVS.W (8,PC,D2.L),D3 -> 0x87FB 0x2808; DIVU.W (8,PC,D2.L),D3 -> 0x86FB 0x2808. Decode/lift
+  // correctness of the shared `(d8,PC,Xn)` EA-read mechanism itself is proven end-to-end against
+  // Musashi by MULS.W's own T003 conformance rows (identical decode call site, identical
+  // `m68k_emit_materialized_ea_read`/`m68k_emit_runtime_ea_address` primitives); DIVS/DIVU's own
+  // divisor-zero/overflow/quotient-remainder semantics are independently value-differential-tested
+  // by tests/m68k_divs_word_musashi_differential_test.py and tests/m68k_divu_word_musashi_
+  // differential_test.py regardless of which EA mode supplies the divisor.
+  {
+    const auto divs_pcindex = std::get<M68kDecodedInstruction>(decode({0x87U, 0xFBU, 0x28U, 0x08U}));
+    expect(divs_pcindex.kind == M68kInstructionKind::divide_signed_word &&
+               divs_pcindex.size == M68kMemoryAccessWidth::word &&
+               divs_pcindex.source_ea.mode == M68kEaMode::pc_index8 &&
+               lift_m68k_instruction(divs_pcindex).kind == M68kIrKind::divide_signed_word,
+           "DIVS.W (d8,PC,Xn),Dn now decodes and lifts through the widened mul/div source set");
+    const auto divu_pcindex = std::get<M68kDecodedInstruction>(decode({0x86U, 0xFBU, 0x28U, 0x08U}));
+    expect(divu_pcindex.kind == M68kInstructionKind::divide_unsigned_word &&
+               divu_pcindex.size == M68kMemoryAccessWidth::word &&
+               divu_pcindex.source_ea.mode == M68kEaMode::pc_index8 &&
+               lift_m68k_instruction(divu_pcindex).kind == M68kIrKind::divide_unsigned_word,
+           "DIVU.W (d8,PC,Xn),Dn now decodes and lifts through the widened mul/div source set");
   }
 }
 
@@ -4628,15 +4653,14 @@ void general_startup_decode_accepts_indexed_arithmetic_source() {
     const auto result = decode_general({0xD4U, 0x7BU, 0x00U, 0x04U});
     expect(std::get_if<M68kDecodedInstruction>(&result) != nullptr,
            "the PC-relative indexed source decodes for ADD (SEG-021-T006)");
-    // SEG-021-T007: legal for AND/OR as well (every size); the MULS/MULU/DIVS/DIVU source sets stay narrow.
+    // SEG-021-T007: legal for AND/OR as well (every size).
     const auto logical = decode_general({0x84U, 0xBBU, 0x00U, 0x00U, 0x00U, 0x04U});
     expect(std::get_if<M68kDecodedInstruction>(&logical) != nullptr,
            "the PC-relative indexed source decodes for OR (SEG-021-T007)");
+    // SEG-021-T010: legal for MULS.W/MULU.W/DIVS.W/DIVU.W too now.
     const auto multiply = decode_general({0xC1U, 0xFBU, 0x00U, 0x00U});
-    const auto *multiply_rejected = std::get_if<RejectedM68kDecode>(&multiply);
-    expect(multiply_rejected != nullptr &&
-               multiply_rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction,
-           "the PC-relative indexed form remains fail-closed for MULS.W");
+    expect(std::get_if<M68kDecodedInstruction>(&multiply) != nullptr,
+           "the PC-relative indexed source decodes for MULS.W (SEG-021-T010)");
   }
   {
     // The destination-alterable sets (ADD/SUB/AND/OR reverse-memory forms,
@@ -6828,12 +6852,14 @@ constexpr std::uint32_t base = 0x00000C00U;
 // +0x08 BRA.S -> base                -- V2: a second, independent instance
 //                                      of the same safe shape.
 // +0x0A FFFF                        -- INVALID: illegal opcode, never decodes
-// +0x0C MULS.W (0,PC,D0.W),D0       -- an ISA-legal form this project's
-//                                      decoder still excludes (SEG-021-T010
-//                                      owns MULS/MULU source EA completion;
-//                                      AND/OR byte/long PC-indexed sources
-//                                      decode since SEG-021-T007) --
-//                                      never becomes a candidate root either
+// +0x0C CHK.W (0,PC,D0.W),D0        -- an ISA-legal form (T001 dataset) this
+//                                      project's decoder still has no CHK
+//                                      handling for at all -- never becomes a
+//                                      candidate root either. SEG-021-T010
+//                                      widened MULS/MULU/DIVS/DIVU's own
+//                                      source-EA set to admit this exact
+//                                      `(d8,PC,Xn)` shape, so this fixture no
+//                                      longer uses a MUL/DIV form here.
 // +0x10 NOP ; +0x12 RTS             -- OVERLAP_A / OVERLAP_B: two
 //                                      independently valid, genuinely
 //                                      overlapping (OVERLAP_B is OVERLAP_A's
@@ -6849,7 +6875,7 @@ const std::vector<std::uint8_t> image{
     0x60U, 0xF8U,              // +0x06 BRA.S -8 -> base (V1)
     0x60U, 0xF6U,              // +0x08 BRA.S -10 -> base (V2)
     0xFFU, 0xFFU,              // +0x0A invalid opcode
-    0xC1U, 0xFBU, 0x00U, 0x00U,  // +0x0C MULS.W (0,PC,D0.W),D0 (excluded form)
+    0x41U, 0xBBU, 0x00U, 0x00U,  // +0x0C CHK.W (0,PC,D0.W),D0 (excluded form)
     0x60U, 0x00U,              // +0x10 BRA.W (OVERLAP_A)
     0x4EU, 0x71U,              // +0x12 extension word / NOP (OVERLAP_B)
     0x76U, 0x05U,              // +0x14 byte-identical data / MOVEQ #5,D3
@@ -7402,12 +7428,69 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
   operation.destination_ea.mode = M68kEaMode::address_register;
   expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
          "LEA computes an address without reading memory or fabricating a target");
-  operation.kind = M68kIrKind::multiply_signed_word;
+  operation.kind = M68kIrKind::write_condition_codes;
   operation.source_ea.mode = M68kEaMode::address_indirect;
-  operation.destination_ea.mode = M68kEaMode::data_register;
+  operation.destination_ea.mode = M68kEaMode::unused;
   expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
          "a memory operand remains excluded without an independent memory-fact contract for every "
-         "IR kind except write_move's own narrow proven-safe carve-out below");
+         "IR kind except write_move's own narrow proven-safe carve-out below and MULS/MULU/compare's "
+         "own family-level admissions");
+  // SEG-021-T010: MULS.W/MULU.W admit every legal source EA (family-level, widened from the prior
+  // storage-free-only restriction) -- a memory operand no longer needs an independent memory-fact
+  // contract because the shared routed-read primitive and the operation-local deferred
+  // address-register commit (auto-updating forms) make every legal shape fact-free, exactly like
+  // the MOVE family above.
+  for (const auto mul_kind : {M68kIrKind::multiply_signed_word, M68kIrKind::multiply_unsigned_word}) {
+    operation.kind = mul_kind;
+    operation.size = M68kMemoryAccessWidth::word;
+    operation.source_ea.mode = M68kEaMode::address_indirect;
+    operation.destination_ea.mode = M68kEaMode::data_register;
+    expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "MULS/MULU admit an (An) memory source (SEG-021-T010 family-level widening)");
+    operation.source_ea.mode = M68kEaMode::address_postinc;
+    expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "MULS/MULU admit an auto-updating (An)+ source via the deferred address-commit helper");
+    operation.source_ea.mode = M68kEaMode::pc_index8;
+    expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "MULS/MULU admit the widened (d8,PC,Xn) source");
+  }
+  // DIVS.W/DIVU.W stay categorically excluded from immutable-ROM AOT regardless of source EA --
+  // unchanged by SEG-021-T010's source-EA widening. SEG-021-T010 correction: a bounded experiment
+  // (temporarily admitting DIVS/DIVU here and exercising an isolated, CFG-unreachable synthetic
+  // AOT candidate) proved the ORIGINAL "no live runtime object" rationale was WRONG --
+  // `emit_immutable_rom_aot_body` DOES configure `runtime_routing = true` / `runtime_object =
+  // "runtime"` identically to an ordinary routed block, and DIVS/DIVU's own `divide_by_zero`
+  // (ADR-0037) raise emits through that exact shared plumbing with no AOT-specific special-casing.
+  // The REAL blocker: `validated_immutable_rom_aot_entries` (frontend.cpp) additionally requires
+  // `m68k_operation_has_complete_c_emission` (below) to pass, and that shared, family-independent
+  // completeness probe deliberately constructs a NON-routed `M68kMemoryEmissionContext` for every
+  // IR kind. DIVS.W/DIVU.W's C emission body is unconditionally gated behind
+  // `memory->runtime_routing` (needed only for the live divide-by-zero raise), so it is always
+  // empty under that probe -- independent of this predicate's own permissiveness. MULS.W/MULU.W
+  // are unaffected: their emission needs no `runtime_routing` gate at all, so they already pass
+  // the same non-routed probe.
+  for (const auto div_kind : {M68kIrKind::divide_signed_word, M68kIrKind::divide_unsigned_word}) {
+    operation.kind = div_kind;
+    operation.source_ea.mode = M68kEaMode::data_register;
+    operation.destination_ea.mode = M68kEaMode::data_register;
+    expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "DIVS/DIVU stay categorically excluded from immutable-ROM AOT");
+    // Pin the REAL invariant directly: DIVS/DIVU fail the shared non-routed completeness probe
+    // even for the simplest legal (register-direct) shape, independent of the safety predicate.
+    expect(!m68k_operation_has_complete_c_emission(operation),
+           "DIVS/DIVU's C emission is unconditionally gated behind runtime_routing, so the shared "
+           "non-routed AOT completeness probe always reports it incomplete");
+  }
+  // MULS/MULU's own emission needs no routing gate, so the same probe DOES pass for them --
+  // confirming the invariant above is specific to DIVS/DIVU's routing requirement, not a general
+  // property of every family-level-admitted mul/div kind.
+  for (const auto mul_kind : {M68kIrKind::multiply_signed_word, M68kIrKind::multiply_unsigned_word}) {
+    operation.kind = mul_kind;
+    operation.source_ea.mode = M68kEaMode::data_register;
+    operation.destination_ea.mode = M68kEaMode::data_register;
+    expect(m68k_operation_has_complete_c_emission(operation),
+           "MULS/MULU pass the shared non-routed AOT completeness probe (no routing gate)");
+  }
   // SEG-007-T249 (bounded family inventory, first result): compare never
   // writes back, so its admission is exactly as broad, independently for
   // EITHER operand, as test_operand's own proven-safe list.
@@ -19799,6 +19882,12 @@ int c4_arithmetic_auto_update_admission() {
       {"ANDI.W #1,(A0)+", {0x02U, 0x58U, 0x00U, 0x01U}, "runtime->a[0] = m68k_logical_auto_ea;", true},
       {"ORI.B #1,-(A7)", {0x00U, 0x27U, 0x00U, 0x01U}, "runtime->a[7] = m68k_logical_auto_ea;", true},
       {"EORI.L #1,(A1)+", {0x0AU, 0x99U, 0x00U, 0x00U, 0x00U, 0x01U}, "runtime->a[1] = m68k_logical_auto_ea;", true},
+      // SEG-021-T010: MULS.W/MULU.W/DIVS.W/DIVU.W's routed auto-updating source (one deferred
+      // live-register commit each, via m68k_emit_routed_muldiv_auto_update).
+      {"MULS.W (A1)+,D2", {0xC5U, 0xD9U}, "runtime->a[1] = m68k_muldiv_auto_ea;", true},
+      {"MULU.W -(A0),D2", {0xC4U, 0xE0U}, "runtime->a[0] = m68k_muldiv_auto_ea;", true},
+      {"DIVS.W (A1)+,D2", {0x85U, 0xD9U}, "runtime->a[1] = m68k_muldiv_auto_ea;", true},
+      {"DIVU.W -(A0),D2", {0x84U, 0xE0U}, "runtime->a[0] = m68k_muldiv_auto_ea;", true},
   };
   int failures = 0;
   for (const auto &test_case : cases) {
@@ -20376,10 +20465,14 @@ int emit_general_startup_runtime_c4_all_gaps_source() {
   using namespace segarecomp;
   FrontendProgram program{};
   program.profile = M68kFrontendProfile::general_startup;
-  // MULU.W -(A0),D1; MULS.W -(A0),D1; RESET. SEG-021-T007: ANDI (like SUBA in T006 and MOVEA before it) now lowers its
-  // auto-updating operand, so the still-declined families are MULU and MULS, whose auto-updating source has no
-  // deferred-commit contract (owned by SEG-021-T010). The fixture keeps its original purpose: two
-  // independently retained requires_architecture_decision auto-update gaps from different families never collapse.
+  // MULU.W -(A0),D1; MULS.W -(A0),D1; RESET. SEG-021-T007: ANDI (like SUBA in T006 and MOVEA before it) lowered its
+  // auto-updating operand; SEG-021-T010 closes the family this fixture originally exercised as the LAST remaining
+  // `requires_architecture_decision` auto-update producer -- MULU's and MULS's own auto-updating source now lowers
+  // through `m68k_emit_routed_muldiv_auto_update` (docs/architecture/c4-add-family-auto-update-commit-contract.md).
+  // No shape in this codebase still produces that gap class (grep the classifier: every `add(..., M68kC4GapClass::
+  // requires_architecture_decision, ...)` call site was removed by T005-T010), so this fixture's own purpose
+  // changes from "two independently retained gaps never collapse" to a positive proof that BOTH auto-updating
+  // sources are admitted with zero preflight rows and their own distinct deferred-commit locals.
   program.image = {"synthetic-c4-all-gaps", {0xC2U, 0xE0U,
                                                0xC3U, 0xE0U, 0x4EU, 0x70U}, 0U};
   program.image.byte_length = program.image.bytes.size();
@@ -20390,30 +20483,14 @@ int emit_general_startup_runtime_c4_all_gaps_source() {
   if (partial == nullptr) return 1;
   const auto first = preflight_m68k_general_startup_c4(*partial);
   const auto second = preflight_m68k_general_startup_c4(*partial);
-  if (!first.valid || !second.valid || first.rows.size() != 2U || second.rows.size() != 2U)
+  if (!first.valid || !second.valid || !first.rows.empty() || !second.rows.empty()) return 1;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  if (emitted.find("translation rejected") != std::string::npos ||
+      emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_") != std::string::npos ||
+      emitted.find("uint32_t m68k_muldiv_auto_ea = runtime->a[0];") == std::string::npos ||
+      emitted.find("runtime->a[0] = m68k_muldiv_auto_ea;") == std::string::npos)
     return 1;
-  for (std::size_t index = 0; index < first.rows.size(); ++index) {
-    const auto &left = first.rows[index];
-    const auto &right = second.rows[index];
-    if (std::tie(left.family, left.ir_kind, left.operand_role, left.width, left.ea_class,
-                 left.auto_update, left.gap, left.predecessor) !=
-        std::tie(right.family, right.ir_kind, right.operand_role, right.width, right.ea_class,
-                 right.auto_update, right.gap, right.predecessor))
-      return 1;
-  }
-  // Rows are sorted by IR kind (signed multiply precedes unsigned multiply).
-  const auto &muls = first.rows[0];
-  const auto &mulu = first.rows[1];
-  if (mulu.ir_kind != M68kIrKind::multiply_unsigned_word ||
-      mulu.operand_role != M68kC4OperandRole::source ||
-      mulu.auto_update != M68kC4AutoUpdateClass::predecrement ||
-      mulu.gap != M68kC4GapClass::requires_architecture_decision ||
-      muls.ir_kind != M68kIrKind::multiply_signed_word ||
-      muls.operand_role != M68kC4OperandRole::source ||
-      muls.auto_update != M68kC4AutoUpdateClass::predecrement ||
-      muls.gap != M68kC4GapClass::requires_architecture_decision)
-    return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << emitted;
   return 0;
 }
 
@@ -20870,6 +20947,137 @@ int emit_operation_c4_divu_word_source() {
   if (partial == nullptr || partial->accepted_prefix.ir.size() != 1U ||
       partial->accepted_prefix.ir.front().kind != M68kIrKind::divide_unsigned_word ||
       partial->accepted_prefix.decoded.front().source_ea.mode != M68kEaMode::data_register ||
+      partial->accepted_prefix.decoded.front().size != M68kMemoryAccessWidth::word ||
+      partial->accepted_prefix.decoded.front().destination_ea.mode != M68kEaMode::data_register ||
+      !partial->accepted_prefix.static_memory_facts.empty())
+    return 1;
+  const auto preflight = preflight_m68k_general_startup_c4(*partial);
+  if (!preflight.valid || !preflight.rows.empty()) return 1;
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  return 0;
+}
+
+// SEG-021-T010 correction: emits the complete C4 retained-block dispatcher for an
+// auto-updating MULU.W (A0)+,D1 vector (0xC2D8), used by the generated-native timing
+// regression proving the routed auto-update source (`m68k_emit_routed_muldiv_auto_update`)
+// feeds the shared dynamic MUL retirement seam (`m68k_timing_mul_source`) with the actually
+// fetched word, never the AOT/C4 block's zero-initialized default.
+int emit_operation_c4_mulu_word_auto_update_source() {
+  using namespace segarecomp;
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T010/c4-mulu-word-auto-update", {0xC2U, 0xD8U, 0x4EU, 0x70U}, 4U};
+  program.mapping_claims = {{"rom", {{}, 0x00000B00U}, {{}, 0x00000B04U}, {0U}, {4U}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0x00000B00U}, 0x00FF0100U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr || partial->accepted_prefix.ir.size() != 1U ||
+      partial->accepted_prefix.ir.front().kind != M68kIrKind::multiply_unsigned_word ||
+      partial->accepted_prefix.decoded.front().source_ea.mode != M68kEaMode::address_postinc ||
+      partial->accepted_prefix.decoded.front().source_ea.reg != 0U ||
+      partial->accepted_prefix.decoded.front().size != M68kMemoryAccessWidth::word ||
+      partial->accepted_prefix.decoded.front().destination_ea.mode != M68kEaMode::data_register ||
+      !partial->accepted_prefix.static_memory_facts.empty())
+    return 1;
+  const auto preflight = preflight_m68k_general_startup_c4(*partial);
+  if (!preflight.valid || !preflight.rows.empty()) return 1;
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  return 0;
+}
+
+// Signed sibling of the above: MULS.W (A0)+,D1 (0xC3D8).
+int emit_operation_c4_muls_word_auto_update_source() {
+  using namespace segarecomp;
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T010/c4-muls-word-auto-update", {0xC3U, 0xD8U, 0x4EU, 0x70U}, 4U};
+  program.mapping_claims = {{"rom", {{}, 0x00000B00U}, {{}, 0x00000B04U}, {0U}, {4U}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0x00000B00U}, 0x00FF0100U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr || partial->accepted_prefix.ir.size() != 1U ||
+      partial->accepted_prefix.ir.front().kind != M68kIrKind::multiply_signed_word ||
+      partial->accepted_prefix.decoded.front().source_ea.mode != M68kEaMode::address_postinc ||
+      partial->accepted_prefix.decoded.front().source_ea.reg != 0U ||
+      partial->accepted_prefix.decoded.front().size != M68kMemoryAccessWidth::word ||
+      partial->accepted_prefix.decoded.front().destination_ea.mode != M68kEaMode::data_register ||
+      !partial->accepted_prefix.static_memory_facts.empty())
+    return 1;
+  const auto preflight = preflight_m68k_general_startup_c4(*partial);
+  if (!preflight.valid || !preflight.rows.empty()) return 1;
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  return 0;
+}
+
+// SEG-021-T010 correction: emits the complete C4 retained-block dispatcher for an
+// auto-updating DIVU.W (A0)+,D3 vector (0x86D8), used by the generated-native regression
+// proving the routed auto-update source commits exactly once and BEFORE the divisor==0 raise
+// (ADR-0037), and that a failed routed source access leaves An completely unchanged.
+int emit_operation_c4_divu_word_auto_update_source() {
+  using namespace segarecomp;
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T010/c4-divu-word-auto-update", {0x86U, 0xD8U, 0x4EU, 0x70U}, 4U};
+  program.mapping_claims = {{"rom", {{}, 0x00000B00U}, {{}, 0x00000B04U}, {0U}, {4U}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0x00000B00U}, 0x00FF0100U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr || partial->accepted_prefix.ir.size() != 1U ||
+      partial->accepted_prefix.ir.front().kind != M68kIrKind::divide_unsigned_word ||
+      partial->accepted_prefix.decoded.front().source_ea.mode != M68kEaMode::address_postinc ||
+      partial->accepted_prefix.decoded.front().source_ea.reg != 0U ||
+      partial->accepted_prefix.decoded.front().size != M68kMemoryAccessWidth::word ||
+      partial->accepted_prefix.decoded.front().destination_ea.mode != M68kEaMode::data_register ||
+      !partial->accepted_prefix.static_memory_facts.empty())
+    return 1;
+  const auto preflight = preflight_m68k_general_startup_c4(*partial);
+  if (!preflight.valid || !preflight.rows.empty()) return 1;
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  return 0;
+}
+
+// SEG-021-T010 correction: emits the complete C4 retained-block dispatcher for
+// DIVS.W (8,PC,D2.L),D3 (0x87FB 0x2808), the same widened `(d8,PC,Xn)` source shape
+// MULS.W's own T003 rows already validate against Musashi, proving the shared EA-read
+// mechanism DIVS.W reuses verbatim actually executes correctly for this DIV family too
+// (not merely decode/lift, per the T010 acceptance's "generated-native support" bar).
+int emit_operation_c4_divs_word_pc_indexed_source() {
+  using namespace segarecomp;
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T010/c4-divs-word-pc-indexed",
+                    {0x87U, 0xFBU, 0x28U, 0x08U, 0x4EU, 0x70U}, 6U};
+  program.mapping_claims = {{"rom", {{}, 0x00000B00U}, {{}, 0x00000B06U}, {0U}, {6U}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0x00000B00U}, 0x00FF0100U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr || partial->accepted_prefix.ir.size() != 1U ||
+      partial->accepted_prefix.ir.front().kind != M68kIrKind::divide_signed_word ||
+      partial->accepted_prefix.decoded.front().source_ea.mode != M68kEaMode::pc_index8 ||
+      partial->accepted_prefix.decoded.front().size != M68kMemoryAccessWidth::word ||
+      partial->accepted_prefix.decoded.front().destination_ea.mode != M68kEaMode::data_register ||
+      !partial->accepted_prefix.static_memory_facts.empty())
+    return 1;
+  const auto preflight = preflight_m68k_general_startup_c4(*partial);
+  if (!preflight.valid || !preflight.rows.empty()) return 1;
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  return 0;
+}
+
+// Unsigned sibling of the above: DIVU.W (8,PC,D2.L),D3 (0x86FB 0x2808).
+int emit_operation_c4_divu_word_pc_indexed_source() {
+  using namespace segarecomp;
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T010/c4-divu-word-pc-indexed",
+                    {0x86U, 0xFBU, 0x28U, 0x08U, 0x4EU, 0x70U}, 6U};
+  program.mapping_claims = {{"rom", {{}, 0x00000B00U}, {{}, 0x00000B06U}, {0U}, {6U}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0x00000B00U}, 0x00FF0100U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr || partial->accepted_prefix.ir.size() != 1U ||
+      partial->accepted_prefix.ir.front().kind != M68kIrKind::divide_unsigned_word ||
+      partial->accepted_prefix.decoded.front().source_ea.mode != M68kEaMode::pc_index8 ||
       partial->accepted_prefix.decoded.front().size != M68kMemoryAccessWidth::word ||
       partial->accepted_prefix.decoded.front().destination_ea.mode != M68kEaMode::data_register ||
       !partial->accepted_prefix.static_memory_facts.empty())
@@ -26919,6 +27127,16 @@ int main(int argc, char **argv) {
     return emit_operation_c4_divs_word_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-divu-word")
     return emit_operation_c4_divu_word_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-mulu-word-auto-update")
+    return emit_operation_c4_mulu_word_auto_update_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-muls-word-auto-update")
+    return emit_operation_c4_muls_word_auto_update_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-divu-word-auto-update")
+    return emit_operation_c4_divu_word_auto_update_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-divs-word-pc-indexed")
+    return emit_operation_c4_divs_word_pc_indexed_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-divu-word-pc-indexed")
+    return emit_operation_c4_divu_word_pc_indexed_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-bridge-divide-by-zero-rte")
     return emit_general_startup_bridge_divide_by_zero_rte_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-movem-adjacent-lea")

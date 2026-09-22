@@ -2088,16 +2088,15 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
              operation.kind == M68kIrKind::divide_signed_word ||
              operation.kind == M68kIrKind::divide_unsigned_word) {
     // SEG-007-T220: MULS.W <ea>,Dn (and MULU/DIVS/DIVU) share a read-only-source,
-    // fixed-Dn-destination shape. An auto-updating source is declined cleanly to the
-    // established frontier (these kinds carry no deferred-address-commit contract;
-    // CMP/SUBA/CMPA gained theirs in SEG-021-T006). Their destination is
-    // architecturally always Dn, never needing a fact).
-    if (const auto update = m68k_c4_auto_update_class(operation.source_ea.mode); update != M68kC4AutoUpdateClass::none) {
-      add(M68kC4OperandRole::source, operation.source_ea.mode, update, M68kC4GapClass::requires_architecture_decision,
-          "deferred address commit");
-    } else {
+    // fixed-Dn-destination shape. Their destination is architecturally always Dn,
+    // never needing a fact. SEG-021-T010: an auto-updating source is lowered by the
+    // operation-local deferred-address-commit helper in emit_m68k_operation_c
+    // (`m68k_emit_routed_muldiv_auto_update`, one An snapshot, commit strictly after
+    // the routed read/postincrement, PC last), the same technique CMP/SUBA/CMPA
+    // gained in SEG-021-T006 and AND/OR/EOR/BTST/BCHG/BCLR/BSET gained in
+    // SEG-021-T007/T008; it is no longer a requires_architecture_decision gap.
+    if (m68k_c4_auto_update_class(operation.source_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.source_ea, M68kC4OperandRole::source, M68kStaticMemoryFactRole::source_read);
-    }
   } else if (operation.kind == M68kIrKind::subtract) {
     // SEG-007-T170 / SEG-021-T006: SUB (`<ea>,Dn` or `Dn,<ea>`) shares ADD's two-operand shape; an
     // auto-updating operand is lowered by the arithmetic-family deferred-address-commit helper (routed
@@ -2310,7 +2309,12 @@ std::optional<std::string_view> c4_lowering_dimension_literal(M68kIrKind kind, M
     // mirroring their own already-represented sibling SUBA above.
     case M68kIrKind::subtract: return "GENESIS_C4_LOWERING_DIMENSIONS_SUBTRACT_AUTO_UPDATE";
     case M68kIrKind::subtract_immediate: return "GENESIS_C4_LOWERING_DIMENSIONS_SUBTRACT_IMMEDIATE_AUTO_UPDATE";
-    // SEG-007-T220: MULS.W shares CMP's declined-auto-update shape.
+    // SEG-021-T010: MULS/MULU/DIVS/DIVU auto-update operands are now lowered by
+    // `m68k_emit_routed_muldiv_auto_update`'s deferred-address-commit path, so
+    // `classify_m68k_c4_gap_shapes` no longer produces this (kind,
+    // requires_architecture_decision) pair for any of the four mnemonics; these four
+    // literals are retained for the stable GenesisC4LoweringDimensions enumeration only,
+    // the same precedent the ADD-family literals above already establish.
     case M68kIrKind::multiply_signed_word: return "GENESIS_C4_LOWERING_DIMENSIONS_MULS_AUTO_UPDATE";
     case M68kIrKind::multiply_unsigned_word: return "GENESIS_C4_LOWERING_DIMENSIONS_MULU_AUTO_UPDATE";
     case M68kIrKind::divide_signed_word: return "GENESIS_C4_LOWERING_DIMENSIONS_DIVS_AUTO_UPDATE";

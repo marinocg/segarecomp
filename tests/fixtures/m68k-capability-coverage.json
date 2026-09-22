@@ -369,27 +369,27 @@
   "integer_arithmetic": {
    "ccr_sr_effect_declared": {
     "applicable_forms": 448,
-    "passing_forms": 402,
-    "passing_words": 12148,
-    "percent_forms": "89.73"
+    "passing_forms": 406,
+    "passing_words": 12180,
+    "percent_forms": "90.63"
    },
    "ccr_sr_validated": {
     "applicable_forms": 448,
-    "passing_forms": 352,
-    "passing_words": 10446,
-    "percent_forms": "78.57"
+    "passing_forms": 374,
+    "passing_words": 11294,
+    "percent_forms": "83.48"
    },
    "compile": {
     "applicable_forms": 500,
-    "passing_forms": 434,
-    "passing_words": 13524,
-    "percent_forms": "86.80"
+    "passing_forms": 436,
+    "passing_words": 13540,
+    "percent_forms": "87.20"
    },
    "decode": {
     "applicable_forms": 500,
-    "passing_forms": 454,
-    "passing_words": 14356,
-    "percent_forms": "90.80"
+    "passing_forms": 458,
+    "passing_words": 14388,
+    "percent_forms": "91.60"
    },
    "ea_footprint_declared": {
     "applicable_forms": 500,
@@ -399,27 +399,27 @@
    },
    "ea_side_effect_validated": {
     "applicable_forms": 113,
-    "passing_forms": 90,
-    "passing_words": 3744,
-    "percent_forms": "79.65"
+    "passing_forms": 94,
+    "passing_words": 4000,
+    "percent_forms": "83.19"
    },
    "effects": {
     "applicable_forms": 500,
-    "passing_forms": 454,
-    "passing_words": 14356,
-    "percent_forms": "90.80"
+    "passing_forms": 458,
+    "passing_words": 14388,
+    "percent_forms": "91.60"
    },
    "emit": {
     "applicable_forms": 500,
-    "passing_forms": 434,
-    "passing_words": 13524,
-    "percent_forms": "86.80"
+    "passing_forms": 436,
+    "passing_words": 13540,
+    "percent_forms": "87.20"
    },
    "end_to_end_structural": {
     "applicable_forms": 500,
-    "passing_forms": 434,
-    "passing_words": 13524,
-    "percent_forms": "86.80"
+    "passing_forms": 436,
+    "passing_words": 13540,
+    "percent_forms": "87.20"
    },
    "exception_privilege_modeled": {
     "applicable_forms": 308,
@@ -429,57 +429,57 @@
    },
    "lift": {
     "applicable_forms": 500,
-    "passing_forms": 454,
-    "passing_words": 14356,
-    "percent_forms": "90.80"
+    "passing_forms": 458,
+    "passing_words": 14388,
+    "percent_forms": "91.60"
    },
    "native_exec": {
     "applicable_forms": 500,
-    "passing_forms": 434,
-    "passing_words": 13524,
-    "percent_forms": "86.80"
+    "passing_forms": 436,
+    "passing_words": 13540,
+    "percent_forms": "87.20"
    },
    "route_immutable_rom_aot": {
     "applicable_forms": 500,
-    "passing_forms": 403,
-    "passing_words": 12758,
-    "percent_forms": "80.60"
+    "passing_forms": 421,
+    "passing_words": 13462,
+    "percent_forms": "84.20"
    },
    "route_runtime_routed_admitted": {
     "applicable_forms": 500,
-    "passing_forms": 446,
-    "passing_words": 13844,
-    "percent_forms": "89.20"
+    "passing_forms": 458,
+    "passing_words": 14388,
+    "percent_forms": "91.60"
    },
    "route_runtime_routed_compiles": {
     "applicable_forms": 500,
-    "passing_forms": 446,
-    "passing_words": 13844,
-    "percent_forms": "89.20"
+    "passing_forms": 458,
+    "passing_words": 14388,
+    "percent_forms": "91.60"
    },
    "route_runtime_routed_executes": {
     "applicable_forms": 500,
-    "passing_forms": 314,
-    "passing_words": 13040,
-    "percent_forms": "62.80"
+    "passing_forms": 322,
+    "passing_words": 13552,
+    "percent_forms": "64.40"
    },
    "route_static_discovery": {
     "applicable_forms": 500,
-    "passing_forms": 454,
-    "passing_words": 14356,
-    "percent_forms": "90.80"
+    "passing_forms": 458,
+    "passing_words": 14388,
+    "percent_forms": "91.60"
    },
    "semantic_validated": {
     "applicable_forms": 500,
-    "passing_forms": 404,
-    "passing_words": 12654,
-    "percent_forms": "80.80"
+    "passing_forms": 426,
+    "passing_words": 13502,
+    "percent_forms": "85.20"
    },
    "timing_model_present": {
     "applicable_forms": 500,
-    "passing_forms": 434,
-    "passing_words": 13524,
-    "percent_forms": "86.80"
+    "passing_forms": 436,
+    "passing_words": 13540,
+    "percent_forms": "87.20"
    },
    "timing_validated": {
     "applicable_forms": 500,
@@ -1474,9 +1474,9 @@
   "divs.ea_dn.w.ind.dn": "11101010001110100-0",
   "divs.ea_dn.w.index.dn": "11101010001110100-0",
   "divs.ea_dn.w.pcdisp.dn": "11101010001100100-0",
-  "divs.ea_dn.w.pcindex.dn": "00000000000000000-0",
-  "divs.ea_dn.w.postinc.dn": "1110101000000010000",
-  "divs.ea_dn.w.predec.dn": "1110101000000010000",
+  "divs.ea_dn.w.pcindex.dn": "11101010001100100-0",
+  "divs.ea_dn.w.postinc.dn": "1110101000111010000",
+  "divs.ea_dn.w.predec.dn": "1110101000111010000",
   "divu.ea_dn.w.absl.dn": "11101010001100100-0",
   "divu.ea_dn.w.absw.dn": "11101010001100100-0",
   "divu.ea_dn.w.disp.dn": "11101010001110100-0",
@@ -1485,9 +1485,9 @@
   "divu.ea_dn.w.ind.dn": "11101010001110100-0",
   "divu.ea_dn.w.index.dn": "11101010001110100-0",
   "divu.ea_dn.w.pcdisp.dn": "11101010001100100-0",
-  "divu.ea_dn.w.pcindex.dn": "00000000000000000-0",
-  "divu.ea_dn.w.postinc.dn": "1110101000000010000",
-  "divu.ea_dn.w.predec.dn": "1110101000000010000",
+  "divu.ea_dn.w.pcindex.dn": "11101010001100100-0",
+  "divu.ea_dn.w.postinc.dn": "1110101000111010000",
+  "divu.ea_dn.w.predec.dn": "1110101000111010000",
   "eor.dn_ea.b.dn.absl": "11111-11111101111-0",
   "eor.dn_ea.b.dn.absw": "11111-11111101111-0",
   "eor.dn_ea.b.dn.disp": "11111-11111111111-0",
@@ -1961,28 +1961,28 @@
   "movep.mem_dn.l.disp.dn": "0000--0000000000--0",
   "movep.mem_dn.w.disp.dn": "0000--0000000000--0",
   "moveq.imm8_dn.l.imm8.dn.data8": "11101-11111111100-0",
-  "muls.ea_dn.w.absl.dn": "11101001111100100-0",
-  "muls.ea_dn.w.absw.dn": "11101001111100100-0",
-  "muls.ea_dn.w.disp.dn": "11101001111110100-0",
-  "muls.ea_dn.w.dn.dn": "11101-01111111100-0",
-  "muls.ea_dn.w.imm.dn": "11101-01111111100-0",
-  "muls.ea_dn.w.ind.dn": "11101001111110100-0",
-  "muls.ea_dn.w.index.dn": "11101001111110100-0",
-  "muls.ea_dn.w.pcdisp.dn": "11101001111100100-0",
-  "muls.ea_dn.w.pcindex.dn": "00000000000000000-0",
-  "muls.ea_dn.w.postinc.dn": "1110100111000010000",
-  "muls.ea_dn.w.predec.dn": "1110100111000010000",
-  "mulu.ea_dn.w.absl.dn": "11101001111100100-0",
-  "mulu.ea_dn.w.absw.dn": "11101001111100100-0",
-  "mulu.ea_dn.w.disp.dn": "11101001111110100-0",
-  "mulu.ea_dn.w.dn.dn": "11101-01111111100-0",
-  "mulu.ea_dn.w.imm.dn": "11101-01111111100-0",
-  "mulu.ea_dn.w.ind.dn": "11101001111110100-0",
-  "mulu.ea_dn.w.index.dn": "11101001111110100-0",
-  "mulu.ea_dn.w.pcdisp.dn": "11101001111100100-0",
-  "mulu.ea_dn.w.pcindex.dn": "00000000000000000-0",
-  "mulu.ea_dn.w.postinc.dn": "1110100111000010000",
-  "mulu.ea_dn.w.predec.dn": "1110100111000010000",
+  "muls.ea_dn.w.absl.dn": "11101001111101111-0",
+  "muls.ea_dn.w.absw.dn": "11101001111101111-0",
+  "muls.ea_dn.w.disp.dn": "11101001111111111-0",
+  "muls.ea_dn.w.dn.dn": "11101-01111111111-0",
+  "muls.ea_dn.w.imm.dn": "11101-01111111111-0",
+  "muls.ea_dn.w.ind.dn": "11101001111111111-0",
+  "muls.ea_dn.w.index.dn": "11101001111111111-0",
+  "muls.ea_dn.w.pcdisp.dn": "11101001111101111-0",
+  "muls.ea_dn.w.pcindex.dn": "11101001111101111-0",
+  "muls.ea_dn.w.postinc.dn": "1110100111111111110",
+  "muls.ea_dn.w.predec.dn": "1110100111111111110",
+  "mulu.ea_dn.w.absl.dn": "11101001111101111-0",
+  "mulu.ea_dn.w.absw.dn": "11101001111101111-0",
+  "mulu.ea_dn.w.disp.dn": "11101001111111111-0",
+  "mulu.ea_dn.w.dn.dn": "11101-01111111111-0",
+  "mulu.ea_dn.w.imm.dn": "11101-01111111111-0",
+  "mulu.ea_dn.w.ind.dn": "11101001111111111-0",
+  "mulu.ea_dn.w.index.dn": "11101001111111111-0",
+  "mulu.ea_dn.w.pcdisp.dn": "11101001111101111-0",
+  "mulu.ea_dn.w.pcindex.dn": "11101001111101111-0",
+  "mulu.ea_dn.w.postinc.dn": "1110100111111111110",
+  "mulu.ea_dn.w.predec.dn": "1110100111111111110",
   "nbcd.unary.b.none.absl": "00000-00000000000-0",
   "nbcd.unary.b.none.absw": "00000-00000000000-0",
   "nbcd.unary.b.none.disp": "00000-00000000000-0",
@@ -2549,27 +2549,27 @@
  "totals": {
   "ccr_sr_effect_declared": {
    "applicable_forms": 1193,
-   "passing_forms": 1088,
-   "passing_words": 34565,
-   "percent_forms": "91.20"
+   "passing_forms": 1092,
+   "passing_words": 34597,
+   "percent_forms": "91.53"
   },
   "ccr_sr_validated": {
    "applicable_forms": 1193,
-   "passing_forms": 1033,
-   "passing_words": 30790,
-   "percent_forms": "86.59"
+   "passing_forms": 1055,
+   "passing_words": 31638,
+   "percent_forms": "88.43"
   },
   "compile": {
    "applicable_forms": 1526,
-   "passing_forms": 1238,
-   "passing_words": 41530,
-   "percent_forms": "81.13"
+   "passing_forms": 1240,
+   "passing_words": 41546,
+   "percent_forms": "81.26"
   },
   "decode": {
    "applicable_forms": 1526,
-   "passing_forms": 1265,
-   "passing_words": 42397,
-   "percent_forms": "82.90"
+   "passing_forms": 1269,
+   "passing_words": 42429,
+   "percent_forms": "83.16"
   },
   "ea_footprint_declared": {
    "applicable_forms": 1526,
@@ -2579,27 +2579,27 @@
   },
   "ea_side_effect_validated": {
    "applicable_forms": 381,
-   "passing_forms": 288,
-   "passing_words": 11250,
-   "percent_forms": "75.59"
+   "passing_forms": 292,
+   "passing_words": 11506,
+   "percent_forms": "76.64"
   },
   "effects": {
    "applicable_forms": 1526,
-   "passing_forms": 1259,
-   "passing_words": 42363,
-   "percent_forms": "82.50"
+   "passing_forms": 1263,
+   "passing_words": 42395,
+   "percent_forms": "82.77"
   },
   "emit": {
    "applicable_forms": 1526,
-   "passing_forms": 1238,
-   "passing_words": 41530,
-   "percent_forms": "81.13"
+   "passing_forms": 1240,
+   "passing_words": 41546,
+   "percent_forms": "81.26"
   },
   "end_to_end_structural": {
    "applicable_forms": 1526,
-   "passing_forms": 1237,
-   "passing_words": 41529,
-   "percent_forms": "81.06"
+   "passing_forms": 1239,
+   "passing_words": 41545,
+   "percent_forms": "81.19"
   },
   "exception_privilege_modeled": {
    "applicable_forms": 852,
@@ -2609,57 +2609,57 @@
   },
   "lift": {
    "applicable_forms": 1526,
-   "passing_forms": 1265,
-   "passing_words": 42397,
-   "percent_forms": "82.90"
+   "passing_forms": 1269,
+   "passing_words": 42429,
+   "percent_forms": "83.16"
   },
   "native_exec": {
    "applicable_forms": 1526,
-   "passing_forms": 1237,
-   "passing_words": 41529,
-   "percent_forms": "81.06"
+   "passing_forms": 1239,
+   "passing_words": 41545,
+   "percent_forms": "81.19"
   },
   "route_immutable_rom_aot": {
    "applicable_forms": 1526,
-   "passing_forms": 1177,
-   "passing_words": 40615,
-   "percent_forms": "77.13"
+   "passing_forms": 1195,
+   "passing_words": 41319,
+   "percent_forms": "78.31"
   },
   "route_runtime_routed_admitted": {
    "applicable_forms": 1526,
-   "passing_forms": 1251,
-   "passing_words": 41851,
-   "percent_forms": "81.98"
+   "passing_forms": 1263,
+   "passing_words": 42395,
+   "percent_forms": "82.77"
   },
   "route_runtime_routed_compiles": {
    "applicable_forms": 1526,
-   "passing_forms": 1251,
-   "passing_words": 41851,
-   "percent_forms": "81.98"
+   "passing_forms": 1263,
+   "passing_words": 42395,
+   "percent_forms": "82.77"
   },
   "route_runtime_routed_executes": {
    "applicable_forms": 1526,
-   "passing_forms": 856,
-   "passing_words": 39580,
-   "percent_forms": "56.09"
+   "passing_forms": 864,
+   "passing_words": 40092,
+   "percent_forms": "56.62"
   },
   "route_static_discovery": {
    "applicable_forms": 1526,
-   "passing_forms": 1239,
-   "passing_words": 38279,
-   "percent_forms": "81.19"
+   "passing_forms": 1243,
+   "passing_words": 38311,
+   "percent_forms": "81.45"
   },
   "semantic_validated": {
    "applicable_forms": 1526,
-   "passing_forms": 1117,
-   "passing_words": 33982,
-   "percent_forms": "73.20"
+   "passing_forms": 1139,
+   "passing_words": 34830,
+   "percent_forms": "74.64"
   },
   "timing_model_present": {
    "applicable_forms": 1526,
-   "passing_forms": 1152,
-   "passing_words": 34773,
-   "percent_forms": "75.49"
+   "passing_forms": 1154,
+   "passing_words": 34789,
+   "percent_forms": "75.62"
   },
   "timing_validated": {
    "applicable_forms": 1526,
@@ -2717,8 +2717,7 @@
   {
    "family": "integer_arithmetic",
    "first_failing_stage": {
-    "decode": 1,
-    "emit": 10
+    "emit": 11
    },
    "forms": 11,
    "mnemonic": "DIVS",
@@ -2727,8 +2726,7 @@
   {
    "family": "integer_arithmetic",
    "first_failing_stage": {
-    "decode": 1,
-    "emit": 10
+    "emit": 11
    },
    "forms": 11,
    "mnemonic": "DIVU",
@@ -2807,24 +2805,6 @@
    "forms": 4,
    "mnemonic": "MOVEP",
    "unsupported_forms": 4
-  },
-  {
-   "family": "integer_arithmetic",
-   "first_failing_stage": {
-    "decode": 1
-   },
-   "forms": 11,
-   "mnemonic": "MULS",
-   "unsupported_forms": 1
-  },
-  {
-   "family": "integer_arithmetic",
-   "first_failing_stage": {
-    "decode": 1
-   },
-   "forms": 11,
-   "mnemonic": "MULU",
-   "unsupported_forms": 1
   },
   {
    "family": "binary_coded_decimal",
@@ -2973,9 +2953,9 @@
  ],
  "validation": {
   "forms_with_at_least_one_validated_word": {
-   "ccr": 1091,
-   "ea": 443,
-   "semantic": 1160,
+   "ccr": 1111,
+   "ea": 447,
+   "semantic": 1180,
    "timing": 0
   },
   "manifest_sources": [
@@ -2994,9 +2974,9 @@
    "tests/m68k_pc_indexed_move_musashi_differential_test.py"
   ],
   "validated_words": {
-   "ccr": 30873,
-   "ea": 11446,
-   "semantic": 34050,
+   "ccr": 31719,
+   "ea": 11702,
+   "semantic": 34896,
    "timing": 0
   }
  }

@@ -237,3 +237,44 @@ one snapshot local (`m68k_shift_auto_ea`), one routed read and one routed write 
 commit strictly after both accesses, so a routed stop leaves no partial architectural mutation. Non-auto-updating
 destinations, including `(d8,An,Xn)`, use the shared routed read/write primitives; foldable absolute destinations retain
 their destination_read/destination_write facts exactly as NOT does.
+
+## SEG-021-T010: MULS.W / MULU.W / DIVS.W / DIVU.W
+
+The mul/div family joins the same technique through `m68k_emit_routed_muldiv_auto_update`
+(`libs/codegen/c11/src/m68k.cpp`), the source-side counterpart of `m68k_emit_routed_bit_auto_update`: the destination is
+architecturally always Dn (decode.cpp fixes it), so only the SOURCE can auto-update, never the destination. Steps:
+snapshot the touched An into `m68k_muldiv_auto_ea`; predecrement the local; routed read from the local; postincrement the
+local right after the read; commit the live An in one statement immediately (before the multiply/divide itself -- the
+source operand, including its own auto-update, is fully consumed at fetch time on real hardware, unconditionally, even
+when DIVS/DIVU's own divisor==0 check afterward raises the synchronous vector-5 exception); compute the product (MULS/
+MULU, full 32-bit Dn write, N/Z/V/C exactly as the non-auto-update body) or the packed quotient/remainder (DIVS/DIVU,
+Dn write conditional on no overflow, divisor==0 still raises vector-5 through the existing `emit_runtime(...).
+divide_by_zero` helper unchanged); advance PC last. A routed stop returns from inside the failing access, before any
+architectural write. The C4 classifier (`classify_m68k_c4_gap_shapes`) no longer emits `requires_architecture_decision`
+rows for an auto-updating MULS/MULU/DIVS/DIVU source. Immutable-ROM AOT admission (`m68k_operation_is_immutable_rom_aot_
+safe`) is now family-level for MULS.W/MULU.W (widened from the prior storage-free-only source restriction -- every legal
+source EA, including memory and auto-updating forms, lowers through the same fact-free routed primitives the MOVE family
+already established); DIVS.W/DIVU.W stay categorically excluded from immutable-ROM AOT regardless of source EA, but NOT
+because an isolated AOT candidate lacks a live runtime object -- `emit_immutable_rom_aot_body` configures the exact same
+live, routed `GenesisRuntime` context as an ordinary block, so the ADR-0037 vector-5 helper itself is not the blocker.
+The actual invariant: `validated_immutable_rom_aot_entries` additionally requires
+`m68k_operation_has_complete_c_emission(operation)`, and that shared, family-independent completeness probe
+intentionally constructs a NON-routed `M68kMemoryEmissionContext` for every IR kind. DIVS.W/DIVU.W's C emission is
+intentionally gated on `memory->runtime_routing` (synchronous divide-by-zero needs the live runtime exception service),
+so it produces no body under that non-routed probe and DIVS/DIVU remain unsupported on the immutable-ROM AOT route --
+an implementation/admission limitation of the shared completeness probe, not an MC68000 hardware limitation and not a
+property of ADR-0037's own mechanism. Widening that shared probe to a routed context would touch every other
+AOT-eligible kind's own validation path and is broader architecture work outside this task's scope (confirmed by a
+bounded experiment: temporarily admitting DIVS/DIVU into the safety predicate still leaves them excluded by the
+completeness probe; MULS.W/MULU.W are unaffected because their own emission needs no `runtime_routing` gate at all).
+`tests/m68k_pipeline_test.cpp`'s `c4_arithmetic_auto_update_admission` proves zero preflight rows and the expected routed
+commit statement for one representative `(An)+`/`-(An)` shape of each of the four mnemonics;
+`immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free` pins the completeness-probe invariant directly.
+
+Source-EA legality (`m68k_ea_mul_div_source`, decode.cpp) is widened to the full Motorola-manual set -- every mode except
+An-direct, now including `(d8,PC,Xn)` (previously excluded as an unevidenced non-goal; matches `m68k_ea_and_or_source`'s
+formula exactly). DIVS.W/DIVU.W have no T003 conformance-table rows at all: both kinds only ever emit through this
+runtime-routed C4 path (needed for the vector-5 raise), so the T003 harness's direct/non-routed emitter mode structurally
+cannot exercise or credit them (see `docs/testing/m68k-conformance-harness.md`'s own SEG-021-T010 section for the full
+routing rationale); MULS.W/MULU.W's full 11-form source-EA matrix is validated against pinned Musashi through T003 rows
+instead.

@@ -1937,12 +1937,15 @@ def main():
   assert not movea_aliasing.stdout.startswith("/* translation rejected:")
   assert "GENESIS_STOP_C4_LOWERING_GAP" not in movea_aliasing.stdout
   assert "runtime->a[0] = m68k_movea_src_ea;" in movea_aliasing.stdout
-  # Independent retained auto-update gaps are collected, normalized, sorted,
-  # and deduplicated before any C is emitted.
+  # SEG-021-T010: this fixture's own MULU/MULS auto-updating source was the last remaining
+  # `requires_architecture_decision` gap producer in the codebase; it is now a positive proof that
+  # both admit with zero preflight rows and their own distinct deferred-commit local.
   all_gaps = subprocess.run([executable, "--emit-general-startup-runtime-c4-all-gaps"], text=True, capture_output=True)
   assert all_gaps.returncode == 0
   assert not all_gaps.stdout.startswith("/* translation rejected:")
-  assert "GENESIS_STOP_C4_LOWERING_GAP" in all_gaps.stdout
+  assert "GENESIS_STOP_C4_LOWERING_GAP" not in all_gaps.stdout
+  assert "uint32_t m68k_muldiv_auto_ea = runtime->a[0];" in all_gaps.stdout
+  assert "runtime->a[0] = m68k_muldiv_auto_ea;" in all_gaps.stdout
   # MOVEM's routed C4 lowering has no ROM-read success route.  Preflight
   # classifies that retained, project-authored source as missing routing before
   # it can emit a generated program that reaches the runtime's defensive ROM
