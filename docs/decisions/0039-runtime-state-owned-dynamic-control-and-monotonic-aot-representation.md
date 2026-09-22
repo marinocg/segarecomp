@@ -151,3 +151,73 @@ the pre-existing wall-clock ceiling. The replacement changes lookup shape,
 not identity or execution semantics, and all resource ceilings remain
 unchanged. The capability remains an explicit generic opt-in while its larger
 source/object cost is visible; ordinary mode output is unchanged.
+
+### Exact PC obligations of independent AOT entries
+
+SEG-021-T026 closes an ordering gap exposed after the experiment. Immutable-ROM
+AOT entries are populated after static discovery and ADR-0038 retention, so an
+entry's exact PC assignments were not part of those passes' authoritative edge
+or frontier obligations. The final generated program could consequently
+contain a valid AOT body whose sequential or direct successor had neither a
+compiled entry nor a typed frontier; executing that body then reached the
+defensive internal-dispatch-inconsistency stop even though the earlier static
+inventory truthfully reported no obligation of its own left unrepresented.
+
+The final cut-aware compiled-address set and existing typed-frontier set remain
+the only target authorities. At generation time, codegen derives each AOT
+entry's fixed successors from the shared `M68kOperationEffect`: ordinary
+advance, direct branch/jump/call target, and both outcomes of conditional
+branch/DBcc. A represented successor dispatches unchanged. An exact successor
+absent from both existing authorities receives a relation-specific,
+source-provenanced `known_but_unemitted_target` stop in that AOT producer after
+the instruction retires; it is never handed to the dispatcher. An effect that
+cannot be classified this way rejects generation closed. Runtime-derived
+control retains its stronger existing membership owner (for example RTS uses
+the whole-program return-target set), so this check neither creates a second
+CFG/target database nor weakens any dynamic-control guard.
+
+The ownership chain is deliberately producer-local rather than a new
+whole-program graph:
+
+| Stage | Existing owner or set | Authority and invalidation |
+| --- | --- | --- |
+| Static discovery | discovered instruction starts and candidate units | Proposes ordinary CFG-backed work only; later rejection, pruning, or replacement invalidates the proposal. |
+| Retained graph | ADR-0038 retained blocks and typed frontiers | Owns ordinary retained execution and its unresolved exits after transactional closure; scratch rebuilds replace stale edges and frontier facts. |
+| Independent immutable AOT admission | `immutable_rom_aot_entries` | Owns only independently decoded, validated, lowerable immutable-ROM starts admitted after retained-graph closure; it creates no CFG edge or reachability claim. |
+| Per-operation PC production | `M68kOperationEffect` | Classifies each admitted producer's fixed `advance`, direct, or conditional exact outputs. Runtime-derived outputs remain with their stronger runtime membership owner. |
+| Final consumers | final compiled/emitted addresses plus typed-frontier destinations | A fixed output is represented only if one of these final cut-aware authorities consumes it. Earlier discovery or retained-graph membership is insufficient. |
+| Producer-local mismatch | the emitting AOT entry | At the completed-instruction retirement boundary, before asynchronous interrupt admission and common dispatch, converts a classified but unrepresented exact output to source-provenanced `known_but_unemitted_target`; device time, execution history, and checkpoint accounting still retire the instruction, while an eligible interrupt remains pending and cannot frame the unrepresented PC. Unclassifiable effects reject generation. |
+| Common dispatcher | sorted final compiled-address lookup | Dispatches represented PCs only. It remains a defensive backstop, not the owner of missing producer obligations. |
+
+The reproduced divergence did not involve stale pruning or late-indirect
+authority: the missing destination was never discovered, admitted, retained,
+or pruned, and the producing AOT entry had a fixed sequential effect rather
+than a late-indirect target set. Existing ADR-0038 scratch-rebuild and
+transactional-closure rules continue to invalidate stale retained edges;
+SEG-007-T190 fixtures independently prove stale late-indirect proofs widen or
+change fail closed. Those paths therefore remain covered by their existing
+owners and are not duplicated by this producer-local check.
+
+A bounded production diagnosis reproduced the ordering gap with a
+runtime-selected identity that classified generically as a legal decoded
+PC-indexed dynamic jump. That identity was absent from discovery, unit
+admission, semantic partitioning, retained blocks, and typed frontiers.
+Immutable-ROM enumeration decoded it, but the existing AOT contract rejected
+both its dynamic source-EA class and its lack of complete isolated C emission;
+it therefore never became an AOT identity and was never later pruned. A
+separate admitted AOT producer nevertheless had a fixed `advance` effect whose
+exact-PC obligation selected that identity. The final consistency rule above
+now converts precisely this cross-stage absence into the producer's typed,
+source-provenanced stop. This is the durable public classification only;
+address-specific evidence came from temporary local tracing, is not retained,
+and supplies no fixture, target fact, or basis for broadening dynamic-jump AOT
+admission here.
+
+The generated stop uses the matching `known_but_unemitted_target` diagnostic
+category and locally attaches mapping/instruction-fetch provenance from the
+same validated AOT decoded record and unique mapping already accepted for
+emission. Only an AOT producer with a non-empty unrepresented exact-PC set
+emits this attachment; ordinary retained sources keep the existing global
+attachment function unchanged, and all other AOT identities add no provenance
+text. This makes sanitized/full reporting valid without a runtime ROM read, a
+second provenance authority, or a whole-ROM attachment switch.

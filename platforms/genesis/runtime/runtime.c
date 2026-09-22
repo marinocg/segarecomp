@@ -2161,9 +2161,11 @@ int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc,
  *             `result` already reflects the handler entry as the next PC --
  *             there is no progress-credit/accounting concept left to update);
  *         2 = admission failed closed (`*result` holds the GENESIS_STOP).
+ * `admit_interrupt == 0` still advances the scheduler and latches a newly
+ * pending VBlank edge, but leaves every pending IRQ unadmitted.
  */
 static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m68k_cycles,
-                                            GenesisControlTransfer *result) {
+                                            int admit_interrupt, GenesisControlTransfer *result) {
   uint32_t mask;
   const uint64_t before = runtime->scheduler.master_ticks;
   const uint64_t delta = (uint64_t)m68k_cycles * GENESIS_M68K_CYCLE_MASTER_TICKS;
@@ -2214,7 +2216,7 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
     }
   }
 
-  if (!runtime->devices.interrupt.vblank_pending) return 0;        /* §5 step 4 */
+  if (!admit_interrupt || !runtime->devices.interrupt.vblank_pending) return 0; /* §5 step 4 */
 
   /* §4: SR interrupt-mask eligibility (SR bits 10-8 vs level 6). */
   mask = (uint32_t)((runtime->sr >> 8) & 0x7U);
@@ -2285,17 +2287,34 @@ GenesisControlTransfer genesis_runtime_step(GenesisRuntime *runtime, GenesisDisp
   return result;
 }
 
-GenesisControlTransfer genesis_runtime_retire_m68k_instruction(GenesisRuntime *runtime,
-                                                                uint32_t m68k_cycles,
-                                                                uint32_t next_pc) {
+static GenesisControlTransfer genesis_runtime_retire_m68k_instruction_impl(
+    GenesisRuntime *runtime, uint32_t m68k_cycles, uint32_t next_pc,
+    const GenesisControlTransfer *pending_stop) {
   GenesisControlTransfer result = {0};
-  if (runtime == 0) return genesis_internal_dispatch_inconsistency_stop(runtime);
+  const int stop_pending = pending_stop != 0;
+  if (runtime == 0 || (stop_pending && pending_stop->kind != GENESIS_STOP))
+    return genesis_internal_dispatch_inconsistency_stop(runtime);
   result.kind = GENESIS_CONTINUE_AT_PC;
   result.next_pc = next_pc;
   runtime->pc = next_pc;
-  (void)genesis_irq6_scheduler_and_admit(runtime, m68k_cycles, &result);
+  (void)genesis_irq6_scheduler_and_admit(runtime, m68k_cycles, !stop_pending, &result);
   if (runtime->m68k_checkpoint.enabled) genesis_m68k_checkpoint_finalize(runtime);
+  if (stop_pending && result.kind == GENESIS_CONTINUE_AT_PC) return *pending_stop;
   return result;
+}
+
+GenesisControlTransfer genesis_runtime_retire_m68k_instruction(GenesisRuntime *runtime,
+                                                                uint32_t m68k_cycles,
+                                                                uint32_t next_pc) {
+  return genesis_runtime_retire_m68k_instruction_impl(runtime, m68k_cycles, next_pc, 0);
+}
+
+GenesisControlTransfer genesis_runtime_retire_m68k_instruction_before_stop(
+    GenesisRuntime *runtime, uint32_t m68k_cycles, uint32_t next_pc,
+    const GenesisControlTransfer *pending_stop) {
+  if (runtime == 0 || pending_stop == 0 || pending_stop->kind != GENESIS_STOP)
+    return genesis_internal_dispatch_inconsistency_stop(runtime);
+  return genesis_runtime_retire_m68k_instruction_impl(runtime, m68k_cycles, next_pc, pending_stop);
 }
 
 GenesisControlTransfer genesis_runtime_retire_m68k_instruction_at(GenesisRuntime *runtime, uint32_t retired_pc,
@@ -2309,6 +2328,21 @@ GenesisControlTransfer genesis_runtime_retire_m68k_instruction_at(GenesisRuntime
     ++runtime->execution_history.retired_count;
   }
   return genesis_runtime_retire_m68k_instruction(runtime, m68k_cycles, next_pc);
+}
+
+GenesisControlTransfer genesis_runtime_retire_m68k_instruction_at_before_stop(
+    GenesisRuntime *runtime, uint32_t retired_pc, uint32_t fallthrough_pc,
+    GenesisHistoryTransferKind transfer_kind, uint32_t m68k_cycles, uint32_t next_pc,
+    const GenesisControlTransfer *pending_stop) {
+  if (runtime == 0 || pending_stop == 0 || pending_stop->kind != GENESIS_STOP)
+    return genesis_internal_dispatch_inconsistency_stop(runtime);
+  if (runtime != 0 && runtime->execution_history.detail_enabled) {
+    if (transfer_kind != GENESIS_HISTORY_TRANSFER_NONE && next_pc != fallthrough_pc)
+      genesis_history_append(runtime, GENESIS_HISTORY_TRANSFER, 0U, next_pc, (uint8_t)transfer_kind, 0U, 0U, 0U);
+    genesis_history_append(runtime, GENESIS_HISTORY_RETIRED, retired_pc, next_pc, 0U, 0U, 0U, 0U);
+    ++runtime->execution_history.retired_count;
+  }
+  return genesis_runtime_retire_m68k_instruction_impl(runtime, m68k_cycles, next_pc, pending_stop);
 }
 
 /*

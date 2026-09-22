@@ -27,6 +27,9 @@ concept HasCpuFrontier = requires(Value value) { value.cpu_frontier; };
 static_assert(!HasCpuFrontier<segarecomp::FrontendRejected>);
 static_assert(!HasCpuFrontier<segarecomp::UnresolvedFrontier>);
 static_assert(HasCpuFrontier<segarecomp::RejectedM68kDecode>);
+static_assert(std::signed_integral<decltype(
+              segarecomp::FrontendAnalysis::OfflineInventoryStitchMetrics{}.adr0038_retained_block_delta)>,
+              "ADR-0038 retained-block shrinkage must not wrap through an unsigned metric");
 
 int failures{};
 void expect(bool condition, const char *message) {
@@ -7622,7 +7625,7 @@ void experiment_aligned_aot_deterministically_classifies_and_dispatches_valid_en
                  std::string::npos,
           "V1 and V2 each own one sorted precompiled lookup entry selected only by architectural PC");
   expect(runtime_source.find("if (runtime->pc == UINT32_C(0x" + v1_hex.str() + "))") == std::string::npos &&
-             runtime_source.find("if (runtime->pc == UINT32_C(0x" + v2_hex.str() + "))") == std::string::npos,
+              runtime_source.find("if (runtime->pc == UINT32_C(0x" + v2_hex.str() + "))") == std::string::npos,
           "AOT-enabled dispatch does not emit the former linear PC comparison chain");
 }
 
@@ -7661,6 +7664,26 @@ void immutable_rom_aot_full_source_is_mapping_derived_and_fail_closed() {
     program.mapping_claims.front().image_end.value += 1U;
     expect(!apply_genesis_immutable_rom_aot(program) && program.immutable_rom_aot_ranges.empty(),
            "a malformed immutable mapping fails closed without partial enumeration");
+  }
+  {
+    auto program = program_with();
+    expect(apply_genesis_immutable_rom_aot(program), "the complete synthetic immutable mapping is accepted");
+    const auto result = analyze_m68k_frontend(program);
+    const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+    expect(partial != nullptr, "the complete synthetic immutable mapping remains a partial program");
+    if (partial != nullptr) {
+      const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+      expect(emitted.find("if (runtime->pc == UINT32_C(0x00000C64)) {") != std::string::npos &&
+                  emitted.find("frontier.stop.stop_class = GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET") !=
+                      std::string::npos &&
+                  emitted.find("frontier.stop.diagnostic_category = "
+                               "GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET") != std::string::npos,
+             "an AOT producer whose exact next PC has no final representation owns a typed post-retirement frontier");
+      expect(emitted.find("if (runtime->pc == UINT32_C(0x00000C14)) {") == std::string::npos,
+             "the adjacent AOT producer whose exact next PC is compiled retains ordinary dispatch");
+      expect(emitted == emit_m68k_general_startup_runtime_c(*partial),
+             "the exact-PC obligation inventory emits byte-identically on repeat");
+    }
   }
 }
 

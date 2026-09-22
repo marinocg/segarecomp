@@ -994,17 +994,39 @@ def run_expansion_loop(base_emitter_command: list[str], compiler: pathlib.Path, 
 
 
 _OFFLINE_INVENTORY_STITCH_METRICS_BY_DIR: dict[str, dict] = {}
+_OFFLINE_METRIC_UNSIGNED_MAX = UINT32_MAX
+_OFFLINE_METRIC_SIGNED_MAX = (1 << 63) - 1
+_OFFLINE_METRIC_SIGNED_MIN_MAGNITUDE = 1 << 63
 
 
-def _parse_marked_metrics_line(stderr_text: str, marker: str) -> dict:
+def _parse_bounded_metric_integer(value: str, signed: bool) -> int | None:
+    """Parse one canonical decimal metric without feeding unbounded text to int()."""
+    negative = signed and value.startswith("-")
+    digits = value[1:] if negative else value
+    if (not digits or any(digit < "0" or digit > "9" for digit in digits) or
+            (len(digits) > 1 and digits.startswith("0")) or (negative and digits == "0")):
+        return None
+    maximum = (_OFFLINE_METRIC_SIGNED_MIN_MAGNITUDE if negative else
+               _OFFLINE_METRIC_SIGNED_MAX if signed else _OFFLINE_METRIC_UNSIGNED_MAX)
+    maximum_text = str(maximum)
+    if len(digits) > len(maximum_text) or (len(digits) == len(maximum_text) and digits > maximum_text):
+        return None
+    parsed = int(digits)
+    return -parsed if negative else parsed
+
+
+def _parse_marked_metrics_line(
+        stderr_text: str, marker: str, signed_integer_keys: frozenset[str] = frozenset()) -> dict:
     """Parse a normalized `<marker>key=value ...` stderr line into a dict.
 
     Shared by every `parse_offline_inventory_*_metrics` function below: each
     emitter/frontend metrics line uses the identical `key=value` shape, so one
-    generic tokenizer covers all of them. Every value is either a non-negative
-    integer count/flag or a bracketed comma-separated list of such counts --
-    never a raw address. Returns an empty dict when no line with `marker` was
-    present.
+    generic tokenizer covers all of them. Values are non-negative integer
+    counts/flags or bracketed lists of counts except for explicitly named
+    signed scalar deltas. Signed values accept only the canonical optional
+    leading minus form; unsigned metrics keep their stricter handling. No
+    value is a raw address. Returns an empty dict when no line with `marker`
+    was present.
     """
     for line in stderr_text.splitlines():
         index = line.find(marker)
@@ -1013,12 +1035,14 @@ def _parse_marked_metrics_line(stderr_text: str, marker: str) -> dict:
         metrics: dict[str, int | list[int]] = {}
         for token in line[index + len(marker):].split():
             key, sep, value = token.partition("=")
-            if sep and value.isdigit():
-                metrics[key] = int(value)
+            parsed_scalar = _parse_bounded_metric_integer(value, key in signed_integer_keys) if sep else None
+            if parsed_scalar is not None:
+                metrics[key] = parsed_scalar
             elif sep and value.startswith("[") and value.endswith("]"):
                 items = value[1:-1].split(",") if len(value) > 2 else []
-                if all(item.isdigit() for item in items):
-                    metrics[key] = [int(item) for item in items]
+                parsed_items = [_parse_bounded_metric_integer(item, False) for item in items]
+                if all(item is not None for item in parsed_items):
+                    metrics[key] = parsed_items
         return metrics
     return {}
 
@@ -1049,10 +1073,13 @@ def parse_offline_inventory_partition_metrics(stderr_text: str) -> dict:
     `diagnostic_frontier_count_after_bounding`,
     `residual_frontier_obligation_count`,
     `retained_block_count_before_pruning`, `retained_block_count_after_pruning`,
-    `ingress_retained`). Every value is a count or 0/1 flag -- never a raw
-    address. Returns an empty dict when no such line was present.
+    `ingress_retained`). `adr0038_retained_block_delta` is the sole signed
+    value; all other values remain unsigned counts or 0/1 flags. No value is a
+    raw address. Returns an empty dict when no such line was present.
     """
-    return _parse_marked_metrics_line(stderr_text, "segarecomp: offline inventory partition: ")
+    return _parse_marked_metrics_line(
+        stderr_text, "segarecomp: offline inventory partition: ",
+        frozenset({"adr0038_retained_block_delta"}))
 
 
 def parse_offline_inventory_emission_metrics(stderr_text: str) -> dict:

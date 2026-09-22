@@ -27,7 +27,8 @@ int main(void) {
   runtime = (GenesisRuntime){0}; runtime.pc = UINT32_C(0x00000F08);
   runtime.a[5] = UINT32_C(0x00FF0080); runtime.a[7] = UINT32_C(0x00FF0100);
   transfer = genesis_bridge_dispatch(&runtime);
-  assert(transfer.kind == GENESIS_CONTINUE_AT_PC && transfer.next_pc == UINT32_C(0x00000F0C));
+  assert(transfer.kind == GENESIS_STOP && runtime.pc == UINT32_C(0x00000F0C));
+  assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
   assert(runtime.a[7] == UINT32_C(0x00FF00FC));  /* decremented exactly once, by 4 */
   assert(runtime.a[5] == UINT32_C(0x00FF0080));  /* PEA never mutates its source register */
   assert(runtime.work_ram[0x00FC] == 0x00U && runtime.work_ram[0x00FD] == 0xFFU &&

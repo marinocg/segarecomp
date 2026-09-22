@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -48,6 +49,47 @@ void drive_mixed(GenesisRuntime *r, uint32_t count) {
     retire(r, pc, pc + 2U, taken ? GENESIS_HISTORY_TRANSFER_DIRECT : GENESIS_HISTORY_TRANSFER_NONE,
            taken ? 0x2000U + i : pc + 2U);
   }
+}
+
+GenesisRuntime stop_retirement_fixture() {
+  GenesisRuntime runtime{};
+  runtime.d[0] = 0x11223344U;
+  runtime.a[7] = SEGARECOMP_GENESIS_WORK_RAM_BEGIN + 0x1000U;
+  runtime.sr = 0x2000U;
+  runtime.pc = 0x100U;
+  runtime.devices.vdp.registers[1] = 0x20U;
+  runtime.devices.interrupt.vblank_pending = 1U;
+  runtime.devices.interrupt.vblank_transition_count = 3U;
+  runtime.scheduler.master_ticks = GENESIS_NTSC_VBLANK_ONSET_TICK - 28U;
+  runtime.irq6_handler_entry = 0x800U;
+  runtime.irq6_handler_present = 1U;
+  runtime.execution_history.detail_enabled = 1U;
+  runtime.m68k_checkpoint.enabled = 1U;
+  runtime.m68k_checkpoint.effect_count = 1U;
+  runtime.m68k_checkpoint.effects[0].kind = GENESIS_M68K_EFFECT_WRITE;
+  runtime.device_checkpoint.enabled = 1U;
+  runtime.device_checkpoint.event_count = 1U;
+  runtime.device_checkpoint.events[0].kind = GENESIS_DEVICE_EVENT_WRITE;
+  return runtime;
+}
+
+void check_invalid_stop_retirement_is_atomic(bool history_aware, const GenesisControlTransfer *pending_stop,
+                                             const char *what) {
+  GenesisRuntime runtime = stop_retirement_fixture();
+  unsigned char before[sizeof(runtime)];
+  std::memcpy(before, &runtime, sizeof(runtime));
+  GenesisControlTransfer result{};
+  if (history_aware) {
+    result = genesis_runtime_retire_m68k_instruction_at_before_stop(
+        &runtime, 0x100U, 0x102U, GENESIS_HISTORY_TRANSFER_DIRECT, 4U, 0x200U, pending_stop);
+  } else {
+    result = genesis_runtime_retire_m68k_instruction_before_stop(&runtime, 4U, 0x200U, pending_stop);
+  }
+  check(result.kind == GENESIS_STOP &&
+            result.stop.stop_class == GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY &&
+            result.stop.diagnostic_category == GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY,
+        what);
+  check(std::memcmp(before, &runtime, sizeof(runtime)) == 0, what);
 }
 }  // namespace
 
@@ -158,6 +200,47 @@ int main() {
   check(xr.kind == GENESIS_CONTINUE_AT_PC && xr.next_pc == 0x800U, "setup: IRQ6 admitted");
   check(dump(x, GENESIS_STOP).find("{\"b\":1,\"k\":\"transfer\",\"t\":5,\"next\":\"0x00000800\"}") != std::string::npos,
         "exception entry recorded at the following boundary ordinal");
+
+  // Stop-aware retirement is a strict producer contract. NULL and non-stop
+  // pointers fail before PC/timing/device/checkpoint/history mutation, even
+  // when an IRQ is otherwise immediately admissible.
+  GenesisControlTransfer not_a_stop{};
+  not_a_stop.kind = GENESIS_CONTINUE_AT_PC;
+  not_a_stop.next_pc = 0x400U;
+  check_invalid_stop_retirement_is_atomic(false, nullptr, "plain stop retirement rejects NULL atomically");
+  check_invalid_stop_retirement_is_atomic(false, &not_a_stop, "plain stop retirement rejects non-stop atomically");
+  check_invalid_stop_retirement_is_atomic(true, nullptr, "history stop retirement rejects NULL atomically");
+  check_invalid_stop_retirement_is_atomic(true, &not_a_stop, "history stop retirement rejects non-stop atomically");
+
+  // A valid producer stop still retires normally while deferring an otherwise
+  // admissible IRQ: time/checkpoint/history advance, but no frame is built and
+  // the pending interrupt is not consumed.
+  GenesisRuntime valid = stop_retirement_fixture();
+  GenesisControlTransfer producer_stop{};
+  producer_stop.kind = GENESIS_STOP;
+  producer_stop.stop.stop_class = GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET;
+  producer_stop.stop.diagnostic_category = GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET;
+  const uint32_t valid_a7 = valid.a[7];
+  const auto valid_result = genesis_runtime_retire_m68k_instruction_at_before_stop(
+      &valid, 0x100U, 0x102U, GENESIS_HISTORY_TRANSFER_NONE, 4U, 0x102U, &producer_stop);
+  check(valid_result.kind == GENESIS_STOP &&
+            valid_result.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET,
+        "valid producer stop is preserved");
+  check(valid.pc == 0x102U && valid.scheduler.master_ticks == GENESIS_NTSC_VBLANK_ONSET_TICK,
+        "valid producer stop retires PC and timing");
+  check(valid.a[7] == valid_a7 && valid.devices.interrupt.vblank_pending == 1U,
+        "valid producer stop defers admissible IRQ without a frame or pending-bit consumption");
+  check(valid.execution_history.retired_count == 1U && valid.execution_history.total_recorded == 1U,
+        "valid producer stop records exactly one retirement");
+  check(valid.m68k_checkpoint.valid == 1U && valid.m68k_checkpoint.pc == 0x102U,
+        "valid producer stop finalizes its checkpoint");
+
+  GenesisRuntime timing_failure = stop_retirement_fixture();
+  const auto timing_result = genesis_runtime_retire_m68k_instruction_before_stop(
+      &timing_failure, 0U, 0x102U, &producer_stop);
+  check(timing_result.kind == GENESIS_STOP &&
+            timing_result.stop.diagnostic_category == GENESIS_DIAG_UNACCOUNTED_INSTRUCTION_TIMING,
+        "scheduler failure retains precedence over a valid producer stop");
 
   if (failures != 0) return 1;
   std::puts("genesis_execution_history_tests passed");

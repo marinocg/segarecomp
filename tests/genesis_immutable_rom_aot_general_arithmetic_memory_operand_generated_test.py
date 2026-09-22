@@ -239,8 +239,9 @@ int main(void) {
   runtime.work_ram[0xB0] = UINT8_C(0x85);
   runtime.work_ram[0xC0] = UINT8_C(0x00);
   transfer = genesis_bridge_dispatch(&runtime);
-  assert(transfer.kind == GENESIS_CONTINUE_AT_PC);
-  assert(transfer.next_pc == UINT32_C(0x00000E1E));
+  assert(transfer.kind == GENESIS_STOP);
+  assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
+  assert(runtime.pc == UINT32_C(0x00000E1E));
   assert(runtime.work_ram[0xC0] == UINT8_C(0x85));
   assert(runtime.work_ram[0xB0] == UINT8_C(0x85));
   assert(runtime.sr == UINT16_C(0x0018)); /* X | N */
@@ -255,8 +256,9 @@ int main(void) {
   runtime.work_ram[0xB4] = UINT8_C(0x00);
   runtime.work_ram[0xC4] = UINT8_C(0x7F);
   transfer = genesis_bridge_dispatch(&runtime);
-  assert(transfer.kind == GENESIS_CONTINUE_AT_PC);
-  assert(transfer.next_pc == UINT32_C(0x00000E1E));
+  assert(transfer.kind == GENESIS_STOP);
+  assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
+  assert(runtime.pc == UINT32_C(0x00000E1E));
   assert(runtime.work_ram[0xC4] == UINT8_C(0x00));
   assert(runtime.sr == UINT16_C(0x0004)); /* Z */
 
