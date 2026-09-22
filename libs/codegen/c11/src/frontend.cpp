@@ -2776,6 +2776,27 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
   }
   std::ostringstream out;
   out << emit_genesis_runtime_c11_include();
+  // Keep these pre-existing ordinary-prefix helpers ahead of the compiled-
+  // entry declarations. AOT participation changes only whether either helper
+  // is needed; exact-PC consistency is computed later from final authority and
+  // must not perturb non-AOT generated text ordering.
+  const auto aot_emits = [&](M68kIrKind kind) {
+    return std::ranges::any_of(*aot_entries, [&](const auto &candidate) {
+      return candidate.second->operation.kind == kind;
+    });
+  };
+  const auto emits_mulu_word = std::ranges::any_of(
+      partial.accepted_prefix.ir, [](const auto &operation) {
+        return operation.kind == M68kIrKind::multiply_unsigned_word;
+      }) || aot_emits(M68kIrKind::multiply_unsigned_word);
+  const auto emits_muls_word = std::ranges::any_of(
+      partial.accepted_prefix.ir, [](const auto &operation) {
+        return operation.kind == M68kIrKind::multiply_signed_word;
+      }) || aot_emits(M68kIrKind::multiply_signed_word);
+  if (emits_mulu_word)
+    out << "static uint32_t genesis_m68k_mulu_word_cycles(uint16_t source) { uint32_t n = 0U; while (source != 0U) { n += (uint32_t)(source & UINT16_C(1)); source >>= 1U; } return UINT32_C(38) + UINT32_C(2) * n; }\n";
+  if (emits_muls_word)
+    out << "static uint32_t genesis_m68k_muls_word_cycles(uint16_t source) { uint32_t n = 0U; uint32_t bits = ((uint32_t)source) << 1U; for (uint32_t i = 0U; i < 16U; ++i) n += ((bits >> i) ^ (bits >> (i + 1U))) & UINT32_C(1); return UINT32_C(38) + UINT32_C(2) * n; }\n";
   out << "typedef GenesisControlTransfer (*GenesisCompiledEntry)(GenesisRuntime *runtime);\n"
       << "typedef struct GenesisCompiledEntryRecord { uint32_t address; GenesisCompiledEntry body; } GenesisCompiledEntryRecord;\n"
       << "static GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n";
@@ -3926,23 +3947,6 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
   auto aot_unrepresented_exact_pcs = *aot_unrepresented_exact_pcs_result;
   const std::vector<std::uint32_t> emitted_code_address_set(emitted_code_addresses.begin(),
                                                              emitted_code_addresses.end());
-  const auto aot_emits = [&](M68kIrKind kind) {
-    return std::ranges::any_of(*aot_entries, [&](const auto &candidate) {
-      return candidate.second->operation.kind == kind;
-    });
-  };
-  const auto emits_mulu_word = std::ranges::any_of(
-      partial.accepted_prefix.ir, [](const auto &operation) {
-        return operation.kind == M68kIrKind::multiply_unsigned_word;
-      }) || aot_emits(M68kIrKind::multiply_unsigned_word);
-  const auto emits_muls_word = std::ranges::any_of(
-      partial.accepted_prefix.ir, [](const auto &operation) {
-        return operation.kind == M68kIrKind::multiply_signed_word;
-      }) || aot_emits(M68kIrKind::multiply_signed_word);
-  if (emits_mulu_word)
-    out << "static uint32_t genesis_m68k_mulu_word_cycles(uint16_t source) { uint32_t n = 0U; while (source != 0U) { n += (uint32_t)(source & UINT16_C(1)); source >>= 1U; } return UINT32_C(38) + UINT32_C(2) * n; }\n";
-  if (emits_muls_word)
-    out << "static uint32_t genesis_m68k_muls_word_cycles(uint16_t source) { uint32_t n = 0U; uint32_t bits = ((uint32_t)source) << 1U; for (uint32_t i = 0U; i < 16U; ++i) n += ((bits >> i) ^ (bits >> (i + 1U))) & UINT32_C(1); return UINT32_C(38) + UINT32_C(2) * n; }\n";
   // SEG-007-T181 / ADR-0027 §6 (wiring the deferred ADR-0026 §5 metrics): once
   // the EmittedCodeAddressSet is final, emit one normalized stderr line with the
   // final emitted block count and emitted code-address count. Numbers only.

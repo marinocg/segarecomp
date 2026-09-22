@@ -51,7 +51,7 @@ class OfflineInventoryStitchMetricsTest(unittest.TestCase):
 
     def test_parse_rejects_malformed_or_signed_unsigned_metrics(self) -> None:
         marker = "segarecomp: offline inventory stitch: "
-        for spelling in ("-", "+1", "--1", "-1.0"):
+        for spelling in ("-", "+1", "--1", "-1.0", "-0", "00", "-01"):
             with self.subTest(spelling=spelling):
                 self.assertEqual(
                     bridge.parse_offline_inventory_stitch_metrics(
@@ -61,6 +61,30 @@ class OfflineInventoryStitchMetricsTest(unittest.TestCase):
             bridge.parse_offline_inventory_stitch_metrics(
                 f"{marker}candidates=-1 adr0038_retained_block_delta=-2\n"),
             {"adr0038_retained_block_delta": -2})
+
+    def test_parse_enforces_integer_widths_before_conversion(self) -> None:
+        marker = "segarecomp: offline inventory stitch: "
+        int64_max = (1 << 63) - 1
+        int64_min = -(1 << 63)
+        uint32_max = (1 << 32) - 1
+        self.assertEqual(
+            bridge.parse_offline_inventory_stitch_metrics(
+                f"{marker}adr0038_retained_block_delta={int64_max} candidates={uint32_max}\n"),
+            {"adr0038_retained_block_delta": int64_max, "candidates": uint32_max})
+        self.assertEqual(
+            bridge.parse_offline_inventory_stitch_metrics(
+                f"{marker}adr0038_retained_block_delta={int64_min} values=[0,{uint32_max}]\n"),
+            {"adr0038_retained_block_delta": int64_min, "values": [0, uint32_max]})
+        huge = "9" * 100_000
+        self.assertEqual(
+            bridge.parse_offline_inventory_stitch_metrics(
+                f"{marker}adr0038_retained_block_delta={int64_max + 1} "
+                f"candidates={uint32_max + 1} huge={huge} values=[1,{huge}] valid=2\n"),
+            {"valid": 2})
+        self.assertEqual(
+            bridge.parse_offline_inventory_stitch_metrics(
+                f"{marker}adr0038_retained_block_delta={int64_min - 1}\n"),
+            {})
 
     def test_cache_lookup_by_resolved_dir_no_file_touch(self) -> None:
         out_dir = pathlib.Path("/tmp/seg007-t180-stitch-cache-probe").resolve()
