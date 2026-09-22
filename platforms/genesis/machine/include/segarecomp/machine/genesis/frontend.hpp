@@ -817,6 +817,30 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // one shared retirement-timing seam must account for the operation.
     return m68k_instruction_cycles(operation).has_value();
   case M68kIrKind::push_effective_address:
+    // SEG-021-T011: PEA family-level admission, the same reasoning as the
+    // MOVE/CLR/NOT/TST family and shift_rotate_memory above. PEA's
+    // `source_ea` computes an address only (never reads through it, exactly
+    // like LEA), so -- unlike every read/write family above -- it needs no
+    // resolver fact at all for any legal EA mode, foldable or not
+    // (classify_m68k_c4_gap_shapes never emits a check_fact row for it; see
+    // its own comment). Its -(A7) push is lowered through the atomic
+    // local-A7-snapshot/deferred-commit technique in emit_m68k_operation_c's
+    // push_effective_address case: a failed routed write returns before any
+    // architectural write (no partial A7 decrement, matching the write_move
+    // Q1-Q5 contract this technique generalizes), so no CFG edge, call
+    // frame, or return target is needed either. Unlike DIVS/DIVU below,
+    // PEA's C emission is gated only on `memory != nullptr` -- never on
+    // `memory->runtime_routing` -- so it passes the shared non-routed
+    // `m68k_operation_has_complete_c_emission` probe
+    // (libs/codegen/c11/src/m68k.cpp) through its own non-routed fallback
+    // branch (the direct-emission path pre-existing direct-emission callers
+    // already use), exactly like the MOVE/CLR family above. `pea_cycles`
+    // (libs/cpu/m68k/src/timing.cpp) covers every one of PEA's seven legal
+    // control-EA classes via the shared `ea()` timing table -- including
+    // both brief-format indexed forms this task widened PEA to admit -- so
+    // gating on `m68k_instruction_cycles` here (the same defensive pattern
+    // BTST/shift_rotate_memory already use) never declines a legal form.
+    return m68k_instruction_cycles(operation).has_value();
   case M68kIrKind::link_frame:
   case M68kIrKind::unlink_frame:
   case M68kIrKind::movem_transfer:

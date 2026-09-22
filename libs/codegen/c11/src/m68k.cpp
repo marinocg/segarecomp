@@ -1939,21 +1939,55 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
           ea.mode == M68kEaMode::pc_disp16) {
         address_expr = "UINT32_C(0x" + hex(ea.absolute_address, 8) + ")";
       } else {
+        // SEG-021-T011: pass the data-register bank too, exactly like
+        // `load_effective_address` above -- PEA's control-EA ceiling now
+        // also admits the brief-format `(d8,An,Xn)`/`(d8,PC,Xn)` Dn-indexed
+        // forms (`m68k_ea_pea_control_modes`), and the shared helper needs
+        // `data_registers` to lower a Dn index for either.
         const auto runtime = m68k_emit_runtime_ea_address(ea, M68kMemoryAccessWidth::long_word,
-                                                           memory->address_registers);
+                                                           memory->address_registers, data_registers);
         prelude << runtime.prelude;
         address_expr = runtime.address_expr;
         prelude << runtime.postlude;
       }
       output << "{\n" << prelude.str() << "const uint32_t pea_address = " << address_expr << ";\n";
-      unsigned temp_ordinal = 0U;
-      std::ostringstream write_prelude;
-      const M68kEffectiveAddress push_target{M68kEaMode::address_predec, 7, 0, 0, 0, 0};
-      const auto write = m68k_emit_ea_write(push_target, M68kMemoryAccessWidth::long_word, data_registers, *memory,
-                                            "pea_address", write_prelude, temp_ordinal);
-      if (write.ok) {
-        output << write_prelude.str() << write.expression << '\n'
-               << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
+      const std::string_view program_counter = memory->program_counter.empty() ? "pc" : memory->program_counter;
+      if (memory->runtime_routing) {
+        // SEG-021-T011: PEA's -(A7) push is now admitted to the C4
+        // block-dispatch/AOT routed path, so it can no longer go through the
+        // shared m68k_emit_ea_write's address_predec branch, which mutates the
+        // LIVE A7 register in its own prelude, unconditionally, before the
+        // routed write's own fail-closed guard has run (see
+        // docs/architecture/c4-move-predecrement-postincrement-commit-contract.md,
+        // whose Q1-Q5 deferred-commit technique this generalizes to PEA's
+        // single always-`-(A7)` push target). A7 is instead snapshotted into a
+        // dedicated local, decremented on that local only, and the routed
+        // write's own generated statement contains its own fail-closed early
+        // return -- so the live A7 writeback below is reached only after the
+        // write has already succeeded.
+        unsigned temp_ordinal = 0U;
+        output << "uint32_t m68k_pea_a7 = " << memory->address_registers << "[7];\n";
+        output << "m68k_pea_a7 -= UINT32_C(4);\n";
+        m68k_emit_routed_write(output, "m68k_pea_a7", M68kMemoryAccessWidth::long_word, *memory, "pea_address",
+                               temp_ordinal);
+        output << memory->address_registers << "[7] = m68k_pea_a7;\n";
+        output << program_counter << " += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
+      } else {
+        unsigned temp_ordinal = 0U;
+        std::ostringstream write_prelude;
+        const M68kEffectiveAddress push_target{M68kEaMode::address_predec, 7, 0, 0, 0, 0};
+        const auto write = m68k_emit_ea_write(push_target, M68kMemoryAccessWidth::long_word, data_registers, *memory,
+                                              "pea_address", write_prelude, temp_ordinal);
+        if (write.ok) {
+          // SEG-021-T011: use the same conventional-local-vs-persistent-context
+          // program-counter projection `load_effective_address` above already
+          // uses, instead of always assuming a bare local `pc`. This
+          // non-routed branch keeps the original, previously-only, direct-
+          // emission shape (no runtime_emitter is guaranteed available here),
+          // matching write_move's own runtime_routing gate above.
+          output << write_prelude.str() << write.expression << '\n'
+                 << program_counter << " += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
+        }
       }
     }
     break;

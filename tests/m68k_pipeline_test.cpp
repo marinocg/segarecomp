@@ -4288,11 +4288,17 @@ void general_startup_decode_accepts_indexed_lea_source() {
            "an indexed LEA primary with no extension word is a truncation");
   }
   {
-    // PEA's own legal-EA set stays unwidened: PEA (0x10,A0,D1.W) -> 0x4870 0x1010.
+    // SEG-021-T011: PEA's own control-EA set (`m68k_ea_pea_control_modes`)
+    // now also admits the brief address-register indexed form, the same
+    // non-control widening precedent LEA already established --
+    // PEA (0x10,A0,D1.W) -> 0x4870 0x1010.
     const auto result = decode_general({0x48U, 0x70U, 0x10U, 0x10U});
-    const auto *rejected = std::get_if<RejectedM68kDecode>(&result);
-    expect(rejected != nullptr && rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction,
-           "PEA gains no indexed source -- the shared m68k_ea_control_modes set is unwidened");
+    const auto *selected = std::get_if<M68kDecodedInstruction>(&result);
+    expect(selected != nullptr && selected->kind == M68kInstructionKind::pea &&
+               selected->source_ea.mode == M68kEaMode::address_index8 && selected->source_ea.reg == 0U &&
+               selected->source_ea.index_reg == 1U && !selected->source_ea.index_is_address &&
+               !selected->source_ea.index_is_long && selected->source_ea.displacement == 16,
+           "PEA (0x10,A0,D1.W) now decodes with a brief-format address-register indexed source");
   }
   {
     // genesis_startup and direct_flow still reject the indexed LEA form.
@@ -4377,15 +4383,19 @@ void general_startup_decode_accepts_pc_indexed_lea_source() {
     }
   }
 
-  // Adversarial negatives: JMP/JSR's own admission is unaffected, and PEA's
-  // legal-EA set stays unwidened for the identical PC-indexed extension word.
+  // Adversarial negatives: JMP/JSR's own admission is unaffected.
   {
-    // PEA (0x10,PC,D1.W) -> 0x487B 0x1010: PEA's own legal-EA set is
-    // unaffected by this LEA-only widening.
+    // SEG-021-T011: PEA (0x10,PC,D1.W) -> 0x487B 0x1010: PEA's own
+    // control-EA set (`m68k_ea_pea_control_modes`) now also admits the
+    // brief PC-relative indexed form, completing PEA's own seven-mode
+    // ceiling.
     const auto result = decode_general({0x48U, 0x7BU, 0x10U, 0x10U});
-    const auto *rejected = std::get_if<RejectedM68kDecode>(&result);
-    expect(rejected != nullptr && rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction,
-           "PEA gains no PC-relative indexed source -- the shared m68k_ea_control_modes set is unwidened");
+    const auto *selected = std::get_if<M68kDecodedInstruction>(&result);
+    expect(selected != nullptr && selected->kind == M68kInstructionKind::pea &&
+               selected->source_ea.mode == M68kEaMode::pc_index8 && selected->source_ea.index_reg == 1U &&
+               !selected->source_ea.index_is_address && !selected->source_ea.index_is_long &&
+               selected->source_ea.displacement == 16,
+           "PEA (0x10,PC,D1.W) now decodes with a brief-format PC-relative indexed source");
   }
   {
     // genesis_startup and direct_flow still reject the PC-indexed LEA form.
@@ -6429,6 +6439,246 @@ void t179_jsr_an_tier2_pushes_return_frame_before_dispatch() {
          "no runtime opcode fetch/decode exists in the JSR (An) Tier-2 path");
 }
 
+// SEG-021-T011 / ADR-0024/ADR-0025 Tier-2 generalization: the brief
+// address-register-indexed control EA sibling of the `pc_index8` and pure
+// `(An)` Tier-2 shapes above -- `JMP (d8,An,Xn)` / `JSR (d8,An,Xn)`. This
+// project never attempts a Tier-1 finite-value proof for this combined
+// base+index shape (see `process_indirect_control_index8`'s own doc comment
+// in static_discovery.cpp), so every site of this shape goes straight to
+// Tier 2.
+namespace t011_index8_tier2_fixture {
+constexpr std::uint32_t jmp_base = 0x00000D00U;
+constexpr std::uint32_t jmp_address = 0x00000D02U;
+constexpr std::uint32_t jmp_candidate_address = 0x00000D0AU;
+// 0x00000D00 NOP              -> a leading real instruction, mirroring the
+//                                established t179 pure-(An) Tier-2 fixture
+//                                shape (the JMP/JSR site is never the sole
+//                                reset-entry instruction with an empty
+//                                accepted prefix)
+// 0x00000D02 JMP (4,A0,D0.W)  -> faithful runtime EA = a[0] + sext(d[0].w) + 4
+// 0x00000D06 NOP              -> unreferenced filler, never decoded by any walk
+// 0x00000D08 NOP              -> unreferenced filler, never decoded by any walk
+// 0x00000D0A BRA.S -12 -> 0x00000D00 (a trivially valid one-instruction candidate block)
+const std::vector<std::uint8_t> jmp_image{0x4EU, 0x71U, 0x4EU, 0xF0U, 0x00U, 0x04U,
+                                          0x4EU, 0x71U, 0x4EU, 0x71U, 0x60U, 0xF4U};
+
+constexpr std::uint32_t jsr_base = 0x00000E00U;
+constexpr std::uint32_t jsr_address = 0x00000E02U;
+constexpr std::uint32_t jsr_candidate_address = 0x00000E0AU;
+// 0x00000E00 NOP              -> a leading real instruction (see jmp_image above)
+// 0x00000E02 JSR (4,A0,D0.W)  -> faithful runtime EA = a[0] + sext(d[0].w) + 4
+// 0x00000E06 NOP              -> unreferenced filler (illustrative return continuation), never decoded by any walk
+// 0x00000E08 NOP              -> unreferenced filler, never decoded by any walk
+// 0x00000E0A BRA.S -12 -> 0x00000E00 (a trivially valid one-instruction candidate block)
+const std::vector<std::uint8_t> jsr_image{0x4EU, 0x71U, 0x4EU, 0xB0U, 0x00U, 0x04U,
+                                          0x4EU, 0x71U, 0x4EU, 0x71U, 0x60U, 0xF4U};
+
+segarecomp::FrontendProgram make_program(const std::vector<std::uint8_t> &image, std::uint32_t base,
+                                        std::vector<segarecomp::GenesisCodeEntryCandidateHint> candidates) {
+  using namespace segarecomp;
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T011/index8-indirect-control", image, image.size()};
+  program.mapping_claims = {{"rom", {{}, base}, {{}, static_cast<std::uint32_t>(base + image.size())},
+                             {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  program.external_code_entry_candidates = std::move(candidates);
+  return program;
+}
+}  // namespace t011_index8_tier2_fixture
+
+// Records the weaker Tier-2 fact for `JMP (d8,An,Xn)` (the static_discovery
+// producer, `process_indirect_control_index8`) and, with a validated
+// candidate inside the emitted set, dispatches through the ordinary
+// GENESIS_CONTINUE_AT_PC transfer using the generic base+index runtime EA
+// formula.
+void t011_jmp_index8_tier2_computed_target_inside_emitted_set_dispatches() {
+  using namespace segarecomp;
+  using namespace t011_index8_tier2_fixture;
+  const auto result = analyze_m68k_frontend(
+      make_program(jmp_image, jmp_base, {tier2_fixture::make_candidate(jmp_candidate_address)}));
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "the JMP (d8,An,Xn) Tier-2 fixture reaches a partial program");
+  if (partial == nullptr) return;
+  const auto &prefix = partial->accepted_prefix;
+  expect(prefix.indirect_target_ea_sets.empty(),
+         "no Tier-1 finite target-EA-set is ever proven for the (d8,An,Xn) shape -- this task deliberately never "
+         "builds one");
+  bool tier2_fact = false;
+  for (const auto &set : prefix.unproven_indirect_control_ea_sets)
+    if (set.source_instruction.source.address.value == jmp_address && !set.is_call &&
+        set.control_ea.mode == M68kEaMode::address_index8 && set.control_ea.reg == 0U &&
+        set.control_ea.index_reg == 0U && !set.control_ea.index_is_address && !set.control_ea.index_is_long &&
+        set.control_ea.displacement == 4)
+      tier2_fact = true;
+  expect(tier2_fact,
+         "the (d8,An,Xn) site records the weaker unproven Tier-2 control-EA fact (A0 base, D0.W index, d8=4, not "
+         "a call)");
+  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  std::ostringstream suffix;
+  suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jmp_address;
+  const auto array_name = "genesis_emitted_code_addresses_" + suffix.str();
+  expect(emitted.find(array_name + "[] = {UINT32_C(0x00000D00), UINT32_C(0x00000D0A)};") != std::string::npos,
+         "the emitted code address set is the sorted, deduplicated union of the reset entry and the candidate");
+  expect(emitted.find("(uint32_t)(runtime->a[0] + (int32_t)(int16_t)(uint16_t)runtime->d[0] + "
+                       "(int32_t)(int8_t)4)") != std::string::npos,
+         "the Tier-2 runtime EA for (d8,An,Xn) is the generic An + sign_extend(Xn) + d8 formula, the same formula "
+         "the shared runtime EA helper already computes for LEA/PEA's own non-control admission");
+  expect(emitted.find("m68k_emitted_code_address_member(" + array_name) != std::string::npos &&
+             emitted.find("transfer.next_pc = m68k_indirect_ea;") != std::string::npos,
+         "membership success dispatches through the ordinary GENESIS_CONTINUE_AT_PC transfer, never a second "
+         "dispatch mechanism");
+}
+
+// JSR (d8,An,Xn) is shipped: the Tier-2 frontier stop checks membership
+// first, then pushes the 4-byte return continuation frame, then dispatches.
+void t011_jsr_index8_tier2_pushes_return_frame_before_dispatch() {
+  using namespace segarecomp;
+  using namespace t011_index8_tier2_fixture;
+  const auto result = analyze_m68k_frontend(
+      make_program(jsr_image, jsr_base, {tier2_fixture::make_candidate(jsr_candidate_address)}));
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "the JSR (d8,An,Xn) Tier-2 fixture reaches a partial program");
+  if (partial == nullptr) return;
+  bool call_fact = false;
+  for (const auto &set : partial->accepted_prefix.unproven_indirect_control_ea_sets)
+    if (set.source_instruction.source.address.value == jsr_address && set.is_call &&
+        set.control_ea.mode == M68kEaMode::address_index8 && set.control_ea.reg == 0U &&
+        set.control_ea.index_reg == 0U && !set.control_ea.index_is_address && !set.control_ea.index_is_long &&
+        set.control_ea.displacement == 4)
+      call_fact = true;
+  expect(call_fact, "the JSR (d8,An,Xn) site records the weaker unproven Tier-2 fact flagged as a call");
+  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  std::ostringstream suffix;
+  suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jsr_address;
+  const auto function_start =
+      emitted.find("genesis_frontier_stop_" + suffix.str() + "(GenesisRuntime *runtime) {");
+  const auto function_end = emitted.find("\n}\n", function_start);
+  expect(function_start != std::string::npos && function_end != std::string::npos,
+         "the JSR (d8,An,Xn) Tier-2 frontier stop function is present");
+  if (function_start == std::string::npos || function_end == std::string::npos) return;
+  const auto body = emitted.substr(function_start, function_end - function_start);
+  const auto push_pos = body.find("runtime->a[7] - UINT32_C(4)");
+  const auto member_pos = body.find("m68k_emitted_code_address_member");
+  const auto continue_pos = body.find("transfer.kind = GENESIS_CONTINUE_AT_PC;");
+  expect(member_pos != std::string::npos && push_pos != std::string::npos && continue_pos != std::string::npos &&
+             member_pos < push_pos && push_pos < continue_pos,
+         "membership is checked first, then the return frame is pushed, then control continues at PC");
+  expect(body.find("genesis_route_access(runtime, m68k_indirect_ea") == std::string::npos &&
+             body.find("decode") == std::string::npos,
+         "no runtime opcode fetch/decode exists in the JSR (d8,An,Xn) Tier-2 path");
+}
+
+// SEG-021-T011: `m68k_is_supported_computed_control_ea` (the shared multi-
+// root aggregation supersession predicate) recognizes the `(d8,An,Xn)`
+// control EA shape too, exactly like `pc_index8` and pure `(An)`.
+void t011_is_supported_computed_control_ea_recognizes_index8() {
+  using namespace segarecomp;
+  M68kEffectiveAddress ea{};
+  ea.mode = M68kEaMode::address_index8;
+  ea.reg = 0U;
+  ea.index_reg = 0U;
+  ea.displacement = 4;
+  expect(m68k_is_supported_computed_control_ea(ea),
+         "the shared computed-control-EA predicate recognizes the brief address-register-indexed shape");
+}
+
+// SEG-021-T011 / SEG-021-T135 precedent: PEA now admits the brief address-
+// register indexed form `(d8,An,Xn)`, the same non-control widening
+// precedent LEA already established -- PEA computes an address value and
+// pushes it, never dereferencing the addressed location.
+//
+// NOTE on admission route: `M68kIrKind::push_effective_address` is now
+// listed in `m68k_c4_represented_ir_kind` (libs/codegen/c11/src/frontend.cpp)
+// -- PEA's whole C4 block-dispatch route is admitted for EVERY legal
+// control-EA form, through the atomic local-snapshot/deferred-commit
+// technique in emit_m68k_operation_c's push_effective_address case (a
+// routed stack-write failure leaves A7 and every other register/PC exactly
+// as they were before the instruction). The block-cut/prefix-retention test
+// fixtures elsewhere in this file (formerly `c4_prefix`/`c4_pruned_stop`/
+// `c4_multi_blocks`/`c4_same_block`/`c4_backward_block`) switched their
+// still-declined placeholder shape from `PEA (A0)` to `UNLK A0`
+// (`unlink_frame`, still not a represented C4 kind) accordingly. This
+// differential/emission coverage below still exercises the decode + lift +
+// DIRECT single-operation C emission route (`emit_m68k_operation_c`, the
+// same shared lowering body the block dispatcher now also calls) for PEA's
+// two newly widened indexed forms; see
+// `tests/genesis_startup_runtime_c4_test.py` for the C4 block-dispatch-
+// routed coverage (all seven legal PEA control-EA classes, no
+// missing_dispatcher gap row) and the atomicity regression.
+int emit_operation_c4_indexed_pea_source() {
+  using namespace segarecomp;
+  // PEA (0x10,A0,D1.W) at address 0x00000B00 -> 0x4870 0x1010.
+  const std::vector<std::uint8_t> image{0x48U, 0x70U, 0x10U, 0x10U};
+  const auto decoded = decode_m68k_instruction(image, source(0x00000B00U), M68kDecodeProfile::general_startup);
+  const auto *selected = std::get_if<M68kDecodedInstruction>(&decoded);
+  if (selected == nullptr || selected->kind != M68kInstructionKind::pea ||
+      selected->source_ea.mode != M68kEaMode::address_index8)
+    return 1;
+  const auto lifted = lift_m68k_instruction(*selected);
+  GenesisM68kEmissionContext memory{};
+  memory.runtime_routing = true;
+  memory.runtime_object = "runtime";
+  memory.address_registers = "runtime->a";
+  memory.ram_array = "runtime->work_ram";
+  memory.program_counter = "runtime->pc";
+  const auto body = emit_m68k_operation_c(lifted, "runtime->d", "runtime->sr", {}, &memory);
+  const auto again = emit_m68k_operation_c(lifted, "runtime->d", "runtime->sr", {}, &memory);
+  if (body != again) return 1;
+  std::cout << "GenesisControlTransfer m68k_pea_op(GenesisRuntime *runtime) {\n" << body
+            << "  GenesisControlTransfer ok = {0}; ok.kind = GENESIS_CONTINUE_AT_PC; ok.next_pc = runtime->pc; return ok;\n}\n";
+  return 0;
+}
+
+// SEG-021-T011 / SEG-007-T215 precedent: PEA's brief PC-relative indexed
+// form `(d8,PC,Xn)`, mirroring `emit_operation_c4_indexed_pea_source`
+// immediately above; see its own doc comment for the C4-block-dispatch-route
+// admission caveat this shares.
+int emit_operation_c4_pc_indexed_pea_source() {
+  using namespace segarecomp;
+  // PEA (0x10,PC,D1.W) at address 0x00000B00 -> 0x487B 0x1010.
+  const std::vector<std::uint8_t> image{0x48U, 0x7BU, 0x10U, 0x10U};
+  const auto decoded = decode_m68k_instruction(image, source(0x00000B00U), M68kDecodeProfile::general_startup);
+  const auto *selected = std::get_if<M68kDecodedInstruction>(&decoded);
+  if (selected == nullptr || selected->kind != M68kInstructionKind::pea ||
+      selected->source_ea.mode != M68kEaMode::pc_index8)
+    return 1;
+  const auto lifted = lift_m68k_instruction(*selected);
+  GenesisM68kEmissionContext memory{};
+  memory.runtime_routing = true;
+  memory.runtime_object = "runtime";
+  memory.address_registers = "runtime->a";
+  memory.ram_array = "runtime->work_ram";
+  memory.program_counter = "runtime->pc";
+  const auto body = emit_m68k_operation_c(lifted, "runtime->d", "runtime->sr", {}, &memory);
+  const auto again = emit_m68k_operation_c(lifted, "runtime->d", "runtime->sr", {}, &memory);
+  if (body != again) return 1;
+  std::cout << "GenesisControlTransfer m68k_pea_op(GenesisRuntime *runtime) {\n" << body
+            << "  GenesisControlTransfer ok = {0}; ok.kind = GENESIS_CONTINUE_AT_PC; ok.next_pc = runtime->pc; return ok;\n}\n";
+  return 0;
+}
+
+// SEG-021-T011: dedicated CLI-emitting fixture for the pinned-Musashi
+// differential of `JSR (d8,An,Xn)`, sharing `t011_index8_tier2_fixture`'s
+// own JSR image/candidate exactly so the gtest-style fact/structure
+// assertions above and the differential's own generated C stay provably the
+// same fixture.
+int emit_general_startup_runtime_c4_indirect_jsr_index8_source() {
+  using namespace segarecomp;
+  using namespace t011_index8_tier2_fixture;
+  const auto result = analyze_m68k_frontend(
+      make_program(jsr_image, jsr_base, {tier2_fixture::make_candidate(jsr_candidate_address)}));
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 1;
+  // No `main` -- the Musashi differential harness supplies its own, exactly
+  // like the established `indirect-jsr`/`indirect-jmp` fixtures
+  // (`emit_general_startup_runtime_c4_frontier_source`, which also emits
+  // through `emit_m68k_general_startup_runtime_c`, never the standalone-CLI
+  // `emit_m68k_general_startup_bridge_c`).
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  return 0;
+}
+
 // SEG-007-T239 / ADR-0039: proves the extracted
 // `emit_m68k_compiled_address_existence_check` helper is genuinely ONE
 // reusable compiled-address existence query, not two independently
@@ -7202,6 +7452,70 @@ FrontendProgram program_with() {
   return program;
 }
 }  // namespace negate_disp16_aot_fixture
+
+// SEG-021-T011: representative immutable-ROM AOT fixture for PEA. Reuses
+// negate_disp16_aot_fixture's own filler prefix verbatim (unrelated static
+// discovery noise, proving AOT admission needs no CFG reachability from the
+// reset vector) and replaces its tail NEG.B (0,A5) with PEA (0,A5) -- the
+// same disp16(An) control-EA class, at the identical offset/address.
+namespace pea_aot_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000F00U;
+const std::vector<std::uint8_t> image{
+    0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U,
+    0x48U, 0x6DU, 0x00U, 0x00U,  // PEA (0,A5)
+};
+constexpr std::uint32_t pea_disp16 = base + 0x08U;
+constexpr std::uint32_t enumeration_end = base + 0x0CU;
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T011/pea-aot-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base},
+                             {{}, static_cast<std::uint32_t>(base + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace pea_aot_fixture
+
+// SEG-021-T011: PEA is now family-level admitted to immutable-ROM AOT
+// (m68k_operation_is_immutable_rom_aot_safe). Proves the admission end to
+// end: PEA (0,A5) becomes a validated independent AOT root (no CFG edge,
+// call frame, or reachability from the reset vector required), and its
+// generated body retains the atomic local-A7-snapshot/deferred-commit
+// technique -- exactly one routed write, and the A7 commit textually after
+// it -- through the AOT emission path.
+void pea_disp16_aot_admission_and_dispatch_are_bounded() {
+  using namespace segarecomp;
+  using namespace pea_aot_fixture;
+  auto program = program_with();
+  expect(apply_genesis_immutable_rom_aot_range(program, base, enumeration_end),
+         "PEA fixture range enumerates cleanly");
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "PEA fixture remains a genuine partial program");
+  if (partial == nullptr) return;
+  const auto &roots = partial->accepted_prefix.immutable_rom_aot_entries;
+  expect(std::any_of(roots.begin(), roots.end(), [&](const auto &root) {
+           return root.decoded.provenance.source.address.value == pea_disp16;
+         }), "PEA d16(An) becomes a validated independent AOT root");
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  std::ostringstream address_hex;
+  address_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << pea_disp16;
+  const auto body_begin = emitted.find("genesis_aot_" + address_hex.str() + "(GenesisRuntime *runtime) {");
+  const auto body_end = body_begin == std::string::npos ? std::string::npos : emitted.find("\n}\n", body_begin);
+  const auto body = body_begin == std::string::npos || body_end == std::string::npos
+                        ? std::string{} : emitted.substr(body_begin, body_end - body_begin);
+  const auto route_count = [&] {
+    std::size_t count = 0U, at = 0U;
+    while ((at = body.find("genesis_route_access(runtime,", at)) != std::string::npos) { ++count; at += 1U; }
+    return count;
+  }();
+  const auto commit = std::string("runtime->a[7] = m68k_pea_a7;");
+  expect(!body.empty() && route_count == 1U && body.find(commit) != std::string::npos &&
+             body.rfind("genesis_route_access(runtime,") < body.find(commit),
+         "PEA AOT body retains exactly one routed write, committed strictly after it succeeds");
+}
 
 // The seam's own range validation: a range extending past the fixture's
 // single mapped `raw_cartridge_rom` claim is rejected outright (`false`,
@@ -8542,6 +8856,22 @@ void negate_disp16_aot_admission_and_dispatch_are_bounded() {
 int emit_negate_disp16_aot_source() {
   using namespace segarecomp;
   using namespace negate_disp16_aot_fixture;
+  auto program = program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
+// SEG-021-T011: representative generated-C source for the strict-C11
+// compile/execute proof (`tests/genesis_immutable_rom_aot_pea_generated_test.py`).
+int emit_pea_aot_source() {
+  using namespace segarecomp;
+  using namespace pea_aot_fixture;
   auto program = program_with();
   if (!apply_genesis_immutable_rom_aot(program)) return 4;
   const auto result = analyze_m68k_frontend(program);
@@ -18497,6 +18827,22 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
   // of the predecrement CLR fixture above, proving both auto-update
   // directions lower through the deferred-address-register-commit path.
   const bool clr_postinc = forge == "clr-postinc";
+  // SEG-021-T011: PEA is now C4-represented for every legal control-EA form,
+  // routed through the atomic local-A7-snapshot/deferred-commit technique in
+  // emit_m68k_operation_c's push_effective_address case. `pea_routed`
+  // exercises the plain (An) source (PEA (A0)); `pea_a7_alias` exercises the
+  // A7-source alias case (PEA (A7)), which must read the PRE-decrement A7
+  // for its address computation, matching Musashi's own `pea` handler.
+  const bool pea_routed = forge == "pea-routed";
+  const bool pea_a7_alias = forge == "pea-a7-alias";
+  // SEG-021-T011: two further representative legal PEA control-EA classes
+  // through the C4 route -- a foldable absolute-long destination-free
+  // source (PEA computes an address, never a fact-needing memory read, so
+  // this only needs to prove no missing_dispatcher gap and a correctly
+  // formed routed push, not a retained resolver fact) and the brief-format
+  // Dn-indexed source this task widened PEA to admit.
+  const bool pea_absolute = forge == "pea-absolute";
+  const bool pea_indexed = forge == "pea-indexed";
   const bool c4_prefix = forge == "c4-prefix";
   const bool c4_pruned_stop = forge == "c4-pruned-stop";
   const bool c4_multi_blocks = forge == "c4-multi-blocks";
@@ -18533,7 +18879,13 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
   // above, proving the emitter's other legal source_ea mode for
   // shift_rotate_register (immediate, not just data-register) also lowers.
   const bool c4_dim_shift_rotate_register_immediate = forge == "c4-dim-shift-rotate-register-immediate";
-  const bool c4_dim_push_effective_address = forge == "c4-dim-push-effective-address";
+  // SEG-021-T011: PEA is now C4-represented for every legal control-EA form
+  // (routed through the atomic local-snapshot/deferred-commit technique in
+  // emit_m68k_operation_c), so this dimension-uniqueness fixture switched to
+  // another still-undispatched, simple, non-CFG-affecting kind: UNLK
+  // (`unlink_frame`), matching the still-declined placeholder the
+  // block-cut/prefix-retention fixtures above also switched to.
+  const bool c4_dim_unlink_frame = forge == "c4-dim-unlink-frame";
   const bool c4_dim_bit_test_auto_update = forge == "c4-dim-bit-test-auto-update";
   const bool c4_dim_shift_memory_auto_update = forge == "c4-dim-shift-memory-auto-update";
   // SEG-007-T153: ADDQ (`add_quick`) is now C4-represented, reusing the
@@ -18660,15 +19012,42 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
       // snapshot local strictly after the routed write, instead of
       // subtracting from it before.
        ? std::vector<std::uint8_t>{0x42U, 0x58U, 0x4EU, 0x70U}
+       : pea_routed
+      // SEG-021-T011: PEA (A0); RESET.  Proves the C4-routed -(A7) push:
+      // success (A7 decrements exactly once by 4, the pushed long equals
+      // A0's unmodified value, PC advances only after the write succeeds)
+      // and the fail-closed atomicity case (a ROM-window push target leaves
+      // A7, every data/address register, and PC completely unmodified, and
+      // performs no partial write).
+       ? std::vector<std::uint8_t>{0x48U, 0x50U, 0x4EU, 0x70U}
+       : pea_a7_alias
+      // SEG-021-T011: PEA (A7); RESET.  The A7-source alias case: the
+      // pushed value must be the PRE-decrement A7 (matching Musashi's own
+      // `pea` handler, which snapshots its EA before the push), not the
+      // already-decremented value.
+       ? std::vector<std::uint8_t>{0x48U, 0x57U, 0x4EU, 0x70U}
+       : pea_absolute
+      // SEG-021-T011: PEA $00FF0010.L (0x4879 0x00FF0010); RESET. A foldable
+      // absolute-long source -- proves PEA never needs a retained resolver
+      // fact for any absolute/pc-relative source (unlike TST/MOVE/etc.),
+      // since it only computes the address, never reads through it.
+       ? std::vector<std::uint8_t>{0x48U, 0x79U, 0x00U, 0xFFU, 0x00U, 0x10U, 0x4EU, 0x70U}
+       : pea_indexed
+      // SEG-021-T011: PEA (0x10,A0,D1.W) (0x4870 0x1010); RESET. The
+      // brief-format Dn-indexed source this task widened PEA to admit,
+      // proven through the C4 route (direct-emission coverage already
+      // exists in emit_operation_c4_indexed_pea_source above).
+       ? std::vector<std::uint8_t>{0x48U, 0x70U, 0x10U, 0x10U, 0x4EU, 0x70U}
        : c4_prefix
-       // MOVEQ #1,D0; PEA (A0) (a still-declined C4 lowering-gap shape --
+       // MOVEQ #1,D0; UNLK A0 (a still-declined C4 lowering-gap shape --
        // this fixture's block-cut/prefix-retention mechanics only need some still-declined shape; ADDA
-       // aliasing, CLR, SUB/CMP, AND/OR/EOR (SEG-021-T007) and BTST/BCHG/BCLR/BSET (SEG-021-T008)
-       // auto-update are all lowered now);
+       // aliasing, CLR, SUB/CMP, AND/OR/EOR (SEG-021-T007), BTST/BCHG/BCLR/BSET (SEG-021-T008)
+       // auto-update and PEA (SEG-021-T011, every control-EA form, both direct and now C4-routed) are
+       // all lowered now, so this fixture uses UNLK instead -- `unlink_frame` is still declined);
        // BRA.S +2; padding; RESET.  The cut must retain
-       // MOVEQ, omit the declined PEA and the terminal BRA, and make
+       // MOVEQ, omit the declined UNLK and the terminal BRA, and make
        // RESET's block unreachable from the emitted program-control graph.
-        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x48U, 0x50U, 0x60U, 0x02U,
+        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x4EU, 0x58U, 0x60U, 0x02U,
                                      0x00U, 0x00U, 0x4EU, 0x70U}
         : c4_dim_compare
        // SEG-007-T146: CMP.B D1,D0; RESET.  `compare` is now C4-represented:
@@ -18699,10 +19078,11 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
        // direct); RESET.  Proves the emitter's other legal source_ea mode
        // for `shift_rotate_register` (immediate, not a count register).
         ? std::vector<std::uint8_t>{0xE3U, 0x48U, 0x4EU, 0x70U}
-        : c4_dim_push_effective_address
-       // PEA (A0); RESET.  SEG-021-T009 lowers the memory-word shift/rotate forms, so this
-       // dimension fixture now uses another still-unrepresented kind (PEA, missing dispatcher).
-        ? std::vector<std::uint8_t>{0x48U, 0x50U, 0x4EU, 0x70U}
+        : c4_dim_unlink_frame
+       // UNLK A0 (0x4E58); RESET.  SEG-021-T011 makes PEA a represented C4 kind for every legal
+       // control-EA form, so this dimension fixture now uses another still-unrepresented kind
+       // (UNLK, `unlink_frame`, missing dispatcher).
+        ? std::vector<std::uint8_t>{0x4EU, 0x58U, 0x4EU, 0x70U}
         : c4_dim_shift_memory_auto_update
        // SEG-021-T009: ASR.W (A1)+ (0xE0D9; auto-updating memory-word shift, lowered by the deferred
        // address-register commit: no gap row); RESET.
@@ -18791,28 +19171,30 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
         // A second C4 cut is statically retained beyond the first cut's
         // terminal branch.  It has no emitted caller and therefore must not
         // leave an unused static stop function in strict-C11 output.  Uses
-        // the same still-declined PEA (A0) cut as
-        // c4_prefix above (see its comment).
-        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x48U, 0x50U, 0x60U, 0x02U,
-                                     0x00U, 0x00U, 0x48U, 0x50U, 0x4EU, 0x70U}
+        // the same still-declined UNLK A0 cut as
+        // c4_prefix above (see its comment; SEG-021-T011 moved this
+        // placeholder off PEA, now fully C4-represented).
+        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x4EU, 0x58U, 0x60U, 0x02U,
+                                     0x00U, 0x00U, 0x4EU, 0x58U, 0x4EU, 0x70U}
         : c4_multi_blocks
-       // BNE.S selects either of two separately reachable PEA (A0)
+       // BNE.S selects either of two separately reachable UNLK A0
        // cut blocks (see c4_prefix's comment above for why this
-       // fixture no longer uses CLR.B -(A0) or ADDA/AND auto-update). Both cut sinks are terminal and
-       // neither becomes a dispatch arm.
-       ? std::vector<std::uint8_t>{0x66U, 0x04U, 0x48U, 0x50U, 0x60U, 0x02U,
-                                    0x48U, 0x50U, 0x4EU, 0x70U}
+       // fixture no longer uses CLR.B -(A0) or ADDA/AND auto-update, and for
+       // why it now uses UNLK instead of PEA). Both cut sinks are terminal
+       // and neither becomes a dispatch arm.
+       ? std::vector<std::uint8_t>{0x66U, 0x04U, 0x4EU, 0x58U, 0x60U, 0x02U,
+                                    0x4EU, 0x58U, 0x4EU, 0x70U}
        : c4_same_block
        // Two candidates in one block: only the first can own the local cut.
-       ? std::vector<std::uint8_t>{0x48U, 0x50U, 0x48U, 0x50U, 0x60U, 0x02U,
+       ? std::vector<std::uint8_t>{0x4EU, 0x58U, 0x4EU, 0x58U, 0x60U, 0x02U,
                                     0x00U, 0x00U, 0x4EU, 0x70U}
        : c4_backward_block
        // BRA.S +8 (0xB00 -> 0xB0A); dead filler; MOVEQ #1,D0 then the
-       // still-declined PEA (A0) cut at 0xB04/0xB06 -- reached only via
+       // still-declined UNLK A0 cut at 0xB04/0xB06 -- reached only via
        // 0xB0A's own BRA.S -8 backward edge, discovered strictly after the
        // higher-address block.
        ? std::vector<std::uint8_t>{0x60U, 0x08U, 0x00U, 0x00U, 0x70U, 0x01U,
-                                    0x48U, 0x50U, 0x4EU, 0x70U, 0x60U, 0xF8U}
+                                    0x4EU, 0x58U, 0x4EU, 0x70U, 0x60U, 0xF8U}
       : routed_write
       ? std::vector<std::uint8_t>{0x42U, 0x90U, 0x60U, 0x06U, 0x00U, 0x00U,
                                   0x00U, 0x00U, 0x00U, 0x00U, 0x4EU, 0x70U}
@@ -18978,10 +19360,11 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
     if (!value.frontiers.front().access) return 1;
     value.frontiers.front().access->address.space = static_cast<TargetAddressSpace>(99);
   }
-    else if (!forge.empty() && !rom_fold && !routed_write && !ram_route && !predecrement && !clr_postinc && !c4_prefix && !c4_pruned_stop &&
+    else if (!forge.empty() && !rom_fold && !routed_write && !ram_route && !predecrement && !clr_postinc &&
+              !pea_routed && !pea_a7_alias && !pea_absolute && !pea_indexed && !c4_prefix && !c4_pruned_stop &&
               !c4_multi_blocks && !c4_same_block && !c4_backward_block && !c4_dim_compare &&
               !c4_dim_compare_immediate && !c4_dim_compare_immediate_absolute && !c4_dim_shift_rotate_register &&
-              !c4_dim_shift_rotate_register_immediate && !c4_dim_push_effective_address &&
+              !c4_dim_shift_rotate_register_immediate && !c4_dim_unlink_frame &&
               !c4_dim_bit_test_auto_update && !c4_dim_shift_memory_auto_update && !c4_dim_add_quick && !c4_dim_add_quick_address &&
               !c4_dim_add_quick_indirect && !c4_dim_add_quick_disp && !c4_dim_add_quick_postinc &&
               !c4_dim_add_quick_predec && !c4_dim_add_quick_absolute &&
@@ -26863,6 +27246,8 @@ int main(int argc, char **argv) {
     return emit_general_arithmetic_memory_operand_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-negate-disp16-aot")
     return emit_negate_disp16_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-pea-aot")
+    return emit_pea_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-straight-line-block")
     return emit_general_startup_runtime_c4_straight_line_block_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-partition-boundary-dispatch")
@@ -26917,6 +27302,14 @@ int main(int argc, char **argv) {
     return emit_general_startup_runtime_c4_frontier_source("predecrement");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-clr-postinc")
     return emit_general_startup_runtime_c4_frontier_source("clr-postinc");
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-pea-routed")
+    return emit_general_startup_runtime_c4_frontier_source("pea-routed");
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-pea-a7-alias")
+    return emit_general_startup_runtime_c4_frontier_source("pea-a7-alias");
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-pea-absolute")
+    return emit_general_startup_runtime_c4_frontier_source("pea-absolute");
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-pea-indexed")
+    return emit_general_startup_runtime_c4_frontier_source("pea-indexed");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-prefix")
     return emit_general_startup_runtime_c4_frontier_source("c4-prefix");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-pruned-stop")
@@ -26937,8 +27330,8 @@ int main(int argc, char **argv) {
     return emit_general_startup_runtime_c4_frontier_source("c4-dim-shift-rotate-register");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-shift-rotate-register-immediate")
     return emit_general_startup_runtime_c4_frontier_source("c4-dim-shift-rotate-register-immediate");
-  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-push-effective-address")
-    return emit_general_startup_runtime_c4_frontier_source("c4-dim-push-effective-address");
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-unlink-frame")
+    return emit_general_startup_runtime_c4_frontier_source("c4-dim-unlink-frame");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-shift-memory-auto-update")
     return emit_general_startup_runtime_c4_frontier_source("c4-dim-shift-memory-auto-update");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-bit-test-auto-update")
@@ -27113,6 +27506,12 @@ int main(int argc, char **argv) {
     return emit_general_startup_runtime_c4_pc_indexed_lea_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-pc-indexed-move")
     return emit_general_startup_runtime_c4_pc_indexed_move_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-indexed-pea")
+    return emit_operation_c4_indexed_pea_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-pc-indexed-pea")
+    return emit_operation_c4_pc_indexed_pea_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-indirect-jsr-index8")
+    return emit_general_startup_runtime_c4_indirect_jsr_index8_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-indexed-arithmetic")
     return emit_operation_c4_indexed_arithmetic_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-pc-indexed-logical")
@@ -27389,6 +27788,15 @@ int main(int argc, char **argv) {
   t179_pure_an_indirect_tier2_target_outside_emitted_set_fails_closed();
   t179_pure_an_indirect_a7_exclusion_stays_fail_closed_with_no_tier2_lowering();
   t179_jsr_an_tier2_pushes_return_frame_before_dispatch();
+  t011_jmp_index8_tier2_computed_target_inside_emitted_set_dispatches();
+  t011_jsr_index8_tier2_pushes_return_frame_before_dispatch();
+  t011_is_supported_computed_control_ea_recognizes_index8();
+  expect(emit_operation_c4_indexed_pea_source() == 0,
+         "PEA (0x10,A0,D1.W) decodes/lifts/emits deterministically through the shared address-index8 runtime EA "
+         "path (direct single-operation emission)");
+  expect(emit_operation_c4_pc_indexed_pea_source() == 0,
+         "PEA (0x10,PC,D1.W) decodes/lifts/emits deterministically through the shared pc-index8 runtime EA path "
+         "(direct single-operation emission)");
   t239_jmp_and_jsr_to_shared_destination_use_byte_identical_existence_check();
   t208_tier2_call_shaped_continuation_joins_whole_program_return_target_set();
   t208_tier2_call_shaped_continuation_excluded_when_not_independently_retained();
@@ -27412,6 +27820,7 @@ int main(int argc, char **argv) {
   immutable_rom_aot_return_from_subroutine_and_bit_clear_are_admitted_and_dispatch();
   general_arithmetic_memory_operand_admissions_are_admitted_and_dispatch();
   negate_disp16_aot_admission_and_dispatch_are_bounded();
+  pea_disp16_aot_admission_and_dispatch_are_bounded();
   t250_final_compiled_membership_suppresses_stale_frontier_interception();
   ordinary_interior_owner_precedes_consistent_aot_and_rejects_conflict();
   t250_genuine_typed_frontier_without_compiled_membership_still_intercepts();

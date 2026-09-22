@@ -1092,7 +1092,21 @@ std::optional<std::string> build_genesis_frontier_stop_function(
           ea.mode == M68kEaMode::pc_index8 && !ea.index_is_address && !ea.index_is_long;
       const bool is_reg_indirect = ea.mode == M68kEaMode::address_indirect && ea.displacement == 0 &&
                                    ea.extension_words == 0U && ea.reg < 7U;
-      if (!is_pc_index8 && !is_reg_indirect) return std::nullopt;
+      // SEG-021-T011 / ADR-0024/ADR-0025 Tier-2 generalization: the brief
+      // address-register-indexed control EA (`JMP (d8,An,Xn)` /
+      // `JSR (d8,An,Xn)`), the sibling shape `process_indirect_control_index8`
+      // (static_discovery.cpp) always records a Tier-2 fact for -- this
+      // project deliberately never attempts a Tier-1 finite-value proof for
+      // this combined base+index shape (see that function's own doc
+      // comment). Unlike the two existing shapes above, the index register
+      // bank/size here is not restricted to word-size Dn: the runtime EA
+      // expression below is built generically (An/Dn index, word/long size),
+      // mirroring `m68k_emit_runtime_ea_address`'s own `address_index8`
+      // formula (libs/codegen/c11/src/m68k.cpp) exactly, because this is a
+      // plain runtime register read/compare, not a static finite-value
+      // proof with a bounded-domain restriction to honor.
+      const bool is_index8 = ea.mode == M68kEaMode::address_index8;
+      if (!is_pc_index8 && !is_reg_indirect && !is_index8) return std::nullopt;
       std::string ea_expr;
       if (is_pc_index8) {
         const auto base = static_cast<std::uint32_t>(static_cast<std::int64_t>(ea.pc_base_address) +
@@ -1102,6 +1116,18 @@ std::optional<std::string> build_genesis_frontier_stop_function(
         std::ostringstream ea_build;
         ea_build << "UINT32_C(" << hex(base, 8) << ") + (uint32_t)(int32_t)(int16_t)(uint16_t)("
                  << index_expr << ")";
+        ea_expr = ea_build.str();
+      } else if (is_index8) {
+        const auto base_expr = std::string("runtime->a[") + std::to_string(static_cast<unsigned>(ea.reg)) + "]";
+        const auto index_bank = ea.index_is_address ? std::string("runtime->a[") : std::string("runtime->d[");
+        const auto index_expr = index_bank + std::to_string(static_cast<unsigned>(ea.index_reg)) + "]";
+        std::ostringstream ea_build;
+        ea_build << "(uint32_t)(" << base_expr << " + ";
+        if (ea.index_is_long)
+          ea_build << "(int32_t)" << index_expr;
+        else
+          ea_build << "(int32_t)(int16_t)(uint16_t)" << index_expr;
+        ea_build << " + (int32_t)(int8_t)" << static_cast<int>(ea.displacement) << ")";
         ea_expr = ea_build.str();
       } else {
         ea_expr = std::string("runtime->a[") + std::to_string(static_cast<unsigned>(ea.reg)) + "]";
@@ -1786,6 +1812,17 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   case M68kIrKind::subtract_quick_long_d0:
   case M68kIrKind::subtract_quick:
   case M68kIrKind::load_effective_address:
+  // SEG-021-T011: PEA is a represented C4 kind (no missing_dispatcher gap).
+  // Like LEA immediately above, its source_ea is address-computation only --
+  // it never reads memory content, so `classify_m68k_c4_gap_shapes` needs no
+  // per-kind branch for it (same "represented, no further per-kind gap
+  // handling" treatment as LEA: no absolute/pc-relative EA ever needs a
+  // retained-fact check because no memory read occurs). The routed -(A7)
+  // push itself is lowered through the atomic local-snapshot/deferred-commit
+  // technique in emit_m68k_operation_c's push_effective_address case (see
+  // that case's own comment), so a routed write failure leaves A7 and every
+  // other register/PC exactly as they were before the instruction.
+  case M68kIrKind::push_effective_address:
   case M68kIrKind::general_branch:
   case M68kIrKind::write_user_stack_pointer:
   case M68kIrKind::write_clr:
@@ -4640,6 +4677,25 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         if (destination == nullptr && m68k_is_statically_foldable_control_ea(found->second->destination_ea))
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
+        auto routed = memory;
+        routed.runtime_routing = true;
+        routed.runtime_object = "runtime";
+        out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
+        break;
+      }
+      // SEG-021-T011: PEA computes its `source_ea`'s address only (never
+      // reading its contents, like LEA above), so -- unlike write_clr/bit_
+      // change/etc. immediately above -- it never has a foldable-absolute
+      // EA that could need a retained resolver fact (classify_m68k_c4_gap_
+      // shapes emits no check_fact row for push_effective_address, the same
+      // "represented, no further per-kind gap handling" treatment as LEA).
+      // Its push target is architecturally fixed to -(A7), never a decoded
+      // destination_ea, so no fact lookup applies to it either. It still
+      // needs the routed context (unlike LEA, which never touches memory)
+      // because its -(A7) push is a genuine RAM write, lowered through the
+      // atomic local-snapshot/deferred-commit technique in
+      // emit_m68k_operation_c's push_effective_address case.
+      case M68kIrKind::push_effective_address: {
         auto routed = memory;
         routed.runtime_routing = true;
         routed.runtime_object = "runtime";

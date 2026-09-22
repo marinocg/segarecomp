@@ -326,6 +326,9 @@ add_test(NAME genesis_immutable_rom_aot_general_arithmetic_memory_operand_genera
 add_test(NAME genesis_immutable_rom_aot_negate_disp16_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_negate_disp16_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME genesis_immutable_rom_aot_pea_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_pea_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME m68k_indirect_control_musashi_differential_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_indirect_control_musashi_differential_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER})
@@ -337,6 +340,15 @@ add_test(NAME m68k_pc_indexed_move_musashi_differential_test COMMAND ${Python3_E
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER})
 add_test(NAME m68k_pc_indexed_lea_musashi_differential_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_pc_indexed_lea_musashi_differential_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER})
+add_test(NAME m68k_index8_pea_musashi_differential_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_index8_pea_musashi_differential_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER})
+add_test(NAME m68k_pc_index8_pea_musashi_differential_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_pc_index8_pea_musashi_differential_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER})
+add_test(NAME m68k_index8_indirect_jsr_musashi_differential_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_index8_indirect_jsr_musashi_differential_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER})
 add_test(NAME m68k_immutable_offset_table_musashi_differential_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_immutable_offset_table_musashi_differential_test.py
