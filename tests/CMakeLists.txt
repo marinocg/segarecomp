@@ -225,6 +225,12 @@ add_test(NAME genesis_vblank_irq6_generated_test COMMAND ${Python3_EXECUTABLE}
 add_test(NAME genesis_divide_by_zero_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_divide_by_zero_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-021-T010 correction: generated-native execution regressions for the routed auto-updating
+# MULS/MULU/DIVS/DIVU source (timing-source capture, DIV auto-update exception ordering) and the
+# widened DIVS/DIVU (d8,PC,Xn) source.
+add_test(NAME m68k_muldiv_auto_update_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_muldiv_auto_update_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_executable(cpu_m68k_static_discovery_tests cpu_m68k_static_discovery_test.cpp)
 target_link_libraries(cpu_m68k_static_discovery_tests PRIVATE segarecomp::cpu_m68k)
 segarecomp_enable_warnings(cpu_m68k_static_discovery_tests)

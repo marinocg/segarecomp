@@ -664,6 +664,16 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
   if (ea.mode == M68kEaMode::address_predec) body << local << " -= UINT32_C(" << step << ");\n";
   std::string source_expr;
   m68k_emit_routed_read(body, local, operation.size, memory, source_expr, temp_ordinal);
+  // A failed routed access returns from inside m68k_emit_routed_read above, before this point is
+  // ever reached -- so source_expr is only used here once the read has genuinely succeeded, and no
+  // architectural An mutation (predecrement already applied above notwithstanding -- it mutates only
+  // the LOCAL snapshot, never the live register, until the unconditional commit below) has happened
+  // yet either. Capture the same dynamic MUL timing source the ordinary (non-auto-update) MULS.W/
+  // MULU.W body captures from its own materialized source read, so the caller's dynamic MUL
+  // retirement-cycle helper (selected by `m68k_retirement_cycle_expression` in frontend.cpp)
+  // retires against the actual fetched word, never the AOT/C4 block's zero-initialized default.
+  // MUL-only: DIVS/DIVU carry no such dynamic timing hook.
+  if (!memory.timing_mul_source.empty()) body << memory.timing_mul_source << " = (uint16_t)(" << source_expr << "); ";
   if (ea.mode == M68kEaMode::address_postinc) body << local << " += UINT32_C(" << step << ");\n";
   body << an << " = " << local << ";\n";
   if (operation.kind == M68kIrKind::multiply_signed_word || operation.kind == M68kIrKind::multiply_unsigned_word) {
