@@ -11,12 +11,12 @@ addressed location -- the same non-control widening precedent
 `m68k_indexed_lea_musashi_differential_test.py` (SEG-007-T135) already
 validates for LEA. This differential exercises the DIRECT single-operation
 C emission (`emit_m68k_operation_c`, via `--emit-operation-c4-indexed-pea`)
-rather than the full C4 block-dispatch pipeline: `push_effective_address` is
-not yet listed in `m68k_c4_represented_ir_kind`
-(libs/codegen/c11/src/frontend.cpp), a PRE-EXISTING gap that declines PEA's
-whole C4 block-dispatch route for every control-EA form (not something this
-task's control-EA widening introduces); see that CLI flag's own C++ helper
-doc comment (tests/m68k_pipeline_test.cpp) for the full explanation.
+for this form's address computation. SEG-021-T011 separately admits
+`push_effective_address` into `m68k_c4_represented_ir_kind`
+(libs/codegen/c11/src/frontend.cpp) for every control-EA form, routed
+through the C4 block-dispatch pipeline; see
+tests/genesis_startup_runtime_c4_test.py for that block-dispatch-routed
+coverage and its own atomicity regression.
 """
 import os
 import pathlib

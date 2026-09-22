@@ -319,9 +319,9 @@
    },
    "route_immutable_rom_aot": {
     "applicable_forms": 357,
-    "passing_forms": 313,
-    "passing_words": 12006,
-    "percent_forms": "87.68"
+    "passing_forms": 320,
+    "passing_words": 12034,
+    "percent_forms": "89.64"
    },
    "route_runtime_routed_admitted": {
     "applicable_forms": 357,
@@ -2144,13 +2144,13 @@
   "ori.imm_ea.w.imm.postinc": "1111101111111111110",
   "ori.imm_ea.w.imm.predec": "1111101111111111110",
   "ori.imm_sr.w.imm.sr": "00000000000000000-0",
-  "pea.ea.l.absl.none": "1110-01111111010-00",
-  "pea.ea.l.absw.none": "1110-01111111011-10",
-  "pea.ea.l.disp.none": "1110-01111111010-00",
-  "pea.ea.l.ind.none": "1110-01111111010-00",
-  "pea.ea.l.index.none": "1110-01111111010-00",
-  "pea.ea.l.pcdisp.none": "1110-01111111010-00",
-  "pea.ea.l.pcindex.none": "1110-01111111010-00",
+  "pea.ea.l.absl.none": "1110-01111111110-00",
+  "pea.ea.l.absw.none": "1110-01111111111-10",
+  "pea.ea.l.disp.none": "1110-01111111110-00",
+  "pea.ea.l.ind.none": "1110-01111111110-00",
+  "pea.ea.l.index.none": "1110-01111111110-00",
+  "pea.ea.l.pcdisp.none": "1110-01111111110-00",
+  "pea.ea.l.pcindex.none": "1110-01111111110-00",
   "reset.none.none.none.none": "0000-00000000000--0",
   "rol.dn_dn.b.dn.dn": "11111-01111111111-0",
   "rol.dn_dn.l.dn.dn": "11111-01111111111-0",
@@ -2621,9 +2621,9 @@
   },
   "route_immutable_rom_aot": {
    "applicable_forms": 1526,
-   "passing_forms": 1195,
-   "passing_words": 41319,
-   "percent_forms": "78.31"
+   "passing_forms": 1202,
+   "passing_words": 41347,
+   "percent_forms": "78.77"
   },
   "route_runtime_routed_admitted": {
    "applicable_forms": 1526,

@@ -25,7 +25,7 @@ Denominator: 1526 legal forms, 45816 legal primary words. A form passes a stage 
 | route_runtime_routed_admitted | 1526 | 1265 | 82.90% | 42404 |
 | route_runtime_routed_compiles | 1526 | 1265 | 82.90% | 42404 |
 | route_runtime_routed_executes | 1526 | 866 | 56.75% | 40101 |
-| route_immutable_rom_aot | 1526 | 1195 | 78.31% | 41319 |
+| route_immutable_rom_aot | 1526 | 1202 | 78.77% | 41347 |
 | route_static_discovery | 1526 | 1245 | 81.59% | 38320 |
 
 `end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1241 of 1526 forms, 81.32%. It is a structural bar, not a correctness claim.

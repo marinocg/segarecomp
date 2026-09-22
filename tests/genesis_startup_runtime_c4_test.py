@@ -459,6 +459,82 @@ int main(void) {
 }
 '''
 
+# SEG-021-T011: full compile+link+execute proof of PEA (A0)'s own C4-routed
+# -(A7) push -- the atomic local-A7-snapshot/deferred-commit technique in
+# emit_m68k_operation_c's push_effective_address case. Success: A7 decrements
+# exactly once by 4, the pushed long equals A0's own (unmodified) value, and
+# PC advances only after the write succeeds. Failure-ordering: a ROM-window
+# push target makes the routed LONG write fail before the deferred A7 commit
+# is ever reached, so A7, every data/address register, and PC all remain
+# completely unmodified, and no byte of work_ram is touched.
+PEA_ROUTED_HARNESS = r'''
+#include <assert.h>
+#include <stdint.h>
+#include <string.h>
+#include "runtime.h"
+#include "generated.c"
+int main(void) {
+  GenesisRuntime runtime = {0};
+  GenesisControlTransfer transfer;
+  /* Success: PEA (A0), A0 pointing into work RAM, A7 also in work RAM. */
+  runtime.pc = UINT32_C(0x00000B00);
+  runtime.a[0] = UINT32_C(0x00FF1234);
+  runtime.a[7] = UINT32_C(0x00FF0100);
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_STOP && transfer.stop.stop_class == GENESIS_STOP_UNSUPPORTED_CPU_FORM);
+  assert(runtime.pc == UINT32_C(0x00000B02));
+  assert(runtime.a[7] == UINT32_C(0x00FF00FC));  /* decremented exactly once, by 4 */
+  assert(runtime.a[0] == UINT32_C(0x00FF1234));  /* PEA never mutates its source register */
+  assert(runtime.work_ram[0x00FC] == 0x00U && runtime.work_ram[0x00FD] == 0xFFU &&
+         runtime.work_ram[0x00FE] == 0x12U && runtime.work_ram[0x00FF] == 0x34U);
+
+  /* Failure-ordering: A7-4 lands in the ROM window (< 0x00400000), so the
+     routed LONG write fails (ROM writes are unconditionally prohibited)
+     before the deferred A7 commit is ever reached. A7, A0, and PC must all
+     remain completely unmodified, and no byte of work_ram is touched. */
+  memset(&runtime, 0, sizeof(runtime));
+  runtime.pc = UINT32_C(0x00000B00);
+  runtime.a[0] = UINT32_C(0x00FF2000);
+  runtime.a[7] = UINT32_C(0x00000100);
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_STOP && transfer.stop.stop_class != GENESIS_STOP_UNSUPPORTED_CPU_FORM);
+  assert(runtime.pc == UINT32_C(0x00000B00));
+  assert(runtime.a[7] == UINT32_C(0x00000100));
+  assert(runtime.a[0] == UINT32_C(0x00FF2000));
+  {
+    unsigned i;
+    for (i = 0U; i < sizeof(runtime.work_ram); ++i) assert(runtime.work_ram[i] == 0U);
+  }
+  return 0;
+}
+'''
+
+# SEG-021-T011: full compile+link+execute proof of PEA (A7)'s A7-source
+# alias case -- the pushed value must be the PRE-decrement A7, matching
+# Musashi's own `pea` handler (which computes its EA into a snapshot local
+# before calling m68ki_push_32), never the already-decremented value.
+PEA_A7_ALIAS_HARNESS = r'''
+#include <assert.h>
+#include <stdint.h>
+#include "runtime.h"
+#include "generated.c"
+int main(void) {
+  GenesisRuntime runtime = {0};
+  GenesisControlTransfer transfer;
+  runtime.pc = UINT32_C(0x00000B00);
+  runtime.a[7] = UINT32_C(0x00FF0100);
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_STOP && transfer.stop.stop_class == GENESIS_STOP_UNSUPPORTED_CPU_FORM);
+  assert(runtime.pc == UINT32_C(0x00000B02));
+  assert(runtime.a[7] == UINT32_C(0x00FF00FC));  /* decremented exactly once, by 4 */
+  /* The pushed long is the PRE-decrement A7 (0x00FF0100), not the
+     already-decremented 0x00FF00FC. */
+  assert(runtime.work_ram[0x00FC] == 0x00U && runtime.work_ram[0x00FD] == 0xFFU &&
+         runtime.work_ram[0x00FE] == 0x01U && runtime.work_ram[0x00FF] == 0x00U);
+  return 0;
+}
+'''
+
 # SEG-007-T070: full compile+link+execute proof of write_move's own C4
 # predecrement/postincrement deferred-address-commit lowering (see
 # emit_general_startup_runtime_c4_move_autoupdate_source for the exact
@@ -1188,6 +1264,60 @@ def main():
   assert "GENESIS_ACCESS_WRITE" in clr_postinc.stdout
   assert clr_postinc.stdout.index("runtime->sr = (uint16_t)((runtime->sr & UINT16_C(0xFFF0)) | UINT16_C(4));") > \
       clr_postinc.stdout.index(postinc_commit)
+  # SEG-021-T011: PEA (A0); RESET -- PEA is now a C4-represented kind for
+  # every legal control-EA form. The -(A7) push is lowered through the
+  # atomic local-A7-snapshot/deferred-commit technique (never the shared
+  # m68k_emit_ea_write address_predec branch, which mutates the live A7
+  # register in its own prelude before a routed write's own fail-closed
+  # guard has run): A7 is snapshotted into a dedicated local, decremented on
+  # that local only, routed through genesis_route_access, and committed back
+  # to the live register file in exactly one statement strictly after the
+  # routed write succeeds.
+  pea_routed_first = subprocess.run([executable, "--emit-general-startup-runtime-c4-pea-routed"], text=True, capture_output=True)
+  pea_routed_second = subprocess.run([executable, "--emit-general-startup-runtime-c4-pea-routed"], text=True, capture_output=True)
+  pea_routed = pea_routed_first
+  assert pea_routed_first.returncode == pea_routed_second.returncode == 0
+  assert pea_routed_first.stdout == pea_routed_second.stdout  # deterministic two-run output
+  assert not pea_routed.stdout.startswith("/* translation rejected:")
+  assert "GENESIS_STOP_C4_LOWERING_GAP" not in pea_routed.stdout
+  assert "genesis_c4_lowering_stop_" not in pea_routed.stdout
+  assert "const uint32_t pea_address = runtime->a[0];" in pea_routed.stdout
+  assert "uint32_t m68k_pea_a7 = runtime->a[7];" in pea_routed.stdout
+  assert "m68k_pea_a7 -= UINT32_C(4);" in pea_routed.stdout
+  pea_commit = "runtime->a[7] = m68k_pea_a7;"
+  assert pea_routed.stdout.count(pea_commit) == 1  # exactly one deferred commit
+  # Commit strictly after the routed write (adversarial: prove no early
+  # writeback is reachable before the routed write can GENESIS_STOP).
+  assert pea_routed.stdout.index(pea_commit) > pea_routed.stdout.rindex("genesis_route_access(runtime, ")
+  assert pea_routed.stdout.index(pea_commit) > pea_routed.stdout.rindex("return transfer;", 0, pea_routed.stdout.index(pea_commit))
+  assert "GENESIS_ACCESS_WRITE" in pea_routed.stdout
+  # PC advances only after the commit above.
+  assert pea_routed.stdout.index("runtime->pc += UINT32_C(2);") > pea_routed.stdout.index(pea_commit)
+  # SEG-021-T011: PEA (A7); RESET -- the A7-source alias case. `pea_address`
+  # must read the PRE-decrement A7 (matching Musashi's own `pea` handler,
+  # which snapshots its EA before m68ki_push_32), never the already-
+  # decremented local.
+  pea_a7_alias = subprocess.run([executable, "--emit-general-startup-runtime-c4-pea-a7-alias"], text=True, capture_output=True)
+  assert pea_a7_alias.returncode == 0 and not pea_a7_alias.stdout.startswith("/* translation rejected:")
+  assert "const uint32_t pea_address = runtime->a[7];" in pea_a7_alias.stdout
+  assert pea_a7_alias.stdout.index("const uint32_t pea_address = runtime->a[7];") < \
+      pea_a7_alias.stdout.index("uint32_t m68k_pea_a7 = runtime->a[7];")
+  # SEG-021-T011: two further representative legal PEA control-EA classes
+  # through the C4 route -- neither needs a retained resolver fact (PEA only
+  # ever computes an address, never reads through one), so both must reach
+  # genesis_route_access with no missing_dispatcher/missing_fact gap.
+  pea_absolute = subprocess.run([executable, "--emit-general-startup-runtime-c4-pea-absolute"], text=True, capture_output=True)
+  assert pea_absolute.returncode == 0 and not pea_absolute.stdout.startswith("/* translation rejected:")
+  assert "GENESIS_STOP_C4_LOWERING_GAP" not in pea_absolute.stdout
+  assert "genesis_c4_lowering_stop_" not in pea_absolute.stdout
+  assert "const uint32_t pea_address = UINT32_C(0x00FF0010);" in pea_absolute.stdout
+  assert "GENESIS_ACCESS_WRITE" in pea_absolute.stdout
+  pea_indexed = subprocess.run([executable, "--emit-general-startup-runtime-c4-pea-indexed"], text=True, capture_output=True)
+  assert pea_indexed.returncode == 0 and not pea_indexed.stdout.startswith("/* translation rejected:")
+  assert "GENESIS_STOP_C4_LOWERING_GAP" not in pea_indexed.stdout
+  assert "genesis_c4_lowering_stop_" not in pea_indexed.stdout
+  assert "runtime->a[0] + (int32_t)(int16_t)(uint16_t)runtime->d[1] + (int32_t)(int8_t)16" in pea_indexed.stdout
+  assert "GENESIS_ACCESS_WRITE" in pea_indexed.stdout
   # ADR-0015 Q1-Q5: a local cut retains the prefix before it, removes the
   # original terminal transfer and its target-only block, and never adds a
   # C4 sink dispatch arm.  Two independently reachable cut blocks remain
@@ -1255,7 +1385,11 @@ def main():
   c4_dim_shapes = {}
   c4_dim_outputs = {}
   for flag, forge in (
-      ("c4-dim-push-effective-address", "push_effective_address"),):
+      # SEG-021-T011: PEA is now a represented C4 kind for every legal
+      # control-EA form; this dimension-uniqueness fixture switched to UNLK
+      # (`unlink_frame`), matching the still-declined placeholder the
+      # block-cut/prefix-retention fixtures also switched to.
+      ("c4-dim-unlink-frame", "unlink_frame"),):
     run_first = subprocess.run([executable, f"--emit-general-startup-runtime-{flag}"], text=True, capture_output=True)
     run_second = subprocess.run([executable, f"--emit-general-startup-runtime-{flag}"], text=True, capture_output=True)
     assert run_first.returncode == run_second.returncode == 0, forge
@@ -1746,7 +1880,7 @@ def main():
   # corrupting the bare identifier into a doubled prefix -- must never appear.
   assert "runtime->runtime->pc" not in suba_source_fold_first.stdout
   c4_dim_outputs["subtract_address_source_fold"] = suba_source_fold_first.stdout
-  assert c4_dim_shapes["push_effective_address"] == "PUSH_EFFECTIVE_ADDRESS_MISSING_DISPATCHER"
+  assert c4_dim_shapes["unlink_frame"] == "UNLINK_FRAME_MISSING_DISPATCHER"
   # SEG-007-T145: ordinary add-family auto-update operands are now lowered by
   # the deferred-address-commit path; the sole remaining add-family lowering
   # gap is the ADDA same-register aliasing decline, which serialises to the
@@ -2060,7 +2194,7 @@ def main():
                           ("subtract-dest-fold", c4_dim_outputs["subtract_dest_fold"]),
                           ("subtract-subi-dest-fold", c4_dim_outputs["subtract_subi_dest_fold"]),
                           ("subtract-address-source-fold", c4_dim_outputs["subtract_address_source_fold"]),
-                          ("dim-push-effective-address", c4_dim_outputs["push_effective_address"]),
+                          ("dim-unlink-frame", c4_dim_outputs["unlink_frame"]),
                           ("dim-bit-test-auto-update", c4_dim_outputs["bit_test_auto_update"]),
                           ("dim-logical-register", c4_dim_outputs["logical_register"]),
                           ("dim-logical-predecrement", c4_dim_outputs["logical_predecrement"]),
@@ -2199,6 +2333,22 @@ def main():
     build = subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-I", str(pathlib.Path(root) / "platforms/genesis/runtime"), "-I", str(path), str(path / "harness.c"), str(pathlib.Path(root) / "platforms/genesis/runtime/runtime.c"), "-o", str(path / "clr-postinc")], text=True, capture_output=True)
     assert build.returncode == 0, build.stderr
     ran = subprocess.run([str(path / "clr-postinc")], text=True, capture_output=True)
+    assert ran.returncode == 0, ran.stderr
+    # SEG-021-T011: full compile+link+execute proof of PEA (A0)'s own
+    # C4-routed -(A7) push atomicity (success + fail-closed failure-ordering).
+    (path / "generated.c").write_text(pea_routed.stdout)
+    (path / "harness.c").write_text(PEA_ROUTED_HARNESS)
+    build = subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-I", str(pathlib.Path(root) / "platforms/genesis/runtime"), "-I", str(path), str(path / "harness.c"), str(pathlib.Path(root) / "platforms/genesis/runtime/runtime.c"), "-o", str(path / "pea-routed")], text=True, capture_output=True)
+    assert build.returncode == 0, build.stderr
+    ran = subprocess.run([str(path / "pea-routed")], text=True, capture_output=True)
+    assert ran.returncode == 0, ran.stderr
+    # SEG-021-T011: full compile+link+execute proof of PEA (A7)'s A7-source
+    # alias ordering (pushed value is the PRE-decrement A7).
+    (path / "generated.c").write_text(pea_a7_alias.stdout)
+    (path / "harness.c").write_text(PEA_A7_ALIAS_HARNESS)
+    build = subprocess.run([compiler, "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-I", str(pathlib.Path(root) / "platforms/genesis/runtime"), "-I", str(path), str(path / "harness.c"), str(pathlib.Path(root) / "platforms/genesis/runtime/runtime.c"), "-o", str(path / "pea-a7-alias")], text=True, capture_output=True)
+    assert build.returncode == 0, build.stderr
+    ran = subprocess.run([str(path / "pea-a7-alias")], text=True, capture_output=True)
     assert ran.returncode == 0, ran.stderr
     # SEG-007-T070: full compile+link+execute proof that MOVE.L D0,-(A0)'s
     # destination-mutating lowering commits A0's decrement exactly once, at
