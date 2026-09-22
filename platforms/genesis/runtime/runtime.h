@@ -1144,10 +1144,12 @@ GenesisControlTransfer genesis_runtime_retire_m68k_instruction(GenesisRuntime *r
                                                                 uint32_t m68k_cycles,
                                                                 uint32_t next_pc);
 
-/* Retires the completed instruction and returns `pending_stop` after timing,
- * device, and checkpoint accounting. Because no represented instruction may
- * consume `next_pc`, asynchronous IRQ admission is deferred and remains
- * pending rather than constructing an exception frame around that PC. */
+/* Retires the completed instruction and returns the required, non-NULL
+ * GENESIS_STOP `pending_stop` after timing, device, and checkpoint accounting.
+ * Invalid pending-stop input fails before any runtime mutation. Because no
+ * represented instruction may consume `next_pc`, asynchronous IRQ admission
+ * is deferred and remains pending rather than constructing an exception frame
+ * around that PC. */
 GenesisControlTransfer genesis_runtime_retire_m68k_instruction_before_stop(
     GenesisRuntime *runtime, uint32_t m68k_cycles, uint32_t next_pc,
     const GenesisControlTransfer *pending_stop);

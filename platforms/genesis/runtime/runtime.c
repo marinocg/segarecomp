@@ -2312,6 +2312,8 @@ GenesisControlTransfer genesis_runtime_retire_m68k_instruction(GenesisRuntime *r
 GenesisControlTransfer genesis_runtime_retire_m68k_instruction_before_stop(
     GenesisRuntime *runtime, uint32_t m68k_cycles, uint32_t next_pc,
     const GenesisControlTransfer *pending_stop) {
+  if (runtime == 0 || pending_stop == 0 || pending_stop->kind != GENESIS_STOP)
+    return genesis_internal_dispatch_inconsistency_stop(runtime);
   return genesis_runtime_retire_m68k_instruction_impl(runtime, m68k_cycles, next_pc, pending_stop);
 }
 
@@ -2332,6 +2334,8 @@ GenesisControlTransfer genesis_runtime_retire_m68k_instruction_at_before_stop(
     GenesisRuntime *runtime, uint32_t retired_pc, uint32_t fallthrough_pc,
     GenesisHistoryTransferKind transfer_kind, uint32_t m68k_cycles, uint32_t next_pc,
     const GenesisControlTransfer *pending_stop) {
+  if (runtime == 0 || pending_stop == 0 || pending_stop->kind != GENESIS_STOP)
+    return genesis_internal_dispatch_inconsistency_stop(runtime);
   if (runtime != 0 && runtime->execution_history.detail_enabled) {
     if (transfer_kind != GENESIS_HISTORY_TRANSFER_NONE && next_pc != fallthrough_pc)
       genesis_history_append(runtime, GENESIS_HISTORY_TRANSFER, 0U, next_pc, (uint8_t)transfer_kind, 0U, 0U, 0U);
