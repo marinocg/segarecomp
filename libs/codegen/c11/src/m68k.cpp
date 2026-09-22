@@ -1939,8 +1939,13 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
           ea.mode == M68kEaMode::pc_disp16) {
         address_expr = "UINT32_C(0x" + hex(ea.absolute_address, 8) + ")";
       } else {
+        // SEG-021-T011: pass the data-register bank too, exactly like
+        // `load_effective_address` above -- PEA's control-EA ceiling now
+        // also admits the brief-format `(d8,An,Xn)`/`(d8,PC,Xn)` Dn-indexed
+        // forms (`m68k_ea_pea_control_modes`), and the shared helper needs
+        // `data_registers` to lower a Dn index for either.
         const auto runtime = m68k_emit_runtime_ea_address(ea, M68kMemoryAccessWidth::long_word,
-                                                           memory->address_registers);
+                                                           memory->address_registers, data_registers);
         prelude << runtime.prelude;
         address_expr = runtime.address_expr;
         prelude << runtime.postlude;
@@ -1952,8 +1957,17 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
       const auto write = m68k_emit_ea_write(push_target, M68kMemoryAccessWidth::long_word, data_registers, *memory,
                                             "pea_address", write_prelude, temp_ordinal);
       if (write.ok) {
+        // SEG-021-T011: use the same conventional-local-vs-persistent-context
+        // program-counter projection `load_effective_address` above already
+        // uses, instead of always assuming a bare local `pc`. PEA was never
+        // previously reachable through a persistent-runtime (`memory->
+        // program_counter` non-empty) caller -- the whole family stays
+        // outside the C4 block-dispatch route today (`push_effective_address`
+        // is not yet listed in `m68k_c4_represented_ir_kind`) -- so this is a
+        // strictly additive correction with no existing caller to regress.
+        const std::string_view program_counter = memory->program_counter.empty() ? "pc" : memory->program_counter;
         output << write_prelude.str() << write.expression << '\n'
-               << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
+               << program_counter << " += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
       }
     }
     break;

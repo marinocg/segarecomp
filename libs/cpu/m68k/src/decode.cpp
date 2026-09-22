@@ -860,13 +860,13 @@ struct M68kEaFieldOutcome {
 // the dispatch chain: SWAP's mask (0xFFF8, all 8 Dn registers) exhaustively
 // claims that entire mode3==000 sub-range first, so by the time this
 // decoder's broader 0xFFC0 mask is even reached, no mode3==000 word remains
-// for it to see. PEA's legal EA ceiling is exactly the existing
-// `m68k_ea_control_modes` set already shared by LEA/JMP/JSR -- the allowed-ea
-// legend's A/D/W/L/d entries (An indirect, d16(An), absolute.w, absolute.l,
-// d16(PC)) are the identical five modes, and PEA's X/x (indexed) entries
-// remain out of the project's T023 EA tranche exactly like LEA/JMP/JSR's.
-// Dn/An-direct/postinc/predec/immediate are illegal (absent from the
-// legend) and rejected by the same shared EA legality check every other
+// for it to see. PEA's legal EA ceiling is `m68k_ea_pea_control_modes`
+// (SEG-021-T011): the five plain control modes shared with LEA/JMP/JSR
+// (An indirect, d16(An), absolute.w, absolute.l, d16(PC)) plus PEA's own
+// brief-format indexed forms `(d8,An,Xn)`/`(d8,PC,Xn)` (allowed-ea legend's
+// X/x entries) -- the Motorola manual's full seven-mode control-addressing
+// ceiling. Dn/An-direct/postinc/predec/immediate are illegal (absent from
+// the legend) and rejected by the same shared EA legality check every other
 // control-EA form already uses; no new EA decoder is introduced.
 [[nodiscard]] std::optional<M68kDecodeResult> m68k_decode_general_pea(
     const DecodeSource &source, std::span<const std::uint8_t> image, std::size_t offset, std::uint64_t available,
@@ -874,8 +874,8 @@ struct M68kEaFieldOutcome {
   if ((word & 0xFFC0U) != 0x4840U) return std::nullopt;
   const auto mode3 = static_cast<std::uint8_t>((word >> 3U) & 0x7U);
   const auto reg3 = static_cast<std::uint8_t>(word & 0x7U);
-  const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3, m68k_ea_control_modes,
-                                       M68kMemoryAccessWidth::long_word);
+  const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3,
+                                       m68k_ea_pea_control_modes, M68kMemoryAccessWidth::long_word);
   if (!src.ok) return src.failure;
   // PEA has no destination_ea (its one EA is source_ea, the address to
   // compute and push), mirroring the existing JMP/JSR convention exactly.
@@ -892,8 +892,10 @@ struct M68kEaFieldOutcome {
   const auto reg3 = static_cast<std::uint8_t>(word & 0x7U);
   // SEG-007-T135 / SEG-007-T215: LEA-only widened control-EA set adds the
   // brief-format `(d8,An,Xn)` indexed base and the brief-format `(d8,PC,Xn)`
-  // PC-relative indexed base; PEA and the shared `m68k_ea_control_modes`
-  // stay unchanged (ADR-0009 JMP/JSR precedent).
+  // PC-relative indexed base; the shared `m68k_ea_control_modes` stays
+  // unchanged (ADR-0009 JMP/JSR precedent). SEG-021-T011: PEA gains its own,
+  // separately-named `m68k_ea_pea_control_modes` (decoded at PEA's own call
+  // site above), not this LEA-only constant.
   const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3, m68k_ea_lea_control_modes,
                                        M68kMemoryAccessWidth::long_word);
   if (!src.ok) return src.failure;
@@ -909,8 +911,11 @@ struct M68kEaFieldOutcome {
   const auto mode3 = static_cast<std::uint8_t>((word >> 3U) & 0x7U);
   const auto reg3 = static_cast<std::uint8_t>(word & 0x7U);
   // SEG-007-T124 / ADR-0009: JMP's own widened control-EA legal set (adds
-  // the brief PC-relative indexed form); LEA/PEA above stay on the
-  // unchanged shared `m68k_ea_control_modes`.
+  // the brief PC-relative indexed form). SEG-021-T011: further widened with
+  // the brief-format address-register indexed form `(d8,An,Xn)`, JMP/JSR's
+  // last missing Motorola control-addressing mode; see
+  // `m68k_ea_jsr_jmp_control_modes`'s own doc comment (instruction.hpp) for
+  // the static-discovery/C4 Tier-2-only admission this new form uses.
   const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3,
                                        m68k_ea_jsr_jmp_control_modes, M68kMemoryAccessWidth::long_word);
   if (!src.ok) return src.failure;

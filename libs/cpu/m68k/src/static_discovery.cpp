@@ -1821,17 +1821,28 @@ class M68kStaticGraphWalker {
       const auto &ea = decoded.source_ea;
       if (!m68k_is_statically_foldable_control_ea(ea)) {
         // SEG-007-T124 / ADR-0009: the one bounded computed/indirect
-        // control-EA class this project represents -- a brief PC-relative
-        // indexed JMP/JSR target proven by the finite-index-value producer.
-        // Every other non-foldable form (An-indirect, d16(An), full-format/
-        // memory-indirect, An-indexed, long-indexed) keeps the existing
-        // fail-closed `reached_unresolved_direct_edge` below unchanged.
+        // control-EA class this project represents with a Tier-1 finite-
+        // value proof -- a brief PC-relative indexed JMP/JSR target proven
+        // by the finite-index-value producer. Every other non-foldable form
+        // (d16(An), full-format/memory-indirect, long-indexed) keeps the
+        // existing fail-closed `reached_unresolved_direct_edge` below
+        // unchanged.
         if (ea.mode == M68kEaMode::pc_index8) return process_indirect_control(addr, decoded);
         // SEG-007-T178 / ADR-0009 producer extension: pure address-register-
         // indirect `JMP (An)` / `JSR (An)` with a generation-time-provable
         // finite An code-address set.
         if (ea.mode == M68kEaMode::address_indirect && ea.displacement == 0 && ea.extension_words == 0U)
           return process_indirect_control_an(addr, decoded);
+        // SEG-021-T011: `JMP (d8,An,Xn)` / `JSR (d8,An,Xn)` -- the last
+        // Motorola control-addressing mode this project admits for JMP/JSR
+        // (`m68k_ea_jsr_jmp_control_modes`). This shape's runtime target
+        // depends on BOTH a runtime An base and a runtime Dn/An index, so a
+        // Tier-1 finite-value proof for it would need a new cross-product
+        // base-An-state x index-Dn/An-state producer this task deliberately
+        // does not build (see `process_indirect_control_index8`'s own doc
+        // comment). It goes straight to the existing Tier-2/ADR-0024/
+        // ADR-0025 generalization instead.
+        if (ea.mode == M68kEaMode::address_index8) return process_indirect_control_index8(addr, decoded);
         failure_ = provenance_issue(DirectFlowDiagnostic::reached_unresolved_direct_edge, decoded.provenance);
         return false;
       }
@@ -2336,6 +2347,55 @@ class M68kStaticGraphWalker {
     // just above), not recursively walked here.
     for (const auto &candidate : target_set.candidates) enqueue_control_target(candidate.value);
     return true;
+  }
+
+  // SEG-021-T011 / ADR-0024/ADR-0025 Tier-2 generalization: the brief
+  // address-register-indexed control EA sibling of `process_indirect_control`
+  // (which owns the `pc_index8` shape) and `process_indirect_control_an`
+  // (which owns the pure `(An)` shape) -- `JMP (d8,An,Xn)` / `JSR (d8,An,Xn)`.
+  //
+  // This shape's runtime target is `An + sign_extend(Xn) + d8`: BOTH the base
+  // (a runtime An value) and the offset (a runtime Dn/An index value) are
+  // register-dependent, unlike either existing Tier-1 producer (`pc_index8`
+  // has a statically-known PC base; the pure `(An)` form has no index at
+  // all). A Tier-1 finite-value proof for this combined shape would need a
+  // genuinely new cross-product producer -- joining the existing finite-An-
+  // state domain (ADR-0030, `analyze_finite_index_values()`'s `an[]` state)
+  // with the existing finite-Dn/An-index-state domain (ADR-0009's own
+  // `dn[]`/index producer) and proving every combination of the two remains
+  // within the existing 256-member cap -- which this task's own scope
+  // explicitly excludes as a new architecture decision ("do NOT build a new
+  // cross-product finite-value producer"; see this task's Notes and the
+  // dispatch site's own comment above). Every site of this shape therefore
+  // skips any Tier-1 attempt entirely and goes straight to the existing
+  // Tier-2/ADR-0024 generalization already used by `pc_index8`'s and the
+  // pure `(An)` form's own failure paths: record the weaker Tier-2-eligible
+  // fact (source provenance and decoded control EA only, no candidate list)
+  // and keep the unchanged fail-closed `reached_unresolved_direct_edge`.
+  // Downstream C4 emission (`build_genesis_frontier_stop_function` in
+  // libs/codegen/c11/src/frontend.cpp) recognizes this `address_index8`
+  // control-EA shape and replaces the generic frontier stop with a runtime
+  // EA computation (`An + sign_extend(Xn) + d8`, the exact same formula the
+  // shared `m68k_emit_runtime_ea_address` runtime-EA helper already computes
+  // for LEA/PEA's own non-control `address_index8` admission) plus a binary-
+  // search membership guard against the compiled-in `EmittedCodeAddressSet`
+  // -- no target fetch or decode, exactly like the two existing Tier-2
+  // shapes. `m68k_is_supported_computed_control_ea`
+  // (libs/cpu/m68k/src/effective_address.cpp) is widened alongside this
+  // producer so the existing multi-root aggregation supersession logic
+  // (platforms/genesis/machine/src/frontend.cpp) recognizes this new shape
+  // too.
+  [[nodiscard]] bool process_indirect_control_index8(Address addr, const M68kDecodedInstruction &decoded) {
+    const bool is_call = decoded.kind == M68kInstructionKind::jsr;
+    if (indirect_emitted_.insert(addr).second) {
+      M68kUnprovenIndirectControlEaSet unproven{};
+      unproven.source_instruction = decoded.provenance;
+      unproven.control_ea = decoded.source_ea;
+      unproven.is_call = is_call;
+      unproven_indirect_control_ea_sets_.push_back(unproven);
+    }
+    failure_ = provenance_issue(DirectFlowDiagnostic::reached_unresolved_direct_edge, decoded.provenance);
+    return false;
   }
 
   // SEG-007-T178 / ADR-0009 producer extension: An-indirect control sites

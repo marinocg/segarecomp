@@ -4288,11 +4288,17 @@ void general_startup_decode_accepts_indexed_lea_source() {
            "an indexed LEA primary with no extension word is a truncation");
   }
   {
-    // PEA's own legal-EA set stays unwidened: PEA (0x10,A0,D1.W) -> 0x4870 0x1010.
+    // SEG-021-T011: PEA's own control-EA set (`m68k_ea_pea_control_modes`)
+    // now also admits the brief address-register indexed form, the same
+    // non-control widening precedent LEA already established --
+    // PEA (0x10,A0,D1.W) -> 0x4870 0x1010.
     const auto result = decode_general({0x48U, 0x70U, 0x10U, 0x10U});
-    const auto *rejected = std::get_if<RejectedM68kDecode>(&result);
-    expect(rejected != nullptr && rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction,
-           "PEA gains no indexed source -- the shared m68k_ea_control_modes set is unwidened");
+    const auto *selected = std::get_if<M68kDecodedInstruction>(&result);
+    expect(selected != nullptr && selected->kind == M68kInstructionKind::pea &&
+               selected->source_ea.mode == M68kEaMode::address_index8 && selected->source_ea.reg == 0U &&
+               selected->source_ea.index_reg == 1U && !selected->source_ea.index_is_address &&
+               !selected->source_ea.index_is_long && selected->source_ea.displacement == 16,
+           "PEA (0x10,A0,D1.W) now decodes with a brief-format address-register indexed source");
   }
   {
     // genesis_startup and direct_flow still reject the indexed LEA form.
@@ -4377,15 +4383,19 @@ void general_startup_decode_accepts_pc_indexed_lea_source() {
     }
   }
 
-  // Adversarial negatives: JMP/JSR's own admission is unaffected, and PEA's
-  // legal-EA set stays unwidened for the identical PC-indexed extension word.
+  // Adversarial negatives: JMP/JSR's own admission is unaffected.
   {
-    // PEA (0x10,PC,D1.W) -> 0x487B 0x1010: PEA's own legal-EA set is
-    // unaffected by this LEA-only widening.
+    // SEG-021-T011: PEA (0x10,PC,D1.W) -> 0x487B 0x1010: PEA's own
+    // control-EA set (`m68k_ea_pea_control_modes`) now also admits the
+    // brief PC-relative indexed form, completing PEA's own seven-mode
+    // ceiling.
     const auto result = decode_general({0x48U, 0x7BU, 0x10U, 0x10U});
-    const auto *rejected = std::get_if<RejectedM68kDecode>(&result);
-    expect(rejected != nullptr && rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction,
-           "PEA gains no PC-relative indexed source -- the shared m68k_ea_control_modes set is unwidened");
+    const auto *selected = std::get_if<M68kDecodedInstruction>(&result);
+    expect(selected != nullptr && selected->kind == M68kInstructionKind::pea &&
+               selected->source_ea.mode == M68kEaMode::pc_index8 && selected->source_ea.index_reg == 1U &&
+               !selected->source_ea.index_is_address && !selected->source_ea.index_is_long &&
+               selected->source_ea.displacement == 16,
+           "PEA (0x10,PC,D1.W) now decodes with a brief-format PC-relative indexed source");
   }
   {
     // genesis_startup and direct_flow still reject the PC-indexed LEA form.
@@ -6427,6 +6437,249 @@ void t179_jsr_an_tier2_pushes_return_frame_before_dispatch() {
   expect(body.find("genesis_route_access(runtime, m68k_indirect_ea") == std::string::npos &&
              body.find("decode") == std::string::npos,
          "no runtime opcode fetch/decode exists in the JSR (An) Tier-2 path");
+}
+
+// SEG-021-T011 / ADR-0024/ADR-0025 Tier-2 generalization: the brief
+// address-register-indexed control EA sibling of the `pc_index8` and pure
+// `(An)` Tier-2 shapes above -- `JMP (d8,An,Xn)` / `JSR (d8,An,Xn)`. This
+// project never attempts a Tier-1 finite-value proof for this combined
+// base+index shape (see `process_indirect_control_index8`'s own doc comment
+// in static_discovery.cpp), so every site of this shape goes straight to
+// Tier 2.
+namespace t011_index8_tier2_fixture {
+constexpr std::uint32_t jmp_base = 0x00000D00U;
+constexpr std::uint32_t jmp_address = 0x00000D02U;
+constexpr std::uint32_t jmp_candidate_address = 0x00000D0AU;
+// 0x00000D00 NOP              -> a leading real instruction, mirroring the
+//                                established t179 pure-(An) Tier-2 fixture
+//                                shape (the JMP/JSR site is never the sole
+//                                reset-entry instruction with an empty
+//                                accepted prefix)
+// 0x00000D02 JMP (4,A0,D0.W)  -> faithful runtime EA = a[0] + sext(d[0].w) + 4
+// 0x00000D06 NOP              -> unreferenced filler, never decoded by any walk
+// 0x00000D08 NOP              -> unreferenced filler, never decoded by any walk
+// 0x00000D0A BRA.S -12 -> 0x00000D00 (a trivially valid one-instruction candidate block)
+const std::vector<std::uint8_t> jmp_image{0x4EU, 0x71U, 0x4EU, 0xF0U, 0x00U, 0x04U,
+                                          0x4EU, 0x71U, 0x4EU, 0x71U, 0x60U, 0xF4U};
+
+constexpr std::uint32_t jsr_base = 0x00000E00U;
+constexpr std::uint32_t jsr_address = 0x00000E02U;
+constexpr std::uint32_t jsr_candidate_address = 0x00000E0AU;
+// 0x00000E00 NOP              -> a leading real instruction (see jmp_image above)
+// 0x00000E02 JSR (4,A0,D0.W)  -> faithful runtime EA = a[0] + sext(d[0].w) + 4
+// 0x00000E06 NOP              -> unreferenced filler (illustrative return continuation), never decoded by any walk
+// 0x00000E08 NOP              -> unreferenced filler, never decoded by any walk
+// 0x00000E0A BRA.S -12 -> 0x00000E00 (a trivially valid one-instruction candidate block)
+const std::vector<std::uint8_t> jsr_image{0x4EU, 0x71U, 0x4EU, 0xB0U, 0x00U, 0x04U,
+                                          0x4EU, 0x71U, 0x4EU, 0x71U, 0x60U, 0xF4U};
+
+segarecomp::FrontendProgram make_program(const std::vector<std::uint8_t> &image, std::uint32_t base,
+                                        std::vector<segarecomp::GenesisCodeEntryCandidateHint> candidates) {
+  using namespace segarecomp;
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T011/index8-indirect-control", image, image.size()};
+  program.mapping_claims = {{"rom", {{}, base}, {{}, static_cast<std::uint32_t>(base + image.size())},
+                             {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  program.external_code_entry_candidates = std::move(candidates);
+  return program;
+}
+}  // namespace t011_index8_tier2_fixture
+
+// Records the weaker Tier-2 fact for `JMP (d8,An,Xn)` (the static_discovery
+// producer, `process_indirect_control_index8`) and, with a validated
+// candidate inside the emitted set, dispatches through the ordinary
+// GENESIS_CONTINUE_AT_PC transfer using the generic base+index runtime EA
+// formula.
+void t011_jmp_index8_tier2_computed_target_inside_emitted_set_dispatches() {
+  using namespace segarecomp;
+  using namespace t011_index8_tier2_fixture;
+  const auto result = analyze_m68k_frontend(
+      make_program(jmp_image, jmp_base, {tier2_fixture::make_candidate(jmp_candidate_address)}));
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "the JMP (d8,An,Xn) Tier-2 fixture reaches a partial program");
+  if (partial == nullptr) return;
+  const auto &prefix = partial->accepted_prefix;
+  expect(prefix.indirect_target_ea_sets.empty(),
+         "no Tier-1 finite target-EA-set is ever proven for the (d8,An,Xn) shape -- this task deliberately never "
+         "builds one");
+  bool tier2_fact = false;
+  for (const auto &set : prefix.unproven_indirect_control_ea_sets)
+    if (set.source_instruction.source.address.value == jmp_address && !set.is_call &&
+        set.control_ea.mode == M68kEaMode::address_index8 && set.control_ea.reg == 0U &&
+        set.control_ea.index_reg == 0U && !set.control_ea.index_is_address && !set.control_ea.index_is_long &&
+        set.control_ea.displacement == 4)
+      tier2_fact = true;
+  expect(tier2_fact,
+         "the (d8,An,Xn) site records the weaker unproven Tier-2 control-EA fact (A0 base, D0.W index, d8=4, not "
+         "a call)");
+  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  std::ostringstream suffix;
+  suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jmp_address;
+  const auto array_name = "genesis_emitted_code_addresses_" + suffix.str();
+  expect(emitted.find(array_name + "[] = {UINT32_C(0x00000D00), UINT32_C(0x00000D0A)};") != std::string::npos,
+         "the emitted code address set is the sorted, deduplicated union of the reset entry and the candidate");
+  expect(emitted.find("(uint32_t)(runtime->a[0] + (int32_t)(int16_t)(uint16_t)runtime->d[0] + "
+                       "(int32_t)(int8_t)4)") != std::string::npos,
+         "the Tier-2 runtime EA for (d8,An,Xn) is the generic An + sign_extend(Xn) + d8 formula, the same formula "
+         "the shared runtime EA helper already computes for LEA/PEA's own non-control admission");
+  expect(emitted.find("m68k_emitted_code_address_member(" + array_name) != std::string::npos &&
+             emitted.find("transfer.next_pc = m68k_indirect_ea;") != std::string::npos,
+         "membership success dispatches through the ordinary GENESIS_CONTINUE_AT_PC transfer, never a second "
+         "dispatch mechanism");
+}
+
+// JSR (d8,An,Xn) is shipped: the Tier-2 frontier stop checks membership
+// first, then pushes the 4-byte return continuation frame, then dispatches.
+void t011_jsr_index8_tier2_pushes_return_frame_before_dispatch() {
+  using namespace segarecomp;
+  using namespace t011_index8_tier2_fixture;
+  const auto result = analyze_m68k_frontend(
+      make_program(jsr_image, jsr_base, {tier2_fixture::make_candidate(jsr_candidate_address)}));
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "the JSR (d8,An,Xn) Tier-2 fixture reaches a partial program");
+  if (partial == nullptr) return;
+  bool call_fact = false;
+  for (const auto &set : partial->accepted_prefix.unproven_indirect_control_ea_sets)
+    if (set.source_instruction.source.address.value == jsr_address && set.is_call &&
+        set.control_ea.mode == M68kEaMode::address_index8 && set.control_ea.reg == 0U &&
+        set.control_ea.index_reg == 0U && !set.control_ea.index_is_address && !set.control_ea.index_is_long &&
+        set.control_ea.displacement == 4)
+      call_fact = true;
+  expect(call_fact, "the JSR (d8,An,Xn) site records the weaker unproven Tier-2 fact flagged as a call");
+  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  std::ostringstream suffix;
+  suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jsr_address;
+  const auto function_start =
+      emitted.find("genesis_frontier_stop_" + suffix.str() + "(GenesisRuntime *runtime) {");
+  const auto function_end = emitted.find("\n}\n", function_start);
+  expect(function_start != std::string::npos && function_end != std::string::npos,
+         "the JSR (d8,An,Xn) Tier-2 frontier stop function is present");
+  if (function_start == std::string::npos || function_end == std::string::npos) return;
+  const auto body = emitted.substr(function_start, function_end - function_start);
+  const auto push_pos = body.find("runtime->a[7] - UINT32_C(4)");
+  const auto member_pos = body.find("m68k_emitted_code_address_member");
+  const auto continue_pos = body.find("transfer.kind = GENESIS_CONTINUE_AT_PC;");
+  expect(member_pos != std::string::npos && push_pos != std::string::npos && continue_pos != std::string::npos &&
+             member_pos < push_pos && push_pos < continue_pos,
+         "membership is checked first, then the return frame is pushed, then control continues at PC");
+  expect(body.find("genesis_route_access(runtime, m68k_indirect_ea") == std::string::npos &&
+             body.find("decode") == std::string::npos,
+         "no runtime opcode fetch/decode exists in the JSR (d8,An,Xn) Tier-2 path");
+}
+
+// SEG-021-T011: `m68k_is_supported_computed_control_ea` (the shared multi-
+// root aggregation supersession predicate) recognizes the `(d8,An,Xn)`
+// control EA shape too, exactly like `pc_index8` and pure `(An)`.
+void t011_is_supported_computed_control_ea_recognizes_index8() {
+  using namespace segarecomp;
+  M68kEffectiveAddress ea{};
+  ea.mode = M68kEaMode::address_index8;
+  ea.reg = 0U;
+  ea.index_reg = 0U;
+  ea.displacement = 4;
+  expect(m68k_is_supported_computed_control_ea(ea),
+         "the shared computed-control-EA predicate recognizes the brief address-register-indexed shape");
+}
+
+// SEG-021-T011 / SEG-021-T135 precedent: PEA now admits the brief address-
+// register indexed form `(d8,An,Xn)`, the same non-control widening
+// precedent LEA already established -- PEA computes an address value and
+// pushes it, never dereferencing the addressed location.
+//
+// NOTE on admission route: `M68kIrKind::push_effective_address` is not yet
+// listed in `m68k_c4_represented_ir_kind` (libs/codegen/c11/src/frontend.cpp)
+// -- a PRE-EXISTING gap that declines PEA's whole C4 block-dispatch route
+// for EVERY control-EA form (including the five modes already shipped
+// before this task), not something this task's control-EA widening
+// introduces or narrows further. Several unrelated block-cut/prefix-
+// retention test fixtures elsewhere in this file deliberately rely on
+// `PEA (A0)` staying a "still-declined" C4 shape (see the `c4_prefix`/
+// `c4_pruned_stop`/`c4_multi_blocks`/`c4_backward_block` fixtures'
+// comments in `emit_general_startup_runtime_c4_frontier_source`), so
+// widening `m68k_c4_represented_ir_kind` for PEA is a wider, unrelated
+// architectural change (touching several other families' test
+// infrastructure) this task does not make. This differential/emission
+// coverage therefore verifies PEA's newly admitted forms through the
+// decode + lift + DIRECT single-operation C emission route
+// (`emit_m68k_operation_c`, the same shared lowering body the block
+// dispatcher would call once represented) -- the standalone function this
+// emits is a real, executable, Musashi-differential-checkable C lowering,
+// just not yet reachable through the full C4 block-dispatch pipeline. See
+// this task's own Evidence for the honest "not C4-block-dispatch-routed"
+// classification.
+int emit_operation_c4_indexed_pea_source() {
+  using namespace segarecomp;
+  // PEA (0x10,A0,D1.W) at address 0x00000B00 -> 0x4870 0x1010.
+  const std::vector<std::uint8_t> image{0x48U, 0x70U, 0x10U, 0x10U};
+  const auto decoded = decode_m68k_instruction(image, source(0x00000B00U), M68kDecodeProfile::general_startup);
+  const auto *selected = std::get_if<M68kDecodedInstruction>(&decoded);
+  if (selected == nullptr || selected->kind != M68kInstructionKind::pea ||
+      selected->source_ea.mode != M68kEaMode::address_index8)
+    return 1;
+  const auto lifted = lift_m68k_instruction(*selected);
+  GenesisM68kEmissionContext memory{};
+  memory.runtime_routing = true;
+  memory.runtime_object = "runtime";
+  memory.address_registers = "runtime->a";
+  memory.ram_array = "runtime->work_ram";
+  memory.program_counter = "runtime->pc";
+  const auto body = emit_m68k_operation_c(lifted, "runtime->d", "runtime->sr", {}, &memory);
+  const auto again = emit_m68k_operation_c(lifted, "runtime->d", "runtime->sr", {}, &memory);
+  if (body != again) return 1;
+  std::cout << "GenesisControlTransfer m68k_pea_op(GenesisRuntime *runtime) {\n" << body
+            << "  GenesisControlTransfer ok = {0}; ok.kind = GENESIS_CONTINUE_AT_PC; ok.next_pc = runtime->pc; return ok;\n}\n";
+  return 0;
+}
+
+// SEG-021-T011 / SEG-007-T215 precedent: PEA's brief PC-relative indexed
+// form `(d8,PC,Xn)`, mirroring `emit_operation_c4_indexed_pea_source`
+// immediately above; see its own doc comment for the C4-block-dispatch-route
+// admission caveat this shares.
+int emit_operation_c4_pc_indexed_pea_source() {
+  using namespace segarecomp;
+  // PEA (0x10,PC,D1.W) at address 0x00000B00 -> 0x487B 0x1010.
+  const std::vector<std::uint8_t> image{0x48U, 0x7BU, 0x10U, 0x10U};
+  const auto decoded = decode_m68k_instruction(image, source(0x00000B00U), M68kDecodeProfile::general_startup);
+  const auto *selected = std::get_if<M68kDecodedInstruction>(&decoded);
+  if (selected == nullptr || selected->kind != M68kInstructionKind::pea ||
+      selected->source_ea.mode != M68kEaMode::pc_index8)
+    return 1;
+  const auto lifted = lift_m68k_instruction(*selected);
+  GenesisM68kEmissionContext memory{};
+  memory.runtime_routing = true;
+  memory.runtime_object = "runtime";
+  memory.address_registers = "runtime->a";
+  memory.ram_array = "runtime->work_ram";
+  memory.program_counter = "runtime->pc";
+  const auto body = emit_m68k_operation_c(lifted, "runtime->d", "runtime->sr", {}, &memory);
+  const auto again = emit_m68k_operation_c(lifted, "runtime->d", "runtime->sr", {}, &memory);
+  if (body != again) return 1;
+  std::cout << "GenesisControlTransfer m68k_pea_op(GenesisRuntime *runtime) {\n" << body
+            << "  GenesisControlTransfer ok = {0}; ok.kind = GENESIS_CONTINUE_AT_PC; ok.next_pc = runtime->pc; return ok;\n}\n";
+  return 0;
+}
+
+// SEG-021-T011: dedicated CLI-emitting fixture for the pinned-Musashi
+// differential of `JSR (d8,An,Xn)`, sharing `t011_index8_tier2_fixture`'s
+// own JSR image/candidate exactly so the gtest-style fact/structure
+// assertions above and the differential's own generated C stay provably the
+// same fixture.
+int emit_general_startup_runtime_c4_indirect_jsr_index8_source() {
+  using namespace segarecomp;
+  using namespace t011_index8_tier2_fixture;
+  const auto result = analyze_m68k_frontend(
+      make_program(jsr_image, jsr_base, {tier2_fixture::make_candidate(jsr_candidate_address)}));
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 1;
+  // No `main` -- the Musashi differential harness supplies its own, exactly
+  // like the established `indirect-jsr`/`indirect-jmp` fixtures
+  // (`emit_general_startup_runtime_c4_frontier_source`, which also emits
+  // through `emit_m68k_general_startup_runtime_c`, never the standalone-CLI
+  // `emit_m68k_general_startup_bridge_c`).
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  return 0;
 }
 
 // SEG-007-T239 / ADR-0039: proves the extracted
@@ -27113,6 +27366,12 @@ int main(int argc, char **argv) {
     return emit_general_startup_runtime_c4_pc_indexed_lea_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-pc-indexed-move")
     return emit_general_startup_runtime_c4_pc_indexed_move_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-indexed-pea")
+    return emit_operation_c4_indexed_pea_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-pc-indexed-pea")
+    return emit_operation_c4_pc_indexed_pea_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-indirect-jsr-index8")
+    return emit_general_startup_runtime_c4_indirect_jsr_index8_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-indexed-arithmetic")
     return emit_operation_c4_indexed_arithmetic_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-pc-indexed-logical")
@@ -27389,6 +27648,15 @@ int main(int argc, char **argv) {
   t179_pure_an_indirect_tier2_target_outside_emitted_set_fails_closed();
   t179_pure_an_indirect_a7_exclusion_stays_fail_closed_with_no_tier2_lowering();
   t179_jsr_an_tier2_pushes_return_frame_before_dispatch();
+  t011_jmp_index8_tier2_computed_target_inside_emitted_set_dispatches();
+  t011_jsr_index8_tier2_pushes_return_frame_before_dispatch();
+  t011_is_supported_computed_control_ea_recognizes_index8();
+  expect(emit_operation_c4_indexed_pea_source() == 0,
+         "PEA (0x10,A0,D1.W) decodes/lifts/emits deterministically through the shared address-index8 runtime EA "
+         "path (direct single-operation emission)");
+  expect(emit_operation_c4_pc_indexed_pea_source() == 0,
+         "PEA (0x10,PC,D1.W) decodes/lifts/emits deterministically through the shared pc-index8 runtime EA path "
+         "(direct single-operation emission)");
   t239_jmp_and_jsr_to_shared_destination_use_byte_identical_existence_check();
   t208_tier2_call_shaped_continuation_joins_whole_program_return_target_set();
   t208_tier2_call_shaped_continuation_excluded_when_not_independently_retained();

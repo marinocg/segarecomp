@@ -12,23 +12,23 @@ Denominator: 1526 legal forms, 45816 legal primary words. A form passes a stage 
 
 | stage | applicable forms | passing forms | percent | passing words |
 | --- | ---: | ---: | ---: | ---: |
-| decode | 1526 | 1269 | 83.16% | 42429 |
-| lift | 1526 | 1269 | 83.16% | 42429 |
-| effects | 1526 | 1263 | 82.77% | 42395 |
+| decode | 1526 | 1273 | 83.42% | 42454 |
+| lift | 1526 | 1273 | 83.42% | 42454 |
+| effects | 1526 | 1265 | 82.90% | 42404 |
 | ea_footprint_declared | 1526 | 1127 | 73.85% | 37711 |
 | ccr_sr_effect_declared | 1193 | 1092 | 91.53% | 34597 |
 | exception_privilege_modeled | 852 | 4 | 0.47% | 144 |
-| timing_model_present | 1526 | 1154 | 75.62% | 34789 |
-| emit | 1526 | 1240 | 81.26% | 41546 |
-| compile | 1526 | 1240 | 81.26% | 41546 |
-| native_exec | 1526 | 1239 | 81.19% | 41545 |
-| route_runtime_routed_admitted | 1526 | 1263 | 82.77% | 42395 |
-| route_runtime_routed_compiles | 1526 | 1263 | 82.77% | 42395 |
-| route_runtime_routed_executes | 1526 | 864 | 56.62% | 40092 |
+| timing_model_present | 1526 | 1158 | 75.88% | 34814 |
+| emit | 1526 | 1242 | 81.39% | 41555 |
+| compile | 1526 | 1242 | 81.39% | 41555 |
+| native_exec | 1526 | 1241 | 81.32% | 41554 |
+| route_runtime_routed_admitted | 1526 | 1265 | 82.90% | 42404 |
+| route_runtime_routed_compiles | 1526 | 1265 | 82.90% | 42404 |
+| route_runtime_routed_executes | 1526 | 866 | 56.75% | 40101 |
 | route_immutable_rom_aot | 1526 | 1195 | 78.31% | 41319 |
-| route_static_discovery | 1526 | 1243 | 81.45% | 38311 |
+| route_static_discovery | 1526 | 1245 | 81.59% | 38320 |
 
-`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1239 of 1526 forms, 81.19%. It is a structural bar, not a correctness claim.
+`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1241 of 1526 forms, 81.32%. It is a structural bar, not a correctness claim.
 
 ## Independently validated coverage (existing pinned-Musashi differential evidence)
 
@@ -64,7 +64,7 @@ Validated primary words per aspect: ccr 31719, ea 11702, semantic 34896, timing 
 | --- | ---: | ---: | ---: |
 | binary_coded_decimal | 12 | 0 | 0.00% |
 | bit_manipulation | 77 | 69 | 89.61% |
-| data_movement | 357 | 342 | 95.80% |
+| data_movement | 357 | 344 | 96.36% |
 | integer_arithmetic | 500 | 436 | 87.20% |
 | logical | 228 | 228 | 100.00% |
 | program_control | 193 | 55 | 28.50% |
@@ -89,8 +89,8 @@ Validated primary words per aspect: ccr 31719, ea 11702, semantic 34896, timing 
 | EORI | system_control | 26 | 2 | decode 2 |
 | EXG | data_movement | 3 | 3 | decode 3 |
 | ILLEGAL | system_control | 1 | 1 | decode 1 |
-| JMP | program_control | 7 | 4 | decode 1, effects 3 |
-| JSR | program_control | 7 | 4 | decode 1, effects 3 |
+| JMP | program_control | 7 | 4 | effects 4 |
+| JSR | program_control | 7 | 4 | effects 4 |
 | MOVE | system_control | 312 | 27 | decode 27 |
 | MOVEM | data_movement | 28 | 6 | decode 6 |
 | MOVEP | data_movement | 4 | 4 | decode 4 |
@@ -98,7 +98,6 @@ Validated primary words per aspect: ccr 31719, ea 11702, semantic 34896, timing 
 | NEG | integer_arithmetic | 24 | 3 | decode 3 |
 | NEGX | integer_arithmetic | 24 | 24 | decode 24 |
 | ORI | system_control | 26 | 2 | decode 2 |
-| PEA | data_movement | 7 | 2 | decode 2 |
 | RESET | system_control | 1 | 1 | decode 1 |
 | RTE | system_control | 1 | 1 | emit 1 |
 | RTR | program_control | 1 | 1 | decode 1 |

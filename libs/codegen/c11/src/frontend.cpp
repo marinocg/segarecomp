@@ -1092,7 +1092,21 @@ std::optional<std::string> build_genesis_frontier_stop_function(
           ea.mode == M68kEaMode::pc_index8 && !ea.index_is_address && !ea.index_is_long;
       const bool is_reg_indirect = ea.mode == M68kEaMode::address_indirect && ea.displacement == 0 &&
                                    ea.extension_words == 0U && ea.reg < 7U;
-      if (!is_pc_index8 && !is_reg_indirect) return std::nullopt;
+      // SEG-021-T011 / ADR-0024/ADR-0025 Tier-2 generalization: the brief
+      // address-register-indexed control EA (`JMP (d8,An,Xn)` /
+      // `JSR (d8,An,Xn)`), the sibling shape `process_indirect_control_index8`
+      // (static_discovery.cpp) always records a Tier-2 fact for -- this
+      // project deliberately never attempts a Tier-1 finite-value proof for
+      // this combined base+index shape (see that function's own doc
+      // comment). Unlike the two existing shapes above, the index register
+      // bank/size here is not restricted to word-size Dn: the runtime EA
+      // expression below is built generically (An/Dn index, word/long size),
+      // mirroring `m68k_emit_runtime_ea_address`'s own `address_index8`
+      // formula (libs/codegen/c11/src/m68k.cpp) exactly, because this is a
+      // plain runtime register read/compare, not a static finite-value
+      // proof with a bounded-domain restriction to honor.
+      const bool is_index8 = ea.mode == M68kEaMode::address_index8;
+      if (!is_pc_index8 && !is_reg_indirect && !is_index8) return std::nullopt;
       std::string ea_expr;
       if (is_pc_index8) {
         const auto base = static_cast<std::uint32_t>(static_cast<std::int64_t>(ea.pc_base_address) +
@@ -1102,6 +1116,18 @@ std::optional<std::string> build_genesis_frontier_stop_function(
         std::ostringstream ea_build;
         ea_build << "UINT32_C(" << hex(base, 8) << ") + (uint32_t)(int32_t)(int16_t)(uint16_t)("
                  << index_expr << ")";
+        ea_expr = ea_build.str();
+      } else if (is_index8) {
+        const auto base_expr = std::string("runtime->a[") + std::to_string(static_cast<unsigned>(ea.reg)) + "]";
+        const auto index_bank = ea.index_is_address ? std::string("runtime->a[") : std::string("runtime->d[");
+        const auto index_expr = index_bank + std::to_string(static_cast<unsigned>(ea.index_reg)) + "]";
+        std::ostringstream ea_build;
+        ea_build << "(uint32_t)(" << base_expr << " + ";
+        if (ea.index_is_long)
+          ea_build << "(int32_t)" << index_expr;
+        else
+          ea_build << "(int32_t)(int16_t)(uint16_t)" << index_expr;
+        ea_build << " + (int32_t)(int8_t)" << static_cast<int>(ea.displacement) << ")";
         ea_expr = ea_build.str();
       } else {
         ea_expr = std::string("runtime->a[") + std::to_string(static_cast<unsigned>(ea.reg)) + "]";

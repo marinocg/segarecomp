@@ -144,14 +144,16 @@ inline constexpr M68kEaLegalMask m68k_ea_immediate = 1U << 9;
 // SEG-007-T120: brief-format (d8,An,Xn) indexed addressing.
 inline constexpr M68kEaLegalMask m68k_ea_index8 = 1U << 10;
 // SEG-007-T124 / ADR-0009: brief-format PC-relative indexed addressing,
-// `(d8,PC,Xn)`. Never included in `m68k_ea_control_modes` (PEA stays exactly
-// as narrow as before); the dedicated JMP/JSR mask below adds it for
-// control-transfer targets, per the ADR's "distinct typed EA mode and
-// control legality" rule. SEG-007-T215 additionally widens LEA's own
-// control-EA set (below) to admit it as a plain address-computation source
-// -- LEA never treats its source as a control-transfer target, so this is
-// the same non-control widening precedent SEG-007-T135 already established
-// for `(d8,An,Xn)`, not a change to JMP/JSR/Tier-1/Tier-2 admission.
+// `(d8,PC,Xn)`. Never included in `m68k_ea_control_modes` itself; the
+// dedicated JMP/JSR mask below adds it for control-transfer targets, per the
+// ADR's "distinct typed EA mode and control legality" rule. SEG-007-T215
+// additionally widens LEA's own control-EA set (below) to admit it as a
+// plain address-computation source -- LEA never treats its source as a
+// control-transfer target, so this is the same non-control widening
+// precedent SEG-007-T135 already established for `(d8,An,Xn)`, not a change
+// to JMP/JSR/Tier-1/Tier-2 admission. SEG-021-T011 further widens PEA's own
+// control-EA set (`m68k_ea_pea_control_modes` below) to admit it, the same
+// non-control precedent, completing PEA's own seven-mode ceiling.
 inline constexpr M68kEaLegalMask m68k_ea_pc_index8 = 1U << 11;
 // The "control addressing modes" set (contract § 2.3): memory operands
 // without an associated size. LEA/JMP/JSR's target EA set, confirmed
@@ -161,11 +163,29 @@ inline constexpr M68kEaLegalMask m68k_ea_control_modes =
 // SEG-007-T124 / ADR-0009: JMP/JSR's own control-EA legal set, widened with
 // the brief-format PC-relative indexed form beyond the shared
 // `m68k_ea_control_modes` LEA/PEA still use unchanged. This is the ADR's
-// required "distinct... control legality" -- an indexed An base
-// (`m68k_ea_index8`) is never added here or to `m68k_ea_control_modes`;
-// control addressing keeps its existing five plain forms plus exactly this
-// one new PC-relative indexed form.
-inline constexpr M68kEaLegalMask m68k_ea_jsr_jmp_control_modes = m68k_ea_control_modes | m68k_ea_pc_index8;
+// required "distinct... control legality".
+// SEG-021-T011: further widened with the brief-format address-register
+// indexed form `(d8,An,Xn)` (`m68k_ea_index8`) -- the seventh and last
+// Motorola-manual (M68000PM/AD Rev. 1, Table 2-4 "Control Addressing
+// Categories") control addressing mode this project had not yet admitted for
+// JMP/JSR. Decode/lift reuse the existing shared `address_index8` operand
+// shape verbatim (SEG-007-T120); this mask addition is the sole legality
+// change JMP/JSR need for the new form. This EA's runtime target is a
+// genuinely computed indirect control-transfer address (a runtime An base
+// plus a runtime index), so -- exactly like the pre-existing `pc_index8`
+// widening above -- admitting it here is NOT a plain non-control widening
+// like LEA/PEA's own `m68k_ea_index8`/`m68k_ea_pc_index8` additions: static
+// discovery and C4 emission gain a matching computed-control-EA producer/
+// consumer pair (see `process_indirect_control_index8` in
+// static_discovery.cpp and the `is_index8` Tier-2 lowering in
+// libs/codegen/c11/src/frontend.cpp's `build_genesis_frontier_stop_function`),
+// deliberately reusing the existing Tier-2/ADR-0024/ADR-0025
+// generic-runtime-compare-against-`EmittedCodeAddressSet` generalization
+// rather than inventing a new Tier-1 base-An x index-Dn/An cross-product
+// finite-value proof (out of scope for this task -- see that function's own
+// doc comment).
+inline constexpr M68kEaLegalMask m68k_ea_jsr_jmp_control_modes =
+    m68k_ea_control_modes | m68k_ea_pc_index8 | m68k_ea_index8;
 // SEG-007-T135 / ADR-0009 precedent: LEA's own control-EA legal set, widened
 // with the brief-format address-register indexed form `(d8,An,Xn)`
 // (`m68k_ea_index8`) beyond the shared `m68k_ea_control_modes`. Used only at
@@ -192,6 +212,28 @@ inline constexpr M68kEaLegalMask m68k_ea_jsr_jmp_control_modes = m68k_ea_control
 // for an existing supported instruction, not a block-reconstruction,
 // stitching, or admission-policy defect.
 inline constexpr M68kEaLegalMask m68k_ea_lea_control_modes =
+    m68k_ea_control_modes | m68k_ea_index8 | m68k_ea_pc_index8;
+// SEG-021-T011: PEA's own control-EA legal set, completing PEA's Motorola-
+// manual (M68000PM/AD Rev. 1, Table 2-4 "Control Addressing Categories")
+// seven-mode ceiling with the two brief-format indexed forms `(d8,An,Xn)`
+// (`m68k_ea_index8`) and `(d8,PC,Xn)` (`m68k_ea_pc_index8`), exactly the
+// same non-control addressing-mode widening precedent SEG-007-T135/T215
+// already established for LEA immediately above -- PEA computes an address
+// value and pushes it, never dereferencing the addressed location or
+// treating it as a control-transfer target, so this introduces no new
+// decode/lift/discovery machinery: decode reuses the existing shared
+// `address_index8`/`pc_index8` operand shapes verbatim, and lowering reuses
+// the existing shared runtime EA-computation helper
+// (`m68k_emit_runtime_ea_address`, SEG-007-T136) verbatim. This bit
+// composition is currently identical to `m68k_ea_lea_control_modes`, but is
+// kept as PEA's own distinctly-named constant (never aliased to or merged
+// with LEA's) per this task's Notes: "do not merge masks across
+// LEA/PEA/JMP/JSR unless architecture identical" -- LEA and PEA are
+// different instructions with independently-stated Motorola legal-EA
+// entries that merely happen to enumerate the same seven modes today; a
+// future correction to either instruction's own legal set must not
+// accidentally propagate to the other through a shared constant.
+inline constexpr M68kEaLegalMask m68k_ea_pea_control_modes =
     m68k_ea_control_modes | m68k_ea_index8 | m68k_ea_pc_index8;
 // The "data alterable" set: MOVE/MOVEA/CLR's destination-alterable modes
 // (MOVEA's destination is always the fixed An register, not this set, but

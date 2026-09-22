@@ -8,7 +8,13 @@ bool m68k_is_statically_foldable_control_ea(const M68kEffectiveAddress &ea) noex
 }
 
 bool m68k_is_supported_computed_control_ea(const M68kEffectiveAddress &ea) noexcept {
-  if (ea.mode == M68kEaMode::pc_index8) return true;
+  // SEG-021-T011: the brief address-register-indexed form `(d8,An,Xn)`
+  // joins `pc_index8` and pure `(An)` as a recognized computed control-EA
+  // shape -- it is Tier-2-only (see `process_indirect_control_index8` in
+  // static_discovery.cpp), never Tier-1-proven, but a genuine, supported
+  // computed control-transfer target for this predicate's purpose (multi-
+  // root aggregation supersession correctness).
+  if (ea.mode == M68kEaMode::pc_index8 || ea.mode == M68kEaMode::address_index8) return true;
   return ea.mode == M68kEaMode::address_indirect && ea.displacement == 0 && ea.extension_words == 0U;
 }
 
