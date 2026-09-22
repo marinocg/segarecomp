@@ -44,6 +44,14 @@ std::string retire_call_open(std::uint32_t address, std::uint32_t length, M68kIr
   return "genesis_runtime_retire_m68k_instruction_at(runtime, UINT32_C(" + hex(address, 8) + "), UINT32_C(" +
          hex(address + length, 8) + "), " + history_transfer_kind(kind) + ", ";
 }
+// Same completed-instruction boundary, but with a producer-owned terminal
+// result that must win over asynchronous interrupt admission. Device time and
+// checkpoint/history accounting still complete inside the runtime call.
+std::string retire_before_stop_call_open(std::uint32_t address, std::uint32_t length, M68kIrKind kind) {
+  if (!g_execution_history_hooks) return "genesis_runtime_retire_m68k_instruction_before_stop(runtime, ";
+  return "genesis_runtime_retire_m68k_instruction_at_before_stop(runtime, UINT32_C(" + hex(address, 8) +
+         "), UINT32_C(" + hex(address + length, 8) + "), " + history_transfer_kind(kind) + ", ";
+}
 bool same(const M68kProgramAddress &a, const M68kProgramAddress &b) { return a.space == b.space && a.value == b.value; }
 bool less(const M68kProgramAddress &a, const M68kProgramAddress &b) { return a.space != b.space ? static_cast<unsigned>(a.space) < static_cast<unsigned>(b.space) : a.value < b.value; }
 [[maybe_unused]] bool less(const BlockId &a, const BlockId &b) { return less(a.entry, b.entry); }
@@ -1851,15 +1859,16 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   // the existing, unchanged `call_general`/`bsr_call` lowering.
   memory.continuation = address + entry.decoded.provenance.length.value;
   out << emit_m68k_operation_c(entry.operation, "runtime->d", "runtime->sr", "  ", &memory)
-      << "  runtime->pc = pc;\n"
-      << "  { const uint32_t m68k_retirement_pc = runtime->pc; GenesisControlTransfer retired = "
-      << retire_call_open(address, entry.decoded.provenance.length.value, entry.operation.kind);
-  out << *cycle_expression;
-  out << ", runtime->pc);\n"
-      << "    if (retired.kind != GENESIS_CONTINUE_AT_PC || retired.next_pc != m68k_retirement_pc) return retired;\n";
+      << "  runtime->pc = pc;\n";
   if (!unrepresented_exact_pcs.empty()) {
     const auto &claim = entry.source_mapping;
-    out << "    GenesisInstructionProvenance source = {0};\n"
+    out << "  if (";
+    for (std::size_t index = 0; index < unrepresented_exact_pcs.size(); ++index) {
+      if (index != 0U) out << " || ";
+      out << "runtime->pc == UINT32_C(" << hex(unrepresented_exact_pcs[index], 8) << ")";
+    }
+    out << ") {\n"
+        << "    GenesisInstructionProvenance source = {0};\n"
         << "    source.cpu_variant = GENESIS_CPU_MC68000;\n"
         << "    source.source_address = UINT32_C(" << hex(address, 8) << ");\n"
         << "    source.image_offset = UINT64_C(" << std::dec
@@ -1867,46 +1876,48 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
         << "    source.primary_bytes[0] = UINT8_C(" << hex(entry.decoded.provenance.bytes[0], 2) << ");\n"
         << "    source.primary_bytes[1] = UINT8_C(" << hex(entry.decoded.provenance.bytes[1], 2) << ");\n"
         << "    source.length = UINT32_C(" << entry.decoded.provenance.length.value << ");\n";
-    out << "    if (";
-    for (std::size_t index = 0; index < unrepresented_exact_pcs.size(); ++index) {
-      if (index != 0U) out << " || ";
-      out << "runtime->pc == UINT32_C(" << hex(unrepresented_exact_pcs[index], 8) << ")";
-    }
-    out << ") {\n"
-        << "      GenesisControlTransfer frontier = {0};\n"
-        << "      frontier.kind = GENESIS_STOP;\n"
-        << "      frontier.stop.stop_class = GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET;\n"
-        << "      frontier.stop.diagnostic_category = GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET;\n"
-        << "      frontier.stop.provenance.has_instruction_provenance = UINT8_C(1);\n"
-        << "      frontier.stop.provenance.instruction = source;\n"
-        << "      frontier.stop.provenance.mapping_claim_count = UINT8_C(1);\n"
-        << "      frontier.stop.provenance.mapping_claims[0].name_length = UINT8_C(" << claim.name.size()
+    out << "    GenesisControlTransfer frontier = {0};\n"
+        << "    frontier.kind = GENESIS_STOP;\n"
+        << "    frontier.stop.stop_class = GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET;\n"
+        << "    frontier.stop.diagnostic_category = GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET;\n"
+        << "    frontier.stop.provenance.has_instruction_provenance = UINT8_C(1);\n"
+        << "    frontier.stop.provenance.instruction = source;\n"
+        << "    frontier.stop.provenance.mapping_claim_count = UINT8_C(1);\n"
+        << "    frontier.stop.provenance.mapping_claims[0].name_length = UINT8_C(" << claim.name.size()
         << ");\n";
     for (std::size_t byte = 0; byte < claim.name.size(); ++byte)
-      out << "      frontier.stop.provenance.mapping_claims[0].name[" << byte << "] = UINT8_C("
+      out << "    frontier.stop.provenance.mapping_claims[0].name[" << byte << "] = UINT8_C("
           << static_cast<unsigned>(static_cast<unsigned char>(claim.name[byte])) << ");\n";
-    out << "      frontier.stop.provenance.mapping_claims[0].target_begin = UINT32_C("
+    out << "    frontier.stop.provenance.mapping_claims[0].target_begin = UINT32_C("
         << hex(claim.target_begin.value, 8) << ");\n"
-        << "      frontier.stop.provenance.mapping_claims[0].target_end = UINT32_C("
+        << "    frontier.stop.provenance.mapping_claims[0].target_end = UINT32_C("
         << hex(claim.target_end.value, 8) << ");\n"
-        << "      frontier.stop.provenance.mapping_claims[0].image_begin = UINT64_C(" << std::dec
+        << "    frontier.stop.provenance.mapping_claims[0].image_begin = UINT64_C(" << std::dec
         << claim.image_begin.value << ");\n"
-        << "      frontier.stop.provenance.mapping_claims[0].image_end = UINT64_C(" << claim.image_end.value
+        << "    frontier.stop.provenance.mapping_claims[0].image_end = UINT64_C(" << claim.image_end.value
         << ");\n"
-        << "      frontier.stop.provenance.bus_access_count = UINT8_C(1);\n"
-        << "      frontier.stop.provenance.bus_accesses[0].ordinal = UINT64_C(0);\n"
-        << "      frontier.stop.provenance.bus_accesses[0].kind = GENESIS_BUS_INSTRUCTION_READ;\n"
-        << "      frontier.stop.provenance.bus_accesses[0].address = source.source_address;\n"
-        << "      frontier.stop.provenance.bus_accesses[0].raw_byte_count = UINT8_C("
+        << "    frontier.stop.provenance.bus_access_count = UINT8_C(1);\n"
+        << "    frontier.stop.provenance.bus_accesses[0].ordinal = UINT64_C(0);\n"
+        << "    frontier.stop.provenance.bus_accesses[0].kind = GENESIS_BUS_INSTRUCTION_READ;\n"
+        << "    frontier.stop.provenance.bus_accesses[0].address = source.source_address;\n"
+        << "    frontier.stop.provenance.bus_accesses[0].raw_byte_count = UINT8_C("
         << entry.decoded.raw_bytes.size() << ");\n"
-        << "      frontier.stop.provenance.bus_accesses[0].region = GENESIS_REGION_RAW_CARTRIDGE_ROM;\n";
+        << "    frontier.stop.provenance.bus_accesses[0].region = GENESIS_REGION_RAW_CARTRIDGE_ROM;\n";
     for (std::size_t byte = 0; byte < entry.decoded.raw_bytes.size(); ++byte)
-      out << "      frontier.stop.provenance.bus_accesses[0].raw_bytes[" << byte << "] = UINT8_C("
+      out << "    frontier.stop.provenance.bus_accesses[0].raw_bytes[" << byte << "] = UINT8_C("
           << hex(entry.decoded.raw_bytes[byte], 2) << ");\n";
-    out << "      return frontier;\n"
-        << "    }\n";
+    out << "    return " << retire_before_stop_call_open(
+        address, entry.decoded.provenance.length.value, entry.operation.kind);
+    out << *cycle_expression;
+    out << ", runtime->pc, &frontier);\n"
+        << "  }\n";
   }
-  out << "    return retired;\n  }\n}\n";
+  out << "  { const uint32_t m68k_retirement_pc = runtime->pc; GenesisControlTransfer retired = "
+      << retire_call_open(address, entry.decoded.provenance.length.value, entry.operation.kind);
+  out << *cycle_expression;
+  out << ", runtime->pc);\n"
+      << "    if (retired.kind != GENESIS_CONTINUE_AT_PC || retired.next_pc != m68k_retirement_pc) return retired;\n"
+      << "    return retired;\n  }\n}\n";
   return out.str();
 }
 } // namespace

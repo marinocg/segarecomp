@@ -1144,6 +1144,14 @@ GenesisControlTransfer genesis_runtime_retire_m68k_instruction(GenesisRuntime *r
                                                                 uint32_t m68k_cycles,
                                                                 uint32_t next_pc);
 
+/* Retires the completed instruction and returns `pending_stop` after timing,
+ * device, and checkpoint accounting. Because no represented instruction may
+ * consume `next_pc`, asynchronous IRQ admission is deferred and remains
+ * pending rather than constructing an exception frame around that PC. */
+GenesisControlTransfer genesis_runtime_retire_m68k_instruction_before_stop(
+    GenesisRuntime *runtime, uint32_t m68k_cycles, uint32_t next_pc,
+    const GenesisControlTransfer *pending_stop);
+
 /*
  * SEG-007-T252 / ADR-0040: the former SEG-007-T107 `genesis_note_loop_backedge`,
  * SEG-007-T211/ADR-0035 `genesis_note_loop_completion`, and SEG-007-T155/
@@ -1304,6 +1312,10 @@ GenesisControlTransfer genesis_runtime_retire_m68k_instruction_at(GenesisRuntime
                                                                   uint32_t fallthrough_pc,
                                                                   GenesisHistoryTransferKind transfer_kind,
                                                                   uint32_t m68k_cycles, uint32_t next_pc);
+GenesisControlTransfer genesis_runtime_retire_m68k_instruction_at_before_stop(
+    GenesisRuntime *runtime, uint32_t retired_pc, uint32_t fallthrough_pc,
+    GenesisHistoryTransferKind transfer_kind, uint32_t m68k_cycles, uint32_t next_pc,
+    const GenesisControlTransfer *pending_stop);
 
 /* SEG-020-T004: last completed boundary's compact digest; 0 when none. */
 uint64_t genesis_m68k_checkpoint_digest(const GenesisRuntime *runtime);

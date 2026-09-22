@@ -186,7 +186,7 @@ whole-program graph:
 | Independent immutable AOT admission | `immutable_rom_aot_entries` | Owns only independently decoded, validated, lowerable immutable-ROM starts admitted after retained-graph closure; it creates no CFG edge or reachability claim. |
 | Per-operation PC production | `M68kOperationEffect` | Classifies each admitted producer's fixed `advance`, direct, or conditional exact outputs. Runtime-derived outputs remain with their stronger runtime membership owner. |
 | Final consumers | final compiled/emitted addresses plus typed-frontier destinations | A fixed output is represented only if one of these final cut-aware authorities consumes it. Earlier discovery or retained-graph membership is insufficient. |
-| Producer-local mismatch | the emitting AOT entry | After retirement and before common dispatch, converts a classified but unrepresented exact output to source-provenanced `known_but_unemitted_target`; unclassifiable effects reject generation. |
+| Producer-local mismatch | the emitting AOT entry | At the completed-instruction retirement boundary, before asynchronous interrupt admission and common dispatch, converts a classified but unrepresented exact output to source-provenanced `known_but_unemitted_target`; device time, execution history, and checkpoint accounting still retire the instruction, while an eligible interrupt remains pending and cannot frame the unrepresented PC. Unclassifiable effects reject generation. |
 | Common dispatcher | sorted final compiled-address lookup | Dispatches represented PCs only. It remains a defensive backstop, not the owner of missing producer obligations. |
 
 The reproduced divergence did not involve stale pruning or late-indirect

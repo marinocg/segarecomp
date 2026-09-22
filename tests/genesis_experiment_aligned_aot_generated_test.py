@@ -88,10 +88,18 @@ int main(void) {
      relation frontier fails closed with source provenance instead of handing
      an unrepresented PC to the internal dispatcher. The NOP->MOVEQ case above
      is the positive near-neighbor: its exact successor is compiled and still
-     returns CONTINUE_AT_PC normally. */
+     returns CONTINUE_AT_PC normally. A pending, admissible IRQ names a real
+     represented handler; the unchanged A7 proves no exception frame can hide
+     the missing PC for a later RTE/common-dispatch re-entry. */
   runtime.pc = UINT32_C(0x00000C62);
   runtime.d[2] = UINT32_C(2);
   runtime.d[3] = UINT32_C(3);
+  runtime.sr = UINT16_C(0x2000);
+  runtime.a[7] = UINT32_C(0x00FF0200);
+  runtime.devices.interrupt.vblank_pending = UINT8_C(1);
+  runtime.irq6_handler_present = UINT8_C(1);
+  runtime.irq6_handler_entry = UINT32_C(0x00000C06); /* represented AOT identity */
+  runtime.m68k_checkpoint.enabled = UINT8_C(1);
   transfer = genesis_bridge_dispatch(&runtime);
   assert(transfer.kind == GENESIS_STOP);
   assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
@@ -99,6 +107,11 @@ int main(void) {
   assert(transfer.stop.provenance.has_instruction_provenance != 0U);
   assert(transfer.stop.provenance.instruction.source_address == UINT32_C(0x00000C62));
   assert(runtime.pc == UINT32_C(0x00000C64));
+  assert(runtime.a[7] == UINT32_C(0x00FF0200));
+  assert(runtime.devices.interrupt.vblank_pending == UINT8_C(1));
+  assert(runtime.scheduler.master_ticks != UINT64_C(0));
+  assert(runtime.m68k_checkpoint.valid == UINT8_C(1));
+  assert(runtime.m68k_checkpoint.pc == UINT32_C(0x00000C64));
 
   /* Exercise the same serializer used by generated main. An AOT-only source
      must carry the accepted mapping/fetch provenance required for canonical
@@ -136,6 +149,7 @@ def main() -> None:
     assert mismatch_body.count(
         "frontier.stop.provenance.bus_access_count = UINT8_C(1)"
     ) == 1
+    assert "genesis_runtime_retire_m68k_instruction_before_stop" in mismatch_body
     # Fixture-local output-size ratchet: the prior broad AOT attachment table
     # duplicated provenance for every aligned identity and crossed this bound.
     # Local mismatch producers keep the complete generated source bounded.

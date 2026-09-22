@@ -35,6 +35,15 @@ int main(void) {
   GenesisReportMetadata metadata = {0};
   static const char digest[] = "@DIGEST@";
   runtime.pc = UINT32_C(0x00012348);
+  runtime.sr = UINT16_C(0x2000);
+  runtime.a[7] = UINT32_C(0x00FF0200);
+  runtime.devices.interrupt.vblank_pending = UINT8_C(1);
+  runtime.irq6_handler_present = UINT8_C(1);
+  /* An admissible IRQ would frame the missing successor and transfer to this
+     represented entry. The producer stop must instead leave A7 untouched. */
+  runtime.irq6_handler_entry = UINT32_C(0x00012340); /* represented C3 entry */
+  runtime.execution_history.detail_enabled = UINT8_C(1);
+  runtime.m68k_checkpoint.enabled = UINT8_C(1);
   GenesisControlTransfer transfer = genesis_dispatch(&runtime);
   assert(transfer.kind == GENESIS_STOP);
   assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
@@ -45,6 +54,13 @@ int main(void) {
   assert(transfer.stop.provenance.bus_access_count == UINT8_C(1));
   assert(transfer.stop.provenance.bus_accesses[0].address == UINT32_C(0x00012348));
   assert(transfer.stop.provenance.bus_accesses[0].raw_byte_count == UINT8_C(4));
+  assert(runtime.pc == UINT32_C(0x0001234C));
+  assert(runtime.a[7] == UINT32_C(0x00FF0200));
+  assert(runtime.devices.interrupt.vblank_pending == UINT8_C(1));
+  assert(runtime.scheduler.master_ticks != UINT64_C(0));
+  assert(runtime.execution_history.retired_count == UINT64_C(1));
+  assert(runtime.m68k_checkpoint.valid == UINT8_C(1));
+  assert(runtime.m68k_checkpoint.pc == UINT32_C(0x0001234C));
   metadata.cpu_dimensions = GENESIS_CPU_DIMENSIONS_NONE;
   return genesis_write_sanitized_report(&transfer, digest, &metadata);
 }
@@ -99,6 +115,8 @@ def main() -> int:
             )[1].split("static GenesisControlTransfer genesis_aot_", 1)[0]
             require(mismatch_body.count("GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET") == 1,
                     "C3 AOT exact-PC mismatch must have one local typed frontier")
+            require("before_stop(runtime" in mismatch_body,
+                    "C3 mismatch retirement must preserve the producer stop across IRQ admission")
             repeated = subprocess.run(base + ["--provenance-diagnostics"], text=True, capture_output=True, check=True)
             require(repeated.stdout == generated, "C3 AOT frontier generation must be deterministic")
 
