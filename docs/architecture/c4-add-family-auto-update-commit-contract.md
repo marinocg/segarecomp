@@ -139,7 +139,7 @@ writes), so no legal ordinary shape is declined and no emitted output changed. D
 
 Not merged into one universal helper: the families differ in routed-stop commit order, so a merge would change
 byte-comparable routed output without evidence of a defect. Remaining declines are missing families rather than
-shape declines, including Scc and TAS (owned by SEG-021-T016), which have no decoded `M68kIrKind` (harness reports `unsupported`). CMPM, ADDX/SUBX and NEGX were completed by SEG-021-T014 and ABCD/SBCD/NBCD by SEG-021-T015 (below).
+shape declines. CMPM, ADDX/SUBX and NEGX were completed by SEG-021-T014, ABCD/SBCD/NBCD by SEG-021-T015 and EXG/MOVEP/Scc/TAS by SEG-021-T016 (below).
 
 ### MOVEM (`M68kIrKind::movem_transfer`): decision — no change, retain the family-specific mechanism
 
@@ -308,3 +308,20 @@ instead.
 - C4/AOT: all three are represented C4 kinds with no gap rows (absolute NBCD operands retain NOT-shaped destination facts) and are
   admitted family-level to immutable-ROM AOT. Static discovery resolves NBCD like NOT/NEG.
 - Timing: Table 8-4 rows (ABCD/SBCD 6 / 18) and the Table 8-6 NBCD row (Dn 6, memory 8 + EA).
+
+## SEG-021-T016: EXG, MOVEP, Scc, TAS
+
+- New decoded/lifted kinds `exchange_registers`, `movep` (`movep_transfer` in the IR), `set_conditional`, `test_and_set`. Legality is
+  encoded in `libs/cpu/m68k` from the Motorola encodings (EXG `1100 Rx 1 01000/01001/10001 Ry`, MOVEP `0000 Dn 1 oo 001 An` + d16, Scc
+  `0101 cccc 11 ea`, TAS `0100 1010 11 ea`, Scc/TAS data-alterable), never from the T001 dataset. The decode collisions are disjoint by
+  construction: MOVEP's `001` operand field is never a legal bit-operation destination, DBcc owns Scc's mode-001 slot, and EXG's opmodes
+  are illegal AND encodings. Scc reuses `M68kCondition`/`m68k_condition_c_expr` (all 16 conditions, T and F included).
+- Lowering (`libs/codegen/c11/src/m68k.cpp`): EXG swaps through one local; MOVEP performs each byte as its own routed/guarded byte access
+  (all reads before the Dn write, PC last, An never updated); Scc is CLR-shaped (write-only byte; the auto-updating operand uses the
+  operation-local deferred commit); TAS is NOT-shaped (one-address byte RMW, N/Z from the operand byte, V/C cleared, X kept, then bit 7 set;
+  the indivisible bus cycle stays platform-owned and is not modelled).
+- C4/AOT: all four are represented C4 kinds; Scc has CLR's and TAS has NOT's retained-fact shape (auto-updating, indexed and register
+  operands need none); all are admitted family-level to immutable-ROM AOT. Static discovery resolves Scc like CLR and TAS like NOT.
+- Timing: Table 8-4 EXG 6, Table 8-3 MOVEP 16 (word) / 24 (long), Table 8-6 TAS (Dn 4, memory 10 + EA) and Scc memory rows (8 + EA).
+  Scc `Dn` is 4 (false) / 6 (true): condition-dependent, so `m68k_instruction_cycles` records it timing-unsupported and the retirement
+  seam supplies the dynamic expression `m68k_scc_true ? 6 : 4` (assigned by the lowerer through `timing_scc_true`).

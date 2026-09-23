@@ -91,6 +91,9 @@ struct M68kMemoryEmissionContext {
   // assigns this byte only on its taken branch; callers that retire the
   // instruction supply a zero-initialized local for the fallthrough cases.
   std::string_view timing_dbcc_taken;
+  // SEG-021-T016: optional caller-owned Scc condition-outcome byte. Scc's Dn timing (4 false / 6 true) depends on the
+  // condition, so the Scc lowerer assigns 1 here when the condition holds; the caller supplies a zero-initialized local.
+  std::string_view timing_scc_true;
   // SEG-007-T252 / ADR-0040: the former SEG-007-T107 `loop_progress_object` /
   // `finite_loop_progress_proof`, SEG-007-T155/ADR-0017 `data_progress_proof`,
   // and SEG-007-T157/ADR-0019 `read_data_progress_proof` / `data_progress_

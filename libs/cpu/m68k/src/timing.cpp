@@ -208,6 +208,25 @@ std::optional<std::uint32_t> negate_decimal_cycles(const M68kIrOperation &o) noe
   return 8U + *value;
 }
 
+// Table 8-6 (TAS row, byte only): Dn is 4; memory is 10 + the byte EA calculation time. The published row includes the
+// indivisible read-modify-write bus cycle, which stays platform-owned; the CPU-visible total is the same.
+std::optional<std::uint32_t> test_and_set_cycles(const M68kIrOperation &o) noexcept {
+  if (o.destination_ea.mode == M68kEaMode::data_register) return 4U;
+  const auto value = ea(o.destination_ea, M68kMemoryAccessWidth::byte);
+  if (!value || !memory_ea(o.destination_ea.mode)) return std::nullopt;
+  return 10U + *value;
+}
+
+// Table 8-6 (Scc row, byte only): memory is 8 + the byte EA calculation time regardless of the condition. The Dn row is
+// condition dependent (4 false / 6 true) and therefore has no static scalar: it is handled by the generated retirement
+// expression, and this function returns no static row for it.
+std::optional<std::uint32_t> set_conditional_cycles(const M68kIrOperation &o) noexcept {
+  if (o.destination_ea.mode == M68kEaMode::data_register) return std::nullopt;
+  const auto value = ea(o.destination_ea, M68kMemoryAccessWidth::byte);
+  if (!value || !memory_ea(o.destination_ea.mode)) return std::nullopt;
+  return 8U + *value;
+}
+
 std::optional<std::uint32_t> lea_cycles(const M68kIrOperation &o) noexcept {
   const auto value = ea(o.source_ea, M68kMemoryAccessWidth::word);
   if (!value || !memory_ea(o.source_ea.mode)) return std::nullopt;
@@ -301,6 +320,11 @@ std::optional<std::uint32_t> m68k_instruction_cycles(const M68kIrOperation &oper
   case M68kIrKind::bit_clear:
   case M68kIrKind::bit_set:
     return bit_cycles(operation, true);
+  // SEG-021-T016: Table 8-4 EXG is 6; Table 8-3 MOVEP is 16 (word) / 24 (long) in either direction; TAS and Scc above.
+  case M68kIrKind::exchange_registers: return 6U;
+  case M68kIrKind::movep_transfer: return operation.size == M68kMemoryAccessWidth::long_word ? 24U : 16U;
+  case M68kIrKind::test_and_set: return test_and_set_cycles(operation);
+  case M68kIrKind::set_conditional: return set_conditional_cycles(operation);
   case M68kIrKind::load_effective_address:
     return lea_cycles(operation);
   case M68kIrKind::push_effective_address:

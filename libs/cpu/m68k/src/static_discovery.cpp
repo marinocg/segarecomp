@@ -186,6 +186,10 @@ std::vector<std::uint8_t> m68k_written_data_registers(const M68kDecodedInstructi
   case M68kInstructionKind::add_decimal:
   case M68kInstructionKind::subtract_decimal:
   case M68kInstructionKind::negate_decimal:
+  // SEG-021-T016: Scc/TAS write a Dn destination; MOVEP writes Dn only in its memory-to-register direction.
+  case M68kInstructionKind::set_conditional:
+  case M68kInstructionKind::test_and_set:
+  case M68kInstructionKind::movep:
   case M68kInstructionKind::add:
   case M68kInstructionKind::addi:
   case M68kInstructionKind::addq:
@@ -208,6 +212,11 @@ std::vector<std::uint8_t> m68k_written_data_registers(const M68kDecodedInstructi
   case M68kInstructionKind::move_from_sr:
   case M68kInstructionKind::shift_rotate:
     if (decoded.destination_ea.mode == M68kEaMode::data_register) registers.push_back(decoded.destination_ea.reg);
+    break;
+  case M68kInstructionKind::exchange_registers:
+    // SEG-021-T016: EXG writes both operands.
+    for (const auto &operand : {decoded.source_ea, decoded.destination_ea})
+      if (operand.mode == M68kEaMode::data_register) registers.push_back(operand.reg);
     break;
   case M68kInstructionKind::movem:
     if (decoded.movem_direction == M68kMovemDirection::memory_to_registers) {
@@ -248,6 +257,11 @@ std::vector<std::uint8_t> m68k_written_address_registers(const M68kDecodedInstru
   case M68kInstructionKind::link:
   case M68kInstructionKind::unlk:
     note_dest_an();
+    break;
+  case M68kInstructionKind::exchange_registers:
+    // SEG-021-T016: EXG writes both operands (An in Ax,Ay and Dx,Ay).
+    for (const auto &operand : {decoded.source_ea, decoded.destination_ea})
+      if (operand.mode == M68kEaMode::address_register) registers.push_back(operand.reg);
     break;
   case M68kInstructionKind::movem:
     if (decoded.movem_direction == M68kMovemDirection::memory_to_registers) {
@@ -1656,13 +1670,16 @@ class M68kStaticGraphWalker {
                                                       M68kMemoryAccessDirection::write, decoded.provenance))
           return reject_operand(pc_value, decoded, *diagnostic, decoded.destination_ea.absolute_address);
       }
-    } else if (decoded.kind == M68kInstructionKind::clr) {
+    } else if (decoded.kind == M68kInstructionKind::clr || decoded.kind == M68kInstructionKind::set_conditional) {
+      // SEG-021-T016: Scc is CLR-shaped on the CPU side (a write-only byte destination).
       if (const auto diagnostic = resolve_operand(decoded.destination_ea, decoded.size,
                                                     M68kMemoryAccessDirection::write, decoded.provenance))
         return reject_operand(pc_value, decoded, *diagnostic, decoded.destination_ea.absolute_address);
     } else if (decoded.kind == M68kInstructionKind::not_operand || decoded.kind == M68kInstructionKind::negate_word ||
                decoded.kind == M68kInstructionKind::negate_extended ||
-               decoded.kind == M68kInstructionKind::negate_decimal) {
+               decoded.kind == M68kInstructionKind::negate_decimal ||
+               decoded.kind == M68kInstructionKind::test_and_set) {
+      // SEG-021-T016: TAS is a byte one-address RMW like NOT.
       // SEG-021-T014: NEG/NEGX share NOT's one-address read-modify-write operand contract.
       // SEG-007-T168: NOT is a genuine one-address read-modify-write (unlike
       // CLR's write-only shape), exactly like shift_rotate's memory form

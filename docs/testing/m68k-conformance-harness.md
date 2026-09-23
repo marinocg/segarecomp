@@ -291,3 +291,21 @@ aliased and A7 pairs and every NBCD EA class, and forces routed stops on every a
 
 Timing: published static rows exist (ABCD/SBCD `Dy,Dx` 6, `-(Ay),-(Ax)` 18; NBCD `Dn` 6, memory 8 + byte EA cell), so no form is
 timing-unsupported; `timing_validated` stays 0 (timing is not compared).
+
+## SEG-021-T016: EXG / MOVEP / Scc / TAS rows
+
+143 rows cover every legal form: EXG (`Dx,Dy`, `Ax,Ay`, `Dx,Ay`; distinct, aliased and A7 pairs), MOVEP (word/long, both directions,
+even, odd and negative displacements, `unary_sweep`/`unary_full` register values over the deterministic memory pattern), Scc (all 16
+conditions x every data-alterable class incl. `(d8,An,Xn)`, every SR CCR combination 2700-270F via `scc_sweep`) and TAS (every
+data-alterable class, boundary bytes incl. 0x00/0x7F/0x80/0xFF). All 143 rows (about 95,000 vectors) match the pinned Musashi with zero
+divergences; CCR unaffected by EXG/MOVEP/Scc is verified because every vector compares the whole SR. `m68k_routed_lowering_test.py`
+compares the routed lowering with the direct one for every EXG pair, MOVEP shape, Scc condition and Scc/TAS operand class, and forces
+routed stops on every memory form (no partial architectural state).
+
+Semantics: Scc writes 0xFF/0x00 and never touches CCR; TAS sets N/Z from the operand byte, clears V/C, keeps X and writes the byte with
+bit 7 set (CPU semantics only: the indivisible bus read-modify-write cycle is platform-owned); MOVEP moves the bytes of the register
+most-significant first to/from every second byte of `d16(An)` and never updates An; EXG changes no CCR bit.
+
+Timing: published static rows exist for EXG (6), MOVEP (16 / 24), TAS (Dn 4, memory 10 + EA) and Scc memory forms (8 + EA). The 16 `Scc Dn`
+forms are recorded as timing-unsupported in `m68k_instruction_cycles` (4 false / 6 true depends on the runtime condition); generated
+retirement uses the dynamic expression `m68k_scc_true ? 6 : 4`. `timing_validated` stays 0 (timing is not compared).

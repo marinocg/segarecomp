@@ -60,6 +60,10 @@ M68kIrOperation lift_m68k_instruction(const M68kDecodedInstruction &instruction)
   case M68kInstructionKind::add_decimal: operation.kind = M68kIrKind::add_decimal; break;
   case M68kInstructionKind::subtract_decimal: operation.kind = M68kIrKind::subtract_decimal; break;
   case M68kInstructionKind::negate_decimal: operation.kind = M68kIrKind::negate_decimal; break;
+  case M68kInstructionKind::exchange_registers: operation.kind = M68kIrKind::exchange_registers; break;
+  case M68kInstructionKind::movep: operation.kind = M68kIrKind::movep_transfer; break;
+  case M68kInstructionKind::set_conditional: operation.kind = M68kIrKind::set_conditional; break;
+  case M68kInstructionKind::test_and_set: operation.kind = M68kIrKind::test_and_set; break;
   case M68kInstructionKind::lea: operation.kind = M68kIrKind::load_effective_address; break;
   case M68kInstructionKind::jmp: operation.kind = M68kIrKind::jump_general; break;
   case M68kInstructionKind::jsr: operation.kind = M68kIrKind::call_general; break;

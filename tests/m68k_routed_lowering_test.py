@@ -225,6 +225,29 @@ def arithmetic_cases():
         for rx, ry in ((1, 2), (1, 1), (7, 7), (7, 0), (0, 7), (3, 4)):
             add("%04X" % (base | (rx << 9) | (1 << 3) | ry), (4,))
             add("%04X" % (base | (rx << 9) | ry), ())
+    # SEG-021-T016: EXG (register-only; distinct, aliased and A7 pairs), MOVEP (both sizes and directions, even/odd/negative
+    # displacements, A7 base), Scc (every condition x every data-alterable class incl. auto-updating and indexed) and
+    # TAS (same classes). Memory forms run in the routed-stop atomicity check too (register forms cannot stop).
+    for opword in (0xC140, 0xC148, 0xC188):
+        for rx, ry in ((1, 2), (1, 1), (7, 7), (7, 0), (0, 7), (3, 4)):
+            add("%04X" % (opword | (rx << 9) | ry), ())
+    for opmode in (4, 5, 6, 7):  # word/long mem->reg, word/long reg->mem
+        for reg in (1, 7):
+            for disp in ("0010", "0011", "FFF0"):
+                word = "%04X" % (0x0008 | (2 << 9) | (opmode << 6) | reg) + disp
+                add(word, ())
+                AUTO_CODES.add(word)  # memory access: participates in the forced-stop atomicity check
+    for cond in range(16):
+        for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
+            for reg in ((1, 7) if mode in (3, 4) else (1,)):
+                add("%04X" % (0x50C0 | (cond << 8) | (mode << 3) | reg) + ext, (mode,))
+                if mode in (2, 5, 6):
+                    AUTO_CODES.add("%04X" % (0x50C0 | (cond << 8) | (mode << 3) | reg) + ext)
+    for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
+        for reg in ((1, 7) if mode in (3, 4) else (1,)):
+            add("%04X" % (0x4AC0 | (mode << 3) | reg) + ext, (mode,))
+            if mode in (2, 5, 6):
+                AUTO_CODES.add("%04X" % (0x4AC0 | (mode << 3) | reg) + ext)
     return out
 
 

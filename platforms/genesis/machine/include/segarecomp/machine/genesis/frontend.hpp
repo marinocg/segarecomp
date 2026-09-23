@@ -707,6 +707,12 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
   case M68kIrKind::add_decimal:
   case M68kIrKind::subtract_decimal:
   case M68kIrKind::negate_decimal:
+  case M68kIrKind::exchange_registers:
+  case M68kIrKind::movep_transfer:
+  case M68kIrKind::set_conditional:
+  case M68kIrKind::test_and_set:
+    // SEG-021-T016: EXG (register-only), MOVEP (d16(An) byte transfers), Scc and TAS (every data-alterable operand)
+    // are admitted family-level on the same terms; Scc's Dn timing is the dynamic retirement expression.
     // SEG-021-T014: NEG/NEGX (every data-alterable operand), ADDX/SUBX (Dy,Dx and -(Ay),-(Ax)) and CMPM
     // ((Ay)+,(Ax)+) family-level admission (supersedes the prior NEG.W Dn/d16(An)-only carve-out). Every
     // legal form lowers through the shared C4 routed read/write primitives with no CFG edge, call frame,
