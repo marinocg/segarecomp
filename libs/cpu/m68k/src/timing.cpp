@@ -296,7 +296,14 @@ std::optional<std::uint32_t> m68k_instruction_cycles(const M68kIrOperation &oper
       case M68kEaMode::address_disp16:
       case M68kEaMode::pc_disp16:
       case M68kEaMode::absolute_word: base = 16U; break;
-      case M68kEaMode::address_index8: base = 18U; break;
+      // SEG-021-T012: Table 8-10 "MOVEM Instruction Execution Times"
+      // (Motorola M68000 8-/16-/32-Bit Microprocessor User's Manual)
+      // publishes a literal `(d8,PC,Xn)` row for the memory->register
+      // direction, identical to the `(d8,An,Xn)` row's base of 18 cycles --
+      // the exact same An-relative/PC-relative pairing this same switch
+      // already applies one row above for `d16(An)`/`d16(PC)` (both 16).
+      case M68kEaMode::address_index8:
+      case M68kEaMode::pc_index8: base = 18U; break;
       case M68kEaMode::absolute_long: base = 20U; break;
       default: return std::nullopt;
       }

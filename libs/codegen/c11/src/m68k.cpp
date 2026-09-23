@@ -2280,13 +2280,22 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
                 "UINT32_C(0x" + hex(base + static_cast<std::uint32_t>(slot) * width, 8) + ")";
             emit_slot(address_expr, order[slot]);
           }
-        } else if (ea.mode == M68kEaMode::address_indirect || ea.mode == M68kEaMode::address_disp16) {
+        } else if (ea.mode == M68kEaMode::address_indirect || ea.mode == M68kEaMode::address_disp16 ||
+            ea.mode == M68kEaMode::address_index8 || ea.mode == M68kEaMode::pc_index8) {
           // Same one-time working-EA snapshot discipline as the direct_flow
           // reference branch below (contract: "snapshot the ordinary MOVEM
-          // working EA once") -- (An)/d16(An) never auto-updates its own EA
-          // register, so every slot's address derives from this ONE
-          // snapshot, never re-read from the live address-register array.
-          const auto runtime = m68k_emit_runtime_ea_address(ea, operation.size, memory->address_registers);
+          // working EA once") -- (An)/d16(An)/(d8,An,Xn)/(d8,PC,Xn) never
+          // auto-update their own EA register (no prelude/postlude from
+          // m68k_emit_runtime_ea_address for any of these four modes), so
+          // every slot's address derives from this ONE snapshot, never
+          // re-read from the live address/data-register arrays. SEG-021-T012:
+          // (d8,An,Xn)/(d8,PC,Xn) need the index register value, so unlike
+          // the plain (An)/d16(An) forms this call also passes
+          // `data_registers` (the index register may be either an An or a
+          // Dn; m68k_emit_runtime_ea_address selects which array to read
+          // from `ea.index_is_address`).
+          const auto runtime =
+              m68k_emit_runtime_ea_address(ea, operation.size, memory->address_registers, data_registers);
           body << runtime.prelude;
           const auto base_local = "m68k_movem_base_" + std::to_string(temp_ordinal++);
           body << "const uint32_t " << base_local << " = " << runtime.address_expr << "; (void)" << base_local
@@ -2397,7 +2406,20 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
               "UINT32_C(" + std::to_string(base + static_cast<std::uint32_t>(slot) * width) + ")";
           emit_transfer(body, offset_expr, order[slot]);
         }
-      } else if (ea.mode == M68kEaMode::address_indirect || ea.mode == M68kEaMode::address_disp16) {
+      } else if (ea.mode == M68kEaMode::address_indirect || ea.mode == M68kEaMode::address_disp16 ||
+          ea.mode == M68kEaMode::address_index8 || ea.mode == M68kEaMode::pc_index8) {
+        // SEG-021-T012: (d8,An,Xn)/(d8,PC,Xn) join this same branch as
+        // (An)/d16(An) -- none of the four modes auto-update any register,
+        // so all four share the identical one-time working-EA-snapshot
+        // discipline below and the identical guarded per-slot runtime read/
+        // write path. `pc_index8`'s base is a fixed (PC-relative-constant)
+        // address plus a genuinely runtime index register, so a
+        // memory->register MOVEM through it can never be an all-constant
+        // ROM fold in general; it is intentionally routed through this
+        // ordinary guarded path with no ROM-fold branch, exactly like plain
+        // `address_indirect`/`address_disp16` whenever the T075 fold
+        // precondition does not hold.
+        //
         // SEG-007-T025 (Batch C, C5a review correction): ordinary (An)/
         // d16(An) MOVEM never auto-updates its EA register (contract:
         // "ordinary MOVEM forms do NOT auto-update their EA register"), so
@@ -2420,7 +2442,8 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         // m68k_emit_runtime_ea_address owner every other selected
         // (An)/d16(An) form uses -- only its ONE result is now bound to a
         // local once, rather than re-embedded verbatim per transfer.
-        const auto runtime = m68k_emit_runtime_ea_address(ea, operation.size, memory->address_registers);
+        const auto runtime =
+            m68k_emit_runtime_ea_address(ea, operation.size, memory->address_registers, data_registers);
         body << runtime.prelude;
         unsigned temp_ordinal = 0U;
         const auto base_local = "m68k_movem_base_" + std::to_string(temp_ordinal++);

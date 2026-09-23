@@ -112540,10 +112540,30 @@
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "48A0": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "48A1": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48A2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48A3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48A4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48A5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48A6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48A7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "48B8": [
    "tests/m68k_batch_c_musashi_differential_test.py"
@@ -112561,12 +112581,30 @@
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "48E0": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "48E1": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "48E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "48E7": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "48EB": [
@@ -112726,10 +112764,30 @@
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "4C98": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "4C99": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4C9A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C9B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C9C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C9D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C9E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C9F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "4CA8": [
    "tests/m68k_batch_c_musashi_differential_test.py"
@@ -112738,12 +112796,30 @@
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "4CD8": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "4CD9": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "4CDA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CDB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CDC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CDD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CDE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "4CDF": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "4CF9": [
@@ -169083,20 +169159,112 @@
   "4886": [
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "4890": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "4891": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "4892": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "4893": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4894": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4895": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4896": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4897": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "48A0": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "48A1": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "48A2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48A3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48A4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48A5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48A6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48A7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48A8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48A9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48AA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48AB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48AC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48AD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48AE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48AF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48B0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48B1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48B2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48B3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48B4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48B5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48B6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48B7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "48B8": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48B9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "48C1": [
    "tests/m68k_batch_c_musashi_differential_test.py"
@@ -169107,20 +169275,112 @@
   "48C7": [
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "48D0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "48D1": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "48D2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48D3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48D4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48D5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48D6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48D7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "48E0": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "48E1": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "48E7": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "48E8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48E9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48EA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "48EB": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "48EC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48ED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48EE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48EF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48F0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48F1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48F2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48F3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48F4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48F5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48F6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48F7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48F8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "48F9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "4A00": [
    "tests/fixtures/m68k-conformance-vectors.json"
@@ -169573,37 +169833,231 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "4C90": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "4C91": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "4C92": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "4C93": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C94": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C95": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C96": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C97": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "4C98": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "4C99": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4C9A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C9B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C9C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C9D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C9E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4C9F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "4CA8": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4CA9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CAA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CAB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CAC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CAD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CAE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CAF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CB0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CB1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CB2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CB3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CB4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CB5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CB6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CB7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CB8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CB9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CBA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CBB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "4CD0": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "4CD1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CD2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CD3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CD4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CD5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CD6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CD7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "4CD8": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
   "4CD9": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4CDA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CDB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CDC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CDD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CDE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "4CDF": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "4CE8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CE9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CEA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CEB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CEC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CEE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CEF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CF0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CF1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CF2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CF3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CF4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CF5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CF6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CF7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CF8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "4CF9": [
+   "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4CFA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4CFB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "4E53": [
    "tests/m68k_batch_c_musashi_differential_test.py"
