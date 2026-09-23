@@ -80,6 +80,14 @@ enum class M68kIrKind {
   // NEG.W Dn: destination_ea is the sole read-then-written operand; zero is
   // the architecturally implied subtraction source.
   negate_word,
+  // SEG-021-T014: extended arithmetic (see the matching M68kInstructionKind
+  // entries). NEGX, ADDX and SUBX write X from carry/borrow, read X as an
+  // operand and use the sticky Z rule; CMPM is CMP's arithmetic on two
+  // postincrement memory operands (X preserved).
+  negate_extended,
+  add_extended,
+  subtract_extended,
+  compare_memory,
   // SEG-007-T220: MULS.W <ea>,Dn. See M68kInstructionKind::multiply_signed_
   // word's own doc comment for the full opcode/EA/CCR contract.
   multiply_signed_word,

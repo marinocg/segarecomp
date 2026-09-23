@@ -50,7 +50,13 @@ register value is also the pointer, so such rows take pair values from the table
 addresses) instead of the profile pairs; an A7 operand value also becomes the active stack pointer of the vector.
 Rows exist for every legal ordinary form of MOVE/MOVEA/ADD/SUB/CMP/ADDA/SUBA/CMPA/AND/OR/EOR (SEG-021-T007: all sizes and
 EAs, incl. `(d8,PC,Xn)` sources and indexed destinations)/immediate/quick/unary and (SEG-021-T008) BTST/BCHG/BCLR/BSET families (every legal EA, bit numbers 0/7/8/31/32/33/255 and
-Dn aliasing; profiles `bit_sweep`/`bit_full`, static bit numbers as literal suffixes); CMPM, ADDX/SUBX and NEGX rows are absent because production has no decoder for them yet.
+Dn aliasing; profiles `bit_sweep`/`bit_full`, static bit numbers as literal suffixes).
+SEG-021-T014 adds 50 rows: ADDX/SUBX (`Dy,Dx` and `-(Ay),-(Ax)`, all sizes, 12 rows), CMPM (3 rows), NEGX (24 rows, every
+legal EA) and the 11 NEG rows previously missing (absolute, `(d8,An,Xn)` and the byte/long `d16(An)` forms). They use the
+`ext_sweep`/`ext_full` (pair profiles) and `xunary_sweep`/`xunary_full` (unary) profiles, whose SR seeds
+(2700/2704/2710/2714, plus 271F in the sweeps) cover every X/Z combination, so carry/borrow chains, X propagation, sticky Z,
+signed overflow, register aliasing (`(A0),(A0)` pairs collapse to consistent states) and the A7 byte step of two are
+compared against the pinned Musashi core. The full-profile words per row are the aliased (Rx = Ry), A7 and mixed pairs.
 
 ## Compared state
 

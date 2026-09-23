@@ -12,34 +12,34 @@ Denominator: 1526 legal forms, 45816 legal primary words. A form passes a stage 
 
 | stage | applicable forms | passing forms | percent | passing words |
 | --- | ---: | ---: | ---: | ---: |
-| decode | 1526 | 1279 | 83.81% | 42488 |
-| lift | 1526 | 1279 | 83.81% | 42488 |
-| effects | 1526 | 1271 | 83.29% | 42438 |
-| ea_footprint_declared | 1526 | 1127 | 73.85% | 37711 |
-| ccr_sr_effect_declared | 1193 | 1092 | 91.53% | 34597 |
+| decode | 1526 | 1321 | 86.57% | 43622 |
+| lift | 1526 | 1321 | 86.57% | 43622 |
+| effects | 1526 | 1313 | 86.04% | 43572 |
+| ea_footprint_declared | 1526 | 1190 | 77.98% | 38971 |
+| ccr_sr_effect_declared | 1193 | 1134 | 95.05% | 35731 |
 | exception_privilege_modeled | 852 | 4 | 0.47% | 144 |
-| timing_model_present | 1526 | 1164 | 76.28% | 34848 |
-| emit | 1526 | 1248 | 81.78% | 41589 |
-| compile | 1526 | 1248 | 81.78% | 41589 |
-| native_exec | 1526 | 1247 | 81.72% | 41588 |
-| route_runtime_routed_admitted | 1526 | 1271 | 83.29% | 42438 |
-| route_runtime_routed_compiles | 1526 | 1271 | 83.29% | 42438 |
-| route_runtime_routed_executes | 1526 | 870 | 57.01% | 40133 |
-| route_immutable_rom_aot | 1526 | 1204 | 78.90% | 41349 |
-| route_static_discovery | 1526 | 1251 | 81.98% | 38354 |
+| timing_model_present | 1526 | 1206 | 79.03% | 35982 |
+| emit | 1526 | 1290 | 84.53% | 42723 |
+| compile | 1526 | 1290 | 84.53% | 42723 |
+| native_exec | 1526 | 1289 | 84.47% | 42722 |
+| route_runtime_routed_admitted | 1526 | 1313 | 86.04% | 43572 |
+| route_runtime_routed_compiles | 1526 | 1313 | 86.04% | 43572 |
+| route_runtime_routed_executes | 1526 | 906 | 59.37% | 41261 |
+| route_immutable_rom_aot | 1526 | 1261 | 82.63% | 42561 |
+| route_static_discovery | 1526 | 1293 | 84.73% | 39488 |
 
-`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1247 of 1526 forms, 81.72%. It is a structural bar, not a correctness claim.
+`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1289 of 1526 forms, 84.47%. It is a structural bar, not a correctness claim.
 
 ## Independently validated coverage (existing pinned-Musashi differential evidence)
 
 | stage | applicable forms | passing forms | percent | passing words |
 | --- | ---: | ---: | ---: | ---: |
-| semantic_validated | 1526 | 1214 | 79.55% | 39228 |
-| ccr_sr_validated | 1193 | 1058 | 88.68% | 31662 |
-| ea_side_effect_validated | 381 | 299 | 78.48% | 11809 |
+| semantic_validated | 1526 | 1264 | 82.83% | 40384 |
+| ccr_sr_validated | 1193 | 1108 | 92.88% | 32818 |
+| ea_side_effect_validated | 381 | 314 | 82.41% | 12433 |
 | timing_validated | 1526 | 0 | 0.00% | 0 |
 
-Validated primary words per aspect: ccr 31733, ea 11987, semantic 39236, timing 0. Forms with at least one validated word: ccr 1111, ea 447, semantic 1221, timing 0. Sources: tests/fixtures/m68k-conformance-vectors.json, tests/m68k_batch_b_musashi_differential_test.py, tests/m68k_batch_c_musashi_differential_test.py, tests/m68k_cmp_absolute_source_musashi_differential_test.py, tests/m68k_divs_word_musashi_differential_test.py, tests/m68k_divu_word_musashi_differential_test.py, tests/m68k_indexed_arithmetic_musashi_differential_test.py, tests/m68k_indexed_lea_musashi_differential_test.py, tests/m68k_muls_word_musashi_differential_test.py, tests/m68k_mulu_word_musashi_differential_test.py, tests/m68k_pc_indexed_lea_musashi_differential_test.py, tests/m68k_pc_indexed_logical_musashi_differential_test.py, tests/m68k_pc_indexed_move_musashi_differential_test.py.
+Validated primary words per aspect: ccr 32889, ea 12611, semantic 40392, timing 0. Forms with at least one validated word: ccr 1161, ea 462, semantic 1271, timing 0. Sources: tests/fixtures/m68k-conformance-vectors.json, tests/m68k_batch_b_musashi_differential_test.py, tests/m68k_batch_c_musashi_differential_test.py, tests/m68k_cmp_absolute_source_musashi_differential_test.py, tests/m68k_divs_word_musashi_differential_test.py, tests/m68k_divu_word_musashi_differential_test.py, tests/m68k_indexed_arithmetic_musashi_differential_test.py, tests/m68k_indexed_lea_musashi_differential_test.py, tests/m68k_muls_word_musashi_differential_test.py, tests/m68k_mulu_word_musashi_differential_test.py, tests/m68k_pc_indexed_lea_musashi_differential_test.py, tests/m68k_pc_indexed_logical_musashi_differential_test.py, tests/m68k_pc_indexed_move_musashi_differential_test.py.
 
 ## Stage definitions (public entry points only)
 
@@ -65,7 +65,7 @@ Validated primary words per aspect: ccr 31733, ea 11987, semantic 39236, timing 
 | binary_coded_decimal | 12 | 0 | 0.00% |
 | bit_manipulation | 77 | 69 | 89.61% |
 | data_movement | 357 | 350 | 98.04% |
-| integer_arithmetic | 500 | 436 | 87.20% |
+| integer_arithmetic | 500 | 478 | 95.60% |
 | logical | 228 | 228 | 100.00% |
 | program_control | 193 | 55 | 28.50% |
 | shift_and_rotate | 104 | 104 | 100.00% |
@@ -80,10 +80,8 @@ Validated primary words per aspect: ccr 31733, ea 11987, semantic 39236, timing 
 | mnemonic | family | forms | unsupported | first failing stage (forms) |
 | --- | --- | ---: | ---: | --- |
 | ABCD | binary_coded_decimal | 2 | 2 | decode 2 |
-| ADDX | integer_arithmetic | 6 | 6 | decode 6 |
 | ANDI | system_control | 26 | 2 | decode 2 |
 | CHK | system_control | 11 | 11 | decode 11 |
-| CMPM | integer_arithmetic | 3 | 3 | decode 3 |
 | DIVS | integer_arithmetic | 11 | 11 | emit 11 |
 | DIVU | integer_arithmetic | 11 | 11 | emit 11 |
 | EORI | system_control | 26 | 2 | decode 2 |
@@ -94,8 +92,6 @@ Validated primary words per aspect: ccr 31733, ea 11987, semantic 39236, timing 
 | MOVE | system_control | 312 | 27 | decode 27 |
 | MOVEP | data_movement | 4 | 4 | decode 4 |
 | NBCD | binary_coded_decimal | 8 | 8 | decode 8 |
-| NEG | integer_arithmetic | 24 | 3 | decode 3 |
-| NEGX | integer_arithmetic | 24 | 24 | decode 24 |
 | ORI | system_control | 26 | 2 | decode 2 |
 | RESET | system_control | 1 | 1 | decode 1 |
 | RTE | system_control | 1 | 1 | emit 1 |
@@ -103,7 +99,6 @@ Validated primary words per aspect: ccr 31733, ea 11987, semantic 39236, timing 
 | RTS | program_control | 1 | 1 | native_exec 1 |
 | SBCD | binary_coded_decimal | 2 | 2 | decode 2 |
 | STOP | system_control | 1 | 1 | decode 1 |
-| SUBX | integer_arithmetic | 6 | 6 | decode 6 |
 | Scc | program_control | 128 | 128 | decode 128 |
 | TAS | bit_manipulation | 8 | 8 | decode 8 |
 | TRAP | system_control | 1 | 1 | decode 1 |

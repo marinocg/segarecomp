@@ -53,6 +53,10 @@ M68kIrOperation lift_m68k_instruction(const M68kDecodedInstruction &instruction)
   case M68kInstructionKind::clr: operation.kind = M68kIrKind::write_clr; break;
   case M68kInstructionKind::not_operand: operation.kind = M68kIrKind::logical_not; break;
   case M68kInstructionKind::negate_word: operation.kind = M68kIrKind::negate_word; break;
+  case M68kInstructionKind::negate_extended: operation.kind = M68kIrKind::negate_extended; break;
+  case M68kInstructionKind::add_extended: operation.kind = M68kIrKind::add_extended; break;
+  case M68kInstructionKind::subtract_extended: operation.kind = M68kIrKind::subtract_extended; break;
+  case M68kInstructionKind::compare_memory: operation.kind = M68kIrKind::compare_memory; break;
   case M68kInstructionKind::lea: operation.kind = M68kIrKind::load_effective_address; break;
   case M68kInstructionKind::jmp: operation.kind = M68kIrKind::jump_general; break;
   case M68kInstructionKind::jsr: operation.kind = M68kIrKind::call_general; break;

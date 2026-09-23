@@ -22,6 +22,18 @@ std::uint16_t m68k_addition_ccr(std::uint16_t status_register, std::uint32_t sou
   return M68kAdditionResultSpecification::apply(status_register, source, destination, width);
 }
 
+M68kExtendedArithmeticResult m68k_evaluate_extended_arithmetic(M68kExtendedArithmeticKind kind, std::uint32_t source,
+                                                                std::uint32_t destination, bool extend,
+                                                                M68kMemoryAccessWidth width) noexcept {
+  return M68kExtendedArithmeticSpecification::evaluate(kind, source, destination, extend, width);
+}
+
+std::uint16_t m68k_extended_arithmetic_ccr(std::uint16_t status_register, M68kExtendedArithmeticKind kind,
+                                           std::uint32_t source, std::uint32_t destination,
+                                           M68kMemoryAccessWidth width) noexcept {
+  return M68kExtendedArithmeticSpecification::apply(status_register, kind, source, destination, width);
+}
+
 M68kLogicalResult m68k_evaluate_logical(std::uint32_t result, M68kMemoryAccessWidth width) noexcept {
   return M68kLogicalResultSpecification::evaluate(result, width);
 }
@@ -330,6 +342,38 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
     effect.pc = M68kPcEffectKind::advance;
     effect.pc_delta = operation.provenance.length.value;
     break;
+  case M68kIrKind::negate_extended:
+    // SEG-021-T014: NEGX is 0 - destination - X: a one-address read-modify-write like NEG; X/C follow
+    // borrow, Z is sticky (see M68kExtendedArithmeticSpecification).
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.destination_ea;
+    effect.resolved_destination_ea = operation.destination_ea;
+    effect.affects_condition_codes = true;
+    effect.extend_flag_policy = M68kExtendFlagPolicy::from_carry;
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::add_extended:
+  case M68kIrKind::subtract_extended:
+    // ADDX/SUBX: Dy,Dx or -(Ay),-(Ax); both operands and X are read; X/C follow carry/borrow.
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.source_ea;
+    effect.resolved_destination_ea = operation.destination_ea;
+    effect.affects_condition_codes = true;
+    effect.extend_flag_policy = M68kExtendFlagPolicy::from_carry;
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::compare_memory:
+    // CMPM (Ay)+,(Ax)+: CMP arithmetic (N/Z/V/C, X preserved) on two postincrement memory operands.
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.source_ea;
+    effect.resolved_destination_ea = operation.destination_ea;
+    effect.affects_condition_codes = true;
+    effect.extend_flag_policy = M68kExtendFlagPolicy::preserve;
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
   case M68kIrKind::multiply_signed_word:
     // SEG-007-T220: MULS.W reads the word-size source_ea and the low word of
     // destination_ea (always a Dn), and writes the full 32-bit product back
@@ -611,7 +655,8 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
     effect.address_register_write_mask |= static_cast<std::uint8_t>(1U << static_cast<unsigned>(*effect.address_register_write));
   if ((operation.destination_ea.mode == M68kEaMode::data_register) && operation.destination_ea.reg < 8U &&
       operation.kind != M68kIrKind::compare && operation.kind != M68kIrKind::compare_immediate &&
-      operation.kind != M68kIrKind::compare_address && operation.kind != M68kIrKind::test_operand &&
+      operation.kind != M68kIrKind::compare_address && operation.kind != M68kIrKind::compare_memory &&
+      operation.kind != M68kIrKind::test_operand &&
       operation.kind != M68kIrKind::bit_test)
     effect.data_register_write_mask |= static_cast<std::uint8_t>(1U << operation.destination_ea.reg);
   // Only the narrow operation subset whose D/A effects are exhaustively
@@ -665,6 +710,11 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
       operation.kind == M68kIrKind::shift_rotate_register || operation.kind == M68kIrKind::shift_rotate_memory ||
       operation.kind == M68kIrKind::write_movea || operation.kind == M68kIrKind::write_clr ||
       operation.kind == M68kIrKind::logical_not || operation.kind == M68kIrKind::test_operand ||
+      // SEG-021-T014: NEG/NEGX (Dn mask plus EA auto-update), ADDX/SUBX (Dn destination mask or two
+      // predecrement updates) and CMPM (two postincrement updates) have exhaustively represented footprints.
+      operation.kind == M68kIrKind::negate_word || operation.kind == M68kIrKind::negate_extended ||
+      operation.kind == M68kIrKind::add_extended || operation.kind == M68kIrKind::subtract_extended ||
+      operation.kind == M68kIrKind::compare_memory ||
       operation.kind == M68kIrKind::compare || operation.kind == M68kIrKind::compare_address ||
       operation.kind == M68kIrKind::general_branch;
   if (operation.kind == M68kIrKind::push_effective_address || operation.kind == M68kIrKind::return_from_subroutine ||
