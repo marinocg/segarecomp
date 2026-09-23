@@ -97,8 +97,16 @@ int main(int argc, char **argv) {
       std::cout << line << " ok\n";
       continue;
     }
-    M68kMemoryEmissionContext memory{"s->ram", "s->a", "frame_ids", "frame_continuations", "frame_depth", 0U,
-                                     M68kOperandAccess::linear_memory, 0U, {}, {}};
+    // SEG-021-T013: BSR (and any other call_general/bsr_call kind reaching this direct, non-routed
+    // emitter) pushes exactly `memory.continuation` -- a caller-supplied constant, never derived from
+    // `operation.provenance` by the lowering itself (the lowering has no other way to know a real call
+    // site's true whole-program continuation). This driver's own single instruction IS the whole
+    // "program" it emits, so its own natural fallthrough (kBase + this instruction's length) is the
+    // correct, honest continuation value for every instruction, not only calls: no prior row ever
+    // exercised a call-shaped kind here, so this was previously left at the placeholder 0.
+    const auto continuation = static_cast<std::uint32_t>(kBase + length);
+    M68kMemoryEmissionContext memory{"s->ram", "s->a", "frame_ids", "frame_continuations", "frame_depth",
+                                     continuation, M68kOperandAccess::linear_memory, 0U, {}, {}};
     // --window (SEG-021-T006): host the direct lowering's linear window at the work-RAM addresses
     // (0x00FF0000..) so the routed-versus-direct test can compare real architectural address values.
     memory.linear_memory_begin = window_mode ? 0x00FF0000U : 0U;

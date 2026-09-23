@@ -207,3 +207,56 @@ every legal MOVEM form, including the two newly widened EA classes -- `(d8,An,Xn
 matching the table's own pre-existing literal cell) and both `(d8,An,Xn)`/`(d8,PC,Xn)` memory->register (base
 18, the same An-relative/PC-relative pairing this same switch already applies to `d16(An)`/`d16(PC)` one row
 above). No form is timing-unsupported.
+
+## SEG-021-T013: Bcc/BRA/BSR, DBcc, LINK/UNLK, SWAP/EXT rows
+
+Inventory found decode, lift, effects, C11 emission and static-discovery treatment of every form in this family
+already complete (SEG-007-T025's shared condition-code owner, `m68k_condition_from_selector`, already covers
+BRA/all 14 Bcc conditions/BSR and DBcc's all-16-condition set including DBT/DBF; LINK/UNLK/SWAP/EXT.W/EXT.L/RTS/
+NOP already decode, lift and emit). NOP already had its own committed T003 row (`nop.none.none.none.none`,
+`state_modes` profile, pre-existing and unaffected by this task -- see "Extension-bearing and no-operand
+canaries" above) validated against Musashi before this task started. The actual remaining gap was exclusively
+in the rest of the T003 differential table: none of Bcc/BRA/BSR/DBcc/LINK/UNLK/SWAP/EXT had a single committed
+row, so `semantic_validated`/`ccr_sr_validated` credited none of them despite their structural support. This
+task's only change is closing that evidence gap (53 new rows; no production code in `libs/cpu/m68k` or
+`libs/codegen/c11` changed).
+
+Rows: Bcc byte and word displacement, all 14 conditions (`bcc.disp8.b.none.target.<cc>` /
+`bcc.disp16.w.none.target.<cc>`); BRA and BSR, both displacement sizes; DBcc, all 16 conditions including DBT
+(never loops) and DBF/DBRA (always loops) with word displacement (`dbcc.dn_disp16.w.dn.target.<cc>`, `d@0`-bound
+Dn sweep over `boundary` values including 0/1/0xFFFF wraparound); LINK.W and UNLK; SWAP, EXT.W and EXT.L. A new
+`cc_full` profile (16 SR seeds, one per NZVC nibble 0x2700-0x270F, X and supervisor fixed) gives every Bcc/DBcc
+row genuine full-CCR-combination coverage of the shared condition evaluator per the parent milestone's
+acceptance criterion; a new `dbcc_full` profile crosses that same 16-state sweep with the `boundary` value set.
+All 53 rows (83840 synthetic vectors) match the pinned Musashi with zero divergences; legal-form enumeration
+(word ranges, exception classes, `dn_disp16`/`disp8`/`disp16` shapes) is `tests/fixtures/m68k-legal-forms.json`'s
+own independent T001 dataset, never read by production.
+
+Byte-displacement odd-target branches (Bcc/BRA/BSR low byte odd, e.g. 0x01/0xFF) are exercised by every
+committed row (the full T001 word range, not a hand-picked subset) and validate cleanly: the pinned Musashi
+checkout builds with `M68K_EMULATE_ADDRESS_ERROR` off (its documented default), so neither side raises a
+synchronous address-error exception on an odd branch target; this harness therefore proves nothing about
+address-error entry (out of this task's scope; base MC68000 address-error synchronous exception entry is not
+implemented by production at all, a separate architecture decision the same way ADR-0037 owns divide-by-zero).
+
+`M68kMemoryEmissionContext::continuation` (the value a `call_general`/`bsr_call` push writes) is a caller-
+supplied constant, never derived from `operation.provenance` by the lowering -- production's real callers
+(the whole-program static-discovery/AOT pipeline) always supply the real call site's own continuation. No row
+had ever exercised a call-shaped kind through the T003 driver's own single-instruction direct emitter before
+this task, so it had a stale placeholder (`0`) for every instruction; `tests/tools/m68k_conformance_emitter.cpp`
+now computes the correct continuation (`kBase + this instruction's own length`) for every emitted instruction, a
+test-harness-only fix (the emitted C11 lowering itself is unchanged).
+
+RTS has NO T003 table row, the same acceptance-criterion carve-out already established for DIVS.W/DIVU.W
+(SEG-021-T010): production's direct/non-routed RTS lowering (`M68kIrKind::return_from_subroutine`,
+`libs/codegen/c11/src/m68k.cpp`) only completes a return whose popped address matches a statically tracked call
+frame's own recorded continuation (`memory->frame_ids_array`/`frame_continuations_array`/`frame_depth`) -- by
+design (ADR-0011/ADR-0039's whole-program continuation authority), not a bug. An isolated RTS with no
+established frame (exactly what a standalone T003 row would be) fails closed (`return 1`, i.e. a runtime stop)
+in every legal context this harness can construct, so it is correctly unsupported through the direct route; the
+existing T002 capability snapshot's own `RTS | program_control | 1 | 1 | native_exec 1` unsupported-mnemonic row
+already recorded this independently, unaffected by this task. RTS's real frame-matched semantics (including the
+fail-closed non-member-continuation and forced-routed-read-failure cases) are covered end to end by
+`tests/genesis_immutable_rom_aot_return_from_subroutine_and_bit_clear_generated_test.py` against the real
+ADR-0011 whole-program continuation authority; RTR remains entirely out of this task's scope (a distinct
+mnemonic, never claimed here).
