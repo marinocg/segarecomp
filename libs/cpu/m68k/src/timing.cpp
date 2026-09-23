@@ -183,6 +183,16 @@ std::optional<std::uint32_t> adda_suba_cycles(const M68kIrOperation &o) noexcept
   return 6U + *value;
 }
 
+// Table 8-4 (ADDX/SUBX/CMPM rows): Dy,Dx is 4 (B/W) / 8 (L); -(Ay),-(Ax) is 18 / 30; CMPM (Ay)+,(Ax)+ is
+// 12 / 20. All are literal totals independent of any other EA cell.
+std::optional<std::uint32_t> extended_pair_cycles(const M68kIrOperation &o) noexcept {
+  const bool long_size = o.size == M68kMemoryAccessWidth::long_word;
+  if (o.kind == M68kIrKind::compare_memory) return long_size ? 20U : 12U;
+  if (o.source_ea.mode == M68kEaMode::data_register) return long_size ? 8U : 4U;
+  if (o.source_ea.mode == M68kEaMode::address_predec) return long_size ? 30U : 18U;
+  return std::nullopt;
+}
+
 std::optional<std::uint32_t> lea_cycles(const M68kIrOperation &o) noexcept {
   const auto value = ea(o.source_ea, M68kMemoryAccessWidth::word);
   if (!value || !memory_ea(o.source_ea.mode)) return std::nullopt;
@@ -260,8 +270,13 @@ std::optional<std::uint32_t> m68k_instruction_cycles(const M68kIrOperation &oper
   case M68kIrKind::write_clr:
   case M68kIrKind::logical_not:
   case M68kIrKind::negate_word:
+  case M68kIrKind::negate_extended:
   case M68kIrKind::shift_rotate_memory:
     return single_operand_cycles(operation);
+  case M68kIrKind::add_extended:
+  case M68kIrKind::subtract_extended:
+  case M68kIrKind::compare_memory:
+    return extended_pair_cycles(operation);
   case M68kIrKind::bit_change:
   case M68kIrKind::bit_clear:
   case M68kIrKind::bit_set:

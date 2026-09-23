@@ -101,10 +101,8 @@ gap rows unchanged.
 
 ## Explicit non-goals / non-claims
 
-- `ADDX` is not implemented. Its only memory form is `-(Ay),-(Ax)` (two independent predecrement
-  address registers plus the X flag) and it is not currently a distinct selected `M68kIrKind`; it
-  remains an explicit bounded non-goal here. If a re-executed Sonic terminal ever selects it, it is a
-  separately scoped, separately evidenced task.
+- `ADDX` is out of scope of the SEG-007 record above; it is implemented by SEG-021-T014 (see the
+  "SEG-021-T014: extended arithmetic" section at the end of this document).
 - `add_immediate` (`ADDI`) is not a C4-represented `M68kIrKind` and is unaffected (it remains a
   `missing_dispatcher` gap).
 - **SEG-007-T153 update:** `add_quick` (`ADDQ`) is now C4-represented and reuses this exact
@@ -141,7 +139,7 @@ writes), so no legal ordinary shape is declined and no emitted output changed. D
 
 Not merged into one universal helper: the families differ in routed-stop commit order, so a merge would change
 byte-comparable routed output without evidence of a defect. Remaining declines are missing families rather than
-shape declines, including CMPM, ADDX/SUBX, ABCD/SBCD and NEGX (owned by SEG-021-T014/T015; NBCD, Scc and TAS by T015/T016), which have no decoded `M68kIrKind` (harness reports `unsupported`).
+shape declines, including ABCD/SBCD (owned by SEG-021-T015; NBCD, Scc and TAS by T015/T016), which have no decoded `M68kIrKind` (harness reports `unsupported`). CMPM, ADDX/SUBX and NEGX were completed by SEG-021-T014 (below).
 
 ### MOVEM (`M68kIrKind::movem_transfer`): decision — no change, retain the family-specific mechanism
 
@@ -172,8 +170,8 @@ T003 rows) belongs to SEG-021-T012; T004 adds no MOVEM mode or matrix.
 
 Final T004 conclusion: ordinary single-EA forms use the existing shared EA helpers; MOVE source/destination
 alias/update uses its existing deferred commit; MOVEM keeps its working-EA/mask/order/final-writeback mechanism;
-CMPM and ADDX/SUBX memory forms are future family-local paired postincrement/predecrement work in SEG-021-T014, and
-ABCD/SBCD in SEG-021-T015. No new shared production mechanism is required.
+CMPM and ADDX/SUBX memory forms are the family-local paired postincrement/predecrement work delivered by SEG-021-T014, and
+ABCD/SBCD are SEG-021-T015. No new shared production mechanism is required.
 
 ## SEG-021-T006: SUB / SUBA / SUBQ / SUBI and CMP / CMPA / CMPI
 
@@ -278,3 +276,23 @@ runtime-routed C4 path (needed for the vector-5 raise), so the T003 harness's di
 cannot exercise or credit them (see `docs/testing/m68k-conformance-harness.md`'s own SEG-021-T010 section for the full
 routing rationale); MULS.W/MULU.W's full 11-form source-EA matrix is validated against pinned Musashi through T003 rows
 instead.
+
+## SEG-021-T014: extended arithmetic (ADDX, SUBX, NEGX, NEG, CMPM)
+
+- New decoded/lifted kinds `add_extended`, `subtract_extended`, `negate_extended` (NEGX) and `compare_memory` (CMPM);
+  NEG keeps `negate_word` (historical name, every size). Legality is encoded in `libs/cpu/m68k` from the Motorola
+  encodings (ADDX/SUBX `1101/1001 Rx 1 ss 00 R Ry`, CMPM `1011 Ax 1 ss 001 Ay`, NEG/NEGX `0100 0100/0000 ss ea`
+  with every data-alterable EA), never from the T001 dataset.
+- One shared semantic owner, `M68kExtendedArithmeticSpecification` (`effects.hpp`), gives ADDX/SUBX/NEGX their result,
+  X=C, N, V and the sticky Z rule (Z cleared by a non-zero result, otherwise unchanged; pre-operation X is an input).
+  NEGX is SUBX with destination 0. CMPM reuses `M68kSubtractionResultSpecification` with X preserved.
+- Memory pairs use the operation-local deferred address commit of this contract (`m68k_emit_extended_pair`,
+  `libs/codegen/c11/src/m68k.cpp`): each An is snapshotted into one local, the destination local starts from the source
+  local when both name the same register (source update first, as on the MC68000), the A7 byte step is two per operand,
+  and both live registers are committed after every access and the CCR computation, PC last. A routed stop or window
+  guard returns before any architectural write. NEG/NEGX share one one-address RMW lowering.
+- C4/AOT: all five are represented C4 kinds with no gap rows (NEG/NEGX absolute operands retain the NOT-shaped
+  destination read/write facts; auto-updating, indexed and register operands need none) and are admitted family-level
+  to immutable-ROM AOT. Static discovery resolves NEG/NEGX like NOT.
+- Timing: Table 8-4 literal rows (ADDX/SUBX `Dy,Dx` 4/4/8, `-(Ay),-(Ax)` 18/18/30; CMPM 12/12/20) and Table 8-6 NEGX rows
+  via the existing single-operand row.

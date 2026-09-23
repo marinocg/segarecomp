@@ -59,7 +59,11 @@ const char *m68k_instruction_kind_name(M68kInstructionKind kind) noexcept {
   case M68kInstructionKind::movea: return "movea";
   case M68kInstructionKind::clr: return "clr";
   case M68kInstructionKind::not_operand: return "not";
-  case M68kInstructionKind::negate_word: return "neg_w";
+  case M68kInstructionKind::negate_word: return "neg";
+  case M68kInstructionKind::negate_extended: return "negx";
+  case M68kInstructionKind::add_extended: return "addx";
+  case M68kInstructionKind::subtract_extended: return "subx";
+  case M68kInstructionKind::compare_memory: return "cmpm";
   case M68kInstructionKind::lea: return "lea";
   case M68kInstructionKind::jmp: return "jmp";
   case M68kInstructionKind::jsr: return "jsr";
@@ -535,10 +539,57 @@ struct M68kEaFieldOutcome {
   const auto mode3 = static_cast<std::uint8_t>((word >> 3U) & 0x7U);
   const auto reg3 = static_cast<std::uint8_t>(word & 0x7U);
   const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3,
-                                       m68k_ea_data_alterable, size);
+                                       m68k_ea_negate_operand, size);
   if (!dst.ok) return dst.failure;
   return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::negate_word, size, {},
                                     dst.ea, dst.extension_bytes);
+}
+
+// SEG-021-T014: NEGX <ea> (0100 0000 ss mmmrrr). Same word shape as NEG/NOT/CLR
+// with operation-select 0000; size field 11 is MOVE from SR (decoded separately).
+[[nodiscard]] std::optional<M68kDecodeResult> m68k_decode_general_negx(
+    const DecodeSource &source, std::span<const std::uint8_t> image, std::size_t offset, std::uint64_t available,
+    const std::array<std::uint8_t, 2> &bytes, std::uint16_t word) {
+  if ((word & UINT16_C(0xFF00)) != UINT16_C(0x4000) || (word & UINT16_C(0x00C0)) == UINT16_C(0x00C0))
+    return std::nullopt;
+  const auto size = m68k_size_from_tst_clr_field(static_cast<std::uint8_t>((word >> 6U) & 0x3U));
+  const auto mode3 = static_cast<std::uint8_t>((word >> 3U) & 0x7U);
+  const auto reg3 = static_cast<std::uint8_t>(word & 0x7U);
+  const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3,
+                                       m68k_ea_negate_operand, size);
+  if (!dst.ok) return dst.failure;
+  return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::negate_extended, size, {},
+                                    dst.ea, dst.extension_bytes);
+}
+
+// SEG-021-T014: ADDX/SUBX/CMPM. Fixed-shape, EA-field-free encodings (no extension words):
+//   ADDX  1101 Rx 1 ss 00 R Ry   (0xD100 under mask 0xF130)
+//   SUBX  1001 Rx 1 ss 00 R Ry   (0x9100 under mask 0xF130)
+//   CMPM  1011 Ax 1 ss 001 Ay    (0xB108 under mask 0xF138)
+// Size field 11 selects ADDA/SUBA/CMPA instead, so it never decodes here. R (bit 3) selects the
+// data-register pair (0) or the -(Ay),-(Ax) memory pair (1).
+[[nodiscard]] std::optional<M68kDecodeResult> m68k_decode_general_extended_pair(
+    const DecodeSource &source, std::span<const std::uint8_t> image, std::size_t offset,
+    const std::array<std::uint8_t, 2> &bytes, std::uint16_t word) {
+  if ((word & UINT16_C(0x00C0)) == UINT16_C(0x00C0)) return std::nullopt;
+  const auto size = m68k_size_from_tst_clr_field(static_cast<std::uint8_t>((word >> 6U) & 0x3U));
+  const auto rx = static_cast<std::uint8_t>((word >> 9U) & 0x7U);
+  const auto ry = static_cast<std::uint8_t>(word & 0x7U);
+  M68kInstructionKind kind{};
+  M68kEaMode mode{};
+  if ((word & UINT16_C(0xF130)) == UINT16_C(0xD100) || (word & UINT16_C(0xF130)) == UINT16_C(0x9100)) {
+    kind = (word & UINT16_C(0xF000)) == UINT16_C(0xD000) ? M68kInstructionKind::add_extended
+                                                         : M68kInstructionKind::subtract_extended;
+    mode = (word & UINT16_C(0x0008)) != 0U ? M68kEaMode::address_predec : M68kEaMode::data_register;
+  } else if ((word & UINT16_C(0xF138)) == UINT16_C(0xB108)) {
+    kind = M68kInstructionKind::compare_memory;
+    mode = M68kEaMode::address_postinc;
+  } else {
+    return std::nullopt;
+  }
+  const M68kEffectiveAddress src{mode, ry, 0, 0, 0, 0};
+  const M68kEffectiveAddress dst{mode, rx, 0, 0, 0, 0};
+  return m68k_finish_general_decode(source, image, offset, bytes, kind, size, src, dst, 0U);
 }
 
 // M68000PM/AD Rev. 1, §2 and §4 CMP/CMPI/CMPA entries.  These use the
@@ -1574,6 +1625,9 @@ M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, De
     // by this block (it never reaches it).
      if (profile == M68kDecodeProfile::general_startup || word == 0x23C0U || word == 0x2239U || word == 0x4EB9U) {
       if (auto general = m68k_decode_general_move(source, image, offset, available, bytes, word)) return *general;
+      // SEG-021-T014: ADDX/SUBX/CMPM share the ADD/SUB/CMP primary nibbles; their fixed opmode-4..6
+      // register/predecrement and CMPM shapes must be claimed before the ordinary EA decoders.
+      if (auto general = m68k_decode_general_extended_pair(source, image, offset, bytes, word)) return *general;
         if (auto general = m68k_decode_general_compare(source, image, offset, available, bytes, word)) return *general;
         if (auto general = m68k_decode_general_add(source, image, offset, available, bytes, word)) return *general;
          if (auto general = m68k_decode_general_subtract(source, image, offset, available, bytes, word)) return *general;
@@ -1581,6 +1635,7 @@ M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, De
       if (auto general = m68k_decode_general_clr(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_not(source, image, offset, available, bytes, word)) return *general;
        if (auto general = m68k_decode_general_negate_word(source, image, offset, available, bytes, word)) return *general;
+      if (auto general = m68k_decode_general_negx(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_move_to_sr(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_move_from_sr(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_move_to_ccr(source, image, offset, available, bytes, word)) return *general;

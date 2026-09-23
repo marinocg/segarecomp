@@ -177,6 +177,10 @@ DirectInstruction decode(std::span<const std::uint8_t> image, const DirectFlowPr
   case M68kInstructionKind::clr:
   case M68kInstructionKind::not_operand:
   case M68kInstructionKind::negate_word:
+  case M68kInstructionKind::negate_extended:
+  case M68kInstructionKind::add_extended:
+  case M68kInstructionKind::subtract_extended:
+  case M68kInstructionKind::compare_memory:
   case M68kInstructionKind::lea:
   case M68kInstructionKind::jmp:
   case M68kInstructionKind::jsr:
@@ -250,6 +254,10 @@ DirectFlowIrOperation project_direct_operation(const M68kIrOperation &lifted) {
   case M68kIrKind::write_clr:
   case M68kIrKind::logical_not:
   case M68kIrKind::negate_word:
+  case M68kIrKind::negate_extended:
+  case M68kIrKind::add_extended:
+  case M68kIrKind::subtract_extended:
+  case M68kIrKind::compare_memory:
   case M68kIrKind::load_effective_address:
   case M68kIrKind::jump_general:
   case M68kIrKind::call_general:

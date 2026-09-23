@@ -1490,6 +1490,9 @@ bool valid_c4_static_memory_fact(
   // SEG-021-T009: the memory-word shift/rotate forms are one-address RMW operations with the same
   // destination_read/destination_write shape as NOT (the register form never carries a fact).
   case M68kInstructionKind::shift_rotate:
+  // SEG-021-T014: NEG/NEGX are one-address RMW operands with NOT's fact shape.
+  case M68kInstructionKind::negate_word:
+  case M68kInstructionKind::negate_extended:
   case M68kInstructionKind::not_operand:
     // SEG-007-T168: NOT has no second operand at all (unlike SUBQ's
     // quick-immediate source); its sole destination is a full RMW operand,
@@ -2023,6 +2026,13 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   // body for it, matching write_clr/add's own already-represented shape.
   case M68kIrKind::logical_not:
   case M68kIrKind::negate_word:
+  // SEG-021-T014: NEGX shares NEG's one-address RMW lowering; ADDX/SUBX/CMPM are register-pair or
+  // predecrement/postincrement-pair operations (always Dn or auto-updating operands, never a retained
+  // fact) lowered by `m68k_emit_extended_pair` through the operation-local deferred address commit.
+  case M68kIrKind::negate_extended:
+  case M68kIrKind::add_extended:
+  case M68kIrKind::subtract_extended:
+  case M68kIrKind::compare_memory:
   case M68kIrKind::logical_and_immediate:
   case M68kIrKind::write_move:
   case M68kIrKind::write_movea:
@@ -2383,7 +2393,9 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     // destination still needs its retained fact exactly as before.
     if (m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
-  } else if (operation.kind == M68kIrKind::logical_not || operation.kind == M68kIrKind::shift_rotate_memory) {
+  } else if (operation.kind == M68kIrKind::logical_not || operation.kind == M68kIrKind::shift_rotate_memory ||
+             operation.kind == M68kIrKind::negate_word || operation.kind == M68kIrKind::negate_extended) {
+    // SEG-021-T014: NEG/NEGX share NOT's one-address RMW gap shape.
     // SEG-007-T168: NOT has no source operand at all (unlike the sibling
     // logical family AND/OR/EOR/ANDI/ORI/EORI, which always carry one, just
     // never a memory one for the immediate forms). Its sole destination is
@@ -3046,6 +3058,9 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
       break;
     // SEG-021-T009: memory-word shift/rotate: same one-address RMW fact shape as NOT.
     case M68kInstructionKind::shift_rotate:
+    // SEG-021-T014: NEG/NEGX are one-address RMW operands with NOT's fact shape.
+    case M68kInstructionKind::negate_word:
+    case M68kInstructionKind::negate_extended:
     case M68kInstructionKind::not_operand:
       // SEG-007-T168: NOT has no second operand at all (unlike AND/OR/EOR);
       // its sole destination is a full RMW operand needing both
@@ -3240,6 +3255,8 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
           kind != M68kInstructionKind::clr && kind != M68kInstructionKind::movea &&
           // SEG-021-T005: `tst` and `not` lower their own auto-updating operand (deferred commit).
           kind != M68kInstructionKind::tst && kind != M68kInstructionKind::not_operand &&
+          // SEG-021-T014: NEG/NEGX lower their own auto-updating operand (deferred commit).
+          kind != M68kInstructionKind::negate_word && kind != M68kInstructionKind::negate_extended &&
           // SEG-021-T007: AND/OR/EOR and ANDI/ORI/EORI lower their own auto-updating operand (deferred commit).
           kind != M68kInstructionKind::logical_and && kind != M68kInstructionKind::logical_or &&
           kind != M68kInstructionKind::eor && kind != M68kInstructionKind::andi &&
@@ -3305,6 +3322,13 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
                         M68kInstructionKind::not_operand) ||
           !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
                         M68kInstructionKind::not_operand))) ||
+        // SEG-021-T014: NEG/NEGX: one-address RMW like NOT.
+        ((instruction->kind == M68kInstructionKind::negate_word ||
+          instruction->kind == M68kInstructionKind::negate_extended) &&
+         instruction->destination_ea.mode != M68kEaMode::data_register &&
+         (!require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_read, instruction->kind) ||
+          !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
+                        instruction->kind))) ||
         // SEG-021-T009: memory-word shift/rotate: one-address RMW like NOT.
         (instruction->kind == M68kInstructionKind::shift_rotate &&
          instruction->destination_ea.mode != M68kEaMode::data_register &&
@@ -4970,16 +4994,35 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
             << "#undef pc\n";
         break;
       }
+      case M68kIrKind::negate_extended:
       case M68kIrKind::negate_word: {
-        // The selected NEG form is Dn-direct, so no retained memory fact is
-        // required. It still lowers through the ordinary routed C4 context.
+        // SEG-021-T014: NEG/NEGX are one-address RMW operands with NOT's fact-lookup/region-threading
+        // discipline (a foldable absolute destination needs a retained synthetic-work-RAM fact; every
+        // other data-alterable mode, including auto-updating and indexed ones, is routed at runtime).
+        // Their shared lowering advances the configured program-counter expression directly, so unlike
+        // NOT's legacy bare-`pc` body it must not pass through the macro bridge, which would expand
+        // `runtime->pc` into `runtime->runtime->pc` under strict C11.
+        const auto *destination = fact_for(M68kStaticMemoryFactRole::destination_write);
+        if (destination != nullptr && destination->region != M68kAbsoluteOperandRegion::synthetic_work_ram)
+          return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
+        if (destination == nullptr && m68k_is_statically_foldable_control_ea(found->second->destination_ea))
+          return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         auto routed = memory;
         routed.runtime_routing = true;
         routed.runtime_object = "runtime";
-        // NEG's shared lowering advances the configured program-counter
-        // expression directly. Unlike NOT's legacy bare-`pc` body it must
-        // not pass through the macro bridge, which would expand
-        // `runtime->pc` into `runtime->runtime->pc` under strict C11.
+        if (destination != nullptr) routed.test_operand_access = genesis_lowering_access(destination->region);
+        out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
+        break;
+      }
+      // SEG-021-T014: ADDX/SUBX (`Dy,Dx` and `-(Ay),-(Ax)`) and CMPM (`(Ay)+,(Ax)+`) never carry an absolute
+      // or PC-relative operand, so no retained fact exists or is needed; the memory pairs are lowered by the
+      // operation-local deferred address commit and advance `memory->program_counter` directly (no bridge).
+      case M68kIrKind::add_extended:
+      case M68kIrKind::subtract_extended:
+      case M68kIrKind::compare_memory: {
+        auto routed = memory;
+        routed.runtime_routing = true;
+        routed.runtime_object = "runtime";
         out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
         break;
       }

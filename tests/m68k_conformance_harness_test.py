@@ -132,9 +132,11 @@ def main():
         check(mc.render(report) == mc.render(again), "report must be byte-identical across runs")
 
         # --- unsupported forms are reported as unsupported, never as divergence ------------------
+        # (RTR is a legal base-MC68000 form the pipeline does not implement; choose another unsupported operandless
+        # form here if a later task supplies it.)
         negx = copy.deepcopy(table)
-        negx["rows"] = [{"id": "negx.unary.w.none.dn", "form": "negx.unary.w.none.dn", "bind": {"x": "ea.dst"},
-                         "profile": "unary_sweep"}]
+        negx["rows"] = [{"id": "rtr.none.none.none.none", "form": "rtr.none.none.none.none",
+                         "profile": "state_modes"}]
         rep = mc.run(negx, forms, emitter, cc, None, scratch / "unsupported")
         check(rep["rows"][0]["status"] == "unsupported" and rep["rows"][0]["passing_words"] == 0,
               "an unsupported form must be reported as unsupported")

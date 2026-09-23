@@ -272,6 +272,11 @@ inline constexpr M68kEaLegalMask m68k_ea_data_alterable_with_index =
     m68k_ea_absolute_word | m68k_ea_absolute_long;
 inline constexpr M68kEaLegalMask m68k_ea_move_family_destination = m68k_ea_data_alterable_with_index;
 inline constexpr M68kEaLegalMask m68k_ea_clr_not_operand = m68k_ea_data_alterable_with_index;
+// SEG-021-T014: NEG/NEGX operand: data alterable (Dn plus every memory-alterable mode including
+// `(d8,An,Xn)`), written from the Motorola M68000 Family Programmer's Reference Manual NEG/NEGX
+// entries; independent of the T001 dataset. ADDX/SUBX/CMPM have no EA field (register-pair or
+// predecrement/postincrement pair shapes fixed by opcode bits, decoded in decode.cpp).
+inline constexpr M68kEaLegalMask m68k_ea_negate_operand = m68k_ea_data_alterable_with_index;
 // SEG-007-T137: brief-format address-register indexed addressing,
 // `(d8,An,Xn)`, is likewise a legal source operand for the shared
 // ADD/SUB/CMP/AND/OR/ADDA/SUBA/CMPA register-form family on the base
@@ -491,9 +496,19 @@ enum class M68kInstructionKind {
   // complements it, and writes the result back -- a genuine one-address
   // read-modify-write, exactly like `shift_rotate`'s memory form.
   not_operand,
-  // NEG.W Dn (0100 0100 01 000 rrr). This bounded capability deliberately
-  // excludes byte/long and every memory-EA form.
+  // NEG <ea> (0100 0100 ss mmmrrr): byte/word/long, every data-alterable EA
+  // (the historical `negate_word` name is retained; the size lives in
+  // `size`). `destination_ea` is the sole read-then-written operand.
   negate_word,
+  // SEG-021-T014: the extended-arithmetic family (Motorola M68000 Family
+  // Programmer's Reference Manual, ADDX/SUBX/NEGX/CMPM entries). NEGX <ea>
+  // (0100 0000 ss mmmrrr, data-alterable): one-address read-modify-write like
+  // NEG, computing 0 - destination - X. ADDX/SUBX (`1101/1001 Rx 1 ss 00 R Ry`)
+  // carry the source in `source_ea` and the destination in `destination_ea`:
+  // R=0 -> `Dy,Dx` (both data_register), R=1 -> `-(Ay),-(Ax)` (both
+  // address_predec). CMPM (`1011 Ax 1 ss 001 Ay`) carries `(Ay)+` in
+  // `source_ea` and `(Ax)+` in `destination_ea`; it is a compare (X preserved).
+  negate_extended, add_extended, subtract_extended, compare_memory,
   // SEG-007-T025 (Batch C, C1): SWAP Dn, EXT.W Dn, EXT.L Dn. Register-only
   // forms -- no EA mode beyond Dn, no memory access. `destination_ea` (not
   // `source_ea`) carries the single Dn operand these read-then-write,

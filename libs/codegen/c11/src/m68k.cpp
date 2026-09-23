@@ -517,6 +517,99 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
   return true;
 }
 
+// SEG-021-T014: lowering of ADDX, SUBX and CMPM (the register-pair, -(Ay),-(Ax) and (Ay)+,(Ax)+ shapes).
+// Register pairs read both Dn, compute through M68kExtendedArithmeticSpecification and write the sized
+// destination. Memory pairs use the operation-local deferred address-register commit technique of
+// docs/architecture/c4-add-family-auto-update-commit-contract.md: each An is snapshotted into one local
+// (the destination local starts from the source local when both name the same register, so an aliased
+// pair sees the source's update first, as the MC68000 does), pre/post-adjusted on the locals only, every
+// access (routed or linear-window guarded) uses them, and both live registers are committed in two
+// statements strictly after every access and the CCR computation; a routed stop or window-guard exit
+// happens before any architectural write. The A7 byte step is 2, per operand register.
+// Returns false when the operation shape is not one of the three legal forms (nothing is emitted).
+[[nodiscard]] bool m68k_emit_extended_pair(std::ostringstream &output, const M68kIrOperation &operation,
+                                           std::string_view data_registers, std::string_view status_register,
+                                           const M68kMemoryEmissionContext &memory) {
+  const bool compare = operation.kind == M68kIrKind::compare_memory;
+  const auto kind = operation.kind == M68kIrKind::add_extended ? M68kExtendedArithmeticKind::add
+                                                                : M68kExtendedArithmeticKind::subtract;
+  const bool registers = operation.source_ea.mode == M68kEaMode::data_register &&
+                         operation.destination_ea.mode == M68kEaMode::data_register && !compare;
+  const auto memory_mode = compare ? M68kEaMode::address_postinc : M68kEaMode::address_predec;
+  const bool memory_pair = operation.source_ea.mode == memory_mode && operation.destination_ea.mode == memory_mode;
+  if (!registers && !memory_pair) return false;
+  const auto dn = [&](unsigned reg) { return std::string(data_registers) + "[" + std::to_string(reg) + "]"; };
+  const auto an = [&](unsigned reg) { return std::string(memory.address_registers) + "[" + std::to_string(reg) + "]"; };
+  const auto size = operation.size;
+  std::ostringstream body;
+  unsigned temp_ordinal = 0U;
+  if (registers) {
+    body << "{ ";
+    M68kExtendedArithmeticSpecification::emit_c_compute(body, status_register, kind,
+                                                        dn(operation.source_ea.reg), dn(operation.destination_ea.reg),
+                                                        size);
+    std::ostringstream write_prelude;
+    const auto write = m68k_emit_ea_write(operation.destination_ea, size, data_registers, memory, "xa_result",
+                                          write_prelude, temp_ordinal);
+    if (!write.ok) return false;
+    body << write_prelude.str() << write.expression << ' ';
+    M68kExtendedArithmeticSpecification::emit_c_update(body, status_register, kind, size);
+    body << "}\n";
+  } else {
+    const auto width = static_cast<std::uint32_t>(size);
+    const auto step = [&](unsigned reg) {
+      return (reg == 7U && size == M68kMemoryAccessWidth::byte) ? 2U : width;
+    };
+    const auto src_reg = static_cast<unsigned>(operation.source_ea.reg);
+    const auto dst_reg = static_cast<unsigned>(operation.destination_ea.reg);
+    const bool predecrement = memory_mode == M68kEaMode::address_predec;
+    const auto read_at = [&](const char *local, const char *guard_local, std::string &expression) {
+      if (memory.runtime_routing) {
+        m68k_emit_routed_read(body, local, size, memory, expression, temp_ordinal);
+      } else {
+        m68k_emit_runtime_ea_guard(body, guard_local, local, size, memory);
+        expression = m68k_emit_ram_read_expr(
+            memory.ram_array, std::string(guard_local) + " - UINT32_C(0x" + hex(memory.linear_memory_begin, 8) + ")",
+            size);
+      }
+    };
+    body << "{\nuint32_t m68k_xa_src_ea = " << an(src_reg) << ";\n";
+    if (predecrement) body << "m68k_xa_src_ea -= UINT32_C(" << step(src_reg) << ");\n";
+    std::string src_expr;
+    read_at("m68k_xa_src_ea", "m68k_xa_src_addr", src_expr);
+    body << "const uint32_t xa_src_value = " << src_expr << ";\n";
+    if (!predecrement) body << "m68k_xa_src_ea += UINT32_C(" << step(src_reg) << ");\n";
+    body << "uint32_t m68k_xa_dst_ea = " << (src_reg == dst_reg ? std::string("m68k_xa_src_ea") : an(dst_reg))
+         << ";\n";
+    if (predecrement) body << "m68k_xa_dst_ea -= UINT32_C(" << step(dst_reg) << ");\n";
+    std::string dst_expr;
+    read_at("m68k_xa_dst_ea", "m68k_xa_dst_addr", dst_expr);
+    body << "const uint32_t xa_dst_value = " << dst_expr << ";\n";
+    if (compare) {
+      M68kSubtractionResultSpecification::emit_c_update(body, status_register, "xa_src_value", "xa_dst_value", size,
+                                                        M68kExtendFlagPolicy::preserve);
+    } else {
+      body << "{ ";
+      M68kExtendedArithmeticSpecification::emit_c_compute(body, status_register, kind, "xa_src_value",
+                                                          "xa_dst_value", size);
+      if (memory.runtime_routing) {
+        m68k_emit_routed_write(body, "m68k_xa_dst_ea", size, memory, "xa_result", temp_ordinal);
+      } else {
+        m68k_emit_ram_write_stmts(body, memory.ram_array,
+                                  std::string("m68k_xa_dst_addr - UINT32_C(0x") + hex(memory.linear_memory_begin, 8) + ")",
+                                  "xa_result", size);
+      }
+      M68kExtendedArithmeticSpecification::emit_c_update(body, status_register, kind, size);
+      body << "}\n";
+    }
+    if (!predecrement) body << "m68k_xa_dst_ea += UINT32_C(" << step(dst_reg) << ");\n";
+    body << an(src_reg) << " = m68k_xa_src_ea;\n" << an(dst_reg) << " = m68k_xa_dst_ea;\n}\n";
+  }
+  output << "{\n" << body.str() << memory.program_counter << " += UINT32_C(" << operation.provenance.length.value
+         << ");\n}\n";
+  return true;
+}
+
 // SEG-021-T007: runtime-routed lowering of an auto-updating ((An)+ / -(An)) operand of AND/OR/EOR and
 // ANDI/ORI/EORI, by the same operation-local deferred-address commit technique as
 // m68k_emit_routed_arith_auto_update: An is snapshotted into one local, pre/post-adjusted on the local
@@ -1756,8 +1849,30 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     }
     break;
   }
+  case M68kIrKind::negate_extended:
   case M68kIrKind::negate_word: {
     if (memory != nullptr) {
+      // SEG-021-T014: NEG and NEGX share this one-address RMW lowering. NEGX computes 0 - operand - X
+      // through M68kExtendedArithmeticSpecification (X/C from borrow, sticky Z); NEG's CCR is the plain
+      // subtraction rule with X copied from C.
+      const bool extended = operation.kind == M68kIrKind::negate_extended;
+      const auto emit_neg_compute = [&](std::ostringstream &o) {
+        if (extended) {
+          M68kExtendedArithmeticSpecification::emit_c_compute(o, status_register, M68kExtendedArithmeticKind::subtract,
+                                                              "neg_destination", "UINT32_C(0)", operation.size);
+          o << "const uint32_t neg_result = xa_result; ";
+        } else {
+          o << "const uint32_t neg_result = UINT32_C(0) - neg_destination; ";
+        }
+      };
+      const auto emit_neg_update = [&](std::ostringstream &o) {
+        if (extended)
+          M68kExtendedArithmeticSpecification::emit_c_update(o, status_register, M68kExtendedArithmeticKind::subtract,
+                                                             operation.size);
+        else
+          M68kSubtractionResultSpecification::emit_c_update(o, status_register, "neg_destination", "UINT32_C(0)",
+                                                            operation.size, M68kExtendFlagPolicy::from_carry);
+      };
       const bool auto_destination = operation.destination_ea.mode == M68kEaMode::address_predec ||
                                     operation.destination_ea.mode == M68kEaMode::address_postinc;
       // NEG is a one-address RMW operation. Its two accesses must not
@@ -1783,8 +1898,8 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
               memory->ram_array, std::string(local) + " - UINT32_C(0x" + hex(memory->linear_memory_begin, 8) + ")",
               operation.size);
         }
-        body << "{ const uint32_t neg_destination = " << neg_destination
-             << "; const uint32_t neg_result = UINT32_C(0) - neg_destination; ";
+        body << "{ const uint32_t neg_destination = " << neg_destination << "; ";
+        emit_neg_compute(body);
         if (memory->runtime_routing) {
           m68k_emit_routed_write(body, "m68k_neg_auto_ea", operation.size, *memory, "neg_result", temp_ordinal);
         } else {
@@ -1795,8 +1910,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         }
         if (operation.destination_ea.mode == M68kEaMode::address_postinc)
           body << "m68k_neg_auto_ea += UINT32_C(" << step << ");\n";
-        M68kSubtractionResultSpecification::emit_c_update(body, status_register, "neg_destination", "UINT32_C(0)",
-                                                           operation.size, M68kExtendFlagPolicy::from_carry);
+        emit_neg_update(body);
         body << " }\n" << an_expr << " = m68k_neg_auto_ea;\n";
         output << "{\n" << body.str() << memory->program_counter << " += UINT32_C("
                << operation.provenance.length.value << ");\n}\n";
@@ -1807,22 +1921,27 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
       const auto destination = m68k_emit_ea_read(operation.destination_ea, operation.size, data_registers,
                                                   *memory, prelude, temp_ordinal);
       if (destination.ok) {
-        output << "{\n" << prelude.str() << "{ const uint32_t neg_destination = "
-               << destination.expression << "; const uint32_t neg_result = UINT32_C(0) - neg_destination; ";
+        output << "{\n" << prelude.str() << "{ const uint32_t neg_destination = " << destination.expression << "; ";
+        emit_neg_compute(output);
         std::ostringstream write_prelude;
         const auto write = m68k_emit_ea_write(operation.destination_ea, operation.size, data_registers, *memory,
                                               "neg_result", write_prelude, temp_ordinal);
         if (write.ok) {
           output << write_prelude.str() << write.expression << ' ';
-          M68kSubtractionResultSpecification::emit_c_update(output, status_register, "neg_destination",
-                                                            "UINT32_C(0)", operation.size,
-                                                            M68kExtendFlagPolicy::from_carry);
+          emit_neg_update(output);
           output << " }\n";
         }
         output << destination.postlude << memory->program_counter << " += UINT32_C("
                << operation.provenance.length.value << ");\n}\n";
       }
     }
+    break;
+  }
+  case M68kIrKind::add_extended:
+  case M68kIrKind::subtract_extended:
+  case M68kIrKind::compare_memory: {
+    // SEG-021-T014: see m68k_emit_extended_pair.
+    if (memory != nullptr) (void)m68k_emit_extended_pair(output, operation, data_registers, status_register, *memory);
     break;
   }
   // SEG-007-T025 (Batch C, C1): SWAP/EXT.W/EXT.L. Each reads and writes the

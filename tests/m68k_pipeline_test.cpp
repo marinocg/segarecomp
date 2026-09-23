@@ -493,7 +493,7 @@ void logical_forms_decode_and_share_flags() {
       std::vector<std::uint8_t>{0xC1U, 0x90U}, source(), segarecomp::M68kDecodeProfile::general_startup));
   expect(reverse_and.destination_ea.mode == segarecomp::M68kEaMode::address_indirect,
          "reverse AND accepts a memory-alterable RMW destination");
-  for (const auto &bytes : std::array<std::array<std::uint8_t, 2>, 8>{{{{0x00U,0x3CU}},{{0x00U,0x7CU}},{{0x02U,0x3CU}},{{0x02U,0x7CU}},{{0x0AU,0x3CU}},{{0x0AU,0x7CU}},{{0xC1U,0x08U}},{{0xB1U,0x08U}}}}) {
+  for (const auto &bytes : std::array<std::array<std::uint8_t, 2>, 7>{{{{0x00U,0x3CU}},{{0x00U,0x7CU}},{{0x02U,0x3CU}},{{0x02U,0x7CU}},{{0x0AU,0x3CU}},{{0x0AU,0x7CU}},{{0xC1U,0x08U}}}}) {  // SEG-021-T014: 0xB108 is CMPM.B (A0)+,(A0)+, no longer a rejected EOR
     const auto rejected = std::get<segarecomp::RejectedM68kDecode>(segarecomp::decode_m68k_instruction(
         bytes, source(), segarecomp::M68kDecodeProfile::general_startup));
     expect(rejected.outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction,
@@ -691,9 +691,9 @@ void batch_b_whitelist_collision_ea_and_truncation_audit() {
   // SEG-007-T222: {0xC0,0xC0} (MULU.W) and {0x80,0xC0} (DIVU.W) are removed
   // from this fail-closed set -- both are now supported instructions (see
   // M68kInstructionKind::multiply_unsigned_word/divide_unsigned_word).
-  for (const auto &bytes : std::array<std::array<std::uint8_t, 2>, 4>{{
-           {{0xB1U,0x08U}},
-           {{0x91U,0x08U}}, {{0xD1U,0x08U}}, {{0x00U,0x3CU}}}}) {
+  // SEG-021-T014: {0xB1,0x08} (CMPM), {0x91,0x08} (SUBX) and {0xD1,0x08} (ADDX) are now supported
+  // instructions and are removed from this fail-closed set.
+  for (const auto &bytes : std::array<std::array<std::uint8_t, 2>, 1>{{{{0x00U,0x3CU}}}}) {
     const auto result = segarecomp::decode_m68k_instruction(bytes, source(), segarecomp::M68kDecodeProfile::general_startup);
     const auto *rejected = std::get_if<segarecomp::RejectedM68kDecode>(&result);
     expect(rejected != nullptr && rejected->outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction &&
@@ -3214,7 +3214,8 @@ void general_startup_decode_accepts_move_from_sr_for_dn_destinations() {
   expect_unsupported(0x40E0U, "MOVE SR,-(A0) remains fail-closed");
   expect_unsupported(0x40E8U, "MOVE SR,d16(A0) remains fail-closed");
   expect_unsupported(0x40F9U, "MOVE SR,(xxx).L remains fail-closed");
-  expect_unsupported(0x4000U, "NEGX.B D0 (0x4000, same primary family) remains unrecognized/unsupported");
+  // SEG-021-T014: NEGX is now supported (0x4000 is NEGX.B D0); An remains an illegal NEGX operand.
+  expect_unsupported(0x4008U, "NEGX.B A0 (address-register-direct) is never a legal operand -- fail closed");
 
   // SEG-007-T118: MOVE Dn,CCR (0x44C0) is now its own supported move_to_ccr
   // kind; it must not be misdecoded as MOVE from SR.
@@ -4097,11 +4098,14 @@ void general_startup_decode_accepts_pc_indexed_move_source() {
     // The shared ADD/SUB/CMP/AND/OR `m68k_ea_move_source` gate stays
     // unwidened: ADD.W (4,PC,D0.W),D2 (0xD47B 0x0004) must stay fail-closed.
     // SEG-021-T006: reverse-opmode Dn/An encodings are ADDX/SUBX, never ADD/SUB Dn,Dn.
+    // SEG-021-T014: they now decode as the distinct ADDX/SUBX instructions.
     for (const auto &word : {std::vector<std::uint8_t>{0xD3U, 0x00U}, std::vector<std::uint8_t>{0x93U, 0x00U},
                             std::vector<std::uint8_t>{0xD3U, 0x08U}}) {
       const auto addx = decode_general(word);
-      expect(std::get_if<M68kDecodedInstruction>(&addx) == nullptr,
-             "an ADDX/SUBX encoding no longer decodes as ADD/SUB (SEG-021-T006)");
+      const auto *instruction = std::get_if<M68kDecodedInstruction>(&addx);
+      expect(instruction != nullptr && instruction->kind != M68kInstructionKind::add &&
+                 instruction->kind != M68kInstructionKind::sub,
+             "an ADDX/SUBX encoding never decodes as ADD/SUB (SEG-021-T006/T014)");
     }
     // SEG-021-T006: ADD/SUB/CMP admit every base-MC68000 source mode, including (d8,PC,Xn).
     const auto result = decode_general({0xD4U, 0x7BU, 0x00U, 0x04U});
@@ -8297,10 +8301,13 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
   operation.kind = M68kIrKind::negate_word;
   operation.destination_ea.mode = M68kEaMode::address_disp16;
   expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "NEG has its own fact-free non-auto-updating d16(An) admission");
-  operation.destination_ea.mode = M68kEaMode::address_indirect;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "an unproven NEG memory EA remains excluded from immutable-ROM AOT admission");
+         "NEG admits a non-auto-updating d16(An) destination");
+  for (const auto mode : {M68kEaMode::address_indirect, M68kEaMode::address_postinc, M68kEaMode::address_predec,
+                          M68kEaMode::address_index8, M68kEaMode::absolute_word, M68kEaMode::absolute_long}) {
+    operation.destination_ea.mode = mode;
+    expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "SEG-021-T014 family-level admission: NEG admits every data-alterable memory destination");
+  }
   operation.destination_ea.mode = M68kEaMode::data_register;
   operation.kind = M68kIrKind::divide_unsigned_word;
   operation.source_ea.mode = M68kEaMode::data_register;
@@ -26130,8 +26137,8 @@ void negate_word_auto_update_uses_one_deferred_address_commit() {
     const auto decoded = std::get<M68kDecodedInstruction>(decode_m68k_instruction(
         std::array<std::uint8_t, 2>{UINT8_C(0x44), opcode}, source(), M68kDecodeProfile::general_startup));
     const auto operation = lift_m68k_instruction(decoded);
-    expect(decoded.destination_ea.mode == mode && !m68k_operation_is_immutable_rom_aot_safe(operation, false),
-           "NEG auto-update form remains decoder-admitted but excluded from immutable-ROM AOT");
+    expect(decoded.destination_ea.mode == mode && m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "SEG-021-T014: NEG auto-update form is decoder-admitted and admitted to immutable-ROM AOT");
     GenesisM68kEmissionContext memory{"ram", "a", "fi", "fc", "fd", 0U, std::nullopt, 0U, {}, {}};
     memory.runtime_routing = true;
     memory.runtime_object = "runtime";
@@ -26153,6 +26160,371 @@ void negate_word_auto_update_uses_one_deferred_address_commit() {
                emitted.find("m68k_routed_addr_3 = (m68k_neg_auto_ea)") != std::string::npos,
            "NEG read and write provenance bind the same deferred auto-update address");
   }
+}
+
+// SEG-021-T014: ADDX/SUBX/NEGX/NEG/CMPM. Legality is asserted from the Motorola encodings, independently of
+// the T001 dataset (production never reads it).
+// SEG-021-T014: immutable-ROM AOT fixture for the extended-arithmetic family. Same filler prefix as the NEG/PEA
+// fixtures, then seven independent AOT roots (the strict-C11 generated-native proof executes them as a chain).
+namespace extended_arithmetic_aot_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000F00U;
+const std::vector<std::uint8_t> image{
+    0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U,
+    0xD1U, 0x49U,  // F08 ADDX.W -(A1),-(A0)
+    0xB1U, 0x49U,  // F0A CMPM.W (A1)+,(A0)+
+    0x40U, 0x98U,  // F0C NEGX.L (A0)+
+    0x40U, 0x03U,  // F0E NEGX.B D3
+    0x91U, 0x01U,  // F10 SUBX.B D1,D0
+    0xDFU, 0x0FU,  // F12 ADDX.B -(A7),-(A7)
+    0xB5U, 0x4AU,  // F14 CMPM.W (A2)+,(A2)+
+};
+constexpr std::uint32_t first_root = base + 0x08U;
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T014/extended-arithmetic-aot-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base}, {{}, static_cast<std::uint32_t>(base + image.size())},
+                             {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace extended_arithmetic_aot_fixture
+
+int emit_extended_arithmetic_aot_source() {
+  using namespace segarecomp;
+  using namespace extended_arithmetic_aot_fixture;
+  auto program = program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
+void extended_arithmetic_forms_decode_lift_declare_effects_and_timing() {
+  using namespace segarecomp;
+  const auto decode_bytes = [](std::vector<std::uint8_t> bytes) {
+    return decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup);
+  };
+  const auto width_of = [](unsigned field) {
+    return field == 0U ? M68kMemoryAccessWidth::byte : field == 1U ? M68kMemoryAccessWidth::word
+                                                                    : M68kMemoryAccessWidth::long_word;
+  };
+  for (const auto &[base, kind, ir] : std::array<std::tuple<unsigned, M68kInstructionKind, M68kIrKind>, 2>{{
+           {0xD100U, M68kInstructionKind::add_extended, M68kIrKind::add_extended},
+           {0x9100U, M68kInstructionKind::subtract_extended, M68kIrKind::subtract_extended}}}) {
+    for (unsigned field = 0U; field < 3U; ++field)
+      for (unsigned memory = 0U; memory < 2U; ++memory)
+        for (unsigned rx = 0U; rx < 8U; ++rx)
+          for (unsigned ry = 0U; ry < 8U; ++ry) {
+            const unsigned word = base | (rx << 9U) | (field << 6U) | (memory << 3U) | ry;
+            const auto decoded = decode_bytes({static_cast<std::uint8_t>(word >> 8U), static_cast<std::uint8_t>(word)});
+            const auto *instruction = std::get_if<M68kDecodedInstruction>(&decoded);
+            const auto mode = memory != 0U ? M68kEaMode::address_predec : M68kEaMode::data_register;
+            const bool shape = instruction != nullptr && instruction->kind == kind &&
+                               instruction->size == width_of(field) && instruction->source_ea.mode == mode &&
+                               instruction->destination_ea.mode == mode && instruction->source_ea.reg == ry &&
+                               instruction->destination_ea.reg == rx && instruction->provenance.length.value == 2U;
+            expect(shape, "ADDX/SUBX decode Dy,Dx and -(Ay),-(Ax) for every size and register pair");
+            if (!shape) continue;
+            const auto operation = lift_m68k_instruction(*instruction);
+            const auto effect = m68k_operation_effect(operation);
+            const auto cycles = m68k_instruction_cycles(operation);
+            const unsigned expected_cycles = memory != 0U ? (field == 2U ? 30U : 18U) : (field == 2U ? 8U : 4U);
+            const auto a_mask = memory != 0U ? static_cast<std::uint8_t>((1U << ry) | (1U << rx)) : std::uint8_t{0};
+            const auto d_mask = memory == 0U ? static_cast<std::uint8_t>(1U << rx) : std::uint8_t{0};
+            expect(operation.kind == ir && effect.affects_condition_codes &&
+                       effect.extend_flag_policy == M68kExtendFlagPolicy::from_carry &&
+                       effect.register_write_footprint_complete && effect.address_register_write_mask == a_mask &&
+                       effect.data_register_write_mask == d_mask && effect.pc == M68kPcEffectKind::advance &&
+                       effect.pc_delta == 2U && cycles && *cycles == expected_cycles,
+                   "ADDX/SUBX lift, declare complete CCR/register-write effects and publish Table 8-4 timing");
+            expect(m68k_operation_is_immutable_rom_aot_safe(operation, false) &&
+                       m68k_operation_has_complete_c_emission(operation),
+                   "ADDX/SUBX are admitted to immutable-ROM AOT and have complete C emission");
+          }
+  }
+  for (unsigned field = 0U; field < 3U; ++field)
+    for (unsigned rx = 0U; rx < 8U; ++rx)
+      for (unsigned ry = 0U; ry < 8U; ++ry) {
+        const unsigned word = 0xB108U | (rx << 9U) | (field << 6U) | ry;
+        const auto decoded = decode_bytes({static_cast<std::uint8_t>(word >> 8U), static_cast<std::uint8_t>(word)});
+        const auto *instruction = std::get_if<M68kDecodedInstruction>(&decoded);
+        expect(instruction != nullptr && instruction->kind == M68kInstructionKind::compare_memory &&
+                   instruction->size == width_of(field) && instruction->source_ea.mode == M68kEaMode::address_postinc &&
+                   instruction->destination_ea.mode == M68kEaMode::address_postinc &&
+                   instruction->source_ea.reg == ry && instruction->destination_ea.reg == rx,
+               "CMPM decodes (Ay)+,(Ax)+ for every size and register pair");
+        if (instruction == nullptr) continue;
+        const auto operation = lift_m68k_instruction(*instruction);
+        const auto effect = m68k_operation_effect(operation);
+        const auto cycles = m68k_instruction_cycles(operation);
+        expect(operation.kind == M68kIrKind::compare_memory && effect.affects_condition_codes &&
+                   effect.extend_flag_policy == M68kExtendFlagPolicy::preserve && effect.data_register_write_mask == 0U &&
+                   effect.address_register_write_mask == static_cast<std::uint8_t>((1U << ry) | (1U << rx)) &&
+                   cycles && *cycles == (field == 2U ? 20U : 12U) &&
+                   m68k_operation_is_immutable_rom_aot_safe(operation, false) &&
+                   m68k_operation_has_complete_c_emission(operation),
+               "CMPM preserves X, declares both postincrement updates, publishes timing and is AOT-admitted");
+      }
+  // NEG (0x4400) and NEGX (0x4000) accept every size and every data-alterable EA including (d8,An,Xn).
+  struct UnaryEa { std::vector<std::uint8_t> ext; unsigned mode_reg; M68kEaMode mode; };
+  const std::vector<UnaryEa> eas{{{}, 0x00U, M68kEaMode::data_register},          {{}, 0x10U, M68kEaMode::address_indirect},
+                                 {{}, 0x18U, M68kEaMode::address_postinc},        {{}, 0x20U, M68kEaMode::address_predec},
+                                 {{0x00U, 0x10U}, 0x28U, M68kEaMode::address_disp16},
+                                 {{0x10U, 0x04U}, 0x30U, M68kEaMode::address_index8},
+                                 {{0x40U, 0x00U}, 0x38U, M68kEaMode::absolute_word},
+                                 {{0x00U, 0xFFU, 0x00U, 0x80U}, 0x39U, M68kEaMode::absolute_long}};
+  for (const auto &[base, kind, ir] : std::array<std::tuple<unsigned, M68kInstructionKind, M68kIrKind>, 2>{{
+           {0x4400U, M68kInstructionKind::negate_word, M68kIrKind::negate_word},
+           {0x4000U, M68kInstructionKind::negate_extended, M68kIrKind::negate_extended}}}) {
+    for (unsigned field = 0U; field < 3U; ++field)
+      for (const auto &ea : eas) {
+        const unsigned word = base | (field << 6U) | ea.mode_reg;
+        std::vector<std::uint8_t> bytes{static_cast<std::uint8_t>(word >> 8U), static_cast<std::uint8_t>(word)};
+        bytes.insert(bytes.end(), ea.ext.begin(), ea.ext.end());
+        const auto decoded = decode_bytes(bytes);
+        const auto *instruction = std::get_if<M68kDecodedInstruction>(&decoded);
+        expect(instruction != nullptr && instruction->kind == kind && instruction->size == width_of(field) &&
+                   instruction->destination_ea.mode == ea.mode && instruction->provenance.length.value == bytes.size(),
+               "NEG/NEGX decode every size and every data-alterable EA with exact provenance length");
+        if (instruction == nullptr) continue;
+        const auto operation = lift_m68k_instruction(*instruction);
+        const auto effect = m68k_operation_effect(operation);
+        expect(operation.kind == ir && effect.affects_condition_codes &&
+                   effect.extend_flag_policy == M68kExtendFlagPolicy::from_carry &&
+                   effect.register_write_footprint_complete && m68k_instruction_cycles(operation).has_value() &&
+                   m68k_operation_is_immutable_rom_aot_safe(operation, false) &&
+                   m68k_operation_has_complete_c_emission(operation),
+               "NEG/NEGX declare subtraction effects, timing, AOT admission and complete C emission");
+      }
+    // An is never a legal operand; the immediate/PC-relative modes are not data alterable either.
+    for (const unsigned illegal : {0x08U, 0x3AU, 0x3BU, 0x3CU}) {
+      const auto rejected = decode_bytes({static_cast<std::uint8_t>((base | 0x40U | illegal) >> 8U),
+                                          static_cast<std::uint8_t>(base | 0x40U | illegal), 0x00U, 0x00U});
+      const auto *instruction = std::get_if<M68kDecodedInstruction>(&rejected);
+      expect(instruction == nullptr || instruction->kind != kind,
+             "NEG/NEGX reject An, PC-relative and immediate operands");
+    }
+    // Truncated extension: bounds-safe rejection.
+    const auto truncated = decode_bytes({static_cast<std::uint8_t>((base | 0x69U) >> 8U), static_cast<std::uint8_t>(base | 0x69U)});
+    const auto *failure = std::get_if<RejectedM68kDecode>(&truncated);
+    expect(failure != nullptr && failure->outcome == DecodeOutcome::truncated_instruction,
+           "NEG/NEGX d16(An) with a truncated extension word is a bounds-safe truncation");
+  }
+  // Neighbouring encodings keep their owners: size field 11 is ADDA/SUBA/CMPA/MOVE-from-SR, and
+  // the non-pair bit patterns are ordinary ADD/EOR.
+  const auto expect_kind = [&](std::vector<std::uint8_t> bytes, M68kInstructionKind kind, const char *message) {
+    const auto decoded = decode_bytes(std::move(bytes));
+    const auto *instruction = std::get_if<M68kDecodedInstruction>(&decoded);
+    expect(instruction != nullptr && instruction->kind == kind, message);
+  };
+  expect_kind({0xD1U, 0xC8U}, M68kInstructionKind::adda, "0xD1C8 remains ADDA.L A0,A0");
+  expect_kind({0x91U, 0xC8U}, M68kInstructionKind::suba, "0x91C8 remains SUBA.L A0,A0");
+  expect_kind({0xB1U, 0xC8U}, M68kInstructionKind::cmpa, "0xB1C8 remains CMPA.L A0,A0");
+  expect_kind({0xD1U, 0x20U}, M68kInstructionKind::add, "0xD120 remains ADD.B D0,-(A0)");
+  expect_kind({0xB1U, 0x00U}, M68kInstructionKind::eor, "0xB100 remains EOR.B D0,D0");
+  expect_kind({0x40U, 0xC0U}, M68kInstructionKind::move_from_sr, "0x40C0 remains MOVE from SR");
+}
+
+void extended_arithmetic_host_semantics_have_sticky_zero_and_carry_chains() {
+  using namespace segarecomp;
+  using K = M68kExtendedArithmeticKind;
+  const auto b = M68kMemoryAccessWidth::byte;
+  const auto w = M68kMemoryAccessWidth::word;
+  const auto l = M68kMemoryAccessWidth::long_word;
+  // Z is cleared by a non-zero result and otherwise left unchanged.
+  expect(m68k_extended_arithmetic_ccr(0x2704U, K::add, 0U, 0U, b) == 0x2704U, "ADDX zero result keeps a set Z");
+  expect(m68k_extended_arithmetic_ccr(0x2700U, K::add, 0U, 0U, b) == 0x2700U, "ADDX zero result keeps a clear Z");
+  expect(m68k_extended_arithmetic_ccr(0x2704U, K::add, 1U, 1U, b) == 0x2700U, "ADDX non-zero result clears Z");
+  // X is an input: 0xFF + 0x00 + X carries out to X and C and leaves Z untouched.
+  expect(m68k_extended_arithmetic_ccr(0x2710U, K::add, 0U, 0xFFU, b) == 0x2711U, "ADDX.B 0xFF+0+X carries, Z clear");
+  expect(m68k_extended_arithmetic_ccr(0x2714U, K::add, 0U, 0xFFU, b) == 0x2715U, "ADDX.B 0xFF+0+X carries, Z kept");
+  expect(m68k_extended_arithmetic_ccr(0x2700U, K::add, 0U, 0xFFU, b) == 0x2708U, "ADDX.B 0xFF+0 (no X) is negative, no carry");
+  // Signed overflow: 0x7F + 0 + X = 0x80.
+  expect(m68k_extended_arithmetic_ccr(0x2710U, K::add, 0U, 0x7FU, b) == 0x270AU, "ADDX.B 0x7F+0+X overflows into N and V");
+  // SUBX: dest - src - X.
+  expect(m68k_extended_arithmetic_ccr(0x2710U, K::subtract, 0U, 0U, b) == 0x2719U, "SUBX.B 0-0-X borrows (X,N,C)");
+  expect(m68k_extended_arithmetic_ccr(0x2710U, K::subtract, 0U, 0x80U, b) == 0x2702U, "SUBX.B 0x80-0-X overflows to V");
+  expect(m68k_extended_arithmetic_ccr(0x2714U, K::subtract, 0U, 1U, b) == 0x2704U &&
+             m68k_evaluate_extended_arithmetic(K::subtract, 0U, 1U, true, b).result == 0U,
+         "SUBX.B 1-0-X is zero: Z kept, no borrow so X clears");
+  // NEGX is SUBX with destination 0 and source = operand.
+  expect(m68k_extended_arithmetic_ccr(0x2710U, K::subtract, 0U, 0U, w) == 0x2719U, "NEGX.W 0 with X gives 0xFFFF, X/N/C");
+  expect(m68k_extended_arithmetic_ccr(0x2700U, K::subtract, 0x80000000U, 0U, l) == 0x271BU, "NEGX.L 0x80000000 sets X,N,V,C");
+  // Upper bits of the operands beyond the operation width never matter.
+  expect(m68k_extended_arithmetic_ccr(0x2710U, K::add, 0xABCD1200U, 0x00FFU, b) == 0x2711U, "ADDX.B ignores operand bits above bit 7");
+  // 64-bit chain: (0xFFFFFFFF_FFFFFFFF) + 1 = 0 carry out; Z survives the ADDX because both halves are zero.
+  std::uint16_t sr = 0x2704U;
+  sr = m68k_addition_ccr(sr, 1U, 0xFFFFFFFFU, l);
+  expect((sr & 0x10U) != 0U, "ADD.L low half carries into X");
+  const auto high = m68k_evaluate_extended_arithmetic(K::add, 0U, 0xFFFFFFFFU, (sr & 0x10U) != 0U, l);
+  sr = m68k_extended_arithmetic_ccr(sr, K::add, 0U, 0xFFFFFFFFU, l);
+  expect(high.result == 0U && high.carry && (sr & 0x15U) == 0x15U, "ADDX.L high half completes the 64-bit carry chain with sticky Z");
+  // A non-zero high half clears Z even when the low half was zero.
+  sr = m68k_addition_ccr(0x2704U, 1U, 0xFFFFFFFFU, l);
+  sr = m68k_extended_arithmetic_ccr(sr, K::add, 0U, 0xFFFFFFFEU, l);
+  expect((sr & 0x04U) == 0U && (sr & 0x10U) == 0U, "a non-zero high half clears the chained Z and X");
+  // 64-bit negate of 1: NEG.L low gives FFFFFFFF with borrow, NEGX.L high gives FFFFFFFF.
+  sr = m68k_subtraction_ccr(0x2704U, 1U, 0U, l, M68kExtendFlagPolicy::from_carry);
+  const auto negx_high = m68k_evaluate_extended_arithmetic(K::subtract, 0U, 0U, (sr & 0x10U) != 0U, l);
+  expect((sr & 0x11U) == 0x11U && negx_high.result == 0xFFFFFFFFU, "NEG.L/NEGX.L propagate the borrow through X");
+}
+
+void extended_arithmetic_generated_c_defers_address_commit_and_handles_alias() {
+  using namespace segarecomp;
+  const auto lift = [](std::vector<std::uint8_t> bytes) {
+    const auto decoded = std::get<M68kDecodedInstruction>(decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup));
+    return lift_m68k_instruction(decoded);
+  };
+  // ADDX.B -(A7),-(A7): both operands step by two (A7 byte exception) and the aliased destination
+  // starts from the already-updated source snapshot.
+  {
+    const GenesisM68kEmissionContext memory{"ram", "a", "fi", "fc", "fd", 0U, std::nullopt, 0U, {}, {}};
+    const auto emitted = emit_m68k_operation_c(lift({0xDFU, 0x0FU}), "d", "sr", "", &memory);
+    expect(emitted.find("m68k_xa_src_ea -= UINT32_C(2)") != std::string::npos &&
+               emitted.find("uint32_t m68k_xa_dst_ea = m68k_xa_src_ea;") != std::string::npos &&
+               emitted.find("m68k_xa_dst_ea -= UINT32_C(2)") != std::string::npos &&
+               emitted.find("a[7] = m68k_xa_src_ea;") < emitted.find("a[7] = m68k_xa_dst_ea;"),
+           "ADDX.B -(A7),-(A7) steps A7 by two per operand, aliases the destination snapshot and commits once per operand");
+  }
+  // Distinct registers do not alias, and word size steps by two, long by four.
+  {
+    const GenesisM68kEmissionContext memory{"ram", "a", "fi", "fc", "fd", 0U, std::nullopt, 0U, {}, {}};
+    const auto emitted = emit_m68k_operation_c(lift({0x91U, 0x89U}), "d", "sr", "", &memory);  // SUBX.L -(A1),-(A0)
+    expect(emitted.find("uint32_t m68k_xa_dst_ea = a[0];") != std::string::npos &&
+               emitted.find("m68k_xa_src_ea -= UINT32_C(4)") != std::string::npos,
+           "SUBX.L -(A1),-(A0) uses independent snapshots stepping by the operand width");
+    const auto cmpm = emit_m68k_operation_c(lift({0xB1U, 0x09U}), "d", "sr", "", &memory);  // CMPM.B (A1)+,(A0)+
+    expect(cmpm.find("m68k_xa_src_ea += UINT32_C(1)") != std::string::npos &&
+               cmpm.find("m68k_xa_dst_ea += UINT32_C(1)") != std::string::npos &&
+               cmpm.find("m68k_xa_result") == std::string::npos && cmpm.find("xa_result") == std::string::npos,
+           "CMPM.B postincrements both snapshots and never computes or writes a result");
+  }
+  // Routed context: every routed failure return precedes the live An commits, which precede the PC advance.
+  {
+    GenesisM68kEmissionContext memory{"ram", "a", "fi", "fc", "fd", 0U, std::nullopt, 0U, {}, {}};
+    memory.runtime_routing = true;
+    memory.runtime_object = "runtime";
+    memory.program_counter = "runtime->pc";
+    const auto emitted = emit_m68k_operation_c(lift({0xD5U, 0x89U}), "runtime->d", "runtime->sr", "", &memory);  // ADDX.L -(A1),-(A2)
+    const auto src_read = emitted.find("m68k_routed_addr_0 = (m68k_xa_src_ea)");
+    const auto dst_read = emitted.find("m68k_routed_addr_3 = (m68k_xa_dst_ea)");
+    const auto dst_write = emitted.find("m68k_routed_addr_6 = (m68k_xa_dst_ea)");
+    const auto commit_src = emitted.find("a[1] = m68k_xa_src_ea;");
+    const auto commit_dst = emitted.find("a[2] = m68k_xa_dst_ea;");
+    const auto pc = emitted.find("runtime->pc +=");
+    const auto npos = std::string::npos;
+    expect(src_read != npos && dst_read != npos && dst_write != npos && commit_src != npos && commit_dst != npos &&
+               pc != npos && src_read < emitted.find("return transfer;", src_read) &&
+               emitted.find("return transfer;", src_read) < dst_read &&
+               dst_read < emitted.find("return transfer;", dst_read) &&
+               emitted.find("return transfer;", dst_read) < dst_write &&
+               dst_write < emitted.find("return transfer;", dst_write) &&
+               emitted.find("return transfer;", dst_write) < commit_src && commit_src < commit_dst && commit_dst < pc,
+           "routed ADDX returns from each failed access before the next access, the An commits and the PC advance");
+  }
+}
+
+void extended_arithmetic_aot_dispatch_is_admitted_end_to_end() {
+  using namespace segarecomp;
+  using namespace extended_arithmetic_aot_fixture;
+  auto program = program_with();
+  expect(apply_genesis_immutable_rom_aot_range(program, first_root, base + static_cast<std::uint32_t>(image.size())),
+         "extended-arithmetic fixture range enumerates cleanly");
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "extended-arithmetic fixture remains a genuine partial program");
+  if (partial == nullptr) return;
+  const auto &roots = partial->accepted_prefix.immutable_rom_aot_entries;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  for (std::uint32_t address = first_root; address < base + image.size(); address += 2U) {
+    expect(std::any_of(roots.begin(), roots.end(),
+                       [&](const auto &root) { return root.decoded.provenance.source.address.value == address; }),
+           "each extended-arithmetic form becomes a validated independent AOT root");
+    std::ostringstream hex_address;
+    hex_address << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address;
+    const auto begin = emitted.find("genesis_aot_" + hex_address.str() + "(GenesisRuntime *runtime) {");
+    const auto end = begin == std::string::npos ? std::string::npos : emitted.find("\n}\n", begin);
+    const auto body = begin == std::string::npos || end == std::string::npos ? std::string{} : emitted.substr(begin, end - begin);
+    expect(!body.empty() && body.find("translation rejected") == std::string::npos &&
+               (body.find("genesis_route_access(runtime,") != std::string::npos) ==
+                   (address != base + 0x0EU && address != base + 0x10U),  // NEGX.B Dn and SUBX.B Dy,Dx are register-only
+           "each extended-arithmetic AOT body is emitted and routes exactly its memory operands");
+  }
+}
+
+int c4_extended_arithmetic_admission() {
+  using namespace segarecomp;
+  // Every legal ADDX/SUBX/CMPM/NEGX/NEG shape (including the absolute and indexed NEG/NEGX operands, which need a
+  // retained fact, and A7 byte steps) must pass the real C4 preflight with ZERO gap rows and emit a routed body.
+  struct Case { const char *name; std::vector<std::uint8_t> code; const char *commit; bool routed; };
+  const std::vector<Case> cases{
+      {"ADDX.B D1,D2", {0xD5U, 0x01U}, nullptr, false},
+      {"SUBX.W D1,D2", {0x95U, 0x41U}, nullptr, false},
+      {"ADDX.L D1,D1", {0xD3U, 0x81U}, nullptr, false},
+      {"ADDX.L -(A1),-(A2)", {0xD5U, 0x89U}, "runtime->a[2] = m68k_xa_dst_ea;", true},
+      {"SUBX.B -(A7),-(A0)", {0x91U, 0x0FU}, "runtime->a[7] = m68k_xa_src_ea;", true},
+      {"ADDX.B -(A7),-(A7)", {0xDFU, 0x0FU}, "runtime->a[7] = m68k_xa_dst_ea;", true},
+      {"CMPM.W (A1)+,(A2)+", {0xB5U, 0x49U}, "runtime->a[2] = m68k_xa_dst_ea;", true},
+      {"CMPM.B (A7)+,(A7)+", {0xBFU, 0x0FU}, "runtime->a[7] = m68k_xa_dst_ea;", true},
+      {"NEGX.W D3", {0x40U, 0x43U}, nullptr, false},
+      {"NEGX.B (A0)+", {0x40U, 0x18U}, "runtime->a[0] = m68k_neg_auto_ea;", true},
+      {"NEGX.L -(A7)", {0x40U, 0xA7U}, "runtime->a[7] = m68k_neg_auto_ea;", true},
+      {"NEGX.W (A0)", {0x40U, 0x50U}, nullptr, true},
+      {"NEGX.W (16,A0)", {0x40U, 0x68U, 0x00U, 0x10U}, nullptr, true},
+      {"NEGX.L (4,A0,D1.W)", {0x40U, 0xB0U, 0x10U, 0x04U}, nullptr, true},
+      {"NEGX.W (0xFF0080).L", {0x40U, 0x79U, 0x00U, 0xFFU, 0x00U, 0x80U}, nullptr, true},
+      {"NEGX.B (0xFF80).W", {0x40U, 0x38U, 0xFFU, 0x80U}, nullptr, true},
+      {"NEG.B D3", {0x44U, 0x03U}, nullptr, false},
+      {"NEG.L (0xFF0080).L", {0x44U, 0xB9U, 0x00U, 0xFFU, 0x00U, 0x80U}, nullptr, true},
+      {"NEG.W (0xFF80).W", {0x44U, 0x78U, 0xFFU, 0x80U}, nullptr, true},
+      {"NEG.L (4,A0,D1.W)", {0x44U, 0xB0U, 0x10U, 0x04U}, nullptr, true},
+      {"NEG.W (A0)", {0x44U, 0x50U}, nullptr, true},
+      {"NEG.W -(A0)", {0x44U, 0x60U}, "runtime->a[0] = m68k_neg_auto_ea;", true},
+  };
+  int failures = 0;
+  for (const auto &test_case : cases) {
+    FrontendProgram program{};
+    program.profile = M68kFrontendProfile::general_startup;
+    auto image = test_case.code;
+    image.push_back(0x4EU);
+    image.push_back(0x70U);  // RESET
+    program.image = {"synthetic-c4-extended-arith", image, 0U};
+    program.image.byte_length = program.image.bytes.size();
+    program.mapping_claims = {{"synthetic-c4-extended-arith", {{}, 0xB00U},
+                                {{}, static_cast<std::uint32_t>(0xB00U + program.image.bytes.size())},
+                                {0U}, {program.image.bytes.size()}}};
+    program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+    const auto result = analyze_m68k_frontend(program);
+    const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+    bool ok = partial != nullptr;
+    std::string emitted;
+    if (ok) {
+      const auto preflight = preflight_m68k_general_startup_c4(*partial);
+      ok = preflight.valid && preflight.rows.empty();
+      emitted = emit_m68k_general_startup_runtime_c(*partial);
+      ok = ok && emitted.find("translation rejected") == std::string::npos &&
+           emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_") == std::string::npos &&
+           emitted.find("genesis_c4_lowering_stop_") == std::string::npos &&
+           (emitted.find("genesis_route_access") != std::string::npos) == test_case.routed &&
+           (test_case.commit == nullptr || emitted.find(test_case.commit) != std::string::npos) &&
+           emitted.find("runtime->runtime") == std::string::npos;
+    }
+    if (!ok) {
+      std::cerr << "C4 extended-arithmetic admission failed: " << test_case.name << "\n";
+      if (partial != nullptr) {
+        const auto pf = preflight_m68k_general_startup_c4(*partial);
+        std::cerr << " preflight valid=" << pf.valid << " rows=" << pf.rows.size() << "\n" << emitted.substr(0, 1800) << "\n";
+      }
+      ++failures;
+    }
+  }
+  return failures == 0 ? 0 : 1;
 }
 
 // SEG-007-T214 / ADR-0028 §9: authoritative exact direct-control target
@@ -27393,6 +27765,8 @@ int main(int argc, char **argv) {
     return emit_general_arithmetic_memory_operand_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-negate-disp16-aot")
     return emit_negate_disp16_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-extended-arithmetic-aot")
+    return emit_extended_arithmetic_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-pea-aot")
     return emit_pea_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-jmp-pc-indexed-word-aot")
@@ -27698,6 +28072,12 @@ int main(int argc, char **argv) {
   startup_moveq_and_move_ccr_effects_are_complete();
   negate_word_data_register_direct_is_bounded_and_has_subtraction_flags();
   negate_word_auto_update_uses_one_deferred_address_commit();
+  extended_arithmetic_forms_decode_lift_declare_effects_and_timing();
+  extended_arithmetic_host_semantics_have_sticky_zero_and_carry_chains();
+  extended_arithmetic_generated_c_defers_address_commit_and_handles_alias();
+  extended_arithmetic_aot_dispatch_is_admitted_end_to_end();
+  expect(c4_extended_arithmetic_admission() == 0,
+         "SEG-021-T014: every legal ADDX/SUBX/CMPM/NEGX/NEG shape passes the C4 preflight with zero gap rows");
   compare_ccr_preserves_x_and_uses_destination_minus_source();
   compare_forms_decode_and_lift_with_shared_ea();
   subtraction_forms_decode_and_share_flags();

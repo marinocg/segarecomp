@@ -240,6 +240,84 @@ struct M68kAdditionResultSpecification {
   }
 };
 
+// SEG-021-T014: the one shared owner of ADDX/SUBX/NEGX arithmetic and condition codes, for host
+// semantics and generated C. Operand roles: ADDX result = destination + source + X; SUBX result =
+// destination - source - X; NEGX is SUBX with destination 0 and source = the operand. From the Motorola
+// M68000 Family Programmer's Reference Manual: X and C are set from the carry/borrow out of the
+// operation, N from the result's most significant bit, V on signed overflow, and Z is CLEARED when the
+// result is non-zero but otherwise UNCHANGED (sticky), so a multi-precision chain keeps the Z of the
+// whole value. The pre-operation X is an input operand.
+enum class M68kExtendedArithmeticKind { add, subtract };
+struct M68kExtendedArithmeticResult {
+  std::uint32_t result{};
+  bool negative{};
+  bool overflow{};
+  bool carry{};
+};
+struct M68kExtendedArithmeticSpecification {
+  [[nodiscard]] static constexpr std::uint32_t mask(M68kMemoryAccessWidth width) noexcept {
+    return M68kAdditionResultSpecification::mask(width);
+  }
+  [[nodiscard]] static constexpr std::uint32_t sign(M68kMemoryAccessWidth width) noexcept {
+    return M68kAdditionResultSpecification::sign(width);
+  }
+  [[nodiscard]] static M68kExtendedArithmeticResult evaluate(M68kExtendedArithmeticKind kind, std::uint32_t source,
+                                                              std::uint32_t destination, bool extend,
+                                                              M68kMemoryAccessWidth width) noexcept {
+    const auto m = mask(width);
+    const auto s = sign(width);
+    source &= m;
+    destination &= m;
+    const std::uint32_t x = extend ? 1U : 0U;
+    const auto result = (kind == M68kExtendedArithmeticKind::add ? destination + source + x
+                                                                  : destination - source - x) & m;
+    const bool carry = kind == M68kExtendedArithmeticKind::add
+        ? (((source & destination) | (~result & destination) | (source & ~result)) & s) != 0U
+        : (((source & ~destination) | (result & ~destination) | (source & result)) & s) != 0U;
+    const bool overflow = kind == M68kExtendedArithmeticKind::add
+        ? (((source & destination & ~result) | (~source & ~destination & result)) & s) != 0U
+        : (((~source & destination & ~result) | (source & ~destination & result)) & s) != 0U;
+    return {result, (result & s) != 0U, overflow, carry};
+  }
+  [[nodiscard]] static std::uint16_t apply(std::uint16_t status_register, M68kExtendedArithmeticKind kind,
+                                            std::uint32_t source, std::uint32_t destination,
+                                            M68kMemoryAccessWidth width) noexcept {
+    const auto r = evaluate(kind, source, destination, (status_register & UINT16_C(0x0010)) != 0U, width);
+    const bool zero = r.result == 0U && (status_register & UINT16_C(0x0004)) != 0U;
+    return static_cast<std::uint16_t>((status_register & UINT16_C(0xFFE0)) | (r.carry ? UINT16_C(0x0011) : 0U) |
+                                      (r.negative ? UINT16_C(0x0008) : 0U) | (zero ? UINT16_C(0x0004) : 0U) |
+                                      (r.overflow ? UINT16_C(0x0002) : 0U));
+  }
+  // Emits locals `xa_source`, `xa_destination`, `xa_extend` (pre-operation X) and `xa_result`.
+  static void emit_c_compute(std::ostringstream &out, std::string_view status_register,
+                             M68kExtendedArithmeticKind kind, const std::string &source,
+                             const std::string &destination, M68kMemoryAccessWidth size) {
+    const auto m = "UINT32_C(0x" + m68k_hex_literal(mask(size), 8) + ")";
+    out << "const uint32_t xa_source = (" << source << ") & " << m << "; const uint32_t xa_destination = ("
+        << destination << ") & " << m << "; const uint32_t xa_extend = ((uint32_t)" << status_register
+        << " >> 4U) & 1U; const uint32_t xa_result = (xa_destination "
+        << (kind == M68kExtendedArithmeticKind::add ? "+ xa_source + xa_extend" : "- xa_source - xa_extend")
+        << ") & " << m << "; ";
+  }
+  // Requires the locals from emit_c_compute in scope.
+  static void emit_c_update(std::ostringstream &out, std::string_view status_register,
+                            M68kExtendedArithmeticKind kind, M68kMemoryAccessWidth size) {
+    const auto sg = "UINT32_C(0x" + m68k_hex_literal(sign(size), 8) + ")";
+    const bool add = kind == M68kExtendedArithmeticKind::add;
+    out << "{ const uint32_t xa_carry = " << (add ? "((xa_source & xa_destination) | (~xa_result & xa_destination) | "
+                                                    "(xa_source & ~xa_result))"
+                                                  : "((xa_source & ~xa_destination) | (xa_result & ~xa_destination) | "
+                                                    "(xa_source & xa_result))")
+        << " & " << sg << "; const uint32_t xa_overflow = "
+        << (add ? "((xa_source & xa_destination & ~xa_result) | (~xa_source & ~xa_destination & xa_result))"
+                : "((~xa_source & xa_destination & ~xa_result) | (xa_source & ~xa_destination & xa_result))")
+        << " & " << sg << "; " << status_register << " = (uint16_t)((" << status_register
+        << " & UINT16_C(0xFFE0)) | (xa_carry != 0U ? UINT16_C(0x0011) : UINT16_C(0)) | ((xa_result & " << sg
+        << ") != 0U ? UINT16_C(8) : UINT16_C(0)) | ((xa_result == 0U && (" << status_register
+        << " & UINT16_C(4)) != 0U) ? UINT16_C(4) : UINT16_C(0)) | (xa_overflow != 0U ? UINT16_C(2) : UINT16_C(0))); }\n";
+  }
+};
+
 // One logical-operation specification supplies the sized result, SR update,
 // and C11 lowering.  Generated C cannot call the host implementation, so the
 // emitter deliberately projects these same constants and operations instead
@@ -1120,6 +1198,13 @@ struct M68kOperationEffect {
 [[nodiscard]] std::uint16_t m68k_addition_ccr(
     std::uint16_t status_register, std::uint32_t source, std::uint32_t destination,
     M68kMemoryAccessWidth width) noexcept;
+// SEG-021-T014: ADDX/SUBX/NEGX (NEGX = subtract with destination 0). Reads X from `status_register`.
+[[nodiscard]] M68kExtendedArithmeticResult m68k_evaluate_extended_arithmetic(
+    M68kExtendedArithmeticKind kind, std::uint32_t source, std::uint32_t destination, bool extend,
+    M68kMemoryAccessWidth width) noexcept;
+[[nodiscard]] std::uint16_t m68k_extended_arithmetic_ccr(
+    std::uint16_t status_register, M68kExtendedArithmeticKind kind, std::uint32_t source,
+    std::uint32_t destination, M68kMemoryAccessWidth width) noexcept;
 [[nodiscard]] M68kLogicalResult m68k_evaluate_logical(std::uint32_t result,
                                                         M68kMemoryAccessWidth width) noexcept;
 [[nodiscard]] std::uint16_t m68k_logical_ccr(std::uint16_t status_register, std::uint32_t result,

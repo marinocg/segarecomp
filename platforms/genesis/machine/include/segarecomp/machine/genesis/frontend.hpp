@@ -700,10 +700,18 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // predicate.
     return true;
   case M68kIrKind::negate_word:
-    // Only the independently reached non-auto-updating d16(An) RMW form is
-    // AOT-safe. Legal auto-updating forms use the normal routed lowering but
-    // remain outside immutable-ROM AOT admission.
-    return destination_register() || operation.destination_ea.mode == M68kEaMode::address_disp16;
+  case M68kIrKind::negate_extended:
+  case M68kIrKind::add_extended:
+  case M68kIrKind::subtract_extended:
+  case M68kIrKind::compare_memory:
+    // SEG-021-T014: NEG/NEGX (every data-alterable operand), ADDX/SUBX (Dy,Dx and -(Ay),-(Ax)) and CMPM
+    // ((Ay)+,(Ax)+) family-level admission (supersedes the prior NEG.W Dn/d16(An)-only carve-out). Every
+    // legal form lowers through the shared C4 routed read/write primitives with no CFG edge, call frame,
+    // return target or static memory fact; auto-updating operands use the operation-local deferred
+    // address-register commit (c4-add-family-auto-update-commit-contract.md), which returns from a failed
+    // routed access before any architectural write. The emitter fails closed on any shape it cannot lower
+    // and operand-mode legality is owned by decode.
+    return true;
   case M68kIrKind::read_status_register:
     return destination_register();
   case M68kIrKind::write_status_register:

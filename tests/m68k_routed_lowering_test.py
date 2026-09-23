@@ -199,6 +199,22 @@ def arithmetic_cases():
                     add("%04X" % (0x0000 | (dn << 9) | (opmode << 6) | (mode << 3) | reg) + ext, (mode,))
                 for bit in ("0000", "0007", "0008", "001F", "0020"):
                     add("%04X" % (0x0800 | (imm_selector << 6) | (mode << 3) | reg) + bit + ext, (mode,))
+    # SEG-021-T014: NEG/NEGX (every legal data-alterable class incl. auto-updating and indexed) and the ADDX/SUBX/CMPM
+    # register-pair and memory-pair forms (distinct, aliased and A7 byte-step register pairs), every size. The memory
+    # pairs are auto-updating on both operands and run in the routed-stop atomicity check too.
+    for base in (0x4400, 0x4000):
+        for size, sf in (("b", 0), ("w", 1), ("l", 2)):
+            for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
+                for reg in ((1, 7) if mode in (3, 4) else (1,)):
+                    add("%04X" % (base | (sf << 6) | (mode << 3) | reg) + ext, (mode,))
+    for name, base in (("addx", 0xD100), ("subx", 0x9100), ("cmpm", 0xB108)):
+        for size, sf in (("b", 0), ("w", 1), ("l", 2)):
+            for rx, ry in ((1, 2), (1, 1), (7, 7), (7, 0), (0, 7), (3, 4)):
+                if name == "cmpm":
+                    add("%04X" % (base | (rx << 9) | (sf << 6) | ry), (3,))
+                else:
+                    add("%04X" % (base | (rx << 9) | (sf << 6) | (1 << 3) | ry), (4,))
+                    add("%04X" % (base | (rx << 9) | (sf << 6) | ry), ())
     return out
 
 
