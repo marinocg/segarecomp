@@ -266,3 +266,28 @@ fail-closed non-member-continuation and forced-routed-read-failure cases) are co
 `tests/genesis_immutable_rom_aot_return_from_subroutine_and_bit_clear_generated_test.py` against the real
 ADR-0011 whole-program continuation authority; RTR remains entirely out of this task's scope (a distinct
 mnemonic, never claimed here).
+
+## SEG-021-T015: ABCD / SBCD / NBCD rows and the undefined-flag policy
+
+12 rows cover every legal form (`Dy,Dx` and `-(Ay),-(Ax)` of ABCD and SBCD, and NBCD over every data-alterable EA including
+`(d8,An,Xn)`), all byte-sized. The `bcd_sweep`/`bcd_full` (pairs) and `bcd_unary_sweep`/`bcd_unary_full` profiles use a
+`bcd` value set (nibble/decade boundaries 09/0A/0F/19/1A/99/9A/A0/F0/FF with garbage upper register bits) and SR seeds
+2700/2704/2710/2714 (every X/Z combination). All 12 rows match the pinned Musashi core.
+
+Semantics: the byte result is the decimal-adjusted sum/difference/ten's complement; X and C are the decimal carry/borrow; Z is
+cleared by a non-zero result and otherwise unchanged (sticky, as ADDX/SUBX). **N and V are undefined on the base MC68000**
+(Motorola's manual lists them undefined). Production reproduces the pinned Musashi core exactly for them
+(`M68kDecimalArithmeticSpecification` in `libs/cpu/m68k/include/segarecomp/cpu/m68k/effects.hpp`: N = bit 7 of the adjusted result;
+V = bit 7 of `~(pre-adjust intermediate) & adjusted result`; NBCD's "nothing to negate" outcome, a zero byte with X clear, leaves the
+byte unchanged, clears X/C/V, keeps Z and sets N). This is a matched-to-oracle policy, not documented hardware behavior; it is labeled
+in `undefined_flags` of the vector table and in the validation manifest description, so the `ccr_sr_validated` credit of these words
+means X/C/Z as documented and N/V as matched only.
+
+`tests/m68k_bcd_exhaustive_musashi_test.py` (tier `full`, oracle-available; skipped with exit 0 without the pinned checkout; about
+4.5 minutes) additionally sweeps EVERY (source byte, destination byte) pair times the four X/Z seeds for ABCD/SBCD in register and
+predecrement forms and every operand byte times the four seeds for NBCD on `Dn`, `(An)`, `(An)+` and `-(An)`: 1,052,672 vectors, all
+identical to Musashi including N/V. `m68k_routed_lowering_test.py` compares the routed lowering with the direct one for the register,
+aliased and A7 pairs and every NBCD EA class, and forces routed stops on every auto-updating shape.
+
+Timing: published static rows exist (ABCD/SBCD `Dy,Dx` 6, `-(Ay),-(Ax)` 18; NBCD `Dn` 6, memory 8 + byte EA cell), so no form is
+timing-unsupported; `timing_validated` stays 0 (timing is not compared).

@@ -704,6 +704,9 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
   case M68kIrKind::add_extended:
   case M68kIrKind::subtract_extended:
   case M68kIrKind::compare_memory:
+  case M68kIrKind::add_decimal:
+  case M68kIrKind::subtract_decimal:
+  case M68kIrKind::negate_decimal:
     // SEG-021-T014: NEG/NEGX (every data-alterable operand), ADDX/SUBX (Dy,Dx and -(Ay),-(Ax)) and CMPM
     // ((Ay)+,(Ax)+) family-level admission (supersedes the prior NEG.W Dn/d16(An)-only carve-out). Every
     // legal form lowers through the shared C4 routed read/write primitives with no CFG edge, call frame,

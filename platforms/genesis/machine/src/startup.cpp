@@ -94,6 +94,9 @@ bool m68k_startup_analysis_pair_consistent(const M68kDecodedInstruction &decoded
   case M68kInstructionKind::add_extended: return lifted.kind == M68kIrKind::add_extended;
   case M68kInstructionKind::subtract_extended: return lifted.kind == M68kIrKind::subtract_extended;
   case M68kInstructionKind::compare_memory: return lifted.kind == M68kIrKind::compare_memory;
+  case M68kInstructionKind::add_decimal: return lifted.kind == M68kIrKind::add_decimal;
+  case M68kInstructionKind::subtract_decimal: return lifted.kind == M68kIrKind::subtract_decimal;
+  case M68kInstructionKind::negate_decimal: return lifted.kind == M68kIrKind::negate_decimal;
   case M68kInstructionKind::lea: return lifted.kind == M68kIrKind::load_effective_address;
   case M68kInstructionKind::jmp: return lifted.kind == M68kIrKind::jump_general;
   case M68kInstructionKind::jsr: return lifted.kind == M68kIrKind::call_general;

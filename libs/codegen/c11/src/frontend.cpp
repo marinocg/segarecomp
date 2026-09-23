@@ -1513,6 +1513,7 @@ bool valid_c4_static_memory_fact(
   // SEG-021-T014: NEG/NEGX are one-address RMW operands with NOT's fact shape.
   case M68kInstructionKind::negate_word:
   case M68kInstructionKind::negate_extended:
+  case M68kInstructionKind::negate_decimal:
   case M68kInstructionKind::not_operand:
     // SEG-007-T168: NOT has no second operand at all (unlike SUBQ's
     // quick-immediate source); its sole destination is a full RMW operand,
@@ -2053,6 +2054,10 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   case M68kIrKind::add_extended:
   case M68kIrKind::subtract_extended:
   case M68kIrKind::compare_memory:
+  // SEG-021-T015: ABCD/SBCD/NBCD reuse the ADDX/SUBX pair and NEG/NEGX RMW lowerings.
+  case M68kIrKind::negate_decimal:
+  case M68kIrKind::add_decimal:
+  case M68kIrKind::subtract_decimal:
   case M68kIrKind::logical_and_immediate:
   case M68kIrKind::write_move:
   case M68kIrKind::write_movea:
@@ -2414,7 +2419,8 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     if (m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
   } else if (operation.kind == M68kIrKind::logical_not || operation.kind == M68kIrKind::shift_rotate_memory ||
-             operation.kind == M68kIrKind::negate_word || operation.kind == M68kIrKind::negate_extended) {
+             operation.kind == M68kIrKind::negate_word || operation.kind == M68kIrKind::negate_extended ||
+             operation.kind == M68kIrKind::negate_decimal) {
     // SEG-021-T014: NEG/NEGX share NOT's one-address RMW gap shape.
     // SEG-007-T168: NOT has no source operand at all (unlike the sibling
     // logical family AND/OR/EOR/ANDI/ORI/EORI, which always carry one, just
@@ -3081,6 +3087,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
     // SEG-021-T014: NEG/NEGX are one-address RMW operands with NOT's fact shape.
     case M68kInstructionKind::negate_word:
     case M68kInstructionKind::negate_extended:
+    case M68kInstructionKind::negate_decimal:
     case M68kInstructionKind::not_operand:
       // SEG-007-T168: NOT has no second operand at all (unlike AND/OR/EOR);
       // its sole destination is a full RMW operand needing both
@@ -3277,6 +3284,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
           kind != M68kInstructionKind::tst && kind != M68kInstructionKind::not_operand &&
           // SEG-021-T014: NEG/NEGX lower their own auto-updating operand (deferred commit).
           kind != M68kInstructionKind::negate_word && kind != M68kInstructionKind::negate_extended &&
+          kind != M68kInstructionKind::negate_decimal &&
           // SEG-021-T007: AND/OR/EOR and ANDI/ORI/EORI lower their own auto-updating operand (deferred commit).
           kind != M68kInstructionKind::logical_and && kind != M68kInstructionKind::logical_or &&
           kind != M68kInstructionKind::eor && kind != M68kInstructionKind::andi &&
@@ -3344,7 +3352,8 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
                         M68kInstructionKind::not_operand))) ||
         // SEG-021-T014: NEG/NEGX: one-address RMW like NOT.
         ((instruction->kind == M68kInstructionKind::negate_word ||
-          instruction->kind == M68kInstructionKind::negate_extended) &&
+          instruction->kind == M68kInstructionKind::negate_extended ||
+          instruction->kind == M68kInstructionKind::negate_decimal) &&
          instruction->destination_ea.mode != M68kEaMode::data_register &&
          (!require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_read, instruction->kind) ||
           !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
@@ -5041,6 +5050,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
             << "#undef pc\n";
         break;
       }
+      case M68kIrKind::negate_decimal:
       case M68kIrKind::negate_extended:
       case M68kIrKind::negate_word: {
         // SEG-021-T014: NEG/NEGX are one-address RMW operands with NOT's fact-lookup/region-threading
@@ -5064,6 +5074,8 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
       // SEG-021-T014: ADDX/SUBX (`Dy,Dx` and `-(Ay),-(Ax)`) and CMPM (`(Ay)+,(Ax)+`) never carry an absolute
       // or PC-relative operand, so no retained fact exists or is needed; the memory pairs are lowered by the
       // operation-local deferred address commit and advance `memory->program_counter` directly (no bridge).
+      case M68kIrKind::add_decimal:
+      case M68kIrKind::subtract_decimal:
       case M68kIrKind::add_extended:
       case M68kIrKind::subtract_extended:
       case M68kIrKind::compare_memory: {

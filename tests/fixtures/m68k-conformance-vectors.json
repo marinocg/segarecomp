@@ -2,6 +2,24 @@
  "schema": 1,
  "ownership": "project-authored synthetic vectors; no commercial content. Rows name legal forms of tests/fixtures/m68k-legal-forms.json; primary words come from the form's word_ranges.",
  "musashi_revision": "313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd",
+ "undefined_flags": {
+  "policy": "matched-to-oracle: the listed condition codes are UNDEFINED on the base MC68000; production reproduces the pinned Musashi core so generated code is bit-comparable. They are not documented semantics.",
+  "forms": {
+   "ABCD": [
+    "N",
+    "V"
+   ],
+   "SBCD": [
+    "N",
+    "V"
+   ],
+   "NBCD": [
+    "N",
+    "V"
+   ]
+  },
+  "owner": "M68kDecimalArithmeticSpecification (libs/cpu/m68k/include/segarecomp/cpu/m68k/effects.hpp)"
+ },
  "values": {
   "boundary": [
    "00000000",
@@ -56,6 +74,27 @@
    "12345681",
    "000000FF",
    "00008001"
+  ],
+  "bcd": [
+   "00000000",
+   "00000001",
+   "00000009",
+   "0000000A",
+   "0000000F",
+   "00000010",
+   "00000019",
+   "0000001A",
+   "00000045",
+   "00000055",
+   "0000007F",
+   "00000080",
+   "00000090",
+   "00000099",
+   "0000009A",
+   "000000A0",
+   "000000F0",
+   "000000FF",
+   "12345699"
   ]
  },
  "profiles": {
@@ -526,9 +565,124 @@
     "2710",
     "2714"
    ]
+  },
+  "bcd_sweep": {
+   "kind": "pair_list",
+   "pairs": [
+    [
+     "00000000",
+     "00000000"
+    ],
+    [
+     "00000099",
+     "00000001"
+    ],
+    [
+     "00000019",
+     "00000009"
+    ],
+    [
+     "00000055",
+     "00000045"
+    ],
+    [
+     "000000FF",
+     "000000FF"
+    ],
+    [
+     "12345699",
+     "0000009A"
+    ],
+    [
+     "0000000A",
+     "00000001"
+    ],
+    [
+     "00000080",
+     "00000080"
+    ]
+   ],
+   "sr": [
+    "2700",
+    "2704",
+    "2710",
+    "2714",
+    "271F"
+   ]
+  },
+  "bcd_full": {
+   "kind": "cross",
+   "values": "bcd",
+   "sr": [
+    "2700",
+    "2704",
+    "2710",
+    "2714"
+   ]
+  },
+  "bcd_unary_sweep": {
+   "kind": "single",
+   "values": "bcd",
+   "sr": [
+    "2700",
+    "2704",
+    "2710",
+    "2714",
+    "271F"
+   ]
+  },
+  "bcd_unary_full": {
+   "kind": "single",
+   "values": "bcd",
+   "sr": [
+    "2700",
+    "2704",
+    "2710",
+    "2714"
+   ]
   }
  },
  "rows": [
+  {
+   "id": "abcd.dn_dn.b.dn.dn",
+   "form": "abcd.dn_dn.b.dn.dn",
+   "bind": {
+    "x": "d@0",
+    "y": "d@9"
+   },
+   "profile": "bcd_sweep",
+   "full_profile": "bcd_full",
+   "full_words": [
+    "C100",
+    "C101",
+    "C107",
+    "C700",
+    "CB05",
+    "CF03",
+    "CF00",
+    "CF07"
+   ]
+  },
+  {
+   "id": "abcd.predec_predec.b.predec.predec",
+   "form": "abcd.predec_predec.b.predec.predec",
+   "bind": {
+    "x": "pd@0",
+    "y": "pd@9"
+   },
+   "profile": "bcd_sweep",
+   "full_profile": "bcd_full",
+   "full_words": [
+    "C108",
+    "C109",
+    "C10F",
+    "C708",
+    "CB0D",
+    "CF0B",
+    "CF08",
+    "CF0F"
+   ]
+  },
   {
    "id": "add.dn_ea.b.dn.absl",
    "form": "add.dn_ea.b.dn.absl",
@@ -14022,6 +14176,129 @@
    "profile": "muldiv_sweep"
   },
   {
+   "id": "nbcd.unary.b.none.absl",
+   "form": "nbcd.unary.b.none.absl",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "ext": [
+    "00020000"
+   ],
+   "profile": "bcd_unary_sweep",
+   "full_profile": "bcd_unary_full",
+   "full_words": [
+    "4839"
+   ]
+  },
+  {
+   "id": "nbcd.unary.b.none.absw",
+   "form": "nbcd.unary.b.none.absw",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "ext": [
+    "4000"
+   ],
+   "profile": "bcd_unary_sweep",
+   "full_profile": "bcd_unary_full",
+   "full_words": [
+    "4838"
+   ]
+  },
+  {
+   "id": "nbcd.unary.b.none.disp",
+   "form": "nbcd.unary.b.none.disp",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "ext": [
+    "0010"
+   ],
+   "profile": "bcd_unary_sweep",
+   "full_profile": "bcd_unary_full",
+   "full_words": [
+    "4828",
+    "482C",
+    "482F"
+   ]
+  },
+  {
+   "id": "nbcd.unary.b.none.dn",
+   "form": "nbcd.unary.b.none.dn",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "bcd_unary_sweep",
+   "full_profile": "bcd_unary_full",
+   "full_words": [
+    "4800",
+    "4804",
+    "4807"
+   ]
+  },
+  {
+   "id": "nbcd.unary.b.none.ind",
+   "form": "nbcd.unary.b.none.ind",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "bcd_unary_sweep",
+   "full_profile": "bcd_unary_full",
+   "full_words": [
+    "4810",
+    "4814",
+    "4817"
+   ]
+  },
+  {
+   "id": "nbcd.unary.b.none.index",
+   "form": "nbcd.unary.b.none.index",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "ext": [
+    "1004"
+   ],
+   "profile": "bcd_unary_sweep",
+   "full_profile": "bcd_unary_full",
+   "full_words": [
+    "4830",
+    "4834",
+    "4837"
+   ],
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
+   "id": "nbcd.unary.b.none.postinc",
+   "form": "nbcd.unary.b.none.postinc",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "bcd_unary_sweep",
+   "full_profile": "bcd_unary_full",
+   "full_words": [
+    "4818",
+    "481C",
+    "481F"
+   ]
+  },
+  {
+   "id": "nbcd.unary.b.none.predec",
+   "form": "nbcd.unary.b.none.predec",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "bcd_unary_sweep",
+   "full_profile": "bcd_unary_full",
+   "full_words": [
+    "4820",
+    "4824",
+    "4827"
+   ]
+  },
+  {
    "id": "neg.unary.b.none.absl",
    "form": "neg.unary.b.none.absl",
    "bind": {
@@ -17005,6 +17282,46 @@
     "x": "ea.dst"
    },
    "profile": "shift_imm"
+  },
+  {
+   "id": "sbcd.dn_dn.b.dn.dn",
+   "form": "sbcd.dn_dn.b.dn.dn",
+   "bind": {
+    "x": "d@0",
+    "y": "d@9"
+   },
+   "profile": "bcd_sweep",
+   "full_profile": "bcd_full",
+   "full_words": [
+    "8100",
+    "8101",
+    "8107",
+    "8700",
+    "8B05",
+    "8F03",
+    "8F00",
+    "8F07"
+   ]
+  },
+  {
+   "id": "sbcd.predec_predec.b.predec.predec",
+   "form": "sbcd.predec_predec.b.predec.predec",
+   "bind": {
+    "x": "pd@0",
+    "y": "pd@9"
+   },
+   "profile": "bcd_sweep",
+   "full_profile": "bcd_full",
+   "full_words": [
+    "8108",
+    "8109",
+    "810F",
+    "8708",
+    "8B0D",
+    "8F0B",
+    "8F08",
+    "8F0F"
+   ]
   },
   {
    "id": "sub.dn_ea.b.dn.absl",

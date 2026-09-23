@@ -215,6 +215,16 @@ def arithmetic_cases():
                 else:
                     add("%04X" % (base | (rx << 9) | (sf << 6) | (1 << 3) | ry), (4,))
                     add("%04X" % (base | (rx << 9) | (sf << 6) | ry), ())
+    # SEG-021-T015: NBCD (every data-alterable class incl. auto-updating and indexed) and the ABCD/SBCD register-pair
+    # and -(Ay),-(Ax) forms (distinct, aliased and A7 byte-step pairs). The memory forms run in the routed-stop
+    # atomicity check too.
+    for mode, ext in ((0, ""), (2, ""), (3, ""), (4, ""), (5, "0010"), (6, "1804"), (6, "1004")):
+        for reg in ((1, 7) if mode in (3, 4) else (1,)):
+            add("%04X" % (0x4800 | (mode << 3) | reg) + ext, (mode,))
+    for base in (0xC100, 0x8100):
+        for rx, ry in ((1, 2), (1, 1), (7, 7), (7, 0), (0, 7), (3, 4)):
+            add("%04X" % (base | (rx << 9) | (1 << 3) | ry), (4,))
+            add("%04X" % (base | (rx << 9) | ry), ())
     return out
 
 

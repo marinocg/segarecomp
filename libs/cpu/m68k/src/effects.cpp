@@ -34,6 +34,16 @@ std::uint16_t m68k_extended_arithmetic_ccr(std::uint16_t status_register, M68kEx
   return M68kExtendedArithmeticSpecification::apply(status_register, kind, source, destination, width);
 }
 
+M68kDecimalArithmeticResult m68k_evaluate_decimal_arithmetic(M68kDecimalArithmeticKind kind, std::uint32_t source,
+                                                              std::uint32_t destination, bool extend) noexcept {
+  return M68kDecimalArithmeticSpecification::evaluate(kind, source, destination, extend);
+}
+
+std::uint16_t m68k_decimal_arithmetic_ccr(std::uint16_t status_register, M68kDecimalArithmeticKind kind,
+                                          std::uint32_t source, std::uint32_t destination) noexcept {
+  return M68kDecimalArithmeticSpecification::apply(status_register, kind, source, destination);
+}
+
 M68kLogicalResult m68k_evaluate_logical(std::uint32_t result, M68kMemoryAccessWidth width) noexcept {
   return M68kLogicalResultSpecification::evaluate(result, width);
 }
@@ -371,6 +381,28 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
     effect.resolved_destination_ea = operation.destination_ea;
     effect.affects_condition_codes = true;
     effect.extend_flag_policy = M68kExtendFlagPolicy::preserve;
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::negate_decimal:
+    // SEG-021-T015: NBCD is a byte one-address read-modify-write; X/C follow the decimal borrow, Z is sticky;
+    // N/V are undefined on the 68000 (see M68kDecimalArithmeticSpecification).
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.destination_ea;
+    effect.resolved_destination_ea = operation.destination_ea;
+    effect.affects_condition_codes = true;
+    effect.extend_flag_policy = M68kExtendFlagPolicy::from_carry;
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::add_decimal:
+  case M68kIrKind::subtract_decimal:
+    // ABCD/SBCD: Dy,Dx or -(Ay),-(Ax); both operands and X are read; X/C follow the decimal carry/borrow.
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.source_ea;
+    effect.resolved_destination_ea = operation.destination_ea;
+    effect.affects_condition_codes = true;
+    effect.extend_flag_policy = M68kExtendFlagPolicy::from_carry;
     effect.pc = M68kPcEffectKind::advance;
     effect.pc_delta = operation.provenance.length.value;
     break;
@@ -714,7 +746,8 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
       // predecrement updates) and CMPM (two postincrement updates) have exhaustively represented footprints.
       operation.kind == M68kIrKind::negate_word || operation.kind == M68kIrKind::negate_extended ||
       operation.kind == M68kIrKind::add_extended || operation.kind == M68kIrKind::subtract_extended ||
-      operation.kind == M68kIrKind::compare_memory ||
+      operation.kind == M68kIrKind::compare_memory || operation.kind == M68kIrKind::negate_decimal ||
+      operation.kind == M68kIrKind::add_decimal || operation.kind == M68kIrKind::subtract_decimal ||
       operation.kind == M68kIrKind::compare || operation.kind == M68kIrKind::compare_address ||
       operation.kind == M68kIrKind::general_branch;
   if (operation.kind == M68kIrKind::push_effective_address || operation.kind == M68kIrKind::return_from_subroutine ||

@@ -64,6 +64,9 @@ const char *m68k_instruction_kind_name(M68kInstructionKind kind) noexcept {
   case M68kInstructionKind::add_extended: return "addx";
   case M68kInstructionKind::subtract_extended: return "subx";
   case M68kInstructionKind::compare_memory: return "cmpm";
+  case M68kInstructionKind::add_decimal: return "abcd";
+  case M68kInstructionKind::subtract_decimal: return "sbcd";
+  case M68kInstructionKind::negate_decimal: return "nbcd";
   case M68kInstructionKind::lea: return "lea";
   case M68kInstructionKind::jmp: return "jmp";
   case M68kInstructionKind::jsr: return "jsr";
@@ -560,6 +563,39 @@ struct M68kEaFieldOutcome {
   if (!dst.ok) return dst.failure;
   return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::negate_extended, size, {},
                                     dst.ea, dst.extension_bytes);
+}
+
+// SEG-021-T015: NBCD <ea> (0100 1000 00 mmmrrr, byte only, data-alterable). Sizes 01/10 of this
+// operation-select are SWAP/PEA/EXT/MOVEM and never reach here.
+[[nodiscard]] std::optional<M68kDecodeResult> m68k_decode_general_nbcd(
+    const DecodeSource &source, std::span<const std::uint8_t> image, std::size_t offset, std::uint64_t available,
+    const std::array<std::uint8_t, 2> &bytes, std::uint16_t word) {
+  if ((word & UINT16_C(0xFFC0)) != UINT16_C(0x4800)) return std::nullopt;
+  const auto mode3 = static_cast<std::uint8_t>((word >> 3U) & 0x7U);
+  const auto reg3 = static_cast<std::uint8_t>(word & 0x7U);
+  const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3,
+                                       m68k_ea_negate_operand, M68kMemoryAccessWidth::byte);
+  if (!dst.ok) return dst.failure;
+  return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::negate_decimal,
+                                    M68kMemoryAccessWidth::byte, {}, dst.ea, dst.extension_bytes);
+}
+
+// SEG-021-T015: ABCD/SBCD, fixed EA-field-free shapes (Motorola encodings):
+//   ABCD  1100 Rx 1 0000 R Ry   (0xC100 under mask 0xF1F0)
+//   SBCD  1000 Rx 1 0000 R Ry   (0x8100 under mask 0xF1F0)
+// R (bit 3) selects `Dy,Dx` (0) or `-(Ay),-(Ax)` (1). Byte only.
+[[nodiscard]] std::optional<M68kDecodeResult> m68k_decode_general_bcd_pair(
+    const DecodeSource &source, std::span<const std::uint8_t> image, std::size_t offset,
+    const std::array<std::uint8_t, 2> &bytes, std::uint16_t word) {
+  const auto pattern = static_cast<std::uint16_t>(word & UINT16_C(0xF1F0));
+  if (pattern != UINT16_C(0xC100) && pattern != UINT16_C(0x8100)) return std::nullopt;
+  const auto mode = (word & UINT16_C(0x0008)) != 0U ? M68kEaMode::address_predec : M68kEaMode::data_register;
+  const M68kEffectiveAddress src{mode, static_cast<std::uint8_t>(word & 0x7U), 0, 0, 0, 0};
+  const M68kEffectiveAddress dst{mode, static_cast<std::uint8_t>((word >> 9U) & 0x7U), 0, 0, 0, 0};
+  return m68k_finish_general_decode(source, image, offset, bytes,
+                                    pattern == UINT16_C(0xC100) ? M68kInstructionKind::add_decimal
+                                                                : M68kInstructionKind::subtract_decimal,
+                                    M68kMemoryAccessWidth::byte, src, dst, 0U);
 }
 
 // SEG-021-T014: ADDX/SUBX/CMPM. Fixed-shape, EA-field-free encodings (no extension words):
@@ -1628,6 +1664,8 @@ M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, De
       // SEG-021-T014: ADDX/SUBX/CMPM share the ADD/SUB/CMP primary nibbles; their fixed opmode-4..6
       // register/predecrement and CMPM shapes must be claimed before the ordinary EA decoders.
       if (auto general = m68k_decode_general_extended_pair(source, image, offset, bytes, word)) return *general;
+      // SEG-021-T015: ABCD/SBCD claim the AND/OR opmode-100 register/predecrement shapes (illegal there).
+      if (auto general = m68k_decode_general_bcd_pair(source, image, offset, bytes, word)) return *general;
         if (auto general = m68k_decode_general_compare(source, image, offset, available, bytes, word)) return *general;
         if (auto general = m68k_decode_general_add(source, image, offset, available, bytes, word)) return *general;
          if (auto general = m68k_decode_general_subtract(source, image, offset, available, bytes, word)) return *general;
@@ -1636,6 +1674,7 @@ M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, De
       if (auto general = m68k_decode_general_not(source, image, offset, available, bytes, word)) return *general;
        if (auto general = m68k_decode_general_negate_word(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_negx(source, image, offset, available, bytes, word)) return *general;
+      if (auto general = m68k_decode_general_nbcd(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_move_to_sr(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_move_from_sr(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_move_to_ccr(source, image, offset, available, bytes, word)) return *general;

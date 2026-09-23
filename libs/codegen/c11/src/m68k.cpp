@@ -531,8 +531,21 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
                                            std::string_view data_registers, std::string_view status_register,
                                            const M68kMemoryEmissionContext &memory) {
   const bool compare = operation.kind == M68kIrKind::compare_memory;
+  // SEG-021-T015: ABCD/SBCD share this exact pair lowering; only the compute/update emitters differ.
+  const bool decimal = operation.kind == M68kIrKind::add_decimal || operation.kind == M68kIrKind::subtract_decimal;
+  const auto decimal_kind = operation.kind == M68kIrKind::add_decimal ? M68kDecimalArithmeticKind::add
+                                                                      : M68kDecimalArithmeticKind::subtract;
   const auto kind = operation.kind == M68kIrKind::add_extended ? M68kExtendedArithmeticKind::add
                                                                 : M68kExtendedArithmeticKind::subtract;
+  const auto emit_compute = [&](std::ostringstream &o, const std::string &source, const std::string &destination) {
+    if (decimal) M68kDecimalArithmeticSpecification::emit_c_compute(o, status_register, decimal_kind, source, destination);
+    else M68kExtendedArithmeticSpecification::emit_c_compute(o, status_register, kind, source, destination, operation.size);
+  };
+  const auto emit_update = [&](std::ostringstream &o) {
+    if (decimal) M68kDecimalArithmeticSpecification::emit_c_update(o, status_register);
+    else M68kExtendedArithmeticSpecification::emit_c_update(o, status_register, kind, operation.size);
+  };
+  const char *result_name = decimal ? "bcd_result" : "xa_result";
   const bool registers = operation.source_ea.mode == M68kEaMode::data_register &&
                          operation.destination_ea.mode == M68kEaMode::data_register && !compare;
   const auto memory_mode = compare ? M68kEaMode::address_postinc : M68kEaMode::address_predec;
@@ -545,15 +558,13 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
   unsigned temp_ordinal = 0U;
   if (registers) {
     body << "{ ";
-    M68kExtendedArithmeticSpecification::emit_c_compute(body, status_register, kind,
-                                                        dn(operation.source_ea.reg), dn(operation.destination_ea.reg),
-                                                        size);
+    emit_compute(body, dn(operation.source_ea.reg), dn(operation.destination_ea.reg));
     std::ostringstream write_prelude;
-    const auto write = m68k_emit_ea_write(operation.destination_ea, size, data_registers, memory, "xa_result",
+    const auto write = m68k_emit_ea_write(operation.destination_ea, size, data_registers, memory, result_name,
                                           write_prelude, temp_ordinal);
     if (!write.ok) return false;
     body << write_prelude.str() << write.expression << ' ';
-    M68kExtendedArithmeticSpecification::emit_c_update(body, status_register, kind, size);
+    emit_update(body);
     body << "}\n";
   } else {
     const auto width = static_cast<std::uint32_t>(size);
@@ -590,16 +601,15 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
                                                         M68kExtendFlagPolicy::preserve);
     } else {
       body << "{ ";
-      M68kExtendedArithmeticSpecification::emit_c_compute(body, status_register, kind, "xa_src_value",
-                                                          "xa_dst_value", size);
+      emit_compute(body, "xa_src_value", "xa_dst_value");
       if (memory.runtime_routing) {
-        m68k_emit_routed_write(body, "m68k_xa_dst_ea", size, memory, "xa_result", temp_ordinal);
+        m68k_emit_routed_write(body, "m68k_xa_dst_ea", size, memory, result_name, temp_ordinal);
       } else {
         m68k_emit_ram_write_stmts(body, memory.ram_array,
                                   std::string("m68k_xa_dst_addr - UINT32_C(0x") + hex(memory.linear_memory_begin, 8) + ")",
-                                  "xa_result", size);
+                                  result_name, size);
       }
-      M68kExtendedArithmeticSpecification::emit_c_update(body, status_register, kind, size);
+      emit_update(body);
       body << "}\n";
     }
     if (!predecrement) body << "m68k_xa_dst_ea += UINT32_C(" << step(dst_reg) << ");\n";
@@ -1849,6 +1859,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     }
     break;
   }
+  case M68kIrKind::negate_decimal:
   case M68kIrKind::negate_extended:
   case M68kIrKind::negate_word: {
     if (memory != nullptr) {
@@ -1856,8 +1867,13 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
       // through M68kExtendedArithmeticSpecification (X/C from borrow, sticky Z); NEG's CCR is the plain
       // subtraction rule with X copied from C.
       const bool extended = operation.kind == M68kIrKind::negate_extended;
+      const bool decimal = operation.kind == M68kIrKind::negate_decimal;  // SEG-021-T015: NBCD shares this RMW path
       const auto emit_neg_compute = [&](std::ostringstream &o) {
-        if (extended) {
+        if (decimal) {
+          M68kDecimalArithmeticSpecification::emit_c_compute(o, status_register, M68kDecimalArithmeticKind::negate,
+                                                             "UINT32_C(0)", "neg_destination");
+          o << "const uint32_t neg_result = bcd_result; ";
+        } else if (extended) {
           M68kExtendedArithmeticSpecification::emit_c_compute(o, status_register, M68kExtendedArithmeticKind::subtract,
                                                               "neg_destination", "UINT32_C(0)", operation.size);
           o << "const uint32_t neg_result = xa_result; ";
@@ -1866,7 +1882,9 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         }
       };
       const auto emit_neg_update = [&](std::ostringstream &o) {
-        if (extended)
+        if (decimal)
+          M68kDecimalArithmeticSpecification::emit_c_update(o, status_register);
+        else if (extended)
           M68kExtendedArithmeticSpecification::emit_c_update(o, status_register, M68kExtendedArithmeticKind::subtract,
                                                              operation.size);
         else
@@ -1937,10 +1955,12 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     }
     break;
   }
+  case M68kIrKind::add_decimal:
+  case M68kIrKind::subtract_decimal:
   case M68kIrKind::add_extended:
   case M68kIrKind::subtract_extended:
   case M68kIrKind::compare_memory: {
-    // SEG-021-T014: see m68k_emit_extended_pair.
+    // SEG-021-T014/T015: see m68k_emit_extended_pair.
     if (memory != nullptr) (void)m68k_emit_extended_pair(output, operation, data_registers, status_register, *memory);
     break;
   }

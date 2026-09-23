@@ -493,7 +493,7 @@ void logical_forms_decode_and_share_flags() {
       std::vector<std::uint8_t>{0xC1U, 0x90U}, source(), segarecomp::M68kDecodeProfile::general_startup));
   expect(reverse_and.destination_ea.mode == segarecomp::M68kEaMode::address_indirect,
          "reverse AND accepts a memory-alterable RMW destination");
-  for (const auto &bytes : std::array<std::array<std::uint8_t, 2>, 7>{{{{0x00U,0x3CU}},{{0x00U,0x7CU}},{{0x02U,0x3CU}},{{0x02U,0x7CU}},{{0x0AU,0x3CU}},{{0x0AU,0x7CU}},{{0xC1U,0x08U}}}}) {  // SEG-021-T014: 0xB108 is CMPM.B (A0)+,(A0)+, no longer a rejected EOR
+  for (const auto &bytes : std::array<std::array<std::uint8_t, 2>, 6>{{{{0x00U,0x3CU}},{{0x00U,0x7CU}},{{0x02U,0x3CU}},{{0x02U,0x7CU}},{{0x0AU,0x3CU}},{{0x0AU,0x7CU}}}}) {  // SEG-021-T015: 0xC108 is ABCD.B -(A0),-(A0), no longer a rejected AND  // SEG-021-T014: 0xB108 is CMPM.B (A0)+,(A0)+, no longer a rejected EOR
     const auto rejected = std::get<segarecomp::RejectedM68kDecode>(segarecomp::decode_m68k_instruction(
         bytes, source(), segarecomp::M68kDecodeProfile::general_startup));
     expect(rejected.outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction,
@@ -18167,11 +18167,7 @@ void general_startup_decoder_rejects_every_t025_explicit_non_goal() {
       {0x0148U, "MOVEP.L (d16,A0),D0 (base 0x0148) is never decoded"},
       {0x0188U, "MOVEP.W D0,(d16,A0) (base 0x0188) is never decoded"},
       {0x01C8U, "MOVEP.L D0,(d16,A0) (base 0x01C8) is never decoded"},
-      {0xC100U, "ABCD Dn,Dn (base 0xC100) is never decoded"},
-      {0xC108U, "ABCD -(Ay),-(Ax) (base 0xC108) is never decoded"},
-      {0x8100U, "SBCD Dn,Dn (base 0x8100) is never decoded"},
-      {0x8108U, "SBCD -(Ay),-(Ax) (base 0x8108) is never decoded"},
-      {0x4800U, "NBCD D0 (base 0x4800) is never decoded"},
+      // SEG-021-T015: ABCD/SBCD/NBCD are supported instructions and no longer non-goal words.
       {0x4E40U, "TRAP #0 (base 0x4E40) is never decoded"},
       {0x4E70U, "RESET (0x4E70) is never decoded"},
       {0x4E72U, "STOP (0x4E72) is never decoded"},
@@ -26635,6 +26631,321 @@ int c4_extended_arithmetic_admission() {
   return failures == 0 ? 0 : 1;
 }
 
+// SEG-021-T015: ABCD/SBCD/NBCD. Legality is asserted from the Motorola encodings (ABCD `1100 Rx 1 0000 R Ry`, SBCD
+// `1000 Rx 1 0000 R Ry`, NBCD `0100 1000 00 ea` data-alterable), independently of the T001 dataset.
+namespace bcd_aot_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000F00U;
+const std::vector<std::uint8_t> image{
+    0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U,
+    0xC1U, 0x09U,  // F08 ABCD.B -(A1),-(A0)
+    0x81U, 0x09U,  // F0A SBCD.B -(A1),-(A0)
+    0x48U, 0x18U,  // F0C NBCD.B (A0)+
+    0x48U, 0x03U,  // F0E NBCD.B D3
+    0xC1U, 0x01U,  // F10 ABCD.B D1,D0
+    0x8FU, 0x0FU,  // F12 SBCD.B -(A7),-(A7)
+    0x48U, 0x22U,  // F14 NBCD.B -(A2)
+};
+constexpr std::uint32_t first_root = base + 0x08U;
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T015/bcd-aot-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base}, {{}, static_cast<std::uint32_t>(base + image.size())},
+                             {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace bcd_aot_fixture
+
+int emit_bcd_aot_source() {
+  using namespace segarecomp;
+  using namespace bcd_aot_fixture;
+  auto program = program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
+void bcd_forms_decode_lift_declare_effects_and_timing() {
+  using namespace segarecomp;
+  const auto decode_bytes = [](std::vector<std::uint8_t> bytes) {
+    return decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup);
+  };
+  for (const auto &[base, kind, ir] : std::array<std::tuple<unsigned, M68kInstructionKind, M68kIrKind>, 2>{{
+           {0xC100U, M68kInstructionKind::add_decimal, M68kIrKind::add_decimal},
+           {0x8100U, M68kInstructionKind::subtract_decimal, M68kIrKind::subtract_decimal}}}) {
+    for (unsigned memory = 0U; memory < 2U; ++memory)
+      for (unsigned rx = 0U; rx < 8U; ++rx)
+        for (unsigned ry = 0U; ry < 8U; ++ry) {
+          const unsigned word = base | (rx << 9U) | (memory << 3U) | ry;
+          const auto decoded = decode_bytes({static_cast<std::uint8_t>(word >> 8U), static_cast<std::uint8_t>(word)});
+          const auto *instruction = std::get_if<M68kDecodedInstruction>(&decoded);
+          const auto mode = memory != 0U ? M68kEaMode::address_predec : M68kEaMode::data_register;
+          const bool shape = instruction != nullptr && instruction->kind == kind &&
+                             instruction->size == M68kMemoryAccessWidth::byte && instruction->source_ea.mode == mode &&
+                             instruction->destination_ea.mode == mode && instruction->source_ea.reg == ry &&
+                             instruction->destination_ea.reg == rx && instruction->provenance.length.value == 2U;
+          expect(shape, "ABCD/SBCD decode Dy,Dx and -(Ay),-(Ax) for every register pair (byte only)");
+          if (!shape) continue;
+          const auto operation = lift_m68k_instruction(*instruction);
+          const auto effect = m68k_operation_effect(operation);
+          const auto cycles = m68k_instruction_cycles(operation);
+          const auto a_mask = memory != 0U ? static_cast<std::uint8_t>((1U << ry) | (1U << rx)) : std::uint8_t{0};
+          const auto d_mask = memory == 0U ? static_cast<std::uint8_t>(1U << rx) : std::uint8_t{0};
+          expect(operation.kind == ir && effect.affects_condition_codes &&
+                     effect.extend_flag_policy == M68kExtendFlagPolicy::from_carry &&
+                     effect.register_write_footprint_complete && effect.address_register_write_mask == a_mask &&
+                     effect.data_register_write_mask == d_mask && effect.pc == M68kPcEffectKind::advance &&
+                     effect.pc_delta == 2U && cycles && *cycles == (memory != 0U ? 18U : 6U),
+                 "ABCD/SBCD lift, declare complete CCR/register-write effects and publish Table 8-4 timing");
+          expect(m68k_operation_is_immutable_rom_aot_safe(operation, false) &&
+                     m68k_operation_has_complete_c_emission(operation),
+                 "ABCD/SBCD are admitted to immutable-ROM AOT and have complete C emission");
+        }
+    // Word/long size encodings of these opcode groups are other instructions (MULU/EXG/ADD...), never ABCD/SBCD.
+    for (const unsigned other : {0x0040U, 0x0080U}) {
+      const auto decoded = decode_bytes({static_cast<std::uint8_t>((base | other) >> 8U), static_cast<std::uint8_t>(base | other)});
+      const auto *instruction = std::get_if<M68kDecodedInstruction>(&decoded);
+      expect(instruction == nullptr || (instruction->kind != M68kInstructionKind::add_decimal &&
+                                        instruction->kind != M68kInstructionKind::subtract_decimal),
+             "non-byte opmodes are never ABCD/SBCD");
+    }
+  }
+  struct UnaryEa { std::vector<std::uint8_t> ext; unsigned mode_reg; M68kEaMode mode; unsigned cycles; };
+  const std::vector<UnaryEa> eas{{{}, 0x00U, M68kEaMode::data_register, 6U},   {{}, 0x10U, M68kEaMode::address_indirect, 12U},
+                                 {{}, 0x18U, M68kEaMode::address_postinc, 12U}, {{}, 0x20U, M68kEaMode::address_predec, 14U},
+                                 {{0x00U, 0x10U}, 0x28U, M68kEaMode::address_disp16, 16U},
+                                 {{0x10U, 0x04U}, 0x30U, M68kEaMode::address_index8, 18U},
+                                 {{0x40U, 0x00U}, 0x38U, M68kEaMode::absolute_word, 16U},
+                                 {{0x00U, 0xFFU, 0x00U, 0x80U}, 0x39U, M68kEaMode::absolute_long, 20U}};
+  for (const auto &ea : eas) {
+    const unsigned word = 0x4800U | ea.mode_reg;
+    std::vector<std::uint8_t> bytes{static_cast<std::uint8_t>(word >> 8U), static_cast<std::uint8_t>(word)};
+    bytes.insert(bytes.end(), ea.ext.begin(), ea.ext.end());
+    const auto decoded = decode_bytes(bytes);
+    const auto *instruction = std::get_if<M68kDecodedInstruction>(&decoded);
+    expect(instruction != nullptr && instruction->kind == M68kInstructionKind::negate_decimal &&
+               instruction->size == M68kMemoryAccessWidth::byte && instruction->destination_ea.mode == ea.mode &&
+               instruction->provenance.length.value == bytes.size(),
+           "NBCD decodes every data-alterable EA with exact provenance length");
+    if (instruction == nullptr) continue;
+    const auto operation = lift_m68k_instruction(*instruction);
+    const auto effect = m68k_operation_effect(operation);
+    const auto cycles = m68k_instruction_cycles(operation);
+    expect(operation.kind == M68kIrKind::negate_decimal && effect.affects_condition_codes &&
+               effect.extend_flag_policy == M68kExtendFlagPolicy::from_carry && effect.register_write_footprint_complete &&
+               cycles && *cycles == ea.cycles && m68k_operation_is_immutable_rom_aot_safe(operation, false) &&
+               m68k_operation_has_complete_c_emission(operation),
+           "NBCD declares effects, Table 8-6 timing (Dn 6, memory 8+EA), AOT admission and complete C emission");
+  }
+  for (const unsigned illegal : {0x08U, 0x3AU, 0x3BU, 0x3CU}) {
+    const auto rejected = decode_bytes({0x48U, static_cast<std::uint8_t>(0x00U | illegal), 0x00U, 0x00U});
+    const auto *instruction = std::get_if<M68kDecodedInstruction>(&rejected);
+    expect(instruction == nullptr || instruction->kind != M68kInstructionKind::negate_decimal,
+           "NBCD rejects An, PC-relative and immediate operands");
+  }
+  const auto truncated = decode_bytes({0x48U, 0x28U});
+  const auto *failure = std::get_if<RejectedM68kDecode>(&truncated);
+  expect(failure != nullptr && failure->outcome == DecodeOutcome::truncated_instruction,
+         "NBCD d16(An) with a truncated extension word is a bounds-safe truncation");
+  // Neighbouring encodings keep their owners.
+  const auto expect_kind = [&](std::vector<std::uint8_t> bytes, M68kInstructionKind kind, const char *message) {
+    const auto decoded = decode_bytes(std::move(bytes));
+    const auto *instruction = std::get_if<M68kDecodedInstruction>(&decoded);
+    expect(instruction != nullptr && instruction->kind == kind, message);
+  };
+  expect_kind({0x48U, 0x40U}, M68kInstructionKind::swap, "0x4840 remains SWAP D0");
+  expect_kind({0x48U, 0x50U}, M68kInstructionKind::pea, "0x4850 remains PEA (A0)");
+  expect_kind({0xC1U, 0xC0U}, M68kInstructionKind::multiply_signed_word, "0xC1C0 remains MULS.W D0,D0");
+  expect_kind({0xC1U, 0x10U}, M68kInstructionKind::logical_and, "0xC110 remains AND.B D0,(A0)");
+  expect_kind({0x81U, 0x10U}, M68kInstructionKind::logical_or, "0x8110 remains OR.B D0,(A0)");
+}
+
+void bcd_host_semantics_have_documented_results_sticky_zero_and_matched_undefined_flags() {
+  using namespace segarecomp;
+  using K = M68kDecimalArithmeticKind;
+  const auto eval = [](K kind, std::uint32_t src, std::uint32_t dst, bool x) {
+    return m68k_evaluate_decimal_arithmetic(kind, src, dst, x);
+  };
+  // Documented results (X, C, byte result, Z rule).
+  auto r = eval(K::add, 0x01U, 0x99U, false);
+  expect(r.result == 0x00U && r.carry && !r.clears_zero, "ABCD 99+01 = 00 with decimal carry, Z not cleared");
+  r = eval(K::add, 0x09U, 0x00U, true);
+  expect(r.result == 0x10U && !r.carry && r.clears_zero, "ABCD 00+09+X = 10 (nibble carry), no decimal carry");
+  r = eval(K::add, 0x09U, 0x19U, false);
+  expect(r.result == 0x28U && !r.carry, "ABCD 19+09 = 28");
+  r = eval(K::add, 0x05U, 0x95U, true);
+  expect(r.result == 0x01U && r.carry, "ABCD 95+05+X = 01 with carry");
+  r = eval(K::subtract, 0x01U, 0x00U, false);
+  expect(r.result == 0x99U && r.carry && r.clears_zero, "SBCD 00-01 = 99 with decimal borrow");
+  r = eval(K::subtract, 0x01U, 0x10U, false);
+  expect(r.result == 0x09U && !r.carry, "SBCD 10-01 = 09");
+  r = eval(K::subtract, 0x55U, 0x45U, false);
+  expect(r.result == 0x90U && r.carry, "SBCD 45-55 = 90 with borrow");
+  r = eval(K::subtract, 0x05U, 0x03U, true);
+  expect(r.result == 0x97U && r.carry, "SBCD 03-05-X = 97 with borrow");
+  r = eval(K::negate, 0U, 0x01U, false);
+  expect(r.result == 0x99U && r.carry && r.clears_zero, "NBCD 01 = 99 with borrow");
+  r = eval(K::negate, 0U, 0x90U, false);
+  expect(r.result == 0x10U && r.carry, "NBCD 90 = 10 (low-nibble 0xA correction)");
+  r = eval(K::negate, 0U, 0x99U, true);
+  expect(r.result == 0x00U && r.carry && !r.clears_zero, "NBCD 99 with X = 00, X/C set, Z not cleared");
+  r = eval(K::negate, 0U, 0x00U, true);
+  expect(r.result == 0x99U && r.carry, "NBCD 00 with X = 99 with borrow");
+  // NBCD of zero without X: nothing to negate; byte unchanged, X/C clear (the documented, defined part).
+  r = eval(K::negate, 0U, 0x00U, false);
+  expect(r.result == 0x00U && !r.carry && !r.clears_zero, "NBCD 00 without X leaves 00, X/C clear, Z unchanged");
+  // Upper bits beyond the byte never matter.
+  r = eval(K::add, 0xABCD1201U, 0x77665599U, false);
+  expect(r.result == 0x00U && r.carry, "ABCD ignores operand bits above bit 7");
+  // Sticky Z and X/C via the whole CCR update (X/C/Z documented; N/V matched-to-Musashi policy, undefined on 68000).
+  expect(m68k_decimal_arithmetic_ccr(0x2704U, K::add, 0U, 0U) == 0x2704U, "ABCD zero result keeps a set Z");
+  expect(m68k_decimal_arithmetic_ccr(0x2700U, K::add, 0U, 0U) == 0x2700U, "ABCD zero result keeps a clear Z");
+  expect(m68k_decimal_arithmetic_ccr(0x2704U, K::add, 0x01U, 0x01U) == 0x2700U, "ABCD non-zero result clears Z");
+  expect(m68k_decimal_arithmetic_ccr(0x2714U, K::add, 0x01U, 0x98U) == 0x2715U, "ABCD 98+01+X = 00 carries into X/C, Z kept");
+  expect(m68k_decimal_arithmetic_ccr(0x2700U, K::subtract, 0x01U, 0x00U) == 0x2719U, "SBCD 00-01 sets X, N(policy), C");
+  expect(m68k_decimal_arithmetic_ccr(0x2704U, K::negate, 0U, 0x00U) == 0x270CU,
+         "NBCD 00 without X: X/C clear, Z kept, N set (matched-to-Musashi undefined-flag policy)");
+  expect(m68k_decimal_arithmetic_ccr(0x2714U, K::negate, 0U, 0x99U) == 0x2715U, "NBCD 99 with X = 00: X/C set, Z kept");
+  // Garbage seeds: 00+00+X(1)=01 clears the seed Z/N/V/C, re-derives them and sets X/C only when carrying (no carry: X clear).
+  expect(m68k_decimal_arithmetic_ccr(0x271FU, K::add, 0U, 0U) == 0x2700U,
+         "ABCD 00+00+X=01: X/C cleared, Z cleared, garbage N/V/C seeds replaced");
+}
+
+void bcd_generated_c_defers_address_commit_and_handles_alias() {
+  using namespace segarecomp;
+  const auto lift = [](std::vector<std::uint8_t> bytes) {
+    const auto decoded = std::get<M68kDecodedInstruction>(decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup));
+    return lift_m68k_instruction(decoded);
+  };
+  {
+    const GenesisM68kEmissionContext memory{"ram", "a", "fi", "fc", "fd", 0U, std::nullopt, 0U, {}, {}};
+    const auto emitted = emit_m68k_operation_c(lift({0x8FU, 0x0FU}), "d", "sr", "", &memory);  // SBCD.B -(A7),-(A7)
+    expect(emitted.find("m68k_xa_src_ea -= UINT32_C(2)") != std::string::npos &&
+               emitted.find("uint32_t m68k_xa_dst_ea = m68k_xa_src_ea;") != std::string::npos &&
+               emitted.find("m68k_xa_dst_ea -= UINT32_C(2)") != std::string::npos &&
+               emitted.find("a[7] = m68k_xa_src_ea;") < emitted.find("a[7] = m68k_xa_dst_ea;") &&
+               emitted.find("bcd_result") != std::string::npos,
+           "SBCD.B -(A7),-(A7) steps A7 by two per operand, aliases the destination snapshot and commits once per operand");
+    const auto nbcd = emit_m68k_operation_c(lift({0x48U, 0x27U}), "d", "sr", "", &memory);  // NBCD.B -(A7)
+    expect(nbcd.find("bcd_result") != std::string::npos && nbcd.find("m68k_neg_auto_ea -= UINT32_C(2)") != std::string::npos,
+           "NBCD.B -(A7) uses the shared one-address RMW lowering with the A7 byte step of two");
+  }
+  {
+    GenesisM68kEmissionContext memory{"ram", "a", "fi", "fc", "fd", 0U, std::nullopt, 0U, {}, {}};
+    memory.runtime_routing = true;
+    memory.runtime_object = "runtime";
+    memory.program_counter = "runtime->pc";
+    const auto emitted = emit_m68k_operation_c(lift({0xC5U, 0x09U}), "runtime->d", "runtime->sr", "", &memory);  // ABCD -(A1),-(A2)
+    const auto src_read = emitted.find("m68k_routed_addr_0 = (m68k_xa_src_ea)");
+    const auto dst_read = emitted.find("m68k_routed_addr_3 = (m68k_xa_dst_ea)");
+    const auto dst_write = emitted.find("m68k_routed_addr_6 = (m68k_xa_dst_ea)");
+    const auto commit_src = emitted.find("a[1] = m68k_xa_src_ea;");
+    const auto commit_dst = emitted.find("a[2] = m68k_xa_dst_ea;");
+    const auto pc = emitted.find("runtime->pc +=");
+    const auto npos = std::string::npos;
+    expect(src_read != npos && dst_read != npos && dst_write != npos && commit_src != npos && commit_dst != npos &&
+               pc != npos && src_read < emitted.find("return transfer;", src_read) &&
+               emitted.find("return transfer;", src_read) < dst_read &&
+               dst_read < emitted.find("return transfer;", dst_read) &&
+               emitted.find("return transfer;", dst_read) < dst_write &&
+               dst_write < emitted.find("return transfer;", dst_write) &&
+               emitted.find("return transfer;", dst_write) < commit_src && commit_src < commit_dst && commit_dst < pc,
+           "routed ABCD returns from each failed access before the next access, the An commits and the PC advance");
+  }
+}
+
+void bcd_aot_dispatch_is_admitted_end_to_end() {
+  using namespace segarecomp;
+  using namespace bcd_aot_fixture;
+  auto program = program_with();
+  expect(apply_genesis_immutable_rom_aot_range(program, first_root, base + static_cast<std::uint32_t>(image.size())),
+         "BCD fixture range enumerates cleanly");
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "BCD fixture remains a genuine partial program");
+  if (partial == nullptr) return;
+  const auto &roots = partial->accepted_prefix.immutable_rom_aot_entries;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  for (std::uint32_t address = first_root; address < base + image.size(); address += 2U) {
+    expect(std::any_of(roots.begin(), roots.end(),
+                       [&](const auto &root) { return root.decoded.provenance.source.address.value == address; }),
+           "each BCD form becomes a validated independent AOT root");
+    std::ostringstream hex_address;
+    hex_address << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address;
+    const auto begin = emitted.find("genesis_aot_" + hex_address.str() + "(GenesisRuntime *runtime) {");
+    const auto end = begin == std::string::npos ? std::string::npos : emitted.find("\n}\n", begin);
+    const auto body = begin == std::string::npos || end == std::string::npos ? std::string{} : emitted.substr(begin, end - begin);
+    expect(!body.empty() && body.find("translation rejected") == std::string::npos &&
+               (body.find("genesis_route_access(runtime,") != std::string::npos) ==
+                   (address != base + 0x0EU && address != base + 0x10U),  // NBCD Dn and ABCD Dy,Dx are register-only
+           "each BCD AOT body is emitted and routes exactly its memory operands");
+  }
+}
+
+int c4_bcd_admission() {
+  using namespace segarecomp;
+  // Every legal ABCD/SBCD/NBCD shape (including the absolute and indexed NBCD operands, which need a retained fact, and
+  // A7 byte steps) must pass the real C4 preflight with ZERO gap rows and emit a routed body.
+  struct Case { const char *name; std::vector<std::uint8_t> code; const char *commit; bool routed; };
+  const std::vector<Case> cases{
+      {"ABCD.B D1,D2", {0xC5U, 0x01U}, nullptr, false},
+      {"SBCD.B D1,D1", {0x83U, 0x01U}, nullptr, false},
+      {"ABCD.B -(A1),-(A2)", {0xC5U, 0x09U}, "runtime->a[2] = m68k_xa_dst_ea;", true},
+      {"SBCD.B -(A7),-(A0)", {0x81U, 0x0FU}, "runtime->a[7] = m68k_xa_src_ea;", true},
+      {"SBCD.B -(A7),-(A7)", {0x8FU, 0x0FU}, "runtime->a[7] = m68k_xa_dst_ea;", true},
+      {"ABCD.B -(A7),-(A7)", {0xCFU, 0x0FU}, "runtime->a[7] = m68k_xa_dst_ea;", true},
+      {"NBCD.B D3", {0x48U, 0x03U}, nullptr, false},
+      {"NBCD.B (A0)+", {0x48U, 0x18U}, "runtime->a[0] = m68k_neg_auto_ea;", true},
+      {"NBCD.B -(A7)", {0x48U, 0x27U}, "runtime->a[7] = m68k_neg_auto_ea;", true},
+      {"NBCD.B (A0)", {0x48U, 0x10U}, nullptr, true},
+      {"NBCD.B (16,A0)", {0x48U, 0x28U, 0x00U, 0x10U}, nullptr, true},
+      {"NBCD.B (4,A0,D1.W)", {0x48U, 0x30U, 0x10U, 0x04U}, nullptr, true},
+      {"NBCD.B (0xFF0080).L", {0x48U, 0x39U, 0x00U, 0xFFU, 0x00U, 0x80U}, nullptr, true},
+      {"NBCD.B (0xFF80).W", {0x48U, 0x38U, 0xFFU, 0x80U}, nullptr, true},
+  };
+  int failures = 0;
+  for (const auto &test_case : cases) {
+    FrontendProgram program{};
+    program.profile = M68kFrontendProfile::general_startup;
+    auto image = test_case.code;
+    image.push_back(0x4EU);
+    image.push_back(0x70U);  // RESET
+    program.image = {"synthetic-c4-bcd", image, 0U};
+    program.image.byte_length = program.image.bytes.size();
+    program.mapping_claims = {{"synthetic-c4-bcd", {{}, 0xB00U},
+                                {{}, static_cast<std::uint32_t>(0xB00U + program.image.bytes.size())},
+                                {0U}, {program.image.bytes.size()}}};
+    program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+    const auto result = analyze_m68k_frontend(program);
+    const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+    bool ok = partial != nullptr;
+    std::string emitted;
+    if (ok) {
+      const auto preflight = preflight_m68k_general_startup_c4(*partial);
+      ok = preflight.valid && preflight.rows.empty();
+      emitted = emit_m68k_general_startup_runtime_c(*partial);
+      ok = ok && emitted.find("translation rejected") == std::string::npos &&
+           emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_") == std::string::npos &&
+           emitted.find("genesis_c4_lowering_stop_") == std::string::npos &&
+           (emitted.find("genesis_route_access") != std::string::npos) == test_case.routed &&
+           (test_case.commit == nullptr || emitted.find(test_case.commit) != std::string::npos) &&
+           emitted.find("runtime->runtime") == std::string::npos;
+    }
+    if (!ok) {
+      std::cerr << "C4 BCD admission failed: " << test_case.name << "\n";
+      ++failures;
+    }
+  }
+  return failures == 0 ? 0 : 1;
+}
+
 // SEG-007-T214 / ADR-0028 §9: authoritative exact direct-control target
 // closure fixtures (Scope item 8). Every fixture is entirely synthetic --
 // generic addresses only, no Sonic/commercial-derived values.
@@ -27875,6 +28186,8 @@ int main(int argc, char **argv) {
     return emit_negate_disp16_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-extended-arithmetic-aot")
     return emit_extended_arithmetic_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-bcd-aot")
+    return emit_bcd_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-pea-aot")
     return emit_pea_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-jmp-pc-indexed-word-aot")
@@ -28190,6 +28503,12 @@ int main(int argc, char **argv) {
   extended_arithmetic_aot_dispatch_is_admitted_end_to_end();
   expect(c4_extended_arithmetic_admission() == 0,
          "SEG-021-T014: every legal ADDX/SUBX/CMPM/NEGX/NEG shape passes the C4 preflight with zero gap rows");
+  bcd_forms_decode_lift_declare_effects_and_timing();
+  bcd_host_semantics_have_documented_results_sticky_zero_and_matched_undefined_flags();
+  bcd_generated_c_defers_address_commit_and_handles_alias();
+  bcd_aot_dispatch_is_admitted_end_to_end();
+  expect(c4_bcd_admission() == 0,
+         "SEG-021-T015: every legal ABCD/SBCD/NBCD shape passes the C4 preflight with zero gap rows");
   compare_ccr_preserves_x_and_uses_destination_minus_source();
   compare_forms_decode_and_lift_with_shared_ea();
   subtraction_forms_decode_and_share_flags();
