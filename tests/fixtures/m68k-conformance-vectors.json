@@ -12738,6 +12738,326 @@
    ]
   },
   {
+   "id": "movem.mem_reglist.l.absl.reglist",
+   "form": "movem.mem_reglist.l.absl.reglist",
+   "ext": [
+    "000000020000",
+    "00FF00020000",
+    "FFFF00020000"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.mem_reglist.l.absw.reglist",
+   "form": "movem.mem_reglist.l.absw.reglist",
+   "ext": [
+    "00004000",
+    "00FF4000",
+    "FFFF4000"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.mem_reglist.l.disp.reglist",
+   "form": "movem.mem_reglist.l.disp.reglist",
+   "ext": [
+    "00000010",
+    "00FF0010",
+    "FFFF0010"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.mem_reglist.l.ind.reglist",
+   "form": "movem.mem_reglist.l.ind.reglist",
+   "ext": [
+    "0000",
+    "00FF",
+    "FFFF"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.mem_reglist.l.index.reglist",
+   "form": "movem.mem_reglist.l.index.reglist",
+   "ext": [
+    "00001804",
+    "00FF1804",
+    "FFFF1804"
+   ],
+   "profile": "state_modes",
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
+   "id": "movem.mem_reglist.l.pcdisp.reglist",
+   "form": "movem.mem_reglist.l.pcdisp.reglist",
+   "ext": [
+    "00000010",
+    "00FF0010",
+    "FFFF0010"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.mem_reglist.l.pcindex.reglist",
+   "form": "movem.mem_reglist.l.pcindex.reglist",
+   "ext": [
+    "00000004",
+    "00FF0004",
+    "FFFF0004"
+   ],
+   "profile": "state_modes",
+   "init": {
+    "d0": "00000010"
+   }
+  },
+  {
+   "id": "movem.mem_reglist.l.postinc.reglist",
+   "form": "movem.mem_reglist.l.postinc.reglist",
+   "ext": [
+    "0000",
+    "00FF",
+    "FFFF"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.mem_reglist.w.absl.reglist",
+   "form": "movem.mem_reglist.w.absl.reglist",
+   "ext": [
+    "000000020000",
+    "00FF00020000",
+    "FFFF00020000"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.mem_reglist.w.absw.reglist",
+   "form": "movem.mem_reglist.w.absw.reglist",
+   "ext": [
+    "00004000",
+    "00FF4000",
+    "FFFF4000"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.mem_reglist.w.disp.reglist",
+   "form": "movem.mem_reglist.w.disp.reglist",
+   "ext": [
+    "00000010",
+    "00FF0010",
+    "FFFF0010"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.mem_reglist.w.ind.reglist",
+   "form": "movem.mem_reglist.w.ind.reglist",
+   "ext": [
+    "0000",
+    "00FF",
+    "FFFF"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.mem_reglist.w.ind.reglist.signext",
+   "form": "movem.mem_reglist.w.ind.reglist",
+   "bind": {
+    "x": "ea.src"
+   },
+   "ext": [
+    "0001"
+   ],
+   "profile": "unary_sweep"
+  },
+  {
+   "id": "movem.mem_reglist.w.index.reglist",
+   "form": "movem.mem_reglist.w.index.reglist",
+   "ext": [
+    "00001804",
+    "00FF1804",
+    "FFFF1804"
+   ],
+   "profile": "state_modes",
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
+   "id": "movem.mem_reglist.w.pcdisp.reglist",
+   "form": "movem.mem_reglist.w.pcdisp.reglist",
+   "ext": [
+    "00000010",
+    "00FF0010",
+    "FFFF0010"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.mem_reglist.w.pcindex.reglist",
+   "form": "movem.mem_reglist.w.pcindex.reglist",
+   "ext": [
+    "00000004",
+    "00FF0004",
+    "FFFF0004"
+   ],
+   "profile": "state_modes",
+   "init": {
+    "d0": "00000010"
+   }
+  },
+  {
+   "id": "movem.mem_reglist.w.postinc.reglist",
+   "form": "movem.mem_reglist.w.postinc.reglist",
+   "ext": [
+    "0000",
+    "00FF",
+    "FFFF"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.mem_reglist.w.postinc.reglist.signext",
+   "form": "movem.mem_reglist.w.postinc.reglist",
+   "bind": {
+    "x": "ea.src"
+   },
+   "ext": [
+    "0001"
+   ],
+   "profile": "unary_sweep"
+  },
+  {
+   "id": "movem.reglist_mem.l.reglist.absl",
+   "form": "movem.reglist_mem.l.reglist.absl",
+   "ext": [
+    "000000020000",
+    "00FF00020000",
+    "FFFF00020000"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.reglist_mem.l.reglist.absw",
+   "form": "movem.reglist_mem.l.reglist.absw",
+   "ext": [
+    "00004000",
+    "00FF4000",
+    "FFFF4000"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.reglist_mem.l.reglist.disp",
+   "form": "movem.reglist_mem.l.reglist.disp",
+   "ext": [
+    "00000010",
+    "00FF0010",
+    "FFFF0010"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.reglist_mem.l.reglist.ind",
+   "form": "movem.reglist_mem.l.reglist.ind",
+   "ext": [
+    "0000",
+    "00FF",
+    "FFFF"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.reglist_mem.l.reglist.index",
+   "form": "movem.reglist_mem.l.reglist.index",
+   "ext": [
+    "00001804",
+    "00FF1804",
+    "FFFF1804"
+   ],
+   "profile": "state_modes",
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
+   "id": "movem.reglist_mem.l.reglist.predec",
+   "form": "movem.reglist_mem.l.reglist.predec",
+   "ext": [
+    "0000",
+    "00FF",
+    "FFFF"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.reglist_mem.w.reglist.absl",
+   "form": "movem.reglist_mem.w.reglist.absl",
+   "ext": [
+    "000000020000",
+    "00FF00020000",
+    "FFFF00020000"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.reglist_mem.w.reglist.absw",
+   "form": "movem.reglist_mem.w.reglist.absw",
+   "ext": [
+    "00004000",
+    "00FF4000",
+    "FFFF4000"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.reglist_mem.w.reglist.disp",
+   "form": "movem.reglist_mem.w.reglist.disp",
+   "ext": [
+    "00000010",
+    "00FF0010",
+    "FFFF0010"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.reglist_mem.w.reglist.ind",
+   "form": "movem.reglist_mem.w.reglist.ind",
+   "ext": [
+    "0000",
+    "00FF",
+    "FFFF"
+   ],
+   "profile": "state_modes"
+  },
+  {
+   "id": "movem.reglist_mem.w.reglist.index",
+   "form": "movem.reglist_mem.w.reglist.index",
+   "ext": [
+    "00001804",
+    "00FF1804",
+    "FFFF1804"
+   ],
+   "profile": "state_modes",
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
+   "id": "movem.reglist_mem.w.reglist.predec",
+   "form": "movem.reglist_mem.w.reglist.predec",
+   "ext": [
+    "0000",
+    "00FF",
+    "FFFF"
+   ],
+   "profile": "state_modes"
+  },
+  {
    "id": "muls.ea_dn.w.absl.dn",
    "form": "muls.ea_dn.w.absl.dn",
    "bind": {

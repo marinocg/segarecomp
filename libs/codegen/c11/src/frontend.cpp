@@ -5243,18 +5243,23 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
         // routed through the exact same genesis_route_access boundary as
         // every other selected memory-affecting C4 kind. `m68k_ea_movem_
         // register_to_memory`/`m68k_ea_movem_memory_to_register` (decode's
-        // own legal-EA sets) admit exactly the four families that routed
+        // own legal-EA sets) admit exactly the six families that routed
         // branch represents (absolute.w/absolute.l/d16(PC),
-        // (An)/d16(An), -(An), (An)+); a forged/malformed IR naming any
-        // other EA mode is rejected here, before any C is emitted, rather
-        // than silently producing an incomplete block.
+        // (An)/d16(An), -(An), (An)+, plus SEG-021-T012's
+        // (d8,An,Xn)/(d8,PC,Xn) widening -- `emit_m68k_operation_c`'s own
+        // shared movem_transfer routed branch groups these two new modes
+        // with (An)/d16(An), the same one-time working-EA-snapshot
+        // discipline); a forged/malformed IR naming any other EA mode is
+        // rejected here, before any C is emitted, rather than silently
+        // producing an incomplete block.
         const bool store = found->second->movem_direction == M68kMovemDirection::registers_to_memory;
         const auto &movem_ea = store ? found->second->destination_ea : found->second->source_ea;
         const bool representable =
             movem_ea.mode == M68kEaMode::absolute_word || movem_ea.mode == M68kEaMode::absolute_long ||
             movem_ea.mode == M68kEaMode::pc_disp16 || movem_ea.mode == M68kEaMode::address_indirect ||
             movem_ea.mode == M68kEaMode::address_disp16 || movem_ea.mode == M68kEaMode::address_predec ||
-            movem_ea.mode == M68kEaMode::address_postinc;
+            movem_ea.mode == M68kEaMode::address_postinc || movem_ea.mode == M68kEaMode::address_index8 ||
+            movem_ea.mode == M68kEaMode::pc_index8;
         if (!representable) return "/* translation rejected: unsupported C4 operation */\n";
         auto routed = memory;
         routed.runtime_routing = true;

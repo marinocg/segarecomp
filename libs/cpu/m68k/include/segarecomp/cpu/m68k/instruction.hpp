@@ -368,23 +368,32 @@ inline constexpr M68kEaLegalMask m68k_ea_bit_test_dynamic_destination =
 // PC-relative or immediate. The operand is always a word and the count is fixed at 1.
 inline constexpr M68kEaLegalMask m68k_ea_shift_memory_destination =
     m68k_ea_data_alterable_with_index & ~m68k_ea_dn;
-// SEG-007-T025 (Batch C, C5a/C5b/C5c): MOVEM's legal EA sets, verified
-// against M68000PM/AD Rev. 1 Sec 4 MOVEM entry and pinned Musashi's
-// m68k_in.c opcode table ("re ." row legend "A..DXWL...": An indirect,
-// d16(An), absolute.w, absolute.l; the dedicated "re pd" row additionally
-// selects -(An) for register->memory; "er ." row identical to "re .", plus
-// the dedicated "er pi" row selecting (An)+ and the dedicated "er pcdi" row
-// selecting d16(PC), both for the memory->register direction only).
+// SEG-007-T025 (Batch C, C5a/C5b/C5c) / SEG-021-T012: MOVEM's legal EA sets,
+// verified against M68000PM/AD Rev. 1 Sec 4 MOVEM entry (Table 2-4 "control
+// alterable" for register->memory, "control" for memory->register) and
+// pinned Musashi's m68k_in.c opcode table ("re ." row legend "A..DXWL...":
+// An indirect, d16(An), absolute.w, absolute.l; the dedicated "re pd" row
+// additionally selects -(An) for register->memory; "er ." row identical to
+// "re .", plus the dedicated "er pi" row selecting (An)+ and the dedicated
+// "er pcdi"/"er pcix" rows selecting d16(PC)/(d8,PC,Xn), both for the
+// memory->register direction only).
 // Register->memory legally EXCLUDES PC-relative entirely (there is no legal
 // MOVEM store through PC-relative addressing) and EXCLUDES postincrement
 // (never legal for register->memory); memory->register legally EXCLUDES
-// predecrement (never legal for memory->register). Indexed modes
-// (d8(An,Xn)/d8(PC,Xn)) remain permanently out of the project's EA tranche,
-// matching every other selected control-EA form.
+// predecrement (never legal for memory->register). SEG-021-T012 widens both
+// sets with the brief-format indexed forms the base MC68000 "control
+// alterable"/"control" categories always included: register->memory gains
+// `(d8,An,Xn)` (`m68k_ea_index8`; no PC-relative form is ever legal for a
+// store), and memory->register gains both `(d8,An,Xn)` and `(d8,PC,Xn)`
+// (`m68k_ea_pc_index8`), completing MOVEM's EA-mode ceiling to the full
+// Motorola-manual "control alterable"/"control" categories, the same
+// per-instruction distinct-mask precedent SEG-021-T011 established for
+// LEA/PEA/JMP/JSR.
 inline constexpr M68kEaLegalMask m68k_ea_movem_register_to_memory =
-    m68k_ea_an_indirect | m68k_ea_an_disp16 | m68k_ea_absolute_word | m68k_ea_absolute_long | m68k_ea_an_predec;
+    m68k_ea_an_indirect | m68k_ea_an_disp16 | m68k_ea_absolute_word | m68k_ea_absolute_long | m68k_ea_an_predec |
+    m68k_ea_index8;
 inline constexpr M68kEaLegalMask m68k_ea_movem_memory_to_register =
-    m68k_ea_control_modes | m68k_ea_an_postinc;
+    m68k_ea_control_modes | m68k_ea_an_postinc | m68k_ea_index8 | m68k_ea_pc_index8;
 // SEG-007-T088: MOVE to SR's project-selected source set. Excludes
 // address-register direct (m68k_ea_an) as an architectural fact: verified
 // against the exact encoding-structure fact in pinned Musashi's own

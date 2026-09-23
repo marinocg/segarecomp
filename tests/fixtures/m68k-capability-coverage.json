@@ -259,15 +259,15 @@
    },
    "compile": {
     "applicable_forms": 357,
-    "passing_forms": 344,
-    "passing_words": 12156,
-    "percent_forms": "96.36"
+    "passing_forms": 350,
+    "passing_words": 12190,
+    "percent_forms": "98.04"
    },
    "decode": {
     "applicable_forms": 357,
-    "passing_forms": 344,
-    "passing_words": 12156,
-    "percent_forms": "96.36"
+    "passing_forms": 350,
+    "passing_words": 12190,
+    "percent_forms": "98.04"
    },
    "ea_footprint_declared": {
     "applicable_forms": 357,
@@ -277,27 +277,27 @@
    },
    "ea_side_effect_validated": {
     "applicable_forms": 123,
-    "passing_forms": 111,
-    "passing_words": 4689,
-    "percent_forms": "90.24"
+    "passing_forms": 115,
+    "passing_words": 4721,
+    "percent_forms": "93.50"
    },
    "effects": {
     "applicable_forms": 357,
-    "passing_forms": 344,
-    "passing_words": 12156,
-    "percent_forms": "96.36"
+    "passing_forms": 350,
+    "passing_words": 12190,
+    "percent_forms": "98.04"
    },
    "emit": {
     "applicable_forms": 357,
-    "passing_forms": 344,
-    "passing_words": 12156,
-    "percent_forms": "96.36"
+    "passing_forms": 350,
+    "passing_words": 12190,
+    "percent_forms": "98.04"
    },
    "end_to_end_structural": {
     "applicable_forms": 357,
-    "passing_forms": 344,
-    "passing_words": 12156,
-    "percent_forms": "96.36"
+    "passing_forms": 350,
+    "passing_words": 12190,
+    "percent_forms": "98.04"
    },
    "exception_privilege_modeled": {
     "applicable_forms": 241,
@@ -307,15 +307,15 @@
    },
    "lift": {
     "applicable_forms": 357,
-    "passing_forms": 344,
-    "passing_words": 12156,
-    "percent_forms": "96.36"
+    "passing_forms": 350,
+    "passing_words": 12190,
+    "percent_forms": "98.04"
    },
    "native_exec": {
     "applicable_forms": 357,
-    "passing_forms": 344,
-    "passing_words": 12156,
-    "percent_forms": "96.36"
+    "passing_forms": 350,
+    "passing_words": 12190,
+    "percent_forms": "98.04"
    },
    "route_immutable_rom_aot": {
     "applicable_forms": 357,
@@ -325,39 +325,39 @@
    },
    "route_runtime_routed_admitted": {
     "applicable_forms": 357,
-    "passing_forms": 344,
-    "passing_words": 12156,
-    "percent_forms": "96.36"
+    "passing_forms": 350,
+    "passing_words": 12190,
+    "percent_forms": "98.04"
    },
    "route_runtime_routed_compiles": {
     "applicable_forms": 357,
-    "passing_forms": 344,
-    "passing_words": 12156,
-    "percent_forms": "96.36"
+    "passing_forms": 350,
+    "passing_words": 12190,
+    "percent_forms": "98.04"
    },
    "route_runtime_routed_executes": {
     "applicable_forms": 357,
-    "passing_forms": 184,
-    "passing_words": 11156,
-    "percent_forms": "51.54"
+    "passing_forms": 188,
+    "passing_words": 11188,
+    "percent_forms": "52.66"
    },
    "route_static_discovery": {
     "applicable_forms": 357,
-    "passing_forms": 344,
-    "passing_words": 12156,
-    "percent_forms": "96.36"
+    "passing_forms": 350,
+    "passing_words": 12190,
+    "percent_forms": "98.04"
    },
    "semantic_validated": {
     "applicable_forms": 357,
-    "passing_forms": 307,
-    "passing_words": 9729,
-    "percent_forms": "85.99"
+    "passing_forms": 333,
+    "passing_words": 9867,
+    "percent_forms": "93.28"
    },
    "timing_model_present": {
     "applicable_forms": 357,
-    "passing_forms": 344,
-    "passing_words": 12156,
-    "percent_forms": "96.36"
+    "passing_forms": 350,
+    "passing_words": 12190,
+    "percent_forms": "98.04"
    },
    "timing_validated": {
     "applicable_forms": 357,
@@ -1929,33 +1929,33 @@
   "movea.ea_an.w.postinc.an": "1111-01111111111-10",
   "movea.ea_an.w.predec.an": "1111-01111111111-10",
   "movem.mem_reglist.l.absl.reglist": "1110-01111110011--0",
-  "movem.mem_reglist.l.absw.reglist": "1110-01111110010--0",
-  "movem.mem_reglist.l.disp.reglist": "1110-01111111010--0",
-  "movem.mem_reglist.l.ind.reglist": "1110-01111111010--0",
-  "movem.mem_reglist.l.index.reglist": "0000-00000000000--0",
-  "movem.mem_reglist.l.pcdisp.reglist": "1110-01111110010--0",
-  "movem.mem_reglist.l.pcindex.reglist": "0000-00000000000--0",
-  "movem.mem_reglist.l.postinc.reglist": "1110-01111111010-00",
-  "movem.mem_reglist.w.absl.reglist": "1110-01111110010--0",
-  "movem.mem_reglist.w.absw.reglist": "1110-01111110010--0",
-  "movem.mem_reglist.w.disp.reglist": "1110-01111111010--0",
-  "movem.mem_reglist.w.ind.reglist": "1110-01111111010--0",
-  "movem.mem_reglist.w.index.reglist": "0000-00000000000--0",
-  "movem.mem_reglist.w.pcdisp.reglist": "1110-01111110010--0",
-  "movem.mem_reglist.w.pcindex.reglist": "0000-00000000000--0",
-  "movem.mem_reglist.w.postinc.reglist": "1110-01111111010-00",
-  "movem.reglist_mem.l.reglist.absl": "1110-01111110010--0",
-  "movem.reglist_mem.l.reglist.absw": "1110-01111110010--0",
-  "movem.reglist_mem.l.reglist.disp": "1110-01111111010--0",
-  "movem.reglist_mem.l.reglist.ind": "1110-01111111010--0",
-  "movem.reglist_mem.l.reglist.index": "0000-00000000000--0",
-  "movem.reglist_mem.l.reglist.predec": "1110-01111111010-00",
-  "movem.reglist_mem.w.reglist.absl": "1110-01111110010--0",
+  "movem.mem_reglist.l.absw.reglist": "1110-01111110011--0",
+  "movem.mem_reglist.l.disp.reglist": "1110-01111111011--0",
+  "movem.mem_reglist.l.ind.reglist": "1110-01111111011--0",
+  "movem.mem_reglist.l.index.reglist": "1110-01111111011--0",
+  "movem.mem_reglist.l.pcdisp.reglist": "1110-01111110011--0",
+  "movem.mem_reglist.l.pcindex.reglist": "1110-01111110011--0",
+  "movem.mem_reglist.l.postinc.reglist": "1110-01111111011-10",
+  "movem.mem_reglist.w.absl.reglist": "1110-01111110011--0",
+  "movem.mem_reglist.w.absw.reglist": "1110-01111110011--0",
+  "movem.mem_reglist.w.disp.reglist": "1110-01111111011--0",
+  "movem.mem_reglist.w.ind.reglist": "1110-01111111011--0",
+  "movem.mem_reglist.w.index.reglist": "1110-01111111011--0",
+  "movem.mem_reglist.w.pcdisp.reglist": "1110-01111110011--0",
+  "movem.mem_reglist.w.pcindex.reglist": "1110-01111110011--0",
+  "movem.mem_reglist.w.postinc.reglist": "1110-01111111011-10",
+  "movem.reglist_mem.l.reglist.absl": "1110-01111110011--0",
+  "movem.reglist_mem.l.reglist.absw": "1110-01111110011--0",
+  "movem.reglist_mem.l.reglist.disp": "1110-01111111011--0",
+  "movem.reglist_mem.l.reglist.ind": "1110-01111111011--0",
+  "movem.reglist_mem.l.reglist.index": "1110-01111111011--0",
+  "movem.reglist_mem.l.reglist.predec": "1110-01111111011-10",
+  "movem.reglist_mem.w.reglist.absl": "1110-01111110011--0",
   "movem.reglist_mem.w.reglist.absw": "1110-01111110011--0",
-  "movem.reglist_mem.w.reglist.disp": "1110-01111111010--0",
-  "movem.reglist_mem.w.reglist.ind": "1110-01111111010--0",
-  "movem.reglist_mem.w.reglist.index": "0000-00000000000--0",
-  "movem.reglist_mem.w.reglist.predec": "1110-01111111010-00",
+  "movem.reglist_mem.w.reglist.disp": "1110-01111111011--0",
+  "movem.reglist_mem.w.reglist.ind": "1110-01111111011--0",
+  "movem.reglist_mem.w.reglist.index": "1110-01111111011--0",
+  "movem.reglist_mem.w.reglist.predec": "1110-01111111011-10",
   "movep.dn_mem.l.dn.disp": "0000--0000000000--0",
   "movep.dn_mem.w.dn.disp": "0000--0000000000--0",
   "movep.mem_dn.l.disp.dn": "0000--0000000000--0",
@@ -2561,15 +2561,15 @@
   },
   "compile": {
    "applicable_forms": 1526,
-   "passing_forms": 1242,
-   "passing_words": 41555,
-   "percent_forms": "81.39"
+   "passing_forms": 1248,
+   "passing_words": 41589,
+   "percent_forms": "81.78"
   },
   "decode": {
    "applicable_forms": 1526,
-   "passing_forms": 1273,
-   "passing_words": 42454,
-   "percent_forms": "83.42"
+   "passing_forms": 1279,
+   "passing_words": 42488,
+   "percent_forms": "83.81"
   },
   "ea_footprint_declared": {
    "applicable_forms": 1526,
@@ -2579,27 +2579,27 @@
   },
   "ea_side_effect_validated": {
    "applicable_forms": 381,
-   "passing_forms": 292,
-   "passing_words": 11506,
-   "percent_forms": "76.64"
+   "passing_forms": 296,
+   "passing_words": 11538,
+   "percent_forms": "77.69"
   },
   "effects": {
    "applicable_forms": 1526,
-   "passing_forms": 1265,
-   "passing_words": 42404,
-   "percent_forms": "82.90"
+   "passing_forms": 1271,
+   "passing_words": 42438,
+   "percent_forms": "83.29"
   },
   "emit": {
    "applicable_forms": 1526,
-   "passing_forms": 1242,
-   "passing_words": 41555,
-   "percent_forms": "81.39"
+   "passing_forms": 1248,
+   "passing_words": 41589,
+   "percent_forms": "81.78"
   },
   "end_to_end_structural": {
    "applicable_forms": 1526,
-   "passing_forms": 1241,
-   "passing_words": 41554,
-   "percent_forms": "81.32"
+   "passing_forms": 1247,
+   "passing_words": 41588,
+   "percent_forms": "81.72"
   },
   "exception_privilege_modeled": {
    "applicable_forms": 852,
@@ -2609,15 +2609,15 @@
   },
   "lift": {
    "applicable_forms": 1526,
-   "passing_forms": 1273,
-   "passing_words": 42454,
-   "percent_forms": "83.42"
+   "passing_forms": 1279,
+   "passing_words": 42488,
+   "percent_forms": "83.81"
   },
   "native_exec": {
    "applicable_forms": 1526,
-   "passing_forms": 1241,
-   "passing_words": 41554,
-   "percent_forms": "81.32"
+   "passing_forms": 1247,
+   "passing_words": 41588,
+   "percent_forms": "81.72"
   },
   "route_immutable_rom_aot": {
    "applicable_forms": 1526,
@@ -2627,39 +2627,39 @@
   },
   "route_runtime_routed_admitted": {
    "applicable_forms": 1526,
-   "passing_forms": 1265,
-   "passing_words": 42404,
-   "percent_forms": "82.90"
+   "passing_forms": 1271,
+   "passing_words": 42438,
+   "percent_forms": "83.29"
   },
   "route_runtime_routed_compiles": {
    "applicable_forms": 1526,
-   "passing_forms": 1265,
-   "passing_words": 42404,
-   "percent_forms": "82.90"
+   "passing_forms": 1271,
+   "passing_words": 42438,
+   "percent_forms": "83.29"
   },
   "route_runtime_routed_executes": {
    "applicable_forms": 1526,
-   "passing_forms": 866,
-   "passing_words": 40101,
-   "percent_forms": "56.75"
+   "passing_forms": 870,
+   "passing_words": 40133,
+   "percent_forms": "57.01"
   },
   "route_static_discovery": {
    "applicable_forms": 1526,
-   "passing_forms": 1245,
-   "passing_words": 38320,
-   "percent_forms": "81.59"
+   "passing_forms": 1251,
+   "passing_words": 38354,
+   "percent_forms": "81.98"
   },
   "semantic_validated": {
    "applicable_forms": 1526,
-   "passing_forms": 1139,
-   "passing_words": 34830,
-   "percent_forms": "74.64"
+   "passing_forms": 1165,
+   "passing_words": 34968,
+   "percent_forms": "76.34"
   },
   "timing_model_present": {
    "applicable_forms": 1526,
-   "passing_forms": 1158,
-   "passing_words": 34814,
-   "percent_forms": "75.88"
+   "passing_forms": 1164,
+   "passing_words": 34848,
+   "percent_forms": "76.28"
   },
   "timing_validated": {
    "applicable_forms": 1526,
@@ -2785,15 +2785,6 @@
    "forms": 312,
    "mnemonic": "MOVE",
    "unsupported_forms": 27
-  },
-  {
-   "family": "data_movement",
-   "first_failing_stage": {
-    "decode": 6
-   },
-   "forms": 28,
-   "mnemonic": "MOVEM",
-   "unsupported_forms": 6
   },
   {
    "family": "data_movement",
@@ -2944,7 +2935,7 @@
   "forms_with_at_least_one_validated_word": {
    "ccr": 1111,
    "ea": 447,
-   "semantic": 1180,
+   "semantic": 1196,
    "timing": 0
   },
   "manifest_sources": [
@@ -2964,8 +2955,8 @@
   ],
   "validated_words": {
    "ccr": 31719,
-   "ea": 11702,
-   "semantic": 34896,
+   "ea": 11724,
+   "semantic": 35015,
    "timing": 0
   }
  }

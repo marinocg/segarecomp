@@ -159,3 +159,51 @@ mechanism they reuse verbatim is the identical one MULS.W's own T003 rows alread
 end. DIVS.W/DIVU.W's own divisor-zero/overflow/quotient-remainder value semantics (independent of which EA mode
 supplies the divisor) are covered by `tests/m68k_divs_word_musashi_differential_test.py` and
 `tests/m68k_divu_word_musashi_differential_test.py`.
+
+## SEG-021-T012: MOVEM word/long EA completion
+
+Legality is `m68k_ea_movem_register_to_memory`/`m68k_ea_movem_memory_to_register` (`libs/cpu/m68k/include/
+segarecomp/cpu/m68k/instruction.hpp`), written from the Motorola manual's "control alterable"/"control"
+addressing categories and independent of the T001 dataset: register->memory widened with `(d8,An,Xn)` (no
+PC-relative form is ever legal for a MOVEM store); memory->register widened with both `(d8,An,Xn)` and
+`(d8,PC,Xn)`, completing MOVEM's EA-mode ceiling to all 28 T001 forms (14 memory->register x 2 sizes, 6+6
+register->memory x 2 sizes -- absl/absw/disp/ind/index/predec for the store direction; absl/absw/disp/ind/
+index/pcdisp/pcindex/postinc for the load direction).
+
+Rows exist for all 28 legal MOVEM forms (`movem.mem_reglist.*`/`movem.reglist_mem.*`), each with three
+mask suffixes (`0000` empty, `00FF` D0-D7 only, `FFFF` every register) so every concrete primary word of a
+form (one per base An 0-7 for the `ind`/`disp`/`index`/`predec`/`postinc` classes) is exercised at least once
+with the empty mask (architectural An unchanged: no transfer, but predecrement/postincrement auto-update
+side effects still apply per Musashi), once with a mask excluding every An (no addressing-register alias),
+and once with the full 16-register mask, which -- because the base An varies 0-7 across the form's own
+concrete words while the mask stays fixed -- systematically covers the addressing-register alias case (the
+EA's own base An is always among the selected registers) and the A7-in-mask case (A7 is always selected) for
+every base register in one row. The two word-size `ind`/`postinc` load forms additionally carry a dedicated
+`.signext` row (`bind: {"x": "ea.src"}`, mask `0001` selecting D0 only, `unary_sweep` profile) that seeds the
+exact loaded word at the transfer's own base address with boundary values including `0x8000` (sign bit set)
+and `0x00FF` (clear), directly differentially validating "every loaded WORD sign-extends to 32 bits" against
+Musashi rather than relying on incidental baseline register/memory content. Predecrement's reversed mask
+ordering is exercised structurally by every `predec` row's full-mask case (a wrong order would misplace which
+register's value lands in which memory slot, a byte-granular memory-write mismatch against Musashi). All 30
+rows (1032 synthetic vectors) pass the self-consistency stage (emit/compile/native-execute/determinism);
+Musashi oracle comparison is skipped without a pinned local checkout (never failed) and, when run with one,
+requires a subsequent `--update-manifest` pass before `m68k_conformance_harness_test.py`'s manifest-
+attribution consistency check (a hermetic bookkeeping check independent of oracle availability) can pass
+again, exactly like every prior family task's own manifest update step.
+
+The immutable-ROM AOT admission predicate (`m68k_operation_is_immutable_rom_aot_safe`,
+`platforms/genesis/machine/include/segarecomp/machine/genesis/frontend.hpp`) returns `false`
+unconditionally for `movem_transfer`, uniformly across every EA mode both before and after this task
+(confirmed unchanged by the regenerated coverage snapshot's unaffected `route_immutable_rom_aot` count for
+this family) -- MOVEM has never been immutable-ROM AOT eligible, for the same pre-existing reason DIVS/DIVU
+are not (the shared family-independent completeness probe constructs a non-routed emission context that
+never reaches MOVEM's routed body); this is a pre-existing, family-uniform fact this task's widening does
+not change, not a per-EA-mode carve-out. The C4-routed admission gate (`m68k_c4_represented_ir_kind`'s
+`movem_transfer` case, `libs/codegen/c11/src/frontend.cpp`) is widened alongside decode's own legal-EA
+masks to admit the two new EA modes through the shared routed emitter.
+
+Timing: `m68k_instruction_cycles` (`libs/cpu/m68k/src/timing.cpp`) has a published static Table 8-10 row for
+every legal MOVEM form, including the two newly widened EA classes -- `(d8,An,Xn)` register->memory (base 14,
+matching the table's own pre-existing literal cell) and both `(d8,An,Xn)`/`(d8,PC,Xn)` memory->register (base
+18, the same An-relative/PC-relative pairing this same switch already applies to `d16(An)`/`d16(PC)` one row
+above). No form is timing-unsupported.
