@@ -213,10 +213,13 @@ above). No form is timing-unsupported.
 Inventory found decode, lift, effects, C11 emission and static-discovery treatment of every form in this family
 already complete (SEG-007-T025's shared condition-code owner, `m68k_condition_from_selector`, already covers
 BRA/all 14 Bcc conditions/BSR and DBcc's all-16-condition set including DBT/DBF; LINK/UNLK/SWAP/EXT.W/EXT.L/RTS/
-NOP already decode, lift and emit). The actual gap was exclusively the T003 differential table: none of these
-forms had a single committed row, so `semantic_validated`/`ccr_sr_validated` credited none of them despite their
-structural support. This task's only change is closing that evidence gap (54 new rows; no production code in
-`libs/cpu/m68k` or `libs/codegen/c11` changed).
+NOP already decode, lift and emit). NOP already had its own committed T003 row (`nop.none.none.none.none`,
+`state_modes` profile, pre-existing and unaffected by this task -- see "Extension-bearing and no-operand
+canaries" above) validated against Musashi before this task started. The actual remaining gap was exclusively
+in the rest of the T003 differential table: none of Bcc/BRA/BSR/DBcc/LINK/UNLK/SWAP/EXT had a single committed
+row, so `semantic_validated`/`ccr_sr_validated` credited none of them despite their structural support. This
+task's only change is closing that evidence gap (53 new rows; no production code in `libs/cpu/m68k` or
+`libs/codegen/c11` changed).
 
 Rows: Bcc byte and word displacement, all 14 conditions (`bcc.disp8.b.none.target.<cc>` /
 `bcc.disp16.w.none.target.<cc>`); BRA and BSR, both displacement sizes; DBcc, all 16 conditions including DBT
@@ -225,7 +228,7 @@ Dn sweep over `boundary` values including 0/1/0xFFFF wraparound); LINK.W and UNL
 `cc_full` profile (16 SR seeds, one per NZVC nibble 0x2700-0x270F, X and supervisor fixed) gives every Bcc/DBcc
 row genuine full-CCR-combination coverage of the shared condition evaluator per the parent milestone's
 acceptance criterion; a new `dbcc_full` profile crosses that same 16-state sweep with the `boundary` value set.
-All 54 rows (83840 synthetic vectors) match the pinned Musashi with zero divergences; legal-form enumeration
+All 53 rows (83840 synthetic vectors) match the pinned Musashi with zero divergences; legal-form enumeration
 (word ranges, exception classes, `dn_disp16`/`disp8`/`disp16` shapes) is `tests/fixtures/m68k-legal-forms.json`'s
 own independent T001 dataset, never read by production.
 
