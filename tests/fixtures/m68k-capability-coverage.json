@@ -253,9 +253,9 @@
    },
    "ccr_sr_validated": {
     "applicable_forms": 282,
-    "passing_forms": 280,
-    "passing_words": 8750,
-    "percent_forms": "99.29"
+    "passing_forms": 281,
+    "passing_words": 8758,
+    "percent_forms": "99.65"
    },
    "compile": {
     "applicable_forms": 357,
@@ -277,9 +277,9 @@
    },
    "ea_side_effect_validated": {
     "applicable_forms": 123,
-    "passing_forms": 115,
-    "passing_words": 4721,
-    "percent_forms": "93.50"
+    "passing_forms": 117,
+    "passing_words": 4737,
+    "percent_forms": "95.12"
    },
    "effects": {
     "applicable_forms": 357,
@@ -349,9 +349,9 @@
    },
    "semantic_validated": {
     "applicable_forms": 357,
-    "passing_forms": 333,
-    "passing_words": 9867,
-    "percent_forms": "93.28"
+    "passing_forms": 336,
+    "passing_words": 9891,
+    "percent_forms": "94.12"
    },
    "timing_model_present": {
     "applicable_forms": 357,
@@ -375,9 +375,9 @@
    },
    "ccr_sr_validated": {
     "applicable_forms": 448,
-    "passing_forms": 374,
-    "passing_words": 11294,
-    "percent_forms": "83.48"
+    "passing_forms": 376,
+    "passing_words": 11310,
+    "percent_forms": "83.93"
    },
    "compile": {
     "applicable_forms": 500,
@@ -471,9 +471,9 @@
    },
    "semantic_validated": {
     "applicable_forms": 500,
-    "passing_forms": 426,
-    "passing_words": 13502,
-    "percent_forms": "85.20"
+    "passing_forms": 428,
+    "passing_words": 13518,
+    "percent_forms": "85.60"
    },
    "timing_model_present": {
     "applicable_forms": 500,
@@ -643,9 +643,9 @@
    },
    "ea_side_effect_validated": {
     "applicable_forms": 43,
-    "passing_forms": 1,
-    "passing_words": 1,
-    "percent_forms": "2.33"
+    "passing_forms": 2,
+    "passing_words": 256,
+    "percent_forms": "4.65"
    },
    "effects": {
     "applicable_forms": 193,
@@ -715,9 +715,9 @@
    },
    "semantic_validated": {
     "applicable_forms": 193,
-    "passing_forms": 5,
-    "passing_words": 5,
-    "percent_forms": "2.59"
+    "passing_forms": 49,
+    "passing_words": 4225,
+    "percent_forms": "25.39"
    },
    "timing_model_present": {
     "applicable_forms": 193,
@@ -1228,34 +1228,34 @@
   "asr.mem.w.none.index": "11111011111111111-0",
   "asr.mem.w.none.postinc": "1111101111111111110",
   "asr.mem.w.none.predec": "1111101111111111110",
-  "bcc.disp16.w.none.target.cc": "1111-00111111110--0",
-  "bcc.disp16.w.none.target.cs": "1111-00111111110--0",
+  "bcc.disp16.w.none.target.cc": "1111-00111111111--0",
+  "bcc.disp16.w.none.target.cs": "1111-00111111111--0",
   "bcc.disp16.w.none.target.eq": "1111-00111111111--0",
-  "bcc.disp16.w.none.target.ge": "1111-00111111110--0",
-  "bcc.disp16.w.none.target.gt": "1111-00111111110--0",
-  "bcc.disp16.w.none.target.hi": "1111-00111111110--0",
-  "bcc.disp16.w.none.target.le": "1111-00111111110--0",
-  "bcc.disp16.w.none.target.ls": "1111-00111111110--0",
-  "bcc.disp16.w.none.target.lt": "1111-00111111110--0",
-  "bcc.disp16.w.none.target.mi": "1111-00111111110--0",
+  "bcc.disp16.w.none.target.ge": "1111-00111111111--0",
+  "bcc.disp16.w.none.target.gt": "1111-00111111111--0",
+  "bcc.disp16.w.none.target.hi": "1111-00111111111--0",
+  "bcc.disp16.w.none.target.le": "1111-00111111111--0",
+  "bcc.disp16.w.none.target.ls": "1111-00111111111--0",
+  "bcc.disp16.w.none.target.lt": "1111-00111111111--0",
+  "bcc.disp16.w.none.target.mi": "1111-00111111111--0",
   "bcc.disp16.w.none.target.ne": "1111-00111111111--0",
-  "bcc.disp16.w.none.target.pl": "1111-00111111110--0",
-  "bcc.disp16.w.none.target.vc": "1111-00111111110--0",
-  "bcc.disp16.w.none.target.vs": "1111-00111111110--0",
-  "bcc.disp8.b.none.target.cc": "1111-00111111100--0",
-  "bcc.disp8.b.none.target.cs": "1111-00111111100--0",
-  "bcc.disp8.b.none.target.eq": "1111-00111111100--0",
-  "bcc.disp8.b.none.target.ge": "1111-00111111100--0",
-  "bcc.disp8.b.none.target.gt": "1111-00111111100--0",
-  "bcc.disp8.b.none.target.hi": "1111-00111111100--0",
-  "bcc.disp8.b.none.target.le": "1111-00111111100--0",
-  "bcc.disp8.b.none.target.ls": "1111-00111111100--0",
-  "bcc.disp8.b.none.target.lt": "1111-00111111100--0",
-  "bcc.disp8.b.none.target.mi": "1111-00111111100--0",
-  "bcc.disp8.b.none.target.ne": "1111-00111111100--0",
-  "bcc.disp8.b.none.target.pl": "1111-00111111100--0",
-  "bcc.disp8.b.none.target.vc": "1111-00111111100--0",
-  "bcc.disp8.b.none.target.vs": "1111-00111111100--0",
+  "bcc.disp16.w.none.target.pl": "1111-00111111111--0",
+  "bcc.disp16.w.none.target.vc": "1111-00111111111--0",
+  "bcc.disp16.w.none.target.vs": "1111-00111111111--0",
+  "bcc.disp8.b.none.target.cc": "1111-00111111101--0",
+  "bcc.disp8.b.none.target.cs": "1111-00111111101--0",
+  "bcc.disp8.b.none.target.eq": "1111-00111111101--0",
+  "bcc.disp8.b.none.target.ge": "1111-00111111101--0",
+  "bcc.disp8.b.none.target.gt": "1111-00111111101--0",
+  "bcc.disp8.b.none.target.hi": "1111-00111111101--0",
+  "bcc.disp8.b.none.target.le": "1111-00111111101--0",
+  "bcc.disp8.b.none.target.ls": "1111-00111111101--0",
+  "bcc.disp8.b.none.target.lt": "1111-00111111101--0",
+  "bcc.disp8.b.none.target.mi": "1111-00111111101--0",
+  "bcc.disp8.b.none.target.ne": "1111-00111111101--0",
+  "bcc.disp8.b.none.target.pl": "1111-00111111101--0",
+  "bcc.disp8.b.none.target.vc": "1111-00111111101--0",
+  "bcc.disp8.b.none.target.vs": "1111-00111111101--0",
   "bchg.dn_ea.b.dn.absl": "11111-11111101111-0",
   "bchg.dn_ea.b.dn.absw": "11111-11111101111-0",
   "bchg.dn_ea.b.dn.disp": "11111-11111111111-0",
@@ -1289,7 +1289,7 @@
   "bclr.imm_ea.b.imm.predec": "11111-1111111111110",
   "bclr.imm_ea.l.imm.dn": "11111-11111111111-0",
   "bra.disp16.w.none.target": "1111-01111111111--0",
-  "bra.disp8.b.none.target": "1111-01111111100--0",
+  "bra.disp8.b.none.target": "1111-01111111101--0",
   "bset.dn_ea.b.dn.absl": "11111-11111101111-0",
   "bset.dn_ea.b.dn.absw": "11111-11111101111-0",
   "bset.dn_ea.b.dn.disp": "11111-11111111111-0",
@@ -1307,7 +1307,7 @@
   "bset.imm_ea.b.imm.predec": "11111-1111111111110",
   "bset.imm_ea.l.imm.dn": "11111-11111111111-0",
   "bsr.disp16.w.none.target": "1110-01111111111-10",
-  "bsr.disp8.b.none.target": "1110-01111111100-00",
+  "bsr.disp8.b.none.target": "1110-01111111101-10",
   "btst.dn_ea.b.dn.absl": "11111-11111101111-0",
   "btst.dn_ea.b.dn.absw": "11111-11111101111-0",
   "btst.dn_ea.b.dn.disp": "11111-11111111111-0",
@@ -1450,22 +1450,22 @@
   "cmpm.postinc_postinc.b.postinc.postinc": "00000-0000000000000",
   "cmpm.postinc_postinc.l.postinc.postinc": "0000000000000000000",
   "cmpm.postinc_postinc.w.postinc.postinc": "0000000000000000000",
-  "dbcc.dn_disp16.w.dn.target.cc": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.cs": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.eq": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.f": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.ge": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.gt": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.hi": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.le": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.ls": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.lt": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.mi": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.ne": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.pl": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.t": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.vc": "1110-00111111110--0",
-  "dbcc.dn_disp16.w.dn.target.vs": "1110-00111111110--0",
+  "dbcc.dn_disp16.w.dn.target.cc": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.cs": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.eq": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.f": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.ge": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.gt": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.hi": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.le": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.ls": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.lt": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.mi": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.ne": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.pl": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.t": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.vc": "1110-00111111111--0",
+  "dbcc.dn_disp16.w.dn.target.vs": "1110-00111111111--0",
   "divs.ea_dn.w.absl.dn": "11101010001100100-0",
   "divs.ea_dn.w.absw.dn": "11101010001100100-0",
   "divs.ea_dn.w.disp.dn": "11101010001110100-0",
@@ -1541,8 +1541,8 @@
   "exg.an_an.l.an.an": "0000--0000000000--0",
   "exg.dn_an.l.dn.an": "0000--0000000000--0",
   "exg.dn_dn.l.dn.dn": "0000--0000000000--0",
-  "ext.dn.l.none.dn": "11101-11111111100-0",
-  "ext.dn.w.none.dn": "11101-11111111100-0",
+  "ext.dn.l.none.dn": "11101-11111111111-0",
+  "ext.dn.w.none.dn": "11101-11111111111-0",
   "illegal.none.none.none.none": "0000-00000000000--0",
   "jmp.ea.none.absl.none": "1110-01111111100--0",
   "jmp.ea.none.absw.none": "1110-01111111100--0",
@@ -1565,7 +1565,7 @@
   "lea.ea_an.l.index.an": "1110--1111111110--0",
   "lea.ea_an.l.pcdisp.an": "1110--1111111110--0",
   "lea.ea_an.l.pcindex.an": "1110--1111111110--0",
-  "link.an_disp16.w.an.disp16": "1110-01111111010-00",
+  "link.an_disp16.w.an.disp16": "1110-01111111011-10",
   "lsl.dn_dn.b.dn.dn": "11111-01111111111-0",
   "lsl.dn_dn.l.dn.dn": "11111-01111111111-0",
   "lsl.dn_dn.w.dn.dn": "11111-01111111111-0",
@@ -2474,7 +2474,7 @@
   "subx.predec_predec.b.predec.predec": "00000-0000000000000",
   "subx.predec_predec.l.predec.predec": "0000000000000000000",
   "subx.predec_predec.w.predec.predec": "0000000000000000000",
-  "swap.dn.w.none.dn": "11101-11111111100-0",
+  "swap.dn.w.none.dn": "11101-11111111111-0",
   "tas.unary.b.none.absl": "00000-00000000000-0",
   "tas.unary.b.none.absw": "00000-00000000000-0",
   "tas.unary.b.none.disp": "00000-00000000000-0",
@@ -2509,7 +2509,7 @@
   "tst.unary.w.none.index": "11111011111111111-0",
   "tst.unary.w.none.postinc": "1111101111111111110",
   "tst.unary.w.none.predec": "1111101111111111110",
-  "unlk.an.none.an.none": "1110-01111111010-00"
+  "unlk.an.none.an.none": "1110-01111111011-10"
  },
  "measurement": {
   "compiler_flags": "-std=c11 -Wall -Wextra -Wno-type-limits -pedantic -Werror -O0",
@@ -2555,9 +2555,9 @@
   },
   "ccr_sr_validated": {
    "applicable_forms": 1193,
-   "passing_forms": 1055,
-   "passing_words": 31638,
-   "percent_forms": "88.43"
+   "passing_forms": 1058,
+   "passing_words": 31662,
+   "percent_forms": "88.68"
   },
   "compile": {
    "applicable_forms": 1526,
@@ -2579,9 +2579,9 @@
   },
   "ea_side_effect_validated": {
    "applicable_forms": 381,
-   "passing_forms": 296,
-   "passing_words": 11538,
-   "percent_forms": "77.69"
+   "passing_forms": 299,
+   "passing_words": 11809,
+   "percent_forms": "78.48"
   },
   "effects": {
    "applicable_forms": 1526,
@@ -2651,9 +2651,9 @@
   },
   "semantic_validated": {
    "applicable_forms": 1526,
-   "passing_forms": 1165,
-   "passing_words": 34968,
-   "percent_forms": "76.34"
+   "passing_forms": 1214,
+   "passing_words": 39228,
+   "percent_forms": "79.55"
   },
   "timing_model_present": {
    "applicable_forms": 1526,
@@ -2935,7 +2935,7 @@
   "forms_with_at_least_one_validated_word": {
    "ccr": 1111,
    "ea": 447,
-   "semantic": 1196,
+   "semantic": 1221,
    "timing": 0
   },
   "manifest_sources": [
@@ -2954,9 +2954,9 @@
    "tests/m68k_pc_indexed_move_musashi_differential_test.py"
   ],
   "validated_words": {
-   "ccr": 31719,
-   "ea": 11724,
-   "semantic": 35015,
+   "ccr": 31733,
+   "ea": 11987,
+   "semantic": 39236,
    "timing": 0
   }
  }
