@@ -1326,6 +1326,12 @@ class M68kStaticGraphWalker {
     result.frames = std::move(frames_);
     result.indirect_target_ea_sets = std::move(indirect_target_ea_sets_);
     result.unproven_indirect_control_ea_sets = std::move(unproven_indirect_control_ea_sets_);
+    // SEG-021-T028: final-owner invariant by set comparison only (no second
+    // CFG traversal). `indirect_emitted_` holds every source that received a
+    // final Tier-1 or Tier-2 owner.
+    for (const auto site : tier2_eligible_control_sources_)
+      if (indirect_emitted_.find(site) == indirect_emitted_.end())
+        result.ownerless_tier2_eligible_control_sources.push_back({TargetAddressSpace::m68k_program, site});
     result.completion_rts = completion_rts_;
     result.primary_issue = std::move(primary_issue_);
     result.secondary_issues = std::move(secondary_issues_);
@@ -2156,6 +2162,17 @@ class M68kStaticGraphWalker {
 
  private:
 
+  // SEG-021-T028: single place that records the existing Tier-2 fact once per
+  // source; `indirect_emitted_` guarantees a source never holds both tiers.
+  void record_unproven_tier2_owner(Address addr, const M68kDecodedInstruction &decoded, bool is_call) {
+    if (!indirect_emitted_.insert(addr).second) return;
+    M68kUnprovenIndirectControlEaSet unproven{};
+    unproven.source_instruction = decoded.provenance;
+    unproven.control_ea = decoded.source_ea;
+    unproven.is_call = is_call;
+    unproven_indirect_control_ea_sets_.push_back(unproven);
+  }
+
   // SEG-007-T124 / ADR-0009, generalized per ADR-0011 Decision §§1-2: proves
   // and admits every candidate of a `M68kIndirectTargetEaSet`, then pushes
   // each admitted candidate onto `worklist_` (plus, for an indirect JSR, the
@@ -2172,6 +2189,7 @@ class M68kStaticGraphWalker {
   [[nodiscard]] bool process_indirect_control(Address addr, const M68kDecodedInstruction &decoded) {
     const bool is_call = decoded.kind == M68kInstructionKind::jsr;
     const auto &control_ea = decoded.source_ea;
+    if (!control_ea.index_is_address && !control_ea.index_is_long) tier2_eligible_control_sources_.insert(addr);
     M68kIndirectTargetEaSet target_set{};
     if (!compute_indirect_target_set(addr, decoded, target_set)) {
       // SEG-007-T174 / ADR-0024: `process_indirect_control` is reached only
@@ -2204,6 +2222,16 @@ class M68kStaticGraphWalker {
     }
     for (const auto &candidate : target_set.candidates) {
       if (environment_.admit_target(candidate, M68kDiscoveryTargetRole::direct_call)) {
+        // SEG-021-T028: the finite Tier-1 set cannot become authoritative
+        // (a candidate fails admission), so it is discarded whole -- no
+        // partial edges/frames/block entries -- and the source falls back to
+        // the existing word-size-Dn Tier-2 fact exactly like a failed proof.
+        // Tier-2 only compares the runtime-computed target against the
+        // compiled-in emitted-code set, so an over-approximate finite set is
+        // safe to abandon.
+        if (!control_ea.index_is_address && !control_ea.index_is_long) {
+          record_unproven_tier2_owner(addr, decoded, is_call);
+        }
         failure_ = provenance_issue(DirectFlowDiagnostic::reached_unresolved_direct_edge, decoded.provenance);
         return false;
       }
@@ -2286,6 +2314,7 @@ class M68kStaticGraphWalker {
       failure_ = provenance_issue(DirectFlowDiagnostic::reached_unresolved_direct_edge, decoded.provenance);
       return false;
     }
+    tier2_eligible_control_sources_.insert(addr);
     M68kIndirectTargetEaSet target_set{};
     if (!compute_indirect_target_set_an(addr, decoded, target_set)) {
       // SEG-007-T178 / ADR-0009 producer extension: the finite An proof may
@@ -2327,6 +2356,7 @@ class M68kStaticGraphWalker {
     }
     for (const auto &candidate : target_set.candidates) {
       if (environment_.admit_target(candidate, M68kDiscoveryTargetRole::direct_call)) {
+        record_unproven_tier2_owner(addr, decoded, is_call);
         failure_ = provenance_issue(DirectFlowDiagnostic::reached_unresolved_direct_edge, decoded.provenance);
         return false;
       }
@@ -2477,6 +2507,8 @@ class M68kStaticGraphWalker {
   // most once by `run`'s own `visited_states_` guard, so no separate
   // idempotency set is needed here.
   std::vector<M68kUnprovenIndirectControlEaSet> unproven_indirect_control_ea_sets_;
+  // SEG-021-T028: retained computed-control sources eligible for a Tier-2 owner.
+  std::set<Address> tier2_eligible_control_sources_;
   // Set by `resolve_operand` immediately before a diagnostic-carrying return;
   // consumed (and reset) by `reject_operand` in the same decode_instruction
   // invocation. Reset defensively at the start of every decode_instruction

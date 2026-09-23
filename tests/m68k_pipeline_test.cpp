@@ -6686,6 +6686,114 @@ int emit_general_startup_runtime_c4_indirect_jsr_index8_source() {
   return 0;
 }
 
+// SEG-021-T028 (Case C): a legal `JMP (0,PC,D0.W)` whose finite Tier-1 set
+// (ANDI.W mask -> four values) cannot be authoritative because two candidates
+// fall outside the single mapping claim (target admission rejects them). The
+// source must fall back to exactly one owner: the existing Tier-2 fact.
+namespace t028_case_c_fixture {
+constexpr std::uint32_t base = 0x00000C00U;
+constexpr std::uint32_t jmp_address = 0x00000C04U;
+constexpr std::uint32_t represented_target = 0x00000C08U;
+// 0x0C00 ANDI.W #6,D0 ; 0x0C04 JMP (0,PC,D0.W) (ext word @0x0C06)
+// 0x0C08 BRA.S -> 0x0C00 (represented candidate block); mapping ends at 0x0C0A.
+const std::vector<std::uint8_t> image{0x02U, 0x40U, 0x00U, 0x06U, 0x4EU, 0xFBU,
+                                      0x00U, 0x00U, 0x60U, 0xF6U};
+
+segarecomp::FrontendProgram make_program() {
+  return t011_index8_tier2_fixture::make_program(image, base,
+                                                 {tier2_fixture::make_candidate(represented_target)});
+}
+}  // namespace t028_case_c_fixture
+
+void t028_case_c_rejected_finite_candidate_yields_single_tier2_owner() {
+  using namespace segarecomp;
+  using namespace t028_case_c_fixture;
+  const auto result = analyze_m68k_frontend(make_program());
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "the Case C fixture reaches a partial program");
+  if (partial == nullptr) return;
+  const auto &prefix = partial->accepted_prefix;
+  expect(prefix.indirect_target_ea_sets.empty(), "no Tier-1 set is retained when a finite candidate is rejected");
+  bool tier2 = false;
+  for (const auto &set : prefix.unproven_indirect_control_ea_sets)
+    if (set.source_instruction.source.address.value == jmp_address &&
+        set.control_ea.mode == M68kEaMode::pc_index8 && !set.is_call)
+      tier2 = true;
+  expect(tier2, "the PC-indexed source owns exactly the existing Tier-2 fact, not an unresolved direct edge");
+  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  expect(emitted.find("genesis_emitted_code_addresses_00000C04[] = {UINT32_C(0x00000C00), UINT32_C(0x00000C08)};") !=
+             std::string::npos &&
+             emitted.find("GENESIS_DIAG_TIER2_COMPUTED_TARGET_NOT_EMITTED") != std::string::npos,
+         "generated C carries the emitted-set membership check with the fail-closed diagnostic");
+}
+
+int emit_t028_case_c_pc_index_tier2_source() {
+  using namespace segarecomp;
+  const auto result = analyze_m68k_frontend(t028_case_c_fixture::make_program());
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 1;
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  return 0;
+}
+
+// SEG-021-T028 (emission-stage seam): the T231 orphan-RTS shape retains a proven
+// Tier-1 set whose second candidate is never representable, so C11 emission
+// cannot dispatch a subset. In a Tier-2-capable (candidate-assisted) build the
+// retained JMP terminal must own the existing Tier-2 emitted-set lowering
+// instead of the generic unresolved-direct-edge typed stop.
+namespace t028_orphan_fixture {
+const std::vector<std::uint8_t> image{
+    0x02U, 0x40U, 0x00U, 0x04U,  // 0x0B00 ANDI.W #4,D0 -> {0,4}
+    0x4EU, 0xFBU, 0x00U, 0x04U,  // 0x0B04 JMP (4,PC,D0.W) -> 0x0B0A / 0x0B0E
+    0x00U, 0x00U,                // 0x0B08 not a target
+    0x60U, 0x04U,                // 0x0B0A BRA.S +4 -> 0x0B10 (represented candidate)
+    0x00U, 0x00U,                // 0x0B0C not a target
+    0x4EU, 0x75U,                // 0x0B0E RTS with no caller (orphan, never emitted)
+    0x4EU, 0x70U,                // 0x0B10 shared CPU frontier (RESET)
+};
+segarecomp::FrontendProgram make_program() {
+  using namespace segarecomp;
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T028/orphan-rts-tier2-fallback", image, image.size()};
+  program.mapping_claims = {{"rom", {{}, 0x00000B00U}, {{}, static_cast<std::uint32_t>(0x00000B00U + image.size())},
+                             {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0x00000B00U}, 0x00FF0100U};
+  program.external_code_entry_candidates = {tier2_fixture::make_candidate(0x00000B00U)};
+  return program;
+}
+}  // namespace t028_orphan_fixture
+
+void t028_unrepresented_tier1_candidate_terminal_owns_tier2_lowering() {
+  using namespace segarecomp;
+  const auto result = analyze_m68k_frontend(t028_orphan_fixture::make_program());
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "the orphan-RTS Tier-2 fallback fixture reaches a partial program");
+  if (partial == nullptr) return;
+  expect(partial->accepted_prefix.indirect_target_ea_sets.size() == 1U,
+         "discovery still retains the proven Tier-1 set (the seam is emission-stage, not discovery)");
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto function_start = emitted.find("genesis_tier1_indirect_stop_00000B04(GenesisRuntime *runtime) {");
+  expect(function_start != std::string::npos, "the retained JMP terminal keeps its call-site function name");
+  if (function_start == std::string::npos) return;
+  const auto function_end = emitted.find("\n}\n", function_start);
+  const auto body = emitted.substr(function_start, function_end - function_start);
+  expect(body.find("m68k_emitted_code_address_member(") != std::string::npos &&
+             body.find("GENESIS_DIAG_TIER2_COMPUTED_TARGET_NOT_EMITTED") != std::string::npos &&
+             body.find("GENESIS_DIAG_REACHED_UNRESOLVED_DIRECT_EDGE") == std::string::npos &&
+             emitted.find("m68k_indirect_target_member(m68k_indirect_targets_00000B04,") == std::string::npos,
+         "the terminal owns exactly the Tier-2 membership lowering; no Tier-1 subset dispatch remains");
+}
+
+int emit_t028_orphan_tier2_source() {
+  using namespace segarecomp;
+  const auto result = analyze_m68k_frontend(t028_orphan_fixture::make_program());
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 1;
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  return 0;
+}
+
 // SEG-007-T239 / ADR-0039: proves the extracted
 // `emit_m68k_compiled_address_existence_check` helper is genuinely ONE
 // reusable compiled-address existence query, not two independently
@@ -28033,6 +28141,10 @@ int main(int argc, char **argv) {
     return emit_operation_c4_indexed_pea_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-pc-indexed-pea")
     return emit_operation_c4_pc_indexed_pea_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-t028-orphan-tier2")
+    return emit_t028_orphan_tier2_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-t028-case-c-pc-index-tier2")
+    return emit_t028_case_c_pc_index_tier2_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-indirect-jsr-index8")
     return emit_general_startup_runtime_c4_indirect_jsr_index8_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-operation-c4-indexed-arithmetic")
@@ -28314,6 +28426,8 @@ int main(int argc, char **argv) {
   tier2_computed_target_outside_emitted_set_fails_closed_with_precise_diagnostic();
   tier2_never_fetches_or_decodes_a_rom_opcode_at_runtime();
   t179_pure_an_indirect_tier2_computed_target_inside_emitted_set_dispatches();
+  t028_case_c_rejected_finite_candidate_yields_single_tier2_owner();
+  t028_unrepresented_tier1_candidate_terminal_owns_tier2_lowering();
   t179_pure_an_indirect_tier2_target_outside_emitted_set_fails_closed();
   t179_pure_an_indirect_a7_exclusion_stays_fail_closed_with_no_tier2_lowering();
   t179_jsr_an_tier2_pushes_return_frame_before_dispatch();

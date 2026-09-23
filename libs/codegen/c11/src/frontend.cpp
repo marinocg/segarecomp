@@ -1031,6 +1031,127 @@ std::string emit_m68k_compiled_address_existence_check(const std::string &array_
   return out.str();
 }
 
+// SEG-021-T028: the one Tier-2 computed-control lowering (runtime EA plus
+// compiled emitted-code-set membership; never a target fetch/decode), shared by
+// a Tier-2 frontier stop and by a retained-block terminal whose finite Tier-1
+// set could not be lowered. Returns nullopt for an EA shape Tier 2 cannot own.
+std::optional<std::string> build_tier2_computed_control_function(
+    const FrontendAnalysis &accepted_prefix, const InstructionProvenance &provenance,
+    const M68kEffectiveAddress &ea, bool is_call, const std::string &function_name,
+    const std::vector<std::uint32_t> &emitted_code_addresses,
+    std::optional<std::uint32_t> *out_tier2_call_continuation) {
+  std::ostringstream name_suffix_stream;
+  name_suffix_stream << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
+                     << provenance.source.address.value;
+  const auto name_suffix = name_suffix_stream.str();
+  
+  // SEG-007-T179 / ADR-0025: Tier-2 now also lowers the pure
+  // register-indirect control EA form (`JMP (An)` / `JSR (An)`, mode 2,
+  // no displacement/index/extension). A7/SP is refused outright -- the
+  // SEG-007-T178 exclusion holds at both tiers; the producer never records
+  // an A7 fact, and this is a belt-and-braces guard. All other gates
+  // (engagement on a non-empty candidate-root set, emitted-set membership,
+  // fail-closed non-member, JSR return-frame push) are shared unchanged
+  // between the two forms.
+  const bool is_pc_index8 =
+      ea.mode == M68kEaMode::pc_index8 && !ea.index_is_address && !ea.index_is_long;
+  const bool is_reg_indirect = ea.mode == M68kEaMode::address_indirect && ea.displacement == 0 &&
+                               ea.extension_words == 0U && ea.reg < 7U;
+  // SEG-021-T011 / ADR-0024/ADR-0025 Tier-2 generalization: the brief
+  // address-register-indexed control EA (`JMP (d8,An,Xn)` /
+  // `JSR (d8,An,Xn)`), the sibling shape `process_indirect_control_index8`
+  // (static_discovery.cpp) always records a Tier-2 fact for -- this
+  // project deliberately never attempts a Tier-1 finite-value proof for
+  // this combined base+index shape (see that function's own doc
+  // comment). Unlike the two existing shapes above, the index register
+  // bank/size here is not restricted to word-size Dn: the runtime EA
+  // expression below is built generically (An/Dn index, word/long size),
+  // mirroring `m68k_emit_runtime_ea_address`'s own `address_index8`
+  // formula (libs/codegen/c11/src/m68k.cpp) exactly, because this is a
+  // plain runtime register read/compare, not a static finite-value
+  // proof with a bounded-domain restriction to honor.
+  const bool is_index8 = ea.mode == M68kEaMode::address_index8;
+  if (!is_pc_index8 && !is_reg_indirect && !is_index8) return std::nullopt;
+  std::string ea_expr;
+  if (is_pc_index8) {
+    const auto base = static_cast<std::uint32_t>(static_cast<std::int64_t>(ea.pc_base_address) +
+                                                   static_cast<std::int64_t>(ea.displacement));
+    const auto index_expr =
+        std::string("runtime->d[") + std::to_string(static_cast<unsigned>(ea.index_reg)) + "]";
+    std::ostringstream ea_build;
+    ea_build << "UINT32_C(" << hex(base, 8) << ") + (uint32_t)(int32_t)(int16_t)(uint16_t)("
+             << index_expr << ")";
+    ea_expr = ea_build.str();
+  } else if (is_index8) {
+    const auto base_expr = std::string("runtime->a[") + std::to_string(static_cast<unsigned>(ea.reg)) + "]";
+    const auto index_bank = ea.index_is_address ? std::string("runtime->a[") : std::string("runtime->d[");
+    const auto index_expr = index_bank + std::to_string(static_cast<unsigned>(ea.index_reg)) + "]";
+    std::ostringstream ea_build;
+    ea_build << "(uint32_t)(" << base_expr << " + ";
+    if (ea.index_is_long)
+      ea_build << "(int32_t)" << index_expr;
+    else
+      ea_build << "(int32_t)(int16_t)(uint16_t)" << index_expr;
+    ea_build << " + (int32_t)(int8_t)" << static_cast<int>(ea.displacement) << ")";
+    ea_expr = ea_build.str();
+  } else {
+    ea_expr = std::string("runtime->a[") + std::to_string(static_cast<unsigned>(ea.reg)) + "]";
+  }
+  const auto array_name = "genesis_emitted_code_addresses_" + name_suffix;
+  std::ostringstream function_header;
+  function_header << "static GenesisControlTransfer " << function_name
+                   << "(GenesisRuntime *runtime) {\n"
+                   << "  GenesisInstructionProvenance source = {0};\n"
+                   << "  source.cpu_variant = GENESIS_CPU_MC68000;\n"
+                   << "  source.source_address = UINT32_C(" << hex(provenance.source.address.value, 8) << ");\n"
+                   << "  source.image_offset = UINT64_C(" << provenance.source.image_offset.value << ");\n"
+                   << "  source.primary_bytes[0] = UINT8_C(" << hex(provenance.bytes[0], 2) << ");\n"
+                   << "  source.primary_bytes[1] = UINT8_C(" << hex(provenance.bytes[1], 2) << ");\n"
+                   << "  source.length = UINT32_C(" << provenance.length.value << ");\n";
+  std::ostringstream fail_stop;
+  fail_stop << "genesis_static_stop(GENESIS_STOP_UNRESOLVED_INDIRECT_TARGET, "
+               "GENESIS_DIAG_TIER2_COMPUTED_TARGET_NOT_EMITTED, &source, 0U, UINT32_C(0), "
+               "GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ)";
+  std::ostringstream tier2;
+  // SEG-007-T239 / ADR-0039: the one reusable compiled-address existence
+  // query, shared unchanged by both Tier-2 JMP (`is_call == false`
+  // below) and Tier-2 JSR (`is_call == true` below) -- see this
+  // function's own doc comment above.
+  tier2 << emit_m68k_compiled_address_existence_check(array_name, emitted_code_addresses,
+                                                       function_header.str(), ea_expr, fail_stop.str(),
+                                                       !accepted_prefix.immutable_rom_aot_entries.empty());
+  if (is_call) {
+    const auto continuation =
+        static_cast<std::uint32_t>(provenance.source.address.value + provenance.length.value);
+    // SEG-007-T208 correction: report this call-shaped Tier-2 site's own
+    // genuine continuation back to the caller (see the out-parameter's
+    // own doc comment above) -- the identical value already pushed onto
+    // the emulated runtime stack a few lines below.
+    if (out_tier2_call_continuation != nullptr) *out_tier2_call_continuation = continuation;
+    tier2 << "    { uint32_t m68k_continuation = UINT32_C(" << hex(continuation, 8) << ");\n"
+          << "      GenesisRuntimeStop m68k_route_stop = {0};\n"
+          << "      if ((runtime->a[7] & 1U) != 0U) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_ALIGNMENT, &source, 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);\n"
+          << "      if (runtime->a[7] < UINT32_C(" << hex(m68k_startup_ram_begin + 4U, 8) << ") || runtime->a[7] > UINT32_C("
+          << hex(m68k_startup_ram_end, 8) << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, &source, 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);\n"
+          << "      { const uint32_t m68k_new_a7 = runtime->a[7] - UINT32_C(4);\n"
+          << "        if (" << (g_execution_history_hooks ? "genesis_route_access_bus(runtime, GENESIS_BUS_STACK_WRITE, " : "genesis_route_access(runtime, ") << "m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) {\n"
+          << "          m68k_route_stop.provenance.has_instruction_provenance = 1U; m68k_route_stop.provenance.instruction = source; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = m68k_new_a7; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_WRITE;\n"
+          << "          { GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop = m68k_route_stop; return transfer; }\n"
+          << "        }\n"
+          << "        runtime->a[7] = m68k_new_a7;\n"
+          << "      }\n"
+          << "    }\n";
+  }
+  tier2 << "    { GenesisControlTransfer transfer = {0};\n"
+        << "      transfer.kind = GENESIS_CONTINUE_AT_PC;\n"
+        << "      transfer.next_pc = m68k_indirect_ea;\n"
+        << "      return transfer;\n"
+        << "    }\n"
+        << "  }\n"
+        << "}\n";
+  return tier2.str();
+}
+
 std::optional<std::string> build_genesis_frontier_stop_function(
     const FrontendAnalysis &accepted_prefix, const UnresolvedFrontier &frontier,
     const std::set<Address> &sibling_frontier_addresses,
@@ -1121,112 +1242,11 @@ std::optional<std::string> build_genesis_frontier_stop_function(
       unproven = &candidate;
     }
     if (unproven != nullptr) {
-      const auto &ea = unproven->control_ea;
-      // SEG-007-T179 / ADR-0025: Tier-2 now also lowers the pure
-      // register-indirect control EA form (`JMP (An)` / `JSR (An)`, mode 2,
-      // no displacement/index/extension). A7/SP is refused outright -- the
-      // SEG-007-T178 exclusion holds at both tiers; the producer never records
-      // an A7 fact, and this is a belt-and-braces guard. All other gates
-      // (engagement on a non-empty candidate-root set, emitted-set membership,
-      // fail-closed non-member, JSR return-frame push) are shared unchanged
-      // between the two forms.
-      const bool is_pc_index8 =
-          ea.mode == M68kEaMode::pc_index8 && !ea.index_is_address && !ea.index_is_long;
-      const bool is_reg_indirect = ea.mode == M68kEaMode::address_indirect && ea.displacement == 0 &&
-                                   ea.extension_words == 0U && ea.reg < 7U;
-      // SEG-021-T011 / ADR-0024/ADR-0025 Tier-2 generalization: the brief
-      // address-register-indexed control EA (`JMP (d8,An,Xn)` /
-      // `JSR (d8,An,Xn)`), the sibling shape `process_indirect_control_index8`
-      // (static_discovery.cpp) always records a Tier-2 fact for -- this
-      // project deliberately never attempts a Tier-1 finite-value proof for
-      // this combined base+index shape (see that function's own doc
-      // comment). Unlike the two existing shapes above, the index register
-      // bank/size here is not restricted to word-size Dn: the runtime EA
-      // expression below is built generically (An/Dn index, word/long size),
-      // mirroring `m68k_emit_runtime_ea_address`'s own `address_index8`
-      // formula (libs/codegen/c11/src/m68k.cpp) exactly, because this is a
-      // plain runtime register read/compare, not a static finite-value
-      // proof with a bounded-domain restriction to honor.
-      const bool is_index8 = ea.mode == M68kEaMode::address_index8;
-      if (!is_pc_index8 && !is_reg_indirect && !is_index8) return std::nullopt;
-      std::string ea_expr;
-      if (is_pc_index8) {
-        const auto base = static_cast<std::uint32_t>(static_cast<std::int64_t>(ea.pc_base_address) +
-                                                       static_cast<std::int64_t>(ea.displacement));
-        const auto index_expr =
-            std::string("runtime->d[") + std::to_string(static_cast<unsigned>(ea.index_reg)) + "]";
-        std::ostringstream ea_build;
-        ea_build << "UINT32_C(" << hex(base, 8) << ") + (uint32_t)(int32_t)(int16_t)(uint16_t)("
-                 << index_expr << ")";
-        ea_expr = ea_build.str();
-      } else if (is_index8) {
-        const auto base_expr = std::string("runtime->a[") + std::to_string(static_cast<unsigned>(ea.reg)) + "]";
-        const auto index_bank = ea.index_is_address ? std::string("runtime->a[") : std::string("runtime->d[");
-        const auto index_expr = index_bank + std::to_string(static_cast<unsigned>(ea.index_reg)) + "]";
-        std::ostringstream ea_build;
-        ea_build << "(uint32_t)(" << base_expr << " + ";
-        if (ea.index_is_long)
-          ea_build << "(int32_t)" << index_expr;
-        else
-          ea_build << "(int32_t)(int16_t)(uint16_t)" << index_expr;
-        ea_build << " + (int32_t)(int8_t)" << static_cast<int>(ea.displacement) << ")";
-        ea_expr = ea_build.str();
-      } else {
-        ea_expr = std::string("runtime->a[") + std::to_string(static_cast<unsigned>(ea.reg)) + "]";
-      }
-      const auto array_name = "genesis_emitted_code_addresses_" + name_suffix;
-      std::ostringstream function_header;
-      function_header << "static GenesisControlTransfer genesis_frontier_stop_" << name_suffix
-                       << "(GenesisRuntime *runtime) {\n"
-                       << "  GenesisInstructionProvenance source = {0};\n"
-                       << "  source.cpu_variant = GENESIS_CPU_MC68000;\n"
-                       << "  source.source_address = UINT32_C(" << hex(provenance.source.address.value, 8) << ");\n"
-                       << "  source.image_offset = UINT64_C(" << provenance.source.image_offset.value << ");\n"
-                       << "  source.primary_bytes[0] = UINT8_C(" << hex(provenance.bytes[0], 2) << ");\n"
-                       << "  source.primary_bytes[1] = UINT8_C(" << hex(provenance.bytes[1], 2) << ");\n"
-                       << "  source.length = UINT32_C(" << provenance.length.value << ");\n";
-      std::ostringstream fail_stop;
-      fail_stop << "genesis_static_stop(GENESIS_STOP_UNRESOLVED_INDIRECT_TARGET, "
-                   "GENESIS_DIAG_TIER2_COMPUTED_TARGET_NOT_EMITTED, &source, 0U, UINT32_C(0), "
-                   "GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ)";
-      std::ostringstream tier2;
-      // SEG-007-T239 / ADR-0039: the one reusable compiled-address existence
-      // query, shared unchanged by both Tier-2 JMP (`is_call == false`
-      // below) and Tier-2 JSR (`is_call == true` below) -- see this
-      // function's own doc comment above.
-      tier2 << emit_m68k_compiled_address_existence_check(array_name, emitted_code_addresses,
-                                                           function_header.str(), ea_expr, fail_stop.str(),
-                                                           !accepted_prefix.immutable_rom_aot_entries.empty());
-      if (unproven->is_call) {
-        const auto continuation =
-            static_cast<std::uint32_t>(provenance.source.address.value + provenance.length.value);
-        // SEG-007-T208 correction: report this call-shaped Tier-2 site's own
-        // genuine continuation back to the caller (see the out-parameter's
-        // own doc comment above) -- the identical value already pushed onto
-        // the emulated runtime stack a few lines below.
-        if (out_tier2_call_continuation != nullptr) *out_tier2_call_continuation = continuation;
-        tier2 << "    { uint32_t m68k_continuation = UINT32_C(" << hex(continuation, 8) << ");\n"
-              << "      GenesisRuntimeStop m68k_route_stop = {0};\n"
-              << "      if ((runtime->a[7] & 1U) != 0U) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_ALIGNMENT, &source, 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);\n"
-              << "      if (runtime->a[7] < UINT32_C(" << hex(m68k_startup_ram_begin + 4U, 8) << ") || runtime->a[7] > UINT32_C("
-              << hex(m68k_startup_ram_end, 8) << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, &source, 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);\n"
-              << "      { const uint32_t m68k_new_a7 = runtime->a[7] - UINT32_C(4);\n"
-              << "        if (" << (g_execution_history_hooks ? "genesis_route_access_bus(runtime, GENESIS_BUS_STACK_WRITE, " : "genesis_route_access(runtime, ") << "m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) {\n"
-              << "          m68k_route_stop.provenance.has_instruction_provenance = 1U; m68k_route_stop.provenance.instruction = source; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = m68k_new_a7; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_WRITE;\n"
-              << "          { GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop = m68k_route_stop; return transfer; }\n"
-              << "        }\n"
-              << "        runtime->a[7] = m68k_new_a7;\n"
-              << "      }\n"
-              << "    }\n";
-      }
-      tier2 << "    { GenesisControlTransfer transfer = {0};\n"
-            << "      transfer.kind = GENESIS_CONTINUE_AT_PC;\n"
-            << "      transfer.next_pc = m68k_indirect_ea;\n"
-            << "      return transfer;\n"
-            << "    }\n"
-            << "  }\n"
-            << "}\n";
-      return tier2.str();
+      const auto tier2_text = build_tier2_computed_control_function(
+          accepted_prefix, provenance, unproven->control_ea, unproven->is_call,
+          "genesis_frontier_stop_" + name_suffix, emitted_code_addresses, out_tier2_call_continuation);
+      if (!tier2_text) return std::nullopt;
+      return tier2_text;
     }
   }
   std::ostringstream out;
@@ -4103,7 +4123,34 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
       ++stop;
   }
   for (const auto &[source, provenance] : tier1_pre_pc_stops) {
-    (void)source;
+    // SEG-021-T028: a retained JMP/JSR terminal whose Tier-1 set (or Tier-1
+    // fact) cannot be lowered but whose EA is Tier-2 eligible gets exactly one
+    // owner, the existing Tier-2 emitted-set membership lowering (same function
+    // name and call site as the typed stop it replaces). A call-shaped site
+    // additionally contributes its genuine continuation (T208's exact
+    // non-fabrication rule) and only where return authority already exists
+    // (`prospective_runtime_return_authority`), so the RTS emission decisions
+    // made earlier from that flag stay valid.
+    if (tier2_capable) {
+      const auto decoded_terminal = decoded.find(source);
+      if (decoded_terminal != decoded.end() &&
+          (decoded_terminal->second->kind == M68kInstructionKind::jmp ||
+           (decoded_terminal->second->kind == M68kInstructionKind::jsr && prospective_runtime_return_authority))) {
+        const bool is_call = decoded_terminal->second->kind == M68kInstructionKind::jsr;
+        std::ostringstream tier2_name;
+        tier2_name << "genesis_tier1_indirect_stop_" << std::uppercase << std::hex << std::setw(8)
+                   << std::setfill('0') << source;
+        std::optional<std::uint32_t> pre_pc_call_continuation;
+        if (auto tier2_text = build_tier2_computed_control_function(
+                partial.accepted_prefix, provenance, decoded_terminal->second->source_ea, is_call,
+                tier2_name.str(), emitted_code_address_set, &pre_pc_call_continuation)) {
+          out << *tier2_text;
+          if (pre_pc_call_continuation && emitted_block_entries.contains(*pre_pc_call_continuation))
+            tier2_call_continuations.insert(*pre_pc_call_continuation);
+          continue;
+        }
+      }
+    }
     out << build_genesis_tier1_indirect_pre_pc_stop(provenance);
   }
   for (const auto &[entry, stop] : c4_block_stops) {
