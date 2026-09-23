@@ -353,6 +353,9 @@ add_test(NAME m68k_index8_pea_musashi_differential_test COMMAND ${Python3_EXECUT
 add_test(NAME m68k_pc_index8_pea_musashi_differential_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_pc_index8_pea_musashi_differential_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER})
+add_test(NAME m68k_t028_case_c_pc_indexed_tier2_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_t028_case_c_pc_indexed_tier2_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER})
 add_test(NAME m68k_index8_indirect_jsr_musashi_differential_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_index8_indirect_jsr_musashi_differential_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER})

@@ -341,6 +341,11 @@ struct M68kStaticDiscoveryResult {
   // for a program with no such instruction; never overlaps
   // `indirect_target_ea_sets` for the same source address.
   std::vector<M68kUnprovenIndirectControlEaSet> unproven_indirect_control_ea_sets;
+  // SEG-021-T028: final-owner invariant. Every retained computed-control source
+  // whose EA shape is Tier-2 eligible must end with a Tier-1 fact or a Tier-2
+  // fact; sources of an ineligible shape (long/address-indexed, A7) are the
+  // explicit typed-unsupported class and are never listed. Must be empty.
+  std::vector<M68kProgramAddress> ownerless_tier2_eligible_control_sources;
   std::optional<InstructionProvenance> completion_rts;
   std::optional<M68kDiscoveryIssue> primary_issue;
   std::vector<M68kDiscoveryIssue> secondary_issues;

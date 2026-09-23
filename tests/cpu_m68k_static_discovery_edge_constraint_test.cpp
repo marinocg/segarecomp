@@ -41,8 +41,16 @@ class FlatImageDiscoveryEnvironment final : public segarecomp::M68kStaticDiscove
     const segarecomp::DecodeSource source{segarecomp::CpuVariant::mc68000, pc, {local}};
     return segarecomp::M68kInstructionSource{std::span<const std::uint8_t>(image_), source, {local}};
   }
+  // SEG-021-T028: optional project-authored admission rejection of one
+  // direct-call-role candidate address (empty for every pre-T028 test).
+  std::optional<std::uint32_t> reject_call_target;
   std::optional<segarecomp::M68kMappingIssue> admit_target(
-      segarecomp::M68kProgramAddress, segarecomp::M68kDiscoveryTargetRole) override {
+      segarecomp::M68kProgramAddress target, segarecomp::M68kDiscoveryTargetRole role) override {
+    if (reject_call_target.has_value() && role == segarecomp::M68kDiscoveryTargetRole::direct_call &&
+        target.value == *reject_call_target) {
+      segarecomp::M68kMappingIssue issue{};
+      return issue;
+    }
     return std::nullopt;
   }
   std::optional<segarecomp::DirectFlowDiagnostic> classify_memory_access(
@@ -124,6 +132,7 @@ void positive_bounded_selector_resolves_tier1() {
   assert(!result.primary_issue.has_value());
   assert(result.indirect_target_ea_sets.size() == 1U);
   assert(result.unproven_indirect_control_ea_sets.empty());
+  assert(result.ownerless_tier2_eligible_control_sources.empty());
 
   auto candidates = result.indirect_target_ea_sets.front().candidates;
   std::sort(candidates.begin(), candidates.end(),
@@ -314,9 +323,43 @@ void decoder_lsl_quick_count_zero_means_eight() {
   assert(candidates.front().value == base + 0x0EU);
 }
 
+// SEG-021-T028 (Case C): a finite Tier-1 set is computed for a legal
+// `JMP (d,PC,Dn.W)` but one candidate fails target admission. The finite set is
+// discarded whole (no partial edges/blocks) and the source has exactly one
+// owner, the existing Tier-2 fact -- never both tiers, never ownerless.
+void case_c_rejected_finite_candidate_falls_back_to_tier2_only() {
+  using namespace segarecomp;
+  const std::uint32_t base = 0x00002000U;
+  const auto image = smps_dispatch_image(/*load_word=*/false, /*compare_word=*/false,
+                                         /*signed_branch=*/false, /*upper_immediate=*/0x0007U);
+  const M68kStaticDiscoveryLimits limits{4096U, 4096U, 8U};
+  const M68kProgramAddress entry{TargetAddressSpace::m68k_program, base};
+
+  FlatImageDiscoveryEnvironment probe(image, base);
+  const auto proven = discover_m68k_static_graph(entry, limits, probe);
+  assert(proven.indirect_target_ea_sets.size() == 1U);
+  const auto victim = proven.indirect_target_ea_sets.front().candidates[1].value;
+  const auto edges_before = proven.edges.size();
+
+  FlatImageDiscoveryEnvironment environment(image, base);
+  environment.reject_call_target = victim;
+  const auto result = discover_m68k_static_graph(entry, limits, environment);
+  assert(result.indirect_target_ea_sets.empty());
+  assert(result.unproven_indirect_control_ea_sets.size() == 1U);
+  assert(result.unproven_indirect_control_ea_sets.front().control_ea.mode == M68kEaMode::pc_index8);
+  assert(!result.unproven_indirect_control_ea_sets.front().is_call);
+  assert(result.primary_issue.has_value());
+  assert(result.primary_issue->category == DirectFlowDiagnostic::reached_unresolved_direct_edge);
+  // No partial indirect edges from the rejected finite set leak on fallback.
+  for (const auto &edge : result.edges) assert(edge.kind != M68kStaticEdgeKind::indirect_branch);
+  assert(result.edges.size() < edges_before);
+  assert(result.ownerless_tier2_eligible_control_sources.empty());
+}
+
 }  // namespace
 
 int main() {
+  case_c_rejected_finite_candidate_falls_back_to_tier2_only();
   positive_bounded_selector_resolves_tier1();
   positive_is_deterministic();
   negative_unknown_selector_byte_compare_stays_fail_closed();
