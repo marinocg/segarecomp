@@ -685,9 +685,9 @@
    },
    "route_immutable_rom_aot": {
     "applicable_forms": 193,
-    "passing_forms": 56,
-    "passing_words": 4232,
-    "percent_forms": "29.02"
+    "passing_forms": 58,
+    "passing_words": 4234,
+    "percent_forms": "30.05"
    },
    "route_runtime_routed_admitted": {
     "applicable_forms": 193,
@@ -1550,14 +1550,14 @@
   "jmp.ea.none.ind.none": "1100-01000000000--0",
   "jmp.ea.none.index.none": "1100-01000000000--0",
   "jmp.ea.none.pcdisp.none": "1110-01111111110--0",
-  "jmp.ea.none.pcindex.none": "1100-01000000000--0",
+  "jmp.ea.none.pcindex.none": "1100-01000000100--0",
   "jsr.ea.none.absl.none": "1110-01111111100-00",
   "jsr.ea.none.absw.none": "1110-01111111100-00",
   "jsr.ea.none.disp.none": "1100-01000000000-00",
   "jsr.ea.none.ind.none": "1100-01000000000-00",
   "jsr.ea.none.index.none": "1100-01000000000-00",
   "jsr.ea.none.pcdisp.none": "1110-01111111110-00",
-  "jsr.ea.none.pcindex.none": "1100-01000000000-00",
+  "jsr.ea.none.pcindex.none": "1100-01000000100-00",
   "lea.ea_an.l.absl.an": "1110--1111111110--0",
   "lea.ea_an.l.absw.an": "1110--1111111110--0",
   "lea.ea_an.l.disp.an": "1110--1111111110--0",
@@ -2621,9 +2621,9 @@
   },
   "route_immutable_rom_aot": {
    "applicable_forms": 1526,
-   "passing_forms": 1202,
-   "passing_words": 41347,
-   "percent_forms": "78.77"
+   "passing_forms": 1204,
+   "passing_words": 41349,
+   "percent_forms": "78.90"
   },
   "route_runtime_routed_admitted": {
    "applicable_forms": 1526,

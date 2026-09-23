@@ -7481,6 +7481,43 @@ FrontendProgram program_with() {
 }
 }  // namespace pea_aot_fixture
 
+// SEG-021-T027: representative immutable-ROM AOT fixture for the
+// runtime-owned brief PC-indexed indirect JMP (`(d8,PC,D0.W)`). Reuses the
+// identical filler prefix verbatim (unrelated static discovery noise
+// reaching an unresolved JSR (A0) frontier, proving AOT admission needs no
+// CFG reachability from the reset vector), then places the JMP at the same
+// offset PEA/NEG use above. The image ends exactly at the JMP's own
+// extension word, exactly like PEA/NEG's own trailing zero word -- so the
+// enumeration's independent 2-byte-aligned decode attempt AT the extension
+// word's own address is always a truncated, discarded non-candidate, never
+// a spurious extra AOT entry.
+//
+// Displacement is 0, so the runtime target is exactly `pc_base +
+// (int16_t)D0`, where `pc_base` is the extension word's own address
+// (`jmp_pc_indexed + 2`), per the existing ADR-0009 runtime EA formula:
+//   D0 == 0xFFF6 (-10) -> `base`            (the block entry: represented)
+//   D0 == 0xFFFE (-2)  -> `jmp_pc_indexed`   (the JMP's own AOT address: represented)
+//   D0 == 0x0000 ( 0)  -> `pc_base`          (never independently compiled: unrepresented)
+namespace jmp_pc_indexed_aot_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000F00U;
+const std::vector<std::uint8_t> image{
+    0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U,
+    0x4EU, 0xFBU, 0x00U, 0x00U,  // JMP (0,PC,D0.W)
+};
+constexpr std::uint32_t jmp_pc_indexed = base + 0x08U;
+constexpr std::uint32_t enumeration_end = base + 0x0CU;
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T027/jmp-pc-indexed-aot-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base},
+                             {{}, static_cast<std::uint32_t>(base + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace jmp_pc_indexed_aot_fixture
+
 // SEG-021-T011: PEA is now family-level admitted to immutable-ROM AOT
 // (m68k_operation_is_immutable_rom_aot_safe). Proves the admission end to
 // end: PEA (0,A5) becomes a validated independent AOT root (no CFG edge,
@@ -7518,6 +7555,45 @@ void pea_disp16_aot_admission_and_dispatch_are_bounded() {
   expect(!body.empty() && route_count == 1U && body.find(commit) != std::string::npos &&
              body.rfind("genesis_route_access(runtime,") < body.find(commit),
          "PEA AOT body retains exactly one routed write, committed strictly after it succeeds");
+}
+
+// SEG-021-T027: the runtime-owned brief PC-indexed indirect JMP is now
+// admitted to immutable-ROM AOT (`m68k_operation_is_immutable_rom_aot_
+// safe`/`m68k_operation_is_runtime_owned_indirect_jump`). Proves the
+// admission end to end -- no CFG edge or reachability from the reset vector
+// required -- and that the generated body reuses the exact existing
+// `jump_general` dynamic-indirect lowering (`m68k_indirect_target_member`
+// against the caller-supplied final compiled-address authority) rather than
+// a duplicated target computation: this is the task's required parity with
+// the ordinary C4/Tier-2 route, achieved by sharing the one production
+// computation instead of maintaining two formulas plus a parity test.
+void jmp_pc_indexed_word_aot_admission_and_dispatch_are_bounded() {
+  using namespace segarecomp;
+  using namespace jmp_pc_indexed_aot_fixture;
+  auto program = program_with();
+  expect(apply_genesis_immutable_rom_aot_range(program, base, enumeration_end),
+         "JMP (d8,PC,D0.W) fixture range enumerates cleanly");
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "JMP fixture remains a genuine partial program");
+  if (partial == nullptr) return;
+  const auto &roots = partial->accepted_prefix.immutable_rom_aot_entries;
+  expect(std::any_of(roots.begin(), roots.end(), [&](const auto &root) {
+           return root.decoded.provenance.source.address.value == jmp_pc_indexed;
+         }), "JMP (d8,PC,D0.W) becomes a validated independent AOT root");
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  std::ostringstream address_hex;
+  address_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jmp_pc_indexed;
+  const auto body_begin = emitted.find("genesis_aot_" + address_hex.str() + "(GenesisRuntime *runtime) {");
+  const auto body_end = body_begin == std::string::npos ? std::string::npos : emitted.find("\n}\n", body_begin);
+  const auto body = body_begin == std::string::npos || body_end == std::string::npos
+                        ? std::string{} : emitted.substr(body_begin, body_end - body_begin);
+  expect(!body.empty() && body.find("m68k_indirect_target_member(") != std::string::npos &&
+             body.find("(int32_t)(int16_t)(uint16_t)") != std::string::npos &&
+             body.find("runtime->d[0]") != std::string::npos &&
+             body.find("genesis_route_access") == std::string::npos,
+         "JMP AOT body reuses the exact existing runtime-EA/membership dynamic-indirect lowering "
+         "verbatim (no runtime opcode decode, no routed memory access of its own)");
 }
 
 // The seam's own range validation: a range extending past the fixture's
@@ -8069,6 +8145,37 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
     expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
            "JMP's carve-out excludes every runtime-only register-relative source form; those need "
            "JSR's own proven-candidate-membership machinery, an independent question");
+  }
+  // SEG-021-T027: the runtime-owned brief PC-indexed indirect JMP/JSR
+  // (`(d8,PC,Xn)`, word index only) now reuses the existing ADR-0009
+  // dynamic-indirect target-computation/membership owner instead of staying
+  // excluded with `(An)`/`d16(An)` above -- see `m68k_operation_is_runtime_
+  // owned_indirect_jump`'s own doc comment (platforms/genesis/machine/
+  // include/.../frontend.hpp). Address-register-indexed and long-indexed
+  // variants of the same brief mode remain a genuinely different runtime EA
+  // computation this bounded task does not attempt, and stay excluded.
+  for (const auto pc_indexed_kind : {M68kIrKind::jump_general, M68kIrKind::call_general}) {
+    operation.kind = pc_indexed_kind;
+    operation.source_ea.mode = M68kEaMode::pc_index8;
+    operation.source_ea.index_is_address = false;
+    operation.source_ea.index_is_long = false;
+    expect(m68k_operation_is_runtime_owned_indirect_jump(operation) &&
+               m68k_operation_is_immutable_rom_aot_safe(operation, false) &&
+               (m68k_operation_has_complete_c_emission(operation) ||
+                m68k_operation_is_runtime_owned_indirect_jump(operation)),
+           "JMP/JSR (d8,PC,Dn.W) is admitted through the narrow runtime-owned dynamic-indirect "
+           "admission-context signal, bypassing only has_complete_c_emission's generic pc-effect "
+           "requirement for this one shape");
+    operation.source_ea.index_is_address = true;
+    expect(!m68k_operation_is_runtime_owned_indirect_jump(operation) &&
+               !m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "an address-register-indexed pc_index8 control transfer is not the admitted subform");
+    operation.source_ea.index_is_address = false;
+    operation.source_ea.index_is_long = true;
+    expect(!m68k_operation_is_runtime_owned_indirect_jump(operation) &&
+               !m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "a long-indexed pc_index8 control transfer is not the admitted subform");
+    operation.source_ea.index_is_long = false;
   }
   // SEG-007-T246 (ninth iteration, same bounded family): a foldable-target
   // JSR needs no whole-program authority at all -- its pushed continuation
@@ -8895,6 +9002,23 @@ int emit_negate_disp16_aot_source() {
 int emit_pea_aot_source() {
   using namespace segarecomp;
   using namespace pea_aot_fixture;
+  auto program = program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
+// SEG-021-T027: representative generated-C source for the strict-C11
+// compile/execute proof (`tests/genesis_immutable_rom_aot_jmp_pc_indexed_
+// generated_test.py`).
+int emit_jmp_pc_indexed_word_aot_source() {
+  using namespace segarecomp;
+  using namespace jmp_pc_indexed_aot_fixture;
   auto program = program_with();
   if (!apply_genesis_immutable_rom_aot(program)) return 4;
   const auto result = analyze_m68k_frontend(program);
@@ -27271,6 +27395,8 @@ int main(int argc, char **argv) {
     return emit_negate_disp16_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-pea-aot")
     return emit_pea_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-jmp-pc-indexed-word-aot")
+    return emit_jmp_pc_indexed_word_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-straight-line-block")
     return emit_general_startup_runtime_c4_straight_line_block_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-partition-boundary-dispatch")
@@ -27844,6 +27970,7 @@ int main(int argc, char **argv) {
   general_arithmetic_memory_operand_admissions_are_admitted_and_dispatch();
   negate_disp16_aot_admission_and_dispatch_are_bounded();
   pea_disp16_aot_admission_and_dispatch_are_bounded();
+  jmp_pc_indexed_word_aot_admission_and_dispatch_are_bounded();
   t250_final_compiled_membership_suppresses_stale_frontier_interception();
   ordinary_interior_owner_precedes_consistent_aot_and_rejects_conflict();
   t250_genuine_typed_frontier_without_compiled_membership_still_intercepts();
