@@ -182,6 +182,10 @@ std::vector<std::uint8_t> m68k_written_data_registers(const M68kDecodedInstructi
   case M68kInstructionKind::negate_extended:
   case M68kInstructionKind::add_extended:
   case M68kInstructionKind::subtract_extended:
+  // SEG-021-T015: ABCD/SBCD/NBCD write a Dn destination.
+  case M68kInstructionKind::add_decimal:
+  case M68kInstructionKind::subtract_decimal:
+  case M68kInstructionKind::negate_decimal:
   case M68kInstructionKind::add:
   case M68kInstructionKind::addi:
   case M68kInstructionKind::addq:
@@ -1657,7 +1661,8 @@ class M68kStaticGraphWalker {
                                                     M68kMemoryAccessDirection::write, decoded.provenance))
         return reject_operand(pc_value, decoded, *diagnostic, decoded.destination_ea.absolute_address);
     } else if (decoded.kind == M68kInstructionKind::not_operand || decoded.kind == M68kInstructionKind::negate_word ||
-               decoded.kind == M68kInstructionKind::negate_extended) {
+               decoded.kind == M68kInstructionKind::negate_extended ||
+               decoded.kind == M68kInstructionKind::negate_decimal) {
       // SEG-021-T014: NEG/NEGX share NOT's one-address read-modify-write operand contract.
       // SEG-007-T168: NOT is a genuine one-address read-modify-write (unlike
       // CLR's write-only shape), exactly like shift_rotate's memory form

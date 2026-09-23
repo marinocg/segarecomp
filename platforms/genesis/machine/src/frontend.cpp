@@ -4457,6 +4457,7 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
       // SEG-021-T014: NEG/NEGX are one-address RMW operands with NOT's exact fact shape.
       case M68kInstructionKind::negate_word:
       case M68kInstructionKind::negate_extended:
+      case M68kInstructionKind::negate_decimal:
       case M68kInstructionKind::not_operand:
         // SEG-007-T168: NOT has no second operand at all (unlike SUBQ's
         // quick-immediate source, and unlike ANDI/ORI/EORI, which do carry

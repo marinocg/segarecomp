@@ -193,6 +193,21 @@ std::optional<std::uint32_t> extended_pair_cycles(const M68kIrOperation &o) noex
   return std::nullopt;
 }
 
+// Table 8-4 (ABCD/SBCD rows, byte only): Dy,Dx is 6; -(Ay),-(Ax) is 18.
+std::optional<std::uint32_t> decimal_pair_cycles(const M68kIrOperation &o) noexcept {
+  if (o.source_ea.mode == M68kEaMode::data_register) return 6U;
+  if (o.source_ea.mode == M68kEaMode::address_predec) return 18U;
+  return std::nullopt;
+}
+
+// Table 8-6 (NBCD row): Dn is 6; memory is 8 + the byte EA calculation time. Anything else has no row.
+std::optional<std::uint32_t> negate_decimal_cycles(const M68kIrOperation &o) noexcept {
+  if (o.destination_ea.mode == M68kEaMode::data_register) return 6U;
+  const auto value = ea(o.destination_ea, M68kMemoryAccessWidth::byte);
+  if (!value || !memory_ea(o.destination_ea.mode)) return std::nullopt;
+  return 8U + *value;
+}
+
 std::optional<std::uint32_t> lea_cycles(const M68kIrOperation &o) noexcept {
   const auto value = ea(o.source_ea, M68kMemoryAccessWidth::word);
   if (!value || !memory_ea(o.source_ea.mode)) return std::nullopt;
@@ -277,6 +292,11 @@ std::optional<std::uint32_t> m68k_instruction_cycles(const M68kIrOperation &oper
   case M68kIrKind::subtract_extended:
   case M68kIrKind::compare_memory:
     return extended_pair_cycles(operation);
+  case M68kIrKind::add_decimal:
+  case M68kIrKind::subtract_decimal:
+    return decimal_pair_cycles(operation);
+  case M68kIrKind::negate_decimal:
+    return negate_decimal_cycles(operation);
   case M68kIrKind::bit_change:
   case M68kIrKind::bit_clear:
   case M68kIrKind::bit_set:

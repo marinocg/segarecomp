@@ -88,6 +88,10 @@ enum class M68kIrKind {
   add_extended,
   subtract_extended,
   compare_memory,
+  // SEG-021-T015: packed-BCD ABCD/SBCD/NBCD (see the matching M68kInstructionKind entries).
+  add_decimal,
+  subtract_decimal,
+  negate_decimal,
   // SEG-007-T220: MULS.W <ea>,Dn. See M68kInstructionKind::multiply_signed_
   // word's own doc comment for the full opcode/EA/CCR contract.
   multiply_signed_word,

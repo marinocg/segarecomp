@@ -509,6 +509,11 @@ enum class M68kInstructionKind {
   // address_predec). CMPM (`1011 Ax 1 ss 001 Ay`) carries `(Ay)+` in
   // `source_ea` and `(Ax)+` in `destination_ea`; it is a compare (X preserved).
   negate_extended, add_extended, subtract_extended, compare_memory,
+  // SEG-021-T015: packed-BCD arithmetic (Motorola M68000 Family Programmer's Reference Manual, ABCD/SBCD/NBCD
+  // entries; byte only). ABCD (`1100 Rx 1 0000 R Ry`) and SBCD (`1000 Rx 1 0000 R Ry`) use the ADDX/SUBX operand
+  // shapes (R=0 -> `Dy,Dx`, R=1 -> `-(Ay),-(Ax)`; source in `source_ea`, destination in `destination_ea`).
+  // NBCD <ea> (`0100 1000 00 mmmrrr`, data-alterable) is a one-address read-modify-write in `destination_ea`.
+  add_decimal, subtract_decimal, negate_decimal,
   // SEG-007-T025 (Batch C, C1): SWAP Dn, EXT.W Dn, EXT.L Dn. Register-only
   // forms -- no EA mode beyond Dn, no memory access. `destination_ea` (not
   // `source_ea`) carries the single Dn operand these read-then-write,

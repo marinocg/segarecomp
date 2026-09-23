@@ -139,7 +139,7 @@ writes), so no legal ordinary shape is declined and no emitted output changed. D
 
 Not merged into one universal helper: the families differ in routed-stop commit order, so a merge would change
 byte-comparable routed output without evidence of a defect. Remaining declines are missing families rather than
-shape declines, including ABCD/SBCD (owned by SEG-021-T015; NBCD, Scc and TAS by T015/T016), which have no decoded `M68kIrKind` (harness reports `unsupported`). CMPM, ADDX/SUBX and NEGX were completed by SEG-021-T014 (below).
+shape declines, including Scc and TAS (owned by SEG-021-T016), which have no decoded `M68kIrKind` (harness reports `unsupported`). CMPM, ADDX/SUBX and NEGX were completed by SEG-021-T014 and ABCD/SBCD/NBCD by SEG-021-T015 (below).
 
 ### MOVEM (`M68kIrKind::movem_transfer`): decision — no change, retain the family-specific mechanism
 
@@ -171,7 +171,7 @@ T003 rows) belongs to SEG-021-T012; T004 adds no MOVEM mode or matrix.
 Final T004 conclusion: ordinary single-EA forms use the existing shared EA helpers; MOVE source/destination
 alias/update uses its existing deferred commit; MOVEM keeps its working-EA/mask/order/final-writeback mechanism;
 CMPM and ADDX/SUBX memory forms are the family-local paired postincrement/predecrement work delivered by SEG-021-T014, and
-ABCD/SBCD are SEG-021-T015. No new shared production mechanism is required.
+ABCD/SBCD are delivered by SEG-021-T015 on the same mechanism. No new shared production mechanism is required.
 
 ## SEG-021-T006: SUB / SUBA / SUBQ / SUBI and CMP / CMPA / CMPI
 
@@ -296,3 +296,15 @@ instead.
   to immutable-ROM AOT. Static discovery resolves NEG/NEGX like NOT.
 - Timing: Table 8-4 literal rows (ADDX/SUBX `Dy,Dx` 4/4/8, `-(Ay),-(Ax)` 18/18/30; CMPM 12/12/20) and Table 8-6 NEGX rows
   via the existing single-operand row.
+
+## SEG-021-T015: packed BCD (ABCD, SBCD, NBCD)
+
+- New decoded/lifted kinds `add_decimal`, `subtract_decimal`, `negate_decimal` (byte only). Legality is encoded in `libs/cpu/m68k`
+  from the Motorola encodings (ABCD/SBCD `1100/1000 Rx 1 0000 R Ry`, NBCD `0100 1000 00 ea` data-alterable), never from the T001 dataset.
+- ABCD/SBCD reuse `m68k_emit_extended_pair` unchanged (same deferred address commit, A7 byte step of two, aliased-pair rule); NBCD
+  reuses the NEG/NEGX one-address RMW lowering. Only the compute/update emitters differ (`M68kDecimalArithmeticSpecification`).
+- N and V are undefined on the base MC68000; production matches the pinned Musashi core (documented as such, see
+  `docs/testing/m68k-conformance-harness.md`). X/C/Z are documented semantics (sticky Z).
+- C4/AOT: all three are represented C4 kinds with no gap rows (absolute NBCD operands retain NOT-shaped destination facts) and are
+  admitted family-level to immutable-ROM AOT. Static discovery resolves NBCD like NOT/NEG.
+- Timing: Table 8-4 rows (ABCD/SBCD 6 / 18) and the Table 8-6 NBCD row (Dn 6, memory 8 + EA).

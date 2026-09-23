@@ -318,6 +318,103 @@ struct M68kExtendedArithmeticSpecification {
   }
 };
 
+// SEG-021-T015: the one shared owner of ABCD/SBCD/NBCD packed-BCD arithmetic and condition codes, for host
+// semantics and generated C (byte operations only). Documented (Motorola M68000 Family Programmer's Reference
+// Manual) behavior: the byte result is the decimal-adjusted sum (ABCD: destination + source + X), difference
+// (SBCD: destination - source - X) or ten's complement (NBCD: 0 - destination - X); X and C are the decimal
+// carry/borrow; Z is CLEARED when the result byte is non-zero and otherwise UNCHANGED (sticky, as ADDX/SUBX).
+// N and V are UNDEFINED on the base MC68000. The values produced here are a deliberate matched-to-oracle policy,
+// not documented semantics: they reproduce the pinned Musashi core exactly so generated code is bit-comparable
+// (N = bit 7 of the adjusted result; V = bit 7 of (~pre-adjust intermediate & adjusted result); NBCD with the
+// "nothing to negate" outcome (intermediate 0x9A) leaves the byte unchanged, clears X/C/V and sets N).
+// The algorithm mirrors the manual's low-nibble-then-high-nibble correction with unsigned 32-bit wraparound.
+enum class M68kDecimalArithmeticKind { add, subtract, negate };
+struct M68kDecimalArithmeticResult {
+  std::uint8_t result{};    // the byte to write back (unchanged destination for the NBCD no-op outcome)
+  bool carry{};             // X and C
+  bool negative{};          // undefined on 68000: matched to Musashi
+  bool overflow{};          // undefined on 68000: matched to Musashi
+  bool clears_zero{};       // Z is cleared (else unchanged)
+};
+struct M68kDecimalArithmeticSpecification {
+  [[nodiscard]] static constexpr M68kDecimalArithmeticResult evaluate(M68kDecimalArithmeticKind kind,
+                                                                       std::uint32_t source,
+                                                                       std::uint32_t destination,
+                                                                       bool extend) noexcept {
+    const std::uint32_t x = extend ? 1U : 0U;
+    if (kind == M68kDecimalArithmeticKind::negate) {
+      const std::uint32_t dst = destination & 0xFFU;
+      std::uint32_t res = (0x9AU - dst - x) & 0xFFU;
+      if (res == 0x9AU) return {static_cast<std::uint8_t>(dst), false, true, false, false};
+      const std::uint32_t v0 = ~res;
+      if ((res & 0x0FU) == 0x0AU) res = (res & 0xF0U) + 0x10U;
+      res &= 0xFFU;
+      return {static_cast<std::uint8_t>(res), true, (res & 0x80U) != 0U, ((v0 & res) & 0x80U) != 0U, res != 0U};
+    }
+    const bool add = kind == M68kDecimalArithmeticKind::add;
+    const std::uint32_t src = source & 0xFFU;
+    const std::uint32_t dst = destination & 0xFFU;
+    std::uint32_t res = add ? (src & 0x0FU) + (dst & 0x0FU) + x : (dst & 0x0FU) - (src & 0x0FU) - x;
+    const std::uint32_t v0 = ~res;
+    if (res > 9U) res = add ? res + 6U : res - 6U;
+    res = add ? res + (src & 0xF0U) + (dst & 0xF0U) : res + (dst & 0xF0U) - (src & 0xF0U);
+    const bool carry = res > 0x99U;
+    if (carry) res = add ? res - 0xA0U : res + 0xA0U;
+    const std::uint32_t masked = res & 0xFFU;
+    return {static_cast<std::uint8_t>(masked), carry, (masked & 0x80U) != 0U, ((v0 & masked) & 0x80U) != 0U,
+            masked != 0U};
+  }
+  [[nodiscard]] static constexpr std::uint16_t apply(std::uint16_t status_register, M68kDecimalArithmeticKind kind,
+                                                      std::uint32_t source, std::uint32_t destination) noexcept {
+    const auto r = evaluate(kind, source, destination, (status_register & UINT16_C(0x0010)) != 0U);
+    const bool zero = !r.clears_zero && (status_register & UINT16_C(0x0004)) != 0U;
+    return static_cast<std::uint16_t>((status_register & UINT16_C(0xFFE0)) | (r.carry ? UINT16_C(0x0011) : 0U) |
+                                      (r.negative ? UINT16_C(0x0008) : 0U) | (zero ? UINT16_C(0x0004) : 0U) |
+                                      (r.overflow ? UINT16_C(0x0002) : 0U));
+  }
+  // Emits locals `bcd_extend`, `bcd_carry`, `bcd_negative`, `bcd_overflow`, `bcd_clears_zero` and `bcd_result`
+  // (the byte to write). `source` is ignored for NBCD.
+  static void emit_c_compute(std::ostringstream &out, std::string_view status_register,
+                             M68kDecimalArithmeticKind kind, const std::string &source,
+                             const std::string &destination) {
+    out << "const uint32_t bcd_dst = (" << destination << ") & UINT32_C(0xFF); const uint32_t bcd_extend = ((uint32_t)"
+        << status_register << " >> 4U) & 1U; ";
+    if (kind == M68kDecimalArithmeticKind::negate) {
+      out << "uint32_t bcd_res = (UINT32_C(0x9A) - bcd_dst - bcd_extend) & UINT32_C(0xFF); "
+             "const uint32_t bcd_noop = bcd_res == UINT32_C(0x9A); uint32_t bcd_v0 = UINT32_C(0); "
+             "if (!bcd_noop) { bcd_v0 = ~bcd_res; if ((bcd_res & UINT32_C(0x0F)) == UINT32_C(0x0A)) "
+             "bcd_res = (bcd_res & UINT32_C(0xF0)) + UINT32_C(0x10); bcd_res &= UINT32_C(0xFF); } "
+             "const uint32_t bcd_carry = bcd_noop ? UINT32_C(0) : UINT32_C(1); "
+             "const uint32_t bcd_negative = bcd_res & UINT32_C(0x80); "
+             "const uint32_t bcd_overflow = bcd_v0 & bcd_res & UINT32_C(0x80); "
+             "const uint32_t bcd_clears_zero = (!bcd_noop && bcd_res != UINT32_C(0)) ? UINT32_C(1) : UINT32_C(0); "
+             "const uint32_t bcd_result = bcd_noop ? bcd_dst : bcd_res; ";
+      return;
+    }
+    const bool add = kind == M68kDecimalArithmeticKind::add;
+    out << "const uint32_t bcd_src = (" << source << ") & UINT32_C(0xFF); uint32_t bcd_res = "
+        << (add ? "(bcd_src & UINT32_C(0x0F)) + (bcd_dst & UINT32_C(0x0F)) + bcd_extend; "
+                : "(bcd_dst & UINT32_C(0x0F)) - (bcd_src & UINT32_C(0x0F)) - bcd_extend; ")
+        << "const uint32_t bcd_v0 = ~bcd_res; if (bcd_res > UINT32_C(9)) bcd_res " << (add ? "+= " : "-= ")
+        << "UINT32_C(6); bcd_res " << (add ? "+= (bcd_src & UINT32_C(0xF0)) + (bcd_dst & UINT32_C(0xF0)); "
+                                           : "+= (bcd_dst & UINT32_C(0xF0)) - (bcd_src & UINT32_C(0xF0)); ")
+        << "const uint32_t bcd_carry = bcd_res > UINT32_C(0x99) ? UINT32_C(1) : UINT32_C(0); if (bcd_carry != 0U) "
+           "bcd_res " << (add ? "-= " : "+= ") << "UINT32_C(0xA0); bcd_res &= UINT32_C(0xFF); "
+           "const uint32_t bcd_negative = bcd_res & UINT32_C(0x80); "
+           "const uint32_t bcd_overflow = bcd_v0 & bcd_res & UINT32_C(0x80); "
+           "const uint32_t bcd_clears_zero = bcd_res != UINT32_C(0) ? UINT32_C(1) : UINT32_C(0); "
+           "const uint32_t bcd_result = bcd_res; ";
+  }
+  // Requires the locals from emit_c_compute in scope.
+  static void emit_c_update(std::ostringstream &out, std::string_view status_register) {
+    out << "{ " << status_register << " = (uint16_t)((" << status_register
+        << " & UINT16_C(0xFFE0)) | (bcd_carry != 0U ? UINT16_C(0x0011) : UINT16_C(0)) | (bcd_negative != 0U ? "
+           "UINT16_C(8) : UINT16_C(0)) | ((bcd_clears_zero == 0U && ("
+        << status_register << " & UINT16_C(4)) != 0U) ? UINT16_C(4) : UINT16_C(0)) | (bcd_overflow != 0U ? "
+           "UINT16_C(2) : UINT16_C(0))); }\n";
+  }
+};
+
 // One logical-operation specification supplies the sized result, SR update,
 // and C11 lowering.  Generated C cannot call the host implementation, so the
 // emitter deliberately projects these same constants and operations instead
@@ -1205,6 +1302,12 @@ struct M68kOperationEffect {
 [[nodiscard]] std::uint16_t m68k_extended_arithmetic_ccr(
     std::uint16_t status_register, M68kExtendedArithmeticKind kind, std::uint32_t source,
     std::uint32_t destination, M68kMemoryAccessWidth width) noexcept;
+// SEG-021-T015: ABCD/SBCD/NBCD (NBCD ignores `source`). Reads X from `status_register`.
+[[nodiscard]] M68kDecimalArithmeticResult m68k_evaluate_decimal_arithmetic(
+    M68kDecimalArithmeticKind kind, std::uint32_t source, std::uint32_t destination, bool extend) noexcept;
+[[nodiscard]] std::uint16_t m68k_decimal_arithmetic_ccr(
+    std::uint16_t status_register, M68kDecimalArithmeticKind kind, std::uint32_t source,
+    std::uint32_t destination) noexcept;
 [[nodiscard]] M68kLogicalResult m68k_evaluate_logical(std::uint32_t result,
                                                         M68kMemoryAccessWidth width) noexcept;
 [[nodiscard]] std::uint16_t m68k_logical_ccr(std::uint16_t status_register, std::uint32_t result,
