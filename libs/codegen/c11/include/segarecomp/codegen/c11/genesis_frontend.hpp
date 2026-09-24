@@ -6,6 +6,7 @@
 #include "segarecomp/machine/genesis/address_space.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
 
+#include <ostream>
 #include <string>
 #include <string_view>
 
@@ -55,6 +56,13 @@ struct GenesisM68kEmissionContext : M68kMemoryEmissionContext {
 [[nodiscard]] std::string emit_m68k_general_startup_runtime_c(const FrontendAnalysis &analysis);
 [[nodiscard]] std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &partial);
 [[nodiscard]] M68kC4Preflight preflight_m68k_general_startup_c4(const FrontendPartialProgram &partial);
+// SEG-022-T002: streaming forms. The generated program is written to `sink` as it is produced and is never
+// materialized as one string. The return value is empty on success; a non-empty return is the
+// "/* translation rejected: ... */" text and any bytes already written to `sink` MUST be discarded.
+[[nodiscard]] std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const FrontendPartialProgram &partial,
+                                                                std::string_view rom_sha256, bool execution_history_hooks = false);
+[[nodiscard]] std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const FrontendAnalysis &analysis,
+                                                                std::string_view rom_sha256, bool execution_history_hooks = false);
 [[nodiscard]] std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &partial, std::string_view rom_sha256,
                                                                     bool execution_history_hooks = false);
 [[nodiscard]] std::string emit_m68k_general_startup_bridge_c(const FrontendAnalysis &analysis, std::string_view rom_sha256,

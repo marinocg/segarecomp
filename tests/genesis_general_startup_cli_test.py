@@ -64,6 +64,21 @@ def main() -> None:
         assert "0x" not in aot.stderr
         total, accepted, rejected = map(int, aggregate.groups())
         assert total > 0 and accepted > 0 and accepted + rejected == total
+        # SEG-022-T002: streamed output is byte-identical to the stdout form, leaves no `.partial`,
+        # and a rejection fails closed (non-zero, no artifact) instead of a truncated program.
+        streamed = pathlib.Path(directory) / "streamed.c"
+        common = [executable, "emit-general-startup-bridge-c", "--rom", str(rom), "--reset-entry",
+                  "--immutable-rom-aot"]
+        ok = subprocess.run(common + ["--rom-sha256", vector["sha256"], "--generated-c-output", str(streamed)],
+                            text=True, capture_output=True, check=False)
+        assert ok.returncode == 0 and ok.stdout == "", ok
+        assert streamed.read_bytes() == aot.stdout.encode(), "streamed C differs from stdout C"
+        assert not pathlib.Path(str(streamed) + ".partial").exists()
+        streamed.write_text("stale")
+        bad = subprocess.run(common + ["--rom-sha256", "0" * 63, "--generated-c-output", str(streamed)],
+                             text=True, capture_output=True, check=False)
+        assert bad.returncode == 1 and bad.stdout == "" and "translation rejected" in bad.stderr, bad
+        assert not streamed.exists() and not pathlib.Path(str(streamed) + ".partial").exists()
         old_range = subprocess.run([
             executable, "emit-general-startup-bridge-c", "--rom", str(rom),
             "--reset-entry", "--rom-sha256", vector["sha256"],

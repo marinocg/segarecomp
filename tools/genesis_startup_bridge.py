@@ -770,17 +770,30 @@ def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, roo
                          out_dir: pathlib.Path, debug: "bool | str",
                          viewer_sdl3: tuple[list[str], list[str]] | None = None,
                          ) -> tuple[int, bytes | None, pathlib.Path | None]:
+    source = out_dir / "bridge.generated.c"
+    executable = out_dir / "bridge"
+    # SEG-022-T002: the emitter streams the generated C straight to `source` (written as
+    # `<source>.partial` and atomically renamed only after complete success), so neither the
+    # emitter nor this bridge ever holds the whole program. Its stdout stays empty; only the
+    # (small, separately retained) stderr diagnostics are captured. A rejection or partial
+    # write exits non-zero with no `source` left behind and fails closed.
+    source.unlink(missing_ok=True)
     try:
-        generated = subprocess.run(emitter_command, text=True, capture_output=True, cwd=root)
+        generated = subprocess.run(emitter_command + ["--generated-c-output", str(source)],
+                                   text=True, capture_output=True, cwd=root)
     except OSError as error:
         sys.stderr.write(f"cannot run emitter: {error}\n")
         return 1, None, None
-    if generated.returncode != 0 or generated.stdout.startswith("/* translation rejected:"):
+    if generated.returncode == 0 and not source.exists() and generated.stdout \
+            and not generated.stdout.startswith("/* translation rejected:"):
+        # Project-authored emitter proxies (tests) predate the streaming option and write the
+        # program to stdout; the real emitter never takes this branch.
+        source.write_text(generated.stdout, encoding="utf-8", newline="\n")
+    if generated.returncode != 0 or generated.stdout.startswith("/* translation rejected:") or not source.is_file():
+        source.unlink(missing_ok=True)
+        pathlib.Path(str(source) + ".partial").unlink(missing_ok=True)
         sys.stderr.write(generated.stderr)
         return 1, None, None
-    source = out_dir / "bridge.generated.c"
-    executable = out_dir / "bridge"
-    source.write_text(generated.stdout, encoding="utf-8", newline="\n")
     # SEG-007-T180 / ADR-0026: capture the emitter's normalized offline-inventory
     # stitch metrics line (counts only, never a raw address) fully in-process from
     # the stderr string. Nothing is written into `out_dir`: that surface is the
@@ -798,7 +811,7 @@ def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, roo
         compile_flags += {"debug": ["-O0", "-g"], "optimized": ["-O2"], "quick": ["-O0"]}[profile]
         if viewer_sdl3 is not None:
             return _compile_viewer_executable(compile_flags, viewer_sdl3, root, source, executable,
-                                              generated.stdout.encode())
+                                              None)
         compile_result = subprocess.run(compile_flags + [
             "-I", str(root / "platforms" / "genesis" / "runtime"),
             "-o", str(executable), str(source), str(root / "platforms" / "genesis" / "runtime" / "runtime.c")],
@@ -809,7 +822,7 @@ def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, roo
     if compile_result.returncode != 0:
         sys.stderr.write(compile_result.stderr)
         return 2, None, None
-    return 0, generated.stdout.encode(), executable
+    return 0, None, executable
 
 
 def find_sdl3() -> tuple[list[str], list[str]] | None:
@@ -831,7 +844,7 @@ def find_sdl3() -> tuple[list[str], list[str]] | None:
 
 def _compile_viewer_executable(compile_flags: list[str], sdl3: tuple[list[str], list[str]],
                                root: pathlib.Path, source: pathlib.Path, executable: pathlib.Path,
-                               generated_bytes: bytes) -> tuple[int, bytes | None, pathlib.Path | None]:
+                               generated_bytes: "bytes | None") -> tuple[int, bytes | None, pathlib.Path | None]:
     """Viewer-mode build of the UNMODIFIED generated C. The generated source alone is
     compiled with -Dgenesis_runtime_run=genesis_viewer_hook_run so its main() hands its
     own runtime/dispatcher/allowance to the viewer hook; every other object is compiled
@@ -1434,12 +1447,15 @@ def main() -> int:
                  else "strict_c11_compile_failed"}, separators=(",", ":")) + "\n")
             return status
         assert executable is not None
-        if args.provenance_diagnostics and generated_bytes is not None:
+        if args.provenance_diagnostics:
             marker = b"\n/* SEG-020-T002 provenance diagnostics"
-            start = generated_bytes.find(marker)
-            if start >= 0:
-                (out_dir / "provenance-diagnostics.c").write_bytes(generated_bytes[start:])
-                sys.stderr.write("PROVENANCE_DIAGNOSTICS " + str(out_dir / "provenance-diagnostics.c") + "\n")
+            import mmap
+            with (out_dir / "bridge.generated.c").open("rb") as generated_file, \
+                    mmap.mmap(generated_file.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+                start = mapped.find(marker)
+                if start >= 0:
+                    (out_dir / "provenance-diagnostics.c").write_bytes(mapped[start:])
+                    sys.stderr.write("PROVENANCE_DIAGNOSTICS " + str(out_dir / "provenance-diagnostics.c") + "\n")
         # SEG-007-T252 / ADR-0040 correction: the canonical/headless one-shot
         # route never silently falls through to the generated binary's own
         # lower-level zero-argument default (128) when the operator omits
