@@ -1448,6 +1448,9 @@ bool valid_c4_static_memory_fact(
   case M68kInstructionKind::suba:
   case M68kInstructionKind::cmpa:
   case M68kInstructionKind::cmp:
+  // SEG-021-T018: MOVE <ea>,SR / MOVE <ea>,CCR read their (word) source only.
+  case M68kInstructionKind::move_to_sr:
+  case M68kInstructionKind::move_to_ccr:
     // SEG-007-T174 follow-up fix: ADDA/SUBA/CMPA's fixed An (or, for CMPA,
     // CCR-only) destination carries no memory fact at all -- only the source
     // read is ever retained (see machine/genesis/frontend.cpp's shared
@@ -1516,6 +1519,7 @@ bool valid_c4_static_memory_fact(
   case M68kInstructionKind::negate_decimal:
   case M68kInstructionKind::test_and_set:  // SEG-021-T016: TAS is a byte one-address RMW like NOT
   case M68kInstructionKind::set_conditional:  // SEG-021-T016: memory Scc reads then writes its byte destination
+  case M68kInstructionKind::move_from_sr:  // SEG-021-T018: a memory MOVE from SR destination is read then written
   case M68kInstructionKind::not_operand:
     // SEG-007-T168: NOT has no second operand at all (unlike SUBQ's
     // quick-immediate source); its sole destination is a full RMW operand,
@@ -1843,7 +1847,10 @@ std::optional<std::vector<Address>> immutable_rom_aot_exact_pc_obligations(
     if (operation.kind == M68kIrKind::jump_general || operation.kind == M68kIrKind::call_general) break;
     return std::nullopt;
   case M68kPcEffectKind::observed_exception_return:
-    return std::nullopt;
+    // SEG-021-T018: like `observed_stack_return`, the restored PC is a runtime fact popped from the exception
+    // frame by the platform's exception-return routine (the M68K-owned core); it continues through the ordinary
+    // dispatcher, whose fail-closed stop owns any PC outside the emitted set. No exact-PC obligation.
+    break;
   }
   std::sort(result.begin(), result.end());
   result.erase(std::unique(result.begin(), result.end()), result.end());
@@ -2052,6 +2059,10 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   case M68kIrKind::push_effective_address:
   case M68kIrKind::general_branch:
   case M68kIrKind::write_user_stack_pointer:
+  // SEG-021-T018: MOVE USP,An and ANDI/ORI/EORI to CCR/SR carry no memory operand (no retained fact).
+  case M68kIrKind::read_user_stack_pointer:
+  case M68kIrKind::logical_immediate_to_ccr:
+  case M68kIrKind::logical_immediate_to_sr:
   case M68kIrKind::write_clr:
   // SEG-007-T168: NOT (`logical_not`) is a represented kind (no
   // missing_dispatcher gap) -- emit_m68k_operation_c has a full lowering
@@ -2378,6 +2389,19 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     // SEG-021-T007/T008; it is no longer a requires_architecture_decision gap.
     if (m68k_c4_auto_update_class(operation.source_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.source_ea, M68kC4OperandRole::source, M68kStaticMemoryFactRole::source_read);
+  } else if (operation.kind == M68kIrKind::write_status_register ||
+             operation.kind == M68kIrKind::write_condition_codes) {
+    // SEG-021-T018: MOVE <ea>,SR / MOVE <ea>,CCR read one word source; an auto-updating source is lowered by
+    // the operation-local deferred commit, and a non-auto foldable source needs its retained fact.
+    if (m68k_c4_auto_update_class(operation.source_ea.mode) == M68kC4AutoUpdateClass::none)
+      check_fact(operation.source_ea, M68kC4OperandRole::source, M68kStaticMemoryFactRole::source_read);
+  } else if (operation.kind == M68kIrKind::read_status_register) {
+    // SEG-021-T018: a memory MOVE from SR destination is read before it is written (memory-Scc shape).
+    if (operation.destination_ea.mode != M68kEaMode::data_register &&
+        m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none) {
+      check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_read);
+      check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
+    }
   } else if (operation.kind == M68kIrKind::subtract) {
     // SEG-007-T170 / SEG-021-T006: SUB (`<ea>,Dn` or `Dn,<ea>`) shares ADD's two-operand shape; an
     // auto-updating operand is lowered by the arithmetic-family deferred-address-commit helper (routed
@@ -3065,6 +3089,8 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
     case M68kInstructionKind::adda:
     case M68kInstructionKind::suba:
     case M68kInstructionKind::cmp:
+    case M68kInstructionKind::move_to_sr:   // SEG-021-T018: one word source read
+    case M68kInstructionKind::move_to_ccr:  // SEG-021-T018: one word source read
       if (fact.role == M68kStaticMemoryFactRole::source_read) {
         expected_ea = &instruction->second->source_ea;
         expected_direction = M68kMemoryAccessDirection::read;
@@ -3109,6 +3135,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
     case M68kInstructionKind::negate_decimal:
     case M68kInstructionKind::test_and_set:  // SEG-021-T016
     case M68kInstructionKind::set_conditional:  // SEG-021-T016: memory Scc is read-then-write like TAS
+    case M68kInstructionKind::move_from_sr:  // SEG-021-T018: a memory MOVE from SR destination is read then written
     case M68kInstructionKind::not_operand:
       // SEG-007-T168: NOT has no second operand at all (unlike AND/OR/EOR);
       // its sole destination is a full RMW operand needing both
@@ -3320,6 +3347,9 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
           kind != M68kInstructionKind::bclr && kind != M68kInstructionKind::bset &&
           // SEG-021-T009: memory-word shifts/rotates lower their own auto-updating destination.
           kind != M68kInstructionKind::shift_rotate &&
+          // SEG-021-T018: MOVE to SR/CCR and MOVE from SR lower their own auto-updating operand (deferred commit).
+          kind != M68kInstructionKind::move_to_sr && kind != M68kInstructionKind::move_to_ccr &&
+          kind != M68kInstructionKind::move_from_sr &&
           (ea.mode == M68kEaMode::address_predec || ea.mode == M68kEaMode::address_postinc))
         return false;
       return !m68k_is_statically_foldable_control_ea(ea) || facts.contains({address, role});
@@ -3390,10 +3420,19 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
                         M68kInstructionKind::shift_rotate) ||
           !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
                         M68kInstructionKind::shift_rotate))) ||
+        // SEG-021-T018: a memory MOVE from SR destination is read then written (memory-Scc shape).
+        (instruction->kind == M68kInstructionKind::move_from_sr &&
+         instruction->destination_ea.mode != M68kEaMode::data_register &&
+         (!require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_read,
+                        M68kInstructionKind::move_from_sr) ||
+          !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
+                        M68kInstructionKind::move_from_sr))) ||
         ((instruction->kind == M68kInstructionKind::cmpa ||
           instruction->kind == M68kInstructionKind::adda ||
           instruction->kind == M68kInstructionKind::suba ||
-          instruction->kind == M68kInstructionKind::cmp) &&
+          instruction->kind == M68kInstructionKind::cmp ||
+          instruction->kind == M68kInstructionKind::move_to_sr ||   // SEG-021-T018
+          instruction->kind == M68kInstructionKind::move_to_ccr) &&  // SEG-021-T018
          !require_fact(instruction->source_ea, M68kStaticMemoryFactRole::source_read, instruction->kind)) ||
         // SEG-007-T146: CMPI reads its destination (CCR-only) exactly like BTST.
         (instruction->kind == M68kInstructionKind::cmpi &&
@@ -3736,6 +3775,12 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
       blocks.contains(partial.accepted_prefix.divide_by_zero_handler_entry->value) &&
       emitted_block_entries.insert(partial.accepted_prefix.divide_by_zero_handler_entry->value).second)
     emitted_block_pending.push_back(partial.accepted_prefix.divide_by_zero_handler_entry->value);
+  // SEG-021-T018 / ADR 0043: the vector-8 handler is the same kind of root.
+  if (partial.accepted_prefix.privilege_violation_handler_entry &&
+      partial.accepted_prefix.privilege_violation_handler_entry->space == TargetAddressSpace::m68k_program &&
+      blocks.contains(partial.accepted_prefix.privilege_violation_handler_entry->value) &&
+      emitted_block_entries.insert(partial.accepted_prefix.privilege_violation_handler_entry->value).second)
+    emitted_block_pending.push_back(partial.accepted_prefix.privilege_violation_handler_entry->value);
   // SEG-007-T174 / ADR-0024: every validated external code-entry candidate
   // root is a second kind of entry-disconnected reachability root, exactly
   // like the IRQ6 handler above -- seed the emission walk from each one (only
@@ -4692,33 +4737,58 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
       // source case correctly.
       case M68kIrKind::load_effective_address:
       case M68kIrKind::general_branch:
-      case M68kIrKind::write_user_stack_pointer:
-      // SEG-007-T088: MOVE to SR's decoded source is restricted (see
-      // m68k_ea_move_to_sr_source) to Dn and immediate modes only -- never
-      // An-indirect, absolute, or PC-relative modes that require a resolver
-      // fact/runtime-routed context -- so it joins this same plain, unrouted
-      // `memory` group, exactly like
-      // write_user_stack_pointer above.
-      case M68kIrKind::write_status_register:
       // SEG-007-T114: NOP has no operand, no EA, and no memory access at all,
       // so it joins this same plain, unrouted `memory` group; its only lowered
       // effect is the two-byte PC advance (see emit_m68k_operation_c's
       // M68kIrKind::no_operation case).
       case M68kIrKind::no_operation:
-      // SEG-007-T116: MOVE from SR's decoded destination is restricted to
-      // data-register-direct (see m68k_ea_move_from_sr_destination), never a
-      // mode that needs a resolver fact / runtime-routed context, so it joins
-      // this same plain, unrouted `memory` group, exactly like
-      // write_status_register above.
-      case M68kIrKind::read_status_register:
-      // SEG-007-T118: MOVE <ea>,CCR's decoded source is restricted to
-      // data-register-direct (see m68k_ea_move_to_ccr_source), never a mode
-      // that needs a resolver fact / runtime-routed context, so it joins this
-      // same plain, unrouted `memory` group, exactly like write_status_register
-      // above.
-      case M68kIrKind::write_condition_codes:
         out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &memory);
         break;
+      // SEG-021-T018 / ADR 0043: the status-register / USP transfer family (MOVE to SR, MOVE to CCR, MOVE from
+      // SR, ANDI/ORI/EORI to CCR/SR, MOVE USP both directions) is routed: the privileged forms raise vector 8
+      // through the platform in user mode and stop through it when T would be set, and every legal operand mode
+      // (supersedes the former Dn/#imm-only plain-group carve-out) reads/writes memory through the routed gate.
+      // A non-auto-update foldable operand uses its retained fact exactly like CMP (MOVE to SR/CCR source) or
+      // memory Scc (MOVE from SR destination, read then written); the lowering advances the configured
+      // program counter directly (no macro bridge).
+      case M68kIrKind::write_user_stack_pointer:
+      case M68kIrKind::read_user_stack_pointer:
+      case M68kIrKind::logical_immediate_to_ccr:
+      case M68kIrKind::logical_immediate_to_sr:
+      case M68kIrKind::write_status_register:
+      case M68kIrKind::write_condition_codes:
+      case M68kIrKind::read_status_register: {
+        const bool reads_destination = found->second->kind == M68kIrKind::read_status_register;
+        const auto *fact = fact_for(reads_destination ? M68kStaticMemoryFactRole::destination_read
+                                                      : M68kStaticMemoryFactRole::source_read);
+        const auto &operand = reads_destination ? found->second->destination_ea : found->second->source_ea;
+        auto routed = memory;
+        routed.runtime_routing = true;
+        routed.runtime_object = "runtime";
+        if (reads_destination && fact != nullptr) {
+          const auto *write_fact = fact_for(M68kStaticMemoryFactRole::destination_write);
+          if (write_fact == nullptr || write_fact->region != M68kAbsoluteOperandRegion::synthetic_work_ram ||
+              fact->region != M68kAbsoluteOperandRegion::synthetic_work_ram)
+            return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
+        }
+        if (fact != nullptr) {
+          routed.test_operand_access = genesis_lowering_access(fact->region);
+          if (fact->region == M68kAbsoluteOperandRegion::raw_cartridge_rom)
+            routed.test_operand_value = fact->immutable_value;
+          if (fact->region != M68kAbsoluteOperandRegion::synthetic_work_ram &&
+              fact->region != M68kAbsoluteOperandRegion::raw_cartridge_rom &&
+              fact->region != M68kAbsoluteOperandRegion::controller_io &&
+              fact->region != M68kAbsoluteOperandRegion::vdp &&
+              fact->region != M68kAbsoluteOperandRegion::routed_device)
+            return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
+        } else if (m68k_is_statically_foldable_control_ea(operand) &&
+                   found->second->kind != M68kIrKind::logical_immediate_to_ccr &&
+                   found->second->kind != M68kIrKind::logical_immediate_to_sr) {
+          return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
+        }
+        out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
+        break;
+      }
       // SEG-007-T177: EXT.W/EXT.L's decoded operand is fixed to
       // `M68kEaMode::data_register` by the shared ext_w/ext_l decode path
       // (decode.cpp always constructs `{M68kEaMode::data_register, reg, 0, 0,
@@ -5644,10 +5714,16 @@ std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &par
     for (const auto &block : partial.accepted_prefix.static_blocks)
       if (block.id.entry.value == handler) { divide_by_zero_handler_hex = hex(handler, 8); break; }
   }
+  std::string privilege_violation_handler_hex;
+  if (partial.accepted_prefix.privilege_violation_handler_entry) {
+    const auto handler = partial.accepted_prefix.privilege_violation_handler_entry->value;
+    for (const auto &block : partial.accepted_prefix.static_blocks)
+      if (block.id.entry.value == handler) { privilege_violation_handler_hex = hex(handler, 8); break; }
+  }
   source += emit_genesis_bridge_c11_main_open(
       hex(partial.accepted_prefix.startup_ingress->initial_ssp, 8),
       hex(partial.accepted_prefix.startup_ingress->entry.value, 8), irq6_handler_hex,
-      divide_by_zero_handler_hex);
+      divide_by_zero_handler_hex, privilege_violation_handler_hex);
   if (g_execution_history_hooks) source += "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; ";
   if (owned_region_count != 0U) {
     source += "  runtime.owned_regions = genesis_owned_cartridge_regions;\n";

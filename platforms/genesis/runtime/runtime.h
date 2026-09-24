@@ -566,6 +566,11 @@ typedef struct GenesisExecutionHistory {
    binary) it is never read or written. Digest = FNV-1a 64 over a fixed
    little-endian field serialization. */
 #define GENESIS_M68K_CHECKPOINT_EFFECT_CAPACITY 8
+/* SEG-021-T018: the MC68000 vector numbers the Genesis binding delivers
+   (ADR 0043 §3). */
+#define GENESIS_M68K_VECTOR_ZERO_DIVIDE UINT32_C(5)
+#define GENESIS_M68K_VECTOR_PRIVILEGE_VIOLATION UINT32_C(8)
+#define GENESIS_M68K_VECTOR_LEVEL6_AUTOVECTOR UINT32_C(30)
 typedef enum GenesisM68kEffectKind {
   GENESIS_M68K_EFFECT_WRITE = 1,
   GENESIS_M68K_EFFECT_TRAP = 2
@@ -656,8 +661,14 @@ typedef enum GenesisDeviceCheckpointComparison {
 typedef struct GenesisRuntime {
   uint32_t d[8];
   uint32_t a[8];
-  /* SEG-007-T085: persistent User Stack Pointer. The bounded startup policy
-     supports only MOVE An,USP, with no user-mode/privilege/exception model. */
+  /* SEG-021-T018 / ADR 0043 §6: `a[7]` is always the ACTIVE stack pointer
+     (the one SR.S selects) and `usp` is the INACTIVE stack-pointer slot: the
+     USP while S = 1 (supervisor) and the SSP while S = 0 (user). Every SR
+     write that changes S (exception entry, RTE, MOVE to SR, ANDI/ORI/EORI to
+     SR) swaps the two; MOVE USP (privileged) reads/writes this slot. The
+     architectural USP is therefore `(sr & 0x2000) ? usp : a[7]`, which is what
+     every checkpoint/report "usp" field records. The reset state (S = 1) is
+     established by the generated `main`. */
   uint32_t usp;
   uint16_t sr;
   uint32_t pc;
@@ -701,6 +712,15 @@ typedef struct GenesisRuntime {
      fails closed via GENESIS_DIAG_UNSUPPORTED_DIVIDE_BY_ZERO_EXCEPTION. */
   uint32_t divide_by_zero_handler_entry;
   uint8_t divide_by_zero_handler_present;
+  /* SEG-021-T018 / ADR 0043 §3/§7: the build-time-resolved MC68000 vector-8
+     (privilege violation) handler entry (the long word at vector-table offset
+     0x20), resolved, retained and written by generated `main` exactly like
+     `divide_by_zero_handler_entry`; NEVER fetched or decoded at runtime.
+     `privilege_violation_handler_present == 0` makes a user-mode privileged
+     instruction fail closed via
+     GENESIS_DIAG_UNSUPPORTED_PRIVILEGE_VIOLATION_EXCEPTION. */
+  uint32_t privilege_violation_handler_entry;
+  uint8_t privilege_violation_handler_present;
   /* SEG-007-T252 / ADR-0040 correction: a fixed-size, no-dynamic-allocation
      circular buffer of the latest GENESIS_RECENT_PC_HISTORY_CAPACITY (64)
      architectural PC values, for LOCAL DIAGNOSTIC USE ONLY. Convention
@@ -763,6 +783,11 @@ typedef enum GenesisStopClass {
    * runtime watchdog class). */
   GENESIS_STOP_DISCOVERY_PREFIX_BOUNDARY = 9,
   GENESIS_STOP_C4_LOWERING_GAP = 10,
+  /* SEG-021-T018 / ADR 0043: a CPU exception the generated-native backend
+   * declines to deliver fail-closed at run time (privilege violation with no
+   * build-resolved vector-8 handler or an unconstructible frame; trace,
+   * which is deferred). No CPU state is changed before this stop. */
+  GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION = 11,
 } GenesisStopClass;
 
 typedef enum GenesisCpuVariant { GENESIS_CPU_MC68000 = 1 } GenesisCpuVariant;
@@ -901,6 +926,19 @@ typedef enum GenesisDiagnosticCategory {
   GENESIS_DIAG_UNSUPPORTED_DIVIDE_BY_ZERO_EXCEPTION = 46,
   GENESIS_DIAG_UNACCOUNTED_INSTRUCTION_TIMING = 47,
   GENESIS_DIAG_VIRTUAL_TIME_OVERFLOW = 48,
+  /* SEG-021-T018 / ADR 0043 §3/§5: a privileged instruction executed with
+     SR.S = 0 whose vector-8 delivery cannot be constructed -- no build-resolved
+     privilege-violation handler is installed
+     (`privilege_violation_handler_present == 0`) or the six-byte frame cannot
+     be placed on the SSP. Paired with GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION.
+     Nothing of the privileged instruction has executed. */
+  GENESIS_DIAG_UNSUPPORTED_PRIVILEGE_VIOLATION_EXCEPTION = 49,
+  /* SEG-021-T018 / ADR 0043 §6: an SR write or an RTE that would leave SR.T = 1
+     when the next instruction starts. Trace (vector 9) is deferred; this is the
+     explicit deterministic stop, decided from runtime state before the SR
+     write or RTE commits anything. Paired with
+     GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION. */
+  GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION = 50,
 } GenesisDiagnosticCategory;
 
 typedef struct GenesisProvenance {
@@ -1250,6 +1288,20 @@ int genesis_exception_return(GenesisRuntime *runtime, uint32_t *restored_pc_out,
  */
 int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc,
                                  uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out);
+
+/*
+ * SEG-021-T018 / ADR 0043 §3/§5: privilege violation (vector 8), called from
+ * the generated lowering of a privileged instruction (MOVE to SR, ANDI/ORI/EORI
+ * to SR, MOVE USP, RTE) when SR.S = 0, before any part of that instruction
+ * executes. `fault_pc` is the privileged instruction's own address (the
+ * stacked PC). The frame goes on the SSP through the M68K-owned exception core
+ * (the USP moves to the inactive slot). Fails closed (returns 0, `*stop_out`
+ * set, nothing changed) if no build-resolved handler is installed or the frame
+ * cannot be constructed; on success returns 1 and writes the handler entry to
+ * `*handler_pc_out`. Performs no target-opcode fetch/decode.
+ */
+int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc,
+                                      uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out);
 
 /* Returns 1 only after the contract's checkpoint observation condition holds.
  * It is a pure snapshot: caller-owned identity/transaction data is copied,

@@ -66,11 +66,26 @@ void frame_is_correct_and_rte_restores_for_each_interrupt_mask() {
     check((r.sr & 0x0700u) == mask_bits, "synchronous entry preserves interrupt mask");
   check((r.sr & 0x8000u) == 0u, "T bit cleared");
 
+  // SEG-021-T018 / ADR 0043 §6: the stacked SR has T = 1, so RTE would leave T set -- trace is deferred and
+  // the return fails closed with nothing restored.
+  {
+    const auto before_rte = r;
+    uint32_t restored_pc = 0;
+    GenesisRuntimeStop rte_stop{};
+    check(genesis_exception_return(&r, &restored_pc, &rte_stop) == 0, "RTE of a T = 1 frame fails closed");
+    check(rte_stop.stop_class == GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION &&
+              rte_stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION,
+          "deferred trace is the explicit unsupported-CPU-exception stop");
+    check(r.sr == before_rte.sr && r.pc == before_rte.pc && r.a[7] == before_rte.a[7] && r.usp == before_rte.usp,
+          "a deferred-trace RTE restores nothing");
+  }
+  // With T = 0 in the stacked SR, RTE restores the exact pre-exception state.
+  r.work_ram[frame_base - kRamBegin] = static_cast<uint8_t>((saved_sr & 0x7FFFu) >> 8U);
   uint32_t restored_pc = 0;
   GenesisRuntimeStop rte_stop{};
   check(genesis_exception_return(&r, &restored_pc, &rte_stop) == 1, "RTE restoration succeeds");
   check(restored_pc == kFaultPc, "RTE restores the exact pushed fault PC");
-  check(r.sr == saved_sr, "RTE restores the exact pre-exception SR");
+  check(r.sr == (saved_sr & 0x7FFFu), "RTE restores the exact pre-exception SR (T clear)");
   check(r.a[7] == kRamBegin + 0x8000u, "RTE restores A7 to its pre-exception value");
   }
 }
@@ -91,18 +106,32 @@ void no_handler_fails_closed_with_no_mutation() {
   check(r.pc == saved.pc && r.sr == saved.sr && r.a[7] == saved.a[7], "no CPU state mutated on failure");
 }
 
-// User mode (S == 0) at the fault: fails closed, no partial frame written.
-void user_mode_admission_is_rejected() {
+// SEG-021-T018 / ADR 0043 §5/§6 (supersedes the former supervisor-only entry): user mode (S == 0) at the fault
+// enters on the SSP (the inactive slot), saves SR with S = 0 and moves the USP to the inactive slot; RTE of that
+// frame restores S = 0, re-activates the USP and parks the incremented SSP in the inactive slot.
+void user_mode_entry_switches_to_the_supervisor_stack() {
   GenesisRuntime r;
   prime(r);
-  r.sr = 0x0000u;  // S = 0
-  const auto saved_ram0 = r.work_ram[0x8000u - 6u];
+  r.sr = 0x0015u;  // S = 0, mask 0, X/Z/C set
+  const uint32_t user_sp = kRamBegin + 0x8000u;
+  const uint32_t supervisor_sp = kRamBegin + 0x9000u;
+  r.a[7] = user_sp;
+  r.usp = supervisor_sp;
+  const auto saved_user_ram = r.work_ram[0x8000u - 6u];
   uint32_t handler_pc = 0;
   GenesisRuntimeStop stop{};
-  const int ok = genesis_raise_divide_by_zero(&r, kFaultPc, &handler_pc, &stop);
-  check(ok == 0, "user-mode (S=0) fails closed");
-  check(r.a[7] == kRamBegin + 0x8000u, "A7 unchanged on user-mode rejection");
-  check(r.work_ram[0x8000u - 6u] == saved_ram0, "no partial frame byte written on user-mode rejection");
+  check(genesis_raise_divide_by_zero(&r, kFaultPc, &handler_pc, &stop) == 1, "user-mode vector 5 enters");
+  check(r.a[7] == supervisor_sp - 6u, "the frame is on the SSP");
+  check(r.usp == user_sp, "the USP moves to the inactive slot");
+  check(r.sr == 0x2015u, "entry sets S and keeps the mask and CCR");
+  check(ram_byte(r, supervisor_sp - 6u) == 0x00u && ram_byte(r, supervisor_sp - 5u) == 0x15u,
+        "the stacked SR has S = 0");
+  check(r.work_ram[0x8000u - 6u] == saved_user_ram, "nothing is written on the user stack");
+  uint32_t restored_pc = 0;
+  GenesisRuntimeStop rte_stop{};
+  check(genesis_exception_return(&r, &restored_pc, &rte_stop) == 1, "RTE to user mode succeeds");
+  check(r.sr == 0x0015u && r.pc == kFaultPc, "RTE restores the user SR and PC");
+  check(r.a[7] == user_sp && r.usp == supervisor_sp, "RTE re-activates the USP and parks the SSP");
 }
 
 // NOT gated by the SR interrupt mask (unlike IRQ6). A fully-masked SR must
@@ -143,7 +172,7 @@ void does_not_touch_irq6_scheduler_state() {
 int main() {
   frame_is_correct_and_rte_restores_for_each_interrupt_mask();
   no_handler_fails_closed_with_no_mutation();
-  user_mode_admission_is_rejected();
+  user_mode_entry_switches_to_the_supervisor_stack();
   not_gated_by_interrupt_mask();
   does_not_touch_irq6_scheduler_state();
   if (failures == 0) std::printf("ok\n");

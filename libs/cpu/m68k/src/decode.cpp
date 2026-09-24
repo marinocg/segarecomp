@@ -91,6 +91,9 @@ const char *m68k_instruction_kind_name(M68kInstructionKind kind) noexcept {
   case M68kInstructionKind::shift_rotate: return "shift_rotate";
   case M68kInstructionKind::move_an_to_usp: return "move_an_to_usp";
   case M68kInstructionKind::move_to_sr: return "move_to_sr";
+  case M68kInstructionKind::move_usp_to_an: return "move_usp_to_an";
+  case M68kInstructionKind::logical_immediate_to_ccr: return "logical_immediate_to_ccr";
+  case M68kInstructionKind::logical_immediate_to_sr: return "logical_immediate_to_sr";
   case M68kInstructionKind::nop: return "nop";
   case M68kInstructionKind::move_from_sr: return "move_from_sr";
   case M68kInstructionKind::move_to_ccr: return "move_to_ccr";
@@ -901,10 +904,25 @@ struct M68kEaFieldOutcome {
     return m68k_finish_general_decode(source, image, offset, bytes, kind, size, imm.ea, dst.ea,
                                       imm.extension_bytes + dst.extension_bytes);
   };
-  // Exact reserved immediate-to-CCR/SR words must not consume an extension.
+  // SEG-021-T018: ANDI/ORI/EORI #<data>,CCR (byte) and #<data>,SR (word) --
+  // exact primary words whose EA field (mode 7, register 4) names the implied
+  // status register, not an ordinary immediate destination. Each carries one
+  // immediate extension word (CCR: the low byte is the operand).
   if (word == 0x023CU || word == 0x027CU || word == 0x003CU || word == 0x007CU ||
-      word == 0x0A3CU || word == 0x0A7CU)
-    return std::nullopt;
+      word == 0x0A3CU || word == 0x0A7CU) {
+    const bool to_sr = (word & 0x0040U) != 0U;
+    const auto size = to_sr ? M68kMemoryAccessWidth::word : M68kMemoryAccessWidth::byte;
+    const auto imm = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, 7U, 4U, m68k_ea_immediate, size);
+    if (!imm.ok) return imm.failure;
+    auto decoded = m68k_finish_general_decode(
+        source, image, offset, bytes,
+        to_sr ? M68kInstructionKind::logical_immediate_to_sr : M68kInstructionKind::logical_immediate_to_ccr, size,
+        imm.ea, {}, imm.extension_bytes);
+    decoded.status_operation = (word & 0xFF00U) == 0x0200U   ? M68kStatusLogicalOperation::and_op
+                               : (word & 0xFF00U) == 0x0000U ? M68kStatusLogicalOperation::or_op
+                                                             : M68kStatusLogicalOperation::eor_op;
+    return decoded;
+  }
   if (auto decoded = ordinary_immediate(0x0200U, M68kInstructionKind::andi)) return decoded;
   if (auto decoded = ordinary_immediate(0x0000U, M68kInstructionKind::ori)) return decoded;
   if (auto decoded = ordinary_immediate(0x0A00U, M68kInstructionKind::eori)) return decoded;
@@ -1674,6 +1692,14 @@ M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, De
     // rejected primary word. The reverse direction MOVE USP,An
     // (0x4E68-0x4E6F) and every other neighboring System Control Group
     // encoding are deliberately excluded and remain unrecognized.
+    // SEG-021-T018: MOVE USP,An (0x4E68-0x4E6F), the privileged reverse form.
+    if (profile == M68kDecodeProfile::general_startup && word >= 0x4E68U && word <= 0x4E6FU) {
+      auto result = select(M68kInstructionKind::move_usp_to_an, 2U);
+      auto &selected = std::get<M68kDecodedInstruction>(result);
+      selected.destination_ea = {M68kEaMode::address_register,
+                                 static_cast<std::uint8_t>(word & UINT16_C(0x0007))};
+      return result;
+    }
     if (profile == M68kDecodeProfile::general_startup && word >= 0x4E60U && word <= 0x4E67U) {
       auto result = select(M68kInstructionKind::move_an_to_usp, 2U);
       auto &selected = std::get<M68kDecodedInstruction>(result);

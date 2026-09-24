@@ -353,6 +353,16 @@
    "000000FD",
    "000000FE",
    "000000FF"
+  ],
+  "sr_word": [
+   "00002700",
+   "0000271F",
+   "00002015",
+   "00000715",
+   "00000000",
+   "00005F3F",
+   "FFFF7FFF",
+   "12342300"
   ]
  },
  "profiles": {
@@ -928,6 +938,87 @@
     "2700",
     "2711",
     "271F"
+   ]
+  },
+  "sr_write": {
+   "kind": "single",
+   "values": "sr_word",
+   "sr": [
+    "2700",
+    "271F",
+    "0715"
+   ]
+  },
+  "ccr_write": {
+   "kind": "single",
+   "values": "sr_word",
+   "sr": [
+    "2700",
+    "271F",
+    "0015"
+   ]
+  },
+  "sr_read": {
+   "kind": "single",
+   "values": "sweep",
+   "sr": [
+    "2700",
+    "271F",
+    "2015",
+    "0715",
+    "0000"
+   ]
+  },
+  "sr_state": {
+   "kind": "state",
+   "sr": [
+    "2700",
+    "271F",
+    "2015",
+    "0000",
+    "0715"
+   ]
+  },
+  "usp_move": {
+   "kind": "single",
+   "values": "even",
+   "sr": [
+    "2700",
+    "271F",
+    "0700"
+   ]
+  },
+  "rte_frame": {
+   "kind": "pair_list",
+   "pairs": [
+    [
+     "00002700",
+     "00003000"
+    ],
+    [
+     "0000271F",
+     "00012344"
+    ],
+    [
+     "00000015",
+     "00004000"
+    ],
+    [
+     "00002015",
+     "00002100"
+    ],
+    [
+     "00005F3F",
+     "00001000"
+    ],
+    [
+     "00000700",
+     "00020000"
+    ]
+   ],
+   "sr": [
+    "2700",
+    "0015"
    ]
   }
  },
@@ -4373,6 +4464,18 @@
    ]
   },
   {
+   "id": "andi.imm_ccr.b.imm.ccr",
+   "form": "andi.imm_ccr.b.imm.ccr",
+   "ext": [
+    "0000",
+    "00FF",
+    "0010",
+    "0005",
+    "001A"
+   ],
+   "profile": "sr_state"
+  },
+  {
    "id": "andi.imm_ea.b.imm.absl",
    "form": "andi.imm_ea.b.imm.absl",
    "bind": {
@@ -4817,6 +4920,19 @@
     "0264",
     "0267"
    ]
+  },
+  {
+   "id": "andi.imm_sr.w.imm.sr",
+   "form": "andi.imm_sr.w.imm.sr",
+   "ext": [
+    "FFFF",
+    "DFFF",
+    "F8FF",
+    "7FFF",
+    "0000",
+    "A71F"
+   ],
+   "profile": "sr_state"
   },
   {
    "id": "asl.dn_dn.b.dn.dn",
@@ -9034,6 +9150,18 @@
    ]
   },
   {
+   "id": "eori.imm_ccr.b.imm.ccr",
+   "form": "eori.imm_ccr.b.imm.ccr",
+   "ext": [
+    "0000",
+    "00FF",
+    "0010",
+    "0005",
+    "001A"
+   ],
+   "profile": "sr_state"
+  },
+  {
    "id": "eori.imm_ea.b.imm.absl",
    "form": "eori.imm_ea.b.imm.absl",
    "bind": {
@@ -9480,6 +9608,19 @@
    ]
   },
   {
+   "id": "eori.imm_sr.w.imm.sr",
+   "form": "eori.imm_sr.w.imm.sr",
+   "ext": [
+    "0000",
+    "2000",
+    "0700",
+    "001F",
+    "0F1F",
+    "2715"
+   ],
+   "profile": "sr_state"
+  },
+  {
    "id": "exg.an_an.l.an.an",
    "form": "exg.an_an.l.an.an",
    "bind": {
@@ -9797,6 +9938,130 @@
     "x": "ea.dst"
    },
    "profile": "shift_imm"
+  },
+  {
+   "id": "move.an_usp.l.an.usp",
+   "form": "move.an_usp.l.an.usp",
+   "bind": {
+    "x": "a@0"
+   },
+   "profile": "usp_move"
+  },
+  {
+   "id": "move.ea_ccr.w.absl.ccr",
+   "form": "move.ea_ccr.w.absl.ccr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "ccr_write",
+   "ext": [
+    "00020000"
+   ]
+  },
+  {
+   "id": "move.ea_ccr.w.absw.ccr",
+   "form": "move.ea_ccr.w.absw.ccr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "ccr_write",
+   "ext": [
+    "4000"
+   ]
+  },
+  {
+   "id": "move.ea_ccr.w.disp.ccr",
+   "form": "move.ea_ccr.w.disp.ccr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "ccr_write",
+   "ext": [
+    "0010"
+   ]
+  },
+  {
+   "id": "move.ea_ccr.w.dn.ccr",
+   "form": "move.ea_ccr.w.dn.ccr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "ccr_write"
+  },
+  {
+   "id": "move.ea_ccr.w.imm.ccr",
+   "form": "move.ea_ccr.w.imm.ccr",
+   "ext": [
+    "2700",
+    "271F",
+    "0000",
+    "00FF",
+    "FFE0"
+   ],
+   "profile": "sr_state"
+  },
+  {
+   "id": "move.ea_ccr.w.ind.ccr",
+   "form": "move.ea_ccr.w.ind.ccr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "ccr_write"
+  },
+  {
+   "id": "move.ea_ccr.w.index.ccr",
+   "form": "move.ea_ccr.w.index.ccr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "ccr_write",
+   "ext": [
+    "1004"
+   ],
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
+   "id": "move.ea_ccr.w.pcdisp.ccr",
+   "form": "move.ea_ccr.w.pcdisp.ccr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "ccr_write",
+   "ext": [
+    "0010"
+   ]
+  },
+  {
+   "id": "move.ea_ccr.w.pcindex.ccr",
+   "form": "move.ea_ccr.w.pcindex.ccr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "ccr_write",
+   "ext": [
+    "1040"
+   ],
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
+   "id": "move.ea_ccr.w.postinc.ccr",
+   "form": "move.ea_ccr.w.postinc.ccr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "ccr_write"
+  },
+  {
+   "id": "move.ea_ccr.w.predec.ccr",
+   "form": "move.ea_ccr.w.predec.ccr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "ccr_write"
   },
   {
    "id": "move.ea_ea.b.absl.absl",
@@ -13606,6 +13871,211 @@
    ]
   },
   {
+   "id": "move.ea_sr.w.absl.sr",
+   "form": "move.ea_sr.w.absl.sr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "sr_write",
+   "ext": [
+    "00020000"
+   ]
+  },
+  {
+   "id": "move.ea_sr.w.absw.sr",
+   "form": "move.ea_sr.w.absw.sr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "sr_write",
+   "ext": [
+    "4000"
+   ]
+  },
+  {
+   "id": "move.ea_sr.w.disp.sr",
+   "form": "move.ea_sr.w.disp.sr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "sr_write",
+   "ext": [
+    "0010"
+   ]
+  },
+  {
+   "id": "move.ea_sr.w.dn.sr",
+   "form": "move.ea_sr.w.dn.sr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "sr_write"
+  },
+  {
+   "id": "move.ea_sr.w.imm.sr",
+   "form": "move.ea_sr.w.imm.sr",
+   "ext": [
+    "2700",
+    "271F",
+    "2015",
+    "0715",
+    "0000",
+    "5F3F",
+    "7FFF"
+   ],
+   "profile": "sr_state"
+  },
+  {
+   "id": "move.ea_sr.w.ind.sr",
+   "form": "move.ea_sr.w.ind.sr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "sr_write"
+  },
+  {
+   "id": "move.ea_sr.w.index.sr",
+   "form": "move.ea_sr.w.index.sr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "sr_write",
+   "ext": [
+    "1004"
+   ],
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
+   "id": "move.ea_sr.w.pcdisp.sr",
+   "form": "move.ea_sr.w.pcdisp.sr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "sr_write",
+   "ext": [
+    "0010"
+   ]
+  },
+  {
+   "id": "move.ea_sr.w.pcindex.sr",
+   "form": "move.ea_sr.w.pcindex.sr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "sr_write",
+   "ext": [
+    "1040"
+   ],
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
+   "id": "move.ea_sr.w.postinc.sr",
+   "form": "move.ea_sr.w.postinc.sr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "sr_write"
+  },
+  {
+   "id": "move.ea_sr.w.predec.sr",
+   "form": "move.ea_sr.w.predec.sr",
+   "bind": {
+    "x": "ea.src"
+   },
+   "profile": "sr_write"
+  },
+  {
+   "id": "move.sr_ea.w.sr.absl",
+   "form": "move.sr_ea.w.sr.absl",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "sr_read",
+   "ext": [
+    "00020000"
+   ]
+  },
+  {
+   "id": "move.sr_ea.w.sr.absw",
+   "form": "move.sr_ea.w.sr.absw",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "sr_read",
+   "ext": [
+    "4000"
+   ]
+  },
+  {
+   "id": "move.sr_ea.w.sr.disp",
+   "form": "move.sr_ea.w.sr.disp",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "sr_read",
+   "ext": [
+    "0010"
+   ]
+  },
+  {
+   "id": "move.sr_ea.w.sr.dn",
+   "form": "move.sr_ea.w.sr.dn",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "sr_read"
+  },
+  {
+   "id": "move.sr_ea.w.sr.ind",
+   "form": "move.sr_ea.w.sr.ind",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "sr_read"
+  },
+  {
+   "id": "move.sr_ea.w.sr.index",
+   "form": "move.sr_ea.w.sr.index",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "sr_read",
+   "ext": [
+    "1004"
+   ],
+   "init": {
+    "d1": "00000010"
+   }
+  },
+  {
+   "id": "move.sr_ea.w.sr.postinc",
+   "form": "move.sr_ea.w.sr.postinc",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "sr_read"
+  },
+  {
+   "id": "move.sr_ea.w.sr.predec",
+   "form": "move.sr_ea.w.sr.predec",
+   "bind": {
+    "x": "ea.dst"
+   },
+   "profile": "sr_read"
+  },
+  {
+   "id": "move.usp_an.l.usp.an",
+   "form": "move.usp_an.l.usp.an",
+   "bind": {
+    "x": "a@0"
+   },
+   "profile": "usp_move"
+  },
+  {
    "id": "movea.ea_an.l.absl.an",
    "form": "movea.ea_an.l.absl.an",
    "bind": {
@@ -16766,6 +17236,18 @@
    ]
   },
   {
+   "id": "ori.imm_ccr.b.imm.ccr",
+   "form": "ori.imm_ccr.b.imm.ccr",
+   "ext": [
+    "0000",
+    "00FF",
+    "0010",
+    "0005",
+    "001A"
+   ],
+   "profile": "sr_state"
+  },
+  {
    "id": "ori.imm_ea.b.imm.absl",
    "form": "ori.imm_ea.b.imm.absl",
    "bind": {
@@ -17210,6 +17692,19 @@
     "0064",
     "0067"
    ]
+  },
+  {
+   "id": "ori.imm_sr.w.imm.sr",
+   "form": "ori.imm_sr.w.imm.sr",
+   "ext": [
+    "0000",
+    "0700",
+    "001F",
+    "2000",
+    "0500",
+    "5800"
+   ],
+   "profile": "sr_state"
   },
   {
    "id": "rol.dn_dn.b.dn.dn",
@@ -17698,6 +18193,15 @@
     "x": "ea.dst"
    },
    "profile": "shift_imm"
+  },
+  {
+   "id": "rte.none.none.none.none",
+   "form": "rte.none.none.none.none",
+   "bind": {
+    "x": "sr@sp",
+    "y": "pc@sp"
+   },
+   "profile": "rte_frame"
   },
   {
    "id": "sbcd.dn_dn.b.dn.dn",

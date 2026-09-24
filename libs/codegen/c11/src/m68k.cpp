@@ -806,6 +806,123 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
   output << "{\n" << body.str() << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
   return true;
 }
+
+// SEG-021-T018 / ADR 0043 §3, §5, §6: the supervisor/user lowering helpers shared by every privileged and
+// status-register form. `memory.user_stack_pointer` names the INACTIVE stack-pointer slot and
+// `address_registers[7]` the active one.
+
+// The privilege guard. Returns the text that must PRECEDE the instruction's own body. Routed: raise vector 8
+// through the platform (the text always returns) and let the body follow. Direct linear-memory route: build
+// the six-byte frame inline in the linear window and take the handler from the window's vector-8 slot (the
+// direct route's flat machine keeps its vector table in that window; no program byte is decoded), then
+// `else` -- the caller wraps its body in braces. `closing` receives the text to append after the body.
+[[nodiscard]] std::string m68k_privilege_guard(const M68kIrOperation &operation, std::string_view status_register,
+                                               const M68kMemoryEmissionContext &memory, std::string &closing) {
+  const auto fault_pc = operation.provenance.source.address.value;
+  std::ostringstream out;
+  out << "if ((" << status_register << " & UINT16_C(0x2000)) == 0U) ";
+  if (memory.runtime_routing) {
+    out << emit_runtime(memory).privilege_violation(memory, fault_pc) << "\n";
+    closing.clear();
+    return out.str();
+  }
+  const std::string_view program_counter = memory.program_counter.empty() ? "pc" : memory.program_counter;
+  const auto begin = memory.linear_memory_begin;
+  const auto end = memory.linear_memory_end;
+  const auto a7 = std::string(memory.address_registers) + "[7]";
+  constexpr std::uint32_t kVectorSlot = 8U * 4U;
+  out << "{\n";
+  if (kVectorSlot < begin || end < kVectorSlot + 4U || end - begin < 6U) {
+    out << "return 1;\n";
+  } else {
+    const auto slot = [&](std::uint32_t address) {
+      return std::string(memory.ram_array) + "[UINT32_C(" + std::to_string(address - begin) + ")]";
+    };
+    const auto frame = [&](unsigned index) {
+      return std::string(memory.ram_array) + "[m68k_pv_frame - UINT32_C(0x" + hex(begin, 8) + ") + " +
+             std::to_string(index) + "U]";
+    };
+    out << "const uint32_t m68k_pv_ssp = " << memory.user_stack_pointer << ";\n"
+        << "if ((m68k_pv_ssp & 1U) != 0U || m68k_pv_ssp < UINT32_C(0x" << hex(begin + 6U, 8)
+        << ") || m68k_pv_ssp > UINT32_C(0x" << hex(end, 8) << ")) { return 1; }\n"
+        << "{ const uint32_t m68k_pv_handler = ((uint32_t)" << slot(kVectorSlot) << " << 24U) | ((uint32_t)"
+        << slot(kVectorSlot + 1U) << " << 16U) | ((uint32_t)" << slot(kVectorSlot + 2U) << " << 8U) | (uint32_t)"
+        << slot(kVectorSlot + 3U) << ";\n"
+        << "const uint32_t m68k_pv_frame = m68k_pv_ssp - UINT32_C(6);\n"
+        << "const uint16_t m68k_pv_saved_sr = " << status_register << ";\n"
+        << frame(0U) << " = (uint8_t)(m68k_pv_saved_sr >> 8U); " << frame(1U) << " = (uint8_t)m68k_pv_saved_sr;\n"
+        << frame(2U) << " = UINT8_C(0x" << hex((fault_pc >> 24U) & 0xFFU, 2) << "); " << frame(3U) << " = UINT8_C(0x"
+        << hex((fault_pc >> 16U) & 0xFFU, 2) << "); " << frame(4U) << " = UINT8_C(0x" << hex((fault_pc >> 8U) & 0xFFU, 2)
+        << "); " << frame(5U) << " = UINT8_C(0x" << hex(fault_pc & 0xFFU, 2) << ");\n"
+        << memory.user_stack_pointer << " = " << a7 << ";\n"
+        << a7 << " = m68k_pv_frame;\n"
+        << status_register << " = (uint16_t)((m68k_pv_saved_sr & UINT16_C(0x271F)) | UINT16_C(0x2000));\n"
+        << program_counter << " = m68k_pv_handler; }\n";
+  }
+  out << "} else {\n";
+  closing = "}\n";
+  return out.str();
+}
+
+// The SR write shared by MOVE to SR and ANDI/ORI/EORI to SR (and, with the same rules, nothing else): mask to
+// the implemented bits, stop fail-closed when T would be set (trace is deferred; nothing committed yet), run
+// `commit` (the operand's deferred address-register commit, which must precede the swap so an auto-updated A7
+// is the OLD active stack pointer), swap the active and inactive stack pointers when S changes, write SR.
+void m68k_emit_status_register_write(std::ostringstream &out, const std::string &value_expr,
+                                     std::string_view status_register, const M68kMemoryEmissionContext &memory,
+                                     std::string_view commit) {
+  const auto a7 = std::string(memory.address_registers) + "[7]";
+  out << "{ const uint16_t m68k_sr_new = (uint16_t)((" << value_expr << ") & UINT32_C(0xA71F));\n"
+      << "if ((m68k_sr_new & UINT16_C(0x8000)) != 0U) ";
+  if (memory.runtime_routing) out << emit_runtime(memory).trace_deferred_stop(memory) << "\n";
+  else out << "{ return 1; }\n";
+  out << commit
+      << "if (((m68k_sr_new ^ " << status_register << ") & UINT16_C(0x2000)) != 0U) { const uint32_t m68k_sp_other = "
+      << memory.user_stack_pointer << "; " << memory.user_stack_pointer << " = " << a7 << "; " << a7
+      << " = m68k_sp_other; }\n"
+      << status_register << " = m68k_sr_new; }\n";
+}
+
+// A word source operand of MOVE to SR / MOVE to CCR. Emits the read into `out` and returns the value
+// expression plus the address-register commit the caller must emit after its own fail-closed checks (empty when
+// the mode has no auto-update). Routed auto-updating operands use the operation-local deferred commit
+// (c4-add-family-auto-update-commit-contract.md): a routed stop returns before An changes.
+struct M68kStatusSource { std::string value; std::string commit; bool ok{false}; };
+[[nodiscard]] M68kStatusSource m68k_emit_status_source(const M68kIrOperation &operation,
+                                                      std::string_view data_registers,
+                                                      const M68kMemoryEmissionContext &memory,
+                                                      std::ostringstream &out) {
+  M68kStatusSource result{};
+  unsigned temp_ordinal = 0U;
+  const auto &ea = operation.source_ea;
+  const bool auto_update = ea.mode == M68kEaMode::address_predec || ea.mode == M68kEaMode::address_postinc;
+  if (memory.runtime_routing && auto_update) {
+    const auto an = std::string(memory.address_registers) + "[" + std::to_string(static_cast<unsigned>(ea.reg)) + "]";
+    out << "uint32_t m68k_status_auto_ea = " << an << ";\n";
+    if (ea.mode == M68kEaMode::address_predec) out << "m68k_status_auto_ea -= UINT32_C(2);\n";
+    std::string expression;
+    m68k_emit_routed_read(out, "m68k_status_auto_ea", M68kMemoryAccessWidth::word, memory, expression, temp_ordinal);
+    out << "const uint32_t m68k_status_source = " << expression << ";\n";
+    result.value = "m68k_status_source";
+    result.commit = an + " = m68k_status_auto_ea" +
+                    (ea.mode == M68kEaMode::address_postinc ? std::string(" + UINT32_C(2)") : std::string()) + ";\n";
+    result.ok = true;
+    return result;
+  }
+  std::ostringstream prelude;
+  const auto read = m68k_emit_ea_read(ea, M68kMemoryAccessWidth::word, data_registers, memory, prelude, temp_ordinal);
+  if (!read.ok) return result;
+  if (ea.mode == M68kEaMode::data_register || ea.mode == M68kEaMode::immediate) {
+    result.value = read.expression;  // register / literal: no memory access, no local needed
+    result.ok = true;
+    return result;
+  }
+  out << prelude.str() << "const uint32_t m68k_status_source = " << read.expression << ";\n";
+  result.value = "m68k_status_source";
+  result.commit = read.postlude;
+  result.ok = true;
+  return result;
+}
 } // namespace
 
 // This is the sole per-operation C-lowering definition for every accepted
@@ -843,38 +960,73 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     if (memory != nullptr) output << memory->program_counter << " += 2U;\n";
     break;
   }
-  case M68kIrKind::write_user_stack_pointer: {
+  case M68kIrKind::write_user_stack_pointer:
+  case M68kIrKind::read_user_stack_pointer: {
+    // SEG-021-T018 / ADR 0043: MOVE An,USP / MOVE USP,An (privileged; vector 8 in user mode). In supervisor
+    // mode the user stack pointer is the inactive stack-pointer slot, so both directions are one register
+    // transfer through that slot; no condition code changes and no memory access. MOVE A7,USP copies the
+    // SSP and MOVE USP,A7 overwrites the SSP (Musashi-identical, `A7` is the active SSP here).
     const auto effect = m68k_operation_effect(operation);
-    if (memory != nullptr && !memory->user_stack_pointer.empty() && effect.user_stack_pointer_source &&
-        effect.pc == M68kPcEffectKind::advance && effect.pc_delta == operation.provenance.length.value) {
-      output << memory->user_stack_pointer << " = " << memory->address_registers << '['
-             << static_cast<unsigned>(*effect.user_stack_pointer_source) << "];\n"
-             << memory->program_counter << " += UINT32_C(" << effect.pc_delta << ");\n";
+    const bool to_usp = operation.kind == M68kIrKind::write_user_stack_pointer;
+    const auto &an_ea = to_usp ? operation.source_ea : operation.destination_ea;
+    if (memory != nullptr && !memory->user_stack_pointer.empty() && an_ea.mode == M68kEaMode::address_register &&
+        an_ea.reg < 8U && effect.pc == M68kPcEffectKind::advance &&
+        effect.pc_delta == operation.provenance.length.value) {
+      const auto an = std::string(memory->address_registers) + "[" + std::to_string(static_cast<unsigned>(an_ea.reg)) + "]";
+      std::string closing;
+      output << m68k_privilege_guard(operation, status_register, *memory, closing);
+      if (to_usp) output << memory->user_stack_pointer << " = " << an << ";\n";
+      else output << an << " = " << memory->user_stack_pointer << ";\n";
+      output << memory->program_counter << " += UINT32_C(" << effect.pc_delta << ");\n" << closing;
     }
     break;
   }
   case M68kIrKind::write_status_register: {
-    // Mirrors M68kIrKind::test_operand's own single-source-EA-read shape
-    // (contract: "the general whitelist kinds... this layer has no memory/
-    // register-file model to reuse"): a plain, non-materialized EA read
-    // (there is no second operand and no destination_ea -- SR is the fixed
-    // destination), then an unconditional 16-bit overwrite of the entire
-    // status_register field, per this project's own narrow MOVE-to-SR
-    // compatibility policy (no privilege check; see
-    // the platform startup compatibility policy).
-    if (memory != nullptr) {
-      unsigned temp_ordinal = 0U;
-      std::ostringstream prelude;
-      const auto read = m68k_emit_ea_read(operation.source_ea, operation.size, data_registers, *memory,
-                                          prelude, temp_ordinal);
-      if (read.ok) {
-        output << prelude.str() << status_register << " = (uint16_t)(" << read.expression << ");\n"
-               << read.postlude;
-        if (memory->program_counter == "pc")
-          output << "pc += UINT32_C(" << operation.provenance.length.value << ");\n";
-        else
-          output << memory->program_counter << " += UINT32_C(" << operation.provenance.length.value << ");\n";
+    // SEG-021-T018 / ADR 0043 (supersedes the SEG-007-T088 no-privilege-check policy): MOVE <ea>,SR from every
+    // data addressing mode. Privileged: in user mode vector 8 is raised before the operand is even read. The
+    // word read is masked to the implemented SR bits; T = 1 stops fail-closed (trace deferred) before any
+    // commit; the operand's address-register update commits before the S-change stack-pointer swap (so an
+    // auto-updated A7 is the old active stack pointer, as on the MC68000); PC advances last.
+    if (memory != nullptr && !memory->user_stack_pointer.empty()) {
+      std::ostringstream body;
+      const auto source = m68k_emit_status_source(operation, data_registers, *memory, body);
+      if (source.ok) {
+        std::string closing;
+        output << m68k_privilege_guard(operation, status_register, *memory, closing) << "{\n" << body.str();
+        m68k_emit_status_register_write(output, source.value, status_register, *memory, source.commit);
+        output << (memory->program_counter.empty() ? std::string_view("pc") : memory->program_counter)
+               << " += UINT32_C(" << operation.provenance.length.value << ");\n}\n" << closing;
       }
+    }
+    break;
+  }
+  case M68kIrKind::logical_immediate_to_sr: {
+    // SEG-021-T018: ANDI/ORI/EORI #imm,SR (privileged). The logical result goes through the same SR write as
+    // MOVE to SR (masking, trace stop, S-change swap).
+    if (memory != nullptr && !memory->user_stack_pointer.empty() && operation.source_ea.mode == M68kEaMode::immediate) {
+      const char *op = operation.status_operation == M68kStatusLogicalOperation::and_op ? " & "
+                       : operation.status_operation == M68kStatusLogicalOperation::or_op ? " | " : " ^ ";
+      const auto value = "(uint32_t)" + std::string(status_register) + op + "UINT32_C(0x" +
+                         hex(operation.source_ea.immediate_value & 0xFFFFU, 4) + ")";
+      std::string closing;
+      output << m68k_privilege_guard(operation, status_register, *memory, closing) << "{\n";
+      m68k_emit_status_register_write(output, value, status_register, *memory, {});
+      output << (memory->program_counter.empty() ? std::string_view("pc") : memory->program_counter)
+             << " += UINT32_C(" << operation.provenance.length.value << ");\n}\n" << closing;
+    }
+    break;
+  }
+  case M68kIrKind::logical_immediate_to_ccr: {
+    // SEG-021-T018: ANDI/ORI/EORI #imm,CCR (unprivileged): only X/N/Z/V/C change (bits 7..5 of the CCR are
+    // unimplemented and read as zero); the system byte is unchanged.
+    if (memory != nullptr && operation.source_ea.mode == M68kEaMode::immediate) {
+      const char *op = operation.status_operation == M68kStatusLogicalOperation::and_op ? " & "
+                       : operation.status_operation == M68kStatusLogicalOperation::or_op ? " | " : " ^ ";
+      output << status_register << " = (uint16_t)((" << status_register << " & UINT16_C(0xFF00)) | (((uint32_t)"
+             << status_register << op << "UINT32_C(0x" << hex(operation.source_ea.immediate_value & 0xFFU, 2)
+             << ")) & UINT32_C(0x1F)));\n"
+             << (memory->program_counter.empty() ? std::string_view("pc") : memory->program_counter)
+             << " += UINT32_C(" << operation.provenance.length.value << ");\n";
     }
     break;
   }
@@ -893,59 +1045,75 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     }
     break;
   case M68kIrKind::read_status_register: {
-    // SEG-007-T116: MOVE from SR. Per the public Motorola M68000 Family
-    // Programmer's Reference Manual System Control Group entry, this is a word
-    // operation that copies the entire status register (this project's generic
-    // 16-bit status_register field) into a data-alterable destination; on the
-    // MC68000 it is unprivileged and affects NO condition codes (contrast
-    // M68kIrKind::write_status_register above, which overwrites SR). The
-    // destination write reuses the shared m68k_emit_ea_write helper (a
-    // word-sized Dn write preserves the register's upper 16 bits, matching the
-    // hardware word operation); the PC-advance shape mirrors write_clr /
-    // no_operation.
+    // SEG-007-T116 / SEG-021-T018: MOVE from SR to every data-alterable destination. Unprivileged on the MC68000
+    // and affects no condition codes. A Dn destination is a word register write (upper word preserved). A
+    // MEMORY destination is read before it is written on the MC68000 (the value is discarded), lowered exactly
+    // like the SEG-021-T016 memory-Scc precedent: one EA computation, one routed word read, one routed word
+    // write to the same EA, the single deferred address-register commit strictly after the write, PC last.
+    // (The pinned Musashi core performs no dummy read; the difference is not observable in its flat memory.)
     if (memory != nullptr) {
+      const std::string_view program_counter = memory->program_counter.empty() ? "pc" : memory->program_counter;
+      const std::string value = "(uint32_t)(uint16_t)" + std::string(status_register);
+      const auto length = operation.provenance.length.value;
+      const auto mode = operation.destination_ea.mode;
       unsigned temp_ordinal = 0U;
-      std::ostringstream write_prelude;
-      const auto write = m68k_emit_ea_write(operation.destination_ea, operation.size, data_registers, *memory,
-                                            "(uint32_t)(uint16_t)" + std::string(status_register), write_prelude,
-                                            temp_ordinal);
-      if (write.ok) {
-        const std::string_view program_counter =
-            memory->program_counter.empty() ? "pc" : memory->program_counter;
-        output << write_prelude.str() << write.expression << "\n"
-               << write.postlude << program_counter << " += UINT32_C(" << operation.provenance.length.value
-               << ");\n";
+      if (mode == M68kEaMode::data_register) {
+        std::ostringstream write_prelude;
+        const auto write = m68k_emit_ea_write(operation.destination_ea, operation.size, data_registers, *memory,
+                                              value, write_prelude, temp_ordinal);
+        if (write.ok)
+          output << write_prelude.str() << write.expression << "\n" << write.postlude << program_counter
+                 << " += UINT32_C(" << length << ");\n";
+        break;
+      }
+      if (memory->runtime_routing && (mode == M68kEaMode::address_predec || mode == M68kEaMode::address_postinc)) {
+        const auto an_expr = std::string(memory->address_registers) + "[" +
+                             std::to_string(static_cast<unsigned>(operation.destination_ea.reg)) + "]";
+        std::ostringstream body;
+        body << "const uint32_t m68k_frs_value = " << value << ";\nuint32_t m68k_frs_auto_ea = " << an_expr << ";\n";
+        if (mode == M68kEaMode::address_predec) body << "m68k_frs_auto_ea -= UINT32_C(2);\n";
+        std::string discarded;
+        m68k_emit_routed_read(body, "m68k_frs_auto_ea", operation.size, *memory, discarded, temp_ordinal);
+        body << "(void)" << discarded << ";\n";
+        m68k_emit_routed_write(body, "m68k_frs_auto_ea", operation.size, *memory, "m68k_frs_value", temp_ordinal);
+        if (mode == M68kEaMode::address_postinc) body << "m68k_frs_auto_ea += UINT32_C(2);\n";
+        body << an_expr << " = m68k_frs_auto_ea;\n";
+        output << "{\n" << body.str() << program_counter << " += UINT32_C(" << length << ");\n}\n";
+        break;
+      }
+      std::ostringstream prelude;
+      const auto discarded = m68k_emit_ea_read(operation.destination_ea, operation.size, data_registers, *memory,
+                                               prelude, temp_ordinal);
+      if (discarded.ok) {
+        auto write_ea = operation.destination_ea;
+        if (write_ea.mode == M68kEaMode::address_predec || write_ea.mode == M68kEaMode::address_postinc)
+          write_ea.mode = M68kEaMode::address_indirect;  // the read already applied the single pointer mutation
+        std::ostringstream write_prelude;
+        const auto write = m68k_emit_ea_write(write_ea, operation.size, data_registers, *memory, "m68k_frs_value",
+                                              write_prelude, temp_ordinal);
+        if (write.ok)
+          output << "{\nconst uint32_t m68k_frs_value = " << value << ";\n" << prelude.str() << "(void)("
+                 << discarded.expression << ");\n" << write_prelude.str() << write.expression << "\n"
+                 << discarded.postlude << program_counter << " += UINT32_C(" << length << ");\n}\n";
       }
     }
     break;
   }
   case M68kIrKind::write_condition_codes: {
-    // SEG-007-T118: MOVE <ea>,CCR. Per the public Motorola M68000 Family
-    // Programmer's Reference Manual System Control Group entry this is a word
-    // operation whose source word is read but only bits 4..0 of its low-order
-    // byte are copied into the CCR (X/N/Z/V/C); CCR bits 7..5 are unimplemented
-    // on every 68000-family part and always read as 0, so the source's bits
-    // 7..5 are discarded -- masking with 0x001F (not 0x00FF) is what keeps the
-    // generated program byte-identical to the pinned Musashi oracle, whose
-    // m68ki_set_ccr consults only BIT_4..BIT_0. The upper (system) byte of SR
-    // is untouched. It is unprivileged on every 68000-family part and replaces
-    // all five condition codes. Mirrors M68kIrKind::write_status_register's
-    // single-source-EA-read shape (there is no destination_ea -- the CCR is the
-    // fixed destination), but writes only the CCR sub-field of the
-    // status_register field rather than overwriting the whole 16-bit SR.
+    // SEG-007-T118 / SEG-021-T018: MOVE <ea>,CCR from every data addressing mode. The source word is read but
+    // only bits 4..0 of its low byte are copied into the CCR (X/N/Z/V/C); CCR bits 7..5 are unimplemented and
+    // read as 0 (Musashi's m68ki_set_ccr consults only BIT_4..BIT_0). The system byte of SR is untouched and
+    // the instruction is unprivileged. Auto-updating sources commit their address register after the read
+    // (routed: the operation-local deferred commit).
     if (memory != nullptr) {
-      unsigned temp_ordinal = 0U;
-      std::ostringstream prelude;
-      const auto read = m68k_emit_ea_read(operation.source_ea, operation.size, data_registers, *memory,
-                                          prelude, temp_ordinal);
-      if (read.ok) {
-        output << prelude.str() << status_register << " = (uint16_t)((" << status_register
-               << " & UINT16_C(0xFF00)) | ((" << read.expression << ") & UINT16_C(0x001F)));\n"
-               << read.postlude;
-        if (memory->program_counter == "pc")
-          output << "pc += UINT32_C(" << operation.provenance.length.value << ");\n";
-        else
-          output << memory->program_counter << " += UINT32_C(" << operation.provenance.length.value << ");\n";
+      std::ostringstream body;
+      const auto source = m68k_emit_status_source(operation, data_registers, *memory, body);
+      if (source.ok) {
+        output << "{\n" << body.str() << status_register << " = (uint16_t)((" << status_register
+               << " & UINT16_C(0xFF00)) | ((" << source.value << ") & UINT16_C(0x001F)));\n"
+               << source.commit
+               << (memory->program_counter.empty() ? std::string_view("pc") : memory->program_counter)
+               << " += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
       }
     }
     break;
@@ -3174,17 +3342,40 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     break;
   }
   case M68kIrKind::return_from_exception: {
-    // SEG-007-T047 / ADR-0020 §9: RTE. Parallels return_from_subroutine's
-    // runtime_routing branch but delegates the validated atomic {SR, PC, A7}
-    // restore to the runtime routine the platform exception-return routine -- no
-    // return-target membership check (the restored PC is a generated-runtime
-    // fact popped from the exception frame), routed through the existing
-    // control-transfer mechanism (the block tail's continue-at-PC on
-    // runtime->pc). A failed routed frame read fails closed with no partial
-    // architectural restoration.
+    // SEG-007-T047 / ADR-0020 §9, SEG-021-T018 / ADR 0043 §5: RTE. Privileged: in user mode vector 8 is raised
+    // with this instruction's own address before the frame is touched. Routed: the validated atomic {SR, PC,
+    // SSP, inactive SP} restore is the M68K-owned exception core bound by the platform's exception-return
+    // routine (no return-target membership check -- the restored PC is a generated-runtime fact popped from the
+    // exception frame -- continuing through the block tail's continue-at-PC on runtime->pc). Direct linear
+    // route: the same rule inline against the window. A failed frame read or a restored T = 1 fails closed
+    // with nothing restored.
     if (memory != nullptr && memory->runtime_routing) {
-      output << emit_runtime(*memory).exception_return(*memory)
-             << memory->program_counter << " = m68k_rte_pc; }\n";
+      std::string closing;
+      output << m68k_privilege_guard(operation, status_register, *memory, closing)
+             << emit_runtime(*memory).exception_return(*memory) << memory->program_counter << " = m68k_rte_pc; }\n"
+             << closing;
+    } else if (memory != nullptr && !memory->user_stack_pointer.empty()) {
+      const std::string_view program_counter = memory->program_counter.empty() ? "pc" : memory->program_counter;
+      const auto a7 = std::string(memory->address_registers) + "[7]";
+      const auto at = [&](unsigned index) {
+        return "(uint32_t)" + std::string(memory->ram_array) + "[m68k_rte_sp - UINT32_C(0x" +
+               hex(memory->linear_memory_begin, 8) + ") + " + std::to_string(index) + "U]";
+      };
+      std::string closing;
+      output << m68k_privilege_guard(operation, status_register, *memory, closing)
+             << "{ const uint32_t m68k_rte_sp = " << a7 << ";\n"
+             << "if ((m68k_rte_sp & 1U) != 0U || m68k_rte_sp < UINT32_C(0x" << hex(memory->linear_memory_begin, 8)
+             << ") || m68k_rte_sp > UINT32_C(0x" << hex(memory->linear_memory_end, 8) << ") - UINT32_C(6)) { return 1; }\n"
+             << "{ const uint16_t m68k_rte_sr = (uint16_t)(((" << at(0U) << " << 8U) | " << at(1U)
+             << ") & UINT32_C(0xA71F));\n"
+             << "const uint32_t m68k_rte_pc = (" << at(2U) << " << 24U) | (" << at(3U) << " << 16U) | (" << at(4U)
+             << " << 8U) | " << at(5U) << ";\n"
+             << "if ((m68k_rte_sr & UINT16_C(0x8000)) != 0U) { return 1; }\n"
+             << "if ((m68k_rte_sr & UINT16_C(0x2000)) != 0U) { " << a7 << " = m68k_rte_sp + UINT32_C(6); } else { "
+             << a7 << " = " << memory->user_stack_pointer << "; " << memory->user_stack_pointer
+             << " = m68k_rte_sp + UINT32_C(6); }\n"
+             << status_register << " = m68k_rte_sr;\n"
+             << program_counter << " = m68k_rte_pc; } }\n" << closing;
     }
     break;
   }

@@ -152,11 +152,48 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
     effect.stack = M68kStackEffectKind::pop_exception_frame;
     effect.stack_width = 6U;
     effect.pc = M68kPcEffectKind::observed_exception_return;
+    // SEG-021-T018 / ADR 0043 §3: RTE is privileged (vector 8 in user mode).
+    effect.may_raise_synchronous_exception = true;
+    effect.exception_vector = 8U;
     break;
   case M68kIrKind::write_user_stack_pointer:
     effect.resolved_source_ea = operation.source_ea;
     if (operation.source_ea.mode == M68kEaMode::address_register && operation.source_ea.reg < 8U)
       effect.user_stack_pointer_source = static_cast<AddressRegister>(operation.source_ea.reg);
+    // SEG-021-T018 / ADR 0043 §3: MOVE An,USP is privileged (vector 8, stacked PC = the instruction).
+    effect.may_raise_synchronous_exception = true;
+    effect.exception_vector = 8U;
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::read_user_stack_pointer:
+    // SEG-021-T018: MOVE USP,An writes the fixed An destination from the user stack pointer; privileged; no
+    // condition codes and no memory access.
+    effect.resolved_destination_ea = operation.destination_ea;
+    if (operation.destination_ea.mode == M68kEaMode::address_register && operation.destination_ea.reg < 8U)
+      effect.address_register_write = static_cast<AddressRegister>(operation.destination_ea.reg);
+    effect.may_raise_synchronous_exception = true;
+    effect.exception_vector = 8U;
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::logical_immediate_to_ccr:
+    // SEG-021-T018: ANDI/ORI/EORI #imm,CCR replace X/N/Z/V/C from the logical result; the system byte is unchanged.
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.source_ea;
+    effect.affects_condition_codes = true;
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::logical_immediate_to_sr:
+    // SEG-021-T018: ANDI/ORI/EORI #imm,SR (privileged) rewrite the whole SR; a change of S swaps the active and
+    // inactive stack pointers, so A7 is part of the register write footprint.
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.source_ea;
+    effect.affects_condition_codes = true;
+    effect.may_raise_synchronous_exception = true;
+    effect.exception_vector = 8U;
+    effect.address_register_write_mask |= UINT8_C(0x80);
     effect.pc = M68kPcEffectKind::advance;
     effect.pc_delta = operation.provenance.length.value;
     break;
@@ -170,6 +207,11 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
     effect.operand_size = operation.size;
     effect.resolved_source_ea = operation.source_ea;
     effect.affects_condition_codes = true;
+    // SEG-021-T018 / ADR 0043: MOVE to SR is privileged (vector 8), and a change of S swaps the active and
+    // inactive stack pointers (A7 is written).
+    effect.may_raise_synchronous_exception = true;
+    effect.exception_vector = 8U;
+    effect.address_register_write_mask |= UINT8_C(0x80);
     effect.pc = M68kPcEffectKind::advance;
     effect.pc_delta = operation.provenance.length.value;
     break;
@@ -182,6 +224,9 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
     // to resolve the SR source itself, so it states only the destination EA,
     // size, and PC shape; the caller performs the actual read/write.
     effect.operand_size = operation.size;
+    // SEG-021-T018: a memory destination is read (value discarded) before it is written on the MC68000 (the
+    // SEG-021-T016 memory-Scc precedent); a Dn destination performs no memory access.
+    if (operation.destination_ea.mode != M68kEaMode::data_register) effect.resolved_source_ea = operation.destination_ea;
     effect.resolved_destination_ea = operation.destination_ea;
     effect.affects_condition_codes = false;
     effect.pc = M68kPcEffectKind::advance;
@@ -798,6 +843,14 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
       operation.kind == M68kIrKind::exchange_registers || operation.kind == M68kIrKind::movep_transfer ||
       operation.kind == M68kIrKind::set_conditional || operation.kind == M68kIrKind::test_and_set ||
       operation.kind == M68kIrKind::compare || operation.kind == M68kIrKind::compare_address ||
+      // SEG-021-T018: the status-register/USP transfer family (MOVE to/from SR, MOVE to CCR, ANDI/ORI/EORI to
+      // CCR/SR, MOVE USP both directions): Dn destination mask, the An of MOVE USP,An, decoded EA auto-updates,
+      // and A7 for every SR writer (a change of S swaps the active stack pointer).
+      operation.kind == M68kIrKind::write_status_register || operation.kind == M68kIrKind::read_status_register ||
+      operation.kind == M68kIrKind::write_condition_codes || operation.kind == M68kIrKind::logical_immediate_to_ccr ||
+      operation.kind == M68kIrKind::logical_immediate_to_sr ||
+      operation.kind == M68kIrKind::write_user_stack_pointer ||
+      operation.kind == M68kIrKind::read_user_stack_pointer ||
       operation.kind == M68kIrKind::general_branch;
   if (operation.kind == M68kIrKind::push_effective_address || operation.kind == M68kIrKind::return_from_subroutine ||
       operation.kind == M68kIrKind::link_frame || operation.kind == M68kIrKind::unlink_frame ||

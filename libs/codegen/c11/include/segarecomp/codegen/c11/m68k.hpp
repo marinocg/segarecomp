@@ -59,11 +59,21 @@ class M68kRuntimeCEmitter {
   [[nodiscard]] virtual std::string divide_by_zero(const M68kMemoryEmissionContext &context, std::uint32_t next_pc) const = 0;
   // Exception return: leaves the restored program counter in `m68k_rte_pc`.
   [[nodiscard]] virtual std::string exception_return(const M68kMemoryEmissionContext &context) const = 0;
+  // SEG-021-T018 / ADR 0043 §3: privilege violation (vector 8) with `fault_pc` (the privileged
+  // instruction's own address) as the stacked PC. The text is a complete statement that always
+  // returns: it continues at the build-time-resolved handler or stops fail-closed.
+  [[nodiscard]] virtual std::string privilege_violation(const M68kMemoryEmissionContext &context,
+                                                        std::uint32_t fault_pc) const = 0;
+  // SEG-021-T018 / ADR 0043 §6: a complete statement that returns the deferred-trace stop (an SR
+  // write would leave T = 1). Nothing has been committed when it runs.
+  [[nodiscard]] virtual std::string trace_deferred_stop(const M68kMemoryEmissionContext &context) const = 0;
 };
 
 struct M68kMemoryEmissionContext {
   std::string_view ram_array;
   std::string_view address_registers;
+  // SEG-021-T018 / ADR 0043 §6: the INACTIVE stack-pointer slot (the USP while SR.S = 1, the SSP while
+  // SR.S = 0); `address_registers[7]` is always the active stack pointer.
   std::string_view user_stack_pointer;
   std::string_view frame_ids_array;
   std::string_view frame_continuations_array;

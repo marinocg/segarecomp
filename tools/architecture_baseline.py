@@ -262,7 +262,7 @@ def probe_bridge_synthetic_c4_full_chain(args: argparse.Namespace, work_root: pa
             "bridge sanitized report diverged from its own established fixture expectation",
         )
     runtime = full_report.get("runtime") if isinstance(full_report, dict) else None
-    if not isinstance(runtime, dict) or runtime.get("sr") != "0x0004" or runtime.get("d", [None])[0] != "0x00000000":
+    if not isinstance(runtime, dict) or runtime.get("sr") != "0x2704" or runtime.get("d", [None])[0] != "0x00000000":
         raise ProbeError(
             EXIT_PROBE_OUTPUT_MALFORMED,
             "bridge full report diverged from its own established fixture expectation",

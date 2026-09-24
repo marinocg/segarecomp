@@ -249,6 +249,13 @@ Hooks at prose level. Each hook receives the bound machine context, and none is 
   (optional): the machine's provenance notifications. The existing Genesis IRQ6-origin grace moves
   here unchanged.
 
+Implementation note (SEG-021-T018): to satisfy §5, the exception-entry frame write is a
+non-fallible `frame_write(ctx, address, size, value)` hook. A successful
+`validate_stack_extent(..., write)` guarantees that every frame write inside the extent succeeds, so
+entry has no failure path after its first frame byte. `stack_read` stays fallible (`ok | stop`) for
+RTE. A machine whose routed write fails after validation anyway reports its own terminal stop; the
+core does not roll back.
+
 ### 8. Timing
 
 Exception-entry cycle counts are CPU facts from the MC68000 User's Manual exception-processing

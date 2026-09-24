@@ -335,6 +335,11 @@ add_test(NAME genesis_immutable_rom_aot_bcd_generated_test COMMAND ${Python3_EXE
 add_test(NAME genesis_immutable_rom_aot_exg_movep_scc_tas_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_exg_movep_scc_tas_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-021-T018 / ADR 0043: supervisor/user model, privilege violation and the SR/CCR/USP family on the AOT, C4 and
+# whole-program bridge routes.
+add_test(NAME genesis_status_register_privilege_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_status_register_privilege_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_immutable_rom_aot_movem_link_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_movem_link_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
@@ -716,6 +721,11 @@ add_test(
 # Genesis/machine/recompiler/codegen-owned symbol, complementing the
 # link-level separation segarecomp_cpu_m68k's own target_link_libraries
 # (linking only segarecomp_base, never segarecomp_core) already provides.
+# SEG-021-T018 / ADR 0043 §7: the M68K-owned exception-entry/RTE core is machine-independent strict C11.
+add_test(
+  NAME m68k_exception_core_ownership_test
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/m68k_exception_core_ownership_test.py ${CMAKE_C_COMPILER}
+)
 add_test(
   NAME cpu_m68k_no_genesis_dependency_test
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/cpu_m68k_no_genesis_dependency_test.py

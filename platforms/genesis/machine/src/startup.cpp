@@ -130,6 +130,10 @@ bool m68k_startup_analysis_pair_consistent(const M68kDecodedInstruction &decoded
     return lifted.kind == M68kIrKind::shift_rotate_register || lifted.kind == M68kIrKind::shift_rotate_memory;
   case M68kInstructionKind::move_an_to_usp: return lifted.kind == M68kIrKind::write_user_stack_pointer;
   case M68kInstructionKind::move_to_sr: return lifted.kind == M68kIrKind::write_status_register;
+  // SEG-021-T018: MOVE USP,An and ANDI/ORI/EORI to CCR/SR (general_startup only; pairing check only).
+  case M68kInstructionKind::move_usp_to_an: return lifted.kind == M68kIrKind::read_user_stack_pointer;
+  case M68kInstructionKind::logical_immediate_to_ccr: return lifted.kind == M68kIrKind::logical_immediate_to_ccr;
+  case M68kInstructionKind::logical_immediate_to_sr: return lifted.kind == M68kIrKind::logical_immediate_to_sr;
   // SEG-007-T114: NOP. execute_m68k_frontend_startup (the genesis_rom_startup
   // fixed-profile executor) does not accept NOP either -- its switch below has
   // no case for it and falls to the defensive `invalid_startup_analysis`

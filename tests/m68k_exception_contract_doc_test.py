@@ -7,9 +7,9 @@ Checks two things:
    frame: saved SR word at SP+0, saved PC long at SP+2, total 6 bytes. It must contain no
    MC68010-style format/vector-offset word, and every other mention of a format or vector-offset word
    in the ADR must be a negation.
-2. The generated-native runtime's exception-entry and RTE implementations still build and consume that
-   same layout. SEG-021-T018 moves the primitive out of the Genesis platform; when it does, it must
-   retarget ``RUNTIME_FRAME_SOURCES`` below instead of deleting the check.
+2. The generated-native exception-entry and RTE implementations still build and consume that same layout.
+   SEG-021-T018 moved the primitive out of the Genesis platform into the M68K-owned C11 exception core
+   (``RUNTIME_FRAME_SOURCES``); the Genesis runtime must delegate to it rather than build frames itself.
 """
 
 from __future__ import annotations
@@ -20,9 +20,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ADR = ROOT / "docs" / "decisions" / "0043-mc68000-exception-privilege-and-machine-hook-contract.md"
-RUNTIME_FRAME_SOURCES = [ROOT / "platforms" / "genesis" / "runtime" / "runtime.c"]
-ENTRY_FUNCTION = "genesis_construct_exception_frame_and_transfer"
-RETURN_FUNCTION = "genesis_exception_return"
+# SEG-021-T018 moved the primitive out of the Genesis platform into the M68K-owned C11 exception core; the
+# runtime half of this guard now checks that core (and that the Genesis runtime delegates to it).
+RUNTIME_FRAME_SOURCES = [ROOT / "libs" / "cpu" / "m68k" / "include" / "segarecomp" / "cpu" / "m68k" / "exception_core.h"]
+GENESIS_BINDING = ROOT / "platforms" / "genesis" / "runtime" / "runtime.c"
+ENTRY_FUNCTION = "segarecomp_m68k_exception_enter"
+RETURN_FUNCTION = "segarecomp_m68k_exception_return"
 
 EXPECTED_GROUP12 = [(0, 2, "saved_sr"), (2, 4, "saved_pc")]
 EXPECTED_TOTAL = 6
@@ -89,7 +92,7 @@ def check_format_word_mentions_are_negations(text: str) -> None:
 
 
 def function_body(source: str, name: str) -> str:
-    m = re.search(r"^(?:static\s+)?int\s+" + re.escape(name) + r"\s*\(", source, re.MULTILINE)
+    m = re.search(r"^(?:static\s+)?(?:inline\s+)?\w+\s+" + re.escape(name) + r"\s*\(", source, re.MULTILINE)
     if m is None:
         raise ContractError(f"{name} not found")
     start = source.index("{", source.index(")", m.end()))
@@ -109,27 +112,41 @@ def _compact(text: str) -> str:
 
 
 def check_runtime_frame(source: str) -> None:
+    if not re.search(r"#define SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES UINT32_C\(6\)", source):
+        raise ContractError("the exception core no longer defines a six-byte frame")
     entry = _compact(function_body(source, ENTRY_FUNCTION))
-    sr_write = re.search(r"routed_value = (\w+); if \(genesis_route_access_bus\(runtime, GENESIS_BUS_STACK_WRITE, frame_base, GENESIS_ACCESS_WORD", entry)
+    sr_write = re.search(r"hooks->frame_write\(hooks->context, frame_base, 2U, \(uint32_t\)(\w+)\)", entry)
     if sr_write is None or sr_write.group(1) != "saved_sr":
         raise ContractError("the SR word slot at frame_base is not written with the saved SR")
-    pc_write = re.search(r"routed_value = (\w+); if \(genesis_route_access_bus\(runtime, GENESIS_BUS_STACK_WRITE, frame_base \+ 2U, GENESIS_ACCESS_LONG", entry)
-    if pc_write is None or pc_write.group(1) != "return_pc":
-        raise ContractError("the PC long slot at frame_base+2 is not written with the return PC")
-    for needle in ("frame_base = a7 - 6U;",
-                   "frame_base, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE",
-                   "frame_base + 2U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE",
-                   "runtime->a[7] = frame_base;"):
+    pc_write = re.search(r"hooks->frame_write\(hooks->context, frame_base \+ 2U, 4U, (\w+)\)", entry)
+    if pc_write is None or pc_write.group(1) != "stacked_pc":
+        raise ContractError("the PC long slot at frame_base+2 is not written with the stacked PC")
+    for needle in ("frame_base = ssp - SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES;",
+                   "*cpu->active_sp = frame_base;"):
         if needle not in entry:
             raise ContractError(f"exception entry no longer contains {needle!r}")
     if re.search(r"frame_base \+ (?!2U)\d+U", entry):
         raise ContractError("exception entry writes beyond the six-byte SR/PC frame")
+    # validate-then-commit: the extent validation and vector resolution precede the first frame write.
+    if not (entry.index("validate_stack_extent") < entry.index("resolve_vector") < entry.index("frame_write")):
+        raise ContractError("exception entry writes the frame before validating it")
     rte = _compact(function_body(source, RETURN_FUNCTION))
-    for needle in ("sp, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ",
-                   "sp + 2U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ",
-                   "runtime->a[7] = sp + 6U;"):
+    for needle in ("hooks->stack_read(hooks->context, sp, 2U, &saved_sr)",
+                   "hooks->stack_read(hooks->context, sp + 2U, 4U, &saved_pc)",
+                   "sp + SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES"):
         if needle not in rte:
             raise ContractError(f"RTE no longer contains {needle!r}")
+
+
+def check_genesis_delegates(source: str) -> None:
+    """The Genesis runtime binds the core; it no longer builds or pops a frame itself."""
+    for needle in ("segarecomp_m68k_exception_enter(", "segarecomp_m68k_exception_return("):
+        if needle not in source:
+            raise ContractError(f"the Genesis runtime no longer delegates to {needle}")
+    for body_name in ("genesis_construct_exception_frame_and_transfer", "genesis_exception_return"):
+        body = _compact(function_body(source, body_name))
+        if "GENESIS_BUS_STACK" in body or "frame_base" in body:
+            raise ContractError(f"{body_name} constructs or reads a frame itself instead of binding the core")
 
 
 class Adr0043FrameContractTest(unittest.TestCase):
@@ -150,6 +167,7 @@ class Adr0043FrameContractTest(unittest.TestCase):
     def test_runtime_matches_contract(self) -> None:
         for path in RUNTIME_FRAME_SOURCES:
             check_runtime_frame(path.read_text(encoding="utf-8"))
+        check_genesis_delegates(GENESIS_BINDING.read_text(encoding="utf-8"))
 
     # Negative controls: each checker must reject a drifted contract.
     def test_negative_format_word_in_frame(self) -> None:
@@ -177,17 +195,27 @@ class Adr0043FrameContractTest(unittest.TestCase):
         with self.assertRaises(ContractError):
             check_group12_frame(duplicate)
         source = RUNTIME_FRAME_SOURCES[0].read_text(encoding="utf-8")
-        swapped = source.replace("routed_value = saved_sr;", "routed_value = return_pc;", 1)
+        swapped = source.replace("frame_base, 2U, (uint32_t)saved_sr)", "frame_base, 2U, (uint32_t)stacked_pc)", 1)
         self.assertNotEqual(swapped, source)
         with self.assertRaises(ContractError):
             check_runtime_frame(swapped)
+        binding = GENESIS_BINDING.read_text(encoding="utf-8")
+        inlined = binding.replace("status = segarecomp_m68k_exception_return(&hooks, &cpu, restored_pc_out);",
+                                  "status = SEGARECOMP_M68K_EXCEPTION_OK; (void)GENESIS_BUS_STACK_READ;", 1)
+        self.assertNotEqual(inlined, binding)
+        with self.assertRaises(ContractError):
+            check_genesis_delegates(inlined)
 
     def test_negative_runtime_drift(self) -> None:
         source = RUNTIME_FRAME_SOURCES[0].read_text(encoding="utf-8")
         with self.assertRaises(ContractError):
-            check_runtime_frame(source.replace("frame_base = a7 - 6U;", "frame_base = a7 - 8U;", 1))
+            check_runtime_frame(source.replace("UINT32_C(6)", "UINT32_C(8)", 1))
         with self.assertRaises(ContractError):
-            check_runtime_frame(source.replace("runtime->a[7] = sp + 6U;", "runtime->a[7] = sp + 8U;", 1))
+            check_runtime_frame(source.replace("frame_base = ssp - SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES;",
+                                               "frame_base = ssp - UINT32_C(8);", 1))
+        with self.assertRaises(ContractError):
+            check_runtime_frame(source.replace("hooks->stack_read(hooks->context, sp + 2U, 4U, &saved_pc)",
+                                               "hooks->stack_read(hooks->context, sp + 4U, 4U, &saved_pc)", 1))
 
 
 if __name__ == "__main__":

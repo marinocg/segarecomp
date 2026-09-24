@@ -308,7 +308,10 @@ def main():
         # Adversarial: every non-Dn MOVE from SR destination mode and the
         # reverse MOVE <ea>,SR encoding must not be accepted by this harness
         # (the decoder fails them closed as valid_but_unsupported_instruction).
-        for code in ("40d0", "40d8", "40e0", "40e8", "40f9ff00", "40c8", "46c0"):
+        # SEG-021-T018: the memory destinations are now legal decoded forms (covered by the conformance rows and
+        # the generated-native status-register test); only the never-legal An destination and the reverse
+        # encoding remain adversarial here.
+        for code in ("40c8", "46c0"):
             (td / "adv.bin").write_bytes(bytes.fromhex(code))
             rejected = subprocess.run([harness, str(td / "adv.bin"), *harness_args()], text=True, capture_output=True)
             assert rejected.returncode == 1, (code, rejected.stdout, rejected.stderr)
@@ -352,7 +355,9 @@ def main():
         # sources closed as valid_but_unsupported_instruction; MOVE from SR is a
         # different accepted kind but its bytes 0x40Cx must not be misrouted to
         # move_to_ccr).
-        for code in ("44d0", "44d8", "44e0", "44e8", "44f9ff00", "44c8", "44fcff00", "46c0"):
+        # SEG-021-T018: the memory and immediate sources are now legal decoded forms; only the never-legal An
+        # source and the MOVE to SR encoding remain adversarial here.
+        for code in ("44c8", "46c0"):
             (td / "adv.bin").write_bytes(bytes.fromhex(code))
             rejected = subprocess.run([harness, str(td / "adv.bin"), *harness_args()], text=True, capture_output=True)
             assert rejected.returncode == 1, (code, rejected.stdout, rejected.stderr)

@@ -95,7 +95,7 @@ def exact_completed_full(full: object, sanitized: dict, expected_d0: str, expect
         return False
     if (runtime.get("d") != [expected_d0] + ["0x00000000"] * 7 or
             runtime.get("a") != ["0x00000000"] * 7 + [expected_a7] or
-            runtime.get("usp") != "0x00000000" or runtime.get("sr") != "0x0000" or
+            runtime.get("usp") != "0x00000000" or runtime.get("sr") != "0x2700" or
             runtime.get("pc") != expected_pc):
         return False
     try:
@@ -121,7 +121,7 @@ def exact_wrong_return_full(full: object, sanitized: dict) -> bool:
     return (runtime.get("d") == ["0x00000000"] * 8 and
             runtime.get("a") == ["0x00000000"] * 7 + ["0x00ff0004"] and
             runtime.get("usp") == "0x00000000" and
-            runtime.get("sr") == "0x0004" and runtime.get("pc") == "0x00000b06" and
+            runtime.get("sr") == "0x2704" and runtime.get("pc") == "0x00000b06" and
             len(ram) == 65536 and not any(ram))
 
 

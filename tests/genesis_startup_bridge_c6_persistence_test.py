@@ -90,7 +90,7 @@ def main() -> int:
                         full["c4_lowering_dimensions"] is None and
                             full["runtime"]["d"] == expected_registers and
                             full["runtime"]["a"] == ["0x00000000"] * 7 + ["0x00ff0004"] and
-                            full["runtime"]["sr"] == "0x0000" and full["runtime"]["pc"] == "0x00000b16" and
+                            full["runtime"]["sr"] == "0x2700" and full["runtime"]["pc"] == "0x00000b16" and
                             ram[ram_offset:ram_offset + 4] == bytes.fromhex(value) and
                             not any(ram[:ram_offset] + ram[ram_offset + 4:]) and
                              full["provenance"] == expected_provenance, "unexpected persistent runtime result")

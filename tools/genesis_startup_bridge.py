@@ -60,6 +60,10 @@ STOP_DIAGNOSTIC_PAIRS = {
     # its real diagnostic category through GENESIS_DIAG_DISCOVERY_BUDGET_EXHAUSTED.
     "discovery_prefix_boundary": {"discovery_budget_exhausted"},
     "c4_lowering_gap": {"c4_lowering_gap"},
+    # SEG-021-T018 / ADR 0043: a CPU exception delivered fail-closed at run time.
+    "unsupported_cpu_exception": {
+        "unsupported_privilege_violation_exception", "unsupported_trace_exception",
+    },
 }
 
 # One whitelist entry per finite, stop-owned C4 family emitted by

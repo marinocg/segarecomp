@@ -121,14 +121,14 @@ def main() -> int:
     # Z-set/otherwise-clear encoding (M68kMoveResultCcrSpecification's
     # zero_mask == UINT16_C(0x0004) in src/m68k_pipeline.cpp; independently
     # cross-checked against tests/genesis_startup_bridge_c5_test.py's
-    # exact_wrong_return_full expecting "sr": "0x0004" for its own Z-set
+    # exact_wrong_return_full expecting "sr": "0x2704" for its own Z-set
     # case, and tests/genesis_startup_bridge_c6_test.py's expected_runtime
-    # asserting "sr": "0x0004" after its own Z-setting CLR.B prefix). If this
+    # asserting "sr": "0x2704" after its own Z-setting CLR.B prefix). If this
     # were still unreachable dead code -- the C2/C3 defect this checkpoint
     # closes -- sr would instead be "0x0000" (TST never executed) or the
     # runtime would report a device-access stop instead of completing the
     # TST and reaching the RESET frontier.
-    if runtime.get("sr") != "0x0004" or runtime.get("d", [None])[0] != "0x00000000":
+    if runtime.get("sr") != "0x2704" or runtime.get("d", [None])[0] != "0x00000000":
         return fail(records)
 
     # Belt-and-suspenders: the exact code path C2/C3 built is what actually

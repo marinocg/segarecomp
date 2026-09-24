@@ -19,12 +19,14 @@ int main(int argc, char **argv) {
     if (!fn) { printf("{\"id\":\"%s\",\"missing\":1}\n", v.id); continue; }
     cf_init_memory(state.ram, &v); memcpy(before, state.ram, sizeof before);
     for (i = 0; i < 8U; ++i) { state.d[i] = v.d[i]; state.a[i] = v.a[i]; }
-    state.sr = (uint16_t)v.sr; state.usp = v.usp; /* a[7] (active SP) was seeded above from the explicit SSP/USP */ state.pc = CF_CODE_BASE;
+    /* SEG-021-T018 / ADR 0043 §6: a[7] is the active stack pointer (seeded above from the explicit SSP/USP) and
+       `usp` is the INACTIVE slot -- the USP in supervisor mode, the SSP in user mode. */
+    state.sr = (uint16_t)v.sr; state.usp = (v.sr & 0x2000U) ? v.usp : v.ssp; state.pc = CF_CODE_BASE;
     memset(frame_ids, 0, sizeof frame_ids); memset(frame_continuations, 0, sizeof frame_continuations); frame_depth = 0U;
     (void)fn(&state);
     for (i = 0; i < 8U; ++i) { d[i] = state.d[i]; a[i] = state.a[i]; }
-    { const unsigned supervisor = state.sr & 0x2000U; /* the generated model has one active A7 plus USP; SSP is shadowed here */
-      cf_print(&v, before, state.ram, state.pc, state.sr, supervisor ? state.usp : a[7], supervisor ? a[7] : v.ssp, d, a); }
+    { const unsigned supervisor = state.sr & 0x2000U; /* the generated model: active A7 plus the inactive slot */
+      cf_print(&v, before, state.ram, state.pc, state.sr, supervisor ? state.usp : a[7], supervisor ? a[7] : state.usp, d, a); }
   }
   fclose(f); return 0;
 }

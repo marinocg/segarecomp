@@ -182,6 +182,32 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
                << "); { GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop = m68k_rte_stop; return transfer; } } ";
     return out.str();
   }
+
+  std::string privilege_violation(const M68kMemoryEmissionContext &ctx, std::uint32_t fault_pc) const override {
+    std::ostringstream out;
+    out << "{ uint32_t m68k_privilege_handler_pc = UINT32_C(0); GenesisRuntimeStop m68k_privilege_stop = {0}; "
+        << "if (genesis_raise_privilege_violation(" << ctx.runtime_object << ", UINT32_C(0x" << hex(fault_pc, 8)
+        << "), &m68k_privilege_handler_pc, &m68k_privilege_stop) == 1) { "
+        << "GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_CONTINUE_AT_PC; "
+        << "transfer.next_pc = m68k_privilege_handler_pc; return transfer; } "
+        << "m68k_privilege_stop.provenance.has_instruction_provenance = 1U; m68k_privilege_stop.provenance.instruction = *"
+        << ctx.runtime_source << "; " << ctx.runtime_provenance_helper << "(&m68k_privilege_stop, "
+        << ctx.runtime_source << "); "
+        << "{ GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop = m68k_privilege_stop; "
+           "return transfer; } }";
+    return out.str();
+  }
+
+  std::string trace_deferred_stop(const M68kMemoryEmissionContext &ctx) const override {
+    std::ostringstream out;
+    out << "{ GenesisRuntimeStop m68k_trace_stop = {0}; m68k_trace_stop.stop_class = GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION; "
+        << "m68k_trace_stop.diagnostic_category = GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION; "
+        << "m68k_trace_stop.provenance.has_instruction_provenance = 1U; m68k_trace_stop.provenance.instruction = *"
+        << ctx.runtime_source << "; " << ctx.runtime_provenance_helper << "(&m68k_trace_stop, " << ctx.runtime_source
+        << "); { GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop = m68k_trace_stop; "
+           "return transfer; } }";
+    return out.str();
+  }
 };
 
 }  // namespace

@@ -256,7 +256,14 @@ std::vector<std::uint8_t> m68k_written_address_registers(const M68kDecodedInstru
   // An value producer, so both must force that An to `unknown` per the ADR rule.
   case M68kInstructionKind::link:
   case M68kInstructionKind::unlk:
+  // SEG-021-T018: MOVE USP,An writes its fixed An destination.
+  case M68kInstructionKind::move_usp_to_an:
     note_dest_an();
+    break;
+  // SEG-021-T018 / ADR 0043 §6: an SR write that changes S swaps the active stack pointer, so A7 is clobbered.
+  case M68kInstructionKind::move_to_sr:
+  case M68kInstructionKind::logical_immediate_to_sr:
+    registers.push_back(7U);
     break;
   case M68kInstructionKind::exchange_registers:
     // SEG-021-T016: EXG writes both operands (An in Ax,Ay and Dx,Ay).
@@ -1622,7 +1629,9 @@ class M68kStaticGraphWalker {
                                                     M68kMemoryAccessDirection::write, decoded.provenance))
         return reject_operand(pc_value, decoded, *diagnostic, decoded.destination_ea.absolute_address);
     } else if (decoded.kind == M68kInstructionKind::tst || decoded.kind == M68kInstructionKind::cmp ||
-                decoded.kind == M68kInstructionKind::cmpi || decoded.kind == M68kInstructionKind::cmpa) {
+                decoded.kind == M68kInstructionKind::cmpi || decoded.kind == M68kInstructionKind::cmpa ||
+                // SEG-021-T018: MOVE <ea>,SR / MOVE <ea>,CCR read one word source.
+                decoded.kind == M68kInstructionKind::move_to_sr || decoded.kind == M68kInstructionKind::move_to_ccr) {
       if (const auto diagnostic = resolve_operand(decoded.source_ea, decoded.size,
                                                     M68kMemoryAccessDirection::read, decoded.provenance))
         return reject_operand(pc_value, decoded, *diagnostic, decoded.source_ea.absolute_address);
@@ -1678,7 +1687,9 @@ class M68kStaticGraphWalker {
                decoded.kind == M68kInstructionKind::negate_extended ||
                decoded.kind == M68kInstructionKind::negate_decimal ||
                decoded.kind == M68kInstructionKind::test_and_set ||
-               decoded.kind == M68kInstructionKind::set_conditional) {
+               decoded.kind == M68kInstructionKind::set_conditional ||
+               decoded.kind == M68kInstructionKind::move_from_sr) {
+      // SEG-021-T018: a memory MOVE from SR destination is read before it is written (68000), like memory Scc.
       // SEG-021-T016: TAS is a byte one-address RMW like NOT; memory Scc is read before it is written (68000).
       // SEG-021-T014: NEG/NEGX share NOT's one-address read-modify-write operand contract.
       // SEG-007-T168: NOT is a genuine one-address read-modify-write (unlike

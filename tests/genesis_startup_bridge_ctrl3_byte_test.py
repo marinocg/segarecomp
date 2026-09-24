@@ -109,7 +109,7 @@ def main() -> int:
     # zero-initialized runtime: sr == "0x0004", D0 unchanged. Dead code or a
     # device-access stop would instead leave sr == "0x0000" or never reach the
     # RESET frontier.
-    if runtime.get("sr") != "0x0004" or runtime.get("d", [None])[0] != "0x00000000":
+    if runtime.get("sr") != "0x2704" or runtime.get("d", [None])[0] != "0x00000000":
         return fail(records)
 
     # The generated source calls the real runtime routing function for this

@@ -113,7 +113,9 @@ def main():
 
     # Production sources carry no injection hook: the perturbation anchors exist untouched and the
     # comparison tool exposes no injection surface.
-    assert runtime_c.count("routed_value = saved_sr;") == 1
+    # SEG-021-T018: the frame is written by the M68K-owned exception core through the Genesis stack-write hook;
+    # the perturbation anchor is that hook's value binding (the SR word is its only 2-byte write).
+    assert runtime_c.count("uint32_t routed_value = value;") == 1
     assert "--inject" not in (root / "tools/m68k_first_divergence.py").read_text()
     assert "SEGARECOMP_FAULT" not in runtime_c and "fault_inject" not in generated
 
@@ -159,10 +161,11 @@ def main():
         reg_fault = build_and_run("regfault", reg_src.replace("runtime->d[7] = UINT32_C(0x00000055);",
                                                               "runtime->d[7] = UINT32_C(0x00000056);"), runtime_c)
         mem_fault = build_and_run("memfault", instrument(generated),
-                                  runtime_c.replace("routed_value = saved_sr;", "routed_value = saved_sr ^ 1U;"))
+                                  runtime_c.replace("uint32_t routed_value = value;",
+                                                    "uint32_t routed_value = value ^ (size == 2U ? 1U : 0U);"))
         # Injection is visible only in the temporary copies.
         assert runtime_c == (root / "platforms/genesis/runtime/runtime.c").read_text()
-        assert "saved_sr ^ 1U" not in (root / "platforms/genesis/runtime/runtime.c").read_text()
+        assert "value ^ (size == 2U" not in (root / "platforms/genesis/runtime/runtime.c").read_text()
 
         checkout = os.environ.get(fd.CHECKOUT_ENV)
         if not checkout:

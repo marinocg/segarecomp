@@ -67,20 +67,25 @@ std::string emit_genesis_bridge_c11_main(std::string_view initial_ssp, std::stri
 
 std::string emit_genesis_bridge_c11_main_open(std::string_view initial_ssp, std::string_view entry_pc,
                                              std::string_view irq6_handler_entry_hex,
-                                             std::string_view divide_by_zero_handler_entry_hex) {
+                                             std::string_view divide_by_zero_handler_entry_hex,
+                                             std::string_view privilege_violation_handler_entry_hex) {
   std::string open =
       "int main(int argc, char **argv) { GenesisRuntime runtime = {0}; GenesisControlTransfer result; "
       "const char *report_path; const char *report_fd; uint32_t instruction_budget = UINT32_C(128); "
       "const char *ephemeral_report_fd; "
       "if (genesis_parse_bridge_argv(argc, argv, &report_path, &report_fd, &instruction_budget, &ephemeral_report_fd) != 0) return 1; "
       "runtime.a[7] = UINT32_C(" +
-      std::string(initial_ssp) + "); runtime.pc = UINT32_C(" + std::string(entry_pc) + "); ";
+      std::string(initial_ssp) + "); runtime.pc = UINT32_C(" + std::string(entry_pc) +
+      "); runtime.sr = UINT16_C(0x2700); ";  // SEG-021-T018 / ADR 0043 §6: reset state S = 1, T = 0, I = 7
   if (!irq6_handler_entry_hex.empty())
     open += "runtime.irq6_handler_entry = UINT32_C(" + std::string(irq6_handler_entry_hex) +
             "); runtime.irq6_handler_present = 1; ";
   if (!divide_by_zero_handler_entry_hex.empty())
     open += "runtime.divide_by_zero_handler_entry = UINT32_C(" + std::string(divide_by_zero_handler_entry_hex) +
             "); runtime.divide_by_zero_handler_present = 1; ";
+  if (!privilege_violation_handler_entry_hex.empty())
+    open += "runtime.privilege_violation_handler_entry = UINT32_C(" + std::string(privilege_violation_handler_entry_hex) +
+            "); runtime.privilege_violation_handler_present = 1; ";
   return open;
 }
 
