@@ -189,7 +189,7 @@ is unchanged. Then PC <- the read PC and active SP += 6. It uses the same atomic
 
 - The CPU instance holds two stack-pointer slots, SSP and USP. A7 names the one selected by SR.S.
   Every SR write that changes S swaps which slot is active. This covers exception entry, RTE, MOVE to
-  SR, ANDI/EORI to SR, and STOP. MOVE USP reads or writes the inactive slot while in supervisor mode.
+  SR, ANDI/ORI/EORI to SR, and STOP. MOVE USP reads or writes the inactive slot while in supervisor mode.
   The existing `usp` runtime field becomes that slot; T018 implements this.
 - Reset state: S = 1, T = 0, I = 7, SSP from vector 0. The USP is not defined by reset, so the
   project keeps its deterministic zero initialization and makes no hardware claim.
