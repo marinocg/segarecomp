@@ -2346,7 +2346,27 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     // a7` entry) for reg==7, while remaining the plain untouched old An
     // value for every reg!=7 -- with no runtime branch on reg==7, since
     // array-based register aliasing (a[7] IS A7) does the work.
-    if (memory != nullptr) {
+    if (memory != nullptr && memory->runtime_routing) {
+      // SEG-021-T016: routed LINK (AOT/C4 admission). The live A7 is never
+      // touched before the routed push has succeeded (a routed stop returns
+      // first); A7 is decremented on a local. The pushed value keeps the
+      // Musashi reg==7 alias (the already-decremented A7) and is the old An
+      // otherwise. Commit order: An = A7', A7 = A7' + disp, then PC.
+      const auto reg = static_cast<unsigned>(operation.destination_ea.reg);
+      const auto an = std::string(memory->address_registers) + "[" + std::to_string(reg) + "]";
+      const auto a7 = std::string(memory->address_registers) + "[7]";
+      unsigned temp_ordinal = 0U;
+      output << "{\nuint32_t m68k_link_a7 = " << a7 << ";\nm68k_link_a7 -= UINT32_C(4);\n";
+      m68k_emit_routed_write(output, "m68k_link_a7", M68kMemoryAccessWidth::long_word, *memory,
+                             reg == 7U ? std::string("m68k_link_a7") : an, temp_ordinal);
+      output << an << " = m68k_link_a7;\n"
+             << a7 << " = m68k_link_a7 + "
+             << m68k_sign_extend_expr("UINT32_C(0x" + hex(operation.source_ea.immediate_value & 0xFFFFU, 4) + ")",
+                                      M68kMemoryAccessWidth::word)
+             << ";\n"
+             << (memory->program_counter.empty() ? std::string_view("pc") : std::string_view(memory->program_counter))
+             << " += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
+    } else if (memory != nullptr) {
       const auto reg = static_cast<unsigned>(operation.destination_ea.reg);
       const auto register_expr = std::string(memory->address_registers) + "[" + std::to_string(reg) + "]";
       unsigned temp_ordinal = 0U;
@@ -2374,7 +2394,22 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     // (its a7-special handler is a plain `A7 = read32(A7)`, no increment
     // survives the final `*r_dst = pulled` assignment in the generic
     // handler either) with no runtime branch on reg==7.
-    if (memory != nullptr) {
+    if (memory != nullptr && memory->runtime_routing) {
+      // SEG-021-T016: routed UNLK. Read the saved long at An through the
+      // routed gate before any register write; then A7 = An + 4, An = value
+      // (An assigned last so UNLK A7 yields the popped value, like Musashi).
+      const auto reg = static_cast<unsigned>(operation.destination_ea.reg);
+      const auto an = std::string(memory->address_registers) + "[" + std::to_string(reg) + "]";
+      unsigned temp_ordinal = 0U;
+      output << "{\nconst uint32_t m68k_unlk_ea = " << an << ";\n";
+      std::string expr;
+      m68k_emit_routed_read(output, "m68k_unlk_ea", M68kMemoryAccessWidth::long_word, *memory, expr, temp_ordinal);
+      output << "const uint32_t m68k_unlk_value = " << expr << ";\n"
+             << memory->address_registers << "[7] = m68k_unlk_ea + UINT32_C(4);\n"
+             << an << " = m68k_unlk_value;\n"
+             << (memory->program_counter.empty() ? std::string_view("pc") : std::string_view(memory->program_counter))
+             << " += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
+    } else if (memory != nullptr) {
       const auto reg = static_cast<unsigned>(operation.destination_ea.reg);
       output << "{\n" << memory->address_registers << "[7] = " << memory->address_registers << "[" << reg
              << "];\n";

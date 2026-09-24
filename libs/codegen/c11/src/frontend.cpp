@@ -4116,9 +4116,10 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
   // call-shaped "unframed Tier-2 call" case): every call-shaped Tier-2 site's
   // own genuine, statically-known continuation, collected alongside its real
   // function body below and unioned into `runtime_return_target_set` further
-  // down -- restricted to a continuation that is itself a genuinely emitted,
-  // dispatchable block entry (`emitted_block_entries`, already final at this
-  // point), never fabricated and never dependent on which downstream target
+  // down -- restricted to a continuation that is itself a member of the final
+  // `emitted_code_addresses` (ordinary block entry/instruction boundary or an
+  // admitted immutable-ROM AOT identity; every block entry is a member;
+  // SEG-021-T030), never fabricated and never dependent on which downstream target
   // the site's own runtime-computed EA happens to resolve to.
   std::set<Address> tier2_call_continuations;
   if (tier2_capable) {
@@ -4129,7 +4130,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
                                                                   &tier2_call_continuation);
       if (!function_text) return "/* translation rejected: unrepresentable C4 frontier */\n";
       out << *function_text;
-      if (tier2_call_continuation && emitted_block_entries.contains(*tier2_call_continuation))
+      if (tier2_call_continuation && emitted_code_addresses.contains(*tier2_call_continuation))
         tier2_call_continuations.insert(*tier2_call_continuation);
     }
   }
@@ -4179,7 +4180,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
                 partial.accepted_prefix, provenance, decoded_terminal->second->source_ea, is_call,
                 tier2_name.str(), emitted_code_address_set, &pre_pc_call_continuation)) {
           out << *tier2_text;
-          if (pre_pc_call_continuation && emitted_block_entries.contains(*pre_pc_call_continuation))
+          if (pre_pc_call_continuation && emitted_code_addresses.contains(*pre_pc_call_continuation))
             tier2_call_continuations.insert(*pre_pc_call_continuation);
           continue;
         }

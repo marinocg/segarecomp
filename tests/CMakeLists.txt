@@ -335,6 +335,9 @@ add_test(NAME genesis_immutable_rom_aot_bcd_generated_test COMMAND ${Python3_EXE
 add_test(NAME genesis_immutable_rom_aot_exg_movep_scc_tas_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_exg_movep_scc_tas_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME genesis_immutable_rom_aot_movem_link_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_movem_link_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_immutable_rom_aot_pea_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_pea_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

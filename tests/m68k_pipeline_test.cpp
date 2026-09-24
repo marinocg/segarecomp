@@ -7013,6 +7013,63 @@ void t208_tier2_call_shaped_continuation_excluded_when_not_independently_retaine
          "membership out of nothing");
 }
 
+// SEG-021-T030: a call-shaped Tier-2 site (JSR (A0)) whose fixed continuation
+// is represented ONLY as an admitted immutable-ROM AOT identity (never an
+// ordinary block entry) is RTS return authority; a continuation represented
+// nowhere still fails closed.
+namespace t030_aot_only_tier2_continuation_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000B00U;
+FrontendProgram make_program(std::uint8_t continuation_hi, std::uint8_t continuation_lo) {
+  const std::vector<std::uint8_t> image{
+      0x4EU, 0xB9U, 0x00U, 0x00U, 0x0BU, 0x0EU,  // 0x0B00 JSR $0B0E.L
+      0x30U, 0x51U,                              // 0x0B06 MOVEA.W (A1),A0
+      0x4EU, 0x90U,                              // 0x0B08 JSR (A0)
+      continuation_hi, continuation_lo,          // 0x0B0A continuation
+      0x60U, 0xF2U,                              // 0x0B0C BRA.S -> 0x0B00
+      0x4EU, 0x75U,                              // 0x0B0E RTS
+  };
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T030/aot-only-tier2-continuation", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base},
+                             {{}, static_cast<std::uint32_t>(base + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  program.external_code_entry_candidates = {tier2_fixture::make_candidate(0x00000B0CU)};
+  return program;
+}
+std::string emit(std::uint8_t hi, std::uint8_t lo, bool aot) {
+  auto program = make_program(hi, lo);
+  if (aot && !apply_genesis_immutable_rom_aot(program)) return "aot-apply-failed";
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return "not-partial";
+  return emit_m68k_general_startup_runtime_c(*partial);
+}
+}  // namespace t030_aot_only_tier2_continuation_fixture
+
+void t030_aot_only_tier2_call_continuation_is_rts_return_authority() {
+  using namespace t030_aot_only_tier2_continuation_fixture;
+  const std::string member = "m68k_observed_return != UINT32_C(0x00000B0A)";
+  const auto with_aot = emit(0x4EU, 0x71U, true);  // NOP: AOT-admissible
+  expect(!with_aot.starts_with("/* translation rejected:") && with_aot != "aot-apply-failed" &&
+             with_aot != "not-partial",
+         "T030 AOT fixture emits");
+  expect(with_aot.find("genesis_aot_00000B0A") != std::string::npos,
+         "the Tier-2 call continuation is an admitted AOT identity");
+  expect(with_aot.find(member) != std::string::npos,
+         "an AOT-only Tier-2 call continuation joins the shared RTS membership check");
+  expect(with_aot.find("m68k_observed_return != UINT32_C(0x00000B06)") != std::string::npos,
+         "the ordinary call continuation is unaffected");
+  const auto without_aot = emit(0x4EU, 0x71U, false);
+  expect(without_aot.find(member) == std::string::npos,
+         "without any representation the continuation is not fabricated into the return set");
+  const auto unrepresented = emit(0x4EU, 0x70U, true);  // RESET: not AOT-safe
+  expect(unrepresented.find("genesis_aot_00000B0A") == std::string::npos &&
+             unrepresented.find(member) == std::string::npos,
+         "a continuation represented nowhere still fails closed");
+}
+
 namespace code_pointer_descriptor_fixture {
 using namespace segarecomp;
 constexpr std::uint32_t base = 0x00000B00U;
@@ -26945,6 +27002,48 @@ int c4_bcd_admission() {
   return failures == 0 ? 0 : 1;
 }
 
+// SEG-021-T016: MOVEM/LINK/UNLK immutable-ROM AOT roots. Encodings from the Motorola M68000 Family Programmer's
+// Reference Manual (MOVEM `0100 1d00 1s ea` + register mask, predecrement mask bit-reversed; LINK `0100 1110 0101 0 An`
+// + d16; UNLK `0100 1110 0101 1 An`), independent of the T001 dataset.
+namespace movem_link_aot_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000F00U;
+const std::vector<std::uint8_t> image{
+    0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U,
+    0x48U, 0xE7U, 0xC0U, 0x00U,  // F08 MOVEM.L D0-D1,-(A7)
+    0x4CU, 0xDFU, 0x00U, 0x03U,  // F0C MOVEM.L (A7)+,D0-D1
+    0x4CU, 0x90U, 0x00U, 0x0CU,  // F10 MOVEM.W (A0),D2-D3
+    0x48U, 0xE8U, 0x00U, 0x03U, 0x00U, 0x10U,  // F14 MOVEM.L D0-D1,(16,A0)
+    0x48U, 0xA7U, 0xC0U, 0x00U,  // F1A MOVEM.W D0-D1,-(A7)
+    0x4EU, 0x56U, 0xFFU, 0xF8U,  // F1E LINK A6,#-8
+    0x4EU, 0x5EU,                // F22 UNLK A6
+    0x4CU, 0xF9U, 0x00U, 0x10U, 0x00U, 0xFFU, 0x08U, 0x00U,  // F24 MOVEM.L $FF0800.L,D4
+};
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T016/movem-link-aot-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base}, {{}, static_cast<std::uint32_t>(base + image.size())},
+                             {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace movem_link_aot_fixture
+
+int emit_movem_link_aot_source() {
+  using namespace segarecomp;
+  using namespace movem_link_aot_fixture;
+  auto program = program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
 // SEG-021-T016: EXG/MOVEP/Scc/TAS. Legality is asserted from the Motorola encodings (EXG `1100 Rx 1 01000/01001/10001 Ry`,
 // MOVEP `0000 Dn 1 oo 001 An`+d16, Scc `0101 cccc 11 ea`, TAS `0100 1010 11 ea`, Scc/TAS data-alterable), independently of the
 // T001 dataset.
@@ -28640,6 +28739,8 @@ int main(int argc, char **argv) {
     return emit_extended_arithmetic_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-bcd-aot")
     return emit_bcd_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-movem-link-aot")
+    return emit_movem_link_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-exg-movep-scc-tas-aot")
     return emit_exg_movep_scc_tas_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-exg-movep-scc-tas-c4")
@@ -29226,6 +29327,7 @@ int main(int argc, char **argv) {
   t239_jmp_and_jsr_to_shared_destination_use_byte_identical_existence_check();
   t208_tier2_call_shaped_continuation_joins_whole_program_return_target_set();
   t208_tier2_call_shaped_continuation_excluded_when_not_independently_retained();
+  t030_aot_only_tier2_call_continuation_is_rts_return_authority();
   code_pointer_descriptor_proposals_are_admitted_and_existing_jsr_an_dispatches();
   code_pointer_descriptor_base_is_the_first_semantic_entry_not_the_biased_affine_origin();
   code_pointer_descriptor_under_count_leaves_an_honest_nonmember_stop();

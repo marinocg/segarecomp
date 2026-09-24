@@ -721,6 +721,16 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // routed access before any architectural write. The emitter fails closed on any shape it cannot lower
     // and operand-mode legality is owned by decode.
     return true;
+  case M68kIrKind::link_frame:
+  case M68kIrKind::unlink_frame:
+  case M68kIrKind::movem_transfer:
+    // SEG-021-T016: LINK/UNLK and MOVEM (both directions, every legal EA mode) lower through the shared
+    // C4 routed read/write primitives with no CFG edge, call frame, return target or static memory
+    // fact. LINK pushes onto an A7 local, UNLK reads before any register write, and MOVEM uses one
+    // working-EA local with a single final An commit, so a routed stop returns before any An/A7/PC
+    // commit (MOVEM memory->register loads already retired into Dn/An before a later stopping slot are
+    // the existing c4 MOVEM contract). Operand legality is owned by decode; DIV remains excluded.
+    return true;
   case M68kIrKind::read_status_register:
     return destination_register();
   case M68kIrKind::write_status_register:
@@ -894,9 +904,6 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // gating on `m68k_instruction_cycles` here (the same defensive pattern
     // BTST/shift_rotate_memory already use) never declines a legal form.
     return m68k_instruction_cycles(operation).has_value();
-  case M68kIrKind::link_frame:
-  case M68kIrKind::unlink_frame:
-  case M68kIrKind::movem_transfer:
   case M68kIrKind::divide_signed_word:
   case M68kIrKind::divide_unsigned_word:
     // SEG-021-T010 correction (bounded experiment, reverted): the "no live runtime object"
