@@ -2,6 +2,11 @@
 
 ## Status and boundary
 
+> **Superseded on implementation (ADR 0043).** [ADR 0043](../decisions/0043-mc68000-exception-privilege-and-machine-hook-contract.md)
+> freezes the MC68000 supervisor/user, privilege-violation and exception contract. SEG-021-T018
+> replaces the unconditional no-privilege-check rules in this file with that model; until it lands they
+> stay in force unchanged.
+
 This is a bounded **project compatibility policy**, not a general MC68000
 privilege, exception, or reset model. It consumes the public Motorola
 *M68000 Family Programmer's Reference Manual* (1988), §6, **MOVE USP** and
