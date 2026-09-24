@@ -229,6 +229,12 @@ def check_frame_write_contract(text: str) -> None:
             f"the core consumes the frame_write result; {FRAME_WRITE_CONTRACT}")
     entry = code[code.index("segarecomp_m68k_exception_enter("):code.index("segarecomp_m68k_exception_return(")]
     assert "ACCESS_FAILED" not in entry, f"exception entry still has an ACCESS_FAILED path; {FRAME_WRITE_CONTRACT}"
+    # After the first frame byte the only way out is the successful commit: any other return (even a
+    # conditional one) or a goto would reintroduce a partially written frame with a failure status.
+    after_first_write = entry[entry.index("hooks->frame_write("):]
+    exits = re.findall(r"\b(?:return\b[^;]*|goto\b[^;]*|longjmp\s*\([^;]*)", after_first_write)
+    assert exits == ["return SEGARECOMP_M68K_EXCEPTION_OK"], (
+        f"exception entry can leave after a frame write with {exits!r}; {FRAME_WRITE_CONTRACT}")
 
 
 def main() -> None:
@@ -241,7 +247,10 @@ def main() -> None:
                                "  if (!hooks->frame_write(hooks->context, frame_base, 2U", 1),
                   text.replace("  hooks->frame_write(hooks->context, frame_base + 2U, 4U, stacked_pc);",
                                "  hooks->frame_write(hooks->context, frame_base + 2U, 4U, stacked_pc);\n"
-                               "  return SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED;", 1)):
+                               "  return SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED;", 1),
+                  text.replace("  hooks->frame_write(hooks->context, frame_base + 2U, 4U, stacked_pc);",
+                               "  if (vector == 9U) return SEGARECOMP_M68K_EXCEPTION_VECTOR_UNAVAILABLE;\n"
+                               "  hooks->frame_write(hooks->context, frame_base + 2U, 4U, stacked_pc);", 1)):
         assert drift != text
         try:
             check_frame_write_contract(drift)
