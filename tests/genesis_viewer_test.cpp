@@ -32,13 +32,14 @@ void attach(Obs &s, GenesisRuntime &r) {
 
 struct Fake {
   uint64_t now = 0; std::vector<uint64_t> sleeps; int closed_after = -1, polls = 0, presents = 0;
-  int fail_present = 0; std::vector<uint64_t> advance; size_t ai = 0;
+  int fail_present = 0; int use_pad = 0; uint8_t pad = 0; std::vector<uint64_t> advance; size_t ai = 0;
 };
 uint64_t f_now(void *c) { auto *f = (Fake *)c; uint64_t n = f->now; if (f->ai < f->advance.size()) f->now += f->advance[f->ai++]; return n; }
 void f_sleep(void *c, uint64_t ns) { auto *f = (Fake *)c; f->sleeps.push_back(ns); f->now += ns; }
 int f_present(void *c, const GenesisFrameArtifact *) { auto *f = (Fake *)c; ++f->presents; return f->fail_present; }
 int f_closed(void *c) { auto *f = (Fake *)c; return f->closed_after >= 0 && f->polls++ >= f->closed_after; }
-GenesisViewerHost host(Fake &f) { return {&f, f_now, f_sleep, f_present, f_closed}; }
+uint8_t f_pad(void *c) { return ((Fake *)c)->pad; }
+GenesisViewerHost host(Fake &f) { return {&f, f_now, f_sleep, f_present, f_closed, f.use_pad ? f_pad : nullptr}; }
 
 void pacer_tests() {
   Fake f; auto h = host(f); GenesisPacer p; genesis_pacer_init(&p, 0);
@@ -65,7 +66,7 @@ void pacer_tests() {
   Fake g; auto hg = host(g); GenesisPacer u; genesis_pacer_init(&u, 1);
   for (int i = 0; i < 5; ++i) (void)genesis_pacer_wait(&u, &hg);
   check(g.sleeps.empty() && u.sleep_calls == 0, "unthrottled never sleeps");
-  GenesisViewerHost bad = {nullptr, nullptr, nullptr, nullptr, nullptr};
+  GenesisViewerHost bad = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
   check(genesis_pacer_wait(&p, &bad) == -1 && genesis_pacer_wait(nullptr, &h) == -1, "null args fail");
 }
 
@@ -85,6 +86,26 @@ GenesisViewerResult go(Run &run, uint32_t slice, bool unthrottled, Fake &f, uint
   g_count = 0; g_limit = limit;
   GenesisViewerOptions o{(uint8_t)unthrottled, slice}; auto h = host(f); GenesisPacer p; genesis_pacer_init(&p, unthrottled);
   return genesis_viewer_run(&run.r, dispatch_fn, &o, &h, &p, total);
+}
+
+void pad_tests() {
+  GenesisViewerKeys k{};
+  check(genesis_viewer_pad_from_keys(&k) == 0 && genesis_viewer_pad_from_keys(nullptr) == 0, "no keys -> released");
+  k.up = 1; check(genesis_viewer_pad_from_keys(&k) == GENESIS_PAD_UP, "up");
+  k = {}; k.down = 1; check(genesis_viewer_pad_from_keys(&k) == GENESIS_PAD_DOWN, "down");
+  k = {}; k.left = 1; check(genesis_viewer_pad_from_keys(&k) == GENESIS_PAD_LEFT, "left");
+  k = {}; k.right = 1; check(genesis_viewer_pad_from_keys(&k) == GENESIS_PAD_RIGHT, "right");
+  k = {}; k.a = 1; check(genesis_viewer_pad_from_keys(&k) == GENESIS_PAD_A, "a");
+  k = {}; k.b = 1; check(genesis_viewer_pad_from_keys(&k) == GENESIS_PAD_B, "b");
+  k = {}; k.c = 1; check(genesis_viewer_pad_from_keys(&k) == GENESIS_PAD_C, "c");
+  k = {}; k.start = 1; check(genesis_viewer_pad_from_keys(&k) == GENESIS_PAD_START, "start");
+  k = {}; k.right = 1; k.b = 1; k.start = 1;
+  check(genesis_viewer_pad_from_keys(&k) == (GENESIS_PAD_RIGHT | GENESIS_PAD_B | GENESIS_PAD_START), "combination");
+  Fake f; f.use_pad = 1; f.pad = GENESIS_PAD_A | GENESIS_PAD_UP; Run r;
+  (void)go(r, 7, false, f, 1000000, 200);
+  check(r.r.pad1 == (GENESIS_PAD_A | GENESIS_PAD_UP), "host pad reaches runtime");
+  Fake g; Run r2; (void)go(r2, 7, false, g, 1000000, 200);
+  check(r2.r.pad1 == 0, "no callback -> released");
 }
 
 void run_tests() {
@@ -113,4 +134,4 @@ void run_tests() {
 }
 }  // namespace
 
-int main() { pacer_tests(); options_tests(); run_tests(); return failures ? 1 : 0; }
+int main() { pacer_tests(); options_tests(); pad_tests(); run_tests(); return failures ? 1 : 0; }

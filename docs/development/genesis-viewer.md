@@ -39,3 +39,9 @@ Mechanism: viewer builds compile the unmodified generated C with
 `-Dgenesis_runtime_run=genesis_viewer_hook_run`, so the generated `main` hands its own runtime,
 dispatcher and allowance to `platforms/genesis/viewer/viewer_main_hook.c`. Headless builds do not define the
 macro and link no viewer or SDL code.
+
+## Player-1 keyboard input (SEG-011-T004)
+
+Fixed map: arrow keys = D-pad, Z = A, X = B, C = C, Return = Start. Escape and window close quit.
+The pad mask is polled once per host slice and injected with `genesis_runtime_set_pad1`; it is host
+input and is not part of device checkpoints or divergence digests. Port 2 always reads released.

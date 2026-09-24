@@ -152,7 +152,91 @@ void test_data1_data2_th_multiplexed_combinational_read() {
 
 } // namespace
 
+// SEG-011-T004: player-1 host pad state. Expected bytes are hand-derived from
+// the documented layout: TH=1 "?1CBRLDU" (0x7F released), TH=0 "?0SA00DU"
+// (0x33 released), active-low.
+void set_th(GenesisRuntime &rt, std::uint32_t data_address, std::uint32_t ctrl_address, unsigned th) {
+  GenesisRuntimeStop stop{};
+  std::uint32_t v = UINT32_C(0x40);
+  assert(genesis_route_access(&rt, ctrl_address, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &v,
+                              &stop) == GENESIS_ACCESS_OK);
+  v = th ? UINT32_C(0x40) : UINT32_C(0x00);
+  assert(genesis_route_access(&rt, data_address, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &v,
+                              &stop) == GENESIS_ACCESS_OK);
+}
+
+void assert_pad(std::uint8_t pad, unsigned th, std::uint8_t expected) {
+  const std::uint32_t d1 = SEGARECOMP_GENESIS_CONTROLLER_IO_BEGIN + 3U;
+  const std::uint32_t c1 = SEGARECOMP_GENESIS_CONTROLLER_IO_BEGIN + 9U;
+  GenesisRuntime rt{};
+  genesis_runtime_set_pad1(&rt, pad);
+  set_th(rt, d1, c1, th);
+  assert_data_port_read(rt, d1, expected);
+}
+
+void test_player1_pad() {
+  // Released default is unchanged.
+  assert_pad(0, 1, 0x7F); assert_pad(0, 0, 0x33);
+  // Directions at TH=1.
+  assert_pad(GENESIS_PAD_UP, 1, 0x7E); assert_pad(GENESIS_PAD_DOWN, 1, 0x7D);
+  assert_pad(GENESIS_PAD_LEFT, 1, 0x7B); assert_pad(GENESIS_PAD_RIGHT, 1, 0x77);
+  // Up/Down at TH=0; Left/Right invisible there (bits 3-2 forced 0).
+  assert_pad(GENESIS_PAD_UP, 0, 0x32); assert_pad(GENESIS_PAD_DOWN, 0, 0x31);
+  assert_pad(GENESIS_PAD_LEFT | GENESIS_PAD_RIGHT, 0, 0x33);
+  // B/C only at TH=1; A/Start only at TH=0.
+  assert_pad(GENESIS_PAD_B, 1, 0x6F); assert_pad(GENESIS_PAD_C, 1, 0x5F);
+  assert_pad(GENESIS_PAD_B | GENESIS_PAD_C, 0, 0x33);
+  assert_pad(GENESIS_PAD_A, 0, 0x23); assert_pad(GENESIS_PAD_START, 0, 0x13);
+  assert_pad(GENESIS_PAD_A | GENESIS_PAD_START, 1, 0x7F);
+  // Combinations.
+  assert_pad(GENESIS_PAD_RIGHT | GENESIS_PAD_B, 1, 0x67);
+  assert_pad(GENESIS_PAD_START | GENESIS_PAD_A, 0, 0x03);
+  // Release restores the released bits.
+  {
+    const std::uint32_t d1 = SEGARECOMP_GENESIS_CONTROLLER_IO_BEGIN + 3U;
+    const std::uint32_t c1 = SEGARECOMP_GENESIS_CONTROLLER_IO_BEGIN + 9U;
+    GenesisRuntime rt{};
+    set_th(rt, d1, c1, 1);
+    genesis_runtime_set_pad1(&rt, GENESIS_PAD_RIGHT | GENESIS_PAD_B);
+    assert_data_port_read(rt, d1, 0x67);
+    genesis_runtime_set_pad1(&rt, 0);
+    assert_data_port_read(rt, d1, 0x7F);
+  }
+  // Input pin TH (CTRL clear) with pad held: default TH=1 group.
+  {
+    GenesisRuntime rt{};
+    genesis_runtime_set_pad1(&rt, GENESIS_PAD_C);
+    assert_data_port_read(rt, SEGARECOMP_GENESIS_CONTROLLER_IO_BEGIN + 3U, 0x5F);
+  }
+  // Port 2 stays released whatever player 1 does.
+  {
+    const std::uint32_t d2 = SEGARECOMP_GENESIS_CONTROLLER_IO_BEGIN + 5U;
+    const std::uint32_t c2 = SEGARECOMP_GENESIS_CONTROLLER_IO_BEGIN + 0xBU;
+    GenesisRuntime rt{};
+    genesis_runtime_set_pad1(&rt, 0xFFU);
+    set_th(rt, d2, c2, 1);
+    assert_data_port_read(rt, d2, 0x7F);
+    set_th(rt, d2, c2, 0);
+    assert_data_port_read(rt, d2, 0x33);
+  }
+  // Writes/latches unaffected by pad state: mixed CTRL mask echoes DATA on output pins.
+  {
+    const std::uint32_t d1 = SEGARECOMP_GENESIS_CONTROLLER_IO_BEGIN + 3U;
+    const std::uint32_t c1 = SEGARECOMP_GENESIS_CONTROLLER_IO_BEGIN + 9U;
+    GenesisRuntime rt{};
+    GenesisRuntimeStop stop{};
+    genesis_runtime_set_pad1(&rt, GENESIS_PAD_UP | GENESIS_PAD_B);
+    std::uint32_t v = 0x41U; // TH + bit0 outputs
+    assert(genesis_route_access(&rt, c1, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &v, &stop) == GENESIS_ACCESS_OK);
+    v = 0xC0U; // bit7 latch, TH=1, bit0 = 0 driven
+    assert(genesis_route_access(&rt, d1, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &v, &stop) == GENESIS_ACCESS_OK);
+    // bit7 echo 0x80 | TH 0x40 | group: B pressed (bit4 clear) -> 0x2E; bit0 output = 0
+    assert_data_port_read(rt, d1, 0xEEU);
+  }
+}
+
 int main() {
+  test_player1_pad();
   GenesisRuntime runtime{};
   for (std::size_t index = 0; index < SEGARECOMP_GENESIS_CONTROLLER_IO_SELECTOR_COUNT; ++index) {
     const auto &selector = segarecomp_genesis_controller_io_selectors[index];

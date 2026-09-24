@@ -47,6 +47,14 @@ void genesis_pacer_init(GenesisPacer *pacer, int unthrottled) {
   pacer->unthrottled = unthrottled ? 1u : 0u;
 }
 
+uint8_t genesis_viewer_pad_from_keys(const GenesisViewerKeys *k) {
+  if (k == NULL) return 0U;
+  return (uint8_t)((k->up ? GENESIS_PAD_UP : 0U) | (k->down ? GENESIS_PAD_DOWN : 0U) |
+                   (k->left ? GENESIS_PAD_LEFT : 0U) | (k->right ? GENESIS_PAD_RIGHT : 0U) |
+                   (k->a ? GENESIS_PAD_A : 0U) | (k->b ? GENESIS_PAD_B : 0U) |
+                   (k->c ? GENESIS_PAD_C : 0U) | (k->start ? GENESIS_PAD_START : 0U));
+}
+
 int genesis_pacer_wait(GenesisPacer *pacer, const GenesisViewerHost *host) {
   if (pacer == NULL || host == NULL || host->now_ns == NULL) return -1;
   if (!pacer->unthrottled && host->sleep_ns == NULL) return -1;
@@ -98,6 +106,7 @@ GenesisViewerResult genesis_viewer_run(GenesisRuntime *runtime, GenesisDispatchF
   uint64_t presented_seq = obs->sequence;
   for (;;) {
     if (host->window_closed(host->ctx)) return finish(r, GENESIS_VIEWER_WINDOW_CLOSED);
+    genesis_runtime_set_pad1(runtime, host->pad1 != NULL ? host->pad1(host->ctx) : 0U);
     uint64_t remaining = total_dispatch_allowance - r.dispatches;
     if (remaining == 0) return finish(r, GENESIS_VIEWER_RUNNER_EXHAUSTED);
     uint32_t slice = remaining < options->slice_dispatches ? (uint32_t)remaining
