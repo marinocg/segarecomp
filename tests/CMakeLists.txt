@@ -779,6 +779,12 @@ add_test(
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/architecture_baseline_verifier_test.py
     $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER}
 )
+# SEG-022-T001: generated-code scalability attribution tool must partition bytes exactly.
+add_test(
+  NAME generated_code_scalability_report_test
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/generated_code_scalability_report_test.py
+    ${PROJECT_SOURCE_DIR}/tools/generated_code_scalability_report.py
+)
 add_test(
   NAME genesis_runtime_ownership_test
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_runtime_ownership_test.py
