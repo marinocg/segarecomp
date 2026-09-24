@@ -19,6 +19,14 @@ const uint32_t v = 1;
 static GenesisControlTransfer genesis_aot_00000020(GenesisRuntime *runtime) {
   uint32_t pc = runtime->pc;
 const uint32_t v = 2;
+  {
+  static const uint32_t m68k_indirect_targets_00000030[] = {
+    UINT32_C(0x00000010),
+    UINT32_C(0x00000020),
+    UINT32_C(0x00000030)
+  };
+  static const uint32_t m68k_indirect_targets_00000032[] = {UINT32_C(0x00000010), UINT32_C(0x00000020)};
+  }
   runtime->pc = pc;
   if (runtime->pc == UINT32_C(0x22)) {
     GenesisInstructionProvenance source = {0};
@@ -51,6 +59,24 @@ assert result["counts"]["compiled_entry_rows"] == 2
 assert result["category_bytes"]["mapping_metadata"] > 0
 assert result["category_bytes"]["provenance"] > 0
 assert result["category_bytes"]["owned_resolved_rom_literals"] > 0
+ARRAY_BYTES = len(b"""  static const uint32_t m68k_indirect_targets_00000030[] = {
+    UINT32_C(0x00000010),
+    UINT32_C(0x00000020),
+    UINT32_C(0x00000030)
+  };
+  static const uint32_t m68k_indirect_targets_00000032[] = {UINT32_C(0x00000010), UINT32_C(0x00000020)};
+""")
+assert result["indirect_target_arrays"] == {"array_count": 2, "element_count": 5, "bytes": ARRAY_BYTES,
+                                            "max_elements_in_one_array": 3}, result["indirect_target_arrays"]
+assert result["category_bytes"]["target_membership_structures"] >= ARRAY_BYTES
+assert result["cells"].get("aot_function.body", {"bytes": 0})["bytes"] < len(SAMPLE) - ARRAY_BYTES
+assert "aot_function.target_membership" in result["cells"]
+assert result["compiled_entry_table"] == {"rows": 2, "rows_owned_by_ordinary_blocks": 1,
+                                          "rows_owned_by_immutable_rom_aot": 1}
+fp = result["fingerprints"]["final_compiled_entry_address_set"]
+import hashlib
+assert fp == {"count": 2, "sha256": hashlib.sha256(b"00000010\n00000020\n").hexdigest()}, fp
+assert gcs.set_fingerprint([0x20, 0x10, 0x10]) == fp
 metrics = gcs.parse_emitter_metrics("segarecomp: immutable-rom AOT enumeration: aligned_start_count=4 accepted_count=3 rejected_count=1\n")
 assert metrics["immutable_rom_aot"] == {"aligned_start_count": 4, "accepted_count": 3, "rejected_count": 1}
 print("ok")

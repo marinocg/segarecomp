@@ -10,7 +10,7 @@ correctness or test gates.
 ```sh
 python3 tools/generated_code_scalability_report.py measure \
   --segarecomp build/dev/apps/segarecomp/segarecomp --rom games/<rom>.md \
-  [--external-hints .tools/analysis-hints/<sha>.json] \
+  [--external-hints .tools/analysis-hints/<sha>.json] \   # omit => no-external-hints route
   --out-dir .cache/<unique-run> --report .cache/<unique-run>.json
 python3 tools/generated_code_scalability_report.py attribute <generated.c>
 ```
@@ -29,3 +29,14 @@ line-pattern based and follows the emitter's current output shape; update the pa
 emitter format changes (the unit test fails if the partition stops being exact).
 
 Output contains only aggregate counts/bytes/times; raw generated C stays in the ignored `--out-dir`.
+
+Site-local `m68k_indirect_targets_*[]` arrays (repeated computed-control membership data, single- or
+multi-line, in any owner) are attributed to `target_membership_structures`, never to instruction
+bodies; the report also gives array count, total elements, bytes and the largest array.
+
+Exact-set baselines are stored as count + SHA-256 of the sorted canonical `%08x\n` address list
+(addresses themselves are never kept): the admitted immutable-ROM AOT set (from the opt-in,
+measurement-only `emit-general-startup-bridge-c --immutable-aot-address-report <path>` sink, deleted
+by the tool after hashing), and the final compiled-entry address set / its AOT- and block-owned parts
+(from the generated `genesis_compiled_entries[]` table, the exact table the generated dispatcher
+looks up). Later SEG-022 tasks must reproduce these digests.

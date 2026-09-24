@@ -12,13 +12,15 @@ caller-supplied ephemeral --out-dir.
 
 Subcommands:
   attribute FILE.c            attribute an existing generated source (streaming, exact byte sum)
-  measure --rom ... [--external-hints H | --no-external-hints] --out-dir D
-                              emit + attribute + compile + link for one route
+  measure --rom ... [--external-hints H] --out-dir D
+                              emit + attribute + compile + link for one route; omitting
+                              --external-hints selects the no-external-hints route
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -53,6 +55,8 @@ _FRONTIER = re.compile(rb"^\s*(?:GenesisControlTransfer frontier\b|frontier\.|re
 _MEMBERSHIP = re.compile(rb"^\s*(?:if \(runtime->pc == UINT32_C\(|\|\| runtime->pc == )")
 _RETIRE = re.compile(rb"^\s*(?:\{ const uint32_t m68k_retirement_pc\b|if \(retired\.|return retired;|"
                      rb"runtime->pc = pc;|uint32_t pc = runtime->pc;|#define pc |#undef pc)")
+_INDIRECT_ARRAY_START = re.compile(rb"static const uint32_t m68k_indirect_targets_\w+\[\]")
+_ENTRY_ROW_ADDR = re.compile(rb"^\s*\{ UINT32_C\(0x([0-9A-Fa-f]+)\), genesis_(aot|block)_")
 _ENTRY_ROW = re.compile(rb"^\s*\{ UINT32_C\(0x[0-9A-Fa-f]+\), genesis_(?:aot|block)_")
 
 _FUNC_RE = {
@@ -90,6 +94,13 @@ def classify_line(region: str, line: bytes) -> str:
     return "body"
 
 
+def set_fingerprint(addresses) -> dict:
+    """Count + SHA-256 over the sorted, canonical `%08x\\n` serialization (no addresses retained)."""
+    ordered = sorted(set(addresses))
+    digest = hashlib.sha256("".join(f"{a:08x}\n" for a in ordered).encode("ascii")).hexdigest()
+    return {"count": len(ordered), "sha256": digest}
+
+
 def attribute(path: pathlib.Path) -> dict:
     cells: dict[str, list[int]] = {}
     counts = {"aot_function": 0, "ordinary_block": 0, "frontier_stop_fn": 0, "tier1_stop_fn": 0,
@@ -97,6 +108,10 @@ def attribute(path: pathlib.Path) -> dict:
     total_bytes = total_lines = 0
     region = "prelude"
     fn_sizes: dict[str, list[int]] = {"aot_function": [], "ordinary_block": []}
+    fn_array_bytes: dict[str, list[int]] = {"aot_function": [], "ordinary_block": []}
+    in_array = False
+    array_count = array_elements = array_bytes = array_max = cur_elements = 0
+    entry_addresses = {"aot": [], "block": []}
     with path.open("rb") as handle:
         for line in handle:
             total_bytes += len(line)
@@ -107,6 +122,7 @@ def attribute(path: pathlib.Path) -> dict:
                         region = name
                         if name in fn_sizes:
                             fn_sizes[name].append(0)
+                            fn_array_bytes[name].append(0)
                         if name in counts:
                             counts[name] += 1
                         break
@@ -116,6 +132,28 @@ def attribute(path: pathlib.Path) -> dict:
             if region in fn_sizes:
                 fn_sizes[region][-1] += len(line)
             cls = classify_line(region, line)
+            if region == "entry_table":
+                em = _ENTRY_ROW_ADDR.match(line)
+                if em:
+                    entry_addresses[em.group(2).decode()].append(int(em.group(1), 16))
+            # Site-local indirect-target membership arrays (possibly multi-line) are target
+            # membership data wherever they are emitted, not instruction-lowering body.
+            if not in_array and region not in ("entry_table", "owned_literals") \
+                    and _INDIRECT_ARRAY_START.search(line):
+                in_array = True
+                array_count += 1
+                cur_elements = 0
+            if in_array:
+                cls = "target_membership"
+                n = line.count(b"UINT32_C(")
+                cur_elements += n
+                array_elements += n
+                array_bytes += len(line)
+                if region in fn_array_bytes:
+                    fn_array_bytes[region][-1] += len(line)
+                if b"};" in line:
+                    in_array = False
+                    array_max = max(array_max, cur_elements)
             if region == "entry_table" and cls == "compiled_entry_table":
                 counts["compiled_entry_rows"] += 1
             cell = cells.setdefault(f"{region}.{cls}", [0, 0])
@@ -149,7 +187,7 @@ def attribute(path: pathlib.Path) -> dict:
         assigned.update(members)
     residual_cells = {k: v[0] for k, v in cells.items() if k not in assigned}
     category_bytes["unattributed_residual"] = sum(residual_cells.values())
-    def distribution(sizes: list[int]) -> dict:
+    def distribution(sizes: list[int], arrays: list[int]) -> dict:
         if not sizes:
             return {"count": 0}
         ordered = sorted(sizes)
@@ -157,10 +195,13 @@ def attribute(path: pathlib.Path) -> dict:
         return {"count": len(ordered), "total_bytes": sum(ordered), "mean_bytes": sum(ordered) // len(ordered),
                 "p50_bytes": pick(0.5), "p90_bytes": pick(0.9), "p99_bytes": pick(0.99), "max_bytes": ordered[-1],
                 "functions_over_100kib": sum(1 for x in ordered if x > 102400),
-                "bytes_in_functions_over_100kib": sum(x for x in ordered if x > 102400)}
+                "bytes_in_functions_over_100kib": sum(x for x in ordered if x > 102400),
+                "indirect_target_array_bytes_in_functions_over_100kib":
+                    sum(a for x, a in zip(sizes, arrays) if x > 102400),
+                "indirect_target_array_bytes_in_all_functions": sum(arrays)}
 
     return {
-        "function_size_distribution": {k: distribution(v) for k, v in fn_sizes.items()},
+        "function_size_distribution": {k: distribution(v, fn_array_bytes[k]) for k, v in fn_sizes.items()},
         "total_bytes": total_bytes,
         "total_lines": total_lines,
         "category_bytes": category_bytes,
@@ -168,6 +209,16 @@ def attribute(path: pathlib.Path) -> dict:
         "category_sum_bytes": sum(category_bytes.values()),
         "cells": {k: {"bytes": v[0], "lines": v[1]} for k, v in sorted(cells.items())},
         "counts": counts,
+        "indirect_target_arrays": {"array_count": array_count, "element_count": array_elements,
+                                   "bytes": array_bytes, "max_elements_in_one_array": array_max},
+        "compiled_entry_table": {"rows": len(entry_addresses["aot"]) + len(entry_addresses["block"]),
+                                 "rows_owned_by_ordinary_blocks": len(entry_addresses["block"]),
+                                 "rows_owned_by_immutable_rom_aot": len(entry_addresses["aot"])},
+        "fingerprints": {
+            "final_compiled_entry_address_set": set_fingerprint(entry_addresses["aot"] + entry_addresses["block"]),
+            "aot_owned_entry_address_set": set_fingerprint(entry_addresses["aot"]),
+            "ordinary_block_entry_address_set": set_fingerprint(entry_addresses["block"]),
+        },
     }
 
 
@@ -214,7 +265,6 @@ def measure(args) -> dict:
     out = pathlib.Path(args.out_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
     rom = pathlib.Path(args.rom).resolve()
-    import hashlib
     digest = hashlib.sha256(rom.read_bytes()).hexdigest()
     src = out / "generated.c"
     cmd = [args.segarecomp, "emit-general-startup-bridge-c", "--rom", str(rom), "--reset-entry",
@@ -222,6 +272,8 @@ def measure(args) -> dict:
     if args.external_hints:
         cmd += ["--external-hints", args.external_hints]
     cmd += ["--immutable-rom-aot"]
+    admitted_sink = out / "admitted_aot_addresses.txt"
+    cmd += ["--immutable-aot-address-report", str(admitted_sink)]
     with src.open("wb") as handle:
         gen = timed(cmd, stdout=handle)
     report: dict = {
@@ -234,6 +286,9 @@ def measure(args) -> dict:
     if gen["returncode"] != 0:
         return report
     report["source"] = attribute(src)
+    addresses = [int(x, 16) for x in admitted_sink.read_text().split()]
+    admitted_sink.unlink()  # ephemeral: only count + digest are retained
+    report["fingerprints"] = {"admitted_immutable_rom_aot_address_set": set_fingerprint(addresses)}
     runtime_dir = pathlib.Path(args.product_root) / "platforms" / "genesis" / "runtime"
     flags = [args.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", args.opt, "-I", str(runtime_dir)]
     obj = out / "generated.o"

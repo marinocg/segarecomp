@@ -16,10 +16,12 @@
 #include <charconv>
 #include <cstdint>
 #include <exception>
+#include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 void print_usage(std::ostream &output) {
@@ -30,7 +32,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-rom-aot] [--provenance-diagnostics]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot] [--provenance-diagnostics]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
                "  segarecomp probe-genesis-startup-mapping <address-hex8> <width-decimal> <image-length-hex16>\n";
@@ -80,6 +82,11 @@ int main(int argc, char **argv) {
       bool immutable_rom_aot = false;
       // SEG-020-T002: opt-in provenance diagnostic table appended to the generated C.
       bool provenance_diagnostics = false;
+      // SEG-022-T001: opt-in, measurement-only sink for the admitted immutable-ROM AOT
+      // address set (sorted, one hex address per line). Ephemeral: the measurement tool
+      // hashes it and never stores the addresses. It reads the existing analysis result
+      // and cannot alter generation.
+      std::optional<std::string_view> immutable_aot_address_report;
       for (int index = 4; index < argc;) {
         const std::string_view option = argv[index];
         if (option == "--reset-entry") {
@@ -89,6 +96,10 @@ int main(int argc, char **argv) {
           if (immutable_rom_aot) { print_usage(std::cerr); return 2; }
           immutable_rom_aot = true;
           ++index;
+        } else if (option == "--immutable-aot-address-report") {
+          if (immutable_aot_address_report || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          immutable_aot_address_report = argv[index + 1];
+          index += 2;
         } else if (option == "--provenance-diagnostics") {
           if (provenance_diagnostics) { print_usage(std::cerr); return 2; }
           provenance_diagnostics = true;
@@ -240,6 +251,21 @@ int main(int argc, char **argv) {
         for (const auto &range : program->immutable_rom_aot_ranges)
           aligned_start_count += (static_cast<std::uint64_t>(range.end_address) - range.begin_address + 1U) / 2U;
         std::uint64_t accepted_count = 0U;
+        if (immutable_aot_address_report) {
+          std::vector<std::uint32_t> admitted;
+          const auto collect = [&admitted](const auto &entries) {
+            for (const auto &entry : entries)
+              admitted.push_back(static_cast<std::uint32_t>(entry.decoded.provenance.source.address.value));
+          };
+          if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result))
+            collect(partial->accepted_prefix.immutable_rom_aot_entries);
+          else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result))
+            collect(accepted->immutable_rom_aot_entries);
+          std::sort(admitted.begin(), admitted.end());
+          std::ofstream sink{std::string(*immutable_aot_address_report)};
+          for (const auto address : admitted) sink << std::hex << address << '\n';
+          if (!sink) { std::cerr << "segarecomp: cannot write immutable-AOT address report\n"; return 2; }
+        }
         if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result))
           accepted_count = partial->accepted_prefix.immutable_rom_aot_entries.size();
         else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result))
