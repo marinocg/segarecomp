@@ -26964,6 +26964,7 @@ const std::vector<std::uint8_t> image{
     0x4AU, 0xC2U,                // F1C TAS D2
     0x4AU, 0xDAU,                // F1E TAS (A2)+
     0x52U, 0xEBU, 0x00U, 0x10U,  // F20 SHI (16,A3)
+    0x57U, 0xD1U,                // F24 SEQ (A1)
 };
 constexpr std::uint32_t first_root = base + 0x08U;
 FrontendProgram program_with() {
@@ -27007,7 +27008,8 @@ int emit_exg_movep_scc_tas_c4_source() {
       0x4AU, 0xDAU,                // B10 TAS (A2)+
       0x4AU, 0xE7U,                // B12 TAS -(A7)
       0x52U, 0xEBU, 0x00U, 0x10U,  // B14 SHI (16,A3)
-      0x4EU, 0x70U,                // B18 RESET
+      0x57U, 0xF9U, 0x00U, 0xFFU, 0x07U, 0x00U,  // B18 SEQ $FF0700.L (foldable absolute: read + write facts)
+      0x4EU, 0x70U,                // B1E RESET
   };
   program.image = {"synthetic-c4-exg-movep-scc-tas-block", image, image.size()};
   program.mapping_claims = {{"synthetic-c4-exg-movep-scc-tas-block", {{}, 0xB00U},
@@ -27176,6 +27178,52 @@ void exg_movep_scc_tas_lift_declare_effects_and_timing() {
          "MOVEP with a missing displacement word is a bounds-safe truncation");
 }
 
+void scc_memory_destination_declares_read_and_write_footprint_and_facts() {
+  using namespace segarecomp;
+  const auto lift = [](std::vector<std::uint8_t> bytes) {
+    const auto decoded = std::get<M68kDecodedInstruction>(decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup));
+    return lift_m68k_instruction(decoded);
+  };
+  const auto memory_effect = m68k_operation_effect(lift({0x57U, 0xD0U}));  // SEQ (A0)
+  expect(memory_effect.resolved_source_ea && memory_effect.resolved_destination_ea &&
+             memory_effect.resolved_source_ea->mode == M68kEaMode::address_indirect &&
+             memory_effect.resolved_destination_ea->mode == M68kEaMode::address_indirect &&
+             !memory_effect.affects_condition_codes,
+         "memory Scc effect metadata declares a destination read (source_ea) and the destination write, no CCR change");
+  const auto register_effect = m68k_operation_effect(lift({0x57U, 0xC3U}));  // SEQ D3
+  expect(!register_effect.resolved_source_ea && register_effect.resolved_destination_ea,
+         "Scc Dn declares no memory read");
+
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  const std::vector<std::uint8_t> image{
+      0x57U, 0xC3U,                                // 0xB00: SEQ D3 (register: no fact)
+      0x57U, 0xF9U, 0x00U, 0xFFU, 0x07U, 0x00U,    // 0xB02: SEQ $00FF0700.L (foldable work-RAM absolute)
+      0x4EU, 0x70U,                                // 0xB08: RESET (frontier)
+  };
+  program.image = {"synthetic/SEG-021-T016/scc-memory-facts", image, image.size()};
+  program.mapping_claims = {{"synthetic-scc-memory-facts", {{}, 0xB00U}, {{}, 0xB0AU}, {0U}, {10U}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "the Scc fact fixture reaches the RESET frontier");
+  if (partial == nullptr) return;
+  const auto &facts = partial->accepted_prefix.static_memory_facts;
+  bool has_read = false, has_write = false;
+  for (const auto &fact : facts) {
+    const bool right = fact.address.value == UINT32_C(0x00FF0700) && fact.width == M68kMemoryAccessWidth::byte &&
+                       fact.region == M68kAbsoluteOperandRegion::synthetic_work_ram &&
+                       fact.operation.source.address.value == 0xB02U;
+    has_read = has_read || (right && fact.role == M68kStaticMemoryFactRole::destination_read &&
+                            fact.direction == M68kMemoryAccessDirection::read);
+    has_write = has_write || (right && fact.role == M68kStaticMemoryFactRole::destination_write &&
+                              fact.direction == M68kMemoryAccessDirection::write);
+  }
+  expect(facts.size() == 2U && has_read && has_write,
+         "memory Scc with a foldable absolute destination retains exactly a destination_read and a destination_write fact; "
+         "Scc Dn retains none");
+}
+
 void exg_movep_scc_tas_host_semantics_ccr_and_bytes() {
   using namespace segarecomp;
   // TAS CCR is the logical-result rule on the operand byte (N/Z set from it, V/C cleared, X preserved).
@@ -27215,6 +27263,37 @@ void exg_movep_scc_tas_generated_c_shapes() {
              scc.find("a[7] = m68k_scc_auto_ea;") > scc.find("return transfer;") &&
              scc.find("a[7] = m68k_scc_auto_ea;") < scc.find("runtime->pc +="),
          "routed Scc (A7)+ steps A7 by two and commits it after the routed write, PC last");
+  // Memory Scc is read before it is written (MC68000: "a memory destination is read before it is written"): one routed BYTE
+  // read, then one routed BYTE write to the same EA, then the single commit, then PC. Dn Scc performs no routed access.
+  const auto count_of = [](const std::string &text, const std::string &needle) {
+    std::size_t count = 0;
+    for (auto at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1)) ++count;
+    return count;
+  };
+  for (const auto &[bytes, commit, step] : std::array<std::tuple<std::vector<std::uint8_t>, std::string, std::string>, 2>{{
+           {{0x57U, 0xDFU}, "a[7] = m68k_scc_auto_ea;", "m68k_scc_auto_ea += UINT32_C(2)"},       // SEQ (A7)+
+           {{0x56U, 0xE7U}, "a[7] = m68k_scc_auto_ea;", "m68k_scc_auto_ea -= UINT32_C(2)"}}}) {  // SNE -(A7)
+    const auto text = emit_m68k_operation_c(lift(bytes), "runtime->d", "runtime->sr", "", &routed);
+    const auto read = text.find("GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &");
+    const auto write = text.find("GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &");
+    expect(read != std::string::npos && write != std::string::npos && read < write &&
+               count_of(text, "genesis_route_access(") == 2U && count_of(text, commit) == 1U &&
+               text.find(commit) > write && text.find(commit) < text.find("runtime->pc +=") &&
+               text.find(step) != std::string::npos && text.find("runtime->sr =") == std::string::npos,
+           "memory Scc auto-update: one routed byte read, then one routed byte write to the same EA, one commit after the "
+           "write, PC last, CCR untouched");
+  }
+  {
+    const auto text = emit_m68k_operation_c(lift({0x57U, 0xD1U}), "runtime->d", "runtime->sr", "", &routed);  // SEQ (A1)
+    const auto read = text.find("GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &");
+    const auto write = text.find("GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &");
+    expect(read != std::string::npos && write != std::string::npos && read < write &&
+               count_of(text, "genesis_route_access(") == 2U && text.find("a[1] =") == std::string::npos,
+           "memory Scc (An): routed byte read before routed byte write, An never updated");
+    const auto dn = emit_m68k_operation_c(lift({0x57U, 0xC3U}), "runtime->d", "runtime->sr", "", &routed);  // SEQ D3
+    expect(dn.find("genesis_route_access(") == std::string::npos && dn.find("runtime->d[3] =") != std::string::npos,
+           "Scc Dn is register-only (no routed access)");
+  }
   const auto tas = emit_m68k_operation_c(lift({0x4AU, 0xE7U}), "runtime->d", "runtime->sr", "", &routed);  // TAS -(A7)
   expect(tas.find("m68k_tas_auto_ea -= UINT32_C(2)") != std::string::npos &&
              tas.find("tas_operand | UINT32_C(0x80)") != std::string::npos &&
@@ -28890,6 +28969,7 @@ int main(int argc, char **argv) {
   exg_movep_scc_tas_lift_declare_effects_and_timing();
   exg_movep_scc_tas_host_semantics_ccr_and_bytes();
   exg_movep_scc_tas_generated_c_shapes();
+  scc_memory_destination_declares_read_and_write_footprint_and_facts();
   exg_movep_scc_tas_aot_dispatch_is_admitted_end_to_end();
   expect(c4_exg_movep_scc_tas_admission() == 0,
          "SEG-021-T016: every legal EXG/MOVEP/Scc/TAS shape passes the C4 preflight with zero gap rows");

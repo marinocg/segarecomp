@@ -302,7 +302,9 @@ divergences; CCR unaffected by EXG/MOVEP/Scc is verified because every vector co
 compares the routed lowering with the direct one for every EXG pair, MOVEP shape, Scc condition and Scc/TAS operand class, and forces
 routed stops on every memory form (no partial architectural state).
 
-Semantics: Scc writes 0xFF/0x00 and never touches CCR; TAS sets N/Z from the operand byte, clears V/C, keeps X and writes the byte with
+Semantics: Scc writes 0xFF/0x00 and never touches CCR; a memory destination is read (byte, value discarded) before it is written and
+`Dn` Scc performs no memory access (generated-C ordering, read-rejected/write-rejected atomicity and auto-update commit-once are proved by
+`genesis_immutable_rom_aot_exg_movep_scc_tas_generated_test`); TAS sets N/Z from the operand byte, clears V/C, keeps X and writes the byte with
 bit 7 set (CPU semantics only: the indivisible bus read-modify-write cycle is platform-owned); MOVEP moves the bytes of the register
 most-significant first to/from every second byte of `d16(An)` and never updates An; EXG changes no CCR bit.
 

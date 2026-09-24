@@ -434,8 +434,10 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
     break;
   case M68kIrKind::set_conditional:
     // SEG-021-T016: Scc writes 0xFF/0x00 to its byte destination and changes no condition code (it only reads
-    // SR through the shared condition owner). Write-only on the CPU side, like CLR.
+    // SR through the shared condition owner). A memory destination is read (value discarded) before it is written
+    // on the MC68000; a Dn destination performs no memory access.
     effect.operand_size = operation.size;
+    if (operation.destination_ea.mode != M68kEaMode::data_register) effect.resolved_source_ea = operation.destination_ea;
     effect.resolved_destination_ea = operation.destination_ea;
     effect.pc = M68kPcEffectKind::advance;
     effect.pc_delta = operation.provenance.length.value;

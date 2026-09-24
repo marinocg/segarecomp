@@ -1386,7 +1386,6 @@ bool valid_c4_static_memory_fact(
     }
     break;
   case M68kInstructionKind::clr:
-  case M68kInstructionKind::set_conditional:  // SEG-021-T016: Scc is CLR-shaped
   case M68kInstructionKind::andi:
   case M68kInstructionKind::ori:
   case M68kInstructionKind::eori:
@@ -1516,6 +1515,7 @@ bool valid_c4_static_memory_fact(
   case M68kInstructionKind::negate_extended:
   case M68kInstructionKind::negate_decimal:
   case M68kInstructionKind::test_and_set:  // SEG-021-T016: TAS is a byte one-address RMW like NOT
+  case M68kInstructionKind::set_conditional:  // SEG-021-T016: memory Scc reads then writes its byte destination
   case M68kInstructionKind::not_operand:
     // SEG-007-T168: NOT has no second operand at all (unlike SUBQ's
     // quick-immediate source); its sole destination is a full RMW operand,
@@ -2426,7 +2426,7 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     // SEG-021-T008: an auto-updating destination lowers through the bit-family deferred address commit.
     if (m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
-  } else if (operation.kind == M68kIrKind::write_clr || operation.kind == M68kIrKind::set_conditional) {
+  } else if (operation.kind == M68kIrKind::write_clr) {
     // SEG-007-T157 / ADR-0019 Stage B: an auto-updating `(An)+` / `-(An)`
     // CLR destination is now lowered by the established deferred-address-
     // commit path in emit_m68k_operation_c (the same pattern the add
@@ -2437,8 +2437,9 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
   } else if (operation.kind == M68kIrKind::logical_not || operation.kind == M68kIrKind::shift_rotate_memory ||
              operation.kind == M68kIrKind::negate_word || operation.kind == M68kIrKind::negate_extended ||
-             operation.kind == M68kIrKind::negate_decimal || operation.kind == M68kIrKind::test_and_set) {
-    // SEG-021-T016: TAS shares it too.
+             operation.kind == M68kIrKind::negate_decimal || operation.kind == M68kIrKind::test_and_set ||
+             operation.kind == M68kIrKind::set_conditional) {
+    // SEG-021-T016: TAS and memory Scc (read then write) share it too.
     // SEG-021-T014: NEG/NEGX share NOT's one-address RMW gap shape.
     // SEG-007-T168: NOT has no source operand at all (unlike the sibling
     // logical family AND/OR/EOR/ANDI/ORI/EORI, which always carry one, just
@@ -3031,7 +3032,6 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
       }
       break;
     case M68kInstructionKind::clr:
-    case M68kInstructionKind::set_conditional:  // SEG-021-T016: Scc is CLR-shaped
     case M68kInstructionKind::andi:
     case M68kInstructionKind::ori:
     case M68kInstructionKind::eori:
@@ -3108,6 +3108,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
     case M68kInstructionKind::negate_extended:
     case M68kInstructionKind::negate_decimal:
     case M68kInstructionKind::test_and_set:  // SEG-021-T016
+    case M68kInstructionKind::set_conditional:  // SEG-021-T016: memory Scc is read-then-write like TAS
     case M68kInstructionKind::not_operand:
       // SEG-007-T168: NOT has no second operand at all (unlike AND/OR/EOR);
       // its sole destination is a full RMW operand needing both
@@ -3335,10 +3336,6 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
         (instruction->kind == M68kInstructionKind::clr &&
          !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
                        M68kInstructionKind::clr)) ||
-        // SEG-021-T016: Scc's write-only byte destination is required exactly like CLR's.
-        (instruction->kind == M68kInstructionKind::set_conditional &&
-         !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
-                       M68kInstructionKind::set_conditional)) ||
         // SEG-007-T071: ANDI's destination is required exactly like CLR's --
         // a foldable absolute EA must have a retained fact, and (since `kind`
         // is `andi`, not `move`) a predecrement/postincrement destination is
@@ -3380,7 +3377,8 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
         ((instruction->kind == M68kInstructionKind::negate_word ||
           instruction->kind == M68kInstructionKind::negate_extended ||
           instruction->kind == M68kInstructionKind::negate_decimal ||
-          instruction->kind == M68kInstructionKind::test_and_set) &&  // SEG-021-T016: TAS is one-address RMW too
+          instruction->kind == M68kInstructionKind::test_and_set ||  // SEG-021-T016: TAS is one-address RMW too
+          instruction->kind == M68kInstructionKind::set_conditional) &&  // memory Scc reads then writes (Dn is register-only)
          instruction->destination_ea.mode != M68kEaMode::data_register &&
          (!require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_read, instruction->kind) ||
           !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
@@ -5082,7 +5080,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
         break;
       }
       case M68kIrKind::negate_decimal:
-      // SEG-021-T016: TAS is a byte one-address RMW and Scc a write-only byte destination; both use this fact-lookup /
+      // SEG-021-T016: TAS and memory Scc are byte one-address read-then-write operands; both use this fact-lookup /
       // region-threading discipline and advance the configured program counter directly (no macro bridge).
       case M68kIrKind::test_and_set:
       case M68kIrKind::set_conditional:

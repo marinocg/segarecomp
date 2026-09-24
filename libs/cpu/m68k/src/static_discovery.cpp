@@ -1670,16 +1670,16 @@ class M68kStaticGraphWalker {
                                                       M68kMemoryAccessDirection::write, decoded.provenance))
           return reject_operand(pc_value, decoded, *diagnostic, decoded.destination_ea.absolute_address);
       }
-    } else if (decoded.kind == M68kInstructionKind::clr || decoded.kind == M68kInstructionKind::set_conditional) {
-      // SEG-021-T016: Scc is CLR-shaped on the CPU side (a write-only byte destination).
+    } else if (decoded.kind == M68kInstructionKind::clr) {
       if (const auto diagnostic = resolve_operand(decoded.destination_ea, decoded.size,
                                                     M68kMemoryAccessDirection::write, decoded.provenance))
         return reject_operand(pc_value, decoded, *diagnostic, decoded.destination_ea.absolute_address);
     } else if (decoded.kind == M68kInstructionKind::not_operand || decoded.kind == M68kInstructionKind::negate_word ||
                decoded.kind == M68kInstructionKind::negate_extended ||
                decoded.kind == M68kInstructionKind::negate_decimal ||
-               decoded.kind == M68kInstructionKind::test_and_set) {
-      // SEG-021-T016: TAS is a byte one-address RMW like NOT.
+               decoded.kind == M68kInstructionKind::test_and_set ||
+               decoded.kind == M68kInstructionKind::set_conditional) {
+      // SEG-021-T016: TAS is a byte one-address RMW like NOT; memory Scc is read before it is written (68000).
       // SEG-021-T014: NEG/NEGX share NOT's one-address read-modify-write operand contract.
       // SEG-007-T168: NOT is a genuine one-address read-modify-write (unlike
       // CLR's write-only shape), exactly like shift_rotate's memory form

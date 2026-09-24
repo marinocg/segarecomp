@@ -2044,8 +2044,12 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
   }
   case M68kIrKind::set_conditional: {
     // SEG-021-T016: Scc writes 0xFF (condition true) or 0x00 to its byte destination and changes no condition code.
-    // The condition comes from the one shared m68k_condition_c_expr owner (Bcc/DBcc use the same). Lowering mirrors
-    // CLR's write-only destination, including the deferred address-register commit for an auto-updating operand.
+    // The condition comes from the one shared m68k_condition_c_expr owner (Bcc/DBcc use the same). A Dn destination is
+    // register-only (no memory access). A MEMORY destination is read before it is written (MC68000 family: "a memory
+    // destination is read before it is written"; the value is discarded and the condition does not depend on it), so
+    // it is lowered NOT/TAS-shaped: one EA computation, one routed byte read, one routed byte write to the same EA,
+    // the single deferred address-register commit strictly after the write, PC last. A stop on the read or write
+    // returns from inside that access, before any commit, CCR change or PC advance.
     if (memory != nullptr) {
       std::ostringstream condition_text;
       condition_text << "const uint8_t m68k_scc_condition_true = (uint8_t)("
@@ -2056,6 +2060,17 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
       const auto length = operation.provenance.length.value;
       const bool auto_destination = operation.destination_ea.mode == M68kEaMode::address_predec ||
                                     operation.destination_ea.mode == M68kEaMode::address_postinc;
+      if (operation.destination_ea.mode == M68kEaMode::data_register) {
+        unsigned temp_ordinal = 0U;
+        std::ostringstream write_prelude;
+        const auto write = m68k_emit_ea_write(operation.destination_ea, operation.size, data_registers, *memory, value,
+                                              write_prelude, temp_ordinal);
+        if (write.ok) {
+          output << "{\n" << condition_text.str() << "\n" << write_prelude.str() << write.expression << "\n"
+                 << write.postlude << memory->program_counter << " += UINT32_C(" << length << ");\n}\n";
+        }
+        break;
+      }
       if (memory->runtime_routing && auto_destination) {
         const auto reg = static_cast<unsigned>(operation.destination_ea.reg);
         const auto step = reg == 7U ? 2U : 1U;  // byte operand; A7 steps by two
@@ -2065,6 +2080,9 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         body << condition_text.str() << "\nuint32_t m68k_scc_auto_ea = " << an_expr << ";\n";
         if (operation.destination_ea.mode == M68kEaMode::address_predec)
           body << "m68k_scc_auto_ea -= UINT32_C(" << step << ");\n";
+        std::string discarded;
+        m68k_emit_routed_read(body, "m68k_scc_auto_ea", operation.size, *memory, discarded, temp_ordinal);
+        body << "(void)" << discarded << ";\n";
         m68k_emit_routed_write(body, "m68k_scc_auto_ea", operation.size, *memory, value, temp_ordinal);
         if (operation.destination_ea.mode == M68kEaMode::address_postinc)
           body << "m68k_scc_auto_ea += UINT32_C(" << step << ");\n";
@@ -2073,12 +2091,21 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         break;
       }
       unsigned temp_ordinal = 0U;
-      std::ostringstream write_prelude;
-      const auto write = m68k_emit_ea_write(operation.destination_ea, operation.size, data_registers, *memory, value,
-                                            write_prelude, temp_ordinal);
-      if (write.ok) {
-        output << "{\n" << condition_text.str() << "\n" << write_prelude.str() << write.expression << "\n"
-               << write.postlude << memory->program_counter << " += UINT32_C(" << length << ");\n}\n";
+      std::ostringstream prelude;
+      const auto discarded = m68k_emit_ea_read(operation.destination_ea, operation.size, data_registers, *memory,
+                                               prelude, temp_ordinal);
+      if (discarded.ok) {
+        auto write_ea = operation.destination_ea;
+        if (write_ea.mode == M68kEaMode::address_predec || write_ea.mode == M68kEaMode::address_postinc)
+          write_ea.mode = M68kEaMode::address_indirect;  // the read already applied the single pointer mutation
+        std::ostringstream write_prelude;
+        const auto write = m68k_emit_ea_write(write_ea, operation.size, data_registers, *memory, value, write_prelude,
+                                              temp_ordinal);
+        if (write.ok) {
+          output << "{\n" << condition_text.str() << "\n" << prelude.str() << "(void)(" << discarded.expression
+                 << ");\n" << write_prelude.str() << write.expression << "\n" << discarded.postlude
+                 << memory->program_counter << " += UINT32_C(" << length << ");\n}\n";
+        }
       }
     }
     break;

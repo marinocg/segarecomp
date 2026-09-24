@@ -317,11 +317,13 @@ instead.
   construction: MOVEP's `001` operand field is never a legal bit-operation destination, DBcc owns Scc's mode-001 slot, and EXG's opmodes
   are illegal AND encodings. Scc reuses `M68kCondition`/`m68k_condition_c_expr` (all 16 conditions, T and F included).
 - Lowering (`libs/codegen/c11/src/m68k.cpp`): EXG swaps through one local; MOVEP performs each byte as its own routed/guarded byte access
-  (all reads before the Dn write, PC last, An never updated); Scc is CLR-shaped (write-only byte; the auto-updating operand uses the
-  operation-local deferred commit); TAS is NOT-shaped (one-address byte RMW, N/Z from the operand byte, V/C cleared, X kept, then bit 7 set;
+  (all reads before the Dn write, PC last, An never updated); Scc is NOT/TAS-shaped for a memory destination (MC68000: "a memory destination is read before it is written": one EA computation, one
+  routed BYTE read whose value is discarded, one routed BYTE write of 0xFF/0x00 to the same EA, the single operation-local deferred
+  commit strictly after a successful write, PC last; a failed read leaves no write, no commit, PC and CCR unchanged, a failed write after a
+  successful read leaves no commit, PC and CCR unchanged, and completed device read effects are not rolled back; `Dn` Scc is register-only); TAS is NOT-shaped (one-address byte RMW, N/Z from the operand byte, V/C cleared, X kept, then bit 7 set;
   the indivisible bus cycle stays platform-owned and is not modelled).
-- C4/AOT: all four are represented C4 kinds; Scc has CLR's and TAS has NOT's retained-fact shape (auto-updating, indexed and register
-  operands need none); all are admitted family-level to immutable-ROM AOT. Static discovery resolves Scc like CLR and TAS like NOT.
+- C4/AOT: all four are represented C4 kinds; memory Scc and TAS have NOT's retained-fact shape (destination_read plus destination_write; `Dn` retains none, effect metadata declares the read) (auto-updating, indexed and register
+  operands need none); all are admitted family-level to immutable-ROM AOT. Static discovery resolves both Scc and TAS like NOT.
 - Timing: Table 8-4 EXG 6, Table 8-3 MOVEP 16 (word) / 24 (long), Table 8-6 TAS (Dn 4, memory 10 + EA) and Scc memory rows (8 + EA).
   Scc `Dn` is 4 (false) / 6 (true): condition-dependent, so `m68k_instruction_cycles` records it timing-unsupported and the retirement
   seam supplies the dynamic expression `m68k_scc_true ? 6 : 4` (assigned by the lowerer through `timing_scc_true`).

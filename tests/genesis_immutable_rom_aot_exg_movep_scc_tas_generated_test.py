@@ -129,11 +129,90 @@ int main(void) {
 
   /* SHI (16,A3): hi = !C && !Z. True with a clear CCR -> 0xFF at A3+16 (16 cycles); false with C set -> 0x00. */
   runtime = fresh(0x0F20, 0x2700); runtime.a[3] = 0x00FF0600; runtime.work_ram[0x610] = 0x33;
-  step_to_end(&runtime, 0x0F24, 16);
+  step(&runtime, 0x0F24, 16);
   assert(runtime.work_ram[0x610] == 0xFF);
   runtime = fresh(0x0F20, 0x2701); runtime.a[3] = 0x00FF0600; runtime.work_ram[0x610] = 0x33;
-  step_to_end(&runtime, 0x0F24, 16);
+  step(&runtime, 0x0F24, 16);
   assert(runtime.work_ram[0x610] == 0x00 && runtime.sr == 0x2701);
+
+  /* SEQ (A1): memory destination, 8 + 4 = 12 cycles; 0xFF when Z set, 0x00 when clear; CCR unchanged, A1 unchanged. */
+  runtime = fresh(0x0F24, 0x2704); runtime.a[1] = 0x00FF0700; runtime.work_ram[0x700] = 0x33;
+  step_to_end(&runtime, 0x0F26, 12);
+  assert(runtime.work_ram[0x700] == 0xFF && runtime.a[1] == 0x00FF0700 && runtime.sr == 0x2704);
+  runtime = fresh(0x0F24, 0x271B); runtime.a[1] = 0x00FF0700; runtime.work_ram[0x700] = 0x33;
+  step_to_end(&runtime, 0x0F26, 12);
+  assert(runtime.work_ram[0x700] == 0x00 && runtime.a[1] == 0x00FF0700 && runtime.sr == 0x271B);
+  /* Auto-update forms commit exactly once: (An)+ by one, -(A7) by two (byte operand). */
+  runtime = fresh(0x0F18, 0x2700); runtime.a[0] = 0x00FF0301;
+  step(&runtime, 0x0F1A, 12);
+  assert(runtime.a[0] == 0x00FF0302 && runtime.work_ram[0x301] == 0xFF);
+  runtime = fresh(0x0F1A, 0x2700); runtime.a[7] = 0x00FF0400;
+  step(&runtime, 0x0F1C, 14);
+  assert(runtime.a[7] == 0x00FF03FE && runtime.work_ram[0x3FF] == 0x00);
+
+  /* Dn Scc is register-only: with every address register aimed at the write-only PSG port (whose byte read is
+     rejected) it must still succeed, touch no device, keep the upper 24 bits and the CCR. */
+  runtime = fresh(0x0F16, 0x2704); runtime.d[3] = 0xDEADBE00;
+  runtime.a[0] = runtime.a[1] = runtime.a[7] = 0x00C00011;
+  step(&runtime, 0x0F18, 6);
+  assert(runtime.d[3] == 0xDEADBEFF && runtime.sr == 0x2704 && runtime.devices.psg.latch_valid == 0U);
+  runtime = fresh(0x0F16, 0x2700); runtime.d[3] = 0xDEADBEFF;
+  runtime.a[0] = runtime.a[1] = runtime.a[7] = 0x00C00011;
+  step(&runtime, 0x0F18, 4);
+  assert(runtime.d[3] == 0xDEADBE00 && runtime.devices.psg.latch_valid == 0U);
+
+  /* Memory Scc reads its byte destination BEFORE writing it. The PSG port at 0xC00011 is an existing asymmetric
+     lane: a byte WRITE is recognised (proved directly below) but a byte READ is rejected, so a write-only implementation
+     would have succeeded. Required: the stop is the READ, no device write, PC/CCR/auto-update register unchanged. */
+  {
+    GenesisRuntime probe = fresh(0x0F18, 0x2700);
+    uint32_t probe_value = 0xFF; GenesisRuntimeStop probe_stop = {0};
+    assert(genesis_route_access(&probe, 0x00C00011, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &probe_value, &probe_stop) ==
+           GENESIS_ACCESS_OK && probe.devices.psg.latch_valid == 1U);
+    probe_value = 0;
+    assert(genesis_route_access(&probe, 0x00C00011, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &probe_value, &probe_stop) !=
+           GENESIS_ACCESS_OK);
+  }
+  /* SNE (A0)+ (true: Z clear). */
+  runtime = fresh(0x0F18, 0x2700); runtime.a[0] = 0x00C00011;
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_STOP && transfer.stop.provenance.has_access &&
+         transfer.stop.provenance.access_direction == GENESIS_ACCESS_READ && transfer.stop.provenance.access_address == 0x00C00011U);
+  assert(runtime.pc == 0x0F18 && runtime.a[0] == 0x00C00011 && runtime.sr == 0x2700 && runtime.devices.psg.latch_valid == 0U &&
+         runtime.devices.psg.attenuation[3] == 0U);
+  /* ST -(A7): A7 = 0xC00013 decrements by two to the same port; the read stops it, A7 untouched. */
+  runtime = fresh(0x0F1A, 0x2715); runtime.a[7] = 0x00C00013;
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_STOP && transfer.stop.provenance.access_direction == GENESIS_ACCESS_READ &&
+         transfer.stop.provenance.access_address == 0x00C00011U);
+  assert(runtime.pc == 0x0F1A && runtime.a[7] == 0x00C00013 && runtime.sr == 0x2715 && runtime.devices.psg.latch_valid == 0U);
+  /* SEQ (A1) (true: Z set). */
+  runtime = fresh(0x0F24, 0x2704); runtime.a[1] = 0x00C00011;
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_STOP && transfer.stop.provenance.access_direction == GENESIS_ACCESS_READ);
+  assert(runtime.pc == 0x0F24 && runtime.a[1] == 0x00C00011 && runtime.sr == 0x2704 && runtime.devices.psg.latch_valid == 0U);
+
+  /* Write failure AFTER a successful read: an owned read-only cartridge region is readable but not writable. The stop
+     is the WRITE (so the read was performed first); no auto-update commit, PC and CCR unchanged, region data intact. */
+  {
+    static const uint8_t rom_bytes[16] = {0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+                                          0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F};
+    const GenesisOwnedCartridgeRegion region = {UINT32_C(0x1000), UINT32_C(0x1010), rom_bytes, 16U};
+    runtime = fresh(0x0F18, 0x2700); runtime.owned_regions = &region; runtime.owned_region_count = 1U; runtime.a[0] = 0x1004;
+    transfer = genesis_bridge_dispatch(&runtime);
+    assert(transfer.kind == GENESIS_STOP && transfer.stop.provenance.access_direction == GENESIS_ACCESS_WRITE &&
+           transfer.stop.provenance.access_address == 0x1004U);
+    assert(runtime.pc == 0x0F18 && runtime.a[0] == 0x1004 && runtime.sr == 0x2700 && rom_bytes[4] == 0x14);
+    runtime = fresh(0x0F1A, 0x2715); runtime.owned_regions = &region; runtime.owned_region_count = 1U; runtime.a[7] = 0x1006;
+    transfer = genesis_bridge_dispatch(&runtime);
+    assert(transfer.kind == GENESIS_STOP && transfer.stop.provenance.access_direction == GENESIS_ACCESS_WRITE &&
+           transfer.stop.provenance.access_address == 0x1004U);
+    assert(runtime.pc == 0x0F1A && runtime.a[7] == 0x1006 && runtime.sr == 0x2715 && rom_bytes[4] == 0x14);
+    runtime = fresh(0x0F24, 0x2704); runtime.owned_regions = &region; runtime.owned_region_count = 1U; runtime.a[1] = 0x1008;
+    transfer = genesis_bridge_dispatch(&runtime);
+    assert(transfer.kind == GENESIS_STOP && transfer.stop.provenance.access_direction == GENESIS_ACCESS_WRITE);
+    assert(runtime.pc == 0x0F24 && runtime.a[1] == 0x1008 && runtime.sr == 0x2704 && rom_bytes[8] == 0x18);
+  }
   return 0;
 }
 '''
@@ -152,9 +231,9 @@ int main(void) {
   runtime.a[0] = 0x00FF0200; runtime.a[2] = 0x00FF0500; runtime.a[3] = 0x00FF0600; runtime.a[7] = 0x00FF0400;
   memset(runtime.work_ram + 0x210, 0xEE, 8);
   runtime.work_ram[0x214] = 0x77; runtime.work_ram[0x216] = 0x88; runtime.work_ram[0x200] = 0x55;
-  runtime.work_ram[0x500] = 0x00; runtime.work_ram[0x3FE] = 0x81;
+  runtime.work_ram[0x500] = 0x00; runtime.work_ram[0x3FE] = 0x81; runtime.work_ram[0x700] = 0x55;
   do { transfer = genesis_bridge_dispatch(&runtime); } while (transfer.kind == GENESIS_CONTINUE_AT_PC);
-  assert(transfer.kind == GENESIS_STOP && runtime.pc == 0x0B18);
+  assert(transfer.kind == GENESIS_STOP && runtime.pc == 0x0B1E);
   /* EXG D1,D2 swaps; MOVEP.W D1,(16,A0) stores 56/00 at +0/+2; MOVEP.L reloads 56 00 77 88 (odd bytes untouched). */
   assert(runtime.d[1] == 0x56007788 && runtime.work_ram[0x210] == 0x56 && runtime.work_ram[0x211] == 0xEE &&
          runtime.work_ram[0x212] == 0x00 && runtime.work_ram[0x213] == 0xEE);
@@ -165,9 +244,36 @@ int main(void) {
   assert(runtime.work_ram[0x3FE] == 0x81 && runtime.a[7] == 0x00FF03FE); /* TAS -(A7): byte step two, 0x81 stays 0x81 */
   assert(runtime.sr == 0x2708);                                         /* last TAS: N set, Z/V/C clear, X kept */
   assert(runtime.work_ram[0x610] == 0xFF);                              /* SHI: hi with N only -> true */
+  assert(runtime.work_ram[0x700] == 0x00);                              /* SEQ $FF0700.L: Z clear -> false, read+write facts */
   return 0;
 }
 '''
+
+
+def root_text(source, address):
+    start = source.index("static GenesisControlTransfer genesis_aot_%s(" % address)
+    end = source.find("static GenesisControlTransfer ", start + 10)
+    return source[start:end if end != -1 else len(source)]
+
+
+def check_scc_read_before_write(source):
+    """Memory Scc must route exactly one BYTE read and then one BYTE write to the same EA (MC68000: a memory destination
+    is read before it is written); auto-update forms commit the live address register exactly once, after the write."""
+    dn = root_text(source, "00000F16")
+    assert "genesis_route_access(" not in dn, "Scc Dn is register-only"
+    for address, register, auto in (("00000F18", "a[0]", True), ("00000F1A", "a[7]", True), ("00000F24", "a[1]", False)):
+        text = root_text(source, address)
+        calls = [i for i in range(len(text)) if text.startswith("genesis_route_access(", i)]
+        assert len(calls) == 2, (address, len(calls))
+        first, second = text[calls[0]:calls[1]], text[calls[1]:text.index("pc += ", calls[1])]
+        assert "GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &" in first, address
+        assert "GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &" in second, address
+        if auto:
+            assert first.count("m68k_scc_auto_ea") == 1 and second.count("m68k_scc_auto_ea") >= 1, address
+            commit = "runtime->%s = m68k_scc_auto_ea;" % register
+            assert text.count(commit) == 1 and text.index(commit) > calls[1], address
+        else:
+            assert "runtime->%s =" % register not in text, "(An) is never updated"
 
 
 def main():
@@ -175,8 +281,9 @@ def main():
     result = subprocess.run([emitter, "--emit-exg-movep-scc-tas-aot"], text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
     for address in ("00000F08", "00000F0A", "00000F0C", "00000F0E", "00000F12", "00000F16", "00000F18", "00000F1A",
-                    "00000F1C", "00000F1E", "00000F20"):
+                    "00000F1C", "00000F1E", "00000F20", "00000F24"):
         assert "genesis_aot_" + address in result.stdout, address
+    check_scc_read_before_write(result.stdout)
     with tempfile.TemporaryDirectory() as temporary:
         path = pathlib.Path(temporary)
         (path / "generated.c").write_text(result.stdout)
