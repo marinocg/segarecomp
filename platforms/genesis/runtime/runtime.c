@@ -107,16 +107,25 @@ static int genesis_is_device(uint32_t address) {
    docs/architecture/genesis-controller-io-startup-read-compatibility-policy.md).
    DATA bit 7 has no corresponding CTRL direction bit (MCD1: "Bit 7 isn't
    connected to any pin... it will latch a value written to it") -- it
-   always echoes the DATA latch's own bit 7, regardless of CTRL. This
-   project has no host input frontend (see Non-goals): every button is
-   modelled as permanently released, so this function needs no captured
-   input state beyond the fixed released-value constants below. */
-static uint8_t genesis_controller_io_data_port_read(uint8_t ctrl, uint8_t data) {
+   always echoes the DATA latch's own bit 7, regardless of CTRL. Player 1
+   (port 1) buttons come from the host-supplied `pad` mask (GENESIS_PAD_*,
+   SEG-011-T004); a zero mask, and port 2 always, is every button released. */
+static uint8_t genesis_controller_io_data_port_read(uint8_t ctrl, uint8_t data, uint8_t pad) {
   const unsigned th = (ctrl & 0x40U) ? ((unsigned)(data >> 6) & 1U) : 1U;
   /* Released-state 6-bit (bits 5-0) button-group value for the current TH
      state: TH=1 -> "1CBRLDU" = 0x3F (C,B,R,L,D,U all released); TH=0 ->
      "0SA00DU" = 0x33 (S,A,D,U released; bits 3-2 documented forced '0'). */
-  const uint8_t input_group = th ? 0x3FU : 0x33U;
+  const uint8_t input_group = th
+      ? (uint8_t)(0x3FU & ~(((pad & GENESIS_PAD_UP) ? 0x01U : 0U) |
+                            ((pad & GENESIS_PAD_DOWN) ? 0x02U : 0U) |
+                            ((pad & GENESIS_PAD_LEFT) ? 0x04U : 0U) |
+                            ((pad & GENESIS_PAD_RIGHT) ? 0x08U : 0U) |
+                            ((pad & GENESIS_PAD_B) ? 0x10U : 0U) |
+                            ((pad & GENESIS_PAD_C) ? 0x20U : 0U)))
+      : (uint8_t)(0x33U & ~(((pad & GENESIS_PAD_UP) ? 0x01U : 0U) |
+                            ((pad & GENESIS_PAD_DOWN) ? 0x02U : 0U) |
+                            ((pad & GENESIS_PAD_A) ? 0x10U : 0U) |
+                            ((pad & GENESIS_PAD_START) ? 0x20U : 0U)));
   const uint8_t input_value = (uint8_t)((th << 6U) | input_group);
   uint8_t result = (uint8_t)(data & 0x80U); /* bit 7: always DATA-latch echo */
   unsigned bit;
@@ -127,7 +136,7 @@ static uint8_t genesis_controller_io_data_port_read(uint8_t ctrl, uint8_t data) 
   return result;
 }
 
-static int genesis_controller_io_access(GenesisDeviceState *devices, uint32_t address,
+static int genesis_controller_io_access(GenesisDeviceState *devices, uint8_t pad1, uint32_t address,
                                           GenesisAccessWidth width,
                                           GenesisAccessDirection direction, uint32_t *value) {
   size_t index;
@@ -143,7 +152,8 @@ static int genesis_controller_io_access(GenesisDeviceState *devices, uint32_t ad
         segarecomp_genesis_controller_io_gpio_register_index(address, (uint32_t)width);
     if (data_port_slot == 0 || data_port_slot == 1) {
       *value = genesis_controller_io_data_port_read(devices->controller_io.ctrl[data_port_slot],
-                                                      devices->controller_io.data[data_port_slot]);
+                                                      devices->controller_io.data[data_port_slot],
+                                                      data_port_slot == 0 ? pad1 : 0U);
       return 1;
     }
   }
@@ -1371,7 +1381,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
   }
   if (genesis_is_device(address)) {
     uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
-    if (genesis_controller_io_access(&runtime->devices, address, width, direction, &routed_value)) {
+    if (genesis_controller_io_access(&runtime->devices, runtime->pad1, address, width, direction, &routed_value)) {
       if (direction == GENESIS_ACCESS_READ) *value = routed_value;
       return GENESIS_ACCESS_OK;
     }
@@ -2465,6 +2475,10 @@ GenesisControlTransfer genesis_runtime_retire_m68k_instruction_at_before_stop(
  * (headless/automated execution is full-speed by construction); see
  * tests/genesis_runtime_run_no_wallclock_test.cpp.
  */
+void genesis_runtime_set_pad1(GenesisRuntime *runtime, uint8_t mask) {
+  if (runtime != NULL) runtime->pad1 = mask;
+}
+
 GenesisControlTransfer genesis_runtime_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                            uint32_t dispatch_allowance) {
   GenesisControlTransfer result = {0};

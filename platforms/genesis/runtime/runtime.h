@@ -658,6 +658,15 @@ typedef enum GenesisDeviceCheckpointComparison {
   GENESIS_DEVICE_CHECKPOINT_UNSUPPORTED = 3      /* never equal */
 } GenesisDeviceCheckpointComparison;
 
+#define GENESIS_PAD_UP 0x01U
+#define GENESIS_PAD_DOWN 0x02U
+#define GENESIS_PAD_LEFT 0x04U
+#define GENESIS_PAD_RIGHT 0x08U
+#define GENESIS_PAD_B 0x10U
+#define GENESIS_PAD_C 0x20U
+#define GENESIS_PAD_A 0x40U
+#define GENESIS_PAD_START 0x80U
+
 typedef struct GenesisRuntime {
   uint32_t d[8];
   uint32_t a[8];
@@ -672,6 +681,11 @@ typedef struct GenesisRuntime {
   uint32_t usp;
   uint16_t sr;
   uint32_t pc;
+  /* SEG-011-T004: host-supplied player-1 3-button pad state (GENESIS_PAD_*
+     bits; 0 == all released, the zero-initialised default). Host input, not
+     guest-derived device state: deliberately excluded from every device
+     checkpoint and first-divergence digest. */
+  uint8_t pad1;
   uint8_t work_ram[65536];
   /* SEG-007-T077: zero-valued (NULL/0) by every existing
      `GenesisRuntime runtime = {0};` construction, so a generated program
@@ -1255,6 +1269,10 @@ GenesisControlTransfer genesis_runtime_step(GenesisRuntime *runtime, GenesisDisp
  */
 GenesisControlTransfer genesis_runtime_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                            uint32_t dispatch_allowance);
+
+/* SEG-011-T004: sets the host-supplied player-1 pad state (GENESIS_PAD_* mask,
+ * 1 == pressed). Port 2 always reads released. */
+void genesis_runtime_set_pad1(GenesisRuntime *runtime, uint8_t mask);
 
 /*
  * SEG-007-T047 / ADR-0020 §9: RTE restoration, consuming exactly the six-byte

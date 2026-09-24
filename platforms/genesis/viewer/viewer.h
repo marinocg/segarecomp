@@ -24,12 +24,21 @@ typedef struct GenesisViewerHost {
   void (*sleep_ns)(void *ctx, uint64_t ns); /* may be NULL only if unthrottled */
   int (*present)(void *ctx, const GenesisFrameArtifact *frame); /* 0 == ok */
   int (*window_closed)(void *ctx);          /* pumps events; nonzero == closed */
+  uint8_t (*pad1)(void *ctx);               /* optional GENESIS_PAD_* mask; NULL == released */
 } GenesisViewerHost;
 
 typedef struct GenesisViewerOptions {
   uint8_t unthrottled;       /* presentation policy only */
   uint32_t slice_dispatches; /* guest dispatches per host slice, > 0 */
 } GenesisViewerOptions;
+
+/* Fixed player-1 key map (SDL3 viewer): arrows = D-pad, Z = A, X = B, C = C,
+ * Return = Start. Pure translation of held-key flags to a GENESIS_PAD_* mask,
+ * kept free of SDL types so it is testable without a window. */
+typedef struct GenesisViewerKeys {
+  uint8_t up, down, left, right, a, b, c, start; /* nonzero == held */
+} GenesisViewerKeys;
+uint8_t genesis_viewer_pad_from_keys(const GenesisViewerKeys *keys);
 
 #define GENESIS_VIEWER_DEFAULT_SLICE UINT32_C(20000)
 /* A wake later than this many frame periods resynchronizes the schedule. */

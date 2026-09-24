@@ -26,6 +26,17 @@ static int sdl_closed(void *ctx) {
   return v->closed;
 }
 
+static uint8_t sdl_pad1(void *ctx) {
+  (void)ctx;
+  const bool *ks = SDL_GetKeyboardState(NULL);
+  GenesisViewerKeys k;
+  k.up = ks[SDL_SCANCODE_UP]; k.down = ks[SDL_SCANCODE_DOWN];
+  k.left = ks[SDL_SCANCODE_LEFT]; k.right = ks[SDL_SCANCODE_RIGHT];
+  k.a = ks[SDL_SCANCODE_Z]; k.b = ks[SDL_SCANCODE_X]; k.c = ks[SDL_SCANCODE_C];
+  k.start = ks[SDL_SCANCODE_RETURN];
+  return genesis_viewer_pad_from_keys(&k);
+}
+
 static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
   GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)ctx;
   static uint8_t rgb[GENESIS_FRAME_WIDTH * GENESIS_FRAME_HEIGHT * 3];
@@ -64,6 +75,7 @@ void genesis_sdl3_viewer_host(GenesisSdl3Viewer *viewer, GenesisViewerHost *host
   host->sleep_ns = sdl_sleep;
   host->present = sdl_present;
   host->window_closed = sdl_closed;
+  host->pad1 = sdl_pad1;
 }
 
 void genesis_sdl3_viewer_close(GenesisSdl3Viewer *v) {
