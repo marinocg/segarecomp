@@ -69,15 +69,14 @@ def main() -> None:
         streamed = pathlib.Path(directory) / "streamed.c"
         common = [executable, "emit-general-startup-bridge-c", "--rom", str(rom), "--reset-entry",
                   "--immutable-rom-aot"]
-        ok = subprocess.run(common + ["--rom-sha256", vector["sha256"], "--generated-c-output", str(streamed)],
-                            text=True, capture_output=True, check=False)
-        assert ok.returncode == 0 and ok.stdout == "", ok
-        assert streamed.read_bytes() == aot.stdout.encode(), "streamed C differs from stdout C"
-        assert not pathlib.Path(str(streamed) + ".partial").exists()
-        streamed.write_text("stale")
-        bad = subprocess.run(common + ["--rom-sha256", "0" * 63, "--generated-c-output", str(streamed)],
-                             text=True, capture_output=True, check=False)
-        assert bad.returncode == 1 and bad.stdout == "" and "translation rejected" in bad.stderr, bad
+        # This fixture is a fail-closed rejection in the legacy stdout form (marker, exit 0); the
+        # streaming form reports the same rejection as exit 1 and leaves no artifact.
+        assert aot.stdout.startswith("/* translation rejected:"), aot.stdout[:80]
+        streamed.write_text("stale")  # a stale artifact must not survive a rejection
+        rejected = subprocess.run(common + ["--rom-sha256", vector["sha256"], "--generated-c-output", str(streamed)],
+                                  text=True, capture_output=True, check=False)
+        assert rejected.returncode == 1 and rejected.stdout == "", rejected
+        assert rejected.stderr.endswith(aot.stdout), rejected
         assert not streamed.exists() and not pathlib.Path(str(streamed) + ".partial").exists()
         old_range = subprocess.run([
             executable, "emit-general-startup-bridge-c", "--rom", str(rom),

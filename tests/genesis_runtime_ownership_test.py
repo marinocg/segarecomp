@@ -45,7 +45,9 @@ def main() -> None:
     assert "target_link_libraries(segarecomp_codegen_c11_genesis PUBLIC segarecomp::codegen_c11_m68k segarecomp::machine_genesis segarecomp::recompiler)" in cmake
     assert '"platforms" / "genesis" / "runtime" / "runtime.c"' in bridge
     assert '"platforms" / "genesis" / "runtime"' in bridge
-    assert '#include \\"runtime.h\\"' in codegen
+    # SEG-022-T002: the frontend streams the runtime header through the single owner helper.
+    assert "emit_genesis_runtime_c11_include" in codegen
+    assert '#include \\"runtime.h\\"' in codegen_owner.read_text(encoding="utf-8")
     assert "genesis_startup_bridge_runtime.h" not in codegen
     assert "emit_genesis_bridge_c11_prelude" in codegen
     assert "emit_genesis_bridge_c11_main" in codegen
