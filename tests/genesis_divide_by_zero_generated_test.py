@@ -14,6 +14,7 @@ def main():
     generated = subprocess.run([executable, "--emit-general-startup-bridge-divide-by-zero-rte"],
                                text=True, capture_output=True, check=True).stdout
     assert "runtime.divide_by_zero_handler_present = 1;" in generated
+    # SEG-021-T018 / ADR 0043 §6: the seeded SR keeps T = 0 -- RTE of a T = 1 frame is the deferred-trace stop.
     # Test-only observation after the production drive call: D3 must retain its
     # seed, D7 proves handler execution, PC proves RTE continuation, and IRQ6
     # scheduler/device state remained untouched by the synchronous transfer.
@@ -22,7 +23,7 @@ def main():
                 '(unsigned)runtime.sr, (unsigned long long)runtime.scheduler.master_ticks, '
                '(unsigned)runtime.devices.interrupt.vblank_pending);')
     generated = generated.replace("runtime.divide_by_zero_handler_present = 1; ",
-                                  "runtime.divide_by_zero_handler_present = 1; runtime.sr = 0xA300; runtime.d[3] = 0x12345678; ", 1)
+                                  "runtime.divide_by_zero_handler_present = 1; runtime.sr = 0x2300; runtime.d[3] = 0x12345678; ", 1)
     anchor = re.search(r"result = genesis_runtime_run\([^;]*\);", generated)
     assert anchor is not None
     generated = generated[:anchor.end()] + observe + generated[anchor.end():]
@@ -44,7 +45,7 @@ def main():
         assert run.returncode == 0, run.stderr
         # Synchronous divide-by-zero does not advance virtual video time;
         # vector-5 itself neither consumes pending state nor resets it.
-        assert "d3=305419896 d7=85 pc=258 sr=41728 tick=238 pending=0" in run.stderr, run.stderr
+        assert "d3=305419896 d7=85 pc=258 sr=8960 tick=238 pending=0" in run.stderr, run.stderr
 
         # SEG-020-T004: the same emitted DIVS.W-by-zero -> handler path, stepped one guest step at
         # a time with the opt-in M68k checkpoint enabled. The emitted DIV lowering returns the handler

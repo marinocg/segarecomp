@@ -374,7 +374,12 @@ std::optional<std::uint32_t> m68k_instruction_cycles(const M68kIrOperation &oper
   case M68kIrKind::sign_extend_word:
   case M68kIrKind::sign_extend_long:
   case M68kIrKind::write_user_stack_pointer:
+  case M68kIrKind::read_user_stack_pointer:  // SEG-021-T018: Table 8-11 MOVE USP is 4 in either direction
     return 4U;
+  // SEG-021-T018: Table 8-11 ANDI/EORI/ORI to CCR and to SR are all 20 (3/0).
+  case M68kIrKind::logical_immediate_to_ccr:
+  case M68kIrKind::logical_immediate_to_sr:
+    return 20U;
   case M68kIrKind::write_status_register:
   case M68kIrKind::write_condition_codes:
     return move_to_status_cycles(operation);

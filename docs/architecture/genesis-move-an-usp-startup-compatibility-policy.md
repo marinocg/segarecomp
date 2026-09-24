@@ -1,11 +1,40 @@
 # Genesis MOVE An,USP startup compatibility policy (SEG-007-T085)
 
-## Status and boundary
+> **Superseded by SEG-021-T018 ([ADR 0043](../decisions/0043-mc68000-exception-privilege-and-machine-hook-contract.md)).**
+> Every no-privilege-check rule and every project narrowing of the operand sets in this file (MOVE An,USP,
+> MOVE to SR, MOVE from SR, MOVE to CCR) is replaced by the implemented MC68000 supervisor/user model. The
+> sections below are kept only as the historical record of the replaced policies; they no longer govern
+> anything.
 
-> **Will be superseded by SEG-021-T018 (ADR 0043).** [ADR 0043](../decisions/0043-mc68000-exception-privilege-and-machine-hook-contract.md)
-> freezes the MC68000 supervisor/user, privilege-violation and exception contract. SEG-021-T018
-> replaces the unconditional no-privilege-check rules in this file with that model; until it lands they
-> stay in force unchanged.
+## Implemented model (SEG-021-T018)
+
+- **State.** `GenesisRuntime.a[7]` (and every generated context's `address_registers[7]`) is always the
+  *active* stack pointer, the one SR.S selects. `GenesisRuntime.usp` is the *inactive* stack-pointer slot:
+  the USP while S = 1 and the SSP while S = 0. The architectural USP is `(sr & 0x2000) ? usp : a[7]`, which
+  every checkpoint and full report records as `usp`. Generated `main` establishes the reset SR
+  (S = 1, T = 0, I = 7, `0x2700`); the USP keeps its deterministic zero initialization (no hardware claim).
+- **SR writes.** MOVE to SR and ANDI/ORI/EORI to SR mask the written value to the implemented SR bits
+  (`0xA71F`), swap the active and inactive stack pointers when S changes (an auto-updated A7 operand is the
+  old active stack pointer, committed before the swap), and stop fail-closed with
+  `unsupported_cpu_exception` / `unsupported_trace_exception` before anything commits when T would be set
+  (trace, vector 9, is deferred: ADR 0043 §6). MOVE to CCR and ANDI/ORI/EORI to CCR change only X/N/Z/V/C.
+- **Privilege.** MOVE to SR, ANDI/ORI/EORI to SR, MOVE An,USP, MOVE USP,An and RTE test SR.S in the
+  generated lowering; in user mode they raise privilege violation (vector 8) before any part of the
+  instruction executes: six-byte frame on the SSP (saved SR with S = 0, stacked PC = the privileged
+  instruction's own address), S set, T cleared, the USP parked in the inactive slot, PC = the vector-8
+  handler resolved at build time from the cartridge vector table (offset `0x20`) exactly like vector 5. An
+  absent/unrepresented handler or an unconstructible frame stops fail-closed with
+  `unsupported_cpu_exception` / `unsupported_privilege_violation_exception` and nothing changed. MOVE from SR,
+  MOVE to CCR and ANDI/ORI/EORI to CCR are not privileged on the MC68000.
+- **Operand sets.** MOVE to SR / MOVE to CCR accept every data addressing source; MOVE from SR accepts every
+  data-alterable destination, and a memory destination is read (value discarded) before it is written, the
+  SEG-021-T016 memory-Scc precedent (the pinned Musashi core performs no dummy read; the difference is not
+  observable in its flat memory).
+- **Ownership.** Exception entry and RTE are the M68K-owned C11 core
+  `libs/cpu/m68k/include/segarecomp/cpu/m68k/exception_core.h`, bound by the Genesis runtime through its
+  machine hooks (ADR 0043 §7). STOP and RESET remain CPU frontiers (SEG-021-T020).
+
+## Historical record: SEG-007-T085 status and boundary
 
 This is a bounded **project compatibility policy**, not a general MC68000
 privilege, exception, or reset model. It consumes the public Motorola
@@ -63,6 +92,8 @@ check.
 ---
 
 # Genesis MOVE to SR startup compatibility policy (SEG-007-T088)
+
+> **Superseded by SEG-021-T018** (see the implemented model at the top of this file); historical record only.
 
 ## Status and boundary
 
@@ -135,6 +166,8 @@ kind's fact/routing wiring without independent re-verification.
 ---
 
 # Genesis MOVE from SR startup compatibility policy (SEG-007-T116)
+
+> **Superseded by SEG-021-T018** (see the implemented model at the top of this file); historical record only.
 
 ## Status and boundary
 
@@ -211,6 +244,8 @@ an explicit architecture decision, not an instruction-local check.
 ---
 
 # Genesis MOVE to CCR startup compatibility policy (SEG-007-T118)
+
+> **Superseded by SEG-021-T018** (see the implemented model at the top of this file); historical record only.
 
 ## Status and boundary
 

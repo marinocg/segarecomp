@@ -66,7 +66,9 @@ def main() -> int:
     # SR overwrite and the instruction's four-byte PC advance before reaching
     # the independent RESET frontier. The bytes and expected state are entirely
     # project-authored synthetic fixture material.
-    sr_image = bytes((0x46, 0xFC, 0x12, 0x34, 0x4E, 0x70))
+    # SEG-021-T018 / ADR 0043: the written value is masked to the implemented SR bits (0x3F34 -> 0x2714); S stays
+    # set, so no stack-pointer swap occurs.
+    sr_image = bytes((0x46, 0xFC, 0x3F, 0x34, 0x4E, 0x70))
     sr_result, sr_source, sr_full = run_bridge(
         binary, compiler, root, sr_image, "move-to-sr", "00000c20")
     try:
@@ -76,9 +78,11 @@ def main() -> int:
     if (sr_result.returncode != 0 or sr_result.stderr or
             sr_report.get("result") != "stop" or sr_report.get("stop_class") != "unsupported_cpu_form" or
             sr_report.get("rom_sha256") != hashlib.sha256(sr_image).hexdigest() or
-            sr_full.get("runtime", {}).get("sr") != "0x1234" or
+            sr_full.get("runtime", {}).get("sr") != "0x2714" or
             sr_full.get("runtime", {}).get("pc") != "0x00000c24" or
-            "runtime->sr = (uint16_t)(UINT32_C(0x00001234));" not in sr_source or
+            "m68k_sr_new = (uint16_t)((UINT32_C(0x00003F34)) & UINT32_C(0xA71F));" not in sr_source or
+            "runtime->sr = m68k_sr_new;" not in sr_source or
+            "genesis_raise_privilege_violation(runtime, UINT32_C(0x00000C20)" not in sr_source or
             "runtime->pc += UINT32_C(4);" not in sr_source):
         sys.stderr.write("MOVE #imm,SR bridge regression failed\n")
         return 1
@@ -102,7 +106,8 @@ def main() -> int:
             nop_report.get("result") != "stop" or nop_report.get("stop_class") != "unsupported_cpu_form" or
             nop_report.get("rom_sha256") != hashlib.sha256(nop_image).hexdigest() or
             nop_full.get("runtime", {}).get("pc") != "0x00000c44" or
-            nop_full.get("runtime", {}).get("sr") != "0x0004" or
+            # SEG-021-T018: generated main establishes the reset SR (S = 1, I = 7) before MOVEQ sets Z.
+            nop_full.get("runtime", {}).get("sr") != "0x2704" or
             nop_full.get("runtime", {}).get("d", [None])[0] != "0x00000000" or
             "/* NOP */" not in nop_source or
             "runtime->pc += UINT32_C(2);" not in nop_lowering or

@@ -20,7 +20,8 @@ the stacked frame is part of the memory-write comparison.
 Without a pinned Musashi checkout the oracle comparison is SKIPPED (never failed); the synthetic
 self-consistency checks (every word emits, compiles strictly, runs, is deterministic) still run.
 
-Measured limits (honest): vectors run in supervisor mode; a write of a value equal to the previous byte is
+Measured limits (honest): a profile's SR seeds select supervisor or user state (SEG-021-T018: user-mode seeds
+exercise the privilege-violation entry and the SSP/USP swap); a write of a value equal to the previous byte is
 invisible; timing is not compared; operand binding covers register-direct, (An), (An)+, -(An) EAs
 (``bind_operand``) and grows by adding cases there, not by adding runners.
 
@@ -134,7 +135,16 @@ def bind_operand(spec: str, word: int, ext: bytes, row: dict, form: dict, state:
                     ``size`` bytes of ``value`` at the effective address; immediate is data in the suffix
       eaM.dst       the MOVE-style destination EA (register bits 9..11, mode bits 6..8), same classes
       pi@S / pd@S   (An)+ / -(An) operand with An in opcode bits S..S+2 (two-auto-update shapes: CMPM, ADDX/SUBX)
+      sr@sp / pc@sp the SR word at the active A7 / the PC long at A7+2 (an MC68000 exception frame for RTE,
+                    SEG-021-T018)
     """
+    if spec in ("sr@sp", "pc@sp"):
+        if phase == 2:
+            if spec == "sr@sp":
+                put_memory(state, state["a"][7], value, 2, row)
+            else:
+                put_memory(state, state["a"][7] + 2, value, 4, row)
+        return ("m", spec)
     size = SIZES.get(form["size"], 2)
     if spec.startswith(("d@", "a@")):
         reg = (word >> int(spec[2:])) & 7

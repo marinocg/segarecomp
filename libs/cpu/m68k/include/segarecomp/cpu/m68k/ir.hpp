@@ -38,8 +38,16 @@ enum class M68kIrKind {
   // count is architecturally fixed to exactly 1, never a decoded operand)
   // distinguishes this from the register form at lift time.
   shift_rotate_memory,
-  // MOVE An,USP writes persistent USP without memory or CCR effects.
+  // MOVE An,USP writes the user stack pointer (the inactive stack-pointer slot
+  // in supervisor mode) without memory or CCR effects; privileged (SEG-021-T018).
   write_user_stack_pointer,
+  // SEG-021-T018: MOVE USP,An reads the user stack pointer into An; privileged.
+  read_user_stack_pointer,
+  // SEG-021-T018: ANDI/ORI/EORI #imm,CCR (unprivileged, CCR only) and
+  // ANDI/ORI/EORI #imm,SR (privileged, whole SR). `status_operation` names the
+  // logical operation.
+  logical_immediate_to_ccr,
+  logical_immediate_to_sr,
   // SEG-007-T088: MOVE <ea>,SR overwrites the entire existing generic 16-bit
   // `sr`/`status_register` runtime field from the decoded source operand
   // (see M68kInstructionKind::move_to_sr's own doc comment); no new
@@ -128,6 +136,8 @@ struct M68kIrOperation {
   std::uint16_t movem_register_mask{};
   // SEG-007-T025 (Batch C, C6): see M68kDecodedInstruction::shift_rotate_kind.
   M68kShiftRotateKind shift_rotate_kind{M68kShiftRotateKind::lsl};
+  // SEG-021-T018: see M68kDecodedInstruction::status_operation.
+  M68kStatusLogicalOperation status_operation{M68kStatusLogicalOperation::and_op};
 };
 
 [[nodiscard]] M68kIrOperation lift_m68k_instruction(const M68kDecodedInstruction &instruction);

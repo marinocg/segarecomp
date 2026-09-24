@@ -23,6 +23,7 @@ M68kIrOperation lift_m68k_instruction(const M68kDecodedInstruction &instruction)
   // SEG-007-T025 (Batch C, C6): carried through unconditionally, harmless
   // default (`lsl`) for every kind that does not use it.
   operation.shift_rotate_kind = instruction.shift_rotate_kind;
+  operation.status_operation = instruction.status_operation;  // SEG-021-T018
   switch (instruction.kind) {
   case M68kInstructionKind::moveq: break;
   case M68kInstructionKind::subq_l_1_d0: operation.kind = M68kIrKind::subtract_quick_long_d0; break;
@@ -96,6 +97,15 @@ M68kIrOperation lift_m68k_instruction(const M68kDecodedInstruction &instruction)
     break;
   case M68kInstructionKind::move_to_sr:
     operation.kind = M68kIrKind::write_status_register;
+    break;
+  case M68kInstructionKind::move_usp_to_an:
+    operation.kind = M68kIrKind::read_user_stack_pointer;
+    break;
+  case M68kInstructionKind::logical_immediate_to_ccr:
+    operation.kind = M68kIrKind::logical_immediate_to_ccr;
+    break;
+  case M68kInstructionKind::logical_immediate_to_sr:
+    operation.kind = M68kIrKind::logical_immediate_to_sr;
     break;
   case M68kInstructionKind::nop:
     operation.kind = M68kIrKind::no_operation;

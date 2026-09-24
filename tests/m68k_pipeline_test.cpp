@@ -493,11 +493,35 @@ void logical_forms_decode_and_share_flags() {
       std::vector<std::uint8_t>{0xC1U, 0x90U}, source(), segarecomp::M68kDecodeProfile::general_startup));
   expect(reverse_and.destination_ea.mode == segarecomp::M68kEaMode::address_indirect,
          "reverse AND accepts a memory-alterable RMW destination");
-  for (const auto &bytes : std::array<std::array<std::uint8_t, 2>, 6>{{{{0x00U,0x3CU}},{{0x00U,0x7CU}},{{0x02U,0x3CU}},{{0x02U,0x7CU}},{{0x0AU,0x3CU}},{{0x0AU,0x7CU}}}}) {  // SEG-021-T015: 0xC108 is ABCD.B -(A0),-(A0), no longer a rejected AND  // SEG-021-T014: 0xB108 is CMPM.B (A0)+,(A0)+, no longer a rejected EOR
-    const auto rejected = std::get<segarecomp::RejectedM68kDecode>(segarecomp::decode_m68k_instruction(
-        bytes, source(), segarecomp::M68kDecodeProfile::general_startup));
-    expect(rejected.outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction,
-           "logical CCR/SR and forbidden reverse destinations fail closed");
+  // SEG-021-T018: ANDI/ORI/EORI to CCR (byte) and to SR (word) are now decoded as their own typed identities with
+  // the immediate extension word; a missing extension word is a truncation, never an ordinary immediate form.
+  for (const auto &[word, op, to_sr] :
+       std::array<std::tuple<std::uint16_t, segarecomp::M68kStatusLogicalOperation, bool>, 6>{{
+           {0x003CU, segarecomp::M68kStatusLogicalOperation::or_op, false},
+           {0x007CU, segarecomp::M68kStatusLogicalOperation::or_op, true},
+           {0x023CU, segarecomp::M68kStatusLogicalOperation::and_op, false},
+           {0x027CU, segarecomp::M68kStatusLogicalOperation::and_op, true},
+           {0x0A3CU, segarecomp::M68kStatusLogicalOperation::eor_op, false},
+           {0x0A7CU, segarecomp::M68kStatusLogicalOperation::eor_op, true}}}) {
+    const std::vector<std::uint8_t> full{static_cast<std::uint8_t>(word >> 8U), static_cast<std::uint8_t>(word & 0xFFU),
+                                         0x27U, 0x1FU};
+    const auto decoded = std::get<segarecomp::M68kDecodedInstruction>(
+        segarecomp::decode_m68k_instruction(full, source(), segarecomp::M68kDecodeProfile::general_startup));
+    const auto lifted = segarecomp::lift_m68k_instruction(decoded);
+    expect(decoded.kind == (to_sr ? segarecomp::M68kInstructionKind::logical_immediate_to_sr
+                                  : segarecomp::M68kInstructionKind::logical_immediate_to_ccr) &&
+               decoded.status_operation == op && lifted.status_operation == op &&
+               lifted.kind == (to_sr ? segarecomp::M68kIrKind::logical_immediate_to_sr
+                                     : segarecomp::M68kIrKind::logical_immediate_to_ccr) &&
+               decoded.size == (to_sr ? segarecomp::M68kMemoryAccessWidth::word : segarecomp::M68kMemoryAccessWidth::byte) &&
+               decoded.source_ea.mode == segarecomp::M68kEaMode::immediate &&
+               decoded.source_ea.immediate_value == (to_sr ? 0x271FU : 0x1FU) &&
+               decoded.provenance.length.value == 4U,
+           "ANDI/ORI/EORI to CCR/SR decode as typed status-register logical identities");
+    const auto truncated = std::get<segarecomp::RejectedM68kDecode>(segarecomp::decode_m68k_instruction(
+        std::vector<std::uint8_t>{full[0], full[1]}, source(), segarecomp::M68kDecodeProfile::general_startup));
+    expect(truncated.outcome == segarecomp::DecodeOutcome::truncated_instruction,
+           "a CCR/SR logical immediate without its extension word is a truncation");
   }
   expect(segarecomp::m68k_logical_ccr(UINT16_C(0xA013), UINT32_C(0x80),
                                        segarecomp::M68kMemoryAccessWidth::byte) == UINT16_C(0xA018) &&
@@ -693,21 +717,15 @@ void batch_b_whitelist_collision_ea_and_truncation_audit() {
   // M68kInstructionKind::multiply_unsigned_word/divide_unsigned_word).
   // SEG-021-T014: {0xB1,0x08} (CMPM), {0x91,0x08} (SUBX) and {0xD1,0x08} (ADDX) are now supported
   // instructions and are removed from this fail-closed set.
-  for (const auto &bytes : std::array<std::array<std::uint8_t, 2>, 1>{{{{0x00U,0x3CU}}}}) {
-    const auto result = segarecomp::decode_m68k_instruction(bytes, source(), segarecomp::M68kDecodeProfile::general_startup);
-    const auto *rejected = std::get_if<segarecomp::RejectedM68kDecode>(&result);
-    expect(rejected != nullptr && rejected->outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction &&
-               rejected->has_provenance && rejected->provenance.source.address.value == 0x100U &&
-               rejected->provenance.source.image_offset.value == 0U && rejected->provenance.bytes == bytes &&
-               rejected->provenance.length.value == 2U,
-           "Batch B opcode-line neighbors fail closed with primary provenance");
-  }
+  // SEG-021-T018: {0x00,0x3C} (ORI to CCR), the last member of this set, is now a supported instruction (a
+  // two-byte image of it is a truncation, covered by the loop below).
+
   for (const auto &bytes : std::array<std::array<std::uint8_t, 2>, 8>{{
            {{0xB2U,0x30U}}, {{0xB2U,0x3BU}}, {{0x00U,0x3CU}}, {{0x00U,0x7CU}},
            {{0x02U,0x3CU}}, {{0x02U,0x7CU}}, {{0x0AU,0x3CU}}, {{0x0AU,0x7CU}}}}) {
     const auto result = segarecomp::decode_m68k_instruction(bytes, source(), segarecomp::M68kDecodeProfile::general_startup);
     expect(std::holds_alternative<segarecomp::RejectedM68kDecode>(result),
-           "indexed EA and logical CCR/SR forms remain excluded from Batch B");
+           "indexed EA and truncated logical CCR/SR forms remain excluded from Batch B");
   }
   const auto truncated = std::get<segarecomp::RejectedM68kDecode>(segarecomp::decode_m68k_instruction(
       std::vector<std::uint8_t>{0x0CU,0x79U,0,0}, source(), segarecomp::M68kDecodeProfile::general_startup));
@@ -2924,15 +2942,40 @@ void general_startup_decode_classifies_move_an_to_usp_as_a_cpu_frontier() {
                effect.stack == segarecomp::M68kStackEffectKind::none &&
                effect.pc == segarecomp::M68kPcEffectKind::advance && effect.pc_delta == 2U,
             "MOVE An,USP lift/effect identifies only the USP write and two-byte PC advance");
+    // SEG-021-T018 / ADR 0043: MOVE An,USP is privileged. The routed lowering tests SR.S, raises vector 8 with
+    // this instruction's own address in user mode, and otherwise copies An into the inactive (USP) slot.
     segarecomp::GenesisM68kEmissionContext memory{};
     memory.address_registers = "runtime->a";
     memory.user_stack_pointer = "runtime->usp";
     memory.program_counter = "runtime->pc";
+    memory.runtime_routing = true;
+    memory.runtime_object = "runtime";
     const auto emitted = segarecomp::emit_m68k_operation_c(lifted, "runtime->d", "runtime->sr", {}, &memory);
     expect(emitted.find("runtime->usp = runtime->a[" + std::to_string(an) + "];\n") != std::string::npos &&
                emitted.find("runtime->pc += UINT32_C(2);\n") != std::string::npos &&
-               emitted.find("runtime->sr") == std::string::npos && emitted.find("genesis_route_access") == std::string::npos,
-            "MOVE An,USP C lowering copies An to USP with no CCR or bus effect");
+               emitted.find("if ((runtime->sr & UINT16_C(0x2000)) == 0U) ") != std::string::npos &&
+               emitted.find("genesis_raise_privilege_violation(runtime, UINT32_C(0x00000B04)") != std::string::npos &&
+               emitted.find("genesis_route_access") == std::string::npos,
+            "MOVE An,USP C lowering copies An to USP with no CCR or bus effect behind the privilege check");
+    const auto usp_to_an = segarecomp::decode_m68k_instruction(
+        std::vector<std::uint8_t>{0x4EU, static_cast<std::uint8_t>(0x68U + an)}, source,
+        segarecomp::M68kDecodeProfile::general_startup);
+    const auto *reverse = std::get_if<segarecomp::M68kDecodedInstruction>(&usp_to_an);
+    expect(reverse != nullptr && reverse->kind == segarecomp::M68kInstructionKind::move_usp_to_an &&
+               reverse->destination_ea.mode == segarecomp::M68kEaMode::address_register &&
+               reverse->destination_ea.reg == an && reverse->provenance.length.value == 2U,
+           "SEG-021-T018: MOVE USP,An decodes every legal An destination");
+    if (reverse == nullptr) continue;
+    const auto reverse_lifted = segarecomp::lift_m68k_instruction(*reverse);
+    const auto reverse_effect = segarecomp::m68k_operation_effect(reverse_lifted);
+    const auto reverse_emitted =
+        segarecomp::emit_m68k_operation_c(reverse_lifted, "runtime->d", "runtime->sr", {}, &memory);
+    expect(reverse_lifted.kind == segarecomp::M68kIrKind::read_user_stack_pointer &&
+               reverse_effect.address_register_write && static_cast<unsigned>(*reverse_effect.address_register_write) == an &&
+               reverse_effect.may_raise_synchronous_exception && reverse_effect.exception_vector == 8U &&
+               reverse_emitted.find("runtime->a[" + std::to_string(an) + "] = runtime->usp;\n") != std::string::npos &&
+               reverse_emitted.find("genesis_raise_privilege_violation") != std::string::npos,
+           "SEG-021-T018: MOVE USP,An reads the inactive (USP) slot behind the privilege check");
   }
 
   // Negative counterpart: the reverse direction MOVE USP,An (0x4E68-0x4E6F,
@@ -2951,9 +2994,6 @@ void general_startup_decode_classifies_move_an_to_usp_as_a_cpu_frontier() {
                decode_rejected->cpu_frontier == segarecomp::M68kCpuFrontierKind::none,
            label);
   };
-  for (std::uint16_t an = 0U; an <= 7U; ++an)
-    expect_unclassified(static_cast<std::uint16_t>(0x4E68U + an),
-                         "the reverse-direction MOVE USP,An word remains unclassified (no CPU frontier)");
   expect_unclassified(0x4E41U, "a neighboring System Control Group encoding (TRAP #1) remains unclassified");
 }
 
@@ -3076,6 +3116,21 @@ void general_startup_bridge_extended_accepts_a_non_d0_moveq() {
 // project-selected source forms (Dn, #imm) individually, mirroring
 // general_startup_decode_classifies_move_an_to_usp_as_a_cpu_frontier's own
 // per-register loop style.
+// SEG-021-T018: a status-register transfer form decodes to `kind` with its operand in `mode` (source for MOVE to
+// SR/CCR, destination for MOVE from SR); extension words are zero.
+void expect_status_form_decodes(std::uint16_t word, segarecomp::M68kInstructionKind kind, segarecomp::M68kEaMode mode,
+                                const char *label) {
+  const std::vector<std::uint8_t> image{static_cast<std::uint8_t>(word >> 8U), static_cast<std::uint8_t>(word & 0xFFU),
+                                        0x00U, 0x00U, 0x00U, 0x00U};
+  const auto decoded = segarecomp::decode_m68k_instruction(image, source(), segarecomp::M68kDecodeProfile::general_startup);
+  const auto *selected = std::get_if<segarecomp::M68kDecodedInstruction>(&decoded);
+  expect(selected != nullptr && selected->kind == kind &&
+             (kind == segarecomp::M68kInstructionKind::move_from_sr ? selected->destination_ea.mode
+                                                                     : selected->source_ea.mode) == mode &&
+             selected->size == segarecomp::M68kMemoryAccessWidth::word,
+         label);
+}
+
 void general_startup_decode_accepts_move_to_sr_for_dn_and_immediate_sources() {
   for (std::uint16_t dn = 0U; dn <= 7U; ++dn) {
     const std::uint16_t word = static_cast<std::uint16_t>(0x46C0U | dn);
@@ -3094,11 +3149,20 @@ void general_startup_decode_accepts_move_to_sr_for_dn_and_immediate_sources() {
                effect.affects_condition_codes && effect.pc == segarecomp::M68kPcEffectKind::advance &&
                effect.pc_delta == 2U,
            "MOVE Dn,SR lift/effect identifies the SR write and two-byte PC advance");
+    // SEG-021-T018 / ADR 0043: privileged, masked to the implemented SR bits, T = 1 stops, S change swaps SPs.
     segarecomp::GenesisM68kEmissionContext memory{};
     memory.address_registers = "runtime->a";
+    memory.user_stack_pointer = "runtime->usp";
     memory.program_counter = "runtime->pc";
+    memory.runtime_routing = true;
+    memory.runtime_object = "runtime";
     const auto emitted = segarecomp::emit_m68k_operation_c(lifted, "runtime->d", "runtime->sr", {}, &memory);
-    expect(emitted.find("runtime->sr = (uint16_t)(runtime->d[" + std::to_string(dn) + "]);\n") != std::string::npos &&
+    expect(emitted.find("m68k_sr_new = (uint16_t)((runtime->d[" + std::to_string(dn) + "]) & UINT32_C(0xA71F));") !=
+                   std::string::npos &&
+               emitted.find("GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION") != std::string::npos &&
+               emitted.find("runtime->usp = runtime->a[7]; runtime->a[7] = m68k_sp_other;") != std::string::npos &&
+               emitted.find("genesis_raise_privilege_violation(runtime, UINT32_C(0x00000100)") != std::string::npos &&
+               emitted.find("runtime->sr = m68k_sr_new;") != std::string::npos &&
                emitted.find("runtime->pc += UINT32_C(2);\n") != std::string::npos,
            "MOVE Dn,SR C lowering overwrites the full SR from the exact decoded Dn source");
   }
@@ -3125,9 +3189,13 @@ void general_startup_decode_accepts_move_to_sr_for_dn_and_immediate_sources() {
            "MOVE #imm,SR lift/effect identifies the SR write and four-byte PC advance");
     segarecomp::GenesisM68kEmissionContext memory{};
     memory.address_registers = "runtime->a";
+    memory.user_stack_pointer = "runtime->usp";
     memory.program_counter = "runtime->pc";
+    memory.runtime_routing = true;
+    memory.runtime_object = "runtime";
     const auto emitted = segarecomp::emit_m68k_operation_c(lifted, "runtime->d", "runtime->sr", {}, &memory);
-    expect(emitted.find("runtime->sr = (uint16_t)(UINT32_C(0x00001234));\n") != std::string::npos &&
+    expect(emitted.find("m68k_sr_new = (uint16_t)((UINT32_C(0x00001234)) & UINT32_C(0xA71F));") != std::string::npos &&
+               emitted.find("runtime->sr = m68k_sr_new;") != std::string::npos &&
                emitted.find("runtime->pc += UINT32_C(4);\n") != std::string::npos,
            "MOVE #imm,SR C lowering overwrites the full SR from the exact decoded immediate value");
   }
@@ -3148,8 +3216,11 @@ void general_startup_decode_accepts_move_to_sr_for_dn_and_immediate_sources() {
            label);
   };
   expect_unsupported(0x46C8U, "MOVE An,SR (address-register-direct source) remains unrecognized (architectural exclusion)");
-  expect_unsupported(0x46D0U, "MOVE (An),SR (An-indirect source) remains unrecognized (project-scope exclusion)");
-  expect_unsupported(0x46F9U, "MOVE (xxx).L,SR (absolute-long source) remains unrecognized (project-scope exclusion)");
+  // SEG-021-T018: every data addressing source is now decoded (supersedes the SEG-007-T088 project narrowing).
+  expect_status_form_decodes(0x46D0U, segarecomp::M68kInstructionKind::move_to_sr, segarecomp::M68kEaMode::address_indirect,
+                             "MOVE (An),SR decodes");
+  expect_status_form_decodes(0x46F9U, segarecomp::M68kInstructionKind::move_to_sr, segarecomp::M68kEaMode::absolute_long,
+                             "MOVE (xxx).L,SR decodes");
 }
 
 // SEG-007-T116: general_startup-profile decode/lift/effect/emission coverage
@@ -3209,11 +3280,17 @@ void general_startup_decode_accepts_move_from_sr_for_dn_destinations() {
            label);
   };
   expect_unsupported(0x40C8U, "MOVE SR,An (address-register-direct) is never a legal destination -- fail closed");
-  expect_unsupported(0x40D0U, "MOVE SR,(A0) (memory destination) remains fail-closed (project-scope exclusion)");
-  expect_unsupported(0x40D8U, "MOVE SR,(A0)+ remains fail-closed");
-  expect_unsupported(0x40E0U, "MOVE SR,-(A0) remains fail-closed");
-  expect_unsupported(0x40E8U, "MOVE SR,d16(A0) remains fail-closed");
-  expect_unsupported(0x40F9U, "MOVE SR,(xxx).L remains fail-closed");
+  // SEG-021-T018: every data-alterable destination is now decoded (supersedes the SEG-007-T116 project narrowing).
+  expect_status_form_decodes(0x40D0U, segarecomp::M68kInstructionKind::move_from_sr, segarecomp::M68kEaMode::address_indirect,
+                             "MOVE SR,(A0) decodes");
+  expect_status_form_decodes(0x40D8U, segarecomp::M68kInstructionKind::move_from_sr, segarecomp::M68kEaMode::address_postinc,
+                             "MOVE SR,(A0)+ decodes");
+  expect_status_form_decodes(0x40E0U, segarecomp::M68kInstructionKind::move_from_sr, segarecomp::M68kEaMode::address_predec,
+                             "MOVE SR,-(A0) decodes");
+  expect_status_form_decodes(0x40E8U, segarecomp::M68kInstructionKind::move_from_sr, segarecomp::M68kEaMode::address_disp16,
+                             "MOVE SR,d16(A0) decodes");
+  expect_status_form_decodes(0x40F9U, segarecomp::M68kInstructionKind::move_from_sr, segarecomp::M68kEaMode::absolute_long,
+                             "MOVE SR,(xxx).L decodes");
   // SEG-021-T014: NEGX is now supported (0x4000 is NEGX.B D0); An remains an illegal NEGX operand.
   expect_unsupported(0x4008U, "NEGX.B A0 (address-register-direct) is never a legal operand -- fail closed");
 
@@ -3289,7 +3366,8 @@ void general_startup_retains_move_to_sr_before_a_later_cpu_frontier() {
          "MOVE #imm,SR is retained before the following independent CPU frontier");
   if (partial == nullptr) return;
   const auto emitted = segarecomp::emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
-  expect(emitted.find("runtime->sr = (uint16_t)(UINT32_C(0x00001234));") != std::string::npos &&
+  expect(emitted.find("m68k_sr_new = (uint16_t)((UINT32_C(0x00001234)) & UINT32_C(0xA71F));") != std::string::npos &&
+             emitted.find("runtime->sr = m68k_sr_new;") != std::string::npos &&
              emitted.find("GENESIS_CPU_DIMENSIONS_RESET") != std::string::npos,
          "bridge emission lowers retained MOVE #imm,SR and reports only the later RESET frontier");
 }
@@ -3385,12 +3463,13 @@ void general_startup_decode_accepts_move_to_ccr_for_dn_sources() {
            label);
   };
   expect_unsupported(0x44C8U, "MOVE An,CCR (address-register-direct) is never a legal source -- fail closed");
-  expect_unsupported(0x44D0U, "MOVE (A0),CCR (memory source) remains fail-closed (project-scope exclusion)");
-  expect_unsupported(0x44D8U, "MOVE (A0)+,CCR remains fail-closed");
-  expect_unsupported(0x44E0U, "MOVE -(A0),CCR remains fail-closed");
-  expect_unsupported(0x44E8U, "MOVE d16(A0),CCR remains fail-closed");
-  expect_unsupported(0x44F9U, "MOVE (xxx).L,CCR remains fail-closed");
-  expect_unsupported(0x44FCU, "MOVE #imm,CCR (immediate source) remains fail-closed (project-scope exclusion)");
+  // SEG-021-T018: every data addressing source is now decoded (supersedes the SEG-007-T118 project narrowing).
+  for (const auto &[word, mode] : std::array<std::pair<std::uint16_t, segarecomp::M68kEaMode>, 6>{{
+           {0x44D0U, segarecomp::M68kEaMode::address_indirect}, {0x44D8U, segarecomp::M68kEaMode::address_postinc},
+           {0x44E0U, segarecomp::M68kEaMode::address_predec}, {0x44E8U, segarecomp::M68kEaMode::address_disp16},
+           {0x44F9U, segarecomp::M68kEaMode::absolute_long}, {0x44FCU, segarecomp::M68kEaMode::immediate}}})
+    expect_status_form_decodes(word, segarecomp::M68kInstructionKind::move_to_ccr, mode,
+                               "MOVE <ea>,CCR decodes every data addressing source");
   // 0x4400 is standard NEG.B D0, covered by the general NEG decoder tests.
 
   // The reverse direction MOVE <ea>,SR (0x46C0) keeps its own established kind.
@@ -8015,10 +8094,10 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
   operation.kind = M68kIrKind::write_condition_codes;
   operation.source_ea.mode = M68kEaMode::address_indirect;
   operation.destination_ea.mode = M68kEaMode::unused;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "a memory operand remains excluded without an independent memory-fact contract for every "
-         "IR kind except write_move's own narrow proven-safe carve-out below and MULS/MULU/compare's "
-         "own family-level admissions");
+  // SEG-021-T018: the status-register transfer family is admitted family-level (routed operand access, no
+  // memory fact), superseding the former Dn/#imm-only carve-out.
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "MOVE (An),CCR is admitted family-level through the routed read primitives");
   // SEG-021-T010: MULS.W/MULU.W admit every legal source EA (family-level, widened from the prior
   // storage-free-only restriction) -- a memory operand no longer needs an independent memory-fact
   // contract because the shared routed-read primitive and the operation-local deferred
@@ -8462,8 +8541,8 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
   expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
          "SEG-021-T005 family-level admission: NOT admits a d16(An) destination");
   operation.kind = M68kIrKind::read_status_register;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "status-register reads stay register-only");
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T018: MOVE SR,d16(An) is admitted family-level (read-before-write routed destination)");
   operation.destination_ea.mode = M68kEaMode::data_register;
   operation.kind = M68kIrKind::negate_word;
   operation.destination_ea.mode = M68kEaMode::address_disp16;
@@ -27091,6 +27170,152 @@ int emit_exg_movep_scc_tas_aot_source() {
   return 0;
 }
 
+// SEG-021-T018 / ADR 0043: the status-register / USP transfer family and the supervisor/user model. Encodings are
+// written from the Motorola M68000 Family Programmer's Reference Manual (MOVE to/from SR, MOVE to CCR, MOVE USP,
+// ANDI/ORI/EORI to CCR/SR, RTE); every byte and expected state is project-authored synthetic fixture material.
+namespace status_register_aot_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00001000U;
+const std::vector<std::uint8_t> image{
+    0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U,
+    0x46U, 0xC1U,                                // 1008 MOVE D1,SR
+    0x46U, 0xD8U,                                // 100A MOVE (A0)+,SR
+    0x46U, 0xE7U,                                // 100C MOVE -(A7),SR
+    0x46U, 0xF9U, 0x00U, 0xFFU, 0x08U, 0x00U,    // 100E MOVE $FF0800.L,SR
+    0x46U, 0xFCU, 0x27U, 0x00U,                  // 1014 MOVE #$2700,SR
+    0x44U, 0xD0U,                                // 1018 MOVE (A0),CCR
+    0x44U, 0xFCU, 0x00U, 0x15U,                  // 101A MOVE #$15,CCR
+    0x40U, 0xC3U,                                // 101E MOVE SR,D3
+    0x40U, 0xE0U,                                // 1020 MOVE SR,-(A0)
+    0x40U, 0xF9U, 0x00U, 0xFFU, 0x09U, 0x00U,    // 1022 MOVE SR,$FF0900.L
+    0x4EU, 0x6AU,                                // 1028 MOVE USP,A2
+    0x4EU, 0x63U,                                // 102A MOVE A3,USP
+    0x02U, 0x7CU, 0xDFU, 0xFFU,                  // 102C ANDI #$DFFF,SR
+    0x00U, 0x7CU, 0x07U, 0x00U,                  // 1030 ORI #$0700,SR
+    0x0AU, 0x7CU, 0x20U, 0x00U,                  // 1034 EORI #$2000,SR
+    0x02U, 0x3CU, 0x00U, 0xF0U,                  // 1038 ANDI #$F0,CCR
+    0x00U, 0x3CU, 0x00U, 0x11U,                  // 103C ORI #$11,CCR
+    0x0AU, 0x3CU, 0x00U, 0x1FU,                  // 1040 EORI #$1F,CCR
+    0x4EU, 0x73U,                                // 1044 RTE
+};
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T018/status-register-aot-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base}, {{}, static_cast<std::uint32_t>(base + image.size())},
+                             {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace status_register_aot_fixture
+
+int emit_status_register_aot_source() {
+  using namespace segarecomp;
+  auto program = status_register_aot_fixture::program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
+// The same family as one straight-line C4 block of the ordinary whole-program route (foldable absolute operands use
+// retained work-RAM facts), ending in user mode before the established RESET frontier.
+int emit_status_register_c4_source() {
+  using namespace segarecomp;
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  const std::vector<std::uint8_t> image{
+      0x46U, 0xFCU, 0x27U, 0x00U,                // B00 MOVE #$2700,SR
+      0x44U, 0xFCU, 0x00U, 0x15U,                // B04 MOVE #$15,CCR
+      0x40U, 0xC3U,                              // B08 MOVE SR,D3
+      0x46U, 0xF9U, 0x00U, 0xFFU, 0x08U, 0x00U,  // B0A MOVE $FF0800.L,SR (retained source-read fact)
+      0x40U, 0xF9U, 0x00U, 0xFFU, 0x09U, 0x00U,  // B10 MOVE SR,$FF0900.L (retained read + write facts)
+      0x4EU, 0x6AU,                              // B16 MOVE USP,A2
+      0x4EU, 0x63U,                              // B18 MOVE A3,USP
+      0x02U, 0x3CU, 0x00U, 0xF0U,                // B1A ANDI #$F0,CCR
+      0x00U, 0x3CU, 0x00U, 0x11U,                // B1E ORI #$11,CCR
+      0x0AU, 0x3CU, 0x00U, 0x1FU,                // B22 EORI #$1F,CCR
+      0x0AU, 0x7CU, 0x20U, 0x00U,                // B26 EORI #$2000,SR (to user mode: stack pointers swap)
+      0x40U, 0xC4U,                              // B2A MOVE SR,D4 (unprivileged in user mode)
+      0x4EU, 0x70U,                              // B2C RESET
+  };
+  program.image = {"synthetic-c4-status-register-block", image, image.size()};
+  program.mapping_claims = {{"synthetic-c4-status-register-block", {{}, 0xB00U},
+                              {{}, static_cast<std::uint32_t>(0xB00U + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 1;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  if (emitted.starts_with("/* translation rejected:")) {
+    std::cerr << emitted;
+    return 2;
+  }
+  std::cout << emitted;
+  return 0;
+}
+
+// Whole-program bridge: supervisor code sets the USP, drops to user mode with MOVE to SR, then executes a privileged
+// MOVE to SR in user mode. Vector 8 (resolved from the synthetic vector table at build time) enters the handler on the
+// SSP with the stacked PC of the privileged instruction; the handler records a marker, reads the USP, skips the
+// faulting instruction in the frame and returns with RTE to user mode, where MOVE SR,D6 (unprivileged) runs before the
+// RESET frontier. Variants: `no-handler` (vector-8 slot zero: fail-closed privilege stop) and `trace` (the user-mode
+// transition value sets T: deferred-trace stop).
+int emit_general_startup_bridge_privilege_violation_source(std::string_view variant) {
+  using namespace segarecomp;
+  if (variant.starts_with("-")) variant.remove_prefix(1U);
+  constexpr std::uint32_t kEntry = 0x100U;
+  constexpr std::uint32_t kHandler = 0x180U;
+  std::vector<std::uint8_t> img(0x1A0U, 0x00U);
+  const auto be32 = [&](std::size_t off, std::uint32_t v) {
+    img[off] = static_cast<std::uint8_t>(v >> 24U); img[off + 1U] = static_cast<std::uint8_t>(v >> 16U);
+    img[off + 2U] = static_cast<std::uint8_t>(v >> 8U); img[off + 3U] = static_cast<std::uint8_t>(v);
+  };
+  be32(0x0U, 0x00FF8000U); be32(0x4U, kEntry);
+  if (variant != "no-handler") be32(0x20U, kHandler);
+  const std::vector<std::uint8_t> code{
+      0x20U, 0x7CU, 0x00U, 0xFFU, 0x70U, 0x00U,   // 100 MOVEA.L #$00FF7000,A0
+      0x4EU, 0x60U,                               // 106 MOVE A0,USP
+      0x46U, 0xFCU, static_cast<std::uint8_t>(variant == "trace" ? 0x80U : 0x00U), 0x15U,  // 108 MOVE #$0015,SR
+      0x46U, 0xFCU, 0x27U, 0x00U,                 // 10C MOVE #$2700,SR (privileged; user mode: vector 8)
+      0x40U, 0xC6U,                               // 110 MOVE SR,D6
+      0x4EU, 0x70U,                               // 112 RESET
+  };
+  std::copy(code.begin(), code.end(), img.begin() + kEntry);
+  const std::vector<std::uint8_t> handler{
+      0x7EU, 0x55U,                               // 180 MOVEQ #$55,D7
+      0x58U, 0xAFU, 0x00U, 0x02U,                 // 182 ADDQ.L #4,2(A7) (skip the faulting instruction)
+      0x4EU, 0x69U,                               // 186 MOVE USP,A1
+      0x4EU, 0x73U,                               // 188 RTE
+  };
+  std::copy(handler.begin(), handler.end(), img.begin() + kHandler);
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T018/privilege-violation-rte", img, img.size()};
+  program.mapping_claims = {{"rom", {{}, 0U}, {{}, static_cast<std::uint32_t>(img.size())}, {0U}, {img.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, kEntry}, 0x00FF8000U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) {
+    if (const auto *rejected = std::get_if<FrontendRejected>(&result))
+      std::cerr << "category=" << static_cast<int>(rejected->category) << "\n";
+    std::cerr << "privilege fixture did not promote\n";
+    return 1;
+  }
+  const bool handler_expected = variant != "no-handler";
+  if (handler_expected != partial->accepted_prefix.privilege_violation_handler_entry.has_value() ||
+      (handler_expected && partial->accepted_prefix.privilege_violation_handler_entry->value != kHandler)) {
+    std::cerr << "privilege fixture vector-8 resolution mismatch\n";
+    return 1;
+  }
+  std::cout << emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  return 0;
+}
+
 // A straight-line C4 block (ordinary whole-program route, not the isolated AOT roots) over the same family, then the
 // established RESET frontier; executed by tests/genesis_immutable_rom_aot_exg_movep_scc_tas_generated_test.py.
 int emit_exg_movep_scc_tas_c4_source() {
@@ -28745,6 +28970,13 @@ int main(int argc, char **argv) {
     return emit_exg_movep_scc_tas_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-exg-movep-scc-tas-c4")
     return emit_exg_movep_scc_tas_c4_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-status-register-aot")
+    return emit_status_register_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-status-register-c4")
+    return emit_status_register_c4_source();
+  if (argc == 2 && std::string_view(argv[1]).starts_with("--emit-general-startup-bridge-privilege-violation"))
+    return emit_general_startup_bridge_privilege_violation_source(
+        std::string_view(argv[1]).substr(std::string_view("--emit-general-startup-bridge-privilege-violation").size()));
   if (argc == 2 && std::string_view(argv[1]) == "--emit-pea-aot")
     return emit_pea_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-jmp-pc-indexed-word-aot")

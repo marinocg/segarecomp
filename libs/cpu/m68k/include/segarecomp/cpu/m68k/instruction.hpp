@@ -404,75 +404,21 @@ inline constexpr M68kEaLegalMask m68k_ea_movem_register_to_memory =
     m68k_ea_index8;
 inline constexpr M68kEaLegalMask m68k_ea_movem_memory_to_register =
     m68k_ea_control_modes | m68k_ea_an_postinc | m68k_ea_index8 | m68k_ea_pc_index8;
-// SEG-007-T088: MOVE to SR's project-selected source set. Excludes
-// address-register direct (m68k_ea_an) as an architectural fact: verified
-// against the exact encoding-structure fact in pinned Musashi's own
-// disassembler opcode table (`m68kdasm.c`'s `g_opcode_info`: mask 0xffc0,
-// base 0x46c0, legal-EA legend 0xbff, whose bit 10 -- An-direct -- is
-// unset), the same encoding-structure citation style SEG-007-T025's
-// shift/rotate work already relies on (Musashi is consulted here only for
-// this structural encoding fact, never as a hardware-semantics or
-// privilege-behavior authority; see the console-developer research
-// discipline this milestone already follows). Additionally, as a
-// deliberate project scope decision (not an architectural exclusion), this
-// task additionally excludes every memory-operand source mode that is
-// otherwise architecturally legal here -- the three absolute/PC-relative
-// control-addressing forms (abs.W, abs.L, d16(PC)), which require this
-// project's separate C4 static-memory-fact/gap-tracking system (already
-// established for TST/CLR/MOVE's own absolute operands), and the four
-// An-indirect-family memory forms ((An)/(An)+/-(An)/d16(An)), which this
-// task's own general_startup C4 block-emission dispatcher deliberately
-// groups with write_moveq/write_user_stack_pointer's shared plain,
-// non-runtime-routed `M68kMemoryEmissionContext` (no `ram_array`
-// configured there) rather than threading a new routed/fact-checked memory
-// path for this one new kind -- neither this task extends to this new kind.
-// Only the two operand positions with a fully self-contained, register-
-// file-only or literal-constant C lowering remain selected: Dn and #imm.
-// This mirrors this milestone's own established precedent for deliberately
-// narrowing an otherwise-legal architectural EA set to a project-scoped
-// subset (BTST's own excluded-immediate-destination precedent; MOVEM's
-// runtime-routing-instead-of-folding precedent). A later task may widen
-// MOVE to SR's decode to recognize the remaining seven architecturally-legal
-// forms once it also wires proper runtime routing/fact-tracking for this
-// new kind; until then they remain unrecognized and fall through to
-// `valid_but_unsupported_instruction` like any other neighboring form.
-// Indexed forms (d8(An,Xn)/d8(PC,Xn)) are not part of any existing
-// `m68k_ea_*` mask in this project at all and remain permanently out of
-// scope project-wide, matching every other selected EA form.
-inline constexpr M68kEaLegalMask m68k_ea_move_to_sr_source = m68k_ea_dn | m68k_ea_immediate;
-// SEG-007-T116: MOVE from SR's project-selected destination set. The public
-// Motorola M68000 Family Programmer's Reference Manual (1988, `M1`) documents
-// MOVE from SR (opcode word 0100 0000 11 mmm rrr, 0x40C0-0x40FF) as a word
-// operation whose destination is any data-alterable addressing mode (Dn plus
-// the six memory-alterable modes). This task deliberately narrows that set to
-// data-register-direct only -- the exact shape the authorized generated-native
-// route reaches -- for the same reason SEG-007-T088 narrowed
-// m68k_ea_move_to_sr_source to Dn/#imm: a memory destination would require
-// threading this new kind through this project's C4 static-memory-fact /
-// runtime-routed memory-access machinery, which this task does not wire up.
-// The excluded memory forms remain unrecognized and fall through to
-// `valid_but_unsupported_instruction` like any other neighboring form; a later
-// task may widen this once it also wires that routing/fact machinery for this
-// kind. An-direct is never a legal MOVE from SR destination on any 68000-family
-// part (it is not in the data-alterable set) and is excluded architecturally.
-inline constexpr M68kEaLegalMask m68k_ea_move_from_sr_destination = m68k_ea_dn;
-// SEG-007-T118: MOVE <ea>,CCR's project-selected source set. The public Motorola
-// M68000 Family Programmer's Reference Manual (1988, `M1`) documents MOVE to CCR
-// (opcode word 0100 0100 11 mmm rrr, 0x44C0-0x44FF) as a word operation whose
-// source is any data addressing mode (Dn plus every memory mode plus the
-// PC-relative modes and immediate); the source is read as a word and only its
-// low-order byte is copied into the CCR (the upper byte is ignored). This task
-// deliberately narrows that set to data-register-direct only -- the exact shape
-// the authorized generated-native route reaches -- for the same reason
-// SEG-007-T088 narrowed m68k_ea_move_to_sr_source and SEG-007-T116 narrowed
-// m68k_ea_move_from_sr_destination to Dn: a memory or PC-relative source would
-// require threading this new kind through this project's C4 static-memory-fact /
-// runtime-routed memory-access machinery, which this task does not wire up. The
-// excluded modes remain unrecognized and fall through to
-// `valid_but_unsupported_instruction` like any other neighboring form; a later
-// task may widen this once it also wires that routing/fact machinery for this
-// kind.
-inline constexpr M68kEaLegalMask m68k_ea_move_to_ccr_source = m68k_ea_dn;
+// SEG-021-T018 (supersedes the SEG-007-T088/T116/T118 project narrowings to
+// Dn/#imm): the status-register transfer family's full legal EA sets, written
+// from the Motorola M68000 Family Programmer's Reference Manual (MOVE to SR,
+// MOVE to CCR and MOVE from SR entries, base MC68000 columns) and independent of
+// the T001 legal-form dataset (production never reads it).
+//   MOVE <ea>,SR / MOVE <ea>,CCR source: every data addressing mode -- Dn, (An),
+//     (An)+, -(An), d16(An), (d8,An,Xn), abs.W, abs.L, d16(PC), (d8,PC,Xn), #imm
+//     (An direct is not a data mode). The operand is a word; MOVE to CCR uses
+//     only its low byte.
+//   MOVE SR,<ea> destination: data alterable -- Dn, (An), (An)+, -(An),
+//     d16(An), (d8,An,Xn), abs.W, abs.L. On the MC68000 the memory destination
+//     is read before it is written (the SEG-021-T016 memory-Scc precedent).
+inline constexpr M68kEaLegalMask m68k_ea_move_to_sr_source = m68k_ea_move_family_source & ~m68k_ea_an;
+inline constexpr M68kEaLegalMask m68k_ea_move_from_sr_destination = m68k_ea_data_alterable_with_index;
+inline constexpr M68kEaLegalMask m68k_ea_move_to_ccr_source = m68k_ea_move_to_sr_source;
 
 enum class M68kMemoryAccessWidth { byte = 1, word = 2, long_word = 4 };
 enum class M68kMemoryAccessDirection { read, write };
@@ -627,21 +573,37 @@ enum class M68kInstructionKind {
   shift_rotate,
   // MOVE An,USP retains its encoded An source as source_ea.
   move_an_to_usp,
+  // SEG-021-T018: MOVE USP,An (0100 1110 0110 1AAA, 0x4E68-0x4E6F), the
+  // privileged reverse of `move_an_to_usp` (Motorola M68000 Family Programmer's
+  // Reference Manual, MOVE USP entry): long, no condition codes. The fixed An
+  // destination is `destination_ea` ({address_register, n}); there is no
+  // `source_ea` (the source is the user stack pointer).
+  move_usp_to_an,
+  // SEG-021-T018: ANDI/ORI/EORI #<data>,CCR (0x023C / 0x003C / 0x0A3C, byte,
+  // unprivileged) and ANDI/ORI/EORI #<data>,SR (0x027C / 0x007C / 0x0A7C, word,
+  // privileged), per the Motorola M68000 Family Programmer's Reference Manual
+  // ANDI/ORI/EORI to CCR / to SR entries. One identity per destination; the
+  // logical operation is the typed `status_operation` fact. `source_ea` is the
+  // decoded immediate (`size` byte for CCR, word for SR); there is no
+  // `destination_ea` (the destination is the implied CCR / SR).
+  logical_immediate_to_ccr, logical_immediate_to_sr,
   // SEG-007-T088: MOVE <ea>,SR (opcode word 0100 0110 11 mmm rrr, 0x46C0-
   // 0x46FF), a privileged System Control Group instruction per the public
   // Motorola M68000 Family Programmer's Reference Manual (1988), the same
   // `M1` citation already used by this milestone's prior CPU-decode-gap
   // tasks (see docs/references/genesis-rom-startup-contract.md); word size
   // only. `source_ea` carries the decoded source operand (see
-  // m68k_ea_move_to_sr_source below for the project-selected legal set);
+  // m68k_ea_move_to_sr_source: every data addressing mode);
   // there is no `destination_ea` (the destination is the fixed SR
   // pseudo-register this project's runtime already models generically as
   // its existing 16-bit `sr`/`status_register` field -- no new persistent-
   // state concept). See the MOVE to SR compatibility policy appended to
-  // docs/architecture/genesis-move-an-usp-startup-compatibility-policy.md
-  // for the narrow, explicitly-labeled no-privilege-check project policy
-  // this decode/lift/emission selects, mirroring SEG-007-T085's own MOVE
-  // An,USP precedent.
+  // docs/architecture/genesis-move-an-usp-startup-compatibility-policy.md:
+  // SEG-021-T018 (ADR 0043) replaced its former no-privilege-check policy with
+  // the implemented supervisor/user model -- the lowering raises vector 8 when
+  // SR.S = 0, masks the written value to the implemented SR bits, swaps the
+  // active/inactive stack pointers when S changes, and stops when T would be
+  // set (trace is deferred).
   move_to_sr,
   // SEG-007-T114: NOP (opcode word 0100 1110 0111 0001 = 0x4E71), a fixed,
   // no-operand, no-extension-word System Control Group instruction, per the
@@ -668,8 +630,8 @@ enum class M68kInstructionKind {
   // docs/references/m68k-move-from-sr-contract.md). Word size only; the source
   // is the fixed Status Register (this project's existing generic 16-bit
   // `sr`/`status_register` runtime field -- no new persistent state); the
-  // destination is any data-alterable EA, deliberately narrowed here to
-  // data-register-direct (see m68k_ea_move_from_sr_destination). On the
+  // destination is any data-alterable EA (SEG-021-T018 removed the former
+  // Dn-only narrowing; see m68k_ea_move_from_sr_destination). On the
   // original MC68000 MOVE from SR is UNPRIVILEGED (it became privileged only
   // from the MC68010) and affects NO condition codes (X/N/Z/V/C unchanged) --
   // contrast MOVE to SR, which overwrites the whole SR. A register (or
@@ -686,8 +648,8 @@ enum class M68kInstructionKind {
   // SEG-007-T059/T085/T088/T114/T116 already use; see
   // docs/references/genesis-rom-startup-contract.md and
   // docs/references/m68k-move-to-ccr-contract.md). Word size only; the source is
-  // any data addressing mode, deliberately narrowed here to data-register-direct
-  // (see m68k_ea_move_to_ccr_source); the source word is read and only its
+  // any data addressing mode (SEG-021-T018 removed the former Dn-only narrowing;
+  // see m68k_ea_move_to_ccr_source); the source word is read and only its
   // low-order byte is copied into the CCR (the upper byte is ignored). The
   // destination is the implied CCR -- the low byte of this project's existing
   // generic 16-bit `sr`/`status_register` runtime field; the upper (system)
@@ -776,6 +738,10 @@ enum class M68kMovemDirection { registers_to_memory, memory_to_registers };
 // `rol`/`ror`; C6d completes it with `roxl`/`roxr`, on this same task
 // branch -- all 8 base-MC68000 register-form families are now represented.
 enum class M68kShiftRotateKind { lsl, lsr, asl, asr, rol, ror, roxl, roxr };
+// SEG-021-T018: the logical operation of ANDI/ORI/EORI to CCR / to SR
+// (`logical_immediate_to_ccr` / `logical_immediate_to_sr`); harmless default
+// (`and_op`) for every other kind.
+enum class M68kStatusLogicalOperation { and_op, or_op, eor_op };
 
 // SEG-007-T025 (Batch C, C4): the one shared typed condition representation
 // for Bcc and DBcc (contract: "one shared condition-code owner"). `always`/
@@ -826,6 +792,8 @@ struct M68kDecodedInstruction {
   // default (`lsl`) for every other kind. Placed last, matching
   // `condition`/`movem_direction`'s own placement rule.
   M68kShiftRotateKind shift_rotate_kind{M68kShiftRotateKind::lsl};
+  // SEG-021-T018: meaningful only for `logical_immediate_to_ccr`/`_sr`.
+  M68kStatusLogicalOperation status_operation{M68kStatusLogicalOperation::and_op};
 };
 
 } // namespace segarecomp

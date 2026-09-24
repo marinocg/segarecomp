@@ -21,10 +21,14 @@ namespace segarecomp {
 // non-empty the emitted `main` also sets `runtime.divide_by_zero_handler_
 // entry` / `.divide_by_zero_handler_present`, mirroring
 // `irq6_handler_entry_hex`'s own wiring exactly for the vector-5 handler.
+// SEG-021-T018 / ADR 0043: `privilege_violation_handler_entry_hex` wires the
+// vector-8 handler the same way. The emitted `main` always establishes the
+// MC68000 reset SR (S = 1, T = 0, I = 7).
 [[nodiscard]] std::string emit_genesis_bridge_c11_main_open(std::string_view initial_ssp,
                                                              std::string_view entry_pc,
                                                              std::string_view irq6_handler_entry_hex = {},
-                                                             std::string_view divide_by_zero_handler_entry_hex = {});
+                                                             std::string_view divide_by_zero_handler_entry_hex = {},
+                                                             std::string_view privilege_violation_handler_entry_hex = {});
 [[nodiscard]] std::string emit_genesis_bridge_c11_main_finish(std::string_view dispatcher_name);
 
 }  // namespace segarecomp

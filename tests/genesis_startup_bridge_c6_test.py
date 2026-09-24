@@ -109,7 +109,7 @@ def main() -> int:
                     "d": ["0x00000000"] * 8,
                     "a": ["0x00000000"] * 7 + ["0x00ff0004"],
                     "usp": "0x00000000",
-                    "sr": "0x0004", "pc": "0x00000b0a",
+                    "sr": "0x2704", "pc": "0x00000b0a",
                 }
                 source_dimensions = ("GENESIS_CPU_DIMENSIONS_NONE" if dimensions is None
                                      else "GENESIS_CPU_DIMENSIONS_RESET")

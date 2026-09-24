@@ -311,3 +311,22 @@ most-significant first to/from every second byte of `d16(An)` and never updates 
 Timing: published static rows exist for EXG (6), MOVEP (16 / 24), TAS (Dn 4, memory 10 + EA) and Scc memory forms (8 + EA). The 16 `Scc Dn`
 forms are recorded as timing-unsupported in `m68k_instruction_cycles` (4 false / 6 true depends on the runtime condition); generated
 retirement uses the dynamic expression `m68k_scc_true ? 6 : 4`. `timing_validated` stays 0 (timing is not compared).
+
+## SEG-021-T018: status register, CCR, USP and privilege rows
+
+39 rows cover every legal form of MOVE <ea>,SR and MOVE <ea>,CCR (all data addressing sources), MOVE SR,<ea>
+(all data-alterable destinations), MOVE An,USP, MOVE USP,An, ANDI/ORI/EORI to CCR and to SR, and RTE
+(4,617 vectors, all validated against the pinned Musashi core configured as a plain 68000, 179 primary words
+credited to the manifest). The vectors' SR seeds include **user-mode** states (`0715`, `0015`, `0000`), so the
+same rows compare the privilege-violation entry (vector 8: frame on the SSP, saved SR with S = 0, stacked PC =
+the privileged instruction, the k=2 vector entry), the SR-write stack-pointer swap in both directions, and RTE
+restoring S = 0 onto the USP (`rte_frame` binds the frame through the new `sr@sp` / `pc@sp` operand specs).
+The generated runner now models `usp` as the inactive stack-pointer slot (USP in supervisor mode, SSP in user
+mode) and reports the architectural USP/SSP pair.
+
+Project-only, never compared with Musashi: SR values with T = 1 (bit 15). ADR 0043 §6 defers trace; the
+generated code stops fail-closed where Musashi (trace emulation off) would continue, so every SR source value
+and every stacked RTE SR in the table keeps T = 0, and the T = 1 stop is proved by
+`tests/genesis_status_register_privilege_generated_test.py` and `tests/m68k_exception_core_ownership_test.py`.
+MOVE SR,<memory> performs the MC68000 read-before-write (as SEG-021-T016 memory Scc does); the pinned Musashi
+core omits the dummy read, which is invisible in the conformance memory model.

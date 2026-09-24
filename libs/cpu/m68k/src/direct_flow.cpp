@@ -207,6 +207,9 @@ DirectInstruction decode(std::span<const std::uint8_t> image, const DirectFlowPr
   case M68kInstructionKind::movem:
   case M68kInstructionKind::shift_rotate:
   case M68kInstructionKind::move_an_to_usp:
+  case M68kInstructionKind::move_usp_to_an:
+  case M68kInstructionKind::logical_immediate_to_ccr:
+  case M68kInstructionKind::logical_immediate_to_sr:
   case M68kInstructionKind::move_to_sr:
   case M68kInstructionKind::nop:
   case M68kInstructionKind::move_from_sr:
@@ -238,6 +241,9 @@ DirectFlowIrOperation project_direct_operation(const M68kIrOperation &lifted) {
   case M68kIrKind::return_from_subroutine:
   case M68kIrKind::return_from_exception:
   case M68kIrKind::write_user_stack_pointer:
+  case M68kIrKind::read_user_stack_pointer:
+  case M68kIrKind::logical_immediate_to_ccr:
+  case M68kIrKind::logical_immediate_to_sr:
   case M68kIrKind::test_operand:
   case M68kIrKind::compare:
   case M68kIrKind::compare_immediate:

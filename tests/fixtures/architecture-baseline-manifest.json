@@ -92,7 +92,7 @@
               "0x00ff0004"
             ],
             "usp": "0x00000000",
-            "sr": "0x0004",
+            "sr": "0x2704",
             "pc": "0x00000b06",
             "work_ram_sha256": "de2f256064a0af797747c2b97505dc0b9f3df0de4f489eac731c23ae9ca9cc31",
             "work_ram_length": 65536
@@ -137,9 +137,9 @@
           }
         }
       },
-      "canonical_sha256": "6ae36ae664fdab83da09950e6d2d4b916adb6e1b8f9f6fd1941dfd4013c93da6",
+      "canonical_sha256": "75e9a64f52b3654116c350a9682a2525cfefb844a8e4350d99071c1dbd407eff",
       "informational": {
-        "generated_c_sha256": "12918b558b22ef550a9a947856b0776b342803e36bbe5d7ac5df5ac4a9ff4b55"
+        "generated_c_sha256": "938797441c80fd8a49f69a7da096a55ffbce7d4a6d052615194018a2e3b7c7bb"
       }
     }
   ]

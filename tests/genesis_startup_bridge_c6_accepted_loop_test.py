@@ -127,7 +127,7 @@ def main() -> int:
                         "d": ["0x00000000"] * 8,
                         "a": ["0x00000000"] * 7 + ["0x00ff0004"],
                         "usp": "0x00000000",
-                        "sr": "0x0000",
+                        "sr": "0x2700",
                         "pc": "0x00000b00",
                         "work_ram_base64": base64.b64encode(bytes(65536)).decode("ascii"),
                     }

@@ -2905,10 +2905,16 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   // ADR-0037: vector 5 is a distinct synchronous-exception root. It shares
   // build-time vector resolution, bounded discovery, and aggregation with the
   // IRQ6 root, while remaining outside asynchronous IRQ scheduling semantics.
+  // SEG-021-T018 / ADR 0043 §3/§7: vector 8 (privilege violation, offset
+  // 0x20) is resolved, rooted and represented by exactly the same rule; the
+  // bounded table below is the complete set of synchronous-exception vectors
+  // this machine delivers.
   std::optional<Address> divide_by_zero_handler_entry_value;
-  {
-    constexpr std::size_t kDivideByZeroVectorOffset = 0x14U;
-    if (const auto resolved_handler = resolve_vector_handler(kDivideByZeroVectorOffset)) {
+  std::optional<Address> privilege_violation_handler_entry_value;
+  for (const auto &[kSynchronousVectorOffset, handler_slot] :
+       {std::pair<std::size_t, std::optional<Address> *>{0x14U, &divide_by_zero_handler_entry_value},
+        std::pair<std::size_t, std::optional<Address> *>{0x20U, &privilege_violation_handler_entry_value}}) {
+    if (const auto resolved_handler = resolve_vector_handler(kSynchronousVectorOffset)) {
       const Address handler = *resolved_handler;
       const M68kProgramAddress handler_address{TargetAddressSpace::m68k_program, handler};
       if (const auto issue = environment.admit_target(
@@ -2930,7 +2936,7 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
         return translate_m68k_discovery_issue(program, *discovery.primary_issue);
       for (const auto &issue : discovery.secondary_issues)
         if (is_fatal_probe_failure(issue)) return translate_m68k_discovery_issue(program, issue);
-      divide_by_zero_handler_entry_value = handler;
+      *handler_slot = handler;
       merge_root_result({StaticProgramRootKind::synchronous_exception, 0U}, discovery);
     }
   }
@@ -3228,6 +3234,8 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
       analysis_roots_base.push_back({TargetAddressSpace::m68k_program, *irq6_handler_entry_value});
     if (divide_by_zero_handler_entry_value)
       analysis_roots_base.push_back({TargetAddressSpace::m68k_program, *divide_by_zero_handler_entry_value});
+    if (privilege_violation_handler_entry_value)
+      analysis_roots_base.push_back({TargetAddressSpace::m68k_program, *privilege_violation_handler_entry_value});
     // Runtime-confirmed roots are authoritative unknown-state roots, never
     // register facts.
     for (const auto &root : program.runtime_confirmed_seeds)
@@ -3533,6 +3541,10 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   if (divide_by_zero_handler_entry_value)
     analysis.divide_by_zero_handler_entry =
         M68kProgramAddress{TargetAddressSpace::m68k_program, *divide_by_zero_handler_entry_value};
+  // SEG-021-T018: the vector-8 handler entry, retained exactly like vector 5.
+  if (privilege_violation_handler_entry_value)
+    analysis.privilege_violation_handler_entry =
+        M68kProgramAddress{TargetAddressSpace::m68k_program, *privilege_violation_handler_entry_value};
   // SEG-007-T174 / ADR-0024: every external code-entry candidate that
   // discovery actually independently decoded (not merely attempted as a
   // seed -- `block_entries` unconditionally records every seed's own bare
@@ -3571,6 +3583,9 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   if (analysis.divide_by_zero_handler_entry &&
       analysis.divide_by_zero_handler_entry->space == TargetAddressSpace::m68k_program)
     analysis.semantic_partition_boundary_addresses.insert(analysis.divide_by_zero_handler_entry->value);
+  if (analysis.privilege_violation_handler_entry &&
+      analysis.privilege_violation_handler_entry->space == TargetAddressSpace::m68k_program)
+    analysis.semantic_partition_boundary_addresses.insert(analysis.privilege_violation_handler_entry->value);
   for (const auto &set : analysis.indirect_target_ea_sets)
     for (const auto &candidate : set.candidates)
       if (candidate.space == TargetAddressSpace::m68k_program)
@@ -3960,6 +3975,9 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
         if (analysis.divide_by_zero_handler_entry &&
             analysis.divide_by_zero_handler_entry->space == TargetAddressSpace::m68k_program)
           seed(analysis.divide_by_zero_handler_entry->value);
+        if (analysis.privilege_violation_handler_entry &&
+            analysis.privilege_violation_handler_entry->space == TargetAddressSpace::m68k_program)
+          seed(analysis.privilege_violation_handler_entry->value);
         for (const auto &root : analysis.validated_code_entry_candidate_roots)
           if (root.space == TargetAddressSpace::m68k_program) seed(root.value);
         // Mirrors `runtime_frontier_eligible`'s own walk exactly: `pending`
@@ -4385,6 +4403,12 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
                       M68kMemoryAccessDirection::write);
         }
         break;
+      case M68kInstructionKind::move_to_sr:
+      case M68kInstructionKind::move_to_ccr:
+        // SEG-021-T018: MOVE <ea>,SR / MOVE <ea>,CCR read one word source (CMP's source-read shape).
+        retain_fact(decoded, decoded.source_ea, M68kStaticMemoryFactRole::source_read,
+                    M68kMemoryAccessDirection::read);
+        break;
       case M68kInstructionKind::cmp:
         // SEG-007-T216: plain `CMP <ea>,Dn` shares CMPA's exact source-read
         // shape below -- its destination is always a data register (never a
@@ -4460,6 +4484,7 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
       case M68kInstructionKind::negate_decimal:
       case M68kInstructionKind::test_and_set:  // SEG-021-T016: TAS is a byte one-address RMW like NOT
       case M68kInstructionKind::set_conditional:  // SEG-021-T016: memory Scc reads then writes (Dn retains nothing)
+      case M68kInstructionKind::move_from_sr:  // SEG-021-T018: a memory MOVE from SR destination is read then written
       case M68kInstructionKind::not_operand:
         // SEG-007-T168: NOT has no second operand at all (unlike SUBQ's
         // quick-immediate source, and unlike ANDI/ORI/EORI, which do carry

@@ -386,6 +386,10 @@ struct FrontendAnalysis { M68kFrontendProfile profile{M68kFrontendProfile::direc
   // dispatch set; a bounded static hardware discovery root entirely outside
   // ADR-0013 §7's seed set S.
   std::optional<M68kProgramAddress> divide_by_zero_handler_entry;
+  // SEG-021-T018 / ADR 0043 §3: the build-time-resolved vector-8 (privilege
+  // violation) handler entry (vector-table offset 0x20), resolved, rooted and
+  // retained by exactly the same rule as `divide_by_zero_handler_entry`.
+  std::optional<M68kProgramAddress> privilege_violation_handler_entry;
   // SEG-007-T174 / ADR-0024: every `FrontendProgram::external_code_entry_
   // candidate` address that discovery actually admitted as a block entry
   // (i.e. every candidate that survived its own independent walk), in the
@@ -656,11 +660,6 @@ inline bool m68k_operation_is_runtime_owned_indirect_jump(const M68kIrOperation 
 
 inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &operation,
                                                       bool runtime_return_target_authority_available) {
-  const auto storage_free = [](const M68kEffectiveAddress &ea) {
-    return ea.mode == M68kEaMode::data_register || ea.mode == M68kEaMode::address_register ||
-           ea.mode == M68kEaMode::immediate;
-  };
-  const auto destination_register = [&] { return operation.destination_ea.mode == M68kEaMode::data_register; };
   switch (operation.kind) {
   case M68kIrKind::subtract_quick_long_d0:
   case M68kIrKind::branch_ne_short:
@@ -732,10 +731,18 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // the existing c4 MOVEM contract). Operand legality is owned by decode; DIV remains excluded.
     return true;
   case M68kIrKind::read_status_register:
-    return destination_register();
   case M68kIrKind::write_status_register:
   case M68kIrKind::write_condition_codes:
-    return storage_free(operation.source_ea);
+  case M68kIrKind::read_user_stack_pointer:
+  case M68kIrKind::logical_immediate_to_ccr:
+  case M68kIrKind::logical_immediate_to_sr:
+    // SEG-021-T018: the status-register/USP transfer family, family-level admission (supersedes the prior
+    // Dn/#imm-only carve-out). Every legal operand mode lowers through the shared routed read/write
+    // primitives with no CFG edge, call frame, return target or static memory fact; auto-updating operands
+    // use the operation-local deferred address-register commit, and a privileged form in user mode raises
+    // vector 8 through the platform before any part of the instruction executes. Operand legality is owned
+    // by decode.
+    return true;
   case M68kIrKind::multiply_signed_word:
   case M68kIrKind::multiply_unsigned_word:
     // SEG-021-T010: family-level admission, widened from the prior storage-free-only source
@@ -815,7 +822,12 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // already proved is sound for a CFG-frame-free RTS.
     return runtime_return_target_authority_available;
   case M68kIrKind::return_from_exception:
-    return false;
+    // SEG-021-T018 / ADR 0043 §5: RTE lowers through the platform's exception-return routine (the M68K-owned
+    // exception core bound by the machine: validated routed frame reads, atomic {SR, PC, SSP, inactive SP}
+    // commit, deferred-trace refusal) behind the privilege check. Exactly like the C4 route, the restored PC is
+    // a generated-runtime fact popped from the frame and continues through the ordinary dispatcher; it needs no
+    // graph, frame, return-target set or memory fact.
+    return true;
   case M68kIrKind::jump_general:
     // SEG-007-T246 (eighth iteration, same bounded family, same
     // architectural seam): an unconditional JMP whose source EA is one of
