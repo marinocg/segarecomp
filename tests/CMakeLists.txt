@@ -692,6 +692,12 @@ add_test(
   NAME compat_genesis_schema_test
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/compat_genesis_schema_test.py
 )
+# SEG-021-T017 / ADR-0043: MC68000 Group 1/2 exception-frame contract guard (six-byte
+# SR-at-SP, PC-at-SP+2 frame; no 68010 format word) in the ADR and the runtime primitive.
+add_test(
+  NAME m68k_exception_contract_doc_test
+  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/m68k_exception_contract_doc_test.py
+)
 add_test(
   NAME probe_genesis_startup_test
   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/probe_genesis_startup_test.py
@@ -802,7 +808,7 @@ set(SEGARECOMP_FAST_TESTS segarecomp_tests moveq_tests direct_flow_tests m68k_ti
     m68k_frontend_rejection_tests genesis_general_startup_cli_test architecture_dependency_test
     codegen_c11_emitter_ownership_test restricted_files_test genesis_viewer_tests
     cpu_m68k_static_discovery_tests genesis_startup_runtime_c2_test recompiler_fake_cpu_tests recompiler_no_genesis_policy_dependency_test
-    genesis_bridge_defaults_test)
+    genesis_bridge_defaults_test m68k_exception_contract_doc_test)
 # Evidence (SEG-018-T001): its genuine 1 s adapter/probe timeout cases race process start-up
 # under parallel load (observed failing at -j 8 and -j 12), so it runs alone.
 set_tests_properties(sonic_startup_inventory_adapter_failure_test sonic_startup_inventory_privacy_test PROPERTIES RUN_SERIAL TRUE)
