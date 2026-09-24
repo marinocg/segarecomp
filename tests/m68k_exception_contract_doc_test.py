@@ -26,8 +26,9 @@ RETURN_FUNCTION = "genesis_exception_return"
 
 EXPECTED_GROUP12 = [(0, 2, "saved_sr"), (2, 4, "saved_pc")]
 EXPECTED_TOTAL = 6
-FORBIDDEN_FIELD = re.compile(r"format|vector_offset|vector-offset", re.IGNORECASE)
-NEGATIONS = ("no ", "No ", "not ", "without", "never")
+FORBIDDEN_FIELD = re.compile(r"format|vector[-_ ]?offset", re.IGNORECASE)
+FORMAT_TERM = re.compile(r"vector[-_ ]?offset|format[-_/ ]?(vector|word|nibble|code|dispatch)", re.IGNORECASE)
+NEGATION = re.compile(r"\b(no|not|without|never|excludes?)\b", re.IGNORECASE)
 
 
 class ContractError(AssertionError):
@@ -35,9 +36,12 @@ class ContractError(AssertionError):
 
 
 def fenced_block(text: str, info: str) -> list[str]:
-    match = re.search(r"^```" + re.escape(info) + r"\n(.*?)^```", text, re.MULTILINE | re.DOTALL)
-    if match is None:
+    matches = list(re.finditer(r"^```" + re.escape(info) + r"\n(.*?)^```", text, re.MULTILINE | re.DOTALL))
+    if not matches:
         raise ContractError(f"missing ```{info} block")
+    if len(matches) > 1:
+        raise ContractError(f"more than one ```{info} block")
+    match = matches[0]
     return [line.strip() for line in match.group(1).splitlines() if line.strip()]
 
 
@@ -77,9 +81,11 @@ def check_group12_frame(text: str) -> None:
 
 def check_format_word_mentions_are_negations(text: str) -> None:
     for number, line in enumerate(text.splitlines(), 1):
-        if re.search(r"format[/ -]?(vector-offset|word|nibble|dispatch)|vector-offset", line, re.IGNORECASE):
-            if not any(token in line for token in NEGATIONS):
-                raise ContractError(f"line {number} mentions a format/vector-offset word without negation")
+        for term in FORMAT_TERM.finditer(line):
+            # The negation must precede the term within the same clause (no clause break in between).
+            prefix = re.split(r"[.;:]\s", line[:term.start()])[-1]
+            if not NEGATION.search(prefix):
+                raise ContractError(f"line {number} mentions a format/vector-offset word without a preceding negation")
 
 
 def function_body(source: str, name: str) -> str:
@@ -104,6 +110,12 @@ def _compact(text: str) -> str:
 
 def check_runtime_frame(source: str) -> None:
     entry = _compact(function_body(source, ENTRY_FUNCTION))
+    sr_write = re.search(r"routed_value = (\w+); if \(genesis_route_access_bus\(runtime, GENESIS_BUS_STACK_WRITE, frame_base, GENESIS_ACCESS_WORD", entry)
+    if sr_write is None or sr_write.group(1) != "saved_sr":
+        raise ContractError("the SR word slot at frame_base is not written with the saved SR")
+    pc_write = re.search(r"routed_value = (\w+); if \(genesis_route_access_bus\(runtime, GENESIS_BUS_STACK_WRITE, frame_base \+ 2U, GENESIS_ACCESS_LONG", entry)
+    if pc_write is None or pc_write.group(1) != "return_pc":
+        raise ContractError("the PC long slot at frame_base+2 is not written with the return PC")
     for needle in ("frame_base = a7 - 6U;",
                    "frame_base, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE",
                    "frame_base + 2U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE",
@@ -154,6 +166,21 @@ class Adr0043FrameContractTest(unittest.TestCase):
     def test_negative_unnegated_format_word(self) -> None:
         with self.assertRaises(ContractError):
             check_format_word_mentions_are_negations(self.text + "\nThe frame carries a format word.\n")
+
+    def test_negative_tightened_drifts(self) -> None:
+        for sentence in ("The frame carries a format word, not a nibble.",
+                         "A vector offset word follows the PC.",
+                         "The frame format code is stored at SP+6."):
+            with self.assertRaises(ContractError, msg=sentence):
+                check_format_word_mentions_are_negations(self.text + "\n" + sentence + "\n")
+        duplicate = self.text + "\n```m68k-group12-frame\noffset=0 size=2 field=saved_sr\ntotal=2\n```\n"
+        with self.assertRaises(ContractError):
+            check_group12_frame(duplicate)
+        source = RUNTIME_FRAME_SOURCES[0].read_text(encoding="utf-8")
+        swapped = source.replace("routed_value = saved_sr;", "routed_value = return_pc;", 1)
+        self.assertNotEqual(swapped, source)
+        with self.assertRaises(ContractError):
+            check_runtime_frame(swapped)
 
     def test_negative_runtime_drift(self) -> None:
         source = RUNTIME_FRAME_SOURCES[0].read_text(encoding="utf-8")

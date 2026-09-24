@@ -45,8 +45,9 @@ error (vector 3). In the coverage snapshot (`tests/fixtures/m68k-capability-cove
 The contract describes the original MC68000 only: the 16-bit external bus, 24-bit addresses, and the
 Group 0/1/2 exception model of the MC68000 User's Manual (citations U1-U4, P1-P2). It excludes
 MC68010-and-later behavior: no format/vector-offset stack word, no VBR, no MOVEC, no MOVE-from-SR
-privilege, no instruction continuation, and no RTE format dispatch. An MC68010-or-later encoding is
-still architecturally illegal (vector 4) under the legal-form baseline.
+privilege, no instruction continuation, and no RTE format dispatch. An MC68010-or-later encoding outside the
+line-A/line-F space is architecturally illegal (vector 4); one inside the line-A/line-F space raises
+vector 10/11 (§3), as the legal-form partition classes A/F/X record.
 
 ### 2. Group 1/2 exception frame (the only frame this project builds)
 
@@ -63,8 +64,9 @@ total=6
 - Offsets are relative to the supervisor stack pointer after entry: saved SR at `SSP`, saved PC at
   `SSP+2`. Values are big-endian.
 - `saved_sr` is the complete SR as it was before entry changed S, T or the interrupt mask.
-- `saved_pc` is the full 32-bit PC value from the table in §3. The MC68000 drives only 24 address
-  bits, but the stacked value is the full long word the CPU holds.
+- `saved_pc` is the 32-bit PC value from the table in §3. The MC68000 drives only 24 address bits;
+  stacking the full 32-bit PC register value is project behavior that matches the pinned Musashi
+  oracle, not a cited claim about the real chip's upper address byte.
 - There is no seventh or eighth byte, no format nibble, and no vector-offset word. The test
   `tests/m68k_exception_contract_doc_test.py` checks this block and the runtime implementation that
   must match it.
@@ -73,7 +75,7 @@ total=6
 
 "Next" is the address of the instruction after the complete current instruction, including its
 extension words. "Current" is the address of the first word of the instruction that raised the
-exception. The group and priority columns come from U2. The stacked-PC column comes from U3 and P2.
+exception. The group column comes from U2. The stacked-PC column comes from U3 and P2.
 
 | vector (offset) | exception | group | stacked PC | disposition | owner task |
 | --- | --- | --- | --- | --- | --- |
@@ -290,7 +292,8 @@ No Sega CD, 32X, Z80 or SH-2 machinery, and no dual-CPU scheduling, is added by 
 - **U2** M68000UM/AD §6, subsection "Exception Processing" and its exception-vector-assignment and
   exception-grouping-and-priority tables. Group 0 = reset, bus error, address error. Group 1 =
   trace, interrupt, illegal, privilege violation. Group 2 = TRAP, TRAPV, CHK, zero divide.
-- **U3** M68000UM/AD §6, subsection "Exception Types", with the entries for reset, interrupts
+- **U3** M68000UM/AD §6, the per-exception detailed-discussion subsection (heading wording differs
+  between editions; the implementing task records it with page numbers), with the entries for reset, interrupts
   (level 7 non-maskable, autovectors), uninitialized interrupt, spurious interrupt, instruction
   traps (stacked PC = next instruction), illegal and unimplemented instructions (line-A/F, stacked
   PC = the offending instruction), privilege violations (stacked PC = the offending instruction) and
@@ -304,8 +307,8 @@ No Sega CD, 32X, Z80 or SH-2 machinery, and no dual-CPU scheduling, is added by 
   instruction pages for MOVE to SR, ANDI/EORI/ORI to SR, MOVE USP, RTE, STOP and RESET (marked
   privileged). MOVE from SR is marked privileged only for the MC68010 and later. The public 1988
   scan is already cited as `M1` in `docs/references/genesis-rom-startup-contract.md`.
-- **P2** M68000PM/AD Table 6-1 "Exception Vector Assignments", already cited by ADR 0020 and
-  ADR 0037, and the RTE, RTR, STOP and RESET instruction pages.
+- **P2** M68000PM/AD exception vector assignment table, cited by ADR 0020 and ADR 0037 as
+  Table 6-1 (its exact table/appendix location is to be confirmed when page numbers are recorded), and the RTE, RTR, STOP and RESET instruction pages.
 
 Exact printed and PDF page numbers are recorded by the implementing task against the archived
 manual, following ADR 0020 and ADR 0037.
