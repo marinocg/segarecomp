@@ -4474,8 +4474,10 @@ void bit_operation_decode_covers_the_full_legal_ea_set_and_rejects_illegal_ones(
   expect(decodes({0x05U, 0x3CU, 0x00U, 0x12U}, K::btst, M68kEaMode::immediate, W::byte), "BTST D2,#imm");
   // Illegal destinations: An direct (also the MOVEP collision), immediate for the static/mutating forms, and
   // PC-relative for the mutating forms.
-  expect(rejects({0x05U, 0x09U, 0x00U, 0x10U}), "MOVEP-shaped BTST D2,An stays rejected");
-  expect(rejects({0x05U, 0x79U, 0x00U, 0x10U}) || rejects({0x05U, 0x49U, 0x00U, 0x10U}), "BCHG D2,An rejects");
+  // SEG-021-T016: the `0000 Dn 1 oo 001 An` slot is MOVEP (asserted exhaustively in the T016 collision test), never
+  // a bit operation, so an An-direct bit-operation destination has no legal decode at all.
+  expect(!rejects({0x05U, 0x09U, 0x00U, 0x10U}), "0x0509 (formerly a rejected BTST D2,An) is MOVEP.W d16(A1),D2");
+  expect(!rejects({0x05U, 0x49U, 0x00U, 0x10U}), "0x0549 (formerly a rejected BCHG D2,An) is MOVEP.L d16(A1),D2");
   expect(rejects({0x08U, 0x3CU, 0x00U, 0x07U, 0x00U, 0x12U}), "static BTST #n,#imm is not a legal form");
   expect(rejects({0x05U, 0x7CU, 0x00U, 0x12U}), "BCHG D2,#imm is not a legal form");
   expect(rejects({0x05U, 0xBAU, 0x00U, 0x10U}), "BCLR D2,d16(PC) is not a legal form");
@@ -7009,6 +7011,63 @@ void t208_tier2_call_shaped_continuation_excluded_when_not_independently_retaine
          "the Tier-2 call-shaped site's own continuation is correctly EXCLUDED here -- it is not itself "
          "a genuinely retained/emitted block in this variant, so the fix must not fabricate its "
          "membership out of nothing");
+}
+
+// SEG-021-T030: a call-shaped Tier-2 site (JSR (A0)) whose fixed continuation
+// is represented ONLY as an admitted immutable-ROM AOT identity (never an
+// ordinary block entry) is RTS return authority; a continuation represented
+// nowhere still fails closed.
+namespace t030_aot_only_tier2_continuation_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000B00U;
+FrontendProgram make_program(std::uint8_t continuation_hi, std::uint8_t continuation_lo) {
+  const std::vector<std::uint8_t> image{
+      0x4EU, 0xB9U, 0x00U, 0x00U, 0x0BU, 0x0EU,  // 0x0B00 JSR $0B0E.L
+      0x30U, 0x51U,                              // 0x0B06 MOVEA.W (A1),A0
+      0x4EU, 0x90U,                              // 0x0B08 JSR (A0)
+      continuation_hi, continuation_lo,          // 0x0B0A continuation
+      0x60U, 0xF2U,                              // 0x0B0C BRA.S -> 0x0B00
+      0x4EU, 0x75U,                              // 0x0B0E RTS
+  };
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T030/aot-only-tier2-continuation", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base},
+                             {{}, static_cast<std::uint32_t>(base + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  program.external_code_entry_candidates = {tier2_fixture::make_candidate(0x00000B0CU)};
+  return program;
+}
+std::string emit(std::uint8_t hi, std::uint8_t lo, bool aot) {
+  auto program = make_program(hi, lo);
+  if (aot && !apply_genesis_immutable_rom_aot(program)) return "aot-apply-failed";
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return "not-partial";
+  return emit_m68k_general_startup_runtime_c(*partial);
+}
+}  // namespace t030_aot_only_tier2_continuation_fixture
+
+void t030_aot_only_tier2_call_continuation_is_rts_return_authority() {
+  using namespace t030_aot_only_tier2_continuation_fixture;
+  const std::string member = "m68k_observed_return != UINT32_C(0x00000B0A)";
+  const auto with_aot = emit(0x4EU, 0x71U, true);  // NOP: AOT-admissible
+  expect(!with_aot.starts_with("/* translation rejected:") && with_aot != "aot-apply-failed" &&
+             with_aot != "not-partial",
+         "T030 AOT fixture emits");
+  expect(with_aot.find("genesis_aot_00000B0A") != std::string::npos,
+         "the Tier-2 call continuation is an admitted AOT identity");
+  expect(with_aot.find(member) != std::string::npos,
+         "an AOT-only Tier-2 call continuation joins the shared RTS membership check");
+  expect(with_aot.find("m68k_observed_return != UINT32_C(0x00000B06)") != std::string::npos,
+         "the ordinary call continuation is unaffected");
+  const auto without_aot = emit(0x4EU, 0x71U, false);
+  expect(without_aot.find(member) == std::string::npos,
+         "without any representation the continuation is not fabricated into the return set");
+  const auto unrepresented = emit(0x4EU, 0x70U, true);  // RESET: not AOT-safe
+  expect(unrepresented.find("genesis_aot_00000B0A") == std::string::npos &&
+             unrepresented.find(member) == std::string::npos,
+         "a continuation represented nowhere still fails closed");
 }
 
 namespace code_pointer_descriptor_fixture {
@@ -18163,10 +18222,7 @@ void general_startup_decoder_rejects_every_t025_explicit_non_goal() {
       // M68kInstructionKind::multiply_unsigned_word/divide_signed_word/
       // divide_unsigned_word. Removed from this non-goal list entirely
       // (each has its own dedicated decode/differential coverage instead).
-      {0x0108U, "MOVEP.W (d16,A0),D0 (base 0x0108) is never decoded"},
-      {0x0148U, "MOVEP.L (d16,A0),D0 (base 0x0148) is never decoded"},
-      {0x0188U, "MOVEP.W D0,(d16,A0) (base 0x0188) is never decoded"},
-      {0x01C8U, "MOVEP.L D0,(d16,A0) (base 0x01C8) is never decoded"},
+      // SEG-021-T016: MOVEP is a supported instruction and no longer a non-goal word.
       // SEG-021-T015: ABCD/SBCD/NBCD are supported instructions and no longer non-goal words.
       {0x4E40U, "TRAP #0 (base 0x4E40) is never decoded"},
       {0x4E70U, "RESET (0x4E70) is never decoded"},
@@ -18604,8 +18660,8 @@ void dbcc_exact_mask_rejects_neighboring_scc_encodings() {
   // bit3=1 by exactly one bit, in the same 0101-cccc opcode region (contract:
   // "DBcc occupies mode-001... structurally overlapping Scc"). An exact mask
   // (word&0xF0F8==0x50C8), never a broad 0101cccc11...... selector, is
-  // required to keep every legal Scc encoding out of DBcc's decode path;
-  // this project does not implement Scc.
+  // required to keep every legal Scc encoding out of DBcc's decode path.
+  // SEG-021-T016: Scc is now implemented; the two decoders are asserted disjoint exhaustively in the T016 test.
   const std::vector<std::uint8_t> scc_ne_dn{0x56U, 0xC2U};  // SNE D2 (Scc, register direct)
   const auto scc_ne_dn_decoded = segarecomp::decode_m68k_instruction(
       scc_ne_dn, source(), segarecomp::M68kDecodeProfile::general_startup);
@@ -26946,6 +27002,501 @@ int c4_bcd_admission() {
   return failures == 0 ? 0 : 1;
 }
 
+// SEG-021-T016: MOVEM/LINK/UNLK immutable-ROM AOT roots. Encodings from the Motorola M68000 Family Programmer's
+// Reference Manual (MOVEM `0100 1d00 1s ea` + register mask, predecrement mask bit-reversed; LINK `0100 1110 0101 0 An`
+// + d16; UNLK `0100 1110 0101 1 An`), independent of the T001 dataset.
+namespace movem_link_aot_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000F00U;
+const std::vector<std::uint8_t> image{
+    0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U,
+    0x48U, 0xE7U, 0xC0U, 0x00U,  // F08 MOVEM.L D0-D1,-(A7)
+    0x4CU, 0xDFU, 0x00U, 0x03U,  // F0C MOVEM.L (A7)+,D0-D1
+    0x4CU, 0x90U, 0x00U, 0x0CU,  // F10 MOVEM.W (A0),D2-D3
+    0x48U, 0xE8U, 0x00U, 0x03U, 0x00U, 0x10U,  // F14 MOVEM.L D0-D1,(16,A0)
+    0x48U, 0xA7U, 0xC0U, 0x00U,  // F1A MOVEM.W D0-D1,-(A7)
+    0x4EU, 0x56U, 0xFFU, 0xF8U,  // F1E LINK A6,#-8
+    0x4EU, 0x5EU,                // F22 UNLK A6
+    0x4CU, 0xF9U, 0x00U, 0x10U, 0x00U, 0xFFU, 0x08U, 0x00U,  // F24 MOVEM.L $FF0800.L,D4
+};
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T016/movem-link-aot-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base}, {{}, static_cast<std::uint32_t>(base + image.size())},
+                             {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace movem_link_aot_fixture
+
+int emit_movem_link_aot_source() {
+  using namespace segarecomp;
+  using namespace movem_link_aot_fixture;
+  auto program = program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
+// SEG-021-T016: EXG/MOVEP/Scc/TAS. Legality is asserted from the Motorola encodings (EXG `1100 Rx 1 01000/01001/10001 Ry`,
+// MOVEP `0000 Dn 1 oo 001 An`+d16, Scc `0101 cccc 11 ea`, TAS `0100 1010 11 ea`, Scc/TAS data-alterable), independently of the
+// T001 dataset.
+namespace exg_movep_scc_tas_aot_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000F00U;
+const std::vector<std::uint8_t> image{
+    0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U,
+    0xC3U, 0x42U,                // F08 EXG D1,D2
+    0xC3U, 0x4AU,                // F0A EXG A1,A2
+    0xC7U, 0x8CU,                // F0C EXG D3,A4
+    0x03U, 0x88U, 0x00U, 0x10U,  // F0E MOVEP.W D1,(16,A0)
+    0x03U, 0x48U, 0x00U, 0x10U,  // F12 MOVEP.L (16,A0),D1
+    0x57U, 0xC3U,                // F16 SEQ D3
+    0x56U, 0xD8U,                // F18 SNE (A0)+
+    0x50U, 0xE7U,                // F1A ST -(A7)
+    0x4AU, 0xC2U,                // F1C TAS D2
+    0x4AU, 0xDAU,                // F1E TAS (A2)+
+    0x52U, 0xEBU, 0x00U, 0x10U,  // F20 SHI (16,A3)
+    0x57U, 0xD1U,                // F24 SEQ (A1)
+};
+constexpr std::uint32_t first_root = base + 0x08U;
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T016/exg-movep-scc-tas-aot-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base}, {{}, static_cast<std::uint32_t>(base + image.size())},
+                             {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace exg_movep_scc_tas_aot_fixture
+
+int emit_exg_movep_scc_tas_aot_source() {
+  using namespace segarecomp;
+  using namespace exg_movep_scc_tas_aot_fixture;
+  auto program = program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
+// A straight-line C4 block (ordinary whole-program route, not the isolated AOT roots) over the same family, then the
+// established RESET frontier; executed by tests/genesis_immutable_rom_aot_exg_movep_scc_tas_generated_test.py.
+int emit_exg_movep_scc_tas_c4_source() {
+  using namespace segarecomp;
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  const std::vector<std::uint8_t> image{
+      0xC3U, 0x42U,                // B00 EXG D1,D2
+      0x03U, 0x88U, 0x00U, 0x10U,  // B02 MOVEP.W D1,(16,A0)
+      0x03U, 0x48U, 0x00U, 0x10U,  // B06 MOVEP.L (16,A0),D1
+      0x57U, 0xC3U,                // B0A SEQ D3
+      0x56U, 0xD8U,                // B0C SNE (A0)+
+      0x4AU, 0xC2U,                // B0E TAS D2
+      0x4AU, 0xDAU,                // B10 TAS (A2)+
+      0x4AU, 0xE7U,                // B12 TAS -(A7)
+      0x52U, 0xEBU, 0x00U, 0x10U,  // B14 SHI (16,A3)
+      0x57U, 0xF9U, 0x00U, 0xFFU, 0x07U, 0x00U,  // B18 SEQ $FF0700.L (foldable absolute: read + write facts)
+      0x4EU, 0x70U,                // B1E RESET
+  };
+  program.image = {"synthetic-c4-exg-movep-scc-tas-block", image, image.size()};
+  program.mapping_claims = {{"synthetic-c4-exg-movep-scc-tas-block", {{}, 0xB00U},
+                              {{}, static_cast<std::uint32_t>(0xB00U + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 1;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  if (emitted.starts_with("/* translation rejected:")) return 2;
+  std::cout << emitted;
+  return 0;
+}
+
+void exg_movep_scc_tas_encodings_are_disjoint_and_exactly_the_legal_set() {
+  using namespace segarecomp;
+  using K = M68kInstructionKind;
+  const auto decode_word = [](unsigned word) {
+    // Every word is followed by two extension words so truncation never masks a decision.
+    return decode_m68k_instruction(std::vector<std::uint8_t>{static_cast<std::uint8_t>(word >> 8U),
+                                                              static_cast<std::uint8_t>(word), 0x00U, 0x10U, 0x00U, 0x10U},
+                                   source(), M68kDecodeProfile::general_startup);
+  };
+  unsigned exg = 0, movep = 0, scc = 0, tas = 0, dbcc = 0;
+  for (unsigned word = 0; word < 0x10000U; ++word) {
+    const auto decoded = decode_word(word);
+    const auto *instruction = std::get_if<M68kDecodedInstruction>(&decoded);
+    const K kind = instruction != nullptr ? instruction->kind : K::moveq;
+    const bool is_exg = instruction != nullptr && kind == K::exchange_registers;
+    const bool is_movep = instruction != nullptr && kind == K::movep;
+    const bool is_scc = instruction != nullptr && kind == K::set_conditional;
+    const bool is_tas = instruction != nullptr && kind == K::test_and_set;
+    const bool is_dbcc = instruction != nullptr && kind == K::dbcc;
+    // Encodings written straight from the Motorola manual.
+    const unsigned f1f8 = word & 0xF1F8U;
+    const bool want_exg = f1f8 == 0xC140U || f1f8 == 0xC148U || f1f8 == 0xC188U;
+    const bool want_movep = (word & 0xF138U) == 0x0108U;
+    const unsigned mode = (word >> 3U) & 7U, reg = word & 7U;
+    const bool ea_ok = mode != 1U && (mode <= 6U || (mode == 7U && reg <= 1U));  // data alterable (incl. (d8,An,Xn))
+    const bool want_scc = (word & 0xF0C0U) == 0x50C0U && mode != 1U && ea_ok;
+    const bool want_tas = (word & 0xFFC0U) == 0x4AC0U && ea_ok;
+    const bool want_dbcc = (word & 0xF0F8U) == 0x50C8U;
+    // (d8,An,Xn) is legal for Scc/TAS; the fixed 0x0010 extension word is a brief word with a zero scale, so it decodes.
+    expect(is_exg == want_exg && is_movep == want_movep && is_scc == want_scc && is_tas == want_tas && is_dbcc == want_dbcc,
+           "EXG/MOVEP/Scc/TAS/DBcc decode exactly their Motorola encodings (no overlap, no gap)");
+    expect((static_cast<int>(is_exg) + is_movep + is_scc + is_tas + is_dbcc) <= 1,
+           "no encoding decodes as two of EXG/MOVEP/Scc/TAS/DBcc");
+    if (is_movep) {
+      // MOVEP never shadows a bit operation: the An-direct slot is not a legal BTST/BCHG/BCLR/BSET destination.
+      expect(((word >> 3U) & 7U) == 1U && (word & 0x0100U) != 0U, "MOVEP occupies only the bit-operation An-direct slot");
+    }
+    exg += is_exg; movep += is_movep; scc += is_scc; tas += is_tas; dbcc += is_dbcc;
+  }
+  expect(exg == 3U * 64U && movep == 4U * 64U, "EXG has 3 opmodes x 64 register pairs; MOVEP 4 opmodes x 64 Dn/An pairs");
+  expect(scc == 16U * 50U, "Scc has 16 conditions x 50 legal operand words (6 x 8 register/memory + abs.W + abs.L)");
+  expect(tas == 50U && dbcc == 16U * 8U, "TAS has 50 legal operand words; DBcc keeps its own 128 words");
+  // Bit operations keep every non-MOVEP encoding (dynamic and static forms).
+  for (const unsigned word : {0x0500U, 0x0510U, 0x05C0U, 0x0800U, 0x0840U, 0x0880U, 0x08C0U}) {
+    const auto decoded = decode_word(word);
+    const auto *instruction = std::get_if<M68kDecodedInstruction>(&decoded);
+    expect(instruction != nullptr && instruction->kind != K::movep, "bit operations are never decoded as MOVEP");
+  }
+  // Neighbouring owners keep their encodings.
+  const auto expect_kind = [&](unsigned word, K kind, const char *message) {
+    const auto decoded = decode_word(word);
+    const auto *instruction = std::get_if<M68kDecodedInstruction>(&decoded);
+    expect(instruction != nullptr && instruction->kind == kind, message);
+  };
+  expect_kind(0xC1C0U, K::multiply_signed_word, "0xC1C0 remains MULS.W");
+  expect_kind(0xC0C0U, K::multiply_unsigned_word, "0xC0C0 remains MULU.W");
+  expect_kind(0xC110U, K::logical_and, "0xC110 remains AND.B D0,(A0)");
+  expect_kind(0xC108U, K::add_decimal, "0xC108 remains ABCD");
+  expect_kind(0x5240U, K::addq, "0x5240 remains ADDQ.W #1,D0");
+}
+
+void exg_movep_scc_tas_lift_declare_effects_and_timing() {
+  using namespace segarecomp;
+  const auto lift = [](std::vector<std::uint8_t> bytes) {
+    const auto decoded = std::get<M68kDecodedInstruction>(decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup));
+    return lift_m68k_instruction(decoded);
+  };
+  {
+    const auto exg = lift({0xC3U, 0x8CU});  // EXG D1,A4
+    const auto effect = m68k_operation_effect(exg);
+    const auto cycles = m68k_instruction_cycles(exg);
+    expect(exg.kind == M68kIrKind::exchange_registers && !effect.affects_condition_codes &&
+               effect.register_write_footprint_complete && effect.data_register_write_mask == 0x02U &&
+               effect.address_register_write_mask == 0x10U && effect.pc == M68kPcEffectKind::advance &&
+               effect.pc_delta == 2U && cycles && *cycles == 6U && m68k_operation_is_immutable_rom_aot_safe(exg, false) &&
+               m68k_operation_has_complete_c_emission(exg),
+           "EXG Dx,Ay writes both registers, changes no CCR, takes 6 cycles and is AOT-admitted");
+    const auto aa = lift({0xC3U, 0x4AU});  // EXG A1,A2
+    expect(m68k_operation_effect(aa).address_register_write_mask == 0x06U && m68k_operation_effect(aa).data_register_write_mask == 0U,
+           "EXG Ax,Ay marks both address registers written");
+  }
+  for (const auto &[word, size_bytes, cycles_expected, to_register] : std::array<std::tuple<unsigned, unsigned, unsigned, bool>, 4>{{
+           {0x0308U, 2U, 16U, true}, {0x0348U, 4U, 24U, true}, {0x0388U, 2U, 16U, false}, {0x03C8U, 4U, 24U, false}}}) {
+    const auto movep = lift({static_cast<std::uint8_t>(word >> 8U), static_cast<std::uint8_t>(word), 0xFFU, 0xF0U});
+    const auto effect = m68k_operation_effect(movep);
+    const auto cycles = m68k_instruction_cycles(movep);
+    expect(movep.kind == M68kIrKind::movep_transfer && static_cast<unsigned>(movep.size) == size_bytes &&
+               (movep.destination_ea.mode == M68kEaMode::data_register) == to_register &&
+               (to_register ? movep.source_ea : movep.destination_ea).mode == M68kEaMode::address_disp16 &&
+               (to_register ? movep.source_ea : movep.destination_ea).displacement == -16 && !effect.affects_condition_codes &&
+               effect.register_write_footprint_complete && effect.address_register_write_mask == 0U &&
+               effect.data_register_write_mask == (to_register ? 0x01U << 1U : 0U) && effect.pc_delta == 4U && cycles &&
+               *cycles == cycles_expected && m68k_operation_is_immutable_rom_aot_safe(movep, false) &&
+               m68k_operation_has_complete_c_emission(movep),
+           "MOVEP decodes size/direction/d16(An), declares Dn-only writes, takes 16/24 cycles and is AOT-admitted");
+  }
+  // Scc: every condition maps to the shared condition owner; timing is static for memory, dynamic for Dn.
+  const std::array<M68kCondition, 16> conditions{M68kCondition::always, M68kCondition::never, M68kCondition::hi,
+      M68kCondition::ls, M68kCondition::cc, M68kCondition::cs, M68kCondition::ne, M68kCondition::eq, M68kCondition::vc,
+      M68kCondition::vs, M68kCondition::pl, M68kCondition::mi, M68kCondition::ge, M68kCondition::lt, M68kCondition::gt,
+      M68kCondition::le};
+  for (unsigned cond = 0; cond < 16U; ++cond) {
+    for (const auto &[mode_reg, ext, expected_cycles] : std::array<std::tuple<unsigned, std::array<std::uint8_t, 2>, int>, 3>{{
+             {0x00U, {}, -1}, {0x10U, {}, 12}, {0x39U, {0x00U, 0xFFU}, 20}}}) {
+      std::vector<std::uint8_t> bytes{static_cast<std::uint8_t>(0x50U | cond), static_cast<std::uint8_t>(0xC0U | mode_reg)};
+      if (mode_reg == 0x39U) bytes.insert(bytes.end(), {0x00U, 0xFFU, 0x00U, 0x80U});
+      const auto scc = lift(bytes);
+      const auto effect = m68k_operation_effect(scc);
+      const auto cycles = m68k_instruction_cycles(scc);
+      expect(scc.kind == M68kIrKind::set_conditional && scc.condition == conditions[cond] &&
+                 scc.size == M68kMemoryAccessWidth::byte && !effect.affects_condition_codes &&
+                 effect.register_write_footprint_complete && (expected_cycles < 0 ? !cycles.has_value()
+                                                                                   : (cycles && *cycles == static_cast<unsigned>(expected_cycles))) &&
+                 m68k_operation_is_immutable_rom_aot_safe(scc, false) && m68k_operation_has_complete_c_emission(scc),
+             "Scc carries its condition, changes no CCR, has static memory timing (Dn timing-unsupported) and is AOT-admitted");
+    }
+  }
+  // Scc semantics through the shared condition owner: for every SR, the emitted C selects exactly what the host owner selects.
+  for (unsigned cond = 0; cond < 16U; ++cond)
+    for (unsigned sr = 0; sr < 32U; ++sr) {
+      const auto scc = lift({static_cast<std::uint8_t>(0x50U | cond), 0xC0U});
+      const bool holds = m68k_evaluate_condition(scc.condition, static_cast<std::uint16_t>(sr));
+      expect(holds == m68k_evaluate_condition(conditions[cond], static_cast<std::uint16_t>(sr)) &&
+                 (cond != 0U || holds) && (cond != 1U || !holds),
+             "Scc reuses the shared Bcc/DBcc condition evaluation (ST always, SF never)");
+    }
+  // TAS timing and CCR/effect declarations.
+  for (const auto &[bytes, expected] : std::array<std::pair<std::vector<std::uint8_t>, unsigned>, 5>{{
+           {{0x4AU, 0xC0U}, 4U}, {{0x4AU, 0xD0U}, 14U}, {{0x4AU, 0xE0U}, 16U}, {{0x4AU, 0xE8U, 0x00U, 0x10U}, 18U},
+           {{0x4AU, 0xF9U, 0x00U, 0xFFU, 0x00U, 0x80U}, 22U}}}) {
+    const auto tas = lift(bytes);
+    const auto effect = m68k_operation_effect(tas);
+    const auto cycles = m68k_instruction_cycles(tas);
+    expect(tas.kind == M68kIrKind::test_and_set && tas.size == M68kMemoryAccessWidth::byte &&
+               effect.affects_condition_codes && effect.register_write_footprint_complete && cycles && *cycles == expected &&
+               m68k_operation_is_immutable_rom_aot_safe(tas, false) && m68k_operation_has_complete_c_emission(tas),
+           "TAS is a byte RMW with CCR effects, Table 8-6 timing (Dn 4, memory 10 + EA) and AOT admission");
+  }
+  // Illegal operands and truncation are bounds-safe rejections.
+  for (const auto &bytes : std::array<std::vector<std::uint8_t>, 4>{{
+           {0x4AU, 0xC8U, 0x00U, 0x00U},        // TAS A0
+           {0x4AU, 0xFAU, 0x00U, 0x10U},        // TAS d16(PC)
+           {0x4AU, 0xFCU, 0x00U, 0x00U},        // ILLEGAL / TAS #imm
+           {0x50U, 0xF9U, 0x00U, 0xFFU}}}) {    // Scc abs.L with a truncated extension
+    const auto decoded = decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup);
+    expect(!std::holds_alternative<M68kDecodedInstruction>(decoded), "illegal/truncated Scc/TAS operands are rejected");
+  }
+  const auto movep_truncated = decode_m68k_instruction(std::vector<std::uint8_t>{0x03U, 0x88U}, source(),
+                                                       M68kDecodeProfile::general_startup);
+  const auto *failure = std::get_if<RejectedM68kDecode>(&movep_truncated);
+  expect(failure != nullptr && failure->outcome == DecodeOutcome::truncated_instruction,
+         "MOVEP with a missing displacement word is a bounds-safe truncation");
+}
+
+void scc_memory_destination_declares_read_and_write_footprint_and_facts() {
+  using namespace segarecomp;
+  const auto lift = [](std::vector<std::uint8_t> bytes) {
+    const auto decoded = std::get<M68kDecodedInstruction>(decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup));
+    return lift_m68k_instruction(decoded);
+  };
+  const auto memory_effect = m68k_operation_effect(lift({0x57U, 0xD0U}));  // SEQ (A0)
+  expect(memory_effect.resolved_source_ea && memory_effect.resolved_destination_ea &&
+             memory_effect.resolved_source_ea->mode == M68kEaMode::address_indirect &&
+             memory_effect.resolved_destination_ea->mode == M68kEaMode::address_indirect &&
+             !memory_effect.affects_condition_codes,
+         "memory Scc effect metadata declares a destination read (source_ea) and the destination write, no CCR change");
+  const auto register_effect = m68k_operation_effect(lift({0x57U, 0xC3U}));  // SEQ D3
+  expect(!register_effect.resolved_source_ea && register_effect.resolved_destination_ea,
+         "Scc Dn declares no memory read");
+
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  const std::vector<std::uint8_t> image{
+      0x57U, 0xC3U,                                // 0xB00: SEQ D3 (register: no fact)
+      0x57U, 0xF9U, 0x00U, 0xFFU, 0x07U, 0x00U,    // 0xB02: SEQ $00FF0700.L (foldable work-RAM absolute)
+      0x4EU, 0x70U,                                // 0xB08: RESET (frontier)
+  };
+  program.image = {"synthetic/SEG-021-T016/scc-memory-facts", image, image.size()};
+  program.mapping_claims = {{"synthetic-scc-memory-facts", {{}, 0xB00U}, {{}, 0xB0AU}, {0U}, {10U}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "the Scc fact fixture reaches the RESET frontier");
+  if (partial == nullptr) return;
+  const auto &facts = partial->accepted_prefix.static_memory_facts;
+  bool has_read = false, has_write = false;
+  for (const auto &fact : facts) {
+    const bool right = fact.address.value == UINT32_C(0x00FF0700) && fact.width == M68kMemoryAccessWidth::byte &&
+                       fact.region == M68kAbsoluteOperandRegion::synthetic_work_ram &&
+                       fact.operation.source.address.value == 0xB02U;
+    has_read = has_read || (right && fact.role == M68kStaticMemoryFactRole::destination_read &&
+                            fact.direction == M68kMemoryAccessDirection::read);
+    has_write = has_write || (right && fact.role == M68kStaticMemoryFactRole::destination_write &&
+                              fact.direction == M68kMemoryAccessDirection::write);
+  }
+  expect(facts.size() == 2U && has_read && has_write,
+         "memory Scc with a foldable absolute destination retains exactly a destination_read and a destination_write fact; "
+         "Scc Dn retains none");
+}
+
+void exg_movep_scc_tas_host_semantics_ccr_and_bytes() {
+  using namespace segarecomp;
+  // TAS CCR is the logical-result rule on the operand byte (N/Z set from it, V/C cleared, X preserved).
+  expect(m68k_logical_ccr(0x2713U, 0x00U, M68kMemoryAccessWidth::byte) == 0x2714U, "TAS of 0x00: Z set, N/V/C clear, X kept");
+  expect(m68k_logical_ccr(0x2700U, 0x80U, M68kMemoryAccessWidth::byte) == 0x2708U, "TAS of 0x80: N set, Z clear");
+  expect(m68k_logical_ccr(0x271FU, 0x7FU, M68kMemoryAccessWidth::byte) == 0x2710U, "TAS of 0x7F: N/Z/V/C clear, X kept");
+}
+
+void exg_movep_scc_tas_generated_c_shapes() {
+  using namespace segarecomp;
+  const auto lift = [](std::vector<std::uint8_t> bytes) {
+    const auto decoded = std::get<M68kDecodedInstruction>(decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup));
+    return lift_m68k_instruction(decoded);
+  };
+  GenesisM68kEmissionContext direct{"ram", "a", "fi", "fc", "fd", 0U, std::nullopt, 0U, {}, {}};
+  const auto exg = emit_m68k_operation_c(lift({0xC3U, 0x42U}), "d", "sr", "", &direct);
+  expect(exg.find("exg_saved = d[1]") != std::string::npos && exg.find("d[1] = d[2]") != std::string::npos &&
+             exg.find("d[2] = exg_saved") != std::string::npos && exg.find("sr") == std::string::npos,
+         "EXG lowers to one swap through a temporary and never touches SR");
+  GenesisM68kEmissionContext routed{"ram", "a", "fi", "fc", "fd", 0U, std::nullopt, 0U, {}, {}};
+  routed.runtime_routing = true;
+  routed.runtime_object = "runtime";
+  routed.program_counter = "runtime->pc";
+  routed.runtime_emitter = &genesis_m68k_runtime_c_emitter();
+  const auto movep = emit_m68k_operation_c(lift({0x03U, 0x48U, 0x00U, 0x10U}), "runtime->d", "runtime->sr", "", &routed);
+  const auto first_read = movep.find("m68k_movep_base + UINT32_C(0)");
+  const auto last_read = movep.find("m68k_movep_base + UINT32_C(6)");
+  const auto write_dn = movep.find("runtime->d[1] =");
+  const auto pc = movep.find("runtime->pc +=");
+  expect(first_read != std::string::npos && last_read != std::string::npos && write_dn != std::string::npos &&
+             pc != std::string::npos && first_read < last_read && last_read < write_dn && write_dn < pc &&
+             movep.find("a[0] =") == std::string::npos,
+         "routed MOVEP.L reads all four bytes (stride two) before writing Dn, advances PC last and never updates An");
+  const auto scc = emit_m68k_operation_c(lift({0x57U, 0xDFU}), "runtime->d", "runtime->sr", "", &routed);  // SEQ (A7)+
+  const auto scc_write = scc.find("m68k_routed_addr_0");
+  expect(scc.find("m68k_scc_auto_ea += UINT32_C(2)") != std::string::npos && scc_write != std::string::npos &&
+             scc.find("a[7] = m68k_scc_auto_ea;") > scc.find("return transfer;") &&
+             scc.find("a[7] = m68k_scc_auto_ea;") < scc.find("runtime->pc +="),
+         "routed Scc (A7)+ steps A7 by two and commits it after the routed write, PC last");
+  // Memory Scc is read before it is written (MC68000: "a memory destination is read before it is written"): one routed BYTE
+  // read, then one routed BYTE write to the same EA, then the single commit, then PC. Dn Scc performs no routed access.
+  const auto count_of = [](const std::string &text, const std::string &needle) {
+    std::size_t count = 0;
+    for (auto at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1)) ++count;
+    return count;
+  };
+  for (const auto &[bytes, commit, step] : std::array<std::tuple<std::vector<std::uint8_t>, std::string, std::string>, 2>{{
+           {{0x57U, 0xDFU}, "a[7] = m68k_scc_auto_ea;", "m68k_scc_auto_ea += UINT32_C(2)"},       // SEQ (A7)+
+           {{0x56U, 0xE7U}, "a[7] = m68k_scc_auto_ea;", "m68k_scc_auto_ea -= UINT32_C(2)"}}}) {  // SNE -(A7)
+    const auto text = emit_m68k_operation_c(lift(bytes), "runtime->d", "runtime->sr", "", &routed);
+    const auto read = text.find("GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &");
+    const auto write = text.find("GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &");
+    expect(read != std::string::npos && write != std::string::npos && read < write &&
+               count_of(text, "genesis_route_access(") == 2U && count_of(text, commit) == 1U &&
+               text.find(commit) > write && text.find(commit) < text.find("runtime->pc +=") &&
+               text.find(step) != std::string::npos && text.find("runtime->sr =") == std::string::npos,
+           "memory Scc auto-update: one routed byte read, then one routed byte write to the same EA, one commit after the "
+           "write, PC last, CCR untouched");
+  }
+  {
+    const auto text = emit_m68k_operation_c(lift({0x57U, 0xD1U}), "runtime->d", "runtime->sr", "", &routed);  // SEQ (A1)
+    const auto read = text.find("GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &");
+    const auto write = text.find("GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &");
+    expect(read != std::string::npos && write != std::string::npos && read < write &&
+               count_of(text, "genesis_route_access(") == 2U && text.find("a[1] =") == std::string::npos,
+           "memory Scc (An): routed byte read before routed byte write, An never updated");
+    const auto dn = emit_m68k_operation_c(lift({0x57U, 0xC3U}), "runtime->d", "runtime->sr", "", &routed);  // SEQ D3
+    expect(dn.find("genesis_route_access(") == std::string::npos && dn.find("runtime->d[3] =") != std::string::npos,
+           "Scc Dn is register-only (no routed access)");
+  }
+  const auto tas = emit_m68k_operation_c(lift({0x4AU, 0xE7U}), "runtime->d", "runtime->sr", "", &routed);  // TAS -(A7)
+  expect(tas.find("m68k_tas_auto_ea -= UINT32_C(2)") != std::string::npos &&
+             tas.find("tas_operand | UINT32_C(0x80)") != std::string::npos &&
+             tas.find("a[7] = m68k_tas_auto_ea;") > tas.rfind("return transfer;") &&
+             tas.find("a[7] = m68k_tas_auto_ea;") < tas.find("runtime->pc +="),
+         "routed TAS -(A7) steps A7 by two, sets bit 7 and commits A7 after both routed accesses");
+}
+
+void exg_movep_scc_tas_aot_dispatch_is_admitted_end_to_end() {
+  using namespace segarecomp;
+  using namespace exg_movep_scc_tas_aot_fixture;
+  auto program = program_with();
+  expect(apply_genesis_immutable_rom_aot_range(program, first_root, base + static_cast<std::uint32_t>(image.size())),
+         "EXG/MOVEP/Scc/TAS fixture range enumerates cleanly");
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "EXG/MOVEP/Scc/TAS fixture remains a genuine partial program");
+  if (partial == nullptr) return;
+  const auto &roots = partial->accepted_prefix.immutable_rom_aot_entries;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  for (const std::uint32_t offset : {0x08U, 0x0AU, 0x0CU, 0x0EU, 0x12U, 0x16U, 0x18U, 0x1AU, 0x1CU, 0x1EU, 0x20U}) {
+    const auto address = base + offset;
+    expect(std::any_of(roots.begin(), roots.end(),
+                       [&](const auto &root) { return root.decoded.provenance.source.address.value == address; }),
+           "each EXG/MOVEP/Scc/TAS form becomes a validated independent AOT root");
+    std::ostringstream hex_address;
+    hex_address << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address;
+    const auto begin = emitted.find("genesis_aot_" + hex_address.str() + "(GenesisRuntime *runtime) {");
+    const auto end = begin == std::string::npos ? std::string::npos : emitted.find("\n}\n", begin);
+    const auto body = begin == std::string::npos || end == std::string::npos ? std::string{} : emitted.substr(begin, end - begin);
+    const bool register_only = offset == 0x08U || offset == 0x0AU || offset == 0x0CU || offset == 0x16U || offset == 0x1CU;
+    expect(!body.empty() && body.find("translation rejected") == std::string::npos &&
+               (body.find("genesis_route_access(runtime,") != std::string::npos) == !register_only,
+           "each AOT body is emitted and routes exactly its memory operands");
+    if (offset == 0x16U)
+      expect(body.find("m68k_scc_true ? UINT32_C(6) : UINT32_C(4)") != std::string::npos ||
+                 body.find("m68k_scc_true") != std::string::npos,
+             "Scc Dn retires with the dynamic 4/6 cycle expression");
+  }
+}
+
+int c4_exg_movep_scc_tas_admission() {
+  using namespace segarecomp;
+  // Every legal shape (absolute and indexed Scc/TAS operands need a retained fact or none; auto-update A7 steps) must pass
+  // the real C4 preflight with ZERO gap rows and emit a routed body.
+  struct Case { const char *name; std::vector<std::uint8_t> code; const char *commit; bool routed; };
+  const std::vector<Case> cases{
+      {"EXG D1,D2", {0xC3U, 0x42U}, nullptr, false},
+      {"EXG A1,A2", {0xC3U, 0x4AU}, nullptr, false},
+      {"EXG D1,A2", {0xC3U, 0x8AU}, nullptr, false},
+      {"MOVEP.W (16,A0),D1", {0x03U, 0x08U, 0x00U, 0x10U}, nullptr, true},
+      {"MOVEP.L D1,(16,A7)", {0x03U, 0xCFU, 0x00U, 0x10U}, nullptr, true},
+      {"SEQ D3", {0x57U, 0xC3U}, nullptr, false},
+      {"SNE (A0)+", {0x56U, 0xD8U}, "runtime->a[0] = m68k_scc_auto_ea;", true},
+      {"ST -(A7)", {0x50U, 0xE7U}, "runtime->a[7] = m68k_scc_auto_ea;", true},
+      {"SF (A0)", {0x51U, 0xD0U}, nullptr, true},
+      {"SHI (16,A0)", {0x52U, 0xE8U, 0x00U, 0x10U}, nullptr, true},
+      {"SLE (4,A0,D1.W)", {0x5FU, 0xF0U, 0x10U, 0x04U}, nullptr, true},
+      {"SMI (0xFF0080).L", {0x5BU, 0xF9U, 0x00U, 0xFFU, 0x00U, 0x80U}, nullptr, true},
+      {"SGT (0xFF80).W", {0x5EU, 0xF8U, 0xFFU, 0x80U}, nullptr, true},
+      {"TAS D2", {0x4AU, 0xC2U}, nullptr, false},
+      {"TAS (A0)+", {0x4AU, 0xD8U}, "runtime->a[0] = m68k_tas_auto_ea;", true},
+      {"TAS -(A7)", {0x4AU, 0xE7U}, "runtime->a[7] = m68k_tas_auto_ea;", true},
+      {"TAS (16,A0)", {0x4AU, 0xE8U, 0x00U, 0x10U}, nullptr, true},
+      {"TAS (4,A0,D1.W)", {0x4AU, 0xF0U, 0x10U, 0x04U}, nullptr, true},
+      {"TAS (0xFF0080).L", {0x4AU, 0xF9U, 0x00U, 0xFFU, 0x00U, 0x80U}, nullptr, true},
+      {"TAS (0xFF80).W", {0x4AU, 0xF8U, 0xFFU, 0x80U}, nullptr, true},
+  };
+  int failures = 0;
+  for (const auto &test_case : cases) {
+    FrontendProgram program{};
+    program.profile = M68kFrontendProfile::general_startup;
+    auto image = test_case.code;
+    image.push_back(0x4EU);
+    image.push_back(0x70U);  // RESET
+    program.image = {"synthetic-c4-exg-movep-scc-tas", image, 0U};
+    program.image.byte_length = program.image.bytes.size();
+    program.mapping_claims = {{"synthetic-c4-exg-movep-scc-tas", {{}, 0xB00U},
+                                {{}, static_cast<std::uint32_t>(0xB00U + program.image.bytes.size())},
+                                {0U}, {program.image.bytes.size()}}};
+    program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+    const auto result = analyze_m68k_frontend(program);
+    const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+    bool ok = partial != nullptr;
+    std::string emitted;
+    if (ok) {
+      const auto preflight = preflight_m68k_general_startup_c4(*partial);
+      ok = preflight.valid && preflight.rows.empty();
+      emitted = emit_m68k_general_startup_runtime_c(*partial);
+      ok = ok && emitted.find("translation rejected") == std::string::npos &&
+           emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_") == std::string::npos &&
+           emitted.find("genesis_c4_lowering_stop_") == std::string::npos &&
+           (emitted.find("genesis_route_access") != std::string::npos) == test_case.routed &&
+           (test_case.commit == nullptr || emitted.find(test_case.commit) != std::string::npos) &&
+           emitted.find("runtime->runtime") == std::string::npos;
+    }
+    if (!ok) {
+      std::cerr << "C4 EXG/MOVEP/Scc/TAS admission failed: " << test_case.name << "\n";
+      ++failures;
+    }
+  }
+  return failures == 0 ? 0 : 1;
+}
+
 // SEG-007-T214 / ADR-0028 §9: authoritative exact direct-control target
 // closure fixtures (Scope item 8). Every fixture is entirely synthetic --
 // generic addresses only, no Sonic/commercial-derived values.
@@ -28188,6 +28739,12 @@ int main(int argc, char **argv) {
     return emit_extended_arithmetic_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-bcd-aot")
     return emit_bcd_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-movem-link-aot")
+    return emit_movem_link_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-exg-movep-scc-tas-aot")
+    return emit_exg_movep_scc_tas_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-exg-movep-scc-tas-c4")
+    return emit_exg_movep_scc_tas_c4_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-pea-aot")
     return emit_pea_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-jmp-pc-indexed-word-aot")
@@ -28509,6 +29066,14 @@ int main(int argc, char **argv) {
   bcd_aot_dispatch_is_admitted_end_to_end();
   expect(c4_bcd_admission() == 0,
          "SEG-021-T015: every legal ABCD/SBCD/NBCD shape passes the C4 preflight with zero gap rows");
+  exg_movep_scc_tas_encodings_are_disjoint_and_exactly_the_legal_set();
+  exg_movep_scc_tas_lift_declare_effects_and_timing();
+  exg_movep_scc_tas_host_semantics_ccr_and_bytes();
+  exg_movep_scc_tas_generated_c_shapes();
+  scc_memory_destination_declares_read_and_write_footprint_and_facts();
+  exg_movep_scc_tas_aot_dispatch_is_admitted_end_to_end();
+  expect(c4_exg_movep_scc_tas_admission() == 0,
+         "SEG-021-T016: every legal EXG/MOVEP/Scc/TAS shape passes the C4 preflight with zero gap rows");
   compare_ccr_preserves_x_and_uses_destination_minus_source();
   compare_forms_decode_and_lift_with_shared_ea();
   subtraction_forms_decode_and_share_flags();
@@ -28762,6 +29327,7 @@ int main(int argc, char **argv) {
   t239_jmp_and_jsr_to_shared_destination_use_byte_identical_existence_check();
   t208_tier2_call_shaped_continuation_joins_whole_program_return_target_set();
   t208_tier2_call_shaped_continuation_excluded_when_not_independently_retained();
+  t030_aot_only_tier2_call_continuation_is_rts_return_authority();
   code_pointer_descriptor_proposals_are_admitted_and_existing_jsr_an_dispatches();
   code_pointer_descriptor_base_is_the_first_semantic_entry_not_the_biased_affine_origin();
   code_pointer_descriptor_under_count_leaves_an_honest_nonmember_stop();

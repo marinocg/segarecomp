@@ -36994,6 +36994,156 @@
   "4AB9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "4AC0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AEA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AEB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AEC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AEE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AEF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "4C90": [
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
@@ -117384,6 +117534,54 @@
   "4AA7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "4AD8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "4C90": [
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
@@ -117673,6 +117871,54 @@
   "50C8": [
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "50D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5100": [
    "tests/m68k_batch_b_musashi_differential_test.py"
   ],
@@ -117835,6 +118081,54 @@
   "51C8": [
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "51D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5218": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -117977,6 +118271,54 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "52A7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5318": [
@@ -118123,6 +118465,54 @@
   "53A7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "53D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5418": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -118267,6 +118657,54 @@
   "54A7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "54D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5518": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -118409,6 +118847,54 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "55A7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5618": [
@@ -118558,6 +119044,54 @@
   "56C8": [
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "56D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5718": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -118700,6 +119234,54 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "57A7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5818": [
@@ -118846,6 +119428,54 @@
   "58A7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "58D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5918": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -118988,6 +119618,54 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "59A7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5A18": [
@@ -119134,6 +119812,54 @@
   "5AA7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "5AD8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AD9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ADA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ADB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ADC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ADD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ADE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ADF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5B18": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -119276,6 +120002,54 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5BA7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BD8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BD9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BDA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BDB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BDC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BDD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BDE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BDF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5C18": [
@@ -119425,6 +120199,54 @@
   "5CC8": [
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "5CD8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CD9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CDA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CDB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CDC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CDD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CDE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CDF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5D18": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -119567,6 +120389,54 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5DA7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DD8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DD9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DDA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DDB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DDC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DDD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DDE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DDF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5E18": [
@@ -119713,6 +120583,54 @@
   "5EA7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "5ED8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ED9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EDA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EDB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EDC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EDD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EDE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EDF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5F18": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -119855,6 +120773,54 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5FA7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FD8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FD9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FDA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FDB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FDC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FDD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FDE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FDF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "6000": [
@@ -138527,6 +139493,30 @@
   "0107": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0108": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0109": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "010A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "010B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "010C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "010D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "010E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "010F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0110": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -138687,6 +139677,30 @@
   "0147": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0148": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0149": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "014A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "014B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "014C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "014D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "014E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "014F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0150": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -138837,6 +139851,30 @@
   "0187": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0188": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0189": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "018A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "018B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "018C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "018D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "018E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "018F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0190": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -138985,6 +140023,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "01C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "01C8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "01C9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "01CA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "01CB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "01CC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "01CD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "01CE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "01CF": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "01D0": [
@@ -139591,6 +140653,30 @@
   "0307": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0308": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0309": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "030A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "030B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "030C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "030D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "030E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "030F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0310": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -139753,6 +140839,30 @@
   "0347": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0348": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0349": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "034A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "034B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "034C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "034D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "034E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "034F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0350": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -139903,6 +141013,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "0387": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0388": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0389": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "038A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "038B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "038C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "038D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "038E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "038F": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "0390": [
@@ -140056,6 +141190,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "03C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "03C8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "03C9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "03CA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "03CB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "03CC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "03CD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "03CE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "03CF": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "03D0": [
@@ -140663,6 +141821,30 @@
   "0507": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0508": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0509": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "050A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "050B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "050C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "050D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "050E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "050F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0510": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -140822,6 +142004,30 @@
   "0547": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0548": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0549": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "054A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "054B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "054C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "054D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "054E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "054F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0550": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -140972,6 +142178,30 @@
   "0587": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0588": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0589": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "058A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "058B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "058C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "058D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "058E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "058F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0590": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -141120,6 +142350,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "05C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "05C8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "05C9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "05CA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "05CB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "05CC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "05CD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "05CE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "05CF": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "05D0": [
@@ -141725,6 +142979,30 @@
   "0707": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0708": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0709": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "070A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "070B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "070C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "070D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "070E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "070F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0710": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -141884,6 +143162,30 @@
   "0747": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0748": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0749": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "074A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "074B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "074C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "074D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "074E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "074F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0750": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -142034,6 +143336,30 @@
   "0787": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0788": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0789": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "078A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "078B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "078C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "078D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "078E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "078F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0790": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -142182,6 +143508,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "07C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "07C8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "07C9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "07CA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "07CB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "07CC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "07CD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "07CE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "07CF": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "07D0": [
@@ -142948,6 +144298,30 @@
   "0907": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0908": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0909": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "090A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "090B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "090C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "090D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "090E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "090F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0910": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -143107,6 +144481,30 @@
   "0947": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0948": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0949": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "094A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "094B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "094C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "094D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "094E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "094F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0950": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -143257,6 +144655,30 @@
   "0987": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0988": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0989": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "098A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "098B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "098C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "098D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "098E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "098F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0990": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -143405,6 +144827,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "09C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "09C8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "09C9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "09CA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "09CB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "09CC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "09CD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "09CE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "09CF": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "09D0": [
@@ -144010,6 +145456,30 @@
   "0B07": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0B08": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B09": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B0A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B0B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B0C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B0D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B0E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B0F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0B10": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -144169,6 +145639,30 @@
   "0B47": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0B48": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B49": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B4A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B4B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B4C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B4D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B4E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B4F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0B50": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -144319,6 +145813,30 @@
   "0B87": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0B88": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B89": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B8A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B8B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B8C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B8D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B8E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0B8F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0B90": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -144467,6 +145985,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "0BC7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0BC8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0BC9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0BCA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0BCB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0BCC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0BCD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0BCE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0BCF": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "0BD0": [
@@ -145072,6 +146614,30 @@
   "0D07": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0D08": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D09": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D0A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D0B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D0C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D0D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D0E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D0F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0D10": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -145231,6 +146797,30 @@
   "0D47": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0D48": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D49": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D4A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D4B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D4C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D4D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D4E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D4F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0D50": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -145379,6 +146969,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "0D87": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D88": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D89": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D8A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D8B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D8C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D8D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D8E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0D8F": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "0D90": [
@@ -145531,6 +147145,30 @@
   "0DC7": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0DC8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0DC9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0DCA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0DCB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0DCC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0DCD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0DCE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0DCF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0DD0": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -145679,6 +147317,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "0F07": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F08": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F09": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F0A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F0B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F0C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F0D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F0E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F0F": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "0F10": [
@@ -145840,6 +147502,30 @@
   "0F47": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0F48": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F49": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F4A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F4B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F4C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F4D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F4E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F4F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0F50": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -145990,6 +147676,30 @@
   "0F87": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "0F88": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F89": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F8A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F8B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F8C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F8D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F8E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0F8F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "0F90": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -146138,6 +147848,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "0FC7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0FC8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0FC9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0FCA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0FCB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0FCC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0FCD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0FCE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "0FCF": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "0FD0": [
@@ -178162,6 +179896,156 @@
   "4AB9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "4AC0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AC7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AD9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4ADF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AE9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AEA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AEB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AEC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AEE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AEF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "4AF9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "4C90": [
    "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
@@ -178949,6 +180833,30 @@
   "50B9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "50C0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50C1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50C2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50C3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50C4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50C5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50C6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "50C8": [
    "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
@@ -178972,6 +180880,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "50CF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50D0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50D1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50D2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50D3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50D4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50D5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50D6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50D7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50E9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50EA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50EB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50EC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50ED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50EE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50EF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50F0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50F1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50F2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50F3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50F4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50F5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50F6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50F7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50F8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "50F9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5100": [
@@ -179477,6 +181511,30 @@
   "51B9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "51C0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51C1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51C2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51C3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51C4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51C5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51C6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "51C8": [
    "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
@@ -179500,6 +181558,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "51CF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51D0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51D1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51D2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51D3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51D4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51D5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51D6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51D7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51E9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51EA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51EB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51EC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51ED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51EE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51EF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51F0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51F1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51F2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51F3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51F4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51F5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51F6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51F7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51F8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "51F9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5200": [
@@ -180000,6 +182184,30 @@
   "52B9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "52C0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52C1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52C2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52C3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52C4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52C5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52C6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "52C8": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -180022,6 +182230,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "52CF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52D0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52D1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52D2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52D3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52D4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52D5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52D6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52D7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52E9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52EA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52EB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52EC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52ED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52EE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52EF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52F0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52F1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52F2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52F3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52F4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52F5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52F6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52F7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52F8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "52F9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5300": [
@@ -180522,6 +182856,30 @@
   "53B9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "53C0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53C1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53C2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53C3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53C4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53C5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53C6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "53C8": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -180544,6 +182902,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "53CF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53D0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53D1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53D2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53D3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53D4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53D5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53D6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53D7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53E9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53EA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53EB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53EC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53ED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53EE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53EF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53F0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53F1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53F2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53F3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53F4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53F5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53F6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53F7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53F8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "53F9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5400": [
@@ -181044,6 +183528,30 @@
   "54B9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "54C0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54C1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54C2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54C3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54C4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54C5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54C6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "54C8": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -181066,6 +183574,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "54CF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54D0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54D1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54D2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54D3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54D4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54D5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54D6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54D7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54E9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54EA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54EB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54EC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54ED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54EE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54EF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54F0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54F1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54F2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54F3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54F4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54F5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54F6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54F7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54F8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "54F9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5500": [
@@ -181566,6 +184200,30 @@
   "55B9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "55C0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55C1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55C2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55C3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55C4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55C5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55C6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "55C8": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -181588,6 +184246,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "55CF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55D0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55D1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55D2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55D3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55D4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55D5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55D6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55D7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55E9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55EA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55EB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55EC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55ED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55EE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55EF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55F0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55F1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55F2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55F3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55F4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55F5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55F6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55F7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55F8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "55F9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5600": [
@@ -182088,6 +184872,30 @@
   "56B9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "56C0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56C1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56C2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56C3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56C4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56C5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56C6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "56C8": [
    "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
@@ -182111,6 +184919,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "56CF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56D0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56D1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56D2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56D3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56D4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56D5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56D6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56D7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56E9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56EA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56EB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56EC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56ED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56EE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56EF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56F0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56F1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56F2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56F3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56F4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56F5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56F6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56F7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56F8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "56F9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5700": [
@@ -182611,6 +185545,30 @@
   "57B9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "57C0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57C1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57C2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57C3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57C4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57C5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57C6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "57C8": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -182633,6 +185591,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "57CF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57D0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57D1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57D2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57D3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57D4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57D5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57D6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57D7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57E9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57EA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57EB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57EC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57ED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57EE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57EF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57F0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57F1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57F2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57F3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57F4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57F5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57F6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57F7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57F8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "57F9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5800": [
@@ -183133,6 +186217,30 @@
   "58B9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "58C0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58C1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58C2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58C3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58C4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58C5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58C6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "58C8": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -183155,6 +186263,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "58CF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58D0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58D1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58D2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58D3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58D4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58D5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58D6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58D7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58E9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58EA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58EB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58EC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58ED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58EE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58EF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58F0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58F1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58F2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58F3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58F4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58F5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58F6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58F7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58F8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "58F9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5900": [
@@ -183655,6 +186889,30 @@
   "59B9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "59C0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59C1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59C2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59C3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59C4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59C5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59C6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59C7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "59C8": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -183677,6 +186935,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "59CF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59D0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59D1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59D2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59D3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59D4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59D5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59D6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59D7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59D8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59D9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59DA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59DB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59DC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59DD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59DE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59DF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59E9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59EA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59EB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59EC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59ED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59EE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59EF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59F0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59F1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59F2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59F3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59F4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59F5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59F6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59F7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59F8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "59F9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5A00": [
@@ -184177,6 +187561,30 @@
   "5AB9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "5AC0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AC1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AC2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AC3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AC4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AC5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AC6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AC7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5AC8": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -184199,6 +187607,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5ACF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AD0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AD1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AD2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AD3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AD4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AD5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AD6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AD7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AD8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AD9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ADA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ADB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ADC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ADD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ADE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ADF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AE9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AEA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AEB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AEC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AEE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AEF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AF0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AF1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AF2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AF3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AF4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AF5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AF6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AF7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AF8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5AF9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5B00": [
@@ -184699,6 +188233,30 @@
   "5BB9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "5BC0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BC1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BC2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BC3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BC4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BC5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BC6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BC7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5BC8": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -184721,6 +188279,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5BCF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BD0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BD1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BD2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BD3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BD4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BD5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BD6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BD7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BD8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BD9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BDA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BDB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BDC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BDD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BDE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BDF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BE9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BEA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BEB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BEC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BEE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BEF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BF0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BF1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BF2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BF3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BF4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BF5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BF6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BF7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BF8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5BF9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5C00": [
@@ -185221,6 +188905,30 @@
   "5CB9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "5CC0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CC1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CC2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CC3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CC4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CC5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CC6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CC7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5CC8": [
    "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
@@ -185244,6 +188952,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5CCF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CD0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CD1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CD2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CD3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CD4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CD5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CD6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CD7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CD8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CD9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CDA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CDB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CDC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CDD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CDE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CDF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CE9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CEA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CEB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CEC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CEE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CEF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CF0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CF1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CF2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CF3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CF4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CF5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CF6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CF7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CF8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5CF9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5D00": [
@@ -185744,6 +189578,30 @@
   "5DB9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "5DC0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DC1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DC2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DC3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DC4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DC5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DC6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DC7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5DC8": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -185766,6 +189624,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5DCF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DD0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DD1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DD2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DD3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DD4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DD5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DD6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DD7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DD8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DD9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DDA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DDB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DDC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DDD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DDE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DDF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DE9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DEA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DEB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DEC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DEE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DEF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DF0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DF1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DF2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DF3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DF4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DF5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DF6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DF7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DF8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5DF9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5E00": [
@@ -186266,6 +190250,30 @@
   "5EB9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "5EC0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EC1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EC2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EC3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EC4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EC5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EC6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EC7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5EC8": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -186288,6 +190296,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5ECF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ED0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ED1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ED2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ED3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ED4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ED5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ED6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ED7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ED8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5ED9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EDA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EDB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EDC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EDD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EDE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EDF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EE9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EEA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EEB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EEC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EEE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EEF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EF0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EF1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EF2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EF3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EF4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EF5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EF6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EF7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EF8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5EF9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5F00": [
@@ -186788,6 +190922,30 @@
   "5FB9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "5FC0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FC1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FC2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FC3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FC4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FC5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FC6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FC7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "5FC8": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -186810,6 +190968,132 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "5FCF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FD0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FD1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FD2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FD3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FD4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FD5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FD6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FD7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FD8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FD9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FDA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FDB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FDC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FDD": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FDE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FDF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FE9": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FEA": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FEB": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FEC": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FED": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FEE": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FEF": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FF0": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FF1": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FF2": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FF3": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FF4": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FF5": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FF6": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FF7": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FF8": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "5FF9": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "6000": [
@@ -229793,6 +234077,54 @@
   "C139": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "C140": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C141": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C142": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C143": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C144": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C145": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C146": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C147": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C148": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C149": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C14A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C14B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C14C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C14D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C14E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C14F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "C150": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -229917,6 +234249,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "C179": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C188": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C189": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C18A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C18B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C18C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C18D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C18E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C18F": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "C190": [
@@ -231017,6 +235373,54 @@
   "C339": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "C340": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C341": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C342": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C343": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C344": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C345": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C346": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C347": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C348": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C349": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C34A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C34B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C34C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C34D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C34E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C34F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "C350": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -231141,6 +235545,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "C379": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C388": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C389": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C38A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C38B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C38C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C38D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C38E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C38F": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "C390": [
@@ -232238,6 +236666,54 @@
   "C539": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "C540": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C541": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C542": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C543": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C544": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C545": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C546": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C547": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C548": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C549": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C54A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C54B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C54C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C54D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C54E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C54F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "C550": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -232362,6 +236838,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "C579": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C588": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C589": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C58A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C58B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C58C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C58D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C58E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C58F": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "C590": [
@@ -233461,6 +237961,54 @@
   "C739": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "C740": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C741": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C742": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C743": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C744": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C745": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C746": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C747": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C748": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C749": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C74A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C74B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C74C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C74D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C74E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C74F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "C750": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -233585,6 +238133,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "C779": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C788": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C789": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C78A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C78B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C78C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C78D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C78E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C78F": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "C790": [
@@ -234683,6 +239255,54 @@
   "C939": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "C940": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C941": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C942": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C943": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C944": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C945": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C946": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C947": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C948": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C949": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C94A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C94B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C94C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C94D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C94E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C94F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "C950": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -234807,6 +239427,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "C979": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C988": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C989": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C98A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C98B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C98C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C98D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C98E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "C98F": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "C990": [
@@ -235904,6 +240548,54 @@
   "CB39": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "CB40": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB41": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB42": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB43": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB44": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB45": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB46": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB47": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB48": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB49": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB4A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB4B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB4C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB4D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB4E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB4F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "CB50": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -236028,6 +240720,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "CB79": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB88": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB89": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB8A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB8B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB8C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB8D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB8E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CB8F": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "CB90": [
@@ -237125,6 +241841,54 @@
   "CD39": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "CD40": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD41": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD42": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD43": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD44": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD45": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD46": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD47": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD48": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD49": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD4A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD4B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD4C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD4D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD4E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD4F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "CD50": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -237249,6 +242013,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "CD79": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD88": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD89": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD8A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD8B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD8C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD8D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD8E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CD8F": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "CD90": [
@@ -238346,6 +243134,54 @@
   "CF39": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
+  "CF40": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF41": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF42": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF43": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF44": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF45": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF46": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF47": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF48": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF49": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF4A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF4B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF4C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF4D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF4E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF4F": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "CF50": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -238470,6 +243306,30 @@
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "CF79": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF88": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF89": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF8A": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF8B": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF8C": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF8D": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF8E": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
+  "CF8F": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "CF90": [

@@ -125,57 +125,57 @@
   "bit_manipulation": {
    "ccr_sr_effect_declared": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "ccr_sr_validated": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "compile": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "decode": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "ea_footprint_declared": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "ea_side_effect_validated": {
     "applicable_forms": 18,
-    "passing_forms": 16,
-    "passing_words": 576,
-    "percent_forms": "88.89"
+    "passing_forms": 18,
+    "passing_words": 592,
+    "percent_forms": "100.00"
    },
    "effects": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "emit": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "end_to_end_structural": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "exception_privilege_modeled": {
     "applicable_forms": 0,
@@ -185,57 +185,57 @@
    },
    "lift": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "native_exec": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "route_immutable_rom_aot": {
     "applicable_forms": 77,
-    "passing_forms": 68,
-    "passing_words": 1818,
-    "percent_forms": "88.31"
+    "passing_forms": 76,
+    "passing_words": 1868,
+    "percent_forms": "98.70"
    },
    "route_runtime_routed_admitted": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "route_runtime_routed_compiles": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "route_runtime_routed_executes": {
     "applicable_forms": 77,
-    "passing_forms": 49,
-    "passing_words": 1736,
-    "percent_forms": "63.64"
+    "passing_forms": 55,
+    "passing_words": 1784,
+    "percent_forms": "71.43"
    },
    "route_static_discovery": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "semantic_validated": {
     "applicable_forms": 77,
-    "passing_forms": 69,
-    "passing_words": 1826,
-    "percent_forms": "89.61"
+    "passing_forms": 77,
+    "passing_words": 1876,
+    "percent_forms": "100.00"
    },
    "timing_model_present": {
     "applicable_forms": 77,
-    "passing_forms": 68,
-    "passing_words": 1818,
-    "percent_forms": "88.31"
+    "passing_forms": 76,
+    "passing_words": 1868,
+    "percent_forms": "98.70"
    },
    "timing_validated": {
     "applicable_forms": 77,
@@ -259,21 +259,21 @@
    },
    "compile": {
     "applicable_forms": 357,
-    "passing_forms": 350,
-    "passing_words": 12190,
-    "percent_forms": "98.04"
+    "passing_forms": 357,
+    "passing_words": 12638,
+    "percent_forms": "100.00"
    },
    "decode": {
     "applicable_forms": 357,
-    "passing_forms": 350,
-    "passing_words": 12190,
-    "percent_forms": "98.04"
+    "passing_forms": 357,
+    "passing_words": 12638,
+    "percent_forms": "100.00"
    },
    "ea_footprint_declared": {
     "applicable_forms": 357,
-    "passing_forms": 304,
-    "passing_words": 9726,
-    "percent_forms": "85.15"
+    "passing_forms": 311,
+    "passing_words": 10174,
+    "percent_forms": "87.11"
    },
    "ea_side_effect_validated": {
     "applicable_forms": 123,
@@ -283,21 +283,21 @@
    },
    "effects": {
     "applicable_forms": 357,
-    "passing_forms": 350,
-    "passing_words": 12190,
-    "percent_forms": "98.04"
+    "passing_forms": 357,
+    "passing_words": 12638,
+    "percent_forms": "100.00"
    },
    "emit": {
     "applicable_forms": 357,
-    "passing_forms": 350,
-    "passing_words": 12190,
-    "percent_forms": "98.04"
+    "passing_forms": 357,
+    "passing_words": 12638,
+    "percent_forms": "100.00"
    },
    "end_to_end_structural": {
     "applicable_forms": 357,
-    "passing_forms": 350,
-    "passing_words": 12190,
-    "percent_forms": "98.04"
+    "passing_forms": 357,
+    "passing_words": 12638,
+    "percent_forms": "100.00"
    },
    "exception_privilege_modeled": {
     "applicable_forms": 241,
@@ -307,57 +307,57 @@
    },
    "lift": {
     "applicable_forms": 357,
-    "passing_forms": 350,
-    "passing_words": 12190,
-    "percent_forms": "98.04"
+    "passing_forms": 357,
+    "passing_words": 12638,
+    "percent_forms": "100.00"
    },
    "native_exec": {
     "applicable_forms": 357,
-    "passing_forms": 350,
-    "passing_words": 12190,
-    "percent_forms": "98.04"
+    "passing_forms": 357,
+    "passing_words": 12638,
+    "percent_forms": "100.00"
    },
    "route_immutable_rom_aot": {
     "applicable_forms": 357,
-    "passing_forms": 320,
-    "passing_words": 12034,
-    "percent_forms": "89.64"
+    "passing_forms": 357,
+    "passing_words": 12638,
+    "percent_forms": "100.00"
    },
    "route_runtime_routed_admitted": {
     "applicable_forms": 357,
-    "passing_forms": 350,
-    "passing_words": 12190,
-    "percent_forms": "98.04"
+    "passing_forms": 357,
+    "passing_words": 12638,
+    "percent_forms": "100.00"
    },
    "route_runtime_routed_compiles": {
     "applicable_forms": 357,
-    "passing_forms": 350,
-    "passing_words": 12190,
-    "percent_forms": "98.04"
+    "passing_forms": 357,
+    "passing_words": 12638,
+    "percent_forms": "100.00"
    },
    "route_runtime_routed_executes": {
     "applicable_forms": 357,
-    "passing_forms": 188,
-    "passing_words": 11188,
-    "percent_forms": "52.66"
+    "passing_forms": 195,
+    "passing_words": 11636,
+    "percent_forms": "54.62"
    },
    "route_static_discovery": {
     "applicable_forms": 357,
-    "passing_forms": 350,
-    "passing_words": 12190,
-    "percent_forms": "98.04"
+    "passing_forms": 357,
+    "passing_words": 12638,
+    "percent_forms": "100.00"
    },
    "semantic_validated": {
     "applicable_forms": 357,
-    "passing_forms": 336,
-    "passing_words": 9891,
-    "percent_forms": "94.12"
+    "passing_forms": 343,
+    "passing_words": 10339,
+    "percent_forms": "96.08"
    },
    "timing_model_present": {
     "applicable_forms": 357,
-    "passing_forms": 350,
-    "passing_words": 12190,
-    "percent_forms": "98.04"
+    "passing_forms": 357,
+    "passing_words": 12638,
+    "percent_forms": "100.00"
    },
    "timing_validated": {
     "applicable_forms": 357,
@@ -625,45 +625,45 @@
    },
    "compile": {
     "applicable_forms": 193,
-    "passing_forms": 56,
-    "passing_words": 4232,
-    "percent_forms": "29.02"
+    "passing_forms": 184,
+    "passing_words": 5032,
+    "percent_forms": "95.34"
    },
    "decode": {
     "applicable_forms": 193,
-    "passing_forms": 64,
-    "passing_words": 4282,
-    "percent_forms": "33.16"
+    "passing_forms": 192,
+    "passing_words": 5082,
+    "percent_forms": "99.48"
    },
    "ea_footprint_declared": {
     "applicable_forms": 193,
-    "passing_forms": 31,
-    "passing_words": 3841,
-    "percent_forms": "16.06"
+    "passing_forms": 159,
+    "passing_words": 4641,
+    "percent_forms": "82.38"
    },
    "ea_side_effect_validated": {
     "applicable_forms": 43,
-    "passing_forms": 2,
-    "passing_words": 256,
-    "percent_forms": "4.65"
+    "passing_forms": 34,
+    "passing_words": 512,
+    "percent_forms": "79.07"
    },
    "effects": {
     "applicable_forms": 193,
-    "passing_forms": 56,
-    "passing_words": 4232,
-    "percent_forms": "29.02"
+    "passing_forms": 184,
+    "passing_words": 5032,
+    "percent_forms": "95.34"
    },
    "emit": {
     "applicable_forms": 193,
-    "passing_forms": 56,
-    "passing_words": 4232,
-    "percent_forms": "29.02"
+    "passing_forms": 184,
+    "passing_words": 5032,
+    "percent_forms": "95.34"
    },
    "end_to_end_structural": {
     "applicable_forms": 193,
-    "passing_forms": 55,
-    "passing_words": 4231,
-    "percent_forms": "28.50"
+    "passing_forms": 183,
+    "passing_words": 5031,
+    "percent_forms": "94.82"
    },
    "exception_privilege_modeled": {
     "applicable_forms": 64,
@@ -673,57 +673,57 @@
    },
    "lift": {
     "applicable_forms": 193,
-    "passing_forms": 64,
-    "passing_words": 4282,
-    "percent_forms": "33.16"
+    "passing_forms": 192,
+    "passing_words": 5082,
+    "percent_forms": "99.48"
    },
    "native_exec": {
     "applicable_forms": 193,
-    "passing_forms": 55,
-    "passing_words": 4231,
-    "percent_forms": "28.50"
+    "passing_forms": 183,
+    "passing_words": 5031,
+    "percent_forms": "94.82"
    },
    "route_immutable_rom_aot": {
     "applicable_forms": 193,
-    "passing_forms": 58,
-    "passing_words": 4234,
-    "percent_forms": "30.05"
+    "passing_forms": 186,
+    "passing_words": 5034,
+    "percent_forms": "96.37"
    },
    "route_runtime_routed_admitted": {
     "applicable_forms": 193,
-    "passing_forms": 56,
-    "passing_words": 4232,
-    "percent_forms": "29.02"
+    "passing_forms": 184,
+    "passing_words": 5032,
+    "percent_forms": "95.34"
    },
    "route_runtime_routed_compiles": {
     "applicable_forms": 193,
-    "passing_forms": 56,
-    "passing_words": 4232,
-    "percent_forms": "29.02"
+    "passing_forms": 184,
+    "passing_words": 5032,
+    "percent_forms": "95.34"
    },
    "route_runtime_routed_executes": {
     "applicable_forms": 193,
-    "passing_forms": 55,
-    "passing_words": 4231,
-    "percent_forms": "28.50"
+    "passing_forms": 151,
+    "passing_words": 4999,
+    "percent_forms": "78.24"
    },
    "route_static_discovery": {
     "applicable_forms": 193,
-    "passing_forms": 36,
-    "passing_words": 148,
-    "percent_forms": "18.65"
+    "passing_forms": 164,
+    "passing_words": 948,
+    "percent_forms": "84.97"
    },
    "semantic_validated": {
     "applicable_forms": 193,
-    "passing_forms": 49,
-    "passing_words": 4225,
-    "percent_forms": "25.39"
+    "passing_forms": 177,
+    "passing_words": 5025,
+    "percent_forms": "91.71"
    },
    "timing_model_present": {
     "applicable_forms": 193,
-    "passing_forms": 20,
-    "passing_words": 570,
-    "percent_forms": "10.36"
+    "passing_forms": 132,
+    "passing_words": 1242,
+    "percent_forms": "68.39"
    },
    "timing_validated": {
     "applicable_forms": 193,
@@ -1538,9 +1538,9 @@
   "eori.imm_ea.w.imm.postinc": "1111101111111111110",
   "eori.imm_ea.w.imm.predec": "1111101111111111110",
   "eori.imm_sr.w.imm.sr": "00000000000000000-0",
-  "exg.an_an.l.an.an": "0000--0000000000--0",
-  "exg.dn_an.l.dn.an": "0000--0000000000--0",
-  "exg.dn_dn.l.dn.dn": "0000--0000000000--0",
+  "exg.an_an.l.an.an": "1111--1111111111--0",
+  "exg.dn_an.l.dn.an": "1111--1111111111--0",
+  "exg.dn_dn.l.dn.dn": "1111--1111111111--0",
   "ext.dn.l.none.dn": "11101-11111111111-0",
   "ext.dn.w.none.dn": "11101-11111111111-0",
   "illegal.none.none.none.none": "0000-00000000000--0",
@@ -1565,7 +1565,7 @@
   "lea.ea_an.l.index.an": "1110--1111111110--0",
   "lea.ea_an.l.pcdisp.an": "1110--1111111110--0",
   "lea.ea_an.l.pcindex.an": "1110--1111111110--0",
-  "link.an_disp16.w.an.disp16": "1110-01111111011-10",
+  "link.an_disp16.w.an.disp16": "1110-01111111111-10",
   "lsl.dn_dn.b.dn.dn": "11111-01111111111-0",
   "lsl.dn_dn.l.dn.dn": "11111-01111111111-0",
   "lsl.dn_dn.w.dn.dn": "11111-01111111111-0",
@@ -1928,38 +1928,38 @@
   "movea.ea_an.w.pcindex.an": "1111-01111110111--0",
   "movea.ea_an.w.postinc.an": "1111-01111111111-10",
   "movea.ea_an.w.predec.an": "1111-01111111111-10",
-  "movem.mem_reglist.l.absl.reglist": "1110-01111110011--0",
-  "movem.mem_reglist.l.absw.reglist": "1110-01111110011--0",
-  "movem.mem_reglist.l.disp.reglist": "1110-01111111011--0",
-  "movem.mem_reglist.l.ind.reglist": "1110-01111111011--0",
-  "movem.mem_reglist.l.index.reglist": "1110-01111111011--0",
-  "movem.mem_reglist.l.pcdisp.reglist": "1110-01111110011--0",
-  "movem.mem_reglist.l.pcindex.reglist": "1110-01111110011--0",
-  "movem.mem_reglist.l.postinc.reglist": "1110-01111111011-10",
-  "movem.mem_reglist.w.absl.reglist": "1110-01111110011--0",
-  "movem.mem_reglist.w.absw.reglist": "1110-01111110011--0",
-  "movem.mem_reglist.w.disp.reglist": "1110-01111111011--0",
-  "movem.mem_reglist.w.ind.reglist": "1110-01111111011--0",
-  "movem.mem_reglist.w.index.reglist": "1110-01111111011--0",
-  "movem.mem_reglist.w.pcdisp.reglist": "1110-01111110011--0",
-  "movem.mem_reglist.w.pcindex.reglist": "1110-01111110011--0",
-  "movem.mem_reglist.w.postinc.reglist": "1110-01111111011-10",
-  "movem.reglist_mem.l.reglist.absl": "1110-01111110011--0",
-  "movem.reglist_mem.l.reglist.absw": "1110-01111110011--0",
-  "movem.reglist_mem.l.reglist.disp": "1110-01111111011--0",
-  "movem.reglist_mem.l.reglist.ind": "1110-01111111011--0",
-  "movem.reglist_mem.l.reglist.index": "1110-01111111011--0",
-  "movem.reglist_mem.l.reglist.predec": "1110-01111111011-10",
-  "movem.reglist_mem.w.reglist.absl": "1110-01111110011--0",
-  "movem.reglist_mem.w.reglist.absw": "1110-01111110011--0",
-  "movem.reglist_mem.w.reglist.disp": "1110-01111111011--0",
-  "movem.reglist_mem.w.reglist.ind": "1110-01111111011--0",
-  "movem.reglist_mem.w.reglist.index": "1110-01111111011--0",
-  "movem.reglist_mem.w.reglist.predec": "1110-01111111011-10",
-  "movep.dn_mem.l.dn.disp": "0000--0000000000--0",
-  "movep.dn_mem.w.dn.disp": "0000--0000000000--0",
-  "movep.mem_dn.l.disp.dn": "0000--0000000000--0",
-  "movep.mem_dn.w.disp.dn": "0000--0000000000--0",
+  "movem.mem_reglist.l.absl.reglist": "1110-01111110111--0",
+  "movem.mem_reglist.l.absw.reglist": "1110-01111110111--0",
+  "movem.mem_reglist.l.disp.reglist": "1110-01111111111--0",
+  "movem.mem_reglist.l.ind.reglist": "1110-01111111111--0",
+  "movem.mem_reglist.l.index.reglist": "1110-01111111111--0",
+  "movem.mem_reglist.l.pcdisp.reglist": "1110-01111110111--0",
+  "movem.mem_reglist.l.pcindex.reglist": "1110-01111110111--0",
+  "movem.mem_reglist.l.postinc.reglist": "1110-01111111111-10",
+  "movem.mem_reglist.w.absl.reglist": "1110-01111110111--0",
+  "movem.mem_reglist.w.absw.reglist": "1110-01111110111--0",
+  "movem.mem_reglist.w.disp.reglist": "1110-01111111111--0",
+  "movem.mem_reglist.w.ind.reglist": "1110-01111111111--0",
+  "movem.mem_reglist.w.index.reglist": "1110-01111111111--0",
+  "movem.mem_reglist.w.pcdisp.reglist": "1110-01111110111--0",
+  "movem.mem_reglist.w.pcindex.reglist": "1110-01111110111--0",
+  "movem.mem_reglist.w.postinc.reglist": "1110-01111111111-10",
+  "movem.reglist_mem.l.reglist.absl": "1110-01111110111--0",
+  "movem.reglist_mem.l.reglist.absw": "1110-01111110111--0",
+  "movem.reglist_mem.l.reglist.disp": "1110-01111111111--0",
+  "movem.reglist_mem.l.reglist.ind": "1110-01111111111--0",
+  "movem.reglist_mem.l.reglist.index": "1110-01111111111--0",
+  "movem.reglist_mem.l.reglist.predec": "1110-01111111111-10",
+  "movem.reglist_mem.w.reglist.absl": "1110-01111110111--0",
+  "movem.reglist_mem.w.reglist.absw": "1110-01111110111--0",
+  "movem.reglist_mem.w.reglist.disp": "1110-01111111111--0",
+  "movem.reglist_mem.w.reglist.ind": "1110-01111111111--0",
+  "movem.reglist_mem.w.reglist.index": "1110-01111111111--0",
+  "movem.reglist_mem.w.reglist.predec": "1110-01111111111-10",
+  "movep.dn_mem.l.dn.disp": "1111--1111111111--0",
+  "movep.dn_mem.w.dn.disp": "1111--1111111111--0",
+  "movep.mem_dn.l.disp.dn": "1111--1111111111--0",
+  "movep.mem_dn.w.disp.dn": "1111--1111111111--0",
   "moveq.imm8_dn.l.imm8.dn.data8": "11101-11111111100-0",
   "muls.ea_dn.w.absl.dn": "11101001111101111-0",
   "muls.ea_dn.w.absw.dn": "11101001111101111-0",
@@ -2209,134 +2209,134 @@
   "rts.none.none.none.none": "1110-01110110110-00",
   "sbcd.dn_dn.b.dn.dn": "11111-11111111111-0",
   "sbcd.predec_predec.b.predec.predec": "11111-1111111111110",
-  "scc.unary.b.none.absl.cc": "0000--0000000000--0",
-  "scc.unary.b.none.absl.cs": "0000--0000000000--0",
-  "scc.unary.b.none.absl.eq": "0000--0000000000--0",
-  "scc.unary.b.none.absl.f": "0000--0000000000--0",
-  "scc.unary.b.none.absl.ge": "0000--0000000000--0",
-  "scc.unary.b.none.absl.gt": "0000--0000000000--0",
-  "scc.unary.b.none.absl.hi": "0000--0000000000--0",
-  "scc.unary.b.none.absl.le": "0000--0000000000--0",
-  "scc.unary.b.none.absl.ls": "0000--0000000000--0",
-  "scc.unary.b.none.absl.lt": "0000--0000000000--0",
-  "scc.unary.b.none.absl.mi": "0000--0000000000--0",
-  "scc.unary.b.none.absl.ne": "0000--0000000000--0",
-  "scc.unary.b.none.absl.pl": "0000--0000000000--0",
-  "scc.unary.b.none.absl.t": "0000--0000000000--0",
-  "scc.unary.b.none.absl.vc": "0000--0000000000--0",
-  "scc.unary.b.none.absl.vs": "0000--0000000000--0",
-  "scc.unary.b.none.absw.cc": "0000--0000000000--0",
-  "scc.unary.b.none.absw.cs": "0000--0000000000--0",
-  "scc.unary.b.none.absw.eq": "0000--0000000000--0",
-  "scc.unary.b.none.absw.f": "0000--0000000000--0",
-  "scc.unary.b.none.absw.ge": "0000--0000000000--0",
-  "scc.unary.b.none.absw.gt": "0000--0000000000--0",
-  "scc.unary.b.none.absw.hi": "0000--0000000000--0",
-  "scc.unary.b.none.absw.le": "0000--0000000000--0",
-  "scc.unary.b.none.absw.ls": "0000--0000000000--0",
-  "scc.unary.b.none.absw.lt": "0000--0000000000--0",
-  "scc.unary.b.none.absw.mi": "0000--0000000000--0",
-  "scc.unary.b.none.absw.ne": "0000--0000000000--0",
-  "scc.unary.b.none.absw.pl": "0000--0000000000--0",
-  "scc.unary.b.none.absw.t": "0000--0000000000--0",
-  "scc.unary.b.none.absw.vc": "0000--0000000000--0",
-  "scc.unary.b.none.absw.vs": "0000--0000000000--0",
-  "scc.unary.b.none.disp.cc": "0000--0000000000--0",
-  "scc.unary.b.none.disp.cs": "0000--0000000000--0",
-  "scc.unary.b.none.disp.eq": "0000--0000000000--0",
-  "scc.unary.b.none.disp.f": "0000--0000000000--0",
-  "scc.unary.b.none.disp.ge": "0000--0000000000--0",
-  "scc.unary.b.none.disp.gt": "0000--0000000000--0",
-  "scc.unary.b.none.disp.hi": "0000--0000000000--0",
-  "scc.unary.b.none.disp.le": "0000--0000000000--0",
-  "scc.unary.b.none.disp.ls": "0000--0000000000--0",
-  "scc.unary.b.none.disp.lt": "0000--0000000000--0",
-  "scc.unary.b.none.disp.mi": "0000--0000000000--0",
-  "scc.unary.b.none.disp.ne": "0000--0000000000--0",
-  "scc.unary.b.none.disp.pl": "0000--0000000000--0",
-  "scc.unary.b.none.disp.t": "0000--0000000000--0",
-  "scc.unary.b.none.disp.vc": "0000--0000000000--0",
-  "scc.unary.b.none.disp.vs": "0000--0000000000--0",
-  "scc.unary.b.none.dn.cc": "0000--0000000000--0",
-  "scc.unary.b.none.dn.cs": "0000--0000000000--0",
-  "scc.unary.b.none.dn.eq": "0000--0000000000--0",
-  "scc.unary.b.none.dn.f": "0000--0000000000--0",
-  "scc.unary.b.none.dn.ge": "0000--0000000000--0",
-  "scc.unary.b.none.dn.gt": "0000--0000000000--0",
-  "scc.unary.b.none.dn.hi": "0000--0000000000--0",
-  "scc.unary.b.none.dn.le": "0000--0000000000--0",
-  "scc.unary.b.none.dn.ls": "0000--0000000000--0",
-  "scc.unary.b.none.dn.lt": "0000--0000000000--0",
-  "scc.unary.b.none.dn.mi": "0000--0000000000--0",
-  "scc.unary.b.none.dn.ne": "0000--0000000000--0",
-  "scc.unary.b.none.dn.pl": "0000--0000000000--0",
-  "scc.unary.b.none.dn.t": "0000--0000000000--0",
-  "scc.unary.b.none.dn.vc": "0000--0000000000--0",
-  "scc.unary.b.none.dn.vs": "0000--0000000000--0",
-  "scc.unary.b.none.ind.cc": "0000--0000000000--0",
-  "scc.unary.b.none.ind.cs": "0000--0000000000--0",
-  "scc.unary.b.none.ind.eq": "0000--0000000000--0",
-  "scc.unary.b.none.ind.f": "0000--0000000000--0",
-  "scc.unary.b.none.ind.ge": "0000--0000000000--0",
-  "scc.unary.b.none.ind.gt": "0000--0000000000--0",
-  "scc.unary.b.none.ind.hi": "0000--0000000000--0",
-  "scc.unary.b.none.ind.le": "0000--0000000000--0",
-  "scc.unary.b.none.ind.ls": "0000--0000000000--0",
-  "scc.unary.b.none.ind.lt": "0000--0000000000--0",
-  "scc.unary.b.none.ind.mi": "0000--0000000000--0",
-  "scc.unary.b.none.ind.ne": "0000--0000000000--0",
-  "scc.unary.b.none.ind.pl": "0000--0000000000--0",
-  "scc.unary.b.none.ind.t": "0000--0000000000--0",
-  "scc.unary.b.none.ind.vc": "0000--0000000000--0",
-  "scc.unary.b.none.ind.vs": "0000--0000000000--0",
-  "scc.unary.b.none.index.cc": "0000--0000000000--0",
-  "scc.unary.b.none.index.cs": "0000--0000000000--0",
-  "scc.unary.b.none.index.eq": "0000--0000000000--0",
-  "scc.unary.b.none.index.f": "0000--0000000000--0",
-  "scc.unary.b.none.index.ge": "0000--0000000000--0",
-  "scc.unary.b.none.index.gt": "0000--0000000000--0",
-  "scc.unary.b.none.index.hi": "0000--0000000000--0",
-  "scc.unary.b.none.index.le": "0000--0000000000--0",
-  "scc.unary.b.none.index.ls": "0000--0000000000--0",
-  "scc.unary.b.none.index.lt": "0000--0000000000--0",
-  "scc.unary.b.none.index.mi": "0000--0000000000--0",
-  "scc.unary.b.none.index.ne": "0000--0000000000--0",
-  "scc.unary.b.none.index.pl": "0000--0000000000--0",
-  "scc.unary.b.none.index.t": "0000--0000000000--0",
-  "scc.unary.b.none.index.vc": "0000--0000000000--0",
-  "scc.unary.b.none.index.vs": "0000--0000000000--0",
-  "scc.unary.b.none.postinc.cc": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.cs": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.eq": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.f": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.ge": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.gt": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.hi": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.le": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.ls": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.lt": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.mi": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.ne": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.pl": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.t": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.vc": "0000--0000000000-00",
-  "scc.unary.b.none.postinc.vs": "0000--0000000000-00",
-  "scc.unary.b.none.predec.cc": "0000--0000000000-00",
-  "scc.unary.b.none.predec.cs": "0000--0000000000-00",
-  "scc.unary.b.none.predec.eq": "0000--0000000000-00",
-  "scc.unary.b.none.predec.f": "0000--0000000000-00",
-  "scc.unary.b.none.predec.ge": "0000--0000000000-00",
-  "scc.unary.b.none.predec.gt": "0000--0000000000-00",
-  "scc.unary.b.none.predec.hi": "0000--0000000000-00",
-  "scc.unary.b.none.predec.le": "0000--0000000000-00",
-  "scc.unary.b.none.predec.ls": "0000--0000000000-00",
-  "scc.unary.b.none.predec.lt": "0000--0000000000-00",
-  "scc.unary.b.none.predec.mi": "0000--0000000000-00",
-  "scc.unary.b.none.predec.ne": "0000--0000000000-00",
-  "scc.unary.b.none.predec.pl": "0000--0000000000-00",
-  "scc.unary.b.none.predec.t": "0000--0000000000-00",
-  "scc.unary.b.none.predec.vc": "0000--0000000000-00",
-  "scc.unary.b.none.predec.vs": "0000--0000000000-00",
+  "scc.unary.b.none.absl.cc": "1111--1111110111--0",
+  "scc.unary.b.none.absl.cs": "1111--1111110111--0",
+  "scc.unary.b.none.absl.eq": "1111--1111110111--0",
+  "scc.unary.b.none.absl.f": "1111--1111110111--0",
+  "scc.unary.b.none.absl.ge": "1111--1111110111--0",
+  "scc.unary.b.none.absl.gt": "1111--1111110111--0",
+  "scc.unary.b.none.absl.hi": "1111--1111110111--0",
+  "scc.unary.b.none.absl.le": "1111--1111110111--0",
+  "scc.unary.b.none.absl.ls": "1111--1111110111--0",
+  "scc.unary.b.none.absl.lt": "1111--1111110111--0",
+  "scc.unary.b.none.absl.mi": "1111--1111110111--0",
+  "scc.unary.b.none.absl.ne": "1111--1111110111--0",
+  "scc.unary.b.none.absl.pl": "1111--1111110111--0",
+  "scc.unary.b.none.absl.t": "1111--1111110111--0",
+  "scc.unary.b.none.absl.vc": "1111--1111110111--0",
+  "scc.unary.b.none.absl.vs": "1111--1111110111--0",
+  "scc.unary.b.none.absw.cc": "1111--1111110111--0",
+  "scc.unary.b.none.absw.cs": "1111--1111110111--0",
+  "scc.unary.b.none.absw.eq": "1111--1111110111--0",
+  "scc.unary.b.none.absw.f": "1111--1111110111--0",
+  "scc.unary.b.none.absw.ge": "1111--1111110111--0",
+  "scc.unary.b.none.absw.gt": "1111--1111110111--0",
+  "scc.unary.b.none.absw.hi": "1111--1111110111--0",
+  "scc.unary.b.none.absw.le": "1111--1111110111--0",
+  "scc.unary.b.none.absw.ls": "1111--1111110111--0",
+  "scc.unary.b.none.absw.lt": "1111--1111110111--0",
+  "scc.unary.b.none.absw.mi": "1111--1111110111--0",
+  "scc.unary.b.none.absw.ne": "1111--1111110111--0",
+  "scc.unary.b.none.absw.pl": "1111--1111110111--0",
+  "scc.unary.b.none.absw.t": "1111--1111110111--0",
+  "scc.unary.b.none.absw.vc": "1111--1111110111--0",
+  "scc.unary.b.none.absw.vs": "1111--1111110111--0",
+  "scc.unary.b.none.disp.cc": "1111--1111111111--0",
+  "scc.unary.b.none.disp.cs": "1111--1111111111--0",
+  "scc.unary.b.none.disp.eq": "1111--1111111111--0",
+  "scc.unary.b.none.disp.f": "1111--1111111111--0",
+  "scc.unary.b.none.disp.ge": "1111--1111111111--0",
+  "scc.unary.b.none.disp.gt": "1111--1111111111--0",
+  "scc.unary.b.none.disp.hi": "1111--1111111111--0",
+  "scc.unary.b.none.disp.le": "1111--1111111111--0",
+  "scc.unary.b.none.disp.ls": "1111--1111111111--0",
+  "scc.unary.b.none.disp.lt": "1111--1111111111--0",
+  "scc.unary.b.none.disp.mi": "1111--1111111111--0",
+  "scc.unary.b.none.disp.ne": "1111--1111111111--0",
+  "scc.unary.b.none.disp.pl": "1111--1111111111--0",
+  "scc.unary.b.none.disp.t": "1111--1111111111--0",
+  "scc.unary.b.none.disp.vc": "1111--1111111111--0",
+  "scc.unary.b.none.disp.vs": "1111--1111111111--0",
+  "scc.unary.b.none.dn.cc": "1111--0111111111--0",
+  "scc.unary.b.none.dn.cs": "1111--0111111111--0",
+  "scc.unary.b.none.dn.eq": "1111--0111111111--0",
+  "scc.unary.b.none.dn.f": "1111--0111111111--0",
+  "scc.unary.b.none.dn.ge": "1111--0111111111--0",
+  "scc.unary.b.none.dn.gt": "1111--0111111111--0",
+  "scc.unary.b.none.dn.hi": "1111--0111111111--0",
+  "scc.unary.b.none.dn.le": "1111--0111111111--0",
+  "scc.unary.b.none.dn.ls": "1111--0111111111--0",
+  "scc.unary.b.none.dn.lt": "1111--0111111111--0",
+  "scc.unary.b.none.dn.mi": "1111--0111111111--0",
+  "scc.unary.b.none.dn.ne": "1111--0111111111--0",
+  "scc.unary.b.none.dn.pl": "1111--0111111111--0",
+  "scc.unary.b.none.dn.t": "1111--0111111111--0",
+  "scc.unary.b.none.dn.vc": "1111--0111111111--0",
+  "scc.unary.b.none.dn.vs": "1111--0111111111--0",
+  "scc.unary.b.none.ind.cc": "1111--1111111111--0",
+  "scc.unary.b.none.ind.cs": "1111--1111111111--0",
+  "scc.unary.b.none.ind.eq": "1111--1111111111--0",
+  "scc.unary.b.none.ind.f": "1111--1111111111--0",
+  "scc.unary.b.none.ind.ge": "1111--1111111111--0",
+  "scc.unary.b.none.ind.gt": "1111--1111111111--0",
+  "scc.unary.b.none.ind.hi": "1111--1111111111--0",
+  "scc.unary.b.none.ind.le": "1111--1111111111--0",
+  "scc.unary.b.none.ind.ls": "1111--1111111111--0",
+  "scc.unary.b.none.ind.lt": "1111--1111111111--0",
+  "scc.unary.b.none.ind.mi": "1111--1111111111--0",
+  "scc.unary.b.none.ind.ne": "1111--1111111111--0",
+  "scc.unary.b.none.ind.pl": "1111--1111111111--0",
+  "scc.unary.b.none.ind.t": "1111--1111111111--0",
+  "scc.unary.b.none.ind.vc": "1111--1111111111--0",
+  "scc.unary.b.none.ind.vs": "1111--1111111111--0",
+  "scc.unary.b.none.index.cc": "1111--1111111111--0",
+  "scc.unary.b.none.index.cs": "1111--1111111111--0",
+  "scc.unary.b.none.index.eq": "1111--1111111111--0",
+  "scc.unary.b.none.index.f": "1111--1111111111--0",
+  "scc.unary.b.none.index.ge": "1111--1111111111--0",
+  "scc.unary.b.none.index.gt": "1111--1111111111--0",
+  "scc.unary.b.none.index.hi": "1111--1111111111--0",
+  "scc.unary.b.none.index.le": "1111--1111111111--0",
+  "scc.unary.b.none.index.ls": "1111--1111111111--0",
+  "scc.unary.b.none.index.lt": "1111--1111111111--0",
+  "scc.unary.b.none.index.mi": "1111--1111111111--0",
+  "scc.unary.b.none.index.ne": "1111--1111111111--0",
+  "scc.unary.b.none.index.pl": "1111--1111111111--0",
+  "scc.unary.b.none.index.t": "1111--1111111111--0",
+  "scc.unary.b.none.index.vc": "1111--1111111111--0",
+  "scc.unary.b.none.index.vs": "1111--1111111111--0",
+  "scc.unary.b.none.postinc.cc": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.cs": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.eq": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.f": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.ge": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.gt": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.hi": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.le": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.ls": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.lt": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.mi": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.ne": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.pl": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.t": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.vc": "1111--1111111111-10",
+  "scc.unary.b.none.postinc.vs": "1111--1111111111-10",
+  "scc.unary.b.none.predec.cc": "1111--1111111111-10",
+  "scc.unary.b.none.predec.cs": "1111--1111111111-10",
+  "scc.unary.b.none.predec.eq": "1111--1111111111-10",
+  "scc.unary.b.none.predec.f": "1111--1111111111-10",
+  "scc.unary.b.none.predec.ge": "1111--1111111111-10",
+  "scc.unary.b.none.predec.gt": "1111--1111111111-10",
+  "scc.unary.b.none.predec.hi": "1111--1111111111-10",
+  "scc.unary.b.none.predec.le": "1111--1111111111-10",
+  "scc.unary.b.none.predec.ls": "1111--1111111111-10",
+  "scc.unary.b.none.predec.lt": "1111--1111111111-10",
+  "scc.unary.b.none.predec.mi": "1111--1111111111-10",
+  "scc.unary.b.none.predec.ne": "1111--1111111111-10",
+  "scc.unary.b.none.predec.pl": "1111--1111111111-10",
+  "scc.unary.b.none.predec.t": "1111--1111111111-10",
+  "scc.unary.b.none.predec.vc": "1111--1111111111-10",
+  "scc.unary.b.none.predec.vs": "1111--1111111111-10",
   "stop.imm16.none.imm.none": "00000000000000000-0",
   "sub.dn_ea.b.dn.absl": "11111-11111101111-0",
   "sub.dn_ea.b.dn.absw": "11111-11111101111-0",
@@ -2475,14 +2475,14 @@
   "subx.predec_predec.l.predec.predec": "1111101111111111110",
   "subx.predec_predec.w.predec.predec": "1111101111111111110",
   "swap.dn.w.none.dn": "11101-11111111111-0",
-  "tas.unary.b.none.absl": "00000-00000000000-0",
-  "tas.unary.b.none.absw": "00000-00000000000-0",
-  "tas.unary.b.none.disp": "00000-00000000000-0",
-  "tas.unary.b.none.dn": "00000-00000000000-0",
-  "tas.unary.b.none.ind": "00000-00000000000-0",
-  "tas.unary.b.none.index": "00000-00000000000-0",
-  "tas.unary.b.none.postinc": "00000-0000000000000",
-  "tas.unary.b.none.predec": "00000-0000000000000",
+  "tas.unary.b.none.absl": "11111-11111101111-0",
+  "tas.unary.b.none.absw": "11111-11111101111-0",
+  "tas.unary.b.none.disp": "11111-11111111111-0",
+  "tas.unary.b.none.dn": "11111-11111111111-0",
+  "tas.unary.b.none.ind": "11111-11111111111-0",
+  "tas.unary.b.none.index": "11111-11111111111-0",
+  "tas.unary.b.none.postinc": "11111-1111111111110",
+  "tas.unary.b.none.predec": "11111-1111111111110",
   "trap.vector.none.none.none.vector0to15": "0000-00000000000-00",
   "trapv.none.none.none.none": "0000-00000000000--0",
   "tst.unary.b.none.absl": "11111-11111101111-0",
@@ -2509,7 +2509,7 @@
   "tst.unary.w.none.index": "11111011111111111-0",
   "tst.unary.w.none.postinc": "1111101111111111110",
   "tst.unary.w.none.predec": "1111101111111111110",
-  "unlk.an.none.an.none": "1110-01111111011-10"
+  "unlk.an.none.an.none": "1110-01111111111-10"
  },
  "measurement": {
   "compiler_flags": "-std=c11 -Wall -Wextra -Wno-type-limits -pedantic -Werror -O0",
@@ -2549,57 +2549,57 @@
  "totals": {
   "ccr_sr_effect_declared": {
    "applicable_forms": 1193,
-   "passing_forms": 1146,
-   "passing_words": 36037,
-   "percent_forms": "96.06"
+   "passing_forms": 1154,
+   "passing_words": 36087,
+   "percent_forms": "96.73"
   },
   "ccr_sr_validated": {
    "applicable_forms": 1193,
-   "passing_forms": 1120,
-   "passing_words": 33124,
-   "percent_forms": "93.88"
+   "passing_forms": 1128,
+   "passing_words": 33174,
+   "percent_forms": "94.55"
   },
   "compile": {
    "applicable_forms": 1526,
-   "passing_forms": 1302,
-   "passing_words": 43029,
-   "percent_forms": "85.32"
+   "passing_forms": 1445,
+   "passing_words": 44327,
+   "percent_forms": "94.69"
   },
   "decode": {
    "applicable_forms": 1526,
-   "passing_forms": 1333,
-   "passing_words": 43928,
-   "percent_forms": "87.35"
+   "passing_forms": 1476,
+   "passing_words": 45226,
+   "percent_forms": "96.72"
   },
   "ea_footprint_declared": {
    "applicable_forms": 1526,
-   "passing_forms": 1202,
-   "passing_words": 39277,
-   "percent_forms": "78.77"
+   "passing_forms": 1345,
+   "passing_words": 40575,
+   "percent_forms": "88.14"
   },
   "ea_side_effect_validated": {
    "applicable_forms": 381,
-   "passing_forms": 318,
-   "passing_words": 12577,
-   "percent_forms": "83.46"
+   "passing_forms": 352,
+   "passing_words": 12849,
+   "percent_forms": "92.39"
   },
   "effects": {
    "applicable_forms": 1526,
-   "passing_forms": 1325,
-   "passing_words": 43878,
-   "percent_forms": "86.83"
+   "passing_forms": 1468,
+   "passing_words": 45176,
+   "percent_forms": "96.20"
   },
   "emit": {
    "applicable_forms": 1526,
-   "passing_forms": 1302,
-   "passing_words": 43029,
-   "percent_forms": "85.32"
+   "passing_forms": 1445,
+   "passing_words": 44327,
+   "percent_forms": "94.69"
   },
   "end_to_end_structural": {
    "applicable_forms": 1526,
-   "passing_forms": 1301,
-   "passing_words": 43028,
-   "percent_forms": "85.26"
+   "passing_forms": 1444,
+   "passing_words": 44326,
+   "percent_forms": "94.63"
   },
   "exception_privilege_modeled": {
    "applicable_forms": 852,
@@ -2609,57 +2609,57 @@
   },
   "lift": {
    "applicable_forms": 1526,
-   "passing_forms": 1333,
-   "passing_words": 43928,
-   "percent_forms": "87.35"
+   "passing_forms": 1476,
+   "passing_words": 45226,
+   "percent_forms": "96.72"
   },
   "native_exec": {
    "applicable_forms": 1526,
-   "passing_forms": 1301,
-   "passing_words": 43028,
-   "percent_forms": "85.26"
+   "passing_forms": 1444,
+   "passing_words": 44326,
+   "percent_forms": "94.63"
   },
   "route_immutable_rom_aot": {
    "applicable_forms": 1526,
-   "passing_forms": 1273,
-   "passing_words": 42867,
-   "percent_forms": "83.42"
+   "passing_forms": 1446,
+   "passing_words": 44321,
+   "percent_forms": "94.76"
   },
   "route_runtime_routed_admitted": {
    "applicable_forms": 1526,
-   "passing_forms": 1325,
-   "passing_words": 43878,
-   "percent_forms": "86.83"
+   "passing_forms": 1468,
+   "passing_words": 45176,
+   "percent_forms": "96.20"
   },
   "route_runtime_routed_compiles": {
    "applicable_forms": 1526,
-   "passing_forms": 1325,
-   "passing_words": 43878,
-   "percent_forms": "86.83"
+   "passing_forms": 1468,
+   "passing_words": 45176,
+   "percent_forms": "96.20"
   },
   "route_runtime_routed_executes": {
    "applicable_forms": 1526,
-   "passing_forms": 916,
-   "passing_words": 41565,
-   "percent_forms": "60.03"
+   "passing_forms": 1025,
+   "passing_words": 42829,
+   "percent_forms": "67.17"
   },
   "route_static_discovery": {
    "applicable_forms": 1526,
-   "passing_forms": 1305,
-   "passing_words": 39794,
-   "percent_forms": "85.52"
+   "passing_forms": 1448,
+   "passing_words": 41092,
+   "percent_forms": "94.89"
   },
   "semantic_validated": {
    "applicable_forms": 1526,
-   "passing_forms": 1276,
-   "passing_words": 40690,
-   "percent_forms": "83.62"
+   "passing_forms": 1419,
+   "passing_words": 41988,
+   "percent_forms": "92.99"
   },
   "timing_model_present": {
    "applicable_forms": 1526,
-   "passing_forms": 1218,
-   "passing_words": 36288,
-   "percent_forms": "79.82"
+   "passing_forms": 1345,
+   "passing_words": 37458,
+   "percent_forms": "88.14"
   },
   "timing_validated": {
    "applicable_forms": 1526,
@@ -2715,15 +2715,6 @@
    "unsupported_forms": 2
   },
   {
-   "family": "data_movement",
-   "first_failing_stage": {
-    "decode": 3
-   },
-   "forms": 3,
-   "mnemonic": "EXG",
-   "unsupported_forms": 3
-  },
-  {
    "family": "system_control",
    "first_failing_stage": {
     "decode": 1
@@ -2758,15 +2749,6 @@
    "forms": 312,
    "mnemonic": "MOVE",
    "unsupported_forms": 27
-  },
-  {
-   "family": "data_movement",
-   "first_failing_stage": {
-    "decode": 4
-   },
-   "forms": 4,
-   "mnemonic": "MOVEP",
-   "unsupported_forms": 4
   },
   {
    "family": "system_control",
@@ -2823,24 +2805,6 @@
    "unsupported_forms": 1
   },
   {
-   "family": "program_control",
-   "first_failing_stage": {
-    "decode": 128
-   },
-   "forms": 128,
-   "mnemonic": "Scc",
-   "unsupported_forms": 128
-  },
-  {
-   "family": "bit_manipulation",
-   "first_failing_stage": {
-    "decode": 8
-   },
-   "forms": 8,
-   "mnemonic": "TAS",
-   "unsupported_forms": 8
-  },
-  {
    "family": "system_control",
    "first_failing_stage": {
     "decode": 1
@@ -2861,9 +2825,9 @@
  ],
  "validation": {
   "forms_with_at_least_one_validated_word": {
-   "ccr": 1173,
-   "ea": 466,
-   "semantic": 1283,
+   "ccr": 1181,
+   "ea": 500,
+   "semantic": 1426,
    "timing": 0
   },
   "manifest_sources": [
@@ -2882,9 +2846,9 @@
    "tests/m68k_pc_indexed_move_musashi_differential_test.py"
   ],
   "validated_words": {
-   "ccr": 33195,
-   "ea": 12755,
-   "semantic": 40698,
+   "ccr": 33245,
+   "ea": 13027,
+   "semantic": 41996,
    "timing": 0
   }
  }

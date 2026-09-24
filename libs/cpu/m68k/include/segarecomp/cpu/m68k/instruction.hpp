@@ -277,6 +277,11 @@ inline constexpr M68kEaLegalMask m68k_ea_clr_not_operand = m68k_ea_data_alterabl
 // entries; independent of the T001 dataset. ADDX/SUBX/CMPM have no EA field (register-pair or
 // predecrement/postincrement pair shapes fixed by opcode bits, decoded in decode.cpp).
 inline constexpr M68kEaLegalMask m68k_ea_negate_operand = m68k_ea_data_alterable_with_index;
+// SEG-021-T016: Scc and TAS operand: data alterable (Dn plus every memory-alterable mode including
+// `(d8,An,Xn)`), from the Motorola M68000 Family Programmer's Reference Manual Scc/TAS entries; independent of
+// the T001 dataset. Mode 001 (An) of the Scc opcode field is DBcc, never an Scc operand. EXG and MOVEP have no
+// EA field (register operands / fixed d16(An)), decoded in decode.cpp.
+inline constexpr M68kEaLegalMask m68k_ea_scc_tas_operand = m68k_ea_data_alterable_with_index;
 // SEG-007-T137: brief-format address-register indexed addressing,
 // `(d8,An,Xn)`, is likewise a legal source operand for the shared
 // ADD/SUB/CMP/AND/OR/ADDA/SUBA/CMPA register-form family on the base
@@ -514,6 +519,17 @@ enum class M68kInstructionKind {
   // shapes (R=0 -> `Dy,Dx`, R=1 -> `-(Ay),-(Ax)`; source in `source_ea`, destination in `destination_ea`).
   // NBCD <ea> (`0100 1000 00 mmmrrr`, data-alterable) is a one-address read-modify-write in `destination_ea`.
   add_decimal, subtract_decimal, negate_decimal,
+  // SEG-021-T016 (Motorola M68000 Family Programmer's Reference Manual, EXG/MOVEP/Scc/TAS entries; 68000 base).
+  // EXG (`1100 Rx 1 opmode Ry`, opmode 01000 Dx,Dy / 01001 Ax,Ay / 10001 Dx,Ay; always long) carries the
+  // Rx-field register in `source_ea` and the Ry-field register in `destination_ea`; both are written and no
+  // condition code changes. MOVEP (`0000 Dn 1 oo 001 An`, oo: 00 word mem->reg, 01 long mem->reg, 10 word
+  // reg->mem, 11 long reg->mem, one 16-bit displacement) transfers `size` bytes to/from every second byte of
+  // memory starting at An+d16, high byte first; mem->reg carries `d16(An)` in `source_ea` and Dn in
+  // `destination_ea`, reg->mem the reverse. Scc <ea> (`0101 cccc 11 mmmrrr`, byte, data-alterable, mode
+  // 001 is DBcc) writes 0xFF when `condition` holds else 0x00 to `destination_ea`; no condition code changes.
+  // TAS <ea> (`0100 1010 11 mmmrrr`, byte, data-alterable) sets N/Z from the operand byte, clears V/C and sets
+  // bit 7 of the byte; the (indivisible) bus read-modify-write cycle is platform-owned and not modelled here.
+  exchange_registers, movep, set_conditional, test_and_set,
   // SEG-007-T025 (Batch C, C1): SWAP Dn, EXT.W Dn, EXT.L Dn. Register-only
   // forms -- no EA mode beyond Dn, no memory access. `destination_ea` (not
   // `source_ea`) carries the single Dn operand these read-then-write,

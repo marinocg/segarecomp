@@ -92,6 +92,11 @@ enum class M68kIrKind {
   add_decimal,
   subtract_decimal,
   negate_decimal,
+  // SEG-021-T016: EXG/MOVEP/Scc/TAS (see the matching M68kInstructionKind entries).
+  exchange_registers,
+  movep_transfer,
+  set_conditional,
+  test_and_set,
   // SEG-007-T220: MULS.W <ea>,Dn. See M68kInstructionKind::multiply_signed_
   // word's own doc comment for the full opcode/EA/CCR contract.
   multiply_signed_word,

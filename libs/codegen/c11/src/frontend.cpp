@@ -1514,6 +1514,8 @@ bool valid_c4_static_memory_fact(
   case M68kInstructionKind::negate_word:
   case M68kInstructionKind::negate_extended:
   case M68kInstructionKind::negate_decimal:
+  case M68kInstructionKind::test_and_set:  // SEG-021-T016: TAS is a byte one-address RMW like NOT
+  case M68kInstructionKind::set_conditional:  // SEG-021-T016: memory Scc reads then writes its byte destination
   case M68kInstructionKind::not_operand:
     // SEG-007-T168: NOT has no second operand at all (unlike SUBQ's
     // quick-immediate source); its sole destination is a full RMW operand,
@@ -1734,6 +1736,11 @@ std::optional<std::string> m68k_retirement_cycle_expression(const M68kIrOperatio
     return std::nullopt;
   case M68kIrKind::dbcc_loop:
     return "m68k_dbcc_condition_true ? UINT32_C(12) : (m68k_dbcc_took_branch ? UINT32_C(10) : UINT32_C(14))";
+  case M68kIrKind::set_conditional:
+    // SEG-021-T016: Table 8-6 Scc Dn row is 4 (condition false) / 6 (true); memory rows are static (timing.cpp).
+    if (operation.destination_ea.mode == M68kEaMode::data_register)
+      return "m68k_scc_true ? UINT32_C(6) : UINT32_C(4)";
+    return std::nullopt;
   case M68kIrKind::shift_rotate_register:
     return "UINT32_C(" + std::to_string(operation.size == M68kMemoryAccessWidth::long_word ? 8U : 6U) +
            ") + UINT32_C(2) * m68k_shift_effective_count";
@@ -1878,6 +1885,9 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
       << "  uint32_t pc = runtime->pc;\n";
   if (entry.operation.kind == M68kIrKind::dbcc_loop)
     out << "  uint8_t m68k_dbcc_took_branch = 0U;\n";
+  const bool scc_dynamic_timing = entry.operation.kind == M68kIrKind::set_conditional &&
+                                  entry.operation.destination_ea.mode == M68kEaMode::data_register;
+  if (scc_dynamic_timing) out << "  uint8_t m68k_scc_true = 0U;\n";
   if (entry.operation.kind == M68kIrKind::multiply_signed_word ||
       entry.operation.kind == M68kIrKind::multiply_unsigned_word)
     out << "  uint16_t m68k_timing_mul_source = UINT16_C(0);\n";
@@ -1888,6 +1898,7 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   memory.user_stack_pointer = "runtime->usp";
   if (entry.operation.kind == M68kIrKind::dbcc_loop)
     memory.timing_dbcc_taken = "m68k_dbcc_took_branch";
+  if (scc_dynamic_timing) memory.timing_scc_true = "m68k_scc_true";
   // SEG-007-T245: every immutable-ROM AOT candidate that
   // `m68k_operation_is_immutable_rom_aot_safe` admits is, by construction,
   // safe to route through the runtime device/memory gate -- register-only
@@ -2058,6 +2069,12 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   case M68kIrKind::negate_decimal:
   case M68kIrKind::add_decimal:
   case M68kIrKind::subtract_decimal:
+  // SEG-021-T016: EXG/MOVEP never carry a retained fact (register-only / d16(An)); Scc has CLR's and TAS has NOT's
+  // gap shape below.
+  case M68kIrKind::exchange_registers:
+  case M68kIrKind::movep_transfer:
+  case M68kIrKind::set_conditional:
+  case M68kIrKind::test_and_set:
   case M68kIrKind::logical_and_immediate:
   case M68kIrKind::write_move:
   case M68kIrKind::write_movea:
@@ -2420,7 +2437,9 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
   } else if (operation.kind == M68kIrKind::logical_not || operation.kind == M68kIrKind::shift_rotate_memory ||
              operation.kind == M68kIrKind::negate_word || operation.kind == M68kIrKind::negate_extended ||
-             operation.kind == M68kIrKind::negate_decimal) {
+             operation.kind == M68kIrKind::negate_decimal || operation.kind == M68kIrKind::test_and_set ||
+             operation.kind == M68kIrKind::set_conditional) {
+    // SEG-021-T016: TAS and memory Scc (read then write) share it too.
     // SEG-021-T014: NEG/NEGX share NOT's one-address RMW gap shape.
     // SEG-007-T168: NOT has no source operand at all (unlike the sibling
     // logical family AND/OR/EOR/ANDI/ORI/EORI, which always carry one, just
@@ -3088,6 +3107,8 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
     case M68kInstructionKind::negate_word:
     case M68kInstructionKind::negate_extended:
     case M68kInstructionKind::negate_decimal:
+    case M68kInstructionKind::test_and_set:  // SEG-021-T016
+    case M68kInstructionKind::set_conditional:  // SEG-021-T016: memory Scc is read-then-write like TAS
     case M68kInstructionKind::not_operand:
       // SEG-007-T168: NOT has no second operand at all (unlike AND/OR/EOR);
       // its sole destination is a full RMW operand needing both
@@ -3285,6 +3306,8 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
           // SEG-021-T014: NEG/NEGX lower their own auto-updating operand (deferred commit).
           kind != M68kInstructionKind::negate_word && kind != M68kInstructionKind::negate_extended &&
           kind != M68kInstructionKind::negate_decimal &&
+          // SEG-021-T016: Scc and TAS lower their own auto-updating operand (deferred commit).
+          kind != M68kInstructionKind::set_conditional && kind != M68kInstructionKind::test_and_set &&
           // SEG-021-T007: AND/OR/EOR and ANDI/ORI/EORI lower their own auto-updating operand (deferred commit).
           kind != M68kInstructionKind::logical_and && kind != M68kInstructionKind::logical_or &&
           kind != M68kInstructionKind::eor && kind != M68kInstructionKind::andi &&
@@ -3353,7 +3376,9 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
         // SEG-021-T014: NEG/NEGX: one-address RMW like NOT.
         ((instruction->kind == M68kInstructionKind::negate_word ||
           instruction->kind == M68kInstructionKind::negate_extended ||
-          instruction->kind == M68kInstructionKind::negate_decimal) &&
+          instruction->kind == M68kInstructionKind::negate_decimal ||
+          instruction->kind == M68kInstructionKind::test_and_set ||  // SEG-021-T016: TAS is one-address RMW too
+          instruction->kind == M68kInstructionKind::set_conditional) &&  // memory Scc reads then writes (Dn is register-only)
          instruction->destination_ea.mode != M68kEaMode::data_register &&
          (!require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_read, instruction->kind) ||
           !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
@@ -4091,9 +4116,10 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
   // call-shaped "unframed Tier-2 call" case): every call-shaped Tier-2 site's
   // own genuine, statically-known continuation, collected alongside its real
   // function body below and unioned into `runtime_return_target_set` further
-  // down -- restricted to a continuation that is itself a genuinely emitted,
-  // dispatchable block entry (`emitted_block_entries`, already final at this
-  // point), never fabricated and never dependent on which downstream target
+  // down -- restricted to a continuation that is itself a member of the final
+  // `emitted_code_addresses` (ordinary block entry/instruction boundary or an
+  // admitted immutable-ROM AOT identity; every block entry is a member;
+  // SEG-021-T030), never fabricated and never dependent on which downstream target
   // the site's own runtime-computed EA happens to resolve to.
   std::set<Address> tier2_call_continuations;
   if (tier2_capable) {
@@ -4104,7 +4130,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
                                                                   &tier2_call_continuation);
       if (!function_text) return "/* translation rejected: unrepresentable C4 frontier */\n";
       out << *function_text;
-      if (tier2_call_continuation && emitted_block_entries.contains(*tier2_call_continuation))
+      if (tier2_call_continuation && emitted_code_addresses.contains(*tier2_call_continuation))
         tier2_call_continuations.insert(*tier2_call_continuation);
     }
   }
@@ -4154,7 +4180,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
                 partial.accepted_prefix, provenance, decoded_terminal->second->source_ea, is_call,
                 tier2_name.str(), emitted_code_address_set, &pre_pc_call_continuation)) {
           out << *tier2_text;
-          if (pre_pc_call_continuation && emitted_block_entries.contains(*pre_pc_call_continuation))
+          if (pre_pc_call_continuation && emitted_code_addresses.contains(*pre_pc_call_continuation))
             tier2_call_continuations.insert(*pre_pc_call_continuation);
           continue;
         }
@@ -4639,6 +4665,10 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
       out << "  {\n";
       if (found->second->kind == M68kIrKind::dbcc_loop)
         out << "    uint8_t m68k_dbcc_took_branch = 0U;\n";
+      // Only the Dn form's retirement time depends on the condition (memory forms have a static row).
+      if (found->second->kind == M68kIrKind::set_conditional &&
+          found->second->destination_ea.mode == M68kEaMode::data_register)
+        out << "    uint8_t m68k_scc_true = 0U;\n";
       if (found->second->kind == M68kIrKind::multiply_signed_word || found->second->kind == M68kIrKind::multiply_unsigned_word)
         out << "    uint16_t m68k_timing_mul_source = UINT16_C(0);\n";
       switch (found->second->kind) {
@@ -5051,6 +5081,10 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
         break;
       }
       case M68kIrKind::negate_decimal:
+      // SEG-021-T016: TAS and memory Scc are byte one-address read-then-write operands; both use this fact-lookup /
+      // region-threading discipline and advance the configured program counter directly (no macro bridge).
+      case M68kIrKind::test_and_set:
+      case M68kIrKind::set_conditional:
       case M68kIrKind::negate_extended:
       case M68kIrKind::negate_word: {
         // SEG-021-T014: NEG/NEGX are one-address RMW operands with NOT's fact-lookup/region-threading
@@ -5068,6 +5102,8 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
         routed.runtime_routing = true;
         routed.runtime_object = "runtime";
         if (destination != nullptr) routed.test_operand_access = genesis_lowering_access(destination->region);
+        if (found->second->kind == M68kIrKind::set_conditional && found->second->destination_ea.mode == M68kEaMode::data_register)
+          routed.timing_scc_true = "m68k_scc_true";  // SEG-021-T016: only Scc Dn (condition-dependent timing) writes it
         out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
         break;
       }
@@ -5076,6 +5112,9 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
       // operation-local deferred address commit and advance `memory->program_counter` directly (no bridge).
       case M68kIrKind::add_decimal:
       case M68kIrKind::subtract_decimal:
+      // SEG-021-T016: EXG (register-only) and MOVEP (d16(An), never a retained fact) advance `memory->program_counter`.
+      case M68kIrKind::exchange_registers:
+      case M68kIrKind::movep_transfer:
       case M68kIrKind::add_extended:
       case M68kIrKind::subtract_extended:
       case M68kIrKind::compare_memory: {

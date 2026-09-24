@@ -4458,6 +4458,8 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
       case M68kInstructionKind::negate_word:
       case M68kInstructionKind::negate_extended:
       case M68kInstructionKind::negate_decimal:
+      case M68kInstructionKind::test_and_set:  // SEG-021-T016: TAS is a byte one-address RMW like NOT
+      case M68kInstructionKind::set_conditional:  // SEG-021-T016: memory Scc reads then writes (Dn retains nothing)
       case M68kInstructionKind::not_operand:
         // SEG-007-T168: NOT has no second operand at all (unlike SUBQ's
         // quick-immediate source, and unlike ANDI/ORI/EORI, which do carry

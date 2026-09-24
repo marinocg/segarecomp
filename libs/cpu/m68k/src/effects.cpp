@@ -406,6 +406,52 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
     effect.pc = M68kPcEffectKind::advance;
     effect.pc_delta = operation.provenance.length.value;
     break;
+  case M68kIrKind::exchange_registers:
+    // SEG-021-T016: EXG swaps two full registers (Dx,Dy / Ax,Ay / Dx,Ay); no condition code changes. Both operands
+    // are written, so their register masks are recorded here (the generic destination rule below also adds Dy).
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.source_ea;
+    effect.resolved_destination_ea = operation.destination_ea;
+    for (const auto &operand : {operation.source_ea, operation.destination_ea}) {
+      if (operand.reg >= 8U) continue;
+      if (operand.mode == M68kEaMode::data_register)
+        effect.data_register_write_mask |= static_cast<std::uint8_t>(1U << operand.reg);
+      else if (operand.mode == M68kEaMode::address_register)
+        effect.address_register_write_mask |= static_cast<std::uint8_t>(1U << operand.reg);
+    }
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::movep_transfer:
+    // SEG-021-T016: MOVEP moves word/long data through every second byte of d16(An); the memory operand is
+    // `source_ea` (mem->reg) or `destination_ea` (reg->mem). Only a Dn destination is a register write; no
+    // condition code changes and An is never updated.
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.source_ea;
+    effect.resolved_destination_ea = operation.destination_ea;
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::set_conditional:
+    // SEG-021-T016: Scc writes 0xFF/0x00 to its byte destination and changes no condition code (it only reads
+    // SR through the shared condition owner). A memory destination is read (value discarded) before it is written
+    // on the MC68000; a Dn destination performs no memory access.
+    effect.operand_size = operation.size;
+    if (operation.destination_ea.mode != M68kEaMode::data_register) effect.resolved_source_ea = operation.destination_ea;
+    effect.resolved_destination_ea = operation.destination_ea;
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::test_and_set:
+    // SEG-021-T016: TAS is a one-address byte read-modify-write; N/Z from the operand byte, V/C cleared, X
+    // preserved (M68kMoveResultCcrSpecification), then bit 7 is set. The indivisible bus cycle is platform-owned.
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.destination_ea;
+    effect.resolved_destination_ea = operation.destination_ea;
+    effect.affects_condition_codes = true;
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
   case M68kIrKind::multiply_signed_word:
     // SEG-007-T220: MULS.W reads the word-size source_ea and the low word of
     // destination_ea (always a Dn), and writes the full 32-bit product back
@@ -748,6 +794,9 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
       operation.kind == M68kIrKind::add_extended || operation.kind == M68kIrKind::subtract_extended ||
       operation.kind == M68kIrKind::compare_memory || operation.kind == M68kIrKind::negate_decimal ||
       operation.kind == M68kIrKind::add_decimal || operation.kind == M68kIrKind::subtract_decimal ||
+      // SEG-021-T016: EXG (both register masks), MOVEP (Dn destination mask), Scc/TAS (Dn mask plus EA auto-update).
+      operation.kind == M68kIrKind::exchange_registers || operation.kind == M68kIrKind::movep_transfer ||
+      operation.kind == M68kIrKind::set_conditional || operation.kind == M68kIrKind::test_and_set ||
       operation.kind == M68kIrKind::compare || operation.kind == M68kIrKind::compare_address ||
       operation.kind == M68kIrKind::general_branch;
   if (operation.kind == M68kIrKind::push_effective_address || operation.kind == M68kIrKind::return_from_subroutine ||

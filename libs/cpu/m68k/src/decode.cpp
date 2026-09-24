@@ -67,6 +67,10 @@ const char *m68k_instruction_kind_name(M68kInstructionKind kind) noexcept {
   case M68kInstructionKind::add_decimal: return "abcd";
   case M68kInstructionKind::subtract_decimal: return "sbcd";
   case M68kInstructionKind::negate_decimal: return "nbcd";
+  case M68kInstructionKind::exchange_registers: return "exg";
+  case M68kInstructionKind::movep: return "movep";
+  case M68kInstructionKind::set_conditional: return "scc";
+  case M68kInstructionKind::test_and_set: return "tas";
   case M68kInstructionKind::lea: return "lea";
   case M68kInstructionKind::jmp: return "jmp";
   case M68kInstructionKind::jsr: return "jsr";
@@ -598,6 +602,85 @@ struct M68kEaFieldOutcome {
                                     M68kMemoryAccessWidth::byte, src, dst, 0U);
 }
 
+[[nodiscard]] M68kCondition m68k_condition_from_selector(std::uint8_t selector) noexcept;
+
+// SEG-021-T016: TAS <ea> (0100 1010 11 mmmrrr, byte only, data-alterable). Size field 11 of the TST operation-select
+// (`0x4AC0`-`0x4AFF`); ILLEGAL (`0x4AFC`, immediate) is not a legal TAS operand and stays a rejection.
+[[nodiscard]] std::optional<M68kDecodeResult> m68k_decode_general_tas(
+    const DecodeSource &source, std::span<const std::uint8_t> image, std::size_t offset, std::uint64_t available,
+    const std::array<std::uint8_t, 2> &bytes, std::uint16_t word) {
+  if ((word & UINT16_C(0xFFC0)) != UINT16_C(0x4AC0)) return std::nullopt;
+  const auto mode3 = static_cast<std::uint8_t>((word >> 3U) & 0x7U);
+  const auto reg3 = static_cast<std::uint8_t>(word & 0x7U);
+  const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3,
+                                       m68k_ea_scc_tas_operand, M68kMemoryAccessWidth::byte);
+  if (!dst.ok) return dst.failure;
+  return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::test_and_set,
+                                    M68kMemoryAccessWidth::byte, {}, dst.ea, dst.extension_bytes);
+}
+
+// SEG-021-T016: EXG, fixed EA-field-free shapes (Motorola encodings, mask 0xF1F8):
+//   EXG Dx,Dy  1100 Rx 1 01000 Ry  (0xC140)     EXG Ax,Ay  1100 Rx 1 01001 Ry  (0xC148)
+//   EXG Dx,Ay  1100 Rx 1 10001 Ry  (0xC188)
+// Always long; Rx (bits 11-9) is `source_ea`, Ry (bits 2-0) is `destination_ea`. These opmodes are illegal
+// AND-family encodings (AND Dn,Dn / AND Dn,An), so claiming them ahead of the AND/OR decoders overlaps nothing.
+[[nodiscard]] std::optional<M68kDecodeResult> m68k_decode_general_exg(
+    const DecodeSource &source, std::span<const std::uint8_t> image, std::size_t offset,
+    const std::array<std::uint8_t, 2> &bytes, std::uint16_t word) {
+  const auto pattern = static_cast<std::uint16_t>(word & UINT16_C(0xF1F8));
+  if (pattern != UINT16_C(0xC140) && pattern != UINT16_C(0xC148) && pattern != UINT16_C(0xC188)) return std::nullopt;
+  const auto rx_mode = pattern == UINT16_C(0xC148) ? M68kEaMode::address_register : M68kEaMode::data_register;
+  const auto ry_mode = pattern == UINT16_C(0xC140) ? M68kEaMode::data_register : M68kEaMode::address_register;
+  const M68kEffectiveAddress src{rx_mode, static_cast<std::uint8_t>((word >> 9U) & 0x7U), 0, 0, 0, 0};
+  const M68kEffectiveAddress dst{ry_mode, static_cast<std::uint8_t>(word & 0x7U), 0, 0, 0, 0};
+  return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::exchange_registers,
+                                    M68kMemoryAccessWidth::long_word, src, dst, 0U);
+}
+
+// SEG-021-T016: MOVEP `0000 Dn 1 oo 001 An` + one 16-bit displacement (mask 0xF138 == 0x0108). oo (bits 7-6):
+// 00 word mem->reg, 01 long mem->reg, 10 word reg->mem, 11 long reg->mem. The `001` field occupies the An-direct
+// operand slot that no bit operation (BTST/BCHG/BCLR/BSET, `0000 Dn 1 oo mmmrrr`) accepts as its destination, so
+// the two encoding sets are disjoint and MOVEP is decoded ahead of the bit-operation decoder.
+[[nodiscard]] std::optional<M68kDecodeResult> m68k_decode_general_movep(
+    const DecodeSource &source, std::span<const std::uint8_t> image, std::size_t offset, std::uint64_t available,
+    const std::array<std::uint8_t, 2> &bytes, std::uint16_t word) {
+  if ((word & UINT16_C(0xF138)) != UINT16_C(0x0108)) return std::nullopt;
+  const auto opmode = static_cast<std::uint8_t>((word >> 6U) & 0x3U);
+  const auto size = (opmode & 1U) != 0U ? M68kMemoryAccessWidth::long_word : M68kMemoryAccessWidth::word;
+  const auto memory = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, 5U,
+                                          static_cast<std::uint8_t>(word & 0x7U), m68k_ea_an_disp16, size);
+  if (!memory.ok) return memory.failure;
+  const M68kEffectiveAddress dn{M68kEaMode::data_register, static_cast<std::uint8_t>((word >> 9U) & 0x7U), 0, 0, 0, 0};
+  const bool to_register = opmode < 2U;
+  return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::movep, size,
+                                    to_register ? memory.ea : dn, to_register ? dn : memory.ea,
+                                    memory.extension_bytes);
+}
+
+// SEG-021-T016: Scc <ea> `0101 cccc 11 mmmrrr` (byte, data-alterable). Mode 001 of this shape is DBcc
+// (`0101 cccc 11001 rrr`), decoded by its own exact decoder; the two are disjoint by construction and this
+// decoder additionally refuses mode 001 itself. All 16 conditions (T = 0000, F = 0001 included) share the
+// one M68kCondition selector owner with Bcc/DBcc.
+[[nodiscard]] std::optional<M68kDecodeResult> m68k_decode_general_scc(
+    const DecodeSource &source, std::span<const std::uint8_t> image, std::size_t offset, std::uint64_t available,
+    const std::array<std::uint8_t, 2> &bytes, std::uint16_t word) {
+  if ((word & UINT16_C(0xF0C0)) != UINT16_C(0x50C0)) return std::nullopt;
+  const auto mode3 = static_cast<std::uint8_t>((word >> 3U) & 0x7U);
+  if (mode3 == 1U) return std::nullopt;  // DBcc
+  const auto reg3 = static_cast<std::uint8_t>(word & 0x7U);
+  const auto selector = static_cast<std::uint8_t>((word >> 8U) & 0xFU);
+  const auto condition = selector == 0U   ? M68kCondition::always
+                        : selector == 1U ? M68kCondition::never
+                                          : m68k_condition_from_selector(selector);
+  const auto dst = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, mode3, reg3,
+                                       m68k_ea_scc_tas_operand, M68kMemoryAccessWidth::byte);
+  if (!dst.ok) return dst.failure;
+  auto instruction = m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::set_conditional,
+                                                 M68kMemoryAccessWidth::byte, {}, dst.ea, dst.extension_bytes);
+  instruction.condition = condition;
+  return instruction;
+}
+
 // SEG-021-T014: ADDX/SUBX/CMPM. Fixed-shape, EA-field-free encodings (no extension words):
 //   ADDX  1101 Rx 1 ss 00 R Ry   (0xD100 under mask 0xF130)
 //   SUBX  1001 Rx 1 ss 00 R Ry   (0x9100 under mask 0xF130)
@@ -1096,18 +1179,12 @@ struct M68kEaFieldOutcome {
 // word-destination bit-operation form, so `size` is derived from the
 // selected EA mode rather than any opcode size field (none exists).
 //
-// Load-bearing MOVEP collision (contract: "MOVEP collision is a load-bearing
-// decoder test"): MOVEP's four forms ("0000rrr100001...", 101001, 110001,
-// 111001 -- word/long, register<-memory and memory<-register) occupy the
-// EXACT SAME `0000rrr1oo......` opmode slots (oo=00/01/10/11) as dynamic
-// BTST/BCHG/BCLR/BSET, always at destination mode3==001 (address-register-
-// direct in ordinary EA terms). mode3==001 is never a legal bit-operation
-// destination on its own architectural merits -- it is absent from every
-// legend row above (only mode3==000/Dn is ever listed as a register-shaped
-// alternative). The shared EA legality check below therefore rejects every
-// MOVEP encoding as an illegal-EA bit operation, through the existing
-// unsupported-instruction route, with no MOVEP-specific exclusion or
-// implementation required.
+// MOVEP collision (SEG-021-T016 supersedes the earlier rejection): MOVEP's four forms ("0000rrr100001...", 101001,
+// 110001, 111001 -- word/long, register<-memory and memory<-register) occupy the EXACT SAME `0000rrr1oo......` opmode
+// slots as dynamic BTST/BCHG/BCLR/BSET, always at operand mode 001 (address-register-direct), which is never a legal
+// bit-operation destination. `m68k_decode_general_movep` therefore claims exactly `(word & 0xF138) == 0x0108` before
+// this decoder runs, and the two encoding sets are disjoint (asserted exhaustively over all 65,536 words by
+// tests/m68k_pipeline_test.cpp).
 [[nodiscard]] std::optional<M68kDecodeResult> m68k_decode_general_bit_operation(
     const DecodeSource &source, std::span<const std::uint8_t> image, std::size_t offset, std::uint64_t available,
     const std::array<std::uint8_t, 2> &bytes, std::uint16_t word) {
@@ -1666,6 +1743,8 @@ M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, De
       if (auto general = m68k_decode_general_extended_pair(source, image, offset, bytes, word)) return *general;
       // SEG-021-T015: ABCD/SBCD claim the AND/OR opmode-100 register/predecrement shapes (illegal there).
       if (auto general = m68k_decode_general_bcd_pair(source, image, offset, bytes, word)) return *general;
+      // SEG-021-T016: EXG claims the AND opmode-101/110 register-direct shapes (illegal there).
+      if (auto general = m68k_decode_general_exg(source, image, offset, bytes, word)) return *general;
         if (auto general = m68k_decode_general_compare(source, image, offset, available, bytes, word)) return *general;
         if (auto general = m68k_decode_general_add(source, image, offset, available, bytes, word)) return *general;
          if (auto general = m68k_decode_general_subtract(source, image, offset, available, bytes, word)) return *general;
@@ -1675,6 +1754,7 @@ M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, De
        if (auto general = m68k_decode_general_negate_word(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_negx(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_nbcd(source, image, offset, available, bytes, word)) return *general;
+      if (auto general = m68k_decode_general_tas(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_move_to_sr(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_move_from_sr(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_move_to_ccr(source, image, offset, available, bytes, word)) return *general;
@@ -1685,10 +1765,14 @@ M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, De
       if (auto general = m68k_decode_general_swap_ext(source, image, offset, bytes, word)) return *general;
       if (auto general = m68k_decode_general_pea(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_link_unlk(source, image, offset, available, bytes, word)) return *general;
+      // SEG-021-T016: MOVEP (`0000 Dn 1 oo 001 An`) is disjoint from every legal bit-operation encoding.
+      if (auto general = m68k_decode_general_movep(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_bit_operation(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_branch(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_bsr(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_dbcc(source, image, offset, available, bytes, word)) return *general;
+      // SEG-021-T016: Scc after the exact DBcc decoder (mode 001 is DBcc, never an Scc operand).
+      if (auto general = m68k_decode_general_scc(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_movem(source, image, offset, available, bytes, word)) return *general;
       if (auto general = m68k_decode_general_shift_rotate(source, image, offset, bytes, word)) return *general;
       if (auto general = m68k_decode_general_shift_rotate_memory(source, image, offset, available, bytes, word))
