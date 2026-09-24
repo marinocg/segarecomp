@@ -1980,18 +1980,42 @@ static GenesisCheckpointPcClass genesis_checkpoint_pc_class_for_target(uint32_t 
  * validation, build-time-resolved handler entries, and the project-only IRQ6
  * frame-origin bookkeeping plus diagnostic side channels through the entry /
  * return notifications. One binding context per call; no file-scope state.
+ *
+ * Frame-write guarantee (ADR 0043 §5 / §7 hook contract): the core's
+ * frame_write hook is non-fallible, so validate_stack_extent must accept only
+ * extents in which every aligned word/long frame write is certain to succeed.
+ * It accepts an even `base` whose whole [base, base + length) lies in work RAM
+ * (segarecomp_genesis_work_ram_contains, which also rejects wrap-around). For
+ * such an extent every frame write the core issues (word at base, long at
+ * base + 2) reaches genesis_route_access_bus with a stack-write bus kind and
+ * WRITE direction (kind/direction check passes), a valid width, non-null
+ * runtime/value/stop pointers, a 24-bit address (work RAM ends at 0x1000000),
+ * an even address, and a range inside work RAM, so
+ * genesis_route_access_unrecorded takes its work-RAM store branch, which has
+ * no failure return. The routed path is kept so the stack_write bus kind,
+ * execution history and checkpoint write effects remain observable.
+ *
+ * If the routed write nevertheless fails (an impossible invariant violation),
+ * the binding records it in `frame_write_failed`; the core still completes and
+ * commits (no rollback of frame bytes) and
+ * genesis_construct_exception_frame_and_transfer converts the record into the
+ * terminal GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY stop. It is never a
+ * recoverable core outcome.
  */
 typedef struct GenesisM68kExceptionContext {
   GenesisRuntime *runtime;
   GenesisRuntimeStop routed;
   int irq6_frame;
+  int frame_write_failed;
 } GenesisM68kExceptionContext;
 
 static int genesis_m68k_validate_stack_extent(void *context, uint32_t base, uint32_t length,
                                               SegarecompM68kStackDirection direction) {
   (void)context;
   (void)direction;
-  return genesis_is_work_ram(base, length);
+  /* Even base (the core also checks it) and the whole extent in work RAM: the
+     precondition of the non-fallible frame_write guarantee above. */
+  return (base & 1U) == 0U && genesis_is_work_ram(base, length);
 }
 
 static int genesis_m68k_stack_read(void *context, uint32_t address, uint32_t size, uint32_t *value) {
@@ -2006,17 +2030,16 @@ static int genesis_m68k_stack_read(void *context, uint32_t address, uint32_t siz
   return 1;
 }
 
-static int genesis_m68k_stack_write(void *context, uint32_t address, uint32_t size, uint32_t value) {
+/* Non-fallible by the ADR 0043 §5 hook contract (see the binding comment
+   above); an impossible routed failure is recorded, never returned. */
+static void genesis_m68k_frame_write(void *context, uint32_t address, uint32_t size, uint32_t value) {
   GenesisM68kExceptionContext *bound = (GenesisM68kExceptionContext *)context;
   GenesisRuntimeStop routed = {0};
   uint32_t routed_value = value;
   if (genesis_route_access_bus(bound->runtime, GENESIS_BUS_STACK_WRITE, address,
                                size == 2U ? GENESIS_ACCESS_WORD : GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE,
-                               &routed_value, &routed) != GENESIS_ACCESS_OK) {
-    bound->routed = routed;
-    return 0;
-  }
-  return 1;
+                               &routed_value, &routed) != GENESIS_ACCESS_OK)
+    bound->frame_write_failed = 1;
 }
 
 /* ADR 0020 §6 / ADR 0037 B / ADR 0043 §7: the Genesis vector table is the
@@ -2065,7 +2088,7 @@ static SegarecompM68kMachineHooks genesis_m68k_exception_hooks(GenesisM68kExcept
   hooks.context = context;
   hooks.validate_stack_extent = genesis_m68k_validate_stack_extent;
   hooks.stack_read = genesis_m68k_stack_read;
-  hooks.stack_write = genesis_m68k_stack_write;
+  hooks.frame_write = genesis_m68k_frame_write;
   hooks.resolve_vector = genesis_m68k_resolve_vector;
   hooks.on_exception_entry = genesis_m68k_on_exception_entry;
   hooks.on_exception_return = genesis_m68k_on_exception_return;
@@ -2130,12 +2153,14 @@ int genesis_exception_return(GenesisRuntime *runtime, uint32_t *restored_pc_out,
  * the M68K-owned core. `sr_keep_mask`/`sr_forced_bits` give the new SR (IRQ6:
  * clear T, set S, mask 6; synchronous exceptions: clear T, set S, keep the
  * mask). `fail_stop_class`/`fail_diag` select the caller-specific diagnostic
- * for a frame that cannot be constructed or a handler that is not installed;
- * a routed-write failure AFTER validation is the shared internal-dispatch-
- * inconsistency stop (validation already proved every destination writable).
+ * for a frame that cannot be constructed or a handler that is not installed.
+ * A routed frame-write failure AFTER validation is impossible by the binding's
+ * frame-write guarantee; if it happens anyway it is recorded by the binding and
+ * reported here as the terminal internal-dispatch-inconsistency stop (the
+ * committed frame and CPU state are NOT rolled back; the run ends).
  *
- * Returns 0 = failed closed (`*result` holds the GENESIS_STOP, no frame or
- *             state mutation of any kind);
+ * Returns 0 = failed closed (`*result` holds the GENESIS_STOP; for every
+ *             ordinary refusal no frame or state mutation of any kind);
  *         1 = frame constructed and committed; `*result` holds the transfer
  *             (`next_pc` and `runtime->pc` are the handler entry).
  */
@@ -2155,13 +2180,14 @@ static int genesis_construct_exception_frame_and_transfer(GenesisRuntime *runtim
   cpu = genesis_m68k_cpu_binding(runtime);
   status = segarecomp_m68k_exception_enter(&hooks, &cpu, vector, return_pc, sr_keep_mask, sr_forced_bits,
                                            &handler_entry);
-  if (status != SEGARECOMP_M68K_EXCEPTION_OK) {
+  if (status != SEGARECOMP_M68K_EXCEPTION_OK || context.frame_write_failed) {
+    const int inconsistent = context.frame_write_failed || (status != SEGARECOMP_M68K_EXCEPTION_STACK_INVALID &&
+                                                            status != SEGARECOMP_M68K_EXCEPTION_VECTOR_UNAVAILABLE);
     *result = (GenesisControlTransfer){0};
     result->kind = GENESIS_STOP;
-    result->stop = status == SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED || status == SEGARECOMP_M68K_EXCEPTION_BAD_BINDING
-                       ? genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
-                                             GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY)
-                       : genesis_access_stop(fail_stop_class, fail_diag);
+    result->stop = inconsistent ? genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
+                                                      GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY)
+                                : genesis_access_stop(fail_stop_class, fail_diag);
     return 0;
   }
   result->next_pc = handler_entry;

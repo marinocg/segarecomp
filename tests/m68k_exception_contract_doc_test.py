@@ -115,10 +115,10 @@ def check_runtime_frame(source: str) -> None:
     if not re.search(r"#define SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES UINT32_C\(6\)", source):
         raise ContractError("the exception core no longer defines a six-byte frame")
     entry = _compact(function_body(source, ENTRY_FUNCTION))
-    sr_write = re.search(r"hooks->stack_write\(hooks->context, frame_base, 2U, \(uint32_t\)(\w+)\)", entry)
+    sr_write = re.search(r"hooks->frame_write\(hooks->context, frame_base, 2U, \(uint32_t\)(\w+)\)", entry)
     if sr_write is None or sr_write.group(1) != "saved_sr":
         raise ContractError("the SR word slot at frame_base is not written with the saved SR")
-    pc_write = re.search(r"hooks->stack_write\(hooks->context, frame_base \+ 2U, 4U, (\w+)\)", entry)
+    pc_write = re.search(r"hooks->frame_write\(hooks->context, frame_base \+ 2U, 4U, (\w+)\)", entry)
     if pc_write is None or pc_write.group(1) != "stacked_pc":
         raise ContractError("the PC long slot at frame_base+2 is not written with the stacked PC")
     for needle in ("frame_base = ssp - SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES;",
@@ -128,7 +128,7 @@ def check_runtime_frame(source: str) -> None:
     if re.search(r"frame_base \+ (?!2U)\d+U", entry):
         raise ContractError("exception entry writes beyond the six-byte SR/PC frame")
     # validate-then-commit: the extent validation and vector resolution precede the first frame write.
-    if not (entry.index("validate_stack_extent") < entry.index("resolve_vector") < entry.index("stack_write")):
+    if not (entry.index("validate_stack_extent") < entry.index("resolve_vector") < entry.index("frame_write")):
         raise ContractError("exception entry writes the frame before validating it")
     rte = _compact(function_body(source, RETURN_FUNCTION))
     for needle in ("hooks->stack_read(hooks->context, sp, 2U, &saved_sr)",

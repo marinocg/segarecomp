@@ -39,8 +39,9 @@ typedef enum SegarecompM68kExceptionStatus {
   SEGARECOMP_M68K_EXCEPTION_STACK_INVALID = 1,
   /* resolve_vector reported no installed / representable handler. */
   SEGARECOMP_M68K_EXCEPTION_VECTOR_UNAVAILABLE = 2,
-  /* A stack access failed after validation (entry) or a frame read failed
-     (RTE).  Nothing was committed. */
+  /* An RTE frame read failed.  Nothing was committed.  Exception entry never
+     returns this: after a successful validate_stack_extent its frame writes
+     cannot fail (see SegarecompM68kMachineHooks.frame_write). */
   SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED = 3,
   /* RTE would leave SR.T = 1: trace is deferred and fails closed (§6). */
   SEGARECOMP_M68K_EXCEPTION_TRACE_DEFERRED = 4,
@@ -60,12 +61,24 @@ typedef enum SegarecompM68kStackDirection {
 
 /* ADR 0043 §7 machine hooks.  Every hook receives the bound `context`.
    Boolean hooks return 1 on success and 0 on a fail-closed refusal; a refusal
-   must leave the machine unchanged.  `size` is 2 (word) or 4 (long). */
+   must leave the machine unchanged.  `size` is 2 (word) or 4 (long).
+
+   ADR 0043 §5 validate-then-commit contract: a successful
+   `validate_stack_extent(context, base, length, SEGARECOMP_M68K_STACK_WRITE)`
+   GUARANTEES that every subsequent even-aligned word/long `frame_write`
+   entirely inside [base, base + length) succeeds for the bound machine.  The
+   frame write is therefore non-fallible (`void`): the core has no failure path
+   between the first frame byte and the commit.  A machine whose routed write
+   could still fail must refuse such an extent in validate_stack_extent; an
+   impossible post-validation failure is a machine-side invariant violation
+   that the binding records and turns into its own terminal stop; it is never
+   a recoverable core outcome and the core never rolls frame bytes back.
+   `stack_read` (RTE) stays fallible. */
 typedef struct SegarecompM68kMachineHooks {
   void *context;
   int (*validate_stack_extent)(void *context, uint32_t base, uint32_t length, SegarecompM68kStackDirection direction);
   int (*stack_read)(void *context, uint32_t address, uint32_t size, uint32_t *value);
-  int (*stack_write)(void *context, uint32_t address, uint32_t size, uint32_t value);
+  void (*frame_write)(void *context, uint32_t address, uint32_t size, uint32_t value);
   SegarecompM68kVectorResolution (*resolve_vector)(void *context, uint32_t vector, uint32_t *handler_entry);
   /* Optional provenance notifications (may be null). */
   void (*on_exception_entry)(void *context, uint32_t vector, uint32_t frame_base, uint32_t handler_entry);
@@ -83,7 +96,7 @@ typedef struct SegarecompM68kCpuBinding {
 static inline int segarecomp_m68k_binding_valid(const SegarecompM68kMachineHooks *hooks,
                                                 const SegarecompM68kCpuBinding *cpu) {
   return hooks != 0 && cpu != 0 && cpu->sr != 0 && cpu->active_sp != 0 && cpu->inactive_sp != 0 &&
-         cpu->pc != 0 && hooks->validate_stack_extent != 0 && hooks->stack_read != 0 && hooks->stack_write != 0 &&
+         cpu->pc != 0 && hooks->validate_stack_extent != 0 && hooks->stack_read != 0 && hooks->frame_write != 0 &&
          hooks->resolve_vector != 0;
 }
 
@@ -93,8 +106,11 @@ static inline int segarecomp_m68k_binding_valid(const SegarecompM68kMachineHooks
  * extent [SSP-6, SSP); resolve the handler; write SR word at SSP-6 and PC long
  * at SSP-4; then commit together SR <- (saved & keep) | forced (callers always
  * force S and clear T), active SP <- SSP-6, the USP into the inactive slot when
- * the mode changed, and PC <- handler.  Every fallible step precedes the first
- * frame write, so any failure returns with nothing written or committed.
+ * the mode changed, and PC <- handler.  Every fallible step (binding, SSP
+ * alignment/underflow, extent validation, vector resolution) precedes the first
+ * frame write, and the frame writes themselves are non-fallible by the hook
+ * contract, so any failure returns with nothing written or committed and a
+ * started frame always completes and commits.
  */
 static inline SegarecompM68kExceptionStatus segarecomp_m68k_exception_enter(
     const SegarecompM68kMachineHooks *hooks, const SegarecompM68kCpuBinding *cpu, uint32_t vector,
@@ -116,10 +132,8 @@ static inline SegarecompM68kExceptionStatus segarecomp_m68k_exception_enter(
   if (hooks->resolve_vector(hooks->context, vector, &handler_entry) != SEGARECOMP_M68K_VECTOR_HANDLER)
     return SEGARECOMP_M68K_EXCEPTION_VECTOR_UNAVAILABLE;
   /* Frame (§2): saved SR word at frame_base, saved PC long at frame_base + 2. */
-  if (!hooks->stack_write(hooks->context, frame_base, 2U, (uint32_t)saved_sr))
-    return SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED;
-  if (!hooks->stack_write(hooks->context, frame_base + 2U, 4U, stacked_pc))
-    return SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED;
+  hooks->frame_write(hooks->context, frame_base, 2U, (uint32_t)saved_sr);
+  hooks->frame_write(hooks->context, frame_base + 2U, 4U, stacked_pc);
   /* Commit. */
   if (!was_supervisor) *cpu->inactive_sp = *cpu->active_sp; /* the USP moves to the inactive slot */
   *cpu->active_sp = frame_base;
