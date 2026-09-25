@@ -52,7 +52,7 @@ def main() -> int:
         source = tmp / "generated.c"
         source.write_text(seeded)
         viewer_exe = tmp / "viewer"
-        st, _, _ = _bridge._compile_viewer_executable(flags, sdl3, root, source, viewer_exe, b"")
+        st, _, _ = _bridge._compile_viewer_executable(flags, sdl3, root, [source], viewer_exe, b"")
         require(st == 0, f"viewer build must succeed (status {st})")
         headless_exe = tmp / "headless"
         hb = subprocess.run(flags + ["-I", str(root / "platforms/genesis/runtime"), "-o", str(headless_exe), str(source),
