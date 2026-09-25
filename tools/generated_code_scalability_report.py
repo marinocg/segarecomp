@@ -36,23 +36,30 @@ SCHEMA = 1
 # Region: which top-level construct owns the line (first matching col-0 signature opens a region).
 _REGION_STARTS = (
     ("provenance_fn", re.compile(rb"^void genesis_attach_route_provenance\(")),
-    ("tier1_stop_fn", re.compile(rb"^static GenesisControlTransfer genesis_tier1_indirect_stop_[0-9A-Fa-f]+\([^;]*\{\s*$")),
-    ("frontier_stop_fn", re.compile(rb"^static GenesisControlTransfer genesis_frontier_stop_[0-9A-Fa-f]+\([^;]*\{\s*$")),
+    # SEG-022-T010: SEG-022-T003/T008 emit non-static functions across translation units and group AOT
+    # entries in `genesis_aot_owner_*` functions; the optional `static ` keeps the old shapes matching.
+    ("route_record_table", re.compile(rb"^static const GenesisRouteRecord genesis_route_records\[\]")),
+    ("route_mapping_table", re.compile(rb"^static const GenesisRouteMapping genesis_route_mappings\[\]")),
+    ("tier1_stop_fn", re.compile(rb"^(?:static )?GenesisControlTransfer genesis_tier1_indirect_stop_[0-9A-Fa-f]+\([^;]*\{\s*$")),
+    ("frontier_stop_fn", re.compile(rb"^(?:static )?GenesisControlTransfer genesis_frontier_stop_[0-9A-Fa-f]+\([^;]*\{\s*$")),
     ("static_stop_fn", re.compile(rb"^GenesisControlTransfer genesis_static_stop\(")),
-    ("ordinary_block", re.compile(rb"^static GenesisControlTransfer genesis_block_[0-9A-Fa-f]+\([^;]*\{\s*$")),
-    ("aot_function", re.compile(rb"^static GenesisControlTransfer genesis_aot_[0-9A-Fa-f]+\([^;]*\{\s*$")),
+    ("ordinary_block", re.compile(rb"^(?:static )?GenesisControlTransfer genesis_block_[0-9A-Fa-f]+\([^;]*\{\s*$")),
+    ("aot_function", re.compile(rb"^(?:static )?GenesisControlTransfer genesis_aot_(?:owner_)?[0-9A-Fa-f]+\([^;]*\{\s*$")),
     ("entry_table", re.compile(rb"^static const uint32_t genesis_compiled_entry_addresses\[\]")),
-    ("dispatch", re.compile(rb"^static GenesisCompiledEntry genesis_compiled_entry_lookup\([^;]*\{")),
+    ("dispatch", re.compile(rb"^(?:static )?GenesisCompiledEntry genesis_compiled_entry_lookup\([^;]*\{")),
     ("owned_literals", re.compile(rb"^static const uint8_t genesis_owned_region_data_")),
     ("main_glue", re.compile(rb"^int main\(")),
 )
 _FORWARD_DECL = re.compile(rb"^static [A-Za-z_ *]+\([^{]*\);\s*$")
 
-_MAPPING = re.compile(rb"^\s*frontier\.stop\.provenance\.mapping_")
+_MAPPING = re.compile(rb"^\s*(?:frontier\.stop\.provenance\.mapping_|genesis_set_mapping_claim\()")
+_ENTRY_DISPATCH = re.compile(rb"^\s*(?:switch \(runtime->pc\) \{|case UINT32_C\(0x[0-9A-Fa-f]+\): goto genesis_(?:aot_entry|instruction)_|"
+                             rb"default: return genesis_internal_dispatch_inconsistency_stop)")
+_ENTRY_LABEL = re.compile(rb"^genesis_(?:aot_entry|instruction)_[0-9A-Fa-f]+:")
 _PROVENANCE = re.compile(
-    rb"^\s*(?:GenesisInstructionProvenance source\b|source\.|frontier\.stop\.provenance\.|"
+    rb"^\s*(?:GenesisInstructionProvenance source\b|source\.|genesis_set_fetch_access\(|frontier\.stop\.provenance\.|"
     rb"frontier\.stop\.(?:stop_class|diagnostic_category)|stop\.provenance)")
-_FRONTIER = re.compile(rb"^\s*(?:GenesisControlTransfer frontier\b|frontier\.|return frontier)")
+_FRONTIER = re.compile(rb"^\s*(?:GenesisControlTransfer frontier\b|frontier\.|return frontier|return genesis_runtime_retire_m68k_instruction_before_stop\()")
 _MEMBERSHIP = re.compile(rb"^\s*(?:if \(runtime->pc == UINT32_C\(|\|\| runtime->pc == )")
 _RETIRE = re.compile(rb"^\s*(?:\{ const uint32_t m68k_retirement_pc\b|if \(retired\.|return retired;|"
                      rb"runtime->pc = pc;|uint32_t pc = runtime->pc;|#define pc |#undef pc)")
@@ -86,10 +93,18 @@ def classify_line(region: str, line: bytes) -> str:
         return "compiled_entry_table" if _ENTRY_ROW.match(line) else "table_scaffold"
     if region == "owned_literals":
         return "owned_rom_literal"
-    if region in ("dispatch", "main_glue", "prelude", "static_stop_fn"):
+    if region in ("dispatch", "main_glue", "prelude", "static_stop_fn", "header"):
         return "glue"
+    if region == "route_record_table":
+        return "provenance"
+    if region == "route_mapping_table":
+        return "mapping_metadata"
     if region == "provenance_fn":
         return "mapping_metadata" if b"mapping" in line else "provenance"
+    if _ENTRY_DISPATCH.match(line):
+        return "entry_dispatch"
+    if _ENTRY_LABEL.match(line):
+        return "boilerplate"
     if _MAPPING.match(line):
         return "mapping_metadata"
     if _PROVENANCE.match(line):
@@ -114,10 +129,13 @@ def set_fingerprint(addresses) -> dict:
     return {"count": len(ordered), "sha256": digest}
 
 
-def attribute(path: pathlib.Path) -> dict:
+def attribute(paths) -> dict:
+    """Attribute every byte of one file or an ordered list of files (translation units + header)."""
+    if isinstance(paths, (str, os.PathLike)):
+        paths = [paths]
     cells: dict[str, list[int]] = {}
     counts = {"aot_function": 0, "ordinary_block": 0, "frontier_stop_fn": 0, "tier1_stop_fn": 0,
-              "compiled_entry_rows": 0, "forward_declarations": 0}
+              "compiled_entry_rows": 0, "forward_declarations": 0, "aot_entry_label": 0}
     total_bytes = total_lines = 0
     region = "prelude"
     fn_sizes: dict[str, list[int]] = {"aot_function": [], "ordinary_block": []}
@@ -128,7 +146,10 @@ def attribute(path: pathlib.Path) -> dict:
     table_addresses: list[int] = []
     table_ids: list[int] = []
     table_owner_kinds: list[str] = []
-    with path.open("rb") as handle:
+    for path in paths:
+        region = "header" if pathlib.Path(path).suffix == ".h" else "prelude"
+        in_array = False
+        handle = pathlib.Path(path).open("rb")
         for line in handle:
             total_bytes += len(line)
             total_lines += 1
@@ -175,22 +196,27 @@ def attribute(path: pathlib.Path) -> dict:
                     array_max = max(array_max, cur_elements)
             if region == "entry_table" and _ENTRY_ADDR_ROW.match(line):
                 counts["compiled_entry_rows"] += 1
+            if region == "aot_function" and _ENTRY_LABEL.match(line):
+                counts["aot_entry_label"] += 1
             cell = cells.setdefault(f"{region}.{cls}", [0, 0])
             cell[0] += len(line)
             cell[1] += 1
+        handle.close()
     entry_addresses = split_entry_addresses(table_addresses, table_ids, table_owner_kinds)
     categories = {
         "ordinary_block_bodies": ("ordinary_block.body",),
         "ordinary_block_boilerplate": ("ordinary_block.boilerplate",),
         "immutable_rom_aot_bodies": ("aot_function.body",),
         "aot_boilerplate": ("aot_function.boilerplate",),
+        # SEG-022-T010: per-owner `switch (runtime->pc)` entry dispatch introduced by grouped AOT owners.
+        "owner_entry_dispatch": ("aot_function.entry_dispatch", "ordinary_block.entry_dispatch"),
         "dispatch_structures": ("dispatch.glue", "entry_table.table_scaffold", "main_glue.glue"),
         "compiled_entry_tables": ("entry_table.compiled_entry_table",),
         "target_membership_structures": ("aot_function.target_membership", "ordinary_block.target_membership",
                                          "tier1_stop_fn.target_membership", "frontier_stop_fn.target_membership"),
-        "provenance": ("provenance_fn.provenance", "aot_function.provenance", "ordinary_block.provenance",
+        "provenance": ("provenance_fn.provenance", "route_record_table.provenance", "aot_function.provenance", "ordinary_block.provenance",
                        "frontier_stop_fn.provenance", "tier1_stop_fn.provenance"),
-        "mapping_metadata": ("provenance_fn.mapping_metadata", "aot_function.mapping_metadata",
+        "mapping_metadata": ("provenance_fn.mapping_metadata", "route_mapping_table.mapping_metadata", "aot_function.mapping_metadata",
                              "ordinary_block.mapping_metadata", "frontier_stop_fn.mapping_metadata",
                              "tier1_stop_fn.mapping_metadata"),
         "frontier_code": ("aot_function.frontier_code", "ordinary_block.frontier_code",
@@ -198,7 +224,7 @@ def attribute(path: pathlib.Path) -> dict:
                           "frontier_stop_fn.boilerplate", "tier1_stop_fn.body", "tier1_stop_fn.frontier_code",
                           "tier1_stop_fn.boilerplate"),
         "owned_resolved_rom_literals": ("owned_literals.owned_rom_literal",),
-        "runtime_prelude_glue": ("prelude.glue", "static_stop_fn.glue"),
+        "runtime_prelude_glue": ("prelude.glue", "static_stop_fn.glue", "header.glue"),
     }
     assigned: set[str] = set()
     category_bytes: dict[str, int] = {}
@@ -323,8 +349,10 @@ def measure(args) -> dict:
     if sharded:
         units = [shard_dir / line for line in manifest.read_text().splitlines() if line]
         sizes = [u.stat().st_size for u in units]
-        report["source"] = {"translation_units": {"count": len(units), "total_bytes": sum(sizes),
-                                                  "largest_bytes": max(sizes), "header_bytes": (shard_dir / "bridge_generated.h").stat().st_size}}
+        header = shard_dir / "bridge_generated.h"
+        report["source"] = attribute(units + [header])
+        report["source"]["translation_units"] = {"count": len(units), "total_bytes": sum(sizes),
+                                                 "largest_bytes": max(sizes), "header_bytes": header.stat().st_size}
     else:
         report["source"] = attribute(src)
     addresses = [int(x, 16) for x in admitted_sink.read_text().split()]
