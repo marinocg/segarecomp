@@ -46,7 +46,6 @@ static std::string build(const fs::path &dir, bool reverse_glue_free = false) {
   CHECK(sharder.translation_unit_count() == 1U + 4U + 1U);  // main + 4 fn shards + meta
   CHECK(sharder.max_translation_unit_count() == 1U + 4U + 1U);
   std::string all;
-  for (const auto &entry : fs::directory_iterator(dir)) (void)entry;
   std::ifstream manifest(dir / "gen.units");
   for (std::string line; std::getline(manifest, line);) all += line + "\n" + slurp(dir / line);
   return all + "HEADER\n" + slurp(dir / "gen.h");
