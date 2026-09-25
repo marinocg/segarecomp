@@ -127,6 +127,10 @@ struct M68kMemoryEmissionContext {
   // operation.
   // SEG-022-T005: non-owning view (see `runtime_return_targets`).
   std::span<const std::uint32_t> indirect_candidate_targets;
+  // SEG-022-T006: when non-empty, the C symbol of the caller-owned final compiled-address lookup
+  // (`Entry lookup(uint32_t) -> NULL when absent`). A runtime-computed JMP/JSR target is then checked
+  // against it instead of a site-local array. Exclusive with a per-site proven `indirect_candidate_targets`.
+  std::string_view compiled_entry_lookup_symbol;
   // SEG-007-T174: true only for the ONE caller (frontend.cpp's shared
   // subtract/add/logical C4 case) that wraps its `emit_m68k_operation_c`
   // call with a `#define pc runtime->pc` / `#undef pc` text bridge. That

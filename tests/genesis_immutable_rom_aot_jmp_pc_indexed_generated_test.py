@@ -92,12 +92,14 @@ def main():
     result = subprocess.run([emitter, "--emit-jmp-pc-indexed-word-aot"], text=True, capture_output=True)
     assert result.returncode == 0, result.stderr
     assert "genesis_aot_00000F08" in result.stdout
-    assert "m68k_indirect_target_member(" in result.stdout
+    assert "genesis_compiled_entry_lookup(m68k_indirect_ea) == NULL" in result.stdout
     body = result.stdout.split("genesis_aot_00000F08(GenesisRuntime *runtime) {", 1)[1].split("\n}\n", 1)[0]
     # No runtime opcode fetch/decode: the body only ever computes one 32-bit
     # integer and compares it against the compiled-in candidate array.
     assert "genesis_route_access" not in body
-    assert body.count("m68k_indirect_target_member(") == 1
+    # SEG-022-T006: membership queries the one final compiled-entry table; no site-local set copy.
+    assert body.count("genesis_compiled_entry_lookup(m68k_indirect_ea) == NULL") == 1
+    assert "m68k_indirect_target_member(" not in body and "m68k_indirect_targets_" not in body
     with tempfile.TemporaryDirectory() as temporary:
         path = pathlib.Path(temporary)
         (path / "generated.c").write_text(result.stdout)

@@ -595,7 +595,8 @@ validated_immutable_rom_aot_entries(const FrontendAnalysis &analysis);
 std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotEntry &entry,
                                          const std::vector<std::uint32_t> &runtime_return_targets,
                                          const std::vector<std::uint32_t> &unrepresented_exact_pcs,
-                                         const std::vector<std::uint32_t> &indirect_candidate_targets = {});
+                                         const std::vector<std::uint32_t> &indirect_candidate_targets = {},
+                                         bool use_shared_compiled_entry_lookup = false);
 std::optional<std::vector<Address>> immutable_rom_aot_exact_pc_obligations(
     const FrontendAnalysis::ImmutableRomAotEntry &entry);
 std::optional<std::map<Address, std::vector<Address>>> immutable_rom_aot_unrepresented_exact_pcs(
@@ -1900,7 +1901,8 @@ std::optional<std::map<Address, std::vector<Address>>> immutable_rom_aot_unrepre
 std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotEntry &entry,
                                           const std::vector<std::uint32_t> &runtime_return_targets,
                                           const std::vector<std::uint32_t> &unrepresented_exact_pcs,
-                                          const std::vector<std::uint32_t> &indirect_candidate_targets) {
+                                          const std::vector<std::uint32_t> &indirect_candidate_targets,
+                                          bool use_shared_compiled_entry_lookup) {
   const auto address = entry.decoded.provenance.source.address.value;
   const auto cycle_expression = m68k_retirement_cycle_expression(entry.operation);
   if (!cycle_expression)
@@ -1949,6 +1951,9 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   // every other admitted operation kind, which never reaches that branch at
   // all.
   memory.indirect_candidate_targets = indirect_candidate_targets;
+  // SEG-022-T006: the sharded/C4 caller supplies no site-local copy; membership queries the one final
+  // compiled-entry table.
+  if (use_shared_compiled_entry_lookup) memory.compiled_entry_lookup_symbol = "genesis_compiled_entry_lookup";
   // SEG-021-T005: an isolated AOT candidate has no whole-program absolute-
   // operand fact; absolute and d16(PC) source reads take the runtime-routed
   // read (never a folded constant).
@@ -5616,7 +5621,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     if (!ordinary_compiled_owners.contains(address)) {
       ShardUnitScope unit(out, "aot", address, genesis_unit_declaration("genesis_aot_", address));
       out << emit_immutable_rom_aot_body(*entry, immutable_rom_aot_runtime_return_targets,
-                                         aot_unrepresented_exact_pcs[address], emitted_code_address_set);
+                                         aot_unrepresented_exact_pcs[address], {}, true);
     }
   // SEG-022-T003: the sorted compiled-entry table and its binary-search lookup form the one `entries` unit.
   if (sharded) shard_begin_unit(out, "entries", 0U, "GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address)");
