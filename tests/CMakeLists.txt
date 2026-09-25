@@ -819,6 +819,10 @@ add_executable(codegen_c11_translation_units_tests codegen_c11_translation_units
 target_link_libraries(codegen_c11_translation_units_tests PRIVATE segarecomp::codegen_c11)
 segarecomp_enable_warnings(codegen_c11_translation_units_tests)
 add_test(NAME codegen_c11_translation_units_tests COMMAND codegen_c11_translation_units_tests)
+add_executable(codegen_c11_shard_selection_tests codegen_c11_shard_selection_test.cpp)
+target_link_libraries(codegen_c11_shard_selection_tests PRIVATE segarecomp::codegen_c11_genesis)
+segarecomp_enable_warnings(codegen_c11_shard_selection_tests)
+add_test(NAME codegen_c11_shard_selection_tests COMMAND codegen_c11_shard_selection_tests)
 # SEG-018-T001: tier labels. `full` = every normal hermetic test (parallel-safe),
 # `fast` = representative hermetic subset of `full`, `extended` = external or
 # environment-heavy checks kept out of the ordinary gate. Selection is explicit
@@ -831,7 +835,7 @@ set(SEGARECOMP_EXTENDED_TESTS ghidra_mcp_smoke_test
 set(SEGARECOMP_FAST_TESTS segarecomp_tests moveq_tests direct_flow_tests m68k_timing_tests
     genesis_runtime_run_tests genesis_vdp_render_frame_tests genesis_frame_export_tests
     m68k_frontend_rejection_tests genesis_general_startup_cli_test architecture_dependency_test
-    codegen_c11_emitter_ownership_test codegen_c11_translation_units_tests restricted_files_test genesis_viewer_tests
+    codegen_c11_emitter_ownership_test codegen_c11_translation_units_tests codegen_c11_shard_selection_tests restricted_files_test genesis_viewer_tests
     cpu_m68k_static_discovery_tests genesis_startup_runtime_c2_test recompiler_fake_cpu_tests recompiler_no_genesis_policy_dependency_test
     genesis_bridge_defaults_test m68k_exception_contract_doc_test)
 # Evidence (SEG-018-T001): its genuine 1 s adapter/probe timeout cases race process start-up

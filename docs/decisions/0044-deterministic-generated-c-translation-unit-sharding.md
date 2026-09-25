@@ -40,10 +40,11 @@ source-location limit. It also cannot be compiled in parallel.
    helpers become `static inline` in the header. There are no cross-TU initializers, hence no
    static-initialization-order dependency. Each TU begins `#define _POSIX_C_SOURCE 200809L` then
    `#include "<stem>.h"`.
-5. **When it applies.** `segarecomp emit-general-startup-bridge-c --generated-c-shard-dir <dir>`. Given
-   together with `--generated-c-output`, the emitter shards only programs with at least 1024 compiled
-   units (ordinary blocks + AOT entries) and otherwise writes the single file: a pure function of the
-   accepted program size. The Python bridge passes both, compiles every TU (serially; parallel
+5. **When it applies.** `segarecomp emit-general-startup-bridge-c --generated-c-shard-dir <dir>`. Alone,
+   it forces sharding; `--generated-c-output` alone forces the historical single file. Given both (as the
+   Python bridge does), the emitter shards only programs with at least 1024 compiled units (ordinary
+   static blocks + AOT entries, counted identically for a partial program's accepted prefix and for a
+   completed analysis) and otherwise writes the single file: a pure function of the accepted program size. The Python bridge passes both, compiles every TU (serially; parallel
    scheduling is SEG-022-T004) and links, and the single-file path is unchanged.
 
 ## Consequences

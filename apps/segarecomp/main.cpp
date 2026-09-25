@@ -34,7 +34,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot] [--provenance-diagnostics] [--generated-c-output <path> | --generated-c-shard-dir <dir>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
                "  segarecomp probe-genesis-startup-mapping <address-hex8> <width-decimal> <image-length-hex16>\n";
@@ -94,7 +94,8 @@ int main(int argc, char **argv) {
       std::optional<std::string_view> generated_c_output;
       // SEG-022-T003: emit the generated C as a bounded deterministic set of translation units in this
       // directory (shared header + main TU + block/AOT/stop/meta/entries TUs + `bridge_generated.units`
-      // manifest). Mutually exclusive with --generated-c-output.
+      // manifest). Alone it forces sharding; --generated-c-output alone forces the single file; given both,
+      // the emitter shards iff the accepted program has >= generated_c_shard_threshold compiled units.
       std::optional<std::string_view> generated_c_shard_dir;
       for (int index = 4; index < argc;) {
         const std::string_view option = argv[index];
@@ -296,11 +297,12 @@ int main(int argc, char **argv) {
       // immutable-ROM AOT entries) and otherwise writes the single --generated-c-output file: a pure,
       // deterministic function of the accepted program size, so small programs keep the historical
       // one-file artifact and one giant TU is never produced for a large one.
-      constexpr std::size_t shard_threshold = 1024U;
       std::size_t program_units = 0U;
       if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result))
-        program_units = partial->accepted_prefix.static_blocks.size() + partial->accepted_prefix.immutable_rom_aot_entries.size();
-      if (generated_c_shard_dir && (!generated_c_output || program_units >= shard_threshold)) {
+        program_units = segarecomp::generated_program_unit_count(*partial);
+      else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result))
+        program_units = segarecomp::generated_program_unit_count(*accepted);
+      if (segarecomp::select_sharded_generated_c(generated_c_output.has_value(), generated_c_shard_dir.has_value(), program_units)) {
         // Layout (bounded, documented in ADR-0044): main + meta + entries + stop + 8 block + 32 AOT shards.
         segarecomp::TranslationUnitSharder sharder{
             std::filesystem::path{std::string(*generated_c_shard_dir)}, "bridge_generated",
