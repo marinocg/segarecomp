@@ -3,7 +3,6 @@
 clean abort with the failing unit's diagnostics. Uses a project-authored fake compiler; no ROM."""
 import os
 import pathlib
-import stat
 import sys
 import tempfile
 
@@ -17,24 +16,32 @@ def require(cond, msg):
         raise RuntimeError(msg)
 
 
-FAKE = """#!/bin/sh
-# args: ... -c -o OUT SRC
-while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift;; *) src="$1";; esac; shift; done
-d=$(dirname "$out")
-mkdir -p "$d/run"; echo $$ > "$d/run/$$"
-n=$(ls "$d/run" | wc -l); echo $n >> "$d/peak"
-sleep 0.2
-case "$src" in *bad*) echo "error in $src" >&2; rm -f "$d/run/$$"; exit 1;; esac
-cat "$src" > "$out"; rm -f "$d/run/$$"
+FAKE = """import os, pathlib, sys, time
+args = sys.argv[1:]
+out = pathlib.Path(args[args.index("-o") + 1])
+src = pathlib.Path(args[-1])
+d = out.parent
+run = d / "run"
+run.mkdir(exist_ok=True)
+marker = run / str(os.getpid())
+marker.write_text("x")
+with open(d / "peak", "a") as f:
+    f.write(str(len(list(run.iterdir()))) + "\\n")
+time.sleep(0.2)
+if "bad" in src.name:
+    sys.stderr.write("error in " + str(src) + "\\n")
+    marker.unlink()
+    sys.exit(1)
+out.write_text(src.read_text())
+marker.unlink()
 """
 
 
 def main():
     with tempfile.TemporaryDirectory() as t:
         t = pathlib.Path(t)
-        cc = t / "fakecc"
+        cc = t / "fakecc.py"
         cc.write_text(FAKE)
-        cc.chmod(cc.stat().st_mode | stat.S_IEXEC)
         srcs = []
         for i in range(8):
             p = t / f"u{i}.c"
@@ -44,7 +51,7 @@ def main():
             bridge._compile_jobs_override = jobs
             out = t / f"o{jobs}"
             out.mkdir()
-            objects, failure = bridge.compile_objects([([str(cc)], s) for s in srcs], t, out)
+            objects, failure = bridge.compile_objects([([sys.executable, str(cc)], s) for s in srcs], t, out)
             require(failure is None, failure)
             require([pathlib.Path(o).read_text() for o in objects] == [f"unit{i}\n" for i in range(8)], "order")
             peak = max(int(x) for x in (out / "peak").read_text().split())
@@ -56,7 +63,7 @@ def main():
         out = t / "of"
         out.mkdir()
         bridge._compile_jobs_override = 3
-        objects, failure = bridge.compile_objects([([str(cc)], s) for s in srcs[:2] + [bad] + srcs[2:]], t, out)
+        objects, failure = bridge.compile_objects([([sys.executable, str(cc)], s) for s in srcs[:2] + [bad] + srcs[2:]], t, out)
         require(objects == [] and "error in" in failure and "bad.c" in failure, "failure diagnostics")
         os.environ["SEGARECOMP_COMPILE_JOBS"] = "2"
         bridge._compile_jobs_override = None
