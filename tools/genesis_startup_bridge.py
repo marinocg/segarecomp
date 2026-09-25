@@ -760,6 +760,55 @@ def save_checkpoint(path: pathlib.Path, digest: str, hints_path: str | None, see
     path.write_text(json.dumps(state, separators=(",", ":")) + "\n", encoding="utf-8")
 
 
+COMPILE_JOBS_ENV = "SEGARECOMP_COMPILE_JOBS"
+_compile_jobs_override: int | None = None
+
+
+def default_compile_jobs() -> int:
+    """SEG-022-T004: bounded compile concurrency. Default min(4, CPU count): safe on a modest
+    machine (each -O2 TU compile is memory heavy). Override: --compile-jobs or SEGARECOMP_COMPILE_JOBS."""
+    if _compile_jobs_override is not None:
+        return max(1, min(_compile_jobs_override, 64))
+    raw = os.environ.get(COMPILE_JOBS_ENV)
+    if raw:
+        try:
+            return max(1, min(int(raw), 64))
+        except ValueError:
+            pass
+    return max(1, min(4, os.cpu_count() or 1))
+
+
+def compile_objects(jobs: "list[tuple[list[str], pathlib.Path]]", cwd: pathlib.Path,
+                    tmp: pathlib.Path) -> "tuple[list[str], str | None]":
+    """Compile independent TUs concurrently (bounded). jobs = (argv before `-c`, source).
+    Object paths and link order follow job order, never completion order. On the first failure
+    pending jobs are cancelled and the diagnostics of the lowest-index failed job are returned."""
+    import concurrent.futures as cf
+    objects = [str(tmp / f"{i}.o") for i in range(len(jobs))]
+
+    def run(i: int):
+        argv, src = jobs[i]
+        return subprocess.run(argv + ["-c", "-o", objects[i], str(src)], text=True, capture_output=True, cwd=cwd)
+
+    failures: dict[int, str] = {}
+    with cf.ThreadPoolExecutor(max_workers=min(default_compile_jobs(), max(1, len(jobs)))) as pool:
+        futures = {i: pool.submit(run, i) for i in range(len(jobs))}
+        pending = set(futures.values())
+        index_of = {f: i for i, f in futures.items()}
+        while pending and not failures:
+            done, pending = cf.wait(pending, return_when=cf.FIRST_COMPLETED)
+            for f in done:
+                res = f.result()
+                if res.returncode != 0:
+                    failures[index_of[f]] = res.stderr
+        if failures:
+            for f in pending:
+                f.cancel()
+    if failures:
+        return [], failures[min(failures)]
+    return objects, None
+
+
 def resolve_profile(args) -> str:
     if args.build_profile != "auto":
         return args.build_profile
@@ -835,23 +884,18 @@ def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, roo
                 "-o", str(executable), str(source), str(root / "platforms" / "genesis" / "runtime" / "runtime.c")],
                 text=True, capture_output=True, cwd=root)
         else:
-            # Serial per-TU compile then link (SEG-022-T004 parallelizes). Objects live in a temp dir,
-            # never in out_dir, which is the compare-runs artifact surface.
+            # Bounded parallel per-TU compile (SEG-022-T004) then link. Objects live in a temp dir,
+            # never in out_dir, which is the compare-runs artifact surface. Link order = job order.
             import tempfile
             with tempfile.TemporaryDirectory() as tmp:
-                objects = []
-                compile_result = None
-                for index, unit in enumerate(sources + [root / "platforms" / "genesis" / "runtime" / "runtime.c"]):
-                    obj = pathlib.Path(tmp) / f"{index}.o"
-                    compile_result = subprocess.run(
-                        compile_flags + runtime_flags + ["-I", str(shard_dir), "-c", "-o", str(obj), str(unit)],
-                        text=True, capture_output=True, cwd=root)
-                    if compile_result.returncode != 0:
-                        break
-                    objects.append(str(obj))
-                if compile_result is not None and compile_result.returncode == 0:
-                    compile_result = subprocess.run([compile_flags[0], "-o", str(executable)] + objects,
-                                                    text=True, capture_output=True, cwd=root)
+                base = compile_flags + runtime_flags + ["-I", str(shard_dir)]
+                units = sources + [root / "platforms" / "genesis" / "runtime" / "runtime.c"]
+                objects, failure = compile_objects([(base, u) for u in units], root, pathlib.Path(tmp))
+                if failure is not None:
+                    sys.stderr.write(failure)
+                    return 2, None, None
+                compile_result = subprocess.run([compile_flags[0], "-o", str(executable)] + objects,
+                                                text=True, capture_output=True, cwd=root)
     except OSError as error:
         sys.stderr.write(f"cannot run C compiler: {error}\n")
         return 2, None, None
@@ -892,18 +936,14 @@ def _compile_viewer_executable(compile_flags: list[str], sdl3: tuple[list[str], 
     others = [runtime_dir / "runtime.c", runtime_dir / "vdp_render.c", viewer_dir / "viewer.c",
               viewer_dir / "viewer_sdl3.c", viewer_dir / "viewer_main_hook.c"]
     with tempfile.TemporaryDirectory() as tmp:
-        objects = []
         # sources[0] is the main TU (the only one whose main() calls genesis_runtime_run).
         jobs = [(sources[0], ["-Dgenesis_runtime_run=genesis_viewer_hook_run"])] + [(u, ["-I", str(sources[0].parent)]) for u in sources[1:]] \
             + [(o, []) for o in others]
-        for index, (src, extra) in enumerate(jobs):
-            obj = pathlib.Path(tmp) / f"{index}.o"
-            result = subprocess.run(compile_flags + extra + includes + ["-c", "-o", str(obj), str(src)],
-                                    text=True, capture_output=True, cwd=root)
-            if result.returncode != 0:
-                sys.stderr.write(result.stderr)
-                return 2, None, None
-            objects.append(str(obj))
+        objects, failure = compile_objects([(compile_flags + extra + includes, src) for src, extra in jobs],
+                                           root, pathlib.Path(tmp))
+        if failure is not None:
+            sys.stderr.write(failure)
+            return 2, None, None
         link = subprocess.run([compile_flags[0], "-o", str(executable)] + objects + sdl3[1],
                               text=True, capture_output=True, cwd=root)
         if link.returncode != 0:
@@ -1321,6 +1361,8 @@ def main() -> int:
     parser.add_argument("--rom", required=True)
     parser.add_argument("--entry", type=hex_address)
     parser.add_argument("--mapping-base", type=hex_mapping_base)
+    parser.add_argument("--compile-jobs", type=int, default=None,
+                        help="max concurrent generated-TU compiles (default min(4, CPUs); env SEGARECOMP_COMPILE_JOBS)")
     parser.add_argument("--out-dir", default="build/genesis-startup-bridge")
     parser.add_argument("--mode", required=True, choices=("synthetic", "commercial"))
     parser.add_argument("--expect-sha256")
@@ -1372,6 +1414,8 @@ def main() -> int:
     parser.add_argument("--viewer-slice", type=instruction_budget_value,
                         help="guest dispatches per host viewer slice (> 0)")
     args = parser.parse_args()
+    global _compile_jobs_override
+    _compile_jobs_override = args.compile_jobs
     if (args.viewer_unthrottled or args.viewer_slice is not None) and not args.viewer:
         sys.stderr.write("--viewer-unthrottled/--viewer-slice require --viewer\n")
         return 8

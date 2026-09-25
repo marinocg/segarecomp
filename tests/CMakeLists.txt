@@ -565,6 +565,9 @@ add_test(NAME genesis_general_startup_bridge_argv_zero_budget_test COMMAND ${Pyt
 add_test(NAME genesis_generated_c_translation_units_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_generated_c_translation_units_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-022-T004: bounded parallel generated-TU compilation (fake compiler, no ROM).
+add_test(NAME genesis_bridge_parallel_compile_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_bridge_parallel_compile_test.py ${PROJECT_SOURCE_DIR})
 add_test(NAME move_an_usp_bridge_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/move_an_usp_bridge_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
