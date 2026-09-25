@@ -101,12 +101,25 @@ if mode == "nofile":
 open(out, "w").write("int streamed_route;\n")
 """
 
+import subprocess
+
+
+def portable_timed(command, stdout=None, cwd=None):
+    """Portable stand-in for the /usr/bin/time wrapper: runs the fake emitter via this interpreter;
+    any other command (the compiler) is reported as failed without being executed."""
+    if not command[0].endswith("fake.py"):
+        return {"returncode": 1, "wall_seconds": 0.0, "peak_rss_bytes": None, "stderr": ""}
+    done = subprocess.run([sys.executable] + command, stdout=stdout or subprocess.DEVNULL,
+                          stderr=subprocess.PIPE, text=True, cwd=cwd)
+    return {"returncode": done.returncode, "wall_seconds": 0.0, "peak_rss_bytes": None, "stderr": done.stderr}
+
+
+gcs.timed = portable_timed
 with tempfile.TemporaryDirectory() as d:
     d = pathlib.Path(d)
     def run(mode):
         fake = d / "fake.py"
         fake.write_text(FAKE.replace('"ok"', repr(mode)))
-        fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
         rom = d / "r.bin"; rom.write_bytes(b"x")
         (d / "out").mkdir(exist_ok=True)
         (d / "out" / "generated.c").write_text("stale")
