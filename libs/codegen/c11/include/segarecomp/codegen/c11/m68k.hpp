@@ -116,6 +116,15 @@ struct M68kMemoryEmissionContext {
   std::string_view runtime_object;
   std::string_view runtime_source;
   std::string_view runtime_provenance_helper;
+  // SEG-022-T011: when non-empty, the C expression (a `const GenesisInstructionProvenance *`-typed
+  // identifier owned by the caller) that the lowering uses wherever it would otherwise spell this
+  // operation's instruction provenance as an inline compound literal. Its pointee must hold exactly the
+  // value `M68kRuntimeCEmitter::instruction_source(operation)` spells, so the lowered statements are
+  // unchanged; only the spelling of the same constant moves out of the body.
+  std::string_view runtime_source_symbol;
+  // SEG-022-T011: when set, a failed routed access returns through the platform's single generated
+  // routed-failure helper, which performs exactly the inline stop/provenance statements it replaces.
+  bool factored_route_failure{};
   // SEG-022-T005: a non-owning view. The caller keeps the authoritative sorted vector alive across the
   // `emit_m68k_operation_c` call, so a per-operation context never copies a whole-program-sized set.
   std::span<const std::uint32_t> runtime_return_targets;

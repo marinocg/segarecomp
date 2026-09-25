@@ -941,7 +941,8 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
   std::string routed_source;
   if (memory != nullptr && memory->runtime_routing) {
     routed_memory = *memory;
-    routed_source = emit_runtime(*memory).instruction_source(operation);
+    routed_source = memory->runtime_source_symbol.empty() ? emit_runtime(*memory).instruction_source(operation)
+                                                          : std::string(memory->runtime_source_symbol);
     routed_memory.runtime_source = routed_source;
     if (routed_memory.runtime_provenance_helper.empty()) routed_memory.runtime_provenance_helper = emit_runtime(*memory).default_provenance_helper();
     memory = &routed_memory;

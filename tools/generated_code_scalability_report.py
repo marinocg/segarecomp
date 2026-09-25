@@ -44,6 +44,9 @@ _REGION_STARTS = (
     ("frontier_stop_fn", re.compile(rb"^(?:static )?GenesisControlTransfer genesis_frontier_stop_[0-9A-Fa-f]+\([^;]*\{\s*$")),
     ("static_stop_fn", re.compile(rb"^GenesisControlTransfer genesis_static_stop\(")),
     ("ordinary_block", re.compile(rb"^(?:static )?GenesisControlTransfer genesis_block_[0-9A-Fa-f]+\([^;]*\{\s*$")),
+    # SEG-022-T011: statically selected shared AOT body helpers; their bytes are attributed exactly like AOT
+    # function bytes (same categories) and they are counted separately.
+    ("aot_shared_helper", re.compile(rb"^(?:static )?GenesisControlTransfer genesis_aot_shared_[0-9]+\([^;]*\{\s*$")),
     ("aot_function", re.compile(rb"^(?:static )?GenesisControlTransfer genesis_aot_(?:owner_)?[0-9A-Fa-f]+\([^;]*\{\s*$")),
     ("entry_table", re.compile(rb"^static const uint32_t genesis_compiled_entry_addresses\[\]")),
     ("dispatch", re.compile(rb"^(?:static )?GenesisCompiledEntry genesis_compiled_entry_lookup\([^;]*\{")),
@@ -57,7 +60,8 @@ _ENTRY_DISPATCH = re.compile(rb"^\s*(?:switch \(runtime->pc\) \{|case UINT32_C\(
                              rb"default: return genesis_internal_dispatch_inconsistency_stop)")
 _ENTRY_LABEL = re.compile(rb"^genesis_(?:aot_entry|instruction)_[0-9A-Fa-f]+:")
 _PROVENANCE = re.compile(
-    rb"^\s*(?:GenesisInstructionProvenance source\b|source\.|genesis_set_fetch_access\(|frontier\.stop\.provenance\.|"
+    rb"^\s*(?:GenesisInstructionProvenance source\b|const GenesisInstructionProvenance \*const genesis_aot_source\b|source\.|"
+    rb"genesis_set_fetch_access\(|frontier\.stop\.provenance\.|"
     rb"frontier\.stop\.(?:stop_class|diagnostic_category)|stop\.provenance)")
 _FRONTIER = re.compile(rb"^\s*(?:GenesisControlTransfer frontier\b|frontier\.|return frontier|return genesis_runtime_retire_m68k_instruction_before_stop\()")
 _MEMBERSHIP = re.compile(rb"^\s*(?:if \(runtime->pc == UINT32_C\(|\|\| runtime->pc == )")
@@ -135,7 +139,7 @@ def attribute(paths) -> dict:
         paths = [paths]
     cells: dict[str, list[int]] = {}
     counts = {"aot_function": 0, "ordinary_block": 0, "frontier_stop_fn": 0, "tier1_stop_fn": 0,
-              "compiled_entry_rows": 0, "forward_declarations": 0, "aot_entry_label": 0}
+              "compiled_entry_rows": 0, "forward_declarations": 0, "aot_entry_label": 0, "aot_shared_helper": 0}
     total_bytes = total_lines = 0
     region = "prelude"
     fn_sizes: dict[str, list[int]] = {"aot_function": [], "ordinary_block": []}
@@ -156,10 +160,11 @@ def attribute(paths) -> dict:
             if line[:1] not in b" \t}\n{":
                 for name, pattern in _REGION_STARTS:
                     if pattern.match(line):
-                        region = name
-                        if name in fn_sizes:
-                            fn_sizes[name].append(0)
-                            fn_array_bytes[name].append(0)
+                        # A shared AOT body helper is attributed as an AOT function (counted separately below).
+                        region = "aot_function" if name == "aot_shared_helper" else name
+                        if region in fn_sizes:
+                            fn_sizes[region].append(0)
+                            fn_array_bytes[region].append(0)
                         if name in counts:
                             counts[name] += 1
                         break
