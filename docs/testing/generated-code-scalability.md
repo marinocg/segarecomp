@@ -40,3 +40,14 @@ measurement-only `emit-general-startup-bridge-c --immutable-aot-address-report <
 by the tool after hashing), and the final compiled-entry address set / its AOT- and block-owned parts
 (from the generated compact `genesis_compiled_entry_addresses[]` / `genesis_compiled_entry_owner_ids[]` / `genesis_compiled_owners[]`
 tables, the exact tables the generated dispatcher looks up). Later SEG-022 tasks must reproduce these digests.
+
+## Multi-translation-unit output (SEG-022-T010)
+
+Since SEG-022-T003/T008 the emitter writes a set of translation units (`bridge_generated.units`
+manifest) plus `bridge_generated.h`, with non-static functions and grouped `genesis_aot_owner_*`
+functions (per-owner `switch (runtime->pc)` entry dispatch and `genesis_aot_entry_*:` labels).
+`measure` now attributes every unit plus the header as one ordered stream (the header counts as
+`runtime_prelude_glue`; the route record/mapping tables count as `provenance` / `mapping_metadata`).
+`aot_function` counts grouped owners and `aot_entry_label` counts entries; the per-owner entry switch
+is the new `owner_entry_dispatch` category (in T001 terms it was part of AOT boilerplate). The
+partition stays exact (residual 0). `--jobs N` compiles independent TUs concurrently.

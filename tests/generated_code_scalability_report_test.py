@@ -166,3 +166,33 @@ with tempfile.TemporaryDirectory() as d:
     assert sharded["fingerprints"]["aot_owned_entry_address_set"] == gcs.set_fingerprint([6])
     assert sharded["compile"]["translation_units"]["count"] == 2
 print("ok-sharded")
+
+# SEG-022-T010: grouped AOT owners (non-static, per-owner entry switch/labels) across several files
+# plus the header must still partition exactly and classify the owner dispatch separately.
+OWNER_TU = b"""#include "bridge_generated.h"
+GenesisControlTransfer genesis_aot_owner_0000(GenesisRuntime *runtime) {
+  switch (runtime->pc) {
+  case UINT32_C(0x00000004): goto genesis_aot_entry_00000004;
+  default: return genesis_internal_dispatch_inconsistency_stop(runtime);
+  }
+genesis_aot_entry_00000004: {
+  uint32_t pc = runtime->pc;
+  pc += UINT32_C(4);
+  runtime->pc = pc;
+  return genesis_runtime_retire_m68k_instruction(runtime, UINT32_C(8), runtime->pc);
+}
+}
+"""
+OWNER_HEADER = b"GenesisControlTransfer genesis_aot_owner_0000(GenesisRuntime *runtime);\n"
+with tempfile.TemporaryDirectory() as tmp:
+    tu = pathlib.Path(tmp) / "a.c"
+    header = pathlib.Path(tmp) / "b.h"
+    tu.write_bytes(OWNER_TU)
+    header.write_bytes(OWNER_HEADER)
+    multi = gcs.attribute([tu, header])
+assert multi["total_bytes"] == len(OWNER_TU) + len(OWNER_HEADER)
+assert multi["category_sum_bytes"] == multi["total_bytes"], multi
+assert multi["category_bytes"]["unattributed_residual"] == 0, multi
+assert multi["category_bytes"]["owner_entry_dispatch"] > 0, multi
+assert multi["counts"]["aot_function"] == 1 and multi["counts"]["aot_entry_label"] == 1, multi
+assert multi["category_bytes"]["immutable_rom_aot_bodies"] > 0, multi
