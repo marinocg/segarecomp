@@ -116,7 +116,7 @@ struct M68kMemoryEmissionContext {
   std::string_view runtime_object;
   std::string_view runtime_source;
   std::string_view runtime_provenance_helper;
-  // SEG-022-T011: when non-empty, the C expression (a `const GenesisInstructionProvenance *`-typed
+  // SEG-022-T011: when non-empty, the C expression (a pointer-to-instruction-provenance
   // identifier owned by the caller) that the lowering uses wherever it would otherwise spell this
   // operation's instruction provenance as an inline compound literal. Its pointee must hold exactly the
   // value `M68kRuntimeCEmitter::instruction_source(operation)` spells, so the lowered statements are
