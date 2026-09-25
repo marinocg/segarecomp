@@ -135,20 +135,20 @@ def main() -> None:
     assert "GenesisCompiledEntry entry = genesis_compiled_entry_lookup(runtime->pc)" in generated.stdout
     assert "if (runtime->pc == UINT32_C(0x00000C06))" not in generated.stdout
     assert "GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET" in generated.stdout
+    # SEG-022-T007: route provenance is one immutable sorted record table.
     attachment = generated.stdout.split(
-        "void genesis_attach_route_provenance", 1
-    )[1].split("GenesisControlTransfer genesis_static_stop", 1)[0]
+        "static const GenesisRouteRecord genesis_route_records[] = {", 1
+    )[1].split("};", 1)[0]
     mismatch_body = generated.stdout.split(
         "genesis_aot_00000C62(GenesisRuntime *runtime) {", 1
     )[1].split("static const GenesisCompiledEntryRecord", 1)[0]
-    assert "source->source_address == UINT32_C(0x00000C62)" not in attachment
-    assert attachment.count("source->source_address ==") == 1
+    assert "UINT32_C(0x00000C62)" not in attachment
+    assert attachment.count("{ UINT32_C(0x") == 1
     assert mismatch_body.count(
         "frontier.stop.provenance.mapping_claim_count = UINT8_C(1)"
     ) == 1
-    assert mismatch_body.count(
-        "frontier.stop.provenance.bus_access_count = UINT8_C(1)"
-    ) == 1
+    assert mismatch_body.count("genesis_set_mapping_claim(") == 1
+    assert mismatch_body.count("genesis_set_fetch_access(") == 1
     assert "genesis_runtime_retire_m68k_instruction_before_stop" in mismatch_body
     # Fixture-local output-size ratchet: the prior broad AOT attachment table
     # duplicated provenance for every aligned identity and crossed this bound.

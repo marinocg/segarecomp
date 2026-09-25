@@ -74,6 +74,138 @@ bool less(const M68kProgramAddress &a, const M68kProgramAddress &b) { return a.s
 constexpr std::size_t genesis_frontier_max_raw_bytes = SEGARECOMP_GENESIS_MAX_RAW_INSTRUCTION_BYTES;
 constexpr std::size_t genesis_frontier_max_name_length = 64U;
 constexpr std::size_t genesis_frontier_max_mapping_claims = 4U;
+
+// SEG-022-T007: compact provenance/mapping metadata. Every stop-provenance
+// datum previously emitted as a long run of per-field assignments is now
+// installed by two small generated helpers (declared in the same generated
+// unit family as `genesis_attach_route_provenance`) or, for the per-instruction
+// route lookup, by one immutable mapping table + one sorted immutable record
+// table. Values are byte-identical to the former assignments.
+constexpr const char *compact_provenance_helper_declarations =
+    "void genesis_set_mapping_claim(GenesisProvenance *provenance, uint8_t index, const char *name, uint8_t name_length, uint32_t target_begin, uint32_t target_end, uint64_t image_begin, uint64_t image_end)";
+constexpr const char *compact_provenance_helper_declarations_2 =
+    "void genesis_set_fetch_access(GenesisProvenance *provenance, uint32_t address, const uint8_t *raw_bytes, uint8_t raw_byte_count)";
+
+std::string compact_provenance_helper_definitions() {
+  std::ostringstream out;
+  out << compact_provenance_helper_declarations << " {\n"
+      << "  uint8_t byte;\n"
+      << "  GenesisMappingClaim *claim = &provenance->mapping_claims[index];\n"
+      << "  claim->name_length = name_length;\n"
+      << "  for (byte = 0U; byte < name_length; ++byte) claim->name[byte] = name[byte];\n"
+      << "  claim->target_begin = target_begin;\n"
+      << "  claim->target_end = target_end;\n"
+      << "  claim->image_begin = image_begin;\n"
+      << "  claim->image_end = image_end;\n"
+      << "}\n"
+      << compact_provenance_helper_declarations_2 << " {\n"
+      << "  uint8_t byte;\n"
+      << "  provenance->bus_access_count = UINT8_C(1);\n"
+      << "  provenance->bus_accesses[0].ordinal = UINT64_C(0);\n"
+      << "  provenance->bus_accesses[0].kind = GENESIS_BUS_INSTRUCTION_READ;\n"
+      << "  provenance->bus_accesses[0].address = address;\n"
+      << "  provenance->bus_accesses[0].raw_byte_count = raw_byte_count;\n"
+      << "  provenance->bus_accesses[0].region = GENESIS_REGION_RAW_CARTRIDGE_ROM;\n"
+      << "  for (byte = 0U; byte < raw_byte_count; ++byte) provenance->bus_accesses[0].raw_bytes[byte] = raw_bytes[byte];\n"
+      << "}\n";
+  return out.str();
+}
+
+// C string literal with a 3-digit octal escape per byte: exact for any byte.
+std::string c_octal_string_literal(const std::string &bytes) {
+  std::ostringstream out;
+  out << '"';
+  for (const char raw_char : bytes) {
+    const auto c = static_cast<unsigned>(static_cast<unsigned char>(raw_char));
+    out << '\\' << static_cast<char>('0' + (c >> 6U)) << static_cast<char>('0' + ((c >> 3U) & 7U))
+        << static_cast<char>('0' + (c & 7U));
+  }
+  out << '"';
+  return out.str();
+}
+
+// One `genesis_set_mapping_claim` call statement (no trailing newline).
+std::string compact_mapping_claim_call(const std::string &indent, const std::string &provenance_expr,
+                                       std::size_t index, const MappingClaim &claim) {
+  std::ostringstream out;
+  out << indent << "genesis_set_mapping_claim(" << provenance_expr << ", UINT8_C(" << index << "), "
+      << c_octal_string_literal(claim.name) << ", UINT8_C(" << claim.name.size() << "), UINT32_C("
+      << hex(claim.target_begin.value, 8) << "), UINT32_C(" << hex(claim.target_end.value, 8)
+      << "), UINT64_C(" << claim.image_begin.value << "), UINT64_C(" << claim.image_end.value << "));\n";
+  return out.str();
+}
+
+std::string compact_fetch_access_call(const std::string &indent, const std::string &provenance_expr,
+                                      const std::string &address_expr, const std::vector<std::uint8_t> &raw) {
+  std::ostringstream out;
+  out << indent << "genesis_set_fetch_access(" << provenance_expr << ", " << address_expr
+      << ", (const uint8_t[]){";
+  for (std::size_t byte = 0; byte < raw.size(); ++byte) out << (byte == 0U ? "" : ", ") << "UINT8_C(" << hex(raw[byte], 2) << ")";
+  out << "}, UINT8_C(" << raw.size() << "));\n";
+  return out.str();
+}
+
+struct RouteProvenanceRecord {
+  std::uint32_t address;
+  const MappingClaim *mapping;
+  const std::vector<std::uint8_t> *raw;
+};
+
+// Emits the body of `genesis_attach_route_provenance` (function header already
+// written by the caller, closing brace written by the caller) as immutable
+// tables plus a bounded binary search. First record for an address wins,
+// matching the former first-match `if` chain. Emits the tables just before
+// the function via `tables_out`.
+void emit_compact_route_provenance(std::ostringstream &tables_out, std::ostringstream &body_out,
+                                   std::vector<RouteProvenanceRecord> records) {
+  std::stable_sort(records.begin(), records.end(),
+                   [](const RouteProvenanceRecord &l, const RouteProvenanceRecord &r) { return l.address < r.address; });
+  records.erase(std::unique(records.begin(), records.end(),
+                            [](const RouteProvenanceRecord &l, const RouteProvenanceRecord &r) { return l.address == r.address; }),
+                records.end());
+  if (records.empty()) { body_out << "  (void)stop;\n  (void)source;\n"; return; }
+  std::vector<const MappingClaim *> mappings;
+  std::vector<std::size_t> mapping_ids;
+  for (const auto &record : records) {
+    std::size_t id = mappings.size();
+    for (std::size_t i = 0; i < mappings.size(); ++i) {
+      const auto &m = *mappings[i]; const auto &c = *record.mapping;
+      if (m.name == c.name && m.target_begin.value == c.target_begin.value && m.target_end.value == c.target_end.value &&
+          m.image_begin.value == c.image_begin.value && m.image_end.value == c.image_end.value) { id = i; break; }
+    }
+    if (id == mappings.size()) mappings.push_back(record.mapping);
+    mapping_ids.push_back(id);
+  }
+  tables_out << "typedef struct GenesisRouteMapping { const char *name; uint8_t name_length; uint32_t target_begin; uint32_t target_end; uint64_t image_begin; uint64_t image_end; } GenesisRouteMapping;\n"
+             << "typedef struct GenesisRouteRecord { uint32_t address; uint32_t mapping; uint8_t raw_byte_count; uint8_t raw_bytes[GENESIS_MAX_RAW_BYTES]; } GenesisRouteRecord;\n"
+             << "static const GenesisRouteMapping genesis_route_mappings[] = {\n";
+  for (const auto *m : mappings)
+    tables_out << "  { " << c_octal_string_literal(m->name) << ", UINT8_C(" << m->name.size() << "), UINT32_C("
+               << hex(m->target_begin.value, 8) << "), UINT32_C(" << hex(m->target_end.value, 8) << "), UINT64_C("
+               << m->image_begin.value << "), UINT64_C(" << m->image_end.value << ") },\n";
+  tables_out << "};\nstatic const GenesisRouteRecord genesis_route_records[] = {\n";
+  for (std::size_t i = 0; i < records.size(); ++i) {
+    tables_out << "  { UINT32_C(" << hex(records[i].address, 8) << "), UINT32_C(" << mapping_ids[i] << "), UINT8_C("
+               << records[i].raw->size() << "), {";
+    for (std::size_t b = 0; b < records[i].raw->size(); ++b)
+      tables_out << (b == 0U ? "" : ", ") << "UINT8_C(" << hex((*records[i].raw)[b], 2) << ")";
+    tables_out << "} },\n";
+  }
+  tables_out << "};\n";
+  body_out << "  size_t low = 0U;\n  size_t high = sizeof genesis_route_records / sizeof genesis_route_records[0];\n"
+           << "  while (low < high) {\n"
+           << "    const size_t middle = low + (high - low) / 2U;\n"
+           << "    if (genesis_route_records[middle].address < source->source_address) low = middle + 1U; else high = middle;\n"
+           << "  }\n"
+           << "  if (low < sizeof genesis_route_records / sizeof genesis_route_records[0] &&\n"
+           << "      genesis_route_records[low].address == source->source_address) {\n"
+           << "    const GenesisRouteRecord *record = &genesis_route_records[low];\n"
+           << "    const GenesisRouteMapping *mapping = &genesis_route_mappings[record->mapping];\n"
+           << "    stop->provenance.mapping_claim_count = UINT8_C(1);\n"
+           << "    genesis_set_mapping_claim(&stop->provenance, UINT8_C(0), mapping->name, mapping->name_length, mapping->target_begin, mapping->target_end, mapping->image_begin, mapping->image_end);\n"
+           << "    genesis_set_fetch_access(&stop->provenance, source->source_address, record->raw_bytes, record->raw_byte_count);\n"
+           << "  }\n";
+}
 constexpr std::size_t general_startup_frontier_access_record_limit = 4U;
 bool same_provenance(const InstructionProvenance &left, const InstructionProvenance &right) {
   return left.source.cpu_variant == right.source.cpu_variant && same(left.source.address, right.source.address) &&
@@ -745,37 +877,20 @@ std::string emit_m68k_general_startup_runtime_c_with_policy_to(
     // The generated route helper only attaches retained static provenance to a
     // runtime routing failure. It never reconstructs a target address or
     // reads image bytes.
-    out << "void genesis_attach_route_provenance(GenesisRuntimeStop *stop, const GenesisInstructionProvenance *source) {\n";
+    std::vector<RouteProvenanceRecord> route_records;
     for (const auto &instruction : analysis.decoded) {
       const auto *mapping = select_unique_affine_mapping(analysis.mapping_claims, instruction.provenance);
       if (mapping == nullptr || mapping->name.size() > genesis_frontier_max_name_length ||
           instruction.raw_bytes.size() > genesis_frontier_max_raw_bytes)
         return "/* translation rejected: invalid bridge retained mapping */\n";
-      out << "  if (source->source_address == UINT32_C(" << hex(instruction.provenance.source.address.value, 8)
-          << ")) {\n"
-          << "    stop->provenance.mapping_claim_count = UINT8_C(1);\n"
-          << "    stop->provenance.mapping_claims[0].name_length = UINT8_C(" << mapping->name.size() << ");\n";
-      for (std::size_t byte = 0; byte < mapping->name.size(); ++byte)
-        out << "    stop->provenance.mapping_claims[0].name[" << byte << "] = UINT8_C("
-            << static_cast<unsigned>(static_cast<unsigned char>(mapping->name[byte])) << ");\n";
-      out << "    stop->provenance.mapping_claims[0].target_begin = UINT32_C("
-          << hex(mapping->target_begin.value, 8) << ");\n"
-          << "    stop->provenance.mapping_claims[0].target_end = UINT32_C("
-          << hex(mapping->target_end.value, 8) << ");\n"
-          << "    stop->provenance.mapping_claims[0].image_begin = UINT64_C(" << mapping->image_begin.value << ");\n"
-          << "    stop->provenance.mapping_claims[0].image_end = UINT64_C(" << mapping->image_end.value << ");\n"
-          << "    stop->provenance.bus_access_count = UINT8_C(1);\n"
-          << "    stop->provenance.bus_accesses[0].ordinal = UINT64_C(0);\n"
-          << "    stop->provenance.bus_accesses[0].kind = GENESIS_BUS_INSTRUCTION_READ;\n"
-          << "    stop->provenance.bus_accesses[0].address = source->source_address;\n"
-          << "    stop->provenance.bus_accesses[0].raw_byte_count = UINT8_C(" << instruction.raw_bytes.size() << ");\n"
-          << "    stop->provenance.bus_accesses[0].region = GENESIS_REGION_RAW_CARTRIDGE_ROM;\n";
-      for (std::size_t byte = 0; byte < instruction.raw_bytes.size(); ++byte)
-        out << "    stop->provenance.bus_accesses[0].raw_bytes[" << byte << "] = UINT8_C("
-            << hex(instruction.raw_bytes[byte], 2) << ");\n";
-      out << "    return;\n  }\n";
+      route_records.push_back({static_cast<std::uint32_t>(instruction.provenance.source.address.value), mapping, &instruction.raw_bytes});
     }
-    out << "}\n\n";
+    std::ostringstream route_tables;
+    std::ostringstream route_body;
+    emit_compact_route_provenance(route_tables, route_body, std::move(route_records));
+    out << compact_provenance_helper_definitions() << "\n" << route_tables.str()
+        << "void genesis_attach_route_provenance(GenesisRuntimeStop *stop, const GenesisInstructionProvenance *source) {\n"
+        << route_body.str() << "}\n\n";
   }
   for (const auto &[entry, block] : blocks) {
     const auto &terminal = block->instructions.back();
@@ -881,6 +996,11 @@ std::string emit_m68k_general_startup_runtime_c_with_policy_to(
   // aot_safe` never admits `return_from_subroutine` for this profile either
   // (same criterion, `validated_immutable_rom_aot_entries` above) -- an
   // empty return-target vector is always the correct, harmless value here.
+  // SEG-022-T007: the legacy C3 profile has no route-provenance helper unit, so it
+  // defines the compact provenance helpers itself when it emits any AOT body.
+  if (policy != M68kGeneralStartupBlockEmissionPolicy::bridge_extended &&
+      std::ranges::any_of(*aot_entries, [&](const auto &candidate) { return !blocks.contains(candidate.first); }))
+    out << compact_provenance_helper_definitions() << "\n";
   for (const auto &[address, entry] : *aot_entries)
     if (!blocks.contains(address))
       out << emit_immutable_rom_aot_body(*entry, {}, aot_unrepresented_exact_pcs[address],
@@ -1293,16 +1413,8 @@ std::optional<std::string> build_genesis_frontier_stop_function(
   }
   if (diagnostic.mapping_claims) {
     out << "  transfer.stop.provenance.mapping_claim_count = UINT8_C(" << diagnostic.mapping_claims->size() << ");\n";
-    for (std::size_t index = 0; index < diagnostic.mapping_claims->size(); ++index) {
-      const auto &claim = diagnostic.mapping_claims->at(index);
-      out << "  transfer.stop.provenance.mapping_claims[" << index << "].name_length = UINT8_C(" << claim.name.size() << ");\n";
-      for (std::size_t byte = 0; byte < claim.name.size(); ++byte)
-        out << "  transfer.stop.provenance.mapping_claims[" << index << "].name[" << byte << "] = UINT8_C(" << static_cast<unsigned>(static_cast<unsigned char>(claim.name[byte])) << ");\n";
-      out << "  transfer.stop.provenance.mapping_claims[" << index << "].target_begin = UINT32_C(" << hex(claim.target_begin.value, 8) << ");\n"
-          << "  transfer.stop.provenance.mapping_claims[" << index << "].target_end = UINT32_C(" << hex(claim.target_end.value, 8) << ");\n"
-          << "  transfer.stop.provenance.mapping_claims[" << index << "].image_begin = UINT64_C(" << claim.image_begin.value << ");\n"
-          << "  transfer.stop.provenance.mapping_claims[" << index << "].image_end = UINT64_C(" << claim.image_end.value << ");\n";
-    }
+    for (std::size_t index = 0; index < diagnostic.mapping_claims->size(); ++index)
+      out << compact_mapping_claim_call("  ", "&transfer.stop.provenance", index, diagnostic.mapping_claims->at(index));
   }
   out << "  transfer.stop.provenance.bus_access_count = UINT8_C(" << diagnostic.accesses.size() << ");\n";
   for (std::size_t index = 0; index < diagnostic.accesses.size(); ++index) {
@@ -1999,30 +2111,9 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
         << "    frontier.stop.diagnostic_category = GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET;\n"
         << "    frontier.stop.provenance.has_instruction_provenance = UINT8_C(1);\n"
         << "    frontier.stop.provenance.instruction = source;\n"
-        << "    frontier.stop.provenance.mapping_claim_count = UINT8_C(1);\n"
-        << "    frontier.stop.provenance.mapping_claims[0].name_length = UINT8_C(" << claim.name.size()
-        << ");\n";
-    for (std::size_t byte = 0; byte < claim.name.size(); ++byte)
-      out << "    frontier.stop.provenance.mapping_claims[0].name[" << byte << "] = UINT8_C("
-          << static_cast<unsigned>(static_cast<unsigned char>(claim.name[byte])) << ");\n";
-    out << "    frontier.stop.provenance.mapping_claims[0].target_begin = UINT32_C("
-        << hex(claim.target_begin.value, 8) << ");\n"
-        << "    frontier.stop.provenance.mapping_claims[0].target_end = UINT32_C("
-        << hex(claim.target_end.value, 8) << ");\n"
-        << "    frontier.stop.provenance.mapping_claims[0].image_begin = UINT64_C(" << std::dec
-        << claim.image_begin.value << ");\n"
-        << "    frontier.stop.provenance.mapping_claims[0].image_end = UINT64_C(" << claim.image_end.value
-        << ");\n"
-        << "    frontier.stop.provenance.bus_access_count = UINT8_C(1);\n"
-        << "    frontier.stop.provenance.bus_accesses[0].ordinal = UINT64_C(0);\n"
-        << "    frontier.stop.provenance.bus_accesses[0].kind = GENESIS_BUS_INSTRUCTION_READ;\n"
-        << "    frontier.stop.provenance.bus_accesses[0].address = source.source_address;\n"
-        << "    frontier.stop.provenance.bus_accesses[0].raw_byte_count = UINT8_C("
-        << entry.decoded.raw_bytes.size() << ");\n"
-        << "    frontier.stop.provenance.bus_accesses[0].region = GENESIS_REGION_RAW_CARTRIDGE_ROM;\n";
-    for (std::size_t byte = 0; byte < entry.decoded.raw_bytes.size(); ++byte)
-      out << "    frontier.stop.provenance.bus_accesses[0].raw_bytes[" << byte << "] = UINT8_C("
-          << hex(entry.decoded.raw_bytes[byte], 2) << ");\n";
+        << "    frontier.stop.provenance.mapping_claim_count = UINT8_C(1);\n";
+    out << compact_mapping_claim_call("    ", "&frontier.stop.provenance", 0U, claim)
+        << compact_fetch_access_call("    ", "&frontier.stop.provenance", "source.source_address", entry.decoded.raw_bytes);
     out << "    return " << retire_before_stop_call_open(
         address, entry.decoded.provenance.length.value, entry.operation.kind);
     out << *cycle_expression;
@@ -2972,6 +3063,8 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       << "typedef struct GenesisCompiledEntryRecord { uint32_t address; GenesisCompiledEntry body; } GenesisCompiledEntryRecord;\n"
       << (sharded ? "GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n"
                   : "static GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n");
+  if (!sharded)
+    out << compact_provenance_helper_declarations << ";\n" << compact_provenance_helper_declarations_2 << ";\n";
   if (sharded) shard_end_header(out);
   if (!tier2_capable) {
     // Every frontier stop function's already-final body text remains in
@@ -3006,35 +3099,25 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   if (sharded) {
     shard_begin_unit(out, "meta", 0U, "void genesis_attach_route_provenance(GenesisRuntimeStop *stop, const GenesisInstructionProvenance *source)");
     shard_declare(out, "GenesisControlTransfer genesis_static_stop(GenesisStopClass class_, GenesisDiagnosticCategory category, const GenesisInstructionProvenance *source, uint8_t has_access, uint32_t address, GenesisAccessWidth width, GenesisAccessDirection direction)");
+    shard_declare(out, compact_provenance_helper_declarations);
+    shard_declare(out, compact_provenance_helper_declarations_2);
   }
-  out << "\nvoid genesis_attach_route_provenance(GenesisRuntimeStop *stop, const GenesisInstructionProvenance *source) {\n";
-  for (const auto &instruction : partial.accepted_prefix.decoded) {
-    const auto *mapping =
-        select_unique_affine_mapping(partial.accepted_prefix.mapping_claims, instruction.provenance);
-    if (mapping == nullptr || mapping->name.size() > genesis_frontier_max_name_length ||
-        instruction.raw_bytes.size() > genesis_frontier_max_raw_bytes)
-      return "/* translation rejected: invalid C4 retained mapping */\n";
-    const auto &claim = *mapping;
-    out << "  if (source->source_address == UINT32_C(" << hex(instruction.provenance.source.address.value, 8) << ")) {\n"
-        << "    stop->provenance.mapping_claim_count = UINT8_C(1);\n"
-        << "    stop->provenance.mapping_claims[0].name_length = UINT8_C(" << claim.name.size() << ");\n";
-    for (std::size_t byte = 0; byte < claim.name.size(); ++byte)
-      out << "    stop->provenance.mapping_claims[0].name[" << byte << "] = UINT8_C("
-          << static_cast<unsigned>(static_cast<unsigned char>(claim.name[byte])) << ");\n";
-    out << "    stop->provenance.mapping_claims[0].target_begin = UINT32_C(" << hex(claim.target_begin.value, 8) << ");\n"
-        << "    stop->provenance.mapping_claims[0].target_end = UINT32_C(" << hex(claim.target_end.value, 8) << ");\n"
-        << "    stop->provenance.mapping_claims[0].image_begin = UINT64_C(" << claim.image_begin.value << ");\n"
-        << "    stop->provenance.mapping_claims[0].image_end = UINT64_C(" << claim.image_end.value << ");\n"
-        << "    stop->provenance.bus_access_count = UINT8_C(1);\n"
-        << "    stop->provenance.bus_accesses[0].ordinal = UINT64_C(0);\n"
-        << "    stop->provenance.bus_accesses[0].kind = GENESIS_BUS_INSTRUCTION_READ;\n"
-        << "    stop->provenance.bus_accesses[0].address = source->source_address;\n"
-        << "    stop->provenance.bus_accesses[0].raw_byte_count = UINT8_C(" << instruction.raw_bytes.size() << ");\n"
-        << "    stop->provenance.bus_accesses[0].region = GENESIS_REGION_RAW_CARTRIDGE_ROM;\n";
-    for (std::size_t byte = 0; byte < instruction.raw_bytes.size(); ++byte)
-      out << "    stop->provenance.bus_accesses[0].raw_bytes[" << byte << "] = UINT8_C("
-          << hex(instruction.raw_bytes[byte], 2) << ");\n";
-    out << "    return;\n  }\n";
+  {
+    std::vector<RouteProvenanceRecord> route_records;
+    for (const auto &instruction : partial.accepted_prefix.decoded) {
+      const auto *mapping =
+          select_unique_affine_mapping(partial.accepted_prefix.mapping_claims, instruction.provenance);
+      if (mapping == nullptr || mapping->name.size() > genesis_frontier_max_name_length ||
+          instruction.raw_bytes.size() > genesis_frontier_max_raw_bytes)
+        return "/* translation rejected: invalid C4 retained mapping */\n";
+      route_records.push_back({static_cast<std::uint32_t>(instruction.provenance.source.address.value), mapping, &instruction.raw_bytes});
+    }
+    std::ostringstream route_tables;
+    std::ostringstream route_body;
+    emit_compact_route_provenance(route_tables, route_body, std::move(route_records));
+    out << "\n" << compact_provenance_helper_definitions() << route_tables.str()
+        << "void genesis_attach_route_provenance(GenesisRuntimeStop *stop, const GenesisInstructionProvenance *source) {\n"
+        << route_body.str();
   }
   out << "}\n"
       << "GenesisControlTransfer genesis_static_stop(GenesisStopClass class_, GenesisDiagnosticCategory category, const GenesisInstructionProvenance *source, uint8_t has_access, uint32_t address, GenesisAccessWidth width, GenesisAccessDirection direction) {\n"
