@@ -3,7 +3,7 @@
 // reference std::map, compiled as strict C11.
 #include "segarecomp/codegen/c11/compiled_entry_table.hpp"
 
-#include <cstdlib>
+#include <map>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -28,7 +28,7 @@ void check_widths() {
 }
 
 // `owners` distinct owners over `entries` sorted addresses (owner = index % owners, so owners repeat).
-void check_lookup(const std::filesystem::path &dir, const std::string &cc, const std::string &name,
+void check_lookup(const std::filesystem::path &dir, const std::string &name,
                   std::vector<std::uint32_t> addresses, std::size_t owners, unsigned expected_bits) {
   std::vector<CompiledEntryBinding> bindings;
   for (std::size_t i = 0; i < addresses.size(); ++i)
@@ -47,30 +47,22 @@ void check_lookup(const std::filesystem::path &dir, const std::string &cc, const
   c << "  };\n  for (size_t i = 0; i < sizeof probes / sizeof probes[0]; ++i) {\n"
     << "    GenesisCompiledEntry e = genesis_compiled_entry_lookup(probes[i]);\n"
     << "    printf(\"%u %d\\n\", (unsigned)probes[i], e == NULL ? -1 : e());\n  }\n  return 0;\n}\n";
-  const auto source = dir / (name + ".c"), binary = dir / name, output = dir / (name + ".out");
-  std::ofstream(source) << c.str();
-  const std::string command = cc + " -std=c11 -Wall -Wextra -Werror -pedantic -o " + binary.string() + " " + source.string();
-  check(std::system(command.c_str()) == 0, "strict C11 compile");
-  check(std::system((binary.string() + " > " + output.string()).c_str()) == 0, "run");
-  std::ifstream in(output);
+  // Portable split: this program only writes the generated C and the expected lookup answers; the
+  // Python driver compiles (strict C11) and runs each source with argument-list subprocesses.
+  std::ofstream(dir / (name + ".c")) << c.str();
   std::map<std::uint32_t, long> expected;
   for (std::size_t i = 0; i < addresses.size(); ++i) expected[addresses[i]] = static_cast<long>(i % owners);
-  unsigned long address = 0;
-  long got = 0;
-  std::size_t seen = 0;
-  while (in >> address >> got) {
-    const auto it = expected.find(static_cast<std::uint32_t>(address));
-    check(got == (it == expected.end() ? -1 : it->second), "lookup equivalence");
-    ++seen;
+  std::ofstream out(dir / (name + ".expected"));
+  for (const auto p : probes) {
+    const auto it = expected.find(p);
+    out << p << " " << (it == expected.end() ? -1L : it->second) << "\n";
   }
-  check(seen == probes.size(), "all probes answered");
 }
 }  // namespace
 
 int main(int argc, char **argv) {
-  if (argc != 3) return 2;
-  const std::string cc = argv[1];
-  const std::filesystem::path dir = argv[2];
+  if (argc != 2) return 2;
+  const std::filesystem::path dir = argv[1];
   std::filesystem::create_directories(dir);
   check_widths();
   {
@@ -78,12 +70,12 @@ int main(int argc, char **argv) {
     check(!emit_compiled_entry_table(unsorted, {{4U, "a"}, {4U, "a"}}).empty(), "duplicate address rejected");
     check(!emit_compiled_entry_table(unsorted, {{5U, "a"}, {4U, "a"}}).empty(), "descending address rejected");
   }
-  check_lookup(dir, cc, "empty_like", {0U}, 1U, 8U);
-  check_lookup(dir, cc, "small", {2U, 4U, 6U, 0x200U, 0x00FFFFFEU, 0xFFFFFFFFU}, 2U, 8U);
+  check_lookup(dir, "empty_like", {0U}, 1U, 8U);
+  check_lookup(dir, "small", {2U, 4U, 6U, 0x200U, 0x00FFFFFEU, 0xFFFFFFFFU}, 2U, 8U);
   std::vector<std::uint32_t> many;
   for (std::uint32_t i = 0; i < 600U; ++i) many.push_back(0x100U + i * 2U);
-  check_lookup(dir, cc, "w8_max", many, 256U, 8U);
-  check_lookup(dir, cc, "w16_min", many, 257U, 16U);
+  check_lookup(dir, "w8_max", many, 256U, 8U);
+  check_lookup(dir, "w16_min", many, 257U, 16U);
   std::ostringstream none;
   check(emit_compiled_entry_table(none, {}).empty() && none.str().find("return NULL") != std::string::npos, "empty table");
   return failures == 0 ? 0 : 1;
