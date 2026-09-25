@@ -996,6 +996,11 @@ std::string emit_m68k_general_startup_runtime_c_with_policy_to(
   // aot_safe` never admits `return_from_subroutine` for this profile either
   // (same criterion, `validated_immutable_rom_aot_entries` above) -- an
   // empty return-target vector is always the correct, harmless value here.
+  // SEG-022-T007: the legacy C3 profile has no route-provenance helper unit, so it
+  // defines the compact provenance helpers itself when it emits any AOT body.
+  if (policy != M68kGeneralStartupBlockEmissionPolicy::bridge_extended &&
+      std::ranges::any_of(*aot_entries, [&](const auto &candidate) { return !blocks.contains(candidate.first); }))
+    out << compact_provenance_helper_definitions() << "\n";
   for (const auto &[address, entry] : *aot_entries)
     if (!blocks.contains(address))
       out << emit_immutable_rom_aot_body(*entry, {}, aot_unrepresented_exact_pcs[address],
