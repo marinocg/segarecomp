@@ -1,5 +1,6 @@
 #include "segarecomp/codegen/c11/genesis_frontend.hpp"
 #include "segarecomp/codegen/c11/genesis.hpp"
+#include "segarecomp/codegen/c11/translation_units.hpp"
 #include "segarecomp/cpu/m68k/timing.hpp"
 #include <algorithm>
 #include <cstdio>
@@ -14,6 +15,17 @@
 
 namespace segarecomp {
 namespace {
+// SEG-022-T003: the shared-header helper functions become `static inline` in a sharded build.
+std::string shard_helper_linkage(bool sharded, std::string text) {
+  if (sharded && text.starts_with("static ")) text.insert(7U, "inline ");
+  return text;
+}
+std::string genesis_unit_declaration(std::string_view prefix, std::uint32_t address) {
+  std::ostringstream name;
+  name << "GenesisControlTransfer " << prefix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address
+       << "(GenesisRuntime *runtime)";
+  return name.str();
+}
 using Address = std::uint32_t;
 std::string hex(std::uint64_t value, unsigned width) { std::ostringstream out; out << "0x" << std::uppercase << std::hex << std::setw(static_cast<int>(width)) << std::setfill('0') << value; return out.str(); }
 // SEG-020-T003: generation-time-only (`--provenance-diagnostics`) execution-history
@@ -2902,7 +2914,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   // block's own reachability is resolved further below.
   const bool tier2_capable = !partial.accepted_prefix.validated_code_entry_candidate_roots.empty() ||
                              !aot_entries->empty();
-  std::vector<std::string> frontier_stop_functions;  // populated only when !tier2_capable (pre-T174 shape); already-final text
+  std::vector<std::pair<std::uint32_t, std::string>> frontier_stop_functions;  // populated only when !tier2_capable (pre-T174 shape); already-final text
   std::map<Address, std::string> frontier_stop_names;                    // source address -> 8-hex-digit suffix
   // SEG-007-T236: collect call-shaped Tier-2 continuations during the
   // existing validation-only first pass as prospective return authority for
@@ -2923,7 +2935,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     suffix_stream << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address;
     if (!frontier_stop_names.emplace(address, suffix_stream.str()).second)
       return "/* translation rejected: unrepresentable C4 frontier */\n";  // duplicate source address
-    if (!tier2_capable) frontier_stop_functions.push_back(std::move(*function_text));
+    if (!tier2_capable) frontier_stop_functions.emplace_back(address, std::move(*function_text));
   }
   out << header;
   // Keep these pre-existing ordinary-prefix helpers ahead of the compiled-
@@ -2943,18 +2955,27 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       partial.accepted_prefix.ir, [](const auto &operation) {
         return operation.kind == M68kIrKind::multiply_signed_word;
       }) || aot_emits(M68kIrKind::multiply_signed_word);
+  // SEG-022-T003: in a sharded build the helpers and shared typedef/declaration live in the shared header
+  // (`static inline`, so a TU that does not use them stays warning-free); the text is otherwise unchanged.
+  const bool sharded = sharding_active(out);
+  if (sharded) shard_begin_header(out);
   if (emits_mulu_word)
-    out << "static uint32_t genesis_m68k_mulu_word_cycles(uint16_t source) { uint32_t n = 0U; while (source != 0U) { n += (uint32_t)(source & UINT16_C(1)); source >>= 1U; } return UINT32_C(38) + UINT32_C(2) * n; }\n";
+    out << shard_helper_linkage(sharded, "static uint32_t genesis_m68k_mulu_word_cycles(uint16_t source) { uint32_t n = 0U; while (source != 0U) { n += (uint32_t)(source & UINT16_C(1)); source >>= 1U; } return UINT32_C(38) + UINT32_C(2) * n; }\n");
   if (emits_muls_word)
-    out << "static uint32_t genesis_m68k_muls_word_cycles(uint16_t source) { uint32_t n = 0U; uint32_t bits = ((uint32_t)source) << 1U; for (uint32_t i = 0U; i < 16U; ++i) n += ((bits >> i) ^ (bits >> (i + 1U))) & UINT32_C(1); return UINT32_C(38) + UINT32_C(2) * n; }\n";
+    out << shard_helper_linkage(sharded, "static uint32_t genesis_m68k_muls_word_cycles(uint16_t source) { uint32_t n = 0U; uint32_t bits = ((uint32_t)source) << 1U; for (uint32_t i = 0U; i < 16U; ++i) n += ((bits >> i) ^ (bits >> (i + 1U))) & UINT32_C(1); return UINT32_C(38) + UINT32_C(2) * n; }\n");
   out << "typedef GenesisControlTransfer (*GenesisCompiledEntry)(GenesisRuntime *runtime);\n"
       << "typedef struct GenesisCompiledEntryRecord { uint32_t address; GenesisCompiledEntry body; } GenesisCompiledEntryRecord;\n"
-      << "static GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n";
+      << (sharded ? "GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n"
+                  : "static GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n");
+  if (sharded) shard_end_header(out);
   if (!tier2_capable) {
     // Every frontier stop function's already-final body text remains in
     // `partial.frontiers` order. No second construction pass is needed when
     // Tier 2 is unavailable.
-    for (const auto &function_text : frontier_stop_functions) out << function_text;
+    for (const auto &[stop_address, function_text] : frontier_stop_functions) {
+      ShardUnitScope unit(out, "stop", stop_address, genesis_unit_declaration("genesis_frontier_stop_", stop_address));
+      out << function_text;
+    }
   } else {
     // SEG-007-T174 / ADR-0024 two-pass shape (only reachable once at least
     // one validated candidate root exists somewhere in this build): forward
@@ -2963,7 +2984,8 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     // blocks and the dispatcher (built next) may reference these functions
     // by name before their real definitions are appended near the end of
     // this function.
-    for (const auto &frontier : partial.frontiers) {
+    // (A sharded build declares every stop function in the shared header instead.)
+    if (!sharded) for (const auto &frontier : partial.frontiers) {
       const auto address = frontier.diagnostic.provenance->source.address.value;
       out << "static GenesisControlTransfer genesis_frontier_stop_" << frontier_stop_names.at(address)
           << "(GenesisRuntime *runtime);\n";
@@ -2975,6 +2997,11 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   // read or a reconstructed host pointer. AOT-only exact-PC mismatch stops
   // attach their one entry's already-validated provenance locally in
   // emit_immutable_rom_aot_body, avoiding a whole-ROM central switch.
+  // SEG-022-T003: provenance lookup + static-stop helper form one `meta` unit; both are already external.
+  if (sharded) {
+    shard_begin_unit(out, "meta", 0U, "void genesis_attach_route_provenance(GenesisRuntimeStop *stop, const GenesisInstructionProvenance *source)");
+    shard_declare(out, "GenesisControlTransfer genesis_static_stop(GenesisStopClass class_, GenesisDiagnosticCategory category, const GenesisInstructionProvenance *source, uint8_t has_access, uint32_t address, GenesisAccessWidth width, GenesisAccessDirection direction)");
+  }
   out << "\nvoid genesis_attach_route_provenance(GenesisRuntimeStop *stop, const GenesisInstructionProvenance *source) {\n";
   for (const auto &instruction : partial.accepted_prefix.decoded) {
     const auto *mapping =
@@ -3009,6 +3036,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       << "  GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop.stop_class = class_; transfer.stop.diagnostic_category = category; transfer.stop.provenance.has_instruction_provenance = 1U; transfer.stop.provenance.instruction = *source;\n"
       << "  if (has_access != 0U) { transfer.stop.provenance.has_access = 1U; transfer.stop.provenance.access_address = address; transfer.stop.provenance.access_width = width; transfer.stop.provenance.access_direction = direction; }\n"
        << "  genesis_attach_route_provenance(&transfer.stop, source); return transfer;\n}\n";
+  if (sharded) shard_end_unit(out);
   // A partial program retains real static blocks, not merely a diagnostic.
   // Every static memory fact is checked against the decoded/lifted operation
   // it names before it can select folding or runtime routing below.
@@ -4181,7 +4209,11 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
                                                                   sibling_frontier_addresses, emitted_code_address_set,
                                                                   &tier2_call_continuation);
       if (!function_text) return "/* translation rejected: unrepresentable C4 frontier */\n";
-      out << *function_text;
+      {
+        const auto stop_address = frontier.diagnostic.provenance->source.address.value;
+        ShardUnitScope unit(out, "stop", stop_address, genesis_unit_declaration("genesis_frontier_stop_", stop_address));
+        out << *function_text;
+      }
       if (tier2_call_continuation && emitted_code_addresses.contains(*tier2_call_continuation))
         tier2_call_continuations.insert(*tier2_call_continuation);
     }
@@ -4210,6 +4242,8 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       ++stop;
   }
   for (const auto &[source, provenance] : tier1_pre_pc_stops) {
+    // Every exit of this iteration emits exactly the one `genesis_tier1_indirect_stop_<source>` function.
+    ShardUnitScope tier1_stop_unit(out, "stop", source, genesis_unit_declaration("genesis_tier1_indirect_stop_", source));
     // SEG-021-T028: a retained JMP/JSR terminal whose Tier-1 set (or Tier-1
     // fact) cannot be lowered but whose EA is Tier-2 eligible gets exactly one
     // owner, the existing Tier-2 emitted-set membership lowering (same function
@@ -4246,6 +4280,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     if (operation == operations.end()) return "/* translation rejected: invalid C4 retained prefix */\n";
     std::ostringstream suffix;
     suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << stop.first;
+    ShardUnitScope c4_stop_unit(out, "stop", stop.first, genesis_unit_declaration("genesis_c4_lowering_stop_", stop.first));
     out << "static GenesisControlTransfer genesis_c4_lowering_stop_" << suffix.str()
         << "(GenesisRuntime *runtime) {\n"
         << "  GenesisInstructionProvenance source = {0};\n"
@@ -4656,6 +4691,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
          (continuation_count != 1U || is_branch || is_direct_jump || is_return || is_indirect_branch || is_indirect_call ||
           direct_count != 0U || fallthrough_count != 0U || return_count != 0U)))
       return "/* translation rejected: incomplete C4 static edge */\n";
+    ShardUnitScope block_unit(out, "block", block.id.entry.value, genesis_unit_declaration("genesis_block_", block.id.entry.value));
     out << "\nstatic GenesisControlTransfer genesis_block_" << std::uppercase << std::hex << std::setw(8)
         << std::setfill('0') << block.id.entry.value << "(GenesisRuntime *runtime) {\n";
     out << "  switch (runtime->pc) {\n";
@@ -5576,9 +5612,13 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   const std::vector<std::uint32_t> immutable_rom_aot_runtime_return_targets(
       runtime_return_target_set.begin(), runtime_return_target_set.end());
   for (const auto &[address, entry] : *aot_entries)
-    if (!ordinary_compiled_owners.contains(address))
+    if (!ordinary_compiled_owners.contains(address)) {
+      ShardUnitScope unit(out, "aot", address, genesis_unit_declaration("genesis_aot_", address));
       out << emit_immutable_rom_aot_body(*entry, immutable_rom_aot_runtime_return_targets,
                                          aot_unrepresented_exact_pcs[address], emitted_code_address_set);
+    }
+  // SEG-022-T003: the sorted compiled-entry table and its binary-search lookup form the one `entries` unit.
+  if (sharded) shard_begin_unit(out, "entries", 0U, "GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address)");
   out << "static const GenesisCompiledEntryRecord genesis_compiled_entries[] = {\n";
   for (const auto address : emitted_code_addresses) {
     out << "  { UINT32_C(" << hex(address, 8) << "), ";
@@ -5606,6 +5646,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       << "  if (low < sizeof(genesis_compiled_entries) / sizeof(genesis_compiled_entries[0]) && genesis_compiled_entries[low].address == address) return genesis_compiled_entries[low].body;\n"
       << "  return NULL;\n"
       << "}\n";
+  if (sharded) shard_end_unit(out);
   out << "\nstatic GenesisControlTransfer genesis_dispatch(GenesisRuntime *runtime) {\n";
   out << "  { GenesisCompiledEntry entry = genesis_compiled_entry_lookup(runtime->pc);\n"
       << "    if (entry != NULL) return entry(runtime);\n"
@@ -5700,9 +5741,17 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
   }
   // SEG-022-T002: stream the runtime body straight to `sink` behind the bridge
   // prelude; the complete program is never materialized in one string.
-  if (auto rejection = emit_m68k_general_startup_runtime_c_to(
-          sink, emit_genesis_bridge_c11_prelude(rom_sha256, *cpu_dimensions), partial);
-      !rejection.empty())
+  // SEG-022-T003: a sharded sink gets the shared includes in the header and the report helpers in the main TU.
+  std::string prelude;
+  if (sharding_active(sink)) {
+    shard_begin_header(sink);
+    sink << emit_genesis_bridge_c11_shared_header_prelude();
+    shard_end_header(sink);
+    sink << emit_genesis_bridge_c11_main_prelude(rom_sha256, *cpu_dimensions);
+  } else {
+    prelude = emit_genesis_bridge_c11_prelude(rom_sha256, *cpu_dimensions);
+  }
+  if (auto rejection = emit_m68k_general_startup_runtime_c_to(sink, prelude, partial); !rejection.empty())
     return rejection;
   if (owned_region_count != 0U) {
     sink << owned_region_data.str() << "static const GenesisOwnedCartridgeRegion genesis_owned_cartridge_regions[] = {\n"

@@ -13,6 +13,7 @@
 #endif
 
 #include <algorithm>
+#include "segarecomp/codegen/c11/translation_units.hpp"
 #include <charconv>
 #include <cstdint>
 #include <exception>
@@ -33,7 +34,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot] [--provenance-diagnostics] [--generated-c-output <path>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot] [--provenance-diagnostics] [--generated-c-output <path> | --generated-c-shard-dir <dir>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
                "  segarecomp probe-genesis-startup-mapping <address-hex8> <width-decimal> <image-length-hex16>\n";
@@ -91,6 +92,10 @@ int main(int argc, char **argv) {
       // SEG-022-T002: stream the generated C to this file (fail-closed: written as `<path>.partial`
       // and atomically renamed only on complete success; removed on any failure).
       std::optional<std::string_view> generated_c_output;
+      // SEG-022-T003: emit the generated C as a bounded deterministic set of translation units in this
+      // directory (shared header + main TU + block/AOT/stop/meta/entries TUs + `bridge_generated.units`
+      // manifest). Mutually exclusive with --generated-c-output.
+      std::optional<std::string_view> generated_c_shard_dir;
       for (int index = 4; index < argc;) {
         const std::string_view option = argv[index];
         if (option == "--reset-entry") {
@@ -107,6 +112,10 @@ int main(int argc, char **argv) {
         } else if (option == "--generated-c-output") {
           if (generated_c_output || index + 1 >= argc) { print_usage(std::cerr); return 2; }
           generated_c_output = argv[index + 1];
+          index += 2;
+        } else if (option == "--generated-c-shard-dir") {
+          if (generated_c_shard_dir || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          generated_c_shard_dir = argv[index + 1];
           index += 2;
         } else if (option == "--provenance-diagnostics") {
           if (provenance_diagnostics) { print_usage(std::cerr); return 2; }
@@ -281,6 +290,46 @@ int main(int argc, char **argv) {
         std::cerr << "segarecomp: immutable-rom AOT enumeration: aligned_start_count=" << aligned_start_count
                   << " accepted_count=" << accepted_count
                   << " rejected_count=" << (aligned_start_count - accepted_count) << '\n';
+      }
+      // Given alone, --generated-c-shard-dir always shards. Given together with --generated-c-output the
+      // emitter shards only a program with at least `shard_threshold` compiled units (ordinary blocks +
+      // immutable-ROM AOT entries) and otherwise writes the single --generated-c-output file: a pure,
+      // deterministic function of the accepted program size, so small programs keep the historical
+      // one-file artifact and one giant TU is never produced for a large one.
+      constexpr std::size_t shard_threshold = 1024U;
+      std::size_t program_units = 0U;
+      if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result))
+        program_units = partial->accepted_prefix.static_blocks.size() + partial->accepted_prefix.immutable_rom_aot_entries.size();
+      if (generated_c_shard_dir && (!generated_c_output || program_units >= shard_threshold)) {
+        // Layout (bounded, documented in ADR-0044): main + meta + entries + stop + 8 block + 32 AOT shards.
+        segarecomp::TranslationUnitSharder sharder{
+            std::filesystem::path{std::string(*generated_c_shard_dir)}, "bridge_generated",
+            {{"block", 8U, 10U}, {"aot", 32U, 10U}, {"stop", 1U, 10U}, {"meta", 1U, 10U}, {"entries", 1U, 10U}}};
+        auto &sink = sharder.stream();
+        std::string rejection;
+        bool emitted = false;
+        if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) {
+          rejection = segarecomp::emit_m68k_general_startup_bridge_c_to(sink, *partial, digest_value, provenance_diagnostics);
+          if (rejection.empty() && provenance_diagnostics) {
+            const auto &a = partial->accepted_prefix;
+            sink << segarecomp::emit_m68k_provenance_diagnostic_c(segarecomp::build_m68k_provenance_diagnostic_projection(
+                digest_value, a.decoded, a.static_blocks, a.static_edges, calls_of(a.static_frames)));
+          }
+          emitted = true;
+        } else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result)) {
+          rejection = segarecomp::emit_m68k_general_startup_bridge_c_to(sink, *accepted, digest_value, provenance_diagnostics);
+          if (rejection.empty() && provenance_diagnostics)
+            sink << segarecomp::emit_m68k_provenance_diagnostic_c(segarecomp::build_m68k_provenance_diagnostic_projection(
+                digest_value, accepted->decoded, accepted->static_blocks, accepted->static_edges, calls_of(accepted->static_frames)));
+          emitted = true;
+        }
+        if (!emitted) { std::cerr << segarecomp::format_m68k_frontend_result(result) << '\n'; return 1; }
+        if (!rejection.empty()) { std::cerr << rejection; return 1; }
+        if (!sink) { std::cerr << "segarecomp: generated-C write failed\n"; return 2; }
+        if (const auto failure = sharder.finish(); !failure.empty()) { std::cerr << "segarecomp: " << failure << '\n'; return 2; }
+        std::cerr << "segarecomp: generated-C translation units: count=" << sharder.translation_unit_count()
+                  << " max=" << sharder.max_translation_unit_count() << '\n';
+        return 0;
       }
       if (generated_c_output) {
         const std::filesystem::path final_path{std::string(*generated_c_output)};

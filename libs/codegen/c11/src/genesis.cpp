@@ -8,10 +8,20 @@ std::string emit_genesis_runtime_c11_include() {
   return "#include \"runtime.h\"\n\n";
 }
 
+std::string emit_genesis_bridge_c11_shared_header_prelude() {
+  return emit_genesis_runtime_c11_include() +
+         "#if defined(_WIN32)\n#include <fcntl.h>\n#include <io.h>\n#endif\n#include <errno.h>\n#include <limits.h>\n#include <stdlib.h>\n#include <string.h>\n\n";
+}
+
 std::string emit_genesis_bridge_c11_prelude(std::string_view rom_sha256,
                                             std::string_view cpu_dimensions) {
-  return "#define _POSIX_C_SOURCE 200809L\n" + emit_genesis_runtime_c11_include() +
-         "#if defined(_WIN32)\n#include <fcntl.h>\n#include <io.h>\n#endif\n#include <errno.h>\n#include <limits.h>\n#include <stdlib.h>\n#include <string.h>\n\n"
+  return "#define _POSIX_C_SOURCE 200809L\n" + emit_genesis_bridge_c11_shared_header_prelude() +
+         emit_genesis_bridge_c11_main_prelude(rom_sha256, cpu_dimensions);
+}
+
+std::string emit_genesis_bridge_c11_main_prelude(std::string_view rom_sha256,
+                                                 std::string_view cpu_dimensions) {
+  return std::string() +
          "static const char GENESIS_BRIDGE_ROM_SHA256[65] = \"" + std::string(rom_sha256) +
          "\";\nstatic const GenesisReportMetadata GENESIS_BRIDGE_REPORT_METADATA = { " +
          std::string(cpu_dimensions) +

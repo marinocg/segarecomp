@@ -94,6 +94,17 @@ if "--generated-c-output" not in a:
     sys.stdout.write("int stdout_route;\n"); raise SystemExit(0)   # legacy route: must not be used
 out = a[a.index("--generated-c-output") + 1]
 open(a[a.index("--immutable-aot-address-report") + 1], "w").write("4\n6\n")
+if mode == "shard":   # SEG-022-T003: a large program is emitted as a translation-unit set instead of `out`
+    import os
+    sd = a[a.index("--generated-c-shard-dir") + 1]
+    os.makedirs(sd)
+    open(sd + "/bridge_generated.h", "w").write("#ifndef H\n#endif\n")
+    open(sd + "/bridge_generated_main.c", "w").write("int main(void) { return 0; }\n")
+    open(sd + "/bridge_generated_entries_00.c", "w").write(
+        "static const GenesisCompiledEntryRecord genesis_compiled_entries[] = {\n"
+        "  { UINT32_C(0x00000004), genesis_block_00000004 },\n  { UINT32_C(0x00000006), genesis_aot_00000006 },\n};\n")
+    open(sd + "/bridge_generated.units", "w").write("bridge_generated_main.c\nbridge_generated_entries_00.c\n")
+    raise SystemExit(0)
 if mode == "fail":
     open(out + ".partial", "w").write("partial"); raise SystemExit(1)
 if mode == "nofile":
@@ -124,7 +135,7 @@ with tempfile.TemporaryDirectory() as d:
         (d / "out").mkdir(exist_ok=True)
         (d / "out" / "generated.c").write_text("stale")
         ns = argparse.Namespace(segarecomp=str(fake), rom=str(rom), external_hints=None, out_dir=str(d / "out"),
-                                cc="/usr/bin/false", opt="-O0", product_root=str(d))
+                                cc="/usr/bin/false", opt="-O0", product_root=str(d), jobs=1)
         return gcs.measure(ns)
     ok = run("ok")
     assert ok["generation"]["returncode"] == 0 and (d / "out" / "generated.c").read_text() == "int streamed_route;\n", ok
@@ -135,3 +146,14 @@ with tempfile.TemporaryDirectory() as d:
         assert "source" not in bad
         assert not (d / "out" / "generated.c").exists() and not (d / "out" / "generated.c.partial").exists()
 
+
+    # SEG-022-T003: sharded output is measured per translation unit; the final compiled-address set
+    # is read from the entries TU; no single `generated.c` exists.
+    sharded = run("shard")
+    assert sharded["generation"]["returncode"] == 0, sharded
+    units = sharded["source"]["translation_units"]
+    assert units["count"] == 2 and units["total_bytes"] > 0 and units["header_bytes"] > 0, units
+    assert sharded["fingerprints"]["final_compiled_entry_address_set"] == gcs.set_fingerprint([4, 6]), sharded["fingerprints"]
+    assert sharded["fingerprints"]["aot_owned_entry_address_set"] == gcs.set_fingerprint([6])
+    assert sharded["compile"]["translation_units"]["count"] == 2
+print("ok-sharded")

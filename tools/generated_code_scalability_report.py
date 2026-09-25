@@ -26,6 +26,7 @@ import os
 import pathlib
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -278,9 +279,15 @@ def measure(args) -> dict:
     # artifact may be accepted: remove any prior output before the emitter runs.
     for stale in (src, pathlib.Path(str(src) + ".partial"), admitted_sink):
         stale.unlink(missing_ok=True)
-    cmd += ["--generated-c-output", str(src)]
+    # SEG-022-T003: a large program is emitted as a bounded deterministic set of translation units in
+    # `shard_dir` (a small one still yields the single `src`); both artifacts are cleared first.
+    shard_dir = out / "generated"
+    shutil.rmtree(shard_dir, ignore_errors=True)
+    cmd += ["--generated-c-output", str(src), "--generated-c-shard-dir", str(shard_dir)]
     gen = timed(cmd)
-    if gen["returncode"] == 0 and (not src.is_file() or pathlib.Path(str(src) + ".partial").exists()):
+    manifest = shard_dir / "bridge_generated.units"
+    sharded = manifest.is_file()
+    if gen["returncode"] == 0 and not sharded and (not src.is_file() or pathlib.Path(str(src) + ".partial").exists()):
         gen["returncode"] = 1  # success without a complete artifact is a failure
     report: dict = {
         "schema": SCHEMA,
@@ -292,17 +299,58 @@ def measure(args) -> dict:
     if gen["returncode"] != 0:
         for leftover in (src, pathlib.Path(str(src) + ".partial"), admitted_sink):
             leftover.unlink(missing_ok=True)
+        shutil.rmtree(shard_dir, ignore_errors=True)
         return report
-    report["source"] = attribute(src)
+    if sharded:
+        units = [shard_dir / line for line in manifest.read_text().splitlines() if line]
+        sizes = [u.stat().st_size for u in units]
+        report["source"] = {"translation_units": {"count": len(units), "total_bytes": sum(sizes),
+                                                  "largest_bytes": max(sizes), "header_bytes": (shard_dir / "bridge_generated.h").stat().st_size}}
+    else:
+        report["source"] = attribute(src)
     addresses = [int(x, 16) for x in admitted_sink.read_text().split()]
     admitted_sink.unlink()  # ephemeral: only count + digest are retained
     report["fingerprints"] = {"admitted_immutable_rom_aot_address_set": set_fingerprint(addresses)}
+    if sharded:
+        # Final compiled-address authority = the sorted compiled-entry table (its own `entries` TU).
+        entry_addresses: dict[str, list[int]] = {"aot": [], "block": []}
+        with (shard_dir / "bridge_generated_entries_00.c").open("rb") as handle:
+            for line in handle:
+                match = _ENTRY_ROW_ADDR.match(line)
+                if match:
+                    entry_addresses[match.group(2).decode()].append(int(match.group(1), 16))
+        report["fingerprints"].update({
+            "final_compiled_entry_address_set": set_fingerprint(entry_addresses["aot"] + entry_addresses["block"]),
+            "aot_owned_entry_address_set": set_fingerprint(entry_addresses["aot"]),
+            "ordinary_block_entry_address_set": set_fingerprint(entry_addresses["block"]),
+        })
     runtime_dir = pathlib.Path(args.product_root) / "platforms" / "genesis" / "runtime"
     flags = [args.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", args.opt, "-I", str(runtime_dir)]
-    obj = out / "generated.o"
-    comp = timed(flags + ["-c", "-o", str(obj), str(src)])
     robj = out / "runtime.o"
     rcomp = timed(flags + ["-c", "-o", str(robj), str(runtime_dir / "runtime.c")])
+    if sharded:
+        # Per-TU compile (objects stay in the ephemeral out dir). `--jobs` > 1 only schedules the same
+        # independent compiles concurrently (SEG-022-T004 owns the build-bridge scheduler); the sum of
+        # per-TU wall times is reported next to the elapsed stage wall.
+        import concurrent.futures
+        objects = [out / f"generated_{i:02d}.o" for i in range(len(units))]
+        stage_start = time.monotonic()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
+            results = list(pool.map(lambda pair: timed(flags + ["-I", str(shard_dir), "-c", "-o", str(pair[1]), str(pair[0])]),
+                                    zip(units, objects)))
+        stage_wall = round(time.monotonic() - stage_start, 2)
+        comp = {"returncode": next((r["returncode"] for r in results if r["returncode"] != 0), 0),
+                "wall_seconds": stage_wall, "peak_rss_bytes": max(r["peak_rss_bytes"] or 0 for r in results),
+                "stderr": next((r["stderr"] for r in results if r["returncode"] != 0), "")}
+        tu_stats = {"count": len(results), "jobs": max(1, args.jobs), "stage_wall_seconds": stage_wall,
+                    "sum_of_tu_wall_seconds": round(sum(r["wall_seconds"] for r in results), 2),
+                    "max_tu_wall_seconds": max(r["wall_seconds"] for r in results),
+                    "max_tu_peak_rss_bytes": max(r["peak_rss_bytes"] or 0 for r in results)}
+    else:
+        obj = out / "generated.o"
+        objects = [obj]
+        comp = timed(flags + ["-c", "-o", str(obj), str(src)])
+        tu_stats = None
     def failure_class(stats: dict) -> str | None:
         if stats["returncode"] == 0:
             return None
@@ -314,13 +362,15 @@ def measure(args) -> dict:
         "failure_class": failure_class(comp) or failure_class(rcomp),
         "opt": args.opt,
         "generated_tu": {k: comp[k] for k in ("returncode", "wall_seconds", "peak_rss_bytes")},
+        "translation_units": tu_stats,
         "runtime_tu": {k: rcomp[k] for k in ("returncode", "wall_seconds", "peak_rss_bytes")},
     }
     if comp["returncode"] == 0 and rcomp["returncode"] == 0:
         exe = out / "bridge"
-        link = timed([args.cc, "-o", str(exe), str(obj), str(robj)])
+        link = timed([args.cc, "-o", str(exe)] + [str(o) for o in objects] + [str(robj)])
         report["link"] = {k: link[k] for k in ("returncode", "wall_seconds", "peak_rss_bytes")}
-        report["artifact_bytes"] = {"generated_source": src.stat().st_size, "generated_object": obj.stat().st_size,
+        report["artifact_bytes"] = {"generated_source": sum(u.stat().st_size for u in units) if sharded else src.stat().st_size,
+                                    "generated_object": sum(o.stat().st_size for o in objects),
                                     "executable": exe.stat().st_size if exe.exists() else None}
     return report
 
@@ -345,6 +395,7 @@ def main() -> int:
     m.add_argument("--external-hints")
     m.add_argument("--out-dir", required=True)
     m.add_argument("--report")
+    m.add_argument("--jobs", type=int, default=1, help="concurrent per-TU compiles (sharded output only)")
     args = parser.parse_args()
     if args.cmd == "attribute":
         result = attribute(pathlib.Path(args.file))
