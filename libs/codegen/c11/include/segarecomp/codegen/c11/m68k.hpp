@@ -116,14 +116,17 @@ struct M68kMemoryEmissionContext {
   std::string_view runtime_object;
   std::string_view runtime_source;
   std::string_view runtime_provenance_helper;
-  std::vector<std::uint32_t> runtime_return_targets;
+  // SEG-022-T005: a non-owning view. The caller keeps the authoritative sorted vector alive across the
+  // `emit_m68k_operation_c` call, so a per-operation context never copies a whole-program-sized set.
+  std::span<const std::uint32_t> runtime_return_targets;
   // SEG-007-T124 / ADR-0009: the proven, sorted, deduplicated candidate
   // target set for a computed/indirect control transfer (currently JSR
   // through a brief PC-relative indexed EA), populated only by the C4
   // caller that already independently validated this exact source
   // instruction's retained `M68kIndirectTargetEaSet`. Empty for every other
   // operation.
-  std::vector<std::uint32_t> indirect_candidate_targets;
+  // SEG-022-T005: non-owning view (see `runtime_return_targets`).
+  std::span<const std::uint32_t> indirect_candidate_targets;
   // SEG-007-T174: true only for the ONE caller (frontend.cpp's shared
   // subtract/add/logical C4 case) that wraps its `emit_m68k_operation_c`
   // call with a `#define pc runtime->pc` / `#undef pc` text bridge. That

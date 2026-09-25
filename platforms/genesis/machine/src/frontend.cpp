@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <unordered_map>
 #include <utility>
 
 namespace segarecomp {
@@ -3910,23 +3911,27 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
       // prefix's own block count immediately before this erase pass runs.
       stitch_metrics.retained_block_count_before_pruning =
           static_cast<std::uint32_t>(prefix.static_blocks.size());
-      const auto block_contains = [](const M68kStaticBlock &block, Address address) {
-        return std::any_of(block.instructions.begin(), block.instructions.end(), [&](const auto &instruction) {
-          return instruction.source.address.value == address;
-        });
+      // SEG-022-T005: immutable indexes over the fixed `all_edges` sequence, built once from that
+      // authoritative sequence. Each maps a guest address to ascending positions in `all_edges`, so every
+      // consumer below visits exactly the edges the former whole-sequence scans matched, in the same order,
+      // and still applies its own unchanged predicate (retained-instruction membership etc.) per edge.
+      std::unordered_map<Address, std::vector<std::size_t>> edge_positions_by_source;
+      std::unordered_map<Address, std::vector<std::size_t>> program_edge_positions_by_target;
+      for (std::size_t position = 0; position < all_edges.size(); ++position) {
+        edge_positions_by_source[all_edges[position].source_instruction.source.address.value].push_back(position);
+        if (all_edges[position].target.space == TargetAddressSpace::m68k_program)
+          program_edge_positions_by_target[all_edges[position].target.value].push_back(position);
+      }
+      const auto any_edge_at = [&](const std::vector<std::size_t> &positions, const auto &predicate) {
+        for (const auto position : positions)
+          if (predicate(all_edges[position])) return true;
+        return false;
       };
-      // SEG-007-T183 / ADR-0028 §8: entry-connectivity pruning, mirroring
-      // `runtime_frontier_eligible`'s own ADR-0014 M1b breadth-first walk
-      // exactly (same seeds: ingress, IRQ6 handler entry, validated
-      // candidate roots; same successor relation: every retained block's own
-      // static edges plus the M1b call->continuation relation). At large
-      // multi-unit scale, widening edge-target safety (above) can leave a
-      // block that is itself edge-safe but only reachable through ANOTHER
-      // block whose own edge was unsafe (a caller that never completed, so
-      // its own call edge/frame never survive) -- a self-consistent but
-      // entirely disconnected island. Computed fresh each fixpoint round
-      // below (over the CURRENT `prefix.static_blocks`), since pruning one
-      // island can strand a block that was only reachable through it.
+      const auto edge_positions_from = [&](const auto &index, Address address) -> const std::vector<std::size_t> & {
+        static const std::vector<std::size_t> none;
+        const auto found = index.find(address);
+        return found == index.end() ? none : found->second;
+      };
       const auto currently_unreachable_entries = [&]() -> std::set<Address> {
         std::map<Address, std::vector<Address>> local_successors;
         std::set<Address> current_entries;
@@ -4047,8 +4052,9 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
           const auto terminal_decoded = decoded_by_address.find(terminal.source.address.value);
           if (terminal_decoded != decoded_by_address.end() &&
               terminal_decoded->second.kind == M68kInstructionKind::rts) {
-            const bool has_live_return_edge = std::any_of(
-                all_edges.begin(), all_edges.end(), [&](const M68kStaticEdge &edge) {
+            const bool has_live_return_edge = any_edge_at(
+                edge_positions_from(edge_positions_by_source, terminal.source.address.value),
+                [&](const M68kStaticEdge &edge) {
                   return edge.kind == M68kStaticEdgeKind::return_to_continuation &&
                          edge.source_instruction.source.address.value == terminal.source.address.value &&
                          edge.call &&
@@ -4086,7 +4092,8 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
             const bool has_ordinary_retained_predecessor =
                 stitch_metrics.offline_candidate_count != 0U &&
                 has_prospective_runtime_return_authority &&
-                std::any_of(all_edges.begin(), all_edges.end(), [&](const M68kStaticEdge &edge) {
+                any_edge_at(edge_positions_from(program_edge_positions_by_target, block.id.entry.value),
+                            [&](const M68kStaticEdge &edge) {
                   return edge.kind != M68kStaticEdgeKind::return_to_continuation &&
                          edge.target.space == TargetAddressSpace::m68k_program &&
                          edge.target.value == block.id.entry.value &&
@@ -4138,8 +4145,9 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
                                 return set.source_instruction.source.address.value == terminal.source.address.value;
               });
               if (!has_proven_indirect_target_set && !has_unproven_tier2_fact) {
-                const bool has_live_predecessor_edge = std::any_of(
-                    all_edges.begin(), all_edges.end(), [&](const M68kStaticEdge &edge) {
+                const bool has_live_predecessor_edge = any_edge_at(
+                    edge_positions_from(program_edge_positions_by_target, block.id.entry.value),
+                    [&](const M68kStaticEdge &edge) {
                   return edge.target.space == TargetAddressSpace::m68k_program &&
                          edge.target.value == block.id.entry.value &&
                          retained_instruction_addresses_now.contains(edge.source_instruction.source.address.value);
@@ -4151,8 +4159,16 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
             }
           }
           std::vector<CompletedPrefixUnsafeRelation> unsafe_relations;
-          for (const auto &edge : all_edges) {
-            if (!block_contains(block, edge.source_instruction.source.address.value)) continue;
+          std::vector<std::size_t> block_edge_positions;
+          for (const auto &instruction : block.instructions) {
+            const auto &positions = edge_positions_from(edge_positions_by_source, instruction.source.address.value);
+            block_edge_positions.insert(block_edge_positions.end(), positions.begin(), positions.end());
+          }
+          std::sort(block_edge_positions.begin(), block_edge_positions.end());
+          block_edge_positions.erase(std::unique(block_edge_positions.begin(), block_edge_positions.end()),
+                                     block_edge_positions.end());
+          for (const auto position : block_edge_positions) {
+            const auto &edge = all_edges[position];
             // SEG-007-T185 / ADR-0028 §8.2 (direct-control target preservation): a
             // `return_to_continuation` edge sourced at this block's own RTS whose
             // continuation block was pruned in an earlier fixpoint round is a dead
