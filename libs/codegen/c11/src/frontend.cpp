@@ -1943,7 +1943,8 @@ validated_immutable_rom_aot_entries(const FrontendAnalysis &analysis) {
     // `m68k_operation_is_runtime_owned_indirect_jump` (platforms/genesis/
     // machine/include/.../frontend.hpp) is the narrow, explicit bypass for
     // exactly this shape; every other kind still requires the unmodified
-    // `has_complete_c_emission` probe.
+    // `has_complete_c_emission` probe. SEG-021-T033: the same signal also
+    // covers pure register-indirect `(An)` JMP/JSR.
     const bool has_complete_emission = m68k_operation_has_complete_c_emission(entry.operation) ||
                                         m68k_operation_is_runtime_owned_indirect_jump(entry.operation);
     if (!m68k_operation_is_immutable_rom_aot_safe(entry.operation, return_target_authority_available) ||
@@ -1989,8 +1990,8 @@ std::optional<std::vector<Address>> immutable_rom_aot_exact_pc_obligations(
     break;
   case M68kPcEffectKind::none:
     // SEG-021-T027: the only admitted AOT candidate that ever reaches this
-    // function with `effect.pc == none` is the runtime-owned brief
-    // PC-indexed indirect JMP/JSR (`m68k_operation_is_immutable_rom_aot_
+    // function with `effect.pc == none` is the runtime-owned indirect
+    // JMP/JSR (brief PC-indexed, and since SEG-021-T033 pure `(An)`) (`m68k_operation_is_immutable_rom_aot_
     // safe` rejects every other kind before an entry can ever reach
     // `aot_entries` with this effect shape). Exactly like `observed_stack_
     // return` above, its target already has a stronger existing runtime
