@@ -60,9 +60,11 @@ int main() {
   CHECK(a == b);  // byte-identical across runs and directories: pure function of (family, key)
 
   // Bounded, exact layout: main first, then sorted.
-  std::ifstream manifest(base / "a" / "gen.units");
   std::vector<std::string> names;
-  for (std::string line; std::getline(manifest, line);) names.push_back(line);
+  {  // the stream must be closed before any later remove_all: Windows refuses to delete open files
+    std::ifstream manifest(base / "a" / "gen.units");
+    for (std::string line; std::getline(manifest, line);) names.push_back(line);
+  }
   CHECK(names.size() == 6U);
   CHECK(names[0] == "gen_main.c");
   CHECK(std::is_sorted(names.begin() + 1, names.end()));

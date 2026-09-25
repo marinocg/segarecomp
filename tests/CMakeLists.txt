@@ -819,6 +819,8 @@ add_executable(codegen_c11_translation_units_tests codegen_c11_translation_units
 target_link_libraries(codegen_c11_translation_units_tests PRIVATE segarecomp::codegen_c11)
 segarecomp_enable_warnings(codegen_c11_translation_units_tests)
 add_test(NAME codegen_c11_translation_units_tests COMMAND codegen_c11_translation_units_tests)
+# Safety net only (a portability regression must fail CI, not occupy a runner); the test takes well under a second.
+set_tests_properties(codegen_c11_translation_units_tests PROPERTIES TIMEOUT 30)
 add_executable(codegen_c11_shard_selection_tests codegen_c11_shard_selection_test.cpp)
 target_link_libraries(codegen_c11_shard_selection_tests PRIVATE segarecomp::codegen_c11_genesis)
 segarecomp_enable_warnings(codegen_c11_shard_selection_tests)
