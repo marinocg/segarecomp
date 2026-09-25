@@ -3272,16 +3272,19 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         (operation.source_ea.mode == M68kEaMode::pc_index8 || is_an_indirect_control)) {
       const auto &ea = operation.source_ea;
       if (memory == nullptr || !memory->runtime_routing || ea.index_is_address || ea.index_is_long ||
-          memory->indirect_candidate_targets.empty()) {
+          (!memory->use_shared_compiled_entry_lookup && memory->indirect_candidate_targets.empty())) {
         break;
       }
+      const bool shared_lookup = memory->use_shared_compiled_entry_lookup;
       const auto array_name = "m68k_indirect_targets_" + hex(operation.provenance.source.address.value, 8);
-      output << "static const uint32_t " << array_name << "[] = {";
-      for (std::size_t index = 0; index < memory->indirect_candidate_targets.size(); ++index) {
-        if (index != 0U) output << ", ";
-        output << "UINT32_C(0x" << hex(memory->indirect_candidate_targets[index], 8) << ")";
+      if (!shared_lookup) {
+        output << "static const uint32_t " << array_name << "[] = {";
+        for (std::size_t index = 0; index < memory->indirect_candidate_targets.size(); ++index) {
+          if (index != 0U) output << ", ";
+          output << "UINT32_C(0x" << hex(memory->indirect_candidate_targets[index], 8) << ")";
+        }
+        output << "};\n";
       }
-      output << "};\n";
       const auto base = static_cast<std::uint32_t>(static_cast<std::int64_t>(ea.pc_base_address) +
                                                      static_cast<std::int64_t>(ea.displacement));
       const auto index_expr = std::string(data_registers) + "[" + std::to_string(static_cast<unsigned>(ea.index_reg)) + "]";
@@ -3291,9 +3294,12 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
       else
         output << "{ const uint32_t m68k_indirect_ea = UINT32_C(0x" << hex(base, 8)
              << ") + (uint32_t)(int32_t)(int16_t)(uint16_t)(" << index_expr << ");\n";
-      output
-             << "  if (!m68k_indirect_target_member(" << array_name << ", (uint32_t)(sizeof(" << array_name
-             << ") / sizeof(" << array_name << "[0])), m68k_indirect_ea)) " << emit_runtime(*memory).unresolved_indirect_stop(*memory);
+      if (shared_lookup)
+        output << "  if (genesis_compiled_entry_lookup(m68k_indirect_ea) == NULL) "
+               << emit_runtime(*memory).unresolved_indirect_stop(*memory);
+      else
+        output << "  if (!m68k_indirect_target_member(" << array_name << ", (uint32_t)(sizeof(" << array_name
+               << ") / sizeof(" << array_name << "[0])), m68k_indirect_ea)) " << emit_runtime(*memory).unresolved_indirect_stop(*memory);
        if (operation.kind == M68kIrKind::jump_general) {
          output << "  " << memory->program_counter << " = m68k_indirect_ea;\n}\n";
          break;

@@ -7838,7 +7838,9 @@ void jmp_pc_indexed_word_aot_admission_and_dispatch_are_bounded() {
   const auto body_end = body_begin == std::string::npos ? std::string::npos : emitted.find("\n}\n", body_begin);
   const auto body = body_begin == std::string::npos || body_end == std::string::npos
                         ? std::string{} : emitted.substr(body_begin, body_end - body_begin);
-  expect(!body.empty() && body.find("m68k_indirect_target_member(") != std::string::npos &&
+  expect(!body.empty() && body.find("genesis_compiled_entry_lookup(m68k_indirect_ea) == NULL") != std::string::npos &&
+             body.find("m68k_indirect_target_member(") == std::string::npos &&
+             body.find("m68k_indirect_targets_") == std::string::npos &&
              body.find("(int32_t)(int16_t)(uint16_t)") != std::string::npos &&
              body.find("runtime->d[0]") != std::string::npos &&
              body.find("genesis_route_access") == std::string::npos,
