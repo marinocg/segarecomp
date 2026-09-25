@@ -16,6 +16,9 @@
 namespace segarecomp {
 namespace {
 // SEG-022-T003: the shared-header helper functions become `static inline` in a sharded build.
+// SEG-022-T008: bounded host-owner size (entries per generated AOT owner function).
+constexpr std::size_t aot_owner_max_entries = 128U;
+
 std::string shard_helper_linkage(bool sharded, std::string text) {
   if (sharded && text.starts_with("static ")) text.insert(7U, "inline ");
   return text;
@@ -728,7 +731,8 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
                                          const std::vector<std::uint32_t> &runtime_return_targets,
                                          const std::vector<std::uint32_t> &unrepresented_exact_pcs,
                                          const std::vector<std::uint32_t> &indirect_candidate_targets = {},
-                                         bool use_shared_compiled_entry_lookup = false);
+                                         bool use_shared_compiled_entry_lookup = false,
+                                         std::string_view owner_entry_label = {});
 std::optional<std::vector<Address>> immutable_rom_aot_exact_pc_obligations(
     const FrontendAnalysis::ImmutableRomAotEntry &entry);
 std::optional<std::map<Address, std::vector<Address>>> immutable_rom_aot_unrepresented_exact_pcs(
@@ -2014,15 +2018,21 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
                                           const std::vector<std::uint32_t> &runtime_return_targets,
                                           const std::vector<std::uint32_t> &unrepresented_exact_pcs,
                                           const std::vector<std::uint32_t> &indirect_candidate_targets,
-                                          bool use_shared_compiled_entry_lookup) {
+                                          bool use_shared_compiled_entry_lookup,
+                                          std::string_view owner_entry_label) {
   const auto address = entry.decoded.provenance.source.address.value;
   const auto cycle_expression = m68k_retirement_cycle_expression(entry.operation);
   if (!cycle_expression)
     return "/* translation rejected: immutable-ROM AOT timing is unaccounted */\n";
   std::ostringstream out;
-  out << "static GenesisControlTransfer genesis_aot_" << std::uppercase << std::hex
-      << std::setw(8) << std::setfill('0') << address << "(GenesisRuntime *runtime) {\n"
-      << "  uint32_t pc = runtime->pc;\n";
+  // SEG-022-T008: an owner-grouped entry is a labelled block inside a shared owner function; the
+  // block body (locals, lowering, retirement, every return) is exactly the standalone function body.
+  if (owner_entry_label.empty())
+    out << "static GenesisControlTransfer genesis_aot_" << std::uppercase << std::hex
+        << std::setw(8) << std::setfill('0') << address << "(GenesisRuntime *runtime) {\n";
+  else
+    out << owner_entry_label << ": {\n";
+  out << "  uint32_t pc = runtime->pc;\n";
   if (entry.operation.kind == M68kIrKind::dbcc_loop)
     out << "  uint8_t m68k_dbcc_took_branch = 0U;\n";
   const bool scc_dynamic_timing = entry.operation.kind == M68kIrKind::set_conditional &&
@@ -5700,6 +5710,44 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   // membership set as any other RTS in this program.
   const std::vector<std::uint32_t> immutable_rom_aot_runtime_return_targets(
       runtime_return_target_set.begin(), runtime_return_target_set.end());
+  // SEG-022-T008: in a sharded build admitted AOT entries are grouped, in ascending address order, into
+  // owners of at most `aot_owner_max_entries` entries. An owner is one external function (one unit, so one
+  // TU) whose `switch (runtime->pc)` enters exactly its own entries and fails closed for every other PC.
+  std::map<Address, std::string> aot_owner_of;
+  if (sharded) {
+    std::vector<Address> pending;
+    std::size_t owner_index = 0U;
+    const auto flush_owner = [&]() {
+      if (pending.empty()) return;
+      std::ostringstream name;
+      name << "genesis_aot_owner_" << std::setw(4) << std::setfill('0') << std::dec << owner_index++;
+      const std::string owner_name = name.str();
+      ShardUnitScope unit(out, "aot", pending.front(),
+                          "GenesisControlTransfer " + owner_name + "(GenesisRuntime *runtime)");
+      out << "static GenesisControlTransfer " << owner_name << "(GenesisRuntime *runtime) {\n  switch (runtime->pc) {\n";
+      for (const auto pc : pending)
+        out << "  case UINT32_C(" << hex(pc, 8) << "): goto genesis_aot_entry_" << std::uppercase << std::hex
+            << std::setw(8) << std::setfill('0') << pc << ";\n";
+      out << "  default: return genesis_internal_dispatch_inconsistency_stop(runtime);\n  }\n";
+      for (const auto pc : pending) {
+        std::ostringstream label;
+        label << "genesis_aot_entry_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << pc;
+        const auto body = emit_immutable_rom_aot_body(*aot_entries->at(pc), immutable_rom_aot_runtime_return_targets,
+                                                      aot_unrepresented_exact_pcs[pc], {}, true, label.str());
+        out << body;
+        aot_owner_of[pc] = owner_name;
+      }
+      out << "}\n";
+      pending.clear();
+    };
+    for (const auto &[address, entry] : *aot_entries) {
+      (void)entry;
+      if (ordinary_compiled_owners.contains(address)) continue;
+      pending.push_back(address);
+      if (pending.size() >= aot_owner_max_entries) flush_owner();
+    }
+    flush_owner();
+  } else
   for (const auto &[address, entry] : *aot_entries)
     if (!ordinary_compiled_owners.contains(address)) {
       ShardUnitScope unit(out, "aot", address, genesis_unit_declaration("genesis_aot_", address));
@@ -5719,7 +5767,10 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       const auto aot = aot_entries->find(address);
       if (aot == aot_entries->end())
         return "/* translation rejected: compiled entry lacks generated body */\n";
-      out << "genesis_aot_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address;
+      if (const auto owner = aot_owner_of.find(address); owner != aot_owner_of.end())
+        out << owner->second;
+      else
+        out << "genesis_aot_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address;
     }
     out << " },\n";
   }
