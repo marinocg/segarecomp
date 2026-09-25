@@ -274,8 +274,14 @@ def measure(args) -> dict:
     cmd += ["--immutable-rom-aot"]
     admitted_sink = out / "admitted_aot_addresses.txt"
     cmd += ["--immutable-aot-address-report", str(admitted_sink)]
-    with src.open("wb") as handle:
-        gen = timed(cmd, stdout=handle)
+    # SEG-022-T002: measure the canonical streaming path (never stdout redirection). No stale
+    # artifact may be accepted: remove any prior output before the emitter runs.
+    for stale in (src, pathlib.Path(str(src) + ".partial"), admitted_sink):
+        stale.unlink(missing_ok=True)
+    cmd += ["--generated-c-output", str(src)]
+    gen = timed(cmd)
+    if gen["returncode"] == 0 and (not src.is_file() or pathlib.Path(str(src) + ".partial").exists()):
+        gen["returncode"] = 1  # success without a complete artifact is a failure
     report: dict = {
         "schema": SCHEMA,
         "route": "external_hints" if args.external_hints else "no_external_hints",
@@ -284,6 +290,8 @@ def measure(args) -> dict:
         "emitter_metrics": parse_emitter_metrics(gen["stderr"]),
     }
     if gen["returncode"] != 0:
+        for leftover in (src, pathlib.Path(str(src) + ".partial"), admitted_sink):
+            leftover.unlink(missing_ok=True)
         return report
     report["source"] = attribute(src)
     addresses = [int(x, 16) for x in admitted_sink.read_text().split()]
@@ -346,6 +354,8 @@ def main() -> int:
         if args.report:
             pathlib.Path(args.report).write_text(json.dumps(result, indent=1, sort_keys=True) + "\n")
     print(json.dumps(result, indent=1, sort_keys=True))
+    if result.get("generation", {}).get("returncode", 0) != 0:
+        return 1  # a failed/incomplete generation is a failed measurement
     return 0
 
 
