@@ -144,6 +144,35 @@ def main():
         rc, out, _, d = build(t, jobs, "env")
         require(out == "10\n" and d.get("hits") == 2 and d.get("evicted", 0) >= 1, f"env/evict {d}")
         require(sum(p.stat().st_size for p in cache.glob("*/*.obj")) <= 1, "cache exceeds bound")
+
+        # Stale temporary files from an interrupted store are evicted; fresh ones are left alone.
+        os.environ[bridge.OBJECT_CACHE_MAX_BYTES_ENV] = str(1 << 30)
+        build(t, jobs, "refill")
+        shard = next(cache.glob("*/"))
+        stale, fresh = shard / "x.obj.1.1.tmp", shard / "y.obj.2.2.tmp"
+        stale.write_bytes(b"partial")
+        fresh.write_bytes(b"partial")
+        os.utime(stale, (0, 0))
+        rc, out, _, d = build(t, jobs, "tmpclean")
+        require(out == "10\n" and not stale.exists() and fresh.exists(), f"stale temp handling {d}")
+        fresh.unlink()
+
+        # Cache I/O failures never fail the build: a read-only cache that must evict (over cap) and a
+        # corrupt entry that cannot be deleted both still build correctly by recompiling.
+        if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() != 0:
+            dirs = [cache] + [p for p in cache.glob("*/") if p.is_dir()]
+            for e in cache.glob("*/*.obj"):
+                e.write_bytes(b"junk")
+            for p in dirs:
+                p.chmod(0o555)
+            try:
+                os.environ[bridge.OBJECT_CACHE_MAX_BYTES_ENV] = "1"
+                rc, out, _, d = build(t, jobs, "readonly")
+                require(rc == 0 and out == "10\n" and d.get("misses") == 2 and d.get("rejected") == 2
+                        and d.get("store_failed") == 2, f"read-only cache {d}")
+            finally:
+                for p in dirs:
+                    p.chmod(0o755)
     print("ok")
 
 

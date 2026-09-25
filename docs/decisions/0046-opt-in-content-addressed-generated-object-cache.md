@@ -33,9 +33,12 @@ previous build. Compilation of the sharded units is the largest host build cost 
    the SHA-256 of the object bytes, then the bytes; it is written to a temporary name and atomically
    renamed, and only after a successful compile. A hit is used only when the magic and digest verify;
    any unreadable, truncated, empty, foreign or mismatching entry is deleted and the unit is recompiled
-   normally (then re-stored). Cache I/O failures never fail the build.
+   normally (then re-stored). Cache I/O failures (read-only cache, an entry held open by another process
+   on Windows, a concurrent eviction) never fail the build: cache maintenance is best effort and the unit
+   is simply compiled.
 4. **Bounded disk use.** After each build the least-recently-used entries are evicted beyond
-   `SEGARECOMP_OBJECT_CACHE_MAX_BYTES` (default 4 GiB); a hit refreshes recency.
+   `SEGARECOMP_OBJECT_CACHE_MAX_BYTES` (default 4 GiB); a hit refreshes recency. Temporary files left by an
+   interrupted store are removed once older than an hour (younger ones may belong to a concurrent build).
 5. **Privacy.** The cache holds host objects compiled from generated C and inherits the out-dir's status:
    for commercial inputs it lives only in an ignored local location (e.g. `.cache/`), is never committed,
    published or used as evidence, and is outside the compare-runs artifact surface.
@@ -47,4 +50,8 @@ previous build. Compilation of the sharded units is the largest host build cost 
 - The identity describes the driver named by argv[0]; a wrapper that changes behavior without changing
   its reported `--version`/target (or a launcher whose argv[0] is an interpreter) is outside this
   contract. The bridge always invokes the selected C compiler directly.
+- The key includes the out-dir source path and cwd, so reuse happens within one out-dir/worktree (the
+  iterative-rebuild case); a different out-dir is always a (correct) miss.
+- Exporting `SEGARECOMP_OBJECT_CACHE_DIR` in a developer/CI environment also enables it under CTest; test
+  outcomes remain correct because every hit is verified and every miss compiles normally.
 - The non-sharded single-file path (small programs) is unchanged and uncached.

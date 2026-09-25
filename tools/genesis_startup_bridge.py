@@ -796,6 +796,7 @@ _OBJECT_CACHE_ENV_KEYS = ("SDKROOT", "DEVELOPER_DIR", "MACOSX_DEPLOYMENT_TARGET"
 _object_cache_dir_override: "pathlib.Path | None" = None
 _object_cache_stats: "dict[str, int]" = {}
 _compiler_identity_memo: "dict[tuple, bytes | None]" = {}
+_compiler_identity_lock = threading.Lock()
 
 
 def object_cache_dir() -> "pathlib.Path | None":
@@ -827,8 +828,13 @@ def compiler_identity(compiler: str, cwd: pathlib.Path) -> "bytes | None":
     env_part = tuple((k, os.environ.get(k)) for k in _OBJECT_CACHE_ENV_KEYS)
     resolved = shutil.which(compiler) or compiler
     memo_key = (compiler, os.path.realpath(resolved), env_part)
-    if memo_key in _compiler_identity_memo:
-        return _compiler_identity_memo[memo_key]
+    with _compiler_identity_lock:
+        if memo_key in _compiler_identity_memo:
+            return _compiler_identity_memo[memo_key]
+        return _compiler_identity_memo.setdefault(memo_key, _probe_compiler_identity(compiler, resolved, env_part, cwd))
+
+
+def _probe_compiler_identity(compiler: str, resolved: str, env_part: tuple, cwd: pathlib.Path) -> "bytes | None":
     identity: "bytes | None" = None
     try:
         version = subprocess.run([compiler, "--version"], capture_output=True, cwd=cwd, timeout=60)
@@ -838,7 +844,6 @@ def compiler_identity(compiler: str, cwd: pathlib.Path) -> "bytes | None":
                                    machine.stdout, json.dumps(env_part).encode()])
     except (OSError, subprocess.SubprocessError):
         identity = None
-    _compiler_identity_memo[memo_key] = identity
     return identity
 
 
@@ -872,6 +877,15 @@ def _object_cache_entry(cache: pathlib.Path, key: str) -> pathlib.Path:
     return cache / key[:2] / (key + ".obj")
 
 
+def _quiet_os(fn, *args, **kwargs) -> None:
+    """Cache maintenance is best effort: an OSError (read-only cache, file held open on Windows,
+    concurrent eviction) never fails the build."""
+    try:
+        fn(*args, **kwargs)
+    except OSError:
+        pass
+
+
 def object_cache_load(cache: pathlib.Path, key: str, dest: str) -> bool:
     """Copy a verified entry to dest. Any unreadable/truncated/corrupt entry is removed (fail safe)."""
     entry = _object_cache_entry(cache, key)
@@ -884,41 +898,57 @@ def object_cache_load(cache: pathlib.Path, key: str, dest: str) -> bool:
             and hashlib.sha256(blob[head:]).hexdigest().encode() == blob[len(_OBJECT_CACHE_MAGIC):head - 1]):
         try:
             pathlib.Path(dest).write_bytes(blob[head:])
-            os.utime(entry)  # recency for size-bounded eviction
         except OSError:
             return False
+        _quiet_os(os.utime, entry)  # recency for size-bounded eviction
         return True
     _count("rejected")
-    entry.unlink(missing_ok=True)
+    _quiet_os(entry.unlink, missing_ok=True)
     return False
 
 
 def object_cache_store(cache: pathlib.Path, key: str, obj: str) -> None:
     """Best effort; atomic replace so a concurrent reader never sees a partial entry."""
+    entry = _object_cache_entry(cache, key)
+    tmp = entry.with_name(f"{entry.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     try:
         data = pathlib.Path(obj).read_bytes()
-        entry = _object_cache_entry(cache, key)
         entry.parent.mkdir(parents=True, exist_ok=True)
-        tmp = entry.with_name(f"{entry.name}.{os.getpid()}.{threading.get_ident()}.tmp")
         tmp.write_bytes(_OBJECT_CACHE_MAGIC + hashlib.sha256(data).hexdigest().encode() + b"\n" + data)
         os.replace(tmp, entry)
         _count("stores")
     except OSError:
         _count("store_failed")
+        _quiet_os(tmp.unlink, missing_ok=True)
 
 
 def object_cache_trim(cache: pathlib.Path) -> None:
-    """Bound disk use: evict least-recently-used entries beyond the byte cap."""
+    """Bound disk use: evict least-recently-used entries beyond the byte cap. Temporary files left
+    by an interrupted store are counted and are evicted first once older than an hour."""
+    import time
+    entries = []
+    stale_before = time.time_ns() - 3600 * 10**9
     try:
-        entries = [(p.stat().st_mtime_ns, p.stat().st_size, p) for p in cache.glob("*/*.obj")]
+        for p in list(cache.glob("*/*.obj")) + list(cache.glob("*/*.tmp")):
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            stale_tmp = p.suffix == ".tmp" and st.st_mtime_ns < stale_before
+            if p.suffix == ".tmp" and not stale_tmp:
+                continue  # possibly an in-flight store by a concurrent build
+            entries.append((0 if stale_tmp else 1, st.st_mtime_ns, str(p), st.st_size, p))
     except OSError:
         return
-    total = sum(size for _, size, _ in entries)
+    total = sum(e[3] for e in entries)
     limit = _object_cache_max_bytes()
-    for _, size, path in sorted(entries, key=lambda e: (e[0], str(e[2]))):
-        if total <= limit:
+    for rank, _, _, size, path in sorted(entries):
+        if total <= limit and rank:
             break
-        path.unlink(missing_ok=True)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            continue
         total -= size
         _count("evicted")
 
