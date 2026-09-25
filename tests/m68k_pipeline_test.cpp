@@ -47,11 +47,12 @@ std::string expand_entry_rows(std::string text) {
   const auto addresses = section("genesis_compiled_entry_addresses");
   const auto ids = section("genesis_compiled_entry_owner_ids");
   const auto owners = section("genesis_compiled_owners");
-  text += "\n/* expanded compiled-entry rows */\n";
+  text += "\n/* expanded compiled-entry rows (test-only view; a C comment so it stays valid if printed)\n";
   for (std::size_t i = 0U; i < addresses.size() && i < ids.size(); ++i) {
     const auto id = static_cast<std::size_t>(std::stoul(ids[i].substr(ids[i].find('(') + 1U)));
     text += "{ " + addresses[i] + ", " + owners.at(id) + " }\n";
   }
+  text += "*/\n";
   return text;
 }
 template <typename Value>
@@ -5390,7 +5391,7 @@ int emit_t236_tier1_ownerless_rts_source() {
   const auto result = analyze_m68k_frontend(t236_ownerless_rts_program());
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -6796,7 +6797,7 @@ int emit_general_startup_runtime_c4_indirect_jsr_index8_source() {
   // (`emit_general_startup_runtime_c4_frontier_source`, which also emits
   // through `emit_m68k_general_startup_runtime_c`, never the standalone-CLI
   // `emit_m68k_general_startup_bridge_c`).
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -6846,7 +6847,7 @@ int emit_t028_case_c_pc_index_tier2_source() {
   const auto result = analyze_m68k_frontend(t028_case_c_fixture::make_program());
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -6904,7 +6905,7 @@ int emit_t028_orphan_tier2_source() {
   const auto result = analyze_m68k_frontend(t028_orphan_fixture::make_program());
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -18994,10 +18995,10 @@ int emit_general_startup_runtime_c3_source(std::string_view forge = {}) {
       forged.ir.front() = lift_m68k_instruction(decoded);
       forged.static_blocks.front().instructions.front() = decoded.provenance;
     } else return 1;
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*analysis));
+  std::cout << emit_m68k_general_startup_runtime_c(*analysis);
   return 0;
 }
 
@@ -19019,7 +19020,7 @@ int emit_general_startup_runtime_c4_discovery_boundary_multi_frame_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -19067,7 +19068,7 @@ int emit_general_startup_bridge_irq6_rte_source() {
     std::cerr << "irq6-rte bridge fixture did not resolve the IRQ6 handler\n";
     return 6;
   }
-  std::cout << expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  std::cout << emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
   return 0;
 }
 
@@ -19128,7 +19129,7 @@ int emit_general_startup_bridge_irq6_retirement_redirect_source(bool split_block
     continuation.target = {{}, kEntry + 2U};
     emitted.accepted_prefix.static_edges.push_back(continuation);
   }
-  std::cout << expand_entry_rows(emit_m68k_general_startup_bridge_c(emitted, std::string(64U, 'a')));
+  std::cout << emit_m68k_general_startup_bridge_c(emitted, std::string(64U, 'a'));
   return 0;
 }
 
@@ -19243,7 +19244,7 @@ int emit_general_startup_bridge_irq6_partial_prefix_rte_source() {
     std::cerr << "irq6-partial-prefix-rte fixture did not resolve the IRQ6 handler\n";
     return 6;
   }
-  std::cout << expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  std::cout << emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
   return 0;
 }
 
@@ -19292,7 +19293,7 @@ int emit_general_startup_bridge_irq6_partial_prefix_boundary_source() {
     std::cerr << "irq6-partial-prefix-boundary fixture did not resolve the IRQ6 handler\n";
     return 6;
   }
-  std::cout << expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  std::cout << emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
   return 0;
 }
 
@@ -19860,7 +19861,7 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
               !c4_dim_subtract_quick_indirect && !c4_dim_subtract_quick_absolute &&
               forge != "mid-block-target" && !call_return && !malformed_return && !multi_caller && !indirect_jsr &&
              !indirect_jmp && !immutable_offset_table) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(value));
+  std::cout << emit_m68k_general_startup_runtime_c(value);
   return 0;
 }
 
@@ -19884,7 +19885,7 @@ int emit_general_startup_runtime_c4_controller_io_source() {
   if (partial->accepted_prefix.static_memory_facts.size() != 1U ||
       partial->accepted_prefix.static_memory_facts.front().region != M68kAbsoluteOperandRegion::controller_io)
     return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -19913,7 +19914,7 @@ int emit_general_startup_runtime_c4_controller_io_minimal_source() {
       partial->accepted_prefix.static_memory_facts.size() != 1U ||
       partial->accepted_prefix.static_memory_facts.front().region != M68kAbsoluteOperandRegion::controller_io)
     return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -19928,7 +19929,7 @@ int emit_general_startup_runtime_c4_frontier_above_cap_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr || partial->frontiers.size() <= m68k_discovery_max_frontier_exits) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -19962,7 +19963,7 @@ int emit_general_startup_runtime_c4_z80_bus_store_source() {
       fact.region != M68kAbsoluteOperandRegion::routed_device ||
       fact.width != M68kMemoryAccessWidth::word)
     return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -19988,7 +19989,7 @@ int emit_general_startup_runtime_c4_vdp_source() {
       partial->accepted_prefix.static_memory_facts.front().region != M68kAbsoluteOperandRegion::vdp ||
       partial->accepted_prefix.static_memory_facts.front().width != M68kMemoryAccessWidth::word)
     return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -20013,7 +20014,7 @@ int emit_general_startup_runtime_c4_vdp_minimal_source() {
       partial->accepted_prefix.static_memory_facts.size() != 1U ||
       partial->accepted_prefix.static_memory_facts.front().region != M68kAbsoluteOperandRegion::vdp)
     return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -20067,7 +20068,7 @@ int emit_general_startup_runtime_c4_vdp_store_source(std::string_view variant = 
     if (partial != nullptr)
       for (const auto &fact : partial->accepted_prefix.static_memory_facts)
         if (fact.region == M68kAbsoluteOperandRegion::vdp) return 1;
-    if (partial != nullptr) std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+    if (partial != nullptr) std::cout << emit_m68k_general_startup_runtime_c(*partial);
     else std::cout << "/* byte VDP-window store is a frontier, not a routable prefix */\n";
     return 0;
   }
@@ -20083,7 +20084,7 @@ int emit_general_startup_runtime_c4_vdp_store_source(std::string_view variant = 
       fact.region != M68kAbsoluteOperandRegion::vdp ||
       fact.width != (variant == "long" ? M68kMemoryAccessWidth::long_word : M68kMemoryAccessWidth::word))
     return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -20105,7 +20106,7 @@ int emit_general_startup_runtime_c4_multi_exit_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr || partial->frontiers.size() != 2U) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 // SEG-007-T066: the diagnosed real-Sonic-ROM C4 terminal-transfer gap this
@@ -20154,11 +20155,11 @@ int emit_general_startup_runtime_c4_straight_line_block_source(std::string_view 
                                        [](const M68kStaticEdge &edge) { return edge.source_instruction.source.address.value == 0xB02U; });
     if (tst_edge == forged.accepted_prefix.static_edges.end()) return 1;
     forged.accepted_prefix.static_edges.push_back(*tst_edge);
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (!forge.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -20220,11 +20221,11 @@ int emit_general_startup_runtime_c4_movem_source(std::string_view forge = {}) {
         forged.accepted_prefix.ir.front().kind != M68kIrKind::movem_transfer)
       return 1;
     forged.accepted_prefix.ir.front().destination_ea.mode = M68kEaMode::data_register;
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (!forge.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -20301,19 +20302,19 @@ int emit_general_startup_runtime_c4_move_source(std::string_view forge = {}) {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.push_back(forged.accepted_prefix.static_memory_facts.front());
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (forge == "fact-unbound") {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.front().operation.source.address.value += 2U;
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (!forge.empty() && !predecrement && !postincrement) return 1;
   if (partial->accepted_prefix.static_blocks.size() != 1U || partial->frontiers.size() != 1U) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -20338,7 +20339,7 @@ int emit_general_startup_runtime_c4_move_byte_source() {
   if (partial == nullptr || partial->accepted_prefix.static_blocks.size() != 1U ||
       partial->frontiers.size() != 1U)
     return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -20413,18 +20414,18 @@ int emit_general_startup_runtime_c4_move_autoupdate_source(std::string_view forg
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.push_back(forged.accepted_prefix.static_memory_facts.front());
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (forge == "fact-unbound") {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.front().operation.source.address.value += 2U;
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (partial->accepted_prefix.static_blocks.size() != 1U || partial->frontiers.size() != 1U) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -20495,14 +20496,14 @@ int emit_general_startup_runtime_c4_andi_source(std::string_view forge = {}) {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.push_back(forged.accepted_prefix.static_memory_facts.front());
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (forge == "fact-unbound") {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.front().operation.source.address.value += 2U;
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (predecrement) {
@@ -20512,7 +20513,7 @@ int emit_general_startup_runtime_c4_andi_source(std::string_view forge = {}) {
   }
   if (!forge.empty() && !predecrement) return 1;
   if (partial->accepted_prefix.static_blocks.size() != 1U || partial->frontiers.size() != 1U) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -20549,14 +20550,14 @@ int emit_general_startup_runtime_c4_not_source(std::string_view forge = {}) {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.push_back(forged.accepted_prefix.static_memory_facts.front());
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (forge == "fact-unbound") {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.front().operation.source.address.value += 2U;
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (missing_fact) {
@@ -20591,7 +20592,7 @@ int emit_general_startup_runtime_c4_not_source(std::string_view forge = {}) {
   }
   if (!forge.empty()) return 1;
   if (partial->accepted_prefix.static_blocks.size() != 1U || partial->frontiers.size() != 1U) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21240,7 +21241,7 @@ int emit_general_startup_runtime_c4_add_bit_dbcc_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21292,7 +21293,7 @@ int emit_general_startup_runtime_c4_movea_source(std::string_view forge = {}) {
     forged.accepted_prefix.static_memory_facts.push_back(forged.accepted_prefix.static_memory_facts.back());
     const auto malformed = preflight_m68k_general_startup_c4(forged);
     if (malformed.valid) return 1;
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (forge == "fact-unbound") {
@@ -21301,7 +21302,7 @@ int emit_general_startup_runtime_c4_movea_source(std::string_view forge = {}) {
     forged.accepted_prefix.static_memory_facts.back().operation.source.address.value += 2U;
     const auto malformed = preflight_m68k_general_startup_c4(forged);
     if (malformed.valid) return 1;
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (forge == "fact-region" || forge == "fact-role") {
@@ -21311,7 +21312,7 @@ int emit_general_startup_runtime_c4_movea_source(std::string_view forge = {}) {
     if (forge == "fact-region") fact.region = M68kAbsoluteOperandRegion::raw_cartridge_rom;
     else fact.role = M68kStaticMemoryFactRole::destination_write;
     if (preflight_m68k_general_startup_c4(forged).valid) return 1;
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (forge == "fact-missing") {
@@ -21322,11 +21323,11 @@ int emit_general_startup_runtime_c4_movea_source(std::string_view forge = {}) {
         missing.rows.front().gap != M68kC4GapClass::missing_fact ||
         missing.rows.front().operand_role != M68kC4OperandRole::source)
       return 1;
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (forge != "" && forge != "predecrement" && forge != "postincrement" && forge != "aliasing") return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21406,7 +21407,7 @@ int emit_general_startup_runtime_c4_missing_routing_source() {
       row.auto_update != M68kC4AutoUpdateClass::none ||
       row.gap != M68kC4GapClass::missing_routing || row.predecessor != "genesis_route_access")
     return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21609,11 +21610,11 @@ int emit_general_startup_runtime_c4_movem_adjacent_lea_source(std::string_view f
     const auto preflight = preflight_m68k_general_startup_c4(emitted);
     if (forge == "interior-split-branch" || forge == "interior-split-ambiguous") {
       if (preflight.valid) return 3;
-      std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(emitted));
+      std::cout << emit_m68k_general_startup_runtime_c(emitted);
       return 0;
     }
     if (!preflight.valid || !preflight.rows.empty()) return 3;
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(emitted));
+    std::cout << emit_m68k_general_startup_runtime_c(emitted);
     return 0;
   }
   if (forge == "fact-duplicate") {
@@ -21623,7 +21624,7 @@ int emit_general_startup_runtime_c4_movem_adjacent_lea_source(std::string_view f
         forged.accepted_prefix.movem_adjacent_lea_facts.back());
     const auto malformed = preflight_m68k_general_startup_c4(forged);
     if (malformed.valid) return 1;
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   if (forge == "fact-unbound") {
@@ -21632,12 +21633,12 @@ int emit_general_startup_runtime_c4_movem_adjacent_lea_source(std::string_view f
     forged.accepted_prefix.movem_adjacent_lea_facts.back().consumer.source.address.value += 2U;
     const auto malformed = preflight_m68k_general_startup_c4(forged);
     if (malformed.valid) return 1;
-    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
+    std::cout << emit_m68k_general_startup_runtime_c(forged);
     return 0;
   }
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21670,7 +21671,7 @@ int emit_general_startup_runtime_c4_pc_indexed_move_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21690,7 +21691,7 @@ int emit_operation_c4_indexed_arithmetic_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21723,7 +21724,7 @@ int emit_operation_c4_pc_indexed_logical_source(std::string_view variant = "") {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21750,7 +21751,7 @@ int emit_operation_c4_muls_word_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21776,7 +21777,7 @@ int emit_operation_c4_mulu_word_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21800,7 +21801,7 @@ int emit_operation_c4_divs_word_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21824,7 +21825,7 @@ int emit_operation_c4_divu_word_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21852,7 +21853,7 @@ int emit_operation_c4_mulu_word_auto_update_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21876,7 +21877,7 @@ int emit_operation_c4_muls_word_auto_update_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21903,7 +21904,7 @@ int emit_operation_c4_divu_word_auto_update_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21931,7 +21932,7 @@ int emit_operation_c4_divs_word_pc_indexed_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21955,7 +21956,7 @@ int emit_operation_c4_divu_word_pc_indexed_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -21988,7 +21989,7 @@ int emit_general_startup_bridge_divide_by_zero_rte_source() {
     std::cerr << "divide fixture did not promote/vector-resolve\n";
     return 1;
   }
-  std::cout << expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  std::cout << emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
   return 0;
 }
 
@@ -22011,7 +22012,7 @@ int emit_general_startup_runtime_c4_indexed_lea_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 
@@ -22042,7 +22043,7 @@ int emit_general_startup_runtime_c4_pc_indexed_lea_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  std::cout << emit_m68k_general_startup_runtime_c(*partial);
   return 0;
 }
 } // namespace
@@ -27407,7 +27408,7 @@ int emit_general_startup_bridge_privilege_violation_source(std::string_view vari
     std::cerr << "privilege fixture vector-8 resolution mismatch\n";
     return 1;
   }
-  std::cout << expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  std::cout << emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
   return 0;
 }
 

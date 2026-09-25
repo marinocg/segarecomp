@@ -32,6 +32,7 @@ padding convention already used by
 tests/genesis_startup_bridge_c5_test.py's own fixture.
 """
 import json
+from compiled_entry_rows import rows
 import pathlib
 import subprocess
 import sys
@@ -207,8 +208,8 @@ def main() -> int:
             not in source_text or "resolved static read" in source_text or
             "genesis_block_00000B00(GenesisRuntime *runtime)" not in source_text or
             "genesis_block_00000B06(GenesisRuntime *runtime)" not in source_text or
-            "{ UINT32_C(0x00000B00), genesis_block_00000B00 }" not in source_text or
-            "{ UINT32_C(0x00000B06), genesis_block_00000B06 }" not in source_text):
+            "{ UINT32_C(0x00000B00), genesis_block_00000B00 }" not in rows(source_text) or
+            "{ UINT32_C(0x00000B06), genesis_block_00000B06 }" not in rows(source_text)):
         return fail(records)
 
     # C5-specific check: independently confirm, by inspecting the actual
