@@ -1953,7 +1953,7 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   memory.indirect_candidate_targets = indirect_candidate_targets;
   // SEG-022-T006: the sharded/C4 caller supplies no site-local copy; membership queries the one final
   // compiled-entry table.
-  memory.use_shared_compiled_entry_lookup = use_shared_compiled_entry_lookup;
+  if (use_shared_compiled_entry_lookup) memory.compiled_entry_lookup_symbol = "genesis_compiled_entry_lookup";
   // SEG-021-T005: an isolated AOT candidate has no whole-program absolute-
   // operand fact; absolute and d16(PC) source reads take the runtime-routed
   // read (never a folded constant).
