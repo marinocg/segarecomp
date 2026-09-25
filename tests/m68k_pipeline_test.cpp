@@ -7713,10 +7713,12 @@ using namespace segarecomp;
 constexpr std::uint32_t base = 0x00001000U;
 constexpr std::size_t entry_count = 300U;
 constexpr std::size_t unrepresented_index = 50U;  // one aligned PC inside the first owner's span
+constexpr std::size_t dynamic_call_index = 10U;   // JSR (0,PC,D0.W): an AOT-admitted dynamic call
 std::vector<std::uint8_t> make_image() {
   std::vector<std::uint8_t> bytes{0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U};
   for (std::size_t index = 0; index < entry_count; ++index) {
     if (index == unrepresented_index) bytes.insert(bytes.end(), {0x4EU, 0x72U, 0x27U, 0x10U});  // STOP: not AOT-safe
+    else if (index == dynamic_call_index) bytes.insert(bytes.end(), {0x4EU, 0xBBU, 0x00U, 0x00U});  // JSR (0,PC,D0.W)
     else bytes.insert(bytes.end(), {0x44U, 0x2DU, 0x00U, 0x00U});  // NEG.B (0,A5)
   }
   return bytes;

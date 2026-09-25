@@ -64,11 +64,34 @@ int main(void) {
     assert(t.kind == GENESIS_STOP && !inconsistent(t));
     assert(r.pc == UINT32_C(0x00001008) && r.a[5] == UINT32_C(0x00500000) && r.sr == UINT16_C(0x2700));
   }
-  /* Dynamic-target membership (the one authority every indirect JMP/JSR site consults): represented
-     targets inside owners are members, unrepresented aligned/odd PCs inside an owner span are not. */
-  assert(genesis_compiled_entry_lookup(UINT32_C(0x00001108)) != NULL);
-  assert(genesis_compiled_entry_lookup(UINT32_C(0x000010D0)) == NULL);
-  assert(genesis_compiled_entry_lookup(UINT32_C(0x000010D1)) == NULL);
+  /* Real dynamic call through owners: JSR (0,PC,D0.W) at 0x1030 (extension word at 0x1032, so target =
+     0x1032 + D0.W, return address 0x1034). Represented target in a different owner is accepted, pushes the
+     return address and enters exactly that entry (NEG.B (0,A5) retires to target+4). */
+  {
+    GenesisRuntime r = fresh(UINT32_C(0x00001030));
+    GenesisControlTransfer t;
+    assert(genesis_compiled_entry_lookup(UINT32_C(0x00001030)) != genesis_compiled_entry_lookup(%(rep_target)s));
+    r.d[0] = %(rep_target)s - UINT32_C(0x00001032);
+    t = genesis_bridge_dispatch(&r);
+    assert(t.kind == GENESIS_CONTINUE_AT_PC && r.pc == %(rep_target)s);
+    assert(r.a[7] == UINT32_C(0x00FF00FC));
+    assert(r.work_ram[0xFC] == 0U && r.work_ram[0xFD] == 0U && r.work_ram[0xFE] == UINT8_C(0x10) && r.work_ram[0xFF] == UINT8_C(0x34));
+    r.work_ram[0x70] = UINT8_C(1);
+    t = genesis_bridge_dispatch(&r);
+    assert(t.kind == GENESIS_CONTINUE_AT_PC && r.pc == %(rep_target)s + UINT32_C(4) && r.work_ram[0x70] == UINT8_C(0xFF));
+  }
+  /* Unrepresented aligned target inside the owner span fails closed with no call commit. */
+  {
+    GenesisRuntime r = fresh(UINT32_C(0x00001030)), before;
+    GenesisControlTransfer t;
+    r.d[0] = UINT32_C(0x000010D0) - UINT32_C(0x00001032);
+    r.work_ram[0xFC] = UINT8_C(0xAA); r.work_ram[0xFF] = UINT8_C(0x55);
+    before = r;
+    t = genesis_bridge_dispatch(&r);
+    assert(t.kind == GENESIS_STOP && t.stop.stop_class == GENESIS_STOP_UNRESOLVED_INDIRECT_TARGET);
+    assert(r.pc == before.pc && r.a[7] == before.a[7] && r.sr == before.sr && r.d[0] == before.d[0]);
+    assert(r.work_ram[0xFC] == UINT8_C(0xAA) && r.work_ram[0xFF] == UINT8_C(0x55) && r.work_ram[0xFD] == 0U && r.work_ram[0xFE] == 0U);
+  }
   /* Budgeted execution crossing an owner boundary stops resumably and resumes to the same result. */
   {
     GenesisRuntime whole = fresh(UINT32_C(0x000010FC)), split = fresh(UINT32_C(0x000010FC));
@@ -78,6 +101,18 @@ int main(void) {
     b = genesis_runtime_run(&split, genesis_bridge_dispatch, 5U);
     assert(a.kind == b.kind && whole.pc == split.pc && whole.sr == split.sr && whole.d[0] == split.d[0] && whole.a[5] == split.a[5]);
     assert(whole.pc > UINT32_C(0x00001108));
+    {
+      GenesisRuntime walk = fresh(UINT32_C(0x000010FC));
+      GenesisCompiledEntry seen[8]; size_t n = 0U, distinct = 0U, k, j;
+      for (k = 0; k < 8U; ++k) {
+        seen[k] = genesis_compiled_entry_lookup(walk.pc);
+        assert(seen[k] != NULL);
+        (void)genesis_bridge_dispatch(&walk);
+      }
+      for (k = 0; k < 8U; ++k) { int dup = 0; for (j = 0; j < k; ++j) dup |= seen[j] == seen[k]; if (!dup) ++distinct; }
+      (void)n;
+      assert(distinct >= 2U && walk.pc == whole.pc);
+    }
   }
   puts("aot owner harness OK");
   return 0;
@@ -122,12 +157,13 @@ def main():
         gaps = [pc for pc in range(lo, hi, 2) if pc not in aot_pcs and pc not in compiled]
         assert 0x10D0 in gaps
         per_owner = 128
+        rep_target = next(pc for pc in baseline if pc > 0x1180 and (pc - 0x1008) % 4 == 0)
         probes = sorted({baseline[0], baseline[len(baseline) // 2], baseline[per_owner - 1], baseline[per_owner],
                          baseline[2 * per_owner - 1], baseline[2 * per_owner], baseline[-1]})
         fmt = lambda values: ", ".join("UINT32_C(0x%08X)" % v for v in values) or "UINT32_C(0)"
         sample = baseline[:: max(1, len(baseline) // 64)] + [baseline[-1]]
         (tmp / "harness.c").write_text(HARNESS % {"represented": fmt(sample), "unrepresented": fmt([0x10D0, 0x0FF0, hi + 2, 0x1009]),
-                                                  "probes": fmt(probes)})
+                                                  "probes": fmt(probes), "rep_target": "UINT32_C(0x%08X)" % rep_target})
         flags = ["-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-O0", "-I", str(runtime), "-I", str(out)]
         objects = []
         for index, source in enumerate([out / n for n in units] + [tmp / "harness.c", runtime / "runtime.c"]):
