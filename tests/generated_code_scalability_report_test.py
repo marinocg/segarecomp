@@ -39,9 +39,17 @@ const uint32_t v = 2;
     return retired;
   }
 }
-static const GenesisCompiledEntryRecord genesis_compiled_entries[] = {
-  { UINT32_C(0x00000010), genesis_block_00000010 },
-  { UINT32_C(0x00000020), genesis_aot_00000020 }
+static const uint32_t genesis_compiled_entry_addresses[] = {
+  UINT32_C(0x00000010),
+  UINT32_C(0x00000020),
+};
+static const uint8_t genesis_compiled_entry_owner_ids[] = {
+  UINT8_C(0),
+  UINT8_C(1),
+};
+static const GenesisCompiledEntry genesis_compiled_owners[] = {
+  genesis_block_00000010,
+  genesis_aot_00000020,
 };
 static const uint8_t genesis_owned_region_data_0[] = { UINT8_C(0) };
 int main(void) { return 0; }
@@ -101,8 +109,9 @@ if mode == "shard":   # SEG-022-T003: a large program is emitted as a translatio
     open(sd + "/bridge_generated.h", "w").write("#ifndef H\n#endif\n")
     open(sd + "/bridge_generated_main.c", "w").write("int main(void) { return 0; }\n")
     open(sd + "/bridge_generated_entries_00.c", "w").write(
-        "static const GenesisCompiledEntryRecord genesis_compiled_entries[] = {\n"
-        "  { UINT32_C(0x00000004), genesis_block_00000004 },\n  { UINT32_C(0x00000006), genesis_aot_00000006 },\n};\n")
+        "static const uint32_t genesis_compiled_entry_addresses[] = {\n  UINT32_C(0x00000004),\n  UINT32_C(0x00000006),\n};\n"
+        "static const uint8_t genesis_compiled_entry_owner_ids[] = {\n  UINT8_C(0),\n  UINT8_C(1),\n};\n"
+        "static const GenesisCompiledEntry genesis_compiled_owners[] = {\n  genesis_block_00000004,\n  genesis_aot_00000006,\n};\n")
     open(sd + "/bridge_generated.units", "w").write("bridge_generated_main.c\nbridge_generated_entries_00.c\n")
     raise SystemExit(0)
 if mode == "fail":

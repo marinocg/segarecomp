@@ -22,6 +22,38 @@
 #include <vector>
 
 namespace {
+// SEG-022-T009: the compiled-entry lookup is now three compact parallel tables (sorted addresses, owner
+// ids, owner symbols). Existing assertions reason about "address -> owner" rows, so every emitted-C string
+// is returned with one synthetic `{ UINT32_C(0xADDR), owner }` line per resolved table entry appended after
+// a marker comment; a rejection is returned untouched. All emission calls are wrapped uniformly, so
+// determinism comparisons stay like-for-like.
+std::string expand_entry_rows(std::string text) {
+  if (text.starts_with("/* translation rejected")) return text;
+  const auto section = [&](const std::string &name) -> std::vector<std::string> {
+    std::vector<std::string> lines;
+    const auto start = text.find(name + "[] = {\n");
+    if (start == std::string::npos) return lines;
+    auto cursor = start + name.size() + 7U;
+    while (cursor < text.size() && text.compare(cursor, 2U, "};") != 0) {
+      const auto end = text.find('\n', cursor);
+      auto line = text.substr(cursor, end - cursor);
+      line.erase(0, line.find_first_not_of(' '));
+      if (line.ends_with(",")) line.pop_back();
+      lines.push_back(line);
+      cursor = end + 1U;
+    }
+    return lines;
+  };
+  const auto addresses = section("genesis_compiled_entry_addresses");
+  const auto ids = section("genesis_compiled_entry_owner_ids");
+  const auto owners = section("genesis_compiled_owners");
+  text += "\n/* expanded compiled-entry rows */\n";
+  for (std::size_t i = 0U; i < addresses.size() && i < ids.size(); ++i) {
+    const auto id = static_cast<std::size_t>(std::stoul(ids[i].substr(ids[i].find('(') + 1U)));
+    text += "{ " + addresses[i] + ", " + owners.at(id) + " }\n";
+  }
+  return text;
+}
 template <typename Value>
 concept HasCpuFrontier = requires(Value value) { value.cpu_frontier; };
 
@@ -2886,7 +2918,7 @@ void general_startup_promotes_a_reset_cpu_frontier_after_a_completed_block() {
   expect(partial->accepted_prefix.static_blocks.size() == 1U &&
              partial->accepted_prefix.static_blocks.front().id.entry.value == 0xB60U,
          "the retained prefix contains only the completed predecessor block and excludes the RESET frontier");
-  const auto emitted = segarecomp::emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(segarecomp::emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.find("GENESIS_CPU_DIMENSIONS_RESET") != std::string::npos,
          "the emitted C for a promoted RESET frontier references GENESIS_CPU_DIMENSIONS_RESET");
 }
@@ -3021,7 +3053,7 @@ void general_startup_retains_move_an_to_usp_before_a_later_cpu_frontier() {
                  segarecomp::M68kCpuFrontierKind::reset,
          "MOVE An,USP is retained before the following independent CPU frontier");
   if (partial == nullptr) return;
-  const auto emitted = segarecomp::emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(segarecomp::emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.find("runtime->usp = runtime->a[0];") != std::string::npos &&
              emitted.find("GENESIS_CPU_DIMENSIONS_RESET") != std::string::npos &&
              emitted.find("GENESIS_CPU_DIMENSIONS_MOVE_AN_TO_USP") == std::string::npos,
@@ -3100,7 +3132,7 @@ void general_startup_bridge_extended_accepts_a_non_d0_moveq() {
          "a non-D0 MOVEQ followed by a self-looping BRA closes into one fully discovered block");
   if (analysis == nullptr) return;
 
-  const auto emitted = segarecomp::emit_m68k_general_startup_bridge_c(*analysis, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(segarecomp::emit_m68k_general_startup_bridge_c(*analysis, std::string(64U, 'a')));
   expect(!emitted.starts_with("/* translation rejected"),
          "bridge_extended no longer rejects a non-D0 MOVEQ destination register");
   expect(emitted.find("runtime->d[2] = UINT32_C(0x00000005);") != std::string::npos,
@@ -3366,7 +3398,7 @@ void general_startup_retains_move_to_sr_before_a_later_cpu_frontier() {
                  segarecomp::M68kCpuFrontierKind::reset,
          "MOVE #imm,SR is retained before the following independent CPU frontier");
   if (partial == nullptr) return;
-  const auto emitted = segarecomp::emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(segarecomp::emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.find("m68k_sr_new = (uint16_t)((UINT32_C(0x00001234)) & UINT32_C(0xA71F));") != std::string::npos &&
              emitted.find("runtime->sr = m68k_sr_new;") != std::string::npos &&
              emitted.find("GENESIS_CPU_DIMENSIONS_RESET") != std::string::npos,
@@ -3399,7 +3431,7 @@ void general_startup_retains_move_from_sr_before_a_later_cpu_frontier() {
                  segarecomp::M68kCpuFrontierKind::reset,
          "MOVE SR,D0 is retained before the following independent CPU frontier");
   if (partial == nullptr) return;
-  const auto emitted = segarecomp::emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(segarecomp::emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.find("runtime->d[0] = (runtime->d[0] & UINT32_C(0xFFFF0000)) | (((uint32_t)(uint16_t)runtime->sr) "
                       "& UINT32_C(0xFFFF));") != std::string::npos &&
              emitted.find("runtime->sr = ") == std::string::npos &&
@@ -3544,7 +3576,7 @@ void general_startup_retains_move_to_ccr_before_a_later_cpu_frontier() {
                  segarecomp::M68kCpuFrontierKind::reset,
          "MOVE D0,CCR is retained before the following independent CPU frontier");
   if (partial == nullptr) return;
-  const auto emitted = segarecomp::emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(segarecomp::emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.find("runtime->sr = (uint16_t)((runtime->sr & UINT16_C(0xFF00)) | ((runtime->d[0]) & "
                       "UINT16_C(0x001F)));") != std::string::npos &&
              emitted.find("GENESIS_CPU_DIMENSIONS_RESET") != std::string::npos,
@@ -3954,7 +3986,7 @@ void general_startup_retains_indexed_move_before_a_later_cpu_frontier() {
                  M68kCpuFrontierKind::reset,
          "the indexed-source MOVE.B is retained before the following independent CPU frontier");
   if (partial == nullptr) return;
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.find("(int32_t)(int16_t)(uint16_t)") != std::string::npos &&
              emitted.find("GENESIS_CPU_DIMENSIONS_RESET") != std::string::npos,
          "bridge emission lowers the retained indexed MOVE.B through the shared runtime EA owner");
@@ -4260,7 +4292,7 @@ void general_startup_retains_pc_indexed_move_before_a_later_cpu_frontier() {
                  M68kCpuFrontierKind::reset,
          "the PC-indexed-source MOVEA.L is retained before the following independent CPU frontier");
   if (partial == nullptr) return;
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.find("(int32_t)(int16_t)(uint16_t)") != std::string::npos &&
              emitted.find("GENESIS_CPU_DIMENSIONS_RESET") != std::string::npos,
          "bridge emission lowers the retained PC-indexed MOVEA.L through the shared runtime EA owner");
@@ -4826,7 +4858,7 @@ void general_startup_retains_indexed_adda_before_a_later_cpu_frontier() {
                  M68kCpuFrontierKind::reset,
          "the indexed-source ADDA.W is retained before the following independent CPU frontier");
   if (partial == nullptr) return;
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.starts_with("/* translation rejected:") &&
              emitted.find("genesis_route_access(runtime,") != std::string::npos,
          "C4 lowers the retained indexed ADDA.W through the existing routed block dispatcher");
@@ -4889,8 +4921,8 @@ void general_startup_resolves_a_pc_indexed_jsr_through_its_proven_candidate_set(
              }) &&
              prefix.static_frames[0].call.callee.value != prefix.static_frames[1].call.callee.value,
          "each candidate owns its own candidate-specific call/frame identity sharing the common continuation");
-  const auto first = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
-  const auto second = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto first = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  const auto second = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(first == second && !first.empty(), "the multi-candidate indirect JSR emission is byte-for-byte deterministic");
   expect(first.find("static const uint32_t m68k_indirect_targets_00000B04[] = {UINT32_C(0x00000B0A), "
                     "UINT32_C(0x00000B0C)};") != std::string::npos,
@@ -4975,7 +5007,7 @@ void general_startup_admits_a_far_indirect_candidate_via_its_own_independent_roo
              partial->frontiers.front().diagnostic.provenance->source.address.value == far_candidate_address,
          "the represented discovery_prefix_boundary is exactly the far candidate's own address");
   (void)continuation_address;
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.starts_with("/* translation rejected:"),
          "SEG-007-T172 fix: C4 emission no longer rejects a proven finite indirect target set merely because "
          "one candidate is represented as this program's own frontier exit instead of a retained block");
@@ -5051,7 +5083,7 @@ void general_startup_admits_a_candidate_whose_closure_reaches_an_existing_c4_blo
   // at it.
   auto forged = *partial;
   forged.accepted_prefix.static_memory_facts.clear();
-  const auto emitted = emit_m68k_general_startup_runtime_c(forged);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
   expect(!emitted.starts_with("/* translation rejected:"),
          "C4 emission does not reject the whole prefix merely because one candidate's closure reaches an "
          "existing, already-represented c4_block_stops node deeper than its own entry");
@@ -5108,7 +5140,7 @@ void general_startup_resolves_a_pc_indexed_jmp_through_its_proven_candidate_set(
            return edge.kind == M68kStaticEdgeKind::indirect_branch;
          }) == 2U && prefix.static_frames.empty(),
          "JMP emits one indirect branch edge per candidate and no call frame");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.starts_with("/* translation rejected:") &&
              emitted.find("m68k_indirect_target_member(m68k_indirect_targets_00000B04,") != std::string::npos,
          "C4 lowers the proved indirect JMP through the same membership guard");
@@ -5182,8 +5214,8 @@ void general_startup_resolves_a_jmp_dispatch_to_rts_candidates_inside_a_jsr_fram
   expect(return_edge_count == 2,
          "SEG-007-T231 fix: both candidate RTS instructions receive a `return_to_continuation` edge under the "
          "JSR's ORIGINAL enclosing (caller, callee, continuation) identity, never a fabricated new frame");
-  const auto first = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
-  const auto second = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto first = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  const auto second = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(first == second && !first.empty() && !first.starts_with("/* translation rejected:"),
          "the fixed representation is byte-for-byte deterministic");
   expect(first.find("genesis_block_00000B12") != std::string::npos &&
@@ -5254,7 +5286,7 @@ void general_startup_jmp_dispatch_with_one_orphan_rts_candidate_stays_unresolved
            return block.id.entry.value == 0x00000B0EU;
          }),
          "the orphaned RTS candidate's own block is pruned (SEG-007-T183/ADR-0028 Sec 8), not resurrected");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.starts_with("/* translation rejected:") &&
              emitted.find("genesis_block_00000B0E") == std::string::npos,
          "the orphaned candidate is never fabricated into an ordinary dispatchable block");
@@ -5320,8 +5352,8 @@ void general_startup_runtime_routes_a_tier1_ownerless_rts_through_existing_membe
                       edge.source_instruction.source.address.value == 0x00000B30U;
              }), "ownerless retention fabricates neither a frame nor a return_to_continuation edge");
 
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
-  const auto repeated = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  const auto repeated = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted == repeated && !emitted.starts_with("/* translation rejected:"),
          "Tier-1 ownerless-RTS C4 emission is deterministic and representable");
   expect(emitted.find("genesis_block_00000B30") != std::string::npos &&
@@ -5338,7 +5370,7 @@ void general_startup_runtime_routes_a_tier1_ownerless_rts_through_existing_membe
   std::erase_if(no_predecessor.accepted_prefix.static_edges, [](const M68kStaticEdge &edge) {
     return edge.kind == M68kStaticEdgeKind::indirect_branch && edge.target.value == 0x00000B30U;
   });
-  const auto rejected = emit_m68k_general_startup_bridge_c(no_predecessor, std::string(64U, 'a'));
+  const auto rejected = expand_entry_rows(emit_m68k_general_startup_bridge_c(no_predecessor, std::string(64U, 'a')));
   expect(rejected.starts_with("/* translation rejected:") ||
              rejected.find("genesis_tier1_indirect_stop_00000B16") != std::string::npos,
          "without an ordinary retained predecessor the ownerless RTS remains fail-closed");
@@ -5358,7 +5390,7 @@ int emit_t236_tier1_ownerless_rts_source() {
   const auto result = analyze_m68k_frontend(t236_ownerless_rts_program());
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -5415,8 +5447,8 @@ void general_startup_resolves_a_shift_and_self_add_narrowed_pc_indexed_jmp() {
            return edge.kind == M68kStaticEdgeKind::indirect_branch;
          }) == 2U && prefix.static_frames.empty(),
          "JMP emits one indirect branch edge per candidate and no call frame");
-  const auto first = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
-  const auto second = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto first = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  const auto second = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(first == second && !first.empty() && !first.starts_with("/* translation rejected:") &&
              first.find("m68k_indirect_target_member(m68k_indirect_targets_00000B08,") != std::string::npos,
          "the existing, unmodified C4 indirect-target-set machinery consumes the shift/self-add-narrowed proof "
@@ -5584,8 +5616,8 @@ void general_startup_resolves_an_an_indirect_jmp_through_its_proven_single_targe
            return edge.kind == M68kStaticEdgeKind::indirect_branch;
          }) == 1U && prefix.static_frames.empty(),
          "one indirect_branch edge per proven candidate and no call frame");
-  const auto first = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
-  const auto second = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto first = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  const auto second = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(first == second && !first.starts_with("/* translation rejected:"),
          "the An-indirect JMP emission is byte-for-byte deterministic and accepted");
   expect(first.find("static const uint32_t m68k_indirect_targets_00000B06[] = {UINT32_C(0x00000B0C)};") !=
@@ -5630,7 +5662,7 @@ void general_startup_resolves_an_an_indirect_jmp_through_a_conditional_adda_two_
            return edge.kind == M68kStaticEdgeKind::indirect_branch;
          }) == 2U && prefix.static_frames.empty(),
          "one indirect_branch edge per proven candidate and no call frame");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.starts_with("/* translation rejected:") &&
              emitted.find("static const uint32_t m68k_indirect_targets_00000B0C[] = {UINT32_C(0x00000B10), "
                           "UINT32_C(0x00000B14)};") != std::string::npos,
@@ -5672,7 +5704,7 @@ void general_startup_resolves_an_an_indirect_jmp_through_a_negative_adda_displac
              fact.candidates.size() == 2U && fact.candidates[0].value == 0x00000B10U &&
              fact.candidates[1].value == 0x00000B14U,
          "the sign-extended ADDA.W #-4,A0 path yields exactly the sorted two-member proven set");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.starts_with("/* translation rejected:") &&
              emitted.find("static const uint32_t m68k_indirect_targets_00000B0C[] = {UINT32_C(0x00000B10), "
                           "UINT32_C(0x00000B14)};") != std::string::npos,
@@ -5801,8 +5833,8 @@ void general_startup_route_without_a_provable_an_indirect_transfer_emits_no_indi
     expect(std::get_if<FrontendRejected>(&result) != nullptr, "an unprovable An-indirect JSR fails closed");
     return;
   }
-  const auto first = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
-  const auto second = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto first = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  const auto second = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(first == second, "the unprovable-An-indirect emission is deterministic");
   expect(first.find("m68k_indirect_target") == std::string::npos,
          "no indirect-target array or membership guard is emitted for an unprovable An-indirect transfer");
@@ -5835,8 +5867,8 @@ void general_startup_resolves_an_an_indirect_jsr_through_its_proven_candidate_wi
              prefix.static_frames.front().call.continuation.value == 0x00000B08U &&
              prefix.static_frames.front().call.callee.value == 0x00000B0CU,
          "one indirect_call edge and one candidate-specific frame with the common continuation");
-  const auto first = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
-  const auto second = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto first = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  const auto second = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(first == second && !first.starts_with("/* translation rejected:"),
          "the An-indirect JSR emission is deterministic and accepted");
   expect(first.find("static const uint32_t m68k_indirect_targets_00000B06[] = {UINT32_C(0x00000B0C)};") !=
@@ -6099,7 +6131,7 @@ void tier2_candidate_inventory_validates_and_emits_new_code() {
       std::any_of(prefix.static_blocks.begin(), prefix.static_blocks.end(),
                   [](const M68kStaticBlock &block) { return block.id.entry.value == candidate_address; });
   expect(candidate_block_retained, "the candidate's own independently walked block is retained in the accepted prefix");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   std::ostringstream block_name;
   block_name << "genesis_block_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << candidate_address;
   expect(emitted.find(block_name.str()) != std::string::npos,
@@ -6122,8 +6154,8 @@ void tier2_false_positive_candidate_is_excluded_and_never_becomes_authority() {
   if (baseline == nullptr || with_false_positive == nullptr) return;
   expect(with_false_positive->accepted_prefix.validated_code_entry_candidate_roots.empty(),
          "a false-positive candidate never becomes a validated code-entry-candidate root");
-  const auto baseline_emitted = emit_m68k_general_startup_bridge_c(*baseline, std::string(64U, 'a'));
-  const auto false_positive_emitted = emit_m68k_general_startup_bridge_c(*with_false_positive, std::string(64U, 'a'));
+  const auto baseline_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*baseline, std::string(64U, 'a')));
+  const auto false_positive_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*with_false_positive, std::string(64U, 'a')));
   expect(baseline_emitted == false_positive_emitted && !baseline_emitted.empty(),
          "an excluded false-positive candidate never changes the emitted program at all");
 }
@@ -6189,8 +6221,8 @@ void tier2_mapped_but_invalid_decode_candidate_is_excluded_and_never_becomes_aut
                   [](const M68kStaticBlock &block) { return block.id.entry.value == invalid_decode_address; });
   expect(!invalid_address_became_a_block,
          "the mapped-but-invalid-decode candidate's own address never becomes a retained block entry");
-  const auto baseline_emitted = emit_m68k_general_startup_bridge_c(*baseline, std::string(64U, 'a'));
-  const auto false_positive_emitted = emit_m68k_general_startup_bridge_c(*with_false_positive, std::string(64U, 'a'));
+  const auto baseline_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*baseline, std::string(64U, 'a')));
+  const auto false_positive_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*with_false_positive, std::string(64U, 'a')));
   expect(baseline_emitted == false_positive_emitted && !baseline_emitted.empty(),
          "a mapped-but-invalid-decode false-positive candidate never changes the emitted program at all, "
          "proving mapped-address plausibility alone is never treated as authority");
@@ -6283,7 +6315,7 @@ void tier2_leaves_tier1_finite_target_set_behavior_unchanged() {
   if (partial == nullptr) return;
   expect(partial->accepted_prefix.unproven_indirect_control_ea_sets.empty(),
          "a fully proven Tier-1 site never also records a Tier-2 unproven fact");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.find("m68k_indirect_target_member(m68k_indirect_targets_00000B08,") != std::string::npos,
          "Tier 1's own membership guard is still emitted exactly as before");
   expect(emitted.find("GENESIS_DIAG_TIER2_COMPUTED_TARGET_NOT_EMITTED") == std::string::npos &&
@@ -6303,7 +6335,7 @@ void tier2_computed_target_inside_emitted_set_dispatches_successfully() {
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   expect(partial != nullptr, "the Tier-2 fixture with a matching candidate reaches a partial program");
   if (partial == nullptr) return;
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   std::ostringstream suffix;
   suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jsr_address;
   const auto array_name = "genesis_emitted_code_addresses_" + suffix.str();
@@ -6334,7 +6366,7 @@ void tier2_computed_target_outside_emitted_set_fails_closed_with_precise_diagnos
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   expect(partial != nullptr, "the Tier-2 fixture with an unrelated candidate reaches a partial program");
   if (partial == nullptr) return;
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   std::ostringstream suffix;
   suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jsr_address;
   const auto array_name = "genesis_emitted_code_addresses_" + suffix.str();
@@ -6362,7 +6394,7 @@ void tier2_never_fetches_or_decodes_a_rom_opcode_at_runtime() {
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   expect(partial != nullptr, "the Tier-2 fixture reaches a partial program");
   if (partial == nullptr) return;
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   std::ostringstream suffix;
   suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jsr_address;
   const auto function_start = emitted.find("genesis_frontier_stop_" + suffix.str() + "(GenesisRuntime *runtime) {");
@@ -6424,7 +6456,7 @@ void t179_pure_an_indirect_tier2_computed_target_inside_emitted_set_dispatches()
       tier2_fact = true;
   expect(tier2_fact,
          "ADR-0025: the pure (An) site records the weaker unproven Tier-2 control-EA fact (reg 0, not a call)");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   std::ostringstream suffix;
   suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jmp_address;
   const auto array_name = "genesis_emitted_code_addresses_" + suffix.str();
@@ -6447,7 +6479,7 @@ void t179_pure_an_indirect_tier2_target_outside_emitted_set_fails_closed() {
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   expect(partial != nullptr, "the pure (An) Tier-2 fixture with only a reset-entry candidate reaches a partial");
   if (partial == nullptr) return;
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   std::ostringstream suffix;
   suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jmp_address;
   expect(emitted.find("genesis_emitted_code_addresses_" + suffix.str() + "[] = {UINT32_C(0x00000B00)};") !=
@@ -6477,7 +6509,7 @@ void t179_pure_an_indirect_a7_exclusion_stays_fail_closed_with_no_tier2_lowering
   if (partial != nullptr) {
     expect(partial->accepted_prefix.unproven_indirect_control_ea_sets.empty(),
            "a pure (A7) site never records a Tier-2 control-EA fact");
-    const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
     expect(emitted.find("genesis_emitted_code_addresses_00000B02") == std::string::npos &&
                emitted.find("GENESIS_DIAG_TIER2_COMPUTED_TARGET_NOT_EMITTED") == std::string::npos,
            "no Tier-2 emitted-set lowering is generated for the (A7) site");
@@ -6507,7 +6539,7 @@ void t179_jsr_an_tier2_pushes_return_frame_before_dispatch() {
         set.control_ea.mode == M68kEaMode::address_indirect)
       call_fact = true;
   expect(call_fact, "the JSR (An) site records the weaker unproven Tier-2 fact flagged as a call");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   std::ostringstream suffix;
   suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jmp_address;
   const auto function_start =
@@ -6603,7 +6635,7 @@ void t011_jmp_index8_tier2_computed_target_inside_emitted_set_dispatches() {
   expect(tier2_fact,
          "the (d8,An,Xn) site records the weaker unproven Tier-2 control-EA fact (A0 base, D0.W index, d8=4, not "
          "a call)");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   std::ostringstream suffix;
   suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jmp_address;
   const auto array_name = "genesis_emitted_code_addresses_" + suffix.str();
@@ -6637,7 +6669,7 @@ void t011_jsr_index8_tier2_pushes_return_frame_before_dispatch() {
         set.control_ea.displacement == 4)
       call_fact = true;
   expect(call_fact, "the JSR (d8,An,Xn) site records the weaker unproven Tier-2 fact flagged as a call");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   std::ostringstream suffix;
   suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jsr_address;
   const auto function_start =
@@ -6764,7 +6796,7 @@ int emit_general_startup_runtime_c4_indirect_jsr_index8_source() {
   // (`emit_general_startup_runtime_c4_frontier_source`, which also emits
   // through `emit_m68k_general_startup_runtime_c`, never the standalone-CLI
   // `emit_m68k_general_startup_bridge_c`).
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -6802,7 +6834,7 @@ void t028_case_c_rejected_finite_candidate_yields_single_tier2_owner() {
         set.control_ea.mode == M68kEaMode::pc_index8 && !set.is_call)
       tier2 = true;
   expect(tier2, "the PC-indexed source owns exactly the existing Tier-2 fact, not an unresolved direct edge");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.find("genesis_emitted_code_addresses_00000C04[] = {UINT32_C(0x00000C00), UINT32_C(0x00000C08)};") !=
              std::string::npos &&
              emitted.find("GENESIS_DIAG_TIER2_COMPUTED_TARGET_NOT_EMITTED") != std::string::npos,
@@ -6814,7 +6846,7 @@ int emit_t028_case_c_pc_index_tier2_source() {
   const auto result = analyze_m68k_frontend(t028_case_c_fixture::make_program());
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -6854,7 +6886,7 @@ void t028_unrepresented_tier1_candidate_terminal_owns_tier2_lowering() {
   if (partial == nullptr) return;
   expect(partial->accepted_prefix.indirect_target_ea_sets.size() == 1U,
          "discovery still retains the proven Tier-1 set (the seam is emission-stage, not discovery)");
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   const auto function_start = emitted.find("genesis_tier1_indirect_stop_00000B04(GenesisRuntime *runtime) {");
   expect(function_start != std::string::npos, "the retained JMP terminal keeps its call-site function name");
   if (function_start == std::string::npos) return;
@@ -6872,7 +6904,7 @@ int emit_t028_orphan_tier2_source() {
   const auto result = analyze_m68k_frontend(t028_orphan_fixture::make_program());
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -6905,8 +6937,8 @@ void t239_jmp_and_jsr_to_shared_destination_use_byte_identical_existence_check()
   expect(jmp_partial != nullptr && jsr_partial != nullptr,
          "both the shared-destination JMP and JSR (An) Tier-2 fixtures reach a partial program");
   if (jmp_partial == nullptr || jsr_partial == nullptr) return;
-  const auto jmp_emitted = emit_m68k_general_startup_bridge_c(*jmp_partial, std::string(64U, 'a'));
-  const auto jsr_emitted = emit_m68k_general_startup_bridge_c(*jsr_partial, std::string(64U, 'a'));
+  const auto jmp_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*jmp_partial, std::string(64U, 'a')));
+  const auto jsr_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*jsr_partial, std::string(64U, 'a')));
   std::ostringstream suffix;
   suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jmp_address;
   const auto array_name = "genesis_emitted_code_addresses_" + suffix.str();
@@ -7044,7 +7076,7 @@ void t208_tier2_call_shaped_continuation_joins_whole_program_return_target_set()
          "M68kStaticCall frame at any stage -- proving the gap this fix addresses is real, not a "
          "partial-prefix retention loss");
 
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && !emitted.starts_with("/* translation rejected:"),
          "the fixture emits successfully");
   expect(emitted.find("m68k_observed_return != UINT32_C(0x00000B06)") != std::string::npos,
@@ -7063,7 +7095,7 @@ void t208_tier2_call_shaped_continuation_joins_whole_program_return_target_set()
   const auto *partial_again = std::get_if<FrontendPartialProgram>(&result_again);
   expect(partial_again != nullptr, "a repeated analysis of the identical input also reaches a partial program");
   if (partial_again == nullptr) return;
-  const auto emitted_again = emit_m68k_general_startup_bridge_c(*partial_again, std::string(64U, 'a'));
+  const auto emitted_again = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial_again, std::string(64U, 'a')));
   expect(emitted == emitted_again,
          "two independent analyses of identical input/options emit byte-identical generated C");
 }
@@ -7082,7 +7114,7 @@ void t208_tier2_call_shaped_continuation_excluded_when_not_independently_retaine
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   expect(partial != nullptr, "the fixture without the continuation's own candidate root still reaches a partial");
   if (partial == nullptr) return;
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && !emitted.starts_with("/* translation rejected:"),
          "the fixture still emits successfully without the continuation's own candidate root");
   expect(emitted.find("m68k_observed_return != UINT32_C(0x00000B06)") != std::string::npos,
@@ -7124,7 +7156,7 @@ std::string emit(std::uint8_t hi, std::uint8_t lo, bool aot) {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return "not-partial";
-  return emit_m68k_general_startup_runtime_c(*partial);
+  return expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
 }
 }  // namespace t030_aot_only_tier2_continuation_fixture
 
@@ -7198,7 +7230,7 @@ void code_pointer_descriptor_proposals_are_admitted_and_existing_jsr_an_dispatch
   if (partial == nullptr) return;
   expect(partial->accepted_prefix.validated_code_entry_candidate_roots.size() == 2U,
          "both valid descriptor proposals survive the ordinary ADR-0025 walk and are admitted");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.find("m68k_emitted_code_address_member") != std::string::npos &&
              emitted.find("transfer.next_pc = m68k_indirect_ea;") != std::string::npos &&
              emitted.find("runtime->a[7] - UINT32_C(4)") != std::string::npos,
@@ -7214,7 +7246,7 @@ int emit_code_pointer_descriptor_jsr_an_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -7268,7 +7300,7 @@ void code_pointer_descriptor_under_count_leaves_an_honest_nonmember_stop() {
   expect(partial->accepted_prefix.validated_code_entry_candidate_roots.size() == 1U &&
              partial->accepted_prefix.validated_code_entry_candidate_roots.front().value == candidate_a,
          "only the declared prefix is proposed and admitted");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   std::ostringstream missing;
   missing << "UINT32_C(0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << candidate_b << ")";
   expect(emitted.find(missing.str()) == std::string::npos &&
@@ -7817,7 +7849,7 @@ void pea_disp16_aot_admission_and_dispatch_are_bounded() {
   expect(std::any_of(roots.begin(), roots.end(), [&](const auto &root) {
            return root.decoded.provenance.source.address.value == pea_disp16;
          }), "PEA d16(An) becomes a validated independent AOT root");
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   std::ostringstream address_hex;
   address_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << pea_disp16;
   const auto body_begin = emitted.find("genesis_aot_" + address_hex.str() + "(GenesisRuntime *runtime) {");
@@ -7859,7 +7891,7 @@ void jmp_pc_indexed_word_aot_admission_and_dispatch_are_bounded() {
   expect(std::any_of(roots.begin(), roots.end(), [&](const auto &root) {
            return root.decoded.provenance.source.address.value == jmp_pc_indexed;
          }), "JMP (d8,PC,D0.W) becomes a validated independent AOT root");
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   std::ostringstream address_hex;
   address_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jmp_pc_indexed;
   const auto body_begin = emitted.find("genesis_aot_" + address_hex.str() + "(GenesisRuntime *runtime) {");
@@ -7952,7 +7984,7 @@ void experiment_aligned_aot_deterministically_classifies_and_dispatches_valid_en
   expect(!has_root(invalid_address), "the invalid-encoding candidate never becomes a root");
   expect(!has_root(excluded_form_address), "the excluded/unsupported-form candidate never becomes a root");
 
-  const auto runtime_source = emit_m68k_general_startup_runtime_c(*partial);
+  const auto runtime_source = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!runtime_source.starts_with("/* translation rejected:"), "the runtime dispatcher body emits");
   std::ostringstream v1_hex;
   v1_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << v1;
@@ -7994,7 +8026,7 @@ void immutable_rom_aot_absent_mode_is_inert() {
   expect(partial != nullptr && partial->accepted_prefix.immutable_rom_aot_entries.empty(),
          "mode-absent analysis carries no independent AOT identities");
   if (partial != nullptr)
-    expect(emit_m68k_general_startup_runtime_c(*partial).find("genesis_aot_") == std::string::npos,
+    expect(expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial)).find("genesis_aot_") == std::string::npos,
            "mode-absent generated output contains no AOT body or dispatcher arm");
 }
 
@@ -8028,7 +8060,7 @@ void immutable_rom_aot_full_source_is_mapping_derived_and_fail_closed() {
     const auto *partial = std::get_if<FrontendPartialProgram>(&result);
     expect(partial != nullptr, "the complete synthetic immutable mapping remains a partial program");
     if (partial != nullptr) {
-      const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+      const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
       expect(emitted.find("if (runtime->pc == UINT32_C(0x00000C64)) {") != std::string::npos &&
                   emitted.find("frontier.stop.stop_class = GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET") !=
                       std::string::npos &&
@@ -8037,7 +8069,7 @@ void immutable_rom_aot_full_source_is_mapping_derived_and_fail_closed() {
              "an AOT producer whose exact next PC has no final representation owns a typed post-retirement frontier");
       expect(emitted.find("if (runtime->pc == UINT32_C(0x00000C14)) {") == std::string::npos,
              "the adjacent AOT producer whose exact next PC is compiled retains ordinary dispatch");
-      expect(emitted == emit_m68k_general_startup_runtime_c(*partial),
+      expect(emitted == expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial)),
              "the exact-PC obligation inventory emits byte-identically on repeat");
     }
   }
@@ -8738,7 +8770,7 @@ void experiment_aligned_aot_genuine_overlap_is_independently_represented() {
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   expect(partial != nullptr, "overlapping PC-keyed starts do not fabricate a graph conflict");
   if (partial == nullptr) return;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!emitted.starts_with("/* translation rejected:") &&
              emitted.find("genesis_aot_00000C10") != std::string::npos &&
              emitted.find("genesis_aot_00000C12") != std::string::npos &&
@@ -8749,7 +8781,7 @@ void experiment_aligned_aot_genuine_overlap_is_independently_represented() {
   auto agreeing = *partial;
   agreeing.accepted_prefix.immutable_rom_aot_entries.push_back(
       agreeing.accepted_prefix.immutable_rom_aot_entries.back());
-  const auto agreeing_emitted = emit_m68k_general_startup_runtime_c(agreeing);
+  const auto agreeing_emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(agreeing));
   const auto count_occurrences = [](const std::string &text, const std::string &needle) {
     std::size_t count = 0U;
     for (std::size_t position = 0U; (position = text.find(needle, position)) != std::string::npos;
@@ -8766,7 +8798,7 @@ void experiment_aligned_aot_genuine_overlap_is_independently_represented() {
   conflicting.accepted_prefix.immutable_rom_aot_entries.push_back(
       conflicting.accepted_prefix.immutable_rom_aot_entries.back());
   conflicting.accepted_prefix.immutable_rom_aot_entries.back().operation.operand ^= 1U;
-  expect(emit_m68k_general_startup_runtime_c(conflicting).starts_with(
+  expect(expand_entry_rows(emit_m68k_general_startup_runtime_c(conflicting)).starts_with(
              "/* translation rejected: invalid immutable-ROM AOT entry */"),
          "same-PC disagreement fails closed before body, arm, or membership emission");
 }
@@ -8789,7 +8821,7 @@ void immutable_rom_aot_retirement_contract_retains_static_and_dynamic_rows() {
   expect(retained(base + 0x04U) && retained(conditional_branch) && retained(dbcc) &&
              retained(immediate_shift) && retained(register_shift) && retained(mulu) && retained(muls),
          "static, conditional branch, DBcc, immediate/register shift, MULU, and MULS rows are retained");
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!emitted.starts_with("/* translation rejected:") &&
              emitted.find("genesis_aot_00000C04") != std::string::npos &&
              emitted.find("genesis_aot_00000C56") != std::string::npos &&
@@ -8821,7 +8853,7 @@ int emit_experiment_aligned_aot_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -8920,7 +8952,7 @@ void immutable_rom_aot_write_move_register_indirect_source_is_admitted_and_dispa
          "SUBQ.B #1,(4,A5,D0.W) becomes a validated AOT root now that its read-modify-write "
          "brief-format indexed destination form is admitted (same bounded family, SEG-007-T248's "
          "eighth iteration)");
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!emitted.starts_with("/* translation rejected:"), "the admitted form's AOT body emits");
   std::ostringstream move_hex;
   move_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << move_postinc_dn;
@@ -9049,7 +9081,7 @@ void immutable_rom_aot_return_from_subroutine_and_bit_clear_are_admitted_and_dis
   expect(std::any_of(partial->accepted_prefix.static_blocks.begin(), partial->accepted_prefix.static_blocks.end(),
                       [&](const auto &block) { return block.id.entry.value == callee; }),
          "the ordinary call's callee is a genuine, ordinarily-discovered CFG block");
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!emitted.starts_with("/* translation rejected:"), "the admitted forms' AOT bodies emit");
   std::ostringstream rts_hex;
   rts_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << rts_isolated;
@@ -9199,7 +9231,7 @@ void general_arithmetic_memory_operand_admissions_are_admitted_and_dispatch() {
          "MOVE.B (0,A0),(0,A5) becomes a validated AOT root now that its d16(An)-source/"
          "d16(An)-destination form is admitted (this task's own second corrected same-seam "
          "continuation)");
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!emitted.starts_with("/* translation rejected:"), "the admitted forms' AOT bodies emit");
   std::ostringstream add_hex, cmp_disp16_hex, cmp_index8_hex, clr_hex, move_hex;
   add_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << add_disp16_dest;
@@ -9232,7 +9264,7 @@ int emit_general_arithmetic_memory_operand_aot_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -9252,7 +9284,7 @@ void negate_disp16_aot_admission_and_dispatch_are_bounded() {
   expect(std::any_of(roots.begin(), roots.end(), [&](const auto &root) {
            return root.decoded.provenance.source.address.value == negate_disp16;
          }), "NEG.B d16(An) becomes a validated independent AOT root");
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   std::ostringstream address_hex;
   address_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << negate_disp16;
   const auto body_begin = emitted.find("genesis_aot_" + address_hex.str() + "(GenesisRuntime *runtime) {");
@@ -9293,7 +9325,7 @@ int emit_aot_owner_single_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -9307,7 +9339,7 @@ int emit_negate_disp16_aot_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -9323,7 +9355,7 @@ int emit_pea_aot_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -9340,7 +9372,7 @@ int emit_jmp_pc_indexed_word_aot_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -9357,7 +9389,7 @@ int emit_immutable_rom_aot_return_from_subroutine_and_bit_clear_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -9375,7 +9407,7 @@ int emit_write_move_register_indirect_aot_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -9473,7 +9505,7 @@ void t250_final_compiled_membership_suppresses_stale_frontier_interception() {
                       }),
          "precondition: unit C's entry is ALSO an independently validated immutable-ROM AOT root -- the exact "
          "dual-representation shape this task corrects");
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!emitted.starts_with("/* translation rejected:"), "the dual-representation fixture emits");
   std::ostringstream boundary_hex;
   boundary_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << boundary_successor_address;
@@ -9530,7 +9562,7 @@ void ordinary_interior_owner_precedes_consistent_aot_and_rejects_conflict() {
   expect(partial != nullptr, "ordinary/AOT interior collision fixture reaches a partial program");
   if (partial == nullptr) return;
 
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   std::ostringstream interior_hex;
   interior_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << interior;
   std::ostringstream owner_hex;
@@ -9553,7 +9585,7 @@ void ordinary_interior_owner_precedes_consistent_aot_and_rejects_conflict() {
          "collision fixture retains the independently validated AOT identity");
   if (collision == conflicting.accepted_prefix.immutable_rom_aot_entries.end()) return;
   collision->operation.operand = 1;
-  const auto rejected = emit_m68k_general_startup_runtime_c(conflicting);
+  const auto rejected = expand_entry_rows(emit_m68k_general_startup_runtime_c(conflicting));
   expect(rejected == "/* translation rejected: invalid immutable-ROM AOT entry */\n" ||
              rejected == "/* translation rejected: conflicting immutable-ROM AOT identity */\n",
          "an ordinary/AOT semantic or provenance disagreement fails closed");
@@ -9582,7 +9614,7 @@ void t250_genuine_typed_frontier_without_compiled_membership_still_intercepts() 
       });
   expect(boundary_is_a_frontier, "precondition: unit C's entry is still represented as a known_but_unemitted_target "
                                   "typed frontier");
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!emitted.starts_with("/* translation rejected:"), "the negative fixture emits");
   std::ostringstream boundary_hex;
   boundary_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << boundary_successor_address;
@@ -9870,7 +9902,7 @@ void address_table_corroboration_promoted_proposals_reach_discovery_and_existing
   expect(root_addresses == std::vector<std::uint32_t>{candidate_a, candidate_b},
          "both promoted proposals survive the ordinary, unweakened ADR-0025 admission walk and are "
          "admitted into the discovered graph by their own true values -- not merely stored in a vector");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.find("m68k_emitted_code_address_member") != std::string::npos &&
              emitted.find("transfer.next_pc = m68k_indirect_ea;") != std::string::npos,
          "the promoted proposals actually change generated discovery output: the existing T179 "
@@ -10077,8 +10109,8 @@ void tier2_raw_route_without_any_candidate_is_byte_for_byte_unaffected() {
   if (partial == nullptr) return;
   expect(partial->accepted_prefix.validated_code_entry_candidate_roots.empty(),
          "the raw route never populates any validated code-entry-candidate root");
-  const auto first = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
-  const auto second = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto first = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  const auto second = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(first == second && !first.empty(), "the raw route remains byte-for-byte deterministic");
   expect(first.find("GENESIS_DIAG_REACHED_UNRESOLVED_DIRECT_EDGE") != std::string::npos,
          "the raw route keeps the exact pre-existing diagnostic for this unprovable site");
@@ -10186,8 +10218,8 @@ void t180_false_positive_candidate_is_excluded_with_a_normalized_reason_without_
   const auto mixed_roots = mixed_partial->accepted_prefix.validated_code_entry_candidate_roots;
   expect(mixed_roots.size() == 1U && mixed_roots.front().value == candidate_address,
          "only the valid unit becomes a validated code-entry-candidate root");
-  const auto valid_emitted = emit_m68k_general_startup_bridge_c(*valid_partial, std::string(64U, 'a'));
-  const auto mixed_emitted = emit_m68k_general_startup_bridge_c(*mixed_partial, std::string(64U, 'a'));
+  const auto valid_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*valid_partial, std::string(64U, 'a')));
+  const auto mixed_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*mixed_partial, std::string(64U, 'a')));
   std::ostringstream block_name;
   block_name << "genesis_block_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
              << candidate_address;
@@ -10221,8 +10253,8 @@ void t180_empty_offline_inventory_is_a_total_no_op() {
   expect(all_zero, "an empty offline inventory leaves every stitch metric at zero, including the new "
                    "SEG-007-T213 fixed-point admission metrics: admission_fixed_point_rounds is exactly 0, "
                    "the zero-round no-op matching the pre-existing single-pass behaviour byte-for-byte");
-  const auto first = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
-  const auto second = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto first = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  const auto second = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(first == second && !first.empty() &&
              first.find("genesis_emitted_code_addresses_") == std::string::npos,
          "the empty-inventory route is byte-for-byte deterministic and engages no stitch/Tier-2 machinery");
@@ -10530,8 +10562,8 @@ void t213_candidate_proposal_order_is_deterministic() {
   expect(forward_analysis->offline_inventory_stitch_metrics.admitted_unit_count == 3U &&
              reverse_analysis->offline_inventory_stitch_metrics.admitted_unit_count == 3U,
          "candidate proposal order does not change the final admitted count");
-  const auto forward_emitted = emit_m68k_general_startup_bridge_c(*forward_analysis, std::string(64U, 'a'));
-  const auto reverse_emitted = emit_m68k_general_startup_bridge_c(*reverse_analysis, std::string(64U, 'a'));
+  const auto forward_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*forward_analysis, std::string(64U, 'a')));
+  const auto reverse_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*reverse_analysis, std::string(64U, 'a')));
   expect(forward_emitted == reverse_emitted && !forward_emitted.empty(),
          "candidate proposal order does not change the emitted result");
 }
@@ -10595,8 +10627,8 @@ void general_startup_folds_an_immutable_offset_table_into_the_finite_index_value
              }) &&
              prefix.static_frames[0].call.callee.value != prefix.static_frames[1].call.callee.value,
          "each candidate owns its own candidate-specific call/frame identity sharing the common continuation");
-  const auto first = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
-  const auto second = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto first = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  const auto second = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(first == second && !first.empty(), "the offset-table-folded indirect JSR emission is byte-for-byte deterministic");
   expect(first.find("static const uint32_t m68k_indirect_targets_00000B08[] = {UINT32_C(0x00000B14), "
                     "UINT32_C(0x00000B16)};") != std::string::npos,
@@ -12070,7 +12102,7 @@ void adr0021_partial_async_root_prefix_is_deterministic() {
   const auto second_result = analyze_m68k_frontend(program);
   const auto emit_text = [&](const auto &variant) -> std::string {
     if (const auto *p = std::get_if<FrontendPartialProgram>(&variant))
-      return emit_m68k_general_startup_bridge_c(*p, std::string(64U, 'a'));
+      return expand_entry_rows(emit_m68k_general_startup_bridge_c(*p, std::string(64U, 'a')));
     return std::string{};
   };
   const auto first_text = emit_text(first_result);
@@ -12240,7 +12272,7 @@ void adr0021_unreachable_async_root_continuation_is_excluded() {
     expect(false, "fixture setup: expected an async-root partial program with a call frame");
     return;
   }
-  const auto baseline = emit_m68k_general_startup_runtime_c(*partial);
+  const auto baseline = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!baseline.empty() && !baseline.starts_with("/* translation rejected:"),
          "fixture setup: the unforged async-root call/return chain emits successfully");
 
@@ -12248,7 +12280,7 @@ void adr0021_unreachable_async_root_continuation_is_excluded() {
   std::erase_if(forged.accepted_prefix.static_edges, [&](const M68kStaticEdge &edge) {
     return edge.kind == M68kStaticEdgeKind::direct_call && edge.call && edge.call->callee.value == kSub;
   });
-  const auto emitted = emit_m68k_general_startup_runtime_c(forged);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
   expect(emitted.starts_with("/* translation rejected:"),
          "an async-root retained continuation whose own call site is no longer reachable "
          "(its own call edge removed) is still refused by runtime_frontier_eligible, exactly as for the "
@@ -12391,7 +12423,7 @@ void adr0021_cross_root_supersession_synchronous_to_asynchronous() {
   expect(!frontier_lists_a(),
          "cross-root supersession (sync->async): A is absent from the final unresolved candidate-frontier set");
   if (partial != nullptr) {
-    const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
     expect(!emitted.empty() && !emitted.starts_with("/* translation rejected:"),
            "cross-root supersession (sync->async): a runnable expanded prefix is emitted");
   }
@@ -12446,7 +12478,7 @@ void adr0021_cross_root_supersession_asynchronous_to_synchronous() {
         });
     expect(!frontier_lists_b,
            "cross-root supersession (async->sync): B is absent from the final unresolved candidate-frontier set");
-    const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
     expect(!emitted.empty() && !emitted.starts_with("/* translation rejected:"),
            "cross-root supersession (async->sync): a runnable expanded prefix is emitted");
   }
@@ -12947,7 +12979,7 @@ void general_startup_routes_z80_and_psg_absolute_operands() {
                  fact.direction == segarecomp::M68kMemoryAccessDirection::write &&
                  fact.region == segarecomp::M68kAbsoluteOperandRegion::routed_device,
              "the retained fact is a routed_device WORD destination_write of the exact BUSREQ register address");
-      expect(!segarecomp::emit_m68k_general_startup_runtime_c(*partial).starts_with("/* translation rejected"),
+      expect(!expand_entry_rows(segarecomp::emit_m68k_general_startup_runtime_c(*partial)).starts_with("/* translation rejected"),
              "the retained routed_device store lowers to generated C without rejection");
     }
   }
@@ -13054,7 +13086,7 @@ void general_startup_routes_ym2612_status_port_read() {
                  fact.direction == segarecomp::M68kMemoryAccessDirection::read &&
                  fact.region == segarecomp::M68kAbsoluteOperandRegion::routed_device,
              "the retained fact is a routed_device BYTE source_read of the exact YM2612 status port address");
-      expect(!segarecomp::emit_m68k_general_startup_runtime_c(*partial).starts_with("/* translation rejected"),
+      expect(!expand_entry_rows(segarecomp::emit_m68k_general_startup_runtime_c(*partial)).starts_with("/* translation rejected"),
              "the retained routed_device read lowers to generated C without rejection");
     }
   }
@@ -13086,7 +13118,7 @@ void general_startup_routes_ym2612_status_port_read() {
                  fact.direction == segarecomp::M68kMemoryAccessDirection::write &&
                  fact.region == segarecomp::M68kAbsoluteOperandRegion::routed_device,
              "the retained fact is a routed_device BYTE destination_write of the exact YM2612 address port address");
-      expect(!segarecomp::emit_m68k_general_startup_runtime_c(*partial).starts_with("/* translation rejected"),
+      expect(!expand_entry_rows(segarecomp::emit_m68k_general_startup_runtime_c(*partial)).starts_with("/* translation rejected"),
              "the retained routed_device write lowers to generated C without rejection");
     }
   }
@@ -13118,7 +13150,7 @@ void general_startup_routes_ym2612_status_port_read() {
                  fact.direction == segarecomp::M68kMemoryAccessDirection::write &&
                  fact.region == segarecomp::M68kAbsoluteOperandRegion::routed_device,
              "the retained fact is a routed_device BYTE destination_write of the exact YM2612 data port address");
-      expect(!segarecomp::emit_m68k_general_startup_runtime_c(*partial).starts_with("/* translation rejected"),
+      expect(!expand_entry_rows(segarecomp::emit_m68k_general_startup_runtime_c(*partial)).starts_with("/* translation rejected"),
              "the retained routed_device data-port write lowers to generated C without rejection");
     }
   }
@@ -13152,7 +13184,7 @@ void general_startup_routes_ym2612_status_port_read() {
                  fact.region == segarecomp::M68kAbsoluteOperandRegion::routed_device,
              "the retained fact is a routed_device BYTE destination_write of the exact YM2612 "
              "PART-II address port address");
-      expect(!segarecomp::emit_m68k_general_startup_runtime_c(*partial).starts_with("/* translation rejected"),
+      expect(!expand_entry_rows(segarecomp::emit_m68k_general_startup_runtime_c(*partial)).starts_with("/* translation rejected"),
              "the retained routed_device PART-II select-port write lowers to generated C without rejection");
     }
   }
@@ -13186,7 +13218,7 @@ void general_startup_routes_ym2612_status_port_read() {
                  fact.region == segarecomp::M68kAbsoluteOperandRegion::routed_device,
              "the retained fact is a routed_device BYTE destination_write of the exact YM2612 "
              "PART-II data port address");
-      expect(!segarecomp::emit_m68k_general_startup_runtime_c(*partial).starts_with("/* translation rejected"),
+      expect(!expand_entry_rows(segarecomp::emit_m68k_general_startup_runtime_c(*partial)).starts_with("/* translation rejected"),
              "the retained routed_device PART-II data-port write lowers to generated C without rejection");
     }
   }
@@ -13935,7 +13967,7 @@ void general_startup_promotes_two_branches_to_two_distinct_precise_frontier_clas
          "the startup entry block itself survives: both its outgoing edges are now represented exits "
          "(SEG-007-T062's own defect class)");
 
-  const auto source_text = segarecomp::emit_m68k_general_startup_runtime_c(*partial);
+  const auto source_text = expand_entry_rows(segarecomp::emit_m68k_general_startup_runtime_c(*partial));
   expect(source_text.find("static GenesisControlTransfer genesis_frontier_stop_00000F02(GenesisRuntime *runtime)") !=
              std::string::npos,
          "the low-address exit gets its own uniquely named stop function");
@@ -13958,7 +13990,7 @@ void general_startup_promotes_two_branches_to_two_distinct_precise_frontier_clas
   // emitted function/comparison-line order.
   const auto second_result = segarecomp::analyze_m68k_frontend(program);
   const auto *second_partial = std::get_if<segarecomp::FrontendPartialProgram>(&second_result);
-  expect(second_partial != nullptr && segarecomp::emit_m68k_general_startup_runtime_c(*second_partial) == source_text,
+  expect(second_partial != nullptr && expand_entry_rows(segarecomp::emit_m68k_general_startup_runtime_c(*second_partial)) == source_text,
          "repeated generation of the same fixture is byte-for-byte deterministic");
 }
 
@@ -14001,7 +14033,7 @@ void general_startup_promotes_one_precise_exit_and_one_known_but_unemitted_targe
          "the higher-address exit is retained as known_but_unemitted_target, its own real (host-side-only) "
          "illegal_instruction category preserved, with no access request");
 
-  const auto source_text = segarecomp::emit_m68k_general_startup_runtime_c(*partial);
+  const auto source_text = expand_entry_rows(segarecomp::emit_m68k_general_startup_runtime_c(*partial));
   expect(source_text.find("GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET") != std::string::npos &&
              source_text.find("GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET") != std::string::npos,
          "the opaque exit's own stop function uses the literal known-but-unemitted stop/diagnostic pair");
@@ -14331,7 +14363,7 @@ void t205_c4_emits_a_complete_frontier_set_exceeding_the_diagnostic_cap() {
   expect(partial->frontiers.size() == total_obligations && total_obligations > m68k_discovery_max_frontier_exits,
          "item: the complete semantic-frontier obligation set is never truncated -- every one of the "
          "above-cap candidates survives discovery's own promotion");
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!emitted.empty() && !emitted.starts_with("/* translation rejected"),
          "item: C4 emission does not reject this partial program solely because "
          "partial.frontiers.size() exceeds m68k_discovery_max_frontier_exits -- the stale aggregate "
@@ -14375,13 +14407,13 @@ void t205_c4_still_rejects_an_empty_frontier_set() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) { expect(false, "fixture setup: expected a promoted controller-io partial program"); return; }
-  const auto baseline = emit_m68k_general_startup_runtime_c(*partial);
+  const auto baseline = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!baseline.empty() && !baseline.starts_with("/* translation rejected"),
          "fixture setup: the unforged single-frontier fixture emits successfully");
 
   auto forged = *partial;
   forged.frontiers.clear();
-  const auto emitted = emit_m68k_general_startup_runtime_c(forged);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
   expect(emitted == "/* translation rejected: unrepresentable C4 frontier */\n",
          "an empty frontier set is still refused as unrepresentable -- the surviving half of the "
          "corrected guard is unweakened by removing its stale upper-bound half");
@@ -14565,12 +14597,12 @@ void general_startup_promotes_the_instruction_discovery_ceiling_to_a_boundary() 
 
   // ADR 0013 Decision §8: two independent analyses of the same input/options
   // produce byte-identical generated C.
-  const auto emitted_first = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted_first = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   const auto result_again = analyze_m68k_frontend(program);
   const auto *partial_again = std::get_if<FrontendPartialProgram>(&result_again);
   expect(partial_again != nullptr, "a repeated analysis of the identical input also promotes a boundary");
   if (partial_again == nullptr) return;
-  const auto emitted_second = emit_m68k_general_startup_bridge_c(*partial_again, std::string(64U, 'a'));
+  const auto emitted_second = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial_again, std::string(64U, 'a')));
   expect(!emitted_first.empty() && emitted_first == emitted_second,
          "two independent analyses of identical input/options emit byte-identical generated C");
   expect(emitted_first.find("GENESIS_STOP_DISCOVERY_PREFIX_BOUNDARY") != std::string::npos,
@@ -14639,8 +14671,8 @@ void general_startup_aggregates_independent_seeds_deterministically() {
   const auto repeated_result = analyze_m68k_frontend(program);
   const auto *repeated = std::get_if<FrontendAnalysis>(&repeated_result);
   expect(repeated != nullptr && expanded != nullptr &&
-             emit_m68k_general_startup_bridge_c(*repeated, std::string(64U, 'a')) ==
-                 emit_m68k_general_startup_bridge_c(*expanded, std::string(64U, 'a')),
+             expand_entry_rows(emit_m68k_general_startup_bridge_c(*repeated, std::string(64U, 'a'))) ==
+                 expand_entry_rows(emit_m68k_general_startup_bridge_c(*expanded, std::string(64U, 'a'))),
          "a duplicated seed produces byte-identical aggregation to the deduplicated seed list");
 }
 
@@ -14770,9 +14802,9 @@ void general_startup_supersedes_a_sibling_candidate_admitted_by_another_seed() {
   const auto emit_ok = [&](const auto &variant) {
     std::string text;
     if (const auto *a = std::get_if<FrontendAnalysis>(&variant))
-      text = emit_m68k_general_startup_bridge_c(*a, std::string(64U, 'a'));
+      text = expand_entry_rows(emit_m68k_general_startup_bridge_c(*a, std::string(64U, 'a')));
     else if (const auto *p = std::get_if<FrontendPartialProgram>(&variant))
-      text = emit_m68k_general_startup_bridge_c(*p, std::string(64U, 'a'));
+      text = expand_entry_rows(emit_m68k_general_startup_bridge_c(*p, std::string(64U, 'a')));
     return !text.empty() && !text.starts_with("/* translation rejected:");
   };
 
@@ -14785,9 +14817,9 @@ void general_startup_supersedes_a_sibling_candidate_admitted_by_another_seed() {
   // Byte-identical two-run behavior.
   const auto emit_text = [&](const auto &variant) {
     if (const auto *a = std::get_if<FrontendAnalysis>(&variant))
-      return emit_m68k_general_startup_bridge_c(*a, std::string(64U, 'a'));
+      return expand_entry_rows(emit_m68k_general_startup_bridge_c(*a, std::string(64U, 'a')));
     if (const auto *p = std::get_if<FrontendPartialProgram>(&variant))
-      return emit_m68k_general_startup_bridge_c(*p, std::string(64U, 'a'));
+      return expand_entry_rows(emit_m68k_general_startup_bridge_c(*p, std::string(64U, 'a')));
     return std::string{};
   };
   const auto first_text = emit_text(result);
@@ -14884,9 +14916,9 @@ void t213_primary_issue_supersession_by_a_different_root_admitted_address() {
   const auto emit_ok = [&](const auto &variant) {
     std::string text;
     if (const auto *a = std::get_if<FrontendAnalysis>(&variant))
-      text = emit_m68k_general_startup_bridge_c(*a, std::string(64U, 'a'));
+      text = expand_entry_rows(emit_m68k_general_startup_bridge_c(*a, std::string(64U, 'a')));
     else if (const auto *p = std::get_if<FrontendPartialProgram>(&variant))
-      text = emit_m68k_general_startup_bridge_c(*p, std::string(64U, 'a'));
+      text = expand_entry_rows(emit_m68k_general_startup_bridge_c(*p, std::string(64U, 'a')));
     return !text.empty() && !text.starts_with("/* translation rejected:");
   };
 
@@ -14900,9 +14932,9 @@ void t213_primary_issue_supersession_by_a_different_root_admitted_address() {
 
   const auto emit_text = [&](const auto &variant) {
     if (const auto *a = std::get_if<FrontendAnalysis>(&variant))
-      return emit_m68k_general_startup_bridge_c(*a, std::string(64U, 'a'));
+      return expand_entry_rows(emit_m68k_general_startup_bridge_c(*a, std::string(64U, 'a')));
     if (const auto *p = std::get_if<FrontendPartialProgram>(&variant))
-      return emit_m68k_general_startup_bridge_c(*p, std::string(64U, 'a'));
+      return expand_entry_rows(emit_m68k_general_startup_bridge_c(*p, std::string(64U, 'a')));
     return std::string{};
   };
   const auto first_text = emit_text(result);
@@ -15314,7 +15346,7 @@ void general_startup_recovers_a_cross_seed_reachable_rts_completion_gap() {
          "the aggregate cross-seed reachable-RTS trace recovers T's own return_to_continuation edge, which "
          "neither seed's own local walk could establish alone");
 
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && !emitted.starts_with("/* translation rejected:"),
          "T's retained RTS terminal now satisfies C4's own unmodified per-terminal completeness invariant, "
          "so the expanded prefix emits rather than failing build-time translation closed");
@@ -15323,7 +15355,7 @@ void general_startup_recovers_a_cross_seed_reachable_rts_completion_gap() {
   const auto second_result = analyze_m68k_frontend(program);
   const auto *second_partial = std::get_if<FrontendPartialProgram>(&second_result);
   expect(second_partial != nullptr &&
-             emit_m68k_general_startup_bridge_c(*second_partial, std::string(64U, 'a')) == emitted,
+             expand_entry_rows(emit_m68k_general_startup_bridge_c(*second_partial, std::string(64U, 'a'))) == emitted,
          "two independent analyses of the identical input emit byte-identical generated C");
 }
 
@@ -15405,14 +15437,14 @@ void general_startup_preserves_distinct_return_edges_when_two_candidate_callees_
               (return_edges[0].call->callee.value == 0x0000200CU && return_edges[1].call->callee.value == 0x0000200AU)),
          "the two preserved return edges retain their own respective distinct call (frame) identities");
 
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && !emitted.starts_with("/* translation rejected:"),
          "both retained terminals satisfy C4's own unmodified per-terminal completeness invariant");
 
   const auto second_result = analyze_m68k_frontend(program);
   const auto *second_partial = std::get_if<FrontendPartialProgram>(&second_result);
   expect(second_partial != nullptr &&
-             emit_m68k_general_startup_bridge_c(*second_partial, std::string(64U, 'a')) == emitted,
+             expand_entry_rows(emit_m68k_general_startup_bridge_c(*second_partial, std::string(64U, 'a'))) == emitted,
          "two independent analyses of the identical input emit byte-identical generated C");
 }
 
@@ -15470,9 +15502,9 @@ void general_startup_tolerates_an_orphan_cross_seed_sibling_candidate_in_a_phase
 
   const auto emit_text = [&](const auto &variant) -> std::string {
     if (const auto *a = std::get_if<FrontendAnalysis>(&variant))
-      return emit_m68k_general_startup_bridge_c(*a, std::string(64U, 'a'));
+      return expand_entry_rows(emit_m68k_general_startup_bridge_c(*a, std::string(64U, 'a')));
     if (const auto *p = std::get_if<FrontendPartialProgram>(&variant))
-      return emit_m68k_general_startup_bridge_c(*p, std::string(64U, 'a'));
+      return expand_entry_rows(emit_m68k_general_startup_bridge_c(*p, std::string(64U, 'a')));
     return std::string{};
   };
   const auto frontier_lists = [&](const auto &variant, std::uint32_t address) {
@@ -15567,14 +15599,14 @@ void general_startup_refuses_a_hand_forged_boundary_with_a_target() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr || partial->frontiers.empty()) { expect(false, "fixture setup: expected a boundary partial program"); return; }
-  const auto baseline = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto baseline = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!baseline.empty() && !baseline.starts_with("/* translation rejected:"),
          "fixture setup: the unforged boundary emits successfully");
 
   auto forged_target = *partial;
   forged_target.frontiers.front().diagnostic.direct.has_target = true;
   forged_target.frontiers.front().diagnostic.direct.target = {{}, 0x600U};
-  const auto emitted_target = emit_m68k_general_startup_bridge_c(forged_target, std::string(64U, 'a'));
+  const auto emitted_target = expand_entry_rows(emit_m68k_general_startup_bridge_c(forged_target, std::string(64U, 'a')));
   expect(emitted_target.starts_with("/* translation rejected:"),
          "a hand-forged boundary carrying direct.has_target is refused by runtime_frontier_eligible");
 
@@ -15583,7 +15615,7 @@ void general_startup_refuses_a_hand_forged_boundary_with_a_target() {
   // is likewise refused.
   auto forged_bus = *partial;
   forged_bus.frontiers.front().diagnostic.accesses.front().address.value += 2U;
-  const auto emitted_bus = emit_m68k_general_startup_bridge_c(forged_bus, std::string(64U, 'a'));
+  const auto emitted_bus = expand_entry_rows(emit_m68k_general_startup_bridge_c(forged_bus, std::string(64U, 'a')));
   expect(emitted_bus.starts_with("/* translation rejected:"),
          "a hand-forged boundary with a mismatched bus-access record is refused by runtime_frontier_eligible");
 }
@@ -15720,14 +15752,14 @@ void general_startup_promotes_a_multi_frame_deep_discovery_boundary_with_orphane
   // Determinism: two independent analyses of the identical input/options
   // produce byte-identical generated C (ADR-0014 Decision §6/§8's
   // across-runs guarantee).
-  const auto first_source = emit_m68k_general_startup_runtime_c(*partial);
+  const auto first_source = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!first_source.empty() && !first_source.starts_with("/* translation rejected:"),
          "the multi-frame boundary partial program emits successfully");
   const auto result_again = analyze_m68k_frontend(program);
   const auto *partial_again = std::get_if<FrontendPartialProgram>(&result_again);
   expect(partial_again != nullptr, "a repeated analysis of the identical input also promotes a boundary");
   if (partial_again == nullptr) return;
-  const auto second_source = emit_m68k_general_startup_runtime_c(*partial_again);
+  const auto second_source = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial_again));
   expect(first_source == second_source,
          "two independent analyses of identical input/options emit byte-identical generated C");
 }
@@ -15757,7 +15789,7 @@ void general_startup_rejects_a_retained_continuation_whose_call_site_is_unreacha
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) { expect(false, "fixture setup: expected a boundary partial program"); return; }
-  const auto baseline = emit_m68k_general_startup_runtime_c(*partial);
+  const auto baseline = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!baseline.empty() && !baseline.starts_with("/* translation rejected:"),
          "fixture setup: the unforged multi-frame boundary emits successfully");
 
@@ -15765,7 +15797,7 @@ void general_startup_rejects_a_retained_continuation_whose_call_site_is_unreacha
   std::erase_if(forged.accepted_prefix.static_edges, [&](const M68kStaticEdge &edge) {
     return edge.kind == M68kStaticEdgeKind::direct_call && edge.call && edge.call->callee.value == sub1;
   });
-  const auto emitted = emit_m68k_general_startup_runtime_c(forged);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
   expect(emitted.starts_with("/* translation rejected:"),
          "a retained continuation whose own call site's containing block is no longer reachable "
          "(its own call edge removed) is still refused by runtime_frontier_eligible");
@@ -16416,7 +16448,7 @@ void general_startup_whole_program_return_membership_survives_a_shared_rts_with_
   // therefore necessarily fails the unchanged, AND-chained `!=` membership
   // check emit_m68k_operation_c already generates -- fail-closed by
   // construction, not by a new mechanism this correction adds).
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && !emitted.starts_with("/* translation rejected:"),
          "the corrected whole-program membership check emits successfully");
   expect(emitted.find("UINT32_C(0x0000060C)") != std::string::npos &&
@@ -16441,7 +16473,7 @@ void general_startup_whole_program_return_membership_survives_a_shared_rts_with_
   const auto *partial_again = std::get_if<FrontendPartialProgram>(&result_again);
   expect(partial_again != nullptr, "a repeated analysis of the identical input also promotes the same frontier");
   if (partial_again == nullptr) return;
-  const auto emitted_again = emit_m68k_general_startup_bridge_c(*partial_again, std::string(64U, 'a'));
+  const auto emitted_again = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial_again, std::string(64U, 'a')));
   expect(emitted == emitted_again,
          "two independent analyses of identical input/options emit byte-identical generated C");
 }
@@ -18655,14 +18687,14 @@ void bridge_digest_validation_precedes_completion_selection() {
   const std::vector<std::string> invalid{"", std::string(63U, 'a'), std::string(65U, 'a'),
                                          std::string(64U, 'A'), std::string(62U, 'a') + "\"\n"};
   for (const auto &digest : invalid) {
-    expect(emit_m68k_general_startup_bridge_c(*no_completion_analysis, digest) == reject &&
-               emit_m68k_general_startup_bridge_c(*completion_analysis, digest) == reject,
+    expect(expand_entry_rows(emit_m68k_general_startup_bridge_c(*no_completion_analysis, digest)) == reject &&
+               expand_entry_rows(emit_m68k_general_startup_bridge_c(*completion_analysis, digest)) == reject,
            "bridge digest rejection is identical before completion selection");
   }
   const std::string valid(64U, 'a');
-  expect(emit_m68k_general_startup_bridge_c(*no_completion_analysis, valid).find(
+  expect(expand_entry_rows(emit_m68k_general_startup_bridge_c(*no_completion_analysis, valid)).find(
              "GENESIS_BRIDGE_ROM_SHA256[65] = \"" + valid + "\";") != std::string::npos &&
-             emit_m68k_general_startup_bridge_c(*completion_analysis, valid).find(
+             expand_entry_rows(emit_m68k_general_startup_bridge_c(*completion_analysis, valid)).find(
                  "GENESIS_BRIDGE_ROM_SHA256[65] = \"" + valid + "\";") != std::string::npos,
          "valid bridge digests retain their generated literals on both paths");
 }
@@ -18962,10 +18994,10 @@ int emit_general_startup_runtime_c3_source(std::string_view forge = {}) {
       forged.ir.front() = lift_m68k_instruction(decoded);
       forged.static_blocks.front().instructions.front() = decoded.provenance;
     } else return 1;
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
-  std::cout << emit_m68k_general_startup_runtime_c(*analysis);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*analysis));
   return 0;
 }
 
@@ -18987,7 +19019,7 @@ int emit_general_startup_runtime_c4_discovery_boundary_multi_frame_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -19035,7 +19067,7 @@ int emit_general_startup_bridge_irq6_rte_source() {
     std::cerr << "irq6-rte bridge fixture did not resolve the IRQ6 handler\n";
     return 6;
   }
-  std::cout << emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  std::cout << expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   return 0;
 }
 
@@ -19096,7 +19128,7 @@ int emit_general_startup_bridge_irq6_retirement_redirect_source(bool split_block
     continuation.target = {{}, kEntry + 2U};
     emitted.accepted_prefix.static_edges.push_back(continuation);
   }
-  std::cout << emit_m68k_general_startup_bridge_c(emitted, std::string(64U, 'a'));
+  std::cout << expand_entry_rows(emit_m68k_general_startup_bridge_c(emitted, std::string(64U, 'a')));
   return 0;
 }
 
@@ -19211,7 +19243,7 @@ int emit_general_startup_bridge_irq6_partial_prefix_rte_source() {
     std::cerr << "irq6-partial-prefix-rte fixture did not resolve the IRQ6 handler\n";
     return 6;
   }
-  std::cout << emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  std::cout << expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   return 0;
 }
 
@@ -19260,7 +19292,7 @@ int emit_general_startup_bridge_irq6_partial_prefix_boundary_source() {
     std::cerr << "irq6-partial-prefix-boundary fixture did not resolve the IRQ6 handler\n";
     return 6;
   }
-  std::cout << emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  std::cout << expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   return 0;
 }
 
@@ -19828,7 +19860,7 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
               !c4_dim_subtract_quick_indirect && !c4_dim_subtract_quick_absolute &&
               forge != "mid-block-target" && !call_return && !malformed_return && !multi_caller && !indirect_jsr &&
              !indirect_jmp && !immutable_offset_table) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(value);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(value));
   return 0;
 }
 
@@ -19852,7 +19884,7 @@ int emit_general_startup_runtime_c4_controller_io_source() {
   if (partial->accepted_prefix.static_memory_facts.size() != 1U ||
       partial->accepted_prefix.static_memory_facts.front().region != M68kAbsoluteOperandRegion::controller_io)
     return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -19881,7 +19913,7 @@ int emit_general_startup_runtime_c4_controller_io_minimal_source() {
       partial->accepted_prefix.static_memory_facts.size() != 1U ||
       partial->accepted_prefix.static_memory_facts.front().region != M68kAbsoluteOperandRegion::controller_io)
     return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -19896,7 +19928,7 @@ int emit_general_startup_runtime_c4_frontier_above_cap_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr || partial->frontiers.size() <= m68k_discovery_max_frontier_exits) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -19930,7 +19962,7 @@ int emit_general_startup_runtime_c4_z80_bus_store_source() {
       fact.region != M68kAbsoluteOperandRegion::routed_device ||
       fact.width != M68kMemoryAccessWidth::word)
     return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -19956,7 +19988,7 @@ int emit_general_startup_runtime_c4_vdp_source() {
       partial->accepted_prefix.static_memory_facts.front().region != M68kAbsoluteOperandRegion::vdp ||
       partial->accepted_prefix.static_memory_facts.front().width != M68kMemoryAccessWidth::word)
     return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -19981,7 +20013,7 @@ int emit_general_startup_runtime_c4_vdp_minimal_source() {
       partial->accepted_prefix.static_memory_facts.size() != 1U ||
       partial->accepted_prefix.static_memory_facts.front().region != M68kAbsoluteOperandRegion::vdp)
     return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -20035,7 +20067,7 @@ int emit_general_startup_runtime_c4_vdp_store_source(std::string_view variant = 
     if (partial != nullptr)
       for (const auto &fact : partial->accepted_prefix.static_memory_facts)
         if (fact.region == M68kAbsoluteOperandRegion::vdp) return 1;
-    if (partial != nullptr) std::cout << emit_m68k_general_startup_runtime_c(*partial);
+    if (partial != nullptr) std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
     else std::cout << "/* byte VDP-window store is a frontier, not a routable prefix */\n";
     return 0;
   }
@@ -20051,7 +20083,7 @@ int emit_general_startup_runtime_c4_vdp_store_source(std::string_view variant = 
       fact.region != M68kAbsoluteOperandRegion::vdp ||
       fact.width != (variant == "long" ? M68kMemoryAccessWidth::long_word : M68kMemoryAccessWidth::word))
     return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -20073,7 +20105,7 @@ int emit_general_startup_runtime_c4_multi_exit_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr || partial->frontiers.size() != 2U) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 // SEG-007-T066: the diagnosed real-Sonic-ROM C4 terminal-transfer gap this
@@ -20122,11 +20154,11 @@ int emit_general_startup_runtime_c4_straight_line_block_source(std::string_view 
                                        [](const M68kStaticEdge &edge) { return edge.source_instruction.source.address.value == 0xB02U; });
     if (tst_edge == forged.accepted_prefix.static_edges.end()) return 1;
     forged.accepted_prefix.static_edges.push_back(*tst_edge);
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (!forge.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -20188,11 +20220,11 @@ int emit_general_startup_runtime_c4_movem_source(std::string_view forge = {}) {
         forged.accepted_prefix.ir.front().kind != M68kIrKind::movem_transfer)
       return 1;
     forged.accepted_prefix.ir.front().destination_ea.mode = M68kEaMode::data_register;
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (!forge.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -20269,19 +20301,19 @@ int emit_general_startup_runtime_c4_move_source(std::string_view forge = {}) {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.push_back(forged.accepted_prefix.static_memory_facts.front());
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (forge == "fact-unbound") {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.front().operation.source.address.value += 2U;
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (!forge.empty() && !predecrement && !postincrement) return 1;
   if (partial->accepted_prefix.static_blocks.size() != 1U || partial->frontiers.size() != 1U) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -20306,7 +20338,7 @@ int emit_general_startup_runtime_c4_move_byte_source() {
   if (partial == nullptr || partial->accepted_prefix.static_blocks.size() != 1U ||
       partial->frontiers.size() != 1U)
     return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -20381,18 +20413,18 @@ int emit_general_startup_runtime_c4_move_autoupdate_source(std::string_view forg
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.push_back(forged.accepted_prefix.static_memory_facts.front());
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (forge == "fact-unbound") {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.front().operation.source.address.value += 2U;
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (partial->accepted_prefix.static_blocks.size() != 1U || partial->frontiers.size() != 1U) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -20463,14 +20495,14 @@ int emit_general_startup_runtime_c4_andi_source(std::string_view forge = {}) {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.push_back(forged.accepted_prefix.static_memory_facts.front());
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (forge == "fact-unbound") {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.front().operation.source.address.value += 2U;
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (predecrement) {
@@ -20480,7 +20512,7 @@ int emit_general_startup_runtime_c4_andi_source(std::string_view forge = {}) {
   }
   if (!forge.empty() && !predecrement) return 1;
   if (partial->accepted_prefix.static_blocks.size() != 1U || partial->frontiers.size() != 1U) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -20517,14 +20549,14 @@ int emit_general_startup_runtime_c4_not_source(std::string_view forge = {}) {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.push_back(forged.accepted_prefix.static_memory_facts.front());
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (forge == "fact-unbound") {
     if (partial->accepted_prefix.static_memory_facts.empty()) return 1;
     auto forged = *partial;
     forged.accepted_prefix.static_memory_facts.front().operation.source.address.value += 2U;
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (missing_fact) {
@@ -20536,7 +20568,7 @@ int emit_general_startup_runtime_c4_not_source(std::string_view forge = {}) {
       if (row.ir_kind != M68kIrKind::logical_not || row.gap != M68kC4GapClass::missing_fact ||
           row.operand_role != M68kC4OperandRole::destination)
         return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(forged);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     // Fail-closed: the block lowers to an emitted C4 lowering-gap stop naming
     // the missing-fact dimension, never a naive unrouted NOT write.
     if (emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_LOGICAL_NOT_MISSING_FACT") == std::string::npos ||
@@ -20550,7 +20582,7 @@ int emit_general_startup_runtime_c4_not_source(std::string_view forge = {}) {
     // commit: no preflight gap row, and the emitted C carries the NOT body instead of a lowering-gap stop.
     const auto preflight = preflight_m68k_general_startup_c4(*partial);
     if (!preflight.valid || !preflight.rows.empty()) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
     if (emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_LOGICAL_NOT_AUTO_UPDATE") != std::string::npos ||
         emitted.find("not_result =") == std::string::npos)
       return 1;
@@ -20559,7 +20591,7 @@ int emit_general_startup_runtime_c4_not_source(std::string_view forge = {}) {
   }
   if (!forge.empty()) return 1;
   if (partial->accepted_prefix.static_blocks.size() != 1U || partial->frontiers.size() != 1U) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -20614,7 +20646,7 @@ int emit_general_startup_runtime_c4_logical_source(std::string_view forge = {}) 
     if (!preflight.valid || preflight.rows.empty()) return 1;
     for (const auto &row : preflight.rows)
       if (row.ir_kind != M68kIrKind::logical_or || row.gap != M68kC4GapClass::missing_fact) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(forged);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     // Fail-closed: the block lowers to an emitted C4 lowering-gap stop naming
     // the missing-fact dimension, never a naive unrouted logical write.
     if (emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_LOGICAL_OR_MISSING_FACT") == std::string::npos ||
@@ -20628,7 +20660,7 @@ int emit_general_startup_runtime_c4_logical_source(std::string_view forge = {}) 
     // helper: zero preflight gap rows, a routed RMW body, no lowering-gap stop, and one live-register commit.
     const auto preflight = preflight_m68k_general_startup_c4(*partial);
     if (!preflight.valid || !preflight.rows.empty()) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
     if (emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_") != std::string::npos ||
         emitted.find("translation rejected") != std::string::npos ||
         emitted.find("logical_result =") == std::string::npos ||
@@ -20643,7 +20675,7 @@ int emit_general_startup_runtime_c4_logical_source(std::string_view forge = {}) 
     // read for a memory source; routed read + write for a memory RMW dest).
     const auto preflight = preflight_m68k_general_startup_c4(*partial);
     if (!preflight.valid || !preflight.rows.empty()) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
     if (emitted.find("logical_result =") == std::string::npos ||
         emitted.find("translation rejected") != std::string::npos ||
         emitted.find("genesis_c4_lowering_stop_") != std::string::npos)
@@ -20670,7 +20702,7 @@ int emit_general_startup_runtime_c4_logical_source(std::string_view forge = {}) 
     if (!flipped) return 1;
     const auto preflight = preflight_m68k_general_startup_c4(forged);
     if (preflight.valid) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(forged);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     if (emitted.find("translation rejected") == std::string::npos ||
         emitted.find("logical_result =") != std::string::npos)
       return 1;
@@ -20680,7 +20712,7 @@ int emit_general_startup_runtime_c4_logical_source(std::string_view forge = {}) 
   if (!forge.empty()) return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.find("logical_result =") == std::string::npos ||
       emitted.find("translation rejected") != std::string::npos)
     return 1;
@@ -20747,7 +20779,7 @@ int c4_arithmetic_auto_update_admission() {
     if (ok) {
       const auto preflight = preflight_m68k_general_startup_c4(*partial);
       ok = preflight.valid && preflight.rows.empty();
-      const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+      const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
       ok = ok && emitted.find("translation rejected") == std::string::npos &&
            emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_") == std::string::npos &&
            emitted.find("genesis_route_access") != std::string::npos &&
@@ -20758,7 +20790,7 @@ int c4_arithmetic_auto_update_admission() {
       if (partial != nullptr) {
         const auto pf = preflight_m68k_general_startup_c4(*partial);
         std::cerr << " preflight valid=" << pf.valid << " rows=" << pf.rows.size();
-        const auto em = emit_m68k_general_startup_runtime_c(*partial);
+        const auto em = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
         std::cerr << " rejected=" << (em.find("translation rejected") != std::string::npos)
                   << " dim=" << (em.find("GENESIS_C4_LOWERING_DIMENSIONS_") != std::string::npos) << "\n" << em.substr(0, 1500) << "\n";
       }
@@ -20823,7 +20855,7 @@ int emit_general_startup_runtime_c4_subtract_source(std::string_view forge = {})
     if (!preflight.valid || preflight.rows.empty()) return 1;
     for (const auto &row : preflight.rows)
       if (row.ir_kind != M68kIrKind::subtract || row.gap != M68kC4GapClass::missing_fact) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(forged);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     // Fail-closed: the block lowers to an emitted C4 lowering-gap stop naming
     // the missing-fact dimension, never a naive unrouted subtract write.
     if (emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_SUBTRACT_MISSING_FACT") == std::string::npos ||
@@ -20837,7 +20869,7 @@ int emit_general_startup_runtime_c4_subtract_source(std::string_view forge = {})
     // deferred-address-commit path -- zero preflight rows, routed read + write, one deferred commit.
     const auto preflight = preflight_m68k_general_startup_c4(*partial);
     if (!preflight.valid || !preflight.rows.empty()) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
     if (emitted.find("sub_result =") == std::string::npos ||
         emitted.find("genesis_c4_lowering_stop_") != std::string::npos ||
         emitted.find("runtime->a[0] = m68k_sub_auto_ea;") == std::string::npos)
@@ -20851,7 +20883,7 @@ int emit_general_startup_runtime_c4_subtract_source(std::string_view forge = {})
     // routed read+write, and a single deferred live-register commit.
     const auto preflight = preflight_m68k_general_startup_c4(*partial);
     if (!preflight.valid || !preflight.rows.empty()) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
     if (emitted.find("sub_result =") == std::string::npos ||
         emitted.find("translation rejected") != std::string::npos ||
         emitted.find("genesis_c4_lowering_stop_") != std::string::npos ||
@@ -20868,7 +20900,7 @@ int emit_general_startup_runtime_c4_subtract_source(std::string_view forge = {})
     // destination).
     const auto preflight = preflight_m68k_general_startup_c4(*partial);
     if (!preflight.valid || !preflight.rows.empty()) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
     if (emitted.find("sub_result =") == std::string::npos ||
         emitted.find("translation rejected") != std::string::npos ||
         emitted.find("genesis_c4_lowering_stop_") != std::string::npos)
@@ -20895,7 +20927,7 @@ int emit_general_startup_runtime_c4_subtract_source(std::string_view forge = {})
     if (!flipped) return 1;
     const auto preflight = preflight_m68k_general_startup_c4(forged);
     if (preflight.valid) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(forged);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     if (emitted.find("translation rejected") == std::string::npos ||
         emitted.find("sub_result =") != std::string::npos)
       return 1;
@@ -20905,7 +20937,7 @@ int emit_general_startup_runtime_c4_subtract_source(std::string_view forge = {})
   if (!forge.empty()) return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.find("sub_result =") == std::string::npos ||
       emitted.find("translation rejected") != std::string::npos)
     return 1;
@@ -20946,7 +20978,7 @@ int emit_general_startup_runtime_c4_add_immediate_source(std::string_view forge 
       auto forged = *partial;
       forged.accepted_prefix.static_memory_facts.clear();
       const auto preflight = preflight_m68k_general_startup_c4(forged);
-      const auto emitted = emit_m68k_general_startup_runtime_c(forged);
+      const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
       if (!preflight.valid || preflight.rows.empty() ||
           emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_ADD_IMMEDIATE_MISSING_FACT") == std::string::npos ||
           emitted.find("add_result =") != std::string::npos)
@@ -20954,7 +20986,7 @@ int emit_general_startup_runtime_c4_add_immediate_source(std::string_view forge 
       continue;
     }
     const auto preflight = preflight_m68k_general_startup_c4(*partial);
-    const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
     if (!preflight.valid || !preflight.rows.empty() || emitted.find("add_result =") == std::string::npos ||
         emitted.find("genesis_c4_lowering_stop_") != std::string::npos)
       return 1;
@@ -20996,7 +21028,7 @@ int emit_general_startup_runtime_c4_subtract_address_source() {
   if (partial == nullptr) return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.find("sub_result =") == std::string::npos ||
       emitted.find("translation rejected") != std::string::npos ||
       emitted.find("genesis_c4_lowering_stop_") != std::string::npos ||
@@ -21056,7 +21088,7 @@ int emit_general_startup_runtime_c4_compare_source(std::string_view forge = {}) 
     if (!preflight.valid || preflight.rows.empty()) return 1;
     for (const auto &row : preflight.rows)
       if (row.ir_kind != M68kIrKind::compare || row.gap != M68kC4GapClass::missing_fact) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(forged);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     if (emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_CMP_MISSING_FACT") == std::string::npos ||
         emitted.find("compare_result =") != std::string::npos)
       return 1;
@@ -21070,7 +21102,7 @@ int emit_general_startup_runtime_c4_compare_source(std::string_view forge = {}) 
   // needs no fact at all).
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.find("compare_result =") == std::string::npos ||
       emitted.find("translation rejected") != std::string::npos ||
       emitted.find("genesis_c4_lowering_stop_") != std::string::npos ||
@@ -21136,7 +21168,7 @@ int emit_general_startup_runtime_c4_bit_manipulation_source(std::string_view kin
     if (!preflight.valid || preflight.rows.empty()) return 1;
     for (const auto &row : preflight.rows)
       if (row.gap != M68kC4GapClass::missing_fact) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(forged);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     if (emitted.find(std::string(dimension) + "_MISSING_FACT") == std::string::npos ||
         emitted.find("bit_result") != std::string::npos)
       return 1;
@@ -21148,7 +21180,7 @@ int emit_general_startup_runtime_c4_bit_manipulation_source(std::string_view kin
     // SEG-021-T008: the auto-updating destination lowers through the bit-family deferred address commit
     // (one snapshot local, routed read + routed write, one live-register commit strictly after both).
     if (!preflight.valid || !preflight.rows.empty()) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
     const auto commit = emitted.find("runtime->a[0] = m68k_bit_auto_ea;");
     if (emitted.find("translation rejected") != std::string::npos ||
         emitted.find("genesis_c4_lowering_stop_") != std::string::npos ||
@@ -21165,7 +21197,7 @@ int emit_general_startup_runtime_c4_bit_manipulation_source(std::string_view kin
   if (dest_fold) {
     const auto preflight = preflight_m68k_general_startup_c4(*partial);
     if (!preflight.valid || !preflight.rows.empty()) return 1;
-    const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
     if (emitted.find("bit_result") == std::string::npos ||
         emitted.find("translation rejected") != std::string::npos ||
         emitted.find("genesis_c4_lowering_stop_") != std::string::npos ||
@@ -21177,7 +21209,7 @@ int emit_general_startup_runtime_c4_bit_manipulation_source(std::string_view kin
   if (!forge.empty()) return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.find("bit_result") == std::string::npos || emitted.find("translation rejected") != std::string::npos)
     return 1;
   std::cout << emitted;
@@ -21208,7 +21240,7 @@ int emit_general_startup_runtime_c4_add_bit_dbcc_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21260,7 +21292,7 @@ int emit_general_startup_runtime_c4_movea_source(std::string_view forge = {}) {
     forged.accepted_prefix.static_memory_facts.push_back(forged.accepted_prefix.static_memory_facts.back());
     const auto malformed = preflight_m68k_general_startup_c4(forged);
     if (malformed.valid) return 1;
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (forge == "fact-unbound") {
@@ -21269,7 +21301,7 @@ int emit_general_startup_runtime_c4_movea_source(std::string_view forge = {}) {
     forged.accepted_prefix.static_memory_facts.back().operation.source.address.value += 2U;
     const auto malformed = preflight_m68k_general_startup_c4(forged);
     if (malformed.valid) return 1;
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (forge == "fact-region" || forge == "fact-role") {
@@ -21279,7 +21311,7 @@ int emit_general_startup_runtime_c4_movea_source(std::string_view forge = {}) {
     if (forge == "fact-region") fact.region = M68kAbsoluteOperandRegion::raw_cartridge_rom;
     else fact.role = M68kStaticMemoryFactRole::destination_write;
     if (preflight_m68k_general_startup_c4(forged).valid) return 1;
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (forge == "fact-missing") {
@@ -21290,11 +21322,11 @@ int emit_general_startup_runtime_c4_movea_source(std::string_view forge = {}) {
         missing.rows.front().gap != M68kC4GapClass::missing_fact ||
         missing.rows.front().operand_role != M68kC4OperandRole::source)
       return 1;
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (forge != "" && forge != "predecrement" && forge != "postincrement" && forge != "aliasing") return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21323,7 +21355,7 @@ int emit_general_startup_runtime_c4_all_gaps_source() {
   const auto first = preflight_m68k_general_startup_c4(*partial);
   const auto second = preflight_m68k_general_startup_c4(*partial);
   if (!first.valid || !second.valid || !first.rows.empty() || !second.rows.empty()) return 1;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.find("translation rejected") != std::string::npos ||
       emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_") != std::string::npos ||
       emitted.find("uint32_t m68k_muldiv_auto_ea = runtime->a[0];") == std::string::npos ||
@@ -21374,7 +21406,7 @@ int emit_general_startup_runtime_c4_missing_routing_source() {
       row.auto_update != M68kC4AutoUpdateClass::none ||
       row.gap != M68kC4GapClass::missing_routing || row.predecessor != "genesis_route_access")
     return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21577,11 +21609,11 @@ int emit_general_startup_runtime_c4_movem_adjacent_lea_source(std::string_view f
     const auto preflight = preflight_m68k_general_startup_c4(emitted);
     if (forge == "interior-split-branch" || forge == "interior-split-ambiguous") {
       if (preflight.valid) return 3;
-      std::cout << emit_m68k_general_startup_runtime_c(emitted);
+      std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(emitted));
       return 0;
     }
     if (!preflight.valid || !preflight.rows.empty()) return 3;
-    std::cout << emit_m68k_general_startup_runtime_c(emitted);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(emitted));
     return 0;
   }
   if (forge == "fact-duplicate") {
@@ -21591,7 +21623,7 @@ int emit_general_startup_runtime_c4_movem_adjacent_lea_source(std::string_view f
         forged.accepted_prefix.movem_adjacent_lea_facts.back());
     const auto malformed = preflight_m68k_general_startup_c4(forged);
     if (malformed.valid) return 1;
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   if (forge == "fact-unbound") {
@@ -21600,12 +21632,12 @@ int emit_general_startup_runtime_c4_movem_adjacent_lea_source(std::string_view f
     forged.accepted_prefix.movem_adjacent_lea_facts.back().consumer.source.address.value += 2U;
     const auto malformed = preflight_m68k_general_startup_c4(forged);
     if (malformed.valid) return 1;
-    std::cout << emit_m68k_general_startup_runtime_c(forged);
+    std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(forged));
     return 0;
   }
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21638,7 +21670,7 @@ int emit_general_startup_runtime_c4_pc_indexed_move_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21658,7 +21690,7 @@ int emit_operation_c4_indexed_arithmetic_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21691,7 +21723,7 @@ int emit_operation_c4_pc_indexed_logical_source(std::string_view variant = "") {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21718,7 +21750,7 @@ int emit_operation_c4_muls_word_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21744,7 +21776,7 @@ int emit_operation_c4_mulu_word_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21768,7 +21800,7 @@ int emit_operation_c4_divs_word_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21792,7 +21824,7 @@ int emit_operation_c4_divu_word_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21820,7 +21852,7 @@ int emit_operation_c4_mulu_word_auto_update_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21844,7 +21876,7 @@ int emit_operation_c4_muls_word_auto_update_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21871,7 +21903,7 @@ int emit_operation_c4_divu_word_auto_update_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21899,7 +21931,7 @@ int emit_operation_c4_divs_word_pc_indexed_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21923,7 +21955,7 @@ int emit_operation_c4_divu_word_pc_indexed_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -21956,7 +21988,7 @@ int emit_general_startup_bridge_divide_by_zero_rte_source() {
     std::cerr << "divide fixture did not promote/vector-resolve\n";
     return 1;
   }
-  std::cout << emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  std::cout << expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   return 0;
 }
 
@@ -21979,7 +22011,7 @@ int emit_general_startup_runtime_c4_indexed_lea_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 
@@ -22010,7 +22042,7 @@ int emit_general_startup_runtime_c4_pc_indexed_lea_source() {
     return 1;
   const auto preflight = preflight_m68k_general_startup_c4(*partial);
   if (!preflight.valid || !preflight.rows.empty()) return 1;
-  std::cout << emit_m68k_general_startup_runtime_c(*partial);
+  std::cout << expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   return 0;
 }
 } // namespace
@@ -22171,7 +22203,7 @@ void t183_partition_boundary_edge_retains_source_block_outside_bounded_frontier_
   expect(has_candidate_frontier,
          "SEG-007-T214: the authoritative direct-call target that never completes a block now receives an "
          "actual known_but_unemitted_target frontier instead of silently vanishing");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && emitted.rfind("/* translation rejected:", 0) != 0,
          "item 1/9: the partition-boundary edge does not reject the whole translation");
 }
@@ -22225,7 +22257,7 @@ void t183_direct_call_into_a_completed_partition_unit_preserves_frame_and_contin
       });
   expect(has_return_to_continuation,
          "item 7: the call frame's own return_to_continuation edge back to the caller's continuation survives");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   std::ostringstream caller_name;
   caller_name << "genesis_block_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << completed_base;
   std::ostringstream callee_name;
@@ -22281,8 +22313,8 @@ void t183_partition_boundary_representation_is_deterministic_across_runs() {
              first_metrics.retained_block_count_after_pruning == second_metrics.retained_block_count_after_pruning &&
              first_metrics.ingress_retained == second_metrics.ingress_retained,
          "every normalized T183 metric is deterministic across runs");
-  const auto first_emitted = emit_m68k_general_startup_bridge_c(*first, std::string(64U, 'a'));
-  const auto second_emitted = emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a'));
+  const auto first_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*first, std::string(64U, 'a')));
+  const auto second_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a')));
   expect(first_emitted == second_emitted, "the emitted C is byte-identical across independent runs");
 }
 
@@ -22456,7 +22488,7 @@ void t184_admitted_unit_indirect_target_entry_is_excluded_and_represented() {
       });
   expect(reset_frontier_still_represented,
          "the reset entry's own unrelated primary frontier is unaffected by the candidate's own preserved secondary");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.rfind("/* translation rejected:", 0) != 0,
          "C4 emission succeeds with no rejection sentinel once the Tier-1/Tier-2 fact is correctly aggregated");
 }
@@ -22605,7 +22637,7 @@ void t185_straight_line_fallthrough_into_unretained_partition_boundary_emits_rep
   expect(terminates_at_boundary_with_fallthrough,
          "item (a): build_analysis terminates the straight-line run at the boundary and emits a representable "
          "fallthrough edge of the existing edge kind");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.starts_with("/* translation rejected:"),
          "SEG-007-T228: C4 now emits a typed destination stop for the represented boundary instead of "
          "rejecting the whole build");
@@ -22641,7 +22673,7 @@ void t185_dangling_fallthrough_successor_outside_the_partition_boundary_still_fa
   expect(!block_b_retained_with_dangling_edge,
          "item (b): a retained straight-line block whose fallthrough successor is a non-boundary unretained address "
          "is still dropped by the unchanged fail-closed edge-safety pass -- the batch did not widen this");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.empty() || emitted.rfind("/* translation rejected:", 0) == 0 ||
              emitted.find("C4 block lacks terminal control transfer") == std::string::npos,
          "item (b): no partial success is fabricated for the dangling non-boundary successor");
@@ -22666,8 +22698,8 @@ void t185_boundary_straight_line_termination_is_deterministic_across_runs() {
   expect(first->accepted_prefix.static_blocks.size() == second->accepted_prefix.static_blocks.size() &&
              first->accepted_prefix.static_edges.size() == second->accepted_prefix.static_edges.size(),
          "the retained block/edge shape is deterministic across runs");
-  const auto first_emitted = emit_m68k_general_startup_bridge_c(*first, std::string(64U, 'a'));
-  const auto second_emitted = emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a'));
+  const auto first_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*first, std::string(64U, 'a')));
+  const auto second_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a')));
   expect(first_emitted == second_emitted, "the emitted C is byte-identical across independent runs");
 }
 
@@ -22722,8 +22754,8 @@ void ordinary_fallthrough_into_an_existing_boundary_is_deterministic() {
   expect(is_semantic_partition_boundary_address(first->accepted_prefix, boundary) &&
              has_block(*first, straight_line_block_b_address) && has_block(*first, boundary) && has_fallthrough(*first),
          "a live ordinary fallthrough reaches a represented boundary through ordinary block construction");
-  const auto first_c = emit_m68k_general_startup_runtime_c(*first);
-  const auto second_c = emit_m68k_general_startup_runtime_c(*second);
+  const auto first_c = expand_entry_rows(emit_m68k_general_startup_runtime_c(*first));
+  const auto second_c = expand_entry_rows(emit_m68k_general_startup_runtime_c(*second));
   std::ostringstream arm;
   arm << "{ UINT32_C(0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
       << boundary << "), genesis_block_" << std::setw(8) << boundary << " }";
@@ -22744,7 +22776,7 @@ void ordinary_fallthrough_into_an_existing_boundary_is_deterministic() {
   expect(pruned != nullptr, "the pruned-boundary control fixture remains a partial program");
   if (pruned == nullptr) return;
   const bool boundary_retained = has_block(*pruned, boundary_successor_address);
-  const auto pruned_c = emit_m68k_general_startup_runtime_c(*pruned);
+  const auto pruned_c = expand_entry_rows(emit_m68k_general_startup_runtime_c(*pruned));
   expect(!boundary_retained && !pruned_c.starts_with("/* translation rejected:"),
          "SEG-007-T228: a pruned nonrepresented boundary is now a typed destination stop; D never makes "
          "boundary membership an ordinary executable block");
@@ -22802,8 +22834,8 @@ void t227_promotes_a_decoded_nonentry_ordinary_boundary_to_a_block_leader() {
   expect(is_semantic_partition_boundary_address(first->accepted_prefix, boundary) && has_live_fallthrough(*first) &&
              has_block(*first) && has_block(*second),
          "D promotes the decoded non-entry boundary leader across repeated analyses");
-  const auto first_c = emit_m68k_general_startup_runtime_c(*first);
-  const auto second_c = emit_m68k_general_startup_runtime_c(*second);
+  const auto first_c = expand_entry_rows(emit_m68k_general_startup_runtime_c(*first));
+  const auto second_c = expand_entry_rows(emit_m68k_general_startup_runtime_c(*second));
   std::ostringstream arm;
   arm << "{ UINT32_C(0x" << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
       << boundary << "), genesis_block_" << std::setw(8) << boundary << " }";
@@ -22868,8 +22900,8 @@ void t227_live_ordinary_predecessor_does_not_retain_an_orphan_boundary_block() {
       });
   expect(boundary_is_a_known_but_unemitted_frontier,
          "SEG-007-T228: the live-predecessor orphan-RTS boundary is a known_but_unemitted_target frontier");
-  const auto first_c = emit_m68k_general_startup_runtime_c(*first);
-  const auto second_c = emit_m68k_general_startup_runtime_c(*second);
+  const auto first_c = expand_entry_rows(emit_m68k_general_startup_runtime_c(*first));
+  const auto second_c = expand_entry_rows(emit_m68k_general_startup_runtime_c(*second));
   expect(!first_c.starts_with("/* translation rejected:") && first_c == second_c,
          "SEG-007-T228: the pruned orphan boundary now compiles to a deterministic typed destination stop "
          "rather than rejecting C4, and never gains executable block membership");
@@ -22912,7 +22944,7 @@ void t228_two_live_predecessors_observe_the_same_destination_representation() {
   expect(known_but_unemitted_frontiers_for(boundary) == 1,
          "SEG-007-T228: exactly one destination-global frontier represents the shared invalid destination, "
          "never a duplicate or per-predecessor stop");
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!emitted.starts_with("/* translation rejected:"),
          "SEG-007-T228: the shared destination stop lets the whole build succeed");
 }
@@ -22998,7 +23030,7 @@ void expect_pruned_continuation_is_represented(const FrontendPartialProgram &par
   expect(known_but_unemitted_for == 1,
          msg(": the pruned call-continuation is represented exactly once as a known_but_unemitted_target "
              "frontier"));
-  const auto emitted = emit_m68k_general_startup_bridge_c(partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(partial, std::string(64U, 'a')));
   expect(!emitted.empty() && !emitted.starts_with("/* translation rejected:"),
          msg(": C4 emits the prefix instead of rejecting the whole translation on a boundary-nominated-but-"
              "unretained return-continuation target"));
@@ -23041,8 +23073,8 @@ void t229_bsr_continuation_orphan_rts_pruned_boundary_is_represented() {
   expect(partial->accepted_prefix.static_blocks.size() == second->accepted_prefix.static_blocks.size() &&
              partial->accepted_prefix.static_edges.size() == second->accepted_prefix.static_edges.size(),
          "SEG-007-T229 (BSR): the retained block/edge shape is deterministic across independent runs");
-  const auto first_emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
-  const auto second_emitted = emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a'));
+  const auto first_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  const auto second_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a')));
   expect(first_emitted == second_emitted, "SEG-007-T229 (BSR): the emitted C is byte-identical across independent runs");
 }
 
@@ -23170,8 +23202,8 @@ void t225_retained_semantic_partition_boundaries_are_dispatchable() {
   };
   expect(retained_boundary(*first), "positive: the completed candidate is both retained and a semantic boundary");
 
-  const auto emitted = emit_m68k_general_startup_runtime_c(*first);
-  const auto emitted_again = emit_m68k_general_startup_runtime_c(*second);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*first));
+  const auto emitted_again = expand_entry_rows(emit_m68k_general_startup_runtime_c(*second));
   std::ostringstream arm;
   arm << "{ UINT32_C(0x" << std::uppercase << std::hex << std::setw(8)
       << std::setfill('0') << completed_candidate_address << "), genesis_block_" << std::setw(8)
@@ -23187,7 +23219,7 @@ void t225_retained_semantic_partition_boundaries_are_dispatchable() {
   const auto *unretained = std::get_if<FrontendPartialProgram>(&unretained_result);
   expect(unretained != nullptr, "adversarial negative: the unretained-boundary fixture remains partial");
   if (unretained == nullptr) return;
-  const auto unretained_c = emit_m68k_general_startup_runtime_c(*unretained);
+  const auto unretained_c = expand_entry_rows(emit_m68k_general_startup_runtime_c(*unretained));
   std::ostringstream unretained_arm;
   unretained_arm << "{ UINT32_C(0x" << std::uppercase << std::hex << std::setw(8)
                   << std::setfill('0') << t185_fixture::boundary_successor_address
@@ -23209,7 +23241,7 @@ int emit_general_startup_runtime_c4_partition_boundary_dispatch_source() {
   const auto result = analyze_m68k_frontend(make_completed_program({make_candidate(completed_candidate_address)}));
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 1;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 1;
   std::cout << emitted;
   return 0;
@@ -23261,7 +23293,7 @@ void t185_direct_absolute_jmp_block_terminal_is_classified_and_lowered_like_a_br
         return edge.kind == M68kStaticEdgeKind::direct_branch && edge.target.value == jump_target_frontier;
       });
   expect(has_direct_branch_edge, "discovery emits the pre-existing direct_branch edge for the folded JMP target");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && emitted.rfind("/* translation rejected:", 0) != 0,
          "C4 now emits the block instead of rejecting the whole translation");
   expect(emitted.find("C4 block lacks terminal control transfer") == std::string::npos,
@@ -23270,7 +23302,7 @@ void t185_direct_absolute_jmp_block_terminal_is_classified_and_lowered_like_a_br
   ingress_name << "genesis_block_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << base;
   expect(emitted.find(ingress_name.str()) != std::string::npos,
          "the ingress block's own genesis_block_<addr> function is emitted");
-  const auto again = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto again = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted == again, "direct-JMP terminal emission is deterministic across repeated emits");
 }
 
@@ -23297,7 +23329,7 @@ void t185_direct_jmp_to_an_unrepresentable_target_still_fails_closed() {
            "an unrepresentable direct-JMP target fails closed (whole-build rejection)");
     return;
   }
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted.rfind("/* translation rejected:", 0) == 0 ||
              emitted.find("genesis_block_00003000") == std::string::npos,
          "an unrepresentable direct-JMP target does not yield a fabricated emitted ingress block");
@@ -23431,7 +23463,7 @@ void t185_shared_direct_call_callee_survives_a_pruned_sibling_continuation() {
          "graph-level pre-emission invariant: every retained direct-control edge target is a retained "
          "block entry, a represented frontier, or a semantic partition boundary");
 
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && emitted.rfind("/* translation rejected:", 0) != 0,
          "C4 emits the shared-callee prefix instead of rejecting the whole translation");
   std::ostringstream callee_name;
@@ -23456,8 +23488,8 @@ void t185_shared_callee_preservation_is_deterministic_across_candidate_order() {
   expect(pa->accepted_prefix.static_blocks.size() == pb->accepted_prefix.static_blocks.size() &&
              pa->accepted_prefix.static_edges.size() == pb->accepted_prefix.static_edges.size(),
          "retained block/edge shape is independent of candidate ordering");
-  expect(emit_m68k_general_startup_bridge_c(*pa, std::string(64U, 'a')) ==
-             emit_m68k_general_startup_bridge_c(*pb, std::string(64U, 'a')),
+  expect(expand_entry_rows(emit_m68k_general_startup_bridge_c(*pa, std::string(64U, 'a'))) ==
+             expand_entry_rows(emit_m68k_general_startup_bridge_c(*pb, std::string(64U, 'a'))),
          "emitted C is byte-identical across candidate ordering");
 }
 
@@ -23493,7 +23525,7 @@ void t185_shared_callee_with_no_representable_return_path_still_fails_closed() {
          "a callee with no representable return path is pruned by the unchanged orphan-RTS gate, not kept");
   expect(every_direct_control_target_is_representable(*partial),
          "the graph-level invariant still holds -- no dangling direct-control target");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   std::ostringstream callee_name;
   callee_name << "genesis_block_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
               << callee_c_address;
@@ -23586,7 +23618,7 @@ void t185_reachable_return_continuation_is_never_treated_as_absent() {
   expect(t185_shared_callee_fixture::every_direct_control_target_is_representable(*partial),
          "graph-level pre-emission invariant holds: every retained direct-control target is representable");
 
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && emitted.rfind("/* translation rejected:", 0) != 0,
          "C4 emits the prefix instead of rejecting the whole translation");
   const auto has_block_and_dispatch = [&](std::uint32_t address) {
@@ -23827,8 +23859,8 @@ void t188_canonical_adjacency_results_are_order_independent() {
   if (pa == nullptr || pb == nullptr) return;
   expect(edge_signature(pa->accepted_prefix) == edge_signature(pb->accepted_prefix),
          "the canonical control adjacency yields a byte-identical static-edge relation across runs");
-  const auto ea = emit_m68k_general_startup_bridge_c(*pa, std::string(64U, 'a'));
-  const auto eb = emit_m68k_general_startup_bridge_c(*pb, std::string(64U, 'a'));
+  const auto ea = expand_entry_rows(emit_m68k_general_startup_bridge_c(*pa, std::string(64U, 'a')));
+  const auto eb = expand_entry_rows(emit_m68k_general_startup_bridge_c(*pb, std::string(64U, 'a')));
   expect(ea == eb && !ea.starts_with("/* translation rejected:"),
          "the parity-corrected consumers keep generated C deterministic");
 }
@@ -24061,8 +24093,8 @@ void t189_results_are_order_independent() {
   if (pa == nullptr || pb == nullptr) return;
   expect(t188_fixture::edge_signature(pa->accepted_prefix) == t188_fixture::edge_signature(pb->accepted_prefix),
          "the bounded call-context-sensitive proof yields a byte-identical static-edge relation across runs");
-  const auto ea = emit_m68k_general_startup_bridge_c(*pa, std::string(64U, 'a'));
-  const auto eb = emit_m68k_general_startup_bridge_c(*pb, std::string(64U, 'a'));
+  const auto ea = expand_entry_rows(emit_m68k_general_startup_bridge_c(*pa, std::string(64U, 'a')));
+  const auto eb = expand_entry_rows(emit_m68k_general_startup_bridge_c(*pb, std::string(64U, 'a')));
   expect(ea == eb && !ea.starts_with("/* translation rejected:") &&
               ea.find("genesis_tier1_indirect_stop_") != std::string::npos &&
               ea.find("m68k_indirect_target_member(") == std::string::npos,
@@ -24650,14 +24682,14 @@ void end_to_end_late_target_representation_and_return_edge() {
   const auto *pp = std::get_if<FrontendPartialProgram>(&result);
   expect(pp != nullptr, "the frontier at the RESET continuation yields a partial program");
   if (pp == nullptr) return;
-  const auto first = emit_m68k_general_startup_bridge_c(*pp, std::string(64U, 'a'));
-  const auto again = emit_m68k_general_startup_bridge_c(*pp, std::string(64U, 'a'));
+  const auto first = expand_entry_rows(emit_m68k_general_startup_bridge_c(*pp, std::string(64U, 'a')));
+  const auto again = expand_entry_rows(emit_m68k_general_startup_bridge_c(*pp, std::string(64U, 'a')));
   expect(first == again && !first.starts_with("/* translation rejected:") &&
              first.find("m68k_indirect_targets_00008100") != std::string::npos,
          "generated dispatch now deterministically contains the previously-missing late-proven target path");
   const auto second_run = analyze_m68k_frontend(program);
   const auto *second = std::get_if<FrontendPartialProgram>(&second_run);
-  expect(second != nullptr && emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a')) == first,
+  expect(second != nullptr && expand_entry_rows(emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a'))) == first,
          "repeated analysis of the identical input emits byte-identical generated C");
 }
 
@@ -24823,8 +24855,8 @@ void fixed_point_iteration_needs_more_than_one_round_and_converges() {
   const auto *pp1 = std::get_if<FrontendPartialProgram>(&result);
   const auto *pp2 = std::get_if<FrontendPartialProgram>(&again);
   expect(pp1 != nullptr && pp2 != nullptr &&
-             emit_m68k_general_startup_bridge_c(*pp2, std::string(64U, 'a')) ==
-                 emit_m68k_general_startup_bridge_c(*pp1, std::string(64U, 'a')),
+             expand_entry_rows(emit_m68k_general_startup_bridge_c(*pp2, std::string(64U, 'a'))) ==
+                 expand_entry_rows(emit_m68k_general_startup_bridge_c(*pp1, std::string(64U, 'a'))),
          "the multi-round closure is byte-identical across repeated runs");
 }
 
@@ -25242,9 +25274,9 @@ void t186_post_stitch_finite_an_jmp_becomes_a_proven_retained_relation_determini
   expect(edge_signature(*first) == edge_signature(*second) &&
              edge_signature(*first) == edge_signature(*third),
          "candidate input order cannot change any retained static edge");
-  const auto emitted_first = emit_m68k_general_startup_bridge_c(*first, std::string(64U, 'a'));
-  const auto emitted_second = emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a'));
-  const auto emitted_third = emit_m68k_general_startup_bridge_c(*third, std::string(64U, 'a'));
+  const auto emitted_first = expand_entry_rows(emit_m68k_general_startup_bridge_c(*first, std::string(64U, 'a')));
+  const auto emitted_second = expand_entry_rows(emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a')));
+  const auto emitted_third = expand_entry_rows(emit_m68k_general_startup_bridge_c(*third, std::string(64U, 'a')));
   expect(!emitted_first.starts_with("/* translation rejected:") && emitted_first == emitted_second &&
              emitted_first == emitted_third &&
              emitted_first.find("m68k_indirect_targets_00005010") != std::string::npos,
@@ -25287,8 +25319,8 @@ void t190_post_stitch_an_jmp_with_a_late_only_target_is_represented_and_accepted
              prefix.offline_inventory_stitch_metrics.late_indirect_closure_rounds == 3U,
          "the bounded closure represented exactly one late unit, committed it on the following graph-stable round, "
          "then revalidated it against the edge-expanded graph and converged");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
-  const auto again = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  const auto again = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(emitted == again && !emitted.starts_with("/* translation rejected:") &&
              emitted.find("m68k_indirect_targets_00005010") != std::string::npos,
          "the late-represented computed target now lowers deterministically through the ordinary Tier-1 path");
@@ -25347,8 +25379,8 @@ void t186_raw_route_without_offline_inventory_is_unchanged() {
                                    edge.source_instruction.source.address.value == indirect_site;
                           }),
          "without offline inventory the stitched root pass adds no candidate fact or computed edge");
-  const auto emitted_first = emit_m68k_general_startup_bridge_c(*first, std::string(64U, 'a'));
-  const auto emitted_second = emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a'));
+  const auto emitted_first = expand_entry_rows(emit_m68k_general_startup_bridge_c(*first, std::string(64U, 'a')));
+  const auto emitted_second = expand_entry_rows(emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a')));
   expect(emitted_first == emitted_second &&
              emitted_first.find("m68k_indirect_targets_00005010") == std::string::npos,
          "the raw no-inventory route remains byte-deterministic and does not engage stitched An lowering");
@@ -25447,7 +25479,7 @@ void t194_orphan_an_indexed_pc_index8_jmp_is_pruned_not_rejected() {
   expect(!candidate_block_retained,
          "the orphan computed-control block (no proven target set, no outgoing edge) is pruned by the "
          "retention fixpoint's orphan-indirect-terminal check, not silently retained");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && emitted.rfind("/* translation rejected:", 0) != 0,
          "C4 emits the pruned prefix instead of rejecting the whole translation with \"invalid C4 indirect "
          "target set\"");
@@ -25914,7 +25946,7 @@ void t243_represented_lowerable_block_has_matching_body_arm_and_membership() {
     expect(!has_block(partial->accepted_prefix, w_dropped_tail),
            "T243(A) precondition: W's own dropped fallthrough tail is never itself fabricated as a retained "
            "block either");
-    const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
     expect(!emitted.empty() && emitted.rfind("/* translation rejected:", 0) != 0,
            "T243(A): C4 emits the represented prefix instead of rejecting the whole translation");
     std::ostringstream suffix;
@@ -26012,7 +26044,7 @@ void t243_represented_lowerable_block_has_matching_body_arm_and_membership() {
            "T243(A2) precondition: no Tier-1/Tier-2 fact exists anywhere in this program -- A and B are "
            "connected via ordinary direct branches only, never routed through Tier-1's own separate "
            "candidate-preservation seeding loop");
-    const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
     expect(!emitted.empty() && emitted.rfind("/* translation rejected:", 0) != 0,
            "T243(A2): C4 emits the represented prefix instead of rejecting the whole translation");
     for (const auto member : {a_address, b_address}) {
@@ -26079,7 +26111,7 @@ void t243_represented_lowerable_block_has_matching_body_arm_and_membership() {
     expect(a_retained && b_retained,
            "T243(A3) informational: A and B remain retained static blocks in this program's actual "
            "analysis representation (not itself the acceptance requirement -- see below)");
-    const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
     expect(!emitted.empty() && emitted.rfind("/* translation rejected:", 0) != 0,
            "T243(A3): C4 still emits the represented prefix -- the cut is a safe typed stop, not a whole "
            "translation rejection");
@@ -26129,7 +26161,7 @@ void t243_represented_lowerable_block_has_matching_body_arm_and_membership() {
            "T243(A) subcase: a reachable computed-control block with no proven Tier-1 target set and no "
            "Tier-2 fact is retained, not silently pruned, now that it is genuinely reached by a live "
            "retained predecessor");
-    const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
     expect(!emitted.empty() && emitted.rfind("/* translation rejected:", 0) != 0,
            "T243(A) subcase: C4 emits the represented prefix instead of rejecting the whole translation");
     std::ostringstream suffix;
@@ -26171,7 +26203,7 @@ void t243_represented_computed_control_uses_compiled_membership_before_mutation(
           return set.source_instruction.source.address.value == jmp_address;
         });
     expect(has_tier2_fact, "T243(B) precondition: the runtime-computed JMP is a genuine Tier-2 unproven-EA site");
-    const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
     expect(emitted.find(array_name + "[] = {UINT32_C(0x00006000), UINT32_C(0x0000600A)};") != std::string::npos,
            "T243(B) in-set: the emitted code address set is the sorted, deduplicated union of the reset entry "
            "and the validated candidate block");
@@ -26206,7 +26238,7 @@ void t243_represented_computed_control_uses_compiled_membership_before_mutation(
     expect(partial != nullptr, "T243(B) out-of-set: the fixture with an unrelated candidate reaches a partial "
                                "program");
     if (partial == nullptr) return;
-    const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
     expect(emitted.find(array_name + "[] = {UINT32_C(0x00006000)};") != std::string::npos,
            "T243(B) out-of-set: the emitted code address set never contains the unreachable candidate address "
            "0x0000600A here");
@@ -26240,8 +26272,8 @@ void t194_orphan_an_indexed_pc_index8_jmp_pruning_is_deterministic_across_runs()
   if (pa == nullptr || pb == nullptr) return;
   expect(pa->accepted_prefix.static_blocks.size() == pb->accepted_prefix.static_blocks.size(),
          "the pruning outcome is deterministic across repeated runs");
-  expect(emit_m68k_general_startup_bridge_c(*pa, std::string(64U, 'a')) ==
-             emit_m68k_general_startup_bridge_c(*pb, std::string(64U, 'a')),
+  expect(expand_entry_rows(emit_m68k_general_startup_bridge_c(*pa, std::string(64U, 'a'))) ==
+             expand_entry_rows(emit_m68k_general_startup_bridge_c(*pb, std::string(64U, 'a'))),
          "the emitted C is byte-identical across repeated runs");
 }
 
@@ -26501,7 +26533,7 @@ int emit_extended_arithmetic_aot_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -26743,7 +26775,7 @@ void extended_arithmetic_aot_dispatch_is_admitted_end_to_end() {
   expect(partial != nullptr, "extended-arithmetic fixture remains a genuine partial program");
   if (partial == nullptr) return;
   const auto &roots = partial->accepted_prefix.immutable_rom_aot_entries;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   for (std::uint32_t address = first_root; address < base + image.size(); address += 2U) {
     expect(std::any_of(roots.begin(), roots.end(),
                        [&](const auto &root) { return root.decoded.provenance.source.address.value == address; }),
@@ -26809,7 +26841,7 @@ int c4_extended_arithmetic_admission() {
     if (ok) {
       const auto preflight = preflight_m68k_general_startup_c4(*partial);
       ok = preflight.valid && preflight.rows.empty();
-      emitted = emit_m68k_general_startup_runtime_c(*partial);
+      emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
       ok = ok && emitted.find("translation rejected") == std::string::npos &&
            emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_") == std::string::npos &&
            emitted.find("genesis_c4_lowering_stop_") == std::string::npos &&
@@ -26864,7 +26896,7 @@ int emit_bcd_aot_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -27070,7 +27102,7 @@ void bcd_aot_dispatch_is_admitted_end_to_end() {
   expect(partial != nullptr, "BCD fixture remains a genuine partial program");
   if (partial == nullptr) return;
   const auto &roots = partial->accepted_prefix.immutable_rom_aot_entries;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   for (std::uint32_t address = first_root; address < base + image.size(); address += 2U) {
     expect(std::any_of(roots.begin(), roots.end(),
                        [&](const auto &root) { return root.decoded.provenance.source.address.value == address; }),
@@ -27128,7 +27160,7 @@ int c4_bcd_admission() {
     if (ok) {
       const auto preflight = preflight_m68k_general_startup_c4(*partial);
       ok = preflight.valid && preflight.rows.empty();
-      emitted = emit_m68k_general_startup_runtime_c(*partial);
+      emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
       ok = ok && emitted.find("translation rejected") == std::string::npos &&
            emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_") == std::string::npos &&
            emitted.find("genesis_c4_lowering_stop_") == std::string::npos &&
@@ -27180,7 +27212,7 @@ int emit_movem_link_aot_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -27227,7 +27259,7 @@ int emit_exg_movep_scc_tas_aot_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -27279,7 +27311,7 @@ int emit_status_register_aot_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 6;
   std::cout << emitted;
   return 0;
@@ -27313,7 +27345,7 @@ int emit_status_register_c4_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 1;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) {
     std::cerr << emitted;
     return 2;
@@ -27375,7 +27407,7 @@ int emit_general_startup_bridge_privilege_violation_source(std::string_view vari
     std::cerr << "privilege fixture vector-8 resolution mismatch\n";
     return 1;
   }
-  std::cout << emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  std::cout << expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   return 0;
 }
 
@@ -27405,7 +27437,7 @@ int emit_exg_movep_scc_tas_c4_source() {
   const auto result = analyze_m68k_frontend(program);
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 1;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   if (emitted.starts_with("/* translation rejected:")) return 2;
   std::cout << emitted;
   return 0;
@@ -27700,7 +27732,7 @@ void exg_movep_scc_tas_aot_dispatch_is_admitted_end_to_end() {
   expect(partial != nullptr, "EXG/MOVEP/Scc/TAS fixture remains a genuine partial program");
   if (partial == nullptr) return;
   const auto &roots = partial->accepted_prefix.immutable_rom_aot_entries;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   for (const std::uint32_t offset : {0x08U, 0x0AU, 0x0CU, 0x0EU, 0x12U, 0x16U, 0x18U, 0x1AU, 0x1CU, 0x1EU, 0x20U}) {
     const auto address = base + offset;
     expect(std::any_of(roots.begin(), roots.end(),
@@ -27769,7 +27801,7 @@ int c4_exg_movep_scc_tas_admission() {
     if (ok) {
       const auto preflight = preflight_m68k_general_startup_c4(*partial);
       ok = preflight.valid && preflight.rows.empty();
-      emitted = emit_m68k_general_startup_runtime_c(*partial);
+      emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
       ok = ok && emitted.find("translation rejected") == std::string::npos &&
            emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_") == std::string::npos &&
            emitted.find("genesis_c4_lowering_stop_") == std::string::npos &&
@@ -27910,7 +27942,7 @@ void t214_recursive_closure_reaches_a_deeper_undiscovered_target() {
          "T's own body never completes, so T is represented as an actual typed frontier, not a block");
   expect(prefix.offline_inventory_stitch_metrics.authoritative_exact_targets_unrepresented == 0U,
          "every authoritative exact target ends the run represented");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && emitted.rfind("/* translation rejected:", 0) != 0,
          "the two-simultaneous-obligations fixture does not reject the whole translation");
 }
@@ -27958,14 +27990,14 @@ void t214_cycle_between_two_units_terminates_deterministically() {
   if (partial == nullptr) return;
   expect(partial->accepted_prefix.offline_inventory_stitch_metrics.authoritative_exact_targets_unrepresented == 0U,
          "every authoritative exact target in the cycle ends the run represented");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && emitted.rfind("/* translation rejected:", 0) != 0,
          "the cyclic call graph does not reject the whole translation");
   // Deterministic across two independent runs.
   const auto second_result = analyze_m68k_frontend(make_program({make_candidate(t_address)}));
   const auto *second_partial = std::get_if<FrontendPartialProgram>(&second_result);
   expect(second_partial != nullptr &&
-             emit_m68k_general_startup_bridge_c(*second_partial, std::string(64U, 'a')) == emitted,
+             expand_entry_rows(emit_m68k_general_startup_bridge_c(*second_partial, std::string(64U, 'a'))) == emitted,
          "the cycle fixture is deterministic across repeated runs");
 }
 
@@ -28032,7 +28064,7 @@ void t214_closure_result_is_independent_of_offline_candidate_identity() {
   const auto compiles = [&](const FrontendResult &result) {
     const auto *partial = std::get_if<FrontendPartialProgram>(&result);
     if (partial == nullptr) return false;
-    const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
     return !emitted.empty() && emitted.rfind("/* translation rejected:", 0) != 0;
   };
   expect(compiles(no_candidate_result) && compiles(admitted_result) && compiles(rejected_result),
@@ -28211,7 +28243,7 @@ void t214_leader_promotion_does_not_consume_the_synthesized_unit_ceiling() {
   expect(metrics.synthesized_resolved_control_target_unit_count == 0U,
          "zero FRESH `M68kStaticGraphWalker` units were synthesized -- every candidate resolved via promotion "
          "(already decoded via its own admission), never via a ceiling-consuming fresh walk");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && emitted.rfind("/* translation rejected:", 0) != 0,
          "the ceiling non-consumption fixture does not reject the whole translation");
 }
@@ -28390,7 +28422,7 @@ void isolated_root_orphan_rts_two_level_chain_commits() {
                       m.adr0038_unresolved_node_count ==
                   m.adr0038_graph_node_count,
          "SEG-007-T234 (two-level chain): the closure's own metrics record a genuine acyclic, committed closure");
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && !emitted.starts_with("/* translation rejected:"),
          "SEG-007-T234 (two-level chain): C4 emits the grown prefix instead of rejecting the whole translation");
 }
@@ -28452,7 +28484,7 @@ void branch_terminal_without_discovered_edges_is_not_a_completed_block() {
                                edge.source_instruction.source.address.value;
     (void)has_terminal_block;
   }
-  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
   expect(!emitted.empty() && !emitted.starts_with("/* translation rejected:"),
          "SEG-021-T008 (edgeless branch): C4 emits the prefix instead of rejecting the whole translation");
 }
@@ -28716,8 +28748,8 @@ void closure_is_deterministic_and_byte_identical_across_runs() {
              first->accepted_prefix.static_edges.size() == second->accepted_prefix.static_edges.size() &&
              first->frontiers.size() == second->frontiers.size(),
          "SEG-007-T234 (determinism): the retained/proposed sets are byte-identical in shape across runs");
-  const auto first_emitted = emit_m68k_general_startup_bridge_c(*first, std::string(64U, 'a'));
-  const auto second_emitted = emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a'));
+  const auto first_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*first, std::string(64U, 'a')));
+  const auto second_emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*second, std::string(64U, 'a')));
   expect(first_emitted == second_emitted,
          "SEG-007-T234 (determinism): the emitted C is byte-identical across independent runs");
 }
@@ -28973,9 +29005,9 @@ int emit_general_startup_runtime_c4_write_swap_source() {
   if (first == nullptr || second == nullptr || first->accepted_prefix.ir.size() != 1U ||
       second->accepted_prefix.ir.size() != 1U || first->accepted_prefix.ir.front().kind != M68kIrKind::write_swap)
     return 1;
-  const auto emitted = emit_m68k_general_startup_runtime_c(*first);
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*first));
   if (emitted.rfind("/* translation rejected:", 0) == 0 ||
-      emitted != emit_m68k_general_startup_runtime_c(*second) ||
+      emitted != expand_entry_rows(emit_m68k_general_startup_runtime_c(*second)) ||
       emitted.find("#define pc runtime->pc\n") == std::string::npos ||
       emitted.find("swap_result") == std::string::npos ||
       emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_WRITE_SWAP_MISSING_DISPATCHER") != std::string::npos)

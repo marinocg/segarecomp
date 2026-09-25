@@ -141,7 +141,7 @@ def main() -> None:
     )[1].split("};", 1)[0]
     mismatch_body = generated.stdout.split(
         "genesis_aot_00000C62(GenesisRuntime *runtime) {", 1
-    )[1].split("static const GenesisCompiledEntryRecord", 1)[0]
+    )[1].split("static const uint32_t genesis_compiled_entry_addresses", 1)[0]
     assert "UINT32_C(0x00000C62)" not in attachment
     assert attachment.count("{ UINT32_C(0x") == 1
     assert mismatch_body.count(

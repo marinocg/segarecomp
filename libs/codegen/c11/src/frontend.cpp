@@ -1,3 +1,4 @@
+#include "segarecomp/codegen/c11/compiled_entry_table.hpp"
 #include "segarecomp/codegen/c11/genesis_frontend.hpp"
 #include "segarecomp/codegen/c11/genesis.hpp"
 #include "segarecomp/codegen/c11/translation_units.hpp"
@@ -3070,7 +3071,6 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   if (emits_muls_word)
     out << shard_helper_linkage(sharded, "static uint32_t genesis_m68k_muls_word_cycles(uint16_t source) { uint32_t n = 0U; uint32_t bits = ((uint32_t)source) << 1U; for (uint32_t i = 0U; i < 16U; ++i) n += ((bits >> i) ^ (bits >> (i + 1U))) & UINT32_C(1); return UINT32_C(38) + UINT32_C(2) * n; }\n");
   out << "typedef GenesisControlTransfer (*GenesisCompiledEntry)(GenesisRuntime *runtime);\n"
-      << "typedef struct GenesisCompiledEntryRecord { uint32_t address; GenesisCompiledEntry body; } GenesisCompiledEntryRecord;\n"
       << (sharded ? "GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n"
                   : "static GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n");
   if (!sharded)
@@ -5756,36 +5756,26 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     }
   // SEG-022-T003: the sorted compiled-entry table and its binary-search lookup form the one `entries` unit.
   if (sharded) shard_begin_unit(out, "entries", 0U, "GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address)");
-  out << "static const GenesisCompiledEntryRecord genesis_compiled_entries[] = {\n";
+  std::vector<CompiledEntryBinding> compiled_entry_bindings;
+  compiled_entry_bindings.reserve(emitted_code_addresses.size());
   for (const auto address : emitted_code_addresses) {
-    out << "  { UINT32_C(" << hex(address, 8) << "), ";
+    std::ostringstream symbol;
     const auto ordinary = ordinary_compiled_owners.find(address);
     if (ordinary != ordinary_compiled_owners.end()) {
-      out << "genesis_block_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
-          << ordinary->second;
+      symbol << "genesis_block_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
+             << ordinary->second;
     } else {
       const auto aot = aot_entries->find(address);
       if (aot == aot_entries->end())
         return "/* translation rejected: compiled entry lacks generated body */\n";
       if (const auto owner = aot_owner_of.find(address); owner != aot_owner_of.end())
-        out << owner->second;
+        symbol << owner->second;
       else
-        out << "genesis_aot_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address;
+        symbol << "genesis_aot_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address;
     }
-    out << " },\n";
+    compiled_entry_bindings.push_back({static_cast<std::uint32_t>(address), symbol.str()});
   }
-  out << "};\n"
-      << "static GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address) {\n"
-      << "  size_t low = 0U;\n"
-      << "  size_t high = sizeof(genesis_compiled_entries) / sizeof(genesis_compiled_entries[0]);\n"
-      << "  while (low < high) {\n"
-      << "    const size_t middle = low + (high - low) / 2U;\n"
-      << "    const uint32_t candidate = genesis_compiled_entries[middle].address;\n"
-      << "    if (candidate < address) low = middle + 1U; else high = middle;\n"
-      << "  }\n"
-      << "  if (low < sizeof(genesis_compiled_entries) / sizeof(genesis_compiled_entries[0]) && genesis_compiled_entries[low].address == address) return genesis_compiled_entries[low].body;\n"
-      << "  return NULL;\n"
-      << "}\n";
+  if (auto rejection = emit_compiled_entry_table(out, compiled_entry_bindings); !rejection.empty()) return rejection;
   if (sharded) shard_end_unit(out);
   out << "\nstatic GenesisControlTransfer genesis_dispatch(GenesisRuntime *runtime) {\n";
   out << "  { GenesisCompiledEntry entry = genesis_compiled_entry_lookup(runtime->pc);\n"

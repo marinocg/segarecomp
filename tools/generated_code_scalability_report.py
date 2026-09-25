@@ -41,7 +41,7 @@ _REGION_STARTS = (
     ("static_stop_fn", re.compile(rb"^GenesisControlTransfer genesis_static_stop\(")),
     ("ordinary_block", re.compile(rb"^static GenesisControlTransfer genesis_block_[0-9A-Fa-f]+\([^;]*\{\s*$")),
     ("aot_function", re.compile(rb"^static GenesisControlTransfer genesis_aot_[0-9A-Fa-f]+\([^;]*\{\s*$")),
-    ("entry_table", re.compile(rb"^static const GenesisCompiledEntryRecord genesis_compiled_entries\[\]")),
+    ("entry_table", re.compile(rb"^static const uint32_t genesis_compiled_entry_addresses\[\]")),
     ("dispatch", re.compile(rb"^static GenesisCompiledEntry genesis_compiled_entry_lookup\([^;]*\{")),
     ("owned_literals", re.compile(rb"^static const uint8_t genesis_owned_region_data_")),
     ("main_glue", re.compile(rb"^int main\(")),
@@ -57,8 +57,11 @@ _MEMBERSHIP = re.compile(rb"^\s*(?:if \(runtime->pc == UINT32_C\(|\|\| runtime->
 _RETIRE = re.compile(rb"^\s*(?:\{ const uint32_t m68k_retirement_pc\b|if \(retired\.|return retired;|"
                      rb"runtime->pc = pc;|uint32_t pc = runtime->pc;|#define pc |#undef pc)")
 _INDIRECT_ARRAY_START = re.compile(rb"static const uint32_t m68k_indirect_targets_\w+\[\]")
-_ENTRY_ROW_ADDR = re.compile(rb"^\s*\{ UINT32_C\(0x([0-9A-Fa-f]+)\), genesis_(aot|block)_")
-_ENTRY_ROW = re.compile(rb"^\s*\{ UINT32_C\(0x[0-9A-Fa-f]+\), genesis_(?:aot|block)_")
+# SEG-022-T009: the compact table is three parallel arrays: sorted guest addresses, owner ids, owner symbols.
+_ENTRY_ADDR_ROW = re.compile(rb"^\s*UINT32_C\(0x([0-9A-Fa-f]+)\),")
+_ENTRY_ID_ROW = re.compile(rb"^\s*UINT(?:8|16|32)_C\(([0-9]+)\),")
+_ENTRY_OWNER_ROW = re.compile(rb"^\s*(genesis_(aot|block)\w*),")
+_ENTRY_ROW = re.compile(rb"^\s*(?:UINT32_C\(0x[0-9A-Fa-f]+\)|UINT(?:8|16|32)_C\([0-9]+\)|genesis_(?:aot|block)\w*),")
 
 _FUNC_RE = {
     "aot_function": re.compile(rb"^static GenesisControlTransfer genesis_aot_"),
@@ -66,6 +69,15 @@ _FUNC_RE = {
     "frontier_stop_fn": re.compile(rb"^static GenesisControlTransfer genesis_frontier_stop_"),
     "tier1_stop_fn": re.compile(rb"^static GenesisControlTransfer genesis_tier1_indirect_stop_"),
 }
+
+
+def split_entry_addresses(addresses, ids, owner_kinds) -> dict:
+    """Resolve the compact table (address -> owner id -> owner kind) into per-kind address lists."""
+    assert len(addresses) == len(ids), "entry table arrays disagree"
+    result = {"aot": [], "block": []}
+    for address, owner in zip(addresses, ids):
+        result[owner_kinds[owner]].append(address)
+    return result
 
 
 def classify_line(region: str, line: bytes) -> str:
@@ -113,6 +125,9 @@ def attribute(path: pathlib.Path) -> dict:
     in_array = False
     array_count = array_elements = array_bytes = array_max = cur_elements = 0
     entry_addresses = {"aot": [], "block": []}
+    table_addresses: list[int] = []
+    table_ids: list[int] = []
+    table_owner_kinds: list[str] = []
     with path.open("rb") as handle:
         for line in handle:
             total_bytes += len(line)
@@ -134,9 +149,12 @@ def attribute(path: pathlib.Path) -> dict:
                 fn_sizes[region][-1] += len(line)
             cls = classify_line(region, line)
             if region == "entry_table":
-                em = _ENTRY_ROW_ADDR.match(line)
-                if em:
-                    entry_addresses[em.group(2).decode()].append(int(em.group(1), 16))
+                if (em := _ENTRY_ADDR_ROW.match(line)):
+                    table_addresses.append(int(em.group(1), 16))
+                elif (em := _ENTRY_ID_ROW.match(line)):
+                    table_ids.append(int(em.group(1)))
+                elif (em := _ENTRY_OWNER_ROW.match(line)):
+                    table_owner_kinds.append(em.group(2).decode())
             # Site-local indirect-target membership arrays (possibly multi-line) are target
             # membership data wherever they are emitted, not instruction-lowering body.
             if not in_array and region not in ("entry_table", "owned_literals") \
@@ -155,11 +173,12 @@ def attribute(path: pathlib.Path) -> dict:
                 if b"};" in line:
                     in_array = False
                     array_max = max(array_max, cur_elements)
-            if region == "entry_table" and cls == "compiled_entry_table":
+            if region == "entry_table" and _ENTRY_ADDR_ROW.match(line):
                 counts["compiled_entry_rows"] += 1
             cell = cells.setdefault(f"{region}.{cls}", [0, 0])
             cell[0] += len(line)
             cell[1] += 1
+    entry_addresses = split_entry_addresses(table_addresses, table_ids, table_owner_kinds)
     categories = {
         "ordinary_block_bodies": ("ordinary_block.body",),
         "ordinary_block_boilerplate": ("ordinary_block.boilerplate",),
@@ -313,12 +332,18 @@ def measure(args) -> dict:
     report["fingerprints"] = {"admitted_immutable_rom_aot_address_set": set_fingerprint(addresses)}
     if sharded:
         # Final compiled-address authority = the sorted compiled-entry table (its own `entries` TU).
-        entry_addresses: dict[str, list[int]] = {"aot": [], "block": []}
+        t_addr: list[int] = []
+        t_ids: list[int] = []
+        t_kinds: list[str] = []
         with (shard_dir / "bridge_generated_entries_00.c").open("rb") as handle:
             for line in handle:
-                match = _ENTRY_ROW_ADDR.match(line)
-                if match:
-                    entry_addresses[match.group(2).decode()].append(int(match.group(1), 16))
+                if (match := _ENTRY_ADDR_ROW.match(line)):
+                    t_addr.append(int(match.group(1), 16))
+                elif (match := _ENTRY_ID_ROW.match(line)):
+                    t_ids.append(int(match.group(1)))
+                elif (match := _ENTRY_OWNER_ROW.match(line)):
+                    t_kinds.append(match.group(2).decode())
+        entry_addresses = split_entry_addresses(t_addr, t_ids, t_kinds)
         report["fingerprints"].update({
             "final_compiled_entry_address_set": set_fingerprint(entry_addresses["aot"] + entry_addresses["block"]),
             "aot_owned_entry_address_set": set_fingerprint(entry_addresses["aot"]),

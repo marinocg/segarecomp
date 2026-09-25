@@ -120,6 +120,20 @@ int main(void) {
 '''
 
 
+def compiled_entry_table(text):
+    """SEG-022-T009: resolve the compact address -> owner-id -> owner-symbol tables to (address, symbol) pairs."""
+    import re as _re
+    def body(name):
+        m = _re.search(r"\b" + name + r"\[\] = \{\n(.*?)\n\};", text, _re.S)
+        assert m, name
+        return m.group(1)
+    addresses = _re.findall(r"UINT32_C\(0x([0-9A-Fa-f]{8})\)", body("genesis_compiled_entry_addresses"))
+    ids = [int(i) for i in _re.findall(r"UINT(?:8|16|32)_C\((\d+)\)", body("genesis_compiled_entry_owner_ids"))]
+    owners = [o.strip().rstrip(",") for o in body("genesis_compiled_owners").splitlines()]
+    assert len(addresses) == len(ids)
+    return [(a, owners[i]) for a, i in zip(addresses, ids)]
+
+
 def main():
     pipeline, compiler, root = sys.argv[1:4]
     root = pathlib.Path(root)
@@ -147,7 +161,7 @@ def main():
         cases = sorted(int(a, 16) for a in re.findall(r"case UINT32_C\(0x([0-9A-F]{8})\): goto genesis_aot_entry_", aot_text))
         assert cases == baseline, "admitted AOT PC set must equal the pre-owner baseline exactly"
         assert aot_text.count("default: return genesis_internal_dispatch_inconsistency_stop(runtime);") == len(owners)
-        table = re.findall(r"\{ UINT32_C\(0x([0-9A-F]{8})\), (\w+) \}", "".join((out / n).read_text() for n in units if "_entries_" in n))
+        table = compiled_entry_table("".join((out / n).read_text() for n in units if "_entries_" in n))
         compiled = sorted(int(a, 16) for a, _ in table)
         assert set(baseline) <= set(compiled), "final compiled-address set keeps every AOT PC"
         assert {int(a, 16) for a, b in table if b.startswith("genesis_aot_owner_")} == set(baseline)
