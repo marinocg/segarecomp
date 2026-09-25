@@ -1,4 +1,5 @@
 #include "segarecomp/codegen/c11/genesis_frontend.hpp"
+#include "segarecomp/codegen/c11/translation_units.hpp"
 #include "segarecomp/cpu/m68k/timing.hpp"
 #include "segarecomp/machine/genesis/address_space.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
@@ -7706,6 +7707,33 @@ FrontendProgram program_with() {
 }
 }  // namespace negate_disp16_aot_fixture
 
+// SEG-022-T008: dense immutable-ROM AOT fixture whose entries are grouped into several generated owners.
+namespace aot_owner_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00001000U;
+constexpr std::size_t entry_count = 300U;
+constexpr std::size_t unrepresented_index = 50U;  // one aligned PC inside the first owner's span
+constexpr std::size_t dynamic_call_index = 10U;   // JSR (0,PC,D0.W): an AOT-admitted dynamic call
+std::vector<std::uint8_t> make_image() {
+  std::vector<std::uint8_t> bytes{0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U};
+  for (std::size_t index = 0; index < entry_count; ++index) {
+    if (index == unrepresented_index) bytes.insert(bytes.end(), {0x4EU, 0x72U, 0x27U, 0x10U});  // STOP: not AOT-safe
+    else if (index == dynamic_call_index) bytes.insert(bytes.end(), {0x4EU, 0xBBU, 0x00U, 0x00U});  // JSR (0,PC,D0.W)
+    else bytes.insert(bytes.end(), {0x44U, 0x2DU, 0x00U, 0x00U});  // NEG.B (0,A5)
+  }
+  return bytes;
+}
+FrontendProgram program_with(const std::vector<std::uint8_t> &image) {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-022-T008/aot-owner-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base},
+                             {{}, static_cast<std::uint32_t>(base + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace aot_owner_fixture
+
 // SEG-021-T011: representative immutable-ROM AOT fixture for PEA. Reuses
 // negate_disp16_aot_fixture's own filler prefix verbatim (unrelated static
 // discovery noise, proving AOT admission needs no CFG reachability from the
@@ -9236,6 +9264,39 @@ void negate_disp16_aot_admission_and_dispatch_are_bounded() {
              body.find("genesis_route_access(runtime,", first_route + 1U) != std::string::npos &&
              body.find("neg_result = UINT32_C(0) - neg_destination") != std::string::npos,
          "NEG AOT body retains the generic routed read/write lowering and subtraction flags");
+}
+
+// SEG-022-T008: forced-sharded production emission of the dense owner fixture into <dir>.
+int emit_aot_owner_shards(const char *directory) {
+  using namespace segarecomp;
+  using namespace aot_owner_fixture;
+  const auto image = make_image();
+  auto program = program_with(image);
+  if (!apply_genesis_immutable_rom_aot_range(program, base + 8U, static_cast<std::uint32_t>(base + image.size()))) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  TranslationUnitSharder sharder{directory, "bridge_generated",
+                                 {{"block", 8U, 10U}, {"aot", 32U, 10U}, {"stop", 1U, 10U}, {"meta", 1U, 10U}, {"entries", 1U, 10U}}};
+  const auto rejection = emit_m68k_general_startup_bridge_c_to(sharder.stream(), *partial, std::string(64U, '0'));
+  if (!rejection.empty()) return 6;
+  return sharder.finish().empty() ? 0 : 7;
+}
+
+// SEG-022-T008: single-file (per-entry function) emission of the same fixture: the pre-owner baseline shape.
+int emit_aot_owner_single_source() {
+  using namespace segarecomp;
+  using namespace aot_owner_fixture;
+  const auto image = make_image();
+  auto program = program_with(image);
+  if (!apply_genesis_immutable_rom_aot_range(program, base + 8U, static_cast<std::uint32_t>(base + image.size()))) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = emit_m68k_general_startup_runtime_c(*partial);
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
 }
 
 int emit_negate_disp16_aot_source() {
@@ -28960,6 +29021,10 @@ int main(int argc, char **argv) {
     return emit_immutable_rom_aot_return_from_subroutine_and_bit_clear_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-arithmetic-memory-operand-aot")
     return emit_general_arithmetic_memory_operand_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-aot-owner-single")
+    return emit_aot_owner_single_source();
+  if (argc == 3 && std::string_view(argv[1]) == "--emit-aot-owner-shards")
+    return emit_aot_owner_shards(argv[2]);
   if (argc == 2 && std::string_view(argv[1]) == "--emit-negate-disp16-aot")
     return emit_negate_disp16_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-extended-arithmetic-aot")
