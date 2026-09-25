@@ -8,6 +8,12 @@ namespace segarecomp {
 // Strict-C11 bridge scaffolding. Machine analysis supplies only validated
 // program facts; this owner renders the ABI-facing C source around them.
 [[nodiscard]] std::string emit_genesis_runtime_c11_include();
+// SEG-022-T003: the prelude split into the part every translation unit shares (includes) and the part only
+// the main TU needs (report helpers). emit_genesis_bridge_c11_prelude is exactly
+// "#define _POSIX_C_SOURCE 200809L\n" + shared_header_prelude + main_prelude.
+[[nodiscard]] std::string emit_genesis_bridge_c11_shared_header_prelude();
+[[nodiscard]] std::string emit_genesis_bridge_c11_main_prelude(std::string_view rom_sha256,
+                                                                std::string_view cpu_dimensions);
 [[nodiscard]] std::string emit_genesis_bridge_c11_prelude(std::string_view rom_sha256,
                                                            std::string_view cpu_dimensions);
 [[nodiscard]] std::string emit_genesis_bridge_c11_main(std::string_view initial_ssp,

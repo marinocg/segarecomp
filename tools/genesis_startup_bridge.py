@@ -778,8 +778,14 @@ def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, roo
     # (small, separately retained) stderr diagnostics are captured. A rejection or partial
     # write exits non-zero with no `source` left behind and fails closed.
     source.unlink(missing_ok=True)
+    # SEG-022-T003: the emitter may instead write a bounded deterministic set of translation units
+    # into `shard_dir` (a large program) and reports them in `bridge_generated.units`; a small
+    # program still produces the single `source`. Stale output of either shape is removed first.
+    shard_dir = out_dir / "generated"
+    shutil.rmtree(shard_dir, ignore_errors=True)
     try:
-        generated = subprocess.run(emitter_command + ["--generated-c-output", str(source)],
+        generated = subprocess.run(emitter_command + ["--generated-c-output", str(source),
+                                                      "--generated-c-shard-dir", str(shard_dir)],
                                    text=True, capture_output=True, cwd=root)
     except OSError as error:
         sys.stderr.write(f"cannot run emitter: {error}\n")
@@ -789,11 +795,22 @@ def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, roo
         # Project-authored emitter proxies (tests) predate the streaming option and write the
         # program to stdout; the real emitter never takes this branch.
         source.write_text(generated.stdout, encoding="utf-8", newline="\n")
-    if generated.returncode != 0 or generated.stdout.startswith("/* translation rejected:") or not source.is_file():
+    manifest = shard_dir / "bridge_generated.units"
+    sharded = generated.returncode == 0 and manifest.is_file()
+    if generated.returncode != 0 or generated.stdout.startswith("/* translation rejected:") or not (sharded or source.is_file()):
         source.unlink(missing_ok=True)
         pathlib.Path(str(source) + ".partial").unlink(missing_ok=True)
+        shutil.rmtree(shard_dir, ignore_errors=True)
         sys.stderr.write(generated.stderr)
         return 1, None, None
+    sources = [source]
+    if sharded:
+        # Manifest order is deterministic: the main TU (the only one defining `main`) first, then sorted.
+        sources = [shard_dir / line for line in manifest.read_text(encoding="utf-8").splitlines() if line]
+        if not sources or not all(item.is_file() for item in sources):
+            sys.stderr.write("generated-C translation-unit manifest is inconsistent\n")
+            shutil.rmtree(shard_dir, ignore_errors=True)
+            return 1, None, None
     # SEG-007-T180 / ADR-0026: capture the emitter's normalized offline-inventory
     # stitch metrics line (counts only, never a raw address) fully in-process from
     # the stderr string. Nothing is written into `out_dir`: that surface is the
@@ -810,12 +827,31 @@ def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, roo
         profile = "debug" if debug is True else ("quick" if debug is False else debug)
         compile_flags += {"debug": ["-O0", "-g"], "optimized": ["-O2"], "quick": ["-O0"]}[profile]
         if viewer_sdl3 is not None:
-            return _compile_viewer_executable(compile_flags, viewer_sdl3, root, source, executable,
+            return _compile_viewer_executable(compile_flags, viewer_sdl3, root, sources, executable,
                                               None)
-        compile_result = subprocess.run(compile_flags + [
-            "-I", str(root / "platforms" / "genesis" / "runtime"),
-            "-o", str(executable), str(source), str(root / "platforms" / "genesis" / "runtime" / "runtime.c")],
-            text=True, capture_output=True, cwd=root)
+        runtime_flags = ["-I", str(root / "platforms" / "genesis" / "runtime")]
+        if not sharded:
+            compile_result = subprocess.run(compile_flags + runtime_flags + [
+                "-o", str(executable), str(source), str(root / "platforms" / "genesis" / "runtime" / "runtime.c")],
+                text=True, capture_output=True, cwd=root)
+        else:
+            # Serial per-TU compile then link (SEG-022-T004 parallelizes). Objects live in a temp dir,
+            # never in out_dir, which is the compare-runs artifact surface.
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmp:
+                objects = []
+                compile_result = None
+                for index, unit in enumerate(sources + [root / "platforms" / "genesis" / "runtime" / "runtime.c"]):
+                    obj = pathlib.Path(tmp) / f"{index}.o"
+                    compile_result = subprocess.run(
+                        compile_flags + runtime_flags + ["-I", str(shard_dir), "-c", "-o", str(obj), str(unit)],
+                        text=True, capture_output=True, cwd=root)
+                    if compile_result.returncode != 0:
+                        break
+                    objects.append(str(obj))
+                if compile_result is not None and compile_result.returncode == 0:
+                    compile_result = subprocess.run([compile_flags[0], "-o", str(executable)] + objects,
+                                                    text=True, capture_output=True, cwd=root)
     except OSError as error:
         sys.stderr.write(f"cannot run C compiler: {error}\n")
         return 2, None, None
@@ -843,7 +879,7 @@ def find_sdl3() -> tuple[list[str], list[str]] | None:
 
 
 def _compile_viewer_executable(compile_flags: list[str], sdl3: tuple[list[str], list[str]],
-                               root: pathlib.Path, source: pathlib.Path, executable: pathlib.Path,
+                               root: pathlib.Path, sources: "list[pathlib.Path]", executable: pathlib.Path,
                                generated_bytes: "bytes | None") -> tuple[int, bytes | None, pathlib.Path | None]:
     """Viewer-mode build of the UNMODIFIED generated C. The generated source alone is
     compiled with -Dgenesis_runtime_run=genesis_viewer_hook_run so its main() hands its
@@ -857,7 +893,9 @@ def _compile_viewer_executable(compile_flags: list[str], sdl3: tuple[list[str], 
               viewer_dir / "viewer_sdl3.c", viewer_dir / "viewer_main_hook.c"]
     with tempfile.TemporaryDirectory() as tmp:
         objects = []
-        jobs = [(source, ["-Dgenesis_runtime_run=genesis_viewer_hook_run"])] + [(o, []) for o in others]
+        # sources[0] is the main TU (the only one whose main() calls genesis_runtime_run).
+        jobs = [(sources[0], ["-Dgenesis_runtime_run=genesis_viewer_hook_run"])] + [(u, ["-I", str(sources[0].parent)]) for u in sources[1:]] \
+            + [(o, []) for o in others]
         for index, (src, extra) in enumerate(jobs):
             obj = pathlib.Path(tmp) / f"{index}.o"
             result = subprocess.run(compile_flags + extra + includes + ["-c", "-o", str(obj), str(src)],
@@ -1450,7 +1488,8 @@ def main() -> int:
         if args.provenance_diagnostics:
             marker = b"\n/* SEG-020-T002 provenance diagnostics"
             import mmap
-            with (out_dir / "bridge.generated.c").open("rb") as generated_file, \
+            _shard_main = out_dir / "generated" / "bridge_generated_main.c"
+            with (_shard_main if _shard_main.is_file() else out_dir / "bridge.generated.c").open("rb") as generated_file, \
                     mmap.mmap(generated_file.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
                 start = mapped.find(marker)
                 if start >= 0:

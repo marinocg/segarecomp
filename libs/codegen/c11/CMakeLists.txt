@@ -3,7 +3,7 @@
 #   codegen_c11_m68k     M68k lowering (common + cpu_m68k only; no Genesis machine/device)
 #   codegen_c11_genesis  Genesis wrapper: M68k lowering + Genesis machine frontend/runtime glue
 # A future Z80 lowering is a sibling of codegen_c11_m68k; an SMS wrapper a sibling of codegen_c11_genesis.
-add_library(segarecomp_codegen_c11 src/manifest.cpp)
+add_library(segarecomp_codegen_c11 src/manifest.cpp src/translation_units.cpp)
 add_library(segarecomp::codegen_c11 ALIAS segarecomp_codegen_c11)
 target_link_libraries(segarecomp_codegen_c11 PUBLIC segarecomp::base segarecomp::media)
 target_include_directories(segarecomp_codegen_c11 PUBLIC include)
