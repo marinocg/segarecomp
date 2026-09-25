@@ -80,3 +80,58 @@ assert gcs.set_fingerprint([0x20, 0x10, 0x10]) == fp
 metrics = gcs.parse_emitter_metrics("segarecomp: immutable-rom AOT enumeration: aligned_start_count=4 accepted_count=3 rejected_count=1\n")
 assert metrics["immutable_rom_aot"] == {"aligned_start_count": 4, "accepted_count": 3, "rejected_count": 1}
 print("ok")
+
+# SEG-022-T002: `measure` must use the streaming --generated-c-output path, never stdout.
+import argparse
+import os
+import stat
+
+FAKE = r"""#!/usr/bin/env python3
+import sys
+a = sys.argv
+mode = a[a.index("--fake-mode") + 1] if "--fake-mode" in a else "ok"
+if "--generated-c-output" not in a:
+    sys.stdout.write("int stdout_route;\n"); raise SystemExit(0)   # legacy route: must not be used
+out = a[a.index("--generated-c-output") + 1]
+open(a[a.index("--immutable-aot-address-report") + 1], "w").write("4\n6\n")
+if mode == "fail":
+    open(out + ".partial", "w").write("partial"); raise SystemExit(1)
+if mode == "nofile":
+    raise SystemExit(0)
+open(out, "w").write("int streamed_route;\n")
+"""
+
+import subprocess
+
+
+def portable_timed(command, stdout=None, cwd=None):
+    """Portable stand-in for the /usr/bin/time wrapper: runs the fake emitter via this interpreter;
+    any other command (the compiler) is reported as failed without being executed."""
+    if not command[0].endswith("fake.py"):
+        return {"returncode": 1, "wall_seconds": 0.0, "peak_rss_bytes": None, "stderr": ""}
+    done = subprocess.run([sys.executable] + command, stdout=stdout or subprocess.DEVNULL,
+                          stderr=subprocess.PIPE, text=True, cwd=cwd)
+    return {"returncode": done.returncode, "wall_seconds": 0.0, "peak_rss_bytes": None, "stderr": done.stderr}
+
+
+gcs.timed = portable_timed
+with tempfile.TemporaryDirectory() as d:
+    d = pathlib.Path(d)
+    def run(mode):
+        fake = d / "fake.py"
+        fake.write_text(FAKE.replace('"ok"', repr(mode)))
+        rom = d / "r.bin"; rom.write_bytes(b"x")
+        (d / "out").mkdir(exist_ok=True)
+        (d / "out" / "generated.c").write_text("stale")
+        ns = argparse.Namespace(segarecomp=str(fake), rom=str(rom), external_hints=None, out_dir=str(d / "out"),
+                                cc="/usr/bin/false", opt="-O0", product_root=str(d))
+        return gcs.measure(ns)
+    ok = run("ok")
+    assert ok["generation"]["returncode"] == 0 and (d / "out" / "generated.c").read_text() == "int streamed_route;\n", ok
+    assert not (d / "out" / "admitted_aot_addresses.txt").exists()
+    for mode in ("fail", "nofile"):
+        bad = run(mode)
+        assert bad["generation"]["returncode"] != 0, (mode, bad)
+        assert "source" not in bad
+        assert not (d / "out" / "generated.c").exists() and not (d / "out" / "generated.c.partial").exists()
+

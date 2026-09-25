@@ -64,6 +64,20 @@ def main() -> None:
         assert "0x" not in aot.stderr
         total, accepted, rejected = map(int, aggregate.groups())
         assert total > 0 and accepted > 0 and accepted + rejected == total
+        # SEG-022-T002: streamed output is byte-identical to the stdout form, leaves no `.partial`,
+        # and a rejection fails closed (non-zero, no artifact) instead of a truncated program.
+        streamed = pathlib.Path(directory) / "streamed.c"
+        common = [executable, "emit-general-startup-bridge-c", "--rom", str(rom), "--reset-entry",
+                  "--immutable-rom-aot"]
+        # This fixture is a fail-closed rejection in the legacy stdout form (marker, exit 0); the
+        # streaming form reports the same rejection as exit 1 and leaves no artifact.
+        assert aot.stdout.startswith("/* translation rejected:"), aot.stdout[:80]
+        streamed.write_text("stale")  # a stale artifact must not survive a rejection
+        rejected = subprocess.run(common + ["--rom-sha256", vector["sha256"], "--generated-c-output", str(streamed)],
+                                  text=True, capture_output=True, check=False)
+        assert rejected.returncode == 1 and rejected.stdout == "", rejected
+        assert rejected.stderr.endswith(aot.stdout), rejected
+        assert not streamed.exists() and not pathlib.Path(str(streamed) + ".partial").exists()
         old_range = subprocess.run([
             executable, "emit-general-startup-bridge-c", "--rom", str(rom),
             "--reset-entry", "--rom-sha256", vector["sha256"],

@@ -590,7 +590,8 @@ std::optional<std::map<Address, std::vector<Address>>> immutable_rom_aot_unrepre
     const std::map<Address, const FrontendAnalysis::ImmutableRomAotEntry *> &entries,
     const std::set<Address> &represented_exact_pcs);
 
-std::string emit_m68k_general_startup_runtime_c_with_policy(
+std::string emit_m68k_general_startup_runtime_c_with_policy_to(
+    std::ostream &out, std::string_view header,
     const FrontendAnalysis &analysis, M68kGeneralStartupBlockEmissionPolicy policy) {
   // C3 emits a finite, wholly static subset of a validated general-startup
   // program.  It has no cardinality gate: every accepted static block gets
@@ -726,8 +727,7 @@ std::string emit_m68k_general_startup_runtime_c_with_policy(
     edges_by_source[source.value].push_back(&edge);
   }
 
-  std::ostringstream out;
-  out << emit_genesis_runtime_c11_include();
+  out << header;
   if (policy == M68kGeneralStartupBlockEmissionPolicy::bridge_extended) {
     // The generated route helper only attaches retained static provenance to a
     // runtime routing failure. It never reconstructs a target address or
@@ -886,7 +886,14 @@ std::string emit_m68k_general_startup_runtime_c_with_policy(
   }
   out << "  return genesis_internal_dispatch_inconsistency_stop(runtime);\n"
       << "}\n";
-  return out.str();
+  return {};  // success: text was streamed to `out`; non-empty return is a rejection
+}
+
+std::string emit_m68k_general_startup_runtime_c_with_policy(
+    const FrontendAnalysis &analysis, M68kGeneralStartupBlockEmissionPolicy policy) {
+  std::ostringstream out;
+  auto rejection = emit_m68k_general_startup_runtime_c_with_policy_to(out, emit_genesis_runtime_c11_include(), analysis, policy);
+  return rejection.empty() ? out.str() : rejection;
 }
 } // namespace
 
@@ -2791,7 +2798,8 @@ M68kC4Preflight preflight_m68k_general_startup_c4(const FrontendPartialProgram &
   return result;
 }
 
-std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &partial) {
+std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::string_view header,
+                                                       const FrontendPartialProgram &partial) {
   const auto preflight = preflight_m68k_general_startup_c4(partial);
   if (!preflight.valid) return "/* translation rejected: invalid C4 retained prefix */\n";
   const auto aot_entries = validated_immutable_rom_aot_entries(partial.accepted_prefix);
@@ -2917,8 +2925,7 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
       return "/* translation rejected: unrepresentable C4 frontier */\n";  // duplicate source address
     if (!tier2_capable) frontier_stop_functions.push_back(std::move(*function_text));
   }
-  std::ostringstream out;
-  out << emit_genesis_runtime_c11_include();
+  out << header;
   // Keep these pre-existing ordinary-prefix helpers ahead of the compiled-
   // entry declarations. AOT participation changes only whether either helper
   // is needed; exact-PC consistency is computed later from final authority and
@@ -5618,10 +5625,16 @@ std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &pa
   out << "  return genesis_internal_dispatch_inconsistency_stop(runtime);\n}\n\n"
       << "GenesisControlTransfer genesis_bridge_dispatch(GenesisRuntime *runtime) {\n"
       << "  return genesis_dispatch(runtime);\n}\n";
-  return out.str();
+  return {};  // success: text was streamed to `out`; non-empty return is a rejection
 }
 
-std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &partial,
+std::string emit_m68k_general_startup_runtime_c(const FrontendPartialProgram &partial) {
+  std::ostringstream out;
+  auto rejection = emit_m68k_general_startup_runtime_c_to(out, emit_genesis_runtime_c11_include(), partial);
+  return rejection.empty() ? out.str() : rejection;
+}
+
+std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const FrontendPartialProgram &partial,
                                                    std::string_view rom_sha256, bool execution_history_hooks) {
   const ExecutionHistoryHooksScope hooks_scope(execution_history_hooks);
   if (!valid_bridge_rom_sha256(rom_sha256))
@@ -5685,16 +5698,15 @@ std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &par
       ++owned_region_count;
     }
   }
-  auto source = emit_m68k_general_startup_runtime_c(partial);
-  const auto runtime_include = emit_genesis_runtime_c11_include();
-  if (!source.starts_with(runtime_include)) return source;
-  source.replace(0U, runtime_include.size(),
-                 emit_genesis_bridge_c11_prelude(rom_sha256, *cpu_dimensions));
+  // SEG-022-T002: stream the runtime body straight to `sink` behind the bridge
+  // prelude; the complete program is never materialized in one string.
+  if (auto rejection = emit_m68k_general_startup_runtime_c_to(
+          sink, emit_genesis_bridge_c11_prelude(rom_sha256, *cpu_dimensions), partial);
+      !rejection.empty())
+    return rejection;
   if (owned_region_count != 0U) {
-    source += owned_region_data.str();
-    source += "static const GenesisOwnedCartridgeRegion genesis_owned_cartridge_regions[] = {\n";
-    source += owned_region_table.str();
-    source += "\n};\n";
+    sink << owned_region_data.str() << "static const GenesisOwnedCartridgeRegion genesis_owned_cartridge_regions[] = {\n"
+         << owned_region_table.str() << "\n};\n";
   }
   // SEG-007-T047 / ADR-0020 §6: emit the build-resolved IRQ6 autovector handler
   // entry only when its handler block was actually retained in the emitted
@@ -5720,35 +5732,42 @@ std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &par
     for (const auto &block : partial.accepted_prefix.static_blocks)
       if (block.id.entry.value == handler) { privilege_violation_handler_hex = hex(handler, 8); break; }
   }
-  source += emit_genesis_bridge_c11_main_open(
+  sink << emit_genesis_bridge_c11_main_open(
       hex(partial.accepted_prefix.startup_ingress->initial_ssp, 8),
       hex(partial.accepted_prefix.startup_ingress->entry.value, 8), irq6_handler_hex,
       divide_by_zero_handler_hex, privilege_violation_handler_hex);
-  if (g_execution_history_hooks) source += "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; ";
+  if (g_execution_history_hooks) sink << "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; ";
   if (owned_region_count != 0U) {
-    source += "  runtime.owned_regions = genesis_owned_cartridge_regions;\n";
-    source += "  runtime.owned_region_count = UINT32_C(" + std::to_string(owned_region_count) + ");\n";
+    sink << "  runtime.owned_regions = genesis_owned_cartridge_regions;\n";
+    sink << "  runtime.owned_region_count = UINT32_C(" + std::to_string(owned_region_count) + ");\n";
   }
-  source += emit_genesis_bridge_c11_main_finish("genesis_bridge_dispatch");
-  return source;
+  sink << emit_genesis_bridge_c11_main_finish("genesis_bridge_dispatch");
+  return {};
 }
 
-std::string emit_m68k_general_startup_bridge_c(const FrontendAnalysis &analysis,
+std::string emit_m68k_general_startup_bridge_c(const FrontendPartialProgram &partial,
+                                                   std::string_view rom_sha256, bool execution_history_hooks) {
+  std::ostringstream out;
+  auto rejection = emit_m68k_general_startup_bridge_c_to(out, partial, rom_sha256, execution_history_hooks);
+  return rejection.empty() ? out.str() : rejection;
+}
+
+std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const FrontendAnalysis &analysis,
                                                    std::string_view rom_sha256, bool execution_history_hooks) {
   const ExecutionHistoryHooksScope hooks_scope(execution_history_hooks);
   if (!valid_bridge_rom_sha256(rom_sha256))
     return "/* translation rejected: invalid bridge ROM SHA-256 */\n";
   if (!analysis.completion) {
-    auto source = emit_m68k_general_startup_runtime_c_with_policy(
-        analysis, M68kGeneralStartupBlockEmissionPolicy::bridge_extended);
-    if (!source.starts_with("#include \"runtime.h\"")) return source;
-    source.replace(0U, emit_genesis_runtime_c11_include().size(),
-                   emit_genesis_bridge_c11_prelude(rom_sha256, "GENESIS_CPU_DIMENSIONS_NONE"));
-    source += emit_genesis_bridge_c11_main_open(hex(analysis.startup_ingress->initial_ssp, 8),
-                                                hex(analysis.startup_ingress->entry.value, 8));
-    if (g_execution_history_hooks) source += "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; ";
-    source += emit_genesis_bridge_c11_main_finish("genesis_dispatch");
-    return source;
+    if (auto rejection = emit_m68k_general_startup_runtime_c_with_policy_to(
+            sink, emit_genesis_bridge_c11_prelude(rom_sha256, "GENESIS_CPU_DIMENSIONS_NONE"), analysis,
+            M68kGeneralStartupBlockEmissionPolicy::bridge_extended);
+        !rejection.empty())
+      return rejection;
+    sink << emit_genesis_bridge_c11_main_open(hex(analysis.startup_ingress->initial_ssp, 8),
+                                              hex(analysis.startup_ingress->entry.value, 8));
+    if (g_execution_history_hooks) sink << "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; ";
+    sink << emit_genesis_bridge_c11_main_finish("genesis_dispatch");
+    return {};
   }
   if (!analysis.startup_ingress || analysis.profile != M68kFrontendProfile::general_startup ||
       analysis.decoded.size() != analysis.ir.size() || analysis.static_blocks.empty())
@@ -5841,7 +5860,15 @@ std::string emit_m68k_general_startup_bridge_c(const FrontendAnalysis &analysis,
        << (g_execution_history_hooks ? "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; " : "")
        << "runtime.work_ram[" << slot << "] = " << byte_literal(completion.sentinel_return_pc.value >> 24U) << "; runtime.work_ram[" << slot + 1U << "] = " << byte_literal(completion.sentinel_return_pc.value >> 16U) << "; runtime.work_ram[" << slot + 2U << "] = " << byte_literal(completion.sentinel_return_pc.value >> 8U) << "; runtime.work_ram[" << slot + 3U << "] = " << byte_literal(completion.sentinel_return_pc.value) << "; "
        << emit_genesis_bridge_c11_main_finish("genesis_dispatch");
-  return out.str();
+  sink << out.str();  // small synthetic completion program
+  return {};
+}
+
+std::string emit_m68k_general_startup_bridge_c(const FrontendAnalysis &analysis,
+                                                   std::string_view rom_sha256, bool execution_history_hooks) {
+  std::ostringstream out;
+  auto rejection = emit_m68k_general_startup_bridge_c_to(out, analysis, rom_sha256, execution_history_hooks);
+  return rejection.empty() ? out.str() : rejection;
 }
 
 std::string emit_m68k_frontend_c(const FrontendAnalysis &analysis,const DirectFlowState &initial,std::uint64_t budget) {
