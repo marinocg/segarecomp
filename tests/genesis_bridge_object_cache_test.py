@@ -123,6 +123,31 @@ def main():
             rc, out, _, d = build(t, jobs, "repaired-" + mode)
             require(out == "10\n" and d.get("hits") == 2, f"repair {mode} {d}")
 
+        # Structurally valid cross-key mismatch: a complete, internally consistent entry for key A copied
+        # to key B's path must be rejected (stored key != requested key), recompiled and repaired.
+        import hashlib
+        key_a, key_b = (bridge.object_cache_key(base, src, t) for src in (a, b))
+        require(key_a and key_b and key_a != key_b, "distinct keys")
+        entry_a, entry_b = (bridge._object_cache_entry(cache, k) for k in (key_a, key_b))
+        require(entry_a.is_file() and entry_b.is_file(), "both entries populated")
+        probe = t / "probe.o"
+        require(bridge.object_cache_load(cache, key_a, str(probe)), "entry A valid under its own key")
+        entry_b.write_bytes(entry_a.read_bytes())
+        rc, out, objs, d = build(t, jobs, "crosskey")
+        require(rc == 0 and out == "10\n" and d.get("hits") == 1 and d.get("rejected") == 1
+                and d.get("misses") == 1 and d.get("stores") == 1, f"cross-key mismatch {d}")
+        repaired = entry_b.read_bytes()
+        require(repaired != entry_a.read_bytes() and key_b.encode() in repaired[:200], "entry B not repaired")
+        rc, out, objs2, d = build(t, jobs, "crosskey-repaired")
+        require(out == "10\n" and d.get("hits") == 2 and not d.get("misses"), f"repaired cross-key {d}")
+        require(objs2 == objs, "repaired hit differs from recompiled object")
+
+        # A pre-key-binding (v1: magic + digest + bytes) entry is rejected, never interpreted.
+        payload = objs[1]
+        entry_b.write_bytes(b"SEGOBJ1\n" + hashlib.sha256(payload).hexdigest().encode() + b"\n" + payload)
+        rc, out, _, d = build(t, jobs, "v1entry")
+        require(out == "10\n" and d.get("rejected") == 1 and d.get("misses") == 1, f"v1 entry {d}")
+
         # Failed compile is never stored.
         bad = t / "bad.c"
         bad.write_text("int broken(void) { return }\n")

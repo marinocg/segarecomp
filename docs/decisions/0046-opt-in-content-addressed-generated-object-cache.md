@@ -29,11 +29,13 @@ previous build. Compilation of the sharded units is the largest host build cost 
    system-header status) and macro definitions, so a change to the TU, to any included header's content or
    location, or to a macro that is never expanded still invalidates the entry. A driver that cannot report
    identity/target, or a TU that fails to preprocess, is compiled without the cache.
-3. **Verified entries, fail safe.** An entry is one file `<key[:2]>/<key>.obj` holding a magic line,
-   the SHA-256 of the object bytes, then the bytes; it is written to a temporary name and atomically
-   renamed, and only after a successful compile. A hit is used only when the magic and digest verify;
-   any unreadable, truncated, empty, foreign or mismatching entry is deleted and the unit is recompiled
-   normally (then re-stored). Cache I/O failures (read-only cache, an entry held open by another process
+3. **Verified, key-bound entries, fail safe.** An entry is one file `<key[:2]>/<key>.obj` holding a
+   format magic line (`SEGOBJ2`), the full cache key it was stored for, the SHA-256 of the object bytes,
+   then the bytes; it is written to a temporary name and atomically renamed, and only after a successful
+   compile. A hit is used only when the magic matches, the stored key equals the requested key exactly and
+   the digest verifies, so a complete, internally valid entry copied or swapped to another key's path is
+   rejected. Any unreadable, truncated, empty, old-format, foreign-key or mismatching entry is deleted
+   (best effort) and the unit is recompiled normally (then re-stored). Cache I/O failures (read-only cache, an entry held open by another process
    on Windows, a concurrent eviction) never fail the build: cache maintenance is best effort and the unit
    is simply compiled.
 4. **Bounded disk use.** After each build the least-recently-used entries are evicted beyond

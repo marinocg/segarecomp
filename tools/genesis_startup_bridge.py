@@ -787,7 +787,9 @@ def default_compile_jobs() -> int:
 OBJECT_CACHE_ENV = "SEGARECOMP_OBJECT_CACHE_DIR"
 OBJECT_CACHE_MAX_BYTES_ENV = "SEGARECOMP_OBJECT_CACHE_MAX_BYTES"
 OBJECT_CACHE_SCHEMA = b"segarecomp-generated-object-cache-v1"
-_OBJECT_CACHE_MAGIC = b"SEGOBJ1\n"
+# Entry layout (v2): magic, the full requested cache key, the object SHA-256, then the object bytes.
+# The key is stored so a structurally valid entry found under another key's path is rejected.
+_OBJECT_CACHE_MAGIC = b"SEGOBJ2\n"
 _OBJECT_CACHE_DEFAULT_MAX_BYTES = 4 << 30
 # Environment that can change what the compiler driver compiles/targets without appearing in argv.
 _OBJECT_CACHE_ENV_KEYS = ("SDKROOT", "DEVELOPER_DIR", "MACOSX_DEPLOYMENT_TARGET", "CPATH", "C_INCLUDE_PATH",
@@ -886,18 +888,25 @@ def _quiet_os(fn, *args, **kwargs) -> None:
         pass
 
 
+def _object_cache_header(key: str, data: bytes) -> bytes:
+    return _OBJECT_CACHE_MAGIC + key.encode() + b"\n" + hashlib.sha256(data).hexdigest().encode() + b"\n"
+
+
 def object_cache_load(cache: pathlib.Path, key: str, dest: str) -> bool:
-    """Copy a verified entry to dest. Any unreadable/truncated/corrupt entry is removed (fail safe)."""
+    """Copy a verified entry to dest. Accepted only when the stored key equals the requested key and
+    the object digest verifies; any unreadable/truncated/corrupt/foreign-key/old-format entry is
+    removed (best effort) and the unit is compiled normally (fail safe)."""
     entry = _object_cache_entry(cache, key)
     try:
         blob = entry.read_bytes()
     except OSError:
         return False
-    head = len(_OBJECT_CACHE_MAGIC) + 64 + 1
-    if (len(blob) > head and blob.startswith(_OBJECT_CACHE_MAGIC) and blob[head - 1:head] == b"\n"
-            and hashlib.sha256(blob[head:]).hexdigest().encode() == blob[len(_OBJECT_CACHE_MAGIC):head - 1]):
+    key_bytes = key.encode()
+    head = len(_OBJECT_CACHE_MAGIC) + len(key_bytes) + 1 + 64 + 1
+    data = blob[head:]
+    if (len(blob) > head and len(key_bytes) == 64 and blob[:head] == _object_cache_header(key, data)):
         try:
-            pathlib.Path(dest).write_bytes(blob[head:])
+            pathlib.Path(dest).write_bytes(data)
         except OSError:
             return False
         _quiet_os(os.utime, entry)  # recency for size-bounded eviction
@@ -914,7 +923,7 @@ def object_cache_store(cache: pathlib.Path, key: str, obj: str) -> None:
     try:
         data = pathlib.Path(obj).read_bytes()
         entry.parent.mkdir(parents=True, exist_ok=True)
-        tmp.write_bytes(_OBJECT_CACHE_MAGIC + hashlib.sha256(data).hexdigest().encode() + b"\n" + data)
+        tmp.write_bytes(_object_cache_header(key, data) + data)
         os.replace(tmp, entry)
         _count("stores")
     except OSError:
