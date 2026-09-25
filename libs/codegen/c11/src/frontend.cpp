@@ -5429,10 +5429,10 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
           routed.runtime_routing = true;
           routed.runtime_object = "runtime";
           routed.continuation = static_cast<Address>(terminal.source.address.value + terminal.length.value);
-          routed.indirect_candidate_targets.clear();
-          routed.indirect_candidate_targets.reserve(indirect_target_set->candidates.size());
-          for (const auto &candidate : indirect_target_set->candidates)
-            routed.indirect_candidate_targets.push_back(candidate.value);
+          std::vector<std::uint32_t> candidate_values;
+          candidate_values.reserve(indirect_target_set->candidates.size());
+          for (const auto &candidate : indirect_target_set->candidates) candidate_values.push_back(candidate.value);
+          routed.indirect_candidate_targets = candidate_values;
           out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
           break;
         }
@@ -5479,10 +5479,10 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         auto routed = memory;
         routed.runtime_routing = true;
         routed.runtime_object = "runtime";
-        routed.indirect_candidate_targets.clear();
-        routed.indirect_candidate_targets.reserve(indirect_target_set->candidates.size());
-        for (const auto &candidate : indirect_target_set->candidates)
-          routed.indirect_candidate_targets.push_back(candidate.value);
+        std::vector<std::uint32_t> candidate_values;
+        candidate_values.reserve(indirect_target_set->candidates.size());
+        for (const auto &candidate : indirect_target_set->candidates) candidate_values.push_back(candidate.value);
+        routed.indirect_candidate_targets = candidate_values;
         out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
         break;
       }
@@ -5563,7 +5563,8 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         // (`emit_m68k_operation_c`'s own `runtime_return_targets` handling,
         // unchanged), followed by the unchanged `genesis_dispatch`; no
         // target is selected statically here.
-        routed.runtime_return_targets.assign(runtime_return_target_set.begin(), runtime_return_target_set.end());
+        const std::vector<std::uint32_t> return_target_values(runtime_return_target_set.begin(), runtime_return_target_set.end());
+        routed.runtime_return_targets = return_target_values;
         if (routed.runtime_return_targets.empty()) return "/* translation rejected: invalid C4 static return edge */\n";
         out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
         break;
@@ -5877,6 +5878,7 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
     for (const auto &provenance : block.instructions) {
       const auto *operation = operations.at(provenance.source.address.value);
       GenesisM68kEmissionContext memory{};
+      std::vector<std::uint32_t> synthetic_return_targets;
   memory.execution_history_hooks = g_execution_history_hooks;
       memory.program_counter = "runtime->pc"; memory.address_registers = "runtime->a";
       memory.runtime_routing = true; memory.runtime_object = "runtime";
@@ -5887,8 +5889,9 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
         memory.continuation = outgoing.front()->call->continuation.value;
       } else if (operation->kind == M68kIrKind::return_from_subroutine) {
         for (const auto *edge : edges[provenance.source.address.value])
-          if (edge->kind == M68kStaticEdgeKind::return_to_continuation) memory.runtime_return_targets.push_back(edge->target.value);
-        if (same_provenance(provenance, completion.terminal_rts)) memory.runtime_return_targets.push_back(completion.sentinel_return_pc.value);
+          if (edge->kind == M68kStaticEdgeKind::return_to_continuation) synthetic_return_targets.push_back(edge->target.value);
+        if (same_provenance(provenance, completion.terminal_rts)) synthetic_return_targets.push_back(completion.sentinel_return_pc.value);
+        memory.runtime_return_targets = synthetic_return_targets;
         if (memory.runtime_return_targets.empty()) return "/* translation rejected: invalid synthetic completion return */\n";
       } else if (operation->kind != M68kIrKind::write_moveq && operation->kind != M68kIrKind::write_clr &&
                  operation->kind != M68kIrKind::general_branch) {
