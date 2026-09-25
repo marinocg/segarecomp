@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """C4 C11 routing and typed retained-frontier regression."""
 import pathlib
+from compiled_entry_rows import rows
 import subprocess
 import sys
 import tempfile
@@ -1327,7 +1328,7 @@ def main():
   assert "runtime->d[0] = UINT32_C(0x00000001);" in c4_prefix.stdout
   assert c4_prefix.stdout.count("genesis_c4_lowering_stop_") == 2  # declaration and one call
   assert "genesis_block_00000B08" not in c4_prefix.stdout
-  assert "{ UINT32_C(0x00000B08), genesis_block_" not in c4_prefix.stdout
+  assert "{ UINT32_C(0x00000B08), genesis_block_" not in rows(c4_prefix.stdout)
   # A cut in a static block that Q1 prunes downstream of the first cut has no
   # retained emitted caller, so its static stop function must not be emitted.
   c4_pruned_stop = subprocess.run([executable, "--emit-general-startup-runtime-c4-pruned-stop"], text=True, capture_output=True)
@@ -1365,7 +1366,7 @@ def main():
   assert partition_boundary_dispatch.returncode == 0
   assert not partition_boundary_dispatch.stdout.startswith("/* translation rejected:")
   assert "static GenesisControlTransfer genesis_block_00000B04" in c4_backward_first.stdout
-  assert "{ UINT32_C(0x00000B04), genesis_block_00000B04 }" in c4_backward_first.stdout
+  assert "{ UINT32_C(0x00000B04), genesis_block_00000B04 }" in rows(c4_backward_first.stdout)
   assert "runtime->d[0] = UINT32_C(0x00000001);" in c4_backward_first.stdout
   assert "genesis_c4_lowering_stop_00000B06" in c4_backward_first.stdout
   assert "genesis_block_00000B08" not in c4_backward_first.stdout
@@ -2149,7 +2150,7 @@ def main():
   block_b02 = straight_line_block_first.stdout.split("genesis_block_00000B02(GenesisRuntime *runtime) {", 1)[1].split(
       "static GenesisControlTransfer genesis_dispatch", 1)[0]
   assert "genesis_frontier_stop" not in block_b02
-  assert "{ UINT32_C(0x00000B04), genesis_block_00000B04 }" in straight_line_block_first.stdout
+  assert "{ UINT32_C(0x00000B04), genesis_block_00000B04 }" in rows(straight_line_block_first.stdout)
   # This fixture's own required negative case: an extra forged fallthrough
   # edge on the same TST terminal (still targeting the same retained block,
   # so no earlier edge-target-validity check catches it) must still be

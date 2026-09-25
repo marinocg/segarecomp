@@ -11,6 +11,7 @@ Genesis runtime. The one MOVEM body selects validated immutable values only
 when its live architectural base matches the adjacent LEA result.
 """
 import pathlib
+from compiled_entry_rows import rows
 import subprocess
 import sys
 import tempfile
@@ -209,10 +210,10 @@ def main():
     assert not emitted.stdout.startswith("/* translation rejected:"), emitted.stdout
     assert emitted.stdout.count("genesis_route_access(") == 2
     interior_sources.append(emitted.stdout)
-  assert "{ UINT32_C(0x00000B06), genesis_block_00000B00 }" in interior_sources[0]
+  assert "{ UINT32_C(0x00000B06), genesis_block_00000B00 }" in rows(interior_sources[0])
   assert "case UINT32_C(0x00000B06): goto genesis_instruction_00000B06;" in interior_sources[0]
   assert "m68k_movem_use_fold_" in interior_sources[0]
-  assert "{ UINT32_C(0x00000B06), genesis_block_00000B06 }" in interior_sources[1]
+  assert "{ UINT32_C(0x00000B06), genesis_block_00000B06 }" in rows(interior_sources[1])
   assert "m68k_movem_use_fold_" in interior_sources[1]
 
   # Entering through LEA makes the same validated fold available regardless

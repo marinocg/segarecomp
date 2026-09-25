@@ -38,5 +38,5 @@ Exact-set baselines are stored as count + SHA-256 of the sorted canonical `%08x\
 (addresses themselves are never kept): the admitted immutable-ROM AOT set (from the opt-in,
 measurement-only `emit-general-startup-bridge-c --immutable-aot-address-report <path>` sink, deleted
 by the tool after hashing), and the final compiled-entry address set / its AOT- and block-owned parts
-(from the generated `genesis_compiled_entries[]` table, the exact table the generated dispatcher
-looks up). Later SEG-022 tasks must reproduce these digests.
+(from the generated compact `genesis_compiled_entry_addresses[]` / `genesis_compiled_entry_owner_ids[]` / `genesis_compiled_owners[]`
+tables, the exact tables the generated dispatcher looks up). Later SEG-022 tasks must reproduce these digests.

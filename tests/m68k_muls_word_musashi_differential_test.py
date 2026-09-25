@@ -115,8 +115,6 @@ def main():
             "n += ((bits >> i) ^ (bits >> (i + 1U))) & UINT32_C(1); return UINT32_C(38) + "
             "UINT32_C(2) * n; }\n"
             "typedef GenesisControlTransfer (*GenesisCompiledEntry)(GenesisRuntime *runtime);\n"
-            "typedef struct GenesisCompiledEntryRecord { uint32_t address; GenesisCompiledEntry body; } "
-            "GenesisCompiledEntryRecord;\n"
             "static GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n"
         )
         prefix_start = generated.index(helper)

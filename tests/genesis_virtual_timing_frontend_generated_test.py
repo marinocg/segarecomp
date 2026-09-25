@@ -63,6 +63,20 @@ def _build_and_run(compiler, runtime_dir, generated_c, name):
     return tuple(map(int, match.groups()))
 
 
+def compiled_entry_table(text):
+    """SEG-022-T009: resolve the compact address -> owner-id -> owner-symbol tables to (address, symbol) pairs."""
+    import re as _re
+    def body(name):
+        m = _re.search(r"\b" + name + r"\[\] = \{\n(.*?)\n\};", text, _re.S)
+        assert m, name
+        return m.group(1)
+    addresses = _re.findall(r"UINT32_C\(0x([0-9A-Fa-f]{8})\)", body("genesis_compiled_entry_addresses"))
+    ids = [int(i) for i in _re.findall(r"UINT(?:8|16|32)_C\((\d+)\)", body("genesis_compiled_entry_owner_ids"))]
+    owners = [o.strip().rstrip(",") for o in body("genesis_compiled_owners").splitlines()]
+    assert len(addresses) == len(ids)
+    return [(a, owners[i]) for a, i in zip(addresses, ids)]
+
+
 def main():
     emitter, compiler, root = sys.argv[1:]
     same = _emit(emitter, "--emit-general-startup-bridge-irq6-retirement-redirect")
@@ -72,9 +86,11 @@ def main():
     # form; direct labels resume without a wrapper or a second dispatcher.
     assert "case UINT32_C(0x00000100): goto genesis_instruction_00000100;" in same
     assert "case UINT32_C(0x00000102): goto genesis_instruction_00000102;" in same
-    assert "{ UINT32_C(0x00000100), genesis_block_00000100 }" in same
-    assert "{ UINT32_C(0x00000102), genesis_block_00000100 }" in same
-    assert "{ UINT32_C(0x00000102), genesis_block_00000102 }" in split
+    same_table = dict(compiled_entry_table(same))
+    split_table = dict(compiled_entry_table(split))
+    assert same_table["00000100"] == "genesis_block_00000100"
+    assert same_table["00000102"] == "genesis_block_00000100"
+    assert split_table["00000102"] == "genesis_block_00000102"
     assert same.count("static GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address)") == 2
 
     runtime_dir = pathlib.Path(root) / "platforms/genesis/runtime"
