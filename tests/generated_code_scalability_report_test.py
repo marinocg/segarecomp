@@ -196,3 +196,46 @@ assert multi["category_bytes"]["unattributed_residual"] == 0, multi
 assert multi["category_bytes"]["owner_entry_dispatch"] > 0, multi
 assert multi["counts"]["aot_function"] == 1 and multi["counts"]["aot_entry_label"] == 1, multi
 assert multi["category_bytes"]["immutable_rom_aot_bodies"] > 0, multi
+
+# SEG-022-T011: a shared AOT body helper (in its own TU) and the entries that call it still partition
+# exactly; the helper's statements are AOT body bytes, the per-entry bound provenance pointer is
+# provenance, and helpers are counted separately from AOT owner functions.
+SHARED_TU = b"""#include "bridge_generated.h"
+GenesisControlTransfer genesis_aot_shared_00000(GenesisRuntime *runtime, const GenesisInstructionProvenance *genesis_aot_source) {
+  uint32_t pc = runtime->pc;
+  (void)genesis_aot_source;
+  pc += UINT32_C(2);
+  runtime->pc = pc;
+  return genesis_runtime_retire_m68k_instruction(runtime, UINT32_C(4), runtime->pc);
+}
+"""
+SHARED_OWNER_TU = b"""#include "bridge_generated.h"
+GenesisControlTransfer genesis_aot_owner_0000(GenesisRuntime *runtime) {
+  switch (runtime->pc) {
+  case UINT32_C(0x00000004): goto genesis_aot_entry_00000004;
+  case UINT32_C(0x00000006): goto genesis_aot_entry_00000006;
+  default: return genesis_internal_dispatch_inconsistency_stop(runtime);
+  }
+genesis_aot_entry_00000004: { return genesis_aot_shared_00000(runtime, &(const GenesisInstructionProvenance){GENESIS_CPU_MC68000, UINT32_C(0x00000004), UINT64_C(4), {UINT8_C(0x4E), UINT8_C(0x71)}, UINT32_C(2)}); }
+genesis_aot_entry_00000006: {
+  const GenesisInstructionProvenance *const genesis_aot_source = &(const GenesisInstructionProvenance){GENESIS_CPU_MC68000, UINT32_C(0x00000006), UINT64_C(6), {UINT8_C(0x4E), UINT8_C(0x71)}, UINT32_C(2)};
+  uint32_t pc = runtime->pc;
+  (void)genesis_aot_source;
+  pc += UINT32_C(2);
+  runtime->pc = pc;
+  return genesis_runtime_retire_m68k_instruction(runtime, UINT32_C(4), runtime->pc);
+}
+}
+"""
+with tempfile.TemporaryDirectory() as tmp:
+    paths = [pathlib.Path(tmp) / "shared.c", pathlib.Path(tmp) / "owner.c", pathlib.Path(tmp) / "h.h"]
+    for path, text in zip(paths, (SHARED_TU, SHARED_OWNER_TU, OWNER_HEADER)):
+        path.write_bytes(text)
+    shared = gcs.attribute(paths)
+assert shared["category_sum_bytes"] == shared["total_bytes"] == len(SHARED_TU) + len(SHARED_OWNER_TU) + len(OWNER_HEADER), shared
+assert shared["category_bytes"]["unattributed_residual"] == 0, shared
+assert shared["counts"]["aot_shared_helper"] == 1 and shared["counts"]["aot_function"] == 1, shared["counts"]
+assert shared["counts"]["aot_entry_label"] == 2, shared["counts"]
+assert shared["cells"]["aot_function.provenance"]["lines"] == 1, shared["cells"]
+assert shared["category_bytes"]["immutable_rom_aot_bodies"] >= len(b"  (void)genesis_aot_source;\n") * 2, shared
+print("ok-shared-helper")

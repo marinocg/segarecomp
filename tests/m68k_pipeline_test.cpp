@@ -55,6 +55,25 @@ std::string expand_entry_rows(std::string text) {
   text += "*/\n";
   return text;
 }
+// SEG-022-T011: the effective body text of one standalone (unsharded) `genesis_aot_<HEX>` function. An
+// entry whose lowered body is shared calls its statically selected `genesis_aot_shared_<N>` helper, so
+// the helper's definition is returned instead; an inline body is returned as is. Empty when absent.
+std::string aot_function_effective_body(const std::string &emitted, const std::string &address_hex) {
+  const auto begin = emitted.find("genesis_aot_" + address_hex + "(GenesisRuntime *runtime) {");
+  if (begin == std::string::npos) return {};
+  const auto call = emitted.find("{ return genesis_aot_shared_", begin);
+  const auto line_end = emitted.find('\n', begin);
+  if (call != std::string::npos && call < line_end) {
+    const auto name_begin = call + 9U;
+    const auto name = emitted.substr(name_begin, emitted.find('(', name_begin) - name_begin);
+    const auto definition = emitted.find("static GenesisControlTransfer " + name + "(GenesisRuntime *runtime");
+    if (definition == std::string::npos) return {};
+    const auto end = emitted.find("\n}\n", definition);
+    return end == std::string::npos ? std::string{} : emitted.substr(definition, end - definition);
+  }
+  const auto end = emitted.find("\n}\n", begin);
+  return end == std::string::npos ? std::string{} : emitted.substr(begin, end - begin);
+}
 template <typename Value>
 concept HasCpuFrontier = requires(Value value) { value.cpu_frontier; };
 
@@ -7767,6 +7786,63 @@ FrontendProgram program_with(const std::vector<std::uint8_t> &image) {
 }
 }  // namespace aot_owner_fixture
 
+// SEG-022-T011: factored-vs-unfactored AOT body differential fixture. A project-authored catalog of
+// MC68000 instructions over many families (routed reads/writes, auto-update, stack, control flow, SR,
+// privileged, multiply/divide, Scc, DBcc, PC-indexed JSR, RTS) repeated three times, so identical lowered
+// bodies occur at different addresses; every aligned in-range PC is offered for immutable-ROM AOT
+// admission (mid-instruction decodes included), exactly like the whole-ROM route.
+namespace aot_factoring_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x2000U;
+std::vector<std::uint8_t> make_image() {
+  const std::vector<std::vector<std::uint8_t>> catalog = {
+      {0x44U, 0x2DU, 0x00U, 0x00U},  // NEG.B (0,A5)
+      {0x32U, 0x18U},                // MOVE.W (A0)+,D1
+      {0x23U, 0x02U},                // MOVE.L D2,-(A1)
+      {0xD6U, 0x92U},                // ADD.L (A2),D3
+      {0x04U, 0x44U, 0x12U, 0x34U},  // SUBI.W #$1234,D4
+      {0xC1U, 0x13U},                // AND.B D0,(A3)
+      {0xBAU, 0x6CU, 0x00U, 0x04U},  // CMP.W (4,A4),D5
+      {0x08U, 0x15U, 0x00U, 0x03U},  // BTST #3,(A5)
+      {0xE5U, 0x4EU},                // LSL.W #2,D6
+      {0xCEU, 0xD0U},                // MULU.W (A0),D7
+      {0x4AU, 0x96U},                // TST.L (A6)
+      {0x42U, 0x62U},                // CLR.W -(A2)
+      {0x48U, 0xE7U, 0xC0U, 0x00U},  // MOVEM.L D0-D1,-(A7)
+      {0x43U, 0xE8U, 0x00U, 0x08U},  // LEA (8,A0),A1
+      {0x48U, 0x50U},                // PEA (A0)
+      {0x4EU, 0x75U},                // RTS
+      {0x60U, 0x02U},                // BRA.S *+4
+      {0x66U, 0x04U},                // BNE.S *+6
+      {0x51U, 0xC8U, 0xFFU, 0xFCU},  // DBF D0,*-2
+      {0x40U, 0xC0U},                // MOVE SR,D0
+      {0x46U, 0xC0U},                // MOVE.W D0,SR (privileged)
+      {0x57U, 0xC3U},                // SEQ D3
+      {0x4EU, 0x71U},                // NOP
+      {0x52U, 0x99U},                // ADDQ.L #1,(A1)+
+      {0xB3U, 0x54U},                // EOR.W D1,(A4)
+      {0x4EU, 0xBBU, 0x00U, 0x00U},  // JSR (0,PC,D0.W)
+      {0x84U, 0xC1U},                // DIVU.W D1,D2
+      {0x16U, 0xFCU, 0x00U, 0x5AU},  // MOVE.B #$5A,(A3)+
+      {0x53U, 0x40U},                // SUBQ.W #1,D0
+      {0xD4U, 0xC1U},                // ADDA.W D1,A2
+  };
+  std::vector<std::uint8_t> bytes{0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U};
+  for (int repeat = 0; repeat < 3; ++repeat)
+    for (const auto &instruction : catalog) bytes.insert(bytes.end(), instruction.begin(), instruction.end());
+  return bytes;
+}
+FrontendProgram program_with(const std::vector<std::uint8_t> &image) {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-022-T011/aot-factoring-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base},
+                             {{}, static_cast<std::uint32_t>(base + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace aot_factoring_fixture
+
 // SEG-021-T011: representative immutable-ROM AOT fixture for PEA. Reuses
 // negate_disp16_aot_fixture's own filler prefix verbatim (unrelated static
 // discovery noise, proving AOT admission needs no CFG reachability from the
@@ -7853,10 +7929,7 @@ void pea_disp16_aot_admission_and_dispatch_are_bounded() {
   const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   std::ostringstream address_hex;
   address_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << pea_disp16;
-  const auto body_begin = emitted.find("genesis_aot_" + address_hex.str() + "(GenesisRuntime *runtime) {");
-  const auto body_end = body_begin == std::string::npos ? std::string::npos : emitted.find("\n}\n", body_begin);
-  const auto body = body_begin == std::string::npos || body_end == std::string::npos
-                        ? std::string{} : emitted.substr(body_begin, body_end - body_begin);
+  const auto body = aot_function_effective_body(emitted, address_hex.str());
   const auto route_count = [&] {
     std::size_t count = 0U, at = 0U;
     while ((at = body.find("genesis_route_access(runtime,", at)) != std::string::npos) { ++count; at += 1U; }
@@ -7895,10 +7968,7 @@ void jmp_pc_indexed_word_aot_admission_and_dispatch_are_bounded() {
   const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   std::ostringstream address_hex;
   address_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jmp_pc_indexed;
-  const auto body_begin = emitted.find("genesis_aot_" + address_hex.str() + "(GenesisRuntime *runtime) {");
-  const auto body_end = body_begin == std::string::npos ? std::string::npos : emitted.find("\n}\n", body_begin);
-  const auto body = body_begin == std::string::npos || body_end == std::string::npos
-                        ? std::string{} : emitted.substr(body_begin, body_end - body_begin);
+  const auto body = aot_function_effective_body(emitted, address_hex.str());
   expect(!body.empty() && body.find("genesis_compiled_entry_lookup(m68k_indirect_ea) == NULL") != std::string::npos &&
              body.find("m68k_indirect_target_member(") == std::string::npos &&
              body.find("m68k_indirect_targets_") == std::string::npos &&
@@ -9099,12 +9169,7 @@ void immutable_rom_aot_return_from_subroutine_and_bit_clear_are_admitted_and_dis
   expect(emitted.find("genesis_aot_" + jmp_hex.str()) != std::string::npos,
          "the admitted foldable-target JMP form receives a genuine, dispatchable, PC-keyed AOT "
          "body");
-  const auto jmp_body_begin = emitted.find("genesis_aot_" + jmp_hex.str() + "(GenesisRuntime *runtime) {");
-  const auto jmp_body_end = jmp_body_begin == std::string::npos ? std::string::npos
-                                                                 : emitted.find("\n}\n", jmp_body_begin);
-  const auto jmp_body = jmp_body_begin == std::string::npos || jmp_body_end == std::string::npos
-                            ? std::string{}
-                            : emitted.substr(jmp_body_begin, jmp_body_end - jmp_body_begin);
+  const auto jmp_body = aot_function_effective_body(emitted, jmp_hex.str());
   expect(jmp_body.find("pc = UINT32_C(0x" + rts_hex.str() + ");") != std::string::npos &&
              jmp_body.find("genesis_route_access") == std::string::npos,
          "the admitted JMP body assigns the folded constant target directly -- no memory access, "
@@ -9116,12 +9181,7 @@ void immutable_rom_aot_return_from_subroutine_and_bit_clear_are_admitted_and_dis
   std::ostringstream jsr_continuation_hex;
   jsr_continuation_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
                         << jsr_foldable_isolated_continuation;
-  const auto jsr_body_begin = emitted.find("genesis_aot_" + jsr_hex.str() + "(GenesisRuntime *runtime) {");
-  const auto jsr_body_end = jsr_body_begin == std::string::npos ? std::string::npos
-                                                                 : emitted.find("\n}\n", jsr_body_begin);
-  const auto jsr_body = jsr_body_begin == std::string::npos || jsr_body_end == std::string::npos
-                            ? std::string{}
-                            : emitted.substr(jsr_body_begin, jsr_body_end - jsr_body_begin);
+  const auto jsr_body = aot_function_effective_body(emitted, jsr_hex.str());
   expect(jsr_body.find("UINT32_C(0x" + jsr_continuation_hex.str() + ")") != std::string::npos,
          "the admitted isolated JSR body pushes exactly its OWN provenance-derived continuation "
          "(this candidate's own address+length), never an external/whole-program fact");
@@ -9176,12 +9236,7 @@ void immutable_rom_aot_return_from_subroutine_and_bit_clear_are_admitted_and_dis
   // unaffected -- T244 never required a represented continuation for the
   // CALL's own admission/dispatch), so only the RTS's own return-target
   // membership list may never contain it.
-  const auto rts_body_begin = emitted.find("genesis_aot_" + rts_hex.str() + "(GenesisRuntime *runtime) {");
-  const auto rts_body_end = rts_body_begin == std::string::npos ? std::string::npos
-                                                                 : emitted.find("\n}\n", rts_body_begin);
-  const auto rts_body = rts_body_begin == std::string::npos || rts_body_end == std::string::npos
-                            ? std::string{}
-                            : emitted.substr(rts_body_begin, rts_body_end - rts_body_begin);
+  const auto rts_body = aot_function_effective_body(emitted, rts_hex.str());
   expect(!rts_body.empty() &&
              rts_body.find("UINT32_C(0x" + unrepresented_continuation_hex.str() + ")") == std::string::npos,
          "the NEGATIVE case, mirroring SEG-007-T208's own `_excluded_when_not_independently_"
@@ -9288,10 +9343,7 @@ void negate_disp16_aot_admission_and_dispatch_are_bounded() {
   const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   std::ostringstream address_hex;
   address_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << negate_disp16;
-  const auto body_begin = emitted.find("genesis_aot_" + address_hex.str() + "(GenesisRuntime *runtime) {");
-  const auto body_end = body_begin == std::string::npos ? std::string::npos : emitted.find("\n}\n", body_begin);
-  const auto body = body_begin == std::string::npos || body_end == std::string::npos
-                        ? std::string{} : emitted.substr(body_begin, body_end - body_begin);
+  const auto body = aot_function_effective_body(emitted, address_hex.str());
   const auto first_route = body.find("genesis_route_access(runtime,");
   expect(!body.empty() && first_route != std::string::npos &&
              body.find("genesis_route_access(runtime,", first_route + 1U) != std::string::npos &&
@@ -9310,13 +9362,37 @@ int emit_aot_owner_shards(const char *directory) {
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
   TranslationUnitSharder sharder{directory, "bridge_generated",
-                                 {{"block", 8U, 10U}, {"aot", 32U, 10U}, {"stop", 1U, 10U}, {"meta", 1U, 10U}, {"entries", 1U, 10U}}};
+                                 genesis_bridge_translation_unit_families()};
   const auto rejection = emit_m68k_general_startup_bridge_c_to(sharder.stream(), *partial, std::string(64U, '0'));
   if (!rejection.empty()) return 6;
   return sharder.finish().empty() ? 0 : 7;
 }
 
 // SEG-022-T008: single-file (per-entry function) emission of the same fixture: the pre-owner baseline shape.
+// SEG-022-T011: the differential fixture emitted with the factored (default) or unfactored AOT body form,
+// either sharded into <dir> or as the single-file form on stdout.
+int emit_aot_factoring(bool factored, const char *directory) {
+  using namespace segarecomp;
+  using namespace aot_factoring_fixture;
+  const auto image = make_image();
+  auto program = program_with(image);
+  if (!apply_genesis_immutable_rom_aot_range(program, base + 8U, static_cast<std::uint32_t>(base + image.size()))) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  ImmutableRomAotBodyFactoringScope factoring(factored);
+  if (directory == nullptr) {
+    const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, '0'));
+    if (emitted.starts_with("/* translation rejected:")) return 6;
+    std::cout << emitted;
+    return 0;
+  }
+  TranslationUnitSharder sharder{directory, "bridge_generated", genesis_bridge_translation_unit_families()};
+  const auto rejection = emit_m68k_general_startup_bridge_c_to(sharder.stream(), *partial, std::string(64U, '0'));
+  if (!rejection.empty()) return 6;
+  return sharder.finish().empty() ? 0 : 7;
+}
+
 int emit_aot_owner_single_source() {
   using namespace segarecomp;
   using namespace aot_owner_fixture;
@@ -26783,9 +26859,7 @@ void extended_arithmetic_aot_dispatch_is_admitted_end_to_end() {
            "each extended-arithmetic form becomes a validated independent AOT root");
     std::ostringstream hex_address;
     hex_address << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address;
-    const auto begin = emitted.find("genesis_aot_" + hex_address.str() + "(GenesisRuntime *runtime) {");
-    const auto end = begin == std::string::npos ? std::string::npos : emitted.find("\n}\n", begin);
-    const auto body = begin == std::string::npos || end == std::string::npos ? std::string{} : emitted.substr(begin, end - begin);
+    const auto body = aot_function_effective_body(emitted, hex_address.str());
     expect(!body.empty() && body.find("translation rejected") == std::string::npos &&
                (body.find("genesis_route_access(runtime,") != std::string::npos) ==
                    (address != base + 0x0EU && address != base + 0x10U),  // NEGX.B Dn and SUBX.B Dy,Dx are register-only
@@ -27110,9 +27184,7 @@ void bcd_aot_dispatch_is_admitted_end_to_end() {
            "each BCD form becomes a validated independent AOT root");
     std::ostringstream hex_address;
     hex_address << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address;
-    const auto begin = emitted.find("genesis_aot_" + hex_address.str() + "(GenesisRuntime *runtime) {");
-    const auto end = begin == std::string::npos ? std::string::npos : emitted.find("\n}\n", begin);
-    const auto body = begin == std::string::npos || end == std::string::npos ? std::string{} : emitted.substr(begin, end - begin);
+    const auto body = aot_function_effective_body(emitted, hex_address.str());
     expect(!body.empty() && body.find("translation rejected") == std::string::npos &&
                (body.find("genesis_route_access(runtime,") != std::string::npos) ==
                    (address != base + 0x0EU && address != base + 0x10U),  // NBCD Dn and ABCD Dy,Dx are register-only
@@ -27741,9 +27813,7 @@ void exg_movep_scc_tas_aot_dispatch_is_admitted_end_to_end() {
            "each EXG/MOVEP/Scc/TAS form becomes a validated independent AOT root");
     std::ostringstream hex_address;
     hex_address << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address;
-    const auto begin = emitted.find("genesis_aot_" + hex_address.str() + "(GenesisRuntime *runtime) {");
-    const auto end = begin == std::string::npos ? std::string::npos : emitted.find("\n}\n", begin);
-    const auto body = begin == std::string::npos || end == std::string::npos ? std::string{} : emitted.substr(begin, end - begin);
+    const auto body = aot_function_effective_body(emitted, hex_address.str());
     const bool register_only = offset == 0x08U || offset == 0x0AU || offset == 0x0CU || offset == 0x16U || offset == 0x1CU;
     expect(!body.empty() && body.find("translation rejected") == std::string::npos &&
                (body.find("genesis_route_access(runtime,") != std::string::npos) == !register_only,
@@ -29054,6 +29124,9 @@ int main(int argc, char **argv) {
     return emit_immutable_rom_aot_return_from_subroutine_and_bit_clear_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-arithmetic-memory-operand-aot")
     return emit_general_arithmetic_memory_operand_aot_source();
+  if ((argc == 3 || argc == 4) && std::string_view(argv[1]) == "--emit-aot-factoring" &&
+      (std::string_view(argv[2]) == "factored" || std::string_view(argv[2]) == "unfactored"))
+    return emit_aot_factoring(std::string_view(argv[2]) == "factored", argc == 4 ? argv[3] : nullptr);
   if (argc == 2 && std::string_view(argv[1]) == "--emit-aot-owner-single")
     return emit_aot_owner_single_source();
   if (argc == 3 && std::string_view(argv[1]) == "--emit-aot-owner-shards")

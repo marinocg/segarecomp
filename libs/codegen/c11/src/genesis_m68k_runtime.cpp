@@ -32,6 +32,19 @@ std::string genesis_access_width(M68kMemoryAccessWidth size) {
 // The lowering's own name for the Genesis width helper is preserved in the moved text below.
 std::string m68k_genesis_access_width(M68kMemoryAccessWidth size) { return genesis_access_width(size); }
 
+// SEG-022-T011: the routed-failure tail. Factored form: one call to the generated
+// `genesis_routed_failure_stop` (defined once beside `genesis_static_stop`), which performs exactly the
+// inline statements of the unfactored form in the same order and returns the same transfer. Returns ""
+// when the caller did not opt in (or uses a different provenance helper), selecting the inline text.
+std::string factored_route_failure(const M68kMemoryEmissionContext &ctx, std::string_view stop,
+                                   std::string_view address, std::string_view width, std::string_view direction) {
+  if (!ctx.factored_route_failure || ctx.runtime_provenance_helper != "genesis_attach_route_provenance") return {};
+  std::ostringstream out;
+  out << "return genesis_routed_failure_stop(&" << stop << ", " << ctx.runtime_source << ", " << address << ", "
+      << width << ", " << direction << ");";
+  return out.str();
+}
+
 class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
  public:
   std::string instruction_source(const M68kIrOperation &operation) const override {
@@ -50,7 +63,13 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
     out << "uint32_t " << value << " = UINT32_C(0); GenesisRuntimeStop " << stop << " = {0}; if "
         << "(genesis_route_access(" << ctx.runtime_object << ", " << routed_addr << ", "
         << m68k_genesis_access_width(size) << ", GENESIS_ACCESS_READ, &" << value << ", &" << stop
-        << ") != GENESIS_ACCESS_OK) { " << stop << ".provenance.has_instruction_provenance = 1U; "
+        << ") != GENESIS_ACCESS_OK) ";
+    if (const auto factored = factored_route_failure(ctx, stop, routed_addr, m68k_genesis_access_width(size),
+                                                     "GENESIS_ACCESS_READ"); !factored.empty()) {
+      out << factored << "\n";
+      return out.str();
+    }
+    out << "{ " << stop << ".provenance.has_instruction_provenance = 1U; "
         << stop << ".provenance.instruction = *" << ctx.runtime_source << "; "
          << stop << ".provenance.has_access = 1U; " << stop << ".provenance.access_address = " << routed_addr
         << "; " << stop << ".provenance.access_width = " << m68k_genesis_access_width(size)
@@ -67,7 +86,13 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
     out << "uint32_t m68k_routed_value = (" << value << "); GenesisRuntimeStop " << stop << " = {0}; if "
         << "(genesis_route_access(" << ctx.runtime_object << ", " << routed_addr << ", "
         << m68k_genesis_access_width(size) << ", GENESIS_ACCESS_WRITE, &m68k_routed_value, &" << stop
-        << ") != GENESIS_ACCESS_OK) { " << stop << ".provenance.has_instruction_provenance = 1U; "
+        << ") != GENESIS_ACCESS_OK) ";
+    if (const auto factored = factored_route_failure(ctx, stop, routed_addr, m68k_genesis_access_width(size),
+                                                     "GENESIS_ACCESS_WRITE"); !factored.empty()) {
+      out << factored;
+      return out.str();
+    }
+    out << "{ " << stop << ".provenance.has_instruction_provenance = 1U; "
         << stop << ".provenance.instruction = *" << ctx.runtime_source << "; "
         << stop << ".provenance.has_access = 1U; " << stop << ".provenance.access_address = " << routed_addr
         << "; " << stop << ".provenance.access_width = " << m68k_genesis_access_width(size)
@@ -87,7 +112,12 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
                  << " > UINT32_C(0x" << hex(ctx.linear_memory_end - 4U, 8) << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
                  << ctx.runtime_source << ", 1U, " << a7 << ", GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ); "
                  << "if (" << stack_route_open(ctx, "GENESIS_BUS_STACK_READ") << a7
-                 << ", GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ, &m68k_observed_return, &m68k_route_stop) != GENESIS_ACCESS_OK) { "
+                 << ", GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ, &m68k_observed_return, &m68k_route_stop) != GENESIS_ACCESS_OK) ";
+          if (const auto factored = factored_route_failure(ctx, "m68k_route_stop", a7, "GENESIS_ACCESS_LONG",
+                                                           "GENESIS_ACCESS_READ"); !factored.empty())
+            out << factored << " if (";
+          else
+            out << "{ "
                  << "m68k_route_stop.provenance.has_instruction_provenance = 1U; m68k_route_stop.provenance.instruction = *"
                  << ctx.runtime_source << "; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = "
                  << a7 << "; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_READ; "
@@ -123,7 +153,13 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
                  << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);\n"
                  << "    { const uint32_t m68k_new_a7 = " << a7 << " - UINT32_C(4);\n"
                  << "      if (" << stack_route_open(ctx, "GENESIS_BUS_STACK_WRITE")
-                 << "m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) {\n"
+                 << "m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) ";
+      if (const auto factored = factored_route_failure(ctx, "m68k_route_stop", "m68k_new_a7", "GENESIS_ACCESS_LONG",
+                                                       "GENESIS_ACCESS_WRITE"); !factored.empty()) {
+        out << factored << "\n";
+        return out.str();
+      }
+      out << "{\n"
                  << "        m68k_route_stop.provenance.has_instruction_provenance = 1U; m68k_route_stop.provenance.instruction = *"
                  << ctx.runtime_source
                  << "; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = m68k_new_a7; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_WRITE;\n"
@@ -139,7 +175,13 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
                        << " > UINT32_C(0x" << hex(ctx.linear_memory_end, 8) << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
                        << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE); "
                        << "{ const uint32_t m68k_new_a7 = " << a7 << " - UINT32_C(4); "
-                       << "if (" << stack_route_open(ctx, "GENESIS_BUS_STACK_WRITE") << "m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) { "
+                       << "if (" << stack_route_open(ctx, "GENESIS_BUS_STACK_WRITE") << "m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) ";
+      if (const auto factored = factored_route_failure(ctx, "m68k_route_stop", "m68k_new_a7", "GENESIS_ACCESS_LONG",
+                                                       "GENESIS_ACCESS_WRITE"); !factored.empty()) {
+        out << factored << " ";
+        return out.str();
+      }
+      out << "{ "
                        << "m68k_route_stop.provenance.has_instruction_provenance = 1U; m68k_route_stop.provenance.instruction = *"
                        << ctx.runtime_source << "; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = m68k_new_a7; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_WRITE; "
                        << ctx.runtime_provenance_helper << "(&m68k_route_stop, " << ctx.runtime_source

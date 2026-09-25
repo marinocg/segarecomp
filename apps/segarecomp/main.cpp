@@ -303,10 +303,10 @@ int main(int argc, char **argv) {
       else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result))
         program_units = segarecomp::generated_program_unit_count(*accepted);
       if (segarecomp::select_sharded_generated_c(generated_c_output.has_value(), generated_c_shard_dir.has_value(), program_units)) {
-        // Layout (bounded, documented in ADR-0044): main + meta + entries + stop + 8 block + 32 AOT shards.
+        // Layout (bounded, documented in ADR-0044/ADR-0045): see genesis_bridge_translation_unit_families().
         segarecomp::TranslationUnitSharder sharder{
             std::filesystem::path{std::string(*generated_c_shard_dir)}, "bridge_generated",
-            {{"block", 8U, 10U}, {"aot", 32U, 10U}, {"stop", 1U, 10U}, {"meta", 1U, 10U}, {"entries", 1U, 10U}}};
+            segarecomp::genesis_bridge_translation_unit_families()};
         auto &sink = sharder.stream();
         std::string rejection;
         bool emitted = false;

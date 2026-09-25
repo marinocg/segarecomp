@@ -19,6 +19,10 @@ namespace {
 // SEG-022-T003: the shared-header helper functions become `static inline` in a sharded build.
 // SEG-022-T008: bounded host-owner size (entries per generated AOT owner function).
 constexpr std::size_t aot_owner_max_entries = 128U;
+// SEG-022-T011: generated routed-failure tail (see its definition beside `genesis_static_stop`).
+constexpr std::string_view genesis_routed_failure_stop_declaration =
+    "GenesisControlTransfer genesis_routed_failure_stop(GenesisRuntimeStop *stop, const GenesisInstructionProvenance *source, "
+    "uint32_t address, GenesisAccessWidth width, GenesisAccessDirection direction)";
 
 std::string shard_helper_linkage(bool sharded, std::string text) {
   if (sharded && text.starts_with("static ")) text.insert(7U, "inline ");
@@ -42,6 +46,8 @@ struct ExecutionHistoryHooksScope {
   ~ExecutionHistoryHooksScope() { g_execution_history_hooks = previous; }
   bool previous;
 };
+// SEG-022-T011: see ImmutableRomAotBodyFactoringScope (genesis_frontend.hpp).
+thread_local bool g_aot_body_factoring = true;
 const char *history_transfer_kind(M68kIrKind kind) {
   switch (kind) {
   case M68kIrKind::branch_ne_short: case M68kIrKind::branch_always_short: case M68kIrKind::general_branch:
@@ -728,12 +734,26 @@ enum class M68kGeneralStartupBlockEmissionPolicy {
 };
 std::optional<std::map<Address, const FrontendAnalysis::ImmutableRomAotEntry *>>
 validated_immutable_rom_aot_entries(const FrontendAnalysis &analysis);
+// SEG-022-T011: opt-in exact factoring of one immutable-ROM AOT body (bridge route only).
+struct AotBodyFactoring {
+  // Group A: a failed routed access returns through the generated `genesis_routed_failure_stop`.
+  bool route_failure = false;
+  // Group B: when non-empty, the body is emitted WITHOUT its function/label header and closing brace, and
+  // every spelling of the entry's own instruction provenance is this `const GenesisInstructionProvenance *`
+  // identifier instead of an inline literal, so identical bodies of different entries are byte-identical
+  // and can share one statically selected generated helper.
+  std::string_view source_symbol;
+  // With an empty `source_symbol`: emit the body as a bare `{ ... }` compound statement (the caller owns the
+  // function header or entry label) instead of a standalone function or labelled block.
+  bool bare_block = false;
+};
 std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotEntry &entry,
                                          const std::vector<std::uint32_t> &runtime_return_targets,
                                          const std::vector<std::uint32_t> &unrepresented_exact_pcs,
                                          const std::vector<std::uint32_t> &indirect_candidate_targets = {},
                                          bool use_shared_compiled_entry_lookup = false,
-                                         std::string_view owner_entry_label = {});
+                                         std::string_view owner_entry_label = {},
+                                         const AotBodyFactoring &factoring = {});
 std::optional<std::vector<Address>> immutable_rom_aot_exact_pc_obligations(
     const FrontendAnalysis::ImmutableRomAotEntry &entry);
 std::optional<std::map<Address, std::vector<Address>>> immutable_rom_aot_unrepresented_exact_pcs(
@@ -2020,7 +2040,8 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
                                           const std::vector<std::uint32_t> &unrepresented_exact_pcs,
                                           const std::vector<std::uint32_t> &indirect_candidate_targets,
                                           bool use_shared_compiled_entry_lookup,
-                                          std::string_view owner_entry_label) {
+                                          std::string_view owner_entry_label,
+                                          const AotBodyFactoring &factoring) {
   const auto address = entry.decoded.provenance.source.address.value;
   const auto cycle_expression = m68k_retirement_cycle_expression(entry.operation);
   if (!cycle_expression)
@@ -2028,7 +2049,11 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   std::ostringstream out;
   // SEG-022-T008: an owner-grouped entry is a labelled block inside a shared owner function; the
   // block body (locals, lowering, retirement, every return) is exactly the standalone function body.
-  if (owner_entry_label.empty())
+  if (!factoring.source_symbol.empty()) {
+    // Inner body only (the caller owns the header and the closing brace).
+  } else if (factoring.bare_block)
+    out << "{\n";
+  else if (owner_entry_label.empty())
     out << "static GenesisControlTransfer genesis_aot_" << std::uppercase << std::hex
         << std::setw(8) << std::setfill('0') << address << "(GenesisRuntime *runtime) {\n";
   else
@@ -2098,6 +2123,8 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   // lowering cases ever consult `memory.continuation`); consulted only by
   // the existing, unchanged `call_general`/`bsr_call` lowering.
   memory.continuation = address + entry.decoded.provenance.length.value;
+  memory.factored_route_failure = factoring.route_failure;
+  memory.runtime_source_symbol = factoring.source_symbol;
   out << emit_m68k_operation_c(entry.operation, "runtime->d", "runtime->sr", "  ", &memory)
       << "  runtime->pc = pc;\n";
   if (!unrepresented_exact_pcs.empty()) {
@@ -2136,7 +2163,8 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   out << *cycle_expression;
   out << ", runtime->pc);\n"
       << "    if (retired.kind != GENESIS_CONTINUE_AT_PC || retired.next_pc != m68k_retirement_pc) return retired;\n"
-      << "    return retired;\n  }\n}\n";
+      << "    return retired;\n  }\n";
+  if (factoring.source_symbol.empty()) out << "}\n";
   return out.str();
 }
 } // namespace
@@ -3111,6 +3139,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     shard_declare(out, "GenesisControlTransfer genesis_static_stop(GenesisStopClass class_, GenesisDiagnosticCategory category, const GenesisInstructionProvenance *source, uint8_t has_access, uint32_t address, GenesisAccessWidth width, GenesisAccessDirection direction)");
     shard_declare(out, compact_provenance_helper_declarations);
     shard_declare(out, compact_provenance_helper_declarations_2);
+    shard_declare(out, genesis_routed_failure_stop_declaration);
   }
   {
     std::vector<RouteProvenanceRecord> route_records;
@@ -3133,7 +3162,14 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       << "GenesisControlTransfer genesis_static_stop(GenesisStopClass class_, GenesisDiagnosticCategory category, const GenesisInstructionProvenance *source, uint8_t has_access, uint32_t address, GenesisAccessWidth width, GenesisAccessDirection direction) {\n"
       << "  GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop.stop_class = class_; transfer.stop.diagnostic_category = category; transfer.stop.provenance.has_instruction_provenance = 1U; transfer.stop.provenance.instruction = *source;\n"
       << "  if (has_access != 0U) { transfer.stop.provenance.has_access = 1U; transfer.stop.provenance.access_address = address; transfer.stop.provenance.access_width = width; transfer.stop.provenance.access_direction = direction; }\n"
-       << "  genesis_attach_route_provenance(&transfer.stop, source); return transfer;\n}\n";
+       << "  genesis_attach_route_provenance(&transfer.stop, source); return transfer;\n}\n"
+      // SEG-022-T011: the single routed-failure tail shared by every factored AOT routed access. Its statements
+      // are exactly the inline failure block `M68kRuntimeCEmitter::routed_read`/`routed_write` and the stack
+      // guards emit when not factored (same fields, same order, same provenance helper, same transfer).
+      << genesis_routed_failure_stop_declaration << " {\n"
+      << "  stop->provenance.has_instruction_provenance = 1U; stop->provenance.instruction = *source; stop->provenance.has_access = 1U; stop->provenance.access_address = address; stop->provenance.access_width = width; stop->provenance.access_direction = direction;\n"
+      << "  genesis_attach_route_provenance(stop, source);\n"
+      << "  { GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop = *stop; return transfer; }\n}\n";
   if (sharded) shard_end_unit(out);
   // A partial program retains real static blocks, not merely a diagnostic.
   // Every static memory fact is checked against the decoded/lifted operation
@@ -5714,46 +5750,119 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   // owners of at most `aot_owner_max_entries` entries. An owner is one external function (one unit, so one
   // TU) whose `switch (runtime->pc)` enters exactly its own entries and fails closed for every other PC.
   std::map<Address, std::string> aot_owner_of;
+  // SEG-022-T011 / ADR-0045: exact statically selected body helpers. Every AOT entry body is first lowered
+  // by the unchanged owner (`emit_immutable_rom_aot_body` -> `emit_m68k_operation_c`) with its own
+  // instruction provenance spelled as the pointer `genesis_aot_source`; nothing else about the entry is
+  // abstracted. Entries whose complete lowered body text is byte-identical share ONE generated helper that
+  // is exactly that text; each such entry calls it with a pointer to its own provenance constant. A body
+  // used once stays inline. Identity is exact text equality of generated C -- never a runtime decision,
+  // never a new semantic implementation -- and helper order/names are a pure function of the ascending
+  // AOT address order, so output stays deterministic.
+  constexpr std::string_view aot_source_symbol = "genesis_aot_source";
+  const bool factor_aot_bodies = g_aot_body_factoring;
+  std::vector<Address> aot_order;
+  for (const auto &[address, entry] : *aot_entries) {
+    (void)entry;
+    if (!ordinary_compiled_owners.contains(address)) aot_order.push_back(address);
+  }
+  std::unordered_map<std::string, std::uint32_t> aot_body_ids;
+  std::vector<const std::string *> aot_body_text;
+  std::vector<std::uint32_t> aot_body_uses;
+  std::vector<std::uint32_t> aot_entry_body;
+  aot_entry_body.reserve(aot_order.size());
+  if (factor_aot_bodies) for (const auto pc : aot_order) {
+    auto inner = emit_immutable_rom_aot_body(*aot_entries->at(pc), immutable_rom_aot_runtime_return_targets,
+                                             aot_unrepresented_exact_pcs[pc], {}, true, {},
+                                             AotBodyFactoring{true, aot_source_symbol});
+    if (inner.starts_with("/* translation rejected"))
+      return inner;  // fail closed: an entry whose timing is unaccounted is never emitted
+    const auto [slot, inserted] =
+        aot_body_ids.try_emplace(std::move(inner), static_cast<std::uint32_t>(aot_body_text.size()));
+    if (inserted) {
+      aot_body_text.push_back(&slot->first);
+      aot_body_uses.push_back(0U);
+    }
+    ++aot_body_uses[slot->second];
+    aot_entry_body.push_back(slot->second);
+  }
+  // Helper names are assigned to shared bodies in first-use (ascending address) order.
+  std::vector<std::string> aot_body_helper(aot_body_text.size());
+  std::size_t aot_helper_count = 0U;
+  for (std::uint32_t id = 0U; id < aot_body_text.size(); ++id) {
+    if (aot_body_uses[id] < 2U) continue;
+    std::ostringstream name;
+    name << "genesis_aot_shared_" << std::setw(5) << std::setfill('0') << std::dec << aot_helper_count;
+    aot_body_helper[id] = name.str();
+    const bool uses_source = aot_body_text[id]->find(aot_source_symbol) != std::string::npos;
+    const auto declaration = "GenesisControlTransfer " + aot_body_helper[id] + "(GenesisRuntime *runtime" +
+                             (uses_source ? ", const GenesisInstructionProvenance *" + std::string(aot_source_symbol)
+                                          : std::string()) + ")";
+    ShardUnitScope unit(out, "shared", aot_helper_count, declaration);
+    out << "static " << declaration << " {\n" << *aot_body_text[id] << "}\n";
+    ++aot_helper_count;
+  }
+  // One entry's compound statement: a call of its shared helper, or the inline body with its provenance
+  // pointer bound.
+  const auto emit_aot_entry = [&](std::size_t index) {
+    const auto pc = aot_order[index];
+    if (!factor_aot_bodies) {
+      // Unfactored reference form: the complete pre-T011 body with its own braces (no header).
+      AotBodyFactoring unfactored{};
+      unfactored.bare_block = true;
+      return emit_immutable_rom_aot_body(*aot_entries->at(pc), immutable_rom_aot_runtime_return_targets,
+                                         aot_unrepresented_exact_pcs[pc], {}, true, {}, unfactored);
+    }
+    const auto id = aot_entry_body[index];
+    const auto &text = *aot_body_text[id];
+    const bool uses_source = text.find(aot_source_symbol) != std::string::npos;
+    const auto source = uses_source ? genesis_m68k_runtime_c_emitter().instruction_source(aot_entries->at(pc)->operation)
+                                    : std::string();
+    std::string result;
+    if (!aot_body_helper[id].empty()) {
+      result = "{ return " + aot_body_helper[id] + "(runtime" + (uses_source ? ", " + source : std::string()) + "); }\n";
+    } else {
+      result = "{\n";
+      if (uses_source)
+        result += "  const GenesisInstructionProvenance *const " + std::string(aot_source_symbol) + " = " + source + ";\n";
+      result += text + "}\n";
+    }
+    return result;
+  };
   if (sharded) {
-    std::vector<Address> pending;
+    std::vector<std::size_t> pending;
     std::size_t owner_index = 0U;
     const auto flush_owner = [&]() {
       if (pending.empty()) return;
       std::ostringstream name;
       name << "genesis_aot_owner_" << std::setw(4) << std::setfill('0') << std::dec << owner_index++;
       const std::string owner_name = name.str();
-      ShardUnitScope unit(out, "aot", pending.front(),
+      ShardUnitScope unit(out, "aot", aot_order[pending.front()],
                           "GenesisControlTransfer " + owner_name + "(GenesisRuntime *runtime)");
       out << "static GenesisControlTransfer " << owner_name << "(GenesisRuntime *runtime) {\n  switch (runtime->pc) {\n";
-      for (const auto pc : pending)
-        out << "  case UINT32_C(" << hex(pc, 8) << "): goto genesis_aot_entry_" << std::uppercase << std::hex
-            << std::setw(8) << std::setfill('0') << pc << ";\n";
+      for (const auto index : pending)
+        out << "  case UINT32_C(" << hex(aot_order[index], 8) << "): goto genesis_aot_entry_" << std::uppercase
+            << std::hex << std::setw(8) << std::setfill('0') << aot_order[index] << ";\n";
       out << "  default: return genesis_internal_dispatch_inconsistency_stop(runtime);\n  }\n";
-      for (const auto pc : pending) {
-        std::ostringstream label;
-        label << "genesis_aot_entry_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << pc;
-        const auto body = emit_immutable_rom_aot_body(*aot_entries->at(pc), immutable_rom_aot_runtime_return_targets,
-                                                      aot_unrepresented_exact_pcs[pc], {}, true, label.str());
-        out << body;
-        aot_owner_of[pc] = owner_name;
+      for (const auto index : pending) {
+        out << "genesis_aot_entry_" << std::uppercase << std::hex << std::setw(8) << std::setfill('0')
+            << aot_order[index] << ": " << emit_aot_entry(index);
+        aot_owner_of[aot_order[index]] = owner_name;
       }
       out << "}\n";
       pending.clear();
     };
-    for (const auto &[address, entry] : *aot_entries) {
-      (void)entry;
-      if (ordinary_compiled_owners.contains(address)) continue;
-      pending.push_back(address);
+    for (std::size_t index = 0; index < aot_order.size(); ++index) {
+      pending.push_back(index);
       if (pending.size() >= aot_owner_max_entries) flush_owner();
     }
     flush_owner();
   } else
-  for (const auto &[address, entry] : *aot_entries)
-    if (!ordinary_compiled_owners.contains(address)) {
-      ShardUnitScope unit(out, "aot", address, genesis_unit_declaration("genesis_aot_", address));
-      out << emit_immutable_rom_aot_body(*entry, immutable_rom_aot_runtime_return_targets,
-                                         aot_unrepresented_exact_pcs[address], {}, true);
-    }
+  for (std::size_t index = 0; index < aot_order.size(); ++index) {
+    const auto address = aot_order[index];
+    ShardUnitScope unit(out, "aot", address, genesis_unit_declaration("genesis_aot_", address));
+    out << "static GenesisControlTransfer genesis_aot_" << std::uppercase << std::hex << std::setw(8)
+        << std::setfill('0') << address << "(GenesisRuntime *runtime) " << emit_aot_entry(index);
+  }
   // SEG-022-T003: the sorted compiled-entry table and its binary-search lookup form the one `entries` unit.
   if (sharded) shard_begin_unit(out, "entries", 0U, "GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address)");
   std::vector<CompiledEntryBinding> compiled_entry_bindings;
@@ -6114,5 +6223,11 @@ std::string emit_m68k_frontend_c(const FrontendAnalysis &analysis,const DirectFl
     flow_units.push_back({unit.ordinal, unit.id, unit.members, unit.entry_block, unit.provenance});
   return emit_m68k_structured_direct_flow_c(analysis.direct_flow, flow_units, initial, budget);
 }
+
+ImmutableRomAotBodyFactoringScope::ImmutableRomAotBodyFactoringScope(bool enabled)
+    : previous_(g_aot_body_factoring) {
+  g_aot_body_factoring = enabled;
+}
+ImmutableRomAotBodyFactoringScope::~ImmutableRomAotBodyFactoringScope() { g_aot_body_factoring = previous_; }
 
 } // namespace segarecomp
