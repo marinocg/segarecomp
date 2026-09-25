@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from tools import process_tree  # noqa: E402
@@ -778,17 +779,222 @@ def default_compile_jobs() -> int:
     return max(1, min(4, os.cpu_count() or 1))
 
 
+# SEG-022-T012: optional content-addressed cache of compiled generated-TU objects. Off unless
+# --object-cache-dir or SEGARECOMP_OBJECT_CACHE_DIR names a directory; correctness never depends
+# on it (a disabled, cold, warm, corrupt, or mismatched cache all yield the same objects, the latter
+# by recompiling). The cache holds host objects compiled from generated C, so it inherits the
+# out-dir's local/ignored-only status for commercial inputs (never commit or publish it).
+OBJECT_CACHE_ENV = "SEGARECOMP_OBJECT_CACHE_DIR"
+OBJECT_CACHE_MAX_BYTES_ENV = "SEGARECOMP_OBJECT_CACHE_MAX_BYTES"
+OBJECT_CACHE_SCHEMA = b"segarecomp-generated-object-cache-v1"
+# Entry layout (v2): magic, the full requested cache key, the object SHA-256, then the object bytes.
+# The key is stored so a structurally valid entry found under another key's path is rejected.
+_OBJECT_CACHE_MAGIC = b"SEGOBJ2\n"
+_OBJECT_CACHE_DEFAULT_MAX_BYTES = 4 << 30
+# Environment that can change what the compiler driver compiles/targets without appearing in argv.
+_OBJECT_CACHE_ENV_KEYS = ("SDKROOT", "DEVELOPER_DIR", "MACOSX_DEPLOYMENT_TARGET", "CPATH", "C_INCLUDE_PATH",
+                          "OBJC_INCLUDE_PATH", "CCC_OVERRIDE_OPTIONS", "COMPILER_PATH", "GCC_EXEC_PREFIX",
+                          "SOURCE_DATE_EPOCH")
+_object_cache_dir_override: "pathlib.Path | None" = None
+_object_cache_stats: "dict[str, int]" = {}
+_compiler_identity_memo: "dict[tuple, bytes | None]" = {}
+_compiler_identity_lock = threading.Lock()
+
+
+def object_cache_dir() -> "pathlib.Path | None":
+    if _object_cache_dir_override is not None:
+        return _object_cache_dir_override
+    raw = os.environ.get(OBJECT_CACHE_ENV)
+    return pathlib.Path(raw).resolve() if raw else None
+
+
+def _object_cache_max_bytes() -> int:
+    raw = os.environ.get(OBJECT_CACHE_MAX_BYTES_ENV)
+    try:
+        return max(0, int(raw)) if raw else _OBJECT_CACHE_DEFAULT_MAX_BYTES
+    except ValueError:
+        return _OBJECT_CACHE_DEFAULT_MAX_BYTES
+
+
+_object_cache_lock = threading.Lock()
+
+
+def _count(stat: str) -> None:
+    with _object_cache_lock:
+        _object_cache_stats[stat] = _object_cache_stats.get(stat, 0) + 1
+
+
+def compiler_identity(compiler: str, cwd: pathlib.Path) -> "bytes | None":
+    """Compiler identity/version and target triple plus compile-affecting environment. None (the
+    job is then compiled uncached) when the driver cannot report them."""
+    env_part = tuple((k, os.environ.get(k)) for k in _OBJECT_CACHE_ENV_KEYS)
+    resolved = shutil.which(compiler) or compiler
+    memo_key = (compiler, os.path.realpath(resolved), env_part)
+    with _compiler_identity_lock:
+        if memo_key in _compiler_identity_memo:
+            return _compiler_identity_memo[memo_key]
+        return _compiler_identity_memo.setdefault(memo_key, _probe_compiler_identity(compiler, resolved, env_part, cwd))
+
+
+def _probe_compiler_identity(compiler: str, resolved: str, env_part: tuple, cwd: pathlib.Path) -> "bytes | None":
+    identity: "bytes | None" = None
+    try:
+        version = subprocess.run([compiler, "--version"], capture_output=True, cwd=cwd, timeout=60)
+        machine = subprocess.run([compiler, "-dumpmachine"], capture_output=True, cwd=cwd, timeout=60)
+        if version.returncode == 0 and machine.returncode == 0 and machine.stdout.strip():
+            identity = b"\0".join([os.path.realpath(resolved).encode(), version.stdout, version.stderr,
+                                   machine.stdout, json.dumps(env_part).encode()])
+    except (OSError, subprocess.SubprocessError):
+        identity = None
+    return identity
+
+
+def object_cache_key(argv: "list[str]", src: pathlib.Path, cwd: pathlib.Path) -> "str | None":
+    """Key = schema + compiler identity/target + exact compile argv + cwd + source path + digest of
+    the full preprocessed TU (`-E -dD`: line markers and macro definitions kept), which covers the TU content and every
+    included header (content and resolved path). None = do not use the cache for this job."""
+    identity = compiler_identity(argv[0], cwd)
+    if identity is None:
+        return None
+    digest = hashlib.sha256()
+    try:
+        proc = subprocess.Popen(argv + ["-E", "-dD", str(src)], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, cwd=cwd)
+        assert proc.stdout is not None
+        for chunk in iter(lambda: proc.stdout.read(1 << 20), b""):
+            digest.update(chunk)
+        proc.stdout.close()
+        if proc.wait() != 0:
+            return None
+    except OSError:
+        return None
+    key = hashlib.sha256()
+    for field in (OBJECT_CACHE_SCHEMA, identity, json.dumps(argv).encode(), str(cwd.resolve()).encode(),
+                  str(src.resolve()).encode(), digest.digest()):
+        key.update(len(field).to_bytes(8, "little"))
+        key.update(field)
+    return key.hexdigest()
+
+
+def _object_cache_entry(cache: pathlib.Path, key: str) -> pathlib.Path:
+    return cache / key[:2] / (key + ".obj")
+
+
+def _quiet_os(fn, *args, **kwargs) -> None:
+    """Cache maintenance is best effort: an OSError (read-only cache, file held open on Windows,
+    concurrent eviction) never fails the build."""
+    try:
+        fn(*args, **kwargs)
+    except OSError:
+        pass
+
+
+def _object_cache_header(key: str, data: bytes) -> bytes:
+    return _OBJECT_CACHE_MAGIC + key.encode() + b"\n" + hashlib.sha256(data).hexdigest().encode() + b"\n"
+
+
+def object_cache_load(cache: pathlib.Path, key: str, dest: str) -> bool:
+    """Copy a verified entry to dest. Accepted only when the stored key equals the requested key and
+    the object digest verifies; any unreadable/truncated/corrupt/foreign-key/old-format entry is
+    removed (best effort) and the unit is compiled normally (fail safe)."""
+    entry = _object_cache_entry(cache, key)
+    try:
+        blob = entry.read_bytes()
+    except OSError:
+        return False
+    key_bytes = key.encode()
+    head = len(_OBJECT_CACHE_MAGIC) + len(key_bytes) + 1 + 64 + 1
+    data = blob[head:]
+    if (len(blob) > head and len(key_bytes) == 64 and blob[:head] == _object_cache_header(key, data)):
+        try:
+            pathlib.Path(dest).write_bytes(data)
+        except OSError:
+            return False
+        _quiet_os(os.utime, entry)  # recency for size-bounded eviction
+        return True
+    _count("rejected")
+    _quiet_os(entry.unlink, missing_ok=True)
+    return False
+
+
+def object_cache_store(cache: pathlib.Path, key: str, obj: str) -> None:
+    """Best effort; atomic replace so a concurrent reader never sees a partial entry."""
+    entry = _object_cache_entry(cache, key)
+    tmp = entry.with_name(f"{entry.name}.{os.getpid()}.{threading.get_ident()}.tmp")
+    try:
+        data = pathlib.Path(obj).read_bytes()
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        tmp.write_bytes(_object_cache_header(key, data) + data)
+        os.replace(tmp, entry)
+        _count("stores")
+    except OSError:
+        _count("store_failed")
+        _quiet_os(tmp.unlink, missing_ok=True)
+
+
+def object_cache_trim(cache: pathlib.Path) -> None:
+    """Bound disk use: evict least-recently-used entries beyond the byte cap. Temporary files left
+    by an interrupted store are counted and are evicted first once older than an hour."""
+    import time
+    entries = []
+    stale_before = time.time_ns() - 3600 * 10**9
+    try:
+        for p in list(cache.glob("*/*.obj")) + list(cache.glob("*/*.tmp")):
+            try:
+                st = p.stat()
+            except OSError:
+                continue
+            stale_tmp = p.suffix == ".tmp" and st.st_mtime_ns < stale_before
+            if p.suffix == ".tmp" and not stale_tmp:
+                continue  # possibly an in-flight store by a concurrent build
+            entries.append((0 if stale_tmp else 1, st.st_mtime_ns, str(p), st.st_size, p))
+    except OSError:
+        return
+    total = sum(e[3] for e in entries)
+    limit = _object_cache_max_bytes()
+    for rank, _, _, size, path in sorted(entries):
+        if total <= limit and rank:
+            break
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            continue
+        total -= size
+        _count("evicted")
+
+
 def compile_objects(jobs: "list[tuple[list[str], pathlib.Path]]", cwd: pathlib.Path,
                     tmp: pathlib.Path) -> "tuple[list[str], str | None]":
     """Compile independent TUs concurrently (bounded). jobs = (argv before `-c`, source).
     Object paths and link order follow job order, never completion order. On the first failure
-    pending jobs are cancelled and the diagnostics of the lowest-index failed job are returned."""
+    pending jobs are cancelled and the diagnostics of the lowest-index failed job are returned.
+    SEG-022-T012: with an object cache configured, a job whose key matches a verified entry reuses
+    that object instead of compiling; misses compile normally and store only on success."""
     import concurrent.futures as cf
     objects = [str(tmp / f"{i}.o") for i in range(len(jobs))]
+    cache = object_cache_dir()
+    if cache is not None:
+        try:
+            cache.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            cache = None
+
+    with _object_cache_lock:
+        before = dict(_object_cache_stats)
 
     def run(i: int):
         argv, src = jobs[i]
-        return subprocess.run(argv + ["-c", "-o", objects[i], str(src)], text=True, capture_output=True, cwd=cwd)
+        key = object_cache_key(argv, src, cwd) if cache is not None else None
+        if cache is not None and key is None:
+            _count("uncacheable")
+        if key is not None and object_cache_load(cache, key, objects[i]):
+            _count("hits")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+        result = subprocess.run(argv + ["-c", "-o", objects[i], str(src)], text=True, capture_output=True, cwd=cwd)
+        if key is not None:
+            _count("misses")
+            if result.returncode == 0:
+                object_cache_store(cache, key, objects[i])
+        return result
 
     failures: dict[int, str] = {}
     with cf.ThreadPoolExecutor(max_workers=min(default_compile_jobs(), max(1, len(jobs)))) as pool:
@@ -804,6 +1010,11 @@ def compile_objects(jobs: "list[tuple[list[str], pathlib.Path]]", cwd: pathlib.P
         if failures:
             for f in pending:
                 f.cancel()
+    if cache is not None:
+        object_cache_trim(cache)
+        with _object_cache_lock:
+            delta = {k: v - before.get(k, 0) for k, v in _object_cache_stats.items() if v != before.get(k, 0)}
+        sys.stderr.write("generated object cache: " + " ".join(f"{k}={delta[k]}" for k in sorted(delta)) + "\n")
     if failures:
         return [], failures[min(failures)]
     return objects, None
@@ -1363,6 +1574,10 @@ def main() -> int:
     parser.add_argument("--mapping-base", type=hex_mapping_base)
     parser.add_argument("--compile-jobs", type=int, default=None,
                         help="max concurrent generated-TU compiles (default min(4, CPUs); env SEGARECOMP_COMPILE_JOBS)")
+    parser.add_argument("--object-cache-dir",
+                        help="opt-in content-addressed cache of compiled generated-TU objects for faster "
+                             "iterative rebuilds (env SEGARECOMP_OBJECT_CACHE_DIR; LRU-bounded by "
+                             "SEGARECOMP_OBJECT_CACHE_MAX_BYTES, default 4 GiB). Local/ignored only.")
     parser.add_argument("--out-dir", default="build/genesis-startup-bridge")
     parser.add_argument("--mode", required=True, choices=("synthetic", "commercial"))
     parser.add_argument("--expect-sha256")
@@ -1414,8 +1629,10 @@ def main() -> int:
     parser.add_argument("--viewer-slice", type=instruction_budget_value,
                         help="guest dispatches per host viewer slice (> 0)")
     args = parser.parse_args()
-    global _compile_jobs_override
+    global _compile_jobs_override, _object_cache_dir_override
     _compile_jobs_override = args.compile_jobs
+    if args.object_cache_dir:
+        _object_cache_dir_override = pathlib.Path(args.object_cache_dir).resolve()
     if (args.viewer_unthrottled or args.viewer_slice is not None) and not args.viewer:
         sys.stderr.write("--viewer-unthrottled/--viewer-slice require --viewer\n")
         return 8
