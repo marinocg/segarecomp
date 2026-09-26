@@ -2554,6 +2554,18 @@
   "tst.unary.w.none.predec": "11111-1111111111110",
   "unlk.an.none.an.none": "1110--1111111111-10"
  },
+ "justified_restrictions": [
+  {
+   "form": "jmp.ea.none.index.none",
+   "reason": "ADR 0047 (SEG-021-T025): no Tier-1 cross-product producer; the site executes natively through the runtime-owned AOT lowering (SEG-021-T034) or the Tier-2 fallback (SEG-021-T011)",
+   "stage": "route_static_discovery"
+  },
+  {
+   "form": "jsr.ea.none.index.none",
+   "reason": "ADR 0047 (SEG-021-T025): no Tier-1 cross-product producer; the site executes natively through the runtime-owned AOT lowering (SEG-021-T034) or the Tier-2 fallback (SEG-021-T011)",
+   "stage": "route_static_discovery"
+  }
+ ],
  "measurement": {
   "compiler_flags": "-std=c11 -Wall -Wextra -Wno-type-limits -pedantic -Werror -O0",
   "end_to_end_structural_stages": [

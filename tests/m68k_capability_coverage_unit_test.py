@@ -67,6 +67,19 @@ check(len(need) > 1, "a form listing several classes requires several vectors")
 check(not any(cov.exception_modeled(need, v) for v in range(0, 48)), "one effect vector must not prove several exception classes")
 check(cov.exception_modeled(set(), 0), "forms with no exception class are not penalised")
 
+# --- SEG-021-T025: justified restrictions must name a currently failing, applicable stage ---------------------
+stages_all = cov.ALL_STAGES
+def fake_rows(passing):
+    return {fid: (BY_ID[fid], {s: passing for s in stages_all}, {s: True for s in stages_all}, 1)
+            for fid, _stage in cov.JUSTIFIED_RESTRICTIONS}
+check(len(cov.justified_restrictions(fake_rows(False))) == len(cov.JUSTIFIED_RESTRICTIONS),
+      "justified restrictions resolve against failing stages")
+try:
+    cov.justified_restrictions(fake_rows(True))
+    check(False, "a justified restriction whose stage now passes must be reported as stale")
+except ValueError:
+    pass
+
 # --- CCR/SR expectation --------------------------------------------------------------------------------
 check(all(cov.ccr_expected(f) for f in forms_of("ADD")), "ADD modifies CCR")
 check(not any(cov.ccr_expected(f) for f in forms_of("MOVEA")), "MOVEA does not modify CCR")

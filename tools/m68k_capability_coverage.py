@@ -65,6 +65,17 @@ EXTENSION_PATTERN = ("every extension word 0x0004 (primary words are exhaustive;
 # required by `exception_privilege_modeled`; forms listing them are reported in a separate deferred bucket.
 # Bus error (vector 2) and trace (vector 9) are listed by no form, so only address error appears here.
 DEFERRED_EXCEPTIONS = frozenset(["address_error_vector_3"])
+# Explicitly justified restrictions: (form id, stage) gaps that are a recorded architecture decision, not missing
+# support. Each entry must name a form in the dataset whose named stage currently fails (checked by
+# `justified_restrictions`, so a stale annotation fails the ratchet instead of hiding a regression or a fix).
+JUSTIFIED_RESTRICTIONS = {
+    ("jmp.ea.none.index.none", "route_static_discovery"):
+        "ADR 0047 (SEG-021-T025): no Tier-1 cross-product producer; the site executes natively through the "
+        "runtime-owned AOT lowering (SEG-021-T034) or the Tier-2 fallback (SEG-021-T011)",
+    ("jsr.ea.none.index.none", "route_static_discovery"):
+        "ADR 0047 (SEG-021-T025): no Tier-1 cross-product producer; the site executes natively through the "
+        "runtime-owned AOT lowering (SEG-021-T034) or the Tier-2 fallback (SEG-021-T011)",
+}
 VECTORS = {"address_error_vector_3": 3, "illegal_vector_4": 4, "zero_divide_vector_5": 5, "chk_vector_6": 6,
            "trapv_vector_7": 7, "privilege_violation_vector_8": 8}
 # Architectural condition-code expectation transcribed from the Motorola M68000 Family Programmer's Reference
@@ -294,6 +305,20 @@ def exception_row_applicable(form):
     return bool(set(form["exceptions"]) - DEFERRED_EXCEPTIONS) or form["privilege"] != "user"
 
 
+def justified_restrictions(rows):
+    """Resolve JUSTIFIED_RESTRICTIONS against the measured rows; a stale entry raises."""
+    out = []
+    for (form_id, stage), reason in sorted(JUSTIFIED_RESTRICTIONS.items()):
+        if form_id not in rows or stage not in ALL_STAGES:
+            raise ValueError("justified restriction names an unknown form or stage: %s/%s" % (form_id, stage))
+        _form, passes, applicable, _n = rows[form_id]
+        if not applicable[stage] or passes[stage]:
+            raise ValueError("justified restriction is stale (stage passes or is not applicable): %s/%s" % (
+                form_id, stage))
+        out.append({"form": form_id, "stage": stage, "reason": reason})
+    return out
+
+
 def deferred_disposition(forms):
     """Forms affected by a declared deferred disposition (ADR 0043 sections 4/6), split into forms whose listed
     classes are all deferred and mixed forms that also list a modeled Group 1/2 class or privilege."""
@@ -519,6 +544,7 @@ def summarize(data, forms, rows, table, manifest, aspects, arch):
         "decode_over_acceptance_words": dict(sorted(over.items())),
         "architecturally_illegal_words": arch,
         "deferred_disposition": deferred_disposition(forms),
+        "justified_restrictions": justified_restrictions(rows),
         "unsupported_mnemonics": unsupported,
         "form_masks": masks,
     }
@@ -600,6 +626,9 @@ def render_report(result):
               "not require them. Forms listing a deferred class: %d = %d listing only deferred classes (not applicable "
               "to `exception_privilege_modeled`) + %d mixed forms (applicable for their non-deferred classes)." % (
                   ", ".join("`%s`" % c for c in d["classes"]), d["forms"], d["only_deferred_forms"], d["mixed_forms"])]
+    lines += ["", "## Justified restrictions (recorded architecture decisions, not missing support)", ""]
+    lines += ["- `%s` / `%s`: %s" % (j["form"], j["stage"], j["reason"]) for j in result["justified_restrictions"]] \
+        or ["- none"]
     lines += ["", "## Decode over-acceptance (non-legal words the decoder accepts as something other than their "
               "architectural exception)", ""]
     over = result["decode_over_acceptance_words"]

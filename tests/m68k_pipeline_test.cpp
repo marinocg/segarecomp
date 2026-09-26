@@ -6713,6 +6713,41 @@ void t011_jsr_index8_tier2_pushes_return_frame_before_dispatch() {
          "no runtime opcode fetch/decode exists in the JSR (d8,An,Xn) Tier-2 path");
 }
 
+// SEG-021-T025 / ADR 0047: A7/SP as the base of a JSR (d8,An,Xn) Tier-2 site. Unlike pure `(An)`, the
+// (d8,An,Xn) Tier-2 owner has no A7 exclusion (it is a plain runtime register read, not a finite-value proof), so
+// the fact is recorded with reg 7 and the runtime EA is formed from the pre-push A7 (MC68000 order: the EA is
+// calculated before the return address is stacked).
+void t025_jsr_index8_a7_base_tier2_uses_pre_push_a7() {
+  using namespace segarecomp;
+  using namespace t011_index8_tier2_fixture;
+  auto image = jsr_image;
+  image[3] = 0xB7U;  // JSR (4,A7,D0.W)
+  const auto result = analyze_m68k_frontend(
+      make_program(image, jsr_base, {tier2_fixture::make_candidate(jsr_candidate_address)}));
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "the JSR (d8,A7,Xn) Tier-2 fixture reaches a partial program");
+  if (partial == nullptr) return;
+  bool call_fact = false;
+  for (const auto &set : partial->accepted_prefix.unproven_indirect_control_ea_sets)
+    if (set.source_instruction.source.address.value == jsr_address && set.is_call &&
+        set.control_ea.mode == M68kEaMode::address_index8 && set.control_ea.reg == 7U)
+      call_fact = true;
+  expect(call_fact, "JSR (d8,A7,Xn) records the Tier-2 call fact with A7 as its base");
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a')));
+  std::ostringstream suffix;
+  suffix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << jsr_address;
+  const auto function_start = emitted.find("genesis_frontier_stop_" + suffix.str() + "(GenesisRuntime *runtime) {");
+  const auto function_end = emitted.find("\n}\n", function_start);
+  expect(function_start != std::string::npos && function_end != std::string::npos,
+         "the JSR (d8,A7,Xn) Tier-2 frontier stop function is present");
+  if (function_start == std::string::npos || function_end == std::string::npos) return;
+  const auto body = emitted.substr(function_start, function_end - function_start);
+  const auto ea_pos = body.find("(uint32_t)(runtime->a[7] + (int32_t)(int16_t)(uint16_t)runtime->d[0] + (int32_t)(int8_t)4)");
+  const auto push_pos = body.find("runtime->a[7] - UINT32_C(4)");
+  expect(ea_pos != std::string::npos && push_pos != std::string::npos && ea_pos < push_pos,
+         "the A7-based runtime EA is captured before the return-address push");
+}
+
 // SEG-021-T011: `m68k_is_supported_computed_control_ea` (the shared multi-
 // root aggregation supersession predicate) recognizes the `(d8,An,Xn)`
 // control EA shape too, exactly like `pc_index8` and pure `(An)`.
@@ -30718,6 +30753,7 @@ int main(int argc, char **argv) {
   t179_jsr_an_tier2_pushes_return_frame_before_dispatch();
   t011_jmp_index8_tier2_computed_target_inside_emitted_set_dispatches();
   t011_jsr_index8_tier2_pushes_return_frame_before_dispatch();
+  t025_jsr_index8_a7_base_tier2_uses_pre_push_a7();
   t011_is_supported_computed_control_ea_recognizes_index8();
   expect(emit_operation_c4_indexed_pea_source() == 0,
          "PEA (0x10,A0,D1.W) decodes/lifts/emits deterministically through the shared address-index8 runtime EA "

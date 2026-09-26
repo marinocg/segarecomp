@@ -87,6 +87,11 @@ Production generation-time classification mismatches against the partition: 0.
 
 Classes `address_error_vector_3` are declared, fail-closed deferrals, not missing modeling; `exception_privilege_modeled` does not require them. Forms listing a deferred class: 835 = 797 listing only deferred classes (not applicable to `exception_privilege_modeled`) + 38 mixed forms (applicable for their non-deferred classes).
 
+## Justified restrictions (recorded architecture decisions, not missing support)
+
+- `jmp.ea.none.index.none` / `route_static_discovery`: ADR 0047 (SEG-021-T025): no Tier-1 cross-product producer; the site executes natively through the runtime-owned AOT lowering (SEG-021-T034) or the Tier-2 fallback (SEG-021-T011)
+- `jsr.ea.none.index.none` / `route_static_discovery`: ADR 0047 (SEG-021-T025): no Tier-1 cross-product producer; the site executes natively through the runtime-owned AOT lowering (SEG-021-T034) or the Tier-2 fallback (SEG-021-T011)
+
 ## Decode over-acceptance (non-legal words the decoder accepts as something other than their architectural exception)
 
 - none
