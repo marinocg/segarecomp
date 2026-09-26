@@ -367,6 +367,9 @@ add_test(NAME genesis_status_register_privilege_generated_test COMMAND ${Python3
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 # SEG-021-T019 / ADR 0043: TRAP/TRAPV/CHK/ILLEGAL/line-A/line-F/illegal-word exceptions and RTR on the AOT, C4 and
 # whole-program bridge routes.
+# SEG-021-T019 correction: unadmittable software-exception vector slots are not installed, not build errors.
+add_test(NAME genesis_software_exception_vector_rooting_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_software_exception_vector_rooting_test.py $<TARGET_FILE:segarecomp>)
 add_test(NAME genesis_software_exception_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_software_exception_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

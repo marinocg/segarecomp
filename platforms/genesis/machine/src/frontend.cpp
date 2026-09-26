@@ -2922,8 +2922,15 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
     if (const auto resolved_handler = resolve_vector_handler(kSynchronousVectorOffset)) {
       const Address handler = *resolved_handler;
       const M68kProgramAddress handler_address{TargetAddressSpace::m68k_program, handler};
+      // SEG-021-T019 correction: vectors 5 and 8 keep their established fail-closed build rule. A
+      // software-exception slot (4, 6, 7, 10, 11, 32-47) that cannot be admitted, or whose handler discovery
+      // hits a fatal probe failure, is treated as NOT INSTALLED: the build proceeds, nothing is rooted, and
+      // the exception fails closed (`unsupported_software_exception`) only if the program actually raises it.
+      // Programs that never execute TRAP/line-A/line-F routinely leave such slots pointing at RAM or data.
+      const bool established_vector = synchronous_vector == 5U || synchronous_vector == 8U;
       if (const auto issue = environment.admit_target(
               handler_address, M68kDiscoveryTargetRole::synchronous_exception_vector)) {
+        if (!established_vector) continue;
         auto r = rejected(issue->category, program);
         set_source(r, entry);
         return r;
@@ -2934,13 +2941,18 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
       exception_boundary.erase(handler);
       auto discovery = discover_m68k_static_graph(handler_address, limits, environment, exception_boundary,
                                                    continuation_roots);
+      const M68kDiscoveryIssue *fatal_issue = nullptr;
+      if (discovery.primary_issue && is_fatal_probe_failure(*discovery.primary_issue))
+        fatal_issue = &*discovery.primary_issue;
+      for (const auto &issue : discovery.secondary_issues)
+        if (fatal_issue == nullptr && is_fatal_probe_failure(issue)) fatal_issue = &issue;
+      if (fatal_issue != nullptr) {
+        if (!established_vector) continue;
+        return translate_m68k_discovery_issue(program, *fatal_issue);
+      }
       stitch_metrics.stitched_direct_edge_count += discovery.stitched_boundary_edges;
       stitch_metrics.stitched_fallthrough_continuation_edge_count +=
           discovery.stitched_fallthrough_continuation_edges;
-      if (discovery.primary_issue && is_fatal_probe_failure(*discovery.primary_issue))
-        return translate_m68k_discovery_issue(program, *discovery.primary_issue);
-      for (const auto &issue : discovery.secondary_issues)
-        if (is_fatal_probe_failure(issue)) return translate_m68k_discovery_issue(program, issue);
       if (synchronous_vector == 5U) divide_by_zero_handler_entry_value = handler;
       else if (synchronous_vector == 8U) privilege_violation_handler_entry_value = handler;
       else software_exception_handler_entry_values[synchronous_vector] = handler;
