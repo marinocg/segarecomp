@@ -34,7 +34,13 @@ REPORT = ROOT / "docs" / "testing" / "m68k-capability-coverage.md"
 
 SCHEMA = 2
 PROBE_FIELDS = ["decode", "lift", "effects", "ea_footprint", "ccr_declared", "timing", "emit_direct", "emit_routed",
-                "aot", "static", "exception_vector"]
+                "aot", "static", "exception_vector", "word_class"]
+# SEG-021-T019: the probe's `word_class` codes (the production generation-time classification) and, per T001
+# partition class, the code it must report and the vector an architecturally reserved word raises on the MC68000.
+WORD_CLASS_CODES = {0: "legal", 1: "line_a", 2: "line_f", 3: "illegal"}
+PARTITION_EXPECTATION = {"legal_user": ("legal", None), "legal_privileged": ("legal", None),
+                         "line_a_reserved_exception": ("line_a", 10), "line_f_reserved_exception": ("line_f", 11),
+                         "illegal_post_68000_encoding": ("illegal", 4), "illegal_reserved_unassigned": ("illegal", 4)}
 # Ordered stage list (bit position in the per-form mask).
 # Structural stages: what the public pipeline declares/produces. Validated stages: independent evidence.
 PIPELINE_STAGES = ["decode", "lift", "effects", "ea_footprint_declared", "ccr_sr_effect_declared",
@@ -54,6 +60,22 @@ RUNTIME_DIR = ROOT / "platforms" / "genesis" / "runtime"
 EXTENSION_PATTERN = ("every extension word 0x0004 (primary words are exhaustive; extension-word, index, MOVEM-mask, "
                      "displacement and immediate values are NOT); one fixed register/RAM state restored before every word; "
                      "direct route: 1 MiB linear window at 0; runtime-routed route: Genesis work RAM only")
+# SEG-021-T032 / ADR 0043 section 4 (Group 0) and section 6 (trace): exception classes whose project disposition is
+# a declared, fail-closed deferral. They stay listed in the legal-form dataset (a hardware fact) but are not
+# required by `exception_privilege_modeled`; forms listing them are reported in a separate deferred bucket.
+# Bus error (vector 2) and trace (vector 9) are listed by no form, so only address error appears here.
+DEFERRED_EXCEPTIONS = frozenset(["address_error_vector_3"])
+# Explicitly justified restrictions: (form id, stage) gaps that are a recorded architecture decision, not missing
+# support. Each entry must name a form in the dataset whose named stage currently fails (checked by
+# `justified_restrictions`, so a stale annotation fails the ratchet instead of hiding a regression or a fix).
+JUSTIFIED_RESTRICTIONS = {
+    ("jmp.ea.none.index.none", "route_static_discovery"):
+        "ADR 0047 (SEG-021-T025): no Tier-1 cross-product producer; the site executes natively through the "
+        "runtime-owned AOT lowering (SEG-021-T034) or the Tier-2 fallback (SEG-021-T011)",
+    ("jsr.ea.none.index.none", "route_static_discovery"):
+        "ADR 0047 (SEG-021-T025): no Tier-1 cross-product producer; the site executes natively through the "
+        "runtime-owned AOT lowering (SEG-021-T034) or the Tier-2 fallback (SEG-021-T011)",
+}
 VECTORS = {"address_error_vector_3": 3, "illegal_vector_4": 4, "zero_divide_vector_5": 5, "chk_vector_6": 6,
            "trapv_vector_7": 7, "privilege_violation_vector_8": 8}
 # Architectural condition-code expectation transcribed from the Motorola M68000 Family Programmer's Reference
@@ -111,6 +133,10 @@ int main(int argc, char **argv) {
   for (unsigned i = 0; i < sizeof baseline.work_ram; ++i) baseline.work_ram[i] = (uint8_t)((i * 7U + 3U) & 0xFFU);
   for (unsigned r = 0; r < 8U; ++r) { baseline.d[r] = 0x100U + r * 0x10U; baseline.a[r] = UINT32_C(0x00FF0000) + 0x2000U + r * 0x1000U; }
   baseline.sr = 0x271FU; baseline.pc = 0x2000U; baseline.usp = UINT32_C(0x00FF8000);
+  /* SEG-021-T019: every software-exception vector has a build-time handler, so a raise continues at it. */
+  for (unsigned v = 0; v < GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT; ++v) {
+    baseline.software_exception_handler_entry[v] = 0x3000U + v * 4U; baseline.software_exception_handler_present[v] = 1U;
+  }
   for (unsigned c = 0; c < %(n)s; ++c) {
     for (unsigned k = 0; k < *counts[c]; ++k) {
       const unsigned w = words[c][k];
@@ -263,6 +289,8 @@ def needed_vectors(form, word):
     """Exception classes the form can architecturally raise for this concrete primary word."""
     need = set()
     for name in form["exceptions"]:
+        if name in DEFERRED_EXCEPTIONS:
+            continue
         if name == "trap_vector_32_47":
             need.add(32 + (word & 0xF))  # TRAP #n -> vector 32 + n (TRAP is 0x4E40 | n)
         else:
@@ -270,6 +298,42 @@ def needed_vectors(form, word):
     if form["privilege"] != "user":
         need.add(8)
     return need
+
+
+def exception_row_applicable(form):
+    """`exception_privilege_modeled` applies only to forms listing a non-deferred class (or privilege)."""
+    return bool(set(form["exceptions"]) - DEFERRED_EXCEPTIONS) or form["privilege"] != "user"
+
+
+def justified_restrictions(rows):
+    """Resolve JUSTIFIED_RESTRICTIONS against the measured rows; a stale entry raises."""
+    out = []
+    for (form_id, stage), reason in sorted(JUSTIFIED_RESTRICTIONS.items()):
+        if form_id not in rows or stage not in ALL_STAGES:
+            raise ValueError("justified restriction names an unknown form or stage: %s/%s" % (form_id, stage))
+        _form, passes, applicable, _n = rows[form_id]
+        if not applicable[stage] or passes[stage]:
+            raise ValueError("justified restriction is stale (stage passes or is not applicable): %s/%s" % (
+                form_id, stage))
+        out.append({"form": form_id, "stage": stage, "reason": reason})
+    return out
+
+
+def deferred_disposition(forms):
+    """Forms affected by a declared deferred disposition (ADR 0043 sections 4/6), split into forms whose listed
+    classes are all deferred and mixed forms that also list a modeled Group 1/2 class or privilege."""
+    only, mixed = 0, 0
+    for form in forms:
+        if not set(form["exceptions"]) & DEFERRED_EXCEPTIONS:
+            continue
+        if exception_row_applicable(form):
+            mixed += 1
+        else:
+            only += 1
+    return {"classes": sorted(DEFERRED_EXCEPTIONS), "forms": only + mixed, "only_deferred_forms": only,
+            "mixed_forms": mixed,
+            "arithmetic": "forms = only_deferred_forms + mixed_forms; only_deferred forms are not applicable to "
+                          "exception_privilege_modeled, mixed forms remain applicable for their non-deferred classes"}
 
 
 def exception_modeled(need, effect_vector):
@@ -344,7 +408,7 @@ def measure(probe, cc):
     for form in forms:
         ws = list(expand(form))
         ccr_needed, ea_needed = ccr_expected(form), ea_effect_expected(form)
-        exc_needed = bool(form["exceptions"]) or form["privilege"] != "user"
+        exc_needed = exception_row_applicable(form)
         passes = {s: True for s in ALL_STAGES}
         applicable = {s: True for s in ALL_STAGES}
         applicable["ccr_sr_effect_declared"] = applicable["ccr_sr_validated"] = ccr_needed
@@ -377,14 +441,50 @@ def measure(probe, cc):
             passes["ea_side_effect_validated"] &= word in aspects["ea"]
             passes["timing_validated"] &= word in aspects["timing"]
         rows[form["id"]] = (form, passes, applicable, len(ws))
-    return data, forms, rows, table, manifest, aspects
+    # SEG-021-T019: every primary word the T001 partition classifies as architecturally reserved (line 1010,
+    # line 1111, unassigned or post-MC68000) is "architecturally illegal - handled" only when the pipeline selects
+    # it at generation time as an exception-raising form with the architectural vector and carries it through every
+    # stage and route; a word the decoder rejects stays "unsupported" (fail closed); a word decoded to anything else
+    # is a misclassification. The production classification is compared with the partition word by word.
+    partition = data["primary_word_partition"]
+    legend = partition["legend"]
+    illegal = {}
+    mismatches = []
+    for word in range(0x10000):
+        cls = legend[partition["rows"][word >> 8][word & 0xFF]]
+        expected_class, vector = PARTITION_EXPECTATION[cls]
+        f = dict(zip(PROBE_FIELDS, table[word]))
+        if WORD_CLASS_CODES.get(f["word_class"]) != expected_class:
+            mismatches.append(word)
+        if vector is None:
+            continue
+        entry = illegal.setdefault(cls, {"words": 0, "handled": 0, "partially_handled": 0, "unsupported": 0,
+                                         "misclassified": 0})
+        entry["words"] += 1
+        if not f["decode"]:
+            entry["unsupported"] += 1
+            continue
+        if not (f["lift"] and f["effects"] and f["exception_vector"] == vector):
+            entry["misclassified"] += 1
+            continue
+        compiled = bool(f["emit_direct"]) and word not in failed
+        ran = compiled and executed.get(word) == 0 and word not in crashed
+        r_ran = bool(f["emit_routed"]) and word not in rfailed and rexecuted.get(word) == 0 and word not in rcrashed
+        if ran and r_ran and f["aot"] and f["static"] and f["timing"]:
+            entry["handled"] += 1
+        else:
+            entry["partially_handled"] += 1
+    arch = {"by_partition_class": dict(sorted(illegal.items())),
+            "production_classification_mismatches": len(mismatches),
+            "first_mismatches": ["%04X" % w for w in mismatches[:8]]}
+    return data, forms, rows, table, manifest, aspects, arch
 
 
 def pct(n, d):
     return "%d.%02d" % divmod((n * 10000 + d // 2) // d if d else 0, 100)
 
 
-def summarize(data, forms, rows, table, manifest, aspects):
+def summarize(data, forms, rows, table, manifest, aspects, arch):
     def tally(selected):
         out = {}
         for stage in ALL_STAGES:
@@ -409,7 +509,10 @@ def summarize(data, forms, rows, table, manifest, aspects):
     legend = partition["legend"]
     for word in range(0x10000):
         cls = legend[partition["rows"][word >> 8][word & 0xFF]]
-        if cls not in ("legal_user", "legal_privileged") and table[word][0]:
+        # SEG-021-T019: a reserved word selected as its architectural exception is handled, not over-accepted.
+        f = dict(zip(PROBE_FIELDS, table[word]))
+        if cls not in ("legal_user", "legal_privileged") and f["decode"] and \
+                f["exception_vector"] != PARTITION_EXPECTATION[cls][1]:
             over[cls] = over.get(cls, 0) + 1
     unsupported = []
     for mnemonic in sorted(by_mnemonic):
@@ -439,6 +542,9 @@ def summarize(data, forms, rows, table, manifest, aspects):
                        "forms_with_at_least_one_validated_word": dict(sorted(touched.items())),
                        "manifest_sources": manifest["sources"]},
         "decode_over_acceptance_words": dict(sorted(over.items())),
+        "architecturally_illegal_words": arch,
+        "deferred_disposition": deferred_disposition(forms),
+        "justified_restrictions": justified_restrictions(rows),
         "unsupported_mnemonics": unsupported,
         "form_masks": masks,
     }
@@ -449,12 +555,13 @@ STAGE_DEFINITIONS = [
     ("effects", "structural", "`m68k_operation_effect` reports a PC effect."),
     ("ea_footprint_declared", "structural", "the effect owner DECLARES a complete architectural register write footprint. This is a claim, not evidence that auto-update, A7 byte adjustment, aliasing or implicit stack effects are correct (see `ea_side_effect_validated`)."),
     ("ccr_sr_effect_declared", "structural", "applicable to forms the Motorola manual says always modify CCR/SR (`CCR_ALWAYS_MNEMONICS`); passes if the effect owner declares `affects_condition_codes`. It does not check which flags or their values (see `ccr_sr_validated`)."),
-    ("exception_privilege_modeled", "structural", "applicable to forms listing exception/privilege classes; per concrete word (TRAP #n needs vector 32+n) it passes only if the effect contract, which carries one synchronous-exception vector, represents every required class. Forms that can raise several classes remain unsupported."),
+    ("exception_privilege_modeled", "structural", "applicable to forms listing a non-deferred exception class or privilege (declared deferred dispositions -- ADR 0043 section 4 Group 0 address/bus error and section 6 trace -- are not required and are counted in the separate `deferred_disposition` bucket); per concrete word (TRAP #n needs vector 32+n) it passes only if the effect contract, which carries one synchronous-exception vector, represents every required class. Forms that can raise several classes remain unsupported."),
     ("timing_model_present", "structural", "`m68k_instruction_cycles` returns a value (existence of an entry, not correctness; see `timing_validated`)."),
     ("emit / compile / native_exec", "structural (direct route)", "`emit_m68k_operation_c` (linear-memory context) produces C; batched units compile under strict C11 (`-std=c11 -Wall -Wextra -Wno-type-limits -pedantic -Werror`); the function runs to normal completion in one native binary, each word from the identical restored baseline state (a runtime stop code, crash or hang fails the word)."),
     ("route_runtime_routed_admitted / compiles / executes", "structural (runtime-routed route)", "the Genesis runtime-routed lowering emits a non-empty operation body (admitted; an indentation-only body is a declined operation, not an admission); that C compiles under the same strict flags against the real `platforms/genesis/runtime` header (compiles); it runs against the real runtime linked from `runtime.c`, from a restored baseline with work RAM only, and continues at PC rather than stopping (executes). Whole-program C4 preflight facts are not exercised, so absolute-address forms stop at the runtime memory gate under the fixed extension pattern. **These rows measure the raw routed emitter only; they are NOT proof that the C4 preflight classifier (`classify_m68k_c4_gap_shapes`) accepts the form** -- C4 acceptance is proved by the focused C4 admission regressions in `tests/m68k_pipeline_test.cpp` (e.g. `c4_arithmetic_auto_update_admission`)."),
     ("route_immutable_rom_aot", "structural", "`m68k_operation_is_immutable_rom_aot_safe` admits the form."),
     ("route_static_discovery", "structural", "the CPU-owned static discovery walks the form to a clean end."),
+    ("architecturally illegal - handled / unsupported", "structural (non-legal words)", "every primary word the T001 partition classifies as architecturally reserved (line 1010 -> vector 10, line 1111 -> vector 11, unassigned or post-MC68000 -> vector 4) is `handled` when decode selects it at generation time as an exception-raising form whose effect names that vector and it emits, compiles, runs (direct and runtime-routed), is immutable-ROM AOT admitted, has a timing row and walks static discovery; `partially_handled` when it is selected with the right vector but a later stage fails; `unsupported` when decode rejects it (fail closed); `misclassified` when it decodes to anything else. `production_classification_mismatches` compares the production generation-time classification (`m68k_classify_primary_word`) with the partition for all 65,536 words."),
     ("semantic_validated", "validated", "every word has existing pinned-Musashi differential evidence comparing the result state."),
     ("ccr_sr_validated", "validated", "applicable to CCR-modifying forms; every word has existing Musashi evidence that compares SR/CCR."),
     ("ea_side_effect_validated", "validated", "applicable to forms with auto-update/implicit-stack effects; every word has existing Musashi evidence comparing the full D/A register state and memory."),
@@ -504,7 +611,26 @@ def render_report(result):
     for family, tally in result["by_family"].items():
         s = tally["end_to_end_structural"]
         lines.append("| %s | %d | %d | %s%% |" % (family, s["applicable_forms"], s["passing_forms"], s["percent_forms"]))
-    lines += ["", "## Decode over-acceptance (non-legal words the decoder accepts)", ""]
+    lines += ["", "## Architecturally illegal words: handled versus unsupported", "",
+              "| partition class | words | handled | partially handled | unsupported (fail closed) | misclassified |",
+              "| --- | ---: | ---: | ---: | ---: | ---: |"]
+    arch = result["architecturally_illegal_words"]
+    for cls, e in arch["by_partition_class"].items():
+        lines.append("| %s | %d | %d | %d | %d | %d |" % (cls, e["words"], e["handled"], e["partially_handled"],
+                                                         e["unsupported"], e["misclassified"]))
+    lines += ["", "Production generation-time classification mismatches against the partition: %d." %
+              arch["production_classification_mismatches"]]
+    d = result["deferred_disposition"]
+    lines += ["", "## Declared deferred dispositions (ADR 0043 sections 4 and 6)", "",
+              "Classes %s are declared, fail-closed deferrals, not missing modeling; `exception_privilege_modeled` does "
+              "not require them. Forms listing a deferred class: %d = %d listing only deferred classes (not applicable "
+              "to `exception_privilege_modeled`) + %d mixed forms (applicable for their non-deferred classes)." % (
+                  ", ".join("`%s`" % c for c in d["classes"]), d["forms"], d["only_deferred_forms"], d["mixed_forms"])]
+    lines += ["", "## Justified restrictions (recorded architecture decisions, not missing support)", ""]
+    lines += ["- `%s` / `%s`: %s" % (j["form"], j["stage"], j["reason"]) for j in result["justified_restrictions"]] \
+        or ["- none"]
+    lines += ["", "## Decode over-acceptance (non-legal words the decoder accepts as something other than their "
+              "architectural exception)", ""]
     over = result["decode_over_acceptance_words"]
     lines += ["- %s: %d words" % (k, n) for k, n in over.items()] or ["- none"]
     lines += ["", "## Unsupported mnemonics (forms failing the end-to-end structural bar)", "",

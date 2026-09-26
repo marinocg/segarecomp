@@ -218,6 +218,11 @@ DirectInstruction decode(std::span<const std::uint8_t> image, const DirectFlowPr
   case M68kInstructionKind::multiply_unsigned_word:
   case M68kInstructionKind::divide_signed_word:
   case M68kInstructionKind::divide_unsigned_word:
+  case M68kInstructionKind::trap:                   // SEG-021-T019
+  case M68kInstructionKind::trapv:                  // SEG-021-T019
+  case M68kInstructionKind::chk:                    // SEG-021-T019
+  case M68kInstructionKind::rtr:                    // SEG-021-T019
+  case M68kInstructionKind::instruction_exception:  // SEG-021-T019
     // Not part of the DirectFlowKind CFG model (SEG-003); unreachable via
     // decode_m68k_instruction(..., M68kDecodeProfile::direct_flow), which
     // never selects any of these kinds (TST.L is selected only by the
@@ -240,6 +245,11 @@ DirectFlowIrOperation project_direct_operation(const M68kIrOperation &lifted) {
   case M68kIrKind::branch_always_short: result.kind = DirectFlowIrKind::branch_always_short; break;
   case M68kIrKind::return_from_subroutine:
   case M68kIrKind::return_from_exception:
+  case M68kIrKind::trap_exception:                  // SEG-021-T019
+  case M68kIrKind::trap_on_overflow:                // SEG-021-T019
+  case M68kIrKind::check_bounds:                    // SEG-021-T019
+  case M68kIrKind::return_restore_condition_codes:  // SEG-021-T019
+  case M68kIrKind::instruction_exception:           // SEG-021-T019
   case M68kIrKind::write_user_stack_pointer:
   case M68kIrKind::read_user_stack_pointer:
   case M68kIrKind::logical_immediate_to_ccr:

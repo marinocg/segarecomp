@@ -176,6 +176,17 @@ int main(int argc, char **argv) {
     return 1;
   }
   const auto &decoded_instruction = std::get<M68kDecodedInstruction>(decoded);
+  // SEG-021-T019: an architecturally illegal word is selected at generation time as the instruction-word exception
+  // (vector 4/10/11). This single-instruction harness has no exception-entry machine model, so it reports that
+  // decode-stage selection instead of emitting a body.
+  if (decoded_instruction.kind == M68kInstructionKind::instruction_exception) {
+    std::cerr << "{\"category\":\"instruction_exception_vector_" << static_cast<unsigned>(decoded_instruction.exception_vector)
+              << "\",\"stage\":\"decode\",\"unsupported_instruction_form\":false,\"provenance\":{\"source_address\":\""
+              << hex(decoded_instruction.provenance.source.address.value, 6) << "\",\"image_offset\":\""
+              << hex(decoded_instruction.provenance.source.image_offset.value, 2)
+              << "\",\"length\":" << decoded_instruction.provenance.length.value << "},\"effective_address\":null}\n";
+    return 1;
+  }
   const auto lifted = lift_m68k_instruction(decoded_instruction);
 
   GenesisM68kEmissionContext memory{};

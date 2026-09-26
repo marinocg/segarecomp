@@ -114,6 +114,13 @@ enum class M68kIrKind {
   multiply_unsigned_word,
   divide_signed_word,
   divide_unsigned_word,
+  // SEG-021-T019 / ADR 0043 §3, §5: the software-exception family, lifted one-to-one from the decoded kinds of the
+  // same names (`trap`, `trapv`, `chk`, `rtr`, `instruction_exception`); `exception_vector` carries the vector.
+  trap_exception,
+  trap_on_overflow,
+  check_bounds,
+  return_restore_condition_codes,
+  instruction_exception,
 };
 
 struct M68kIrOperation {
@@ -138,6 +145,8 @@ struct M68kIrOperation {
   M68kShiftRotateKind shift_rotate_kind{M68kShiftRotateKind::lsl};
   // SEG-021-T018: see M68kDecodedInstruction::status_operation.
   M68kStatusLogicalOperation status_operation{M68kStatusLogicalOperation::and_op};
+  // SEG-021-T019: see M68kDecodedInstruction::exception_vector.
+  std::uint8_t exception_vector{};
 };
 
 [[nodiscard]] M68kIrOperation lift_m68k_instruction(const M68kDecodedInstruction &instruction);

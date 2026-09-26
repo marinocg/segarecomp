@@ -660,7 +660,8 @@ int main(void) {
   assert(transfer.kind == GENESIS_STOP && transfer.stop.diagnostic_category == GENESIS_DIAG_ODD_EFFECTIVE_ADDRESS);
   assert(memcmp(&runtime, &before, sizeof(runtime)) == 0);
   assert(transfer.stop.provenance.has_access == 1U && transfer.stop.provenance.access_address == UINT32_C(0x00FF0011));
-  assert(transfer.stop.provenance.access_width == GENESIS_ACCESS_LONG && transfer.stop.provenance.access_direction == GENESIS_ACCESS_WRITE);
+  /* SEG-021-T029: memory CLR reads its destination before writing it, so the first (rejected) access is the READ. */
+  assert(transfer.stop.provenance.access_width == GENESIS_ACCESS_LONG && transfer.stop.provenance.access_direction == GENESIS_ACCESS_READ);
 
   /* SEG-007-T105: an address register holding a value with bits set above bit
      23 (0xFFFF0010) drives only 24 external address lines on the MC68000, so
@@ -693,8 +694,9 @@ int main(void) {
   assert(transfer.stop.provenance.has_access == 1U);
   assert(transfer.stop.provenance.access_address == UINT32_C(0x00500000));
   assert((transfer.stop.provenance.access_address & UINT32_C(0xFF000000)) == 0U);
+  /* SEG-021-T029: the destination read precedes the write, so the unmapped stop is the READ. */
   assert(transfer.stop.provenance.access_width == GENESIS_ACCESS_LONG &&
-         transfer.stop.provenance.access_direction == GENESIS_ACCESS_WRITE);
+         transfer.stop.provenance.access_direction == GENESIS_ACCESS_READ);
   return 0;
 }
 '''
@@ -1213,9 +1215,16 @@ def main():
   # 24-bit external-address-bus truncation seam; the route call and the
   # provenance record both consume that single bus-address local (still a
   # genuine runtime routing, not a compile-time fold).
-  assert "const uint32_t m68k_routed_addr_1 = (m68k_ea_waddr_0) & UINT32_C(0x00FFFFFF);" in routed_write_first.stdout
-  assert "genesis_route_access(runtime, m68k_routed_addr_1, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE" in routed_write_first.stdout
-  assert "m68k_route_stop_2.provenance.access_address = m68k_routed_addr_1;" in routed_write_first.stdout
+  # SEG-021-T029: memory CLR now performs the MC68000 destination read (value
+  # discarded) before the write, so the routed READ binds the first ordinals and
+  # the routed WRITE of zero to the same (An) follows it.
+  assert "const uint32_t m68k_routed_addr_1 = (m68k_ea_addr_0) & UINT32_C(0x00FFFFFF);" in routed_write_first.stdout
+  assert "genesis_route_access(runtime, m68k_routed_addr_1, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ" in routed_write_first.stdout
+  assert "const uint32_t m68k_routed_addr_5 = (m68k_ea_waddr_4) & UINT32_C(0x00FFFFFF);" in routed_write_first.stdout
+  assert "genesis_route_access(runtime, m68k_routed_addr_5, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE" in routed_write_first.stdout
+  assert "m68k_route_stop_6.provenance.access_address = m68k_routed_addr_5;" in routed_write_first.stdout
+  assert routed_write_first.stdout.index("GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ") < \
+      routed_write_first.stdout.index("GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE")
   assert "runtime->a[0] -=" not in routed_write_first.stdout and "runtime->a[0] +=" not in routed_write_first.stdout
   # SEG-007-T157 / ADR-0019 Stage B: a dynamic predecrement CLR destination no
   # longer cuts the block. It now lowers through the same deferred-address-
@@ -1244,6 +1253,11 @@ def main():
   assert predecrement.stdout.index(commit) > predecrement.stdout.rindex("genesis_route_access(runtime, ")
   assert predecrement.stdout.index(commit) > predecrement.stdout.rindex("return transfer;", 0, predecrement.stdout.index(commit))
   assert "GENESIS_ACCESS_WRITE" in predecrement.stdout
+  # SEG-021-T029: the memory destination is read (value discarded) before it is written, both inside the
+  # snapshot/commit window: one routed READ, then one routed WRITE, then the commit.
+  window = predecrement.stdout[predecrement.stdout.index("uint32_t m68k_clr_auto_ea = runtime->a[0];"):predecrement.stdout.index(commit)]
+  assert window.count("genesis_route_access(") == 2
+  assert 0 <= window.index("GENESIS_ACCESS_READ, &") < window.index("GENESIS_ACCESS_WRITE, &")
   # CLR's fixed condition-code pattern only reached after the commit above.
   assert predecrement.stdout.index("runtime->sr = (uint16_t)((runtime->sr & UINT16_C(0xFFF0)) | UINT16_C(4));") > \
       predecrement.stdout.index(commit)
@@ -1263,6 +1277,10 @@ def main():
   assert clr_postinc.stdout.index(postinc_commit) > clr_postinc.stdout.rindex("genesis_route_access(runtime, ")
   assert clr_postinc.stdout.index(postinc_commit) > clr_postinc.stdout.rindex("return transfer;", 0, clr_postinc.stdout.index(postinc_commit))
   assert "GENESIS_ACCESS_WRITE" in clr_postinc.stdout
+  # SEG-021-T029: read before write inside the snapshot/commit window (see the predecrement sibling above).
+  window = clr_postinc.stdout[clr_postinc.stdout.index("uint32_t m68k_clr_auto_ea = runtime->a[0];"):clr_postinc.stdout.index(postinc_commit)]
+  assert window.count("genesis_route_access(") == 2
+  assert 0 <= window.index("GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &") < window.index("GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &")
   assert clr_postinc.stdout.index("runtime->sr = (uint16_t)((runtime->sr & UINT16_C(0xFFF0)) | UINT16_C(4));") > \
       clr_postinc.stdout.index(postinc_commit)
   # SEG-021-T011: PEA (A0); RESET -- PEA is now a C4-represented kind for
@@ -2220,8 +2238,12 @@ def main():
     assert ran.returncode == 0, ran.stderr
     generated = subprocess.run([executable, "--emit-general-startup-runtime-c4-ram-byte"], text=True, capture_output=True)
     assert generated.returncode == 0, generated.stderr
+    # SEG-021-T029: the absolute work-RAM CLR.B reads its destination (value
+    # discarded) before writing zero to the same bus address.
     assert "const uint32_t m68k_routed_addr_0 = (UINT32_C(0x00FF0000)) & UINT32_C(0x00FFFFFF);" in generated.stdout
-    assert "genesis_route_access(runtime, m68k_routed_addr_0, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE" in generated.stdout
+    assert "genesis_route_access(runtime, m68k_routed_addr_0, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ" in generated.stdout
+    assert "const uint32_t m68k_routed_addr_3 = (UINT32_C(0x00FF0000)) & UINT32_C(0x00FFFFFF);" in generated.stdout
+    assert "genesis_route_access(runtime, m68k_routed_addr_3, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE" in generated.stdout
     assert "runtime->work_ram" not in generated.stdout
     (path / "generated.c").write_text(generated.stdout)
     (path / "harness.c").write_text(RAM_BYTE_HARNESS)

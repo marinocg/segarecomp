@@ -330,3 +330,34 @@ and every stacked RTE SR in the table keeps T = 0, and the T = 1 stop is proved 
 `tests/genesis_status_register_privilege_generated_test.py` and `tests/m68k_exception_core_ownership_test.py`.
 MOVE SR,<memory> performs the MC68000 read-before-write (as SEG-021-T016 memory Scc does); the pinned Musashi
 core omits the dummy read, which is invisible in the conformance memory model.
+
+## SEG-021-T019: TRAP / TRAPV / CHK / ILLEGAL / RTR rows and architecturally reserved words
+
+Rows exist for every legal form of TRAP #n (all 16 vectors), TRAPV, CHK.W (all 11 data-addressing bound classes; the
+tested Dn bound with `d@9`, the bound with `ea.src`; `chk_pairs` covers in range, equal to the bound, zero, Dn.W
+negative, Dn.W above the bound, a negative bound and garbage upper register bits; the immediate row uses four literal
+bounds with `chk_single`), ILLEGAL and RTR (`sr@sp`/`pc@sp` frame binding, `rtr_frame` pairs with garbage in the
+upper byte of the popped word). SR seeds include supervisor and user states (`exception_state`, `trapv_state` with V
+set and clear), so every row compares the vector number (the k=2 entry), the six-byte frame bytes on the SSP (saved
+SR word at SP, stacked PC long at SP+2), the SSP/USP swap and the post-exception SR against the pinned Musashi core.
+15 legal rows (18,254 vectors) are validated and credited; CHK takes vector 6 in 11,008 of its vectors and continues
+in 7,136, in both modes.
+
+Architecturally reserved words are exercised by three pseudo-form rows that take their primary words from the T001
+partition classes named in the row (`partition_classes`; the tool still holds no legality knowledge):
+`reserved.partition.illegal` (unassigned and post-MC68000 encodings, vector 4, 11,528 words),
+`reserved.partition.line_a` (vector 10, 4,096 words) and `reserved.partition.line_f` (vector 11, 4,088 words),
+supervisor and user state (39,424 vectors), all validated. Pseudo-form rows never credit the legal-form manifest.
+Deviation: `0xF620-0xF627` (`exclude_words`) is the pinned Musashi's CPU-type-unguarded 68040 MOVE16 handler, which
+executes instead of raising vector 11 on the 68000 core (the documented `m68k-word-sweep-disagreements.json` quirk);
+production raises vector 11 for these words as the manual requires.
+
+CHK.W condition codes: Z/V/C are undefined on the MC68000 and N is undefined when no trap is taken. Production matches
+the pinned Musashi core (Z <- Dn.W == 0, V <- 0, C <- 0, N changed only on a trap: set for Dn.W < 0, cleared for
+Dn.W > bound), which agrees with every case the manual defines; `undefined_flags.chk_policy` in the table records it.
+An `(An)+`/`-(An)` bound commits its address-register update before the exception (the saved frame carries the new
+flags).
+
+Timing is not compared. Static rows exist for the retiring paths only (TRAPV V = 0: 4; CHK.W in range: 10 + word EA
+cell; RTR: 20) plus the published 34-cycle rows for TRAP and the instruction-word exceptions; the exception-entry
+charge itself is owned by SEG-021-T022 (ADR 0043 §8) and is not retired today.

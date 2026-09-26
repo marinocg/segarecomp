@@ -64,6 +64,20 @@ if tolerated:
 # The committed human report and snapshot must agree.
 check(REPORT.read_text(encoding="utf-8") == tool.render_report(snapshot), "report does not match snapshot")
 
+# SEG-021-T019: production legality agrees with the independent partition word for word; no reserved word is
+# misclassified or over-accepted; the architecturally-illegal handled counts never drop.
+arch = current["architecturally_illegal_words"]
+check(arch["production_classification_mismatches"] == 0,
+      "production legality disagrees with the T001 partition: %s" % arch["first_mismatches"])
+check(not current["decode_over_acceptance_words"], "decode over-acceptance: %s" % current["decode_over_acceptance_words"])
+for cls, entry in arch["by_partition_class"].items():
+    check(entry["misclassified"] == 0, "%s words misclassified" % cls)
+    before = snapshot.get("architecturally_illegal_words", {}).get("by_partition_class", {}).get(cls)
+    if before is not None:
+        check(entry["handled"] >= before["handled"], "%s handled words dropped" % cls)
+check(current["architecturally_illegal_words"] == snapshot.get("architecturally_illegal_words"),
+      "architecturally-illegal accounting changed without a deliberate snapshot update")
+
 # Validation manifest: words are legal words; batch fixtures' vector words are all listed.
 manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 _, forms = tool.load_forms()

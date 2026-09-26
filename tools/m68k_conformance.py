@@ -83,6 +83,39 @@ def form_words(form: dict) -> list[int]:
     return [w for lo, hi in form["word_ranges"] for w in range(lo, hi + 1)]
 
 
+def partition_words(classes: list[str], exclude: list[list[str]]) -> list[int]:
+    """SEG-021-T019: the primary words the T001 partition assigns to the named NON-legal classes (architecturally
+    reserved words that raise an exception on the MC68000), minus literal excluded ranges. Table data selects the
+    classes; this tool holds no legality knowledge of its own."""
+    data = json.loads(FORMS.read_text(encoding="utf-8"))
+    partition = data["primary_word_partition"]
+    legend = partition["legend"]
+    wanted = set(classes)
+    if wanted & {"legal_user", "legal_privileged"}:
+        raise ValueError("partition rows name architecturally reserved classes only")
+    excluded = {w for lo, hi in exclude for w in range(int(lo, 16), int(hi, 16) + 1)}
+    return [w for w in range(0x10000)
+            if legend[partition["rows"][w >> 8][w & 0xFF]] in wanted and w not in excluded]
+
+
+def row_form(row: dict, forms: dict) -> dict:
+    """The form a row exercises: a T001 legal form, or (SEG-021-T019) an operandless pseudo-form over architecturally
+    reserved partition words. A pseudo-form row never credits the legal-form manifest."""
+    if "form" in row:
+        return forms[row["form"]]
+    words = partition_words(row["partition_classes"], row.get("exclude_words", []))
+    ranges, start = [], None
+    for index, w in enumerate(words):
+        if start is None:
+            start = w
+        if index + 1 == len(words) or words[index + 1] != w + 1:
+            ranges.append([start, w])
+            start = None
+    return {"id": row["id"], "word_ranges": ranges, "size": "none", "src": "none", "dst": "none", "mnemonic": "",
+            "exceptions": [], "privilege": "user", "auto_update": "none", "family": "architecturally_reserved",
+            "pseudo": True}
+
+
 def base_d(i: int) -> int:
     return (0x9E3779B1 * (i + 1)) & 0xFFFFFFFF
 
@@ -241,11 +274,11 @@ def expand_row(row: dict, table: dict, forms: dict) -> list[dict]:
 
     Each tested encoding is the T001 primary word plus one literal extension suffix of ``row["ext"]`` (default:
     one empty suffix), so a row describes COMPLETE instructions. ``bind`` is optional (no-operand rows)."""
-    form = forms[row["form"]]
+    form = row_form(row, forms)
     words = form_words(form)
     full = {int(w, 16) for w in row.get("full_words", [])}
     if not full <= set(words):
-        raise ValueError("row %s: full_words outside form %s" % (row["id"], row["form"]))
+        raise ValueError("row %s: full_words outside form %s" % (row["id"], form["id"]))
     suffixes = [bytes.fromhex(x) for x in row.get("ext", [""])]
     bind = row.get("bind", {})
     if set(bind) - {"x", "y"}:
@@ -285,6 +318,8 @@ def vector_line(v: dict) -> str:
 def manifest_credit(row: dict, form: dict, table: dict) -> dict[str, bool]:
     """Aspects a row may credit in the T002 manifest, from what the vectors actually vary and compare."""
     import m68k_capability_coverage as cov
+    if form.get("pseudo"):
+        return {"semantic": False, "ccr": False, "ea": False}
     profiles = {row["profile"], row["full_profile"]} if "full_profile" in row else {row["profile"]}
     srs = {sr for p in profiles for sr in table["profiles"][p]["sr"]}
     return {"semantic": True, "ccr": cov.ccr_expected(form) and len(srs) >= 2, "ea": cov.ea_effect_expected(form)}
@@ -404,7 +439,7 @@ def run(table: dict, forms: dict, emitter: pathlib.Path, cc: str, checkout: path
     oracle = run_oracle(vectors, checkout, cc, work) if checkout is not None else None
     report_rows = []
     for row in selected:
-        form = forms[row["form"]]
+        form = row_form(row, forms)
         mine = [v for v in vectors if v["row"] == row["id"]]
         outcomes: dict[int, set] = {}
         first = None
@@ -433,7 +468,8 @@ def run(table: dict, forms: dict, emitter: pathlib.Path, cc: str, checkout: path
         words = form_words(form)
         credit = manifest_credit(row, form, table)
         passing = [w for w in words if by_word.get(w) == "pass"]
-        report_rows.append({"row": row["id"], "form": row["form"], "vectors": len(mine), "words": len(words),
+        report_rows.append({"row": row["id"], "form": row.get("form", "partition:" + ",".join(row.get("partition_classes", []))),
+                            "vectors": len(mine), "words": len(words),
                             "passing_words": len(passing), "counts": counts,
                             "status": "unsupported" if counts["unsupported"] else (
                                 "diverged" if counts["diverged"] else ("validated" if oracle is not None else "self_consistent")),
@@ -459,7 +495,7 @@ def declared_words(table: dict, forms: dict) -> dict[str, set[int]]:
     """Words the TABLE claims (static, no oracle): what the committed manifest must contain for this source."""
     aspects: dict[str, set[int]] = {"semantic": set(), "ccr": set(), "ea": set()}
     for row in table["rows"]:
-        form = forms[row["form"]]
+        form = row_form(row, forms)
         for aspect, allowed in manifest_credit(row, form, table).items():
             if allowed:
                 aspects[aspect] |= set(form_words(form))

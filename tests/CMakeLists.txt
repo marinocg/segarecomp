@@ -190,6 +190,16 @@ add_executable(genesis_live_frame_tests genesis_live_frame_test.cpp)
 target_link_libraries(genesis_live_frame_tests PRIVATE segarecomp::runtime_genesis)
 segarecomp_enable_warnings(genesis_live_frame_tests)
 add_test(NAME genesis_live_frame_tests COMMAND genesis_live_frame_tests)
+# SEG-021-T031: headless bounded live-frame capture core (host tool; not linked by runtime_genesis).
+add_executable(genesis_frame_capture_tests genesis_frame_capture_test.cpp
+  ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/frame_capture.c)
+target_include_directories(genesis_frame_capture_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer)
+target_link_libraries(genesis_frame_capture_tests PRIVATE segarecomp::runtime_genesis)
+target_compile_features(genesis_frame_capture_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_frame_capture_tests)
+add_test(NAME genesis_frame_capture_tests COMMAND genesis_frame_capture_tests)
+add_test(NAME genesis_frame_capture_bridge_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_frame_capture_bridge_test.py ${PROJECT_SOURCE_DIR})
 # SEG-007-T254: optional viewer core; deliberately not linked by runtime_genesis.
 add_executable(genesis_viewer_tests genesis_viewer_test.cpp ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/viewer.c)
 target_include_directories(genesis_viewer_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer)
@@ -346,10 +356,22 @@ add_test(NAME genesis_immutable_rom_aot_bcd_generated_test COMMAND ${Python3_EXE
 add_test(NAME genesis_immutable_rom_aot_exg_movep_scc_tas_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_exg_movep_scc_tas_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-021-T029: memory CLR reads its destination before writing zero (AOT and C4 routes, failure ordering).
+add_test(NAME genesis_clr_read_before_write_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_clr_read_before_write_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 # SEG-021-T018 / ADR 0043: supervisor/user model, privilege violation and the SR/CCR/USP family on the AOT, C4 and
 # whole-program bridge routes.
 add_test(NAME genesis_status_register_privilege_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_status_register_privilege_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-021-T019 / ADR 0043: TRAP/TRAPV/CHK/ILLEGAL/line-A/line-F/illegal-word exceptions and RTR on the AOT, C4 and
+# whole-program bridge routes.
+# SEG-021-T019 correction: unadmittable software-exception vector slots are not installed, not build errors.
+add_test(NAME genesis_software_exception_vector_rooting_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_software_exception_vector_rooting_test.py $<TARGET_FILE:segarecomp>)
+add_test(NAME genesis_software_exception_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_software_exception_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_immutable_rom_aot_movem_link_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_movem_link_generated_test.py
@@ -359,6 +381,14 @@ add_test(NAME genesis_immutable_rom_aot_pea_generated_test COMMAND ${Python3_EXE
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_immutable_rom_aot_jmp_pc_indexed_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_jmp_pc_indexed_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-021-T035: no-hints immutable-ROM AOT DIVS.W/DIVU.W generated-native execution.
+add_test(NAME genesis_immutable_rom_aot_div_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_div_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-021-T034: no-hints immutable-ROM AOT register-relative JMP/JSR (d16(An), (d8,An,Xn), long (d8,PC,Xn)).
+add_test(NAME genesis_immutable_rom_aot_jmp_an_relative_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_jmp_an_relative_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 # SEG-021-T033: no-hints immutable-ROM AOT JMP (An)/JSR (An) generated-native execution.
 add_test(NAME genesis_immutable_rom_aot_jmp_an_indirect_generated_test COMMAND ${Python3_EXECUTABLE}

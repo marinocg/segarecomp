@@ -1217,7 +1217,14 @@ enum class M68kStackEffectKind { none, push_static_continuation, pop_static_retu
 enum class M68kPcEffectKind { none, advance, direct_target, observed_stack_return,
   // SEG-007-T047 / ADR-0020 §9: PC becomes whatever value RTE restores from
   // the exception frame; the observed value itself is never part of this effect.
-  observed_exception_return };
+  // SEG-021-T019: RTR uses the same shape (its CCR/PC frame is popped by the
+  // same M68K-owned frame-return core).
+  observed_exception_return,
+  // SEG-021-T019 / ADR 0043 §3: the instruction always takes the synchronous
+  // exception `exception_vector` with its OWN address stacked (ILLEGAL, line
+  // 1010/1111, every other illegal word): PC becomes the build-time-resolved
+  // handler, or the run stops fail-closed. There is no static successor.
+  exception_entry };
 // The shared MC68000 execution-semantic owner for every already-selected
 // M68kIrOperation kind. Given only the operation, this decides exactly what
 // a selected MC68000 instruction means: which register (if any) is written
@@ -1271,7 +1278,9 @@ struct M68kOperationEffect {
   // SEG-007-T222 / ADR-0037: additive, defaulted-false fields describing
   // that this operation MAY (not always) raise a synchronous CPU exception
   // instead of completing its normal destination write -- set only for
-  // DIVS.W/DIVU.W (`exception_vector = 5`). Every existing consumer of this
+  // DIVS.W/DIVU.W (`exception_vector = 5`; SEG-021-T018 adds vector 8 for the
+  // privileged forms, SEG-021-T019 vectors 4/6/7/10/11/32-47 for TRAP, TRAPV,
+  // CHK and the instruction-word exceptions). Every existing consumer of this
   // struct ignores these fields safely (they default false/0); the
   // conservative "Dn may be written" shape above (`resolved_destination_ea`/
   // `affects_condition_codes`) is unchanged and remains sound for every

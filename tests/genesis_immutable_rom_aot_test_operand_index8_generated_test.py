@@ -16,10 +16,11 @@ fixture the write_move family's own generated-native tests already reuse
     uncommitted and reports a runtime stop instead of a bogus continuation.
 
 Also proves the excluded PC-relative sibling (`TST.B (4,PC,D0.W)`,
-`M68kEaMode::pc_index8`) never becomes a dispatchable AOT identity at all: it
-is TST's own decode-stage legal-EA mask (never any AOT-admission question)
-that rejects every PC-relative form for TST, so the emitted generated source
-never contains a `genesis_aot_<addr>` body for that instruction's address.
+`M68kEaMode::pc_index8`) is never a TST: TST's decode-stage legal-EA mask
+rejects every PC-relative form, and (SEG-021-T019) the architecturally illegal
+word is selected at generation time as the vector-4 instruction-word
+exception, whose AOT identity raises vector 4 with its own address stacked
+(fail-closed without an installed handler).
 
 Also proves the write-direction symmetric case (SEG-007-T248's seventh
 iteration): `MOVE.B D1,(4,A5,D0.W)` dispatched as an independent immutable-
@@ -64,8 +65,9 @@ int main(void) {
   runtime.d[0] = UINT32_C(0x00000000);
   runtime.work_ram[0x74] = UINT8_C(0x80);
   transfer = genesis_bridge_dispatch(&runtime);
-  assert(transfer.kind == GENESIS_STOP);
-  assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
+  /* SEG-021-T019: the exact successor 0xC4A is now a represented AOT identity (the vector-4 instruction-word
+     exception), so the TST continues there instead of stopping as known-but-unemitted. */
+  assert(transfer.kind == GENESIS_CONTINUE_AT_PC && transfer.next_pc == UINT32_C(0x00000C4A));
   assert(runtime.pc == UINT32_C(0x00000C4A));
   assert(runtime.sr == UINT16_C(0x0008));
   /* Neither the base nor the index register mutates -- address_index8 emits
@@ -81,12 +83,28 @@ int main(void) {
   runtime.d[0] = UINT32_C(0x00000002);
   runtime.work_ram[0x76] = UINT8_C(0x00);
   transfer = genesis_bridge_dispatch(&runtime);
-  assert(transfer.kind == GENESIS_STOP);
-  assert(transfer.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET);
+  /* SEG-021-T019: the exact successor 0xC4A is now a represented AOT identity (the vector-4 instruction-word
+     exception), so the TST continues there instead of stopping as known-but-unemitted. */
+  assert(transfer.kind == GENESIS_CONTINUE_AT_PC && transfer.next_pc == UINT32_C(0x00000C4A));
   assert(runtime.pc == UINT32_C(0x00000C4A));
   assert(runtime.sr == UINT16_C(0x0004));
   assert(runtime.a[6] == UINT32_C(0x00FF0070));
   assert(runtime.d[0] == UINT32_C(0x00000002));
+
+  /* SEG-021-T019: the architecturally illegal PC-relative TST word at 0xC4A raises vector 4 with its own address
+     stacked; without an installed vector-4 handler it stops fail-closed with nothing changed. */
+  runtime = (GenesisRuntime){0};
+  runtime.pc = UINT32_C(0x00000C4A); runtime.sr = UINT16_C(0x2704); runtime.a[7] = UINT32_C(0x00FF0100);
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_STOP && transfer.stop.stop_class == GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION &&
+         transfer.stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION);
+  assert(runtime.pc == UINT32_C(0x00000C4A) && runtime.sr == UINT16_C(0x2704) && runtime.a[7] == UINT32_C(0x00FF0100));
+  runtime.software_exception_handler_entry[4] = UINT32_C(0x00000C00); runtime.software_exception_handler_present[4] = 1U;
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_CONTINUE_AT_PC && transfer.next_pc == UINT32_C(0x00000C00));
+  assert(runtime.a[7] == UINT32_C(0x00FF00FA) && runtime.sr == UINT16_C(0x2704));
+  assert(runtime.work_ram[0xFA] == 0x27 && runtime.work_ram[0xFB] == 0x04 && runtime.work_ram[0xFC] == 0x00 &&
+         runtime.work_ram[0xFD] == 0x00 && runtime.work_ram[0xFE] == 0x0C && runtime.work_ram[0xFF] == 0x4A);
 
   /* Forced routed-read failure: A6 points at an unregistered cartridge
      address, so genesis_route_access fails closed before SR is touched. */
@@ -183,9 +201,10 @@ def main() -> None:
     assert generated.returncode == 0, generated.stderr
     assert not generated.stdout.startswith("/* translation rejected:")
     assert "genesis_aot_00000C46" in generated.stdout
-    # The PC-relative sibling never decodes at all (TST admits no
-    # PC-relative EA), so it never receives a generated AOT body either.
-    assert "genesis_aot_00000C4A" not in generated.stdout
+    # SEG-021-T019: the PC-relative sibling is never a TST (TST admits no PC-relative EA): its architecturally
+    # illegal word is the generation-time vector-4 instruction-word exception, stacked at its own address.
+    assert "genesis_aot_00000C4A" in generated.stdout
+    assert "genesis_raise_software_exception(runtime, UINT32_C(4), UINT32_C(0x00000C4A)" in generated.stdout
     assert "genesis_aot_00000C4E" in generated.stdout
     assert "genesis_aot_00000C52" in generated.stdout
     assert "genesis_route_access(runtime," in generated.stdout

@@ -570,6 +570,11 @@ typedef struct GenesisExecutionHistory {
    (ADR 0043 §3). */
 #define GENESIS_M68K_VECTOR_ZERO_DIVIDE UINT32_C(5)
 #define GENESIS_M68K_VECTOR_PRIVILEGE_VIOLATION UINT32_C(8)
+/* SEG-021-T019 / ADR 0043 §3: the software-exception vectors (4 illegal
+   instruction, 6 CHK, 7 TRAPV, 10 line 1010, 11 line 1111, 32-47 TRAP #0-#15)
+   index `software_exception_handler_entry` directly; the table covers vector
+   numbers 0 .. GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT - 1. */
+#define GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT 48U
 #define GENESIS_M68K_VECTOR_LEVEL6_AUTOVECTOR UINT32_C(30)
 typedef enum GenesisM68kEffectKind {
   GENESIS_M68K_EFFECT_WRITE = 1,
@@ -735,6 +740,14 @@ typedef struct GenesisRuntime {
      GENESIS_DIAG_UNSUPPORTED_PRIVILEGE_VIOLATION_EXCEPTION. */
   uint32_t privilege_violation_handler_entry;
   uint8_t privilege_violation_handler_present;
+  /* SEG-021-T019 / ADR 0043 §3/§7: the build-time-resolved handler entries of
+     the software-exception vectors, indexed by vector number and written by
+     generated `main` exactly like `divide_by_zero_handler_entry`; NEVER fetched
+     or decoded at runtime. Only vectors 4, 6, 7, 10, 11 and 32-47 are ever
+     selected; `software_exception_handler_present[v] == 0` makes a raise of v
+     fail closed via GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION. */
+  uint32_t software_exception_handler_entry[GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT];
+  uint8_t software_exception_handler_present[GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT];
   /* SEG-007-T252 / ADR-0040 correction: a fixed-size, no-dynamic-allocation
      circular buffer of the latest GENESIS_RECENT_PC_HISTORY_CAPACITY (64)
      architectural PC values, for LOCAL DIAGNOSTIC USE ONLY. Convention
@@ -953,6 +966,12 @@ typedef enum GenesisDiagnosticCategory {
      write or RTE commits anything. Paired with
      GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION. */
   GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION = 50,
+  /* SEG-021-T019 / ADR 0043 §3/§5: a software exception (TRAP #n, TRAPV,
+     CHK, ILLEGAL, line 1010/1111 or another illegal operation word) whose
+     delivery cannot be constructed -- no build-resolved handler is installed
+     for its vector or the six-byte frame cannot be placed on the SSP. Paired
+     with GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION; nothing is changed. */
+  GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION = 51,
 } GenesisDiagnosticCategory;
 
 typedef struct GenesisProvenance {
@@ -1320,6 +1339,31 @@ int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc,
  */
 int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc,
                                       uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out);
+
+/*
+ * SEG-021-T019 / ADR 0043 §3/§5: a software exception, called from the
+ * generated lowering of TRAP #n (vector 32 + n), TRAPV with V = 1 (7), CHK.W
+ * out of bounds (6), ILLEGAL and every other architecturally illegal
+ * operation word (4) and line 1010/1111 (10/11). `vector` and `stacked_pc`
+ * are build-time facts of the lowered instruction (the next instruction for
+ * TRAP/TRAPV/CHK, the instruction itself otherwise). The frame goes on the SSP
+ * through the M68K-owned exception core. Fails closed (returns 0, `*stop_out`
+ * set, nothing changed) for a vector outside that set, an uninstalled handler
+ * or a frame that cannot be constructed; on success returns 1 and writes the
+ * handler entry to `*handler_pc_out`. Performs no target-opcode fetch/decode.
+ */
+int genesis_raise_software_exception(GenesisRuntime *runtime, uint32_t vector, uint32_t stacked_pc,
+                                     uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out);
+
+/*
+ * SEG-021-T019 / ADR 0043 §5: RTR (unprivileged) through the M68K-owned
+ * frame-return core: reads the CCR word at the active SP and the PC long at
+ * SP+2, then commits CCR (X/N/Z/V/C only), PC and SP += 6 together. A failed
+ * routed read commits nothing (returns 0, `*stop_out` set); on success
+ * returns 1 and writes the restored PC to `*restored_pc_out`.
+ */
+int genesis_return_restore_condition_codes(GenesisRuntime *runtime, uint32_t *restored_pc_out,
+                                           GenesisRuntimeStop *stop_out);
 
 /* Returns 1 only after the contract's checkpoint observation condition holds.
  * It is a pure snapshot: caller-owned identity/transaction data is copied,

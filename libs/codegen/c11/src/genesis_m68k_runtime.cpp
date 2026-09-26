@@ -240,6 +240,33 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
     return out.str();
   }
 
+  std::string software_exception(const M68kMemoryEmissionContext &ctx, std::uint32_t vector,
+                                 std::uint32_t stacked_pc) const override {
+    std::ostringstream out;
+    out << "{ uint32_t m68k_exception_handler_pc = UINT32_C(0); GenesisRuntimeStop m68k_exception_stop = {0}; "
+        << "if (genesis_raise_software_exception(" << ctx.runtime_object << ", UINT32_C(" << vector << "), UINT32_C(0x"
+        << hex(stacked_pc, 8) << "), &m68k_exception_handler_pc, &m68k_exception_stop) == 1) { "
+        << "GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_CONTINUE_AT_PC; "
+        << "transfer.next_pc = m68k_exception_handler_pc; return transfer; } "
+        << "m68k_exception_stop.provenance.has_instruction_provenance = 1U; m68k_exception_stop.provenance.instruction = *"
+        << ctx.runtime_source << "; " << ctx.runtime_provenance_helper << "(&m68k_exception_stop, "
+        << ctx.runtime_source << "); "
+        << "{ GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop = m68k_exception_stop; "
+           "return transfer; } }";
+    return out.str();
+  }
+
+  std::string condition_code_return(const M68kMemoryEmissionContext &ctx) const override {
+    std::ostringstream out;
+    out << "{ uint32_t m68k_rtr_pc = UINT32_C(0); GenesisRuntimeStop m68k_rtr_stop = {0}; "
+        << "if (genesis_return_restore_condition_codes(" << ctx.runtime_object << ", &m68k_rtr_pc, &m68k_rtr_stop) != 1) { "
+        << "m68k_rtr_stop.provenance.has_instruction_provenance = 1U; m68k_rtr_stop.provenance.instruction = *"
+        << ctx.runtime_source << "; " << ctx.runtime_provenance_helper << "(&m68k_rtr_stop, " << ctx.runtime_source
+        << "); { GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop = m68k_rtr_stop; "
+           "return transfer; } } ";
+    return out.str();
+  }
+
   std::string trace_deferred_stop(const M68kMemoryEmissionContext &ctx) const override {
     std::ostringstream out;
     out << "{ GenesisRuntimeStop m68k_trace_stop = {0}; m68k_trace_stop.stop_class = GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION; "

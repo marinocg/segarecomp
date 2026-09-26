@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -390,6 +391,11 @@ struct FrontendAnalysis { M68kFrontendProfile profile{M68kFrontendProfile::direc
   // violation) handler entry (vector-table offset 0x20), resolved, rooted and
   // retained by exactly the same rule as `divide_by_zero_handler_entry`.
   std::optional<M68kProgramAddress> privilege_violation_handler_entry;
+  // SEG-021-T019 / ADR 0043 §3, §7: the build-time-resolved handler entries of the software-exception vectors
+  // (4 illegal instruction, 6 CHK, 7 TRAPV, 10 line 1010, 11 line 1111, 32-47 TRAP #0-#15), keyed by vector
+  // number; each is resolved from the immutable vector table, rooted and retained by exactly the vector-5/8 rule
+  // (a zero slot installs nothing; a raise of an uninstalled vector stops fail-closed at runtime).
+  std::map<std::uint8_t, M68kProgramAddress> software_exception_handler_entries;
   // SEG-007-T174 / ADR-0024: every `FrontendProgram::external_code_entry_
   // candidate` address that discovery actually admitted as a block entry
   // (i.e. every candidate that survived its own independent walk), in the
@@ -659,14 +665,21 @@ inline bool is_semantic_partition_boundary_address(const FrontendAnalysis &analy
 // admitted: the SEG-007-T178 A7 exclusion belongs to the Tier-1 finite-value
 // domain, which this runtime-membership owner never consults, and the shared
 // branch reads the EA before a JSR's continuation push (MC68000 order).
-// `d16(An)` and `(d8,An,Xn)` have no lowering in that shared branch and stay
-// excluded.
+// SEG-021-T034 closes the family: `d16(An)`, `(d8,An,Xn)` and the
+// long/address-register index variants of `(d8,PC,Xn)` now lower in that
+// shared branch via the existing `m68k_emit_runtime_ea_address` helper.
 inline bool m68k_operation_is_runtime_owned_indirect_jump(const M68kIrOperation &operation) {
   if (operation.kind != M68kIrKind::jump_general && operation.kind != M68kIrKind::call_general) return false;
   const auto &ea = operation.source_ea;
   if (ea.mode == M68kEaMode::address_indirect)
     return ea.displacement == 0 && ea.extension_words == 0U;
-  return ea.mode == M68kEaMode::pc_index8 && !ea.index_is_address && !ea.index_is_long;
+  // SEG-021-T034: exactly the shapes the shared branch now also lowers
+  // through `m68k_emit_runtime_ea_address`: d16(An), (d8,An,Xn) and every
+  // (d8,PC,Xn) index bank/size. Remaining control EAs are statically
+  // foldable (abs.W/abs.L/d16(PC)), so the whole legal JMP/JSR control-EA
+  // family is admitted.
+  return ea.mode == M68kEaMode::pc_index8 || ea.mode == M68kEaMode::address_disp16 ||
+         ea.mode == M68kEaMode::address_index8;
 }
 
 inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &operation,
@@ -862,7 +875,7 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // now reuses that exact existing ADR-0009 membership machinery via
     // `m68k_operation_is_runtime_owned_indirect_jump` above -- see that
     // predicate's own doc comment. SEG-021-T033: pure `(An)` now reuses the
-    // same owner through that predicate; `d16(An)` remains excluded.
+    // same owner through that predicate; SEG-021-T034 adds d16(An)/(d8,An,Xn).
     return m68k_is_statically_foldable_control_ea(operation.source_ea) ||
            m68k_operation_is_runtime_owned_indirect_jump(operation);
   case M68kIrKind::call_general:
@@ -932,28 +945,31 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     return m68k_instruction_cycles(operation).has_value();
   case M68kIrKind::divide_signed_word:
   case M68kIrKind::divide_unsigned_word:
-    // SEG-021-T010 correction (bounded experiment, reverted): the "no live runtime object"
-    // rationale this comment previously carried was WRONG -- `emit_immutable_rom_aot_body` DOES
-    // configure `runtime_routing = true` / `runtime_object = "runtime"` for every isolated AOT
-    // candidate, identically to an ordinary routed block, and DIVS.W/DIVU.W's own
-    // `emit_runtime(...).divide_by_zero(...)` (ADR-0037) emits through that exact shared plumbing
-    // with no AOT-specific special-casing. Temporarily admitting DIVS/DIVU here (returning `true`)
-    // and exercising an isolated, CFG-unreachable synthetic AOT candidate proved the REAL blocker
-    // is elsewhere: `validated_immutable_rom_aot_entries` (frontend.cpp) additionally requires
-    // `m68k_operation_has_complete_c_emission` (libs/codegen/c11/src/m68k.cpp) to pass, and that
-    // shared, family-independent completeness probe deliberately constructs a NON-routed
-    // (`runtime_routing = false`, no `runtime_emitter`) `M68kMemoryEmissionContext` for every IR
-    // kind, by design proving a kind's AOT candidacy needs no live runtime plumbing at the
-    // completeness-check stage itself. DIVS.W/DIVU.W's C emission body is unconditionally gated
-    // behind `memory->runtime_routing` (needed only for that live divide-by-zero raise), so it is
-    // always empty under that probe regardless of this predicate's own permissiveness -- DIVS/DIVU
-    // can never pass `validated_immutable_rom_aot_entries`, independent of `m68k_operation_is_
-    // immutable_rom_aot_safe`. Making DIVS/DIVU AOT-eligible would require threading the full
-    // runtime-routed emitter/object context into that shared probe -- a change touching every
-    // other AOT-eligible kind's own validation path, not a DIV-local fix, and out of this task's
-    // bounded scope. MULS.W/MULU.W are unaffected: their own emission needs no `runtime_routing`
-    // gate at all (only `memory != nullptr`), so they already pass the same non-routed probe.
-    return false;
+    // SEG-021-T035: admitted. `emit_immutable_rom_aot_body` configures the same runtime-routed
+    // context (`runtime_routing`, `runtime_object`, the Genesis runtime emitter) as an ordinary routed
+    // C4 block, so the existing DIVS.W/DIVU.W lowering -- including the ADR-0037 vector-5 raise and the
+    // SEG-021-T010 deferred auto-update commit -- is used verbatim. Completeness is proven by the
+    // routed-only probe `validated_immutable_rom_aot_entries` applies to exactly these two kinds
+    // (libs/codegen/c11/src/frontend.cpp), leaving the shared non-routed
+    // `m68k_operation_has_complete_c_emission` probe unchanged for every other kind. Timing reuses the
+    // shared static retirement row (exact data-dependent DIV timing is SEG-021-T022).
+    return m68k_instruction_cycles(operation).has_value();
+  case M68kIrKind::trap_exception:
+  case M68kIrKind::trap_on_overflow:
+  case M68kIrKind::check_bounds:
+  case M68kIrKind::instruction_exception:
+    // SEG-021-T019 / ADR 0043 §3, §5: TRAP #n, TRAPV, CHK.W and the instruction-word exceptions lower through the
+    // platform's synchronous-exception raise (the M68K-owned entry core bound by the machine: validated six-byte
+    // frame on the SSP, build-time-resolved handler, fail-closed when no handler is installed) exactly like the
+    // vector-5/vector-8 raises; CHK's bound is read through the shared routed read primitives with the
+    // operation-local deferred commit for (An)+/-(An). No CFG edge, frame, return-target set or memory fact is
+    // needed: the handler is a build-time dispatch root and the stacked continuation is an ordinary PC. The
+    // retiring (not-taken) paths have published static rows.
+    return m68k_instruction_cycles(operation).has_value();
+  case M68kIrKind::return_restore_condition_codes:
+    // SEG-021-T019 / ADR 0043 §5: RTR pops its CCR/PC frame through the same validated atomic frame-return core as
+    // RTE (no privilege check); the restored PC continues through the ordinary dispatcher exactly like RTE's.
+    return true;
   }
   return false;
 }

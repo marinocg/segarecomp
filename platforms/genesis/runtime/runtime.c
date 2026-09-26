@@ -2052,6 +2052,13 @@ static void genesis_m68k_frame_write(void *context, uint32_t address, uint32_t s
     bound->frame_write_failed = 1;
 }
 
+/* SEG-021-T019 / ADR 0043 §3: the software-exception vector set (4, 6, 7, 10,
+   11, 32-47) the table `software_exception_handler_entry` serves. */
+static int genesis_is_software_exception_vector(uint32_t vector) {
+  return vector == 4U || vector == 6U || vector == 7U || vector == 10U || vector == 11U ||
+         (vector >= 32U && vector <= 47U);
+}
+
 /* ADR 0020 §6 / ADR 0037 B / ADR 0043 §7: the Genesis vector table is the
    immutable cartridge image at address 0, resolved at build time; only the
    generated `main`'s compiled-in entries are ever selected here. */
@@ -2072,6 +2079,11 @@ static SegarecompM68kVectorResolution genesis_m68k_resolve_vector(void *context,
     *handler_entry = runtime->irq6_handler_entry;
     return SEGARECOMP_M68K_VECTOR_HANDLER;
   default:
+    /* SEG-021-T019: the software-exception vectors, from the build-time table. */
+    if (genesis_is_software_exception_vector(vector) && runtime->software_exception_handler_present[vector]) {
+      *handler_entry = runtime->software_exception_handler_entry[vector];
+      return SEGARECOMP_M68K_VECTOR_HANDLER;
+    }
     return SEGARECOMP_M68K_VECTOR_NOT_INSTALLED;
   }
 }
@@ -2261,6 +2273,62 @@ int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc
                                              GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION,
                                              GENESIS_DIAG_UNSUPPORTED_PRIVILEGE_VIOLATION_EXCEPTION, handler_pc_out,
                                              stop_out);
+}
+
+/*
+ * SEG-021-T019 / ADR 0043 §3: the software exceptions (TRAP #n, TRAPV, CHK,
+ * ILLEGAL, line 1010/1111 and every other illegal word) share the synchronous
+ * raise; only the build-time vector and stacked PC differ.
+ */
+int genesis_raise_software_exception(GenesisRuntime *runtime, uint32_t vector, uint32_t stacked_pc,
+                                     uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out) {
+  if (!genesis_is_software_exception_vector(vector)) {
+    if (stop_out != 0)
+      *stop_out = genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
+                                      GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY);
+    return 0;
+  }
+  return genesis_raise_synchronous_exception(runtime, vector, stacked_pc, GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION,
+                                             GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION, handler_pc_out, stop_out);
+}
+
+/*
+ * SEG-021-T019 / ADR 0043 §5: RTR through the M68K-owned frame-return core
+ * (validated routed reads, atomic CCR/PC/SP commit, no privilege check and no
+ * exception-return notification: RTR is not an exception return).
+ */
+int genesis_return_restore_condition_codes(GenesisRuntime *runtime, uint32_t *restored_pc_out,
+                                           GenesisRuntimeStop *stop_out) {
+  GenesisM68kExceptionContext context = {0};
+  SegarecompM68kMachineHooks hooks;
+  SegarecompM68kCpuBinding cpu;
+  SegarecompM68kExceptionStatus status;
+  if (runtime == 0 || restored_pc_out == 0 || stop_out == 0) {
+    if (stop_out != 0)
+      *stop_out = genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
+                                      GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY);
+    return 0;
+  }
+  context.runtime = runtime;
+  hooks = genesis_m68k_exception_hooks(&context);
+  cpu = genesis_m68k_cpu_binding(runtime);
+  status = segarecomp_m68k_return_restore_ccr(&hooks, &cpu, restored_pc_out);
+  switch (status) {
+  case SEGARECOMP_M68K_EXCEPTION_OK: return 1;
+  case SEGARECOMP_M68K_EXCEPTION_STACK_INVALID:
+    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_ALIGNMENT);
+    return 0;
+  case SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED:
+    *stop_out = context.routed;
+    return 0;
+  case SEGARECOMP_M68K_EXCEPTION_TRACE_DEFERRED:
+  case SEGARECOMP_M68K_EXCEPTION_VECTOR_UNAVAILABLE:
+  case SEGARECOMP_M68K_EXCEPTION_BAD_BINDING:
+    break;
+  }
+  *stop_out = genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
+                                  GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY);
+  return 0;
 }
 
 /*
@@ -2771,6 +2839,7 @@ static const char *genesis_diagnostic_name(GenesisDiagnosticCategory value) {
   case GENESIS_DIAG_TIER2_COMPUTED_TARGET_NOT_EMITTED: return "tier2_computed_target_not_emitted";
   case GENESIS_DIAG_UNSUPPORTED_PRIVILEGE_VIOLATION_EXCEPTION: return "unsupported_privilege_violation_exception";
   case GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION: return "unsupported_trace_exception";
+  case GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION: return "unsupported_software_exception";
   default: return 0;
   }
 }
@@ -2813,7 +2882,8 @@ static int genesis_valid_stop_pair(GenesisStopClass stop_class,
     return category == GENESIS_DIAG_C4_LOWERING_GAP;
   case GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION:
     return category == GENESIS_DIAG_UNSUPPORTED_PRIVILEGE_VIOLATION_EXCEPTION ||
-           category == GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION;
+           category == GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION ||
+           category == GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION;
   }
   return 0;
 }

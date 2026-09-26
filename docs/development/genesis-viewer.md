@@ -45,3 +45,20 @@ macro and link no viewer or SDL code.
 Fixed map: arrow keys = D-pad, Z = A, X = B, C = C, Return = Start. Escape and window close quit.
 The pad mask is polled once per host slice and injected with `genesis_runtime_set_pad1`; it is host
 input and is not part of device checkpoints or divergence digests. Port 2 always reads released.
+
+## Headless bounded frame capture (SEG-021-T031)
+
+`--capture-frames FIRST:COUNT[:STRIDE]` builds the same unmodified generated program with a headless
+capture hook (`platforms/genesis/viewer/frame_capture*.c`, no SDL) instead of the viewer, runs it once, and
+writes the frames the runtime publishes at ordinals `FIRST, FIRST+STRIDE, ...` (`COUNT <= 64`) to
+`<out-dir>/frames/frame-<ordinal>.ppm` via the runtime's own PPM exporter, plus a PNG copy for inspection.
+Selection is by frame publication ordinal only (no PC, address, or game-state heuristic). The run stops
+as soon as the window is complete; if the dispatch allowance ends or the guest stops first, the bridge
+exits non-zero and reports the shortfall. A `CAPTURE_SUMMARY` line on stderr lists the ordinals, counts,
+and per-frame digests. Captured frames from commercial images are local diagnostics only: keep them under
+an ignored output directory and never commit them.
+
+```sh
+python3 tools/genesis_startup_bridge.py --rom games/<rom> --mode commercial --one-shot \
+  --diagnose-frontier --immutable-rom-aot --capture-frames 40:16:80 --out-dir .cache/capture
+```

@@ -48,6 +48,8 @@ std::vector<Address> return_reachability_successors(
   }
   case M68kInstructionKind::rts:
   case M68kInstructionKind::rte:
+  case M68kInstructionKind::rtr:                    // SEG-021-T019
+  case M68kInstructionKind::instruction_exception:  // SEG-021-T019: no static successor
     break;
   case M68kInstructionKind::jmp:
     if (m68k_is_statically_foldable_control_ea(decoded.source_ea)) {

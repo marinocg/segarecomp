@@ -401,6 +401,20 @@ std::optional<std::uint32_t> m68k_instruction_cycles(const M68kIrOperation &oper
   case M68kIrKind::divide_unsigned_word:
     if (const auto value = ea(operation.source_ea, M68kMemoryAccessWidth::word)) return 140U + *value;
     return std::nullopt;
+  // SEG-021-T019 (MC68000 User's Manual Tables 8-11 and 8-14). RTR is 20 (5/0). TRAP #n and the
+  // instruction-word exceptions (ILLEGAL, line 1010/1111, every other illegal word) are 34 (4/3); these forms ALWAYS
+  // take the exception, whose entry cost is charged by the exception-entry timing owner (ADR 0043 §8, SEG-021-T022),
+  // never by an instruction retirement. TRAPV is 4 (1/0) when V = 0 (the only path that retires; V = 1 takes the
+  // vector-7 entry, 34). CHK.W is 10 (1/0) + the word EA cell when the bound check passes (the only path that
+  // retires; a failed check takes the vector-6 entry, 40 + EA).
+  case M68kIrKind::return_restore_condition_codes: return 20U;
+  case M68kIrKind::trap_exception:
+  case M68kIrKind::instruction_exception:
+    return 34U;
+  case M68kIrKind::trap_on_overflow: return 4U;
+  case M68kIrKind::check_bounds:
+    if (const auto value = ea(operation.source_ea, M68kMemoryAccessWidth::word)) return 10U + *value;
+    return std::nullopt;
   }
   return std::nullopt;
 }

@@ -237,8 +237,9 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
 // must emit strictly after the operation's own access statement. `memory`
 // supplies the already-resolved static-operand fact for an absolute/
 // pc-relative SOURCE read (M68kMemoryEmissionContext::test_operand_access/
-// test_operand_value); this function is never called for a destination-only
-// position (CLR has no source).
+// test_operand_value). SEG-021-T029: memory CLR also calls it for its
+// discarded destination read, supplying the write's own access class for an
+// absolute destination.
 [[nodiscard]] M68kEaCode m68k_emit_ea_read(const M68kEffectiveAddress &ea, M68kMemoryAccessWidth size,
                                            std::string_view data_registers, const M68kMemoryEmissionContext &memory,
                                            std::ostringstream &out, unsigned &temp_ordinal) {
@@ -811,55 +812,77 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
 // status-register form. `memory.user_stack_pointer` names the INACTIVE stack-pointer slot and
 // `address_registers[7]` the active one.
 
-// The privilege guard. Returns the text that must PRECEDE the instruction's own body. Routed: raise vector 8
-// through the platform (the text always returns) and let the body follow. Direct linear-memory route: build
-// the six-byte frame inline in the linear window and take the handler from the window's vector-8 slot (the
-// direct route's flat machine keeps its vector table in that window; no program byte is decoded), then
-// `else` -- the caller wraps its body in braces. `closing` receives the text to append after the body.
-[[nodiscard]] std::string m68k_privilege_guard(const M68kIrOperation &operation, std::string_view status_register,
-                                               const M68kMemoryEmissionContext &memory, std::string &closing) {
-  const auto fault_pc = operation.provenance.source.address.value;
-  std::ostringstream out;
-  out << "if ((" << status_register << " & UINT16_C(0x2000)) == 0U) ";
+// SEG-021-T019 / ADR 0043 §2, §3, §5: one synchronous exception entry -- `vector` with the build-time `stacked_pc`.
+// Routed: the platform's raise through the M68K-owned entry core (a complete statement that always returns: the
+// build-time-resolved handler or a fail-closed stop). Direct linear-memory route: the same rule inline against the
+// window -- the frame goes on the SSP (the active A7 when S = 1, the inactive slot when S = 0), the complete
+// six-byte extent and the vector slot are validated before the first write, then SR word at SSP-6 / PC long at
+// SSP-4, SR <- (saved & 0x271F) | S (T cleared, mask and CCR kept), the USP moves to the inactive slot when the
+// mode changes, and PC <- the handler read from the window's vector slot (the direct route's flat machine keeps its
+// vector table in that window; no program byte is decoded). The direct text falls through with the handler PC set.
+[[nodiscard]] std::string m68k_exception_entry(std::uint32_t vector, std::uint32_t stacked_pc,
+                                               std::string_view status_register,
+                                               const M68kMemoryEmissionContext &memory) {
   if (memory.runtime_routing) {
-    out << emit_runtime(memory).privilege_violation(memory, fault_pc) << "\n";
-    closing.clear();
-    return out.str();
+    if (vector == 8U) return emit_runtime(memory).privilege_violation(memory, stacked_pc);
+    return emit_runtime(memory).software_exception(memory, vector, stacked_pc);
   }
   const std::string_view program_counter = memory.program_counter.empty() ? "pc" : memory.program_counter;
   const auto begin = memory.linear_memory_begin;
   const auto end = memory.linear_memory_end;
   const auto a7 = std::string(memory.address_registers) + "[7]";
-  constexpr std::uint32_t kVectorSlot = 8U * 4U;
+  const std::uint32_t slot_address = vector * 4U;
+  std::ostringstream out;
   out << "{\n";
-  if (kVectorSlot < begin || end < kVectorSlot + 4U || end - begin < 6U) {
-    out << "return 1;\n";
-  } else {
-    const auto slot = [&](std::uint32_t address) {
-      return std::string(memory.ram_array) + "[UINT32_C(" + std::to_string(address - begin) + ")]";
-    };
-    const auto frame = [&](unsigned index) {
-      return std::string(memory.ram_array) + "[m68k_pv_frame - UINT32_C(0x" + hex(begin, 8) + ") + " +
-             std::to_string(index) + "U]";
-    };
-    out << "const uint32_t m68k_pv_ssp = " << memory.user_stack_pointer << ";\n"
-        << "if ((m68k_pv_ssp & 1U) != 0U || m68k_pv_ssp < UINT32_C(0x" << hex(begin + 6U, 8)
-        << ") || m68k_pv_ssp > UINT32_C(0x" << hex(end, 8) << ")) { return 1; }\n"
-        << "{ const uint32_t m68k_pv_handler = ((uint32_t)" << slot(kVectorSlot) << " << 24U) | ((uint32_t)"
-        << slot(kVectorSlot + 1U) << " << 16U) | ((uint32_t)" << slot(kVectorSlot + 2U) << " << 8U) | (uint32_t)"
-        << slot(kVectorSlot + 3U) << ";\n"
-        << "const uint32_t m68k_pv_frame = m68k_pv_ssp - UINT32_C(6);\n"
-        << "const uint16_t m68k_pv_saved_sr = " << status_register << ";\n"
-        << frame(0U) << " = (uint8_t)(m68k_pv_saved_sr >> 8U); " << frame(1U) << " = (uint8_t)m68k_pv_saved_sr;\n"
-        << frame(2U) << " = UINT8_C(0x" << hex((fault_pc >> 24U) & 0xFFU, 2) << "); " << frame(3U) << " = UINT8_C(0x"
-        << hex((fault_pc >> 16U) & 0xFFU, 2) << "); " << frame(4U) << " = UINT8_C(0x" << hex((fault_pc >> 8U) & 0xFFU, 2)
-        << "); " << frame(5U) << " = UINT8_C(0x" << hex(fault_pc & 0xFFU, 2) << ");\n"
-        << memory.user_stack_pointer << " = " << a7 << ";\n"
-        << a7 << " = m68k_pv_frame;\n"
-        << status_register << " = (uint16_t)((m68k_pv_saved_sr & UINT16_C(0x271F)) | UINT16_C(0x2000));\n"
-        << program_counter << " = m68k_pv_handler; }\n";
+  if (slot_address < begin || end < slot_address + 4U || end - begin < 6U) {
+    out << "return 1;\n}\n";
+    return out.str();
   }
-  out << "} else {\n";
+  const auto slot = [&](std::uint32_t address) {
+    return std::string(memory.ram_array) + "[UINT32_C(" + std::to_string(address - begin) + ")]";
+  };
+  const auto frame = [&](unsigned index) {
+    return std::string(memory.ram_array) + "[m68k_exception_frame - UINT32_C(0x" + hex(begin, 8) + ") + " +
+           std::to_string(index) + "U]";
+  };
+  out << "const uint16_t m68k_exception_saved_sr = " << status_register << ";\n"
+      << "const uint32_t m68k_exception_ssp = (m68k_exception_saved_sr & UINT16_C(0x2000)) != 0U ? " << a7 << " : "
+      << memory.user_stack_pointer << ";\n"
+      << "if ((m68k_exception_ssp & 1U) != 0U || m68k_exception_ssp < UINT32_C(0x" << hex(begin + 6U, 8)
+      << ") || m68k_exception_ssp > UINT32_C(0x" << hex(end, 8) << ")) { return 1; }\n"
+      << "{ const uint32_t m68k_exception_handler = ((uint32_t)" << slot(slot_address) << " << 24U) | ((uint32_t)"
+      << slot(slot_address + 1U) << " << 16U) | ((uint32_t)" << slot(slot_address + 2U) << " << 8U) | (uint32_t)"
+      << slot(slot_address + 3U) << ";\n"
+      << "const uint32_t m68k_exception_frame = m68k_exception_ssp - UINT32_C(6);\n"
+      << frame(0U) << " = (uint8_t)(m68k_exception_saved_sr >> 8U); " << frame(1U)
+      << " = (uint8_t)m68k_exception_saved_sr;\n"
+      << frame(2U) << " = UINT8_C(0x" << hex((stacked_pc >> 24U) & 0xFFU, 2) << "); " << frame(3U) << " = UINT8_C(0x"
+      << hex((stacked_pc >> 16U) & 0xFFU, 2) << "); " << frame(4U) << " = UINT8_C(0x"
+      << hex((stacked_pc >> 8U) & 0xFFU, 2) << "); " << frame(5U) << " = UINT8_C(0x" << hex(stacked_pc & 0xFFU, 2)
+      << ");\n"
+      << "if ((m68k_exception_saved_sr & UINT16_C(0x2000)) == 0U) " << memory.user_stack_pointer << " = " << a7 << ";\n"
+      << a7 << " = m68k_exception_frame;\n"
+      << status_register << " = (uint16_t)((m68k_exception_saved_sr & UINT16_C(0x271F)) | UINT16_C(0x2000));\n"
+      << program_counter << " = m68k_exception_handler; }\n}\n";
+  return out.str();
+}
+
+// The privilege guard. Returns the text that must PRECEDE the instruction's own body. Routed: raise vector 8
+// through the platform (the text always returns) and let the body follow. Direct linear-memory route: the shared
+// inline exception entry above (vector 8, the privileged instruction's own address stacked), then `else` -- the
+// caller wraps its body in braces. `closing` receives the text to append after the body.
+[[nodiscard]] std::string m68k_privilege_guard(const M68kIrOperation &operation, std::string_view status_register,
+                                               const M68kMemoryEmissionContext &memory, std::string &closing) {
+  const auto fault_pc = operation.provenance.source.address.value;
+  std::ostringstream out;
+  out << "if ((" << status_register << " & UINT16_C(0x2000)) == 0U) "
+      << m68k_exception_entry(8U, fault_pc, status_register, memory);
+  if (memory.runtime_routing) {
+    out << "\n";
+    closing.clear();
+    return out.str();
+  }
+  out << "else {\n";
   closing = "}\n";
   return out.str();
 }
@@ -1914,21 +1937,32 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
   }
   case M68kIrKind::write_clr: {
     if (memory != nullptr) {
-      // SEG-007-T157 / ADR-0019 Stage B: an auto-updating `(An)+` / `-(An)`
-      // CLR destination is lowered through the same deferred-address-
-      // register-commit technique already established for the add family
-      // above (docs/architecture/c4-add-family-auto-update-commit-contract.md)
-      // -- snapshot the EA into one local, apply the predecrement/
-      // postincrement adjustment to that local, route the WRITE through the
-      // existing m68k_emit_routed_write boundary, and commit the
-      // architectural An exactly once, strictly after that routed write, in
-      // one statement. A runtime stop reached by the routed write returns
-      // from inside its own generated statement (m68k_emit_routed_write's
-      // own `return transfer;`), textually before the commit and before the
-      // CCR update below, so a failed access never exposes a partial
-      // auto-update or a partial CCR update. `write_clr`'s own CCR
-      // semantics are reused completely unchanged: no new M68kIrKind, no new
-      // CCR formula.
+      // CLR always sets N=0,Z=1,V=0,C=0 and keeps X, regardless of the cleared value (contract, CLR "Condition
+      // Codes"): a fixed pattern, not m68k_move_result_ccr applied to a value.
+      const std::string status(status_register);
+      const std::string clr_ccr = status + " = (uint16_t)((" + status + " & UINT16_C(0xFFF0)) | UINT16_C(4));\n";
+      const auto length = operation.provenance.length.value;
+      if (operation.destination_ea.mode == M68kEaMode::data_register) {
+        // A Dn destination is register-only: no memory access at all.
+        unsigned temp_ordinal = 0U;
+        std::ostringstream write_prelude;
+        const auto write = m68k_emit_ea_write(operation.destination_ea, operation.size, data_registers, *memory,
+                                              "UINT32_C(0)", write_prelude, temp_ordinal);
+        if (write.ok) {
+          output << write_prelude.str() << write.expression << "\n" << clr_ccr << write.postlude
+                 << memory->program_counter << " += UINT32_C(" << length << ");\n";
+        }
+        break;
+      }
+      // SEG-021-T029: a MEMORY destination is read before it is written on the MC68000 (the value is discarded
+      // and the result never depends on it), the exact shape SEG-021-T016 established for memory Scc: one EA
+      // computation, one routed read, one routed write of zero to the same EA, the single deferred address-
+      // register commit strictly after the successful write, then CCR and PC. A stop on the read or the write
+      // returns from inside that access (m68k_emit_routed_read/write's own `return transfer;`), before any
+      // commit, CCR change or PC advance.
+      // SEG-007-T157 / ADR-0019 Stage B: the routed auto-updating `(An)+` / `-(An)` destination keeps the
+      // deferred-address-register-commit technique (docs/architecture/c4-add-family-auto-update-commit-
+      // contract.md): snapshot the EA into one local, adjust it, access, commit once after the write.
       const bool auto_destination = operation.destination_ea.mode == M68kEaMode::address_predec ||
                                     operation.destination_ea.mode == M68kEaMode::address_postinc;
       if (memory->runtime_routing && auto_destination) {
@@ -1943,29 +1977,41 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         body << "uint32_t m68k_clr_auto_ea = " << an_expr << ";\n";
         if (operation.destination_ea.mode == M68kEaMode::address_predec)
           body << "m68k_clr_auto_ea -= UINT32_C(" << step << ");\n";
+        std::string discarded;
+        m68k_emit_routed_read(body, "m68k_clr_auto_ea", operation.size, *memory, discarded, temp_ordinal);
+        body << "(void)" << discarded << ";\n";
         m68k_emit_routed_write(body, "m68k_clr_auto_ea", operation.size, *memory, "UINT32_C(0)", temp_ordinal);
         if (operation.destination_ea.mode == M68kEaMode::address_postinc)
           body << "m68k_clr_auto_ea += UINT32_C(" << step << ");\n";
-        body << an_expr << " = m68k_clr_auto_ea;\n";
-        // Always N=0,Z=1,V=0,C=0, X unaffected -- identical fixed pattern to
-        // the non-auto-update branch below, only reached after the commit.
-        body << status_register << " = (uint16_t)((" << status_register << " & UINT16_C(0xFFF0)) | UINT16_C(4));\n";
-        output << "{\n" << body.str() << memory->program_counter << " += UINT32_C("
-               << operation.provenance.length.value << ");\n}\n";
+        body << an_expr << " = m68k_clr_auto_ea;\n" << clr_ccr;
+        output << "{\n" << body.str() << memory->program_counter << " += UINT32_C(" << length << ");\n}\n";
         break;
       }
+      // An absolute destination's discarded read goes exactly where its write goes: the write's own rule
+      // (m68k_emit_ea_write) routes it through the runtime owner in a routed context and indexes linear memory
+      // otherwise, so the read uses that same access class -- never a folded constant, and never dependent on
+      // whether the caller supplied a source-operand access class.
+      auto access = *memory;
+      if (operation.destination_ea.mode == M68kEaMode::absolute_word ||
+          operation.destination_ea.mode == M68kEaMode::absolute_long)
+        access.test_operand_access =
+            memory->runtime_routing ? M68kOperandAccess::runtime_routed : M68kOperandAccess::linear_memory;
       unsigned temp_ordinal = 0U;
-      std::ostringstream write_prelude;
-      const auto write = m68k_emit_ea_write(operation.destination_ea, operation.size, data_registers, *memory,
-                                            "UINT32_C(0)", write_prelude, temp_ordinal);
-      if (write.ok) {
-        output << write_prelude.str() << write.expression << "\n";
-        // Always N=0,Z=1,V=0,C=0, X unaffected -- regardless of the cleared
-        // value (contract, CLR "Condition Codes"): a fixed pattern, not
-        // m68k_move_result_ccr applied to a value.
-        output << status_register << " = (uint16_t)((" << status_register << " & UINT16_C(0xFFF0)) | UINT16_C(4));\n";
-        output << write.postlude;
-        output << memory->program_counter << " += UINT32_C(" << operation.provenance.length.value << ");\n";
+      std::ostringstream prelude;
+      const auto discarded = m68k_emit_ea_read(operation.destination_ea, operation.size, data_registers, access,
+                                               prelude, temp_ordinal);
+      if (discarded.ok) {
+        auto write_ea = operation.destination_ea;
+        if (auto_destination)
+          write_ea.mode = M68kEaMode::address_indirect;  // the read already applied the single pointer mutation
+        std::ostringstream write_prelude;
+        const auto write = m68k_emit_ea_write(write_ea, operation.size, data_registers, access, "UINT32_C(0)",
+                                              write_prelude, temp_ordinal);
+        if (write.ok) {
+          output << "{\n" << prelude.str() << "(void)(" << discarded.expression << ");\n" << write_prelude.str()
+                 << write.expression << "\n" << write.postlude << discarded.postlude << clr_ccr
+                 << memory->program_counter << " += UINT32_C(" << length << ");\n}\n";
+        }
       }
     }
     break;
@@ -3266,13 +3312,27 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     // no displacement/index/extension word) joins `pc_index8` as a lowered
     // computed control EA -- the runtime EA is the architectural `An` value
     // itself, with no base/index arithmetic.
+    //
+    // SEG-021-T034: the remaining register-relative control EAs -- `d16(An)`,
+    // `(d8,An,Xn)` (every index bank/size) and the address-register/long
+    // index variants of `(d8,PC,Xn)` -- join the same branch. Their runtime
+    // EA comes from the existing shared `m68k_emit_runtime_ea_address`
+    // helper (none of these modes has an auto-update prelude/postlude), so
+    // no EA formula is duplicated; membership, JSR push and the fail-closed
+    // stop are the unchanged code below. The two earlier shapes keep their
+    // original, byte-identical EA text.
     const bool is_an_indirect_control = operation.source_ea.mode == M68kEaMode::address_indirect &&
                                         operation.source_ea.displacement == 0 &&
                                         operation.source_ea.extension_words == 0U;
+    const bool is_word_dn_pc_index = operation.source_ea.mode == M68kEaMode::pc_index8 &&
+                                     !operation.source_ea.index_is_address && !operation.source_ea.index_is_long;
+    const bool is_helper_ea_control = operation.source_ea.mode == M68kEaMode::address_disp16 ||
+                                      operation.source_ea.mode == M68kEaMode::address_index8 ||
+                                      (operation.source_ea.mode == M68kEaMode::pc_index8 && !is_word_dn_pc_index);
     if ((operation.kind == M68kIrKind::call_general || operation.kind == M68kIrKind::jump_general) &&
-        (operation.source_ea.mode == M68kEaMode::pc_index8 || is_an_indirect_control)) {
+        (is_word_dn_pc_index || is_an_indirect_control || is_helper_ea_control)) {
       const auto &ea = operation.source_ea;
-      if (memory == nullptr || !memory->runtime_routing || ea.index_is_address || ea.index_is_long ||
+      if (memory == nullptr || !memory->runtime_routing ||
           (memory->compiled_entry_lookup_symbol.empty() && memory->indirect_candidate_targets.empty())) {
         break;
       }
@@ -3292,7 +3352,12 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
       if (is_an_indirect_control)
         output << "{ const uint32_t m68k_indirect_ea = " << memory->address_registers << "["
                << static_cast<unsigned>(ea.reg) << "];\n";
-      else
+      else if (is_helper_ea_control) {
+        const auto runtime = m68k_emit_runtime_ea_address(ea, M68kMemoryAccessWidth::long_word,
+                                                          memory->address_registers, data_registers);
+        if (runtime.address_expr.empty() || !runtime.prelude.empty() || !runtime.postlude.empty()) break;
+        output << "{ const uint32_t m68k_indirect_ea = " << runtime.address_expr << ";\n";
+      } else
         output << "{ const uint32_t m68k_indirect_ea = UINT32_C(0x" << hex(base, 8)
              << ") + (uint32_t)(int32_t)(int16_t)(uint16_t)(" << index_expr << ");\n";
       if (shared_lookup)
@@ -3345,6 +3410,87 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         }
         output << "pc = UINT32_C(0x" << hex(effect.direct_target, 8) << ");\n";
       }
+    }
+    break;
+  }
+  case M68kIrKind::trap_exception:
+  case M68kIrKind::trap_on_overflow:
+  case M68kIrKind::instruction_exception: {
+    // SEG-021-T019 / ADR 0043 §3: TRAP #n always raises vector 32 + n and TRAPV raises vector 7 when V = 1, both with
+    // the NEXT instruction stacked; ILLEGAL, line 1010/1111 and every other illegal word raise vector 4/10/11 with
+    // THIS instruction stacked. Nothing else of the instruction executes (TRAPV with V = 0 only advances the PC).
+    // The vector is a build-time fact of the decoded word; no opcode is inspected at runtime.
+    if (memory != nullptr && !memory->user_stack_pointer.empty() && operation.exception_vector != 0U) {
+      const std::string_view program_counter = memory->program_counter.empty() ? "pc" : memory->program_counter;
+      const auto address = operation.provenance.source.address.value;
+      const auto next_pc = address + operation.provenance.length.value;
+      const bool current = operation.kind == M68kIrKind::instruction_exception;
+      const auto entry = m68k_exception_entry(operation.exception_vector, current ? address : next_pc,
+                                              status_register, *memory);
+      if (operation.kind == M68kIrKind::trap_on_overflow)
+        output << "if ((" << status_register << " & UINT16_C(0x0002)) != 0U) " << entry << "else { " << program_counter
+               << " += UINT32_C(" << operation.provenance.length.value << "); }\n";
+      else
+        output << entry;
+    }
+    break;
+  }
+  case M68kIrKind::check_bounds: {
+    // SEG-021-T019 / ADR 0043 §3: CHK.W <ea>,Dn. The word bound is read first (an (An)+/-(An) bound commits its
+    // address-register update before any exception, as on the MC68000; the routed read uses the operation-local
+    // deferred commit, so a failed read changes nothing). Condition codes follow the pinned Musashi core, which is
+    // consistent with the Motorola manual where it is defined: Z <- (Dn.W == 0), V <- 0, C <- 0 (all three are
+    // "undefined" in the manual), X unchanged; N is changed only when the exception is taken -- set when
+    // Dn.W < 0, cleared when Dn.W > bound (the manual's defined cases). Out of range raises vector 6 with the NEXT
+    // instruction stacked (the saved SR carries the new flags); in range only advances the PC.
+    if (memory != nullptr && !memory->user_stack_pointer.empty() &&
+        operation.destination_ea.mode == M68kEaMode::data_register && operation.destination_ea.reg < 8U) {
+      std::ostringstream body;
+      const auto source = m68k_emit_status_source(operation, data_registers, *memory, body);
+      if (source.ok) {
+        const std::string_view program_counter = memory->program_counter.empty() ? "pc" : memory->program_counter;
+        const auto next_pc = operation.provenance.source.address.value + operation.provenance.length.value;
+        const auto dn = std::string(data_registers) + "[" +
+                        std::to_string(static_cast<unsigned>(operation.destination_ea.reg)) + "]";
+        output << "{\n" << body.str()
+               << "const int32_t m68k_chk_bound = (int32_t)(int16_t)(uint16_t)(" << source.value << ");\n"
+               << source.commit
+               << "{ const int32_t m68k_chk_value = (int32_t)(int16_t)(uint16_t)(" << dn << ");\n"
+               << status_register << " = (uint16_t)((" << status_register
+               << " & UINT16_C(0xFFF8)) | (m68k_chk_value == 0 ? UINT16_C(0x0004) : UINT16_C(0)));\n"
+               << "if (m68k_chk_value < 0 || m68k_chk_value > m68k_chk_bound) { " << status_register << " = (uint16_t)(("
+               << status_register << " & UINT16_C(0xFFF7)) | (m68k_chk_value < 0 ? UINT16_C(0x0008) : UINT16_C(0)));\n"
+               << m68k_exception_entry(operation.exception_vector, next_pc, status_register, *memory)
+               << "} else { " << program_counter << " += UINT32_C(" << operation.provenance.length.value
+               << "); } } }\n";
+      }
+    }
+    break;
+  }
+  case M68kIrKind::return_restore_condition_codes: {
+    // SEG-021-T019 / ADR 0043 §5: RTR (unprivileged). The CCR word at SP and the PC long at SP+2 are read, then
+    // committed together: CCR <- read & 0x1F (the system byte is unchanged), PC <- read PC, SP += 6. Routed: the
+    // M68K-owned frame-return core bound by the platform (validated routed reads; a failed read commits nothing);
+    // the restored PC continues through the ordinary dispatcher exactly like RTE's. Direct: the same rule inline.
+    if (memory != nullptr && memory->runtime_routing) {
+      output << emit_runtime(*memory).condition_code_return(*memory) << memory->program_counter
+             << " = m68k_rtr_pc; }\n";
+    } else if (memory != nullptr && !memory->user_stack_pointer.empty()) {
+      const std::string_view program_counter = memory->program_counter.empty() ? "pc" : memory->program_counter;
+      const auto a7 = std::string(memory->address_registers) + "[7]";
+      const auto at = [&](unsigned index) {
+        return "(uint32_t)" + std::string(memory->ram_array) + "[m68k_rtr_sp - UINT32_C(0x" +
+               hex(memory->linear_memory_begin, 8) + ") + " + std::to_string(index) + "U]";
+      };
+      output << "{ const uint32_t m68k_rtr_sp = " << a7 << ";\n"
+             << "if ((m68k_rtr_sp & 1U) != 0U || m68k_rtr_sp < UINT32_C(0x" << hex(memory->linear_memory_begin, 8)
+             << ") || m68k_rtr_sp > UINT32_C(0x" << hex(memory->linear_memory_end, 8) << ") - UINT32_C(6)) { return 1; }\n"
+             << "{ const uint32_t m68k_rtr_ccr = " << at(1U) << " & UINT32_C(0x1F);\n"
+             << "const uint32_t m68k_rtr_pc = (" << at(2U) << " << 24U) | (" << at(3U) << " << 16U) | (" << at(4U)
+             << " << 8U) | " << at(5U) << ";\n"
+             << status_register << " = (uint16_t)((" << status_register << " & UINT16_C(0xFF00)) | m68k_rtr_ccr);\n"
+             << a7 << " = m68k_rtr_sp + UINT32_C(6);\n"
+             << program_counter << " = m68k_rtr_pc; } }\n";
     }
     break;
   }

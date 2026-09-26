@@ -327,3 +327,18 @@ instead.
 - Timing: Table 8-4 EXG 6, Table 8-3 MOVEP 16 (word) / 24 (long), Table 8-6 TAS (Dn 4, memory 10 + EA) and Scc memory rows (8 + EA).
   Scc `Dn` is 4 (false) / 6 (true): condition-dependent, so `m68k_instruction_cycles` records it timing-unsupported and the retirement
   seam supplies the dynamic expression `m68k_scc_true ? 6 : 4` (assigned by the lowerer through `timing_scc_true`).
+
+## SEG-021-T029: CLR memory read-before-write
+
+- A memory CLR destination (byte/word/long) is read before it is written on the MC68000, so `write_clr` now has the memory-Scc
+  shape above: one EA computation, one routed read of the operand width whose value is discarded, one routed write of zero to the
+  same EA, the single operation-local deferred commit strictly after a successful write, then the fixed CCR (N=0, Z=1, V=0, C=0,
+  X kept) and PC. A failed read performs no write and leaves An, CCR and PC unchanged; a failed write after a successful read leaves
+  An, CCR and PC unchanged (a completed device read effect is not rolled back). `Dn` CLR is register-only. The non-routed lowering
+  demotes the write to `(An)` after the read applied the single pointer mutation; an absolute destination's read uses the write's
+  own access rule (runtime-routed in a routed context, linear memory otherwise), never a folded constant.
+- Facts, discovery and effects: memory CLR retains NOT's two-fact shape (`destination_read` plus `destination_write`, both required
+  by the C4 preflight and gap classification for a foldable destination; `Dn` retains none), static discovery resolves the read
+  before the write (a destination whose read is rejected, such as a write-only device register, is a read frontier like TST or
+  memory Scc of the same address), and effect metadata declares the read (`resolved_source_ea`) for memory destinations only.
+- Timing is unchanged: the published Table 8-6 memory rows (8/12 + EA) already include the read.

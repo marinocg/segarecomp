@@ -24,6 +24,7 @@ M68kIrOperation lift_m68k_instruction(const M68kDecodedInstruction &instruction)
   // default (`lsl`) for every kind that does not use it.
   operation.shift_rotate_kind = instruction.shift_rotate_kind;
   operation.status_operation = instruction.status_operation;  // SEG-021-T018
+  operation.exception_vector = instruction.exception_vector;  // SEG-021-T019
   switch (instruction.kind) {
   case M68kInstructionKind::moveq: break;
   case M68kInstructionKind::subq_l_1_d0: operation.kind = M68kIrKind::subtract_quick_long_d0; break;
@@ -128,6 +129,12 @@ M68kIrOperation lift_m68k_instruction(const M68kDecodedInstruction &instruction)
   case M68kInstructionKind::divide_unsigned_word:
     operation.kind = M68kIrKind::divide_unsigned_word;
     break;
+  // SEG-021-T019: the software-exception family.
+  case M68kInstructionKind::trap: operation.kind = M68kIrKind::trap_exception; break;
+  case M68kInstructionKind::trapv: operation.kind = M68kIrKind::trap_on_overflow; break;
+  case M68kInstructionKind::chk: operation.kind = M68kIrKind::check_bounds; break;
+  case M68kInstructionKind::rtr: operation.kind = M68kIrKind::return_restore_condition_codes; break;
+  case M68kInstructionKind::instruction_exception: operation.kind = M68kIrKind::instruction_exception; break;
   }
   return operation;
 }
@@ -136,6 +143,8 @@ bool m68k_ir_is_transfer(const M68kIrOperation &operation) noexcept {
   return operation.kind == M68kIrKind::branch_ne_short || operation.kind == M68kIrKind::branch_always_short ||
           operation.kind == M68kIrKind::return_from_subroutine ||
          operation.kind == M68kIrKind::return_from_exception ||
+         operation.kind == M68kIrKind::return_restore_condition_codes ||  // SEG-021-T019: RTR
+         operation.kind == M68kIrKind::instruction_exception ||           // SEG-021-T019: no static successor
          operation.kind == M68kIrKind::jump_general || operation.kind == M68kIrKind::call_general;
 }
 

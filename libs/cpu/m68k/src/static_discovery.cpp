@@ -263,6 +263,13 @@ std::vector<std::uint8_t> m68k_written_address_registers(const M68kDecodedInstru
   // SEG-021-T018 / ADR 0043 §6: an SR write that changes S swaps the active stack pointer, so A7 is clobbered.
   case M68kInstructionKind::move_to_sr:
   case M68kInstructionKind::logical_immediate_to_sr:
+  // SEG-021-T019: exception entry (TRAP/TRAPV/CHK/instruction-word exceptions) switches to and decrements the SSP;
+  // RTR pops six bytes.
+  case M68kInstructionKind::trap:
+  case M68kInstructionKind::trapv:
+  case M68kInstructionKind::chk:
+  case M68kInstructionKind::rtr:
+  case M68kInstructionKind::instruction_exception:
     registers.push_back(7U);
     break;
   case M68kInstructionKind::exchange_registers:
@@ -810,10 +817,17 @@ std::vector<M68kValueFlowSuccessor> m68k_decode_local_flow_successors(Address ad
     break;
   case M68kInstructionKind::rts:
   case M68kInstructionKind::rte:
+  case M68kInstructionKind::rtr:                    // SEG-021-T019: PC popped from the stack frame
+  case M68kInstructionKind::instruction_exception:  // SEG-021-T019: always the vector; no successor
   case M68kInstructionKind::jmp:
     break;
   case M68kInstructionKind::jsr:
   case M68kInstructionKind::bsr:
+  // SEG-021-T019: TRAP (always) and TRAPV/CHK (conditionally) enter a handler whose RTE resumes at the next
+  // instruction; the handler may change any register, so that continuation carries no register fact (like a call's).
+  case M68kInstructionKind::trap:
+  case M68kInstructionKind::trapv:
+  case M68kInstructionKind::chk:
     out.push_back({next_pc, true, std::nullopt});
     break;
   default:
@@ -1631,7 +1645,9 @@ class M68kStaticGraphWalker {
     } else if (decoded.kind == M68kInstructionKind::tst || decoded.kind == M68kInstructionKind::cmp ||
                 decoded.kind == M68kInstructionKind::cmpi || decoded.kind == M68kInstructionKind::cmpa ||
                 // SEG-021-T018: MOVE <ea>,SR / MOVE <ea>,CCR read one word source.
-                decoded.kind == M68kInstructionKind::move_to_sr || decoded.kind == M68kInstructionKind::move_to_ccr) {
+                decoded.kind == M68kInstructionKind::move_to_sr || decoded.kind == M68kInstructionKind::move_to_ccr ||
+                // SEG-021-T019: CHK.W reads its word bound.
+                decoded.kind == M68kInstructionKind::chk) {
       if (const auto diagnostic = resolve_operand(decoded.source_ea, decoded.size,
                                                     M68kMemoryAccessDirection::read, decoded.provenance))
         return reject_operand(pc_value, decoded, *diagnostic, decoded.source_ea.absolute_address);
@@ -1679,22 +1695,20 @@ class M68kStaticGraphWalker {
                                                       M68kMemoryAccessDirection::write, decoded.provenance))
           return reject_operand(pc_value, decoded, *diagnostic, decoded.destination_ea.absolute_address);
       }
-    } else if (decoded.kind == M68kInstructionKind::clr) {
-      if (const auto diagnostic = resolve_operand(decoded.destination_ea, decoded.size,
-                                                    M68kMemoryAccessDirection::write, decoded.provenance))
-        return reject_operand(pc_value, decoded, *diagnostic, decoded.destination_ea.absolute_address);
-    } else if (decoded.kind == M68kInstructionKind::not_operand || decoded.kind == M68kInstructionKind::negate_word ||
+    } else if (decoded.kind == M68kInstructionKind::clr || decoded.kind == M68kInstructionKind::not_operand ||
+               decoded.kind == M68kInstructionKind::negate_word ||
                decoded.kind == M68kInstructionKind::negate_extended ||
                decoded.kind == M68kInstructionKind::negate_decimal ||
                decoded.kind == M68kInstructionKind::test_and_set ||
                decoded.kind == M68kInstructionKind::set_conditional ||
                decoded.kind == M68kInstructionKind::move_from_sr) {
+      // SEG-021-T029: a memory CLR destination is read (value discarded) before it is written (68000), like
+      // memory Scc; a Dn destination is not statically foldable, so resolve_operand ignores it.
       // SEG-021-T018: a memory MOVE from SR destination is read before it is written (68000), like memory Scc.
       // SEG-021-T016: TAS is a byte one-address RMW like NOT; memory Scc is read before it is written (68000).
       // SEG-021-T014: NEG/NEGX share NOT's one-address read-modify-write operand contract.
-      // SEG-007-T168: NOT is a genuine one-address read-modify-write (unlike
-      // CLR's write-only shape), exactly like shift_rotate's memory form
-      // below.
+      // SEG-007-T168: NOT is a genuine one-address read-modify-write,
+      // exactly like shift_rotate's memory form below.
       if (const auto diagnostic = resolve_operand(decoded.destination_ea, decoded.size,
                                                     M68kMemoryAccessDirection::read, decoded.provenance))
         return reject_operand(pc_value, decoded, *diagnostic, decoded.destination_ea.absolute_address);
@@ -1858,6 +1872,11 @@ class M68kStaticGraphWalker {
       return true;
     }
     case M68kInstructionKind::rte:
+    // SEG-021-T019: RTR (the PC popped from its CCR/PC frame) and the instruction-word exceptions (ILLEGAL,
+    // line 1010/1111, every other illegal word: control always enters the build-time-rooted vector handler with
+    // THIS instruction stacked) have no static successor either.
+    case M68kInstructionKind::rtr:
+    case M68kInstructionKind::instruction_exception:
       // SEG-007-T047 / ADR-0020 §9: RTE terminates the static walk with no
       // successors, exactly like RTS. The restored PC is a generated-runtime
       // fact (the popped exception-frame PC), never a statically-simulated one.
