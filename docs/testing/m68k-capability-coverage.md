@@ -12,34 +12,34 @@ Denominator: 1526 legal forms, 45816 legal primary words. A form passes a stage 
 
 | stage | applicable forms | passing forms | percent | passing words |
 | --- | ---: | ---: | ---: | ---: |
-| decode | 1526 | 1509 | 98.89% | 45371 |
-| lift | 1526 | 1509 | 98.89% | 45371 |
-| effects | 1526 | 1501 | 98.36% | 45321 |
-| ea_footprint_declared | 1526 | 1383 | 90.63% | 40753 |
-| ccr_sr_effect_declared | 1193 | 1179 | 98.83% | 36182 |
-| exception_privilege_modeled | 852 | 11 | 1.29% | 172 |
-| timing_model_present | 1526 | 1378 | 90.30% | 37603 |
-| emit | 1526 | 1479 | 96.92% | 44473 |
-| compile | 1526 | 1479 | 96.92% | 44473 |
-| native_exec | 1526 | 1477 | 96.79% | 44464 |
-| route_runtime_routed_admitted | 1526 | 1501 | 98.36% | 45321 |
-| route_runtime_routed_compiles | 1526 | 1501 | 98.36% | 45321 |
-| route_runtime_routed_executes | 1526 | 1047 | 68.61% | 42956 |
-| route_immutable_rom_aot | 1526 | 1508 | 98.82% | 45363 |
-| route_static_discovery | 1526 | 1481 | 97.05% | 41237 |
+| decode | 1526 | 1524 | 99.87% | 45814 |
+| lift | 1526 | 1524 | 99.87% | 45814 |
+| effects | 1526 | 1516 | 99.34% | 45764 |
+| ea_footprint_declared | 1526 | 1398 | 91.61% | 41196 |
+| ccr_sr_effect_declared | 1193 | 1191 | 99.83% | 36607 |
+| exception_privilege_modeled | 852 | 15 | 1.76% | 246 |
+| timing_model_present | 1526 | 1393 | 91.28% | 38046 |
+| emit | 1526 | 1494 | 97.90% | 44916 |
+| compile | 1526 | 1494 | 97.90% | 44916 |
+| native_exec | 1526 | 1492 | 97.77% | 44907 |
+| route_runtime_routed_admitted | 1526 | 1516 | 99.34% | 45764 |
+| route_runtime_routed_compiles | 1526 | 1516 | 99.34% | 45764 |
+| route_runtime_routed_executes | 1526 | 1058 | 69.33% | 43367 |
+| route_immutable_rom_aot | 1526 | 1523 | 99.80% | 45806 |
+| route_static_discovery | 1526 | 1496 | 98.03% | 41680 |
 
-`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1477 of 1526 forms, 96.79%. It is a structural bar, not a correctness claim.
+`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1492 of 1526 forms, 97.77%. It is a structural bar, not a correctness claim.
 
 ## Independently validated coverage (existing pinned-Musashi differential evidence)
 
 | stage | applicable forms | passing forms | percent | passing words |
 | --- | ---: | ---: | ---: | ---: |
-| semantic_validated | 1526 | 1458 | 95.54% | 42167 |
-| ccr_sr_validated | 1193 | 1157 | 96.98% | 33287 |
-| ea_side_effect_validated | 381 | 359 | 94.23% | 12898 |
+| semantic_validated | 1526 | 1473 | 96.53% | 42610 |
+| ccr_sr_validated | 1193 | 1169 | 97.99% | 33712 |
+| ea_side_effect_validated | 381 | 363 | 95.28% | 13043 |
 | timing_validated | 1526 | 0 | 0.00% | 0 |
 
-Validated primary words per aspect: ccr 33357, ea 13076, semantic 42173, timing 0. Forms with at least one validated word: ccr 1209, ea 507, semantic 1463, timing 0. Sources: tests/fixtures/m68k-conformance-vectors.json, tests/m68k_batch_b_musashi_differential_test.py, tests/m68k_batch_c_musashi_differential_test.py, tests/m68k_cmp_absolute_source_musashi_differential_test.py, tests/m68k_divs_word_musashi_differential_test.py, tests/m68k_divu_word_musashi_differential_test.py, tests/m68k_indexed_arithmetic_musashi_differential_test.py, tests/m68k_indexed_lea_musashi_differential_test.py, tests/m68k_muls_word_musashi_differential_test.py, tests/m68k_mulu_word_musashi_differential_test.py, tests/m68k_pc_indexed_lea_musashi_differential_test.py, tests/m68k_pc_indexed_logical_musashi_differential_test.py, tests/m68k_pc_indexed_move_musashi_differential_test.py.
+Validated primary words per aspect: ccr 33782, ea 13221, semantic 42616, timing 0. Forms with at least one validated word: ccr 1221, ea 511, semantic 1478, timing 0. Sources: tests/fixtures/m68k-conformance-vectors.json, tests/m68k_batch_b_musashi_differential_test.py, tests/m68k_batch_c_musashi_differential_test.py, tests/m68k_cmp_absolute_source_musashi_differential_test.py, tests/m68k_divs_word_musashi_differential_test.py, tests/m68k_divu_word_musashi_differential_test.py, tests/m68k_indexed_arithmetic_musashi_differential_test.py, tests/m68k_indexed_lea_musashi_differential_test.py, tests/m68k_muls_word_musashi_differential_test.py, tests/m68k_mulu_word_musashi_differential_test.py, tests/m68k_pc_indexed_lea_musashi_differential_test.py, tests/m68k_pc_indexed_logical_musashi_differential_test.py, tests/m68k_pc_indexed_move_musashi_differential_test.py.
 
 ## Stage definitions (public entry points only)
 
@@ -53,6 +53,7 @@ Validated primary words per aspect: ccr 33357, ea 13076, semantic 42173, timing 
 - `route_runtime_routed_admitted / compiles / executes` (structural (runtime-routed route)): the Genesis runtime-routed lowering emits a non-empty operation body (admitted; an indentation-only body is a declined operation, not an admission); that C compiles under the same strict flags against the real `platforms/genesis/runtime` header (compiles); it runs against the real runtime linked from `runtime.c`, from a restored baseline with work RAM only, and continues at PC rather than stopping (executes). Whole-program C4 preflight facts are not exercised, so absolute-address forms stop at the runtime memory gate under the fixed extension pattern. **These rows measure the raw routed emitter only; they are NOT proof that the C4 preflight classifier (`classify_m68k_c4_gap_shapes`) accepts the form** -- C4 acceptance is proved by the focused C4 admission regressions in `tests/m68k_pipeline_test.cpp` (e.g. `c4_arithmetic_auto_update_admission`).
 - `route_immutable_rom_aot` (structural): `m68k_operation_is_immutable_rom_aot_safe` admits the form.
 - `route_static_discovery` (structural): the CPU-owned static discovery walks the form to a clean end.
+- `architecturally illegal - handled / unsupported` (structural (non-legal words)): every primary word the T001 partition classifies as architecturally reserved (line 1010 -> vector 10, line 1111 -> vector 11, unassigned or post-MC68000 -> vector 4) is `handled` when decode selects it at generation time as an exception-raising form whose effect names that vector and it emits, compiles, runs (direct and runtime-routed), is immutable-ROM AOT admitted, has a timing row and walks static discovery; `partially_handled` when it is selected with the right vector but a later stage fails; `unsupported` when decode rejects it (fail closed); `misclassified` when it decodes to anything else. `production_classification_mismatches` compares the production generation-time classification (`m68k_classify_primary_word`) with the partition for all 65,536 words.
 - `semantic_validated` (validated): every word has existing pinned-Musashi differential evidence comparing the result state.
 - `ccr_sr_validated` (validated): applicable to CCR-modifying forms; every word has existing Musashi evidence that compares SR/CCR.
 - `ea_side_effect_validated` (validated): applicable to forms with auto-update/implicit-stack effects; every word has existing Musashi evidence comparing the full D/A register state and memory.
@@ -67,11 +68,22 @@ Validated primary words per aspect: ccr 33357, ea 13076, semantic 42173, timing 
 | data_movement | 357 | 357 | 100.00% |
 | integer_arithmetic | 500 | 478 | 95.60% |
 | logical | 228 | 228 | 100.00% |
-| program_control | 193 | 183 | 94.82% |
+| program_control | 193 | 184 | 95.34% |
 | shift_and_rotate | 104 | 104 | 100.00% |
-| system_control | 55 | 38 | 69.09% |
+| system_control | 55 | 52 | 94.55% |
 
-## Decode over-acceptance (non-legal words the decoder accepts)
+## Architecturally illegal words: handled versus unsupported
+
+| partition class | words | handled | partially handled | unsupported (fail closed) | misclassified |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| illegal_post_68000_encoding | 2249 | 2249 | 0 | 0 | 0 |
+| illegal_reserved_unassigned | 9279 | 9279 | 0 | 0 | 0 |
+| line_a_reserved_exception | 4096 | 4096 | 0 | 0 | 0 |
+| line_f_reserved_exception | 4096 | 4096 | 0 | 0 | 0 |
+
+Production generation-time classification mismatches against the partition: 0.
+
+## Decode over-acceptance (non-legal words the decoder accepts as something other than their architectural exception)
 
 - none
 
@@ -79,16 +91,11 @@ Validated primary words per aspect: ccr 33357, ea 13076, semantic 42173, timing 
 
 | mnemonic | family | forms | unsupported | first failing stage (forms) |
 | --- | --- | ---: | ---: | --- |
-| CHK | system_control | 11 | 11 | decode 11 |
 | DIVS | integer_arithmetic | 11 | 11 | emit 11 |
 | DIVU | integer_arithmetic | 11 | 11 | emit 11 |
-| ILLEGAL | system_control | 1 | 1 | decode 1 |
 | JMP | program_control | 7 | 4 | effects 4 |
 | JSR | program_control | 7 | 4 | effects 4 |
 | MOVE | system_control | 312 | 1 | native_exec 1 |
 | RESET | system_control | 1 | 1 | decode 1 |
-| RTR | program_control | 1 | 1 | decode 1 |
 | RTS | program_control | 1 | 1 | native_exec 1 |
 | STOP | system_control | 1 | 1 | decode 1 |
-| TRAP | system_control | 1 | 1 | decode 1 |
-| TRAPV | system_control | 1 | 1 | decode 1 |

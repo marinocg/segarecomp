@@ -545,6 +545,46 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
     effect.pc = M68kPcEffectKind::advance;
     effect.pc_delta = operation.provenance.length.value;
     break;
+  // SEG-021-T019 / ADR 0043 §3, §5. TRAP #n always, TRAPV when V = 1 and CHK.W when the bound check fails
+  // take their vector with the NEXT instruction stacked; the handler's RTE resumes at that instruction, so the
+  // sequential advance is the architectural continuation (the handler may change any register: consumers of the
+  // value-flow graph treat that continuation like a call's). Exception entry switches to (and writes) the SSP.
+  case M68kIrKind::trap_exception:
+  case M68kIrKind::trap_on_overflow:
+    effect.may_raise_synchronous_exception = true;
+    effect.exception_vector = operation.exception_vector;
+    effect.address_register_write_mask |= UINT8_C(0x80);
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::check_bounds:
+    // CHK.W <ea>,Dn reads the word bound (Dn is only read); N/Z/V/C change (Motorola: N defined on a trap, Z/V/C
+    // undefined -- the pinned-oracle policy is documented at the lowering), X is unchanged.
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.source_ea;
+    effect.affects_condition_codes = true;
+    effect.may_raise_synchronous_exception = true;
+    effect.exception_vector = operation.exception_vector;
+    effect.address_register_write_mask |= UINT8_C(0x80);
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::return_restore_condition_codes:
+    // RTR (unprivileged): CCR <- word at SP (only X/N/Z/V/C), PC <- long at SP+2, SP += 6, through the same
+    // validated atomic frame-return core as RTE.
+    effect.stack = M68kStackEffectKind::pop_exception_frame;
+    effect.stack_width = 6U;
+    effect.affects_condition_codes = true;
+    effect.address_register_write_mask |= UINT8_C(0x80);
+    effect.pc = M68kPcEffectKind::observed_exception_return;
+    break;
+  case M68kIrKind::instruction_exception:
+    // ILLEGAL, line 1010/1111 and every other illegal word: always the vector, this instruction's address stacked.
+    effect.may_raise_synchronous_exception = true;
+    effect.exception_vector = operation.exception_vector;
+    effect.address_register_write_mask |= UINT8_C(0x80);
+    effect.pc = M68kPcEffectKind::exception_entry;
+    break;
   case M68kIrKind::load_effective_address:
     // LEA is entirely CCR-unaffected and never performs a memory access at
     // all (it only computes an address into An); affects_condition_codes
@@ -780,7 +820,8 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
       operation.kind != M68kIrKind::compare && operation.kind != M68kIrKind::compare_immediate &&
       operation.kind != M68kIrKind::compare_address && operation.kind != M68kIrKind::compare_memory &&
       operation.kind != M68kIrKind::test_operand &&
-      operation.kind != M68kIrKind::bit_test)
+      operation.kind != M68kIrKind::bit_test &&
+      operation.kind != M68kIrKind::check_bounds)  // SEG-021-T019: CHK only reads Dn
     effect.data_register_write_mask |= static_cast<std::uint8_t>(1U << operation.destination_ea.reg);
   // Only the narrow operation subset whose D/A effects are exhaustively
   // represented above advertises completeness.  An absent claim is a reject,
@@ -851,6 +892,11 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
       operation.kind == M68kIrKind::logical_immediate_to_sr ||
       operation.kind == M68kIrKind::write_user_stack_pointer ||
       operation.kind == M68kIrKind::read_user_stack_pointer ||
+      // SEG-021-T019: the software-exception family writes only A7 (the stack switch / RTR pop) plus CHK's decoded
+      // source EA auto-update.
+      operation.kind == M68kIrKind::trap_exception || operation.kind == M68kIrKind::trap_on_overflow ||
+      operation.kind == M68kIrKind::check_bounds || operation.kind == M68kIrKind::return_restore_condition_codes ||
+      operation.kind == M68kIrKind::instruction_exception ||
       operation.kind == M68kIrKind::general_branch;
   if (operation.kind == M68kIrKind::push_effective_address || operation.kind == M68kIrKind::return_from_subroutine ||
       operation.kind == M68kIrKind::link_frame || operation.kind == M68kIrKind::unlink_frame ||

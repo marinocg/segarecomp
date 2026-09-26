@@ -93,6 +93,15 @@ segarecomp::DecodeSource source(std::uint32_t address = 0x100U) {
   return {segarecomp::CpuVariant::mc68000, {segarecomp::TargetAddressSpace::m68k_program, address}, {0}};
 }
 
+// SEG-021-T019 / ADR 0043 §3: an architecturally illegal operation word (reserved EA field, unassigned or post-MC68000
+// encoding, line 1010/1111) is selected by general_startup at generation time as the two-byte instruction-word
+// exception carrying its vector -- never as the neighbouring instruction and never as a runtime decode.
+bool is_instruction_exception(const segarecomp::M68kDecodeResult &result, unsigned vector) {
+  const auto *decoded = std::get_if<segarecomp::M68kDecodedInstruction>(&result);
+  return decoded != nullptr && decoded->kind == segarecomp::M68kInstructionKind::instruction_exception &&
+         decoded->exception_vector == vector && decoded->provenance.length.value == 2U;
+}
+
 void profiles_preserve_the_existing_envelopes() {
   const std::vector<std::uint8_t> moveq_d7{0x7EU, 0xFFU};
   const auto moveq = segarecomp::decode_m68k_instruction(
@@ -200,10 +209,12 @@ void subtraction_forms_decode_and_share_flags() {
   expect(subq_an.destination_ea.mode == segarecomp::M68kEaMode::address_register &&
              !subq_an_effect.affects_condition_codes && subq_an_effect.address_register_write,
          "SUBQ.W An is selected as full address arithmetic with SR unchanged");
-  const auto byte_an = std::get<segarecomp::RejectedM68kDecode>(segarecomp::decode_m68k_instruction(
+  // SEG-021-T019: SUBQ.B An is architecturally illegal on the MC68000; general_startup selects it at generation time
+  // as the vector-4 instruction-word exception (it is never a SUBQ).
+  const auto byte_an = std::get<segarecomp::M68kDecodedInstruction>(segarecomp::decode_m68k_instruction(
       std::vector<std::uint8_t>{0x51U, 0x08U}, source(), segarecomp::M68kDecodeProfile::general_startup));
-  expect(byte_an.outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction,
-         "SUBQ.B An remains rejected");
+  expect(byte_an.kind == segarecomp::M68kInstructionKind::instruction_exception && byte_an.exception_vector == 4U,
+         "SUBQ.B An is the vector-4 instruction-word exception");
   const auto rmw = std::get<segarecomp::M68kDecodedInstruction>(segarecomp::decode_m68k_instruction(
       std::vector<std::uint8_t>{0x93U, 0x20U}, source(), segarecomp::M68kDecodeProfile::general_startup));
   const segarecomp::GenesisM68kEmissionContext memory{"ram", "a", "fi", "fc", "fd", 0U, std::nullopt, 0U, {}, {}};
@@ -224,10 +235,7 @@ void addition_forms_decode_and_share_flags() {
          "ADD.B D0,D1 decodes through shared EA facts");
   const auto byte_an = segarecomp::decode_m68k_instruction(
       std::vector<std::uint8_t>{0xD2U, 0x08U}, source(), segarecomp::M68kDecodeProfile::general_startup);
-  const auto *byte_failure = std::get_if<segarecomp::RejectedM68kDecode>(&byte_an);
-  expect(byte_failure != nullptr && byte_failure->outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction &&
-             byte_failure->unsupported_instruction_form,
-          "ADD.B An,Dn remains rejected");
+  expect(is_instruction_exception(byte_an, 4U), "ADD.B An,Dn is the vector-4 instruction-word exception");
   for (const auto &bytes : std::array<std::array<std::uint8_t, 2>, 2>{{{{0xD2U, 0x48U}}, {{0xD2U, 0x88U}}}}) {
     const auto decoded = segarecomp::decode_m68k_instruction(
         bytes, source(), segarecomp::M68kDecodeProfile::general_startup);
@@ -263,9 +271,7 @@ void addition_forms_decode_and_share_flags() {
          "ADDQ.W An is full address arithmetic with SR unchanged");
   const auto addq_byte_an_result = segarecomp::decode_m68k_instruction(
       std::vector<std::uint8_t>{0x50U, 0x08U}, source(), segarecomp::M68kDecodeProfile::general_startup);
-  const auto *addq_byte_an = std::get_if<segarecomp::RejectedM68kDecode>(&addq_byte_an_result);
-  expect(addq_byte_an != nullptr && addq_byte_an->outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction,
-         "ADDQ.B An remains rejected");
+  expect(is_instruction_exception(addq_byte_an_result, 4U), "ADDQ.B An is the vector-4 instruction-word exception");
   // SEG-007-T153: generic ADDQ memory destinations decode/lift with the
   // immediate quick source preserved and the CCR-affecting effect that every
   // memory destination form carries.
@@ -3031,23 +3037,25 @@ void general_startup_decode_classifies_move_an_to_usp_as_a_cpu_frontier() {
            "SEG-021-T018: MOVE USP,An reads the inactive (USP) slot behind the privilege check");
   }
 
-  // Negative counterpart: the reverse direction MOVE USP,An (0x4E68-0x4E6F,
-  // a distinct bit pattern with bit 3 set) and a neighboring System Control
-  // Group encoding (TRAP #n, 0x4E40-0x4E4F) must remain unrecognized and
-  // fail closed with no CPU-frontier classification.
-  const auto expect_unclassified = [](std::uint16_t word, const char *label) {
-    const std::vector<std::uint8_t> image{static_cast<std::uint8_t>(word >> 8U), static_cast<std::uint8_t>(word & 0xFFU)};
-    const segarecomp::DecodeSource source{segarecomp::CpuVariant::mc68000,
-                                           {segarecomp::TargetAddressSpace::m68k_program, 0xB04U}, {0U}};
-    const auto decoded = segarecomp::decode_m68k_instruction(
-        image, source, segarecomp::M68kDecodeProfile::general_startup);
-    const auto *decode_rejected = std::get_if<segarecomp::RejectedM68kDecode>(&decoded);
-    expect(decode_rejected != nullptr &&
-               decode_rejected->outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction &&
-               decode_rejected->cpu_frontier == segarecomp::M68kCpuFrontierKind::none,
-           label);
-  };
-  expect_unclassified(0x4E41U, "a neighboring System Control Group encoding (TRAP #1) remains unclassified");
+  // Neighboring System Control Group encodings (SEG-021-T019): TRAP #n (0x4E40-0x4E4F) is a selected form and the
+  // MC68010 RTD word is architecturally illegal; neither is a CPU frontier.
+  // SEG-021-T019: TRAP #1 is now a selected form (vector 33, next instruction stacked), never a CPU frontier.
+  {
+    const std::vector<std::uint8_t> trap_image{0x4EU, 0x41U};
+    const auto trap_result = segarecomp::decode_m68k_instruction(trap_image, source(),
+                                                                 segarecomp::M68kDecodeProfile::general_startup);
+    const auto *trap = std::get_if<segarecomp::M68kDecodedInstruction>(&trap_result);
+    expect(trap != nullptr && trap->kind == segarecomp::M68kInstructionKind::trap && trap->exception_vector == 33U,
+           "a neighboring System Control Group encoding (TRAP #1) is the vector-33 TRAP form");
+  }
+  // The neighbouring 0x4E74 (MC68010 RTD) stays outside every selected form: architecturally illegal on the MC68000.
+  {
+    const std::vector<std::uint8_t> rtd_image{0x4EU, 0x74U, 0x00U, 0x00U};
+    expect(is_instruction_exception(segarecomp::decode_m68k_instruction(rtd_image, source(),
+                                                                        segarecomp::M68kDecodeProfile::general_startup),
+                                    4U),
+           "0x4E74 (post-MC68000 RTD) is the vector-4 instruction-word exception");
+  }
 }
 
 // The former CPU-frontier promotion coverage now proves the selected MOVE is
@@ -3120,9 +3128,9 @@ void general_startup_decode_accepts_moveq_for_every_destination_register() {
     const std::vector<std::uint8_t> image{static_cast<std::uint8_t>(word >> 8U), static_cast<std::uint8_t>(word & 0xFFU)};
     const auto decoded = segarecomp::decode_m68k_instruction(
         image, source(), segarecomp::M68kDecodeProfile::general_startup);
-    const auto *rejected = std::get_if<segarecomp::RejectedM68kDecode>(&decoded);
-    expect(rejected != nullptr && rejected->outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction,
-           "the reserved bit-8-set 0111-prefix form remains valid_but_unsupported, never silently accepted as MOVEQ");
+    // SEG-021-T019: architecturally illegal on the MC68000 -- the vector-4 instruction-word exception.
+    expect(is_instruction_exception(decoded, 4U),
+           "the reserved bit-8-set 0111-prefix form is the vector-4 exception, never silently accepted as MOVEQ");
   }
 }
 
@@ -3263,12 +3271,10 @@ void general_startup_decode_accepts_move_to_sr_for_dn_and_immediate_sources() {
     const std::vector<std::uint8_t> image{static_cast<std::uint8_t>(word >> 8U), static_cast<std::uint8_t>(word & 0xFFU)};
     const auto decoded = segarecomp::decode_m68k_instruction(
         image, source(), segarecomp::M68kDecodeProfile::general_startup);
-    const auto *rejected = std::get_if<segarecomp::RejectedM68kDecode>(&decoded);
-    expect(rejected != nullptr && rejected->outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction &&
-               rejected->unsupported_instruction_form,
-           label);
+    // SEG-021-T019: architecturally illegal -- selected as the vector-4 instruction-word exception.
+    expect(is_instruction_exception(decoded, 4U), label);
   };
-  expect_unsupported(0x46C8U, "MOVE An,SR (address-register-direct source) remains unrecognized (architectural exclusion)");
+  expect_unsupported(0x46C8U, "MOVE An,SR (address-register-direct source) is the vector-4 exception (architectural exclusion)");
   // SEG-021-T018: every data addressing source is now decoded (supersedes the SEG-007-T088 project narrowing).
   expect_status_form_decodes(0x46D0U, segarecomp::M68kInstructionKind::move_to_sr, segarecomp::M68kEaMode::address_indirect,
                              "MOVE (An),SR decodes");
@@ -3327,12 +3333,10 @@ void general_startup_decode_accepts_move_from_sr_for_dn_destinations() {
                                           static_cast<std::uint8_t>(word & 0xFFU), 0x00U, 0x00U};
     const auto decoded = segarecomp::decode_m68k_instruction(
         image, source(), segarecomp::M68kDecodeProfile::general_startup);
-    const auto *rejected = std::get_if<segarecomp::RejectedM68kDecode>(&decoded);
-    expect(rejected != nullptr &&
-               rejected->outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction,
-           label);
+    // SEG-021-T019: architecturally illegal -- selected as the vector-4 instruction-word exception.
+    expect(is_instruction_exception(decoded, 4U), label);
   };
-  expect_unsupported(0x40C8U, "MOVE SR,An (address-register-direct) is never a legal destination -- fail closed");
+  expect_unsupported(0x40C8U, "MOVE SR,An (address-register-direct) is never a legal destination -- vector-4 exception");
   // SEG-021-T018: every data-alterable destination is now decoded (supersedes the SEG-007-T116 project narrowing).
   expect_status_form_decodes(0x40D0U, segarecomp::M68kInstructionKind::move_from_sr, segarecomp::M68kEaMode::address_indirect,
                              "MOVE SR,(A0) decodes");
@@ -3345,7 +3349,7 @@ void general_startup_decode_accepts_move_from_sr_for_dn_destinations() {
   expect_status_form_decodes(0x40F9U, segarecomp::M68kInstructionKind::move_from_sr, segarecomp::M68kEaMode::absolute_long,
                              "MOVE SR,(xxx).L decodes");
   // SEG-021-T014: NEGX is now supported (0x4000 is NEGX.B D0); An remains an illegal NEGX operand.
-  expect_unsupported(0x4008U, "NEGX.B A0 (address-register-direct) is never a legal operand -- fail closed");
+  expect_unsupported(0x4008U, "NEGX.B A0 (address-register-direct) is never a legal operand -- vector-4 exception");
 
   // SEG-007-T118: MOVE Dn,CCR (0x44C0) is now its own supported move_to_ccr
   // kind; it must not be misdecoded as MOVE from SR.
@@ -3510,12 +3514,10 @@ void general_startup_decode_accepts_move_to_ccr_for_dn_sources() {
                                           static_cast<std::uint8_t>(word & 0xFFU), 0x00U, 0x00U};
     const auto decoded = segarecomp::decode_m68k_instruction(
         image, source(), segarecomp::M68kDecodeProfile::general_startup);
-    const auto *rejected = std::get_if<segarecomp::RejectedM68kDecode>(&decoded);
-    expect(rejected != nullptr &&
-               rejected->outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction,
-           label);
+    // SEG-021-T019: architecturally illegal -- selected as the vector-4 instruction-word exception.
+    expect(is_instruction_exception(decoded, 4U), label);
   };
-  expect_unsupported(0x44C8U, "MOVE An,CCR (address-register-direct) is never a legal source -- fail closed");
+  expect_unsupported(0x44C8U, "MOVE An,CCR (address-register-direct) is never a legal source -- vector-4 exception");
   // SEG-021-T018: every data addressing source is now decoded (supersedes the SEG-007-T118 project narrowing).
   for (const auto &[word, mode] : std::array<std::pair<std::uint16_t, segarecomp::M68kEaMode>, 6>{{
            {0x44D0U, segarecomp::M68kEaMode::address_indirect}, {0x44D8U, segarecomp::M68kEaMode::address_postinc},
@@ -3857,12 +3859,10 @@ void general_startup_decode_accepts_indexed_tst_source() {
     // TST's own legal-EA mask admits no PC-relative form at all (base
     // MC68000), unlike the general arithmetic/logical family.
     // TST.B (4,PC,D0.W)  ->  0x4A3B 0x0004
+    // SEG-021-T019: architecturally illegal on the MC68000, so it is the two-byte vector-4 exception (never a TST).
     const auto result = decode_general({0x4AU, 0x3BU, 0x00U, 0x04U});
-    const auto *rejected = std::get_if<RejectedM68kDecode>(&result);
-    expect(rejected != nullptr &&
-               rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction &&
-               rejected->unsupported_instruction_form,
-           "TST.B (4,PC,D0.W) fails closed as an unsupported form -- TST admits no PC-relative "
+    expect(is_instruction_exception(result, 4U),
+           "TST.B (4,PC,D0.W) is the vector-4 instruction-word exception -- TST admits no PC-relative "
            "EA at all");
   }
   {
@@ -4579,10 +4579,9 @@ void bit_operation_decode_covers_the_full_legal_ea_set_and_rejects_illegal_ones(
     return decoded != nullptr && decoded->kind == kind && decoded->destination_ea.mode == destination &&
            decoded->size == size;
   };
+  // SEG-021-T019: an architecturally illegal bit-operation encoding is the vector-4 instruction-word exception.
   const auto rejects = [&](const std::vector<std::uint8_t> &bytes) {
-    const auto result = decode_general(bytes);
-    const auto *rejected = std::get_if<RejectedM68kDecode>(&result);
-    return rejected != nullptr && rejected->outcome == DecodeOutcome::valid_but_unsupported_instruction;
+    return is_instruction_exception(decode_general(bytes), 4U);
   };
   using K = M68kInstructionKind;
   using W = M68kMemoryAccessWidth;
@@ -4642,9 +4641,9 @@ void shift_rotate_memory_decode_legality_and_aot_admission() {
              decoded->shift_rotate_kind == kind && decoded->destination_ea.mode == mode &&
              decoded->size == M68kMemoryAccessWidth::word;
     };
+    // SEG-021-T019: an architecturally illegal memory-shift encoding is the vector-4 instruction-word exception.
     const auto rejects = [&](std::uint16_t ea, std::initializer_list<std::uint8_t> ext) {
-      const auto result = word(ea, ext);
-      return std::get_if<RejectedM68kDecode>(&result) != nullptr;
+      return is_instruction_exception(word(ea, ext), 4U);
     };
     expect(accepts(0x30U, {0x10U, 0x04U}, M68kEaMode::address_index8), "memory shift (d8,An,Xn) is legal");
     expect(accepts(0x10U, {}, M68kEaMode::address_indirect), "memory shift (An) is legal");
@@ -6212,9 +6211,13 @@ void tier2_mapped_but_invalid_decode_candidate_is_excluded_and_never_becomes_aut
   // F-line reserved/unimplemented opcode word this project's decoder has
   // never supported). This region is never reached by the fixture's own
   // entry flow (which only ever runs 0xC00..0xC0C).
-  image.resize(invalid_decode_address - base + 2U, 0x00U);
-  image[invalid_decode_address - base] = 0xFFU;
-  image[invalid_decode_address - base + 1U] = 0xFFU;
+  // SEG-021-T019: 0xFFFF is now a decoded line-1111 exception word, so the unsupported encoding is a legal TST.B
+  // (d8,A6,Xn) whose index word carries the MC68020 full-format bit (still rejected by the decoder).
+  image.resize(invalid_decode_address - base + 4U, 0x00U);
+  image[invalid_decode_address - base] = 0x4AU;
+  image[invalid_decode_address - base + 1U] = 0x36U;
+  image[invalid_decode_address - base + 2U] = 0x01U;
+  image[invalid_decode_address - base + 3U] = 0x04U;
   auto make_invalid_candidate_program = [&](std::vector<GenesisCodeEntryCandidateHint> candidates) {
     FrontendProgram program{};
     program.profile = M68kFrontendProfile::general_startup;
@@ -7215,7 +7218,9 @@ const std::vector<std::uint8_t> image{
     0x60U, 0xF8U,  // loop
     0x60U, 0xF6U,  // candidate A
     0x60U, 0xF4U,  // candidate B
-    0xFFU, 0xFFU, 0x4EU, 0x71U,  // invalid decode + padding
+    // SEG-021-T019: 0xFFFF would now decode (line-1111 exception); an unsupported full-format indexed TST.B stays
+    // undecodable.
+    0x4AU, 0x36U, 0x01U, 0x04U,  // undecodable (unsupported extension form)
     0x00U, 0x00U, 0x0BU, 0x08U,  // table entry A
     0x00U, 0x00U, 0x0BU, 0x0AU,  // table entry B
 };
@@ -7430,8 +7435,11 @@ const std::vector<std::uint8_t> image{
     0x4EU, 0x71U,              // +0x04 return continuation (NOP)
     0x60U, 0xF8U,              // +0x06 BRA.S -8 -> base (V1)
     0x60U, 0xF6U,              // +0x08 BRA.S -10 -> base (V2)
-    0xFFU, 0xFFU,              // +0x0A invalid opcode
-    0x41U, 0xBBU, 0x00U, 0x00U,  // +0x0C CHK.W (0,PC,D0.W),D0 (excluded form)
+    // SEG-021-T019: every operation word except RESET/STOP now decodes (0xFFFF is the line-1111 exception and
+    // CHK.W is supported), so the undecodable word is RESET (a CPU frontier the decoder still rejects) and the
+    // excluded form is a legal TST.B (d8,A6,Xn) whose index word carries the MC68020 full-format bit.
+    0x4EU, 0x70U,              // +0x0A undecodable (RESET)
+    0x4AU, 0x36U, 0x01U, 0x04U,  // +0x0C TST.B full-format index (excluded form)
     0x60U, 0x00U,              // +0x10 BRA.W (OVERLAP_A)
     0x4EU, 0x71U,              // +0x12 extension word / NOP (OVERLAP_B)
     0x76U, 0x05U,              // +0x14 byte-identical data / MOVEQ #5,D3
@@ -9319,10 +9327,16 @@ void immutable_rom_aot_write_move_register_indirect_source_is_admitted_and_dispa
                       [&](const auto &root) { return root.decoded.provenance.source.address.value == tst_index8; }),
          "TST.B (4,A6,D0.W) becomes a validated AOT root now that its brief-format indexed source "
          "form is admitted (same bounded family, SEG-007-T248's sixth `test_operand` iteration)");
-  expect(!std::any_of(roots.begin(), roots.end(),
-                       [&](const auto &root) { return root.decoded.provenance.source.address.value == tst_pc_index8; }),
-         "TST.B (4,PC,D0.W) never becomes an AOT root -- TST's own decode-stage legal-EA mask never "
-         "admits any PC-relative form, so this instruction never even reaches the IR/AOT layer");
+  // SEG-021-T019: the PC-relative TST word is architecturally illegal on the MC68000, so it is never a TST; it is
+  // selected at generation time as the two-byte vector-4 instruction-word exception and admitted as such.
+  expect(std::any_of(roots.begin(), roots.end(),
+                     [&](const auto &root) {
+                       return root.decoded.provenance.source.address.value == tst_pc_index8 &&
+                              root.decoded.kind == M68kInstructionKind::instruction_exception &&
+                              root.decoded.exception_vector == 4U && root.decoded.provenance.length.value == 2U;
+                     }),
+         "TST.B (4,PC,D0.W) is never a TST -- its architecturally illegal word becomes a vector-4 "
+         "instruction-word exception AOT root");
   expect(std::any_of(roots.begin(), roots.end(),
                       [&](const auto &root) { return root.decoded.provenance.source.address.value == move_dn_to_index8; }),
          "MOVE.B D1,(4,A5,D0.W) becomes a validated AOT root now that its brief-format indexed "
@@ -9404,9 +9418,10 @@ void immutable_rom_aot_write_move_register_indirect_source_is_admitted_and_dispa
          "PC-keyed AOT body (SEG-007-T248)");
   std::ostringstream tst_pc_index8_hex;
   tst_pc_index8_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << tst_pc_index8;
-  expect(emitted.find("genesis_aot_" + tst_pc_index8_hex.str()) == std::string::npos,
-         "the PC-relative TST sibling never receives a generated AOT body -- it never decodes at "
-         "all, let alone becomes an AOT candidate");
+  expect(emitted.find("genesis_aot_" + tst_pc_index8_hex.str()) != std::string::npos &&
+             emitted.find("genesis_raise_software_exception(runtime, UINT32_C(4), UINT32_C(0x" + tst_pc_index8_hex.str()) !=
+                 std::string::npos,
+         "the PC-relative TST word's AOT body raises vector 4 with its own address stacked (SEG-021-T019)");
   std::ostringstream move_dn_to_index8_hex;
   move_dn_to_index8_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << move_dn_to_index8;
   expect(emitted.find("genesis_aot_" + move_dn_to_index8_hex.str()) != std::string::npos,
@@ -10301,7 +10316,9 @@ const std::vector<std::uint8_t> image{
     0x60U, 0xF8U,  // loop
     0x60U, 0xF6U,  // candidate A entry point
     0x60U, 0xF4U,  // candidate B entry point
-    0xFFU, 0xFFU, 0x4EU, 0x71U,  // invalid decode + padding
+    // SEG-021-T019: 0xFFFF would now decode (line-1111 exception); an unsupported full-format indexed TST.B stays
+    // undecodable.
+    0x4AU, 0x36U, 0x01U, 0x04U,  // undecodable (unsupported extension form)
     0x00U, 0x00U, 0x0BU, 0x08U,  // table entry A (== candidate_a)
     0x00U, 0x00U, 0x0BU, 0x0AU,  // table entry B (== candidate_b), claim ends here
 };
@@ -12019,10 +12036,28 @@ void general_startup_decode_accepts_nop_as_a_pure_pc_advance() {
                fixed_rej->outcome == segarecomp::DecodeOutcome::valid_but_unsupported_instruction,
            "RTE (0x4E73) stays valid-but-unsupported under the fixed genesis_startup profile");
   }
-  expect_frontier(0x4E74U, "0x4E74 remains a valid-but-unsupported form");
-  expect_frontier(0x4E76U, "TRAPV (0x4E76) remains a valid-but-unsupported form");
-  expect_frontier(0x4E77U, "RTR (0x4E77) remains a valid-but-unsupported form");
-  expect_frontier(0x4E78U, "0x4E78 remains a valid-but-unsupported form");
+  // SEG-021-T019: 0x4E74 (MC68010 RTD) and 0x4E78 (unassigned) are architecturally illegal (vector 4); TRAPV
+  // (0x4E76) and RTR (0x4E77) are selected forms.
+  {
+    const auto decode_word = [](std::uint16_t word) {
+      return segarecomp::decode_m68k_instruction(std::vector<std::uint8_t>{static_cast<std::uint8_t>(word >> 8U),
+                                                                           static_cast<std::uint8_t>(word & 0xFFU),
+                                                                           0x00U, 0x00U},
+                                                 source(), segarecomp::M68kDecodeProfile::general_startup);
+    };
+    expect(is_instruction_exception(decode_word(0x4E74U), 4U), "0x4E74 is the vector-4 instruction-word exception");
+    expect(is_instruction_exception(decode_word(0x4E78U), 4U), "0x4E78 is the vector-4 instruction-word exception");
+    const auto trapv = decode_word(0x4E76U);
+    const auto rtr = decode_word(0x4E77U);
+    const auto *trapv_decoded = std::get_if<segarecomp::M68kDecodedInstruction>(&trapv);
+    const auto *rtr_decoded = std::get_if<segarecomp::M68kDecodedInstruction>(&rtr);
+    expect(trapv_decoded != nullptr && trapv_decoded->kind == segarecomp::M68kInstructionKind::trapv &&
+               trapv_decoded->exception_vector == 7U && trapv_decoded->provenance.length.value == 2U,
+           "TRAPV (0x4E76) decodes as the two-byte vector-7 TRAPV form");
+    expect(rtr_decoded != nullptr && rtr_decoded->kind == segarecomp::M68kInstructionKind::rtr &&
+               rtr_decoded->provenance.length.value == 2U,
+           "RTR (0x4E77) decodes as the two-byte RTR form");
+  }
 
   // MOVE An,USP (0x4E60-0x4E67) keeps its own dedicated kind.
   for (std::uint16_t word = 0x4E60U; word <= 0x4E67U; ++word) {
@@ -12156,13 +12191,14 @@ void general_startup_retains_call_return_identity_when_the_continuation_is_the_c
 }
 
 void general_startup_rejects_an_unclassified_complete_unsupported_form() {
-  // BRA completes the predecessor block; TRAPV is a decoder-valid, fixed
-  // two-byte unsupported form with no internal CPU-frontier classification.
-  const std::vector<std::uint8_t> image{0x60U, 0x02U, 0x00U, 0x00U, 0x4EU, 0x76U};
+  // BRA completes the predecessor block. SEG-021-T019: every MC68000 operation word except RESET/STOP (classified
+  // CPU frontiers) now decodes, so the unclassified unsupported form is a legal TST.B (d8,A6,Xn) whose index word
+  // carries the MC68020 full-format bit -- an unsupported extension form with no CPU-frontier classification.
+  const std::vector<std::uint8_t> image{0x60U, 0x02U, 0x00U, 0x00U, 0x4AU, 0x36U, 0x01U, 0x04U};
   segarecomp::FrontendProgram program{};
   program.profile = segarecomp::M68kFrontendProfile::general_startup;
   program.image = {"synthetic/SEG-007-T029/c1-unclassified-unsupported", image, image.size()};
-  program.mapping_claims = {{"rom", {{}, 0xB00U}, {{}, 0xB06U}, {0U}, {6U}}};
+  program.mapping_claims = {{"rom", {{}, 0xB00U}, {{}, 0xB08U}, {0U}, {8U}}};
   program.startup_ingress = segarecomp::M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
 
   const segarecomp::DecodeSource trapv_source{segarecomp::CpuVariant::mc68000,
@@ -12175,16 +12211,16 @@ void general_startup_rejects_an_unclassified_complete_unsupported_form() {
              decode_rejected->has_provenance && decode_rejected->instruction_length == 2U &&
              decode_rejected->provenance.source.address.value == 0xB04U &&
              decode_rejected->provenance.source.image_offset.value == 4U &&
-             decode_rejected->provenance.bytes == std::array<std::uint8_t, 2>{0x4EU, 0x76U} &&
-             decode_rejected->provenance.length.value == 2U &&
+             decode_rejected->provenance.bytes == std::array<std::uint8_t, 2>{0x4AU, 0x36U} &&
+             decode_rejected->provenance.length.value == 2U && decode_rejected->unsupported_instruction_form &&
              decode_rejected->cpu_frontier == segarecomp::M68kCpuFrontierKind::none,
-         "TRAPV is a complete two-byte decoder rejection with no CPU-frontier classification");
+         "a full-format indexed TST is a decoder rejection with no CPU-frontier classification");
 
   const auto result = segarecomp::analyze_m68k_frontend(program);
   const auto *rejected = std::get_if<segarecomp::FrontendRejected>(&result);
   expect(decode_rejected != nullptr && rejected != nullptr &&
              !std::holds_alternative<segarecomp::FrontendPartialProgram>(result) &&
-             rejected->category == segarecomp::DirectFlowDiagnostic::valid_but_unsupported_instruction &&
+             rejected->category == segarecomp::DirectFlowDiagnostic::unsupported_instruction_form &&
              rejected->source_address && rejected->source_address->value == 0xB04U &&
              rejected->image_offset && rejected->image_offset->value == 4U && rejected->provenance &&
              rejected->provenance->source.address.value == decode_rejected->provenance.source.address.value &&
@@ -12248,19 +12284,17 @@ void general_startup_retains_cpu_frontiers_only_through_public_provenance() {
               stop_partial->frontiers.front().diagnostic.accesses.front().bytes == std::vector<std::uint8_t>{0x4EU, 0x72U, 0x27U, 0x00U},
           "a complete STOP becomes a CPU frontier with its exact public four-byte fetch");
 
-  // SEG-007-T059 classified 0x4E70 (RESET) as a recognized CPU-frontier kind,
-  // so this fixture -- whose entire purpose is exercising a primary the
-  // decoder still leaves genuinely unclassified -- uses 0x4E74 (RTD), a word no
-  // decode branch (general_startup's explicit NOP acceptance, STOP/RESET
-  // recognition, and SEG-007-T047's RTE 0x4E73 acceptance included) claims,
-  // preserving this test's original intent unchanged.
-  const std::vector<std::uint8_t> generic{0x60U, 0x02U, 0x00U, 0x00U, 0x4EU, 0x74U};
+  // SEG-007-T059 classified 0x4E70 (RESET) as a recognized CPU-frontier kind. SEG-021-T019: every other operation
+  // word now decodes (0x4E74, the MC68010 RTD word, is the vector-4 instruction-word exception), so the only
+  // unclassified rejection left is an unsupported extension form: a legal TST.B (d8,A6,Xn) whose index word carries
+  // the MC68020 full-format bit.
+  const std::vector<std::uint8_t> generic{0x60U, 0x02U, 0x00U, 0x00U, 0x4AU, 0x36U, 0x01U, 0x04U};
   const auto generic_result = segarecomp::analyze_m68k_frontend(program_for("synthetic/SEG-007-T029/c1-generic", generic));
   const auto *generic_rejected = std::get_if<segarecomp::FrontendRejected>(&generic_result);
-  expect(generic_rejected != nullptr && generic_rejected->category == segarecomp::DirectFlowDiagnostic::valid_but_unsupported_instruction &&
+  expect(generic_rejected != nullptr && generic_rejected->category == segarecomp::DirectFlowDiagnostic::unsupported_instruction_form &&
              generic_rejected->provenance &&
              segarecomp::classify_m68k_cpu_frontier(*generic_rejected->provenance) == segarecomp::M68kCpuFrontierKind::none,
-         "an unclassified two-byte primary remains a rejection without a CPU-frontier classification");
+         "an unclassified unsupported form remains a rejection without a CPU-frontier classification");
 }
 
 void general_startup_retains_a_closed_two_block_cpu_prefix_deterministically() {
@@ -14441,7 +14475,9 @@ void general_startup_promotes_one_precise_exit_and_one_known_but_unemitted_targe
       0x66U, 0x04U,  // 0xF00: BNE.s 0xF06
       0x4EU, 0x70U,  // 0xF02: RESET (fallthrough precise CPU frontier)
       0x00U, 0x00U,  // 0xF04: unreached filler
-      0x4AU, 0xFCU,  // 0xF06: ILLEGAL (taken known_but_unemitted_target exit)
+      // SEG-021-T019: ILLEGAL is now the decoded vector-4 exception, so the non-precise exit is a legal TST.B
+      // (d8,A6,Xn) whose index word carries the MC68020 full-format bit (an unsupported extension form).
+      0x4AU, 0x36U, 0x01U, 0x04U,  // 0xF06: (taken known_but_unemitted_target exit)
   };
   segarecomp::FrontendProgram program{};
   program.profile = segarecomp::M68kFrontendProfile::general_startup;
@@ -14462,9 +14498,9 @@ void general_startup_promotes_one_precise_exit_and_one_known_but_unemitted_targe
          "the lower-address exit is the precise CPU-form frontier at 0xF02");
   expect(opaque.diagnostic.provenance && opaque.diagnostic.provenance->source.address.value == 0xF06U &&
              opaque.class_ == segarecomp::GenesisFrontierClass::known_but_unemitted_target &&
-             opaque.diagnostic.category == segarecomp::DirectFlowDiagnostic::illegal_instruction && !opaque.access,
+             opaque.diagnostic.category == segarecomp::DirectFlowDiagnostic::unsupported_instruction_form && !opaque.access,
          "the higher-address exit is retained as known_but_unemitted_target, its own real (host-side-only) "
-         "illegal_instruction category preserved, with no access request");
+         "unsupported_instruction_form category preserved, with no access request");
 
   const auto source_text = expand_entry_rows(segarecomp::emit_m68k_general_startup_runtime_c(*partial));
   expect(source_text.find("GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET") != std::string::npos &&
@@ -14687,43 +14723,31 @@ void general_startup_rejects_a_frontier_exit_set_exceeding_the_named_bound() {
                              {{}, static_cast<std::uint32_t>(base + image.size())}, {0U}, {image.size()}}};
   program.startup_ingress = segarecomp::M68kStartupIngress{{{}, base}, 0x00FF0100U};
 
+  // SEG-021-T019 / ADR 0043 §3: the 64 taken ILLEGAL siblings are no longer unclassifiable decode failures (the
+  // former cause of this fixture's whole-promotion rejection, see the SEG-007-T205 note below): each is selected at
+  // generation time as the vector-4 instruction-word exception, a terminal with no static successor. Only the RESET
+  // remains a frontier, so the promotion is a partial program with exactly that one precise exit and 64 retained
+  // exception terminals -- nothing fabricated, nothing truncated.
   const auto result = segarecomp::analyze_m68k_frontend(program);
-  const auto *rejected = std::get_if<segarecomp::FrontendRejected>(&result);
-  expect(rejected != nullptr,
-         "65 distinct candidate exits (one over the named bound) reject the whole promotion, "
-         "never a truncated FrontendPartialProgram");
-  if (rejected == nullptr) return;
-  // ADR-0014 Decision §1 (M1): the entry-connected breadth-first drain order
-  // interleaves each branch's own taken ILLEGAL sibling immediately after
-  // that branch itself (a taken target is enqueued ahead of its own
-  // fallthrough), so the walk's own primary issue here is the FIRST taken
-  // ILLEGAL sibling encountered, not the terminal RESET -- unlike the
-  // pre-ADR-0014 depth-first fixture this replaces. This test asserts only
-  // the honest, non-fabricated fail-closed rejection outcome itself (P6);
-  // which exact candidate becomes primary versus secondary is an
-  // implementation-order detail already covered, deterministically, by the
-  // separate byte-identical-repeat determinism assertions elsewhere in this
-  // suite.
-  expect(rejected->source_address.has_value() &&
-             (rejected->category == segarecomp::DirectFlowDiagnostic::valid_but_unsupported_instruction ||
-              rejected->category == segarecomp::DirectFlowDiagnostic::illegal_instruction) &&
-             (rejected->source_address->value == reset_address ||
-              (rejected->source_address->value >= reset_address + 2U &&
-               rejected->source_address->value < reset_address + 2U + branch_count * 2U)),
-         "the rejection reports one of this fixture's own real candidate failures honestly, "
-         "not an invented overflow category or address");
-  // SEG-007-T205 clarification: this fixture's rejection is NOT the stale
-  // ADR-0028 §8 aggregate-count guard that T205 removed from C4's own entry
-  // point (libs/codegen/c11/src/frontend.cpp). Confirmed by direct instrumentation
-  // during T205: `analyze_m68k_frontend` here reports
-  // `unresolved_semantic_frontier_count_before_bounding=1`, i.e. only the
-  // FIRST taken ILLEGAL sibling is even considered -- a bare `illegal_
-  // instruction` primary is not classifiable into any eligible
-  // GenesisFrontierClass at all (independent of `m68k_discovery_max_frontier_
-  // exits`), so the whole promotion fails via the ordinary single-primary
-  // `reject()` path before any bound is ever consulted. See
+  const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result);
+  expect(partial != nullptr && partial->frontiers.size() == 1U &&
+             partial->frontiers.front().class_ == segarecomp::GenesisFrontierClass::unsupported_cpu_form &&
+             partial->frontiers.front().diagnostic.source_address &&
+             partial->frontiers.front().diagnostic.source_address->value == reset_address,
+         "the 64 ILLEGAL siblings are handled exception terminals; only the RESET frontier remains");
+  if (partial == nullptr) return;
+  std::uint32_t exception_terminals = 0U;
+  for (const auto &decoded : partial->accepted_prefix.decoded)
+    if (decoded.kind == segarecomp::M68kInstructionKind::instruction_exception && decoded.exception_vector == 4U &&
+        decoded.provenance.source.address.value >= reset_address + 2U &&
+        decoded.provenance.source.address.value < reset_address + 2U + branch_count * 2U)
+      ++exception_terminals;
+  expect(exception_terminals == branch_count, "every ILLEGAL sibling is a retained vector-4 exception terminal");
+  // SEG-007-T205 clarification (historical): before SEG-021-T019 a bare `illegal_instruction` primary was not
+  // classifiable into any eligible GenesisFrontierClass, so this fixture failed via the ordinary single-primary
+  // `reject()` path before any bound was consulted. See
   // `t205_c4_emits_a_complete_frontier_set_exceeding_the_diagnostic_cap`
-  // below for this task's own above-cap coverage, which substitutes an
+  // below for the above-cap coverage, which substitutes an
   // eligible CPU-form opcode (RESET) for every sibling so all 65 candidates
   // genuinely reach promotion and C4 emission.
 }
@@ -18831,10 +18855,9 @@ void general_startup_decoder_rejects_every_t025_explicit_non_goal() {
       // (each has its own dedicated decode/differential coverage instead).
       // SEG-021-T016: MOVEP is a supported instruction and no longer a non-goal word.
       // SEG-021-T015: ABCD/SBCD/NBCD are supported instructions and no longer non-goal words.
-      {0x4E40U, "TRAP #0 (base 0x4E40) is never decoded"},
+      // SEG-021-T019: TRAP #n and TRAPV are supported instructions and no longer non-goal words.
       {0x4E70U, "RESET (0x4E70) is never decoded"},
       {0x4E72U, "STOP (0x4E72) is never decoded"},
-      {0x4E76U, "TRAPV (0x4E76) is never decoded"},
   };
   for (const auto &c : non_goal_words) {
     const auto result = decode(c.word);
@@ -26877,12 +26900,11 @@ void negate_word_data_register_direct_is_bounded_and_has_subtraction_flags() {
          "NEG.W generated C preserves Dn's upper word, derives flags through subtraction, and advances PC");
 
   for (const auto &bytes : std::array<std::array<std::uint8_t, 2>, 1>{{{{UINT8_C(0x44), UINT8_C(0x48)}}}}) {
+    // SEG-021-T019: NEG An is architecturally illegal -- the vector-4 instruction-word exception with its primary provenance.
     const auto rejected = decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup);
-    const auto *failure = std::get_if<RejectedM68kDecode>(&rejected);
-    expect(failure != nullptr && failure->outcome == DecodeOutcome::valid_but_unsupported_instruction &&
-               failure->has_provenance &&
-               failure->provenance.bytes == bytes && failure->provenance.length.value == 2U,
-            "NEG rejects an illegal An destination with primary provenance");
+    const auto *exception = std::get_if<M68kDecodedInstruction>(&rejected);
+    expect(is_instruction_exception(rejected, 4U) && exception != nullptr && exception->provenance.bytes == bytes,
+            "NEG An is the vector-4 instruction-word exception with primary provenance");
   }
   const auto reserved = decode_m68k_instruction(std::array<std::uint8_t, 2>{UINT8_C(0x44), UINT8_C(0xC0)},
                                                 source(), M68kDecodeProfile::general_startup);
@@ -27840,6 +27862,174 @@ int emit_general_startup_bridge_privilege_violation_source(std::string_view vari
   return 0;
 }
 
+// SEG-021-T019 / ADR 0043 §3, §5: the software-exception family as isolated immutable-ROM AOT roots, executed by
+// tests/genesis_software_exception_generated_test.py through the real Genesis runtime.
+namespace software_exception_aot_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00001000U;
+const std::vector<std::uint8_t> image{
+    0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U,  // Tier-2 entry prefix (see status_register_aot_fixture)
+    0x4EU, 0x40U,                                // 1008 TRAP #0
+    0x4EU, 0x4FU,                                // 100A TRAP #15
+    0x4EU, 0x76U,                                // 100C TRAPV
+    0x41U, 0x81U,                                // 100E CHK.W D1,D0
+    0x45U, 0x98U,                                // 1010 CHK.W (A0)+,D2
+    0x47U, 0xA1U,                                // 1012 CHK.W -(A1),D3
+    0x49U, 0xBCU, 0x00U, 0x10U,                  // 1014 CHK.W #$0010,D4
+    0x4BU, 0xB9U, 0x00U, 0xFFU, 0x08U, 0x00U,    // 1018 CHK.W $FF0800.L,D5
+    0x4AU, 0xFCU,                                // 101E ILLEGAL
+    0xA1U, 0x23U,                                // 1020 line 1010
+    0xF4U, 0x56U,                                // 1022 line 1111
+    0x4EU, 0x7AU,                                // 1024 MOVEC word: illegal on the MC68000 (vector 4)
+    0x4EU, 0x77U,                                // 1026 RTR
+    0x4EU, 0x71U,                                // 1028 NOP (handler target)
+};
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T019/software-exception-aot-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base}, {{}, static_cast<std::uint32_t>(base + image.size())},
+                             {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace software_exception_aot_fixture
+
+int emit_software_exception_aot_source() {
+  using namespace segarecomp;
+  auto program = software_exception_aot_fixture::program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  if (emitted.starts_with("/* translation rejected:")) {
+    std::cerr << emitted;
+    return 6;
+  }
+  std::cout << emitted;
+  return 0;
+}
+
+// The same family as one straight-line C4 block of the ordinary whole-program route (the absolute CHK bound uses its
+// retained work-RAM fact), ending before the established RESET frontier.
+int emit_software_exception_c4_source() {
+  using namespace segarecomp;
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  const std::vector<std::uint8_t> image{
+      0x49U, 0xBCU, 0x00U, 0x10U,                // B00 CHK.W #$0010,D4
+      0x4BU, 0xB9U, 0x00U, 0xFFU, 0x08U, 0x00U,  // B04 CHK.W $FF0800.L,D5 (retained source-read fact)
+      0x4EU, 0x76U,                              // B0A TRAPV
+      0x4EU, 0x43U,                              // B0C TRAP #3
+      0x4EU, 0x70U,                              // B0E RESET
+  };
+  program.image = {"synthetic-c4-software-exception-block", image, image.size()};
+  program.mapping_claims = {{"synthetic-c4-software-exception-block", {{}, 0xB00U},
+                              {{}, static_cast<std::uint32_t>(0xB00U + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 1;
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  if (emitted.starts_with("/* translation rejected:")) {
+    std::cerr << emitted;
+    return 2;
+  }
+  std::cout << emitted;
+  return 0;
+}
+
+// Whole-program bridge (SEG-021-T019): the synthetic vector table installs handlers for vectors 4, 6, 7, 10, 11, 32 and
+// 33 (resolved and rooted at build time). Supervisor TRAP #0; drop to user mode; user TRAP #1, TRAPV with V set and an
+// out-of-range CHK each enter the "count" handler on the SSP and RTE back to the next instruction; ILLEGAL, a line-1010
+// word and a line-1111 word each enter the "skip" handler, which advances the stacked PC past the two-byte word (the
+// continuation is a statically reachable branch target) and returns with RTE; RTR then restores CCR and PC from a
+// user-stack frame (its target is also a statically reachable branch target); the established RESET frontier ends
+// the run. Variant `no-handler`: the vector table installs no
+// software-exception vector, so the first TRAP stops fail-closed.
+int emit_general_startup_bridge_software_exception_source(std::string_view variant) {
+  using namespace segarecomp;
+  if (variant.starts_with("-")) variant.remove_prefix(1U);
+  constexpr std::uint32_t kEntry = 0x100U;
+  constexpr std::uint32_t kCount = 0x180U;
+  constexpr std::uint32_t kSkip = 0x190U;
+  std::vector<std::uint8_t> img(0x1A0U, 0x00U);
+  const auto be32 = [&](std::size_t off, std::uint32_t v) {
+    img[off] = static_cast<std::uint8_t>(v >> 24U); img[off + 1U] = static_cast<std::uint8_t>(v >> 16U);
+    img[off + 2U] = static_cast<std::uint8_t>(v >> 8U); img[off + 3U] = static_cast<std::uint8_t>(v);
+  };
+  be32(0x0U, 0x00FF8000U); be32(0x4U, kEntry);
+  if (variant != "no-handler") {
+    for (const unsigned vector : {6U, 7U, 32U, 33U}) be32(vector * 4U, kCount);
+    for (const unsigned vector : {4U, 10U, 11U}) be32(vector * 4U, kSkip);
+  }
+  const std::vector<std::uint8_t> code{
+      0x20U, 0x7CU, 0x00U, 0xFFU, 0x70U, 0x00U,   // 100 MOVEA.L #$00FF7000,A0
+      0x4EU, 0x60U,                               // 106 MOVE A0,USP
+      0x4EU, 0x40U,                               // 108 TRAP #0 (supervisor)
+      0x46U, 0xFCU, 0x00U, 0x00U,                 // 10A MOVE #$0000,SR (to user mode)
+      0x4EU, 0x41U,                               // 10E TRAP #1 (user)
+      0x44U, 0xFCU, 0x00U, 0x02U,                 // 110 MOVE #$02,CCR (V set)
+      0x4EU, 0x76U,                               // 114 TRAPV (taken)
+      0x72U, 0x05U,                               // 116 MOVEQ #5,D1
+      0x70U, 0x09U,                               // 118 MOVEQ #9,D0
+      0x41U, 0x81U,                               // 11A CHK.W D1,D0 (9 > 5: vector 6, N cleared)
+      0x67U, 0x02U,                               // 11C BEQ.S 120 (Z clear here: falls into ILLEGAL)
+      0x4AU, 0xFCU,                               // 11E ILLEGAL
+      0x67U, 0x02U,                               // 120 BEQ.S 124
+      0xA0U, 0x00U,                               // 122 line 1010
+      0x67U, 0x02U,                               // 124 BEQ.S 128
+      0xF0U, 0x00U,                               // 126 line 1111
+      0x48U, 0x7AU, 0x00U, 0x0CU,                 // 128 PEA 136(PC)
+      0x3FU, 0x3CU, 0x00U, 0x11U,                 // 12C MOVE.W #$0011,-(A7)
+      0x67U, 0x04U,                               // 130 BEQ.S 136 (Z clear: falls into RTR; 136 stays reachable)
+      0x4EU, 0x77U,                               // 132 RTR (CCR <- X|C, PC <- 136)
+      0x4EU, 0x71U,                               // 134 NOP (skipped)
+      0x40U, 0xC6U,                               // 136 MOVE SR,D6
+      0x4EU, 0x70U,                               // 138 RESET
+  };
+  std::copy(code.begin(), code.end(), img.begin() + kEntry);
+  const std::vector<std::uint8_t> count_handler{
+      0x52U, 0x87U,                               // 180 ADDQ.L #1,D7
+      0x4EU, 0x73U,                               // 182 RTE
+  };
+  std::copy(count_handler.begin(), count_handler.end(), img.begin() + kCount);
+  const std::vector<std::uint8_t> skip_handler{
+      0x54U, 0xAFU, 0x00U, 0x02U,                 // 190 ADDQ.L #2,2(A7) (skip the two-byte exception word)
+      0x52U, 0x85U,                               // 194 ADDQ.L #1,D5
+      0x4EU, 0x73U,                               // 196 RTE
+  };
+  std::copy(skip_handler.begin(), skip_handler.end(), img.begin() + kSkip);
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T019/software-exception-rte", img, img.size()};
+  program.mapping_claims = {{"rom", {{}, 0U}, {{}, static_cast<std::uint32_t>(img.size())}, {0U}, {img.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, kEntry}, 0x00FF8000U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) {
+    if (const auto *rejected = std::get_if<FrontendRejected>(&result))
+      std::cerr << "category=" << static_cast<int>(rejected->category) << "\n";
+    std::cerr << "software-exception fixture did not promote\n";
+    return 1;
+  }
+  const auto &handlers = partial->accepted_prefix.software_exception_handler_entries;
+  const bool handler_expected = variant != "no-handler";
+  if (handler_expected != (handlers.size() == 7U)) {
+    std::cerr << "software-exception fixture vector resolution mismatch\n";
+    return 1;
+  }
+  if (handler_expected)
+    for (const auto &[vector, handler] : handlers)
+      if (handler.value != ((vector == 4U || vector == 10U || vector == 11U) ? kSkip : kCount)) {
+        std::cerr << "software-exception fixture handler mismatch\n";
+        return 1;
+      }
+  std::cout << emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  return 0;
+}
+
 // A straight-line C4 block (ordinary whole-program route, not the isolated AOT roots) over the same family, then the
 // established RESET frontier; executed by tests/genesis_immutable_rom_aot_exg_movep_scc_tas_generated_test.py.
 int emit_exg_movep_scc_tas_c4_source() {
@@ -27870,6 +28060,166 @@ int emit_exg_movep_scc_tas_c4_source() {
   if (emitted.starts_with("/* translation rejected:")) return 2;
   std::cout << emitted;
   return 0;
+}
+
+// SEG-021-T019 / ADR 0043 §3: TRAP/TRAPV/CHK/RTR/ILLEGAL/line A/line F and every other architecturally illegal word:
+// decode (generation-time classification carrying the vector), lift, effect, published timing rows, AOT admission,
+// routed lowering and static discovery (TRAP/TRAPV/CHK continue at the next instruction with no register fact;
+// RTR and the instruction-word exceptions have no static successor).
+void software_exception_family_decodes_lifts_and_discovers() {
+  using namespace segarecomp;
+  const auto decode_general = [](std::vector<std::uint8_t> bytes) {
+    bytes.resize(std::max<std::size_t>(bytes.size(), 6U), 0x00U);
+    return decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup);
+  };
+  const auto decoded_of = [&](std::vector<std::uint8_t> bytes) {
+    const auto result = decode_general(std::move(bytes));
+    const auto *decoded = std::get_if<M68kDecodedInstruction>(&result);
+    return decoded == nullptr ? std::optional<M68kDecodedInstruction>{} : std::optional<M68kDecodedInstruction>{*decoded};
+  };
+  for (unsigned n = 0U; n < 16U; ++n) {
+    const auto trap = decoded_of({0x4EU, static_cast<std::uint8_t>(0x40U | n)});
+    expect(trap && trap->kind == M68kInstructionKind::trap && trap->exception_vector == 32U + n &&
+               trap->provenance.length.value == 2U,
+           "TRAP #n decodes with vector 32 + n");
+    if (!trap) continue;
+    const auto op = lift_m68k_instruction(*trap);
+    const auto effect = m68k_operation_effect(op);
+    expect(op.kind == M68kIrKind::trap_exception && op.exception_vector == 32U + n &&
+               effect.may_raise_synchronous_exception && effect.exception_vector == 32U + n &&
+               effect.pc == M68kPcEffectKind::advance && effect.pc_delta == 2U && !effect.affects_condition_codes &&
+               effect.register_write_footprint_complete && effect.address_register_write_mask == 0x80U &&
+               effect.data_register_write_mask == 0U,
+           "TRAP lifts to trap_exception: next instruction continuation, A7-only footprint");
+    expect(m68k_instruction_cycles(op) == std::optional<std::uint32_t>{34U} && m68k_operation_is_immutable_rom_aot_safe(op, false) &&
+               m68k_operation_has_complete_c_emission(op),
+           "TRAP has its published 34-cycle row, AOT admission and a complete emission");
+  }
+  const auto trapv = decoded_of({0x4EU, 0x76U});
+  const auto rtr = decoded_of({0x4EU, 0x77U});
+  expect(trapv && trapv->kind == M68kInstructionKind::trapv && trapv->exception_vector == 7U, "TRAPV decodes (vector 7)");
+  expect(rtr && rtr->kind == M68kInstructionKind::rtr && rtr->exception_vector == 0U, "RTR decodes");
+  if (trapv) {
+    const auto op = lift_m68k_instruction(*trapv);
+    const auto effect = m68k_operation_effect(op);
+    expect(op.kind == M68kIrKind::trap_on_overflow && effect.exception_vector == 7U &&
+               effect.pc == M68kPcEffectKind::advance && m68k_instruction_cycles(op) == std::optional<std::uint32_t>{4U},
+           "TRAPV: vector 7, retiring (V = 0) path 4 cycles");
+  }
+  if (rtr) {
+    const auto op = lift_m68k_instruction(*rtr);
+    const auto effect = m68k_operation_effect(op);
+    expect(op.kind == M68kIrKind::return_restore_condition_codes && effect.stack == M68kStackEffectKind::pop_exception_frame &&
+               effect.stack_width == 6U && effect.pc == M68kPcEffectKind::observed_exception_return &&
+               effect.affects_condition_codes && !effect.may_raise_synchronous_exception &&
+               m68k_instruction_cycles(op) == std::optional<std::uint32_t>{20U} &&
+               m68k_operation_is_immutable_rom_aot_safe(op, false) && m68k_operation_has_complete_c_emission(op),
+           "RTR: six-byte CCR/PC pop, unprivileged, 20 cycles, AOT admitted");
+  }
+  // CHK.W <ea>,Dn over every data addressing mode with the Table 8-12 row 10 + word EA cell; Dn is never written.
+  struct ChkCase { std::vector<std::uint8_t> bytes; M68kEaMode mode; std::uint32_t cycles; };
+  for (const auto &c : std::vector<ChkCase>{
+           {{0x41U, 0x81U}, M68kEaMode::data_register, 10U}, {{0x41U, 0x90U}, M68kEaMode::address_indirect, 14U},
+           {{0x41U, 0x98U}, M68kEaMode::address_postinc, 14U}, {{0x41U, 0xA0U}, M68kEaMode::address_predec, 16U},
+           {{0x41U, 0xA8U, 0x00U, 0x10U}, M68kEaMode::address_disp16, 18U},
+           {{0x41U, 0xB0U, 0x10U, 0x04U}, M68kEaMode::address_index8, 20U},
+           {{0x41U, 0xB8U, 0x40U, 0x00U}, M68kEaMode::absolute_word, 18U},
+           {{0x41U, 0xB9U, 0x00U, 0xFFU, 0x08U, 0x00U}, M68kEaMode::absolute_long, 22U},
+           {{0x41U, 0xBAU, 0x00U, 0x10U}, M68kEaMode::pc_disp16, 18U},
+           {{0x41U, 0xBBU, 0x10U, 0x04U}, M68kEaMode::pc_index8, 20U},
+           {{0x41U, 0xBCU, 0x00U, 0x10U}, M68kEaMode::immediate, 14U}}) {
+    const auto chk = decoded_of(c.bytes);
+    expect(chk && chk->kind == M68kInstructionKind::chk && chk->exception_vector == 6U &&
+               chk->size == M68kMemoryAccessWidth::word && chk->source_ea.mode == c.mode &&
+               chk->destination_ea.mode == M68kEaMode::data_register && chk->destination_ea.reg == 0U &&
+               chk->provenance.length.value == c.bytes.size(),
+           "CHK.W decodes every data addressing source with Dn as the tested register");
+    if (!chk) continue;
+    const auto op = lift_m68k_instruction(*chk);
+    const auto effect = m68k_operation_effect(op);
+    expect(op.kind == M68kIrKind::check_bounds && effect.exception_vector == 6U && effect.affects_condition_codes &&
+               effect.data_register_write_mask == 0U && effect.register_write_footprint_complete &&
+               m68k_instruction_cycles(op) == std::optional<std::uint32_t>{c.cycles} &&
+               m68k_operation_is_immutable_rom_aot_safe(op, false) && m68k_operation_has_complete_c_emission(op),
+           "CHK.W: vector 6, CCR effect, Dn only read, 10 + EA cycles, AOT admitted");
+  }
+  // The instruction-word exceptions: ILLEGAL, line 1010, line 1111, CHK An, the MC68020 CHK.L and the MC68010
+  // MOVE from CCR are two-byte exceptions with THIS instruction stacked (no static successor).
+  for (const auto &[bytes, vector] : std::vector<std::pair<std::vector<std::uint8_t>, unsigned>>{
+           {{0x4AU, 0xFCU}, 4U}, {{0xA0U, 0x00U}, 10U}, {{0xAFU, 0xFFU}, 10U}, {{0xF0U, 0x00U}, 11U},
+           {{0xFFU, 0xFFU}, 11U}, {{0x41U, 0x88U}, 4U}, {{0x41U, 0x00U}, 4U}, {{0x42U, 0xC0U}, 4U}}) {
+    const auto result = decode_general(bytes);
+    expect(is_instruction_exception(result, vector), "architecturally reserved words select their vector");
+    const auto *decoded = std::get_if<M68kDecodedInstruction>(&result);
+    if (decoded == nullptr) continue;
+    const auto op = lift_m68k_instruction(*decoded);
+    const auto effect = m68k_operation_effect(op);
+    expect(op.kind == M68kIrKind::instruction_exception && effect.pc == M68kPcEffectKind::exception_entry &&
+               effect.exception_vector == vector && m68k_instruction_cycles(op) == std::optional<std::uint32_t>{34U} &&
+               m68k_ir_is_transfer(op) && m68k_operation_is_immutable_rom_aot_safe(op, false) &&
+               m68k_operation_has_complete_c_emission(op),
+           "instruction-word exception: terminal exception entry, 34-cycle row, AOT admitted");
+  }
+  // Other profiles keep their frozen behaviour: ILLEGAL is still an illegal_instruction rejection there.
+  const auto fixed = decode_m68k_instruction(std::vector<std::uint8_t>{0x4AU, 0xFCU}, source(),
+                                             M68kDecodeProfile::genesis_startup);
+  const auto *fixed_rejected = std::get_if<RejectedM68kDecode>(&fixed);
+  expect(fixed_rejected != nullptr && fixed_rejected->outcome == DecodeOutcome::illegal_instruction,
+         "genesis_startup still rejects ILLEGAL as illegal_instruction");
+  // Generation-time classification spot checks (the exhaustive comparison with the independent partition is the
+  // capability ratchet).
+  expect(m68k_classify_primary_word(0x4AFCU) == M68kPrimaryWordClass::legal &&
+             m68k_classify_primary_word(0x4E7AU) == M68kPrimaryWordClass::illegal &&
+             m68k_classify_primary_word(0xA123U) == M68kPrimaryWordClass::line_a_emulator &&
+             m68k_classify_primary_word(0xF456U) == M68kPrimaryWordClass::line_f_emulator &&
+             m68k_classify_primary_word(0x4E70U) == M68kPrimaryWordClass::legal &&
+             m68k_primary_word_exception_vector(M68kPrimaryWordClass::legal) == 0U,
+         "primary-word classification");
+  // Routed lowering: the raise carries the build-time vector and stacked PC; RTR uses the frame-return routine.
+  GenesisM68kEmissionContext memory{};
+  memory.address_registers = "runtime->a";
+  memory.user_stack_pointer = "runtime->usp";
+  memory.program_counter = "runtime->pc";
+  memory.runtime_routing = true;
+  memory.runtime_object = "runtime";
+  const auto routed = [&](std::vector<std::uint8_t> bytes) {
+    const auto decoded = decoded_of(std::move(bytes));
+    return decoded ? emit_m68k_operation_c(lift_m68k_instruction(*decoded), "runtime->d", "runtime->sr", {}, &memory)
+                   : std::string{};
+  };
+  expect(routed({0x4EU, 0x45U}).find("genesis_raise_software_exception(runtime, UINT32_C(37), UINT32_C(0x00000102)") !=
+             std::string::npos,
+         "TRAP #5 raises vector 37 with the next instruction stacked");
+  expect(routed({0xA0U, 0x00U}).find("genesis_raise_software_exception(runtime, UINT32_C(10), UINT32_C(0x00000100)") !=
+             std::string::npos,
+         "a line-1010 word raises vector 10 with its own address stacked");
+  const auto trapv_c = routed({0x4EU, 0x76U});
+  expect(trapv_c.find("& UINT16_C(0x0002)) != 0U)") != std::string::npos &&
+             trapv_c.find("genesis_raise_software_exception(runtime, UINT32_C(7), UINT32_C(0x00000102)") != std::string::npos,
+         "TRAPV raises vector 7 only when V is set");
+  expect(routed({0x4EU, 0x77U}).find("genesis_return_restore_condition_codes(runtime, &m68k_rtr_pc") != std::string::npos,
+         "RTR pops through the platform's frame-return routine");
+  expect(routed({0x4EU, 0x77U}).find("genesis_raise_privilege_violation") == std::string::npos,
+         "RTR is unprivileged");
+  // Static discovery: TRAP continues at the next instruction; ILLEGAL is terminal (the bytes after it are never
+  // walked); RTR is terminal.
+  {
+    const std::vector<std::uint8_t> image{0x4EU, 0x40U, 0x70U, 0x01U, 0x4AU, 0xFCU, 0xFFU, 0xFFU, 0xFFU, 0xFFU};
+    FrontendProgram program{};
+    program.profile = M68kFrontendProfile::general_startup;
+    program.image = {"synthetic/SEG-021-T019/discovery", image, image.size()};
+    program.mapping_claims = {{"rom", {{}, 0xB00U}, {{}, static_cast<std::uint32_t>(0xB00U + image.size())}, {0U},
+                               {image.size()}}};
+    program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+    const auto result = analyze_m68k_frontend(program);
+    const auto *analysis = std::get_if<FrontendAnalysis>(&result);
+    expect(analysis != nullptr && analysis->decoded.size() == 3U &&
+               analysis->decoded[0].kind == M68kInstructionKind::trap &&
+               analysis->decoded[1].kind == M68kInstructionKind::moveq &&
+               analysis->decoded[2].kind == M68kInstructionKind::instruction_exception &&
+               analysis->decoded[2].exception_vector == 4U,
+           "discovery walks TRAP's continuation and stops at the ILLEGAL terminal");
+  }
 }
 
 void exg_movep_scc_tas_encodings_are_disjoint_and_exactly_the_legal_set() {
@@ -28010,15 +28360,18 @@ void exg_movep_scc_tas_lift_declare_effects_and_timing() {
                m68k_operation_is_immutable_rom_aot_safe(tas, false) && m68k_operation_has_complete_c_emission(tas),
            "TAS is a byte RMW with CCR effects, Table 8-6 timing (Dn 4, memory 10 + EA) and AOT admission");
   }
-  // Illegal operands and truncation are bounds-safe rejections.
-  for (const auto &bytes : std::array<std::vector<std::uint8_t>, 4>{{
+  // Illegal operands are the vector-4 instruction-word exception (SEG-021-T019; 0x4AFC is ILLEGAL itself, never a
+  // TAS #imm) and truncation is a bounds-safe rejection.
+  for (const auto &bytes : std::array<std::vector<std::uint8_t>, 3>{{
            {0x4AU, 0xC8U, 0x00U, 0x00U},        // TAS A0
            {0x4AU, 0xFAU, 0x00U, 0x10U},        // TAS d16(PC)
-           {0x4AU, 0xFCU, 0x00U, 0x00U},        // ILLEGAL / TAS #imm
-           {0x50U, 0xF9U, 0x00U, 0xFFU}}}) {    // Scc abs.L with a truncated extension
+           {0x4AU, 0xFCU, 0x00U, 0x00U}}}) {    // ILLEGAL / TAS #imm
     const auto decoded = decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup);
-    expect(!std::holds_alternative<M68kDecodedInstruction>(decoded), "illegal/truncated Scc/TAS operands are rejected");
+    expect(is_instruction_exception(decoded, 4U), "illegal Scc/TAS operands are the vector-4 instruction-word exception");
   }
+  expect(!std::holds_alternative<M68kDecodedInstruction>(decode_m68k_instruction(
+             std::vector<std::uint8_t>{0x50U, 0xF9U, 0x00U, 0xFFU}, source(), M68kDecodeProfile::general_startup)),
+         "a truncated Scc abs.L extension is rejected");
   const auto movep_truncated = decode_m68k_instruction(std::vector<std::uint8_t>{0x03U, 0x88U}, source(),
                                                        M68kDecodeProfile::general_startup);
   const auto *failure = std::get_if<RejectedM68kDecode>(&movep_truncated);
@@ -29361,13 +29714,15 @@ void t242_independently_walked_safe_block_survives_missing_graph_ownership() {
            "through the existing odd_direct_target diagnostic");
   }
 
-  // NEGATIVE (undecodable bytes): Y begins with a genuine ILLEGAL opcode.
+  // NEGATIVE (undecodable bytes): Y begins with bytes the decoder rejects. SEG-021-T019: ILLEGAL (0x4AFC) is now the
+  // decoded vector-4 exception, so the undecodable form is a legal TST.B (d8,A6,Xn) whose index word carries the
+  // MC68020 full-format bit.
   {
-    const std::vector<std::uint8_t> illegal_y_bytes{0x4AU, 0xFCU};  // ILLEGAL
+    const std::vector<std::uint8_t> illegal_y_bytes{0x4AU, 0x36U, 0x01U, 0x04U};
     const auto result = analyze_m68k_frontend(make_program(illegal_y_bytes));
     if (const auto *partial = std::get_if<FrontendPartialProgram>(&result)) {
       expect(!has_block(partial->accepted_prefix, y_address),
-             "T242 negative (undecodable bytes): a genuine ILLEGAL opcode never becomes a retained block");
+             "T242 negative (undecodable bytes): an undecodable form never becomes a retained block");
     }
   }
 
@@ -29506,6 +29861,13 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::string_view(argv[1]).starts_with("--emit-general-startup-bridge-privilege-violation"))
     return emit_general_startup_bridge_privilege_violation_source(
         std::string_view(argv[1]).substr(std::string_view("--emit-general-startup-bridge-privilege-violation").size()));
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-software-exception-aot")
+    return emit_software_exception_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-software-exception-c4")
+    return emit_software_exception_c4_source();
+  if (argc == 2 && std::string_view(argv[1]).starts_with("--emit-general-startup-bridge-software-exception"))
+    return emit_general_startup_bridge_software_exception_source(
+        std::string_view(argv[1]).substr(std::string_view("--emit-general-startup-bridge-software-exception").size()));
   if (argc == 2 && std::string_view(argv[1]) == "--emit-pea-aot")
     return emit_pea_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-jmp-pc-indexed-word-aot")
@@ -29834,6 +30196,7 @@ int main(int argc, char **argv) {
   expect(c4_bcd_admission() == 0,
          "SEG-021-T015: every legal ABCD/SBCD/NBCD shape passes the C4 preflight with zero gap rows");
   exg_movep_scc_tas_encodings_are_disjoint_and_exactly_the_legal_set();
+  software_exception_family_decodes_lifts_and_discovers();
   exg_movep_scc_tas_lift_declare_effects_and_timing();
   exg_movep_scc_tas_host_semantics_ccr_and_bytes();
   exg_movep_scc_tas_generated_c_shapes();

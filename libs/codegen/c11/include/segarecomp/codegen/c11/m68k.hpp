@@ -67,6 +67,15 @@ class M68kRuntimeCEmitter {
   // SEG-021-T018 / ADR 0043 §6: a complete statement that returns the deferred-trace stop (an SR
   // write would leave T = 1). Nothing has been committed when it runs.
   [[nodiscard]] virtual std::string trace_deferred_stop(const M68kMemoryEmissionContext &context) const = 0;
+  // SEG-021-T019 / ADR 0043 §3, §5: the software exceptions (TRAP #n, TRAPV, CHK, ILLEGAL, line 1010/1111 and every
+  // other illegal word) raise `vector` with `stacked_pc` (the build-time PC value ADR 0043 §3 selects for that
+  // exception). The text is a complete statement that always returns: it continues at the build-time-resolved
+  // handler or stops fail-closed with nothing changed.
+  [[nodiscard]] virtual std::string software_exception(const M68kMemoryEmissionContext &context, std::uint32_t vector,
+                                                       std::uint32_t stacked_pc) const = 0;
+  // SEG-021-T019 / ADR 0043 §5: RTR's validated atomic CCR/PC frame pop; leaves the restored program counter in
+  // `m68k_rtr_pc` (the text opens a block the lowering closes) or returns the fail-closed stop.
+  [[nodiscard]] virtual std::string condition_code_return(const M68kMemoryEmissionContext &context) const = 0;
 };
 
 struct M68kMemoryEmissionContext {

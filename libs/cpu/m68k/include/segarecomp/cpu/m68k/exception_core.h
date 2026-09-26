@@ -180,4 +180,28 @@ static inline SegarecompM68kExceptionStatus segarecomp_m68k_exception_return(
   return SEGARECOMP_M68K_EXCEPTION_OK;
 }
 
+/*
+ * SEG-021-T019 / ADR 0043 §5 RTR (unprivileged; no mode requirement): read the
+ * word at the active SP and the PC long at SP+2, then commit together CCR <-
+ * the read word's X/N/Z/V/C (the system byte of SR is unchanged), PC <- the
+ * read PC, active SP <- SP+6. A failed read commits nothing. RTR is not an
+ * exception return, so no exception-return notification is made.
+ */
+static inline SegarecompM68kExceptionStatus segarecomp_m68k_return_restore_ccr(
+    const SegarecompM68kMachineHooks *hooks, const SegarecompM68kCpuBinding *cpu, uint32_t *restored_pc_out) {
+  uint32_t sp;
+  uint32_t saved_ccr = 0U;
+  uint32_t saved_pc = 0U;
+  if (!segarecomp_m68k_binding_valid(hooks, cpu)) return SEGARECOMP_M68K_EXCEPTION_BAD_BINDING;
+  sp = *cpu->active_sp;
+  if ((sp & 1U) != 0U) return SEGARECOMP_M68K_EXCEPTION_STACK_INVALID;
+  if (!hooks->stack_read(hooks->context, sp, 2U, &saved_ccr)) return SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED;
+  if (!hooks->stack_read(hooks->context, sp + 2U, 4U, &saved_pc)) return SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED;
+  *cpu->sr = (uint16_t)((*cpu->sr & UINT16_C(0xFF00)) | (saved_ccr & UINT32_C(0x1F)));
+  *cpu->active_sp = sp + SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES;
+  *cpu->pc = saved_pc;
+  if (restored_pc_out != 0) *restored_pc_out = saved_pc;
+  return SEGARECOMP_M68K_EXCEPTION_OK;
+}
+
 #endif

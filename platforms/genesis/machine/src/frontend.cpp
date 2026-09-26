@@ -2907,14 +2907,18 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   // build-time vector resolution, bounded discovery, and aggregation with the
   // IRQ6 root, while remaining outside asynchronous IRQ scheduling semantics.
   // SEG-021-T018 / ADR 0043 §3/§7: vector 8 (privilege violation, offset
-  // 0x20) is resolved, rooted and represented by exactly the same rule; the
-  // bounded table below is the complete set of synchronous-exception vectors
-  // this machine delivers.
+  // 0x20) is resolved, rooted and represented by exactly the same rule.
+  // SEG-021-T019 / ADR 0043 §3: so are the software-exception vectors 4, 6,
+  // 7, 10, 11 and 32-47; the bounded table below is the complete set of
+  // synchronous-exception vectors this machine delivers (vectors 5 and 8
+  // first, preserving their established root order).
   std::optional<Address> divide_by_zero_handler_entry_value;
   std::optional<Address> privilege_violation_handler_entry_value;
-  for (const auto &[kSynchronousVectorOffset, handler_slot] :
-       {std::pair<std::size_t, std::optional<Address> *>{0x14U, &divide_by_zero_handler_entry_value},
-        std::pair<std::size_t, std::optional<Address> *>{0x20U, &privilege_violation_handler_entry_value}}) {
+  std::map<std::uint8_t, Address> software_exception_handler_entry_values;
+  std::vector<std::uint8_t> synchronous_vectors{5U, 8U, 4U, 6U, 7U, 10U, 11U};
+  for (std::uint8_t trap_vector = 32U; trap_vector <= 47U; ++trap_vector) synchronous_vectors.push_back(trap_vector);
+  for (const auto synchronous_vector : synchronous_vectors) {
+    const std::size_t kSynchronousVectorOffset = static_cast<std::size_t>(synchronous_vector) * 4U;
     if (const auto resolved_handler = resolve_vector_handler(kSynchronousVectorOffset)) {
       const Address handler = *resolved_handler;
       const M68kProgramAddress handler_address{TargetAddressSpace::m68k_program, handler};
@@ -2937,7 +2941,9 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
         return translate_m68k_discovery_issue(program, *discovery.primary_issue);
       for (const auto &issue : discovery.secondary_issues)
         if (is_fatal_probe_failure(issue)) return translate_m68k_discovery_issue(program, issue);
-      *handler_slot = handler;
+      if (synchronous_vector == 5U) divide_by_zero_handler_entry_value = handler;
+      else if (synchronous_vector == 8U) privilege_violation_handler_entry_value = handler;
+      else software_exception_handler_entry_values[synchronous_vector] = handler;
       merge_root_result({StaticProgramRootKind::synchronous_exception, 0U}, discovery);
     }
   }
@@ -3237,6 +3243,8 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
       analysis_roots_base.push_back({TargetAddressSpace::m68k_program, *divide_by_zero_handler_entry_value});
     if (privilege_violation_handler_entry_value)
       analysis_roots_base.push_back({TargetAddressSpace::m68k_program, *privilege_violation_handler_entry_value});
+    for (const auto &[software_vector, handler] : software_exception_handler_entry_values)  // SEG-021-T019
+      analysis_roots_base.push_back({TargetAddressSpace::m68k_program, handler});
     // Runtime-confirmed roots are authoritative unknown-state roots, never
     // register facts.
     for (const auto &root : program.runtime_confirmed_seeds)
@@ -3546,6 +3554,10 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   if (privilege_violation_handler_entry_value)
     analysis.privilege_violation_handler_entry =
         M68kProgramAddress{TargetAddressSpace::m68k_program, *privilege_violation_handler_entry_value};
+  // SEG-021-T019: the software-exception vector handler entries, retained exactly like vectors 5 and 8.
+  for (const auto &[software_vector, handler] : software_exception_handler_entry_values)
+    analysis.software_exception_handler_entries[software_vector] =
+        M68kProgramAddress{TargetAddressSpace::m68k_program, handler};
   // SEG-007-T174 / ADR-0024: every external code-entry candidate that
   // discovery actually independently decoded (not merely attempted as a
   // seed -- `block_entries` unconditionally records every seed's own bare
@@ -3587,6 +3599,9 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   if (analysis.privilege_violation_handler_entry &&
       analysis.privilege_violation_handler_entry->space == TargetAddressSpace::m68k_program)
     analysis.semantic_partition_boundary_addresses.insert(analysis.privilege_violation_handler_entry->value);
+  for (const auto &[software_vector, handler] : analysis.software_exception_handler_entries)  // SEG-021-T019
+    if (handler.space == TargetAddressSpace::m68k_program)
+      analysis.semantic_partition_boundary_addresses.insert(handler.value);
   for (const auto &set : analysis.indirect_target_ea_sets)
     for (const auto &candidate : set.candidates)
       if (candidate.space == TargetAddressSpace::m68k_program)
@@ -3710,6 +3725,8 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
     const auto is_block_transfer = [](M68kInstructionKind kind) {
       return kind == M68kInstructionKind::bne_short || kind == M68kInstructionKind::bra_short ||
              kind == M68kInstructionKind::rts || kind == M68kInstructionKind::rte ||
+             // SEG-021-T019: RTR and the instruction-word exceptions end a block (no fallthrough successor).
+             kind == M68kInstructionKind::rtr || kind == M68kInstructionKind::instruction_exception ||
              kind == M68kInstructionKind::jmp || kind == M68kInstructionKind::jsr ||
              kind == M68kInstructionKind::branch || kind == M68kInstructionKind::bsr ||
              kind == M68kInstructionKind::dbcc;
@@ -3796,6 +3813,8 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
                                  decoded->second.kind == M68kInstructionKind::bra_short ||
                                  decoded->second.kind == M68kInstructionKind::rts ||
                                  decoded->second.kind == M68kInstructionKind::rte ||
+                                 decoded->second.kind == M68kInstructionKind::rtr ||                    // SEG-021-T019
+                                 decoded->second.kind == M68kInstructionKind::instruction_exception ||  // SEG-021-T019
                                  decoded->second.kind == M68kInstructionKind::jmp ||
                                  decoded->second.kind == M68kInstructionKind::jsr ||
                                  decoded->second.kind == M68kInstructionKind::branch ||
@@ -3983,6 +4002,8 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
         if (analysis.privilege_violation_handler_entry &&
             analysis.privilege_violation_handler_entry->space == TargetAddressSpace::m68k_program)
           seed(analysis.privilege_violation_handler_entry->value);
+        for (const auto &[software_vector, handler] : analysis.software_exception_handler_entries)  // SEG-021-T019
+          if (handler.space == TargetAddressSpace::m68k_program) seed(handler.value);
         for (const auto &root : analysis.validated_code_entry_candidate_roots)
           if (root.space == TargetAddressSpace::m68k_program) seed(root.value);
         // Mirrors `runtime_frontier_eligible`'s own walk exactly: `pending`
@@ -4421,6 +4442,7 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
         break;
       case M68kInstructionKind::move_to_sr:
       case M68kInstructionKind::move_to_ccr:
+      case M68kInstructionKind::chk:  // SEG-021-T019: CHK.W reads its word bound (same shape)
         // SEG-021-T018: MOVE <ea>,SR / MOVE <ea>,CCR read one word source (CMP's source-read shape).
         retain_fact(decoded, decoded.source_ea, M68kStaticMemoryFactRole::source_read,
                     M68kMemoryAccessDirection::read);

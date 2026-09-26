@@ -34,7 +34,13 @@ REPORT = ROOT / "docs" / "testing" / "m68k-capability-coverage.md"
 
 SCHEMA = 2
 PROBE_FIELDS = ["decode", "lift", "effects", "ea_footprint", "ccr_declared", "timing", "emit_direct", "emit_routed",
-                "aot", "static", "exception_vector"]
+                "aot", "static", "exception_vector", "word_class"]
+# SEG-021-T019: the probe's `word_class` codes (the production generation-time classification) and, per T001
+# partition class, the code it must report and the vector an architecturally reserved word raises on the MC68000.
+WORD_CLASS_CODES = {0: "legal", 1: "line_a", 2: "line_f", 3: "illegal"}
+PARTITION_EXPECTATION = {"legal_user": ("legal", None), "legal_privileged": ("legal", None),
+                         "line_a_reserved_exception": ("line_a", 10), "line_f_reserved_exception": ("line_f", 11),
+                         "illegal_post_68000_encoding": ("illegal", 4), "illegal_reserved_unassigned": ("illegal", 4)}
 # Ordered stage list (bit position in the per-form mask).
 # Structural stages: what the public pipeline declares/produces. Validated stages: independent evidence.
 PIPELINE_STAGES = ["decode", "lift", "effects", "ea_footprint_declared", "ccr_sr_effect_declared",
@@ -111,6 +117,10 @@ int main(int argc, char **argv) {
   for (unsigned i = 0; i < sizeof baseline.work_ram; ++i) baseline.work_ram[i] = (uint8_t)((i * 7U + 3U) & 0xFFU);
   for (unsigned r = 0; r < 8U; ++r) { baseline.d[r] = 0x100U + r * 0x10U; baseline.a[r] = UINT32_C(0x00FF0000) + 0x2000U + r * 0x1000U; }
   baseline.sr = 0x271FU; baseline.pc = 0x2000U; baseline.usp = UINT32_C(0x00FF8000);
+  /* SEG-021-T019: every software-exception vector has a build-time handler, so a raise continues at it. */
+  for (unsigned v = 0; v < GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT; ++v) {
+    baseline.software_exception_handler_entry[v] = 0x3000U + v * 4U; baseline.software_exception_handler_present[v] = 1U;
+  }
   for (unsigned c = 0; c < %(n)s; ++c) {
     for (unsigned k = 0; k < *counts[c]; ++k) {
       const unsigned w = words[c][k];
@@ -377,14 +387,50 @@ def measure(probe, cc):
             passes["ea_side_effect_validated"] &= word in aspects["ea"]
             passes["timing_validated"] &= word in aspects["timing"]
         rows[form["id"]] = (form, passes, applicable, len(ws))
-    return data, forms, rows, table, manifest, aspects
+    # SEG-021-T019: every primary word the T001 partition classifies as architecturally reserved (line 1010,
+    # line 1111, unassigned or post-MC68000) is "architecturally illegal - handled" only when the pipeline selects
+    # it at generation time as an exception-raising form with the architectural vector and carries it through every
+    # stage and route; a word the decoder rejects stays "unsupported" (fail closed); a word decoded to anything else
+    # is a misclassification. The production classification is compared with the partition word by word.
+    partition = data["primary_word_partition"]
+    legend = partition["legend"]
+    illegal = {}
+    mismatches = []
+    for word in range(0x10000):
+        cls = legend[partition["rows"][word >> 8][word & 0xFF]]
+        expected_class, vector = PARTITION_EXPECTATION[cls]
+        f = dict(zip(PROBE_FIELDS, table[word]))
+        if WORD_CLASS_CODES.get(f["word_class"]) != expected_class:
+            mismatches.append(word)
+        if vector is None:
+            continue
+        entry = illegal.setdefault(cls, {"words": 0, "handled": 0, "partially_handled": 0, "unsupported": 0,
+                                         "misclassified": 0})
+        entry["words"] += 1
+        if not f["decode"]:
+            entry["unsupported"] += 1
+            continue
+        if not (f["lift"] and f["effects"] and f["exception_vector"] == vector):
+            entry["misclassified"] += 1
+            continue
+        compiled = bool(f["emit_direct"]) and word not in failed
+        ran = compiled and executed.get(word) == 0 and word not in crashed
+        r_ran = bool(f["emit_routed"]) and word not in rfailed and rexecuted.get(word) == 0 and word not in rcrashed
+        if ran and r_ran and f["aot"] and f["static"] and f["timing"]:
+            entry["handled"] += 1
+        else:
+            entry["partially_handled"] += 1
+    arch = {"by_partition_class": dict(sorted(illegal.items())),
+            "production_classification_mismatches": len(mismatches),
+            "first_mismatches": ["%04X" % w for w in mismatches[:8]]}
+    return data, forms, rows, table, manifest, aspects, arch
 
 
 def pct(n, d):
     return "%d.%02d" % divmod((n * 10000 + d // 2) // d if d else 0, 100)
 
 
-def summarize(data, forms, rows, table, manifest, aspects):
+def summarize(data, forms, rows, table, manifest, aspects, arch):
     def tally(selected):
         out = {}
         for stage in ALL_STAGES:
@@ -409,7 +455,10 @@ def summarize(data, forms, rows, table, manifest, aspects):
     legend = partition["legend"]
     for word in range(0x10000):
         cls = legend[partition["rows"][word >> 8][word & 0xFF]]
-        if cls not in ("legal_user", "legal_privileged") and table[word][0]:
+        # SEG-021-T019: a reserved word selected as its architectural exception is handled, not over-accepted.
+        f = dict(zip(PROBE_FIELDS, table[word]))
+        if cls not in ("legal_user", "legal_privileged") and f["decode"] and \
+                f["exception_vector"] != PARTITION_EXPECTATION[cls][1]:
             over[cls] = over.get(cls, 0) + 1
     unsupported = []
     for mnemonic in sorted(by_mnemonic):
@@ -439,6 +488,7 @@ def summarize(data, forms, rows, table, manifest, aspects):
                        "forms_with_at_least_one_validated_word": dict(sorted(touched.items())),
                        "manifest_sources": manifest["sources"]},
         "decode_over_acceptance_words": dict(sorted(over.items())),
+        "architecturally_illegal_words": arch,
         "unsupported_mnemonics": unsupported,
         "form_masks": masks,
     }
@@ -455,6 +505,7 @@ STAGE_DEFINITIONS = [
     ("route_runtime_routed_admitted / compiles / executes", "structural (runtime-routed route)", "the Genesis runtime-routed lowering emits a non-empty operation body (admitted; an indentation-only body is a declined operation, not an admission); that C compiles under the same strict flags against the real `platforms/genesis/runtime` header (compiles); it runs against the real runtime linked from `runtime.c`, from a restored baseline with work RAM only, and continues at PC rather than stopping (executes). Whole-program C4 preflight facts are not exercised, so absolute-address forms stop at the runtime memory gate under the fixed extension pattern. **These rows measure the raw routed emitter only; they are NOT proof that the C4 preflight classifier (`classify_m68k_c4_gap_shapes`) accepts the form** -- C4 acceptance is proved by the focused C4 admission regressions in `tests/m68k_pipeline_test.cpp` (e.g. `c4_arithmetic_auto_update_admission`)."),
     ("route_immutable_rom_aot", "structural", "`m68k_operation_is_immutable_rom_aot_safe` admits the form."),
     ("route_static_discovery", "structural", "the CPU-owned static discovery walks the form to a clean end."),
+    ("architecturally illegal - handled / unsupported", "structural (non-legal words)", "every primary word the T001 partition classifies as architecturally reserved (line 1010 -> vector 10, line 1111 -> vector 11, unassigned or post-MC68000 -> vector 4) is `handled` when decode selects it at generation time as an exception-raising form whose effect names that vector and it emits, compiles, runs (direct and runtime-routed), is immutable-ROM AOT admitted, has a timing row and walks static discovery; `partially_handled` when it is selected with the right vector but a later stage fails; `unsupported` when decode rejects it (fail closed); `misclassified` when it decodes to anything else. `production_classification_mismatches` compares the production generation-time classification (`m68k_classify_primary_word`) with the partition for all 65,536 words."),
     ("semantic_validated", "validated", "every word has existing pinned-Musashi differential evidence comparing the result state."),
     ("ccr_sr_validated", "validated", "applicable to CCR-modifying forms; every word has existing Musashi evidence that compares SR/CCR."),
     ("ea_side_effect_validated", "validated", "applicable to forms with auto-update/implicit-stack effects; every word has existing Musashi evidence comparing the full D/A register state and memory."),
@@ -504,7 +555,17 @@ def render_report(result):
     for family, tally in result["by_family"].items():
         s = tally["end_to_end_structural"]
         lines.append("| %s | %d | %d | %s%% |" % (family, s["applicable_forms"], s["passing_forms"], s["percent_forms"]))
-    lines += ["", "## Decode over-acceptance (non-legal words the decoder accepts)", ""]
+    lines += ["", "## Architecturally illegal words: handled versus unsupported", "",
+              "| partition class | words | handled | partially handled | unsupported (fail closed) | misclassified |",
+              "| --- | ---: | ---: | ---: | ---: | ---: |"]
+    arch = result["architecturally_illegal_words"]
+    for cls, e in arch["by_partition_class"].items():
+        lines.append("| %s | %d | %d | %d | %d | %d |" % (cls, e["words"], e["handled"], e["partially_handled"],
+                                                         e["unsupported"], e["misclassified"]))
+    lines += ["", "Production generation-time classification mismatches against the partition: %d." %
+              arch["production_classification_mismatches"]]
+    lines += ["", "## Decode over-acceptance (non-legal words the decoder accepts as something other than their "
+              "architectural exception)", ""]
     over = result["decode_over_acceptance_words"]
     lines += ["- %s: %d words" % (k, n) for k, n in over.items()] or ["- none"]
     lines += ["", "## Unsupported mnemonics (forms failing the end-to-end structural bar)", "",

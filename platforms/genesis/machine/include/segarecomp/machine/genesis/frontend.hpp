@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -390,6 +391,11 @@ struct FrontendAnalysis { M68kFrontendProfile profile{M68kFrontendProfile::direc
   // violation) handler entry (vector-table offset 0x20), resolved, rooted and
   // retained by exactly the same rule as `divide_by_zero_handler_entry`.
   std::optional<M68kProgramAddress> privilege_violation_handler_entry;
+  // SEG-021-T019 / ADR 0043 §3, §7: the build-time-resolved handler entries of the software-exception vectors
+  // (4 illegal instruction, 6 CHK, 7 TRAPV, 10 line 1010, 11 line 1111, 32-47 TRAP #0-#15), keyed by vector
+  // number; each is resolved from the immutable vector table, rooted and retained by exactly the vector-5/8 rule
+  // (a zero slot installs nothing; a raise of an uninstalled vector stops fail-closed at runtime).
+  std::map<std::uint8_t, M68kProgramAddress> software_exception_handler_entries;
   // SEG-007-T174 / ADR-0024: every `FrontendProgram::external_code_entry_
   // candidate` address that discovery actually admitted as a block entry
   // (i.e. every candidate that survived its own independent walk), in the
@@ -948,6 +954,22 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // `m68k_operation_has_complete_c_emission` probe unchanged for every other kind. Timing reuses the
     // shared static retirement row (exact data-dependent DIV timing is SEG-021-T022).
     return m68k_instruction_cycles(operation).has_value();
+  case M68kIrKind::trap_exception:
+  case M68kIrKind::trap_on_overflow:
+  case M68kIrKind::check_bounds:
+  case M68kIrKind::instruction_exception:
+    // SEG-021-T019 / ADR 0043 §3, §5: TRAP #n, TRAPV, CHK.W and the instruction-word exceptions lower through the
+    // platform's synchronous-exception raise (the M68K-owned entry core bound by the machine: validated six-byte
+    // frame on the SSP, build-time-resolved handler, fail-closed when no handler is installed) exactly like the
+    // vector-5/vector-8 raises; CHK's bound is read through the shared routed read primitives with the
+    // operation-local deferred commit for (An)+/-(An). No CFG edge, frame, return-target set or memory fact is
+    // needed: the handler is a build-time dispatch root and the stacked continuation is an ordinary PC. The
+    // retiring (not-taken) paths have published static rows.
+    return m68k_instruction_cycles(operation).has_value();
+  case M68kIrKind::return_restore_condition_codes:
+    // SEG-021-T019 / ADR 0043 §5: RTR pops its CCR/PC frame through the same validated atomic frame-return core as
+    // RTE (no privilege check); the restored PC continues through the ordinary dispatcher exactly like RTE's.
+    return true;
   }
   return false;
 }

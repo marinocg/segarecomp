@@ -256,6 +256,20 @@ entry has no failure path after its first frame byte. `stack_read` stays fallibl
 RTE. A machine whose routed write fails after validation anyway reports its own terminal stop; the
 core does not roll back.
 
+Implementation note (SEG-021-T019): TRAP #n, TRAPV, CHK.W, ILLEGAL, line 1010/1111 and every other
+architecturally illegal operation word enter through the same core with the vector and stacked PC of
+§3 as build-time facts of the lowered instruction. Which operation words are architecturally illegal
+is decided at generation time by `m68k_classify_primary_word` (`libs/cpu/m68k`, written from the
+Motorola manual); such a word is selected as a two-byte exception-raising instruction with no static
+successor, while a legal word the project does not implement still fails closed. The Genesis binding
+generalizes the vector-5/vector-8 rule into one bounded build-time table (vectors 4, 6, 7, 10, 11 and
+32-47, each resolved from the immutable vector table, rooted for static discovery and written by the
+generated `main`); an uninstalled vector stops with `unsupported_software_exception`. TRAP, TRAPV and
+CHK stack the next instruction, so their sequential continuation is kept in the static graph as a
+call-like continuation that carries no register fact. RTR is `segarecomp_m68k_return_restore_ccr`:
+two fallible reads, then CCR (X/N/Z/V/C only), PC and SP += 6 commit together, with no privilege check
+and no exception-return notification.
+
 ### 8. Timing
 
 Exception-entry cycle counts are CPU facts from the MC68000 User's Manual exception-processing

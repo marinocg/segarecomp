@@ -419,6 +419,8 @@ inline constexpr M68kEaLegalMask m68k_ea_movem_memory_to_register =
 inline constexpr M68kEaLegalMask m68k_ea_move_to_sr_source = m68k_ea_move_family_source & ~m68k_ea_an;
 inline constexpr M68kEaLegalMask m68k_ea_move_from_sr_destination = m68k_ea_data_alterable_with_index;
 inline constexpr M68kEaLegalMask m68k_ea_move_to_ccr_source = m68k_ea_move_to_sr_source;
+// SEG-021-T019: CHK.W <ea>,Dn upper-bound source -- every data addressing mode (Motorola CHK entry).
+inline constexpr M68kEaLegalMask m68k_ea_chk_source = m68k_ea_move_family_source & ~m68k_ea_an;
 
 enum class M68kMemoryAccessWidth { byte = 1, word = 2, long_word = 4 };
 enum class M68kMemoryAccessDirection { read, write };
@@ -428,7 +430,7 @@ enum class M68kInstructionKind {
   // SEG-007-T047 / ADR-0020 §9: RTE, the architected encoding 0x4E73, selected
   // only under the general_startup policy, beside rts. It consumes exactly the
   // basic MC68000 exception stack frame this task's IRQ6 entry constructs (SR
-  // at SP, PC at SP+2). RTR/TRAP/TRAPV/ILLEGAL remain out of scope / rejected.
+  // at SP, PC at SP+2). SEG-021-T019 adds RTR/TRAP/TRAPV/ILLEGAL (see the end of this enumeration).
   // Static translation only: no runtime instruction fetch of any kind.
   rte,
   // SEG-007-T023 shared whitelist forms. Each `kind` spans every selected
@@ -726,6 +728,20 @@ enum class M68kInstructionKind {
   // same divide-by-zero/overflow/CCR contract as DIVS.W with unsigned
   // comparison (quotient > 0xFFFF is the overflow condition).
   divide_unsigned_word,
+  // SEG-021-T019 / ADR 0043 §3 (Motorola M68000 Family Programmer's Reference Manual TRAP/TRAPV/CHK/RTR/ILLEGAL
+  // entries; MC68000 User's Manual exception chapter). Every exception-raising form carries its build-time vector
+  // in `exception_vector`; nothing is decoded at runtime.
+  //   trap   TRAP #<vector> (0x4E40-0x4E4F): always raises vector 32 + n with the NEXT instruction stacked.
+  //   trapv  TRAPV (0x4E76): raises vector 7 (next instruction stacked) when V = 1, otherwise does nothing.
+  //   chk    CHK.W <ea>,Dn (0100 ddd 110 mmmrrr, data source): `source_ea` is the word upper bound, `destination_ea`
+  //          the Dn tested; raises vector 6 (next instruction stacked) when Dn.W < 0 or Dn.W > bound.
+  //   rtr    RTR (0x4E77, unprivileged): CCR <- word at SP, PC <- long at SP+2, SP += 6.
+  //   instruction_exception
+  //          ILLEGAL (0x4AFC, vector 4), every line-1010 word (vector 10), every line-1111 word (vector 11) and every
+  //          other architecturally illegal operation word (vector 4, `m68k_classify_primary_word`): raises the
+  //          vector with THIS instruction's address stacked. Always two bytes (the exception is taken on the
+  //          operation word).
+  trap, trapv, chk, rtr, instruction_exception,
 };
 // SEG-007-T025 (Batch C, C5): MOVEM's direction bit (contract: "one truthful
 // MOVEM identity"). Never combined with M68kCondition -- MOVEM reads no
@@ -794,6 +810,8 @@ struct M68kDecodedInstruction {
   M68kShiftRotateKind shift_rotate_kind{M68kShiftRotateKind::lsl};
   // SEG-021-T018: meaningful only for `logical_immediate_to_ccr`/`_sr`.
   M68kStatusLogicalOperation status_operation{M68kStatusLogicalOperation::and_op};
+  // SEG-021-T019: the build-time exception vector of `trap`/`trapv`/`chk`/`instruction_exception`; 0 otherwise.
+  std::uint8_t exception_vector{};
 };
 
 } // namespace segarecomp

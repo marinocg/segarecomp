@@ -64,6 +64,8 @@ STOP_DIAGNOSTIC_PAIRS = {
     # SEG-021-T018 / ADR 0043: a CPU exception delivered fail-closed at run time.
     "unsupported_cpu_exception": {
         "unsupported_privilege_violation_exception", "unsupported_trace_exception",
+        # SEG-021-T019: TRAP/TRAPV/CHK/ILLEGAL/line-A/line-F without an installed handler.
+        "unsupported_software_exception",
     },
 }
 

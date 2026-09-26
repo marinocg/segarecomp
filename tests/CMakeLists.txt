@@ -361,6 +361,11 @@ add_test(NAME genesis_immutable_rom_aot_exg_movep_scc_tas_generated_test COMMAND
 add_test(NAME genesis_status_register_privilege_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_status_register_privilege_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-021-T019 / ADR 0043: TRAP/TRAPV/CHK/ILLEGAL/line-A/line-F/illegal-word exceptions and RTR on the AOT, C4 and
+# whole-program bridge routes.
+add_test(NAME genesis_software_exception_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_software_exception_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_immutable_rom_aot_movem_link_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_movem_link_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

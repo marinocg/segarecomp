@@ -16,9 +16,15 @@
    "NBCD": [
     "N",
     "V"
+   ],
+   "CHK": [
+    "Z",
+    "V",
+    "C"
    ]
   },
-  "owner": "M68kDecimalArithmeticSpecification (libs/cpu/m68k/include/segarecomp/cpu/m68k/effects.hpp)"
+  "owner": "M68kDecimalArithmeticSpecification (libs/cpu/m68k/include/segarecomp/cpu/m68k/effects.hpp)",
+  "chk_policy": "SEG-021-T019: CHK.W Z/V/C are UNDEFINED on the base MC68000 and N is undefined when no trap is taken; production matches the pinned Musashi core (Z <- Dn.W == 0, V <- 0, C <- 0, N changed only on a trap: set for Dn.W < 0, cleared for Dn.W > bound), which agrees with every case the Motorola manual defines."
  },
  "values": {
   "boundary": [
@@ -1019,6 +1025,130 @@
    "sr": [
     "2700",
     "0015"
+   ]
+  },
+  "exception_state": {
+   "kind": "state",
+   "sr": [
+    "2700",
+    "271F",
+    "2000",
+    "0000",
+    "0715"
+   ]
+  },
+  "exception_state_modes": {
+   "kind": "state",
+   "sr": [
+    "2700",
+    "0015"
+   ]
+  },
+  "trapv_state": {
+   "kind": "state",
+   "sr": [
+    "2700",
+    "2702",
+    "271D",
+    "271F",
+    "0000",
+    "0002",
+    "001D"
+   ]
+  },
+  "rtr_frame": {
+   "kind": "pair_list",
+   "pairs": [
+    [
+     "0000001F",
+     "00003000"
+    ],
+    [
+     "0000FFE0",
+     "00012344"
+    ],
+    [
+     "00000000",
+     "00004000"
+    ],
+    [
+     "0000A715",
+     "00002100"
+    ],
+    [
+     "00002711",
+     "00001000"
+    ],
+    [
+     "0000000A",
+     "00020000"
+    ]
+   ],
+   "sr": [
+    "2700",
+    "271F",
+    "0015"
+   ]
+  },
+  "chk_pairs": {
+   "kind": "pair_list",
+   "pairs": [
+    [
+     "00000005",
+     "00000005"
+    ],
+    [
+     "00000000",
+     "00000005"
+    ],
+    [
+     "00000006",
+     "00000005"
+    ],
+    [
+     "0000FFFF",
+     "00000005"
+    ],
+    [
+     "12348000",
+     "00007FFF"
+    ],
+    [
+     "00007FFF",
+     "00007FFF"
+    ],
+    [
+     "00000001",
+     "0000FFFF"
+    ],
+    [
+     "FFFF0003",
+     "00000004"
+    ],
+    [
+     "00000000",
+     "00008000"
+    ],
+    [
+     "00008000",
+     "00008000"
+    ]
+   ],
+   "sr": [
+    "2700",
+    "271F",
+    "0000",
+    "001F"
+   ]
+  },
+  "chk_single": {
+   "kind": "single",
+   "values": "boundary",
+   "sr": [
+    "2700",
+    "271F",
+    "0000",
+    "001F"
    ]
   }
  },
@@ -6724,6 +6854,128 @@
    ]
   },
   {
+   "id": "chk.ea_dn.w.absl.dn",
+   "form": "chk.ea_dn.w.absl.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.src"
+   },
+   "profile": "chk_pairs",
+   "ext": [
+    "00020000"
+   ]
+  },
+  {
+   "id": "chk.ea_dn.w.absw.dn",
+   "form": "chk.ea_dn.w.absw.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.src"
+   },
+   "profile": "chk_pairs",
+   "ext": [
+    "4000"
+   ]
+  },
+  {
+   "id": "chk.ea_dn.w.disp.dn",
+   "form": "chk.ea_dn.w.disp.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.src"
+   },
+   "profile": "chk_pairs",
+   "ext": [
+    "0010"
+   ]
+  },
+  {
+   "id": "chk.ea_dn.w.dn.dn",
+   "form": "chk.ea_dn.w.dn.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.src"
+   },
+   "profile": "chk_pairs"
+  },
+  {
+   "id": "chk.ea_dn.w.imm.dn",
+   "form": "chk.ea_dn.w.imm.dn",
+   "bind": {
+    "x": "d@9"
+   },
+   "profile": "chk_single",
+   "ext": [
+    "0005",
+    "0000",
+    "8000",
+    "7FFF"
+   ]
+  },
+  {
+   "id": "chk.ea_dn.w.ind.dn",
+   "form": "chk.ea_dn.w.ind.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.src"
+   },
+   "profile": "chk_pairs"
+  },
+  {
+   "id": "chk.ea_dn.w.index.dn",
+   "form": "chk.ea_dn.w.index.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.src"
+   },
+   "profile": "chk_pairs",
+   "ext": [
+    "9004"
+   ]
+  },
+  {
+   "id": "chk.ea_dn.w.pcdisp.dn",
+   "form": "chk.ea_dn.w.pcdisp.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.src"
+   },
+   "profile": "chk_pairs",
+   "ext": [
+    "0010"
+   ]
+  },
+  {
+   "id": "chk.ea_dn.w.pcindex.dn",
+   "form": "chk.ea_dn.w.pcindex.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.src"
+   },
+   "profile": "chk_pairs",
+   "ext": [
+    "9004"
+   ]
+  },
+  {
+   "id": "chk.ea_dn.w.postinc.dn",
+   "form": "chk.ea_dn.w.postinc.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.src"
+   },
+   "profile": "chk_pairs"
+  },
+  {
+   "id": "chk.ea_dn.w.predec.dn",
+   "form": "chk.ea_dn.w.predec.dn",
+   "bind": {
+    "x": "d@9",
+    "y": "ea.src"
+   },
+   "profile": "chk_pairs"
+  },
+  {
    "id": "clr.unary.b.none.absl",
    "form": "clr.unary.b.none.absl",
    "bind": {
@@ -9686,6 +9938,11 @@
     "x": "ea.dst"
    },
    "profile": "unary_full"
+  },
+  {
+   "id": "illegal.none.none.none.none",
+   "form": "illegal.none.none.none.none",
+   "profile": "exception_state"
   },
   {
    "id": "link.an_disp16.w.an.disp16",
@@ -17707,6 +17964,34 @@
    "profile": "sr_state"
   },
   {
+   "id": "reserved.partition.illegal",
+   "partition_classes": [
+    "illegal_post_68000_encoding",
+    "illegal_reserved_unassigned"
+   ],
+   "profile": "exception_state_modes"
+  },
+  {
+   "id": "reserved.partition.line_a",
+   "partition_classes": [
+    "line_a_reserved_exception"
+   ],
+   "profile": "exception_state_modes"
+  },
+  {
+   "id": "reserved.partition.line_f",
+   "partition_classes": [
+    "line_f_reserved_exception"
+   ],
+   "exclude_words": [
+    [
+     "F620",
+     "F627"
+    ]
+   ],
+   "profile": "exception_state_modes"
+  },
+  {
    "id": "rol.dn_dn.b.dn.dn",
    "form": "rol.dn_dn.b.dn.dn",
    "bind": {
@@ -18202,6 +18487,15 @@
     "y": "pc@sp"
    },
    "profile": "rte_frame"
+  },
+  {
+   "id": "rtr.none.none.none.none",
+   "form": "rtr.none.none.none.none",
+   "bind": {
+    "x": "sr@sp",
+    "y": "pc@sp"
+   },
+   "profile": "rtr_frame"
   },
   {
    "id": "sbcd.dn_dn.b.dn.dn",
@@ -22057,6 +22351,16 @@
     "4AE4",
     "4AE7"
    ]
+  },
+  {
+   "id": "trap.vector.none.none.none.vector0to15",
+   "form": "trap.vector.none.none.none.vector0to15",
+   "profile": "exception_state"
+  },
+  {
+   "id": "trapv.none.none.none.none",
+   "form": "trapv.none.none.none.none",
+   "profile": "trapv_state"
   },
   {
    "id": "tst.unary.b.none.absl",

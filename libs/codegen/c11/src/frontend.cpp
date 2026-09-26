@@ -55,6 +55,7 @@ const char *history_transfer_kind(M68kIrKind kind) {
   case M68kIrKind::jump_general: return "GENESIS_HISTORY_TRANSFER_COMPUTED";
   case M68kIrKind::call_general: case M68kIrKind::bsr_call: return "GENESIS_HISTORY_TRANSFER_CALL";
   case M68kIrKind::return_from_subroutine: case M68kIrKind::return_from_exception:
+  case M68kIrKind::return_restore_condition_codes:  // SEG-021-T019: RTR
     return "GENESIS_HISTORY_TRANSFER_RETURN";
   default: return "GENESIS_HISTORY_TRANSFER_NONE";
   }
@@ -1608,6 +1609,7 @@ bool valid_c4_static_memory_fact(
   // SEG-021-T018: MOVE <ea>,SR / MOVE <ea>,CCR read their (word) source only.
   case M68kInstructionKind::move_to_sr:
   case M68kInstructionKind::move_to_ccr:
+  case M68kInstructionKind::chk:  // SEG-021-T019: CHK.W reads its word bound only (Dn is a register)
     // SEG-007-T174 follow-up fix: ADDA/SUBA/CMPA's fixed An (or, for CMPA,
     // CCR-only) destination carries no memory fact at all -- only the source
     // read is ever retained (see machine/genesis/frontend.cpp's shared
@@ -2033,6 +2035,10 @@ std::optional<std::vector<Address>> immutable_rom_aot_exact_pc_obligations(
     // frame by the platform's exception-return routine (the M68K-owned core); it continues through the ordinary
     // dispatcher, whose fail-closed stop owns any PC outside the emitted set. No exact-PC obligation.
     break;
+  case M68kPcEffectKind::exception_entry:
+    // SEG-021-T019: the PC becomes the build-time-resolved vector handler selected by the platform's raise (a
+    // dispatch root of the program), or the run stops fail-closed. No exact-PC obligation.
+    break;
   }
   std::sort(result.begin(), result.end());
   result.erase(std::unique(result.begin(), result.end()), result.end());
@@ -2242,6 +2248,13 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   case M68kIrKind::read_user_stack_pointer:
   case M68kIrKind::logical_immediate_to_ccr:
   case M68kIrKind::logical_immediate_to_sr:
+  // SEG-021-T019: TRAP/TRAPV/RTR and the instruction-word exceptions carry no memory operand; CHK.W's word bound has
+  // the MOVE to SR source gap shape below.
+  case M68kIrKind::trap_exception:
+  case M68kIrKind::trap_on_overflow:
+  case M68kIrKind::check_bounds:
+  case M68kIrKind::return_restore_condition_codes:
+  case M68kIrKind::instruction_exception:
   case M68kIrKind::write_clr:
   // SEG-007-T168: NOT (`logical_not`) is a represented kind (no
   // missing_dispatcher gap) -- emit_m68k_operation_c has a full lowering
@@ -2569,7 +2582,8 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     if (m68k_c4_auto_update_class(operation.source_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.source_ea, M68kC4OperandRole::source, M68kStaticMemoryFactRole::source_read);
   } else if (operation.kind == M68kIrKind::write_status_register ||
-             operation.kind == M68kIrKind::write_condition_codes) {
+             operation.kind == M68kIrKind::write_condition_codes ||
+             operation.kind == M68kIrKind::check_bounds) {  // SEG-021-T019: CHK.W reads its word bound
     // SEG-021-T018: MOVE <ea>,SR / MOVE <ea>,CCR read one word source; an auto-updating source is lowered by
     // the operation-local deferred commit, and a non-auto foldable source needs its retained fact.
     if (m68k_c4_auto_update_class(operation.source_ea.mode) == M68kC4AutoUpdateClass::none)
@@ -3285,6 +3299,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     case M68kInstructionKind::cmp:
     case M68kInstructionKind::move_to_sr:   // SEG-021-T018: one word source read
     case M68kInstructionKind::move_to_ccr:  // SEG-021-T018: one word source read
+    case M68kInstructionKind::chk:          // SEG-021-T019: one word bound read
       if (fact.role == M68kStaticMemoryFactRole::source_read) {
         expected_ea = &instruction->second->source_ea;
         expected_direction = M68kMemoryAccessDirection::read;
@@ -3543,6 +3558,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
           kind != M68kInstructionKind::shift_rotate &&
           // SEG-021-T018: MOVE to SR/CCR and MOVE from SR lower their own auto-updating operand (deferred commit).
           kind != M68kInstructionKind::move_to_sr && kind != M68kInstructionKind::move_to_ccr &&
+          kind != M68kInstructionKind::chk &&  // SEG-021-T019: same deferred word-source commit
           kind != M68kInstructionKind::move_from_sr &&
           (ea.mode == M68kEaMode::address_predec || ea.mode == M68kEaMode::address_postinc))
         return false;
@@ -3626,7 +3642,8 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
           instruction->kind == M68kInstructionKind::suba ||
           instruction->kind == M68kInstructionKind::cmp ||
           instruction->kind == M68kInstructionKind::move_to_sr ||   // SEG-021-T018
-          instruction->kind == M68kInstructionKind::move_to_ccr) &&  // SEG-021-T018
+          instruction->kind == M68kInstructionKind::move_to_ccr ||  // SEG-021-T018
+          instruction->kind == M68kInstructionKind::chk) &&         // SEG-021-T019
          !require_fact(instruction->source_ea, M68kStaticMemoryFactRole::source_read, instruction->kind)) ||
         // SEG-007-T146: CMPI reads its destination (CCR-only) exactly like BTST.
         (instruction->kind == M68kInstructionKind::cmpi &&
@@ -3975,6 +3992,11 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       blocks.contains(partial.accepted_prefix.privilege_violation_handler_entry->value) &&
       emitted_block_entries.insert(partial.accepted_prefix.privilege_violation_handler_entry->value).second)
     emitted_block_pending.push_back(partial.accepted_prefix.privilege_violation_handler_entry->value);
+  // SEG-021-T019: every software-exception vector handler is the same kind of root.
+  for (const auto &[software_vector, handler] : partial.accepted_prefix.software_exception_handler_entries)
+    if (handler.space == TargetAddressSpace::m68k_program && blocks.contains(handler.value) &&
+        emitted_block_entries.insert(handler.value).second)
+      emitted_block_pending.push_back(handler.value);
   // SEG-007-T174 / ADR-0024: every validated external code-entry candidate
   // root is a second kind of entry-disconnected reachability root, exactly
   // like the IRQ6 handler above -- seed the emission walk from each one (only
@@ -4602,7 +4624,12 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     // static successors (the restored PC is a generated-runtime fact popped
     // from the exception frame). It carries no direct/fallthrough/call/return
     // static edge and needs no return-target membership check.
-    const bool is_exception_return = terminal_operation->kind == M68kIrKind::return_from_exception;
+    // SEG-021-T019: RTR (PC popped from its CCR/PC frame) and the instruction-word exceptions (ILLEGAL, line
+    // 1010/1111, every other illegal word: control enters the build-time-rooted vector handler) are terminals of
+    // the same no-static-successor shape.
+    const bool is_exception_return = terminal_operation->kind == M68kIrKind::return_from_exception ||
+                                     terminal_operation->kind == M68kIrKind::return_restore_condition_codes ||
+                                     terminal_operation->kind == M68kIrKind::instruction_exception;
     // SEG-007-T174 / ADR-0024: Tier 2 (the shared `EmittedCodeAddressSet`
     // dispatch mechanism) never reaches this per-BLOCK terminal-validation
     // path at all -- a Tier-2-eligible site is, by construction, always the
@@ -4959,6 +4986,13 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       case M68kIrKind::logical_immediate_to_sr:
       case M68kIrKind::write_status_register:
       case M68kIrKind::write_condition_codes:
+      // SEG-021-T019 / ADR 0043: the software-exception family raises through the platform (routed), RTR pops its
+      // frame through the platform's frame-return routine, and CHK.W's word bound has MOVE to SR's source shape.
+      case M68kIrKind::trap_exception:
+      case M68kIrKind::trap_on_overflow:
+      case M68kIrKind::check_bounds:
+      case M68kIrKind::return_restore_condition_codes:
+      case M68kIrKind::instruction_exception:
       case M68kIrKind::read_status_register: {
         const bool reads_destination = found->second->kind == M68kIrKind::read_status_register;
         const auto *fact = fact_for(reads_destination ? M68kStaticMemoryFactRole::destination_read
@@ -6045,10 +6079,18 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
     for (const auto &block : partial.accepted_prefix.static_blocks)
       if (block.id.entry.value == handler) { privilege_violation_handler_hex = hex(handler, 8); break; }
   }
+  // SEG-021-T019: the software-exception vector handlers, by the same "handler block emitted" rule.
+  std::vector<std::pair<std::uint32_t, std::string>> software_exception_handler_hex;
+  for (const auto &[software_vector, handler] : partial.accepted_prefix.software_exception_handler_entries)
+    for (const auto &block : partial.accepted_prefix.static_blocks)
+      if (block.id.entry.value == handler.value) {
+        software_exception_handler_hex.emplace_back(software_vector, hex(handler.value, 8));
+        break;
+      }
   sink << emit_genesis_bridge_c11_main_open(
       hex(partial.accepted_prefix.startup_ingress->initial_ssp, 8),
       hex(partial.accepted_prefix.startup_ingress->entry.value, 8), irq6_handler_hex,
-      divide_by_zero_handler_hex, privilege_violation_handler_hex);
+      divide_by_zero_handler_hex, privilege_violation_handler_hex, software_exception_handler_hex);
   if (g_execution_history_hooks) sink << "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; ";
   if (owned_region_count != 0U) {
     sink << "  runtime.owned_regions = genesis_owned_cartridge_regions;\n";

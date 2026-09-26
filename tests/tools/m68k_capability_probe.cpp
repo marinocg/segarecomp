@@ -6,7 +6,10 @@
 //
 // stdout: one line per primary word:
 //   XXXX decode lift effects ea_footprint ccr_declared timing emit_direct emit_routed aot static exception_vector
-// (each field 0/1 except exception_vector). With --emit-dir, direct-route C for every emitting word is
+//        word_class
+// (each field 0/1 except exception_vector and word_class; SEG-021-T019: word_class is the production
+// generation-time classification `m68k_classify_primary_word` -- 0 legal, 1 line 1010, 2 line 1111, 3 illegal -- so
+// the driver can compare it with the independent legal-form partition). With --emit-dir, direct-route C for every emitting word is
 // written as batched translation units chunk_NNN.c, and Genesis runtime-routed C as rchunk_NNN.c (bounded
 // functions per unit), for compilation/execution by the driver.
 #include "segarecomp/codegen/c11/genesis_frontend.hpp"
@@ -205,8 +208,13 @@ int main(int argc, char **argv) {
                              "  s->pc = pc;\n  return 0;\n}\n");
       }
     }
-    std::printf("%s %d %d %d %d %d %d %d %d %d %d %u\n", hex4(word).c_str(), decode, lift, effects, footprint, ccr,
-                timing, emit_direct, emit_routed, aot, statik, exception_vector);
+    const auto word_class = m68k_classify_primary_word(static_cast<std::uint16_t>(word));
+    const unsigned word_class_code = word_class == M68kPrimaryWordClass::legal             ? 0U
+                                     : word_class == M68kPrimaryWordClass::line_a_emulator ? 1U
+                                     : word_class == M68kPrimaryWordClass::line_f_emulator ? 2U
+                                                                                           : 3U;
+    std::printf("%s %d %d %d %d %d %d %d %d %d %d %u %u\n", hex4(word).c_str(), decode, lift, effects, footprint, ccr,
+                timing, emit_direct, emit_routed, aot, statik, exception_vector, word_class_code);
   }
   direct.flush();
   routed_writer.flush();
