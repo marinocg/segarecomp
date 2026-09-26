@@ -28,7 +28,8 @@ static int genesis_frame_capture_producer(const uint8_t vram[GENESIS_VDP_VRAM_BY
   const int status = genesis_vdp_produce_frame(vram, vsram, cram, registers, frame_out);
   if (status != 0 || session == NULL) return status;
   session->produced++;
-  if (session->produced >= session->options->first_frame &&
+  /* After a failed write nothing more is captured, so digests stay aligned with selected ordinals. */
+  if (!session->io_error && session->produced >= session->options->first_frame &&
       (session->produced - session->options->first_frame) % session->options->frame_stride == 0U &&
       session->result->frames_captured < session->options->frame_count) {
     char path[GENESIS_FRAME_CAPTURE_PATH_MAX];

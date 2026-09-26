@@ -56,7 +56,9 @@ def main():
         raise AssertionError("accepted malformed PPM")
     # Incompatible flag combinations are rejected before any generation (exit 8).
     for extra in (["--capture-slice", "10"], ["--capture-frames", "1:1", "--viewer"],
-                  ["--capture-frames", "1:1", "--compare-runs"]):
+                  ["--capture-frames", "1:1", "--compare-runs"],
+                  ["--capture-frames", "1:1", "--checkpoint", "x"],
+                  ["--capture-frames", "1:1", "--full-report-path", "x"]):
         result = subprocess.run([sys.executable, str(root / "tools" / "genesis_startup_bridge.py"),
                                  "--rom", str(root / "README.md"), "--mode", "commercial"] + extra, capture_output=True, text=True)
         assert result.returncode == 8, (extra, result.returncode, result.stderr)

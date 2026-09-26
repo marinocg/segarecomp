@@ -163,6 +163,15 @@ void invalid_arguments_are_rejected() {
   check(genesis_frame_capture_run(&r, synthetic_dispatch, &o, 10000000U).outcome == GENESIS_FRAME_CAPTURE_IO_ERROR,
         "unwritable output fails closed");
   check(r.live_frame_observer == nullptr, "observer detached after failure");
+  // A write failure mid-window stops capturing: no later selected frame is written or digested.
+  const auto mid = fresh_dir("segarecomp-t031-midwindow");
+  std::filesystem::create_directories(mid + "/frame-00000005.ppm");  // blocks ordinal 5
+  setup(r);
+  o = options_for(mid, 3U, 4U, 1U);
+  const auto failed = genesis_frame_capture_run(&r, synthetic_dispatch, &o, 10000000U);
+  check(failed.outcome == GENESIS_FRAME_CAPTURE_IO_ERROR && failed.frames_captured == 2U,
+        "mid-window I/O failure fails closed after the frames before it");
+  check(!std::filesystem::exists(mid + "/frame-00000006.ppm"), "no frame is captured after an I/O failure");
 }
 }  // namespace
 
