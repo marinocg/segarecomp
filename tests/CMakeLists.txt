@@ -360,6 +360,10 @@ add_test(NAME genesis_immutable_rom_aot_pea_generated_test COMMAND ${Python3_EXE
 add_test(NAME genesis_immutable_rom_aot_jmp_pc_indexed_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_jmp_pc_indexed_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-021-T034: no-hints immutable-ROM AOT register-relative JMP/JSR (d16(An), (d8,An,Xn), long (d8,PC,Xn)).
+add_test(NAME genesis_immutable_rom_aot_jmp_an_relative_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_jmp_an_relative_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 # SEG-021-T033: no-hints immutable-ROM AOT JMP (An)/JSR (An) generated-native execution.
 add_test(NAME genesis_immutable_rom_aot_jmp_an_indirect_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_jmp_an_indirect_generated_test.py

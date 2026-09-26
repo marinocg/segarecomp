@@ -3266,13 +3266,27 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     // no displacement/index/extension word) joins `pc_index8` as a lowered
     // computed control EA -- the runtime EA is the architectural `An` value
     // itself, with no base/index arithmetic.
+    //
+    // SEG-021-T034: the remaining register-relative control EAs -- `d16(An)`,
+    // `(d8,An,Xn)` (every index bank/size) and the address-register/long
+    // index variants of `(d8,PC,Xn)` -- join the same branch. Their runtime
+    // EA comes from the existing shared `m68k_emit_runtime_ea_address`
+    // helper (none of these modes has an auto-update prelude/postlude), so
+    // no EA formula is duplicated; membership, JSR push and the fail-closed
+    // stop are the unchanged code below. The two earlier shapes keep their
+    // original, byte-identical EA text.
     const bool is_an_indirect_control = operation.source_ea.mode == M68kEaMode::address_indirect &&
                                         operation.source_ea.displacement == 0 &&
                                         operation.source_ea.extension_words == 0U;
+    const bool is_word_dn_pc_index = operation.source_ea.mode == M68kEaMode::pc_index8 &&
+                                     !operation.source_ea.index_is_address && !operation.source_ea.index_is_long;
+    const bool is_helper_ea_control = operation.source_ea.mode == M68kEaMode::address_disp16 ||
+                                      operation.source_ea.mode == M68kEaMode::address_index8 ||
+                                      (operation.source_ea.mode == M68kEaMode::pc_index8 && !is_word_dn_pc_index);
     if ((operation.kind == M68kIrKind::call_general || operation.kind == M68kIrKind::jump_general) &&
-        (operation.source_ea.mode == M68kEaMode::pc_index8 || is_an_indirect_control)) {
+        (is_word_dn_pc_index || is_an_indirect_control || is_helper_ea_control)) {
       const auto &ea = operation.source_ea;
-      if (memory == nullptr || !memory->runtime_routing || ea.index_is_address || ea.index_is_long ||
+      if (memory == nullptr || !memory->runtime_routing ||
           (memory->compiled_entry_lookup_symbol.empty() && memory->indirect_candidate_targets.empty())) {
         break;
       }
@@ -3292,7 +3306,12 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
       if (is_an_indirect_control)
         output << "{ const uint32_t m68k_indirect_ea = " << memory->address_registers << "["
                << static_cast<unsigned>(ea.reg) << "];\n";
-      else
+      else if (is_helper_ea_control) {
+        const auto runtime = m68k_emit_runtime_ea_address(ea, M68kMemoryAccessWidth::long_word,
+                                                          memory->address_registers, data_registers);
+        if (runtime.address_expr.empty() || !runtime.prelude.empty() || !runtime.postlude.empty()) break;
+        output << "{ const uint32_t m68k_indirect_ea = " << runtime.address_expr << ";\n";
+      } else
         output << "{ const uint32_t m68k_indirect_ea = UINT32_C(0x" << hex(base, 8)
              << ") + (uint32_t)(int32_t)(int16_t)(uint16_t)(" << index_expr << ");\n";
       if (shared_lookup)

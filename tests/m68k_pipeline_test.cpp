@@ -7917,7 +7917,7 @@ FrontendProgram program_with() {
 //   0x100C JSR (A4)     -- admitted: target = runtime A4, pushes 0x100E
 //   0x100E NOP
 //   0x1010 JMP (A7)     -- admitted: target = runtime A7
-//   0x1012 JMP (16,A3)  -- admission negative (d16(An) has no shared lowering)
+//   0x1012 JMP (16,A3)  -- admitted since SEG-021-T034 (was the T033 negative)
 // The trailing extension word at 0x1014 never decodes to a candidate, so it
 // is the fixture's unrepresented runtime target.
 namespace jmp_an_indirect_aot_fixture {
@@ -7947,6 +7947,52 @@ FrontendProgram program_with() {
   return program;
 }
 }  // namespace jmp_an_indirect_aot_fixture
+
+// SEG-021-T034: representative no-hints immutable-ROM AOT fixture closing the register-relative control-EA
+// family. Same T011/T027/T033 filler prefix (a genuine partial program), then:
+//   0x1008 NOP
+//   0x100A JMP (4,A3,D1.W)    -- target = A3 + sext16(D1) + 4
+//   0x100E JSR (-2,A4,A2.L)   -- target = A4 + A2 - 2, pushes 0x1012
+//   0x1012 NOP
+//   0x1014 JMP (16,A5)        -- target = A5 + 16
+//   0x1018 JSR (-8,A6)        -- target = A6 - 8, pushes 0x101C
+//   0x101C JMP (0,PC,D2.L)    -- target = 0x101E + D2 (long index)
+//   0x1020 NOP
+//   0x1022 JSR (0,A7,D0.L)    -- target = pre-push A7 + D0, pushes 0x1026
+//   0x1026 NOP
+// Targets outside the image are the fixture's unrepresented runtime targets.
+namespace jmp_an_relative_aot_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00001000U;
+const std::vector<std::uint8_t> image{
+    0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U,
+    0x4EU, 0x71U,                // NOP
+    0x4EU, 0xF3U, 0x10U, 0x04U,  // JMP (4,A3,D1.W)
+    0x4EU, 0xB4U, 0xA8U, 0xFEU,  // JSR (-2,A4,A2.L)
+    0x4EU, 0x71U,                // NOP
+    0x4EU, 0xEDU, 0x00U, 0x10U,  // JMP (16,A5)
+    0x4EU, 0xAEU, 0xFFU, 0xF8U,  // JSR (-8,A6)
+    0x4EU, 0xFBU, 0x28U, 0x00U,  // JMP (0,PC,D2.L)
+    0x4EU, 0x71U,                // NOP
+    0x4EU, 0xB7U, 0x08U, 0x00U,  // JSR (0,A7,D0.L)
+    0x4EU, 0x71U,                // NOP
+};
+constexpr std::uint32_t jmp_index_an = base + 0x0AU;
+constexpr std::uint32_t jsr_index_long_an = base + 0x0EU;
+constexpr std::uint32_t jmp_disp_an = base + 0x14U;
+constexpr std::uint32_t jsr_disp_an = base + 0x18U;
+constexpr std::uint32_t jmp_pc_index_long = base + 0x1CU;
+constexpr std::uint32_t jsr_index_a7 = base + 0x22U;
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T034/jmp-an-relative-aot-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base},
+                             {{}, static_cast<std::uint32_t>(base + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace jmp_an_relative_aot_fixture
 
 // SEG-021-T011: PEA is now family-level admitted to immutable-ROM AOT
 // (m68k_operation_is_immutable_rom_aot_safe). Proves the admission end to
@@ -8022,6 +8068,53 @@ void jmp_pc_indexed_word_aot_admission_and_dispatch_are_bounded() {
          "verbatim (no runtime opcode decode, no routed memory access of its own)");
 }
 
+// SEG-021-T034: d16(An), (d8,An,Xn) (word/long, Dn/An index) and long-indexed (d8,PC,Xn) JMP/JSR are admitted by
+// whole-image AOT enumeration and lowered by the shared dynamic-indirect branch via m68k_emit_runtime_ea_address.
+void jmp_an_relative_aot_admission_and_dispatch_are_bounded() {
+  using namespace segarecomp;
+  using namespace jmp_an_relative_aot_fixture;
+  auto program = program_with();
+  expect(apply_genesis_immutable_rom_aot(program), "register-relative control fixture enumerates cleanly");
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "register-relative control fixture remains a genuine partial program");
+  if (partial == nullptr) return;
+  const auto &roots = partial->accepted_prefix.immutable_rom_aot_entries;
+  const auto has_root = [&](std::uint32_t address) {
+    return std::any_of(roots.begin(), roots.end(), [&](const auto &root) {
+      return root.decoded.provenance.source.address.value == address;
+    });
+  };
+  for (const auto address : {jmp_index_an, jsr_index_long_an, jmp_disp_an, jsr_disp_an, jmp_pc_index_long, jsr_index_a7})
+    expect(has_root(address), "every register-relative control EA becomes a validated independent AOT root");
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  expect(!emitted.starts_with("/* translation rejected"), "register-relative control fixture emits");
+  const auto hex_of = [](std::uint32_t address) {
+    std::ostringstream text;
+    text << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address;
+    return text.str();
+  };
+  const auto check = [&](std::uint32_t address, std::string_view ea_text, const char *what) {
+    const auto body = aot_function_effective_body(emitted, hex_of(address));
+    expect(!body.empty() && body.find(ea_text) != std::string::npos &&
+               body.find("genesis_compiled_entry_lookup(m68k_indirect_ea) == NULL") != std::string::npos,
+           what);
+  };
+  check(jmp_index_an, "m68k_indirect_ea = (uint32_t)(runtime->a[3] + (int32_t)(int16_t)(uint16_t)runtime->d[1] + (int32_t)(int8_t)4);",
+        "JMP (d8,An,Dn.W) uses the shared runtime-EA helper formula");
+  check(jsr_index_long_an, "m68k_indirect_ea = (uint32_t)(runtime->a[4] + (int32_t)runtime->a[2] + (int32_t)(int8_t)-2);",
+        "JSR (d8,An,An.L) uses the shared runtime-EA helper formula");
+  check(jmp_disp_an, "m68k_indirect_ea = (uint32_t)(runtime->a[5] + (int32_t)(int16_t)16);",
+        "JMP d16(An) uses the shared runtime-EA helper formula");
+  check(jsr_disp_an, "m68k_indirect_ea = (uint32_t)(runtime->a[6] + (int32_t)(int16_t)-8);",
+        "JSR d16(An) uses the shared runtime-EA helper formula");
+  check(jmp_pc_index_long, "m68k_indirect_ea = (uint32_t)(UINT32_C(0x0000101E) + (int32_t)runtime->d[2] + (int32_t)(int8_t)0);",
+        "JMP (d8,PC,Dn.L) uses the shared runtime-EA helper formula");
+  const auto jmp_body = aot_function_effective_body(emitted, hex_of(jmp_index_an));
+  expect(jmp_body.find("genesis_route_access") == std::string::npos,
+         "JMP (d8,An,Xn) performs no memory access and no opcode fetch");
+}
+
 // SEG-021-T033: JMP (An)/JSR (An) are admitted by whole-image (no-hints) AOT enumeration and lowered by the
 // existing shared dynamic-indirect branch against the final compiled-entry table;
 // JMP d16(An) remains rejected; the NOP whose fixed fallthrough is the JMP (An) identity has no unrepresented exact PC.
@@ -8042,7 +8135,7 @@ void jmp_an_indirect_aot_admission_and_dispatch_are_bounded() {
   };
   expect(has_root(jmp_an) && has_root(jsr_an) && has_root(jmp_a7) && has_root(nop_before_jmp),
          "JMP (A3), JSR (A4) and JMP (A7) become validated independent AOT roots without hints");
-  expect(!has_root(jmp_disp16), "JMP d16(An) stays outside immutable-ROM AOT admission");
+  expect(has_root(jmp_disp16), "SEG-021-T034: JMP d16(An) is now an admitted immutable-ROM AOT root");
   const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
   expect(!emitted.starts_with("/* translation rejected"), "JMP (An) fixture emits");
   const auto hex_of = [](std::uint32_t address) {
@@ -8625,11 +8718,28 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
              "(the generic completeness probe still rejects its runtime-only target)");
     }
     operation.source_ea.reg = 0U;
-    for (const auto excluded_mode : {M68kEaMode::address_disp16, M68kEaMode::address_index8}) {
-      operation.source_ea.mode = excluded_mode;
-      expect(!m68k_operation_is_runtime_owned_indirect_jump(operation) &&
-                 !m68k_operation_is_immutable_rom_aot_safe(operation, false),
-             "JMP/JSR d16(An)/(d8,An,Xn) have no shared dynamic-indirect lowering and stay excluded");
+    // SEG-021-T034: d16(An) and every (d8,An,Xn) index bank/size now lower in the shared branch through
+    // m68k_emit_runtime_ea_address and are admitted through the same runtime-owned signal.
+    for (const auto admitted_mode : {M68kEaMode::address_disp16, M68kEaMode::address_index8}) {
+      operation.source_ea.mode = admitted_mode;
+      for (const bool index_is_address : {false, true})
+        for (const bool index_is_long : {false, true}) {
+          operation.source_ea.index_is_address = index_is_address;
+          operation.source_ea.index_is_long = index_is_long;
+          expect(m68k_operation_is_runtime_owned_indirect_jump(operation) &&
+                     m68k_operation_is_immutable_rom_aot_safe(operation, false) &&
+                     !m68k_operation_has_complete_c_emission(operation),
+                 "JMP/JSR d16(An)/(d8,An,Xn) are admitted only through the runtime-owned indirect signal");
+        }
+    }
+    // Non-control EA modes never become runtime-owned control transfers.
+    for (const auto illegal_mode : {M68kEaMode::data_register, M68kEaMode::address_register,
+                                    M68kEaMode::address_postinc, M68kEaMode::address_predec,
+                                    M68kEaMode::immediate}) {
+      operation.source_ea = {};
+      operation.source_ea.mode = illegal_mode;
+      expect(!m68k_operation_is_runtime_owned_indirect_jump(operation),
+             "only legal register-relative control EAs are runtime-owned control transfers");
     }
     operation.source_ea = {};
   }
@@ -8653,15 +8763,16 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
            "JMP/JSR (d8,PC,Dn.W) is admitted through the narrow runtime-owned dynamic-indirect "
            "admission-context signal, bypassing only has_complete_c_emission's generic pc-effect "
            "requirement for this one shape");
+    // SEG-021-T034: the address-register/long index variants now share the helper-computed runtime EA.
     operation.source_ea.index_is_address = true;
-    expect(!m68k_operation_is_runtime_owned_indirect_jump(operation) &&
-               !m68k_operation_is_immutable_rom_aot_safe(operation, false),
-           "an address-register-indexed pc_index8 control transfer is not the admitted subform");
+    expect(m68k_operation_is_runtime_owned_indirect_jump(operation) &&
+               m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "an address-register-indexed pc_index8 control transfer is admitted");
     operation.source_ea.index_is_address = false;
     operation.source_ea.index_is_long = true;
-    expect(!m68k_operation_is_runtime_owned_indirect_jump(operation) &&
-               !m68k_operation_is_immutable_rom_aot_safe(operation, false),
-           "a long-indexed pc_index8 control transfer is not the admitted subform");
+    expect(m68k_operation_is_runtime_owned_indirect_jump(operation) &&
+               m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "a long-indexed pc_index8 control transfer is admitted");
     operation.source_ea.index_is_long = false;
   }
   // SEG-007-T246 (ninth iteration, same bounded family): a foldable-target
@@ -9561,6 +9672,22 @@ int emit_jmp_pc_indexed_word_aot_source() {
 
 // SEG-021-T033: representative generated-C source for the strict-C11 compile/execute proof
 // (`tests/genesis_immutable_rom_aot_jmp_an_indirect_generated_test.py`).
+// SEG-021-T034: representative generated-C source for
+// `tests/genesis_immutable_rom_aot_jmp_an_relative_generated_test.py`.
+int emit_jmp_an_relative_aot_source() {
+  using namespace segarecomp;
+  using namespace jmp_an_relative_aot_fixture;
+  auto program = program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
 int emit_jmp_an_indirect_aot_source() {
   using namespace segarecomp;
   using namespace jmp_an_indirect_aot_fixture;
@@ -29276,6 +29403,8 @@ int main(int argc, char **argv) {
     return emit_jmp_pc_indexed_word_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-jmp-an-indirect-aot")
     return emit_jmp_an_indirect_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-jmp-an-relative-aot")
+    return emit_jmp_an_relative_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-straight-line-block")
     return emit_general_startup_runtime_c4_straight_line_block_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-partition-boundary-dispatch")
@@ -29878,6 +30007,7 @@ int main(int argc, char **argv) {
   pea_disp16_aot_admission_and_dispatch_are_bounded();
   jmp_pc_indexed_word_aot_admission_and_dispatch_are_bounded();
   jmp_an_indirect_aot_admission_and_dispatch_are_bounded();
+  jmp_an_relative_aot_admission_and_dispatch_are_bounded();
   t250_final_compiled_membership_suppresses_stale_frontier_interception();
   ordinary_interior_owner_precedes_consistent_aot_and_rejects_conflict();
   t250_genuine_typed_frontier_without_compiled_membership_still_intercepts();

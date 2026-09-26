@@ -659,14 +659,21 @@ inline bool is_semantic_partition_boundary_address(const FrontendAnalysis &analy
 // admitted: the SEG-007-T178 A7 exclusion belongs to the Tier-1 finite-value
 // domain, which this runtime-membership owner never consults, and the shared
 // branch reads the EA before a JSR's continuation push (MC68000 order).
-// `d16(An)` and `(d8,An,Xn)` have no lowering in that shared branch and stay
-// excluded.
+// SEG-021-T034 closes the family: `d16(An)`, `(d8,An,Xn)` and the
+// long/address-register index variants of `(d8,PC,Xn)` now lower in that
+// shared branch via the existing `m68k_emit_runtime_ea_address` helper.
 inline bool m68k_operation_is_runtime_owned_indirect_jump(const M68kIrOperation &operation) {
   if (operation.kind != M68kIrKind::jump_general && operation.kind != M68kIrKind::call_general) return false;
   const auto &ea = operation.source_ea;
   if (ea.mode == M68kEaMode::address_indirect)
     return ea.displacement == 0 && ea.extension_words == 0U;
-  return ea.mode == M68kEaMode::pc_index8 && !ea.index_is_address && !ea.index_is_long;
+  // SEG-021-T034: exactly the shapes the shared branch now also lowers
+  // through `m68k_emit_runtime_ea_address`: d16(An), (d8,An,Xn) and every
+  // (d8,PC,Xn) index bank/size. Remaining control EAs are statically
+  // foldable (abs.W/abs.L/d16(PC)), so the whole legal JMP/JSR control-EA
+  // family is admitted.
+  return ea.mode == M68kEaMode::pc_index8 || ea.mode == M68kEaMode::address_disp16 ||
+         ea.mode == M68kEaMode::address_index8;
 }
 
 inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &operation,
@@ -862,7 +869,7 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // now reuses that exact existing ADR-0009 membership machinery via
     // `m68k_operation_is_runtime_owned_indirect_jump` above -- see that
     // predicate's own doc comment. SEG-021-T033: pure `(An)` now reuses the
-    // same owner through that predicate; `d16(An)` remains excluded.
+    // same owner through that predicate; SEG-021-T034 adds d16(An)/(d8,An,Xn).
     return m68k_is_statically_foldable_control_ea(operation.source_ea) ||
            m68k_operation_is_runtime_owned_indirect_jump(operation);
   case M68kIrKind::call_general:
