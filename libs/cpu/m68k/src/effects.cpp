@@ -364,17 +364,20 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
   case M68kIrKind::write_clr:
     // CLR's CCR result (N=0,Z=1,V=0,C=0, X unaffected) never depends on the
     // cleared value, so affects_condition_codes is a fixed pattern, not
-    // m68k_move_result_ccr applied to a value (contract: "no observable
-    // consequence" of the real-hardware read-before-write bus note).
+    // m68k_move_result_ccr applied to a value.
+    // SEG-021-T029: a memory destination is read (value discarded) before it
+    // is written on the MC68000, exactly like memory Scc (SEG-021-T016); a Dn
+    // destination performs no memory access.
     effect.operand_size = operation.size;
+    if (operation.destination_ea.mode != M68kEaMode::data_register) effect.resolved_source_ea = operation.destination_ea;
     effect.resolved_destination_ea = operation.destination_ea;
     effect.affects_condition_codes = true;
     effect.pc = M68kPcEffectKind::advance;
     effect.pc_delta = operation.provenance.length.value;
     break;
   case M68kIrKind::logical_not:
-    // SEG-007-T168: NOT is a genuine one-address read-modify-write (unlike
-    // write_clr's write-only shape) -- both resolved_source_ea and
+    // SEG-007-T168: NOT is a genuine one-address read-modify-write (its
+    // result, unlike CLR's, depends on the value read) -- both resolved_source_ea and
     // resolved_destination_ea are the SAME single destination_ea, exactly
     // matching shift_rotate_memory's one-address RMW footprint. Its CCR
     // result reuses the logical family's own formula (N/Z set from the

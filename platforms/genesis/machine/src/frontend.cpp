@@ -4359,12 +4359,18 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
         retain_fact(decoded, decoded.source_ea, M68kStaticMemoryFactRole::source_read, M68kMemoryAccessDirection::read);
         break;
       case M68kInstructionKind::clr:
-        retain_fact(decoded, decoded.destination_ea, M68kStaticMemoryFactRole::destination_write, M68kMemoryAccessDirection::write);
+        // SEG-021-T029: a memory CLR destination is read (value discarded) before it is written (MC68000), so it
+        // retains both the destination_read and destination_write facts exactly like memory Scc (SEG-021-T016).
+        if (decoded.destination_ea.mode != M68kEaMode::data_register) {
+          retain_fact(decoded, decoded.destination_ea, M68kStaticMemoryFactRole::destination_read,
+                      M68kMemoryAccessDirection::read);
+          retain_fact(decoded, decoded.destination_ea, M68kStaticMemoryFactRole::destination_write,
+                      M68kMemoryAccessDirection::write);
+        }
         break;
       case M68kInstructionKind::andi:
-        // SEG-007-T071: ANDI's destination is read-modify-write, exactly like
-        // CLR's destination-only write, so it retains a fact the same way
-        // (single destination_write role; ANDI has no separate source
+        // SEG-007-T071: ANDI's destination is read-modify-write; it retains a
+        // single destination_write fact (ANDI has no separate source
         // operand to retain a fact for -- its source is always immediate).
         retain_fact(decoded, decoded.destination_ea, M68kStaticMemoryFactRole::destination_write, M68kMemoryAccessDirection::write);
         break;

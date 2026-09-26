@@ -237,8 +237,9 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
 // must emit strictly after the operation's own access statement. `memory`
 // supplies the already-resolved static-operand fact for an absolute/
 // pc-relative SOURCE read (M68kMemoryEmissionContext::test_operand_access/
-// test_operand_value); this function is never called for a destination-only
-// position (CLR has no source).
+// test_operand_value). SEG-021-T029: memory CLR also calls it for its
+// discarded destination read, supplying the write's own access class for an
+// absolute destination.
 [[nodiscard]] M68kEaCode m68k_emit_ea_read(const M68kEffectiveAddress &ea, M68kMemoryAccessWidth size,
                                            std::string_view data_registers, const M68kMemoryEmissionContext &memory,
                                            std::ostringstream &out, unsigned &temp_ordinal) {
@@ -1936,21 +1937,32 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
   }
   case M68kIrKind::write_clr: {
     if (memory != nullptr) {
-      // SEG-007-T157 / ADR-0019 Stage B: an auto-updating `(An)+` / `-(An)`
-      // CLR destination is lowered through the same deferred-address-
-      // register-commit technique already established for the add family
-      // above (docs/architecture/c4-add-family-auto-update-commit-contract.md)
-      // -- snapshot the EA into one local, apply the predecrement/
-      // postincrement adjustment to that local, route the WRITE through the
-      // existing m68k_emit_routed_write boundary, and commit the
-      // architectural An exactly once, strictly after that routed write, in
-      // one statement. A runtime stop reached by the routed write returns
-      // from inside its own generated statement (m68k_emit_routed_write's
-      // own `return transfer;`), textually before the commit and before the
-      // CCR update below, so a failed access never exposes a partial
-      // auto-update or a partial CCR update. `write_clr`'s own CCR
-      // semantics are reused completely unchanged: no new M68kIrKind, no new
-      // CCR formula.
+      // CLR always sets N=0,Z=1,V=0,C=0 and keeps X, regardless of the cleared value (contract, CLR "Condition
+      // Codes"): a fixed pattern, not m68k_move_result_ccr applied to a value.
+      const std::string status(status_register);
+      const std::string clr_ccr = status + " = (uint16_t)((" + status + " & UINT16_C(0xFFF0)) | UINT16_C(4));\n";
+      const auto length = operation.provenance.length.value;
+      if (operation.destination_ea.mode == M68kEaMode::data_register) {
+        // A Dn destination is register-only: no memory access at all.
+        unsigned temp_ordinal = 0U;
+        std::ostringstream write_prelude;
+        const auto write = m68k_emit_ea_write(operation.destination_ea, operation.size, data_registers, *memory,
+                                              "UINT32_C(0)", write_prelude, temp_ordinal);
+        if (write.ok) {
+          output << write_prelude.str() << write.expression << "\n" << clr_ccr << write.postlude
+                 << memory->program_counter << " += UINT32_C(" << length << ");\n";
+        }
+        break;
+      }
+      // SEG-021-T029: a MEMORY destination is read before it is written on the MC68000 (the value is discarded
+      // and the result never depends on it), the exact shape SEG-021-T016 established for memory Scc: one EA
+      // computation, one routed read, one routed write of zero to the same EA, the single deferred address-
+      // register commit strictly after the successful write, then CCR and PC. A stop on the read or the write
+      // returns from inside that access (m68k_emit_routed_read/write's own `return transfer;`), before any
+      // commit, CCR change or PC advance.
+      // SEG-007-T157 / ADR-0019 Stage B: the routed auto-updating `(An)+` / `-(An)` destination keeps the
+      // deferred-address-register-commit technique (docs/architecture/c4-add-family-auto-update-commit-
+      // contract.md): snapshot the EA into one local, adjust it, access, commit once after the write.
       const bool auto_destination = operation.destination_ea.mode == M68kEaMode::address_predec ||
                                     operation.destination_ea.mode == M68kEaMode::address_postinc;
       if (memory->runtime_routing && auto_destination) {
@@ -1965,29 +1977,41 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         body << "uint32_t m68k_clr_auto_ea = " << an_expr << ";\n";
         if (operation.destination_ea.mode == M68kEaMode::address_predec)
           body << "m68k_clr_auto_ea -= UINT32_C(" << step << ");\n";
+        std::string discarded;
+        m68k_emit_routed_read(body, "m68k_clr_auto_ea", operation.size, *memory, discarded, temp_ordinal);
+        body << "(void)" << discarded << ";\n";
         m68k_emit_routed_write(body, "m68k_clr_auto_ea", operation.size, *memory, "UINT32_C(0)", temp_ordinal);
         if (operation.destination_ea.mode == M68kEaMode::address_postinc)
           body << "m68k_clr_auto_ea += UINT32_C(" << step << ");\n";
-        body << an_expr << " = m68k_clr_auto_ea;\n";
-        // Always N=0,Z=1,V=0,C=0, X unaffected -- identical fixed pattern to
-        // the non-auto-update branch below, only reached after the commit.
-        body << status_register << " = (uint16_t)((" << status_register << " & UINT16_C(0xFFF0)) | UINT16_C(4));\n";
-        output << "{\n" << body.str() << memory->program_counter << " += UINT32_C("
-               << operation.provenance.length.value << ");\n}\n";
+        body << an_expr << " = m68k_clr_auto_ea;\n" << clr_ccr;
+        output << "{\n" << body.str() << memory->program_counter << " += UINT32_C(" << length << ");\n}\n";
         break;
       }
+      // An absolute destination's discarded read goes exactly where its write goes: the write's own rule
+      // (m68k_emit_ea_write) routes it through the runtime owner in a routed context and indexes linear memory
+      // otherwise, so the read uses that same access class -- never a folded constant, and never dependent on
+      // whether the caller supplied a source-operand access class.
+      auto access = *memory;
+      if (operation.destination_ea.mode == M68kEaMode::absolute_word ||
+          operation.destination_ea.mode == M68kEaMode::absolute_long)
+        access.test_operand_access =
+            memory->runtime_routing ? M68kOperandAccess::runtime_routed : M68kOperandAccess::linear_memory;
       unsigned temp_ordinal = 0U;
-      std::ostringstream write_prelude;
-      const auto write = m68k_emit_ea_write(operation.destination_ea, operation.size, data_registers, *memory,
-                                            "UINT32_C(0)", write_prelude, temp_ordinal);
-      if (write.ok) {
-        output << write_prelude.str() << write.expression << "\n";
-        // Always N=0,Z=1,V=0,C=0, X unaffected -- regardless of the cleared
-        // value (contract, CLR "Condition Codes"): a fixed pattern, not
-        // m68k_move_result_ccr applied to a value.
-        output << status_register << " = (uint16_t)((" << status_register << " & UINT16_C(0xFFF0)) | UINT16_C(4));\n";
-        output << write.postlude;
-        output << memory->program_counter << " += UINT32_C(" << operation.provenance.length.value << ");\n";
+      std::ostringstream prelude;
+      const auto discarded = m68k_emit_ea_read(operation.destination_ea, operation.size, data_registers, access,
+                                               prelude, temp_ordinal);
+      if (discarded.ok) {
+        auto write_ea = operation.destination_ea;
+        if (auto_destination)
+          write_ea.mode = M68kEaMode::address_indirect;  // the read already applied the single pointer mutation
+        std::ostringstream write_prelude;
+        const auto write = m68k_emit_ea_write(write_ea, operation.size, data_registers, access, "UINT32_C(0)",
+                                              write_prelude, temp_ordinal);
+        if (write.ok) {
+          output << "{\n" << prelude.str() << "(void)(" << discarded.expression << ");\n" << write_prelude.str()
+                 << write.expression << "\n" << write.postlude << discarded.postlude << clr_ccr
+                 << memory->program_counter << " += UINT32_C(" << length << ");\n}\n";
+        }
       }
     }
     break;

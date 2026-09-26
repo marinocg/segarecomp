@@ -28597,6 +28597,270 @@ int c4_exg_movep_scc_tas_admission() {
   return failures == 0 ? 0 : 1;
 }
 
+// SEG-021-T029: memory-destination CLR (byte/word/long) performs the MC68000 architectural read of its destination
+// (value discarded) before writing zero, the shape SEG-021-T016 established for memory Scc: one EA, one routed read,
+// one routed write to the same EA, one auto-update commit after the write, CCR (N=0,Z=1,V=0,C=0, X kept) and PC last.
+// A Dn destination is register-only. Encodings are written from the Motorola CLR entry (`0100 0010 ss mmmrrr`).
+namespace clr_read_before_write_aot_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000F00U;
+const std::vector<std::uint8_t> image{
+    0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U,
+    0x42U, 0x03U,                // F08 CLR.B D3
+    0x42U, 0x18U,                // F0A CLR.B (A0)+
+    0x42U, 0x27U,                // F0C CLR.B -(A7)
+    0x42U, 0x51U,                // F0E CLR.W (A1)
+    0x42U, 0x62U,                // F10 CLR.W -(A2)
+    0x42U, 0x9BU,                // F12 CLR.L (A3)+
+    0x42U, 0xACU, 0x00U, 0x10U,  // F14 CLR.L (16,A4)
+    0x42U, 0x85U,                // F18 CLR.L D5
+    0x42U, 0x1FU,                // F1A CLR.B (A7)+
+};
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T029/clr-read-before-write-aot-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base}, {{}, static_cast<std::uint32_t>(base + image.size())},
+                             {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace clr_read_before_write_aot_fixture
+
+int emit_clr_read_before_write_aot_source() {
+  using namespace segarecomp;
+  using namespace clr_read_before_write_aot_fixture;
+  auto program = program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
+// A straight-line C4 block (ordinary whole-program route) over every CLR destination class, including a foldable
+// absolute work-RAM destination (retained destination_read + destination_write facts), then the RESET frontier;
+// executed by tests/genesis_clr_read_before_write_generated_test.py.
+int emit_clr_read_before_write_c4_source() {
+  using namespace segarecomp;
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  const std::vector<std::uint8_t> image{
+      0x42U, 0x03U,                              // B00 CLR.B D3
+      0x42U, 0x18U,                              // B02 CLR.B (A0)+
+      0x42U, 0x67U,                              // B04 CLR.W -(A7)
+      0x42U, 0x92U,                              // B06 CLR.L (A2)
+      0x42U, 0x27U,                              // B08 CLR.B -(A7)
+      0x42U, 0x79U, 0x00U, 0xFFU, 0x07U, 0x00U,  // B0A CLR.W $FF0700.L (foldable absolute: read + write facts)
+      0x42U, 0xABU, 0x00U, 0x10U,                // B10 CLR.L (16,A3)
+      0x4EU, 0x70U,                              // B14 RESET
+  };
+  program.image = {"synthetic-c4-clr-read-before-write-block", image, image.size()};
+  program.mapping_claims = {{"synthetic-c4-clr-read-before-write-block", {{}, 0xB00U},
+                              {{}, static_cast<std::uint32_t>(0xB00U + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 1;
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  if (emitted.starts_with("/* translation rejected:")) return 2;
+  std::cout << emitted;
+  return 0;
+}
+
+void clr_memory_destination_reads_before_writing() {
+  using namespace segarecomp;
+  const auto lift = [](std::vector<std::uint8_t> bytes) {
+    const auto decoded = std::get<M68kDecodedInstruction>(decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup));
+    return lift_m68k_instruction(decoded);
+  };
+  const auto count_of = [](const std::string &text, const std::string &needle) {
+    std::size_t count = 0;
+    for (auto at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1)) ++count;
+    return count;
+  };
+  // Effect metadata: a memory destination declares the destination read (source_ea) and write; Dn declares no read.
+  const auto memory_effect = m68k_operation_effect(lift({0x42U, 0x50U}));  // CLR.W (A0)
+  expect(memory_effect.resolved_source_ea && memory_effect.resolved_destination_ea &&
+             memory_effect.resolved_source_ea->mode == M68kEaMode::address_indirect &&
+             memory_effect.resolved_destination_ea->mode == M68kEaMode::address_indirect &&
+             memory_effect.affects_condition_codes,
+         "memory CLR effect metadata declares a destination read (source_ea) and the destination write");
+  const auto register_effect = m68k_operation_effect(lift({0x42U, 0x83U}));  // CLR.L D3
+  expect(!register_effect.resolved_source_ea && register_effect.resolved_destination_ea,
+         "CLR Dn declares no memory read");
+  expect(m68k_instruction_cycles(lift({0x42U, 0x50U})) == std::optional<std::uint32_t>{12U} &&
+             m68k_instruction_cycles(lift({0x42U, 0x90U})) == std::optional<std::uint32_t>{20U} &&
+             m68k_instruction_cycles(lift({0x42U, 0x83U})) == std::optional<std::uint32_t>{6U},
+         "CLR published timing is unchanged (the memory rows already include the read)");
+
+  // Routed lowering: one routed read, then one routed write of zero to the same EA, then (auto-update) the single
+  // commit, then the fixed CCR pattern, then PC. Every size; A7 byte steps by two.
+  GenesisM68kEmissionContext routed{"ram", "a", "fi", "fc", "fd", 0U, std::nullopt, 0U, {}, {}};
+  routed.runtime_routing = true;
+  routed.runtime_object = "runtime";
+  routed.program_counter = "runtime->pc";
+  routed.runtime_emitter = &genesis_m68k_runtime_c_emitter();
+  const std::string ccr = "runtime->sr = (uint16_t)((runtime->sr & UINT16_C(0xFFF0)) | UINT16_C(4));";
+  struct Shape { std::vector<std::uint8_t> bytes; const char *width; const char *commit; const char *step; };
+  for (const auto &shape : std::vector<Shape>{
+           {{0x42U, 0x1FU}, "GENESIS_ACCESS_BYTE", "a[7] = m68k_clr_auto_ea;", "m68k_clr_auto_ea += UINT32_C(2)"},
+           {{0x42U, 0x27U}, "GENESIS_ACCESS_BYTE", "a[7] = m68k_clr_auto_ea;", "m68k_clr_auto_ea -= UINT32_C(2)"},
+           {{0x42U, 0x18U}, "GENESIS_ACCESS_BYTE", "a[0] = m68k_clr_auto_ea;", "m68k_clr_auto_ea += UINT32_C(1)"},
+           {{0x42U, 0x62U}, "GENESIS_ACCESS_WORD", "a[2] = m68k_clr_auto_ea;", "m68k_clr_auto_ea -= UINT32_C(2)"},
+           {{0x42U, 0x9BU}, "GENESIS_ACCESS_LONG", "a[3] = m68k_clr_auto_ea;", "m68k_clr_auto_ea += UINT32_C(4)"},
+           {{0x42U, 0xA7U}, "GENESIS_ACCESS_LONG", "a[7] = m68k_clr_auto_ea;", "m68k_clr_auto_ea -= UINT32_C(4)"}}) {
+    const auto text = emit_m68k_operation_c(lift(shape.bytes), "runtime->d", "runtime->sr", "", &routed);
+    const auto read = text.find(std::string(shape.width) + ", GENESIS_ACCESS_READ, &");
+    const auto write = text.find(std::string(shape.width) + ", GENESIS_ACCESS_WRITE, &");
+    const auto commit = text.find(shape.commit);
+    expect(read != std::string::npos && write != std::string::npos && read < write &&
+               count_of(text, "genesis_route_access(") == 2U && count_of(text, shape.commit) == 1U &&
+               commit > write && commit > text.rfind("return transfer;") && text.find(ccr) > commit &&
+               text.find(ccr) < text.find("runtime->pc +=") && text.find(shape.step) != std::string::npos,
+           "memory CLR auto-update: one routed read, then one routed write to the same EA, one commit after the "
+           "write, then CCR, PC last");
+  }
+  for (const auto &bytes : std::vector<std::vector<std::uint8_t>>{
+           {0x42U, 0x11U}, {0x42U, 0x69U, 0x00U, 0x10U}, {0x42U, 0xB0U, 0x10U, 0x04U}, {0x42U, 0xB9U, 0x00U, 0xFFU, 0x00U, 0x80U}}) {
+    const auto text = emit_m68k_operation_c(lift(bytes), "runtime->d", "runtime->sr", "", &routed);
+    const auto read = text.find(", GENESIS_ACCESS_READ, &");
+    const auto write = text.find(", GENESIS_ACCESS_WRITE, &");
+    expect(read != std::string::npos && write != std::string::npos && read < write &&
+               count_of(text, "genesis_route_access(") == 2U && text.find(ccr) > text.rfind("return transfer;") &&
+               text.find(ccr) < text.find("runtime->pc +=") && text.find("a[0] =") == std::string::npos &&
+               text.find("a[1] =") == std::string::npos && text.find("m68k_clr_auto_ea") == std::string::npos,
+           "memory CLR (An)/(d16,An)/(d8,An,Xn)/abs: routed read before routed write, CCR after both, no An update");
+  }
+  const auto dn = emit_m68k_operation_c(lift({0x42U, 0x43U}), "runtime->d", "runtime->sr", "", &routed);  // CLR.W D3
+  expect(dn.find("genesis_route_access(") == std::string::npos && dn.find("runtime->d[3]") != std::string::npos &&
+             dn.find(ccr) != std::string::npos,
+         "CLR Dn is register-only (no routed access)");
+  // Direct (linear-memory) lowering: the read expression is evaluated (and discarded) before the write.
+  GenesisM68kEmissionContext direct{"ram", "a", "fi", "fc", "fd", 0U, std::nullopt, 0U, {}, {}};
+  const auto direct_text = emit_m68k_operation_c(lift({0x42U, 0x58U}), "d", "sr", "", &direct);  // CLR.W (A0)+
+  expect(direct_text.find("(void)(") != std::string::npos &&
+             direct_text.find("(void)(") < direct_text.find("sr = (uint16_t)") && count_of(direct_text, "a[0] +=") == 1U,
+         "direct CLR (An)+ evaluates the discarded read before the write and applies the single pointer update once");
+
+  // Static discovery / retained facts: a foldable absolute memory CLR retains a destination_read AND a
+  // destination_write fact (memory-Scc shape); CLR Dn retains none.
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  const std::vector<std::uint8_t> image{
+      0x42U, 0x83U,                              // 0xB00: CLR.L D3 (register: no fact)
+      0x42U, 0x79U, 0x00U, 0xFFU, 0x07U, 0x00U,  // 0xB02: CLR.W $00FF0700.L (foldable work-RAM absolute)
+      0x4EU, 0x70U,                              // 0xB08: RESET (frontier)
+  };
+  program.image = {"synthetic/SEG-021-T029/clr-memory-facts", image, image.size()};
+  program.mapping_claims = {{"synthetic-clr-memory-facts", {{}, 0xB00U}, {{}, 0xB0AU}, {0U}, {10U}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "the CLR fact fixture reaches the RESET frontier");
+  if (partial == nullptr) return;
+  const auto &facts = partial->accepted_prefix.static_memory_facts;
+  bool has_read = false, has_write = false;
+  for (const auto &fact : facts) {
+    const bool right = fact.address.value == UINT32_C(0x00FF0700) && fact.width == M68kMemoryAccessWidth::word &&
+                       fact.region == M68kAbsoluteOperandRegion::synthetic_work_ram &&
+                       fact.operation.source.address.value == 0xB02U;
+    has_read = has_read || (right && fact.role == M68kStaticMemoryFactRole::destination_read &&
+                            fact.direction == M68kMemoryAccessDirection::read);
+    has_write = has_write || (right && fact.role == M68kStaticMemoryFactRole::destination_write &&
+                              fact.direction == M68kMemoryAccessDirection::write);
+  }
+  expect(facts.size() == 2U && has_read && has_write,
+         "memory CLR with a foldable absolute destination retains exactly a destination_read and a destination_write "
+         "fact; CLR Dn retains none");
+  const auto preflight = preflight_m68k_general_startup_c4(*partial);
+  expect(preflight.valid && preflight.rows.empty(), "the two-fact absolute CLR passes the C4 preflight with no gap row");
+  // Removing the destination_read fact is a CLR missing-fact gap (the read side is now a required fact).
+  auto without_read = *partial;
+  std::erase_if(without_read.accepted_prefix.static_memory_facts, [](const M68kStaticMemoryFact &fact) {
+    return fact.role == M68kStaticMemoryFactRole::destination_read;
+  });
+  const auto missing = preflight_m68k_general_startup_c4(without_read);
+  expect(!missing.valid || !missing.rows.empty(), "an absolute CLR lacking its destination_read fact is not admitted");
+
+  // Static discovery resolves the destination READ before the write: an absolute CLR.W to the word-writable but
+  // read-rejected Z80 RESET register is a frontier whose recorded access is the READ (a write-only resolution
+  // would have admitted it), exactly like TST/memory Scc of the same address.
+  FrontendProgram device{};
+  device.profile = M68kFrontendProfile::general_startup;
+  const std::vector<std::uint8_t> device_image{
+      0x4EU, 0x71U,                              // 0xB00: NOP
+      0x42U, 0x79U, 0x00U, 0xA1U, 0x12U, 0x00U,  // 0xB02: CLR.W $00A11200.L (write-only device register)
+      0x4EU, 0x70U,                              // 0xB08: RESET
+  };
+  device.image = {"synthetic/SEG-021-T029/clr-write-only-device", device_image, device_image.size()};
+  device.mapping_claims = {{"synthetic-clr-write-only-device", {{}, 0xB00U}, {{}, 0xB0AU}, {0U}, {10U}}};
+  device.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+  const auto device_result = analyze_m68k_frontend(device);
+  const auto *device_partial = std::get_if<FrontendPartialProgram>(&device_result);
+  expect(device_partial != nullptr && device_partial->accepted_prefix.decoded.size() == 1U &&
+             !device_partial->frontiers.empty() && device_partial->frontiers.front().access.has_value() &&
+             device_partial->frontiers.front().access->direction == M68kMemoryAccessDirection::read &&
+             device_partial->frontiers.front().access->address.value == UINT32_C(0x00A11200),
+         "static discovery stops a CLR to a write-only device register at its destination READ");
+}
+
+int c4_clr_read_before_write_admission() {
+  using namespace segarecomp;
+  struct Case { const char *name; std::vector<std::uint8_t> code; const char *commit; bool routed; };
+  const std::vector<Case> cases{
+      {"CLR.B D3", {0x42U, 0x03U}, nullptr, false},
+      {"CLR.L D3", {0x42U, 0x83U}, nullptr, false},
+      {"CLR.B (A0)+", {0x42U, 0x18U}, "runtime->a[0] = m68k_clr_auto_ea;", true},
+      {"CLR.B -(A7)", {0x42U, 0x27U}, "runtime->a[7] = m68k_clr_auto_ea;", true},
+      {"CLR.W (A0)", {0x42U, 0x50U}, nullptr, true},
+      {"CLR.W (16,A0)", {0x42U, 0x68U, 0x00U, 0x10U}, nullptr, true},
+      {"CLR.L (4,A0,D1.W)", {0x42U, 0xB0U, 0x10U, 0x04U}, nullptr, true},
+      {"CLR.B (0xFF0080).L", {0x42U, 0x39U, 0x00U, 0xFFU, 0x00U, 0x80U}, nullptr, true},
+      {"CLR.W (0xFF80).W", {0x42U, 0x78U, 0xFFU, 0x80U}, nullptr, true},
+      {"CLR.L (0xFF0080).L", {0x42U, 0xB9U, 0x00U, 0xFFU, 0x00U, 0x80U}, nullptr, true},
+  };
+  int failures = 0;
+  for (const auto &test_case : cases) {
+    FrontendProgram program{};
+    program.profile = M68kFrontendProfile::general_startup;
+    auto image = test_case.code;
+    image.push_back(0x4EU);
+    image.push_back(0x70U);  // RESET
+    program.image = {"synthetic-c4-clr-read-before-write", image, 0U};
+    program.image.byte_length = program.image.bytes.size();
+    program.mapping_claims = {{"synthetic-c4-clr-read-before-write", {{}, 0xB00U},
+                                {{}, static_cast<std::uint32_t>(0xB00U + program.image.bytes.size())},
+                                {0U}, {program.image.bytes.size()}}};
+    program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+    const auto result = analyze_m68k_frontend(program);
+    const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+    bool ok = partial != nullptr;
+    if (ok) {
+      const auto preflight = preflight_m68k_general_startup_c4(*partial);
+      ok = preflight.valid && preflight.rows.empty();
+      const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+      const auto read = emitted.find(", GENESIS_ACCESS_READ, &");
+      const auto write = emitted.find(", GENESIS_ACCESS_WRITE, &");
+      ok = ok && emitted.find("translation rejected") == std::string::npos &&
+           emitted.find("GENESIS_C4_LOWERING_DIMENSIONS_") == std::string::npos &&
+           emitted.find("genesis_c4_lowering_stop_") == std::string::npos &&
+           (read != std::string::npos) == test_case.routed && (write != std::string::npos) == test_case.routed &&
+           (!test_case.routed || read < write) &&
+           (test_case.commit == nullptr || emitted.find(test_case.commit) != std::string::npos) &&
+           emitted.find("runtime->runtime") == std::string::npos;
+    }
+    if (!ok) {
+      std::cerr << "C4 CLR read-before-write admission failed: " << test_case.name << "\n";
+      ++failures;
+    }
+  }
+  return failures == 0 ? 0 : 1;
+}
+
 // SEG-007-T214 / ADR-0028 §9: authoritative exact direct-control target
 // closure fixtures (Scope item 8). Every fixture is entirely synthetic --
 // generic addresses only, no Sonic/commercial-derived values.
@@ -29854,6 +30118,10 @@ int main(int argc, char **argv) {
     return emit_exg_movep_scc_tas_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-exg-movep-scc-tas-c4")
     return emit_exg_movep_scc_tas_c4_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-clr-read-before-write-aot")
+    return emit_clr_read_before_write_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-clr-read-before-write-c4")
+    return emit_clr_read_before_write_c4_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-status-register-aot")
     return emit_status_register_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-status-register-c4")
@@ -30204,6 +30472,9 @@ int main(int argc, char **argv) {
   exg_movep_scc_tas_aot_dispatch_is_admitted_end_to_end();
   expect(c4_exg_movep_scc_tas_admission() == 0,
          "SEG-021-T016: every legal EXG/MOVEP/Scc/TAS shape passes the C4 preflight with zero gap rows");
+  clr_memory_destination_reads_before_writing();
+  expect(c4_clr_read_before_write_admission() == 0,
+         "SEG-021-T029: every CLR destination class passes the C4 preflight and routes the read before the write");
   compare_ccr_preserves_x_and_uses_destination_minus_source();
   compare_forms_decode_and_lift_with_shared_ea();
   subtraction_forms_decode_and_share_flags();

@@ -1543,11 +1543,10 @@ bool valid_c4_static_memory_fact(
       expected_direction = M68kMemoryAccessDirection::read;
     }
     break;
-  case M68kInstructionKind::clr:
   case M68kInstructionKind::andi:
   case M68kInstructionKind::ori:
   case M68kInstructionKind::eori:
-    // SEG-007-T167: ORI/EORI reuse ANDI/CLR's destination-only retained-fact
+    // SEG-007-T167: ORI/EORI reuse ANDI's destination-only retained-fact
     // convention -- their source is always an instruction-embedded immediate,
     // and a single destination_write fact is the independently re-verified
     // address/region authority for the whole read-modify-write memory
@@ -1679,6 +1678,7 @@ bool valid_c4_static_memory_fact(
   case M68kInstructionKind::test_and_set:  // SEG-021-T016: TAS is a byte one-address RMW like NOT
   case M68kInstructionKind::set_conditional:  // SEG-021-T016: memory Scc reads then writes its byte destination
   case M68kInstructionKind::move_from_sr:  // SEG-021-T018: a memory MOVE from SR destination is read then written
+  case M68kInstructionKind::clr:  // SEG-021-T029: a memory CLR destination is read then written (memory-Scc shape)
   case M68kInstructionKind::not_operand:
     // SEG-007-T168: NOT has no second operand at all (unlike SUBQ's
     // quick-immediate source); its sole destination is a full RMW operand,
@@ -2649,9 +2649,15 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     // commit path in emit_m68k_operation_c (the same pattern the add
     // family, MOVE, and MOVEA already use); it is no longer a
     // requires_architecture_decision gap. A non-auto-update foldable
-    // destination still needs its retained fact exactly as before.
-    if (m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none)
+    // destination still needs its retained facts.
+    // SEG-021-T029: a memory CLR destination is read then written (the
+    // memory-Scc shape), so it needs both destination_read and
+    // destination_write facts; a Dn destination needs none.
+    if (operation.destination_ea.mode != M68kEaMode::data_register &&
+        m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none) {
+      check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_read);
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
+    }
   } else if (operation.kind == M68kIrKind::logical_not || operation.kind == M68kIrKind::shift_rotate_memory ||
              operation.kind == M68kIrKind::negate_word || operation.kind == M68kIrKind::negate_extended ||
              operation.kind == M68kIrKind::negate_decimal || operation.kind == M68kIrKind::test_and_set ||
@@ -3263,11 +3269,10 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         expected_direction = M68kMemoryAccessDirection::read;
       }
       break;
-    case M68kInstructionKind::clr:
     case M68kInstructionKind::andi:
     case M68kInstructionKind::ori:
     case M68kInstructionKind::eori:
-      // SEG-007-T167: ORI/EORI reuse ANDI/CLR's destination-only fact shape;
+      // SEG-007-T167: ORI/EORI reuse ANDI's destination-only fact shape;
       // the single destination_write fact authorises the whole RMW destination.
       if (fact.role == M68kStaticMemoryFactRole::destination_write) {
         expected_ea = &instruction->second->destination_ea;
@@ -3345,6 +3350,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     case M68kInstructionKind::test_and_set:  // SEG-021-T016
     case M68kInstructionKind::set_conditional:  // SEG-021-T016: memory Scc is read-then-write like TAS
     case M68kInstructionKind::move_from_sr:  // SEG-021-T018: a memory MOVE from SR destination is read then written
+    case M68kInstructionKind::clr:  // SEG-021-T029: a memory CLR destination is read then written (memory-Scc shape)
     case M68kInstructionKind::not_operand:
       // SEG-007-T168: NOT has no second operand at all (unlike AND/OR/EOR);
       // its sole destination is a full RMW operand needing both
@@ -3573,9 +3579,13 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
                        M68kInstructionKind::movea)) ||
         (instruction->kind == M68kInstructionKind::tst &&
          !require_fact(instruction->source_ea, M68kStaticMemoryFactRole::source_read, M68kInstructionKind::tst)) ||
+        // SEG-021-T029: a memory CLR destination is read then written (memory-Scc shape; Dn is register-only).
         (instruction->kind == M68kInstructionKind::clr &&
-         !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
-                       M68kInstructionKind::clr)) ||
+         instruction->destination_ea.mode != M68kEaMode::data_register &&
+         (!require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_read,
+                        M68kInstructionKind::clr) ||
+          !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
+                        M68kInstructionKind::clr))) ||
         // SEG-007-T071: ANDI's destination is required exactly like CLR's --
         // a foldable absolute EA must have a retained fact, and (since `kind`
         // is `andi`, not `move`) a predecrement/postincrement destination is
@@ -5299,6 +5309,8 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         break;
       }
       case M68kIrKind::write_clr: {
+        // SEG-021-T029: memory CLR is read then written (memory-Scc shape); like Scc, the destination_write fact
+        // is the region authority checked here (preflight already required the matching destination_read fact).
         const auto *destination = fact_for(M68kStaticMemoryFactRole::destination_write);
         if (destination != nullptr && destination->region != M68kAbsoluteOperandRegion::synthetic_work_ram)
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
