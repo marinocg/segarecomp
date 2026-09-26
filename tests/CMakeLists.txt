@@ -190,6 +190,16 @@ add_executable(genesis_live_frame_tests genesis_live_frame_test.cpp)
 target_link_libraries(genesis_live_frame_tests PRIVATE segarecomp::runtime_genesis)
 segarecomp_enable_warnings(genesis_live_frame_tests)
 add_test(NAME genesis_live_frame_tests COMMAND genesis_live_frame_tests)
+# SEG-021-T031: headless bounded live-frame capture core (host tool; not linked by runtime_genesis).
+add_executable(genesis_frame_capture_tests genesis_frame_capture_test.cpp
+  ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/frame_capture.c)
+target_include_directories(genesis_frame_capture_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer)
+target_link_libraries(genesis_frame_capture_tests PRIVATE segarecomp::runtime_genesis)
+target_compile_features(genesis_frame_capture_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_frame_capture_tests)
+add_test(NAME genesis_frame_capture_tests COMMAND genesis_frame_capture_tests)
+add_test(NAME genesis_frame_capture_bridge_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_frame_capture_bridge_test.py ${PROJECT_SOURCE_DIR})
 # SEG-007-T254: optional viewer core; deliberately not linked by runtime_genesis.
 add_executable(genesis_viewer_tests genesis_viewer_test.cpp ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/viewer.c)
 target_include_directories(genesis_viewer_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer)

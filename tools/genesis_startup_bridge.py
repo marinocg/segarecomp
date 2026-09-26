@@ -1023,12 +1023,13 @@ def compile_objects(jobs: "list[tuple[list[str], pathlib.Path]]", cwd: pathlib.P
 def resolve_profile(args) -> str:
     if args.build_profile != "auto":
         return args.build_profile
-    return "optimized" if args.viewer else "quick"
+    return "optimized" if (args.viewer or args.capture_frames is not None) else "quick"
 
 
 def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, root: pathlib.Path,
                          out_dir: pathlib.Path, debug: "bool | str",
                          viewer_sdl3: tuple[list[str], list[str]] | None = None,
+                         capture: bool = False,
                          ) -> tuple[int, bytes | None, pathlib.Path | None]:
     source = out_dir / "bridge.generated.c"
     executable = out_dir / "bridge"
@@ -1089,6 +1090,8 @@ def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, roo
         if viewer_sdl3 is not None:
             return _compile_viewer_executable(compile_flags, viewer_sdl3, root, sources, executable,
                                               None)
+        if capture:
+            return _compile_capture_executable(compile_flags, root, sources, executable)
         runtime_flags = ["-I", str(root / "platforms" / "genesis" / "runtime")]
         if not sharded:
             compile_result = subprocess.run(compile_flags + runtime_flags + [
@@ -1161,6 +1164,100 @@ def _compile_viewer_executable(compile_flags: list[str], sdl3: tuple[list[str], 
             sys.stderr.write(link.stderr)
             return 2, None, None
     return 0, generated_bytes, executable
+
+
+def _compile_capture_executable(compile_flags: list[str], root: pathlib.Path, sources: "list[pathlib.Path]",
+                                executable: pathlib.Path) -> tuple[int, bytes | None, pathlib.Path | None]:
+    """SEG-021-T031: headless frame-capture build of the UNMODIFIED generated C, mirroring the
+    viewer build: only the main TU is compiled with -Dgenesis_runtime_run=genesis_frame_capture_hook_run.
+    No SDL. Objects live in a temp dir (never in out_dir)."""
+    import tempfile
+    runtime_dir = root / "platforms" / "genesis" / "runtime"
+    viewer_dir = root / "platforms" / "genesis" / "viewer"
+    includes = ["-I", str(runtime_dir), "-I", str(viewer_dir)]
+    others = [runtime_dir / "runtime.c", runtime_dir / "vdp_render.c", runtime_dir / "frame_export.c",
+              viewer_dir / "frame_capture.c", viewer_dir / "frame_capture_main_hook.c"]
+    with tempfile.TemporaryDirectory() as tmp:
+        jobs = [(sources[0], ["-Dgenesis_runtime_run=genesis_frame_capture_hook_run"])] \
+            + [(u, ["-I", str(sources[0].parent)]) for u in sources[1:]] + [(o, []) for o in others]
+        objects, failure = compile_objects([(compile_flags + extra + includes, src) for src, extra in jobs],
+                                           root, pathlib.Path(tmp))
+        if failure is not None:
+            sys.stderr.write(failure)
+            return 2, None, None
+        link = subprocess.run([compile_flags[0], "-o", str(executable)] + objects,
+                              text=True, capture_output=True, cwd=root)
+        if link.returncode != 0:
+            sys.stderr.write(link.stderr)
+            return 2, None, None
+    return 0, None, executable
+
+
+def capture_frames_value(value: str) -> tuple[int, int, int]:
+    """`FIRST:COUNT[:STRIDE]` -- 1-based frame publication ordinal, a bounded frame count and an
+    optional ordinal stride (default 1: a contiguous window)."""
+    fields = value.split(":")
+    if len(fields) not in (2, 3) or not all(field.isdigit() for field in fields):
+        raise argparse.ArgumentTypeError("expected FIRST:COUNT[:STRIDE] (decimal)")
+    first, count = int(fields[0]), int(fields[1])
+    stride = int(fields[2]) if len(fields) == 3 else 1
+    if first < 1 or stride < 1 or not 1 <= count <= GENESIS_FRAME_CAPTURE_MAX_FRAMES:
+        raise argparse.ArgumentTypeError(
+            f"FIRST and STRIDE must be >= 1 and COUNT in 1..{GENESIS_FRAME_CAPTURE_MAX_FRAMES}")
+    return first, count, stride
+
+
+GENESIS_FRAME_CAPTURE_MAX_FRAMES = 64
+
+
+def ppm_to_png(ppm: bytes) -> bytes:
+    """Deterministic P6 (maxval 255) -> 8-bit RGB PNG using only the standard library."""
+    import struct
+    import zlib
+    parts = ppm.split(maxsplit=4)
+    if len(parts) != 5 or parts[0] != b"P6" or parts[3] != b"255":
+        raise ValueError("unsupported PPM")
+    width, height, pixels = int(parts[1]), int(parts[2]), parts[4]
+    if len(pixels) != width * height * 3:
+        raise ValueError("truncated PPM")
+    raw = b"".join(b"\x00" + pixels[row * width * 3:(row + 1) * width * 3] for row in range(height))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+
+
+def run_capture(executable: pathlib.Path, root: pathlib.Path, out_dir: pathlib.Path, instruction_budget: int,
+                first: int, count: int, stride: int, slice_dispatches: int | None) -> int:
+    """SEG-021-T031: run the capture-mode executable once; frames land in `out_dir/frames` as
+    PPM (the runtime's own export) plus a PNG conversion for local operator inspection."""
+    frames = out_dir / "frames"
+    shutil.rmtree(frames, ignore_errors=True)
+    frames.mkdir(parents=True)
+    env = dict(os.environ)
+    env["SEGARECOMP_CAPTURE_DIR"] = str(frames)
+    env["SEGARECOMP_CAPTURE_FIRST"] = str(first)
+    env["SEGARECOMP_CAPTURE_COUNT"] = str(count)
+    env["SEGARECOMP_CAPTURE_STRIDE"] = str(stride)
+    if slice_dispatches is not None:
+        env["SEGARECOMP_CAPTURE_SLICE"] = str(slice_dispatches)
+    else:
+        env.pop("SEGARECOMP_CAPTURE_SLICE", None)
+    completed = subprocess.run([str(executable), "--instruction-budget", str(instruction_budget)],
+                               cwd=root, env=env, text=True, capture_output=True)
+    summary = [line for line in completed.stderr.splitlines() if line.startswith("CAPTURE_SUMMARY ")]
+    for line in summary:
+        sys.stderr.write(line + "\n")
+    for ppm in sorted(frames.glob("frame-*.ppm")):
+        ppm.with_suffix(".png").write_bytes(ppm_to_png(ppm.read_bytes()))
+    if completed.stdout:
+        sys.stdout.write(completed.stdout)
+    if len(summary) != 1:
+        sys.stderr.write(completed.stderr)
+        return 5
+    outcome = json.loads(summary[0][len("CAPTURE_SUMMARY "):]).get("outcome")
+    return 0 if outcome == "window_complete" else 10
 
 
 def run_viewer(executable: pathlib.Path, root: pathlib.Path, instruction_budget: int,
@@ -1628,6 +1725,11 @@ def main() -> int:
                         help="viewer presentation policy: do not sleep between frames")
     parser.add_argument("--viewer-slice", type=instruction_budget_value,
                         help="guest dispatches per host viewer slice (> 0)")
+    # SEG-021-T031: bounded headless frame capture by publication ordinal (FIRST:COUNT).
+    parser.add_argument("--capture-frames", type=capture_frames_value,
+                        help="capture published frames FIRST, FIRST+STRIDE, ... (COUNT frames) into <out-dir>/frames")
+    parser.add_argument("--capture-slice", type=instruction_budget_value,
+                        help="guest dispatches per capture slice (> 0)")
     args = parser.parse_args()
     global _compile_jobs_override, _object_cache_dir_override
     _compile_jobs_override = args.compile_jobs
@@ -1635,6 +1737,13 @@ def main() -> int:
         _object_cache_dir_override = pathlib.Path(args.object_cache_dir).resolve()
     if (args.viewer_unthrottled or args.viewer_slice is not None) and not args.viewer:
         sys.stderr.write("--viewer-unthrottled/--viewer-slice require --viewer\n")
+        return 8
+    if args.capture_slice is not None and args.capture_frames is None:
+        sys.stderr.write("--capture-slice requires --capture-frames\n")
+        return 8
+    if args.capture_frames is not None and (args.viewer or args.compare_runs or args.full_report_path or
+                                            args.checkpoint):
+        sys.stderr.write("--capture-frames is incompatible with --viewer/--compare-runs/--full-report-path/--checkpoint\n")
         return 8
     if args.viewer and (args.compare_runs or args.full_report_path or args.checkpoint):
         sys.stderr.write("--viewer is incompatible with --compare-runs/--full-report-path/--checkpoint\n")
@@ -1706,7 +1815,17 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     def single_cycle_generate_and_compile() -> tuple[int, bytes | None, pathlib.Path | None]:
         return generate_and_compile(emitter_command, compiler, root, out_dir, resolve_profile(args),
-                                    viewer_sdl3)
+                                    viewer_sdl3, capture=args.capture_frames is not None)
+    if args.capture_frames is not None:
+        # One generation + one compile + one bounded headless capture run of the same program.
+        status, _, executable = single_cycle_generate_and_compile()
+        if status:
+            return status
+        assert executable is not None
+        return run_capture(executable, root, out_dir,
+                           args.instruction_budget if args.instruction_budget is not None
+                           else GENESIS_CANONICAL_RUNNER_DISPATCH_ALLOWANCE,
+                           *args.capture_frames, args.capture_slice)
     if args.viewer:
         # One generation + one compile + one interactive run of the same generated program.
         status, _, executable = single_cycle_generate_and_compile()
