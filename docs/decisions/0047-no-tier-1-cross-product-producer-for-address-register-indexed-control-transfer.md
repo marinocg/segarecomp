@@ -43,9 +43,9 @@ site is owned by both.
   already native (Decision 2). Targets reachable only through such a site are still represented, because
   immutable-ROM AOT enumerates every legal identity in the immutable image regardless of CFG reachability.
 - **Real-site data (aggregate counts only, from local authorized images, not persisted beyond these numbers).**
-  Whole-image AOT identities with a `(d8,An,Xn)` control EA: 6 in Sonic The Hedgehog, 4 in Streets of Rage. These
+  Whole-image AOT identities with a `(d8,An,Xn)` control EA: 6 and 4 in two authorized local commercial images. These
   are whole-image candidates, not executed sites. On both images the no-hints route runs to steady-state frame
-  execution (VBlank IRQ6 delivered, title screen and attract demo rendered for Sonic; SEG-021-T031) with no
+  execution (VBlank IRQ6 delivered, title screen and attract demo rendered on the first image; SEG-021-T031) with no
   `unresolved_indirect_target` stop, so no executed site of this shape currently leaves the compiled set.
 - **Cost of the producer.** A cross-product proof has to track joint base and index values per call context,
   prove every combination stays under the 256-member cap, revalidate across expansion rounds (ADR 0013), and add
