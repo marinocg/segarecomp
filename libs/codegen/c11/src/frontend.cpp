@@ -1886,6 +1886,25 @@ bool valid_c4_owned_cartridge_region_fact(const M68kOwnedCartridgeRegionFact &fa
 // The retirement seam consumes a C expression, not a partial scalar timing
 // row.  Keep every dynamic row here so ordinary blocks and isolated AOT
 // identities cannot silently diverge.
+// SEG-021-T035: routed-only completeness probe for the immutable-ROM AOT boundary. Applies ONLY to
+// kinds whose C lowering is gated on `runtime_routing` (DIVS.W/DIVU.W); returns false for every other
+// kind so the shared non-routed probe remains their sole completeness authority. The context mirrors
+// `emit_immutable_rom_aot_body`'s routed setup (Genesis runtime emitter, runtime object, routed operand
+// access); an EA the lowering cannot express yields an empty body and is rejected.
+bool immutable_rom_aot_routed_only_emission_is_complete(const M68kIrOperation &operation) {
+  if (operation.kind != M68kIrKind::divide_signed_word && operation.kind != M68kIrKind::divide_unsigned_word)
+    return false;
+  if (m68k_operation_effect(operation).pc == M68kPcEffectKind::none) return false;
+  GenesisM68kEmissionContext memory{};
+  memory.program_counter = "pc";
+  memory.address_registers = "runtime->a";
+  memory.user_stack_pointer = "runtime->usp";
+  memory.runtime_routing = true;
+  memory.runtime_object = "runtime";
+  memory.test_operand_access = M68kOperandAccess::runtime_routed;
+  return !emit_m68k_operation_c(operation, "runtime->d", "runtime->sr", "  ", &memory).empty();
+}
+
 std::optional<std::string> m68k_retirement_cycle_expression(const M68kIrOperation &operation) {
   if (const auto cycles = m68k_instruction_cycles(operation))
     return "UINT32_C(" + std::to_string(*cycles) + ")";
@@ -1945,8 +1964,13 @@ validated_immutable_rom_aot_entries(const FrontendAnalysis &analysis) {
     // exactly this shape; every other kind still requires the unmodified
     // `has_complete_c_emission` probe. SEG-021-T033: the same signal also
     // covers pure register-indirect `(An)` JMP/JSR.
+    // SEG-021-T035: DIVS.W/DIVU.W emission exists only under runtime routing (the ADR-0037 vector-5
+    // raise needs the live runtime object), so the shared non-routed probe is always empty for them.
+    // Prove their completeness under the routed context `emit_immutable_rom_aot_body` actually uses;
+    // scoped to exactly these routed-only kinds so no other kind's probe result changes.
     const bool has_complete_emission = m68k_operation_has_complete_c_emission(entry.operation) ||
-                                        m68k_operation_is_runtime_owned_indirect_jump(entry.operation);
+                                        m68k_operation_is_runtime_owned_indirect_jump(entry.operation) ||
+                                        immutable_rom_aot_routed_only_emission_is_complete(entry.operation);
     if (!m68k_operation_is_immutable_rom_aot_safe(entry.operation, return_target_authority_available) ||
         !has_complete_emission ||
         !independently_decoded_and_lifted(entry.decoded, entry.operation) || selected == nullptr ||

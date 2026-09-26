@@ -7994,6 +7994,57 @@ FrontendProgram program_with() {
 }
 }  // namespace jmp_an_relative_aot_fixture
 
+// SEG-021-T035: no-hints immutable-ROM AOT DIVS.W/DIVU.W fixture. Vector table at 0 (SSP, reset 0x100,
+// vector 5 -> 0x180). The reset prefix is the T011/T033 filler (a genuine partial program), so the DIV
+// identities exist only through whole-image AOT enumeration:
+//   0x110 DIVS.W D2,D3
+//   0x112 DIVU.W #7,D4
+//   0x116 DIVS.W (A0)+,D5
+//   0x118 DIVU.W -(A1),D6
+//   0x11A NOP
+//   0x180 MOVEQ #0x55,D7 ; RTE   (vector-5 handler, a static root)
+namespace div_aot_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t divs_reg = 0x110U;
+constexpr std::uint32_t divu_imm = 0x112U;
+constexpr std::uint32_t divs_postinc = 0x116U;
+constexpr std::uint32_t divu_predec = 0x118U;
+constexpr std::uint32_t handler = 0x180U;
+std::vector<std::uint8_t> image() {
+  std::vector<std::uint8_t> img(0x200U, 0x00U);
+  const auto be32 = [&](std::size_t off, std::uint32_t v) {
+    img[off] = static_cast<std::uint8_t>(v >> 24U); img[off + 1U] = static_cast<std::uint8_t>(v >> 16U);
+    img[off + 2U] = static_cast<std::uint8_t>(v >> 8U); img[off + 3U] = static_cast<std::uint8_t>(v);
+  };
+  be32(0x0U, 0x00FF8000U); be32(0x4U, 0x100U); be32(0x14U, handler);
+  const std::vector<std::uint8_t> code{
+      0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U,  // filler prefix (unresolved JSR (A0))
+  };
+  std::copy(code.begin(), code.end(), img.begin() + 0x100);
+  const std::vector<std::uint8_t> divs{
+      0x87U, 0xC2U,                // DIVS.W D2,D3
+      0x88U, 0xFCU, 0x00U, 0x07U,  // DIVU.W #7,D4
+      0x8BU, 0xD8U,                // DIVS.W (A0)+,D5
+      0x8CU, 0xE1U,                // DIVU.W -(A1),D6
+      0x4EU, 0x71U,                // NOP
+  };
+  std::copy(divs.begin(), divs.end(), img.begin() + divs_reg);
+  img[handler] = 0x7EU; img[handler + 1U] = 0x55U;      // MOVEQ #0x55,D7
+  img[handler + 2U] = 0x4EU; img[handler + 3U] = 0x73U;  // RTE
+  return img;
+}
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  const auto img = image();
+  program.image = {"synthetic/SEG-021-T035/div-aot-fixture", img, img.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, 0U}, {{}, static_cast<std::uint32_t>(img.size())}, {0U},
+                             {img.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0x100U}, 0x00FF8000U};
+  return program;
+}
+}  // namespace div_aot_fixture
+
 // SEG-021-T011: PEA is now family-level admitted to immutable-ROM AOT
 // (m68k_operation_is_immutable_rom_aot_safe). Proves the admission end to
 // end: PEA (0,A5) becomes a validated independent AOT root (no CFG edge,
@@ -8066,6 +8117,39 @@ void jmp_pc_indexed_word_aot_admission_and_dispatch_are_bounded() {
              body.find("genesis_route_access") == std::string::npos,
          "JMP AOT body reuses the exact existing runtime-EA/membership dynamic-indirect lowering "
          "verbatim (no runtime opcode decode, no routed memory access of its own)");
+}
+
+// SEG-021-T035: DIVS.W/DIVU.W become validated independent AOT roots without hints and lower through the
+// existing routed DIV emission (vector-5 raise, deferred auto-update commit) inside isolated AOT bodies.
+void div_aot_admission_and_dispatch_are_bounded() {
+  using namespace segarecomp;
+  using namespace div_aot_fixture;
+  auto program = program_with();
+  expect(apply_genesis_immutable_rom_aot(program), "DIV AOT fixture enumerates cleanly");
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr, "DIV AOT fixture remains a genuine partial program");
+  if (partial == nullptr) return;
+  expect(partial->accepted_prefix.divide_by_zero_handler_entry &&
+             partial->accepted_prefix.divide_by_zero_handler_entry->value == handler,
+         "the vector-5 handler is resolved at build time");
+  const auto &roots = partial->accepted_prefix.immutable_rom_aot_entries;
+  const auto has_root = [&](std::uint32_t address) {
+    return std::any_of(roots.begin(), roots.end(), [&](const auto &root) {
+      return root.decoded.provenance.source.address.value == address;
+    });
+  };
+  for (const auto address : {divs_reg, divu_imm, divs_postinc, divu_predec})
+    expect(has_root(address), "every DIV identity becomes a validated independent AOT root");
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  expect(!emitted.starts_with("/* translation rejected"), "DIV AOT fixture emits");
+  for (const auto address : {divs_reg, divu_imm, divs_postinc, divu_predec}) {
+    std::ostringstream text;
+    text << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address;
+    const auto body = aot_function_effective_body(emitted, text.str());
+    expect(!body.empty() && body.find("genesis_raise_divide_by_zero(") != std::string::npos,
+           "each DIV AOT body contains the shared vector-5 raise");
+  }
 }
 
 // SEG-021-T034: d16(An), (d8,An,Xn) (word/long, Dn/An index) and long-indexed (d8,PC,Xn) JMP/JSR are admitted by
@@ -8450,10 +8534,20 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
     operation.kind = div_kind;
     operation.source_ea.mode = M68kEaMode::data_register;
     operation.destination_ea.mode = M68kEaMode::data_register;
-    expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-           "DIVS/DIVU stay categorically excluded from immutable-ROM AOT");
-    // Pin the REAL invariant directly: DIVS/DIVU fail the shared non-routed completeness probe
-    // even for the simplest legal (register-direct) shape, independent of the safety predicate.
+    // SEG-021-T035: admitted for every legal data-mode source EA; completeness is proven by the
+    // routed-only probe in validated_immutable_rom_aot_entries, never by the shared non-routed probe.
+    for (const auto source_mode : {M68kEaMode::data_register, M68kEaMode::address_indirect,
+                                   M68kEaMode::address_postinc, M68kEaMode::address_predec,
+                                   M68kEaMode::address_disp16, M68kEaMode::address_index8,
+                                   M68kEaMode::absolute_word, M68kEaMode::absolute_long, M68kEaMode::pc_disp16,
+                                   M68kEaMode::pc_index8, M68kEaMode::immediate}) {
+      operation.source_ea.mode = source_mode;
+      expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+             "SEG-021-T035: DIVS/DIVU are admitted to immutable-ROM AOT for every legal source EA");
+    }
+    operation.source_ea.mode = M68kEaMode::data_register;
+    // Pin the invariant directly: DIVS/DIVU still fail the shared non-routed completeness probe
+    // (unchanged by SEG-021-T035), independent of the safety predicate.
     expect(!m68k_operation_has_complete_c_emission(operation),
            "DIVS/DIVU's C emission is unconditionally gated behind runtime_routing, so the shared "
            "non-routed AOT completeness probe always reports it incomplete");
@@ -8905,8 +8999,8 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
   operation.destination_ea.mode = M68kEaMode::data_register;
   operation.kind = M68kIrKind::divide_unsigned_word;
   operation.source_ea.mode = M68kEaMode::data_register;
-  expect(!m68k_operation_is_immutable_rom_aot_safe(operation, false),
-         "exception-sensitive divide remains excluded from the fact-free boundary");
+  expect(m68k_operation_is_immutable_rom_aot_safe(operation, false),
+         "SEG-021-T035: divide is admitted; its vector-5 raise uses the routed AOT context");
   // SEG-007-T246: `return_from_subroutine` is the sole existing-authority
   // (not fact-free) carve-out. It is admitted only when the caller can
   // supply ADR-0011's already-computed whole-program `runtime_return_
@@ -9672,6 +9766,21 @@ int emit_jmp_pc_indexed_word_aot_source() {
 
 // SEG-021-T033: representative generated-C source for the strict-C11 compile/execute proof
 // (`tests/genesis_immutable_rom_aot_jmp_an_indirect_generated_test.py`).
+// SEG-021-T035: generated-C source for `tests/genesis_immutable_rom_aot_div_generated_test.py`.
+int emit_div_aot_source() {
+  using namespace segarecomp;
+  using namespace div_aot_fixture;
+  auto program = program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
 // SEG-021-T034: representative generated-C source for
 // `tests/genesis_immutable_rom_aot_jmp_an_relative_generated_test.py`.
 int emit_jmp_an_relative_aot_source() {
@@ -29403,6 +29512,8 @@ int main(int argc, char **argv) {
     return emit_jmp_pc_indexed_word_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-jmp-an-indirect-aot")
     return emit_jmp_an_indirect_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-div-aot")
+    return emit_div_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-jmp-an-relative-aot")
     return emit_jmp_an_relative_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-straight-line-block")
@@ -30008,6 +30119,7 @@ int main(int argc, char **argv) {
   jmp_pc_indexed_word_aot_admission_and_dispatch_are_bounded();
   jmp_an_indirect_aot_admission_and_dispatch_are_bounded();
   jmp_an_relative_aot_admission_and_dispatch_are_bounded();
+  div_aot_admission_and_dispatch_are_bounded();
   t250_final_compiled_membership_suppresses_stale_frontier_interception();
   ordinary_interior_owner_precedes_consistent_aot_and_rejects_conflict();
   t250_genuine_typed_frontier_without_compiled_membership_still_intercepts();

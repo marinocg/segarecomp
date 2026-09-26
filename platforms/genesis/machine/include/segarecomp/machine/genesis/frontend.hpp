@@ -939,28 +939,15 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     return m68k_instruction_cycles(operation).has_value();
   case M68kIrKind::divide_signed_word:
   case M68kIrKind::divide_unsigned_word:
-    // SEG-021-T010 correction (bounded experiment, reverted): the "no live runtime object"
-    // rationale this comment previously carried was WRONG -- `emit_immutable_rom_aot_body` DOES
-    // configure `runtime_routing = true` / `runtime_object = "runtime"` for every isolated AOT
-    // candidate, identically to an ordinary routed block, and DIVS.W/DIVU.W's own
-    // `emit_runtime(...).divide_by_zero(...)` (ADR-0037) emits through that exact shared plumbing
-    // with no AOT-specific special-casing. Temporarily admitting DIVS/DIVU here (returning `true`)
-    // and exercising an isolated, CFG-unreachable synthetic AOT candidate proved the REAL blocker
-    // is elsewhere: `validated_immutable_rom_aot_entries` (frontend.cpp) additionally requires
-    // `m68k_operation_has_complete_c_emission` (libs/codegen/c11/src/m68k.cpp) to pass, and that
-    // shared, family-independent completeness probe deliberately constructs a NON-routed
-    // (`runtime_routing = false`, no `runtime_emitter`) `M68kMemoryEmissionContext` for every IR
-    // kind, by design proving a kind's AOT candidacy needs no live runtime plumbing at the
-    // completeness-check stage itself. DIVS.W/DIVU.W's C emission body is unconditionally gated
-    // behind `memory->runtime_routing` (needed only for that live divide-by-zero raise), so it is
-    // always empty under that probe regardless of this predicate's own permissiveness -- DIVS/DIVU
-    // can never pass `validated_immutable_rom_aot_entries`, independent of `m68k_operation_is_
-    // immutable_rom_aot_safe`. Making DIVS/DIVU AOT-eligible would require threading the full
-    // runtime-routed emitter/object context into that shared probe -- a change touching every
-    // other AOT-eligible kind's own validation path, not a DIV-local fix, and out of this task's
-    // bounded scope. MULS.W/MULU.W are unaffected: their own emission needs no `runtime_routing`
-    // gate at all (only `memory != nullptr`), so they already pass the same non-routed probe.
-    return false;
+    // SEG-021-T035: admitted. `emit_immutable_rom_aot_body` configures the same runtime-routed
+    // context (`runtime_routing`, `runtime_object`, the Genesis runtime emitter) as an ordinary routed
+    // C4 block, so the existing DIVS.W/DIVU.W lowering -- including the ADR-0037 vector-5 raise and the
+    // SEG-021-T010 deferred auto-update commit -- is used verbatim. Completeness is proven by the
+    // routed-only probe `validated_immutable_rom_aot_entries` applies to exactly these two kinds
+    // (libs/codegen/c11/src/frontend.cpp), leaving the shared non-routed
+    // `m68k_operation_has_complete_c_emission` probe unchanged for every other kind. Timing reuses the
+    // shared static retirement row (exact data-dependent DIV timing is SEG-021-T022).
+    return m68k_instruction_cycles(operation).has_value();
   }
   return false;
 }
