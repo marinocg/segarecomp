@@ -37,7 +37,22 @@ int main(void) {
   runtime.work_ram[1] = UINT8_C(0x06);
   transfer = genesis_bridge_dispatch(&runtime);
   assert(transfer.kind == GENESIS_CONTINUE_AT_PC);
+  /* SEG-021-T033 / ADR-0039 precedence: JSR (A0) at base+0x02 is now also an
+     admitted immutable-ROM AOT identity, so it is a member of the final
+     compiled-address set and its Tier-2 frontier stop is no longer invoked
+     from the block (an independently compiled representation is never
+     erased by a frontier stop). The block retires MOVEA and continues at the
+     JSR's PC; the AOT body then checks runtime A0 against the same final
+     compiled-entry set, pushes the continuation once and transfers. */
+  assert(transfer.next_pc == UINT32_C(0x00000C02));
+  assert(runtime.a[0] == UINT32_C(0x00000C06) && runtime.a[7] == UINT32_C(0x00FF0100));
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_CONTINUE_AT_PC);
   assert(transfer.next_pc == UINT32_C(0x00000C06));
+  assert(runtime.a[7] == UINT32_C(0x00FF00FC));
+  assert(runtime.work_ram[0x00FC] == 0x00U && runtime.work_ram[0x00FD] == 0x00U &&
+         runtime.work_ram[0x00FE] == 0x0CU && runtime.work_ram[0x00FF] == 0x04U);
+  runtime.a[7] = UINT32_C(0x00FF0100);
 
   /* Dispatch directly to V1 (base+0x06): a valid, experimentally-proposed
      aligned entry admitted through the unmodified existing decode/lowering
@@ -132,6 +147,12 @@ def main() -> None:
     assert not generated.stdout.startswith("/* translation rejected:")
     assert "static GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address)" in generated.stdout
     assert "while (low < high)" in generated.stdout
+    # SEG-021-T033 / ADR-0039: the JSR (A0) site is co-owned by its Tier-2 frontier stop and an
+    # admitted AOT identity; the compiled-entry table (consulted first by dispatch) selects the AOT
+    # body, and the ordinary block no longer invokes the frontier stop for that member PC.
+    assert "{ UINT32_C(0x00000C02), genesis_aot_00000C02 }" in generated.stdout
+    block = generated.stdout.split("genesis_block_00000C00(GenesisRuntime *runtime) {", 1)[1].split("\n}\n", 1)[0]
+    assert "genesis_frontier_stop_00000C02(runtime)" not in block
     assert "GenesisCompiledEntry entry = genesis_compiled_entry_lookup(runtime->pc)" in generated.stdout
     assert "if (runtime->pc == UINT32_C(0x00000C06))" not in generated.stdout
     assert "GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET" in generated.stdout

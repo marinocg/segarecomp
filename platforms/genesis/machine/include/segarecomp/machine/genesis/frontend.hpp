@@ -652,9 +652,20 @@ inline bool is_semantic_partition_boundary_address(const FrontendAnalysis &analy
 // call site can use it to bypass ONLY the generic `has_complete_c_emission`
 // probe's `pc != M68kPcEffectKind::none` requirement for this one narrow
 // shape, never weakening that requirement for any other kind.
+// SEG-021-T033: the pure register-indirect control EA (`JMP (An)`/`JSR (An)`,
+// mode 2, no displacement/extension) is the second shape that same shared
+// dynamic-indirect branch already lowers (runtime EA = architectural `An`,
+// same membership check, same fail-closed stop). Every address register is
+// admitted: the SEG-007-T178 A7 exclusion belongs to the Tier-1 finite-value
+// domain, which this runtime-membership owner never consults, and the shared
+// branch reads the EA before a JSR's continuation push (MC68000 order).
+// `d16(An)` and `(d8,An,Xn)` have no lowering in that shared branch and stay
+// excluded.
 inline bool m68k_operation_is_runtime_owned_indirect_jump(const M68kIrOperation &operation) {
   if (operation.kind != M68kIrKind::jump_general && operation.kind != M68kIrKind::call_general) return false;
   const auto &ea = operation.source_ea;
+  if (ea.mode == M68kEaMode::address_indirect)
+    return ea.displacement == 0 && ea.extension_words == 0U;
   return ea.mode == M68kEaMode::pc_index8 && !ea.index_is_address && !ea.index_is_long;
 }
 
@@ -850,7 +861,8 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // SEG-021-T027: the brief PC-indexed indirect form (word index only)
     // now reuses that exact existing ADR-0009 membership machinery via
     // `m68k_operation_is_runtime_owned_indirect_jump` above -- see that
-    // predicate's own doc comment. `(An)`/`d16(An)` remain excluded.
+    // predicate's own doc comment. SEG-021-T033: pure `(An)` now reuses the
+    // same owner through that predicate; `d16(An)` remains excluded.
     return m68k_is_statically_foldable_control_ea(operation.source_ea) ||
            m68k_operation_is_runtime_owned_indirect_jump(operation);
   case M68kIrKind::call_general:
@@ -878,6 +890,8 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // aot_body` already sets `memory.continuation` generically for every
     // admitted call_general candidate above, so no new stack/call-frame/
     // return-target architecture is introduced.
+    // SEG-021-T033: the same holds for pure `JSR (An)`: the shared
+    // branch computes the EA from `An` before the routed continuation push.
     return m68k_is_statically_foldable_control_ea(operation.source_ea) ||
            m68k_operation_is_runtime_owned_indirect_jump(operation);
   case M68kIrKind::bsr_call:
