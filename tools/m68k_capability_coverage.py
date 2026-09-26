@@ -60,6 +60,11 @@ RUNTIME_DIR = ROOT / "platforms" / "genesis" / "runtime"
 EXTENSION_PATTERN = ("every extension word 0x0004 (primary words are exhaustive; extension-word, index, MOVEM-mask, "
                      "displacement and immediate values are NOT); one fixed register/RAM state restored before every word; "
                      "direct route: 1 MiB linear window at 0; runtime-routed route: Genesis work RAM only")
+# SEG-021-T032 / ADR 0043 section 4 (Group 0) and section 6 (trace): exception classes whose project disposition is
+# a declared, fail-closed deferral. They stay listed in the legal-form dataset (a hardware fact) but are not
+# required by `exception_privilege_modeled`; forms listing them are reported in a separate deferred bucket.
+# Bus error (vector 2) and trace (vector 9) are listed by no form, so only address error appears here.
+DEFERRED_EXCEPTIONS = frozenset(["address_error_vector_3"])
 VECTORS = {"address_error_vector_3": 3, "illegal_vector_4": 4, "zero_divide_vector_5": 5, "chk_vector_6": 6,
            "trapv_vector_7": 7, "privilege_violation_vector_8": 8}
 # Architectural condition-code expectation transcribed from the Motorola M68000 Family Programmer's Reference
@@ -273,6 +278,8 @@ def needed_vectors(form, word):
     """Exception classes the form can architecturally raise for this concrete primary word."""
     need = set()
     for name in form["exceptions"]:
+        if name in DEFERRED_EXCEPTIONS:
+            continue
         if name == "trap_vector_32_47":
             need.add(32 + (word & 0xF))  # TRAP #n -> vector 32 + n (TRAP is 0x4E40 | n)
         else:
@@ -280,6 +287,28 @@ def needed_vectors(form, word):
     if form["privilege"] != "user":
         need.add(8)
     return need
+
+
+def exception_row_applicable(form):
+    """`exception_privilege_modeled` applies only to forms listing a non-deferred class (or privilege)."""
+    return bool(set(form["exceptions"]) - DEFERRED_EXCEPTIONS) or form["privilege"] != "user"
+
+
+def deferred_disposition(forms):
+    """Forms affected by a declared deferred disposition (ADR 0043 sections 4/6), split into forms whose listed
+    classes are all deferred and mixed forms that also list a modeled Group 1/2 class or privilege."""
+    only, mixed = 0, 0
+    for form in forms:
+        if not set(form["exceptions"]) & DEFERRED_EXCEPTIONS:
+            continue
+        if exception_row_applicable(form):
+            mixed += 1
+        else:
+            only += 1
+    return {"classes": sorted(DEFERRED_EXCEPTIONS), "forms": only + mixed, "only_deferred_forms": only,
+            "mixed_forms": mixed,
+            "arithmetic": "forms = only_deferred_forms + mixed_forms; only_deferred forms are not applicable to "
+                          "exception_privilege_modeled, mixed forms remain applicable for their non-deferred classes"}
 
 
 def exception_modeled(need, effect_vector):
@@ -354,7 +383,7 @@ def measure(probe, cc):
     for form in forms:
         ws = list(expand(form))
         ccr_needed, ea_needed = ccr_expected(form), ea_effect_expected(form)
-        exc_needed = bool(form["exceptions"]) or form["privilege"] != "user"
+        exc_needed = exception_row_applicable(form)
         passes = {s: True for s in ALL_STAGES}
         applicable = {s: True for s in ALL_STAGES}
         applicable["ccr_sr_effect_declared"] = applicable["ccr_sr_validated"] = ccr_needed
@@ -489,6 +518,7 @@ def summarize(data, forms, rows, table, manifest, aspects, arch):
                        "manifest_sources": manifest["sources"]},
         "decode_over_acceptance_words": dict(sorted(over.items())),
         "architecturally_illegal_words": arch,
+        "deferred_disposition": deferred_disposition(forms),
         "unsupported_mnemonics": unsupported,
         "form_masks": masks,
     }
@@ -499,7 +529,7 @@ STAGE_DEFINITIONS = [
     ("effects", "structural", "`m68k_operation_effect` reports a PC effect."),
     ("ea_footprint_declared", "structural", "the effect owner DECLARES a complete architectural register write footprint. This is a claim, not evidence that auto-update, A7 byte adjustment, aliasing or implicit stack effects are correct (see `ea_side_effect_validated`)."),
     ("ccr_sr_effect_declared", "structural", "applicable to forms the Motorola manual says always modify CCR/SR (`CCR_ALWAYS_MNEMONICS`); passes if the effect owner declares `affects_condition_codes`. It does not check which flags or their values (see `ccr_sr_validated`)."),
-    ("exception_privilege_modeled", "structural", "applicable to forms listing exception/privilege classes; per concrete word (TRAP #n needs vector 32+n) it passes only if the effect contract, which carries one synchronous-exception vector, represents every required class. Forms that can raise several classes remain unsupported."),
+    ("exception_privilege_modeled", "structural", "applicable to forms listing a non-deferred exception class or privilege (declared deferred dispositions -- ADR 0043 section 4 Group 0 address/bus error and section 6 trace -- are not required and are counted in the separate `deferred_disposition` bucket); per concrete word (TRAP #n needs vector 32+n) it passes only if the effect contract, which carries one synchronous-exception vector, represents every required class. Forms that can raise several classes remain unsupported."),
     ("timing_model_present", "structural", "`m68k_instruction_cycles` returns a value (existence of an entry, not correctness; see `timing_validated`)."),
     ("emit / compile / native_exec", "structural (direct route)", "`emit_m68k_operation_c` (linear-memory context) produces C; batched units compile under strict C11 (`-std=c11 -Wall -Wextra -Wno-type-limits -pedantic -Werror`); the function runs to normal completion in one native binary, each word from the identical restored baseline state (a runtime stop code, crash or hang fails the word)."),
     ("route_runtime_routed_admitted / compiles / executes", "structural (runtime-routed route)", "the Genesis runtime-routed lowering emits a non-empty operation body (admitted; an indentation-only body is a declined operation, not an admission); that C compiles under the same strict flags against the real `platforms/genesis/runtime` header (compiles); it runs against the real runtime linked from `runtime.c`, from a restored baseline with work RAM only, and continues at PC rather than stopping (executes). Whole-program C4 preflight facts are not exercised, so absolute-address forms stop at the runtime memory gate under the fixed extension pattern. **These rows measure the raw routed emitter only; they are NOT proof that the C4 preflight classifier (`classify_m68k_c4_gap_shapes`) accepts the form** -- C4 acceptance is proved by the focused C4 admission regressions in `tests/m68k_pipeline_test.cpp` (e.g. `c4_arithmetic_auto_update_admission`)."),
@@ -564,6 +594,12 @@ def render_report(result):
                                                          e["unsupported"], e["misclassified"]))
     lines += ["", "Production generation-time classification mismatches against the partition: %d." %
               arch["production_classification_mismatches"]]
+    d = result["deferred_disposition"]
+    lines += ["", "## Declared deferred dispositions (ADR 0043 sections 4 and 6)", "",
+              "Classes %s are declared, fail-closed deferrals, not missing modeling; `exception_privilege_modeled` does "
+              "not require them. Forms listing a deferred class: %d = %d listing only deferred classes (not applicable "
+              "to `exception_privilege_modeled`) + %d mixed forms (applicable for their non-deferred classes)." % (
+                  ", ".join("`%s`" % c for c in d["classes"]), d["forms"], d["only_deferred_forms"], d["mixed_forms"])]
     lines += ["", "## Decode over-acceptance (non-legal words the decoder accepts as something other than their "
               "architectural exception)", ""]
     over = result["decode_over_acceptance_words"]

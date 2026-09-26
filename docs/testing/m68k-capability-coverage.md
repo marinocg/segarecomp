@@ -17,7 +17,7 @@ Denominator: 1526 legal forms, 45816 legal primary words. A form passes a stage 
 | effects | 1526 | 1516 | 99.34% | 45764 |
 | ea_footprint_declared | 1526 | 1398 | 91.61% | 41196 |
 | ccr_sr_effect_declared | 1193 | 1191 | 99.83% | 36607 |
-| exception_privilege_modeled | 852 | 15 | 1.76% | 246 |
+| exception_privilege_modeled | 55 | 53 | 96.36% | 1363 |
 | timing_model_present | 1526 | 1393 | 91.28% | 38046 |
 | emit | 1526 | 1494 | 97.90% | 44916 |
 | compile | 1526 | 1494 | 97.90% | 44916 |
@@ -47,7 +47,7 @@ Validated primary words per aspect: ccr 33782, ea 13221, semantic 42616, timing 
 - `effects` (structural): `m68k_operation_effect` reports a PC effect.
 - `ea_footprint_declared` (structural): the effect owner DECLARES a complete architectural register write footprint. This is a claim, not evidence that auto-update, A7 byte adjustment, aliasing or implicit stack effects are correct (see `ea_side_effect_validated`).
 - `ccr_sr_effect_declared` (structural): applicable to forms the Motorola manual says always modify CCR/SR (`CCR_ALWAYS_MNEMONICS`); passes if the effect owner declares `affects_condition_codes`. It does not check which flags or their values (see `ccr_sr_validated`).
-- `exception_privilege_modeled` (structural): applicable to forms listing exception/privilege classes; per concrete word (TRAP #n needs vector 32+n) it passes only if the effect contract, which carries one synchronous-exception vector, represents every required class. Forms that can raise several classes remain unsupported.
+- `exception_privilege_modeled` (structural): applicable to forms listing a non-deferred exception class or privilege (declared deferred dispositions -- ADR 0043 section 4 Group 0 address/bus error and section 6 trace -- are not required and are counted in the separate `deferred_disposition` bucket); per concrete word (TRAP #n needs vector 32+n) it passes only if the effect contract, which carries one synchronous-exception vector, represents every required class. Forms that can raise several classes remain unsupported.
 - `timing_model_present` (structural): `m68k_instruction_cycles` returns a value (existence of an entry, not correctness; see `timing_validated`).
 - `emit / compile / native_exec` (structural (direct route)): `emit_m68k_operation_c` (linear-memory context) produces C; batched units compile under strict C11 (`-std=c11 -Wall -Wextra -Wno-type-limits -pedantic -Werror`); the function runs to normal completion in one native binary, each word from the identical restored baseline state (a runtime stop code, crash or hang fails the word).
 - `route_runtime_routed_admitted / compiles / executes` (structural (runtime-routed route)): the Genesis runtime-routed lowering emits a non-empty operation body (admitted; an indentation-only body is a declined operation, not an admission); that C compiles under the same strict flags against the real `platforms/genesis/runtime` header (compiles); it runs against the real runtime linked from `runtime.c`, from a restored baseline with work RAM only, and continues at PC rather than stopping (executes). Whole-program C4 preflight facts are not exercised, so absolute-address forms stop at the runtime memory gate under the fixed extension pattern. **These rows measure the raw routed emitter only; they are NOT proof that the C4 preflight classifier (`classify_m68k_c4_gap_shapes`) accepts the form** -- C4 acceptance is proved by the focused C4 admission regressions in `tests/m68k_pipeline_test.cpp` (e.g. `c4_arithmetic_auto_update_admission`).
@@ -82,6 +82,10 @@ Validated primary words per aspect: ccr 33782, ea 13221, semantic 42616, timing 
 | line_f_reserved_exception | 4096 | 4096 | 0 | 0 | 0 |
 
 Production generation-time classification mismatches against the partition: 0.
+
+## Declared deferred dispositions (ADR 0043 sections 4 and 6)
+
+Classes `address_error_vector_3` are declared, fail-closed deferrals, not missing modeling; `exception_privilege_modeled` does not require them. Forms listing a deferred class: 835 = 797 listing only deferred classes (not applicable to `exception_privilege_modeled`) + 38 mixed forms (applicable for their non-deferred classes).
 
 ## Decode over-acceptance (non-legal words the decoder accepts as something other than their architectural exception)
 
