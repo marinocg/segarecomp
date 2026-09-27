@@ -966,6 +966,11 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // needed: the handler is a build-time dispatch root and the stacked continuation is an ordinary PC. The
     // retiring (not-taken) paths have published static rows.
     return m68k_instruction_cycles(operation).has_value();
+  case M68kIrKind::stop_until_interrupt:
+    // SEG-021-T020 / ADR 0043 §7: STOP #imm is ANDI-to-SR-shaped (privilege guard, immediate SR write, PC advance)
+    // plus the platform's stopped-state mark; the halt/wake is the retirement boundary's scheduler (ADR 0041). It
+    // needs no CFG edge, frame, return-target set or memory fact, and retires with the published Table 8-11 row.
+    return m68k_instruction_cycles(operation).has_value();
   case M68kIrKind::return_restore_condition_codes:
     // SEG-021-T019 / ADR 0043 §5: RTR pops its CCR/PC frame through the same validated atomic frame-return core as
     // RTE (no privilege check); the restored PC continues through the ordinary dispatcher exactly like RTE's.

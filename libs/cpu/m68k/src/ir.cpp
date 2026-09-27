@@ -135,6 +135,7 @@ M68kIrOperation lift_m68k_instruction(const M68kDecodedInstruction &instruction)
   case M68kInstructionKind::chk: operation.kind = M68kIrKind::check_bounds; break;
   case M68kInstructionKind::rtr: operation.kind = M68kIrKind::return_restore_condition_codes; break;
   case M68kInstructionKind::instruction_exception: operation.kind = M68kIrKind::instruction_exception; break;
+  case M68kInstructionKind::stop: operation.kind = M68kIrKind::stop_until_interrupt; break;  // SEG-021-T020
   }
   return operation;
 }

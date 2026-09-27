@@ -408,6 +408,24 @@ that word, and that a MUL timing row stays unsupported.
 `CYC_SHIFT = 1` over base cycles 10/10/12/4/6/8, and it charges the modulo-64 count for ROXL/ROXR). No deviation is
 recorded.
 
-**Still fail closed (enumerated by `timing_model_present`, 25 forms).** MULU.W/MULS.W (22 forms; data-dependent word
+**Still fail closed (enumerated by `timing_model_present`, 24 forms).** MULU.W/MULS.W (22 forms; data-dependent word
 table, SEG-021-T022 -- generated retirement keeps its Genesis-runtime helper), `BTST Dn,#<data>` (no verified table
-cell, SEG-021-T008), RESET and STOP. The direct_flow-profile-only `BNE.S` compatibility kind also has no rule.
+cell, SEG-021-T008) and RESET (still a decode frontier; SEG-021-T020 gave STOP its 4-cycle Table 8-11 row). The direct_flow-profile-only `BNE.S` compatibility kind also has no rule.
+
+## SEG-021-T020: STOP row and the interrupt acceptance differential
+
+`stop.imm16.none.imm.none` uses eight literal SR immediates (`2700`, `2000`, `271F`, `2015`, `0715`, `0000`, `5F3F`,
+`7FFF`: mask values 0-7 across the set, supervisor-to-user transitions and every implemented CCR bit) with the
+`sr_state` seeds (40 vectors). Supervisor seeds compare the loaded SR, the PC after the immediate word and the
+stack-pointer swap when S clears; user seeds compare vector 8 with STOP itself stacked on the SSP. All vectors match
+the pinned Musashi core and the row credits `0x4E72`. The row is not `timing`: its user-mode vectors take the
+privilege-violation entry, whose cost is the exception-entry timing owner's (ADR 0043 §8); the 24 supervisor vectors
+match Musashi's 4 cycles. T = 1 immediates are project-only (the deferred-trace stop; see the SEG-021-T018 section)
+and the wait/wake itself is machine scheduler behavior, proved by `tests/genesis_stop_interrupt_generated_test.py`.
+
+Interrupt acceptance is not an instruction and has no table row: `tests/m68k_interrupt_acceptance_test.py` scripts the
+M68K-owned contract and the pinned Musashi core (interrupt-acknowledge callback enabled) through the same 85
+instruction-boundary steps -- levels 1-6 against every mask, level-7 transitions at every mask, level 7 held at
+mask 7 and then recognized once the mask is lowered, a 7 -> 3 -> 7 re-transition, autovector/supplied/spurious/
+uninitialized acknowledges, user-mode entry, T cleared on entry, and STOP woken by an accepted level versus staying
+stopped on masked ones -- and compares PC, SR, A7, USP and the six bytes at A7 after every step.

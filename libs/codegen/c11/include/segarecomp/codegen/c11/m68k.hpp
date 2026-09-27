@@ -76,6 +76,10 @@ class M68kRuntimeCEmitter {
   // SEG-021-T019 / ADR 0043 §5: RTR's validated atomic CCR/PC frame pop; leaves the restored program counter in
   // `m68k_rtr_pc` (the text opens a block the lowering closes) or returns the fail-closed stop.
   [[nodiscard]] virtual std::string condition_code_return(const M68kMemoryEmissionContext &context) const = 0;
+  // SEG-021-T020 / ADR 0043 §7: a complete statement, emitted by STOP #imm after its SR load and PC advance, that
+  // marks the CPU stopped. The machine's retirement boundary then waits for an accepted interrupt (or reports that
+  // none can ever wake the CPU); the lowering itself never waits or loops.
+  [[nodiscard]] virtual std::string stopped_state(const M68kMemoryEmissionContext &context) const = 0;
 };
 
 struct M68kMemoryEmissionContext {

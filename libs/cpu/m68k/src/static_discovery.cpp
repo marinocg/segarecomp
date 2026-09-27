@@ -263,6 +263,7 @@ std::vector<std::uint8_t> m68k_written_address_registers(const M68kDecodedInstru
   // SEG-021-T018 / ADR 0043 §6: an SR write that changes S swaps the active stack pointer, so A7 is clobbered.
   case M68kInstructionKind::move_to_sr:
   case M68kInstructionKind::logical_immediate_to_sr:
+  case M68kInstructionKind::stop:  // SEG-021-T020: STOP loads SR (a change of S swaps A7)
   // SEG-021-T019: exception entry (TRAP/TRAPV/CHK/instruction-word exceptions) switches to and decrements the SSP;
   // RTR pops six bytes.
   case M68kInstructionKind::trap:

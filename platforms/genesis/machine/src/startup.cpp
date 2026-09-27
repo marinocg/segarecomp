@@ -179,6 +179,7 @@ bool m68k_startup_analysis_pair_consistent(const M68kDecodedInstruction &decoded
   case M68kInstructionKind::chk: return lifted.kind == M68kIrKind::check_bounds;
   case M68kInstructionKind::rtr: return lifted.kind == M68kIrKind::return_restore_condition_codes;
   case M68kInstructionKind::instruction_exception: return lifted.kind == M68kIrKind::instruction_exception;
+  case M68kInstructionKind::stop: return lifted.kind == M68kIrKind::stop_until_interrupt;  // SEG-021-T020
   }
   return false;
 }

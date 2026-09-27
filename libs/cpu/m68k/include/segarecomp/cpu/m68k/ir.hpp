@@ -121,6 +121,8 @@ enum class M68kIrKind {
   check_bounds,
   return_restore_condition_codes,
   instruction_exception,
+  // SEG-021-T020 / ADR 0043 §7: STOP #<data>, lifted one-to-one from M68kInstructionKind::stop.
+  stop_until_interrupt,
 };
 
 struct M68kIrOperation {

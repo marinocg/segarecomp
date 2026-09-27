@@ -7812,7 +7812,8 @@ constexpr std::size_t dynamic_call_index = 10U;   // JSR (0,PC,D0.W): an AOT-adm
 std::vector<std::uint8_t> make_image() {
   std::vector<std::uint8_t> bytes{0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U};
   for (std::size_t index = 0; index < entry_count; ++index) {
-    if (index == unrepresented_index) bytes.insert(bytes.end(), {0x4EU, 0x72U, 0x27U, 0x10U});  // STOP: not AOT-safe
+    // SEG-021-T020 made STOP AOT-safe; BTST D0,#<data> (no verified Table 8 cell, no timing row) is not.
+    if (index == unrepresented_index) bytes.insert(bytes.end(), {0x01U, 0x3CU, 0x00U, 0x10U});  // BTST D0,#$10
     else if (index == dynamic_call_index) bytes.insert(bytes.end(), {0x4EU, 0xBBU, 0x00U, 0x00U});  // JSR (0,PC,D0.W)
     else bytes.insert(bytes.end(), {0x44U, 0x2DU, 0x00U, 0x00U});  // NEG.B (0,A5)
   }
@@ -12043,7 +12044,18 @@ void general_startup_decode_accepts_nop_as_a_pure_pc_advance() {
            label);
   };
   expect_frontier(0x4E70U, "RESET (0x4E70) remains a valid-but-unsupported CPU frontier");
-  expect_frontier(0x4E72U, "STOP (0x4E72) remains a valid-but-unsupported CPU frontier");
+  // SEG-021-T020: STOP #imm (0x4E72 + immediate word) is a selected general_startup instruction.
+  {
+    const std::vector<std::uint8_t> stop_bytes{0x4EU, 0x72U, 0x27U, 0x00U};
+    const auto result = segarecomp::decode_m68k_instruction(
+        stop_bytes, source(), segarecomp::M68kDecodeProfile::general_startup);
+    const auto *decoded = std::get_if<segarecomp::M68kDecodedInstruction>(&result);
+    expect(decoded != nullptr && decoded->kind == segarecomp::M68kInstructionKind::stop &&
+               decoded->provenance.length.value == 4U &&
+               decoded->source_ea.mode == segarecomp::M68kEaMode::immediate &&
+               decoded->source_ea.immediate_value == 0x2700U,
+           "SEG-021-T020: STOP #$2700 decodes as a four-byte stop carrying its immediate SR word");
+  }
   // SEG-007-T047 / ADR-0020 §9: RTE (0x4E73) is now decoded under the
   // general_startup policy (only) and lifts to return_from_exception.
   {
@@ -12306,18 +12318,18 @@ void general_startup_retains_cpu_frontiers_only_through_public_provenance() {
               missing_rejected->requested_length && *missing_rejected->requested_length == 4U,
           "STOP missing its extension remains a four-byte truncation");
 
-  const std::vector<std::uint8_t> stop_complete{0x60U, 0x02U, 0x00U, 0x00U, 0x4EU, 0x72U, 0x27U, 0x00U};
+  // SEG-021-T020: a complete STOP is a selected instruction; the following RESET is the CPU frontier, reached
+  // through STOP's ordinary sequential continuation.
+  const std::vector<std::uint8_t> stop_complete{0x60U, 0x02U, 0x00U, 0x00U, 0x4EU, 0x72U, 0x27U, 0x00U, 0x4EU, 0x70U};
   const auto complete = segarecomp::analyze_m68k_frontend(program_for("synthetic/SEG-007-T029/c1-stop-complete", stop_complete));
   const auto *stop_partial = std::get_if<segarecomp::FrontendPartialProgram>(&complete);
   expect(stop_partial != nullptr && stop_partial->frontiers.front().class_ == segarecomp::GenesisFrontierClass::unsupported_cpu_form &&
                stop_partial->frontiers.front().diagnostic.provenance &&
                segarecomp::classify_m68k_cpu_frontier(*stop_partial->frontiers.front().diagnostic.provenance) ==
-                   segarecomp::M68kCpuFrontierKind::stop_immediate_word &&
-               stop_partial->frontiers.front().diagnostic.category == segarecomp::DirectFlowDiagnostic::valid_but_unsupported_instruction &&
-              stop_partial->frontiers.front().diagnostic.provenance->length.value == 4U &&
-              stop_partial->frontiers.front().diagnostic.accesses.size() == 1U &&
-              stop_partial->frontiers.front().diagnostic.accesses.front().bytes == std::vector<std::uint8_t>{0x4EU, 0x72U, 0x27U, 0x00U},
-          "a complete STOP becomes a CPU frontier with its exact public four-byte fetch");
+                   segarecomp::M68kCpuFrontierKind::reset &&
+               stop_partial->frontiers.front().diagnostic.source_address &&
+               stop_partial->frontiers.front().diagnostic.source_address->value == 0xC88U,
+          "SEG-021-T020: a complete STOP is selected and falls through to the following CPU frontier");
 
   // SEG-007-T059 classified 0x4E70 (RESET) as a recognized CPU-frontier kind. SEG-021-T019: every other operation
   // word now decodes (0x4E74, the MC68010 RTD word, is the vector-4 instruction-word exception), so the only
@@ -18892,7 +18904,8 @@ void general_startup_decoder_rejects_every_t025_explicit_non_goal() {
       // SEG-021-T015: ABCD/SBCD/NBCD are supported instructions and no longer non-goal words.
       // SEG-021-T019: TRAP #n and TRAPV are supported instructions and no longer non-goal words.
       {0x4E70U, "RESET (0x4E70) is never decoded"},
-      {0x4E72U, "STOP (0x4E72) is never decoded"},
+      // SEG-021-T020: STOP #imm is a supported instruction; without its immediate word it stays a truncation.
+      {0x4E72U, "STOP (0x4E72) without its immediate word is never decoded"},
   };
   for (const auto &c : non_goal_words) {
     const auto result = decode(c.word);
@@ -28065,6 +28078,127 @@ int emit_general_startup_bridge_software_exception_source(std::string_view varia
   return 0;
 }
 
+// SEG-021-T020 / ADR 0043 §7: STOP #imm as isolated immutable-ROM AOT roots, executed by
+// tests/genesis_stop_interrupt_generated_test.py through the real Genesis runtime (wake on an accepted VBlank IRQ6
+// with the instruction after STOP stacked, the no-wake-source diagnostic, privilege, deferred trace).
+namespace stop_aot_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00001000U;
+const std::vector<std::uint8_t> image{
+    0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U,  // Tier-2 entry prefix (see status_register_aot_fixture)
+    0x4EU, 0x72U, 0x20U, 0x00U,                  // 1008 STOP #$2000 (mask 0)
+    0x4EU, 0x72U, 0x26U, 0x00U,                  // 100C STOP #$2600 (mask 6: VBlank can never be accepted)
+    0x4EU, 0x72U, 0x00U, 0x00U,                  // 1010 STOP #$0000 (to user mode, mask 0)
+    0x4EU, 0x72U, 0x87U, 0x00U,                  // 1014 STOP #$8700 (T = 1: deferred trace)
+    0x4EU, 0x71U,                                // 1018 NOP (handler target)
+};
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T020/stop-aot-fixture", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base}, {{}, static_cast<std::uint32_t>(base + image.size())},
+                             {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace stop_aot_fixture
+
+int emit_stop_aot_source() {
+  using namespace segarecomp;
+  auto program = stop_aot_fixture::program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  if (emitted.starts_with("/* translation rejected:")) {
+    std::cerr << emitted;
+    return 6;
+  }
+  std::cout << emitted;
+  return 0;
+}
+
+// The same STOP in one straight-line C4 block of the ordinary whole-program route, before the RESET frontier.
+int emit_stop_c4_source() {
+  using namespace segarecomp;
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  const std::vector<std::uint8_t> image{
+      0x70U, 0x01U,                // B00 MOVEQ #1,D0
+      0x4EU, 0x72U, 0x20U, 0x00U,  // B02 STOP #$2000
+      0x72U, 0x02U,                // B06 MOVEQ #2,D1
+      0x4EU, 0x70U,                // B08 RESET
+  };
+  program.image = {"synthetic-c4-stop-block", image, image.size()};
+  program.mapping_claims = {{"synthetic-c4-stop-block", {{}, 0xB00U},
+                              {{}, static_cast<std::uint32_t>(0xB00U + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 1;
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  if (emitted.starts_with("/* translation rejected:")) {
+    std::cerr << emitted;
+    return 2;
+  }
+  std::cout << emitted;
+  return 0;
+}
+
+// Whole-program bridge (SEG-021-T020): the synthetic vector table installs a level-6 autovector handler (resolved and
+// rooted at build time). The program enables VBlank interrupts (VDP register 1 IE0), executes STOP #$2000, is woken by
+// the next VBlank IRQ6 (the handler counts in D7 and returns with RTE to the instruction after STOP), records SR in
+// D6, then executes STOP #$2700: no interrupt can ever be accepted, so the run ends with the explicit
+// stopped_without_wake_source diagnostic. Variant `no-handler`: no level-6 handler, so the first STOP already has no
+// wake source.
+int emit_general_startup_bridge_stop_source(std::string_view variant) {
+  using namespace segarecomp;
+  if (variant.starts_with("-")) variant.remove_prefix(1U);
+  constexpr std::uint32_t kEntry = 0x100U;
+  constexpr std::uint32_t kHandler = 0x180U;
+  std::vector<std::uint8_t> img(0x190U, 0x00U);
+  const auto be32 = [&](std::size_t off, std::uint32_t v) {
+    img[off] = static_cast<std::uint8_t>(v >> 24U); img[off + 1U] = static_cast<std::uint8_t>(v >> 16U);
+    img[off + 2U] = static_cast<std::uint8_t>(v >> 8U); img[off + 3U] = static_cast<std::uint8_t>(v);
+  };
+  be32(0x0U, 0x00FF8000U); be32(0x4U, kEntry);
+  if (variant != "no-handler") be32(30U * 4U, kHandler);
+  const std::vector<std::uint8_t> code{
+      0x33U, 0xFCU, 0x81U, 0x20U, 0x00U, 0xC0U, 0x00U, 0x04U,  // 100 MOVE.W #$8120,$C00004 (VDP reg 1: IE0)
+      0x4EU, 0x72U, 0x20U, 0x00U,                              // 108 STOP #$2000 (woken by VBlank IRQ6)
+      0x40U, 0xC6U,                                            // 10C MOVE SR,D6
+      0x4EU, 0x72U, 0x27U, 0x00U,                              // 10E STOP #$2700 (no wake source)
+      0x4EU, 0x70U,                                            // 112 RESET (static terminator; never reached)
+  };
+  std::copy(code.begin(), code.end(), img.begin() + kEntry);
+  const std::vector<std::uint8_t> handler{
+      0x52U, 0x87U,  // 180 ADDQ.L #1,D7
+      0x4EU, 0x73U,  // 182 RTE
+  };
+  std::copy(handler.begin(), handler.end(), img.begin() + kHandler);
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T020/stop-wake", img, img.size()};
+  program.mapping_claims = {{"rom", {{}, 0U}, {{}, static_cast<std::uint32_t>(img.size())}, {0U}, {img.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, kEntry}, 0x00FF8000U};
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) {
+    if (const auto *rejected = std::get_if<FrontendRejected>(&result))
+      std::cerr << "category=" << static_cast<int>(rejected->category) << "\n";
+    std::cerr << "stop fixture did not promote\n";
+    return 1;
+  }
+  const bool handler_expected = variant != "no-handler";
+  if (handler_expected != partial->accepted_prefix.irq6_handler_entry.has_value()) {
+    std::cerr << "stop fixture IRQ6 vector resolution mismatch\n";
+    return 1;
+  }
+  std::cout << emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  return 0;
+}
+
 // A straight-line C4 block (ordinary whole-program route, not the isolated AOT roots) over the same family, then the
 // established RESET frontier; executed by tests/genesis_immutable_rom_aot_exg_movep_scc_tas_generated_test.py.
 int emit_exg_movep_scc_tas_c4_source() {
@@ -28101,6 +28235,59 @@ int emit_exg_movep_scc_tas_c4_source() {
 // decode (generation-time classification carrying the vector), lift, effect, published timing rows, AOT admission,
 // routed lowering and static discovery (TRAP/TRAPV/CHK continue at the next instruction with no register fact;
 // RTR and the instruction-word exceptions have no static successor).
+// SEG-021-T020 / ADR 0043 §3, §7: STOP #imm decode, lift, effect, timing, admission and lowering.
+void stop_decodes_lifts_and_lowers() {
+  using namespace segarecomp;
+  const std::vector<std::uint8_t> bytes{0x4EU, 0x72U, 0x23U, 0x00U, 0x00U, 0x00U};
+  const auto result = decode_m68k_instruction(bytes, source(), M68kDecodeProfile::general_startup);
+  const auto *decoded = std::get_if<M68kDecodedInstruction>(&result);
+  expect(decoded != nullptr && decoded->kind == M68kInstructionKind::stop && decoded->provenance.length.value == 4U &&
+             decoded->source_ea.mode == M68kEaMode::immediate && decoded->source_ea.immediate_value == 0x2300U &&
+             decoded->raw_bytes.size() == 4U,
+         "STOP #$2300 decodes as a four-byte stop with its immediate SR word");
+  const std::vector<std::uint8_t> truncated{0x4EU, 0x72U, 0x23U};
+  const auto truncated_result = decode_m68k_instruction(truncated, source(), M68kDecodeProfile::general_startup);
+  const auto *truncated_rejected = std::get_if<RejectedM68kDecode>(&truncated_result);
+  expect(truncated_rejected != nullptr && truncated_rejected->outcome == DecodeOutcome::truncated_instruction,
+         "STOP without a complete immediate word is a truncation");
+  const auto startup = decode_m68k_instruction(bytes, source(), M68kDecodeProfile::genesis_startup);
+  expect(!std::holds_alternative<M68kDecodedInstruction>(startup), "the fixed genesis_startup profile still rejects STOP");
+  if (decoded == nullptr) return;
+  const auto op = lift_m68k_instruction(*decoded);
+  const auto effect = m68k_operation_effect(op);
+  expect(op.kind == M68kIrKind::stop_until_interrupt && effect.pc == M68kPcEffectKind::advance && effect.pc_delta == 4U &&
+             effect.affects_condition_codes && effect.may_raise_synchronous_exception && effect.exception_vector == 8U &&
+             effect.register_write_footprint_complete && effect.address_register_write_mask == 0x80U &&
+             effect.data_register_write_mask == 0U && effect.stack == M68kStackEffectKind::none,
+         "STOP lifts to stop_until_interrupt: privileged SR load, sequential continuation, A7-only footprint");
+  expect(m68k_instruction_cycles(op) == std::optional<std::uint32_t>{4U} && m68k_operation_is_immutable_rom_aot_safe(op, false) &&
+             m68k_operation_has_complete_c_emission(op),
+         "STOP has its published 4-cycle row (Table 8-11), AOT admission and a complete emission");
+  expect(!m68k_ir_is_transfer(op), "STOP is not a block-ending transfer (its continuation is the next instruction)");
+  M68kMemoryEmissionContext routed{"runtime->work_ram", "runtime->a", "frame_ids", "frame_continuations",
+                                   "frame_depth", 0U, M68kOperandAccess::runtime_routed, 0U, {}, {}};
+  routed.user_stack_pointer = "runtime->usp";
+  routed.runtime_routing = true;
+  routed.runtime_object = "runtime";
+  routed.program_counter = "runtime->pc";
+  routed.linear_memory_begin = 0x00FF0000U;
+  routed.linear_memory_end = 0x01000000U;
+  routed.runtime_emitter = &genesis_m68k_runtime_c_emitter();
+  const auto text = emit_m68k_operation_c(op, "runtime->d", "runtime->sr", "", &routed);
+  const auto guard = text.find("genesis_raise_privilege_violation(runtime, UINT32_C(0x");
+  const auto load = text.find("UINT32_C(0x2300)");
+  const auto advance = text.find("runtime->pc += UINT32_C(4);");
+  const auto halt = text.find("genesis_m68k_enter_stopped_state(runtime);");
+  expect(guard != std::string::npos && load != std::string::npos && advance != std::string::npos &&
+             halt != std::string::npos && guard < load && load < advance && advance < halt &&
+             text.find("GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION") != std::string::npos &&
+             text == emit_m68k_operation_c(op, "runtime->d", "runtime->sr", "", &routed),
+         "routed STOP lowering: privilege guard, then the immediate SR write (deferred-trace stop), PC advance, stopped "
+         "mark -- deterministic and never a wait loop");
+  expect(text.find("while") == std::string::npos && text.find("for (") == std::string::npos,
+         "the STOP lowering never spins");
+}
+
 void software_exception_family_decodes_lifts_and_discovers() {
   using namespace segarecomp;
   const auto decode_general = [](std::vector<std::uint8_t> bytes) {
@@ -30166,6 +30353,13 @@ int main(int argc, char **argv) {
         std::string_view(argv[1]).substr(std::string_view("--emit-general-startup-bridge-privilege-violation").size()));
   if (argc == 2 && std::string_view(argv[1]) == "--emit-software-exception-aot")
     return emit_software_exception_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-stop-aot")
+    return emit_stop_aot_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-stop-c4")
+    return emit_stop_c4_source();
+  if (argc == 2 && std::string_view(argv[1]).starts_with("--emit-general-startup-bridge-stop"))
+    return emit_general_startup_bridge_stop_source(
+        std::string_view(argv[1]).substr(std::string_view("--emit-general-startup-bridge-stop").size()));
   if (argc == 2 && std::string_view(argv[1]) == "--emit-software-exception-c4")
     return emit_software_exception_c4_source();
   if (argc == 2 && std::string_view(argv[1]).starts_with("--emit-general-startup-bridge-software-exception"))
@@ -30500,6 +30694,7 @@ int main(int argc, char **argv) {
          "SEG-021-T015: every legal ABCD/SBCD/NBCD shape passes the C4 preflight with zero gap rows");
   exg_movep_scc_tas_encodings_are_disjoint_and_exactly_the_legal_set();
   software_exception_family_decodes_lifts_and_discovers();
+  stop_decodes_lifts_and_lowers();  // SEG-021-T020
   exg_movep_scc_tas_lift_declare_effects_and_timing();
   exg_movep_scc_tas_host_semantics_ccr_and_bytes();
   exg_movep_scc_tas_generated_c_shapes();

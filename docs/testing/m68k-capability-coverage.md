@@ -12,34 +12,34 @@ Denominator: 1526 legal forms, 45816 legal primary words. A form passes a stage 
 
 | stage | applicable forms | passing forms | percent | passing words |
 | --- | ---: | ---: | ---: | ---: |
-| decode | 1526 | 1524 | 99.87% | 45814 |
-| lift | 1526 | 1524 | 99.87% | 45814 |
-| effects | 1526 | 1516 | 99.34% | 45764 |
-| ea_footprint_declared | 1526 | 1398 | 91.61% | 41196 |
-| ccr_sr_effect_declared | 1193 | 1191 | 99.83% | 36607 |
-| exception_privilege_modeled | 55 | 53 | 96.36% | 1363 |
-| timing_model_present | 1526 | 1501 | 98.36% | 44958 |
-| emit | 1526 | 1494 | 97.90% | 44916 |
-| compile | 1526 | 1494 | 97.90% | 44916 |
-| native_exec | 1526 | 1492 | 97.77% | 44907 |
-| route_runtime_routed_admitted | 1526 | 1516 | 99.34% | 45764 |
-| route_runtime_routed_compiles | 1526 | 1516 | 99.34% | 45764 |
-| route_runtime_routed_executes | 1526 | 1058 | 69.33% | 43367 |
-| route_immutable_rom_aot | 1526 | 1523 | 99.80% | 45806 |
-| route_static_discovery | 1526 | 1496 | 98.03% | 41680 |
+| decode | 1526 | 1525 | 99.93% | 45815 |
+| lift | 1526 | 1525 | 99.93% | 45815 |
+| effects | 1526 | 1517 | 99.41% | 45765 |
+| ea_footprint_declared | 1526 | 1399 | 91.68% | 41197 |
+| ccr_sr_effect_declared | 1193 | 1192 | 99.92% | 36608 |
+| exception_privilege_modeled | 55 | 54 | 98.18% | 1364 |
+| timing_model_present | 1526 | 1502 | 98.43% | 44959 |
+| emit | 1526 | 1495 | 97.97% | 44917 |
+| compile | 1526 | 1495 | 97.97% | 44917 |
+| native_exec | 1526 | 1493 | 97.84% | 44908 |
+| route_runtime_routed_admitted | 1526 | 1517 | 99.41% | 45765 |
+| route_runtime_routed_compiles | 1526 | 1517 | 99.41% | 45765 |
+| route_runtime_routed_executes | 1526 | 1059 | 69.40% | 43368 |
+| route_immutable_rom_aot | 1526 | 1524 | 99.87% | 45807 |
+| route_static_discovery | 1526 | 1497 | 98.10% | 41681 |
 
-`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1492 of 1526 forms, 97.77%. It is a structural bar, not a correctness claim.
+`end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1493 of 1526 forms, 97.84%. It is a structural bar, not a correctness claim.
 
 ## Independently validated coverage (existing pinned-Musashi differential evidence)
 
 | stage | applicable forms | passing forms | percent | passing words |
 | --- | ---: | ---: | ---: | ---: |
-| semantic_validated | 1526 | 1473 | 96.53% | 42610 |
-| ccr_sr_validated | 1193 | 1169 | 97.99% | 33712 |
+| semantic_validated | 1526 | 1474 | 96.59% | 42611 |
+| ccr_sr_validated | 1193 | 1170 | 98.07% | 33713 |
 | ea_side_effect_validated | 381 | 363 | 95.28% | 13043 |
 | timing_validated | 1526 | 110 | 7.21% | 7168 |
 
-Validated primary words per aspect: ccr 33782, ea 13221, semantic 42616, timing 7168. Forms with at least one validated word: ccr 1221, ea 511, semantic 1478, timing 110. Sources: tests/fixtures/m68k-conformance-vectors.json, tests/m68k_batch_b_musashi_differential_test.py, tests/m68k_batch_c_musashi_differential_test.py, tests/m68k_cmp_absolute_source_musashi_differential_test.py, tests/m68k_divs_word_musashi_differential_test.py, tests/m68k_divu_word_musashi_differential_test.py, tests/m68k_indexed_arithmetic_musashi_differential_test.py, tests/m68k_indexed_lea_musashi_differential_test.py, tests/m68k_muls_word_musashi_differential_test.py, tests/m68k_mulu_word_musashi_differential_test.py, tests/m68k_pc_indexed_lea_musashi_differential_test.py, tests/m68k_pc_indexed_logical_musashi_differential_test.py, tests/m68k_pc_indexed_move_musashi_differential_test.py.
+Validated primary words per aspect: ccr 33783, ea 13221, semantic 42617, timing 7168. Forms with at least one validated word: ccr 1222, ea 511, semantic 1479, timing 110. Sources: tests/fixtures/m68k-conformance-vectors.json, tests/m68k_batch_b_musashi_differential_test.py, tests/m68k_batch_c_musashi_differential_test.py, tests/m68k_cmp_absolute_source_musashi_differential_test.py, tests/m68k_divs_word_musashi_differential_test.py, tests/m68k_divu_word_musashi_differential_test.py, tests/m68k_indexed_arithmetic_musashi_differential_test.py, tests/m68k_indexed_lea_musashi_differential_test.py, tests/m68k_muls_word_musashi_differential_test.py, tests/m68k_mulu_word_musashi_differential_test.py, tests/m68k_pc_indexed_lea_musashi_differential_test.py, tests/m68k_pc_indexed_logical_musashi_differential_test.py, tests/m68k_pc_indexed_move_musashi_differential_test.py.
 
 ## Stage definitions (public entry points only)
 
@@ -70,7 +70,7 @@ Validated primary words per aspect: ccr 33782, ea 13221, semantic 42616, timing 
 | logical | 228 | 228 | 100.00% |
 | program_control | 193 | 184 | 95.34% |
 | shift_and_rotate | 104 | 104 | 100.00% |
-| system_control | 55 | 52 | 94.55% |
+| system_control | 55 | 53 | 96.36% |
 
 ## Architecturally illegal words: handled versus unsupported
 
@@ -107,4 +107,3 @@ Classes `address_error_vector_3` are declared, fail-closed deferrals, not missin
 | MOVE | system_control | 312 | 1 | native_exec 1 |
 | RESET | system_control | 1 | 1 | decode 1 |
 | RTS | program_control | 1 | 1 | native_exec 1 |
-| STOP | system_control | 1 | 1 | decode 1 |

@@ -742,6 +742,12 @@ enum class M68kInstructionKind {
   //          vector with THIS instruction's address stacked. Always two bytes (the exception is taken on the
   //          operation word).
   trap, trapv, chk, rtr, instruction_exception,
+  // SEG-021-T020 / ADR 0043 §3, §7 (Motorola M68000 Family Programmer's Reference Manual STOP entry): STOP #<data>
+  // (0x4E72 plus one immediate word, `source_ea` immediate). Privileged (vector 8 in user mode, nothing executed);
+  // otherwise SR <- the immediate (the ordinary SR write: implemented bits, S-change stack swap, T = 1 fails
+  // closed as the deferred trace), PC <- the next instruction, and the CPU halts at that boundary until the machine
+  // scheduler accepts an interrupt (stacking the instruction after STOP) or reports that none can ever wake it.
+  stop,
 };
 // SEG-007-T025 (Batch C, C5): MOVEM's direction bit (contract: "one truthful
 // MOVEM identity"). Never combined with M68kCondition -- MOVEM reads no

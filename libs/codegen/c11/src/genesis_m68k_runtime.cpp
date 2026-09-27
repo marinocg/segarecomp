@@ -256,6 +256,10 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
     return out.str();
   }
 
+  std::string stopped_state(const M68kMemoryEmissionContext &ctx) const override {
+    return "genesis_m68k_enter_stopped_state(" + std::string(ctx.runtime_object) + ");\n";
+  }
+
   std::string condition_code_return(const M68kMemoryEmissionContext &ctx) const override {
     std::ostringstream out;
     out << "{ uint32_t m68k_rtr_pc = UINT32_C(0); GenesisRuntimeStop m68k_rtr_stop = {0}; "

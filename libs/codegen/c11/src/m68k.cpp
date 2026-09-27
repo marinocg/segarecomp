@@ -1041,6 +1041,28 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
     }
     break;
   }
+  case M68kIrKind::stop_until_interrupt: {
+    // SEG-021-T020 / ADR 0043 §3, §7 (Motorola M68000 Family PRM STOP entry): privileged -- in user mode vector 8 is
+    // raised with this instruction's own address and nothing executes. Otherwise the immediate goes through the
+    // shared SR write (implemented bits, T = 1 fails closed as the deferred trace before anything commits, a change
+    // of S swaps the active and inactive stack pointers), the PC advances past the extension word, and the CPU
+    // halts at that boundary. Routed: the platform marks the CPU stopped and its retirement boundary (the machine
+    // scheduler, ADR 0041) advances virtual time until an interrupt is accepted -- stacking the instruction after
+    // STOP -- or ends with an explicit no-wake-source diagnostic. Direct linear route (a flat machine with no
+    // interrupt source): the architectural state at the halted boundary (SR loaded, PC after STOP).
+    if (memory != nullptr && !memory->user_stack_pointer.empty() && operation.source_ea.mode == M68kEaMode::immediate) {
+      const auto value = "UINT32_C(0x" + hex(operation.source_ea.immediate_value & 0xFFFFU, 4) + ")";
+      std::string closing;
+      output << m68k_privilege_guard(operation, status_register, *memory, closing) << "{\n";
+      m68k_emit_status_register_write(output, value, status_register, *memory, {});
+      output << (memory->program_counter.empty() ? std::string_view("pc") : memory->program_counter)
+             << " += UINT32_C(" << operation.provenance.length.value << ");\n";
+      if (memory->runtime_routing) output << emit_runtime(*memory).stopped_state(*memory);
+      else output << "/* STOP: halted at this boundary (no interrupt source on the direct route) */\n";
+      output << "}\n" << closing;
+    }
+    break;
+  }
   case M68kIrKind::logical_immediate_to_ccr: {
     // SEG-021-T018: ANDI/ORI/EORI #imm,CCR (unprivileged): only X/N/Z/V/C change (bits 7..5 of the CCR are
     // unimplemented and read as zero); the system byte is unchanged.

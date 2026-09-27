@@ -19912,6 +19912,21 @@
    "profile": "scc_sweep"
   },
   {
+   "id": "stop.imm16.none.imm.none",
+   "form": "stop.imm16.none.imm.none",
+   "ext": [
+    "2700",
+    "2000",
+    "271F",
+    "2015",
+    "0715",
+    "0000",
+    "5F3F",
+    "7FFF"
+   ],
+   "profile": "sr_state"
+  },
+  {
    "id": "sub.dn_ea.b.dn.absl",
    "form": "sub.dn_ea.b.dn.absl",
    "bind": {

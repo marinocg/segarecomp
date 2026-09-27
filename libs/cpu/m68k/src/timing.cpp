@@ -380,6 +380,9 @@ std::optional<std::uint32_t> m68k_instruction_cycles(const M68kIrOperation &oper
   case M68kIrKind::logical_immediate_to_ccr:
   case M68kIrKind::logical_immediate_to_sr:
     return 20U;
+  // SEG-021-T020: Table 8-11 STOP is 4 (0/0) -- the retirement of the instruction itself; the halted interval that
+  // follows is machine scheduler time (ADR 0041), not an instruction cost.
+  case M68kIrKind::stop_until_interrupt: return 4U;
   case M68kIrKind::write_status_register:
   case M68kIrKind::write_condition_codes:
     return move_to_status_cycles(operation);

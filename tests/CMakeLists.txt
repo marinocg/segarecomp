@@ -378,6 +378,13 @@ add_test(NAME genesis_software_exception_vector_rooting_test COMMAND ${Python3_E
 add_test(NAME genesis_software_exception_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_software_exception_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-021-T020 / ADR 0043 §7: STOP and the interrupt acceptance contract. The acceptance test compares with the
+# pinned Musashi core when SEGARECOMP_M68K_MULS_WORD_MUSASHI_CHECKOUT (or the conformance checkout variable) is set.
+add_test(NAME genesis_stop_interrupt_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_stop_interrupt_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME m68k_interrupt_acceptance_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_interrupt_acceptance_test.py ${CMAKE_C_COMPILER})
 add_test(NAME genesis_immutable_rom_aot_movem_link_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_movem_link_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

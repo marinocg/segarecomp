@@ -2243,6 +2243,7 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   case M68kIrKind::check_bounds:
   case M68kIrKind::return_restore_condition_codes:
   case M68kIrKind::instruction_exception:
+  case M68kIrKind::stop_until_interrupt:  // SEG-021-T020: STOP #imm carries no memory operand
   case M68kIrKind::write_clr:
   // SEG-007-T168: NOT (`logical_not`) is a represented kind (no
   // missing_dispatcher gap) -- emit_m68k_operation_c has a full lowering
@@ -4991,6 +4992,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       case M68kIrKind::check_bounds:
       case M68kIrKind::return_restore_condition_codes:
       case M68kIrKind::instruction_exception:
+      case M68kIrKind::stop_until_interrupt:  // SEG-021-T020: ANDI-to-SR-shaped immediate SR load + stopped mark
       case M68kIrKind::read_status_register: {
         const bool reads_destination = found->second->kind == M68kIrKind::read_status_register;
         const auto *fact = fact_for(reads_destination ? M68kStaticMemoryFactRole::destination_read
@@ -5017,7 +5019,8 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
             return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         } else if (m68k_is_statically_foldable_control_ea(operand) &&
                    found->second->kind != M68kIrKind::logical_immediate_to_ccr &&
-                   found->second->kind != M68kIrKind::logical_immediate_to_sr) {
+                   found->second->kind != M68kIrKind::logical_immediate_to_sr &&
+                   found->second->kind != M68kIrKind::stop_until_interrupt) {
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         }
         out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);

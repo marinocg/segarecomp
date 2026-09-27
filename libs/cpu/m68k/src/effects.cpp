@@ -197,6 +197,19 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
     effect.pc = M68kPcEffectKind::advance;
     effect.pc_delta = operation.provenance.length.value;
     break;
+  case M68kIrKind::stop_until_interrupt:
+    // SEG-021-T020 / ADR 0043 §7: STOP #imm (privileged) loads the whole SR from its immediate exactly like
+    // ANDI/ORI/EORI to SR (a change of S swaps A7), advances the PC, then halts until an interrupt is accepted. The
+    // interrupt handler's RTE resumes at the next instruction, so the sequential advance is the continuation.
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.source_ea;
+    effect.affects_condition_codes = true;
+    effect.may_raise_synchronous_exception = true;
+    effect.exception_vector = 8U;
+    effect.address_register_write_mask |= UINT8_C(0x80);
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
   case M68kIrKind::write_status_register:
     // MOVE to SR overwrites the entire SR (CCR bits included) from the
     // decoded source operand; this layer has no register/memory model of
@@ -893,6 +906,7 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
       operation.kind == M68kIrKind::write_status_register || operation.kind == M68kIrKind::read_status_register ||
       operation.kind == M68kIrKind::write_condition_codes || operation.kind == M68kIrKind::logical_immediate_to_ccr ||
       operation.kind == M68kIrKind::logical_immediate_to_sr ||
+      operation.kind == M68kIrKind::stop_until_interrupt ||  // SEG-021-T020: STOP writes only SR (and A7 via S)
       operation.kind == M68kIrKind::write_user_stack_pointer ||
       operation.kind == M68kIrKind::read_user_stack_pointer ||
       // SEG-021-T019: the software-exception family writes only A7 (the stack switch / RTR pop) plus CHK's decoded

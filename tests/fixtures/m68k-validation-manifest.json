@@ -38642,6 +38642,9 @@
   "4E71": [
    "tests/m68k_batch_c_musashi_differential_test.py"
   ],
+  "4E72": [
+   "tests/fixtures/m68k-conformance-vectors.json"
+  ],
   "4E73": [
    "tests/fixtures/m68k-conformance-vectors.json"
   ],
@@ -184217,6 +184220,9 @@
   "4E71": [
    "tests/fixtures/m68k-conformance-vectors.json",
    "tests/m68k_batch_c_musashi_differential_test.py"
+  ],
+  "4E72": [
+   "tests/fixtures/m68k-conformance-vectors.json"
   ],
   "4E73": [
    "tests/fixtures/m68k-conformance-vectors.json"

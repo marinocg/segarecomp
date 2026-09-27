@@ -270,6 +270,46 @@ call-like continuation that carries no register fact. RTR is `segarecomp_m68k_re
 two fallible reads, then CCR (X/N/Z/V/C only), PC and SP += 6 commit together, with no privilege check
 and no exception-return notification.
 
+Implementation note (SEG-021-T020): the interrupt acceptance rule and the STOP halt state are M68K-owned in
+`exception_core.h` (`SegarecompM68kInterruptState`: sampled request level, latched level-7 transition, stopped
+flag; one record per CPU instance). The machine samples its request level into that record at every instruction
+boundary (`segarecomp_m68k_interrupt_sample`); `segarecomp_m68k_interrupt_recognized_level` recognizes levels 1-6
+iff the level exceeds the SR mask and level 7 on a latched lower-to-7 transition regardless of the mask, plus, while
+level 7 stays asserted, by the level comparator once an instruction has lowered the mask below 7 (U3, the
+"Interrupts" entry of §6: "An interrupt is generated each time the interrupt request level changes from some lower
+level to level 7. A level 7 interrupt may still be caused by the level comparator if the request level is a 7 and the
+processor priority is set to a lower level by an instruction"). Level 7 is therefore never modeled as `level > mask`
+alone. A latched transition stays pending until it is serviced, as in the pinned Musashi core. The acknowledge
+answer maps through `segarecomp_m68k_interrupt_vector`: autovector to 24 + level, a supplied vector only within
+64-255 (any other number is refused, per the reserved-vector row of §3), spurious to 24, uninitialized to 15.
+`segarecomp_m68k_interrupt_enter` is the §5 entry with the next instruction stacked and SR <- S = 1, T = 0,
+I = level; it consumes a serviced level-7 transition and clears `stopped`. `tests/m68k_interrupt_acceptance_test.py`
+checks every level against every mask, the level-7 cases and the acknowledge answers against documented values
+and, step by step, against the pinned Musashi core (built with its interrupt-acknowledge callback enabled so that a
+request stays asserted until the script changes it).
+
+The Genesis binding wires one source, the VBlank request (level 6, autovector 30), exactly as ADR 0020 does; its
+admission now goes through the rule above with an unchanged frame, SR and stacked PC. STOP #imm is decoded,
+lifted and lowered on the direct, C4 and immutable-ROM AOT routes: privilege guard (vector 8 with STOP itself
+stacked), the ordinary SR write (T = 1 fails closed as the deferred trace of §6 before anything commits; a change
+of S swaps the stack pointers), PC past the immediate word, then the platform's stopped mark. Timing is the Table
+8-11 row, 4 cycles. The Genesis `wait_while_stopped` runs at STOP's retirement boundary when that boundary accepted
+nothing: while stopped no instruction runs, so only virtual time can change the wired source, and the CPU can wake
+iff the level-6 handler is installed, VBlank is pending or VDP register 1 IE0 is set, and the loaded mask is below 6
+(`segarecomp_m68k_stop_wake_possible`). If it can, virtual time advances in whole CPU cycles through the same
+scheduler exactly to the next VBlank onset (ADR 0041), where the request latches and is accepted with the
+instruction after STOP stacked. Otherwise the run ends with the sanitized pair
+`unsupported_interrupt_or_scheduling_event` / `stopped_without_wake_source`; it never spins. The direct linear
+route has no interrupt source and reports the architectural state at the halted boundary; the
+`stop.imm16.none.imm.none` conformance row matches Musashi for that state from supervisor and user mode.
+
+RESET stays a decode frontier in this task. Selecting it (CPU side: privileged, 132 cycles per Table 8-11, registers
+unchanged, then `reset_devices`) retires the last legal operation word the decoder rejects, which is the
+verified-complete CPU frontier every synthetic partial-program fixture terminates with; choosing its replacement
+terminator is a separate decision. When RESET is selected, the Genesis `reset_devices` binding is a documented
+no-op: no project evidence bounds what the RESET output does to the Genesis devices, so no device effect is
+modeled or guessed.
+
 ### 8. Timing
 
 Exception-entry cycle counts are CPU facts from the MC68000 User's Manual exception-processing

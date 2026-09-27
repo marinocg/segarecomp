@@ -22,6 +22,8 @@
 
 #include "../machine/include/segarecomp/machine/genesis/address_space_contract.h"
 #include "checkpoint_evidence.h"
+/* SEG-021-T020: the M68K-owned interrupt/STOP state record (SegarecompM68kInterruptState). */
+#include "../../../libs/cpu/m68k/include/segarecomp/cpu/m68k/exception_core.h"
 
 /* checkpoint_evidence.h intentionally keeps its standalone schema literals.
  * These production-side checks keep those literals aligned with the shared
@@ -748,6 +750,12 @@ typedef struct GenesisRuntime {
      fail closed via GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION. */
   uint32_t software_exception_handler_entry[GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT];
   uint8_t software_exception_handler_present[GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT];
+  /* SEG-021-T020 / ADR 0043 §7: the M68K-owned interrupt-recognition and STOP
+     state of this CPU instance (sampled request level, latched level-7
+     transition, stopped flag), zero-initialized with the rest of the record.
+     The Genesis binding samples its request level (VBlank: level 6) into it at
+     every instruction boundary; the core owns the acceptance rule. */
+  SegarecompM68kInterruptState m68k_interrupt;
   /* SEG-007-T252 / ADR-0040 correction: a fixed-size, no-dynamic-allocation
      circular buffer of the latest GENESIS_RECENT_PC_HISTORY_CAPACITY (64)
      architectural PC values, for LOCAL DIAGNOSTIC USE ONLY. Convention
@@ -972,6 +980,13 @@ typedef enum GenesisDiagnosticCategory {
      for its vector or the six-byte frame cannot be placed on the SSP. Paired
      with GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION; nothing is changed. */
   GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION = 51,
+  /* SEG-021-T020 / ADR 0043 §7: STOP halted the CPU and no interrupt the
+     machine can still raise could ever be accepted (the loaded mask blocks
+     every wired source, the source is disabled, or its handler is not
+     installed), so the scheduler ends the run instead of advancing time
+     forever. Paired with GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT;
+     the STOP itself has completed (SR loaded, PC at the next instruction). */
+  GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE = 52,
 } GenesisDiagnosticCategory;
 
 typedef struct GenesisProvenance {
@@ -1354,6 +1369,18 @@ int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc
  */
 int genesis_raise_software_exception(GenesisRuntime *runtime, uint32_t vector, uint32_t stacked_pc,
                                      uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out);
+
+/*
+ * SEG-021-T020 / ADR 0043 §7: called by the generated lowering of STOP #imm
+ * after its privilege check, SR load and PC advance. Marks the CPU stopped;
+ * the instruction then retires normally and the retirement boundary (the
+ * machine scheduler, ADR 0041) keeps advancing virtual time until an
+ * interrupt is accepted -- stacking the instruction after STOP -- or ends the
+ * run with GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE when no interrupt this
+ * machine can raise could ever be accepted. Performs no target-opcode
+ * fetch/decode.
+ */
+void genesis_m68k_enter_stopped_state(GenesisRuntime *runtime);
 
 /*
  * SEG-021-T019 / ADR 0043 §5: RTR (unprivileged) through the M68K-owned
