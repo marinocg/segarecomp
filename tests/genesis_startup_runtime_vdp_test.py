@@ -618,6 +618,26 @@ int main(void) {
    assert(runtime.devices.vdp.dma.phase == GENESIS_VDP_DMA_BUSY &&
           runtime.devices.vdp.dma.remaining_length == 1U &&
           runtime.devices.vdp.vsram[UINT32_C(0x0007)] == 0U);
+   /* SEG-021-T037: the defensive status-read-triggered DMA-progress guard
+      (genesis_vdp_progress_dma's own call site in genesis_route_access) now
+      shares the same genesis_is_vdp_status_read_shape predicate as the
+      status-value read/return path, so a BYTE status-lane read observes the
+      identical still-stuck-DMA failure as the WORD lane above -- neither
+      BYTE lane is silently exempted from this "one shared status
+      transaction" side effect. */
+   value = UINT32_C(0xFFFFFFFF);
+   assert(genesis_route_access(&runtime, UINT32_C(0x00C00004), GENESIS_ACCESS_BYTE,
+                                GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+   assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
+          stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
+   value = UINT32_C(0xFFFFFFFF);
+   assert(genesis_route_access(&runtime, UINT32_C(0x00C00005), GENESIS_ACCESS_BYTE,
+                                GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+   assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
+          stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
+   assert(runtime.devices.vdp.dma.phase == GENESIS_VDP_DMA_BUSY &&
+          runtime.devices.vdp.dma.remaining_length == 1U &&
+          runtime.devices.vdp.vsram[UINT32_C(0x0007)] == 0U);
    /* Recover: idle the runtime's own DMA state so subsequent tests below are
       unaffected by this synthetic odd-destination corruption coverage. */
    runtime.devices.vdp.dma.phase = GENESIS_VDP_DMA_IDLE;

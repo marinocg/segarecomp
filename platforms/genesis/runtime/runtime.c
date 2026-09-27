@@ -881,6 +881,21 @@ static int genesis_vdp_data_port_cpu_write(GenesisDeviceState *devices,
   return accepted;
 }
 
+/* The one recognized VDP status-read access shape: the WORD lane and both
+   BYTE lanes of the CONTROL port's status alias. Every caller that needs to
+   decide "is this a status-read transaction" (DMA-progress suspension,
+   VBlank-pending observation, and the dispatch below) shares this single
+   predicate so the three call sites cannot silently diverge on which shapes
+   count as a status read. */
+static int genesis_is_vdp_status_read_shape(uint32_t address, GenesisAccessWidth width,
+                                            GenesisAccessDirection direction) {
+  if (direction != GENESIS_ACCESS_READ) return 0;
+  if (width == GENESIS_ACCESS_WORD) return address == UINT32_C(0x00C00004);
+  if (width == GENESIS_ACCESS_BYTE)
+    return address == UINT32_C(0x00C00004) || address == UINT32_C(0x00C00005);
+  return 0;
+}
+
 /* One status transaction, shared by the WORD and both BYTE lanes. The VDP
    clears the control-command write-pending flip-flop on a status read; the
    returned snapshot precedes that side effect. Upper unused bus bits are not
@@ -896,9 +911,7 @@ static int genesis_vdp_access(GenesisDeviceState *devices, uint32_t address,
                               GenesisAccessWidth width, GenesisAccessDirection direction,
                               uint32_t *value, uint16_t *status_sample_out) {
   if (direction == GENESIS_ACCESS_READ) {
-    if ((width == GENESIS_ACCESS_WORD && address == UINT32_C(0x00C00004)) ||
-        (width == GENESIS_ACCESS_BYTE &&
-         (address == UINT32_C(0x00C00004) || address == UINT32_C(0x00C00005)))) {
+    if (genesis_is_vdp_status_read_shape(address, width, direction)) {
       const uint16_t status = genesis_vdp_status_read(devices);
       *status_sample_out = status;
       *value = width == GENESIS_ACCESS_WORD ? status :
@@ -1468,9 +1481,12 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
        (genesis_vdp_progress_dma's own phase guard). It is retained,
        unmodified, as a defensive invariant, not removed, so an unforeseen
        path that somehow leaves the DMA BUSY still progresses on a status
-       read exactly as before this task. */
-    if (direction == GENESIS_ACCESS_READ && width == GENESIS_ACCESS_WORD &&
-         address == UINT32_C(0x00C00004) &&
+       read exactly as before this task. SEG-021-T037 widens the guard's own
+       shape test to the shared genesis_is_vdp_status_read_shape predicate:
+       every valid status-read shape (WORD and both BYTE lanes) is one status
+       transaction, so this defensive invariant must not silently exempt the
+       BYTE lanes from it. */
+    if (genesis_is_vdp_status_read_shape(address, width, direction) &&
          genesis_vdp_progress_dma(runtime, stop_out) != GENESIS_ACCESS_OK)
       return GENESIS_ACCESS_FAIL;
     /* SEG-007-T175 (second correction): a LONG CONTROL-port write is handled
@@ -1518,10 +1534,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
        * policy observes a synthetic VBlank assertion only here.  There is no
        * acknowledgement selector in this substrate: once raised, pending
        * remains sticky rather than inventing an ungrounded clear behavior. */
-       if (direction == GENESIS_ACCESS_READ &&
-           ((width == GENESIS_ACCESS_WORD && address == UINT32_C(0x00C00004)) ||
-            (width == GENESIS_ACCESS_BYTE &&
-             (address == UINT32_C(0x00C00004) || address == UINT32_C(0x00C00005))))) {
+       if (genesis_is_vdp_status_read_shape(address, width, direction)) {
          ++runtime->devices.interrupt.vblank_status_read_count;
          /* Check the sampled full word, not the byte returned to the CPU:
             the even high lane still observes one status transaction. */
