@@ -1475,13 +1475,17 @@ class M68kStaticGraphWalker {
   [[nodiscard]] std::optional<DirectFlowDiagnostic> resolve_operand(const M68kEffectiveAddress &ea,
                                                                       M68kMemoryAccessWidth width,
                                                                       M68kMemoryAccessDirection direction,
-                                                                      const InstructionProvenance &provenance) {
+                                                                      const InstructionProvenance &provenance,
+                                                                      bool value_discarded = false) {
     if (!m68k_is_statically_foldable_control_ea(ea)) return std::nullopt;
     const auto address = m68k_canonical_ea_address(ea);
     if (const auto misaligned = m68k_startup_absolute_operand_alignment(address, width)) return *misaligned;
     const M68kCpuMemoryAccessRequest request{{TargetAddressSpace::m68k_program, address}, width, direction,
                                               provenance};
-    const auto diagnostic = environment_.classify_memory_access(request);
+    // SEG-021-T036: a read whose value is architecturally discarded asks the scenario's discarded-read rule.
+    const auto diagnostic = value_discarded && direction == M68kMemoryAccessDirection::read
+                                ? environment_.classify_discarded_read(request)
+                                : environment_.classify_memory_access(request);
     if (diagnostic) pending_access_ = request;
     return diagnostic;
   }
@@ -1710,8 +1714,10 @@ class M68kStaticGraphWalker {
       // SEG-021-T014: NEG/NEGX share NOT's one-address read-modify-write operand contract.
       // SEG-007-T168: NOT is a genuine one-address read-modify-write,
       // exactly like shift_rotate's memory form below.
+      // SEG-021-T036: CLR/Scc/MOVE from SR discard the read value, so their read uses the discarded-read rule.
       if (const auto diagnostic = resolve_operand(decoded.destination_ea, decoded.size,
-                                                    M68kMemoryAccessDirection::read, decoded.provenance))
+                                                    M68kMemoryAccessDirection::read, decoded.provenance,
+                                                    m68k_destination_read_value_discarded(decoded.kind)))
         return reject_operand(pc_value, decoded, *diagnostic, decoded.destination_ea.absolute_address);
       if (const auto diagnostic = resolve_operand(decoded.destination_ea, decoded.size,
                                                     M68kMemoryAccessDirection::write, decoded.provenance))

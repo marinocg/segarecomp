@@ -124,7 +124,12 @@ the runtime is modified" contract (T042 §3).
 1. **`$C00011` only.** The odd mirror addresses are only secondarily attested and stay
    fail-closed.
 2. **BYTE width only; write-only.** WORD/LONG and every read fail closed. The secondary
-   word-write / even-address quirks are not modelled.
+   word-write / even-address quirks are not modelled. This includes the architecturally
+   discarded read-before-write of memory CLR / Scc / MOVE from SR (SEG-021-T036): unlike the
+   write-only Z80 RESET register, a 68000 read of the PSG port **locks the machine up** on
+   hardware (MCD1 section 1.1 note 3, "Reading the PSG addresses will cause the machine to lock
+   up"; Genesis Plus GX and BlastEm agree), so there is no completing behaviour to model and the
+   READ stop is the faithful result.
 3. **DATA byte requires a prior LATCH byte.** Otherwise fail closed.
 4. **Noise register is 3 bits.** A channel-3 tone/noise LATCH byte with data bit 3 set fails
    closed.

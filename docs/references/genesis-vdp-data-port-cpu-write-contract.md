@@ -69,7 +69,13 @@ Every excluded neighbour fails closed (returns 0, mutating no `GenesisVdpState`
 field) **before any mutation**, preserving
 `GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP`:
 
-- wrong direction: any DATA-port read;
+- wrong direction: any DATA-port read; this includes the architecturally discarded
+  read-before-write of memory CLR / Scc / MOVE from SR (SEG-021-T036). With a write-class code
+  selected (CD0 = 1: VRAM/CRAM/VSRAM write, an armed fill, or a half-written write command) a
+  68000 read of the data port never completes on hardware — the machine freezes (BlastEm stalls
+  the CPU; Genesis Plus GX documents a lockup needing a hard reset) — so the fail-closed READ stop
+  is the faithful result, not a missing feature. Read-code data-port reads (prefetched data,
+  address += register 15, new prefetch) remain unmodelled and fail closed;
 - wrong port/address: any address other than `$C00000` for this path;
 - no transfer code selected (`data_port_transfer_code_valid == 0`);
 - a READ code selected (`0x00` VRAM READ, `0x04` VSRAM READ, `0x08` CRAM READ);
@@ -159,7 +165,8 @@ two-word CONTROL command those existing fields already model (SEG-007-T091 /
 T042 SS1.3), now completed rather than approximated -- a bounded additive
 detail within the existing semantic owner, not a new state machine.
 
-Still out of scope and fail-closed: all DATA-port reads; CRAM / VSRAM / VRAM
+Still out of scope and fail-closed: all DATA-port reads (including the discarded read of
+memory CLR / Scc / MOVE from SR, which locks up real hardware under a write code); CRAM / VSRAM / VRAM
 read paths; a generic control-port state machine; the VDP DMA engine (the
 executed frontier did not couple the data-port write to DMA); FIFO / timing /
 status-bit behavior. A DATA-port write with no transfer code ever selected

@@ -42,6 +42,14 @@ class M68kRuntimeCEmitter {
   [[nodiscard]] virtual std::string routed_read(const M68kMemoryEmissionContext &context, std::string_view routed_addr,
                                                 std::string_view value, std::string_view stop,
                                                 M68kMemoryAccessWidth size) const = 0;
+  // SEG-021-T036: the same statement text for a read whose value is architecturally discarded (the read-before-
+  // write of memory CLR, memory Scc and memory MOVE from SR only). The platform may admit a lane whose ordinary read
+  // it rejects; a failing lane must stop exactly as `routed_read` does. Default: an ordinary routed read.
+  [[nodiscard]] virtual std::string routed_discarded_read(const M68kMemoryEmissionContext &context,
+                                                          std::string_view routed_addr, std::string_view value,
+                                                          std::string_view stop, M68kMemoryAccessWidth size) const {
+    return routed_read(context, routed_addr, value, stop, size);
+  }
   // Text following `{ const uint32_t <routed_addr> = ...; `, ending before the lowering's closing `}`.
   [[nodiscard]] virtual std::string routed_write(const M68kMemoryEmissionContext &context, std::string_view routed_addr,
                                                  std::string_view stop, M68kMemoryAccessWidth size,

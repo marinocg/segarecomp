@@ -1255,6 +1255,17 @@ class M68kGeneralStartupEnvironment final : public M68kStaticDiscoveryEnvironmen
                                                 request.provenance);
   }
 
+  // SEG-021-T036: a discarded read (memory CLR/Scc/MOVE from SR) of the write-only Z80 RESET register is admitted
+  // (open-bus value, no side effect; see segarecomp_genesis_discarded_read_admitted). Everything else is an
+  // ordinary read with the ordinary classification.
+  std::optional<DirectFlowDiagnostic> classify_discarded_read(const M68kCpuMemoryAccessRequest &request) override {
+    if (request.direction == M68kMemoryAccessDirection::read &&
+        segarecomp_genesis_discarded_read_admitted(request.address.value,
+                                                   static_cast<std::uint32_t>(request.width)) != 0)
+      return std::nullopt;
+    return classify_memory_access(request);
+  }
+
   bool is_completion_rts(const InstructionProvenance &rts_provenance) override {
     return program_.synthetic_completion.has_value() &&
            same(program_.synthetic_completion->terminal_rts_address, rts_provenance.source.address);
@@ -4304,7 +4315,13 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
           const auto routed = m68k_route_genesis_device_access(M68kMemoryAccessRequest{
               M68kProgramAddress{TargetAddressSpace::m68k_program, address}, decoded.size, direction,
               decoded.provenance});
-          if (std::holds_alternative<M68kControllerIoResult>(routed))
+          // SEG-021-T036: the discarded read-before-write of memory CLR/Scc/MOVE from SR is routed to the same
+          // runtime owner on the one lane whose ordinary read fails closed (the write-only Z80 RESET register).
+          if (role == M68kStaticMemoryFactRole::destination_read &&
+              m68k_destination_read_value_discarded(decoded.kind) &&
+              segarecomp_genesis_discarded_read_admitted(address, static_cast<std::uint32_t>(decoded.size)) != 0)
+            fact.region = M68kAbsoluteOperandRegion::routed_device;
+          else if (std::holds_alternative<M68kControllerIoResult>(routed))
             fact.region = M68kAbsoluteOperandRegion::controller_io;
           else if (std::holds_alternative<M68kVdpRoutedRead>(routed))
             fact.region = M68kAbsoluteOperandRegion::vdp;

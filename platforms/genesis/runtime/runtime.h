@@ -1219,6 +1219,15 @@ GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, Genesi
                                                  GenesisAccessWidth width, GenesisAccessDirection direction,
                                                  uint32_t *value, GenesisRuntimeStop *stop_out);
 
+/* SEG-021-T036: the DATA read of a read-before-write whose value is architecturally discarded (memory CLR, memory
+ * Scc, memory MOVE from SR only). Identical to `genesis_route_access` (same bus kind, same recording, same stop)
+ * except that a WORD or even-BYTE read of the write-only Z80 RESET register ($A11200) returns 0 and mutates nothing
+ * (open bus on hardware: MacDonald hardware notes v0.8 section 1 note 4; GTO1 p. 76). `direction` must be READ. */
+GenesisAccessResultKind genesis_route_access_discarded_read(GenesisRuntime *runtime, uint32_t address,
+                                                            GenesisAccessWidth width,
+                                                            GenesisAccessDirection direction, uint32_t *value,
+                                                            GenesisRuntimeStop *stop_out);
+
 /* Defensive finite-dispatch failure.  It never mutates the runtime. */
 GenesisControlTransfer genesis_internal_dispatch_inconsistency_stop(GenesisRuntime *runtime);
 

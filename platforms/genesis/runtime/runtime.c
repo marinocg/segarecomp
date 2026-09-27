@@ -1193,7 +1193,9 @@ static int genesis_is_z80_bus_region(uint32_t address) {
      (c) RESET polarity per GTO1 p. 76 / p. 91: writing the bit as 0 asserts
          /RESET (`reset_asserted = 1`); writing it as 1 releases /RESET
          (`reset_asserted = 0`).
-   Fails closed (returns 0, mutating nothing): a read of $A11200; any LONG
+   Fails closed (returns 0, mutating nothing): a read of $A11200 (SEG-021-T036: except the architecturally
+   DISCARDED read of memory CLR/Scc/MOVE from SR, admitted before this owner is reached -- see
+   genesis_route_access_classified; open bus per MCD1 section 1 note 4, write-only per GTO1 p. 76); any LONG
    access to either register; and every other address inside
    genesis_is_z80_bus_region. Every validation check precedes every mutation,
    so a rejected access is atomic (T042 SS3 / genesis_route_access's own
@@ -1865,9 +1867,20 @@ int genesis_device_checkpoint_write_detail(FILE *output, const GenesisRuntime *r
   return fputs("]}}\n", output) < 0;
 }
 
-GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, GenesisBusKind bus_kind, uint32_t address,
-                                                 GenesisAccessWidth width, GenesisAccessDirection direction,
-                                                 uint32_t *value, GenesisRuntimeStop *stop_out) {
+/* SEG-021-T036: `discarded` marks a DATA read whose value the instruction architecturally discards (the read-before-
+   write of memory CLR, memory Scc and memory MOVE from SR). It changes exactly one lane: a WORD or even-BYTE read of
+   the write-only Z80 RESET register ($A11200) returns a deterministic 0 and mutates nothing (reset/bus state
+   unchanged). Hardware: that read returns open-bus data -- the MSB of the next instruction fetch with the LSB zero
+   (Charles MacDonald, "Sega Genesis hardware notes" v0.8, section 1 note 4) -- with no side effect; GTO1 v1.00 p. 76
+   documents the register as write-only. The value is never observed, so 0 is a faithful stand-in. Every other access
+   (including LONG, the odd byte, and every value-consuming read of $A11200) takes the ordinary route below and fails
+   closed exactly as before. The VDP data port under a write-class code and the PSG port stay fail-closed even for a
+   discarded read: a 68000 read of either locks the machine up on hardware (see the VDP data-port write contract and
+   the PSG compatibility policy). The access is recorded like any other DATA read (no new bus kind). */
+static GenesisAccessResultKind genesis_route_access_classified(GenesisRuntime *runtime, GenesisBusKind bus_kind,
+                                                               uint32_t address, GenesisAccessWidth width,
+                                                               GenesisAccessDirection direction, uint32_t *value,
+                                                               GenesisRuntimeStop *stop_out, int discarded) {
   GenesisAccessResultKind status;
   const int is_read_kind = bus_kind == GENESIS_BUS_INSTRUCTION_READ || bus_kind == GENESIS_BUS_DATA_READ ||
                            bus_kind == GENESIS_BUS_STACK_READ;
@@ -1878,7 +1891,13 @@ GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, Genesi
                                                         GENESIS_DIAG_UNMAPPED_DATA_ACCESS);
     return GENESIS_ACCESS_FAIL;
   }
-  status = genesis_route_access_unrecorded(runtime, address, width, direction, value, stop_out);
+  if (discarded && runtime != 0 && value != 0 && bus_kind == GENESIS_BUS_DATA_READ &&
+      segarecomp_genesis_discarded_read_admitted(address, (uint32_t)width) != 0) {
+    *value = 0U;
+    status = GENESIS_ACCESS_OK;
+  } else {
+    status = genesis_route_access_unrecorded(runtime, address, width, direction, value, stop_out);
+  }
   if (status == GENESIS_ACCESS_OK && runtime != 0 && runtime->m68k_checkpoint.enabled && is_write_kind &&
       value != 0)
     genesis_m68k_effect_note(runtime, GENESIS_M68K_EFFECT_WRITE, (uint8_t)width, address,
@@ -1899,6 +1918,12 @@ GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, Genesi
   return status;
 }
 
+GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, GenesisBusKind bus_kind, uint32_t address,
+                                                 GenesisAccessWidth width, GenesisAccessDirection direction,
+                                                 uint32_t *value, GenesisRuntimeStop *stop_out) {
+  return genesis_route_access_classified(runtime, bus_kind, address, width, direction, value, stop_out, 0);
+}
+
 GenesisAccessResultKind genesis_route_access(GenesisRuntime *runtime, uint32_t address,
                                               GenesisAccessWidth width,
                                               GenesisAccessDirection direction, uint32_t *value,
@@ -1906,6 +1931,14 @@ GenesisAccessResultKind genesis_route_access(GenesisRuntime *runtime, uint32_t a
   return genesis_route_access_bus(runtime,
                                   direction == GENESIS_ACCESS_WRITE ? GENESIS_BUS_DATA_WRITE : GENESIS_BUS_DATA_READ,
                                   address, width, direction, value, stop_out);
+}
+
+GenesisAccessResultKind genesis_route_access_discarded_read(GenesisRuntime *runtime, uint32_t address,
+                                                            GenesisAccessWidth width,
+                                                            GenesisAccessDirection direction, uint32_t *value,
+                                                            GenesisRuntimeStop *stop_out) {
+  return genesis_route_access_classified(runtime, GENESIS_BUS_DATA_READ, address, width, direction, value, stop_out,
+                                         1);
 }
 
 
@@ -2466,7 +2499,8 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
  * is installed, it is already pending or VDP register 1 IE0 is set, and the
  * mask STOP loaded is below 6 (segarecomp_m68k_stop_wake_possible). If it can,
  * virtual time advances -- in whole CPU cycles, through the same scheduler --
- * exactly to the next VBlank onset, where the request latches and is accepted
+ * to the first whole-cycle boundary at or after the next VBlank onset (at most
+ * one CPU cycle late), where the request latches and is accepted
  * with the instruction after STOP stacked. Otherwise the run ends with the
  * explicit stopped_without_wake_source diagnostic instead of spinning.
  */

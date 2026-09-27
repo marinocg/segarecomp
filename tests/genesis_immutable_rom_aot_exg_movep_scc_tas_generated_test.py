@@ -9,6 +9,7 @@ upper register bits, the A7 byte step of two, TAS N/Z/V/C and bit 7, published r
 and routed-stop atomicity.
 """
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -192,6 +193,48 @@ int main(void) {
   assert(transfer.kind == GENESIS_STOP && transfer.stop.provenance.access_direction == GENESIS_ACCESS_READ);
   assert(runtime.pc == 0x0F24 && runtime.a[1] == 0x00C00011 && runtime.sr == 0x2704 && runtime.devices.psg.latch_valid == 0U);
 
+  /* SEG-021-T036: the write-only Z80 RESET register ($A11200). Memory Scc discards its read, and a discarded BYTE read of
+     the even register address is admitted (open bus on hardware, no side effect: MacDonald hardware notes v0.8 section 1
+     note 4; GTO1 p. 76), so Scc completes: the byte is written (D0 = the RESET bit), the address register committed
+     once, CCR untouched. TAS consumes its read (N/Z), so TAS stops at the READ exactly as before. */
+  {
+    GenesisRuntime probe = fresh(0x0F18, 0x2700);
+    uint32_t probe_value = 0xAB; GenesisRuntimeStop probe_stop = {0};
+    const GenesisZ80BusState before = probe.devices.z80_bus;
+    assert(genesis_route_access(&probe, 0x00A11200, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &probe_value, &probe_stop) !=
+           GENESIS_ACCESS_OK);
+    assert(genesis_route_access_discarded_read(&probe, 0x00A11200, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &probe_value,
+                                               &probe_stop) == GENESIS_ACCESS_OK && probe_value == 0U);
+    assert(memcmp(&before, &probe.devices.z80_bus, sizeof before) == 0);
+  }
+  /* SNE (A0)+ (true: Z clear) writes 0xFF: D0 = 1 releases reset; A0 += 1. */
+  runtime = fresh(0x0F18, 0x2700); runtime.a[0] = 0x00A11200; runtime.devices.z80_bus.reset_asserted = 1U;
+  step(&runtime, 0x0F1A, 12);
+  assert(runtime.a[0] == 0x00A11201 && runtime.devices.z80_bus.reset_asserted == 0U && runtime.sr == 0x2700);
+  /* ST -(A7): A7 = $A11202 steps two onto the register; 0xFF releases reset (14 cycles). */
+  runtime = fresh(0x0F1A, 0x2715); runtime.a[7] = 0x00A11202; runtime.devices.z80_bus.reset_asserted = 1U;
+  step(&runtime, 0x0F1C, 14);
+  assert(runtime.a[7] == 0x00A11200 && runtime.devices.z80_bus.reset_asserted == 0U && runtime.sr == 0x2715);
+  /* SEQ (A1) (false: Z clear) writes 0x00: D0 = 0 asserts reset; A1 never updated. */
+  runtime = fresh(0x0F24, 0x2700); runtime.a[1] = 0x00A11200;
+  step_to_end(&runtime, 0x0F26, 12);
+  assert(runtime.a[1] == 0x00A11200 && runtime.devices.z80_bus.reset_asserted == 1U && runtime.sr == 0x2700);
+  /* The odd byte $A11201 is not the register: SNE (A0)+ still stops at the READ, nothing committed. */
+  runtime = fresh(0x0F18, 0x2700); runtime.a[0] = 0x00A11201;
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_STOP && transfer.stop.provenance.access_direction == GENESIS_ACCESS_READ &&
+         transfer.stop.provenance.access_address == 0x00A11201U);
+  assert(runtime.pc == 0x0F18 && runtime.a[0] == 0x00A11201 && runtime.devices.z80_bus.reset_asserted == 0U);
+  /* TAS (A2)+ consumes its read: stop at the READ of $A11200, A2/CCR/reset state unchanged. */
+  runtime = fresh(0x0F1E, 0x2713); runtime.a[2] = 0x00A11200;
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_STOP && transfer.stop.provenance.has_access &&
+         transfer.stop.provenance.access_direction == GENESIS_ACCESS_READ &&
+         transfer.stop.provenance.access_address == 0x00A11200U &&
+         transfer.stop.provenance.access_width == GENESIS_ACCESS_BYTE);
+  assert(runtime.pc == 0x0F1E && runtime.a[2] == 0x00A11200 && runtime.sr == 0x2713 &&
+         runtime.devices.z80_bus.reset_asserted == 0U);
+
   /* Write failure AFTER a successful read: an owned read-only cartridge region is readable but not writable. The stop
      is the WRITE (so the read was performed first); no auto-update commit, PC and CCR unchanged, region data intact. */
   {
@@ -263,8 +306,11 @@ def check_scc_read_before_write(source):
     assert "genesis_route_access(" not in dn, "Scc Dn is register-only"
     for address, register, auto in (("00000F18", "a[0]", True), ("00000F1A", "a[7]", True), ("00000F24", "a[1]", False)):
         text = root_text(source, address)
-        calls = [i for i in range(len(text)) if text.startswith("genesis_route_access(", i)]
+        # SEG-021-T036: Scc discards the read's value, so the read goes through genesis_route_access_discarded_read.
+        calls = [m.start() for m in re.finditer(r"genesis_route_access(_discarded_read)?\(", text)]
         assert len(calls) == 2, (address, len(calls))
+        assert text.startswith("genesis_route_access_discarded_read(", calls[0]), address
+        assert text.startswith("genesis_route_access(", calls[1]), address
         first, second = text[calls[0]:calls[1]], text[calls[1]:text.index("pc += ", calls[1])]
         assert "GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &" in first, address
         assert "GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &" in second, address

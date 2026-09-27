@@ -297,7 +297,7 @@ of S swaps the stack pointers), PC past the immediate word, then the platform's 
 nothing: while stopped no instruction runs, so only virtual time can change the wired source, and the CPU can wake
 iff the level-6 handler is installed, VBlank is pending or VDP register 1 IE0 is set, and the loaded mask is below 6
 (`segarecomp_m68k_stop_wake_possible`). If it can, virtual time advances in whole CPU cycles through the same
-scheduler exactly to the next VBlank onset (ADR 0041), where the request latches and is accepted with the
+scheduler to the first whole-cycle boundary at or after the next VBlank onset (ADR 0041), where the request latches and is accepted with the
 instruction after STOP stacked. Otherwise the run ends with the sanitized pair
 `unsupported_interrupt_or_scheduling_event` / `stopped_without_wake_source`; it never spins. The direct linear
 route has no interrupt source and reports the architectural state at the halted boundary; the

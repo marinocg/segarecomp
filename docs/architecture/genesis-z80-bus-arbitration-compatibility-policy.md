@@ -27,6 +27,8 @@ read-back from them.
 | --- | --- | --- |
 | GTO1 | Sega Enterprises, *Genesis Technical Overview* v1.00 (1991), [Internet Archive PDF](https://ia801909.us.archive.org/24/items/Genesis_Technical_Overview_v1.00_1991_Sega_US/Genesis_Technical_Overview_v1.00_1991_Sega_US.pdf), [text derivative](https://ia801909.us.archive.org/24/items/Genesis_Technical_Overview_v1.00_1991_Sega_US/Genesis_Technical_Overview_v1.00_1991_Sega_US_djvu.txt), accessed 2026-08-28; **p. 76 §4 "Z80 CONTROL"** and **p. 91** ("Z-80 OPERATION SEQUENCE" / "RESET Z-80"). Register-index table p. 76 entries "Z80 BUSREQ 76", "Z80 RESET 76". | See the itemised facts below. |
 
+| MCD1 | Charles MacDonald, *Sega Genesis hardware notes* v0.8, [`gen-hw.txt` SpritesMind mirror](https://gendev.spritesmind.net/mirrors/cmd/gen-hw.txt); **section 1, note 4**. | Reading `$A11200` returns open-bus data: the MSB is the next instruction fetch's MSB and the LSB is zero; the read has no side effect. Public secondary technical source (states its content was verified on hardware); Genesis Plus GX and BlastEm agree and are corroboration only. |
+
 ### Documented hardware facts (GTO1 p. 76 §4, p. 91)
 
 1. **BUSREQ register address** is `$A11100`. **RESET register address** is `$A11200`.
@@ -74,11 +76,26 @@ Request bit for a WORD access is **D8** (mask `0x0100`); for a BYTE access it is
 | **READ WORD/BYTE `$A11100`** | returns a value whose BUSACK bit (D8 word / D0 byte) is `0` when `bus_granted`, `1` otherwise; **every other bit is `0`**. Side-effect-free. |
 | **WRITE WORD/BYTE `$A11200`** | bit set ⇒ `reset_asserted = 0` (RESET CANCEL / released); bit clear ⇒ `reset_asserted = 1` (RESET REQUEST / asserted). The caller's value is never mutated. |
 | everything else in the region | **fail-closed** as a device access: `GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS` / `GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_Z80_BUS`. This includes: any **LONG** access to either register; a **READ** of `$A11200` (write-only); a BYTE access to the odd half of either register address; and any other sub-address in `[0x00A11100, 0x00A11300)`. |
+| **discarded READ WORD / even BYTE `$A11200`** (SEG-021-T036) | only through `genesis_route_access_discarded_read`, i.e. the read-before-write of memory **CLR**, memory **Scc** and memory **MOVE from SR**, whose read value is architecturally discarded: returns a deterministic `0` and mutates nothing (`reset_asserted`, `bus_requested`, `bus_granted` unchanged); the instruction's write then proceeds normally. See "Discarded-read policy" below. |
 | an address outside the region | unchanged: the pre-existing `GENESIS_STOP_UNSUPPORTED_MEMORY_REGION` / `GENESIS_DIAG_UNMAPPED_DATA_ACCESS` result. |
 
 Every validation check (width, exact address, direction) precedes every state mutation, so a rejected
 access is atomic: it modifies neither `*value` nor any `GenesisRuntime` field, honouring
 `genesis_route_access`'s "on failure neither `*value` nor the runtime is modified" contract (T042 §3).
+
+## Discarded-read policy (SEG-021-T036)
+
+GTO1 p. 76 documents `$A11200` as write-only; MCD1 section 1 note 4 states that reading it returns open-bus data
+(the MSB of the next instruction fetch, LSB zero) with no side effect. The MC68000 reads a memory destination before
+writing it for CLR, Scc and MOVE from SR and discards that value, so such an instruction is well defined on hardware.
+The runtime therefore admits exactly that discarded read — WORD or even BYTE of exactly `$A11200` — returning `0`
+(the value is never observed, so no open-bus/prefetch model is needed) and mutating nothing. The rule is one shared
+predicate (`segarecomp_genesis_discarded_read_admitted`, `address_space_contract.h`) used by the generated runtime
+(`genesis_route_access_discarded_read`, a `GENESIS_BUS_DATA_READ`, so no bus kind or checkpoint/history schema
+changes) and by static discovery / C4 fact admission (the CPU marks the read with
+`m68k_destination_read_value_discarded`). Everything else keeps failing closed exactly as before, with the same READ
+stop and provenance: every ordinary or value-consuming read (TST, MOVE, CMP, TAS, NOT, NEG, NEGX, NBCD, shifts,
+bit operations), a LONG access, and the odd byte `$A11201`.
 
 ## The one policy statement: immediate deterministic grant
 

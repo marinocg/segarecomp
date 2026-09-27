@@ -749,6 +749,13 @@ enum class M68kInstructionKind {
   // scheduler accepts an interrupt (stacking the instruction after STOP) or reports that none can ever wake it.
   stop,
 };
+// SEG-021-T036: whether a MEMORY destination's architectural read-before-write returns a value that no result, flag
+// or later access ever consumes (MC68000: memory CLR, memory Scc and memory MOVE from SR read the destination and
+// discard the value). Every read-modify-write kind (TAS, NOT, NEG, NEGX, NBCD, shifts, ...) consumes it: false.
+[[nodiscard]] constexpr bool m68k_destination_read_value_discarded(M68kInstructionKind kind) noexcept {
+  return kind == M68kInstructionKind::clr || kind == M68kInstructionKind::set_conditional ||
+         kind == M68kInstructionKind::move_from_sr;
+}
 // SEG-007-T025 (Batch C, C5): MOVEM's direction bit (contract: "one truthful
 // MOVEM identity"). Never combined with M68kCondition -- MOVEM reads no
 // condition and writes no CCR/SR bit at all.

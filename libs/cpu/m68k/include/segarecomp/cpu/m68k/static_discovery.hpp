@@ -274,6 +274,13 @@ class M68kStaticDiscoveryEnvironment {
   // accepts the access; a populated diagnostic rejects it.
   [[nodiscard]] virtual std::optional<DirectFlowDiagnostic> classify_memory_access(
       const M68kCpuMemoryAccessRequest &request) = 0;
+  // SEG-021-T036: classification of a READ whose value is architecturally discarded
+  // (`m68k_destination_read_value_discarded`: memory CLR/Scc/MOVE from SR). A scenario may admit a lane whose
+  // ordinary read it rejects when the discarded read is hardware-harmless; by default it is an ordinary read.
+  [[nodiscard]] virtual std::optional<DirectFlowDiagnostic> classify_discarded_read(
+      const M68kCpuMemoryAccessRequest &request) {
+    return classify_memory_access(request);
+  }
   // Whether `rts_provenance` is the scenario's own opt-in synthetic-
   // completion terminal RTS (the pre-T003 monolith's own
   // `program.synthetic_completion && same(...)` check) -- always `false` for

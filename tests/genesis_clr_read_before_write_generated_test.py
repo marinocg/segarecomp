@@ -8,12 +8,17 @@ immutable-ROM AOT route and the whole-program C4 route; the harnesses below exec
 runtime and check hand-derived results (Motorola M68000 Family Programmer's Reference Manual, CLR): the cleared bytes
 and their untouched neighbours, CCR N=0 Z=1 V=0 C=0 with X kept, one auto-update commit (A7 byte step two), register
 CLR touching no device, published retirement cycles, and failure ordering against existing asymmetric lanes:
-  * read failure before the write: the PSG port (byte write accepted, byte read rejected) and the Z80 RESET register
-    (word write accepted, word read rejected) -- the stop is the READ, no device write, no An commit, PC/CCR unchanged;
+  * read failure before the write: the PSG port (byte write accepted, byte read rejected; a read locks the machine up on
+    hardware) and the LONG / odd-byte forms of the Z80 RESET register -- the stop is the READ, no device write, no An
+    commit, PC/CCR unchanged;
+  * SEG-021-T036 discarded read: CLR's read value is architecturally discarded, and a discarded WORD / even-BYTE read of
+    the write-only Z80 RESET register is admitted (open bus, no side effect: MacDonald hardware notes v0.8 section 1
+    note 4; GTO1 p. 76) -- CLR completes: reset register written, PC advances, An committed once;
   * write failure after a successful read: an owned read-only cartridge region -- the stop is the WRITE, no An commit,
     PC/CCR unchanged, region intact.
 """
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -94,9 +99,10 @@ int main(void) {
   assert(runtime.a[7] == 0x00FF0902 && runtime.work_ram[0x900] == 0 && runtime.work_ram[0x901] == 0x5A);
 
   /* Read failure BEFORE the write. Probe the lanes first. The Z80 RESET register accepts the word write of zero but
-     rejects the word read, so a write-only CLR would have succeeded there. The PSG port is a byte-write lane whose read
-     is rejected (a zero DATA byte with no latched register is also rejected, so there the discriminator is the stop
-     direction: a write-only CLR would stop on the WRITE, never the READ). */
+     rejects an ordinary word read; only the discarded read of CLR/Scc/MOVE from SR is admitted there (WORD or even
+     BYTE, value 0, nothing mutated), never LONG or the odd byte. The PSG port is a byte-write lane whose read is
+     rejected even when discarded (a zero DATA byte with no latched register is also rejected, so there the
+     discriminator is the stop direction: a write-only CLR would stop on the WRITE, never the READ). */
   {
     GenesisRuntime probe = fresh(0x0F08, 0x2700);
     uint32_t value = 0x9F; GenesisRuntimeStop stop = {0};
@@ -109,6 +115,26 @@ int main(void) {
            GENESIS_ACCESS_OK && probe.devices.z80_bus.reset_asserted == 1U);
     assert(genesis_route_access(&probe, 0x00A11200, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &value, &stop) !=
            GENESIS_ACCESS_OK);
+    {
+      const GenesisZ80BusState before = probe.devices.z80_bus;
+      value = 0xBEEF;
+      assert(genesis_route_access_discarded_read(&probe, 0x00A11200, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &value,
+                                                 &stop) == GENESIS_ACCESS_OK && value == 0U);
+      value = 0xEF;
+      assert(genesis_route_access_discarded_read(&probe, 0x00A11200, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &value,
+                                                 &stop) == GENESIS_ACCESS_OK && value == 0U);
+      assert(memcmp(&before, &probe.devices.z80_bus, sizeof before) == 0);
+      assert(genesis_route_access_discarded_read(&probe, 0x00A11200, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ, &value,
+                                                 &stop) != GENESIS_ACCESS_OK);
+      assert(genesis_route_access_discarded_read(&probe, 0x00A11201, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &value,
+                                                 &stop) != GENESIS_ACCESS_OK);
+      assert(genesis_route_access_discarded_read(&probe, 0x00C00011, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &value,
+                                                 &stop) != GENESIS_ACCESS_OK);
+      /* A write direction is never a discarded read. */
+      assert(genesis_route_access_discarded_read(&probe, 0x00A11200, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &value,
+                                                 &stop) != GENESIS_ACCESS_OK);
+      assert(memcmp(&before, &probe.devices.z80_bus, sizeof before) == 0);
+    }
   }
   runtime = fresh(0x0F0A, 0x271B); runtime.a[0] = 0x00C00011;  /* CLR.B (A0)+ */
   expect_stop(&runtime, GENESIS_ACCESS_READ, 0x00C00011U);
@@ -116,13 +142,26 @@ int main(void) {
   runtime = fresh(0x0F0C, 0x2715); runtime.a[7] = 0x00C00013;  /* CLR.B -(A7): steps two onto the port */
   expect_stop(&runtime, GENESIS_ACCESS_READ, 0x00C00011U);
   assert(runtime.pc == 0x0F0C && runtime.a[7] == 0x00C00013 && runtime.sr == 0x2715 && runtime.devices.psg.latch_valid == 0U);
+  /* SEG-021-T036: CLR of the Z80 RESET register completes: the discarded read is admitted, the zero write asserts
+     reset (D8/D0 = 0), PC advances, CCR N=0 Z=1 V=0 C=0 with X kept, and an auto-update register is committed once. */
   runtime = fresh(0x0F0E, 0x2708); runtime.a[1] = 0x00A11200;  /* CLR.W (A1) */
+  step(&runtime, 0x0F10, 12);
+  assert(runtime.a[1] == 0x00A11200 && runtime.sr == 0x2704 && runtime.devices.z80_bus.reset_asserted == 1U &&
+         runtime.devices.z80_bus.bus_requested == 0U && runtime.devices.z80_bus.bus_granted == 0U);
+  runtime = fresh(0x0F10, 0x2711); runtime.a[2] = 0x00A11202;  /* CLR.W -(A2) */
+  step(&runtime, 0x0F12, 14);
+  assert(runtime.a[2] == 0x00A11200 && runtime.sr == 0x2714 && runtime.devices.z80_bus.reset_asserted == 1U);
+  runtime = fresh(0x0F0A, 0x2700); runtime.a[0] = 0x00A11200;  /* CLR.B (A0)+: even byte */
+  step(&runtime, 0x0F0C, 12);
+  assert(runtime.a[0] == 0x00A11201 && runtime.sr == 0x2704 && runtime.devices.z80_bus.reset_asserted == 1U);
+  /* LONG and the odd byte are not admitted: the stop is the READ, nothing committed or written. */
+  runtime = fresh(0x0F12, 0x2701); runtime.a[3] = 0x00A11200;  /* CLR.L (A3)+ */
   expect_stop(&runtime, GENESIS_ACCESS_READ, 0x00A11200U);
-  assert(runtime.pc == 0x0F0E && runtime.a[1] == 0x00A11200 && runtime.sr == 0x2708 &&
+  assert(runtime.pc == 0x0F12 && runtime.a[3] == 0x00A11200 && runtime.sr == 0x2701 &&
          runtime.devices.z80_bus.reset_asserted == 0U);
-  runtime = fresh(0x0F10, 0x2701); runtime.a[2] = 0x00A11202;  /* CLR.W -(A2) */
-  expect_stop(&runtime, GENESIS_ACCESS_READ, 0x00A11200U);
-  assert(runtime.pc == 0x0F10 && runtime.a[2] == 0x00A11202 && runtime.sr == 0x2701 &&
+  runtime = fresh(0x0F0A, 0x2701); runtime.a[0] = 0x00A11201;  /* CLR.B (A0)+: odd byte */
+  expect_stop(&runtime, GENESIS_ACCESS_READ, 0x00A11201U);
+  assert(runtime.pc == 0x0F0A && runtime.a[0] == 0x00A11201 && runtime.sr == 0x2701 &&
          runtime.devices.z80_bus.reset_asserted == 0U);
 
   /* Write failure AFTER a successful read: an owned read-only cartridge region is readable but not writable. The stop
@@ -188,6 +227,12 @@ int main(void) {
          runtime.work_ram[0x614] == 0x5A);                                                  /* CLR.L (16,A3) */
   assert(runtime.sr == 0x2714);                                                            /* Z set, X kept */
 
+  /* SEG-021-T036: CLR.B (A0)+ of the Z80 RESET register completes inside the C4 block (discarded read admitted). */
+  runtime = fresh(); runtime.a[0] = 0x00A11200;
+  do { transfer = genesis_bridge_dispatch(&runtime); } while (transfer.kind == GENESIS_CONTINUE_AT_PC);
+  assert(transfer.kind == GENESIS_STOP && runtime.pc == 0x0B14 && runtime.a[0] == 0x00A11201 &&
+         runtime.devices.z80_bus.reset_asserted == 1U && runtime.sr == 0x2714);
+
   /* Read failure inside the C4 block: the READ of the PSG port stops CLR.B (A0)+ before any write or commit. */
   runtime = fresh(); runtime.a[0] = 0x00C00011;
   do { transfer = genesis_bridge_dispatch(&runtime); } while (transfer.kind == GENESIS_CONTINUE_AT_PC);
@@ -232,8 +277,12 @@ def check_clr_read_before_write(source):
                                      ("00000F12", "LONG", "a[3]"), ("00000F14", "LONG", None),
                                      ("00000F1A", "BYTE", "a[7]")):
         text = root_text(source, address)
-        calls = [i for i in range(len(text)) if text.startswith("genesis_route_access(", i)]
+        # SEG-021-T036: the discarded read goes through genesis_route_access_discarded_read, the write through the
+        # ordinary genesis_route_access.
+        calls = [m.start() for m in re.finditer(r"genesis_route_access(_discarded_read)?\(", text)]
         assert len(calls) == 2, (address, len(calls))
+        assert text.startswith("genesis_route_access_discarded_read(", calls[0]), address
+        assert text.startswith("genesis_route_access(", calls[1]), address
         first, second = text[calls[0]:calls[1]], text[calls[1]:]
         assert "GENESIS_ACCESS_%s, GENESIS_ACCESS_READ, &" % width in first, address
         assert "GENESIS_ACCESS_%s, GENESIS_ACCESS_WRITE, &" % width in second, address

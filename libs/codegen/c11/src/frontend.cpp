@@ -1488,6 +1488,27 @@ std::string build_genesis_tier1_indirect_pre_pc_stop(const InstructionProvenance
 } // namespace
 
 namespace {
+// SEG-021-T036: a routed_device fact for the architecturally discarded destination read of memory CLR/Scc/MOVE from
+// SR on the one lane whose discarded read the shared address-space contract admits (the write-only Z80 RESET
+// register, segarecomp_genesis_discarded_read_admitted). Its ordinary read is rejected by the routing gate, so both
+// fact validators accept exactly this shape before consulting that gate.
+bool c4_discarded_read_fact(const M68kStaticMemoryFact &fact, M68kInstructionKind kind) {
+  return fact.region == M68kAbsoluteOperandRegion::routed_device &&
+         fact.role == M68kStaticMemoryFactRole::destination_read &&
+         fact.direction == M68kMemoryAccessDirection::read && m68k_destination_read_value_discarded(kind) &&
+         segarecomp_genesis_discarded_read_admitted(fact.address.value, static_cast<std::uint32_t>(fact.width)) != 0;
+}
+
+// SEG-021-T036: the retained-fact pair of a memory CLR/Scc/MOVE from SR absolute destination (read, value discarded,
+// then write) that C4 lowers: both work RAM, or both routed-device facts (each already independently re-verified by
+// the static-memory-fact validation: an ordinary routed device access or the admitted discarded read). Either way
+// both accesses go through the ordinary lowering; a routed pair reaches the runtime owner.
+bool c4_read_then_write_destination_admitted(const M68kStaticMemoryFact *write, const M68kStaticMemoryFact *read) {
+  if (write == nullptr || read == nullptr || write->region != read->region) return false;
+  return write->region == M68kAbsoluteOperandRegion::synthetic_work_ram ||
+         write->region == M68kAbsoluteOperandRegion::routed_device;
+}
+
 bool valid_c4_static_memory_fact(
     const M68kStaticMemoryFact &fact,
     const std::map<Address, const M68kDecodedInstruction *> &decoded) {
@@ -1737,6 +1758,8 @@ bool valid_c4_static_memory_fact(
     // routed operand is valid only if the exact shared routing gate that
     // produced it still returns the generalized routed-device marker for the
     // same direction; nothing else is a valid routed_device fact.
+    // SEG-021-T036: or it is an admitted discarded destination read (c4_discarded_read_fact).
+    if (c4_discarded_read_fact(fact, instruction->second->kind)) return true;
     const auto *routed_access = std::get_if<M68kDeviceRoutedAccess>(&routed);
     return routed_access != nullptr && routed_access->direction == fact.direction;
   }
@@ -3415,11 +3438,12 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         // SEG-007-T115: independent re-verification for a retained Z80
         // bus-arbitration / Z80 program-RAM / PSG routed operand -- the same
         // shared routing gate must still return the generalized routed-device
-        // marker for this fact's own direction.
+        // marker for this fact's own direction (SEG-021-T036: or it is an admitted discarded destination read).
         const auto routed = m68k_route_genesis_device_access(
             M68kMemoryAccessRequest{fact.address, fact.width, fact.direction, fact.source_provenance});
         const auto *routed_access = std::get_if<M68kDeviceRoutedAccess>(&routed);
-        if (routed_access == nullptr || routed_access->direction != fact.direction)
+        if (!c4_discarded_read_fact(fact, instruction->second->kind) &&
+            (routed_access == nullptr || routed_access->direction != fact.direction))
           return "/* translation rejected: invalid C4 static memory fact */\n";
       } else {
         return "/* translation rejected: invalid C4 static memory fact */\n";
@@ -5002,9 +5026,9 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         routed.runtime_routing = true;
         routed.runtime_object = "runtime";
         if (reads_destination && fact != nullptr) {
+          // SEG-021-T036: a routed-device destination is admitted like memory CLR/Scc (c4_read_then_write_...).
           const auto *write_fact = fact_for(M68kStaticMemoryFactRole::destination_write);
-          if (write_fact == nullptr || write_fact->region != M68kAbsoluteOperandRegion::synthetic_work_ram ||
-              fact->region != M68kAbsoluteOperandRegion::synthetic_work_ram)
+          if (write_fact == nullptr || !c4_read_then_write_destination_admitted(write_fact, fact))
             return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         }
         if (fact != nullptr) {
@@ -5302,8 +5326,11 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       case M68kIrKind::write_clr: {
         // SEG-021-T029: memory CLR is read then written (memory-Scc shape); like Scc, the destination_write fact
         // is the region authority checked here (preflight already required the matching destination_read fact).
+        // SEG-021-T036: a routed-device destination (its validated destination_read fact is either an ordinary
+        // routed device read or the admitted discarded read) lowers through the runtime owner for both accesses.
         const auto *destination = fact_for(M68kStaticMemoryFactRole::destination_write);
-        if (destination != nullptr && destination->region != M68kAbsoluteOperandRegion::synthetic_work_ram)
+        if (destination != nullptr && !c4_read_then_write_destination_admitted(destination, fact_for(
+                                          M68kStaticMemoryFactRole::destination_read)))
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         if (destination == nullptr && m68k_is_statically_foldable_control_ea(found->second->destination_ea))
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
@@ -5402,8 +5429,12 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         // Their shared lowering advances the configured program-counter expression directly, so unlike
         // NOT's legacy bare-`pc` body it must not pass through the macro bridge, which would expand
         // `runtime->pc` into `runtime->runtime->pc` under strict C11.
+        // SEG-021-T036: memory Scc (a discarded read, unlike TAS/NOT/NEG/NEGX/NBCD) may also target a routed device.
         const auto *destination = fact_for(M68kStaticMemoryFactRole::destination_write);
-        if (destination != nullptr && destination->region != M68kAbsoluteOperandRegion::synthetic_work_ram)
+        if (destination != nullptr && destination->region != M68kAbsoluteOperandRegion::synthetic_work_ram &&
+            !(found->second->kind == M68kIrKind::set_conditional &&
+              c4_read_then_write_destination_admitted(destination,
+                                                      fact_for(M68kStaticMemoryFactRole::destination_read))))
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         if (destination == nullptr && m68k_is_statically_foldable_control_ea(found->second->destination_ea))
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";

@@ -1217,9 +1217,10 @@ def main():
   # genuine runtime routing, not a compile-time fold).
   # SEG-021-T029: memory CLR now performs the MC68000 destination read (value
   # discarded) before the write, so the routed READ binds the first ordinals and
-  # the routed WRITE of zero to the same (An) follows it.
+  # the routed WRITE of zero to the same (An) follows it. SEG-021-T036: that
+  # discarded read goes through genesis_route_access_discarded_read.
   assert "const uint32_t m68k_routed_addr_1 = (m68k_ea_addr_0) & UINT32_C(0x00FFFFFF);" in routed_write_first.stdout
-  assert "genesis_route_access(runtime, m68k_routed_addr_1, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ" in routed_write_first.stdout
+  assert "genesis_route_access_discarded_read(runtime, m68k_routed_addr_1, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ" in routed_write_first.stdout
   assert "const uint32_t m68k_routed_addr_5 = (m68k_ea_waddr_4) & UINT32_C(0x00FFFFFF);" in routed_write_first.stdout
   assert "genesis_route_access(runtime, m68k_routed_addr_5, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE" in routed_write_first.stdout
   assert "m68k_route_stop_6.provenance.access_address = m68k_routed_addr_5;" in routed_write_first.stdout
@@ -1256,7 +1257,8 @@ def main():
   # SEG-021-T029: the memory destination is read (value discarded) before it is written, both inside the
   # snapshot/commit window: one routed READ, then one routed WRITE, then the commit.
   window = predecrement.stdout[predecrement.stdout.index("uint32_t m68k_clr_auto_ea = runtime->a[0];"):predecrement.stdout.index(commit)]
-  assert window.count("genesis_route_access(") == 2
+  # SEG-021-T036: the discarded read goes through genesis_route_access_discarded_read.
+  assert window.count("genesis_route_access_discarded_read(") == 1 and window.count("genesis_route_access(") == 1
   assert 0 <= window.index("GENESIS_ACCESS_READ, &") < window.index("GENESIS_ACCESS_WRITE, &")
   # CLR's fixed condition-code pattern only reached after the commit above.
   assert predecrement.stdout.index("runtime->sr = (uint16_t)((runtime->sr & UINT16_C(0xFFF0)) | UINT16_C(4));") > \
@@ -1279,7 +1281,7 @@ def main():
   assert "GENESIS_ACCESS_WRITE" in clr_postinc.stdout
   # SEG-021-T029: read before write inside the snapshot/commit window (see the predecrement sibling above).
   window = clr_postinc.stdout[clr_postinc.stdout.index("uint32_t m68k_clr_auto_ea = runtime->a[0];"):clr_postinc.stdout.index(postinc_commit)]
-  assert window.count("genesis_route_access(") == 2
+  assert window.count("genesis_route_access_discarded_read(") == 1 and window.count("genesis_route_access(") == 1
   assert 0 <= window.index("GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &") < window.index("GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &")
   assert clr_postinc.stdout.index("runtime->sr = (uint16_t)((runtime->sr & UINT16_C(0xFFF0)) | UINT16_C(4));") > \
       clr_postinc.stdout.index(postinc_commit)
@@ -2239,9 +2241,10 @@ def main():
     generated = subprocess.run([executable, "--emit-general-startup-runtime-c4-ram-byte"], text=True, capture_output=True)
     assert generated.returncode == 0, generated.stderr
     # SEG-021-T029: the absolute work-RAM CLR.B reads its destination (value
-    # discarded) before writing zero to the same bus address.
+    # discarded; SEG-021-T036: via genesis_route_access_discarded_read) before
+    # writing zero to the same bus address.
     assert "const uint32_t m68k_routed_addr_0 = (UINT32_C(0x00FF0000)) & UINT32_C(0x00FFFFFF);" in generated.stdout
-    assert "genesis_route_access(runtime, m68k_routed_addr_0, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ" in generated.stdout
+    assert "genesis_route_access_discarded_read(runtime, m68k_routed_addr_0, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ" in generated.stdout
     assert "const uint32_t m68k_routed_addr_3 = (UINT32_C(0x00FF0000)) & UINT32_C(0x00FFFFFF);" in generated.stdout
     assert "genesis_route_access(runtime, m68k_routed_addr_3, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE" in generated.stdout
     assert "runtime->work_ram" not in generated.stdout

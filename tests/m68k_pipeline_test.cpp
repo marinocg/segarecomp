@@ -28700,7 +28700,10 @@ void exg_movep_scc_tas_generated_c_shapes() {
     const auto read = text.find("GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &");
     const auto write = text.find("GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &");
     expect(read != std::string::npos && write != std::string::npos && read < write &&
-               count_of(text, "genesis_route_access(") == 2U && count_of(text, commit) == 1U &&
+               count_of(text, "genesis_route_access_discarded_read(") == 1U &&
+               count_of(text, "genesis_route_access(") == 1U &&
+               text.find("genesis_route_access_discarded_read(") < text.find("genesis_route_access(") &&
+               count_of(text, commit) == 1U &&
                text.find(commit) > write && text.find(commit) < text.find("runtime->pc +=") &&
                text.find(step) != std::string::npos && text.find("runtime->sr =") == std::string::npos,
            "memory Scc auto-update: one routed byte read, then one routed byte write to the same EA, one commit after the "
@@ -28711,7 +28714,8 @@ void exg_movep_scc_tas_generated_c_shapes() {
     const auto read = text.find("GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &");
     const auto write = text.find("GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &");
     expect(read != std::string::npos && write != std::string::npos && read < write &&
-               count_of(text, "genesis_route_access(") == 2U && text.find("a[1] =") == std::string::npos,
+               count_of(text, "genesis_route_access_discarded_read(") == 1U &&
+               count_of(text, "genesis_route_access(") == 1U && text.find("a[1] =") == std::string::npos,
            "memory Scc (An): routed byte read before routed byte write, An never updated");
     const auto dn = emit_m68k_operation_c(lift({0x57U, 0xC3U}), "runtime->d", "runtime->sr", "", &routed);  // SEQ D3
     expect(dn.find("genesis_route_access(") == std::string::npos && dn.find("runtime->d[3] =") != std::string::npos,
@@ -28940,7 +28944,8 @@ void clr_memory_destination_reads_before_writing() {
     const auto write = text.find(std::string(shape.width) + ", GENESIS_ACCESS_WRITE, &");
     const auto commit = text.find(shape.commit);
     expect(read != std::string::npos && write != std::string::npos && read < write &&
-               count_of(text, "genesis_route_access(") == 2U && count_of(text, shape.commit) == 1U &&
+               count_of(text, "genesis_route_access_discarded_read(") == 1U &&
+               count_of(text, "genesis_route_access(") == 1U && count_of(text, shape.commit) == 1U &&
                commit > write && commit > text.rfind("return transfer;") && text.find(ccr) > commit &&
                text.find(ccr) < text.find("runtime->pc +=") && text.find(shape.step) != std::string::npos,
            "memory CLR auto-update: one routed read, then one routed write to the same EA, one commit after the "
@@ -28952,7 +28957,8 @@ void clr_memory_destination_reads_before_writing() {
     const auto read = text.find(", GENESIS_ACCESS_READ, &");
     const auto write = text.find(", GENESIS_ACCESS_WRITE, &");
     expect(read != std::string::npos && write != std::string::npos && read < write &&
-               count_of(text, "genesis_route_access(") == 2U && text.find(ccr) > text.rfind("return transfer;") &&
+               count_of(text, "genesis_route_access_discarded_read(") == 1U &&
+               count_of(text, "genesis_route_access(") == 1U && text.find(ccr) > text.rfind("return transfer;") &&
                text.find(ccr) < text.find("runtime->pc +=") && text.find("a[0] =") == std::string::npos &&
                text.find("a[1] =") == std::string::npos && text.find("m68k_clr_auto_ea") == std::string::npos,
            "memory CLR (An)/(d16,An)/(d8,An,Xn)/abs: routed read before routed write, CCR after both, no An update");
@@ -29008,26 +29014,77 @@ void clr_memory_destination_reads_before_writing() {
   const auto missing = preflight_m68k_general_startup_c4(without_read);
   expect(!missing.valid || !missing.rows.empty(), "an absolute CLR lacking its destination_read fact is not admitted");
 
-  // Static discovery resolves the destination READ before the write: an absolute CLR.W to the word-writable but
-  // read-rejected Z80 RESET register is a frontier whose recorded access is the READ (a write-only resolution
-  // would have admitted it), exactly like TST/memory Scc of the same address.
-  FrontendProgram device{};
-  device.profile = M68kFrontendProfile::general_startup;
-  const std::vector<std::uint8_t> device_image{
-      0x4EU, 0x71U,                              // 0xB00: NOP
-      0x42U, 0x79U, 0x00U, 0xA1U, 0x12U, 0x00U,  // 0xB02: CLR.W $00A11200.L (write-only device register)
-      0x4EU, 0x70U,                              // 0xB08: RESET
+  // Static discovery resolves the destination READ before the write. SEG-021-T036: the read of memory CLR/Scc/MOVE
+  // from SR is architecturally discarded, and a discarded WORD / even-BYTE read of the write-only Z80 RESET register
+  // is admitted (open bus, no side effect: MacDonald hardware notes v0.8 section 1 note 4; GTO1 p. 76), so an absolute
+  // CLR.W/CLR.B/Sxx to $A11200 is no longer a frontier and reaches C4 with routed read+write facts. A value-consuming
+  // read (TST, MOVE, NOT, TAS), a LONG CLR and the odd byte stay a frontier whose recorded access is the READ.
+  const auto analyze_device = [](std::vector<std::uint8_t> instruction) {
+    FrontendProgram device{};
+    device.profile = M68kFrontendProfile::general_startup;
+    std::vector<std::uint8_t> device_image{0x4EU, 0x71U};  // 0xB00: NOP
+    device_image.insert(device_image.end(), instruction.begin(), instruction.end());
+    device_image.push_back(0x4EU);  // RESET (frontier)
+    device_image.push_back(0x70U);
+    device.image = {"synthetic/SEG-021-T036/discarded-read-device", device_image, device_image.size()};
+    device.mapping_claims = {{"synthetic-discarded-read-device", {{}, 0xB00U},
+                              {{}, static_cast<std::uint32_t>(0xB00U + device_image.size())}, {0U},
+                              {device_image.size()}}};
+    device.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
+    return analyze_m68k_frontend(device);
   };
-  device.image = {"synthetic/SEG-021-T029/clr-write-only-device", device_image, device_image.size()};
-  device.mapping_claims = {{"synthetic-clr-write-only-device", {{}, 0xB00U}, {{}, 0xB0AU}, {0U}, {10U}}};
-  device.startup_ingress = M68kStartupIngress{{{}, 0xB00U}, 0x00FF0100U};
-  const auto device_result = analyze_m68k_frontend(device);
-  const auto *device_partial = std::get_if<FrontendPartialProgram>(&device_result);
-  expect(device_partial != nullptr && device_partial->accepted_prefix.decoded.size() == 1U &&
-             !device_partial->frontiers.empty() && device_partial->frontiers.front().access.has_value() &&
-             device_partial->frontiers.front().access->direction == M68kMemoryAccessDirection::read &&
-             device_partial->frontiers.front().access->address.value == UINT32_C(0x00A11200),
-         "static discovery stops a CLR to a write-only device register at its destination READ");
+  for (const auto &[name, instruction, width] :
+       std::vector<std::tuple<const char *, std::vector<std::uint8_t>, M68kMemoryAccessWidth>>{
+           {"CLR.W $A11200.L", {0x42U, 0x79U, 0x00U, 0xA1U, 0x12U, 0x00U}, M68kMemoryAccessWidth::word},
+           {"CLR.B $A11200.L", {0x42U, 0x39U, 0x00U, 0xA1U, 0x12U, 0x00U}, M68kMemoryAccessWidth::byte},
+           {"ST $A11200.L", {0x50U, 0xF9U, 0x00U, 0xA1U, 0x12U, 0x00U}, M68kMemoryAccessWidth::byte},
+           {"MOVE SR,$A11200.L", {0x40U, 0xF9U, 0x00U, 0xA1U, 0x12U, 0x00U}, M68kMemoryAccessWidth::word}}) {
+    const auto admitted = analyze_device(instruction);
+    const auto *admitted_partial = std::get_if<FrontendPartialProgram>(&admitted);
+    bool read_fact = false, write_fact = false;
+    if (admitted_partial != nullptr)
+      for (const auto &fact : admitted_partial->accepted_prefix.static_memory_facts) {
+        const bool right = fact.address.value == UINT32_C(0x00A11200) && fact.width == width &&
+                           fact.region == M68kAbsoluteOperandRegion::routed_device;
+        read_fact = read_fact || (right && fact.role == M68kStaticMemoryFactRole::destination_read);
+        write_fact = write_fact || (right && fact.role == M68kStaticMemoryFactRole::destination_write);
+      }
+    const bool reaches_reset = admitted_partial != nullptr && admitted_partial->accepted_prefix.decoded.size() == 2U &&
+                               !admitted_partial->frontiers.empty() &&
+                               !admitted_partial->frontiers.front().access.has_value();
+    bool c4_ok = false;
+    if (admitted_partial != nullptr) {
+      const auto c4_preflight = preflight_m68k_general_startup_c4(*admitted_partial);
+      const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*admitted_partial));
+      c4_ok = c4_preflight.valid && c4_preflight.rows.empty() &&
+              emitted.find("translation rejected") == std::string::npos &&
+              emitted.find("genesis_route_access_discarded_read(runtime, m68k_routed_addr_") != std::string::npos;
+    }
+    if (!(reaches_reset && read_fact && write_fact && c4_ok))
+      std::cerr << "discarded-read admission failed: " << name << " reset=" << reaches_reset << " read=" << read_fact
+                << " write=" << write_fact << " c4=" << c4_ok << " decoded="
+                << (admitted_partial ? admitted_partial->accepted_prefix.decoded.size() : 0U) << "\n";
+    expect(reaches_reset && read_fact && write_fact && c4_ok,
+           "static discovery admits the discarded read of an absolute CLR/Scc/MOVE from SR to the Z80 RESET register "
+           "(routed read+write facts, C4 emits the discarded-read route)");
+  }
+  for (const auto &[name, instruction] : std::vector<std::pair<const char *, std::vector<std::uint8_t>>>{
+           {"TST.W $A11200.L", {0x4AU, 0x79U, 0x00U, 0xA1U, 0x12U, 0x00U}},
+           {"MOVE.W $A11200.L,D0", {0x30U, 0x39U, 0x00U, 0xA1U, 0x12U, 0x00U}},
+           {"NOT.W $A11200.L", {0x46U, 0x79U, 0x00U, 0xA1U, 0x12U, 0x00U}},
+           {"TAS $A11200.L", {0x4AU, 0xF9U, 0x00U, 0xA1U, 0x12U, 0x00U}},
+           {"CLR.L $A11200.L", {0x42U, 0xB9U, 0x00U, 0xA1U, 0x12U, 0x00U}},
+           {"CLR.B $A11201.L", {0x42U, 0x39U, 0x00U, 0xA1U, 0x12U, 0x01U}}}) {
+    const auto stopped = analyze_device(instruction);
+    const auto *stopped_partial = std::get_if<FrontendPartialProgram>(&stopped);
+    const bool ok = stopped_partial != nullptr && stopped_partial->accepted_prefix.decoded.size() == 1U &&
+                    !stopped_partial->frontiers.empty() && stopped_partial->frontiers.front().access.has_value() &&
+                    stopped_partial->frontiers.front().access->direction == M68kMemoryAccessDirection::read &&
+                    (stopped_partial->frontiers.front().access->address.value & ~UINT32_C(1)) == UINT32_C(0x00A11200);
+    if (!ok) std::cerr << "value-consuming/unsupported read not stopped: " << name << "\n";
+    expect(ok, "static discovery still stops a value-consuming, LONG or odd-byte read of the Z80 RESET register at "
+               "its READ");
+  }
 }
 
 int c4_clr_read_before_write_admission() {

@@ -59,9 +59,24 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
 
   std::string routed_read(const M68kMemoryEmissionContext &ctx, std::string_view routed_addr, std::string_view value,
                           std::string_view stop, M68kMemoryAccessWidth size) const override {
+    return routed_read_through(ctx, "genesis_route_access", routed_addr, value, stop, size);
+  }
+
+  // SEG-021-T036: the discarded read-before-write of memory CLR/Scc/MOVE from SR calls the runtime's
+  // genesis_route_access_discarded_read (an ordinary DATA read except on the one admitted lane); a failing lane
+  // produces the identical READ stop and provenance.
+  std::string routed_discarded_read(const M68kMemoryEmissionContext &ctx, std::string_view routed_addr,
+                                    std::string_view value, std::string_view stop,
+                                    M68kMemoryAccessWidth size) const override {
+    return routed_read_through(ctx, "genesis_route_access_discarded_read", routed_addr, value, stop, size);
+  }
+
+  static std::string routed_read_through(const M68kMemoryEmissionContext &ctx, std::string_view entry,
+                                         std::string_view routed_addr, std::string_view value, std::string_view stop,
+                                         M68kMemoryAccessWidth size) {
     std::ostringstream out;
     out << "uint32_t " << value << " = UINT32_C(0); GenesisRuntimeStop " << stop << " = {0}; if "
-        << "(genesis_route_access(" << ctx.runtime_object << ", " << routed_addr << ", "
+        << "(" << entry << "(" << ctx.runtime_object << ", " << routed_addr << ", "
         << m68k_genesis_access_width(size) << ", GENESIS_ACCESS_READ, &" << value << ", &" << stop
         << ") != GENESIS_ACCESS_OK) ";
     if (const auto factored = factored_route_failure(ctx, stop, routed_addr, m68k_genesis_access_width(size),

@@ -207,14 +207,17 @@ struct M68kEaCode { std::string expression; std::string postlude; bool ok{true};
 // only known at run time. It is bound once to a freshly named local so that the
 // value routed to the routed-access owner and the value recorded in
 // `provenance.access_address` are the exact same truncated 24-bit value.
+// SEG-021-T036: `discarded` marks the read-before-write of memory CLR/Scc/MOVE from SR, whose value is never
+// consumed (m68k_destination_read_value_discarded); the platform text then comes from routed_discarded_read.
 void m68k_emit_routed_read(std::ostringstream &out, std::string_view address, M68kMemoryAccessWidth size,
                            const M68kMemoryEmissionContext &memory, std::string &expression,
-                           unsigned &temp_ordinal) {
+                           unsigned &temp_ordinal, bool discarded = false) {
   const auto routed_addr = "m68k_routed_addr_" + std::to_string(temp_ordinal++);
   const auto value = "m68k_routed_value_" + std::to_string(temp_ordinal++);
   const auto stop = "m68k_route_stop_" + std::to_string(temp_ordinal++);
   out << "const uint32_t " << routed_addr << " = (" << address << ") & UINT32_C(0x00FFFFFF); ";
-  out << emit_runtime(memory).routed_read(memory, routed_addr, value, stop, size);
+  out << (discarded ? emit_runtime(memory).routed_discarded_read(memory, routed_addr, value, stop, size)
+                    : emit_runtime(memory).routed_read(memory, routed_addr, value, stop, size));
   expression = value;
 }
 
@@ -241,9 +244,10 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
 // test_operand_value). SEG-021-T029: memory CLR also calls it for its
 // discarded destination read, supplying the write's own access class for an
 // absolute destination.
+// SEG-021-T036: `discarded` is forwarded to every routed read this EA emits (see m68k_emit_routed_read).
 [[nodiscard]] M68kEaCode m68k_emit_ea_read(const M68kEffectiveAddress &ea, M68kMemoryAccessWidth size,
                                            std::string_view data_registers, const M68kMemoryEmissionContext &memory,
-                                           std::ostringstream &out, unsigned &temp_ordinal) {
+                                           std::ostringstream &out, unsigned &temp_ordinal, bool discarded = false) {
   M68kEaCode result{};
   switch (ea.mode) {
   case M68kEaMode::data_register:
@@ -265,7 +269,7 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
       // wrapper's classification, opaque here) reaches the platform's runtime-routed access
       // owner; no compile-time literal, no static device model.
       m68k_emit_routed_read(out, "UINT32_C(0x" + hex(m68k_canonical_ea_address(ea), 8) + ")", size,
-                            memory, result.expression, temp_ordinal);
+                            memory, result.expression, temp_ordinal, discarded);
     } else if (*memory.test_operand_access == M68kOperandAccess::linear_memory) {
       const auto offset = (m68k_canonical_ea_address(ea) - memory.linear_memory_begin);
       // Static addresses retain one literal RAM index per byte.  Besides
@@ -301,7 +305,7 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
     const auto local = "m68k_ea_addr_" + std::to_string(temp_ordinal++);
     if (memory.runtime_routing) {
       out << "const uint32_t " << local << " = " << runtime.address_expr << ";\n";
-      m68k_emit_routed_read(out, local, size, memory, result.expression, temp_ordinal);
+      m68k_emit_routed_read(out, local, size, memory, result.expression, temp_ordinal, discarded);
     } else {
       m68k_emit_runtime_ea_guard(out, local, runtime.address_expr, size, memory);
       const auto offset_expr = local + " - UINT32_C(0x" + hex(memory.linear_memory_begin, 8) + ")";
@@ -1120,7 +1124,8 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         body << "const uint32_t m68k_frs_value = " << value << ";\nuint32_t m68k_frs_auto_ea = " << an_expr << ";\n";
         if (mode == M68kEaMode::address_predec) body << "m68k_frs_auto_ea -= UINT32_C(2);\n";
         std::string discarded;
-        m68k_emit_routed_read(body, "m68k_frs_auto_ea", operation.size, *memory, discarded, temp_ordinal);
+        m68k_emit_routed_read(body, "m68k_frs_auto_ea", operation.size, *memory, discarded, temp_ordinal,
+                              true);
         body << "(void)" << discarded << ";\n";
         m68k_emit_routed_write(body, "m68k_frs_auto_ea", operation.size, *memory, "m68k_frs_value", temp_ordinal);
         if (mode == M68kEaMode::address_postinc) body << "m68k_frs_auto_ea += UINT32_C(2);\n";
@@ -1130,7 +1135,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
       }
       std::ostringstream prelude;
       const auto discarded = m68k_emit_ea_read(operation.destination_ea, operation.size, data_registers, *memory,
-                                               prelude, temp_ordinal);
+                                               prelude, temp_ordinal, true);
       if (discarded.ok) {
         auto write_ea = operation.destination_ea;
         if (write_ea.mode == M68kEaMode::address_predec || write_ea.mode == M68kEaMode::address_postinc)
@@ -2001,7 +2006,8 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         if (operation.destination_ea.mode == M68kEaMode::address_predec)
           body << "m68k_clr_auto_ea -= UINT32_C(" << step << ");\n";
         std::string discarded;
-        m68k_emit_routed_read(body, "m68k_clr_auto_ea", operation.size, *memory, discarded, temp_ordinal);
+        m68k_emit_routed_read(body, "m68k_clr_auto_ea", operation.size, *memory, discarded, temp_ordinal,
+                              true);
         body << "(void)" << discarded << ";\n";
         m68k_emit_routed_write(body, "m68k_clr_auto_ea", operation.size, *memory, "UINT32_C(0)", temp_ordinal);
         if (operation.destination_ea.mode == M68kEaMode::address_postinc)
@@ -2022,7 +2028,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
       unsigned temp_ordinal = 0U;
       std::ostringstream prelude;
       const auto discarded = m68k_emit_ea_read(operation.destination_ea, operation.size, data_registers, access,
-                                               prelude, temp_ordinal);
+                                               prelude, temp_ordinal, true);
       if (discarded.ok) {
         auto write_ea = operation.destination_ea;
         if (auto_destination)
@@ -2319,7 +2325,8 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         if (operation.destination_ea.mode == M68kEaMode::address_predec)
           body << "m68k_scc_auto_ea -= UINT32_C(" << step << ");\n";
         std::string discarded;
-        m68k_emit_routed_read(body, "m68k_scc_auto_ea", operation.size, *memory, discarded, temp_ordinal);
+        m68k_emit_routed_read(body, "m68k_scc_auto_ea", operation.size, *memory, discarded, temp_ordinal,
+                              true);
         body << "(void)" << discarded << ";\n";
         m68k_emit_routed_write(body, "m68k_scc_auto_ea", operation.size, *memory, value, temp_ordinal);
         if (operation.destination_ea.mode == M68kEaMode::address_postinc)
@@ -2331,7 +2338,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
       unsigned temp_ordinal = 0U;
       std::ostringstream prelude;
       const auto discarded = m68k_emit_ea_read(operation.destination_ea, operation.size, data_registers, *memory,
-                                               prelude, temp_ordinal);
+                                               prelude, temp_ordinal, true);
       if (discarded.ok) {
         auto write_ea = operation.destination_ea;
         if (write_ea.mode == M68kEaMode::address_predec || write_ea.mode == M68kEaMode::address_postinc)

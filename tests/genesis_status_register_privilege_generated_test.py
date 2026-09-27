@@ -134,6 +134,14 @@ int main(void) {
   runtime = fresh(0x1020, 0x2704); runtime.a[0] = 0x00FF0A02;
   step(&runtime, 0x1022, 14);
   assert(runtime.a[0] == 0x00FF0A00 && runtime.work_ram[0xA00] == 0x27 && runtime.work_ram[0xA01] == 0x04);
+  /* SEG-021-T036: MOVE SR,-(A0) onto the write-only Z80 RESET register ($A11200). The discarded destination read is
+     admitted (open bus, no side effect); the SR word is written (D8 = 1 releases reset), A0 is committed once. */
+  runtime = fresh(0x1020, 0x2704); runtime.a[0] = 0x00A11202; runtime.devices.z80_bus.reset_asserted = 1U;
+  step(&runtime, 0x1022, 14);
+  assert(runtime.a[0] == 0x00A11200 && runtime.devices.z80_bus.reset_asserted == 0U && runtime.sr == 0x2704);
+  runtime = fresh(0x1020, 0x2604); runtime.a[0] = 0x00A11202;  /* SR D8 = 0 asserts reset */
+  step(&runtime, 0x1022, 14);
+  assert(runtime.a[0] == 0x00A11200 && runtime.devices.z80_bus.reset_asserted == 1U);
   /* MOVE SR,$FF0900.L (20 cycles). */
   runtime = fresh(0x1022, 0x2711);
   step(&runtime, 0x1028, 20);
@@ -249,8 +257,11 @@ def check_structure(source):
         assert "genesis_raise_privilege_violation" not in root_text(source, address), address
     for address in ("00001020", "00001022"):
         text = root_text(source, address)
-        calls = [i for i in range(len(text)) if text.startswith("genesis_route_access(", i)]
+        # SEG-021-T036: the read's value is discarded, so it goes through genesis_route_access_discarded_read.
+        calls = [m.start() for m in re.finditer(r"genesis_route_access(_discarded_read)?\(", text)]
         assert len(calls) == 2, (address, len(calls))
+        assert text.startswith("genesis_route_access_discarded_read(", calls[0]), address
+        assert text.startswith("genesis_route_access(", calls[1]), address
         assert "GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &" in text[calls[0]:calls[1]], address
         assert "GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &" in text[calls[1]:], address
 
