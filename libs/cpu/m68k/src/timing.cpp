@@ -386,8 +386,10 @@ std::optional<std::uint32_t> m68k_instruction_cycles(const M68kIrOperation &oper
   case M68kIrKind::read_status_register:
     return move_from_status_cycles(operation);
   // These instruction tables depend on runtime CCR, register count, or
-  // operand value. They require a generated timing expression, not a guessed
-  // scalar, so translation fails closed for now.
+  // operand value: no complete scalar exists. SEG-021-T021: the Bcc/DBcc/
+  // shift-rotate outcome rules are owned by `m68k_instruction_timing` below;
+  // the direct_flow-profile-only BNE.S compatibility kind has no generated
+  // outcome hook and stays fail-closed.
   case M68kIrKind::branch_ne_short:
   case M68kIrKind::dbcc_loop:
   case M68kIrKind::shift_rotate_register:
@@ -417,6 +419,60 @@ std::optional<std::uint32_t> m68k_instruction_cycles(const M68kIrOperation &oper
     return std::nullopt;
   }
   return std::nullopt;
+}
+
+std::optional<M68kInstructionTiming> m68k_instruction_timing(const M68kIrOperation &operation) noexcept {
+  if (const auto cycles = m68k_instruction_cycles(operation)) {
+    M68kInstructionTiming timing{};
+    timing.cycles = *cycles;
+    return timing;
+  }
+  M68kInstructionTiming timing{};
+  switch (operation.kind) {
+  // Table 8-10 Bcc: taken 10 (2/0) for either displacement size; not taken 8 (1/0) for the byte
+  // displacement and 12 (2/0) for the word displacement (the extension word is still fetched).
+  case M68kIrKind::general_branch:
+    if (operation.condition == M68kCondition::always) return std::nullopt;  // BRA is the static row above
+    if (operation.size != M68kMemoryAccessWidth::byte && operation.size != M68kMemoryAccessWidth::word)
+      return std::nullopt;
+    timing.rule = M68kTimingRule::condition;
+    timing.cycles = 10U;
+    timing.false_cycles = operation.size == M68kMemoryAccessWidth::byte ? 8U : 12U;
+    return timing;
+  // Table 8-10 DBcc: condition true 12 (2/0); condition false, counter not expired (branch taken) 10 (2/0);
+  // condition false, counter expired 14 (3/0).
+  case M68kIrKind::dbcc_loop:
+    timing.rule = M68kTimingRule::dbcc;
+    timing.cycles = 12U;
+    timing.false_cycles = 10U;
+    timing.expired_cycles = 14U;
+    return timing;
+  // Table 8-6 Scc: the Dn row is 6 when the condition is true and 4 when it is false (memory rows are static).
+  case M68kIrKind::set_conditional:
+    if (operation.destination_ea.mode != M68kEaMode::data_register) return std::nullopt;
+    timing.rule = M68kTimingRule::condition;
+    timing.cycles = 6U;
+    timing.false_cycles = 4U;
+    return timing;
+  // Table 8-9 register shift/rotate (ASd, LSd, ROd, ROXd): byte/word 6 + 2n, long 8 + 2n.
+  case M68kIrKind::shift_rotate_register:
+    timing.rule = M68kTimingRule::register_count;
+    timing.cycles = operation.size == M68kMemoryAccessWidth::long_word ? 8U : 6U;
+    timing.per_count_cycles = 2U;
+    return timing;
+  default: return std::nullopt;
+  }
+}
+
+std::uint32_t m68k_timing_cycles(const M68kInstructionTiming &timing, const M68kTimingOutcome &outcome) noexcept {
+  switch (timing.rule) {
+  case M68kTimingRule::fixed: return timing.cycles;
+  case M68kTimingRule::condition: return outcome.condition_true ? timing.cycles : timing.false_cycles;
+  case M68kTimingRule::dbcc:
+    return outcome.condition_true ? timing.cycles : (outcome.counter_expired ? timing.expired_cycles : timing.false_cycles);
+  case M68kTimingRule::register_count: return timing.cycles + timing.per_count_cycles * outcome.count;
+  }
+  return timing.cycles;
 }
 
 std::optional<std::uint32_t> m68k_effective_address_cycles(

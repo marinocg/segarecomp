@@ -1,6 +1,7 @@
 #include "segarecomp/codegen/c11/m68k.hpp"
 #include "segarecomp/cpu/m68k/effective_address.hpp"
 #include "segarecomp/cpu/m68k/effects.hpp"
+#include "segarecomp/cpu/m68k/timing.hpp"
 
 #include <iomanip>
 #include <limits>
@@ -3545,4 +3546,26 @@ bool m68k_operation_has_complete_c_emission(const M68kIrOperation &operation) {
          !emit_m68k_operation_c(operation, "d", "sr", {}, &probe_memory).empty();
 }
 
-} // namespace segarecomp
+std::optional<std::string> m68k_timing_c_expression(const M68kIrOperation &operation) {
+  const auto timing = m68k_instruction_timing(operation);
+  if (!timing) return std::nullopt;
+  const auto literal = [](std::uint32_t value) { return "UINT32_C(" + std::to_string(value) + ")"; };
+  switch (timing->rule) {
+  case M68kTimingRule::fixed: return literal(timing->cycles);
+  case M68kTimingRule::condition: {
+    // The outcome local is materialized by the lowering itself (Bcc) or by the caller-owned Scc slot.
+    const char *outcome = operation.kind == M68kIrKind::general_branch ? "m68k_branch_taken"
+                          : operation.kind == M68kIrKind::set_conditional ? "m68k_scc_true" : nullptr;
+    if (outcome == nullptr) return std::nullopt;
+    return std::string(outcome) + " ? " + literal(timing->cycles) + " : " + literal(timing->false_cycles);
+  }
+  case M68kTimingRule::dbcc:
+    return "m68k_dbcc_condition_true ? " + literal(timing->cycles) + " : (m68k_dbcc_took_branch ? " +
+           literal(timing->false_cycles) + " : " + literal(timing->expired_cycles) + ")";
+  case M68kTimingRule::register_count:
+    return literal(timing->cycles) + " + " + literal(timing->per_count_cycles) + " * m68k_shift_effective_count";
+  }
+  return std::nullopt;
+}
+
+}  // namespace segarecomp

@@ -40,6 +40,93 @@ def force_function(source, code, old, new):
     return source[:start] + body.replace(old, new, 1) + source[end:]
 
 
+# --- SEG-021-T021: outcome-dependent timing -------------------------------------------------------------
+# Test-owned transcription of the published MC68000 User's Manual section 8 rows (Table 8-10 Bcc/DBcc, Table 8-6
+# Scc Dn, Table 8-9 register shift/rotate) and of the Bcc/DBcc/Scc condition tests (Programmer's Reference
+# Manual table 3-19); independent of the production timing owner and of Musashi.
+def condition_true(cond, sr):
+    c, v, z, n = sr & 1, (sr >> 1) & 1, (sr >> 2) & 1, (sr >> 3) & 1
+    return {"t": True, "f": False, "hi": not c and not z, "ls": bool(c or z), "cc": not c, "cs": bool(c),
+            "ne": not z, "eq": bool(z), "vc": not v, "vs": bool(v), "pl": not n, "mi": bool(n), "ge": n == v,
+            "lt": n != v, "gt": n == v and not z, "le": bool(z) or n != v}[cond]
+
+
+def published_cycles(row_id, vector):
+    parts = row_id.split(".")
+    if parts[0] == "bra":
+        return 10
+    if parts[0] == "bcc":
+        return 10 if condition_true(parts[-1], vector["sr"]) else (8 if parts[2] == "b" else 12)
+    if parts[0] == "dbcc":
+        if condition_true(parts[-1], vector["sr"]):
+            return 12
+        return 14 if vector["x"] & 0xFFFF == 0 else 10
+    if parts[0] == "scc":
+        return 6 if condition_true(parts[-1], vector["sr"]) else 4
+    base = 8 if parts[2] == "l" else 6
+    count = vector["x"] & 63 if parts[1] == "dn_dn" else (((vector["word"] >> 9) & 7) or 8)
+    return base + 2 * count
+
+
+TIMING_SAMPLE = ["asl.dn_dn.b.dn.dn", "bcc.disp16.w.none.target.lt", "bcc.disp8.b.none.target.eq",
+                 "bra.disp8.b.none.target", "dbcc.dn_disp16.w.dn.target.f", "dbcc.dn_disp16.w.dn.target.ne",
+                 "dbcc.dn_disp16.w.dn.target.t", "lsr.dn_dn.w.dn.dn", "ror.imm_dn.w.count1to8.dn.count1to8",
+                 "roxl.dn_dn.l.dn.dn", "roxr.imm_dn.l.count1to8.dn.count1to8", "scc.unary.b.none.dn.hi"]
+
+
+def timing_checks(emitter, cc, table, forms, checkout, scratch):
+    timed = [r for r in table["rows"] if r.get("timing")]
+    families = {r["id"].split(".")[0] for r in timed}
+    check(families == {"bcc", "bra", "dbcc", "scc", "asl", "asr", "lsl", "lsr", "rol", "ror", "roxl", "roxr"},
+          "timing rows cover the Bcc/DBcc/Scc/shift-rotate families: %s" % sorted(families))
+    check(len([r for r in timed if r["id"].split(".")[0] in ("asl", "asr", "lsl", "lsr", "rol", "ror", "roxl", "roxr")])
+          == 48, "every register shift/rotate family x {Dn count, immediate count} x {B, W, L} is a timing row")
+    shift_counts = {int(x, 16) for x, _ in table["profiles"]["shift_count"]["pairs"]}
+    check({0, 1, 8, 63} <= {c & 63 for c in shift_counts} and any(c > 63 for c in shift_counts),
+          "shift count vectors must include 0/1/8/63 and a count register above 63 (modulo 64)")
+    by_id = {r["id"]: r for r in table["rows"]}
+    vectors = [v for rid in TIMING_SAMPLE for v in mc.expand_row(by_id[rid], table, forms)]
+    generated, status, deterministic = mc.run_generated(vectors, emitter, cc, scratch / "timing")
+    check(deterministic and all(s == "ok" for s in status.values()), "timing sample emits, compiles and runs")
+    outcomes = {}
+    for v in vectors:
+        expected = published_cycles(v["row"], v)
+        outcomes.setdefault(v["row"], set()).add(expected)
+        got = generated[v["id"]].get("cycles")
+        if got != expected:
+            check(False, "generated cycles %s != published %s for %s" % (got, expected, v["id"]))
+            break
+    check(outcomes["bcc.disp8.b.none.target.eq"] == {10, 8} and outcomes["bcc.disp16.w.none.target.lt"] == {10, 12},
+          "Bcc taken and not-taken outcomes (byte and word) are exercised")
+    check(outcomes["dbcc.dn_disp16.w.dn.target.ne"] == {12, 10, 14} and outcomes["dbcc.dn_disp16.w.dn.target.f"] == {10, 14}
+          and outcomes["dbcc.dn_disp16.w.dn.target.t"] == {12}, "DBcc true / expired / branch-taken outcomes exercised")
+    check({8 + 2 * n for n in (0, 1, 8, 63)} <= outcomes["roxl.dn_dn.l.dn.dn"] and
+          {6 + 2 * n for n in (0, 1, 8, 63)} <= outcomes["asl.dn_dn.b.dn.dn"], "shift counts 0/1/8/63 exercised")
+    # fail closed: a timing row on a form without a CPU-owned timing rule (the MUL word table) is unsupported
+    mul = copy.deepcopy(table)
+    mul["rows"] = [dict(by_id["mulu.ea_dn.w.dn.dn"], timing=True)]
+    rep = mc.run(mul, forms, emitter, cc, None, scratch / "timing-mul")
+    check(rep["rows"][0]["status"] == "unsupported" and rep["rows"][0]["passing_words"] == 0,
+          "a timing row without a timing rule must be reported unsupported")
+    if checkout is None:
+        print("pinned Musashi unavailable: timing oracle cross-check SKIPPED")
+        return
+    oracle = mc.run_oracle(vectors, checkout, cc, scratch / "timing-oracle")
+    bad = [v["id"] for v in vectors if oracle[v["id"]].get("cycles") != published_cycles(v["row"], v)]
+    check(not bad, "pinned Musashi cycle report must agree with the published tables: %s" % bad[:5])
+    rep = mc.run(table, forms, emitter, cc, checkout, scratch / "timing-run", TIMING_SAMPLE)
+    check(all(r["status"] == "validated" and r["counts"]["timing_compared"] == r["counts"]["compared"] > 0
+              and r["credit"]["timing"] for r in rep["rows"]), "timing sample validates against Musashi: %s" % [
+                  (r["row"], r["status"], r["first_divergence"]) for r in rep["rows"] if r["status"] != "validated"])
+    # injected timing fault: BEQ.S not-taken retires 10 instead of 8 -> only word 6702 diverges, domain timing
+    faulty = mc.run(table, forms, emitter, cc, checkout, scratch / "timing-fault", ["bcc.disp8.b.none.target.eq"],
+                    mutate=lambda s: force_function(s, "6702", "UINT32_C(8)", "UINT32_C(10)"))
+    r = faulty["rows"][0]
+    check(r["status"] == "diverged" and r["passing_words"] == r["words"] - 1 and r["first_divergence"]["domain"] == "timing"
+          and r["first_divergence"]["fields"][0]["field"] == "cycles", "timing fault must fail exactly word 6702: %s" % r)
+    check(not mc.credited_words(faulty, forms, table)["timing"], "a timing-diverging row must credit nothing")
+
+
 def main():
     emitter, cc = pathlib.Path(sys.argv[1]), sys.argv[2]
     table, forms = mc.load_table(), mc.load_forms()
@@ -213,6 +300,7 @@ int main(void) { cf_vector v; unsigned d[8] = {0}, r[8] = {0}, k; static const u
             first = faulty["rows"][0]["first_divergence"]
             check(faulty["rows"][0]["status"] == "diverged" and first and
                   {f["field"] for f in first["fields"]} == {"a0"}, "auto-update fault must differ only in a0: %s" % first)
+        timing_checks(emitter, cc, table, forms, checkout, scratch)
     if FAILURES:
         print("%d failure(s)" % len(FAILURES))
         return 1

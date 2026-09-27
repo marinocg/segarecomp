@@ -1,12 +1,14 @@
 /* SEG-021-T003: generated-native runner. Linked with the emitter's translation unit (cf_table). Reads the
  * vector file (argv[1]), runs each vector's emitted function on a fresh copy of the common memory image and
  * prints the boundary-schema JSON. A vector whose encoding has no emitted function prints
- * {"id":..,"missing":1}. */
+ * {"id":..,"missing":1}. With the emitter's --timing mode the record also carries the retirement cycles. */
 #include "m68k_conformance_common.h"
 typedef struct { uint32_t d[8]; uint32_t a[8]; uint16_t sr; uint32_t pc; uint32_t usp; uint8_t ram[0x100000]; } cap_state;
 typedef struct { const char *code; int (*fn)(cap_state *); } cf_entry;
 extern const cf_entry cf_table[];
 uint32_t frame_ids[64], frame_continuations[64], frame_depth;
+/* SEG-021-T021: the emitted function stores its retirement-rule cycles here (0xFFFFFFFF = no rule). */
+uint32_t cf_cycles;
 static cap_state state;
 static uint8_t before[CF_MEM_SIZE];
 int main(int argc, char **argv) {
@@ -23,7 +25,9 @@ int main(int argc, char **argv) {
        `usp` is the INACTIVE slot -- the USP in supervisor mode, the SSP in user mode. */
     state.sr = (uint16_t)v.sr; state.usp = (v.sr & 0x2000U) ? v.usp : v.ssp; state.pc = CF_CODE_BASE;
     memset(frame_ids, 0, sizeof frame_ids); memset(frame_continuations, 0, sizeof frame_continuations); frame_depth = 0U;
+    cf_cycles = UINT32_C(0xFFFFFFFF);
     (void)fn(&state);
+    cf_reported_cycles = cf_cycles == UINT32_C(0xFFFFFFFF) ? -1L : (long)cf_cycles;
     for (i = 0; i < 8U; ++i) { d[i] = state.d[i]; a[i] = state.a[i]; }
     { const unsigned supervisor = state.sr & 0x2000U; /* the generated model: active A7 plus the inactive slot */
       cf_print(&v, before, state.ram, state.pc, state.sr, supervisor ? state.usp : a[7], supervisor ? a[7] : state.usp, d, a); }

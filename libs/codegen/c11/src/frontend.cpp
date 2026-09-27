@@ -1908,24 +1908,12 @@ bool immutable_rom_aot_routed_only_emission_is_complete(const M68kIrOperation &o
 }
 
 std::optional<std::string> m68k_retirement_cycle_expression(const M68kIrOperation &operation) {
-  if (const auto cycles = m68k_instruction_cycles(operation))
-    return "UINT32_C(" + std::to_string(*cycles) + ")";
+  // SEG-021-T021: every static and outcome-dependent row (Bcc, DBcc, Scc Dn, register shift/rotate) comes from
+  // the one CPU-owned rule (`m68k_instruction_timing`) rendered by the shared M68k lowering owner.
+  if (auto expression = m68k_timing_c_expression(operation)) return expression;
   switch (operation.kind) {
-  case M68kIrKind::general_branch:
-    if (operation.condition != M68kCondition::always)
-      return "m68k_branch_taken ? UINT32_C(10) : UINT32_C(" +
-             std::to_string(operation.size == M68kMemoryAccessWidth::byte ? 8U : 12U) + ")";
-    return std::nullopt;
-  case M68kIrKind::dbcc_loop:
-    return "m68k_dbcc_condition_true ? UINT32_C(12) : (m68k_dbcc_took_branch ? UINT32_C(10) : UINT32_C(14))";
-  case M68kIrKind::set_conditional:
-    // SEG-021-T016: Table 8-6 Scc Dn row is 4 (condition false) / 6 (true); memory rows are static (timing.cpp).
-    if (operation.destination_ea.mode == M68kEaMode::data_register)
-      return "m68k_scc_true ? UINT32_C(6) : UINT32_C(4)";
-    return std::nullopt;
-  case M68kIrKind::shift_rotate_register:
-    return "UINT32_C(" + std::to_string(operation.size == M68kMemoryAccessWidth::long_word ? 8U : 6U) +
-           ") + UINT32_C(2) * m68k_shift_effective_count";
+  // The data-dependent MULU/MULS word table stays a Genesis-runtime helper until SEG-021-T022 moves it into the
+  // CPU timing contract.
   case M68kIrKind::multiply_unsigned_word:
   case M68kIrKind::multiply_signed_word: {
     const auto ea = m68k_effective_address_cycles(operation.source_ea, M68kMemoryAccessWidth::word);

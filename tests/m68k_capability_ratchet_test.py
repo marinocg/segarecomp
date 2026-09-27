@@ -93,7 +93,13 @@ for name in ("m68k-batch-b-musashi-vectors", "m68k-batch-c-musashi-vectors"):
     words = {int(v["code_hex"][:4], 16) for v in vectors}
     for key in ("semantic_validated_words", "ccr_sr_validated_words", "ea_side_effect_validated_words"):
         check(words <= {int(w, 16) for w in manifest[key]}, "%s words missing from manifest %s" % (name, key))
-check(manifest["timing_validated_words"] == [], "no timing oracle test exists; timing manifest must stay empty until one does")
+# SEG-021-T021: the only timing oracle is the conformance table's `"timing": true` rows (pinned Musashi cycle report
+# versus the generated retirement rule); timing words are legal, semantically validated, and attributed only to it.
+timing_words = manifest["timing_validated_words"]
+check(isinstance(timing_words, dict) and timing_words, "timing manifest must be a non-empty word -> sources map")
+check({int(w, 16) for w in timing_words} <= semantic & legal, "timing aspect must be legal and a subset of semantic")
+check(all(s == ["tests/fixtures/m68k-conformance-vectors.json"] for s in timing_words.values()),
+      "timing words may only be credited by the conformance table's timing rows")
 
 # Independence in both directions.
 tool_text = TOOL.read_text(encoding="utf-8")

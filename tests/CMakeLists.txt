@@ -33,6 +33,11 @@ add_executable(m68k_timing_tests m68k_timing_test.cpp)
 target_link_libraries(m68k_timing_tests PRIVATE segarecomp::cpu_m68k)
 segarecomp_enable_warnings(m68k_timing_tests)
 add_test(NAME m68k_timing_tests COMMAND m68k_timing_tests)
+# SEG-021-T021: outcome-dependent Bcc/DBcc/Scc/register shift-rotate timing rules (published tables).
+add_executable(m68k_dynamic_timing_tests m68k_dynamic_timing_test.cpp)
+target_link_libraries(m68k_dynamic_timing_tests PRIVATE segarecomp::cpu_m68k)
+segarecomp_enable_warnings(m68k_dynamic_timing_tests)
+add_test(NAME m68k_dynamic_timing_tests COMMAND m68k_dynamic_timing_tests)
 # SEG-007-T252 / ADR-0040: the former SEG-007-T107 loop-progress-note
 # wrap-guard test has been removed along with the generated-runtime
 # progress watchdog and its note-emission mechanism.
@@ -884,7 +889,7 @@ add_test(NAME codegen_c11_shard_selection_tests COMMAND codegen_c11_shard_select
 # not a product/generated-execution gate, so it lives in `extended` on every host.
 set(SEGARECOMP_EXTENDED_TESTS ghidra_mcp_smoke_test
     genesis_experiment_aligned_aot_report_failure_test)
-set(SEGARECOMP_FAST_TESTS segarecomp_tests moveq_tests direct_flow_tests m68k_timing_tests
+set(SEGARECOMP_FAST_TESTS segarecomp_tests moveq_tests direct_flow_tests m68k_timing_tests m68k_dynamic_timing_tests
     genesis_runtime_run_tests genesis_vdp_render_frame_tests genesis_frame_export_tests
     m68k_frontend_rejection_tests genesis_general_startup_cli_test architecture_dependency_test
     codegen_c11_emitter_ownership_test codegen_c11_translation_units_tests codegen_c11_shard_selection_tests restricted_files_test genesis_viewer_tests

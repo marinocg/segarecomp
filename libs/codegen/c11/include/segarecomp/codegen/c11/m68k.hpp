@@ -180,6 +180,17 @@ struct M68kMemoryEmissionContext {
 // context needed to inspect complete lowering, so callers cannot mistake a
 // context-free fragment for supported generated execution.
 [[nodiscard]] bool m68k_operation_has_complete_c_emission(const M68kIrOperation &operation);
+
+// SEG-021-T021: the C11 rendering of the CPU-owned retirement timing rule (`m68k_instruction_timing`,
+// libs/cpu/m68k timing.hpp) against the outcome locals `emit_m68k_operation_c` materializes. It is evaluated
+// after the lowered body, in the same scope:
+//   condition (Bcc)       `m68k_branch_taken` (declared by the Bcc lowering)
+//   condition (Scc Dn)    `m68k_scc_true` (caller-declared zero-initialized uint8_t, passed as `timing_scc_true`)
+//   dbcc                  `m68k_dbcc_condition_true` (declared by the DBcc lowering) and `m68k_dbcc_took_branch`
+//                         (caller-declared zero-initialized uint8_t, passed as `timing_dbcc_taken`)
+//   register_count        `m68k_shift_effective_count` (declared by the register shift/rotate lowering)
+// Returns nullopt when the CPU owner has no rule; callers must fail closed.
+[[nodiscard]] std::optional<std::string> m68k_timing_c_expression(const M68kIrOperation &operation);
 [[nodiscard]] std::string emit_m68k_direct_flow_c(const DirectFlowAnalysis &analysis, const DirectFlowState &initial, std::uint64_t budget);
 [[nodiscard]] std::string emit_m68k_structured_direct_flow_c(const DirectFlowAnalysis &analysis, std::span<const M68kDirectFlowUnit> units, const DirectFlowState &initial, std::uint64_t budget);
 } // namespace segarecomp

@@ -166,7 +166,9 @@ int main(int argc, char **argv) {
       footprint = lift && effect.register_write_footprint_complete;
       ccr = lift && effect.affects_condition_codes;
       exception_vector = lift && effect.may_raise_synchronous_exception ? effect.exception_vector : 0U;
-      timing = lift && m68k_instruction_cycles(operation).has_value();
+      // SEG-021-T021: a form has a timing model when the CPU owner publishes a complete rule for it -- a static
+      // scalar or an outcome-dependent rule (Bcc, DBcc, Scc Dn, register shift/rotate).
+      timing = lift && m68k_instruction_timing(operation).has_value();
       emit_direct = lift && m68k_operation_has_complete_c_emission(operation);
       if (lift) {
         M68kMemoryEmissionContext routed{"runtime->work_ram", "runtime->a", "frame_ids", "frame_continuations",

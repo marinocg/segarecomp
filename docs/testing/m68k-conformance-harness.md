@@ -64,14 +64,16 @@ D0-D7, A0-A7 (A7 = active stack pointer), PC, SR/CCR, USP, SSP, byte-granular me
 image (memory RMW results, auto-updated EA memory and exception stacked frames) and the exception-vector hook: vectors
 2..255 are seeded to distinct handler addresses (`CF_HANDLER(v)`); when the final PC is a handler a `k=2` effect
 records the vector number (TRAP #0..#15 = 32..47, user vectors above), so exception families reuse the same rows and
-comparison. Timing is not compared. Exception instruction semantics are not implemented by this harness.
+comparison. Timing is compared only for rows that set `"timing": true` (see the SEG-021-T021 section). Exception
+instruction semantics are not implemented by this harness.
 
 ## Limits (measured, not hidden)
 
 A credited primary word means the vectors declared by its row (all suffixes, all profile cases) matched Musashi;
 it is NOT semantic exhaustiveness (a handful of extension values, fixed baseline registers and memory pattern).
 Family tasks own deeper family-specific vector expansion. A write that does not change a byte is invisible. The
-generated model has one active A7 plus USP, so SSP is shadowed by the runner. Timing is out of scope. Only a fully
+generated model has one active A7 plus USP, so SSP is shadowed by the runner. Timing is compared only for
+`"timing": true` rows, at the fidelity of published instruction cycle totals (not bus cycles). Only a fully
 passing row can credit the T002 manifest (`update_manifest` only adds credit and never removes it).
 
 ## Oracle policy
@@ -119,7 +121,8 @@ the whole family (the emitter still fails closed on a shape it cannot lower).
 
 `m68k_instruction_cycles` has a published static row for every legal BTST/BCHG/BCLR/BSET form except the dynamic
 `BTST Dn,#<data>` form (`btst.dn_ea.b.dn.imm`), which is recorded as timing-unsupported: no row is asserted without a
-verified Motorola table cell. Timing is not compared by this harness (`timing_validated` stays 0).
+verified Motorola table cell. The bit-operation rows are not `"timing": true` rows (timing is compared only from
+SEG-021-T021 on, for the rows listed there).
 
 ## SEG-021-T009: shift and rotate rows
 
@@ -137,7 +140,7 @@ lowering for every memory-word shape.
 Timing: memory-word forms have a published static row (`8 + EA`, table 8-1) and are admitted to the immutable-ROM AOT
 route; the register forms' retirement time depends on the runtime count (`6/8 + 2n`) and is emitted as a dynamic
 retirement expression, so `m68k_instruction_cycles` (static) records them as timing-unsupported (owned by SEG-021-T021).
-Timing is not compared by this harness.
+Superseded by SEG-021-T021 (below): the register forms now have a CPU-owned `register_count` rule and are timing-validated.
 
 ## SEG-021-T010: MULS.W/MULU.W/DIVS.W/DIVU.W source-EA completion
 
@@ -310,7 +313,8 @@ most-significant first to/from every second byte of `d16(An)` and never updates 
 
 Timing: published static rows exist for EXG (6), MOVEP (16 / 24), TAS (Dn 4, memory 10 + EA) and Scc memory forms (8 + EA). The 16 `Scc Dn`
 forms are recorded as timing-unsupported in `m68k_instruction_cycles` (4 false / 6 true depends on the runtime condition); generated
-retirement uses the dynamic expression `m68k_scc_true ? 6 : 4`. `timing_validated` stays 0 (timing is not compared).
+retirement uses the dynamic expression `m68k_scc_true ? 6 : 4`. Superseded by SEG-021-T021 (below): `Scc Dn` has a CPU-owned
+`condition` rule and is timing-validated.
 
 ## SEG-021-T018: status register, CCR, USP and privilege rows
 
@@ -361,3 +365,49 @@ flags).
 Timing is not compared. Static rows exist for the retiring paths only (TRAPV V = 0: 4; CHK.W in range: 10 + word EA
 cell; RTR: 20) plus the published 34-cycle rows for TRAP and the instruction-word exceptions; the exception-entry
 charge itself is owned by SEG-021-T022 (ADR 0043 §8) and is not retired today.
+
+## SEG-021-T021: outcome-dependent timing for Bcc, DBcc, Scc Dn and register shift/rotate
+
+**Owner.** `m68k_instruction_timing` (`libs/cpu/m68k/include/segarecomp/cpu/m68k/timing.hpp`) is the one CPU-owned
+retirement-time rule: `fixed` (every static `m68k_instruction_cycles` row, unchanged), `condition` (true/false),
+`dbcc` (condition true / counter expired / branch taken) or `register_count` (`base + per_count * n`). The shared M68k
+lowering owner renders it as C11 (`m68k_timing_c_expression`, `libs/codegen/c11`) against the outcome locals the
+lowering already materializes, and every generated route (ordinary blocks, C4 prefixes, immutable-ROM AOT bodies) plus
+the conformance emitter's `--timing` mode consume that one rendering; `m68k_timing_cycles` is the host-side evaluation
+for tests. The generated C text is byte-identical to the previous hand-written expressions.
+
+**Published rows** (MC68000 User's Manual section 8):
+
+| Form | Rule |
+| --- | --- |
+| Bcc.B / Bcc.W (Table 8-10) | taken 10; not taken 8 (byte) / 12 (word); BRA stays the static 10 |
+| DBcc (Table 8-10) | condition true 12; condition false and counter expired (Dn.W = -1) 14; condition false and branch taken 10 |
+| Scc Dn (Table 8-6) | condition true 6, false 4 (memory forms stay static: 8 + byte EA) |
+| ASd/LSd/ROd/ROXd register (Table 8-9) | B/W 6 + 2n, L 8 + 2n; n = immediate 1..8, or the count register modulo 64 (n = 0 costs the base); ROXL/ROXR use the same n for timing although the rotation is taken modulo size + 1 |
+| memory shift/rotate (Table 8-9) | static 8 + word EA (unchanged) |
+
+**Fidelity.** Published instruction cycle totals consumed by the deterministic scheduler at instruction retirement. Not
+bus-cycle accurate: no wait states, prefetch, bus arbitration or intra-instruction access timing.
+
+**Validation.** 110 rows carry `"timing": true` (28 Bcc, 2 BRA, 16 DBcc, 16 Scc Dn, 48 register shift/rotate = the 8
+families x {Dn count, immediate count} x {B, W, L}). For every vector the generated side stores the rendered rule's value
+for the executed outcome in `cf_cycles`; the oracle side reports what `m68k_execute(1)` consumed for exactly that one
+instruction; `compare_timing` reports a mismatch as a `domain: "timing"` first divergence with a `cycles` field, and a
+timing row whose form has no rule is `unsupported` (fail closed). The existing vector profiles already exercise every
+outcome: `cc_full`/`dbcc_full` sweep all 16 CCR states (Bcc taken and not taken; DBcc true, expired from Dn.W = 0 and
+branch taken) and `shift_count` includes count registers 0, 1, 8, 63, 64, 65 and 255 (modulo 64), while the immediate
+forms cover 1..8 through the word ranges. Measured with the pinned core: 227,776 timing comparisons, 0 divergences,
+7,168 primary words credited to `timing_validated_words` (`timing_validated`: 0 -> 110 of 1526 forms).
+`tests/m68k_conformance_harness_test.py` also checks, independently of both the production owner and Musashi, a sample of
+rows against a test-owned transcription of the published rows and condition tests (generated side always; Musashi side
+when pinned), that each outcome and the counts 0/1/8/63 occur, that an injected timing fault in one function fails exactly
+that word, and that a MUL timing row stays unsupported.
+
+**Musashi agreement.** For all 110 rows the pinned core's reported cycles equal the published tables (its 68000 constants
+`CYC_BCC_NOTAKE_B = -2`, `CYC_BCC_NOTAKE_W = 2`, `CYC_DBCC_F_NOEXP = -2`, `CYC_DBCC_F_EXP = 2`, `CYC_SCC_R_TRUE = 2`,
+`CYC_SHIFT = 1` over base cycles 10/10/12/4/6/8, and it charges the modulo-64 count for ROXL/ROXR). No deviation is
+recorded.
+
+**Still fail closed (enumerated by `timing_model_present`, 25 forms).** MULU.W/MULS.W (22 forms; data-dependent word
+table, SEG-021-T022 -- generated retirement keeps its Genesis-runtime helper), `BTST Dn,#<data>` (no verified table
+cell, SEG-021-T008), RESET and STOP. The direct_flow-profile-only `BNE.S` compatibility kind also has no rule.
