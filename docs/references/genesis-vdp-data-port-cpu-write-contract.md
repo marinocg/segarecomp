@@ -86,10 +86,24 @@ field) **before any mutation**, preserving
 - the second sub-write of a `LONG` write failing after the first succeeded
   (partial-completion policy below).
 
-The armed VRAM-fill DATA-port WORD path (SEG-007-T098 / SEG-007-T101) is
-unchanged: when `dma.phase == BUSY && dma.kind == VRAM_FILL`, a `WORD` write to
-`$C00000` still routes to `genesis_vdp_data_port_fill_write` and any other width
-still fails closed.
+The armed VRAM-fill DATA-port WORD path (SEG-007-T098 / SEG-007-T101) retains
+its engine and pointer policy. The bounded BYTE-trigger extension below also
+accepts BYTE writes on either CPU DATA-port lane while armed; LONG remains
+fail-closed.
+
+## Armed VRAM-fill BYTE trigger extension
+
+When the existing VRAM-fill engine is armed, a CPU DATA-port BYTE write at
+either `$C00000` or `$C00001` triggers exactly one word-equivalent source
+transfer: `B` is presented as `(B << 8) | B` to the same validated fill engine
+as a WORD write. This uses the existing even VRAM pointer, nonzero fill count,
+source store, auto-increment, boundary-wrap and completion policies without
+changing the LONG or plain non-DMA DATA-port paths. Charles MacDonald's
+[Genesis hardware notes §1.2](https://gendev.spritesmind.net/mirrors/cmd/gen-hw.txt)
+and Genesis Plus GX `core/mem68k.c` (`vdp_write_byte`) /
+`core/vdp_ctrl.c` (`vdp_68k_data_w_m5`, `vdp_dma_fill`) corroborate the
+lane-independent mirrored-byte word trigger. The CPU port lane does not
+choose the VRAM destination parity; the VDP addressed pointer still does.
 
 ## SEG-007-T191 extension: generalized data-port WRITE surface
 

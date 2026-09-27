@@ -888,13 +888,20 @@ static int genesis_vdp_access(GenesisDeviceState *devices, uint32_t address,
     return 0;
   }
   /* direction == GENESIS_ACCESS_WRITE (SEG-007-T091) */
-  if (address == UINT32_C(0x00C00000)) {
-    /* DATA-port write. An armed VRAM fill (SEG-007-T098/T101) still owns the
-       WORD source path exactly as before; anything else is the plain CPU
-       DATA-port write model (SEG-007-T108 + SEG-007-T191: VRAM/CRAM/VSRAM
-       targets, BYTE/WORD/LONG widths). */
+  if (address == UINT32_C(0x00C00000) ||
+      (address == UINT32_C(0x00C00001) && width == GENESIS_ACCESS_BYTE &&
+       devices->vdp.dma.phase == GENESIS_VDP_DMA_BUSY &&
+       devices->vdp.dma.kind == GENESIS_VDP_DMA_VRAM_FILL)) {
+    /* DATA-port write. An armed VRAM fill owns one WORD-equivalent source
+       transaction, including an 8-bit write on either CPU DATA-port lane;
+       otherwise use the plain CPU DATA-port write model (SEG-007-T108 +
+       SEG-007-T191: VRAM/CRAM/VSRAM targets, BYTE/WORD/LONG widths). */
     if (devices->vdp.dma.phase == GENESIS_VDP_DMA_BUSY &&
         devices->vdp.dma.kind == GENESIS_VDP_DMA_VRAM_FILL) {
+      if (width == GENESIS_ACCESS_BYTE) {
+        const uint32_t data_byte = *value & UINT32_C(0xFF);
+        return genesis_vdp_data_port_fill_write(devices, (data_byte << 8) | data_byte);
+      }
       if (width != GENESIS_ACCESS_WORD) return 0;
       return genesis_vdp_data_port_fill_write(devices, *value);
     }
@@ -2027,12 +2034,12 @@ static GenesisCheckpointPcClass genesis_checkpoint_pc_class_for_target(uint32_t 
  * Frame-write guarantee (ADR 0043 §5 / §7 hook contract): the core's
  * frame_write hook is non-fallible, so validate_stack_extent must accept only
  * extents in which every aligned word/long frame write is certain to succeed.
- * It accepts an even `base` whose whole [base, base + length) lies in work RAM
- * (segarecomp_genesis_work_ram_contains, which also rejects wrap-around). For
+ * It accepts an even `base` whose masked 24-bit physical extent lies wholly
+ * in work RAM (the extent check also rejects crossing the physical boundary). For
  * such an extent every frame write the core issues (word at base, long at
  * base + 2) reaches genesis_route_access_bus with a stack-write bus kind and
  * WRITE direction (kind/direction check passes), a valid width, non-null
- * runtime/value/stop pointers, a 24-bit address (work RAM ends at 0x1000000),
+ * runtime/value/stop pointers, a masked 24-bit bus address,
  * an even address, and a range inside work RAM, so
  * genesis_route_access_unrecorded takes its work-RAM store branch, which has
  * no failure return. The routed path is kept so the stack_write bus kind,
@@ -2058,13 +2065,13 @@ static int genesis_m68k_validate_stack_extent(void *context, uint32_t base, uint
   (void)direction;
   /* Even base (the core also checks it) and the whole extent in work RAM: the
      precondition of the non-fallible frame_write guarantee above. */
-  return (base & 1U) == 0U && genesis_is_work_ram(base, length);
+  return (base & 1U) == 0U && genesis_is_work_ram(base & UINT32_C(0x00FFFFFF), length);
 }
 
 static int genesis_m68k_stack_read(void *context, uint32_t address, uint32_t size, uint32_t *value) {
   GenesisM68kExceptionContext *bound = (GenesisM68kExceptionContext *)context;
   GenesisRuntimeStop routed = {0};
-  if (genesis_route_access_bus(bound->runtime, GENESIS_BUS_STACK_READ, address,
+  if (genesis_route_access_bus(bound->runtime, GENESIS_BUS_STACK_READ, address & UINT32_C(0x00FFFFFF),
                                size == 2U ? GENESIS_ACCESS_WORD : GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ, value,
                                &routed) != GENESIS_ACCESS_OK) {
     bound->routed = routed;
@@ -2079,7 +2086,7 @@ static void genesis_m68k_frame_write(void *context, uint32_t address, uint32_t s
   GenesisM68kExceptionContext *bound = (GenesisM68kExceptionContext *)context;
   GenesisRuntimeStop routed = {0};
   uint32_t routed_value = value;
-  if (genesis_route_access_bus(bound->runtime, GENESIS_BUS_STACK_WRITE, address,
+  if (genesis_route_access_bus(bound->runtime, GENESIS_BUS_STACK_WRITE, address & UINT32_C(0x00FFFFFF),
                                size == 2U ? GENESIS_ACCESS_WORD : GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE,
                                &routed_value, &routed) != GENESIS_ACCESS_OK)
     bound->frame_write_failed = 1;
@@ -2124,7 +2131,8 @@ static SegarecompM68kVectorResolution genesis_m68k_resolve_vector(void *context,
 static void genesis_m68k_on_exception_entry(void *context, uint32_t vector, uint32_t frame_base,
                                             uint32_t handler_entry) {
   GenesisRuntime *runtime = ((GenesisM68kExceptionContext *)context)->runtime;
-  if (vector == GENESIS_M68K_VECTOR_LEVEL6_AUTOVECTOR) genesis_note_irq6_exception_frame(runtime, frame_base);
+  if (vector == GENESIS_M68K_VECTOR_LEVEL6_AUTOVECTOR)
+    genesis_note_irq6_exception_frame(runtime, frame_base & UINT32_C(0x00FFFFFF));
   if (runtime->m68k_checkpoint.enabled)
     genesis_m68k_effect_note(runtime, GENESIS_M68K_EFFECT_TRAP, 0U, handler_entry, vector);
   if (runtime->execution_history.detail_enabled)
@@ -2134,8 +2142,9 @@ static void genesis_m68k_on_exception_entry(void *context, uint32_t vector, uint
 
 static void genesis_m68k_on_exception_return(void *context, uint32_t frame_base) {
   GenesisM68kExceptionContext *bound = (GenesisM68kExceptionContext *)context;
-  bound->irq6_frame = genesis_is_work_ram(frame_base, 6U) &&
-                      genesis_take_irq6_exception_frame_origin(bound->runtime, frame_base);
+  const uint32_t physical_base = frame_base & UINT32_C(0x00FFFFFF);
+  bound->irq6_frame = genesis_is_work_ram(physical_base, 6U) &&
+                      genesis_take_irq6_exception_frame_origin(bound->runtime, physical_base);
 }
 
 static SegarecompM68kMachineHooks genesis_m68k_exception_hooks(GenesisM68kExceptionContext *context) {

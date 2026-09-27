@@ -829,9 +829,9 @@ int main(void) {
      value = UINT32_C(0x0080);
      assert(genesis_route_access(&fill, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
                                  GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
-     assert(fill.devices.vdp.dma.phase == GENESIS_VDP_DMA_BUSY &&
-            fill.devices.vdp.dma.kind == GENESIS_VDP_DMA_VRAM_FILL &&
-            fill.devices.vdp.dma.fill_byte_count == 3U);
+       assert(fill.devices.vdp.dma.phase == GENESIS_VDP_DMA_BUSY &&
+              fill.devices.vdp.dma.kind == GENESIS_VDP_DMA_VRAM_FILL &&
+              fill.devices.vdp.dma.fill_byte_count == 3U);
       value = UINT32_C(0xABCD);
       assert(genesis_route_access(&fill, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
@@ -840,8 +840,38 @@ int main(void) {
              fill.devices.vdp.vram[UINT32_C(0x2004)] == UINT8_C(0xAB) &&
              fill.devices.vdp.vram[UINT32_C(0x2005)] == UINT8_C(0xAB));
       assert(fill.devices.vdp.addressed_pointer == UINT32_C(0x2006) &&
-             fill.devices.vdp.dma.fill_byte_count == 0U &&
-             fill.devices.vdp.dma.phase == GENESIS_VDP_DMA_IDLE);
+              fill.devices.vdp.dma.fill_byte_count == 0U &&
+              fill.devices.vdp.dma.phase == GENESIS_VDP_DMA_IDLE);
+
+      /* Both CPU DATA-port BYTE lanes drive the same mirrored 16-bit fill
+         trigger. Compare the entire VDP state against a WORD trigger through
+         the same engine, not merely the resulting fill bytes. */
+      {
+        GenesisRuntime word = {0};
+        GenesisVdpState expected;
+        uint32_t lane;
+        word.devices.vdp.dma.phase = GENESIS_VDP_DMA_BUSY;
+        word.devices.vdp.dma.kind = GENESIS_VDP_DMA_VRAM_FILL;
+        word.devices.vdp.dma.fill_byte_count = 3U;
+        word.devices.vdp.addressed_pointer = UINT32_C(0x2100);
+        word.devices.vdp.auto_increment_value = 2U;
+        value = UINT32_C(0x7E7E);
+        assert(genesis_route_access(&word, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                    GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+        expected = word.devices.vdp;
+        for (lane = 0U; lane < 2U; ++lane) {
+          GenesisRuntime byte = {0};
+          byte.devices.vdp.dma.phase = GENESIS_VDP_DMA_BUSY;
+          byte.devices.vdp.dma.kind = GENESIS_VDP_DMA_VRAM_FILL;
+          byte.devices.vdp.dma.fill_byte_count = 3U;
+          byte.devices.vdp.addressed_pointer = UINT32_C(0x2100);
+          byte.devices.vdp.auto_increment_value = 2U;
+          value = UINT32_C(0x7E);
+          assert(genesis_route_access(&byte, UINT32_C(0x00C00000) + lane, GENESIS_ACCESS_BYTE,
+                                      GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+          assert(value == UINT32_C(0x7E) && memcmp(&byte.devices.vdp, &expected, sizeof(expected)) == 0);
+        }
+      }
 
       /* The public fill evidence covers only an even VRAM address for the
          DATA-port source WORD. An odd armed pointer is therefore rejected
@@ -862,29 +892,38 @@ int main(void) {
              stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
       assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
 
-     /* Wrong port/direction/width remain fail-closed while armed. */
-     fill.devices.vdp.dma.phase = GENESIS_VDP_DMA_BUSY;
-     fill.devices.vdp.dma.fill_byte_count = 1U;
-     fill.devices.vdp.addressed_pointer = UINT32_C(0x2010);
-     before = fill.devices.vdp;
-     value = UINT32_C(0x1234);
-     assert(genesis_route_access(&fill, UINT32_C(0x00C00002), GENESIS_ACCESS_WORD,
-                                 GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
-     assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
-     assert(genesis_route_access(&fill, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
-                                 GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
-     assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
-     assert(genesis_route_access(&fill, UINT32_C(0x00C00000), GENESIS_ACCESS_LONG,
-                                 GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
-     assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
+       /* Wrong port/direction/width remain fail-closed while armed. */
+       fill.devices.vdp.dma.phase = GENESIS_VDP_DMA_BUSY;
+       fill.devices.vdp.dma.fill_byte_count = 1U;
+       fill.devices.vdp.addressed_pointer = UINT32_C(0x2010);
+       before = fill.devices.vdp;
+       value = UINT32_C(0x1234);
+       assert(genesis_route_access(&fill, UINT32_C(0x00C00002), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+       assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
+       assert(genesis_route_access(&fill, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+       assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
+      assert(genesis_route_access(&fill, UINT32_C(0x00C00000), GENESIS_ACCESS_LONG,
+                                  GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+      assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
+      assert(genesis_route_access(&fill, UINT32_C(0x00C00001), GENESIS_ACCESS_WORD,
+                                  GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+      assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
+      assert(genesis_route_access(&fill, UINT32_C(0x00C00002), GENESIS_ACCESS_BYTE,
+                                  GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+      assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
 
       /* A zero count is still an explicit fail-closed preflight case: armed
          state, pointer, and VRAM remain untouched. */
-     fill.devices.vdp.dma.fill_byte_count = 0U;
-     before = fill.devices.vdp;
-     value = UINT32_C(0xBEEF);
-     assert(genesis_route_access(&fill, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
-                                 GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+       fill.devices.vdp.dma.fill_byte_count = 0U;
+       before = fill.devices.vdp;
+      value = UINT32_C(0xBEEF);
+      assert(genesis_route_access(&fill, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                  GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+      assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
+      assert(genesis_route_access(&fill, UINT32_C(0x00C00001), GENESIS_ACCESS_BYTE,
+                                  GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
       assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
 
       /* A non-fill armed DMA kind at the DATA port still fails closed before
@@ -895,6 +934,9 @@ int main(void) {
       fill.devices.vdp.addressed_pointer = UINT32_C(0x1000);
       before = fill.devices.vdp;
       assert(genesis_route_access(&fill, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                  GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+      assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
+      assert(genesis_route_access(&fill, UINT32_C(0x00C00001), GENESIS_ACCESS_BYTE,
                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
       assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
       fill.devices.vdp.dma.kind = GENESIS_VDP_DMA_VRAM_FILL;
@@ -981,6 +1023,9 @@ int main(void) {
       fill.devices.vdp.addressed_pointer = UINT32_C(0xFFFF);
       before = fill.devices.vdp;
       assert(genesis_route_access(&fill, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                  GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+      assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
+      assert(genesis_route_access(&fill, UINT32_C(0x00C00001), GENESIS_ACCESS_BYTE,
                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
       assert(memcmp(&fill.devices.vdp, &before, sizeof(before)) == 0);
    }

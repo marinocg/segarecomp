@@ -13,6 +13,7 @@
 
 #include "runtime.h"
 
+#include <cstring>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
@@ -278,6 +279,162 @@ void rte_atomic_restore_and_failure() {
   check(genesis_exception_return(&bad, &out, &bs) == 0, "RTE fails closed on a bad frame read");
   check(bad.sr == 0x1234u && bad.pc == 0x0000BEEFu && bad.a[7] == a7_before,
         "failed RTE leaves sr/pc/a7 completely unmodified");
+}
+
+// A7 is a 32-bit architectural register; only the machine-side stack bus
+// address and out-of-band IRQ frame key are 24-bit physical addresses.
+void high_alias_stack_entry_and_returns() {
+  constexpr uint32_t alias_sp = 0xFFFF8000u;
+  constexpr uint32_t canonical_sp = 0x00FF8000u;
+  constexpr uint32_t physical_frame = 0x00FF7FFAu;
+  GenesisRuntime canonical;
+  GenesisRuntime aliased;
+  prime(canonical);
+  prime(aliased);
+  canonical.a[7] = canonical_sp;
+  aliased.a[7] = alias_sp;
+  canonical.devices.interrupt.vblank_pending = aliased.devices.interrupt.vblank_pending = 1u;
+  const auto canonical_entry = genesis_runtime_retire_m68k_instruction(&canonical, 4u, kOrdinaryPc);
+  const auto aliased_entry = genesis_runtime_retire_m68k_instruction(&aliased, 4u, kOrdinaryPc);
+  check(canonical_entry.kind == GENESIS_CONTINUE_AT_PC &&
+            aliased_entry.kind == canonical_entry.kind && aliased_entry.next_pc == canonical_entry.next_pc &&
+            aliased_entry.next_pc == kHandler &&
+            aliased_entry.stop.stop_class == canonical_entry.stop.stop_class &&
+            aliased_entry.stop.diagnostic_category == canonical_entry.stop.diagnostic_category,
+        "IRQ6 alias and canonical entry have identical transfer and stop");
+  check(canonical.a[7] == canonical_sp - 6u && aliased.a[7] == alias_sp - 6u &&
+            canonical.pc == aliased.pc && canonical.sr == aliased.sr &&
+            canonical.scheduler.master_ticks == aliased.scheduler.master_ticks &&
+            std::memcmp(canonical.work_ram, aliased.work_ram, sizeof(canonical.work_ram)) == 0,
+        "IRQ6 alias and canonical entry share physical frame, SR, PC and timing, but not high A7");
+  check(ram_byte(aliased, physical_frame) == 0x20u && ram_byte(aliased, physical_frame + 1u) == 0x00u &&
+            ram_byte(aliased, physical_frame + 4u) == 0x02u,
+        "IRQ6 frame is stored at the physical work-RAM address");
+  check(std::memcmp(canonical.exception_frame_irq6_origin, aliased.exception_frame_irq6_origin,
+                    sizeof(canonical.exception_frame_irq6_origin)) == 0 &&
+            canonical.exception_frame_irq6_origin[(physical_frame - kRamBegin) / 16u] != 0u,
+        "both IRQ6 entries record the same physical frame origin");
+  uint32_t canonical_restored = 0, aliased_restored = 0;
+  GenesisRuntimeStop canonical_stop{}, aliased_stop{};
+  const int canonical_ok = genesis_exception_return(&canonical, &canonical_restored, &canonical_stop);
+  const int aliased_ok = genesis_exception_return(&aliased, &aliased_restored, &aliased_stop);
+  check(canonical_ok == 1 && aliased_ok == canonical_ok && aliased_restored == canonical_restored &&
+            aliased_restored == kOrdinaryPc && canonical_stop.stop_class == aliased_stop.stop_class &&
+            canonical_stop.diagnostic_category == aliased_stop.diagnostic_category &&
+            canonical.a[7] == canonical_sp && aliased.a[7] == alias_sp &&
+            canonical.pc == aliased.pc && canonical.sr == aliased.sr &&
+            canonical.scheduler.master_ticks == aliased.scheduler.master_ticks &&
+            std::memcmp(canonical.work_ram, aliased.work_ram, sizeof(canonical.work_ram)) == 0,
+        "canonical and aliased IRQ6 RTE return identically except for full-width A7");
+  bool origins_consumed = true;
+  for (uint8_t origin : aliased.exception_frame_irq6_origin) origins_consumed &= origin == 0u;
+  check(origins_consumed && std::memcmp(canonical.exception_frame_irq6_origin, aliased.exception_frame_irq6_origin,
+                                         sizeof(canonical.exception_frame_irq6_origin)) == 0,
+        "both IRQ6 frame origins are consumed identically on RTE");
+
+  canonical.a[7] = canonical_sp - 6u;
+  aliased.a[7] = alias_sp - 6u;
+  canonical.pc = aliased.pc = kHandler;
+  canonical.sr = aliased.sr = 0x2700u;
+  canonical.work_ram[physical_frame - kRamBegin] = aliased.work_ram[physical_frame - kRamBegin] = 0xFFu;
+  canonical.work_ram[physical_frame - kRamBegin + 1u] =
+      aliased.work_ram[physical_frame - kRamBegin + 1u] = 0x15u;
+  canonical_restored = aliased_restored = 0;
+  const int canonical_rtr = genesis_return_restore_condition_codes(&canonical, &canonical_restored, &canonical_stop);
+  const int aliased_rtr = genesis_return_restore_condition_codes(&aliased, &aliased_restored, &aliased_stop);
+  check(canonical_rtr == 1 && aliased_rtr == canonical_rtr && aliased_restored == canonical_restored &&
+            aliased_restored == kOrdinaryPc && canonical_stop.stop_class == aliased_stop.stop_class &&
+            canonical_stop.diagnostic_category == aliased_stop.diagnostic_category &&
+            canonical.a[7] == canonical_sp && aliased.a[7] == alias_sp &&
+            canonical.pc == aliased.pc && canonical.sr == aliased.sr && aliased.sr == 0x2715u &&
+            canonical.scheduler.master_ticks == aliased.scheduler.master_ticks &&
+            std::memcmp(canonical.work_ram, aliased.work_ram, sizeof(canonical.work_ram)) == 0,
+        "canonical and aliased RTR restore identically except for full-width A7");
+
+  // Valid first word but a long read crossing the physical RAM end: reject
+  // before either CPU register or the output target is changed.
+  GenesisRuntime &r = aliased;
+  uint32_t &restored = aliased_restored;
+  GenesisRuntimeStop &stop = aliased_stop;
+  r.a[7] = 0xFFFFFFFCu;
+  r.sr = 0x2700u;
+  r.pc = kHandler;
+  restored = 0xBEEFu;
+  check(genesis_exception_return(&r, &restored, &stop) == 0 &&
+            r.a[7] == 0xFFFFFFFCu && r.sr == 0x2700u && r.pc == kHandler && restored == 0xBEEFu,
+        "aliased boundary-crossing RTE fails atomically");
+  check(genesis_return_restore_condition_codes(&r, &restored, &stop) == 0 &&
+            r.a[7] == 0xFFFFFFFCu && r.sr == 0x2700u && r.pc == kHandler && restored == 0xBEEFu,
+        "aliased boundary-crossing RTR fails atomically");
+
+  prime(r);
+  r.a[7] = 0xFFFF0002u;
+  r.work_ram[0] = 0xAAu;
+  r.devices.interrupt.vblank_pending = 1u;
+  const auto rejected = genesis_runtime_retire_m68k_instruction(&r, 4u, kOrdinaryPc);
+  check(rejected.kind == GENESIS_STOP && r.a[7] == 0xFFFF0002u &&
+            r.pc == kOrdinaryPc && r.work_ram[0] == 0xAAu,
+        "aliased IRQ frame crossing physical RAM start fails before writing");
+
+  prime(r);
+  r.a[7] = alias_sp | 1u;
+  for (uint32_t offset = physical_frame - kRamBegin; offset < physical_frame - kRamBegin + 8u; ++offset)
+    r.work_ram[offset] = 0xAAu;
+  r.devices.interrupt.vblank_pending = 1u;
+  const auto odd = genesis_runtime_retire_m68k_instruction(&r, 4u, kOrdinaryPc);
+  bool frame_untouched = true;
+  for (uint32_t offset = physical_frame - kRamBegin; offset < physical_frame - kRamBegin + 8u; ++offset)
+    frame_untouched &= r.work_ram[offset] == 0xAAu;
+  check(odd.kind == GENESIS_STOP && odd.stop.stop_class == GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT &&
+            r.a[7] == (alias_sp | 1u) && r.pc == kOrdinaryPc && frame_untouched,
+        "odd aliased stack rejects IRQ6 entry without writing a frame");
+  restored = 0xBEEFu;
+  check(genesis_exception_return(&r, &restored, &stop) == 0 && r.a[7] == (alias_sp | 1u) &&
+            restored == 0xBEEFu && r.pc == kOrdinaryPc,
+        "odd aliased RTE stack fails without committing");
+  check(genesis_return_restore_condition_codes(&r, &restored, &stop) == 0 &&
+            r.a[7] == (alias_sp | 1u) && restored == 0xBEEFu && r.pc == kOrdinaryPc,
+        "odd aliased RTR stack fails without committing");
+}
+
+void high_alias_synchronous_entry_and_rte() {
+  constexpr uint32_t alias_sp = 0xFFFF4000u;
+  constexpr uint32_t canonical_sp = 0x00FF4000u;
+  GenesisRuntime canonical{}, aliased{};
+  for (GenesisRuntime *r : {&canonical, &aliased}) {
+    r->a[7] = r == &canonical ? canonical_sp : alias_sp;
+    r->sr = 0x2015u;
+    r->pc = kOrdinaryPc;
+    r->software_exception_handler_present[4] = 1u;
+    r->software_exception_handler_entry[4] = kHandler;
+  }
+  uint32_t canonical_handler = 0, aliased_handler = 0;
+  GenesisRuntimeStop canonical_stop{}, aliased_stop{};
+  const int canonical_ok = genesis_raise_software_exception(&canonical, 4u, kOrdinaryPc, 34u,
+                                                            &canonical_handler, &canonical_stop);
+  const int aliased_ok = genesis_raise_software_exception(&aliased, 4u, kOrdinaryPc, 34u,
+                                                          &aliased_handler, &aliased_stop);
+  check(canonical_ok == 1 && aliased_ok == canonical_ok && aliased_handler == canonical_handler &&
+            aliased_handler == kHandler && canonical.a[7] == canonical_sp - 6u &&
+            aliased.a[7] == alias_sp - 6u && canonical.pc == aliased.pc && canonical.sr == aliased.sr &&
+            canonical_stop.stop_class == aliased_stop.stop_class &&
+            canonical_stop.diagnostic_category == aliased_stop.diagnostic_category &&
+            canonical.scheduler.master_ticks == aliased.scheduler.master_ticks &&
+            std::memcmp(canonical.work_ram, aliased.work_ram, sizeof(canonical.work_ram)) == 0,
+        "synchronous exception alias matches canonical frame, CPU state, stop and timing except A7");
+  check(ram_byte(aliased, 0x00FF3FFAu) == 0x20u && ram_byte(aliased, 0x00FF3FFBu) == 0x15u,
+        "synchronous frame lands at physical RAM alias");
+  uint32_t canonical_restored = 0, aliased_restored = 0;
+  const int canonical_rte = genesis_exception_return(&canonical, &canonical_restored, &canonical_stop);
+  const int aliased_rte = genesis_exception_return(&aliased, &aliased_restored, &aliased_stop);
+  check(canonical_rte == 1 && aliased_rte == canonical_rte && aliased_restored == canonical_restored &&
+            aliased_restored == kOrdinaryPc && canonical.a[7] == canonical_sp && aliased.a[7] == alias_sp &&
+            canonical.pc == aliased.pc && canonical.sr == aliased.sr && aliased.sr == 0x2015u &&
+            canonical_stop.stop_class == aliased_stop.stop_class &&
+            canonical_stop.diagnostic_category == aliased_stop.diagnostic_category &&
+            canonical.scheduler.master_ticks == aliased.scheduler.master_ticks &&
+            std::memcmp(canonical.work_ram, aliased.work_ram, sizeof(canonical.work_ram)) == 0,
+        "synchronous canonical and aliased RTE restore identically except for full-width A7");
 }
 
 // ---------------------------------------------------------------------------
@@ -550,6 +707,8 @@ int main() {
   user_mode_admission_is_rejected();
   stack_wrap_fails_closed_with_no_frame_write();
   rte_atomic_restore_and_failure();
+  high_alias_stack_entry_and_returns();
+  high_alias_synchronous_entry_and_rte();
   integration_round_trip_is_deterministic();
   post_rte_first_retirement_admits_pending_irq6();
   if (failures == 0) std::printf("ok\n");
