@@ -125,7 +125,8 @@ static int valid(void *c, uint32_t base, uint32_t length, SegarecompM68kStackDir
   (void)c; (void)d; return base >= 0x100U && base + length <= MEM; }
 static int rd(void *c, uint32_t a, uint32_t size, uint32_t *v) {
   uint32_t i, x = 0; (void)c; if (a + size > MEM) return 0;
-  for (i = 0; i < size; ++i) x = (x << 8) | mem[a + i]; *v = x; return 1; }
+  for (i = 0; i < size; ++i) x = (x << 8) | mem[a + i];
+  *v = x; return 1; }
 static void wr(void *c, uint32_t a, uint32_t size, uint32_t v) {
   uint32_t i; (void)c; for (i = 0; i < size; ++i) mem[a + i] = (uint8_t)(v >> (8U * (size - 1U - i))); }
 static SegarecompM68kVectorResolution vec(void *c, uint32_t v, uint32_t *h) {

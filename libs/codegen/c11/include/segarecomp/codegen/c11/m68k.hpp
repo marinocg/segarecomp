@@ -216,7 +216,7 @@ struct M68kMemoryEmissionContext {
 //   divide_*              `m68k_timing_div_dividend` / `m68k_timing_div_divisor` (caller-declared uint32_t /
 //                         uint16_t, passed as `timing_div_dividend` / `timing_div_divisor`)
 // The MUL/DIV rules call the CPU-owned C helpers of libs/cpu/m68k timing_core.h, which the generated translation
-// unit must include (the Genesis runtime header does).
+// unit must include through its machine runtime header.
 // Returns nullopt when the CPU owner has no rule; callers must fail closed.
 [[nodiscard]] std::optional<std::string> m68k_timing_c_expression(const M68kIrOperation &operation);
 [[nodiscard]] std::string emit_m68k_direct_flow_c(const DirectFlowAnalysis &analysis, const DirectFlowState &initial, std::uint64_t budget);
