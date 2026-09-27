@@ -2929,6 +2929,21 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   // 7, 10, 11 and 32-47; the bounded table below is the complete set of
   // synchronous-exception vectors this machine delivers (vectors 5 and 8
   // first, preserving their established root order).
+  //
+  // SEG-021-T040 correction: vectors 5 and 8 previously kept a stricter,
+  // whole-build-rejecting rule than every other software-exception slot,
+  // even though the runtime already supports the identical "not installed"
+  // fail-closed contract for both (`divide_by_zero_handler_present` /
+  // `privilege_violation_handler_present`, see runtime.c/runtime.h --
+  // `SEGARECOMP_M68K_VECTOR_NOT_INSTALLED` is raised only if the exception is
+  // actually taken). A ROM whose vector-5/8 slot cannot be statically
+  // admitted, or whose handler discovery hits a fatal probe failure, is now
+  // treated exactly like an unadmittable vector 4/6/7/10/11/32-47 slot: the
+  // build proceeds, nothing is rooted for that vector, and the corresponding
+  // instruction (DIVS/DIVU by zero; a privileged instruction outside
+  // supervisor mode) fails closed at runtime only if it is actually reached.
+  // A representable vector-5/8 handler is unaffected -- it is still resolved,
+  // discovered and rooted exactly as before.
   std::optional<Address> divide_by_zero_handler_entry_value;
   std::optional<Address> privilege_violation_handler_entry_value;
   std::map<std::uint8_t, Address> software_exception_handler_entry_values;
@@ -2939,18 +2954,13 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
     if (const auto resolved_handler = resolve_vector_handler(kSynchronousVectorOffset)) {
       const Address handler = *resolved_handler;
       const M68kProgramAddress handler_address{TargetAddressSpace::m68k_program, handler};
-      // SEG-021-T019 correction: vectors 5 and 8 keep their established fail-closed build rule. A
-      // software-exception slot (4, 6, 7, 10, 11, 32-47) that cannot be admitted, or whose handler discovery
-      // hits a fatal probe failure, is treated as NOT INSTALLED: the build proceeds, nothing is rooted, and
-      // the exception fails closed (`unsupported_software_exception`) only if the program actually raises it.
-      // Programs that never execute TRAP/line-A/line-F routinely leave such slots pointing at RAM or data.
-      const bool established_vector = synchronous_vector == 5U || synchronous_vector == 8U;
+      // Every synchronous-exception slot (5, 8, and the software-exception
+      // vectors) shares the same NOT INSTALLED fallback: an unadmittable or
+      // fatally-undiscoverable handler leaves the build unaffected and the
+      // exception fails closed only if actually raised at runtime.
       if (const auto issue = environment.admit_target(
               handler_address, M68kDiscoveryTargetRole::synchronous_exception_vector)) {
-        if (!established_vector) continue;
-        auto r = rejected(issue->category, program);
-        set_source(r, entry);
-        return r;
+        continue;
       }
       std::set<Address> exception_boundary = admitted_units;
       exception_boundary.insert(synthesized_control_roots.begin(), synthesized_control_roots.end());
@@ -2964,8 +2974,7 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
       for (const auto &issue : discovery.secondary_issues)
         if (fatal_issue == nullptr && is_fatal_probe_failure(issue)) fatal_issue = &issue;
       if (fatal_issue != nullptr) {
-        if (!established_vector) continue;
-        return translate_m68k_discovery_issue(program, *fatal_issue);
+        continue;
       }
       stitch_metrics.stitched_direct_edge_count += discovery.stitched_boundary_edges;
       stitch_metrics.stitched_fallthrough_continuation_edge_count +=

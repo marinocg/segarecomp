@@ -8224,26 +8224,43 @@ void vector_instruction_fetch_uses_physical_bus_address() {
                emitted.find("genesis_raise_divide_by_zero(") != std::string::npos,
            "physical vector root and AOT DIV body emit via the existing exception owner");
   }
-  const auto rejects = [&](std::uint32_t vector_word, DirectFlowDiagnostic category) {
+  // SEG-021-T040: an odd, unmapped, or multiply-owned physical vector-5
+  // target is no longer a whole-build rejection -- vector 5 (and 8) now
+  // share the identical NOT INSTALLED fallback every other synchronous-
+  // exception vector already used (SEG-021-T019). The build proceeds, no
+  // divide_by_zero_handler_entry is rooted, and the DIV AOT bodies (whose
+  // admission never depended on the handler being resolved) are unaffected:
+  // genesis_raise_divide_by_zero itself fails closed at runtime with
+  // SEGARECOMP_M68K_VECTOR_NOT_INSTALLED only if DIVS/DIVU by zero is
+  // actually reached, exactly like an unrepresentable TRAP/line-A handler.
+  const auto not_installed = [&](std::uint32_t vector_word) {
     auto program = program_with();
     set_vector(program, vector_word);
     expect(apply_genesis_immutable_rom_aot(program), "invalid vector fixture enumerates immutable ROM");
     const auto result = analyze_m68k_frontend(program);
-    const auto *rejection = std::get_if<FrontendRejected>(&result);
-    expect(rejection != nullptr && rejection->category == category,
-           "odd or unmapped physical vector handler still rejects before AOT emission");
+    const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+    expect(partial != nullptr, "odd or unmapped physical vector-5 handler no longer rejects the whole build");
+    if (!partial) return;
+    expect(!partial->accepted_prefix.divide_by_zero_handler_entry,
+           "an unadmittable vector-5 target roots no divide_by_zero_handler_entry");
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+    expect(!emitted.starts_with("/* translation rejected") &&
+               emitted.find("genesis_raise_divide_by_zero(") != std::string::npos,
+           "DIV AOT admission is unaffected by an unresolved vector-5 handler");
   };
-  rejects(UINT32_C(0xA5000000) | (handler + 1U), DirectFlowDiagnostic::odd_direct_target);
-  rejects(UINT32_C(0xA5000400), DirectFlowDiagnostic::unmapped_direct_target);
+  not_installed(UINT32_C(0xA5000000) | (handler + 1U));
+  not_installed(UINT32_C(0xA5000400));
   {
     auto program = program_with();
     set_vector(program, UINT32_C(0xA5000000) | handler);
     program.mapping_claims.push_back({"overlapping_rom", {{}, handler}, {{}, handler + 4U},
                                       {handler}, {handler + 4U}});
     const auto result = analyze_m68k_frontend(program);
-    const auto *rejection = std::get_if<FrontendRejected>(&result);
-    expect(rejection != nullptr && rejection->category == DirectFlowDiagnostic::unmapped_direct_target,
-           "multiply-owned physical vector target remains rejected");
+    const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+    expect(partial != nullptr, "a multiply-owned physical vector-5 target no longer rejects the whole build");
+    if (partial)
+      expect(!partial->accepted_prefix.divide_by_zero_handler_entry,
+             "a multiply-owned vector-5 target roots no divide_by_zero_handler_entry");
   }
 }
 
