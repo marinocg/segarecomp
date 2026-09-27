@@ -360,12 +360,15 @@ void high_alias_stack_entry_and_returns() {
   r.sr = 0x2700u;
   r.pc = kHandler;
   restored = 0xBEEFu;
+  const GenesisRuntime before_bad_frame = r;
   check(genesis_exception_return(&r, &restored, &stop) == 0 &&
-            r.a[7] == 0xFFFFFFFCu && r.sr == 0x2700u && r.pc == kHandler && restored == 0xBEEFu,
-        "aliased boundary-crossing RTE fails atomically");
+            stop.diagnostic_category == GENESIS_DIAG_INVALID_STACK_RANGE &&
+            std::memcmp(&r, &before_bad_frame, sizeof(r)) == 0 && restored == 0xBEEFu,
+        "aliased boundary-crossing RTE fails before any read or accounting");
   check(genesis_return_restore_condition_codes(&r, &restored, &stop) == 0 &&
-            r.a[7] == 0xFFFFFFFCu && r.sr == 0x2700u && r.pc == kHandler && restored == 0xBEEFu,
-        "aliased boundary-crossing RTR fails atomically");
+            stop.diagnostic_category == GENESIS_DIAG_INVALID_STACK_RANGE &&
+            std::memcmp(&r, &before_bad_frame, sizeof(r)) == 0 && restored == 0xBEEFu,
+        "aliased boundary-crossing RTR fails before any read or accounting");
 
   prime(r);
   r.a[7] = 0xFFFF0002u;

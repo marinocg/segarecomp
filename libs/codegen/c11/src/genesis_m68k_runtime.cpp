@@ -122,20 +122,22 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
     std::ostringstream out;
           out << "{ uint32_t m68k_observed_return = UINT32_C(0); GenesisRuntimeStop m68k_route_stop = {0}; "
                  << "if ((" << a7 << " & 1U) != 0U) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_ALIGNMENT, "
-                 << ctx.runtime_source << ", 1U, " << a7 << ", GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ); "
-                 << "if (" << a7 << " < UINT32_C(0x" << hex(ctx.linear_memory_begin, 8) << ") || " << a7
-                 << " > UINT32_C(0x" << hex(ctx.linear_memory_end - 4U, 8) << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
-                 << ctx.runtime_source << ", 1U, " << a7 << ", GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ); "
-                 << "if (" << stack_route_open(ctx, "GENESIS_BUS_STACK_READ") << a7
+                   << ctx.runtime_source << ", 1U, " << a7 << ", GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ); "
+                  << "const uint32_t m68k_stack_bus = " << a7 << " & UINT32_C(0x00FFFFFF); "
+                  << "if (m68k_stack_bus < UINT32_C(0x" << hex(ctx.linear_memory_begin, 8)
+                  << ") || m68k_stack_bus > UINT32_C(0x" << hex(ctx.linear_memory_end - 4U, 8)
+                  << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
+                  << ctx.runtime_source << ", 1U, m68k_stack_bus, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ); "
+                  << "if (" << stack_route_open(ctx, "GENESIS_BUS_STACK_READ") << "m68k_stack_bus"
                  << ", GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ, &m68k_observed_return, &m68k_route_stop) != GENESIS_ACCESS_OK) ";
-          if (const auto factored = factored_route_failure(ctx, "m68k_route_stop", a7, "GENESIS_ACCESS_LONG",
+           if (const auto factored = factored_route_failure(ctx, "m68k_route_stop", "m68k_stack_bus", "GENESIS_ACCESS_LONG",
                                                            "GENESIS_ACCESS_READ"); !factored.empty())
             out << factored << " if (";
           else
             out << "{ "
                  << "m68k_route_stop.provenance.has_instruction_provenance = 1U; m68k_route_stop.provenance.instruction = *"
                  << ctx.runtime_source << "; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = "
-                 << a7 << "; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_READ; "
+                  << "m68k_stack_bus; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_READ; "
                  << ctx.runtime_provenance_helper << "(&m68k_route_stop, " << ctx.runtime_source
                  << "); { GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop = m68k_route_stop; return transfer; } } if (";
           for (std::size_t index = 0; index < ctx.runtime_return_targets.size(); ++index) {
@@ -144,7 +146,7 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
           }
           if (ctx.runtime_return_targets.empty()) out << "1";
           out << ") return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_RETURN_TARGET_MISMATCH, "
-                 << ctx.runtime_source << ", 1U, " << a7 << ", GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ); ";
+                  << ctx.runtime_source << ", 1U, m68k_stack_bus, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ); ";
     return out.str();
   }
 
@@ -162,14 +164,17 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
                  << "); GenesisRuntimeStop m68k_route_stop = {0};\n"
                  << "    if ((" << a7 << " & 1U) != 0U) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_ALIGNMENT, "
                  << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);\n"
-                 << "    if (" << a7 << " < UINT32_C(0x" << hex(ctx.linear_memory_begin + 4U, 8) << ") || " << a7
-                 << " > UINT32_C(0x" << hex(ctx.linear_memory_end, 8)
-                 << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
-                 << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);\n"
-                 << "    { const uint32_t m68k_new_a7 = " << a7 << " - UINT32_C(4);\n"
-                 << "      if (" << stack_route_open(ctx, "GENESIS_BUS_STACK_WRITE")
-                 << "m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) ";
-      if (const auto factored = factored_route_failure(ctx, "m68k_route_stop", "m68k_new_a7", "GENESIS_ACCESS_LONG",
+                  << "    if (" << a7 << " < UINT32_C(4)) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
+                  << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);\n"
+                  << "    { const uint32_t m68k_new_a7 = " << a7 << " - UINT32_C(4);\n"
+                  << "      const uint32_t m68k_stack_bus = m68k_new_a7 & UINT32_C(0x00FFFFFF);\n"
+                  << "      if (m68k_stack_bus < UINT32_C(0x" << hex(ctx.linear_memory_begin, 8)
+                  << ") || m68k_stack_bus > UINT32_C(0x" << hex(ctx.linear_memory_end - 4U, 8)
+                  << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
+                  << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);\n"
+                  << "      if (" << stack_route_open(ctx, "GENESIS_BUS_STACK_WRITE")
+                  << "m68k_stack_bus, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) ";
+       if (const auto factored = factored_route_failure(ctx, "m68k_route_stop", "m68k_stack_bus", "GENESIS_ACCESS_LONG",
                                                        "GENESIS_ACCESS_WRITE"); !factored.empty()) {
         out << factored << "\n";
         return out.str();
@@ -177,7 +182,7 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
       out << "{\n"
                  << "        m68k_route_stop.provenance.has_instruction_provenance = 1U; m68k_route_stop.provenance.instruction = *"
                  << ctx.runtime_source
-                 << "; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = m68k_new_a7; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_WRITE;\n"
+                  << "; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = m68k_stack_bus; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_WRITE;\n"
                  << "        " << ctx.runtime_provenance_helper << "(&m68k_route_stop, " << ctx.runtime_source << ");\n"
                  << "        { GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop = m68k_route_stop; return transfer; }\n"
                  << "      }\n";
@@ -186,19 +191,23 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
                        << hex(ctx.continuation, 8) << "); GenesisRuntimeStop m68k_route_stop = {0}; "
                        << "if ((" << a7 << " & 1U) != 0U) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_ALIGNMENT, "
                        << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE); "
-                       << "if (" << a7 << " < UINT32_C(0x" << hex(ctx.linear_memory_begin + 4U, 8) << ") || " << a7
-                       << " > UINT32_C(0x" << hex(ctx.linear_memory_end, 8) << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
-                       << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE); "
-                       << "{ const uint32_t m68k_new_a7 = " << a7 << " - UINT32_C(4); "
-                       << "if (" << stack_route_open(ctx, "GENESIS_BUS_STACK_WRITE") << "m68k_new_a7, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) ";
-      if (const auto factored = factored_route_failure(ctx, "m68k_route_stop", "m68k_new_a7", "GENESIS_ACCESS_LONG",
+                        << "if (" << a7 << " < UINT32_C(4)) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
+                        << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE); "
+                        << "{ const uint32_t m68k_new_a7 = " << a7 << " - UINT32_C(4); "
+                        << "const uint32_t m68k_stack_bus = m68k_new_a7 & UINT32_C(0x00FFFFFF); "
+                        << "if (m68k_stack_bus < UINT32_C(0x" << hex(ctx.linear_memory_begin, 8)
+                        << ") || m68k_stack_bus > UINT32_C(0x" << hex(ctx.linear_memory_end - 4U, 8)
+                        << ")) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
+                        << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE); "
+                        << "if (" << stack_route_open(ctx, "GENESIS_BUS_STACK_WRITE") << "m68k_stack_bus, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &m68k_continuation, &m68k_route_stop) != GENESIS_ACCESS_OK) ";
+       if (const auto factored = factored_route_failure(ctx, "m68k_route_stop", "m68k_stack_bus", "GENESIS_ACCESS_LONG",
                                                        "GENESIS_ACCESS_WRITE"); !factored.empty()) {
         out << factored << " ";
         return out.str();
       }
       out << "{ "
                        << "m68k_route_stop.provenance.has_instruction_provenance = 1U; m68k_route_stop.provenance.instruction = *"
-                       << ctx.runtime_source << "; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = m68k_new_a7; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_WRITE; "
+                        << ctx.runtime_source << "; m68k_route_stop.provenance.has_access = 1U; m68k_route_stop.provenance.access_address = m68k_stack_bus; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_WRITE; "
                        << ctx.runtime_provenance_helper << "(&m68k_route_stop, " << ctx.runtime_source
                        << "); { GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop = m68k_route_stop; return transfer; } } ";
     }

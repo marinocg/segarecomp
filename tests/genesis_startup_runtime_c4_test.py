@@ -179,6 +179,7 @@ int main(void) {
   runtime.work_ram[0x66] = 0xFFU; runtime.work_ram[0x67] = 0xFEU;
   transfer = genesis_bridge_dispatch(&runtime);
   assert(transfer.kind == GENESIS_STOP && transfer.stop.stop_class == GENESIS_STOP_UNSUPPORTED_CPU_FORM);
+
   assert(runtime.pc == UINT32_C(0x00000B18));
   /* MOVEM.L D0-D1,(0x00FF0080).L: absolute.l destination, both registers
      stored big-endian, D0 first. */
@@ -764,25 +765,27 @@ T236_TIER1_OWNERLESS_RTS_HARNESS = r'''
 #include <string.h>
 #include "runtime.h"
 #include "generated.c"
-static void expect_tier2_caller(uint32_t caller, unsigned address_register, uint32_t continuation) {
+static void expect_tier2_caller(uint32_t caller, unsigned address_register, uint32_t continuation, uint32_t sp) {
   GenesisRuntime runtime = {0};
   GenesisControlTransfer transfer;
   runtime.pc = caller;
-  runtime.a[7] = UINT32_C(0x00FF0100);
+  runtime.a[7] = sp;
   runtime.a[address_register] = UINT32_C(0x00000B30);
   transfer = genesis_bridge_dispatch(&runtime);
   assert(transfer.kind == GENESIS_CONTINUE_AT_PC && transfer.next_pc == UINT32_C(0x00000B30));
-  assert(runtime.pc == caller && runtime.a[7] == UINT32_C(0x00FF00FC));
+  assert(runtime.pc == caller && runtime.a[7] == sp - 4U);
   runtime.pc = transfer.next_pc; /* genesis_runtime_run's CONTINUE_AT_PC commit */
   transfer = genesis_bridge_dispatch(&runtime);
   assert(transfer.kind == GENESIS_CONTINUE_AT_PC && transfer.next_pc == continuation);
-  assert(runtime.pc == continuation && runtime.a[7] == UINT32_C(0x00FF0100));
+  assert(runtime.pc == continuation && runtime.a[7] == sp);
 }
 int main(void) {
   GenesisRuntime runtime = {0}, before;
   GenesisControlTransfer transfer;
-  expect_tier2_caller(UINT32_C(0x00000B02), 1U, UINT32_C(0x00000B04));
-  expect_tier2_caller(UINT32_C(0x00000B08), 2U, UINT32_C(0x00000B0A));
+  expect_tier2_caller(UINT32_C(0x00000B02), 1U, UINT32_C(0x00000B04), UINT32_C(0x00FF0100));
+  expect_tier2_caller(UINT32_C(0x00000B08), 2U, UINT32_C(0x00000B0A), UINT32_C(0x00FF0100));
+  expect_tier2_caller(UINT32_C(0x00000B02), 1U, UINT32_C(0x00000B04), UINT32_C(0xFFFF0100));
+  expect_tier2_caller(UINT32_C(0x00000B08), 2U, UINT32_C(0x00000B0A), UINT32_C(0xFFFF0100));
 
   /* A represented code address that is not a call continuation is not valid
      return authority.  The successful stack read remains atomic with respect
@@ -854,6 +857,23 @@ int main(void) {
   transfer = genesis_bridge_dispatch(&runtime);
   assert(transfer.kind == GENESIS_STOP && transfer.stop.stop_class == GENESIS_STOP_UNSUPPORTED_CPU_FORM);
 
+  /* Architectural SP remains 32-bit; pushed continuation and RTS read use
+     the physical 24-bit work-RAM alias without altering the high byte. */
+  memset(&runtime, 0, sizeof(runtime)); runtime.pc = UINT32_C(0x00000B00);
+  runtime.a[7] = UINT32_C(0xFFFF0100);
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_CONTINUE_AT_PC && runtime.a[7] == UINT32_C(0xFFFF00FC));
+  assert(runtime.work_ram[0xFC] == (uint8_t)((EXPECT_CONTINUATION >> 24) & 0xFFU) &&
+         runtime.work_ram[0xFD] == (uint8_t)((EXPECT_CONTINUATION >> 16) & 0xFFU) &&
+         runtime.work_ram[0xFE] == (uint8_t)((EXPECT_CONTINUATION >> 8) & 0xFFU) &&
+         runtime.work_ram[0xFF] == (uint8_t)(EXPECT_CONTINUATION & 0xFFU));
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_CONTINUE_AT_PC && transfer.next_pc == EXPECT_CONTINUATION &&
+         runtime.a[7] == UINT32_C(0xFFFF0100));
+  expect_push_rejection(UINT32_C(0xFFFE0002), GENESIS_DIAG_INVALID_STACK_RANGE);
+  expect_push_rejection(UINT32_C(0xFFFF0002), GENESIS_DIAG_INVALID_STACK_RANGE);
+  expect_push_rejection(UINT32_C(0xFFFFFFFF), GENESIS_DIAG_INVALID_STACK_ALIGNMENT);
+
   /* The one-past-work-RAM stack top is valid for a four-byte push; any
      greater value is rejected before the router and leaves all state intact. */
   memset(&runtime, 0, sizeof(runtime)); runtime.pc = UINT32_C(0x00000B00); runtime.a[7] = UINT32_C(0x01000000);
@@ -902,6 +922,12 @@ int main(void) {
   runtime.work_ram[0xFFFE] = (uint8_t)((EXPECT_CONTINUATION >> 8) & 0xFFU); runtime.work_ram[0xFFFF] = (uint8_t)(EXPECT_CONTINUATION & 0xFFU);
   transfer = genesis_bridge_dispatch(&runtime);
   assert(transfer.kind == GENESIS_CONTINUE_AT_PC && runtime.a[7] == UINT32_C(0x01000000) && runtime.pc == EXPECT_CONTINUATION);
+  /* Physical pop extent must not wrap across the external 24-bit boundary. */
+  memset(&runtime, 0, sizeof(runtime)); runtime.pc = UINT32_C(0x00000B08);
+  runtime.a[7] = UINT32_C(0xFFFFFFFE); before = runtime;
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_STOP && transfer.stop.diagnostic_category == GENESIS_DIAG_INVALID_STACK_RANGE &&
+         memcmp(&runtime, &before, sizeof(runtime)) == 0);
   return 0;
 }
 '''

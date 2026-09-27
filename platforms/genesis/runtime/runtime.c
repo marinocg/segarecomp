@@ -2060,12 +2060,13 @@ typedef struct GenesisM68kExceptionContext {
 } GenesisM68kExceptionContext;
 
 static int genesis_m68k_validate_stack_extent(void *context, uint32_t base, uint32_t length,
-                                              SegarecompM68kStackDirection direction) {
+                                               SegarecompM68kStackDirection direction) {
   (void)context;
   (void)direction;
   /* Even base (the core also checks it) and the whole extent in work RAM: the
      precondition of the non-fallible frame_write guarantee above. */
-  return (base & 1U) == 0U && genesis_is_work_ram(base & UINT32_C(0x00FFFFFF), length);
+  return (base & 1U) == 0U && base <= UINT32_MAX - length &&
+         genesis_is_work_ram(base & UINT32_C(0x00FFFFFF), length);
 }
 
 static int genesis_m68k_stack_read(void *context, uint32_t address, uint32_t size, uint32_t *value) {
@@ -2194,7 +2195,9 @@ int genesis_exception_return(GenesisRuntime *runtime, uint32_t *restored_pc_out,
   switch (status) {
   case SEGARECOMP_M68K_EXCEPTION_OK: return 1;
   case SEGARECOMP_M68K_EXCEPTION_STACK_INVALID:
-    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_ALIGNMENT);
+    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION,
+                                    (runtime->a[7] & 1U) != 0U ? GENESIS_DIAG_INVALID_STACK_ALIGNMENT
+                                                                : GENESIS_DIAG_INVALID_STACK_RANGE);
     return 0;
   case SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED:
     *stop_out = context.routed;
@@ -2417,7 +2420,9 @@ int genesis_return_restore_condition_codes(GenesisRuntime *runtime, uint32_t *re
   switch (status) {
   case SEGARECOMP_M68K_EXCEPTION_OK: return 1;
   case SEGARECOMP_M68K_EXCEPTION_STACK_INVALID:
-    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_ALIGNMENT);
+    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION,
+                                    (runtime->a[7] & 1U) != 0U ? GENESIS_DIAG_INVALID_STACK_ALIGNMENT
+                                                                : GENESIS_DIAG_INVALID_STACK_RANGE);
     return 0;
   case SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED:
     *stop_out = context.routed;
