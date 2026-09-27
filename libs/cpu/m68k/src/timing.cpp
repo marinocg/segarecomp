@@ -1,5 +1,8 @@
 #include "segarecomp/cpu/m68k/timing.hpp"
 
+#include "segarecomp/cpu/m68k/effects.hpp"
+#include "segarecomp/cpu/m68k/timing_core.h"
+
 namespace segarecomp {
 
 namespace {
@@ -40,7 +43,12 @@ bool memory_ea(M68kEaMode mode) noexcept {
 
 std::optional<std::uint32_t> move_cycles(const M68kIrOperation &o) noexcept {
   const auto source_ea = ea_cycles(o.source_ea, o.size);
-  const auto destination_ea = ea_cycles(o.destination_ea, o.size);
+  // SEG-021-T022 (audit of the SEG-021-T005 row): Tables 8-2/8-3's -(An) DESTINATION column equals the (An) column
+  // (the predecrement overlaps the write; e.g. MOVE.W Dn,-(An) is 8, MOVE.L Dn,-(An) 12), unlike the -(An) SOURCE
+  // cell, which does cost the extra 2. The pinned Musashi core agrees.
+  M68kEffectiveAddress destination = o.destination_ea;
+  if (destination.mode == M68kEaMode::address_predec) destination.mode = M68kEaMode::address_indirect;
+  const auto destination_ea = ea_cycles(destination, o.size);
   if (!source_ea || !destination_ea) return std::nullopt;
   // Table 8-2: the literal table-8-1 source and destination cells compose
   // with the four-clock MOVE base.
@@ -54,12 +62,12 @@ std::optional<std::uint32_t> source_alu(const M68kIrOperation &o, std::uint32_t 
   const auto value = ea(o.source_ea, o.size);
   return value ? std::optional<std::uint32_t>((o.size == M68kMemoryAccessWidth::long_word ? long_base : word_base) + *value) : std::nullopt;
 }
-// Table 8-4 has separate CMPA rows: word sign-extension costs 8 plus the
-// B/W EA column, while long costs 6 plus the long EA column.
+// Table 8-4 CMPA: 6(1/0) + the size's EA column for both word and long (SEG-021-T022 audit: the former word
+// row of 8 + EA was not the published row; the pinned Musashi core also reports 6 + EA).
 std::optional<std::uint32_t> cmpa_cycles(const M68kIrOperation &o) noexcept {
   const auto value = ea(o.source_ea, o.size);
   if (!value) return std::nullopt;
-  return (o.size == M68kMemoryAccessWidth::long_word ? 6U : 8U) + *value;
+  return 6U + *value;
 }
 
 // Table 8-4: CMP.L has its own base cycle column.  In particular, Dn -> Dn
@@ -117,9 +125,10 @@ std::optional<std::uint32_t> single_operand_cycles(const M68kIrOperation &o) noe
 std::optional<std::uint32_t> test_cycles(const M68kIrOperation &o) noexcept {
   const auto value = ea(o.source_ea, o.size);
   if (!value || (!memory_ea(o.source_ea.mode) && o.source_ea.mode != M68kEaMode::data_register)) return std::nullopt;
-  // Table 8-6: Dn is four clocks at every size; memory is exactly its table
-  // 8-1 cell, rather than the read-modify-write unary row.
-  return o.source_ea.mode == M68kEaMode::data_register ? 4U : *value;
+  // Table 8-6 TST: Dn 4(1/0); memory 4(1/0) + the table 8-1 cell (the read-only row, not the read-modify-write
+  // unary row). SEG-021-T022 audit: the former memory value omitted the 4-clock base; the pinned Musashi core
+  // reports 4 + EA.
+  return o.source_ea.mode == M68kEaMode::data_register ? 4U : 4U + *value;
 }
 
 std::optional<std::uint32_t> logical_cycles(const M68kIrOperation &o) noexcept {
@@ -155,8 +164,14 @@ std::optional<std::uint32_t> compare_immediate_cycles(const M68kIrOperation &o) 
 
 std::optional<std::uint32_t> bit_cycles(const M68kIrOperation &o, bool modifies) noexcept {
   const bool immediate_selector = o.source_ea.mode == M68kEaMode::immediate;
+  // Table 8-8 register rows (published maxima): BTST 6 / 10, BCHG and BSET 8 / 12, BCLR 10 / 14 (dynamic / static).
+  // SEG-021-T022 audit: BCLR's register row is 2 clocks above BCHG/BSET's; the pinned Musashi core agrees.
   if (o.destination_ea.mode == M68kEaMode::data_register)
-    return (modifies ? 8U : 6U) + (immediate_selector ? 4U : 0U);
+    return (modifies ? (o.kind == M68kIrKind::bit_clear ? 10U : 8U) : 6U) + (immediate_selector ? 4U : 0U);
+  // SEG-021-T022: BTST Dn,#<data> (the only bit form whose destination may be immediate) is Table 8-8's dynamic
+  // BTST memory row, 4 + the Table 8-1 #<data> byte/word cell (4) = 8 (1/0 + 1/0).
+  if (!modifies && !immediate_selector && o.destination_ea.mode == M68kEaMode::immediate)
+    return 4U + *ea(o.destination_ea, M68kMemoryAccessWidth::byte);
   const auto target = ea(o.destination_ea, M68kMemoryAccessWidth::word);
   if (!target || !memory_ea(o.destination_ea.mode)) return std::nullopt;
   // Table 8-8: BTST's memory row is 4 + word EA; BCHG/BCLR/BSET's is
@@ -227,16 +242,22 @@ std::optional<std::uint32_t> set_conditional_cycles(const M68kIrOperation &o) no
   return 8U + *value;
 }
 
-std::optional<std::uint32_t> lea_cycles(const M68kIrOperation &o) noexcept {
+// Table 8-10 LEA / PEA literal rows: (An) 4 / 12, d16 8 / 16, (d8,An,Xn) 12 / 20, abs.W 8 / 16, abs.L 12 / 20,
+// d16(PC) 8 / 16, (d8,PC,Xn) 12 / 20. They follow the table 8-1 word cells except the indexed rows, which are 2
+// clocks longer (SEG-021-T022 audit: the former indexed values 10 / 18 were not the published rows; the pinned
+// Musashi core reports 12 / 20).
+std::optional<std::uint32_t> control_address_cycles(const M68kIrOperation &o) noexcept {
   const auto value = ea(o.source_ea, M68kMemoryAccessWidth::word);
   if (!value || !memory_ea(o.source_ea.mode)) return std::nullopt;
-  return *value;
+  const bool indexed = o.source_ea.mode == M68kEaMode::address_index8 || o.source_ea.mode == M68kEaMode::pc_index8;
+  return *value + (indexed ? 2U : 0U);
 }
 
+std::optional<std::uint32_t> lea_cycles(const M68kIrOperation &o) noexcept { return control_address_cycles(o); }
+
 std::optional<std::uint32_t> pea_cycles(const M68kIrOperation &o) noexcept {
-  const auto value = ea(o.source_ea, M68kMemoryAccessWidth::word);
-  if (!value || !memory_ea(o.source_ea.mode)) return std::nullopt;
-  return 8U + *value;
+  const auto value = control_address_cycles(o);
+  return value ? std::optional<std::uint32_t>(8U + *value) : std::nullopt;
 }
 
 } // namespace
@@ -380,29 +401,153 @@ std::optional<std::uint32_t> m68k_instruction_cycles(const M68kIrOperation &oper
   case M68kIrKind::logical_immediate_to_ccr:
   case M68kIrKind::logical_immediate_to_sr:
     return 20U;
+  // SEG-021-T020: Table 8-11 STOP is 4 (0/0) -- the retirement of the instruction itself; the halted interval that
+  // follows is machine scheduler time (ADR 0041), not an instruction cost.
+  case M68kIrKind::stop_until_interrupt: return 4U;
   case M68kIrKind::write_status_register:
   case M68kIrKind::write_condition_codes:
     return move_to_status_cycles(operation);
   case M68kIrKind::read_status_register:
     return move_from_status_cycles(operation);
   // These instruction tables depend on runtime CCR, register count, or
-  // operand value. They require a generated timing expression, not a guessed
-  // scalar, so translation fails closed for now.
+  // operand value: no complete scalar exists. SEG-021-T021: the Bcc/DBcc/
+  // shift-rotate outcome rules are owned by `m68k_instruction_timing` below;
+  // the direct_flow-profile-only BNE.S compatibility kind has no generated
+  // outcome hook and stays fail-closed.
   case M68kIrKind::branch_ne_short:
   case M68kIrKind::dbcc_loop:
   case M68kIrKind::shift_rotate_register:
     return std::nullopt;
+  // SEG-021-T022: MULU/MULS (38 + 2n) and DIVU/DIVS (exact data-dependent count; Table 8-4 publishes only the
+  // < 140 / < 158 bounds) depend on the operand values: their rules are owned by `m68k_instruction_timing`.
   case M68kIrKind::multiply_signed_word:
   case M68kIrKind::multiply_unsigned_word:
-    return std::nullopt;
   case M68kIrKind::divide_signed_word:
-    if (const auto value = ea(operation.source_ea, M68kMemoryAccessWidth::word)) return 158U + *value;
-    return std::nullopt;
   case M68kIrKind::divide_unsigned_word:
-    if (const auto value = ea(operation.source_ea, M68kMemoryAccessWidth::word)) return 140U + *value;
+    return std::nullopt;
+  // SEG-021-T019 (MC68000 User's Manual Tables 8-11 and 8-14). RTR is 20 (5/0). TRAP #n and the
+  // instruction-word exceptions (ILLEGAL, line 1010/1111, every other illegal word) are 34 (4/3); these forms ALWAYS
+  // take the exception, whose entry cost is charged by the exception-entry timing owner (ADR 0043 §8, SEG-021-T022),
+  // never by an instruction retirement. TRAPV is 4 (1/0) when V = 0 (the only path that retires; V = 1 takes the
+  // vector-7 entry, 34). CHK.W is 10 (1/0) + the word EA cell when the bound check passes (the only path that
+  // retires; a failed check takes the vector-6 entry, 40 + EA).
+  case M68kIrKind::return_restore_condition_codes: return 20U;
+  case M68kIrKind::trap_exception:
+  case M68kIrKind::instruction_exception:
+    return 34U;
+  case M68kIrKind::trap_on_overflow: return 4U;
+  case M68kIrKind::check_bounds:
+    if (const auto value = ea(operation.source_ea, M68kMemoryAccessWidth::word)) return 10U + *value;
     return std::nullopt;
   }
   return std::nullopt;
+}
+
+std::optional<std::uint32_t> m68k_exception_entry_cycles(const M68kIrOperation &operation) noexcept {
+  const auto effect = m68k_operation_effect(operation);
+  if (!effect.may_raise_synchronous_exception) return std::nullopt;
+  const auto base = segarecomp_m68k_exception_entry_cycles(effect.exception_vector);
+  if (base == 0U) return std::nullopt;
+  // The zero-divide and CHK rows are "+ EA": the <ea> word operand is fetched before the exception is recognized.
+  if (effect.exception_vector == 5U || effect.exception_vector == 6U) {
+    const auto value = ea(operation.source_ea, M68kMemoryAccessWidth::word);
+    if (!value) return std::nullopt;
+    return base + *value;
+  }
+  return base;
+}
+
+namespace {
+
+std::optional<M68kInstructionTiming> retirement_timing(const M68kIrOperation &operation) noexcept {
+  if (const auto cycles = m68k_instruction_cycles(operation)) {
+    M68kInstructionTiming timing{};
+    timing.cycles = *cycles;
+    return timing;
+  }
+  M68kInstructionTiming timing{};
+  switch (operation.kind) {
+  // Table 8-10 Bcc: taken 10 (2/0) for either displacement size; not taken 8 (1/0) for the byte
+  // displacement and 12 (2/0) for the word displacement (the extension word is still fetched).
+  case M68kIrKind::general_branch:
+    if (operation.condition == M68kCondition::always) return std::nullopt;  // BRA is the static row above
+    if (operation.size != M68kMemoryAccessWidth::byte && operation.size != M68kMemoryAccessWidth::word)
+      return std::nullopt;
+    timing.rule = M68kTimingRule::condition;
+    timing.cycles = 10U;
+    timing.false_cycles = operation.size == M68kMemoryAccessWidth::byte ? 8U : 12U;
+    return timing;
+  // Table 8-10 DBcc: condition true 12 (2/0); condition false, counter not expired (branch taken) 10 (2/0);
+  // condition false, counter expired 14 (3/0).
+  case M68kIrKind::dbcc_loop:
+    timing.rule = M68kTimingRule::dbcc;
+    timing.cycles = 12U;
+    timing.false_cycles = 10U;
+    timing.expired_cycles = 14U;
+    return timing;
+  // Table 8-6 Scc: the Dn row is 6 when the condition is true and 4 when it is false (memory rows are static).
+  case M68kIrKind::set_conditional:
+    if (operation.destination_ea.mode != M68kEaMode::data_register) return std::nullopt;
+    timing.rule = M68kTimingRule::condition;
+    timing.cycles = 6U;
+    timing.false_cycles = 4U;
+    return timing;
+  // Table 8-9 register shift/rotate (ASd, LSd, ROd, ROXd): byte/word 6 + 2n, long 8 + 2n.
+  case M68kIrKind::shift_rotate_register:
+    timing.rule = M68kTimingRule::register_count;
+    timing.cycles = operation.size == M68kMemoryAccessWidth::long_word ? 8U : 6U;
+    timing.per_count_cycles = 2U;
+    return timing;
+  // SEG-021-T022: Table 8-4 MULU.W/MULS.W 38 + 2n (+ the word EA cell held in `cycles`); DIVU.W/DIVS.W the exact
+  // count of timing_core.h (+ the word EA cell). The operand-dependent part is evaluated by timing_core.h.
+  case M68kIrKind::multiply_unsigned_word:
+  case M68kIrKind::multiply_signed_word:
+  case M68kIrKind::divide_unsigned_word:
+  case M68kIrKind::divide_signed_word: {
+    const auto value = ea(operation.source_ea, M68kMemoryAccessWidth::word);
+    if (!value) return std::nullopt;
+    timing.rule = operation.kind == M68kIrKind::multiply_unsigned_word ? M68kTimingRule::multiply_unsigned
+                  : operation.kind == M68kIrKind::multiply_signed_word ? M68kTimingRule::multiply_signed
+                  : operation.kind == M68kIrKind::divide_unsigned_word ? M68kTimingRule::divide_unsigned
+                                                                         : M68kTimingRule::divide_signed;
+    timing.cycles = *value;
+    return timing;
+  }
+  default: return std::nullopt;
+  }
+}
+
+}  // namespace
+
+std::optional<M68kInstructionTiming> m68k_instruction_timing(const M68kIrOperation &operation) noexcept {
+  auto timing = retirement_timing(operation);
+  if (!timing) return std::nullopt;
+  const auto effect = m68k_operation_effect(operation);
+  if (effect.may_raise_synchronous_exception) {
+    // A form that can take an exception but whose entry has no published count stays fail-closed.
+    const auto entry = m68k_exception_entry_cycles(operation);
+    if (!entry) return std::nullopt;
+    timing->exception_entry_cycles = *entry;
+  }
+  return timing;
+}
+
+std::uint32_t m68k_timing_cycles(const M68kInstructionTiming &timing, const M68kTimingOutcome &outcome) noexcept {
+  if (outcome.exception_taken && timing.exception_entry_cycles != 0U) return timing.exception_entry_cycles;
+  switch (timing.rule) {
+  case M68kTimingRule::fixed: return timing.cycles;
+  case M68kTimingRule::condition: return outcome.condition_true ? timing.cycles : timing.false_cycles;
+  case M68kTimingRule::dbcc:
+    return outcome.condition_true ? timing.cycles : (outcome.counter_expired ? timing.expired_cycles : timing.false_cycles);
+  case M68kTimingRule::register_count: return timing.cycles + timing.per_count_cycles * outcome.count;
+  case M68kTimingRule::multiply_unsigned: return segarecomp_m68k_mulu_word_cycles(outcome.source_word) + timing.cycles;
+  case M68kTimingRule::multiply_signed: return segarecomp_m68k_muls_word_cycles(outcome.source_word) + timing.cycles;
+  case M68kTimingRule::divide_unsigned:
+    return segarecomp_m68k_divu_word_cycles(outcome.dividend, outcome.source_word) + timing.cycles;
+  case M68kTimingRule::divide_signed:
+    return segarecomp_m68k_divs_word_cycles(outcome.dividend, outcome.source_word) + timing.cycles;
+  }
+  return timing.cycles;
 }
 
 std::optional<std::uint32_t> m68k_effective_address_cycles(

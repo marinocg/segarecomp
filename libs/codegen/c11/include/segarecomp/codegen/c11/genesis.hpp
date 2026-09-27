@@ -2,6 +2,9 @@
 
 #include <string>
 #include <string_view>
+#include <cstdint>
+#include <utility>
+#include <vector>
 
 namespace segarecomp {
 
@@ -34,7 +37,9 @@ namespace segarecomp {
                                                              std::string_view entry_pc,
                                                              std::string_view irq6_handler_entry_hex = {},
                                                              std::string_view divide_by_zero_handler_entry_hex = {},
-                                                             std::string_view privilege_violation_handler_entry_hex = {});
+                                                             std::string_view privilege_violation_handler_entry_hex = {},
+                                                             const std::vector<std::pair<std::uint32_t, std::string>>
+                                                                 &software_exception_handler_entry_hex = {});
 [[nodiscard]] std::string emit_genesis_bridge_c11_main_finish(std::string_view dispatcher_name);
 
 }  // namespace segarecomp

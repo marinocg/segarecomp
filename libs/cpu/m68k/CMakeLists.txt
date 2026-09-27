@@ -5,6 +5,7 @@ add_library(segarecomp_cpu_m68k
   src/effective_address.cpp
   src/effects.cpp
   src/ir.cpp
+  src/legality.cpp
   src/static_discovery.cpp
   src/static_program.cpp
   src/timing.cpp

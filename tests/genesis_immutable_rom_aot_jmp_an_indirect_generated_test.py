@@ -17,7 +17,7 @@ unresolved-indirect-target stop otherwise. This executes the generated C:
   - JSR (A4): represented target pushes the correct return address and
     decrements A7 once; an unrepresented target and an unwritable stack both
     fail closed with A7, memory and PC unchanged;
-  - dispatching the excluded JMP d16(An) identity executes no body;
+  - JMP d16(An) (excluded in T033) is admitted since SEG-021-T034;
   - no runtime opcode fetch/decode in the generated bodies.
 """
 import pathlib
@@ -113,12 +113,11 @@ int main(void) {
   assert(transfer.kind == GENESIS_CONTINUE_AT_PC && transfer.next_pc == UINT32_C(0x00001000));
   assert(runtime.a[7] == UINT32_C(0x00001000));
 
-  /* The excluded JMP d16(An) identity has no body: dispatch fails closed without executing it
-     (A3 + 16 would name a compiled entry, so a stop proves the body never ran). */
+  /* SEG-021-T034: JMP (16,A3) is now admitted: A3 + 16 names a compiled entry. */
   runtime = at(UINT32_C(0x00001012));
   runtime.a[3] = UINT32_C(0x00000FF0);
   transfer = genesis_bridge_dispatch(&runtime);
-  assert(transfer.kind == GENESIS_STOP && runtime.pc == UINT32_C(0x00001012));
+  assert(transfer.kind == GENESIS_CONTINUE_AT_PC && transfer.next_pc == UINT32_C(0x00001000));
   return 0;
 }
 '''
@@ -135,7 +134,7 @@ def main():
     source = result.stdout
     for address in ("0000100A", "0000100C", "00001010"):
         assert f"genesis_aot_{address}" in source, address
-    for excluded in ("00001012", "00001014"):
+    for excluded in ("00001014",):
         assert f"genesis_aot_{excluded}(" not in source, excluded
     jmp = body_of(source, "0000100A")
     assert "m68k_indirect_ea = runtime->a[3];" in jmp

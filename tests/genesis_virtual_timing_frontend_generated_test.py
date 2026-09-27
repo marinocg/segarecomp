@@ -102,9 +102,9 @@ def main():
     assert pc == 0x104
     assert d0 == 1 and d1 == 1, "prefix replay or resumed-instruction loss"
     assert edges == 1
-    # ADDQ.L Dn (8) + RTE (20) + resumed ADDQ.L Dn (8), seven master ticks
-    # per MC68000 cycle. The first instruction begins 56 ticks before onset.
-    assert ticks == 766080 + 196
+    # ADDQ.L Dn (8) + IRQ6 entry (44, SEG-021-T022; previously uncharged) + RTE (20) + resumed ADDQ.L Dn (8),
+    # seven master ticks per MC68000 cycle. The first instruction begins 56 ticks before onset.
+    assert ticks == 766080 + 196 + 44 * 7
     assert dispatches == 3, "entry, handler/RTE, and interior resume must each dispatch once"
     assert a7 == 0x00FF8000, "RTE did not consume exactly its six-byte exception frame"
 

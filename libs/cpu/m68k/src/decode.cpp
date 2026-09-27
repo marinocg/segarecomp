@@ -101,6 +101,12 @@ const char *m68k_instruction_kind_name(M68kInstructionKind kind) noexcept {
   case M68kInstructionKind::multiply_unsigned_word: return "mulu";
   case M68kInstructionKind::divide_signed_word: return "divs";
   case M68kInstructionKind::divide_unsigned_word: return "divu";
+  case M68kInstructionKind::trap: return "trap";
+  case M68kInstructionKind::trapv: return "trapv";
+  case M68kInstructionKind::chk: return "chk";
+  case M68kInstructionKind::rtr: return "rtr";
+  case M68kInstructionKind::instruction_exception: return "instruction_exception";
+  case M68kInstructionKind::stop: return "stop";
   }
   return "unknown";
 }
@@ -1633,8 +1639,10 @@ M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, De
   };
   // ILLEGAL is a source-word property, not a property of the selected slice.
   // Check it before profile-specific supported-form selection so every route
-  // retains the inherited source-decode precedence.
-  if (word == 0x4AFCU)
+  // retains the inherited source-decode precedence. SEG-021-T019: the
+  // general_startup policy selects it (and every other architecturally
+  // reserved word) as an exception-raising `instruction_exception` below.
+  if (word == 0x4AFCU && profile != M68kDecodeProfile::general_startup)
     return reject_word(DecodeOutcome::illegal_instruction, 2U);
 
   M68kDecodedInstruction instruction{};
@@ -1658,6 +1666,48 @@ M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, De
                                 instruction.raw_bytes[5];
       return instruction;
     };
+    // SEG-021-T019 / ADR 0043 §3: generation-time exception classification (general_startup only). ILLEGAL and
+    // every architecturally reserved operation word (m68k_classify_primary_word, written from the Motorola manual)
+    // is selected as a two-byte `instruction_exception` carrying its vector: 4 (ILLEGAL, unassigned and
+    // post-MC68000 encodings), 10 (line 1010) or 11 (line 1111). A legal word the project does not implement is
+    // never selected here; it keeps failing closed below as an unsupported form.
+    if (profile == M68kDecodeProfile::general_startup) {
+      const auto word_class = m68k_classify_primary_word(word);
+      if (word == 0x4AFCU || word_class != M68kPrimaryWordClass::legal) {
+        auto result = select(M68kInstructionKind::instruction_exception, 2U);
+        std::get<M68kDecodedInstruction>(result).exception_vector =
+            word == 0x4AFCU ? std::uint8_t{4U} : m68k_primary_word_exception_vector(word_class);
+        return result;
+      }
+      // TRAP #n (0x4E40-0x4E4F): vector 32 + n.
+      if (word >= 0x4E40U && word <= 0x4E4FU) {
+        auto result = select(M68kInstructionKind::trap, 2U);
+        std::get<M68kDecodedInstruction>(result).exception_vector = static_cast<std::uint8_t>(32U + (word & 0xFU));
+        return result;
+      }
+      // TRAPV (0x4E76): vector 7 when V is set.
+      if (word == 0x4E76U) {
+        auto result = select(M68kInstructionKind::trapv, 2U);
+        std::get<M68kDecodedInstruction>(result).exception_vector = 7U;
+        return result;
+      }
+      // RTR (0x4E77): unprivileged CCR + PC restore.
+      if (word == 0x4E77U) return select(M68kInstructionKind::rtr, 2U);
+      // CHK.W <ea>,Dn (0100 ddd 110 mmmrrr): every data addressing mode (m68k_ea_chk_source).
+      if ((word & 0xF1C0U) == 0x4180U) {
+        const auto src = m68k_decode_one_ea(source, image, offset, available, bytes, 0U,
+                                             static_cast<std::uint8_t>((word >> 3U) & 7U),
+                                             static_cast<std::uint8_t>(word & 7U), m68k_ea_chk_source,
+                                             M68kMemoryAccessWidth::word);
+        if (!src.ok) return src.failure;
+        auto chk = m68k_finish_general_decode(
+            source, image, offset, bytes, M68kInstructionKind::chk, M68kMemoryAccessWidth::word, src.ea,
+            {M68kEaMode::data_register, static_cast<std::uint8_t>((word >> 9U) & 7U), 0, 0, 0, 0},
+            src.extension_bytes);
+        chk.exception_vector = 6U;
+        return chk;
+      }
+    }
     if ((word & 0xFF00U) == 0x7000U) return select(M68kInstructionKind::moveq, 2U);
     // SEG-007-T086: general_startup's own MOVEQ recognition (the check
     // immediately above this one, shared with genesis_startup) only ever
@@ -1719,14 +1769,23 @@ M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, De
     // rejection cluster below are both general_startup-only, so genesis_startup
     // still falls through to its own unconditional
     // valid_but_unsupported_instruction rejection later in this function.
-    // RESET (0x4E70) and STOP (0x4E72) remain in the reject cluster below
-    // exactly as before -- each needs architecture this task must not add
-    // (external-device reset, privilege + halt/interrupt-wait).
+    // RESET (0x4E70) remains in the reject cluster below exactly as before
+    // (it is the synthetic fixtures' verified-complete CPU-frontier sentinel;
+    // see ADR 0043's SEG-021-T020 implementation note).
     if (profile == M68kDecodeProfile::general_startup && word == 0x4E71U)
       return select(M68kInstructionKind::nop, 2U);
-    if (profile == M68kDecodeProfile::general_startup &&
-        (word == 0x4E70U || word == 0x4E72U)) {
-      const auto length = word == 0x4E72U ? 4U : 2U;
+    // SEG-021-T020 / ADR 0043 §7: STOP #<data> (0x4E72 plus one immediate
+    // word), general_startup only. A STOP without its extension word is still
+    // a truncated instruction (the immediate EA decoder bounds-checks it).
+    if (profile == M68kDecodeProfile::general_startup && word == 0x4E72U) {
+      const auto imm = m68k_decode_one_ea(source, image, offset, available, bytes, 0U, 7U, 4U, m68k_ea_immediate,
+                                          M68kMemoryAccessWidth::word);
+      if (!imm.ok) return imm.failure;
+      return m68k_finish_general_decode(source, image, offset, bytes, M68kInstructionKind::stop,
+                                        M68kMemoryAccessWidth::word, imm.ea, {}, imm.extension_bytes);
+    }
+    if (profile == M68kDecodeProfile::general_startup && word == 0x4E70U) {
+      const auto length = 2U;
       if (available < length) return reject_word(DecodeOutcome::truncated_instruction, length);
       auto result = reject_word(DecodeOutcome::valid_but_unsupported_instruction, length);
       result.instruction_length = length;

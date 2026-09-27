@@ -888,13 +888,20 @@ static int genesis_vdp_access(GenesisDeviceState *devices, uint32_t address,
     return 0;
   }
   /* direction == GENESIS_ACCESS_WRITE (SEG-007-T091) */
-  if (address == UINT32_C(0x00C00000)) {
-    /* DATA-port write. An armed VRAM fill (SEG-007-T098/T101) still owns the
-       WORD source path exactly as before; anything else is the plain CPU
-       DATA-port write model (SEG-007-T108 + SEG-007-T191: VRAM/CRAM/VSRAM
-       targets, BYTE/WORD/LONG widths). */
+  if (address == UINT32_C(0x00C00000) ||
+      (address == UINT32_C(0x00C00001) && width == GENESIS_ACCESS_BYTE &&
+       devices->vdp.dma.phase == GENESIS_VDP_DMA_BUSY &&
+       devices->vdp.dma.kind == GENESIS_VDP_DMA_VRAM_FILL)) {
+    /* DATA-port write. An armed VRAM fill owns one WORD-equivalent source
+       transaction, including an 8-bit write on either CPU DATA-port lane;
+       otherwise use the plain CPU DATA-port write model (SEG-007-T108 +
+       SEG-007-T191: VRAM/CRAM/VSRAM targets, BYTE/WORD/LONG widths). */
     if (devices->vdp.dma.phase == GENESIS_VDP_DMA_BUSY &&
         devices->vdp.dma.kind == GENESIS_VDP_DMA_VRAM_FILL) {
+      if (width == GENESIS_ACCESS_BYTE) {
+        const uint32_t data_byte = *value & UINT32_C(0xFF);
+        return genesis_vdp_data_port_fill_write(devices, (data_byte << 8) | data_byte);
+      }
       if (width != GENESIS_ACCESS_WORD) return 0;
       return genesis_vdp_data_port_fill_write(devices, *value);
     }
@@ -1193,7 +1200,9 @@ static int genesis_is_z80_bus_region(uint32_t address) {
      (c) RESET polarity per GTO1 p. 76 / p. 91: writing the bit as 0 asserts
          /RESET (`reset_asserted = 1`); writing it as 1 releases /RESET
          (`reset_asserted = 0`).
-   Fails closed (returns 0, mutating nothing): a read of $A11200; any LONG
+   Fails closed (returns 0, mutating nothing): a read of $A11200 (SEG-021-T036: except the architecturally
+   DISCARDED read of memory CLR/Scc/MOVE from SR, admitted before this owner is reached -- see
+   genesis_route_access_classified; open bus per MCD1 section 1 note 4, write-only per GTO1 p. 76); any LONG
    access to either register; and every other address inside
    genesis_is_z80_bus_region. Every validation check precedes every mutation,
    so a rejected access is atomic (T042 SS3 / genesis_route_access's own
@@ -1865,9 +1874,20 @@ int genesis_device_checkpoint_write_detail(FILE *output, const GenesisRuntime *r
   return fputs("]}}\n", output) < 0;
 }
 
-GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, GenesisBusKind bus_kind, uint32_t address,
-                                                 GenesisAccessWidth width, GenesisAccessDirection direction,
-                                                 uint32_t *value, GenesisRuntimeStop *stop_out) {
+/* SEG-021-T036: `discarded` marks a DATA read whose value the instruction architecturally discards (the read-before-
+   write of memory CLR, memory Scc and memory MOVE from SR). It changes exactly one lane: a WORD or even-BYTE read of
+   the write-only Z80 RESET register ($A11200) returns a deterministic 0 and mutates nothing (reset/bus state
+   unchanged). Hardware: that read returns open-bus data -- the MSB of the next instruction fetch with the LSB zero
+   (Charles MacDonald, "Sega Genesis hardware notes" v0.8, section 1 note 4) -- with no side effect; GTO1 v1.00 p. 76
+   documents the register as write-only. The value is never observed, so 0 is a faithful stand-in. Every other access
+   (including LONG, the odd byte, and every value-consuming read of $A11200) takes the ordinary route below and fails
+   closed exactly as before. The VDP data port under a write-class code and the PSG port stay fail-closed even for a
+   discarded read: a 68000 read of either locks the machine up on hardware (see the VDP data-port write contract and
+   the PSG compatibility policy). The access is recorded like any other DATA read (no new bus kind). */
+static GenesisAccessResultKind genesis_route_access_classified(GenesisRuntime *runtime, GenesisBusKind bus_kind,
+                                                               uint32_t address, GenesisAccessWidth width,
+                                                               GenesisAccessDirection direction, uint32_t *value,
+                                                               GenesisRuntimeStop *stop_out, int discarded) {
   GenesisAccessResultKind status;
   const int is_read_kind = bus_kind == GENESIS_BUS_INSTRUCTION_READ || bus_kind == GENESIS_BUS_DATA_READ ||
                            bus_kind == GENESIS_BUS_STACK_READ;
@@ -1878,7 +1898,13 @@ GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, Genesi
                                                         GENESIS_DIAG_UNMAPPED_DATA_ACCESS);
     return GENESIS_ACCESS_FAIL;
   }
-  status = genesis_route_access_unrecorded(runtime, address, width, direction, value, stop_out);
+  if (discarded && runtime != 0 && value != 0 && bus_kind == GENESIS_BUS_DATA_READ &&
+      segarecomp_genesis_discarded_read_admitted(address, (uint32_t)width) != 0) {
+    *value = 0U;
+    status = GENESIS_ACCESS_OK;
+  } else {
+    status = genesis_route_access_unrecorded(runtime, address, width, direction, value, stop_out);
+  }
   if (status == GENESIS_ACCESS_OK && runtime != 0 && runtime->m68k_checkpoint.enabled && is_write_kind &&
       value != 0)
     genesis_m68k_effect_note(runtime, GENESIS_M68K_EFFECT_WRITE, (uint8_t)width, address,
@@ -1899,6 +1925,12 @@ GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, Genesi
   return status;
 }
 
+GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, GenesisBusKind bus_kind, uint32_t address,
+                                                 GenesisAccessWidth width, GenesisAccessDirection direction,
+                                                 uint32_t *value, GenesisRuntimeStop *stop_out) {
+  return genesis_route_access_classified(runtime, bus_kind, address, width, direction, value, stop_out, 0);
+}
+
 GenesisAccessResultKind genesis_route_access(GenesisRuntime *runtime, uint32_t address,
                                               GenesisAccessWidth width,
                                               GenesisAccessDirection direction, uint32_t *value,
@@ -1906,6 +1938,14 @@ GenesisAccessResultKind genesis_route_access(GenesisRuntime *runtime, uint32_t a
   return genesis_route_access_bus(runtime,
                                   direction == GENESIS_ACCESS_WRITE ? GENESIS_BUS_DATA_WRITE : GENESIS_BUS_DATA_READ,
                                   address, width, direction, value, stop_out);
+}
+
+GenesisAccessResultKind genesis_route_access_discarded_read(GenesisRuntime *runtime, uint32_t address,
+                                                            GenesisAccessWidth width,
+                                                            GenesisAccessDirection direction, uint32_t *value,
+                                                            GenesisRuntimeStop *stop_out) {
+  return genesis_route_access_classified(runtime, GENESIS_BUS_DATA_READ, address, width, direction, value, stop_out,
+                                         1);
 }
 
 
@@ -1994,12 +2034,12 @@ static GenesisCheckpointPcClass genesis_checkpoint_pc_class_for_target(uint32_t 
  * Frame-write guarantee (ADR 0043 §5 / §7 hook contract): the core's
  * frame_write hook is non-fallible, so validate_stack_extent must accept only
  * extents in which every aligned word/long frame write is certain to succeed.
- * It accepts an even `base` whose whole [base, base + length) lies in work RAM
- * (segarecomp_genesis_work_ram_contains, which also rejects wrap-around). For
+ * It accepts an even `base` whose masked 24-bit physical extent lies wholly
+ * in work RAM (the extent check also rejects crossing the physical boundary). For
  * such an extent every frame write the core issues (word at base, long at
  * base + 2) reaches genesis_route_access_bus with a stack-write bus kind and
  * WRITE direction (kind/direction check passes), a valid width, non-null
- * runtime/value/stop pointers, a 24-bit address (work RAM ends at 0x1000000),
+ * runtime/value/stop pointers, a masked 24-bit bus address,
  * an even address, and a range inside work RAM, so
  * genesis_route_access_unrecorded takes its work-RAM store branch, which has
  * no failure return. The routed path is kept so the stack_write bus kind,
@@ -2025,13 +2065,13 @@ static int genesis_m68k_validate_stack_extent(void *context, uint32_t base, uint
   (void)direction;
   /* Even base (the core also checks it) and the whole extent in work RAM: the
      precondition of the non-fallible frame_write guarantee above. */
-  return (base & 1U) == 0U && genesis_is_work_ram(base, length);
+  return (base & 1U) == 0U && genesis_is_work_ram(base & UINT32_C(0x00FFFFFF), length);
 }
 
 static int genesis_m68k_stack_read(void *context, uint32_t address, uint32_t size, uint32_t *value) {
   GenesisM68kExceptionContext *bound = (GenesisM68kExceptionContext *)context;
   GenesisRuntimeStop routed = {0};
-  if (genesis_route_access_bus(bound->runtime, GENESIS_BUS_STACK_READ, address,
+  if (genesis_route_access_bus(bound->runtime, GENESIS_BUS_STACK_READ, address & UINT32_C(0x00FFFFFF),
                                size == 2U ? GENESIS_ACCESS_WORD : GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ, value,
                                &routed) != GENESIS_ACCESS_OK) {
     bound->routed = routed;
@@ -2046,10 +2086,17 @@ static void genesis_m68k_frame_write(void *context, uint32_t address, uint32_t s
   GenesisM68kExceptionContext *bound = (GenesisM68kExceptionContext *)context;
   GenesisRuntimeStop routed = {0};
   uint32_t routed_value = value;
-  if (genesis_route_access_bus(bound->runtime, GENESIS_BUS_STACK_WRITE, address,
+  if (genesis_route_access_bus(bound->runtime, GENESIS_BUS_STACK_WRITE, address & UINT32_C(0x00FFFFFF),
                                size == 2U ? GENESIS_ACCESS_WORD : GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE,
                                &routed_value, &routed) != GENESIS_ACCESS_OK)
     bound->frame_write_failed = 1;
+}
+
+/* SEG-021-T019 / ADR 0043 §3: the software-exception vector set (4, 6, 7, 10,
+   11, 32-47) the table `software_exception_handler_entry` serves. */
+static int genesis_is_software_exception_vector(uint32_t vector) {
+  return vector == 4U || vector == 6U || vector == 7U || vector == 10U || vector == 11U ||
+         (vector >= 32U && vector <= 47U);
 }
 
 /* ADR 0020 §6 / ADR 0037 B / ADR 0043 §7: the Genesis vector table is the
@@ -2072,6 +2119,11 @@ static SegarecompM68kVectorResolution genesis_m68k_resolve_vector(void *context,
     *handler_entry = runtime->irq6_handler_entry;
     return SEGARECOMP_M68K_VECTOR_HANDLER;
   default:
+    /* SEG-021-T019: the software-exception vectors, from the build-time table. */
+    if (genesis_is_software_exception_vector(vector) && runtime->software_exception_handler_present[vector]) {
+      *handler_entry = runtime->software_exception_handler_entry[vector];
+      return SEGARECOMP_M68K_VECTOR_HANDLER;
+    }
     return SEGARECOMP_M68K_VECTOR_NOT_INSTALLED;
   }
 }
@@ -2079,7 +2131,8 @@ static SegarecompM68kVectorResolution genesis_m68k_resolve_vector(void *context,
 static void genesis_m68k_on_exception_entry(void *context, uint32_t vector, uint32_t frame_base,
                                             uint32_t handler_entry) {
   GenesisRuntime *runtime = ((GenesisM68kExceptionContext *)context)->runtime;
-  if (vector == GENESIS_M68K_VECTOR_LEVEL6_AUTOVECTOR) genesis_note_irq6_exception_frame(runtime, frame_base);
+  if (vector == GENESIS_M68K_VECTOR_LEVEL6_AUTOVECTOR)
+    genesis_note_irq6_exception_frame(runtime, frame_base & UINT32_C(0x00FFFFFF));
   if (runtime->m68k_checkpoint.enabled)
     genesis_m68k_effect_note(runtime, GENESIS_M68K_EFFECT_TRAP, 0U, handler_entry, vector);
   if (runtime->execution_history.detail_enabled)
@@ -2089,8 +2142,9 @@ static void genesis_m68k_on_exception_entry(void *context, uint32_t vector, uint
 
 static void genesis_m68k_on_exception_return(void *context, uint32_t frame_base) {
   GenesisM68kExceptionContext *bound = (GenesisM68kExceptionContext *)context;
-  bound->irq6_frame = genesis_is_work_ram(frame_base, 6U) &&
-                      genesis_take_irq6_exception_frame_origin(bound->runtime, frame_base);
+  const uint32_t physical_base = frame_base & UINT32_C(0x00FFFFFF);
+  bound->irq6_frame = genesis_is_work_ram(physical_base, 6U) &&
+                      genesis_take_irq6_exception_frame_origin(bound->runtime, physical_base);
 }
 
 static SegarecompM68kMachineHooks genesis_m68k_exception_hooks(GenesisM68kExceptionContext *context) {
@@ -2174,6 +2228,23 @@ int genesis_exception_return(GenesisRuntime *runtime, uint32_t *restored_pc_out,
  *         1 = frame constructed and committed; `*result` holds the transfer
  *             (`next_pc` and `runtime->pc` are the handler entry).
  */
+static int genesis_finish_exception_entry(SegarecompM68kExceptionStatus status, int frame_write_failed,
+                                          uint32_t handler_entry, GenesisStopClass fail_stop_class,
+                                          GenesisDiagnosticCategory fail_diag, GenesisControlTransfer *result) {
+  if (status != SEGARECOMP_M68K_EXCEPTION_OK || frame_write_failed) {
+    const int inconsistent = frame_write_failed || (status != SEGARECOMP_M68K_EXCEPTION_STACK_INVALID &&
+                                                    status != SEGARECOMP_M68K_EXCEPTION_VECTOR_UNAVAILABLE);
+    *result = (GenesisControlTransfer){0};
+    result->kind = GENESIS_STOP;
+    result->stop = inconsistent ? genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
+                                                      GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY)
+                                : genesis_access_stop(fail_stop_class, fail_diag);
+    return 0;
+  }
+  result->next_pc = handler_entry;
+  return 1;
+}
+
 static int genesis_construct_exception_frame_and_transfer(GenesisRuntime *runtime, uint32_t vector,
                                                            uint32_t return_pc, uint16_t sr_keep_mask,
                                                            uint16_t sr_forced_bits,
@@ -2190,34 +2261,66 @@ static int genesis_construct_exception_frame_and_transfer(GenesisRuntime *runtim
   cpu = genesis_m68k_cpu_binding(runtime);
   status = segarecomp_m68k_exception_enter(&hooks, &cpu, vector, return_pc, sr_keep_mask, sr_forced_bits,
                                            &handler_entry);
-  if (status != SEGARECOMP_M68K_EXCEPTION_OK || context.frame_write_failed) {
-    const int inconsistent = context.frame_write_failed || (status != SEGARECOMP_M68K_EXCEPTION_STACK_INVALID &&
-                                                            status != SEGARECOMP_M68K_EXCEPTION_VECTOR_UNAVAILABLE);
-    *result = (GenesisControlTransfer){0};
-    result->kind = GENESIS_STOP;
-    result->stop = inconsistent ? genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
-                                                      GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY)
-                                : genesis_access_stop(fail_stop_class, fail_diag);
-    return 0;
-  }
-  result->next_pc = handler_entry;
-  return 1;
+  return genesis_finish_exception_entry(status, context.frame_write_failed, handler_entry, fail_stop_class, fail_diag,
+                                        result);
 }
 
 /*
+ * SEG-021-T020 / ADR 0043 §3, §7: take the interrupt the M68K-owned acceptance
+ * rule recognized at this boundary. Genesis acknowledges every level it wires
+ * with the autovector (only VBlank, level 6, is wired: vector 30), so the
+ * vector, the six-byte frame on the SSP, the entry SR (S = 1, T = 0, I =
+ * level) and the stacked PC (`result->next_pc`, the next instruction -- after
+ * a STOP, the instruction after STOP) are exactly the IRQ6 delivery of ADR 0020.
+ * Returns 1 (entered; `result` holds the handler) or 0 (failed closed with the
+ * interrupt diagnostic; nothing changed).
+ */
+static int genesis_accept_interrupt(GenesisRuntime *runtime, uint32_t level, GenesisControlTransfer *result) {
+  GenesisM68kExceptionContext context = {0};
+  SegarecompM68kMachineHooks hooks;
+  SegarecompM68kCpuBinding cpu;
+  uint32_t handler_entry = 0U;
+  SegarecompM68kExceptionStatus status;
+  context.runtime = runtime;
+  hooks = genesis_m68k_exception_hooks(&context);
+  cpu = genesis_m68k_cpu_binding(runtime);
+  status = segarecomp_m68k_interrupt_enter(
+      &hooks, &cpu, &runtime->m68k_interrupt, level,
+      segarecomp_m68k_interrupt_vector(SEGARECOMP_M68K_INTERRUPT_ACK_AUTOVECTOR, level, 0U), result->next_pc,
+      &handler_entry);
+  return genesis_finish_exception_entry(status, context.frame_write_failed, handler_entry,
+                                        GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+                                        GENESIS_DIAG_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT, result);
+}
+
+static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m68k_cycles,
+                                            int admit_interrupt, GenesisControlTransfer *result);
+
+/*
  * The synchronous (never scheduled, never masked) exception raise shared by
- * vector 5 and vector 8: builds the frame through the core and completes the
- * faulting instruction's diagnostic boundary (the generated lowering returns
+ * vectors 4-8, 10, 11 and 32-47: builds the frame through the core and completes
+ * the faulting instruction's diagnostic boundary (the generated lowering returns
  * the handler transfer directly and never reaches the retirement path).
+ * SEG-021-T022 / ADR 0043 §8: after the entry commits, the CPU-owned
+ * exception-processing time `entry_cycles` advances the deterministic scheduler
+ * (ADR 0041) exactly as a retirement would, but admits no interrupt at this
+ * boundary (a request latched here is admitted at the next retirement boundary,
+ * as before). A zero count is refused before anything changes.
  */
 static int genesis_raise_synchronous_exception(GenesisRuntime *runtime, uint32_t vector, uint32_t stacked_pc,
-                                               GenesisStopClass fail_stop_class, GenesisDiagnosticCategory fail_diag,
-                                               uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out) {
+                                               uint32_t entry_cycles, GenesisStopClass fail_stop_class,
+                                               GenesisDiagnosticCategory fail_diag, uint32_t *handler_pc_out,
+                                               GenesisRuntimeStop *stop_out) {
   GenesisControlTransfer result = {0};
   if (runtime == 0 || handler_pc_out == 0 || stop_out == 0) {
     if (stop_out != 0)
       *stop_out = genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
                                       GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY);
+    return 0;
+  }
+  if (entry_cycles == 0U) {
+    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+                                    GENESIS_DIAG_UNACCOUNTED_INSTRUCTION_TIMING);
     return 0;
   }
   if (!genesis_construct_exception_frame_and_transfer(runtime, vector, stacked_pc, UINT16_C(0x7FFF), UINT16_C(0x2000),
@@ -2226,9 +2329,18 @@ static int genesis_raise_synchronous_exception(GenesisRuntime *runtime, uint32_t
     return 0;
   }
   *handler_pc_out = result.next_pc;
+  /* SEG-021-T022: charge the entry (no admission). Only a virtual-time overflow can fail here, after the committed
+     entry; it is a terminal stop like every other scheduler overflow. */
+  {
+    GenesisControlTransfer charge = {0};
+    if (genesis_irq6_scheduler_and_admit(runtime, entry_cycles, 0, &charge) == 2) {
+      *stop_out = charge.stop;
+      return 0;
+    }
+  }
   /* SEG-020-T004: runtime->pc is already the handler entry, the frame writes and trap
      effect are pending; the faulting instruction's diagnostic boundary completes here
-     (exactly once). No retirement, scheduler tick or IRQ admission. */
+     (exactly once). No retirement or IRQ admission. */
   if (runtime->m68k_checkpoint.enabled) genesis_m68k_checkpoint_finalize(runtime);
   return 1;
 }
@@ -2240,9 +2352,9 @@ static int genesis_raise_synchronous_exception(GenesisRuntime *runtime, uint32_t
  * mask, NOT admitted at any scheduler/dispatch boundary, and does not consume
  * or arm any IRQ6-only admission-grace/watchdog-credit state.
  */
-int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc,
+int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc, uint32_t entry_cycles,
                                  uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out) {
-  return genesis_raise_synchronous_exception(runtime, GENESIS_M68K_VECTOR_ZERO_DIVIDE, fault_pc,
+  return genesis_raise_synchronous_exception(runtime, GENESIS_M68K_VECTOR_ZERO_DIVIDE, fault_pc, entry_cycles,
                                              GENESIS_STOP_UNSUPPORTED_CPU_FORM,
                                              GENESIS_DIAG_UNSUPPORTED_DIVIDE_BY_ZERO_EXCEPTION, handler_pc_out,
                                              stop_out);
@@ -2255,12 +2367,69 @@ int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc,
  * that instruction has executed. The saved SR has S = 0; the frame goes on the
  * SSP (the inactive slot) and the USP moves to the inactive slot.
  */
-int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc,
+int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc, uint32_t entry_cycles,
                                       uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out) {
-  return genesis_raise_synchronous_exception(runtime, GENESIS_M68K_VECTOR_PRIVILEGE_VIOLATION, fault_pc,
+  return genesis_raise_synchronous_exception(runtime, GENESIS_M68K_VECTOR_PRIVILEGE_VIOLATION, fault_pc, entry_cycles,
                                              GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION,
                                              GENESIS_DIAG_UNSUPPORTED_PRIVILEGE_VIOLATION_EXCEPTION, handler_pc_out,
                                              stop_out);
+}
+
+/*
+ * SEG-021-T019 / ADR 0043 §3: the software exceptions (TRAP #n, TRAPV, CHK,
+ * ILLEGAL, line 1010/1111 and every other illegal word) share the synchronous
+ * raise; only the build-time vector and stacked PC differ.
+ */
+int genesis_raise_software_exception(GenesisRuntime *runtime, uint32_t vector, uint32_t stacked_pc,
+                                     uint32_t entry_cycles, uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out) {
+  if (!genesis_is_software_exception_vector(vector)) {
+    if (stop_out != 0)
+      *stop_out = genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
+                                      GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY);
+    return 0;
+  }
+  return genesis_raise_synchronous_exception(runtime, vector, stacked_pc, entry_cycles,
+                                             GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION,
+                                             GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION, handler_pc_out, stop_out);
+}
+
+/*
+ * SEG-021-T019 / ADR 0043 §5: RTR through the M68K-owned frame-return core
+ * (validated routed reads, atomic CCR/PC/SP commit, no privilege check and no
+ * exception-return notification: RTR is not an exception return).
+ */
+int genesis_return_restore_condition_codes(GenesisRuntime *runtime, uint32_t *restored_pc_out,
+                                           GenesisRuntimeStop *stop_out) {
+  GenesisM68kExceptionContext context = {0};
+  SegarecompM68kMachineHooks hooks;
+  SegarecompM68kCpuBinding cpu;
+  SegarecompM68kExceptionStatus status;
+  if (runtime == 0 || restored_pc_out == 0 || stop_out == 0) {
+    if (stop_out != 0)
+      *stop_out = genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
+                                      GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY);
+    return 0;
+  }
+  context.runtime = runtime;
+  hooks = genesis_m68k_exception_hooks(&context);
+  cpu = genesis_m68k_cpu_binding(runtime);
+  status = segarecomp_m68k_return_restore_ccr(&hooks, &cpu, restored_pc_out);
+  switch (status) {
+  case SEGARECOMP_M68K_EXCEPTION_OK: return 1;
+  case SEGARECOMP_M68K_EXCEPTION_STACK_INVALID:
+    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_ALIGNMENT);
+    return 0;
+  case SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED:
+    *stop_out = context.routed;
+    return 0;
+  case SEGARECOMP_M68K_EXCEPTION_TRACE_DEFERRED:
+  case SEGARECOMP_M68K_EXCEPTION_VECTOR_UNAVAILABLE:
+  case SEGARECOMP_M68K_EXCEPTION_BAD_BINDING:
+    break;
+  }
+  *stop_out = genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
+                                  GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY);
+  return 0;
 }
 
 /*
@@ -2280,7 +2449,7 @@ int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc
  */
 static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m68k_cycles,
                                             int admit_interrupt, GenesisControlTransfer *result) {
-  uint32_t mask;
+  uint32_t level;
   const uint64_t before = runtime->scheduler.master_ticks;
   const uint64_t delta = (uint64_t)m68k_cycles * GENESIS_M68K_CYCLE_MASTER_TICKS;
   const uint64_t frame = GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
@@ -2330,26 +2499,90 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
     }
   }
 
-  if (!admit_interrupt || !runtime->devices.interrupt.vblank_pending) return 0; /* §5 step 4 */
+  /* SEG-021-T020 / ADR 0043 §7: this boundary samples the machine's request
+     level into the M68K-owned CPU record. Genesis wires one source: the
+     pending VBlank requests level 6 (autovectored). */
+  segarecomp_m68k_interrupt_sample(&runtime->m68k_interrupt,
+                                   runtime->devices.interrupt.vblank_pending ? 6U : 0U);
+  if (!admit_interrupt) return 0;                                  /* §5 step 4 */
 
-  /* §4: SR interrupt-mask eligibility (SR bits 10-8 vs level 6). */
-  mask = (uint32_t)((runtime->sr >> 8) & 0x7U);
-  if (mask >= 6U) return 0;                                        /* §5 step 3: masked, stays pending */
+  /* §4 / ADR 0043: the CPU-owned acceptance rule (level > SR mask for 1-6;
+     level 7 transition-sensitive). A masked request stays pending (§5 step 3). */
+  level = segarecomp_m68k_interrupt_recognized_level(&runtime->m68k_interrupt, runtime->sr);
+  if (level == 0U) return 0;
 
   if (!runtime->irq6_handler_present) return 0;                    /* no build-resolved handler */
 
-  /* SEG-007-T222 / ADR-0037: frame construction/commit delegates to the
-     shared helper (byte-identical checks/order/commit to the prior inline
-     body); only the IRQ6-specific `vblank_pending` re-arm (§3) stays here,
-     performed after a successful commit, exactly as before. */
-  if (!genesis_construct_exception_frame_and_transfer(
-          runtime, GENESIS_M68K_VECTOR_LEVEL6_AUTOVECTOR, result->next_pc, UINT16_C(0x78FF), UINT16_C(0x2600),
-          GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
-          GENESIS_DIAG_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT, result)) {
-    return 2;
-  }
+  /* SEG-007-T222 / ADR-0037, SEG-021-T020: the frame and commit go through the
+     M68K-owned interrupt entry (identical checks/order/commit: vector 30, SR <-
+     (SR & 0x78FF) | 0x2600, the next instruction stacked); only the
+     IRQ6-specific `vblank_pending` re-arm (§3) stays here, performed after a
+     successful commit, exactly as before. */
+  if (!genesis_accept_interrupt(runtime, level, result)) return 2;
   runtime->devices.interrupt.vblank_pending = 0U;                  /* §3 re-arm (admission clears) */
+  /* SEG-021-T022 / ADR 0043 §8: the interrupt exception-processing cost -- 44 cycles for the autovectored entry, CPU-owned --
+     advances the same scheduler after the entry commits, admitting nothing at that boundary; a VBlank onset
+     crossed while it is charged latches normally and is admitted at the next retirement boundary. */
+  {
+    const uint32_t entry_cycles = segarecomp_m68k_exception_entry_cycles(
+        segarecomp_m68k_interrupt_vector(SEGARECOMP_M68K_INTERRUPT_ACK_AUTOVECTOR, level, 0U));
+    GenesisControlTransfer charge = {0};
+    if (genesis_irq6_scheduler_and_admit(runtime, entry_cycles, 0, &charge) == 2) {
+      result->kind = GENESIS_STOP;
+      result->stop = charge.stop;
+      return 2;
+    }
+  }
   return 1;
+}
+
+/*
+ * SEG-021-T020 / ADR 0043 §7, ADR 0041: the Genesis `wait_while_stopped`
+ * scheduler hook. Runs at the retirement boundary of a STOP whose own boundary
+ * admitted nothing. The CPU executes no instruction while stopped, so nothing
+ * but virtual time can change the machine's interrupt sources: the only wired
+ * source is the VBlank level-6 request, which can wake the CPU iff its handler
+ * is installed, it is already pending or VDP register 1 IE0 is set, and the
+ * mask STOP loaded is below 6 (segarecomp_m68k_stop_wake_possible). If it can,
+ * virtual time advances -- in whole CPU cycles, through the same scheduler --
+ * to the first whole-cycle boundary at or after the next VBlank onset (at most
+ * one CPU cycle late), where the request latches and is accepted
+ * with the instruction after STOP stacked. Otherwise the run ends with the
+ * explicit stopped_without_wake_source diagnostic instead of spinning.
+ */
+static void genesis_m68k_wait_while_stopped(GenesisRuntime *runtime, GenesisControlTransfer *result) {
+  const uint64_t now = runtime->scheduler.master_ticks;
+  const uint64_t frame = GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
+  const uint64_t onset = GENESIS_NTSC_VBLANK_ONSET_TICK;
+  const int vblank_source = runtime->irq6_handler_present &&
+                            (runtime->devices.interrupt.vblank_pending ||
+                             (runtime->devices.vdp.registers[1] & UINT16_C(0x0020)) != 0U);
+  uint64_t target;
+  uint64_t ticks;
+  if (!segarecomp_m68k_stop_wake_possible(&runtime->m68k_interrupt, vblank_source ? 6U : 0U, runtime->sr)) {
+    *result = (GenesisControlTransfer){0};
+    result->kind = GENESIS_STOP;
+    result->stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+                                       GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE);
+    return;
+  }
+  /* The next onset strictly after `now` (an onset at exactly `now` was already
+     crossed by the advance that reached it). */
+  target = now < onset ? onset : onset + ((now - onset) / frame + 1U) * frame;
+  ticks = target - now;
+  if (genesis_irq6_scheduler_and_admit(
+          runtime, (uint32_t)((ticks + GENESIS_M68K_CYCLE_MASTER_TICKS - 1U) / GENESIS_M68K_CYCLE_MASTER_TICKS), 1,
+          result) == 0) {
+    /* Unreachable by the wake condition above; never spin. */
+    *result = (GenesisControlTransfer){0};
+    result->kind = GENESIS_STOP;
+    result->stop = genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
+                                       GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY);
+  }
+}
+
+void genesis_m68k_enter_stopped_state(GenesisRuntime *runtime) {
+  if (runtime != 0) runtime->m68k_interrupt.stopped = 1U;
 }
 
 /*
@@ -2412,6 +2645,9 @@ static GenesisControlTransfer genesis_runtime_retire_m68k_instruction_impl(
   result.next_pc = next_pc;
   runtime->pc = next_pc;
   (void)genesis_irq6_scheduler_and_admit(runtime, m68k_cycles, !stop_pending, &result);
+  /* SEG-021-T020: a STOP whose own boundary accepted nothing waits here. */
+  if (!stop_pending && result.kind == GENESIS_CONTINUE_AT_PC && runtime->m68k_interrupt.stopped)
+    genesis_m68k_wait_while_stopped(runtime, &result);
   if (runtime->m68k_checkpoint.enabled) genesis_m68k_checkpoint_finalize(runtime);
   if (stop_pending && result.kind == GENESIS_CONTINUE_AT_PC) return *pending_stop;
   return result;
@@ -2771,6 +3007,8 @@ static const char *genesis_diagnostic_name(GenesisDiagnosticCategory value) {
   case GENESIS_DIAG_TIER2_COMPUTED_TARGET_NOT_EMITTED: return "tier2_computed_target_not_emitted";
   case GENESIS_DIAG_UNSUPPORTED_PRIVILEGE_VIOLATION_EXCEPTION: return "unsupported_privilege_violation_exception";
   case GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION: return "unsupported_trace_exception";
+  case GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION: return "unsupported_software_exception";
+  case GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE: return "stopped_without_wake_source";
   default: return 0;
   }
 }
@@ -2802,7 +3040,8 @@ static int genesis_valid_stop_pair(GenesisStopClass stop_class,
   case GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET:
     return category == GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET;
   case GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT:
-    return 0;
+    /* SEG-021-T020: a STOP with no possible wake source. */
+    return category == GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE;
   case GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY:
     return category == GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY;
   case GENESIS_STOP_INSTRUCTION_BUDGET_EXHAUSTED:
@@ -2813,7 +3052,8 @@ static int genesis_valid_stop_pair(GenesisStopClass stop_class,
     return category == GENESIS_DIAG_C4_LOWERING_GAP;
   case GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION:
     return category == GENESIS_DIAG_UNSUPPORTED_PRIVILEGE_VIOLATION_EXCEPTION ||
-           category == GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION;
+           category == GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION ||
+           category == GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION;
   }
   return 0;
 }

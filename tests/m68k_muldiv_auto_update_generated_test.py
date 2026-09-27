@@ -29,13 +29,13 @@ GENESIS_M68K_CYCLE_MASTER_TICKS = 7
 
 
 def mulu_word_cycles(source: int) -> int:
-    """Independent transcription of the generated `genesis_m68k_mulu_word_cycles` helper
-    (libs/codegen/c11/src/frontend.cpp): 38 + 2 * popcount(source)."""
+    """Independent transcription of the CPU-owned `segarecomp_m68k_mulu_word_cycles` rule
+    (libs/cpu/m68k timing_core.h, MC68000 UM Table 8-4): 38 + 2 * popcount(source)."""
     return 38 + 2 * bin(source & 0xFFFF).count("1")
 
 
 def muls_word_cycles(source: int) -> int:
-    """Independent transcription of the generated `genesis_m68k_muls_word_cycles` helper:
+    """Independent transcription of the CPU-owned `segarecomp_m68k_muls_word_cycles` rule:
     38 + 2 * (number of adjacent-bit transitions in (source << 1), bits 0..16)."""
     bits = (source & 0xFFFF) << 1
     n = 0
@@ -123,6 +123,93 @@ int main(void) {{
     # regression would genuinely fail at a head that always captures the zero default.
     assert mulu_word_cycles(0x0000) != mulu_word_cycles(0xFFFF)
     assert muls_word_cycles(0x0000) != muls_word_cycles(0xFFFF)
+
+
+def divu_word_cycles(dividend: int, divisor: int) -> int:
+    """SEG-021-T022: test-owned transcription of the exact MC68000 DIVU.W time (J. Cwik's analysis of the division
+    microcode; MC68000 UM Table 8-4 publishes only "< 140"), excluding the EA cell. Expressed in microcycle pairs:
+    overflow 5; otherwise 38 plus, per quotient step 1..15, 0 when the partial remainder's top bit shifts out, else 2,
+    or 1 when the shifted remainder still covers the divisor (it is then subtracted)."""
+    assert divisor != 0
+    if (dividend >> 16) >= divisor:
+        return 2 * 5
+    pairs, remainder, high = 38, dividend & 0xFFFFFFFF, divisor << 16
+    for _ in range(15):
+        carry = remainder >> 31
+        remainder = (remainder << 1) & 0xFFFFFFFF
+        if carry:
+            remainder = (remainder - high) & 0xFFFFFFFF
+        elif remainder >= high:
+            remainder -= high
+            pairs += 1
+        else:
+            pairs += 2
+    return 2 * pairs
+
+
+def divs_word_cycles(dividend: int, divisor: int) -> int:
+    """SEG-021-T022: test-owned transcription of the exact MC68000 DIVS.W time (same analysis; UM: "< 158"),
+    excluding the EA cell, in microcycle pairs: 6 (+1 for a negative dividend); absolute overflow +2; otherwise +55,
+    -1/+1 for a positive divisor with a positive/negative dividend, +1 per 0 among bits 15..1 of |quotient|."""
+    assert divisor & 0xFFFF
+    s_dividend = dividend - (1 << 32) if dividend & 0x80000000 else dividend
+    s_divisor = divisor - (1 << 16) if divisor & 0x8000 else divisor
+    pairs = 6 + (1 if s_dividend < 0 else 0)
+    if (abs(s_dividend) >> 16) >= abs(s_divisor):
+        return 2 * (pairs + 2)
+    quotient = abs(s_dividend) // abs(s_divisor)
+    pairs += 55
+    if s_divisor >= 0:
+        pairs += 1 if s_dividend < 0 else -1
+    pairs += sum(1 for bit in range(1, 16) if not (quotient >> bit) & 1)
+    return 2 * pairs
+
+
+# Representative dividend/divisor pairs: quotient bit patterns from all-ones to sparse, every sign combination,
+# absolute and signed overflow, the most negative dividend and a +/-1 divisor.
+DIV_TIMING_CASES = [(100, 5), (0x0000FFFF, 1), (0xFFFFFFFE, 0xFFFF), (0x7FFFFFFF, 0x8000), (0x00010000, 0x0002),
+                    (0x00000000, 0x0001), (0x12345678, 0x9ABC), (0xFFFF8000, 0x0001), (0x80000000, 0xFFFF),
+                    (0x80000000, 0x0001), (0xFFFFFFFF, 0x0001), (0x0000FFFF, 0xFFFF), (0x00050000, 0x0004),
+                    (0xFFFB0000, 0x0004), (0x00007FFF, 0x0002), (0x00FF00FF, 0x0100), (0x00000001, 0x8000)]
+
+DIV_CASE_TEMPLATE = """  { GenesisRuntime runtime = {0};
+    runtime.pc = UINT32_C(0x00000B00); runtime.sr = UINT16_C(0x2700); runtime.a[7] = UINT32_C(0x00FF0100);
+    runtime.divide_by_zero_handler_present = 1U; runtime.divide_by_zero_handler_entry = UINT32_C(0x00001234);
+    runtime.d[3] = UINT32_C(%d); %s
+    (void)genesis_bridge_dispatch(&runtime);
+    if (runtime.scheduler.master_ticks != UINT64_C(%d)) {
+      printf("%s %08X/%04X: ticks %%llu\\n", (unsigned long long)runtime.scheduler.master_ticks); return 1; } }
+"""
+
+
+def div_timing_regression(executable, compiler, runtime_dir, runtime_c, work):
+    """SEG-021-T022: DIVU.W/DIVS.W D2,D3 retire their exact data-dependent time and a zero divisor charges the
+    vector-5 entry (38 + the Dn EA cell 0) instead; DIVU.W (A0)+,D3 adds the (An)+ word cell to both."""
+    # Published envelope (Table 8-4: DIVU < 140, DIVS < 158) and the overflow shortcuts.
+    assert all(76 <= divu_word_cycles(a, b) <= 136 for a in range(0, 1 << 32, 0x01234567)
+               for b in (1, 3, 0x7FFF, 0xFFFF) if (a >> 16) < b)
+    assert all(16 <= divs_word_cycles(a, b) <= 156 for a in range(0, 1 << 32, 0x01234567) for b in (1, 3, 0x8001, 0xFFFF))
+    assert divu_word_cycles(0x00010000, 1) == 10 and divs_word_cycles(0x00010000, 1) == 16
+    assert divs_word_cycles(0x80000000, 0xFFFF) == 18  # |0x80000000| >> 16 >= 1: absolute overflow
+    for flag, model, ea_cycles in (("--emit-operation-c4-divu-word", divu_word_cycles, 0),
+                                   ("--emit-operation-c4-divs-word", divs_word_cycles, 0),
+                                   ("--emit-operation-c4-divu-word-auto-update", divu_word_cycles, 4)):
+        generated = checked([executable, flag]).stdout
+        assert not generated.startswith("/* translation rejected:"), generated
+        assert "m68k_timing_div_dividend" in generated and "m68k_timing_div_divisor" in generated, flag
+        auto = "auto-update" in flag
+        name = flag[len("--emit-operation-c4-"):]
+        checks = []
+        for dividend, divisor in DIV_TIMING_CASES + [(0x12345678, 0)]:
+            expected = (model(dividend, divisor) if divisor else 38) + ea_cycles
+            source = ("runtime.work_ram[0x20] = (uint8_t)(UINT32_C(%d) >> 8); runtime.work_ram[0x21] = "
+                      "(uint8_t)UINT32_C(%d); runtime.a[0] = UINT32_C(0x00FF0020);" % (divisor, divisor)) if auto else \
+                "runtime.d[2] = UINT32_C(%d);" % divisor
+            checks.append(DIV_CASE_TEMPLATE % (dividend, source, expected * GENESIS_M68K_CYCLE_MASTER_TICKS, name,
+                                               dividend, divisor))
+        harness = ('#include <stdint.h>\n#include <stdio.h>\n#include "runtime.h"\n#include "generated.c"\n'
+                   "int main(void) {\n" + "".join(checks) + "  return 0;\n}\n")
+        build_and_run(compiler, runtime_dir, runtime_c, work, "div-timing-" + name, generated, harness)
 
 
 def div_pc_indexed_execution_regression(executable, compiler, runtime_dir, runtime_c, work):
@@ -228,7 +315,9 @@ def main():
         mul_auto_update_timing_regression(executable, compiler, runtime_dir, runtime_c, work)
         div_pc_indexed_execution_regression(executable, compiler, runtime_dir, runtime_c, work)
         divu_auto_update_ordering_regression(executable, compiler, runtime_dir, runtime_c, work)
-    print("MUL auto-update timing, DIV (d8,PC,Xn) execution, and DIV auto-update ordering regressions pass")
+        div_timing_regression(executable, compiler, runtime_dir, runtime_c, work)
+    print("MUL auto-update timing, DIV (d8,PC,Xn) execution, DIV auto-update ordering and exact DIV timing "
+          "regressions pass")
     return 0
 
 

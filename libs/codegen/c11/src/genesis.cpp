@@ -78,7 +78,9 @@ std::string emit_genesis_bridge_c11_main(std::string_view initial_ssp, std::stri
 std::string emit_genesis_bridge_c11_main_open(std::string_view initial_ssp, std::string_view entry_pc,
                                              std::string_view irq6_handler_entry_hex,
                                              std::string_view divide_by_zero_handler_entry_hex,
-                                             std::string_view privilege_violation_handler_entry_hex) {
+                                             std::string_view privilege_violation_handler_entry_hex,
+                                             const std::vector<std::pair<std::uint32_t, std::string>>
+                                                 &software_exception_handler_entry_hex) {
   std::string open =
       "int main(int argc, char **argv) { GenesisRuntime runtime = {0}; GenesisControlTransfer result; "
       "const char *report_path; const char *report_fd; uint32_t instruction_budget = UINT32_C(128); "
@@ -96,6 +98,10 @@ std::string emit_genesis_bridge_c11_main_open(std::string_view initial_ssp, std:
   if (!privilege_violation_handler_entry_hex.empty())
     open += "runtime.privilege_violation_handler_entry = UINT32_C(" + std::string(privilege_violation_handler_entry_hex) +
             "); runtime.privilege_violation_handler_present = 1; ";
+  // SEG-021-T019 / ADR 0043 §7: the software-exception vector table, indexed by vector number.
+  for (const auto &[vector, handler_hex] : software_exception_handler_entry_hex)
+    open += "runtime.software_exception_handler_entry[" + std::to_string(vector) + "] = UINT32_C(" + handler_hex +
+            "); runtime.software_exception_handler_present[" + std::to_string(vector) + "] = 1; ";
   return open;
 }
 

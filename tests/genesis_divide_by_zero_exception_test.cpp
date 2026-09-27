@@ -25,6 +25,8 @@ void check(bool ok, const char *what) {
 constexpr uint32_t kRamBegin = 0x00FF0000u;
 constexpr uint32_t kHandler = 0x00002000u;
 constexpr uint32_t kFaultPc = 0x00000B02u;  // instruction following the faulting DIVS.W/DIVU.W
+// SEG-021-T022: the CPU-owned zero-divide entry time for a register-direct divisor (38 + the Dn EA cell 0).
+constexpr uint32_t kEntryCycles = 38u;
 
 void prime(GenesisRuntime &r) {
   r = GenesisRuntime{};
@@ -48,7 +50,7 @@ void frame_is_correct_and_rte_restores_for_each_interrupt_mask() {
   const uint16_t saved_sr = r.sr;
   uint32_t handler_pc = 0;
   GenesisRuntimeStop stop{};
-  const int ok = genesis_raise_divide_by_zero(&r, kFaultPc, &handler_pc, &stop);
+  const int ok = genesis_raise_divide_by_zero(&r, kFaultPc, kEntryCycles, &handler_pc, &stop);
   check(ok == 1, "divide-by-zero raise succeeds with a build-resolved handler");
   check(handler_pc == kHandler, "raise jumps to the build-resolved vector-5 handler entry");
   check(r.pc == kHandler, "runtime->pc is set to the handler entry");
@@ -98,7 +100,7 @@ void no_handler_fails_closed_with_no_mutation() {
   const auto saved = r;
   uint32_t handler_pc = 0;
   GenesisRuntimeStop stop{};
-  const int ok = genesis_raise_divide_by_zero(&r, kFaultPc, &handler_pc, &stop);
+  const int ok = genesis_raise_divide_by_zero(&r, kFaultPc, kEntryCycles, &handler_pc, &stop);
   check(ok == 0, "no handler installed fails closed");
   check(stop.stop_class == GENESIS_STOP_UNSUPPORTED_CPU_FORM, "stop class is CPU-form (synchronous exception delivery)");
   check(stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DIVIDE_BY_ZERO_EXCEPTION,
@@ -120,7 +122,7 @@ void user_mode_entry_switches_to_the_supervisor_stack() {
   const auto saved_user_ram = r.work_ram[0x8000u - 6u];
   uint32_t handler_pc = 0;
   GenesisRuntimeStop stop{};
-  check(genesis_raise_divide_by_zero(&r, kFaultPc, &handler_pc, &stop) == 1, "user-mode vector 5 enters");
+  check(genesis_raise_divide_by_zero(&r, kFaultPc, kEntryCycles, &handler_pc, &stop) == 1, "user-mode vector 5 enters");
   check(r.a[7] == supervisor_sp - 6u, "the frame is on the SSP");
   check(r.usp == user_sp, "the USP moves to the inactive slot");
   check(r.sr == 0x2015u, "entry sets S and keeps the mask and CCR");
@@ -142,29 +144,46 @@ void not_gated_by_interrupt_mask() {
   r.sr = 0x2700u;  // S = 1, mask = 7 (would block IRQ6 entirely)
   uint32_t handler_pc = 0;
   GenesisRuntimeStop stop{};
-  const int ok = genesis_raise_divide_by_zero(&r, kFaultPc, &handler_pc, &stop);
+  const int ok = genesis_raise_divide_by_zero(&r, kFaultPc, kEntryCycles, &handler_pc, &stop);
   check(ok == 1, "divide-by-zero is admitted even with the SR interrupt mask fully closed");
   check(handler_pc == kHandler, "handler still resolved correctly under a masked SR");
   check((r.sr & 0x0700u) == 0x0700u, "fully closed interrupt mask remains closed in the handler");
 }
 
-// Does not touch IRQ6 virtual-time or pending state.
-void does_not_touch_irq6_scheduler_state() {
+// SEG-021-T022: the entry charges exactly its CPU-owned exception-processing time to virtual time (the former
+// "untouched" expectation predates exception-entry timing), but never consumes or admits the pending IRQ6.
+void charges_entry_time_without_touching_irq6_pending_state() {
   GenesisRuntime r;
   prime(r);
   r.scheduler.master_ticks = 42u;
   r.devices.interrupt.vblank_pending = 1u;
   uint32_t handler_pc = 0;
   GenesisRuntimeStop stop{};
-  check(genesis_raise_divide_by_zero(&r, kFaultPc, &handler_pc, &stop) == 1, "raise succeeds");
-  check(r.scheduler.master_ticks == 42u, "IRQ6 virtual-time phase untouched");
+  check(genesis_raise_divide_by_zero(&r, kFaultPc, kEntryCycles, &handler_pc, &stop) == 1, "raise succeeds");
+  check(r.scheduler.master_ticks == 42u + kEntryCycles * GENESIS_M68K_CYCLE_MASTER_TICKS,
+        "virtual time advances by exactly the vector-5 entry time");
   check(r.devices.interrupt.vblank_pending == 1u, "VBlank-pending flag untouched (not re-armed/consumed)");
+  check(r.pc == kHandler, "no interrupt admitted at the entry boundary");
   uint32_t restored_pc = 0;
   GenesisRuntimeStop rte_stop{};
   check(genesis_exception_return(&r, &restored_pc, &rte_stop) == 1, "vector-5 RTE succeeds");
   check(restored_pc == kFaultPc, "vector-5 RTE restores the saved PC");
-  check(r.scheduler.master_ticks == 42u,
-        "vector-5 RTE leaves IRQ6 virtual time untouched");
+  check(r.scheduler.master_ticks == 42u + kEntryCycles * GENESIS_M68K_CYCLE_MASTER_TICKS,
+        "the RTE frame pop itself charges nothing (its retirement does)");
+}
+
+// SEG-021-T022: an entry with no published time fails closed before anything changes.
+void zero_entry_time_fails_closed_with_no_mutation() {
+  GenesisRuntime r;
+  prime(r);
+  const auto saved = r;
+  uint32_t handler_pc = 0;
+  GenesisRuntimeStop stop{};
+  check(genesis_raise_divide_by_zero(&r, kFaultPc, 0u, &handler_pc, &stop) == 0, "a zero entry time fails closed");
+  check(stop.diagnostic_category == GENESIS_DIAG_UNACCOUNTED_INSTRUCTION_TIMING, "unaccounted timing diagnostic");
+  check(r.pc == saved.pc && r.sr == saved.sr && r.a[7] == saved.a[7] &&
+            r.scheduler.master_ticks == saved.scheduler.master_ticks,
+        "nothing changed");
 }
 
 }  // namespace
@@ -174,7 +193,8 @@ int main() {
   no_handler_fails_closed_with_no_mutation();
   user_mode_entry_switches_to_the_supervisor_stack();
   not_gated_by_interrupt_mask();
-  does_not_touch_irq6_scheduler_state();
+  charges_entry_time_without_touching_irq6_pending_state();
+  zero_entry_time_fails_closed_with_no_mutation();
   if (failures == 0) std::printf("ok\n");
   return failures == 0 ? 0 : 1;
 }

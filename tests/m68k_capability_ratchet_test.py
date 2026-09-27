@@ -64,6 +64,20 @@ if tolerated:
 # The committed human report and snapshot must agree.
 check(REPORT.read_text(encoding="utf-8") == tool.render_report(snapshot), "report does not match snapshot")
 
+# SEG-021-T019: production legality agrees with the independent partition word for word; no reserved word is
+# misclassified or over-accepted; the architecturally-illegal handled counts never drop.
+arch = current["architecturally_illegal_words"]
+check(arch["production_classification_mismatches"] == 0,
+      "production legality disagrees with the T001 partition: %s" % arch["first_mismatches"])
+check(not current["decode_over_acceptance_words"], "decode over-acceptance: %s" % current["decode_over_acceptance_words"])
+for cls, entry in arch["by_partition_class"].items():
+    check(entry["misclassified"] == 0, "%s words misclassified" % cls)
+    before = snapshot.get("architecturally_illegal_words", {}).get("by_partition_class", {}).get(cls)
+    if before is not None:
+        check(entry["handled"] >= before["handled"], "%s handled words dropped" % cls)
+check(current["architecturally_illegal_words"] == snapshot.get("architecturally_illegal_words"),
+      "architecturally-illegal accounting changed without a deliberate snapshot update")
+
 # Validation manifest: words are legal words; batch fixtures' vector words are all listed.
 manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
 _, forms = tool.load_forms()
@@ -79,7 +93,13 @@ for name in ("m68k-batch-b-musashi-vectors", "m68k-batch-c-musashi-vectors"):
     words = {int(v["code_hex"][:4], 16) for v in vectors}
     for key in ("semantic_validated_words", "ccr_sr_validated_words", "ea_side_effect_validated_words"):
         check(words <= {int(w, 16) for w in manifest[key]}, "%s words missing from manifest %s" % (name, key))
-check(manifest["timing_validated_words"] == [], "no timing oracle test exists; timing manifest must stay empty until one does")
+# SEG-021-T021: the only timing oracle is the conformance table's `"timing": true` rows (pinned Musashi cycle report
+# versus the generated retirement rule); timing words are legal, semantically validated, and attributed only to it.
+timing_words = manifest["timing_validated_words"]
+check(isinstance(timing_words, dict) and timing_words, "timing manifest must be a non-empty word -> sources map")
+check({int(w, 16) for w in timing_words} <= semantic & legal, "timing aspect must be legal and a subset of semantic")
+check(all(s == ["tests/fixtures/m68k-conformance-vectors.json"] for s in timing_words.values()),
+      "timing words may only be credited by the conformance table's timing rows")
 
 # Independence in both directions.
 tool_text = TOOL.read_text(encoding="utf-8")

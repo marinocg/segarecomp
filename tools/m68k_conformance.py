@@ -22,7 +22,10 @@ self-consistency checks (every word emits, compiles strictly, runs, is determini
 
 Measured limits (honest): a profile's SR seeds select supervisor or user state (SEG-021-T018: user-mode seeds
 exercise the privilege-violation entry and the SSP/USP swap); a write of a value equal to the previous byte is
-invisible; timing is not compared; operand binding covers register-direct, (An), (An)+, -(An) EAs
+invisible; timing is compared only for rows that set ``"timing": true`` (SEG-021-T021: the generated side reports
+the value of the shared retirement timing expression for the executed outcome, the oracle side the cycles
+``m68k_execute`` consumed for exactly that instruction; fidelity is published instruction cycle totals, not bus
+cycles); operand binding covers register-direct, (An), (An)+, -(An) EAs
 (``bind_operand``) and grows by adding cases there, not by adding runners.
 
     python3 tools/m68k_conformance.py --emitter build/dev/tests/m68k_conformance_emitter --cc cc \
@@ -47,6 +50,7 @@ TABLE = ROOT / "tests" / "fixtures" / "m68k-conformance-vectors.json"
 FORMS = ROOT / "tests" / "fixtures" / "m68k-legal-forms.json"
 MANIFEST = ROOT / "tests" / "fixtures" / "m68k-validation-manifest.json"
 TOOLS = ROOT / "tests" / "tools"
+CPU_INCLUDE = ROOT / "libs" / "cpu" / "m68k" / "include"  # SEG-021-T022: timing_core.h for the MUL/DIV timing rules
 SOURCE_TAG = "tests/fixtures/m68k-conformance-vectors.json"
 CHECKOUT_ENVS = ("SEGARECOMP_M68K_CONFORMANCE_MUSASHI_CHECKOUT", "SEGARECOMP_M68K_MULS_WORD_MUSASHI_CHECKOUT",
                  "SEGARECOMP_M68K_BATCH_B_MUSASHI_CHECKOUT")
@@ -81,6 +85,39 @@ def load_forms() -> dict:
 
 def form_words(form: dict) -> list[int]:
     return [w for lo, hi in form["word_ranges"] for w in range(lo, hi + 1)]
+
+
+def partition_words(classes: list[str], exclude: list[list[str]]) -> list[int]:
+    """SEG-021-T019: the primary words the T001 partition assigns to the named NON-legal classes (architecturally
+    reserved words that raise an exception on the MC68000), minus literal excluded ranges. Table data selects the
+    classes; this tool holds no legality knowledge of its own."""
+    data = json.loads(FORMS.read_text(encoding="utf-8"))
+    partition = data["primary_word_partition"]
+    legend = partition["legend"]
+    wanted = set(classes)
+    if wanted & {"legal_user", "legal_privileged"}:
+        raise ValueError("partition rows name architecturally reserved classes only")
+    excluded = {w for lo, hi in exclude for w in range(int(lo, 16), int(hi, 16) + 1)}
+    return [w for w in range(0x10000)
+            if legend[partition["rows"][w >> 8][w & 0xFF]] in wanted and w not in excluded]
+
+
+def row_form(row: dict, forms: dict) -> dict:
+    """The form a row exercises: a T001 legal form, or (SEG-021-T019) an operandless pseudo-form over architecturally
+    reserved partition words. A pseudo-form row never credits the legal-form manifest."""
+    if "form" in row:
+        return forms[row["form"]]
+    words = partition_words(row["partition_classes"], row.get("exclude_words", []))
+    ranges, start = [], None
+    for index, w in enumerate(words):
+        if start is None:
+            start = w
+        if index + 1 == len(words) or words[index + 1] != w + 1:
+            ranges.append([start, w])
+            start = None
+    return {"id": row["id"], "word_ranges": ranges, "size": "none", "src": "none", "dst": "none", "mnemonic": "",
+            "exceptions": [], "privilege": "user", "auto_update": "none", "family": "architecturally_reserved",
+            "pseudo": True}
 
 
 def base_d(i: int) -> int:
@@ -241,11 +278,11 @@ def expand_row(row: dict, table: dict, forms: dict) -> list[dict]:
 
     Each tested encoding is the T001 primary word plus one literal extension suffix of ``row["ext"]`` (default:
     one empty suffix), so a row describes COMPLETE instructions. ``bind`` is optional (no-operand rows)."""
-    form = forms[row["form"]]
+    form = row_form(row, forms)
     words = form_words(form)
     full = {int(w, 16) for w in row.get("full_words", [])}
     if not full <= set(words):
-        raise ValueError("row %s: full_words outside form %s" % (row["id"], row["form"]))
+        raise ValueError("row %s: full_words outside form %s" % (row["id"], form["id"]))
     suffixes = [bytes.fromhex(x) for x in row.get("ext", [""])]
     bind = row.get("bind", {})
     if set(bind) - {"x", "y"}:
@@ -285,9 +322,12 @@ def vector_line(v: dict) -> str:
 def manifest_credit(row: dict, form: dict, table: dict) -> dict[str, bool]:
     """Aspects a row may credit in the T002 manifest, from what the vectors actually vary and compare."""
     import m68k_capability_coverage as cov
+    if form.get("pseudo"):
+        return {"semantic": False, "ccr": False, "ea": False, "timing": False}
     profiles = {row["profile"], row["full_profile"]} if "full_profile" in row else {row["profile"]}
     srs = {sr for p in profiles for sr in table["profiles"][p]["sr"]}
-    return {"semantic": True, "ccr": cov.ccr_expected(form) and len(srs) >= 2, "ea": cov.ea_effect_expected(form)}
+    return {"semantic": True, "ccr": cov.ccr_expected(form) and len(srs) >= 2, "ea": cov.ea_effect_expected(form),
+            "timing": bool(row.get("timing"))}
 
 
 # ---------------------------------------------------------------------------------------------
@@ -317,7 +357,7 @@ def _remove_functions(source: str, codes: set[str]) -> str:
 def build_generated(codes: list[str], emitter: pathlib.Path, cc: str, work: pathlib.Path, mutate=None):
     """Emit, strictly compile and link the generated side. Returns (runner, status per code)."""
     (work / "codes.txt").write_text("".join(c + "\n" for c in codes))
-    proc = _run([str(emitter), "--out", str(work / "conf.c")], input="".join(c + "\n" for c in codes))
+    proc = _run([str(emitter), "--timing", "--out", str(work / "conf.c")], input="".join(c + "\n" for c in codes))
     if proc.returncode != 0:
         raise RuntimeError("emitter failed: " + proc.stderr)
     status = dict(line.split() for line in proc.stdout.splitlines())
@@ -326,7 +366,7 @@ def build_generated(codes: list[str], emitter: pathlib.Path, cc: str, work: path
         source = mutate(source)
     for _ in range(6):
         (work / "conf.c").write_text(source)
-        compiled = _run([cc, *CFLAGS, "-c", str(work / "conf.c"), "-o", str(work / "conf.o")])
+        compiled = _run([cc, *CFLAGS, "-I", str(CPU_INCLUDE), "-c", str(work / "conf.c"), "-o", str(work / "conf.o")])
         if compiled.returncode == 0:
             break
         lines = source.split("\n")
@@ -387,10 +427,8 @@ def run_oracle(vectors: list[dict], checkout: pathlib.Path, cc: str, work: pathl
     return parse_records(proc.stdout)
 
 
-def run(table: dict, forms: dict, emitter: pathlib.Path, cc: str, checkout: pathlib.Path | None, work: pathlib.Path,
-        rows: list[str] | None = None, mutate=None) -> dict:
-    selected = [r for r in table["rows"] if rows is None or r["id"] in rows]
-    vectors = [v for r in selected for v in expand_row(r, table, forms)]
+def run_generated(vectors: list[dict], emitter: pathlib.Path, cc: str, work: pathlib.Path, mutate=None):
+    """Emit/compile/run the generated side twice. Returns (records by vector id, status per code, deterministic)."""
     work = work.resolve()
     work.mkdir(parents=True, exist_ok=True)
     (work / "vectors.txt").write_text("".join(vector_line(v) + "\n" for v in vectors))
@@ -399,26 +437,41 @@ def run(table: dict, forms: dict, emitter: pathlib.Path, cc: str, checkout: path
     out2 = _run([str(runner), str(work / "vectors.txt")])
     if out1.returncode != 0:
         raise RuntimeError("generated-native runner failed: " + out1.stderr[:2000])
-    generated = parse_records(out1.stdout)
-    deterministic = out1.stdout == out2.stdout
+    return parse_records(out1.stdout), status, out1.stdout == out2.stdout
+
+
+def run(table: dict, forms: dict, emitter: pathlib.Path, cc: str, checkout: pathlib.Path | None, work: pathlib.Path,
+        rows: list[str] | None = None, mutate=None) -> dict:
+    selected = [r for r in table["rows"] if rows is None or r["id"] in rows]
+    vectors = [v for r in selected for v in expand_row(r, table, forms)]
+    work = work.resolve()
+    generated, status, deterministic = run_generated(vectors, emitter, cc, work, mutate)
     oracle = run_oracle(vectors, checkout, cc, work) if checkout is not None else None
     report_rows = []
     for row in selected:
-        form = forms[row["form"]]
+        form = row_form(row, forms)
         mine = [v for v in vectors if v["row"] == row["id"]]
         outcomes: dict[int, set] = {}
         first = None
         counts = {"compared": 0, "diverged": 0, "unsupported": 0}
+        timed = bool(row.get("timing"))
+        if timed:
+            counts.update(timing_compared=0, timing_diverged=0)
         for v in mine:
             seen = outcomes.setdefault(v["word"], set())
             code_status = status.get(v["code"], "undecodable")
             g = generated.get(v["id"])
-            if code_status != "ok" or g is None or g.get("missing"):
-                counts["unsupported"] += 1
+            if code_status != "ok" or g is None or g.get("missing") or (timed and "cycles" not in g):
+                counts["unsupported"] += 1  # includes a timing row whose form has no timing rule (fail closed)
                 seen.add("unsupported")
             elif oracle is not None:
                 counts["compared"] += 1
                 rep = fd.compare_streams([g], [oracle[v["id"]]], 1, CODE_BASE, v["id"])
+                if rep["result"] == "no_divergence" and timed:
+                    rep = compare_timing(g, oracle[v["id"]], v["id"])
+                    counts["timing_compared"] += 1
+                    if rep["result"] != "no_divergence":
+                        counts["timing_diverged"] += 1
                 if rep["result"] != "no_divergence":
                     counts["diverged"] += 1
                     seen.add("diverged")
@@ -433,7 +486,8 @@ def run(table: dict, forms: dict, emitter: pathlib.Path, cc: str, checkout: path
         words = form_words(form)
         credit = manifest_credit(row, form, table)
         passing = [w for w in words if by_word.get(w) == "pass"]
-        report_rows.append({"row": row["id"], "form": row["form"], "vectors": len(mine), "words": len(words),
+        report_rows.append({"row": row["id"], "form": row.get("form", "partition:" + ",".join(row.get("partition_classes", []))),
+                            "vectors": len(mine), "words": len(words),
                             "passing_words": len(passing), "counts": counts,
                             "status": "unsupported" if counts["unsupported"] else (
                                 "diverged" if counts["diverged"] else ("validated" if oracle is not None else "self_consistent")),
@@ -443,9 +497,19 @@ def run(table: dict, forms: dict, emitter: pathlib.Path, cc: str, checkout: path
             "vectors": len(vectors), "rows": report_rows}
 
 
+def compare_timing(generated: dict, oracle: dict, image: str) -> dict:
+    """SEG-021-T021: retirement cycles of one executed vector. The generated side must carry a timing rule."""
+    g, o = generated.get("cycles"), oracle.get("cycles")
+    if g is not None and g == o:
+        return {"result": "no_divergence"}
+    return {"schema": fd.SCHEMA, "cpu": fd.CPU_NAME, "boundary_limit": 1, "last_matching_boundary": 0,
+            "first_differing_boundary": 1, "pc": CODE_BASE, "image": image, "domain": "timing", "result": "diverged",
+            "fields": [{"field": "cycles", "generated": g, "oracle": o}]}
+
+
 def credited_words(report: dict, forms: dict, table: dict) -> dict[str, set[int]]:
     """Words each aspect may take from a report: only fully validated rows with every word passing."""
-    aspects: dict[str, set[int]] = {"semantic": set(), "ccr": set(), "ea": set()}
+    aspects: dict[str, set[int]] = {"semantic": set(), "ccr": set(), "ea": set(), "timing": set()}
     for row in report["rows"]:
         if row["status"] != "validated" or row["passing_words"] != row["words"]:
             continue
@@ -457,9 +521,9 @@ def credited_words(report: dict, forms: dict, table: dict) -> dict[str, set[int]
 
 def declared_words(table: dict, forms: dict) -> dict[str, set[int]]:
     """Words the TABLE claims (static, no oracle): what the committed manifest must contain for this source."""
-    aspects: dict[str, set[int]] = {"semantic": set(), "ccr": set(), "ea": set()}
+    aspects: dict[str, set[int]] = {"semantic": set(), "ccr": set(), "ea": set(), "timing": set()}
     for row in table["rows"]:
-        form = forms[row["form"]]
+        form = row_form(row, forms)
         for aspect, allowed in manifest_credit(row, form, table).items():
             if allowed:
                 aspects[aspect] |= set(form_words(form))
@@ -467,13 +531,17 @@ def declared_words(table: dict, forms: dict) -> dict[str, set[int]]:
 
 
 MANIFEST_KEYS = {"semantic": "semantic_validated_words", "ccr": "ccr_sr_validated_words",
-                 "ea": "ea_side_effect_validated_words"}
+                 "ea": "ea_side_effect_validated_words", "timing": "timing_validated_words"}
 
 
 def update_manifest(credited: dict[str, set[int]], path: pathlib.Path = MANIFEST) -> None:
     manifest = json.loads(path.read_text(encoding="utf-8"))
     for aspect, words in credited.items():
         entry = manifest[MANIFEST_KEYS[aspect]]
+        if isinstance(entry, list):  # an aspect with no evidence yet is stored as an empty list
+            if entry:
+                raise ValueError("manifest %s must be a word -> sources map" % MANIFEST_KEYS[aspect])
+            entry = {}
         for word in words:
             sources = entry.setdefault("%04X" % word, [])
             if SOURCE_TAG not in sources:

@@ -22,6 +22,11 @@
 
 #include "../machine/include/segarecomp/machine/genesis/address_space_contract.h"
 #include "checkpoint_evidence.h"
+/* SEG-021-T020: the M68K-owned interrupt/STOP state record (SegarecompM68kInterruptState). */
+#include "../../../libs/cpu/m68k/include/segarecomp/cpu/m68k/exception_core.h"
+/* SEG-021-T022: the CPU-owned data-dependent cycle rules (MULU/MULS/DIVU/DIVS, exception entry) generated
+   retirement expressions and the scheduler call. */
+#include "../../../libs/cpu/m68k/include/segarecomp/cpu/m68k/timing_core.h"
 
 /* checkpoint_evidence.h intentionally keeps its standalone schema literals.
  * These production-side checks keep those literals aligned with the shared
@@ -570,6 +575,11 @@ typedef struct GenesisExecutionHistory {
    (ADR 0043 §3). */
 #define GENESIS_M68K_VECTOR_ZERO_DIVIDE UINT32_C(5)
 #define GENESIS_M68K_VECTOR_PRIVILEGE_VIOLATION UINT32_C(8)
+/* SEG-021-T019 / ADR 0043 §3: the software-exception vectors (4 illegal
+   instruction, 6 CHK, 7 TRAPV, 10 line 1010, 11 line 1111, 32-47 TRAP #0-#15)
+   index `software_exception_handler_entry` directly; the table covers vector
+   numbers 0 .. GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT - 1. */
+#define GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT 48U
 #define GENESIS_M68K_VECTOR_LEVEL6_AUTOVECTOR UINT32_C(30)
 typedef enum GenesisM68kEffectKind {
   GENESIS_M68K_EFFECT_WRITE = 1,
@@ -735,6 +745,20 @@ typedef struct GenesisRuntime {
      GENESIS_DIAG_UNSUPPORTED_PRIVILEGE_VIOLATION_EXCEPTION. */
   uint32_t privilege_violation_handler_entry;
   uint8_t privilege_violation_handler_present;
+  /* SEG-021-T019 / ADR 0043 §3/§7: the build-time-resolved handler entries of
+     the software-exception vectors, indexed by vector number and written by
+     generated `main` exactly like `divide_by_zero_handler_entry`; NEVER fetched
+     or decoded at runtime. Only vectors 4, 6, 7, 10, 11 and 32-47 are ever
+     selected; `software_exception_handler_present[v] == 0` makes a raise of v
+     fail closed via GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION. */
+  uint32_t software_exception_handler_entry[GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT];
+  uint8_t software_exception_handler_present[GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT];
+  /* SEG-021-T020 / ADR 0043 §7: the M68K-owned interrupt-recognition and STOP
+     state of this CPU instance (sampled request level, latched level-7
+     transition, stopped flag), zero-initialized with the rest of the record.
+     The Genesis binding samples its request level (VBlank: level 6) into it at
+     every instruction boundary; the core owns the acceptance rule. */
+  SegarecompM68kInterruptState m68k_interrupt;
   /* SEG-007-T252 / ADR-0040 correction: a fixed-size, no-dynamic-allocation
      circular buffer of the latest GENESIS_RECENT_PC_HISTORY_CAPACITY (64)
      architectural PC values, for LOCAL DIAGNOSTIC USE ONLY. Convention
@@ -953,6 +977,19 @@ typedef enum GenesisDiagnosticCategory {
      write or RTE commits anything. Paired with
      GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION. */
   GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION = 50,
+  /* SEG-021-T019 / ADR 0043 §3/§5: a software exception (TRAP #n, TRAPV,
+     CHK, ILLEGAL, line 1010/1111 or another illegal operation word) whose
+     delivery cannot be constructed -- no build-resolved handler is installed
+     for its vector or the six-byte frame cannot be placed on the SSP. Paired
+     with GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION; nothing is changed. */
+  GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION = 51,
+  /* SEG-021-T020 / ADR 0043 §7: STOP halted the CPU and no interrupt the
+     machine can still raise could ever be accepted (the loaded mask blocks
+     every wired source, the source is disabled, or its handler is not
+     installed), so the scheduler ends the run instead of advancing time
+     forever. Paired with GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT;
+     the STOP itself has completed (SR loaded, PC at the next instruction). */
+  GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE = 52,
 } GenesisDiagnosticCategory;
 
 typedef struct GenesisProvenance {
@@ -1185,6 +1222,15 @@ GenesisAccessResultKind genesis_route_access_bus(GenesisRuntime *runtime, Genesi
                                                  GenesisAccessWidth width, GenesisAccessDirection direction,
                                                  uint32_t *value, GenesisRuntimeStop *stop_out);
 
+/* SEG-021-T036: the DATA read of a read-before-write whose value is architecturally discarded (memory CLR, memory
+ * Scc, memory MOVE from SR only). Identical to `genesis_route_access` (same bus kind, same recording, same stop)
+ * except that a WORD or even-BYTE read of the write-only Z80 RESET register ($A11200) returns 0 and mutates nothing
+ * (open bus on hardware: MacDonald hardware notes v0.8 section 1 note 4; GTO1 p. 76). `direction` must be READ. */
+GenesisAccessResultKind genesis_route_access_discarded_read(GenesisRuntime *runtime, uint32_t address,
+                                                            GenesisAccessWidth width,
+                                                            GenesisAccessDirection direction, uint32_t *value,
+                                                            GenesisRuntimeStop *stop_out);
+
 /* Defensive finite-dispatch failure.  It never mutates the runtime. */
 GenesisControlTransfer genesis_internal_dispatch_inconsistency_stop(GenesisRuntime *runtime);
 
@@ -1297,14 +1343,24 @@ int genesis_exception_return(GenesisRuntime *runtime, uint32_t *restored_pc_out,
  * §7/§8's exception-frame construction (the same shared helper IRQ6 admission
  * uses) with `fault_pc` (the instruction immediately following the faulting
  * DIVS.W/DIVU.W) as the pushed return PC. NOT gated by the SR interrupt mask,
- * NOT scheduled, and does not consume/arm any IRQ6 admission-grace or
+ * never admits an interrupt, and does not consume/arm any IRQ6 admission-grace or
  * watchdog progress-credit state. Fails closed (returns 0, `*stop_out` set)
  * if no build-resolved handler is installed
  * (`divide_by_zero_handler_present == 0`) or the frame cannot be constructed;
  * on success returns 1 and writes the resolved handler entry to
  * `*handler_pc_out`. Performs no target-opcode fetch/decode.
  */
-int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc,
+/*
+ * SEG-021-T022 (applies to the three synchronous raises below): `entry_cycles` is
+ * the CPU-owned exception-processing time of the raising instruction (the
+ * MC68000 exception-processing table, + the word EA cell for vectors 5 and 6),
+ * a build-time fact supplied by the generated lowering. After the entry
+ * commits it advances the deterministic scheduler exactly like a retirement
+ * does (ADR 0041), without admitting an interrupt at that boundary (a pending
+ * request is admitted at the next retirement boundary, as before). 0 fails
+ * closed with GENESIS_DIAG_UNACCOUNTED_INSTRUCTION_TIMING before any change.
+ */
+int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc, uint32_t entry_cycles,
                                  uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out);
 
 /*
@@ -1318,8 +1374,45 @@ int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc,
  * cannot be constructed; on success returns 1 and writes the handler entry to
  * `*handler_pc_out`. Performs no target-opcode fetch/decode.
  */
-int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc,
+int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc, uint32_t entry_cycles,
                                       uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out);
+
+/*
+ * SEG-021-T019 / ADR 0043 §3/§5: a software exception, called from the
+ * generated lowering of TRAP #n (vector 32 + n), TRAPV with V = 1 (7), CHK.W
+ * out of bounds (6), ILLEGAL and every other architecturally illegal
+ * operation word (4) and line 1010/1111 (10/11). `vector` and `stacked_pc`
+ * are build-time facts of the lowered instruction (the next instruction for
+ * TRAP/TRAPV/CHK, the instruction itself otherwise). The frame goes on the SSP
+ * through the M68K-owned exception core. Fails closed (returns 0, `*stop_out`
+ * set, nothing changed) for a vector outside that set, an uninstalled handler
+ * or a frame that cannot be constructed; on success returns 1 and writes the
+ * handler entry to `*handler_pc_out`. Performs no target-opcode fetch/decode.
+ */
+int genesis_raise_software_exception(GenesisRuntime *runtime, uint32_t vector, uint32_t stacked_pc,
+                                     uint32_t entry_cycles, uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out);
+
+/*
+ * SEG-021-T020 / ADR 0043 §7: called by the generated lowering of STOP #imm
+ * after its privilege check, SR load and PC advance. Marks the CPU stopped;
+ * the instruction then retires normally and the retirement boundary (the
+ * machine scheduler, ADR 0041) keeps advancing virtual time until an
+ * interrupt is accepted -- stacking the instruction after STOP -- or ends the
+ * run with GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE when no interrupt this
+ * machine can raise could ever be accepted. Performs no target-opcode
+ * fetch/decode.
+ */
+void genesis_m68k_enter_stopped_state(GenesisRuntime *runtime);
+
+/*
+ * SEG-021-T019 / ADR 0043 §5: RTR (unprivileged) through the M68K-owned
+ * frame-return core: reads the CCR word at the active SP and the PC long at
+ * SP+2, then commits CCR (X/N/Z/V/C only), PC and SP += 6 together. A failed
+ * routed read commits nothing (returns 0, `*stop_out` set); on success
+ * returns 1 and writes the restored PC to `*restored_pc_out`.
+ */
+int genesis_return_restore_condition_codes(GenesisRuntime *runtime, uint32_t *restored_pc_out,
+                                           GenesisRuntimeStop *stop_out);
 
 /* Returns 1 only after the contract's checkpoint observation condition holds.
  * It is a pure snapshot: caller-owned identity/transaction data is copied,

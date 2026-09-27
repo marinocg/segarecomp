@@ -16,7 +16,6 @@
 
 namespace segarecomp {
 namespace {
-// SEG-022-T003: the shared-header helper functions become `static inline` in a sharded build.
 // SEG-022-T008: bounded host-owner size (entries per generated AOT owner function).
 constexpr std::size_t aot_owner_max_entries = 128U;
 // SEG-022-T011: generated routed-failure tail (see its definition beside `genesis_static_stop`).
@@ -24,10 +23,6 @@ constexpr std::string_view genesis_routed_failure_stop_declaration =
     "GenesisControlTransfer genesis_routed_failure_stop(GenesisRuntimeStop *stop, const GenesisInstructionProvenance *source, "
     "uint32_t address, GenesisAccessWidth width, GenesisAccessDirection direction)";
 
-std::string shard_helper_linkage(bool sharded, std::string text) {
-  if (sharded && text.starts_with("static ")) text.insert(7U, "inline ");
-  return text;
-}
 std::string genesis_unit_declaration(std::string_view prefix, std::uint32_t address) {
   std::ostringstream name;
   name << "GenesisControlTransfer " << prefix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address
@@ -55,6 +50,7 @@ const char *history_transfer_kind(M68kIrKind kind) {
   case M68kIrKind::jump_general: return "GENESIS_HISTORY_TRANSFER_COMPUTED";
   case M68kIrKind::call_general: case M68kIrKind::bsr_call: return "GENESIS_HISTORY_TRANSFER_CALL";
   case M68kIrKind::return_from_subroutine: case M68kIrKind::return_from_exception:
+  case M68kIrKind::return_restore_condition_codes:  // SEG-021-T019: RTR
     return "GENESIS_HISTORY_TRANSFER_RETURN";
   default: return "GENESIS_HISTORY_TRANSFER_NONE";
   }
@@ -1487,6 +1483,27 @@ std::string build_genesis_tier1_indirect_pre_pc_stop(const InstructionProvenance
 } // namespace
 
 namespace {
+// SEG-021-T036: a routed_device fact for the architecturally discarded destination read of memory CLR/Scc/MOVE from
+// SR on the one lane whose discarded read the shared address-space contract admits (the write-only Z80 RESET
+// register, segarecomp_genesis_discarded_read_admitted). Its ordinary read is rejected by the routing gate, so both
+// fact validators accept exactly this shape before consulting that gate.
+bool c4_discarded_read_fact(const M68kStaticMemoryFact &fact, M68kInstructionKind kind) {
+  return fact.region == M68kAbsoluteOperandRegion::routed_device &&
+         fact.role == M68kStaticMemoryFactRole::destination_read &&
+         fact.direction == M68kMemoryAccessDirection::read && m68k_destination_read_value_discarded(kind) &&
+         segarecomp_genesis_discarded_read_admitted(fact.address.value, static_cast<std::uint32_t>(fact.width)) != 0;
+}
+
+// SEG-021-T036: the retained-fact pair of a memory CLR/Scc/MOVE from SR absolute destination (read, value discarded,
+// then write) that C4 lowers: both work RAM, or both routed-device facts (each already independently re-verified by
+// the static-memory-fact validation: an ordinary routed device access or the admitted discarded read). Either way
+// both accesses go through the ordinary lowering; a routed pair reaches the runtime owner.
+bool c4_read_then_write_destination_admitted(const M68kStaticMemoryFact *write, const M68kStaticMemoryFact *read) {
+  if (write == nullptr || read == nullptr || write->region != read->region) return false;
+  return write->region == M68kAbsoluteOperandRegion::synthetic_work_ram ||
+         write->region == M68kAbsoluteOperandRegion::routed_device;
+}
+
 bool valid_c4_static_memory_fact(
     const M68kStaticMemoryFact &fact,
     const std::map<Address, const M68kDecodedInstruction *> &decoded) {
@@ -1542,11 +1559,10 @@ bool valid_c4_static_memory_fact(
       expected_direction = M68kMemoryAccessDirection::read;
     }
     break;
-  case M68kInstructionKind::clr:
   case M68kInstructionKind::andi:
   case M68kInstructionKind::ori:
   case M68kInstructionKind::eori:
-    // SEG-007-T167: ORI/EORI reuse ANDI/CLR's destination-only retained-fact
+    // SEG-007-T167: ORI/EORI reuse ANDI's destination-only retained-fact
     // convention -- their source is always an instruction-embedded immediate,
     // and a single destination_write fact is the independently re-verified
     // address/region authority for the whole read-modify-write memory
@@ -1608,6 +1624,7 @@ bool valid_c4_static_memory_fact(
   // SEG-021-T018: MOVE <ea>,SR / MOVE <ea>,CCR read their (word) source only.
   case M68kInstructionKind::move_to_sr:
   case M68kInstructionKind::move_to_ccr:
+  case M68kInstructionKind::chk:  // SEG-021-T019: CHK.W reads its word bound only (Dn is a register)
     // SEG-007-T174 follow-up fix: ADDA/SUBA/CMPA's fixed An (or, for CMPA,
     // CCR-only) destination carries no memory fact at all -- only the source
     // read is ever retained (see machine/genesis/frontend.cpp's shared
@@ -1677,6 +1694,7 @@ bool valid_c4_static_memory_fact(
   case M68kInstructionKind::test_and_set:  // SEG-021-T016: TAS is a byte one-address RMW like NOT
   case M68kInstructionKind::set_conditional:  // SEG-021-T016: memory Scc reads then writes its byte destination
   case M68kInstructionKind::move_from_sr:  // SEG-021-T018: a memory MOVE from SR destination is read then written
+  case M68kInstructionKind::clr:  // SEG-021-T029: a memory CLR destination is read then written (memory-Scc shape)
   case M68kInstructionKind::not_operand:
     // SEG-007-T168: NOT has no second operand at all (unlike SUBQ's
     // quick-immediate source); its sole destination is a full RMW operand,
@@ -1735,6 +1753,8 @@ bool valid_c4_static_memory_fact(
     // routed operand is valid only if the exact shared routing gate that
     // produced it still returns the generalized routed-device marker for the
     // same direction; nothing else is a valid routed_device fact.
+    // SEG-021-T036: or it is an admitted discarded destination read (c4_discarded_read_fact).
+    if (c4_discarded_read_fact(fact, instruction->second->kind)) return true;
     const auto *routed_access = std::get_if<M68kDeviceRoutedAccess>(&routed);
     return routed_access != nullptr && routed_access->direction == fact.direction;
   }
@@ -1886,35 +1906,53 @@ bool valid_c4_owned_cartridge_region_fact(const M68kOwnedCartridgeRegionFact &fa
 // The retirement seam consumes a C expression, not a partial scalar timing
 // row.  Keep every dynamic row here so ordinary blocks and isolated AOT
 // identities cannot silently diverge.
+// SEG-021-T035: routed-only completeness probe for the immutable-ROM AOT boundary. Applies ONLY to
+// kinds whose C lowering is gated on `runtime_routing` (DIVS.W/DIVU.W); returns false for every other
+// kind so the shared non-routed probe remains their sole completeness authority. The context mirrors
+// `emit_immutable_rom_aot_body`'s routed setup (Genesis runtime emitter, runtime object, routed operand
+// access); an EA the lowering cannot express yields an empty body and is rejected.
+bool immutable_rom_aot_routed_only_emission_is_complete(const M68kIrOperation &operation) {
+  if (operation.kind != M68kIrKind::divide_signed_word && operation.kind != M68kIrKind::divide_unsigned_word)
+    return false;
+  if (m68k_operation_effect(operation).pc == M68kPcEffectKind::none) return false;
+  GenesisM68kEmissionContext memory{};
+  memory.program_counter = "pc";
+  memory.address_registers = "runtime->a";
+  memory.user_stack_pointer = "runtime->usp";
+  memory.runtime_routing = true;
+  memory.runtime_object = "runtime";
+  memory.test_operand_access = M68kOperandAccess::runtime_routed;
+  return !emit_m68k_operation_c(operation, "runtime->d", "runtime->sr", "  ", &memory).empty();
+}
+
 std::optional<std::string> m68k_retirement_cycle_expression(const M68kIrOperation &operation) {
-  if (const auto cycles = m68k_instruction_cycles(operation))
-    return "UINT32_C(" + std::to_string(*cycles) + ")";
-  switch (operation.kind) {
-  case M68kIrKind::general_branch:
-    if (operation.condition != M68kCondition::always)
-      return "m68k_branch_taken ? UINT32_C(10) : UINT32_C(" +
-             std::to_string(operation.size == M68kMemoryAccessWidth::byte ? 8U : 12U) + ")";
-    return std::nullopt;
-  case M68kIrKind::dbcc_loop:
-    return "m68k_dbcc_condition_true ? UINT32_C(12) : (m68k_dbcc_took_branch ? UINT32_C(10) : UINT32_C(14))";
-  case M68kIrKind::set_conditional:
-    // SEG-021-T016: Table 8-6 Scc Dn row is 4 (condition false) / 6 (true); memory rows are static (timing.cpp).
-    if (operation.destination_ea.mode == M68kEaMode::data_register)
-      return "m68k_scc_true ? UINT32_C(6) : UINT32_C(4)";
-    return std::nullopt;
-  case M68kIrKind::shift_rotate_register:
-    return "UINT32_C(" + std::to_string(operation.size == M68kMemoryAccessWidth::long_word ? 8U : 6U) +
-           ") + UINT32_C(2) * m68k_shift_effective_count";
-  case M68kIrKind::multiply_unsigned_word:
-  case M68kIrKind::multiply_signed_word: {
-    const auto ea = m68k_effective_address_cycles(operation.source_ea, M68kMemoryAccessWidth::word);
-    if (!ea) return std::nullopt;
-    return std::string(operation.kind == M68kIrKind::multiply_unsigned_word
-                           ? "genesis_m68k_mulu_word_cycles(m68k_timing_mul_source)"
-                           : "genesis_m68k_muls_word_cycles(m68k_timing_mul_source)") +
-           " + UINT32_C(" + std::to_string(*ea) + ")";
-  }
-  default: return std::nullopt;
+  // SEG-021-T021/T022: every static and outcome-dependent row (Bcc, DBcc, Scc Dn, register shift/rotate,
+  // MULU/MULS, DIVU/DIVS) comes from the one CPU-owned rule (`m68k_instruction_timing`) rendered by the shared
+  // M68k lowering owner.
+  return m68k_timing_c_expression(operation);
+}
+
+// SEG-021-T022: the caller-owned timing operand slots of the data-dependent MUL/DIV rules
+// (`m68k_timing_c_expression`): declared zero-initialized before the lowering, bound into its context.
+bool m68k_is_multiply_kind(M68kIrKind kind) {
+  return kind == M68kIrKind::multiply_signed_word || kind == M68kIrKind::multiply_unsigned_word;
+}
+bool m68k_is_divide_kind(M68kIrKind kind) {
+  return kind == M68kIrKind::divide_signed_word || kind == M68kIrKind::divide_unsigned_word;
+}
+std::string m68k_timing_slot_declarations(M68kIrKind kind, std::string_view indent) {
+  std::string out;
+  if (m68k_is_multiply_kind(kind)) out += std::string(indent) + "uint16_t m68k_timing_mul_source = UINT16_C(0);\n";
+  if (m68k_is_divide_kind(kind))
+    out += std::string(indent) + "uint32_t m68k_timing_div_dividend = UINT32_C(0); uint16_t m68k_timing_div_divisor = "
+                                 "UINT16_C(0);\n";
+  return out;
+}
+void bind_m68k_timing_slots(M68kMemoryEmissionContext &memory, M68kIrKind kind) {
+  if (m68k_is_multiply_kind(kind)) memory.timing_mul_source = "m68k_timing_mul_source";
+  if (m68k_is_divide_kind(kind)) {
+    memory.timing_div_dividend = "m68k_timing_div_dividend";
+    memory.timing_div_divisor = "m68k_timing_div_divisor";
   }
 }
 
@@ -1945,8 +1983,13 @@ validated_immutable_rom_aot_entries(const FrontendAnalysis &analysis) {
     // exactly this shape; every other kind still requires the unmodified
     // `has_complete_c_emission` probe. SEG-021-T033: the same signal also
     // covers pure register-indirect `(An)` JMP/JSR.
+    // SEG-021-T035: DIVS.W/DIVU.W emission exists only under runtime routing (the ADR-0037 vector-5
+    // raise needs the live runtime object), so the shared non-routed probe is always empty for them.
+    // Prove their completeness under the routed context `emit_immutable_rom_aot_body` actually uses;
+    // scoped to exactly these routed-only kinds so no other kind's probe result changes.
     const bool has_complete_emission = m68k_operation_has_complete_c_emission(entry.operation) ||
-                                        m68k_operation_is_runtime_owned_indirect_jump(entry.operation);
+                                        m68k_operation_is_runtime_owned_indirect_jump(entry.operation) ||
+                                        immutable_rom_aot_routed_only_emission_is_complete(entry.operation);
     if (!m68k_operation_is_immutable_rom_aot_safe(entry.operation, return_target_authority_available) ||
         !has_complete_emission ||
         !independently_decoded_and_lifted(entry.decoded, entry.operation) || selected == nullptr ||
@@ -2009,6 +2052,10 @@ std::optional<std::vector<Address>> immutable_rom_aot_exact_pc_obligations(
     // frame by the platform's exception-return routine (the M68K-owned core); it continues through the ordinary
     // dispatcher, whose fail-closed stop owns any PC outside the emitted set. No exact-PC obligation.
     break;
+  case M68kPcEffectKind::exception_entry:
+    // SEG-021-T019: the PC becomes the build-time-resolved vector handler selected by the platform's raise (a
+    // dispatch root of the program), or the run stops fail-closed. No exact-PC obligation.
+    break;
   }
   std::sort(result.begin(), result.end());
   result.erase(std::unique(result.begin(), result.end()), result.end());
@@ -2065,9 +2112,7 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   const bool scc_dynamic_timing = entry.operation.kind == M68kIrKind::set_conditional &&
                                   entry.operation.destination_ea.mode == M68kEaMode::data_register;
   if (scc_dynamic_timing) out << "  uint8_t m68k_scc_true = 0U;\n";
-  if (entry.operation.kind == M68kIrKind::multiply_signed_word ||
-      entry.operation.kind == M68kIrKind::multiply_unsigned_word)
-    out << "  uint16_t m68k_timing_mul_source = UINT16_C(0);\n";
+  out << m68k_timing_slot_declarations(entry.operation.kind, "  ");
   GenesisM68kEmissionContext memory{};
   memory.execution_history_hooks = g_execution_history_hooks;
   memory.program_counter = "pc";
@@ -2107,9 +2152,7 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   // operand fact; absolute and d16(PC) source reads take the runtime-routed
   // read (never a folded constant).
   memory.test_operand_access = M68kOperandAccess::runtime_routed;
-  if (entry.operation.kind == M68kIrKind::multiply_signed_word ||
-      entry.operation.kind == M68kIrKind::multiply_unsigned_word)
-    memory.timing_mul_source = "m68k_timing_mul_source";
+  bind_m68k_timing_slots(memory, entry.operation.kind);
   // SEG-007-T246: the caller supplies the SAME already-computed whole-
   // program `runtime_return_target_set` (ADR-0011 Decision §1) every
   // ordinary CFG-rooted `return_from_subroutine` emission already uses.
@@ -2218,6 +2261,14 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   case M68kIrKind::read_user_stack_pointer:
   case M68kIrKind::logical_immediate_to_ccr:
   case M68kIrKind::logical_immediate_to_sr:
+  // SEG-021-T019: TRAP/TRAPV/RTR and the instruction-word exceptions carry no memory operand; CHK.W's word bound has
+  // the MOVE to SR source gap shape below.
+  case M68kIrKind::trap_exception:
+  case M68kIrKind::trap_on_overflow:
+  case M68kIrKind::check_bounds:
+  case M68kIrKind::return_restore_condition_codes:
+  case M68kIrKind::instruction_exception:
+  case M68kIrKind::stop_until_interrupt:  // SEG-021-T020: STOP #imm carries no memory operand
   case M68kIrKind::write_clr:
   // SEG-007-T168: NOT (`logical_not`) is a represented kind (no
   // missing_dispatcher gap) -- emit_m68k_operation_c has a full lowering
@@ -2545,7 +2596,8 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     if (m68k_c4_auto_update_class(operation.source_ea.mode) == M68kC4AutoUpdateClass::none)
       check_fact(operation.source_ea, M68kC4OperandRole::source, M68kStaticMemoryFactRole::source_read);
   } else if (operation.kind == M68kIrKind::write_status_register ||
-             operation.kind == M68kIrKind::write_condition_codes) {
+             operation.kind == M68kIrKind::write_condition_codes ||
+             operation.kind == M68kIrKind::check_bounds) {  // SEG-021-T019: CHK.W reads its word bound
     // SEG-021-T018: MOVE <ea>,SR / MOVE <ea>,CCR read one word source; an auto-updating source is lowered by
     // the operation-local deferred commit, and a non-auto foldable source needs its retained fact.
     if (m68k_c4_auto_update_class(operation.source_ea.mode) == M68kC4AutoUpdateClass::none)
@@ -2611,9 +2663,15 @@ std::vector<M68kC4GapShape> classify_m68k_c4_gap_shapes(
     // commit path in emit_m68k_operation_c (the same pattern the add
     // family, MOVE, and MOVEA already use); it is no longer a
     // requires_architecture_decision gap. A non-auto-update foldable
-    // destination still needs its retained fact exactly as before.
-    if (m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none)
+    // destination still needs its retained facts.
+    // SEG-021-T029: a memory CLR destination is read then written (the
+    // memory-Scc shape), so it needs both destination_read and
+    // destination_write facts; a Dn destination needs none.
+    if (operation.destination_ea.mode != M68kEaMode::data_register &&
+        m68k_c4_auto_update_class(operation.destination_ea.mode) == M68kC4AutoUpdateClass::none) {
+      check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_read);
       check_fact(operation.destination_ea, M68kC4OperandRole::destination, M68kStaticMemoryFactRole::destination_write);
+    }
   } else if (operation.kind == M68kIrKind::logical_not || operation.kind == M68kIrKind::shift_rotate_memory ||
              operation.kind == M68kIrKind::negate_word || operation.kind == M68kIrKind::negate_extended ||
              operation.kind == M68kIrKind::negate_decimal || operation.kind == M68kIrKind::test_and_set ||
@@ -3074,31 +3132,12 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     if (!tier2_capable) frontier_stop_functions.emplace_back(address, std::move(*function_text));
   }
   out << header;
-  // Keep these pre-existing ordinary-prefix helpers ahead of the compiled-
-  // entry declarations. AOT participation changes only whether either helper
-  // is needed; exact-PC consistency is computed later from final authority and
-  // must not perturb non-AOT generated text ordering.
-  const auto aot_emits = [&](M68kIrKind kind) {
-    return std::ranges::any_of(*aot_entries, [&](const auto &candidate) {
-      return candidate.second->operation.kind == kind;
-    });
-  };
-  const auto emits_mulu_word = std::ranges::any_of(
-      partial.accepted_prefix.ir, [](const auto &operation) {
-        return operation.kind == M68kIrKind::multiply_unsigned_word;
-      }) || aot_emits(M68kIrKind::multiply_unsigned_word);
-  const auto emits_muls_word = std::ranges::any_of(
-      partial.accepted_prefix.ir, [](const auto &operation) {
-        return operation.kind == M68kIrKind::multiply_signed_word;
-      }) || aot_emits(M68kIrKind::multiply_signed_word);
+  // SEG-021-T022: the MULU/MULS/DIVU/DIVS retirement rules call the CPU-owned timing_core.h helpers, which the
+  // runtime header includes; no per-program timing helper text is emitted any more.
   // SEG-022-T003: in a sharded build the helpers and shared typedef/declaration live in the shared header
   // (`static inline`, so a TU that does not use them stays warning-free); the text is otherwise unchanged.
   const bool sharded = sharding_active(out);
   if (sharded) shard_begin_header(out);
-  if (emits_mulu_word)
-    out << shard_helper_linkage(sharded, "static uint32_t genesis_m68k_mulu_word_cycles(uint16_t source) { uint32_t n = 0U; while (source != 0U) { n += (uint32_t)(source & UINT16_C(1)); source >>= 1U; } return UINT32_C(38) + UINT32_C(2) * n; }\n");
-  if (emits_muls_word)
-    out << shard_helper_linkage(sharded, "static uint32_t genesis_m68k_muls_word_cycles(uint16_t source) { uint32_t n = 0U; uint32_t bits = ((uint32_t)source) << 1U; for (uint32_t i = 0U; i < 16U; ++i) n += ((bits >> i) ^ (bits >> (i + 1U))) & UINT32_C(1); return UINT32_C(38) + UINT32_C(2) * n; }\n");
   out << "typedef GenesisControlTransfer (*GenesisCompiledEntry)(GenesisRuntime *runtime);\n"
       << (sharded ? "GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n"
                   : "static GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n");
@@ -3225,11 +3264,10 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         expected_direction = M68kMemoryAccessDirection::read;
       }
       break;
-    case M68kInstructionKind::clr:
     case M68kInstructionKind::andi:
     case M68kInstructionKind::ori:
     case M68kInstructionKind::eori:
-      // SEG-007-T167: ORI/EORI reuse ANDI/CLR's destination-only fact shape;
+      // SEG-007-T167: ORI/EORI reuse ANDI's destination-only fact shape;
       // the single destination_write fact authorises the whole RMW destination.
       if (fact.role == M68kStaticMemoryFactRole::destination_write) {
         expected_ea = &instruction->second->destination_ea;
@@ -3261,6 +3299,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     case M68kInstructionKind::cmp:
     case M68kInstructionKind::move_to_sr:   // SEG-021-T018: one word source read
     case M68kInstructionKind::move_to_ccr:  // SEG-021-T018: one word source read
+    case M68kInstructionKind::chk:          // SEG-021-T019: one word bound read
       if (fact.role == M68kStaticMemoryFactRole::source_read) {
         expected_ea = &instruction->second->source_ea;
         expected_direction = M68kMemoryAccessDirection::read;
@@ -3306,6 +3345,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     case M68kInstructionKind::test_and_set:  // SEG-021-T016
     case M68kInstructionKind::set_conditional:  // SEG-021-T016: memory Scc is read-then-write like TAS
     case M68kInstructionKind::move_from_sr:  // SEG-021-T018: a memory MOVE from SR destination is read then written
+    case M68kInstructionKind::clr:  // SEG-021-T029: a memory CLR destination is read then written (memory-Scc shape)
     case M68kInstructionKind::not_operand:
       // SEG-007-T168: NOT has no second operand at all (unlike AND/OR/EOR);
       // its sole destination is a full RMW operand needing both
@@ -3381,11 +3421,12 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         // SEG-007-T115: independent re-verification for a retained Z80
         // bus-arbitration / Z80 program-RAM / PSG routed operand -- the same
         // shared routing gate must still return the generalized routed-device
-        // marker for this fact's own direction.
+        // marker for this fact's own direction (SEG-021-T036: or it is an admitted discarded destination read).
         const auto routed = m68k_route_genesis_device_access(
             M68kMemoryAccessRequest{fact.address, fact.width, fact.direction, fact.source_provenance});
         const auto *routed_access = std::get_if<M68kDeviceRoutedAccess>(&routed);
-        if (routed_access == nullptr || routed_access->direction != fact.direction)
+        if (!c4_discarded_read_fact(fact, instruction->second->kind) &&
+            (routed_access == nullptr || routed_access->direction != fact.direction))
           return "/* translation rejected: invalid C4 static memory fact */\n";
       } else {
         return "/* translation rejected: invalid C4 static memory fact */\n";
@@ -3519,6 +3560,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
           kind != M68kInstructionKind::shift_rotate &&
           // SEG-021-T018: MOVE to SR/CCR and MOVE from SR lower their own auto-updating operand (deferred commit).
           kind != M68kInstructionKind::move_to_sr && kind != M68kInstructionKind::move_to_ccr &&
+          kind != M68kInstructionKind::chk &&  // SEG-021-T019: same deferred word-source commit
           kind != M68kInstructionKind::move_from_sr &&
           (ea.mode == M68kEaMode::address_predec || ea.mode == M68kEaMode::address_postinc))
         return false;
@@ -3533,9 +3575,13 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
                        M68kInstructionKind::movea)) ||
         (instruction->kind == M68kInstructionKind::tst &&
          !require_fact(instruction->source_ea, M68kStaticMemoryFactRole::source_read, M68kInstructionKind::tst)) ||
+        // SEG-021-T029: a memory CLR destination is read then written (memory-Scc shape; Dn is register-only).
         (instruction->kind == M68kInstructionKind::clr &&
-         !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
-                       M68kInstructionKind::clr)) ||
+         instruction->destination_ea.mode != M68kEaMode::data_register &&
+         (!require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_read,
+                        M68kInstructionKind::clr) ||
+          !require_fact(instruction->destination_ea, M68kStaticMemoryFactRole::destination_write,
+                        M68kInstructionKind::clr))) ||
         // SEG-007-T071: ANDI's destination is required exactly like CLR's --
         // a foldable absolute EA must have a retained fact, and (since `kind`
         // is `andi`, not `move`) a predecrement/postincrement destination is
@@ -3602,7 +3648,8 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
           instruction->kind == M68kInstructionKind::suba ||
           instruction->kind == M68kInstructionKind::cmp ||
           instruction->kind == M68kInstructionKind::move_to_sr ||   // SEG-021-T018
-          instruction->kind == M68kInstructionKind::move_to_ccr) &&  // SEG-021-T018
+          instruction->kind == M68kInstructionKind::move_to_ccr ||  // SEG-021-T018
+          instruction->kind == M68kInstructionKind::chk) &&         // SEG-021-T019
          !require_fact(instruction->source_ea, M68kStaticMemoryFactRole::source_read, instruction->kind)) ||
         // SEG-007-T146: CMPI reads its destination (CCR-only) exactly like BTST.
         (instruction->kind == M68kInstructionKind::cmpi &&
@@ -3951,6 +3998,11 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       blocks.contains(partial.accepted_prefix.privilege_violation_handler_entry->value) &&
       emitted_block_entries.insert(partial.accepted_prefix.privilege_violation_handler_entry->value).second)
     emitted_block_pending.push_back(partial.accepted_prefix.privilege_violation_handler_entry->value);
+  // SEG-021-T019: every software-exception vector handler is the same kind of root.
+  for (const auto &[software_vector, handler] : partial.accepted_prefix.software_exception_handler_entries)
+    if (handler.space == TargetAddressSpace::m68k_program && blocks.contains(handler.value) &&
+        emitted_block_entries.insert(handler.value).second)
+      emitted_block_pending.push_back(handler.value);
   // SEG-007-T174 / ADR-0024: every validated external code-entry candidate
   // root is a second kind of entry-disconnected reachability root, exactly
   // like the IRQ6 handler above -- seed the emission walk from each one (only
@@ -4578,7 +4630,12 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     // static successors (the restored PC is a generated-runtime fact popped
     // from the exception frame). It carries no direct/fallthrough/call/return
     // static edge and needs no return-target membership check.
-    const bool is_exception_return = terminal_operation->kind == M68kIrKind::return_from_exception;
+    // SEG-021-T019: RTR (PC popped from its CCR/PC frame) and the instruction-word exceptions (ILLEGAL, line
+    // 1010/1111, every other illegal word: control enters the build-time-rooted vector handler) are terminals of
+    // the same no-static-successor shape.
+    const bool is_exception_return = terminal_operation->kind == M68kIrKind::return_from_exception ||
+                                     terminal_operation->kind == M68kIrKind::return_restore_condition_codes ||
+                                     terminal_operation->kind == M68kIrKind::instruction_exception;
     // SEG-007-T174 / ADR-0024: Tier 2 (the shared `EmittedCodeAddressSet`
     // dispatch mechanism) never reaches this per-BLOCK terminal-validation
     // path at all -- a Tier-2-eligible site is, by construction, always the
@@ -4892,8 +4949,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       if (found->second->kind == M68kIrKind::set_conditional &&
           found->second->destination_ea.mode == M68kEaMode::data_register)
         out << "    uint8_t m68k_scc_true = 0U;\n";
-      if (found->second->kind == M68kIrKind::multiply_signed_word || found->second->kind == M68kIrKind::multiply_unsigned_word)
-        out << "    uint16_t m68k_timing_mul_source = UINT16_C(0);\n";
+      out << m68k_timing_slot_declarations(found->second->kind, "    ");
       switch (found->second->kind) {
       case M68kIrKind::write_moveq:
       case M68kIrKind::subtract_quick_long_d0:
@@ -4935,6 +4991,14 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       case M68kIrKind::logical_immediate_to_sr:
       case M68kIrKind::write_status_register:
       case M68kIrKind::write_condition_codes:
+      // SEG-021-T019 / ADR 0043: the software-exception family raises through the platform (routed), RTR pops its
+      // frame through the platform's frame-return routine, and CHK.W's word bound has MOVE to SR's source shape.
+      case M68kIrKind::trap_exception:
+      case M68kIrKind::trap_on_overflow:
+      case M68kIrKind::check_bounds:
+      case M68kIrKind::return_restore_condition_codes:
+      case M68kIrKind::instruction_exception:
+      case M68kIrKind::stop_until_interrupt:  // SEG-021-T020: ANDI-to-SR-shaped immediate SR load + stopped mark
       case M68kIrKind::read_status_register: {
         const bool reads_destination = found->second->kind == M68kIrKind::read_status_register;
         const auto *fact = fact_for(reads_destination ? M68kStaticMemoryFactRole::destination_read
@@ -4944,9 +5008,9 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         routed.runtime_routing = true;
         routed.runtime_object = "runtime";
         if (reads_destination && fact != nullptr) {
+          // SEG-021-T036: a routed-device destination is admitted like memory CLR/Scc (c4_read_then_write_...).
           const auto *write_fact = fact_for(M68kStaticMemoryFactRole::destination_write);
-          if (write_fact == nullptr || write_fact->region != M68kAbsoluteOperandRegion::synthetic_work_ram ||
-              fact->region != M68kAbsoluteOperandRegion::synthetic_work_ram)
+          if (write_fact == nullptr || !c4_read_then_write_destination_admitted(write_fact, fact))
             return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         }
         if (fact != nullptr) {
@@ -4961,7 +5025,8 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
             return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         } else if (m68k_is_statically_foldable_control_ea(operand) &&
                    found->second->kind != M68kIrKind::logical_immediate_to_ccr &&
-                   found->second->kind != M68kIrKind::logical_immediate_to_sr) {
+                   found->second->kind != M68kIrKind::logical_immediate_to_sr &&
+                   found->second->kind != M68kIrKind::stop_until_interrupt) {
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         }
         out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
@@ -5147,9 +5212,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         routed.runtime_routing = true;
         routed.runtime_object = "runtime";
         routed.pc_macro_bridge_active = true;
-        if (found->second->kind == M68kIrKind::multiply_signed_word ||
-            found->second->kind == M68kIrKind::multiply_unsigned_word)
-          routed.timing_mul_source = "m68k_timing_mul_source";
+        bind_m68k_timing_slots(routed, found->second->kind);
         if (source != nullptr) {
           routed.test_operand_access = genesis_lowering_access(source->region);
           if (source->region == M68kAbsoluteOperandRegion::raw_cartridge_rom)
@@ -5241,8 +5304,13 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         break;
       }
       case M68kIrKind::write_clr: {
+        // SEG-021-T029: memory CLR is read then written (memory-Scc shape); like Scc, the destination_write fact
+        // is the region authority checked here (preflight already required the matching destination_read fact).
+        // SEG-021-T036: a routed-device destination (its validated destination_read fact is either an ordinary
+        // routed device read or the admitted discarded read) lowers through the runtime owner for both accesses.
         const auto *destination = fact_for(M68kStaticMemoryFactRole::destination_write);
-        if (destination != nullptr && destination->region != M68kAbsoluteOperandRegion::synthetic_work_ram)
+        if (destination != nullptr && !c4_read_then_write_destination_admitted(destination, fact_for(
+                                          M68kStaticMemoryFactRole::destination_read)))
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         if (destination == nullptr && m68k_is_statically_foldable_control_ea(found->second->destination_ea))
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
@@ -5341,8 +5409,12 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         // Their shared lowering advances the configured program-counter expression directly, so unlike
         // NOT's legacy bare-`pc` body it must not pass through the macro bridge, which would expand
         // `runtime->pc` into `runtime->runtime->pc` under strict C11.
+        // SEG-021-T036: memory Scc (a discarded read, unlike TAS/NOT/NEG/NEGX/NBCD) may also target a routed device.
         const auto *destination = fact_for(M68kStaticMemoryFactRole::destination_write);
-        if (destination != nullptr && destination->region != M68kAbsoluteOperandRegion::synthetic_work_ram)
+        if (destination != nullptr && destination->region != M68kAbsoluteOperandRegion::synthetic_work_ram &&
+            !(found->second->kind == M68kIrKind::set_conditional &&
+              c4_read_then_write_destination_admitted(destination,
+                                                      fact_for(M68kStaticMemoryFactRole::destination_read))))
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         if (destination == nullptr && m68k_is_statically_foldable_control_ea(found->second->destination_ea))
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
@@ -6021,10 +6093,18 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
     for (const auto &block : partial.accepted_prefix.static_blocks)
       if (block.id.entry.value == handler) { privilege_violation_handler_hex = hex(handler, 8); break; }
   }
+  // SEG-021-T019: the software-exception vector handlers, by the same "handler block emitted" rule.
+  std::vector<std::pair<std::uint32_t, std::string>> software_exception_handler_hex;
+  for (const auto &[software_vector, handler] : partial.accepted_prefix.software_exception_handler_entries)
+    for (const auto &block : partial.accepted_prefix.static_blocks)
+      if (block.id.entry.value == handler.value) {
+        software_exception_handler_hex.emplace_back(software_vector, hex(handler.value, 8));
+        break;
+      }
   sink << emit_genesis_bridge_c11_main_open(
       hex(partial.accepted_prefix.startup_ingress->initial_ssp, 8),
       hex(partial.accepted_prefix.startup_ingress->entry.value, 8), irq6_handler_hex,
-      divide_by_zero_handler_hex, privilege_violation_handler_hex);
+      divide_by_zero_handler_hex, privilege_violation_handler_hex, software_exception_handler_hex);
   if (g_execution_history_hooks) sink << "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; ";
   if (owned_region_count != 0U) {
     sink << "  runtime.owned_regions = genesis_owned_cartridge_regions;\n";

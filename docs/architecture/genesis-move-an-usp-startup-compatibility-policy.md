@@ -32,7 +32,8 @@
   observable in its flat memory).
 - **Ownership.** Exception entry and RTE are the M68K-owned C11 core
   `libs/cpu/m68k/include/segarecomp/cpu/m68k/exception_core.h`, bound by the Genesis runtime through its
-  machine hooks (ADR 0043 §7). STOP and RESET remain CPU frontiers (SEG-021-T020).
+  machine hooks (ADR 0043 §7). SEG-021-T020 selected STOP (ADR 0043 implementation note); RESET remains a CPU
+  frontier.
 
 ## Historical record: SEG-007-T085 status and boundary
 

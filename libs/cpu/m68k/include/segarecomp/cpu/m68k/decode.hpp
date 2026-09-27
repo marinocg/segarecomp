@@ -56,6 +56,17 @@ struct RejectedM68kDecode {
 
 using M68kDecodeResult = std::variant<M68kDecodedInstruction, RejectedM68kDecode>;
 
+// SEG-021-T019 / ADR 0043 §3: the generation-time architectural classification of one MC68000 operation word
+// (src/legality.cpp, written from the Motorola manual; never from a test dataset). `legal` words are base-MC68000
+// instructions (which this project may or may not support yet); the other classes are architecturally reserved
+// words that raise an exception on the MC68000: line 1010 (vector 10), line 1111 (vector 11) and every other
+// unassigned or post-MC68000 encoding (vector 4). The decoder uses it to select the exception-raising
+// `instruction_exception` form at generation time; nothing is decoded at runtime.
+enum class M68kPrimaryWordClass { legal, line_a_emulator, line_f_emulator, illegal };
+[[nodiscard]] M68kPrimaryWordClass m68k_classify_primary_word(std::uint16_t word) noexcept;
+// The exception vector an architecturally reserved class raises (4, 10 or 11); 0 for `legal`.
+[[nodiscard]] std::uint8_t m68k_primary_word_exception_vector(M68kPrimaryWordClass word_class) noexcept;
+
 [[nodiscard]] M68kDecodeResult decode_m68k_instruction(
     std::span<const std::uint8_t> image, DecodeSource source, M68kDecodeProfile profile);
 

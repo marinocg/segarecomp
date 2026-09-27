@@ -74,7 +74,10 @@ def require(condition: bool, message: str) -> None:
 
 def main() -> int:
     binary, compiler, root = (pathlib.Path(v).resolve() for v in sys.argv[1:4])
-    image = bytes((0x70, 0x01, 0x60, 0x00, 0x00, 0x02, 0x60, 0x00, 0x00, 0x02, 0x60, 0x00, 0xFF, 0xFE))
+    # SEG-021-T019: the self-loop is BRA.S -2 followed by a RESET word. The isolated AOT candidate at 0x12348
+    # (ORI.B #$FE,D2, four bytes) then has the undecodable RESET at 0x1234C as its absent exact successor (0xFFFE, the
+    # former absent successor, is now the decoded line-1111 exception and therefore represented).
+    image = bytes((0x70, 0x01, 0x60, 0x00, 0x00, 0x02, 0x60, 0x00, 0x00, 0x02, 0x60, 0xFE, 0x4E, 0x70))
     digest = hashlib.sha256(image).hexdigest()
     with tempfile.TemporaryDirectory() as temporary:
         work = pathlib.Path(temporary)

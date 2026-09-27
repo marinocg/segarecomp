@@ -197,6 +197,19 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
     effect.pc = M68kPcEffectKind::advance;
     effect.pc_delta = operation.provenance.length.value;
     break;
+  case M68kIrKind::stop_until_interrupt:
+    // SEG-021-T020 / ADR 0043 §7: STOP #imm (privileged) loads the whole SR from its immediate exactly like
+    // ANDI/ORI/EORI to SR (a change of S swaps A7), advances the PC, then halts until an interrupt is accepted. The
+    // interrupt handler's RTE resumes at the next instruction, so the sequential advance is the continuation.
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.source_ea;
+    effect.affects_condition_codes = true;
+    effect.may_raise_synchronous_exception = true;
+    effect.exception_vector = 8U;
+    effect.address_register_write_mask |= UINT8_C(0x80);
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
   case M68kIrKind::write_status_register:
     // MOVE to SR overwrites the entire SR (CCR bits included) from the
     // decoded source operand; this layer has no register/memory model of
@@ -364,17 +377,20 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
   case M68kIrKind::write_clr:
     // CLR's CCR result (N=0,Z=1,V=0,C=0, X unaffected) never depends on the
     // cleared value, so affects_condition_codes is a fixed pattern, not
-    // m68k_move_result_ccr applied to a value (contract: "no observable
-    // consequence" of the real-hardware read-before-write bus note).
+    // m68k_move_result_ccr applied to a value.
+    // SEG-021-T029: a memory destination is read (value discarded) before it
+    // is written on the MC68000, exactly like memory Scc (SEG-021-T016); a Dn
+    // destination performs no memory access.
     effect.operand_size = operation.size;
+    if (operation.destination_ea.mode != M68kEaMode::data_register) effect.resolved_source_ea = operation.destination_ea;
     effect.resolved_destination_ea = operation.destination_ea;
     effect.affects_condition_codes = true;
     effect.pc = M68kPcEffectKind::advance;
     effect.pc_delta = operation.provenance.length.value;
     break;
   case M68kIrKind::logical_not:
-    // SEG-007-T168: NOT is a genuine one-address read-modify-write (unlike
-    // write_clr's write-only shape) -- both resolved_source_ea and
+    // SEG-007-T168: NOT is a genuine one-address read-modify-write (its
+    // result, unlike CLR's, depends on the value read) -- both resolved_source_ea and
     // resolved_destination_ea are the SAME single destination_ea, exactly
     // matching shift_rotate_memory's one-address RMW footprint. Its CCR
     // result reuses the logical family's own formula (N/Z set from the
@@ -544,6 +560,46 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
     effect.exception_vector = 5U;
     effect.pc = M68kPcEffectKind::advance;
     effect.pc_delta = operation.provenance.length.value;
+    break;
+  // SEG-021-T019 / ADR 0043 §3, §5. TRAP #n always, TRAPV when V = 1 and CHK.W when the bound check fails
+  // take their vector with the NEXT instruction stacked; the handler's RTE resumes at that instruction, so the
+  // sequential advance is the architectural continuation (the handler may change any register: consumers of the
+  // value-flow graph treat that continuation like a call's). Exception entry switches to (and writes) the SSP.
+  case M68kIrKind::trap_exception:
+  case M68kIrKind::trap_on_overflow:
+    effect.may_raise_synchronous_exception = true;
+    effect.exception_vector = operation.exception_vector;
+    effect.address_register_write_mask |= UINT8_C(0x80);
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::check_bounds:
+    // CHK.W <ea>,Dn reads the word bound (Dn is only read); N/Z/V/C change (Motorola: N defined on a trap, Z/V/C
+    // undefined -- the pinned-oracle policy is documented at the lowering), X is unchanged.
+    effect.operand_size = operation.size;
+    effect.resolved_source_ea = operation.source_ea;
+    effect.affects_condition_codes = true;
+    effect.may_raise_synchronous_exception = true;
+    effect.exception_vector = operation.exception_vector;
+    effect.address_register_write_mask |= UINT8_C(0x80);
+    effect.pc = M68kPcEffectKind::advance;
+    effect.pc_delta = operation.provenance.length.value;
+    break;
+  case M68kIrKind::return_restore_condition_codes:
+    // RTR (unprivileged): CCR <- word at SP (only X/N/Z/V/C), PC <- long at SP+2, SP += 6, through the same
+    // validated atomic frame-return core as RTE.
+    effect.stack = M68kStackEffectKind::pop_exception_frame;
+    effect.stack_width = 6U;
+    effect.affects_condition_codes = true;
+    effect.address_register_write_mask |= UINT8_C(0x80);
+    effect.pc = M68kPcEffectKind::observed_exception_return;
+    break;
+  case M68kIrKind::instruction_exception:
+    // ILLEGAL, line 1010/1111 and every other illegal word: always the vector, this instruction's address stacked.
+    effect.may_raise_synchronous_exception = true;
+    effect.exception_vector = operation.exception_vector;
+    effect.address_register_write_mask |= UINT8_C(0x80);
+    effect.pc = M68kPcEffectKind::exception_entry;
     break;
   case M68kIrKind::load_effective_address:
     // LEA is entirely CCR-unaffected and never performs a memory access at
@@ -780,7 +836,8 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
       operation.kind != M68kIrKind::compare && operation.kind != M68kIrKind::compare_immediate &&
       operation.kind != M68kIrKind::compare_address && operation.kind != M68kIrKind::compare_memory &&
       operation.kind != M68kIrKind::test_operand &&
-      operation.kind != M68kIrKind::bit_test)
+      operation.kind != M68kIrKind::bit_test &&
+      operation.kind != M68kIrKind::check_bounds)  // SEG-021-T019: CHK only reads Dn
     effect.data_register_write_mask |= static_cast<std::uint8_t>(1U << operation.destination_ea.reg);
   // Only the narrow operation subset whose D/A effects are exhaustively
   // represented above advertises completeness.  An absent claim is a reject,
@@ -849,8 +906,14 @@ M68kOperationEffect m68k_operation_effect(const M68kIrOperation &operation) noex
       operation.kind == M68kIrKind::write_status_register || operation.kind == M68kIrKind::read_status_register ||
       operation.kind == M68kIrKind::write_condition_codes || operation.kind == M68kIrKind::logical_immediate_to_ccr ||
       operation.kind == M68kIrKind::logical_immediate_to_sr ||
+      operation.kind == M68kIrKind::stop_until_interrupt ||  // SEG-021-T020: STOP writes only SR (and A7 via S)
       operation.kind == M68kIrKind::write_user_stack_pointer ||
       operation.kind == M68kIrKind::read_user_stack_pointer ||
+      // SEG-021-T019: the software-exception family writes only A7 (the stack switch / RTR pop) plus CHK's decoded
+      // source EA auto-update.
+      operation.kind == M68kIrKind::trap_exception || operation.kind == M68kIrKind::trap_on_overflow ||
+      operation.kind == M68kIrKind::check_bounds || operation.kind == M68kIrKind::return_restore_condition_codes ||
+      operation.kind == M68kIrKind::instruction_exception ||
       operation.kind == M68kIrKind::general_branch;
   if (operation.kind == M68kIrKind::push_effective_address || operation.kind == M68kIrKind::return_from_subroutine ||
       operation.kind == M68kIrKind::link_frame || operation.kind == M68kIrKind::unlink_frame ||

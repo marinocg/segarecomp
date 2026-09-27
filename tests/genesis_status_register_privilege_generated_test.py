@@ -57,14 +57,15 @@ static uint16_t frame_sr(const GenesisRuntime *r, uint32_t base) {
   const uint8_t *m = r->work_ram + (base - 0x00FF0000U);
   return (uint16_t)((m[0] << 8) | m[1]);
 }
-/* User mode: vector 8 on the SSP (inactive slot 0xFF0700), stacked PC = the instruction, S = 0 saved, no cycles
-   retired, and nothing of the privileged instruction executed. */
+/* User mode: vector 8 on the SSP (inactive slot 0xFF0700), stacked PC = the instruction, S = 0 saved, nothing of
+   the privileged instruction executed. SEG-021-T022: no retirement, but the privilege-violation entry charges its
+   published exception-processing time, 34 cycles (previously 0: entries were uncharged). */
 static void expect_privilege_violation(uint32_t pc) {
   GenesisRuntime runtime = fresh(pc, 0x0015);
   runtime.a[7] = 0x00FF0500; runtime.usp = 0x00FF0700; runtime.d[1] = 0x00002700; runtime.a[0] = 0x00FF0800;
   runtime.a[2] = 0x11111111; runtime.a[3] = 0x22222222;
   const GenesisRuntime before = runtime;
-  step(&runtime, 0x00001044, 0);
+  step(&runtime, 0x00001044, 34);
   assert(runtime.sr == 0x2015 && runtime.a[7] == 0x00FF06FA && runtime.usp == 0x00FF0500);
   assert(frame_sr(&runtime, 0x00FF06FA) == 0x0015 && frame_pc(&runtime, 0x00FF06FA) == pc);
   assert(runtime.d[1] == before.d[1] && runtime.a[0] == before.a[0] && runtime.a[2] == before.a[2] && runtime.a[3] == before.a[3]);
@@ -134,6 +135,14 @@ int main(void) {
   runtime = fresh(0x1020, 0x2704); runtime.a[0] = 0x00FF0A02;
   step(&runtime, 0x1022, 14);
   assert(runtime.a[0] == 0x00FF0A00 && runtime.work_ram[0xA00] == 0x27 && runtime.work_ram[0xA01] == 0x04);
+  /* SEG-021-T036: MOVE SR,-(A0) onto the write-only Z80 RESET register ($A11200). The discarded destination read is
+     admitted (open bus, no side effect); the SR word is written (D8 = 1 releases reset), A0 is committed once. */
+  runtime = fresh(0x1020, 0x2704); runtime.a[0] = 0x00A11202; runtime.devices.z80_bus.reset_asserted = 1U;
+  step(&runtime, 0x1022, 14);
+  assert(runtime.a[0] == 0x00A11200 && runtime.devices.z80_bus.reset_asserted == 0U && runtime.sr == 0x2704);
+  runtime = fresh(0x1020, 0x2604); runtime.a[0] = 0x00A11202;  /* SR D8 = 0 asserts reset */
+  step(&runtime, 0x1022, 14);
+  assert(runtime.a[0] == 0x00A11200 && runtime.devices.z80_bus.reset_asserted == 1U);
   /* MOVE SR,$FF0900.L (20 cycles). */
   runtime = fresh(0x1022, 0x2711);
   step(&runtime, 0x1028, 20);
@@ -249,8 +258,11 @@ def check_structure(source):
         assert "genesis_raise_privilege_violation" not in root_text(source, address), address
     for address in ("00001020", "00001022"):
         text = root_text(source, address)
-        calls = [i for i in range(len(text)) if text.startswith("genesis_route_access(", i)]
+        # SEG-021-T036: the read's value is discarded, so it goes through genesis_route_access_discarded_read.
+        calls = [m.start() for m in re.finditer(r"genesis_route_access(_discarded_read)?\(", text)]
         assert len(calls) == 2, (address, len(calls))
+        assert text.startswith("genesis_route_access_discarded_read(", calls[0]), address
+        assert text.startswith("genesis_route_access(", calls[1]), address
         assert "GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &" in text[calls[0]:calls[1]], address
         assert "GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &" in text[calls[1]:], address
 

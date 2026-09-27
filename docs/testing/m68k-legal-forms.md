@@ -21,6 +21,11 @@ fixed row order, no timestamps): `python3 tools/m68k_legal_forms.py [--check]`.
 * No production source (`libs/`, `platforms/`, `apps/`, product tools, CMake files outside `tests/`)
   imports or reads the tool or the dataset. Only tests and the coverage measurement (T002) consume it.
 * `tests/m68k_legal_forms_test.py` enforces both directions (with negative-control scanners).
+* SEG-021-T019: production has its own generation-time primary-word classification
+  (`m68k_classify_primary_word`, `libs/cpu/m68k/src/legality.cpp`), written from the Motorola manual. It is
+  compared with this partition word by word only on the test side: the capability probe reports it and
+  `tests/m68k_capability_ratchet_test.py` requires zero mismatches over all 65,536 words
+  (`architecturally_illegal_words.production_classification_mismatches` in the coverage snapshot).
 
 ## Vocabulary
 

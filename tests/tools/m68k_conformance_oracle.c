@@ -42,7 +42,7 @@ int main(int argc, char **argv) {
     for (i = 0; i < 7U; ++i) m68k_set_reg((m68k_register_t)(M68K_REG_A0 + i), v.a[i]);
     m68k_set_reg(M68K_REG_PC, CF_CODE_BASE);
     (void)m68k_execute(1); /* drain the pending reset cycles; executes no instruction */
-    (void)m68k_execute(1); /* exactly one instruction (or one exception entry) */
+    cf_reported_cycles = m68k_execute(1); /* exactly one instruction (or one exception entry); its cycles */
     for (i = 0; i < 8U; ++i) { d[i] = m68k_get_reg(NULL, (m68k_register_t)(M68K_REG_D0 + i)); a[i] = m68k_get_reg(NULL, (m68k_register_t)(M68K_REG_A0 + i)); }
     cf_print(&v, before, ram, m68k_get_reg(NULL, M68K_REG_PC), m68k_get_reg(NULL, M68K_REG_SR), m68k_get_reg(NULL, M68K_REG_USP), m68k_get_reg(NULL, M68K_REG_ISP), d, a);
   }

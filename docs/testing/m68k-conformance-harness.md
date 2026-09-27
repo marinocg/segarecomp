@@ -64,14 +64,16 @@ D0-D7, A0-A7 (A7 = active stack pointer), PC, SR/CCR, USP, SSP, byte-granular me
 image (memory RMW results, auto-updated EA memory and exception stacked frames) and the exception-vector hook: vectors
 2..255 are seeded to distinct handler addresses (`CF_HANDLER(v)`); when the final PC is a handler a `k=2` effect
 records the vector number (TRAP #0..#15 = 32..47, user vectors above), so exception families reuse the same rows and
-comparison. Timing is not compared. Exception instruction semantics are not implemented by this harness.
+comparison. Timing is compared only for rows that set `"timing": true` (see the SEG-021-T021 section). Exception
+instruction semantics are not implemented by this harness.
 
 ## Limits (measured, not hidden)
 
 A credited primary word means the vectors declared by its row (all suffixes, all profile cases) matched Musashi;
 it is NOT semantic exhaustiveness (a handful of extension values, fixed baseline registers and memory pattern).
 Family tasks own deeper family-specific vector expansion. A write that does not change a byte is invisible. The
-generated model has one active A7 plus USP, so SSP is shadowed by the runner. Timing is out of scope. Only a fully
+generated model has one active A7 plus USP, so SSP is shadowed by the runner. Timing is compared only for
+`"timing": true` rows, at the fidelity of published instruction cycle totals (not bus cycles). Only a fully
 passing row can credit the T002 manifest (`update_manifest` only adds credit and never removes it).
 
 ## Oracle policy
@@ -117,9 +119,11 @@ the whole family (the emitter still fails closed on a shape it cannot lower).
 
 ## Timing coverage of the bit operations (SEG-021-T008)
 
-`m68k_instruction_cycles` has a published static row for every legal BTST/BCHG/BCLR/BSET form except the dynamic
-`BTST Dn,#<data>` form (`btst.dn_ea.b.dn.imm`), which is recorded as timing-unsupported: no row is asserted without a
-verified Motorola table cell. Timing is not compared by this harness (`timing_validated` stays 0).
+`m68k_instruction_cycles` has a published static row for every legal BTST/BCHG/BCLR/BSET form. The dynamic
+`BTST Dn,#<data>` form (`btst.dn_ea.b.dn.imm`) was timing-unsupported until SEG-021-T022 resolved its cell: Table 8-8's
+dynamic BTST memory row (4) plus the Table 8-1 `#<data>` byte/word cell (4) = 8, which is also the pinned Musashi
+total. The bit-operation rows are not `"timing": true` rows (timing is compared only from
+SEG-021-T021 on, for the rows listed there).
 
 ## SEG-021-T009: shift and rotate rows
 
@@ -137,7 +141,7 @@ lowering for every memory-word shape.
 Timing: memory-word forms have a published static row (`8 + EA`, table 8-1) and are admitted to the immutable-ROM AOT
 route; the register forms' retirement time depends on the runtime count (`6/8 + 2n`) and is emitted as a dynamic
 retirement expression, so `m68k_instruction_cycles` (static) records them as timing-unsupported (owned by SEG-021-T021).
-Timing is not compared by this harness.
+Superseded by SEG-021-T021 (below): the register forms now have a CPU-owned `register_count` rule and are timing-validated.
 
 ## SEG-021-T010: MULS.W/MULU.W/DIVS.W/DIVU.W source-EA completion
 
@@ -310,7 +314,8 @@ most-significant first to/from every second byte of `d16(An)` and never updates 
 
 Timing: published static rows exist for EXG (6), MOVEP (16 / 24), TAS (Dn 4, memory 10 + EA) and Scc memory forms (8 + EA). The 16 `Scc Dn`
 forms are recorded as timing-unsupported in `m68k_instruction_cycles` (4 false / 6 true depends on the runtime condition); generated
-retirement uses the dynamic expression `m68k_scc_true ? 6 : 4`. `timing_validated` stays 0 (timing is not compared).
+retirement uses the dynamic expression `m68k_scc_true ? 6 : 4`. Superseded by SEG-021-T021 (below): `Scc Dn` has a CPU-owned
+`condition` rule and is timing-validated.
 
 ## SEG-021-T018: status register, CCR, USP and privilege rows
 
@@ -330,3 +335,189 @@ and every stacked RTE SR in the table keeps T = 0, and the T = 1 stop is proved 
 `tests/genesis_status_register_privilege_generated_test.py` and `tests/m68k_exception_core_ownership_test.py`.
 MOVE SR,<memory> performs the MC68000 read-before-write (as SEG-021-T016 memory Scc does); the pinned Musashi
 core omits the dummy read, which is invisible in the conformance memory model.
+
+## SEG-021-T019: TRAP / TRAPV / CHK / ILLEGAL / RTR rows and architecturally reserved words
+
+Rows exist for every legal form of TRAP #n (all 16 vectors), TRAPV, CHK.W (all 11 data-addressing bound classes; the
+tested Dn bound with `d@9`, the bound with `ea.src`; `chk_pairs` covers in range, equal to the bound, zero, Dn.W
+negative, Dn.W above the bound, a negative bound and garbage upper register bits; the immediate row uses four literal
+bounds with `chk_single`), ILLEGAL and RTR (`sr@sp`/`pc@sp` frame binding, `rtr_frame` pairs with garbage in the
+upper byte of the popped word). SR seeds include supervisor and user states (`exception_state`, `trapv_state` with V
+set and clear), so every row compares the vector number (the k=2 entry), the six-byte frame bytes on the SSP (saved
+SR word at SP, stacked PC long at SP+2), the SSP/USP swap and the post-exception SR against the pinned Musashi core.
+15 legal rows (18,254 vectors) are validated and credited; CHK takes vector 6 in 11,008 of its vectors and continues
+in 7,136, in both modes.
+
+Architecturally reserved words are exercised by three pseudo-form rows that take their primary words from the T001
+partition classes named in the row (`partition_classes`; the tool still holds no legality knowledge):
+`reserved.partition.illegal` (unassigned and post-MC68000 encodings, vector 4, 11,528 words),
+`reserved.partition.line_a` (vector 10, 4,096 words) and `reserved.partition.line_f` (vector 11, 4,088 words),
+supervisor and user state (39,424 vectors), all validated. Pseudo-form rows never credit the legal-form manifest.
+Deviation: `0xF620-0xF627` (`exclude_words`) is the pinned Musashi's CPU-type-unguarded 68040 MOVE16 handler, which
+executes instead of raising vector 11 on the 68000 core (the documented `m68k-word-sweep-disagreements.json` quirk);
+production raises vector 11 for these words as the manual requires.
+
+CHK.W condition codes: Z/V/C are undefined on the MC68000 and N is undefined when no trap is taken. Production matches
+the pinned Musashi core (Z <- Dn.W == 0, V <- 0, C <- 0, N changed only on a trap: set for Dn.W < 0, cleared for
+Dn.W > bound), which agrees with every case the manual defines; `undefined_flags.chk_policy` in the table records it.
+An `(An)+`/`-(An)` bound commits its address-register update before the exception (the saved frame carries the new
+flags).
+
+Timing (SEG-021-T022): the retiring paths have static rows (TRAPV V = 0: 4; CHK.W in range: 10 + word EA cell; RTR:
+20); a taken exception reports its Table 8-14 entry time (TRAP, TRAPV, ILLEGAL, line A/F: 34; CHK: 40 + the bound's
+word EA cell), which the machine charges at the entry commit. All of these rows are timing rows except the
+memory-bound CHK rows (Musashi omits the EA term; see the SEG-021-T022 section).
+
+## SEG-021-T021: outcome-dependent timing for Bcc, DBcc, Scc Dn and register shift/rotate
+
+**Owner.** `m68k_instruction_timing` (`libs/cpu/m68k/include/segarecomp/cpu/m68k/timing.hpp`) is the one CPU-owned
+retirement-time rule: `fixed` (every static `m68k_instruction_cycles` row, unchanged), `condition` (true/false),
+`dbcc` (condition true / counter expired / branch taken) or `register_count` (`base + per_count * n`). The shared M68k
+lowering owner renders it as C11 (`m68k_timing_c_expression`, `libs/codegen/c11`) against the outcome locals the
+lowering already materializes, and every generated route (ordinary blocks, C4 prefixes, immutable-ROM AOT bodies) plus
+the conformance emitter's `--timing` mode consume that one rendering; `m68k_timing_cycles` is the host-side evaluation
+for tests. The generated C text is byte-identical to the previous hand-written expressions.
+
+**Published rows** (MC68000 User's Manual section 8):
+
+| Form | Rule |
+| --- | --- |
+| Bcc.B / Bcc.W (Table 8-10) | taken 10; not taken 8 (byte) / 12 (word); BRA stays the static 10 |
+| DBcc (Table 8-10) | condition true 12; condition false and counter expired (Dn.W = -1) 14; condition false and branch taken 10 |
+| Scc Dn (Table 8-6) | condition true 6, false 4 (memory forms stay static: 8 + byte EA) |
+| ASd/LSd/ROd/ROXd register (Table 8-9) | B/W 6 + 2n, L 8 + 2n; n = immediate 1..8, or the count register modulo 64 (n = 0 costs the base); ROXL/ROXR use the same n for timing although the rotation is taken modulo size + 1 |
+| memory shift/rotate (Table 8-9) | static 8 + word EA (unchanged) |
+
+**Fidelity.** Published instruction cycle totals consumed by the deterministic scheduler at instruction retirement. Not
+bus-cycle accurate: no wait states, prefetch, bus arbitration or intra-instruction access timing.
+
+**Validation.** 110 rows carry `"timing": true` (28 Bcc, 2 BRA, 16 DBcc, 16 Scc Dn, 48 register shift/rotate = the 8
+families x {Dn count, immediate count} x {B, W, L}). For every vector the generated side stores the rendered rule's value
+for the executed outcome in `cf_cycles`; the oracle side reports what `m68k_execute(1)` consumed for exactly that one
+instruction; `compare_timing` reports a mismatch as a `domain: "timing"` first divergence with a `cycles` field, and a
+timing row whose form has no rule is `unsupported` (fail closed). The existing vector profiles already exercise every
+outcome: `cc_full`/`dbcc_full` sweep all 16 CCR states (Bcc taken and not taken; DBcc true, expired from Dn.W = 0 and
+branch taken) and `shift_count` includes count registers 0, 1, 8, 63, 64, 65 and 255 (modulo 64), while the immediate
+forms cover 1..8 through the word ranges. Measured with the pinned core: 227,776 timing comparisons, 0 divergences,
+7,168 primary words credited to `timing_validated_words` (`timing_validated`: 0 -> 110 of 1526 forms).
+`tests/m68k_conformance_harness_test.py` also checks, independently of both the production owner and Musashi, a sample of
+rows against a test-owned transcription of the published rows and condition tests (generated side always; Musashi side
+when pinned), that each outcome and the counts 0/1/8/63 occur, that an injected timing fault in one function fails exactly
+that word, and that a timing row whose function reports no rule is unsupported (since SEG-021-T022 every decodable
+form has a rule, so the missing rule is injected into one function).
+
+**Musashi agreement.** For all 110 rows the pinned core's reported cycles equal the published tables (its 68000 constants
+`CYC_BCC_NOTAKE_B = -2`, `CYC_BCC_NOTAKE_W = 2`, `CYC_DBCC_F_NOEXP = -2`, `CYC_DBCC_F_EXP = 2`, `CYC_SCC_R_TRUE = 2`,
+`CYC_SHIFT = 1` over base cycles 10/10/12/4/6/8, and it charges the modulo-64 count for ROXL/ROXR). No deviation is
+recorded.
+
+**Still fail closed at T021 (24 forms; closed by SEG-021-T022, see below).** MULU.W/MULS.W (22 forms), `BTST
+Dn,#<data>` and RESET. After T022 only RESET (a decode frontier) and the direct_flow-profile-only `BNE.S`
+compatibility kind have no rule.
+
+## SEG-021-T020: STOP row and the interrupt acceptance differential
+
+`stop.imm16.none.imm.none` uses eight literal SR immediates (`2700`, `2000`, `271F`, `2015`, `0715`, `0000`, `5F3F`,
+`7FFF`: mask values 0-7 across the set, supervisor-to-user transitions and every implemented CCR bit) with the
+`sr_state` seeds (40 vectors). Supervisor seeds compare the loaded SR, the PC after the immediate word and the
+stack-pointer swap when S clears; user seeds compare vector 8 with STOP itself stacked on the SSP. All vectors match
+the pinned Musashi core and the row credits `0x4E72`. Since SEG-021-T022 the row is a timing row: the supervisor
+vectors retire in 4 cycles and the user-mode vectors report the 34-cycle privilege-violation entry, both equal to
+Musashi. T = 1 immediates are project-only (the deferred-trace stop; see the SEG-021-T018 section)
+and the wait/wake itself is machine scheduler behavior, proved by `tests/genesis_stop_interrupt_generated_test.py`.
+
+Interrupt acceptance is not an instruction and has no table row: `tests/m68k_interrupt_acceptance_test.py` scripts the
+M68K-owned contract and the pinned Musashi core (interrupt-acknowledge callback enabled) through the same 85
+instruction-boundary steps -- levels 1-6 against every mask, level-7 transitions at every mask, level 7 held at
+mask 7 and then recognized once the mask is lowered, a 7 -> 3 -> 7 re-transition, autovector/supplied/spurious/
+uninitialized acknowledges, user-mode entry, T cleared on entry, and STOP woken by an accepted level versus staying
+stopped on masked ones -- and compares PC, SR, A7, USP and the six bytes at A7 after every step.
+
+## SEG-021-T022: MULU/MULS, DIVU/DIVS and exception-entry timing
+
+**Owner.** The data-dependent rules are CPU-owned C in `libs/cpu/m68k/include/segarecomp/cpu/m68k/timing_core.h`
+(strict C11, `<stdint.h>` only), consumed verbatim by the C++ descriptor (`m68k_instruction_timing`: rules
+`multiply_unsigned`, `multiply_signed`, `divide_unsigned`, `divide_signed`, `cycles` = the Table 8-1 word EA cell) and
+by the generated retirement expressions (`segarecomp_m68k_*_word_cycles(...) + UINT32_C(ea)`, through the Genesis
+runtime header). The former per-program `genesis_m68k_mulu/muls_word_cycles` helper text is gone. Every descriptor
+also carries `exception_entry_cycles`, the exception-processing time of the form's one synchronous exception path
+(ADR 0043 §8 implementation note); the direct route reports it when the exception is taken
+(`timing_exception_taken`), the routed raises pass it to the machine, which charges it at the entry commit.
+
+| Rule | Source | Value |
+| --- | --- | --- |
+| MULU.W (Table 8-4) | published | 38 + 2n + EA, n = 1 bits of the source word |
+| MULS.W (Table 8-4) | published | 38 + 2n + EA, n = 01/10 pairs of `<source>:0` |
+| DIVU.W, divisor != 0 | Cwik's microcode analysis (Table 8-4 gives only `< 140`) | overflow 10; else 76..136 + EA |
+| DIVS.W, divisor != 0 | same (Table 8-4: `< 158`) | absolute overflow 16/18; else 120..156 + EA |
+| BTST Dn,#<data> (Table 8-8) | published | 4 + 4 = 8 |
+| exception entry (§8 exception table) | published | 34 illegal / line A / line F / privilege / TRAP / TRAPV / trace; 38 + EA zero divide; 40 + EA CHK; 44 interrupt |
+
+**DIV approximation replaced.** DIVU/DIVS formerly retired the Table 8-4 maxima (140 / 158 + EA) for every operand;
+they now retire the exact count, which is 2..142 cycles shorter depending on the operands (overflow is detected up
+front and is the cheapest case). The pinned Musashi core still charges the fixed maxima (and does so for overflow
+too), so it cannot validate DIV timing: the rule is checked instead against an independent test-owned transcription of
+the same published analysis (`tests/m68k_muldiv_auto_update_generated_test.py`: 17 dividend/divisor pairs covering
+every sign combination, absolute and signed overflow, the most negative dividend and a zero divisor, through
+generated DIVU/DIVS Dn and DIVU (An)+ code on the Genesis runtime, plus the published bounds over a sweep) and the
+host rule (`tests/m68k_dynamic_timing_test.cpp`). DIV has no direct-route emission, so it has no conformance timing row.
+
+**MUL rows.** 22 `*.timing` rows (every MULU.W/MULS.W source-EA form) use the `mulu_timing` profile (sources
+`0000`, `0001`, `0003` ... `FFFF`, `5555`, `AAAA`, `8000`: n = 0..16) and the `muls_timing` profile (zero and
+negative sources `0000`, `8000`, `FFFF`, `8001`, `8005`, `8015`, `8055`, `8155`, `8555`, `9555`, `AAAA`, `CCCC`: n = 0
+and every odd n); the immediate rows carry the same patterns as literal extension words. All 30,528 vectors match
+the pinned core. **Documented deviation:** Musashi counts MULS pairs only while source bits remain, so for every
+positive nonzero source it misses the final `1 -> 0` pair and reports Table 8-4 - 2 (a negative source ends with its
+sign bit and has only odd n, which Musashi counts exactly). Production follows Table 8-4 (the same n Genesis Plus GX
+and the manual use); `tests/m68k_conformance_harness_test.py` pins the generated value for positive sources and the
+exact Musashi offset, and `tests/m68k_dynamic_timing_test.cpp` checks all 65,536 source words of both rules against a
+test-owned transcription.
+
+**Exception entry.** Exception-taking vectors of the timing rows compare the entry time with Musashi, which reports
+`CYC_EXCEPTION[vector] - CYC_INSTRUCTION[IR]` on top of the instruction row, i.e. exactly the table's total. It agrees
+for TRAP #n, TRAPV, ILLEGAL / line A / line F / every reserved word, the privilege violation of every privileged form and
+CHK with a Dn bound. **Documented deviation:** because Musashi undoes the whole instruction row, EA included, it charges
+a taken CHK trap 40 regardless of the bound's EA (and a zero divide 38); the manual's rows are "+ EA", which production
+follows, so the memory-bound CHK rows are not timing rows (the offset is pinned by the harness test). The interrupt
+entry (44) is compared step by step in `tests/m68k_interrupt_acceptance_test.py` (every acknowledge kind, user mode, STOP
+wake), except that Musashi's table carries a placeholder 4 for the user vectors 64-255 (documented; 44 is asserted).
+
+**Timing audit of the SEG-021 families (T005-T016, T018-T020, T034-T036).** Every conformance row was run once with
+`"timing": true` against the pinned core (1,663,616 vectors). 1,366 of 1,484 rows matched as they stood; the 118
+divergent rows split into production errors, corrected here, and Musashi deviations, documented and kept out of the
+timing rows (`TIMING_ORACLE_DEVIATION_ROWS` in `tests/m68k_conformance_harness_test.py` pins the exact list):
+
+| Rows | Production before | Published row | Musashi | Resolution |
+| --- | --- | --- | --- | --- |
+| TST memory (21) | EA only | Table 8-6: 4 + EA | 4 + EA | corrected |
+| MOVE to -(An) (35) | 4 + src + 6/10 | Tables 8-2/8-3: -(An) destination = (An) column | same | corrected |
+| CMPA.W (12) | 8 + EA | Table 8-4: 6 + EA | 6 + EA | corrected |
+| BCLR Dn,Dn / #,Dn (2) | 8 / 12 | Table 8-8: 10 / 14 (maxima) | 10 / 14 | corrected |
+| ADD/SUB/AND/OR.L Dn,Dn; ADDA/SUBA.L Dn/An,An (8) | 8 | Table 8-4 "**": 8 | 6 | deviation |
+| ADD/SUB/AND/OR.B/.W #,Dn; ADDA/SUBA.W #,An (10) | 8 / 12 | 4 + 4 / 8 + 4 | +2 | deviation |
+| ADDQ.W #,An (1) | 8 | Table 8-5: 8 | 4 | deviation |
+| ANDI.L #,Dn (1) | 16 | Table 8-5: 16 | 14 | deviation |
+| CHK memory bound, trap taken (10) | 40 + EA | Table 8-14: 40 + EA | 40 | deviation |
+| TAS memory (7) | 10 + EA | Table 8-6: 10 + EA | 14 + EA | deviation |
+| MULS with positive sources (11) | Table 8-4 n | 38 + 2n | n - 1 | deviation; `.timing` rows validate the rest |
+
+Every deviation keeps the published row (Genesis Plus GX's hardware-oriented cycle table also agrees with production
+for all of them). The audit also added 21 rows for forms that had no conformance row (LEA and PEA in all seven control
+EAs, JMP/JSR absolute and d16(PC), MOVEQ); they exposed one more production error, corrected here: the indexed LEA /
+PEA rows of Table 8-10 are 12 / 20 (production had the table 8-1 cell, 10 / 18; Musashi 12 / 20).
+
+Result: 1,479 of 1,527 rows are timing rows (22 of them the new `.timing` MUL rows) and every one matches the pinned
+core: 1,612,772 + 4,612 timing comparisons, 0 divergences. The 48 deviation rows remain semantic/CCR/EA rows only.
+
+**Coverage (capability snapshot).** `timing_model_present` 1,502 -> 1,525 of 1,526 forms (99.93%); `timing_validated`
+110 -> 1,457 of 1,526 forms (7.21% -> 95.48%; 7,168 -> 43,850 primary words). The 69 forms without validated timing,
+exhaustively:
+
+- RESET (1): no timing descriptor -- it is still a decode frontier (its Table 8-11 row is 132).
+- DIVU.W / DIVS.W (22, every source EA): exact rule modeled; no direct-route emission (the vector-5 raise needs the
+  routed runtime) and the pinned Musashi charges fixed maxima, so they are validated against the independent
+  transcription instead of the oracle.
+- JMP / JSR with (An), d16(An), (d8,An,Xn), (d8,PC,Xn) (8) and RTS (1): published static rows modeled; their targets are
+  runtime-owned (indirect / return-target authority), which the single-instruction direct harness cannot emit.
+- Oracle-deviation forms (37): ADD/SUB/AND/OR .B/.W `#,Dn` and .L `Dn,Dn`, ADDA/SUBA .L `Dn/An,An` and .W `#,An`,
+  ADDQ.W `#,An`, ANDI.L `#,Dn`, the 10 memory-bound CHK forms and the 7 memory TAS forms (table above).

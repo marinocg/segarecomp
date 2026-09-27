@@ -37,18 +37,48 @@ for n in (0, 5, 15):
     # An effect contract naming vector 32 for every TRAP proves only TRAP #0; the true vector proves TRAP #n.
     check(cov.exception_modeled({32 + n}, 32) == (n == 0), "single vector 32 must not prove TRAP #%d" % n)
     check(cov.exception_modeled({32 + n}, 32 + n), "the encoded vector proves TRAP #%d" % n)
-    # The dataset also lists address error for TRAP, so the real form needs more than one class.
-    check(len(cov.needed_vectors(trap, word)) > 1 and not cov.exception_modeled(cov.needed_vectors(trap, word), 32 + n),
-          "the real TRAP form lists several classes; one vector cannot prove them")
+    # SEG-021-T032: the dataset also lists address error for TRAP; that class is a declared deferred
+    # disposition (ADR 0043 section 4), so the real form requires exactly the TRAP vector.
+    check("address_error_vector_3" in trap["exceptions"], "the dataset still lists address error for TRAP")
+    check(cov.needed_vectors(trap, word) == {32 + n} and cov.exception_modeled(cov.needed_vectors(trap, word), 32 + n),
+          "a deferred class is never required; the real TRAP form needs only its own vector")
 privileged = [f for f in FORMS if f["privilege"] != "user" and not f["exceptions"] or f["mnemonic"] == "RESET"][0]
 word = next(iter(cov.expand(privileged)))
 check(cov.needed_vectors(privileged, word) >= {8}, "a privileged form requires vector 8")
 check(cov.exception_modeled({8}, 8) and not cov.exception_modeled({8}, 0), "vector 8 only when modeled")
-multi = next(f for f in FORMS if len([e for e in f["exceptions"]]) > 1)
+# SEG-021-T032 negative controls: a form listing only the deferred address-error class is not applicable to
+# exception_privilege_modeled; a form listing vector 3 plus vector 5 still requires vector 5.
+base_form = dict(forms_of("ADD")[0], privilege="user")
+only_deferred = dict(base_form, exceptions=["address_error_vector_3"])
+check(not cov.exception_row_applicable(only_deferred), "a deferred-only form is not applicable")
+check(cov.needed_vectors(only_deferred, next(iter(cov.expand(only_deferred)))) == set(),
+      "a deferred-only form requires no vector")
+mixed = dict(base_form, exceptions=["address_error_vector_3", "zero_divide_vector_5"])
+check(cov.exception_row_applicable(mixed), "a mixed form stays applicable")
+check(cov.needed_vectors(mixed, next(iter(cov.expand(mixed)))) == {5}, "a mixed form still requires vector 5")
+check(not cov.exception_modeled({5}, 0) and cov.exception_modeled({5}, 5), "vector 5 is required for the mixed form")
+split = cov.deferred_disposition(FORMS)
+check(split["forms"] == split["only_deferred_forms"] + split["mixed_forms"], "deferred bucket arithmetic")
+check(split["forms"] == sum(1 for f in FORMS if "address_error_vector_3" in f["exceptions"]),
+      "deferred bucket counts every form listing a deferred class")
+multi = dict(base_form, exceptions=["zero_divide_vector_5", "chk_vector_6"])
 need = cov.needed_vectors(multi, next(iter(cov.expand(multi))))
 check(len(need) > 1, "a form listing several classes requires several vectors")
 check(not any(cov.exception_modeled(need, v) for v in range(0, 48)), "one effect vector must not prove several exception classes")
 check(cov.exception_modeled(set(), 0), "forms with no exception class are not penalised")
+
+# --- SEG-021-T025: justified restrictions must name a currently failing, applicable stage ---------------------
+stages_all = cov.ALL_STAGES
+def fake_rows(passing):
+    return {fid: (BY_ID[fid], {s: passing for s in stages_all}, {s: True for s in stages_all}, 1)
+            for fid, _stage in cov.JUSTIFIED_RESTRICTIONS}
+check(len(cov.justified_restrictions(fake_rows(False))) == len(cov.JUSTIFIED_RESTRICTIONS),
+      "justified restrictions resolve against failing stages")
+try:
+    cov.justified_restrictions(fake_rows(True))
+    check(False, "a justified restriction whose stage now passes must be reported as stale")
+except ValueError:
+    pass
 
 # --- CCR/SR expectation --------------------------------------------------------------------------------
 check(all(cov.ccr_expected(f) for f in forms_of("ADD")), "ADD modifies CCR")

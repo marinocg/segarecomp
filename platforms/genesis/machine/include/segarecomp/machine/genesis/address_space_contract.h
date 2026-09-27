@@ -61,6 +61,16 @@ static inline int segarecomp_genesis_z80_arbitration_region_contains(uint32_t ad
          address < SEGARECOMP_GENESIS_Z80_ARBITRATION_REGION_END;
 }
 
+/* SEG-021-T036: the one lane whose ordinary read fails closed but whose architecturally DISCARDED read (the
+ * read-before-write of memory CLR, memory Scc and memory MOVE from SR; never a value-consuming read) is admitted:
+ * a WORD or even-BYTE read of exactly the write-only RESET register.  On hardware that read returns open-bus data
+ * (Charles MacDonald, "Sega Genesis hardware notes" v0.8 section 1 note 4: the MSB of the next instruction fetch,
+ * LSB zero; GTO1 v1.00 p. 76 documents the register as write-only) and has no side effect.  LONG, the odd byte and
+ * every other in-region address stay fail-closed.  Shared by the translation-time gate and the generated runtime. */
+static inline int segarecomp_genesis_discarded_read_admitted(uint32_t address, uint32_t width_bytes) {
+  return address == SEGARECOMP_GENESIS_Z80_ARBITRATION_RESET_REGISTER && (width_bytes == 1U || width_bytes == 2U);
+}
+
 /* Flat 68000-visible Z80 program-RAM window: 8 KiB at $A00000 (GTO1 v1.00 68K
  * memory map p. 7 / overview p. 2; Charles MacDonald hardware notes SS2).
  * Runtime owner: genesis_z80_ram_window_access (SEG-007-T103), which also

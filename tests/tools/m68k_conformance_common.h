@@ -12,7 +12,11 @@
  * pointing at distinct handler addresses, the instruction bytes at CF_CODE_BASE, then the per-vector seeds.
  * Result: one JSON object per vector; `effects` are byte-granular memory differences against the initial
  * image (a write of an unchanged value is intentionally invisible) plus a k=2 exception entry when the
- * final PC is a vector handler address. */
+ * final PC is a vector handler address.
+ * SEG-021-T021: when a side sets `cf_reported_cycles` (>= 0) before cf_print, the record carries
+ * `"cycles":N` -- the generated side's retirement-rule value for the executed outcome, or the cycles
+ * Musashi's m68k_execute consumed for exactly that one instruction. The SEG-020 field comparison ignores
+ * it; tools/m68k_conformance.py compares it for rows that request timing. */
 #ifndef M68K_CONFORMANCE_COMMON_H
 #define M68K_CONFORMANCE_COMMON_H
 #include <stdint.h>
@@ -34,6 +38,8 @@ typedef struct {
   unsigned sr, usp, ssp, d[8], a[8], nmem;
   cf_seed mem[CF_MAX_MEM];
 } cf_vector;
+
+static long cf_reported_cycles = -1;
 
 static int cf_parse(char *line, cf_vector *v) {
   char *tok[64]; unsigned n = 0, i;
@@ -98,6 +104,8 @@ static void cf_print(const cf_vector *v, const uint8_t *before, const uint8_t *a
   }
   for (k = CF_FIRST_VECTOR; k < CF_VECTOR_COUNT; ++k) if (pc == CF_HANDLER(k)) vec = k;
   if (vec) printf("%s{\"k\":2,\"w\":0,\"a\":%u,\"v\":%u}", count ? "," : "", pc, vec);
-  printf("],\"unsupported\":%u}\n", overflow);
+  printf("],\"unsupported\":%u", overflow);
+  if (cf_reported_cycles >= 0) printf(",\"cycles\":%ld", cf_reported_cycles);
+  printf("}\n");
 }
 #endif

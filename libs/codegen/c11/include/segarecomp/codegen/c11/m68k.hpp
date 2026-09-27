@@ -42,6 +42,14 @@ class M68kRuntimeCEmitter {
   [[nodiscard]] virtual std::string routed_read(const M68kMemoryEmissionContext &context, std::string_view routed_addr,
                                                 std::string_view value, std::string_view stop,
                                                 M68kMemoryAccessWidth size) const = 0;
+  // SEG-021-T036: the same statement text for a read whose value is architecturally discarded (the read-before-
+  // write of memory CLR, memory Scc and memory MOVE from SR only). The platform may admit a lane whose ordinary read
+  // it rejects; a failing lane must stop exactly as `routed_read` does. Default: an ordinary routed read.
+  [[nodiscard]] virtual std::string routed_discarded_read(const M68kMemoryEmissionContext &context,
+                                                          std::string_view routed_addr, std::string_view value,
+                                                          std::string_view stop, M68kMemoryAccessWidth size) const {
+    return routed_read(context, routed_addr, value, stop, size);
+  }
   // Text following `{ const uint32_t <routed_addr> = ...; `, ending before the lowering's closing `}`.
   [[nodiscard]] virtual std::string routed_write(const M68kMemoryEmissionContext &context, std::string_view routed_addr,
                                                  std::string_view stop, M68kMemoryAccessWidth size,
@@ -56,17 +64,33 @@ class M68kRuntimeCEmitter {
   [[nodiscard]] virtual std::string call_push_guard(const M68kMemoryEmissionContext &context, std::string_view stack_pointer,
                                                     bool expanded) const = 0;
   // Divide-by-zero trap: continues at the handler or stops. Text ends before the lowering's `else { `.
-  [[nodiscard]] virtual std::string divide_by_zero(const M68kMemoryEmissionContext &context, std::uint32_t next_pc) const = 0;
+  // SEG-021-T022: every synchronous raise carries `entry_cycles`, the CPU-owned exception-processing time
+  // (`m68k_exception_entry_cycles`, libs/cpu/m68k timing.hpp) the machine charges at the entry commit.
+  [[nodiscard]] virtual std::string divide_by_zero(const M68kMemoryEmissionContext &context, std::uint32_t next_pc,
+                                                   std::uint32_t entry_cycles) const = 0;
   // Exception return: leaves the restored program counter in `m68k_rte_pc`.
   [[nodiscard]] virtual std::string exception_return(const M68kMemoryEmissionContext &context) const = 0;
   // SEG-021-T018 / ADR 0043 §3: privilege violation (vector 8) with `fault_pc` (the privileged
   // instruction's own address) as the stacked PC. The text is a complete statement that always
   // returns: it continues at the build-time-resolved handler or stops fail-closed.
   [[nodiscard]] virtual std::string privilege_violation(const M68kMemoryEmissionContext &context,
-                                                        std::uint32_t fault_pc) const = 0;
+                                                        std::uint32_t fault_pc, std::uint32_t entry_cycles) const = 0;
   // SEG-021-T018 / ADR 0043 §6: a complete statement that returns the deferred-trace stop (an SR
   // write would leave T = 1). Nothing has been committed when it runs.
   [[nodiscard]] virtual std::string trace_deferred_stop(const M68kMemoryEmissionContext &context) const = 0;
+  // SEG-021-T019 / ADR 0043 §3, §5: the software exceptions (TRAP #n, TRAPV, CHK, ILLEGAL, line 1010/1111 and every
+  // other illegal word) raise `vector` with `stacked_pc` (the build-time PC value ADR 0043 §3 selects for that
+  // exception). The text is a complete statement that always returns: it continues at the build-time-resolved
+  // handler or stops fail-closed with nothing changed.
+  [[nodiscard]] virtual std::string software_exception(const M68kMemoryEmissionContext &context, std::uint32_t vector,
+                                                       std::uint32_t stacked_pc, std::uint32_t entry_cycles) const = 0;
+  // SEG-021-T019 / ADR 0043 §5: RTR's validated atomic CCR/PC frame pop; leaves the restored program counter in
+  // `m68k_rtr_pc` (the text opens a block the lowering closes) or returns the fail-closed stop.
+  [[nodiscard]] virtual std::string condition_code_return(const M68kMemoryEmissionContext &context) const = 0;
+  // SEG-021-T020 / ADR 0043 §7: a complete statement, emitted by STOP #imm after its SR load and PC advance, that
+  // marks the CPU stopped. The machine's retirement boundary then waits for an accepted interrupt (or reports that
+  // none can ever wake the CPU); the lowering itself never waits or loops.
+  [[nodiscard]] virtual std::string stopped_state(const M68kMemoryEmissionContext &context) const = 0;
 };
 
 struct M68kMemoryEmissionContext {
@@ -97,6 +121,14 @@ struct M68kMemoryEmissionContext {
   // Optional caller-owned timing source slot.  MUL lowering writes the word
   // it already materialized after a successful routed read.
   std::string_view timing_mul_source;
+  // SEG-021-T022: optional caller-owned DIVU/DIVS timing operands (uint32_t dividend, uint16_t divisor). The DIV
+  // lowering assigns both on its non-zero-divisor path, before the quotient is written; the zero-divisor path takes
+  // the vector-5 entry and never retires.
+  std::string_view timing_div_dividend;
+  std::string_view timing_div_divisor;
+  // SEG-021-T022: optional caller-owned exception-taken byte for the DIRECT linear-memory route, whose inline
+  // exception entry falls through with the handler PC set; the entry assigns 1 here (the routed entry returns).
+  std::string_view timing_exception_taken;
   // Optional caller-owned DBcc taken-branch timing output. The DBcc lowerer
   // assigns this byte only on its taken branch; callers that retire the
   // instruction supply a zero-initialized local for the fallthrough cases.
@@ -171,6 +203,22 @@ struct M68kMemoryEmissionContext {
 // context needed to inspect complete lowering, so callers cannot mistake a
 // context-free fragment for supported generated execution.
 [[nodiscard]] bool m68k_operation_has_complete_c_emission(const M68kIrOperation &operation);
+
+// SEG-021-T021: the C11 rendering of the CPU-owned retirement timing rule (`m68k_instruction_timing`,
+// libs/cpu/m68k timing.hpp) against the outcome locals `emit_m68k_operation_c` materializes. It is evaluated
+// after the lowered body, in the same scope:
+//   condition (Bcc)       `m68k_branch_taken` (declared by the Bcc lowering)
+//   condition (Scc Dn)    `m68k_scc_true` (caller-declared zero-initialized uint8_t, passed as `timing_scc_true`)
+//   dbcc                  `m68k_dbcc_condition_true` (declared by the DBcc lowering) and `m68k_dbcc_took_branch`
+//                         (caller-declared zero-initialized uint8_t, passed as `timing_dbcc_taken`)
+//   register_count        `m68k_shift_effective_count` (declared by the register shift/rotate lowering)
+//   multiply_*            `m68k_timing_mul_source` (caller-declared uint16_t, passed as `timing_mul_source`)
+//   divide_*              `m68k_timing_div_dividend` / `m68k_timing_div_divisor` (caller-declared uint32_t /
+//                         uint16_t, passed as `timing_div_dividend` / `timing_div_divisor`)
+// The MUL/DIV rules call the CPU-owned C helpers of libs/cpu/m68k timing_core.h, which the generated translation
+// unit must include through its machine runtime header.
+// Returns nullopt when the CPU owner has no rule; callers must fail closed.
+[[nodiscard]] std::optional<std::string> m68k_timing_c_expression(const M68kIrOperation &operation);
 [[nodiscard]] std::string emit_m68k_direct_flow_c(const DirectFlowAnalysis &analysis, const DirectFlowState &initial, std::uint64_t budget);
 [[nodiscard]] std::string emit_m68k_structured_direct_flow_c(const DirectFlowAnalysis &analysis, std::span<const M68kDirectFlowUnit> units, const DirectFlowState &initial, std::uint64_t budget);
 } // namespace segarecomp

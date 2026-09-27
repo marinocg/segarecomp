@@ -102,24 +102,11 @@ def main():
         temp = pathlib.Path(directory)
         generated = checked([executable, "--emit-operation-c4-muls-word"]).stdout
         assert not generated.startswith("/* translation rejected:"), generated
-        helper = "static uint32_t genesis_m68k_muls_word_cycles(uint16_t source)"
-        retirement = "genesis_m68k_muls_word_cycles(m68k_timing_mul_source)"
-        assert helper in generated, "generated MULS dispatcher is missing its dynamic timing helper"
+        # SEG-021-T022: the MULS rule is the CPU-owned timing_core.h helper (included through runtime.h); no
+        # per-program helper text is emitted any more, so the ordinary prefix starts at the compiled-entry typedef.
+        retirement = "segarecomp_m68k_muls_word_cycles(m68k_timing_mul_source) + UINT32_C(0)"
+        assert "genesis_m68k_muls_word_cycles" not in generated, "a per-program MULS timing helper is still emitted"
         assert retirement in generated, "generated MULS dispatcher does not retire dynamic timing"
-        # Byte-identical non-AOT ordering ratchet: this ordinary fixture's
-        # established helper/declaration prefix predates immutable-ROM AOT.
-        # Exact-PC consistency work must not move or rewrite these bytes.
-        established_prefix = (
-            "static uint32_t genesis_m68k_muls_word_cycles(uint16_t source) { uint32_t n = 0U; "
-            "uint32_t bits = ((uint32_t)source) << 1U; for (uint32_t i = 0U; i < 16U; ++i) "
-            "n += ((bits >> i) ^ (bits >> (i + 1U))) & UINT32_C(1); return UINT32_C(38) + "
-            "UINT32_C(2) * n; }\n"
-            "typedef GenesisControlTransfer (*GenesisCompiledEntry)(GenesisRuntime *runtime);\n"
-            "static GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n"
-        )
-        prefix_start = generated.index(helper)
-        assert generated[prefix_start:prefix_start + len(established_prefix)] == established_prefix, \
-            "ordinary non-AOT MUL helper/declaration bytes or ordering changed"
         # The source slot is materialized while lowering MULS, and retirement
         # must remain after the operation's destination write.
         assert generated.index("runtime->d[3] = (muls_result);") < generated.index(retirement), \

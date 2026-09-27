@@ -6,15 +6,23 @@
 // (`undecodable`, `not_lifted`, `no_emission`, `length_mismatch`). It holds no instruction knowledge and
 // never invents an emission: an unsupported encoding is reported, not approximated.
 //
-//   m68k_conformance_emitter [--routed|--window] --out FILE.c < encodings.txt
+//   m68k_conformance_emitter [--routed|--window|--timing] --out FILE.c < encodings.txt
 //
 // --routed (SEG-021-T005): emit the Genesis runtime-routed lowering (the route C4 and the immutable-ROM AOT
 // candidates use) as `GenesisControlTransfer rf_<CODE>(GenesisRuntime *)` plus `rf_table`, for the hermetic
 // routed-versus-direct differential test (tests/m68k_routed_lowering_test.py).
+//
+// --timing (SEG-021-T021): every direct function also stores, after its lowered body, the value of the shared
+// retirement timing expression (`m68k_timing_c_expression`, the one rendering every generated route uses) in
+// the runner-owned `cf_cycles`, declaring the caller-owned outcome slots exactly as the production retirement
+// seam does; a form without a CPU-owned timing rule stores 0xFFFFFFFF (no claim). SEG-021-T022: a form whose
+// synchronous exception was taken stores the CPU-owned exception-entry time instead; the MULU/MULS rules call the
+// CPU-owned timing_core.h helpers (the harness compiles with the CPU include directory).
 #include "segarecomp/codegen/c11/genesis_frontend.hpp"
 #include "segarecomp/codegen/c11/m68k.hpp"
 #include "segarecomp/cpu/m68k/decode.hpp"
 #include "segarecomp/cpu/m68k/ir.hpp"
+#include "segarecomp/cpu/m68k/timing.hpp"
 
 #include <cstdint>
 #include <fstream>
@@ -51,11 +59,13 @@ int main(int argc, char **argv) {
   std::string out_path;
   bool routed_mode = false;
   bool window_mode = false;
+  bool timing_mode = false;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--out" && i + 1 < argc) out_path = argv[++i];
     else if (arg == "--routed") routed_mode = true;
     else if (arg == "--window") window_mode = true;
+    else if (arg == "--timing") timing_mode = true;
     else { std::cerr << "usage: m68k_conformance_emitter --out FILE.c < encodings\n"; return 2; }
   }
   if (out_path.empty()) { std::cerr << "--out is required\n"; return 2; }
@@ -112,10 +122,39 @@ int main(int argc, char **argv) {
     memory.linear_memory_begin = window_mode ? 0x00FF0000U : 0U;
     memory.linear_memory_end = window_mode ? 0x01000000U : 0x100000U;
     memory.user_stack_pointer = "s->usp";
+    const auto timing = timing_mode ? m68k_timing_c_expression(operation) : std::nullopt;
+    std::string timing_locals;
+    if (timing && operation.kind == M68kIrKind::dbcc_loop) {
+      timing_locals += "  uint8_t m68k_dbcc_took_branch = 0U;\n";
+      memory.timing_dbcc_taken = "m68k_dbcc_took_branch";
+    }
+    if (timing && operation.kind == M68kIrKind::set_conditional &&
+        operation.destination_ea.mode == M68kEaMode::data_register) {
+      timing_locals += "  uint8_t m68k_scc_true = 0U;\n";
+      memory.timing_scc_true = "m68k_scc_true";
+    }
+    // SEG-021-T022: the MUL rules read the caller-owned source slot; a form with a synchronous exception path reports
+    // the CPU-owned entry time when the (direct, fall-through) entry was taken instead of its retirement rule.
+    if (timing && (operation.kind == M68kIrKind::multiply_signed_word ||
+                   operation.kind == M68kIrKind::multiply_unsigned_word)) {
+      timing_locals += "  uint16_t m68k_timing_mul_source = UINT16_C(0);\n";
+      memory.timing_mul_source = "m68k_timing_mul_source";
+    }
+    const auto descriptor = timing_mode ? m68k_instruction_timing(operation) : std::nullopt;
+    const bool entry_timed = timing && descriptor && descriptor->exception_entry_cycles != 0U;
+    if (entry_timed) {
+      timing_locals += "  uint8_t m68k_exception_taken = 0U;\n";
+      memory.timing_exception_taken = "m68k_exception_taken";
+    }
     const auto body = emit_m68k_operation_c(operation, "s->d", "s->sr", "  ", &memory);
     if (body.empty()) { std::cout << line << " no_emission\n"; continue; }
-    functions << "static int cf_" << line << "(cap_state *s) {\n  uint32_t pc = s->pc;\n" << body
-              << "  s->pc = pc;\n  return 0;\n}\n";
+    functions << "static int cf_" << line << "(cap_state *s) {\n  uint32_t pc = s->pc;\n" << timing_locals << body;
+    if (entry_timed)
+      functions << "  cf_cycles = m68k_exception_taken ? UINT32_C(" << descriptor->exception_entry_cycles
+                << ") : (uint32_t)(" << *timing << ");\n";
+    else if (timing)
+      functions << "  cf_cycles = (uint32_t)(" << *timing << ");\n";
+    functions << "  s->pc = pc;\n  return 0;\n}\n";
     table << "  {\"" << line << "\", cf_" << line << "},\n";
     std::cout << line << " ok\n";
   }
@@ -133,8 +172,10 @@ int main(int argc, char **argv) {
     return out ? 0 : 1;
   }
   out << "#include <stdint.h>\n#include <stddef.h>\n"
-         "typedef struct { uint32_t d[8]; uint32_t a[8]; uint16_t sr; uint32_t pc; uint32_t usp; uint8_t ram[0x100000]; } cap_state;\n"
+      << (timing_mode ? "#include \"segarecomp/cpu/m68k/timing_core.h\" /* SEG-021-T022: CPU-owned MUL/DIV rules */\n" : "")
+      << "typedef struct { uint32_t d[8]; uint32_t a[8]; uint16_t sr; uint32_t pc; uint32_t usp; uint8_t ram[0x100000]; } cap_state;\n"
          "extern uint32_t frame_ids[64]; extern uint32_t frame_continuations[64]; extern uint32_t frame_depth; /* owned and reset per vector by the runner */\n"
+      << (timing_mode ? "extern uint32_t cf_cycles; /* runner-owned retirement cycles of the executed vector */\n" : "")
       << functions.str()
       << "typedef struct { const char *code; int (*fn)(cap_state *); } cf_entry;\n"
          "const cf_entry cf_table[] = {\n" << table.str() << "  {NULL, NULL}\n};\n";
