@@ -24,6 +24,9 @@
 #include "checkpoint_evidence.h"
 /* SEG-021-T020: the M68K-owned interrupt/STOP state record (SegarecompM68kInterruptState). */
 #include "../../../libs/cpu/m68k/include/segarecomp/cpu/m68k/exception_core.h"
+/* SEG-021-T022: the CPU-owned data-dependent cycle rules (MULU/MULS/DIVU/DIVS, exception entry) generated
+   retirement expressions and the scheduler call. */
+#include "../../../libs/cpu/m68k/include/segarecomp/cpu/m68k/timing_core.h"
 
 /* checkpoint_evidence.h intentionally keeps its standalone schema literals.
  * These production-side checks keep those literals aligned with the shared
@@ -1340,14 +1343,24 @@ int genesis_exception_return(GenesisRuntime *runtime, uint32_t *restored_pc_out,
  * §7/§8's exception-frame construction (the same shared helper IRQ6 admission
  * uses) with `fault_pc` (the instruction immediately following the faulting
  * DIVS.W/DIVU.W) as the pushed return PC. NOT gated by the SR interrupt mask,
- * NOT scheduled, and does not consume/arm any IRQ6 admission-grace or
+ * never admits an interrupt, and does not consume/arm any IRQ6 admission-grace or
  * watchdog progress-credit state. Fails closed (returns 0, `*stop_out` set)
  * if no build-resolved handler is installed
  * (`divide_by_zero_handler_present == 0`) or the frame cannot be constructed;
  * on success returns 1 and writes the resolved handler entry to
  * `*handler_pc_out`. Performs no target-opcode fetch/decode.
  */
-int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc,
+/*
+ * SEG-021-T022 (applies to the three synchronous raises below): `entry_cycles` is
+ * the CPU-owned exception-processing time of the raising instruction (the
+ * MC68000 exception-processing table, + the word EA cell for vectors 5 and 6),
+ * a build-time fact supplied by the generated lowering. After the entry
+ * commits it advances the deterministic scheduler exactly like a retirement
+ * does (ADR 0041), without admitting an interrupt at that boundary (a pending
+ * request is admitted at the next retirement boundary, as before). 0 fails
+ * closed with GENESIS_DIAG_UNACCOUNTED_INSTRUCTION_TIMING before any change.
+ */
+int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc, uint32_t entry_cycles,
                                  uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out);
 
 /*
@@ -1361,7 +1374,7 @@ int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc,
  * cannot be constructed; on success returns 1 and writes the handler entry to
  * `*handler_pc_out`. Performs no target-opcode fetch/decode.
  */
-int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc,
+int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc, uint32_t entry_cycles,
                                       uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out);
 
 /*
@@ -1377,7 +1390,7 @@ int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc
  * handler entry to `*handler_pc_out`. Performs no target-opcode fetch/decode.
  */
 int genesis_raise_software_exception(GenesisRuntime *runtime, uint32_t vector, uint32_t stacked_pc,
-                                     uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out);
+                                     uint32_t entry_cycles, uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out);
 
 /*
  * SEG-021-T020 / ADR 0043 §7: called by the generated lowering of STOP #imm

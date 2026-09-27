@@ -205,7 +205,8 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
     return out.str();
   }
 
-  std::string divide_by_zero(const M68kMemoryEmissionContext &ctx, std::uint32_t next_pc) const override {
+  std::string divide_by_zero(const M68kMemoryEmissionContext &ctx, std::uint32_t next_pc,
+                             std::uint32_t entry_cycles) const override {
     std::ostringstream out;
                  out << "uint32_t divide_handler_pc = UINT32_C(0); GenesisRuntimeStop divide_stop = {0}; "
                   << "if (genesis_raise_divide_by_zero("
@@ -218,7 +219,7 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
                  // re-expanded into "runtime->runtime->pc" by that still-active
                  // macro (the exact hazard return_from_exception's own comment
                  // documents for `subtract_address`).
-                  << "), &divide_handler_pc, &divide_stop) == 1) { "
+                  << "), UINT32_C(" << entry_cycles << "), &divide_handler_pc, &divide_stop) == 1) { "
                   << "GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_CONTINUE_AT_PC; "
                   << "transfer.next_pc = divide_handler_pc; return transfer; } else { "
                  << "divide_stop.provenance.has_instruction_provenance = 1U; divide_stop.provenance.instruction = *"
@@ -240,11 +241,12 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
     return out.str();
   }
 
-  std::string privilege_violation(const M68kMemoryEmissionContext &ctx, std::uint32_t fault_pc) const override {
+  std::string privilege_violation(const M68kMemoryEmissionContext &ctx, std::uint32_t fault_pc,
+                                  std::uint32_t entry_cycles) const override {
     std::ostringstream out;
     out << "{ uint32_t m68k_privilege_handler_pc = UINT32_C(0); GenesisRuntimeStop m68k_privilege_stop = {0}; "
         << "if (genesis_raise_privilege_violation(" << ctx.runtime_object << ", UINT32_C(0x" << hex(fault_pc, 8)
-        << "), &m68k_privilege_handler_pc, &m68k_privilege_stop) == 1) { "
+        << "), UINT32_C(" << entry_cycles << "), &m68k_privilege_handler_pc, &m68k_privilege_stop) == 1) { "
         << "GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_CONTINUE_AT_PC; "
         << "transfer.next_pc = m68k_privilege_handler_pc; return transfer; } "
         << "m68k_privilege_stop.provenance.has_instruction_provenance = 1U; m68k_privilege_stop.provenance.instruction = *"
@@ -256,11 +258,12 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
   }
 
   std::string software_exception(const M68kMemoryEmissionContext &ctx, std::uint32_t vector,
-                                 std::uint32_t stacked_pc) const override {
+                                 std::uint32_t stacked_pc, std::uint32_t entry_cycles) const override {
     std::ostringstream out;
     out << "{ uint32_t m68k_exception_handler_pc = UINT32_C(0); GenesisRuntimeStop m68k_exception_stop = {0}; "
         << "if (genesis_raise_software_exception(" << ctx.runtime_object << ", UINT32_C(" << vector << "), UINT32_C(0x"
-        << hex(stacked_pc, 8) << "), &m68k_exception_handler_pc, &m68k_exception_stop) == 1) { "
+        << hex(stacked_pc, 8) << "), UINT32_C(" << entry_cycles
+        << "), &m68k_exception_handler_pc, &m68k_exception_stop) == 1) { "
         << "GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_CONTINUE_AT_PC; "
         << "transfer.next_pc = m68k_exception_handler_pc; return transfer; } "
         << "m68k_exception_stop.provenance.has_instruction_provenance = 1U; m68k_exception_stop.provenance.instruction = *"

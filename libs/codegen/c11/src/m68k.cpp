@@ -781,7 +781,7 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
   // MULU.W body captures from its own materialized source read, so the caller's dynamic MUL
   // retirement-cycle helper (selected by `m68k_retirement_cycle_expression` in frontend.cpp)
   // retires against the actual fetched word, never the AOT/C4 block's zero-initialized default.
-  // MUL-only: DIVS/DIVU carry no such dynamic timing hook.
+  // SEG-021-T022: DIVS/DIVU capture their dividend/divisor timing operands below.
   if (!memory.timing_mul_source.empty()) body << memory.timing_mul_source << " = (uint16_t)(" << source_expr << "); ";
   if (ea.mode == M68kEaMode::address_postinc) body << local << " += UINT32_C(" << step << ");\n";
   body << an << " = " << local << ";\n";
@@ -802,8 +802,12 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
     body << "{ const uint16_t divide_auto_divisor = (uint16_t)(" << source_expr << "); "
          << "if (divide_auto_divisor == 0U) { "
          << emit_runtime(memory).divide_by_zero(memory,
-                operation.provenance.source.address.value + operation.provenance.length.value)
+                operation.provenance.source.address.value + operation.provenance.length.value,
+                m68k_exception_entry_cycles(operation).value_or(0U))
          << "else { ";
+    if (!memory.timing_div_dividend.empty() && !memory.timing_div_divisor.empty())
+      body << memory.timing_div_dividend << " = (uint32_t)(" << dn << "); " << memory.timing_div_divisor
+           << " = divide_auto_divisor; ";
     std::ostringstream divide_body;
     M68kDivisionResultSpecification::emit_c_update(divide_body, status_register, dn, std::string("divide_auto_divisor"),
                                                     is_signed, std::string("divide_auto_result"));
@@ -825,12 +829,16 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
 // SSP-4, SR <- (saved & 0x271F) | S (T cleared, mask and CCR kept), the USP moves to the inactive slot when the
 // mode changes, and PC <- the handler read from the window's vector slot (the direct route's flat machine keeps its
 // vector table in that window; no program byte is decoded). The direct text falls through with the handler PC set.
-[[nodiscard]] std::string m68k_exception_entry(std::uint32_t vector, std::uint32_t stacked_pc,
-                                               std::string_view status_register,
+// SEG-021-T022: `operation` supplies the CPU-owned entry time (`m68k_exception_entry_cycles`); the routed raise
+// passes it to the machine, which charges it at the entry commit (0 -- no published row -- makes the machine stop
+// fail-closed before any state changes). The direct route marks `timing_exception_taken` instead.
+[[nodiscard]] std::string m68k_exception_entry(const M68kIrOperation &operation, std::uint32_t vector,
+                                               std::uint32_t stacked_pc, std::string_view status_register,
                                                const M68kMemoryEmissionContext &memory) {
+  const auto entry_cycles = m68k_exception_entry_cycles(operation).value_or(0U);
   if (memory.runtime_routing) {
-    if (vector == 8U) return emit_runtime(memory).privilege_violation(memory, stacked_pc);
-    return emit_runtime(memory).software_exception(memory, vector, stacked_pc);
+    if (vector == 8U) return emit_runtime(memory).privilege_violation(memory, stacked_pc, entry_cycles);
+    return emit_runtime(memory).software_exception(memory, vector, stacked_pc, entry_cycles);
   }
   const std::string_view program_counter = memory.program_counter.empty() ? "pc" : memory.program_counter;
   const auto begin = memory.linear_memory_begin;
@@ -868,7 +876,9 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
       << "if ((m68k_exception_saved_sr & UINT16_C(0x2000)) == 0U) " << memory.user_stack_pointer << " = " << a7 << ";\n"
       << a7 << " = m68k_exception_frame;\n"
       << status_register << " = (uint16_t)((m68k_exception_saved_sr & UINT16_C(0x271F)) | UINT16_C(0x2000));\n"
-      << program_counter << " = m68k_exception_handler; }\n}\n";
+      << program_counter << " = m68k_exception_handler; ";
+  if (!memory.timing_exception_taken.empty()) out << memory.timing_exception_taken << " = 1U; ";
+  out << "}\n}\n";
   return out.str();
 }
 
@@ -881,7 +891,7 @@ void m68k_emit_routed_write(std::ostringstream &out, std::string_view address, M
   const auto fault_pc = operation.provenance.source.address.value;
   std::ostringstream out;
   out << "if ((" << status_register << " & UINT16_C(0x2000)) == 0U) "
-      << m68k_exception_entry(8U, fault_pc, status_register, memory);
+      << m68k_exception_entry(operation, 8U, fault_pc, status_register, memory);
   if (memory.runtime_routing) {
     out << "\n";
     closing.clear();
@@ -1634,8 +1644,13 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
         output << "{\n" << prelude.str()
                << "{ const uint16_t divide_divisor = (uint16_t)(" << source.expression << "); "
                << "if (divide_divisor == 0U) { "
-               << emit_runtime(*memory).divide_by_zero(*memory, operation.provenance.source.address.value + operation.provenance.length.value)
+               << emit_runtime(*memory).divide_by_zero(*memory, operation.provenance.source.address.value + operation.provenance.length.value,
+                                                        m68k_exception_entry_cycles(operation).value_or(0U))
                << "else { ";
+        // SEG-021-T022: the exact DIV timing reads the dividend before the quotient/remainder write.
+        if (!memory->timing_div_dividend.empty() && !memory->timing_div_divisor.empty())
+          output << memory->timing_div_dividend << " = (uint32_t)(" << destination.expression << "); "
+                 << memory->timing_div_divisor << " = divide_divisor; ";
         const auto write = m68k_emit_ea_write(operation.destination_ea, M68kMemoryAccessWidth::long_word,
                                               data_registers, *memory, "divide_result", output, temp_ordinal);
         // Emit the division computation before the write so `divide_result`
@@ -3455,7 +3470,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
       const auto address = operation.provenance.source.address.value;
       const auto next_pc = address + operation.provenance.length.value;
       const bool current = operation.kind == M68kIrKind::instruction_exception;
-      const auto entry = m68k_exception_entry(operation.exception_vector, current ? address : next_pc,
+      const auto entry = m68k_exception_entry(operation, operation.exception_vector, current ? address : next_pc,
                                               status_register, *memory);
       if (operation.kind == M68kIrKind::trap_on_overflow)
         output << "if ((" << status_register << " & UINT16_C(0x0002)) != 0U) " << entry << "else { " << program_counter
@@ -3490,7 +3505,7 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
                << " & UINT16_C(0xFFF8)) | (m68k_chk_value == 0 ? UINT16_C(0x0004) : UINT16_C(0)));\n"
                << "if (m68k_chk_value < 0 || m68k_chk_value > m68k_chk_bound) { " << status_register << " = (uint16_t)(("
                << status_register << " & UINT16_C(0xFFF7)) | (m68k_chk_value < 0 ? UINT16_C(0x0008) : UINT16_C(0)));\n"
-               << m68k_exception_entry(operation.exception_vector, next_pc, status_register, *memory)
+               << m68k_exception_entry(operation, operation.exception_vector, next_pc, status_register, *memory)
                << "} else { " << program_counter << " += UINT32_C(" << operation.provenance.length.value
                << "); } } }\n";
       }
@@ -3593,6 +3608,17 @@ std::optional<std::string> m68k_timing_c_expression(const M68kIrOperation &opera
            literal(timing->false_cycles) + " : " + literal(timing->expired_cycles) + ")";
   case M68kTimingRule::register_count:
     return literal(timing->cycles) + " + " + literal(timing->per_count_cycles) + " * m68k_shift_effective_count";
+  // SEG-021-T022: the operand-dependent part is the CPU-owned C rule of timing_core.h; `cycles` is the EA cell.
+  case M68kTimingRule::multiply_unsigned:
+    return "segarecomp_m68k_mulu_word_cycles(m68k_timing_mul_source) + " + literal(timing->cycles);
+  case M68kTimingRule::multiply_signed:
+    return "segarecomp_m68k_muls_word_cycles(m68k_timing_mul_source) + " + literal(timing->cycles);
+  case M68kTimingRule::divide_unsigned:
+    return "segarecomp_m68k_divu_word_cycles(m68k_timing_div_dividend, m68k_timing_div_divisor) + " +
+           literal(timing->cycles);
+  case M68kTimingRule::divide_signed:
+    return "segarecomp_m68k_divs_word_cycles(m68k_timing_div_dividend, m68k_timing_div_divisor) + " +
+           literal(timing->cycles);
   }
   return std::nullopt;
 }

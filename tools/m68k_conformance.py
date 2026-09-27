@@ -50,6 +50,7 @@ TABLE = ROOT / "tests" / "fixtures" / "m68k-conformance-vectors.json"
 FORMS = ROOT / "tests" / "fixtures" / "m68k-legal-forms.json"
 MANIFEST = ROOT / "tests" / "fixtures" / "m68k-validation-manifest.json"
 TOOLS = ROOT / "tests" / "tools"
+CPU_INCLUDE = ROOT / "libs" / "cpu" / "m68k" / "include"  # SEG-021-T022: timing_core.h for the MUL/DIV timing rules
 SOURCE_TAG = "tests/fixtures/m68k-conformance-vectors.json"
 CHECKOUT_ENVS = ("SEGARECOMP_M68K_CONFORMANCE_MUSASHI_CHECKOUT", "SEGARECOMP_M68K_MULS_WORD_MUSASHI_CHECKOUT",
                  "SEGARECOMP_M68K_BATCH_B_MUSASHI_CHECKOUT")
@@ -365,7 +366,7 @@ def build_generated(codes: list[str], emitter: pathlib.Path, cc: str, work: path
         source = mutate(source)
     for _ in range(6):
         (work / "conf.c").write_text(source)
-        compiled = _run([cc, *CFLAGS, "-c", str(work / "conf.c"), "-o", str(work / "conf.o")])
+        compiled = _run([cc, *CFLAGS, "-I", str(CPU_INCLUDE), "-c", str(work / "conf.c"), "-o", str(work / "conf.o")])
         if compiled.returncode == 0:
             break
         lines = source.split("\n")

@@ -107,16 +107,19 @@ static void build_memory(const Scenario *s) {
   if (s->has_stop) { mem[CODE] = 0x4E; mem[CODE + 1U] = 0x72; mem[CODE + 2U] = (uint8_t)(s->stop_imm >> 8);
                      mem[CODE + 3U] = (uint8_t)s->stop_imm; }
 }
-static void print_state(const char *name, int step, unsigned pc, unsigned sr, unsigned a7, unsigned usp) {
+/* SEG-021-T022: `cycles` is the step's cycle count (interrupt entry + the executed instruction); -1 prints "-"
+   (the CPU is stopped after the step: no instruction boundary is timed). */
+static void print_state(const char *name, int step, unsigned pc, unsigned sr, unsigned a7, unsigned usp, long cycles) {
   unsigned i;
   printf("%s %d pc=%05X sr=%04X a7=%05X usp=%05X top=", name, step, pc, sr & 0xFFFFU, a7, usp);
   for (i = 0; i < 6U; ++i) printf("%02X", (a7 + i) < MEM ? mem[a7 + i] : 0U);
-  printf("\n");
+  if (cycles < 0) printf(" cyc=-\n"); else printf(" cyc=%ld\n", cycles);
 }
 '''
 
 CONTRACT = r'''
 #include "exception_core.h"
+#include "timing_core.h"
 typedef struct { uint16_t sr; uint32_t a7, other, pc; SegarecompM68kInterruptState irq; } Cpu;
 static int valid(void *c, uint32_t base, uint32_t length, SegarecompM68kStackDirection d) {
   (void)c; (void)d; return base >= 0x100U && base + length <= MEM; }
@@ -128,14 +131,16 @@ static void wr(void *c, uint32_t a, uint32_t size, uint32_t v) {
 static SegarecompM68kVectorResolution vec(void *c, uint32_t v, uint32_t *h) {
   uint32_t x = 0; (void)c; if (!rd(c, v * 4U, 4U, &x)) return SEGARECOMP_M68K_VECTOR_NOT_INSTALLED;
   *h = x; return SEGARECOMP_M68K_VECTOR_HANDLER; }
-/* Test scaffold: the scripts only ever place NOP and STOP #imm (with S kept set) in memory. */
-static void execute_one(Cpu *cpu) {
-  if (cpu->irq.stopped) return;
+/* Test scaffold: the scripts only ever place NOP and STOP #imm (with S kept set) in memory. Returns the
+   instruction's published cycles (Table 8-11: NOP 4, STOP 4) or 0 when nothing executed. */
+static long execute_one(Cpu *cpu) {
+  if (cpu->irq.stopped) return 0;
   if (mem[cpu->pc] == 0x4E && mem[cpu->pc + 1U] == 0x72) {
     cpu->sr = (uint16_t)((((unsigned)mem[cpu->pc + 2U] << 8) | mem[cpu->pc + 3U]) & SEGARECOMP_M68K_SR_IMPLEMENTED);
-    cpu->pc += 4U; cpu->irq.stopped = 1U; return;
+    cpu->pc += 4U; cpu->irq.stopped = 1U; return 4;
   }
   cpu->pc += 2U;
+  return 4;
 }
 int main(void) {
   unsigned n; int k, refused = 0;
@@ -150,6 +155,7 @@ int main(void) {
     cpu.a7 = (s->sr & 0x2000U) ? SSP0 : USP0; cpu.other = (s->sr & 0x2000U) ? USP0 : SSP0;
     for (k = 0; k < s->count; ++k) {
       const Step *t = &steps[s->first + k];
+      long cycles = 0;
       if (t->new_sr >= 0) cpu.sr = (uint16_t)t->new_sr;
       segarecomp_m68k_interrupt_sample(&cpu.irq, (uint32_t)t->level);
       {
@@ -159,11 +165,13 @@ int main(void) {
                                                                   (uint32_t)t->supplied);
           if (segarecomp_m68k_interrupt_enter(&hooks, &binding, &cpu.irq, level, vector, cpu.pc, 0) !=
               SEGARECOMP_M68K_EXCEPTION_OK) { printf("%s %d entry-failed\n", s->name, k); continue; }
+          /* SEG-021-T022: the interrupt exception-processing time (CPU-owned table). */
+          cycles += (long)segarecomp_m68k_exception_entry_cycles(vector);
         }
       }
-      execute_one(&cpu);
+      cycles += execute_one(&cpu);
       { const int sup = (cpu.sr & 0x2000U) != 0U;
-        print_state(s->name, k, cpu.pc, cpu.sr, cpu.a7, sup ? cpu.other : cpu.a7); }
+        print_state(s->name, k, cpu.pc, cpu.sr, cpu.a7, sup ? cpu.other : cpu.a7, cpu.irq.stopped ? -1L : cycles); }
     }
   }
   /* Documented expected values beyond the oracle: supplied vectors outside 64-255 are refused, levels outside 1-7 map
@@ -240,11 +248,11 @@ int main(void) {
       current = t;
       if (t->new_sr >= 0) m68k_set_reg(M68K_REG_SR, (unsigned)t->new_sr);
       m68k_set_irq((unsigned)t->level);
-      (void)m68k_execute(1);
-      { const unsigned sr = m68k_get_reg(NULL, M68K_REG_SR);
+      { const long cycles = (long)m68k_execute(1);
+        const unsigned sr = m68k_get_reg(NULL, M68K_REG_SR);
         const unsigned a7 = m68k_get_reg(NULL, M68K_REG_A7);
         print_state(s->name, k, m68k_get_reg(NULL, M68K_REG_PC), sr, a7,
-                    (sr & 0x2000U) ? m68k_get_reg(NULL, M68K_REG_USP) : a7); }
+                    (sr & 0x2000U) ? m68k_get_reg(NULL, M68K_REG_USP) : a7, cycles); }
     }
   }
   return 0;
@@ -271,7 +279,7 @@ def expected_documented(lines):
     by_key = {}
     for line in lines:
         parts = line.split()
-        if len(parts) == 7:
+        if len(parts) == 8:
             by_key[(parts[0], int(parts[1]))] = dict(p.split("=") for p in parts[2:])
     handler = lambda vector, executed=True: "%05X" % (0x3000 + vector * 0x10 + (2 if executed else 0))
     for mask in range(8):
@@ -280,8 +288,10 @@ def expected_documented(lines):
             if level > mask:  # accepted: autovector 24 + level, SR mask = level, next instruction (0x400) stacked
                 assert state["pc"] == handler(24 + level) and state["sr"] == "%04X" % (0x2000 | level << 8), state
                 assert state["a7"] == "07FFA" and state["top"] == "%04X00000400" % (0x2000 | mask << 8), state
+                assert state["cyc"] == "48", state  # SEG-021-T022: interrupt entry 44 + the handler's NOP 4
             else:  # masked: the NOP executes, nothing is stacked
                 assert state["pc"] == "00402" and state["a7"] == "08000", state
+                assert state["cyc"] == "4", state
         state = by_key[("L7_edge_M%d" % mask, 0)]
         assert state["pc"] == handler(31) and state["sr"] == "2700", state  # non-maskable transition, any mask
     held = [by_key[("L7_held", i)] for i in range(6)]
@@ -301,12 +311,35 @@ def expected_documented(lines):
     assert user["top"] == "001500000400", user
     trace = by_key[("trace_cleared", 0)]
     assert trace["sr"] == "241F" and trace["top"] == "A31F00000400", trace
+    for name in ("ack_auto", "ack_vec64", "ack_vec255", "ack_spurious", "ack_uninit", "user_mode"):
+        assert by_key[(name, 0)]["cyc"] == "48", name  # every interrupt entry is 44 (+ NOP 4)
     stop = [by_key[("stop_wake", i)] for i in range(5)]
     assert [s["pc"] for s in stop[:3]] == ["00404"] * 3 and stop[3]["pc"] == handler(28), stop
     assert stop[3]["top"] == "230000000404" and stop[3]["sr"] == "2400", stop
+    # SEG-021-T022: STOP leaves the CPU stopped (untimed "-"); the waking entry is 44 + the handler's NOP.
+    assert [s["cyc"] for s in stop[:3]] == ["-"] * 3 and stop[3]["cyc"] == "48", stop
     nmi = [by_key[("stop_nmi", i)] for i in range(4)]
     assert [s["pc"] for s in nmi[:3]] == ["00404"] * 3 and nmi[3]["pc"] == handler(31), nmi
     assert nmi[3]["top"] == "270000000404", nmi
+
+
+# SEG-021-T022 documented oracle deviation: the pinned Musashi indexes its exception-cycle table by vector number and
+# carries a placeholder 4 (instead of the interrupt row's 44) for the user-defined vectors 64-255, so a supplied
+# user vector costs it 4 + the NOP. The documented value (48) is asserted on the contract side above.
+MUSASHI_SUPPLIED_VECTOR_STEPS = {("ack_vec64", "0"), ("ack_vec255", "0")}
+
+
+def normalize_oracle_cycles(contract_line, oracle_line):
+    """A stopped CPU has no timed boundary (the contract prints "-"; Musashi reports its time slice). The two
+    documented supplied-vector steps are accepted exactly at Musashi's deviating value 8."""
+    contract, oracle = contract_line.split(), oracle_line.split()
+    if len(contract) != 8 or len(oracle) != 8:
+        return oracle_line
+    if contract[7] == "cyc=-":
+        oracle[7] = "cyc=-"
+    elif (oracle[0], oracle[1]) in MUSASHI_SUPPLIED_VECTOR_STEPS and oracle[7] == "cyc=8":
+        oracle[7] = contract[7]
+    return " ".join(oracle)
 
 
 def main():
@@ -337,6 +370,7 @@ def main():
                  "-I", str(checkout / "softfloat"), str(temp / "oracle.c"), str(checkout / "m68kcpu.c"),
                  str(temp / "m68kops.c"), str(checkout / "softfloat/softfloat.c"), "-o", str(temp / "oracle")])
         oracle = checked([str(temp / "oracle")]).stdout.splitlines()
+        oracle = [normalize_oracle_cycles(a, b) for a, b in zip(lines[:-1], oracle)]
         mismatches = [(a, b) for a, b in zip(lines[:-1], oracle) if a != b]
         assert len(oracle) == len(lines) - 1 and not mismatches, mismatches[:10]
         print("m68k_interrupt_acceptance_test: %d steps match documented values and the pinned Musashi core"

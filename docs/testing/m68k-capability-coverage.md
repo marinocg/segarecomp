@@ -18,14 +18,14 @@ Denominator: 1526 legal forms, 45816 legal primary words. A form passes a stage 
 | ea_footprint_declared | 1526 | 1399 | 91.68% | 41197 |
 | ccr_sr_effect_declared | 1193 | 1192 | 99.92% | 36608 |
 | exception_privilege_modeled | 55 | 54 | 98.18% | 1364 |
-| timing_model_present | 1526 | 1502 | 98.43% | 44959 |
+| timing_model_present | 1526 | 1525 | 99.93% | 45815 |
 | emit | 1526 | 1495 | 97.97% | 44917 |
 | compile | 1526 | 1495 | 97.97% | 44917 |
 | native_exec | 1526 | 1493 | 97.84% | 44908 |
 | route_runtime_routed_admitted | 1526 | 1517 | 99.41% | 45765 |
 | route_runtime_routed_compiles | 1526 | 1517 | 99.41% | 45765 |
 | route_runtime_routed_executes | 1526 | 1059 | 69.40% | 43368 |
-| route_immutable_rom_aot | 1526 | 1524 | 99.87% | 45807 |
+| route_immutable_rom_aot | 1526 | 1525 | 99.93% | 45815 |
 | route_static_discovery | 1526 | 1497 | 98.10% | 41681 |
 
 `end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1493 of 1526 forms, 97.84%. It is a structural bar, not a correctness claim.
@@ -34,12 +34,12 @@ Denominator: 1526 legal forms, 45816 legal primary words. A form passes a stage 
 
 | stage | applicable forms | passing forms | percent | passing words |
 | --- | ---: | ---: | ---: | ---: |
-| semantic_validated | 1526 | 1474 | 96.59% | 42611 |
-| ccr_sr_validated | 1193 | 1170 | 98.07% | 33713 |
-| ea_side_effect_validated | 381 | 363 | 95.28% | 13043 |
-| timing_validated | 1526 | 110 | 7.21% | 7168 |
+| semantic_validated | 1526 | 1494 | 97.90% | 44916 |
+| ccr_sr_validated | 1193 | 1171 | 98.16% | 35761 |
+| ea_side_effect_validated | 381 | 372 | 97.64% | 13073 |
+| timing_validated | 1526 | 1457 | 95.48% | 43850 |
 
-Validated primary words per aspect: ccr 33783, ea 13221, semantic 42617, timing 7168. Forms with at least one validated word: ccr 1222, ea 511, semantic 1479, timing 110. Sources: tests/fixtures/m68k-conformance-vectors.json, tests/m68k_batch_b_musashi_differential_test.py, tests/m68k_batch_c_musashi_differential_test.py, tests/m68k_cmp_absolute_source_musashi_differential_test.py, tests/m68k_divs_word_musashi_differential_test.py, tests/m68k_divu_word_musashi_differential_test.py, tests/m68k_indexed_arithmetic_musashi_differential_test.py, tests/m68k_indexed_lea_musashi_differential_test.py, tests/m68k_muls_word_musashi_differential_test.py, tests/m68k_mulu_word_musashi_differential_test.py, tests/m68k_pc_indexed_lea_musashi_differential_test.py, tests/m68k_pc_indexed_logical_musashi_differential_test.py, tests/m68k_pc_indexed_move_musashi_differential_test.py.
+Validated primary words per aspect: ccr 35831, ea 13249, semantic 44918, timing 43850. Forms with at least one validated word: ccr 1223, ea 519, semantic 1496, timing 1457. Sources: tests/fixtures/m68k-conformance-vectors.json, tests/m68k_batch_b_musashi_differential_test.py, tests/m68k_batch_c_musashi_differential_test.py, tests/m68k_cmp_absolute_source_musashi_differential_test.py, tests/m68k_divs_word_musashi_differential_test.py, tests/m68k_divu_word_musashi_differential_test.py, tests/m68k_indexed_arithmetic_musashi_differential_test.py, tests/m68k_indexed_lea_musashi_differential_test.py, tests/m68k_muls_word_musashi_differential_test.py, tests/m68k_mulu_word_musashi_differential_test.py, tests/m68k_pc_indexed_lea_musashi_differential_test.py, tests/m68k_pc_indexed_logical_musashi_differential_test.py, tests/m68k_pc_indexed_move_musashi_differential_test.py.
 
 ## Stage definitions (public entry points only)
 
@@ -48,7 +48,7 @@ Validated primary words per aspect: ccr 33783, ea 13221, semantic 42617, timing 
 - `ea_footprint_declared` (structural): the effect owner DECLARES a complete architectural register write footprint. This is a claim, not evidence that auto-update, A7 byte adjustment, aliasing or implicit stack effects are correct (see `ea_side_effect_validated`).
 - `ccr_sr_effect_declared` (structural): applicable to forms the Motorola manual says always modify CCR/SR (`CCR_ALWAYS_MNEMONICS`); passes if the effect owner declares `affects_condition_codes`. It does not check which flags or their values (see `ccr_sr_validated`).
 - `exception_privilege_modeled` (structural): applicable to forms listing a non-deferred exception class or privilege (declared deferred dispositions -- ADR 0043 section 4 Group 0 address/bus error and section 6 trace -- are not required and are counted in the separate `deferred_disposition` bucket); per concrete word (TRAP #n needs vector 32+n) it passes only if the effect contract, which carries one synchronous-exception vector, represents every required class. Forms that can raise several classes remain unsupported.
-- `timing_model_present` (structural): `m68k_instruction_timing` returns a rule: a static scalar or an outcome-dependent Bcc/DBcc/Scc Dn/register shift-rotate rule (existence of an entry, not correctness; see `timing_validated`).
+- `timing_model_present` (structural): `m68k_instruction_timing` returns a rule: a static scalar, an outcome-dependent Bcc/DBcc/Scc Dn/register shift-rotate rule, or a data-dependent MULU/MULS/DIVU/DIVS rule, plus the exception-entry time of every form that can take a synchronous exception (SEG-021-T022; existence of an entry, not correctness; see `timing_validated`).
 - `emit / compile / native_exec` (structural (direct route)): `emit_m68k_operation_c` (linear-memory context) produces C; batched units compile under strict C11 (`-std=c11 -Wall -Wextra -Wno-type-limits -pedantic -Werror`); the function runs to normal completion in one native binary, each word from the identical restored baseline state (a runtime stop code, crash or hang fails the word).
 - `route_runtime_routed_admitted / compiles / executes` (structural (runtime-routed route)): the Genesis runtime-routed lowering emits a non-empty operation body (admitted; an indentation-only body is a declined operation, not an admission); that C compiles under the same strict flags against the real `platforms/genesis/runtime` header (compiles); it runs against the real runtime linked from `runtime.c`, from a restored baseline with work RAM only, and continues at PC rather than stopping (executes). Whole-program C4 preflight facts are not exercised, so absolute-address forms stop at the runtime memory gate under the fixed extension pattern. **These rows measure the raw routed emitter only; they are NOT proof that the C4 preflight classifier (`classify_m68k_c4_gap_shapes`) accepts the form** -- C4 acceptance is proved by the focused C4 admission regressions in `tests/m68k_pipeline_test.cpp` (e.g. `c4_arithmetic_auto_update_admission`).
 - `route_immutable_rom_aot` (structural): `m68k_operation_is_immutable_rom_aot_safe` admits the form.
@@ -57,7 +57,7 @@ Validated primary words per aspect: ccr 33783, ea 13221, semantic 42617, timing 
 - `semantic_validated` (validated): every word has existing pinned-Musashi differential evidence comparing the result state.
 - `ccr_sr_validated` (validated): applicable to CCR-modifying forms; every word has existing Musashi evidence that compares SR/CCR.
 - `ea_side_effect_validated` (validated): applicable to forms with auto-update/implicit-stack effects; every word has existing Musashi evidence comparing the full D/A register state and memory.
-- `timing_validated` (validated): every word of the form is credited by a conformance-table row with `"timing": true`: for every vector the generated retirement-rule cycles equal the cycles the pinned Musashi core consumed for that instruction, and Musashi agrees with the published MC68000 tables for those rows (SEG-021-T021; published instruction totals, not bus cycles).
+- `timing_validated` (validated): every word of the form is credited by a conformance-table row with `"timing": true`: for every vector the generated retirement-rule cycles -- or, when the vector takes the form's synchronous exception, its exception-entry time -- equal the cycles the pinned Musashi core consumed for that instruction, and Musashi agrees with the published MC68000 tables for those rows (SEG-021-T021/T022; published instruction and exception-processing totals, not bus cycles).
 
 ## By family (end-to-end structural, forms)
 

@@ -57,14 +57,15 @@ static uint16_t frame_sr(const GenesisRuntime *r, uint32_t base) {
   const uint8_t *m = r->work_ram + (base - 0x00FF0000U);
   return (uint16_t)((m[0] << 8) | m[1]);
 }
-/* User mode: vector 8 on the SSP (inactive slot 0xFF0700), stacked PC = the instruction, S = 0 saved, no cycles
-   retired, and nothing of the privileged instruction executed. */
+/* User mode: vector 8 on the SSP (inactive slot 0xFF0700), stacked PC = the instruction, S = 0 saved, nothing of
+   the privileged instruction executed. SEG-021-T022: no retirement, but the privilege-violation entry charges its
+   published exception-processing time, 34 cycles (previously 0: entries were uncharged). */
 static void expect_privilege_violation(uint32_t pc) {
   GenesisRuntime runtime = fresh(pc, 0x0015);
   runtime.a[7] = 0x00FF0500; runtime.usp = 0x00FF0700; runtime.d[1] = 0x00002700; runtime.a[0] = 0x00FF0800;
   runtime.a[2] = 0x11111111; runtime.a[3] = 0x22222222;
   const GenesisRuntime before = runtime;
-  step(&runtime, 0x00001044, 0);
+  step(&runtime, 0x00001044, 34);
   assert(runtime.sr == 0x2015 && runtime.a[7] == 0x00FF06FA && runtime.usp == 0x00FF0500);
   assert(frame_sr(&runtime, 0x00FF06FA) == 0x0015 && frame_pc(&runtime, 0x00FF06FA) == pc);
   assert(runtime.d[1] == before.d[1] && runtime.a[0] == before.a[0] && runtime.a[2] == before.a[2] && runtime.a[3] == before.a[3]);

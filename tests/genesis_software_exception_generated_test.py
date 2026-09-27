@@ -64,16 +64,19 @@ static uint16_t frame_sr(const GenesisRuntime *r, uint32_t base) {
   const uint8_t *m = r->work_ram + (base - 0x00FF0000U);
   return (uint16_t)((m[0] << 8) | m[1]);
 }
-/* The exception is taken: frame on the SSP, handler entered, no retirement charged (ADR 0043 §8). */
-static void expect_entry(GenesisRuntime *runtime, uint32_t stacked_pc) {
+/* The exception is taken: frame on the SSP, handler entered, no retirement charged. SEG-021-T022 / ADR 0043 §8:
+   the entry charges its published exception-processing time instead (TRAP/TRAPV/ILLEGAL/line A/F 34; CHK 40 + the
+   bound's word EA cell); before T022 the entry charged 0. */
+static void expect_entry_timed(GenesisRuntime *runtime, uint32_t stacked_pc, uint64_t entry_cycles) {
   const GenesisRuntime before = *runtime;
   const uint32_t ssp = (before.sr & 0x2000U) != 0U ? before.a[7] : before.usp;
-  step(runtime, HANDLER, 0);
+  step(runtime, HANDLER, entry_cycles);
   assert(runtime->a[7] == ssp - 6U);
   assert(runtime->usp == ((before.sr & 0x2000U) != 0U ? before.usp : before.a[7]));
   assert(frame_pc(runtime, ssp - 6U) == stacked_pc);
   assert(runtime->sr == (uint16_t)((frame_sr(runtime, ssp - 6U) & 0x271FU) | 0x2000U));
 }
+static void expect_entry(GenesisRuntime *runtime, uint32_t stacked_pc) { expect_entry_timed(runtime, stacked_pc, 34U); }
 /* A software exception that cannot be delivered stops fail-closed with nothing changed. */
 static void expect_fail_closed(GenesisRuntime runtime) {
   const GenesisRuntime before = runtime;
@@ -124,15 +127,15 @@ int main(void) {
   assert(runtime.sr == 0x2704);
   /* Dn.W < 0: vector 6, N set; the saved SR carries the new flags; the next instruction is stacked. */
   runtime = fresh(0x100E, 0x2703); runtime.d[0] = 0x00008000; runtime.d[1] = 5;
-  expect_entry(&runtime, 0x1010);
+  expect_entry_timed(&runtime, 0x1010, 40U);
   assert(frame_sr(&runtime, 0x00FF03FA) == 0x2708 && runtime.sr == 0x2708 && runtime.d[0] == 0x00008000);
   /* Dn.W > bound: vector 6, N cleared. */
   runtime = fresh(0x100E, 0x0008); runtime.d[0] = 6; runtime.d[1] = 0x12340005;
-  expect_entry(&runtime, 0x1010);
+  expect_entry_timed(&runtime, 0x1010, 40U);
   assert(frame_sr(&runtime, 0x00FF06FA) == 0x0000);
   /* Negative bound: 1 > -1 traps with N cleared. */
   runtime = fresh(0x100E, 0x2708); runtime.d[0] = 1; runtime.d[1] = 0xFFFF;
-  expect_entry(&runtime, 0x1010);
+  expect_entry_timed(&runtime, 0x1010, 40U);
   assert(frame_sr(&runtime, 0x00FF03FA) == 0x2700);
   /* CHK.W (A0)+,D2: the bound is read through the routed gate, A0 advances by two (14 cycles in range) and stays
      advanced when the check traps; a failed routed read changes nothing. */
@@ -141,7 +144,7 @@ int main(void) {
   step(&runtime, 0x1012, 14);
   assert(runtime.a[0] == 0x00FF0802);
   runtime = fresh(0x1010, 0x2700); runtime.a[0] = 0x00FF0800; runtime.work_ram[0x801] = 0x10; runtime.d[2] = 0x20;
-  expect_entry(&runtime, 0x1012);
+  expect_entry_timed(&runtime, 0x1012, 44U);
   assert(runtime.a[0] == 0x00FF0802);
   runtime = fresh(0x1010, 0x2700); runtime.a[0] = 0x00000000; runtime.d[2] = 0x20;
   {
@@ -158,12 +161,12 @@ int main(void) {
   runtime = fresh(0x1014, 0x2700); runtime.d[4] = 0x10;
   step(&runtime, 0x1018, 14);
   runtime = fresh(0x1014, 0x2700); runtime.d[4] = 0x11;
-  expect_entry(&runtime, 0x1018);
+  expect_entry_timed(&runtime, 0x1018, 44U);
   /* CHK.W $FF0800.L,D5 (22 cycles) and its trap (N set). */
   runtime = fresh(0x1018, 0x2700); runtime.work_ram[0x801] = 0x10; runtime.d[5] = 7;
   step(&runtime, 0x101E, 22);
   runtime = fresh(0x1018, 0x2700); runtime.work_ram[0x801] = 0x10; runtime.d[5] = 0xFFFF;
-  expect_entry(&runtime, 0x101E);
+  expect_entry_timed(&runtime, 0x101E, 52U);
   assert(frame_sr(&runtime, 0x00FF03FA) == 0x2708);
   /* ILLEGAL, line 1010, line 1111 and the MC68010 MOVEC word: vectors 4/10/11/4 with THIS instruction stacked. */
   runtime = fresh(0x101E, 0x2700);

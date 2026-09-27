@@ -224,8 +224,9 @@ mnemonics; legality (incl. `(d8,An,Xn)`, and for BTST `d16(PC)`, `(d8,PC,Xn)` an
 Remaining declined auto-update shapes: MULS/MULU/DIVS/DIVU sources (SEG-021-T010).
 
 AOT admission additionally requires the shared retirement-timing seam to account for the operation
-(`m68k_instruction_cycles`): the dynamic `BTST Dn,#<data>` form has no published static timing row and is declined at
-analysis time rather than admitted and rejected by codegen (which invalidated the whole immutable-ROM AOT program).
+(`m68k_instruction_cycles`), so a form without a published static row is declined at analysis time rather than
+admitted and rejected by codegen (which invalidated the whole immutable-ROM AOT program). SEG-021-T022 gave the dynamic
+`BTST Dn,#<data>` form its Table 8-8 row (4 + the `#<data>` cell 4 = 8), so the whole bit family is now admitted.
 
 ## SEG-021-T009 extension: memory-word shift/rotate
 

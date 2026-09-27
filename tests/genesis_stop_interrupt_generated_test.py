@@ -36,6 +36,11 @@ AOT_HARNESS = r'''
 #define HANDLER UINT32_C(0x00001018)
 #define ONSET ((uint64_t)GENESIS_NTSC_VBLANK_ONSET_TICK)
 #define FRAME ((uint64_t)GENESIS_NTSC_MASTER_TICKS_PER_FRAME)
+/* SEG-021-T022: the accepted interrupt's exception-processing time (MC68000 exception table: 44 cycles), charged
+   after the entry commits; before T022 the entry charged nothing. */
+#define ENTRY ((uint64_t)44U * GENESIS_M68K_CYCLE_MASTER_TICKS)
+/* The privilege-violation entry (34 cycles). */
+#define PRIVILEGE_ENTRY ((uint64_t)34U * GENESIS_M68K_CYCLE_MASTER_TICKS)
 static GenesisRuntime fresh(uint32_t pc, uint16_t sr) {
   GenesisRuntime runtime = (GenesisRuntime){0};
   runtime.pc = pc; runtime.sr = sr;
@@ -54,12 +59,13 @@ static uint16_t frame_sr(const GenesisRuntime *r, uint32_t base) {
   const uint8_t *m = r->work_ram + (base - 0x00FF0000U);
   return (uint16_t)((m[0] << 8) | m[1]);
 }
-/* Whole CPU cycles from `from` to the first VBlank onset strictly after `from + 4 cycles` (STOP's own retirement). */
+/* Whole CPU cycles from `from` to the first VBlank onset strictly after `from + 4 cycles` (STOP's own retirement),
+   plus the interrupt entry time. */
 static uint64_t wake_ticks(uint64_t from) {
   const uint64_t after_stop = from + 4U * GENESIS_M68K_CYCLE_MASTER_TICKS;
   const uint64_t target = after_stop < ONSET ? ONSET : ONSET + ((after_stop - ONSET) / FRAME + 1U) * FRAME;
   const uint64_t cycles = (target - after_stop + GENESIS_M68K_CYCLE_MASTER_TICKS - 1U) / GENESIS_M68K_CYCLE_MASTER_TICKS;
-  return after_stop + cycles * GENESIS_M68K_CYCLE_MASTER_TICKS;
+  return after_stop + cycles * GENESIS_M68K_CYCLE_MASTER_TICKS + ENTRY;
 }
 /* STOP woken by the next VBlank: frame on the SSP with the instruction after STOP stacked, SR <- S | I = 6. */
 static void expect_wake(GenesisRuntime *runtime, uint32_t next_pc, uint16_t stop_sr, uint32_t ssp) {
@@ -89,7 +95,7 @@ int main(void) {
   /* STOP #$2000 from reset time: woken exactly at the first VBlank onset. */
   runtime = fresh(0x1008, 0x2700);
   expect_wake(&runtime, 0x100C, 0x2000, 0x00FF0400);
-  assert(runtime.scheduler.master_ticks == ONSET && runtime.devices.interrupt.vblank_transition_count == 1U);
+  assert(runtime.scheduler.master_ticks == ONSET + ENTRY && runtime.devices.interrupt.vblank_transition_count == 1U);
   /* Determinism: the identical start reaches the identical state. */
   again = fresh(0x1008, 0x2700);
   expect_wake(&again, 0x100C, 0x2000, 0x00FF0400);
@@ -97,13 +103,14 @@ int main(void) {
   /* Mid-frame, past this frame's onset: the wait runs to the NEXT frame's onset. */
   runtime = fresh(0x1008, 0x2700); runtime.scheduler.master_ticks = ONSET + 5U;
   expect_wake(&runtime, 0x100C, 0x2000, 0x00FF0400);
-  assert(runtime.scheduler.master_ticks >= ONSET + FRAME && runtime.scheduler.master_ticks < ONSET + FRAME + 7U);
-  /* A request already pending is accepted at STOP's own boundary (4 cycles, no wait). */
+  assert(runtime.scheduler.master_ticks >= ONSET + FRAME + ENTRY &&
+         runtime.scheduler.master_ticks < ONSET + FRAME + 7U + ENTRY);
+  /* A request already pending is accepted at STOP's own boundary (4 cycles, no wait, then the 44-cycle entry). */
   runtime = fresh(0x1008, 0x2700); runtime.devices.interrupt.vblank_pending = 1U;
   {
     const GenesisControlTransfer transfer = genesis_bridge_dispatch(&runtime);
     assert(transfer.kind == GENESIS_CONTINUE_AT_PC && runtime.pc == HANDLER);
-    assert(runtime.scheduler.master_ticks == 4U * GENESIS_M68K_CYCLE_MASTER_TICKS);
+    assert(runtime.scheduler.master_ticks == 4U * GENESIS_M68K_CYCLE_MASTER_TICKS + ENTRY);
     assert(frame_pc(&runtime, 0x00FF03FA) == 0x100C && runtime.sr == 0x2600 && runtime.m68k_interrupt.stopped == 0U);
   }
   /* The mask STOP loads (6) blocks the only wired source: no wake source. */
@@ -118,14 +125,15 @@ int main(void) {
   expect_no_wake(&runtime, 0x100C, 0x2000);
   runtime = fresh(0x1008, 0x2700); runtime.irq6_handler_present = 0U;
   expect_no_wake(&runtime, 0x100C, 0x2000);
-  /* User mode: vector 8 with STOP itself stacked; nothing of STOP executes (SR, stopped, time). */
+  /* User mode: vector 8 with STOP itself stacked; nothing of STOP executes (SR, stopped, its 4 cycles); only the
+     34-cycle privilege-violation entry is charged. */
   runtime = fresh(0x1008, 0x0015);
   {
     const GenesisControlTransfer transfer = genesis_bridge_dispatch(&runtime);
     assert(transfer.kind == GENESIS_CONTINUE_AT_PC && runtime.pc == HANDLER);
     assert(runtime.a[7] == 0x00FF03FA && runtime.usp == 0x00FF0600 && frame_pc(&runtime, 0x00FF03FA) == 0x1008 &&
            frame_sr(&runtime, 0x00FF03FA) == 0x0015 && runtime.sr == 0x2015);
-    assert(runtime.m68k_interrupt.stopped == 0U && runtime.scheduler.master_ticks == 0U);
+    assert(runtime.m68k_interrupt.stopped == 0U && runtime.scheduler.master_ticks == PRIVILEGE_ENTRY);
   }
   /* T = 1 in the immediate: deferred-trace stop, nothing committed. */
   runtime = fresh(0x1014, 0x2700);
@@ -178,7 +186,8 @@ int main(void) {
   assert(runtime.d[0] == 1U && runtime.d[1] == 0U && runtime.a[7] == 0x00FF03FA && runtime.sr == 0x2600);
   assert(runtime.work_ram[0x3FA] == 0x20 && runtime.work_ram[0x3FB] == 0x00 && runtime.work_ram[0x3FE] == 0x0B &&
          runtime.work_ram[0x3FF] == 0x06);
-  assert(runtime.scheduler.master_ticks == (uint64_t)GENESIS_NTSC_VBLANK_ONSET_TICK);
+  /* SEG-021-T022: + the 44-cycle interrupt entry. */
+  assert(runtime.scheduler.master_ticks == (uint64_t)GENESIS_NTSC_VBLANK_ONSET_TICK + 44U * GENESIS_M68K_CYCLE_MASTER_TICKS);
   return 0;
 }
 '''

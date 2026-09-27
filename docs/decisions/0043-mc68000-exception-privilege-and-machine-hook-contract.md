@@ -317,6 +317,35 @@ timing table (U5). They are charged through `charge_exception_cycles`. Values ar
 validated only by SEG-021-T022; this ADR records no count. The existing ADR 0041 rule stays: timing
 is charged at guest instruction boundaries.
 
+Implementation note (SEG-021-T022): the counts live in the M68K-owned strict-C11 unit
+`libs/cpu/m68k/include/segarecomp/cpu/m68k/timing_core.h` (`segarecomp_m68k_exception_entry_cycles(vector)`,
+beside the MULU/MULS/DIVU/DIVS rules), which the C++ owner (`m68k_exception_entry_cycles(operation)` and
+`M68kInstructionTiming::exception_entry_cycles`, `timing.hpp`) and the generated C consume verbatim. Values (U5,
+counted from the start of the instruction for the instruction-caused rows): illegal instruction, line 1010/1111,
+privilege violation, TRAP #0-15, TRAPV and trace 34; zero divide 38 + the divisor's word EA cell; CHK 40 + the
+bound's word EA cell; interrupt (autovector, spurious, uninitialized, supplied user vector) 44, assuming the
+table's four-clock acknowledge; bus/address error 50 and reset 40 are listed but never delivered. Each form has at
+most one synchronous exception path (the effect owner's `exception_vector`), so its entry time is a build-time fact
+of the lowered instruction.
+
+The machine charges the value at the entry commit (§5 step 7) rather than through a void hook pointer, because the
+charge advances the ADR 0041 scheduler and can itself fail closed (virtual-time overflow): the synchronous raises
+(`genesis_raise_divide_by_zero` / `_privilege_violation` / `_software_exception`) take the entry time as a
+build-time argument from the generated lowering and, after a successful entry, advance the same scheduler a
+retirement uses without admitting an interrupt at that boundary (a request latched while it is charged is admitted
+at the next retirement boundary, exactly where it was admitted before); a zero count stops fail-closed before any
+change. Interrupt acceptance charges 44 after the entry commits and after the IRQ6 re-arm, again without admission,
+so the STOP wake entry is charged by the same path. The exception path never retires, so nothing is charged twice.
+Semantics are unchanged; only virtual time moves: every taken exception now advances time by its entry cost, so
+VBlank-relative instruction boundaries after an IRQ6 entry shift by 44 cycles (308 master ticks) per accepted
+interrupt. Validation: `tests/m68k_interrupt_acceptance_test.py` compares the interrupt entry (44 + the handler's
+first instruction) step by step with the pinned Musashi core, except the supplied user vectors 64-255, where
+Musashi indexes its cycle table by vector and carries a placeholder 4 (documented deviation, the published 44 is
+asserted); the conformance harness compares TRAP/TRAPV/ILLEGAL/line-A/F/privilege-violation entries and CHK Dn
+entries with Musashi (`docs/testing/m68k-conformance-harness.md`). Musashi omits the EA term of the zero-divide
+and CHK rows (it undoes the whole instruction row, EA included), so the memory-EA CHK trap and every
+zero-divide EA > 0 value follow the manual and are validated against it only.
+
 ### 9. Second 68000 instances (Sega CD sub-CPU, 32X-side 68000)
 
 The design already supports more than one 68000, because:

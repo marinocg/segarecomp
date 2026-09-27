@@ -128,9 +128,12 @@ def main():
         temp = pathlib.Path(directory)
         generated = checked([executable, "--emit-operation-c4-divs-word"]).stdout
         assert not generated.startswith("/* translation rejected:"), generated
+        # SEG-021-T022: the retirement is the CPU-owned exact data-dependent rule (timing_core.h), no longer the
+        # static worst-case row; no per-program timing helper is emitted.
         assert "genesis_m68k_divs_word_cycles" not in generated
-        assert "m68k_timing_divisor" not in generated
-        assert "UINT32_C(158)" in generated
+        assert "segarecomp_m68k_divs_word_cycles(m68k_timing_div_dividend, m68k_timing_div_divisor) + UINT32_C(0)" \
+            in generated
+        assert "UINT32_C(158)" not in generated
         (temp / "generated.c").write_text(generated)
         (temp / "actual.c").write_text(ACTUAL_SOURCE)
         actual = temp / "actual"

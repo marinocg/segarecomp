@@ -7812,8 +7812,9 @@ constexpr std::size_t dynamic_call_index = 10U;   // JSR (0,PC,D0.W): an AOT-adm
 std::vector<std::uint8_t> make_image() {
   std::vector<std::uint8_t> bytes{0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U};
   for (std::size_t index = 0; index < entry_count; ++index) {
-    // SEG-021-T020 made STOP AOT-safe; BTST D0,#<data> (no verified Table 8 cell, no timing row) is not.
-    if (index == unrepresented_index) bytes.insert(bytes.end(), {0x01U, 0x3CU, 0x00U, 0x10U});  // BTST D0,#$10
+    // SEG-021-T020 made STOP AOT-safe and SEG-021-T022 gave BTST D0,#<data> its timing row; RESET (still a decode
+    // frontier) is never admitted, so RESET + NOP keeps one unrepresented aligned PC at the same place.
+    if (index == unrepresented_index) bytes.insert(bytes.end(), {0x4EU, 0x70U, 0x4EU, 0x71U});  // RESET; NOP
     else if (index == dynamic_call_index) bytes.insert(bytes.end(), {0x4EU, 0xBBU, 0x00U, 0x00U});  // JSR (0,PC,D0.W)
     else bytes.insert(bytes.end(), {0x44U, 0x2DU, 0x00U, 0x00U});  // NEG.B (0,A5)
   }
@@ -8760,17 +8761,17 @@ void immutable_rom_aot_safe_family_boundary_is_shared_and_fact_free() {
            "SEG-021-T008 family-level admission: -(An) is admitted for the same reason as (An)+");
   }
   // SEG-021-T008: family-level admission still requires the one shared retirement-timing seam to account
-  // for the operation. The dynamic `BTST Dn,#<data>` form has no published static timing row, so it is
-  // declined at analysis time (never admitted and then rejected by codegen, which would invalidate the
-  // whole immutable-ROM AOT program); every other legal bit-operation destination class is admitted.
+  // for the operation (a form without a row is declined at analysis time, never admitted and then rejected
+  // by codegen, which would invalidate the whole immutable-ROM AOT program). SEG-021-T022: the dynamic
+  // `BTST Dn,#<data>` form now has its Table 8-8 row (4 + the #<data> cell 4 = 8), so every legal
+  // bit-operation destination class is admitted.
   {
     operation.kind = M68kIrKind::bit_test;
     operation.size = M68kMemoryAccessWidth::byte;
     operation.source_ea.mode = M68kEaMode::data_register;
     operation.destination_ea.mode = M68kEaMode::immediate;
-    expect(!m68k_instruction_cycles(operation).has_value() &&
-               !m68k_operation_is_immutable_rom_aot_safe(operation, false),
-           "BTST Dn,#imm has no timing row and is not admitted to the immutable-ROM AOT route");
+    expect(m68k_instruction_cycles(operation) == 8U && m68k_operation_is_immutable_rom_aot_safe(operation, false),
+           "BTST Dn,#imm has its 8-cycle timing row and is admitted to the immutable-ROM AOT route");
     for (const auto mode : {M68kEaMode::address_indirect, M68kEaMode::address_postinc, M68kEaMode::address_predec,
                             M68kEaMode::address_disp16, M68kEaMode::address_index8, M68kEaMode::absolute_word,
                             M68kEaMode::absolute_long, M68kEaMode::pc_disp16, M68kEaMode::pc_index8}) {
@@ -9260,8 +9261,8 @@ void immutable_rom_aot_retirement_contract_retains_static_and_dynamic_rows() {
              emitted.find("m68k_branch_taken ? UINT32_C(10)") != std::string::npos &&
              emitted.find("m68k_dbcc_condition_true ? UINT32_C(12)") != std::string::npos &&
              emitted.find("m68k_shift_effective_count") != std::string::npos &&
-             emitted.find("genesis_m68k_mulu_word_cycles(m68k_timing_mul_source)") != std::string::npos &&
-             emitted.find("genesis_m68k_muls_word_cycles(m68k_timing_mul_source)") != std::string::npos,
+             emitted.find("segarecomp_m68k_mulu_word_cycles(m68k_timing_mul_source)") != std::string::npos &&
+             emitted.find("segarecomp_m68k_muls_word_cycles(m68k_timing_mul_source)") != std::string::npos,
          "every retained timing-matrix identity emits its shared retirement expression and dynamic locals");
 }
 

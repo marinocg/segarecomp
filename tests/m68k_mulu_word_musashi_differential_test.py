@@ -103,9 +103,9 @@ def main():
         temp = pathlib.Path(directory)
         generated = checked([executable, "--emit-operation-c4-mulu-word"]).stdout
         assert not generated.startswith("/* translation rejected:"), generated
-        helper = "static uint32_t genesis_m68k_mulu_word_cycles(uint16_t source)"
-        retirement = "genesis_m68k_mulu_word_cycles(m68k_timing_mul_source)"
-        assert helper in generated, "generated MULU dispatcher is missing its dynamic timing helper"
+        # SEG-021-T022: the MULU rule is the CPU-owned timing_core.h helper (included through runtime.h).
+        retirement = "segarecomp_m68k_mulu_word_cycles(m68k_timing_mul_source) + UINT32_C(0)"
+        assert "genesis_m68k_mulu_word_cycles" not in generated, "a per-program MULU timing helper is still emitted"
         assert retirement in generated, "generated MULU dispatcher does not retire dynamic timing"
         # The source slot is materialized while lowering MULU, and retirement
         # must remain after the operation's destination write.

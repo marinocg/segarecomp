@@ -2284,20 +2284,34 @@ static int genesis_accept_interrupt(GenesisRuntime *runtime, uint32_t level, Gen
                                         GENESIS_DIAG_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT, result);
 }
 
+static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m68k_cycles,
+                                            int admit_interrupt, GenesisControlTransfer *result);
+
 /*
  * The synchronous (never scheduled, never masked) exception raise shared by
- * vector 5 and vector 8: builds the frame through the core and completes the
- * faulting instruction's diagnostic boundary (the generated lowering returns
+ * vectors 4-8, 10, 11 and 32-47: builds the frame through the core and completes
+ * the faulting instruction's diagnostic boundary (the generated lowering returns
  * the handler transfer directly and never reaches the retirement path).
+ * SEG-021-T022 / ADR 0043 §8: after the entry commits, the CPU-owned
+ * exception-processing time `entry_cycles` advances the deterministic scheduler
+ * (ADR 0041) exactly as a retirement would, but admits no interrupt at this
+ * boundary (a request latched here is admitted at the next retirement boundary,
+ * as before). A zero count is refused before anything changes.
  */
 static int genesis_raise_synchronous_exception(GenesisRuntime *runtime, uint32_t vector, uint32_t stacked_pc,
-                                               GenesisStopClass fail_stop_class, GenesisDiagnosticCategory fail_diag,
-                                               uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out) {
+                                               uint32_t entry_cycles, GenesisStopClass fail_stop_class,
+                                               GenesisDiagnosticCategory fail_diag, uint32_t *handler_pc_out,
+                                               GenesisRuntimeStop *stop_out) {
   GenesisControlTransfer result = {0};
   if (runtime == 0 || handler_pc_out == 0 || stop_out == 0) {
     if (stop_out != 0)
       *stop_out = genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
                                       GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY);
+    return 0;
+  }
+  if (entry_cycles == 0U) {
+    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+                                    GENESIS_DIAG_UNACCOUNTED_INSTRUCTION_TIMING);
     return 0;
   }
   if (!genesis_construct_exception_frame_and_transfer(runtime, vector, stacked_pc, UINT16_C(0x7FFF), UINT16_C(0x2000),
@@ -2306,9 +2320,18 @@ static int genesis_raise_synchronous_exception(GenesisRuntime *runtime, uint32_t
     return 0;
   }
   *handler_pc_out = result.next_pc;
+  /* SEG-021-T022: charge the entry (no admission). Only a virtual-time overflow can fail here, after the committed
+     entry; it is a terminal stop like every other scheduler overflow. */
+  {
+    GenesisControlTransfer charge = {0};
+    if (genesis_irq6_scheduler_and_admit(runtime, entry_cycles, 0, &charge) == 2) {
+      *stop_out = charge.stop;
+      return 0;
+    }
+  }
   /* SEG-020-T004: runtime->pc is already the handler entry, the frame writes and trap
      effect are pending; the faulting instruction's diagnostic boundary completes here
-     (exactly once). No retirement, scheduler tick or IRQ admission. */
+     (exactly once). No retirement or IRQ admission. */
   if (runtime->m68k_checkpoint.enabled) genesis_m68k_checkpoint_finalize(runtime);
   return 1;
 }
@@ -2320,9 +2343,9 @@ static int genesis_raise_synchronous_exception(GenesisRuntime *runtime, uint32_t
  * mask, NOT admitted at any scheduler/dispatch boundary, and does not consume
  * or arm any IRQ6-only admission-grace/watchdog-credit state.
  */
-int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc,
+int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc, uint32_t entry_cycles,
                                  uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out) {
-  return genesis_raise_synchronous_exception(runtime, GENESIS_M68K_VECTOR_ZERO_DIVIDE, fault_pc,
+  return genesis_raise_synchronous_exception(runtime, GENESIS_M68K_VECTOR_ZERO_DIVIDE, fault_pc, entry_cycles,
                                              GENESIS_STOP_UNSUPPORTED_CPU_FORM,
                                              GENESIS_DIAG_UNSUPPORTED_DIVIDE_BY_ZERO_EXCEPTION, handler_pc_out,
                                              stop_out);
@@ -2335,9 +2358,9 @@ int genesis_raise_divide_by_zero(GenesisRuntime *runtime, uint32_t fault_pc,
  * that instruction has executed. The saved SR has S = 0; the frame goes on the
  * SSP (the inactive slot) and the USP moves to the inactive slot.
  */
-int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc,
+int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc, uint32_t entry_cycles,
                                       uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out) {
-  return genesis_raise_synchronous_exception(runtime, GENESIS_M68K_VECTOR_PRIVILEGE_VIOLATION, fault_pc,
+  return genesis_raise_synchronous_exception(runtime, GENESIS_M68K_VECTOR_PRIVILEGE_VIOLATION, fault_pc, entry_cycles,
                                              GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION,
                                              GENESIS_DIAG_UNSUPPORTED_PRIVILEGE_VIOLATION_EXCEPTION, handler_pc_out,
                                              stop_out);
@@ -2349,14 +2372,15 @@ int genesis_raise_privilege_violation(GenesisRuntime *runtime, uint32_t fault_pc
  * raise; only the build-time vector and stacked PC differ.
  */
 int genesis_raise_software_exception(GenesisRuntime *runtime, uint32_t vector, uint32_t stacked_pc,
-                                     uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out) {
+                                     uint32_t entry_cycles, uint32_t *handler_pc_out, GenesisRuntimeStop *stop_out) {
   if (!genesis_is_software_exception_vector(vector)) {
     if (stop_out != 0)
       *stop_out = genesis_access_stop(GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
                                       GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY);
     return 0;
   }
-  return genesis_raise_synchronous_exception(runtime, vector, stacked_pc, GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION,
+  return genesis_raise_synchronous_exception(runtime, vector, stacked_pc, entry_cycles,
+                                             GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION,
                                              GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION, handler_pc_out, stop_out);
 }
 
@@ -2487,6 +2511,19 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
      successful commit, exactly as before. */
   if (!genesis_accept_interrupt(runtime, level, result)) return 2;
   runtime->devices.interrupt.vblank_pending = 0U;                  /* §3 re-arm (admission clears) */
+  /* SEG-021-T022 / ADR 0043 §8: the interrupt exception-processing cost -- 44 cycles for the autovectored entry, CPU-owned --
+     advances the same scheduler after the entry commits, admitting nothing at that boundary; a VBlank onset
+     crossed while it is charged latches normally and is admitted at the next retirement boundary. */
+  {
+    const uint32_t entry_cycles = segarecomp_m68k_exception_entry_cycles(
+        segarecomp_m68k_interrupt_vector(SEGARECOMP_M68K_INTERRUPT_ACK_AUTOVECTOR, level, 0U));
+    GenesisControlTransfer charge = {0};
+    if (genesis_irq6_scheduler_and_admit(runtime, entry_cycles, 0, &charge) == 2) {
+      result->kind = GENESIS_STOP;
+      result->stop = charge.stop;
+      return 2;
+    }
+  }
   return 1;
 }
 

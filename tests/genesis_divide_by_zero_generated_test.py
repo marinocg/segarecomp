@@ -43,9 +43,11 @@ def main():
         assert build.returncode == 0, build.stderr
         run = subprocess.run([binary], text=True, capture_output=True)
         assert run.returncode == 0, run.stderr
-        # Synchronous divide-by-zero does not advance virtual video time;
-        # vector-5 itself neither consumes pending state nor resets it.
-        assert "d3=305419896 d7=85 pc=258 sr=8960 tick=238 pending=0" in run.stderr, run.stderr
+        # SEG-021-T022: the synchronous divide-by-zero entry charges its published exception-processing time
+        # (38 + the Dn EA cell 0 = 38 cycles = 266 master ticks) on top of the 238 ticks the retiring
+        # instructions account for (previously the entry charged nothing: tick=238); vector 5 itself neither
+        # consumes pending state nor resets it.
+        assert "d3=305419896 d7=85 pc=258 sr=8960 tick=504 pending=0" in run.stderr, run.stderr
 
         # SEG-020-T004: the same emitted DIVS.W-by-zero -> handler path, stepped one guest step at
         # a time with the opt-in M68k checkpoint enabled. The emitted DIV lowering returns the handler

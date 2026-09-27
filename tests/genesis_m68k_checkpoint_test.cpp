@@ -82,7 +82,7 @@ int main() {
     trap.divide_by_zero_handler_entry = 0x300U;
     uint32_t handler = 0;
     GenesisRuntimeStop stop{};
-    check(genesis_raise_divide_by_zero(&trap, 0x2FEU, &handler, &stop) == 1, "trap raised");
+    check(genesis_raise_divide_by_zero(&trap, 0x2FEU, 38U, &handler, &stop) == 1, "trap raised");
     // Real generated route: DIV lowering returns the handler transfer straight after the raise
     // (no retire call), so the raise itself must have completed exactly one boundary.
     check(trap.m68k_checkpoint.valid == 1U && trap.m68k_checkpoint.boundary == 1U, "one boundary at raise");

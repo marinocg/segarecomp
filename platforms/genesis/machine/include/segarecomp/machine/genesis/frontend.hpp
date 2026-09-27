@@ -826,9 +826,9 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // address-register commit (c4-add-family-auto-update-commit-contract.md); BTST never writes back. The
     // emitter fails closed on any shape it cannot lower and operand-mode legality is owned by decode.
     // The one shared retirement-timing seam must also account for the operation: a candidate with no
-    // published static timing row (the dynamic `BTST Dn,#<data>` form) is declined here, at analysis time,
-    // exactly like every other codegen-side requirement, so the analysis and codegen boundaries agree and
-    // one unaccounted candidate can never invalidate the whole immutable-ROM AOT program.
+    // published static timing row is declined here, at analysis time, exactly like every other codegen-side
+    // requirement, so the analysis and codegen boundaries agree and one unaccounted candidate can never
+    // invalidate the whole immutable-ROM AOT program (SEG-021-T022 gave `BTST Dn,#<data>` its Table 8-8 row).
     return m68k_instruction_cycles(operation).has_value();
   case M68kIrKind::return_from_subroutine:
     // SEG-007-T246: existing-authority integration, not a new architecture.
@@ -951,9 +951,9 @@ inline bool m68k_operation_is_immutable_rom_aot_safe(const M68kIrOperation &oper
     // SEG-021-T010 deferred auto-update commit -- is used verbatim. Completeness is proven by the
     // routed-only probe `validated_immutable_rom_aot_entries` applies to exactly these two kinds
     // (libs/codegen/c11/src/frontend.cpp), leaving the shared non-routed
-    // `m68k_operation_has_complete_c_emission` probe unchanged for every other kind. Timing reuses the
-    // shared static retirement row (exact data-dependent DIV timing is SEG-021-T022).
-    return m68k_instruction_cycles(operation).has_value();
+    // `m68k_operation_has_complete_c_emission` probe unchanged for every other kind. SEG-021-T022: timing is
+    // the CPU-owned exact data-dependent DIV rule (no static scalar exists), plus its vector-5 entry time.
+    return m68k_instruction_timing(operation).has_value();
   case M68kIrKind::trap_exception:
   case M68kIrKind::trap_on_overflow:
   case M68kIrKind::check_bounds:

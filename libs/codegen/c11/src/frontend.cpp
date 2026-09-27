@@ -16,7 +16,6 @@
 
 namespace segarecomp {
 namespace {
-// SEG-022-T003: the shared-header helper functions become `static inline` in a sharded build.
 // SEG-022-T008: bounded host-owner size (entries per generated AOT owner function).
 constexpr std::size_t aot_owner_max_entries = 128U;
 // SEG-022-T011: generated routed-failure tail (see its definition beside `genesis_static_stop`).
@@ -24,10 +23,6 @@ constexpr std::string_view genesis_routed_failure_stop_declaration =
     "GenesisControlTransfer genesis_routed_failure_stop(GenesisRuntimeStop *stop, const GenesisInstructionProvenance *source, "
     "uint32_t address, GenesisAccessWidth width, GenesisAccessDirection direction)";
 
-std::string shard_helper_linkage(bool sharded, std::string text) {
-  if (sharded && text.starts_with("static ")) text.insert(7U, "inline ");
-  return text;
-}
 std::string genesis_unit_declaration(std::string_view prefix, std::uint32_t address) {
   std::ostringstream name;
   name << "GenesisControlTransfer " << prefix << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << address
@@ -1931,22 +1926,33 @@ bool immutable_rom_aot_routed_only_emission_is_complete(const M68kIrOperation &o
 }
 
 std::optional<std::string> m68k_retirement_cycle_expression(const M68kIrOperation &operation) {
-  // SEG-021-T021: every static and outcome-dependent row (Bcc, DBcc, Scc Dn, register shift/rotate) comes from
-  // the one CPU-owned rule (`m68k_instruction_timing`) rendered by the shared M68k lowering owner.
-  if (auto expression = m68k_timing_c_expression(operation)) return expression;
-  switch (operation.kind) {
-  // The data-dependent MULU/MULS word table stays a Genesis-runtime helper until SEG-021-T022 moves it into the
-  // CPU timing contract.
-  case M68kIrKind::multiply_unsigned_word:
-  case M68kIrKind::multiply_signed_word: {
-    const auto ea = m68k_effective_address_cycles(operation.source_ea, M68kMemoryAccessWidth::word);
-    if (!ea) return std::nullopt;
-    return std::string(operation.kind == M68kIrKind::multiply_unsigned_word
-                           ? "genesis_m68k_mulu_word_cycles(m68k_timing_mul_source)"
-                           : "genesis_m68k_muls_word_cycles(m68k_timing_mul_source)") +
-           " + UINT32_C(" + std::to_string(*ea) + ")";
-  }
-  default: return std::nullopt;
+  // SEG-021-T021/T022: every static and outcome-dependent row (Bcc, DBcc, Scc Dn, register shift/rotate,
+  // MULU/MULS, DIVU/DIVS) comes from the one CPU-owned rule (`m68k_instruction_timing`) rendered by the shared
+  // M68k lowering owner.
+  return m68k_timing_c_expression(operation);
+}
+
+// SEG-021-T022: the caller-owned timing operand slots of the data-dependent MUL/DIV rules
+// (`m68k_timing_c_expression`): declared zero-initialized before the lowering, bound into its context.
+bool m68k_is_multiply_kind(M68kIrKind kind) {
+  return kind == M68kIrKind::multiply_signed_word || kind == M68kIrKind::multiply_unsigned_word;
+}
+bool m68k_is_divide_kind(M68kIrKind kind) {
+  return kind == M68kIrKind::divide_signed_word || kind == M68kIrKind::divide_unsigned_word;
+}
+std::string m68k_timing_slot_declarations(M68kIrKind kind, std::string_view indent) {
+  std::string out;
+  if (m68k_is_multiply_kind(kind)) out += std::string(indent) + "uint16_t m68k_timing_mul_source = UINT16_C(0);\n";
+  if (m68k_is_divide_kind(kind))
+    out += std::string(indent) + "uint32_t m68k_timing_div_dividend = UINT32_C(0); uint16_t m68k_timing_div_divisor = "
+                                 "UINT16_C(0);\n";
+  return out;
+}
+void bind_m68k_timing_slots(M68kMemoryEmissionContext &memory, M68kIrKind kind) {
+  if (m68k_is_multiply_kind(kind)) memory.timing_mul_source = "m68k_timing_mul_source";
+  if (m68k_is_divide_kind(kind)) {
+    memory.timing_div_dividend = "m68k_timing_div_dividend";
+    memory.timing_div_divisor = "m68k_timing_div_divisor";
   }
 }
 
@@ -2106,9 +2112,7 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   const bool scc_dynamic_timing = entry.operation.kind == M68kIrKind::set_conditional &&
                                   entry.operation.destination_ea.mode == M68kEaMode::data_register;
   if (scc_dynamic_timing) out << "  uint8_t m68k_scc_true = 0U;\n";
-  if (entry.operation.kind == M68kIrKind::multiply_signed_word ||
-      entry.operation.kind == M68kIrKind::multiply_unsigned_word)
-    out << "  uint16_t m68k_timing_mul_source = UINT16_C(0);\n";
+  out << m68k_timing_slot_declarations(entry.operation.kind, "  ");
   GenesisM68kEmissionContext memory{};
   memory.execution_history_hooks = g_execution_history_hooks;
   memory.program_counter = "pc";
@@ -2148,9 +2152,7 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   // operand fact; absolute and d16(PC) source reads take the runtime-routed
   // read (never a folded constant).
   memory.test_operand_access = M68kOperandAccess::runtime_routed;
-  if (entry.operation.kind == M68kIrKind::multiply_signed_word ||
-      entry.operation.kind == M68kIrKind::multiply_unsigned_word)
-    memory.timing_mul_source = "m68k_timing_mul_source";
+  bind_m68k_timing_slots(memory, entry.operation.kind);
   // SEG-007-T246: the caller supplies the SAME already-computed whole-
   // program `runtime_return_target_set` (ADR-0011 Decision §1) every
   // ordinary CFG-rooted `return_from_subroutine` emission already uses.
@@ -3130,31 +3132,12 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     if (!tier2_capable) frontier_stop_functions.emplace_back(address, std::move(*function_text));
   }
   out << header;
-  // Keep these pre-existing ordinary-prefix helpers ahead of the compiled-
-  // entry declarations. AOT participation changes only whether either helper
-  // is needed; exact-PC consistency is computed later from final authority and
-  // must not perturb non-AOT generated text ordering.
-  const auto aot_emits = [&](M68kIrKind kind) {
-    return std::ranges::any_of(*aot_entries, [&](const auto &candidate) {
-      return candidate.second->operation.kind == kind;
-    });
-  };
-  const auto emits_mulu_word = std::ranges::any_of(
-      partial.accepted_prefix.ir, [](const auto &operation) {
-        return operation.kind == M68kIrKind::multiply_unsigned_word;
-      }) || aot_emits(M68kIrKind::multiply_unsigned_word);
-  const auto emits_muls_word = std::ranges::any_of(
-      partial.accepted_prefix.ir, [](const auto &operation) {
-        return operation.kind == M68kIrKind::multiply_signed_word;
-      }) || aot_emits(M68kIrKind::multiply_signed_word);
+  // SEG-021-T022: the MULU/MULS/DIVU/DIVS retirement rules call the CPU-owned timing_core.h helpers, which the
+  // runtime header includes; no per-program timing helper text is emitted any more.
   // SEG-022-T003: in a sharded build the helpers and shared typedef/declaration live in the shared header
   // (`static inline`, so a TU that does not use them stays warning-free); the text is otherwise unchanged.
   const bool sharded = sharding_active(out);
   if (sharded) shard_begin_header(out);
-  if (emits_mulu_word)
-    out << shard_helper_linkage(sharded, "static uint32_t genesis_m68k_mulu_word_cycles(uint16_t source) { uint32_t n = 0U; while (source != 0U) { n += (uint32_t)(source & UINT16_C(1)); source >>= 1U; } return UINT32_C(38) + UINT32_C(2) * n; }\n");
-  if (emits_muls_word)
-    out << shard_helper_linkage(sharded, "static uint32_t genesis_m68k_muls_word_cycles(uint16_t source) { uint32_t n = 0U; uint32_t bits = ((uint32_t)source) << 1U; for (uint32_t i = 0U; i < 16U; ++i) n += ((bits >> i) ^ (bits >> (i + 1U))) & UINT32_C(1); return UINT32_C(38) + UINT32_C(2) * n; }\n");
   out << "typedef GenesisControlTransfer (*GenesisCompiledEntry)(GenesisRuntime *runtime);\n"
       << (sharded ? "GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n"
                   : "static GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address);\n");
@@ -4966,8 +4949,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       if (found->second->kind == M68kIrKind::set_conditional &&
           found->second->destination_ea.mode == M68kEaMode::data_register)
         out << "    uint8_t m68k_scc_true = 0U;\n";
-      if (found->second->kind == M68kIrKind::multiply_signed_word || found->second->kind == M68kIrKind::multiply_unsigned_word)
-        out << "    uint16_t m68k_timing_mul_source = UINT16_C(0);\n";
+      out << m68k_timing_slot_declarations(found->second->kind, "    ");
       switch (found->second->kind) {
       case M68kIrKind::write_moveq:
       case M68kIrKind::subtract_quick_long_d0:
@@ -5230,9 +5212,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         routed.runtime_routing = true;
         routed.runtime_object = "runtime";
         routed.pc_macro_bridge_active = true;
-        if (found->second->kind == M68kIrKind::multiply_signed_word ||
-            found->second->kind == M68kIrKind::multiply_unsigned_word)
-          routed.timing_mul_source = "m68k_timing_mul_source";
+        bind_m68k_timing_slots(routed, found->second->kind);
         if (source != nullptr) {
           routed.test_operand_access = genesis_lowering_access(source->region);
           if (source->region == M68kAbsoluteOperandRegion::raw_cartridge_rom)
