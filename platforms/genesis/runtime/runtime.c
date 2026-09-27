@@ -186,18 +186,22 @@ static int genesis_is_vdp_region(uint32_t address) {
   return segarecomp_genesis_vdp_region_contains(address, 1U);
 }
 
-/* SEG-007-T081: routes exactly the one policy-defined VDP READ selector this
-    project currently implements -- a WORD read of the VDP control port's
-   base address ($C00004), which GTO1 p. 19 and MCD1's own VDP port
+/* SEG-007-T081: the original policy-defined VDP READ selector was a WORD
+    read of the VDP control port's base address ($C00004), which GTO1 p. 19 and MCD1's VDP port
    documentation both establish also serves as the VDP status-register read
    path. The routed value is `devices->vdp.status_register` itself (never a
     hardcoded constant): this project has no VDP interrupt state-mutation
     path, and T084 does not map DMA phase into status bits, so that field remains at its
-   zero-initialized default (T042 SS8) and this read always currently
+    zero-initialized default (T042 SS8) and reads currently
    observes 0x0000 -- an explicit SEG-007-T081 project compatibility
    policy, never a claim about real Genesis VDP status-register runtime
-   behavior (VBlank/HBlank/FIFO/DMA-busy/collision/overflow bits are
-   genuinely dynamic hardware state this project does not yet model). See
+    behavior (VBlank/HBlank/FIFO/DMA-busy/collision/overflow bits are
+    genuinely dynamic hardware state this project does not yet model).
+    BYTE reads at $C00004/$C00005 now return the modeled high/low byte of
+    the same status word; each successful status read cancels the pending
+    two-word control command and counts as one synthetic VBlank observation.
+    Unused high bits are a project policy, not reconstructed open bus. See
+    docs/references/genesis-vdp-status-byte-read-contract.md and
    the VDP addendum to
    docs/architecture/genesis-controller-io-startup-read-compatibility-policy.md
    for the full citation/policy discussion.
@@ -246,8 +250,8 @@ static int genesis_is_vdp_region(uint32_t address) {
     - SEG-007-T084 now accepts only the cited memory-to-VRAM DMA subset;
       every other CD5-set command remains fail-closed. See
       docs/references/genesis-vdp-dma-contract.md.
-   - The second documented CONTROL-port mirror lane, $C00006, for either
-     direction (T081's own prior narrowing, unchanged by this task).
+    - The second documented CONTROL-port mirror lane, $C00006, for either
+      direction (T081's own prior narrowing, unchanged by this task).
    - Any VRAM/CRAM/VSRAM data-port ($C00000) byte-level read/write access
      itself (SEG-007-T083's own separate scope); this task only populates
      the `addressed_pointer`/`auto_increment_value` state a future data-port
@@ -877,12 +881,28 @@ static int genesis_vdp_data_port_cpu_write(GenesisDeviceState *devices,
   return accepted;
 }
 
+/* One status transaction, shared by the WORD and both BYTE lanes. The VDP
+   clears the control-command write-pending flip-flop on a status read; the
+   returned snapshot precedes that side effect. Upper unused bus bits are not
+   reconstructed: this owner's existing status_register policy supplies them. */
+static uint16_t genesis_vdp_status_read(GenesisDeviceState *devices) {
+  const uint16_t status = devices->vdp.status_register;
+  devices->vdp.control_port_awaiting_second_word = 0U;
+  devices->vdp.control_port_first_word = 0U;
+  return status;
+}
+
 static int genesis_vdp_access(GenesisDeviceState *devices, uint32_t address,
                               GenesisAccessWidth width, GenesisAccessDirection direction,
-                              uint32_t *value) {
+                              uint32_t *value, uint16_t *status_sample_out) {
   if (direction == GENESIS_ACCESS_READ) {
-    if (width == GENESIS_ACCESS_WORD && address == UINT32_C(0x00C00004)) {
-      *value = devices->vdp.status_register; /* SEG-007-T081 policy value; see comment above. */
+    if ((width == GENESIS_ACCESS_WORD && address == UINT32_C(0x00C00004)) ||
+        (width == GENESIS_ACCESS_BYTE &&
+         (address == UINT32_C(0x00C00004) || address == UINT32_C(0x00C00005)))) {
+      const uint16_t status = genesis_vdp_status_read(devices);
+      *status_sample_out = status;
+      *value = width == GENESIS_ACCESS_WORD ? status :
+               (address & 1U) ? (status & UINT16_C(0xFF)) : (status >> 8);
       return 1;
     }
     return 0;
@@ -1435,6 +1455,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
        access -- a write never mutates the caller's own *value, matching
        genesis_route_access's own documented contract. */
     uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
+    uint16_t status_sample = 0U;
     /* SEG-007-T084's original status-read-triggered progression event. Do not
        progress on writes here: they remain exclusively command/register
        state accesses and must not acquire a hidden scheduler side effect on
@@ -1490,16 +1511,22 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
       }
       return GENESIS_ACCESS_OK;
     }
-    if (genesis_vdp_access(&runtime->devices, address, width, direction, &routed_value)) {
+    if (genesis_vdp_access(&runtime->devices, address, width, direction,
+                           &routed_value, &status_sample)) {
       /* GTO1 p. 19 documents the VBlank-pending status bit.  The status read
        * is the established routed VDP seam, so this deliberately bounded
        * policy observes a synthetic VBlank assertion only here.  There is no
        * acknowledgement selector in this substrate: once raised, pending
        * remains sticky rather than inventing an ungrounded clear behavior. */
-      if (direction == GENESIS_ACCESS_READ && width == GENESIS_ACCESS_WORD &&
-          address == UINT32_C(0x00C00004)) {
-        ++runtime->devices.interrupt.vblank_status_read_count;
-        if ((routed_value & UINT32_C(0x0008)) != 0U && !runtime->devices.interrupt.vblank_pending) {
+       if (direction == GENESIS_ACCESS_READ &&
+           ((width == GENESIS_ACCESS_WORD && address == UINT32_C(0x00C00004)) ||
+            (width == GENESIS_ACCESS_BYTE &&
+             (address == UINT32_C(0x00C00004) || address == UINT32_C(0x00C00005))))) {
+         ++runtime->devices.interrupt.vblank_status_read_count;
+         /* Check the sampled full word, not the byte returned to the CPU:
+            the even high lane still observes one status transaction. */
+         if ((status_sample & UINT16_C(0x0008)) != 0U &&
+             !runtime->devices.interrupt.vblank_pending) {
           runtime->devices.interrupt.vblank_pending = 1U;
           ++runtime->devices.interrupt.vblank_transition_count;
         }

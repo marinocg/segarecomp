@@ -2839,8 +2839,14 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
              static_cast<Address>(image_bytes[off + 3U]);
     };
     if (read_be32(kResetPcOffset) != program.startup_ingress->entry.value) return std::nullopt;
-    const Address handler = read_be32(vector_offset);
-    return handler == 0U ? std::nullopt : std::optional<Address>{handler};
+    const Address vector_word = read_be32(vector_offset);
+    // A vector word supplies an architectural 32-bit PC, but the MC68000
+    // fetches its handler through the 24-bit external address bus. Root and
+    // emit the physical instruction address; admit_target still checks odd,
+    // unmapped and multiply-owned destinations. Keep the zero (uninstalled)
+    // sentinel distinct from a nonzero vector whose bus address is zero.
+    return vector_word == 0U ? std::nullopt
+                             : std::optional<Address>{vector_word & UINT32_C(0x00FFFFFF)};
   };
 
   std::optional<Address> irq6_handler_entry_value;

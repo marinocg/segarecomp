@@ -8197,6 +8197,56 @@ void div_aot_admission_and_dispatch_are_bounded() {
   }
 }
 
+void vector_instruction_fetch_uses_physical_bus_address() {
+  using namespace segarecomp;
+  using namespace div_aot_fixture;
+  const auto set_vector = [](FrontendProgram &program, std::uint32_t word) {
+    for (unsigned i = 0; i < 4U; ++i)
+      program.image.bytes[0x14U + i] = static_cast<std::uint8_t>(word >> (24U - 8U * i));
+  };
+  for (const auto vector_word : {handler, UINT32_C(0xA5000000) | handler}) {
+    auto program = program_with();
+    set_vector(program, vector_word);
+    expect(apply_genesis_immutable_rom_aot(program), "vector fixture enumerates immutable ROM");
+    const auto result = analyze_m68k_frontend(program);
+    const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+    expect(partial != nullptr, "mapped vector does not reject whole frontend");
+    if (!partial) continue;
+    expect(partial->accepted_prefix.divide_by_zero_handler_entry &&
+               partial->accepted_prefix.divide_by_zero_handler_entry->value == handler,
+           "normal and high-byte vector words resolve to the same physical instruction root");
+    expect(std::any_of(partial->accepted_prefix.immutable_rom_aot_entries.begin(),
+                       partial->accepted_prefix.immutable_rom_aot_entries.end(), [&](const auto &root) {
+                         return root.decoded.provenance.source.address.value == divs_reg;
+                       }), "vector admission preserves independent immutable-ROM AOT candidates");
+    const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+    expect(!emitted.starts_with("/* translation rejected") &&
+               emitted.find("genesis_raise_divide_by_zero(") != std::string::npos,
+           "physical vector root and AOT DIV body emit via the existing exception owner");
+  }
+  const auto rejects = [&](std::uint32_t vector_word, DirectFlowDiagnostic category) {
+    auto program = program_with();
+    set_vector(program, vector_word);
+    expect(apply_genesis_immutable_rom_aot(program), "invalid vector fixture enumerates immutable ROM");
+    const auto result = analyze_m68k_frontend(program);
+    const auto *rejection = std::get_if<FrontendRejected>(&result);
+    expect(rejection != nullptr && rejection->category == category,
+           "odd or unmapped physical vector handler still rejects before AOT emission");
+  };
+  rejects(UINT32_C(0xA5000000) | (handler + 1U), DirectFlowDiagnostic::odd_direct_target);
+  rejects(UINT32_C(0xA5000400), DirectFlowDiagnostic::unmapped_direct_target);
+  {
+    auto program = program_with();
+    set_vector(program, UINT32_C(0xA5000000) | handler);
+    program.mapping_claims.push_back({"overlapping_rom", {{}, handler}, {{}, handler + 4U},
+                                      {handler}, {handler + 4U}});
+    const auto result = analyze_m68k_frontend(program);
+    const auto *rejection = std::get_if<FrontendRejected>(&result);
+    expect(rejection != nullptr && rejection->category == DirectFlowDiagnostic::unmapped_direct_target,
+           "multiply-owned physical vector target remains rejected");
+  }
+}
+
 // SEG-021-T034: d16(An), (d8,An,Xn) (word/long, Dn/An index) and long-indexed (d8,PC,Xn) JMP/JSR are admitted by
 // whole-image AOT enumeration and lowered by the shared dynamic-indirect branch via m68k_emit_runtime_ea_address.
 void jmp_an_relative_aot_admission_and_dispatch_are_bounded() {
@@ -31043,6 +31093,7 @@ int main(int argc, char **argv) {
   jmp_an_indirect_aot_admission_and_dispatch_are_bounded();
   jmp_an_relative_aot_admission_and_dispatch_are_bounded();
   div_aot_admission_and_dispatch_are_bounded();
+  vector_instruction_fetch_uses_physical_bus_address();
   t250_final_compiled_membership_suppresses_stale_frontier_interception();
   ordinary_interior_owner_precedes_consistent_aot_and_rejects_conflict();
   t250_genuine_typed_frontier_without_compiled_membership_still_intercepts();
