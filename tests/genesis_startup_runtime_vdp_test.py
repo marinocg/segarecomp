@@ -137,14 +137,6 @@ int main(void) {
          stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP &&
          value == UINT32_C(0xFFFFFFFF));
 
-  /* A BYTE read at the exact CONTROL-port selector address remains
-     fail-closed: the selector is WORD-only. */
-  value = UINT32_C(0xFFFFFFFF);
-  assert(genesis_route_access(&runtime, UINT32_C(0x00C00004), GENESIS_ACCESS_BYTE,
-                               GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
-  assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
-         stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
-
   /* A LONG read starting at the CONTROL-port selector address remains
      fail-closed: the selector is WORD-only. */
   value = UINT32_C(0xFFFFFFFF);
@@ -229,6 +221,82 @@ int main(void) {
     GenesisRuntime expected = zeroed;
     expected.devices.interrupt.vblank_status_read_count = 1U;
     assert(memcmp(&runtime, &expected, sizeof(runtime)) == 0);
+  }
+
+  /* Synthetic Mode-5 status transaction: byte lanes select the high/low
+     halves of ONE sampled word. Reading either lane or the existing WORD
+     selector cancels a pending two-word command without changing its already
+     applied address bits, and counts one status observation per transaction.
+     Even though VB lives in the low lane, a high-lane read observes the full
+     word for the existing synthetic sticky interrupt policy. */
+  {
+    GenesisRuntime status_case = {0};
+    const uint32_t ports[] = { UINT32_C(0x00C00004), UINT32_C(0x00C00005),
+                               UINT32_C(0x00C00004) };
+    const GenesisAccessWidth widths[] = { GENESIS_ACCESS_BYTE, GENESIS_ACCESS_BYTE,
+                                          GENESIS_ACCESS_WORD };
+    const uint32_t results[] = { UINT32_C(0x02), UINT32_C(0xA8), UINT32_C(0x02A8) };
+    unsigned i;
+    status_case.devices.vdp.status_register = UINT16_C(0x02A8);
+    status_case.devices.vdp.addressed_pointer = UINT32_C(0x1234);
+    for (i = 0U; i < 3U; ++i) {
+      status_case.devices.vdp.control_port_awaiting_second_word = 1U;
+      status_case.devices.vdp.control_port_first_word = UINT16_C(0x4321);
+      value = UINT32_C(0xFFFFFFFF);
+      assert(genesis_route_access(&status_case, ports[i], widths[i], GENESIS_ACCESS_READ,
+                                  &value, &stop) == GENESIS_ACCESS_OK);
+      assert(value == results[i]);
+      assert(status_case.devices.vdp.status_register == UINT16_C(0x02A8));
+      assert(status_case.devices.vdp.addressed_pointer == UINT32_C(0x1234));
+      assert(status_case.devices.vdp.control_port_awaiting_second_word == 0U);
+      assert(status_case.devices.vdp.control_port_first_word == 0U);
+      assert(status_case.devices.interrupt.vblank_status_read_count == i + 1U);
+      assert(status_case.devices.interrupt.vblank_pending == 1U);
+      assert(status_case.devices.interrupt.vblank_transition_count == 1U);
+    }
+    /* All unsupported neighboring shapes fail without modifying the device,
+       interrupt accounting, or caller's read value, even with a live latch. */
+    {
+      const uint32_t rejected_ports[] = { UINT32_C(0x00C00006), UINT32_C(0x00C00007),
+                                          UINT32_C(0x00C00005), UINT32_C(0x00C00004) };
+      const GenesisAccessWidth rejected_widths[] = { GENESIS_ACCESS_BYTE, GENESIS_ACCESS_BYTE,
+                                                      GENESIS_ACCESS_WORD, GENESIS_ACCESS_LONG };
+      GenesisDeviceState before;
+      status_case.devices.vdp.control_port_awaiting_second_word = 1U;
+      status_case.devices.vdp.control_port_first_word = UINT16_C(0x4321);
+      before = status_case.devices;
+      for (i = 0U; i < 4U; ++i) {
+        value = UINT32_C(0xFFFFFFFF);
+        assert(genesis_route_access(&status_case, rejected_ports[i], rejected_widths[i],
+                                    GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+        if (i == 2U) {
+          assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_MEMORY_REGION &&
+                 stop.diagnostic_category == GENESIS_DIAG_ODD_EFFECTIVE_ADDRESS);
+        } else {
+          assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
+                 stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
+        }
+        assert(value == UINT32_C(0xFFFFFFFF));
+        assert(memcmp(&status_case.devices, &before, sizeof(before)) == 0);
+      }
+    }
+    /* Independent replay from identical synthetic initial state is exact. */
+    {
+      GenesisRuntime replay = {0};
+      GenesisRuntime first = {0};
+      unsigned run;
+      for (run = 0U; run < 2U; ++run) {
+        GenesisRuntime *r = run ? &replay : &first;
+        r->devices.vdp.status_register = UINT16_C(0x0008);
+        r->devices.vdp.control_port_awaiting_second_word = 1U;
+        r->devices.vdp.control_port_first_word = UINT16_C(0x2222);
+        value = UINT32_C(0xFFFFFFFF);
+        assert(genesis_route_access(r, UINT32_C(0x00C00004), GENESIS_ACCESS_BYTE,
+                                    GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+        assert(value == 0U);
+      }
+      assert(memcmp(&first, &replay, sizeof(first)) == 0);
+    }
   }
 
   /* --- SEG-007-T091 (a): one-word register-set command WRITEs. ---
@@ -544,6 +612,26 @@ int main(void) {
       reattempted -- idempotent, not a new mutation). */
    value = UINT32_C(0xFFFFFFFF);
    assert(genesis_route_access(&runtime, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+   assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
+          stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
+   assert(runtime.devices.vdp.dma.phase == GENESIS_VDP_DMA_BUSY &&
+          runtime.devices.vdp.dma.remaining_length == 1U &&
+          runtime.devices.vdp.vsram[UINT32_C(0x0007)] == 0U);
+   /* SEG-021-T037: the defensive status-read-triggered DMA-progress guard
+      (genesis_vdp_progress_dma's own call site in genesis_route_access) now
+      shares the same genesis_is_vdp_status_read_shape predicate as the
+      status-value read/return path, so a BYTE status-lane read observes the
+      identical still-stuck-DMA failure as the WORD lane above -- neither
+      BYTE lane is silently exempted from this "one shared status
+      transaction" side effect. */
+   value = UINT32_C(0xFFFFFFFF);
+   assert(genesis_route_access(&runtime, UINT32_C(0x00C00004), GENESIS_ACCESS_BYTE,
+                                GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+   assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
+          stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
+   value = UINT32_C(0xFFFFFFFF);
+   assert(genesis_route_access(&runtime, UINT32_C(0x00C00005), GENESIS_ACCESS_BYTE,
                                 GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
    assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
           stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);

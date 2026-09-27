@@ -39,7 +39,7 @@ typedef enum SegarecompM68kExceptionStatus {
   SEGARECOMP_M68K_EXCEPTION_STACK_INVALID = 1,
   /* resolve_vector reported no installed / representable handler. */
   SEGARECOMP_M68K_EXCEPTION_VECTOR_UNAVAILABLE = 2,
-  /* An RTE frame read failed.  Nothing was committed.  Exception entry never
+  /* An RTE/RTR frame read failed after whole-extent validation. Nothing was committed. Exception entry never
      returns this: after a successful validate_stack_extent its frame writes
      cannot fail (see SegarecompM68kMachineHooks.frame_write). */
   SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED = 3,
@@ -147,7 +147,7 @@ static inline SegarecompM68kExceptionStatus segarecomp_m68k_exception_enter(
 /*
  * ADR 0043 §5 RTE (the caller has already performed the privilege check, so
  * S = 1 and the active SP is the SSP): read the SR word at SSP and the PC long
- * at SSP+2, then commit together SR <- read SR (masked to the implemented
+  * at SSP+2, then commit together SR <- read SR (masked to the implemented
  * bits), PC <- read PC, SSP <- SSP+6; when the restored S is 0 the USP (the
  * inactive slot) becomes active and the incremented SSP moves to the inactive
  * slot.  A failed read, or a restored T = 1 (trace deferred, §6), commits
@@ -161,7 +161,10 @@ static inline SegarecompM68kExceptionStatus segarecomp_m68k_exception_return(
   uint16_t restored_sr;
   if (!segarecomp_m68k_binding_valid(hooks, cpu)) return SEGARECOMP_M68K_EXCEPTION_BAD_BINDING;
   sp = *cpu->active_sp;
-  if ((sp & 1U) != 0U) return SEGARECOMP_M68K_EXCEPTION_STACK_INVALID;
+  if ((sp & 1U) != 0U || sp > UINT32_MAX - SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES ||
+      !hooks->validate_stack_extent(hooks->context, sp, SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES,
+                                    SEGARECOMP_M68K_STACK_READ))
+    return SEGARECOMP_M68K_EXCEPTION_STACK_INVALID;
   if (!hooks->stack_read(hooks->context, sp, 2U, &saved_sr)) return SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED;
   if (!hooks->stack_read(hooks->context, sp + 2U, 4U, &saved_pc)) return SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED;
   restored_sr = (uint16_t)(saved_sr & SEGARECOMP_M68K_SR_IMPLEMENTED);
@@ -194,7 +197,10 @@ static inline SegarecompM68kExceptionStatus segarecomp_m68k_return_restore_ccr(
   uint32_t saved_pc = 0U;
   if (!segarecomp_m68k_binding_valid(hooks, cpu)) return SEGARECOMP_M68K_EXCEPTION_BAD_BINDING;
   sp = *cpu->active_sp;
-  if ((sp & 1U) != 0U) return SEGARECOMP_M68K_EXCEPTION_STACK_INVALID;
+  if ((sp & 1U) != 0U || sp > UINT32_MAX - SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES ||
+      !hooks->validate_stack_extent(hooks->context, sp, SEGARECOMP_M68K_EXCEPTION_FRAME_BYTES,
+                                    SEGARECOMP_M68K_STACK_READ))
+    return SEGARECOMP_M68K_EXCEPTION_STACK_INVALID;
   if (!hooks->stack_read(hooks->context, sp, 2U, &saved_ccr)) return SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED;
   if (!hooks->stack_read(hooks->context, sp + 2U, 4U, &saved_pc)) return SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED;
   *cpu->sr = (uint16_t)((*cpu->sr & UINT16_C(0xFF00)) | (saved_ccr & UINT32_C(0x1F)));

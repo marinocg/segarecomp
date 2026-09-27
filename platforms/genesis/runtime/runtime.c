@@ -186,18 +186,22 @@ static int genesis_is_vdp_region(uint32_t address) {
   return segarecomp_genesis_vdp_region_contains(address, 1U);
 }
 
-/* SEG-007-T081: routes exactly the one policy-defined VDP READ selector this
-    project currently implements -- a WORD read of the VDP control port's
-   base address ($C00004), which GTO1 p. 19 and MCD1's own VDP port
+/* SEG-007-T081: the original policy-defined VDP READ selector was a WORD
+    read of the VDP control port's base address ($C00004), which GTO1 p. 19 and MCD1's VDP port
    documentation both establish also serves as the VDP status-register read
    path. The routed value is `devices->vdp.status_register` itself (never a
     hardcoded constant): this project has no VDP interrupt state-mutation
     path, and T084 does not map DMA phase into status bits, so that field remains at its
-   zero-initialized default (T042 SS8) and this read always currently
+    zero-initialized default (T042 SS8) and reads currently
    observes 0x0000 -- an explicit SEG-007-T081 project compatibility
    policy, never a claim about real Genesis VDP status-register runtime
-   behavior (VBlank/HBlank/FIFO/DMA-busy/collision/overflow bits are
-   genuinely dynamic hardware state this project does not yet model). See
+    behavior (VBlank/HBlank/FIFO/DMA-busy/collision/overflow bits are
+    genuinely dynamic hardware state this project does not yet model).
+    BYTE reads at $C00004/$C00005 now return the modeled high/low byte of
+    the same status word; each successful status read cancels the pending
+    two-word control command and counts as one synthetic VBlank observation.
+    Unused high bits are a project policy, not reconstructed open bus. See
+    docs/references/genesis-vdp-status-byte-read-contract.md and
    the VDP addendum to
    docs/architecture/genesis-controller-io-startup-read-compatibility-policy.md
    for the full citation/policy discussion.
@@ -246,8 +250,8 @@ static int genesis_is_vdp_region(uint32_t address) {
     - SEG-007-T084 now accepts only the cited memory-to-VRAM DMA subset;
       every other CD5-set command remains fail-closed. See
       docs/references/genesis-vdp-dma-contract.md.
-   - The second documented CONTROL-port mirror lane, $C00006, for either
-     direction (T081's own prior narrowing, unchanged by this task).
+    - The second documented CONTROL-port mirror lane, $C00006, for either
+      direction (T081's own prior narrowing, unchanged by this task).
    - Any VRAM/CRAM/VSRAM data-port ($C00000) byte-level read/write access
      itself (SEG-007-T083's own separate scope); this task only populates
      the `addressed_pointer`/`auto_increment_value` state a future data-port
@@ -877,12 +881,41 @@ static int genesis_vdp_data_port_cpu_write(GenesisDeviceState *devices,
   return accepted;
 }
 
+/* The one recognized VDP status-read access shape: the WORD lane and both
+   BYTE lanes of the CONTROL port's status alias. Every caller that needs to
+   decide "is this a status-read transaction" (DMA-progress suspension,
+   VBlank-pending observation, and the dispatch below) shares this single
+   predicate so the three call sites cannot silently diverge on which shapes
+   count as a status read. */
+static int genesis_is_vdp_status_read_shape(uint32_t address, GenesisAccessWidth width,
+                                            GenesisAccessDirection direction) {
+  if (direction != GENESIS_ACCESS_READ) return 0;
+  if (width == GENESIS_ACCESS_WORD) return address == UINT32_C(0x00C00004);
+  if (width == GENESIS_ACCESS_BYTE)
+    return address == UINT32_C(0x00C00004) || address == UINT32_C(0x00C00005);
+  return 0;
+}
+
+/* One status transaction, shared by the WORD and both BYTE lanes. The VDP
+   clears the control-command write-pending flip-flop on a status read; the
+   returned snapshot precedes that side effect. Upper unused bus bits are not
+   reconstructed: this owner's existing status_register policy supplies them. */
+static uint16_t genesis_vdp_status_read(GenesisDeviceState *devices) {
+  const uint16_t status = devices->vdp.status_register;
+  devices->vdp.control_port_awaiting_second_word = 0U;
+  devices->vdp.control_port_first_word = 0U;
+  return status;
+}
+
 static int genesis_vdp_access(GenesisDeviceState *devices, uint32_t address,
                               GenesisAccessWidth width, GenesisAccessDirection direction,
-                              uint32_t *value) {
+                              uint32_t *value, uint16_t *status_sample_out) {
   if (direction == GENESIS_ACCESS_READ) {
-    if (width == GENESIS_ACCESS_WORD && address == UINT32_C(0x00C00004)) {
-      *value = devices->vdp.status_register; /* SEG-007-T081 policy value; see comment above. */
+    if (genesis_is_vdp_status_read_shape(address, width, direction)) {
+      const uint16_t status = genesis_vdp_status_read(devices);
+      *status_sample_out = status;
+      *value = width == GENESIS_ACCESS_WORD ? status :
+               (address & 1U) ? (status & UINT16_C(0xFF)) : (status >> 8);
       return 1;
     }
     return 0;
@@ -1435,6 +1468,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
        access -- a write never mutates the caller's own *value, matching
        genesis_route_access's own documented contract. */
     uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
+    uint16_t status_sample = 0U;
     /* SEG-007-T084's original status-read-triggered progression event. Do not
        progress on writes here: they remain exclusively command/register
        state accesses and must not acquire a hidden scheduler side effect on
@@ -1447,9 +1481,12 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
        (genesis_vdp_progress_dma's own phase guard). It is retained,
        unmodified, as a defensive invariant, not removed, so an unforeseen
        path that somehow leaves the DMA BUSY still progresses on a status
-       read exactly as before this task. */
-    if (direction == GENESIS_ACCESS_READ && width == GENESIS_ACCESS_WORD &&
-         address == UINT32_C(0x00C00004) &&
+       read exactly as before this task. SEG-021-T037 widens the guard's own
+       shape test to the shared genesis_is_vdp_status_read_shape predicate:
+       every valid status-read shape (WORD and both BYTE lanes) is one status
+       transaction, so this defensive invariant must not silently exempt the
+       BYTE lanes from it. */
+    if (genesis_is_vdp_status_read_shape(address, width, direction) &&
          genesis_vdp_progress_dma(runtime, stop_out) != GENESIS_ACCESS_OK)
       return GENESIS_ACCESS_FAIL;
     /* SEG-007-T175 (second correction): a LONG CONTROL-port write is handled
@@ -1490,16 +1527,19 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
       }
       return GENESIS_ACCESS_OK;
     }
-    if (genesis_vdp_access(&runtime->devices, address, width, direction, &routed_value)) {
+    if (genesis_vdp_access(&runtime->devices, address, width, direction,
+                           &routed_value, &status_sample)) {
       /* GTO1 p. 19 documents the VBlank-pending status bit.  The status read
        * is the established routed VDP seam, so this deliberately bounded
        * policy observes a synthetic VBlank assertion only here.  There is no
        * acknowledgement selector in this substrate: once raised, pending
        * remains sticky rather than inventing an ungrounded clear behavior. */
-      if (direction == GENESIS_ACCESS_READ && width == GENESIS_ACCESS_WORD &&
-          address == UINT32_C(0x00C00004)) {
-        ++runtime->devices.interrupt.vblank_status_read_count;
-        if ((routed_value & UINT32_C(0x0008)) != 0U && !runtime->devices.interrupt.vblank_pending) {
+       if (genesis_is_vdp_status_read_shape(address, width, direction)) {
+         ++runtime->devices.interrupt.vblank_status_read_count;
+         /* Check the sampled full word, not the byte returned to the CPU:
+            the even high lane still observes one status transaction. */
+         if ((status_sample & UINT16_C(0x0008)) != 0U &&
+             !runtime->devices.interrupt.vblank_pending) {
           runtime->devices.interrupt.vblank_pending = 1U;
           ++runtime->devices.interrupt.vblank_transition_count;
         }
@@ -2060,12 +2100,13 @@ typedef struct GenesisM68kExceptionContext {
 } GenesisM68kExceptionContext;
 
 static int genesis_m68k_validate_stack_extent(void *context, uint32_t base, uint32_t length,
-                                              SegarecompM68kStackDirection direction) {
+                                               SegarecompM68kStackDirection direction) {
   (void)context;
   (void)direction;
   /* Even base (the core also checks it) and the whole extent in work RAM: the
      precondition of the non-fallible frame_write guarantee above. */
-  return (base & 1U) == 0U && genesis_is_work_ram(base & UINT32_C(0x00FFFFFF), length);
+  return (base & 1U) == 0U && base <= UINT32_MAX - length &&
+         genesis_is_work_ram(base & UINT32_C(0x00FFFFFF), length);
 }
 
 static int genesis_m68k_stack_read(void *context, uint32_t address, uint32_t size, uint32_t *value) {
@@ -2194,7 +2235,9 @@ int genesis_exception_return(GenesisRuntime *runtime, uint32_t *restored_pc_out,
   switch (status) {
   case SEGARECOMP_M68K_EXCEPTION_OK: return 1;
   case SEGARECOMP_M68K_EXCEPTION_STACK_INVALID:
-    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_ALIGNMENT);
+    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION,
+                                    (runtime->a[7] & 1U) != 0U ? GENESIS_DIAG_INVALID_STACK_ALIGNMENT
+                                                                : GENESIS_DIAG_INVALID_STACK_RANGE);
     return 0;
   case SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED:
     *stop_out = context.routed;
@@ -2417,7 +2460,9 @@ int genesis_return_restore_condition_codes(GenesisRuntime *runtime, uint32_t *re
   switch (status) {
   case SEGARECOMP_M68K_EXCEPTION_OK: return 1;
   case SEGARECOMP_M68K_EXCEPTION_STACK_INVALID:
-    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_ALIGNMENT);
+    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION,
+                                    (runtime->a[7] & 1U) != 0U ? GENESIS_DIAG_INVALID_STACK_ALIGNMENT
+                                                                : GENESIS_DIAG_INVALID_STACK_RANGE);
     return 0;
   case SEGARECOMP_M68K_EXCEPTION_ACCESS_FAILED:
     *stop_out = context.routed;
