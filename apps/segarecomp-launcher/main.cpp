@@ -465,6 +465,8 @@ int gui() {
     ImGui::End();
 
     ImGui::Render();
+    // High-DPI: ImGui works in window points, the renderer in pixels.
+    SDL_SetRenderScale(renderer, ImGui::GetIO().DisplayFramebufferScale.x, ImGui::GetIO().DisplayFramebufferScale.y);
     SDL_SetRenderDrawColor(renderer, 9, 11, 24, 255);
     SDL_RenderClear(renderer);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
