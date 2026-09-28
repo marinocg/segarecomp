@@ -140,7 +140,7 @@ fs::path entry_dir(const RomView &rom, const Layout &layout) {
   std::error_code ec;
   const auto cli_size = fs::is_regular_file(layout.cli, ec) ? fs::file_size(layout.cli, ec) : 0U;
   const auto cli_time = fs::last_write_time(layout.cli, ec).time_since_epoch().count();
-  const std::string key = rom.sha256 + "|cli-" + std::to_string(cli_size) + "-" + std::to_string(cli_time) + "|" SEGARECOMP_LAUNCHER_VERSION "|genesis|" + host_arch() + "|" +
+  const std::string key = rom.sha256 + "|cli-" + std::to_string(static_cast<unsigned long long>(cli_size)) + "-" + std::to_string(static_cast<long long>(cli_time)) + "|" SEGARECOMP_LAUNCHER_VERSION "|genesis|" + host_arch() + "|" +
                           SDL_GetPlatform() + "|zig-" SEGARECOMP_ZIG_VERSION "|O2|" + utf8(layout.root);
   const std::string digest = segarecomp::sha256_hex({reinterpret_cast<const std::uint8_t *>(key.data()), key.size()});
   return cache_root() / "games" / digest.substr(0, 32);
