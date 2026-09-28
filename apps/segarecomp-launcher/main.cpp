@@ -4,6 +4,12 @@
 #include "launcher_core.hpp"
 #include "pixel_assets.hpp"
 
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
@@ -13,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <memory>
@@ -408,21 +415,33 @@ int gui() {
     }
 
     const float t = static_cast<float>(SDL_GetTicks()) / 1000.0F;
-    int win_w = 0, win_h = 0;
-    SDL_GetWindowSize(window, &win_w, &win_h);
+    // The window's point size (win_w/win_h, used for every layout computation below) is derived from the
+    // renderer's actual current output pixels divided by the window's current display scale, rather than
+    // trusted from SDL_GetWindowSize()/io.DisplayFramebufferScale directly: those two are supplied by
+    // different subsystems and a platform-specific staleness/mismatch between them (observed on Windows
+    // after a DPI/monitor change: correctly-proportioned content rendered too small, pinned to one corner,
+    // leaving part of the window unpainted) would otherwise leave a gap between what we think we're filling
+    // and what actually reaches the screen. Deriving both from the one live renderer query keeps them
+    // exactly self-consistent by construction, on every platform.
+    int output_w = 0, output_h = 0;
+    SDL_GetCurrentRenderOutputSize(renderer, &output_w, &output_h);
+    float display_scale = SDL_GetWindowDisplayScale(window);
+    if (!(display_scale > 0.0F)) display_scale = 1.0F;
+    const float win_w = static_cast<float>(output_w) / display_scale;
+    const float win_h = static_cast<float>(output_h) / display_scale;
     // Uniform scale-to-fit ("letterbox") of the fixed design canvas within the current window size, centered;
     // this is the only concession to resizing -- the background instead covers the full window (below), never
     // letterboxed, so resizing crops scenery rather than shrinking the composition into empty bars.
-    const Layout2D L{std::min(static_cast<float>(win_w) / LW, static_cast<float>(win_h) / LH), 0, 0};
+    const Layout2D L{std::min(win_w / LW, win_h / LH), 0, 0};
     Layout2D centered = L;
-    centered.ox = (static_cast<float>(win_w) - LW * L.scale) * 0.5F;
-    centered.oy = (static_cast<float>(win_h) - LH * L.scale) * 0.5F;
+    centered.ox = (win_w - LW * L.scale) * 0.5F;
+    centered.oy = (win_h - LH * L.scale) * 0.5F;
 
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
     ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(ImVec2(static_cast<float>(win_w), static_cast<float>(win_h)));
+    ImGui::SetNextWindowSize(ImVec2(win_w, win_h));
     ImGui::PushStyleColor(ImGuiCol_WindowBg, rgba(0, 0, 0, 0));
     ImGui::Begin("##main", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                                         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
@@ -431,12 +450,12 @@ int gui() {
 
     // ---- background: cover-fill (crop, never distort) the whole window, independent of the letterbox ----
     if (tex_background && bg_w > 0 && bg_h > 0) {
-      const float cover = std::max(static_cast<float>(win_w) / bg_w, static_cast<float>(win_h) / bg_h);
+      const float cover = std::max(win_w / bg_w, win_h / bg_h);
       const float dw = bg_w * cover, dh = bg_h * cover;
-      const float dx = (static_cast<float>(win_w) - dw) * 0.5F, dy = (static_cast<float>(win_h) - dh) * 0.5F;
+      const float dx = (win_w - dw) * 0.5F, dy = (win_h - dh) * 0.5F;
       dl->AddImage(reinterpret_cast<ImTextureID>(tex_background), ImVec2(dx, dy), ImVec2(dx + dw, dy + dh));
     } else {
-      dl->AddRectFilled(ImVec2(0, 0), ImVec2(static_cast<float>(win_w), static_cast<float>(win_h)), rgba(8, 11, 26));
+      dl->AddRectFilled(ImVec2(0, 0), ImVec2(win_w, win_h), rgba(8, 11, 26));
     }
 
     // ---- header: pixel-art wordmark (or a bold-text fallback if the asset failed to load), compact subtitle ----
@@ -602,8 +621,10 @@ int gui() {
     ImGui::End();
 
     ImGui::Render();
-    // High-DPI: ImGui/our own draw calls above work in window points; the renderer target is pixels.
-    SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
+    // High-DPI: our draw calls above work in window points; the renderer target is pixels. `display_scale`
+    // is exactly the points -> pixels ratio our own win_w/win_h derivation above used, so this is guaranteed
+    // self-consistent with everything just drawn -- never a separately-sourced value that could drift from it.
+    SDL_SetRenderScale(renderer, display_scale, display_scale);
     SDL_SetRenderDrawColor(renderer, 8, 11, 26, 255);
     SDL_RenderClear(renderer);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
@@ -628,7 +649,40 @@ int gui() {
 
 } // namespace
 
+#if defined(_WIN32)
+namespace {
+// Windows creates a window's decorated frame at the real per-monitor DPI regardless of the process's
+// declared awareness, but only hands back correct point/pixel sizes -- and paints the whole client area --
+// once the process has opted into per-monitor-v2 awareness. Without it, a scaled (e.g. 4K) display can leave
+// part of the window unpainted (observed: small, correctly-proportioned content pinned to one corner, the
+// rest of the frame showing whatever was behind the window). Resolved dynamically (GetProcAddress) rather
+// than through a specific mingw-w64 SDK header vintage, with an older-Windows fallback chain; safe to call
+// even when a manifest already declared awareness (the redundant call is simply ignored by Windows).
+void enable_dpi_awareness() {
+  if (HMODULE user32 = LoadLibraryA("user32.dll")) {
+    using SetContextFn = BOOL(WINAPI *)(void *);
+    void *per_monitor_v2 = reinterpret_cast<void *>(static_cast<std::intptr_t>(-4));  // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
+    auto *set_context = reinterpret_cast<SetContextFn>(GetProcAddress(user32, "SetProcessDpiAwarenessContext"));
+    const bool ok = set_context && set_context(per_monitor_v2);
+    FreeLibrary(user32);
+    if (ok) return;
+  }
+  if (HMODULE shcore = LoadLibraryA("shcore.dll")) {
+    using SetAwarenessFn = HRESULT(WINAPI *)(int);
+    if (auto *set_awareness = reinterpret_cast<SetAwarenessFn>(GetProcAddress(shcore, "SetProcessDpiAwareness")))
+      set_awareness(2 /* PROCESS_PER_MONITOR_DPI_AWARE */);
+    FreeLibrary(shcore);
+    return;
+  }
+  SetProcessDPIAware();  // last-resort fallback, present since Windows Vista
+}
+} // namespace
+#endif
+
 int main(int argc, char **argv) {
+#if defined(_WIN32)
+  enable_dpi_awareness();
+#endif
   if (argc > 1) return headless(argc, argv);
   return gui();
 }
