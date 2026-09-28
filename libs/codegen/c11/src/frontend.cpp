@@ -2306,21 +2306,29 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   // technique PEA's own comment documents, so no per-kind retained-fact
   // branch is needed below either.
   //
-  // UNLK (`unlink_frame`) has an equally mature routed lowering body
-  // (SEG-021-T016) and could be admitted the same way, but is deliberately
-  // NOT admitted here: it is the test suite's own chosen "still-declined,
-  // simple, non-CFG-affecting" placeholder shape, reused across many
-  // independent block-cut/prefix-retention/dimension-uniqueness fixtures in
-  // tests/m68k_pipeline_test.cpp and
-  // tests/genesis_startup_runtime_c4_test.py (see the comment above
-  // emit_operation_c4_indexed_pea_source). Admitting it requires migrating
-  // that whole placeholder convention to a different still-declined shape
-  // first (there is now exactly one candidate pair left,
-  // branch_ne_short/branch_always_short, both CFG-affecting and therefore
-  // unsuitable for the same fixtures without a larger rewrite) -- a bounded
-  // test-infrastructure task of its own, not required to unblock the
-  // Cool Spot LINK frontier this task is fixing.
+  // SEG-021-T040 (second follow-through): UNLK (`unlink_frame`) is now also
+  // admitted, for the identical reason -- SEG-021-T016 already gave it the
+  // same mature routed lowering body, unreachable only because this
+  // classifier never listed it either. It carries no memory-referencing EA
+  // either (An register only; the (A7)+ frame pop is architecturally
+  // fixed), so it needs no per-kind retained-fact branch below, exactly
+  // like LINK. The test suite's own "still-declined, non-CFG-affecting"
+  // placeholder convention that used to depend on UNLK staying declined
+  // (tests/m68k_pipeline_test.cpp, tests/genesis_startup_runtime_c4_test.py)
+  // was migrated in the same change: every affected fixture now uses a
+  // foldable-absolute-EA TST.W read with its retained fact deliberately
+  // forged away after real discovery (mirroring the pre-existing
+  // `not-missing-fact` NOT fixture's own established technique), since no
+  // ordinarily-decodable M68kIrKind remains undeclined (confirmed
+  // empirically: an unclaimed, an ambiguously multiply-claimed, and a
+  // bounds-exceeding foldable absolute EA read/write each hard-reject the
+  // whole static prefix in this pipeline rather than degrading to a
+  // retained missing_fact gap row, so a genuinely still-undeclined
+  // ordinary-decode placeholder is not available; branch_ne_short/
+  // branch_always_short remain the only other undeclined kinds and are
+  // CFG-affecting, unsuitable for this placeholder role either).
   case M68kIrKind::link_frame:
+  case M68kIrKind::unlink_frame:
   case M68kIrKind::set_conditional:
   case M68kIrKind::test_and_set:
   case M68kIrKind::logical_and_immediate:
@@ -5379,6 +5387,19 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       // through the atomic local-snapshot/deferred-commit technique in
       // emit_m68k_operation_c's link_frame case.
       case M68kIrKind::link_frame: {
+        auto routed = memory;
+        routed.runtime_routing = true;
+        routed.runtime_object = "runtime";
+        out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
+        break;
+      }
+      // SEG-021-T040: UNLK An carries no decoded memory-referencing EA
+      // either (destination_ea is always an address register); the (A7)+
+      // frame pop is architecturally fixed exactly like LINK's -(A7) push
+      // immediately above, so no fact lookup applies here either. Same
+      // routed context for the same reason: the pop is a genuine RAM read,
+      // lowered through emit_m68k_operation_c's unlink_frame case.
+      case M68kIrKind::unlink_frame: {
         auto routed = memory;
         routed.runtime_routing = true;
         routed.runtime_object = "runtime";

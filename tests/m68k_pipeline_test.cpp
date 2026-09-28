@@ -20105,15 +20105,22 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
       // exists in emit_operation_c4_indexed_pea_source above).
        ? std::vector<std::uint8_t>{0x48U, 0x70U, 0x10U, 0x10U, 0x4EU, 0x70U}
        : c4_prefix
-       // MOVEQ #1,D0; UNLK A0 (a still-declined C4 lowering-gap shape --
-       // this fixture's block-cut/prefix-retention mechanics only need some still-declined shape; ADDA
-       // aliasing, CLR, SUB/CMP, AND/OR/EOR (SEG-021-T007), BTST/BCHG/BCLR/BSET (SEG-021-T008)
-       // auto-update and PEA (SEG-021-T011, every control-EA form, both direct and now C4-routed) are
-       // all lowered now, so this fixture uses UNLK instead -- `unlink_frame` is still declined);
-       // BRA.S +2; padding; RESET.  The cut must retain
-       // MOVEQ, omit the declined UNLK and the terminal BRA, and make
-       // RESET's block unreachable from the emitted program-control graph.
-        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x4EU, 0x58U, 0x60U, 0x02U,
+       // MOVEQ #1,D0; TST.W $0B00 (a still-declined C4 lowering-gap shape --
+       // this fixture's block-cut/prefix-retention mechanics only need SOME
+       // still-declined shape. SEG-021-T040 admits both LINK and UNLK, the
+       // last two ordinarily-decodable such shapes, so this fixture (and
+       // its siblings below) switched to a foldable-absolute-EA TST.W read
+       // whose retained resolver fact is deliberately forged away after
+       // real discovery, mirroring the pre-existing NOT fixture's own
+       // established `not-missing-fact` technique -- see the shared
+       // `value.accepted_prefix.static_memory_facts.clear()` branch below.
+       // The address ($0B00, absolute short/word) always resolves inside
+       // this fixture's own single claimed image, so discovery retains a
+       // real fact for it before the forge clears it); BRA.S +2; padding;
+       // RESET. The cut must retain MOVEQ, omit the declined TST and the
+       // terminal BRA, and make RESET's block unreachable from the emitted
+       // program-control graph.
+        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x4AU, 0x38U, 0x0BU, 0x00U, 0x60U, 0x02U,
                                      0x00U, 0x00U, 0x4EU, 0x70U}
         : c4_dim_compare
        // SEG-007-T146: CMP.B D1,D0; RESET.  `compare` is now C4-represented:
@@ -20145,9 +20152,12 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
        // for `shift_rotate_register` (immediate, not a count register).
         ? std::vector<std::uint8_t>{0xE3U, 0x48U, 0x4EU, 0x70U}
         : c4_dim_unlink_frame
-       // UNLK A0 (0x4E58); RESET.  SEG-021-T011 makes PEA a represented C4 kind for every legal
-       // control-EA form, so this dimension fixture now uses another still-unrepresented kind
-       // (UNLK, `unlink_frame`, missing dispatcher).
+       // SEG-021-T040: UNLK A0 (0x4E58); RESET. `unlink_frame` is now
+       // C4-represented (mirroring `c4_dim_link_frame`'s own conversion):
+       // the shared emission body sets A0 = A7, then pops the saved long
+       // through the routed (A7)+ read into A0 -- no missing_dispatcher
+       // gap. This is now a positive lowering proof, not a gap-dimension
+       // uniqueness proof.
         ? std::vector<std::uint8_t>{0x4EU, 0x58U, 0x4EU, 0x70U}
         : c4_dim_shift_memory_auto_update
        // SEG-021-T009: ASR.W (A1)+ (0xE0D9; auto-updating memory-word shift, lowered by the deferred
@@ -20244,30 +20254,39 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
         // A second C4 cut is statically retained beyond the first cut's
         // terminal branch.  It has no emitted caller and therefore must not
         // leave an unused static stop function in strict-C11 output.  Uses
-        // the same still-declined UNLK A0 cut as
-        // c4_prefix above (see its comment; SEG-021-T011 moved this
-        // placeholder off PEA, now fully C4-represented).
-        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x4EU, 0x58U, 0x60U, 0x02U,
-                                     0x00U, 0x00U, 0x4EU, 0x58U, 0x4EU, 0x70U}
+        // the same still-declined TST.W $0B00 shape as
+        // c4_prefix above (see its comment). Two occurrences: the second
+        // cut's own address shifts from the pre-SEG-021-T040 (UNLK-based)
+        // 0xB08 to 0xB0A because the first TST is 4 bytes, not UNLK's 2.
+        ? std::vector<std::uint8_t>{0x70U, 0x01U, 0x4AU, 0x38U, 0x0BU, 0x00U, 0x60U, 0x02U,
+                                     0x00U, 0x00U, 0x4AU, 0x38U, 0x0BU, 0x00U, 0x4EU, 0x70U}
         : c4_multi_blocks
-       // BNE.S selects either of two separately reachable UNLK A0
-       // cut blocks (see c4_prefix's comment above for why this
-       // fixture no longer uses CLR.B -(A0) or ADDA/AND auto-update, and for
-       // why it now uses UNLK instead of PEA). Both cut sinks are terminal
-       // and neither becomes a dispatch arm.
-       ? std::vector<std::uint8_t>{0x66U, 0x04U, 0x4EU, 0x58U, 0x60U, 0x02U,
-                                    0x4EU, 0x58U, 0x4EU, 0x70U}
+       // BNE.S selects either of two separately reachable TST.W $0B00
+       // cut blocks (see c4_prefix's comment above for why this fixture
+       // uses TST instead of UNLK now). Both cut sinks are terminal and
+       // neither becomes a dispatch arm. The second cut's own address
+       // shifts from the pre-SEG-021-T040 0xB06 to 0xB08 (first TST is 4
+       // bytes), so BNE.S's own displacement widens from 0x04 to 0x06.
+       ? std::vector<std::uint8_t>{0x66U, 0x06U, 0x4AU, 0x38U, 0x0BU, 0x00U, 0x60U, 0x04U,
+                                    0x4AU, 0x38U, 0x0BU, 0x00U, 0x4EU, 0x70U}
        : c4_same_block
        // Two candidates in one block: only the first can own the local cut.
-       ? std::vector<std::uint8_t>{0x4EU, 0x58U, 0x4EU, 0x58U, 0x60U, 0x02U,
+       // The first candidate's own address (0xB00, the block entry) is
+       // unchanged; the second candidate shifts from the pre-SEG-021-T040
+       // 0xB02 to 0xB04 (the first TST is 4 bytes, not UNLK's 2).
+       ? std::vector<std::uint8_t>{0x4AU, 0x38U, 0x0BU, 0x00U, 0x4AU, 0x38U, 0x0BU, 0x00U, 0x60U, 0x02U,
                                     0x00U, 0x00U, 0x4EU, 0x70U}
        : c4_backward_block
-       // BRA.S +8 (0xB00 -> 0xB0A); dead filler; MOVEQ #1,D0 then the
-       // still-declined UNLK A0 cut at 0xB04/0xB06 -- reached only via
-       // 0xB0A's own BRA.S -8 backward edge, discovered strictly after the
-       // higher-address block.
-       ? std::vector<std::uint8_t>{0x60U, 0x08U, 0x00U, 0x00U, 0x70U, 0x01U,
-                                    0x4EU, 0x58U, 0x4EU, 0x70U, 0x60U, 0xF8U}
+       // BRA.S +10 (0xB00 -> 0xB0C); dead filler; MOVEQ #1,D0 then the
+       // still-declined TST.W $0B00 cut at 0xB06 (MOVEQ at 0xB04 and the
+       // cut's own address at 0xB06 are unchanged) -- reached only via
+       // 0xB0C's own BRA.S backward edge (target 0xB04, displacement
+       // -10/0xF6), discovered strictly after the higher-address block.
+       // RESET's own address shifts from the pre-SEG-021-T040 0xB08 to
+       // 0xB0A (unreachable either way -- the cut truncates the block); the
+       // backward-branch block itself shifts from 0xB0A to 0xB0C.
+       ? std::vector<std::uint8_t>{0x60U, 0x0AU, 0x00U, 0x00U, 0x70U, 0x01U,
+                                    0x4AU, 0x38U, 0x0BU, 0x00U, 0x4EU, 0x70U, 0x60U, 0xF6U}
       : routed_write
       ? std::vector<std::uint8_t>{0x42U, 0x90U, 0x60U, 0x06U, 0x00U, 0x00U,
                                   0x00U, 0x00U, 0x00U, 0x00U, 0x4EU, 0x70U}
@@ -20328,7 +20347,22 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
    else if (forge == "unresolved-reason") value.frontiers.front().diagnostic.direct.unresolved_reason = "forged";
    else if (forge == "frontier-category") value.frontiers.front().diagnostic.category = DirectFlowDiagnostic::unmapped_data_access;
    else if (forge == "frontier-class") value.frontiers.front().class_ = GenesisFrontierClass::unsupported_device_access;
-   else if (forge == "prefix-mapping-duplicate") value.accepted_prefix.mapping_claims.push_back(value.accepted_prefix.mapping_claims.front());
+   else if (c4_prefix || c4_pruned_stop || c4_multi_blocks || c4_same_block || c4_backward_block) {
+     // SEG-021-T040: each of these block-cut/prefix-retention fixtures needs
+     // a real, ordinarily-decodable, non-CFG-affecting "still declined"
+     // instruction at a specific mid-block position. UNLK (their prior
+     // placeholder) is now C4-represented, and no ordinarily-decodable
+     // M68kIrKind remains undeclined (branch_ne_short/branch_always_short
+     // are the only other candidates, both CFG-affecting). Their TST.W
+     // $0B00 substitute is a genuinely foldable, validly single-claimed,
+     // in-bounds absolute EA, so real discovery retains a resolver fact for
+     // it -- clearing that fact here (mirroring the pre-existing NOT
+     // fixture's own established `not-missing-fact` technique) forces the
+     // exact same missing_fact C4-lowering-gap stop at that exact
+     // instruction's own address that the old missing_dispatcher UNLK shape
+     // used to produce, preserving each fixture's own block-cut semantics.
+     value.accepted_prefix.static_memory_facts.clear();
+   } else if (forge == "prefix-mapping-duplicate") value.accepted_prefix.mapping_claims.push_back(value.accepted_prefix.mapping_claims.front());
    else if (forge == "prefix-mapping-offset") value.accepted_prefix.mapping_claims.front().image_begin.value += 1U;
     else if (forge == "prefix-mapping-affine-distractor") {
       // This claim owns the same target span but maps it to a different image

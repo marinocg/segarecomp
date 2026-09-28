@@ -1373,27 +1373,40 @@ def main():
   assert c4_prefix.returncode == 0 and not c4_prefix.stdout.startswith("/* translation rejected:")
   assert "runtime->d[0] = UINT32_C(0x00000001);" in c4_prefix.stdout
   assert c4_prefix.stdout.count("genesis_c4_lowering_stop_") == 2  # declaration and one call
-  assert "genesis_block_00000B08" not in c4_prefix.stdout
-  assert "{ UINT32_C(0x00000B08), genesis_block_" not in rows(c4_prefix.stdout)
+  # SEG-021-T040: UNLK (this fixture's prior placeholder) is now
+  # C4-represented; it switched to a TST.W $0B00 cut whose own 4-byte width
+  # (vs UNLK's 2) shifts RESET's own address from 0xB08 to 0xB0A. The cut's
+  # own address (0xB02) is unchanged.
+  assert "genesis_block_00000B0A" not in c4_prefix.stdout
+  assert "{ UINT32_C(0x00000B0A), genesis_block_" not in rows(c4_prefix.stdout)
   # A cut in a static block that Q1 prunes downstream of the first cut has no
   # retained emitted caller, so its static stop function must not be emitted.
   c4_pruned_stop = subprocess.run([executable, "--emit-general-startup-runtime-c4-pruned-stop"], text=True, capture_output=True)
   assert c4_pruned_stop.returncode == 0 and not c4_pruned_stop.stdout.startswith("/* translation rejected:")
   assert "genesis_c4_lowering_stop_00000B02" in c4_pruned_stop.stdout
-  assert "genesis_c4_lowering_stop_00000B08" not in c4_pruned_stop.stdout
+  # SEG-021-T040: the second (pruned) cut's own address shifts from 0xB08 to
+  # 0xB0A (the first TST.W $0B00 cut is 4 bytes, not UNLK's 2).
+  assert "genesis_c4_lowering_stop_00000B0A" not in c4_pruned_stop.stdout
   c4_multi_first = subprocess.run([executable, "--emit-general-startup-runtime-c4-multi-blocks"], text=True, capture_output=True)
   c4_multi_second = subprocess.run([executable, "--emit-general-startup-runtime-c4-multi-blocks"], text=True, capture_output=True)
   assert c4_multi_first.returncode == c4_multi_second.returncode == 0
   assert c4_multi_first.stdout == c4_multi_second.stdout
   assert c4_multi_first.stdout.count("static GenesisControlTransfer genesis_c4_lowering_stop_") == 2
+  # SEG-021-T040: the second cut's own address shifts from 0xB06 to 0xB08
+  # (the first TST.W $0B00 cut is 4 bytes, not UNLK's 2); the first cut's own
+  # address (0xB02) is unchanged.
   assert "return genesis_c4_lowering_stop_00000B02(runtime);" in c4_multi_first.stdout
-  assert "return genesis_c4_lowering_stop_00000B06(runtime);" in c4_multi_first.stdout
+  assert "return genesis_c4_lowering_stop_00000B08(runtime);" in c4_multi_first.stdout
   assert "UINT32_C(0x00000B02)) return genesis_c4_lowering_stop" not in c4_multi_first.stdout
-  assert "UINT32_C(0x00000B06)) return genesis_c4_lowering_stop" not in c4_multi_first.stdout
+  assert "UINT32_C(0x00000B08)) return genesis_c4_lowering_stop" not in c4_multi_first.stdout
   c4_same_block = subprocess.run([executable, "--emit-general-startup-runtime-c4-same-block"], text=True, capture_output=True)
   assert c4_same_block.returncode == 0 and not c4_same_block.stdout.startswith("/* translation rejected:")
   assert "genesis_c4_lowering_stop_00000B00" in c4_same_block.stdout
-  assert "genesis_c4_lowering_stop_00000B02" not in c4_same_block.stdout
+  # SEG-021-T040: the second (non-owning) candidate's own address shifts
+  # from 0xB02 to 0xB04 (the first TST.W $0B00 candidate is 4 bytes, not
+  # UNLK's 2); the block entry / owning cut's own address (0xB00) is
+  # unchanged.
+  assert "genesis_c4_lowering_stop_00000B04" not in c4_same_block.stdout
   # SEG-007-T142 correction (adversarial validation): a retained, uncut block
   # reached only via a backward/lower-address edge from a later-visited,
   # higher-address block must not be silently dropped from either the
@@ -1415,7 +1428,11 @@ def main():
   assert "{ UINT32_C(0x00000B04), genesis_block_00000B04 }" in rows(c4_backward_first.stdout)
   assert "runtime->d[0] = UINT32_C(0x00000001);" in c4_backward_first.stdout
   assert "genesis_c4_lowering_stop_00000B06" in c4_backward_first.stdout
-  assert "genesis_block_00000B08" not in c4_backward_first.stdout
+  # SEG-021-T040: RESET's own (unreachable either way) address shifts from
+  # 0xB08 to 0xB0A (the TST.W $0B00 cut at 0xB06 is 4 bytes, not UNLK's 2);
+  # the backward-branch block itself is now at 0xB0C (was 0xB0A).
+  assert "genesis_block_00000B0A" not in c4_backward_first.stdout
+  assert "static GenesisControlTransfer genesis_block_00000B0C" in c4_backward_first.stdout
   # SEG-007-T142 correction (adversarial validation): GenesisC4LoweringDimensions
   # must be injective over every distinct C4 gap shape the emitter can
   # currently turn into a stop, never a generic catch-all. Prove this
@@ -1431,22 +1448,36 @@ def main():
     return stdout[start:stdout.index(";", start)]
   c4_dim_shapes = {}
   c4_dim_outputs = {}
-  for flag, forge in (
-      # SEG-021-T011: PEA is now a represented C4 kind for every legal
-      # control-EA form; this dimension-uniqueness fixture switched to UNLK
-      # (`unlink_frame`), matching the still-declined placeholder the
-      # block-cut/prefix-retention fixtures also switched to.
-      ("c4-dim-unlink-frame", "unlink_frame"),):
-    run_first = subprocess.run([executable, f"--emit-general-startup-runtime-{flag}"], text=True, capture_output=True)
-    run_second = subprocess.run([executable, f"--emit-general-startup-runtime-{flag}"], text=True, capture_output=True)
-    assert run_first.returncode == run_second.returncode == 0, forge
-    assert run_first.stdout == run_second.stdout, forge
-    assert not run_first.stdout.startswith("/* translation rejected:"), forge
-    assert "GENESIS_STOP_C4_LOWERING_GAP" in run_first.stdout, forge
-    assert "GENESIS_C4_LOWERING_DIMENSIONS_OTHER" not in run_first.stdout, forge
-    c4_dim_shapes[forge] = c4_dimension(run_first.stdout)
-    c4_dim_outputs[forge] = run_first.stdout
+  # SEG-021-T040: this loop used to prove GenesisC4LoweringDimensions
+  # injectivity across still-undeclined missing_dispatcher M68kIrKind shapes,
+  # with UNLK (`unlink_frame`) as its last remaining example (after PEA/LINK
+  # and every other ordinarily-decodable kind became C4-represented). Now
+  # that UNLK is represented too, there is no remaining ordinarily-decodable
+  # missing_dispatcher shape left to prove distinct from another, so this
+  # loop is retained only as the (now-empty) injectivity check's own
+  # machinery -- `c4_dim_shapes`/`c4_dim_outputs` remain declared for the
+  # unrelated `dim-*` fixtures still appended to them below. UNLK itself
+  # moved to a positive-lowering proof, mirroring LINK's own conversion
+  # immediately below.
   assert len(set(c4_dim_shapes.values())) == len(c4_dim_shapes), c4_dim_shapes  # every shape distinct
+  # SEG-021-T040: UNLK (`unlink_frame`) now has a real C4 dispatcher body
+  # too -- it reuses the same shared routed lowering emit_m68k_operation_c
+  # already had for immutable-ROM AOT admission (SEG-021-T016), unreachable
+  # from the ordinary C4 route only because m68k_c4_represented_ir_kind
+  # never listed it (the same gap LINK had). UNLK A0 must reach the routed
+  # (A7)+ pop, write A0, and advance PC -- never a missing_dispatcher gap.
+  unlk_first = subprocess.run(
+      [executable, "--emit-general-startup-runtime-c4-dim-unlink-frame"], text=True, capture_output=True)
+  unlk_second = subprocess.run(
+      [executable, "--emit-general-startup-runtime-c4-dim-unlink-frame"], text=True, capture_output=True)
+  assert unlk_first.returncode == unlk_second.returncode == 0
+  assert unlk_first.stdout == unlk_second.stdout  # deterministic two-run output
+  assert not unlk_first.stdout.startswith("/* translation rejected:")
+  assert "GENESIS_STOP_C4_LOWERING_GAP" not in unlk_first.stdout
+  assert "genesis_c4_lowering_stop_" not in unlk_first.stdout
+  assert "genesis_route_access(runtime" in unlk_first.stdout
+  assert "runtime->a[0] = " in unlk_first.stdout
+  c4_dim_outputs["unlink_frame"] = unlk_first.stdout
   # SEG-021-T009: an auto-updating memory-word shift (ASR.W (A1)+) is lowered by the deferred address-commit
   # helper: no lowering-gap stop, one routed read and one routed write at the snapshot address, one live-register
   # commit strictly after both accesses.
@@ -1947,7 +1978,8 @@ def main():
   # corrupting the bare identifier into a doubled prefix -- must never appear.
   assert "runtime->runtime->pc" not in suba_source_fold_first.stdout
   c4_dim_outputs["subtract_address_source_fold"] = suba_source_fold_first.stdout
-  assert c4_dim_shapes["unlink_frame"] == "UNLINK_FRAME_MISSING_DISPATCHER"
+  # SEG-021-T040: UNLK (`unlink_frame`) is now C4-represented -- see its own
+  # positive-lowering proof above; this dimension can no longer be produced.
   # SEG-007-T145: ordinary add-family auto-update operands are now lowered by
   # the deferred-address-commit path; the sole remaining add-family lowering
   # gap is the ADDA same-register aliasing decline, which serialises to the
