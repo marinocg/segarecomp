@@ -121,6 +121,7 @@ const ImU32 dash_color_hover  = rgba(70, 220, 255, 255);
 const ImU32 text_primary      = rgba(220, 232, 255);   // #DCE8FF
 const ImU32 text_secondary    = rgba(169, 183, 221);   // #A9B7DD
 const ImU32 text_dim          = rgba(120, 133, 170);
+const ImU32 text_footer       = rgba(202, 211, 235, 255);   // brighter than text_dim: footer/legal text over busy background art
 const ImU32 col_ok            = rgba(104, 224, 158);
 const ImU32 col_err           = rgba(255, 129, 119);
 const ImU32 link_normal       = rgba(62, 167, 255);    // #3EA7FF
@@ -527,6 +528,11 @@ int gui() {
           start_build(true);
         if (outline_button(centered, "choose2", content_x + 268.0F, row_y + 30.0F, 140.0F, 42.0F, "Choose...", font_regular, 14.0F))
           browse();
+        // Fixed control scheme (the runtime has no remapping UI yet): keep it visible right where "Play" is.
+        const float controls_y = row_y + 96.0F;
+        draw_text(dl, font_bold, centered.len(13), text_secondary, centered.at(content_x, controls_y), "Controls");
+        draw_text(dl, font_regular, centered.len(13), text_footer, centered.at(content_x, controls_y + 20.0F),
+                 "Arrows = D-Pad   Z = A   X = B   C = C   Enter = Start");
       } else if (state == State::Running) {
         draw_text(dl, font_bold, centered.len(16), text_primary, centered.at(content_x, row_y + 10.0F), "Playing...");
         draw_text(dl, font_regular, centered.len(13), text_secondary, centered.at(content_x, row_y + 38.0F), "Close the game window to return.");
@@ -573,17 +579,23 @@ int gui() {
       if (tex_info) dl->AddImage(reinterpret_cast<ImTextureID>(tex_info), centered.at(panel_x0 + 14.0F, below_y + 14.0F),
                                 centered.at(panel_x0 + 40.0F, below_y + 40.0F));
       const float tx = panel_x0 + (tex_info ? 52.0F : 16.0F);
-      draw_text(dl, font_regular, centered.len(12.5F), text_secondary, centered.at(tx, below_y + 12.0F), "No ROMs are included with Segarecomp. Use only");
-      draw_text(dl, font_regular, centered.len(12.5F), text_secondary, centered.at(tx, below_y + 30.0F), "software you are legally entitled to analyze.");
-      draw_text(dl, font_regular, centered.len(12.5F), text_secondary, centered.at(tx, below_y + 48.0F), "Compatibility is experimental.");
+      draw_text(dl, font_regular, centered.len(12.5F), text_footer, centered.at(tx, below_y + 12.0F), "No ROMs are included with Segarecomp. Use only");
+      draw_text(dl, font_regular, centered.len(12.5F), text_footer, centered.at(tx, below_y + 30.0F), "software you are legally entitled to analyze.");
+      draw_text(dl, font_regular, centered.len(12.5F), text_footer, centered.at(tx, below_y + 48.0F), "Compatibility is experimental.");
     }
 
-    // ---- footer: quiet, centered status metadata, then the cache-folder link ----
+    // ---- footer: quiet, centered status metadata, then the cache-folder link -- on its own scrim so it
+    // stays legible over the busy background art regardless of what part of the scenery sits behind it ----
+    {
+      const float fx0 = LW * 0.5F - 220.0F, fx1 = LW * 0.5F + 220.0F, fy0 = LH - 86.0F, fy1 = LH - 16.0F;
+      dl->AddRectFilled(centered.at(fx0, fy0), centered.at(fx1, fy1), rgba(6, 10, 22, 165), centered.len(6));
+      dl->AddLine(centered.at(fx0 + 10.0F, fy0), centered.at(fx1 - 10.0F, fy0), rgba(60, 75, 120, 120), centered.len(1));
+    }
     char info[160];
     std::snprintf(info, sizeof info, "v%s  \xC2\xB7  Zig %s  \xC2\xB7  SDL %d.%d.%d  \xC2\xB7  %s", SEGARECOMP_LAUNCHER_VERSION,
                   SEGARECOMP_ZIG_VERSION, SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
                   SDL_VERSIONNUM_MICRO(SDL_GetVersion()), host_description().c_str());
-    draw_text_centered(dl, font_regular, centered.len(12.5F), text_dim, centered.at(LW * 0.5F, 0).x, centered.at(0, LH - 70.0F).y, info);
+    draw_text_centered(dl, font_regular, centered.len(12.5F), text_footer, centered.at(LW * 0.5F, 0).x, centered.at(0, LH - 70.0F).y, info);
     if (text_link(centered, "cache", LW * 0.5F, LH - 42.0F, tex_folder, "Open cache folder", font_regular, 13.5F))
       SDL_OpenURL(("file://" + u8s(cache_root())).c_str());
 
