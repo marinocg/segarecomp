@@ -1627,6 +1627,26 @@ def main():
   assert "runtime->d[0] =" in register_imm_first.stdout
   assert "runtime->sr" in register_imm_first.stdout
   c4_dim_outputs["shift_rotate_register_immediate"] = register_imm_first.stdout
+  # SEG-021-T040: LINK (`link_frame`) now has a real C4 dispatcher body -- it
+  # reuses the shared routed lowering emit_m68k_operation_c already had for
+  # immutable-ROM AOT admission (SEG-021-T016), and was simply unreachable
+  # from the ordinary C4 whole-program route because
+  # m68k_c4_represented_ir_kind never listed it. LINK A0,#0 must reach the
+  # routed -(A7) push, write A0 and A7, and advance PC -- never a
+  # missing_dispatcher gap.
+  link_first = subprocess.run(
+      [executable, "--emit-general-startup-runtime-c4-dim-link-frame"], text=True, capture_output=True)
+  link_second = subprocess.run(
+      [executable, "--emit-general-startup-runtime-c4-dim-link-frame"], text=True, capture_output=True)
+  assert link_first.returncode == link_second.returncode == 0
+  assert link_first.stdout == link_second.stdout  # deterministic two-run output
+  assert not link_first.stdout.startswith("/* translation rejected:")
+  assert "GENESIS_STOP_C4_LOWERING_GAP" not in link_first.stdout
+  assert "genesis_c4_lowering_stop_" not in link_first.stdout
+  assert "genesis_route_access(runtime" in link_first.stdout
+  assert "runtime->a[0] = " in link_first.stdout
+  assert "runtime->a[7] = " in link_first.stdout
+  c4_dim_outputs["link_frame"] = link_first.stdout
   # SEG-007-T153: ADDQ (`add_quick`) now has a real C4 dispatcher body -- it
   # reuses the shared `add` / `add_immediate` / `add_quick` / `add_address`
   # emission body that was already present before this task and was simply
@@ -2228,6 +2248,7 @@ def main():
                           ("dim-compare-immediate-absolute", c4_dim_outputs["compare_immediate_absolute"]),
                           ("dim-shift-rotate-register", c4_dim_outputs["shift_rotate_register"]),
                           ("dim-shift-rotate-register-immediate", c4_dim_outputs["shift_rotate_register_immediate"]),
+                          ("dim-link-frame", c4_dim_outputs["link_frame"]),
                           ("dim-add-quick", c4_dim_outputs["add_quick"]),
                           ("dim-add-quick-address", c4_dim_outputs["add_quick_address"]),
                           ("dim-add-quick-indirect", c4_dim_outputs["add_quick_indirect"]),

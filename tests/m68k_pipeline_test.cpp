@@ -19946,6 +19946,12 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
   // (`unlink_frame`), matching the still-declined placeholder the
   // block-cut/prefix-retention fixtures above also switched to.
   const bool c4_dim_unlink_frame = forge == "c4-dim-unlink-frame";
+  // SEG-021-T040: LINK is now a represented C4 kind (see
+  // m68k_c4_represented_ir_kind), so this is a positive lowering proof --
+  // mirroring add_quick's own positive-proof shape below -- rather than a
+  // gap-shape fixture. UNLK stays the dimension-uniqueness/placeholder
+  // shape (see its own comment above); only LINK moved.
+  const bool c4_dim_link_frame = forge == "c4-dim-link-frame";
   const bool c4_dim_bit_test_auto_update = forge == "c4-dim-bit-test-auto-update";
   const bool c4_dim_shift_memory_auto_update = forge == "c4-dim-shift-memory-auto-update";
   // SEG-007-T153: ADDQ (`add_quick`) is now C4-represented, reusing the
@@ -20227,6 +20233,13 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
        // C4-represented: the shared emission body sign-extends the low word
        // of D0 into the full long, writes D0, and updates CCR only.
         ? std::vector<std::uint8_t>{0x48U, 0xC0U, 0x4EU, 0x70U}
+        : c4_dim_link_frame
+       // SEG-021-T040: LINK A0,#0 (0x4E50 0x0000: LINK opcode 0100111001010,
+       // An=A0, displacement word 0); RESET. `link_frame` is now
+       // C4-represented: the shared emission body pushes the old A0 through
+       // the routed -(A7) write, sets A0 = the new A7, then A7 += 0 -- no
+       // missing_dispatcher gap.
+        ? std::vector<std::uint8_t>{0x4EU, 0x50U, 0x00U, 0x00U, 0x4EU, 0x70U}
         : c4_pruned_stop
         // A second C4 cut is statically retained beyond the first cut's
         // terminal branch.  It has no emitted caller and therefore must not
@@ -20424,7 +20437,7 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
               !pea_routed && !pea_a7_alias && !pea_absolute && !pea_indexed && !c4_prefix && !c4_pruned_stop &&
               !c4_multi_blocks && !c4_same_block && !c4_backward_block && !c4_dim_compare &&
               !c4_dim_compare_immediate && !c4_dim_compare_immediate_absolute && !c4_dim_shift_rotate_register &&
-              !c4_dim_shift_rotate_register_immediate && !c4_dim_unlink_frame &&
+              !c4_dim_shift_rotate_register_immediate && !c4_dim_unlink_frame && !c4_dim_link_frame &&
               !c4_dim_bit_test_auto_update && !c4_dim_shift_memory_auto_update && !c4_dim_add_quick && !c4_dim_add_quick_address &&
               !c4_dim_add_quick_indirect && !c4_dim_add_quick_disp && !c4_dim_add_quick_postinc &&
               !c4_dim_add_quick_predec && !c4_dim_add_quick_absolute &&
@@ -30584,6 +30597,8 @@ int main(int argc, char **argv) {
     return emit_general_startup_runtime_c4_frontier_source("c4-dim-shift-rotate-register-immediate");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-unlink-frame")
     return emit_general_startup_runtime_c4_frontier_source("c4-dim-unlink-frame");
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-link-frame")
+    return emit_general_startup_runtime_c4_frontier_source("c4-dim-link-frame");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-shift-memory-auto-update")
     return emit_general_startup_runtime_c4_frontier_source("c4-dim-shift-memory-auto-update");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-startup-runtime-c4-dim-bit-test-auto-update")

@@ -2293,6 +2293,34 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   // gap shape below.
   case M68kIrKind::exchange_registers:
   case M68kIrKind::movep_transfer:
+  // SEG-021-T040: LINK is a represented C4 kind (no missing_dispatcher gap).
+  // SEG-021-T016 already added a full routed lowering body for it in
+  // emit_m68k_operation_c (the same `memory->runtime_routing` branch AOT
+  // admission uses), but that task scoped only immutable-ROM AOT admission
+  // and never widened this completeness classifier to match, leaving the
+  // already-working C4 lowering unreachable behind a stale
+  // missing_dispatcher gap. Like PEA/LEA immediately above, LINK carries no
+  // memory-referencing source/destination EA (An register plus an
+  // instruction-embedded word displacement) -- the -(A7) frame push is
+  // lowered through the same atomic local-snapshot/deferred-commit
+  // technique PEA's own comment documents, so no per-kind retained-fact
+  // branch is needed below either.
+  //
+  // UNLK (`unlink_frame`) has an equally mature routed lowering body
+  // (SEG-021-T016) and could be admitted the same way, but is deliberately
+  // NOT admitted here: it is the test suite's own chosen "still-declined,
+  // simple, non-CFG-affecting" placeholder shape, reused across many
+  // independent block-cut/prefix-retention/dimension-uniqueness fixtures in
+  // tests/m68k_pipeline_test.cpp and
+  // tests/genesis_startup_runtime_c4_test.py (see the comment above
+  // emit_operation_c4_indexed_pea_source). Admitting it requires migrating
+  // that whole placeholder convention to a different still-declined shape
+  // first (there is now exactly one candidate pair left,
+  // branch_ne_short/branch_always_short, both CFG-affecting and therefore
+  // unsuitable for the same fixtures without a larger rewrite) -- a bounded
+  // test-infrastructure task of its own, not required to unblock the
+  // Cool Spot LINK frontier this task is fixing.
+  case M68kIrKind::link_frame:
   case M68kIrKind::set_conditional:
   case M68kIrKind::test_and_set:
   case M68kIrKind::logical_and_immediate:
@@ -5336,6 +5364,21 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       // atomic local-snapshot/deferred-commit technique in
       // emit_m68k_operation_c's push_effective_address case.
       case M68kIrKind::push_effective_address: {
+        auto routed = memory;
+        routed.runtime_routing = true;
+        routed.runtime_object = "runtime";
+        out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
+        break;
+      }
+      // SEG-021-T040: LINK An,#disp carries no decoded memory-referencing
+      // EA either (destination_ea is always an address register; the
+      // displacement is instruction-embedded) -- its -(A7) push target is
+      // architecturally fixed exactly like PEA's immediately above, so no
+      // fact lookup applies here either. It needs the same routed context
+      // for the same reason: the push is a genuine RAM write, lowered
+      // through the atomic local-snapshot/deferred-commit technique in
+      // emit_m68k_operation_c's link_frame case.
+      case M68kIrKind::link_frame: {
         auto routed = memory;
         routed.runtime_routing = true;
         routed.runtime_object = "runtime";
