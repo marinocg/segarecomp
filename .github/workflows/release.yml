@@ -6,6 +6,13 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+  # Packaging changes are exercised (build + package + smoke test, never published) on pull requests.
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "packaging/**"
+      - "apps/segarecomp-launcher/**"
+      - "apps/segarecomp/**"
 
 permissions:
   contents: read
@@ -13,18 +20,19 @@ permissions:
 env:
   ZIG_VERSION: "0.15.2"
   SDL_VERSION: "3.4.16"
-  SDL_SOURCE_SHA256: 7322236cd12090c3eb40b9728be4d49c76f66ad17d04369584d4ecad5cf77c68
   SDL_VC_SHA256: 1a784cb2a5c64d56fe7a62090fe9d242d9865f235e4ea9678f1a6ba4e693e7de
   SDL_MINGW_SHA256: 9828bb735cf8a007bcf0ac5aa9f01f3fcb54b7ca67c932e775c905c5d5053a60
   SOURCE_DATE_EPOCH: "1767225600"  # 2026-01-01T00:00:00Z: normalized archive timestamps
 
 jobs:
   tests:
-    # Full hermetic suite on all three hosts before anything is packaged.
+    # Full hermetic suite on all three hosts before anything is packaged (pull requests run ci.yml themselves).
+    if: github.event_name != 'pull_request'
     uses: ./.github/workflows/ci.yml
 
   package:
     needs: tests
+    if: ${{ !cancelled() && (needs.tests.result == 'success' || needs.tests.result == 'skipped') }}
     name: package (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -87,20 +95,10 @@ jobs:
       - name: "SDL3 (macOS/Linux, pinned source build, shared)"
         if: runner.os != 'Windows'
         run: |
-          cd "$WORK"
-          curl -fsSL -o sdl.tar.gz "https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL3-${SDL_VERSION}.tar.gz"
-          if command -v sha256sum >/dev/null; then echo "${SDL_SOURCE_SHA256}  sdl.tar.gz" | sha256sum -c -; else echo "${SDL_SOURCE_SHA256}  sdl.tar.gz" | shasum -a 256 -c -; fi
-          tar xzf sdl.tar.gz
-          extra=""
-          if [ "$RUNNER_OS" = "macOS" ]; then extra="-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"; fi
-          cmake -S "SDL3-${SDL_VERSION}" -B sdl-build -G Ninja -DCMAKE_BUILD_TYPE=Release $extra \
-            -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TESTS=OFF -DSDL_TEST_LIBRARY=OFF -DSDL_INSTALL_TESTS=OFF \
-            -DCMAKE_INSTALL_PREFIX="$WORK/sdl3"
-          cmake --build sdl-build
-          cmake --install sdl-build
+          packaging/build-sdl3.sh "$WORK/sdl" "$WORK/sdl3"
           echo "SDL3_PREFIX=$WORK/sdl3" >> "$GITHUB_ENV"
           echo "SDL3_PKG_PREFIX=$WORK/sdl3" >> "$GITHUB_ENV"
-          echo "SDL3_LICENSE=$WORK/SDL3-${SDL_VERSION}/LICENSE.txt" >> "$GITHUB_ENV"
+          echo "SDL3_LICENSE=$WORK/sdl3/LICENSE.txt" >> "$GITHUB_ENV"
           echo "SDL3_DLL=" >> "$GITHUB_ENV"
 
       - name: "SDL3 (Windows, pinned official VC devel for the launcher and mingw devel for the bundled compiler)"

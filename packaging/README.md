@@ -1,7 +1,7 @@
 # Consumer packaging
 
 The release package is `cmake --install` of a Release build with `-DSEGARECOMP_BUILD_LAUNCHER=ON` plus the pinned
-third-party inputs (`install.cmake`). `.github/workflows/release.yml` does exactly this per host, archives the result,
+third-party inputs (`install.cmake`). `.github/workflows/release.yml` does exactly this per host (also on pull requests that touch packaging, without publishing; run it by hand with **Actions > release > Run workflow**), archives the result,
 **extracts the archive into a clean directory and runs `smoke_test.py` against it**, then publishes archives and
 `SHA256SUMS.txt` for a `v*` tag (a manual run is a dry run that only uploads artifacts).
 
@@ -28,12 +28,15 @@ toolchain/  (Zig)   sdl3/{include,lib}  runtime/{platforms,libs}  licenses/  REA
 
 `runtime/` mirrors the repository paths the Genesis runtime headers include by relative path.
 
-## Local staging (macOS example)
+## Local staging (macOS/Linux)
+
+SDL3 comes from `packaging/build-sdl3.sh` (pinned source build; no Homebrew/vcpkg dependency, `@rpath` install name):
 
 ```sh
+packaging/build-sdl3.sh /tmp/sdl-work /tmp/sdl3      # pinned source build, ~2 min
 cmake -S . -B build/launcher -G Ninja -DCMAKE_BUILD_TYPE=Release -DSEGARECOMP_BUILD_LAUNCHER=ON -DBUILD_TESTING=OFF \
-  -DCMAKE_PREFIX_PATH=<sdl3-prefix> -DSEGARECOMP_PACKAGE_ZIG_DIR=<extracted zig> \
-  -DSEGARECOMP_PACKAGE_SDL3_PREFIX=<sdl3-prefix> -DSEGARECOMP_PACKAGE_SDL3_LICENSE=<SDL3 LICENSE.txt>
+  -DCMAKE_PREFIX_PATH=/tmp/sdl3 -DSEGARECOMP_PACKAGE_ZIG_DIR=<extracted zig> \
+  -DSEGARECOMP_PACKAGE_SDL3_PREFIX=/tmp/sdl3 -DSEGARECOMP_PACKAGE_SDL3_LICENSE=/tmp/sdl3/LICENSE.txt
 cmake --build build/launcher && cmake --install build/launcher --prefix stage
 python3 packaging/smoke_test.py stage/Segarecomp.app/Contents/MacOS/Segarecomp
 ```
