@@ -69,16 +69,24 @@ int main(void) {
      resolved target. */
   assert(genesis_runtime_run(&runtime, drive_dispatch, 2U).kind == GENESIS_COMPLETE);
   assert(runtime.devices.interrupt.checkpoint_entered == 0U);
-  value = UINT32_C(0x0008); /* synthetic documented VBlank status observation */
-  runtime.devices.vdp.status_register = (uint16_t)value;
+  value = UINT32_C(0xFFFFFFFF);
+  /* SEG-021-T040: status bit 3 is now a live projection of
+     `scheduler.master_ticks` against the modeled VBlank window (see
+     genesis_vdp_status_read), not the static status_register field, so this
+     synthetic documented VBlank status observation sets master_ticks inside
+     that window instead. A status read only observes the bit -- it must not
+     also arm vblank_pending/vblank_transition_count, which stay owned
+     exclusively by the scheduler's own crossing-onset edge. */
+  runtime.scheduler.master_ticks = GENESIS_NTSC_VBLANK_ONSET_TICK;
   assert(genesis_route_access(&runtime, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
                               GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
-  assert(runtime.devices.interrupt.vblank_pending == 1U);
-  assert(runtime.devices.interrupt.vblank_transition_count == 1U);
+  assert((value & UINT32_C(0x0008)) != 0U); /* live VBlank bit observed */
+  assert(runtime.devices.interrupt.vblank_pending == 0U);
+  assert(runtime.devices.interrupt.vblank_transition_count == 0U);
   assert(runtime.devices.interrupt.vblank_status_read_count == 1U);
   assert(genesis_route_access(&runtime, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
                               GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
-  assert(runtime.devices.interrupt.vblank_transition_count == 1U); /* no overwrite on 1 -> 1 */
+  assert(runtime.devices.interrupt.vblank_transition_count == 0U); /* status reads never arm it */
   assert(runtime.devices.interrupt.vblank_status_read_count == 2U);
 
   /* Extraction fails closed before its checkpoint observation-count condition. */

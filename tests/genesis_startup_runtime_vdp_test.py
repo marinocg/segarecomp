@@ -227,8 +227,19 @@ int main(void) {
      halves of ONE sampled word. Reading either lane or the existing WORD
      selector cancels a pending two-word command without changing its already
      applied address bits, and counts one status observation per transaction.
-     Even though VB lives in the low lane, a high-lane read observes the full
-     word for the existing synthetic sticky interrupt policy. */
+     SEG-021-T040: bit 3 (the low byte's bit 0, 0x01) is no longer read
+     verbatim from the static `status_register` field -- it is a live
+     projection of `scheduler.master_ticks` against the modeled VBlank
+     window, so this fixture sets `master_ticks` inside that window (and
+     deliberately stores a *clear* bit 3 in `status_register` itself, proving
+     the live projection overrides it regardless of the stored value) rather
+     than poking the status word directly. Even though VB lives in the low
+     lane, a high-lane read observes the full word (both lanes share one
+     sampled status transaction). A status read only observes the bit here;
+     it must not also arm `vblank_pending` merely because it sampled an
+     already-live bit -- the scheduler's own crossing-onset edge is the sole
+     `vblank_pending`/IRQ6 source (see genesis_route_access's own VDP
+     branch), so both stay at their zero-initialized values throughout. */
   {
     GenesisRuntime status_case = {0};
     const uint32_t ports[] = { UINT32_C(0x00C00004), UINT32_C(0x00C00005),
@@ -237,7 +248,8 @@ int main(void) {
                                           GENESIS_ACCESS_WORD };
     const uint32_t results[] = { UINT32_C(0x02), UINT32_C(0xA8), UINT32_C(0x02A8) };
     unsigned i;
-    status_case.devices.vdp.status_register = UINT16_C(0x02A8);
+    status_case.devices.vdp.status_register = UINT16_C(0x02A0); /* bit 3 clear in storage */
+    status_case.scheduler.master_ticks = GENESIS_NTSC_VBLANK_ONSET_TICK; /* live bit 3 set */
     status_case.devices.vdp.addressed_pointer = UINT32_C(0x1234);
     for (i = 0U; i < 3U; ++i) {
       status_case.devices.vdp.control_port_awaiting_second_word = 1U;
@@ -246,13 +258,13 @@ int main(void) {
       assert(genesis_route_access(&status_case, ports[i], widths[i], GENESIS_ACCESS_READ,
                                   &value, &stop) == GENESIS_ACCESS_OK);
       assert(value == results[i]);
-      assert(status_case.devices.vdp.status_register == UINT16_C(0x02A8));
+      assert(status_case.devices.vdp.status_register == UINT16_C(0x02A0));
       assert(status_case.devices.vdp.addressed_pointer == UINT32_C(0x1234));
       assert(status_case.devices.vdp.control_port_awaiting_second_word == 0U);
       assert(status_case.devices.vdp.control_port_first_word == 0U);
       assert(status_case.devices.interrupt.vblank_status_read_count == i + 1U);
-      assert(status_case.devices.interrupt.vblank_pending == 1U);
-      assert(status_case.devices.interrupt.vblank_transition_count == 1U);
+      assert(status_case.devices.interrupt.vblank_pending == 0U);
+      assert(status_case.devices.interrupt.vblank_transition_count == 0U);
     }
     /* All unsupported neighboring shapes fail without modifying the device,
        interrupt accounting, or caller's read value, even with a live latch. */

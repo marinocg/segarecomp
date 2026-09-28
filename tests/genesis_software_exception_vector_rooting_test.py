@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""SEG-021-T019 correction: an unadmittable software-exception vector slot is "not installed", not a build error.
+"""SEG-021-T019 correction, widened by SEG-021-T040: an unadmittable software-exception vector slot is
+"not installed", not a build error.
 
 A project-authored synthetic image (no commercial data) whose reset program never raises a software exception must
 build even when a TRAP / line-A / line-F / CHK / TRAPV / ILLEGAL vector slot points at work RAM or an odd address.
-Vectors 5 and 8 keep their established fail-closed build rule.
+SEG-021-T040 widens this identical "not installed" rule to vectors 5 (divide-by-zero) and 8 (privilege violation):
+the runtime already supports the same fail-closed-only-if-actually-raised contract for both
+(`divide_by_zero_handler_present` / `privilege_violation_handler_present`), so an unadmittable vector-5/8 slot no
+longer rejects the whole build either.
 
 usage: genesis_software_exception_vector_rooting_test.py <segarecomp>
 """
@@ -38,14 +42,10 @@ def analyze(segarecomp: str, data: bytes) -> dict:
 def main():
     segarecomp = sys.argv[1]
     assert analyze(segarecomp, image(47, 0))["result"] == "accepted", "baseline image builds"
-    for vector in (4, 6, 7, 10, 11, 32, 47):
+    for vector in (4, 5, 6, 7, 8, 10, 11, 32, 47):
         for value in (0x00FF0000, 0x00000301, 0x00800000):  # work RAM, odd, unmapped
             report = analyze(segarecomp, image(vector, value))
             assert report["result"] == "accepted", (vector, hex(value), report)
-    # Established vectors 5 and 8 keep their fail-closed build rule.
-    for vector in (5, 8):
-        report = analyze(segarecomp, image(vector, 0x00000301))
-        assert report["result"] == "rejected", (vector, report)
     print("genesis_software_exception_vector_rooting_test: OK")
 
 

@@ -1102,10 +1102,28 @@ def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, roo
                 "-o", str(executable), str(source), str(root / "platforms" / "genesis" / "runtime" / "runtime.c")],
                 text=True, capture_output=True, cwd=root)
         else:
-            # Bounded parallel per-TU compile (SEG-022-T004) then link. Objects live in a temp dir,
-            # never in out_dir, which is the compare-runs artifact surface. Link order = job order.
+            # Bounded parallel per-TU compile (SEG-022-T004) then link. Objects normally live in an
+            # ephemeral temp dir, never in out_dir (the compare-runs artifact surface), and are
+            # deleted immediately after linking.
+            #
+            # SEG-021-T040: a `debug` profile build is never a compare-runs artifact and is only
+            # ever produced for local diagnosis (this tool's own --build-profile flag), so it
+            # persists its objects in `out_dir/objects` instead of an ephemeral temp dir. On
+            # platforms whose linker records a debug map pointing back at each input .o (for
+            # example macOS's dsymutil-style "N_OSO" stabs), an already-deleted temp-dir object
+            # leaves that debug map unresolvable, so a debugger attached to the linked executable
+            # after the fact cannot load full symbol/variable information even though `-g` was
+            # passed at compile time -- exactly the limitation that blocked live inspection of a
+            # large sharded ROM's debug build during this task's own Golden Axe investigation.
+            # Persisting the objects for a debug build (and only a debug build) fixes this with no
+            # change to the ordinary quick/optimized one-shot path.
             import tempfile
-            with tempfile.TemporaryDirectory() as tmp:
+            persistent_objects = profile == "debug"
+            object_dir = out_dir / "objects" if persistent_objects else None
+            if persistent_objects:
+                shutil.rmtree(object_dir, ignore_errors=True)
+                object_dir.mkdir(parents=True, exist_ok=True)
+            with contextlib.nullcontext(object_dir) if persistent_objects else tempfile.TemporaryDirectory() as tmp:
                 base = compile_flags + runtime_flags + ["-I", str(shard_dir)]
                 units = sources + [root / "platforms" / "genesis" / "runtime" / "runtime.c"]
                 objects, failure = compile_objects([(base, u) for u in units], root, pathlib.Path(tmp))

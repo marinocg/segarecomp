@@ -896,12 +896,30 @@ static int genesis_is_vdp_status_read_shape(uint32_t address, GenesisAccessWidth
   return 0;
 }
 
+/* SEG-021-T040: status bit 3 (VBlank flag, GTO1 p.19) is the one status bit
+   this owner already treats as interrupt-relevant (see the read-time
+   observation below). It must be a truthful live projection of the same
+   NTSC scheduler/video-timing state that already drives IRQ6 admission
+   (`genesis_irq6_scheduler_and_admit`'s own `crosses_onset` test), not the
+   permanently-zero static `status_register` field: `master_ticks` is
+   monotonic guest time, and one frame's VBlank window is exactly
+   [onset, frame) modulo the frame length -- the same window the scheduler
+   uses to decide whether to raise `vblank_pending`. This is a pure read-time
+   projection: it never mutates the scheduler, never advances time, and
+   introduces no second clock. */
+static int genesis_vdp_live_vblank_status_bit(uint64_t master_ticks) {
+  return (master_ticks % GENESIS_NTSC_MASTER_TICKS_PER_FRAME) >= GENESIS_NTSC_VBLANK_ONSET_TICK;
+}
+
 /* One status transaction, shared by the WORD and both BYTE lanes. The VDP
    clears the control-command write-pending flip-flop on a status read; the
    returned snapshot precedes that side effect. Upper unused bus bits are not
-   reconstructed: this owner's existing status_register policy supplies them. */
-static uint16_t genesis_vdp_status_read(GenesisDeviceState *devices) {
-  const uint16_t status = devices->vdp.status_register;
+   reconstructed: this owner's existing status_register policy supplies them,
+   except for bit 3, which SEG-021-T040 overrides with the live projection
+   above so every lane samples one identical, truthful status word. */
+static uint16_t genesis_vdp_status_read(GenesisDeviceState *devices, uint64_t master_ticks) {
+  uint16_t status = (uint16_t)(devices->vdp.status_register & (uint16_t)~UINT16_C(0x0008));
+  if (genesis_vdp_live_vblank_status_bit(master_ticks)) status |= UINT16_C(0x0008);
   devices->vdp.control_port_awaiting_second_word = 0U;
   devices->vdp.control_port_first_word = 0U;
   return status;
@@ -909,10 +927,11 @@ static uint16_t genesis_vdp_status_read(GenesisDeviceState *devices) {
 
 static int genesis_vdp_access(GenesisDeviceState *devices, uint32_t address,
                               GenesisAccessWidth width, GenesisAccessDirection direction,
-                              uint32_t *value, uint16_t *status_sample_out) {
+                              uint32_t *value, uint16_t *status_sample_out,
+                              uint64_t master_ticks) {
   if (direction == GENESIS_ACCESS_READ) {
     if (genesis_is_vdp_status_read_shape(address, width, direction)) {
-      const uint16_t status = genesis_vdp_status_read(devices);
+      const uint16_t status = genesis_vdp_status_read(devices, master_ticks);
       *status_sample_out = status;
       *value = width == GENESIS_ACCESS_WORD ? status :
                (address & 1U) ? (status & UINT16_C(0xFF)) : (status >> 8);
@@ -1528,21 +1547,28 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
       return GENESIS_ACCESS_OK;
     }
     if (genesis_vdp_access(&runtime->devices, address, width, direction,
-                           &routed_value, &status_sample)) {
-      /* GTO1 p. 19 documents the VBlank-pending status bit.  The status read
-       * is the established routed VDP seam, so this deliberately bounded
-       * policy observes a synthetic VBlank assertion only here.  There is no
-       * acknowledgement selector in this substrate: once raised, pending
-       * remains sticky rather than inventing an ungrounded clear behavior. */
+                           &routed_value, &status_sample, runtime->scheduler.master_ticks)) {
+      /* SEG-021-T040: GTO1 p. 19's VBlank status bit is now a truthful live
+       * projection of the scheduler's own video-timing state (see
+       * genesis_vdp_status_read / genesis_vdp_live_vblank_status_bit above),
+       * not the permanently-zero static status_register field it used to
+       * read verbatim. The scheduler's own crossing-onset edge
+       * (genesis_irq6_scheduler_and_admit's `crosses_onset` test) remains
+       * the sole place that raises `vblank_pending` and therefore the sole
+       * IRQ6 edge source: a status read only *observes* bit 3 here and must
+       * never also arm `vblank_pending` merely because it sampled an
+       * already-live bit. Before this task, this block also armed
+       * `vblank_pending` whenever the sampled bit was set; that read was
+       * always of the permanently-zero static field, so it was
+       * unreachable in practice. Once the bit is truthfully live, keeping
+       * that arm would let a status read taken anywhere inside an
+       * already-admitted VBlank window immediately re-arm `vblank_pending`
+       * once more (the scheduler already cleared it on admission),
+       * producing a spurious duplicate IRQ6 request the instant the
+       * handler polls status -- an interrupt storm, not real hardware
+       * behavior. Only the read-observation counter remains here. */
        if (genesis_is_vdp_status_read_shape(address, width, direction)) {
          ++runtime->devices.interrupt.vblank_status_read_count;
-         /* Check the sampled full word, not the byte returned to the CPU:
-            the even high lane still observes one status transaction. */
-         if ((status_sample & UINT16_C(0x0008)) != 0U &&
-             !runtime->devices.interrupt.vblank_pending) {
-          runtime->devices.interrupt.vblank_pending = 1U;
-          ++runtime->devices.interrupt.vblank_transition_count;
-        }
       }
       /* SEG-007-T175 PRIMARY suspension mechanism: if this exact access is
          the CONTROL-port write that just armed a memory-to-VDP DMA transfer

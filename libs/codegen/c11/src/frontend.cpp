@@ -2293,6 +2293,47 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   // gap shape below.
   case M68kIrKind::exchange_registers:
   case M68kIrKind::movep_transfer:
+  // SEG-021-T040: LINK is a represented C4 kind (no missing_dispatcher gap).
+  // SEG-021-T016 already added a full routed lowering body for it in
+  // emit_m68k_operation_c (the same `memory->runtime_routing` branch AOT
+  // admission uses), but that task scoped only immutable-ROM AOT admission
+  // and never widened this completeness classifier to match, leaving the
+  // already-working C4 lowering unreachable behind a stale
+  // missing_dispatcher gap. Like PEA/LEA immediately above, LINK carries no
+  // memory-referencing source/destination EA (An register plus an
+  // instruction-embedded word displacement) -- the -(A7) frame push is
+  // lowered through the same atomic local-snapshot/deferred-commit
+  // technique PEA's own comment documents, so no per-kind retained-fact
+  // branch is needed below either.
+  //
+  // SEG-021-T040 (second follow-through): UNLK (`unlink_frame`) is now also
+  // admitted, for the identical reason -- SEG-021-T016 already gave it the
+  // same mature routed lowering body, unreachable only because this
+  // classifier never listed it either. It carries no memory-referencing EA
+  // either (An register only; the (A7)+ frame pop is architecturally
+  // fixed), so it needs no per-kind retained-fact branch below, exactly
+  // like LINK. The test suite's own "still-declined, non-CFG-affecting"
+  // placeholder convention that used to depend on UNLK staying declined
+  // (tests/m68k_pipeline_test.cpp, tests/genesis_startup_runtime_c4_test.py)
+  // was migrated in the same change: every affected fixture now uses a
+  // foldable-absolute-EA TST.W read with its retained fact deliberately
+  // forged away after real discovery (mirroring the pre-existing
+  // `not-missing-fact` NOT fixture's own established technique), since no
+  // ordinarily-decodable M68kIrKind remains undeclined (confirmed
+  // empirically, matching each real fixture's own MOVEQ-then-declined-
+  // instruction shape: an unclaimed, an ambiguously multiply-claimed, or a
+  // bounds-exceeding foldable absolute EA read/write is excluded from
+  // `accepted_prefix.ir` entirely and instead promoted to a separate
+  // `UnresolvedFrontier` runtime-frontier diagnostic -- `missing_fact` gap
+  // rows are only ever computed over instructions already inside
+  // `accepted_prefix.ir` (see `check_fact`/`classify_m68k_c4_gap_shapes`
+  // below), so that promoted instruction structurally cannot produce one,
+  // and a genuinely still-undeclined ordinary-decode placeholder is
+  // therefore not available; branch_ne_short/branch_always_short remain the
+  // only other undeclined kinds and are CFG-affecting, unsuitable for this
+  // placeholder role either).
+  case M68kIrKind::link_frame:
+  case M68kIrKind::unlink_frame:
   case M68kIrKind::set_conditional:
   case M68kIrKind::test_and_set:
   case M68kIrKind::logical_and_immediate:
@@ -5336,6 +5377,34 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       // atomic local-snapshot/deferred-commit technique in
       // emit_m68k_operation_c's push_effective_address case.
       case M68kIrKind::push_effective_address: {
+        auto routed = memory;
+        routed.runtime_routing = true;
+        routed.runtime_object = "runtime";
+        out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
+        break;
+      }
+      // SEG-021-T040: LINK An,#disp carries no decoded memory-referencing
+      // EA either (destination_ea is always an address register; the
+      // displacement is instruction-embedded) -- its -(A7) push target is
+      // architecturally fixed exactly like PEA's immediately above, so no
+      // fact lookup applies here either. It needs the same routed context
+      // for the same reason: the push is a genuine RAM write, lowered
+      // through the atomic local-snapshot/deferred-commit technique in
+      // emit_m68k_operation_c's link_frame case.
+      case M68kIrKind::link_frame: {
+        auto routed = memory;
+        routed.runtime_routing = true;
+        routed.runtime_object = "runtime";
+        out << emit_m68k_operation_c(*found->second, "runtime->d", "runtime->sr", "  ", &routed);
+        break;
+      }
+      // SEG-021-T040: UNLK An carries no decoded memory-referencing EA
+      // either (destination_ea is always an address register); the (A7)+
+      // frame pop is architecturally fixed exactly like LINK's -(A7) push
+      // immediately above, so no fact lookup applies here either. Same
+      // routed context for the same reason: the pop is a genuine RAM read,
+      // lowered through emit_m68k_operation_c's unlink_frame case.
+      case M68kIrKind::unlink_frame: {
         auto routed = memory;
         routed.runtime_routing = true;
         routed.runtime_object = "runtime";
