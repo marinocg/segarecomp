@@ -881,6 +881,165 @@ static int genesis_vdp_data_port_cpu_write(GenesisDeviceState *devices,
   return accepted;
 }
 
+/* SEG-021-T041: the runtime-reached plain (non-armed-DMA) CPU DATA-port
+   ($C00000) READ model, the read-direction sibling of
+   genesis_vdp_data_port_cpu_write above.
+   ================ scope ================
+   Plain CPU data-port reads whose transfer target was selected by a
+   completed non-DMA two-word address-set command as a documented READ
+   target -- VRAM READ (CD5-CD0 code 0x00), VSRAM READ (0x04) or CRAM READ
+   (0x08). WORD and LONG widths only (see the BYTE note below). It is NOT a
+   generic data-port state machine: every WRITE code, an unselected code, and
+   an armed DMA/fill engine remain fail-closed here exactly as the write path
+   already documents for its own out-of-scope shapes.
+
+   ================ public sources ================
+   - GTO1 (Sega, Genesis Technical Overview v1.00, 1991) p. 20 / p. 27: the
+     CD5-CD0 access-mode table -- VRAM READ = 000000 (0x00), VSRAM READ =
+     000100 (0x04), CRAM READ = 001000 (0x08). Independently corroborated by
+     plutiedev.com "VDP command reference".
+   - GTO1 p. 20: "Long word access is equivalent to two word accesses, with
+     D31-D16 written first." This project reads the identical documented
+     sequencing for a LONG data-port access in either direction: two
+     sequential 16-bit transactions, high half first -- trivial reuse of the
+     same per-halfword helper the write path already established.
+   - GTO1 p. 28: the current VDP address is advanced by register #15's
+     auto-increment value after each data-port access, in either direction;
+     plutiedev.com "VDP command reference" corroborates.
+   - GTO1 p. 28: "VRAM address A0 is used in the calculation of the address
+     increment, but is ignored during address decoding" and "high and low
+     bytes are exchanged if A0 = 1". This project reads that exchange as
+     direction-symmetric: it renames which stored byte of the even base pair
+     supplies the bus's high/low half, not merely a write-only quirk. The
+     write path (genesis_vdp_data_port_target_write_halfword) already
+     implements one direction of this exchange (bus halfword H at odd
+     address A stores low(H) at base=A&~1 and high(H) at base+1); reading
+     the SAME odd address back with the same exchange inverted --
+     high=stored[base+1], low=stored[base] -- reproduces H exactly, which is
+     the only self-consistent round-trip reading of GTO1's own exchange
+     rule. CRAM/VSRAM at an odd current address stay fail-closed exactly
+     like the write path: GTO1 documents the exchange only for VRAM.
+
+   ================ project compatibility policy (replaceable, not hardware) ==
+   - BYTE data-port reads are NOT modeled. The write path's own BYTE support
+     is itself a replaceable, non-hardware-cited compatibility policy
+     (mirroring the write byte into both halves) that GTO1 does not precisely
+     describe for BYTE writes either; for reads GTO1 gives no comparable
+     byte-lane selection rule at all (which physical half of the fetched
+     word a BYTE read of $C00000 vs $C00001 would return is undocumented
+     here), and the runtime-selected frontier this task resolves is a WORD
+     read. Guessing a BYTE read-lane split would be exactly the kind of
+     unevidenced hardware claim this project avoids; BYTE reads of the
+     DATA port remain fail-closed.
+   - The current VDP address wraps modulo the selected target's documented
+     byte size, identical to the write path's own policy.
+   - Each 16-bit sub-read is fully validated before it advances the pointer
+     or (for LONG) proceeds to the second sub-read, so a single sub-read is
+     atomic; the two-sub-read LONG sequence keeps the identical documented
+     non-atomic partial-completion policy the write path already uses (GTO1
+     p. 20): if the second sub-read fails, the first sub-read's already-
+     advanced pointer is left in place and the overall access reports
+     failure.
+   See docs/references/genesis-vdp-data-port-cpu-write-contract.md (extended
+   by this task to cover the read direction; the read/write protocol shares
+   one control-port command latch and one addressed pointer, so the two
+   directions are documented together rather than duplicated). */
+static const uint8_t *genesis_vdp_read_target_buffer(const GenesisVdpState *vdp, uint8_t read_code,
+                                                      uint32_t *out_size) {
+  if (read_code == 0x00U) { *out_size = GENESIS_VDP_VRAM_BYTES; return vdp->vram; }
+  if (read_code == 0x04U) { *out_size = GENESIS_VDP_VSRAM_BYTES; return vdp->vsram; }
+  if (read_code == 0x08U) { *out_size = GENESIS_VDP_CRAM_BYTES; return vdp->cram; }
+  return NULL;
+}
+
+/* SEG-021-T041: one 16-bit data-port sub-read from the latched VRAM / CRAM /
+   VSRAM target, with the documented post-access auto-increment -- the read
+   direction sibling of genesis_vdp_data_port_target_write_halfword. See the
+   citations in the doc comment above genesis_vdp_data_port_cpu_read. */
+static int genesis_vdp_data_port_target_read_halfword(GenesisVdpState *vdp, const uint8_t *target,
+                                                       uint32_t target_size, uint8_t read_code,
+                                                       uint16_t *halfword_out) {
+  uint32_t dest = vdp->addressed_pointer % target_size;
+  if ((dest & 1U) != 0U) {
+    uint32_t base;
+    if (read_code != 0x00U) return 0; /* CRAM/VSRAM odd address: fail closed (GTO1 undocumented) */
+    base = dest & ~UINT32_C(1);
+    *halfword_out = (uint16_t)(((uint16_t)target[base + 1U] << 8) | (uint16_t)target[base]);
+  } else {
+    *halfword_out = (uint16_t)(((uint16_t)target[dest] << 8) |
+                               (uint16_t)target[(dest + 1U) % target_size]);
+  }
+  vdp->addressed_pointer = (vdp->addressed_pointer + vdp->auto_increment_value) % target_size;
+  return 1;
+}
+
+/* SEG-021-T041: generalized plain (non-armed-DMA) CPU DATA-port ($C00000)
+   READ model. See the doc comment above for scope/citations/policy. Fail-
+   closed (mutating nothing) for: an armed DMA/fill engine, no selected
+   transfer code, a selected WRITE code, an unsupported width, and (CRAM/
+   VSRAM only) an odd current address.
+
+   Ordering mirrors genesis_vdp_data_port_cpu_write exactly: the armed-DMA
+   guard runs first (a DATA-port access must never race an armed transfer
+   engine, and if it did, nothing here may mutate anything -- see the
+   analysis below), THEN the shared two-word CONTROL-port write-pending
+   flip-flop is unconditionally cleared (real Mode-5 VDP hardware clears it
+   on any DATA-port access, read or write, independent of whether the read
+   itself then succeeds), THEN the read target/width is validated.
+
+   Could a CPU DATA-port READ ever actually observe `dma.phase !=
+   GENESIS_VDP_DMA_IDLE`? No: SEG-007-T175's synchronous drain
+   (genesis_vdp_drain_memory_to_vdp_dma_body, invoked from
+   genesis_route_access immediately after the exact CONTROL-port write that
+   arms a memory-to-VRAM DMA) and the VRAM-fill engine's own single-CPU-
+   write completion (genesis_vdp_data_port_fill_write, which clears BUSY
+   before returning) both leave `dma.phase` IDLE before control ever returns
+   to generated C, so no reachable generated dispatch step can execute a
+   DATA-port READ while a DMA is BUSY under this project's synchronous-DMA
+   policy. This guard is kept anyway, unchanged in shape from the write
+   path's own identical guard, purely as a defensive invariant against a
+   future arm site added without also wiring the synchronous drain -- never
+   as the sole suspension mechanism. */
+static int genesis_vdp_data_port_cpu_read(GenesisDeviceState *devices, GenesisAccessWidth width,
+                                          uint32_t *value_out) {
+  GenesisVdpState *vdp = &devices->vdp;
+  const uint8_t *target;
+  uint32_t target_size;
+  uint8_t read_code;
+  uint16_t high_half;
+  uint16_t low_half;
+  if (vdp->dma.phase != GENESIS_VDP_DMA_IDLE) return 0;
+  if (vdp->control_port_awaiting_second_word) {
+    vdp->control_port_awaiting_second_word = 0U;
+    vdp->control_port_first_word = 0U;
+  }
+  if (!vdp->data_port_transfer_code_valid) return 0;
+  read_code = vdp->data_port_transfer_code;
+  /* Resolves 0x00 (VRAM) / 0x04 (VSRAM) / 0x08 (CRAM); every WRITE code
+     (0x01/0x03/0x05) is not a read target and fails closed here. */
+  target = genesis_vdp_read_target_buffer(vdp, read_code, &target_size);
+  if (target == NULL) return 0;
+  if (width == GENESIS_ACCESS_WORD) {
+    if (!genesis_vdp_data_port_target_read_halfword(vdp, target, target_size, read_code, &low_half))
+      return 0;
+    *value_out = low_half;
+    return 1;
+  }
+  if (width == GENESIS_ACCESS_LONG) {
+    /* GTO1 p. 20: two sequential 16-bit transactions, D31-D16 first. Same
+       documented non-atomic partial-completion policy as the write path: if
+       the second sub-read fails, the first sub-read's pointer advance is
+       left in place. */
+    if (!genesis_vdp_data_port_target_read_halfword(vdp, target, target_size, read_code, &high_half))
+      return 0;
+    if (!genesis_vdp_data_port_target_read_halfword(vdp, target, target_size, read_code, &low_half))
+      return 0;
+    *value_out = ((uint32_t)high_half << 16) | (uint32_t)low_half;
+    return 1;
+  }
+  return 0; /* BYTE data-port reads are out of scope; see the doc comment. */
+}
+
 /* The one recognized VDP status-read access shape: the WORD lane and both
    BYTE lanes of the CONTROL port's status alias. Every caller that needs to
    decide "is this a status-read transaction" (DMA-progress suspension,
@@ -935,6 +1094,16 @@ static int genesis_vdp_access(GenesisDeviceState *devices, uint32_t address,
       *status_sample_out = status;
       *value = width == GENESIS_ACCESS_WORD ? status :
                (address & 1U) ? (status & UINT16_C(0xFF)) : (status >> 8);
+      return 1;
+    }
+    /* SEG-021-T041: the plain CPU DATA-port ($C00000) READ, WORD/LONG only
+       -- see genesis_vdp_data_port_cpu_read's own doc comment for scope,
+       citations and the BYTE-exclusion rationale. */
+    if (address == UINT32_C(0x00C00000) &&
+        (width == GENESIS_ACCESS_WORD || width == GENESIS_ACCESS_LONG)) {
+      uint32_t read_value;
+      if (!genesis_vdp_data_port_cpu_read(devices, width, &read_value)) return 0;
+      *value = read_value;
       return 1;
     }
     return 0;
