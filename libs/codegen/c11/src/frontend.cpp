@@ -2320,13 +2320,18 @@ bool m68k_c4_represented_ir_kind(M68kIrKind kind) {
   // forged away after real discovery (mirroring the pre-existing
   // `not-missing-fact` NOT fixture's own established technique), since no
   // ordinarily-decodable M68kIrKind remains undeclined (confirmed
-  // empirically: an unclaimed, an ambiguously multiply-claimed, and a
-  // bounds-exceeding foldable absolute EA read/write each hard-reject the
-  // whole static prefix in this pipeline rather than degrading to a
-  // retained missing_fact gap row, so a genuinely still-undeclined
-  // ordinary-decode placeholder is not available; branch_ne_short/
-  // branch_always_short remain the only other undeclined kinds and are
-  // CFG-affecting, unsuitable for this placeholder role either).
+  // empirically, matching each real fixture's own MOVEQ-then-declined-
+  // instruction shape: an unclaimed, an ambiguously multiply-claimed, or a
+  // bounds-exceeding foldable absolute EA read/write is excluded from
+  // `accepted_prefix.ir` entirely and instead promoted to a separate
+  // `UnresolvedFrontier` runtime-frontier diagnostic -- `missing_fact` gap
+  // rows are only ever computed over instructions already inside
+  // `accepted_prefix.ir` (see `check_fact`/`classify_m68k_c4_gap_shapes`
+  // below), so that promoted instruction structurally cannot produce one,
+  // and a genuinely still-undeclined ordinary-decode placeholder is
+  // therefore not available; branch_ne_short/branch_always_short remain the
+  // only other undeclined kinds and are CFG-affecting, unsuitable for this
+  // placeholder role either).
   case M68kIrKind::link_frame:
   case M68kIrKind::unlink_frame:
   case M68kIrKind::set_conditional:

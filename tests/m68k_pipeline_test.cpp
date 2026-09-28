@@ -19939,18 +19939,19 @@ int emit_general_startup_runtime_c4_frontier_source(std::string_view forge = {})
   // above, proving the emitter's other legal source_ea mode for
   // shift_rotate_register (immediate, not just data-register) also lowers.
   const bool c4_dim_shift_rotate_register_immediate = forge == "c4-dim-shift-rotate-register-immediate";
-  // SEG-021-T011: PEA is now C4-represented for every legal control-EA form
-  // (routed through the atomic local-snapshot/deferred-commit technique in
-  // emit_m68k_operation_c), so this dimension-uniqueness fixture switched to
-  // another still-undispatched, simple, non-CFG-affecting kind: UNLK
-  // (`unlink_frame`), matching the still-declined placeholder the
-  // block-cut/prefix-retention fixtures above also switched to.
+  // SEG-021-T040 (second follow-through): UNLK (`unlink_frame`) is now also
+  // a represented C4 kind (see m68k_c4_represented_ir_kind), so this is a
+  // positive lowering proof -- mirroring add_quick's own positive-proof
+  // shape below and c4_dim_link_frame immediately below -- rather than a
+  // gap-shape fixture. It is no longer the dimension-uniqueness placeholder
+  // (that role has no remaining ordinarily-decodable candidate at all; the
+  // block-cut/prefix-retention fixtures above migrated to a forged-missing-
+  // fact TST.W $0B00 shape instead -- see their own comments).
   const bool c4_dim_unlink_frame = forge == "c4-dim-unlink-frame";
   // SEG-021-T040: LINK is now a represented C4 kind (see
   // m68k_c4_represented_ir_kind), so this is a positive lowering proof --
   // mirroring add_quick's own positive-proof shape below -- rather than a
-  // gap-shape fixture. UNLK stays the dimension-uniqueness/placeholder
-  // shape (see its own comment above); only LINK moved.
+  // gap-shape fixture.
   const bool c4_dim_link_frame = forge == "c4-dim-link-frame";
   const bool c4_dim_bit_test_auto_update = forge == "c4-dim-bit-test-auto-update";
   const bool c4_dim_shift_memory_auto_update = forge == "c4-dim-shift-memory-auto-update";
