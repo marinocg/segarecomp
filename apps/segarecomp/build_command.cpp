@@ -232,10 +232,10 @@ int segarecomp_build_command(int argc, char **argv) {
     log.line("rom_sha256=" + sha);
     log.line("cc=" + options.cc);
     const auto reset = segarecomp::analyze_genesis_reset_image(bytes);
-    if (reset.outcome != segarecomp::ResetOutcome::accepted)
-      return fail(options, log, sha, "analyze", 1,
-                  "This file does not look like a supported Genesis / Mega Drive ROM (" +
-                      std::string(segarecomp::reset_diagnostic_name(reset.diagnostic)) + ").");
+    if (reset.outcome != segarecomp::ResetOutcome::accepted) {
+      log.line(std::string("analyze diagnostic: ") + segarecomp::reset_diagnostic_name(reset.diagnostic));
+      return fail(options, log, sha, "analyze", 1, "This file is not a supported Genesis / Mega Drive ROM.");
+    }
     stage("analyze", "done");
 
     // ---- generate: the existing emit route, in-process ----

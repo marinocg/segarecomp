@@ -237,7 +237,11 @@ void BuildJob::run() {
   };
   while (output) {
     const std::size_t got = SDL_ReadIO(output, buffer, sizeof(buffer));
-    if (got == 0) break;
+    if (got == 0) {
+      // A pipe with no data yet reports NOT_READY; only EOF/error ends the read loop.
+      if (SDL_GetIOStatus(output) == SDL_IO_STATUS_NOT_READY) { SDL_Delay(15); continue; }
+      break;
+    }
     pending.append(buffer, got);
     for (std::size_t nl; (nl = pending.find('\n')) != std::string::npos;) {
       std::string line = pending.substr(0, nl);
