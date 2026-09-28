@@ -1,7 +1,6 @@
 # MC68000 ISA semantics; links only against segarecomp::base, never Genesis code.
 add_library(segarecomp_cpu_m68k
   src/decode.cpp
-  src/control_support.cpp
   src/direct_flow.cpp
   src/effective_address.cpp
   src/effects.cpp

@@ -4,7 +4,6 @@
 #include "segarecomp/codegen/c11/genesis_frontend.hpp"
 #include "segarecomp/codegen/c11/provenance_diagnostics.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
-#include "segarecomp/machine/genesis/executable_support.hpp"
 #include "build_command.hpp"
 #include "segarecomp/rom.hpp"
 
@@ -17,7 +16,6 @@
 #include <algorithm>
 #include "segarecomp/codegen/c11/translation_units.hpp"
 #include <array>
-#include <chrono>
 #include <charconv>
 #include <cstdint>
 #include <exception>
@@ -38,7 +36,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--executable-support-report <path>] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]...] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]...] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
                "  segarecomp probe-genesis-startup-mapping <address-hex8> <width-decimal> <image-length-hex16>\n";
@@ -95,9 +93,6 @@ int run_cli(int argc, char **argv) {
       // hashes it and never stores the addresses. It reads the existing analysis result
       // and cannot alter generation.
       std::optional<std::string_view> immutable_aot_address_report;
-      // SEG-024-T001: opt-in, report-only executable-support experiment over the admitted immutable-ROM
-      // AOT universe. Writes sanitized aggregate JSON (counts/digests only); cannot alter generation.
-      std::optional<std::string_view> executable_support_report;
       // SEG-022-T002: stream the generated C to this file (fail-closed: written as `<path>.partial`
       // and atomically renamed only on complete success; removed on any failure).
       std::optional<std::string_view> generated_c_output;
@@ -132,10 +127,6 @@ int run_cli(int argc, char **argv) {
         } else if (option == "--immutable-aot-address-report") {
           if (immutable_aot_address_report || index + 1 >= argc) { print_usage(std::cerr); return 2; }
           immutable_aot_address_report = argv[index + 1];
-          index += 2;
-        } else if (option == "--executable-support-report") {
-          if (executable_support_report || index + 1 >= argc) { print_usage(std::cerr); return 2; }
-          executable_support_report = argv[index + 1];
           index += 2;
         } else if (option == "--generated-c-output") {
           if (generated_c_output || index + 1 >= argc) { print_usage(std::cerr); return 2; }
@@ -296,27 +287,7 @@ int run_cli(int argc, char **argv) {
         for (const auto &frame : frames) calls.push_back(frame.call);
         return calls;
       };
-      if (executable_support_report && !immutable_rom_aot) {
-        std::cerr << "segarecomp: --executable-support-report requires --immutable-rom-aot\n"; return 2;
-      }
-      const auto analysis_started = std::chrono::steady_clock::now();
       const auto result = segarecomp::analyze_m68k_frontend(*program);
-      const auto analysis_finished = std::chrono::steady_clock::now();
-      if (executable_support_report) {
-        const segarecomp::FrontendAnalysis *analysis = nullptr;
-        if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) analysis = &partial->accepted_prefix;
-        else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result)) analysis = accepted;
-        if (analysis == nullptr) { std::cerr << "segarecomp: executable-support report requires an accepted analysis\n"; return 2; }
-        const auto support_started = std::chrono::steady_clock::now();
-        const auto report = segarecomp::format_genesis_executable_support_report(*program, *analysis);
-        const auto support_finished = std::chrono::steady_clock::now();
-        std::ofstream sink{std::string(*executable_support_report)};
-        sink << report;
-        if (!sink) { std::cerr << "segarecomp: cannot write executable-support report\n"; return 2; }
-        const auto ms = [](auto from, auto to) { return std::chrono::duration_cast<std::chrono::milliseconds>(to - from).count(); };
-        std::cerr << "segarecomp: executable-support experiment: frontend_analysis_ms=" << ms(analysis_started, analysis_finished)
-                  << " support_matrix_ms=" << ms(support_started, support_finished) << '\n';
-      }
       if (immutable_rom_aot) {
         std::uint64_t aligned_start_count = 0U;
         for (const auto &range : program->immutable_rom_aot_ranges)

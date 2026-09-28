@@ -1834,33 +1834,6 @@ void apply_genesis_code_pointer_table_descriptors(FrontendProgram &program) {
   sort_and_dedup_external_code_entry_candidates(program);
 }
 
-// SEG-024-T001: the one Genesis vector-table handler rule, extracted verbatim from general-startup discovery
-// (which still calls it) so the executable-support experiment reuses rather than restates it.
-std::optional<std::uint32_t> genesis_vector_handler_bus_address(const FrontendProgram &program,
-                                                                std::size_t vector_offset) {
-  using Address = std::uint32_t;
-  if (vector_offset > 0x100U - 4U) return std::nullopt;
-  constexpr std::size_t kResetPcOffset = 0x4U;
-  constexpr std::size_t kVectorTableBytes = 0x100U;
-  const auto &image_bytes = program.image.bytes;
-  if (image_bytes.size() < kVectorTableBytes || !program.startup_ingress) return std::nullopt;
-  const auto read_be32 = [&](std::size_t off) -> Address {
-    return (static_cast<Address>(image_bytes[off]) << 24) |
-           (static_cast<Address>(image_bytes[off + 1U]) << 16) |
-           (static_cast<Address>(image_bytes[off + 2U]) << 8) |
-           static_cast<Address>(image_bytes[off + 3U]);
-  };
-  if (read_be32(kResetPcOffset) != program.startup_ingress->entry.value) return std::nullopt;
-  const Address vector_word = read_be32(vector_offset);
-  // A vector word supplies an architectural 32-bit PC, but the MC68000
-  // fetches its handler through the 24-bit external address bus. Root and
-  // emit the physical instruction address; admit_target still checks odd,
-  // unmapped and multiply-owned destinations. Keep the zero (uninstalled)
-  // sentinel distinct from a nonzero vector whose bus address is zero.
-  return vector_word == 0U ? std::nullopt
-                           : std::optional<Address>{vector_word & UINT32_C(0x00FFFFFF)};
-}
-
 bool apply_genesis_immutable_rom_aot_range(FrontendProgram &program, std::uint32_t begin_address,
                                            std::uint32_t end_address) {
   if (end_address <= begin_address || (begin_address & 1U) != 0U || (end_address & 1U) != 0U) return false;
@@ -2894,7 +2867,25 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   // any more; see the `seeds` construction comment above.) An
   // odd/unmapped/unrepresentable vector fails the BUILD closed.
   const auto resolve_vector_handler = [&](std::size_t vector_offset) -> std::optional<Address> {
-    return genesis_vector_handler_bus_address(program, vector_offset);
+    constexpr std::size_t kResetPcOffset = 0x4U;
+    constexpr std::size_t kVectorTableBytes = 0x100U;
+    const auto &image_bytes = program.image.bytes;
+    if (image_bytes.size() < kVectorTableBytes || !program.startup_ingress) return std::nullopt;
+    const auto read_be32 = [&](std::size_t off) -> Address {
+      return (static_cast<Address>(image_bytes[off]) << 24) |
+             (static_cast<Address>(image_bytes[off + 1U]) << 16) |
+             (static_cast<Address>(image_bytes[off + 2U]) << 8) |
+             static_cast<Address>(image_bytes[off + 3U]);
+    };
+    if (read_be32(kResetPcOffset) != program.startup_ingress->entry.value) return std::nullopt;
+    const Address vector_word = read_be32(vector_offset);
+    // A vector word supplies an architectural 32-bit PC, but the MC68000
+    // fetches its handler through the 24-bit external address bus. Root and
+    // emit the physical instruction address; admit_target still checks odd,
+    // unmapped and multiply-owned destinations. Keep the zero (uninstalled)
+    // sentinel distinct from a nonzero vector whose bus address is zero.
+    return vector_word == 0U ? std::nullopt
+                             : std::optional<Address>{vector_word & UINT32_C(0x00FFFFFF)};
   };
 
   std::optional<Address> irq6_handler_entry_value;

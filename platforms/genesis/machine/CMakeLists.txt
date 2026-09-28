@@ -1,7 +1,6 @@
 # Genesis address-space/frontend composition over reusable CPU and device libraries.
 add_library(segarecomp_machine_genesis
   src/address_space.cpp
-  src/executable_support.cpp
   src/frontend.cpp
   src/startup.cpp
 )

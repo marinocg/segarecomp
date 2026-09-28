@@ -338,12 +338,6 @@ void apply_genesis_code_pointer_table_descriptors(FrontendProgram &program);
 // caller-selected address or extent enters this operation.
 [[nodiscard]] bool apply_genesis_immutable_rom_aot(FrontendProgram &program);
 
-// The Genesis MC68000 vector-table handler rule used by general-startup discovery: the long word at image
-// offset `vector_offset` (< 0x100) of an image whose reset-PC slot equals the startup entry, as a 24-bit
-// bus address; nullopt for a zero (uninstalled) slot, a short image, or a non-vector-table image.
-[[nodiscard]] std::optional<std::uint32_t> genesis_vector_handler_bus_address(const FrontendProgram &program,
-                                                                              std::size_t vector_offset);
-
 // SEG-021-T041 / ADR 0049: records one immutable-copy alias proposal. Fails closed (returns false, changes
 // nothing) for a zero/odd/oversized length, an odd base, a span that is not wholly inside the 64 KiB work-RAM
 // window without wrapping, a source span that is not wholly inside exactly one structurally valid
