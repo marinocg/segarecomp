@@ -320,6 +320,14 @@ add_test(NAME genesis_immutable_rom_aot_write_move_generated_test COMMAND ${Pyth
 add_test(NAME genesis_push_then_rts_computed_jump_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_push_then_rts_computed_jump_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-021-T041 / ADR 0049: immutable-copy alias (verbatim ROM-to-work-RAM copy executed at RAM-relative
+# semantics, guarded by a runtime byte-identity comparison; strict-C11 compile/execute proof).
+add_test(NAME genesis_pea_static_return_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_pea_static_return_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME genesis_immutable_copy_alias_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_copy_alias_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_immutable_rom_aot_return_from_subroutine_and_bit_clear_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_return_from_subroutine_and_bit_clear_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
@@ -581,6 +589,10 @@ add_test(NAME genesis_startup_bridge_report_metadata_representability_test COMMA
 # driver (never a private test-only reimplementation).
 add_test(NAME genesis_startup_bridge_owned_cartridge_region_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_startup_bridge_owned_cartridge_region_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-021-T041 / ADR 0049: cartridge ROM mirroring across the 4 MiB window for a power-of-two chip.
+add_test(NAME genesis_cartridge_mirror_region_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_cartridge_mirror_region_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_startup_bridge_mapping_preparation_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_startup_bridge_mapping_preparation_test.py
@@ -875,6 +887,9 @@ add_test(
 
 add_test(NAME genesis_bridge_defaults_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_bridge_defaults_test.py)
+# SEG-021-T041 / ADR 0049: pure derivation of immutable-copy alias proposals (tool side).
+add_test(NAME genesis_copy_alias_discovery_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_copy_alias_discovery_test.py)
 
 add_executable(codegen_c11_provenance_diagnostics_tests codegen_c11_provenance_diagnostics_test.cpp)
 target_link_libraries(codegen_c11_provenance_diagnostics_tests PRIVATE segarecomp::codegen_c11_m68k)

@@ -1295,6 +1295,119 @@ def run_viewer(executable: pathlib.Path, root: pathlib.Path, instruction_budget:
                           cwd=root, env=env).returncode
 
 
+GENESIS_WORK_RAM_BEGIN = 0xFF0000
+GENESIS_WORK_RAM_SIZE = 0x10000
+GENESIS_ALIAS_MIN_RUN = 16
+GENESIS_ALIAS_MAX_ROUNDS = 64
+GUEST_STOP_KNOWN_BUT_UNEMITTED_TARGET = 5
+GUEST_STOP_INTERNAL_DISPATCH_INCONSISTENCY = 7
+
+
+def derive_copy_alias(rom: bytes, work_ram: bytes, pc: int) -> tuple[int, int, int] | None:
+    """SEG-021-T041 / ADR 0049: propose an immutable-copy alias for a stop at work-RAM `pc`.
+
+    Returns (execution_base, source_base, length) for the maximal verbatim run of the ROM image that
+    matches the work-RAM bytes around `pc` (extended in both directions with a constant address delta),
+    or None when no run of at least GENESIS_ALIAS_MIN_RUN bytes exists. This is only a PROPOSAL: the
+    emitter re-validates it against the image and every alias body carries a runtime byte-identity guard.
+    Several identical ROM occurrences are interchangeable because the alias is decoded from the identical
+    bytes at the execution address, so the lowest even occurrence is used. Nothing here is persisted.
+    """
+    if (pc & 1) or not GENESIS_WORK_RAM_BEGIN <= pc < GENESIS_WORK_RAM_BEGIN + GENESIS_WORK_RAM_SIZE:
+        return None
+    offset = pc - GENESIS_WORK_RAM_BEGIN
+    needle = work_ram[offset:offset + GENESIS_ALIAS_MIN_RUN]
+    if len(needle) < GENESIS_ALIAS_MIN_RUN:
+        return None
+    best = None
+    position = rom.find(needle)
+    while position != -1:
+        if not position & 1:
+            length = GENESIS_ALIAS_MIN_RUN
+            while (offset + length < len(work_ram) and position + length < len(rom)
+                   and work_ram[offset + length] == rom[position + length]):
+                length += 1
+            back = 0
+            while back + 2 <= offset and back + 2 <= position and work_ram[offset - back - 2:offset - back] == \
+                    rom[position - back - 2:position - back]:
+                back += 2
+            length = length - (length & 1)
+            if best is None or back + length > best[0]:
+                best = (back + length, back, position)
+        position = rom.find(needle, position + 1)
+    if best is None:
+        return None
+    total, back, position = best
+    return GENESIS_WORK_RAM_BEGIN + offset - back, position - back, total
+
+
+def merge_copy_aliases(aliases: list[tuple[int, int, int]]) -> list[tuple[int, int, int]]:
+    """Union overlapping/adjacent aliases that share one execution-to-source delta."""
+    merged: list[tuple[int, int, int]] = []
+    for execution, source, length in sorted(aliases):
+        if merged:
+            last_execution, last_source, last_length = merged[-1]
+            if (execution - source == last_execution - last_source and execution <= last_execution + last_length):
+                end = max(last_execution + last_length, execution + length)
+                merged[-1] = (last_execution, last_source, end - last_execution)
+                continue
+        merged.append((execution, source, length))
+    return merged
+
+
+def discover_copy_aliases(emitter_command: list[str], compiler: pathlib.Path, root: pathlib.Path,
+                          out_dir: pathlib.Path, rom_bytes: bytes, instruction_budget: int) -> list[tuple[int, int, int]] | None:
+    """SEG-021-T041 / ADR 0049: bounded build/run/derive rounds. Each round builds the headless capture
+    executable of the current generated program with the aliases found so far and runs it with a frame window
+    that is never reached; when the guest stops fail-closed at a work-RAM PC, the private work-RAM dump proves
+    (by byte comparison against the immutable image) a fixed verbatim copy and adds one alias. Returns the
+    final aliases, or None on a tool failure. Only aggregate counts are reported; the concrete addresses and
+    the dump stay in the ignored out directory."""
+    aliases: list[tuple[int, int, int]] = []
+    work = out_dir / "alias-discovery"
+    work.mkdir(parents=True, exist_ok=True)
+    dump_path = work / "stop-work-ram.dump"
+    rounds = 0
+    while rounds < GENESIS_ALIAS_MAX_ROUNDS:
+        rounds += 1
+        command = emitter_command + [arg for alias in aliases
+                                     for arg in ("--immutable-copy-alias", f"{alias[0]:08x}:{alias[1]:08x}:{alias[2]:08x}")]
+        status, _, executable = generate_and_compile(command, compiler, root, work, "quick", None, capture=True)
+        if status or executable is None:
+            return None
+        dump_path.unlink(missing_ok=True)
+        env = dict(os.environ)
+        env.update({"SEGARECOMP_CAPTURE_DIR": str(work / "frames"), "SEGARECOMP_CAPTURE_FIRST": str(1 << 40),
+                    "SEGARECOMP_CAPTURE_COUNT": "1", "SEGARECOMP_STOP_WORK_RAM_DUMP": str(dump_path)})
+        (work / "frames").mkdir(exist_ok=True)
+        completed = subprocess.run([str(executable), "--instruction-budget", str(instruction_budget)],
+                                   cwd=root, env=env, text=True, capture_output=True)
+        outcome = None
+        for line in completed.stderr.splitlines():
+            if line.startswith("CAPTURE_SUMMARY "):
+                outcome = json.loads(line[len("CAPTURE_SUMMARY "):]).get("outcome")
+        if outcome != "incomplete_guest_stop" or not dump_path.is_file():
+            break
+        dump = dump_path.read_bytes()
+        if len(dump) != 8 + GENESIS_WORK_RAM_SIZE:
+            return None
+        pc = int.from_bytes(dump[0:4], "big")
+        stop_class = int.from_bytes(dump[4:8], "big")
+        if stop_class not in (GUEST_STOP_KNOWN_BUT_UNEMITTED_TARGET, GUEST_STOP_INTERNAL_DISPATCH_INCONSISTENCY):
+            break
+        proposal = derive_copy_alias(rom_bytes, dump[8:], pc)
+        if proposal is None:
+            break
+        merged = merge_copy_aliases(aliases + [proposal])
+        if merged == aliases:
+            break  # the stop is not explained by a (further) verbatim copy: report it honestly
+        aliases = merged
+    dump_path.unlink(missing_ok=True)
+    sys.stderr.write("COPY_ALIAS_DISCOVERY " + json.dumps({"rounds": rounds, "alias_count": len(aliases),
+                     "alias_total_bytes": sum(alias[2] for alias in aliases)}, separators=(",", ":")) + "\n")
+    return aliases
+
+
 def run_expansion_loop(base_emitter_command: list[str], compiler: pathlib.Path, root: pathlib.Path,
                        out_dir: pathlib.Path, digest: str, initial_seeds: list[int] | None = None,
                        instruction_budget: int | None = None,
@@ -1722,6 +1835,9 @@ def main() -> int:
     parser.add_argument("--external-hints")
     parser.add_argument("--immutable-rom-aot", action="store_true",
                         help="opt in to complete aligned immutable-ROM AOT enumeration")
+    parser.add_argument("--discover-copy-aliases", action="store_true",
+                        help="SEG-021-T041: derive immutable-ROM-to-work-RAM copy alias descriptors from "
+                             "fail-closed work-RAM stops (requires --immutable-rom-aot; ephemeral, never persisted)")
     parser.add_argument("--provenance-diagnostics", action="store_true",
                         help="SEG-020-T002: opt in to the generated provenance lookup; the table is "
                              "extracted to <out-dir>/provenance-diagnostics.c (ephemeral, not for commit)")
@@ -1826,6 +1942,17 @@ def main() -> int:
         emitter_command += ["--immutable-rom-aot"]
     if args.provenance_diagnostics:
         emitter_command += ["--provenance-diagnostics"]
+    if args.discover_copy_aliases:
+        if not args.immutable_rom_aot:
+            sys.stderr.write("--discover-copy-aliases requires --immutable-rom-aot\n")
+            return 8
+        discovered = discover_copy_aliases(
+            emitter_command, compiler, root, out_dir, rom.read_bytes(),
+            args.instruction_budget if args.instruction_budget is not None else GENESIS_CANONICAL_RUNNER_DISPATCH_ALLOWANCE)
+        if discovered is None:
+            return 2
+        for execution, source, length in discovered:
+            emitter_command += ["--immutable-copy-alias", f"{execution:08x}:{source:08x}:{length:08x}"]
     viewer_sdl3 = None
     if args.viewer:
         # Fail clearly before any generation/guest execution; never fall back to headless.

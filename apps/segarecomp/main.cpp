@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include "segarecomp/codegen/c11/translation_units.hpp"
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <exception>
@@ -34,7 +35,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]...] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
                "  segarecomp probe-genesis-startup-mapping <address-hex8> <width-decimal> <image-length-hex16>\n";
@@ -82,6 +83,8 @@ int main(int argc, char **argv) {
       // Explicit non-default gate for complete mapping-derived immutable-ROM
       // AOT enumeration. No caller address/range enters this source.
       bool immutable_rom_aot = false;
+      // SEG-021-T041 / ADR 0049: generated-data immutable-copy alias proposals (execution:source:length).
+      std::vector<std::array<std::uint32_t, 3>> immutable_copy_aliases;
       // SEG-020-T002: opt-in provenance diagnostic table appended to the generated C.
       bool provenance_diagnostics = false;
       // SEG-022-T001: opt-in, measurement-only sink for the admitted immutable-ROM AOT
@@ -106,6 +109,20 @@ int main(int argc, char **argv) {
           if (immutable_rom_aot) { print_usage(std::cerr); return 2; }
           immutable_rom_aot = true;
           ++index;
+        } else if (option == "--immutable-copy-alias") {
+          if (index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          const std::string_view text = argv[index + 1];
+          const auto first = text.find(':');
+          const auto second = first == std::string_view::npos ? first : text.find(':', first + 1U);
+          if (second == std::string_view::npos) { print_usage(std::cerr); return 2; }
+          const auto execution = parse_hex(text.substr(0, first), 8);
+          const auto source = parse_hex(text.substr(first + 1U, second - first - 1U), 8);
+          const auto length = parse_hex(text.substr(second + 1U), 8);
+          if (!execution || !source || !length) { print_usage(std::cerr); return 2; }
+          immutable_copy_aliases.push_back({static_cast<std::uint32_t>(*execution),
+                                            static_cast<std::uint32_t>(*source),
+                                            static_cast<std::uint32_t>(*length)});
+          index += 2;
         } else if (option == "--immutable-aot-address-report") {
           if (immutable_aot_address_report || index + 1 >= argc) { print_usage(std::cerr); return 2; }
           immutable_aot_address_report = argv[index + 1];
@@ -251,6 +268,12 @@ int main(int argc, char **argv) {
         if (!applied) {
           std::cerr << "segarecomp: invalid immutable-ROM AOT mapping source\n"; return 2;
         }
+        for (const auto &alias : immutable_copy_aliases)
+          if (!segarecomp::apply_genesis_immutable_copy_alias(*program, alias[0], alias[1], alias[2])) {
+            std::cerr << "segarecomp: invalid immutable-copy alias\n"; return 2;
+          }
+      } else if (!immutable_copy_aliases.empty()) {
+        std::cerr << "segarecomp: --immutable-copy-alias requires --immutable-rom-aot\n"; return 2;
       }
       // ADR-0013 Decision §7 Phase B seed transport: an out-of-mapping seed
       // is not rejected here -- discover_m68k_general_startup's per-seed walk

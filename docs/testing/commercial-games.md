@@ -86,6 +86,15 @@ The helper uses LLDB/GDB to stop at the generated runtime's access failure and p
 plus the relevant VDP pointer/register/DMA state. Its output is equally ephemeral. Use one diagnostic
 execution while investigating and reserve `--compare-runs` for the final determinism handoff.
 
+## Immutable-ROM-to-work-RAM copies (ADR 0049)
+
+When a title copies immutable ROM code to a fixed work-RAM address and executes it there, add
+`--discover-copy-aliases` (requires `--immutable-rom-aot`) to the same route. The tool runs bounded
+build/run rounds with the headless capture executable, derives each verbatim-copy alias descriptor from the
+private, ephemeral work-RAM dump of a fail-closed work-RAM stop, and regenerates with
+`--immutable-copy-alias <execution>:<source>:<length>`. Only aggregate counts (`COPY_ALIAS_DISCOVERY`) are
+printed; descriptors and the dump stay in the ignored output directory and are never durable evidence.
+
 ## Enforcement
 
 `tests/restricted_files_test.py` verifies that Git tracks no path under `games/` and that representative

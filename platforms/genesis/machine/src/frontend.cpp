@@ -1883,6 +1883,45 @@ bool apply_genesis_immutable_rom_aot_range(FrontendProgram &program, std::uint32
   return true;
 }
 
+// SEG-021-T041 / ADR 0049. Work RAM is the 64 KiB window at the top of the 24-bit bus; the execution span must
+// lie wholly inside it without wrapping so every execution address is a single unmirrored physical byte.
+inline constexpr std::uint32_t genesis_alias_work_ram_begin = UINT32_C(0x00FF0000);
+inline constexpr std::uint32_t genesis_alias_work_ram_end = UINT32_C(0x01000000);
+
+bool apply_genesis_immutable_copy_alias(FrontendProgram &program, std::uint32_t execution_base,
+                                        std::uint32_t source_base, std::uint32_t length) {
+  if (length == 0U || (length & 1U) != 0U || (execution_base & 1U) != 0U || (source_base & 1U) != 0U) return false;
+  if (execution_base < genesis_alias_work_ram_begin ||
+      static_cast<std::uint64_t>(execution_base) + length > genesis_alias_work_ram_end)
+    return false;
+  const std::uint64_t source_end = static_cast<std::uint64_t>(source_base) + length;
+  const MappingClaim *covering = nullptr;
+  for (const auto &claim : program.mapping_claims) {
+    if (claim.target_begin.space != TargetAddressSpace::m68k_program ||
+        claim.target_end.space != TargetAddressSpace::m68k_program ||
+        !(source_base < claim.target_end.value && claim.target_begin.value < source_end))
+      continue;
+    if (covering != nullptr) return false;  // ambiguous ownership
+    covering = &claim;
+  }
+  if (covering == nullptr || covering->name != "raw_cartridge_rom" || !structurally_valid_mapping_claim(*covering) ||
+      source_base < covering->target_begin.value || source_end > covering->target_end.value ||
+      covering->image_end.value > program.image.bytes.size())
+    return false;
+  for (const auto &existing : program.immutable_copy_aliases) {
+    if (existing.execution_base == execution_base && existing.source_base == source_base &&
+        existing.length == length)
+      return true;  // exact duplicate
+    if (execution_base < existing.execution_base + existing.length &&
+        existing.execution_base < static_cast<std::uint64_t>(execution_base) + length)
+      return false;  // overlapping execution spans are ambiguous
+  }
+  program.immutable_copy_aliases.push_back({execution_base, source_base, length});
+  std::sort(program.immutable_copy_aliases.begin(), program.immutable_copy_aliases.end(),
+            [](const auto &left, const auto &right) { return left.execution_base < right.execution_base; });
+  return true;
+}
+
 bool apply_genesis_immutable_rom_aot(FrontendProgram &program) {
   std::vector<FrontendProgram::ImmutableRomAotRange> ranges;
   for (const auto &claim : program.mapping_claims) {
@@ -6085,6 +6124,46 @@ bool populate_immutable_rom_aot_entries(const FrontendProgram &program,
                  found->second.source_mapping.image_end.value != candidate.source_mapping.image_end.value) {
         return false;
       }
+    }
+  }
+  // SEG-021-T041 / ADR 0049: immutable-copy alias identities. The same immutable source bytes are decoded a
+  // second time by the SAME decoder, with the decode source address set to the work-RAM execution address and
+  // the image offset kept at the immutable source. PC-relative EAs, relative branch/DBcc/BSR targets,
+  // fallthrough and call continuations therefore come out execution-relative, while absolute EAs/targets stay
+  // absolute. An instruction is an alias identity only when its whole span lies inside its alias descriptor.
+  for (const auto &alias : program.immutable_copy_aliases) {
+    const auto owners = claims(program.mapping_claims, alias.source_base);
+    if (owners.size() != 1U || owners.front()->name != "raw_cartridge_rom" ||
+        !structurally_valid_mapping_claim(*owners.front()))
+      return false;
+    const auto &claim = *owners.front();
+    const std::uint64_t source_end = static_cast<std::uint64_t>(alias.source_base) + alias.length;
+    if (alias.execution_base < genesis_alias_work_ram_begin ||
+        static_cast<std::uint64_t>(alias.execution_base) + alias.length > genesis_alias_work_ram_end ||
+        source_end > claim.target_end.value || claim.image_end.value > program.image.bytes.size())
+      return false;
+    const auto claim_size = claim.image_end.value - claim.image_begin.value;
+    const auto claim_bytes = std::span<const std::uint8_t>(program.image.bytes).subspan(
+        static_cast<std::size_t>(claim.image_begin.value), static_cast<std::size_t>(claim_size));
+    for (std::uint32_t offset = 0U; offset < alias.length; offset += 2U) {
+      const Address execution = alias.execution_base + offset;
+      const std::uint64_t local = static_cast<std::uint64_t>(alias.source_base + offset) - claim.target_begin.value;
+      const std::uint64_t image_offset = claim.image_begin.value + local;
+      DecodeSource source{CpuVariant::mc68000, {TargetAddressSpace::m68k_program, execution}, MoveqImageOffset{local}};
+      auto decoded_result = decode_m68k_instruction(claim_bytes, source, M68kDecodeProfile::general_startup);
+      auto *decoded = std::get_if<M68kDecodedInstruction>(&decoded_result);
+      if (decoded == nullptr) continue;
+      decoded->provenance.source.image_offset = MoveqImageOffset{image_offset};
+      const std::uint64_t length = decoded->provenance.length.value;
+      if (length < 2U || offset + length > alias.length) continue;
+      auto operation = lift_m68k_instruction(*decoded);
+      if (!m68k_operation_is_immutable_rom_aot_safe(operation, return_target_authority_available)) continue;
+      FrontendAnalysis::ImmutableRomAotEntry candidate{*decoded, operation, claim, true, alias.source_base + offset};
+      const auto [found, inserted] = entries.emplace(execution, candidate);
+      if (!inserted &&
+          (!found->second.execution_alias || !same_decoded(found->second.decoded, candidate.decoded) ||
+           !same_ir(found->second.operation, candidate.operation)))
+        return false;
     }
   }
   analysis.immutable_rom_aot_entries.clear();

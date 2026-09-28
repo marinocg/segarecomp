@@ -1980,7 +1980,20 @@ validated_immutable_rom_aot_entries(const FrontendAnalysis &analysis) {
     // would make the analysis/codegen boundary silently disagree and leave a
     // PC-keyed identity absent from generated dispatch.
     if (!m68k_retirement_cycle_expression(entry.operation)) return std::nullopt;
-    const auto *selected = select_unique_affine_mapping(analysis.mapping_claims, entry.decoded.provenance);
+    // SEG-021-T041 / ADR 0049: an alias identity executes at a work-RAM address but its bytes are the immutable
+    // source's. Its mapping is therefore selected at the alias's source address; the execution span must lie
+    // wholly in the 64 KiB work-RAM window (no wrap), the source and execution addresses must share parity and
+    // the instruction length, and the raw bytes (the runtime guard's expected bytes) must be present in full.
+    InstructionProvenance mapping_provenance = entry.decoded.provenance;
+    if (entry.execution_alias) {
+      const auto span = entry.decoded.provenance.length.value;
+      if (address < UINT32_C(0x00FF0000) || (address & 1U) != 0U || (entry.alias_source_address & 1U) != 0U ||
+          static_cast<std::uint64_t>(address) + span > UINT64_C(0x01000000) ||
+          entry.decoded.raw_bytes.size() != span)
+        return std::nullopt;
+      mapping_provenance.source.address.value = entry.alias_source_address;
+    }
+    const auto *selected = select_unique_affine_mapping(analysis.mapping_claims, mapping_provenance);
     // SEG-021-T027: `m68k_operation_has_complete_c_emission`'s generic probe
     // requires `m68k_operation_effect(...).pc != M68kPcEffectKind::none`,
     // which the runtime-owned brief PC-indexed indirect JMP/JSR genuinely
@@ -2115,6 +2128,23 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   else
     out << owner_entry_label << ": {\n";
   out << "  uint32_t pc = runtime->pc;\n";
+  // SEG-021-T041 / ADR 0049: the runtime byte-identity guard of an immutable-copy alias identity. It compares
+  // exactly this instruction's own immutable bytes against the work-RAM bytes at its execution address (identity
+  // comparison only -- nothing in RAM is ever decoded) before any effect of the body. A mismatch, whether from a
+  // copy that never happened or a later write, fails closed with the existing typed unemitted-target stop.
+  if (entry.execution_alias) {
+    out << "  if (";
+    for (std::size_t index = 0; index < entry.decoded.raw_bytes.size(); ++index) {
+      if (index != 0U) out << " || ";
+      out << "runtime->work_ram[UINT32_C(" << std::dec << (address - UINT32_C(0x00FF0000) + index)
+          << ")] != UINT8_C(" << hex(entry.decoded.raw_bytes[index], 2) << ")";
+    }
+    out << ") return genesis_static_stop(GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET, "
+           "GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET, "
+        << (factoring.source_symbol.empty() ? genesis_m68k_runtime_c_emitter().instruction_source(entry.operation)
+                                            : std::string(factoring.source_symbol))
+        << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ);\n";
+  }
   if (entry.operation.kind == M68kIrKind::dbcc_loop)
     out << "  uint8_t m68k_dbcc_took_branch = 0U;\n";
   const bool scc_dynamic_timing = entry.operation.kind == M68kIrKind::set_conditional &&
@@ -4627,6 +4657,22 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       const auto continuation = aot_address + aot_entry->decoded.provenance.length.value;
       if (emitted_code_addresses.contains(continuation)) runtime_return_target_set.insert(continuation);
     }
+  // SEG-021-T041 / ADR 0049: a `PEA` whose effective address is statically foldable (absolute or PC-relative,
+  // already execution-relative for an alias identity) pushes a fixed code address: the classic manual call
+  // `PEA next; JMP/BRA callee`, whose callee's RTS returns to the pushed address rather than to a JSR
+  // continuation. Exactly like a call continuation, that pushed address is a statically known value of the
+  // same authority class (the RTS still pops the real stack slot), admitted to the whole-program return set
+  // only when it is itself a final emitted code address. Register-indexed PEA forms fold no static value.
+  for (const auto &[aot_address, aot_entry] : *aot_entries) {
+    (void)aot_address;
+    if (aot_entry->operation.kind != M68kIrKind::push_effective_address) continue;
+    const auto &pea_ea = aot_entry->operation.source_ea;
+    if (pea_ea.mode != M68kEaMode::absolute_word && pea_ea.mode != M68kEaMode::absolute_long &&
+        pea_ea.mode != M68kEaMode::pc_disp16)
+      continue;
+    if (emitted_code_addresses.contains(pea_ea.absolute_address))
+      runtime_return_target_set.insert(pea_ea.absolute_address);
+  }
   for (const auto &block : partial.accepted_prefix.static_blocks) {
     const auto &terminal = block.instructions.back();
     const auto terminal_operation = operations.at(terminal.source.address.value);
@@ -6172,6 +6218,20 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
                           << hex(fact.claim.target_end.value, 8) << "), " << array_name << ", UINT32_C("
                           << hex(static_cast<std::uint32_t>(fact.resolved_bytes.size()), 8) << ") }";
       ++owned_region_count;
+      // SEG-021-T041 / ADR 0049: cartridge ROM smaller than the 4 MiB cartridge window whose chip size is a power
+      // of two and which is mapped at the window base is mirrored across the rest of the window (the upper
+      // cartridge address lines are not decoded by the chip; Genesis Plus GX `md_cart.c` maps
+      // `cart.rom + ((page << 16) & (size - 1))`). Each mirror is another region row over the SAME embedded
+      // data array, so no data is duplicated and the runtime's bounds-checked read path is unchanged. Any other
+      // shape (non-power-of-two size, non-zero base) gets no mirror and keeps failing closed.
+      const std::uint64_t chip_size = fact.claim.target_end.value - fact.claim.target_begin.value;
+      if (fact.claim.target_begin.value == 0U && chip_size >= UINT64_C(0x10000) &&
+          (chip_size & (chip_size - 1U)) == 0U && fact.resolved_bytes.size() == chip_size)
+        for (std::uint64_t mirror = chip_size; mirror < UINT64_C(0x00400000); mirror += chip_size) {
+          owned_region_table << ",\n  { UINT32_C(" << hex(mirror, 8) << "), UINT32_C(" << hex(mirror + chip_size, 8)
+                              << "), " << array_name << ", UINT32_C(" << hex(chip_size, 8) << ") }";
+          ++owned_region_count;
+        }
     }
   }
   // SEG-022-T002: stream the runtime body straight to `sink` behind the bridge
