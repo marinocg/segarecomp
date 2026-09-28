@@ -20,9 +20,15 @@ import tempfile
 IMAGE = bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x70, 0x00, 0x4E, 0x70))
 
 
+CACHE_FOR_DIAGNOSTICS = []
+
+
 def require(condition, message):
     if not condition:
         print("SMOKE FAIL:", message, file=sys.stderr)
+        for cache in CACHE_FOR_DIAGNOSTICS:  # show the preserved diagnostics of any failed build
+            for log in sorted(cache.glob("games/*/build.log")):
+                print(f"---- {log} ----\n" + log.read_text(encoding="utf-8", errors="replace")[-6000:], file=sys.stderr)
         sys.exit(1)
 
 
@@ -49,6 +55,7 @@ def main():
             env.update(SystemRoot=system, PATH=str(tmp / "emptybin") + ";" + system + r"\System32",
                        LOCALAPPDATA=str(tmp / "home"), TEMP=str(tmp), TMP=str(tmp))
             env["SEGARECOMP_CACHE_DIR"] = str(tmp / "cache")
+        CACHE_FOR_DIAGNOSTICS.append(tmp / "cache")
         rom = tmp / "synthetic.bin"
         rom.write_bytes(IMAGE)
         digest = hashlib.sha256(IMAGE).hexdigest()
