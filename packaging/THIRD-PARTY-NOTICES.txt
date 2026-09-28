@@ -8,6 +8,10 @@ This package redistributes the following third-party components unmodified, unde
   headers/sources (musl, mingw-w64, glibc/libc++ stubs and headers) under their own licenses; those texts
   ship inside toolchain/lib next to the files they cover.
 * Dear ImGui (launcher user interface), MIT                            -> DearImGui.txt
+* stb_image.h (launcher PNG asset decoding), public domain / MIT       -> compiled in, not redistributed as a
+  separate file; see https://github.com/nothings/stb
+* Silkscreen font (launcher UI typeface), SIL Open Font License 1.1    -> Silkscreen-OFL.txt
+* Original Segarecomp pixel-art (background, wordmark, icons)          -> apps/segarecomp-launcher/assets/README.md
 
 Source for Zig and SDL3 is available from https://ziglang.org and https://libsdl.org at the pinned versions
 listed in packaging/README.md of the Segarecomp source repository.

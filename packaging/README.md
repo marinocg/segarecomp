@@ -12,11 +12,19 @@ third-party inputs (`install.cmake`). `.github/workflows/release.yml` does exact
 | Zig (bundled `zig cc`) | 0.15.2 | official archives, SHA-256 in `release.yml`; MIT; used only to compile generated C |
 | SDL3 | 3.4.16 | macOS/Linux built from the official source tarball (shared); Windows: official `VC` devel (launcher, DLL) and `mingw` devel (import lib for Zig) |
 | Dear ImGui | 1.92.9b | fetched at configure time with a pinned hash (`apps/segarecomp-launcher/CMakeLists.txt`) |
+| stb_image.h | pinned commit | fetched at configure time with a pinned hash; decodes the launcher's own PNG assets only |
+| Silkscreen font | Google Fonts release | `apps/segarecomp-launcher/assets/fonts/`, SIL OFL 1.1 |
 
 The generated program is always compiled with an explicit Zig `-target` (`aarch64-macos`, `x86_64-macos`,
 `x86_64-linux-gnu.2.35`, `aarch64-linux-gnu.2.35`, `x86_64-windows-gnu`); see `apps/segarecomp-launcher/launcher_core.cpp`.
 
 Linux packages are built on Ubuntu 22.04 and need glibc >= 2.35 (the bundled SDL3 requires it; the generated program is linked against the same version).
+
+The launcher's pixel-art (background, wordmark, icons) and the Silkscreen font live in
+`apps/segarecomp-launcher/assets/` (see that directory's own `README.md`) and are installed into the
+package's `assets/` directory (`packaging/install.cmake`); `apps/segarecomp-launcher/pixel_assets.*` loads
+them at runtime, falling back to the source tree during development and to ImGui's built-in font/a flat
+fill if an asset is missing.
 
 ## Layout
 

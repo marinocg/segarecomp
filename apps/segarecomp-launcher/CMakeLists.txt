@@ -8,6 +8,13 @@ FetchContent_Declare(imgui
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(imgui)
 
+# stb_image.h (public domain / MIT dual-license, single header): the only decoder needed for the
+# launcher's own PNG pixel-art assets. Pinned by content hash; not a general image-library dependency.
+set(_stb_dir "${CMAKE_CURRENT_BINARY_DIR}/stb")
+file(DOWNLOAD "https://raw.githubusercontent.com/nothings/stb/f0569113c93ad095470c54bf34a17b36646bbbb/stb_image.h"
+  "${_stb_dir}/stb_image.h"
+  EXPECTED_HASH SHA256=594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3)
+
 add_library(segarecomp_imgui STATIC
   ${imgui_SOURCE_DIR}/imgui.cpp ${imgui_SOURCE_DIR}/imgui_draw.cpp ${imgui_SOURCE_DIR}/imgui_tables.cpp
   ${imgui_SOURCE_DIR}/imgui_widgets.cpp
@@ -16,11 +23,13 @@ add_library(segarecomp_imgui STATIC
 target_include_directories(segarecomp_imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 
-add_executable(segarecomp-launcher WIN32 launcher_core.cpp main.cpp)
+add_executable(segarecomp-launcher WIN32 launcher_core.cpp pixel_assets.cpp main.cpp)
+target_include_directories(segarecomp-launcher SYSTEM PRIVATE ${_stb_dir})
 target_link_libraries(segarecomp-launcher PRIVATE segarecomp_imgui segarecomp::media)
 target_compile_definitions(segarecomp-launcher PRIVATE
   SEGARECOMP_LAUNCHER_VERSION="${SEGARECOMP_RELEASE_VERSION}"
-  SEGARECOMP_ZIG_VERSION="${SEGARECOMP_ZIG_VERSION}")
+  SEGARECOMP_ZIG_VERSION="${SEGARECOMP_ZIG_VERSION}"
+  SEGARECOMP_LAUNCHER_SOURCE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 set_target_properties(segarecomp-launcher PROPERTIES OUTPUT_NAME Segarecomp)
 segarecomp_enable_warnings(segarecomp-launcher)
 

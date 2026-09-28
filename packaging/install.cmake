@@ -28,7 +28,11 @@ install(DIRECTORY ${_src}/platforms/genesis/machine/include/ DESTINATION ${_rt}/
 install(DIRECTORY ${_src}/libs/device/sega/genesis/include/ DESTINATION ${_rt}/libs/device/sega/genesis/include FILES_MATCHING PATTERN "*.h")
 install(DIRECTORY ${_src}/libs/cpu/m68k/include/ DESTINATION ${_rt}/libs/cpu/m68k/include FILES_MATCHING PATTERN "*.h")
 
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/apps/segarecomp-launcher/assets/ DESTINATION ${_res}/assets
+  PATTERN "README.md" EXCLUDE PATTERN "Silkscreen-OFL.txt" EXCLUDE)
+
 install(FILES ${PROJECT_SOURCE_DIR}/LICENSE DESTINATION ${_res}/licenses RENAME MPL-2.0.txt)
+install(FILES ${PROJECT_SOURCE_DIR}/apps/segarecomp-launcher/assets/fonts/Silkscreen-OFL.txt DESTINATION ${_res}/licenses RENAME Silkscreen-OFL.txt)
 install(FILES ${PROJECT_SOURCE_DIR}/packaging/THIRD-PARTY-NOTICES.txt DESTINATION ${_res}/licenses)
 install(FILES ${imgui_SOURCE_DIR}/LICENSE.txt DESTINATION ${_res}/licenses RENAME DearImGui.txt)
 if(APPLE)
