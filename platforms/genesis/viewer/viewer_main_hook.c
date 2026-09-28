@@ -75,7 +75,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
     memset(&t, 0, sizeof(t));
     t.kind = GENESIS_RUNNER_RESOURCE_LIMIT;
     t.next_pc = runtime->pc;
-    t.runner_dispatch_count = (uint32_t)(r.dispatches > UINT32_MAX ? UINT32_MAX : r.dispatches);
+    t.runner_dispatch_count = (uint32_t)(r.dispatches >= UINT32_MAX ? UINT32_MAX - 1U : r.dispatches) /* UINT32_MAX is reserved: "runner allowance exhausted" */;
     return t;
   }
   return r.transfer;

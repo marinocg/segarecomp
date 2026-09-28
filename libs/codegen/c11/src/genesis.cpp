@@ -110,12 +110,14 @@ std::string emit_genesis_bridge_c11_main_finish(std::string_view dispatcher_name
   // genesis_runtime_run, not a guest-semantic window. An explicit `--instruction-budget N` (N > 0) is one finite
   // run of N dispatches. When the flag is absent the budget stays 0 (the parser rejects an explicit 0), which
   // means "run until the guest stops or completes": the generated main keeps re-entering genesis_runtime_run with
-  // the largest allowance (UINT32_MAX) while it reports GENESIS_RUNNER_RESOURCE_LIMIT. The viewer/capture hooks
+  // the largest allowance (UINT32_MAX) only while the runner itself exhausted that allowance (a resource limit whose
+  // runner_dispatch_count is exactly UINT32_MAX). A viewer window close or a finished capture also reports a resource
+  // limit but with a smaller count (the hooks clamp to UINT32_MAX - 1), and must end the run, never restart it. The viewer/capture hooks
   // receive UINT32_MAX and treat it as unlimited. Automated/headless callers (tests, agents, tooling) that need a
   // bounded run MUST pass an explicit `--instruction-budget`; a zero-argument invocation of a non-terminating
   // guest never returns. Consumer launches pass no flag on purpose.
   return "do { result = genesis_runtime_run(&runtime, " + std::string(dispatcher_name) +
-          ", instruction_budget != 0U ? instruction_budget : UINT32_MAX); } while (instruction_budget == 0U && result.kind == GENESIS_RUNNER_RESOURCE_LIMIT); if (genesis_write_requested_full_report(report_path, report_fd, &runtime, &result) != 0) return 1; if (genesis_write_requested_ephemeral_pc_history(ephemeral_report_fd, &runtime, &result) != 0) return 1; return genesis_write_sanitized_report(&result, GENESIS_BRIDGE_ROM_SHA256, &GENESIS_BRIDGE_REPORT_METADATA); }\n";
+          ", instruction_budget != 0U ? instruction_budget : UINT32_MAX); } while (instruction_budget == 0U && result.kind == GENESIS_RUNNER_RESOURCE_LIMIT && result.runner_dispatch_count == UINT32_MAX); if (genesis_write_requested_full_report(report_path, report_fd, &runtime, &result) != 0) return 1; if (genesis_write_requested_ephemeral_pc_history(ephemeral_report_fd, &runtime, &result) != 0) return 1; return genesis_write_sanitized_report(&result, GENESIS_BRIDGE_ROM_SHA256, &GENESIS_BRIDGE_REPORT_METADATA); }\n";
 }
 
 }  // namespace segarecomp

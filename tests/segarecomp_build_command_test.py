@@ -64,6 +64,38 @@ def main():
         except subprocess.TimeoutExpired:
             pass
 
+        # Regression: a viewer window close / finished capture reports a runner resource limit with a count below
+        # UINT32_MAX and must END the unbounded default run, never re-enter the runner (which reopened the window).
+        # No window is involved: the runner is replaced by a stub that fails if it is called a second time.
+        gen = tmp / "hook-gen.c"
+        emit = subprocess.run([cli, "emit-general-startup-bridge-c", "--rom", str(loop), "--reset-entry", "--rom-sha256",
+                               hashlib.sha256(loop.read_bytes()).hexdigest(), "--immutable-rom-aot",
+                               "--generated-c-output", str(gen)], text=True, capture_output=True)
+        require(emit.returncode == 0 and gen.is_file(), "emit for the hook regression must succeed: " + emit.stderr)
+        runtime_dir = root / "platforms" / "genesis" / "runtime"
+        (tmp / "proto.h").write_text('#include "runtime.h"\nGenesisControlTransfer test_hook(GenesisRuntime *, GenesisDispatchFunction, uint32_t);\n')
+        (tmp / "hook.c").write_text(
+            '#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include "proto.h"\nstatic int calls;\n'
+            'GenesisControlTransfer test_hook(GenesisRuntime *r, GenesisDispatchFunction d, uint32_t a) {\n'
+            '  GenesisControlTransfer t; (void)d; (void)a; memset(&t, 0, sizeof t); calls++;\n'
+            '  if (calls > 1) { fputs("RESTARTED\\n", stderr); exit(9); }\n'
+            '  t.kind = GENESIS_RUNNER_RESOURCE_LIMIT; t.next_pc = r->pc; t.runner_dispatch_count = 7U; return t; }\n')
+        hooked = tmp / "hooked"
+        # Only the generated main is compiled with the rename; runtime.c and the stub keep their own definitions.
+        objects = []
+        for name, src, extra in (("gen", gen, ["-include", str(tmp / "proto.h"), "-Dgenesis_runtime_run=test_hook"]),
+                                 ("hook", tmp / "hook.c", []), ("rt", runtime_dir / "runtime.c", [])):
+            obj = tmp / (name + ".o")
+            built = subprocess.run([compiler, "-std=c11", "-I", str(runtime_dir), "-I", str(tmp), *extra, "-c", str(src),
+                                    "-o", str(obj)], text=True, capture_output=True)
+            require(built.returncode == 0, f"hook build ({name}) must succeed: " + built.stderr)
+            objects.append(str(obj))
+        linked = subprocess.run([compiler, *objects, "-o", str(hooked)], text=True, capture_output=True)
+        require(linked.returncode == 0, "hook link must succeed: " + linked.stderr)
+        hooked_run = subprocess.run([str(hooked)], text=True, capture_output=True, timeout=30)
+        require(hooked_run.returncode == 0 and "RESTARTED" not in hooked_run.stderr,
+                "a hook-ended run must not restart the runner: " + hooked_run.stderr)
+
         # Not a Genesis image: fail closed at analyze/generate with exit 1 and a diagnostic log.
         bad = tmp / "bad.bin"
         bad.write_bytes(bytes(64))
