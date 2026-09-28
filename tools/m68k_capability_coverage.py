@@ -76,6 +76,7 @@ JUSTIFIED_RESTRICTIONS = {
         "ADR 0047 (SEG-021-T025): no Tier-1 cross-product producer; the site executes natively through the "
         "runtime-owned AOT lowering (SEG-021-T034) or the Tier-2 fallback (SEG-021-T011)",
 }
+# SEG-021-T023: the broader rule-based accounting (RESIDUAL_RULES below) also claims these cells.
 VECTORS = {"address_error_vector_3": 3, "illegal_vector_4": 4, "zero_divide_vector_5": 5, "chk_vector_6": 6,
            "trapv_vector_7": 7, "privilege_violation_vector_8": 8}
 # Architectural condition-code expectation transcribed from the Motorola M68000 Family Programmer's Reference
@@ -319,6 +320,90 @@ def justified_restrictions(rows):
     return out
 
 
+# SEG-021-T023: rule-based residual accounting. Every failing (form, non-validation stage) pair must be claimed by
+# exactly the rules below (a recorded architecture decision or an explicit measurement-condition limit); a failing
+# pair no rule claims is an unexplained gap and fails the ratchet. A rule that claims nothing is stale and raises.
+# Form ids read `<mnemonic>.<form>.<size>.<source>.<destination>[.<detail>]`.
+ABS_OR_PC_MODES = frozenset(["absl", "absw", "pcdisp", "pcindex"])
+DYNAMIC_CONTROL_MODES = frozenset(["disp", "ind", "index", "pcindex"])
+NON_VALIDATION_STAGES = PIPELINE_STAGES + ROUTES
+RESIDUAL_RULES = [
+    ("reset_decode_frontier", "justified_decision", frozenset(NON_VALIDATION_STAGES),
+     lambda p: p[0] == "reset",
+     "ADR 0043 section 7: RESET stays a fail-closed decode frontier; it is the verified-complete CPU terminator the "
+     "synthetic partial-program fixtures end with, and no project evidence bounds its device effect on Genesis"),
+    ("divide_routed_only", "justified_decision", frozenset(["emit", "compile", "native_exec"]),
+     lambda p: p[0] in ("divs", "divu"),
+     "ADR 0037: the divide-by-zero vector-5 raise needs the live runtime object, so DIVS.W/DIVU.W lower only under "
+     "runtime routing and the immutable-ROM AOT route; the linear-memory direct route has no exception delivery"),
+    ("computed_control_transfer", "justified_decision",
+     frozenset(["effects", "emit", "compile", "native_exec", "route_runtime_routed_admitted",
+                "route_runtime_routed_compiles", "route_runtime_routed_executes", "route_static_discovery"]),
+     lambda p: p[0] in ("jmp", "jsr") and p[3] in DYNAMIC_CONTROL_MODES,
+     "ADR 0009/0047 (SEG-021-T033/T034): a register-computed JMP/JSR target has no static PC effect and exists only "
+     "on the immutable-ROM AOT route (runtime-owned lowering checked against the compiled-entry authority) or the "
+     "Tier-2 fallback; the linear and runtime-routed lowerings hold no compiled-target membership to dispatch to"),
+    ("odd_branch_displacement_target", "justified_decision", frozenset(["route_static_discovery"]),
+     lambda p: p[0] in ("bcc", "bra", "bsr") and p[1] == "disp8",
+     "ADR 0043 section 4 (Group 0 address error, deferred): an odd byte displacement yields an odd branch target "
+     "(128 of 256 words per form); static discovery fails closed instead of walking it"),
+    ("trace_bit_status_source", "justified_decision", frozenset(["native_exec", "route_runtime_routed_executes"]),
+     lambda p: p[0] == "move" and p[1] == "ea_sr" and p[3] == "predec",
+     "ADR 0043 section 6 (trace, deferred): the fixed baseline stack word sets SR.T, so MOVE to SR stops "
+     "fail-closed rather than modelling the trace exception"),
+    ("return_from_unowned_stack", "justified_decision", frozenset(["native_exec", "route_runtime_routed_executes"]),
+     lambda p: p[0] == "rts",
+     "the baseline stack word is not a return target owned by any generated call frame; a return to an unowned "
+     "address stops fail-closed (no interpreter fallback)"),
+    ("work_ram_only_window", "measurement_limit", frozenset(["route_runtime_routed_executes"]),
+     lambda p: bool(ABS_OR_PC_MODES & {p[3], p[4]}),
+     "measurement condition: the fixed extension pattern places absolute and PC-relative operands in the vector "
+     "or cartridge region, outside the work-RAM-only runtime image, so the runtime memory gate stops the word; "
+     "these operands execute in the covered direct route and in family Musashi/route tests"),
+    ("consumer_scoped_footprint", "justified_decision", frozenset(["ea_footprint_declared"]),
+     lambda p: True,
+     "effects.cpp declares a complete register footprint per whitelisted kind only for footprint-dependent retained "
+     "proofs (data-transform progress, bounded computed-jump window walk); absence rejects those proofs, never "
+     "lowering or execution of the form"),
+    ("rte_sr_restore", "justified_decision", frozenset(["ccr_sr_effect_declared"]),
+     lambda p: p[0] == "rte",
+     "ADR 0020 section 9: RTE restores the whole SR through the exception-return runtime routine, modelled as "
+     "pop_exception_frame rather than a condition-code effect"),
+]
+
+
+def residual_accounting(rows):
+    """Claim every failing non-validation (form, stage) pair with a rule; return per-rule impact and the
+    unexplained remainder (must be empty)."""
+    claimed = {rule[0]: {"forms": set(), "stages": {}, "words": 0} for rule in RESIDUAL_RULES}
+    explained_by_dict = {(f, st) for (f, st) in JUSTIFIED_RESTRICTIONS}
+    unexplained = []
+    for fid, (_form, passes, applicable, n) in rows.items():
+        p = fid.split(".")
+        for stage in NON_VALIDATION_STAGES:
+            if not applicable[stage] or passes[stage]:
+                continue
+            hit = [r for r in RESIDUAL_RULES if stage in r[2] and r[3](p)]
+            if not hit:
+                if (fid, stage) not in explained_by_dict:
+                    unexplained.append("%s/%s" % (fid, stage))
+                continue
+            rule = hit[0]
+            entry = claimed[rule[0]]
+            if fid not in entry["forms"]:
+                entry["forms"].add(fid)
+                entry["words"] += n
+            entry["stages"][stage] = entry["stages"].get(stage, 0) + 1
+    out = []
+    for rule_id, kind, _stages, _pred, reason in RESIDUAL_RULES:
+        entry = claimed[rule_id]
+        if not entry["forms"]:
+            raise ValueError("residual rule is stale (claims nothing): %s" % rule_id)
+        out.append({"rule": rule_id, "kind": kind, "reason": reason, "forms": len(entry["forms"]),
+                    "words": entry["words"], "stage_failures": dict(sorted(entry["stages"].items()))})
+    return {"rules": out, "unexplained": sorted(unexplained)}
+
+
 def deferred_disposition(forms):
     """Forms affected by a declared deferred disposition (ADR 0043 sections 4/6), split into forms whose listed
     classes are all deferred and mixed forms that also list a modeled Group 1/2 class or privilege."""
@@ -545,6 +630,7 @@ def summarize(data, forms, rows, table, manifest, aspects, arch):
         "architecturally_illegal_words": arch,
         "deferred_disposition": deferred_disposition(forms),
         "justified_restrictions": justified_restrictions(rows),
+        "residual_accounting": residual_accounting(rows),
         "unsupported_mnemonics": unsupported,
         "form_masks": masks,
     }
@@ -629,6 +715,15 @@ def render_report(result):
     lines += ["", "## Justified restrictions (recorded architecture decisions, not missing support)", ""]
     lines += ["- `%s` / `%s`: %s" % (j["form"], j["stage"], j["reason"]) for j in result["justified_restrictions"]] \
         or ["- none"]
+    ra = result["residual_accounting"]
+    lines += ["", "## Residual accounting (SEG-021-T023)", "",
+              "Every failing structural or route cell is claimed by exactly one rule below; unexplained cells: %d. "
+              "`justified_decision` cites a recorded architecture decision; `measurement_limit` is a limit of the fixed "
+              "measurement condition, not a decline." % len(ra["unexplained"]), "",
+              "| rule | kind | forms | words | failing cells by stage | reason |", "| --- | --- | ---: | ---: | --- | --- |"]
+    for r in ra["rules"]:
+        lines.append("| %s | %s | %d | %d | %s | %s |" % (r["rule"], r["kind"], r["forms"], r["words"],
+                     ", ".join("%s %d" % kv for kv in r["stage_failures"].items()), r["reason"]))
     lines += ["", "## Decode over-acceptance (non-legal words the decoder accepts as something other than their "
               "architectural exception)", ""]
     over = result["decode_over_acceptance_words"]

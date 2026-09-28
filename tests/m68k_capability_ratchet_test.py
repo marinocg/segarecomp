@@ -109,4 +109,17 @@ for directory in PRODUCTION_DIRS:
         if path.is_file() and path.suffix in {".c", ".cc", ".cpp", ".h", ".hpp", ".txt", ".cmake", ".py", ".json"}:
             text = path.read_text(encoding="utf-8", errors="ignore")
             check(not any(t in text for t in FORBIDDEN_IN_PRODUCTION), "production file references coverage data: %s" % path)
+
+# SEG-021-T023: no failing structural or route cell may be unexplained, the residual accounting never grows, and the
+# end-to-end structural coverage target (95% of legal forms) holds.
+residual = current["residual_accounting"]
+check(not residual["unexplained"], "unexplained capability gaps (%d): %s" % (
+    len(residual["unexplained"]), "; ".join(residual["unexplained"][:10])))
+before_rules = {r["rule"]: r for r in snapshot.get("residual_accounting", {}).get("rules", [])}
+for rule in residual["rules"]:
+    old = before_rules.get(rule["rule"])
+    if old is not None:
+        check(rule["forms"] <= old["forms"], "residual rule %s claims more forms than the snapshot" % rule["rule"])
+e2e = current["totals"]["end_to_end_structural"]
+check(e2e["passing_forms"] * 100 >= e2e["applicable_forms"] * 95, "end-to-end structural coverage fell below 95%")
 print("m68k capability ratchet OK: %d forms, %d stages" % (len(current["form_masks"]), len(stages)))
