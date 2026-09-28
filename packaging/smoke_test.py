@@ -28,7 +28,7 @@ def require(condition, message):
         print("SMOKE FAIL:", message, file=sys.stderr)
         for cache in CACHE_FOR_DIAGNOSTICS:  # show the preserved diagnostics of any failed build
             for log in sorted(cache.glob("games/*/build.log")):
-                print(f"---- {log} ----\n" + log.read_text(encoding="utf-8", errors="replace")[-6000:], file=sys.stderr)
+                print(f"---- {log} ----\n" + log.read_text(encoding="utf-8", errors="replace"), file=sys.stderr)
         sys.exit(1)
 
 

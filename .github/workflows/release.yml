@@ -64,8 +64,10 @@ jobs:
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-dev"; fi
           echo "VERSION=$v" >> "$GITHUB_ENV"
-          echo "WORK=$RUNNER_TEMP/work" >> "$GITHUB_ENV"
-          mkdir -p "$RUNNER_TEMP/work"
+          # forward slashes: these paths end up inside generated cmake_install.cmake on Windows
+          work="${RUNNER_TEMP//\\//}/work"
+          echo "WORK=$work" >> "$GITHUB_ENV"
+          mkdir -p "$work"
 
       - name: Fetch pinned Zig (bundled C toolchain)
         run: |
