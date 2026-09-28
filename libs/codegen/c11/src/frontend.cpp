@@ -5,6 +5,7 @@
 #include "segarecomp/cpu/m68k/timing.hpp"
 #include <algorithm>
 #include <cstdio>
+#include <deque>
 #include <functional>
 #include <iomanip>
 #include <limits>
@@ -742,6 +743,10 @@ struct AotBodyFactoring {
   // With an empty `source_symbol`: emit the body as a bare `{ ... }` compound statement (the caller owns the
   // function header or entry label) instead of a standalone function or labelled block.
   bool bare_block = false;
+  // SEG-021-T041 / ADR 0048: this entry is an RTS immediately preceded (by exact immutable-ROM decode) by a long
+  // push onto the stack; its popped value is a computed jump target validated against the final compiled-entry
+  // lookup rather than the JSR-continuation set. Meaningful only with the shared compiled-entry lookup.
+  bool computed_jump_return = false;
 };
 std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotEntry &entry,
                                          const std::vector<std::uint32_t> &runtime_return_targets,
@@ -2151,6 +2156,7 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   // SEG-022-T006: the sharded/C4 caller supplies no site-local copy; membership queries the one final
   // compiled-entry table.
   if (use_shared_compiled_entry_lookup) memory.compiled_entry_lookup_symbol = "genesis_compiled_entry_lookup";
+  memory.return_target_is_computed_jump = factoring.computed_jump_return && use_shared_compiled_entry_lookup;
   // SEG-021-T005: an isolated AOT candidate has no whole-program absolute-
   // operand fact; absolute and d16(PC) source reads take the runtime-routed
   // read (never a folded constant).
@@ -5891,6 +5897,49 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   // membership set as any other RTS in this program.
   const std::vector<std::uint32_t> immutable_rom_aot_runtime_return_targets(
       runtime_return_target_set.begin(), runtime_return_target_set.end());
+  // SEG-021-T041 / ADR 0048: push-then-RTS computed jump. From every admitted `MOVE.L <src>,-(A7)` identity a
+  // bounded forward walk (both arms of direct conditional branches, direct BRA, at most
+  // `computed_jump_window` instructions) follows admitted identities that neither touch the stack nor write A7
+  // (complete register footprint, no stack effect, sequential or direct-branch PC effect). An admitted RTS
+  // identity reached this way pops the pushed value: it is a computed jump, not a return address, so the
+  // JSR-continuation set can never contain it. Such an RTS validates its (still routed-read) popped value
+  // against the final compiled-entry lookup instead. Any other instruction on a path abandons that path. The
+  // walk only scopes the weaker authority; the transfer stays architecturally exact because the RTS still reads
+  // the real stack slot.
+  constexpr unsigned computed_jump_window = 8U;
+  std::set<Address> computed_jump_return_addresses;
+  for (const auto &[push_address, push_entry] : *aot_entries) {
+    const auto &push_op = push_entry->operation;
+    if (push_op.kind != M68kIrKind::write_move || push_op.size != M68kMemoryAccessWidth::long_word ||
+        push_op.destination_ea.mode != M68kEaMode::address_predec || push_op.destination_ea.reg != 7U)
+      continue;
+    std::deque<std::pair<Address, unsigned>> walk;
+    std::set<Address> visited;
+    walk.emplace_back(push_address + push_entry->decoded.provenance.length.value, 1U);
+    while (!walk.empty()) {
+      const auto [address, depth] = walk.front();
+      walk.pop_front();
+      if (depth > computed_jump_window || !visited.insert(address).second) continue;
+      const auto found = aot_entries->find(address);
+      if (found == aot_entries->end() || ordinary_compiled_owners.contains(address)) continue;
+      const auto &op = found->second->operation;
+      if (op.kind == M68kIrKind::return_from_subroutine) {
+        computed_jump_return_addresses.insert(address);
+        continue;
+      }
+      const auto effect = m68k_operation_effect(op);
+      if (!effect.register_write_footprint_complete || (effect.address_register_write_mask & 0x80U) != 0U ||
+          effect.stack != M68kStackEffectKind::none)
+        continue;
+      const auto next = address + found->second->decoded.provenance.length.value;
+      if (op.kind == M68kIrKind::general_branch) {
+        walk.emplace_back(effect.direct_target, depth + 1U);
+        if (op.condition != M68kCondition::always) walk.emplace_back(next, depth + 1U);
+      } else if (effect.pc == M68kPcEffectKind::advance) {
+        walk.emplace_back(next, depth + 1U);
+      }
+    }
+  }
   // SEG-022-T008: in a sharded build admitted AOT entries are grouped, in ascending address order, into
   // owners of at most `aot_owner_max_entries` entries. An owner is one external function (one unit, so one
   // TU) whose `switch (runtime->pc)` enters exactly its own entries and fails closed for every other PC.
@@ -5916,9 +5965,10 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   std::vector<std::uint32_t> aot_entry_body;
   aot_entry_body.reserve(aot_order.size());
   if (factor_aot_bodies) for (const auto pc : aot_order) {
+    AotBodyFactoring factoring{true, aot_source_symbol};
+    factoring.computed_jump_return = computed_jump_return_addresses.contains(pc);
     auto inner = emit_immutable_rom_aot_body(*aot_entries->at(pc), immutable_rom_aot_runtime_return_targets,
-                                             aot_unrepresented_exact_pcs[pc], {}, true, {},
-                                             AotBodyFactoring{true, aot_source_symbol});
+                                             aot_unrepresented_exact_pcs[pc], {}, true, {}, factoring);
     if (inner.starts_with("/* translation rejected"))
       return inner;  // fail closed: an entry whose timing is unaccounted is never emitted
     const auto [slot, inserted] =
@@ -5954,6 +6004,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       // Unfactored reference form: the complete pre-T011 body with its own braces (no header).
       AotBodyFactoring unfactored{};
       unfactored.bare_block = true;
+      unfactored.computed_jump_return = computed_jump_return_addresses.contains(pc);
       return emit_immutable_rom_aot_body(*aot_entries->at(pc), immutable_rom_aot_runtime_return_targets,
                                          aot_unrepresented_exact_pcs[pc], {}, true, {}, unfactored);
     }

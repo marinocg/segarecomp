@@ -9947,6 +9947,55 @@ int emit_immutable_rom_aot_return_from_subroutine_and_bit_clear_source() {
   return 0;
 }
 
+// SEG-021-T041 / ADR 0048: synthetic fixture for the push-then-RTS computed-jump admission. Project-authored
+// bytes only. The leading JSR/MOVEA.W/JSR(A0) shape mirrors the T246 fixture so the program is a genuine
+// partial program with a non-empty continuation set.
+namespace push_then_rts_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000D00U;
+const std::vector<std::uint8_t> image{
+    0x4EU, 0xB9U, 0x00U, 0x00U, 0x0DU, 0x1CU,  // +0x00 JSR $00000D1C
+    0x30U, 0x51U,                              // +0x06 MOVEA.W (A1),A0
+    0x4EU, 0x90U,                              // +0x08 JSR (A0)
+    0x4EU, 0x71U,                              // +0x0A NOP
+    0x60U, 0xF2U,                              // +0x0C BRA.S -> base
+    0x4EU, 0x75U,                              // +0x0E RTS_PLAIN (preceded by BRA.S: no push)
+    0x2FU, 0x32U, 0x10U, 0x10U,                // +0x10 MOVE.L $10(A2,D1.W),-(A7)
+    0x4EU, 0x75U,                              // +0x14 RTS_PUSHED (computed jump)
+    0x2FU, 0x12U,                              // +0x16 MOVE.L (A2),-(A7)
+    0x58U, 0x8FU,                              // +0x18 ADDQ.L #4,A7 (writes A7: ends the window)
+    0x4EU, 0x75U,                              // +0x1A RTS_STACK_ALTERED (ordinary RTS)
+    0x4EU, 0x75U,                              // +0x1C callee RTS
+    0x2FU, 0x12U,                              // +0x1E MOVE.L (A2),-(A7)
+    0x4AU, 0x39U, 0x00U, 0xFFU, 0x00U, 0x20U,  // +0x20 TST.B $00FF0020
+    0x66U, 0x06U,                              // +0x26 BNE.S -> +0x2E
+    0x50U, 0xF9U, 0x00U, 0xFFU, 0x00U, 0x21U,  // +0x28 ST $00FF0021
+    0x4EU, 0x75U,                              // +0x2E RTS_DIAMOND (computed jump across a diamond)
+};
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T041/push-then-rts", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base},
+                             {{}, static_cast<std::uint32_t>(base + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace push_then_rts_fixture
+
+int emit_push_then_rts_source() {
+  using namespace segarecomp;
+  auto program = push_then_rts_fixture::program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
 // SEG-007-T245: representative generated-C source for the strict-C11
 // compile/execute proof (`tests/genesis_immutable_rom_aot_write_move_
 // generated_test.py`). Uses the exact same range the classification test
@@ -30492,6 +30541,8 @@ int main(int argc, char **argv) {
     return emit_write_move_register_indirect_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-immutable-rom-aot-return-from-subroutine-and-bit-clear")
     return emit_immutable_rom_aot_return_from_subroutine_and_bit_clear_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-push-then-rts")
+    return emit_push_then_rts_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-arithmetic-memory-operand-aot")
     return emit_general_arithmetic_memory_operand_aot_source();
   if ((argc == 3 || argc == 4) && std::string_view(argv[1]) == "--emit-aot-factoring" &&

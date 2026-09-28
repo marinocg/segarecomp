@@ -316,6 +316,10 @@ add_test(NAME genesis_immutable_rom_aot_write_move_generated_test COMMAND ${Pyth
 # real whole-program return-target authority (existing-owner integration,
 # not a new architecture), and that the new BCHG/BCLR/BSET plain-`(An)`
 # carve-out routes its read-modify-write through the runtime memory gate.
+# SEG-021-T041 / ADR 0048: push-then-RTS computed jump (strict-C11 compile/execute proof).
+add_test(NAME genesis_push_then_rts_computed_jump_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_push_then_rts_computed_jump_generated_test.py
+  $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_immutable_rom_aot_return_from_subroutine_and_bit_clear_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_immutable_rom_aot_return_from_subroutine_and_bit_clear_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
