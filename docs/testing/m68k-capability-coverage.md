@@ -94,7 +94,7 @@ Classes `address_error_vector_3` are declared, fail-closed deferrals, not missin
 
 ## Residual accounting (SEG-021-T023)
 
-Every failing structural or route cell is claimed by exactly one rule below; unexplained cells: 0. `justified_decision` cites a recorded architecture decision; `measurement_limit` is a limit of the fixed measurement condition, not a decline.
+Every failing structural or route cell is claimed by exactly one rule below (enforced: zero matches is unexplained, more than one raises); unexplained cells: 0. `justified_decision` cites a recorded architecture decision; `measurement_limit` is a limit of the fixed measurement condition, not a decline.
 
 | rule | kind | forms | words | failing cells by stage | reason |
 | --- | --- | ---: | ---: | --- | --- |

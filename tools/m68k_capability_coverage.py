@@ -76,7 +76,7 @@ JUSTIFIED_RESTRICTIONS = {
         "ADR 0047 (SEG-021-T025): no Tier-1 cross-product producer; the site executes natively through the "
         "runtime-owned AOT lowering (SEG-021-T034) or the Tier-2 fallback (SEG-021-T011)",
 }
-# SEG-021-T023: the broader rule-based accounting (RESIDUAL_RULES below) also claims these cells.
+# SEG-021-T023: kept for its human/report purpose only; the closure accounting (RESIDUAL_RULES) does not consult it.
 VECTORS = {"address_error_vector_3": 3, "illegal_vector_4": 4, "zero_divide_vector_5": 5, "chk_vector_6": 6,
            "trapv_vector_7": 7, "privilege_violation_vector_8": 8}
 # Architectural condition-code expectation transcribed from the Motorola M68000 Family Programmer's Reference
@@ -356,12 +356,12 @@ RESIDUAL_RULES = [
      "the baseline stack word is not a return target owned by any generated call frame; a return to an unowned "
      "address stops fail-closed (no interpreter fallback)"),
     ("work_ram_only_window", "measurement_limit", frozenset(["route_runtime_routed_executes"]),
-     lambda p: bool(ABS_OR_PC_MODES & {p[3], p[4]}),
+     lambda p: p[0] not in ("jmp", "jsr") and bool(ABS_OR_PC_MODES & {p[3], p[4]}),
      "measurement condition: the fixed extension pattern places absolute and PC-relative operands in the vector "
      "or cartridge region, outside the work-RAM-only runtime image, so the runtime memory gate stops the word; "
      "these operands execute in the covered direct route and in family Musashi/route tests"),
     ("consumer_scoped_footprint", "justified_decision", frozenset(["ea_footprint_declared"]),
-     lambda p: True,
+     lambda p: p[0] != "reset",  # RESET is wholly owned by reset_decode_frontier
      "effects.cpp declares a complete register footprint per whitelisted kind only for footprint-dependent retained "
      "proofs (data-transform progress, bounded computed-jump window walk); absence rejects those proofs, never "
      "lowering or execution of the form"),
@@ -372,30 +372,32 @@ RESIDUAL_RULES = [
 ]
 
 
-def residual_accounting(rows):
-    """Claim every failing non-validation (form, stage) pair with a rule; return per-rule impact and the
-    unexplained remainder (must be empty)."""
-    claimed = {rule[0]: {"forms": set(), "stages": {}, "words": 0} for rule in RESIDUAL_RULES}
-    explained_by_dict = {(f, st) for (f, st) in JUSTIFIED_RESTRICTIONS}
+def residual_accounting(rows, rules=None):
+    """Claim every failing non-validation (form, stage) pair with exactly one rule; return per-rule impact and the
+    unexplained remainder (must be empty). A cell matching more than one rule is ambiguous and raises; a rule that
+    claims nothing is stale and raises."""
+    rules = RESIDUAL_RULES if rules is None else rules
+    claimed = {rule[0]: {"forms": set(), "stages": {}, "words": 0} for rule in rules}
     unexplained = []
     for fid, (_form, passes, applicable, n) in rows.items():
         p = fid.split(".")
         for stage in NON_VALIDATION_STAGES:
             if not applicable[stage] or passes[stage]:
                 continue
-            hit = [r for r in RESIDUAL_RULES if stage in r[2] and r[3](p)]
+            hit = [r for r in rules if stage in r[2] and r[3](p)]
             if not hit:
-                if (fid, stage) not in explained_by_dict:
-                    unexplained.append("%s/%s" % (fid, stage))
+                unexplained.append("%s/%s" % (fid, stage))
                 continue
-            rule = hit[0]
-            entry = claimed[rule[0]]
+            if len(hit) > 1:
+                raise ValueError("residual cell is ambiguous (claimed by %s): %s/%s" % (
+                    ", ".join(r[0] for r in hit), fid, stage))
+            entry = claimed[hit[0][0]]
             if fid not in entry["forms"]:
                 entry["forms"].add(fid)
                 entry["words"] += n
             entry["stages"][stage] = entry["stages"].get(stage, 0) + 1
     out = []
-    for rule_id, kind, _stages, _pred, reason in RESIDUAL_RULES:
+    for rule_id, kind, _stages, _pred, reason in rules:
         entry = claimed[rule_id]
         if not entry["forms"]:
             raise ValueError("residual rule is stale (claims nothing): %s" % rule_id)
@@ -717,7 +719,7 @@ def render_report(result):
         or ["- none"]
     ra = result["residual_accounting"]
     lines += ["", "## Residual accounting (SEG-021-T023)", "",
-              "Every failing structural or route cell is claimed by exactly one rule below; unexplained cells: %d. "
+              "Every failing structural or route cell is claimed by exactly one rule below (enforced: zero matches is unexplained, more than one raises); unexplained cells: %d. "
               "`justified_decision` cites a recorded architecture decision; `measurement_limit` is a limit of the fixed "
               "measurement condition, not a decline." % len(ra["unexplained"]), "",
               "| rule | kind | forms | words | failing cells by stage | reason |", "| --- | --- | ---: | ---: | --- | --- |"]
