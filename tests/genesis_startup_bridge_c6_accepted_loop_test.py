@@ -105,10 +105,10 @@ def main() -> int:
                     source = (output_dir / "bridge.generated.c").read_text()
                     require("translation rejected" not in source and "decode" not in source.lower() and
                             "GENESIS_COMPLETE" not in source and "runtime.work_ram[" not in source and
-                            # SEG-007-T106 retained the bounded project-engineering limit at 128
-                            # after no permitted higher candidate cleared its production budget stop.
-                            # It is not a hardware or timing value and must appear exactly once.
-                            source.count("UINT32_C(128)") == 1 and
+                            # SEG-023-T001: the compiled-in 128 default is gone; no explicit budget means
+                            # unbounded (the bridge tool always passes its own explicit finite allowance).
+                            source.count("instruction_budget = UINT32_C(0)") == 1 and
+                            "UINT32_C(128)" not in source and
                             source.count("static GenesisControlTransfer genesis_block_") == block_count,
                             f"{name}: not accepted no-completion source")
                     for target in targets:

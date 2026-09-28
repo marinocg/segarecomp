@@ -54,7 +54,8 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   GenesisPacer pacer;
   genesis_sdl3_viewer_host(sdl, &host);
   genesis_pacer_init(&pacer, options.unthrottled);
-  GenesisViewerResult r = genesis_viewer_run(runtime, dispatch, &options, &host, &pacer, dispatch_allowance);
+  GenesisViewerResult r = genesis_viewer_run(runtime, dispatch, &options, &host, &pacer,
+                                                dispatch_allowance == UINT32_MAX ? UINT64_MAX : dispatch_allowance);
   runtime->live_frame_observer = NULL;
   genesis_sdl3_viewer_close(sdl);
 

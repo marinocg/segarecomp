@@ -38,3 +38,13 @@ host C compiler and, for the viewer, an installed SDL3. A normal user has none o
 
 Large commercial ROMs generate very large C; the first build takes minutes (documented). The package is large
 (Zig's `lib/`); trimming it is future work. Windows paths must fit the system code page (the CLI is ANSI-argv based).
+
+## Amendment: unbounded default run, explicit budget for automation
+
+The generated `main` previously defaulted to a 128-dispatch allowance, so a game started by the launcher stopped almost
+immediately. With no `--instruction-budget` the generated program now runs until the guest stops or completes (the
+viewer until the window closes): the budget stays 0 (an explicit 0 is still rejected) and `main` re-enters
+`genesis_runtime_run` with `UINT32_MAX` while it reports the resource limit; the viewer/capture hooks treat `UINT32_MAX`
+as unlimited. An explicit positive `--instruction-budget N` is unchanged (one finite run). Consequence: any
+automated caller (tests, agents, tooling) that runs a generated program MUST pass `--instruction-budget`, otherwise a
+non-terminating guest never returns. The viewer's default slice is now 500 dispatches (was 20000).

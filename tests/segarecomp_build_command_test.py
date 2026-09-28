@@ -49,6 +49,21 @@ def main():
         ran = subprocess.run([str(executable)], text=True, capture_output=True)
         require('"result":"stop"' in ran.stdout and digest in ran.stdout, "the native program must emit the sanitized stop report")
 
+        # Instruction budget: an explicit budget is one finite run; with no flag the program is unbounded
+        # (it must still be running after a couple of seconds on a guest that never stops).
+        loop = tmp / "loop.bin"
+        loop.write_bytes(bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x60, 0xFE)))
+        result = build(cli, compiler, root, loop, tmp / "loop-out")
+        require(result.returncode == 0, "loop build must succeed: " + result.stdout + result.stderr)
+        loop_exe = next(p for p in (tmp / "loop-out").iterdir() if p.stem == "game")
+        bounded = subprocess.run([str(loop_exe), "--instruction-budget", "1000"], text=True, capture_output=True, timeout=60)
+        require('"result":"runner_resource_limit"' in bounded.stdout, "an explicit budget must end in runner_resource_limit")
+        try:
+            subprocess.run([str(loop_exe)], text=True, capture_output=True, timeout=3)
+            require(False, "without --instruction-budget the program must keep running")
+        except subprocess.TimeoutExpired:
+            pass
+
         # Not a Genesis image: fail closed at analyze/generate with exit 1 and a diagnostic log.
         bad = tmp / "bad.bin"
         bad.write_bytes(bytes(64))

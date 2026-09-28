@@ -40,7 +40,7 @@ typedef struct GenesisViewerKeys {
 } GenesisViewerKeys;
 uint8_t genesis_viewer_pad_from_keys(const GenesisViewerKeys *keys);
 
-#define GENESIS_VIEWER_DEFAULT_SLICE UINT32_C(20000)
+#define GENESIS_VIEWER_DEFAULT_SLICE UINT32_C(500)
 /* A wake later than this many frame periods resynchronizes the schedule. */
 #define GENESIS_VIEWER_MAX_LATE_PERIODS UINT64_C(4)
 
