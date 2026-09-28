@@ -1295,6 +1295,164 @@ def run_viewer(executable: pathlib.Path, root: pathlib.Path, instruction_budget:
                           cwd=root, env=env).returncode
 
 
+GENESIS_WORK_RAM_BEGIN = 0xFF0000
+GENESIS_WORK_RAM_SIZE = 0x10000
+GENESIS_ALIAS_MIN_RUN = 16
+GENESIS_ALIAS_MAX_ROUNDS = 64
+GUEST_STOP_KNOWN_BUT_UNEMITTED_TARGET = 5
+GUEST_STOP_INTERNAL_DISPATCH_INCONSISTENCY = 7
+
+
+def derive_copy_alias(rom: bytes, work_ram: bytes, pc: int) -> tuple[int, int, int] | None:
+    """SEG-021-T041 / ADR 0049: propose an immutable-copy alias for a stop at work-RAM `pc`.
+
+    Returns (execution_base, source_base, length) for the maximal verbatim run of the ROM image that
+    matches the work-RAM bytes around `pc` (extended in both directions with a constant address delta),
+    or None when no run of at least GENESIS_ALIAS_MIN_RUN bytes exists. This is only a PROPOSAL: the
+    emitter re-validates it against the image and every alias body carries a runtime byte-identity guard.
+    Several identical ROM occurrences are interchangeable because the alias is decoded from the identical
+    bytes at the execution address, so the lowest even occurrence is used. Nothing here is persisted.
+    """
+    if (pc & 1) or not GENESIS_WORK_RAM_BEGIN <= pc < GENESIS_WORK_RAM_BEGIN + GENESIS_WORK_RAM_SIZE:
+        return None
+    offset = pc - GENESIS_WORK_RAM_BEGIN
+    needle = work_ram[offset:offset + GENESIS_ALIAS_MIN_RUN]
+    if len(needle) < GENESIS_ALIAS_MIN_RUN:
+        return None
+    best = None
+    position = rom.find(needle)
+    while position != -1:
+        if not position & 1:
+            length = GENESIS_ALIAS_MIN_RUN
+            while (offset + length < len(work_ram) and position + length < len(rom)
+                   and work_ram[offset + length] == rom[position + length]):
+                length += 1
+            back = 0
+            while back + 2 <= offset and back + 2 <= position and work_ram[offset - back - 2:offset - back] == \
+                    rom[position - back - 2:position - back]:
+                back += 2
+            length = length - (length & 1)
+            if best is None or back + length > best[0]:
+                best = (back + length, back, position)
+        position = rom.find(needle, position + 1)
+    if best is None:
+        return None
+    total, back, position = best
+    return GENESIS_WORK_RAM_BEGIN + offset - back, position - back, total
+
+
+def merge_copy_aliases(aliases: list[tuple[int, int, int]]) -> list[tuple[int, int, int]]:
+    """Union overlapping/adjacent aliases that share one execution-to-source delta."""
+    merged: list[tuple[int, int, int]] = []
+    for execution, source, length in sorted(aliases):
+        if merged:
+            last_execution, last_source, last_length = merged[-1]
+            if (execution - source == last_execution - last_source and execution <= last_execution + last_length):
+                end = max(last_execution + last_length, execution + length)
+                merged[-1] = (last_execution, last_source, end - last_execution)
+                continue
+        merged.append((execution, source, length))
+    return merged
+
+
+# SEG-021-T041 / ADR 0049: closed vocabulary of COPY_ALIAS_DISCOVERY termination reasons (aggregate only).
+ALIAS_TERMINATION_ROUTE_ADVANCED = "route_advanced"  # a preparation run ended without a fail-closed guest stop
+ALIAS_TERMINATION_NO_WORK_RAM_FRONTIER = "no_work_ram_frontier"  # the stop PC is not (even, aligned) work RAM
+ALIAS_TERMINATION_NOT_VERBATIM_COPY = "frontier_not_verbatim_copy"  # work-RAM stop without a >= minimum ROM copy
+ALIAS_TERMINATION_REPEATED_ALIAS = "repeated_alias_no_progress"  # the proposal is already covered: no progress
+ALIAS_TERMINATION_RUNNER_RESOURCE_LIMIT = "runner_resource_limit"  # host dispatch allowance reached, no guest stop
+ALIAS_TERMINATION_NON_ALIAS_FRONTIER = "non_alias_frontier"  # a guest stop of a class no copy alias can explain
+ALIAS_TERMINATION_MAX_ROUNDS = "max_rounds"  # bound exhausted while still discovering: preparation INCOMPLETE
+ALIAS_TERMINATION_TOOL_FAILURE = "tool_failure"  # generation/compile/run/dump failure: preparation INCOMPLETE
+ALIAS_INCOMPLETE_TERMINATIONS = (ALIAS_TERMINATION_MAX_ROUNDS, ALIAS_TERMINATION_TOOL_FAILURE)
+ALIAS_MAX_ROUNDS_ENV = "SEGARECOMP_TEST_ALIAS_MAX_ROUNDS"  # test-only override of GENESIS_ALIAS_MAX_ROUNDS
+GENESIS_EXIT_ALIAS_PREPARATION_INCOMPLETE = 11
+
+
+def alias_max_rounds() -> int:
+    override = os.environ.get(ALIAS_MAX_ROUNDS_ENV)
+    return int(override) if override and override.isdigit() and int(override) > 0 else GENESIS_ALIAS_MAX_ROUNDS
+
+
+def discover_copy_aliases(emitter_command: list[str], compiler: pathlib.Path, root: pathlib.Path,
+                          out_dir: pathlib.Path, rom_bytes: bytes, instruction_budget: int,
+                          max_rounds: int | None = None) -> dict:
+    """SEG-021-T041 / ADR 0049: the OPTIONAL bounded PREPARATION phase, run before (and separate from) the
+    canonical final one-shot generation/compile/run. Each round builds the headless capture executable of the
+    current generated program with the aliases found so far and runs it with a frame window that is never
+    reached; when the guest stops fail-closed at a work-RAM PC, the private work-RAM dump proves (by byte
+    comparison against the immutable image) a fixed verbatim copy and adds one alias. Always prints exactly one
+    COPY_ALIAS_DISCOVERY aggregate line (rounds, generation/compile/run attempts of THIS phase, alias count and
+    total bytes, termination_reason); addresses and the dump stay in the ignored out directory.
+    Returns {"aliases", "termination_reason", "complete"}; `complete` is False for max_rounds / tool_failure."""
+    limit = max_rounds if max_rounds is not None else alias_max_rounds()
+    aliases: list[tuple[int, int, int]] = []
+    work = out_dir / "alias-discovery"
+    work.mkdir(parents=True, exist_ok=True)
+    dump_path = work / "stop-work-ram.dump"
+    counts = {"rounds": 0, "generation_attempts": 0, "compile_attempts": 0, "run_attempts": 0}
+    reason = ALIAS_TERMINATION_MAX_ROUNDS
+    while counts["rounds"] < limit:
+        counts["rounds"] += 1
+        command = emitter_command + [arg for alias in aliases
+                                     for arg in ("--immutable-copy-alias", f"{alias[0]:08x}:{alias[1]:08x}:{alias[2]:08x}")]
+        counts["generation_attempts"] += 1
+        status, _, executable = generate_and_compile(command, compiler, root, work, "quick", None, capture=True)
+        if status != 1:  # status 1 = emitter rejection before any C compiler invocation
+            counts["compile_attempts"] += 1
+        if status or executable is None:
+            reason = ALIAS_TERMINATION_TOOL_FAILURE
+            break
+        dump_path.unlink(missing_ok=True)
+        env = dict(os.environ)
+        env.update({"SEGARECOMP_CAPTURE_DIR": str(work / "frames"), "SEGARECOMP_CAPTURE_FIRST": str(1 << 40),
+                    "SEGARECOMP_CAPTURE_COUNT": "1", "SEGARECOMP_STOP_WORK_RAM_DUMP": str(dump_path)})
+        (work / "frames").mkdir(exist_ok=True)
+        counts["run_attempts"] += 1
+        completed = subprocess.run([str(executable), "--instruction-budget", str(instruction_budget)],
+                                   cwd=root, env=env, text=True, capture_output=True)
+        outcome = None
+        for line in completed.stderr.splitlines():
+            if line.startswith("CAPTURE_SUMMARY "):
+                outcome = json.loads(line[len("CAPTURE_SUMMARY "):]).get("outcome")
+        if outcome == "incomplete_runner_resource_limit":
+            reason = ALIAS_TERMINATION_RUNNER_RESOURCE_LIMIT
+            break
+        if outcome in ("window_complete", "incomplete_guest_complete"):
+            reason = ALIAS_TERMINATION_ROUTE_ADVANCED
+            break
+        if outcome != "incomplete_guest_stop" or not dump_path.is_file():
+            reason = ALIAS_TERMINATION_TOOL_FAILURE  # unknown/io_error outcome or missing dump
+            break
+        dump = dump_path.read_bytes()
+        if len(dump) != 8 + GENESIS_WORK_RAM_SIZE:
+            reason = ALIAS_TERMINATION_TOOL_FAILURE
+            break
+        pc = int.from_bytes(dump[0:4], "big")
+        stop_class = int.from_bytes(dump[4:8], "big")
+        if stop_class not in (GUEST_STOP_KNOWN_BUT_UNEMITTED_TARGET, GUEST_STOP_INTERNAL_DISPATCH_INCONSISTENCY):
+            reason = ALIAS_TERMINATION_NON_ALIAS_FRONTIER
+            break
+        if (pc & 1) or not GENESIS_WORK_RAM_BEGIN <= pc < GENESIS_WORK_RAM_BEGIN + GENESIS_WORK_RAM_SIZE:
+            reason = ALIAS_TERMINATION_NO_WORK_RAM_FRONTIER
+            break
+        proposal = derive_copy_alias(rom_bytes, dump[8:], pc)
+        if proposal is None:
+            reason = ALIAS_TERMINATION_NOT_VERBATIM_COPY
+            break
+        merged = merge_copy_aliases(aliases + [proposal])
+        if merged == aliases:
+            reason = ALIAS_TERMINATION_REPEATED_ALIAS  # not explained by a further verbatim copy: no progress
+            break
+        aliases = merged
+    dump_path.unlink(missing_ok=True)
+    sys.stderr.write("COPY_ALIAS_DISCOVERY " + json.dumps(
+        {**counts, "alias_count": len(aliases), "alias_total_bytes": sum(alias[2] for alias in aliases),
+         "termination_reason": reason}, separators=(",", ":")) + "\n")
+    return {"aliases": aliases, "termination_reason": reason,
+            "complete": reason not in ALIAS_INCOMPLETE_TERMINATIONS}
+
+
 def run_expansion_loop(base_emitter_command: list[str], compiler: pathlib.Path, root: pathlib.Path,
                        out_dir: pathlib.Path, digest: str, initial_seeds: list[int] | None = None,
                        instruction_budget: int | None = None,
@@ -1722,6 +1880,13 @@ def main() -> int:
     parser.add_argument("--external-hints")
     parser.add_argument("--immutable-rom-aot", action="store_true",
                         help="opt in to complete aligned immutable-ROM AOT enumeration")
+    parser.add_argument("--discover-copy-aliases", action="store_true",
+                        help="SEG-021-T041: optional bounded PREPARATION phase before the final program: it may "
+                             "iterate generate/compile/run (bounded rounds) to derive immutable-ROM-to-work-RAM "
+                             "copy alias descriptors from fail-closed work-RAM stops, prints one "
+                             "COPY_ALIAS_DISCOVERY aggregate summary, and fails closed when incomplete. It finds only "
+                             "copies executed on the preparation run's path. Requires --immutable-rom-aot; "
+                             "ephemeral, never persisted. The FINAL program is then built once (see --one-shot)")
     parser.add_argument("--provenance-diagnostics", action="store_true",
                         help="SEG-020-T002: opt in to the generated provenance lookup; the table is "
                              "extracted to <out-dir>/provenance-diagnostics.c (ephemeral, not for commit)")
@@ -1730,12 +1895,17 @@ def main() -> int:
     # with --diagnose-frontier); every other caller shape is unaffected.
     parser.add_argument("--checkpoint")
     # SEG-007-T179 / ADR-0025: the canonical offline-analysis one-shot assisted
-    # route. Exactly one generation + one compile + one run; the offline
+    # route. The FINAL program is exactly one generation + one compile + one run (an optional
+    # --discover-copy-aliases preparation phase, ADR-0049, precedes it and is reported separately by
+    # COPY_ALIAS_DISCOVERY; ONE_SHOT_SUMMARY describes the final phase only); the offline
     # `--external-hints` code-entry inventory is the sole non-reset seed source;
     # 0 runtime-confirmed seeds; no Phase-B expansion loop, no checkpoint, no
     # runtime-confirmed promotion. Reaching unemitted code is reported once as
     # `offline_inventory_incomplete`, never another round.
-    parser.add_argument("--one-shot", action="store_true")
+    parser.add_argument("--one-shot", action="store_true",
+                        help="canonical final phase: exactly one generation, one compile, one run of the final "
+                             "program; forbids runtime-confirmed code-discovery expansion of it. Preparation "
+                             "(--discover-copy-aliases) is a separate earlier phase")
     parser.add_argument("--rom-sha256")
     # SEG-007-T252 / ADR-0040: the runner-owned finite dispatch allowance.
     # Omitted means the generated binary's own compiled-in default (128).
@@ -1826,6 +1996,21 @@ def main() -> int:
         emitter_command += ["--immutable-rom-aot"]
     if args.provenance_diagnostics:
         emitter_command += ["--provenance-diagnostics"]
+    if args.discover_copy_aliases:
+        if not args.immutable_rom_aot:
+            sys.stderr.write("--discover-copy-aliases requires --immutable-rom-aot\n")
+            return 8
+        discovered = discover_copy_aliases(
+            emitter_command, compiler, root, out_dir, rom.read_bytes(),
+            args.instruction_budget if args.instruction_budget is not None else GENESIS_CANONICAL_RUNNER_DISPATCH_ALLOWANCE)
+        if not discovered["complete"]:
+            # Fail closed: an incomplete preparation never proceeds to (or silently builds) the final program.
+            sys.stderr.write("copy-alias preparation incomplete (" + discovered["termination_reason"] +
+                             "); no final program was generated\n")
+            return (GENESIS_EXIT_ALIAS_PREPARATION_INCOMPLETE
+                    if discovered["termination_reason"] == ALIAS_TERMINATION_MAX_ROUNDS else 2)
+        for execution, source, length in discovered["aliases"]:
+            emitter_command += ["--immutable-copy-alias", f"{execution:08x}:{source:08x}:{length:08x}"]
     viewer_sdl3 = None
     if args.viewer:
         # Fail clearly before any generation/guest execution; never fall back to headless.
@@ -1867,7 +2052,8 @@ def main() -> int:
     # --diagnose-frontier) keeps today's single generate/compile/run/report
     # cycle byte-identically, so no existing fixture's behavior changes.
     if args.one_shot:
-        # SEG-007-T179 / ADR-0025 canonical one-shot assisted route: exactly one
+        # SEG-007-T179 / ADR-0025 canonical one-shot assisted route (the FINAL phase; any
+        # --discover-copy-aliases preparation already finished and reported separately): exactly one
         # generation + one compile + one run. No expansion loop, no checkpoint,
         # no runtime-confirmed seed promotion. `emitter_command` already carries
         # `--reset-entry` and `--external-hints <artifact>`; no `--analysis-seed`

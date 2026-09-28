@@ -8,6 +8,10 @@
  * driver and re-validated here) so the generated argv ABI is unchanged:
  *   SEGARECOMP_CAPTURE_DIR, SEGARECOMP_CAPTURE_FIRST, SEGARECOMP_CAPTURE_COUNT,
  *   SEGARECOMP_CAPTURE_STRIDE (optional, default 1), SEGARECOMP_CAPTURE_SLICE (optional, default 65536).
+ * SEG-021-T041 / ADR 0049: SEGARECOMP_STOP_WORK_RAM_DUMP (optional) names a private, ephemeral file that receives,
+ * only when the guest stops fail-closed, 8 header bytes (big-endian stop PC, big-endian stop class) followed by the
+ * 65536 work-RAM bytes at the stop. The tooling uses it to prove a fixed immutable-ROM-to-work-RAM verbatim copy
+ * and derive an alias descriptor; the file is local diagnostic material and is never durable evidence.
  * Prints one CAPTURE_SUMMARY line (ordinals/counts/digests of synthetic-or-local frames only;
  * callers decide what, if anything, becomes durable evidence).
  */
@@ -67,6 +71,21 @@ GenesisControlTransfer genesis_frame_capture_hook_run(GenesisRuntime *runtime, G
          : r.outcome == GENESIS_FRAME_CAPTURE_INCOMPLETE_GUEST_COMPLETE   ? "incomplete_guest_complete"
          : r.outcome == GENESIS_FRAME_CAPTURE_IO_ERROR                    ? "io_error"
                                                                           : "invalid_argument";
+  if (r.outcome == GENESIS_FRAME_CAPTURE_INCOMPLETE_GUEST_STOP && getenv("SEGARECOMP_STOP_WORK_RAM_DUMP") != NULL) {
+    FILE *dump = fopen(getenv("SEGARECOMP_STOP_WORK_RAM_DUMP"), "wb");
+    unsigned char header[8];
+    const uint32_t stop_class = (uint32_t)r.transfer.stop.stop_class;
+    header[0] = (unsigned char)(runtime->pc >> 24); header[1] = (unsigned char)(runtime->pc >> 16);
+    header[2] = (unsigned char)(runtime->pc >> 8);  header[3] = (unsigned char)runtime->pc;
+    header[4] = (unsigned char)(stop_class >> 24);  header[5] = (unsigned char)(stop_class >> 16);
+    header[6] = (unsigned char)(stop_class >> 8);   header[7] = (unsigned char)stop_class;
+    if (dump == NULL || fwrite(header, 1, sizeof(header), dump) != sizeof(header) ||
+        fwrite(runtime->work_ram, 1, sizeof(runtime->work_ram), dump) != sizeof(runtime->work_ram) ||
+        fclose(dump) != 0) {
+      fprintf(stderr, "capture: cannot write stop work-RAM dump\n");
+      exit(4);
+    }
+  }
   fprintf(stderr, "CAPTURE_SUMMARY {\"outcome\":\"%s\",\"first_frame\":%llu,\"frame_count\":%u,\"frame_stride\":%u,"
                   "\"frames_captured\":%u,\"frames_published\":%llu,\"dispatches\":%llu,\"digests\":[",
           name, (unsigned long long)first, (unsigned)options.frame_count, (unsigned)options.frame_stride,

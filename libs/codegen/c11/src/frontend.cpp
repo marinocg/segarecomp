@@ -5,6 +5,7 @@
 #include "segarecomp/cpu/m68k/timing.hpp"
 #include <algorithm>
 #include <cstdio>
+#include <deque>
 #include <functional>
 #include <iomanip>
 #include <limits>
@@ -742,6 +743,10 @@ struct AotBodyFactoring {
   // With an empty `source_symbol`: emit the body as a bare `{ ... }` compound statement (the caller owns the
   // function header or entry label) instead of a standalone function or labelled block.
   bool bare_block = false;
+  // SEG-021-T041 / ADR 0048: this entry is an RTS immediately preceded (by exact immutable-ROM decode) by a long
+  // push onto the stack; its popped value is a computed jump target validated against the final compiled-entry
+  // lookup rather than the JSR-continuation set. Meaningful only with the shared compiled-entry lookup.
+  bool computed_jump_return = false;
 };
 std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotEntry &entry,
                                          const std::vector<std::uint32_t> &runtime_return_targets,
@@ -1975,7 +1980,20 @@ validated_immutable_rom_aot_entries(const FrontendAnalysis &analysis) {
     // would make the analysis/codegen boundary silently disagree and leave a
     // PC-keyed identity absent from generated dispatch.
     if (!m68k_retirement_cycle_expression(entry.operation)) return std::nullopt;
-    const auto *selected = select_unique_affine_mapping(analysis.mapping_claims, entry.decoded.provenance);
+    // SEG-021-T041 / ADR 0049: an alias identity executes at a work-RAM address but its bytes are the immutable
+    // source's. Its mapping is therefore selected at the alias's source address; the execution span must lie
+    // wholly in the 64 KiB work-RAM window (no wrap), the source and execution addresses must share parity and
+    // the instruction length, and the raw bytes (the runtime guard's expected bytes) must be present in full.
+    InstructionProvenance mapping_provenance = entry.decoded.provenance;
+    if (entry.execution_alias) {
+      const auto span = entry.decoded.provenance.length.value;
+      if (address < UINT32_C(0x00FF0000) || (address & 1U) != 0U || (entry.alias_source_address & 1U) != 0U ||
+          static_cast<std::uint64_t>(address) + span > UINT64_C(0x01000000) ||
+          entry.decoded.raw_bytes.size() != span)
+        return std::nullopt;
+      mapping_provenance.source.address.value = entry.alias_source_address;
+    }
+    const auto *selected = select_unique_affine_mapping(analysis.mapping_claims, mapping_provenance);
     // SEG-021-T027: `m68k_operation_has_complete_c_emission`'s generic probe
     // requires `m68k_operation_effect(...).pc != M68kPcEffectKind::none`,
     // which the runtime-owned brief PC-indexed indirect JMP/JSR genuinely
@@ -2110,6 +2128,23 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   else
     out << owner_entry_label << ": {\n";
   out << "  uint32_t pc = runtime->pc;\n";
+  // SEG-021-T041 / ADR 0049: the runtime byte-identity guard of an immutable-copy alias identity. It compares
+  // exactly this instruction's own immutable bytes against the work-RAM bytes at its execution address (identity
+  // comparison only -- nothing in RAM is ever decoded) before any effect of the body. A mismatch, whether from a
+  // copy that never happened or a later write, fails closed with the existing typed unemitted-target stop.
+  if (entry.execution_alias) {
+    out << "  if (";
+    for (std::size_t index = 0; index < entry.decoded.raw_bytes.size(); ++index) {
+      if (index != 0U) out << " || ";
+      out << "runtime->work_ram[UINT32_C(" << std::dec << (address - UINT32_C(0x00FF0000) + index)
+          << ")] != UINT8_C(" << hex(entry.decoded.raw_bytes[index], 2) << ")";
+    }
+    out << ") return genesis_static_stop(GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET, "
+           "GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET, "
+        << (factoring.source_symbol.empty() ? genesis_m68k_runtime_c_emitter().instruction_source(entry.operation)
+                                            : std::string(factoring.source_symbol))
+        << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ);\n";
+  }
   if (entry.operation.kind == M68kIrKind::dbcc_loop)
     out << "  uint8_t m68k_dbcc_took_branch = 0U;\n";
   const bool scc_dynamic_timing = entry.operation.kind == M68kIrKind::set_conditional &&
@@ -2151,6 +2186,7 @@ std::string emit_immutable_rom_aot_body(const FrontendAnalysis::ImmutableRomAotE
   // SEG-022-T006: the sharded/C4 caller supplies no site-local copy; membership queries the one final
   // compiled-entry table.
   if (use_shared_compiled_entry_lookup) memory.compiled_entry_lookup_symbol = "genesis_compiled_entry_lookup";
+  memory.return_target_is_computed_jump = factoring.computed_jump_return && use_shared_compiled_entry_lookup;
   // SEG-021-T005: an isolated AOT candidate has no whole-program absolute-
   // operand fact; absolute and d16(PC) source reads take the runtime-routed
   // read (never a folded constant).
@@ -4621,6 +4657,22 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       const auto continuation = aot_address + aot_entry->decoded.provenance.length.value;
       if (emitted_code_addresses.contains(continuation)) runtime_return_target_set.insert(continuation);
     }
+  // SEG-021-T041 / ADR 0049: a `PEA` whose effective address is statically foldable (absolute or PC-relative,
+  // already execution-relative for an alias identity) pushes a fixed code address: the classic manual call
+  // `PEA next; JMP/BRA callee`, whose callee's RTS returns to the pushed address rather than to a JSR
+  // continuation. Exactly like a call continuation, that pushed address is a statically known value of the
+  // same authority class (the RTS still pops the real stack slot), admitted to the whole-program return set
+  // only when it is itself a final emitted code address. Register-indexed PEA forms fold no static value.
+  for (const auto &[aot_address, aot_entry] : *aot_entries) {
+    (void)aot_address;
+    if (aot_entry->operation.kind != M68kIrKind::push_effective_address) continue;
+    const auto &pea_ea = aot_entry->operation.source_ea;
+    if (pea_ea.mode != M68kEaMode::absolute_word && pea_ea.mode != M68kEaMode::absolute_long &&
+        pea_ea.mode != M68kEaMode::pc_disp16)
+      continue;
+    if (emitted_code_addresses.contains(pea_ea.absolute_address))
+      runtime_return_target_set.insert(pea_ea.absolute_address);
+  }
   for (const auto &block : partial.accepted_prefix.static_blocks) {
     const auto &terminal = block.instructions.back();
     const auto terminal_operation = operations.at(terminal.source.address.value);
@@ -5891,6 +5943,49 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   // membership set as any other RTS in this program.
   const std::vector<std::uint32_t> immutable_rom_aot_runtime_return_targets(
       runtime_return_target_set.begin(), runtime_return_target_set.end());
+  // SEG-021-T041 / ADR 0048: push-then-RTS computed jump. From every admitted `MOVE.L <src>,-(A7)` identity a
+  // bounded forward walk (both arms of direct conditional branches, direct BRA, at most
+  // `computed_jump_window` instructions) follows admitted identities that neither touch the stack nor write A7
+  // (complete register footprint, no stack effect, sequential or direct-branch PC effect). An admitted RTS
+  // identity reached this way pops the pushed value: it is a computed jump, not a return address, so the
+  // JSR-continuation set can never contain it. Such an RTS validates its (still routed-read) popped value
+  // against the final compiled-entry lookup instead. Any other instruction on a path abandons that path. The
+  // walk only scopes the weaker authority; the transfer stays architecturally exact because the RTS still reads
+  // the real stack slot.
+  constexpr unsigned computed_jump_window = 8U;
+  std::set<Address> computed_jump_return_addresses;
+  for (const auto &[push_address, push_entry] : *aot_entries) {
+    const auto &push_op = push_entry->operation;
+    if (push_op.kind != M68kIrKind::write_move || push_op.size != M68kMemoryAccessWidth::long_word ||
+        push_op.destination_ea.mode != M68kEaMode::address_predec || push_op.destination_ea.reg != 7U)
+      continue;
+    std::deque<std::pair<Address, unsigned>> walk;
+    std::set<Address> visited;
+    walk.emplace_back(push_address + push_entry->decoded.provenance.length.value, 1U);
+    while (!walk.empty()) {
+      const auto [address, depth] = walk.front();
+      walk.pop_front();
+      if (depth > computed_jump_window || !visited.insert(address).second) continue;
+      const auto found = aot_entries->find(address);
+      if (found == aot_entries->end() || ordinary_compiled_owners.contains(address)) continue;
+      const auto &op = found->second->operation;
+      if (op.kind == M68kIrKind::return_from_subroutine) {
+        computed_jump_return_addresses.insert(address);
+        continue;
+      }
+      const auto effect = m68k_operation_effect(op);
+      if (!effect.register_write_footprint_complete || (effect.address_register_write_mask & 0x80U) != 0U ||
+          effect.stack != M68kStackEffectKind::none)
+        continue;
+      const auto next = address + found->second->decoded.provenance.length.value;
+      if (op.kind == M68kIrKind::general_branch) {
+        walk.emplace_back(effect.direct_target, depth + 1U);
+        if (op.condition != M68kCondition::always) walk.emplace_back(next, depth + 1U);
+      } else if (effect.pc == M68kPcEffectKind::advance) {
+        walk.emplace_back(next, depth + 1U);
+      }
+    }
+  }
   // SEG-022-T008: in a sharded build admitted AOT entries are grouped, in ascending address order, into
   // owners of at most `aot_owner_max_entries` entries. An owner is one external function (one unit, so one
   // TU) whose `switch (runtime->pc)` enters exactly its own entries and fails closed for every other PC.
@@ -5916,9 +6011,10 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   std::vector<std::uint32_t> aot_entry_body;
   aot_entry_body.reserve(aot_order.size());
   if (factor_aot_bodies) for (const auto pc : aot_order) {
+    AotBodyFactoring factoring{true, aot_source_symbol};
+    factoring.computed_jump_return = computed_jump_return_addresses.contains(pc);
     auto inner = emit_immutable_rom_aot_body(*aot_entries->at(pc), immutable_rom_aot_runtime_return_targets,
-                                             aot_unrepresented_exact_pcs[pc], {}, true, {},
-                                             AotBodyFactoring{true, aot_source_symbol});
+                                             aot_unrepresented_exact_pcs[pc], {}, true, {}, factoring);
     if (inner.starts_with("/* translation rejected"))
       return inner;  // fail closed: an entry whose timing is unaccounted is never emitted
     const auto [slot, inserted] =
@@ -5954,6 +6050,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       // Unfactored reference form: the complete pre-T011 body with its own braces (no header).
       AotBodyFactoring unfactored{};
       unfactored.bare_block = true;
+      unfactored.computed_jump_return = computed_jump_return_addresses.contains(pc);
       return emit_immutable_rom_aot_body(*aot_entries->at(pc), immutable_rom_aot_runtime_return_targets,
                                          aot_unrepresented_exact_pcs[pc], {}, true, {}, unfactored);
     }
@@ -6121,6 +6218,20 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
                           << hex(fact.claim.target_end.value, 8) << "), " << array_name << ", UINT32_C("
                           << hex(static_cast<std::uint32_t>(fact.resolved_bytes.size()), 8) << ") }";
       ++owned_region_count;
+      // SEG-021-T041 / ADR 0049: cartridge ROM smaller than the 4 MiB cartridge window whose chip size is a power
+      // of two and which is mapped at the window base is mirrored across the rest of the window (the upper
+      // cartridge address lines are not decoded by the chip; Genesis Plus GX `md_cart.c` maps
+      // `cart.rom + ((page << 16) & (size - 1))`). Each mirror is another region row over the SAME embedded
+      // data array, so no data is duplicated and the runtime's bounds-checked read path is unchanged. Any other
+      // shape (non-power-of-two size, non-zero base) gets no mirror and keeps failing closed.
+      const std::uint64_t chip_size = fact.claim.target_end.value - fact.claim.target_begin.value;
+      if (fact.claim.target_begin.value == 0U && chip_size >= UINT64_C(0x10000) &&
+          (chip_size & (chip_size - 1U)) == 0U && fact.resolved_bytes.size() == chip_size)
+        for (std::uint64_t mirror = chip_size; mirror < UINT64_C(0x00400000); mirror += chip_size) {
+          owned_region_table << ",\n  { UINT32_C(" << hex(mirror, 8) << "), UINT32_C(" << hex(mirror + chip_size, 8)
+                              << "), " << array_name << ", UINT32_C(" << hex(chip_size, 8) << ") }";
+          ++owned_region_count;
+        }
     }
   }
   // SEG-022-T002: stream the runtime body straight to `sink` behind the bridge

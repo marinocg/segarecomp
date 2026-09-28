@@ -86,6 +86,30 @@ The helper uses LLDB/GDB to stop at the generated runtime's access failure and p
 plus the relevant VDP pointer/register/DMA state. Its output is equally ephemeral. Use one diagnostic
 execution while investigating and reserve `--compare-runs` for the final determinism handoff.
 
+## Immutable-ROM-to-work-RAM copies (ADR 0049)
+
+When a title copies immutable ROM code to a fixed work-RAM address and executes it there, add
+`--discover-copy-aliases` (requires `--immutable-rom-aot`) to the same route. It is the normal high-level helper;
+`--immutable-copy-alias <execution>:<source>:<length>` is the low-level emitter descriptor input (tests, future
+static analyzers, preparation artifacts) and no game-specific descriptor is committed.
+
+The invocation has two phases. An optional, bounded **preparation phase** (only with the flag) iterates
+generate/compile/run rounds of the headless capture executable, deriving each verbatim-copy alias from the
+private, ephemeral work-RAM dump of a fail-closed work-RAM stop. It prints exactly one aggregate
+`COPY_ALIAS_DISCOVERY` line even when no alias is found (`rounds`, `generation_attempts`, `compile_attempts`,
+`run_attempts`, `alias_count`, `alias_total_bytes`, `termination_reason`); descriptors and the dump stay in the
+ignored output directory and are never durable evidence. An incomplete preparation (`max_rounds`,
+`tool_failure`) exits nonzero and builds no final program. Then the canonical **final one-shot phase** builds and
+runs the final program exactly once (one generation, one compile, one run); `ONE_SHOT_SUMMARY` describes that
+final phase only, so an invocation with discovery costs N preparation builds plus one final build. Without the
+flag there is no preparation at all.
+
+Discovery is workload/path dependent: it finds only ROM-to-RAM executable copies reached by the preparation runs.
+A boot-attract-copy-execute path is discovered; a title that waits for START and only then loads a level and
+copies code is not discovered unless that path is exercised. The final executable contains only the aliases known
+before emission, a later unseen executable RAM copy stays fail-closed, and a run without a stop is not proof of
+complete alias coverage. The helper is temporary and explicit.
+
 ## Enforcement
 
 `tests/restricted_files_test.py` verifies that Git tracks no path under `games/` and that representative

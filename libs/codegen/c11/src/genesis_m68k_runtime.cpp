@@ -140,11 +140,16 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
                   << "m68k_stack_bus; m68k_route_stop.provenance.access_width = GENESIS_ACCESS_LONG; m68k_route_stop.provenance.access_direction = GENESIS_ACCESS_READ; "
                  << ctx.runtime_provenance_helper << "(&m68k_route_stop, " << ctx.runtime_source
                  << "); { GenesisControlTransfer transfer = {0}; transfer.kind = GENESIS_STOP; transfer.stop = m68k_route_stop; return transfer; } } if (";
+          if (ctx.return_target_is_computed_jump && !ctx.compiled_entry_lookup_symbol.empty()) {
+            // ADR 0048: push-then-RTS computed jump; the popped value must be a final compiled identity.
+            out << ctx.compiled_entry_lookup_symbol << "(m68k_observed_return) == NULL";
+          } else {
           for (std::size_t index = 0; index < ctx.runtime_return_targets.size(); ++index) {
             if (index != 0U) out << " && ";
             out << "m68k_observed_return != UINT32_C(0x" << hex(ctx.runtime_return_targets[index], 8) << ")";
           }
           if (ctx.runtime_return_targets.empty()) out << "1";
+          }
           out << ") return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_RETURN_TARGET_MISMATCH, "
                   << ctx.runtime_source << ", 1U, m68k_stack_bus, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ); ";
     return out.str();

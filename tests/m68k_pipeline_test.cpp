@@ -9947,6 +9947,212 @@ int emit_immutable_rom_aot_return_from_subroutine_and_bit_clear_source() {
   return 0;
 }
 
+// SEG-021-T041 / ADR 0048: synthetic fixture for the push-then-RTS computed-jump admission. Project-authored
+// bytes only. The leading JSR/MOVEA.W/JSR(A0) shape mirrors the T246 fixture so the program is a genuine
+// partial program with a non-empty continuation set.
+namespace push_then_rts_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000D00U;
+const std::vector<std::uint8_t> image{
+    0x4EU, 0xB9U, 0x00U, 0x00U, 0x0DU, 0x1CU,  // +0x00 JSR $00000D1C
+    0x30U, 0x51U,                              // +0x06 MOVEA.W (A1),A0
+    0x4EU, 0x90U,                              // +0x08 JSR (A0)
+    0x4EU, 0x71U,                              // +0x0A NOP
+    0x60U, 0xF2U,                              // +0x0C BRA.S -> base
+    0x4EU, 0x75U,                              // +0x0E RTS_PLAIN (preceded by BRA.S: no push)
+    0x2FU, 0x32U, 0x10U, 0x10U,                // +0x10 MOVE.L $10(A2,D1.W),-(A7)
+    0x4EU, 0x75U,                              // +0x14 RTS_PUSHED (computed jump)
+    0x2FU, 0x12U,                              // +0x16 MOVE.L (A2),-(A7)
+    0x58U, 0x8FU,                              // +0x18 ADDQ.L #4,A7 (writes A7: ends the window)
+    0x4EU, 0x75U,                              // +0x1A RTS_STACK_ALTERED (ordinary RTS)
+    0x4EU, 0x75U,                              // +0x1C callee RTS
+    0x2FU, 0x12U,                              // +0x1E MOVE.L (A2),-(A7)
+    0x4AU, 0x39U, 0x00U, 0xFFU, 0x00U, 0x20U,  // +0x20 TST.B $00FF0020
+    0x66U, 0x06U,                              // +0x26 BNE.S -> +0x2E
+    0x50U, 0xF9U, 0x00U, 0xFFU, 0x00U, 0x21U,  // +0x28 ST $00FF0021
+    0x4EU, 0x75U,                              // +0x2E RTS_DIAMOND (computed jump across a diamond)
+};
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T041/push-then-rts", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base},
+                             {{}, static_cast<std::uint32_t>(base + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  return program;
+}
+}  // namespace push_then_rts_fixture
+
+int emit_push_then_rts_source() {
+  using namespace segarecomp;
+  auto program = push_then_rts_fixture::program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
+// SEG-021-T041 / ADR 0049: synthetic fixture for the immutable-copy alias (verbatim ROM-to-work-RAM copy
+// executed at the RAM address). Project-authored bytes only. The ROM prologue copies the 40-byte routine that
+// lives at +0x40 to work RAM $00FF0400 with a MOVE.L (A0)+,(A1)+ / DBRA loop and calls it with JSR abs.L. The
+// routine contains arithmetic, a BSR.S to an internal subroutine (call continuation), fallthrough, a relative
+// BNE.S, a PC-relative data read (d16,PC), an absolute store, and RTS.
+namespace immutable_copy_alias_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000E00U;
+constexpr std::uint32_t source_offset = 0x40U;
+constexpr std::uint32_t routine_length = 0x28U;
+constexpr std::uint32_t execution_base = 0x00FF0400U;
+const std::vector<std::uint8_t> image{
+    0x4EU, 0xB9U, 0x00U, 0x00U, 0x0EU, 0x0EU,  // +0x00 JSR $00000E0E (startup graph: shape of the ADR 0048 fixture)
+    0x30U, 0x51U,                              // +0x06 MOVEA.W (A1),A0
+    0x4EU, 0x90U,                              // +0x08 JSR (A0)  (unresolved: ends discovery with a frontier)
+    0x4EU, 0x71U,                              // +0x0A NOP
+    0x60U, 0xF2U,                              // +0x0C BRA.S -> base
+    0x4EU, 0x75U,                              // +0x0E RTS (callee)
+    // ---- copy prologue, reached only as an independent immutable-ROM AOT identity ----
+    0x41U, 0xFAU, 0x00U, 0x2EU,                // +0x10 LEA (d16,PC),A0  -> +0x40 (the routine source)
+    0x43U, 0xF9U, 0x00U, 0xFFU, 0x04U, 0x00U,  // +0x14 LEA $00FF0400.L,A1
+    0x74U, 0x09U,                              // +0x1A MOVEQ #9,D2
+    0x22U, 0xD8U,                              // +0x1C MOVE.L (A0)+,(A1)+
+    0x51U, 0xCAU, 0xFFU, 0xFCU,                // +0x1E DBRA D2,-4
+    0x4EU, 0xB9U, 0x00U, 0xFFU, 0x04U, 0x00U,  // +0x22 JSR $00FF0400.L   (transfer to the RAM copy)
+    0x4EU, 0x71U,                              // +0x28 NOP (JSR continuation)
+    0x60U, 0xFEU,                              // +0x2A BRA.S *
+    0x4EU, 0x71U, 0x4EU, 0x71U, 0x4EU, 0x71U, 0x4EU, 0x71U, 0x4EU, 0x71U,  // +0x2C..+0x35 padding
+    0x4EU, 0x71U, 0x4EU, 0x71U, 0x4EU, 0x71U, 0x4EU, 0x71U, 0x4EU, 0x71U,  // +0x36..+0x3F padding
+    // ---- routine, source +0x40 (executes at $00FF0400) ----
+    0x70U, 0x05U,                              // +0x00 MOVEQ #5,D0
+    0x61U, 0x18U,                              // +0x02 BSR.S -> +0x1C
+    0x4AU, 0x40U,                              // +0x04 TST.W D0
+    0x66U, 0x04U,                              // +0x06 BNE.S -> +0x0C
+    0x7CU, 0x63U,                              // +0x08 MOVEQ #$63,D6 (skipped)
+    0x4EU, 0x71U,                              // +0x0A NOP
+    0x30U, 0x3AU, 0x00U, 0x16U,                // +0x0C MOVE.W (d16,PC),D0 -> +0x24 (data word)
+    0x33U, 0xC0U, 0x00U, 0xFFU, 0x08U, 0x00U,  // +0x10 MOVE.W D0,$00FF0800.L
+    0x4EU, 0x75U,                              // +0x16 RTS
+    0x4EU, 0x71U, 0x4EU, 0x71U,                // +0x18 NOP NOP
+    0x52U, 0x40U,                              // +0x1C ADDQ.W #1,D0 (BSR target)
+    0x4EU, 0x75U,                              // +0x1E RTS
+    0x4EU, 0x71U, 0x4EU, 0x71U,                // +0x20 NOP NOP
+    0x12U, 0x34U, 0x00U, 0x00U,                // +0x24 data word $1234 (+ pad)
+};
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T041/immutable-copy-alias", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base},
+                             {{}, static_cast<std::uint32_t>(base + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF1000U};
+  return program;
+}
+}  // namespace immutable_copy_alias_fixture
+
+int emit_immutable_copy_alias_source(bool with_alias) {
+  using namespace segarecomp;
+  using namespace immutable_copy_alias_fixture;
+  auto program = program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  if (with_alias && !apply_genesis_immutable_copy_alias(program, execution_base, base + source_offset,
+                                                        routine_length))
+    return 7;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) {
+    if (const auto *bad = std::get_if<FrontendRejected>(&result)) std::cerr << "rejected category=" << static_cast<int>(bad->category) << "\n";
+    else std::cerr << "fully accepted analysis\n";
+    return 5;
+  }
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
+// Boundary and malformed-descriptor checks: every invalid alias is refused with no change to the program.
+int check_immutable_copy_alias_validation() {
+  using namespace segarecomp;
+  using namespace immutable_copy_alias_fixture;
+  auto program = program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto src = base + source_offset;
+  const auto rejected = [&](std::uint32_t exec, std::uint32_t source, std::uint32_t length) {
+    return !apply_genesis_immutable_copy_alias(program, exec, source, length) && program.immutable_copy_aliases.empty();
+  };
+  if (!rejected(execution_base, src, 0U)) return 10;                        // zero length
+  if (!rejected(execution_base, src, 0x27U)) return 11;                     // odd length
+  if (!rejected(execution_base + 1U, src, 0x28U)) return 12;                // odd execution base
+  if (!rejected(execution_base, src + 1U, 0x28U)) return 13;                // odd source base
+  if (!rejected(0x00FEFFF0U, src, 0x28U)) return 14;                        // below work RAM
+  if (!rejected(0x00FFFFF0U, src, 0x28U)) return 15;                        // runs past the end of work RAM
+  if (!rejected(0x00000400U, src, 0x28U)) return 16;                        // execution in cartridge space
+  if (!rejected(execution_base, src, static_cast<std::uint32_t>(image.size()))) return 17;  // source overruns image
+  if (!rejected(execution_base, 0x00001000U, 0x28U)) return 18;             // source not in any claim
+  if (!rejected(execution_base, 0xFFFFFFF0U, 0x28U)) return 19;             // source span wraps
+  if (!apply_genesis_immutable_copy_alias(program, execution_base, src, routine_length)) return 20;
+  if (!apply_genesis_immutable_copy_alias(program, execution_base, src, routine_length)) return 21;  // duplicate ok
+  if (program.immutable_copy_aliases.size() != 1U) return 22;
+  if (apply_genesis_immutable_copy_alias(program, execution_base + 0x10U, src, 0x20U)) return 23;    // overlap
+  if (program.immutable_copy_aliases.size() != 1U) return 24;
+  if (!apply_genesis_immutable_copy_alias(program, execution_base + 0x100U, src, 0x10U)) return 25;  // disjoint ok
+  if (program.immutable_copy_aliases.size() != 2U) return 26;
+  return 0;
+}
+
+// SEG-021-T041 / ADR 0049: synthetic fixture for the statically-foldable PEA return authority (a manual call
+// `PEA next; BRA callee` whose callee RTS returns to the pushed address, which no JSR continuation names).
+namespace pea_static_return_fixture {
+using namespace segarecomp;
+constexpr std::uint32_t base = 0x00000F00U;
+const std::vector<std::uint8_t> image{
+    0x4EU, 0xB9U, 0x00U, 0x00U, 0x0FU, 0x0EU,  // +0x00 JSR $00000F0E (startup graph)
+    0x30U, 0x51U,                              // +0x06 MOVEA.W (A1),A0
+    0x4EU, 0x90U,                              // +0x08 JSR (A0)
+    0x4EU, 0x71U,                              // +0x0A NOP
+    0x60U, 0xF2U,                              // +0x0C BRA.S -> base
+    0x4EU, 0x75U,                              // +0x0E RTS (callee of the real JSR)
+    0x48U, 0x7AU, 0x00U, 0x08U,                // +0x10 PEA (d16,PC) -> +0x1A
+    0x60U, 0x06U,                              // +0x14 BRA.S -> +0x1C
+    0x4EU, 0x71U, 0x4EU, 0x71U,                // +0x16 NOP NOP
+    0x4EU, 0x71U,                              // +0x1A NOP (pushed return target)
+    0x4EU, 0x75U,                              // +0x1C RTS (callee: pops the PEA-pushed address)
+    0x48U, 0x79U, 0x00U, 0x00U, 0x0FU, 0x2EU,  // +0x1E PEA $00000F2E.L
+    0x60U, 0xF6U,                              // +0x24 BRA.S -> +0x1C
+    0x4EU, 0x71U, 0x4EU, 0x71U,                // +0x26 NOP NOP
+    0x4EU, 0x71U,                              // +0x2A NOP
+    0x4EU, 0x71U,                              // +0x2C NOP
+    0x4EU, 0x71U,                              // +0x2E NOP (pushed return target)
+    0x48U, 0x78U, 0x10U, 0x00U,                // +0x30 PEA $1000.W (pushed value is not a compiled identity)
+    0x60U, 0xE6U,                              // +0x34 BRA.S -> +0x1C
+};
+FrontendProgram program_with() {
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-021-T041/pea-static-return", image, image.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base},
+                             {{}, static_cast<std::uint32_t>(base + image.size())}, {0U}, {image.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF1000U};
+  return program;
+}
+}  // namespace pea_static_return_fixture
+
+int emit_pea_static_return_source() {
+  using namespace segarecomp;
+  auto program = pea_static_return_fixture::program_with();
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
 // SEG-007-T245: representative generated-C source for the strict-C11
 // compile/execute proof (`tests/genesis_immutable_rom_aot_write_move_
 // generated_test.py`). Uses the exact same range the classification test
@@ -30492,6 +30698,16 @@ int main(int argc, char **argv) {
     return emit_write_move_register_indirect_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-immutable-rom-aot-return-from-subroutine-and-bit-clear")
     return emit_immutable_rom_aot_return_from_subroutine_and_bit_clear_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-push-then-rts")
+    return emit_push_then_rts_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-pea-static-return")
+    return emit_pea_static_return_source();
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-immutable-copy-alias")
+    return emit_immutable_copy_alias_source(true);
+  if (argc == 2 && std::string_view(argv[1]) == "--emit-immutable-copy-alias-control")
+    return emit_immutable_copy_alias_source(false);
+  if (argc == 2 && std::string_view(argv[1]) == "--check-immutable-copy-alias-validation")
+    return check_immutable_copy_alias_validation();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-arithmetic-memory-operand-aot")
     return emit_general_arithmetic_memory_operand_aot_source();
   if ((argc == 3 || argc == 4) && std::string_view(argv[1]) == "--emit-aot-factoring" &&

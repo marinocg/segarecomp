@@ -172,6 +172,12 @@ struct M68kMemoryEmissionContext {
   // (`Entry lookup(uint32_t) -> NULL when absent`). A runtime-computed JMP/JSR target is then checked
   // against it instead of a site-local array. Exclusive with a per-site proven `indirect_candidate_targets`.
   std::string_view compiled_entry_lookup_symbol;
+  // SEG-021-T041 / ADR 0048: when true (and `compiled_entry_lookup_symbol` is non-empty) an RTS validates
+  // its popped value against the final compiled-entry lookup instead of the whole-program JSR-continuation
+  // set. The caller sets it only for an RTS whose immediately preceding instruction is a long push onto the
+  // stack (a push-then-RTS computed jump), where the popped value is a computed jump target, not a return
+  // address.
+  bool return_target_is_computed_jump{};
   // SEG-007-T174: true only for the ONE caller (frontend.cpp's shared
   // subtract/add/logical C4 case) that wraps its `emit_m68k_operation_c`
   // call with a `#define pc runtime->pc` / `#undef pc` text bridge. That

@@ -307,6 +307,12 @@ struct FrontendProgram {
   struct ImmutableRomAotRange { std::uint32_t begin_address{}; std::uint32_t end_address{}; };
   std::vector<ImmutableRomAotRange> immutable_rom_aot_ranges{};
   bool immutable_rom_aot_enabled{false};
+  // SEG-021-T041 / ADR 0049: generated-data proposals that a work-RAM span is (or may become) a verbatim copy of
+  // an immutable cartridge span. Each proposal is only a request to compile the SAME immutable source bytes a
+  // second time for the alternate execution base; the runtime byte-identity guard emitted with every such body
+  // is the sole authority, so a wrong proposal can never execute wrong code. Empty by default.
+  struct ImmutableCopyAlias { std::uint32_t execution_base{}; std::uint32_t source_base{}; std::uint32_t length{}; };
+  std::vector<ImmutableCopyAlias> immutable_copy_aliases{};
   // Test-only synthetic seam for exercising block partitioning independently
   // from admission. Production input parsing never populates this vector; it
   // is honored only for project-authored `synthetic/` images.
@@ -331,6 +337,14 @@ void apply_genesis_code_pointer_table_descriptors(FrontendProgram &program);
 // uniquely mapped, structurally valid immutable raw-cartridge claims. No
 // caller-selected address or extent enters this operation.
 [[nodiscard]] bool apply_genesis_immutable_rom_aot(FrontendProgram &program);
+
+// SEG-021-T041 / ADR 0049: records one immutable-copy alias proposal. Fails closed (returns false, changes
+// nothing) for a zero/odd/oversized length, an odd base, a span that is not wholly inside the 64 KiB work-RAM
+// window without wrapping, a source span that is not wholly inside exactly one structurally valid
+// `raw_cartridge_rom` claim and image, or an execution span that overlaps an already-recorded alias other than
+// as an exact duplicate.
+[[nodiscard]] bool apply_genesis_immutable_copy_alias(FrontendProgram &program, std::uint32_t execution_base,
+                                                      std::uint32_t source_base, std::uint32_t length);
 
 // SEG-007-T204 / ADR-0033 (re-homed by the 2026-09-11 operator correction):
 // promotes zero or more `external_address_table_candidates` into ordinary
@@ -363,6 +377,13 @@ struct FrontendAnalysis { M68kFrontendProfile profile{M68kFrontendProfile::direc
     M68kDecodedInstruction decoded;
     M68kIrOperation operation;
     MappingClaim source_mapping;
+    // SEG-021-T041 / ADR 0049: an alias identity is the same immutable source bytes decoded a second time (by the
+    // one existing decoder) at an alternate work-RAM execution base. `decoded`/`operation` provenance carries
+    // the EXECUTION address (so relative branches, PC-relative EAs, fallthrough and continuations are
+    // execution-relative and absolute targets stay absolute); `alias_source_address` is the immutable source
+    // address of the same instruction. `decoded.raw_bytes` are the bytes the runtime guard must find in RAM.
+    bool execution_alias{false};
+    std::uint32_t alias_source_address{};
   };
   // Independent executable identities. Provenance lives in `decoded` and
   // `operation`; `source_mapping` preserves the unique immutable byte owner.

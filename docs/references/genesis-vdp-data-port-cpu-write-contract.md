@@ -1,11 +1,13 @@
-# Genesis VDP bounded CPU DATA-port write contract
+# Genesis VDP bounded CPU DATA-port write/read contract
 
 ## Scope
 
 This record supplies the public-source basis for SEG-007-T108's bounded runtime
 capability: the plain (non-armed-fill, non-DMA) MC68000 CPU write to the Genesis
-VDP DATA port (`$C00000`) that the canonical Sonic startup route reaches. It
-covers only what that route exercises:
+VDP DATA port (`$C00000`) that the canonical Sonic startup route reaches, and
+(SEG-021-T041, see the dedicated section below) the read-direction sibling the
+Cool Spot route reached once the write path was already complete. It
+covers only what those routes exercise:
 
 - a `LONG` (32-bit) and `WORD` (16-bit) CPU write to `$C00000`;
 - whose transfer target was selected by a completed non-DMA two-word
@@ -74,8 +76,9 @@ field) **before any mutation**, preserving
   selected (CD0 = 1: VRAM/CRAM/VSRAM write, an armed fill, or a half-written write command) a
   68000 read of the data port never completes on hardware — the machine freezes (BlastEm stalls
   the CPU; Genesis Plus GX documents a lockup needing a hard reset) — so the fail-closed READ stop
-  is the faithful result, not a missing feature. Read-code data-port reads (prefetched data,
-  address += register 15, new prefetch) remain unmodelled and fail closed;
+  is the faithful result, not a missing feature. With a READ-class code selected, WORD/LONG
+  data-port reads are now modelled by the read-direction sibling in the dedicated section below
+  (SEG-021-T041); BYTE data-port reads remain unmodelled and fail closed;
 - wrong port/address: any address other than `$C00000` for this path;
 - no transfer code selected (`data_port_transfer_code_valid == 0`);
 - a READ code selected (`0x00` VRAM READ, `0x04` VSRAM READ, `0x08` CRAM READ);
@@ -179,11 +182,13 @@ two-word CONTROL command those existing fields already model (SEG-007-T091 /
 T042 SS1.3), now completed rather than approximated -- a bounded additive
 detail within the existing semantic owner, not a new state machine.
 
-Still out of scope and fail-closed: all DATA-port reads (including the discarded read of
-memory CLR / Scc / MOVE from SR, which locks up real hardware under a write code); CRAM / VSRAM / VRAM
-read paths; a generic control-port state machine; the VDP DMA engine (the
-executed frontier did not couple the data-port write to DMA); FIFO / timing /
-status-bit behavior. A DATA-port write with no transfer code ever selected
+Still out of scope and fail-closed for the WRITE path itself: a DATA-port read with a
+write-class code selected (including the discarded read of memory CLR / Scc / MOVE from SR,
+which locks up real hardware under a write code); a generic control-port state machine; the
+VDP DMA engine (the executed frontier did not couple the data-port write to DMA); FIFO / timing /
+status-bit behavior. (WORD/LONG DATA-port reads with a READ-class code selected are now modelled
+by the read-direction sibling, SEG-021-T041, below; BYTE DATA-port reads remain out of scope in
+either direction.) A DATA-port write with no transfer code ever selected
 (`data_port_transfer_code_valid == 0`) is still rejected -- but it now still
 clears any half-written CONTROL command latch first, matching the shared
 write-pending flip-flop.
@@ -212,3 +217,68 @@ through a separately evidenced change.
   mirroring the VRAM-fill path's identical rationale.
 - **No FIFO / timing / status model.** These writes complete immediately with no
   FIFO occupancy, no DMA-busy interaction, and no status-bit effect.
+
+## SEG-021-T041 extension: DATA-port READ direction
+
+SEG-021-T041 adds the read-direction sibling of the write model above:
+`genesis_vdp_data_port_cpu_read` (`genesis_vdp_read_target_buffer` /
+`genesis_vdp_data_port_target_read_halfword`), wired into `genesis_vdp_access`'s
+READ branch for `$C00000`. Scope, in the same spirit as the write path above:
+
+- **Read targets.** `data_port_transfer_code == 0x00` (VRAM READ) targets
+  `vram`; `0x04` (VSRAM READ) targets `vsram`; `0x08` (CRAM READ) targets
+  `cram` -- the three documented READ codes from the same GTO1 p. 20 / p. 27
+  `CD5..CD0` table the write path already cites. Every WRITE code
+  (`0x01`/`0x03`/`0x05`), an unselected code, and an armed DMA/fill engine
+  remain fail-closed for a READ exactly as they already are documented for a
+  WRITE.
+- **WORD and LONG widths only.** A `LONG` read decomposes into two sequential
+  16-bit sub-reads, D31-D16 first (GTO1 p. 20's "two word accesses" rule read
+  for the read direction), reusing the identical per-halfword helper shape the
+  write path already established, with the same documented non-atomic
+  partial-completion policy (a failed second sub-read leaves the first
+  sub-read's pointer advance committed).
+- **BYTE reads are out of scope and fail closed.** GTO1 gives no byte-lane
+  selection rule for a DATA-port *read* comparable to its (already only
+  loosely worded) BYTE-write phrasing, and the runtime-selected frontier this
+  task resolves is a WORD read. Guessing which physical half of the fetched
+  word a BYTE read of `$C00000` vs `$C00001` would return is exactly the kind
+  of unevidenced hardware claim this project avoids, so BYTE DATA-port reads
+  stay fail-closed, unlike the write path's own (separately justified, still
+  non-hardware-cited) BYTE mirroring policy.
+- **VRAM odd-address exchange, read direction.** The write path (GTO1 pp. 20 /
+  27-33, "VRAM address A0 is used in the calculation of the address increment,
+  but is ignored during address decoding" / "high and low bytes are exchanged
+  if A0 = 1") already stores a halfword `H` written at odd address `A` as
+  `vram[A&~1] = low(H)`, `vram[(A&~1)+1] = high(H)`. This project reads GTO1's
+  exchange rule as direction-symmetric -- it renames which stored byte of the
+  even base pair supplies the bus's high/low half, not a write-only quirk --
+  so a READ at the same odd address reconstructs
+  `H = (vram[(A&~1)+1] << 8) | vram[A&~1]`, the only self-consistent round-trip
+  reading of that rule (writing `H` at an odd address and immediately reading
+  it back at the same address returns `H` unchanged). CRAM / VSRAM at an odd
+  current address stay fail-closed on a READ, exactly like the write path:
+  GTO1 documents the exchange only for VRAM.
+- **Auto-increment and wrap.** Identical to the write path: `addressed_pointer`
+  advances by `auto_increment_value` after each successful sub-read, modulo
+  the selected target's documented byte size (including the 64 KiB VRAM wrap).
+- **Coupled control-port latch.** A DATA-port READ clears the shared two-word
+  CONTROL-port write-pending flip-flop unconditionally, in the same
+  cancel-and-consume shape the write path already documents (SEG-007-T191)
+  -- even when the read itself then fails for lack of a selected/valid READ
+  code.
+- **Armed-DMA guard kept defensively.** The read path carries the identical
+  `dma.phase != GENESIS_VDP_DMA_IDLE -> fail closed` guard the write path
+  uses. Under this project's synchronous-DMA-drain policy (SEG-007-T175;
+  `genesis_vdp_drain_memory_to_vdp_dma_body` runs before any routed access
+  returns to generated C, and the VRAM-fill engine's own CPU-write completion
+  clears `BUSY` before returning) no reachable generated dispatch step can
+  actually observe `dma.phase != IDLE` at a DATA-port READ, so this guard is
+  believed unreachable in practice; it is kept anyway as a defensive
+  invariant, not as the sole suspension mechanism.
+
+No new `GenesisVdpState` field or ownership is introduced for the read
+direction either: it reuses the identical `addressed_pointer`,
+`auto_increment_value`, `data_port_transfer_code[_valid]`,
+`control_port_first_word`, `control_port_awaiting_second_word`, and
+`vram`/`cram`/`vsram` fields the write path already owns.

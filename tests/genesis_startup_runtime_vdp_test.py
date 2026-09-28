@@ -51,6 +51,20 @@ generated program is involved. It calls `genesis_route_access` directly for:
   (CRAM/VSRAM odd stays fail-closed), and a data-port write with no completed
   or an incomplete two-word control-port command is deterministic fail-closed.
 
+- SEG-021-T041 adds the read-direction sibling: the plain (non-armed-DMA)
+  CPU DATA-port ($C00000) READ. A completed non-DMA two-word address-set
+  command selecting a READ code (VRAM READ 0x00, VSRAM READ 0x04, CRAM READ
+  0x08) makes a subsequent WORD/LONG read of $C00000 return the correct
+  big-endian value from the selected target and advance `addressed_pointer`
+  by the register-15 auto-increment, wrapping modulo the target's byte size
+  (including the 64 KiB VRAM wrap). VRAM at an odd current address applies
+  GTO1's documented high/low byte exchange to the read direction (a WORD
+  written at an odd address reads back byte-identical); CRAM/VSRAM at an odd
+  current address stay fail-closed. A selected WRITE code, no selected code,
+  or BYTE width fail closed; a DATA-port read after only the first word of a
+  two-word command still cancels the pending latch, exactly like the write
+  path's own cancel-and-consume case.
+
 It also confirms every other address, width, and direction in the
 recognized VDP register-area window remains unconditionally fail-closed
 with `GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP` -- including the DATA
@@ -1591,6 +1605,359 @@ int main(void) {
        }
        assert(memcmp(a.devices.vdp.vram, b.devices.vdp.vram, GENESIS_VDP_VRAM_BYTES) == 0);
        assert(a.devices.vdp.addressed_pointer == b.devices.vdp.addressed_pointer);
+     }
+   }
+
+   /* --- SEG-021-T041: the plain CPU DATA-port ($C00000) READ -- VRAM READ
+      (CD5-CD0 code 0x00), VSRAM READ (0x04) and CRAM READ (0x08), WORD/LONG
+      widths, the GTO1-documented VRAM odd-address byte-exchange read back,
+      64 KiB VRAM wrap, and the coupled control-port latch fail-closed
+      cases. See genesis_vdp_data_port_cpu_read's own doc comment in
+      runtime.c for citations. All state here is synthetic, test-authored
+      fixture state; no ROM is involved. */
+   {
+     /* VRAM READ: seed known bytes directly, program a VRAM READ command,
+        confirm the correct big-endian word, address auto-increment, and
+        that a subsequent read observes the next address. */
+     {
+       GenesisRuntime rr = {0};
+       value = UINT32_C(0x8F02); /* reg #15 = auto-increment 2 */
+       assert(genesis_route_access(&rr, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       rr.devices.vdp.vram[UINT32_C(0x3000)] = UINT8_C(0xAB);
+       rr.devices.vdp.vram[UINT32_C(0x3001)] = UINT8_C(0xCD);
+       rr.devices.vdp.vram[UINT32_C(0x3002)] = UINT8_C(0x12);
+       rr.devices.vdp.vram[UINT32_C(0x3003)] = UINT8_C(0x34);
+       /* VRAM READ (CD5..CD0 = 000000) at address 0x3000: 1st word
+          bits 15-14 = CD1,CD0 = 00, A13-A0 = 0x3000 -> 0x3000; 2nd word
+          = 0x0000 (CD5-CD2=0000, A15A14=00, since 0x3000 < 0x4000). */
+       value = UINT32_C(0x3000);
+       assert(genesis_route_access(&rr, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0x0000);
+       assert(genesis_route_access(&rr, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(rr.devices.vdp.data_port_transfer_code == UINT8_C(0x00));
+       assert(rr.devices.vdp.data_port_transfer_code_valid == 1U);
+       assert(rr.devices.vdp.addressed_pointer == UINT32_C(0x3000));
+
+       value = UINT32_C(0xFFFFFFFF);
+       assert(genesis_route_access(&rr, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(value == UINT32_C(0xABCD));
+       assert(rr.devices.vdp.addressed_pointer == UINT32_C(0x3002));
+       value = UINT32_C(0xFFFFFFFF);
+       assert(genesis_route_access(&rr, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(value == UINT32_C(0x1234));
+       assert(rr.devices.vdp.addressed_pointer == UINT32_C(0x3004));
+       /* Reading never mutates VRAM itself. */
+       assert(rr.devices.vdp.vram[UINT32_C(0x3000)] == UINT8_C(0xAB) &&
+              rr.devices.vdp.vram[UINT32_C(0x3001)] == UINT8_C(0xCD));
+     }
+
+     /* VRAM odd-address round trip: a WORD written at an odd current
+        address (high/low bytes exchanged, GTO1) reads back byte-identical
+        through the same exchange applied to the read direction. */
+     {
+       GenesisRuntime rt = {0};
+       value = UINT32_C(0x8F02);
+       assert(genesis_route_access(&rt, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       /* VRAM WRITE (CD5..CD0 = 0x01) at address 0x4001 (odd): 1st word
+          CD1CD0=01 -> 0x4000, A13-A0=0x0001 -> 0x4001; 2nd word
+          CD5-CD2=0000, A15A14=01 -> 0x0001. */
+       value = UINT32_C(0x4001);
+       assert(genesis_route_access(&rt, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0x0001);
+       assert(genesis_route_access(&rt, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(rt.devices.vdp.addressed_pointer == UINT32_C(0x4001));
+       value = UINT32_C(0xBEEF);
+       assert(genesis_route_access(&rt, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(rt.devices.vdp.vram[UINT32_C(0x4000)] == UINT8_C(0xEF) &&
+              rt.devices.vdp.vram[UINT32_C(0x4001)] == UINT8_C(0xBE));
+       assert(rt.devices.vdp.addressed_pointer == UINT32_C(0x4003));
+
+       /* Re-select VRAM READ at the same odd address 0x4001. */
+       value = UINT32_C(0x0001); /* CD1CD0=00, A13-A0=0x0001 */
+       assert(genesis_route_access(&rt, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0x0001); /* CD5-CD2=0000, A15A14=01 */
+       assert(genesis_route_access(&rt, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(rt.devices.vdp.addressed_pointer == UINT32_C(0x4001));
+       value = UINT32_C(0xFFFFFFFF);
+       assert(genesis_route_access(&rt, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(value == UINT32_C(0xBEEF)); /* exact round trip of the odd-address write */
+       assert(rt.devices.vdp.addressed_pointer == UINT32_C(0x4003));
+     }
+
+     /* 64 KiB VRAM wrap: a READ armed near the top of VRAM with a non-zero
+        auto-increment wraps its address progression modulo 64 KiB. */
+     {
+       GenesisRuntime rw = {0};
+       value = UINT32_C(0x8F02);
+       assert(genesis_route_access(&rw, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       rw.devices.vdp.vram[UINT32_C(0xFFFE)] = UINT8_C(0x99);
+       rw.devices.vdp.vram[UINT32_C(0xFFFF)] = UINT8_C(0x88);
+       rw.devices.vdp.vram[UINT32_C(0x0000)] = UINT8_C(0x77);
+       rw.devices.vdp.vram[UINT32_C(0x0001)] = UINT8_C(0x66);
+       /* VRAM READ at address 0xFFFE: 1st word CD1CD0=00, A13-A0=0x3FFE
+          -> 0x3FFE; 2nd word CD5-CD2=0000, A15A14=11 -> 0x0003. */
+       value = UINT32_C(0x3FFE);
+       assert(genesis_route_access(&rw, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0x0003);
+       assert(genesis_route_access(&rw, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(rw.devices.vdp.addressed_pointer == UINT32_C(0xFFFE));
+       value = UINT32_C(0xFFFFFFFF);
+       assert(genesis_route_access(&rw, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(value == UINT32_C(0x9988));
+       assert(rw.devices.vdp.addressed_pointer == UINT32_C(0x0000)); /* wrapped */
+       value = UINT32_C(0xFFFFFFFF);
+       assert(genesis_route_access(&rw, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(value == UINT32_C(0x7766));
+       assert(rw.devices.vdp.addressed_pointer == UINT32_C(0x0002));
+     }
+
+     /* VSRAM READ: progression and odd-address fail-closed. */
+     {
+       GenesisRuntime vs = {0};
+       value = UINT32_C(0x8F02);
+       assert(genesis_route_access(&vs, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       vs.devices.vdp.vsram[2] = UINT8_C(0x11);
+       vs.devices.vdp.vsram[3] = UINT8_C(0x22);
+       vs.devices.vdp.vsram[4] = UINT8_C(0x33);
+       vs.devices.vdp.vsram[5] = UINT8_C(0x44);
+       /* VSRAM READ (CD5..CD0 = 000100 = 0x04) at address 0x0002: 1st word
+          CD1CD0=00 -> 0x0002; 2nd word CD5-CD2=0001 -> 0x0010. */
+       value = UINT32_C(0x0002);
+       assert(genesis_route_access(&vs, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0x0010);
+       assert(genesis_route_access(&vs, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(vs.devices.vdp.data_port_transfer_code == UINT8_C(0x04));
+       assert(vs.devices.vdp.addressed_pointer == UINT32_C(0x0002));
+       value = UINT32_C(0xFFFFFFFF);
+       assert(genesis_route_access(&vs, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(value == UINT32_C(0x1122));
+       assert(vs.devices.vdp.addressed_pointer == UINT32_C(0x0004));
+       value = UINT32_C(0xFFFFFFFF);
+       assert(genesis_route_access(&vs, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(value == UINT32_C(0x3344));
+       assert(vs.devices.vdp.addressed_pointer == UINT32_C(0x0006));
+
+       /* Odd current address: VSRAM stays fail-closed (GTO1 documents the
+          A0 exchange only for VRAM). */
+       {
+         GenesisRuntime vo = {0};
+         value = UINT32_C(0x8F02);
+         assert(genesis_route_access(&vo, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                     GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+         /* VSRAM READ at address 0x0005: 1st word=0x0005; 2nd word=0x0010. */
+         value = UINT32_C(0x0005);
+         assert(genesis_route_access(&vo, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                     GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+         value = UINT32_C(0x0010);
+         assert(genesis_route_access(&vo, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                     GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+         {
+           GenesisDeviceState before = vo.devices;
+           value = UINT32_C(0xFFFFFFFF);
+           assert(genesis_route_access(&vo, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                       GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+           assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
+                  stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
+           assert(memcmp(&vo.devices, &before, sizeof(before)) == 0);
+         }
+       }
+     }
+
+     /* CRAM READ: readback equals exactly what a prior write stored
+        (byte-for-byte), progression, and odd-address fail-closed. */
+     {
+       GenesisRuntime cr = {0};
+       value = UINT32_C(0x8F02);
+       assert(genesis_route_access(&cr, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       /* CRAM WRITE (CD5..CD0 = 000011 = 0x03) at address 0x0010: 1st word
+          CD1CD0=11 -> 0xC000, A13-A0=0x0010 -> 0xC010; 2nd word
+          CD5-CD2=0000 -> 0x0000. */
+       value = UINT32_C(0xC010);
+       assert(genesis_route_access(&cr, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0x0000);
+       assert(genesis_route_access(&cr, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0x1357);
+       assert(genesis_route_access(&cr, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(cr.devices.vdp.cram[UINT32_C(0x10)] == UINT8_C(0x13) &&
+              cr.devices.vdp.cram[UINT32_C(0x11)] == UINT8_C(0x57));
+       assert(cr.devices.vdp.addressed_pointer == UINT32_C(0x0012));
+
+       /* CRAM READ (CD5..CD0 = 001000 = 0x08) at address 0x0010: 1st word
+          CD1CD0=00 -> 0x0010; 2nd word CD5-CD2=0010 -> 0x0020. */
+       value = UINT32_C(0x0010);
+       assert(genesis_route_access(&cr, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0x0020);
+       assert(genesis_route_access(&cr, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(cr.devices.vdp.data_port_transfer_code == UINT8_C(0x08));
+       assert(cr.devices.vdp.addressed_pointer == UINT32_C(0x0010));
+       value = UINT32_C(0xFFFFFFFF);
+       assert(genesis_route_access(&cr, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(value == UINT32_C(0x1357)); /* byte-identical to the prior write */
+       assert(cr.devices.vdp.addressed_pointer == UINT32_C(0x0012));
+
+       /* Progression: reselect CRAM WRITE, store a second known word, then
+          reselect CRAM READ and confirm the advanced-address readback. */
+       value = UINT32_C(0xC012);
+       assert(genesis_route_access(&cr, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0x0000);
+       assert(genesis_route_access(&cr, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0x2468);
+       assert(genesis_route_access(&cr, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0x0012);
+       assert(genesis_route_access(&cr, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0x0020);
+       assert(genesis_route_access(&cr, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0xFFFFFFFF);
+       assert(genesis_route_access(&cr, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(value == UINT32_C(0x2468));
+       assert(cr.devices.vdp.addressed_pointer == UINT32_C(0x0014));
+
+       /* Odd current address: CRAM stays fail-closed. */
+       {
+         GenesisRuntime co = {0};
+         value = UINT32_C(0x8F02);
+         assert(genesis_route_access(&co, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                     GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+         /* CRAM READ at address 0x0011: 1st word=0x0011; 2nd word=0x0020. */
+         value = UINT32_C(0x0011);
+         assert(genesis_route_access(&co, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                     GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+         value = UINT32_C(0x0020);
+         assert(genesis_route_access(&co, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                     GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+         {
+           GenesisDeviceState before = co.devices;
+           value = UINT32_C(0xFFFFFFFF);
+           assert(genesis_route_access(&co, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                       GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+           assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
+                  stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
+           assert(memcmp(&co.devices, &before, sizeof(before)) == 0);
+         }
+       }
+     }
+
+     /* Wrong code: a WRITE code (0x01/0x03/0x05) selected, then a DATA-port
+        READ attempted -- fails closed, mutating nothing (the two-word
+        command already completed, so there is no pending latch to
+        cancel). */
+     {
+       GenesisRuntime wc = {0};
+       value = UINT32_C(0x8F02);
+       assert(genesis_route_access(&wc, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       /* VRAM WRITE (CD5..CD0 = 0x01) at address 0x1000, same as the earlier
+          SEG-007-T191 fixture. */
+       value = UINT32_C(0x5000);
+       assert(genesis_route_access(&wc, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       value = UINT32_C(0x0000);
+       assert(genesis_route_access(&wc, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       {
+         GenesisDeviceState before = wc.devices;
+         value = UINT32_C(0xFFFFFFFF);
+         assert(genesis_route_access(&wc, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                     GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+         assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
+                stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
+         assert(memcmp(&wc.devices, &before, sizeof(before)) == 0);
+       }
+     }
+
+     /* Missing code: a fresh runtime has no selected transfer code at all.
+        A DATA-port READ attempted right after only the FIRST word of a
+        two-word command fails closed for lack of a completed/valid code,
+        but the shared two-word pending latch is still cancelled by the
+        DATA-port access itself, exactly mirroring the write path's own
+        SEG-007-T191 cancel-and-consume case. */
+     {
+       GenesisRuntime nc = {0};
+       value = UINT32_C(0x5000); /* first word of a VRAM address-set command */
+       assert(genesis_route_access(&nc, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+       assert(nc.devices.vdp.control_port_awaiting_second_word == 1U);
+       assert(nc.devices.vdp.data_port_transfer_code_valid == 0U);
+       value = UINT32_C(0xFFFFFFFF);
+       assert(genesis_route_access(&nc, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                   GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+       assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
+              stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
+       /* The pending sequence is cancelled by the DATA-port access even
+          though the read itself was rejected (no transfer code selected). */
+       assert(nc.devices.vdp.control_port_awaiting_second_word == 0U);
+       assert(nc.devices.vdp.control_port_first_word == 0U);
+       assert(nc.devices.vdp.data_port_transfer_code_valid == 0U);
+       /* A rejected read never touches VRAM/CRAM/VSRAM: a fresh runtime's
+          buffers remain zero-initialized. */
+       assert(nc.devices.vdp.vram[0] == 0U && nc.devices.vdp.vram[GENESIS_VDP_VRAM_BYTES - 1U] == 0U);
+     }
+
+     /* Determinism: an identical VRAM READ command + seeded-data + WORD
+        read sequence on two fresh runtimes yields byte-identical device
+        state, including the final address pointer. */
+     {
+       GenesisRuntime da = {0};
+       GenesisRuntime db = {0};
+       GenesisRuntime *deach[2];
+       int i;
+       deach[0] = &da;
+       deach[1] = &db;
+       for (i = 0; i < 2; ++i) {
+         GenesisRuntime *r = deach[i];
+         value = UINT32_C(0x8F02);
+         assert(genesis_route_access(r, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                     GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+         r->devices.vdp.vram[UINT32_C(0x0800)] = UINT8_C(0x5A);
+         r->devices.vdp.vram[UINT32_C(0x0801)] = UINT8_C(0xA5);
+         value = UINT32_C(0x0800);
+         assert(genesis_route_access(r, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                     GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+         value = UINT32_C(0x0000);
+         assert(genesis_route_access(r, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                     GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+         value = UINT32_C(0xFFFFFFFF);
+         assert(genesis_route_access(r, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                     GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+         assert(value == UINT32_C(0x5AA5));
+       }
+       assert(memcmp(&da.devices, &db.devices, sizeof(da.devices)) == 0);
+       assert(da.devices.vdp.addressed_pointer == db.devices.vdp.addressed_pointer);
      }
    }
 
