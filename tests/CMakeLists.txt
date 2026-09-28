@@ -890,6 +890,9 @@ add_test(NAME genesis_bridge_defaults_test COMMAND ${Python3_EXECUTABLE}
 # SEG-021-T041 / ADR 0049: pure derivation of immutable-copy alias proposals (tool side).
 add_test(NAME genesis_copy_alias_discovery_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_copy_alias_discovery_test.py)
+# SEG-021-T041 / ADR 0049: preparation-phase lifecycle, accounting and termination vocabulary (hermetic).
+add_test(NAME genesis_copy_alias_lifecycle_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_copy_alias_lifecycle_test.py)
 
 add_executable(codegen_c11_provenance_diagnostics_tests codegen_c11_provenance_diagnostics_test.cpp)
 target_link_libraries(codegen_c11_provenance_diagnostics_tests PRIVATE segarecomp::codegen_c11_m68k)

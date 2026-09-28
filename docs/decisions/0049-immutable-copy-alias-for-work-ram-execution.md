@@ -70,14 +70,33 @@ and fail closed, exactly as a jump into unknown RAM must.
    instruction provenance and commits nothing. The comparison is identity only: nothing in RAM is ever decoded,
    compiled or cached. Because the guard runs at every fetch, bytes changed later (self-modification) fail
    closed at the changed instruction. A wrong or stale descriptor can therefore never execute wrong code.
-3. **Descriptor discovery is tooling, not the runtime.** `tools/genesis_startup_bridge.py --discover-copy-aliases`
-   runs bounded (64 rounds) build/run rounds with the headless capture executable. When the guest stops
-   fail-closed at a work-RAM PC, the capture hook writes a private ephemeral work-RAM dump; the tool finds the
-   maximal verbatim run of the immutable image around that PC (both directions, constant delta, minimum 16 bytes;
-   identical ROM occurrences are interchangeable because the alias decodes the identical bytes at the execution
-   address), merges same-delta neighbours, and regenerates with `--immutable-copy-alias
-   <execution>:<source>:<length>`. Only aggregate counts are reported. The emitter re-validates every descriptor
-   (`apply_genesis_immutable_copy_alias` fails closed on odd/zero/oversized/wrapping/overlapping/unowned input).
+3. **Descriptor discovery is tooling, not the runtime, and a separate optional preparation phase.**
+   `--immutable-copy-alias <execution>:<source>:<length>` is the low-level emitter descriptor input (tests, future
+   static analyzers, preparation artifacts); `tools/genesis_startup_bridge.py --discover-copy-aliases` is the normal
+   high-level helper that produces such descriptors. The invocation lifecycle is:
+   - an optional, bounded **preparation phase** (only with `--discover-copy-aliases`): up to 64 rounds (a
+     test-only environment override lowers the bound), each round one generation + one compile + one run of the
+     headless capture executable of the program built with the aliases found so far. When the guest stops
+     fail-closed at a work-RAM PC, the capture hook writes a private ephemeral work-RAM dump; the tool finds the
+     maximal verbatim run of the immutable image around that PC (both directions, constant delta, minimum 16
+     bytes; identical ROM occurrences are interchangeable because the alias decodes the identical bytes at the
+     execution address), merges same-delta neighbours, and iterates. The phase ends with exactly one aggregate
+     `COPY_ALIAS_DISCOVERY` line (`rounds`, `generation_attempts`, `compile_attempts`, `run_attempts`,
+     `alias_count`, `alias_total_bytes`, `termination_reason`), printed even for zero aliases; no addresses,
+     offsets or dumps are reported. `termination_reason` is a closed vocabulary: `route_advanced` (a run ended
+     without a guest stop), `runner_resource_limit` (host dispatch allowance reached without a stop),
+     `no_work_ram_frontier`, `frontier_not_verbatim_copy`, `non_alias_frontier` (the stop cannot be explained by a
+     copy alias), `repeated_alias_no_progress`, and the two incomplete outcomes `max_rounds` and `tool_failure`.
+     Incomplete preparation fails closed: nonzero exit, no final program is generated or run. Every other outcome
+     proceeds to the final phase, which then reports any remaining frontier honestly.
+   - the canonical **final one-shot phase** (`--one-shot`): exactly one generation, one compile and one run of
+     the final program, whose emitter command carries exactly the aliases found (or provided) before emission.
+     `--one-shot` governs this final program and forbids runtime-confirmed code-discovery expansion of it.
+     `ONE_SHOT_SUMMARY` describes the final phase only and is unchanged when no discovery flag is given; the whole
+     invocation is therefore N preparation builds plus one final build, never "one generate/compile/run".
+   Without `--discover-copy-aliases` there is no preparation: no extra execution, no work-RAM dump, no alias search,
+   no extra compile round. The emitter re-validates every descriptor (`apply_genesis_immutable_copy_alias` fails
+   closed on odd/zero/oversized/wrapping/overlapping/unowned input).
 4. **Static PEA return authority (same generic family, found by the rerun).** A `PEA` with a statically
    foldable effective address (absolute or PC-relative; execution-relative for an alias identity) pushes a fixed
    code address (the classic manual call `PEA next; JMP/BRA callee`). Such an address that is itself a final
@@ -103,6 +122,12 @@ and fail closed, exactly as a jump into unknown RAM must.
   mirror has no compiled body and fails closed).
 - Alias descriptors are proposals derived from observed fail-closed stops; a route never observed reaching the
   copy has no alias and stops honestly.
+- Discovery is workload/path dependent. It finds only ROM-to-RAM executable copies reached by the preparation
+  runs: a boot, attract-mode copy and execute is discovered; a title that waits for START and only then loads a
+  level and copies code is not discovered unless the preparation run exercises that path. The final executable
+  contains only aliases discovered or provided before emission; a later, unseen executable RAM copy stays
+  fail-closed. A title that runs without a stop is not proof of complete alias coverage. The helper is a temporary,
+  explicit tool (no default, no persistence), and no game-specific descriptor is committed.
 
 ## Consequences
 
@@ -113,7 +138,9 @@ and fail closed, exactly as a jump into unknown RAM must.
   later-changed bytes fail closed; ROM execution of the same routine is unchanged; the alias-less control still
   stops at the RAM target; no decoder in the generated program; deterministic; strict C11 with `-Werror`),
   descriptor validation checks in the same test, `genesis_pea_static_return_generated_test`,
-  `genesis_cartridge_mirror_region_test`, `genesis_copy_alias_discovery_test`.
+  `genesis_cartridge_mirror_region_test`, `genesis_copy_alias_discovery_test`, and
+  `genesis_copy_alias_lifecycle_test` (preparation/final lifecycle accounting, every termination reason,
+  fail-closed round-bound exhaustion, and no preparation without the flag).
 - The route reaches a stable generated-native presentation with no fail-closed frontier (sanitized frontier
   sequence recorded in the task evidence: alias, PEA return authority, cartridge mirror).
 
@@ -121,4 +148,4 @@ and fail closed, exactly as a jump into unknown RAM must.
 
 The project models no cartridge SRAM/backup RAM. A power-of-two image of 1 or 2 MiB
 with SRAM at `$200000` would read mirrored ROM there under the mirroring rule above.
-Modelling SRAM is out of scope for this decision.
+Modelling SRAM is out of scope for this decision, and nothing here claims that SRAM-bearing titles run correctly.

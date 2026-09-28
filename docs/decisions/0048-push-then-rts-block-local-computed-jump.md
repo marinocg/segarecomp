@@ -46,6 +46,15 @@ commercial title's table dispatch (runtime-selected evidence, sanitized to this 
   and is also accepted, which is still architecturally exact. This is why no whole-program predecessor analysis is
   required (indirect predecessors are unknowable statically) and why the check fails closed rather than open.
 - Because nothing is merged, an interrupt taken between them behaves as on hardware.
+- Adversarial review (SEG-021-T041, shared join point): the marking is existential per RTS identity (some push
+  candidate reaches it through the bounded, stack-neutral window), so an RTS that is a join of a push-arm (branch or
+  diamond) and an arm entered by an ordinary `JSR`/`BSR` return is marked as a computed-jump RTS. This admits no
+  transfer that hardware would not perform: the RTS still pops the real stack slot and the popped value must be a
+  compiled identity; a genuine return address is a compiled continuation and is accepted exactly as before, while a
+  corrupted return value that happens to be another compiled identity is now followed instead of stopping with
+  `return_target_mismatch` (a loss of that RTS's strictness, never of architectural exactness). Any instruction with a
+  stack effect (`JSR`/`BSR`/`PEA`/`LINK`/A7 writes) terminates the walk, so an intervening call never extends the
+  window. No whole-program predecessor analysis is added, and unknown targets still fail closed.
 
 ## Consequences
 
