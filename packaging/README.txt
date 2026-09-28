@@ -29,6 +29,6 @@ Good to know
 * On Windows keep the package path to characters in your system code page.
 * macOS: the app is not notarized. On first launch use right-click > Open, or run
   xattr -dr com.apple.quarantine Segarecomp.app
-* Linux: SDL3 needs a graphical session (X11 or Wayland) and the usual system libraries.
+* Linux: needs glibc 2.35 or newer (Ubuntu 22.04+, Debian 12+, Fedora 36+) and a graphical session (X11 or Wayland).
 
 Licenses and third-party notices are in the licenses folder.

@@ -35,10 +35,12 @@ const char *zig_target() {
   return "x86_64-macos";
 #elif defined(_WIN32)
   return "x86_64-windows-gnu";
+// Linux: the bundled libSDL3.so is built on Ubuntu 22.04 (glibc 2.35) and references symbols up to GLIBC_2.34, so
+// the generated program must be linked against at least that glibc (release builds require glibc >= 2.35).
 #elif defined(__aarch64__)
-  return "aarch64-linux-gnu";
+  return "aarch64-linux-gnu.2.35";
 #else
-  return "x86_64-linux-gnu";
+  return "x86_64-linux-gnu.2.35";
 #endif
 }
 

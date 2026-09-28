@@ -14,7 +14,9 @@ third-party inputs (`install.cmake`). `.github/workflows/release.yml` does exact
 | Dear ImGui | 1.92.9b | fetched at configure time with a pinned hash (`apps/segarecomp-launcher/CMakeLists.txt`) |
 
 The generated program is always compiled with an explicit Zig `-target` (`aarch64-macos`, `x86_64-macos`,
-`x86_64-linux-gnu`, `aarch64-linux-gnu`, `x86_64-windows-gnu`); see `apps/segarecomp-launcher/launcher_core.cpp`.
+`x86_64-linux-gnu.2.35`, `aarch64-linux-gnu.2.35`, `x86_64-windows-gnu`); see `apps/segarecomp-launcher/launcher_core.cpp`.
+
+Linux packages are built on Ubuntu 22.04 and need glibc >= 2.35 (the bundled SDL3 requires it; the generated program is linked against the same version).
 
 ## Layout
 
