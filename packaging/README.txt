@@ -30,5 +30,12 @@ Good to know
 * macOS: the app is not notarized. On first launch use right-click > Open, or run
   xattr -dr com.apple.quarantine Segarecomp.app
 * Linux: needs glibc 2.35 or newer (Ubuntu 22.04+, Debian 12+, Fedora 36+) and a graphical session (X11 or Wayland).
+* WSL (Windows Subsystem for Linux): the launcher can run under WSLg, but WSLg does not ship a
+  file-chooser service, so "Browse..." will show an error ("The file picker could not be opened");
+  it also does not bridge drag-and-drop from Windows Explorer into a WSLg window. This is a WSLg
+  limitation, not specific to Segarecomp; native Linux, Windows and macOS are unaffected. As a
+  workaround under WSL, use the bundled CLI directly: `bin/segarecomp build --rom <file> --output <dir>
+  --cc toolchain/zig --cc-arg cc --cc-arg -target --cc-arg <your target> --runtime-dir runtime/platforms/genesis`,
+  then run the produced `<dir>/game`.
 
 Licenses and third-party notices are in the licenses folder.

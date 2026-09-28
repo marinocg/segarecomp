@@ -100,12 +100,15 @@ enum class State { NoRom, RomSelected, Building, Ready, Running, Failed };
 struct Pending {
   std::mutex mutex;
   std::string path;   // set by the file dialog / drop, consumed on the UI thread
+  std::string error;  // set when the dialog itself could not run (SDL_GetError() at the time); a plain
+                      // cancel (files[0] == NULL, no error) leaves both empty and is silently ignored.
 };
 
 void dialog_callback(void *userdata, const char *const *files, int) {
-  if (!files || !files[0]) return;
   auto *pending = static_cast<Pending *>(userdata);
   std::lock_guard<std::mutex> lock(pending->mutex);
+  if (!files) { pending->error = SDL_GetError(); return; }
+  if (!files[0]) return;  // user cancelled; no feedback needed
   pending->path = files[0];
 }
 
@@ -392,9 +395,20 @@ int gui() {
       if (event.type == SDL_EVENT_DROP_FILE && event.drop.data) select_rom(event.drop.data);
     }
     {
-      std::string chosen;
-      { std::lock_guard<std::mutex> lock(pending.mutex); chosen.swap(pending.path); }
+      std::string chosen, dialog_error;
+      { std::lock_guard<std::mutex> lock(pending.mutex); chosen.swap(pending.path); dialog_error.swap(pending.error); }
       if (!chosen.empty()) select_rom(chosen);
+      else if (!dialog_error.empty() && state != State::Building && state != State::Running) {
+        rom = RomView{};
+        rom.error = "file picker unavailable";  // non-empty: suppresses the Failed state's "Try again" button
+        failure = "The file picker could not be opened.";
+        diagnostics = "SDL: " + dialog_error +
+                      "\n\nOn Linux this usually means no file-chooser service (XDG Desktop Portal) is "
+                      "available -- common under WSL/WSLg, which does not ship one by default. Drop the "
+                      "ROM onto this window instead.";
+        show_diagnostics = true;
+        state = State::Failed;
+      }
     }
     if (state == State::Building && job->finished()) {
       if (job->succeeded()) state = State::Ready;
