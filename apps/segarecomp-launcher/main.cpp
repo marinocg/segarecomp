@@ -415,20 +415,16 @@ int gui() {
     }
 
     const float t = static_cast<float>(SDL_GetTicks()) / 1000.0F;
-    // The window's point size (win_w/win_h, used for every layout computation below) is derived from the
-    // renderer's actual current output pixels divided by the window's current display scale, rather than
-    // trusted from SDL_GetWindowSize()/io.DisplayFramebufferScale directly: those two are supplied by
-    // different subsystems and a platform-specific staleness/mismatch between them (observed on Windows
-    // after a DPI/monitor change: correctly-proportioned content rendered too small, pinned to one corner,
-    // leaving part of the window unpainted) would otherwise leave a gap between what we think we're filling
-    // and what actually reaches the screen. Deriving both from the one live renderer query keeps them
-    // exactly self-consistent by construction, on every platform.
-    int output_w = 0, output_h = 0;
-    SDL_GetCurrentRenderOutputSize(renderer, &output_w, &output_h);
-    float display_scale = SDL_GetWindowDisplayScale(window);
-    if (!(display_scale > 0.0F)) display_scale = 1.0F;
-    const float win_w = static_cast<float>(output_w) / display_scale;
-    const float win_h = static_cast<float>(output_h) / display_scale;
+    // win_w/win_h (points): the SAME value SDL itself uses for mouse-event coordinates, so every widget's
+    // drawn position and its InvisibleButton hit-rect always agree pixel-for-pixel. Do not substitute a
+    // separately-derived value here (a previous version divided the renderer's output pixels by the display
+    // content scale instead, which on a live-resized/moved window can round to a value a point or two off
+    // from SDL's own window-point tracking -- invisible in the drawing, but enough to offset every click
+    // target from what's drawn under it).
+    int win_w_pt = 0, win_h_pt = 0;
+    SDL_GetWindowSize(window, &win_w_pt, &win_h_pt);
+    const float win_w = static_cast<float>(win_w_pt);
+    const float win_h = static_cast<float>(win_h_pt);
     // Uniform scale-to-fit ("letterbox") of the fixed design canvas within the current window size, centered;
     // this is the only concession to resizing -- the background instead covers the full window (below), never
     // letterboxed, so resizing crops scenery rather than shrinking the composition into empty bars.
@@ -621,10 +617,14 @@ int gui() {
     ImGui::End();
 
     ImGui::Render();
-    // High-DPI: our draw calls above work in window points; the renderer target is pixels. `display_scale`
-    // is exactly the points -> pixels ratio our own win_w/win_h derivation above used, so this is guaranteed
-    // self-consistent with everything just drawn -- never a separately-sourced value that could drift from it.
-    SDL_SetRenderScale(renderer, display_scale, display_scale);
+    // High-DPI: our draw calls above work in window points (win_w/win_h); the renderer target is pixels.
+    // The points -> pixels ratio is computed fresh from the renderer's actual current output size every
+    // frame, rather than trusted from io.DisplayFramebufferScale, which can lag a live DPI/monitor change
+    // by a frame or more on some platforms and previously left part of the window unpainted.
+    int output_w = win_w_pt, output_h = win_h_pt;
+    SDL_GetCurrentRenderOutputSize(renderer, &output_w, &output_h);
+    SDL_SetRenderScale(renderer, win_w_pt > 0 ? static_cast<float>(output_w) / win_w : 1.0F,
+                       win_h_pt > 0 ? static_cast<float>(output_h) / win_h : 1.0F);
     SDL_SetRenderDrawColor(renderer, 8, 11, 26, 255);
     SDL_RenderClear(renderer);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);

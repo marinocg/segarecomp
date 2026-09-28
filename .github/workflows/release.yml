@@ -79,6 +79,8 @@ jobs:
           zigdir="$(ls -d zig-*/ | head -1)"; zigdir="${zigdir%/}"
           echo "ZIG_DIR=$WORK/$zigdir" >> "$GITHUB_ENV"
           "$WORK/$zigdir/zig" version
+          case "$RUNNER_OS" in Linux) keep=linux ;; macOS) keep=macos ;; Windows) keep=windows ;; esac
+          bash "$GITHUB_WORKSPACE/packaging/trim-zig.sh" "$WORK/$zigdir" "$keep"
 
       - name: Build tools (Linux)
         if: runner.os == 'Linux'
@@ -149,7 +151,7 @@ jobs:
           mkdir -p dist
           find stage -exec touch -h -d "@${SOURCE_DATE_EPOCH}" {} + 2>/dev/null || find stage -exec touch -h -t 202601010000 {} +
           case "$RUNNER_OS" in
-            Linux)   tar --sort=name --owner=0 --group=0 --numeric-owner -cf - -C stage Segarecomp | gzip -n -9 > "dist/${name}.tar.gz"; echo "ARCHIVE=dist/${name}.tar.gz" >> "$GITHUB_ENV" ;;
+            Linux)   tar --dereference --sort=name --owner=0 --group=0 --numeric-owner -cf - -C stage Segarecomp | gzip -n -9 > "dist/${name}.tar.gz"; echo "ARCHIVE=dist/${name}.tar.gz" >> "$GITHUB_ENV" ;;
             macOS)   (cd stage && zip -qry -X "../dist/${name}.zip" Segarecomp.app README.txt); echo "ARCHIVE=dist/${name}.zip" >> "$GITHUB_ENV" ;;
             Windows) (cd stage && cmake -E tar cf "../dist/${name}.zip" --format=zip Segarecomp); echo "ARCHIVE=dist/${name}.zip" >> "$GITHUB_ENV" ;;
           esac

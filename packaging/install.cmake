@@ -52,8 +52,29 @@ if(SEGARECOMP_PACKAGE_ZIG_DIR)
 endif()
 if(SEGARECOMP_PACKAGE_SDL3_PREFIX)
   install(DIRECTORY ${SEGARECOMP_PACKAGE_SDL3_PREFIX}/include/SDL3 DESTINATION ${_res}/sdl3/include)
-  install(DIRECTORY ${SEGARECOMP_PACKAGE_SDL3_PREFIX}/lib/ DESTINATION ${_res}/sdl3/lib USE_SOURCE_PERMISSIONS
-    FILES_MATCHING PATTERN "libSDL3.*")
+  # Ship two real (non-symlink) COPIES of the one runtime library, under the two names actually needed --
+  # never the symlink chain a naive `FILES_MATCHING PATTERN "libSDL3.*"` directory copy would stage instead,
+  # which a later archiving/extraction step (observed: WSL/DrvFs) can turn into an empty or truncated file
+  # where the real, larger target should be -- "file too short" at load time. Both names are genuinely
+  # required at run time on an end user's machine (the launcher builds each game locally): the bundled
+  # compiler's linker resolves a game's "-lSDL3" by searching for the unversioned "libSDL3.<ext>", while the
+  # produced game binary's own embedded runtime dependency (its rpath-relative install name/SONAME) names
+  # the versioned file. Resolving the real target ourselves at packaging time and installing plain copies
+  # under both names means every shipped file is a genuine regular file, immune to how any downstream
+  # archiver or filesystem handles symlinks -- at the cost of ~3 MB of harmless duplication.
+  if(APPLE)
+    set(_sdl3_soname_name "libSDL3.0.dylib")   # SDL3's own install name (`@rpath/libSDL3.0.dylib`); real file, not a symlink
+    set(_sdl3_linker_name "libSDL3.dylib")     # what "-lSDL3" searches for
+  else()
+    set(_sdl3_soname_name "libSDL3.so.0")      # SDL3's SONAME; a symlink to the real, patch-versioned file
+    set(_sdl3_linker_name "libSDL3.so")        # what "-lSDL3" searches for
+  endif()
+  if(NOT EXISTS "${SEGARECOMP_PACKAGE_SDL3_PREFIX}/lib/${_sdl3_soname_name}")
+    message(FATAL_ERROR "expected SDL3 runtime library not found: ${SEGARECOMP_PACKAGE_SDL3_PREFIX}/lib/${_sdl3_soname_name}")
+  endif()
+  file(REAL_PATH "${SEGARECOMP_PACKAGE_SDL3_PREFIX}/lib/${_sdl3_soname_name}" _sdl3_runtime_real)
+  install(FILES ${_sdl3_runtime_real} DESTINATION ${_res}/sdl3/lib RENAME ${_sdl3_soname_name})
+  install(FILES ${_sdl3_runtime_real} DESTINATION ${_res}/sdl3/lib RENAME ${_sdl3_linker_name})
   if(SEGARECOMP_PACKAGE_SDL3_LICENSE)
     install(FILES ${SEGARECOMP_PACKAGE_SDL3_LICENSE} DESTINATION ${_res}/licenses RENAME SDL3.txt)
   endif()
