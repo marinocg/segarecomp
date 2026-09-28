@@ -205,7 +205,6 @@ int main(int argc, char **argv) {
         const M68kStaticDiscoveryLimits limits{64U, 64U, 2U};
         const auto graph = discover_m68k_static_graph(pc, limits, environment);
         statik = !graph.decode_order.empty() && !graph.primary_issue.has_value();
-        if (std::getenv("CAP_DEBUG_STATIC") && !statik && (word >> 12) == 6U) std::fprintf(stderr, "static-fail %04X order=%zu\n", word, graph.decode_order.size());
         for (std::size_t i = 0; i < flat.size(); i += 2U) { shared[kBase + i] = 0x4EU; shared[kBase + i + 1U] = 0x75U; }
       }
       if (emit_direct && !emit_dir.empty()) {
