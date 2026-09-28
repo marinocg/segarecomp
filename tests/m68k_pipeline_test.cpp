@@ -7871,6 +7871,11 @@ std::vector<std::uint8_t> make_image() {
       {0x16U, 0xFCU, 0x00U, 0x5AU},  // MOVE.B #$5A,(A3)+
       {0x53U, 0x40U},                // SUBQ.W #1,D0
       {0xD4U, 0xC1U},                // ADDA.W D1,A2
+      // SEG-025-T001: bodies whose only varying literal is their own PC (group C parameterization).
+      {0x4AU, 0xFCU},                // ILLEGAL
+      {0xA1U, 0x23U},                // line 1010
+      {0xF1U, 0x23U},                // line 1111
+      {0x4EU, 0x43U},                // TRAP #3
   };
   std::vector<std::uint8_t> bytes{0x30U, 0x51U, 0x4EU, 0x90U, 0x4EU, 0x71U, 0x60U, 0xF8U};
   for (int repeat = 0; repeat < 3; ++repeat)
@@ -9522,9 +9527,16 @@ void immutable_rom_aot_write_move_register_indirect_source_is_admitted_and_dispa
          "PC-keyed AOT body (SEG-007-T248)");
   std::ostringstream tst_pc_index8_hex;
   tst_pc_index8_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << tst_pc_index8;
-  expect(emitted.find("genesis_aot_" + tst_pc_index8_hex.str()) != std::string::npos &&
-             emitted.find("genesis_raise_software_exception(runtime, UINT32_C(4), UINT32_C(0x" + tst_pc_index8_hex.str()) !=
-                 std::string::npos,
+  // SEG-025-T001: the stacked PC is either inline (single-use body) or passed as the own-PC argument of a
+  // shared helper whose body raises vector 4 with `genesis_aot_pc`.
+  const auto own_pc_argument = ", UINT32_C(0x" + tst_pc_index8_hex.str() + ")); }";
+  const bool inline_raise =
+      emitted.find("genesis_raise_software_exception(runtime, UINT32_C(4), UINT32_C(0x" + tst_pc_index8_hex.str()) !=
+      std::string::npos;
+  const bool shared_raise = emitted.find(own_pc_argument) != std::string::npos &&
+                            emitted.find("genesis_raise_software_exception(runtime, UINT32_C(4), genesis_aot_pc") !=
+                                std::string::npos;
+  expect(emitted.find("genesis_aot_" + tst_pc_index8_hex.str()) != std::string::npos && (inline_raise || shared_raise),
          "the PC-relative TST word's AOT body raises vector 4 with its own address stacked (SEG-021-T019)");
   std::ostringstream move_dn_to_index8_hex;
   move_dn_to_index8_hex << std::uppercase << std::hex << std::setw(8) << std::setfill('0') << move_dn_to_index8;

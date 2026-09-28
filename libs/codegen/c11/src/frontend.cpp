@@ -5999,6 +5999,29 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   // never a new semantic implementation -- and helper order/names are a pure function of the ascending
   // AOT address order, so output stays deterministic.
   constexpr std::string_view aot_source_symbol = "genesis_aot_source";
+  // SEG-025-T001 (group C, experiment): a body's own instruction address, spelled exactly
+  // `UINT32_C(<hex8>)`, is replaced by this ordinary `uint32_t` parameter before exact-text grouping, so
+  // bodies that differ ONLY in their own PC (e.g. the instruction-exception raise's stacked PC) share one
+  // statically selected helper. Each caller passes exactly the literal that stood at every replaced
+  // position, and `UINT32_C` has type `uint32_t`, so the value and type at each use are unchanged. Bodies
+  // containing a constant-expression context (`case`/`static`/`switch`) are never rewritten.
+  constexpr std::string_view aot_pc_symbol = "genesis_aot_pc";
+  const auto own_pc_literal = [](Address pc) { return "UINT32_C(" + hex(pc, 8) + ")"; };
+  const auto parameterize_own_pc = [&](std::string text, Address pc) {
+    if (text.find("case ") != std::string::npos || text.find("static ") != std::string::npos ||
+        text.find("switch (") != std::string::npos)
+      return text;
+    const auto literal = own_pc_literal(pc);
+    for (auto at = text.find(literal); at != std::string::npos; at = text.find(literal, at + aot_pc_symbol.size()))
+      text.replace(at, literal.size(), aot_pc_symbol);
+    return text;
+  };
+  const auto restore_own_pc = [&](std::string text, Address pc) {
+    const auto literal = own_pc_literal(pc);
+    for (auto at = text.find(aot_pc_symbol); at != std::string::npos; at = text.find(aot_pc_symbol, at + literal.size()))
+      text.replace(at, aot_pc_symbol.size(), literal);
+    return text;
+  };
   const bool factor_aot_bodies = g_aot_body_factoring;
   std::vector<Address> aot_order;
   for (const auto &[address, entry] : *aot_entries) {
@@ -6017,6 +6040,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
                                              aot_unrepresented_exact_pcs[pc], {}, true, {}, factoring);
     if (inner.starts_with("/* translation rejected"))
       return inner;  // fail closed: an entry whose timing is unaccounted is never emitted
+    inner = parameterize_own_pc(std::move(inner), pc);
     const auto [slot, inserted] =
         aot_body_ids.try_emplace(std::move(inner), static_cast<std::uint32_t>(aot_body_text.size()));
     if (inserted) {
@@ -6035,9 +6059,11 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     name << "genesis_aot_shared_" << std::setw(5) << std::setfill('0') << std::dec << aot_helper_count;
     aot_body_helper[id] = name.str();
     const bool uses_source = aot_body_text[id]->find(aot_source_symbol) != std::string::npos;
+    const bool uses_pc = aot_body_text[id]->find(aot_pc_symbol) != std::string::npos;
     const auto declaration = "GenesisControlTransfer " + aot_body_helper[id] + "(GenesisRuntime *runtime" +
                              (uses_source ? ", const GenesisInstructionProvenance *" + std::string(aot_source_symbol)
-                                          : std::string()) + ")";
+                                          : std::string()) +
+                             (uses_pc ? ", uint32_t " + std::string(aot_pc_symbol) : std::string()) + ")";
     ShardUnitScope unit(out, "shared", aot_helper_count, declaration);
     out << "static " << declaration << " {\n" << *aot_body_text[id] << "}\n";
     ++aot_helper_count;
@@ -6059,14 +6085,17 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     const bool uses_source = text.find(aot_source_symbol) != std::string::npos;
     const auto source = uses_source ? genesis_m68k_runtime_c_emitter().instruction_source(aot_entries->at(pc)->operation)
                                     : std::string();
+    const bool uses_pc = text.find(aot_pc_symbol) != std::string::npos;
     std::string result;
     if (!aot_body_helper[id].empty()) {
-      result = "{ return " + aot_body_helper[id] + "(runtime" + (uses_source ? ", " + source : std::string()) + "); }\n";
+      result = "{ return " + aot_body_helper[id] + "(runtime" + (uses_source ? ", " + source : std::string()) +
+               (uses_pc ? ", " + own_pc_literal(pc) : std::string()) + "); }\n";
     } else {
+      // A single-use body is emitted exactly as before group C (its own PC literal restored).
       result = "{\n";
       if (uses_source)
         result += "  const GenesisInstructionProvenance *const " + std::string(aot_source_symbol) + " = " + source + ";\n";
-      result += text + "}\n";
+      result += (uses_pc ? restore_own_pc(text, pc) : text) + "}\n";
     }
     return result;
   };
