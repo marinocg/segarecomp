@@ -26,7 +26,7 @@ Denominator: 1526 legal forms, 45816 legal primary words. A form passes a stage 
 | route_runtime_routed_compiles | 1526 | 1517 | 99.41% | 45765 |
 | route_runtime_routed_executes | 1526 | 1059 | 69.40% | 43368 |
 | route_immutable_rom_aot | 1526 | 1525 | 99.93% | 45815 |
-| route_static_discovery | 1526 | 1497 | 98.10% | 41681 |
+| route_static_discovery | 1526 | 1501 | 98.36% | 41685 |
 
 `end_to_end_structural` (decode, lift, effects, emit, compile, native_exec, direct route): 1493 of 1526 forms, 97.84%. It is a structural bar, not a correctness claim.
 
@@ -91,6 +91,22 @@ Classes `address_error_vector_3` are declared, fail-closed deferrals, not missin
 
 - `jmp.ea.none.index.none` / `route_static_discovery`: ADR 0047 (SEG-021-T025): no Tier-1 cross-product producer; the site executes natively through the runtime-owned AOT lowering (SEG-021-T034) or the Tier-2 fallback (SEG-021-T011)
 - `jsr.ea.none.index.none` / `route_static_discovery`: ADR 0047 (SEG-021-T025): no Tier-1 cross-product producer; the site executes natively through the runtime-owned AOT lowering (SEG-021-T034) or the Tier-2 fallback (SEG-021-T011)
+
+## Residual accounting (SEG-021-T023)
+
+Every failing structural or route cell is claimed by exactly one rule below (enforced: zero matches is unexplained, more than one raises); unexplained cells: 0. `justified_decision` cites a recorded architecture decision; `measurement_limit` is a limit of the fixed measurement condition, not a decline.
+
+| rule | kind | forms | words | failing cells by stage | reason |
+| --- | --- | ---: | ---: | --- | --- |
+| reset_decode_frontier | justified_decision | 1 | 1 | compile 1, decode 1, ea_footprint_declared 1, effects 1, emit 1, exception_privilege_modeled 1, lift 1, native_exec 1, route_immutable_rom_aot 1, route_runtime_routed_admitted 1, route_runtime_routed_compiles 1, route_runtime_routed_executes 1, route_static_discovery 1, timing_model_present 1 | ADR 0043 section 7: RESET stays a fail-closed decode frontier; it is the verified-complete CPU terminator the synthetic partial-program fixtures end with, and no project evidence bounds its device effect on Genesis |
+| divide_routed_only | justified_decision | 22 | 848 | compile 22, emit 22, native_exec 22 | ADR 0037: the divide-by-zero vector-5 raise needs the live runtime object, so DIVS.W/DIVU.W lower only under runtime routing and the immutable-ROM AOT route; the linear-memory direct route has no exception delivery |
+| computed_control_transfer | justified_decision | 8 | 50 | compile 8, effects 8, emit 8, native_exec 8, route_runtime_routed_admitted 8, route_runtime_routed_compiles 8, route_runtime_routed_executes 8, route_static_discovery 8 | ADR 0009/0047 (SEG-021-T033/T034): a register-computed JMP/JSR target has no static PC effect and exists only on the immutable-ROM AOT route (runtime-owned lowering checked against the compiled-entry authority) or the Tier-2 fallback; the linear and runtime-routed lowerings hold no compiled-target membership to dispatch to |
+| odd_branch_displacement_target | justified_decision | 16 | 4080 | route_static_discovery 16 | ADR 0043 section 4 (Group 0 address error, deferred): an odd byte displacement yields an odd branch target (128 of 256 words per form); static discovery fails closed instead of walking it |
+| trace_bit_status_source | justified_decision | 1 | 8 | native_exec 1, route_runtime_routed_executes 1 | ADR 0043 section 6 (trace, deferred): the fixed baseline stack word sets SR.T, so MOVE to SR stops fail-closed rather than modelling the trace exception |
+| return_from_unowned_stack | justified_decision | 1 | 1 | native_exec 1, route_runtime_routed_executes 1 | the baseline stack word is not a return target owned by any generated call frame; a return to an unowned address stops fail-closed (no interpreter fallback) |
+| work_ram_only_window | measurement_limit | 456 | 2388 | route_runtime_routed_executes 456 | measurement condition: the fixed extension pattern places absolute and PC-relative operands in the vector or cartridge region, outside the work-RAM-only runtime image, so the runtime memory gate stops the word; these operands execute in the covered direct route and in family Musashi/route tests |
+| consumer_scoped_footprint | justified_decision | 126 | 4618 | ea_footprint_declared 126 | effects.cpp declares a complete register footprint per whitelisted kind only for footprint-dependent retained proofs (data-transform progress, bounded computed-jump window walk); absence rejects those proofs, never lowering or execution of the form |
+| rte_sr_restore | justified_decision | 1 | 1 | ccr_sr_effect_declared 1 | ADR 0020 section 9: RTE restores the whole SR through the exception-return runtime routine, modelled as pop_exception_frame rather than a condition-code effect |
 
 ## Decode over-acceptance (non-legal words the decoder accepts as something other than their architectural exception)
 

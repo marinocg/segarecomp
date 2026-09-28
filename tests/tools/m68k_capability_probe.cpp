@@ -55,15 +55,15 @@ std::vector<std::uint8_t> make_image(std::uint16_t word) {
 
 class FlatEnvironment final : public M68kStaticDiscoveryEnvironment {
  public:
-  FlatEnvironment(std::vector<std::uint8_t> image, std::uint32_t tail) : image_(std::move(image)), tail_(tail) {}
+  FlatEnvironment(const std::vector<std::uint8_t> &image, std::uint32_t tail) : image_(image), tail_(tail) {}
   M68kInstructionSourceResult instruction_source(M68kProgramAddress pc) override {
-    if (pc.value < kBase || pc.value >= kBase + image_.size()) {
+    if (pc.value >= image_.size()) {
       M68kInstructionSourceIssue issue{};
       issue.kind = M68kInstructionSourceIssueKind::unmapped;
       issue.address = pc;
       return issue;
     }
-    const auto local = static_cast<std::size_t>(pc.value - kBase);
+    const auto local = static_cast<std::size_t>(pc.value);
     const DecodeSource source{CpuVariant::mc68000, pc, {local}};
     return M68kInstructionSource{std::span<const std::uint8_t>(image_), source, {local}};
   }
@@ -74,14 +74,16 @@ class FlatEnvironment final : public M68kStaticDiscoveryEnvironment {
     return std::nullopt;
   }
   // The RTS tail after the probed instruction terminates discovery cleanly; it is not part of the probed form.
-  bool is_completion_rts(const InstructionProvenance &rts) override { return rts.source.address.value >= tail_; }
+  // SEG-021-T023: the image is RTS-padded on both sides of the probed instruction so backward/absolute targets map
+  // to a clean RTS instead of an unmapped hole; only the probed instruction itself is not a completion RTS.
+  bool is_completion_rts(const InstructionProvenance &rts) override { return rts.source.address.value != tail_; }
   std::optional<M68kImmutableCartridgeBytes> read_immutable_cartridge_bytes(M68kProgramAddress,
                                                                             std::uint32_t) override {
     return std::nullopt;
   }
 
  private:
-  std::vector<std::uint8_t> image_;
+  const std::vector<std::uint8_t> &image_;
   std::uint32_t tail_;
 };
 
@@ -191,12 +193,19 @@ int main(int argc, char **argv) {
         const auto length = static_cast<std::size_t>(operation.provenance.length.value);
         auto flat = std::vector<std::uint8_t>(image.begin(), image.begin() + static_cast<std::ptrdiff_t>(
             decoded->raw_bytes.empty() ? length : decoded->raw_bytes.size()));
-        const auto tail = static_cast<std::uint32_t>(kBase + flat.size());
-        for (unsigned i = 0; i < 512U; ++i) { flat.push_back(0x4EU); flat.push_back(0x75U); }
-        FlatEnvironment environment(std::move(flat), tail);
+        const auto tail = static_cast<std::uint32_t>(kBase);
+        // One shared RTS-padded 1 MiB program image; the probed instruction is patched in and restored per word.
+        static std::vector<std::uint8_t> shared = [] {
+          std::vector<std::uint8_t> v(0x100000U);
+          for (std::size_t i = 0; i < v.size(); i += 2U) { v[i] = 0x4EU; v[i + 1U] = 0x75U; }
+          return v;
+        }();
+        std::copy(flat.begin(), flat.end(), shared.begin() + kBase);
+        FlatEnvironment environment(shared, tail);
         const M68kStaticDiscoveryLimits limits{64U, 64U, 2U};
         const auto graph = discover_m68k_static_graph(pc, limits, environment);
         statik = !graph.decode_order.empty() && !graph.primary_issue.has_value();
+        for (std::size_t i = 0; i < flat.size(); i += 2U) { shared[kBase + i] = 0x4EU; shared[kBase + i + 1U] = 0x75U; }
       }
       if (emit_direct && !emit_dir.empty()) {
         M68kMemoryEmissionContext memory{"s->ram", "s->a", "frame_ids", "frame_continuations", "frame_depth", 0U,

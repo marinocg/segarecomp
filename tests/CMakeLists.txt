@@ -998,6 +998,12 @@ add_test(NAME m68k_routed_lowering_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_routed_lowering_test.py
   $<TARGET_FILE:m68k_conformance_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST m68k_routed_lowering_test APPEND PROPERTY LABELS full fast)
+# SEG-021-T023: M68K reuse boundary (no machine identifiers/globals in the CPU library; independent live instances).
+add_test(NAME m68k_reuse_boundary_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/m68k_reuse_boundary_test.py
+  $<TARGET_FILE:m68k_conformance_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST m68k_reuse_boundary_test APPEND PROPERTY LABELS full fast)
+set_property(TEST m68k_reuse_boundary_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST m68k_routed_lowering_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-021-T015: exhaustive BCD byte sweeps versus the pinned Musashi core (skips with exit 0 without the checkout).
 add_test(NAME m68k_bcd_exhaustive_musashi_test COMMAND ${Python3_EXECUTABLE}

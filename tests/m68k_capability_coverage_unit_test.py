@@ -80,6 +80,42 @@ try:
 except ValueError:
     pass
 
+# --- SEG-021-T023: residual accounting requires unique ownership ---------------------------------------------
+def synth(failing, mnemonics=("a", "b")):
+    """Rows for synthetic forms `<m>.f.b.x.y`; every non-validation stage passes except those in `failing[m]`."""
+    rows = {}
+    for m in mnemonics:
+        applicable = {s: True for s in stages_all}
+        passes = {s: s not in failing.get(m, ()) for s in stages_all}
+        rows["%s.f.b.x.y" % m] = ({"mnemonic": m}, passes, applicable, 3)
+    return rows
+RULE_A = ("ra", "justified_decision", frozenset(["emit"]), lambda p: p[0] == "a", "reason a")
+RULE_B = ("rb", "justified_decision", frozenset(["emit"]), lambda p: p[0] == "b", "reason b")
+RULE_ANY = ("rany", "justified_decision", frozenset(["emit"]), lambda p: True, "reason any")
+ok = cov.residual_accounting(synth({"a": ["emit"], "b": ["emit"]}), [RULE_A, RULE_B])
+check(ok["unexplained"] == [] and [r["forms"] for r in ok["rules"]] == [1, 1], "unique claims are accepted")
+un = cov.residual_accounting(synth({"a": ["emit"], "b": ["emit"]}), [RULE_A])
+check(un["unexplained"] == ["b.f.b.x.y/emit"], "an unclaimed failing cell must be reported unexplained")
+for order in ([RULE_A, RULE_ANY], [RULE_ANY, RULE_A]):
+    try:
+        cov.residual_accounting(synth({"a": ["emit"]}), order)
+        check(False, "a cell matching two rules must fail as ambiguous regardless of rule order")
+    except ValueError as error:
+        check("ambiguous" in str(error), "wrong error for an ambiguous cell: %s" % error)
+try:
+    cov.residual_accounting(synth({"a": ["emit"]}), [RULE_A, RULE_B])
+    check(False, "a rule claiming nothing must be reported stale")
+except ValueError as error:
+    check("stale" in str(error), "wrong error for a stale rule: %s" % error)
+check(cov.residual_accounting(synth({"a": ["emit"]}), [RULE_A])["unexplained"] == [], "stale check leaves a valid set alone")
+# A legacy JUSTIFIED_RESTRICTIONS annotation is not an exemption: its cell stays unexplained without a rule.
+legacy_form, legacy_stage = sorted(cov.JUSTIFIED_RESTRICTIONS)[0]
+legacy_rows = synth({"b": ["emit"]}, ("b",))
+legacy_rows[legacy_form] = (BY_ID[legacy_form], {s: s != legacy_stage for s in stages_all},
+                            {s: True for s in stages_all}, 1)
+legacy = cov.residual_accounting(legacy_rows, [RULE_B])
+check(legacy["unexplained"] == ["%s/%s" % (legacy_form, legacy_stage)], "legacy annotation must not exempt a cell")
+
 # --- CCR/SR expectation --------------------------------------------------------------------------------
 check(all(cov.ccr_expected(f) for f in forms_of("ADD")), "ADD modifies CCR")
 check(not any(cov.ccr_expected(f) for f in forms_of("MOVEA")), "MOVEA does not modify CCR")
