@@ -281,6 +281,9 @@ add_test(NAME m68k_frontend_static_slice_test COMMAND ${Python3_EXECUTABLE} ${CM
 add_test(NAME m68k_frontend_adversarial_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/m68k_frontend_adversarial_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER})
 add_test(NAME genesis_rom_startup_static_slice_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_rom_startup_static_slice_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER})
 add_test(NAME genesis_general_startup_cli_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_general_startup_cli_test.py $<TARGET_FILE:segarecomp>)
+# Consumer build route: `segarecomp build` (ROM -> generated C -> C compiler -> executable) without Python tooling.
+add_test(NAME segarecomp_build_command_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_build_command_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_startup_runtime_c2_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_startup_runtime_c2_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
@@ -918,7 +921,7 @@ add_test(NAME codegen_c11_shard_selection_tests COMMAND codegen_c11_shard_select
 # not a product/generated-execution gate, so it lives in `extended` on every host.
 set(SEGARECOMP_EXTENDED_TESTS ghidra_mcp_smoke_test
     genesis_experiment_aligned_aot_report_failure_test)
-set(SEGARECOMP_FAST_TESTS segarecomp_tests moveq_tests direct_flow_tests m68k_timing_tests m68k_dynamic_timing_tests
+set(SEGARECOMP_FAST_TESTS segarecomp_tests segarecomp_build_command_test moveq_tests direct_flow_tests m68k_timing_tests m68k_dynamic_timing_tests
     genesis_runtime_run_tests genesis_vdp_render_frame_tests genesis_frame_export_tests
     m68k_frontend_rejection_tests genesis_general_startup_cli_test architecture_dependency_test
     codegen_c11_emitter_ownership_test codegen_c11_translation_units_tests codegen_c11_shard_selection_tests restricted_files_test genesis_viewer_tests

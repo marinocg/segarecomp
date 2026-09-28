@@ -24,6 +24,29 @@ Experimental. Stated without exaggeration:
 
 See `platforms/README.md` for the per-platform map.
 
+## Play a game (download)
+
+Grab the archive for your platform from the [Releases](../../releases) page (`segarecomp-<version>-windows-x86_64.zip`,
+`-linux-x86_64.tar.gz`, `-macos-arm64.zip`; verify with `SHA256SUMS.txt`), then:
+
+1. Extract it and open **Segarecomp** (`Segarecomp.exe`, `Segarecomp.app`, or `./Segarecomp`).
+2. Drop your ROM onto the window, or click **Browse...**.
+3. Click **Recompile & Play**. The first build of a game takes a while (minutes for large ROMs); later launches are instant.
+
+Nothing else needs installing: the C compiler (a pinned Zig, used only to compile generated C) and SDL3 are in the
+package. No ROMs are included; use only software you are legally entitled to analyze.
+
+- **Experimental.** Only Genesis / Mega Drive images are supported and most games will not translate or run correctly yet.
+  The launcher says "Compatibility unknown" for a ROM it has no metadata for; "Try anyway" is all it offers.
+- **Controls:** arrow keys, Z/X/C = A/B/C, Return = Start, Escape = quit. No remapping yet.
+- **Cache:** built games live in `%LOCALAPPDATA%\Segarecomp\` (Windows), `~/Library/Application Support/Segarecomp/` (macOS) or
+  `~/.local/share/Segarecomp/` (Linux). The ROM is never copied. When a build fails, **View diagnostics** shows the log, also
+  kept as `build.log` under `games/<id>.failed/`; attach it to bug reports.
+- **macOS** builds are not notarized: right-click > Open the first time (or `xattr -dr com.apple.quarantine Segarecomp.app`).
+- Bundled third-party software (Zig, SDL3, Dear ImGui) and their licenses are listed in `licenses/` inside the package.
+
+Building the launcher and packages from source: see [packaging/README.md](packaging/README.md). The developer build below is separate.
+
 ## Legal and ROM policy
 
 No commercial ROMs, firmware, keys, or vendor SDK material are distributed. Bring only software you
@@ -33,8 +56,9 @@ directory; tests and CI use project-authored synthetic inputs. See `docs/testing
 ## License
 
 Licensed under the [Mozilla Public License 2.0](LICENSE). The repository vendors no third-party
-source, so no separate third-party notices are currently required. SDL3 (optional viewer) and other
-tools are external prerequisites under their own licenses. No security-reporting contact policy has
+source, so no separate third-party notices are currently required for a source checkout. SDL3 (optional viewer) and other
+tools are external prerequisites under their own licenses. Release packages additionally redistribute SDL3 (zlib),
+Zig (MIT, used as the bundled C compiler) and Dear ImGui (MIT); their notices ship in the package's `licenses/`. No security-reporting contact policy has
 been established yet, so there is no `SECURITY.md`.
 
 ## Repository map
@@ -43,7 +67,9 @@ been established yet, so there is no `SECURITY.md`.
 | --- | --- |
 | `libs/` | reusable libraries: core, CPU semantics (`cpu/m68k`), recompiler, C11 codegen, devices, media |
 | `platforms/` | machine products (`genesis/{machine,runtime,viewer,compat}`); other platforms are docs only |
-| `apps/segarecomp` | the CLI |
+| `apps/segarecomp` | the CLI (including `build`, the native ROM-to-executable route) |
+| `apps/segarecomp-launcher` | opt-in consumer GUI launcher (SDL3 + Dear ImGui) |
+| `packaging/` | release staging, package smoke test, pinned third-party inputs |
 | `tools/` | Python developer tools (startup bridge, frontier debugging, Ghidra, baselines) |
 | `tests/` | tests; the root `CMakeLists.txt` only orchestrates |
 | `docs/` | architecture, decisions (ADRs), references, testing policy |

@@ -1,0 +1,198 @@
+name: release
+
+# Tag `vX.Y.Z[-pre]` (or run manually for a dry run that only uploads artifacts) to build, smoke-test and publish
+# the self-contained consumer packages. Ordinary PR CI is unchanged (ci.yml).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ZIG_VERSION: "0.15.2"
+  SDL_VERSION: "3.4.16"
+  SDL_SOURCE_SHA256: 7322236cd12090c3eb40b9728be4d49c76f66ad17d04369584d4ecad5cf77c68
+  SDL_VC_SHA256: 1a784cb2a5c64d56fe7a62090fe9d242d9865f235e4ea9678f1a6ba4e693e7de
+  SDL_MINGW_SHA256: 9828bb735cf8a007bcf0ac5aa9f01f3fcb54b7ca67c932e775c905c5d5053a60
+  SOURCE_DATE_EPOCH: "1767225600"  # 2026-01-01T00:00:00Z: normalized archive timestamps
+
+jobs:
+  tests:
+    # Full hermetic suite on all three hosts before anything is packaged.
+    uses: ./.github/workflows/ci.yml
+
+  package:
+    needs: tests
+    name: package (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x86_64
+            os: windows-latest
+            zig_archive: zig-x86_64-windows-0.15.2.zip
+            zig_sha256: 3a0ed1e8799a2f8ce2a6e6290a9ff22e6906f8227865911fb7ddedc3cc14cb0c
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            zig_archive: zig-x86_64-linux-0.15.2.tar.xz
+            zig_sha256: 02aa270f183da276e5b5920b1dac44a63f1a49e55050ebde3aecc9eb82f93239
+          - name: macos-arm64
+            os: macos-latest
+            zig_archive: zig-aarch64-macos-0.15.2.tar.xz
+            zig_sha256: 3cc2bab367e185cdfb27501c4b30b1b0653c28d9f73df8dc91488e66ece5fa6b
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-dev"; fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          echo "WORK=$RUNNER_TEMP/work" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/work"
+
+      - name: Fetch pinned Zig (bundled C toolchain)
+        run: |
+          cd "$WORK"
+          curl -fsSL -o "${{ matrix.zig_archive }}" "https://ziglang.org/download/${ZIG_VERSION}/${{ matrix.zig_archive }}"
+          if command -v sha256sum >/dev/null; then echo "${{ matrix.zig_sha256 }}  ${{ matrix.zig_archive }}" | sha256sum -c -
+          else echo "${{ matrix.zig_sha256 }}  ${{ matrix.zig_archive }}" | shasum -a 256 -c -; fi
+          case "${{ matrix.zig_archive }}" in *.zip) cmake -E tar xf "${{ matrix.zig_archive }}" ;; *) tar xf "${{ matrix.zig_archive }}" ;; esac
+          zigdir="$(ls -d zig-*/ | head -1)"; zigdir="${zigdir%/}"
+          echo "ZIG_DIR=$WORK/$zigdir" >> "$GITHUB_ENV"
+          "$WORK/$zigdir/zig" version
+
+      - name: Build tools (Linux)
+        if: runner.os == 'Linux'
+        run: >
+          sudo apt-get update && sudo apt-get install -y ninja-build pkg-config libx11-dev libxext-dev libxrandr-dev
+          libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev
+          libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libasound2-dev libpulse-dev libudev-dev
+          libdbus-1-dev libdecor-0-dev libibus-1.0-dev wayland-protocols
+      - name: Build tools (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ninja
+      - name: Windows MSVC environment (for the LLVM/Clang route)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: "SDL3 (macOS/Linux, pinned source build, shared)"
+        if: runner.os != 'Windows'
+        run: |
+          cd "$WORK"
+          curl -fsSL -o sdl.tar.gz "https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL3-${SDL_VERSION}.tar.gz"
+          if command -v sha256sum >/dev/null; then echo "${SDL_SOURCE_SHA256}  sdl.tar.gz" | sha256sum -c -; else echo "${SDL_SOURCE_SHA256}  sdl.tar.gz" | shasum -a 256 -c -; fi
+          tar xzf sdl.tar.gz
+          extra=""
+          if [ "$RUNNER_OS" = "macOS" ]; then extra="-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"; fi
+          cmake -S "SDL3-${SDL_VERSION}" -B sdl-build -G Ninja -DCMAKE_BUILD_TYPE=Release $extra \
+            -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TESTS=OFF -DSDL_TEST_LIBRARY=OFF -DSDL_INSTALL_TESTS=OFF \
+            -DCMAKE_INSTALL_PREFIX="$WORK/sdl3"
+          cmake --build sdl-build
+          cmake --install sdl-build
+          echo "SDL3_PREFIX=$WORK/sdl3" >> "$GITHUB_ENV"
+          echo "SDL3_PKG_PREFIX=$WORK/sdl3" >> "$GITHUB_ENV"
+          echo "SDL3_LICENSE=$WORK/SDL3-${SDL_VERSION}/LICENSE.txt" >> "$GITHUB_ENV"
+          echo "SDL3_DLL=" >> "$GITHUB_ENV"
+
+      - name: "SDL3 (Windows, pinned official VC devel for the launcher and mingw devel for the bundled compiler)"
+        if: runner.os == 'Windows'
+        run: |
+          cd "$WORK"
+          curl -fsSL -o sdl-vc.zip "https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL3-devel-${SDL_VERSION}-VC.zip"
+          curl -fsSL -o sdl-mingw.zip "https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL3-devel-${SDL_VERSION}-mingw.zip"
+          echo "${SDL_VC_SHA256}  sdl-vc.zip" | sha256sum -c -
+          echo "${SDL_MINGW_SHA256}  sdl-mingw.zip" | sha256sum -c -
+          cmake -E tar xf sdl-vc.zip
+          mkdir mingw && (cd mingw && cmake -E tar xf ../sdl-mingw.zip)
+          echo "SDL3_PREFIX=$WORK/SDL3-${SDL_VERSION}" >> "$GITHUB_ENV"
+          echo "SDL3_PKG_PREFIX=$WORK/mingw/SDL3-${SDL_VERSION}/x86_64-w64-mingw32" >> "$GITHUB_ENV"
+          echo "SDL3_LICENSE=$WORK/SDL3-${SDL_VERSION}/LICENSE.txt" >> "$GITHUB_ENV"
+          echo "SDL3_DLL=$WORK/SDL3-${SDL_VERSION}/lib/x64/SDL3.dll" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: |
+          extra=""
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            export CC=clang CXX=clang++
+            # Static CRT: no Visual C++ redistributable on a clean machine.
+            extra="-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
+          fi
+          if [ "$RUNNER_OS" = "macOS" ]; then extra="-DCMAKE_OSX_DEPLOYMENT_TARGET=12.0"; fi
+          cmake -S . -B build/release -G Ninja -DCMAKE_BUILD_TYPE=Release $extra \
+            -DBUILD_TESTING=OFF -DSEGARECOMP_BUILD_LAUNCHER=ON \
+            -DCMAKE_PREFIX_PATH="$SDL3_PREFIX" \
+            -DSEGARECOMP_ZIG_VERSION="$ZIG_VERSION" -DSEGARECOMP_RELEASE_VERSION="$VERSION" \
+            -DSEGARECOMP_PACKAGE_ZIG_DIR="$ZIG_DIR" -DSEGARECOMP_PACKAGE_SDL3_PREFIX="$SDL3_PKG_PREFIX" \
+            -DSEGARECOMP_PACKAGE_SDL3_LICENSE="$SDL3_LICENSE" -DSEGARECOMP_PACKAGE_SDL3_DLL="$SDL3_DLL"
+      - name: Build
+        run: cmake --build build/release
+
+      - name: Stage package
+        run: |
+          rm -rf stage && cmake --install build/release --prefix stage
+          if [ "$RUNNER_OS" = "Windows" ]; then mv stage stage-tmp && mkdir stage && mv stage-tmp stage/Segarecomp; fi
+          if [ "$RUNNER_OS" = "Linux" ]; then mv stage stage-tmp && mkdir stage && mv stage-tmp stage/Segarecomp; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then dumpbin //dependents stage/Segarecomp/Segarecomp.exe || true; fi
+
+      - name: Archive
+        run: |
+          name="segarecomp-${VERSION}-${{ matrix.name }}"
+          mkdir -p dist
+          find stage -exec touch -h -d "@${SOURCE_DATE_EPOCH}" {} + 2>/dev/null || find stage -exec touch -h -t 202601010000 {} +
+          case "$RUNNER_OS" in
+            Linux)   tar --sort=name --owner=0 --group=0 --numeric-owner -cf - -C stage Segarecomp | gzip -n -9 > "dist/${name}.tar.gz"; echo "ARCHIVE=dist/${name}.tar.gz" >> "$GITHUB_ENV" ;;
+            macOS)   (cd stage && zip -qry -X "../dist/${name}.zip" Segarecomp.app README.txt); echo "ARCHIVE=dist/${name}.zip" >> "$GITHUB_ENV" ;;
+            Windows) (cd stage && cmake -E tar cf "../dist/${name}.zip" --format=zip Segarecomp); echo "ARCHIVE=dist/${name}.zip" >> "$GITHUB_ENV" ;;
+          esac
+
+      - name: Package smoke test (extract the archive into a clean directory)
+        run: |
+          rm -rf "$RUNNER_TEMP/extracted" && mkdir "$RUNNER_TEMP/extracted"
+          archive="$PWD/$ARCHIVE"
+          cd "$RUNNER_TEMP/extracted"
+          case "$RUNNER_OS" in
+            Linux)   tar xzf "$archive"; launcher=Segarecomp/Segarecomp ;;
+            macOS)   unzip -q "$archive"; launcher=Segarecomp.app/Contents/MacOS/Segarecomp ;;
+            Windows) cmake -E tar xf "$archive"; launcher=Segarecomp/Segarecomp.exe ;;
+          esac
+          cd "$RUNNER_TEMP"   # leave the checkout: nothing may resolve through the source or build tree
+          python "$GITHUB_WORKSPACE/packaging/smoke_test.py" "$RUNNER_TEMP/extracted/$launcher"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: segarecomp-${{ matrix.name }}
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+
+  publish:
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: segarecomp-*
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist && sha256sum segarecomp-* > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pre=""; case "$GITHUB_REF_NAME" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" $pre --repo "$GITHUB_REPOSITORY" --title "Segarecomp $GITHUB_REF_NAME" \
+            --notes "Experimental consumer build. Download the archive for your platform, extract it, open Segarecomp and drop in a ROM you legally own. No ROMs are included. See README.txt in the archive; verify downloads against SHA256SUMS.txt. The automatic 'Source code' archives are not consumer packages." \
+            dist/*

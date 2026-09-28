@@ -1,5 +1,6 @@
 add_library(segarecomp_media
   src/rom.cpp
+  src/sha256.cpp
 )
 add_library(segarecomp::media ALIAS segarecomp_media)
 target_link_libraries(segarecomp_media PUBLIC segarecomp::base)
