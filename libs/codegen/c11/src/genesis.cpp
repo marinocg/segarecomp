@@ -83,7 +83,7 @@ std::string emit_genesis_bridge_c11_main_open(std::string_view initial_ssp, std:
                                                  &software_exception_handler_entry_hex) {
   std::string open =
       "int main(int argc, char **argv) { GenesisRuntime runtime = {0}; GenesisControlTransfer result; "
-      "const char *report_path; const char *report_fd; uint32_t instruction_budget = UINT32_C(128); "
+      "const char *report_path; const char *report_fd; uint32_t instruction_budget = UINT32_C(0); "
       "const char *ephemeral_report_fd; "
       "if (genesis_parse_bridge_argv(argc, argv, &report_path, &report_fd, &instruction_budget, &ephemeral_report_fd) != 0) return 1; "
       "runtime.a[7] = UINT32_C(" +
@@ -106,29 +106,18 @@ std::string emit_genesis_bridge_c11_main_open(std::string_view initial_ssp, std:
 }
 
 std::string emit_genesis_bridge_c11_main_finish(std::string_view dispatcher_name) {
-  // SEG-007-T252 / ADR-0040: `instruction_budget` (parsed above, defaulting to
-  // 128 when no `--instruction-budget` argv pair is present) is now a RUNNER
-  // allowance passed to genesis_runtime_run, not a guest-semantic no-progress
-  // window -- there is no watchdog/progress-credit concept left to describe.
-  // 128 is retained ONLY as the compiled-in default for zero-argument argv
-  // compatibility (same argv shape, same generated-binary default when no
-  // `--instruction-budget` flag is passed) -- it is NOT a claim that a
-  // zero-argument invocation executes an equivalent depth of guest dispatch
-  // to the former watchdog window. The former semantic-watchdog `W = 128` was
-  // a *consecutive no-progress* window that legitimate recurring progress
-  // kept resetting, so real execution ran for millions of dispatches; this
-  // `128` is a *total* dispatch count, a radically shorter bound. Any
-  // automated/headless caller that wants a depth comparable to historical
-  // watchdog-bounded runs must pass an explicit `--instruction-budget`
-  // (see `GENESIS_CANONICAL_RUNNER_DISPATCH_ALLOWANCE` in
-  // tools/genesis_startup_bridge.py -- the runner/tooling layer, not this
-  // generated runtime -- which the canonical/headless
-  // `tools/genesis_startup_bridge.py` CLI path uses by default instead of
-  // silently falling through to this lower-level, unrelated 128 default).
-  // This value carries no hardware/timing meaning and callers may override
-  // it explicitly.
-  return "result = genesis_runtime_run(&runtime, " + std::string(dispatcher_name) +
-          ", instruction_budget); if (genesis_write_requested_full_report(report_path, report_fd, &runtime, &result) != 0) return 1; if (genesis_write_requested_ephemeral_pc_history(ephemeral_report_fd, &runtime, &result) != 0) return 1; return genesis_write_sanitized_report(&result, GENESIS_BRIDGE_ROM_SHA256, &GENESIS_BRIDGE_REPORT_METADATA); }\n";
+  // SEG-007-T252 / ADR-0040 (amended by SEG-023-T001): `instruction_budget` is a RUNNER allowance passed to
+  // genesis_runtime_run, not a guest-semantic window. An explicit `--instruction-budget N` (N > 0) is one finite
+  // run of N dispatches. When the flag is absent the budget stays 0 (the parser rejects an explicit 0), which
+  // means "run until the guest stops or completes": the generated main keeps re-entering genesis_runtime_run with
+  // the largest allowance (UINT32_MAX) only while the runner itself exhausted that allowance (a resource limit whose
+  // runner_dispatch_count is exactly UINT32_MAX). A viewer window close or a finished capture also reports a resource
+  // limit but with a smaller count (the hooks clamp to UINT32_MAX - 1), and must end the run, never restart it. The viewer/capture hooks
+  // receive UINT32_MAX and treat it as unlimited. Automated/headless callers (tests, agents, tooling) that need a
+  // bounded run MUST pass an explicit `--instruction-budget`; a zero-argument invocation of a non-terminating
+  // guest never returns. Consumer launches pass no flag on purpose.
+  return "do { result = genesis_runtime_run(&runtime, " + std::string(dispatcher_name) +
+          ", instruction_budget != 0U ? instruction_budget : UINT32_MAX); } while (instruction_budget == 0U && result.kind == GENESIS_RUNNER_RESOURCE_LIMIT && result.runner_dispatch_count == UINT32_MAX); if (genesis_write_requested_full_report(report_path, report_fd, &runtime, &result) != 0) return 1; if (genesis_write_requested_ephemeral_pc_history(ephemeral_report_fd, &runtime, &result) != 0) return 1; return genesis_write_sanitized_report(&result, GENESIS_BRIDGE_ROM_SHA256, &GENESIS_BRIDGE_REPORT_METADATA); }\n";
 }
 
 }  // namespace segarecomp

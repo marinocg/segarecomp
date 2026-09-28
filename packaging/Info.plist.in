@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Segarecomp</string>
+  <key>CFBundleDisplayName</key><string>Segarecomp</string>
+  <key>CFBundleIdentifier</key><string>io.github.marinocg.segarecomp</string>
+  <key>CFBundleExecutable</key><string>Segarecomp</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleVersion</key><string>@SEGARECOMP_BUNDLE_VERSION@</string>
+  <key>CFBundleShortVersionString</key><string>@SEGARECOMP_BUNDLE_VERSION@</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>LSMinimumSystemVersion</key><string>12.0</string>
+</dict>
+</plist>

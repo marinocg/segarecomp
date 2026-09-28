@@ -30,7 +30,7 @@ alone `-O0` 198 s, `-O1` 413 s, so `-O2` cuts guest execution (~250 s to ~50 s) 
 runs, hence the auto split.
 
 Options: `--viewer-unthrottled` (no presentation sleep; same guest results), `--viewer-slice <N>`
-(guest dispatches per host slice, default 20000), `--instruction-budget <N>` (total runner allowance;
+(guest dispatches per host slice, default 500), `--instruction-budget <N>` (total runner allowance; a generated program started with no `--instruction-budget` at all runs unbounded until the guest stops or the window closes;
 defaults to the canonical 16777216, host policy only). Close the window or press Escape to stop; that is
 normal host termination reported as `window_closed`, distinct from guest stop/complete and
 `runner_resource_limit`. A `VIEWER_SUMMARY` line with normalized facts is printed to stderr.

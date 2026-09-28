@@ -1,6 +1,7 @@
 name: ci
 
 on:
+  workflow_call:
   pull_request:
     # ready_for_review re-triggers the run when a draft is promoted.
     types: [opened, synchronize, reopened, ready_for_review]
@@ -107,6 +108,6 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then export CC=clang CXX=clang++; fi
           hint="-DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
           cmake -S . -B build/sdl3 -G Ninja -DCMAKE_BUILD_TYPE=Debug \
-            -DSEGARECOMP_WARNINGS_AS_ERRORS=ON -DSEGARECOMP_ENABLE_SDL3_VIEWER=ON -DBUILD_TESTING=OFF $hint
-      - name: Build the SDL3 viewer target
-        run: cmake --build build/sdl3 --target segarecomp_viewer_genesis_sdl3
+            -DSEGARECOMP_WARNINGS_AS_ERRORS=ON -DSEGARECOMP_ENABLE_SDL3_VIEWER=ON -DSEGARECOMP_BUILD_LAUNCHER=ON -DBUILD_TESTING=OFF $hint
+      - name: Build the SDL3 viewer target and the consumer launcher
+        run: cmake --build build/sdl3 --target segarecomp_viewer_genesis_sdl3 segarecomp-launcher

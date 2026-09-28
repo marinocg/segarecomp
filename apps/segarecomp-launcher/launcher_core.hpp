@@ -1,0 +1,93 @@
+#pragma once
+
+// Orchestration only: locate the packaged toolchain, derive the per-user cache entry for a ROM, run
+// `segarecomp build` and launch the produced native program. No recompilation logic lives here.
+
+#include <SDL3/SDL.h>
+
+#include <atomic>
+#include <filesystem>
+#include <mutex>
+#include <string>
+#include <thread>
+
+namespace launcher {
+
+struct Layout {
+  std::filesystem::path root;         // directory holding bin/, toolchain/, runtime/, sdl3/
+  std::filesystem::path cli;          // segarecomp build driver
+  std::filesystem::path cc;           // bundled zig
+  std::filesystem::path runtime;      // runtime/genesis (runtime/, viewer/, compat/)
+  std::filesystem::path sdl_include;
+  std::filesystem::path sdl_lib;
+  std::string problem;                // non-empty when the package is incomplete
+};
+
+struct RomView {
+  std::filesystem::path path;
+  std::string sha256;
+  std::string title;
+  std::string platform;               // "Genesis / Mega Drive" when supported
+  bool supported_platform = false;
+  bool compat_known = false;          // ROM-hash-bound analysis metadata ships with this release
+  std::string error;                  // non-empty: unreadable/too large
+};
+
+[[nodiscard]] Layout locate_layout();
+[[nodiscard]] std::filesystem::path cache_root();
+[[nodiscard]] RomView inspect_rom_file(const std::filesystem::path &path, const Layout &layout);
+[[nodiscard]] std::filesystem::path entry_dir(const RomView &rom, const Layout &layout);
+[[nodiscard]] bool entry_ready(const std::filesystem::path &entry);
+[[nodiscard]] std::filesystem::path entry_executable(const std::filesystem::path &entry);
+[[nodiscard]] std::string read_tail(const std::filesystem::path &path, std::size_t max_bytes);
+[[nodiscard]] std::string host_description();
+
+enum class StageState { pending, running, done };
+
+// One asynchronous `segarecomp build`; poll from the UI thread.
+class BuildJob {
+public:
+  static constexpr int stage_count = 4;  // analyze, generate, compile, link
+  BuildJob(RomView rom, Layout layout);
+  ~BuildJob();
+  BuildJob(const BuildJob &) = delete;
+  BuildJob &operator=(const BuildJob &) = delete;
+
+  [[nodiscard]] bool finished() const { return finished_.load(); }
+  [[nodiscard]] bool succeeded() const { return ok_.load(); }
+  [[nodiscard]] StageState stage(int index) const { return static_cast<StageState>(stages_[index].load()); }
+  [[nodiscard]] std::string message() const;
+  [[nodiscard]] std::filesystem::path entry() const { return entry_; }
+  void wait();
+
+private:
+  void run();
+  RomView rom_;
+  Layout layout_;
+  std::filesystem::path entry_;
+  std::atomic<int> stages_[stage_count]{};
+  std::atomic<bool> finished_{false};
+  std::atomic<bool> ok_{false};
+  mutable std::mutex mutex_;
+  std::string message_;
+  std::thread thread_;
+};
+
+// The launched native game; its output goes to <entry>/run.log.
+class GameRun {
+public:
+  GameRun(const RomView &rom, const Layout &layout, const std::filesystem::path &entry);
+  ~GameRun();
+  GameRun(const GameRun &) = delete;
+  GameRun &operator=(const GameRun &) = delete;
+  [[nodiscard]] bool started() const { return process_ != nullptr; }
+  // Returns true once the game exited (exit code stored).
+  bool poll();
+  [[nodiscard]] int exit_code() const { return exit_code_; }
+
+private:
+  SDL_Process *process_ = nullptr;
+  int exit_code_ = 0;
+};
+
+} // namespace launcher

@@ -1,0 +1,17 @@
+Segarecomp is licensed under the Mozilla Public License 2.0 (MPL-2.0.txt).
+
+This package redistributes the following third-party components unmodified, under their own licenses:
+
+* SDL3 (Simple DirectMedia Layer), zlib license                       -> SDL3.txt
+* Zig 0.15.2 toolchain (bundled only to compile generated C), MIT     -> Zig.txt
+  The Zig distribution includes LLVM/Clang (Apache-2.0 with LLVM exceptions), compiler-rt, and libc
+  headers/sources (musl, mingw-w64, glibc/libc++ stubs and headers) under their own licenses; those texts
+  ship inside toolchain/lib next to the files they cover.
+* Dear ImGui (launcher user interface), MIT                            -> DearImGui.txt
+* stb_image.h (launcher PNG asset decoding), public domain / MIT       -> compiled in, not redistributed as a
+  separate file; see https://github.com/nothings/stb
+* Silkscreen font (launcher UI typeface), SIL Open Font License 1.1    -> Silkscreen-OFL.txt
+* Original Segarecomp pixel-art (background, wordmark, icons)          -> apps/segarecomp-launcher/assets/README.md
+
+Source for Zig and SDL3 is available from https://ziglang.org and https://libsdl.org at the pinned versions
+listed in packaging/README.md of the Segarecomp source repository.

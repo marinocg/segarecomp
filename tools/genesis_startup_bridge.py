@@ -222,6 +222,8 @@ UINT32_MAX = (1 << 32) - 1
 # does not explicitly pass `--instruction-budget`; it is always explicitly
 # overridable via `--instruction-budget`.
 GENESIS_CANONICAL_RUNNER_DISPATCH_ALLOWANCE = 16777216
+# Bounded fallback for callers that pass no budget at all (the generated binary's former compiled-in default).
+GENESIS_BRIDGE_FALLBACK_DISPATCH_ALLOWANCE = 128
 
 
 def instruction_budget_value(value: str) -> int:
@@ -297,11 +299,11 @@ def run_bridge(executable: pathlib.Path, root: pathlib.Path, full_path: pathlib.
                 full_pipe: bool = False, instruction_budget: int | None = None,
                 ephemeral_pipe: bool = False) -> tuple[int, dict, bytes | None, str, bytes | None]:
     command = process_tree.script_argv(executable)
-    # SEG-007-T252 / ADR-0040: an explicit finite runner dispatch allowance.
-    # When omitted, the generated binary uses its own compiled-in default
-    # (128) -- this tool never silently changes that default on its own.
-    if instruction_budget is not None:
-        command += ["--instruction-budget", str(instruction_budget)]
+    # SEG-007-T252 / ADR-0040, amended by SEG-023-T001 / ADR 0050: a generated binary started with no
+    # `--instruction-budget` now runs unbounded (consumer behavior). This developer tool must never do that
+    # implicitly, so it always passes an explicit finite allowance: the caller's, else the historical 128.
+    command += ["--instruction-budget",
+                str(instruction_budget if instruction_budget is not None else GENESIS_BRIDGE_FALLBACK_DISPATCH_ALLOWANCE)]
     if full_path is not None:
         command += ["--full-report-path", str(full_path)]
     ephemeral_read_fd = -1

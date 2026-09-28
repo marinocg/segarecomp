@@ -189,6 +189,7 @@ legitimate recurring structure; removing the pool removes the need for all of th
   fields that fed only that emission.
 - New disjoint result type: `GENESIS_RUNNER_RESOURCE_LIMIT` / `"result":"runner_resource_limit"`, with
   its own deterministic `runner_dispatch_count` field, at both the sanitized and full report levels.
+- Amended by SEG-023-T001 (ADR 0050): a generated program invoked with NO `--instruction-budget` now runs unbounded (the former compiled-in default of 128 is gone); an explicit `--instruction-budget N` is still one finite run.
 - Headless/automated callers must now supply an explicit finite allowance when the compiled-in default
   (128) is not the desired bound; `tools/genesis_startup_bridge.py --instruction-budget N` is the
   supported way to do this.

@@ -4,6 +4,7 @@
 #include "segarecomp/codegen/c11/genesis_frontend.hpp"
 #include "segarecomp/codegen/c11/provenance_diagnostics.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
+#include "build_command.hpp"
 #include "segarecomp/rom.hpp"
 
 #if defined(_WIN32)
@@ -28,7 +29,7 @@
 
 namespace {
 void print_usage(std::ostream &output) {
-  output << "usage:\n  segarecomp inspect <image>\n  segarecomp analyze <image>\n  segarecomp emit-c <image>\n"
+  output << "usage:\n" << segarecomp_build_usage << "  segarecomp inspect <image>\n  segarecomp analyze <image>\n  segarecomp emit-c <image>\n"
              "  segarecomp emit-moveq-c <image> <pc> <offset> <sr> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7>\n"
                "  segarecomp emit-direct-flow-c <image> <pc> <offset> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7>\n"
                "  segarecomp m68k-frontend <image> <source-id> <entry> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
@@ -49,7 +50,7 @@ void print_usage(std::ostream &output) {
 }
 } // namespace
 
-int main(int argc, char **argv) {
+int run_cli(int argc, char **argv) {
 #if defined(_WIN32)
   // SEG-018-T006: generated C and reports are deterministic byte streams; never
   // let the Windows CRT translate "\n" to "\r\n" on stdout/stderr.
@@ -683,4 +684,9 @@ int main(int argc, char **argv) {
     std::cerr << "segarecomp: " << error.what() << '\n';
     return 1;
   }
+}
+
+int main(int argc, char **argv) {
+  if (argc >= 2 && std::string_view(argv[1]) == "build") return segarecomp_build_command(argc, argv);
+  return run_cli(argc, argv);
 }

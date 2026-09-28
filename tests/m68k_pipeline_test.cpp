@@ -10846,9 +10846,9 @@ static const uint8_t genesis_owned_region_data_0[] = { UINT8_C(0x02), UINT8_C(0x
 static const GenesisOwnedCartridgeRegion genesis_owned_cartridge_regions[] = {
   { UINT32_C(0x00000C00), UINT32_C(0x00000C0C), genesis_owned_region_data_0, UINT32_C(0x0000000C) }
 };
-int main(int argc, char **argv) { GenesisRuntime runtime = {0}; GenesisControlTransfer result; const char *report_path; const char *report_fd; uint32_t instruction_budget = UINT32_C(128); const char *ephemeral_report_fd; if (genesis_parse_bridge_argv(argc, argv, &report_path, &report_fd, &instruction_budget, &ephemeral_report_fd) != 0) return 1; runtime.a[7] = UINT32_C(0x00FF0100); runtime.pc = UINT32_C(0x00000C00);   runtime.owned_regions = genesis_owned_cartridge_regions;
+int main(int argc, char **argv) { GenesisRuntime runtime = {0}; GenesisControlTransfer result; const char *report_path; const char *report_fd; uint32_t instruction_budget = UINT32_C(0); const char *ephemeral_report_fd; if (genesis_parse_bridge_argv(argc, argv, &report_path, &report_fd, &instruction_budget, &ephemeral_report_fd) != 0) return 1; runtime.a[7] = UINT32_C(0x00FF0100); runtime.pc = UINT32_C(0x00000C00);   runtime.owned_regions = genesis_owned_cartridge_regions;
   runtime.owned_region_count = UINT32_C(1);
-result = genesis_runtime_run(&runtime, genesis_bridge_dispatch, instruction_budget); if (genesis_write_requested_full_report(report_path, report_fd, &runtime, &result) != 0) return 1; if (genesis_write_requested_ephemeral_pc_history(ephemeral_report_fd, &runtime, &result) != 0) return 1; return genesis_write_sanitized_report(&result, GENESIS_BRIDGE_ROM_SHA256, &GENESIS_BRIDGE_REPORT_METADATA); }
+do { result = genesis_runtime_run(&runtime, genesis_bridge_dispatch, instruction_budget != 0U ? instruction_budget : UINT32_MAX); } while (instruction_budget == 0U && result.kind == GENESIS_RUNNER_RESOURCE_LIMIT && result.runner_dispatch_count == UINT32_MAX); if (genesis_write_requested_full_report(report_path, report_fd, &runtime, &result) != 0) return 1; if (genesis_write_requested_ephemeral_pc_history(ephemeral_report_fd, &runtime, &result) != 0) return 1; return genesis_write_sanitized_report(&result, GENESIS_BRIDGE_ROM_SHA256, &GENESIS_BRIDGE_REPORT_METADATA); }
 )GOLDEN";
 
 // Scope item 6, positive case 8: the raw/unannotated route (no external
