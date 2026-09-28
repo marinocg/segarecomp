@@ -101,140 +101,93 @@ void dialog_callback(void *userdata, const char *const *files, int) {
   pending->path = files[0];
 }
 
-constexpr float window_w = 560.0F;   // logical size at 100% scale; the window is fixed
-constexpr float window_h = 770.0F;
+constexpr float window_w = 520.0F;   // logical size at 100% scale; the window is fixed
+constexpr float window_h = 440.0F;
+constexpr float margin = 28.0F;
 
 float g_scale = 1.0F;
 float S(float v) { return v * g_scale; }
-
 ImU32 rgba(int r, int g, int b, int a = 255) { return IM_COL32(r, g, b, a); }
 
-// Decorative full-window background: gradient, soft circles, rings, speed stripes and a dot grid.
-void draw_background(ImDrawList *dl, float t) {
-  const float w = S(window_w), h = S(window_h);
-  dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(w, h), rgba(9, 11, 24), rgba(9, 11, 24), rgba(27, 14, 48), rgba(20, 10, 40));
-  const float drift = std::sin(t * 0.35F), drift2 = std::cos(t * 0.27F);
-  dl->AddCircleFilled(ImVec2(w * 0.10F + S(10) * drift, h * 0.08F), w * 0.55F, rgba(47, 107, 255, 34), 96);
-  dl->AddCircleFilled(ImVec2(w * 1.02F, h * 0.50F + S(14) * drift2), w * 0.58F, rgba(214, 51, 132, 30), 96);
-  dl->AddCircleFilled(ImVec2(w * 0.05F, h * 1.00F), w * 0.50F, rgba(20, 200, 220, 26), 96);
-  dl->AddCircleFilled(ImVec2(w * 0.85F, h * 0.06F), w * 0.16F, rgba(255, 190, 40, 22), 64);
-  for (int i = 0; i < 4; ++i)
-    dl->AddCircle(ImVec2(w * 0.10F + S(10) * drift, h * 0.08F), w * (0.66F + 0.09F * static_cast<float>(i)),
-                  rgba(120, 160, 255, 26 - i * 5), 128, S(1.5F));
-  // Speed stripes rising from the bottom-right corner.
-  static const ImU32 stripe[] = {rgba(47, 107, 255, 46), rgba(214, 51, 132, 40), rgba(255, 190, 40, 34), rgba(20, 200, 220, 34)};
-  for (int i = 0; i < 4; ++i) {
-    const float x = w * (0.52F + 0.13F * static_cast<float>(i)) + S(6) * drift;
-    dl->AddQuadFilled(ImVec2(x, h), ImVec2(x + w * 0.09F, h), ImVec2(x + w * 0.09F + h * 0.16F, h * 0.80F),
-                      ImVec2(x + h * 0.16F, h * 0.80F), stripe[i]);
-  }
-  for (int gy = 0; gy < 9; ++gy)
-    for (int gx = 0; gx < 6; ++gx)
-      dl->AddCircleFilled(ImVec2(S(26) + S(16) * static_cast<float>(gx), h - S(120) + S(16) * static_cast<float>(gy)), S(1.6F),
-                          rgba(255, 255, 255, 30));
+// Palette: one interactive accent; the logo alone carries the richer colors.
+const ImU32 col_bg = rgba(19, 21, 27), col_panel = rgba(26, 29, 37), col_border = rgba(52, 57, 70);
+const ImU32 col_text = rgba(226, 229, 238), col_muted = rgba(139, 145, 162), col_dim = rgba(103, 109, 127);
+const ImU32 col_accent = rgba(61, 123, 253), col_accent_hi = rgba(92, 145, 255), col_ok = rgba(80, 200, 130), col_err = rgba(240, 120, 112);
+
+void text_at(ImDrawList *dl, float size, ImU32 color, float x, float y, const char *text, bool bold = false) {
+  dl->AddText(nullptr, S(size), ImVec2(x, y), color, text);
+  if (bold) dl->AddText(nullptr, S(size), ImVec2(x + S(0.7F), y), color, text);
 }
 
-// Logo: a play triangle inside a ring made of two arcs (recompile loop) plus a faux-bold letter-spaced wordmark.
-void draw_logo(ImDrawList *dl, float cx, float cy, float t) {
-  const float r = S(38);
-  dl->AddCircleFilled(ImVec2(cx, cy), r + S(10), rgba(47, 107, 255, 40), 64);
-  dl->AddCircleFilled(ImVec2(cx, cy), r, rgba(28, 64, 170), 64);
-  dl->AddCircle(ImVec2(cx, cy), r, rgba(120, 170, 255), 64, S(2));
-  const float a0 = t * 0.9F;
-  dl->PathArcTo(ImVec2(cx, cy), r - S(8), a0, a0 + 2.4F, 32);
-  dl->PathStroke(rgba(20, 220, 235), 0, S(4));
-  dl->PathArcTo(ImVec2(cx, cy), r - S(8), a0 + 3.14159F, a0 + 3.14159F + 2.4F, 32);
-  dl->PathStroke(rgba(255, 190, 40), 0, S(4));
-  dl->AddTriangleFilled(ImVec2(cx - S(9), cy - S(13)), ImVec2(cx - S(9), cy + S(13)), ImVec2(cx + S(15), cy), rgba(255, 255, 255));
-
-  const char *word = "SEGARECOMP";
-  const float size = S(34), spacing = S(5);
-  float total = 0;
-  for (const char *c = word; *c; ++c) total += ImGui::GetFont()->CalcTextSizeA(size, 1e9F, 0, c, c + 1).x + spacing;
-  total -= spacing;
-  float x = cx - total * 0.5F;
-  const float y = cy + r + S(20);
-  for (const char *c = word; *c; ++c) {
-    for (int dx = 0; dx <= 1; ++dx)   // faux bold
-      dl->AddText(nullptr, size, ImVec2(x + S(0.9F) * static_cast<float>(dx), y), rgba(245, 247, 255), c, c + 1);
-    x += ImGui::GetFont()->CalcTextSizeA(size, 1e9F, 0, c, c + 1).x + spacing;
-  }
+// Background: flat dark with a very faint 16-bit tile grid. No gradients, blobs or arcs.
+void draw_background(ImDrawList *dl) {
+  const float w = S(window_w), h = S(window_h), cell = S(16);
+  dl->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), col_bg);
+  for (float x = 0; x <= w; x += cell) dl->AddLine(ImVec2(x, 0), ImVec2(x, h), rgba(255, 255, 255, 5));
+  for (float y = 0; y <= h; y += cell) dl->AddLine(ImVec2(0, y), ImVec2(w, y), rgba(255, 255, 255, 5));
 }
 
-void centered_text(const char *text, ImU32 color = 0) {
-  const float width = ImGui::CalcTextSize(text).x;
-  ImGui::SetCursorPosX((ImGui::GetWindowWidth() - width) * 0.5F);
-  if (color) ImGui::PushStyleColor(ImGuiCol_Text, color);
-  ImGui::TextUnformatted(text);
-  if (color) ImGui::PopStyleColor();
+// Logo mark (kept from the previous design, smaller and flat): play triangle inside a two-color ring.
+void draw_mark(ImDrawList *dl, float cx, float cy, float r) {
+  dl->AddCircleFilled(ImVec2(cx, cy), r, rgba(28, 64, 170), 48);
+  dl->AddCircle(ImVec2(cx, cy), r, rgba(120, 170, 255), 48, S(1.5F));
+  dl->PathArcTo(ImVec2(cx, cy), r - S(5), -1.2F, 1.0F, 24);
+  dl->PathStroke(rgba(20, 220, 235), 0, S(2.5F));
+  dl->PathArcTo(ImVec2(cx, cy), r - S(5), 1.94F, 4.14F, 24);
+  dl->PathStroke(rgba(255, 190, 40), 0, S(2.5F));
+  const float k = r / 38.0F;
+  dl->AddTriangleFilled(ImVec2(cx - S(9) * k, cy - S(13) * k), ImVec2(cx - S(9) * k, cy + S(13) * k), ImVec2(cx + S(15) * k, cy), rgba(255, 255, 255));
 }
 
-bool primary_button(const char *label, float width) {
-  ImGui::SetCursorPosX((ImGui::GetWindowWidth() - width) * 0.5F);
-  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(S(20), S(14)));
-  ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, S(16));
-  ImGui::PushStyleColor(ImGuiCol_Button, rgba(47, 107, 255));
-  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, rgba(76, 132, 255));
-  ImGui::PushStyleColor(ImGuiCol_ButtonActive, rgba(30, 84, 220));
-  const bool pressed = ImGui::Button(label, ImVec2(width, 0));
-  ImGui::PopStyleColor(3);
+// x, y, width, height are in logical (100% scale) units.
+bool button(const char *label, float x, float y, float width, bool primary, float height = 34.0F) {
+  ImGui::SetCursorPos(ImVec2(S(x), S(y)));
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, S(6));
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, primary ? 0.0F : S(1));
+  ImGui::PushStyleColor(ImGuiCol_Button, primary ? col_accent : col_panel);
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, primary ? col_accent_hi : rgba(38, 42, 53));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, primary ? rgba(45, 100, 220) : rgba(32, 36, 46));
+  ImGui::PushStyleColor(ImGuiCol_Border, col_border);
+  ImGui::PushStyleColor(ImGuiCol_Text, primary ? rgba(255, 255, 255) : col_text);
+  const bool pressed = ImGui::Button(label, ImVec2(width > 0 ? S(width) : 0, S(height)));
+  ImGui::PopStyleColor(5);
   ImGui::PopStyleVar(2);
   return pressed;
 }
 
-bool secondary_button(const char *label, float width) {
-  ImGui::SetCursorPosX((ImGui::GetWindowWidth() - width) * 0.5F);
-  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(S(16), S(10)));
-  ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, S(14));
-  ImGui::PushStyleColor(ImGuiCol_Button, rgba(255, 255, 255, 22));
-  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, rgba(255, 255, 255, 44));
-  ImGui::PushStyleColor(ImGuiCol_ButtonActive, rgba(255, 255, 255, 30));
-  const bool pressed = ImGui::Button(label, ImVec2(width, 0));
-  ImGui::PopStyleColor(3);
+// Subtle text-only action (used for the footer).
+bool text_button(const char *label, float right_x, float y) {
+  ImGui::PushFont(nullptr, S(12.5F));
+  const float w = ImGui::CalcTextSize(label).x + S(12);
+  ImGui::SetCursorPos(ImVec2(right_x - w, y));
+  ImGui::PushStyleColor(ImGuiCol_Button, rgba(0, 0, 0, 0));
+  ImGui::PushStyleColor(ImGuiCol_ButtonHovered, rgba(255, 255, 255, 14));
+  ImGui::PushStyleColor(ImGuiCol_ButtonActive, rgba(255, 255, 255, 24));
+  ImGui::PushStyleColor(ImGuiCol_Text, col_muted);
+  ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(S(6), S(2)));
+  ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, S(4));
+  const bool pressed = ImGui::Button(label);
   ImGui::PopStyleVar(2);
+  ImGui::PopStyleColor(4);
+  ImGui::PopFont();
   return pressed;
 }
 
-// Stage row icon: done = green disc with a check, running = spinning arc, pending = hollow ring.
-void stage_row(const char *label, StageState state, float t) {
-  ImDrawList *dl = ImGui::GetWindowDrawList();
-  const ImVec2 origin = ImGui::GetCursorScreenPos();
-  const float row = S(22), width = ImGui::GetWindowWidth();
-  const ImVec2 c(origin.x + width * 0.5F - S(105), origin.y + row * 0.5F);
-  const float r = S(9);
+// Stage row: done = check, running = spinner, pending = hollow dot. Left aligned.
+void stage_row(ImDrawList *dl, float x, float y, const char *label, StageState state, float t) {
+  const float r = S(6);
+  const ImVec2 c(x + r, y + S(9));
   if (state == StageState::done) {
-    dl->AddCircleFilled(c, r, rgba(52, 199, 120), 24);
-    dl->PathLineTo(ImVec2(c.x - r * 0.45F, c.y)); dl->PathLineTo(ImVec2(c.x - r * 0.1F, c.y + r * 0.4F));
-    dl->PathLineTo(ImVec2(c.x + r * 0.5F, c.y - r * 0.35F));
-    dl->PathStroke(rgba(255, 255, 255), 0, S(2));
+    dl->PathLineTo(ImVec2(c.x - r * 0.7F, c.y)); dl->PathLineTo(ImVec2(c.x - r * 0.15F, c.y + r * 0.6F));
+    dl->PathLineTo(ImVec2(c.x + r * 0.8F, c.y - r * 0.55F));
+    dl->PathStroke(col_ok, 0, S(2));
   } else if (state == StageState::running) {
-    dl->AddCircle(c, r, rgba(255, 255, 255, 40), 24, S(2));
-    dl->PathArcTo(c, r, t * 6.0F, t * 6.0F + 1.9F, 16);
-    dl->PathStroke(rgba(76, 150, 255), 0, S(2.5F));
+    dl->PathArcTo(c, r, t * 6.0F, t * 6.0F + 4.2F, 16);
+    dl->PathStroke(col_accent_hi, 0, S(2));
   } else {
-    dl->AddCircle(c, r, rgba(255, 255, 255, 50), 24, S(1.5F));
+    dl->AddCircle(c, r * 0.6F, col_dim, 16, S(1.2F));
   }
-  const ImU32 color = state == StageState::pending ? rgba(140, 146, 165) : rgba(235, 238, 250);
-  dl->AddText(ImVec2(c.x + r + S(14), origin.y + (row - ImGui::GetFontSize()) * 0.5F), color, label);
-  ImGui::Dummy(ImVec2(0, row));
-}
-
-// Dashed rounded rectangle for the drop target; brighter while a file is dragged over the window.
-void dashed_rect(ImDrawList *dl, ImVec2 a, ImVec2 b, ImU32 color, float thickness) {
-  const float dash = S(9), gap = S(7);
-  for (float x = a.x + S(16); x < b.x - S(16); x += dash + gap) {
-    dl->AddLine(ImVec2(x, a.y), ImVec2(std::min(x + dash, b.x - S(16)), a.y), color, thickness);
-    dl->AddLine(ImVec2(x, b.y), ImVec2(std::min(x + dash, b.x - S(16)), b.y), color, thickness);
-  }
-  for (float y = a.y + S(16); y < b.y - S(16); y += dash + gap) {
-    dl->AddLine(ImVec2(a.x, y), ImVec2(a.x, std::min(y + dash, b.y - S(16))), color, thickness);
-    dl->AddLine(ImVec2(b.x, y), ImVec2(b.x, std::min(y + dash, b.y - S(16))), color, thickness);
-  }
-  const float r = S(16);
-  dl->PathArcTo(ImVec2(a.x + r, a.y + r), r, 3.14159F, 4.71239F, 8); dl->PathStroke(color, 0, thickness);
-  dl->PathArcTo(ImVec2(b.x - r, a.y + r), r, 4.71239F, 6.28318F, 8); dl->PathStroke(color, 0, thickness);
-  dl->PathArcTo(ImVec2(b.x - r, b.y - r), r, 0, 1.5708F, 8); dl->PathStroke(color, 0, thickness);
-  dl->PathArcTo(ImVec2(a.x + r, b.y - r), r, 1.5708F, 3.14159F, 8); dl->PathStroke(color, 0, thickness);
+  text_at(dl, 15, state == StageState::pending ? col_dim : col_text, x + S(26), y, label);
 }
 
 int gui() {
@@ -253,9 +206,9 @@ int gui() {
   ImGui::GetIO().IniFilename = nullptr;
   ImGui::StyleColorsDark();
   ImGuiStyle &style = ImGui::GetStyle();
-  style.WindowPadding = ImVec2(0, 0); style.ItemSpacing = ImVec2(S(10), S(10)); style.ChildRounding = S(20);
+  style.WindowPadding = ImVec2(0, 0); style.ItemSpacing = ImVec2(S(8), S(8)); style.FramePadding = ImVec2(S(14), S(7));
   style.FontScaleDpi = g_scale;
-  style.FontSizeBase = 18.0F;
+  style.FontSizeBase = 16.0F;
   // Prefer the platform UI font when present (never redistributed); fall back to ImGui's built-in font.
   for (const char *candidate : {"/System/Library/Fonts/Helvetica.ttc", "/System/Library/Fonts/Supplemental/Arial.ttf",
                                 "C:\\Windows\\Fonts\\segoeui.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -336,138 +289,134 @@ int gui() {
     ImGui::Begin("##main", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
                                         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
     ImGui::PopStyleColor();
-    ImDrawList *bg = ImGui::GetWindowDrawList();
-    draw_background(bg, t);
-    draw_logo(bg, S(window_w) * 0.5F, S(84), t);
-    const ImU32 muted = rgba(160, 166, 188), dim = rgba(120, 126, 148);
-    ImGui::SetCursorPos(ImVec2(0, S(196)));
-    centered_text("Recompile Sega games to native code.", muted);
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    draw_background(dl);
 
-    // Card
-    const float card_x = S(40), card_y = S(240), card_w = S(window_w) - S(80), card_h = S(350);
-    bg->AddRectFilled(ImVec2(card_x + S(2), card_y + S(8)), ImVec2(card_x + card_w + S(2), card_y + card_h + S(8)), rgba(0, 0, 0, 70), S(22));
-    bg->AddRectFilled(ImVec2(card_x, card_y), ImVec2(card_x + card_w, card_y + card_h), rgba(18, 20, 34, 214), S(22));
-    bg->AddRect(ImVec2(card_x, card_y), ImVec2(card_x + card_w, card_y + card_h), rgba(255, 255, 255, 30), S(22), 0, S(1.2F));
-    ImGui::SetCursorPos(ImVec2(card_x, card_y));
-    ImGui::BeginChild("card", ImVec2(card_w, card_h), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
-    const float button_width = card_w - S(120);
+    // ---- header: small mark, name, understated subtitle (left aligned) ----
+    draw_mark(dl, S(margin + 20), S(44), S(20));
+    text_at(dl, 30, col_text, S(margin + 52), S(24), "Segarecomp", true);
+    text_at(dl, 14, col_muted, S(margin + 53), S(58), "Recompile Sega games to native code.");
+    // one small brand accent: a four-segment cartridge-label stripe under the header
+    {
+      const ImU32 seg[] = {rgba(47, 107, 255), rgba(20, 220, 235), rgba(255, 190, 40), rgba(214, 51, 132)};
+      const float y = S(88), w = S(20);
+      for (int i = 0; i < 4; ++i)
+        dl->AddRectFilled(ImVec2(S(margin) + static_cast<float>(i) * (w + S(2)), y), ImVec2(S(margin) + static_cast<float>(i) * (w + S(2)) + w, y + S(3)), seg[i]);
+    }
+
+    // ---- main control ----
+    const float bx = S(margin), by = S(108), bw = S(window_w - 2 * margin);
+    float bh = S(112);
+    if (state == State::Building) bh = S(176);
+    else if (state != State::NoRom) bh = S(150);
+    if (state == State::Failed) bh = S(170);
+    const bool box_hover = ImGui::IsMouseHoveringRect(ImVec2(bx, by), ImVec2(bx + bw, by + bh), false);
+    const bool drop_active = state == State::NoRom && (dragging || false);
+    dl->AddRectFilled(ImVec2(bx, by), ImVec2(bx + bw, by + bh), drop_active ? rgba(61, 123, 253, 26) : col_panel, S(8));
     if (state == State::NoRom) {
-      const ImVec2 o = ImGui::GetWindowPos();
-      const ImVec2 a(o.x + S(24), o.y + S(24)), b(o.x + card_w - S(24), o.y + card_h - S(24));
-      dashed_rect(ImGui::GetWindowDrawList(), a, b, dragging ? rgba(90, 150, 255) : rgba(255, 255, 255, 70), S(dragging ? 2.5F : 1.6F));
-      if (dragging) ImGui::GetWindowDrawList()->AddRectFilled(a, b, rgba(47, 107, 255, 28), S(16));
-      // "tray + down arrow" icon
-      const float cx = o.x + card_w * 0.5F, cy = o.y + S(92);
-      ImDrawList *dl = ImGui::GetWindowDrawList();
-      const ImU32 ic = dragging ? rgba(120, 175, 255) : rgba(190, 200, 235);
-      dl->AddLine(ImVec2(cx, cy - S(26)), ImVec2(cx, cy + S(10)), ic, S(3.5F));
-      dl->AddLine(ImVec2(cx - S(14), cy - S(4)), ImVec2(cx, cy + S(10)), ic, S(3.5F));
-      dl->AddLine(ImVec2(cx + S(14), cy - S(4)), ImVec2(cx, cy + S(10)), ic, S(3.5F));
-      dl->PathLineTo(ImVec2(cx - S(26), cy + S(2))); dl->PathLineTo(ImVec2(cx - S(26), cy + S(24)));
-      dl->PathLineTo(ImVec2(cx + S(26), cy + S(24))); dl->PathLineTo(ImVec2(cx + S(26), cy + S(2)));
-      dl->PathStroke(ic, 0, S(3.5F));
-      ImGui::SetCursorPosY(S(150));
-      centered_text(dragging ? "Release to load the ROM" : "Drop a ROM here", rgba(240, 243, 255));
-      centered_text("or", dim);
-      ImGui::SetCursorPosY(ImGui::GetCursorPosY() + S(2));
-      if (secondary_button("Browse...", S(170))) browse();
+      // dashed-free simple border, modest radius; accent only while a file is dragged over the window
+      dl->AddRect(ImVec2(bx, by), ImVec2(bx + bw, by + bh), drop_active ? col_accent : (box_hover ? rgba(80, 87, 104) : col_border), S(8), 0, S(drop_active ? 1.5F : 1.0F));
     } else {
-      ImGui::SetCursorPosY(S(30));
+      dl->AddRect(ImVec2(bx, by), ImVec2(bx + bw, by + bh), col_border, S(8), 0, S(1));
+    }
+    const float px = bx + S(20);   // content inset inside the control
+
+    if (state == State::NoRom) {
+      // small, secondary open-file icon
+      const float ix = px, iy = by + S(24);
+      const ImU32 ic = drop_active ? col_accent_hi : col_muted;
+      dl->AddLine(ImVec2(ix + S(12), iy), ImVec2(ix + S(12), iy + S(15)), ic, S(2));
+      dl->AddLine(ImVec2(ix + S(6), iy + S(9)), ImVec2(ix + S(12), iy + S(15)), ic, S(2));
+      dl->AddLine(ImVec2(ix + S(18), iy + S(9)), ImVec2(ix + S(12), iy + S(15)), ic, S(2));
+      dl->PathLineTo(ImVec2(ix + S(2), iy + S(11))); dl->PathLineTo(ImVec2(ix + S(2), iy + S(22)));
+      dl->PathLineTo(ImVec2(ix + S(22), iy + S(22))); dl->PathLineTo(ImVec2(ix + S(22), iy + S(11)));
+      dl->PathStroke(ic, 0, S(2));
+      text_at(dl, 17, col_text, px + S(38), by + S(20), drop_active ? "Release to load the ROM" : "Drop a ROM here");
+      text_at(dl, 13, col_muted, px + S(38), by + S(44), ".bin  .md  .gen  .smd");
+      if (button("Browse...", (px - S(0)) / g_scale + 38.0F, (by + S(66)) / g_scale, 104, false, 32)) browse();
+    } else {
       std::string title = rom.title;
-      if (ImGui::CalcTextSize(title.c_str()).x > card_w - S(40)) title = title.substr(0, 34) + "...";
-      ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.25F * g_scale);
-      centered_text(title.c_str(), rgba(245, 247, 255));
-      ImGui::PopFont();
-      centered_text(rom.platform.c_str(), muted);
-      if (rom.supported_platform)
-        centered_text(rom.compat_known ? "Experimental compatibility" : "Compatibility unknown",
-                      rom.compat_known ? rgba(255, 190, 40) : dim);
-      ImGui::SetCursorPosY(S(128));
+      while (title.size() > 4 && ImGui::CalcTextSize(title.c_str()).x * 1.15F > bw - S(40)) title.resize(title.size() - 4), title += "...";
+      text_at(dl, 18, col_text, px, by + S(16), title.c_str());
+      std::string meta = rom.platform;
+      if (rom.supported_platform) meta += rom.compat_known ? "  -  Experimental compatibility" : "  -  Compatibility unknown";
+      text_at(dl, 13, col_muted, px, by + S(40), meta.c_str());
+      const float row_y = by + S(70);
+      const float rx = px / g_scale, ry = row_y / g_scale;
       if (!layout.problem.empty()) {
-        ImGui::SetCursorPosX(S(24));
-        ImGui::PushTextWrapPos(card_w - S(24));
+        ImGui::SetCursorPos(ImVec2(px, row_y));
+        ImGui::PushTextWrapPos(bx + bw - S(20));
+        ImGui::PushStyleColor(ImGuiCol_Text, col_err);
         ImGui::TextUnformatted(layout.problem.c_str());
+        ImGui::PopStyleColor();
         ImGui::PopTextWrapPos();
       } else if (state == State::RomSelected) {
-        if (!rom.supported_platform) centered_text("This is not a supported Genesis / Mega Drive ROM.", rgba(255, 140, 130));
-        ImGui::SetCursorPosY(S(160));
-        if (primary_button(rom.compat_known ? "Recompile & Play" : "Try anyway", button_width)) start_build(false);
+        if (!rom.supported_platform) text_at(dl, 13, col_err, px, row_y - S(4), "This is not a supported Genesis / Mega Drive ROM.");
+        if (button(rom.compat_known ? "Recompile & Play" : "Try anyway", rx, ry + 20, 170, true, 38)) start_build(false);
+        if (button("Choose another...", rx + 182, ry + 20, 150, false, 38)) browse();
       } else if (state == State::Building) {
         static const char *names[BuildJob::stage_count] = {"Analyzing ROM", "Generating native C", "Compiling", "Linking"};
-        centered_text("Preparing game...", rgba(240, 243, 255));
-        ImGui::SetCursorPosY(S(150));
-        for (int i = 0; i < BuildJob::stage_count; ++i) stage_row(names[i], job->stage(i), t);
-        ImGui::SetCursorPosY(S(300));
-        centered_text("Large games can take several minutes the first time.", dim);
+        for (int i = 0; i < BuildJob::stage_count; ++i) stage_row(dl, px, by + S(68) + S(22) * static_cast<float>(i), names[i], job->stage(i), t);
+        text_at(dl, 12, col_dim, px, by + bh - S(22), "Large games can take several minutes the first time.");
       } else if (state == State::Ready) {
-        centered_text("Native build ready", rgba(52, 199, 120));
-        ImGui::SetCursorPosY(S(160));
-        if (primary_button("Play", button_width)) {
+        text_at(dl, 13, col_ok, px, by + S(64), "Native build ready");
+        if (button("Play", rx, ry + 30, 110, true, 38)) {
           game = std::make_unique<GameRun>(rom, layout, entry);
           if (game->started()) state = State::Running;
           else { failure = "The game could not be started."; diagnostics = failure; game.reset(); state = State::Failed; }
         }
-        if (secondary_button("Recompile", button_width)) start_build(true);
+        if (button("Recompile", rx + 122, ry + 30, 110, false, 38)) start_build(true);
+        if (button("Choose another...", rx + 244, ry + 30, 150, false, 38)) browse();
       } else if (state == State::Running) {
-        ImGui::SetCursorPosY(S(170));
-        centered_text("Playing...", rgba(240, 243, 255));
-        centered_text("Close the game window to return.", dim);
+        text_at(dl, 16, col_text, px, by + S(78), "Playing...");
+        text_at(dl, 13, col_muted, px, by + S(102), "Close the game window to return.");
       } else if (state == State::Failed) {
-        ImGui::SetCursorPos(ImVec2(S(28), S(124)));
-        ImGui::PushStyleColor(ImGuiCol_Text, rgba(255, 140, 130));
-        ImGui::PushTextWrapPos(card_w - S(28));
+        ImGui::SetCursorPos(ImVec2(px, by + S(62)));
+        ImGui::PushTextWrapPos(bx + bw - S(20));
+        ImGui::PushStyleColor(ImGuiCol_Text, col_err);
         ImGui::TextUnformatted(failure.c_str());
-        ImGui::PopTextWrapPos();
         ImGui::PopStyleColor();
-        ImGui::SetCursorPosY(S(186));
-        if (rom.error.empty() && primary_button("Try again", button_width)) start_build(true);
-        if (secondary_button(show_diagnostics ? "Hide diagnostics" : "View diagnostics", button_width)) show_diagnostics = !show_diagnostics;
-      }
-      if (state != State::Building && state != State::Running) {
-        ImGui::SetCursorPosY(card_h - S(52));
-        if (secondary_button("Choose another ROM...", S(220))) browse();
+        ImGui::PopTextWrapPos();
+        const float fy = (by + bh - S(52)) / g_scale;
+        if (rom.error.empty() && button("Try again", rx, fy, 100, true, 34)) start_build(true);
+        if (button(show_diagnostics ? "Hide diagnostics" : "View diagnostics", rx + 112, fy, 150, false, 34)) show_diagnostics = !show_diagnostics;
+        if (button("Choose another...", rx + 274, fy, 140, false, 34)) browse();
       }
     }
-    ImGui::EndChild();
 
+    // ---- below the control: diagnostics when asked for, otherwise the legal notice (left aligned, compact) ----
+    const float below = by + bh + S(16);
     if (show_diagnostics && state == State::Failed) {
-      ImGui::SetCursorPos(ImVec2(card_x, card_y + card_h + S(10)));
-      ImGui::PushStyleColor(ImGuiCol_ChildBg, rgba(8, 9, 16, 235));
-      ImGui::BeginChild("diag", ImVec2(card_w, S(70)), ImGuiChildFlags_Borders);
-      ImGui::PushTextWrapPos(card_w - S(20));
+      dl->AddRectFilled(ImVec2(bx, below), ImVec2(bx + bw, below + S(120)), rgba(12, 13, 18), S(6));
+      dl->AddRect(ImVec2(bx, below), ImVec2(bx + bw, below + S(120)), col_border, S(6));
+      ImGui::SetCursorPos(ImVec2(bx + S(10), below + S(8)));
+      ImGui::BeginChild("diag", ImVec2(bw - S(20), S(104)), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+      ImGui::PushTextWrapPos(bw - S(30));
+      ImGui::PushStyleColor(ImGuiCol_Text, col_muted);
       ImGui::TextUnformatted(diagnostics.c_str());
+      ImGui::PopStyleColor();
       ImGui::PopTextWrapPos();
       ImGui::EndChild();
-      ImGui::PopStyleColor();
     } else {
-      ImGui::SetCursorPos(ImVec2(card_x + S(16), card_y + card_h + S(24)));
-      ImGui::PushStyleColor(ImGuiCol_Text, dim);
-      ImGui::PushTextWrapPos(S(window_w) - S(56));
-      ImGui::TextUnformatted("No ROMs are included with Segarecomp. Use only software you are legally entitled to analyze. "
-                             "Compatibility is experimental.");
-      ImGui::PopTextWrapPos();
-      ImGui::PopStyleColor();
+      text_at(dl, 12.5F, col_muted, bx, below, "No ROMs are included with Segarecomp.");
+      text_at(dl, 12.5F, col_muted, bx, below + S(17), "Use only software you are legally entitled to analyze. Compatibility is experimental.");
     }
 
-    // Footer: version info and cache folder.
+    // ---- footer: status metadata left, action right ----
+    const float fy = S(window_h) - S(44);
+    dl->AddLine(ImVec2(S(margin), fy), ImVec2(S(window_w - margin), fy), col_border);
     char info[160];
-    std::snprintf(info, sizeof info, "v%s  -  zig %s  -  SDL %d.%d.%d  -  %s", SEGARECOMP_LAUNCHER_VERSION, SEGARECOMP_ZIG_VERSION,
-                  SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()), SDL_VERSIONNUM_MICRO(SDL_GetVersion()),
-                  host_description().c_str());
-    ImGui::SetCursorPos(ImVec2(0, S(window_h) - S(60)));
-    centered_text(info, dim);
-    ImGui::SetCursorPosY(S(window_h) - S(40));
-    ImGui::PushStyleColor(ImGuiCol_Button, rgba(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_Text, muted);
-    ImGui::SetCursorPosX((S(window_w) - ImGui::CalcTextSize("Open cache folder").x - S(20)) * 0.5F);
-    if (ImGui::Button("Open cache folder")) SDL_OpenURL(("file://" + u8s(cache_root())).c_str());
-    ImGui::PopStyleColor(2);
+    std::snprintf(info, sizeof info, "v%s  \xC2\xB7  Zig %s  \xC2\xB7  SDL %d.%d.%d  \xC2\xB7  %s", SEGARECOMP_LAUNCHER_VERSION,
+                  SEGARECOMP_ZIG_VERSION, SDL_VERSIONNUM_MAJOR(SDL_GetVersion()), SDL_VERSIONNUM_MINOR(SDL_GetVersion()),
+                  SDL_VERSIONNUM_MICRO(SDL_GetVersion()), host_description().c_str());
+    text_at(dl, 12, col_dim, S(margin), fy + S(15), info);
+    if (text_button("Open cache folder", S(window_w - margin) + S(6), fy + S(10))) SDL_OpenURL(("file://" + u8s(cache_root())).c_str());
     ImGui::End();
 
     ImGui::Render();
     // High-DPI: ImGui works in window points, the renderer in pixels.
     SDL_SetRenderScale(renderer, ImGui::GetIO().DisplayFramebufferScale.x, ImGui::GetIO().DisplayFramebufferScale.y);
-    SDL_SetRenderDrawColor(renderer, 9, 11, 24, 255);
+    SDL_SetRenderDrawColor(renderer, 19, 21, 27, 255);
     SDL_RenderClear(renderer);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
     SDL_RenderPresent(renderer);
