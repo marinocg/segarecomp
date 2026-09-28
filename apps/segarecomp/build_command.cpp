@@ -130,8 +130,11 @@ struct Log {
   std::ofstream file;
   void line(const std::string &text) { file << text << '\n'; file.flush(); }
   void append_file(const fs::path &path) {
+    // Not `file << in.rdbuf()`: that sets failbit on an empty source and silently drops every later line.
     std::ifstream in(path, std::ios::binary);
-    if (in) file << in.rdbuf();
+    std::ostringstream text;
+    if (in) text << in.rdbuf();
+    file << text.str();
     file.flush();
   }
 };
