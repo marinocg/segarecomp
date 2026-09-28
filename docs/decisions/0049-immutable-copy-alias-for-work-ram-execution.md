@@ -116,3 +116,9 @@ and fail closed, exactly as a jump into unknown RAM must.
   `genesis_cartridge_mirror_region_test`, `genesis_copy_alias_discovery_test`.
 - The route reaches a stable generated-native presentation with no fail-closed frontier (sanitized frontier
   sequence recorded in the task evidence: alias, PEA return authority, cartridge mirror).
+
+## Known limitation: cartridge SRAM
+
+The project models no cartridge SRAM/backup RAM. A power-of-two image of 1 or 2 MiB
+with SRAM at `$200000` would read mirrored ROM there under the mirroring rule above.
+Modelling SRAM is out of scope for this decision.
