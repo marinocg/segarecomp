@@ -84,57 +84,6 @@ def check_recovery(root: pathlib.Path, segarecomp: str, compare: pathlib.Path, t
     assert "000214" not in out.stdout and "0x" not in out.stdout
 
 
-def store_provenance_image() -> bytes:
-    image = bytearray(0x800)
-    image[0:4] = (0x00FFFE00).to_bytes(4, "big")
-    image[4:8] = (0x200).to_bytes(4, "big")
-    # 0x200: MOVEA.L ($F200).W,A0; MOVEQ #0,D0; MOVE.B 4(A0),D0; JMP (2,PC,D0.W) at 0x20A: an object-relative
-    # width-only dispatch whose base A0 is not locally exact.
-    words(image, 0x200, [0x2078, 0xF200, 0x7000, 0x1028, 0x0004, 0x4EFB, 0x0002])
-    words(image, 0x20E, [0x60FE, 0x60FE, 0x60FE])
-    return bytes(image)
-
-
-def check_store_provenance(segarecomp: str, compare: pathlib.Path, tmpdir: pathlib.Path) -> None:
-    """SEG-026-T003: store-provenance flags, aggregate, and source-kind attribution of observed width-only sites."""
-    rom = tmpdir / "store.bin"
-    rom.write_bytes(store_provenance_image())
-    base = [segarecomp, "genesis-reachability-challenger", "--rom", str(rom), "--entry", "00000200", "--mapping-base",
-            "00000000", "--rom-sha256", "0" * 64]
-    bad = subprocess.run(base + ["--private-output", str(tmpdir / "bad2.json"), "--pc-index-store-provenance", "prove"],
-                         capture_output=True, text=True)
-    assert bad.returncode == 2, "store provenance requires --pc-index-recovery"
-    observed = {0x200, 0x204, 0x206, 0x20A, 0x212}
-    pcs = tmpdir / "store-pcs.txt"
-    pcs.write_text("".join(f"{pc:06x}\n" for pc in sorted(observed)))
-    private = tmpdir / "store.json"
-    classification = tmpdir / "store-classification.json"
-    result = subprocess.run(base + ["--private-output", str(private), "--pc-index-recovery", "--pc-index-store-provenance",
-                                    "prove", "--classify-pcs", str(pcs), "--classify-output", str(classification)],
-                            capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
-    provenance = json.loads(result.stdout)["pc_index_recovery"]["store_provenance"]
-    assert provenance["mode"] == "prove" and provenance["alias_policy"] == "strict", provenance
-    assert provenance["sites_by_source_kind_and_outcome"] == {"register_relative": {"width_only_domain": 1}}, provenance
-    assert provenance["sites_by_source_kind_and_source_outcome"] == {"register_relative": {"base_unknown": 1}}, provenance
-    assert "f200" not in result.stdout.lower() and "0x" not in result.stdout
-    coverage = tmpdir / "store-coverage"
-    coverage.mkdir()
-    (coverage / "coverage.bitmap").write_bytes(bitmap_of(observed))
-    witnesses = [(0, 0x0, 0x200, 0), (1, 0x200, 0x204, 1), (2, 0x204, 0x206, 1), (3, 0x206, 0x20A, 1),
-                 (4, 0x20A, 0x212, 1)]
-    (coverage / "witnesses.txt").write_text("".join(f"{o} {p:08x} {c:08x} {k}\n" for o, p, c, k in witnesses))
-    out = subprocess.run([sys.executable, str(compare), "--coverage-dir", str(coverage), "--challenger", str(private),
-                          "--classification", str(classification)], capture_output=True, text=True)
-    assert out.returncode == 0, out.stderr
-    report = json.loads(out.stdout)
-    assert report["observed_pc_index_sites_by_local_domain_and_source_kind"] == {
-        "width_only_domain:in_d": {"register_relative(base_unknown)": 1}}, report
-    assert report["missing_pcs_behind_width_only_pc_index_on_chain"] == 1, report
-    assert report["missing_pcs_behind_width_only_by_source_kinds"] == {"register_relative": 1}, report
-    assert "000212" not in out.stdout and "0x" not in out.stdout
-
-
 def bitmap_of(pcs: set[int]) -> bytes:
     data = bytearray(1 << 20)
     for pc in pcs:
@@ -222,7 +171,6 @@ def main() -> int:
                                    str(private)], capture_output=True, text=True)
         assert mismatch.returncode == 3
         check_recovery(root, segarecomp, compare, tmpdir)
-        check_store_provenance(segarecomp, compare, tmpdir)
     # Bridge flag validation happens before any generation (exit 8).
     bridge = root / "tools" / "genesis_startup_bridge.py"
     for extra in (["--coverage-epoch-frames", "10"], ["--coverage-disabled"], ["--coverage-no-render"],

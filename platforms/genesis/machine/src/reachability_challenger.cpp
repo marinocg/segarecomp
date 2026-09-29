@@ -221,55 +221,13 @@ EdgeKind edge_kind(M68kControlSuccessorKind kind) {
   return EdgeKind::fallthrough;
 }
 
-// SEG-026-T003: what one proof learned about the mutable byte sources it read.
-struct SourceLog {
-  std::uint32_t kinds{};
-  std::uint32_t bases_exact{};    // register-relative sources whose base An has an exact local value
-  std::uint32_t bases_unknown{};  // ... whose base An does not
-  std::optional<GenesisStateSourceOutcome> outcome;  // first non-resolved outcome
-  void note(GenesisStateSourceOutcome value) {
-    if (!outcome && value != GenesisStateSourceOutcome::resolved) outcome = value;
-  }
-};
-
-GenesisStateSourceKind state_source_kind(M68kEaMode mode) {
-  switch (mode) {
-  case M68kEaMode::absolute_word:
-  case M68kEaMode::absolute_long: return GenesisStateSourceKind::absolute_ram;
-  case M68kEaMode::address_indirect:
-  case M68kEaMode::address_disp16: return GenesisStateSourceKind::register_relative;
-  case M68kEaMode::address_index8: return GenesisStateSourceKind::indexed_relative;
-  case M68kEaMode::address_postinc:
-  case M68kEaMode::address_predec: return GenesisStateSourceKind::auto_update_relative;
-  default: return GenesisStateSourceKind::other;
-  }
-}
-
-std::string source_kinds_label(std::uint32_t kinds) {
-  if (kinds == 0U) return "none";
-  std::string out;
-  for (std::uint32_t kind = 0; kind < genesis_state_source_kind_count; ++kind)
-    if (((kinds >> kind) & 1U) != 0U) {
-      if (!out.empty()) out += '+';
-      out += genesis_state_source_kind_name(static_cast<GenesisStateSourceKind>(kind));
-    }
-  return out;
-}
-
-class StoreDomain;
-
-// Registers 0..7 are D0..D7 (query width 16 or 32); 8..15 are A0..A7 (width 32, SEG-026-T003).
-constexpr unsigned address_register_base = 8U;
-
 class IndexEvaluator final : public M68kFiniteValueInputs {
 public:
   IndexEvaluator(const std::map<std::uint32_t, Decoded> &instructions, const PredecessorMap &predecessors,
-                 const std::set<std::uint32_t> &opaque, const Decoder &decoder, StoreDomain *stores = nullptr,
-                 SourceLog *log = nullptr)
-      : instructions_(instructions), predecessors_(predecessors), opaque_(opaque), decoder_(decoder), stores_(stores),
-        log_(log) {}
+                 const std::set<std::uint32_t> &opaque, const Decoder &decoder)
+      : instructions_(instructions), predecessors_(predecessors), opaque_(opaque), decoder_(decoder) {}
 
-  // Value of the register (mod 2^width) immediately before the instruction at `pc` on every known path.
+  // Value of Dreg (mod 2^width) immediately before the instruction at `pc` on every known path.
   M68kFiniteValues before(unsigned reg, unsigned width, std::uint32_t pc) {
     const auto key = std::make_tuple(reg, width, pc);
     if (const auto found = memo_.find(key); found != memo_.end()) return found->second;
@@ -293,7 +251,7 @@ public:
     M68kFiniteValues acc = M68kFiniteValues::of({}, width);
     for (const auto &edge : preds->second) {
       auto value = after(reg, width, edge.from);
-      if (value.known && reg < address_register_base && (edge.kind == EdgeKind::taken || edge.kind == EdgeKind::not_taken)) {
+      if (value.known && (edge.kind == EdgeKind::taken || edge.kind == EdgeKind::not_taken)) {
         // Flags at the branch are exact only when its sole predecessor is the physically preceding flag setter.
         const auto branch_preds = predecessors_.find(edge.from);
         if (!opaque_.contains(edge.from) && branch_preds != predecessors_.end() && branch_preds->second.size() == 1U &&
@@ -316,25 +274,12 @@ public:
   }
 
   M68kFiniteValues data_register_before(unsigned reg, unsigned width) override { return before(reg, width, current_); }
-  M68kFiniteValues address_register_before(unsigned reg) override {
-    ++quiet_;
-    auto value = before(address_register_base + reg, 32U, current_);
-    --quiet_;
-    return value;
-  }
 
   std::optional<std::uint32_t> immutable_read(std::uint32_t address, unsigned bytes) override {
     const auto value = decoder_.immutable_read(address, bytes);
     if (value) entries_.insert(address);
     return value;
   }
-
-  // SEG-026-T003: a byte index source read from mutable memory.
-  std::optional<M68kFiniteValues> mutable_byte(const M68kEffectiveAddress &ea) override;
-
-  // Evaluate operands "at" `pc` (used for a store operation's own operands).
-  void at(std::uint32_t pc) { current_ = pc; }
-  void set_roots(const std::vector<std::uint32_t> &roots) { roots_.insert(roots.begin(), roots.end()); }
 
   bool exhausted() const { return exhausted_; }
   std::optional<GenesisPcIndexUnknownOrigin> origin() const { return origin_; }
@@ -350,9 +295,7 @@ private:
     if (found == instructions_.end()) return M68kFiniteValues::unknown();
     const auto saved = current_;
     current_ = pc;
-    const auto transfer = reg >= address_register_base
-                              ? m68k_finite_address_register_after(found->second.operation, reg - address_register_base, *this)
-                              : m68k_finite_register_after(found->second.operation, reg, width, *this);
+    const auto transfer = m68k_finite_register_after(found->second.operation, reg, width, *this);
     current_ = saved;
     proof_ |= transfer.proof;
     table_reads_ += transfer.table_reads;
@@ -375,20 +318,17 @@ private:
   }
 
   void note(GenesisPcIndexUnknownOrigin origin) {
-    if (!origin_ && quiet_ == 0U) origin_ = origin;
+    if (!origin_) origin_ = origin;
   }
 
   const std::map<std::uint32_t, Decoded> &instructions_;
   const PredecessorMap &predecessors_;
   const std::set<std::uint32_t> &opaque_;
   const Decoder &decoder_;
-  StoreDomain *stores_{};
-  SourceLog *log_{};
   std::map<std::tuple<unsigned, unsigned, std::uint32_t>, M68kFiniteValues> memo_;
   std::set<std::tuple<unsigned, unsigned, std::uint32_t>> active_;
   std::uint32_t current_{};
   std::uint32_t steps_{};
-  unsigned quiet_{};
   bool exhausted_{};
   bool read_failed_{};
   std::uint32_t proof_{};
@@ -397,330 +337,17 @@ private:
   std::set<std::uint32_t> entries_;
   std::set<std::uint32_t> roots_;
   std::optional<GenesisPcIndexUnknownOrigin> origin_;
-};
 
-// ---------------------------------------------------------------------------------------------------------
-// SEG-026-T003: exact store domains of mutable work-RAM bytes, relative to the challenger's discovered set D.
-
-constexpr std::uint32_t work_ram_begin = UINT32_C(0x00E00000);  // 64 KiB work RAM, mirrored up to 0xFFFFFF
-constexpr std::uint32_t max_state_locations = 16U;               // exact base sets naming more locations: unresolved
-constexpr std::uint32_t max_store_addresses = 64U;               // exact store address sets beyond this: unresolved
-constexpr std::uint32_t max_update_iterations = 16U;             // self-update fixed-point bound
-
-std::uint32_t normalize_ram(std::uint32_t address) {
-  address &= bus_mask;
-  return address >= work_ram_begin ? (UINT32_C(0x00FF0000) | (address & 0xFFFFU)) : address;
-}
-
-class StoreDomain {
 public:
-  StoreDomain(const std::map<std::uint32_t, Decoded> &instructions, const PredecessorMap &predecessors,
-              const std::set<std::uint32_t> &opaque, const Decoder &decoder, GenesisStoreAliasPolicy policy,
-              bool interrupt_frames)
-      : instructions_(instructions), predecessors_(predecessors), opaque_(opaque), decoder_(decoder), policy_(policy),
-        interrupt_frames_(interrupt_frames) {}
-
-  // The exact domain of the work-RAM byte `location`. `resolved` with the current iterate when the location is
-  // the source being iterated (a self-update); `source_cycle` for any other active source.
-  std::pair<GenesisStateSourceOutcome, M68kFiniteValues> domain(std::uint32_t location) {
-    location = normalize_ram(location);
-    if (location < work_ram_begin) {
-      records_.try_emplace(location).first->second.outcome = GenesisStateSourceOutcome::not_work_ram;
-      return {GenesisStateSourceOutcome::not_work_ram, M68kFiniteValues::unknown()};
-    }
-    if (!active_.empty() && active_.back() == location) return {GenesisStateSourceOutcome::resolved, iterate_.at(location)};
-    if (std::find(active_.begin(), active_.end(), location) != active_.end()) {
-      tainted_ = true;
-      return {GenesisStateSourceOutcome::source_cycle, M68kFiniteValues::unknown()};
-    }
-    if (const auto found = records_.find(location); found != records_.end())
-      return {found->second.outcome, found->second.outcome == GenesisStateSourceOutcome::resolved
-                                         ? M68kFiniteValues::of(found->second.values, 32U)
-                                         : M68kFiniteValues::unknown()};
-    build();
-    const bool outer_taint = tainted_;
-    tainted_ = false;
-    active_.push_back(location);
-    auto record = compute(location);
-    active_.pop_back();
-    const bool tainted = tainted_;
-    tainted_ = outer_taint || tainted;
-    auto values = record.outcome == GenesisStateSourceOutcome::resolved ? M68kFiniteValues::of(record.values, 32U)
-                                                                        : M68kFiniteValues::unknown();
-    const auto outcome = record.outcome;
-    // A record that met an outer active source depends on that source's iterate: never memoized.
-    if (!tainted) records_.emplace(location, std::move(record));
-    return {outcome, values};
-  }
-
-  const std::map<std::uint32_t, GenesisStateSourceRecord> &records() const { return records_; }
-  void counts(std::array<std::uint64_t, genesis_store_class_count> &all,
-              std::array<std::uint64_t, genesis_store_class_count> &unknown) {
-    build();
-    all = {};
-    unknown = {};
-    for (const auto &entry : entries_) {
-      ++all[static_cast<std::size_t>(entry.store_class)];
-      if (!entry.plain_value.known || entry.plain_value.width_derived) ++unknown[static_cast<std::size_t>(entry.store_class)];
-    }
-  }
-
-private:
-  struct Entry {
-    std::uint32_t pc{};
-    M68kMemoryStore store;
-    GenesisStoreClass store_class{GenesisStoreClass::unmodeled};
-    std::vector<std::uint32_t> addresses;  // exact start addresses (exact_address only)
-    M68kFiniteValues plain_value;          // value with no state-source recursion (every mutable byte is width-only)
-  };
-
-  IndexEvaluator evaluator(SourceLog *log, bool with_sources) {
-    return IndexEvaluator{instructions_, predecessors_, opaque_, decoder_, with_sources ? this : nullptr, log};
-  }
-
-  void build() {
-    if (built_) return;
-    built_ = true;
-    for (const auto &[pc, decoded] : instructions_) {
-      for (const auto &store : m68k_memory_stores(decoded.operation)) {
-        Entry entry{pc, store, GenesisStoreClass::unmodeled, {}, M68kFiniteValues::unknown()};
-        switch (store.target) {
-        case M68kStoreTarget::stack_push: entry.store_class = GenesisStoreClass::stack; break;
-        case M68kStoreTarget::exception_frame: entry.store_class = GenesisStoreClass::exception_frame; break;
-        case M68kStoreTarget::unmodeled: entry.store_class = GenesisStoreClass::unmodeled; break;
-        case M68kStoreTarget::effective_address: classify(entry, pc); break;
-        }
-        if (store.target != M68kStoreTarget::exception_frame && store.target != M68kStoreTarget::unmodeled) {
-          auto plain = evaluator(nullptr, false);
-          plain.at(pc);
-          entry.plain_value = m68k_finite_store_value(decoded.operation, store, plain).values;
-        }
-        entries_.push_back(std::move(entry));
-      }
-    }
-    // An interrupt entry stacks a frame at the interrupted code's A7 (value: its PC and SR).
-    if (interrupt_frames_) entries_.push_back({0U, {M68kStoreTarget::exception_frame, {}, 6U}, GenesisStoreClass::exception_frame, {}, M68kFiniteValues::unknown()});
-  }
-
-  void classify(Entry &entry, std::uint32_t pc) {
-    const auto &ea = entry.store.ea;
-    const auto disp = static_cast<std::uint32_t>(static_cast<std::int32_t>(ea.displacement));
-    // The source operand's (An)+ / -(An) step happens before the destination address is formed: a destination based
-    // on (or indexed by) that same An is not at the value An had before the instruction. Unresolved (conservative).
-    const auto &source = instructions_.at(pc).operation.source_ea;
-    const bool source_steps = source.mode == M68kEaMode::address_postinc || source.mode == M68kEaMode::address_predec;
-    const bool stepped = source_steps && (source.reg == ea.reg || (ea.mode == M68kEaMode::address_index8 &&
-                                                                   ea.index_is_address && ea.index_reg == source.reg));
-    const auto base = [&](GenesisStoreClass unknown_class) -> std::optional<M68kFiniteValues> {
-      if (ea.reg == 7U) {
-        entry.store_class = GenesisStoreClass::stack;
-        return std::nullopt;
-      }
-      if (stepped) {
-        entry.store_class = unknown_class;
-        return std::nullopt;
-      }
-      auto eval = evaluator(nullptr, false);
-      eval.at(pc);
-      auto value = eval.address_register_before(ea.reg);
-      if (!value.known || value.values.size() > max_store_addresses) {
-        entry.store_class = unknown_class;
-        return std::nullopt;
-      }
-      return value;
-    };
-    std::vector<std::uint32_t> addresses;
-    switch (ea.mode) {
-    case M68kEaMode::absolute_word:
-    case M68kEaMode::absolute_long: addresses.push_back(ea.absolute_address & bus_mask); break;
-    case M68kEaMode::address_indirect:
-    case M68kEaMode::address_disp16: {
-      const auto value = base(GenesisStoreClass::register_relative);
-      if (!value) return;
-      for (const auto a : value->values) addresses.push_back((a + (ea.mode == M68kEaMode::address_disp16 ? disp : 0U)) & bus_mask);
-      break;
-    }
-    case M68kEaMode::address_postinc:
-    case M68kEaMode::address_predec: {
-      const auto value = base(GenesisStoreClass::auto_update_relative);
-      if (!value) return;
-      for (const auto a : value->values)
-        addresses.push_back((ea.mode == M68kEaMode::address_predec ? a - entry.store.bytes : a) & bus_mask);
-      break;
-    }
-    case M68kEaMode::address_index8: {
-      const auto value = base(GenesisStoreClass::indexed_relative);
-      if (!value) return;
-      auto eval = evaluator(nullptr, false);
-      eval.at(pc);
-      const unsigned width = ea.index_is_long ? 32U : 16U;
-      const auto index = ea.index_is_address ? eval.address_register_before(ea.index_reg)
-                                             : eval.data_register_before(ea.index_reg, width);
-      if (!index.known || index.values.size() * value->values.size() > max_store_addresses) {
-        entry.store_class = GenesisStoreClass::indexed_relative;
-        return;
-      }
-      for (const auto a : value->values)
-        for (const auto x : index.values) {
-          const auto offset = ea.index_is_long ? x : static_cast<std::uint32_t>(static_cast<std::int32_t>(static_cast<std::int16_t>(x)));
-          addresses.push_back((a + offset + disp) & bus_mask);
-        }
-      break;
-    }
-    default: entry.store_class = GenesisStoreClass::unmodeled; return;
-    }
-    entry.store_class = GenesisStoreClass::exact_address;
-    std::sort(addresses.begin(), addresses.end());
-    addresses.erase(std::unique(addresses.begin(), addresses.end()), addresses.end());
-    entry.addresses = std::move(addresses);
-  }
-
-  bool excluded(GenesisStoreClass store_class) const {
-    switch (policy_) {
-    case GenesisStoreAliasPolicy::strict: return false;
-    case GenesisStoreAliasPolicy::exclude_stack:
-      return store_class == GenesisStoreClass::stack || store_class == GenesisStoreClass::exception_frame;
-    case GenesisStoreAliasPolicy::exclude_unresolved: return store_class != GenesisStoreClass::exact_address;
-    }
-    return false;
-  }
-
-  static void add_bytes(std::vector<std::uint32_t> &out, const M68kFiniteValues &value, unsigned bytes,
-                        std::optional<unsigned> offset) {
-    for (const auto v : value.values)
-      for (unsigned i = 0; i < bytes; ++i)
-        if (!offset || *offset == i) out.push_back((v >> (8U * (bytes - 1U - i))) & 0xFFU);
-  }
-
-  GenesisStateSourceRecord compute(std::uint32_t location) {
-    GenesisStateSourceRecord record{};
-    // Stores that may cover the byte: exact writers (with the covered byte offset), and every non-excluded store
-    // with an unresolved destination (any offset).
-    std::vector<std::pair<const Entry *, unsigned>> exact;
-    std::vector<std::uint32_t> fixed;  // bytes contributed by unresolved-address stores
-    for (const auto &entry : entries_) {
-      if (entry.store_class == GenesisStoreClass::exact_address) {
-        for (const auto a : entry.addresses)
-          for (unsigned i = 0; i < entry.store.bytes; ++i)
-            if (normalize_ram(a + i) == location) exact.emplace_back(&entry, i);
-        continue;
-      }
-      if (excluded(entry.store_class)) continue;
-      if (!entry.plain_value.known || entry.plain_value.width_derived) {
-        record.poison_classes |= UINT32_C(1) << static_cast<unsigned>(entry.store_class);
-        continue;
-      }
-      add_bytes(fixed, entry.plain_value, entry.store.bytes, std::nullopt);
-    }
-    if (record.poison_classes != 0U) {
-      record.outcome = GenesisStateSourceOutcome::alias_poison;
-      return record;
-    }
-    std::set<const Entry *> writers;
-    for (const auto &[entry, offset] : exact) writers.insert(entry);
-    record.exact_writers = static_cast<std::uint32_t>(writers.size());
-    // Least fixed point from the machine model's reset work RAM (zero).
-    auto current = M68kFiniteValues::of({0U}, 32U);
-    for (std::uint32_t iteration = 1;; ++iteration) {
-      if (iteration > max_update_iterations) {
-        record.outcome = GenesisStateSourceOutcome::unbounded_update;
-        return record;
-      }
-      iterate_[location] = current;
-      std::vector<std::uint32_t> next = fixed;
-      next.push_back(0U);
-      bool zero_written = std::find(fixed.begin(), fixed.end(), 0U) != fixed.end();
-      for (const auto &[entry, offset] : exact) {
-        SourceLog log;
-        auto eval = evaluator(&log, true);
-        eval.at(entry->pc);
-        const auto value = m68k_finite_store_value(instructions_.at(entry->pc).operation, entry->store, eval).values;
-        if (!value.known || value.width_derived) {
-          record.outcome = log.outcome && *log.outcome != GenesisStateSourceOutcome::resolved ? *log.outcome
-                                                                                              : GenesisStateSourceOutcome::writer_value_unknown;
-          if (record.outcome == GenesisStateSourceOutcome::not_attempted ||
-              record.outcome == GenesisStateSourceOutcome::base_unknown)
-            record.outcome = GenesisStateSourceOutcome::writer_value_unknown;
-          iterate_.erase(location);
-          return record;
-        }
-        std::vector<std::uint32_t> bytes;
-        add_bytes(bytes, value, entry->store.bytes, offset);
-        if (std::find(bytes.begin(), bytes.end(), 0U) != bytes.end()) zero_written = true;
-        next.insert(next.end(), bytes.begin(), bytes.end());
-      }
-      auto merged = M68kFiniteValues::of(std::move(next), 32U);
-      record.update_iterations = iteration;
-      if (merged.values == current.values) {
-        record.outcome = GenesisStateSourceOutcome::resolved;
-        record.values = current.values;
-        record.zero_only_from_reset = !zero_written;
-        iterate_.erase(location);
-        return record;
-      }
-      current = std::move(merged);
-    }
-  }
-
-  const std::map<std::uint32_t, Decoded> &instructions_;
-  const PredecessorMap &predecessors_;
-  const std::set<std::uint32_t> &opaque_;
-  const Decoder &decoder_;
-  GenesisStoreAliasPolicy policy_;
-  bool interrupt_frames_{};
-  bool built_{};
-  bool tainted_{};
-  std::vector<Entry> entries_;
-  std::vector<std::uint32_t> active_;
-  std::map<std::uint32_t, M68kFiniteValues> iterate_;
-  std::map<std::uint32_t, GenesisStateSourceRecord> records_;
+  void set_roots(const std::vector<std::uint32_t> &roots) { roots_.insert(roots.begin(), roots.end()); }
 };
-
-std::optional<M68kFiniteValues> IndexEvaluator::mutable_byte(const M68kEffectiveAddress &ea) {
-  const auto kind = state_source_kind(ea.mode);
-  if (log_ != nullptr) log_->kinds |= UINT32_C(1) << static_cast<unsigned>(kind);
-  const auto fail = [&](GenesisStateSourceOutcome outcome) -> std::optional<M68kFiniteValues> {
-    if (log_ != nullptr) log_->note(outcome);
-    return std::nullopt;
-  };
-  if (stores_ == nullptr) {
-    // Classification: record whether a register-relative source's base is locally exact (never a location).
-    if (log_ != nullptr && kind == GenesisStateSourceKind::register_relative) {
-      const auto base = address_register_before(ea.reg);
-      ++(base.known && ea.reg != 7U ? log_->bases_exact : log_->bases_unknown);
-    }
-    return fail(GenesisStateSourceOutcome::not_attempted);
-  }
-  std::vector<std::uint32_t> locations;
-  if (kind == GenesisStateSourceKind::absolute_ram) {
-    locations.push_back(ea.absolute_address & bus_mask);
-  } else if (kind == GenesisStateSourceKind::register_relative) {
-    const auto base = address_register_before(ea.reg);
-    if (log_ != nullptr) ++(base.known && ea.reg != 7U ? log_->bases_exact : log_->bases_unknown);
-    if (!base.known || ea.reg == 7U) return fail(GenesisStateSourceOutcome::base_unknown);
-    if (base.values.size() > max_state_locations) return fail(GenesisStateSourceOutcome::too_many_locations);
-    const auto disp = ea.mode == M68kEaMode::address_disp16 ? static_cast<std::uint32_t>(static_cast<std::int32_t>(ea.displacement)) : 0U;
-    for (const auto a : base.values) locations.push_back((a + disp) & bus_mask);
-  } else {
-    return fail(GenesisStateSourceOutcome::not_attempted);
-  }
-  auto acc = M68kFiniteValues::of({}, 32U);
-  for (const auto location : locations) {
-    const auto [outcome, values] = stores_->domain(location);
-    if (outcome != GenesisStateSourceOutcome::resolved) return fail(outcome);
-    acc = m68k_finite_union(acc, values, 32U);
-  }
-  if (log_ != nullptr) log_->note(GenesisStateSourceOutcome::resolved);
-  return acc;
-}
 
 GenesisPcIndexSiteRecovery resolve_pc_index_site(const Decoded &site, std::uint32_t pc,
                                                  const std::map<std::uint32_t, Decoded> &instructions,
                                                  const PredecessorMap &predecessors, const std::set<std::uint32_t> &opaque,
                                                  const std::vector<std::uint32_t> &roots,
                                                  const Decoder &decoder, bool accept_width_domains,
-                                                 std::set<std::uint32_t> &entries, StoreDomain *stores = nullptr,
-                                                 SourceLog *log = nullptr) {
+                                                 std::set<std::uint32_t> &entries) {
   GenesisPcIndexSiteRecovery out{};
   out.call = site.operation.kind == M68kIrKind::call_general;
   const auto &ea = site.operation.source_ea;
@@ -729,14 +356,10 @@ GenesisPcIndexSiteRecovery resolve_pc_index_site(const Decoded &site, std::uint3
     out.outcome = GenesisPcIndexOutcome::address_register_index;
     return out;
   }
-  IndexEvaluator evaluator{instructions, predecessors, opaque, decoder, stores, log};
+  IndexEvaluator evaluator{instructions, predecessors, opaque, decoder};
   evaluator.set_roots(roots);
   const unsigned width = ea.index_is_long ? 32U : 16U;
   const auto index = evaluator.before(ea.index_reg, width, pc);
-  if (log != nullptr) {
-    out.source_kinds = log->kinds;
-    out.source_outcome = log->outcome;
-  }
   out.proof = evaluator.proof();
   out.table_reads = evaluator.table_reads();
   out.misaligned_reads_excluded = evaluator.misaligned();
@@ -796,8 +419,7 @@ std::string genesis_challenger_family_name(std::uint32_t family) {
 namespace {
 
 GenesisReachabilityChallengerResult run_once(const FrontendProgram &program, const GenesisReachabilityChallengerConfig &config,
-                                             const std::set<std::uint32_t> &pinned, std::set<std::uint32_t> &invalidated,
-                                             std::uint32_t &store_invalidations) {
+                                             const std::set<std::uint32_t> &pinned, std::set<std::uint32_t> &invalidated) {
   GenesisReachabilityChallengerResult result{};
   const Decoder decoder{program};
   const bool hypothesis = config.exception_model == GenesisReachabilityExceptionModel::normal_resumption;
@@ -883,36 +505,23 @@ GenesisReachabilityChallengerResult run_once(const FrontendProgram &program, con
     opaque.insert(result.pushed_code_addresses.begin(), result.pushed_code_addresses.end());
     bool changed = false;
     result.table_entry_addresses.clear();
-    // SEG-026-T003: one store-domain view per recovery step, over exactly the current D.
-    const bool classify_sources = config.store_provenance != GenesisReachabilityChallengerConfig::StoreProvenance::off;
-    std::optional<StoreDomain> stores;
-    if (config.store_provenance == GenesisReachabilityChallengerConfig::StoreProvenance::prove)
-      stores.emplace(instructions, predecessors, opaque, decoder, config.store_alias_policy, result.vector_roots > 0U);
     for (auto &[pc, site] : result.pc_index_sites) {
       if (pinned.contains(pc)) {
         site.outcome = GenesisPcIndexOutcome::invalidated;
         continue;
       }
       const bool was_resolved = site.outcome == GenesisPcIndexOutcome::resolved;
-      SourceLog log;
       auto next = resolve_pc_index_site(instructions.at(pc), pc, instructions, predecessors, opaque, result.roots, decoder,
-                                        config.pc_index_width_domains, result.table_entry_addresses,
-                                        stores ? &*stores : nullptr, classify_sources ? &log : nullptr);
+                                        config.pc_index_width_domains, result.table_entry_addresses);
       next.first_round = site.first_round;
       // Monotone growth only: a resolved site that loses its proof, or any target, is invalidated (restart).
       if (was_resolved && (next.outcome != GenesisPcIndexOutcome::resolved ||
-                           !std::includes(next.targets.begin(), next.targets.end(), site.targets.begin(), site.targets.end()))) {
+                           !std::includes(next.targets.begin(), next.targets.end(), site.targets.begin(), site.targets.end())))
         invalidated.insert(pc);
-        if ((site.proof & m68k_finite_proof::store_domain) != 0U) ++store_invalidations;
-      }
       if (next.targets != site.targets) changed = true;
       for (const auto target : next.targets)
         if (!visited.contains(target)) queue.push_back(target);
       site = std::move(next);
-    }
-    if (stores) {
-      result.state_sources = stores->records();
-      stores->counts(result.stores_by_class, result.unknown_value_stores_by_class);
     }
     return changed;
   };
@@ -989,54 +598,6 @@ const char *genesis_pc_index_outcome_name(GenesisPcIndexOutcome outcome) noexcep
   return "unknown";
 }
 
-const char *genesis_store_alias_policy_name(GenesisStoreAliasPolicy policy) noexcept {
-  switch (policy) {
-  case GenesisStoreAliasPolicy::strict: return "strict";
-  case GenesisStoreAliasPolicy::exclude_stack: return "exclude_stack";
-  case GenesisStoreAliasPolicy::exclude_unresolved: return "exclude_unresolved";
-  }
-  return "unknown";
-}
-
-const char *genesis_state_source_kind_name(GenesisStateSourceKind kind) noexcept {
-  switch (kind) {
-  case GenesisStateSourceKind::absolute_ram: return "absolute_ram";
-  case GenesisStateSourceKind::register_relative: return "register_relative";
-  case GenesisStateSourceKind::indexed_relative: return "indexed_relative";
-  case GenesisStateSourceKind::auto_update_relative: return "auto_update_relative";
-  case GenesisStateSourceKind::other: return "other";
-  }
-  return "unknown";
-}
-
-const char *genesis_state_source_outcome_name(GenesisStateSourceOutcome outcome) noexcept {
-  switch (outcome) {
-  case GenesisStateSourceOutcome::resolved: return "resolved";
-  case GenesisStateSourceOutcome::not_attempted: return "not_attempted";
-  case GenesisStateSourceOutcome::base_unknown: return "base_unknown";
-  case GenesisStateSourceOutcome::not_work_ram: return "not_work_ram";
-  case GenesisStateSourceOutcome::alias_poison: return "alias_poison";
-  case GenesisStateSourceOutcome::writer_value_unknown: return "writer_value_unknown";
-  case GenesisStateSourceOutcome::unbounded_update: return "unbounded_update";
-  case GenesisStateSourceOutcome::source_cycle: return "source_cycle";
-  case GenesisStateSourceOutcome::too_many_locations: return "too_many_locations";
-  }
-  return "unknown";
-}
-
-const char *genesis_store_class_name(GenesisStoreClass store_class) noexcept {
-  switch (store_class) {
-  case GenesisStoreClass::exact_address: return "exact_address";
-  case GenesisStoreClass::stack: return "stack";
-  case GenesisStoreClass::exception_frame: return "exception_frame";
-  case GenesisStoreClass::register_relative: return "register_relative";
-  case GenesisStoreClass::indexed_relative: return "indexed_relative";
-  case GenesisStoreClass::auto_update_relative: return "auto_update_relative";
-  case GenesisStoreClass::unmodeled: return "unmodeled";
-  }
-  return "unknown";
-}
-
 const char *genesis_pc_index_unknown_origin_name(GenesisPcIndexUnknownOrigin origin) noexcept {
   switch (origin) {
   case GenesisPcIndexUnknownOrigin::none: return "none";
@@ -1055,13 +616,11 @@ const char *genesis_pc_index_unknown_origin_name(GenesisPcIndexUnknownOrigin ori
 GenesisReachabilityChallengerResult run_genesis_reachability_challenger(const FrontendProgram &program,
                                                                         const GenesisReachabilityChallengerConfig &config) {
   std::set<std::uint32_t> pinned;
-  std::uint32_t store_invalidations = 0U;
   for (std::uint32_t restarts = 0;; ++restarts) {
     std::set<std::uint32_t> invalidated;
-    auto result = run_once(program, config, pinned, invalidated, store_invalidations);
+    auto result = run_once(program, config, pinned, invalidated);
     if (invalidated.empty()) {
       result.recovery_restarts = restarts;
-      result.store_domain_invalidations = store_invalidations;
       return result;
     }
     pinned.insert(invalidated.begin(), invalidated.end());  // monotone: terminates
@@ -1105,16 +664,9 @@ std::map<std::uint32_t, GenesisReachabilityPcClassification> classify_genesis_re
   std::set<std::uint32_t> entries;
   for (const auto &[pc, decoded] : instructions) {
     if (!is_pc_index_site(decoded)) continue;
-    SourceLog log;
-    const auto site = resolve_pc_index_site(decoded, pc, instructions, predecessors, opaque, roots, decoder, false, entries,
-                                            nullptr, &log);
+    const auto site = resolve_pc_index_site(decoded, pc, instructions, predecessors, opaque, roots, decoder, false, entries);
     out[pc].pc_index_domain = site.outcome;
     out[pc].pc_index_unknown_origin = site.unknown_origin;
-    out[pc].pc_index_source_kinds = site.source_kinds;
-    out[pc].pc_index_source_base = log.bases_exact == 0U && log.bases_unknown == 0U ? "none"
-                                   : log.bases_unknown == 0U                      ? "exact"
-                                   : log.bases_exact == 0U                        ? "unknown"
-                                                                                  : "mixed";
   }
   return out;
 }
@@ -1146,9 +698,7 @@ std::string format_genesis_reachability_classification_private(
         << (entry.control.always_raises_exception ? "true" : "false");
     if (entry.pc_index_domain)
       out << ",\"pc_index_domain\":\"" << genesis_pc_index_outcome_name(*entry.pc_index_domain)
-          << "\",\"pc_index_unknown_origin\":\"" << genesis_pc_index_unknown_origin_name(entry.pc_index_unknown_origin)
-          << "\",\"pc_index_source_kind\":\"" << source_kinds_label(entry.pc_index_source_kinds)
-          << "\",\"pc_index_source_base\":\"" << entry.pc_index_source_base << '"';
+          << "\",\"pc_index_unknown_origin\":\"" << genesis_pc_index_unknown_origin_name(entry.pc_index_unknown_origin) << '"';
     out << '}';
   }
   out << "}}\n";
@@ -1158,11 +708,7 @@ std::string format_genesis_reachability_classification_private(
 namespace {
 
 // SEG-026-T002: aggregate-only recovery report (counts, generic families, proof mechanism names; no address).
-std::string format_pc_index_recovery_aggregate(const GenesisReachabilityChallengerResult &result,
-                                              const GenesisReachabilityChallengerConfig &config) {
-  const bool sources = config.store_provenance != GenesisReachabilityChallengerConfig::StoreProvenance::off;
-  // The SEG-026-T003 proof bit is reported only when store provenance is enabled (T002 output is unchanged).
-  const std::uint32_t mechanism_count = sources ? m68k_finite_proof::count : m68k_finite_proof::count - 1U;
+std::string format_pc_index_recovery_aggregate(const GenesisReachabilityChallengerResult &result) {
   std::array<std::size_t, genesis_pc_index_outcome_count> outcomes{};
   std::array<std::size_t, genesis_pc_index_unknown_origin_count> origins{};
   std::array<std::size_t, m68k_finite_proof::count> mechanisms{};
@@ -1176,13 +722,8 @@ std::string format_pc_index_recovery_aggregate(const GenesisReachabilityChalleng
     std::size_t targets;
     std::uint32_t proof;
     std::uint32_t reads;
-    std::uint32_t source_kinds;
-    std::uint32_t source_outcome;  // genesis_state_source_outcome_count: none
-    auto key() const { return std::make_tuple(round, call, outcome, targets, proof, reads, source_kinds, source_outcome); }
+    auto key() const { return std::make_tuple(round, call, outcome, targets, proof, reads); }
   };
-  // SEG-026-T003: sites by (source kind label, outcome) and by (source kind label, source outcome).
-  std::map<std::string, std::map<std::string, std::size_t>> by_source_kind;
-  std::map<std::string, std::map<std::string, std::size_t>> by_source_outcome;
   std::vector<Row> rows;
   for (const auto &[pc, site] : result.pc_index_sites) {
     (void)pc;
@@ -1196,19 +737,11 @@ std::string format_pc_index_recovery_aggregate(const GenesisReachabilityChalleng
       (site.call ? resolved_jsr : resolved_jmp) += 1U;
       max_targets = std::max(max_targets, site.targets.size());
       target_sum += site.targets.size();
-      for (std::uint32_t bit = 0; bit < mechanism_count; ++bit)
+      for (std::uint32_t bit = 0; bit < m68k_finite_proof::count; ++bit)
         if (((site.proof >> bit) & 1U) != 0U) ++mechanisms[bit];
     }
     rows.push_back({site.first_round, site.call, static_cast<std::uint32_t>(site.outcome), site.targets.size(),
-                    site.outcome == GenesisPcIndexOutcome::resolved ? site.proof : 0U, site.table_reads,
-                    sources ? site.source_kinds : 0U,
-                    sources && site.source_outcome ? static_cast<std::uint32_t>(*site.source_outcome)
-                                                   : genesis_state_source_outcome_count});
-    if (sources) {
-      const auto label = source_kinds_label(site.source_kinds);
-      ++by_source_kind[label][genesis_pc_index_outcome_name(site.outcome)];
-      ++by_source_outcome[label][site.source_outcome ? genesis_state_source_outcome_name(*site.source_outcome) : "none"];
-    }
+                    site.outcome == GenesisPcIndexOutcome::resolved ? site.proof : 0U, site.table_reads});
   }
   std::sort(rows.begin(), rows.end(), [](const Row &a, const Row &b) { return a.key() < b.key(); });
   std::size_t targets_discovered = 0U, targets_rejected = 0U, targets_unmapped = 0U, targets_odd = 0U;
@@ -1243,7 +776,7 @@ std::string format_pc_index_recovery_aggregate(const GenesisReachabilityChalleng
     out << (o == 1U ? "" : ",") << '"' << genesis_pc_index_unknown_origin_name(static_cast<GenesisPcIndexUnknownOrigin>(o))
         << "\":" << origins[o];
   out << "},\"proof_mechanisms_of_resolved_sites\":{";
-  for (std::uint32_t bit = 0; bit < mechanism_count; ++bit)
+  for (std::uint32_t bit = 0; bit < m68k_finite_proof::count; ++bit)
     out << (bit == 0U ? "" : ",") << '"' << m68k_finite_proof::name(bit) << "\":" << mechanisms[bit];
   out << "},\"recovered_targets\":" << result.recovered_targets.size() << ",\"target_identities_sum\":" << target_sum
       << ",\"max_targets_per_site\":" << max_targets << ",\"recovered_targets_discovered\":" << targets_discovered
@@ -1270,83 +803,10 @@ std::string format_pc_index_recovery_aggregate(const GenesisReachabilityChalleng
     const auto &row = rows[i];
     out << (i == 0U ? "" : ",") << "{\"round\":" << row.round << ",\"family\":\"" << (row.call ? "jsr" : "jmp")
         << "\",\"outcome\":\"" << genesis_pc_index_outcome_name(static_cast<GenesisPcIndexOutcome>(row.outcome))
-        << "\",\"targets\":" << row.targets << ",\"table_reads\":" << row.reads << ",\"proof\":" << proof_names(row.proof);
-    if (sources)
-      out << ",\"source_kind\":\"" << source_kinds_label(row.source_kinds) << "\",\"source_outcome\":\""
-          << (row.source_outcome < genesis_state_source_outcome_count
-                  ? genesis_state_source_outcome_name(static_cast<GenesisStateSourceOutcome>(row.source_outcome))
-                  : "none")
-          << '"';
-    out << '}';
+        << "\",\"targets\":" << row.targets << ",\"table_reads\":" << row.reads << ",\"proof\":" << proof_names(row.proof)
+        << '}';
   }
-  out << "]";
-  if (sources) {
-    const auto nested = [&](const std::map<std::string, std::map<std::string, std::size_t>> &table) {
-      std::ostringstream text;
-      text << '{';
-      bool first_outer = true;
-      for (const auto &[label, counts] : table) {
-        text << (first_outer ? "" : ",") << '"' << label << "\":{";
-        first_outer = false;
-        bool first_inner = true;
-        for (const auto &[name, n] : counts) {
-          text << (first_inner ? "" : ",") << '"' << name << "\":" << n;
-          first_inner = false;
-        }
-        text << '}';
-      }
-      text << '}';
-      return text.str();
-    };
-    out << ",\"store_provenance\":{\"mode\":\""
-        << (config.store_provenance == GenesisReachabilityChallengerConfig::StoreProvenance::prove ? "prove" : "classify")
-        << "\",\"alias_policy\":\"" << genesis_store_alias_policy_name(config.store_alias_policy)
-        << "\",\"sites_by_source_kind_and_outcome\":" << nested(by_source_kind)
-        << ",\"sites_by_source_kind_and_source_outcome\":" << nested(by_source_outcome);
-    if (config.store_provenance == GenesisReachabilityChallengerConfig::StoreProvenance::prove) {
-      std::array<std::size_t, genesis_state_source_outcome_count> source_outcomes{};
-      std::array<std::size_t, genesis_store_class_count> poison{};
-      std::size_t in_ram = 0U, domain_sum = 0U, domain_max = 0U, zero_from_reset = 0U, writers = 0U, self_updates = 0U;
-      std::uint32_t max_iterations = 0U;
-      for (const auto &[location, record] : result.state_sources) {
-        (void)location;
-        ++source_outcomes[static_cast<std::size_t>(record.outcome)];
-        if (record.outcome != GenesisStateSourceOutcome::not_work_ram) ++in_ram;
-        for (std::uint32_t c = 0; c < genesis_store_class_count; ++c)
-          if (((record.poison_classes >> c) & 1U) != 0U) ++poison[c];
-        writers += record.exact_writers;
-        max_iterations = std::max(max_iterations, record.update_iterations);
-        if (record.update_iterations > 2U) ++self_updates;
-        if (record.outcome == GenesisStateSourceOutcome::resolved) {
-          domain_sum += record.values.size();
-          domain_max = std::max(domain_max, record.values.size());
-          if (record.zero_only_from_reset) ++zero_from_reset;
-        }
-      }
-      out << ",\"state_locations\":" << result.state_sources.size() << ",\"state_locations_in_work_ram\":" << in_ram
-          << ",\"state_location_outcomes\":{";
-      for (std::uint32_t o = 0; o < genesis_state_source_outcome_count; ++o)
-        out << (o == 0U ? "" : ",") << '"' << genesis_state_source_outcome_name(static_cast<GenesisStateSourceOutcome>(o))
-            << "\":" << source_outcomes[o];
-      out << "},\"alias_poison_by_store_class\":{";
-      for (std::uint32_t c = 0; c < genesis_store_class_count; ++c)
-        out << (c == 0U ? "" : ",") << '"' << genesis_store_class_name(static_cast<GenesisStoreClass>(c)) << "\":" << poison[c];
-      out << "},\"resolved_domain_values_sum\":" << domain_sum << ",\"resolved_domain_values_max\":" << domain_max
-          << ",\"resolved_zero_only_from_reset_ram\":" << zero_from_reset << ",\"exact_writers_sum\":" << writers
-          << ",\"locations_needing_more_than_two_iterations\":" << self_updates
-          << ",\"max_update_iterations\":" << max_iterations << ",\"stores_in_d_by_class\":{";
-      for (std::uint32_t c = 0; c < genesis_store_class_count; ++c)
-        out << (c == 0U ? "" : ",") << '"' << genesis_store_class_name(static_cast<GenesisStoreClass>(c))
-            << "\":" << result.stores_by_class[c];
-      out << "},\"non_exact_value_stores_in_d_by_class\":{";
-      for (std::uint32_t c = 0; c < genesis_store_class_count; ++c)
-        out << (c == 0U ? "" : ",") << '"' << genesis_store_class_name(static_cast<GenesisStoreClass>(c))
-            << "\":" << result.unknown_value_stores_by_class[c];
-      out << "},\"store_domain_invalidations\":" << result.store_domain_invalidations;
-    }
-    out << '}';
-  }
-  out << '}';
+  out << "]}";
   return out.str();
 }
 
@@ -1371,7 +831,7 @@ std::string format_genesis_reachability_challenger_aggregate(const GenesisReacha
   for (std::uint32_t family = 1U; family < genesis_challenger_family_count; ++family)
     out << (family == 1U ? "" : ",") << "\"" << genesis_challenger_family_name(family) << "\":" << result.sites[family].size();
   out << "}";
-  if (config.pc_index_recovery) out << ",\"pc_index_recovery\":" << format_pc_index_recovery_aggregate(result, config);
+  if (config.pc_index_recovery) out << ",\"pc_index_recovery\":" << format_pc_index_recovery_aggregate(result);
   out << "}";
   return out.str();
 }
@@ -1402,11 +862,8 @@ std::string format_genesis_reachability_challenger_private(const GenesisReachabi
       out << (first ? "" : ",") << "\"" << std::hex << std::setw(6) << std::setfill('0') << pc << std::dec
           << "\":{\"outcome\":\"" << genesis_pc_index_outcome_name(site.outcome) << "\",\"unknown_origin\":\""
           << genesis_pc_index_unknown_origin_name(site.unknown_origin) << "\",\"round\":" << site.first_round
-          << ",\"targets\":" << hex_list(site.targets);
-      if (config.store_provenance != GenesisReachabilityChallengerConfig::StoreProvenance::off)
-        out << ",\"source_kind\":\"" << source_kinds_label(site.source_kinds) << "\",\"source_outcome\":\""
-            << (site.source_outcome ? genesis_state_source_outcome_name(*site.source_outcome) : "none") << '"';
-      out << '}';
+          << ",\"targets\":" << hex_list(site.targets)
+          << '}';
       first = false;
     }
     out << '}';

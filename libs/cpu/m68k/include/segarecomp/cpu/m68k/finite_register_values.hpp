@@ -12,12 +12,6 @@
 // `m68k_finite_values_limit` becomes Unknown; the limit is a resource bound (the site stays unresolved), never
 // a proof of a table extent.
 //
-// SEG-026-T003 (experiment, report-only) adds three caller-driven pieces and no memory model of its own: a
-// `mutable_byte` hook through which a caller may supply a proven exact store domain for a mutable byte source, an
-// address-register transfer for locally exact bases, and a conservative description of every memory write an
-// operation performs (`m68k_memory_stores`) with the exact value it stores when that value is in this tiny domain.
-// A memory operand is always read at the operation's own size and then restricted to the queried low slice.
-//
 // The transfer reads only the lifted operation's decoded fields and the existing semantic owners
 // (`m68k_operation_effect` for the register write footprint, `m68k_evaluate_subtraction` and
 // `M68kConditionSpecification` for guard filtering). It adds no decoding or execution semantics.
@@ -64,10 +58,7 @@ inline constexpr std::uint32_t register_copy = 1U << 8;     // MOVE Dm,Dn
 inline constexpr std::uint32_t logical = 1U << 9;           // OR/EOR
 inline constexpr std::uint32_t call_edge = 1U << 10;        // value carried across a direct call into a callee
 inline constexpr std::uint32_t dynamic_edge = 1U << 11;     // value carried across a recovered PC-indexed edge
-// SEG-026-T003: a byte read from a mutable state location whose exact store domain the caller proved
-// (`M68kFiniteValueInputs::mutable_byte`).
-inline constexpr std::uint32_t store_domain = 1U << 12;
-inline constexpr std::uint32_t count = 13U;
+inline constexpr std::uint32_t count = 12U;
 [[nodiscard]] const char *name(std::uint32_t bit_index) noexcept;
 }  // namespace m68k_finite_proof
 
@@ -79,18 +70,6 @@ public:
   // Big-endian read of `bytes` (1, 2 or 4) at the 24-bit bus `address` from provably immutable image bytes.
   // nullopt: the bytes are not uniquely owned immutable image bytes (outside the image, a RAM alias, ...).
   [[nodiscard]] virtual std::optional<std::uint32_t> immutable_read(std::uint32_t address, unsigned bytes) = 0;
-  // SEG-026-T003: the exact finite domain (values 0..255) of a BYTE read from mutable memory through `ea` by the
-  // current operation, when the caller proves one; nullopt keeps the width-only 0..255 rule. The domain must not
-  // be `width_derived`. Default: nullopt (the SEG-026-T002 behaviour).
-  [[nodiscard]] virtual std::optional<M68kFiniteValues> mutable_byte(const M68kEffectiveAddress &ea) {
-    (void)ea;
-    return std::nullopt;
-  }
-  // SEG-026-T003: value of An (32 bits) immediately before the operation. Default: Unknown.
-  [[nodiscard]] virtual M68kFiniteValues address_register_before(unsigned reg) {
-    (void)reg;
-    return M68kFiniteValues::unknown();
-  }
 };
 
 struct M68kFiniteTransfer {
@@ -112,34 +91,6 @@ struct M68kFiniteTransfer {
 // leaves `values` unchanged when the flag setter / branch / register / width shape gives no exact filter.
 [[nodiscard]] bool m68k_finite_branch_filter(const M68kIrOperation &flag_setter, const M68kIrOperation &branch,
                                              bool taken, unsigned reg, unsigned width, M68kFiniteValues &values);
-
-// SEG-026-T003: value of An (all 32 bits) after `operation`. Exact only for LEA/MOVEA of an absolute, PC-relative
-// or immediate address, LEA d16(Am) of a known Am, and ADDA/SUBA/ADDQ/SUBQ of an immediate to a known An. An
-// operation stated (M68000PRM) or by a complete effect footprint not to write An leaves it unchanged; every other
-// writer (auto-increment, MOVEM, EXG, loads from memory, ...) yields Unknown.
-[[nodiscard]] M68kFiniteTransfer m68k_finite_address_register_after(const M68kIrOperation &operation, unsigned reg,
-                                                                    M68kFiniteValueInputs &inputs);
-
-// SEG-026-T003: every memory write an operation performs, described conservatively for store-completeness proofs.
-enum class M68kStoreTarget : std::uint8_t {
-  effective_address,  // `ea` (a memory-mode operand); `bytes` bytes starting at its address
-  stack_push,         // an implicit push through A7 (JSR/BSR return address, PEA, LINK)
-  exception_frame,    // the stacked frame of a raised exception (TRAP/TRAPV/CHK/illegal-style/divide)
-  unmodeled,          // a writer whose destination this description does not model (poison)
-};
-struct M68kMemoryStore {
-  M68kStoreTarget target{M68kStoreTarget::unmodeled};
-  M68kEffectiveAddress ea{};
-  unsigned bytes{};
-};
-[[nodiscard]] std::vector<M68kMemoryStore> m68k_memory_stores(const M68kIrOperation &operation);
-
-// SEG-026-T003: the exact finite set of values (low `8 * store.bytes` bits, width 32) that `store` writes, or
-// Unknown. Modeled: MOVE (the tiny source domain; a memory byte source goes through `mutable_byte`), CLR, the
-// ADD/SUB/AND/OR/EOR immediate/quick/Dn forms on a BYTE destination (old value through `mutable_byte`), and the
-// JSR/BSR/PEA pushes of a constant address. Everything else is Unknown.
-[[nodiscard]] M68kFiniteTransfer m68k_finite_store_value(const M68kIrOperation &operation, const M68kMemoryStore &store,
-                                                         M68kFiniteValueInputs &inputs);
 
 // The effective address of a `(d8,PC,Xn)` operand for one exact index value (the index register modulo 2^16 for
 // `.W`, sign extended; modulo 2^32 for `.L`), as a 24-bit bus address.

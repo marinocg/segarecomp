@@ -288,13 +288,11 @@ def structural_attribution(observed: set[int], witnesses: dict, discovered: set[
             kinds_missing[kind] = kinds_missing.get(kind, 0) + 1
     missing = observed - discovered
     nearest_site_of: dict[int, int] = {}
-    chain_sites_of: dict[int, set] = {}
     for x in missing:
         cursor = x
         gate = None
         near = None
         seen = set()
-        chain_sites = chain_sites_of.setdefault(x, set())
         while cursor is not None and cursor not in seen:
             seen.add(cursor)
             if cursor not in steps:
@@ -302,8 +300,6 @@ def structural_attribution(observed: set[int], witnesses: dict, discovered: set[
                 break
             pred, kind, family = steps[cursor]
             label = family if kind == "dynamic" else kind
-            if kind == "dynamic" and pred is not None:
-                chain_sites.add(pred)
             if near is None and kind == "dynamic":
                 near = (family, pred)
             if pred is None or pred in discovered:
@@ -341,41 +337,7 @@ def structural_attribution(observed: set[int], witnesses: dict, discovered: set[
         if label == "index_unknown":
             label += ":" + info[near].get("pc_index_unknown_origin", "none")
         nearest_by_domain[label] = nearest_by_domain.get(label, 0) + 1
-    # SEG-026-T003: the generic source kind of each observed PC-indexed site's mutable byte index (classification
-    # only), and the missing PCs whose structural chain crosses at least one width-only PC-indexed dispatch.
-    def source_kind(pc: int) -> str:
-        return info[pc].get("pc_index_source_kind", "unlabelled")
-
-    sites_by_kind: dict[str, dict[str, int]] = {}
-    for pc, entry in info.items():
-        label = entry.get("pc_index_domain")
-        if label is None or pc not in observed:
-            continue
-        where = "outside_d" if pc not in discovered else "in_d"
-        bucket = sites_by_kind.setdefault(label + ":" + where, {})
-        kind = source_kind(pc)
-        if "register_relative" in kind:
-            kind += "(base_" + info[pc].get("pc_index_source_base", "unlabelled") + ")"
-        bucket[kind] = bucket.get(kind, 0) + 1
-    behind_width_only = 0
-    behind_width_only_kinds: dict[str, int] = {}
-    behind_only_other: dict[str, int] = {}
-    for x in missing:
-        widths = [pc for pc in chain_sites_of.get(x, ()) if pc in info and info[pc].get("pc_index_domain") == "width_only_domain"]
-        if widths:
-            behind_width_only += 1
-            kinds = sorted({source_kind(pc) for pc in widths})
-            key = "+".join(kinds)
-            behind_width_only_kinds[key] = behind_width_only_kinds.get(key, 0) + 1
-        else:
-            families = sorted({info[pc]["family"] for pc in chain_sites_of.get(x, ()) if pc in info and info[pc].get("decoded")})
-            key = "+".join(families) if families else "no_dynamic_step"
-            behind_only_other[key] = behind_only_other.get(key, 0) + 1
     return {
-        "observed_pc_index_sites_by_local_domain_and_source_kind": {k: dict(sorted(v.items())) for k, v in sorted(sites_by_kind.items())},
-        "missing_pcs_behind_width_only_pc_index_on_chain": behind_width_only,
-        "missing_pcs_behind_width_only_by_source_kinds": dict(sorted(behind_width_only_kinds.items())),
-        "missing_pcs_not_behind_width_only_by_chain_families": dict(sorted(behind_only_other.items())),
         "observed_pc_index_sites_by_local_domain": dict(sorted(domain_sites.items())),
         "observed_pc_index_sites_outside_d_by_local_domain": dict(sorted(domain_sites_outside_d.items())),
         "missing_pcs_by_nearest_pc_index_site_local_domain": dict(sorted(nearest_by_domain.items())),
