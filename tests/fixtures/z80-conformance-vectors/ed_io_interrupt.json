@@ -2,7 +2,482 @@
  "schema": 1,
  "family": "ed_io_interrupt",
  "rows": [
-  {"form": "halt.base", "profiles": ["zero", "mixed"], "steps": [{"mode": "i", "budget": 1, "repeat": 3}]},
-  {"form": "halt.base", "prefixes": ["DD"], "profiles": ["mixed"], "steps": [{"mode": "i", "budget": 1, "repeat": 2}]}
+  {
+   "form": "halt.base",
+   "profiles": [
+    "zero",
+    "mixed"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 3
+    }
+   ]
+  },
+  {
+   "form": "halt.base",
+   "prefixes": [
+    "DD"
+   ],
+   "profiles": [
+    "mixed"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 2
+    }
+   ]
+  },
+  {
+   "form": "di.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 2
+    }
+   ]
+  },
+  {
+   "form": "ei.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 2
+    }
+   ]
+  },
+  {
+   "form": "in.a_n_port.base",
+   "operands": [
+    "A5",
+    "5A",
+    "FF",
+    "00"
+   ],
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "out.n_port_a.base",
+   "operands": [
+    "A5",
+    "5A",
+    "FF",
+    "00"
+   ],
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "nop.ed_undefined.ed.undoc",
+   "profiles": [
+    "zero",
+    "mixed"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 2
+    }
+   ]
+  },
+  {
+   "form": "in.r_c_port.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "out.c_port_r.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "in.flags_only_c_port.ed.undoc",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "out.c_port_zero.ed.undoc",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "retn.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "reti.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "retn.ed.alias",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "im.im0.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "im.im1.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "im.im2.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "im.im0.ed.alias",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "im.im1.ed.alias",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "im.im2.ed.alias",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "ld.i_a.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "ld.r_refresh_a.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "ld.a_i.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "ld.a_r_refresh.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "rrd.a_hl_ind.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "rld.a_hl_ind.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "ldi.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "ldd.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "cpi.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "cpd.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "ini.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "ind.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "outi.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "outd.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ]
+  },
+  {
+   "form": "ldir.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 3
+    }
+   ]
+  },
+  {
+   "form": "lddr.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 3
+    }
+   ]
+  },
+  {
+   "form": "cpir.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 3
+    }
+   ]
+  },
+  {
+   "form": "cpdr.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 3
+    }
+   ]
+  },
+  {
+   "form": "inir.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 3
+    }
+   ]
+  },
+  {
+   "form": "indr.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 3
+    }
+   ]
+  },
+  {
+   "form": "otir.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 3
+    }
+   ]
+  },
+  {
+   "form": "otdr.ed",
+   "profiles": [
+    "zero",
+    "ones",
+    "edge",
+    "mixed"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 3
+    }
+   ]
+  }
  ]
 }

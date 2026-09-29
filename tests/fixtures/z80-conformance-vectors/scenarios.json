@@ -289,6 +289,158 @@
      ]
     }
    ]
+  },
+  "t007_prog": {
+   "images": [
+    {
+     "identity": 1,
+     "kind": "invariant",
+     "windows": [
+      [
+       "0000",
+       "0000",
+       "10000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "0038",
+       "00"
+      ],
+      [
+       "0066",
+       "ED45"
+      ],
+      [
+       "0100",
+       "EDB076"
+      ],
+      [
+       "0110",
+       "EDB876"
+      ],
+      [
+       "0120",
+       "EDB176"
+      ],
+      [
+       "0130",
+       "EDB976"
+      ],
+      [
+       "0140",
+       "EDB276"
+      ],
+      [
+       "0150",
+       "EDBA76"
+      ],
+      [
+       "0160",
+       "EDB376"
+      ],
+      [
+       "0170",
+       "EDBB76"
+      ],
+      [
+       "0180",
+       "DDEDB076"
+      ],
+      [
+       "0190",
+       "FB76"
+      ],
+      [
+       "01A0",
+       "FBF300"
+      ],
+      [
+       "01B0",
+       "F376"
+      ],
+      [
+       "01C0",
+       "ED45"
+      ],
+      [
+       "01D0",
+       "ED57"
+      ],
+      [
+       "01E0",
+       "FBED45"
+      ],
+      [
+       "01F0",
+       "ED5F"
+      ],
+      [
+       "0200",
+       "ED78ED40ED70DB12ED50ED58ED60ED68"
+      ],
+      [
+       "0220",
+       "EDA2EDAAEDA3EDAB"
+      ],
+      [
+       "0240",
+       "EDA0EDA8EDA1EDA9"
+      ],
+      [
+       "0260",
+       "ED67ED6F"
+      ],
+      [
+       "0280",
+       "ED47ED4F"
+      ],
+      [
+       "0290",
+       "ED46ED56ED5E"
+      ],
+      [
+       "02A0",
+       "ED79ED71ED41ED49D312"
+      ],
+      [
+       "02C0",
+       "FBC9"
+      ],
+      [
+       "0500",
+       "00"
+      ],
+      [
+       "0400",
+       "00000000"
+      ]
+     ]
+    }
+   ]
+  },
+  "t007_small": {
+   "images": [
+    {
+     "identity": 1,
+     "kind": "invariant",
+     "windows": [
+      [
+       "0000",
+       "0000",
+       "400"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "0000",
+       "00"
+      ]
+     ]
+    }
+   ]
   }
  },
  "scenarios": [
@@ -1997,7 +2149,7 @@
    }
   },
   {
-   "name": "no_owner_unlowered_form",
+   "name": "no_owner_target_not_emitted",
    "image": "two_image",
    "steps": [
     {
@@ -2006,12 +2158,12 @@
     }
    ],
    "state": {
-    "pc": "0500"
+    "pc": "8100"
    },
    "expect": [
     {
      "out": "no_owner",
-     "pc": "0500"
+     "pc": "8100"
     }
    ],
    "oracle": false,
@@ -2024,8 +2176,8 @@
       "0"
      ],
      [
-      "4000",
       "8000",
+      "C000",
       2,
       "4000"
      ]
@@ -2638,6 +2790,2764 @@
      ]
     ]
    }
+  },
+  {
+   "name": "t007_ldir_bc1",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 2
+    }
+   ],
+   "state": {
+    "pc": "0100",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "d": "30",
+    "e": "00",
+    "c": "01"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "5A"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ldir_bc3",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 4
+    }
+   ],
+   "state": {
+    "pc": "0100",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "d": "30",
+    "e": "00",
+    "c": "03",
+    "a": "A5"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "112233"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ldir_overlap_fwd",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 8
+    }
+   ],
+   "state": {
+    "pc": "0100",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "d": "20",
+    "e": "01",
+    "c": "06"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "A1B2C3D4E5F6"
+    ]
+   ]
+  },
+  {
+   "name": "t007_lddr_overlap",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 8
+    }
+   ],
+   "state": {
+    "pc": "0110",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "05",
+    "d": "20",
+    "e": "06",
+    "c": "06"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "A1B2C3D4E5F6"
+    ]
+   ]
+  },
+  {
+   "name": "t007_lddr_bc2",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 3
+    }
+   ],
+   "state": {
+    "pc": "0110",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "10",
+    "d": "30",
+    "e": "10",
+    "c": "02"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "200F",
+     "0102"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ldir_bc0_full",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 1376251,
+     "int": 0,
+     "nmi": 0
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0100",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "40",
+    "d": "40"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 1376251,
+     "pc": "0102",
+     "b": "00",
+     "c": "00"
+    },
+    {
+     "out": "halted"
+    }
+   ]
+  },
+  {
+   "name": "t007_lddr_bc0_full",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 1376251,
+     "int": 0,
+     "nmi": 0
+    }
+   ],
+   "state": {
+    "pc": "0110",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "40",
+    "l": "00",
+    "d": "40",
+    "e": "00"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ldir_deadline_mid",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 50
+    },
+    {
+     "mode": "r",
+     "budget": 60
+    },
+    {
+     "mode": "r",
+     "budget": 200
+    }
+   ],
+   "state": {
+    "pc": "0100",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "d": "30",
+    "c": "20"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "0102030405060708"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ldir_prefixed",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 5
+    }
+   ],
+   "state": {
+    "pc": "0180",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "d": "30",
+    "e": "00",
+    "c": "03",
+    "r": "7E"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "0A0B0C"
+    ]
+   ]
+  },
+  {
+   "name": "t007_cpir_bc0_nomatch",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 1376251
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0120",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "a": "55",
+    "h": "10",
+    "l": "00"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 1376251,
+     "pc": "0122",
+     "b": "00",
+     "c": "00"
+    },
+    {
+     "out": "halted"
+    }
+   ]
+  },
+  {
+   "name": "t007_cpdr_bc0_nomatch",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 1376251
+    }
+   ],
+   "state": {
+    "pc": "0130",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "a": "55",
+    "h": "10",
+    "l": "00"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_cpir_early_match",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 7
+    }
+   ],
+   "state": {
+    "pc": "0120",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "a": "7C",
+    "h": "20",
+    "l": "00",
+    "b": "00",
+    "c": "20"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "01020304057C08"
+    ]
+   ]
+  },
+  {
+   "name": "t007_cpdr_early_match",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 7
+    }
+   ],
+   "state": {
+    "pc": "0130",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "a": "7C",
+    "h": "20",
+    "l": "10",
+    "b": "00",
+    "c": "20"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2008",
+     "017C0304"
+    ]
+   ]
+  },
+  {
+   "name": "t007_cpir_bc1",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 2
+    }
+   ],
+   "state": {
+    "pc": "0120",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "a": "7C",
+    "h": "20",
+    "l": "00",
+    "c": "01"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "10"
+    ]
+   ]
+  },
+  {
+   "name": "t007_cpdr_bc2_half",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 3
+    }
+   ],
+   "state": {
+    "pc": "0130",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "a": "18",
+    "h": "20",
+    "l": "00",
+    "c": "02",
+    "f": "FF"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "1FFF",
+     "09"
+    ],
+    [
+     "2000",
+     "2A"
+    ]
+   ]
+  },
+  {
+   "name": "t007_inir_b0",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 5371
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0140",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "c": "34"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "in": "0b30557a9fc4e90e33587da2c7ec11365b80a5caef14395e83a8cdf2173c6186abd0f51a3f6489aed3f81d42678cb1d6fb20456a8fb4d9fe23486d92b7dc01264b7095badf04294e7398bde2072c51769bc0e50a2f54799ec3e80d32577ca1c6eb10355a7fa4c9ee13385d82a7ccf1163b6085aacff4193e6388add2f71c41668bb0d5fa1f44698eb3d8fd22476c91b6db00254a6f94b9de03284d7297bce1062b50759abfe4092e53789dc2e70c31567ba0c5ea0f34597ea3c8ed12375c81a6cbf0153a5f84a9cef3183d6287acd1f61b40658aafd4f91e43688db2d7fc21466b90b5daff24496e93b8dd02274c7196bbe0052a4f7499bee3082d52779cc1e6",
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 5371,
+     "pc": "0142",
+     "b": "00"
+    },
+    {
+     "out": "halted"
+    }
+   ]
+  },
+  {
+   "name": "t007_indr_b0",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 5371
+    }
+   ],
+   "state": {
+    "pc": "0150",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "21",
+    "l": "FF",
+    "c": "9E"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "in": "0b30557a9fc4e90e33587da2c7ec11365b80a5caef14395e83a8cdf2173c6186abd0f51a3f6489aed3f81d42678cb1d6fb20456a8fb4d9fe23486d92b7dc01264b7095badf04294e7398bde2072c51769bc0e50a2f54799ec3e80d32577ca1c6eb10355a7fa4c9ee13385d82a7ccf1163b6085aacff4193e6388add2f71c41668bb0d5fa1f44698eb3d8fd22476c91b6db00254a6f94b9de03284d7297bce1062b50759abfe4092e53789dc2e70c31567ba0c5ea0f34597ea3c8ed12375c81a6cbf0153a5f84a9cef3183d6287acd1f61b40658aafd4f91e43688db2d7fc21466b90b5daff24496e93b8dd02274c7196bbe0052a4f7499bee3082d52779cc1e6"
+  },
+  {
+   "name": "t007_inir_b1",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 2
+    }
+   ],
+   "state": {
+    "pc": "0140",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "b": "01",
+    "c": "34"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "in": "81"
+  },
+  {
+   "name": "t007_indr_b1",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 2
+    }
+   ],
+   "state": {
+    "pc": "0150",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "b": "01",
+    "c": "34"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "in": "C0"
+  },
+  {
+   "name": "t007_inir_b4",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 5
+    }
+   ],
+   "state": {
+    "pc": "0140",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "b": "04",
+    "c": "7F"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "in": "8001FF40"
+  },
+  {
+   "name": "t007_indr_b4",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 5
+    }
+   ],
+   "state": {
+    "pc": "0150",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "03",
+    "b": "04",
+    "c": "80"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "in": "8001FF40"
+  },
+  {
+   "name": "t007_otir_b0",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 5371
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0160",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "c": "34"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98a5b2bfccd9e6f3000d1a2734414e5b6875828f9ca9b6c3d0ddeaf704111e2b3845525f6c798693a0adbac7d4e1eefb0815222f3c495663707d8a97a4b1becbd8e5f2ff0c192633404d5a6774818e9ba8b5c2cfdce9f603101d2a3744515e6b7885929facb9c6d3e0edfa0714212e3b4855626f7c8996a3b0bdcad7e4f1fe0b1825323f4c596673808d9aa7b4c1cedbe8f5020f1c293643505d6a7784919eabb8c5d2dfecf90613202d3a4754616e7b8895a2afbcc9d6e3f0fd0a1724313e4b5865727f8c99a6b3c0cddae7f4010e1b2835424f5c697683909daab7c4d1deebf8"
+    ]
+   ],
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 5371,
+     "pc": "0162",
+     "b": "00"
+    },
+    {
+     "out": "halted"
+    }
+   ]
+  },
+  {
+   "name": "t007_otdr_b0",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 5371
+    }
+   ],
+   "state": {
+    "pc": "0170",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "FF",
+    "c": "9E"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "05121f2c394653606d7a8794a1aebbc8d5e2effc091623303d4a5764717e8b98a5b2bfccd9e6f3000d1a2734414e5b6875828f9ca9b6c3d0ddeaf704111e2b3845525f6c798693a0adbac7d4e1eefb0815222f3c495663707d8a97a4b1becbd8e5f2ff0c192633404d5a6774818e9ba8b5c2cfdce9f603101d2a3744515e6b7885929facb9c6d3e0edfa0714212e3b4855626f7c8996a3b0bdcad7e4f1fe0b1825323f4c596673808d9aa7b4c1cedbe8f5020f1c293643505d6a7784919eabb8c5d2dfecf90613202d3a4754616e7b8895a2afbcc9d6e3f0fd0a1724313e4b5865727f8c99a6b3c0cddae7f4010e1b2835424f5c697683909daab7c4d1deebf8"
+    ]
+   ]
+  },
+  {
+   "name": "t007_otir_b1",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 2
+    }
+   ],
+   "state": {
+    "pc": "0160",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "b": "01",
+    "c": "34"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "C0"
+    ]
+   ]
+  },
+  {
+   "name": "t007_otdr_b1",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 2
+    }
+   ],
+   "state": {
+    "pc": "0170",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "b": "01",
+    "c": "34"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "3F"
+    ]
+   ]
+  },
+  {
+   "name": "t007_otir_b4",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 5
+    }
+   ],
+   "state": {
+    "pc": "0160",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "F0",
+    "b": "04",
+    "c": "7F"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "20F0",
+     "8001FF40"
+    ]
+   ]
+  },
+  {
+   "name": "t007_otdr_b4",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 5
+    }
+   ],
+   "state": {
+    "pc": "0170",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "03",
+    "b": "04",
+    "c": "80"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "8001FF40"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ldir_int_mid",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0100",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1,
+    "h": "20",
+    "d": "30",
+    "c": "05"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "0102030405"
+    ]
+   ],
+   "expect": [
+    {},
+    {},
+    {
+     "pc": "0038",
+     "sp": "7FFE",
+     "iff1": 0
+    }
+   ]
+  },
+  {
+   "name": "t007_otir_int_mid",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0160",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1,
+    "h": "20",
+    "b": "05",
+    "c": "34"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "0102030405"
+    ]
+   ]
+  },
+  {
+   "name": "t007_inir_int_mid",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0140",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1,
+    "h": "20",
+    "b": "05",
+    "c": "34"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "in": "1122334455"
+  },
+  {
+   "name": "t007_cpir_int_mid",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0120",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1,
+    "h": "20",
+    "c": "05",
+    "a": "09"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "0102030405"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ldir_nmi_mid",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "nmi": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0100",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1,
+    "h": "20",
+    "d": "30",
+    "c": "05"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "0102030405"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ei_di_int_high",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "01A0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ei_nop_int_high",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "01A0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": []
+  },
+  {
+   "name": "t007_ei_halt_int",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0190",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": []
+  },
+  {
+   "name": "t007_ei_ret_int",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "02C0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "8000",
+     "0005"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ei_retn_int",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "01E0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "8000",
+     "0005"
+    ]
+   ]
+  },
+  {
+   "name": "t007_di_halt_nmi",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "nmi": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "01B0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "7FFE",
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_nmi_in_di_section",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "nmi": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "01B0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_retn_restores_iff",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "nmi": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_retn_iff2_zero",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "nmi": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 0
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_reti_from_handler_int",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": []
+  },
+  {
+   "name": "t007_halt_iff0_nmi",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "nmi": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0192",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "halted": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_halt_iff1_nmi_then_retn",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "nmi": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0192",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1,
+    "halted": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_nmi_edge_after_ei",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "nmi": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0190",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "deferral": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ld_a_i_int",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "01D0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1,
+    "i": "00"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ld_a_i_int_iff2_0",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "01D0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 0,
+    "i": "80"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ld_a_r_int",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "01F0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1,
+    "r": "83"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ld_a_i_no_int",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "01D0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1,
+    "i": "01"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_ld_ir_a",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 2
+    }
+   ],
+   "state": {
+    "pc": "0280",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "a": "C3",
+    "i": "01",
+    "r": "00"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_im_change",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 3
+    }
+   ],
+   "state": {
+    "pc": "0290",
+    "sp": "8000",
+    "im": 0,
+    "iff1": 0,
+    "iff2": 0
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_im2_even",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 2,
+    "iff1": 1,
+    "iff2": 1,
+    "i": "80"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "10",
+   "memory": [
+    [
+     "8010",
+     "0005"
+    ]
+   ]
+  },
+  {
+   "name": "t007_im2_vec00",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 2,
+    "iff1": 1,
+    "iff2": 1,
+    "i": "80"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "00",
+   "memory": [
+    [
+     "8000",
+     "0005"
+    ]
+   ]
+  },
+  {
+   "name": "t007_im2_vecFF",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 2,
+    "iff1": 1,
+    "iff2": 1,
+    "i": "80"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "FF",
+   "memory": [
+    [
+     "80FF",
+     "0005"
+    ]
+   ]
+  },
+  {
+   "name": "t007_im2_odd",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 2,
+    "iff1": 1,
+    "iff2": 1,
+    "i": "80"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "11",
+   "memory": [
+    [
+     "8011",
+     "0005"
+    ]
+   ]
+  },
+  {
+   "name": "t007_im2_wrap_ii_ff",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 2,
+    "iff1": 1,
+    "iff2": 1,
+    "i": "FF"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "FF",
+   "memory": [
+    [
+     "FFFF",
+     "00"
+    ],
+    [
+     "0000",
+     "05"
+    ]
+   ]
+  },
+  {
+   "name": "t007_im2_iFF_even",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 2,
+    "iff1": 1,
+    "iff2": 1,
+    "i": "FF"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "02",
+   "memory": [
+    [
+     "FF02",
+     "0005"
+    ]
+   ]
+  },
+  {
+   "name": "t007_im2_halted",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 2,
+    "iff1": 1,
+    "iff2": 1,
+    "i": "80",
+    "halted": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "20",
+   "memory": [
+    [
+     "8020",
+     "0005"
+    ]
+   ]
+  },
+  {
+   "name": "t007_im0_rst_C7",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 0,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "C7"
+  },
+  {
+   "name": "t007_im0_rst_CF",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 0,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "CF"
+  },
+  {
+   "name": "t007_im0_rst_D7",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 0,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "D7"
+  },
+  {
+   "name": "t007_im0_rst_DF",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 0,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "DF"
+  },
+  {
+   "name": "t007_im0_rst_E7",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 0,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "E7"
+  },
+  {
+   "name": "t007_im0_rst_EF",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 0,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "EF"
+  },
+  {
+   "name": "t007_im0_rst_F7",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 0,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "F7"
+  },
+  {
+   "name": "t007_im0_rst_FF",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 0,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "FF"
+  },
+  {
+   "name": "t007_int_im1_halted_ack",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0192",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1,
+    "halted": 1
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_in_c_script",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 8
+    }
+   ],
+   "state": {
+    "pc": "0200",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "b": "12",
+    "c": "34",
+    "f": "C3",
+    "a": "77"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "in": "000180FF7F55AA0F"
+  },
+  {
+   "name": "t007_in_c_script2",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 8
+    }
+   ],
+   "state": {
+    "pc": "0200",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "b": "AB",
+    "c": "CD",
+    "f": "00",
+    "a": "10"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "in": "9600010E7F0FF0AA"
+  },
+  {
+   "name": "t007_ini_ind_out",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 4
+    }
+   ],
+   "state": {
+    "pc": "0220",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "FF",
+    "b": "03",
+    "c": "FE",
+    "f": "A5"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "0F"
+    ]
+   ],
+   "in": "008D40E1"
+  },
+  {
+   "name": "t007_ini_ind_out2",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 4
+    }
+   ],
+   "state": {
+    "pc": "0220",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "21",
+    "l": "00",
+    "b": "80",
+    "c": "00",
+    "f": "FF"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "20FF",
+     "FE"
+    ],
+    [
+     "2100",
+     "C3"
+    ]
+   ],
+   "in": "8D008D80"
+  },
+  {
+   "name": "t007_ini_flags_b01",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 4
+    }
+   ],
+   "state": {
+    "pc": "0220",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "21",
+    "l": "00",
+    "b": "01",
+    "c": "7F",
+    "f": "00"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2100",
+     "0080"
+    ]
+   ],
+   "in": "FF80"
+  },
+  {
+   "name": "t007_ld_block_single",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 4
+    }
+   ],
+   "state": {
+    "pc": "0240",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "d": "30",
+    "e": "00",
+    "b": "00",
+    "c": "01",
+    "a": "12"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "AB"
+    ]
+   ]
+  },
+  {
+   "name": "t007_cp_block_single",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 4
+    }
+   ],
+   "state": {
+    "pc": "0240",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "d": "30",
+    "e": "00",
+    "b": "00",
+    "c": "02",
+    "a": "1F",
+    "f": "FF"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "10FF0F"
+    ]
+   ]
+  },
+  {
+   "name": "t007_rxd",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 2
+    }
+   ],
+   "state": {
+    "pc": "0260",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "h": "20",
+    "l": "00",
+    "a": "12",
+    "f": "FF"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "memory": [
+    [
+     "2000",
+     "34"
+    ]
+   ]
+  },
+  {
+   "name": "t007_out_c_zero",
+   "image": "t007_prog",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 5
+    }
+   ],
+   "state": {
+    "pc": "02A0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0,
+    "b": "12",
+    "c": "34",
+    "a": "9C",
+    "h": "20",
+    "l": "00"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "t007_im2_handler_not_emitted",
+   "image": "t007_small",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 0
+    }
+   ],
+   "state": {
+    "pc": "0100",
+    "sp": "8000",
+    "im": 2,
+    "iff1": 1,
+    "iff2": 1,
+    "i": "80"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "ack": "10",
+   "memory": [
+    [
+     "8010",
+     "0090"
+    ]
+   ],
+   "oracle": false,
+   "expect": [
+    {
+     "out": "deadline",
+     "pc": "9000"
+    },
+    {
+     "out": "no_owner",
+     "pc": "9000"
+    }
+   ]
   }
  ]
 }

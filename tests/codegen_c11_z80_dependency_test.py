@@ -73,7 +73,8 @@ for family in FAMILIES:
     file_text = (C11 / "src" / ("z80_lower_%s.cpp" % family)).read_text()
     check(("std::span<const LoweringRow> %s()" % accessor) in file_text, "%s.cpp does not define %s" % (family, accessor))
     check(registry.count(accessor + "()") == 1, "registry must list %s exactly once" % accessor)
-    check(includes(file_text) == ["segarecomp/codegen/c11/z80_lowering.hpp"], "%s.cpp must include only z80_lowering.hpp" % family)
+    project = [i for i in includes(file_text) if "/" in i]
+    check(project == ["segarecomp/codegen/c11/z80_lowering.hpp"], "%s.cpp must include only z80_lowering.hpp (plus standard headers)" % family)
     other = [f for f in FAMILIES if f != family]
     check(not any(("%s_lowering_rows" % o) in file_text for o in other), "%s.cpp references another family" % family)
 check(len(re.findall(r"_lowering_rows\(\)", registry)) == len(FAMILIES), "registry lists a family accessor twice or an unknown one")

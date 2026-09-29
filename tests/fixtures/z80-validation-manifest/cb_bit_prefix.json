@@ -1,0 +1,527 @@
+{
+ "family": "cb_bit_prefix",
+ "forms": {
+  "bit.bit_hl_ind.cb": {
+   "digest": "8bdfe5f471e28abaf5a6bba28aab6578b7af47894c9752a80658a59496e4d189",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "bit.bit_ix_d.ddcb": {
+   "digest": "f44d37606773fc82eeb086f68bff48c5575e1ac233fa39e6928bb350aac915c9",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "bit.bit_ix_d.ddcb.alias": {
+   "digest": "18b21fd12c873fcf1a8dd48f25173e9a64cdf2229846e78ec4c73cf843b78ee9",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "bit.bit_iy_d.fdcb": {
+   "digest": "e9dddf58ad7e73ace96ab311419c3ebaf05928bc9cb2dc766798cb05b4ef983c",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "bit.bit_iy_d.fdcb.alias": {
+   "digest": "a0dbcc0bfb5708cbea378c392e1029b22f955f6d614e9357ecc42c825fa26927",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "bit.bit_r.cb": {
+   "digest": "81d0925ba2bc283dbc59aac6edf464701e16a2757f6d1b391bbb2ca7b377e392",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  },
+  "res.bit_hl_ind.cb": {
+   "digest": "596a2fe6ac106fa1257cdc6c2fea46e4df63743fee767b44717dbfde3c011181",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "res.bit_ix_d.ddcb": {
+   "digest": "710bf2893f6ce2d305c906a755f7e7622ff68a394dd5b2abff62ddfd3ed6f821",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "res.bit_ix_d_copy_r.ddcb.undoc": {
+   "digest": "34c0497e2b0b2b7ea958d1a6e1ef6acafbf4a047b3c29a42174f7e05ce461249",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "res.bit_iy_d.fdcb": {
+   "digest": "9bbf9e3698503ccfa6c0acfde32361107547d9f98d5734424ba19a84c1d911cd",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "res.bit_iy_d_copy_r.fdcb.undoc": {
+   "digest": "caccb80310762f731dcc3d370a537979d5518b785c7a4cbbab6300e6ec071188",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "res.bit_r.cb": {
+   "digest": "b431b2355b3c7a38c154b7749ed63144374c190faac52f503cf90275bd188a60",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  },
+  "rl.hl_ind.cb": {
+   "digest": "317117edc47c6b3ed31ab7e2b3173cf8c3084c36bd8f4e175f4dcefa61a594ab",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rl.ix_d.ddcb": {
+   "digest": "a678386c1af8a4433cc49fb3077367a05e8b3e7c425946ca38a1636b200a5d6f",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rl.ix_d_copy_r.ddcb.undoc": {
+   "digest": "8200a85b9f9925d1b26aaec33d0ff1dd5de4c5269ed40f5ea76fbd8596d4d4cb",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rl.iy_d.fdcb": {
+   "digest": "3c64d327cd9a8e9e918a84623df7820c2534aaa621728daabbd61c390dad95a4",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rl.iy_d_copy_r.fdcb.undoc": {
+   "digest": "77fb98b3d505b3706b39feb31676727190b514cbec0c4276024bff438528cd6c",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rl.r.cb": {
+   "digest": "a7dceb12d0b5fb44ccfec030b46a841f4a517e79a136c1a4e9260e30a89908b9",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  },
+  "rlc.hl_ind.cb": {
+   "digest": "bf74fff6454b22d0603e770b6d67893dfaa23d3a13ec908e61a686aaeefca78f",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rlc.ix_d.ddcb": {
+   "digest": "235d2000047ab25f9fab3be7885c8c9be2ec19d1e3148d6582fcf40b693f021a",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rlc.ix_d_copy_r.ddcb.undoc": {
+   "digest": "0fe3b2f4ff30770e0a8e56f22a9be6d3a816026f381c94aa11571bc6bcc79252",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rlc.iy_d.fdcb": {
+   "digest": "921fd38051f3c1033837be6123354dea0e2dc1350055f98fd297c936a9951e17",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rlc.iy_d_copy_r.fdcb.undoc": {
+   "digest": "804382e4a3fddfed549681749ec287061bbe8d13f1bf1ef427fd4ef332fe7724",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rlc.r.cb": {
+   "digest": "77a29caf0d513a5a017eab8a05daf8ed11c72f5f6dd04fc6515b91e4261c2d3d",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  },
+  "rr.hl_ind.cb": {
+   "digest": "f2e05db1b207007bdb795aa5d53386b623b1fc3e4159efb421661a5d2df63a0c",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rr.ix_d.ddcb": {
+   "digest": "d32278103ed46b4986a36c1252e1bda3d1d70ed54cc098fec083bbf5aaa56986",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rr.ix_d_copy_r.ddcb.undoc": {
+   "digest": "494d55f27b4ee1d2a1e341fc6af9b88855bd62b3dfee42b05f7bbad3e36c1dee",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rr.iy_d.fdcb": {
+   "digest": "e3b6ab1dea534ce27a4cacef62cee000f15562c767338483d39e376281cb5405",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rr.iy_d_copy_r.fdcb.undoc": {
+   "digest": "7737617de40244c9b50611c5352b9f2e304691bed8e4fcc6445b23b9535ba34b",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rr.r.cb": {
+   "digest": "f87f2e9983ff524ea253cce5c64876bf5f37121666b48a029998911099c15832",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  },
+  "rrc.hl_ind.cb": {
+   "digest": "6333492cf3623d538efa10d7adfaab2b61b550fdfd90f734ee6cd2ea90efd914",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rrc.ix_d.ddcb": {
+   "digest": "5261558219302f96d0d7b7c0df198bb32d999f873b13f52b7098edd707289f80",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rrc.ix_d_copy_r.ddcb.undoc": {
+   "digest": "77721a643279216eaf85b34ca9942f960c34f388aa106ecb15c8b1433c2c4b96",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rrc.iy_d.fdcb": {
+   "digest": "80fee543c2453b770e91f1d57962fabfb3f9cb2dd883a9c9765a38343f1c6a8d",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rrc.iy_d_copy_r.fdcb.undoc": {
+   "digest": "f641a54a2a22230ad1eb621172331fe1d23c1f874bf0dd017be82c7a47ec840c",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "rrc.r.cb": {
+   "digest": "873e6e07fb2eac6eaa6bafc96be67c4621024195197b4fac48929ce03eca802f",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  },
+  "set.bit_hl_ind.cb": {
+   "digest": "702dbaf4babffeac6b8d400ccfbb7453c3a3bfaa1a3b03ef56e962ca9d833e15",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "set.bit_ix_d.ddcb": {
+   "digest": "b21ee0d04ddac1f84ce0c6c6b382e384f6d2f1b9ad86baedbad5178211376bc3",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "set.bit_ix_d_copy_r.ddcb.undoc": {
+   "digest": "7b6bf90bfbf2fcf787d5a1cfbd3e79ab234319fd5a6f94ef60eb75c5c31ddcc1",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "set.bit_iy_d.fdcb": {
+   "digest": "73ad8463ef405a17f9c5a85163075156c971e5861920fd9257e3d7634f64344f",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "set.bit_iy_d_copy_r.fdcb.undoc": {
+   "digest": "452ef631c3609c2ff011321c49b7e4bce74e6d0660f16414919acaa9026dc419",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "set.bit_r.cb": {
+   "digest": "aef3e37baea33bddfbbd7e1894054c3df8337183f1fff10f4049f532a213bcc7",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  },
+  "sla.hl_ind.cb": {
+   "digest": "220850c2c81f51d45cea5108a04c5900cb6831f058df02de5c3a232803df559a",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sla.ix_d.ddcb": {
+   "digest": "1c98fb2d0be9ba33fe497f81d7fb94e41ddfd97a347736d5f4841c1f3f2cc010",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sla.ix_d_copy_r.ddcb.undoc": {
+   "digest": "f923460d136c6fd305d87e0588c58795fbedc624cb4997621c9ab44dd3ab5d2e",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sla.iy_d.fdcb": {
+   "digest": "292973aa04eee50f753303e15345ffefcdfe7a4d5f5129b0c8362735e21537d3",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sla.iy_d_copy_r.fdcb.undoc": {
+   "digest": "c2c59ddb673b20c928007cc5e66320cf3884e53383e8098ddb0cc74719152050",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sla.r.cb": {
+   "digest": "dfe4f70e4f4fd03a6c3cb53e2ea86defd5530436b59afaabe3b1e79a57a31fe1",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  },
+  "sll.hl_ind.cb.undoc": {
+   "digest": "9c2eb844c6393fcb68014e38e2428609c64c5b4d6ba8c513002b6d7e5f5c6558",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sll.ix_d.ddcb.undoc": {
+   "digest": "b0e0c7d7b3893c28304fd3fc57414a135ccc1d7e06d3b52bbe241a0b50b811ca",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sll.ix_d_copy_r.ddcb.undoc": {
+   "digest": "99f6a72361d686c8426520feca8e26c945448ad0767e427eccb212c47442be14",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sll.iy_d.fdcb.undoc": {
+   "digest": "acad3151b2d7fb0319848e2aaa1df2f5bdbfdf4c42b638eadd17b75cec498e9f",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sll.iy_d_copy_r.fdcb.undoc": {
+   "digest": "1700470684f6545ce24a1091e7057c324a64f7c44a48cb6b4dc7e4a95b4f2fd8",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sll.r.cb.undoc": {
+   "digest": "ca1d740d62379bd8739ac5034897c490ef0cd819629beb7a53f9398bc5e917ce",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  },
+  "sra.hl_ind.cb": {
+   "digest": "1fa792a6983dc9e8d372f59dff4f73b2179d5cb6e88ee7c844d142f018b89f73",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sra.ix_d.ddcb": {
+   "digest": "2d72f3573977aef13ff8f24058b6cf680067068762be75b0616658e85ecb4a91",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sra.ix_d_copy_r.ddcb.undoc": {
+   "digest": "9258e8e638a05712f377c97d22c0574c076316d2eec73c42a628bd3f3545615f",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sra.iy_d.fdcb": {
+   "digest": "3bec517301f59426beb239090c61b697ee2294a41f96fabcf82a8b12f86728ff",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sra.iy_d_copy_r.fdcb.undoc": {
+   "digest": "61b5b5ceba15af0fe43e6b25edaa45b47439040517541fcbdcc93d4b3cf86dd9",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "sra.r.cb": {
+   "digest": "f0d18213e416e37b78df212bfbf3a172a32b5ffbfb518b4a3533b483e2502109",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  },
+  "srl.hl_ind.cb": {
+   "digest": "54192072145f72f83278d0ccc9316339463dab0ca02d3092a243cb692416bf8d",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "srl.ix_d.ddcb": {
+   "digest": "3af4c7d99438f7b6f933df76c95719f8289238ab1b0e05b3e7976bfe3bbd5027",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "srl.ix_d_copy_r.ddcb.undoc": {
+   "digest": "b72be09c96ca399036a690c1c0ddb55b88b491a3cb446114e16a42e4a1a9b16d",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "srl.iy_d.fdcb": {
+   "digest": "eb1f5f96f1cb68d70169f79773a8959b682b056bb36cabdc42592b5099a3a059",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "srl.iy_d_copy_r.fdcb.undoc": {
+   "digest": "e566ddd0768a8e861b37b3b4cd766dc6553cb80a5dccaae34e01e4a960eeb2b2",
+   "stages": [
+    "oracle_state",
+    "timing_validated",
+    "oracle_memory"
+   ]
+  },
+  "srl.r.cb": {
+   "digest": "9cfabd570dd0719fb65882e038296320ee4965f277842e29d305e7e293420067",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  }
+ },
+ "oracle": {
+  "redcode_Z80": "6bb4166317108b8d1a4b5934df15761089bdea9e",
+  "redcode_Zeta": "93ba5ab967eef00f074d21bb760fe9dc48afd2d3"
+ },
+ "schema": 1
+}

@@ -21,12 +21,16 @@ refuses to run without the pinned oracle and only ever adds credit. A hermetic t
 import argparse
 import concurrent.futures
 import hashlib
+import itertools
 import json
 import os
 import pathlib
 import subprocess
 import sys
 import tempfile
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import z80_conformance_sweeps as sweeps  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 DATASET = ROOT / "tests" / "fixtures" / "z80-legal-forms.json"
@@ -156,6 +160,7 @@ def expand_rows(doc, data, forms):
         operand_sets = row.get("operands", default_ops)
         byte_filter = {int(b, 16) for b in row["bytes"]} if "bytes" in row else None
         step_spec = row.get("steps", [{"mode": "i", "budget": 1, "int": 0, "nmi": 0}])
+        cases = sweeps.sweep_cases(row["sweep"]) if "sweep" in row else [None]
         steps = expand_steps(step_spec)
         for prefix in row.get("prefixes", [""]):
             pbytes = bytes.fromhex(prefix)
@@ -163,18 +168,24 @@ def expand_rows(doc, data, forms):
                 if byte_filter is not None and b not in byte_filter:
                     continue
                 if pbytes:  # a DD/FD chain before a base-space byte: only prefix-ignored bytes keep the base form
-                    if form["space"] != "base" or partition["dd" if pbytes[-1] == 0xDD else "fd"][b] != "P":
+                    if form["space"] in ("ddcb", "fdcb"):  # the form's own DD/FD supersedes every chained prefix
+                        pass
+                    elif form["space"] != "base" or partition["dd" if pbytes[-1] == 0xDD else "fd"][b] != "P":
                         continue
-                for ops in operand_sets:
-                    code = pbytes + encoding_code(form, b, bytes.fromhex(ops))
-                    for profile in row.get("profiles", ["zero", "mixed"]):
-                        key = "%s:%s:%s:%s" % (row["form"], prefix, code.hex(), profile)
-                        name = "%s/%s/%s/r%d" % (row["form"], code.hex(), profile, row_index)
-                        state = profile_state(profile, key)
-                        patches = [((p + d) & 0xFFFF, bytes([rng(key, "mem", p, d) & 0xFF]))
-                                   for p in touch_points(state) for d in range(4)]
-                        vecs.append(Vec(name, code, state, steps, form=row["form"], patches=patches,
-                                        family=form["family"], oracle=row.get("oracle", True)))
+                for pre, ops, profile, case in itertools.product(row.get("pre", [""]), operand_sets,
+                                                                  row.get("profiles", ["zero", "mixed"]), cases):
+                    if case is not None and case.get("v") is not None and row.get("sweep_v") == "imm":
+                        ops = "%02X" % case["v"]
+                    code = bytes.fromhex(pre) + pbytes + encoding_code(form, b, bytes.fromhex(ops))
+                    tag = "" if case is None else ":" + sweeps.case_tag(case)
+                    key = "%s:%s:%s:%s%s" % (row["form"], prefix, code.hex(), profile, tag)
+                    name = "%s/%s/%s/r%d%s" % (row["form"], code.hex(), profile, row_index, tag)
+                    state = profile_state(profile, key)
+                    mem = None if case is None else sweeps.apply_case(case, state, row.get("sweep_v"))
+                    patches = [((p + d) & 0xFFFF, bytes([rng(key, "mem", p, d) & 0xFF if mem is None else mem]))
+                               for p in touch_points(state) for d in range(4)]
+                    vecs.append(Vec(name, code, state, steps, form=row["form"], patches=patches,
+                                    family=form["family"], oracle=row.get("oracle", True)))
     return vecs
 
 

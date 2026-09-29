@@ -74,6 +74,9 @@ def seed_rows_against_model(tc, work):
                 continue
             total += 1
             pc = batch.slots[vec.code]
+            if not (forms[vec.form]["mnemonic"] in ("NOP", "HALT") or (forms[vec.form]["mnemonic"] == "LD" and
+                    forms[vec.form]["dst"] == "r" and forms[vec.form]["src"] in ("r", "n"))):
+                continue  # the seed model covers only the T003 seed forms; the other families are oracle-validated
             exp = expected_model(vec, pc)
             first = steps[0]
             form = forms[vec.form]
