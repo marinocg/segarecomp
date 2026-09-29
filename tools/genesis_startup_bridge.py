@@ -1029,13 +1029,15 @@ def compile_objects(jobs: "list[tuple[list[str], pathlib.Path]]", cwd: pathlib.P
 def resolve_profile(args) -> str:
     if args.build_profile != "auto":
         return args.build_profile
-    return "optimized" if (args.viewer or args.capture_frames is not None) else "quick"
+    return "optimized" if (args.viewer or args.capture_frames is not None or
+                           args.execution_coverage is not None) else "quick"
 
 
 def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, root: pathlib.Path,
                          out_dir: pathlib.Path, debug: "bool | str",
                          viewer_sdl3: tuple[list[str], list[str]] | None = None,
                          capture: bool = False,
+                         coverage: bool = False,
                          ) -> tuple[int, bytes | None, pathlib.Path | None]:
     source = out_dir / "bridge.generated.c"
     executable = out_dir / "bridge"
@@ -1098,6 +1100,8 @@ def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, roo
                                               None)
         if capture:
             return _compile_capture_executable(compile_flags, root, sources, executable)
+        if coverage:
+            return _compile_capture_executable(compile_flags, root, sources, executable, coverage=True)
         runtime_flags = ["-I", str(root / "platforms" / "genesis" / "runtime")]
         if not sharded:
             compile_result = subprocess.run(compile_flags + runtime_flags + [
@@ -1191,18 +1195,23 @@ def _compile_viewer_executable(compile_flags: list[str], sdl3: tuple[list[str], 
 
 
 def _compile_capture_executable(compile_flags: list[str], root: pathlib.Path, sources: "list[pathlib.Path]",
-                                executable: pathlib.Path) -> tuple[int, bytes | None, pathlib.Path | None]:
+                                executable: pathlib.Path,
+                                coverage: bool = False) -> tuple[int, bytes | None, pathlib.Path | None]:
     """SEG-021-T031: headless frame-capture build of the UNMODIFIED generated C, mirroring the
     viewer build: only the main TU is compiled with -Dgenesis_runtime_run=genesis_frame_capture_hook_run.
-    No SDL. Objects live in a temp dir (never in out_dir)."""
+    No SDL. Objects live in a temp dir (never in out_dir). SEG-026-T001: `coverage` selects the
+    execution-coverage hook (genesis_execution_coverage_hook_run) over the same unmodified program."""
     import tempfile
     runtime_dir = root / "platforms" / "genesis" / "runtime"
     viewer_dir = root / "platforms" / "genesis" / "viewer"
     includes = ["-I", str(runtime_dir), "-I", str(viewer_dir)]
-    others = [runtime_dir / "runtime.c", runtime_dir / "vdp_render.c", runtime_dir / "frame_export.c",
-              viewer_dir / "frame_capture.c", viewer_dir / "frame_capture_main_hook.c"]
+    hook = ([viewer_dir / "execution_coverage.c", viewer_dir / "execution_coverage_main_hook.c"] if coverage
+            else [viewer_dir / "frame_capture.c", viewer_dir / "frame_capture_main_hook.c"])
+    others = [runtime_dir / "runtime.c", runtime_dir / "vdp_render.c", runtime_dir / "frame_export.c"] + hook
+    hook_macro = ("-Dgenesis_runtime_run=genesis_execution_coverage_hook_run" if coverage
+                  else "-Dgenesis_runtime_run=genesis_frame_capture_hook_run")
     with tempfile.TemporaryDirectory() as tmp:
-        jobs = [(sources[0], ["-Dgenesis_runtime_run=genesis_frame_capture_hook_run"])] \
+        jobs = [(sources[0], [hook_macro])] \
             + [(u, ["-I", str(sources[0].parent)]) for u in sources[1:]] + [(o, []) for o in others]
         objects, failure = compile_objects([(compile_flags + extra + includes, src) for src, extra in jobs],
                                            root, pathlib.Path(tmp))
@@ -1282,6 +1291,44 @@ def run_capture(executable: pathlib.Path, root: pathlib.Path, out_dir: pathlib.P
         return 5
     outcome = json.loads(summary[0][len("CAPTURE_SUMMARY "):]).get("outcome")
     return 0 if outcome == "window_complete" else 10
+
+
+def run_execution_coverage(executable: pathlib.Path, root: pathlib.Path, out_dir: pathlib.Path,
+                           instruction_budget: int, frames: int, epoch_frames: int | None,
+                           enabled: bool) -> int:
+    """SEG-026-T001: run the coverage-mode executable once for exactly `frames` published frames.
+    Prints the aggregate COVERAGE_SUMMARY line (counts/digests only). With coverage enabled the exact
+    PC bitmap and first-entry witnesses are written to the ignored private directory
+    `<out-dir>/coverage-private` for local comparison only; never persist them."""
+    private = out_dir / "coverage-private"
+    shutil.rmtree(private, ignore_errors=True)
+    env = dict(os.environ)
+    env["SEGARECOMP_COVERAGE_FRAMES"] = str(frames)
+    env["SEGARECOMP_COVERAGE_ENABLED"] = "1" if enabled else "0"
+    if epoch_frames is not None:
+        env["SEGARECOMP_COVERAGE_EPOCH_FRAMES"] = str(epoch_frames)
+    else:
+        env.pop("SEGARECOMP_COVERAGE_EPOCH_FRAMES", None)
+    if enabled:
+        private.mkdir(parents=True)
+        env["SEGARECOMP_COVERAGE_DIR"] = str(private)
+    else:
+        env.pop("SEGARECOMP_COVERAGE_DIR", None)
+    import time
+    started = time.monotonic()
+    completed = subprocess.run([str(executable), "--instruction-budget", str(instruction_budget)],
+                               cwd=root, env=env, text=True, capture_output=True)
+    elapsed = time.monotonic() - started
+    summary = [line for line in completed.stderr.splitlines() if line.startswith("COVERAGE_SUMMARY ")]
+    if len(summary) != 1:
+        sys.stderr.write(completed.stderr)
+        return 5
+    parsed = json.loads(summary[0][len("COVERAGE_SUMMARY "):])
+    parsed["run_wall_seconds"] = round(elapsed, 3)
+    sys.stderr.write("COVERAGE_SUMMARY " + json.dumps(parsed, separators=(",", ":")) + "\n")
+    if completed.stdout:
+        sys.stdout.write(completed.stdout)
+    return 0 if parsed.get("outcome") == "frames_reached" else 10
 
 
 def run_viewer(executable: pathlib.Path, root: pathlib.Path, instruction_budget: int,
@@ -1924,6 +1971,15 @@ def main() -> int:
                         help="capture published frames FIRST, FIRST+STRIDE, ... (COUNT frames) into <out-dir>/frames")
     parser.add_argument("--capture-slice", type=instruction_budget_value,
                         help="guest dispatches per capture slice (> 0)")
+    # SEG-026-T001: measurement-only complete execution-PC coverage over a fixed number of frames.
+    parser.add_argument("--execution-coverage", type=instruction_budget_value, metavar="FRAMES",
+                        help="run the same generated program headless for exactly FRAMES published frames and "
+                             "record every retired guest PC (aggregates on stderr; exact PCs only in the ignored "
+                             "<out-dir>/coverage-private)")
+    parser.add_argument("--coverage-epoch-frames", type=instruction_budget_value,
+                        help="aggregate coverage checkpoint interval in published frames")
+    parser.add_argument("--coverage-disabled", action="store_true",
+                        help="run the identical frame-bounded loop with no coverage observer (overhead baseline)")
     args = parser.parse_args()
     global _compile_jobs_override, _object_cache_dir_override
     _compile_jobs_override = args.compile_jobs
@@ -1931,6 +1987,14 @@ def main() -> int:
         _object_cache_dir_override = pathlib.Path(args.object_cache_dir).resolve()
     if (args.viewer_unthrottled or args.viewer_slice is not None) and not args.viewer:
         sys.stderr.write("--viewer-unthrottled/--viewer-slice require --viewer\n")
+        return 8
+    if (args.coverage_epoch_frames is not None or args.coverage_disabled) and args.execution_coverage is None:
+        sys.stderr.write("--coverage-epoch-frames/--coverage-disabled require --execution-coverage\n")
+        return 8
+    if args.execution_coverage is not None and (args.capture_frames is not None or args.viewer or args.compare_runs or
+                                                args.full_report_path or args.checkpoint):
+        sys.stderr.write("--execution-coverage is incompatible with --capture-frames/--viewer/--compare-runs/"
+                         "--full-report-path/--checkpoint\n")
         return 8
     if args.capture_slice is not None and args.capture_frames is None:
         sys.stderr.write("--capture-slice requires --capture-frames\n")
@@ -2024,7 +2088,19 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     def single_cycle_generate_and_compile() -> tuple[int, bytes | None, pathlib.Path | None]:
         return generate_and_compile(emitter_command, compiler, root, out_dir, resolve_profile(args),
-                                    viewer_sdl3, capture=args.capture_frames is not None)
+                                    viewer_sdl3, capture=args.capture_frames is not None,
+                                    coverage=args.execution_coverage is not None)
+    if args.execution_coverage is not None:
+        # One generation + one compile + one frame-bounded headless coverage run of the same program.
+        status, _, executable = single_cycle_generate_and_compile()
+        if status:
+            return status
+        assert executable is not None
+        return run_execution_coverage(executable, root, out_dir,
+                                      args.instruction_budget if args.instruction_budget is not None
+                                      else GENESIS_CANONICAL_RUNNER_DISPATCH_ALLOWANCE,
+                                      args.execution_coverage, args.coverage_epoch_frames,
+                                      not args.coverage_disabled)
     if args.capture_frames is not None:
         # One generation + one compile + one bounded headless capture run of the same program.
         status, _, executable = single_cycle_generate_and_compile()

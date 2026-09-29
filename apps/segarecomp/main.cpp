@@ -4,6 +4,7 @@
 #include "segarecomp/codegen/c11/genesis_frontend.hpp"
 #include "segarecomp/codegen/c11/provenance_diagnostics.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
+#include "segarecomp/machine/genesis/reachability_challenger.hpp"
 #include "build_command.hpp"
 #include "segarecomp/rom.hpp"
 
@@ -37,6 +38,7 @@ void print_usage(std::ostream &output) {
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
                   "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]...] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                 "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--universe]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
                "  segarecomp probe-genesis-startup-mapping <address-hex8> <width-decimal> <image-length-hex16>\n";
@@ -409,6 +411,104 @@ int run_cli(int argc, char **argv) {
       }
       std::cerr << segarecomp::format_m68k_frontend_result(result) << '\n';
       return 1;
+    }
+    // SEG-026-T001 (experiment, report-only): reachability-first discovery challenger. Writes aggregate JSON to
+    // stdout (counts only) and exact PCs to --private-output (ignored location; never persisted). Reads the image,
+    // its reset handoff and optional ADR 0049 alias descriptors only; it never alters generation. --universe also
+    // reports the unchanged broad immutable-ROM AOT identity count U for comparison.
+    if (command == "genesis-reachability-challenger") {
+      std::optional<std::string_view> rom;
+      std::optional<std::string_view> digest;
+      std::optional<std::string_view> private_output;
+      std::optional<std::uint32_t> entry_address;
+      std::optional<std::uint32_t> mapping_base;
+      bool reset_entry = false;
+      bool universe = false;
+      segarecomp::GenesisReachabilityChallengerConfig config{};
+      std::vector<std::array<std::uint32_t, 3>> aliases;
+      for (int index = 2; index < argc;) {
+        const std::string_view option = argv[index];
+        const bool has_value = index + 1 < argc;
+        if (option == "--rom" && has_value && !rom) { rom = argv[index + 1]; index += 2; }
+        else if (option == "--rom-sha256" && has_value && !digest) { digest = argv[index + 1]; index += 2; }
+        else if (option == "--private-output" && has_value && !private_output) { private_output = argv[index + 1]; index += 2; }
+        else if (option == "--reset-entry" && !reset_entry) { reset_entry = true; ++index; }
+        else if (option == "--universe" && !universe) { universe = true; ++index; }
+        else if (option == "--pea-continuations" && !config.pea_continuations) { config.pea_continuations = true; ++index; }
+        else if (option == "--exception-model" && has_value) {
+          const std::string_view model = argv[index + 1];
+          if (model == "strict") config.exception_model = segarecomp::GenesisReachabilityExceptionModel::strict;
+          else if (model == "normal-resumption") config.exception_model = segarecomp::GenesisReachabilityExceptionModel::normal_resumption;
+          else { print_usage(std::cerr); return 2; }
+          index += 2;
+        } else if ((option == "--entry" || option == "--mapping-base") && has_value) {
+          const auto value = parse_hex(argv[index + 1], 8);
+          auto &destination = option == "--entry" ? entry_address : mapping_base;
+          if (!value || destination || (*value & UINT64_C(0xFF000000)) != 0U || (option == "--entry" && (*value & 1U) != 0U)) {
+            std::cerr << "segarecomp: invalid challenger input\n"; return 2;
+          }
+          destination = static_cast<std::uint32_t>(*value);
+          index += 2;
+        } else if (option == "--immutable-copy-alias" && has_value) {
+          const std::string_view text = argv[index + 1];
+          const auto first = text.find(':');
+          const auto second = first == std::string_view::npos ? first : text.find(':', first + 1U);
+          if (second == std::string_view::npos) { print_usage(std::cerr); return 2; }
+          const auto execution = parse_hex(text.substr(0, first), 8);
+          const auto source = parse_hex(text.substr(first + 1U, second - first - 1U), 8);
+          const auto length = parse_hex(text.substr(second + 1U), 8);
+          if (!execution || !source || !length) { print_usage(std::cerr); return 2; }
+          aliases.push_back({static_cast<std::uint32_t>(*execution), static_cast<std::uint32_t>(*source),
+                             static_cast<std::uint32_t>(*length)});
+          index += 2;
+        } else { print_usage(std::cerr); return 2; }
+      }
+      if (!rom || !digest || !private_output || (reset_entry == (entry_address.has_value() || mapping_base.has_value())) ||
+          (!reset_entry && (!entry_address || !mapping_base))) {
+        print_usage(std::cerr); return 2;
+      }
+      const auto bytes = segarecomp::read_binary(std::string(*rom));
+      std::optional<segarecomp::FrontendProgram> program;
+      if (reset_entry) {
+        const auto reset = segarecomp::analyze_genesis_reset_image(bytes);
+        if (reset.outcome != segarecomp::ResetOutcome::accepted) {
+          std::cerr << segarecomp::format_genesis_reset_image_report(reset) << '\n'; return 1;
+        }
+        program = segarecomp::make_genesis_reset_bridge_startup_program(bytes, reset, std::nullopt);
+      } else {
+        program = segarecomp::make_genesis_bridge_startup_program(bytes, *mapping_base, *entry_address, std::nullopt);
+      }
+      if (!program) { std::cerr << "segarecomp: bridge mapping overflows\n"; return 2; }
+      // ADR 0049 aliases are machine mapping facts, recorded through the same fail-closed owner production uses.
+      if (!aliases.empty() && !segarecomp::apply_genesis_immutable_rom_aot(*program)) {
+        std::cerr << "segarecomp: invalid immutable-ROM AOT mapping source\n"; return 2;
+      }
+      for (const auto &alias : aliases)
+        if (!segarecomp::apply_genesis_immutable_copy_alias(*program, alias[0], alias[1], alias[2])) {
+          std::cerr << "segarecomp: invalid immutable-copy alias\n"; return 2;
+        }
+      const auto result = segarecomp::run_genesis_reachability_challenger(*program, config);
+      std::string aggregate = segarecomp::format_genesis_reachability_challenger_aggregate(result, config);
+      if (universe) {
+        // U: the unchanged broad Gen-2 analysis on an independent copy of the program (never an input to D).
+        auto broad = *program;
+        if (aliases.empty() && !segarecomp::apply_genesis_immutable_rom_aot(broad)) {
+          std::cerr << "segarecomp: invalid immutable-ROM AOT mapping source\n"; return 2;
+        }
+        const auto analysis = segarecomp::analyze_m68k_frontend(broad);
+        std::size_t count = 0U;
+        if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&analysis))
+          count = partial->accepted_prefix.immutable_rom_aot_entries.size();
+        else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&analysis))
+          count = accepted->immutable_rom_aot_entries.size();
+        else { std::cerr << "segarecomp: broad analysis rejected\n"; return 1; }
+        aggregate.insert(aggregate.size() - 1U, ",\"universe_immutable_rom_aot\":" + std::to_string(count));
+      }
+      std::ofstream sink{std::string(*private_output), std::ios::binary};
+      sink << segarecomp::format_genesis_reachability_challenger_private(result, config);
+      if (!sink) { std::cerr << "segarecomp: cannot write challenger private output\n"; return 2; }
+      std::cout << aggregate << '\n';
+      return 0;
     }
     if (command == "emit-genesis-pc-relative-offset-table-proposals") {
       // SEG-007-T206 / Scope Phase 2: mechanical, non-authoritative proposal
