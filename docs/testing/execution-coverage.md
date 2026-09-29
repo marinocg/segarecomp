@@ -82,6 +82,28 @@ segarecomp genesis-reachability-challenger --rom games/<rom> --reset-entry --rom
   a proof invalidated by a later edge restarts discovery with that site pinned unresolved. stdout gains a
   `pc_index_recovery` aggregate (per-site outcomes, proof mechanisms, graph-growth and accidental-decode
   indicators; never an address).
+- **Store provenance (SEG-026-T003, ADR 0055, `--pc-index-store-provenance classify|prove`, off by default,
+  requires `--pc-index-recovery`).**
+  - `classify` labels each PC-indexed site's mutable byte index source by generic class:
+    - absolute RAM;
+    - `(An)`/`d16(An)` field;
+    - `(d8,An,Xn)` field;
+    - `(An)+`/`-(An)` pointer.
+
+    Discovery is identical to T002.
+  - `prove` replaces a byte source's width rule with its exact store domain only when that domain is complete
+    under the challenger's current `D`:
+    - every store in `D` is described by a conservative store model;
+    - a store whose destination cannot be excluded poisons the location unless its value is exact;
+    - the initial value is the model's zero reset RAM;
+    - self-updates reach a bounded fixed point.
+
+    Domains are recomputed every recovery step. A store-derived proof that later loses a target is invalidated with
+    the T002 restart.
+  - `--store-alias-policy exclude-stack|exclude-unresolved` are unsound, labelled attribution variants, never
+    proofs.
+  - The aggregate gains a `store_provenance` block (sites by source class and outcome, location outcomes, poisoning
+    store classes, store counts by class, invalidations; never an address).
 - **Output.** stdout carries aggregate counts only; `--universe` adds the unchanged broad AOT count `U`.
 - **Private output.** `--private-output` holds exact PCs.
 
@@ -113,6 +135,11 @@ With `--pc-index-recovery`:
 - with `--classification`, observed PC-indexed sites carry the strict local domain label of the same proof, over a
   predecessor graph built only from the classified instructions (never D). The tool reports those sites, and the
   missing PCs behind them, by label.
+
+With a classification produced by this task's tool (SEG-026-T003), the tool also reports:
+- observed PC-indexed sites by local domain label and index source class;
+- whether each register-relative base is locally exact;
+- the missing PCs whose structural chain crosses at least one width-only dispatch, by those sites' source classes.
 
 Runtime coverage only falsifies the challenger. It never expands or authorizes it, and a PC that was not observed
 is not unreachable.

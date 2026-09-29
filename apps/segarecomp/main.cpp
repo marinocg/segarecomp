@@ -38,7 +38,7 @@ void print_usage(std::ostream &output) {
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
                   "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]...] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
-                 "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
+                 "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains] [--pc-index-store-provenance classify|prove [--store-alias-policy strict|exclude-stack|exclude-unresolved]]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
                "  segarecomp probe-genesis-startup-mapping <address-hex8> <width-decimal> <image-length-hex16>\n";
@@ -444,7 +444,21 @@ int run_cli(int argc, char **argv) {
         else if (option == "--pea-continuations" && !config.pea_continuations) { config.pea_continuations = true; ++index; }
         else if (option == "--pc-index-recovery" && !config.pc_index_recovery) { config.pc_index_recovery = true; ++index; }
         else if (option == "--pc-index-width-domains" && !config.pc_index_width_domains) { config.pc_index_width_domains = true; ++index; }
-        else if (option == "--exception-model" && has_value) {
+        else if (option == "--pc-index-store-provenance" && has_value &&
+                 config.store_provenance == segarecomp::GenesisReachabilityChallengerConfig::StoreProvenance::off) {
+          const std::string_view mode = argv[index + 1];
+          if (mode == "classify") config.store_provenance = segarecomp::GenesisReachabilityChallengerConfig::StoreProvenance::classify;
+          else if (mode == "prove") config.store_provenance = segarecomp::GenesisReachabilityChallengerConfig::StoreProvenance::prove;
+          else { print_usage(std::cerr); return 2; }
+          index += 2;
+        } else if (option == "--store-alias-policy" && has_value) {
+          const std::string_view policy = argv[index + 1];
+          if (policy == "strict") config.store_alias_policy = segarecomp::GenesisStoreAliasPolicy::strict;
+          else if (policy == "exclude-stack") config.store_alias_policy = segarecomp::GenesisStoreAliasPolicy::exclude_stack;
+          else if (policy == "exclude-unresolved") config.store_alias_policy = segarecomp::GenesisStoreAliasPolicy::exclude_unresolved;
+          else { print_usage(std::cerr); return 2; }
+          index += 2;
+        } else if (option == "--exception-model" && has_value) {
           const std::string_view model = argv[index + 1];
           if (model == "strict") config.exception_model = segarecomp::GenesisReachabilityExceptionModel::strict;
           else if (model == "normal-resumption") config.exception_model = segarecomp::GenesisReachabilityExceptionModel::normal_resumption;
@@ -474,6 +488,8 @@ int run_cli(int argc, char **argv) {
       }
       if (classify_input.has_value() != classify_output.has_value()) { print_usage(std::cerr); return 2; }
       if (config.pc_index_width_domains && !config.pc_index_recovery) { print_usage(std::cerr); return 2; }
+      if (config.store_provenance != segarecomp::GenesisReachabilityChallengerConfig::StoreProvenance::off &&
+          !config.pc_index_recovery) { print_usage(std::cerr); return 2; }
       if (!rom || !digest || !private_output || (reset_entry == (entry_address.has_value() || mapping_base.has_value())) ||
           (!reset_entry && (!entry_address || !mapping_base))) {
         print_usage(std::cerr); return 2;

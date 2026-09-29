@@ -4,6 +4,7 @@
 
 #include <algorithm>
 
+#include "segarecomp/cpu/m68k/control_successors.hpp"
 #include "segarecomp/cpu/m68k/effects.hpp"
 
 namespace segarecomp {
@@ -64,9 +65,12 @@ struct Source {
   bool same_register{};     // the source is the destination register itself (pointwise, not a cross product)
 };
 
-// The source operand of an ALU/MOVE into Dreg, restricted to its low `bits`.
+// The source operand of an ALU/MOVE into Dreg, restricted to its low `bits`. `access_bits` is the operation's own
+// operand size: a memory operand is read at that size (big-endian) and then restricted, so a query narrower than
+// the access sees the operand's LOW bytes (SEG-026-T003 correction: the low slice of a word/long load is at the
+// higher addresses).
 Source read_source(const M68kEffectiveAddress &ea, unsigned reg, unsigned bits, unsigned width,
-                   M68kFiniteValueInputs &inputs, M68kFiniteTransfer &transfer) {
+                   M68kFiniteValueInputs &inputs, M68kFiniteTransfer &transfer, unsigned access_bits) {
   const auto mask = width_mask(bits);
   Source out{};
   switch (ea.mode) {
@@ -90,11 +94,11 @@ Source read_source(const M68kEffectiveAddress &ea, unsigned reg, unsigned bits, 
     std::vector<std::uint32_t> values;
     for (const auto value : index.values) {
       const auto address = m68k_pc_index_address(ea, value);
-      if (bits > 8U && (address & 1U) != 0U) {
+      if (access_bits > 8U && (address & 1U) != 0U) {
         ++transfer.misaligned_reads_excluded;
         continue;
       }
-      const auto read = inputs.immutable_read(address, bits / 8U);
+      const auto read = inputs.immutable_read(address, access_bits / 8U);
       ++transfer.table_reads;
       if (!read) {
         transfer.immutable_read_failed = true;
@@ -111,8 +115,8 @@ Source read_source(const M68kEffectiveAddress &ea, unsigned reg, unsigned bits, 
   case M68kEaMode::absolute_word:
   case M68kEaMode::absolute_long: {
     const auto address = ea.absolute_address & UINT32_C(0x00FFFFFF);
-    if (bits > 8U && (address & 1U) != 0U) return out;
-    if (const auto read = inputs.immutable_read(address, bits / 8U)) {
+    if (access_bits > 8U && (address & 1U) != 0U) return out;
+    if (const auto read = inputs.immutable_read(address, access_bits / 8U)) {
       ++transfer.table_reads;
       out.values = M68kFiniteValues::of({*read & mask}, width);
       out.proof = m68k_finite_proof::immutable_load;
@@ -126,7 +130,13 @@ Source read_source(const M68kEffectiveAddress &ea, unsigned reg, unsigned bits, 
                       ea.mode == M68kEaMode::address_predec || ea.mode == M68kEaMode::address_disp16 ||
                       ea.mode == M68kEaMode::address_index8 || ea.mode == M68kEaMode::absolute_word ||
                       ea.mode == M68kEaMode::absolute_long || ea.mode == M68kEaMode::pc_disp16;
-  if (memory && bits == 8U) {
+  if (memory && access_bits == 8U) {
+    // SEG-026-T003: a caller-proven exact store domain of the mutable state byte replaces the width rule.
+    if (auto exact = inputs.mutable_byte(ea); exact && exact->known && !exact->width_derived) {
+      out.values = M68kFiniteValues::of(exact->values, width);
+      out.proof = m68k_finite_proof::store_domain;
+      return out;
+    }
     std::vector<std::uint32_t> all(256U);
     for (std::uint32_t v = 0; v < 256U; ++v) all[v] = v;
     out.values = M68kFiniteValues::of(std::move(all), width);
@@ -170,6 +180,7 @@ const char *m68k_finite_proof::name(std::uint32_t bit_index) noexcept {
   case 9: return "logical";
   case 10: return "call_edge";
   case 11: return "dynamic_edge";
+  case 12: return "store_domain";
   default: return "unknown";
   }
 }
@@ -244,7 +255,7 @@ M68kFiniteTransfer m68k_finite_register_after(const M68kIrOperation &operation, 
     return transfer;
   case M68kIrKind::write_move: {
     if (!destination_is_reg) return transfer;
-    const auto source = read_source(operation.source_ea, reg, bits, width, inputs, transfer);
+    const auto source = read_source(operation.source_ea, reg, bits, width, inputs, transfer, size_bits(operation.size));
     if (transfer.immutable_read_failed) return transfer;
     if (source.same_register) {
       transfer.values = inputs.data_register_before(reg, width);
@@ -288,7 +299,7 @@ M68kFiniteTransfer m68k_finite_register_after(const M68kIrOperation &operation, 
                                operation.kind == M68kIrKind::exclusive_or_immediate
                            ? m68k_finite_proof::logical
                            : m68k_finite_proof::add_sub;
-    const auto source = read_source(operation.source_ea, reg, bits, width, inputs, transfer);
+    const auto source = read_source(operation.source_ea, reg, bits, width, inputs, transfer, size_bits(operation.size));
     if (transfer.immutable_read_failed) return transfer;
     const auto old = inputs.data_register_before(reg, width);
     const bool and_kind = operation.kind == M68kIrKind::logical_and || operation.kind == M68kIrKind::logical_and_immediate;
@@ -381,6 +392,315 @@ bool m68k_finite_branch_filter(const M68kIrOperation &flag_setter, const M68kIrO
   narrow(values, filtered);
   values = std::move(filtered);
   return true;
+}
+
+
+// ---------------------------------------------------------------------------------------------------------
+// SEG-026-T003: address-register values and memory stores (report-only store-provenance experiment).
+
+namespace {
+
+bool is_memory_mode(M68kEaMode mode) {
+  switch (mode) {
+  case M68kEaMode::address_indirect:
+  case M68kEaMode::address_postinc:
+  case M68kEaMode::address_predec:
+  case M68kEaMode::address_disp16:
+  case M68kEaMode::address_index8:
+  case M68kEaMode::absolute_word:
+  case M68kEaMode::absolute_long: return true;
+  default: return false;
+  }
+}
+
+unsigned size_bytes(M68kMemoryAccessWidth size) { return size_bits(size) / 8U; }
+
+}  // namespace
+
+M68kFiniteTransfer m68k_finite_address_register_after(const M68kIrOperation &operation, unsigned reg,
+                                                      M68kFiniteValueInputs &inputs) {
+  M68kFiniteTransfer transfer{};
+  const auto exact = [&](std::uint32_t value) {
+    transfer.writes = true;
+    transfer.values = M68kFiniteValues::of({value}, 32U);
+    transfer.proof = m68k_finite_proof::constant;
+    return transfer;
+  };
+  const auto offset = [&](const M68kFiniteValues &base, std::uint32_t delta) {
+    transfer.writes = true;
+    transfer.values = map_values(base, 32U, [&](std::uint32_t a) { return a + delta; });
+    transfer.proof = m68k_finite_proof::add_sub;
+    return transfer;
+  };
+  const bool destination_is_reg =
+      operation.destination_ea.mode == M68kEaMode::address_register && operation.destination_ea.reg == reg;
+  switch (operation.kind) {
+  // Operations that write no address register (M68000PRM): data-register-only writers and PC-only transfers.
+  case M68kIrKind::write_moveq:
+  case M68kIrKind::jump_general:
+  case M68kIrKind::general_branch:
+  case M68kIrKind::branch_ne_short:
+  case M68kIrKind::branch_always_short:
+  case M68kIrKind::no_operation:
+  case M68kIrKind::dbcc_loop:
+  case M68kIrKind::write_swap:
+  case M68kIrKind::sign_extend_word:
+  case M68kIrKind::sign_extend_long:
+  case M68kIrKind::multiply_signed_word:
+  case M68kIrKind::multiply_unsigned_word:
+  case M68kIrKind::divide_signed_word:
+  case M68kIrKind::divide_unsigned_word: {
+    // Their only possible An write is a decoded source EA auto-update.
+    const auto &source = operation.source_ea;
+    if ((source.mode == M68kEaMode::address_postinc || source.mode == M68kEaMode::address_predec) && source.reg == reg) {
+      transfer.writes = true;
+      return transfer;
+    }
+    return transfer;
+  }
+  case M68kIrKind::call_general:
+  case M68kIrKind::bsr_call:
+    if (reg == 7U) transfer.writes = true;  // the pushed return address moves A7
+    return transfer;
+  case M68kIrKind::load_effective_address: {
+    if (!destination_is_reg) return transfer;
+    const auto &ea = operation.source_ea;
+    switch (ea.mode) {
+    case M68kEaMode::absolute_word:
+    case M68kEaMode::absolute_long: return exact(ea.absolute_address);
+    case M68kEaMode::pc_disp16:
+      return exact(ea.pc_base_address + static_cast<std::uint32_t>(static_cast<std::int32_t>(ea.displacement)));
+    case M68kEaMode::address_indirect: return offset(inputs.address_register_before(ea.reg), 0U);
+    case M68kEaMode::address_disp16:
+      return offset(inputs.address_register_before(ea.reg),
+                    static_cast<std::uint32_t>(static_cast<std::int32_t>(ea.displacement)));
+    default: transfer.writes = true; return transfer;
+    }
+  }
+  case M68kIrKind::write_movea: {
+    if (!destination_is_reg) break;
+    const auto &ea = operation.source_ea;
+    if (ea.mode == M68kEaMode::immediate)
+      return exact(operation.size == M68kMemoryAccessWidth::word ? sign_extend(ea.immediate_value, 16U)
+                                                                 : ea.immediate_value);
+    if (ea.mode == M68kEaMode::address_register && operation.size == M68kMemoryAccessWidth::long_word) {
+      transfer.writes = true;
+      transfer.values = inputs.address_register_before(ea.reg);
+      transfer.proof = m68k_finite_proof::register_copy;
+      return transfer;
+    }
+    transfer.writes = true;
+    return transfer;
+  }
+  case M68kIrKind::add_address:
+  case M68kIrKind::subtract_address:
+  case M68kIrKind::add_quick:
+  case M68kIrKind::subtract_quick: {
+    if (!destination_is_reg) break;
+    if (operation.source_ea.mode != M68kEaMode::immediate) {
+      transfer.writes = true;
+      return transfer;
+    }
+    // ADDA.W sign-extends its source; ADDQ/SUBQ to An operate on all 32 bits.
+    auto delta = operation.kind == M68kIrKind::add_address || operation.kind == M68kIrKind::subtract_address
+                     ? (operation.size == M68kMemoryAccessWidth::word ? sign_extend(operation.source_ea.immediate_value, 16U)
+                                                                      : operation.source_ea.immediate_value)
+                     : operation.source_ea.immediate_value;
+    if (operation.kind == M68kIrKind::subtract_address || operation.kind == M68kIrKind::subtract_quick) delta = 0U - delta;
+    return offset(inputs.address_register_before(reg), delta);
+  }
+  default: break;
+  }
+  const auto effect = m68k_operation_effect(operation);
+  if (effect.register_write_footprint_complete && ((effect.address_register_write_mask >> reg) & 1U) == 0U &&
+      !(effect.address_register_write && static_cast<unsigned>(*effect.address_register_write) == reg))
+    return transfer;
+  transfer.writes = true;  // Unknown
+  return transfer;
+}
+
+std::vector<M68kMemoryStore> m68k_memory_stores(const M68kIrOperation &operation) {
+  std::vector<M68kMemoryStore> stores;
+  const auto destination = [&](unsigned bytes) {
+    if (is_memory_mode(operation.destination_ea.mode))
+      stores.push_back({M68kStoreTarget::effective_address, operation.destination_ea, bytes});
+  };
+  switch (operation.kind) {
+  // No memory write (M68000PRM): register/flag/PC-only operations and pure reads.
+  case M68kIrKind::write_moveq:
+  case M68kIrKind::subtract_quick_long_d0:
+  case M68kIrKind::branch_ne_short:
+  case M68kIrKind::branch_always_short:
+  case M68kIrKind::return_from_subroutine:
+  case M68kIrKind::return_from_exception:
+  case M68kIrKind::return_restore_condition_codes:
+  case M68kIrKind::test_operand:
+  case M68kIrKind::compare:
+  case M68kIrKind::compare_immediate:
+  case M68kIrKind::compare_address:
+  case M68kIrKind::compare_memory:
+  case M68kIrKind::bit_test:
+  case M68kIrKind::load_effective_address:
+  case M68kIrKind::write_movea:
+  case M68kIrKind::add_address:
+  case M68kIrKind::subtract_address:
+  case M68kIrKind::jump_general:
+  case M68kIrKind::general_branch:
+  case M68kIrKind::dbcc_loop:
+  case M68kIrKind::write_swap:
+  case M68kIrKind::sign_extend_word:
+  case M68kIrKind::sign_extend_long:
+  case M68kIrKind::exchange_registers:
+  case M68kIrKind::multiply_signed_word:
+  case M68kIrKind::multiply_unsigned_word:
+  case M68kIrKind::unlink_frame:
+  case M68kIrKind::no_operation:
+  case M68kIrKind::write_user_stack_pointer:
+  case M68kIrKind::read_user_stack_pointer:
+  case M68kIrKind::logical_immediate_to_ccr:
+  case M68kIrKind::logical_immediate_to_sr:
+  case M68kIrKind::write_status_register:
+  case M68kIrKind::write_condition_codes:
+  case M68kIrKind::stop_until_interrupt: return stores;
+  // May raise a synchronous exception, which stacks a frame.
+  case M68kIrKind::divide_signed_word:
+  case M68kIrKind::divide_unsigned_word:
+  case M68kIrKind::check_bounds:
+  case M68kIrKind::trap_exception:
+  case M68kIrKind::trap_on_overflow:
+  case M68kIrKind::instruction_exception: stores.push_back({M68kStoreTarget::exception_frame, {}, 6U}); return stores;
+  case M68kIrKind::call_general:
+  case M68kIrKind::bsr_call:
+  case M68kIrKind::push_effective_address:
+  case M68kIrKind::link_frame: stores.push_back({M68kStoreTarget::stack_push, {}, 4U}); return stores;
+  // Destination read-modify-write / write forms: a memory destination is stored.
+  case M68kIrKind::write_move:
+  case M68kIrKind::write_clr:
+  case M68kIrKind::add:
+  case M68kIrKind::add_immediate:
+  case M68kIrKind::add_quick:
+  case M68kIrKind::subtract:
+  case M68kIrKind::subtract_immediate:
+  case M68kIrKind::subtract_quick:
+  case M68kIrKind::logical_and:
+  case M68kIrKind::logical_and_immediate:
+  case M68kIrKind::logical_or:
+  case M68kIrKind::logical_or_immediate:
+  case M68kIrKind::exclusive_or:
+  case M68kIrKind::exclusive_or_immediate:
+  case M68kIrKind::logical_not:
+  case M68kIrKind::negate_word:
+  case M68kIrKind::negate_extended:
+  case M68kIrKind::negate_decimal:
+  case M68kIrKind::add_extended:
+  case M68kIrKind::subtract_extended:
+  case M68kIrKind::add_decimal:
+  case M68kIrKind::subtract_decimal: destination(size_bytes(operation.size)); return stores;
+  case M68kIrKind::bit_change:
+  case M68kIrKind::bit_clear:
+  case M68kIrKind::bit_set:
+  case M68kIrKind::set_conditional:
+  case M68kIrKind::test_and_set: destination(1U); return stores;
+  case M68kIrKind::shift_rotate_memory:
+  case M68kIrKind::read_status_register: destination(2U); return stores;
+  case M68kIrKind::shift_rotate_register: return stores;
+  case M68kIrKind::movep_transfer:
+    // Alternate bytes of 2 or 4 transfers starting at d16(An): the covering span.
+    if (is_memory_mode(operation.destination_ea.mode)) destination(2U * size_bytes(operation.size));
+    else if (!is_memory_mode(operation.source_ea.mode)) stores.push_back({M68kStoreTarget::unmodeled, {}, 0U});
+    return stores;
+  case M68kIrKind::movem_transfer:
+    if (operation.movem_direction == M68kMovemDirection::registers_to_memory)
+      destination(static_cast<unsigned>(__builtin_popcount(operation.movem_register_mask)) * size_bytes(operation.size));
+    return stores;  default: break;
+  }
+  stores.push_back({M68kStoreTarget::unmodeled, {}, 0U});
+  return stores;
+}
+
+M68kFiniteTransfer m68k_finite_store_value(const M68kIrOperation &operation, const M68kMemoryStore &store,
+                                           M68kFiniteValueInputs &inputs) {
+  M68kFiniteTransfer transfer{};
+  transfer.writes = true;
+  if (store.bytes == 0U || store.bytes > 4U) return transfer;
+  const unsigned bits = store.bytes * 8U;
+  const auto mask = width_mask(bits);
+  if (store.target == M68kStoreTarget::stack_push) {
+    const auto control = m68k_control_successors(operation);
+    if (control.stacked == M68kStackedContinuationKind::call_continuation) {
+      transfer.values = M68kFiniteValues::of({control.stacked_address}, 32U);
+      transfer.proof = m68k_finite_proof::constant;
+    } else if (operation.kind == M68kIrKind::push_effective_address) {
+      const auto &ea = operation.source_ea;
+      if (ea.mode == M68kEaMode::absolute_word || ea.mode == M68kEaMode::absolute_long)
+        transfer.values = M68kFiniteValues::of({ea.absolute_address}, 32U);
+      else if (ea.mode == M68kEaMode::pc_disp16)
+        transfer.values = M68kFiniteValues::of(
+            {ea.pc_base_address + static_cast<std::uint32_t>(static_cast<std::int32_t>(ea.displacement))}, 32U);
+      transfer.proof = m68k_finite_proof::constant;
+    }
+    return transfer;
+  }
+  if (store.target != M68kStoreTarget::effective_address) return transfer;
+  constexpr unsigned no_register = 8U;
+  switch (operation.kind) {
+  case M68kIrKind::write_clr:
+    transfer.values = M68kFiniteValues::of({0U}, 32U);
+    transfer.proof = m68k_finite_proof::constant;
+    return transfer;
+  case M68kIrKind::write_move: {
+    if (operation.source_ea.mode == M68kEaMode::data_register) {
+      // Only the stored low slice matters: query the register at exactly that width.
+      transfer.values = inputs.data_register_before(operation.source_ea.reg, bits);
+      transfer.proof = m68k_finite_proof::register_copy;
+      return transfer;
+    }
+    const auto source = read_source(operation.source_ea, no_register, bits, 32U, inputs, transfer, bits);
+    if (transfer.immutable_read_failed) return transfer;
+    transfer.values = map_values(source.values, 32U, [&](std::uint32_t v) { return v & mask; });
+    transfer.proof = source.proof;
+    return transfer;
+  }
+  case M68kIrKind::add:
+  case M68kIrKind::add_immediate:
+  case M68kIrKind::add_quick:
+  case M68kIrKind::subtract:
+  case M68kIrKind::subtract_immediate:
+  case M68kIrKind::subtract_quick:
+  case M68kIrKind::logical_and:
+  case M68kIrKind::logical_and_immediate:
+  case M68kIrKind::logical_or:
+  case M68kIrKind::logical_or_immediate:
+  case M68kIrKind::exclusive_or:
+  case M68kIrKind::exclusive_or_immediate: {
+    // Byte read-modify-write only: the old byte comes from the caller's proven state domain.
+    if (bits != 8U) return transfer;
+    const auto source = read_source(operation.source_ea, no_register, 8U, 32U, inputs, transfer, 8U);
+    if (transfer.immutable_read_failed || !source.values.known || source.values.width_derived) return transfer;
+    const auto old = inputs.mutable_byte(store.ea);
+    if (!old || !old->known || old->width_derived) return transfer;
+    const auto op = [&](std::uint32_t a, std::uint32_t b) -> std::uint32_t {
+      switch (operation.kind) {
+      case M68kIrKind::logical_and:
+      case M68kIrKind::logical_and_immediate: return (a & b) & mask;
+      case M68kIrKind::logical_or:
+      case M68kIrKind::logical_or_immediate: return (a | b) & mask;
+      case M68kIrKind::exclusive_or:
+      case M68kIrKind::exclusive_or_immediate: return (a ^ b) & mask;
+      case M68kIrKind::add:
+      case M68kIrKind::add_immediate:
+      case M68kIrKind::add_quick: return (a + b) & mask;
+      default: return (a - b) & mask;
+      }
+    };
+    transfer.values = combine(*old, source.values, 32U, op);
+    transfer.values.width_derived = false;
+    transfer.proof = m68k_finite_proof::store_domain | (source.proof & ~m68k_finite_proof::constant) |
+                     m68k_finite_proof::add_sub;
+    return transfer;
+  }
+  default: return transfer;
+  }
 }
 
 }  // namespace segarecomp
