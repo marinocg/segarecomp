@@ -148,15 +148,17 @@ measuring:
 | 512 KiB random | R | 525,312 (1,541,120) | 311.4 | 95.2 | 62.2 / 385.1* | 1,471 | 38.0 / 24.3 | yes | PASS (all 7) |
 | 512 KiB dense | N | 1,541,120 | 850.4 | **287.2** | 195.4 / 1,262.8 | **2,891** | 76.8 / 28.4 | yes | **MISS (RSS, exe)** |
 
-\* The random-R -j1 time was extrapolated from 12 of 48 owner TUs plus the main TU.
+\* The random-R -j1 time and serial RSS were measured on 12 of 48 owner TUs plus the main TU, and the time
+extrapolated. The main TU dominates RSS, and the full parallel run peaked at 1,126 MiB.
 
-- **R scales linearly.** From 256 to 512 KiB it is 2.0x in C, executable and -j1 time. It costs about 1.1x the
-  C and about 1.03x the compile time per owner of the single-window B1 baseline, despite serving about 2.94 window
+- **R scales about linearly.** From 256 to 512 KiB it is 2.0x in C and executable size, and 2.19x in -j1 time. It
+  costs about 1.1x the C and 1.02-1.12x the compile time per owner of the single-window B1 baseline (1.12x for
+  the 512 KiB dense case), despite serving about 2.94 window
   instances per owner.
-- **N misses** the RSS budget (2.83 GiB) and the executable budget (287 MiB) at 512 KiB. Its all-declarations
+- **N misses** the RSS budget (2,891 MiB = 2.82 GiB) and the executable budget (287 MiB) at 512 KiB. Its all-declarations
   shared header alone costs about 745 MiB in every TU, so adding shards cannot fix it.
 - **R's peak RSS is the main TU** (1.43 GiB, 95% of budget): the entry table plus the all-owner declaration
-  header. Owner TUs peak at 1.17 GiB.
+  header. Owner TUs peak at 1,173 MiB (1.15 GiB).
 - **Stubs.** Starts whose instruction crosses its window edge become typed stubs: 7 of 1,541,120 window instances
   (dense) and 9 (random). No prefix lock can occur under this map, because non-code breaks every fetch circle.
 - **Execution cost of the strict binding rule.** 999,987 of 1,000,000 bounded smoke steps returned to the
@@ -182,8 +184,12 @@ measuring:
    - Superblocks may return later only as a measured, selective optimisation with its own ADR.
    - **Owner representation: window-relative (R) for multi-window images.** The second experiment measured this
      on an SMS-shaped map.
-     - When the logical code mapping admits an image in more than one window of equal size, each (image, offset)
-       gets one owner shared by every admissible window.
+     - When the logical code mapping admits an image in more than one window of the same stride and alignment,
+       each (image, offset) gets one owner shared by every admissible window. A window may expose only a
+       sub-range of the image, such as SMS slot 0 (0x0400-0x3FFF).
+     - A shared owner can be a full owner in one window and a typed stub in another: an instruction crossing the
+       window's end resolves by the adjacent window's class. The owner selects the stub kind at runtime from the
+       base, and T003 must implement and test this.
      - The owner receives the window base and derives every PC-dependent value from base + offset.
      - The lookup key is (image identity, offset within the window).
      - An image admissible in exactly one window, and every invariant window, keeps absolute-PC owners.
@@ -204,7 +210,10 @@ measuring:
    - Code images and their windows are generation-time platform input. The platform declares each window as
      either **statically invariant** (always this image) or **mapping-sensitive** (banked).
    - A direct target (JP/JR/CALL/DJNZ/RST, or fall-through) binds to an owner symbol **only if the target lies in
-     a statically invariant window** (SEG-008 Notes answer 9). No other exception exists. In particular, being in
+     a statically invariant window** (SEG-008 Notes answer 9).
+   - For window-relative owners (§1), only **absolute** targets (JP nn, CALL nn, RST p, and their conditional
+     forms) can be classified statically. Base-relative targets (fall-through, JR, DJNZ, the repeat self-target)
+     are never statically bound, because the same shared owner reaches different windows from different bases. No other exception exists. In particular, being in
      the same banked window as the source owner is not enough. Any instruction can write memory or I/O, including
      the mapper control registers, directly or through a CALL/RST push. Binding across such a write would run
      stale code from the previous image instead of failing closed.
@@ -222,7 +231,11 @@ measuring:
      0xFFFF -> 0x0000. There is no architectural "image edge". `3E` at 0xFFFF with `42` at 0x0000 is an ordinary
      `LD A,42h`. The pinned oracle confirms this for operand, displacement, opcode and chain bytes (ADR 0057).
    - **Generation-time logical code mapping.** Platform input assigns every 16-bit logical address one class:
-     - an **invariant window**: always the same immutable image and offset;
+     - an **invariant window**: always the same immutable bytes. Every invariant window has **its own code-image
+       identity**, distinct from any banked image, even when its bytes are a copy or sub-range of a banked image.
+       Example: the SMS fixed first 1 KiB is bank 0's bytes, but bank 0 can also sit in a slot. Its owners are
+       absolute-PC owners whose successor bytes differ from a banked instance of the same offset. A shared
+       identity would give two different owner bodies the same key;
      - a **mapping-sensitive window**: banked; the admissible images are declared, and the current one is
        reported at runtime;
      - **non-code**: RAM, I/O or unmapped.
@@ -239,12 +252,19 @@ measuring:
        from mutable memory is mutable code.
    - **Prefix lock.** A DD/FD run that revisits the same (mapping state, logical address, effective prefix)
      without reaching a non-prefix opcode can never terminate.
-     - Its start gets a `prefix_lock` owner. That owner accounts 4 T-states and R += 1 per prefix, advances the
-       next-fetch PC with wrap, never accepts INT or NMI, and returns the resumable `prefix_lock` outcome at the
-       deadline.
-     - Only RESET, which is platform policy, leaves it.
+     - Its start gets a `prefix_lock` owner. **Entered with the in-prefix-run state clear**, which is the case at
+       an ordinary instruction boundary, the owner runs the normal boundary prologue (§6): deadline check, then
+       acceptance of a pending acceptable INT or NMI. Then it sets in-prefix-run.
+     - While in-prefix-run is set, it accounts 4 T-states and R += 1 per prefix and advances the next-fetch PC
+       with wrap. It never accepts INT or NMI, and it returns the resumable `prefix_lock` outcome at the deadline
+       with in-prefix-run still set.
+     - Resuming with in-prefix-run set skips interrupt acceptance and continues the run. Every other outcome and
+       every instruction boundary leaves it clear. Resume and entry use the same (identity, PC) lookup, so this
+       explicit state bit, part of the Z80 state structure in the runtime ABI, is what distinguishes them.
+     - The pinned oracle confirms acceptance at entry (IM1 13 T, NMI 11 T) and none inside the run (ADR 0057).
+     - Only RESET, which is platform policy, leaves the run.
      - This is the one resumable state inside a prefix run. It is safe because no effective instruction ever
-       follows, and it is not an instruction boundary: it is never interruptible.
+       follows.
    - Chain ends are precomputed in one linear pass over the circular logical address space. The naive
      per-address rescan is O(n²).
 6. **Resume and deadline.**
@@ -255,14 +275,15 @@ measuring:
    - When the deadline has been reached, or an interrupt must be taken, the owner returns to the runtime with PC =
      its own address.
    - A DD/FD chain that reaches an opcode is one owner, so no resume point exists inside it. The only exception is
-     the non-interruptible `prefix_lock` state (§5).
+     the `prefix_lock` state with in-prefix-run set (§5).
+   - The prologue is skipped only when resuming with in-prefix-run set.
 7. **Execution outcomes.** One result enum carries two distinct classes.
    - **Resumable (not errors):**
      - `deadline`: stopped at an instruction boundary with cycles >= deadline;
      - `halted`: HALT executed, or still halted when the deadline arrives. PC = HALT+1, and halted cycles are
        accounted by the runtime.
-     - `prefix_lock`: inside an endless DD/FD run (§5). PC is the next fetch address, and the state is never
-       interruptible.
+     - `prefix_lock`: inside an endless DD/FD run (§5). PC is the next fetch address, in-prefix-run is set, and the
+       state is not interruptible until RESET.
    - **Fail-closed errors (typed stops, never recovered by decoding):**
      - `no_owner`: the (identity, address) key was never emitted. Under broad AOT this only happens for an address
        outside the declared code windows, or for an inconsistent platform identity;

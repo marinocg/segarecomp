@@ -52,7 +52,7 @@ static zuint8 cb_inta(void *c, zuint16 a) { bus_t *b = c; (void)a; logev(b, 'A',
 
 typedef struct {
     unsigned af, bc, de, hl, af_, bc_, de_, hl_, ix, iy, sp, pc, wz;
-    unsigned i, r, im, iff1, iff2, q, halted, ei_pending;
+    unsigned i, r, im, iff1, iff2, q, halted, ei_pending, in_prefix_run;
 } state_t;
 
 static void init_cpu(Z80 *z, bus_t *b) {
@@ -83,6 +83,10 @@ static void get_state(const Z80 *z, state_t *s) {
     s->i = z->i; s->r = z->r; s->im = z->im; s->iff1 = z->iff1; s->iff2 = z->iff2; s->q = z->q;
     s->halted = (z->halt_line || z->resume == Z80_RESUME_HALT);
     s->ei_pending = (z->data.uint8_array[0] == 0xFB);
+    /* Contract normalisation (ADR 0058 prefix_lock): suspended inside a DD/FD run the core's PC names the last
+     * fetched prefix; the architectural value is the next fetch address, and the run is flagged explicitly. */
+    s->in_prefix_run = (z->resume == Z80_RESUME_XY);
+    if (s->in_prefix_run) s->pc = (s->pc + 1u) & 0xFFFFu;
 }
 /* One architectural step: an instruction, or an interrupt response if one is pending and
  * acceptable. A DD/FD prefix run is completed (the core yields after each prefix when the cycle
@@ -194,13 +198,38 @@ int main(void) {
     t += (unsigned)z80_run(&cpu, 380);
     get_state(&cpu, &o);
     printf("PREFIX-LOCK: T=%u PC=%04X SP=%04X R=%02X IFF1=%u IFF2=%u\n", t, o.pc, o.sp, o.r, o.iff1, o.iff2);
-    /* Suspended inside a prefix run the core's PC names the last fetched prefix; the contract's architectural
-     * value is the next fetch address, so the adapter normalises it (as it normalises HALT). */
-    expect("LOCK suspended in prefix run", cpu.resume == Z80_RESUME_XY, 1);
+    expect("LOCK in prefix run", o.in_prefix_run, 1);
     expect("LOCK T", t, 800);
-    expect("LOCK next-fetch PC (wrapped)", (o.pc + 1u) & 0xFFFFu, (0xFFF0u + 200u) & 0xFFFFu);
+    expect("LOCK next-fetch PC (wrapped, normalised by get_state)", o.pc, (0xFFF0u + 200u) & 0xFFFFu);
     expect("LOCK SP (no interrupt push)", o.sp, 0x8000); expect("LOCK R", o.r, 200u & 0x7Fu);
     expect("LOCK IFF1", o.iff1, 1); expect("LOCK IFF2", o.iff2, 1);
+
+    /* 6. Entry into a prefix run is an ordinary instruction boundary: an INT (IM1) or NMI already pending
+     *    before the first prefix is accepted there (ADR 0058 prefix_lock owner prologue). */
+    memset(&bus, 0, sizeof bus);
+    init_cpu(&cpu, &bus);
+    memset(bus.mem, 0xDD, sizeof bus.mem);
+    memset(&s, 0, sizeof s);
+    s.sp = 0x8000; s.pc = 0xFFF0; s.im = 1; s.iff1 = 1; s.iff2 = 1;
+    set_state(&cpu, &s);
+    z80_int(&cpu, Z_TRUE);
+    t = (unsigned)z80_run(&cpu, 13);
+    z80_int(&cpu, Z_FALSE);
+    get_state(&cpu, &o);
+    printf("ENTRY-INT: T=%u PC=%04X SP=%04X IFF1=%u RUN=%u\n", t, o.pc, o.sp, o.iff1, o.in_prefix_run);
+    expect("ENTRY INT T", t, 13); expect("ENTRY INT PC", o.pc, 0x0038); expect("ENTRY INT SP", o.sp, 0x7FFE);
+    expect("ENTRY INT ret", bus.mem[0x7FFE] | (bus.mem[0x7FFF] << 8), 0xFFF0); expect("ENTRY INT IFF1", o.iff1, 0);
+    expect("ENTRY INT not in run", o.in_prefix_run, 0);
+    memset(&bus, 0, sizeof bus);
+    init_cpu(&cpu, &bus);
+    memset(bus.mem, 0xDD, sizeof bus.mem);
+    set_state(&cpu, &s);
+    z80_nmi(&cpu);
+    t = (unsigned)z80_run(&cpu, 11);
+    get_state(&cpu, &o);
+    printf("ENTRY-NMI: T=%u PC=%04X SP=%04X IFF1=%u IFF2=%u\n", t, o.pc, o.sp, o.iff1, o.iff2);
+    expect("ENTRY NMI T", t, 11); expect("ENTRY NMI PC", o.pc, 0x0066); expect("ENTRY NMI SP", o.sp, 0x7FFE);
+    expect("ENTRY NMI IFF1", o.iff1, 0); expect("ENTRY NMI IFF2", o.iff2, 1);
 
     printf(failures ? "adapter smoke: %d failure(s)\n" : "adapter smoke: OK%.0d\n", failures);
     return failures ? 1 : 0;

@@ -49,7 +49,7 @@ milestone, whose ASIC-integrated core must be classified first). No CMOS-only in
 | IM | 0/1/2 | interrupt mode |
 | HALT | 1 | halted flag (§4.4) |
 | INT-deferral | 1 | maskable INT not accepted at this boundary: set by `EI`, or by `RETI`/`RETN` that change IFF1 (§4.2) |
-| prefix-pending | — | never architecturally visible between instructions: a prefix and its opcode form one indivisible instruction boundary in this contract (§3.2) |
+| in-prefix-run | 1 | set only in the resumable `prefix_lock` state (§3.2, ADR 0058): the CPU is inside an endless DD/FD run, so no interrupt is accepted. It is clear at every instruction boundary, because a prefix and its opcode otherwise form one indivisible instruction |
 | MEMPTR (WZ) | 16 | internal; in scope because `BIT n,(HL)` X/Y observe it [MEMPTR] |
 | Q | 8 | internal; F value written by the last instruction if it changed flags, else 0; in scope because SCF/CCF X/Y observe it [Rak] |
 | LD A,I/R marker | 1 | NMOS quirk marker (§4.6) |
@@ -84,10 +84,14 @@ class, and the scope excludes nothing (ADR 0056).
   of DD bytes, is architecturally defined behaviour, not an error.
   - The CPU executes one prefix after another forever: each costs 4 T-states and one M1 (R += 1), and PC advances
     with wrap.
-  - Neither INT nor NMI is accepted, because no instruction boundary is ever reached (§4.7).
-  - Only RESET leaves it.
-  - The pinned oracle confirms this with INT and NMI raised after the run began (ADR 0057).
-  - ADR 0058 represents it as the resumable, non-interruptible `prefix_lock` outcome.
+  - The boundary *before the first prefix* is an ordinary instruction boundary: an INT or NMI that is pending
+    and acceptable there is accepted before the run starts.
+  - Once the first prefix has been fetched, neither INT nor NMI is accepted, because no instruction boundary is
+    ever reached again (§4.7). Only RESET leaves it.
+  - The pinned oracle confirms both: acceptance at entry (IM1 13 T, NMI 11 T), and no acceptance with INT and NMI
+    raised after the run began (ADR 0057).
+  - ADR 0058 represents it as the resumable `prefix_lock` outcome. That outcome carries the explicit in-prefix-run
+    state (§2), which distinguishes resuming inside the run from entering it.
 
 ### 3.3 R register
 
@@ -144,8 +148,9 @@ Tony Brewer, "Z80 Special Reset" (2014); Woody's HALT2INT test (2021). These sup
 "re-executes HALT", and the software-visible result is identical]. **Architectural PC while halted = the
 address after HALT** (the resume address). An accepted INT or NMI clears HALT and pushes that address. Generated
 code does not spin: HALT returns the resumable `halted` outcome (ADR 0058) and the runtime accounts halted cycles
-up to the deadline. A core that represents PC as pointing at the HALT opcode while halted is normalised to this
-contract by the oracle adapter (ADR 0057).
+up to the deadline. The pinned redcode oracle already reports HALT+1. Any
+comparison core that represents PC as pointing at the HALT opcode while halted (for example floooh `z80.h`) must be
+normalised by its adapter (ADR 0057).
 
 ### 4.5 IM0 static contract (decided: RST-only)
 

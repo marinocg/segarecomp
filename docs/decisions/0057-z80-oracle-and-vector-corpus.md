@@ -110,7 +110,10 @@ How the disagreements resolve:
      HALT, NMI, and **prefix lock**: a 64 KiB mapping of DD bytes, entered at 0xFFF0, with INT (IFF1 = 1) and then
      NMI raised after the run began. After 800 T it shows 200 prefixes, next-fetch PC wrapped to 0x00B8, R += 200
      (7-bit), SP unchanged and IFF1 = IFF2 = 1: no interrupt was accepted. The core's suspended-in-chain PC names
-     the last fetched prefix; the adapter normalises it to the next fetch address, as it does for HALT.
+     the last fetched prefix. The adapter's `get_state` normalises it to the next fetch address and reports the
+     explicit in-prefix-run state; the test asserts the normalised PC 0x00B8 directly. Two further cases enter an
+     all-DD run with INT (IM1) or NMI already pending: both are accepted at the boundary before the first prefix
+     (13 T to 0x0038, and 11 T to 0x0066), so only the state inside the run is non-interruptible.
    - `tests/z80_legal_forms_oracle_crosscheck_test.py` and `tests/z80_oracle/legal_forms_crosscheck.c` falsify
      the independent dataset (ADR 0056) against the oracle, with exact expectations. For every one of the 1,446
      form encodings they check the exact T-states, the exact R increment (M1 fetches) and the exact resulting PC:
