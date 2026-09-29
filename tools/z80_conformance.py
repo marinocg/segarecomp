@@ -61,7 +61,8 @@ SECONDARY_FORM_MASK = {"ccf.": {"f"}, "scf.": {"f"}, "ldir.": {"f", "wz"}, "lddr
                        "reti.": {"deferral"}, "retn.": {"deferral"}}
 ORACLE_DEFINES = ["-DZ80_STATIC", "-DZ80_WITH_EXECUTE", "-DZ80_WITH_Q", "-DZ80_WITH_FULL_IM0", "-DZ80_WITH_SPECIAL_RESET",
                   "-DZ80_WITH_UNOFFICIAL_RETI", "-DZ80_WITH_ZILOG_NMOS_LD_A_IR_BUG"]
-STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror"]
+# _CRT_SECURE_NO_WARNINGS: the MSVC CRT marks sscanf/fopen deprecated, which -Werror turns into a hard error on Windows.
+STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-D_CRT_SECURE_NO_WARNINGS"]
 SCHEMA = 1
 SLOT_BASE = 0x0100
 MAX_CODE = 0x2000          # code bytes per slot batch (bounded emitted C per batch)
@@ -523,7 +524,7 @@ def secondary_checkout(root):
 
 def build_secondary(root, workdir, cxx="c++"):
     exe = pathlib.Path(workdir) / "z80_conformance_kosarev"
-    r = run([cxx, "-std=c++17", "-O1", "-Wall", "-Wextra", "-Werror", "-I", str(root), "-I", str(TOOLS_DIR),
+    r = run([cxx, "-std=c++17", "-O1", "-Wall", "-Wextra", "-Werror", "-D_CRT_SECURE_NO_WARNINGS", "-I", str(root), "-I", str(TOOLS_DIR),
              str(ORACLE_DIR / "z80_conformance_kosarev.cpp"), "-o", str(exe)])
     if r.returncode != 0:
         raise AssertionError("secondary oracle build failed: " + r.stderr)
