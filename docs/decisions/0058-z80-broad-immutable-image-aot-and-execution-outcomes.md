@@ -101,8 +101,11 @@ semantics with Z80 names. After the decision the code was intentionally **not re
 ## Decision
 
 1. **Broad immutable-image AOT with B1 granularity is the Z80 default.**
-   - Every address of every executable immutable code image is a candidate start.
-   - Every legal decode that does not reach past the image edge gets exactly one owner (a C function).
+   - Every address of every executable immutable code image (under every admissible window mapping, §5) is a
+     candidate start.
+   - Every start whose bytes resolve statically through the logical code mapping (§5) gets exactly one owner, a C
+     function. A start in a prefix lock gets a small `prefix_lock` owner. Every other start gets a small typed
+     fail-closed stub owner. No start is ever left without an owner.
    - An owner transfers to its direct successor by returning the successor owner, or by a direct call where the
      lowering chooses.
    - B1 met every budget on every input with at least 3.6x margin on generated C. B2 missed the C budget on
@@ -114,8 +117,7 @@ semantics with Z80 names. After the decision the code was intentionally **not re
    a budget.
 3. **Owner key.** The key is (code-image identity, 16-bit address). The lookup key is the 32-bit value
    `image_id << 16 | address`.
-   - Address arithmetic wraps at 0xFFFF in the CPU address space.
-   - An instruction's bytes never wrap inside an image: they are read from the image's own byte sequence.
+   - Address arithmetic, including instruction fetch, wraps at 0xFFFF in the CPU address space (§5).
    - The TU shard key is the dense position (`image ordinal x image length + offset`). The lookup key is not used
      for sharding, so that banked images spread over every shard (the experiment's crowding finding). The shard
      count scales with total owners to keep compiler RSS within budget.
@@ -136,12 +138,36 @@ semantics with Z80 names. After the decision the code was intentionally **not re
    - No discovery or refinement cycle exists: a miss is a typed stop (Notes question 11).
    - Faster binding inside banked windows, for example a prologue identity re-check, is a possible later
      optimisation. It needs its own ADR with a soundness argument covering writes to the mapping control.
-5. **Image edges.**
-   - An instruction or prefix chain that would read past the end of its image is a **typed truncation**. It gets
-     no owner and no table entry, and a transfer to it fails closed with `no_owner`.
-   - A platform may declare a composite invariant image, for example a fixed region physically adjacent to
-     another invariant region, to make straddling instructions legal. The CPU library never assumes adjacency.
-   - The chain classifier is linear-time.
+5. **Logical fetch mapping (not storage-image edges).**
+   - **Architecture.** The Z80 fetches every instruction byte at the next logical address, PC + 1 wrapping
+     0xFFFF -> 0x0000. There is no architectural "image edge". `3E` at 0xFFFF with `42` at 0x0000 is an ordinary
+     `LD A,42h`. The pinned oracle confirms this for operand, displacement, opcode and chain bytes (ADR 0057).
+   - **Generation-time logical code mapping.** Platform input assigns every 16-bit logical address one class:
+     - an **invariant window**: always the same immutable image and offset;
+     - a **mapping-sensitive window**: banked; the admissible images are declared, and the current one is
+       reported at runtime;
+     - **non-code**: RAM, I/O or unmapped.
+
+     A full immutable 64 KiB mapping is one invariant window covering the whole space, so fetch simply wraps. The
+     CPU library knows only this abstract mapping and no mapper policy.
+   - **Classifying one owner start** (window W, image X). Each fetched byte at a logical address A (wrapping)
+     resolves as follows:
+     - **A in W:** the byte comes from X at A's offset.
+     - **A in an invariant window:** the byte comes from that window's image.
+     - **A in a different mapping-sensitive window:** the image cannot be statically identified. The start
+       gets a fail-closed stub owner, `unresolved_fetch_mapping`.
+     - **A in non-code:** the start gets a fail-closed stub owner, `mutable_code`. Fetching instruction bytes
+       from mutable memory is mutable code.
+   - **Prefix lock.** A DD/FD run that revisits the same (mapping state, logical address, effective prefix)
+     without reaching a non-prefix opcode can never terminate.
+     - Its start gets a `prefix_lock` owner. That owner accounts 4 T-states and R += 1 per prefix, advances the
+       next-fetch PC with wrap, never accepts INT or NMI, and returns the resumable `prefix_lock` outcome at the
+       deadline.
+     - Only RESET, which is platform policy, leaves it.
+     - This is the one resumable state inside a prefix run. It is safe because no effective instruction ever
+       follows, and it is not an instruction boundary: it is never interruptible.
+   - Chain ends are precomputed in one linear pass over the circular logical address space. The naive
+     per-address rescan is O(n²).
 6. **Resume and deadline.**
    - Every instruction boundary is an owner start, so any boundary resumes through the entry table. Each
      repeated block-instruction iteration is also a boundary: the iteration re-enters its own owner.
@@ -149,15 +175,22 @@ semantics with Z80 names. After the decision the code was intentionally **not re
      RETI/RETN deferral, and prefix indivisibility, per ADR 0056) before executing its instruction.
    - When the deadline has been reached, or an interrupt must be taken, the owner returns to the runtime with PC =
      its own address.
-   - A DD/FD chain is one owner, so no resume point exists inside a chain.
+   - A DD/FD chain that reaches an opcode is one owner, so no resume point exists inside it. The only exception is
+     the non-interruptible `prefix_lock` state (§5).
 7. **Execution outcomes.** One result enum carries two distinct classes.
    - **Resumable (not errors):**
      - `deadline`: stopped at an instruction boundary with cycles >= deadline;
      - `halted`: HALT executed, or still halted when the deadline arrives. PC = HALT+1, and halted cycles are
        accounted by the runtime.
+     - `prefix_lock`: inside an endless DD/FD run (§5). PC is the next fetch address, and the state is never
+       interruptible.
    - **Fail-closed errors (typed stops, never recovered by decoding):**
-     - `no_owner`: the target was never emitted (including typed truncations and image-edge straddles);
-     - `mutable_code`: no immutable code image is mapped at the target (RAM, or modified/self-modifying code);
+     - `no_owner`: the (identity, address) key was never emitted. Under broad AOT this only happens for an address
+       outside the declared code windows, or for an inconsistent platform identity;
+     - `mutable_code`: no immutable code image is mapped at the target, or an instruction byte would be fetched
+       from non-code (RAM, or modified/self-modifying code);
+     - `unresolved_fetch_mapping`: an instruction's bytes continue into a different mapping-sensitive window, whose
+       image cannot be statically identified;
      - `unknown_image_identity`: the platform reports an identity that was not compiled;
      - `excluded_form`: reserved; the ADR 0056 scope currently excludes nothing;
      - `im0_unsupported_acknowledge_byte` (ADR 0056 §5).
@@ -175,8 +208,10 @@ semantics with Z80 names. After the decision the code was intentionally **not re
 
 ## Consequences
 
-- T002's decoder must classify all 65,536 addresses of an image in linear time and return typed truncation at the
-  edge.
+- T002's decoder decodes from a logical fetch function (address -> byte, or unresolved/non-code) rather than
+  from a storage slice. It wraps at 0xFFFF and classifies all starts of a mapping in linear time into owner,
+  `prefix_lock`, `unresolved_fetch_mapping` or `mutable_code`. Z80 provenance records the start's (identity,
+  address) and the logical byte count; the bytes may wrap.
 - T003 builds the owner and entry emission with packed dense shard keys, the runtime ABI outcome enum above,
   and a synthetic two-image test in which mapping-sensitive transfers dispatch by the current identity.
 - Generated-size budgets for large banked ROMs are governed by the linear per-bank figures above. A future emitter

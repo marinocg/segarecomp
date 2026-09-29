@@ -444,12 +444,16 @@ PREFIX_RULES = [
         "t_states": "4 * (k - 1) + T(effective instruction)",
         "m1_fetches_and_r_increment": "(k - 1) + m1_fetches(effective instruction); R low 7 bits += that count, "
                                       "bit 7 preserved",
-        "interrupt_acceptance": "decided in docs/architecture/z80-cpu-contract.md (section 'Prefix chains and "
-                                "interrupts'); the dataset records that each ignored prefix is a separately "
+        "interrupt_acceptance": "never between a prefix and the following byte: a chain of any length plus its "
+                                "effective instruction is one indivisible boundary (docs/architecture/"
+                                "z80-cpu-contract.md section 4.7); each superseded prefix is still a separately "
                                 "timed 4-T-state M1 cycle",
         "length": "k + length(effective instruction) - 1",
-        "bound": "unbounded in principle; decode is bounded only by the immutable code image and fails closed "
-                 "with a typed truncation outcome if the chain or its instruction runs past the image edge",
+        "bound": "no maximum length. Bytes are fetched at successive logical addresses wrapping 0xFFFF -> 0x0000 "
+                 "through the generation-time logical code mapping, never through a storage-image edge. A run that "
+                 "never reaches a non-prefix opcode (it revisits a (mapping, address, effective prefix) state) is a "
+                 "deterministic prefix lock: 4 T-states and one M1 per prefix forever, no interrupt acceptance. A "
+                 "byte whose mapping cannot be statically identified fails closed",
     },
     {
         "id": "index_prefix_ignored",
@@ -473,7 +477,7 @@ PREFIX_RULES = [
         "m1_fetches_and_r_increment": "2 (d and op are ordinary memory reads, not M1 fetches)",
         "interrupt_acceptance": "only after op completes",
         "length": "4",
-        "bound": "fails closed with a typed truncation outcome if any byte lies past the image edge",
+        "bound": "as index_prefix_chain (d and op are fetched at wrapping logical addresses)",
     },
     {
         "id": "no_other_chains",

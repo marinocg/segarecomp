@@ -55,7 +55,7 @@ The legal-form dataset (`tools/z80_legal_forms.py`) is the SEG-008 denominator:
   `aot_admitted`, `oracle_state`, `oracle_memory`, `oracle_io`, `timing_modeled` and `timing_validated`.
 - **Evidence.** The dataset is byte-reproducible, and a two-way independence test enforces its separation from
   production. The pinned oracle check covers all 1,446 encodings, the prefix-ignored bytes and the chain rules:
-  1,909 exact cases with 0 mismatches.
+  1,915 exact cases with 0 mismatches, including instructions and chains that wrap across 0xFFFF.
   - It checks exact T-states, R and resulting PC.
   - Conditional forms run both outcomes; repeat forms run repeating and final iterations; control forms check the
     exact target or fall-through.

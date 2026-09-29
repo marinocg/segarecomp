@@ -178,6 +178,30 @@ int main(void) {
     expect("NMI T", t, 11); expect("NMI PC", o.pc, 0x66); expect("NMI IFF1", o.iff1, 0);
     expect("NMI IFF2", o.iff2, 1); expect("NMI ret", bus.mem[0x7FFE] | (bus.mem[0x7FFF] << 8), 0x1001);
 
+    /* 5. Prefix lock (ADR 0058): a full 64 KiB mapping of DD bytes never reaches an opcode. Fetch wraps at
+     *    0xFFFF, every prefix is 4 T and one M1 (R += 1), and once the run has started neither INT (IFF1 = 1,
+     *    line asserted) nor NMI is ever accepted inside it. */
+    memset(&bus, 0, sizeof bus);
+    init_cpu(&cpu, &bus);
+    memset(bus.mem, 0xDD, sizeof bus.mem);
+    memset(&s, 0, sizeof s);
+    s.sp = 0x8000; s.pc = 0xFFF0; s.im = 1; s.iff1 = 1; s.iff2 = 1; s.r = 0;
+    set_state(&cpu, &s);
+    t = (unsigned)z80_run(&cpu, 40);     /* enter the prefix run first: no interrupt pending yet */
+    z80_int(&cpu, Z_TRUE);               /* then assert INT (IFF1 = 1) ... */
+    t += (unsigned)z80_run(&cpu, 380);
+    z80_nmi(&cpu);                       /* ... and raise NMI while INT stays asserted */
+    t += (unsigned)z80_run(&cpu, 380);
+    get_state(&cpu, &o);
+    printf("PREFIX-LOCK: T=%u PC=%04X SP=%04X R=%02X IFF1=%u IFF2=%u\n", t, o.pc, o.sp, o.r, o.iff1, o.iff2);
+    /* Suspended inside a prefix run the core's PC names the last fetched prefix; the contract's architectural
+     * value is the next fetch address, so the adapter normalises it (as it normalises HALT). */
+    expect("LOCK suspended in prefix run", cpu.resume == Z80_RESUME_XY, 1);
+    expect("LOCK T", t, 800);
+    expect("LOCK next-fetch PC (wrapped)", (o.pc + 1u) & 0xFFFFu, (0xFFF0u + 200u) & 0xFFFFu);
+    expect("LOCK SP (no interrupt push)", o.sp, 0x8000); expect("LOCK R", o.r, 200u & 0x7Fu);
+    expect("LOCK IFF1", o.iff1, 1); expect("LOCK IFF2", o.iff2, 1);
+
     printf(failures ? "adapter smoke: %d failure(s)\n" : "adapter smoke: OK%.0d\n", failures);
     return failures ? 1 : 0;
 }

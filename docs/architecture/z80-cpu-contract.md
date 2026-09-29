@@ -75,8 +75,19 @@ class, and the scope excludes nothing (ADR 0056).
   no-operation, and `b` executes as its base form. `P ED`: the prefix is ignored and ED escapes.
 - `P CB d op`: `d` and `op` are ordinary memory reads, not M1 fetches (R += 2 for the whole instruction).
 - **Instruction boundary for chains.** See §4.7 for interrupt acceptance inside a chain.
-- **Decode bound.** A chain has no assumed maximum length. Decode is bounded only by the immutable code image:
-  a chain or instruction that runs past the image edge is a typed fail-closed outcome (ADR 0058).
+- **Decode bound and fetch wrap.** Neither an instruction nor a chain has an assumed maximum length. Every byte
+  after the first is fetched at the next *logical* address: PC + 1, wrapping 0xFFFF -> 0x0000, exactly as the
+  CPU's 16-bit PC does. For example, `3E` at 0xFFFF takes its immediate from 0x0000. Storage-image bounds are
+  never an architectural edge; the generation-time logical code mapping (ADR 0058 §5) resolves each fetched
+  address. The pinned oracle confirms fetch wrap for operands, displacements, opcodes and chains (ADR 0057).
+- **Prefix lock.** A run of DD/FD bytes that never reaches a non-prefix opcode, for example a full 64 KiB mapping
+  of DD bytes, is architecturally defined behaviour, not an error.
+  - The CPU executes one prefix after another forever: each costs 4 T-states and one M1 (R += 1), and PC advances
+    with wrap.
+  - Neither INT nor NMI is accepted, because no instruction boundary is ever reached (§4.7).
+  - Only RESET leaves it.
+  - The pinned oracle confirms this with INT and NMI raised after the run began (ADR 0057).
+  - ADR 0058 represents it as the resumable, non-interruptible `prefix_lock` outcome.
 
 ### 3.3 R register
 
@@ -236,5 +247,9 @@ the direction and the value. Port decoding is platform policy.
 
 ## 8. Static execution, code images and outcomes
 
-Defined in ADR 0058: broad immutable-image AOT, owners keyed by (code-image identity, 16-bit address), exact
-dispatch for runtime-selected targets, and the resumable-versus-fail-closed outcome split.
+Defined in ADR 0058:
+- broad immutable-image AOT;
+- a generation-time logical code mapping, which gives 16-bit fetch wrap;
+- owners keyed by (code-image identity, 16-bit address);
+- exact dispatch for runtime-selected targets;
+- the split between resumable outcomes (`deadline`, `halted`, `prefix_lock`) and fail-closed outcomes.

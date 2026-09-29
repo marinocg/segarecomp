@@ -9,7 +9,9 @@ redcode/Z80 oracle, with exact expectations:
   * repeat forms (LDIR/CPIR/INIR/OTIR and decrementing): run a repeating iteration (PC stays, repeating
     T-states) and a final iteration (PC advances, final T-states);
   * the DD/FD `prefix_ignored` bytes (4 + base) and parametric chains (k = 1..8; repeated and alternating),
-    a prefix before ED and a chain before DDCB.
+    a prefix before ED and a chain before DDCB;
+  * logical fetch wrap (ADR 0058): instructions, displacement/operand bytes and prefix chains that continue
+    from 0xFFFF to 0x0000 (a full 64 KiB mapping has no edge).
 
 Mutation controls: the same run is repeated on in-memory corrupted copies of the dataset (taken/not-taken
 swapped, repeating T-states changed, control-form lengths changed, one M1 count changed); each must produce
@@ -125,12 +127,23 @@ def cases(data):
             out.append((chain + [0x21, 0x34, 0x12], A << 8, 0x0101, START + k + 3, 4 * (k - 1) + 14, (k - 1) + 2))
     out.append(([0xDD, 0xED, 0x44], A << 8, 0x0101, START + 3, 12, 3))
     out.append(([0xFD, 0xDD, 0xCB, 0x12, 0x06], A << 8, 0x0101, START + 5, 27, 3))
+    out = [(START,) + c for c in out]
+    # logical fetch wrap across 0xFFFF -> 0x0000 (start, bytes, af, bc, expected pc, T, R)
+    out += [
+        (0xFFFF, [0x3E, 0x42], A << 8, 0x0101, 0x0001, 7, 1),                   # LD A,n: operand at 0x0000
+        (0xFFFE, [0xDD, 0x21, 0x34, 0x12], A << 8, 0x0101, 0x0002, 14, 2),      # LD IX,nn: nn at 0x0000-1
+        (0xFFFF, [0xDD, 0xCB, 0x12, 0x06], A << 8, 0x0101, 0x0003, 23, 2),      # RLC (IX+d): d, op wrapped
+        (0xFFFD, [0xDD, 0xFD, 0xDD, 0x21, 0x34, 0x12], A << 8, 0x0101, 0x0003, 22, 4),  # chain across wrap
+        (0xFFFF, [0x18, 0x12], A << 8, 0x0101, 0x0013, 12, 1),                  # JR e: e at 0x0000
+        (0xFFFE, [0xC3, 0x34, 0x12], A << 8, 0x0101, 0x1234, 10, 1),            # JP nn: nn high at 0x0000
+    ]
     return out
 
 
 def render(case_list):
-    return "".join("%d %s %04x %04x %04x %d %02x\n" % (len(bs), " ".join("%02x" % x for x in bs), af, bc, pc, t, r)
-                   for bs, af, bc, pc, t, r in case_list)
+    return "".join("%04x %d %s %04x %04x %04x %d %02x\n" % (start, len(bs), " ".join("%02x" % x for x in bs), af, bc,
+                                                             pc, t, r)
+                   for start, bs, af, bc, pc, t, r in case_list)
 
 
 def mutations(data):

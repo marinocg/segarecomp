@@ -35,7 +35,9 @@ Each byte gets exactly one classification: a **form**, or a **prefix-behaviour c
 `DD`/`FD` prefix chains have unbounded length, so they are not enumerated. `prefix_rules` specifies them
 parametrically (`index_prefix_chain`, `index_prefix_ignored`, `index_cb_displacement`, `no_other_chains`): the
 last prefix is effective; each superseded or ignored prefix costs 4 T-states and one M1 fetch; the length and T-state
-cost are functions of the prefix count; decode is bounded only by the immutable image and fails closed at its edge.
+cost are functions of the prefix count. Bytes are fetched at logical addresses that wrap at 0xFFFF, with no
+storage-image edge. A run that never reaches an opcode is a deterministic prefix lock, and a byte whose mapping
+cannot be statically identified fails closed (ADR 0058).
 
 Output is byte-for-byte reproducible (sorted keys, fixed row order, no timestamps):
 `python3 tools/z80_legal_forms.py [--check] [--summary]`.

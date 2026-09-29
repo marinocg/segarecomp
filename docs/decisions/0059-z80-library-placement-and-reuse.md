@@ -36,8 +36,10 @@ libraries, decides the additive `libs/core` change, and confirms both lists agai
 ### Additive `libs/core` change
 
 - Add `CpuVariant::z80` when T002 first needs it; no other value changes.
-- Z80 provenance is **Z80-local** (`segarecomp::cpu::z80`). It holds the code-image identity, the 16-bit
-  address, the image offset, and the byte length. The length is not bounded by an assumed maximum, because
+- Z80 provenance is **Z80-local** (`segarecomp::cpu::z80`). It holds the start's code-image identity, 16-bit
+  logical address and image offset, plus the logical byte count. The instruction's bytes may continue across the
+  0xFFFF -> 0x0000 fetch wrap or into an invariant window (ADR 0058 §5), so they are not assumed to be one
+  contiguous storage slice. The length is not bounded by an assumed maximum, because
   DD/FD chains are unbounded. The existing `DecodeSource` and `InstructionProvenance` are M68K-shaped:
   `M68kProgramAddress` and fixed `std::array<uint8_t, 2> bytes`. They are neither reused nor widened. A neutral
   widening would change M68K types for no current second consumer. It can be reconsidered only when a

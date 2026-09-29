@@ -107,7 +107,10 @@ How the disagreements resolve:
    - `tests/z80_oracle_adapter_smoke_test.py` and `tests/z80_oracle/adapter_smoke.c` exercise the adapter shape.
      They set the full state, run one instruction or interrupt response, observe memory/I/O/INTA callbacks, and read
      the full state back (MEMPTR, Q, IFF, IM, R, HALT, EI-pending, T-states). Cases: INI, OUTI, IM2 (odd vector),
-     HALT, NMI.
+     HALT, NMI, and **prefix lock**: a 64 KiB mapping of DD bytes, entered at 0xFFF0, with INT (IFF1 = 1) and then
+     NMI raised after the run began. After 800 T it shows 200 prefixes, next-fetch PC wrapped to 0x00B8, R += 200
+     (7-bit), SP unchanged and IFF1 = IFF2 = 1: no interrupt was accepted. The core's suspended-in-chain PC names
+     the last fetched prefix; the adapter normalises it to the next fetch address, as it does for HALT.
    - `tests/z80_legal_forms_oracle_crosscheck_test.py` and `tests/z80_oracle/legal_forms_crosscheck.c` falsify
      the independent dataset (ADR 0056) against the oracle, with exact expectations. For every one of the 1,446
      form encodings they check the exact T-states, the exact R increment (M1 fetches) and the exact resulting PC:
@@ -118,7 +121,10 @@ How the disagreements resolve:
      - The DD/FD `prefix_ignored` bytes are checked as 4 + base form.
      - Parametric chains (k = 1..8, repeated and alternating) are checked against `4(k-1) + T`, `(k-1) + m1` and
        `k + len - 1`, plus a prefix before ED and a chain before DDCB.
-     - Result: **1,909 cases, 0 mismatches**.
+     - Logical fetch wrap: LD A,n at 0xFFFF (operand at 0x0000), LD IX,nn at 0xFFFE, RLC (IX+d) at 0xFFFF
+       (d and op wrapped), a DD FD DD chain across the wrap, JR e at 0xFFFF and JP nn at 0xFFFE all match exact PC,
+       T-states and R.
+     - Result: **1,915 cases, 0 mismatches**.
      - Built-in mutation controls on in-memory corrupted copies must all be detected, and were: taken/not-taken
        swapped (126 mismatches), repeating T-states changed (8), control-form lengths changed (105), and one M1
        count changed (1).
