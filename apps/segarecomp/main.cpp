@@ -413,7 +413,8 @@ int run_cli(int argc, char **argv) {
       return 1;
     }
     // SEG-026-T001 (experiment, report-only): reachability-first discovery challenger. Writes aggregate JSON to
-    // stdout (counts only) and exact PCs to --private-output (ignored location; never persisted). Reads the image,
+    // stdout (counts only) and exact PCs to --private-output / --classify-output. The CLI does not police those
+    // paths: for a commercial input the caller must place them in an ignored location and never persist them. Reads the image,
     // its reset handoff and optional ADR 0049 alias descriptors only; it never alters generation. --universe also
     // reports the unchanged broad immutable-ROM AOT identity count U for comparison.
     if (command == "genesis-reachability-challenger") {
@@ -513,6 +514,7 @@ int run_cli(int argc, char **argv) {
       }
       if (classify_input) {
         std::ifstream pcs_file{std::string(*classify_input)};
+        if (!pcs_file) { std::cerr << "segarecomp: cannot read classify PCs\n"; return 2; }
         std::vector<std::uint32_t> pcs;
         std::string line;
         while (std::getline(pcs_file, line)) {

@@ -186,7 +186,18 @@ Broad Gen-2 AOT remains production; nothing here changes admission, emission or 
 
 ## Limits
 
+- **First gate vs whole picture.** "100% first gate" rests on only four reachable sites that sit in front of the
+  whole game-mode program. It identifies the first mechanism to resolve, not a guarantee about the rest.
+  - The nearest-mechanism figures describe transitions that were observed.
+  - Statically resolving the tables may still expose further families, such as `(An)` object dispatch, or growth
+    from decodes that are really data. Measuring that is the next experiment's job.
 - One title and one no-input workload. It does not cover every level, boss, special stage, ending or menu path.
+- **Coarse continuation set.** The challenger's continuation set is context-insensitive, global and latched. Once
+  one ordinary RTS is reachable, every discovered call's continuation is discovered, including continuations of
+  calls that never return. Data that follows such a call could therefore enter `D`.
+  - On Sonic this is harmless: the 16 continuations that were discovered but never observed all belong to calls
+    that were never observed.
+  - `D − O` (253) keeps any such growth visible.
 - Recall is a validation metric only, and `O` is not an executable-set bound.
 - The attribution after the first gate uses observed transitions. A static resolution of the PC-indexed tables
   could still expose additional dynamic families or data-decode growth that this workload never executes.

@@ -13,7 +13,10 @@
 // Returns: every call (BSR/JSR, direct or indirect) DISCOVERED BY THIS CHALLENGER contributes its stacked
 // continuation to a challenger-owned continuation set; once a reachable RTS that is not an ADR 0048
 // push-then-RTS computed jump exists, every member of that set is discovered (deterministic fixed point,
-// context-insensitive). No continuation is ever taken from the Gen-2 return set.
+// context-insensitive). No continuation is ever taken from the Gen-2 return set. This is deliberately coarse: the
+// enablement is global (a discovered call whose callee never returns still contributes its continuation) and
+// latched (an RTS later reclassified as push-then-RTS does not revoke it), so data following a non-returning
+// call could in principle enter D; the comparison reports D - O so such growth stays visible.
 //
 // Exception returns: `strict` model -- RTE/RTR discover nothing; `normal_resumption` hypothesis -- an RTE/RTR
 // resumes an already-discovered boundary, where the only boundaries it may add are the stacked exception

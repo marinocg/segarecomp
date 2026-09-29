@@ -63,7 +63,8 @@ typedef struct GenesisExecutionCoverageResult {
   GenesisExecutionCoverageEpoch epochs[GENESIS_EXECUTION_COVERAGE_MAX_EPOCHS];
   uint8_t coverage_digest[32];     /* final bitmap SHA-256 (zero when disabled) */
   uint8_t frame_stream_digest[32]; /* SHA-256 over every published frame digest, in order (skip_render: of none) */
-  uint8_t final_state_digest[32];  /* SHA-256 over CPU registers, work RAM, device and scheduler state */
+  uint8_t final_state_digest[32];  /* SHA-256 over CPU registers, work RAM and the raw device/scheduler struct bytes
+                                      (padding included): comparable only between runs of one binary */
 } GenesisExecutionCoverageResult;
 
 /* `runtime->execution_coverage` and `runtime->live_frame_observer` must be NULL on entry and are NULL on return. */

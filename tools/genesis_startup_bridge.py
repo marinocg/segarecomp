@@ -2091,9 +2091,11 @@ def main() -> int:
             return 9
     out_dir.mkdir(parents=True, exist_ok=True)
     def single_cycle_generate_and_compile() -> tuple[int, bytes | None, pathlib.Path | None]:
+        # The coverage keyword is passed only when requested, so the historical call shape (and every
+        # caller/test double of generate_and_compile) is unchanged for all other modes.
+        extra = {"coverage": True} if args.execution_coverage is not None else {}
         return generate_and_compile(emitter_command, compiler, root, out_dir, resolve_profile(args),
-                                    viewer_sdl3, capture=args.capture_frames is not None,
-                                    coverage=args.execution_coverage is not None)
+                                    viewer_sdl3, capture=args.capture_frames is not None, **extra)
     if args.execution_coverage is not None:
         # One generation + one compile + one frame-bounded headless coverage run of the same program.
         status, _, executable = single_cycle_generate_and_compile()

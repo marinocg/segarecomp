@@ -2825,19 +2825,6 @@ void genesis_m68k_enter_stopped_state(GenesisRuntime *runtime) {
   if (runtime != 0) runtime->m68k_interrupt.stopped = 1U;
 }
 
-/*
- * SEG-007-T252 / ADR-0040: the guest-owned runtime step/boundary contract.
- * Performs exactly one dispatch step -- the SEG-007-T175 defensive VDP DMA
- * drain, one dispatch() call, T131's checkpoint-class observation, the
- * SEG-007-T047 / ADR-0020 §5 device-scheduler tick and SR-masked IRQ6
- * admission -- and returns immediately with whatever GenesisControlTransfer
- * results. It carries NO notion of "no progress": it never reads or writes
- * any progress-credit/watchdog state (there is none left to read), and it
- * never loops. `result.kind` is always GENESIS_STOP or GENESIS_COMPLETE on
- * those genuine guest outcomes, else GENESIS_CONTINUE_AT_PC with
- * `runtime->pc` already advanced (and possibly overridden by an admitted
- * IRQ6 exception's handler entry) after exactly one guest step.
- */
 /* SEG-026-T001: execution-PC coverage (see GenesisExecutionCoverage in runtime.h). Host-side bookkeeping
    only: these functions read nothing but their own record and the PC values passed in. */
 int genesis_execution_coverage_contains(const GenesisExecutionCoverage *coverage, uint32_t pc) {
@@ -2925,6 +2912,19 @@ static void genesis_execution_coverage_successor(GenesisExecutionCoverage *cover
   }
 }
 
+/*
+ * SEG-007-T252 / ADR-0040: the guest-owned runtime step/boundary contract.
+ * Performs exactly one dispatch step -- the SEG-007-T175 defensive VDP DMA
+ * drain, one dispatch() call, T131's checkpoint-class observation, the
+ * SEG-007-T047 / ADR-0020 §5 device-scheduler tick and SR-masked IRQ6
+ * admission -- and returns immediately with whatever GenesisControlTransfer
+ * results. It carries NO notion of "no progress": it never reads or writes
+ * any progress-credit/watchdog state (there is none left to read), and it
+ * never loops. `result.kind` is always GENESIS_STOP or GENESIS_COMPLETE on
+ * those genuine guest outcomes, else GENESIS_CONTINUE_AT_PC with
+ * `runtime->pc` already advanced (and possibly overridden by an admitted
+ * IRQ6 exception's handler entry) after exactly one guest step.
+ */
 GenesisControlTransfer genesis_runtime_step(GenesisRuntime *runtime, GenesisDispatchFunction dispatch) {
   GenesisControlTransfer result = {0};
   if (runtime == 0 || dispatch == 0)

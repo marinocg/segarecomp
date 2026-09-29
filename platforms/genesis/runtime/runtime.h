@@ -1272,10 +1272,10 @@ typedef enum GenesisAccessResultKind {
  */
 #ifdef __cplusplus
 extern "C" {
+#endif
 
 /* SEG-026-T001: nonzero iff `pc` (masked to the 24-bit bus, even) was recorded by the coverage observer. */
 int genesis_execution_coverage_contains(const GenesisExecutionCoverage *coverage, uint32_t pc);
-#endif
 
 GenesisAccessResultKind genesis_route_access(GenesisRuntime *runtime, uint32_t address,
                                               GenesisAccessWidth width,
