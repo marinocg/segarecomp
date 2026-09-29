@@ -986,6 +986,20 @@ add_test(NAME m68k_legal_forms_musashi_crosscheck_test COMMAND ${Python3_EXECUTA
 set_property(TEST m68k_legal_forms_test m68k_legal_forms_musashi_crosscheck_test APPEND PROPERTY LABELS full fast)
 set_property(TEST m68k_legal_forms_test m68k_legal_forms_musashi_crosscheck_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
+# SEG-008-T001: independent NMOS Z80 legal-form dataset (hermetic; reproducibility, ownership, independence).
+add_test(NAME z80_legal_forms_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_legal_forms_test.py ${PROJECT_SOURCE_DIR})
+# Pinned redcode/Z80 oracle checks (ADR 0057): skip cleanly (exit 0) unless SEGARECOMP_Z80_ORACLE_CHECKOUT points at
+# the directory holding the pinned redcode_Z80 and redcode_Zeta clones; a wrong or dirty pin fails.
+add_test(NAME z80_oracle_adapter_smoke_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_oracle_adapter_smoke_test.py ${CMAKE_C_COMPILER})
+add_test(NAME z80_legal_forms_oracle_crosscheck_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_legal_forms_oracle_crosscheck_test.py ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_legal_forms_test z80_oracle_adapter_smoke_test z80_legal_forms_oracle_crosscheck_test
+  APPEND PROPERTY LABELS full fast)
+set_property(TEST z80_legal_forms_test z80_oracle_adapter_smoke_test z80_legal_forms_oracle_crosscheck_test
+  APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
 # SEG-020-T005: first-divergence diagnosis (generated M68k boundaries vs pinned Musashi).
 add_test(NAME m68k_first_divergence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_first_divergence_test.py
