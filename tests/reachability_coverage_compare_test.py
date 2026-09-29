@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """SEG-026-T001: hermetic checks for the challenger CLI, the private O-vs-D comparison and the bridge's
---execution-coverage flag validation (project-authored synthetic image; no ROM)."""
+--execution-coverage flag validation (project-authored synthetic image; no ROM).
+
+SEG-026-T002: --pc-index-recovery CLI aggregates and the comparison's falsification of proven PC-indexed target
+sets (an observed escape outside a proven set is counted; runtime coverage never feeds the challenger)."""
 import json
 import pathlib
 import subprocess
@@ -27,6 +30,58 @@ def synthetic_image() -> bytes:
     words(image, 0x300, [0x4E71, 0x4E73])        # handler: NOP; RTE
     words(image, 0x600, [0x4E71, 0x4E71, 0x4E75])  # unreachable legal island
     return bytes(image)
+
+
+def recovery_image() -> bytes:
+    image = bytearray(0x800)
+    image[0:4] = (0x00FFFE00).to_bytes(4, "big")
+    image[4:8] = (0x200).to_bytes(4, "big")
+    # 0x200: MOVE.B ($F100).W,D0; ANDI.W #4,D0; JMP (2,PC,D0.W) at 0x208 -> proven targets 0x20C / 0x210 exactly.
+    words(image, 0x200, [0x1038, 0xF100, 0x0240, 0x0004, 0x4EFB, 0x0002])
+    words(image, 0x20C, [0x60FE, 0x4E71, 0x60FE, 0x4E71, 0x60FE])  # 0x214: legal code outside the proven set
+    return bytes(image)
+
+
+def check_recovery(root: pathlib.Path, segarecomp: str, compare: pathlib.Path, tmpdir: pathlib.Path) -> None:
+    rom = tmpdir / "recovery.bin"
+    rom.write_bytes(recovery_image())
+    base = [segarecomp, "genesis-reachability-challenger", "--rom", str(rom), "--entry", "00000200", "--mapping-base",
+            "00000000", "--rom-sha256", "0" * 64]
+    bad = subprocess.run(base + ["--private-output", str(tmpdir / "bad.json"), "--pc-index-width-domains"],
+                         capture_output=True, text=True)
+    assert bad.returncode == 2, "the width-domain variant requires --pc-index-recovery"
+    private = tmpdir / "recovery.json"
+    observed = {0x200, 0x204, 0x208, 0x20C, 0x214}
+    pcs = tmpdir / "recovery-pcs.txt"
+    pcs.write_text("".join(f"{pc:06x}\n" for pc in sorted(observed)))
+    classification = tmpdir / "recovery-classification.json"
+    result = subprocess.run(base + ["--private-output", str(private), "--pc-index-recovery", "--classify-pcs", str(pcs),
+                                    "--classify-output", str(classification)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    aggregate = json.loads(result.stdout)
+    recovery = aggregate["pc_index_recovery"]
+    assert recovery["sites_encountered"] == 1 and recovery["resolved"] == 1 and recovery["recovered_targets"] == 2, recovery
+    assert aggregate["sites"]["jmp_(d8,PC,Xn)"] == 0 and aggregate["discovered"] == 5, aggregate
+    assert "000214" not in result.stdout and "0x" not in result.stdout
+    challenger = json.loads(private.read_text())
+    assert challenger["pc_index_sites"]["000208"]["targets"] == ["00020c", "000210"], challenger
+    # Observed: the proven target 0x20C, and an escape to 0x214 first entered from the resolved site.
+    coverage = tmpdir / "recovery-coverage"
+    coverage.mkdir()
+    (coverage / "coverage.bitmap").write_bytes(bitmap_of(observed))
+    witnesses = [(0, 0x0, 0x200, 0), (1, 0x200, 0x204, 1), (2, 0x204, 0x208, 1), (3, 0x208, 0x20C, 1),
+                 (4, 0x208, 0x214, 1)]
+    (coverage / "witnesses.txt").write_text("".join(f"{o} {p:08x} {c:08x} {k}\n" for o, p, c, k in witnesses))
+    out = subprocess.run([sys.executable, str(compare), "--coverage-dir", str(coverage), "--challenger", str(private),
+                          "--classification", str(classification)], capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    report = json.loads(out.stdout)
+    check = report["pc_index_recovery_check"]
+    assert check["escapes_outside_proven_targets"] == 1 and check["sites_with_escapes"] == 1, check
+    assert check["proven_targets"] == 2 and check["proven_targets_observed"] == 1, check
+    assert report["structural_first_gate_missing_pcs"] == {"pc_index_recovery_escape": 1}, report
+    assert report["observed_pc_index_sites_by_local_domain"] == {"resolved": 1}, report
+    assert "000214" not in out.stdout and "0x" not in out.stdout
 
 
 def bitmap_of(pcs: set[int]) -> bytes:
@@ -115,6 +170,7 @@ def main() -> int:
         mismatch = subprocess.run([sys.executable, str(compare), "--coverage-dir", str(coverage), "--challenger",
                                    str(private)], capture_output=True, text=True)
         assert mismatch.returncode == 3
+        check_recovery(root, segarecomp, compare, tmpdir)
     # Bridge flag validation happens before any generation (exit 8).
     bridge = root / "tools" / "genesis_startup_bridge.py"
     for extra in (["--coverage-epoch-frames", "10"], ["--coverage-disabled"], ["--coverage-no-render"],

@@ -71,6 +71,17 @@ segarecomp genesis-reachability-challenger --rom games/<rom> --reset-entry --rom
   additionally resumes the stacked continuations of discovered TRAP/TRAPV instructions.
 - **Unresolved sites.** Every other runtime-derived PC is recorded by family and not followed.
 - **Never used:** linear sweep, broad-AOT identities, runtime coverage, hints or external disassemblers.
+- **PC-indexed recovery (SEG-026-T002, ADR 0054, `--pc-index-recovery`, off by default).** A `JMP/JSR (d8,PC,Xn)`
+  site is resolved only when its index register's exact finite domain is proven by a demand-driven backward
+  evaluation over the challenger's own discovered graph:
+  - constants, masks, CMP/TST + Bcc guards, add/sub/shift/extend transforms;
+  - entries read from uniquely owned immutable image bytes.
+  A domain bounded only by the width of a byte loaded from mutable memory is `width_only_domain` and stays
+  unresolved. `--pc-index-width-domains` admits it as a labelled measurement variant. Out-of-image entries or
+  targets fail closed. The exact targets become ordinary discovery roots, iterated to a deterministic fixed point;
+  a proof invalidated by a later edge restarts discovery with that site pinned unresolved. stdout gains a
+  `pc_index_recovery` aggregate (per-site outcomes, proof mechanisms, graph-growth and accidental-decode
+  indicators; never an address).
 - **Output.** stdout carries aggregate counts only; `--universe` adds the unchanged broad AOT count `U`.
 - **Private output.** `--private-output` holds exact PCs.
 
@@ -93,6 +104,14 @@ The tool prints aggregates only:
 - unresolved sites per family, and how many of them executed;
 - first-miss attribution: every missing PC is traced through its witness chain to the first transition out
   of `D`, and classified by the control family of that transition's source.
+
+With `--pc-index-recovery`:
+- `pc_index_recovery_check` counts observed first entries from a resolved site that fall outside its proven target
+  set (escapes, expected 0), and how many proven targets were observed;
+- a proven edge is structural in the attribution, and an escape is labelled `pc_index_recovery_escape`;
+- with `--classification`, observed PC-indexed sites carry the strict local domain label of the same proof, over a
+  predecessor graph built only from the classified instructions (never D). The tool reports those sites, and the
+  missing PCs behind them, by label.
 
 Runtime coverage only falsifies the challenger. It never expands or authorizes it, and a PC that was not observed
 is not unreachable.

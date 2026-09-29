@@ -17,6 +17,12 @@ classified by the control family the challenger recorded for that previous PC (o
 every missing PC behind it is attributed to that family. A PC first executed when a handler resumed an
 interrupted instruction carries the instruction retired before the interrupt as its witness predecessor, so an
 ordinary interrupt return is never mistaken for the mechanism that reached the interrupted code.
+
+SEG-026-T002: when the challenger ran with --pc-index-recovery, its private output lists every encountered
+PC-indexed site with its proven exact target set. Runtime coverage then FALSIFIES those proofs: any observed first
+entry whose witness predecessor is a resolved site but which lies outside that site's proven set is counted as a
+recovery escape (expected 0). The tool also reports how many proven targets were ever observed (a precision
+indicator). Nothing observed is ever fed back into the challenger.
 """
 import argparse
 import json
@@ -131,6 +137,7 @@ def compare(observed: set[int], witnesses: dict, challenger: dict, summary: dict
                 fine_sites.setdefault(fine, set()).add(site)
 
     sites_by_family = {family: len(pcs) for family, pcs in challenger["sites"].items()}
+    recovery = pc_index_recovery_check(observed, witnesses, challenger)
     executed_sites_by_family = {family: sum(1 for pc in pcs if int(pc, 16) in observed)
                                 for family, pcs in challenger["sites"].items()}
     report = {
@@ -153,6 +160,8 @@ def compare(observed: set[int], witnesses: dict, challenger: dict, summary: dict
         "missing_pcs_attributed_by_family": dict(sorted(fine_attributed.items())),
         "rte_rtr_counterexamples_to_normal_resumption": first_miss_edges["rte_rtr"],
     }
+    if recovery is not None:
+        report["pc_index_recovery_check"] = recovery
     if report["U"]:
         u = report["U"]
         report["ratios"] = {"D_over_U": round(len(discovered) / u, 6), "O_over_U": round(len(observed) / u, 6),
@@ -171,11 +180,45 @@ def compare(observed: set[int], witnesses: dict, challenger: dict, summary: dict
     return report
 
 
+def resolved_pc_index_targets(challenger: dict) -> dict[int, set[int]]:
+    return {int(pc, 16): {int(t, 16) for t in entry["targets"]}
+            for pc, entry in challenger.get("pc_index_sites", {}).items() if entry["outcome"] == "resolved"}
+
+
+def pc_index_recovery_check(observed: set[int], witnesses: dict, challenger: dict) -> dict | None:
+    """Falsification of proven PC-indexed target sets (aggregates only)."""
+    if "pc_index_sites" not in challenger:
+        return None
+    resolved = resolved_pc_index_targets(challenger)
+    escapes = 0
+    escape_sites = set()
+    entries_from_resolved = 0
+    for x, (_, previous, cause) in witnesses.items():
+        if cause == CAUSE_RETIRE and previous in resolved:
+            entries_from_resolved += 1
+            if x not in resolved[previous]:
+                escapes += 1
+                escape_sites.add(previous)
+    all_targets = set().union(*resolved.values()) if resolved else set()
+    sites = challenger["pc_index_sites"]
+    return {
+        "resolved_sites": len(resolved),
+        "resolved_sites_executed": sum(1 for pc in resolved if pc in observed),
+        "unresolved_sites_executed": sum(1 for pc, e in sites.items() if e["outcome"] != "resolved" and int(pc, 16) in observed),
+        "proven_targets": len(all_targets),
+        "proven_targets_observed": len(all_targets & observed),
+        "first_entries_from_resolved_sites": entries_from_resolved,
+        "escapes_outside_proven_targets": escapes,
+        "sites_with_escapes": len(escape_sites),
+    }
+
+
 DYNAMIC_FAMILIES = {"rts", "rts_push_window", "rte", "rtr", "jmp_(An)", "jsr_(An)", "jmp_d16(An)", "jsr_d16(An)",
                     "jmp_(d8,An,Xn)", "jsr_(d8,An,Xn)", "jmp_(d8,PC,Xn)", "jsr_(d8,PC,Xn)", "unclassified"}
 
 
-def structural_attribution(observed: set[int], witnesses: dict, discovered: set[int], classification: dict) -> dict:
+def structural_attribution(observed: set[int], witnesses: dict, discovered: set[int], classification: dict,
+                           resolved: dict[int, set[int]] | None = None) -> dict:
     """Attribution using a private classification of observed PCs (same decoder; never discovery input).
 
     Each first entry prev -> x is labelled structurally:
@@ -211,6 +254,11 @@ def structural_attribution(observed: set[int], witnesses: dict, discovered: set[
         family = entry["family"]
         if x in {int(t, 16) for t in entry["successors"]}:
             return previous, "fixed", None
+        if resolved and previous in resolved:
+            # SEG-026-T002: a proven exact PC-indexed edge is structural; leaving the proven set is an escape.
+            if x in resolved[previous]:
+                return previous, "recovered", None
+            return previous, "dynamic", "pc_index_recovery_escape"
         if family == "rts" and x in stacked_call and witnesses.get(stacked_call[x], (ordinal + 1,))[0] < ordinal:
             return stacked_call[x], "call_return", None
         if family in ("rte", "rtr") and x in stacked_exception:
@@ -239,6 +287,7 @@ def structural_attribution(observed: set[int], witnesses: dict, discovered: set[
         if x not in discovered:
             kinds_missing[kind] = kinds_missing.get(kind, 0) + 1
     missing = observed - discovered
+    nearest_site_of: dict[int, int] = {}
     for x in missing:
         cursor = x
         gate = None
@@ -265,7 +314,33 @@ def structural_attribution(observed: set[int], witnesses: dict, discovered: set[
         nearest[near_label] = nearest.get(near_label, 0) + 1
         if near:
             nearest_sites.setdefault(near_label, set()).add(near[1])
+            nearest_site_of[x] = near[1]
+    # SEG-026-T002: strict local index-domain labels (classification only) of observed PC-indexed sites, and the
+    # missing PCs whose nearest mechanism is such a site, by that label.
+    domain_sites: dict[str, int] = {}
+    domain_sites_outside_d: dict[str, int] = {}
+    for pc, entry in info.items():
+        label = entry.get("pc_index_domain")
+        if label is None or pc not in observed:
+            continue
+        if label == "index_unknown":
+            label += ":" + entry.get("pc_index_unknown_origin", "none")
+        domain_sites[label] = domain_sites.get(label, 0) + 1
+        if pc not in discovered:
+            domain_sites_outside_d[label] = domain_sites_outside_d.get(label, 0) + 1
+    nearest_by_domain: dict[str, int] = {}
+    for x in missing:
+        near = nearest_site_of.get(x)
+        if near is None or near not in info or info[near].get("pc_index_domain") is None:
+            continue
+        label = info[near]["pc_index_domain"]
+        if label == "index_unknown":
+            label += ":" + info[near].get("pc_index_unknown_origin", "none")
+        nearest_by_domain[label] = nearest_by_domain.get(label, 0) + 1
     return {
+        "observed_pc_index_sites_by_local_domain": dict(sorted(domain_sites.items())),
+        "observed_pc_index_sites_outside_d_by_local_domain": dict(sorted(domain_sites_outside_d.items())),
+        "missing_pcs_by_nearest_pc_index_site_local_domain": dict(sorted(nearest_by_domain.items())),
         "structural_first_gate_missing_pcs": dict(sorted(first_gate.items())),
         "structural_first_gate_distinct_sites": {k: len(v) for k, v in sorted(first_gate_sites.items())},
         "nearest_mechanism_missing_pcs": dict(sorted(nearest.items())),
@@ -302,7 +377,7 @@ def main() -> int:
     if args.classification:
         classification = json.loads(pathlib.Path(args.classification).read_text(encoding="utf-8"))
         report.update(structural_attribution(observed, witnesses, {int(x, 16) for x in challenger["discovered"]},
-                                             classification))
+                                             classification, resolved_pc_index_targets(challenger)))
     if args.checkpoint_frames and "checkpoints" in report:
         keep = {int(x) for x in args.checkpoint_frames.split(",")}
         report["checkpoints"] = [c for c in report["checkpoints"] if c["frame"] in keep]
