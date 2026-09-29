@@ -4,6 +4,7 @@
 # machine/codegen relationship (owned by later SEG-018 tasks) does not depend on directory order.
 add_subdirectory(core)
 add_subdirectory(cpu/m68k)
+add_subdirectory(cpu/z80)
 add_subdirectory(recompiler)
 add_subdirectory(device/sega/genesis)
 add_subdirectory(media)

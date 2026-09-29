@@ -1000,6 +1000,20 @@ set_property(TEST z80_legal_forms_test z80_oracle_adapter_smoke_test z80_legal_f
 set_property(TEST z80_legal_forms_test z80_oracle_adapter_smoke_test z80_legal_forms_oracle_crosscheck_test
   APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
+# SEG-008-T002: Z80 CPU library decode tests, per-byte capability probe and coverage ratchet.
+add_executable(cpu_z80_decode_tests cpu_z80_decode_test.cpp)
+target_link_libraries(cpu_z80_decode_tests PRIVATE segarecomp::cpu_z80 segarecomp::base)
+segarecomp_enable_warnings(cpu_z80_decode_tests)
+add_test(NAME cpu_z80_decode_tests COMMAND cpu_z80_decode_tests)
+add_executable(z80_capability_probe tools/z80_capability_probe.cpp)
+target_link_libraries(z80_capability_probe PRIVATE segarecomp::cpu_z80)
+segarecomp_enable_warnings(z80_capability_probe)
+add_test(NAME z80_capability_ratchet_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_capability_ratchet_test.py $<TARGET_FILE:z80_capability_probe> ${PROJECT_SOURCE_DIR})
+add_test(NAME cpu_z80_dependency_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpu_z80_dependency_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_capability_ratchet_test cpu_z80_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
 # SEG-020-T005: first-divergence diagnosis (generated M68k boundaries vs pinned Musashi).
 add_test(NAME m68k_first_divergence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_first_divergence_test.py

@@ -69,7 +69,7 @@ The coverage unit is the form. A form is claimed in a stage only when every byte
 stage columns are `decodes`, `lowers`, `emits`, `compiles`, `executes`, `aot_admitted`, `oracle_state`,
 `oracle_memory`, `oracle_io`, `timing_modeled` and `timing_validated`. `oracle_memory` and `oracle_io` are not
 applicable to a form whose `observables` omit them. Snapshots are regenerated deterministically and ratcheted
-monotonically, as for M68K (`docs/testing/m68k-capability-coverage.md`). The coverage probe is built by T003.
+monotonically, as for M68K (`docs/testing/m68k-capability-coverage.md`). The coverage tool `tools/z80_capability_coverage.py`, its probe and the ratchet are delivered by T002 (`docs/testing/z80-capability-coverage.md`); T003 and later tasks extend the stages.
 "Unsupported" is a measurement-side status only; it is never stored in the dataset.
 
 ## Independence rule

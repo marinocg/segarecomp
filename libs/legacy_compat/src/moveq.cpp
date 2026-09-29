@@ -15,6 +15,7 @@ namespace {
 [[nodiscard]] const char *cpu_variant_name(CpuVariant cpu_variant) noexcept {
   switch (cpu_variant) {
   case CpuVariant::mc68000: return "mc68000";
+  case CpuVariant::z80: return "z80";
   }
   return "unknown";
 }
