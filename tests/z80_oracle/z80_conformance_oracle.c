@@ -106,12 +106,12 @@ int main(int argc, char **argv) {
       z80_int(&cpu, st->int_line ? Z_TRUE : Z_FALSE);
       if (st->nmi) z80_nmi(&cpu);
       memset(&events, 0, sizeof events);
-      unsigned long t;
+      unsigned long long t;
       if (st->mode == 'i') {
-        t = (unsigned long)z80_run(&cpu, 1);
-        while (cpu.resume == Z80_RESUME_XY) t += (unsigned long)z80_run(&cpu, 1);
+        t = (unsigned long long)z80_run(&cpu, 1);
+        while (cpu.resume == Z80_RESUME_XY) t += (unsigned long long)z80_run(&cpu, 1);
       } else {
-        t = (unsigned long)z80_run(&cpu, st->budget ? st->budget : 1);
+        t = (unsigned long long)z80_run(&cpu, st->budget ? st->budget : 1);
       }
       zc_state now;
       get_state(&cpu, &now);
