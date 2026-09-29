@@ -209,6 +209,16 @@ void frame_bounded_run() {
             on1.coverage.distinct_count == on2.coverage.distinct_count,
         "coverage digest is deterministic");
   check(bitmap.size() == GENESIS_EXECUTION_COVERAGE_BITMAP_BYTES && !witnesses.empty(), "private artifacts written");
+  // Counting frame boundaries without rendering changes nothing observable in the guest.
+  static GenesisExecutionCoverageResult norender;
+  GenesisRuntime r4;
+  setup(r4, true);
+  options.skip_render = 1;
+  genesis_execution_coverage_run(&r4, program, &options, 100000000U, &norender);
+  options.skip_render = 0;
+  check(norender.outcome == GENESIS_EXECUTION_COVERAGE_FRAMES_REACHED && norender.frames_published == 3U &&
+            norender.dispatches == off.dispatches && std::memcmp(norender.final_state_digest, off.final_state_digest, 32U) == 0,
+        "no-render counting: identical dispatches and final guest state");
   check(on1.coverage.distinct_count == 6U, "block PCs plus the handler");
   check(r1.execution_coverage == nullptr && r1.live_frame_observer == nullptr, "observers detached");
   GenesisRuntime busy;

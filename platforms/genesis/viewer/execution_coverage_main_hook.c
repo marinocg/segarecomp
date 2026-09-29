@@ -7,7 +7,8 @@
  * (validated by the Python driver and re-validated here) so the generated argv ABI is unchanged:
  *   SEGARECOMP_COVERAGE_FRAMES (> 0), SEGARECOMP_COVERAGE_EPOCH_FRAMES (> 0, default = FRAMES),
  *   SEGARECOMP_COVERAGE_ENABLED (0 or 1, default 1), SEGARECOMP_COVERAGE_WITNESS_CAPACITY (default 1048576),
- *   SEGARECOMP_COVERAGE_DIR (private output directory; required when enabled).
+ *   SEGARECOMP_COVERAGE_DIR (private output directory; required when enabled),
+ *   SEGARECOMP_COVERAGE_RENDER (0 or 1, default 1; 0 counts frame boundaries without rendering).
  * Prints one COVERAGE_SUMMARY line of aggregates only (counts and digests; never a PC).
  */
 #include <errno.h>
@@ -50,6 +51,8 @@ GenesisControlTransfer genesis_execution_coverage_hook_run(GenesisRuntime *runti
   const char *epoch_text = getenv("SEGARECOMP_COVERAGE_EPOCH_FRAMES");
   const char *enabled_text = getenv("SEGARECOMP_COVERAGE_ENABLED");
   const char *capacity_text = getenv("SEGARECOMP_COVERAGE_WITNESS_CAPACITY");
+  const char *render_text = getenv("SEGARECOMP_COVERAGE_RENDER");
+  uint64_t render = 1U;
   const char *name;
   uint32_t index;
   memset(&options, 0, sizeof(options));
@@ -57,6 +60,7 @@ GenesisControlTransfer genesis_execution_coverage_hook_run(GenesisRuntime *runti
       (epoch_text != NULL && genesis_coverage_parse_u64(epoch_text, &epoch) != 0) ||
       (enabled_text != NULL && (genesis_coverage_parse_u64(enabled_text, &enabled) != 0 || enabled > 1U)) ||
       (capacity_text != NULL && genesis_coverage_parse_u64(capacity_text, &capacity) != 0) ||
+      (render_text != NULL && (genesis_coverage_parse_u64(render_text, &render) != 0 || render > 1U)) ||
       (enabled == 1U && getenv("SEGARECOMP_COVERAGE_DIR") == NULL)) {
     fprintf(stderr, "coverage: malformed coverage options\n");
     exit(3);
@@ -65,6 +69,7 @@ GenesisControlTransfer genesis_execution_coverage_hook_run(GenesisRuntime *runti
   options.epoch_frames = epoch == 0U ? frames : epoch;
   options.coverage_enabled = (int)enabled;
   options.witness_capacity = capacity;
+  options.skip_render = render == 0U;
   options.private_dir = enabled == 1U ? getenv("SEGARECOMP_COVERAGE_DIR") : NULL;
   genesis_execution_coverage_run(runtime, dispatch, &options, dispatch_allowance, r);
   name = r->outcome == GENESIS_EXECUTION_COVERAGE_FRAMES_REACHED    ? "frames_reached"
@@ -74,12 +79,12 @@ GenesisControlTransfer genesis_execution_coverage_hook_run(GenesisRuntime *runti
          : r->outcome == GENESIS_EXECUTION_COVERAGE_IO_ERROR         ? "io_error"
                                                                      : "invalid_argument";
   fprintf(stderr,
-          "COVERAGE_SUMMARY {\"outcome\":\"%s\",\"coverage_enabled\":%s,\"target_frames\":%llu,\"epoch_frames\":%llu,"
+          "COVERAGE_SUMMARY {\"outcome\":\"%s\",\"coverage_enabled\":%s,\"render\":%s,\"target_frames\":%llu,\"epoch_frames\":%llu,"
           "\"frames_published\":%llu,\"dispatches\":%llu,\"stop_class\":%d,\"retirements\":%llu,"
           "\"distinct_pc_count\":%llu,\"witness_count\":%llu,\"witness_overflow\":%llu,"
           "\"unknown_retirements\":%llu,\"odd_pc_retirements\":%llu,\"wide_pc_retirements\":%llu,"
           "\"interrupt_redirects\":%llu,\"interrupt_resumptions\":%llu,\"interrupt_depth_overflow\":%llu,\"coverage_digest\":\"",
-          name, enabled ? "true" : "false", (unsigned long long)options.target_frames,
+          name, enabled ? "true" : "false", render ? "true" : "false", (unsigned long long)options.target_frames,
           (unsigned long long)options.epoch_frames, (unsigned long long)r->frames_published,
           (unsigned long long)r->dispatches,
           r->outcome == GENESIS_EXECUTION_COVERAGE_GUEST_STOP ? (int)r->transfer.stop.stop_class : 0,

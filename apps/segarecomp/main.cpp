@@ -38,7 +38,7 @@ void print_usage(std::ostream &output) {
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
                   "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]...] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
-                 "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--universe]\n"
+                 "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
                "  segarecomp probe-genesis-startup-mapping <address-hex8> <width-decimal> <image-length-hex16>\n";
@@ -424,6 +424,10 @@ int run_cli(int argc, char **argv) {
       std::optional<std::uint32_t> mapping_base;
       bool reset_entry = false;
       bool universe = false;
+      // Classification only: labels caller-supplied PCs (e.g. privately observed ones) by generic control
+      // mechanism with the same decoder. The result never enters the challenger's discovered set.
+      std::optional<std::string_view> classify_input;
+      std::optional<std::string_view> classify_output;
       segarecomp::GenesisReachabilityChallengerConfig config{};
       std::vector<std::array<std::uint32_t, 3>> aliases;
       for (int index = 2; index < argc;) {
@@ -434,6 +438,8 @@ int run_cli(int argc, char **argv) {
         else if (option == "--private-output" && has_value && !private_output) { private_output = argv[index + 1]; index += 2; }
         else if (option == "--reset-entry" && !reset_entry) { reset_entry = true; ++index; }
         else if (option == "--universe" && !universe) { universe = true; ++index; }
+        else if (option == "--classify-pcs" && has_value && !classify_input) { classify_input = argv[index + 1]; index += 2; }
+        else if (option == "--classify-output" && has_value && !classify_output) { classify_output = argv[index + 1]; index += 2; }
         else if (option == "--pea-continuations" && !config.pea_continuations) { config.pea_continuations = true; ++index; }
         else if (option == "--exception-model" && has_value) {
           const std::string_view model = argv[index + 1];
@@ -463,6 +469,7 @@ int run_cli(int argc, char **argv) {
           index += 2;
         } else { print_usage(std::cerr); return 2; }
       }
+      if (classify_input.has_value() != classify_output.has_value()) { print_usage(std::cerr); return 2; }
       if (!rom || !digest || !private_output || (reset_entry == (entry_address.has_value() || mapping_base.has_value())) ||
           (!reset_entry && (!entry_address || !mapping_base))) {
         print_usage(std::cerr); return 2;
@@ -504,8 +511,33 @@ int run_cli(int argc, char **argv) {
         else { std::cerr << "segarecomp: broad analysis rejected\n"; return 1; }
         aggregate.insert(aggregate.size() - 1U, ",\"universe_immutable_rom_aot\":" + std::to_string(count));
       }
+      if (classify_input) {
+        std::ifstream pcs_file{std::string(*classify_input)};
+        std::vector<std::uint32_t> pcs;
+        std::string line;
+        while (std::getline(pcs_file, line)) {
+          if (line.empty()) continue;
+          const auto value = parse_hex(line, line.size());
+          if (!value || *value > UINT64_C(0xFFFFFFFF)) { std::cerr << "segarecomp: invalid classify PC\n"; return 2; }
+          pcs.push_back(static_cast<std::uint32_t>(*value));
+        }
+        std::ofstream classified{std::string(*classify_output), std::ios::binary};
+        classified << segarecomp::format_genesis_reachability_classification_private(
+            segarecomp::classify_genesis_reachability_pcs(*program, pcs));
+        if (!classified) { std::cerr << "segarecomp: cannot write classification\n"; return 2; }
+      }
+      std::string private_report = segarecomp::format_genesis_reachability_challenger_private(result, config);
+      if (universe) {
+        // Carry U into the private report's aggregate too, so the comparison tool can form D/U and O/U.
+        const std::string marker = ",\"sites\":{";
+        const auto at = private_report.find(marker);
+        const auto closing = at == std::string::npos ? at : private_report.find("}}", at);
+        if (closing == std::string::npos) { std::cerr << "segarecomp: malformed challenger report\n"; return 2; }
+        const auto key = aggregate.find(",\"universe_immutable_rom_aot\":");
+        private_report.insert(closing + 1U, aggregate.substr(key, aggregate.size() - 1U - key));
+      }
       std::ofstream sink{std::string(*private_output), std::ios::binary};
-      sink << segarecomp::format_genesis_reachability_challenger_private(result, config);
+      sink << private_report;
       if (!sink) { std::cerr << "segarecomp: cannot write challenger private output\n"; return 2; }
       std::cout << aggregate << '\n';
       return 0;

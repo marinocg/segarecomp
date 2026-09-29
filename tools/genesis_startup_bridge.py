@@ -1295,7 +1295,7 @@ def run_capture(executable: pathlib.Path, root: pathlib.Path, out_dir: pathlib.P
 
 def run_execution_coverage(executable: pathlib.Path, root: pathlib.Path, out_dir: pathlib.Path,
                            instruction_budget: int, frames: int, epoch_frames: int | None,
-                           enabled: bool) -> int:
+                           enabled: bool, render: bool = True) -> int:
     """SEG-026-T001: run the coverage-mode executable once for exactly `frames` published frames.
     Prints the aggregate COVERAGE_SUMMARY line (counts/digests only). With coverage enabled the exact
     PC bitmap and first-entry witnesses are written to the ignored private directory
@@ -1305,6 +1305,7 @@ def run_execution_coverage(executable: pathlib.Path, root: pathlib.Path, out_dir
     env = dict(os.environ)
     env["SEGARECOMP_COVERAGE_FRAMES"] = str(frames)
     env["SEGARECOMP_COVERAGE_ENABLED"] = "1" if enabled else "0"
+    env["SEGARECOMP_COVERAGE_RENDER"] = "1" if render else "0"
     if epoch_frames is not None:
         env["SEGARECOMP_COVERAGE_EPOCH_FRAMES"] = str(epoch_frames)
     else:
@@ -1980,6 +1981,8 @@ def main() -> int:
                         help="aggregate coverage checkpoint interval in published frames")
     parser.add_argument("--coverage-disabled", action="store_true",
                         help="run the identical frame-bounded loop with no coverage observer (overhead baseline)")
+    parser.add_argument("--coverage-no-render", action="store_true",
+                        help="count virtual frame boundaries without rendering frames (faster; no frame-stream digest)")
     args = parser.parse_args()
     global _compile_jobs_override, _object_cache_dir_override
     _compile_jobs_override = args.compile_jobs
@@ -1988,8 +1991,9 @@ def main() -> int:
     if (args.viewer_unthrottled or args.viewer_slice is not None) and not args.viewer:
         sys.stderr.write("--viewer-unthrottled/--viewer-slice require --viewer\n")
         return 8
-    if (args.coverage_epoch_frames is not None or args.coverage_disabled) and args.execution_coverage is None:
-        sys.stderr.write("--coverage-epoch-frames/--coverage-disabled require --execution-coverage\n")
+    if ((args.coverage_epoch_frames is not None or args.coverage_disabled or args.coverage_no_render) and
+            args.execution_coverage is None):
+        sys.stderr.write("--coverage-epoch-frames/--coverage-disabled/--coverage-no-render require --execution-coverage\n")
         return 8
     if args.execution_coverage is not None and (args.capture_frames is not None or args.viewer or args.compare_runs or
                                                 args.full_report_path or args.checkpoint):
@@ -2100,7 +2104,7 @@ def main() -> int:
                                       args.instruction_budget if args.instruction_budget is not None
                                       else GENESIS_CANONICAL_RUNNER_DISPATCH_ALLOWANCE,
                                       args.execution_coverage, args.coverage_epoch_frames,
-                                      not args.coverage_disabled)
+                                      not args.coverage_disabled, not args.coverage_no_render)
     if args.capture_frames is not None:
         # One generation + one compile + one bounded headless capture run of the same program.
         status, _, executable = single_cycle_generate_and_compile()

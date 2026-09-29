@@ -41,6 +41,7 @@ typedef struct GenesisExecutionCoverageOptions {
   uint64_t epoch_frames;    /* > 0: aggregate checkpoint interval in published frames */
   int coverage_enabled;     /* 0: identical loop with no observer attached */
   uint64_t witness_capacity;
+  int skip_render;          /* nonzero: count virtual frame boundaries without rendering (nothing is published) */
   const char *private_dir;  /* existing private directory (coverage_enabled only); NULL: write nothing */
 } GenesisExecutionCoverageOptions;
 
@@ -61,7 +62,7 @@ typedef struct GenesisExecutionCoverageResult {
   uint32_t epoch_count;
   GenesisExecutionCoverageEpoch epochs[GENESIS_EXECUTION_COVERAGE_MAX_EPOCHS];
   uint8_t coverage_digest[32];     /* final bitmap SHA-256 (zero when disabled) */
-  uint8_t frame_stream_digest[32]; /* SHA-256 over every published frame digest, in order */
+  uint8_t frame_stream_digest[32]; /* SHA-256 over every published frame digest, in order (skip_render: of none) */
   uint8_t final_state_digest[32];  /* SHA-256 over CPU registers, work RAM, device and scheduler state */
 } GenesisExecutionCoverageResult;
 

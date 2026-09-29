@@ -266,6 +266,58 @@ GenesisReachabilityChallengerResult run_genesis_reachability_challenger(const Fr
   return result;
 }
 
+std::map<std::uint32_t, GenesisReachabilityPcClassification> classify_genesis_reachability_pcs(
+    const FrontendProgram &program, const std::vector<std::uint32_t> &pcs) {
+  const Decoder decoder{program};
+  std::map<std::uint32_t, GenesisReachabilityPcClassification> out;
+  std::map<std::uint32_t, Decoded> instructions;
+  for (const auto raw : pcs) {
+    const auto pc = raw & bus_mask;
+    if (out.contains(pc)) continue;
+    GenesisReachabilityPcClassification entry{};
+    Decoded decoded{};
+    if (decoder.decode(pc, decoded) == DecodeFailure::none) {
+      entry.decoded = true;
+      entry.length = decoded.length;
+      entry.control = m68k_control_successors(decoded.operation);
+      instructions.emplace(pc, decoded);
+    }
+    out.emplace(pc, entry);
+  }
+  for (const auto site : push_window_rts(instructions)) out[site].push_window_rts = true;
+  return out;
+}
+
+std::string format_genesis_reachability_classification_private(
+    const std::map<std::uint32_t, GenesisReachabilityPcClassification> &classification) {
+  std::ostringstream out;
+  out << "{\"schema\":\"segarecomp.reachability_classification.private.v1\",\"pcs\":{";
+  bool first = true;
+  for (const auto &[pc, entry] : classification) {
+    out << (first ? "" : ",") << "\"" << std::hex << std::setw(6) << std::setfill('0') << pc << std::dec << "\":{";
+    first = false;
+    if (!entry.decoded) {
+      out << "\"decoded\":false}";
+      continue;
+    }
+    const auto family = entry.push_window_rts ? genesis_challenger_family_push_window_rts
+                                              : static_cast<std::uint32_t>(entry.control.dynamic);
+    std::vector<std::uint32_t> successors;
+    for (const auto &successor : entry.control.successors) successors.push_back(successor.target & bus_mask);
+    out << "\"decoded\":true,\"length\":" << entry.length << ",\"family\":\"" << genesis_challenger_family_name(family)
+        << "\",\"successors\":" << hex_list(successors) << ",\"stacked\":\""
+        << (entry.control.stacked == M68kStackedContinuationKind::call_continuation        ? "call"
+            : entry.control.stacked == M68kStackedContinuationKind::exception_continuation ? "exception"
+            : entry.control.stacked == M68kStackedContinuationKind::pushed_code_address    ? "pea"
+                                                                                           : "none")
+        << "\",\"stacked_address\":\"" << std::hex << std::setw(6) << std::setfill('0')
+        << (entry.control.stacked_address & bus_mask) << std::dec << "\",\"exception_entry\":"
+        << (entry.control.always_raises_exception ? "true" : "false") << '}';
+  }
+  out << "}}\n";
+  return out.str();
+}
+
 std::string format_genesis_reachability_challenger_aggregate(const GenesisReachabilityChallengerResult &result,
                                                              const GenesisReachabilityChallengerConfig &config) {
   std::ostringstream out;

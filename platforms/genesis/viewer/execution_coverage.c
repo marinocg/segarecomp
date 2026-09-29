@@ -10,6 +10,7 @@
 typedef struct GenesisExecutionCoverageSession {
   GenesisSha256 frame_stream;
   uint64_t produced;
+  int skip_render;
 } GenesisExecutionCoverageSession;
 
 static GenesisExecutionCoverageSession *g_coverage_session;
@@ -21,7 +22,14 @@ static int genesis_execution_coverage_producer(const uint8_t vram[GENESIS_VDP_VR
                                                const uint8_t cram[GENESIS_VDP_CRAM_BYTES],
                                                const uint16_t registers[GENESIS_VDP_REGISTER_COUNT],
                                                GenesisFrameArtifact *frame_out) {
-  const int status = genesis_vdp_produce_frame(vram, vsram, cram, registers, frame_out);
+  int status;
+  if (g_coverage_session != NULL && g_coverage_session->skip_render) {
+    /* Count the genuine virtual frame boundary without rendering: the runtime publishes nothing on a nonzero
+       status and mutates nothing, exactly as for a failed render. */
+    g_coverage_session->produced++;
+    return 1;
+  }
+  status = genesis_vdp_produce_frame(vram, vsram, cram, registers, frame_out);
   if (status == 0 && g_coverage_session != NULL) {
     genesis_sha256_update(&g_coverage_session->frame_stream, frame_out->frame_digest, 32U);
     g_coverage_session->produced++;
@@ -129,6 +137,7 @@ void genesis_execution_coverage_run(GenesisRuntime *runtime, GenesisDispatchFunc
   memset(&latest, 0, sizeof(latest));
   memset(&session, 0, sizeof(session));
   genesis_sha256_init(&session.frame_stream);
+  session.skip_render = options->skip_render;
   observer.producer = genesis_execution_coverage_producer;
   observer.latest = &latest;
   observer.sequence = 0U;

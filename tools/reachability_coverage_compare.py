@@ -171,12 +171,121 @@ def compare(observed: set[int], witnesses: dict, challenger: dict, summary: dict
     return report
 
 
+DYNAMIC_FAMILIES = {"rts", "rts_push_window", "rte", "rtr", "jmp_(An)", "jsr_(An)", "jmp_d16(An)", "jsr_d16(An)",
+                    "jmp_(d8,An,Xn)", "jsr_(d8,An,Xn)", "jmp_(d8,PC,Xn)", "jsr_(d8,PC,Xn)", "unclassified"}
+
+
+def structural_attribution(observed: set[int], witnesses: dict, discovered: set[int], classification: dict) -> dict:
+    """Attribution using a private classification of observed PCs (same decoder; never discovery input).
+
+    Each first entry prev -> x is labelled structurally:
+      fixed        x is a fixed successor of prev (fallthrough / branch / call target)
+      call_return  prev is an RTS and x is the stacked continuation of an observed call C; the structural
+                   predecessor of x is C (the return itself is ordinary once C is known)
+      exception_return  prev is an RTE/RTR and x is the stacked continuation of an observed TRAP C
+      dynamic      prev owns a runtime-derived PC (its family) and x is not explained above
+      interrupt / exception_entry / initial
+    First gate: the step leaving D on the structural chain. Nearest mechanism: the closest dynamic step.
+    """
+    pcs = classification["pcs"]
+    info = {int(pc, 16): entry for pc, entry in pcs.items()}
+    stacked_call = {}
+    stacked_exception = {}
+    for pc, entry in info.items():
+        if pc in observed and entry.get("decoded"):
+            target = int(entry["stacked_address"], 16)
+            if entry["stacked"] == "call":
+                stacked_call.setdefault(target, pc)
+            elif entry["stacked"] == "exception":
+                stacked_exception.setdefault(target, pc)
+
+    def step(x: int):
+        ordinal, previous, cause = witnesses[x]
+        if cause == CAUSE_INITIAL:
+            return None, "initial", None
+        if cause == CAUSE_INTERRUPT:
+            return previous, "interrupt", None
+        entry = info.get(previous)
+        if entry is None or not entry.get("decoded"):
+            return previous, "unclassified_predecessor", None
+        family = entry["family"]
+        if x in {int(t, 16) for t in entry["successors"]}:
+            return previous, "fixed", None
+        if family == "rts" and x in stacked_call and witnesses.get(stacked_call[x], (ordinal + 1,))[0] < ordinal:
+            return stacked_call[x], "call_return", None
+        if family in ("rte", "rtr") and x in stacked_exception:
+            return stacked_exception[x], "exception_return", None
+        if family in DYNAMIC_FAMILIES and family != "none":
+            return previous, "dynamic", family
+        if entry.get("exception_entry") or entry["stacked"] == "exception":
+            return previous, "exception_entry", None
+        return previous, "other", None
+
+    steps = {x: step(x) for x in observed if x in witnesses}
+    first_gate: dict[str, int] = {}
+    first_gate_sites: dict[str, set] = {}
+    nearest: dict[str, int] = {}
+    nearest_sites: dict[str, set] = {}
+    dynamic_entries: dict[str, int] = {}
+    dynamic_entry_sites: dict[str, set] = {}
+    dynamic_entries_missing: dict[str, int] = {}
+    kinds_missing: dict[str, int] = {}
+    for x, (pred, kind, family) in steps.items():
+        if kind == "dynamic":
+            dynamic_entries[family] = dynamic_entries.get(family, 0) + 1
+            dynamic_entry_sites.setdefault(family, set()).add(pred)
+            if x not in discovered:
+                dynamic_entries_missing[family] = dynamic_entries_missing.get(family, 0) + 1
+        if x not in discovered:
+            kinds_missing[kind] = kinds_missing.get(kind, 0) + 1
+    missing = observed - discovered
+    for x in missing:
+        cursor = x
+        gate = None
+        near = None
+        seen = set()
+        while cursor is not None and cursor not in seen:
+            seen.add(cursor)
+            if cursor not in steps:
+                gate = gate or ("no_witness", None)
+                break
+            pred, kind, family = steps[cursor]
+            label = family if kind == "dynamic" else kind
+            if near is None and kind == "dynamic":
+                near = (family, pred)
+            if pred is None or pred in discovered:
+                gate = (label, pred)
+                break
+            cursor = pred
+        gate = gate or ("cycle", None)
+        first_gate[gate[0]] = first_gate.get(gate[0], 0) + 1
+        if gate[1] is not None:
+            first_gate_sites.setdefault(gate[0], set()).add(gate[1])
+        near_label = near[0] if near else "none_(" + gate[0] + ")"
+        nearest[near_label] = nearest.get(near_label, 0) + 1
+        if near:
+            nearest_sites.setdefault(near_label, set()).add(near[1])
+    return {
+        "structural_first_gate_missing_pcs": dict(sorted(first_gate.items())),
+        "structural_first_gate_distinct_sites": {k: len(v) for k, v in sorted(first_gate_sites.items())},
+        "nearest_mechanism_missing_pcs": dict(sorted(nearest.items())),
+        "nearest_mechanism_distinct_sites": {k: len(v) for k, v in sorted(nearest_sites.items())},
+        "observed_dynamic_entries_by_family": dict(sorted(dynamic_entries.items())),
+        "observed_dynamic_entry_sites_by_family": {k: len(v) for k, v in sorted(dynamic_entry_sites.items())},
+        "missing_first_entry_kinds": dict(sorted(kinds_missing.items())),
+        "missing_dynamic_entries_by_family": dict(sorted(dynamic_entries_missing.items())),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--coverage-dir", required=True)
     parser.add_argument("--challenger", required=True)
     parser.add_argument("--coverage-summary")
     parser.add_argument("--checkpoint-frames", help="comma-separated frames to keep from the per-epoch recall")
+    parser.add_argument("--classification",
+                        help="private classification of the observed PCs (segarecomp genesis-reachability-challenger "
+                             "--classify-pcs/--classify-output); enables structural attribution")
     args = parser.parse_args()
     coverage_dir = pathlib.Path(args.coverage_dir)
     observed = load_bitmap(coverage_dir / "coverage.bitmap")
@@ -190,6 +299,10 @@ def main() -> int:
         text = pathlib.Path(args.coverage_summary).read_text(encoding="utf-8").strip()
         summary = json.loads(text[len("COVERAGE_SUMMARY "):] if text.startswith("COVERAGE_SUMMARY ") else text)
     report = compare(observed, witnesses, challenger, summary)
+    if args.classification:
+        classification = json.loads(pathlib.Path(args.classification).read_text(encoding="utf-8"))
+        report.update(structural_attribution(observed, witnesses, {int(x, 16) for x in challenger["discovered"]},
+                                             classification))
     if args.checkpoint_frames and "checkpoints" in report:
         keep = {int(x) for x in args.checkpoint_frames.split(",")}
         report["checkpoints"] = [c for c in report["checkpoints"] if c["frame"] in keep]

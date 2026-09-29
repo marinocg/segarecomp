@@ -67,6 +67,21 @@ struct GenesisReachabilityChallengerResult {
 [[nodiscard]] GenesisReachabilityChallengerResult run_genesis_reachability_challenger(
     const FrontendProgram &program, const GenesisReachabilityChallengerConfig &config);
 
+// Classification only (never discovery): decodes the one instruction at `pc` with the challenger's decoder and
+// projects its control successors. Used to label observed runtime transitions by generic mechanism; the result
+// never enters D.
+struct GenesisReachabilityPcClassification {
+  bool decoded{};
+  std::uint32_t length{};
+  M68kControlSuccessors control{};
+  bool push_window_rts{};  // RTS preceded (within this classification set) by an ADR 0048 push window
+};
+[[nodiscard]] std::map<std::uint32_t, GenesisReachabilityPcClassification> classify_genesis_reachability_pcs(
+    const FrontendProgram &program, const std::vector<std::uint32_t> &pcs);
+// PRIVATE JSON (exact PCs) of a classification.
+[[nodiscard]] std::string format_genesis_reachability_classification_private(
+    const std::map<std::uint32_t, GenesisReachabilityPcClassification> &classification);
+
 // Aggregate-only JSON (counts per family etc.; never an address). Safe for durable evidence.
 [[nodiscard]] std::string format_genesis_reachability_challenger_aggregate(const GenesisReachabilityChallengerResult &result,
                                                                            const GenesisReachabilityChallengerConfig &config);
