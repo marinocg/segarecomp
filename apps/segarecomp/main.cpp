@@ -38,7 +38,7 @@ void print_usage(std::ostream &output) {
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
                   "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]...] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
-                 "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
+                 "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
                "  segarecomp probe-genesis-startup-mapping <address-hex8> <width-decimal> <image-length-hex16>\n";
@@ -442,6 +442,8 @@ int run_cli(int argc, char **argv) {
         else if (option == "--classify-pcs" && has_value && !classify_input) { classify_input = argv[index + 1]; index += 2; }
         else if (option == "--classify-output" && has_value && !classify_output) { classify_output = argv[index + 1]; index += 2; }
         else if (option == "--pea-continuations" && !config.pea_continuations) { config.pea_continuations = true; ++index; }
+        else if (option == "--pc-index-recovery" && !config.pc_index_recovery) { config.pc_index_recovery = true; ++index; }
+        else if (option == "--pc-index-width-domains" && !config.pc_index_width_domains) { config.pc_index_width_domains = true; ++index; }
         else if (option == "--exception-model" && has_value) {
           const std::string_view model = argv[index + 1];
           if (model == "strict") config.exception_model = segarecomp::GenesisReachabilityExceptionModel::strict;
@@ -471,6 +473,7 @@ int run_cli(int argc, char **argv) {
         } else { print_usage(std::cerr); return 2; }
       }
       if (classify_input.has_value() != classify_output.has_value()) { print_usage(std::cerr); return 2; }
+      if (config.pc_index_width_domains && !config.pc_index_recovery) { print_usage(std::cerr); return 2; }
       if (!rom || !digest || !private_output || (reset_entry == (entry_address.has_value() || mapping_base.has_value())) ||
           (!reset_entry && (!entry_address || !mapping_base))) {
         print_usage(std::cerr); return 2;
@@ -530,13 +533,12 @@ int run_cli(int argc, char **argv) {
       }
       std::string private_report = segarecomp::format_genesis_reachability_challenger_private(result, config);
       if (universe) {
-        // Carry U into the private report's aggregate too, so the comparison tool can form D/U and O/U.
-        const std::string marker = ",\"sites\":{";
-        const auto at = private_report.find(marker);
-        const auto closing = at == std::string::npos ? at : private_report.find("}}", at);
-        if (closing == std::string::npos) { std::cerr << "segarecomp: malformed challenger report\n"; return 2; }
-        const auto key = aggregate.find(",\"universe_immutable_rom_aot\":");
-        private_report.insert(closing + 1U, aggregate.substr(key, aggregate.size() - 1U - key));
+        // Carry U into the private report's aggregate too, so the comparison tool can form D/U and O/U: the
+        // private report embeds the exact aggregate string, which is replaced by the U-carrying one.
+        const auto plain = segarecomp::format_genesis_reachability_challenger_aggregate(result, config);
+        const auto at = private_report.find("\"aggregate\":" + plain);
+        if (at == std::string::npos) { std::cerr << "segarecomp: malformed challenger report\n"; return 2; }
+        private_report.replace(at + 12U, plain.size(), aggregate);
       }
       std::ofstream sink{std::string(*private_output), std::ios::binary};
       sink << private_report;
