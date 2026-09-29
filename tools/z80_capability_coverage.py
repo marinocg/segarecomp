@@ -138,6 +138,8 @@ def pipeline_stages(forms, lowered, emitter, cc):
                     emitted[vec.form] = False
             exe, error = conformance.compile_units(toolchain, workdir, "cov",
                                                    extra_sources=[conformance.TOOLS_DIR / "z80_conformance_runner.c"])
+            if exe is None:  # never hide a build failure: it silently zeroes every later stage
+                print("z80 coverage: %s did not compile:\n%s" % (batch.name, str(error)[:2000]), file=sys.stderr)
             outcomes = conformance.run_exe(exe, batch.text, workdir) if exe else {}
             for fid in forms_here:
                 mine = [v for v, _ in batch.vectors if v.form == fid]

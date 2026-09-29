@@ -113,7 +113,7 @@ int main(int argc, char **argv) {
       zc_state now;
       memset(&now, 0, sizeof now);
       store_state(&now, &rt.state);
-      zc_print_step(stdout, vec.name, k, (unsigned long)(rt.state.cycles - before), z80_outcome_name(outcome), &now, &events);
+      zc_print_step(stdout, vec.name, k, (unsigned long long)(rt.state.cycles - before), z80_outcome_name(outcome), &now, &events);
       if (z80_outcome_is_error(outcome)) break; /* fail-closed: later steps are meaningless */
     }
   }

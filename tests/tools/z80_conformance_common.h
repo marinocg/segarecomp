@@ -39,7 +39,7 @@ typedef struct {
   unsigned i, r, im, iff1, iff2, q, halted, deferral, ldair, prefix_run, nmireject;
 } zc_state;
 
-typedef struct { char mode; unsigned long budget; int int_line, nmi, map; } zc_step;
+typedef struct { char mode; unsigned long long budget; int int_line, nmi, map; } zc_step;
 typedef struct { unsigned lo, hi, identity, base; } zc_range;
 typedef struct { int count; zc_range ranges[ZC_MAX_RANGES]; } zc_map;
 
@@ -160,10 +160,10 @@ static int zc_read_vector(FILE *file, zc_vector *v) {
     } else if (!strcmp(verb, "S")) {
       zc_step *st = &v->steps[v->step_count];
       char mode;
-      unsigned long budget;
+      unsigned long long budget;
       int int_line, nmi, map = 0;
       char extra[32] = {0};
-      const int n = sscanf(rest, " %c %lu %d %d %31s", &mode, &budget, &int_line, &nmi, extra);
+      const int n = sscanf(rest, " %c %llu %d %d %31s", &mode, &budget, &int_line, &nmi, extra);
       if (n < 4 || v->step_count >= ZC_MAX_STEPS) { free(line); return -1; }
       if (n == 5 && !strncmp(extra, "map=", 4)) map = atoi(extra + 4);
       *st = (zc_step){mode, budget, int_line, nmi, map};
@@ -177,10 +177,10 @@ static int zc_read_vector(FILE *file, zc_vector *v) {
   return 0;
 }
 
-static void zc_print_step(FILE *out, const char *name, int step, unsigned long t, const char *outcome, const zc_state *s,
+static void zc_print_step(FILE *out, const char *name, int step, unsigned long long t, const char *outcome, const zc_state *s,
                           const zc_events *ev) {
   fprintf(out,
-          "S %s %d t=%lu out=%s a=%02X f=%02X b=%02X c=%02X d=%02X e=%02X h=%02X l=%02X a2=%02X f2=%02X b2=%02X "
+          "S %s %d t=%llu out=%s a=%02X f=%02X b=%02X c=%02X d=%02X e=%02X h=%02X l=%02X a2=%02X f2=%02X b2=%02X "
           "c2=%02X d2=%02X e2=%02X h2=%02X l2=%02X ix=%04X iy=%04X sp=%04X pc=%04X wz=%04X i=%02X r=%02X im=%u iff1=%u "
           "iff2=%u q=%02X halted=%u deferral=%u ldair=%u prefix_run=%u nmireject=%u w=",
           name, step, t, outcome, s->a, s->f, s->b, s->c, s->d, s->e, s->h, s->l, s->a2, s->f2, s->b2, s->c2, s->d2,
