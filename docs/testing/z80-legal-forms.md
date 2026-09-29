@@ -54,8 +54,8 @@ Output is byte-for-byte reproducible (sorted keys, fixed row order, no timestamp
 
 | family | task | forms | encodings |
 | --- | --- | --- | --- |
-| data_alu | SEG-008-T004 | 125 | 375 |
-| control_stack | SEG-008-T005 | 29 | 66 |
+| data_alu | SEG-008-T004 | 128 | 378 |
+| control_stack | SEG-008-T005 | 26 | 63 |
 | cb_bit_prefix | SEG-008-T006 | 66 | 768 |
 | ed_io_interrupt | SEG-008-T007 | 41 | 237 |
 

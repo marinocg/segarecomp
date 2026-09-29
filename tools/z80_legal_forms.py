@@ -172,7 +172,7 @@ def classify_base(b):
             return op("EXX", "none", "none", "control_stack", 4, 1, "op")
         if p == 2:
             return op("JP", "none", "hl", "control_stack", 4, 1, "op", effects=("control", "indirect"))
-        return op("LD", "sp", "hl", "control_stack", 6, 1, "op")
+        return op("LD", "sp", "hl", "data_alu", 6, 1, "op")
     if z == 2:
         return op("JP", "cc", "nn", "control_stack", 10, 3, "op nn_lo nn_hi", effects=("control",))
     if z == 3:
@@ -371,7 +371,7 @@ def classify_index(b, ix):
     if b == 0xE9:
         return op("JP", "none", ix, "control_stack", 8, 2, lay, m1=2, effects=("control", "indirect"))
     if b == 0xF9:
-        return op("LD", "sp", ix, "control_stack", 10, 2, lay, m1=2)
+        return op("LD", "sp", ix, "data_alu", 10, 2, lay, m1=2)
     if b == 0xE3:
         return op("EX", "sp_ind", ix, "control_stack", 23, 2, lay, m1=2, effects=("stack", "memory"))
     return prefix("prefix_ignored")

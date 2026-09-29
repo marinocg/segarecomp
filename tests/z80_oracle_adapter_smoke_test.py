@@ -34,15 +34,22 @@ def checkout():
     return root
 
 
+def skip_reason():
+    configured = os.environ.get(CHECKOUT_ENV)
+    if not configured:
+        return "pinned Z80 oracle checkout unavailable (%s unset)" % CHECKOUT_ENV
+    return "pinned Z80 oracle checkout unavailable (%s=%s has no redcode_Z80/sources/Z80.c)" % (CHECKOUT_ENV, configured)
+
+
 def main():
     compiler = sys.argv[1] if len(sys.argv) > 1 else "cc"
     root = checkout()
     if root is None:
-        print("skipped: pinned Z80 oracle checkout unavailable (%s unset)" % CHECKOUT_ENV)
+        print("skipped: " + skip_reason())
         return 0
     with tempfile.TemporaryDirectory() as tmp:
         exe = pathlib.Path(tmp) / "adapter_smoke"
-        cmd = [compiler, "-std=c11", "-Wall", "-Wextra", *DEFINES,
+        cmd = [compiler, "-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror", *DEFINES,
                "-I%s" % (root / "redcode_Z80" / "API"), "-I%s" % (root / "redcode_Zeta" / "API"),
                str(SOURCE), str(root / "redcode_Z80" / "sources" / "Z80.c"), "-o", str(exe)]
         subprocess.run(cmd, check=True)

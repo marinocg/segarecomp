@@ -35,7 +35,7 @@ EXPECTED_PER_SPACE = {  # space: (forms, documented encodings, undocumented enco
     "base": (75, 252, 0, 4), "cb": (22, 248, 8, 0), "ed": (44, 58, 198, 0), "dd": (38, 39, 46, 171),
     "fd": (38, 39, 46, 171), "ddcb": (22, 31, 225, 0), "fdcb": (22, 31, 225, 0),
 }
-EXPECTED_PER_FAMILY = {"data_alu": (125, 375), "control_stack": (29, 66), "cb_bit_prefix": (66, 768),
+EXPECTED_PER_FAMILY = {"data_alu": (128, 378), "control_stack": (26, 63), "cb_bit_prefix": (66, 768),
                        "ed_io_interrupt": (41, 237)}
 
 

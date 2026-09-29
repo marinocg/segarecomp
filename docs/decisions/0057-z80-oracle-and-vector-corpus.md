@@ -108,12 +108,20 @@ How the disagreements resolve:
      They set the full state, run one instruction or interrupt response, observe memory/I/O/INTA callbacks, and read
      the full state back (MEMPTR, Q, IFF, IM, R, HALT, EI-pending, T-states). Cases: INI, OUTI, IM2 (odd vector),
      HALT, NMI.
-   - `tests/z80_legal_forms_oracle_crosscheck_test.py` and `tests/z80_oracle/legal_forms_crosscheck.c`
-     falsify the independent dataset (ADR 0056) against the oracle. They check the length, the T-states per timing
-     class and the M1/R increment of every one of the 1,446 form encodings. They also check the DD/FD
-     `prefix_ignored` bytes (4 + base) and parametric chains (k = 1..8; repeated, alternating) against
-     `4(k-1) + T` and `(k-1) + m1`. Result: **1,814 cases, 0 mismatches**. A negative control (all 19-T timings
-     corrupted to 18) produced 47 mismatches.
+   - `tests/z80_legal_forms_oracle_crosscheck_test.py` and `tests/z80_oracle/legal_forms_crosscheck.c` falsify
+     the independent dataset (ADR 0056) against the oracle, with exact expectations. For every one of the 1,446
+     form encodings they check the exact T-states, the exact R increment (M1 fetches) and the exact resulting PC:
+     the length for straight-line forms, and the computed target or fall-through for control forms.
+     - Conditional forms (JR cc, JP cc, CALL cc, RET cc, DJNZ) run with the condition forced true and false, and
+       each asserts its taken or not-taken T-states and PC.
+     - Repeat forms run a repeating iteration (PC unchanged, repeating T-states) and a final iteration.
+     - The DD/FD `prefix_ignored` bytes are checked as 4 + base form.
+     - Parametric chains (k = 1..8, repeated and alternating) are checked against `4(k-1) + T`, `(k-1) + m1` and
+       `k + len - 1`, plus a prefix before ED and a chain before DDCB.
+     - Result: **1,909 cases, 0 mismatches**.
+     - Built-in mutation controls on in-memory corrupted copies must all be detected, and were: taken/not-taken
+       swapped (126 mismatches), repeating T-states changed (8), control-form lengths changed (105), and one M1
+       count changed (1).
 
 ## Vector corpora: falsification inputs only, never the specification
 
@@ -137,5 +145,10 @@ The specification remains UM0080, Young, [MEMPTR], [Rak] and [Banks], with confl
 3. **The data-bus byte during interrupt acknowledge on specific consoles** (platform fact; matters for IM0/IM2 only).
 4. **MEMPTR on non-final INxR/OTxR iterations (PC+1).** The evidence is netlist-based, not a hardware measurement.
    T007 validates against the oracle and labels it netlist-evidenced.
-5. **NMI held off across DD/FD prefixes, and NMI rejected directly after an NMI response.** The evidence is netlist
-   and forum-based, and all tested cores agree. ADR 0056 adopts it; T007 targets it with explicit vectors.
+5. **NMI held off across DD/FD prefixes, and an NMI edge during an NMI response discarded (not deferred).** The
+   evidence is netlist and forum-based (Young §5.5 says the NMI-prefix case was not tested). The three finalists agree
+   on the prefix case. The second-NMI rule was not in the T001 smoke matrix; the pinned oracle implements
+   discard. ADR 0056 adopts both; T007 targets them with explicit vectors.
+6. **Maskable INT deferred after `RETI`/`RETN` that change IFF1** (Weissflog 2021; Sainz de Baranda 2022). The
+   evidence is netlist and emulator research, implemented by the pinned oracle. Not yet cross-checked against
+   kosarev. ADR 0056 adopts it; T007 targets it.

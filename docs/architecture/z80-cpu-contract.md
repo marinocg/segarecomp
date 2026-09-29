@@ -99,11 +99,20 @@ NMI has priority over INT.
 next instruction always executes first. Consecutive `EI`s keep deferring. `DI` clears IFF1 and IFF2 immediately
 (no INT at the boundary after DI) [UM0080; Young §5.3, §5.5]. NMI acceptance is not blocked by the EI deferral (§4.7).
 
+**RETI/RETN deferral.** A maskable INT is also not accepted at the boundary immediately after `RETI` or `RETN`
+(any ED RETN/RETI encoding) when IFF1 and IFF2 differed before that instruction, i.e. when the instruction changed
+IFF1. This happens only when returning from an NMI handler entered with interrupts enabled. It is relevant because
+a Master System pause-button NMI can return while the VDP INT is pending [Weissflog, "A New Cycle-Stepped Z80
+Emulator" (2021-12-17); Sainz de Baranda, spectrumcomputing.co.uk t=7086 and stardot t=24662 (2022); implemented by
+the pinned redcode oracle]. The evidence is netlist and emulator research, not a Zilog document (ADR 0057,
+unresolved item 6). The EI-deferral state therefore generalises to "maskable INT deferred at this boundary": it is
+set by `EI`, and by `RETI`/`RETN` when they change IFF1.
+
 ### 4.3 Modes
 
 | event | action | T-states | R |
 | --- | --- | --- | --- |
-| NMI | IFF1 := 0 (IFF2 keeps the previous IFF1); push PC; PC := 0x0066 | 11 | +1 |
+| NMI | IFF1 := 0, IFF2 unchanged [Young §5.3 hardware test]; push PC; PC := 0x0066 | 11 | +1 |
 | INT, IM1 | IFF1 := IFF2 := 0; push PC; PC := 0x0038 | 13 | +1 |
 | INT, IM2 | IFF1 := IFF2 := 0; push PC; vector address V := (I << 8) \| data-bus byte; PC := mem[V] \| mem[(V+1) & 0xFFFF] << 8 | 19 | +1 |
 | INT, IM0 | static contract (§4.5) | 13 for RST p | +1 |
@@ -153,16 +162,19 @@ P/V := IFF2. On NMOS, if a maskable interrupt is accepted at the boundary immedi
 `LD A,R`, the P/V flag that was set is instead read as 0 [redcode-doc, option `Z80_WITH_ZILOG_NMOS_LD_A_IR_BUG`,
 which documents this Zilog NMOS behaviour; not covered by Young or UM0080]. Acceptance occurs only
 at instruction boundaries in this contract, so the quirk is deterministic. The LD A,I/R marker is set by these two
-instructions and cleared by every other instruction. If an INT is accepted while the marker is set, the saved F
-has P/V = 0. The NMOS default models it; the CMOS variant parameter disables it.
+instructions and cleared by every other instruction. If an INT is accepted while the marker is set, the P/V flag in
+the live F register (the value `LD A,I/R` produced) is cleared to 0 before the handler runs. The NMOS default models it; the CMOS variant parameter disables it.
 
 ### 4.7 Prefix chains, EI and interrupt acceptance
 
 Neither INT nor NMI is accepted between a DD/FD prefix and the following byte. That includes between the prefixes of a
-chain, so a chain of any length plus its effective instruction forms one indivisible instruction boundary [UM0080;
-Young §5.5; netlist evidence; all oracle finalists agree] (ADR 0056 §3). EI defers only maskable INT, so an NMI
-is accepted directly after `EI` [Banks, "NMI during EI"]. An NMI is not accepted at the boundary directly after an
-NMI response (netlist-evidenced; redcode oracle behaviour; ADR 0057 unresolved item 5).
+chain, so a chain of any length plus its effective instruction forms one indivisible instruction boundary. For INT:
+[Young §5.5], "interrupts are only accepted between instructions ... also true for prefixed instructions". For NMI:
+netlist evidence and the pinned oracle; Young §5.5 states the NMI case was not tested (ADR 0057, unresolved item 5).
+All oracle finalists agree (ADR 0056 §3). EI defers only maskable INT, so an NMI is accepted directly after `EI`
+[Banks, "NMI during EI"]. An NMI edge that arrives during an NMI response is discarded, not deferred: at least one
+instruction executes between two NMI responses. This is netlist-evidenced and implemented by the pinned oracle; it is
+not yet covered by a T001 smoke case (ADR 0057, unresolved item 5; T007 targets it).
 
 ## 5. Flags
 

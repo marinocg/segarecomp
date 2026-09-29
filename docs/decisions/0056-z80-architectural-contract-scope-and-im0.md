@@ -54,8 +54,12 @@ The legal-form dataset (`tools/z80_legal_forms.py`) is the SEG-008 denominator:
 - **Coverage stages.** The stage columns are `decodes`, `lowers`, `emits`, `compiles`, `executes`,
   `aot_admitted`, `oracle_state`, `oracle_memory`, `oracle_io`, `timing_modeled` and `timing_validated`.
 - **Evidence.** The dataset is byte-reproducible, and a two-way independence test enforces its separation from
-  production. The pinned oracle falsification over all 1,446 encodings plus the prefix rules found 0 mismatches
-  in length, T-states or R (ADR 0057).
+  production. The pinned oracle check covers all 1,446 encodings, the prefix-ignored bytes and the chain rules:
+  1,909 exact cases with 0 mismatches.
+  - It checks exact T-states, R and resulting PC.
+  - Conditional forms run both outcomes; repeat forms run repeating and final iterations; control forms check the
+    exact target or fall-through.
+  - Built-in mutation controls must all be detected (ADR 0057).
 
 ### 3. Interrupt acceptance inside prefix chains (decided)
 
@@ -67,14 +71,17 @@ The legal-form dataset (`tools/z80_legal_forms.py`) is the SEG-008 denominator:
   finalists agree, and the redcode oracle implements it (ADR 0057 unresolved item 5 records the evidence class).
 - Consequence for static code: a chain is decoded and emitted as a single owner instruction. A deadline or
   interrupt can never resume in the middle of a chain.
-- An NMI is not accepted immediately after an NMI response (redcode behaviour, netlist-evidenced). T007 targets
-  this rule with explicit vectors.
+- An NMI edge arriving during an NMI response is discarded, not deferred (redcode behaviour, netlist-evidenced).
+  T007 targets this rule with explicit vectors.
 
 ### 4. EI, NMI, HALT, IM1/IM2, RETI/RETN, LD A,I/R
 
 These are decided as written in the contract document (§4):
 
 - **EI and NMI.** EI defers only maskable INT, and NMI is accepted directly after EI.
+- **RETI/RETN deferral.** `RETI`/`RETN` that change IFF1 (IFF1 != IFF2 before the instruction, i.e. returning
+  from an NMI) defer a maskable INT by one boundary, like `EI`. Sources: Weissflog 2021 and Sainz de Baranda 2022;
+  the pinned redcode oracle implements it. It is netlist/emulator-evidenced (ADR 0057, unresolved item 6).
 - **HALT.** The architectural PC while halted is HALT+1. Halted cycles cost 4 T-states each and increment R by 1.
 - **IM2.** The vector byte is used unmasked, the vector address wraps at 16 bits, and the table is read through
   ordinary memory reads before exact entry dispatch.

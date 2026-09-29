@@ -50,7 +50,7 @@ libraries, decides the additive `libs/core` change, and confirms both lists agai
 | item | status on `main` | Z80 use |
 | --- | --- | --- |
 | `codegen/c11/compiled_entry_table.hpp` | generic header; opaque 32-bit keys; names via `CompiledEntryTableNames` (Genesis defaults) | reuse with explicit Z80 names; key = code-image identity and address packed into 32 bits (ADR 0058) |
-| `codegen/c11/translation_units.hpp` | generic, key-sharded, deterministic | reuse for owner sharding (family key = packed image identity and address) |
+| `codegen/c11/translation_units.hpp` | generic, key-sharded, deterministic | reuse for owner sharding. The unit key is the dense position (image ordinal x image length + offset), not the lookup key (ADR 0058 §3) |
 | `codegen_c11` common support (`emit_c_manifest`) | metadata-only manifest from `RomInfo` (media classification) | platform-level. A Z80 generated program may emit it through the platform (SEG-009); the CPU lowering does not depend on `RomInfo` |
 | `libs/core` provenance/`CpuVariant` | M68K-shaped structures, one enum value | additive `CpuVariant::z80` only (above) |
 | SEG-020 first-divergence (`tools/m68k_first_divergence.py`, ADR 0042) | M68K boundary schema (`d[8]`, `a[8]`, `sr`) | pattern reused: bounded sequential lockstep, first differing domain, write-ordering rule. See extraction below |
