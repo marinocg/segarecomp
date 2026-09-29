@@ -6040,7 +6040,6 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
                                              aot_unrepresented_exact_pcs[pc], {}, true, {}, factoring);
     if (inner.starts_with("/* translation rejected"))
       return inner;  // fail closed: an entry whose timing is unaccounted is never emitted
-    inner = parameterize_own_pc(std::move(inner), pc);
     const auto [slot, inserted] =
         aot_body_ids.try_emplace(std::move(inner), static_cast<std::uint32_t>(aot_body_text.size()));
     if (inserted) {
@@ -6050,6 +6049,26 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     ++aot_body_uses[slot->second];
     aot_entry_body.push_back(slot->second);
   }
+  // SEG-025-T001 group C: only a body that is single-use under exact identity is re-keyed by its own-PC-
+  // normalized text, so every exact sharing above is preserved and group C can only add sharing (a body whose
+  // own address happens to appear in a shared list, e.g. an RTS return-target set, keeps its exact helper).
+  // A normalized text always contains `genesis_aot_pc`, which no exact text does, so the keys never collide.
+  if (factor_aot_bodies)
+    for (std::size_t index = 0; index < aot_order.size(); ++index) {
+      const auto id = aot_entry_body[index];
+      if (aot_body_uses[id] != 1U) continue;
+      auto normalized = parameterize_own_pc(*aot_body_text[id], aot_order[index]);
+      if (normalized.find(aot_pc_symbol) == std::string::npos) continue;
+      const auto [slot, inserted] =
+          aot_body_ids.try_emplace(std::move(normalized), static_cast<std::uint32_t>(aot_body_text.size()));
+      if (inserted) {
+        aot_body_text.push_back(&slot->first);
+        aot_body_uses.push_back(0U);
+      }
+      aot_body_uses[id] = 0U;
+      ++aot_body_uses[slot->second];
+      aot_entry_body[index] = slot->second;
+    }
   // Helper names are assigned to shared bodies in first-use (ascending address) order.
   std::vector<std::string> aot_body_helper(aot_body_text.size());
   std::size_t aot_helper_count = 0U;
