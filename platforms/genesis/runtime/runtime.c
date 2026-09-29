@@ -2825,6 +2825,93 @@ void genesis_m68k_enter_stopped_state(GenesisRuntime *runtime) {
   if (runtime != 0) runtime->m68k_interrupt.stopped = 1U;
 }
 
+/* SEG-026-T001: execution-PC coverage (see GenesisExecutionCoverage in runtime.h). Host-side bookkeeping
+   only: these functions read nothing but their own record and the PC values passed in. */
+int genesis_execution_coverage_contains(const GenesisExecutionCoverage *coverage, uint32_t pc) {
+  const uint32_t bus = pc & UINT32_C(0x00FFFFFF);
+  if (coverage == 0 || coverage->bitmap == 0 || (bus & 1U) != 0U) return 0;
+  return (coverage->bitmap[bus >> 4U] >> ((bus >> 1U) & 7U)) & 1U;
+}
+
+static void genesis_execution_coverage_dispatch(GenesisExecutionCoverage *coverage, uint32_t pc) {
+  if (coverage->has_current && coverage->current_pc == pc) return; /* the retirement successor, as tracked */
+  coverage->current_pc = pc;
+  coverage->current_cause =
+      (uint8_t)(coverage->has_last_retired ? GENESIS_COVERAGE_CAUSE_DISPATCH : GENESIS_COVERAGE_CAUSE_INITIAL);
+  coverage->has_current = 1U;
+}
+
+static void genesis_execution_coverage_retire(GenesisExecutionCoverage *coverage) {
+  uint32_t pc;
+  uint32_t bus;
+  uint8_t *byte;
+  uint8_t bit;
+  if (!coverage->has_current) {
+    ++coverage->unknown_retirement_count;
+    return;
+  }
+  pc = coverage->current_pc;
+  bus = pc & UINT32_C(0x00FFFFFF);
+  if (bus != pc) ++coverage->wide_pc_count;
+  if ((bus & 1U) != 0U) {
+    ++coverage->odd_pc_count;
+  } else if (coverage->bitmap != 0) {
+    byte = &coverage->bitmap[bus >> 4U];
+    bit = (uint8_t)(1U << ((bus >> 1U) & 7U));
+    if ((*byte & bit) == 0U) {
+      *byte = (uint8_t)(*byte | bit);
+      ++coverage->distinct_count;
+      if (coverage->witnesses != 0 && coverage->witness_count < coverage->witness_capacity) {
+        GenesisExecutionCoverageWitness *witness = &coverage->witnesses[coverage->witness_count++];
+        witness->retirement_ordinal = coverage->retirement_count;
+        witness->previous_pc = coverage->current_cause == GENESIS_COVERAGE_CAUSE_INTERRUPT_RESUMPTION
+                                   ? coverage->current_predecessor
+                                   : (coverage->has_last_retired ? coverage->last_retired_pc : 0U);
+        witness->pc = pc;
+        witness->cause = coverage->has_last_retired ? coverage->current_cause : (uint8_t)GENESIS_COVERAGE_CAUSE_INITIAL;
+      } else if (coverage->witnesses != 0) {
+        ++coverage->witness_overflow;
+      }
+    }
+  }
+  ++coverage->retirement_count;
+  coverage->last_retired_pc = pc;
+  coverage->has_last_retired = 1U;
+  coverage->has_current = 0U;
+}
+
+static void genesis_execution_coverage_successor(GenesisExecutionCoverage *coverage, int continues,
+                                                 uint32_t successor, uint32_t unredirected_successor) {
+  const int redirected = successor != unredirected_successor;
+  if (!continues) return;
+  coverage->current_pc = successor;
+  coverage->current_cause =
+      (uint8_t)(redirected ? GENESIS_COVERAGE_CAUSE_INTERRUPT_ENTRY : GENESIS_COVERAGE_CAUSE_RETIRE_SUCCESSOR);
+  coverage->has_current = 1U;
+  if (redirected) {
+    ++coverage->interrupt_redirects;
+    if (coverage->interrupt_depth == GENESIS_EXECUTION_COVERAGE_INTERRUPT_DEPTH) {
+      /* Bounded: drop the oldest pending resumption (a handler that never returned). */
+      unsigned index;
+      for (index = 1U; index < GENESIS_EXECUTION_COVERAGE_INTERRUPT_DEPTH; ++index) {
+        coverage->interrupted_successor[index - 1U] = coverage->interrupted_successor[index];
+        coverage->interrupted_predecessor[index - 1U] = coverage->interrupted_predecessor[index];
+      }
+      --coverage->interrupt_depth;
+      ++coverage->interrupt_depth_overflow;
+    }
+    coverage->interrupted_successor[coverage->interrupt_depth] = unredirected_successor;
+    coverage->interrupted_predecessor[coverage->interrupt_depth] = coverage->last_retired_pc;
+    ++coverage->interrupt_depth;
+  } else if (coverage->interrupt_depth != 0U &&
+             coverage->interrupted_successor[coverage->interrupt_depth - 1U] == successor) {
+    --coverage->interrupt_depth;
+    coverage->current_cause = (uint8_t)GENESIS_COVERAGE_CAUSE_INTERRUPT_RESUMPTION;
+    coverage->current_predecessor = coverage->interrupted_predecessor[coverage->interrupt_depth];
+    ++coverage->interrupt_resumptions;
+  }
+}
+
 /*
  * SEG-007-T252 / ADR-0040: the guest-owned runtime step/boundary contract.
  * Performs exactly one dispatch step -- the SEG-007-T175 defensive VDP DMA
@@ -2848,6 +2935,7 @@ GenesisControlTransfer genesis_runtime_step(GenesisRuntime *runtime, GenesisDisp
      no guest state, dispatch selection, or timing is read from or affected by
      this recording. */
   genesis_history_append(runtime, GENESIS_HISTORY_DISPATCH, runtime->pc, 0U, 0U, 0U, 0U, 0U);
+  if (runtime->execution_coverage != 0) genesis_execution_coverage_dispatch(runtime->execution_coverage, runtime->pc);
   /* SEG-007-T175 DEFENSIVE mechanism only (see the PRIMARY synchronous
      drain documented above genesis_vdp_drain_memory_to_vdp_dma_body /
      inside genesis_route_access's VDP branch, which now drains a
@@ -2881,6 +2969,7 @@ static GenesisControlTransfer genesis_runtime_retire_m68k_instruction_impl(
   const int stop_pending = pending_stop != 0;
   if (runtime == 0 || (stop_pending && pending_stop->kind != GENESIS_STOP))
     return genesis_internal_dispatch_inconsistency_stop(runtime);
+  if (runtime->execution_coverage != 0) genesis_execution_coverage_retire(runtime->execution_coverage);
   result.kind = GENESIS_CONTINUE_AT_PC;
   result.next_pc = next_pc;
   runtime->pc = next_pc;
@@ -2889,6 +2978,10 @@ static GenesisControlTransfer genesis_runtime_retire_m68k_instruction_impl(
   if (!stop_pending && result.kind == GENESIS_CONTINUE_AT_PC && runtime->m68k_interrupt.stopped)
     genesis_m68k_wait_while_stopped(runtime, &result);
   if (runtime->m68k_checkpoint.enabled) genesis_m68k_checkpoint_finalize(runtime);
+  if (runtime->execution_coverage != 0)
+    genesis_execution_coverage_successor(runtime->execution_coverage,
+                                         !stop_pending && result.kind == GENESIS_CONTINUE_AT_PC, result.next_pc,
+                                         next_pc);
   if (stop_pending && result.kind == GENESIS_CONTINUE_AT_PC) return *pending_stop;
   return result;
 }

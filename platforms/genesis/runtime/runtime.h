@@ -793,7 +793,72 @@ typedef struct GenesisRuntime {
   GenesisDeviceCheckpoint device_checkpoint;
   /* SEG-007-T255: host-owned optional observer (NULL = absent); non-semantic. */
   GenesisLiveFrameObserver *live_frame_observer;
+  /* SEG-026-T001: host-owned optional execution-PC coverage observer (NULL = absent, the value in every
+     ordinary build); non-semantic. See GenesisExecutionCoverage. */
+  struct GenesisExecutionCoverage *execution_coverage;
 } GenesisRuntime;
+
+/* SEG-026-T001: optional, measurement-only, host-owned complete execution-PC coverage.
+ *
+ * Records every distinct guest MC68000 instruction-start PC that RETIRES during a run of arbitrary length,
+ * in a caller-owned dense bitmap with one bit per even 24-bit bus address (1 MiB). Rule: the runtime tracks
+ * the PC about to execute (`current_pc`) -- set at each dispatch (`genesis_runtime_step`) and, at every
+ * retirement that continues, to the retirement's selected successor (after interrupt admission) -- and marks
+ * `current_pc` when that instruction retires. Ordinary multi-instruction blocks therefore contribute every
+ * interior instruction, immutable-ROM AOT entries and compiled RAM-copy aliases contribute their exact
+ * execution PC (aliases stay distinct because their execution addresses are work-RAM addresses), and an
+ * instruction that stops fail-closed before retiring is not counted. No opcode is decoded and no guest
+ * state, dispatch selection, timing or device state is read back into execution: recording never changes
+ * behavior. It is excluded from every report, digest and checkpoint.
+ *
+ * First-entry witness (optional, `witnesses != NULL`): for the first retirement of each new PC, records the
+ * previously retired PC and how the new PC became current (dispatch, ordinary retirement successor, or a
+ * successor redirected by interrupt admission). When interrupt admission replaces a retirement's successor S,
+ * (S, retired PC) is pushed on a bounded pending-resumption stack; when S later becomes current again (the
+ * handler returned to it) the witness names the instruction retired before the interrupt as predecessor, so an
+ * interrupted first execution is attributed to its architectural predecessor, not to the handler's RTE. Exact PCs are commercial-derived local diagnostics: host
+ * tools keep them in ignored private artifacts and persist only aggregates. */
+#define GENESIS_EXECUTION_COVERAGE_BITMAP_BYTES (UINT32_C(1) << 20)
+typedef enum GenesisExecutionCoverageCause {
+  GENESIS_COVERAGE_CAUSE_INITIAL = 0,           /* no earlier retirement in this run */
+  GENESIS_COVERAGE_CAUSE_RETIRE_SUCCESSOR = 1,  /* the previous retirement's own selected successor */
+  GENESIS_COVERAGE_CAUSE_INTERRUPT_ENTRY = 2,   /* successor replaced by interrupt admission at that retirement */
+  GENESIS_COVERAGE_CAUSE_DISPATCH = 3,          /* set by a dispatch that did not follow a retirement successor */
+  /* the interrupted successor of an earlier interrupt redirect became current again (the handler resumed it);
+     the witness's `previous_pc` is then the instruction retired just before the interrupt was admitted */
+  GENESIS_COVERAGE_CAUSE_INTERRUPT_RESUMPTION = 4
+} GenesisExecutionCoverageCause;
+#define GENESIS_EXECUTION_COVERAGE_INTERRUPT_DEPTH 16U
+typedef struct GenesisExecutionCoverageWitness {
+  uint64_t retirement_ordinal; /* 0-based ordinal of the first retirement of `pc` */
+  uint32_t previous_pc;        /* previously retired PC (undefined for CAUSE_INITIAL) */
+  uint32_t pc;
+  uint8_t cause;               /* GenesisExecutionCoverageCause */
+} GenesisExecutionCoverageWitness;
+typedef struct GenesisExecutionCoverage {
+  uint8_t *bitmap;                            /* caller-owned, zeroed, GENESIS_EXECUTION_COVERAGE_BITMAP_BYTES */
+  GenesisExecutionCoverageWitness *witnesses; /* caller-owned; may be NULL */
+  uint64_t witness_capacity;
+  uint64_t witness_count;
+  uint64_t witness_overflow;                  /* first entries not recorded for lack of capacity */
+  uint64_t distinct_count;                    /* distinct retired PCs */
+  uint64_t retirement_count;                  /* retirements observed with a known current PC */
+  uint64_t unknown_retirement_count;          /* retirements with no tracked current PC (not recorded) */
+  uint64_t odd_pc_count;                      /* retirements at an odd PC (never marked) */
+  uint64_t wide_pc_count;                     /* retirements whose PC has bits above the 24-bit bus */
+  uint64_t interrupt_redirects;               /* retirement successors replaced by interrupt admission */
+  uint64_t interrupt_resumptions;             /* redirects whose interrupted successor became current again */
+  uint64_t interrupt_depth_overflow;          /* redirects dropped from the bounded pending-resumption stack */
+  uint32_t current_pc;
+  uint32_t current_predecessor;               /* witness predecessor for CAUSE_INTERRUPT_RESUMPTION */
+  uint32_t last_retired_pc;
+  uint32_t interrupted_successor[GENESIS_EXECUTION_COVERAGE_INTERRUPT_DEPTH];
+  uint32_t interrupted_predecessor[GENESIS_EXECUTION_COVERAGE_INTERRUPT_DEPTH];
+  uint8_t interrupt_depth;
+  uint8_t has_current;
+  uint8_t has_last_retired;
+  uint8_t current_cause;
+} GenesisExecutionCoverage;
 
 
 typedef enum GenesisAccessWidth {
@@ -1208,6 +1273,9 @@ typedef enum GenesisAccessResultKind {
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* SEG-026-T001: nonzero iff `pc` (masked to the 24-bit bus, even) was recorded by the coverage observer. */
+int genesis_execution_coverage_contains(const GenesisExecutionCoverage *coverage, uint32_t pc);
 
 GenesisAccessResultKind genesis_route_access(GenesisRuntime *runtime, uint32_t address,
                                               GenesisAccessWidth width,
