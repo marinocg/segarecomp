@@ -148,11 +148,14 @@ def main():
 
         # Prefix-adversarial whole-mapping images: 65,536 prefix_lock owners, no full owner, bounded output.
         for name in ("dd64", "fd64", "alt64"):
+            if name not in report:  # full-scale-only image (SEGARECOMP_Z80_FULL_SCALE=1)
+                continue
             s = report[name]["stats"]
             check(s["prefix_lock"] == 65536 and s["full"] == 0 and s["stubs"] == 0, "%s: whole-mapping run is not all prefix_lock" % name)
         # Chains that wrap across 0xFFFF and terminate: full owners (each chain start is one owner).
-        check(report["mixed64"]["stats"]["full"] == 65536 and report["mixed64"]["stats"]["prefix_lock"] == 0,
-              "mixed64: terminating wrapped chains must be full owners")
+        if "mixed64" in report:
+            check(report["mixed64"]["stats"]["full"] == 65536 and report["mixed64"]["stats"]["prefix_lock"] == 0,
+                  "mixed64: terminating wrapped chains must be full owners")
 
         # Two immutable images at the same window: distinct keys per identity, no static binding into the window.
         two = {(o["identity"], o["key"]): o for o in report["two_image"]["owners"]}
@@ -183,7 +186,7 @@ def main():
             _, _, error = emit_only(spec, work / ("det_" + name))
             check(error is None, "wrap64 emission failed: %s" % error)
         check(tree_hash(work / "det_a") == tree_hash(work / "det_b"), "wrap64 output is not byte-identical across runs")
-        for image_name in ("reloc", "dd64", "mixed64"):  # window-relative owners and the prefix-adversarial images
+        for image_name in ("reloc", "dd64", "mixed64"):  # window-relative owners and the prefix-adversarial images (emission is cheap: always)
             other_spec = z.image_spec_text(doc["images"][image_name]["images"])
             for name in ("a", "b"):
                 emit_only(other_spec, work / ("%s_%s" % (image_name, name)))

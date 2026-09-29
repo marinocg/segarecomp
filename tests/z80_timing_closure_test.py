@@ -170,6 +170,10 @@ def table_test(tc, work, root):
 def scenario_test(tc, work, root):
     doc = z.load_scenarios()
     batches = z.scenario_batches(doc)
+    if not z.FULL_SCALE:
+        # Interrupt/HALT/timing scenarios live on these images; the other images (prefix-lock, banked, window-relative)
+        # are compiled and checked by z80_generated_pipeline_test, so the hermetic tiers do not build them twice.
+        batches = [b for b in batches if b.name in ("wrap64", "t007_prog", "t007_small")]
     report = z.run_batches(tc, batches, work / "scen", with_oracle=root is not None)
     results = {}
     for batch in batches:
@@ -221,7 +225,8 @@ SUB = bytes.fromhex("3E01" "87" "C9")          # 0430 LD A,1 ; ADD A,A ; RET
 
 
 def program_image():
-    return {"images": [{"identity": 1, "kind": "invariant", "windows": [["0000", "0000", "10000"]], "fill": "00",
+    # The program lives below 0x0500: a 4 KiB image keeps the hermetic compile cost low (wrap_image/lock_image stay 64 KiB).
+    return {"images": [{"identity": 1, "kind": "invariant", "windows": [["0000", "0000", "1000"]], "fill": "00", "size": 0x1000,
                         "patch": [["0400", PROGRAM.hex()], ["0430", SUB.hex()], ["0038", "C9"], ["0066", "ED45"]]}]}
 
 
@@ -251,10 +256,18 @@ def run_text(exe, vecs, image_doc, work):
     return z.run_exe(exe, text, work)
 
 
+_BUILT = {}
+
+
 def build_image(tc, image_doc, work, stem):
-    built = z.build_generated(tc, z.image_spec_text(image_doc["images"]), work, stem=stem)
+    key = z.image_spec_text(image_doc["images"])  # the same image is reused across programs/states: compile it once
+    if key in _BUILT:
+        pathlib.Path(work).mkdir(parents=True, exist_ok=True)  # callers write their vectors next to the executable's work dir
+        return _BUILT[key]
+    built = z.build_generated(tc, key, work, stem=stem)
     if built["error"]:
         raise AssertionError(str(built["error"])[:600])
+    _BUILT[key] = built["exe"]
     return built["exe"]
 
 

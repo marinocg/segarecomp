@@ -139,3 +139,12 @@ IFF, IM, PC, WZ, R and T-states of those files still compare. A test with a wron
 Hermetic tests: `z80_sst_corpus_test.py` (synthetic corpus, injected register/R/PC/memory/port/timing faults, the
 RETN classification; the oracle part skips without the checkout) and `z80_secondary_oracle_test.py` (every form vector
 against kosarev under the mask, plus a mutant check; skips without the checkout).
+
+## Test cost tiers (CI)
+
+Compile time of the generated C dominates. The hermetic tiers (`fast`/`full`) therefore build a reduced, path-equivalent image
+set: small programs use 4 KiB images, and an image marked `"scale": "full"` in `scenarios.json` (the FD-only, alternating and
+wrapped-chain 64 KiB adversarial images, which repeat code paths the DD-only and wrap images already exercise) is skipped.
+`SEGARECOMP_Z80_FULL_SCALE=1` builds all of them; `z80_generated_pipeline_test_fullscale` and
+`z80_conformance_oracle_test_fullscale` (label `extended`) do that. Run them before changing emission, ABI or the dispatcher.
+CI runs `full` without re-running the `fast` subset (`-LE fast`).

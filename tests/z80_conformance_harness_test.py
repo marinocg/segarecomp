@@ -103,13 +103,13 @@ def seed_rows_against_model(tc, work):
 
 
 def rows_are_deterministic():
-    first = z.form_vectors()
-    second = z.form_vectors()
+    first = z.form_vectors(fresh=True)
+    second = z.form_vectors(fresh=True)
     check(sorted(first) == sorted(second), "row expansion is not deterministic")
     names = set()
     for form_id, vecs in first.items():
+        # equal digest material implies an equal digest (form_digest is a pure function of it): compare it once
         check([v.digest_material() for v in vecs] == [v.digest_material() for v in second[form_id]], "digest material differs: " + form_id)
-        check(z.form_digest(vecs) == z.form_digest(second[form_id]), "digest differs: " + form_id)
         for v in vecs:
             check(v.name not in names, "duplicate vector name " + v.name)
             names.add(v.name)

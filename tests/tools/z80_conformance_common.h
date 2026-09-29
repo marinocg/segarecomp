@@ -78,12 +78,37 @@ static int zc_parse_bytes(const char *text, unsigned char *out, int capacity) {
   return count;
 }
 
+/* Portable line reader (getline is POSIX-only and absent from the Windows CRT). Returns the length, or -1 at EOF. */
+static long zc_getline(char **line, size_t *capacity, FILE *file) {
+  size_t length = 0;
+  int c;
+  if (*line == NULL || *capacity == 0) {
+    *capacity = 256;
+    *line = (char *)malloc(*capacity);
+    if (*line == NULL) return -1;
+  }
+  while ((c = fgetc(file)) != EOF) {
+    if (length + 2 > *capacity) {
+      size_t grown = *capacity * 2;
+      char *bigger = (char *)realloc(*line, grown);
+      if (bigger == NULL) return -1;
+      *line = bigger;
+      *capacity = grown;
+    }
+    (*line)[length++] = (char)c;
+    if (c == '\n') break;
+  }
+  if (length == 0) return -1;
+  (*line)[length] = '\0';
+  return (long)length;
+}
+
 /* Reads the next vector; returns 1, 0 at end of file, -1 on a malformed line. */
 static int zc_read_vector(FILE *file, zc_vector *v) {
   char *line = NULL;
   size_t capacity = 0;
   int started = 0;
-  while (getline(&line, &capacity, file) >= 0) {
+  while (zc_getline(&line, &capacity, file) >= 0) {
     if (line[0] == '#' || line[0] == '\n') continue;
     char verb[8] = {0};
     int consumed = 0;

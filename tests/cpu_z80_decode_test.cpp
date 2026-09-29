@@ -62,7 +62,7 @@ std::vector<std::uint8_t> encode(Space space, std::uint8_t b, std::uint8_t d, st
   out.push_back(b);
   if (bc.form == kNoForm) return out;  // escape/chain bytes are exercised separately
   f = &form_descriptor(bc.form);
-  const std::size_t total = f->length + (bc.kind == ByteClassKind::prefix_ignored ? 1 : 0);
+  const std::size_t total = static_cast<std::size_t>(f->length) + (bc.kind == ByteClassKind::prefix_ignored ? 1u : 0u);
   // Operand bytes in fetch order: displacement (if any), then immediates.
   std::vector<std::uint8_t> ops;
   if (f->displacement_index != kNoIndex) ops.push_back(d);

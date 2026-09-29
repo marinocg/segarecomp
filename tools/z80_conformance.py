@@ -199,8 +199,17 @@ def expand_rows(doc, data, forms):
                     name = "%s/%s/%s/r%d%s" % (row["form"], code.hex(), profile, row_index, tag)
                     state = profile_state(profile, key)
                     mem = None if case is None else sweeps.apply_case(case, state, row.get("sweep_v"))
-                    patches = [((p + d) & 0xFFFF, bytes([rng(key, "mem", p, d) & 0xFF if mem is None else mem]))
-                               for p in touch_points(state) for d in range(4)]
+                    if mem is None:
+                        # == rng(key, "mem", p, d) & 0xFF (low byte of the first 8 digest bytes), without re-hashing the key
+                        seed = hashlib.sha256((key + "|mem|").encode())
+                        patches = []
+                        for p in touch_points(state):
+                            for d in range(4):
+                                h = seed.copy()
+                                h.update(("%d|%d" % (p, d)).encode())
+                                patches.append(((p + d) & 0xFFFF, bytes([h.digest()[7]])))
+                    else:
+                        patches = [((p + d) & 0xFFFF, bytes([mem])) for p in touch_points(state) for d in range(4)]
                     vecs.append(Vec(name, code, state, steps, form=row["form"], patches=patches,
                                     family=form["family"], oracle=row.get("oracle", True)))
     return vecs
@@ -228,9 +237,19 @@ def load_row_documents(directory=VECTOR_DIR):
     return docs
 
 
-def form_vectors(docs=None):
-    """All row-expanded vector definitions, grouped by form id, and a check that each row sits in its family."""
+_FORM_VECTORS = None
+
+
+def form_vectors(docs=None, fresh=False):
+    """All row-expanded vector definitions, grouped by form id, and a check that each row sits in its family.
+
+    The default expansion is memoized per process (it is the dominant cost of several tests); `fresh=True` recomputes it
+    (the determinism test compares two independent expansions)."""
+    global _FORM_VECTORS
+    if docs is None and not fresh and _FORM_VECTORS is not None:
+        return _FORM_VECTORS
     data, forms = load_dataset()
+    cacheable = docs is None
     docs = docs if docs is not None else load_row_documents()
     by_form = {}
     for family, doc in docs.items():
@@ -238,6 +257,8 @@ def form_vectors(docs=None):
             if vec.family != family:
                 raise SystemExit("row for %s is in the %s table but belongs to %s" % (vec.form, family, vec.family))
             by_form.setdefault(vec.form, []).append(vec)
+    if cacheable:
+        _FORM_VECTORS = by_form
     return by_form
 
 
@@ -372,10 +393,18 @@ def load_scenarios(path=None):
     return doc
 
 
+FULL_SCALE = os.environ.get("SEGARECOMP_Z80_FULL_SCALE") == "1"
+
+
 def scenario_batches(doc):
-    """One batch per named image; scenarios keep declaration order."""
+    """One batch per named image; scenarios keep declaration order.
+
+    An image marked `"scale": "full"` repeats a full-size (64 KiB) code path that a cheaper image already covers in
+    the hermetic tiers; it is compiled only when SEGARECOMP_Z80_FULL_SCALE=1 (the `extended` tier / validator)."""
     batches = []
     for image_name, image_doc in doc["images"].items():
+        if image_doc.get("scale") == "full" and not FULL_SCALE:
+            continue
         texts = []
         for sc in doc["scenarios"]:
             if sc["image"] != image_name:
