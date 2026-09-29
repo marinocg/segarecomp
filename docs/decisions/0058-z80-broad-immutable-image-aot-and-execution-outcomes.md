@@ -164,6 +164,17 @@ extrapolated. The main TU dominates RSS, and the full parallel run peaked at 1,1
 - **Execution cost of the strict binding rule.** 999,987 of 1,000,000 bounded smoke steps returned to the
   dispatcher, at about 32 ns per owner step (3.7 ns with unrestricted chaining in the first experiment).
   N and R produced identical cycle totals in the bounded smoke runs.
+- **Authorized local SMS images** (ephemeral, sanitized aggregate: size classes and counts only; not a CI input).
+  - Three images were classified under the same map with window-relative owners: 128 KiB, 256 KiB and 512 KiB.
+    Every admissible window instance resolves to a full owner, except 6 of 386,048 window instances in the
+    128 KiB image, which cross a window edge and become typed stubs. None has a prefix lock, and the longest
+    prefix chain is 4.
+  - One build of the 512 KiB image met all 7 budgets:
+    - 291.0 MiB of C and an 89.6 MiB executable;
+    - -j8 55.5 s; -j1 about 339 s, extrapolated from 6 of 48 owner TUs plus the main TU;
+    - peak compiler RSS 1,465 MiB, set by the same main TU;
+    - lookup 38/24 ns; byte-identical; zero warnings.
+  - The synthetic dense banks are therefore slightly conservative.
 - **Not run.** 1 MiB (R about 2x the 512 KiB figures by linearity) and 512 KiB random N (N already rejected).
 - **Measurement note.** Serial compiles report a higher per-process RSS than parallel ones on this host. All RSS
   figures in this ADR are the maximum over serial and parallel runs.
