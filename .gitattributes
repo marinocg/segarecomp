@@ -3,3 +3,5 @@ tests/fixtures/m68k-*.json text eol=lf
 tools/m68k_legal_forms.py text eol=lf
 docs/testing/m68k-capability-coverage.md text eol=lf
 tools/m68k_capability_coverage.py text eol=lf
+tests/fixtures/z80-*.json text eol=lf
+tools/z80_legal_forms.py text eol=lf
