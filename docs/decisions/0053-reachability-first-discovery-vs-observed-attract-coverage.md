@@ -134,15 +134,20 @@ No `(An)`, `d16(An)`, `(d8,An,Xn)`, push-then-RTS, RTR or unclassified site is r
 
 **Cost.**
 - The challenger runs in about 1.2 s, including the broad analysis for `U`.
-- Coverage overhead was measured with host instruction/cycle counters. The host was heavily loaded by unrelated
-  work (load average about 38 on 12 cores), so wall time was not a usable measure. Each figure below is from
-  alternating runs of the identical binary, 3,000 frames × 2 each:
-  - **Rendering:** +0.3% instructions; cycles within noise.
-  - **Frame-boundary counting without rendering (`--coverage-no-render`):** +4.0% instructions and +4–6% cycles.
-    This is about 41 host instructions per retired guest instruction.
+- **Coverage overhead.** Measured on a quiet host (load average 7–10 on 12 cores) with alternating
+  coverage-off/on runs of the identical `-O2` binary, three pairs per mode:
+
+  | mode | off, wall | on, wall | wall | host instructions | cycles |
+  | --- | --- | --- | --- | --- | --- |
+  | no render, 23,200 frames | 25.4 s (25.0–25.6) | 26.9 s (26.7–27.2) | +6.1% | +3.5% | +4.2% |
+  | rendered, 3,000 frames | 27.2 s median (27.1–28.5) | 27.2 s (27.2–27.3) | +0.2% | +0.3% | within noise |
+
+  - The no-render cost is about 37 host instructions per retired guest instruction.
+  - An earlier measurement on a heavily loaded host gave the same instruction overheads.
 - The no-render oracle reproduces the rendered one exactly: same coverage digest, witnesses, final state, and
-  all 232 epochs. It runs the two-rotation workload in about 30 s instead of about 280 s. Rendering is roughly
-  90% of the rendered run's cost.
+  all 232 epochs.
+  - It runs the two-rotation workload (223 guest seconds) in about 27 s, roughly 8x faster than real time.
+  - Rendering every frame costs about 10x more per frame than the guest execution itself.
 
 **Supplementary second title (Phase E, not an attract oracle).**
 - The 1 MiB Sonic 2 image under the same no-input route shows its intro text, then stops publishing renderable
