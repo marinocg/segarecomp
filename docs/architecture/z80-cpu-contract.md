@@ -105,7 +105,7 @@ IFF1. This happens only when returning from an NMI handler entered with interrup
 a Master System pause-button NMI can return while the VDP INT is pending [Weissflog, "A New Cycle-Stepped Z80
 Emulator" (2021-12-17); Sainz de Baranda, spectrumcomputing.co.uk t=7086 and stardot t=24662 (2022); implemented by
 the pinned redcode oracle]. The evidence is netlist and emulator research, not a Zilog document (ADR 0057,
-unresolved item 6). The EI-deferral state therefore generalises to "maskable INT deferred at this boundary": it is
+unresolved item 6). The INT-deferral state (§2) is therefore "maskable INT deferred at this boundary": it is
 set by `EI`, and by `RETI`/`RETN` when they change IFF1.
 
 ### 4.3 Modes
