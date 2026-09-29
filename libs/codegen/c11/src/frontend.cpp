@@ -6069,7 +6069,8 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       ++aot_body_uses[slot->second];
       aot_entry_body[index] = slot->second;
     }
-  // Helper names are assigned to shared bodies in first-use (ascending address) order.
+  // Helper names follow body-id order: exact bodies in first-use (ascending address) order, then group-C
+  // own-PC bodies in the order they were re-keyed (also ascending address). Both orders are deterministic.
   std::vector<std::string> aot_body_helper(aot_body_text.size());
   std::size_t aot_helper_count = 0U;
   for (std::uint32_t id = 0U; id < aot_body_text.size(); ++id) {

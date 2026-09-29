@@ -272,6 +272,17 @@ def check_structure(source):
                                      ("00001022", 11, "00001022"), ("00001024", 4, "00001024")):
         text = root_text(source, address)
         call = "genesis_raise_software_exception(runtime, UINT32_C(%d), UINT32_C(0x%s)" % (vector, stacked)
+        # SEG-022-T011 / SEG-025-T001: the raise is inline, in an exact shared helper, or in an own-PC
+        # parameterized helper (ADR 0052) whose caller passes its own PC -- only possible when stacked == own PC.
+        helper = re.search(r"return (genesis_aot_shared_\d+)\(runtime[^;]*\); \}", text)
+        if helper:
+            body = re.search(r"GenesisControlTransfer %s\(GenesisRuntime \*runtime([^)]*)\) \{\n(.*?)\n\}\n" % helper.group(1),
+                             source, re.S)
+            assert body, (address, helper.group(1))
+            if "uint32_t genesis_aot_pc" in body.group(1):
+                assert stacked == address and text.rstrip().endswith("UINT32_C(0x%s)); }" % address), (address, text[:400])
+                call = "genesis_raise_software_exception(runtime, UINT32_C(%d), genesis_aot_pc" % vector
+            text = body.group(2)
         assert text.count("genesis_raise_software_exception(") == 1 and call in text, (address, text[:400])
     assert "genesis_return_restore_condition_codes(runtime" in root_text(source, "00001026")
     assert "genesis_raise_software_exception" not in root_text(source, "00001026")

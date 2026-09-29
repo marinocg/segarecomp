@@ -35,8 +35,8 @@ EA mode, privilege behavior, exception class or timing family is parameterized.
 ## Soundness
 
 Every replaced position held exactly that entry's own address, and all members of a group have identical text
-outside the replaced positions. The caller passes that same value, and `UINT32_C` constants have type `uint32_t`,
-so each use sees the same value and type. Bodies with constant-expression contexts are excluded.
+outside the replaced positions. The caller passes that same value. A `UINT32_C` constant has the promoted type of `uint_least32_t`, which
+is `uint32_t` on every supported target, so each use sees the same value and type. Bodies with constant-expression contexts are excluded.
 
 ## Evidence (SEG-025-T001)
 
