@@ -204,7 +204,10 @@ def main() -> None:
     # SEG-021-T019: the PC-relative sibling is never a TST (TST admits no PC-relative EA): its architecturally
     # illegal word is the generation-time vector-4 instruction-word exception, stacked at its own address.
     assert "genesis_aot_00000C4A" in generated.stdout
-    assert "genesis_raise_software_exception(runtime, UINT32_C(4), UINT32_C(0x00000C4A)" in generated.stdout
+    # SEG-025-T001 (ADR 0052): inline, or an own-PC parameterized helper called with this entry's own PC.
+    assert ("genesis_raise_software_exception(runtime, UINT32_C(4), UINT32_C(0x00000C4A)" in generated.stdout or
+            ("UINT32_C(0x00000C4A)); }" in generated.stdout and
+             "genesis_raise_software_exception(runtime, UINT32_C(4), genesis_aot_pc" in generated.stdout))
     assert "genesis_aot_00000C4E" in generated.stdout
     assert "genesis_aot_00000C52" in generated.stdout
     assert "genesis_route_access(runtime," in generated.stdout

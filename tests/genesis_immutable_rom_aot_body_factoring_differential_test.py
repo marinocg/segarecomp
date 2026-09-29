@@ -57,6 +57,10 @@ static void seed(GenesisRuntime *r, uint32_t pc, unsigned scenario) {
     r->privilege_violation_handler_present = 1U; r->privilege_violation_handler_entry = entries[0];
     r->divide_by_zero_handler_present = 1U; r->divide_by_zero_handler_entry = entries[1];
   }
+  if (scenario == 4U)  /* SEG-025-T001: installed software-exception handlers (scenario 3 keeps them absent) */
+    for (i = 0; i < GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT; ++i) {
+      r->software_exception_handler_present[i] = 1U; r->software_exception_handler_entry[i] = entries[2];
+    }
 }
 static void dump(const char *tag, uint32_t pc, unsigned scenario, GenesisControlTransfer t, const GenesisRuntime *r) {
   const GenesisProvenance *p = &t.stop.provenance;
@@ -202,6 +206,19 @@ def main():
         for name, body in helpers:
             assert "switch" not in body and "opcode" not in body and "genesis_aot_shared_" not in body, name
             assert factored_single.count(name + "(runtime") >= 2, f"{name} is shared by at least two entries"
+        # SEG-025-T001 group C: bodies differing only in their own PC share a helper that takes it as an ordinary
+        # uint32_t argument; each call passes its own PC literal. The reference form never has the parameter.
+        pc_helpers = [(n, b) for n, b in helpers if "genesis_aot_pc" in b]
+        assert pc_helpers, "own-PC-parameterized helpers are exercised"
+        assert any("genesis_raise_software_exception" in b for _, b in pc_helpers), "instruction-exception raise shared"
+        for name, _ in pc_helpers:
+            assert re.search(name + r"\(GenesisRuntime \*runtime[^)]*uint32_t genesis_aot_pc\) \{", factored_single), name
+            calls = re.findall(r"genesis_aot_(?:entry_)?([0-9A-F]{8})\W[^\n]*?return " + name +
+                               r"\(runtime[^\n]*, UINT32_C\(0x([0-9A-F]{8})\)\); \}$", factored_single, re.M)
+            assert len(calls) >= 2 and all(entry == arg for entry, arg in calls), f"{name}: each entry passes its own PC"
+        for text in (unfactored_sharded, unfactored_single):
+            assert "genesis_aot_pc" not in text
+        assert re.search(r"^step .* s=4 kind=0 next=", reference, re.M), "handler-present exception entries are compared"
     print("genesis_immutable_rom_aot_body_factoring_differential_test: OK")
 
 
