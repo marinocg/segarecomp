@@ -74,7 +74,7 @@ segarecomp genesis-reachability-challenger --rom games/<rom> --reset-entry --rom
 - **PC-indexed recovery (SEG-026-T002, ADR 0054, `--pc-index-recovery`, off by default).** A `JMP/JSR (d8,PC,Xn)`
   site is resolved only when its index register's exact finite domain is proven by a demand-driven backward
   evaluation over the challenger's own discovered graph:
-  - constants, masks, CMP/TST + Bcc guards, add/sub/shift/extend transforms;
+  - constants, masks, CMP/TST + Bcc guards, add/sub/shift/EXT transforms;
   - entries read from uniquely owned immutable image bytes.
   A domain bounded only by the width of a byte loaded from mutable memory is `width_only_domain` and stays
   unresolved. `--pc-index-width-domains` admits it as a labelled measurement variant. Out-of-image entries or
@@ -107,7 +107,8 @@ The tool prints aggregates only:
 
 With `--pc-index-recovery`:
 - `pc_index_recovery_check` counts observed first entries from a resolved site that fall outside its proven target
-  set (escapes, expected 0), and how many proven targets were observed;
+  set (escapes, expected 0; later transfers to an already-observed PC are not witnessed), and how many proven
+  targets were observed;
 - a proven edge is structural in the attribution, and an escape is labelled `pc_index_recovery_escape`;
 - with `--classification`, observed PC-indexed sites carry the strict local domain label of the same proof, over a
   predecessor graph built only from the classified instructions (never D). The tool reports those sites, and the

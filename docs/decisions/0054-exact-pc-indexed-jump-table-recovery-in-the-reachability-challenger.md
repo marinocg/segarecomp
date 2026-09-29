@@ -34,9 +34,9 @@ reachable (d8,PC,Xn) site
   - word/long entries from immutable image bytes (`(d8,PC,Xn)`, `d16(PC)`, absolute);
   - AND/OR/EOR/ADD/SUB with immediate, quick or register sources;
   - LSL/ASL/LSR/ASR by an immediate count;
-  - EXT.
+  - EXT.W/EXT.L (taken before the effect whitelist, which does not list them).
   A known mask applied to an unknown register gives the exact submask set. Control transfers and NOP write no
-  data register. MOVEQ uses its decoded destination: the effect owner deliberately keeps a legacy D0-only MOVEQ
+  data register. An AND whose register source is width-derived stays width-derived. MOVEQ uses its decoded destination: the effect owner deliberately keeps a legacy D0-only MOVEQ
   footprint. Every other writer yields Unknown. There is no loop reasoning and no memory model.
 - **Guards.** A CMPI/CMP #imm/TST + Bcc edge filters the value set exactly, using the existing
   `m68k_evaluate_subtraction` and `M68kConditionSpecification`. The filter applies only when the branch's sole
@@ -63,8 +63,9 @@ reachable (d8,PC,Xn) site
 Runtime coverage only falsifies: `tools/reachability_coverage_compare.py` counts every observed first entry whose
 witness predecessor is a resolved site but which lies outside that site's proven set (a recovery escape).
 Classification-only labels (`--classify-pcs`) apply the same strict proof to observed PC-indexed sites. That proof
-runs over a predecessor graph built only from the classified instructions, to measure the remaining PC-indexed
-graph. Those labels never enter D.
+runs over a predecessor graph built only from the classified instructions' fixed successors, with machine roots and
+stacked continuations opaque, to measure the remaining PC-indexed graph. A block also entered by an unclassified
+dynamic transfer can still be labelled optimistically. Those labels never enter D.
 
 The architecture stays one-shot and static: ROM → static challenger → finite proven targets → D. Runtime
 execution never modifies D. There is no runtime decode, JIT, interpreter, runtime target learning or
@@ -93,8 +94,8 @@ regenerate-after-observation loop.
 | recall after the first demo cycle (frame 3,100) | 14.3% | 52.7% | 29.8% |
 | overlapping instruction starts | 0 | 70 | 63 |
 | decoder-rejected targets | 0 | 1 | 0 |
-| exception-raising decodes (ILLEGAL/line A/F) | 12 | 31 | 13 |
-| recovery escapes (observed outside proven sets) | — | 0 | 0 |
+| exception-raising decodes (ILLEGAL/line A/F) | 0 | 31 | 13 |
+| recovery escapes (observed first entries outside proven sets) | — | 0 | 0 |
 
 **PC-indexed sites (strict).**
 - 14 encountered: the 4 original first-gate sites (round 0) and 10 exposed by recovered code (round 1).
@@ -129,7 +130,7 @@ unobserved target is not thereby accidental.
 - One over-read entry lands mid-sequence at another dispatch. That dispatch's only known predecessor is then this
   accidental edge, which yields the 58-target round-1 resolution. The runtime never escaped that set, but the
   proof is weak: its real entry path is not in D.
-- Overlapping starts (0 → 70) and exception-raising decodes (12 → 31) show a moderate, bounded accidental-decode
+- Overlapping starts (0 → 70) and exception-raising decodes (0 → 31) show a moderate, bounded accidental-decode
   tail. There is no snowball.
 
 **Width-domain variant.**
@@ -171,7 +172,7 @@ Across every dynamic step on each missing PC's structural chain back to D:
 
 **REFINE.**
 - Exact recovery of explicitly bounded tables is a major, cheap gain: recall rises 9.7% → 42.7% (4.4×) while D
-  stays 36× smaller than U, with zero escapes.
+  stays 36× smaller than U, with zero escapes among observed first entries.
 - The four original gates were not the whole problem. They exposed a larger PC-indexed graph, and most of it is not
   a graph of explicitly bounded tables: 70 of the 84 observed PC-indexed sites select entries with a mutable RAM
   byte whose only bound is its width.
@@ -202,7 +203,10 @@ direction.
 - **Mask over-reads.** A mask is sound but may exceed the real table, so over-read entries become targets (see
   indicators). No plausibility filter is applied, by design.
 - **Recovery and escape counts.** They cover the no-input attract workload only; unobserved targets are not
-  classified as accidental.
+  classified as accidental. The escape check sees first-entry witnesses only (14 first entries from resolved
+  sites; 27 proven targets observed): a later transfer to an already-observed PC is not checked.
+- **Mask bounds.** Any mask that cuts the maximum counts as explicit, even a weak one (for example `#$FE` on a
+  byte, 128 values).
 
 ## Revisit when
 

@@ -62,6 +62,8 @@ struct Asm {
   Asm &andi_b(unsigned d, std::uint8_t imm) { return w(0x0200U | d).w(imm); }
   Asm &cmpi_b(unsigned d, std::uint8_t imm) { return w(0x0C00U | d).w(imm); }
   Asm &subi_b(unsigned d, std::uint8_t imm) { return w(0x0400U | d).w(imm); }
+  Asm &ext_w(unsigned d) { return w(0x4880U | d); }
+  Asm &and_w_reg(unsigned source, unsigned d) { return w(0xC040U | d << 9U | source); }
   Asm &add_w_self(unsigned d) { return w(0xD040U | d << 9U | d); }
   Asm &lsl_w(unsigned d, unsigned count) { return w(0xE148U | (count & 7U) << 9U | d); }
   Asm &bcc_s(unsigned condition, std::uint32_t to) { return w(0x6000U | condition << 8U | ((to - pc - 2U) & 0xFFU)); }
@@ -179,6 +181,32 @@ void fixture3_signed_entries() {
   Asm{image, 0x2A0U}.bra_self();
   const auto r = run(image);
   expect(targets(r, jmp, {0x240U, 0x2A0U}), "F3: sign-extended word entries give a backward and a forward target");
+}
+
+// F12b: EXT.W sign-extends an exactly known byte (a negative index names a target before the table base); an AND
+// with a width-only register source stays width-only.
+void fixture12_ext_and_register_and() {
+  Image image;
+  Asm{image, 0x200U}.bra_w(0x300U);
+  Asm a{image, 0x300U};
+  a.moveq(0, 0).move_b_ram(0, 0xF100U).andi_b(0, 0x80U).ext_w(0);  // {0, 0x80} -> {0, 0xFF80}
+  const auto jmp = a.pc;
+  a.jmp_pcidx(0, 0x370U);
+  Asm{image, 0x370U}.bra_self();
+  Asm{image, 0x2F0U}.bra_self();
+  const auto r = run(image);
+  expect(targets(r, jmp, {0x2F0U, 0x370U}), "F12b: EXT.W gives the sign-extended backward target");
+  const auto *s = site(r, jmp);
+  expect(s != nullptr && (s->proof & m68k_finite_proof::sign_extend) != 0U, "F12b: EXT in the proof");
+
+  Image leak;
+  Asm b{leak, 0x200U};
+  b.moveq(1, 0).move_b_ram(1, 0xF100U).moveq(0, 0x7F).and_w_reg(1, 0).add_w_self(0).move_w_pcidx(0, 0, 0x280U);
+  const auto jmp_leak = b.pc;
+  b.jmp_pcidx(0, 0x280U);
+  const auto rl = run(leak);
+  expect(outcome(rl, jmp_leak, GenesisPcIndexOutcome::width_only_domain),
+         "F12b: AND with a width-only register source is not an explicit bound");
 }
 
 // F5: unprovable extents stay unresolved; nothing they would name enters D. The width-only variant is measured.
@@ -375,6 +403,7 @@ int main() {
   fixture2_mask_bounded();
   fixture3_signed_entries();
   fixture5_unprovable();
+  fixture12_ext_and_register_and();
   fixture6_malformed();
   fixture7_duplicates();
   fixture8_9_nested_and_an();

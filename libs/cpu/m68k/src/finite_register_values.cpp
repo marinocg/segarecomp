@@ -205,6 +205,22 @@ M68kFiniteTransfer m68k_finite_register_after(const M68kIrOperation &operation, 
   case M68kIrKind::no_operation: return transfer;
   default: break;
   }
+  if (operation.kind == M68kIrKind::sign_extend_word || operation.kind == M68kIrKind::sign_extend_long) {
+    // EXT.W / EXT.L write only their Dn (M68000PRM); the effect owner does not list them as complete, so the
+    // destination is taken from the decoded operand.
+    if (!is_data_register(operation.destination_ea, reg)) return transfer;
+    transfer.writes = true;
+    const auto old = inputs.data_register_before(reg, width);
+    const auto wmask = width_mask(width);
+    if (operation.kind == M68kIrKind::sign_extend_word)
+      transfer.values = map_values(old, width, [&](std::uint32_t a) {
+        return ((a & ~UINT32_C(0xFFFF)) | (sign_extend(a, 8U) & 0xFFFFU)) & wmask;
+      });
+    else
+      transfer.values = map_values(old, width, [&](std::uint32_t a) { return sign_extend(a, 16U) & wmask; });
+    transfer.proof = m68k_finite_proof::sign_extend;
+    return transfer;
+  }
   const auto effect = m68k_operation_effect(operation);
   if (effect.register_write_footprint_complete && ((effect.data_register_write_mask >> reg) & 1U) == 0U) return transfer;
   transfer.writes = true;  // Unknown unless a supported exact form below says otherwise
@@ -292,7 +308,11 @@ M68kFiniteTransfer m68k_finite_register_after(const M68kIrOperation &operation, 
     } else {
       transfer.values = combine(old, source.values, width, op);
       transfer.proof = source.proof & ~m68k_finite_proof::constant;
-      if (and_kind) narrow(old, transfer.values);
+      if (and_kind) {
+        narrow(old, transfer.values);
+        // A width-only register source is not cut by the destination's range.
+        if (transfer.values.known && source.values.width_derived) transfer.values.width_derived = true;
+      }
     }
     transfer.proof |= proof;
     return transfer;
@@ -319,22 +339,6 @@ M68kFiniteTransfer m68k_finite_register_after(const M68kIrOperation &operation, 
     });
     if (right) narrow(old, transfer.values);
     transfer.proof = m68k_finite_proof::shift;
-    return transfer;
-  }
-  case M68kIrKind::sign_extend_word: {  // EXT.W: byte -> word
-    if (!destination_is_reg) return transfer;
-    const auto old = inputs.data_register_before(reg, width);
-    transfer.values = map_values(old, width, [&](std::uint32_t a) {
-      return ((a & ~UINT32_C(0xFFFF)) | (sign_extend(a, 8U) & 0xFFFFU)) & wmask;
-    });
-    transfer.proof = m68k_finite_proof::sign_extend;
-    return transfer;
-  }
-  case M68kIrKind::sign_extend_long: {  // EXT.L: word -> long (the low word is unchanged)
-    if (!destination_is_reg) return transfer;
-    const auto old = inputs.data_register_before(reg, width);
-    transfer.values = map_values(old, width, [&](std::uint32_t a) { return sign_extend(a, 16U) & wmask; });
-    transfer.proof = m68k_finite_proof::sign_extend;
     return transfer;
   }
   default: return transfer;

@@ -655,10 +655,16 @@ std::map<std::uint32_t, GenesisReachabilityPcClassification> classify_genesis_re
       predecessors[successor.target & bus_mask].push_back({pc, edge_kind(successor.kind)});
     if (control.stacked != M68kStackedContinuationKind::none) opaque.insert(control.stacked_address & bus_mask);
   }
+  // Machine roots (reset entry, delivered vectors) are opaque exactly as in discovery.
+  std::vector<std::uint32_t> roots;
+  if (program.startup_ingress) roots.push_back(program.startup_ingress->entry.value & bus_mask);
+  for (const auto vector : machine_delivered_vectors())
+    if (const auto handler = vector_handler(program, static_cast<std::size_t>(vector) * 4U)) roots.push_back(*handler);
+  opaque.insert(roots.begin(), roots.end());
   std::set<std::uint32_t> entries;
   for (const auto &[pc, decoded] : instructions) {
     if (!is_pc_index_site(decoded)) continue;
-    const auto site = resolve_pc_index_site(decoded, pc, instructions, predecessors, opaque, {}, decoder, false, entries);
+    const auto site = resolve_pc_index_site(decoded, pc, instructions, predecessors, opaque, roots, decoder, false, entries);
     out[pc].pc_index_domain = site.outcome;
     out[pc].pc_index_unknown_origin = site.unknown_origin;
   }
