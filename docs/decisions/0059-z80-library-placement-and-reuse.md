@@ -28,7 +28,8 @@ libraries, decides the additive `libs/core` change, and confirms both lists agai
   `cpu_m68k`, `codegen_c11_m68k`, `codegen_c11_genesis`, `machine_genesis` or any platform target.
 - The runtime ABI is a plain C11 header. It declares the Z80 state structure, memory and I/O callbacks,
   interrupt inputs (INT line with the data-bus byte supplied through the acknowledge callback, NMI edge), the
-  cycle deadline, the current-code-image-identity callback, and the result enum. That enum keeps resumable
+  cycle deadline, the current-code-image-identity callback (identity and window of a logical address, which window-relative
+  owners need for their window base; ADR 0058), and the result enum. That enum keeps resumable
   outcomes and fail-closed errors in distinct classes (ADR 0058). It contains no machine policy.
 - Machine policy (memory maps, banking/mappers, port decoding, interrupt sources, device scheduling) stays in
   later platform code (SEG-009 Master System, SEG-032 Genesis Z80).

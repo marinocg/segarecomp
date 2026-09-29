@@ -250,6 +250,7 @@ the direction and the value. Port decoding is platform policy.
 Defined in ADR 0058:
 - broad immutable-image AOT;
 - a generation-time logical code mapping, which gives 16-bit fetch wrap;
-- owners keyed by (code-image identity, 16-bit address);
+- owners keyed by (code-image identity, 16-bit address), with window-relative owners for images mapped into
+  several windows;
 - exact dispatch for runtime-selected targets;
 - the split between resumable outcomes (`deadline`, `halted`, `prefix_lock`) and fail-closed outcomes.

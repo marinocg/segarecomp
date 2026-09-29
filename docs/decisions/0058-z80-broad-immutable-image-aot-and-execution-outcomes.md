@@ -1,7 +1,8 @@
 # ADR 0058: Z80 Static-Code Strategy: Broad Immutable-Image AOT (B1), Image-Identity Dispatch and Execution Outcomes
 
 - Status: Accepted (decision: ADOPT broad per-address AOT, one owner per instruction start (B1), as the Z80
-  default; no reachability mechanism and no superblocks by default)
+  default, with window-relative owners for images admissible in several windows and a logical fetch mapping that
+  wraps at 0xFFFF; no reachability mechanism and no superblocks by default)
 - Date: 2026-09-29
 - Task: SEG-008-T001
 - Related: ADR 0002 (static translation, fail closed), ADR 0039 (M68K independent immutable-ROM AOT identities),
@@ -16,7 +17,7 @@ practical, what is the smallest reachability mechanism the evidence justifies?
 ## Experiment (report-only; not retained)
 
 The experiment used a throwaway Python classifier and emitter plus a C++ driver. The classifier was driven only by
-`tests/fixtures/z80-legal-forms.json` (DD/FD chains per its prefix rules; typed truncation at the image edge). The
+`tests/fixtures/z80-legal-forms.json` (DD/FD chains per its prefix rules). The first run truncated instructions at the storage-image edge; that rule is superseded by §5, and the second experiment below reclassified the same inputs. The
 driver compiled the product `translation_units.cpp` unchanged, and the emitter used `emit_compiled_entry_table`
 semantics with Z80 names. After the decision the code was intentionally **not retained**, following the ADR
 0051/0053 precedent: it has no production consumer, and T003 builds the real pipeline.
@@ -74,11 +75,14 @@ semantics with Z80 names. After the decision the code was intentionally **not re
   dense variant is **not justified** under the decision rule. Lookups happen only on indirect, return, interrupt
   and resume transitions, because B1 chains direct successors.
 - **Prefix adversaries.**
-  - Whole-image chains produce 65,536 typed truncations, 0 owners and a fail-closed lookup.
+  - Whole-image chains produced 65,536 typed truncations and 0 owners under the superseded edge rule. Under §5's
+    wrapping fetch they are 65,536 `prefix_lock` starts (second experiment, Part 1).
   - In `mixed_prefix`, 63,998 of 64,261 owners are chain suffixes (mean 450, max 1,024 prefixes per owner).
     Generated size tracks the number of starts, not chain length: 486 bytes per owner against 544 for random
     bytes. Per-address chain starts are therefore safe.
-  - The chain running into the edge yields exactly 1,275 truncations, with no owner, no symbol and no table entry.
+  - Under the superseded edge rule, the chain running into the edge yielded 1,275 truncations. Under wrapping fetch
+    those 1,275 starts become full owners: the chain continues at 0x0000. The longest chain grows from 1,024 to
+    2,130 prefixes, and generated size still tracks starts, not chain length.
   - Classifier hazard: a naive per-address chain rescan is O(n²) (2^31 steps on a DD image). The classifier must
     precompute chain ends in one O(n) pass.
 - **Banked scaling (B1, keys (image, address)).** Cost is linear per 16 KiB bank: 9.1 MiB of C, 3.1 MiB of
@@ -98,6 +102,70 @@ semantics with Z80 names. After the decision the code was intentionally **not re
   times its per-window figures. SEG-009 must state its mapper's actual window multiplicity and measure the product
   before relying on these figures.
 
+## Second experiment: 16-bit fetch wrap and an SMS-shaped multi-window machine (report-only; not retained)
+
+Review of the first result raised two points. Z80 fetch wraps at 0xFFFF (§5). A banked code image can be mapped
+into several windows, so owners with absolute PCs would multiply. A second throwaway experiment measured both
+without a ROM. The environment was the same host and compiler, with the product `TranslationUnitSharder` and
+`emit_compiled_entry_table` unchanged.
+
+**Part 1: reclassify the first experiment's 64 KiB inputs as a full invariant 64 KiB mapping with wrap**
+(classification only, 0.01-0.08 s per image, linear):
+- `dense`, `random`, `zero` and `ff` are unchanged, with 65,536 owners each.
+- `dd_only`, `fd_only` and `ddfd_alt`: 65,536 `prefix_lock` starts each, instead of truncations.
+- `mixed_prefix`: 65,536 full owners (+1,275; the final chain wraps into the chain at 0x0000).
+
+**Part 2: SMS-shaped logical map, from public Sega-mapper documentation.**
+- The map:
+  - 0x0000-0x03FF is invariant (bank 0, first 1 KiB);
+  - slot 0 (0x0400-0x3FFF), slot 1 (0x4000-0x7FFF) and slot 2 (0x8000-0xBFFF) can each hold any bank;
+  - 0xC000-0xFFFF is non-code (RAM).
+- Bank contents were dense synthetic documented code (seeds 82000+bank) or uniform random bytes (83000+bank).
+- Broad B1 was applied under every admissible (bank, window) instance: 1,541,120 window instances for 32 banks,
+  2.94x the single-window count. Direct binding was allowed only into the invariant window (§4).
+- Two owner representations were compared:
+  - **N (naive):** one owner per (bank, window) instance, with absolute PC constants.
+  - **R (window-relative):** one owner per (bank, offset), shared by all windows. It receives the window base
+    (`PC & 0xC000`) and computes every PC-dependent value from base + offset: fall-through, pushed return, JR/DJNZ
+    target, repeat self-target and deadline PC. The lookup key is (bank identity, `PC & 0x3FFF`).
+  - The invariant 1 KiB keeps its own absolute owners in both representations, because the byte after 0x03FF
+    belongs to slot 0, not to bank 0.
+
+Pre-declared whole-program budgets for a 512 KiB SMS-shaped ROM, fixed in the experiment specification before
+measuring:
+- generated C <= 1 GiB;
+- -j8 compile <= 300 s and -j1 compile <= 1,800 s;
+- peak per-compiler-process RSS <= 1.5 GiB (maximum over serial and parallel runs);
+- executable <= 256 MiB;
+- exact lookup median <= 100 ns;
+- byte-identical output.
+
+| ROM | rep | entries (window instances) | gen C MiB | exe MiB | j8 / j1 s | peak compiler RSS MiB | lookup ns rnd/seq | identical | verdict |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 256 KiB dense | R | 263,168 (771,072) | 162.2 | 50.5 | 31.3 / 188.5 | 1,075 | 32.5 / 22.4 | yes | - |
+| 256 KiB dense | N | 771,072 | 425.3 | 143.7 | 90.5 / 587.1 | 1,831 | 57.1 / 27.6 | yes | - |
+| **512 KiB dense** | **R** | 525,312 (1,541,120) | **323.8** | **100.9** | **71.6 / 412.2** | **1,466** | 37.2 / 23.9 | yes | **PASS (all 7)** |
+| 512 KiB random | R | 525,312 (1,541,120) | 311.4 | 95.2 | 62.2 / 385.1* | 1,471 | 38.0 / 24.3 | yes | PASS (all 7) |
+| 512 KiB dense | N | 1,541,120 | 850.4 | **287.2** | 195.4 / 1,262.8 | **2,891** | 76.8 / 28.4 | yes | **MISS (RSS, exe)** |
+
+\* The random-R -j1 time was extrapolated from 12 of 48 owner TUs plus the main TU.
+
+- **R scales linearly.** From 256 to 512 KiB it is 2.0x in C, executable and -j1 time. It costs about 1.1x the
+  C and about 1.03x the compile time per owner of the single-window B1 baseline, despite serving about 2.94 window
+  instances per owner.
+- **N misses** the RSS budget (2.83 GiB) and the executable budget (287 MiB) at 512 KiB. Its all-declarations
+  shared header alone costs about 745 MiB in every TU, so adding shards cannot fix it.
+- **R's peak RSS is the main TU** (1.43 GiB, 95% of budget): the entry table plus the all-owner declaration
+  header. Owner TUs peak at 1.17 GiB.
+- **Stubs.** Starts whose instruction crosses its window edge become typed stubs: 7 of 1,541,120 window instances
+  (dense) and 9 (random). No prefix lock can occur under this map, because non-code breaks every fetch circle.
+- **Execution cost of the strict binding rule.** 999,987 of 1,000,000 bounded smoke steps returned to the
+  dispatcher, at about 32 ns per owner step (3.7 ns with unrestricted chaining in the first experiment).
+  N and R produced identical cycle totals in the bounded smoke runs.
+- **Not run.** 1 MiB (R about 2x the 512 KiB figures by linearity) and 512 KiB random N (N already rejected).
+- **Measurement note.** Serial compiles report a higher per-process RSS than parallel ones on this host. All RSS
+  figures in this ADR are the maximum over serial and parallel runs.
+
 ## Decision
 
 1. **Broad immutable-image AOT with B1 granularity is the Z80 default.**
@@ -112,11 +180,22 @@ semantics with Z80 names. After the decision the code was intentionally **not re
      dense code and on a NOP sled for no lookup benefit. Strategy A is unnecessary: broad AOT is practical, so no
      reachability mechanism is introduced (SEG-008 Notes question 10), and no M68K discovery tiers are imported.
    - Superblocks may return later only as a measured, selective optimisation with its own ADR.
+   - **Owner representation: window-relative (R) for multi-window images.** The second experiment measured this
+     on an SMS-shaped map.
+     - When the logical code mapping admits an image in more than one window of equal size, each (image, offset)
+       gets one owner shared by every admissible window.
+     - The owner receives the window base and derives every PC-dependent value from base + offset.
+     - The lookup key is (image identity, offset within the window).
+     - An image admissible in exactly one window, and every invariant window, keeps absolute-PC owners.
+     - Naive per-(image, window) owners (N) are rejected: they missed the 512 KiB whole-program budgets.
+     - Broad B1 is therefore practical for the Master System machine: a 512 KiB SMS-shaped ROM passes all seven
+       pre-declared whole-program budgets.
 2. **Dispatch** uses the generic exact `compiled_entry_table.hpp` binary search with Z80 table names. A dense table
    may be added only in the generic codegen layer, and only if a later measurement shows the binary search missing
    a budget.
 3. **Owner key.** The key is (code-image identity, 16-bit address). The lookup key is the 32-bit value
-   `image_id << 16 | address`.
+   `image_id << 16 | address`. For window-relative owners (§1) the address component is the offset within the
+   window, and the dispatcher passes the window base derived from PC.
    - Address arithmetic, including instruction fetch, wraps at 0xFFFF in the CPU address space (§5).
    - The TU shard key is the dense position (`image ordinal x image length + offset`). The lookup key is not used
      for sharding, so that banked images spread over every shard (the experiment's crowding finding). The shard
@@ -199,7 +278,8 @@ semantics with Z80 names. After the decision the code was intentionally **not re
 ## Code-image statement (Scope item 6)
 
 - **Supported: immutable banked ROM.** Bank switching is immutable code-image remapping: owners are keyed by
-  (image identity, address), and the platform reports the current identity through the runtime ABI. SEG-009
+  (image identity, address or window offset, §1/§3), and the platform reports the current identity through the
+  runtime ABI. SEG-009
   crosses Master System bank boundaries through this mechanism. Mapper policy stays entirely outside `libs/cpu/z80`.
 - **Fail closed: mutable code.** RAM-generated code, code modified after compilation and self-modifying code stop
   with `mutable_code` until a later architecture explicitly supports them. The same applies to a ROM-to-RAM copy
@@ -213,6 +293,12 @@ semantics with Z80 names. After the decision the code was intentionally **not re
   `prefix_lock`, `unresolved_fetch_mapping` or `mutable_code`. Z80 provenance records the start's (identity,
   address) and the logical byte count; the bytes may wrap.
 - T003 builds the owner and entry emission with packed dense shard keys, the runtime ABI outcome enum above,
-  and a synthetic two-image test in which mapping-sensitive transfers dispatch by the current identity.
+  and a synthetic two-image test in which mapping-sensitive transfers dispatch by the current identity. It also
+  builds the window-relative owner representation with a synthetic image admissible in two windows.
+- Compiler-memory headroom for large banked ROMs is set by the entry-table/declaration TU (1.43 GiB at 512 KiB).
+  Owners in mapping-sensitive windows never reference each other (§4), so T003 must not declare every owner in
+  the shared header. Only the entry-table TU needs them, and it may be sharded.
+- The strict binding rule makes most steps dispatcher lookups (about 32 ns per step at 512 KiB). A faster sound
+  binding (§4) is the natural later optimisation, and it needs its own ADR.
 - Generated-size budgets for large banked ROMs are governed by the linear per-bank figures above. A future emitter
   that factors flag helpers will be smaller than the experiment's fully inline bodies.
