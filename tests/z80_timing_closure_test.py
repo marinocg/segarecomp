@@ -350,7 +350,7 @@ def lock_property(tc, work, rng):
     """Splits inside a prefix_lock run with INT/NMI raised between them: never accepted, same final state as a straight
     run, every stop after entry is prefix_lock with in_prefix_run set; an entry with in_prefix_run clear is interruptible."""
     image_doc = lock_image()
-    exe = build_image(tc, image_doc, work / "lock", "z80_lock")
+    exe = build_image(tc, image_doc, work / "lock", "z80_dd64")  # same spec+stem as the scenario image: one shared compile
     state = {"pc": 0xFFF0, "sp": 0x8000, "im": 1, "iff1": 1, "iff2": 1}
     vecs, plans = [], []
     for k in range(SCHEDULES_PER_PROGRAM):

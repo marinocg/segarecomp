@@ -25,6 +25,7 @@ import itertools
 import json
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -427,9 +428,17 @@ def scenario_batches(doc):
 
 
 # ------------------------------------------------------------------------------------------------ build / run
+BUILD_CACHE_ENV = "SEGARECOMP_Z80_BUILD_CACHE"
+
+
 class Toolchain:
-    def __init__(self, cc, emitter, oracle_checkout=None, opt="-O0", include_dir=None):
+    def __init__(self, cc, emitter, oracle_checkout=None, opt="-O0", include_dir=None, cache=True):
         self.cc, self.emitter, self.oracle_checkout, self.opt = cc, emitter, oracle_checkout, opt
+        # Optional content-addressed cache of linked generated programs, shared by the test processes of one build
+        # tree: identical (spec, stem, compiler, flags, emitter, runtime headers, runner) => identical executable.
+        # A test that must observe a fresh compile (reproducibility) passes cache=False.
+        configured = os.environ.get(BUILD_CACHE_ENV)
+        self.cache_dir = pathlib.Path(configured) if configured and cache else None
         self.include_dir = include_dir or INCLUDE_DIR  # a test may shadow the ABI header with a mutated copy
 
 
@@ -483,13 +492,44 @@ def compile_units(tc, workdir, stem, extra_sources=(), extra_flags=()):
     return exe, None
 
 
+def _file_digest(path):
+    return hashlib.sha256(pathlib.Path(path).read_bytes()).hexdigest()
+
+
+def _cache_key(tc, spec_text, stem):
+    h = hashlib.sha256()
+    for part in (spec_text, stem, str(tc.cc), tc.opt, " ".join(STRICT), sys.platform):
+        h.update(part.encode())
+        h.update(b"\0")
+    inputs = [tc.emitter, TOOLS_DIR / "z80_conformance_runner.c", TOOLS_DIR / "z80_conformance_common.h",
+              *sorted(pathlib.Path(tc.include_dir).rglob("*.h")), *sorted(pathlib.Path(INCLUDE_DIR).rglob("*.h"))]
+    for path in inputs:
+        h.update(_file_digest(path).encode())
+    return h.hexdigest()
+
+
 def build_generated(tc, spec_text, workdir, stem="z80_image", list_owners=False):
     stats, owners, error = emit_image(tc, spec_text, workdir, stem, list_owners)
     if error:
         return {"error": "emit: " + error}
+    cached = None
+    if tc.cache_dir is not None:
+        cached = tc.cache_dir / (_cache_key(tc, spec_text, stem) + ".exe")
+        if cached.exists():
+            exe = pathlib.Path(workdir) / (stem + ".exe")
+            shutil.copy2(cached, exe)
+            return {"exe": exe, "stats": stats, "owners": owners, "error": None}
     exe, error = compile_units(tc, workdir, stem, extra_sources=[TOOLS_DIR / "z80_conformance_runner.c"])
     if error:
         return {"error": "compile: " + error, "stats": stats, "owners": owners}
+    if cached is not None:
+        cached.parent.mkdir(parents=True, exist_ok=True)
+        partial = cached.with_name("%s.%d.tmp" % (cached.name, os.getpid()))
+        shutil.copy2(exe, partial)
+        try:
+            os.replace(partial, cached)  # atomic: concurrent test processes may race to fill the same entry
+        except OSError:  # e.g. Windows while another process holds the entry open: the winner's entry is equivalent
+            partial.unlink(missing_ok=True)
     return {"exe": exe, "stats": stats, "owners": owners, "error": None}
 
 

@@ -1127,3 +1127,10 @@ foreach(_z80_full z80_generated_pipeline_test z80_conformance_oracle_test)
   set_property(TEST ${_z80_full}_fullscale APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_FULL_SCALE=1")
   set_property(TEST ${_z80_full}_fullscale APPEND PROPERTY LABELS extended)
 endforeach()
+# Share linked generated programs between the Z80 test processes of this build tree (content-addressed; see
+# tools/z80_conformance.py `Toolchain`): the same 64 KiB image is compiled once instead of once per test.
+set_property(TEST z80_generated_pipeline_test z80_conformance_harness_test z80_conformance_oracle_test
+  z80_timing_closure_test z80_control_stack_dispatch_test z80_data_alu_flags_test z80_sst_corpus_test
+  z80_secondary_oracle_test z80_capability_ratchet_test z80_generated_pipeline_test_fullscale
+  z80_conformance_oracle_test_fullscale
+  APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")

@@ -195,8 +195,9 @@ def main():
         small = z.image_spec_text([{"identity": 1, "kind": "invariant", "windows": [["0000", "0000", "0100"]], "fill": "00",
                                     "size": 0x100}])
         exes = []
+        tc_fresh = z.Toolchain(CC, EMITTER, cache=False)  # reproducibility needs two real compiles, never a cache hit
         for name in ("a", "b"):
-            built = z.build_generated(tc, small, work / ("small_" + name), stem="small")
+            built = z.build_generated(tc_fresh, small, work / ("small_" + name), stem="small")
             check(not built["error"], "small build failed: %s" % built["error"])
             if not built["error"]:
                 exes.append(hashlib.sha256(pathlib.Path(built["exe"]).read_bytes()).hexdigest())
