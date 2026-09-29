@@ -505,9 +505,19 @@ private:
   void classify(Entry &entry, std::uint32_t pc) {
     const auto &ea = entry.store.ea;
     const auto disp = static_cast<std::uint32_t>(static_cast<std::int32_t>(ea.displacement));
+    // The source operand's (An)+ / -(An) step happens before the destination address is formed: a destination based
+    // on (or indexed by) that same An is not at the value An had before the instruction. Unresolved (conservative).
+    const auto &source = instructions_.at(pc).operation.source_ea;
+    const bool source_steps = source.mode == M68kEaMode::address_postinc || source.mode == M68kEaMode::address_predec;
+    const bool stepped = source_steps && (source.reg == ea.reg || (ea.mode == M68kEaMode::address_index8 &&
+                                                                   ea.index_is_address && ea.index_reg == source.reg));
     const auto base = [&](GenesisStoreClass unknown_class) -> std::optional<M68kFiniteValues> {
       if (ea.reg == 7U) {
         entry.store_class = GenesisStoreClass::stack;
+        return std::nullopt;
+      }
+      if (stepped) {
+        entry.store_class = unknown_class;
         return std::nullopt;
       }
       auto eval = evaluator(nullptr, false);

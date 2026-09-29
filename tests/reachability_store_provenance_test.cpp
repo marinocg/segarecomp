@@ -418,10 +418,51 @@ void fixture_narrow_query_of_long_load() {
   expect(resolved_to(r, jmp, {0}), "CORR: the low word of a long table entry names the target");
 }
 
+// CORRECTION 1 (validator): a destination based on the An that the source operand steps is not at An's prior value.
+// LEA S-1,A1; MOVE.B (A1)+,(A1) really stores into S: it must stay unresolved, never exclude the writer.
+// Also pinned: a predecrement store's span and the big-endian byte offsets of a word store covering the byte.
+void fixture_store_addresses() {
+  {
+    Image image;
+    Asm a{image, entry};
+    a.move_b_imm_ram(2, S).move_b_imm_ram(8, S - 1U).lea_ram(1, S - 1U).w(0x1299U);  // MOVE.B (A1)+,(A1)
+    const auto jmp = a.dispatch_abs(S);
+    table_and_targets(image, 10U);
+    const auto r = run(image);
+    expect(outcome(r, jmp, GenesisPcIndexOutcome::width_only_domain) && source(r, jmp, GenesisStateSourceOutcome::alias_poison),
+           "SAME-AN: a stepped-source destination is unresolved, so it poisons");
+  }
+  for (const auto &[base, values] : {std::pair<std::uint16_t, std::vector<unsigned>>{S + 1U, {0, 6}},
+                                    std::pair<std::uint16_t, std::vector<unsigned>>{S + 2U, {0}}}) {
+    Image image;
+    Asm a{image, entry};
+    a.lea_ram(1, base).w(0x133CU).w(6U);  // MOVE.B #6,-(A1)
+    const auto jmp = a.dispatch_abs(S);
+    table_and_targets(image, 10U);
+    const auto r = run(image);
+    const auto *s0 = site(r, jmp);
+    std::vector<std::uint32_t> expected;
+    for (const auto v : values) expected.push_back(target(v));
+    expect(s0 != nullptr && s0->outcome == GenesisPcIndexOutcome::resolved && s0->targets == expected,
+           "PREDEC: -(A1) writes the byte below A1 exactly");
+  }
+  {
+    constexpr std::uint16_t odd = 0xF105U;  // the low byte of the word at 0xF104
+    Image image;
+    Asm a{image, entry};
+    a.w(0x31FCU).w(0x0206U).w(0xF104U);  // MOVE.W #$0206,($F104).W -> byte 0xF105 = 6 (big-endian)
+    a.w(0x31FCU).w(0x0408U).w(0xF106U);  // MOVE.W #$0408,($F106).W -> does not cover 0xF105
+    const auto jmp = a.dispatch_abs(odd);
+    table_and_targets(image, 10U);
+    expect(resolved_to(run(image), jmp, {0, 6}), "ENDIAN: a word store covers its low byte at the higher address");
+  }
+}
+
 }  // namespace
 
 int main() {
   fixture_narrow_query_of_long_load();
+  fixture_store_addresses();
   fixture1_constants_only();
   fixture2_bounded_and_unbounded_update();
   fixture3_alias_poison();

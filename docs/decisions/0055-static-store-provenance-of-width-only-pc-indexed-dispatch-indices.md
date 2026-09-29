@@ -26,8 +26,10 @@ index values, stores, aliases, targets or roots.
 
 `--pc-index-store-provenance classify|prove` (requires `--pc-index-recovery`).
 
-- `classify` records the generic addressing class of every mutable byte index source a proof reads. Discovery is
-  identical to T002.
+- `classify` records the generic addressing class of every mutable byte index source a proof reads. For a
+  register-relative source it also records whether the base is locally exact. That lookup spends the same per-site
+  evaluation budget, so classify could in principle turn a site into `resource_limit`. Measured on Sonic 1, `D` and
+  every site outcome are identical to T002.
 - `prove` also attempts an exact store domain for the source.
 
 Source classes:
@@ -55,14 +57,17 @@ discovered set `D`, at every recovery step.
    An interrupt entry stacks a frame whenever an interrupt vector root exists. An operation the model does not
    describe poisons.
 2. A store whose destination resolves is excluded when it names only other bytes. Resolved means absolute, or
-   `An`/`Xn` with exact local values; the RAM mirror is normalized.
+   `An`/`Xn` with exact local values; the RAM mirror is normalized. A destination based on (or indexed by) the
+   same `An` that the source operand steps (`(An)+`/`-(An)`) is never resolved: the step happens before the
+   destination address is formed.
 3. A store that may cover `S` contributes its exact stored value set.
 4. A store whose destination cannot be excluded may cover every RAM byte. This includes an unknown `An`, `A7`
    stack operands and pushes, and exception frames. If its value is not an exact finite set, `S` is
    `alias_poison`.
 5. The initial value is the machine model's reset work RAM (zero, the project runtime's `{0}`-initialised
-   state). Real hardware leaves work RAM undefined, so this is a stated model assumption. The report counts
-   domains where 0 is present only through it.
+   state). Real hardware leaves work RAM undefined, so this is a stated model assumption. A byte with no writer in
+   `D` is therefore exactly `{0}`, including when it is copied into another location. The report counts only the
+   domains where 0 enters a location solely through its own reset value.
 6. Supported stored values are deliberately few:
    - immediate and `CLR`;
    - `MOVEQ`/register-derived exact values from the existing T002 domain;
@@ -84,6 +89,11 @@ report counts `store_domain_invalidations`.
 **Measurement variants (never proofs).** `--store-alias-policy exclude-stack` ignores stack and exception-frame
 stores. `exclude-unresolved` ignores every store with an unresolved destination. Both are unsound. They exist only
 to attribute what blocks a strict proof.
+
+**Validator correction (cycle 1).** The first candidate formed a destination based on the stepped `An` from `An`'s
+prior value. `MOVE.B (A1)+,(A1)` was then misplaced and excluded, an optimistic defect. That destination is now
+unresolved. Fixtures pin this case, predecrement spans and big-endian byte offsets, and the Sonic outputs are
+byte-identical.
 
 **Correction to the shared domain.** A register query narrower than a memory load's access size (for example a
 `.W` index loaded by `MOVE.L` from an immutable table) previously read the high bytes of the big-endian load
@@ -113,12 +123,15 @@ production admission.
 | --- | --- | --- | --- |
 | challenger-reachable width-only sites (9) | **8** | 0 | 1 |
 | observed width-only sites (70; classification only) | 10 (7 in `D`) | **59** (all outside `D`) | 1 |
-| missing PCs behind width-only dispatch (5,681 of 6,019 `O − D`) | 425 | **5,070** | 186 |
+| missing PCs with a width-only dispatch on their structural chain (5,681 of 6,019 `O − D`) | 425 | **5,070** | 186 |
 
-- The register-relative sources are all object fields: for all 59, the base register has no locally exact value on
-  the observed fixed-flow graph.
+- For all 59 register-relative sources, the base register has no locally exact value on the observed fixed-flow
+  graph. That they are object fields is an interpretation; the measurement is only that the base is not locally
+  provable.
 - On the challenger's own frontier the problem looks favourable: a handful of absolute state bytes. Across the
-  execution still missing, it is not. **84.2% of `O − D` lies behind object-relative mutable fields.**
+  execution still missing, it is not. **84.2% of `O − D` has a register-relative width-only dispatch on its
+  structural chain.** For 5,367 of those PCs the structural first gate is `JSR (An)`, so resolving the fields alone
+  would not reach them either.
 
 ### Exact store domains (strict)
 
@@ -191,7 +204,8 @@ three of the stated STOP criteria hold:
      pointer.
    - Excluding the stack is not enough.
 2. **Object-relative fields dominate, and their base provenance cannot be established locally.**
-   - 59 of 70 observed width-only sites are object fields, and 84.2% of `O − D` lies behind them.
+   - 59 of 70 observed width-only sites read a register-relative field, and 84.2% of `O − D` has one on its
+     structural chain.
    - None has a locally exact base. The next step would be object/heap identity, which is interprocedural pointer
      analysis.
 3. **The important width-only sites stay unresolved after simple exact-store analysis.**
@@ -211,6 +225,7 @@ approach: 42.7% recall at `D/U` 2.75%. No successor experiment is proposed for t
 - Z80 or DMA writes into 68000 work RAM are not modelled, and neither are external bus masters. With the strict
   result at zero resolutions this is moot.
 - A may-alias store with an exact value is not poison: it contributes its value bytes at every offset.
+- A pinned (invalidated) site is not re-evaluated, so it reports source kind `none`.
 - Classification labels over observed PCs use only the observed fixed-flow graph (ADR 0054) and never enter `D`.
   No store analysis is run over observed code, since that would make runtime coverage a store source.
 

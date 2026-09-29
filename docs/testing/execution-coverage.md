@@ -90,7 +90,7 @@ segarecomp genesis-reachability-challenger --rom games/<rom> --reset-entry --rom
     - `(d8,An,Xn)` field;
     - `(An)+`/`-(An)` pointer.
 
-    Discovery is identical to T002.
+    Discovery is measured identical to T002 on Sonic 1.
   - `prove` replaces a byte source's width rule with its exact store domain only when that domain is complete
     under the challenger's current `D`:
     - every store in `D` is described by a conservative store model;
