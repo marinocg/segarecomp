@@ -64,9 +64,12 @@ struct Source {
   bool same_register{};     // the source is the destination register itself (pointwise, not a cross product)
 };
 
-// The source operand of an ALU/MOVE into Dreg, restricted to its low `bits`.
+// The source operand of an ALU/MOVE into Dreg, restricted to its low `bits`. `access_bits` is the operation's own
+// operand size: a memory operand is read at that architectural size (big-endian) and only then restricted, so a
+// query narrower than the access sees the operand's LOW bytes, which lie at the HIGHER addresses (SEG-026-T003
+// correction: the narrow query previously read the high bytes of a wider load).
 Source read_source(const M68kEffectiveAddress &ea, unsigned reg, unsigned bits, unsigned width,
-                   M68kFiniteValueInputs &inputs, M68kFiniteTransfer &transfer) {
+                   M68kFiniteValueInputs &inputs, M68kFiniteTransfer &transfer, unsigned access_bits) {
   const auto mask = width_mask(bits);
   Source out{};
   switch (ea.mode) {
@@ -90,11 +93,11 @@ Source read_source(const M68kEffectiveAddress &ea, unsigned reg, unsigned bits, 
     std::vector<std::uint32_t> values;
     for (const auto value : index.values) {
       const auto address = m68k_pc_index_address(ea, value);
-      if (bits > 8U && (address & 1U) != 0U) {
+      if (access_bits > 8U && (address & 1U) != 0U) {
         ++transfer.misaligned_reads_excluded;
         continue;
       }
-      const auto read = inputs.immutable_read(address, bits / 8U);
+      const auto read = inputs.immutable_read(address, access_bits / 8U);
       ++transfer.table_reads;
       if (!read) {
         transfer.immutable_read_failed = true;
@@ -111,8 +114,8 @@ Source read_source(const M68kEffectiveAddress &ea, unsigned reg, unsigned bits, 
   case M68kEaMode::absolute_word:
   case M68kEaMode::absolute_long: {
     const auto address = ea.absolute_address & UINT32_C(0x00FFFFFF);
-    if (bits > 8U && (address & 1U) != 0U) return out;
-    if (const auto read = inputs.immutable_read(address, bits / 8U)) {
+    if (access_bits > 8U && (address & 1U) != 0U) return out;
+    if (const auto read = inputs.immutable_read(address, access_bits / 8U)) {
       ++transfer.table_reads;
       out.values = M68kFiniteValues::of({*read & mask}, width);
       out.proof = m68k_finite_proof::immutable_load;
@@ -126,7 +129,7 @@ Source read_source(const M68kEffectiveAddress &ea, unsigned reg, unsigned bits, 
                       ea.mode == M68kEaMode::address_predec || ea.mode == M68kEaMode::address_disp16 ||
                       ea.mode == M68kEaMode::address_index8 || ea.mode == M68kEaMode::absolute_word ||
                       ea.mode == M68kEaMode::absolute_long || ea.mode == M68kEaMode::pc_disp16;
-  if (memory && bits == 8U) {
+  if (memory && access_bits == 8U) {
     std::vector<std::uint32_t> all(256U);
     for (std::uint32_t v = 0; v < 256U; ++v) all[v] = v;
     out.values = M68kFiniteValues::of(std::move(all), width);
@@ -244,7 +247,7 @@ M68kFiniteTransfer m68k_finite_register_after(const M68kIrOperation &operation, 
     return transfer;
   case M68kIrKind::write_move: {
     if (!destination_is_reg) return transfer;
-    const auto source = read_source(operation.source_ea, reg, bits, width, inputs, transfer);
+    const auto source = read_source(operation.source_ea, reg, bits, width, inputs, transfer, size_bits(operation.size));
     if (transfer.immutable_read_failed) return transfer;
     if (source.same_register) {
       transfer.values = inputs.data_register_before(reg, width);
@@ -288,7 +291,7 @@ M68kFiniteTransfer m68k_finite_register_after(const M68kIrOperation &operation, 
                                operation.kind == M68kIrKind::exclusive_or_immediate
                            ? m68k_finite_proof::logical
                            : m68k_finite_proof::add_sub;
-    const auto source = read_source(operation.source_ea, reg, bits, width, inputs, transfer);
+    const auto source = read_source(operation.source_ea, reg, bits, width, inputs, transfer, size_bits(operation.size));
     if (transfer.immutable_read_failed) return transfer;
     const auto old = inputs.data_register_before(reg, width);
     const bool and_kind = operation.kind == M68kIrKind::logical_and || operation.kind == M68kIrKind::logical_and_immediate;

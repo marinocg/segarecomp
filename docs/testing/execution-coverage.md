@@ -82,6 +82,8 @@ segarecomp genesis-reachability-challenger --rom games/<rom> --reset-entry --rom
   a proof invalidated by a later edge restarts discovery with that site pinned unresolved. stdout gains a
   `pc_index_recovery` aggregate (per-site outcomes, proof mechanisms, graph-growth and accidental-decode
   indicators; never an address).
+- **Store provenance of width-only indices (SEG-026-T003, ADR 0055).** This was measured and STOPPED. The experiment
+  implementation is not retained, so there is no flag for it.
 - **Output.** stdout carries aggregate counts only; `--universe` adds the unchanged broad AOT count `U`.
 - **Private output.** `--private-output` holds exact PCs.
 

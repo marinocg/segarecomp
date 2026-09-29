@@ -396,9 +396,36 @@ void fixture_default_and_determinism() {
          "AGG: aggregate carries no target address");
 }
 
+// A `.W` index register loaded by MOVE.L from immutable bytes is the operand's LOW word, which big-endian memory
+// holds at the HIGHER address. The operand is read at its architectural access width (long) and only then
+// restricted (SEG-026-T003 correction; the narrow query previously read the high word).
+void fixture_narrow_query_of_wider_load() {
+  for (const bool absolute : {false, true}) {
+    Image image;
+    constexpr std::uint32_t table = 0x240U;
+    Asm a{image, 0x200U};
+    if (absolute) {
+      a.w(0x2038U).w(table + 4U);  // MOVE.L (table+4).W,D0
+    } else {
+      a.moveq(1, 4);
+      a.w(0x203BU).index_ext(1, table);  // MOVE.L (table,PC,D1.W),D0
+    }
+    const auto jmp = a.pc;
+    a.jmp_pcidx(0, table);  // JMP (table,PC,D0.W)
+    // High word 0x0001 would name an odd PC (no target); the low word names 0x260.
+    image.words(table + 4U, {0x0001U, 0x0020U});
+    Asm{image, 0x260U}.bra_self();
+    const auto r = run(image);
+    expect(targets(r, jmp, {0x260U}) && in_d(r, 0x260U),
+           absolute ? "WIDE: MOVE.L (abs).W -> .W index uses the low word"
+                    : "WIDE: MOVE.L (d8,PC,Xn) -> .W index uses the low word");
+  }
+}
+
 }  // namespace
 
 int main() {
+  fixture_narrow_query_of_wider_load();
   fixture1_explicit_bound_and_adjacent_data();
   fixture2_mask_bounded();
   fixture3_signed_entries();
