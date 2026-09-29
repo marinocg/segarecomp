@@ -232,8 +232,10 @@ extrapolated. The main TU dominates RSS, and the full parallel run peaked at 1,1
      runtime-selected target, sets PC and returns to the dispatcher. The
      runtime-selected targets are `JP (HL)/(IX)/(IY)`, `RET`/`RETI`/`RETN` (conditional or not), the IM1/IM2/NMI/
      IM0-RST handler PC, and resume after deadline, HALT or interrupt.
-   - The dispatcher asks the platform, through the runtime ABI, for the current code-image identity of the PC,
-     then performs an exact lookup of (identity, PC).
+   - The dispatcher asks the platform, through the runtime ABI, for the current code-image identity and window of
+     the PC, then performs an exact lookup of the owner key (§3):
+     - (identity, PC) for absolute-PC owners, i.e. invariant windows and images admissible in exactly one window;
+     - (identity, PC - window base) for window-relative owners, whose window base is passed to the owner.
    - No discovery or refinement cycle exists: a miss is a typed stop (Notes question 11).
    - Faster binding inside banked windows, for example a prologue identity re-check, is a possible later
      optimisation. It needs its own ADR with a soundness argument covering writes to the mapping control.
@@ -270,7 +272,7 @@ extrapolated. The main TU dominates RSS, and the full parallel run peaked at 1,1
        with wrap. It never accepts INT or NMI, and it returns the resumable `prefix_lock` outcome at the deadline
        with in-prefix-run still set.
      - Resuming with in-prefix-run set skips interrupt acceptance and continues the run. Every other outcome and
-       every instruction boundary leaves it clear. Resume and entry use the same (identity, PC) lookup, so this
+       every instruction boundary leaves it clear. Resume and entry use the same owner-key lookup (§3, §4), so this
        explicit state bit, part of the Z80 state structure in the runtime ABI, is what distinguishes them.
      - The pinned oracle confirms acceptance at entry (IM1 13 T, NMI 11 T) and none inside the run (ADR 0057).
      - Only RESET, which is platform policy, leaves the run.
