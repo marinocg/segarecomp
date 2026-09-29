@@ -61,7 +61,7 @@ Text, one vector per `V ... E` block: `R` (16 byte registers), `P` (IX IY SP PC 
 deferral ldair prefix_run nmireject), `M`/`F` (memory patch/fill), `IN` (I/O input script), `ACK` (interrupt-acknowledge
 bytes), `K` (code-image map entries for the generated side) and `S` steps: `i` = one instruction, interrupt response or
 halted cycle (DD/FD chains completed on the oracle), `r` = a raw run of N T-states (used for the endless prefix lock),
-each with the INT level and an NMI edge applied before the step. Each step prints one result line with the full
+each with the INT level and an NMI edge applied before the step. `a` (SEG-008-T008, generated side only) passes an absolute cycle deadline, used by the timing/deadline property test (`tests/z80_timing_closure_test.py`, contract in `docs/architecture/z80-scheduling-contract.md`). Each step prints one result line with the full
 architectural and internal state, T-states, the ordered memory-write log and the ordered I/O log (IN, OUT and INTA).
 Every run is bounded: each step passes a finite deadline and a vector has at most 64 steps.
 

@@ -1093,6 +1093,11 @@ set_property(TEST codegen_c11_z80_dependency_test z80_generated_pipeline_test z8
 set_property(TEST cpu_z80_decode_tests z80_generated_pipeline_test z80_conformance_oracle_test APPEND PROPERTY LABELS full)
 set_property(TEST cpu_z80_dependency_test z80_capability_ratchet_test codegen_c11_z80_dependency_test
   z80_conformance_harness_test APPEND PROPERTY LABELS full fast)
+# SEG-008-T008: per-form/per-outcome T-state validation and the deadline/resume property (oracle comparison skips cleanly).
+add_test(NAME z80_timing_closure_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_timing_closure_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_timing_closure_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST z80_timing_closure_test APPEND PROPERTY LABELS full)
 # SEG-008-T005: control-flow/stack/dispatch scenarios (oracle comparison skips cleanly without the pinned checkout).
 add_test(NAME z80_control_stack_dispatch_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/z80_control_stack_dispatch_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

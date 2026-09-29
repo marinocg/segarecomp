@@ -105,8 +105,11 @@ int main(int argc, char **argv) {
       if (st->nmi) rt.state.nmi_pending = 1;
       memset(&events, 0, sizeof events);
       const uint64_t before = rt.state.cycles;
+      /* 'i': one instruction (deadline = now + 1); 'r': a relative run of N T-states; 'a' (SEG-008-T008): an ABSOLUTE
+       * cycle deadline, the platform-owned scheduling form of the contract (a deadline already reached does no work). */
       const uint64_t budget = st->mode == 'i' ? 1u : st->budget;
-      const Z80Outcome outcome = z80_run(&rt, before + (budget ? budget : 1u));
+      const uint64_t deadline = st->mode == 'a' ? (uint64_t)st->budget : before + (budget ? budget : 1u);
+      const Z80Outcome outcome = z80_run(&rt, deadline);
       zc_state now;
       memset(&now, 0, sizeof now);
       store_state(&now, &rt.state);
