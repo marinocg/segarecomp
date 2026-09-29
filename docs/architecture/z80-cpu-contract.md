@@ -48,13 +48,13 @@ milestone, whose ASIC-integrated core must be classified first). No CMOS-only in
 | IFF1, IFF2 | 1 each | interrupt enable flip-flops |
 | IM | 0/1/2 | interrupt mode |
 | HALT | 1 | halted flag (§4.4) |
-| EI-deferral | 1 | "the previous instruction was EI": maskable INT not accepted at this boundary (§4.2) |
+| INT-deferral | 1 | maskable INT not accepted at this boundary: set by `EI`, or by `RETI`/`RETN` that change IFF1 (§4.2) |
 | prefix-pending | — | never architecturally visible between instructions: a prefix and its opcode form one indivisible instruction boundary in this contract (§3.2) |
 | MEMPTR (WZ) | 16 | internal; in scope because `BIT n,(HL)` X/Y observe it [MEMPTR] |
 | Q | 8 | internal; F value written by the last instruction if it changed flags, else 0; in scope because SCF/CCF X/Y observe it [Rak] |
 | LD A,I/R marker | 1 | NMOS quirk marker (§4.6) |
 
-Reset state [Young §2.4; UM0080]: PC = 0, I = 0, R = 0, IFF1 = IFF2 = 0, IM = 0, HALT = 0, EI-deferral = 0.
+Reset state [Young §2.4; UM0080]: PC = 0, I = 0, R = 0, IFF1 = IFF2 = 0, IM = 0, HALT = 0, INT-deferral = 0.
 AF = SP = 0xFFFF. All other registers (BC, DE, HL, alternates, IX, IY, MEMPTR, Q) are undefined on hardware.
 This contract **defines** them as 0xFFFF (Q = 0, MEMPTR = 0xFFFF) so generated execution is deterministic. The
 platform may override any initial value through the runtime ABI.

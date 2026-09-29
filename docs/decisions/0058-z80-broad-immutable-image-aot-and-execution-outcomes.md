@@ -56,7 +56,7 @@ semantics with Z80 names. After the decision the code was intentionally **not re
 | input | strategy | legal starts / owners | typed truncations | generated C MiB | exe MiB | j8 / j1 s | compiler RSS MiB | exact lookup ns rnd/seq | budgets |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | dense | A | 10,603 | 0 | 6.0 | 2.1 | 2.2 / 11.0 | 98 | 31.7 / 21.3 | pass |
-| dense | **B1** | 65,536 | 0 | 35.7 | 12.2 | 8.8 / 49.7 | 226 | 34.0 / 19.6 | **all pass** |
+| dense | **B1** | 65,536 | 0 | 35.7 | 12.2 | 8.8 / 49.7 | 227 | 34.0 / 19.6 | **all pass** |
 | dense | B2 (dup 6.46) | 65,536 | 0 | **155.3** | 35.4 | 37.6 / 207.7 | 544 | 33.1 / 19.8 | **miss C** |
 | random | B1 | 65,536 | 0 | 34.0 | 11.5 | 6.9 / 42.9 | 221 | 32.4 / 18.8 | all pass |
 | random | B2 (dup 5.57) | 65,536 | 0 | 121.1 | 25.4 | 20.7 / 138.1 | 448 | 32.2 / 19.2 | pass (95% of C) |
