@@ -336,3 +336,28 @@ extrapolated. The main TU dominates RSS, and the full parallel run peaked at 1,1
   binding (§4) is the natural later optimisation, and it needs its own ADR.
 - Generated-size budgets for large banked ROMs are governed by the linear per-bank figures above. A future emitter
   that factors flag helpers will be smaller than the experiment's fully inline bodies.
+
+## SEG-008-T009 addendum: budgets re-measured with the real lowerings
+
+`tools/z80_static_budget.py` (-O1, same host class, per-process peak RSS by wait4, -j8 and -j1, exact lookup via the generated
+main TU's static lookup, two-run byte-identity). All 64 KiB shapes emit 65,536 full owners, no typed truncation, no unlowered start.
+
+| shape | generated C MiB | exe MiB | j8 / j1 s | compiler RSS MiB | exact lookup ns rnd/seq | budgets |
+| --- | --- | --- | --- | --- | --- | --- |
+| 64K dense (legal encodings with operands) | 46.1 | 14.8 | 9.5 / 56.6 | 249 | 37.8 / 18.6 | all pass |
+| 64K random | 46.1 | 14.8 | 8.2 / 54.4 | 248 | 33.8 / 19.2 | all pass |
+| 64K zero | 36.0 | 10.9 | 5.1 / 33.3 | 254 | 36.2 / 18.5 | all pass |
+| 64K 0xFF | 34.0 | 17.0 | 7.5 / 47.5 | 250 | 37.3 / 18.5 | all pass |
+| 512K SMS-shaped dense, 32 banks, 3 windows, window-relative | 355.7 | 121.4 | 72.7-120.2 / 461-570 | 1,015-1,559 (isolated main TU 1,357) | 44-47 / 24-25 | 6/7 every run; RSS see below |
+| 512K SMS-shaped random | 355.7 | 121.4 | 79.8 / 463.8 | 1,534 | 45.5 / 23.5 | all pass |
+| 512K authorized local SMS image (aggregate only) | 332.0 | 115.7 | 72.9 / 426.5 | 1,553 | 45.1 / 23.4 | RSS 1% over in this run |
+
+- Real lowerings cost about 1.29x the T001 stub-era C per owner at 64K (46.1 vs 35.7 MiB) and 1.10x at 512K (355.7 vs 323.8 MiB);
+  every size, time and lookup budget still passes with at least 1.4x margin (executable at 512K: 2.1x margin; -j1 at 512K:
+  3.1x). The dispatcher round trip (image query + lookup + one owner step, not the budgeted quantity) is 100-133 ns at 64K.
+- **RSS.** The peak process is the main TU (entry table plus all-owner declarations, about 72 MiB of C): 1,357 MiB when compiled
+  alone at -O1, 1,051 MiB at -O0. Under concurrent -j8 the host's per-process accounting varied between 1,015 and 1,559 MiB
+  across repeated runs of the same input; two of five 512K runs read 1-2% above the pre-declared 1,536 MiB. No 64K shape is
+  near it. This is a whole-program main-TU property (not a per-form one) that grows with window instances served; no
+  per-form exception applies. If SEG-009's mapper needs more headroom, the generic fix is to shard the entry table into the owner
+  TUs so the main TU only declares shard lookups. It is recorded here, not implemented.
