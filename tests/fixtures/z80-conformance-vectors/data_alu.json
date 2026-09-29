@@ -1,0 +1,10 @@
+{
+ "schema": 1,
+ "family": "data_alu",
+ "rows": [
+  {"form": "ld.r_r.base", "profiles": ["zero", "ones", "mixed", "edge"]},
+  {"form": "ld.r_r.base", "prefixes": ["DD", "FD", "DDFD", "FDDDFD"], "profiles": ["mixed"]},
+  {"form": "ld.r_n.base", "operands": ["00", "7F", "80", "FF", "5A"], "profiles": ["zero", "mixed"]},
+  {"form": "ld.r_n.base", "prefixes": ["DD", "FDFD"], "operands": ["A5"], "profiles": ["mixed"]}
+ ]
+}

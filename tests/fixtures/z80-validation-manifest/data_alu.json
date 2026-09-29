@@ -1,0 +1,24 @@
+{
+ "family": "data_alu",
+ "forms": {
+  "ld.r_n.base": {
+   "digest": "789c4ebc3f671444bcfe40c70eeeb4eacfbeba8886b0bb67a59ba5bddbf5ba77",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  },
+  "ld.r_r.base": {
+   "digest": "6b55a10c75ab325e895f5411aa27412a07370ea585b71fec55347968c0504e6b",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  }
+ },
+ "oracle": {
+  "redcode_Z80": "6bb4166317108b8d1a4b5934df15761089bdea9e",
+  "redcode_Zeta": "93ba5ab967eef00f074d21bb760fe9dc48afd2d3"
+ },
+ "schema": 1
+}

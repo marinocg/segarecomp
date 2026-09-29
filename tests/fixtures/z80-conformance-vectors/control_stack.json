@@ -1,0 +1,9 @@
+{
+ "schema": 1,
+ "family": "control_stack",
+ "rows": [
+  {"form": "nop.base", "profiles": ["zero", "ones", "mixed", "edge"]},
+  {"form": "nop.base", "prefixes": ["DD", "FD", "DDDDFD"], "profiles": ["mixed"]},
+  {"form": "nop.base", "profiles": ["mixed"], "steps": [{"mode": "i", "budget": 1, "repeat": 3}]}
+ ]
+}

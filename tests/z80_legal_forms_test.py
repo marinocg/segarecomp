@@ -21,7 +21,7 @@ FORBIDDEN_IN_DATASET_SIDE = ("libs/cpu", "cpu/z80", "z80_decode", "codegen_c11_z
 FORBIDDEN_IN_PRODUCTION = ("z80_legal_forms", "z80-legal-forms")
 PRODUCTION_DIRS = ("libs", "platforms", "apps")
 # Test-side measurement tools that legitimately consume the dataset (the ratchet test guards their independence).
-MEASUREMENT_TOOLS = ("z80_capability_coverage.py",)
+MEASUREMENT_TOOLS = ("z80_capability_coverage.py", "z80_conformance.py")
 PRODUCTION_FILES = ("CMakeLists.txt", "CMakePresets.json")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp", ".txt", ".cmake", ".py", ".json", ".in"}
 

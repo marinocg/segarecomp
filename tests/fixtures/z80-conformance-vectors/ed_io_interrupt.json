@@ -1,0 +1,8 @@
+{
+ "schema": 1,
+ "family": "ed_io_interrupt",
+ "rows": [
+  {"form": "halt.base", "profiles": ["zero", "mixed"], "steps": [{"mode": "i", "budget": 1, "repeat": 3}]},
+  {"form": "halt.base", "prefixes": ["DD"], "profiles": ["mixed"], "steps": [{"mode": "i", "budget": 1, "repeat": 2}]}
+ ]
+}

@@ -1,0 +1,17 @@
+{
+ "family": "ed_io_interrupt",
+ "forms": {
+  "halt.base": {
+   "digest": "88ad09fcdb0fd01a6e35ac87ce1e9d575e1eea299051b7df09b1a89224b8955d",
+   "stages": [
+    "oracle_state",
+    "timing_validated"
+   ]
+  }
+ },
+ "oracle": {
+  "redcode_Z80": "6bb4166317108b8d1a4b5934df15761089bdea9e",
+  "redcode_Zeta": "93ba5ab967eef00f074d21bb760fe9dc48afd2d3"
+ },
+ "schema": 1
+}

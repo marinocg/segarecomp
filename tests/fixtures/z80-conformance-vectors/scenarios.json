@@ -1,0 +1,2643 @@
+{
+ "schema": 1,
+ "images": {
+  "wrap64": {
+   "images": [
+    {
+     "identity": 1,
+     "kind": "invariant",
+     "windows": [
+      [
+       "0000",
+       "0000",
+       "10000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "FFFE",
+       "FD"
+      ],
+      [
+       "FFFF",
+       "DD"
+      ],
+      [
+       "0000",
+       "3E"
+      ],
+      [
+       "0001",
+       "42"
+      ],
+      [
+       "0200",
+       "DD3E42"
+      ],
+      [
+       "0210",
+       "FDDD3E42"
+      ],
+      [
+       "0300",
+       "76"
+      ]
+     ]
+    }
+   ]
+  },
+  "dd64": {
+   "images": [
+    {
+     "identity": 1,
+     "kind": "invariant",
+     "windows": [
+      [
+       "0000",
+       "0000",
+       "10000"
+      ]
+     ],
+     "fill": "DD"
+    }
+   ]
+  },
+  "fd64": {
+   "images": [
+    {
+     "identity": 1,
+     "kind": "invariant",
+     "windows": [
+      [
+       "0000",
+       "0000",
+       "10000"
+      ]
+     ],
+     "fill": "FD"
+    }
+   ]
+  },
+  "alt64": {
+   "images": [
+    {
+     "identity": 1,
+     "kind": "invariant",
+     "windows": [
+      [
+       "0000",
+       "0000",
+       "10000"
+      ]
+     ],
+     "fill": "DD",
+     "patch": [
+      [
+       "0000",
+       "DDFD",
+       32768
+      ]
+     ]
+    }
+   ]
+  },
+  "mixed64": {
+   "images": [
+    {
+     "identity": 1,
+     "kind": "invariant",
+     "windows": [
+      [
+       "0000",
+       "0000",
+       "10000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "FF00",
+       "DD",
+       256
+      ],
+      [
+       "0000",
+       "DD",
+       256
+      ],
+      [
+       "8000",
+       "DDFD",
+       150
+      ]
+     ]
+    }
+   ]
+  },
+  "two_image": {
+   "images": [
+    {
+     "identity": 1,
+     "kind": "invariant",
+     "windows": [
+      [
+       "0000",
+       "0000",
+       "4000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "0500",
+       "C9"
+      ]
+     ]
+    },
+    {
+     "identity": 2,
+     "kind": "banked",
+     "windows": [
+      [
+       "4000",
+       "0000",
+       "4000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "0000",
+       "06220E44"
+      ],
+      [
+       "3FFF",
+       "3E"
+      ]
+     ]
+    },
+    {
+     "identity": 3,
+     "kind": "banked",
+     "windows": [
+      [
+       "4000",
+       "0000",
+       "4000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "0000",
+       "06330E55"
+      ],
+      [
+       "3FFF",
+       "3E"
+      ]
+     ]
+    },
+    {
+     "identity": 7,
+     "kind": "banked",
+     "windows": [
+      [
+       "8000",
+       "0000",
+       "4000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "3FFF",
+       "3E"
+      ]
+     ]
+    }
+   ]
+  },
+  "reloc": {
+   "images": [
+    {
+     "identity": 1,
+     "kind": "invariant",
+     "windows": [
+      [
+       "0000",
+       "0000",
+       "4000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "0000",
+       "0655"
+      ],
+      [
+       "3FFF",
+       "3E"
+      ]
+     ]
+    },
+    {
+     "identity": 2,
+     "kind": "banked",
+     "windows": [
+      [
+       "4000",
+       "0000",
+       "4000"
+      ],
+      [
+       "8000",
+       "0000",
+       "4000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "0000",
+       "0655"
+      ],
+      [
+       "3FFF",
+       "3E"
+      ]
+     ]
+    },
+    {
+     "identity": 4,
+     "kind": "invariant",
+     "windows": [
+      [
+       "C000",
+       "0000",
+       "4000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "0000",
+       "42"
+      ]
+     ]
+    }
+   ]
+  }
+ },
+ "scenarios": [
+  {
+   "name": "wrap_dd_ld_a_n",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "FFFF",
+    "sp": "8000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 11,
+     "pc": "0002",
+     "a": "42",
+     "r": "02"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "unwrapped_dd_ld_a_n",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0200",
+    "sp": "8000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 11,
+     "pc": "0203",
+     "a": "42",
+     "r": "02"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "same_final_as": [
+    "wrap_dd_ld_a_n",
+    [
+     "pc"
+    ]
+   ]
+  },
+  {
+   "name": "wrap_chain_ld_a_n",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "FFFE",
+    "sp": "8000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 15,
+     "pc": "0002",
+     "a": "42",
+     "r": "03"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "unwrapped_chain_ld_a_n",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0210",
+    "sp": "8000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 15,
+     "pc": "0214",
+     "a": "42",
+     "r": "03"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "same_final_as": [
+    "wrap_chain_ld_a_n",
+    [
+     "pc"
+    ]
+   ]
+  },
+  {
+   "name": "wrap_plain_ld_a_n_from_zero",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 7,
+     "pc": "0002",
+     "a": "42",
+     "r": "01"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "nop_sled_deadline",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 5
+    }
+   ],
+   "state": {
+    "pc": "0400"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 8,
+     "pc": "0402"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "resume_whole",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 40
+    }
+   ],
+   "state": {
+    "pc": "0400"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 40,
+     "pc": "040A"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "resume_split",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 8,
+     "repeat": 5
+    }
+   ],
+   "state": {
+    "pc": "0400"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 8,
+     "pc": "0402"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "same_final_as": [
+    "resume_whole",
+    []
+   ]
+  },
+  {
+   "name": "halt_whole",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "r",
+     "budget": 100
+    }
+   ],
+   "state": {
+    "pc": "0300"
+   },
+   "expect": [
+    {
+     "out": "halted",
+     "t": 4,
+     "pc": "0301",
+     "halted": 1
+    },
+    {
+     "out": "halted",
+     "t": 100,
+     "pc": "0301",
+     "halted": 1,
+     "r": "1A"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "halt_split",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 25
+    }
+   ],
+   "state": {
+    "pc": "0300"
+   },
+   "expect": [
+    {
+     "out": "halted",
+     "t": 4,
+     "pc": "0301",
+     "halted": 1
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "same_final_as": [
+    "halt_whole",
+    []
+   ]
+  },
+  {
+   "name": "int_im1",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 13,
+     "pc": "0038",
+     "sp": "7FFE",
+     "iff1": 0,
+     "iff2": 0,
+     "r": "01"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "int_im2_odd_vector",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 2,
+    "iff1": 1,
+    "iff2": 1,
+    "i": "80"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 19,
+     "pc": "5678",
+     "wz": "5678",
+     "sp": "7FFE"
+    }
+   ],
+   "ack": "11",
+   "memory": [
+    [
+     "8011",
+     "7856"
+    ]
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "int_im0_rst",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 0,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 13,
+     "pc": "0030",
+     "sp": "7FFE",
+     "r": "01"
+    }
+   ],
+   "ack": "F7",
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "int_im0_unsupported_byte",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 0,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "im0_unsupported_acknowledge_byte",
+     "pc": "0400",
+     "iff1": 1,
+     "iff2": 1,
+     "sp": "8000",
+     "r": "00",
+     "t": 0
+    }
+   ],
+   "oracle": false,
+   "ack": "00",
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "nmi_accept",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "nmi": 1
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 11,
+     "pc": "0066",
+     "sp": "7FFE",
+     "iff1": 0,
+     "iff2": 1,
+     "nmireject": 1,
+     "r": "01"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "nmi_second_discarded",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "nmi": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "nmi": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 11,
+     "pc": "0066"
+    },
+    {
+     "out": "deadline",
+     "t": 4,
+     "pc": "0067",
+     "nmireject": 0
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "int_after_ei_deferred",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "deferral": 1,
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 4,
+     "pc": "0401",
+     "deferral": 0
+    },
+    {
+     "out": "deadline",
+     "t": 13,
+     "pc": "0038"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "nmi_directly_after_ei",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "nmi": 1
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "deferral": 1,
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 11,
+     "pc": "0066"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "int_ld_a_ir_pv_cleared",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "f": "FF",
+    "ldair": 1,
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 13,
+     "pc": "0038",
+     "f": "FB",
+     "ldair": 0
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "halt_then_int",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0301",
+    "halted": 1,
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 13,
+     "pc": "0038",
+     "halted": 0,
+     "sp": "7FFE"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "halt_then_nmi",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "nmi": 1
+    }
+   ],
+   "state": {
+    "pc": "0301",
+    "halted": 1,
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 11,
+     "pc": "0066",
+     "halted": 0,
+     "sp": "7FFE"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "halt_int_masked",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0301",
+    "halted": 1,
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0
+   },
+   "expect": [
+    {
+     "out": "halted",
+     "t": 4,
+     "pc": "0301",
+     "halted": 1,
+     "r": "01"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "int_masked_iff0",
+   "image": "wrap64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "0400",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 0,
+    "iff2": 0
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 4,
+     "pc": "0401"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "lock_run_dd64",
+   "image": "dd64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 40
+    },
+    {
+     "mode": "r",
+     "budget": 380,
+     "int": 1
+    },
+    {
+     "mode": "r",
+     "budget": 380,
+     "int": 1,
+     "nmi": 1
+    }
+   ],
+   "state": {
+    "pc": "FFF0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "prefix_lock",
+     "t": 40,
+     "pc": "FFFA",
+     "prefix_run": 1,
+     "r": "0A"
+    },
+    {
+     "out": "prefix_lock",
+     "t": 380,
+     "prefix_run": 1
+    },
+    {
+     "out": "prefix_lock",
+     "t": 380,
+     "pc": "00B8",
+     "sp": "8000",
+     "iff1": 1,
+     "iff2": 1,
+     "prefix_run": 1,
+     "r": "48"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "lock_whole_dd64",
+   "image": "dd64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 800
+    }
+   ],
+   "state": {
+    "pc": "FFF0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "prefix_lock",
+     "t": 800,
+     "pc": "00B8",
+     "prefix_run": 1,
+     "r": "48"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "same_final_as": [
+    "lock_run_dd64",
+    []
+   ]
+  },
+  {
+   "name": "lock_entry_int_dd64",
+   "image": "dd64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 13,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "FFF0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 13,
+     "pc": "0038",
+     "sp": "7FFE",
+     "prefix_run": 0,
+     "iff1": 0
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "lock_entry_nmi_dd64",
+   "image": "dd64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 11,
+     "nmi": 1
+    }
+   ],
+   "state": {
+    "pc": "FFF0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 11,
+     "pc": "0066",
+     "sp": "7FFE",
+     "prefix_run": 0,
+     "iff1": 0,
+     "iff2": 1
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "lock_deadline_rounds_up_dd64",
+   "image": "dd64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 5
+    }
+   ],
+   "state": {
+    "pc": "0000",
+    "sp": "8000"
+   },
+   "expect": [
+    {
+     "out": "prefix_lock",
+     "t": 8,
+     "pc": "0002",
+     "prefix_run": 1,
+     "r": "02"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "lock_run_fd64",
+   "image": "fd64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 40
+    },
+    {
+     "mode": "r",
+     "budget": 380,
+     "int": 1
+    },
+    {
+     "mode": "r",
+     "budget": 380,
+     "int": 1,
+     "nmi": 1
+    }
+   ],
+   "state": {
+    "pc": "FFF0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "prefix_lock",
+     "t": 40,
+     "pc": "FFFA",
+     "prefix_run": 1,
+     "r": "0A"
+    },
+    {
+     "out": "prefix_lock",
+     "t": 380,
+     "prefix_run": 1
+    },
+    {
+     "out": "prefix_lock",
+     "t": 380,
+     "pc": "00B8",
+     "sp": "8000",
+     "iff1": 1,
+     "iff2": 1,
+     "prefix_run": 1,
+     "r": "48"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "lock_whole_fd64",
+   "image": "fd64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 800
+    }
+   ],
+   "state": {
+    "pc": "FFF0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "prefix_lock",
+     "t": 800,
+     "pc": "00B8",
+     "prefix_run": 1,
+     "r": "48"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "same_final_as": [
+    "lock_run_fd64",
+    []
+   ]
+  },
+  {
+   "name": "lock_entry_int_fd64",
+   "image": "fd64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 13,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "FFF0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 13,
+     "pc": "0038",
+     "sp": "7FFE",
+     "prefix_run": 0,
+     "iff1": 0
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "lock_entry_nmi_fd64",
+   "image": "fd64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 11,
+     "nmi": 1
+    }
+   ],
+   "state": {
+    "pc": "FFF0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 11,
+     "pc": "0066",
+     "sp": "7FFE",
+     "prefix_run": 0,
+     "iff1": 0,
+     "iff2": 1
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "lock_deadline_rounds_up_fd64",
+   "image": "fd64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 5
+    }
+   ],
+   "state": {
+    "pc": "0000",
+    "sp": "8000"
+   },
+   "expect": [
+    {
+     "out": "prefix_lock",
+     "t": 8,
+     "pc": "0002",
+     "prefix_run": 1,
+     "r": "02"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "lock_run_alt64",
+   "image": "alt64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 40
+    },
+    {
+     "mode": "r",
+     "budget": 380,
+     "int": 1
+    },
+    {
+     "mode": "r",
+     "budget": 380,
+     "int": 1,
+     "nmi": 1
+    }
+   ],
+   "state": {
+    "pc": "FFF0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "prefix_lock",
+     "t": 40,
+     "pc": "FFFA",
+     "prefix_run": 1,
+     "r": "0A"
+    },
+    {
+     "out": "prefix_lock",
+     "t": 380,
+     "prefix_run": 1
+    },
+    {
+     "out": "prefix_lock",
+     "t": 380,
+     "pc": "00B8",
+     "sp": "8000",
+     "iff1": 1,
+     "iff2": 1,
+     "prefix_run": 1,
+     "r": "48"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "lock_whole_alt64",
+   "image": "alt64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 800
+    }
+   ],
+   "state": {
+    "pc": "FFF0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "prefix_lock",
+     "t": 800,
+     "pc": "00B8",
+     "prefix_run": 1,
+     "r": "48"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "same_final_as": [
+    "lock_run_alt64",
+    []
+   ]
+  },
+  {
+   "name": "lock_entry_int_alt64",
+   "image": "alt64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 13,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "FFF0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 13,
+     "pc": "0038",
+     "sp": "7FFE",
+     "prefix_run": 0,
+     "iff1": 0
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "lock_entry_nmi_alt64",
+   "image": "alt64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 11,
+     "nmi": 1
+    }
+   ],
+   "state": {
+    "pc": "FFF0",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 11,
+     "pc": "0066",
+     "sp": "7FFE",
+     "prefix_run": 0,
+     "iff1": 0,
+     "iff2": 1
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "lock_deadline_rounds_up_alt64",
+   "image": "alt64",
+   "steps": [
+    {
+     "mode": "r",
+     "budget": 5
+    }
+   ],
+   "state": {
+    "pc": "0000",
+    "sp": "8000"
+   },
+   "expect": [
+    {
+     "out": "prefix_lock",
+     "t": 8,
+     "pc": "0002",
+     "prefix_run": 1,
+     "r": "02"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "chain_wraps_dd",
+   "image": "mixed64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "FF00",
+    "sp": "8000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 2052,
+     "pc": "0101",
+     "r": "01"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "chain_alternating",
+   "image": "mixed64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "8000",
+    "sp": "8000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 1204,
+     "pc": "812D",
+     "r": "2D"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "two_image_a",
+   "image": "two_image",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "4000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "b": "22",
+     "pc": "4002"
+    },
+    {
+     "out": "deadline",
+     "c": "44",
+     "pc": "4004"
+    }
+   ],
+   "load": [
+    [
+     2,
+     "4000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "two_image_b",
+   "image": "two_image",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "4000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "b": "33",
+     "pc": "4002"
+    },
+    {
+     "out": "deadline",
+     "c": "55",
+     "pc": "4004"
+    }
+   ],
+   "load": [
+    [
+     3,
+     "4000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      3,
+      "4000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "two_image_remap",
+   "image": "two_image",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "map": 1
+    }
+   ],
+   "state": {
+    "pc": "4000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "b": "22",
+     "pc": "4002"
+    },
+    {
+     "out": "deadline",
+     "c": "55",
+     "pc": "4004"
+    }
+   ],
+   "oracle": false,
+   "load": [
+    [
+     2,
+     "4000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ]
+    ],
+    "1": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      3,
+      "4000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "two_image_crossing",
+   "image": "two_image",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "3FFF"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "pc": "4000"
+    },
+    {
+     "out": "deadline",
+     "b": "22",
+     "pc": "4002"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ],
+    [
+     2,
+     "4000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "unknown_image_identity",
+   "image": "two_image",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0100"
+   },
+   "expect": [
+    {
+     "out": "unknown_image_identity",
+     "pc": "0100"
+    }
+   ],
+   "oracle": false,
+   "maps": {
+    "0": [
+     [
+      "0",
+      "10000",
+      9,
+      "0"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "mutable_code_unmapped",
+   "image": "two_image",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "5000"
+   },
+   "expect": [
+    {
+     "out": "mutable_code",
+     "pc": "5000"
+    }
+   ],
+   "oracle": false,
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "no_owner_unlowered_form",
+   "image": "two_image",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0500"
+   },
+   "expect": [
+    {
+     "out": "no_owner",
+     "pc": "0500"
+    }
+   ],
+   "oracle": false,
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "stub_unresolved_fetch_mapping",
+   "image": "two_image",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "7FFF"
+   },
+   "expect": [
+    {
+     "out": "unresolved_fetch_mapping",
+     "pc": "7FFF"
+    }
+   ],
+   "oracle": false,
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ],
+     [
+      "8000",
+      "C000",
+      7,
+      "8000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "stub_mutable_code_crossing",
+   "image": "two_image",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "BFFF"
+   },
+   "expect": [
+    {
+     "out": "mutable_code",
+     "pc": "BFFF"
+    }
+   ],
+   "oracle": false,
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ],
+     [
+      "8000",
+      "C000",
+      7,
+      "8000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "stub_interrupt_taken_first",
+   "image": "two_image",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "7FFF",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 13,
+     "pc": "0038",
+     "sp": "7FFE"
+    }
+   ],
+   "oracle": false,
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ],
+     [
+      "8000",
+      "C000",
+      7,
+      "8000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reloc_int_window_a",
+   "image": "reloc",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "4020",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 13,
+     "pc": "0038",
+     "sp": "7FFE"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ],
+    [
+     2,
+     "4000"
+    ],
+    [
+     2,
+     "8000"
+    ],
+    [
+     4,
+     "C000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ],
+     [
+      "8000",
+      "C000",
+      2,
+      "8000"
+     ],
+     [
+      "C000",
+      "10000",
+      4,
+      "C000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reloc_int_window_b",
+   "image": "reloc",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "int": 1
+    }
+   ],
+   "state": {
+    "pc": "8020",
+    "sp": "8000",
+    "im": 1,
+    "iff1": 1,
+    "iff2": 1
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "t": 13,
+     "pc": "0038",
+     "sp": "7FFE"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ],
+    [
+     2,
+     "4000"
+    ],
+    [
+     2,
+     "8000"
+    ],
+    [
+     4,
+     "C000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ],
+     [
+      "8000",
+      "C000",
+      2,
+      "8000"
+     ],
+     [
+      "C000",
+      "10000",
+      4,
+      "C000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reloc_fallthrough_window_a",
+   "image": "reloc",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "4000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "b": "55",
+     "pc": "4002"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ],
+    [
+     2,
+     "4000"
+    ],
+    [
+     2,
+     "8000"
+    ],
+    [
+     4,
+     "C000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ],
+     [
+      "8000",
+      "C000",
+      2,
+      "8000"
+     ],
+     [
+      "C000",
+      "10000",
+      4,
+      "C000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reloc_fallthrough_window_b",
+   "image": "reloc",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "8000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "b": "55",
+     "pc": "8002"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ],
+    [
+     2,
+     "4000"
+    ],
+    [
+     2,
+     "8000"
+    ],
+    [
+     4,
+     "C000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ],
+     [
+      "8000",
+      "C000",
+      2,
+      "8000"
+     ],
+     [
+      "C000",
+      "10000",
+      4,
+      "C000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reloc_invariant_window_copy",
+   "image": "reloc",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "b": "55",
+     "pc": "0002"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ],
+    [
+     2,
+     "4000"
+    ],
+    [
+     2,
+     "8000"
+    ],
+    [
+     4,
+     "C000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ],
+     [
+      "8000",
+      "C000",
+      2,
+      "8000"
+     ],
+     [
+      "C000",
+      "10000",
+      4,
+      "C000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reloc_crossing_full_in_window_b",
+   "image": "reloc",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "BFFF"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "a": "42",
+     "pc": "C001"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ],
+    [
+     2,
+     "4000"
+    ],
+    [
+     2,
+     "8000"
+    ],
+    [
+     4,
+     "C000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ],
+     [
+      "8000",
+      "C000",
+      2,
+      "8000"
+     ],
+     [
+      "C000",
+      "10000",
+      4,
+      "C000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reloc_crossing_stub_in_window_a",
+   "image": "reloc",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "7FFF"
+   },
+   "expect": [
+    {
+     "out": "unresolved_fetch_mapping",
+     "pc": "7FFF"
+    }
+   ],
+   "oracle": false,
+   "load": [
+    [
+     1,
+     "0000"
+    ],
+    [
+     2,
+     "4000"
+    ],
+    [
+     2,
+     "8000"
+    ],
+    [
+     4,
+     "C000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ],
+     [
+      "8000",
+      "C000",
+      2,
+      "8000"
+     ],
+     [
+      "C000",
+      "10000",
+      4,
+      "C000"
+     ]
+    ]
+   }
+  }
+ ]
+}

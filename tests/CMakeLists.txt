@@ -1008,11 +1008,10 @@ add_test(NAME cpu_z80_decode_tests COMMAND cpu_z80_decode_tests)
 add_executable(z80_capability_probe tools/z80_capability_probe.cpp)
 target_link_libraries(z80_capability_probe PRIVATE segarecomp::cpu_z80)
 segarecomp_enable_warnings(z80_capability_probe)
-add_test(NAME z80_capability_ratchet_test COMMAND ${Python3_EXECUTABLE}
-  ${CMAKE_CURRENT_SOURCE_DIR}/z80_capability_ratchet_test.py $<TARGET_FILE:z80_capability_probe> ${PROJECT_SOURCE_DIR})
+# (the T003 stages also need the lowering probe, the image emitter and a C compiler; targets defined further below)
 add_test(NAME cpu_z80_dependency_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/cpu_z80_dependency_test.py ${PROJECT_SOURCE_DIR})
-set_property(TEST z80_capability_ratchet_test cpu_z80_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST cpu_z80_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
 # SEG-020-T005: first-divergence diagnosis (generated M68k boundaries vs pinned Musashi).
 add_test(NAME m68k_first_divergence_test COMMAND ${Python3_EXECUTABLE}
@@ -1066,3 +1065,31 @@ set_property(TEST m68k_conformance_harness_test APPEND PROPERTY ENVIRONMENT_MODI
 set_property(TEST m68k_capability_ratchet_test m68k_capability_coverage_unit_test APPEND PROPERTY LABELS full fast)
 set_property(TEST m68k_capability_coverage_unit_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST m68k_capability_ratchet_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-008-T003: Z80 generated-native pipeline (codegen_c11_z80), runtime ABI and differential harness.
+add_executable(z80_image_emitter tools/z80_image_emitter.cpp)
+target_link_libraries(z80_image_emitter PRIVATE segarecomp::codegen_c11_z80)
+segarecomp_enable_warnings(z80_image_emitter)
+add_executable(z80_lowering_probe tools/z80_lowering_probe.cpp)
+target_link_libraries(z80_lowering_probe PRIVATE segarecomp::codegen_c11_z80)
+segarecomp_enable_warnings(z80_lowering_probe)
+add_test(NAME z80_capability_ratchet_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_capability_ratchet_test.py $<TARGET_FILE:z80_capability_probe> ${PROJECT_SOURCE_DIR}
+  $<TARGET_FILE:z80_lowering_probe> $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER})
+set_property(TEST z80_capability_ratchet_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+add_test(NAME codegen_c11_z80_dependency_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/codegen_c11_z80_dependency_test.py ${PROJECT_SOURCE_DIR})
+# Generated-native pipeline (strict-C11 builds of 64 KiB images: the slowest Z80 test, `full` only) and harness self-tests.
+add_test(NAME z80_generated_pipeline_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_generated_pipeline_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME z80_conformance_harness_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_conformance_harness_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# Oracle side (ADR 0057): skips cleanly unless SEGARECOMP_Z80_ORACLE_CHECKOUT names the pinned clones.
+add_test(NAME z80_conformance_oracle_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_conformance_oracle_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST codegen_c11_z80_dependency_test z80_generated_pipeline_test z80_conformance_harness_test
+  z80_conformance_oracle_test z80_capability_ratchet_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-008-T002 tests were registered after the label loop above and so carried no tier label: add them here.
+set_property(TEST cpu_z80_decode_tests z80_generated_pipeline_test z80_conformance_oracle_test APPEND PROPERTY LABELS full)
+set_property(TEST cpu_z80_dependency_test z80_capability_ratchet_test codegen_c11_z80_dependency_test
+  z80_conformance_harness_test APPEND PROPERTY LABELS full fast)

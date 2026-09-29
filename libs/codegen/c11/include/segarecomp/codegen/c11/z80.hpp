@@ -1,0 +1,88 @@
+#pragma once
+
+// Z80 image-level C11 emission (SEG-008-T003; ADR 0058 sections 1-6). Broad immutable-image AOT: one owner (a C
+// function) per instruction start of every code image, classified by the cpu_z80 logical-fetch decoder.
+//
+//   full owner         a decoded start whose form has a lowering row (z80_lowering.hpp)
+//   prefix_lock owner  a start of an endless DD/FD run
+//   typed stub owner   `mutable_code`, `unresolved_fetch_mapping` (and the reserved `excluded_form`) starts
+//   (no owner)         a decoded start whose form has no lowering row yet: dispatch fails closed with `no_owner`
+//
+// Absolute-PC owners serve statically invariant windows and banked images admissible in exactly one window.
+// A banked image admissible in several windows gets one window-relative owner per offset that derives every
+// PC-dependent value from the run-time window base. Direct owner-to-owner binding exists only from an invariant
+// window owner to an invariant-window successor; everything else returns to the generated dispatcher `z80_run`,
+// which asks the host for the current code-image identity and looks up (identity, PC) or (identity, PC - base)
+// exactly through the generic compiled entry table.
+
+#include <cstdint>
+#include <filesystem>
+#include <string>
+#include <vector>
+
+#include "segarecomp/cpu/z80/decode.hpp"
+
+namespace segarecomp::codegen::z80 {
+
+enum class ImageKind : std::uint8_t {
+  invariant,  // statically invariant window: exactly one window, absolute-PC owners, direct binding allowed
+  banked,     // mapping-sensitive: one or more admissible windows of identical stride and exposed range
+};
+
+// Image offset `o` (first_offset <= o < first_offset + length) is exposed at logical address `base + o`.
+struct CodeWindow {
+  std::uint16_t base = 0;
+  std::uint32_t first_offset = 0;
+  std::uint32_t length = 0x10000;
+};
+
+struct CodeImage {
+  std::uint32_t identity = 0;  // unique, <= 0xFFFF (the high half of the 32-bit entry key)
+  ImageKind kind = ImageKind::banked;
+  std::vector<std::uint8_t> bytes;
+  std::vector<CodeWindow> windows;
+};
+
+struct ImageSet {
+  std::vector<CodeImage> images;
+};
+
+enum class OwnerKind : std::uint8_t { full, prefix_lock, stub_mutable_code, stub_unresolved_fetch_mapping, stub_excluded_form };
+const char* owner_kind_name(OwnerKind kind);
+
+struct OwnerRecord {
+  std::uint32_t identity = 0;
+  std::uint16_t key = 0;             // logical address (absolute owner) or offset within the window (window-relative)
+  bool window_relative = false;
+  OwnerKind kind = OwnerKind::full;  // kind of the first variant
+  std::uint32_t variants = 1;        // > 1: the owner selects among body variants from the run-time window base
+  cpu::z80::FormId form = cpu::z80::kNoForm;
+  bool bound_successor = false;      // fall-through is a direct owner-to-owner return
+};
+
+struct EmitOptions {
+  std::filesystem::path directory;
+  std::string stem = "z80_image";
+  std::string runtime_include = "segarecomp/codegen/c11/runtime/z80_runtime.h";
+  bool record_owners = false;  // fill EmitResult::owners (large for full images)
+};
+
+struct EmitStats {
+  std::size_t full_owners = 0;
+  std::size_t prefix_lock_owners = 0;
+  std::size_t stub_owners = 0;
+  std::size_t unlowered_starts = 0;  // decoded starts without a lowering row (no owner emitted)
+  std::size_t variant_owners = 0;    // window-relative owners with a per-base switch
+  std::size_t bound_successors = 0;
+  std::size_t translation_units = 0;
+};
+
+struct EmitResult {
+  std::string error;  // empty on success; nothing is left behind on failure
+  EmitStats stats;
+  std::vector<OwnerRecord> owners;
+};
+
+EmitResult emit_image_set(const ImageSet& images, const EmitOptions& options);
+
+}  // namespace segarecomp::codegen::z80

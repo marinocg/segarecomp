@@ -72,7 +72,7 @@
   "ex.sp_ind_ix.dd": "10000000-10",
   "ex.sp_ind_iy.fd": "10000000-10",
   "exx.base": "1000000--10",
-  "halt.base": "1000000--10",
+  "halt.base": "1111111--11",
   "im.im0.ed": "1000000--10",
   "im.im0.ed.alias": "1000000--10",
   "im.im1.ed": "1000000--10",
@@ -136,8 +136,8 @@
   "ld.r_ix_half.dd.undoc": "1000000--10",
   "ld.r_iy_d.fd": "10000000-10",
   "ld.r_iy_half.fd.undoc": "1000000--10",
-  "ld.r_n.base": "1000000--10",
-  "ld.r_r.base": "1000000--10",
+  "ld.r_n.base": "1111111--11",
+  "ld.r_r.base": "1111111--11",
   "ld.r_refresh_a.ed": "1000000--10",
   "ld.rr_ed_nn_ind.ed": "10000000-10",
   "ld.rr_ind_a.base": "10000000-10",
@@ -151,7 +151,7 @@
   "ldir.ed": "10000000-10",
   "neg.a.ed": "1000000--10",
   "neg.a.ed.alias": "1000000--10",
-  "nop.base": "1000000--10",
+  "nop.base": "1111111--11",
   "nop.ed_undefined.ed.undoc": "1000000--10",
   "or.a_hl_ind.base": "10000000-10",
   "or.a_ix_d.dd": "10000000-10",
@@ -272,7 +272,22 @@
  "measurement": {
   "implemented_stages": [
    "decodes",
-   "timing_modeled"
+   "lowers",
+   "emits",
+   "compiles",
+   "executes",
+   "aot_admitted",
+   "oracle_state",
+   "oracle_memory",
+   "oracle_io",
+   "timing_modeled",
+   "timing_validated"
+  ],
+  "lowered_forms": [
+   "halt.base",
+   "ld.r_n.base",
+   "ld.r_r.base",
+   "nop.base"
   ],
   "stage_order": [
    "decodes",
@@ -296,13 +311,13 @@
  "totals": {
   "aot_admitted": {
    "applicable_forms": 261,
-   "passing_forms": 0,
-   "percent_forms": "0.00"
+   "passing_forms": 4,
+   "percent_forms": "1.53"
   },
   "compiles": {
    "applicable_forms": 261,
-   "passing_forms": 0,
-   "percent_forms": "0.00"
+   "passing_forms": 4,
+   "percent_forms": "1.53"
   },
   "decodes": {
    "applicable_forms": 261,
@@ -311,18 +326,18 @@
   },
   "emits": {
    "applicable_forms": 261,
-   "passing_forms": 0,
-   "percent_forms": "0.00"
+   "passing_forms": 4,
+   "percent_forms": "1.53"
   },
   "executes": {
    "applicable_forms": 261,
-   "passing_forms": 0,
-   "percent_forms": "0.00"
+   "passing_forms": 4,
+   "percent_forms": "1.53"
   },
   "lowers": {
    "applicable_forms": 261,
-   "passing_forms": 0,
-   "percent_forms": "0.00"
+   "passing_forms": 4,
+   "percent_forms": "1.53"
   },
   "oracle_io": {
    "applicable_forms": 14,
@@ -336,8 +351,8 @@
   },
   "oracle_state": {
    "applicable_forms": 261,
-   "passing_forms": 0,
-   "percent_forms": "0.00"
+   "passing_forms": 4,
+   "percent_forms": "1.53"
   },
   "timing_modeled": {
    "applicable_forms": 261,
@@ -346,8 +361,8 @@
   },
   "timing_validated": {
    "applicable_forms": 261,
-   "passing_forms": 0,
-   "percent_forms": "0.00"
+   "passing_forms": 4,
+   "percent_forms": "1.53"
   }
  },
  "words": {
