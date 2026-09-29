@@ -203,6 +203,20 @@ target_link_libraries(genesis_frame_capture_tests PRIVATE segarecomp::runtime_ge
 target_compile_features(genesis_frame_capture_tests PRIVATE cxx_std_20)
 segarecomp_enable_warnings(genesis_frame_capture_tests)
 add_test(NAME genesis_frame_capture_tests COMMAND genesis_frame_capture_tests)
+# SEG-026-T001: execution-PC coverage observer + frame-bounded coverage run; reachability challenger fixtures.
+add_executable(genesis_execution_coverage_tests genesis_execution_coverage_test.cpp
+  ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer/execution_coverage.c)
+target_include_directories(genesis_execution_coverage_tests PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/viewer)
+target_link_libraries(genesis_execution_coverage_tests PRIVATE segarecomp::runtime_genesis)
+target_compile_features(genesis_execution_coverage_tests PRIVATE cxx_std_20)
+segarecomp_enable_warnings(genesis_execution_coverage_tests)
+add_test(NAME genesis_execution_coverage_tests COMMAND genesis_execution_coverage_tests)
+add_executable(reachability_challenger_tests reachability_challenger_test.cpp)
+target_link_libraries(reachability_challenger_tests PRIVATE segarecomp::machine_genesis)
+segarecomp_enable_warnings(reachability_challenger_tests)
+add_test(NAME reachability_challenger_tests COMMAND reachability_challenger_tests)
+add_test(NAME reachability_coverage_compare_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/reachability_coverage_compare_test.py ${PROJECT_SOURCE_DIR} $<TARGET_FILE:segarecomp>)
 add_test(NAME genesis_frame_capture_bridge_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_frame_capture_bridge_test.py ${PROJECT_SOURCE_DIR})
 # SEG-007-T254: optional viewer core; deliberately not linked by runtime_genesis.
@@ -926,7 +940,8 @@ set(SEGARECOMP_FAST_TESTS segarecomp_tests segarecomp_build_command_test moveq_t
     m68k_frontend_rejection_tests genesis_general_startup_cli_test architecture_dependency_test
     codegen_c11_emitter_ownership_test codegen_c11_translation_units_tests codegen_c11_shard_selection_tests restricted_files_test genesis_viewer_tests
     cpu_m68k_static_discovery_tests genesis_startup_runtime_c2_test recompiler_fake_cpu_tests recompiler_no_genesis_policy_dependency_test
-    genesis_bridge_defaults_test m68k_exception_contract_doc_test)
+    genesis_bridge_defaults_test m68k_exception_contract_doc_test
+    genesis_execution_coverage_tests reachability_challenger_tests)
 # Evidence (SEG-018-T001): its genuine 1 s adapter/probe timeout cases race process start-up
 # under parallel load (observed failing at -j 8 and -j 12), so it runs alone.
 set_tests_properties(sonic_startup_inventory_adapter_failure_test sonic_startup_inventory_privacy_test PROPERTIES RUN_SERIAL TRUE)

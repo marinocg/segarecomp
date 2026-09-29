@@ -2,6 +2,7 @@
 add_library(segarecomp_machine_genesis
   src/address_space.cpp
   src/frontend.cpp
+  src/reachability_challenger.cpp
   src/startup.cpp
 )
 add_library(segarecomp::machine_genesis ALIAS segarecomp_machine_genesis)
