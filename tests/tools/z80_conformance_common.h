@@ -113,7 +113,7 @@ static int zc_read_vector(FILE *file, zc_vector *v) {
       if (sscanf(rest, "%x%n", &addr, &used) != 1) { free(line); return -1; }
       const char *hex = rest + used;
       while (*hex == ' ') ++hex;
-      unsigned char *bytes = malloc(strlen(hex) / 2 + 1);
+      unsigned char *bytes = (unsigned char *)malloc(strlen(hex) / 2 + 1);
       const int count = zc_parse_bytes(hex, bytes, (int)(strlen(hex) / 2 + 1));
       for (int i = 0; i < count; ++i) v->mem[(addr + (unsigned)i) & 0xFFFFu] = bytes[i];
       free(bytes);

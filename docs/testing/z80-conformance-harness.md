@@ -119,3 +119,23 @@ interrupt-acknowledge transaction) of the emitted C or ABI header and checks tha
 3. **Oracle credit**: run `tools/z80_conformance.py --update-manifest` locally (the pinned oracle is required); commit the
    family's manifest. Then `python3 tools/z80_capability_coverage.py ... --update-snapshot` regenerates the snapshot and
    the coverage report; the ratchet enforces that no form drops a stage.
+
+## External corpus, secondary oracle and static budgets (SEG-008-T009)
+
+All three are local, opt-in and never part of CI. Inputs live only in the ignored product `.tools/`.
+
+| tool | role |
+| --- | --- |
+| `tools/z80_sst_corpus.py fetch` | takes a bounded HTTP-Range prefix (default 96 KiB, the leading complete cases, about 120 of the 1,000 per file) of every pinned SingleStepTests/z80 per-opcode file (revision in ADR 0057) into `<checkout>/sst-cache` (or `SEGARECOMP_Z80_SST_CACHE`). It never downloads a file in full and commits nothing. |
+| `tools/z80_sst_corpus.py run --emitter E [--oracle] [--secondary]` | converts each case to the T003 vector text, places the case's own instruction bytes in a banked, window-relative code image at its real PC (per-vector code-image map), runs the generated-native runner (and redcode / kosarev on the same text) and compares with the corpus final state: registers, WZ, Q, IFF, IM, R, the EI and LD A,I markers, RAM, port transactions and T-states (= corpus cycle count). Output is aggregated per opcode file and field; only non-reconstructable aggregates are printed. |
+| `tests/z80_oracle/z80_conformance_kosarev.cpp`, `tools/z80_conformance.py --secondary` | the secondary independent oracle (kosarev/z80 at the ADR 0057 pin, header-only, built with `c++ -std=c++17`). Unmodelled state (Q, LD A,I marker, prefix-run, NMI latch) is not compared; the ADR deviation mask lives in `SECONDARY_MASK` / `SECONDARY_FORM_MASK`. Anything else that differs is unexplained and fails. |
+| `tools/z80_static_budget.py` | measures the ADR 0058 static-code budgets with the real lowerings on full-size synthetic images (64 KiB invariant; 512 KiB SMS-shaped banked with window-relative owners): generated C size, -j8 and -j1 compile time, per-process peak RSS, executable size, exact lookup (the bench includes the generated main TU to call its static lookup) and byte-identical re-emission. |
+
+Classified corpus disagreement (the only one): the corpus `ei` field is the EI marker only, and it is 0 after every ED
+RETN/RETI encoding, while the contract (section 4.2) and the pinned redcode oracle defer a maskable INT by one boundary when
+RETI/RETN changes IFF1. The driver skips the `deferral` field for the eight ED RETN/RETI opcode files and counts the skips;
+IFF, IM, PC, WZ, R and T-states of those files still compare. A test with a wrong PC on such a file must (and does) fail.
+
+Hermetic tests: `z80_sst_corpus_test.py` (synthetic corpus, injected register/R/PC/memory/port/timing faults, the
+RETN classification; the oracle part skips without the checkout) and `z80_secondary_oracle_test.py` (every form vector
+against kosarev under the mask, plus a mutant check; skips without the checkout).

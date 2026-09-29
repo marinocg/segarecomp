@@ -42,6 +42,23 @@ ORACLE_DIR = ROOT / "tests" / "z80_oracle"
 CHECKOUT_ENV = "SEGARECOMP_Z80_ORACLE_CHECKOUT"
 PINS = {"redcode_Z80": "6bb4166317108b8d1a4b5934df15761089bdea9e",
         "redcode_Zeta": "93ba5ab967eef00f074d21bb760fe9dc48afd2d3"}
+SECONDARY_PIN = {"kosarev_z80": "4c56dc514b37087751c5d9de29126a0d5c6ec731"}
+# Fields the secondary oracle (kosarev/z80, ADR 0057 decision 2) does not model at all: the NMOS Q register, the LD A,I/R
+# marker, the in-prefix-run state and the NMI reject latch print as 0 and are never compared against it.
+SECONDARY_UNMODELLED = {"q", "ldair", "prefix_run", "nmireject"}
+# Committed deviation mask (ADR 0057 decision 2; the corpus and redcode agree with the generated side on every one of
+# these): {opcode-file stem or stem prefix -> (family, masked fields)}. Anything else that differs is unexplained.
+SECONDARY_MASK = {
+    "scf_ccf": ({"37", "3f", "dd_37", "dd_3f", "fd_37", "fd_3f"}, {"f"}),          # kosarev has no Zilog NMOS Q rule
+    "block_io_memptr_flags": ({"ed_a2", "ed_aa", "ed_b2", "ed_ba", "ed_b3", "ed_bb"}, {"f", "wz"}),  # INI/IND/OTIR/OTDR family
+    "repeating_block": ({"ed_b0", "ed_b1", "ed_b8", "ed_b9"}, {"f", "wz"}),        # repeating-step LDxR/CPxR flags, MEMPTR
+}
+# The same deviations by legal-form id for the synthetic form vectors: {form-id prefix -> masked cpu fields}.
+SECONDARY_FORM_MASK = {"ccf.": {"f"}, "scf.": {"f"}, "ldir.": {"f", "wz"}, "lddr.": {"f", "wz"}, "cpir.": {"f", "wz"},
+                       "cpdr.": {"f", "wz"}, "ini.": {"f", "wz"}, "ind.": {"f", "wz"}, "inir.": {"f", "wz"},
+                       "indr.": {"f", "wz"}, "otir.": {"f", "wz"}, "otdr.": {"f", "wz"},
+                       # kosarev models no RETI/RETN deferral bit (ADR 0057 unresolved item 6)
+                       "reti.": {"deferral"}, "retn.": {"deferral"}}
 ORACLE_DEFINES = ["-DZ80_STATIC", "-DZ80_WITH_EXECUTE", "-DZ80_WITH_Q", "-DZ80_WITH_FULL_IM0", "-DZ80_WITH_SPECIAL_RESET",
                   "-DZ80_WITH_UNOFFICIAL_RETI", "-DZ80_WITH_ZILOG_NMOS_LD_A_IR_BUG"]
 STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror"]
@@ -462,6 +479,28 @@ def oracle_checkout():
     return root
 
 
+def secondary_checkout(root):
+    """The pinned kosarev/z80 checkout under `root`, or None when it is absent. A wrong HEAD or a dirty tree is a hard failure."""
+    if root is None or not (pathlib.Path(root) / "kosarev_z80" / "z80.h").is_file():
+        return None
+    for name, pin in SECONDARY_PIN.items():
+        head = run(["git", "-C", str(pathlib.Path(root) / name), "rev-parse", "HEAD"])
+        if head.returncode != 0 or head.stdout.strip() != pin:
+            raise AssertionError("%s checkout is not the pinned revision %s" % (name, pin))
+        if run(["git", "-C", str(pathlib.Path(root) / name), "diff", "--quiet", "HEAD", "--"]).returncode != 0:
+            raise AssertionError("%s pinned checkout has local modifications" % name)
+    return pathlib.Path(root) / "kosarev_z80"
+
+
+def build_secondary(root, workdir, cxx="c++"):
+    exe = pathlib.Path(workdir) / "z80_conformance_kosarev"
+    r = run([cxx, "-std=c++17", "-O1", "-Wall", "-Wextra", "-Werror", "-I", str(root), "-I", str(TOOLS_DIR),
+             str(ORACLE_DIR / "z80_conformance_kosarev.cpp"), "-o", str(exe)])
+    if r.returncode != 0:
+        raise AssertionError("secondary oracle build failed: " + r.stderr)
+    return exe
+
+
 def skip_reason():
     configured = os.environ.get(CHECKOUT_ENV)
     if not configured:
@@ -479,6 +518,21 @@ def build_oracle(tc, workdir):
     if r.returncode != 0:
         raise AssertionError("oracle build failed: " + r.stderr)
     return exe
+
+
+def secondary_unexplained(generated, secondary, vectors):
+    """Generated-vs-kosarev differences of `vectors` [(Vec, ...)] outside the committed deviation mask, as
+    [(vector, step, domain, fields)]. Q, the LD A,I marker, the prefix-run state and the NMI latch are never compared."""
+    out = []
+    for vec in vectors:
+        allowed = next((m for prefix, m in SECONDARY_FORM_MASK.items() if (vec.form or "").startswith(prefix)), set())
+        for k, (g, o) in enumerate(zip(generated.get(vec.name, []), secondary.get(vec.name, []))):
+            fields = [f for f in CPU_FIELDS if f not in SECONDARY_UNMODELLED and f not in allowed and g["cpu"][f] != o["cpu"][f]]
+            fields += [d for d, a, b in (("memory", g["w"], o["w"]), ("io", g["io"], o["io"]), ("timing", g["t"], o["t"]))
+                       if a != b]
+            if fields:
+                out.append((vec.name, k, fields))
+    return out
 
 
 def run_exe(exe, text, workdir, timeout=600):
@@ -658,6 +712,8 @@ def main():
     parser.add_argument("--work", help="work directory (default: a fresh temporary directory)")
     parser.add_argument("--update-manifest", action="store_true")
     parser.add_argument("--json", help="write the first-divergence report here")
+    parser.add_argument("--secondary", action="store_true",
+                        help="also compare every form vector with the pinned kosarev/z80 secondary oracle under the deviation mask")
     args = parser.parse_args()
     root = oracle_checkout()
     if root is None:
@@ -689,6 +745,21 @@ def main():
                 passing_by_form.setdefault(vec.form, True)
                 if vec.name in bad:
                     passing_by_form[vec.form] = False
+        if args.secondary:
+            sec_root = secondary_checkout(os.environ.get(CHECKOUT_ENV))
+            if sec_root is None:
+                print("skipped: pinned kosarev/z80 checkout unavailable")
+                return 0
+            sec_exe = build_secondary(sec_root, work)
+            unexplained = []
+            for batch in batches:
+                bdir = work / batch.name
+                sec = run_exe(sec_exe, batch.text, bdir)
+                unexplained += secondary_unexplained(report[batch.name]["generated"], sec, [v for v, _ in batch.vectors])
+            print("z80 secondary (kosarev): %d unexplained differences over %d vectors" % (len(unexplained), len(all_vecs)))
+            if unexplained:
+                print(unexplained[:3])
+                return 1
         if args.json:
             pathlib.Path(args.json).write_text(json.dumps(divergence, indent=1, sort_keys=True) + "\n")
         if failures or divergence:

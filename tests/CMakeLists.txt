@@ -1108,3 +1108,11 @@ add_test(NAME z80_data_alu_flags_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/z80_data_alu_flags_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST z80_data_alu_flags_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST z80_data_alu_flags_test APPEND PROPERTY LABELS full)
+# SEG-008-T009: SingleStepTests/z80 corpus driver (hermetic synthetic cache; oracle part skips without the checkout) and
+# the secondary independent oracle (skips without SEGARECOMP_Z80_ORACLE_CHECKOUT holding the pinned kosarev/z80 clone).
+add_test(NAME z80_sst_corpus_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_sst_corpus_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME z80_secondary_oracle_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_secondary_oracle_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_sst_corpus_test z80_secondary_oracle_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST z80_sst_corpus_test z80_secondary_oracle_test APPEND PROPERTY LABELS full)
