@@ -230,6 +230,8 @@ int main(void) {
     printf("ENTRY-NMI: T=%u PC=%04X SP=%04X IFF1=%u IFF2=%u\n", t, o.pc, o.sp, o.iff1, o.iff2);
     expect("ENTRY NMI T", t, 11); expect("ENTRY NMI PC", o.pc, 0x0066); expect("ENTRY NMI SP", o.sp, 0x7FFE);
     expect("ENTRY NMI IFF1", o.iff1, 0); expect("ENTRY NMI IFF2", o.iff2, 1);
+    expect("ENTRY NMI ret", bus.mem[0x7FFE] | (bus.mem[0x7FFF] << 8), 0xFFF0);
+    expect("ENTRY NMI not in run", o.in_prefix_run, 0);
 
     printf(failures ? "adapter smoke: %d failure(s)\n" : "adapter smoke: OK%.0d\n", failures);
     return failures ? 1 : 0;

@@ -70,7 +70,8 @@ The legal-form dataset (`tools/z80_legal_forms.py`) is the SEG-008 denominator:
 - The evidence is UM0080's interrupt-enable section, Young §5.5 and netlist simulation. All three oracle
   finalists agree, and the redcode oracle implements it (ADR 0057 unresolved item 5 records the evidence class).
 - Consequence for static code: a chain is decoded and emitted as a single owner instruction. A deadline or
-  interrupt can never resume in the middle of a chain.
+  interrupt can never resume in the middle of a chain. The only exception is the non-terminating `prefix_lock` run (ADR 0058 §5), which
+  resumes only by deadline and never by interrupt; the boundary before its first prefix is an ordinary boundary.
 - An NMI edge arriving during an NMI response is discarded, not deferred (redcode behaviour, netlist-evidenced).
   T007 targets this rule with explicit vectors.
 
