@@ -500,6 +500,28 @@ void test_interrupts() {
   check(machine.rt.state.int_line == 0 && dev.vdp.size() == 1 && dev.vdp[0].cycles == E + 13, "status read at the handler's first instruction");
   check(machine.rt.state.iff1 == 1, "reti re-enabled interrupts");
 
+  // SEG-009-T012: the acknowledge byte is always $FF, so IM0 (RST 38h) and IM2 (vector low byte $FF) are accepted without
+  // the Z80 IM0 fail-closed outcome (im0_unsupported_acknowledge_byte is unreachable through the SMS mapping) and all
+  // three modes reach the $0038 handler (IM2 through the word at (I << 8) | $FF).
+  for (int mode = 0; mode <= 2; ++mode) {
+    setup(true);
+    nop_loop(0x100);
+    machine.rt.state.pc = 0x100;
+    machine.rt.state.im = static_cast<uint8_t>(mode);
+    machine.rt.state.i = 0xC0;
+    machine.mem.ram[0xFF] = 0x38;  // IM2 vector word at $C0FF = $0038
+    machine.mem.ram[0x100] = 0x00;
+    machine.rt.state.iff1 = machine.rt.state.iff2 = 1;
+    im1_handler(0x100);
+    const SmsStop mode_stop = sms_run_until_cycle(&machine, 50000);
+    const std::vector<TraceRow> rows = trace_rows();
+    check(mode_stop.kind == SMS_STOP_CYCLE && machine.rt.outcome != Z80_ERROR_IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE &&
+              !z80_outcome_is_error(machine.rt.outcome) && mode_stop.sms_error == SMS_OK,
+          "IM" + std::to_string(mode) + ": $FF acknowledge is admissible, no error outcome");
+    check(rows.size() == 3 && rows[1].event == SMS_IRQ_ACCEPTED && rows[2].event == SMS_IRQ_DEASSERTED && dev.vdp.size() == 1,
+          "IM" + std::to_string(mode) + ": interrupt accepted and its handler at $0038 reached");
+  }
+
   // IFF1 clear: the level stays asserted and is taken when interrupts are enabled (level semantics, no re-trigger)
   setup(true);
   nop_loop(0x100);

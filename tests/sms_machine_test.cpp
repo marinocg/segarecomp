@@ -256,6 +256,12 @@ void test_memory() {
   check(m.r(0xE123) == 0x42, "RAM write visible in the mirror");
   m.w(0xF0F0, 0x24);
   check(m.r(0xD0F0) == 0x24, "mirror write visible in RAM");
+  // 3D glasses register window $FFF8-$FFFB: no device (excluded row mem.3d_glasses), ordinary RAM-mirror cells
+  for (std::uint16_t a = 0xFFF8; a <= 0xFFFB; ++a) {
+    m.w(a, static_cast<std::uint8_t>(a));
+    check(m.r(a) == static_cast<std::uint8_t>(a) && m.r(static_cast<std::uint16_t>(a - 0x2000)) == static_cast<std::uint8_t>(a),
+          "3D glasses window: writes are plain RAM-mirror writes");
+  }
   check(m.mem.error == SMS_OK, "no error so far");
 }
 

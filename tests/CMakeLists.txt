@@ -1283,3 +1283,11 @@ add_test(NAME sms_viewer_equivalence_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST sms_viewer_tests APPEND PROPERTY LABELS full fast)
 set_property(TEST sms_viewer_equivalence_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_viewer_equivalence_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T012: capability coverage ratchet (hermetic, pure Python) and the typed fail-closed inventory.
+add_test(NAME sms_capability_ratchet_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_capability_ratchet_test.py ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_fail_closed_inventory_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_fail_closed_inventory_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_capability_ratchet_test sms_fail_closed_inventory_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_capability_ratchet_test sms_fail_closed_inventory_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")

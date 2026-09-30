@@ -168,6 +168,17 @@ def main():
         check(straddle["outcome"] == "unresolved_fetch_mapping" and straddle["pc"] == "7FFF", "slot-straddling instruction: %r" % straddle)
         unmapped = execute(exe, "--cycle-budget", "200000", "--pc", "8000", "--write", "FFFC=08")
         check(unmapped["outcome"] == "mutable_code", "code in cartridge RAM must fail closed: %r" % unmapped)
+        # SEG-009-T012: no_owner is unreachable through the SMS mapping by construction: every mappable ROM offset of every
+        # declared image is an owner start (full owner or typed stub), so the emitter's owner list has no holes.
+        per_identity = {}
+        for o in owners:
+            per_identity.setdefault(int(o[1]), set()).add(int(o[2], 16))
+        check(per_identity.get(1) == set(range(0x400)), "invariant image: every offset of the first 1 KiB has an owner")
+        check(all(ids == set(range(0x4000)) for ident, ids in per_identity.items() if ident >= 2),
+              "banked images: every offset of every 16 KiB bank has an owner (no_owner unreachable through the SMS mapping)")
+        # $FFFC bit 7 is accepted and has no effect on a mask ROM (no stop, mapping unchanged); cartridge RAM is zero at power-on
+        bit7 = execute(exe, "--cycle-budget", "2000", "--write", "FFFC=80")
+        check(bit7["sms_error"] == "SMS_OK" and bit7["regs"].split()[0] == "80", "$FFFC bit 7 is accepted: %r" % bit7)
         bad_ctl = execute(exe, "--cycle-budget", "200000", "--write", "FFFC=10")
         check(bad_ctl["sms_error"] == "SMS_ERROR_CONTROL_BIT_UNSUPPORTED", "unsupported $FFFC bit: %r" % bad_ctl)
 
