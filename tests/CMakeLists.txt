@@ -1170,6 +1170,12 @@ add_test(NAME sms_emission_budget_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR})
 add_test(NAME sms_machine_dependency_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_dependency_test.py ${PROJECT_SOURCE_DIR})
+# SEG-009-T010: `segarecomp build` for Master System images (platform routing, mapper declaration, T008 digest reproduction).
+add_test(NAME sms_native_build_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_native_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  $<TARGET_FILE:sms_image_emitter>)
+set_property(TEST sms_native_build_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_native_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST sms_machine_tests sms_machine_dependency_test APPEND PROPERTY LABELS full fast)
 set_property(TEST sms_bank_crossing_test sms_emission_budget_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_bank_crossing_test sms_emission_budget_test sms_machine_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")

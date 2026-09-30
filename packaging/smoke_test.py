@@ -36,6 +36,56 @@ def parse(report):
     return dict(line.split("=", 1) for line in report.read_text(encoding="utf-8").splitlines() if "=" in line)
 
 
+def smoke_master_system(tmp, launch):
+    """Master System through the same launcher core, with the project-authored `machine_e2e` fixture (built from
+    tools/sms_fixture_rom.py, never committed). The mapper is declared, never defaulted; the viewer run is finite."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "tools"))
+    import sms_fixture_rom as builder
+    roms = tmp / "sms-roms"
+    builder.main(["--out", str(roms), "--fixture", "machine_e2e"])
+    sidecar_rom = roms / "machine_e2e.sms"  # the builder also wrote machine_e2e.mapper.json beside it
+    (tmp / "sms-plain").mkdir()
+    rom = tmp / "sms-plain" / "machine_e2e.sms"  # the same image with no manifest beside it
+    rom.write_bytes(sidecar_rom.read_bytes())
+    digest = hashlib.sha256(rom.read_bytes()).hexdigest()
+
+    # No mapper declaration: typed fail-closed failure (clear message), diagnostics preserved, nothing run.
+    code, undeclared, _ = launch(rom, "sms-undeclared.txt", run=False)
+    require(code == 3 and undeclared.get("build") == "failed" and "must be declared" in undeclared.get("message", ""),
+            f"an undeclared SMS mapper must fail closed: {undeclared}")
+    require(undeclared.get("platform") == "master-system" and undeclared.get("mapper") == "undeclared", f"platform not shown: {undeclared}")
+    log = pathlib.Path(undeclared["entry"] + ".failed") / "build.log"
+    require('"diagnostic":"SMS_ERROR_MAPPER_UNDECLARED"' in (log.parent / "status.json").read_text(encoding="utf-8"),
+            "the typed diagnostic must be preserved in status.json")
+    require(not (log.parent / "generated").exists(), "nothing may be emitted before the mapper is declared")
+
+    # Declared mapper: build with the bundled compiler and run the viewer for a finite number of frames (dummy video/audio).
+    frames = ["--game-arg", "--viewer-frames", "--game-arg", "60", "--game-arg", "--viewer-unthrottled", "--game-arg", "--viewer-mute"]
+    code, built, _ = launch(rom, "sms-first.txt", extra=["--mapper", "sega"] + frames)
+    require(code == 0 and built["build"] == "ok" and built["run"] == "exited code=0", f"SMS build+run failed rc={code}: {built}")
+    require(built["rom_sha256"] == digest and built["platform"] == "master-system" and built["mapper"] == "sega", f"SMS report: {built}")
+    entry = pathlib.Path(built["entry"])
+    compiler = pathlib.Path(built["compiler"]).resolve()
+    build_log = (entry / "build.log").read_text(encoding="utf-8")
+    require(f"cc={compiler}" in build_log and "mapper=sega" in build_log and "mapper_declaration_source=build_option" in build_log,
+            "SMS build.log must record the toolchain, mapper and declaration source")
+    compile_lines = [line for line in build_log.splitlines() if line.startswith("$ ")]
+    require(compile_lines and all(line.startswith(f"$ {compiler}") or line.startswith("$ (link)") for line in compile_lines),
+            "every SMS compile command must invoke the bundled compiler")
+    require("viewer outcome 1 frames 60" in (entry / "run.log").read_text(encoding="utf-8"), "the SMS viewer must run its 60 frames")
+    meta = (entry / "metadata.json").read_text(encoding="utf-8")
+    require('"platform":"master-system"' in meta and '"mapper":"sega"' in meta and '"profile":"sms2_ntsc_export"' in meta and str(rom) not in meta,
+            f"SMS metadata provenance: {meta}")
+    require(not list(entry.rglob("machine_e2e.sms")), "the ROM must not be copied into the cache")
+
+    # Same declaration: cache hit. A sidecar manifest (another declaration form) selects another cache entry.
+    code, again, _ = launch(rom, "sms-second.txt", run=False, extra=["--mapper", "sega"])
+    require(code == 0 and again["cache"] == "hit", f"expected an SMS cache hit: {again}")
+    code, other, _ = launch(sidecar_rom, "sms-third.txt", run=False)
+    require(code == 0 and other["cache"] == "miss" and other["entry"] != built["entry"] and other["mapper"] == "manifest",
+            f"the sidecar manifest declaration must key a separate entry: {other}")
+
+
 def main():
     launcher = pathlib.Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="segarecomp-smoke-") as directory:
@@ -60,9 +110,9 @@ def main():
         rom.write_bytes(IMAGE)
         digest = hashlib.sha256(IMAGE).hexdigest()
 
-        def launch(rom_path, report_name, run=True):
+        def launch(rom_path, report_name, run=True, extra=()):
             report = tmp / report_name
-            command = [str(launcher), "--build", str(rom_path), "--report", str(report)] + (["--run"] if run else [])
+            command = [str(launcher), "--build", str(rom_path), "--report", str(report)] + (["--run"] if run else []) + list(extra)
             result = subprocess.run(command, env=env, text=True, capture_output=True, timeout=900)
             return result.returncode, (parse(report) if report.exists() else {}), result
 
@@ -108,6 +158,7 @@ def main():
         require(failed_log.is_file() and "FAILED" in failed_log.read_text(encoding="utf-8"), "diagnostics must be preserved")
         code, unreadable, _ = launch(tmp / "missing.bin", "missing.txt", run=False)
         require(code == 1 and "problem" in "".join(unreadable.values()) + str(unreadable), "unreadable ROM must fail cleanly")
+        smoke_master_system(tmp, launch)
         require(not (tmp / "decoy-used").exists(), "a host compiler on PATH was used")
     print("package smoke test: OK")
 

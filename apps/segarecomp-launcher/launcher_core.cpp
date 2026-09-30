@@ -94,11 +94,13 @@ Layout locate_layout() {
   layout.cli = layout.root / "bin" / (std::string("segarecomp") + exe_suffix);
   layout.cc = layout.root / "toolchain" / (std::string("zig") + exe_suffix);
   layout.runtime = layout.root / "runtime" / "platforms" / "genesis";
+  layout.runtime_sms = layout.root / "runtime" / "platforms" / "master-system";
   layout.sdl_include = layout.root / "sdl3" / "include";
   layout.sdl_lib = layout.root / "sdl3" / "lib";
   std::error_code ec;
   for (const auto &required : {layout.cli, layout.cc, layout.runtime / "runtime" / "runtime.c",
-                               layout.runtime / "viewer" / "viewer_sdl3.c", layout.sdl_include / "SDL3" / "SDL.h"}) {
+                               layout.runtime / "viewer" / "viewer_sdl3.c",
+                               layout.runtime_sms / "viewer" / "sms_viewer_sdl3.c", layout.sdl_include / "SDL3" / "SDL.h"}) {
     if (!fs::exists(required, ec)) { layout.problem = "This Segarecomp installation is incomplete (missing " + utf8(required.filename()) + "). Please download it again."; break; }
   }
   return layout;
@@ -122,7 +124,23 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
     const auto bytes = segarecomp::read_binary(path);
     view.sha256 = segarecomp::sha256_hex(bytes);
     const auto info = segarecomp::inspect_rom(bytes);
+    const bool recognized = info.outcome == segarecomp::ClassificationOutcome::recognized;
+    if (recognized && info.platform == segarecomp::Platform::master_system) {
+      view.supported_platform = true;
+      view.platform_id = "master-system";
+      view.platform = "Master System";
+      view.title = utf8(path.stem());
+      const fs::path sidecar = fs::path(path).replace_extension(".mapper.json");
+      std::error_code manifest_ec;
+      if (fs::is_regular_file(sidecar, manifest_ec)) {
+        const std::string text = read_all(sidecar);
+        view.mapper_manifest = sidecar;
+        view.mapper_manifest_sha256 = segarecomp::sha256_hex({reinterpret_cast<const std::uint8_t *>(text.data()), text.size()});
+      }
+      return view;
+    }
     view.supported_platform = info.platform == segarecomp::Platform::genesis;
+    view.platform_id = view.supported_platform ? "genesis" : "";
     view.platform = view.supported_platform ? "Genesis / Mega Drive" : "Unrecognized file";
     view.title = info.domestic_title_display;
     while (!view.title.empty() && view.title.back() == ' ') view.title.pop_back();
@@ -135,6 +153,13 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
   return view;
 }
 
+// Genesis keeps its historical key segment; Master System adds the platform, profile and declared mapper (and the sidecar
+// manifest's content digest), so a different declaration or manifest always selects a fresh cache entry.
+std::string platform_key(const RomView &rom) {
+  if (rom.platform_id != "master-system") return "genesis";
+  return std::string("master-system:") + sms_profile + ":mapper=" + rom.mapper + ":manifest=" + rom.mapper_manifest_sha256;
+}
+
 fs::path entry_dir(const RomView &rom, const Layout &layout) {
   // Everything that changes the produced binary is part of the key; a mismatch selects a fresh directory.
   // The build driver itself (which embeds the code generator) is part of the key: a different segarecomp
@@ -142,7 +167,7 @@ fs::path entry_dir(const RomView &rom, const Layout &layout) {
   std::error_code ec;
   const auto cli_size = fs::is_regular_file(layout.cli, ec) ? fs::file_size(layout.cli, ec) : 0U;
   const auto cli_time = fs::last_write_time(layout.cli, ec).time_since_epoch().count();
-  const std::string key = rom.sha256 + "|cli-" + std::to_string(static_cast<unsigned long long>(cli_size)) + "-" + std::to_string(static_cast<long long>(cli_time)) + "|" SEGARECOMP_LAUNCHER_VERSION "|genesis|" + host_arch() + "|" +
+  const std::string key = rom.sha256 + "|cli-" + std::to_string(static_cast<unsigned long long>(cli_size)) + "-" + std::to_string(static_cast<long long>(cli_time)) + "|" SEGARECOMP_LAUNCHER_VERSION "|" + platform_key(rom) + "|" + host_arch() + "|" +
                           SDL_GetPlatform() + "|zig-" SEGARECOMP_ZIG_VERSION "|O2|" + utf8(layout.root);
   const std::string digest = segarecomp::sha256_hex({reinterpret_cast<const std::uint8_t *>(key.data()), key.size()});
   return cache_root() / "games" / digest.substr(0, 32);
@@ -193,10 +218,16 @@ void BuildJob::run() {
   fs::create_directories(partial.parent_path(), ec);
   if (ec) { set_message("Cannot create the Segarecomp cache folder."); finish(false); return; }
 
+  const bool sms = rom_.platform_id == "master-system";
   std::vector<std::string> args{utf8(layout_.cli), "build", "--rom", utf8(rom_.path), "--output", utf8(partial),
                                 "--cc", utf8(layout_.cc), "--cc-arg", "cc", "--cc-arg", "-target",
-                                "--cc-arg", zig_target(), "--runtime-dir", utf8(layout_.runtime),
+                                "--cc-arg", zig_target(), "--runtime-dir", utf8(sms ? layout_.runtime_sms : layout_.runtime),
                                 "--sdl3-include", utf8(layout_.sdl_include), "--sdl3-lib", utf8(layout_.sdl_lib)};
+  if (sms) {
+    // The platform is selected by the recognized header; the mapper only by an explicit declaration (never a default).
+    if (!rom_.mapper.empty()) args.insert(args.end(), {"--mapper", rom_.mapper});
+    if (!rom_.mapper_manifest.empty()) args.insert(args.end(), {"--mapper-manifest", utf8(rom_.mapper_manifest)});
+  }
 #if defined(_WIN32)
   // The runtime keeps whole-machine state in automatic storage; match the POSIX 8 MiB main-thread stack.
   args.insert(args.end(), {"--link-arg", "-Wl,--stack,8388608"});
@@ -265,8 +296,12 @@ void BuildJob::run() {
   if (ok) {
     std::ofstream meta(partial / "metadata.json", std::ios::binary);
     meta << "{\"rom_sha256\":\"" << rom_.sha256 << "\",\"title\":\"" << json_safe(rom_.title)
-         << "\",\"segarecomp_version\":\"" SEGARECOMP_LAUNCHER_VERSION "\",\"platform\":\"genesis\",\"host\":\""
-         << host_description() << "\",\"toolchain\":\"zig " SEGARECOMP_ZIG_VERSION "\",\"rom_path\":\"referenced, not copied\"}\n";
+         << "\",\"segarecomp_version\":\"" SEGARECOMP_LAUNCHER_VERSION "\",\"platform\":\""
+         << (sms ? "master-system" : "genesis") << "\",";
+    if (sms)
+      meta << "\"profile\":\"" << sms_profile << "\",\"mapper\":\"" << json_safe(rom_.mapper) << "\",\"mapper_declaration\":\""
+           << (rom_.mapper.empty() ? "manifest" : "option") << "\",";
+    meta << "\"host\":\"" << host_description() << "\",\"toolchain\":\"zig " SEGARECOMP_ZIG_VERSION "\",\"rom_path\":\"referenced, not copied\"}\n";
     meta.close();
     fs::remove_all(entry_, ec);
     fs::rename(partial, entry_, ec);
@@ -284,9 +319,11 @@ void BuildJob::run() {
 
 // ---- GameRun ----
 
-GameRun::GameRun(const RomView &, const Layout &layout, const fs::path &entry) {
+GameRun::GameRun(const RomView &, const Layout &layout, const fs::path &entry, const std::vector<std::string> &extra_args) {
   const std::string exe = utf8(entry_executable(entry));
-  const char *argv[] = {exe.c_str(), nullptr};
+  std::vector<const char *> argv{exe.c_str()};
+  for (const auto &arg : extra_args) argv.push_back(arg.c_str());
+  argv.push_back(nullptr);
   SDL_Environment *environment = SDL_CreateEnvironment(true);
 #if defined(_WIN32)
   // The game links SDL3.dll; find it next to the package rather than requiring it on PATH.
@@ -298,7 +335,7 @@ GameRun::GameRun(const RomView &, const Layout &layout, const fs::path &entry) {
 #endif
   SDL_IOStream *log = SDL_IOFromFile(utf8(entry / "run.log").c_str(), "wb");
   SDL_PropertiesID props = SDL_CreateProperties();
-  SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv);
+  SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());
   SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ENVIRONMENT_POINTER, environment);
   SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
   if (log) {

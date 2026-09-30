@@ -48,3 +48,25 @@ viewer until the window closes): the budget stays 0 (an explicit 0 is still reje
 as unlimited. An explicit positive `--instruction-budget N` is unchanged (one finite run). Consequence: any
 automated caller (tests, agents, tooling) that runs a generated program MUST pass `--instruction-budget`, otherwise a
 non-terminating guest never returns. The viewer's default slice is now 500 dispatches (was 20000).
+
+## Amendment: Master System route (SEG-009-T010)
+
+`segarecomp build` routes by platform inside the same orchestration (stages, `@stage`/`@result`, `status.json`, `build.log`,
+cache, bundled `zig cc`); there is no second build system and the Genesis route is byte-for-byte unchanged.
+
+- **Platform/profile.** `--platform master-system` selects the SMS route explicitly; with no `--platform`, only a
+  recognized SMS header (libs/media classification) selects it. An unclassified image keeps the Genesis route and its
+  rejection; a Game Gear header is rejected (`PLATFORM_UNSUPPORTED`). Nothing is guessed.
+- **Mapper.** The header never identifies the mapper. The declaration is `--mapper <sega|rom_only>` and/or
+  `--mapper-manifest <file>` (ingestion rejects conflicts). With none, the build fails at the analyze stage, before any
+  emission, with `SMS_ERROR_MAPPER_UNDECLARED` in `status.json` (`diagnostic`) and exit 1; unsupported/unknown
+  mapper, profile, or size classes are the other typed `SMS_ERROR_*` diagnostics with the same exit code. A mapper
+  option on a non-SMS image is `MAPPER_NOT_APPLICABLE`.
+- **Composition.** `--runtime-dir` is `<root>/platforms/master-system`; shared sources (PSG device, Z80 runtime ABI header)
+  come from `<root>/libs`. Emission is `emit_cartridge()` (the one SMS emitter). Headless link set: generated units, SMS runtime,
+  PSG device, `sms_audio/sms_headless/sms_devices_vdp`; with `--sdl3-*`: the viewer core, SDL3 adapter and viewer `main`
+  instead (never both). The package mirrors the same tree under `runtime/`.
+- **Cache/provenance.** The launcher key adds platform, profile, declared mapper and the sidecar manifest digest
+  (Genesis keeps its historical key). `status.json`/`metadata.json` record ROM SHA-256, profile, mapper, declaration
+  source and toolchain. The launcher reads an optional `<rom>.mapper.json` sidecar or asks the user to choose the mapper;
+  it never defaults one. Non-interactive `--mapper` and `--game-arg` (finite run bounds) exist for the package smoke test.
