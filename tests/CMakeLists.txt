@@ -1176,6 +1176,11 @@ add_test(NAME sms_native_build_test COMMAND ${Python3_EXECUTABLE}
   $<TARGET_FILE:sms_image_emitter>)
 set_property(TEST sms_native_build_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_native_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-009-T011: authorized local images (skips cleanly without games/sms; not in the hermetic tiers).
+add_test(NAME sms_local_images_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_local_images_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_local_images_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_local_images_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST sms_machine_tests sms_machine_dependency_test APPEND PROPERTY LABELS full fast)
 set_property(TEST sms_bank_crossing_test sms_emission_budget_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_bank_crossing_test sms_emission_budget_test sms_machine_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
