@@ -63,7 +63,7 @@ declared mapper `sega`) runs black-box through each finalist's libretro core. Th
 | Genesis Plus GX | 47 | 47 |
 
 Both finalists produce an identical result block. Status bits 4-0 read `%11111` on both. MacDonald documents
-them as undefined, so the contract adopts `%11111`.
+them as garbage, so `%11111` is adopted as a project convention only.
 
 **PSG chip** (`tests/sms_psg_oracle_smoke_test.py`). 17 checks per reference: reset state, latch/data protocol
 including the two SMS Power! data-byte cases, LFSR reset on noise writes, the white and "periodic" sequences for
@@ -75,12 +75,13 @@ steps. Results: ares 14 pass + 3 masked; Blargg 14 pass + 3 masked; no unmasked 
 | topic | observations | resolution (citation) |
 | --- | --- | --- |
 | data byte after an attenuation latch | Blargg updates; ares ignores | update: SMS Power! SN76489 ("The data byte is NOT ignored", Alex Kidd). ares deviation (mask) |
-| noise output phase | GPGX and Blargg output bit 0 after the shift; ares outputs the bit shifted off (one shift later) | after the shift: SMS Power! reference implementation (`Output=ShiftRegister&1` after the shift) and GPGX. ares deviation (mask) |
+| noise output phase | GPGX and Blargg output bit 0 after the shift; ares outputs the bit shifted off (one shift later) | **open (U4, T007).** SMS Power!'s prose ("the bit that is shifted off ... is output to the mixer") supports ares; its reference implementation (`Output=ShiftRegister&1` after the shift) supports GPGX and Blargg. The model follows the implementation meanwhile; ares' phase is masked. Neither PSG reference in the smoke observes the chosen convention exactly (ares is masked on phase, Blargg on polarity); only GPGX, which is not in the PSG smoke, does |
 | noise polarity | ares and GPGX: bit 1 = channel on; Blargg: bit 0 = on | bit 1 = on: SMS Power! mixer description ("the bit ... is output to the mixer", multiplied by the volume), GPGX. Blargg deviation (mask; SMS Power! "Output inversion") |
-| tone period 0 | ares toggles every tick (= period 1); Blargg holds it static | behaves as period 1: GPGX hardware note; SMS Power! lists `$001` as 111,861 Hz and describes periods 0/1 as a constant +1 at the audible output, the analogue result of that ultrasonic toggle. Blargg deviation (mask) |
+| tone period 0 | ares toggles every tick (= period 1); Blargg holds it static | **open (U10, T007).** SMS Power! states "If the register value is zero or one then the output is a constant value of +1"; GPGX (verified on 315-5313A/315-5660), ares and MAME toggle every tick. The model follows the references meanwhile, as a project decision that departs from SMS Power! and changes the PCM of sample-playback software. Blargg's static period 0 is masked |
+| post-BIOS VDP registers | Gearsystem R0-R10 = `$36,$80,$FF,$FF,$FF,$FF,$FB,$00,$00,$00,$FF` (R1 `$A0` for some database titles); Genesis Plus GX writes R6 = `$FF` ("normally done by BOOT ROM"); ares seeds a RAM copy of R1 = `$9B` | **open (U9, T003/T011).** No public source; the contract uses the Gearsystem column as a project convention. Not exercised by the smoke |
 | PSG latch before the first latch byte | GPGX: tone 2 attenuation (315-5313A/315-5660); ares: channel 0 tone | unresolved for the 315-5246: typed stop `SMS_ERROR_PSG_DATA_BEFORE_LATCH` (U5, T007) |
 | post-BIOS SP and RAM | Gearsystem SP `$DFF0`, RAM `$00`; ares SP `$FFFD`, `$C000 = $AB`, `$C700 = $9B` | `$C000 = $AB` is documented (MacDonald §6); the rest is U1 (T011) |
-| status bits 4-0 | both finalists `%11111` | documented as undefined (MacDonald §4); adopt `%11111` |
+| status bits 4-0 | both finalists `%11111` | MacDonald §4: "garbage values"; `%11111` is a project convention, not a hardware fact |
 | in-line event offsets | Gearsystem and GPGX use different per-line cycle tables | U2 (T004): the event line is fixed; offsets are resolved only where both agree or a public source states them |
 
 ## Decision

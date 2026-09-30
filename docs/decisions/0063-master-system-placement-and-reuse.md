@@ -48,7 +48,9 @@ ratios; reset and post-BIOS state; SMS headless driver and artifacts. Everything
 - SMS Power! (*SN76489*) lists the SMS 1, SMS 2, Genesis/Mega Drive and Game Gear PSGs as the same Sega integrated
   variant: a 16-bit LFSR, white-noise taps bits 0 and 3, the same latch/data protocol and the same /16 internal
   divider.
-- MacDonald (VDP §1) states every VDP revision integrates the same SN76489. The Game Gear adds only a stereo
+- MacDonald (VDP §1) states every VDP revision integrates the SN76489 and calls it "identical to the stand-alone
+  version". That conflicts with SMS Power! on the LFSR (15-bit taps `$0003` discrete vs 16-bit taps `$0009` Sega); the
+  more specific SMS Power! measurement is followed, which is why LFSR width/taps are the variant parameter. The Game Gear adds only a stereo
   register.
 - Genesis Plus GX drives both machines with one `psg.c` "integrated" model, parameterised only by clock and
   panning.

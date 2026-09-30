@@ -31,7 +31,8 @@ port ABI, level `int_line`, latched NMI, RST-only IM0, absolute T-state deadline
    accepted (`SMS_ERROR_BIOS_UNSUPPORTED`). The profile provides the state the export BIOS leaves:
    - memory control `$AB`, and its RAM copy at `$C000` (MacDonald §4, §6: "Game software uses this value");
    - mapper `0,0,1,2`: the BIOS never programs the mapper and relies on bank 1 in slot 1 (SMS Power *BIOSes*);
-   - the documented VDP register values; PSG silent; I/O pins as inputs.
+   - PSG silent and I/O pins as inputs. The VDP register values are a project convention: no public source states
+     them and the references disagree on R1/R6 (open fact U9, owned by T003, attributed by T011).
 
    The CPU starts from SEG-008 `z80_reset`. BIOS-left values that no public source documents (SP in particular;
    the references disagree) are the bounded open fact U1, owned by T011, which attributes any title that depends
@@ -89,4 +90,4 @@ port ABI, level `int_line`, latched NMI, RST-only IM0, absolute T-state deadline
   post-BIOS state, the port decoder and the scheduler on the T-state clock. T010 adds `--mapper` and manifests
   to the build and the launcher.
 - `SMS_ERROR_*` classes (contract §13) are the typed platform error surface, distinct from `Z80Outcome`.
-- Open facts U1-U8 (contract §14) each have one owner and a resolution method. None is implemented by guessing.
+- Open facts U1-U10 (contract §14) each have one owner and a resolution method. None is implemented by guessing.

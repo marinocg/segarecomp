@@ -80,6 +80,20 @@ def main():
                   "0x%04X %s %s: disagrees with the legal-form dataset %s" % (address, mnem, bytes(encoded).hex(), forms))
             checked += 1
     check(checked > 300, "too few instructions cross-checked")
+    # full-byte golden encodings (Zilog UM0080 opcode tables): register fields, operands and prefixes
+    golden = {"ld b,a": "47", "ld a,b": "78", "ld c,a": "4f", "ld a,c": "79", "ld (hl),0x12": "3612",
+              "ld a,(hl)": "7e", "ld (hl),a": "77", "ld a,(0x1234)": "3a3412", "ld (0x1234),a": "323412",
+              "ld hl,0x1234": "213412", "ld sp,0xdff0": "31f0df", "out (0xbf),a": "d3bf", "in a,(0x7e)": "db7e",
+              "im 1": "ed56", "im 2": "ed5e", "ld i,a": "ed47", "otir": "edb3", "ldir": "edb0", "reti": "ed4d",
+              "retn": "ed45", "push af": "f5", "pop bc": "c1", "add a,16": "c610", "cp 0xff": "feff", "or c": "b1",
+              "and 0xc0": "e6c0", "xor a": "af", "dec bc": "0b", "inc hl": "23", "inc (hl)": "34", "call 0x1234": "cd3412",
+              "jp 0x1234": "c33412", "out (c),a": "ed79", "in b,(c)": "ed40", "rst 0x38": "ff"}
+    for text, expected in golden.items():
+        image, _ = builder.Assembler(text).assemble()
+        got = bytes(image[a] for a in sorted(image)).hex()
+        check(got == expected, "golden encoding %r: %s != %s" % (text, got, expected))
+    rel, _ = builder.Assembler("x: jr x\ndjnz x\njr nz,x").assemble()
+    check(bytes(rel[a] for a in sorted(rel)).hex() == "18fe10fc20fa", "relative branch encodings")
     # fail closed on unknown forms and ranges
     for bad in ("ld (ix+1),a", "frobnicate", ".org 0\nlabel: jr far\n.org 0x200\nfar: nop"):
         try:

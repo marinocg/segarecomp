@@ -62,8 +62,17 @@ PAL, Japanese region, SMS 1 VDP, Game Gear, SG-1000 and Mark III fail closed wit
 - Master clock 53.693175 MHz (NTSC); the Z80 runs at master / 15 = 3,579,545 Hz (the crystal is rated 53.6931 MHz;
   the chrominance subcarrier value 315/88 MHz is the one commonly used) [SP-CLK].
 - The PSG is clocked by the system clock and divides it by 16 internally [SP-CLK, SP-PSG]: one PSG chip tick = 16 T.
-- A scanline is 342 pixel periods [MD-VDP §11]. The VDP pixel clock is the TMS9918A's 5.3693175 MHz [TMS], i.e.
-  master / 10. One line therefore lasts 342 x 10 / 15 = **228 T** exactly.
+- A scanline is 342 pixel periods [MD-VDP §11]. MacDonald took this horizontal breakdown "from the TMS9918 manual
+  and my tests on a NTSC Genesis" and warns that "a real SMS may have different results". The VDP pixel clock is the
+  TMS9918A's 5.3693175 MHz [TMS], i.e. master / 10. One line therefore lasts 342 x 10 / 15 = **228 T** exactly.
+  Both pinned machine references use the same line length (Gearsystem 228 CPU cycles, Genesis Plus GX 3,420 master
+  cycles), and the oracle smoke's line-interrupt and V-counter checks, which depend on it, agree on both. The
+  per-line T length is therefore adopted; the positions of events *within* the line remain U2.
+- Vertical composition of a 192-line NTSC frame: 192 active, 24 bottom border, 3 bottom blanking, 3 vertical sync,
+  13 top blanking, 27 top border (224-line mode: 224/8/3/3/13/11) [MD-VDP §11]. Horizontal composition (342 pixels,
+  same caveat): 256 active, 15 right border, 8 right blanking, 26 horizontal sync, 2 left blanking, 14 colour
+  burst, 8 left blanking, 13 left border [MD-VDP §11]. Only the active area enters the framebuffer artifact
+  (§9.9).
 - A frame is 262 lines [MD-VDP §11] = **59,736 T** exactly.
 
 **Timebase decision.** All machine time is the Z80's monotonic `cycles` (u64 T-states) [Z80-ABI §8]. Every
@@ -134,8 +143,9 @@ Baseline families:
   content, so a data read there stops with `SMS_ERROR_UNMAPPED_READ`. Writes to `$FFFC-$FFFF` are RAM-mirror writes
   only, and `code_image` reports one invariant image for `$0000-$7FFF` [cap:mapper.rom_only].
 
-Accepted ROM sizes are 32, 64, 128, 256 and 512 KiB (power of two; the largest standard mapper revisions address
-512 KiB) [SP-MAP]; anything else is `SMS_ERROR_ROM_SIZE_UNSUPPORTED` [cap:ingest.rom_sizes]. The header size nibble and
+Accepted ROM sizes are 32, 64, 128, 256 and 512 KiB (power of two). SP-MAP records bank registers of 3, 5 and, for
+the largest known revision, 6 significant bits (1 MiB); the baseline stops at 512 KiB because that is the largest size
+whose generated-code cost was measured against the ADR 0058 budgets, and 1 MiB is excluded; anything else is `SMS_ERROR_ROM_SIZE_UNSUPPORTED` [cap:ingest.rom_sizes]. The header size nibble and
 checksum are recorded (match/mismatch) and never used to accept or reject [SP-HDR] [cap:ingest.checksum_informational].
 
 ### 4.2 Sega mapper behaviour
@@ -172,9 +182,12 @@ Bits (active low: 1 = disabled): 7 expansion, 6 cartridge, 5 card, 4 work RAM, 3
 and 5 have no effect on an SMS 2. The BIOS leaves `$AB` when it starts a cartridge [MD-HW §4, SP-3E].
 
 - Power-on value of the model: `$AB` [cap:memctl.post_bios_value].
-- A write with bits 6, 4 and 2 clear and bit 3 set (cartridge, RAM and I/O enabled, BIOS disabled) is accepted and
-  has no further effect [cap:memctl.write_compatible].
-- Any other write (disable the cartridge, work RAM or I/O chip, or enable the BIOS) stops with
+- A write with bits 6 and 4 clear and bit 3 set (cartridge and RAM enabled, BIOS disabled) is accepted
+  [cap:memctl.write_compatible].
+- Bit 2 (I/O chip) is modelled: while it is set, reads of `$C0-$FF` return `$FF` on the SMS 2 [MD-HW §4]. Software
+  uses this for YM2413 detection [SP-3E, MD-HW §7]; on the export SMS 2 the probe of port `$F2` then reads `$FF`
+  and finds no FM unit [cap:memctl.io_disable].
+- Any other write (disable the cartridge or work RAM, or enable the BIOS) stops with
   `SMS_ERROR_CONTROL_BIT_UNSUPPORTED` at the `io_out` T-state: slot switching and BIOS mapping are outside the
   baseline [cap:memctl.write_incompatible].
 
@@ -244,7 +257,7 @@ The Z80 ABI supplies a 16-bit port [Z80-ABI §6]. The SMS decodes only A7, A6 an
 
 | reg | bits used (SMS 2) | reset |
 | --- | --- | --- |
-| 0 | 7 vscroll lock cols 24-31, 6 hscroll lock rows 0-15 (lines 0-15), 5 left column blank, 4 IE1 line IRQ, 3 sprite shift -8, 2 M4, 1 M2, 0 no-sync | `$36` |
+| 0 | 7 vscroll lock cols 24-31, 6 hscroll lock for rows 0-1 (lines 0-15), 5 left column blank, 4 IE1 line IRQ, 3 sprite shift -8, 2 M4, 1 M2, 0 no-sync | `$36` |
 | 1 | 6 display enable, 5 IE0 frame IRQ, 4 M1, 3 M3, 1 sprite 8x16, 0 sprite zoom; 7 and 2 no effect | `$80` |
 | 2 | bits 3-1 name-table base (192 lines); bits 3-2 select `$0700/$1700/$2700/$3700` (224 lines) | `$FF` |
 | 3, 4 | no effect in Mode 4 on the SMS 2 | `$FF` |
@@ -255,8 +268,11 @@ The Z80 ABI supplies a 16-bit port [Z80-ABI §6]. The SMS decodes only A7, A6 an
 | 9 | vertical scroll | `$00` |
 | 10 | line counter reload value | `$FF` |
 
-The reset column is the post-BIOS register state documented for the Alex Kidd SMS 2 BIOS path and used by both
-finalists; the table-mask behaviour of unused bits (SMS 1) does not exist on the 315-5246 [MD-VDP §7, §15,
+The reset column is a **project convention**, not a documented value: no public source used here states the
+post-BIOS register contents, and the references disagree (Gearsystem uses the column above, with R1 = `$A0` for some
+titles from its database; Genesis Plus GX writes R6 = `$FF` "normally done by BOOT ROM"; ares seeds a RAM copy of R1
+= `$9B`). R6 bit 2 selects the sprite pattern half, so a title that never writes R6 is observably affected. This is
+U9 [cap:reset.vdp_registers]. The table-mask behaviour of unused bits (SMS 1) does not exist on the 315-5246 [MD-VDP §7, §15,
 SP-VREG] [cap:vdp.revision_5246] [cap:vdp.vram_16k]. Register numbers 11-15 have no effect [MD-VDP §3] [cap:vdp.registers_0_10].
 
 ### 9.2 Control/data ports [MD-VDP §3]
@@ -280,7 +296,8 @@ buffer loaded by a write, wrap `$3FFF -> $0000`, CRAM `$21 -> $01`, and port mir
 
 - Bit 7 frame pending, bit 6 sprite overflow, bit 5 sprite collision; a status read returns them and clears all
   three, the line pending flag and the byte flag [cap:vdp.status_flags].
-- Bits 4-0 are documented as undefined; the model returns `%11111`, the value both pinned finalists return
+- Bits 4-0 "return garbage values" [MD-VDP §4]. The model returns `%11111` as a **project convention** (both pinned
+  finalists return it); software that depends on these bits is outside the contract
   [cap:vdp.status_low_bits].
 
 ### 9.4 Frame and line interrupts [MD-VDP §12]
@@ -365,17 +382,26 @@ Chip facts (Sega integrated SN76489 variant) [SP-PSG, MD-VDP §1]:
   registers update immediately on each byte [cap:psg.latch_data] [cap:psg.tone_immediate].
 - A data byte before any latch byte stops with `SMS_ERROR_PSG_DATA_BEFORE_LATCH` (U5) [cap:psg.data_before_latch].
 - Internal clock = system clock / 16 [cap:psg.divider_16]. Each chip tick every channel's 10-bit counter decrements;
-  on reaching zero it reloads and flips the channel output [cap:psg.tone_counter]. **Tone period 0 behaves as period
-  1** (the output flips every chip tick; 111,861 Hz) [GPGX-NOTE; SP-PSG lists `$001` as 111,861 Hz and describes
-  periods 0 and 1 as a constant +1 at the audible output] [cap:psg.tone_period_0_1].
+  on reaching zero it reloads and flips the channel output [cap:psg.tone_counter]. Initial counter values and output
+  flip-flops are not documented ("The initial output value may be arbitrarily set" [SP-PSG]); the model starts them
+  at 0 as a project convention (part of U5).
+- **Tone period 0 and 1 (U10, open).** SP-PSG states: "If the register value is zero or one then the output is a
+  constant value of +1." The references (GPGX, ares, MAME) instead flip the output every chip tick, with 0 behaving as
+  1 (GPGX-NOTE, verified on 315-5313A/315-5660, not on the 315-5246). Until T007 resolves U10, the model follows the
+  reference behaviour as a **project decision that departs from SP-PSG**. Consequence: under the §10 decimation a
+  toggling channel averages to about half its level with ripple, whereas a constant +1 gives the full level, so PCM
+  digests of sample-playback software depend on this item [cap:psg.tone_period_0_1].
 - Noise: counter reload `$10`, `$20`, `$40` or the tone 2 register (rate 3); the LFSR shifts once per two counter
   expiries (on the 0 -> 1 flip). 16-bit LFSR; white noise feeds `bit0 XOR bit3` into bit 15, "periodic" feeds bit 0.
-  Any write to the noise register (latch or data) resets the LFSR to `$8000`. The channel output is bit 0 of the
-  register **after** the shift, and 1 = channel on (SP-PSG reference implementation; GPGX-NOTE)
+  Any write to the noise register (latch or data) resets the LFSR to `$8000`. **Noise output phase (U4, open):**
+  SP-PSG's prose says the bit "shifted off the end" goes to the mixer, while its reference implementation outputs
+  bit 0 after the shift. The model follows the implementation (with GPGX) until T007 resolves U4; the choice moves
+  the noise sequence by one shift. 1 = channel on
   [cap:psg.noise_rates] [cap:psg.lfsr_16_taps_0_3] [cap:psg.lfsr_reset] [cap:psg.noise_output_phase].
 - Attenuation: 2 dB per step, `$F` = silence. Integer level table (SP-PSG, verbatim): `32767, 26028, 20675, 16422,
   13045, 10362, 8231, 6568, 5193, 4125, 3277, 2603, 2067, 1642, 1304, 0` [cap:psg.attenuation].
-- Reset: tone/noise registers 0, attenuations `$F`, LFSR `$8000` [SP-PSG] [cap:psg.reset_state].
+- Reset: tone/noise registers 0 and attenuations `$F` [SP-PSG]; LFSR `$8000` at power-on [GPGX-NOTE] (SP-PSG documents
+  that value after a noise-register write) [cap:psg.reset_state].
 - Mono: SMS has no stereo register (Game Gear port `$06` is excluded) [MD-HW §7] [cap:psg.gg_stereo]. Analogue
   decay/filtering is not modelled [SP-PSG "imperfect SN76489"] [cap:psg.analog_imperfection].
 
@@ -455,18 +481,21 @@ Distinct from `Z80Outcome` and reported with PC, image identity, T-state and the
 | U1 | BIOS-left CPU state other than PC/IM/IFF (SP in particular) and RAM other than `$C000` | oracles disagree (Gearsystem SP `$DFF0`, ares SP `$FFFD` and `$C700 = $9B`); normal software sets SP first. The profile uses `z80_reset` values | T011 | any real title whose behaviour depends on it is attributed with the frontier tools; a cited BIOS behaviour then becomes a profile delta |
 | U2 | T offset within the 228-T line of the frame flag, line flag, line-counter step, V counter increment and horizontal-scroll latch | MacDonald: "I don't have information about where events occur within a single scanline". The line is fixed (section 9.4); meanwhile events happen at T offset 0 of their line | T004 (T005 for the scroll latch) | measure both finalists (they model distinct in-line offsets) with project fixtures that poll status/V counter; adopt only a value both finalists agree on or that a public source states; otherwise keep offset 0 and record the difference as a validation tolerance |
 | U3 | H counter value per T offset and the TH-latch trigger via port `$3F` | only relevant to software reading port `$7F`; stops with `SMS_ERROR_HCOUNTER_UNRESOLVED` | T004 (value table), T006 (trigger) | MacDonald's 342-pixel breakdown plus finalist agreement |
-| U5 | PSG latch state before the first latch byte | GPGX-NOTE records tone 2 attenuation on 315-5313A/315-5660, ares uses channel 0 tone; untested on 315-5246. Stops with `SMS_ERROR_PSG_DATA_BEFORE_LATCH` | T007 | a public 315-5246 statement, else keep the stop |
+| U4 | noise output phase: bit shifted off (SP-PSG prose, ares) vs bit 0 after the shift (SP-PSG code, GPGX, Blargg) | one shift of phase in the noise sequence; model follows the code | T007 | a public 315-5246 capture or statement; otherwise keep the code convention and record it in the PCM tolerance |
+| U5 | PSG latch state before the first latch byte, and the initial counter/output flip-flop states | GPGX-NOTE records tone 2 attenuation on 315-5313A/315-5660, ares uses channel 0 tone; untested on 315-5246. Stops with `SMS_ERROR_PSG_DATA_BEFORE_LATCH` | T007 | a public 315-5246 statement, else keep the stop |
 | U6 | VDP access-slot loss for rapid data-port writes during active display (MacDonald §15, SMS 2) | writes always land [cap:timing.vdp_access_slots] | T012 | classify with evidence during the residual sweep; model only with a public timing source |
+| U9 | post-BIOS VDP register contents (no public source; references disagree on R1/R6) | project convention of §9.1; normal software writes every register before enabling the display | T003 | T011 attributes any title that renders before writing a register; a cited BIOS behaviour then becomes a profile delta |
+| U10 | tone period 0/1 digital output: toggle every tick (references) vs constant +1 (SP-PSG) | model toggles; affects PCM of sample playback | T007 | a public 315-5246 capture or statement; otherwise keep the reference behaviour and record the departure |
 | U8 | content of the fine-scroll gap (backdrop "and sometimes pattern data from sprite #0") | backdrop only | T005 | finalist comparison plus the public statement; keep backdrop if unresolved and record the tolerance |
 
-(U4 and U7 were resolved during T001: noise output phase, and status low bits; sections 9.3 and 10.)
+(Status bits 4-0 are a project convention, §9.3; there is no U7.)
 
 ## 15. Independent references (summary; ADR 0062)
 
 | subsystem | primary | secondary / falsification |
 | --- | --- | --- |
 | memory map, mapper, port decode, interrupts, VDP ports/status/IRQ, raster/renderer | Gearsystem `704a92e` (GPL-3.0) | Genesis Plus GX `939ce4f` (non-commercial licence; local test-only use), plus the project-authored oracle smoke/fixture corpus |
-| PSG chip | ares SN76489 component `4cb8d92` (ISC) with a two-entry deviation mask | Blargg Sms_Apu 0.1.4 (LGPL-2.1+, inside the Gearsystem pin) with a three-entry deviation mask |
+| PSG chip | ares SN76489 component `4cb8d92` (ISC) with a three-entry deviation mask (two behaviours) | Blargg Sms_Apu 0.1.4 (LGPL-2.1+, inside the Gearsystem pin) with a three-entry deviation mask (two behaviours) |
 
 References are test-only, obtained as ignored `.tools/sms-oracles/` checkouts at the pinned hashes
 (`SEGARECOMP_SMS_ORACLE_CHECKOUT`), never linked into production and never run in CI.

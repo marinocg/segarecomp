@@ -75,7 +75,7 @@
     },
     {
       "area": "background",
-      "behavior": "R0 bit 6 locks horizontal scroll to 0 on lines 0-15",
+      "behavior": "R0 bit 6 locks horizontal scroll to 0 for rows 0-1 (lines 0-15)",
       "evidence": [
         "MD-VDP"
       ],
@@ -305,10 +305,11 @@
     },
     {
       "area": "ingestion",
-      "behavior": "ROM sizes 32/64/128/256/512 KiB accepted; any other size fails closed",
+      "behavior": "ROM sizes 32/64/128/256/512 KiB accepted; any other size (including 1 MiB) fails closed",
       "evidence": [
         "SP-MAP",
-        "SP-HDR"
+        "SP-HDR",
+        "ADR-0058"
       ],
       "id": "ingest.rom_sizes",
       "owner": "SEG-009-T002",
@@ -424,7 +425,7 @@
     },
     {
       "area": "io_control",
-      "behavior": "a TH 0->1 transition latches the H counter",
+      "behavior": "a TH change latches the H counter (exact trigger through port $3F open)",
       "evidence": [
         "MD-VDP"
       ],
@@ -840,6 +841,17 @@
     },
     {
       "area": "memory_control",
+      "behavior": "port $3E bit 2 set: reads of $C0-$FF return $FF (SMS 2); YM2413 probes find no FM unit",
+      "evidence": [
+        "MD-HW",
+        "SP-3E"
+      ],
+      "id": "memctl.io_disable",
+      "owner": "SEG-009-T003",
+      "scope": "in_scope"
+    },
+    {
+      "area": "memory_control",
       "behavior": "memory control is $AB after the (not executed) BIOS: cartridge, RAM and I/O enabled",
       "evidence": [
         "MD-HW",
@@ -862,7 +874,7 @@
     },
     {
       "area": "memory_control",
-      "behavior": "writes keeping cartridge, RAM and I/O enabled and BIOS disabled are accepted (bits 7,5,1,0 have no SMS 2 effect)",
+      "behavior": "writes keeping cartridge and RAM enabled and BIOS disabled are accepted (bits 7,5,1,0 have no SMS 2 effect)",
       "evidence": [
         "MD-HW",
         "SP-3E"
@@ -873,7 +885,7 @@
     },
     {
       "area": "memory_control",
-      "behavior": "writes disabling cartridge/RAM/I/O or enabling the BIOS slot",
+      "behavior": "writes disabling the cartridge or work RAM, or enabling the BIOS slot",
       "evidence": [
         "MD-HW",
         "SP-3E"
@@ -1060,7 +1072,7 @@
     },
     {
       "area": "psg",
-      "behavior": "noise output is bit 0 of the register after the shift; 1 = channel on",
+      "behavior": "noise output is bit 0 of the register after the shift (SP-PSG code; prose differs); 1 = channel on",
       "evidence": [
         "SP-PSG",
         "GPGX-NOTE",
@@ -1068,7 +1080,8 @@
       ],
       "id": "psg.noise_output_phase",
       "owner": "SEG-009-T007",
-      "scope": "in_scope"
+      "scope": "in_scope",
+      "unresolved": "U4"
     },
     {
       "area": "psg",
@@ -1083,14 +1096,17 @@
     },
     {
       "area": "psg",
-      "behavior": "reset: tone/noise registers 0, volumes $F, LFSR $8000",
+      "behavior": "reset: tone/noise registers 0, volumes $F, LFSR $8000, counters and outputs 0",
       "evidence": [
         "SP-PSG",
-        "PSG-SMOKE"
+        "GPGX-NOTE",
+        "PSG-SMOKE",
+        "PROJECT"
       ],
       "id": "psg.reset_state",
       "owner": "SEG-009-T007",
-      "scope": "in_scope"
+      "scope": "in_scope",
+      "unresolved": "U5"
     },
     {
       "area": "psg",
@@ -1116,15 +1132,17 @@
     },
     {
       "area": "psg",
-      "behavior": "tone period 0 behaves as period 1 (output flips every chip tick)",
+      "behavior": "tone period 0 behaves as period 1 and flips every chip tick: project decision departing from SP-PSG constant +1",
       "evidence": [
         "GPGX-NOTE",
         "SP-PSG",
-        "PSG-SMOKE"
+        "PSG-SMOKE",
+        "PROJECT"
       ],
       "id": "psg.tone_period_0_1",
       "owner": "SEG-009-T007",
-      "scope": "in_scope"
+      "scope": "in_scope",
+      "unresolved": "U10"
     },
     {
       "area": "raster",
@@ -1171,7 +1189,7 @@
     },
     {
       "area": "reset",
-      "behavior": "mapper, VDP, PSG and I/O control take their documented reset values",
+      "behavior": "mapper, PSG and I/O control take their documented reset values",
       "evidence": [
         "SP-MAP",
         "SP-PSG",
@@ -1192,6 +1210,17 @@
       "owner": "SEG-009-T003",
       "scope": "in_scope",
       "unresolved": "U1"
+    },
+    {
+      "area": "reset",
+      "behavior": "VDP registers start at the contract's project-convention values (no public source)",
+      "evidence": [
+        "PROJECT"
+      ],
+      "id": "reset.vdp_registers",
+      "owner": "SEG-009-T003",
+      "scope": "in_scope",
+      "unresolved": "U9"
     },
     {
       "area": "sprites",
@@ -1608,10 +1637,11 @@
     },
     {
       "area": "vdp_status",
-      "behavior": "status bits 4-0 read as %11111 (documented as undefined; both pinned finalists agree)",
+      "behavior": "status bits 4-0 read as %11111: project convention (documented as garbage; both pinned finalists return it)",
       "evidence": [
         "MD-VDP",
-        "ORACLE-SMOKE"
+        "ORACLE-SMOKE",
+        "PROJECT"
       ],
       "id": "vdp.status_low_bits",
       "owner": "SEG-009-T004",

@@ -13,6 +13,7 @@ usage: sms_psg_oracle_smoke_test.py [c++]
 """
 import json
 import math
+import os
 import pathlib
 import subprocess
 import sys
@@ -80,11 +81,11 @@ def expectations():
         ("latch.noise_after_latch", lambda o: o["latch"]["noise_after_latch"] == [1, 1], "SP-PSG: noise latch %101 = white, rate 1"),
         ("latch.noise_after_data", lambda o: o["latch"]["noise_after_data"] == [0, 1], "SP-PSG: data byte updates the noise register (Micro Machines)"),
         ("latch.lfsr_after_noise_write", lambda o: o["latch"]["lfsr_after_noise_write"] == 0x8000, "SP-PSG: any noise write resets the LFSR"),
-        ("white_rate0", lambda o: o["white_rate0"] == lfsr_outputs(True, 64), "SP-PSG: 16-bit LFSR, taps bits 0 and 3, output bit 0 after the shift, 1 = on"),
+        ("white_rate0", lambda o: o["white_rate0"] == lfsr_outputs(True, 64), "SP-PSG: 16-bit LFSR, taps bits 0 and 3; output bit 0 after the shift (SP-PSG code; phase open U4), 1 = on"),
         ("periodic_rate0", lambda o: o["periodic_rate0"] == lfsr_outputs(False, 32), "SP-PSG: 'periodic' noise = 1/16 duty"),
         ("noise_shift_interval", lambda o: o["noise_shift_interval"] == [32, 64, 128, 10], "SP-PSG: reload $10/$20/$40/tone 2; one shift per two expiries"),
-        ("tone_period1", lambda o: alternates(o["tone_period1"]), "SP-PSG: period 1 flips every chip tick (111,861 Hz)"),
-        ("tone_period0", lambda o: alternates(o["tone_period0"]), "GPGX-NOTE: period 0 behaves as period 1 on the integrated PSG"),
+        ("tone_period1", lambda o: alternates(o["tone_period1"]), "SP-PSG tone formula/range ($001 = 111,861 Hz); SP-PSG also says constant +1 for 0/1: open U10"),
+        ("tone_period0", lambda o: alternates(o["tone_period0"]), "GPGX-NOTE: period 0 behaves as period 1 (contract project decision, open U10)"),
         ("tone_period3", lambda o: o["tone_period3"] in ("111000111000", "000111000111"), "SP-PSG: output flips when the counter reloads"),
         ("attenuation_steps", attenuation_ok, "SP-PSG: 2 dB per step, $F = silence"),
     ]
@@ -126,6 +127,9 @@ def build(compiler, root, tmp):
 
 def main():
     compiler = sys.argv[1] if len(sys.argv) > 1 else "c++"
+    if os.name != "posix" or pathlib.Path(compiler).stem.lower() in ("cl", "clang-cl"):
+        print("skipped: the PSG observation adapters need a POSIX GCC/Clang-style compiler")
+        return 0
     root = pins.checkout(NAMES)
     if root is None:
         print("skipped: " + pins.skip_reason(NAMES))
