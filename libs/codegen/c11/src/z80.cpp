@@ -217,8 +217,8 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
       if (w.length == 0 || w.first_offset + w.length > kSpace || static_cast<std::uint32_t>(w.base) + w.first_offset + w.length > kSpace)
         return fail("code window leaves the 16-bit logical address space");
       if (image.bytes.size() < w.first_offset + w.length) return fail("code image shorter than its exposed range");
-      if (w.first_offset != image.windows.front().first_offset || w.length != image.windows.front().length)
-        return fail("windows of one image must share stride and exposed range");
+      // Windows of one image may expose different sub-ranges (ADR 0058: SMS slot 0 exposes 0x0400-0x3FFF of a bank whose
+      // other slots expose all of it). The owner key is the image offset, so it is well defined for any such set.
     }
   }
 
@@ -291,21 +291,32 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
       std::vector<std::vector<StartClassification>> classes;
       for (const CodeWindow& w : image.windows) classes.push_back(cpu::z80::classify_all(window_fetch(image, w)));
       const bool relative = image.windows.size() > 1;
-      for (std::uint32_t o = first.first_offset; o < first.first_offset + first.length; ++o) {
+      // One owner per (image, offset) over the union of the offsets any window exposes; a window contributes a variant
+      // only for the offsets it actually exposes.
+      std::uint32_t lo = image.windows.front().first_offset;
+      std::uint32_t hi = lo;
+      for (const CodeWindow& w : image.windows) {
+        lo = std::min(lo, w.first_offset);
+        hi = std::max(hi, w.first_offset + w.length);
+      }
+      for (std::uint32_t o = lo; o < hi; ++o) {
         Plan plan;
         plan.identity = image.identity;
         plan.relative = relative;
-        plan.dense = dense + (o - first.first_offset);
+        plan.dense = dense + (o - lo);
         plan.key = relative ? static_cast<std::uint16_t>(o) : static_cast<std::uint16_t>(first.base + o);
         for (std::size_t j = 0; j < image.windows.size(); ++j) {
-          const StartClassification& c = classes[j][static_cast<std::uint16_t>(image.windows[j].base + o)];
+          const CodeWindow& w = image.windows[j];
+          if (o < w.first_offset || o >= w.first_offset + w.length) continue;
+          const StartClassification& c = classes[j][static_cast<std::uint16_t>(w.base + o)];
           auto same = std::ranges::find_if(plan.variants, [&](const Variant& v) { return same_semantics(v.classification, c); });
           if (same == plan.variants.end()) {
             plan.variants.push_back(make_variant(c));
             same = plan.variants.end() - 1;
           }
-          same->bases.push_back(image.windows[j].base);
+          same->bases.push_back(w.base);
         }
+        if (plan.variants.empty()) continue;  // an offset no window exposes
         if (relative && std::ranges::any_of(plan.variants, [](const Variant& v) { return v.classification.kind == StartKind::prefix_lock; }))
           return fail("a prefix_lock start cannot occur in a window-relative owner");
         if (std::ranges::all_of(plan.variants, [](const Variant& v) { return v.absent; })) {
@@ -314,6 +325,8 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
         }
         plans.push_back(std::move(plan));
       }
+      dense += hi - lo;
+      continue;
     }
     dense += first.length;
   }
@@ -333,7 +346,17 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
   // ---- emission ----
   std::size_t shards = static_cast<std::size_t>((dense + 2047) / 2048);
   shards = std::clamp<std::size_t>(shards, 1, 48);
-  TranslationUnitSharder sharder(options.directory, options.stem, {TranslationUnitFamily{"owner", shards, 8}});
+  // Entry table chunking (ADR 0058 budgets): the flat table + all owner declarations in the main TU would grow that TU, and the
+  // compiler's peak memory with it, linearly with the owner count. Above kEntryChunk entries the generic chunked form puts
+  // each chunk (with its own owner declarations) in an "entry" TU; smaller images keep the flat table unchanged.
+  const std::size_t kEntryChunk = std::max<std::size_t>(options.entry_chunk_entries, 1);
+  CompiledEntryChunking chunking;
+  chunking.chunk_entries = kEntryChunk;
+  chunking.declare_owner = [](std::string_view symbol) { return owner_declaration(std::string(symbol)); };
+  const bool chunked_entries = plans.size() > kEntryChunk;
+  std::vector<TranslationUnitFamily> families{TranslationUnitFamily{"owner", shards, 8}};
+  if (chunked_entries) families.push_back(TranslationUnitFamily{"entry", compiled_entry_chunk_count(plans.size(), kEntryChunk), 0});
+  TranslationUnitSharder sharder(options.directory, options.stem, std::move(families));
   std::ostream& out = sharder.stream();
   shard_begin_header(out);
   out << "/* Generated Z80 image owners (SEG-008-T003). Deterministic; do not edit. */\n"
@@ -369,11 +392,12 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
   }
 
   // Main translation unit: owner declarations (only here), identity table, entry table, dispatcher.
-  out << "\n/* Owner declarations: only this translation unit references every owner. */\n";
+  out << (chunked_entries ? "\n/* Owner declarations live in the entry-chunk translation units. */\n"
+                          : "\n/* Owner declarations: only this translation unit references every owner. */\n");
   std::vector<CompiledEntryBinding> bindings;
   for (const Plan& plan : plans) {
     const std::string symbol = owner_symbol(plan.identity, plan.key);
-    out << owner_declaration(symbol) << ";\n";
+    if (!chunked_entries) out << owner_declaration(symbol) << ";\n";
     bindings.push_back({static_cast<std::uint32_t>(plan.identity << 16 | plan.key), symbol});
   }
   out << "\nstatic const uint32_t z80_identity_ids[] = {\n";
@@ -391,7 +415,7 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
   names.addresses = "z80_entry_keys";
   names.owner_ids = "z80_entry_owner_ids";
   names.owners = "z80_entry_owners";
-  if (const std::string rejected = emit_compiled_entry_table(out, bindings, names); !rejected.empty()) return fail(rejected);
+  if (const std::string rejected = emit_compiled_entry_table_chunked(out, bindings, names, chunking); !rejected.empty()) return fail(rejected);
   out << "\nZ80Outcome z80_run(Z80Runtime *rt, uint64_t deadline) {\n"
       << "  Z80State *s = &rt->state;\n"
       << "  s->deadline = deadline;\n"

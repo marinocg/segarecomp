@@ -352,8 +352,10 @@ def scenario_image_bytes(spec):
     return bytes(data)
 
 
-def image_spec_text(images):
+def image_spec_text(images, entry_chunk=None):
     lines = []
+    if entry_chunk:  # emitter test hook: force the chunked entry table on a small image
+        lines.append("chunk %d" % entry_chunk)
     for img in images:
         lines.append("image %d %s" % (img["identity"], img["kind"]))
         for base, first, length in img["windows"]:
@@ -370,8 +372,10 @@ def memory_lines_for_load(image_doc, load):
         img = by_id[identity]
         raw = scenario_image_bytes(img)
         base = hexint(base_hex)
-        first = hexint(img["windows"][0][1])
-        length = hexint(img["windows"][0][2])
+        # the window this load exposes: the one at `base` (windows of one image may expose different sub-ranges)
+        window = next((w for w in img["windows"] if hexint(w[0]) == base), img["windows"][0])
+        first = hexint(window[1])
+        length = hexint(window[2])
         fill = hexint(img.get("fill", "00"))
         lines.append("F %04X %X %02X" % ((base + first) & 0xFFFF, length, fill))
         run = None
@@ -423,7 +427,7 @@ def scenario_batches(doc):
             vec.patches = [(hexint(a), bytes.fromhex(b)) for a, b in sc.get("memory", [])]
             texts.append((vec, vector_text(vec, state["pc"], memory_lines_for_load(image_doc, sc.get("load", [])))))
         if texts:
-            batches.append(Batch(image_name, image_spec_text(image_doc["images"]), texts))
+            batches.append(Batch(image_name, image_spec_text(image_doc["images"], image_doc.get("entry_chunk")), texts))
     return batches
 
 

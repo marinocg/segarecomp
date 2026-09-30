@@ -33,6 +33,7 @@ int main(int argc, char** argv) {
     return 2;
   }
   ImageSet set;
+  std::size_t entry_chunk = 0;
   std::map<unsigned long, std::size_t> index;
   const auto image_of = [&](unsigned long identity) -> CodeImage& { return set.images.at(index.at(identity)); };
   for (std::string line; std::getline(spec, line);) {
@@ -61,6 +62,8 @@ int main(int argc, char** argv) {
       in >> hex;
       for (std::size_t i = 0; i + 1 < hex.size(); i += 2)
         image_of(identity).bytes.push_back(static_cast<std::uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16)));
+    } else if (verb == "chunk") {  // `chunk <entries>`: entry-table chunk size (test hook; the identity slot holds the count)
+      entry_chunk = static_cast<std::size_t>(identity);
     } else if (verb == "fill") {
       std::string value, count;
       in >> value >> count;
@@ -75,6 +78,7 @@ int main(int argc, char** argv) {
   options.directory = argv[2];
   options.stem = argv[3];
   options.record_owners = list;
+  if (entry_chunk != 0) options.entry_chunk_entries = entry_chunk;
   const EmitResult result = emit_image_set(set, options);
   if (!result.error.empty()) {
     std::cout << "error " << result.error << "\n";

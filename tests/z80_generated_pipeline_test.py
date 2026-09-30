@@ -126,7 +126,20 @@ def main():
             check("z80_o_" not in header, "%s: the shared header declares owners (ADR 0058 RSS constraint)" % batch.name)
             check(len(header) < 2048, "%s: shared header is not small" % batch.name)
             main_tu = (out_dir / ("z80_%s_main.c" % batch.name)).read_text()
-            check("z80_o_" in main_tu and "z80_run" in main_tu, "%s: main TU lacks the entry table" % batch.name)
+            check("z80_run" in main_tu and "z80_entry_lookup" in main_tu, "%s: main TU lacks the dispatcher/entry lookup" % batch.name)
+            entry_tus = sorted(out_dir.glob("z80_%s_entry_*.c" % batch.name))
+            chunk = doc["images"][batch.name].get("entry_chunk")
+            if chunk:
+                # Chunked exact lookup: the main TU keeps only the chunk directory; each chunk TU declares its own owners
+                # and holds at most `chunk` entries. The flat form (every other image) keeps the table in the main TU.
+                owners_total = len(r["owners"]) if r.get("owners") else 0
+                check(len(entry_tus) == -(-owners_total // chunk) and len(entry_tus) > 1, "%s: expected %d entry-chunk TUs, found %d"
+                      % (batch.name, -(-owners_total // chunk), len(entry_tus)))
+                check("z80_o_" not in main_tu.replace("z80_entry_lookup", ""), "%s: chunked main TU still references owners" % batch.name)
+                for tu in entry_tus:
+                    check(tu.read_text().count("UINT32_C(0x") <= chunk + 1, "%s: %s holds more than one chunk" % (batch.name, tu.name))
+            else:
+                check("z80_o_" in main_tu and not entry_tus, "%s: flat entry table must live in the main TU" % batch.name)
             for path in out_dir.glob("*.c"):
                 text = path.read_text().lower()
                 check("m68k" not in text and "genesis" not in text, "%s: generated C mentions an M68k/Genesis symbol" % path.name)

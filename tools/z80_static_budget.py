@@ -2,12 +2,11 @@
 """SEG-008-T009: re-measures the ADR 0058 static-code budgets with the real Z80 lowerings on full-size synthetic images.
 
 usage: z80_static_budget.py --emitter <z80_image_emitter> --shape <shape> [--cc cc] [--opt -O1] [--work DIR] [--json OUT]
-       [--corpus-cache DIR]
 
-Shapes: `dense64` (one invariant 64 KiB image of documented legal instructions with operands; sampled from the ignored
-SST cache when present, else seeded uniform legal opcode bytes), `random64`, `zero64`, `ff64` (the ADR 0058 inputs) and
-`banked512-dense` / `banked512-random` (SMS-shaped: a 1 KiB invariant image plus 32 banked 16 KiB banks each exposed in
-three 16 KiB windows, window-relative owners). Measures generated C size, -jN/-j1 compile time (per-process peak RSS from
+Shapes: `dense64` (one invariant 64 KiB image of legal instructions with operands, built from the canonical Z80 legal-form
+dataset through the conformance tooling: instruction-aligned by construction), `random64`, `zero64`, `ff64` (the ADR 0058
+inputs) and `banked512-dense` / `banked512-random` (the ADR 0058 SMS-shaped logical map, see `sms_spec`; a scale-shape
+definition only, no machine policy), or `rom:<path>` (the same map over a local image, ephemeral). Measures generated C size, -jN/-j1 compile time (per-process peak RSS from
 wait4), executable size (linked with the dispatch benchmark) and the dispatcher round-trip time (an upper bound of the
 exact lookup), and reports pass/fail against the pre-declared budgets. Output is byte-identical across two emits (checked).
 Nothing measured here is committed except the aggregate figures the caller records.
@@ -26,77 +25,69 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import z80_conformance as zc  # noqa: E402
-import z80_sst_corpus as sst  # noqa: E402
 
 BUDGETS_64K = {"generated_c_mib": 128.0, "j8_s": 90.0, "j1_s": 300.0, "rss_mib": 1536.0, "exe_mib": 48.0, "lookup_ns": 100.0}
 BUDGETS_512K = {"generated_c_mib": 1024.0, "j8_s": 300.0, "j1_s": 1800.0, "rss_mib": 1536.0, "exe_mib": 256.0, "lookup_ns": 100.0}
 BENCH = zc.TOOLS_DIR / "z80_dispatch_bench.c"
 
 
-def dense_bytes(rng, size, cache):
-    """Legal instruction encodings with operands, from the ignored corpus cache when available."""
-    codes = []
-    if cache and cache.is_dir():
-        for path in sorted(cache.glob("*.json")):
-            for case in json.loads(path.read_text())[:6]:
-                ram = {a: v for a, v in case["initial"]["ram"]}
-                pc, code = case["initial"]["pc"], bytearray()
-                while len(code) < 4 and ((pc + len(code)) & 0xFFFF) in ram:
-                    code.append(ram[(pc + len(code)) & 0xFFFF])
-                if code:
-                    codes.append(bytes(code[:instruction_length(code)]))
+def legal_encoding_pool():
+    """(form, opcode byte) for every concrete encoding of every form: the one authoritative Z80 form source."""
+    _, forms = zc.load_dataset()
+    return [(forms[fid], byte) for fid in sorted(forms) for byte in zc.expand_ranges(forms[fid]["byte_ranges"])]
+
+
+def dense_bytes(rng, size, pool):
+    """`size` bytes of back-to-back legal instructions (random operands), aligned by construction."""
     out = bytearray()
     while len(out) < size:
-        out += rng.choice(codes) if codes else bytes([rng.randrange(256)])
+        form, byte = rng.choice(pool)
+        out += zc.encoding_code(form, byte, bytes(rng.randrange(256) for _ in range(zc.operand_count(form))))
     return bytes(out[:size])
 
 
-def instruction_length(code):
-    first = code[0]
-    if first in (0xDD, 0xFD):
-        if len(code) > 1 and code[1] == 0xCB:
-            return min(4, len(code))
-        return min(len(code), 2 + (1 if len(code) > 2 else 0))
-    if first == 0xED:
-        return min(len(code), 2)
-    return min(len(code), 1)
+# The ADR 0058 second-experiment logical map (public Sega-mapper shape). CodeWindow semantics: image offset `o` of a window
+# (first, length) is exposed at logical `base + o`, so slot 0 is base 0 exposing offsets 0x0400-0x3FFF of a bank.
+SMS_INVARIANT = (0x0000, 0x0000, 0x0400)  # (base, first offset, length): the first 1 KiB, one invariant image
+SMS_BANK_WINDOWS = ((0x0000, 0x0400, 0x3C00), (0x4000, 0x0000, 0x4000), (0x8000, 0x0000, 0x4000))  # slots 0, 1, 2
+SMS_BANK_SIZE = 0x4000  # 0xC000-0xFFFF is RAM (non-code): no image window covers it
+
+
+def sms_spec(invariant, banks):
+    """Emitter spec text of the SMS-shaped map: image 1 = invariant first 1 KiB, images 2.. = 16 KiB banks each admissible in
+    slots 0/1/2 (window-relative owners). `invariant` is 0x400 bytes, `banks` a list of 0x4000-byte banks."""
+    assert len(invariant) == SMS_INVARIANT[2] and all(len(b) == SMS_BANK_SIZE for b in banks)
+    base, first, length = SMS_INVARIANT
+    lines = ["image 1 invariant\nwindow 1 %X %X %X\nbytes 1 %s\n" % (base, first, length, invariant.hex())]
+    for n, data in enumerate(banks):
+        ident = 2 + n
+        lines.append("image %d banked\n" % ident)
+        for base, first, length in SMS_BANK_WINDOWS:
+            lines.append("window %d %X %X %X\n" % (ident, base, first, length))
+        lines.append("bytes %d %s\n" % (ident, data.hex()))
+    return "".join(lines)
 
 
 def rom_spec(path):
-    """SMS-shaped banked spec from a local ROM image (ephemeral scale check; the path and bytes are never recorded)."""
+    """SMS-shaped spec from a local ROM image (ephemeral scale check; the path and bytes are never recorded)."""
     data = pathlib.Path(path).read_bytes()
-    data += bytes(-len(data) % 0x4000)
-    banks = len(data) // 0x4000
-    lines = ["image 1 invariant\nwindow 1 0 0 400\nbytes 1 %s\n" % data[:0x400].hex()]
-    for bank in range(banks):
-        ident = 2 + bank
-        lines.append("image %d banked\n" % ident)
-        for base in ("4000", "8000", "C000"):
-            lines.append("window %d %s 0 4000\n" % (ident, base))
-        lines.append("bytes %d %s\n" % (ident, data[bank * 0x4000:(bank + 1) * 0x4000].hex()))
-    return "".join(lines), 1, BUDGETS_512K
+    data += bytes(-len(data) % SMS_BANK_SIZE)
+    banks = [data[i:i + SMS_BANK_SIZE] for i in range(0, len(data), SMS_BANK_SIZE)]
+    return sms_spec(data[:SMS_INVARIANT[2]], banks), 1, BUDGETS_512K
 
 
-def shape_spec(shape, cache):
+def shape_spec(shape, pool=None):
     if shape.startswith("rom:"):
         return rom_spec(shape[4:])
     rng = random.Random(88000)
     kind = shape.split("-")[-1] if "-" in shape else shape[:-2]
+    pool = pool if pool is not None else (legal_encoding_pool() if kind == "dense" else None)
+    make = {"dense": lambda n: dense_bytes(rng, n, pool), "random": lambda n: bytes(rng.randrange(256) for _ in range(n)),
+            "zero": lambda n: bytes(n), "ff": lambda n: b"\xff" * n}[kind]
     if shape.endswith("64"):
-        size = 0x10000
-        data = {"dense": lambda: dense_bytes(rng, size, cache), "random": lambda: bytes(rng.randrange(256) for _ in range(size)),
-                "zero": lambda: bytes(size), "ff": lambda: b"\xff" * size}[kind]()
-        return "image 1 invariant\nwindow 1 0 0 10000\nbytes 1 %s\n" % data.hex(), 0, BUDGETS_64K
-    lines = ["image 1 invariant\nwindow 1 0 0 400\nbytes 1 %s\n" % (
-        dense_bytes(rng, 0x400, cache) if kind == "dense" else bytes(rng.randrange(256) for _ in range(0x400))).hex()]
-    for bank in range(32):
-        data = dense_bytes(rng, 0x4000, cache) if kind == "dense" else bytes(rng.randrange(256) for _ in range(0x4000))
-        ident = 2 + bank
-        lines.append("image %d banked\n" % ident)
-        for base in ("4000", "8000", "C000"):
-            lines.append("window %d %s 0 4000\n" % (ident, base))
-        lines.append("bytes %d %s\n" % (ident, data.hex()))
-    return "".join(lines), 1, BUDGETS_512K
+        return "image 1 invariant\nwindow 1 0 0 10000\nbytes 1 %s\n" % make(0x10000).hex(), 0, BUDGETS_64K
+    invariant = make(SMS_INVARIANT[2])
+    return sms_spec(invariant, [make(SMS_BANK_SIZE) for _ in range(32)]), 1, BUDGETS_512K
 
 
 def child_rss_mib(cmd):
@@ -134,13 +125,11 @@ def main():
     parser.add_argument("--opt", default="-O1")
     parser.add_argument("--work")
     parser.add_argument("--json")
-    parser.add_argument("--corpus-cache")
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--skip-j1", action="store_true")
     args = parser.parse_args()
-    cache = pathlib.Path(args.corpus_cache) if args.corpus_cache else sst.default_cache()
     tc = zc.Toolchain(args.cc, args.emitter, None, opt=args.opt)
-    spec, mode, budgets = shape_spec(args.shape, cache)
+    spec, mode, budgets = shape_spec(args.shape)
     with tempfile.TemporaryDirectory() as tmp:
         work = pathlib.Path(args.work) if args.work else pathlib.Path(tmp)
         work.mkdir(parents=True, exist_ok=True)

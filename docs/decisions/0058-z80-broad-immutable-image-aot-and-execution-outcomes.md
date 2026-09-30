@@ -337,27 +337,55 @@ extrapolated. The main TU dominates RSS, and the full parallel run peaked at 1,1
 - Generated-size budgets for large banked ROMs are governed by the linear per-bank figures above. A future emitter
   that factors flag helpers will be smaller than the experiment's fully inline bodies.
 
-## SEG-008-T009 addendum: budgets re-measured with the real lowerings
+## SEG-008-T009 addendum: budgets re-measured with the real lowerings on the corrected SMS map
 
 `tools/z80_static_budget.py` (-O1, same host class, per-process peak RSS by wait4, -j8 and -j1, exact lookup via the generated
 main TU's static lookup, two-run byte-identity). All 64 KiB shapes emit 65,536 full owners, no typed truncation, no unlowered start.
 
-| shape | generated C MiB | exe MiB | j8 / j1 s | compiler RSS MiB | exact lookup ns rnd/seq | budgets |
-| --- | --- | --- | --- | --- | --- | --- |
-| 64K dense (legal encodings with operands) | 46.1 | 14.8 | 9.5 / 56.6 | 249 | 37.8 / 18.6 | all pass |
-| 64K random | 46.1 | 14.8 | 8.2 / 54.4 | 248 | 33.8 / 19.2 | all pass |
-| 64K zero | 36.0 | 10.9 | 5.1 / 33.3 | 254 | 36.2 / 18.5 | all pass |
-| 64K 0xFF | 34.0 | 17.0 | 7.5 / 47.5 | 250 | 37.3 / 18.5 | all pass |
-| 512K SMS-shaped dense, 32 banks, 3 windows, window-relative | 355.7 | 121.4 | 72.7-120.2 / 461-570 | 1,015-1,559 (isolated main TU 1,357) | 44-47 / 24-25 | 6/7 every run; RSS see below |
-| 512K SMS-shaped random | 355.7 | 121.4 | 79.8 / 463.8 | 1,534 | 45.5 / 23.5 | all pass |
-| 512K authorized local SMS image (aggregate only) | 332.0 | 115.7 | 72.9 / 426.5 | 1,553 | 45.1 / 23.4 | RSS 1% over in this run |
+**Correction of the first T009 measurement.** The first re-measurement modelled the SMS-shaped image wrongly: it exposed each
+bank at 0x4000, 0x8000 and **0xC000** and omitted slot 0 (0x0400-0x3FFF), so it treated the RAM region as banked ROM. Its figures
+(compiler RSS 1,015-1,559 MiB) are superseded. The model is now exactly the second experiment's map above, expressed with
+`CodeWindow` semantics (image offset `o` is exposed at `base + o`): the invariant first 1 KiB (base 0, offsets 0-0x3FF), and each
+bank in slot 0 (base 0x0000, offsets 0x0400-0x3FFF), slot 1 (base 0x4000, offsets 0-0x3FFF) and slot 2 (base 0x8000, offsets
+0-0x3FFF); nothing is exposed at 0xC000-0xFFFF. `z80_static_budget_shape_test` pins the map (a negative control shows it rejects
+the old shape). Slot 0 exposing a sub-range exposed a T003 gap: the Z80 emitter required every window of an image to expose the
+same range, contradicting the "a window may expose only a sub-range" decision above. The emitter now plans one owner per (image,
+offset) over the union of the windows' ranges, each window contributing a variant only for the offsets it exposes;
+`sms_*` oracle-checked scenarios cover slot 0/1/2, the invariant end crossing into slot 0 and the RAM region.
 
-- Real lowerings cost about 1.29x the T001 stub-era C per owner at 64K (46.1 vs 35.7 MiB) and 1.10x at 512K (355.7 vs 323.8 MiB);
-  every size, time and lookup budget still passes with at least 1.4x margin (executable at 512K: 2.1x margin; -j1 at 512K:
-  3.1x). The dispatcher round trip (image query + lookup + one owner step, not the budgeted quantity) is 100-133 ns at 64K.
-- **RSS.** The peak process is the main TU (entry table plus all-owner declarations, about 72 MiB of C): 1,357 MiB when compiled
-  alone at -O1, 1,051 MiB at -O0. Under concurrent -j8 the host's per-process accounting varied between 1,015 and 1,559 MiB
-  across repeated runs of the same input; two of five 512K runs read 1-2% above the pre-declared 1,536 MiB. No 64K shape is
-  near it. This is a whole-program main-TU property (not a per-form one) that grows with window instances served; no
-  per-form exception applies. If SEG-009's mapper needs more headroom, the generic fix is to shard the entry table into the owner
-  TUs so the main TU only declares shard lookups. It is recorded here, not implemented.
+**Corrected result, before any fix.** With the flat entry table the corrected 512 KiB shapes measured (dense / random):
+generated C 360.2 / 355.7 MiB, executable 122.9 / 121.4 MiB, -j8 99.9 / 83.4 s, -j1 504.4 / 472.5 s, lookup 46.7 / 47.0 ns, and compiler
+peak RSS **1,388 / 1,549 MiB against the 1,536 MiB budget: random exceeded it by 0.9%**. The peak process was the main TU (the
+whole entry table plus all 525,312 owner declarations), which grows linearly with the owner count.
+
+**Fix (generic).** `emit_compiled_entry_table_chunked` (next to the flat `emit_compiled_entry_table`, which is unchanged) splits
+the same sorted bindings deterministically into consecutive chunks of at most 65,536 entries. Each chunk is a unit of its own
+TU family (through the existing `TranslationUnitSharder`) with its own owner declarations, tables and exact binary search; the
+main TU keeps only a sorted table of each chunk's first key and one exact binary search over it. Lookup semantics are exact
+(exact key or NULL); the output is byte-identical across runs; no dense pointer table and no Z80-specific dispatcher. Tables with
+at most 65,536 entries stay flat (every 64 KiB image and every M68K/Genesis image is unchanged). The Z80 emitter enables it with
+`EmitOptions::entry_chunk_entries` (default 65,536; a test hook lowers it so `sms_map` runs through the chunk path against the
+oracle, including entries on both sides of a chunk boundary).
+
+**Final figures** (units: MiB, seconds, ns; RSS = max compiler process over -j8 and -j1):
+
+| shape | generated C | exe | -j8 / -j1 | compiler RSS | exact lookup rnd / seq | budgets |
+| --- | --- | --- | --- | --- | --- | --- |
+| 64K dense (legal instructions with operands) | 47.1 | 15.0 | 10.3 / 59.0 | 248 | 39.4 / 19.4 | all pass |
+| 64K random | 46.1 | 14.8 | 9.6 / 57.8 | 250 | 36.4 / 18.6 | all pass |
+| 64K zero | 36.0 | 10.9 | 5.7 / 35.8 | 245 | 34.4 / 19.5 | all pass |
+| 64K 0xFF | 34.0 | 17.0 | 8.2 / 51.7 | 244 | 36.2 / 19.8 | all pass |
+| 512K SMS map, dense, 32 banks (chunked entry table) | 359.8 | 121.9 | 91.6 / 497.7 | 1051 | 68.2 / 22.8 | all pass |
+| 512K SMS map, random (chunked entry table) | 355.2 | 120.4 | 94.4 / 508.1 | 906 | 66.8 / 21.4 | all pass |
+| 512K authorized local SMS image (aggregate only; chunked) | 331.6 | 114.7 | 67.4 / 411.5 | 1005 | 65.7 / 21.6 | all pass |
+
+The 64K rows were measured before the entry-chunk change; images of at most 65,536 owners emit byte-identical output under it.
+
+Budgets (pre-declared, unchanged): 64K: C <= 128, exe <= 48, -j8 <= 90 s, -j1 <= 300 s, RSS <= 1,536, lookup <= 100 ns; 512K: C <= 1,024,
+exe <= 256, -j8 <= 300 s, -j1 <= 1,800 s, RSS <= 1,536, lookup <= 100 ns. All pass; the two-run byte-identity holds for every shape.
+
+- Real lowerings cost about 1.3x the T001 stub-era C per owner at 64K and 1.1x at 512K; every size, time and lookup budget passes
+  with at least 1.4x margin (executable at 512K 2.1x; -j1 at 512K 3.5x).
+- The chunk directory adds one more binary search, so the 512K exact lookup is about 67 ns (was 47 ns flat), still inside 100 ns.
+  Peak RSS at 512K is now 906-1,051 MiB (was 1,388-1,549 flat) because no TU carries the whole table.
+- The dispatcher round trip (image query + lookup + one owner step, not the budgeted quantity) is 130-300 ns.

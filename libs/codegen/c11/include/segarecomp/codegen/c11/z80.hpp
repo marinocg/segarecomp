@@ -65,6 +65,10 @@ struct EmitOptions {
   std::string stem = "z80_image";
   std::string runtime_include = "segarecomp/codegen/c11/runtime/z80_runtime.h";
   bool record_owners = false;  // fill EmitResult::owners (large for full images)
+  // Entry-table chunk size: an image with more owners than this splits its exact-lookup table into per-TU chunks (bounded
+  // TU size and compiler memory, ADR 0058). The default only matters for images above 64 Ki owners; tests lower it to exercise
+  // the chunk path on a small image.
+  std::size_t entry_chunk_entries = 65536;
 };
 
 struct EmitStats {

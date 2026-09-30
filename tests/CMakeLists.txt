@@ -1134,3 +1134,8 @@ set_property(TEST z80_generated_pipeline_test z80_conformance_harness_test z80_c
   z80_secondary_oracle_test z80_capability_ratchet_test z80_generated_pipeline_test_fullscale
   z80_conformance_oracle_test_fullscale
   APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
+# SEG-008-T009: the static-budget SMS-shaped scale model must be the ADR 0058 logical map (hermetic; emits a small image).
+add_test(NAME z80_static_budget_shape_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_static_budget_shape_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_static_budget_shape_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST z80_static_budget_shape_test APPEND PROPERTY LABELS full)

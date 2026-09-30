@@ -53,7 +53,7 @@ invariant-window owner to an emitted invariant-window successor; base-relative t
 
 Output is sharded through `translation_units.hpp` with the packed dense key (`image ordinal x length + offset`, page
 shift 8); the shared header carries only the ABI include (no owner declarations: bound successors are declared in block
-scope, and the entry-table/dispatcher main TU declares each owner once). Output is byte-identical across runs.
+scope, and the entry-table/dispatcher main TU declares each owner once; above 65,536 owners the entry table is chunked into `entry` TUs that declare their own owners, see ADR 0060). Output is byte-identical across runs.
 
 ## Vector schema (`z80_conformance_common.h`)
 
@@ -129,7 +129,7 @@ All three are local, opt-in and never part of CI. Inputs live only in the ignore
 | `tools/z80_sst_corpus.py fetch` | takes a bounded HTTP-Range prefix (default 96 KiB, the leading complete cases, about 120 of the 1,000 per file) of every pinned SingleStepTests/z80 per-opcode file (revision in ADR 0057) into `<checkout>/sst-cache` (or `SEGARECOMP_Z80_SST_CACHE`). It never downloads a file in full and commits nothing. |
 | `tools/z80_sst_corpus.py run --emitter E [--oracle] [--secondary]` | converts each case to the T003 vector text, places the case's own instruction bytes in a banked, window-relative code image at its real PC (per-vector code-image map), runs the generated-native runner (and redcode / kosarev on the same text) and compares with the corpus final state: registers, WZ, Q, IFF, IM, R, the EI and LD A,I markers, RAM, port transactions and T-states (= corpus cycle count). Output is aggregated per opcode file and field; only non-reconstructable aggregates are printed. |
 | `tests/z80_oracle/z80_conformance_kosarev.cpp`, `tools/z80_conformance.py --secondary` | the secondary independent oracle (kosarev/z80 at the ADR 0057 pin, header-only, built with `c++ -std=c++17`). Unmodelled state (Q, LD A,I marker, prefix-run, NMI latch) is not compared; the ADR deviation mask lives in `SECONDARY_MASK` / `SECONDARY_FORM_MASK`. Anything else that differs is unexplained and fails. |
-| `tools/z80_static_budget.py` | measures the ADR 0058 static-code budgets with the real lowerings on full-size synthetic images (64 KiB invariant; 512 KiB SMS-shaped banked with window-relative owners): generated C size, -j8 and -j1 compile time, per-process peak RSS, executable size, exact lookup (the bench includes the generated main TU to call its static lookup) and byte-identical re-emission. |
+| `tools/z80_static_budget.py` | measures the ADR 0058 static-code budgets with the real lowerings on full-size synthetic images (64 KiB invariant; 512 KiB in the ADR 0058 SMS-shaped logical map: invariant first 1 KiB + banks admissible in slot 0 = 0x0400-0x3FFF, slot 1, slot 2, window-relative owners; `z80_static_budget_shape_test` pins the map): generated C size, -j8 and -j1 compile time, per-process peak RSS, executable size, exact lookup (the bench includes the generated main TU to call its static lookup) and byte-identical re-emission. |
 
 Classified corpus disagreement (the only one): the corpus `ei` field is the EI marker only, and it is 0 after every ED
 RETN/RETI encoding, while the contract (section 4.2) and the pinned redcode oracle defer a maskable INT by one boundary when
