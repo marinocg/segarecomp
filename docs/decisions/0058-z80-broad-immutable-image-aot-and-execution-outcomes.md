@@ -375,9 +375,9 @@ oracle, including entries on both sides of a chunk boundary).
 | 64K random | 46.1 | 14.8 | 9.6 / 57.8 | 250 | 36.4 / 18.6 | all pass |
 | 64K zero | 36.0 | 10.9 | 5.7 / 35.8 | 245 | 34.4 / 19.5 | all pass |
 | 64K 0xFF | 34.0 | 17.0 | 8.2 / 51.7 | 244 | 36.2 / 19.8 | all pass |
-| 512K SMS map, dense, 32 banks (chunked entry table) | 359.8 | 121.9 | 91.6 / 497.7 | 1051 | 68.2 / 22.8 | all pass |
-| 512K SMS map, random (chunked entry table) | 355.2 | 120.4 | 94.4 / 508.1 | 906 | 66.8 / 21.4 | all pass |
-| 512K authorized local SMS image (aggregate only; chunked) | 331.6 | 114.7 | 67.4 / 411.5 | 1005 | 65.7 / 21.6 | all pass |
+| 512K SMS map, dense, 32 banks (chunked entry table) | 368.0 | 123.3 | 125.0 / 564.7 | 868 | 65.0 / 24.2 | all pass |
+| 512K SMS map, random (chunked entry table) | 363.4 | 121.8 | 86.8 / 494.7 | 921 | 66.3 / 21.3 | all pass |
+| 512K authorized local SMS image (aggregate only; chunked) | 339.6 | 116.1 | 72.1 / 453.2 | 876 | 66.4 / 21.6 | all pass |
 
 The 64K rows were measured before the entry-chunk change; images of at most 65,536 owners emit byte-identical output under it.
 
@@ -385,7 +385,7 @@ Budgets (pre-declared, unchanged): 64K: C <= 128, exe <= 48, -j8 <= 90 s, -j1 <=
 exe <= 256, -j8 <= 300 s, -j1 <= 1,800 s, RSS <= 1,536, lookup <= 100 ns. All pass; the two-run byte-identity holds for every shape.
 
 - Real lowerings cost about 1.3x the T001 stub-era C per owner at 64K and 1.1x at 512K; every size, time and lookup budget passes
-  with at least 1.4x margin (executable at 512K 2.1x; -j1 at 512K 3.5x).
+  with at least 1.4x margin (executable at 512K 2.1x; -j1 at 512K 3.2x; -j8 at 512K 2.4x; RSS 1.7x; lookup 1.5x). The table rows are the final code (the last emitter change, a base check on owners exposed by only some window bases, grew 512K C by about 2%).
 - The chunk directory adds one more binary search, so the 512K exact lookup is about 67 ns (was 47 ns flat), still inside 100 ns.
-  Peak RSS at 512K is now 906-1,051 MiB (was 1,388-1,549 flat), consistent with no TU carrying the whole table (the lookup-bench link, which still includes the main TU, fell from about 1.2 GiB to about 0.8 GiB). Single runs: compiler RSS varied by hundreds of MiB between repeated identical inputs in the earlier measurement, so treat the figures as a range.
+  Peak RSS at 512K is now 868-921 MiB (was 1,388-1,549 flat), consistent with no TU carrying the whole table (the lookup-bench link, which still includes the main TU, fell from about 1.2 GiB to about 0.8 GiB). Single runs: compiler RSS varied by hundreds of MiB between repeated identical inputs in the earlier measurement, so treat the figures as a range.
 - The dispatcher round trip (image query + lookup + one owner step, not the budgeted quantity) is about 100-300 ns.
