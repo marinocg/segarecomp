@@ -1,0 +1,941 @@
+{
+ "schema": 1,
+ "images": {
+  "ctrl64": {
+   "images": [
+    {
+     "identity": 1,
+     "kind": "invariant",
+     "windows": [
+      [
+       "0000",
+       "0000",
+       "10000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "0100",
+       "E1E9"
+      ],
+      [
+       "0200",
+       "C5D5E1"
+      ],
+      [
+       "0210",
+       "E9"
+      ],
+      [
+       "0400",
+       "000510050B0A20050D0C30050006"
+      ],
+      [
+       "0500",
+       "E1C1E9"
+      ],
+      [
+       "0510",
+       "DDE1D1DDE9"
+      ],
+      [
+       "0520",
+       "FDE1FDE5C9"
+      ],
+      [
+       "0530",
+       "E1C36105"
+      ],
+      [
+       "0560",
+       "C2E900"
+      ],
+      [
+       "0000",
+       "02"
+      ],
+      [
+       "FFFE",
+       "CD18"
+      ]
+     ]
+    }
+   ]
+  },
+  "ctrl_images": {
+   "images": [
+    {
+     "identity": 1,
+     "kind": "invariant",
+     "windows": [
+      [
+       "0000",
+       "0000",
+       "4000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "0000",
+       "E1E5C9"
+      ],
+      [
+       "0100",
+       "CD0040"
+      ],
+      [
+       "0200",
+       "E9"
+      ]
+     ],
+     "size": 16384
+    },
+    {
+     "identity": 2,
+     "kind": "banked",
+     "windows": [
+      [
+       "4000",
+       "0000",
+       "4000"
+      ],
+      [
+       "8000",
+       "0000",
+       "4000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "0000",
+       "C7"
+      ]
+     ],
+     "size": 16384
+    },
+    {
+     "identity": 3,
+     "kind": "banked",
+     "windows": [
+      [
+       "4000",
+       "0000",
+       "4000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "0000",
+       "D9C9"
+      ]
+     ],
+     "size": 16384
+    },
+    {
+     "identity": 4,
+     "kind": "banked",
+     "windows": [
+      [
+       "4000",
+       "0000",
+       "4000"
+      ]
+     ],
+     "fill": "00",
+     "patch": [
+      [
+       "0000",
+       "08C9"
+      ]
+     ],
+     "size": 16384
+    }
+   ]
+  }
+ },
+ "scenarios": [
+  {
+   "name": "table_dispatch_hl_ix_iy_ret_mid_instruction",
+   "image": "ctrl64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0100",
+    "sp": "0400"
+   },
+   "expect": [
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {},
+    {
+     "out": "deadline",
+     "pc": "0602",
+     "sp": "040E",
+     "h": "06",
+     "l": "00",
+     "b": "0A",
+     "c": "0B",
+     "d": "0C",
+     "e": "0D",
+     "ix": "0520",
+     "iy": "0530"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "wrap_call_operand_and_return_address",
+   "image": "ctrl64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "FFFE",
+    "sp": "8000"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "pc": "0218",
+     "sp": "7FFE",
+     "t": 17
+    },
+    {
+     "out": "deadline",
+     "pc": "0219"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "wrap_jr_target_from_ffff",
+   "image": "ctrl64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "FFFF"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "pc": "0003",
+     "wz": "0003",
+     "t": 12
+    },
+    {
+     "out": "deadline",
+     "pc": "0004"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "jp_hl_into_ffff_then_wrap_jr",
+   "image": "ctrl64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0210",
+    "h": "FF",
+    "l": "FF"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "pc": "FFFF",
+     "t": 4
+    },
+    {
+     "out": "deadline",
+     "pc": "0003"
+    },
+    {
+     "out": "deadline",
+     "pc": "0004"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "stack_wrap_push_pop",
+   "image": "ctrl64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0200",
+    "sp": "0001",
+    "b": "12",
+    "c": "34",
+    "d": "56",
+    "e": "78"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "sp": "FFFF",
+     "t": 11
+    },
+    {
+     "out": "deadline",
+     "sp": "FFFD"
+    },
+    {
+     "out": "deadline",
+     "h": "56",
+     "l": "78",
+     "sp": "FFFF",
+     "pc": "0203"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "stack_in_image_region",
+   "image": "ctrl64",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0200",
+    "sp": "0300",
+    "b": "12",
+    "c": "34",
+    "d": "56",
+    "e": "78"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "sp": "02FE"
+    },
+    {
+     "out": "deadline",
+     "sp": "02FC"
+    },
+    {
+     "out": "deadline",
+     "h": "56",
+     "l": "78",
+     "sp": "02FE",
+     "pc": "0203"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ]
+  },
+  {
+   "name": "reloc_rst_ret_window_a",
+   "image": "ctrl_images",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "4000",
+    "sp": "8000"
+   },
+   "expect": [
+    {},
+    {},
+    {},
+    {},
+    {
+     "out": "deadline",
+     "pc": "4002",
+     "h": "40",
+     "l": "01",
+     "sp": "8000"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ],
+    [
+     2,
+     "4000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "reloc_rst_ret_window_b",
+   "image": "ctrl_images",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "8000",
+    "sp": "8000"
+   },
+   "expect": [
+    {},
+    {},
+    {},
+    {},
+    {
+     "out": "deadline",
+     "pc": "8002",
+     "h": "80",
+     "l": "01",
+     "sp": "8000"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ],
+    [
+     2,
+     "8000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "8000",
+      "C000",
+      2,
+      "8000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "call_into_bank_c_exx",
+   "image": "ctrl_images",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0100",
+    "sp": "8000",
+    "b": "11",
+    "b2": "22"
+   },
+   "expect": [
+    {},
+    {},
+    {},
+    {
+     "out": "deadline",
+     "pc": "0104",
+     "b": "22",
+     "b2": "11",
+     "sp": "8000"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ],
+    [
+     3,
+     "4000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      3,
+      "4000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "call_into_bank_d_ex_af",
+   "image": "ctrl_images",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0100",
+    "sp": "8000",
+    "a": "11",
+    "a2": "22"
+   },
+   "expect": [
+    {},
+    {},
+    {},
+    {
+     "out": "deadline",
+     "pc": "0104",
+     "a": "22",
+     "a2": "11",
+     "sp": "8000"
+    }
+   ],
+   "load": [
+    [
+     1,
+     "0000"
+    ],
+    [
+     4,
+     "4000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      4,
+      "4000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "remap_between_call_and_return",
+   "image": "ctrl_images",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "map": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "map": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1,
+     "map": 1
+    }
+   ],
+   "state": {
+    "pc": "0100",
+    "sp": "8000",
+    "a": "11",
+    "a2": "22",
+    "b": "33",
+    "b2": "44"
+   },
+   "expect": [
+    {},
+    {},
+    {},
+    {
+     "out": "deadline",
+     "pc": "0104",
+     "a": "22",
+     "a2": "11",
+     "b": "33",
+     "b2": "44"
+    }
+   ],
+   "oracle": false,
+   "load": [
+    [
+     1,
+     "0000"
+    ],
+    [
+     3,
+     "4000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      3,
+      "4000"
+     ]
+    ],
+    "1": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      4,
+      "4000"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "jp_hl_target_unmapped_fails_closed",
+   "image": "ctrl_images",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0200",
+    "h": "80",
+    "l": "00"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "pc": "8000"
+    },
+    {
+     "out": "mutable_code",
+     "pc": "8000"
+    }
+   ],
+   "oracle": false,
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ]
+    ]
+   }
+  },
+  {
+   "name": "jp_hl_target_not_emitted_fails_closed",
+   "image": "ctrl_images",
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1
+    },
+    {
+     "mode": "i",
+     "budget": 1
+    }
+   ],
+   "state": {
+    "pc": "0200",
+    "h": "81",
+    "l": "00"
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "pc": "8100"
+    },
+    {
+     "out": "no_owner",
+     "pc": "8100"
+    }
+   ],
+   "oracle": false,
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "4000",
+      1,
+      "0"
+     ],
+     [
+      "8000",
+      "C000",
+      3,
+      "4000"
+     ]
+    ]
+   }
+  }
+ ]
+}

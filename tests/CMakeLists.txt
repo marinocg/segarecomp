@@ -1000,6 +1000,19 @@ set_property(TEST z80_legal_forms_test z80_oracle_adapter_smoke_test z80_legal_f
 set_property(TEST z80_legal_forms_test z80_oracle_adapter_smoke_test z80_legal_forms_oracle_crosscheck_test
   APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
+# SEG-008-T002: Z80 CPU library decode tests, per-byte capability probe and coverage ratchet.
+add_executable(cpu_z80_decode_tests cpu_z80_decode_test.cpp)
+target_link_libraries(cpu_z80_decode_tests PRIVATE segarecomp::cpu_z80 segarecomp::base)
+segarecomp_enable_warnings(cpu_z80_decode_tests)
+add_test(NAME cpu_z80_decode_tests COMMAND cpu_z80_decode_tests)
+add_executable(z80_capability_probe tools/z80_capability_probe.cpp)
+target_link_libraries(z80_capability_probe PRIVATE segarecomp::cpu_z80)
+segarecomp_enable_warnings(z80_capability_probe)
+# (the T003 stages also need the lowering probe, the image emitter and a C compiler; targets defined further below)
+add_test(NAME cpu_z80_dependency_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/cpu_z80_dependency_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST cpu_z80_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
 # SEG-020-T005: first-divergence diagnosis (generated M68k boundaries vs pinned Musashi).
 add_test(NAME m68k_first_divergence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/m68k_first_divergence_test.py
@@ -1052,3 +1065,77 @@ set_property(TEST m68k_conformance_harness_test APPEND PROPERTY ENVIRONMENT_MODI
 set_property(TEST m68k_capability_ratchet_test m68k_capability_coverage_unit_test APPEND PROPERTY LABELS full fast)
 set_property(TEST m68k_capability_coverage_unit_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST m68k_capability_ratchet_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-008-T003: Z80 generated-native pipeline (codegen_c11_z80), runtime ABI and differential harness.
+add_executable(z80_image_emitter tools/z80_image_emitter.cpp)
+target_link_libraries(z80_image_emitter PRIVATE segarecomp::codegen_c11_z80)
+segarecomp_enable_warnings(z80_image_emitter)
+add_executable(z80_lowering_probe tools/z80_lowering_probe.cpp)
+target_link_libraries(z80_lowering_probe PRIVATE segarecomp::codegen_c11_z80)
+segarecomp_enable_warnings(z80_lowering_probe)
+add_test(NAME z80_capability_ratchet_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_capability_ratchet_test.py $<TARGET_FILE:z80_capability_probe> ${PROJECT_SOURCE_DIR}
+  $<TARGET_FILE:z80_lowering_probe> $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER})
+set_property(TEST z80_capability_ratchet_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+add_test(NAME codegen_c11_z80_dependency_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/codegen_c11_z80_dependency_test.py ${PROJECT_SOURCE_DIR})
+# Generated-native pipeline (strict-C11 builds of 64 KiB images: the slowest Z80 test, `full` only) and harness self-tests.
+add_test(NAME z80_generated_pipeline_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_generated_pipeline_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME z80_conformance_harness_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_conformance_harness_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# Oracle side (ADR 0057): skips cleanly unless SEGARECOMP_Z80_ORACLE_CHECKOUT names the pinned clones.
+add_test(NAME z80_conformance_oracle_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_conformance_oracle_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST codegen_c11_z80_dependency_test z80_generated_pipeline_test z80_conformance_harness_test
+  z80_conformance_oracle_test z80_capability_ratchet_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-008-T002 tests were registered after the label loop above and so carried no tier label: add them here.
+set_property(TEST cpu_z80_decode_tests z80_generated_pipeline_test z80_conformance_oracle_test APPEND PROPERTY LABELS full)
+set_property(TEST cpu_z80_dependency_test z80_capability_ratchet_test codegen_c11_z80_dependency_test
+  APPEND PROPERTY LABELS full fast)
+# The harness self-test compiles several generated images and expands ~90k row vectors: `full` only (CI runs it there).
+set_property(TEST z80_conformance_harness_test APPEND PROPERTY LABELS full)
+# SEG-008-T008: per-form/per-outcome T-state validation and the deadline/resume property (oracle comparison skips cleanly).
+add_test(NAME z80_timing_closure_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_timing_closure_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_timing_closure_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST z80_timing_closure_test APPEND PROPERTY LABELS full)
+# SEG-008-T005: control-flow/stack/dispatch scenarios (oracle comparison skips cleanly without the pinned checkout).
+add_test(NAME z80_control_stack_dispatch_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_control_stack_dispatch_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_control_stack_dispatch_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST z80_control_stack_dispatch_test APPEND PROPERTY LABELS full)
+# SEG-008-T004: independent-model flag/result check of the data_alu lowering (hermetic, no oracle).
+add_test(NAME z80_data_alu_flags_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_data_alu_flags_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_data_alu_flags_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST z80_data_alu_flags_test APPEND PROPERTY LABELS full)
+# SEG-008-T009: SingleStepTests/z80 corpus driver (hermetic synthetic cache; oracle part skips without the checkout) and
+# the secondary independent oracle (skips without SEGARECOMP_Z80_ORACLE_CHECKOUT holding the pinned kosarev/z80 clone).
+add_test(NAME z80_sst_corpus_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_sst_corpus_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME z80_secondary_oracle_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_secondary_oracle_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_sst_corpus_test z80_secondary_oracle_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST z80_sst_corpus_test z80_secondary_oracle_test APPEND PROPERTY LABELS full)
+# Full-scale (64 KiB adversarial images) variants of the heaviest generated-native tests. The hermetic tiers compile a
+# reduced but path-equivalent image set (tools/z80_conformance.py, `"scale": "full"` images); these run the rest.
+foreach(_z80_full z80_generated_pipeline_test z80_conformance_oracle_test)
+  add_test(NAME ${_z80_full}_fullscale COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/${_z80_full}.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+  set_property(TEST ${_z80_full}_fullscale APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  set_property(TEST ${_z80_full}_fullscale APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_FULL_SCALE=1")
+  set_property(TEST ${_z80_full}_fullscale APPEND PROPERTY LABELS extended)
+endforeach()
+# Share linked generated programs between the Z80 test processes of this build tree (content-addressed; see
+# tools/z80_conformance.py `Toolchain`): the same 64 KiB image is compiled once instead of once per test.
+set_property(TEST z80_generated_pipeline_test z80_conformance_harness_test z80_conformance_oracle_test
+  z80_timing_closure_test z80_control_stack_dispatch_test z80_data_alu_flags_test z80_sst_corpus_test
+  z80_secondary_oracle_test z80_capability_ratchet_test z80_generated_pipeline_test_fullscale
+  z80_conformance_oracle_test_fullscale
+  APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
+# SEG-008-T009: the static-budget SMS-shaped scale model must be the ADR 0058 logical map (hermetic; emits a small image).
+add_test(NAME z80_static_budget_shape_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_static_budget_shape_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_static_budget_shape_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST z80_static_budget_shape_test APPEND PROPERTY LABELS full)

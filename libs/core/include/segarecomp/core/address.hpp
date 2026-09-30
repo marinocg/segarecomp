@@ -68,9 +68,9 @@ struct ByteLength {
   std::uint32_t value{};
 };
 
-// Currently one-value (mc68000); grows to z80/sh2 later without becoming a
+// mc68000 and z80 (SEG-008, additive; ADR 0059); grows to sh2 later without becoming a
 // new type, exactly like TargetAddressSpace above.
-enum class CpuVariant { mc68000 };
+enum class CpuVariant { mc68000, z80 };
 
 // A generic "this program-address range came from this image-offset range"
 // fact. See this header's own doc comment above for why it lives here

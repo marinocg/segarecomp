@@ -259,3 +259,6 @@ Defined in ADR 0058:
   several windows;
 - exact dispatch for runtime-selected targets;
 - the split between resumable outcomes (`deadline`, `halted`, `prefix_lock`) and fail-closed outcomes.
+
+The concrete runtime ABI (`libs/codegen/c11/include/segarecomp/codegen/c11/runtime/z80_runtime.h`), the owner emission
+shape and the differential harness are recorded in ADR 0060 and `docs/testing/z80-conformance-harness.md`.

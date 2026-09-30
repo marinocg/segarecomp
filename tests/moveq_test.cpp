@@ -59,7 +59,7 @@ void test_rejection_precedence() {
 }
 void test_source_contract_precedes_byte_classification() {
   const std::vector<std::uint8_t> image{0x4AU, 0xFCU};
-  const auto invalid_cpu = static_cast<segarecomp::CpuVariant>(1);
+  const auto invalid_cpu = static_cast<segarecomp::CpuVariant>(2);
   const auto invalid_address_space = static_cast<segarecomp::TargetAddressSpace>(1);
   const auto wrong_cpu = std::get<segarecomp::RejectedMoveq>(segarecomp::decode_moveq(
       image, source(0x101U, 0U, invalid_cpu, invalid_address_space)));

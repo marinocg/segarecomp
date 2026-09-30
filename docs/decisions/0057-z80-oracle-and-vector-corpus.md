@@ -161,3 +161,20 @@ The specification remains UM0080, Young, [MEMPTR], [Rak] and [Banks], with confl
 6. **Maskable INT deferred after `RETI`/`RETN` that change IFF1** (Weissflog 2021; Sainz de Baranda 2022). The
    evidence is netlist and emulator research, implemented by the pinned oracle. Not yet cross-checked against
    kosarev. ADR 0056 adopts it; T007 targets it.
+
+## SEG-008-T009 addendum: corpus and secondary-oracle outcome
+
+- **Secondary oracle wired.** kosarev/z80 at the pin runs the identical vector text (`tests/z80_oracle/z80_conformance_kosarev.cpp`,
+  `tools/z80_conformance.py --secondary`). Over all 45,948 synthetic form vectors of the 261 forms, the only differences from the
+  generated side are inside the committed mask: SCF/CCF flags, INI/IND/INIR/INDR/OTIR/OTDR flags and MEMPTR, repeating
+  LDxR/CPxR flags and MEMPTR, and the RETI/RETN deferral bit (kosarev models none). No IM0 vector differs.
+  The mask is exact per form (`SECONDARY_FORM_MASK`); anything else is unexplained and fails. Item 6 above is thus
+  cross-checked as a kosarev *non*-model, not as agreement; it stays netlist/emulator evidence.
+- **Corpus at the pin, sampled.** `tools/z80_sst_corpus.py fetch` takes a 96 KiB Range prefix per file (all 1,604 files,
+  190,430 cases, about 150 MB in ignored `.tools/`; no file downloaded in full, so the "no bulk fetch" rule holds). Result:
+  generated-native 0 disagreements outside one classified item, redcode 0, kosarev 0 outside the mask
+  (SCF/CCF 300 cases in 6 files, block I/O 596 in 6, repeating block 272 in 4). The classified item: the corpus `ei` field
+  is the EI marker only and is 0 after RETN/RETI, so the `deferral` field is skipped for the eight ED RETN/RETI files
+  (424 cases); all other fields of those files still compare.
+- zexdoc/zexall: not run. No local image and no CP/M shim exist, the suites are GPL and would need a shim in the
+  product tree; the corpus plus the secondary oracle cover the documented and undocumented flag surface they test.

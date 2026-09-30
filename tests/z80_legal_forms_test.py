@@ -20,6 +20,8 @@ FORBIDDEN_IN_DATASET_SIDE = ("libs/cpu", "cpu/z80", "z80_decode", "codegen_c11_z
                              "redcode", "floooh", "singlesteptests")
 FORBIDDEN_IN_PRODUCTION = ("z80_legal_forms", "z80-legal-forms")
 PRODUCTION_DIRS = ("libs", "platforms", "apps")
+# Test-side measurement tools that legitimately consume the dataset (the ratchet test guards their independence).
+MEASUREMENT_TOOLS = ("z80_capability_coverage.py", "z80_conformance.py")
 PRODUCTION_FILES = ("CMakeLists.txt", "CMakePresets.json")
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".h", ".hpp", ".txt", ".cmake", ".py", ".json", ".in"}
 
@@ -93,7 +95,7 @@ def test_independence():
     hits = scan_tree_for(ROOT, FORBIDDEN_IN_PRODUCTION, PRODUCTION_DIRS, PRODUCTION_FILES)
     check(not hits, "production references the test-side dataset/tool: %r" % hits[:5])
     for p in (ROOT / "tools").glob("*"):
-        if p.is_file() and p != TOOL and p.suffix in SOURCE_SUFFIXES:
+        if p.is_file() and p != TOOL and p.name not in MEASUREMENT_TOOLS and p.suffix in SOURCE_SUFFIXES:
             text = p.read_text(errors="replace").lower()
             check(not any(t in text for t in FORBIDDEN_IN_PRODUCTION), "product tool %s consumes the dataset" % p.name)
 

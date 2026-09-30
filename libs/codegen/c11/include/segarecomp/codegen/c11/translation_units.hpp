@@ -72,15 +72,19 @@ void shard_declare(std::ostream &out, std::string_view declaration);
 // trailing ';' (e.g. "GenesisControlTransfer f(GenesisRuntime *runtime)"). It is published in the
 // shared header and, if the unit text defines `static <declaration>`, that `static ` is dropped so the
 // definition has external linkage. Units may not nest.
-void shard_begin_unit(std::ostream &out, std::string_view family, std::uint64_t key, std::string_view declaration);
+// `publish_declaration = false` keeps the declaration out of the shared header (the unit is then referenced only by
+// declarations the emitter itself writes into the translation units that need it).
+void shard_begin_unit(std::ostream &out, std::string_view family, std::uint64_t key, std::string_view declaration,
+                      bool publish_declaration = true);
 void shard_end_unit(std::ostream &out);
 
 // Scope form of begin/end so early returns and `continue` cannot leave a unit open.
 class ShardUnitScope {
  public:
-  ShardUnitScope(std::ostream &out, std::string_view family, std::uint64_t key, std::string_view declaration)
+  ShardUnitScope(std::ostream &out, std::string_view family, std::uint64_t key, std::string_view declaration,
+                 bool publish_declaration = true)
       : out_(out), active_(sharding_active(out)) {
-    if (active_) shard_begin_unit(out, family, key, declaration);
+    if (active_) shard_begin_unit(out, family, key, declaration, publish_declaration);
   }
   ~ShardUnitScope() { if (active_) shard_end_unit(out_); }
   ShardUnitScope(const ShardUnitScope &) = delete;

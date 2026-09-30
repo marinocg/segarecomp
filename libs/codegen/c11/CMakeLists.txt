@@ -18,3 +18,14 @@ add_library(segarecomp_codegen_c11_genesis src/frontend.cpp src/genesis.cpp src/
 add_library(segarecomp::codegen_c11_genesis ALIAS segarecomp_codegen_c11_genesis)
 target_link_libraries(segarecomp_codegen_c11_genesis PUBLIC segarecomp::codegen_c11_m68k segarecomp::machine_genesis segarecomp::recompiler)
 segarecomp_enable_warnings(segarecomp_codegen_c11_genesis)
+
+# Z80 lowering (SEG-008-T003, ADR 0059): sibling of codegen_c11_m68k; common C11 support + cpu_z80 only, no M68k,
+# Genesis or platform dependency. The generated-code runtime ABI is the plain C header
+# include/segarecomp/codegen/c11/runtime/z80_runtime.h. Lowering rows live one family per file.
+add_library(segarecomp_codegen_c11_z80
+  src/z80.cpp src/z80_lowering.cpp
+  src/z80_lower_data_alu.cpp src/z80_lower_control_stack.cpp src/z80_lower_cb_bit_prefix.cpp
+  src/z80_lower_ed_io_interrupt.cpp)
+add_library(segarecomp::codegen_c11_z80 ALIAS segarecomp_codegen_c11_z80)
+target_link_libraries(segarecomp_codegen_c11_z80 PUBLIC segarecomp::codegen_c11 segarecomp::cpu_z80)
+segarecomp_enable_warnings(segarecomp_codegen_c11_z80)

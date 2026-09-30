@@ -63,7 +63,8 @@ jobs:
         run: ctest --preset fast
       - name: Full hermetic tests
         # Run without the developer preset's stop-on-failure so CI reports every failing test.
-        run: ctest --test-dir build/dev -L "^full$" -j 4 --output-on-failure --no-tests=error
+        # `fast` is a subset of `full` and already ran above: run only the remainder instead of every fast test twice.
+        run: ctest --test-dir build/dev -L "^full$" -LE "^fast$" -j 4 --output-on-failure --no-tests=error
 
   sdl3-viewer:
     # Save Actions quota: draft PRs do not run the matrix (pushes to main always do).

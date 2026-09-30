@@ -60,7 +60,7 @@ class ShardBuffer final : public std::streambuf {
   void declare(std::string_view declaration) {
     if (header_ != nullptr) *header_ << declaration << ";\n";
   }
-  void begin_unit(std::string_view family, std::uint64_t key, std::string_view declaration) {
+  void begin_unit(std::string_view family, std::uint64_t key, std::string_view declaration, bool publish) {
     if (unit_open_ || in_header_) { fail("nested or misplaced translation unit"); return; }
     const auto found = std::ranges::find_if(families_, [&](const auto &f) { return f.name == family; });
     if (found == families_.end()) { fail("unknown translation-unit family"); return; }
@@ -68,7 +68,7 @@ class ShardBuffer final : public std::streambuf {
     unit_target_ = tu(std::string(family) + "_" + two_digits(static_cast<std::size_t>((key >> found->page_shift) % found->shards)));
     unit_declaration_ = std::string(declaration);
     unit_text_.clear();
-    declare(declaration);
+    if (publish) declare(declaration);
   }
   void end_unit() {
     if (!unit_open_) { fail("unit end without begin"); return; }
@@ -203,8 +203,9 @@ bool sharding_active(std::ostream &out) { return impl_of(out) != nullptr; }
 void shard_begin_header(std::ostream &out) { if (auto *i = impl_of(out)) i->header(true); }
 void shard_end_header(std::ostream &out) { if (auto *i = impl_of(out)) i->header(false); }
 void shard_declare(std::ostream &out, std::string_view declaration) { if (auto *i = impl_of(out)) i->declare(declaration); }
-void shard_begin_unit(std::ostream &out, std::string_view family, std::uint64_t key, std::string_view declaration) {
-  if (auto *i = impl_of(out)) i->begin_unit(family, key, declaration);
+void shard_begin_unit(std::ostream &out, std::string_view family, std::uint64_t key, std::string_view declaration,
+                      bool publish_declaration) {
+  if (auto *i = impl_of(out)) i->begin_unit(family, key, declaration, publish_declaration);
 }
 void shard_end_unit(std::ostream &out) { if (auto *i = impl_of(out)) i->end_unit(); }
 

@@ -1,0 +1,475 @@
+{
+ "schema": 1,
+ "family": "control_stack",
+ "rows": [
+  {
+   "form": "nop.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "ex.af_af_alt.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "djnz.e.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ],
+   "operands": [
+    "00",
+    "7F",
+    "80",
+    "FF",
+    "A5",
+    "5A"
+   ]
+  },
+  {
+   "form": "jr.e.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ],
+   "operands": [
+    "00",
+    "7F",
+    "80",
+    "FF",
+    "A5",
+    "5A"
+   ]
+  },
+  {
+   "form": "jr.cc4_e.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ],
+   "operands": [
+    "00",
+    "7F",
+    "80",
+    "FF",
+    "A5",
+    "5A"
+   ]
+  },
+  {
+   "form": "ret.cc.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "pop.rr2.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "jp.cc_nn.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "jp.nn.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "call.cc_nn.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "push.rr2.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "rst.p.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "ret.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "call.nn.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "exx.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "ex.sp_ind_hl.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "jp.hl.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "ex.de_hl.base",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "pop.ix.dd",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "ex.sp_ind_ix.dd",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "push.ix.dd",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "jp.ix.dd",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "pop.iy.fd",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "ex.sp_ind_iy.fd",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "push.iy.fd",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "jp.iy.fd",
+   "profiles": [
+    "zero",
+    "ones",
+    "mixed",
+    "edge"
+   ]
+  },
+  {
+   "form": "nop.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "ex.af_af_alt.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "djnz.e.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "jr.e.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "jr.cc4_e.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "ret.cc.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "pop.rr2.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "jp.cc_nn.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "jp.nn.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "call.cc_nn.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "push.rr2.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "rst.p.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "ret.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "call.nn.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "exx.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "ex.sp_ind_hl.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "jp.hl.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "ex.de_hl.base",
+   "prefixes": [
+    "DD",
+    "FD",
+    "DDDDFD"
+   ],
+   "profiles": [
+    "mixed"
+   ]
+  },
+  {
+   "form": "push.rr2.base",
+   "profiles": [
+    "zero"
+   ],
+   "steps": [
+    {
+     "mode": "i",
+     "budget": 1,
+     "repeat": 2
+    }
+   ]
+  }
+ ]
+}
