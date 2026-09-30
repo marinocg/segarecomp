@@ -179,7 +179,7 @@ uint8_t sms_vdp_read(SmsVdp *v, SmsPortClass cls, uint64_t cycles) {
       break;
     case SMS_PORT_VDP_STATUS:
       if (sms_vdp_mode(v) == SMS_VDP_MODE_UNSUPPORTED) fail_mode(v, cycles); /* a flag it would produce is read */
-      value = (uint8_t)((v->frame_pending << 7) | (v->sprite_overflow << 6) | (v->sprite_collision << 5) | 0x1Fu);
+      value = (uint8_t)(((unsigned)v->frame_pending << 7) | ((unsigned)v->sprite_overflow << 6) | ((unsigned)v->sprite_collision << 5) | 0x1Fu);
       v->frame_pending = v->sprite_overflow = v->sprite_collision = v->line_pending = 0;
       v->latch_set = 0u;
       trace_add(v, cycles, SMS_VDP_TRACE_STATUS_READ, 0, value, 0);

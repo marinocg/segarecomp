@@ -9,6 +9,13 @@
     },
     {
       "declaration_source": "fixture_builder",
+      "fixture": "machine_e2e",
+      "mapper": "sega",
+      "sha256": "0053df036e58d1a9d7002654bd08490e6bf9bb2c139d17e127d02aa22e4b3a1b",
+      "size": 131072
+    },
+    {
+      "declaration_source": "fixture_builder",
       "fixture": "memctl_bad",
       "mapper": "rom_only",
       "sha256": "315ca3928832c1a9d2073e9dca76b251e35b521f38e8fda991d16fabf8a909c0",

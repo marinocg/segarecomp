@@ -1558,10 +1558,194 @@ def _render_fixture(name):
 RENDER_FIXTURES = {name: _render_fixture(name) for name in RENDER_SCENES}
 
 
+# --- SEG-009-T008: end-to-end machine fixture ---------------------------------------------------------------------------
+# One project-authored program on the Sega mapper (declared by the builder, never inferred) that exercises every baseline
+# machine area through generated-native Z80 owners: reset entry, RAM and its mirror, slot-1/slot-2 bank switches (including
+# a mapper value above the bank count), the same logical PC 0x4100 dispatched under three banks, VRAM/name-table/sprite/CRAM
+# uploads read from banked tables, mode 4 background scrolling (R8 per frame and from the line interrupt, R9 per frame),
+# sprites with per-line overflow and collision, the IM1 frame and line interrupts (status acknowledged by a read, V counter
+# sampled at entry), both controller ports under scripted input plus the I/O control readback, the pause NMI, and PSG tone and
+# noise writes spread over the frames. Guest-visible results (the reference comparison surface) are ordinary RAM:
+#   $C100 magic $5A; $C101-$C102 RAM mirror reads; $C103-$C108 bank markers; $C109-$C10C the routine at $4100 under banks
+#   1, 3, 6, 1; $C10D the mapper RAM copy; $C10E-$C10F undecoded port reads; $C110-$C111 nationalization; $C112-$C113 the sum
+#   and xor of a VRAM read-back; $C1FF = $A5 when the program finished.
+#   Frame n log at $C200 + 16 n (n = guest frame counter, increments in the frame interrupt): +0 n, +1 V counter at entry,
+#   +2 status flags accumulated over the frame (bit 7 frame, bit 6 overflow, bit 5 collision), +3 port $DC, +4 port $DD,
+#   +5 line interrupts taken in the frame, +6..+9 V counter at entry of each line interrupt, +10 pause NMIs so far,
+#   +11 slot-2 bank marker for bank 4 + (n & 3), +12 slot-1 bank marker for bank 2 + (n & 1).
+E2E_FRAMES = 52            # headless --frames bound (the program finishes its 40 logged frames inside it)
+E2E_LOGGED_FRAMES = 40
+E2E_SEED = 0x5E2E0001
+E2E_R10 = 39
+E2E_SCRIPT = """# scripted input of the machine_e2e fixture: <frame> <p1 UDLR12> <p2> <pause P|->
+0  ------ ------ -
+9  U----- ------ -
+12 U---1- ---R-- -
+15 -D--1- ---R-- P
+18 -D--1- ---R-- -
+21 ---R-2 ------ -
+24 ---R-2 -D---- P
+25 ---R-2 -D---- P
+27 ------ -D---- -
+30 U-L-12 ------ -
+33 ------ ------ P
+34 ------ ------ -
+"""
+# (latch/data byte pair per guest frame, 0 = no write); every PSG write of the program is one of these
+E2E_PSG = {1: (0x8E, 0x0F), 2: (0x90, 0), 8: (0x9F, 0),                      # tone 0 alone
+           9: (0xA3, 0x1F), 10: (0xB0, 0), 15: (0xBF, 0),                    # tone 1 alone
+           16: (0xC7, 0x08), 17: (0xD0, 0), 22: (0xDF, 0),                   # tone 2 alone
+           23: (0xE6, 0), 24: (0xF0, 0), 29: (0xFF, 0),                      # white noise alone (rate 2)
+           30: (0xE1, 0), 31: (0xF4, 0), 35: (0xFF, 0)}                      # periodic noise alone (rate 1), then silence
+E2E_BANK_MARKER_OFFSET = 0x10
+E2E_TABLES = {"tiles": (2, 0x200), "nt": (3, 0x200), "sat": (4, 0x200), "cram": (4, 0x300)}
+E2E_ROUTINES = {1: 0x11, 3: 0x33, 6: 0x66}   # bank -> value returned by the routine at logical 0x4100
+
+
+def e2e_data():
+    tiles, upper, nt, sat, cram = render_scene_data(E2E_SEED, False)
+    return {"tiles": tiles + upper, "nt": nt, "sat": sat, "cram": cram}
+
+
+def e2e_source():
+    data = e2e_data()
+    lines = [
+        ".org 0x0000", "        di", "        im 1", "        ld sp,0xDFF0", "        jp main",
+        ".org 0x0038", "        jp irq",
+        ".org 0x0066",                                   # pause NMI: count in $C013
+        "        push af", "        ld a,(0xC013)", "        inc a", "        ld (0xC013),a", "        pop af", "        retn",
+        ".org 0x0100",
+        "irq:    push af", "        push bc", "        push de", "        push hl",
+        "        in a,(0xBF)",                          # status read acknowledges the source
+        "        ld b,a",
+        "        in a,(0x7E)",                          # V counter at entry
+        "        ld c,a",
+        "        ld a,b", "        and 0x80", "        jp z,line_irq",
+        # ---- frame interrupt: PSG writes first (their T-state offsets from the acknowledge are fixed) ----
+        "psg_begin:",
+        "        ld a,(0xC010)", "        add a,a", "        ld e,a", "        ld d,0", "        ld hl,psg_table", "        add hl,de",
+        "        ld a,(hl)", "        or a", "        jr z,psg_s1", "        out (0x7F),a",
+        "psg_s1: inc hl", "        ld a,(hl)", "        or a", "        jr z,psg_s2", "        out (0x7F),a",
+        "psg_s2:",
+        # ---- frame log record ----
+        "        ld a,(0xC010)", "        ld l,a", "        ld h,0", "        add hl,hl", "        add hl,hl", "        add hl,hl",
+        "        add hl,hl", "        ld de,0xC200", "        add hl,de",
+        "        ld a,(0xC010)", "        ld (hl),a", "        inc hl",               # +0
+        "        ld (hl),c", "        inc hl",                                          # +1 V counter at entry
+        "        ld a,b", "        and 0x60", "        ld e,a", "        ld a,(0xC014)", "        or e", "        or 0x80",
+        "        ld (hl),a", "        inc hl",                                          # +2 flags
+        "        xor a", "        ld (0xC014),a",
+        "        in a,(0xDC)", "        ld (hl),a", "        inc hl",                  # +3
+        "        in a,(0xDD)", "        ld (hl),a", "        inc hl",                  # +4
+        "        ld a,(0xC011)", "        ld (hl),a", "        inc hl",                # +5
+        "        ld a,(0xC020)", "        ld (hl),a", "        inc hl",
+        "        ld a,(0xC021)", "        ld (hl),a", "        inc hl",
+        "        ld a,(0xC022)", "        ld (hl),a", "        inc hl",
+        "        ld a,(0xC023)", "        ld (hl),a", "        inc hl",                # +6..+9
+        "        ld a,(0xC013)", "        ld (hl),a", "        inc hl",                # +10
+        "        ld a,(0xC010)", "        and 3", "        add a,4", "        ld (0xFFFF),a",   # slot 2 <- bank 4 + (n & 3)
+        "        ld a,(0x8010)", "        ld (hl),a", "        inc hl",                # +11
+        "        ld a,(0xC010)", "        and 1", "        add a,2", "        ld (0xFFFE),a",   # slot 1 <- bank 2 + (n & 1)
+        "        ld a,(0x4010)", "        ld (hl),a",                                 # +12
+        # ---- per-frame scroll registers ----
+        "        ld a,(0xC010)", "        ld e,a", "        add a,a", "        add a,e", "        add a,3",
+        "        out (0xBF),a", "        ld a,0x88", "        out (0xBF),a",           # R8 = 3 (n + 1)
+        "        ld a,(0xC010)", "        add a,a", "        add a,2",
+        "        out (0xBF),a", "        ld a,0x89", "        out (0xBF),a",           # R9 = 2 (n + 1), latched at the next line 0
+        "        xor a", "        ld (0xC011),a",
+        "        ld a,(0xC010)", "        inc a", "        ld (0xC010),a",
+        "        cp %d" % E2E_LOGGED_FRAMES, "        jr nz,irq_exit", "        ld a,0xA5", "        ld (0xC1FF),a",
+        "irq_exit:", "        pop hl", "        pop de", "        pop bc", "        pop af", "        ei", "        reti",
+        # ---- line interrupt: log the V counter, accumulate the sprite flags, raster scroll ----
+        "line_irq:",
+        "        ld a,b", "        and 0x60", "        ld e,a", "        ld a,(0xC014)", "        or e", "        ld (0xC014),a",
+        "        ld a,(0xC011)", "        ld e,a", "        ld d,0", "        ld hl,0xC020", "        add hl,de", "        ld (hl),c",
+        "        inc a", "        ld (0xC011),a", "        ld e,a", "        add a,a", "        add a,a", "        add a,a", "        add a,e",
+        "        out (0xBF),a", "        ld a,0x88", "        out (0xBF),a",            # R8 = 9 x interrupt number
+        "        jp irq_exit",
+        ".org 0x0400",
+        "main:   ld hl,0xC000", "        ld de,0xC001", "        ld bc,0x07FF", "        ld (hl),0", "        ldir",
+        "        ld a,0x5A", "        ld (0xC100),a",
+        "        ld a,0x3C", "        ld (0xC0F0),a", "        ld a,(0xE0F0)", "        ld (0xC101),a",          # RAM mirror
+        "        ld a,0xA7", "        ld (0xE0F1),a", "        ld a,(0xC0F1)", "        ld (0xC102),a",
+        "        ld a,(0x4010)", "        ld (0xC103),a", "        ld a,(0x8010)", "        ld (0xC104),a",          # reset banks
+        "        ld a,3", "        ld (0xFFFE),a", "        ld a,(0x4010)", "        ld (0xC105),a",
+        "        ld a,5", "        ld (0xFFFF),a", "        ld a,(0x8010)", "        ld (0xC106),a",
+        "        ld a,10", "        ld (0xFFFF),a", "        ld a,(0x8010)", "        ld (0xC107),a",              # masked to bank 2
+        "        ld a,13", "        ld (0xFFFE),a", "        ld a,(0x4010)", "        ld (0xC108),a",              # masked to bank 5
+    ]
+    for slot_bank, cell in ((1, 0xC109), (3, 0xC10A), (6, 0xC10B), (1, 0xC10C)):
+        lines += ["        ld a,%d" % slot_bank, "        ld (0xFFFE),a", "        call 0x4100", "        ld (0x%04X),a" % cell]
+    lines += [
+        "        ld a,(0xFFFE)", "        ld (0xC10D),a",
+        "        in a,(0x00)", "        ld (0xC10E),a", "        in a,(0x3E)", "        ld (0xC10F),a",
+        "        ld a,0xF5", "        out (0x3F),a", "        in a,(0xDD)", "        and 0xC0", "        ld (0xC110),a",
+        "        ld a,0x55", "        out (0x3F),a", "        in a,(0xDD)", "        and 0xC0", "        ld (0xC111),a",
+        "        ld a,0xFF", "        out (0x3F),a",
+    ]
+    lines += ["        ld a,0x12", "        out (0xBF),a", "        in a,(0xBF)"]   # a dangling first control byte: the status read resets the latch
+    regs = {0: 0x16, 2: 0x0E, 5: 0xFF, 6: 0xFB, 7: 0x03, 8: 0, 9: 0, 10: E2E_R10}
+    for reg, value in regs.items():
+        lines += _vdp_reg(reg, value)
+
+    def upload(table, vdp_address, code, length):
+        bank, offset = E2E_TABLES[table]
+        window = 0x8000 if table in ("sat", "cram") else 0x4000
+        slot_reg = "0xFFFF" if window == 0x8000 else "0xFFFE"
+        out = ["        ld a,%d" % bank, "        ld (%s),a" % slot_reg,
+               "        ld a,0x%02X" % (vdp_address & 255), "        out (0xBF),a",
+               "        ld a,0x%02X" % ((vdp_address >> 8) | (code << 6)), "        out (0xBF),a",
+               "        ld hl,0x%04X" % (window + offset)]
+        if length >= 256:
+            out += ["        ld d,%d" % (length // 256), "up_%s: ld b,0" % table, "        ld c,0xBE", "        otir",
+                    "        dec d", "        jr nz,up_%s" % table]
+        else:
+            out += ["        ld b,%d" % length, "        ld c,0xBE", "        otir"]
+        return out
+    lines += upload("tiles", 0x0000, 1, len(data["tiles"]))
+    lines += upload("nt", (0x0E & 0x0E) << 10, 1, len(data["nt"]))
+    lines += upload("sat", 0x3F00, 1, len(data["sat"]))
+    lines += upload("cram", 0x0000, 3, len(data["cram"]))
+    lines += [  # read back the first 2 KiB of VRAM: sum and xor into $C112/$C113 (the VDP state checked by the guest itself)
+        "        xor a", "        out (0xBF),a", "        out (0xBF),a",
+        "        ld hl,0x0800", "        ld b,0", "        ld c,0", "rb:     in a,(0xBE)", "        ld d,a", "        add a,b",
+        "        ld b,a", "        ld a,d", "        xor c", "        ld c,a", "        dec hl", "        ld a,h", "        or l",
+        "        jr nz,rb", "        ld a,b", "        ld (0xC112),a", "        ld a,c", "        ld (0xC113),a",
+    ]
+    lines += _vdp_reg(1, 0xE0)        # display on, frame interrupt enabled
+    lines += ["        in a,(0xBF)", "        ei", "idle:   halt", "        jr idle"]
+    lines += [".org 0x0800", "psg_table:"]
+    for n in range(0, 64, 4):
+        row = []
+        for k in range(n, n + 4):
+            row += list(E2E_PSG.get(k, (0, 0)))
+        lines.append("        .db " + ",".join("0x%02X" % b for b in row))
+    return "\n".join(lines) + "\n"
+
+
+def fixture_machine_e2e():
+    image, _ = Assembler(e2e_source()).assemble()
+    if max(image) >= 0x2000:
+        raise AsmError("machine_e2e code must stay below 0x2000")
+    markers = {}
+    for bank in range(1, 8):
+        markers[bank * BANK_SIZE + E2E_BANK_MARKER_OFFSET] = 0xB0 + bank
+    for bank, value in E2E_ROUTINES.items():   # the routine at logical 0x4100 (slot 1) of each bank
+        routine, _ = Assembler(".org 0x4100\n        ld a,0x%02X\n        ret\n" % value).assemble()
+        for address, byte in routine.items():
+            markers[bank * BANK_SIZE + (address - 0x4000)] = byte
+    for table, blob in e2e_data().items():
+        bank, offset = E2E_TABLES[table]
+        for i, byte in enumerate(blob):
+            markers[bank * BANK_SIZE + offset + i] = byte
+    markers[0x0010] = 0xB0     # bank 0 marker (slot 0 is never remapped by this program)
+    return build_rom(0x20000, image, markers), "sega"
+
+
 FIXTURES = {"trivial": fixture_trivial, "oracle_smoke": fixture_oracle_smoke, "bank_crossing": fixture_bank_crossing,
             "sched_irq": fixture_sched_irq, "sched_straddle": fixture_sched_straddle, "port_open": fixture_port_open,
             "port_vdp": fixture_port_vdp, "memctl_bad": fixture_memctl_bad, "u11_probe": fixture_u11_probe, **VDP_FIXTURES,
-            **RENDER_FIXTURES}
+            **RENDER_FIXTURES, "machine_e2e": fixture_machine_e2e}
 
 
 def build(name):

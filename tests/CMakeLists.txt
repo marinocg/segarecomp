@@ -1250,3 +1250,14 @@ set_property(TEST sms_pad_tests APPEND PROPERTY LABELS full fast)
 set_property(TEST sms_pad_native_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_hcounter_reference_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_pad_native_test sms_hcounter_reference_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T008: the end-to-end generated-native machine fixture (all baseline areas on the full SMS runtime) against the
+# independent models and the committed validation manifest (hermetic), with determinism, generated-native-only inspection and
+# six fault injections; the oracle comparison runs the same fixture on the pinned references (skips without
+# SEGARECOMP_SMS_ORACLE_CHECKOUT) and asserts the recorded `reference` section of tests/fixtures/sms-e2e-validation.json.
+add_test(NAME sms_machine_e2e_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_e2e_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_machine_e2e_oracle_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_e2e_oracle_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_machine_e2e_test sms_machine_e2e_oracle_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_machine_e2e_test sms_machine_e2e_oracle_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
