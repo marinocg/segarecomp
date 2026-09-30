@@ -50,7 +50,7 @@ def main():
                   "%s: %s must name a SEG-009 owner task" % (r["id"], r["unresolved"]))
     # every non-baseline mapper, VDP mode and peripheral named as excluded is typed or explicitly device-absent
     for r in rows:
-        if r["area"] in ("vdp_modes", "mapper_identity") and r["scope"].startswith("excluded:"):
+        if r["area"] in ("vdp_modes", "mapper_identity") and r["scope"].startswith("excluded:") and "no request channel exists" not in r["scope"]:
             check("fail_closed" in r, "%s: excluded mode/mapper without a typed stop" % r["id"])
     in_scope = sum(r["scope"] == caps.IN for r in rows)
     check(in_scope > 100, "in-scope rows unexpectedly few")

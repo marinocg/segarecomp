@@ -273,11 +273,9 @@ static int run_slice(SmsMachine *m, uint64_t deadline, SmsStop *stop) {
   if (nmi_before != 0u && prefix_before == 0u && st->cycles < deadline)
     irq_trace(m, st->cycles, SMS_IRQ_TRACE_PAUSE, reject_before != 0u ? SMS_IRQ_DEASSERTED : SMS_IRQ_ACCEPTED);
   m->rt.outcome = z80_run(&m->rt, deadline);
-  if (nmi_before != 0u && prefix_before != 0u && st->nmi_pending == 0u) {
-    /* NMI pending across a prefix-lock run is accepted at the first boundary after the run ends, inside this call; only an
-     * upper bound (the T-state at return) is known to the platform. */
-    irq_trace(m, st->cycles, SMS_IRQ_TRACE_PAUSE, SMS_IRQ_ACCEPTED);
-  }
+  /* No acceptance trace after a call entered inside a prefix-lock run: the runtime never accepts or discards an NMI while
+   * `in_prefix_run` is set and nothing but `z80_reset` clears the flag, so `nmi_pending` cannot change during such a call
+   * (the former post-run trace branch was unreachable and was removed; guarded by test_interrupts in sms_runtime_test). */
   if (m->mem.error != SMS_OK) {
     *stop = die(m, SMS_STOP_PLATFORM_ERROR);
     return 1;

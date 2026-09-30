@@ -73,7 +73,7 @@ def g(patterns, test, stages, needle):
     return {"patterns": patterns.split(), "test": test, "stages": stages, "needle": needle}
 
 
-RENDER_MUTATED = "bg.priority bg.hscroll_lock bg.vscroll_lock bg.left_column_blank bg.fine_scroll_gap spr.limit_overflow spr.terminator raster.per_line_latch"
+RENDER_MUTATED = "spr.y_wrap bg.priority bg.hscroll_lock bg.vscroll_lock bg.left_column_blank bg.fine_scroll_gap spr.limit_overflow spr.terminator raster.per_line_latch"
 
 GROUPS = [
     g("exec.run_api exec.headless_budget", "sms_machine_scheduler_test", "R", "published Z80 instruction T-states"),
@@ -173,6 +173,8 @@ GROUPS = [
     g("vdp.* pal.cram_rgb", "sms_machine_e2e_test", "FN", "capability area"),
     # --- raster, background, sprites, framebuffer ---------------------------------------------------------------
     g("raster.* bg.* spr.* fb.artifact pal.cram_rgb", "sms_render_test", "IR", "MUTATIONS"),
+    g("spr.y_wrap", "sms_render_test", "IR", "y_wrap_"),
+    g("spr.y_wrap", "sms_render_native_test", "FN", "render_ywrap_192"),
     g(RENDER_MUTATED, "sms_render_test", "M", "MUTATIONS"),
     g("raster.* bg.* spr.* fb.artifact", "sms_render_native_test", "FNR", "mutation controls"),
     g(RENDER_MUTATED, "sms_render_native_test", "M", "mutation controls"),
@@ -237,8 +239,8 @@ EXCLUSION_EVIDENCE = {
     "vdp.invalid_text_mode": ("typed_stop", "sms_vdp_tests", "test_mode_stops"),
     "vdp.r0_bit0_nosync": ("typed_stop", "sms_vdp_tests", "test_mode_stops"),
     "psg.data_before_latch": ("typed_stop", "sms_psg_native_test", "data byte before any latch byte"),
-    "timing.pal": ("reserved_no_request_channel", "sms_machine_tests", "test_ingestion"),
-    "vdp.revision_5124": ("reserved_no_request_channel", "sms_machine_tests", "test_ingestion"),
+    "timing.pal": ("baseline_profile_fixed", "sms_machine_tests", "test_profile_has_no_request_channel"),
+    "vdp.revision_5124": ("baseline_profile_fixed", "sms_machine_tests", "test_profile_has_no_request_channel"),
     "mem.3d_glasses": ("device_absent", "sms_machine_tests", "3D glasses window"),
     "io.fm_unit": ("device_absent", "sms_runtime_tests", "test_port_decode"),
     "mapper.persistence": ("device_absent", "sms_machine_tests", "persist"),
@@ -249,7 +251,7 @@ EXCLUSION_EVIDENCE = {
 }
 CLASS_TEXT = {
     "typed_stop": "software or input can select it; the typed stop has a hermetic test",
-    "reserved_no_request_channel": "the typed class is reserved: no ingestion option, header field or driver flag can request it (the profile is fixed)",
+    "baseline_profile_fixed": "the baseline profile is NTSC SMS 2; no ingestion option, header field or driver flag can request the alternative, so no typed stop is claimed (witness: `test_profile_has_no_request_channel` and `sms_dependency_gate_test`)",
     "device_absent": "the device is not part of the baseline machine; the access decodes to no effect/open bus",
 }
 
@@ -263,21 +265,39 @@ REAL_IMAGE_FINDINGS = [
     "Three authorized local images (128/256/512 KiB) build through `segarecomp build` and run headless with finite "
     "frame budgets; per-image frame/IRQ/mapper-write counts are asserted as aggregates in `tests/sms_local_images_test.py` "
     "(skipped without `games/sms`).",
-    "128 KiB: one scanline of one frame differs from one reference (a palette write 21 T into a line: the platform renders a "
-    "line at its first T-state, one reference applies it to that line and the other to the next). Classified U2: the "
-    "references disagree with each other.",
-    "512 KiB: a timed object enters at a frame that differs by 1-3 frames on all three machines; the software derives a "
+    "Sanitized aggregates, each image run for 600 frames: frame interrupts accepted about 470-600 per image; the pause NMI "
+    "accepted exactly once under scripted input; line interrupts accepted 0 times in all three images (the line interrupt is "
+    "therefore validated only by fixtures and the pinned references, not by any local image); mapper writes in the thousands "
+    "with 6, 8 and 11 distinct slot-2 bank values; PCM non-constant and identical when the run is split into slices.",
+    "128 KiB: one scanline of one frame differs from one reference (a mid-line palette write: the platform renders a "
+    "line at its first T-state, one reference applies it to that line and the other to the next). Unresolved U2 "
+    "sensitivity; the pinned references disagree with each other.",
+    "512 KiB: a timed object enters at a frame that differs by a few frames on all three machines; the software derives a "
     "start offset from the Z80 refresh register (`LD A,R`), which depends on the exact iteration counts of status-polling "
-    "loops. Classified U2/U11 + `R` sensitivity: no two of the three machines agree. Not a platform defect.",
+    "loops. Unresolved U2/U11 + `R` sensitivity; the pinned references disagree (no two of the three machines agree).",
     "256 KiB: framebuffers identical to both references for the compared frames.",
-    "Mapper identity of the three images is declared per SHA-256 and inferred from the public SMS Power! mapper/cartridge "
-    "pages (the Sonic-family image: 99% Sega mapper on the mapper page; the other image's page states a standard "
-    "cartridge without RAM). It is a documented human inference from public documentation, not a byte heuristic, and is "
-    "never derived from ROM contents by the tools.",
+    "Mapper identity of the three images is declared per SHA-256 and inferred by a human from the public SMS Power! "
+    "mapper/cartridge pages, not from a byte heuristic; it is never derived from ROM contents by the tools. The images "
+    "are authorized local images and are not named here.",
+]
+LIMITS = [
+    "A claim is a registered (row pattern, CTest test, stage set, needle) group: the test is registered and its source "
+    "contains the needle. It is not proof that the test executes the row; a passing ratchet means the registered tests exist "
+    "and still name the behaviour, nothing more.",
+    "The mapping from rows to tests is pattern-based: a wildcard group claims every matching row, including rows the test "
+    "does not individually assert, so stage counts can over-claim.",
+    "`mutation_guarded` under-counts: only behaviours with a deliberate wrong rule in a test are marked. An independent "
+    "mutation campaign over the runtime found 86 of 89 valid mutants detected; the survivors were one equivalent mutant, "
+    "the post-prefix-run NMI trace branch (S11) and halt-idle with a pending NMI (S13); the last two now have guards.",
+    "For example `spr.y_wrap` is also claimed, by the `spr.*` wildcard groups, for the oracle and end-to-end tests that do not "
+    "assert it; its real evidence is `sms_render_test` and `sms_render_native_test` against the independent model plus the "
+    "unresolved U12 (the references differ from the platform in 224-line zoomed 8x16 at high Y).",
+    "Stage letters say nothing about oracle agreement beyond the named reference; unresolved divergences are listed in the "
+    "fact table below.",
 ]
 U_STATUS = [
     ("U1", "open", "BIOS-left SP/RAM: `z80_reset` convention kept; no compared difference traces back to it (contract section 18)"),
-    ("U2", "unresolved, tolerance asserted", "in-line event offset: offset 0 kept; 0..16 T lead asserted by `sms_vdp_oracle_test`; classified in the 128 KiB and 512 KiB images"),
+    ("U2", "unresolved, tolerance asserted", "in-line event offset: offset 0 kept; 0..16 T lead asserted by `sms_vdp_oracle_test`; unresolved U2 sensitivity in the 128 KiB and 512 KiB images (the pinned references disagree)"),
     ("U3", "resolved (T006)", "H counter table and TH latch: `sms_hcounter_reference_test`, `pad_hlatch`"),
     ("U4", "classified", "noise output phase: LFSR sequence agrees with both chip references"),
     ("U5", "classified, stop kept", "PSG data before latch stays a typed stop"),
@@ -286,6 +306,7 @@ U_STATUS = [
     ("U9", "classified", "post-BIOS VDP state: project convention; `vdp_reset_probe` agrees on everything except the first status byte of one reference"),
     ("U10", "classified", "tone period 0/1: toggling kept; departure from SP-PSG recorded"),
     ("U11", "classified", "instruction-start ordering kept; bounded against both references; real-image `LD A,R` sensitivity recorded"),
+    ("U12", "unresolved, classified divergence", "sprite Y wrap: native wraps modulo 256; 192-line mode matches Genesis Plus GX (Gearsystem deviates on zoomed 8x16 sprites at high Y); 224-line zoomed 8x16 sprites at high Y: the two references agree with each other and differ from native; no public documentation shows native is wrong, so no renderer change"),
 ]
 
 
@@ -433,6 +454,8 @@ def render_report(doc):
               "| size class | translation units | owners | generated C | compile time |", "| --- | --- | --- | --- | --- |"]
     for row in SCALE_ROWS:
         lines.append("| %s | %d | %s | %s | %s |" % row)
+    lines += ["", "## Ratchet limits", ""]
+    lines += ["- " + text for text in LIMITS]
     lines += ["", "## Real-image findings (sanitized)", ""]
     lines += ["- " + text for text in REAL_IMAGE_FINDINGS]
     return "\n".join(lines) + "\n"

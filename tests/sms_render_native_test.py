@@ -29,7 +29,8 @@ import sms_render_model as model  # noqa: E402
 from sms_vdp_native import Native  # noqa: E402
 
 LINE, FRAME = 228, 59736
-FRAMES = {"render_scene_a": "10", "render_scene_b": "10", "render_scene_c": "10", "render_raster": "24"}
+FRAMES = {"render_scene_a": "10", "render_scene_b": "10", "render_scene_c": "10", "render_raster": "24",
+          "render_ywrap_192": "10", "render_ywrap_224": "10"}
 RESET_REGS = [0x36, 0x80, 0xFF, 0xFF, 0xFF, 0xFF, 0xFB, 0, 0, 0, 0xFF]
 FAILED = []
 
@@ -94,7 +95,7 @@ def main():
         check(all(a[2] <= b[2] for a, b in zip(records, records[1:])) and records[-1][2] <= res["vdp"]["trace_entries"],
               "%s: trace linkage is not monotonic" % name)
         full = [r for r in records if r[0] * FRAME >= enable]
-        check(all(r[1] == (224 if name == "render_scene_c" else 192) for r in full), "%s: frame height" % name)
+        check(all(r[1] == (224 if name in ("render_scene_c", "render_ywrap_224") else 192) for r in full), "%s: frame height" % name)
         check(len(full) >= 3, "%s: fewer than 3 complete frames after the display enable" % name)
         flags = (False, False)
         hashes = set()

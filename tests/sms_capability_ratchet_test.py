@@ -48,7 +48,7 @@ def main():
     for row_id, e in doc["excluded"].items():
         check(e["reason"] and e["class"] and e["evidence_test"] and e["approval"] == "pending T013", "exclusion %s lacks reason/evidence/approval" % row_id)
     for r in excluded:
-        if r["area"] in ("vdp_modes", "mapper_identity"):
+        if r["area"] in ("vdp_modes", "mapper_identity") and "no request channel exists" not in r["scope"]:
             check(doc["excluded"][r["id"]]["fail_closed"], "%s: excluded mode/mapper without typed stop" % r["id"])
     # unresolved facts: the statuses recorded in the report follow the contract's open-fact table
     contract = (ROOT / "docs/architecture/master-system-machine-contract.md").read_text(encoding="utf-8")

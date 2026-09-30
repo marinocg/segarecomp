@@ -8,12 +8,12 @@ SEG-009-T012. The denominator is the independent T001 capability list (`tests/fi
 
 | stage | rows | applicable | share |
 | --- | --- | --- | --- |
-| implemented | 138 | 138 | 100.0% |
-| reference_validated | 126 | 126 | 100.0% |
-| fixture_exercised | 138 | 138 | 100.0% |
-| generated_native_exercised | 138 | 138 | 100.0% |
-| mutation_guarded | 30 | 138 | 21.7% |
-| covered | 138 | 138 | 100.0% |
+| implemented | 139 | 139 | 100.0% |
+| reference_validated | 127 | 127 | 100.0% |
+| fixture_exercised | 139 | 139 | 100.0% |
+| generated_native_exercised | 139 | 139 | 100.0% |
+| mutation_guarded | 31 | 139 | 22.3% |
+| covered | 139 | 139 | 100.0% |
 
 `covered` = implemented and (fixture or generated-native exercised) and (reference validated or not applicable). Reference validation is not applicable (`-`) only for rows whose sole evidence is a project decision. `mutation_guarded` is reported honestly and ratcheted; it is not part of the 100% gate.
 
@@ -40,7 +40,7 @@ SEG-009-T012. The denominator is the independent T001 capability list (`tests/fi
 | psg | 12 | 12 | 12 | 12 | 12 | 5 | 12 |
 | raster | 3 | 3 | 3 | 3 | 3 | 1 | 3 |
 | reset | 4 | 4 | 4 | 4 | 4 | 0 | 4 |
-| spr | 10 | 10 | 10 | 10 | 10 | 2 | 10 |
+| spr | 11 | 11 | 11 | 11 | 11 | 3 | 11 |
 | timing | 7 | 7 | 7 | 7 | 7 | 0 | 7 |
 | vdp | 22 | 22 | 22 | 22 | 22 | 8 | 22 |
 | view | 4 | 4 | 1 | 4 | 4 | 0 | 4 |
@@ -53,8 +53,8 @@ SEG-009-T012. The denominator is the independent T001 capability list (`tests/fi
 | `ingest.game_gear` | game_gear_out_of_milestone | typed_stop | `SMS_ERROR_PROFILE_UNSUPPORTED` | `sms_machine_tests` |
 | `ingest.region_japan` | japanese_profile_not_in_baseline | typed_stop | `SMS_ERROR_PROFILE_UNSUPPORTED` | `sms_machine_tests` |
 | `io.fm_unit` | fm_absent_on_export_sms2 | device_absent | - | `sms_runtime_tests` |
-| `mapper.bank_shift` | no_known_software | typed_stop | `SMS_ERROR_CONTROL_BIT_UNSUPPORTED` | `sms_runtime_tests` |
-| `mapper.cart_ram_system_overlay` | no_known_software | typed_stop | `SMS_ERROR_CONTROL_BIT_UNSUPPORTED` | `sms_bank_crossing_test` |
+| `mapper.bank_shift` | not used by known licensed software per the cited public source; fails closed | typed_stop | `SMS_ERROR_CONTROL_BIT_UNSUPPORTED` | `sms_runtime_tests` |
+| `mapper.cart_ram_system_overlay` | not used by known licensed software per the cited public source; fails closed | typed_stop | `SMS_ERROR_CONTROL_BIT_UNSUPPORTED` | `sms_bank_crossing_test` |
 | `mapper.codemasters` | non_baseline_mapper | typed_stop | `SMS_ERROR_MAPPER_UNSUPPORTED` | `sms_bank_crossing_test` |
 | `mapper.eeprom_multicart` | non_baseline_mapper | typed_stop | `SMS_ERROR_MAPPER_UNSUPPORTED` | `sms_machine_tests` |
 | `mapper.korean_msx_janggun` | non_baseline_mapper | typed_stop | `SMS_ERROR_MAPPER_UNSUPPORTED` | `sms_machine_tests` |
@@ -64,23 +64,23 @@ SEG-009-T012. The denominator is the independent T001 capability list (`tests/fi
 | `pad.peripherals` | peripheral_absent | device_absent | - | `sms_pad_tests` |
 | `pad.reset_button` | absent_on_sms2 | device_absent | - | `sms_pad_tests` |
 | `psg.analog_imperfection` | digital_model_only | device_absent | - | `sms_psg_differential_test` |
-| `psg.data_before_latch` | unresolved_power_on_latch | typed_stop | `SMS_ERROR_PSG_DATA_BEFORE_LATCH` | `sms_psg_native_test` |
+| `psg.data_before_latch` | references disagree on the power-on latch; typed stop kept, revisit if a workload hits it | typed_stop | `SMS_ERROR_PSG_DATA_BEFORE_LATCH` | `sms_psg_native_test` |
 | `psg.gg_stereo` | game_gear_out_of_milestone | device_absent | - | `sms_runtime_tests` |
-| `timing.pal` | pal_not_in_baseline | reserved_no_request_channel | `SMS_ERROR_PROFILE_UNSUPPORTED` | `sms_machine_tests` |
+| `timing.pal` | baseline profile is NTSC SMS2; no request channel exists, no typed stop claimed | baseline_profile_fixed | - | `sms_machine_tests` |
 | `vdp.invalid_text_mode` | legacy_modes_not_in_baseline | typed_stop | `SMS_ERROR_VDP_MODE_UNSUPPORTED` | `sms_vdp_tests` |
 | `vdp.mode4_240_ntsc` | invalid_on_ntsc | typed_stop | `SMS_ERROR_VDP_MODE_UNSUPPORTED` | `sms_vdp_tests` |
-| `vdp.r0_bit0_nosync` | no_known_software | typed_stop | `SMS_ERROR_VDP_MODE_UNSUPPORTED` | `sms_vdp_tests` |
-| `vdp.revision_5124` | vdp_revision_not_in_profile | reserved_no_request_channel | `SMS_ERROR_PROFILE_UNSUPPORTED` | `sms_machine_tests` |
+| `vdp.r0_bit0_nosync` | not used by known licensed software per the cited public source; fails closed | typed_stop | `SMS_ERROR_VDP_MODE_UNSUPPORTED` | `sms_vdp_tests` |
+| `vdp.revision_5124` | baseline profile is NTSC SMS2; no request channel exists, no typed stop claimed | baseline_profile_fixed | - | `sms_machine_tests` |
 | `vdp.tms9918_modes` | legacy_modes_not_in_baseline | typed_stop | `SMS_ERROR_VDP_MODE_UNSUPPORTED` | `sms_vdp_tests` |
 
-Classes: `typed_stop` = software or input can select it; the typed stop has a hermetic test; `reserved_no_request_channel` = the typed class is reserved: no ingestion option, header field or driver flag can request it (the profile is fixed); `device_absent` = the device is not part of the baseline machine; the access decodes to no effect/open bus.
+Classes: `typed_stop` = software or input can select it; the typed stop has a hermetic test; `baseline_profile_fixed` = the baseline profile is NTSC SMS 2; no ingestion option, header field or driver flag can request the alternative, so no typed stop is claimed (witness: `test_profile_has_no_request_channel` and `sms_dependency_gate_test`); `device_absent` = the device is not part of the baseline machine; the access decodes to no effect/open bus.
 
 ## Unresolved/classified facts
 
 | id | status | note |
 | --- | --- | --- |
 | U1 | open | BIOS-left SP/RAM: `z80_reset` convention kept; no compared difference traces back to it (contract section 18) |
-| U2 | unresolved, tolerance asserted | in-line event offset: offset 0 kept; 0..16 T lead asserted by `sms_vdp_oracle_test`; classified in the 128 KiB and 512 KiB images |
+| U2 | unresolved, tolerance asserted | in-line event offset: offset 0 kept; 0..16 T lead asserted by `sms_vdp_oracle_test`; unresolved U2 sensitivity in the 128 KiB and 512 KiB images (the pinned references disagree) |
 | U3 | resolved (T006) | H counter table and TH latch: `sms_hcounter_reference_test`, `pad_hlatch` |
 | U4 | classified | noise output phase: LFSR sequence agrees with both chip references |
 | U5 | classified, stop kept | PSG data before latch stays a typed stop |
@@ -89,6 +89,7 @@ Classes: `typed_stop` = software or input can select it; the typed stop has a he
 | U9 | classified | post-BIOS VDP state: project convention; `vdp_reset_probe` agrees on everything except the first status byte of one reference |
 | U10 | classified | tone period 0/1: toggling kept; departure from SP-PSG recorded |
 | U11 | classified | instruction-start ordering kept; bounded against both references; real-image `LD A,R` sensitivity recorded |
+| U12 | unresolved, classified divergence | sprite Y wrap: native wraps modulo 256; 192-line mode matches Genesis Plus GX (Gearsystem deviates on zoomed 8x16 sprites at high Y); 224-line zoomed 8x16 sprites at high Y: the two references agree with each other and differ from native; no public documentation shows native is wrong, so no renderer change |
 
 ## Fail-closed surface
 
@@ -104,10 +105,19 @@ Measured on project-irrelevant local images of the three size classes, host `cc 
 | 256 KiB | 54 | 263k | ~219 MB | 14 s |
 | 512 KiB | 58 | 525k | ~355 MB | 27 s |
 
+## Ratchet limits
+
+- A claim is a registered (row pattern, CTest test, stage set, needle) group: the test is registered and its source contains the needle. It is not proof that the test executes the row; a passing ratchet means the registered tests exist and still name the behaviour, nothing more.
+- The mapping from rows to tests is pattern-based: a wildcard group claims every matching row, including rows the test does not individually assert, so stage counts can over-claim.
+- `mutation_guarded` under-counts: only behaviours with a deliberate wrong rule in a test are marked. An independent mutation campaign over the runtime found 86 of 89 valid mutants detected; the survivors were one equivalent mutant, the post-prefix-run NMI trace branch (S11) and halt-idle with a pending NMI (S13); the last two now have guards.
+- For example `spr.y_wrap` is also claimed, by the `spr.*` wildcard groups, for the oracle and end-to-end tests that do not assert it; its real evidence is `sms_render_test` and `sms_render_native_test` against the independent model plus the unresolved U12 (the references differ from the platform in 224-line zoomed 8x16 at high Y).
+- Stage letters say nothing about oracle agreement beyond the named reference; unresolved divergences are listed in the fact table below.
+
 ## Real-image findings (sanitized)
 
 - Three authorized local images (128/256/512 KiB) build through `segarecomp build` and run headless with finite frame budgets; per-image frame/IRQ/mapper-write counts are asserted as aggregates in `tests/sms_local_images_test.py` (skipped without `games/sms`).
-- 128 KiB: one scanline of one frame differs from one reference (a palette write 21 T into a line: the platform renders a line at its first T-state, one reference applies it to that line and the other to the next). Classified U2: the references disagree with each other.
-- 512 KiB: a timed object enters at a frame that differs by 1-3 frames on all three machines; the software derives a start offset from the Z80 refresh register (`LD A,R`), which depends on the exact iteration counts of status-polling loops. Classified U2/U11 + `R` sensitivity: no two of the three machines agree. Not a platform defect.
+- Sanitized aggregates, each image run for 600 frames: frame interrupts accepted about 470-600 per image; the pause NMI accepted exactly once under scripted input; line interrupts accepted 0 times in all three images (the line interrupt is therefore validated only by fixtures and the pinned references, not by any local image); mapper writes in the thousands with 6, 8 and 11 distinct slot-2 bank values; PCM non-constant and identical when the run is split into slices.
+- 128 KiB: one scanline of one frame differs from one reference (a mid-line palette write: the platform renders a line at its first T-state, one reference applies it to that line and the other to the next). Unresolved U2 sensitivity; the pinned references disagree with each other.
+- 512 KiB: a timed object enters at a frame that differs by a few frames on all three machines; the software derives a start offset from the Z80 refresh register (`LD A,R`), which depends on the exact iteration counts of status-polling loops. Unresolved U2/U11 + `R` sensitivity; the pinned references disagree (no two of the three machines agree).
 - 256 KiB: framebuffers identical to both references for the compared frames.
-- Mapper identity of the three images is declared per SHA-256 and inferred from the public SMS Power! mapper/cartridge pages (the Sonic-family image: 99% Sega mapper on the mapper page; the other image's page states a standard cartridge without RAM). It is a documented human inference from public documentation, not a byte heuristic, and is never derived from ROM contents by the tools.
+- Mapper identity of the three images is declared per SHA-256 and inferred by a human from the public SMS Power! mapper/cartridge pages, not from a byte heuristic; it is never derived from ROM contents by the tools. The images are authorized local images and are not named here.

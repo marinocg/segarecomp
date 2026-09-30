@@ -571,6 +571,16 @@ void test_interrupts() {
   for (const TraceRow& r : trace_rows())
     if (r.event == SMS_IRQ_ACCEPTED) accepted_any = true;
   check(!accepted_any && machine.rt.state.nmi_pending == 1 && machine.rt.state.int_line == 1, "INT/NMI are not accepted inside a prefix run");
+  // S11: a call entered inside a prefix run can neither accept nor discard the NMI, so the platform records no acceptance
+  // for it at any later resume either (the former post-run trace branch was unreachable and is gone)
+  const uint32_t rows_before = machine.irq_count;
+  sms_run_until_cycle(&machine, 75000);
+  sms_run_until_cycle(&machine, 80000);
+  bool accepted_after = false;
+  for (const TraceRow& r : trace_rows())
+    if (r.source == SMS_IRQ_TRACE_PAUSE && r.event == SMS_IRQ_ACCEPTED) accepted_after = true;
+  check(!accepted_after && machine.rt.state.nmi_pending == 1 && machine.rt.state.in_prefix_run == 1 && machine.irq_count >= rows_before,
+        "resuming inside a prefix run keeps the NMI pending and records no acceptance");
 }
 
 void test_halt_idle_and_budget() {
@@ -590,6 +600,36 @@ void test_halt_idle_and_budget() {
   const SmsInputEvent press[] = {{2, 0, 0, 1}};
   sms_machine_set_input(&machine, press, 1);
   check(sms_run_until_cycle(&machine, 100000).kind == SMS_STOP_CYCLE, "a scripted pause keeps a halted CPU non-idle");
+
+  // S13: the last scripted pause applied by a host access inside the slice that then executes HALT with interrupts
+  // disabled is still a pending wake source at the slice end: the machine must take the NMI before it may report halt idle
+  setup(true);
+  {
+    program[0] = nop(1, 4);
+    Step jump;  // a long instruction whose first access lies after the frame-1 start (T 59,736): applies the press mid-slice
+    jump.len = 4;
+    jump.next = 2;
+    jump.halt = true;
+    jump.action = [](Z80Runtime* rt) {
+      rt->state.cycles = 59740;
+      z80_read(rt, 0x0000);
+    };
+    program[1] = jump;
+    Step park = nop(2, 4);
+    park.halt = true;
+    program[2] = park;
+    nmi_handler(2);
+    machine.stop_on_halt_idle = 1;
+    const SmsInputEvent press_last[] = {{1, 0, 0, 1}};
+    sms_machine_set_input(&machine, press_last, 1);
+    const SmsStop stop = sms_run_until_cycle(&machine, 70000);
+    uint64_t accepted_at = 0;
+    for (const TraceRow& r : trace_rows())
+      if (r.source == SMS_IRQ_TRACE_PAUSE && r.event == SMS_IRQ_ACCEPTED) accepted_at = r.cycles;
+    check(accepted_at >= 59736 && stop.kind == SMS_STOP_HALT_IDLE && stop.cycles > accepted_at,
+          "halt idle is reported only after the pending pause NMI has been taken");
+    check(machine.rt.state.nmi_pending == 0 && machine.input_next == machine.input_count, "the NMI latch is consumed at the idle stop");
+  }
 
   // budgets are resumable reports; the frame bound wins a coincident bound
   setup(true);

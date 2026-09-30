@@ -1440,15 +1440,18 @@ VDP_FIXTURES = {"vdp_seq_a": fixture_vdp_seq_a, "vdp_seq_b": fixture_vdp_seq_b, 
 # per-line latching and the R9 frame latch are exercised through the real interrupt route.
 RENDER_DATA_ORG = 0x1000
 RENDER_SCENES = {
-    # name: (seed, tall, regs R0..R10 as finally programmed, raster)
-    "render_scene_a": (0x5CE11A01, False, [0x06, 0xC0, 0x0E, 0xFF, 0xFF, 0x7F, 0xFB, 0x03, 0x1D, 0x25, 0xFF], False),
-    "render_scene_b": (0x5CE11B02, False, [0xEE, 0xC3, 0x0A, 0xFF, 0xFF, 0x7F, 0xFB, 0x0C, 0x2B, 0x91, 0xFF], False),
-    "render_scene_c": (0x5CE11C03, True, [0x06, 0xD0, 0x0C, 0xFF, 0xFF, 0x7F, 0xFF, 0x05, 0x46, 0x7A, 0xFF], False),
-    "render_raster": (0x5CE11D04, False, [0x76, 0xC0, 0x0E, 0xFF, 0xFF, 0x7F, 0xFB, 0x01, 0x00, 0x00, 0x07], True),
+    # name: (seed, tall, regs R0..R10 as finally programmed, raster, ywrap)
+    "render_scene_a": (0x5CE11A01, False, [0x06, 0xC0, 0x0E, 0xFF, 0xFF, 0x7F, 0xFB, 0x03, 0x1D, 0x25, 0xFF], False, False),
+    "render_scene_b": (0x5CE11B02, False, [0xEE, 0xC3, 0x0A, 0xFF, 0xFF, 0x7F, 0xFB, 0x0C, 0x2B, 0x91, 0xFF], False, False),
+    "render_scene_c": (0x5CE11C03, True, [0x06, 0xD0, 0x0C, 0xFF, 0xFF, 0x7F, 0xFF, 0x05, 0x46, 0x7A, 0xFF], False, False),
+    "render_raster": (0x5CE11D04, False, [0x76, 0xC0, 0x0E, 0xFF, 0xFF, 0x7F, 0xFB, 0x01, 0x00, 0x00, 0x07], True, False),
+    # SEG-009-T013 / U12: sprites with Y near the bottom of the 256-line space (they wrap to the top), zoomed 8x16 in both heights
+    "render_ywrap_192": (0x5CE11E05, False, [0x06, 0xC3, 0x0E, 0xFF, 0xFF, 0x7F, 0xFB, 0x00, 0x00, 0x00, 0xFF], False, True),
+    "render_ywrap_224": (0x5CE11F06, True, [0x06, 0xD3, 0x0C, 0xFF, 0xFF, 0x7F, 0xFF, 0x05, 0x00, 0x00, 0xFF], False, True),
 }
 
 
-def render_scene_data(seed, tall):
+def render_scene_data(seed, tall, ywrap=False):
     """(tiles 0-95 at VRAM 0 [3072 B], tiles 256-263 at $2000 [256 B], name table [2048 B], sprite attribute area $3F00 [256 B],
     CRAM [32 B]) of a deterministic scene that exercises overflow, collision, priority, flips and both palettes."""
     state = [seed & 0xFFFFFFFF]
@@ -1500,6 +1503,9 @@ def render_scene_data(seed, tall):
             sat[0x80 + 2 * i], sat[0x81 + 2 * i] = rnd(256), rnd(96)
         sat[40] = 0xD0
     cram = [rnd(64) for _ in range(32)]
+    if ywrap:  # applied after every random draw, so the other scenes are unchanged
+        for k, y in enumerate((0xF0, 0xF6, 0xFA, 0xFF)):
+            sat[12 + k] = y
     return bytes(tiles), bytes(upper), bytes(nt), bytes(sat), bytes(cram)
 
 
@@ -1516,8 +1522,8 @@ def _render_segment(label, address, code, length):
 
 
 def render_source(name):
-    seed, tall, regs, raster = RENDER_SCENES[name]
-    tiles, upper, nt, sat, cram = render_scene_data(seed, tall)
+    seed, tall, regs, raster, ywrap = RENDER_SCENES[name]
+    tiles, upper, nt, sat, cram = render_scene_data(seed, tall, ywrap)
     nt_base = ((regs[2] & 0x0C) << 10) | 0x700 if tall else (regs[2] & 0x0E) << 10
     lines = [".org 0x0000", "        di", "        im 1", "        ld sp,0xDFF0", "        jp main",
              ".org 0x0038"]

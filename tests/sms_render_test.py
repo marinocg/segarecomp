@@ -157,6 +157,20 @@ def directed():
             vram[sat + 0x80 + 2 * i], vram[sat + 0x81 + 2 * i] = x, 1
         vram[sat + 2] = 0xD0
         out.append((Scenario("collision_%d" % overlap, vram, palette, base_regs(0x06, 0xC0, 0xFF, 0xFF), []), "collision", overlap))
+    # F4 / U12: the sprite row offset wraps modulo 256, so a sprite whose top lies near the bottom of the 256-line space
+    # reappears at the top. Tile row r is painted with colour r + 1, so the pattern row drawn on each line is visible.
+    for tall in (False, True):
+        for y, top_rows in ((0xFA, (5, 6, 7)), (0xFF, (0, 1, 2))):
+            vram = bytearray(0x4000)
+            put_tile(vram, 1, [[r + 1] * 8 for r in range(8)])
+            sat = 0x3F00
+            vram[sat] = y
+            vram[sat + 0x80], vram[sat + 0x81] = 40, 1
+            vram[sat + 1] = 0xE0  # second entry far below the screen (and not the terminator) so nothing else is drawn
+            vram[sat + 0x82], vram[sat + 0x83] = 200, 1
+            r1 = 0xD0 if tall else 0xC0
+            scn = Scenario("y_wrap_%s_%02X" % ("224" if tall else "192", y), vram, palette, base_regs(0x06, r1, 0x0C if tall else 0xFF, 0xFF), [])
+            out.append((scn, "y_wrap", top_rows))
     return [o[0] for o in out], out
 
 
@@ -205,6 +219,12 @@ def main():
             cram_color = scn.cram[16 + 7] & 63
             drawn = any(row[50] == cram_color for row in c[1])
             check(drawn == expect, "%s: terminated-list sprite drawn=%s, expected %s" % (scn.name, drawn, expect))
+        elif kind == "y_wrap":
+            # the wrapped top rows of the sprite appear on lines 0..2 (x = 40), the line below them is empty
+            want = [scn.cram[16 + r + 1] & 63 for r in expect]
+            got = [c[1][line][40] for line in range(3)]
+            check(got == want, "%s: wrapped sprite rows %s, expected %s" % (scn.name, got, want))
+            check(c[1][8][40] == c[1][20][40] and c[1][8][40] not in want, "%s: the line below the wrapped sprite is not empty" % scn.name)
     # mutation controls: each wrong rule must be detected by at least one scenario
     for mutation in model.MUTATIONS:
         detected = False

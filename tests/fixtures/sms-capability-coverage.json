@@ -33,14 +33,14 @@
       "class": "typed_stop",
       "evidence_test": "sms_runtime_tests",
       "fail_closed": "SMS_ERROR_CONTROL_BIT_UNSUPPORTED",
-      "reason": "no_known_software"
+      "reason": "not used by known licensed software per the cited public source; fails closed"
     },
     "mapper.cart_ram_system_overlay": {
       "approval": "pending T013",
       "class": "typed_stop",
       "evidence_test": "sms_bank_crossing_test",
       "fail_closed": "SMS_ERROR_CONTROL_BIT_UNSUPPORTED",
-      "reason": "no_known_software"
+      "reason": "not used by known licensed software per the cited public source; fails closed"
     },
     "mapper.codemasters": {
       "approval": "pending T013",
@@ -110,7 +110,7 @@
       "class": "typed_stop",
       "evidence_test": "sms_psg_native_test",
       "fail_closed": "SMS_ERROR_PSG_DATA_BEFORE_LATCH",
-      "reason": "unresolved_power_on_latch"
+      "reason": "references disagree on the power-on latch; typed stop kept, revisit if a workload hits it"
     },
     "psg.gg_stereo": {
       "approval": "pending T013",
@@ -121,10 +121,10 @@
     },
     "timing.pal": {
       "approval": "pending T013",
-      "class": "reserved_no_request_channel",
+      "class": "baseline_profile_fixed",
       "evidence_test": "sms_machine_tests",
-      "fail_closed": "SMS_ERROR_PROFILE_UNSUPPORTED",
-      "reason": "pal_not_in_baseline"
+      "fail_closed": null,
+      "reason": "baseline profile is NTSC SMS2; no request channel exists, no typed stop claimed"
     },
     "vdp.invalid_text_mode": {
       "approval": "pending T013",
@@ -145,14 +145,14 @@
       "class": "typed_stop",
       "evidence_test": "sms_vdp_tests",
       "fail_closed": "SMS_ERROR_VDP_MODE_UNSUPPORTED",
-      "reason": "no_known_software"
+      "reason": "not used by known licensed software per the cited public source; fails closed"
     },
     "vdp.revision_5124": {
       "approval": "pending T013",
-      "class": "reserved_no_request_channel",
+      "class": "baseline_profile_fixed",
       "evidence_test": "sms_machine_tests",
-      "fail_closed": "SMS_ERROR_PROFILE_UNSUPPORTED",
-      "reason": "vdp_revision_not_in_profile"
+      "fail_closed": null,
+      "reason": "baseline profile is NTSC SMS2; no request channel exists, no typed stop claimed"
     },
     "vdp.tms9918_modes": {
       "approval": "pending T013",
@@ -268,6 +268,7 @@
     "spr.shift": "11110",
     "spr.size_8x16": "11110",
     "spr.terminator": "11111",
+    "spr.y_wrap": "11111",
     "spr.zoom": "11110",
     "timing.access_timestamp": "11110",
     "timing.cpu_clock": "11110",
@@ -2056,6 +2057,29 @@
       ]
     },
     "spr.terminator": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "mutation_guarded": [
+        "sms_render_native_test",
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "spr.y_wrap": {
       "fixture_exercised": [
         "sms_machine_e2e_test",
         "sms_render_native_test"

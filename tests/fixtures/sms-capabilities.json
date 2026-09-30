@@ -568,7 +568,7 @@
       "fail_closed": "SMS_ERROR_CONTROL_BIT_UNSUPPORTED",
       "id": "mapper.bank_shift",
       "owner": "SEG-009-T002",
-      "scope": "excluded:no_known_software"
+      "scope": "excluded:not used by known licensed software per the cited public source; fails closed"
     },
     {
       "area": "mapper",
@@ -599,7 +599,7 @@
       "fail_closed": "SMS_ERROR_CONTROL_BIT_UNSUPPORTED",
       "id": "mapper.cart_ram_system_overlay",
       "owner": "SEG-009-T002",
-      "scope": "excluded:no_known_software"
+      "scope": "excluded:not used by known licensed software per the cited public source; fails closed"
     },
     {
       "area": "mapper",
@@ -1006,7 +1006,7 @@
       "fail_closed": "SMS_ERROR_PSG_DATA_BEFORE_LATCH",
       "id": "psg.data_before_latch",
       "owner": "SEG-009-T007",
-      "scope": "excluded:unresolved_power_on_latch",
+      "scope": "excluded:references disagree on the power-on latch; typed stop kept, revisit if a workload hits it",
       "unresolved": "U5"
     },
     {
@@ -1322,6 +1322,18 @@
     },
     {
       "area": "sprites",
+      "behavior": "sprite Y wraps modulo 256 (a sprite near the bottom of the 256-line space reappears at the top); 192-line mode matches Genesis Plus GX; zoomed 8x16 sprites at high Y in 224-line mode differ from both references",
+      "evidence": [
+        "MD-VDP",
+        "PROJECT"
+      ],
+      "id": "spr.y_wrap",
+      "owner": "SEG-009-T005",
+      "scope": "in_scope",
+      "unresolved": "U12"
+    },
+    {
+      "area": "sprites",
       "behavior": "R1 bit 0 doubles sprite pixels for all eight sprites (SMS 2)",
       "evidence": [
         "MD-VDP",
@@ -1381,10 +1393,9 @@
         "MD-VDP",
         "SP-CLK"
       ],
-      "fail_closed": "SMS_ERROR_PROFILE_UNSUPPORTED",
       "id": "timing.pal",
       "owner": "SEG-009-T003",
-      "scope": "excluded:pal_not_in_baseline"
+      "scope": "excluded:baseline profile is NTSC SMS2; no request channel exists, no typed stop claimed"
     },
     {
       "area": "timing",
@@ -1606,7 +1617,7 @@
       "fail_closed": "SMS_ERROR_VDP_MODE_UNSUPPORTED",
       "id": "vdp.r0_bit0_nosync",
       "owner": "SEG-009-T004",
-      "scope": "excluded:no_known_software"
+      "scope": "excluded:not used by known licensed software per the cited public source; fails closed"
     },
     {
       "area": "vdp_state",
@@ -1625,10 +1636,9 @@
         "MD-VDP",
         "SP-VREG"
       ],
-      "fail_closed": "SMS_ERROR_PROFILE_UNSUPPORTED",
       "id": "vdp.revision_5124",
       "owner": "SEG-009-T004",
-      "scope": "excluded:vdp_revision_not_in_profile"
+      "scope": "excluded:baseline profile is NTSC SMS2; no request channel exists, no typed stop claimed"
     },
     {
       "area": "vdp_modes",

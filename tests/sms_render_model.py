@@ -14,9 +14,10 @@ Written from the contract and the public MacDonald/SMS Power! rules it cites, ne
   terminator_ignored  Y = $D0 does not end the sprite list
   no_fine_gap       the fine-scroll gap shows wrapped background instead of the backdrop
   vscroll_live      R9 is taken per line instead of being latched at line 0
+  no_y_wrap         the sprite row offset does not wrap modulo 256 (spr.y_wrap / U12)
 """
 MUTATIONS = ("priority", "no_hscroll_lock", "no_vscroll_lock", "sprite_limit_7", "sprite_limit_9", "no_left_blank",
-             "terminator_ignored", "no_fine_gap", "vscroll_live")
+             "terminator_ignored", "no_fine_gap", "vscroll_live", "no_y_wrap")
 
 
 def height_of(regs):
@@ -53,7 +54,9 @@ def sprite_entries(vram, regs, height, line, limit, mutation):
         if height == 192 and y == 0xD0 and mutation != "terminator_ignored":
             break
         top = y + 1
-        offset = (line - top) % 256
+        offset = line - top if mutation == "no_y_wrap" else (line - top) % 256
+        if offset < 0:
+            continue
         if offset < size:
             if len(chosen) == limit:
                 overflow = True

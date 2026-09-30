@@ -187,6 +187,14 @@ def main():
         c = execute(irq["test"], tmp, "budget_first", "--frames", "1", "--cycle-budget", "59000")
         check(c["code"] == 2 and c["status"]["stop"] == "cycle_budget", "the earlier cycle budget wins: %r" % (c.get("status"),))
         check(run([irq["none"], "--frames", "zero"], timeout=30).returncode == 64, "malformed --frames must be a usage error")
+        # F3: out-of-range numerals (ERANGE) are usage errors for every numeric option; the maximum itself is in range
+        too_big = ("18446744073709551616", "99999999999999999999999999")
+        for option in ("--frames", "--cycle-budget", "--slice-cycles", "--slice-seed"):
+            for numeral in too_big:
+                check(run([irq["none"], option, numeral], timeout=30).returncode == 64,
+                      "%s %s must be a usage error (exit 64)" % (option, numeral))
+        check(run([irq["none"], "--frames", "1", "--cycle-budget", "18446744073709551615"], timeout=60).returncode == 0,
+              "the maximum uint64 numeral is in range")
 
         # ---- U11 ordering: accesses at instruction-start T vs scanline events -----------------------------------------
         st = execute(exes["sched_straddle"]["test"], tmp, "straddle", "--frames", "3", env_log=True)

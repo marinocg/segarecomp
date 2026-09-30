@@ -72,6 +72,20 @@
     },
     {
       "declaration_source": "fixture_builder",
+      "fixture": "render_ywrap_192",
+      "mapper": "rom_only",
+      "sha256": "4d87a1352d98f9e7e4d98d6c525c540efaaa099fca7d0a86b1bad68d3e687b78",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "render_ywrap_224",
+      "mapper": "rom_only",
+      "sha256": "0aa5b07308f2bc5bf9f8720318b956f77e2e6440d60c397b0e1cb4e872a99092",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
       "fixture": "sched_irq",
       "mapper": "rom_only",
       "sha256": "728c3fa7eada24cb7d9da77da10bdbcb944583e8079865df3606455e5dfb53bb",

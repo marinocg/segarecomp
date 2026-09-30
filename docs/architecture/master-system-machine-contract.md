@@ -53,9 +53,10 @@ the SMS 1 returns open-bus bytes) and always presents `$FF` on the interrupt-ack
 presents a random byte, which would violate the SEG-008 RST-only IM0 contract for IM0 software). The 315-5246 has
 no SMS 1 table-mask quirks. NTSC export matches the authorized local images (section 18) and the NTSC SMS 2 on
 which MacDonald measured the display timing. Everything else is profile data or an exclusion:
-PAL, Japanese region, SMS 1 VDP, Game Gear, SG-1000 and Mark III fail closed with `SMS_ERROR_PROFILE_UNSUPPORTED`
-(or `SMS_ERROR_VDP_MODE_UNSUPPORTED` for a revision-specific mode) [cap:timing.pal] [cap:ingest.region_japan]
-[cap:ingest.game_gear] [cap:vdp.revision_5124].
+The Japanese region, Game Gear, SG-1000 and Mark III headers fail closed with `SMS_ERROR_PROFILE_UNSUPPORTED`
+[cap:ingest.region_japan] [cap:ingest.game_gear]. PAL timing [cap:timing.pal] and the SMS 1 VDP [cap:vdp.revision_5124] are
+not stops: the baseline profile is NTSC SMS 2 and no header field, ingestion option or driver flag can request either (there
+is no PAL header code; witness `test_profile_has_no_request_channel`), so no typed stop is claimed for them.
 
 ## 2. Clocks and the unified timebase
 
@@ -374,7 +375,7 @@ an input and its output level while an output (§11). A read before the first la
   X or pattern (Oracle smoke: nine transparent sprites set bit 6). Overlapping opaque pixels set collision (Oracle
   smoke: bit 5). Lower entry wins; colour 0 is transparent; R0 bit 3 shifts left by 8; R1 bit 1 gives 8x16 (index
   bit 0 ignored); R1 bit 0 zooms all eight sprites (SMS 2); R6 bit 2 selects the upper 256 patterns; no horizontal
-  wrap [MD-VDP §10, SP-VREG] [cap:spr.sat] [cap:spr.terminator] [cap:spr.limit_overflow] [cap:spr.collision]
+  wrap; the vertical position wraps modulo 256 (U12) [MD-VDP §10, SP-VREG] [cap:spr.y_wrap] [cap:spr.sat] [cap:spr.terminator] [cap:spr.limit_overflow] [cap:spr.collision]
   [cap:spr.priority_order] [cap:spr.shift] [cap:spr.size_8x16] [cap:spr.zoom] [cap:spr.pattern_base]
   [cap:spr.no_wrap].
 - R1 bit 6 clear blanks the display to the backdrop [cap:raster.display_enable].
@@ -403,7 +404,7 @@ Chip facts (Sega integrated SN76489 variant) [SP-PSG, MD-VDP §1]:
   `%0-DDDDDD` writes the latched register: tone high 6 bits, attenuation low 4 bits, noise low 3 bits. A data byte
   after an attenuation or noise latch is **not** ignored (SP-PSG's Alex Kidd and Micro Machines cases). Tone
   registers update immediately on each byte [cap:psg.latch_data] [cap:psg.tone_immediate].
-- A data byte before any latch byte stops with `SMS_ERROR_PSG_DATA_BEFORE_LATCH` (U5) [cap:psg.data_before_latch].
+- A data byte before any latch byte stops with `SMS_ERROR_PSG_DATA_BEFORE_LATCH` (U5) [cap:psg.data_before_latch]. The stop is kept because the references disagree on the power-on latch; revisit if a workload hits it.
 - Internal clock = system clock / 16 [cap:psg.divider_16]. Each chip tick every channel's 10-bit counter decrements;
   on reaching zero it reloads and flips the channel output [cap:psg.tone_counter]. Initial counter values and output
   flip-flops are not documented ("The initial output value may be arbitrarily set" [SP-PSG]); the model starts them
@@ -519,6 +520,7 @@ Distinct from `Z80Outcome` and reported with PC, image identity, T-state and the
 | U9 | post-BIOS VDP state: register contents (no public source; references disagree on R1/R6), VRAM/CRAM contents | project convention of §8/§9.1; normal software writes every register before enabling the display | T004 | T011 attributes any title that renders before writing a register; a cited BIOS behaviour then becomes a profile delta **T004 evidence (2026-09-30):** `vdp_reset_probe` (first buffer read, status, VRAM, interrupts taken with only the reset registers, R0 bit 4 set at reset) against both pinned references: identical except the first status byte, which is `$1F` on the platform and Gearsystem and `$DF` on Genesis Plus GX (it powers on with a pending frame flag and the sprite-overflow flag: time origin and sprite flags, classified). The VRAM/CRAM zero reset and the register column are consistent with both references' observable behaviour; R1/R6 remain a project convention (no probe can separate them from software behaviour without rendering). |
 | U10 | tone period 0/1 digital output: toggle every tick (references) vs constant +1 (SP-PSG) | model toggles; affects PCM of sample playback | T007 | a public 315-5246 capture or statement; otherwise keep the reference behaviour and record the departure **T007 evidence (2026-09-30):** the device toggles every tick for periods 0 and 1 (ares exactly; Blargg holds period 0 static, GPGX-NOTE masks it); SP-PSG's constant +1 is not adopted, no public 315-5246 capture found. The departure is recorded; the PCM digest of sample-playback software depends on it. |
 | U11 | instruction-internal host-access timing: the ABI timestamps memory/I/O callbacks at instruction start and does not expose the bus-cycle offset | accesses are ordered at instruction start; error at most one indivisible boundary around a device event (23 T per form + 4 T per superseded DD/FD prefix; block iterations and interrupt responses are separate boundaries) | T003 (scheduler), T004 (VDP ports/counters/IRQ), T006 (pad reads), T007 (PSG) | adversarial fixtures whose accesses straddle a scheduled device boundary, compared with both pinned machine references. If instruction-start ordering matches for the declared baseline, record that compatibility contract; if not, open a bounded SEG-008 continuation adding statically known per-access timing offsets to the ABI. No silent approximation, no runtime opcode decoding **T003 evidence (scheduler part, 2026-09-30):** the platform orders accesses at the instruction-start T-state against scanline events (adversarial straddle fixtures, generated-native). The `u11_probe` sweep (same V-counter read behind k superseded DD prefixes) against both pinned references classifies them: Genesis Plus GX orders at the real bus cycle (shift exactly k steps of 4 T), Gearsystem partially (shifts 2, 3, 3 steps for k = 2, 4, 6); both stay within the 0..k bound and affect only index-prefix chains in front of a device access; the references disagree with each other, and plain-form offsets are below the probe's resolution and the unresolved U2 in-line offsets. Instruction-start ordering is therefore kept as the compatibility contract for the baseline and no SEG-008 continuation is opened; T004/T006/T007 re-check their own device-visible accesses (ADR 0066). **T007 evidence (PSG part, 2026-09-30):** write timestamps straddling chip-tick (16 T) and scanline (228 T) boundaries (offsets 0, 1, 15, 16, 17, 227, 228, 229, 455-457 T, random gaps) give chip state identical to ares tick for tick and PCM identical to the contract decimation of ares' state. Blargg applies a write at 1 T resolution: tone edges differ from the device by exactly T mod 16 (< 1 tick, < 1/5 of a 81 T PCM sample) and its 440 Hz PCM correlates 0.98 with the device. Instruction-start ordering is sufficient for the PSG; no SEG-008 continuation is opened. **T004 evidence (VDP part, 2026-09-30):** three accesses whose instruction-start T straddles a scheduled event, generated-native against both pinned references (`vdp_straddle`, `vdp_straddle_write`; ADR 0067): a status read against the line-193 frame flag, a V counter read against the line-193 step, and an R10 write against the next line's counter reload. The R10 write flips at the same 4-T step in all three implementations. The status and V counter reads flip 3 steps (12 T) before the platform in both references, identically (the U2 tolerance); no reference disagrees with the other and every deviation lies inside the contract's bound of one indivisible boundary (23 T). The IRQ enable/acknowledge races (pending-but-disabled then enabled, status read before the enable) agree with both references. Instruction-start ordering is sufficient for the VDP at the declared baseline; no SEG-008 continuation is opened. **T006 evidence (controller part, 2026-09-30):** a `$DC` read loop crossing scripted input boundaries flips at exactly the first sample whose instruction-start T-state is at or after the frame start (generated-native `pad_boundary`, expectation from the published Z80 T-states); TH-latch write timestamps reproduce the counter at the write's T offset (`pad_hlatch`). Input events are frame-granular on both pinned references as well, so the only instruction-internal window is the superseded-prefix chain already classified above; the near-boundary controller reads were not run on the pinned references (they poll input at frame starts, no sub-frame boundary exists to straddle), and instruction-start ordering is sufficient for controllers; no SEG-008 continuation is opened. |
+| U12 | sprite Y wrap: the platform wraps the sprite row offset modulo 256. In 192-line mode it matches Genesis Plus GX (Gearsystem deviates on zoomed 8x16 sprites at high Y); in 224-line mode zoomed 8x16 sprites at high Y are drawn identically by both pinned references, which differ from the platform | native wrap kept: no public documentation shows the references right and the platform wrong | T005 | classified, unresolved: a public hardware capture or statement; adopt it with a regression if it shows the platform is wrong (T013 independent measurement) |
 
 (Status bits 4-0 are a project convention, §9.3; there is no U7.)
 
@@ -567,25 +569,21 @@ platform's frame start: a comparison at the wrong phase shows a steady 10-40 byt
 not one (`tests/sms_oracle/libretro_frames_host.c` option `host_ram_frames=1` dumps the full 8 KiB after every
 `retro_run`). Results, per image class:
 
-- 256 KiB: 600/600 framebuffers identical to both references; work RAM identical to Gearsystem on every frame after the
-  boot transient (frames 0-27) and to Genesis Plus GX except 9 bytes of stack residue below the stack pointer.
-- 128 KiB: 599/600 framebuffers identical to Gearsystem. The one difference is one scanline of one frame: a palette
-  (backdrop) write lands 21 T into line L and the platform, which renders a line at its first T-state (U2), applies it from
-  line L+1; Gearsystem applies it to line L, Genesis Plus GX (compared after its constant one-frame boot lag below) to line
-  L+1. The references disagree, so this is the U2 in-line render/write-visibility tolerance, not a defect. Genesis Plus GX is
-  exactly one frame later than the platform from the first displayed frame to the end (0 differences at that offset; ~97
-  differing frames at offset 0, all of them animation transitions); this is its power-on state (U9: pending frame flag)
-  and the ADR 0069 item 7 startup divergence.
-- 512 KiB: 0..231 identical to both references; from frame 232 a timed enemy/object enters the right edge at a frame that
-  differs by 1-3 frames on all three machines (Gearsystem and Genesis Plus GX disagree with each other from frame 233, 329
-  frames, the platform with either 292-342). The software derives a random start offset from the Z80 refresh register
-  (`LD A,R` executed at about frame 113 and 22 more times in 600 frames), which is the instruction count mod 128 and
-  therefore depends on the exact iteration counts of its status-polling loops (U2/U11); no two of the three machines agree
-  on it. Sweeping the frame-flag in-line offset 0-40 T on the platform never reproduces either reference (first differing
-  frame 225-235 in every case, the same frames where the references diverge from each other), while adding a constant to
-  every `LD A,R` result moves the first differing frame against Gearsystem from 232 to 413 (+3; 113 instead of 292 frames
-  differ), i.e. the `R` value is the controlling input. Classified reference-behaviour ambiguity (U2/U11 + `R`), not a
-  platform defect.
+- Size class A: 600/600 framebuffers identical to both references; work RAM identical to Gearsystem after the boot transient
+  and to Genesis Plus GX except a few bytes of stack residue below the stack pointer.
+- Size class B: 599/600 framebuffers identical to Gearsystem. The one difference is one scanline of one frame: a mid-line
+  palette write, where the platform (which renders a line at its first T-state, U2) applies it from the next line, Gearsystem
+  applies it to the same line and Genesis Plus GX (compared after its constant one-frame boot lag below) to the next line.
+  The references disagree, so this is the U2 in-line render/write-visibility sensitivity (unresolved U2; the pinned references
+  disagree). Genesis Plus GX is exactly one frame later than the platform from the first displayed frame to the end (0
+  differences at that offset); this is its power-on state (U9: pending frame flag) and the ADR 0069 item 7 startup divergence.
+- Size class C: identical to both references for the first part of the run; later a timed object enters at a frame that differs
+  by a few frames on all three machines (the two references also disagree with each other). The software derives a random
+  start offset from the Z80 refresh register, which is the instruction count mod 128 and therefore depends on the exact
+  iteration counts of its status-polling loops (U2/U11); no two of the three machines agree on it. Sweeping the frame-flag
+  in-line offset on the platform never reproduces either reference, while adding a constant to every `LD A,R` result moves the
+  first differing frame, i.e. the `R` value is the controlling input. Classified as unresolved U2/U11 + `R` sensitivity; the
+  pinned references disagree.
 - Power-on work RAM: only `$C000` differs between the platform (`$AB`), Gearsystem (`$00`) and Genesis Plus GX (`$A8`) in
   the comparisons above; none of the compared differences traces back to it (the BIOS-residue convention of section 8 stays).
 
@@ -593,9 +591,8 @@ not one (`tests/sms_oracle/libretro_frames_host.c` option `host_ram_frames=1` du
 aggregates (generated C per size class: 128 KiB about 52 translation units / 132k owners / ~89 MB / 8 s; 256 KiB 54 /
 263k / ~219 MB / 14 s; 512 KiB 58 / 525k / ~355 MB / 27 s, host `cc -O0`; counts only) are in
 `docs/testing/sms-capability-coverage.md` and ratcheted by `sms_capability_ratchet_test`. The mapper family of the three
-images is declared per SHA-256 and inferred by a human from the public SMS Power! mapper/cartridge pages (the Sonic-family
-image: listed as a 99% Sega mapper title; the other image's page describes a standard cartridge without RAM); it is not a
+images is declared per SHA-256 and inferred by a human from the public SMS Power! mapper/cartridge pages; it is not a
 byte heuristic and no tool derives it from ROM contents. The 128 KiB single-line and the 512 KiB divergences above are
-classified U2/U11 (reference disagreement; refresh-register `LD A,R` sensitivity), not platform defects. Open facts after
-T012: U2 unresolved (asserted tolerance), U8 unresolved (masked), U3 resolved, U6/U9/U10/U11/U4/U5 classified, U1 open with
+classified as unresolved U2/U11 sensitivity (the pinned references disagree; refresh-register `LD A,R` sensitivity). Open facts after
+T012: U2 unresolved (asserted tolerance), U8 unresolved (masked), U3 resolved, U6/U9/U10/U11/U4/U5 classified, U12 unresolved (classified divergence), U1 open with
 no attributed impact.

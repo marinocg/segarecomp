@@ -1181,7 +1181,11 @@ add_test(NAME sms_local_images_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_local_images_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sms_local_images_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_local_images_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
-set_property(TEST sms_machine_tests sms_machine_dependency_test APPEND PROPERTY LABELS full fast)
+# SEG-009-T013: durable dependency gate (reference scan, CMake link closure allowlist, negative controls, profile witness).
+add_test(NAME sms_dependency_gate_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_dependency_gate_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_machine_tests sms_machine_dependency_test sms_dependency_gate_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_dependency_gate_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST sms_bank_crossing_test sms_emission_budget_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_bank_crossing_test sms_emission_budget_test sms_machine_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 

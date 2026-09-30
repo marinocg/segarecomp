@@ -14,6 +14,7 @@
  *
  * Exit status: 0 frame target reached (or the guest stopped normally with no bound); 2 cycle budget reached first;
  * 3 fail-closed Z80 outcome; 4 SMS_ERROR_*; 64 usage. Plain C11; the ROM is the build-time embedded array. */
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,8 +47,9 @@ static int parse_u64(const char *text, uint64_t *out) {
   char *end = NULL;
   unsigned long long v;
   if (text == NULL || *text < '0' || *text > '9') return 0;
+  errno = 0;
   v = strtoull(text, &end, 10);
-  if (end == NULL || *end != '\0') return 0;
+  if (errno == ERANGE || end == NULL || *end != '\0') return 0; /* out-of-range numerals are a usage error */
   *out = (uint64_t)v;
   return 1;
 }

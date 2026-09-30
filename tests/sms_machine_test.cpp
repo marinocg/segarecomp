@@ -154,6 +154,33 @@ void test_ingestion() {
 
 // ---- ImageSet -----------------------------------------------------------------------------------------------------
 
+// Witness for timing.pal / vdp.revision_5124: nothing a caller controls can request a profile other than NTSC SMS 2.
+// Every region nibble, with and without explicit profile selection, with every recognized declaration, yields either the
+// baseline profile or a typed error; there is no other accepted profile. (The header has no PAL code; the option struct is
+// checked field-by-field by sms_machine_dependency_test.)
+void test_profile_has_no_request_channel() {
+  unsigned accepted = 0;
+  for (unsigned region = 0; region < 16; ++region) {
+    for (bool explicit_profile : {false, true}) {
+      for (const char* family : {"sega", "rom_only"}) {
+        IngestOptions o = declared(family);
+        o.explicit_profile = explicit_profile;
+        const auto rom_size = std::string(family) == "rom_only" ? 0x8000u : 0x20000u;
+        for (bool header : {true, false}) {
+          const auto r = ingest_cartridge(make_rom(rom_size, region, header), o);
+          if (r.ok()) {
+            ++accepted;
+            check(r.identity.profile == "sms2_ntsc_export", "an accepted cartridge always carries the NTSC SMS 2 profile");
+          } else {
+            check(r.error == SMS_ERROR_PROFILE_UNSUPPORTED, "a refused profile is always the typed profile error");
+          }
+        }
+      }
+    }
+  }
+  check(accepted > 0, "the profile sweep accepted at least the baseline region");
+}
+
 void test_image_set() {
   for (std::size_t size : {0x8000u, 0x20000u, 0x80000u}) {
     const auto rom = make_rom(size);
@@ -568,6 +595,7 @@ void test_contract_agreement_and_mutations() {
 
 int main() {
   test_ingestion();
+  test_profile_has_no_request_channel();
   test_image_set();
   test_memory();
   test_cart_ram_control_and_rom_only();
