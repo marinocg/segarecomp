@@ -31,11 +31,11 @@ ADR 0058 fixed the strategy (broad immutable-image AOT, B1 owners, window-relati
    file, registered once in the registry; a form claimed by two rows is an error.
 5. **RSS shape.** The shared header carries only the ABI include. Owners are units published with
    `publish_declaration = false` (an additive `translation_units.hpp` parameter; default behaviour unchanged); a direct
-   binding declares its successor in block scope; the main TU declares every owner of a flat entry table (entry table + dispatcher); above 65,536 owners the generic chunked table (`emit_compiled_entry_table_chunked`, SEG-008-T009) moves the table and each chunk's owner declarations into per-chunk `entry` TUs and the main TU keeps only the chunk directory and dispatcher. Sharding
-   the entry table itself is not needed at the measured sizes (about 37 MiB of C and 33 TUs per 64 KiB image) and stays open.
+   binding declares its successor in block scope; the main TU declares every owner of a flat entry table (entry table + dispatcher); above 65,536 owners the generic chunked table (`emit_compiled_entry_table_chunked`, SEG-008-T009) moves the table and each chunk's owner declarations into per-chunk `entry` TUs and the main TU keeps only the chunk directory and dispatcher.
+   Tables of at most 65,536 entries (every 64 KiB image, about 37 MiB of C and 33 TUs) stay flat; the chunked form was needed at 512 KiB scale (ADR 0058 T009 addendum).
 6. **Window-relative variants.** Per offset, the classification of each admissible window is compared; equal
    semantics share one body, differing ones become `switch (window_base)` variants (a stub of the right kind in one window,
-   a full owner in another). A `prefix_lock` start cannot occur in a window-relative owner (non-code or another window
+   a full owner in another). Windows of one image may expose different sub-ranges (SMS slot 0 exposes offsets 0x0400-0x3FFF of a bank that slots 1 and 2 expose whole): an owner exposed by only some of the image's window bases also gets a base switch whose default is `no_owner`, and two windows of one image at the same base may not overlap. A `prefix_lock` start cannot occur in a window-relative owner (non-code or another window
    breaks every fetch circle) and is rejected at emission.
 7. **Harness.** Vectors are plain text shared by both sides. The comparator is Z80-local (SEG-020 order: cpu, memory, io,
    timing); `m68k_first_divergence.py` is M68k-schema-bound and is not touched. The oracle adapter normalises the core's

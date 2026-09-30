@@ -50,6 +50,7 @@ struct Plan {
   std::uint32_t identity = 0;
   std::uint16_t key = 0;
   bool relative = false;
+  bool partial = false;  // window-relative owner exposed by only some of the image's windows: it must check the base
   std::uint64_t dense = 0;
   bool invariant = false;
   std::vector<Variant> variants;
@@ -164,7 +165,7 @@ void emit_owner(std::ostream& out, const Plan& plan, const std::string& symbol, 
   if (!plan.relative) out << "  (void)window_base;\n";
   const bool lock = plan.variants.size() == 1 && first.classification.kind == StartKind::prefix_lock;
   if (!lock) out << "  if (z80_owner_prologue(rt, " << pc.start << ")) return Z80_OWNER_STOP;\n";
-  if (plan.variants.size() == 1) {
+  if (plan.variants.size() == 1 && !plan.partial) {
     emit_variant_body(out, plan, first, plan.key, "  ", plan.successor_symbol);
     out << "}\n";
     return;
@@ -217,6 +218,11 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
       if (w.length == 0 || w.first_offset + w.length > kSpace || static_cast<std::uint32_t>(w.base) + w.first_offset + w.length > kSpace)
         return fail("code window leaves the 16-bit logical address space");
       if (image.bytes.size() < w.first_offset + w.length) return fail("code image shorter than its exposed range");
+      for (const CodeWindow& other : image.windows) {  // two placements at one base with overlapping offsets are ambiguous
+        if (&other == &w || other.base != w.base) continue;
+        if (w.first_offset < other.first_offset + other.length && other.first_offset < w.first_offset + w.length)
+          return fail("windows of one image overlap at the same base");
+      }
       // Windows of one image may expose different sub-ranges (ADR 0058: SMS slot 0 exposes 0x0400-0x3FFF of a bank whose
       // other slots expose all of it). The owner key is the image offset, so it is well defined for any such set.
     }
@@ -314,9 +320,15 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
             plan.variants.push_back(make_variant(c));
             same = plan.variants.end() - 1;
           }
-          same->bases.push_back(w.base);
+          if (std::ranges::find(same->bases, w.base) == same->bases.end()) same->bases.push_back(w.base);  // no duplicate case labels
         }
         if (plan.variants.empty()) continue;  // an offset no window exposes
+        std::size_t exposing = 0;  // distinct window bases exposing this offset vs all of the image's distinct bases
+        for (const Variant& v : plan.variants) exposing += v.bases.size();
+        std::vector<std::uint16_t> all_bases;
+        for (const CodeWindow& w : image.windows)
+          if (std::ranges::find(all_bases, w.base) == all_bases.end()) all_bases.push_back(w.base);
+        plan.partial = relative && exposing < all_bases.size();  // a base that does not expose this offset must fail closed
         if (relative && std::ranges::any_of(plan.variants, [](const Variant& v) { return v.classification.kind == StartKind::prefix_lock; }))
           return fail("a prefix_lock start cannot occur in a window-relative owner");
         if (std::ranges::all_of(plan.variants, [](const Variant& v) { return v.absent; })) {

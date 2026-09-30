@@ -193,6 +193,24 @@ def main():
         check((1, 0x0000) in by_key and (2, 0x0000) in by_key, "reloc: invariant window and banked image share offset 0 without a key collision")
         check(report["reloc"]["stats"]["variants"] == 1, "reloc: exactly one owner selects its kind from the base")
 
+        # Windows exposing different sub-ranges: an owner exposed by only some windows must fail closed for the others.
+        partial_spec = "image 1 banked\nwindow 1 4000 0 100\nwindow 1 8000 80 80\nfill 1 00 200\n"
+        _, partial_owners, error = emit_only(partial_spec, work / "partial", True)
+        check(error is None, "sub-range windows failed to emit: %s" % error)
+        if error is None:
+            keys = {o["key"] for o in partial_owners}
+            check(keys == set(range(0x100)), "sub-range windows: owners must be the union of the exposed offsets 0..0xFF")
+            text = "".join(p.read_text() for p in sorted((work / "partial").glob("*_owner_*.c")))
+            def owner_text(symbol):
+                start = text.index(symbol + "(struct Z80Runtime *rt, uint16_t window_base) {")  # the definition (external linkage in a shard)
+                end = text.find("\n/* ", start)
+                return text[start:end if end != -1 else len(text)]
+            head = owner_text("z80_o_0001_0010")
+            check("switch (window_base)" in head and "case 0x4000" in head and "case 0x8000" not in head and "Z80_ERROR_NO_OWNER" in head,
+                  "an owner exposed only at base 0x4000 must check the window base and fail closed for 0x8000")
+            check("switch (window_base)" not in owner_text("z80_o_0001_0090"),
+                  "an owner exposed by every window serves every base without a base check")
+
         # Determinism: byte-identical output across two emissions, and a byte-identical build of the same units.
         spec = z.image_spec_text(doc["images"]["wrap64"]["images"])
         for name in ("a", "b"):
@@ -224,6 +242,7 @@ def main():
             "window beyond the address space": "image 1 invariant\nwindow 1 FF00 0 200\nfill 1 00 200\n",
             "image shorter than its window": "image 1 invariant\nwindow 1 0 0 100\nfill 1 00 10\n",
             "no window": "image 1 banked\nfill 1 00 10\n",
+            "windows of one image overlap at the same base": "image 1 banked\nwindow 1 4000 0 100\nwindow 1 4000 80 100\nfill 1 00 200\n",
         }
         for label, text in bad_specs.items():
             stats, _, error = emit_only(text, work / "bad", False)
