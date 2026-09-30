@@ -110,5 +110,5 @@ jobs:
           hint="-DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
           cmake -S . -B build/sdl3 -G Ninja -DCMAKE_BUILD_TYPE=Debug \
             -DSEGARECOMP_WARNINGS_AS_ERRORS=ON -DSEGARECOMP_ENABLE_SDL3_VIEWER=ON -DSEGARECOMP_BUILD_LAUNCHER=ON -DBUILD_TESTING=OFF $hint
-      - name: Build the SDL3 viewer target and the consumer launcher
-        run: cmake --build build/sdl3 --target segarecomp_viewer_genesis_sdl3 segarecomp-launcher
+      - name: Build the SDL3 viewer targets (Genesis, Master System) and the consumer launcher
+        run: cmake --build build/sdl3 --target segarecomp_viewer_genesis_sdl3 segarecomp_viewer_master_system_sdl3 segarecomp_viewer_master_system_main_check segarecomp-launcher

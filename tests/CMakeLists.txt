@@ -1261,3 +1261,14 @@ add_test(NAME sms_machine_e2e_oracle_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_e2e_oracle_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST sms_machine_e2e_test sms_machine_e2e_oracle_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_machine_e2e_test sms_machine_e2e_oracle_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T009: SMS viewer core (fake host, fake CPU) and the generated-native viewer/headless equivalence.
+add_executable(sms_viewer_tests sms_viewer_test.cpp)
+target_link_libraries(sms_viewer_tests PRIVATE segarecomp::viewer_master_system)
+segarecomp_enable_warnings(sms_viewer_tests)
+add_test(NAME sms_viewer_tests COMMAND sms_viewer_tests)
+add_test(NAME sms_viewer_equivalence_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_viewer_equivalence_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_viewer_tests APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_viewer_equivalence_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_viewer_equivalence_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")

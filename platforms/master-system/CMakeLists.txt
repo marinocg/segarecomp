@@ -4,3 +4,4 @@
 add_subdirectory(runtime)
 add_subdirectory(machine)
 add_subdirectory(headless)
+add_subdirectory(viewer)
