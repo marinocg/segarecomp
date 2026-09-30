@@ -20,6 +20,7 @@
 
 #include "sms_audio.h"
 #include "sms_machine.h"
+#include "sms_pad.h"
 #include "sms_psg.h"
 
 extern const uint8_t sms_rom_data[];
@@ -35,6 +36,7 @@ int sms_write_device_artifacts(SmsMachine *machine, const char *dir); /* device 
 
 static SmsMachine machine;
 static SmsPsg psg_device;         /* T007: attached after sms_install_devices unless that unit installed a PSG */
+static SmsPad pad_device;         /* T006: attached after sms_install_devices unless that unit installed a pad */
 static SmsAudioCapture audio;
 static SmsIrqTraceEntry irq_buffer[IRQ_CAPACITY];
 static SmsMapperTraceEntry mapper_buffer[MAPPER_CAPACITY];
@@ -182,6 +184,7 @@ int main(int argc, char **argv) {
     }
     psg_attached = sms_psg_attach(&psg_device, &machine, capture ? sms_audio_capture_sink : NULL, &audio);
   }
+  if (machine.pad.read == NULL) sms_pad_attach(&machine, &pad_device); /* the VDP (if any) receives the H counter latch */
   if (input_path != NULL && !load_input(input_path)) return 64;
   machine.stop_on_halt_idle = cycle_budget == SMS_NO_LIMIT && frames == SMS_NO_LIMIT;
   sms_machine_reset(&machine); /* device resets run after the devices are attached */

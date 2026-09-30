@@ -37,6 +37,34 @@
     },
     {
       "declaration_source": "fixture_builder",
+      "fixture": "render_raster",
+      "mapper": "rom_only",
+      "sha256": "173c8a7d0a7940b37e58fe8841aa9436caae03f7399d900f1f4b9b91cacac3e3",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "render_scene_a",
+      "mapper": "rom_only",
+      "sha256": "4551b69d88e93b293f3ee0ed841e9fb9ca44fe9bebd60517007b063a025cbc6e",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "render_scene_b",
+      "mapper": "rom_only",
+      "sha256": "afd1e4791a342570c02ff3ba88a85d6b8c619f243d6fb95d275aa78ff81e46b7",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "render_scene_c",
+      "mapper": "rom_only",
+      "sha256": "33eaea2f3e55fcb62798f26b53b276777a37f9d2aa911e4e6c66d478a07afe25",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
       "fixture": "sched_irq",
       "mapper": "rom_only",
       "sha256": "728c3fa7eada24cb7d9da77da10bdbcb944583e8079865df3606455e5dfb53bb",

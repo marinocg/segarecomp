@@ -60,6 +60,8 @@ typedef struct SmsVdp {
   uint8_t read_buffer;
   uint8_t frame_pending, sprite_overflow, sprite_collision, line_pending;
   uint8_t line_counter;
+  uint8_t hcounter_latch; /* upper 8 bits of the 9-bit H counter at the last TH rising edge (contract 9.7, U3) */
+  uint8_t hcounter_valid; /* 0 until the first latch: a port $7F read before it stops typed */
   uint32_t line;  /* line of the last scanline event (0..261) */
   uint64_t frame; /* frame of the last scanline event */
 
@@ -78,9 +80,16 @@ void sms_vdp_reset(SmsVdp *vdp);
 
 /* Wires `vdp` into `machine->vdp` (port device, scanline hook, irq sources) and binds the error sink to the machine. */
 void sms_vdp_install(SmsMachine *machine, SmsVdp *vdp);
+/* The SmsVdp wired into `machine` by sms_vdp_install, or NULL when the VDP slot holds any other device (stubs, none). */
+SmsVdp *sms_vdp_from_machine(SmsMachine *machine);
 void sms_vdp_set_trace(SmsVdp *vdp, SmsVdpTraceEntry *entries, uint32_t capacity);
 /* Emits the pending VRAM/CRAM write summaries (call once at the end of a run before reading the trace). */
 void sms_vdp_flush_trace(SmsVdp *vdp, uint64_t cycles);
+
+/* H counter (contract 9.7, U3). `sms_vdp_hcounter_value` maps a T offset within a 228-T line to the 8-bit port value; the
+ * latch is taken by the pad device on a TH pin rising edge (sms_pad.h) and returned, frozen, by every port $7F read. */
+uint8_t sms_vdp_hcounter_value(uint32_t t_in_line);
+void sms_vdp_latch_hcounter(SmsVdp *vdp, uint64_t cycles);
 
 /* Port protocol, exposed for the unit tests (the machine reaches these through `SmsVdpDevice`). */
 uint8_t sms_vdp_read(SmsVdp *vdp, SmsPortClass cls, uint64_t cycles);

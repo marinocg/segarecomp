@@ -1220,3 +1220,33 @@ add_test(NAME sms_vdp_oracle_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST sms_vdp_tests APPEND PROPERTY LABELS full fast)
 set_property(TEST sms_vdp_native_test sms_vdp_oracle_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_vdp_native_test sms_vdp_oracle_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T005: SMS deterministic renderer: state-injection differential against the independent model with mutation
+# controls (hermetic, no fixtures or ROMs), and the generated-native rendering fixtures (tests/sms_render_native_test.py).
+add_executable(sms_render_dump tools/sms_render_dump.c)
+set_target_properties(sms_render_dump PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_link_libraries(sms_render_dump PRIVATE segarecomp::runtime_master_system)
+segarecomp_enable_warnings(sms_render_dump)
+add_test(NAME sms_render_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_render_test.py $<TARGET_FILE:sms_render_dump> ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_render_native_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_render_native_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_render_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_render_native_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_render_test sms_render_native_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T006: SMS controllers, I/O control, TH-latched H counter and pause NMI: exhaustive pin-by-pin reference sweep with a
+# polarity mutation control (hermetic), the generated-native scripted-input fixtures, and the H counter table differential
+# against the pinned references (skips without SEGARECOMP_SMS_ORACLE_CHECKOUT).
+add_executable(sms_pad_tests sms_pad_test.cpp)
+target_link_libraries(sms_pad_tests PRIVATE segarecomp::runtime_master_system)
+segarecomp_enable_warnings(sms_pad_tests)
+add_test(NAME sms_pad_tests COMMAND sms_pad_tests)
+add_test(NAME sms_pad_native_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_pad_native_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_hcounter_reference_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_hcounter_reference_test.py ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_pad_tests APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_pad_native_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_hcounter_reference_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_pad_native_test sms_hcounter_reference_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")

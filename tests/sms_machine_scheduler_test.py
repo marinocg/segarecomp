@@ -36,7 +36,7 @@ RUNTIME = PLATFORM / "runtime"
 Z80_INCLUDE = ROOT / "libs" / "codegen" / "c11" / "include"
 STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-D_CRT_SECURE_NO_WARNINGS"]
 PSG_LIB = ROOT / "libs" / "device" / "sega" / "psg"
-RUNTIME_SOURCES = [RUNTIME / n for n in ("sms_memory.c", "sms_sha256.c", "sms_input.c", "sms_machine.c", "sms_psg.c")] + [
+RUNTIME_SOURCES = [RUNTIME / n for n in ("sms_memory.c", "sms_sha256.c", "sms_input.c", "sms_machine.c", "sms_psg.c", "sms_pad.c", "sms_vdp.c")] + [
     PSG_LIB / "src" / "sn76489.c", PLATFORM / "headless" / "sms_audio.c"]
 DRIVER = PLATFORM / "headless" / "sms_headless.c"
 NO_DEVICES = PLATFORM / "headless" / "sms_devices_none.c"

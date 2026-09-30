@@ -5,8 +5,10 @@ add_library(segarecomp_runtime_master_system STATIC
   sms_sha256.c
   sms_input.c
   sms_machine.c
+  sms_pad.c
   sms_psg.c
   sms_vdp.c
+  sms_render.c
 )
 add_library(segarecomp::runtime_master_system ALIAS segarecomp_runtime_master_system)
 set_target_properties(segarecomp_runtime_master_system PROPERTIES

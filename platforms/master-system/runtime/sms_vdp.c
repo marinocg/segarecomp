@@ -100,10 +100,32 @@ void sms_vdp_reset(SmsVdp *v) {
   v->read_buffer = 0;
   v->frame_pending = v->sprite_overflow = v->sprite_collision = v->line_pending = 0;
   v->line_counter = 0xFFu;
+  v->hcounter_latch = 0;
+  v->hcounter_valid = 0;
   v->line = 0;
   v->frame = 0;
   v->trace_count = v->trace_dropped = 0;
   v->vram_writes = v->cram_writes = 0;
+}
+
+/* ---- H counter (contract 9.7, U3) ----------------------------------------------------------------------------------- */
+
+/* The counter has 342 pixel positions per line, 2 pixels per count, running 0x00-0x93 then 0xE9-0xFF (MacDonald 342-pixel
+ * breakdown). Pixel position = floor(3 x T / 2) + origin (exact integer arithmetic, never accumulated). Line T = 0 is
+ * pixel 266 (count 0x85), the origin of the GPGX table; Gearsystem's is 30 pixels (20 T) earlier, a constant
+ * shift of the same sequence (the U2 in-line offset tolerance, tests/sms_hcounter_reference_test.py). */
+#define SMS_HCOUNTER_ORIGIN_PIXEL 266u
+#define SMS_HCOUNTER_LINE_PIXELS 342u
+
+uint8_t sms_vdp_hcounter_value(uint32_t t_in_line) {
+  const uint32_t pixel = (3u * t_in_line / 2u + SMS_HCOUNTER_ORIGIN_PIXEL) % SMS_HCOUNTER_LINE_PIXELS;
+  const uint32_t count = pixel / 2u; /* 0..170 */
+  return (uint8_t)(count < 0x94u ? count : 0xE9u + (count - 0x94u));
+}
+
+void sms_vdp_latch_hcounter(SmsVdp *v, uint64_t cycles) {
+  v->hcounter_latch = sms_vdp_hcounter_value((uint32_t)(cycles % 228u));
+  v->hcounter_valid = 1u;
 }
 
 /* ---- ports ---------------------------------------------------------------------------------------------------- */
@@ -172,9 +194,12 @@ uint8_t sms_vdp_read(SmsVdp *v, SmsPortClass cls, uint64_t cycles) {
       }
       break;
     }
-    case SMS_PORT_H_COUNTER: /* U3: the latch trigger and value table are T006 (TH input) facts; never a guessed value */
-      if (v->error_sink != NULL)
+    case SMS_PORT_H_COUNTER: /* the value latched by the last TH rising edge; unlatched, no value exists: typed stop */
+      if (v->hcounter_valid) {
+        value = v->hcounter_latch;
+      } else if (v->error_sink != NULL) {
         sms_memory_latch_error(v->error_sink, SMS_ERROR_HCOUNTER_UNRESOLVED, 0x7Fu, 0, cycles);
+      }
       break;
     default: break;
   }
@@ -228,6 +253,8 @@ void sms_vdp_digest(const SmsVdp *v, SmsSha256 *sha) {
   sms_sha256_update(sha, v->reg, sizeof v->reg);
   sms_sha256_update_u16(sha, v->address);
   sms_sha256_update(sha, scalars, sizeof scalars);
+  sms_sha256_update_u8(sha, v->hcounter_latch);
+  sms_sha256_update_u8(sha, v->hcounter_valid);
   sms_sha256_update_u32(sha, v->line);
   sms_sha256_update_u64(sha, v->frame);
   sms_sha256_update_u32(sha, v->vram_writes);
@@ -260,3 +287,5 @@ void sms_vdp_install(SmsMachine *m, SmsVdp *v) {
   m->vdp.scanline = seam_scanline;
   m->vdp.irq_sources = seam_irq;
 }
+
+SmsVdp *sms_vdp_from_machine(SmsMachine *m) { return m->vdp.scanline == seam_scanline ? (SmsVdp *)m->vdp.port.context : NULL; }

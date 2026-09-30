@@ -5,7 +5,7 @@ Code lives in `machine/` (generation-time C++: cartridge ingestion, mapper ident
 surface, port decode, machine composition, deterministic scheduler, run API, state digest, scripted input) and `headless/`
 (the generated program's `main`, artifacts, and the no-device wiring). See ADR 0065 and ADR 0066. The VDP state, port protocol, status register and frame/line interrupts
 (`runtime/sms_vdp.{h,c}`, ADR 0067; `headless/sms_devices_vdp.c` attaches it and writes `vdp.trace`, `vram.bin`, `cram.bin`,
-`vdp.json`) are independent of every other platform's VDP; rendering is T005. The PSG (`libs/device/sega/psg`, wired by `runtime/sms_psg.c`) produces the deterministic PCM stream and `audio.pcm`/`audio.sha256` headless artifacts; controllers stay typed and fail closed until T006 attaches them; the viewer lands in T009.
+`vdp.json`) are independent of every other platform's VDP; rendering is T005. The PSG (`libs/device/sega/psg`, wired by `runtime/sms_psg.c`) produces the deterministic PCM stream and `audio.pcm`/`audio.sha256` headless artifacts; the controllers and I/O control (`runtime/sms_pad.c`, scripted `--input`, pause NMI, TH-latched H counter) are attached by the headless driver unless a device unit installs its own pad; the viewer lands in T009.
 
 **Purpose:** Static recompilation of Z80 + SMS VDP software.
 

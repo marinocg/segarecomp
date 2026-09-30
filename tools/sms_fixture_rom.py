@@ -1433,9 +1433,135 @@ VDP_FIXTURES = {"vdp_seq_a": fixture_vdp_seq_a, "vdp_seq_b": fixture_vdp_seq_b, 
                 **{name: _vdp_mode_fixture(name) for name in VDP_MODE_CASES}}
 
 
+# --- SEG-009-T005: rendering fixtures --------------------------------------------------------------------------------------
+# Project-authored scenes (LCG-generated tile, name table, sprite and palette data) loaded through the VDP data port with OTIR,
+# then the display is enabled. The static scenes differ in register configuration (scroll, locks, sprite size/zoom/shift, left
+# blank, 224-line mode, sprite pattern base); `render_raster` additionally changes R8/R9 from a line interrupt every 8 lines so the
+# per-line latching and the R9 frame latch are exercised through the real interrupt route.
+RENDER_DATA_ORG = 0x1000
+RENDER_SCENES = {
+    # name: (seed, tall, regs R0..R10 as finally programmed, raster)
+    "render_scene_a": (0x5CE11A01, False, [0x06, 0xC0, 0x0E, 0xFF, 0xFF, 0x7F, 0xFB, 0x03, 0x1D, 0x25, 0xFF], False),
+    "render_scene_b": (0x5CE11B02, False, [0xEE, 0xC3, 0x0A, 0xFF, 0xFF, 0x7F, 0xFB, 0x0C, 0x2B, 0x91, 0xFF], False),
+    "render_scene_c": (0x5CE11C03, True, [0x06, 0xD0, 0x0C, 0xFF, 0xFF, 0x7F, 0xFF, 0x05, 0x46, 0x7A, 0xFF], False),
+    "render_raster": (0x5CE11D04, False, [0x76, 0xC0, 0x0E, 0xFF, 0xFF, 0x7F, 0xFB, 0x01, 0x00, 0x00, 0x07], True),
+}
+
+
+def render_scene_data(seed, tall):
+    """(tiles 0-95 at VRAM 0 [3072 B], tiles 256-263 at $2000 [256 B], name table [2048 B], sprite attribute area $3F00 [256 B],
+    CRAM [32 B]) of a deterministic scene that exercises overflow, collision, priority, flips and both palettes."""
+    state = [seed & 0xFFFFFFFF]
+
+    def rnd(n):
+        state[0] = (state[0] * 1664525 + 1013904223) & 0xFFFFFFFF
+        return (state[0] >> 8) % n
+
+    def tile(density):
+        out = []
+        for _ in range(8):
+            planes = [0, 0, 0, 0]
+            for col in range(8):
+                v = rnd(16) if rnd(100) < density else 0
+                for p in range(4):
+                    planes[p] |= ((v >> p) & 1) << (7 - col)
+            out += planes
+        return out
+
+    tiles = []
+    for t in range(96):
+        tiles += tile((20, 50, 90)[t % 3])
+    upper = []
+    for _ in range(8):
+        upper += tile(70)
+    nt = []
+    for _ in range(32 * 32):
+        entry = rnd(96) | (rnd(2) << 9) | (rnd(2) << 10) | (rnd(2) << 11) | (rnd(2) << 12)
+        nt += [entry & 255, entry >> 8]
+    sat = [0xD0] * 64 + [0] * 64 + [0] * 128
+    count = 26
+    for i in range(count):
+        crowd = i < 12  # twelve sprites share a band of lines: per-line overflow, overlaps: collision
+        y = (70 + rnd(6)) if crowd else rnd(180)
+        if y == 0xD0:
+            y = 0xCF
+        sat[i] = y
+        sat[0x80 + 2 * i] = (60 + rnd(90)) if crowd else rnd(256)
+        sat[0x81 + 2 * i] = rnd(96) if i % 5 else rnd(8)
+    sat[count] = 0xD0
+    if not tall:  # entries after the terminator are dead in 192-line mode
+        for i in range(count + 1, count + 6):
+            sat[i] = 30 + 20 * (i - count)
+            sat[0x80 + 2 * i], sat[0x81 + 2 * i] = 40 + rnd(150), 1 + rnd(90)
+    if tall:
+        sat[count] = 200  # 224-line mode has no terminator: the entries beyond are live
+        for i in range(count + 1, 40):
+            sat[i] = rnd(224)
+            sat[0x80 + 2 * i], sat[0x81 + 2 * i] = rnd(256), rnd(96)
+        sat[40] = 0xD0
+    cram = [rnd(64) for _ in range(32)]
+    return bytes(tiles), bytes(upper), bytes(nt), bytes(sat), bytes(cram)
+
+
+def _render_segment(label, address, code, length):
+    lo, hi = address & 255, (address >> 8) | (code << 6)
+    lines = ["        ld a,0x%02X" % lo, "        out (0xBF),a", "        ld a,0x%02X" % hi, "        out (0xBF),a",
+             "        ld hl,%s" % label]
+    if length >= 256:
+        lines += ["        ld d,%d" % (length // 256), "%s_l:  ld b,0" % label, "        ld c,0xBE", "        otir",
+                  "        dec d", "        jr nz,%s_l" % label]
+    else:
+        lines += ["        ld b,%d" % length, "        ld c,0xBE", "        otir"]
+    return lines
+
+
+def render_source(name):
+    seed, tall, regs, raster = RENDER_SCENES[name]
+    tiles, upper, nt, sat, cram = render_scene_data(seed, tall)
+    nt_base = ((regs[2] & 0x0C) << 10) | 0x700 if tall else (regs[2] & 0x0E) << 10
+    lines = [".org 0x0000", "        di", "        im 1", "        ld sp,0xDFF0", "        jp main",
+             ".org 0x0038"]
+    if raster:
+        lines += ["        push af", "        in a,(0xBF)", "        ld a,(0xC010)", "        add a,13", "        ld (0xC010),a",
+                  "        out (0xBF),a", "        ld a,0x88", "        out (0xBF),a", "        ld a,(0xC010)",
+                  "        add a,a", "        out (0xBF),a", "        ld a,0x89", "        out (0xBF),a", "        pop af", "        ei",
+                  "        reti"]
+    else:
+        lines += ["        ei", "        reti"]
+    lines += [".org 0x0066", "        retn", ".org 0x0080", "main:   xor a", "        ld (0xC010),a"]
+    lines += _render_segment("d_tiles", 0x0000, 1, len(tiles))
+    lines += _render_segment("d_upper", 0x2000, 1, len(upper))
+    lines += _render_segment("d_nt", nt_base, 1, len(nt))
+    lines += _render_segment("d_sat", 0x3F00, 1, len(sat))
+    lines += ["        ld a,0x00", "        out (0xBF),a", "        ld a,0xC0", "        out (0xBF),a", "        ld hl,d_cram",
+              "        ld b,32", "        ld c,0xBE", "        otir"]
+    for reg in (0, 2, 5, 6, 7, 8, 9, 10):
+        lines += _vdp_reg(reg, regs[reg])
+    lines += _vdp_reg(1, regs[1])  # display enable last: VRAM, CRAM and every register are final
+    if raster:
+        lines += ["        in a,(0xBF)", "        ei", "fin:    halt", "        jr fin"]
+    else:
+        lines += ["        ld bc,0x1800", "sp:     dec bc", "        ld a,b", "        or c", "        jr nz,sp", "        in a,(0xBF)",
+                  "        ld (0xC100),a", "        ld a,0xA5", "        ld (0xC1FF),a", "fin:    halt", "        jr fin"]
+    lines.append(".org 0x%04X" % RENDER_DATA_ORG)
+    for label, blob in (("d_tiles", tiles), ("d_upper", upper), ("d_nt", nt), ("d_sat", sat), ("d_cram", cram)):
+        lines.append("%s:" % label)
+        for i in range(0, len(blob), 16):
+            lines.append("        .db " + ",".join("0x%02X" % b for b in blob[i:i + 16]))
+    return "\n".join(lines) + "\n"
+
+
+def _render_fixture(name):
+    return lambda: _rom_only(render_source(name))
+
+
+RENDER_FIXTURES = {name: _render_fixture(name) for name in RENDER_SCENES}
+
+
 FIXTURES = {"trivial": fixture_trivial, "oracle_smoke": fixture_oracle_smoke, "bank_crossing": fixture_bank_crossing,
             "sched_irq": fixture_sched_irq, "sched_straddle": fixture_sched_straddle, "port_open": fixture_port_open,
-            "port_vdp": fixture_port_vdp, "memctl_bad": fixture_memctl_bad, "u11_probe": fixture_u11_probe, **VDP_FIXTURES}
+            "port_vdp": fixture_port_vdp, "memctl_bad": fixture_memctl_bad, "u11_probe": fixture_u11_probe, **VDP_FIXTURES,
+            **RENDER_FIXTURES}
 
 
 def build(name):

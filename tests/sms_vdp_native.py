@@ -20,7 +20,7 @@ class Native:
         self.include = [self.root / "libs" / "codegen" / "c11" / "include", platform / "runtime", platform / "headless",
                         self.root / "libs" / "device" / "sega" / "psg" / "include"]
         self.sources = ([platform / "runtime" / n for n in ("sms_memory.c", "sms_sha256.c", "sms_input.c", "sms_machine.c",
-                                                            "sms_psg.c", "sms_vdp.c")]
+                                                            "sms_psg.c", "sms_pad.c", "sms_vdp.c", "sms_render.c")]
                         + [self.root / "libs" / "device" / "sega" / "psg" / "src" / "sn76489.c"]
                         + [platform / "headless" / n for n in ("sms_audio.c", "sms_headless.c", "sms_devices_vdp.c")])
         self.failures = []
