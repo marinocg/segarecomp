@@ -88,7 +88,10 @@ before a scheduled device event may complete after it [Z80-ABI §8]. The platfor
 instruction-start T-state: device state is first advanced through every event with `T_event <= T_access`, then the
 access is applied. An instruction that straddles a device event (for example an `OUT` starting at T 224 of a line
 whose next event is at T 228) is ordered *before* that event, even when the real bus write happens after it. The
-ordering error is bounded by one instruction (at most 23 T; each block-I/O iteration is its own boundary). This can
+ordering error is bounded by one indivisible boundary: at most 23 T for a single form, plus 4 T per superseded DD/FD
+prefix in an index-prefix chain (SEG-008 legal forms `index_prefix_chain`; a chain has no static length limit, and an
+endless chain becomes the resumable `prefix_lock`). Each block-instruction iteration and each interrupt response
+(at most 19 T) is its own boundary [Z80-ABI §8]. This can
 affect raster register changes near line boundaries, V/H counter reads, status/IRQ interactions, PSG write phase
 and so PCM. Whether instruction-start ordering is sufficient for the baseline is the open fact U11; it is not
 silently approximated, and no runtime opcode decoding is added [cap:timing.access_timestamp].
@@ -501,7 +504,7 @@ Distinct from `Z80Outcome` and reported with PC, image identity, T-state and the
 | U8 | content of the fine-scroll gap (backdrop "and sometimes pattern data from sprite #0") | backdrop only | T005 | finalist comparison plus the public statement; keep backdrop if unresolved and record the tolerance |
 | U9 | post-BIOS VDP state: register contents (no public source; references disagree on R1/R6), VRAM/CRAM contents | project convention of §8/§9.1; normal software writes every register before enabling the display | T004 | T011 attributes any title that renders before writing a register; a cited BIOS behaviour then becomes a profile delta |
 | U10 | tone period 0/1 digital output: toggle every tick (references) vs constant +1 (SP-PSG) | model toggles; affects PCM of sample playback | T007 | a public 315-5246 capture or statement; otherwise keep the reference behaviour and record the departure |
-| U11 | instruction-internal host-access timing: the ABI timestamps memory/I/O callbacks at instruction start and does not expose the bus-cycle offset | accesses are ordered at instruction start; error at most one instruction (23 T) around a device event | T003 (scheduler), T004 (VDP ports/counters/IRQ), T006 (pad reads), T007 (PSG) | adversarial fixtures whose accesses straddle a scheduled device boundary, compared with both pinned machine references. If instruction-start ordering matches for the declared baseline, record that compatibility contract; if not, open a bounded SEG-008 continuation adding statically known per-access timing offsets to the ABI. No silent approximation, no runtime opcode decoding |
+| U11 | instruction-internal host-access timing: the ABI timestamps memory/I/O callbacks at instruction start and does not expose the bus-cycle offset | accesses are ordered at instruction start; error at most one indivisible boundary around a device event (23 T per form + 4 T per superseded DD/FD prefix; block iterations and interrupt responses are separate boundaries) | T003 (scheduler), T004 (VDP ports/counters/IRQ), T006 (pad reads), T007 (PSG) | adversarial fixtures whose accesses straddle a scheduled device boundary, compared with both pinned machine references. If instruction-start ordering matches for the declared baseline, record that compatibility contract; if not, open a bounded SEG-008 continuation adding statically known per-access timing offsets to the ABI. No silent approximation, no runtime opcode decoding |
 
 (Status bits 4-0 are a project convention, §9.3; there is no U7.)
 

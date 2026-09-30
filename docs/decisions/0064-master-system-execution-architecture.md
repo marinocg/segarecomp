@@ -75,8 +75,9 @@ SmsStop sms_run_until_frame(SmsMachine *m, uint64_t frame);     /* stops at T >=
   genuinely needed, it is a deliberate, separate decision. Tooling that enforces a finite budget (the launcher, and
   the harness rule for agents) must accept `--cycle-budget`/`--frames` for SMS executables (T003/T010).
 - Exit status:
-  - 0: requested frames/cycles reached;
-  - 2: cycle budget exhausted;
+  - 0: the `--frames` target was reached (`SMS_STOP_FRAME`), or the guest stopped normally with no bound given;
+  - 2: the `--cycle-budget` was reached first, or it was the only bound (`SMS_STOP_CYCLE_BUDGET`). When both bounds
+    fall on the same instruction boundary, the frame target wins (exit 0);
   - 3: fail-closed Z80 outcome;
   - 4: `SMS_ERROR_*`;
   - 64: usage.
@@ -85,7 +86,7 @@ SmsStop sms_run_until_frame(SmsMachine *m, uint64_t frame);     /* stops at T >=
 
 | artifact | format |
 | --- | --- |
-| `status.json` | stop kind, frames, T-state, instruction count, error class/PC/identity when stopped |
+| `status.json` | stop kind, frames completed, T-state, error class/PC/identity when stopped (no instruction count: the Z80 ABI has none) |
 | `state.sha256` | SHA-256 over the canonical machine-state serialization: Z80 state (ABI field order), RAM, mapper registers and cartridge RAM, VDP registers/VRAM/CRAM/latch/buffer/flags/counters, PSG registers/counters/LFSR, I/O control |
 | `frames/<n>.bin` + `frames.sha256` | framebuffer artifact per frame: active area, 1 byte per pixel = 6-bit CRAM colour, row-major (contract §9.9); one SHA-256 line per frame |
 | `audio.pcm` + `audio.sha256` | s16le mono 44,100 Hz PCM for the run, plus SHA-256 per frame range `[f0,f1)` |
