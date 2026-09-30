@@ -140,6 +140,7 @@ static uint8_t host_io_in(void *context, uint16_t port, uint64_t cycles) {
     return 0xFFu;
   }
   value = dev->read(dev->context, cls, cycles);
+  if (m->mem.error != SMS_OK) request_stop(m); /* a device may latch a typed error (VDP mode stop) */
   sample_irq(m, cycles); /* a status read acknowledges and may deassert /INT */
   return value;
 }
@@ -164,6 +165,7 @@ static void host_io_out(void *context, uint16_t port, uint8_t value, uint64_t cy
   }
   if (cls == SMS_PORT_IO_CONTROL) m->io_control = value;
   dev->write(dev->context, cls, value, cycles);
+  if (m->mem.error != SMS_OK) request_stop(m);
   sample_irq(m, cycles); /* a VDP register/control write can change the enable bits */
 }
 
@@ -293,6 +295,7 @@ SmsStop sms_run_until_cycle(SmsMachine *m, uint64_t t_state) {
   for (;;) {
     uint64_t deadline;
     advance_events(m, m->rt.state.cycles);
+    if (m->mem.error != SMS_OK) return die(m, SMS_STOP_PLATFORM_ERROR); /* a scanline event latched a typed device error */
     if (m->rt.state.cycles >= t_state) return make_stop(m, SMS_STOP_CYCLE);
     deadline = sms_next_event_cycles(m);
     if (deadline > t_state) deadline = t_state;

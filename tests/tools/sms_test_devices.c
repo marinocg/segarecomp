@@ -167,6 +167,12 @@ static void pad_write(void *context, SmsPortClass cls, uint8_t value, uint64_t c
   add('W', 0x3F, cycles, value);
 }
 
+int sms_write_device_artifacts(SmsMachine *m, const char *dir) {
+  (void)m;
+  (void)dir;
+  return 1; /* the stub devices write no artifacts (the device log is their evidence) */
+}
+
 void sms_install_devices(SmsMachine *m) {
   static int registered;
   machine = m;

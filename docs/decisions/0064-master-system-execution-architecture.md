@@ -103,6 +103,12 @@ instruction-start T-state (open fact U11), after the device catches up. Then com
   boundaries and compares the PCM digest.
 - The ring buffer handed to consumers holds whole output samples with their frame range.
 
+Implementation (T007): `libs/device/sega/psg` (`sn76489.h`) owns the chip, the decimation (`Sn76489Pcm`, `Sn76489PcmSink`
+delivering whole samples with their absolute index; sample k starts at T_k, so its frame is `T_k / 59,736`) and a
+drop-oldest `Sn76489Ring` consumer; `runtime/sms_psg.c` binds it to `SmsMachine.psg`; the headless driver streams
+`audio.pcm` and writes `audio.sha256` (`frame <n> <first sample> <count> <sha256>` lines, then `run <samples> <sha256>`)
+through `headless/sms_audio.c`. The PCM completes to the stop boundary (`sms_psg_sync`).
+
 ### 7. Viewer and headless share one guest loop
 
 The viewer (T009) calls the same `sms_run_until_frame`. It only paces presentation at the rational frame period

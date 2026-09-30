@@ -8,7 +8,9 @@
  * Automation always passes a finite bound; with no bound the program runs until the guest halts with interrupts
  * disabled (the consumer default). `--slice-cycles`/`--slice-seed` split the run into fixed or pseudo-random slices
  * (test hooks: the state digest must not change). `--artifacts <dir>` (directory must exist) receives `status.json`,
- * `state.sha256`, `irq.trace`, `mapper.trace` and `ram.bin`. `--bios` is rejected: the BIOS is never executed.
+ * `state.sha256`, `irq.trace`, `mapper.trace` and `ram.bin`, plus whatever the linked device wiring adds through
+ * `sms_write_device_artifacts` (the VDP unit: `vdp.trace`, `vram.bin`, `cram.bin`, `vdp.json`). `--bios` is rejected: the
+ * BIOS is never executed.
  *
  * Exit status: 0 frame target reached (or the guest stopped normally with no bound); 2 cycle budget reached first;
  * 3 fail-closed Z80 outcome; 4 SMS_ERROR_*; 64 usage. Plain C11; the ROM is the build-time embedded array. */
@@ -16,12 +18,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "sms_audio.h"
 #include "sms_machine.h"
+#include "sms_psg.h"
 
 extern const uint8_t sms_rom_data[];
 extern const uint32_t sms_rom_size;
 extern const uint32_t sms_rom_mapper_family;
 void sms_install_devices(SmsMachine *machine);
+int sms_write_device_artifacts(SmsMachine *machine, const char *dir); /* device artifacts (VDP trace, VRAM, ...) */
 
 #define IRQ_CAPACITY 65536u
 #define MAPPER_CAPACITY 65536u
@@ -29,6 +34,8 @@ void sms_install_devices(SmsMachine *machine);
 #define INPUT_MAX_BYTES (1u << 20)
 
 static SmsMachine machine;
+static SmsPsg psg_device;         /* T007: attached after sms_install_devices unless that unit installed a PSG */
+static SmsAudioCapture audio;
 static SmsIrqTraceEntry irq_buffer[IRQ_CAPACITY];
 static SmsMapperTraceEntry mapper_buffer[MAPPER_CAPACITY];
 static SmsInputEvent input_events[INPUT_CAPACITY];
@@ -101,6 +108,7 @@ static int write_artifacts(const char *dir, const SmsStop *stop, const char *dig
   }
   ok &= write_file(dir, "mapper.trace", buffer, used);
   ok &= write_file(dir, "ram.bin", machine.mem.ram, sizeof machine.mem.ram);
+  ok &= sms_write_device_artifacts(&machine, dir);
   return ok;
 }
 
@@ -131,6 +139,7 @@ static int is_terminal(const SmsStop *stop) { return !sms_stop_is_resumable(stop
 int main(int argc, char **argv) {
   uint64_t cycle_budget = SMS_NO_LIMIT, frames = SMS_NO_LIMIT, slice_cycles = 0, slice_seed = 0;
   int have_slice_seed = 0;
+  int psg_attached = 0;
   const char *input_path = NULL;
   const char *artifacts = NULL;
   SmsStop stop;
@@ -164,6 +173,15 @@ int main(int argc, char **argv) {
   }
   sms_machine_set_traces(&machine, irq_buffer, IRQ_CAPACITY, mapper_buffer, MAPPER_CAPACITY);
   sms_install_devices(&machine);
+  if (machine.psg.write == NULL) {
+    const Sn76489PcmConfig pcm_config = sn76489_pcm_config_44100_sms();
+    const int capture = artifacts != NULL && sms_audio_capture_open(&audio, artifacts, &pcm_config, SMS_CYCLES_PER_FRAME);
+    if (artifacts != NULL && !capture) {
+      fprintf(stderr, "cannot write artifacts to %s\n", artifacts);
+      return 64;
+    }
+    psg_attached = sms_psg_attach(&psg_device, &machine, capture ? sms_audio_capture_sink : NULL, &audio);
+  }
   if (input_path != NULL && !load_input(input_path)) return 64;
   machine.stop_on_halt_idle = cycle_budget == SMS_NO_LIMIT && frames == SMS_NO_LIMIT;
   sms_machine_reset(&machine); /* device resets run after the devices are attached */
@@ -190,6 +208,7 @@ int main(int argc, char **argv) {
       stop = sms_run_bounded(&machine, cycle_budget, frames);
     }
   }
+  if (psg_attached) sms_psg_sync(&psg_device, stop.cycles); /* PCM completes to the stop boundary; part of the digest */
   sms_machine_digest(&machine, digest);
   hex(digest, sizeof digest, digest_hex);
   printf("stop %s cycles %llu frames %llu digest %s\n", sms_stop_kind_name(stop.kind), (unsigned long long)stop.cycles,
@@ -198,6 +217,10 @@ int main(int argc, char **argv) {
   if (stop.kind == SMS_STOP_PLATFORM_ERROR)
     printf("sms_error %s address %04X value %02X cycles %llu pc %04X\n", sms_error_name(stop.sms_error),
            (unsigned)stop.error_address, (unsigned)stop.error_value, (unsigned long long)stop.error_cycles, (unsigned)stop.pc);
+  if (psg_attached && audio.pcm_file != NULL && !sms_audio_capture_close(&audio)) {
+    fprintf(stderr, "cannot write audio artifacts to %s\n", artifacts);
+    return 64;
+  }
   if (artifacts != NULL && !write_artifacts(artifacts, &stop, digest_hex)) {
     fprintf(stderr, "cannot write artifacts to %s\n", artifacts);
     return 64;

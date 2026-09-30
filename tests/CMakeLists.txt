@@ -1190,3 +1190,33 @@ set_property(TEST sms_u11_oracle_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_u11_oracle_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST sms_machine_scheduler_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_machine_scheduler_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T007: Sega PSG device library (platform-neutral: links only segarecomp::device_psg) and its hermetic tests.
+add_executable(sn76489_tests sn76489_test.cpp)
+target_link_libraries(sn76489_tests PRIVATE segarecomp::device_psg)
+segarecomp_enable_warnings(sn76489_tests)
+add_test(NAME sn76489_tests COMMAND sn76489_tests)
+set_property(TEST sn76489_tests APPEND PROPERTY LABELS full fast)
+add_test(NAME sms_psg_differential_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_psg_differential_test.py ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_psg_native_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_psg_native_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_psg_dependency_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_psg_dependency_test.py ${PROJECT_SOURCE_DIR} ${CMAKE_C_COMPILER})
+set_property(TEST sms_psg_differential_test sms_psg_dependency_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_psg_native_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_psg_differential_test sms_psg_native_test sms_psg_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T004: SMS VDP (direct API test), generated-native port/state/interrupt/mode differential against the independent
+# Python model (mutation-checked) and, when the pinned references are available, against both machine references.
+add_executable(sms_vdp_tests sms_vdp_test.cpp)
+target_link_libraries(sms_vdp_tests PRIVATE segarecomp::runtime_master_system)
+segarecomp_enable_warnings(sms_vdp_tests)
+add_test(NAME sms_vdp_tests COMMAND sms_vdp_tests)
+add_test(NAME sms_vdp_native_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_vdp_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_vdp_oracle_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_vdp_oracle_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_vdp_tests APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_vdp_native_test sms_vdp_oracle_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_vdp_native_test sms_vdp_oracle_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")

@@ -2,7 +2,7 @@
 """SEG-009-T002 / ADR 0063: Master System machine placement and dependency direction (hermetic).
 
   - the machine library links only media, codegen_c11_z80 and the SMS runtime (no M68k, Genesis machine/device or other
-    platform target); the runtime library links nothing and only sees the Z80 ABI header by include path;
+    platform target); the runtime library links only the platform-neutral PSG device library and sees the Z80 ABI header by include path;
   - no source in the SMS machine/runtime trees includes or mentions M68k/Genesis vocabulary;
   - the mapper contract table is ONE definition: the C runtime and the C++ ImageSet builder both include it and neither
     re-declares slot bases, reset values or the bank mask;
@@ -35,7 +35,8 @@ check(link_block(machine_cmake, "segarecomp_machine_master_system") ==
       ["segarecomp::codegen_c11_z80", "segarecomp::media", "segarecomp::runtime_master_system"],
       "machine_master_system links exactly media, codegen_c11_z80 and runtime_master_system")
 runtime_cmake = (SMS / "runtime" / "CMakeLists.txt").read_text()
-check("target_link_libraries" not in runtime_cmake, "the SMS runtime library links no other target")
+check(link_block(runtime_cmake, "segarecomp_runtime_master_system") == ["segarecomp::device_psg"],
+      "the SMS runtime library links only the platform-neutral PSG device library")
 check("C_STANDARD 11" in runtime_cmake and "C_EXTENSIONS NO" in runtime_cmake, "the SMS runtime is strict C11")
 
 FORBIDDEN = re.compile(r"m68k|genesis|megadrive|cpu_m68k|device_genesis", re.I)
@@ -50,7 +51,7 @@ for path in sources:
 for path in (SMS / "runtime").glob("*.[ch]"):
     text = path.read_text()
     for inc in re.findall(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', text, re.M):
-        ok = inc in ("stdint.h", "string.h", "stddef.h") or inc.startswith("sms_") or inc == "segarecomp/codegen/c11/runtime/z80_runtime.h"
+        ok = inc in ("stdint.h", "string.h", "stddef.h") or inc.startswith("sms_") or inc in ("segarecomp/codegen/c11/runtime/z80_runtime.h", "segarecomp/device/sega/psg/sn76489.h")
         check(ok, "%s includes %s" % (path.name, inc))
     check("fopen" not in text and "stdio" not in text, "%s performs host I/O" % path.name)
 

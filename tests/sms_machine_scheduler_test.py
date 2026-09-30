@@ -35,7 +35,9 @@ PLATFORM = ROOT / "platforms" / "master-system"
 RUNTIME = PLATFORM / "runtime"
 Z80_INCLUDE = ROOT / "libs" / "codegen" / "c11" / "include"
 STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-D_CRT_SECURE_NO_WARNINGS"]
-RUNTIME_SOURCES = [RUNTIME / n for n in ("sms_memory.c", "sms_sha256.c", "sms_input.c", "sms_machine.c")]
+PSG_LIB = ROOT / "libs" / "device" / "sega" / "psg"
+RUNTIME_SOURCES = [RUNTIME / n for n in ("sms_memory.c", "sms_sha256.c", "sms_input.c", "sms_machine.c", "sms_psg.c")] + [
+    PSG_LIB / "src" / "sn76489.c", PLATFORM / "headless" / "sms_audio.c"]
 DRIVER = PLATFORM / "headless" / "sms_headless.c"
 NO_DEVICES = PLATFORM / "headless" / "sms_devices_none.c"
 TEST_DEVICES = ROOT / "tests" / "tools" / "sms_test_devices.c"
@@ -64,7 +66,7 @@ def build(tmp, roms, name):
     for src in units + RUNTIME_SOURCES + [DRIVER, NO_DEVICES, TEST_DEVICES]:
         obj = out / (src.stem + ".o")
         if not obj.exists():
-            c = run([CC, *STRICT, "-O0", "-I", Z80_INCLUDE, "-I", RUNTIME, "-I", out, "-c", src, "-o", obj])
+            c = run([CC, *STRICT, "-O0", "-I", Z80_INCLUDE, "-I", RUNTIME, "-I", PLATFORM / "headless", "-I", PSG_LIB / "include", "-I", out, "-c", src, "-o", obj])
             check(c.returncode == 0, "%s: %s did not compile as strict C11: %s" % (name, src.name, c.stderr[:1500]))
             if c.returncode != 0:
                 return None

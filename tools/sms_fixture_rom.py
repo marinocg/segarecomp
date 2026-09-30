@@ -1084,9 +1084,358 @@ def fixture_u11_probe():
 T003_SOURCES = [SCHED_IRQ_SOURCE, STRADDLE_SOURCE, PORT_OPEN_SOURCE, PORT_VDP_SOURCE, MEMCTL_BAD_SOURCE,
                 U11_PROBE_SOURCE]
 
+# --- SEG-009-T004 VDP fixtures ---------------------------------------------------------------------------------------
+# All project-authored. `vdp_seq_*`: a deterministic generated port-operation sequence (table in ROM, interpreter below)
+# whose read results land at $C200.., followed by a VRAM Fletcher-style checksum; `vdp_irq`, `vdp_straddle` and
+# `vdp_reset_probe`: interrupt/race, straddle and reset-state observations. Result blocks are documented where consumed
+# (tests/sms_vdp_test.py, tests/sms_vdp_oracle_test.py).
+VDP_SEQ_OPS = 700
+VDP_SEQ_TABLE = 0x1000
+VDP_SEQ_SEEDS = {"vdp_seq_a": 0x5EED0001, "vdp_seq_b": 0xC0FFEE17}
+
+# op codes of the generated sequence
+SEQ_CTRL, SEQ_DATA_W, SEQ_STATUS, SEQ_DATA_R, SEQ_END = 0, 1, 2, 3, 0xFF
+
+
+def vdp_sequence(seed, count=VDP_SEQ_OPS):
+    """Deterministic (LCG) mix of control/data port operations: [(op, arg)] ending with no terminator. The generator
+    tracks the first/second-byte latch only to keep register writes away from R0/R1 (the mode stays supported, display and
+    interrupts off) - every other effect is left to the devices under test."""
+    state = [seed & 0xFFFFFFFF]
+
+    def rnd(n):
+        state[0] = (state[0] * 1664525 + 1013904223) & 0xFFFFFFFF
+        return (state[0] >> 8) % n
+
+    ops = []
+    latch = [False]
+
+    def ctrl(value):
+        if latch[0] and value >> 6 == 2 and (value & 15) in (0, 1):
+            value ^= 0x02  # never write R0/R1 through the second byte
+        latch[0] = not latch[0]
+        ops.append((SEQ_CTRL, value))
+
+    def data_w():
+        latch[0] = False
+        ops.append((SEQ_DATA_W, rnd(256)))
+
+    def data_r():
+        latch[0] = False
+        ops.append((SEQ_DATA_R, 0))
+
+    def status():
+        latch[0] = False
+        ops.append((SEQ_STATUS, 0))
+
+    def set_address(code, address):
+        if latch[0]:
+            status()  # resynchronise the latch
+        ctrl(address & 0xFF)
+        ctrl((code << 6) | ((address >> 8) & 0x3F))
+
+    while len(ops) < count:
+        kind = rnd(100)
+        if kind < 14:
+            set_address(rnd(4) if rnd(4) else 1, rnd(0x4000))
+        elif kind < 20:
+            set_address(rnd(4), 0x3FF0 + rnd(16))  # near the address wrap
+        elif kind < 26:
+            set_address(3, rnd(0x40))  # CRAM, including the $20-$3F alias
+        elif kind < 34:
+            if latch[0]:
+                status()
+            reg = rnd(16)
+            if reg < 2:
+                reg += 2
+            ctrl(rnd(256) if reg != 10 else rnd(256))
+            ctrl(0x80 | reg)
+        elif kind < 46:
+            ctrl(rnd(256))  # raw control byte: exercises half-set latch states
+        elif kind < 62:
+            data_w()
+        elif kind < 82:
+            data_r()
+        elif kind < 90:
+            status()
+        else:
+            for _ in range(1 + rnd(6)):
+                (data_r if rnd(2) else data_w)()
+    return ops[:count]
+
+
+def vdp_seq_source(seed):
+    lines = [
+        ".org 0x0000", "        di", "        im 1", "        ld sp,0xDFF0", "        jp main",
+        ".org 0x0038", "        ei", "        reti",
+        ".org 0x0066", "        retn",
+        ".org 0x0080",
+        "main:   ld hl,seq", "        ld de,0xC200",
+        "loop:   ld a,(hl)", "        cp 0xFF", "        jr z,done", "        inc hl", "        ld b,(hl)", "        inc hl",
+        "        cp 1", "        jr c,op0", "        jr z,op1", "        cp 3", "        jr c,op2",
+        "        in a,(0xBE)", "        jr store",
+        "op0:    ld c,0xBF", "        out (c),b", "        jr loop",
+        "op1:    ld c,0xBE", "        out (c),b", "        jr loop",
+        "op2:    in a,(0xBF)",
+        "store:  ld (de),a", "        inc de", "        jr loop",
+        "done:   ld a,e", "        ld (0xC1F4),a", "        ld a,d", "        ld (0xC1F5),a",
+        "        ld a,0x5A", "        out (0xBE),a",          # marks the final address (CRAM when code 3)
+        "        xor a", "        out (0xBF),a", "        out (0xBF),a",  # address 0, code 0: read set-up
+        "        ld hl,0", "        ld b,h", "        ld c,l", "        ld de,0x4000",
+        "csum:   in a,(0xBE)", "        add a,c", "        ld c,a", "        jr nc,cs1", "        inc b",
+        "cs1:    add hl,bc", "        dec de", "        ld a,d", "        or e", "        jr nz,csum",
+        "        ld (0xC1F0),hl", "        ld a,c", "        ld (0xC1F2),a", "        ld a,b", "        ld (0xC1F3),a",
+        "        ld a,0xA5", "        ld (0xC1FF),a", "        ld a,4", "        ld (0xC0F5),a",
+        "fin:    halt", "        jr fin",
+        ".org 0x%04X" % VDP_SEQ_TABLE, "seq:",
+    ]
+    ops = vdp_sequence(seed)
+    flat = []
+    for op, arg in ops:
+        flat += [op, arg]
+    flat += [SEQ_END, 0]
+    for i in range(0, len(flat), 16):
+        lines.append("        .db " + ",".join("0x%02X" % b for b in flat[i:i + 16]))
+    return "\n".join(lines) + "\n"
+
+
+def _vdp_setregs(r0, r1, r10):
+    return ["        ld a,0x%02X" % r0, "        out (0xBF),a", "        ld a,0x80", "        out (0xBF),a",
+            "        ld a,0x%02X" % r1, "        out (0xBF),a", "        ld a,0x81", "        out (0xBF),a",
+            "        ld a,0x%02X" % r10, "        out (0xBF),a", "        ld a,0x8A", "        out (0xBF),a"]
+
+
+def _wait_n(target):
+    return ["        ei", "w%d:     halt" % target, "        ld a,(0xC0F2)", "        cp %d" % target,
+            "        jr c,w%d" % target, "        di"]
+
+
+VDP_IRQ_PHASES = []  # (name, first index, count) of the recorded interrupt entries, filled by vdp_irq_source
+
+
+def vdp_irq_source():
+    """Phases (each records V counter at $C100+n and the status byte read in the handler at $C200+n; n at $C0F2;
+    the n reached after each phase is stored at $C0E0+phase):
+    0 frame IRQ 192-line (2), 1 frame IRQ 224-line (2), 2 line IRQ R10=15 (12, lines 15..191), 3 line IRQ R10=0 from the start of a frame (100), 4 frame flag pending
+    while disabled then enabled (1), 5 line flag pending while disabled then enabled (1), 6 status read clears a pending
+    line flag before enable (1, the next line IRQ), 7 line IRQ R10=15 across the frame boundary (14: lines 15..191 then 15, 31 of the next frame), 8 R10 written at line 191-192 with the line IRQ enabled there (30: the new value applies from the next reload, lines 0, 1, 2, ...)."""
+    del VDP_IRQ_PHASES[:]
+    lines = [
+        ".org 0x0000", "        di", "        im 1", "        ld sp,0xDFF0", "        jp main",
+        ".org 0x0038",
+        "        push af", "        push hl", "        ld a,(0xC0F2)", "        ld l,a", "        ld h,0xC1",
+        "        in a,(0x7E)", "        ld (hl),a", "        inc h", "        in a,(0xBF)", "        ld (hl),a",
+        "        ld a,l", "        inc a", "        ld (0xC0F2),a", "        pop hl", "        pop af", "        ei", "        reti",
+        ".org 0x0066", "        retn",
+        ".org 0x0080", "main:   xor a", "        ld (0xC0F2),a",
+    ]
+    n = 0
+    phase = [0]
+
+    def boundary():
+        lines.extend(["        ld a,(0xC0F2)", "        ld (0x%04X),a" % (0xC0E0 + phase[0])])
+        phase[0] += 1
+
+    def prepare(r0, r1, r10):
+        lines.append("        di")
+        lines.extend(_vdp_setregs(r0, r1, r10))
+        lines.append("        in a,(0xBF)")
+
+    def waitv(value, tag):
+        lines.extend(["wv%s:    in a,(0x7E)" % tag, "        cp 0x%02X" % value, "        jr nz,wv%s" % tag])
+
+    prepare(0x06, 0x80, 0xFF)
+    lines.extend(_vdp_setregs(0x06, 0xA0, 0xFF)); n += 2; lines.extend(_wait_n(n)); boundary()               # phase 0
+    prepare(0x06, 0x80, 0xFF)
+    lines.extend(_vdp_setregs(0x06, 0xB0, 0xFF)); n += 2; lines.extend(_wait_n(n)); boundary()               # phase 1
+    prepare(0x06, 0x80, 0xFF)
+    lines.extend(_vdp_setregs(0x16, 0x80, 15)); n += 12; lines.extend(_wait_n(n)); boundary()                # phase 2
+    prepare(0x06, 0x80, 0)
+    waitv(0xE0, "3")                                # vblank: the counter reloads from R10 every line
+    lines.extend(["        in a,(0xBF)"])
+    lines.extend(_vdp_reg(0, 0x16))
+    n += 100; lines.extend(_wait_n(n)); boundary()                                                          # phase 3
+    prepare(0x06, 0x80, 0xFF)
+    waitv(0xD0, "4")
+    lines.extend(["        ld a,0xA0", "        out (0xBF),a", "        ld a,0x81", "        out (0xBF),a"])
+    n += 1; lines.extend(_wait_n(n)); boundary()                                                            # phase 4
+    prepare(0x06, 0x80, 15)
+    waitv(0xE0, "5a"); waitv(0x08, "5b"); waitv(0x40, "5c")
+    lines.extend(["        ld a,0x16", "        out (0xBF),a", "        ld a,0x80", "        out (0xBF),a"])
+    n += 1; lines.extend(_wait_n(n)); boundary()                                                            # phase 5
+    prepare(0x16, 0x80, 15)
+    waitv(0xE0, "6a"); waitv(0x20, "6b")
+    lines.extend(["        in a,(0xBF)"])
+    n += 1; lines.extend(_wait_n(n)); boundary()                                                            # phase 6
+    prepare(0x06, 0x80, 15)
+    waitv(0xE0, "7")                                # vblank: the counter reloads from R10 every line
+    lines.extend(["        in a,(0xBF)"])           # clear the line flag raised while the interrupt was disabled
+    lines.extend(_vdp_reg(0, 0x16))
+    n += 14; lines.extend(_wait_n(n)); boundary()                                                            # phase 7
+    prepare(0x06, 0x80, 15)
+    waitv(0xBF, "8")                                # line 191: the counter has just been reloaded with 15 (R10 = 15)
+    lines.extend(["        in a,(0xBF)"])
+    lines.extend(_vdp_reg(0, 0x16))                 # line IRQ enabled, then R10 changes while the counter is mid-flight
+    lines.extend(_vdp_reg(10, 0))
+    n += 30; lines.extend(_wait_n(n)); boundary()                                                            # phase 8
+    lines.extend(["        ld a,0xA5", "        ld (0xC1FF),a", "        ld a,4", "        ld (0xC0F5),a",
+                  "fin:    halt", "        jr fin"])
+    return "\n".join(lines) + "\n"
+
+
+VDP_STRADDLE_STEPS = 64
+
+
+def vdp_straddle_source():
+    """One trial per frame: a line interrupt at line 192 (R10 = 192, line IRQ only) is dispatched through a constant-length
+    handler to trial block i: n NOPs (n = i mod 64), then a status read (series S, result $C100+n: bit 7 = frame flag seen)
+    or a V counter read followed by an acknowledging status read (series V, result $C140+n); series S first reads the status once at
+    the handler entry (acknowledge; clears the frame flag set by the previous frame). The frame flag and the V
+    counter step at line 193, 228 T after the interrupt's line starts."""
+    lines = [
+        ".org 0x0000", "        di", "        im 1", "        ld sp,0xDFF0", "        jp main",
+        ".org 0x0038", "        ld hl,(0xC0F0)", "        jp (hl)",
+        ".org 0x0066", "        retn",
+        ".org 0x0080", "main:   ld hl,blk_0", "        ld (0xC0F0),hl",
+    ]
+    lines.extend(_vdp_setregs(0x16, 0x80, 192))
+    lines.extend(["        in a,(0xBF)", "        ei", "idle:   halt", "        jr idle", ".org 0x0100"])
+    total = 2 * VDP_STRADDLE_STEPS
+    for i in range(total):
+        series, n = divmod(i, VDP_STRADDLE_STEPS)
+        lines.append("blk_%d:" % i)
+        if series == 0:
+            lines.append("        in a,(0xBF)             ; acknowledge and clear the frame flag left by the previous frame")
+        lines += ["        nop"] * n
+        if series == 0:
+            lines += ["        in a,(0xBF)", "        ld (0x%04X),a" % (0xC100 + n)]
+        else:
+            lines += ["        in a,(0x7E)", "        ld (0x%04X),a" % (0xC140 + n), "        in a,(0xBF)"]
+        lines += ["        ld hl,blk_%d" % (i + 1), "        ld (0xC0F0),hl", "        ei", "        reti"]
+    lines += ["blk_%d:" % total, "        in a,(0xBF)", "        ld a,4", "        ld (0xC0F5),a", "        ld a,0xA5",
+              "        ld (0xC1FF),a", "        ei", "        reti"]
+    return "\n".join(lines) + "\n"
+
+
+def vdp_straddle_write_source():
+    """U11 for an IRQ-sensitive register write. R10 = 0 with the line IRQ enabled raises an interrupt on every line; trial n
+    (handlers A_n, B_n, C_n chained through consecutive interrupts) writes R10 = 3 in A_n after n NOPs, at an instruction-start
+    offset that straddles the next line's event. The reload at that line's underflow uses the R10 of that instant: a write
+    before the event makes the following interrupt 4 lines later, after it 1 line later. B_n and C_n log the V counter of
+    the next two interrupts ($C100 + n, $C140 + n); C_n restores R10 = 0."""
+    lines = [
+        ".org 0x0000", "        di", "        im 1", "        ld sp,0xDFF0", "        jp main",
+        ".org 0x0038", "        ld hl,(0xC0F0)", "        jp (hl)",
+        ".org 0x0066", "        retn",
+        ".org 0x0080", "main:   ld hl,a_0", "        ld (0xC0F0),hl",
+    ]
+    lines.extend(_vdp_setregs(0x16, 0x80, 0))
+    lines.extend(["        in a,(0xBF)", "        ei", "idle:   halt", "        jr idle", ".org 0x0100"])
+    for n in range(VDP_STRADDLE_STEPS):
+        lines += ["a_%d:" % n, "        in a,(0xBF)"] + ["        nop"] * n
+        lines += ["        ld a,3", "        out (0xBF),a", "        ld a,0x8A", "        out (0xBF),a",
+                  "        ld hl,b_%d" % n, "        ld (0xC0F0),hl", "        ei", "        reti"]
+        lines += ["b_%d:" % n, "        in a,(0x7E)", "        ld (0x%04X),a" % (0xC100 + n), "        in a,(0xBF)",
+                  "        ld hl,c_%d" % n, "        ld (0xC0F0),hl", "        ei", "        reti"]
+        lines += ["c_%d:" % n, "        in a,(0x7E)", "        ld (0x%04X),a" % (0xC140 + n), "        in a,(0xBF)",
+                  "        xor a", "        out (0xBF),a", "        ld a,0x8A", "        out (0xBF),a",
+                  "        ld hl,a_%d" % (n + 1), "        ld (0xC0F0),hl", "        ei", "        reti"]
+    lines += ["a_%d:" % VDP_STRADDLE_STEPS, "        in a,(0xBF)", "        ld a,4", "        ld (0xC0F5),a", "        ld a,0xA5",
+              "        ld (0xC1FF),a", "        ei", "        reti"]
+    return "\n".join(lines) + "\n"
+
+
+def vdp_reset_source():
+    """Observes the post-reset VDP with no register written: $C100 first data read (buffer), $C101 first status byte,
+    $C102-$C109 VRAM[0..7] reads, $C10A count of interrupts taken with only the reset registers (R1 bit 5 or an R10-gated
+    line interrupt: none expected for R10 = $FF), $C10B count taken after only R10 = 0 was written (R0 bit 4 at reset)."""
+    lines = [
+        ".org 0x0000", "        di", "        im 1", "        ld sp,0xDFF0", "        jp main",
+        ".org 0x0038", "        push af", "        in a,(0xBF)", "        ld a,(0xC0F2)", "        inc a", "        ld (0xC0F2),a",
+        "        pop af", "        ei", "        reti",
+        ".org 0x0066", "        retn",
+        ".org 0x0080", "main:   in a,(0xBE)", "        ld (0xC100),a", "        in a,(0xBF)", "        ld (0xC101),a",
+        "        xor a", "        out (0xBF),a", "        out (0xBF),a",
+    ]
+    for i in range(8):
+        lines += ["        in a,(0xBE)", "        ld (0x%04X),a" % (0xC102 + i)]
+    lines += ["        xor a", "        ld (0xC0F2),a", "        ei", "        ld bc,0",
+              "spin1:  dec bc", "        ld a,b", "        or c", "        jr nz,spin1", "        di",
+              "        ld a,(0xC0F2)", "        ld (0xC10A),a", "        in a,(0xBF)", "        xor a", "        ld (0xC0F2),a",
+              "        out (0xBF),a", "        ld a,0x8A", "        out (0xBF),a", "        ei", "        ld bc,0",
+              "spin2:  dec bc", "        ld a,b", "        or c", "        jr nz,spin2", "        di",
+              "        ld a,(0xC0F2)", "        ld (0xC10B),a", "        ld a,0xA5", "        ld (0xC1FF),a", "        ld a,4",
+              "        ld (0xC0F5),a", "fin:    halt", "        jr fin"]
+    return "\n".join(lines) + "\n"
+
+
+def fixture_vdp_seq_a():
+    return _rom_only(vdp_seq_source(VDP_SEQ_SEEDS["vdp_seq_a"]))
+
+
+def fixture_vdp_seq_b():
+    return _rom_only(vdp_seq_source(VDP_SEQ_SEEDS["vdp_seq_b"]))
+
+
+def fixture_vdp_straddle_write():
+    return _rom_only(vdp_straddle_write_source())
+
+
+def fixture_vdp_irq():
+    return _rom_only(vdp_irq_source())
+
+
+def fixture_vdp_straddle():
+    return _rom_only(vdp_straddle_source())
+
+
+def fixture_vdp_reset_probe():
+    return _rom_only(vdp_reset_source())
+
+
+def vdp_mode_source(body):
+    """Mode-check fixtures (contract section 9.5): `body` runs after the VDP register writes of the case; $C100 = $5A is
+    written before it and $C101 = $A5 after it, so a typed stop leaves $C101 = 0."""
+    lines = [
+        ".org 0x0000", "        di", "        im 1", "        ld sp,0xDFF0", "        jp main",
+        ".org 0x0066", "        retn",
+        ".org 0x0080", "main:   ld a,0x5A", "        ld (0xC100),a",
+    ]
+    lines += body
+    lines += ["        ld a,0xA5", "        ld (0xC101),a", "fin:    halt", "        jr fin"]
+    return "\n".join(lines) + "\n"
+
+
+def _vdp_reg(register, value):
+    return ["        ld a,0x%02X" % value, "        out (0xBF),a", "        ld a,0x%02X" % (0x80 | register), "        out (0xBF),a"]
+
+
+VDP_MODE_CASES = {
+    # the invalid text mode (R0 $04: M4 set, M2 clear; R1 bit 4: M1; M4 M3 M2 M1 = 1 0 0 1) set while the display is blanked: no stop, the mode never reaches output
+    "vdp_mode_blank_ok": _vdp_reg(0, 0x04) + _vdp_reg(1, 0x90) + _vdp_reg(1, 0x80) + _vdp_reg(0, 0x36) + ["        ld bc,0x6000", "sp0:     dec bc", "        ld a,b",
+                                                                   "        or c", "        jr nz,sp0"],
+    # the same mode with the display enabled: stops at the first active line of the next frame
+    "vdp_mode_display_stop": _vdp_reg(0, 0x04) + _vdp_reg(1, 0xD0) + ["        ld bc,0xFFFF", "sp1:     dec bc", "        ld a,b", "        or c",
+                                                   "        jr nz,sp1"],
+    # a status read in an unsupported mode (the flags it would return are not modelled): stops at the read
+    "vdp_mode_status_stop": _vdp_reg(0, 0x04) + _vdp_reg(1, 0x90) + ["        in a,(0xBF)"],
+    # the H counter (U3) stops typed until the TH latch trigger exists
+    "vdp_hcounter_stop": ["        in a,(0x7F)"],
+}
+
+
+def _vdp_mode_fixture(name):
+    return lambda: _rom_only(vdp_mode_source(VDP_MODE_CASES[name]))
+
+
+VDP_FIXTURES = {"vdp_seq_a": fixture_vdp_seq_a, "vdp_seq_b": fixture_vdp_seq_b, "vdp_irq": fixture_vdp_irq,
+                "vdp_straddle": fixture_vdp_straddle, "vdp_straddle_write": fixture_vdp_straddle_write, "vdp_reset_probe": fixture_vdp_reset_probe,
+                **{name: _vdp_mode_fixture(name) for name in VDP_MODE_CASES}}
+
+
 FIXTURES = {"trivial": fixture_trivial, "oracle_smoke": fixture_oracle_smoke, "bank_crossing": fixture_bank_crossing,
             "sched_irq": fixture_sched_irq, "sched_straddle": fixture_sched_straddle, "port_open": fixture_port_open,
-            "port_vdp": fixture_port_vdp, "memctl_bad": fixture_memctl_bad, "u11_probe": fixture_u11_probe}
+            "port_vdp": fixture_port_vdp, "memctl_bad": fixture_memctl_bad, "u11_probe": fixture_u11_probe, **VDP_FIXTURES}
 
 
 def build(name):

@@ -62,6 +62,76 @@
       "mapper": "rom_only",
       "sha256": "38a00fc40b59306678dd61eeda2de2e87aa177d5540c2d2fb913662b7b6bae16",
       "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_hcounter_stop",
+      "mapper": "rom_only",
+      "sha256": "1aeb4b92f48b6d3084a28dd1336352ca50719e99d648f53ea0b1e7c69d999230",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_irq",
+      "mapper": "rom_only",
+      "sha256": "f1a79d2548d63122db33aef6f97a557ae90ea1b7db7c2f2852e4e606e18f970a",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_mode_blank_ok",
+      "mapper": "rom_only",
+      "sha256": "814e74c902a83f715bd91e86a5befcc9d7d167c4b6a446e746c3bf9c5cc1123c",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_mode_display_stop",
+      "mapper": "rom_only",
+      "sha256": "51a1008637768532e60083879ad97a134ce8ca88d2611dc4b2497a6922edc379",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_mode_status_stop",
+      "mapper": "rom_only",
+      "sha256": "164ff22f9cec7073c4c9295889c0e72fc7166278375087e97a7449e387649e0d",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_reset_probe",
+      "mapper": "rom_only",
+      "sha256": "b2a304477735bdb64b81b40280c4d29bb39ad3e500d7186bce55b3c7a4c9d0fa",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_seq_a",
+      "mapper": "rom_only",
+      "sha256": "1a9459815ec66194f8dbafa4c7dfa21aa881e4f2b1ab2db54255176d3afd5c90",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_seq_b",
+      "mapper": "rom_only",
+      "sha256": "e8d5eb6eab13e4884b079041cbbe6169b0c528b91234ba04170ff94391b184ee",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_straddle",
+      "mapper": "rom_only",
+      "sha256": "4053b588fae2f4a3ad4187270dbbf2bb68c05d44a8858325b978097860d735f6",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_straddle_write",
+      "mapper": "rom_only",
+      "sha256": "6bb8c397db462b2f93cc1f358a725cd352dd1606d723cba25737b45b499504dc",
+      "size": 32768
     }
   ],
   "schema": 1
