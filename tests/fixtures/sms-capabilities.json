@@ -22,14 +22,15 @@
     },
     {
       "area": "audio_pipeline",
-      "behavior": "PSG writes apply at the io_out T-state after catch-up",
+      "behavior": "PSG writes apply at the io_out cycles value (instruction start) after catch-up",
       "evidence": [
         "Z80-ABI",
         "PROJECT"
       ],
       "id": "audio.write_timestamp",
       "owner": "SEG-009-T007",
-      "scope": "in_scope"
+      "scope": "in_scope",
+      "unresolved": "U11"
     },
     {
       "area": "background",
@@ -199,9 +200,11 @@
     },
     {
       "area": "execution",
-      "behavior": "headless driver requires a finite --instruction-budget and frame budget",
+      "behavior": "automated headless runs are bounded by a finite --cycle-budget and/or --frames (absolute T-state deadlines; no instruction-count budget)",
       "evidence": [
-        "ADR-0050"
+        "ADR-0050",
+        "Z80-ABI",
+        "PROJECT"
       ],
       "id": "exec.headless_budget",
       "owner": "SEG-009-T003",
@@ -940,14 +943,15 @@
     },
     {
       "area": "controllers",
-      "behavior": "a port read returns the pad state at the io_in T-state",
+      "behavior": "a port read returns the pad state at the io_in cycles value (instruction start)",
       "evidence": [
         "Z80-ABI",
         "PROJECT"
       ],
       "id": "pad.read_timing",
       "owner": "SEG-009-T006",
-      "scope": "in_scope"
+      "scope": "in_scope",
+      "unresolved": "U11"
     },
     {
       "area": "controllers",
@@ -1190,11 +1194,11 @@
     },
     {
       "area": "reset",
-      "behavior": "mapper, PSG and I/O control take their documented reset values",
+      "behavior": "reset orchestration: z80_reset, RAM, mapper, memory control, I/O control, then the VDP and PSG resets (semantics owned by T004/T007)",
       "evidence": [
         "SP-MAP",
-        "SP-PSG",
-        "MD-HW"
+        "MD-HW",
+        "PROJECT"
       ],
       "id": "reset.devices",
       "owner": "SEG-009-T003",
@@ -1214,12 +1218,12 @@
     },
     {
       "area": "reset",
-      "behavior": "VDP registers start at the contract's project-convention values (no public source)",
+      "behavior": "VDP reset state (registers, VRAM, CRAM) follows the contract's project convention (no public source)",
       "evidence": [
         "PROJECT"
       ],
       "id": "reset.vdp_registers",
-      "owner": "SEG-009-T003",
+      "owner": "SEG-009-T004",
       "scope": "in_scope",
       "unresolved": "U9"
     },
@@ -1326,6 +1330,18 @@
       "id": "spr.zoom",
       "owner": "SEG-009-T005",
       "scope": "in_scope"
+    },
+    {
+      "area": "timing",
+      "behavior": "memory/I/O accesses are ordered at the instruction-start T-state (ABI cycles), before any device event after it",
+      "evidence": [
+        "Z80-ABI",
+        "PROJECT"
+      ],
+      "id": "timing.access_timestamp",
+      "owner": "SEG-009-T003",
+      "scope": "in_scope",
+      "unresolved": "U11"
     },
     {
       "area": "timing",
@@ -1746,7 +1762,7 @@
     }
   ],
   "evidence": {
-    "ADR-0050": "segarecomp ADR 0050 (consumer launcher; finite instruction budget amendment)",
+    "ADR-0050": "segarecomp ADR 0050 (consumer launcher; amendment: automated runs must be finitely bounded)",
     "ADR-0058": "segarecomp ADR 0058 (broad immutable-image AOT, image identity, SMS reference shape)",
     "GPGX-NOTE": "Genesis Plus GX core/sound/psg.c hardware-verification notes (pinned commit, ADR 0062)",
     "LOCAL-AGG": "SEG-009-T001 sanitized aggregate over authorized local images (task Evidence)",

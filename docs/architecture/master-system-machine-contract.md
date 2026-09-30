@@ -81,9 +81,19 @@ sub-T quantity is the pixel position, which is the exact rational `3/2 x (T with
 integer arithmetic when needed (H counter, section 9.7) and never accumulated, so there is no rounding drift.
 Host time is derived only for presentation: CPU frequency = 39,375,000 / 11 Hz (315/88 MHz), frame period =
 59,736 x 11 / 39,375,000 s (59.9227 Hz). [cap:timing.timebase_tstates] [cap:timing.ntsc_262_lines] [cap:timing.cpu_clock]
-Devices are stepped to the T-state of each CPU access (the `cycles`
-argument of the ABI callbacks = start of the current instruction) and at scanline boundaries; nothing is split
-inside an instruction [Z80-ABI §3, §8]. Wait states and bus contention are not modelled [cap:timing.wait_states].
+**Access timestamps (U11).** Every memory and I/O callback receives the T-state at the *start of the current
+instruction*, not the T-state of the bus cycle that performs the access; intra-instruction offsets are outside the
+SEG-008 ABI [Z80-ABI §3]. `z80_run` checks its deadline only at instruction boundaries, so an instruction that starts
+before a scheduled device event may complete after it [Z80-ABI §8]. The platform therefore orders each access at its
+instruction-start T-state: device state is first advanced through every event with `T_event <= T_access`, then the
+access is applied. An instruction that straddles a device event (for example an `OUT` starting at T 224 of a line
+whose next event is at T 228) is ordered *before* that event, even when the real bus write happens after it. The
+ordering error is bounded by one instruction (at most 23 T; each block-I/O iteration is its own boundary). This can
+affect raster register changes near line boundaries, V/H counter reads, status/IRQ interactions, PSG write phase
+and so PCM. Whether instruction-start ordering is sufficient for the baseline is the open fact U11; it is not
+silently approximated, and no runtime opcode decoding is added [cap:timing.access_timestamp].
+Scanline events are applied between `z80_run` calls, at instruction boundaries; nothing is split inside an
+instruction. Wait states and bus contention are not modelled [cap:timing.wait_states].
 
 **Frame boundary.** Frame *n* is the half-open T interval `[n x 59,736, (n+1) x 59,736)`; line 0 (V counter `$00`)
 starts at T = n x 59,736. `run_until_frame(n)` stops at the first instruction boundary with
@@ -245,10 +255,12 @@ The Z80 ABI supplies a 16-bit port [Z80-ABI §6]. The SMS decodes only A7, A6 an
     it when rewriting port `$3E` [MD-HW §6, SP-BIOS] [cap:memctl.ram_copy_c000] [cap:reset.ram].
   - Mapper `$FFFC..$FFFF = 0,0,1,2`; cartridge RAM zero.
   - Memory control `$AB`; I/O control `$FF` (all pins input) [cap:ioctl.reset_state].
-  - VDP: registers as section 9.1 "reset", address/code 0, latch clear, read buffer 0, status 0, line counter `$FF`,
-    VRAM and CRAM zero.
-  - PSG: tone and noise registers 0, all attenuations `$F` (silent), LFSR `$8000`; no register latched (section 10)
-    [SP-PSG]. [cap:reset.devices]
+  - VDP (semantics owned by T004; T003 only calls the VDP reset): registers as section 9.1 "reset", address/code 0,
+    latch clear, read buffer 0, status 0, line counter `$FF`, VRAM and CRAM zero (project convention, U9).
+  - PSG (semantics owned by T007; T003 only calls the PSG reset): tone and noise registers 0, all attenuations `$F`
+    (silent), LFSR `$8000`; no register latched (section 10) [SP-PSG].
+  - T003 owns the reset orchestration: `z80_reset`, work RAM, mapper, memory control and I/O control composition,
+    then the device resets in a fixed order [cap:reset.devices].
 - Software that depends on other BIOS-left state (for example the exact SP) is a bounded open fact (U1).
 
 ## 9. VDP (315-5246, Mode 4)
@@ -408,8 +420,9 @@ Chip facts (Sega integrated SN76489 variant) [SP-PSG, MD-VDP §1]:
 Sample-generation contract (ADR 0064) [cap:audio.write_timestamp] [cap:audio.decimation] [cap:audio.pcm_format]
 [cap:psg.mono_mix]:
 
-1. The device is stepped in chip ticks (16 T). A PSG write carries the `io_out` T-state; the device first runs every
-   whole tick that ends at or before it, then applies the write. The result is independent of how the host slices
+1. The device is stepped in chip ticks (16 T). A PSG write carries the `io_out` `cycles` value, i.e. the
+   instruction-start T-state (§2, U11); the device first runs every whole tick that ends at or before it, then
+   applies the write. The result is independent of how the host slices
    execution.
 2. Tick level = sum over the four channels of `(output ? level[attenuation] : 0)` (0..131,068).
 3. Output rate 44,100 Hz, integer arithmetic only. With `T_k = ceil(k x 39,375,000 / 485,100)` (the CPU clock
@@ -426,7 +439,8 @@ PSG placement: a platform-neutral `libs/device/sega/psg` (ADR 0063).
 - Port `$DC`: bit 0-5 P1 up, down, left, right, TL (button 1), TR (button 2); bits 6-7 P2 up, down. Port `$DD`:
   bits 0-3 P2 left, right, TL, TR; bit 4 reset = 1 (no reset button on the SMS 2); bit 5 = 1; bit 6 port A TH;
   bit 7 port B TH. Pressed = 0 [MD-HW §4] [cap:pad.port_dc] [cap:pad.port_dd] [cap:pad.player2]
-  [cap:pad.reset_button]. A read returns the state at the `io_in` T-state [cap:pad.read_timing].
+  [cap:pad.reset_button]. A read returns the state at the `io_in` `cycles` value, the instruction-start T-state (§2, U11)
+  [cap:pad.read_timing].
 - Port `$3F` (write): bits 3-0 = direction of B.TH, B.TR, A.TH, A.TR (1 = input); bits 7-4 = output levels of
   B.TH, B.TR, A.TH, A.TR. A pin configured as output reads back its output level in `$DC`/`$DD` (export console);
   a pin configured as input reads the pad (TH inputs read 1: no light gun) [MD-HW §4, SP-REGION]
@@ -451,8 +465,8 @@ PSG placement: a platform-neutral `libs/device/sega/psg` (ADR 0063).
 - Run API: `sms_run_until_cycle`, `sms_run_until_frame`; resumable vs fail-closed stops; a fail-closed Z80 outcome or
   `SMS_ERROR_*` stops the machine permanently with PC, image identity and class [cap:exec.run_api]
   [cap:exec.error_surface].
-- Headless driver: finite `--instruction-budget <N>` (ADR 0050 amendment), `--frames <N>`, `--input <script>`,
-  artifact outputs [cap:exec.headless_budget] [cap:exec.state_digest] [cap:exec.mapper_trace].
+- Headless driver: finite `--cycle-budget <T>` and/or `--frames <N>` (the SMS form of the ADR 0050 amendment's
+  finite-budget rule; there is no instruction-count budget, see ADR 0064), `--input <script>`, artifact outputs [cap:exec.headless_budget] [cap:exec.state_digest] [cap:exec.mapper_trace].
 - Viewer and headless share one guest loop; the viewer only paces, presents and samples input at frame boundaries
   [cap:view.pacing] [cap:view.input_frames] [cap:view.audio_out] [cap:view.equivalence].
 
@@ -485,8 +499,9 @@ Distinct from `Z80Outcome` and reported with PC, image identity, T-state and the
 | U5 | PSG latch state before the first latch byte, and the initial counter/output flip-flop states | GPGX-NOTE records tone 2 attenuation on 315-5313A/315-5660, ares uses channel 0 tone; untested on 315-5246. Stops with `SMS_ERROR_PSG_DATA_BEFORE_LATCH` | T007 | a public 315-5246 statement, else keep the stop |
 | U6 | VDP access-slot loss for rapid data-port writes during active display (MacDonald §15, SMS 2) | writes always land [cap:timing.vdp_access_slots] | T012 | classify with evidence during the residual sweep; model only with a public timing source |
 | U8 | content of the fine-scroll gap (backdrop "and sometimes pattern data from sprite #0") | backdrop only | T005 | finalist comparison plus the public statement; keep backdrop if unresolved and record the tolerance |
-| U9 | post-BIOS VDP register contents (no public source; references disagree on R1/R6) | project convention of §9.1; normal software writes every register before enabling the display | T003 | T011 attributes any title that renders before writing a register; a cited BIOS behaviour then becomes a profile delta |
+| U9 | post-BIOS VDP state: register contents (no public source; references disagree on R1/R6), VRAM/CRAM contents | project convention of §8/§9.1; normal software writes every register before enabling the display | T004 | T011 attributes any title that renders before writing a register; a cited BIOS behaviour then becomes a profile delta |
 | U10 | tone period 0/1 digital output: toggle every tick (references) vs constant +1 (SP-PSG) | model toggles; affects PCM of sample playback | T007 | a public 315-5246 capture or statement; otherwise keep the reference behaviour and record the departure |
+| U11 | instruction-internal host-access timing: the ABI timestamps memory/I/O callbacks at instruction start and does not expose the bus-cycle offset | accesses are ordered at instruction start; error at most one instruction (23 T) around a device event | T003 (scheduler), T004 (VDP ports/counters/IRQ), T006 (pad reads), T007 (PSG) | adversarial fixtures whose accesses straddle a scheduled device boundary, compared with both pinned machine references. If instruction-start ordering matches for the declared baseline, record that compatibility contract; if not, open a bounded SEG-008 continuation adding statically known per-access timing offsets to the ABI. No silent approximation, no runtime opcode decoding |
 
 (Status bits 4-0 are a project convention, §9.3; there is no U7.)
 

@@ -3,7 +3,7 @@
 - Status: Accepted
 - Date: 2026-09-30
 - Task: SEG-009-T001
-- Related: ADR 0006 (build-time embedded cartridge data), ADR 0050 (+ amendment: finite `--instruction-budget` for
+- Related: ADR 0006 (build-time embedded cartridge data), ADR 0050 (+ amendment: a finite budget for
   automation), ADR 0058 (image identity and dispatch), ADR 0060 (Z80 generated runtime ABI), ADR 0061-0063,
   `docs/architecture/master-system-machine-contract.md` §10-§13.
 
@@ -41,14 +41,16 @@ checked against the recorded input SHA-256 at generation time.
 ### 3. Run API (C11)
 
 ```c
-typedef enum { SMS_STOP_CYCLE, SMS_STOP_FRAME, SMS_STOP_HALT_IDLE, SMS_STOP_INSTRUCTION_BUDGET,
+typedef enum { SMS_STOP_CYCLE, SMS_STOP_FRAME, SMS_STOP_HALT_IDLE, SMS_STOP_CYCLE_BUDGET,
                SMS_STOP_Z80_ERROR, SMS_STOP_PLATFORM_ERROR } SmsStopKind;
 SmsStop sms_run_until_cycle(SmsMachine *m, uint64_t t_state);   /* resumable unless *_ERROR */
 SmsStop sms_run_until_frame(SmsMachine *m, uint64_t frame);     /* stops at T >= frame * 59,736 */
 ```
 
-- The scheduler calls `z80_run(rt, deadline)` with `deadline = min(next scanline event, requested stop,
-  instruction-budget boundary)`.
+- The scheduler calls `z80_run(rt, deadline)` with `deadline = min(next device event, requested cycle stop)`. Both
+  are absolute T-states, which is the only deadline type the Z80 ABI has. The requested cycle stop is the smallest of
+  the `run_until` target and the end of the cycle or frame budget.
+- Memory and I/O accesses are ordered at their instruction-start T-state (contract §2, open fact U11).
 - `deadline`, `halted` and `prefix_lock` are resumable and advance time. While halted, time advances to the next
   event; an interrupt wakes the CPU per the Z80 contract.
 - A fail-closed `Z80Outcome` or an `SMS_ERROR_*` stops the machine **permanently**. The stop reports PC, image
@@ -58,14 +60,23 @@ SmsStop sms_run_until_frame(SmsMachine *m, uint64_t frame);     /* stops at T >=
 ### 4. Headless driver (generated `main`)
 
 ```
-<game> --instruction-budget <N> [--frames <F>] [--input <script>] [--artifacts <dir>] [--frame-hashes]
+<game> [--cycle-budget <T>] [--frames <F>] [--input <script>] [--artifacts <dir>] [--frame-hashes]
 ```
 
-- Automation always passes a finite `--instruction-budget` (ADR 0050 amendment); `--frames` bounds guest time.
-- The consumer default (no budget) runs until the guest stops, exactly as the Genesis `main` does.
+- `--cycle-budget <T>` stops at the first instruction boundary with `cycles >= T` (overshoot at most one instruction).
+  `--frames <F>` stops at `T >= F x 59,736`. Both map directly onto the absolute T-state deadline of `z80_run`.
+- Automation always passes a finite `--cycle-budget` and/or `--frames`. This is the SMS form of the ADR 0050
+  amendment's rule that automated callers must bound every run. The consumer default (neither option) runs until the
+  guest stops, as the Genesis `main` does.
+- There is **no `--instruction-budget`** for SMS. The Genesis budget comes from the runner's dispatch allowance.
+  The Z80 ABI has no instruction counter, and statically direct-bound owners execute several instructions without
+  returning to the dispatcher, so an instruction count cannot be turned into a deadline. A per-owner counter in the
+  generated Z80 path would be complexity added only to mimic a CLI name. If instruction-count budgeting is ever
+  genuinely needed, it is a deliberate, separate decision. Tooling that enforces a finite budget (the launcher, and
+  the harness rule for agents) must accept `--cycle-budget`/`--frames` for SMS executables (T003/T010).
 - Exit status:
   - 0: requested frames/cycles reached;
-  - 2: instruction budget exhausted;
+  - 2: cycle budget exhausted;
   - 3: fail-closed Z80 outcome;
   - 4: `SMS_ERROR_*`;
   - 64: usage.
@@ -84,8 +95,8 @@ SmsStop sms_run_until_frame(SmsMachine *m, uint64_t frame);     /* stops at T >=
 
 ### 6. Audio pipeline
 
-The PSG device steps in chip ticks (16 T). Each PSG write is applied at its `io_out` T-state after the device catches
-up. Then comes the integer box-filter decimation to 44,100 Hz and s16le mapping of contract §10.
+The PSG device steps in chip ticks (16 T). Each PSG write is applied at its `io_out` `cycles` value, the
+instruction-start T-state (open fact U11), after the device catches up. Then comes the integer box-filter decimation to 44,100 Hz and s16le mapping of contract §10.
 
 - The result depends only on guest T-states, never on host slicing. A test splits the same run at arbitrary cycle
   boundaries and compares the PCM digest.

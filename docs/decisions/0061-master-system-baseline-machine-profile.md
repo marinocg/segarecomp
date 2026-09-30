@@ -67,6 +67,8 @@ port ABI, level `int_line`, latched NMI, RST-only IM0, absolute T-state deadline
    - Host time is derived only for pacing and audio rate, from the rational CPU clock 39,375,000 / 11 Hz.
 6. **Unmodelled timing.**
    - There are no wait states or bus contention (Z80 contract §8).
+   - Memory/I/O callbacks carry the instruction-start T-state (SEG-008 ABI). Whether ordering accesses there is
+     sufficient around device events is the bounded open fact U11 (T003/T004/T006/T007).
    - In-line event positions are the bounded open fact U2. The event *line* is fixed now; its T offset defaults to 0
      until T004 resolves it against the references.
 
@@ -90,4 +92,4 @@ port ABI, level `int_line`, latched NMI, RST-only IM0, absolute T-state deadline
   post-BIOS state, the port decoder and the scheduler on the T-state clock. T010 adds `--mapper` and manifests
   to the build and the launcher.
 - `SMS_ERROR_*` classes (contract §13) are the typed platform error surface, distinct from `Z80Outcome`.
-- Open facts U1-U10 (contract §14) each have one owner and a resolution method. None is implemented by guessing.
+- Open facts U1-U11 (contract §14) each have one owner and a resolution method. None is implemented by guessing.
