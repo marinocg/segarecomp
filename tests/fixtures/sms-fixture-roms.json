@@ -1,0 +1,19 @@
+{
+  "fixtures": [
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "oracle_smoke",
+      "mapper": "sega",
+      "sha256": "ab65129ecda3fc5fdd4baa7b368e4d052f46af0cf43ba94d8cfa6250e6fb8be4",
+      "size": 131072
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "trivial",
+      "mapper": "rom_only",
+      "sha256": "aa3642138e5d4e1ce17938b80337802a867404a5145e37a8f1899559c305c6b3",
+      "size": 32768
+    }
+  ],
+  "schema": 1
+}
