@@ -486,7 +486,9 @@ def compile_units(tc, workdir, stem, extra_sources=(), extra_flags=()):
         if code != 0:
             return None, message
     exe = workdir / (stem + ".exe")
-    linked = run([tc.cc, *[str(o) for o in objs], "-o", str(exe)])
+    # PE images embed a link timestamp; /Brepro makes the link deterministic (the reproducibility check compares bytes).
+    deterministic = ["-Wl,/Brepro"] if sys.platform == "win32" else []
+    linked = run([tc.cc, *[str(o) for o in objs], *deterministic, "-o", str(exe)])
     if linked.returncode != 0:
         return None, linked.stderr
     return exe, None
