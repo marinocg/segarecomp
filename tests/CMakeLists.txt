@@ -1139,3 +1139,18 @@ add_test(NAME z80_static_budget_shape_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/z80_static_budget_shape_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST z80_static_budget_shape_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST z80_static_budget_shape_test APPEND PROPERTY LABELS full)
+
+# SEG-009-T001: Master System capability list and fixture builder (hermetic), and the pinned-reference smoke checks
+# (ADR 0062): the smoke tests skip cleanly (exit 0) unless SEGARECOMP_SMS_ORACLE_CHECKOUT points at the directory
+# holding the pinned checkouts; a wrong or dirty pin fails. References are built in temporary copies, never linked.
+add_test(NAME sms_capabilities_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/sms_capabilities_test.py)
+add_test(NAME sms_fixture_rom_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_fixture_rom_test.py $<TARGET_FILE:segarecomp>)
+add_test(NAME sms_oracle_smoke_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_oracle_smoke_test.py ${CMAKE_C_COMPILER})
+add_test(NAME sms_psg_oracle_smoke_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_psg_oracle_smoke_test.py ${CMAKE_CXX_COMPILER})
+set_property(TEST sms_capabilities_test sms_fixture_rom_test sms_oracle_smoke_test sms_psg_oracle_smoke_test
+  APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_capabilities_test sms_fixture_rom_test sms_oracle_smoke_test sms_psg_oracle_smoke_test
+  APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")

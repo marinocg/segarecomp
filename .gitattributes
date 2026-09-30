@@ -5,3 +5,6 @@ docs/testing/m68k-capability-coverage.md text eol=lf
 tools/m68k_capability_coverage.py text eol=lf
 tests/fixtures/z80-*.json text eol=lf
 tools/z80_legal_forms.py text eol=lf
+tests/fixtures/sms-*.json text eol=lf
+tools/sms_capabilities.py text eol=lf
+tools/sms_fixture_rom.py text eol=lf
