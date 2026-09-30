@@ -821,6 +821,11 @@ def main():
                 passing_by_form.setdefault(vec.form, True)
                 if vec.name in bad:
                     passing_by_form[vec.form] = False
+        if failures or divergence:  # the primary oracle verdict is reported before any secondary-oracle early exit
+            if args.json:
+                pathlib.Path(args.json).write_text(json.dumps(divergence, indent=1, sort_keys=True) + "\n")
+            print("z80 conformance: FAIL", failures[:1], divergence)
+            return 1
         if args.secondary:
             sec_root = secondary_checkout(os.environ.get(CHECKOUT_ENV))
             if sec_root is None:
