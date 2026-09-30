@@ -874,10 +874,11 @@
     },
     {
       "area": "memory_control",
-      "behavior": "writes keeping cartridge and RAM enabled and BIOS disabled are accepted (bits 7,5,1,0 have no SMS 2 effect)",
+      "behavior": "writes keeping cartridge and RAM enabled and BIOS disabled are accepted (bits 7,5 no SMS 2 effect; bits 1,0 unknown, ignored by convention)",
       "evidence": [
         "MD-HW",
-        "SP-3E"
+        "SP-3E",
+        "PROJECT"
       ],
       "id": "memctl.write_compatible",
       "owner": "SEG-009-T002",

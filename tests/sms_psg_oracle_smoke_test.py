@@ -73,7 +73,7 @@ def expectations():
         ("reset.tone", lambda o: o["reset"]["tone"] == [0, 0, 0], "SP-PSG: Sega integrated PSG starts with zero tone registers"),
         ("reset.volume", lambda o: o["reset"].get("volume", o["reset"].get("volume_reg")) == [15, 15, 15, 15],
          "SP-PSG: ... and all attenuations $F (silence)"),
-        ("reset.lfsr", lambda o: o["reset"]["lfsr"] == 0x8000, "SP-PSG: LFSR holds only the highest bit"),
+        ("reset.lfsr", lambda o: o["reset"]["lfsr"] == 0x8000, "GPGX-NOTE: power-on LFSR holds only the highest bit (SP-PSG: after a noise write)"),
         ("latch.tone0_after_latch", lambda o: o["latch"]["tone0_after_latch"] == 0x00E, "SP-PSG: latch writes the low 4 bits immediately"),
         ("latch.tone0_after_data", lambda o: o["latch"]["tone0_after_data"] == 0x0FE, "SP-PSG: data byte writes the high 6 bits (440 Hz example)"),
         ("latch.vol2_after_latch", lambda o: o["latch"]["vol2_after_latch"] == 15, "SP-PSG: attenuation latch"),

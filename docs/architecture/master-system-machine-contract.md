@@ -178,7 +178,7 @@ checksum are recorded (match/mismatch) and never used to accept or reject [SP-HD
 
 ## 5. Memory control (port `$3E`)
 
-Bits (active low: 1 = disabled): 7 expansion, 6 cartridge, 5 card, 4 work RAM, 3 BIOS, 2 I/O; 1-0 unused. Bits 7
+Bits (active low: 1 = disabled): 7 expansion, 6 cartridge, 5 card, 4 work RAM, 3 BIOS, 2 I/O; 1-0 "unknown" (no effect observed on the SMS 2; the model ignores them as a project convention). Bits 7
 and 5 have no effect on an SMS 2. The BIOS leaves `$AB` when it starts a cartridge [MD-HW §4, SP-3E].
 
 - Power-on value of the model: `$AB` [cap:memctl.post_bios_value].
@@ -387,7 +387,7 @@ Chip facts (Sega integrated SN76489 variant) [SP-PSG, MD-VDP §1]:
   at 0 as a project convention (part of U5).
 - **Tone period 0 and 1 (U10, open).** SP-PSG states: "If the register value is zero or one then the output is a
   constant value of +1." The references (GPGX, ares, MAME) instead flip the output every chip tick, with 0 behaving as
-  1 (GPGX-NOTE, verified on 315-5313A/315-5660, not on the 315-5246). Until T007 resolves U10, the model follows the
+  1 (GPGX-NOTE: "zero value behaves the same as a value of 1 on integrated version"; no 315-5246 statement). Until T007 resolves U10, the model follows the
   reference behaviour as a **project decision that departs from SP-PSG**. Consequence: under the §10 decimation a
   toggling channel averages to about half its level with ripple, whereas a constant +1 gives the full level, so PCM
   digests of sample-playback software depend on this item [cap:psg.tone_period_0_1].
@@ -484,9 +484,9 @@ Distinct from `Z80Outcome` and reported with PC, image identity, T-state and the
 | U4 | noise output phase: bit shifted off (SP-PSG prose, ares) vs bit 0 after the shift (SP-PSG code, GPGX, Blargg) | one shift of phase in the noise sequence; model follows the code | T007 | a public 315-5246 capture or statement; otherwise keep the code convention and record it in the PCM tolerance |
 | U5 | PSG latch state before the first latch byte, and the initial counter/output flip-flop states | GPGX-NOTE records tone 2 attenuation on 315-5313A/315-5660, ares uses channel 0 tone; untested on 315-5246. Stops with `SMS_ERROR_PSG_DATA_BEFORE_LATCH` | T007 | a public 315-5246 statement, else keep the stop |
 | U6 | VDP access-slot loss for rapid data-port writes during active display (MacDonald §15, SMS 2) | writes always land [cap:timing.vdp_access_slots] | T012 | classify with evidence during the residual sweep; model only with a public timing source |
+| U8 | content of the fine-scroll gap (backdrop "and sometimes pattern data from sprite #0") | backdrop only | T005 | finalist comparison plus the public statement; keep backdrop if unresolved and record the tolerance |
 | U9 | post-BIOS VDP register contents (no public source; references disagree on R1/R6) | project convention of §9.1; normal software writes every register before enabling the display | T003 | T011 attributes any title that renders before writing a register; a cited BIOS behaviour then becomes a profile delta |
 | U10 | tone period 0/1 digital output: toggle every tick (references) vs constant +1 (SP-PSG) | model toggles; affects PCM of sample playback | T007 | a public 315-5246 capture or statement; otherwise keep the reference behaviour and record the departure |
-| U8 | content of the fine-scroll gap (backdrop "and sometimes pattern data from sprite #0") | backdrop only | T005 | finalist comparison plus the public statement; keep backdrop if unresolved and record the tolerance |
 
 (Status bits 4-0 are a project convention, §9.3; there is no U7.)
 

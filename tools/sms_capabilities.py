@@ -106,7 +106,7 @@ ROWS = [
     row("mapper.persistence", "mapper", T2, "battery-backed save persistence", ["PROJECT"], "excluded:deterministic_in_memory_only"),
     # --- memory control -----------------------------------------------------------------------------
     row("memctl.post_bios_value", "memory_control", T2, "memory control is $AB after the (not executed) BIOS: cartridge, RAM and I/O enabled", ["MD-HW", "SP-3E"]),
-    row("memctl.write_compatible", "memory_control", T2, "writes keeping cartridge and RAM enabled and BIOS disabled are accepted (bits 7,5,1,0 have no SMS 2 effect)", ["MD-HW", "SP-3E"]),
+    row("memctl.write_compatible", "memory_control", T2, "writes keeping cartridge and RAM enabled and BIOS disabled are accepted (bits 7,5 no SMS 2 effect; bits 1,0 unknown, ignored by convention)", ["MD-HW", "SP-3E", "PROJECT"]),
     row("memctl.io_disable", "memory_control", T3, "port $3E bit 2 set: reads of $C0-$FF return $FF (SMS 2); YM2413 probes find no FM unit", ["MD-HW", "SP-3E"]),
     row("memctl.write_incompatible", "memory_control", T2, "writes disabling the cartridge or work RAM, or enabling the BIOS slot", ["MD-HW", "SP-3E"], "excluded:bios_and_slot_switching_not_in_baseline", "SMS_ERROR_CONTROL_BIT_UNSUPPORTED"),
     row("memctl.ram_copy_c000", "memory_control", T3, "post-BIOS RAM holds the last port $3E value ($AB) at $C000", ["MD-HW", "SP-BIOS"]),
