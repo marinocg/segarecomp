@@ -1,8 +1,10 @@
 # Master System
 
 Code lives in `machine/` (generation-time C++: cartridge ingestion, mapper identity, ImageSet, SMS generation route
-`emit_cartridge`) and `runtime/` (strict C11 compiled with generated programs: memory map, Sega mapper, typed error
-surface). See ADR 0065. Other platform pieces (VDP, PSG, scheduler, viewer) land in later SEG-009 tasks.
+`emit_cartridge`), `runtime/` (strict C11 compiled with generated programs: memory map, Sega mapper, typed error
+surface, port decode, machine composition, deterministic scheduler, run API, state digest, scripted input) and `headless/`
+(the generated program's `main`, artifacts, and the no-device wiring). See ADR 0065 and ADR 0066. Device seams for the VDP,
+PSG and controllers are typed and fail closed until T004/T006/T007 attach them; the viewer lands in T009.
 
 **Purpose:** Static recompilation of Z80 + SMS VDP software.
 

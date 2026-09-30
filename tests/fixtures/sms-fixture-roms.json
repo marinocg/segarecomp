@@ -9,6 +9,13 @@
     },
     {
       "declaration_source": "fixture_builder",
+      "fixture": "memctl_bad",
+      "mapper": "rom_only",
+      "sha256": "315ca3928832c1a9d2073e9dca76b251e35b521f38e8fda991d16fabf8a909c0",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
       "fixture": "oracle_smoke",
       "mapper": "sega",
       "sha256": "ab65129ecda3fc5fdd4baa7b368e4d052f46af0cf43ba94d8cfa6250e6fb8be4",
@@ -16,9 +23,44 @@
     },
     {
       "declaration_source": "fixture_builder",
+      "fixture": "port_open",
+      "mapper": "rom_only",
+      "sha256": "e0529c0331a5c522cdd249876072b39149dadebf3c20084615f84a8d35c44f5a",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "port_vdp",
+      "mapper": "rom_only",
+      "sha256": "246355e3d7f026a4f5e6fdeba06c4011fd7d8cde92ba257d7813a60e26da77f2",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "sched_irq",
+      "mapper": "rom_only",
+      "sha256": "728c3fa7eada24cb7d9da77da10bdbcb944583e8079865df3606455e5dfb53bb",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "sched_straddle",
+      "mapper": "rom_only",
+      "sha256": "ed398f079251b24ba017201aecb9e4e846c4606a8b8f010ceee6c86ac4f41484",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
       "fixture": "trivial",
       "mapper": "rom_only",
       "sha256": "aa3642138e5d4e1ce17938b80337802a867404a5145e37a8f1899559c305c6b3",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "u11_probe",
+      "mapper": "rom_only",
+      "sha256": "38a00fc40b59306678dd61eeda2de2e87aa177d5540c2d2fb913662b7b6bae16",
       "size": 32768
     }
   ],

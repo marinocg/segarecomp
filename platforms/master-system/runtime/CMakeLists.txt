@@ -2,6 +2,9 @@
 # code. The Z80 runtime ABI header is only included from its owner (codegen_c11 include tree), never copied.
 add_library(segarecomp_runtime_master_system STATIC
   sms_memory.c
+  sms_sha256.c
+  sms_input.c
+  sms_machine.c
 )
 add_library(segarecomp::runtime_master_system ALIAS segarecomp_runtime_master_system)
 set_target_properties(segarecomp_runtime_master_system PROPERTIES

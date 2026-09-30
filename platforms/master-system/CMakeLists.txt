@@ -3,3 +3,4 @@
 # shared contract headers (mapper contract table, typed error surface).
 add_subdirectory(runtime)
 add_subdirectory(machine)
+add_subdirectory(headless)

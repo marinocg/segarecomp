@@ -2,13 +2,14 @@
 
 #include <string.h>
 
-static void sms_fail(SmsMemory *m, SmsError error, uint16_t address, uint8_t value, uint64_t cycles) {
+void sms_memory_latch_error(SmsMemory *m, SmsError error, uint16_t address, uint8_t value, uint64_t cycles) {
   if (m->error != SMS_OK) return;
   m->error = error;
   m->error_address = address;
   m->error_value = value;
   m->error_cycles = cycles;
 }
+#define sms_fail sms_memory_latch_error
 
 SmsError sms_memory_init(SmsMemory *m, const uint8_t *rom, uint32_t rom_size, SmsMapperFamily family) {
   memset(m, 0, sizeof *m);

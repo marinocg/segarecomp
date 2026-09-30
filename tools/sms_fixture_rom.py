@@ -920,7 +920,173 @@ def fixture_bank_crossing():
     return build_rom(size, image, markers), "sega"
 
 
-FIXTURES = {"trivial": fixture_trivial, "oracle_smoke": fixture_oracle_smoke, "bank_crossing": fixture_bank_crossing}
+# --- SEG-009-T003 scheduler fixtures ------------------------------------------------------------------------------
+# rom_only 32 KiB programs (small generated code) for the generated-native scheduler tests. The INT handler acknowledges
+# with a status read (port $BF) and counts in RAM $C200; the NMI handler counts in $C201.
+SCHED_HANDLERS = """
+.org 0x0038
+        in a,(0xBF)             ; acknowledge: a status read deasserts /INT
+        ld hl,0xC200
+        inc (hl)
+        ei
+        reti
+.org 0x0066
+        ld hl,0xC201
+        inc (hl)
+        retn
+"""
+SCHED_IRQ_SOURCE = """
+.org 0x0000
+        im 1
+        ld sp,0xDFF0
+        ei
+main:   halt                    ; woken by the frame interrupt (INT) or the pause NMI
+        jr main
+""" + SCHED_HANDLERS
+
+STRADDLE_SOURCE = (
+    """
+.org 0x0000
+        im 1
+        ld sp,0xDFF0
+        ei
+        jp main
+""" + SCHED_HANDLERS + """
+.org 0x0100
+main:   halt                    ; sync: the frame interrupt (line 192) wakes the probe
+        ld a,0x5A
+"""
+    + "        out (0x7F),a\n" * 60      # 60 back-to-back 11-T PSG writes: their bus cycles cross three line starts
+    + "        .db 0xDD,0xDD,0xDD,0xDD,0xDD,0xDD,0xD3,0x7F\n" * 20  # index-prefix chains (6 superseded prefixes + OUT)
+    + "        in a,(0x7E)\n" * 30        # V counter reads
+    + "        jp main\n"
+)
+
+PORT_OPEN_SOURCE = """
+.org 0x0000
+        in a,(0x00)             ; reads of $00-$3F return $FF (no device)
+        ld (0xC210),a
+        ld a,0xAF
+        out (0x3E),a            ; cartridge + RAM enabled, BIOS off, I/O chip disabled (bit 2)
+        in a,(0xC0)             ; $C0-$FF read $FF while the I/O chip is disabled, without consulting a pad device
+        ld (0xC211),a
+        in a,(0xDD)
+        ld (0xC212),a
+        out (0xC1),a            ; writes to $C0-$FF have no effect
+        in a,(0x3E)
+        ld (0xC213),a
+done:   halt
+        jr done
+"""
+PORT_VDP_SOURCE = """
+.org 0x0000
+        ld a,0x55
+        ld (0xC220),a
+        out (0xBF),a            ; VDP control write: no VDP device is attached -> typed stop
+        ld a,0x66
+        ld (0xC221),a
+done:   halt
+        jr done
+"""
+MEMCTL_BAD_SOURCE = """
+.org 0x0000
+        ld a,0xE3               ; cartridge disabled (bit 6 set): outside the baseline
+        out (0x3E),a
+done:   halt
+        jr done
+"""
+
+
+def _rom_only(source):
+    image, _ = Assembler(source).assemble()
+    return build_rom(0x8000, image, {}), "rom_only"
+
+
+def fixture_sched_irq():
+    return _rom_only(SCHED_IRQ_SOURCE)
+
+
+def fixture_sched_straddle():
+    return _rom_only(STRADDLE_SOURCE)
+
+
+def fixture_port_open():
+    return _rom_only(PORT_OPEN_SOURCE)
+
+
+def fixture_port_vdp():
+    return _rom_only(PORT_VDP_SOURCE)
+
+
+def fixture_memctl_bad():
+    return _rom_only(MEMCTL_BAD_SOURCE)
+
+
+# U11 probe (SEG-009-T003): the same V-counter read instruction is issued at instruction-start offsets 4n T after a line
+# interrupt with k superseded DD prefixes in front of it. Under instruction-start ordering the observed flip position n*
+# does not depend on k; a bus-cycle-accurate machine moves it by k (each prefix delays the real bus read by 4 T). Every
+# trial is one line interrupt (R0 bit 4, R10 = 1: every second line), dispatched through a constant-length handler so the sync phase is
+# identical for every trial. Results: RAM $C100 + index (index = 4 n + position of k in U11_PREFIXES).
+U11_PREFIXES = (0, 2, 4, 6)
+U11_STEPS = 48
+
+
+def u11_probe_source():
+    lines = [
+        ".org 0x0000",
+        "        di",
+        "        im 1",
+        "        ld sp,0xDFF0",
+        "        jp main",
+        ".org 0x0038",
+        "        in a,(0xBF)             ; acknowledge (clears the line-pending flag)",
+        "        ld hl,(0xC0F0)",
+        "        jp (hl)                 ; constant-length dispatch to this trial's block",
+        ".org 0x0066",
+        "        retn",
+        ".org 0x0080",
+        "main:   ld hl,vdp_regs",
+        "        ld b,vdp_regs_end-vdp_regs",
+        "        ld c,0xBF",
+        "        otir                    ; R0 = M4 + line IRQ, R1 = display on (frame IRQ off), R10 = 1 (an interrupt every 2nd line)",
+        "        ld hl,blk_0",
+        "        ld (0xC0F0),hl",
+        "        ei",
+        "idle:   halt",
+        "        jr idle",
+        "vdp_regs:",
+        "        .db 0x14,0x80, 0x40,0x81, 0x01,0x8A",
+        "vdp_regs_end:",
+        ".org 0x0100",
+    ]
+    total = U11_STEPS * len(U11_PREFIXES)
+    index = 0
+    for n in range(U11_STEPS):
+        for k in U11_PREFIXES:
+            lines.append("blk_%d:" % index)
+            lines += ["        nop"] * n
+            lines.append("        .db " + ",".join(["0xDD"] * k + ["0xDB", "0x7E"]))
+            lines.append("        ld (0x%04X),a" % (0xC100 + index))
+            index += 1
+            lines.append("        ld hl,blk_%d" % index)
+            lines += ["        ld (0xC0F0),hl", "        ei", "        reti"]
+    lines += ["blk_%d:" % total, "        ld a,4", "        ld (0xC0F5),a", "        ei", "        reti"]
+    return "\n".join(lines) + "\n"
+
+
+U11_PROBE_SOURCE = u11_probe_source()
+
+
+def fixture_u11_probe():
+    return _rom_only(U11_PROBE_SOURCE)
+
+
+T003_SOURCES = [SCHED_IRQ_SOURCE, STRADDLE_SOURCE, PORT_OPEN_SOURCE, PORT_VDP_SOURCE, MEMCTL_BAD_SOURCE,
+                U11_PROBE_SOURCE]
+
+FIXTURES = {"trivial": fixture_trivial, "oracle_smoke": fixture_oracle_smoke, "bank_crossing": fixture_bank_crossing,
+            "sched_irq": fixture_sched_irq, "sched_straddle": fixture_sched_straddle, "port_open": fixture_port_open,
+            "port_vdp": fixture_port_vdp, "memctl_bad": fixture_memctl_bad, "u11_probe": fixture_u11_probe}
 
 
 def build(name):

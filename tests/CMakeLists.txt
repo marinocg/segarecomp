@@ -1173,3 +1173,20 @@ add_test(NAME sms_machine_dependency_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST sms_machine_tests sms_machine_dependency_test APPEND PROPERTY LABELS full fast)
 set_property(TEST sms_bank_crossing_test sms_emission_budget_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_bank_crossing_test sms_emission_budget_test sms_machine_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T003: machine composition, deterministic scheduler, interrupt wiring and headless driver. The unit test supplies
+# a scripted fake `z80_run` (over the real z80_runtime.h boundary logic) so scheduler ordering is checked without a
+# generated image; the Python test builds generated-native fixtures with the real driver and stub devices.
+add_executable(sms_runtime_tests sms_runtime_test.cpp)
+target_link_libraries(sms_runtime_tests PRIVATE segarecomp::runtime_master_system)
+segarecomp_enable_warnings(sms_runtime_tests)
+add_test(NAME sms_runtime_tests COMMAND sms_runtime_tests)
+add_test(NAME sms_machine_scheduler_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_scheduler_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_u11_oracle_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_u11_oracle_test.py ${CMAKE_C_COMPILER})
+set_property(TEST sms_runtime_tests APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_u11_oracle_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_u11_oracle_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST sms_machine_scheduler_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_machine_scheduler_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")

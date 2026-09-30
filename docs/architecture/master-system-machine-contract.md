@@ -8,7 +8,7 @@ stops with a typed error or follows the decision written next to the item.
 
 Decisions: ADR 0061 (profile, BIOS, mapper identity, timebase), ADR 0062 (independent references), ADR 0063
 (placement and reuse, PSG device placement), ADR 0064 (execution architecture, artifacts, audio pipeline,
-fixture builder). Z80 boundary: `docs/architecture/z80-master-system-integration-contract.md` (the SEG-008
+fixture builder), ADR 0066 (machine composition, device seams, scheduler). Z80 boundary: `docs/architecture/z80-master-system-integration-contract.md` (the SEG-008
 contract) wins on anything CPU-owned. Machine-readable scope: `tests/fixtures/sms-capabilities.json`
 (`tools/sms_capabilities.py`); capability ids are quoted in square brackets with a `cap:` prefix.
 
@@ -485,7 +485,7 @@ Distinct from `Z80Outcome` and reported with PC, image identity, T-state and the
 | `SMS_ERROR_ROM_SIZE_UNSUPPORTED` | ROM size outside 32-512 KiB power of two | T002 |
 | `SMS_ERROR_CONTROL_BIT_UNSUPPORTED` | `$FFFC` bit 4 or bank shift; incompatible port `$3E` write | T002 |
 | `SMS_ERROR_UNMAPPED_READ` | `rom_only` data read of `$8000-$BFFF` | T002 |
-| `SMS_ERROR_BIOS_UNSUPPORTED` | a supplied BIOS image | T003 |
+| `SMS_ERROR_BIOS_UNSUPPORTED` | a supplied BIOS image (headless driver `--bios`) | T003 |
 | `SMS_ERROR_PORT_UNIMPLEMENTED` | a decoded port class whose device is not implemented yet | T003 |
 | `SMS_ERROR_VDP_MODE_UNSUPPORTED` | TMS9918/invalid text/240-line NTSC mode or R0 bit 0 at the check point | T004 |
 | `SMS_ERROR_HCOUNTER_UNRESOLVED` | H counter read while U3 is open | T004 |
@@ -504,7 +504,7 @@ Distinct from `Z80Outcome` and reported with PC, image identity, T-state and the
 | U8 | content of the fine-scroll gap (backdrop "and sometimes pattern data from sprite #0") | backdrop only | T005 | finalist comparison plus the public statement; keep backdrop if unresolved and record the tolerance |
 | U9 | post-BIOS VDP state: register contents (no public source; references disagree on R1/R6), VRAM/CRAM contents | project convention of §8/§9.1; normal software writes every register before enabling the display | T004 | T011 attributes any title that renders before writing a register; a cited BIOS behaviour then becomes a profile delta |
 | U10 | tone period 0/1 digital output: toggle every tick (references) vs constant +1 (SP-PSG) | model toggles; affects PCM of sample playback | T007 | a public 315-5246 capture or statement; otherwise keep the reference behaviour and record the departure |
-| U11 | instruction-internal host-access timing: the ABI timestamps memory/I/O callbacks at instruction start and does not expose the bus-cycle offset | accesses are ordered at instruction start; error at most one indivisible boundary around a device event (23 T per form + 4 T per superseded DD/FD prefix; block iterations and interrupt responses are separate boundaries) | T003 (scheduler), T004 (VDP ports/counters/IRQ), T006 (pad reads), T007 (PSG) | adversarial fixtures whose accesses straddle a scheduled device boundary, compared with both pinned machine references. If instruction-start ordering matches for the declared baseline, record that compatibility contract; if not, open a bounded SEG-008 continuation adding statically known per-access timing offsets to the ABI. No silent approximation, no runtime opcode decoding |
+| U11 | instruction-internal host-access timing: the ABI timestamps memory/I/O callbacks at instruction start and does not expose the bus-cycle offset | accesses are ordered at instruction start; error at most one indivisible boundary around a device event (23 T per form + 4 T per superseded DD/FD prefix; block iterations and interrupt responses are separate boundaries) | T003 (scheduler), T004 (VDP ports/counters/IRQ), T006 (pad reads), T007 (PSG) | adversarial fixtures whose accesses straddle a scheduled device boundary, compared with both pinned machine references. If instruction-start ordering matches for the declared baseline, record that compatibility contract; if not, open a bounded SEG-008 continuation adding statically known per-access timing offsets to the ABI. No silent approximation, no runtime opcode decoding **T003 evidence (scheduler part, 2026-09-30):** the platform orders accesses at the instruction-start T-state against scanline events (adversarial straddle fixtures, generated-native). The `u11_probe` sweep (same V-counter read behind k superseded DD prefixes) against both pinned references classifies them: Genesis Plus GX orders at the real bus cycle (shift exactly k steps of 4 T), Gearsystem partially (shifts 2, 3, 3 steps for k = 2, 4, 6); both stay within the 0..k bound and affect only index-prefix chains in front of a device access; the references disagree with each other, and plain-form offsets are below the probe's resolution and the unresolved U2 in-line offsets. Instruction-start ordering is therefore kept as the compatibility contract for the baseline and no SEG-008 continuation is opened; T004/T006/T007 re-check their own device-visible accesses (ADR 0066). |
 
 (Status bits 4-0 are a project convention, §9.3; there is no U7.)
 

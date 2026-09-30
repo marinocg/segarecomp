@@ -69,7 +69,7 @@ def main():
         roms[name] = rom
     # independent encoding cross-check
     checked = 0
-    for source in (builder.TRIVIAL_SOURCE, builder.ORACLE_SMOKE_SOURCE):
+    for source in (builder.TRIVIAL_SOURCE, builder.ORACLE_SMOKE_SOURCE, *builder.T003_SOURCES):
         asm = builder.Assembler(source)
         asm.assemble()
         for address, mnem, encoded in asm.listing:

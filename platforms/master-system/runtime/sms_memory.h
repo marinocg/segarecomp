@@ -51,6 +51,10 @@ void sms_memory_write(SmsMemory *m, uint16_t address, uint8_t value, uint64_t cy
 /* 1 and identity/window base when immutable ROM code is mapped at `address` under the current mapping, else 0. */
 int sms_memory_code_image(const SmsMemory *m, uint16_t address, Z80CodeImage *image);
 
+/* Latches `error` (first error wins, sticky) with the offending address/port, value and instruction-start T-state. Used by
+ * the machine for platform errors that are not memory errors (an unimplemented port class); same latch, same rules. */
+void sms_memory_latch_error(SmsMemory *m, SmsError error, uint16_t address, uint8_t value, uint64_t cycles);
+
 /* Port $3E write. A write with the cartridge (bit 6) and work RAM (bit 4) enabled and BIOS (bit 3) disabled is accepted
  * (bit 2 is the I/O chip disable and is modelled; bits 7, 5, 1-0 have no effect); any other write latches
  * SMS_ERROR_CONTROL_BIT_UNSUPPORTED. `port` is recorded in the error for diagnostics. */
