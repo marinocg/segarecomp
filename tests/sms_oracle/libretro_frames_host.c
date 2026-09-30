@@ -12,6 +12,8 @@
  *   frames.rgb  every retro_run's frame, RGB888 row-major, consecutively (the dimensions are in meta.txt)
  *   meta.txt    one line per retro_run: `<run> <width> <height> <audio frames produced> <RAM $C010>`
  *   ram.bin     the first 2 KiB of system RAM after the last frame
+ *   ram_frames.bin  only with the host option `host_ram_frames=1` (consumed by the host, never passed to the core): the full
+ *               8 KiB of system RAM after every retro_run, consecutively (for frame-by-frame work-RAM comparison)
  *   audio.raw   interleaved s16le stereo samples as produced by the core
  *   av.txt      `<sample rate> <fps>`
  * Exit: 0 success, 2 host/core failure.
@@ -69,6 +71,7 @@ static unsigned joypad[2];
 static FILE *audio_file;
 static unsigned long audio_frames_run;
 static const char *tmp_dir = ".";
+static int host_ram_frames;
 
 struct event { unsigned long frame; unsigned pad[2]; unsigned pause; };
 static struct event events[MAX_EVENTS];
@@ -210,6 +213,7 @@ int main(int argc, char **argv) {
     char *eq = strchr(argv[i], '=');
     if (eq == NULL) { fprintf(stderr, "bad option %s\n", argv[i]); return 2; }
     *eq = '\0';
+    if (strcmp(argv[i], "host_ram_frames") == 0) { host_ram_frames = eq[1] == '1'; continue; } /* host-only option */
     options[option_count].key = argv[i];
     options[option_count].value = eq + 1;
     ++option_count;
@@ -262,6 +266,8 @@ int main(int argc, char **argv) {
   fprintf(avf, "%.3f %.6f\n", av.sample_rate, av.fps);
   fclose(avf);
 
+  FILE *ram_frames_file = host_ram_frames ? open_out(out, "ram_frames.bin") : NULL;
+  if (host_ram_frames && ram_frames_file == NULL) { fprintf(stderr, "cannot write %s\n", out); return 2; }
   int next_event = 0;
   unsigned pause = 0;
   for (long run = 0; run < max_frames; ++run) {
@@ -275,10 +281,12 @@ int main(int argc, char **argv) {
     audio_frames_run = 0;
     retro_run();
     if (frame != NULL) fwrite(frame, 3, (size_t)frame_w * frame_h, frames_file);
+    if (ram_frames_file != NULL && fwrite(ram, 1, 0x2000, ram_frames_file) != 0x2000) { fprintf(stderr, "cannot write ram frames\n"); return 2; }
     fprintf(meta, "%ld %u %u %lu %u\n", run, frame_w, frame_h, audio_frames_run, (unsigned)ram[0x10]);
   }
   fclose(frames_file);
   fclose(meta);
+  if (ram_frames_file != NULL) fclose(ram_frames_file);
   fclose(audio_file);
   FILE *ram_file = open_out(out, "ram.bin");
   if (ram_file == NULL || fwrite(ram, 1, 0x800, ram_file) != 0x800) { fprintf(stderr, "cannot write ram\n"); return 2; }

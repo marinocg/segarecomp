@@ -556,3 +556,34 @@ Three authorized local SMS images (ignored `games/`), classified ephemerally thr
 900 frames without input: 3/3 carry a `TMR SEGA` header at `$7FF0` with region `$4` (SMS export); size classes
 128, 256 and 512 KiB (one each); 3/3 write the Sega slot registers; 1/3 sets `$FFFC` bit 7; none sets `$FFFC` bits
 2-4 in that window. No image is a source of any fact in this contract.
+
+**Bring-up comparison findings (SEG-009-T011 follow-up; sanitized classifications only).** The three images were compared
+frame by frame with both pinned references, run with the explicit NTSC/export options of `tests/sms_oracle_smoke_test.py`
+(left on automatic timing, both references run an export-tagged image at 50 Hz, the software's own 50/60 Hz detection takes
+the other branch and every later frame differs: a reference configuration, not a platform defect). Work RAM must be
+compared at the reference's frame boundary, which falls near the vertical blank (platform lines about 182-192), not at the
+platform's frame start: a comparison at the wrong phase shows a steady 10-40 byte "drift" of per-frame counters that is
+not one (`tests/sms_oracle/libretro_frames_host.c` option `host_ram_frames=1` dumps the full 8 KiB after every
+`retro_run`). Results, per image class:
+
+- 256 KiB: 600/600 framebuffers identical to both references; work RAM identical to Gearsystem on every frame after the
+  boot transient (frames 0-27) and to Genesis Plus GX except 9 bytes of stack residue below the stack pointer.
+- 128 KiB: 599/600 framebuffers identical to Gearsystem. The one difference is one scanline of one frame: a palette
+  (backdrop) write lands 21 T into line L and the platform, which renders a line at its first T-state (U2), applies it from
+  line L+1; Gearsystem applies it to line L, Genesis Plus GX (compared after its constant one-frame boot lag below) to line
+  L+1. The references disagree, so this is the U2 in-line render/write-visibility tolerance, not a defect. Genesis Plus GX is
+  exactly one frame later than the platform from the first displayed frame to the end (0 differences at that offset; ~97
+  differing frames at offset 0, all of them animation transitions); this is its power-on state (U9: pending frame flag)
+  and the ADR 0069 item 7 startup divergence.
+- 512 KiB: 0..231 identical to both references; from frame 232 a timed enemy/object enters the right edge at a frame that
+  differs by 1-3 frames on all three machines (Gearsystem and Genesis Plus GX disagree with each other from frame 233, 329
+  frames, the platform with either 292-342). The software derives a random start offset from the Z80 refresh register
+  (`LD A,R` executed at about frame 113 and 22 more times in 600 frames), which is the instruction count mod 128 and
+  therefore depends on the exact iteration counts of its status-polling loops (U2/U11); no two of the three machines agree
+  on it. Sweeping the frame-flag in-line offset 0-40 T on the platform never reproduces either reference (first differing
+  frame 225-235 in every case, the same frames where the references diverge from each other), while adding a constant to
+  every `LD A,R` result moves the first differing frame against Gearsystem from 232 to 413 (+3; 113 instead of 292 frames
+  differ), i.e. the `R` value is the controlling input. Classified reference-behaviour ambiguity (U2/U11 + `R`), not a
+  platform defect.
+- Power-on work RAM: only `$C000` differs between the platform (`$AB`), Gearsystem (`$00`) and Genesis Plus GX (`$A8`) in
+  the comparisons above; none of the compared differences traces back to it (the BIOS-residue convention of section 8 stays).
