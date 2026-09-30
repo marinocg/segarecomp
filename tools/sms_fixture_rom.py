@@ -863,7 +863,64 @@ def fixture_oracle_smoke():
     return build_rom(size, image, markers), "sega"
 
 
-FIXTURES = {"trivial": fixture_trivial, "oracle_smoke": fixture_oracle_smoke}
+# Bank-crossing fixture (SEG-009-T002). Distinct code lives at the SAME logical address under different banks so a
+# generated-native run must dispatch one logical PC under two image identities after a mapper write. Result bytes go to
+# RAM 0xC200-0xC2FF. `BANK_CROSSING_MAIN` is the normal entry (PC 0); test hosts may start at other labelled entries
+# (0x0200 jumps into RAM; 0x7FFF is a slot-boundary-straddling instruction when bank 2 is mapped into slot 1).
+BANK_CROSSING_MAIN = """
+.org 0x0000
+        di
+        im 1
+        ld sp,0xDFF0
+        jp main
+.org 0x0038
+        reti
+.org 0x0066
+        retn
+.org 0x0100
+main:   call 0x0500             ; slot 0 still bank 0
+        call 0x4100             ; slot 1 = bank 1
+        ld a,3
+        ld (0xFFFE),a           ; slot 1 <- bank 3
+        call 0x4100             ; the same logical PC, now bank 3 code
+        ld a,2
+        ld (0xFFFD),a           ; slot 0 <- bank 2
+        call 0x0500             ; slot 0 now bank 2 code
+        call 0x0210             ; fixed first 1 KiB is unaffected by slot 0
+        ld a,0x5A
+        ld (0xC2FF),a
+done:   halt
+        jr done
+.org 0x0200
+ram_jump:
+        ld hl,0xC300
+        jp (hl)                 ; code in work RAM fails closed
+.org 0x0210
+        ld a,0x44
+        ld (0xC204),a
+        ret
+"""
+BANK_CROSSING_ROUTINES = [  # (bank, logical origin of the routine as seen from `slot_base`, slot base, source)
+    (0, 0x0500, 0x0000, "        ld a,0x0F\n        ld (0xC203),a\n        ret\n"),
+    (1, 0x4100, 0x4000, "        ld a,0x11\n        ld (0xC200),a\n        ret\n"),
+    (2, 0x0500, 0x0000, "        ld a,0x22\n        ld (0xC202),a\n        ret\n"),
+    (3, 0x4100, 0x4000, "        ld a,0x33\n        ld (0xC201),a\n        ret\n"),
+]
+
+
+def fixture_bank_crossing():
+    image, _ = Assembler(BANK_CROSSING_MAIN).assemble()
+    size = 0x10000
+    markers = {}
+    for bank, origin, slot_base, source in BANK_CROSSING_ROUTINES:
+        routine, _ = Assembler(".org 0x%04X\n%s" % (origin, source)).assemble()
+        for address, byte in routine.items():
+            markers[bank * BANK_SIZE + (address - slot_base)] = byte
+    markers[2 * BANK_SIZE + 0x3FFF] = 0x3E  # last byte of bank 2: a two-byte instruction straddling the slot edge
+    return build_rom(size, image, markers), "sega"
+
+
+FIXTURES = {"trivial": fixture_trivial, "oracle_smoke": fixture_oracle_smoke, "bank_crossing": fixture_bank_crossing}
 
 
 def build(name):

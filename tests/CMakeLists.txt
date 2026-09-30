@@ -1154,3 +1154,22 @@ set_property(TEST sms_capabilities_test sms_fixture_rom_test sms_oracle_smoke_te
   APPEND PROPERTY LABELS full fast)
 set_property(TEST sms_capabilities_test sms_fixture_rom_test sms_oracle_smoke_test sms_psg_oracle_smoke_test
   APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T002: SMS cartridge ingestion, memory map/mapper, ImageSet declaration and the declaration-vs-run-time mapper
+# contract (hermetic, synthetic ROMs), plus the test-side SMS generation CLI and generated-native bank-crossing host.
+add_executable(sms_machine_tests sms_machine_test.cpp)
+target_link_libraries(sms_machine_tests PRIVATE segarecomp::machine_master_system segarecomp::runtime_master_system)
+segarecomp_enable_warnings(sms_machine_tests)
+add_test(NAME sms_machine_tests COMMAND sms_machine_tests)
+add_executable(sms_image_emitter tools/sms_image_emitter.cpp)
+target_link_libraries(sms_image_emitter PRIVATE segarecomp::machine_master_system)
+segarecomp_enable_warnings(sms_image_emitter)
+add_test(NAME sms_bank_crossing_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_bank_crossing_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_emission_budget_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_machine_dependency_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_dependency_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_machine_tests sms_machine_dependency_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_bank_crossing_test sms_emission_budget_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_bank_crossing_test sms_emission_budget_test sms_machine_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")

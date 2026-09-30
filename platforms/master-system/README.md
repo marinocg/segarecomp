@@ -1,6 +1,8 @@
 # Master System
 
-Documentation-only platform goal; no code yet (see [../README.md](../README.md)).
+Code lives in `machine/` (generation-time C++: cartridge ingestion, mapper identity, ImageSet, SMS generation route
+`emit_cartridge`) and `runtime/` (strict C11 compiled with generated programs: memory map, Sega mapper, typed error
+surface). See ADR 0065. Other platform pieces (VDP, PSG, scheduler, viewer) land in later SEG-009 tasks.
 
 **Purpose:** Static recompilation of Z80 + SMS VDP software.
 
