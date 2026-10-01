@@ -72,7 +72,8 @@ def mutated_run(tc, oracle_exe, work, name, owner_edit=None, header_edit=None):
         mtc = z.Toolchain(tc.cc, tc.emitter, tc.oracle_checkout, include_dir=bdir / "inc")
     if owner_edit:
         applied = False
-        for path in bdir.glob("*_owner_*.c"):
+        # SEG-033: instruction effects (R, T-states, Q) live in the shared-body units, entries and prologues in the owner units
+        for path in [*bdir.glob("*_owner_*.c"), *bdir.glob("*_body_*.c")]:
             text = path.read_text()
             edited = owner_edit(text)
             applied = applied or edited != text

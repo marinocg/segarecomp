@@ -12,7 +12,8 @@ the gate cannot see that defect). The mutants:
   wrong_entry_selected      two entries of a group swap their case labels
   foreign_address_accepted  an owner also accepts the neighbouring address (selector masked)
   cross_image_confusion     two images' group owners are swapped in the entry table
-  direct_branch_wrong_entry an in-group fall-through jumps to the next entry's label instead of its own successor
+  direct_branch_wrong_entry an in-group fall-through jumps to another entry's label instead of its own successor
+  drop_set_pc               a direct binding into another grouped owner leaves a stale PC (found by the independent validator)
   missing_exact_entry       rows of the exact entry table are removed
   nearby_entry_fallback     the exact lookup returns the next key's owner when the key is absent
   stale_image_after_remap   the dispatcher keeps the code image of the first lookup (a bank switch keeps running the old image)
@@ -46,7 +47,7 @@ REPORT = []
 # Equivalent by design: a lookup that wrongly returns a neighbouring group still fails closed because the group's own selector does
 # not own the address (`no_owner`). The stacked mutant that also removes that second defence must be killed.
 MASKED = {"nearby_entry_fallback"}
-BATCHES = ("sms_map", "t007_prog", "two_image", "reloc", "rnd_sms")
+BATCHES = ("sms_map", "t007_prog", "two_image", "reloc", "rnd_sms", "group_cross")
 
 
 def check(cond, message):
@@ -171,6 +172,11 @@ def nearby_fallback_with_lenient_owner(d):
     return nearby_entry_fallback(d) & lenient_group_default(d)
 
 
+def drop_set_pc(d):
+    """A direct binding into another grouped owner no longer stores the successor PC: the target selects its entry from a stale PC."""
+    return any([edit(p, lambda t: re.sub(r"s->pc = [^;\n]+;\n(\s*return Z80_OWNER_NEXT\()", r"\1", t)) for p in owner_files(d)])
+
+
 def stale_image_after_remap(d):
     def stale(t):
         t = t.replace("    Z80CodeImage image;\n", "    static Z80CodeImage image; static int have;\n")
@@ -199,7 +205,7 @@ MUTANTS = {"wrong_window_key": wrong_window_key, "wrong_entry_selected": wrong_e
            "foreign_address_accepted": foreign_address_accepted, "cross_image_confusion": cross_image_confusion,
            "direct_branch_wrong_entry": direct_branch_wrong_entry, "missing_exact_entry": missing_exact_entry,
            "nearby_entry_fallback": nearby_entry_fallback, "nearby_fallback_lenient_owner": nearby_fallback_with_lenient_owner,
-           "stale_image_after_remap": stale_image_after_remap,
+           "drop_set_pc": drop_set_pc, "stale_image_after_remap": stale_image_after_remap,
            "fail_closed_bypassed": fail_closed_bypassed, "wrong_shared_body": wrong_shared_body}
 
 
