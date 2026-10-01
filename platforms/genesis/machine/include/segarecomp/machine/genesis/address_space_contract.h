@@ -89,14 +89,14 @@ static inline int segarecomp_genesis_z80_bank_register_contains(uint32_t address
   return address >= SEGARECOMP_GENESIS_Z80_BANK_REGISTER_BEGIN && address < SEGARECOMP_GENESIS_Z80_BANK_REGISTER_END;
 }
 
-/* Co-located PSG (SN76489) audio port: exactly the odd byte $C00011 (GTO1
- * v1.00 p. 10 "VDP AREA": "PSG 76489").  Runtime owner: genesis_psg_access
- * (SEG-007-T109), routed ahead of the VDP lane because the address is inside
- * the VDP interval. */
+/* Co-located PSG (SN76489) audio port: the odd byte $C00011 and its odd mirrors $C00013/$C00015/$C00017 (GTO1 v1.00 p. 10
+ * "VDP AREA": "PSG 76489"; MacDonald and Genesis Plus GX/ares agree on the four odd addresses, SEG-032-T006, contract section 9).
+ * Runtime owner: genesis_psg_access_68k, routed ahead of the VDP lane because the addresses are inside the VDP interval. */
 #define SEGARECOMP_GENESIS_PSG_PORT_ADDRESS UINT32_C(0x00C00011)
 
 static inline int segarecomp_genesis_psg_port_contains(uint32_t address) {
-  return address == SEGARECOMP_GENESIS_PSG_PORT_ADDRESS;
+  return address == UINT32_C(0x00C00011) || address == UINT32_C(0x00C00013) || address == UINT32_C(0x00C00015) ||
+         address == UINT32_C(0x00C00017);
 }
 
 /* SEG-007-T171: YM2612 FM synthesis chip register window, $A04000-$A04003

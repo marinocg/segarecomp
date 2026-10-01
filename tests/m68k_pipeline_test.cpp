@@ -13711,8 +13711,9 @@ void general_startup_routes_z80_and_psg_absolute_operands() {
            "a BYTE or WORD write of the Z80 bank register routes");
 
   // Co-located PSG audio port ($C00011): BYTE write only.
-  expect(routes(0x00C00011U, W::byte, D::write),
-         "a BYTE write of the co-located PSG audio port routes to M68kDeviceRoutedAccess");
+  for (const auto address : {UINT32_C(0x00C00011), UINT32_C(0x00C00013), UINT32_C(0x00C00015), UINT32_C(0x00C00017)})
+    expect(routes(address, W::byte, D::write),
+           "a BYTE write of the co-located PSG audio port and its odd mirrors routes to M68kDeviceRoutedAccess");
 
   // Fail-closed neighbours -- every one stays exactly unmapped_data_access.
   expect(is_unmapped(0x00A11100U, W::long_word, D::write) &&
@@ -13730,7 +13731,8 @@ void general_startup_routes_z80_and_psg_absolute_operands() {
              is_unmapped(0x00A05FFFU, W::byte, D::write) &&   // YM2612 mirror space past the four ports
              is_unmapped(0x009FFFFFU, W::byte, D::read) &&     // one byte below the window
              is_unmapped(0x00C00011U, W::byte, D::read) &&    // PSG port is write-only
-             is_unmapped(0x00C00013U, W::byte, D::write) &&   // the excluded PSG mirror
+             is_unmapped(0x00C00012U, W::byte, D::write) &&   // the even PSG mirror neighbour
+             is_unmapped(0x00C00018U, W::byte, D::write) &&   // just past the four odd ports
              is_unmapped(0x00C00010U, W::byte, D::write),      // the even PSG neighbour
          "LONG Z80-bus access, a RESET read, non-register in-region addresses, the region top edge, "
          "LONG Z80-RAM access, a bank register read/LONG write/neighbour, a PSG read, and the PSG mirror/neighbour all "

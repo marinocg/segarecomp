@@ -335,6 +335,11 @@ typedef struct GenesisZ80BusState {
 } GenesisZ80BusState;
 
 /*
+ * SEG-032-T006 (ADR 0072): the SEG-007-T109 command-latch model below is retired. The PSG is the shared Sega device
+ * (libs/device/sega/psg) attached through the audio hooks; the only PSG record left in the evidence-bearing device state is the
+ * log of the 68000's port traffic (count and running digest), which is what first-divergence diagnosis can observe: the chip is
+ * write-only from the 68000. The historical text follows for reference.
+ *
  * SEG-007-T109: minimal persistent PSG (SN76489) command-latch state. This is
  * a new genuinely-stateful subsystem (sound generation) added to
  * `GenesisDeviceState` per T042 SS1.1's extension discipline -- it does NOT
@@ -363,13 +368,8 @@ typedef struct GenesisZ80BusState {
  * Zero-initialised per T042 SS8.
  */
 typedef struct GenesisPsgState {
-  uint8_t latched_channel;  /* 0..3: the channel selected by the most recent LATCH byte. */
-  uint8_t latched_volume;   /* 1 iff that LATCH byte selected the volume register; 0 = tone/noise. */
-  uint8_t latch_valid;      /* 1 once any LATCH byte has been seen since reset; a DATA byte with
-                               this still 0 fails closed (no register is latched yet). */
-  uint16_t tone_period[3];  /* 10-bit period for tone channels 0..2 (0x000..0x3FF). */
-  uint8_t attenuation[4];   /* 4-bit attenuation for channels 0..3 (0 = loudest, 15 = silent). */
-  uint8_t noise_control;    /* 3-bit noise register for channel 3: bit 2 feedback, bits 1-0 rate. */
+  uint32_t write_count;   /* SEG-032-T006: bytes the 68000 has written to the PSG port ($C00011 and its odd mirrors) */
+  uint32_t write_digest;  /* FNV-1a (32-bit) over those bytes in order (basis 0 until the first write, then 2166136261) */
 } GenesisPsgState;
 
 /* Persistent interrupt/checkpoint timing state.  It is mutated only through
@@ -824,6 +824,8 @@ typedef struct GenesisRuntime {
      latches still follow the hardware rules, but nothing executes). Production programs attach one through the machine hook
      seam (z80_machine.h); 68K-only unit tests do not. Never part of any serialization. */
   const struct GenesisZ80Hooks *z80_hooks;
+  /* SEG-032-T006: the attached sound devices (NULL = none). Never part of any serialization. */
+  const struct GenesisAudioHooks *audio_hooks;
   /* Last master time the Z80 was explicitly synchronized to, and the retirement-hook cadence in master ticks (0 = default 512).
      Results never depend on the cadence: every interaction with Z80-domain state synchronizes first (contract section 10). */
   uint64_t z80_synced_ticks;
@@ -1284,6 +1286,16 @@ typedef struct GenesisZ80Hooks {
   int (*bus_event)(void *context, GenesisRuntime *runtime, GenesisZ80Event event, uint64_t master_ticks, int transition, int epoch,
                    const uint8_t *written, GenesisRuntimeStop *stop);
 } GenesisZ80Hooks;
+
+/*
+ * SEG-032-T006 (ADR 0072): the sound devices both CPUs reach, attached by the program (genesis_audio.c). Plain C. A program without an
+ * attached sound device accepts every supported PSG/YM2612 access and discards it (absent hardware, not an emulation of it).
+ */
+typedef struct GenesisAudioHooks {
+  void *context;
+  /* One PSG data-port byte at guest time `master_ticks`, from either CPU. 1 = accepted. */
+  int (*psg_write)(void *context, GenesisRuntime *runtime, uint8_t value, uint64_t master_ticks);
+} GenesisAudioHooks;
 typedef struct GenesisReportMetadata {
   GenesisCpuDimensions cpu_dimensions;
 } GenesisReportMetadata;

@@ -93,3 +93,18 @@ made the Sega PSG a platform-neutral device. SEG-032 must run a real Z80 image i
 - Evidence: `tests/genesis_z80_machine_test.py` (power-on, hold/resume with the 68K clock running, reset while executing, restart epoch,
   same Z80 PC under two images with dirty carry-over data, unknown image, data vs code mutation, VBlank INT with and without IFF1,
   determinism and sync-cadence invariance at quanta 1/512/4096, no decoder symbol in the linked executable).
+
+## T006 implementation record (2026-10-01)
+
+- **One shared PSG, attached.** `genesis_audio.[ch]` owns the `Sn76489` of `libs/device/sega/psg` (the default Sega variant, power-on state)
+  and installs `GenesisAudioHooks` into the runtime; the 68000's `$C00011/13/15/17` (the odd mirrors now routed on both sides of the static
+  seam) and the Z80's `$7F11/13/15/17` window both call `psg_write(value, master_ticks)` on the same instance. A program without an attached sound
+  device accepts the byte and discards it (absent hardware). Time is the Z80/PSG clock (master / 15); the device clock is monotonic
+  (`sn76489_advance` ignores a time in the past), so a Z80 write whose instruction started before a 68000 write is delivered first even
+  when its stamp is later.
+- **Evidence.** The SEG-007-T109 command-latch model is removed. The evidence-bearing PSG record is the log of the 68000's port traffic
+  (`write_count`, FNV-1a digest); the independent checkpoint oracle mirrors it. The device's own state is determinism evidence of the
+  audio artifact (T009). A data byte before any latch is accepted and ignored by the device (counted), as on the Master System, not a stop.
+- Tests: `genesis_startup_runtime_psg_test` (port semantics, stand-in device), `genesis_audio_psg_test` (real runtime + Z80 machine + shared
+  device: 68000-only, Z80-only, interleaved with the overshoot case, state equal to the library driven directly at cycle = ticks / 15,
+  cadence independence, wrong-ratio and dropped-writer controls, library builds with no Genesis code).

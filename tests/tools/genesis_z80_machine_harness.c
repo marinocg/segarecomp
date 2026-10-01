@@ -1,10 +1,12 @@
 /*
  * SEG-032-T005 (ADR 0072): replays a 68K bus script against the REAL Genesis runtime with an attached generated-native Z80 machine.
- *   genesis_z80_machine_harness <script> [sync-quantum]
+ *   genesis_z80_machine_harness <script> [sync-quantum|-] [audio]
  * script lines (decimal times, hex addresses/values):
  *   retire <m68k cycles>          advance guest time through the real retirement hook (genesis_runtime_retire_m68k_instruction)
  *   w8|w16 <addr> <value>         68K write through genesis_route_access        r8|r16 <addr>     68K read (prints R <addr> <value>)
  *   quantum <ticks>               change the retirement-hook synchronization cadence
+
+ *   psgrun | psgstate             (with `audio`) run the shared PSG to the current guest time / print its state, counters and delivery trace
  *   state                         print Z80 machine digest, Z80 time, bound image, bank, latches
  * Any rejected access or retirement prints STOP <class> <diagnostic> and ends the run with exit status 0 (the stop is the result).
  */
@@ -12,10 +14,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "genesis_audio.h"
 #include "z80_machine.h"
 
 static GenesisRuntime runtime;
 static GenesisZ80Machine machine;
+static GenesisAudio audio;
 
 static void print_digest(const uint8_t digest[32]) {
   unsigned i;
@@ -29,7 +33,8 @@ int main(int argc, char **argv) {
   script = fopen(argv[1], "r");
   if (script == NULL) return 2;
   genesis_z80_machine_attach(&machine, &runtime);
-  if (argc > 2) runtime.z80_sync_quantum = (uint32_t)strtoul(argv[2], NULL, 10);
+  if (argc > 2 && strcmp(argv[2], "-") != 0) runtime.z80_sync_quantum = (uint32_t)strtoul(argv[2], NULL, 10);
+  if (argc > 3 && strcmp(argv[3], "audio") == 0) genesis_audio_attach(&audio, &runtime);
   while (fgets(line, sizeof line, script) != NULL) {
     char op[16];
     unsigned long a = 0, b = 0;
@@ -41,6 +46,16 @@ int main(int argc, char **argv) {
       if (t.kind == GENESIS_STOP) { printf("STOP %d %d\n", (int)t.stop.stop_class, (int)t.stop.diagnostic_category); return 0; }
     } else if (strcmp(op, "quantum") == 0) {
       runtime.z80_sync_quantum = (uint32_t)strtoul(line + 8, NULL, 10);
+    } else if (strcmp(op, "psgstate") == 0) {
+      uint8_t bytes[SN76489_STATE_BYTES];
+      uint32_t i;
+      genesis_audio_psg_state(&audio, bytes);
+      printf("PSG ");
+      for (i = 0; i < SN76489_STATE_BYTES; ++i) printf("%02x", (unsigned)bytes[i]);
+      printf(" writes=%llu data_before_latch=%llu\n", (unsigned long long)audio.psg_writes, (unsigned long long)audio.psg_data_before_latch);
+      for (i = 0; i < audio.trace_count; ++i) printf("TRACE %llu %02x\n", (unsigned long long)audio.trace_ticks[i], (unsigned)audio.trace_bytes[i]);
+    } else if (strcmp(op, "psgrun") == 0) {
+      genesis_audio_psg_run_to(&audio, runtime.scheduler.master_ticks);
     } else if (strcmp(op, "state") == 0) {
       uint8_t digest[32];
       const GenesisZ80BusState *bus = &runtime.devices.z80_bus;

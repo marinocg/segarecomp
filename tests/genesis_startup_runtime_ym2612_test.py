@@ -298,7 +298,7 @@ int main(void) {
     value = UINT32_C(0x000000AA); /* tone latch, channel 1, nibble 0x0A */
     assert(genesis_route_access(&clean, UINT32_C(0x00C00011), GENESIS_ACCESS_BYTE,
                                  GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
-    assert(clean.devices.psg.latch_valid == 1U);
+    assert(clean.devices.psg.write_count == 1U);
   }
 
   return 0;

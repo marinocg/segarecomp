@@ -1102,9 +1102,13 @@ add_test(NAME genesis_z80_view_test COMMAND ${Python3_EXECUTABLE}
 # SEG-032-T005 (ADR 0072): BUSREQ/RESET and the deterministic M68K/Z80 scheduling of the attached Z80 machine.
 add_test(NAME genesis_z80_machine_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_machine_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
-set_property(TEST z80_live_guard_test genesis_z80_images_test genesis_z80_view_test genesis_z80_machine_test APPEND PROPERTY LABELS full)
+# SEG-032-T006 (ADR 0072): the shared Sega PSG written by both CPUs.
+add_test(NAME genesis_audio_psg_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_audio_psg_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_live_guard_test genesis_z80_images_test genesis_z80_view_test genesis_z80_machine_test genesis_audio_psg_test
+  APPEND PROPERTY LABELS full)
 set_property(TEST codegen_c11_z80_dependency_test z80_generated_pipeline_test z80_conformance_harness_test
-  z80_conformance_oracle_test z80_capability_ratchet_test z80_live_guard_test genesis_z80_images_test genesis_z80_view_test genesis_z80_machine_test
+  z80_conformance_oracle_test z80_capability_ratchet_test z80_live_guard_test genesis_z80_images_test genesis_z80_view_test genesis_z80_machine_test genesis_audio_psg_test
   APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-008-T002 tests were registered after the label loop above and so carried no tier label: add them here.
 set_property(TEST cpu_z80_decode_tests z80_generated_pipeline_test z80_conformance_oracle_test APPEND PROPERTY LABELS full)

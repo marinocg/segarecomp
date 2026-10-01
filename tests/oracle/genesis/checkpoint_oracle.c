@@ -136,7 +136,10 @@ static int oracle_is_z80_bus(uint32_t address) {
 static int oracle_is_vdp(uint32_t address) {
   return address == UINT32_C(0x00C00000) || address == UINT32_C(0x00C00004);
 }
-static int oracle_is_psg(uint32_t address) { return address == UINT32_C(0x00C00011); }
+static int oracle_is_psg(uint32_t address) {
+  return address == UINT32_C(0x00C00011) || address == UINT32_C(0x00C00013) || address == UINT32_C(0x00C00015) ||
+         address == UINT32_C(0x00C00017);
+}
 static int oracle_is_controller_io(uint32_t address) {
   return address == UINT32_C(0x00A10003) || address == UINT32_C(0x00A10009);
 }
@@ -341,45 +344,16 @@ static uint32_t oracle_vdp_status_read(void) {
   return status;
 }
 
-/* SMS Power "Development/SN76489": LATCH byte %1cctdddd, DATA byte
- * %0-DDDDDD updating the last-latched register. This oracle implements
- * exactly the one write shape its own fixtures use (a LATCH volume byte);
- * a DATA byte with no prior LATCH is a documented remaining no-op (see
- * below); the routing of a wrong-width PSG access is faulted one level up,
- * in oracle_route_write. */
+/* SEG-032-T006: the PSG is the shared Sega device, attached by the program; this 68000-only oracle world has none, so a byte at the
+ * port is accepted and discarded. The evidence-bearing PSG record is the log of the 68000's port traffic: the byte count and an
+ * FNV-1a (32-bit) digest over the bytes in order (basis taken at the first byte). The routing of a wrong-width or wrong-direction
+ * PSG access is faulted one level up, in oracle_route_write. */
 static void oracle_psg_write(uint8_t command) {
-  GenesisPsgState *psg = &g_world.devices.psg;
-  if ((command & 0x80U) != 0U) {
-    uint8_t channel = (uint8_t)((command >> 5) & 0x03U);
-    uint8_t is_volume = (uint8_t)((command >> 4) & 0x01U);
-    uint8_t data = (uint8_t)(command & 0x0FU);
-    psg->latched_channel = channel;
-    psg->latched_volume = is_volume;
-    psg->latch_valid = 1U;
-    if (is_volume) {
-      psg->attenuation[channel] = data;
-    } else if (channel < 3U) {
-      psg->tone_period[channel] = (uint16_t)((psg->tone_period[channel] & UINT16_C(0x03F0)) | data);
-    } else {
-      psg->noise_control = (uint8_t)(data & 0x07U);
-    }
-    return;
-  }
-  /* A DATA byte with no prior LATCH is not one of this hardening pass's
-   * enumerated fault cases; left as the existing documented no-op. */
-  if (!psg->latch_valid) return;
-  {
-    uint8_t data6 = (uint8_t)(command & 0x3FU);
-    uint8_t channel = psg->latched_channel;
-    if (psg->latched_volume) {
-      psg->attenuation[channel] = (uint8_t)(data6 & 0x0FU);
-    } else if (channel < 3U) {
-      psg->tone_period[channel] =
-          (uint16_t)((psg->tone_period[channel] & UINT16_C(0x000F)) | ((uint16_t)data6 << 4));
-    } else {
-      psg->noise_control = (uint8_t)(data6 & 0x07U);
-    }
-  }
+  GenesisPsgState *log = &g_world.devices.psg;
+  uint32_t digest = log->write_count == 0U ? UINT32_C(2166136261) : log->write_digest;
+  digest = (digest ^ command) * UINT32_C(16777619);
+  log->write_digest = digest;
+  ++log->write_count;
 }
 
 /* GTO1 p. 72-75: one GPIO data/control port pair. This oracle implements
@@ -566,12 +540,8 @@ static void oracle_sha_device(OracleSha256 *state, const GenesisDeviceState *dev
   oracle_sha256_put_u32(state, devices->vdp.dma.fill_byte_count);
   oracle_sha256_put_u32(state, devices->vdp.dma.transfer_access_count);
   oracle_sha256_put_u8(state, devices->vdp.dma.write_target_code);
-  oracle_sha256_put_u8(state, devices->psg.latched_channel);
-  oracle_sha256_put_u8(state, devices->psg.latched_volume);
-  oracle_sha256_put_u8(state, devices->psg.latch_valid);
-  for (i = 0U; i < 3U; ++i) oracle_sha256_put_u16(state, devices->psg.tone_period[i]);
-  oracle_sha256_update(state, devices->psg.attenuation, 4U);
-  oracle_sha256_put_u8(state, devices->psg.noise_control);
+  oracle_sha256_put_u32(state, devices->psg.write_count);
+  oracle_sha256_put_u32(state, devices->psg.write_digest);
   oracle_sha256_update(state, devices->controller_io.data, 3U);
   oracle_sha256_update(state, devices->controller_io.ctrl, 3U);
   oracle_sha256_put_u8(state, devices->interrupt.vblank_pending);

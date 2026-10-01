@@ -90,8 +90,9 @@ def main():
         tc = z.Toolchain(cc, pathlib.Path("unused-emitter"), opt="-O0", cache=False)
         exe, message = z.compile_units(
             tc, tmp / "gen", "genesis_z80",
-            extra_sources=[harness, root / "platforms/genesis/runtime/runtime.c", root / "platforms/genesis/runtime/z80_machine.c"],
-            extra_flags=["-I", str(root / "platforms/genesis/runtime")])
+            extra_sources=[harness, root / "platforms/genesis/runtime/runtime.c", root / "platforms/genesis/runtime/z80_machine.c",
+                           root / "platforms/genesis/runtime/genesis_audio.c", root / "libs/device/sega/psg/src/sn76489.c"],
+            extra_flags=["-I", str(root / "platforms/genesis/runtime"), "-I", str(root / "libs/device/sega/psg/include")])
         assert exe is not None, message
         hexfile = tmp / "ram.hex"
         hexfile.write_text(ram.hex())

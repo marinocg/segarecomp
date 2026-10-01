@@ -66,7 +66,7 @@ int main(void) {
   runtime = fresh(0x0F08, 0x271B); runtime.d[3] = 0xDEADBEEF;
   runtime.a[0] = runtime.a[1] = runtime.a[7] = 0x00C00011;
   step(&runtime, 0x0F0A, 4);
-  assert(runtime.d[3] == 0xDEADBE00 && runtime.sr == 0x2714 && runtime.devices.psg.latch_valid == 0U);
+  assert(runtime.d[3] == 0xDEADBE00 && runtime.sr == 0x2714 && runtime.devices.psg.write_count == 0U);
   runtime = fresh(0x0F18, 0x2708); runtime.d[5] = 0xFFFFFFFF;
   step(&runtime, 0x0F1A, 6);
   assert(runtime.d[5] == 0 && runtime.sr == 0x2704);
@@ -107,7 +107,7 @@ int main(void) {
     GenesisRuntime probe = fresh(0x0F08, 0x2700);
     uint32_t value = 0x9F; GenesisRuntimeStop stop = {0};
     assert(genesis_route_access(&probe, 0x00C00011, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) ==
-           GENESIS_ACCESS_OK && probe.devices.psg.latch_valid == 1U);
+           GENESIS_ACCESS_OK && probe.devices.psg.write_count == 1U);
     assert(genesis_route_access(&probe, 0x00C00011, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &value, &stop) !=
            GENESIS_ACCESS_OK);
     value = 0;
@@ -138,10 +138,10 @@ int main(void) {
   }
   runtime = fresh(0x0F0A, 0x271B); runtime.a[0] = 0x00C00011;  /* CLR.B (A0)+ */
   expect_stop(&runtime, GENESIS_ACCESS_READ, 0x00C00011U);
-  assert(runtime.pc == 0x0F0A && runtime.a[0] == 0x00C00011 && runtime.sr == 0x271B && runtime.devices.psg.latch_valid == 0U);
+  assert(runtime.pc == 0x0F0A && runtime.a[0] == 0x00C00011 && runtime.sr == 0x271B && runtime.devices.psg.write_count == 0U);
   runtime = fresh(0x0F0C, 0x2715); runtime.a[7] = 0x00C00013;  /* CLR.B -(A7): steps two onto the port */
   expect_stop(&runtime, GENESIS_ACCESS_READ, 0x00C00011U);
-  assert(runtime.pc == 0x0F0C && runtime.a[7] == 0x00C00013 && runtime.sr == 0x2715 && runtime.devices.psg.latch_valid == 0U);
+  assert(runtime.pc == 0x0F0C && runtime.a[7] == 0x00C00013 && runtime.sr == 0x2715 && runtime.devices.psg.write_count == 0U);
   /* SEG-021-T036: CLR of the Z80 RESET register completes: the discarded read is admitted, the zero write asserts
      reset (D8/D0 = 0), PC advances, CCR N=0 Z=1 V=0 C=0 with X kept, and an auto-update register is committed once. */
   runtime = fresh(0x0F0E, 0x2708); runtime.a[1] = 0x00A11200;  /* CLR.W (A1) */
@@ -240,7 +240,7 @@ int main(void) {
          transfer.stop.provenance.access_direction == GENESIS_ACCESS_READ &&
          transfer.stop.provenance.access_address == 0x00C00011U);
   assert(runtime.pc == 0x0B02 && runtime.a[0] == 0x00C00011 && runtime.sr == 0x2714 && runtime.d[3] == 0xDEADBE00 &&
-         runtime.devices.psg.latch_valid == 0U);
+         runtime.devices.psg.write_count == 0U);
 
   /* Write failure after a successful read inside the C4 block: CLR.L (A2) on an owned read-only region. */
   {

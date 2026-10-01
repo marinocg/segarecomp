@@ -10,12 +10,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "genesis_audio.h"
 #include "z80_machine.h"
 
 static uint8_t rom[0x20000];
 static GenesisOwnedCartridgeRegion region;
 static GenesisRuntime runtime;
 static GenesisZ80Machine machine;
+static GenesisAudio audio;
 
 static int route(uint32_t address, GenesisAccessWidth width, GenesisAccessDirection direction, uint32_t *value, GenesisDiagnosticCategory *diag) {
   GenesisRuntimeStop stop;
@@ -47,12 +49,13 @@ int main(int argc, char **argv) {
   fclose(file);
   runtime.devices.z80_bus.z80_ram[0x1F00] = (uint8_t)scenario;
   genesis_z80_machine_init(&machine, &runtime);
+  genesis_audio_attach(&audio, &runtime); /* the shared PSG: the Z80 write below reaches it through the audio hooks */
   machine.bound_ordinal = 1U;
   outcome = z80_run(&machine.cpu, cycles);
   printf("RESULT outcome=%s view_stop=%d cycles=%llu bank=%03x work10=%02x z80ram=", z80_outcome_name(outcome), (int)machine.view_stop,
          (unsigned long long)machine.cpu.state.cycles, (unsigned)runtime.devices.z80_bus.bank, (unsigned)runtime.work_ram[0x10]);
   for (index = 0x1000; index < 0x1010; ++index) printf("%02x", runtime.devices.z80_bus.z80_ram[index]);
-  printf(" psg_tone0=%u\n", (unsigned)runtime.devices.psg.tone_period[0]);
+  printf(" psg_tone0=%u psg_writes=%llu\n", (unsigned)audio.psg.tone_period[0], (unsigned long long)audio.psg_writes);
 
   /* ---- the 68K side of the Z80 area (contract section 3) ---- */
   {

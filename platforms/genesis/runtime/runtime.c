@@ -1148,112 +1148,39 @@ static int genesis_vdp_access(GenesisDeviceState *devices, uint32_t address,
   return 0;
 }
 
-/* SEG-007-T109: fail-closed-lane recognition of exactly the one co-located PSG
-   (SN76489) audio port the canonical Sonic startup route reaches -- a single
-   tight interval matching ONLY the odd byte address $C00011, mirroring
-   genesis_is_vdp_region's single-interval recognition shape.
+/* SEG-032-T006 (ADR 0072, contract section 9) -- the 68000's PSG (SN76489) port: BYTE writes at the odd addresses $C00011,
+   $C00013, $C00015, $C00017 (GTO1 v1.00 p. 10 "VDP AREA: PSG 76489"; MacDonald, Genesis Plus GX and ares agree on the four odd
+   mirrors; byte writes to the even addresses have no effect and stay unmapped here). The chip is write-only: a read, and any
+   WORD/LONG access, fails closed with GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG.
 
-   $C00011 is the port GTO1 v1.00 p. 10 "VDP AREA" labels "PSG 76489" (a
-   primary Sega source); plutiedev.com "psg" ("68000: at $C00011") corroborates
-   it. Charles MacDonald's Sega Genesis hardware notes additionally list odd
-   mirrors ($C00013/$C00015/$C00017) and note "Doing byte-wide writes to even
-   PSG addresses has no effect" -- but those mirrors are only secondarily
-   attested, so, exactly like the SEG-007-T103 Z80-RAM-mirror exclusion, they
-   stay fail-closed rather than be folded in without direct evidence. */
+   Replaces the SEG-007-T109 command-latch compatibility model. The device is the shared `Sn76489` of libs/device/sega/psg,
+   reached through `runtime->audio_hooks` from BOTH CPUs (the Z80 through its $7F11 window, z80_machine.c); the byte is
+   delivered at the guest time of the 68000 access after the Z80 was run to that time, so the two writers interleave in master-time
+   order. The only evidence-bearing PSG state is the log of the 68000's port traffic: a DATA byte before any LATCH byte is the
+   device's business (it is accepted and changes nothing, as on the Master System), not a fail-closed case here. Without an
+   attached sound device the byte is accepted and discarded. */
 static int genesis_is_psg_region(uint32_t address) {
-  /* SEG-007-T115: delegate to the shared contract predicate (byte-identical
-     to the former $C00011 literal). */
   return segarecomp_genesis_psg_port_contains(address);
 }
 
-/* SEG-007-T109: the bounded, runtime-reached PSG (SN76489) BYTE WRITE.
-   ================ scope ================
-   This models ONLY the CPU-visible SN76489 write-command register latch. It is
-   an explicitly labelled, replaceable PROJECT COMPATIBILITY POLICY (see
-   docs/architecture/genesis-psg-sn76489-port-write-compatibility-policy.md),
-   NOT verified Genesis/SN76489 hardware behaviour. There is NO audio synthesis,
-   NO tone/noise oscillator or frequency-divider emulation, NO attenuation-ramp
-   modelling, NO PSG ready/busy line, NO YM2612/FM, and NO Z80 view of the chip.
+int genesis_psg_port_write(GenesisRuntime *runtime, uint8_t value, uint64_t master_ticks) {
+  const GenesisAudioHooks *hooks = runtime->audio_hooks;
+  if (hooks != 0 && hooks->psg_write != 0) return hooks->psg_write(hooks->context, runtime, value, master_ticks);
+  return 1; /* no sound device attached: accepted and discarded */
+}
 
-   ================ public sources ================
-   - GTO1 (Sega, Genesis Technical Overview v1.00, 1991) p. 10: PSG 76489 at
-     $C00011.
-   - SMS Power "Development/SN76489": LATCH byte %1cctdddd (cc = channel 0..3,
-     t = 1 volume / 0 tone-noise, dddd = 4-bit data); DATA byte %0-DDDDDD
-     (DDDDDD = upper 6 bits of a 10-bit tone period, or the low bits of an
-     attenuation / noise control); attenuation is 4-bit (0 loudest, 15 silent);
-     the noise register (channel 3) is 3-bit: bit 2 = feedback mode
-     (0 periodic / 1 white), bits 1-0 = shift rate.
-   - plutiedev.com "psg": corroborates the port ("68000: at $C00011"), the
-     volume command ($90 | channel<<5 | attenuation), the two-byte tone command
-     ($80 | channel<<5 | (freq & 0x0F) then freq>>4), and the documented noise
-     command set $E0-$E7.
-   - Charles MacDonald, Sega Genesis hardware notes: PSG is write-only
-     ("Reading the PSG addresses will cause the machine to lock up").
-
-   ================ project compatibility policy (replaceable, not hardware) ==
-   - BYTE width only. WORD/LONG writes fail closed (a WORD/LONG access to the
-     odd address $C00011 is already rejected by genesis_route_access's
-     odd-effective-address guard before this lane is reached; the width check
-     here is defensive). MacDonald's secondary "word write, data in LSB" quirk
-     is deliberately not modelled, exactly like the SEG-007-T103 Z80-area
-     word-width ambiguity.
-   - Write-only. Any READ of $C00011 fails closed.
-   - A DATA byte (bit 7 clear) with no prior LATCH byte fails closed
-     (latch_valid == 0): the latched register is genuinely undefined at that
-     point and this project rejects the ambiguity rather than guess.
-   - The noise register is 3 bits: a LATCH byte selecting channel 3's
-     tone/noise register with data bit 3 set (outside the documented $E0-$E7
-     command set) fails closed rather than guess whether hardware latches or
-     ignores it. Every other command-byte value is a defined SN76489 command.
-
-   All validation precedes any mutation: a rejected access returns 0 having
-   modified neither devices->psg nor the caller's *value (T042 SS3 /
-   genesis_route_access's own "on failure neither it nor the runtime is
-   modified" contract). */
-static int genesis_psg_access(GenesisDeviceState *devices, uint32_t address,
-                              GenesisAccessWidth width, GenesisAccessDirection direction,
-                              uint32_t *value) {
-  GenesisPsgState *psg = &devices->psg;
-  uint8_t command;
-  if (address != UINT32_C(0x00C00011)) return 0;       /* wrong address */
-  if (direction != GENESIS_ACCESS_WRITE) return 0;      /* PSG port is write-only */
-  if (width != GENESIS_ACCESS_BYTE) return 0;           /* BYTE width only */
-  command = (uint8_t)(*value & 0xFFU);
-  if ((command & 0x80U) != 0U) {
-    /* LATCH byte %1cctdddd. */
-    uint8_t channel = (uint8_t)((command >> 5) & 0x03U);
-    uint8_t is_volume = (uint8_t)((command >> 4) & 0x01U);
-    uint8_t data = (uint8_t)(command & 0x0FU);
-    if (!is_volume && channel == 3U && (data & 0x08U) != 0U)
-      return 0; /* reserved: noise register is 3 bits, only $E0-$E7 documented */
-    psg->latched_channel = channel;
-    psg->latched_volume = is_volume;
-    psg->latch_valid = 1U;
-    if (is_volume) {
-      psg->attenuation[channel] = data;
-    } else if (channel < 3U) {
-      psg->tone_period[channel] = (uint16_t)((psg->tone_period[channel] & UINT16_C(0x03F0)) | data);
-    } else {
-      psg->noise_control = (uint8_t)(data & 0x07U);
-    }
-    return 1;
-  }
-  /* DATA byte %0-DDDDDD: updates the last-latched register. */
-  if (!psg->latch_valid) return 0; /* no register latched yet */
-  {
-    uint8_t data6 = (uint8_t)(command & 0x3FU);
-    uint8_t channel = psg->latched_channel;
-    if (psg->latched_volume) {
-      psg->attenuation[channel] = (uint8_t)(data6 & 0x0FU);
-    } else if (channel < 3U) {
-      psg->tone_period[channel] =
-          (uint16_t)((psg->tone_period[channel] & UINT16_C(0x000F)) | ((uint16_t)data6 << 4));
-    } else {
-      psg->noise_control = (uint8_t)(data6 & 0x07U);
-    }
-    return 1;
-  }
+static int genesis_psg_access_68k(GenesisRuntime *runtime, GenesisAccessWidth width, GenesisAccessDirection direction,
+                                  uint32_t *value) {
+  GenesisPsgState *log = &runtime->devices.psg;
+  uint8_t byte;
+  if (direction != GENESIS_ACCESS_WRITE) return 0; /* the PSG port is write-only */
+  if (width != GENESIS_ACCESS_BYTE) return 0;
+  byte = (uint8_t)(*value & 0xFFU);
+  if (!genesis_psg_port_write(runtime, byte, runtime->scheduler.master_ticks)) return 0;
+  log->write_digest = (log->write_count == 0U ? UINT32_C(2166136261) : log->write_digest);
+  log->write_digest = (log->write_digest ^ byte) * UINT32_C(16777619);
+  ++log->write_count;
+  return 1;
 }
 
 /* SEG-007-T171: fail-closed-lane recognition of the YM2612 FM-synthesis
@@ -1509,11 +1436,6 @@ void genesis_ym2612_port_reset(GenesisRuntime *runtime, uint64_t master_ticks) {
   (void)runtime; (void)master_ticks; /* the compat model has no state to reset; the YM2612 device (SEG-032-T007) does */
 }
 
-int genesis_psg_port_write(GenesisRuntime *runtime, uint8_t value, uint64_t master_ticks) {
-  uint32_t routed = value;
-  (void)master_ticks;
-  return genesis_psg_access(&runtime->devices, UINT32_C(0x00C00011), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &routed);
-}
 
 /* SEG-032-T002/T005 (ADR 0073): the 68K wrote one Z80 RAM byte (mirror resolved): it belongs to the hold window. */
 static void genesis_z80_epoch_note_ram_write(GenesisRuntime *runtime, uint32_t address) {
@@ -1610,7 +1532,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
        to learn it); the PSG port is write-only so nothing is ever read back
        into *value. */
     uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
-    if (genesis_psg_access(&runtime->devices, address, width, direction, &routed_value)) {
+    if (genesis_psg_access_68k(runtime, width, direction, &routed_value)) {
       return GENESIS_ACCESS_OK;
     }
     *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS,
@@ -2010,12 +1932,8 @@ static void genesis_device_checkpoint_finalize(GenesisRuntime *runtime) {
   h = genesis_fnv_bytes(h, d->interrupt.vblank_transition_count_at_checkpoint_entry, 4U);
   cp->component[5] = h;
   h = basis;
-  h = genesis_fnv_bytes(h, d->psg.latched_channel, 1U);
-  h = genesis_fnv_bytes(h, d->psg.latched_volume, 1U);
-  h = genesis_fnv_bytes(h, d->psg.latch_valid, 1U);
-  for (i = 0; i < 3U; ++i) h = genesis_fnv_bytes(h, d->psg.tone_period[i], 2U);
-  for (i = 0; i < 4U; ++i) h = genesis_fnv_bytes(h, d->psg.attenuation[i], 1U);
-  h = genesis_fnv_bytes(h, d->psg.noise_control, 1U);
+  h = genesis_fnv_bytes(h, d->psg.write_count, 4U);
+  h = genesis_fnv_bytes(h, d->psg.write_digest, 4U);
   cp->component[6] = h;
   h = basis;
   h = genesis_fnv_bytes(h, d->z80_bus.bus_requested, 1U);
@@ -3132,8 +3050,7 @@ static void genesis_sha_device(GenesisSha256 *s, const GenesisDeviceState *d) {
   uint32_t i; genesis_sha_u8(s,d->z80_bus.bus_requested); genesis_sha_u8(s,d->z80_bus.bus_granted); genesis_sha_u8(s,d->z80_bus.reset_released); genesis_sha_u8(s,(uint8_t)(d->z80_bus.bank >> 8)); genesis_sha_u8(s,(uint8_t)d->z80_bus.bank); genesis_sha256_update(s,d->z80_bus.z80_ram,GENESIS_Z80_RAM_BYTES);
   for(i=0U;i<GENESIS_VDP_REGISTER_COUNT;++i) { genesis_sha_u16(s,d->vdp.registers[i]); }
   genesis_sha_u8(s,d->vdp.control_port_awaiting_second_word); genesis_sha_u16(s,d->vdp.control_port_first_word); genesis_sha_u32(s,d->vdp.addressed_pointer); genesis_sha_u16(s,d->vdp.auto_increment_value); genesis_sha_u16(s,d->vdp.status_register); genesis_sha_u8(s,d->vdp.data_port_transfer_code); genesis_sha_u8(s,d->vdp.data_port_transfer_code_valid); genesis_sha256_update(s,d->vdp.vram,GENESIS_VDP_VRAM_BYTES); genesis_sha256_update(s,d->vdp.cram,GENESIS_VDP_CRAM_BYTES); genesis_sha256_update(s,d->vdp.vsram,GENESIS_VDP_VSRAM_BYTES); genesis_sha_u8(s,(uint8_t)d->vdp.dma.phase); genesis_sha_u8(s,(uint8_t)d->vdp.dma.kind); genesis_sha_u32(s,d->vdp.dma.source_address); genesis_sha_u32(s,d->vdp.dma.remaining_length); genesis_sha_u32(s,d->vdp.dma.fill_byte_count); genesis_sha_u32(s,d->vdp.dma.transfer_access_count); genesis_sha_u8(s,d->vdp.dma.write_target_code);
-  genesis_sha_u8(s,d->psg.latched_channel); genesis_sha_u8(s,d->psg.latched_volume); genesis_sha_u8(s,d->psg.latch_valid); for(i=0U;i<3U;++i) { genesis_sha_u16(s,d->psg.tone_period[i]); }
-  genesis_sha256_update(s,d->psg.attenuation,4U); genesis_sha_u8(s,d->psg.noise_control); genesis_sha256_update(s,d->controller_io.data,3U); genesis_sha256_update(s,d->controller_io.ctrl,3U); genesis_sha_u8(s,d->interrupt.vblank_pending); genesis_sha_u32(s,d->interrupt.vblank_status_read_count); genesis_sha_u32(s,d->interrupt.vblank_transition_count); genesis_sha_u8(s,d->interrupt.checkpoint_entered); genesis_sha_u32(s,d->interrupt.vblank_transition_count_at_checkpoint_entry);
+  genesis_sha_u32(s,d->psg.write_count); genesis_sha_u32(s,d->psg.write_digest); genesis_sha256_update(s,d->controller_io.data,3U); genesis_sha256_update(s,d->controller_io.ctrl,3U); genesis_sha_u8(s,d->interrupt.vblank_pending); genesis_sha_u32(s,d->interrupt.vblank_status_read_count); genesis_sha_u32(s,d->interrupt.vblank_transition_count); genesis_sha_u8(s,d->interrupt.checkpoint_entered); genesis_sha_u32(s,d->interrupt.vblank_transition_count_at_checkpoint_entry);
 }
 
 int genesis_extract_checkpoint_evidence(const GenesisRuntime *runtime,
