@@ -1,6 +1,6 @@
 # ADR 0073: Build-Time Z80 Image Materialization and RAM-Backed Code Identity
 
-- Status: Accepted (SEG-032-T001); T002 amends the activation-signature section with the measured proof; T008 freezes the bounds.
+- Status: Accepted (SEG-032-T001); amended by SEG-032-T002 (activation signature S1\*, measured results below); T008 freezes the bounds.
 - Date: 2026-10-01
 - Related: ADR 0058 (broad immutable-image AOT; "SEG-032-style materialization"), ADR 0071 (owners), ADR 0072,
   `docs/architecture/genesis-z80-audio-contract.md` §5-7.
@@ -20,12 +20,14 @@ prerequisites and are not reproduced here. SEG-031 (admission policy over known 
    while the Z80 is pristine. The snapshot is the full 8 KiB RAM.
 3. **Two keys, never confused.**
    - *Content hash* (contract §7): names a compiled image and makes the registry reproducible. Build artifact.
-   - *Activation signature*: the runtime selection key, defined to ignore unrelated mutable and carry-over RAM. Candidates S1
-     (68K-written extents since the last reset assertion) and S2 (instruction-footprint bytes) are frozen; T002 must prove one
-     with: fill-pattern perturbations, scribbled carry-over data, a multi-epoch dirty-data falsifier (epoch 2 inherits epoch 1's
-     driver state; epoch 3 repeats epoch 1's code over different carry-over), a different-code/identical-carry-over collision
-     control and footprint-byte sensitivity controls. Failure to prove either is NO-GO (or an operator decision), not a silent
-     redefinition.
+   - *Activation signature S1\**: the runtime selection key, defined over the 68K-written extents of the **hold window**
+     (since power-on or the previous runnable transition, epoch or plain resume). The T001 candidate "writes since the last
+     `/RESET` assertion" was disproved by the first real run (the documented upload sequence asserts `/RESET` after the
+     upload, so the set was empty) and replaced; the instruction-footprint alternative S2 is the documented fallback only.
+     T002 proof (`tests/genesis_z80_epoch_signature_test.py` on the real runtime router, plus the authorized workload):
+     identical signatures for the same code over different carry-over data and different power-on fills, different
+     signatures for different code and for a one-byte code change, an independent model of the observer state machine,
+     and three negative controls (whole-RAM identity, writes-since-assertion, clearing only at an epoch).
 4. **Fixed point.** `run -> unknown signature at a runnable transition -> write the snapshot and stop -> derive content hash and
    signature -> emit and compile only that image with the existing broad Z80 AOT -> regenerate the registry -> relink -> restart
    from reset`. It ends when one complete run of the observation window ends with no unknown epoch; one confirming run must
@@ -56,3 +58,27 @@ prerequisites and are not reproduced here. SEG-031 (admission policy over known 
 
 - Epochs that occur after the observation window or depend on input surface as `z80_unknown_image` at run time (documented unsupported).
 - Evidence records only counts and classes; image hashes are local artifacts.
+
+## T002 decision record (2026-10-01): GO
+
+Generic epoch observer in the Genesis runtime (`GenesisZ80EpochObserver`, optional, non-semantic) plus the probe seam
+`platforms/genesis/viewer/z80_epoch_probe_main_hook.c` (mirrors the execution-coverage seam; bridge option `--z80-epoch-probe`).
+Authorized-workload aggregates (zero input, quick profile, 600 virtual frames, power-on fill 0):
+
+| workload | epochs | virtual frames of the epochs | notes |
+| --- | --- | --- | --- |
+| Sonic 1 (authorized) | 3 | 0, 59, 348 | epoch 1 a 38-byte stub upload; epochs 2 and 3 a 7,110-byte image; the two images differ in exactly one byte outside the uploaded extent (carry-over data): content hash 3 classes, signature 2 classes |
+| Sonic 2 (authorized) | 2 | 0, 113 | 38-byte stub, then a 4,872-byte image |
+
+Caveats recorded honestly:
+- The 600-frame window is long enough for the boot-time handoffs of both workloads; epoch 3 of Sonic 1 appears in this seam, where
+  **no Z80 executes**: the 68K reads Z80 RAM mailboxes the real driver would write, so with another power-on fill (0xFF) the 68K
+  takes a different path and epoch 3 does not occur within the window (dispatch count 2.3 M vs 6.3 M). Later epochs are therefore a
+  lower bound and must be re-derived with the executing Z80 (T008); epochs 1 and 2 are fill-independent.
+- Broad AOT of one snapshot (the existing `z80_image_emitter`, debug build, 16 KiB two-mirror window): 10 translation units,
+  3.2-4.1 MB of C, 0.8-1.1 MB of objects, 0.2 s emit and 0.6-1.0 s strict-C11 `-O2` compile wall on 8 jobs per image; three repeated
+  derivations are byte-identical. The cost of one more image is therefore about a second; the image bound is driven by correctness,
+  not by build time.
+- Proposed constants (frozen by T008 after the executing-Z80 re-run): image bound 8 (observed maximum 3; rule: at least 2x the
+  maximum observed, at most 16), observation window 600 virtual frames, per-run instruction budget 400,000,000 retired dispatches
+  (the observed runs used 2.3-6.3 M), per-run wall timeout 120 s, loop iterations at most bound + 1.

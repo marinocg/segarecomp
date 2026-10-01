@@ -1172,11 +1172,14 @@ add_test(NAME genesis_z80_fixture_rom_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_fixture_rom_test.py)
 add_test(NAME genesis_z80_oracle_smoke_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_oracle_smoke_test.py ${CMAKE_C_COMPILER})
+add_test(NAME genesis_z80_epoch_signature_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_epoch_signature_test.py ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_ym2612_oracle_smoke_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_ym2612_oracle_smoke_test.py ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER})
 set_property(TEST genesis_z80_fixture_rom_test genesis_z80_oracle_smoke_test genesis_ym2612_oracle_smoke_test
-  APPEND PROPERTY LABELS full fast)
+  genesis_z80_epoch_signature_test APPEND PROPERTY LABELS full fast)
 set_property(TEST genesis_z80_fixture_rom_test genesis_z80_oracle_smoke_test genesis_ym2612_oracle_smoke_test
+  genesis_z80_epoch_signature_test
   APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
 # SEG-009-T002: SMS cartridge ingestion, memory map/mapper, ImageSet declaration and the declaration-vs-run-time mapper

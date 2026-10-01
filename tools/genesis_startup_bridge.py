@@ -1038,6 +1038,7 @@ def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, roo
                          viewer_sdl3: tuple[list[str], list[str]] | None = None,
                          capture: bool = False,
                          coverage: bool = False,
+                         z80_probe: bool = False,
                          ) -> tuple[int, bytes | None, pathlib.Path | None]:
     source = out_dir / "bridge.generated.c"
     executable = out_dir / "bridge"
@@ -1102,6 +1103,8 @@ def generate_and_compile(emitter_command: list[str], compiler: pathlib.Path, roo
             return _compile_capture_executable(compile_flags, root, sources, executable)
         if coverage:
             return _compile_capture_executable(compile_flags, root, sources, executable, coverage=True)
+        if z80_probe:
+            return _compile_capture_executable(compile_flags, root, sources, executable, z80_probe=True)
         runtime_flags = ["-I", str(root / "platforms" / "genesis" / "runtime")]
         if not sharded:
             compile_result = subprocess.run(compile_flags + runtime_flags + [
@@ -1196,7 +1199,8 @@ def _compile_viewer_executable(compile_flags: list[str], sdl3: tuple[list[str], 
 
 def _compile_capture_executable(compile_flags: list[str], root: pathlib.Path, sources: "list[pathlib.Path]",
                                 executable: pathlib.Path,
-                                coverage: bool = False) -> tuple[int, bytes | None, pathlib.Path | None]:
+                                coverage: bool = False,
+                                z80_probe: bool = False) -> tuple[int, bytes | None, pathlib.Path | None]:
     """SEG-021-T031: headless frame-capture build of the UNMODIFIED generated C, mirroring the
     viewer build: only the main TU is compiled with -Dgenesis_runtime_run=genesis_frame_capture_hook_run.
     No SDL. Objects live in a temp dir (never in out_dir). SEG-026-T001: `coverage` selects the
@@ -1206,9 +1210,11 @@ def _compile_capture_executable(compile_flags: list[str], root: pathlib.Path, so
     viewer_dir = root / "platforms" / "genesis" / "viewer"
     includes = ["-I", str(runtime_dir), "-I", str(viewer_dir)]
     hook = ([viewer_dir / "execution_coverage.c", viewer_dir / "execution_coverage_main_hook.c"] if coverage
+            else [viewer_dir / "z80_epoch_probe_main_hook.c"] if z80_probe
             else [viewer_dir / "frame_capture.c", viewer_dir / "frame_capture_main_hook.c"])
     others = [runtime_dir / "runtime.c", runtime_dir / "vdp_render.c", runtime_dir / "frame_export.c"] + hook
     hook_macro = ("-Dgenesis_runtime_run=genesis_execution_coverage_hook_run" if coverage
+                  else "-Dgenesis_runtime_run=genesis_z80_epoch_probe_hook_run" if z80_probe
                   else "-Dgenesis_runtime_run=genesis_frame_capture_hook_run")
     with tempfile.TemporaryDirectory() as tmp:
         jobs = [(sources[0], [hook_macro])] \
@@ -1330,6 +1336,30 @@ def run_execution_coverage(executable: pathlib.Path, root: pathlib.Path, out_dir
     if completed.stdout:
         sys.stdout.write(completed.stdout)
     return 0 if parsed.get("outcome") == "frames_reached" else 10
+
+
+def run_z80_epoch_probe(executable: pathlib.Path, root: pathlib.Path, out_dir: pathlib.Path, instruction_budget: int,
+                        frames: int, stop_at: int = 0, fill: int = 0, private_name: str = "z80-probe-private") -> int:
+    """SEG-032-T002: run the probe-mode executable once. The epoch snapshots (private, local only) land in
+    `<out-dir>/<private_name>`; stderr carries the single EPOCH_PROBE_SUMMARY aggregate line."""
+    private = out_dir / private_name
+    shutil.rmtree(private, ignore_errors=True)
+    private.mkdir(parents=True)
+    env = dict(os.environ)
+    env["SEGARECOMP_Z80PROBE_FRAMES"] = str(frames)
+    env["SEGARECOMP_Z80PROBE_STOP_AT"] = str(stop_at)
+    env["SEGARECOMP_Z80PROBE_FILL"] = str(fill)
+    env["SEGARECOMP_Z80PROBE_DIR"] = str(private)
+    completed = subprocess.run([str(executable), "--instruction-budget", str(instruction_budget)],
+                               cwd=root, env=env, text=True, capture_output=True)
+    summary = [line for line in completed.stderr.splitlines() if line.startswith("EPOCH_PROBE_SUMMARY ")]
+    for line in summary:
+        sys.stderr.write(line + "\n")
+    if len(summary) != 1:
+        sys.stderr.write(completed.stderr)
+        return 5
+    outcome = json.loads(summary[0][len("EPOCH_PROBE_SUMMARY "):]).get("outcome")
+    return 0 if outcome in ("window_complete", "epoch_cap") else 10
 
 
 def run_viewer(executable: pathlib.Path, root: pathlib.Path, instruction_budget: int,
@@ -1983,6 +2013,11 @@ def main() -> int:
                         help="run the identical frame-bounded loop with no coverage observer (overhead baseline)")
     parser.add_argument("--coverage-no-render", action="store_true",
                         help="count virtual frame boundaries without rendering frames (faster; no frame-stream digest)")
+    # SEG-032-T002: measurement-only generic Z80 image-epoch probe (platforms/genesis/viewer/z80_epoch_probe_main_hook.c).
+    parser.add_argument("--z80-epoch-probe", type=instruction_budget_value, metavar="FRAMES",
+                        help="build the probe seam over the unmodified generated program and run it from reset for FRAMES "
+                             "virtual frames; epoch snapshots go to the ignored <out-dir>/z80-probe-private, aggregates "
+                             "(counts and frame numbers) to stderr")
     args = parser.parse_args()
     global _compile_jobs_override, _object_cache_dir_override
     _compile_jobs_override = args.compile_jobs
@@ -2094,8 +2129,19 @@ def main() -> int:
         # The coverage keyword is passed only when requested, so the historical call shape (and every
         # caller/test double of generate_and_compile) is unchanged for all other modes.
         extra = {"coverage": True} if args.execution_coverage is not None else {}
+        if args.z80_epoch_probe is not None:
+            extra = {"z80_probe": True}
         return generate_and_compile(emitter_command, compiler, root, out_dir, resolve_profile(args),
                                     viewer_sdl3, capture=args.capture_frames is not None, **extra)
+    if args.z80_epoch_probe is not None:
+        # One generation + one compile + one bounded run of the same program with the generic epoch observer.
+        status, _, executable = single_cycle_generate_and_compile()
+        if status:
+            return status
+        assert executable is not None
+        return run_z80_epoch_probe(executable, root, out_dir,
+                                   args.instruction_budget if args.instruction_budget is not None
+                                   else GENESIS_CANONICAL_RUNNER_DISPATCH_ALLOWANCE, args.z80_epoch_probe)
     if args.execution_coverage is not None:
         # One generation + one compile + one frame-bounded headless coverage run of the same program.
         status, _, executable = single_cycle_generate_and_compile()

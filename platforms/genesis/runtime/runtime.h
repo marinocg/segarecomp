@@ -506,6 +506,37 @@ typedef struct GenesisLiveFrameObserver {
   uint64_t sequence;
 } GenesisLiveFrameObserver;
 
+/*
+ * SEG-032-T002 (ADR 0073, contract section 5): optional, host-owned, NON-semantic observer of the generic Z80 image epoch.
+ * An epoch is the transition to a Z80-runnable state after a reset/upload epoch: /RESET released and BUSREQ not asserted
+ * while the Z80 is pristine (reset since its last instruction). The observer sees only generic hardware events -- the
+ * 68000 writes to $A11100/$A11200 and to Z80 RAM -- never an address, a title or a cartridge byte, and it never changes
+ * guest state. Absent (NULL) == the unobserved behavior. Power-on state per the contract: /RESET asserted, BUSREQ clear,
+ * pristine, nothing written.
+ *
+ * `on_epoch` receives the 8 KiB RAM snapshot at the transition and the bitmap (bit i of byte i/8) of the RAM bytes the
+ * 68000 wrote during the *hold window*: since power-on or the previous runnable transition (an epoch or a plain resume),
+ * i.e. while the Z80 was not executing (activation signature S1*, ADR 0073). 68K writes made in earlier holds, before
+ * the Z80 last ran, and every Z80-written byte are not in it.
+ */
+typedef struct GenesisZ80EpochEvent {
+  uint32_t ordinal;               /* 1-based epoch ordinal in activation order */
+  uint64_t master_ticks;          /* guest time of the transition */
+  const uint8_t *ram;             /* GENESIS_Z80_RAM_BYTES */
+  const uint8_t *written_bitmap;  /* GENESIS_Z80_RAM_BYTES / 8 bytes */
+} GenesisZ80EpochEvent;
+
+typedef struct GenesisZ80EpochObserver {
+  void (*on_epoch)(void *context, const GenesisZ80EpochEvent *event);
+  void *context;
+  uint32_t epoch_count;                       /* epochs reported so far */
+  uint8_t initialized;                        /* 0 until the first event: lazily set to the power-on state */
+  uint8_t reset_asserted;                     /* shadow of /RESET (1 = asserted) */
+  uint8_t busreq;                             /* shadow of BUSREQ */
+  uint8_t pristine;                           /* reset since the last instruction (no Z80 executes in this seam) */
+  uint8_t written[GENESIS_Z80_RAM_BYTES / 8U];
+} GenesisZ80EpochObserver;
+
 /* Fixed pure-C11 persistent state ABI for generated Genesis startup blocks. */
 /* SEG-020-T003 / ADR-0042 section 4: ONE fixed-capacity, allocation-free,
    overwrite-oldest, Genesis-local typed history. Event categories are exactly:
@@ -796,6 +827,8 @@ typedef struct GenesisRuntime {
   /* SEG-026-T001: host-owned optional execution-PC coverage observer (NULL = absent, the value in every
      ordinary build); non-semantic. See GenesisExecutionCoverage. */
   struct GenesisExecutionCoverage *execution_coverage;
+  /* SEG-032-T002: host-owned optional Z80 image-epoch observer (NULL = absent); non-semantic. */
+  GenesisZ80EpochObserver *z80_epoch_observer;
 } GenesisRuntime;
 
 /* SEG-026-T001: optional, measurement-only, host-owned complete execution-PC coverage.

@@ -104,12 +104,12 @@ class M68k:
     def release_bus(self):
         self.move_w_imm(0x0000, Z80_BUSREQ)
 
-    def copy_to_z80(self, program_label, length, loop):
+    def copy_to_z80(self, program_label, length, loop, destination=Z80_RAM):
         self.w(0x41FA)  # LEA d16(PC),A0
         self.fixups.append((len(self.words), program_label + ":pcrel"))
         self.w(0)
         self.w(0x43F9)
-        self.l(Z80_RAM)  # LEA abs.L,A1
+        self.l(destination)  # LEA abs.L,A1
         self.w(0x303C, length - 1)  # MOVE.W #n-1,D0
         self.label(loop)
         self.w(0x12D8)  # MOVE.B (A0)+,(A1)+
@@ -247,7 +247,92 @@ def fixture_bus_reset_control():
     return probe(False)
 
 
-FIXTURES = {"bus_reset_probe": fixture_bus_reset_probe, "bus_reset_control": fixture_bus_reset_control}
+
+# --- fixture: multi-epoch upload with dirty carry-over data (SEG-032-T002, activation-signature falsifier) -----------------
+
+DIRTY_BASE = 0x1F00  # a mailbox/variable area outside every uploaded image
+
+
+def multi_epoch_programs():
+    """Three project-authored 'drivers' (opaque Z80 byte strings; the T002 seam never executes them): X, X' (one code byte
+    changed) and Y (different code, same length)."""
+    x = bytes((i * 7 + 3) & 0xFF for i in range(96))
+    x2 = bytearray(x)
+    x2[40] ^= 0x55
+    y = bytes((i * 13 + 5) & 0xFF for i in range(96))
+    return x, bytes(x2), y
+
+
+def multi_epoch_ops():
+    """The multi-epoch dirty-data program as backend-neutral operations, rendered as 68K code (`fixture_multi_epoch_dirty`)
+    and as a raw 68K access script for the runtime-level harness (`access_script`). Epochs (each: BUSREQ, upload, /RESET pulse,
+    BUSREQ cancel, /RESET release), with 68K 'command' writes into the mailbox area during separate holds between them:
+      1: X over a clean mailbox        2: X again, mailbox dirty (A)     3: Y (different code), mailbox dirty (A)
+      4: X again, mailbox dirty (B)    5: X' (one code byte changed), mailbox dirty (B)"""
+    ops = []
+
+    def epoch(program):
+        ops.extend([("busreq", 1), ("reset", 1), ("wait_ack",), ("upload", program), ("reset", 0), ("busreq", 0),
+                    ("reset", 1)])  # the last write is the runnable transition: an epoch
+
+    def dirty(value):
+        ops.extend([("busreq", 1), ("wait_ack",)])  # a separate hold: the Z80 ran in between
+        ops.extend(("write", DIRTY_BASE + i, value + i) for i in range(4))
+        ops.append(("busreq", 0))
+
+    epoch("x")
+    dirty(0xA0)
+    epoch("x")
+    epoch("y")
+    dirty(0xB0)
+    epoch("x")
+    epoch("x2")
+    return ops
+
+
+def fixture_multi_epoch_dirty():
+    programs = dict(zip(("x", "x2", "y"), multi_epoch_programs()))
+    m = M68k()
+    waits = 0
+    for op in multi_epoch_ops():
+        if op[0] == "busreq":
+            m.move_w_imm(0x0100 if op[1] else 0x0000, Z80_BUSREQ)
+        elif op[0] == "reset":
+            m.move_w_imm(0x0100 if op[1] else 0x0000, Z80_RESET)
+        elif op[0] == "wait_ack":
+            waits += 1
+            m.label("ack_%d" % waits)
+            m.btst0(Z80_BUSREQ)
+            m.branch(0x66, "ack_%d" % waits)
+        elif op[0] == "upload":
+            m.copy_to_z80("prog_" + op[1], len(programs[op[1]]), "cp_%d" % len(m.words))
+        elif op[0] == "write":
+            m.move_b_imm(op[2], Z80_RAM + op[1])
+    m.move_b_imm(0xA5, DONE)
+    m.label("spin")
+    m.branch(0x60, "spin")
+    for name in sorted(programs):
+        m.data("prog_" + name, programs[name])
+    return build_rom(m.resolve())
+
+
+def access_script(ops, programs):
+    """Renders backend-neutral operations as the raw 68K access stream the runtime-level harness replays through
+    genesis_route_access: `w16 <addr> <value>` / `w8 <addr> <value>` (hex)."""
+    lines = []
+    for op in ops:
+        if op[0] == "busreq":
+            lines.append("w16 %06X %04X" % (Z80_BUSREQ, 0x0100 if op[1] else 0))
+        elif op[0] == "reset":
+            lines.append("w16 %06X %04X" % (Z80_RESET, 0x0100 if op[1] else 0))
+        elif op[0] == "upload":
+            lines.extend("w8 %06X %02X" % (Z80_RAM + i, b) for i, b in enumerate(programs[op[1]]))
+        elif op[0] == "write":
+            lines.append("w8 %06X %02X" % (Z80_RAM + op[1], op[2]))
+    return "\n".join(lines) + "\n"
+
+
+FIXTURES = {"multi_epoch_dirty": fixture_multi_epoch_dirty, "bus_reset_probe": fixture_bus_reset_probe, "bus_reset_control": fixture_bus_reset_control}
 
 
 def build(name):

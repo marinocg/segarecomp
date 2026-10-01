@@ -1539,6 +1539,62 @@ static int genesis_z80_ram_window_access(GenesisDeviceState *devices, uint32_t a
   return 0;
 }
 
+/* SEG-032-T002 (ADR 0073): the generic Z80 image-epoch observer notifications. Pure side channel: they read the
+   already-validated, already-applied access and never change guest state. */
+static void genesis_z80_epoch_init(GenesisZ80EpochObserver *observer) {
+  if (observer->initialized) return;
+  observer->initialized = 1U;
+  observer->reset_asserted = 1U; /* power-on: the Z80 is held in /RESET */
+  observer->busreq = 0U;
+  observer->pristine = 1U;
+  memset(observer->written, 0, sizeof(observer->written));
+}
+
+static void genesis_z80_epoch_check(GenesisRuntime *runtime, GenesisZ80EpochObserver *observer, int was_runnable) {
+  const int runnable = !observer->reset_asserted && !observer->busreq;
+  if (runnable && !was_runnable) {
+    if (observer->pristine) {
+      GenesisZ80EpochEvent event;
+      observer->pristine = 0U;
+      ++observer->epoch_count;
+      event.ordinal = observer->epoch_count;
+      event.master_ticks = runtime->scheduler.master_ticks;
+      event.ram = runtime->devices.z80_bus.z80_ram;
+      event.written_bitmap = observer->written;
+      if (observer->on_epoch != 0) observer->on_epoch(observer->context, &event);
+    }
+    /* Every runnable transition (an epoch or a plain resume) ends the hold window: later holds start a fresh one. */
+    memset(observer->written, 0, sizeof(observer->written));
+  }
+}
+
+static void genesis_z80_epoch_note_register(GenesisRuntime *runtime, uint32_t address, GenesisAccessWidth width,
+                                            uint32_t written_value) {
+  GenesisZ80EpochObserver *observer = runtime->z80_epoch_observer;
+  const uint32_t bit = (width == GENESIS_ACCESS_WORD) ? UINT32_C(0x0100) : UINT32_C(0x0001);
+  int was_runnable;
+  if (observer == 0) return;
+  genesis_z80_epoch_init(observer);
+  was_runnable = !observer->reset_asserted && !observer->busreq;
+  if (address == UINT32_C(0x00A11100)) {
+    observer->busreq = (uint8_t)((written_value & bit) != 0U);
+  } else {
+    const uint8_t asserted = (uint8_t)((written_value & bit) == 0U);
+    if (!asserted && observer->reset_asserted) observer->pristine = 1U; /* release: the Z80 is reset (contract 4.6) */
+    observer->reset_asserted = asserted;
+  }
+  genesis_z80_epoch_check(runtime, observer, was_runnable);
+}
+
+static void genesis_z80_epoch_note_ram_write(GenesisRuntime *runtime, uint32_t address) {
+  GenesisZ80EpochObserver *observer = runtime->z80_epoch_observer;
+  uint32_t offset;
+  if (observer == 0) return;
+  genesis_z80_epoch_init(observer);
+  offset = address - UINT32_C(0x00A00000);
+  if (offset < GENESIS_Z80_RAM_BYTES) observer->written[offset >> 3] |= (uint8_t)(1U << (offset & 7U));
+}
+
 static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *runtime, uint32_t address,
                                               GenesisAccessWidth width,
                                               GenesisAccessDirection direction, uint32_t *value,
@@ -1769,6 +1825,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
     uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
     if (genesis_z80_bus_access(&runtime->devices, address, width, direction, &routed_value)) {
       if (direction == GENESIS_ACCESS_READ) *value = routed_value;
+      else genesis_z80_epoch_note_register(runtime, address, width, routed_value);
       return GENESIS_ACCESS_OK;
     }
     *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS,
@@ -1783,6 +1840,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
     uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
     if (genesis_z80_ram_window_access(&runtime->devices, address, width, direction, &routed_value)) {
       if (direction == GENESIS_ACCESS_READ) *value = routed_value;
+      else genesis_z80_epoch_note_ram_write(runtime, address);
       return GENESIS_ACCESS_OK;
     }
     *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS,

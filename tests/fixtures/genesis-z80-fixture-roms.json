@@ -7,6 +7,10 @@
     "bus_reset_probe": {
       "sha256": "1fd5ce35a01d1b9f4ca7af5924bcc0e048ee1f72eeb7485378177ce810b6b9aa",
       "size": 16384
+    },
+    "multi_epoch_dirty": {
+      "sha256": "5427a813f35539ba54c5f9880e3ba5f0b42e6d91c1dccf6a8b4e1887069c7991",
+      "size": 16384
     }
   },
   "schema": 1

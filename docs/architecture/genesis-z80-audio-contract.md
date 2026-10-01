@@ -148,26 +148,31 @@ immediates or displacements and no runtime decoding of replacement bytes are sup
 
 ## 7. Content hash and activation signature
 
-Two separate quantities are derived from the RAM at the runnable transition:
+Two separate quantities are derived at the runnable transition:
 
 - **Content hash** `H = SHA-256(tag "segarecomp.genesis.z80.image.v1", u32le window_length = 0x4000, u8 mirror_count = 2,
   the 8,192 snapshot bytes)`. It names the compiled image, orders the registry by first activation and makes builds
-  reproducible. It is a build artifact, never selection authority at runtime.
-- **Activation signature** `S`, the runtime selection key. It must be insensitive to unrelated mutable or carry-over RAM
-  (a previous epoch's driver state, variables, the zero power-on fill) and sensitive to what the 68K established for this
-  epoch. Two candidates are frozen for T002 to prove; exactly one is selected by the T002 evidence and recorded in ADR 0073:
-  - **S1 (written extents).** `S1 = SHA-256(tag "...sig.v1.extents", the sequence of (u16le offset, u16le length, bytes)` for
-    the maximal runs of Z80-RAM bytes the 68K wrote since the later of power-on and the most recent `/RESET` **assertion**
-    that preceded the transition`)`. Runs are merged when adjacent and ordered by offset; a write that stores the byte already
-    present still counts as written.
-  - **S2 (instruction footprint).** `S2 = SHA-256(tag "...sig.v1.footprint", for every offset covered by an instruction
-    start of the compiled image reachable by linear sweep from PC 0 along fall-through and unconditional/conditional direct
-    targets inside the window: (u16le offset, byte))`; computed at activation from live RAM using the offsets list stored in the
-    registry for each candidate image (a lookup visits candidates in registry order and compares).
+  reproducible. It is a build artifact, never selection authority at runtime. (Measured on the authorized workload: it
+  varies with unrelated carry-over data and with the power-on fill, which is why it cannot select.)
+- **Activation signature S1\*** (proved by SEG-032-T002, ADR 0073), the runtime selection key: `SHA-256(tag
+  "segarecomp.genesis.z80.signature.v1.extents", then for every maximal run of Z80-RAM bytes the 68K wrote during the
+  *hold window*: u16le offset, u16le length, the run's bytes at the transition)`, runs ordered by offset and merged when
+  adjacent. The **hold window** is the time since power-on or since the previous runnable transition (an epoch *or* a plain
+  resume), i.e. while the Z80 was not executing. Consequently it contains the uploaded image and anything else the 68K
+  wrote in the same hold, and it excludes: 68K command/mailbox writes made in earlier holds (before the Z80 last ran),
+  every Z80-written byte, and the power-on fill. A write that stores the byte already present still counts as written.
   The matching rule: the first registered image (registry order) whose signature equals the computed one is bound; a
-  signature shared by two registered images with different content hashes is a build failure
-  (`z80_signature_collision`). If no candidate is proved by T002 the milestone stops (NO-GO or operator decision); the
-  definition is never silently weakened.
+  signature shared by two registered images with different content hashes is a build failure (`z80_signature_collision`).
+- **Rejected definitions (T002 negative controls):** the whole 8 KiB RAM (varies with carry-over and fill: five images
+  where three suffice); "writes since the last /RESET assertion" (the documented upload sequence asserts `/RESET` after
+  the upload, so the set is empty and every image collides); clearing the window only at an epoch (earlier holds' command
+  writes leak into later signatures); the instruction-footprint alternative S2 (bytes reachable from the hardware entry
+  points by static flow) is not adopted: it needs a control-flow analysis whose under-approximation (indirect jumps) would
+  select an image whose live bytes differ in code reached only indirectly, turning a selection question into a guard
+  failure. It remains the documented fallback if a supported workload ever uploads in a way S1\* cannot see (for example
+  an upload performed by the Z80 itself, which is outside the supported set).
+- **Known limit:** the signature is input-independent only if the 68K's writes during the final hold are. Anything the
+  68K stores in the same hold as the upload is part of the image's identity by design.
 
 ## 8. Interrupts
 
@@ -238,7 +243,7 @@ No fake/real dual path remains after a task retires its row; a transitional seam
 | id | fact | bound / decision until resolved | owner |
 | --- | --- | --- | --- |
 | U1 | exact YM2612 busy duration and timer reload alignment (ymfm leaves busy and timers to the host interface: `ymfm_set_busy_end`, `ymfm_set_timer`) | the host owns the clock: T007 implements both from master ticks and compares to NUKED within a documented tolerance; a write during busy is lost on the real chip (Nuked), so the Z80 drivers poll | T007 |
-| U2 | which of S1/S2 is the activation signature | frozen candidates (§7); T002 proves one | T002 |
+| U2 | the activation signature | RESOLVED by T002: S1\* (hold-window written extents), §7 | T002 |
 | U3 | Z80 read of work RAM through the bank window (ARES forbids, GPGX allows) | typed stop `z80_bank_target_unsupported` for RAM reads; RAM **writes** admitted; reconsider only with a supported workload that needs it | T004/T010 |
 | U4 | Z80 access to VDP ports through `$7F00` | typed stop except PSG writes | T006/T010 |
 | U5 | audible mix ratio of PSG to FM on hardware | §11 constants; not claimed to be hardware accurate | T009 |
