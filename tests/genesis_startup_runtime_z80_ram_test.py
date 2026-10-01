@@ -1,38 +1,18 @@
 #!/usr/bin/env python3
-"""SEG-007-T103: direct, isolated coverage of genesis_route_access's flat
-68000-visible Z80 program-RAM window routing extension (window base $A00000,
-GENESIS_Z80_RAM_BYTES bytes).
-
-This proves the runtime routing function alone -- no compiled/executed
-generated program is involved. It calls `genesis_route_access` directly,
-exactly as tests/genesis_startup_runtime_z80_bus_test.py does for the
-bus-arbitration registers, against a real `GenesisRuntime`, and asserts on the
-return value, `*value`, `stop`, and the resulting
-`runtime.devices.z80_bus.z80_ram` / latch fields.
-
-The modeled behaviour is an explicitly labelled, replaceable PROJECT
-COMPATIBILITY POLICY (see
-docs/architecture/genesis-z80-ram-window-compatibility-policy.md), not verified
-Z80-area access behaviour. There is no Z80 core, decode, JIT, or instruction
-fetch: the only modeled effect is a flat byte-array read/write, gated on the
-SEG-007-T102 `bus_granted` latch. Public size/range/access facts are from
-Sega's *Genesis Technical Overview* v1.00 (1991) p. 2 / p. 7 / p. 76 / p. 77 /
-p. 91 and Charles MacDonald's *Sega Genesis hardware notes* v0.8 SS1/SS2.
+"""SEG-007-T103, rewritten by SEG-032-T004 (ADR 0072, contract section 3): the 68000 view of the Z80 sound RAM through
+genesis_route_access, without a Z80 CPU. The original flat, byte-only, un-mirrored compat policy is superseded: the window is the
+8 KiB RAM plus its $A02000 mirror, a WORD write stores the high byte and a WORD read returns the byte in both halves (Genesis
+Plus GX z80_read_byte/z80_write_byte, MacDonald SS1.2), LONG fails closed, an access without the bus grant is the typed
+GENESIS_DIAG_68K_Z80_AREA_WITHOUT_BUS. The BUSREQ grant latch is still the SEG-007-T102 model here (replaced by SEG-032-T005).
+The full Z80 view (bank register, banked window, YM2612/PSG ports) is covered by tests/genesis_z80_view_test.py.
 
 Covered:
-- With `bus_granted` set: BYTE WRITE then BYTE READ-back at the window base,
-  near the middle, and at the last valid byte -- round-trips the value; WRITE
+- With `bus_granted` set: BYTE write then BYTE read-back at the window base, middle, last RAM byte and through the mirror; WRITE
   never mutates the caller's `*value`; READ is side-effect-free.
-- A modelled byte-stream copy (loop of BYTE writes across a bounded span) then
-  read-back, deterministic across two independent `GenesisRuntime` values.
-- Adversarial fail-closed BEFORE mutation: access while `bus_granted == 0`;
-  WORD width; LONG width; an in-window unsupported-width access yielding the new
-  Z80-RAM device diagnostic; the first address just past the window keeping the
-  PRE-EXISTING generic unmapped-region result. Each against an all-zero runtime
-  (byte-identical to `zeroed`) and a pre-populated snapshot.
-- Regression: `z80_bus` BUSREQ/BUSACK/RESET and the VDP status read still work
-  and are unaffected; an end-to-end BUSREQ-write-then-window-access path.
-- Determinism: a mixed sequence repeated twice, `memcmp` equal.
+- A modelled byte-stream copy then read-back, deterministic across two independent `GenesisRuntime` values.
+- Adversarial fail-closed BEFORE mutation: access without the bus grant (typed); LONG width; an invalid direction; the first
+  address past the mirror keeping the pre-existing generic unmapped-region result.
+- Regression: `z80_bus` BUSREQ/BUSACK/RESET and the VDP status read still work. Determinism: a mixed sequence, `memcmp` equal.
 """
 import pathlib
 import subprocess
@@ -50,18 +30,24 @@ HARNESS = r'''
 
 /* Assert a rejected access is fail-closed with the Z80-RAM device diagnostic
    AND mutated neither the runtime nor the caller's value. */
-static void reject_z80_ram(GenesisRuntime *runtime, const GenesisRuntime *snapshot,
-                           uint32_t address, GenesisAccessWidth width,
-                           GenesisAccessDirection direction) {
+static void reject_z80_ram_as(GenesisRuntime *runtime, const GenesisRuntime *snapshot,
+                              uint32_t address, GenesisAccessWidth width,
+                              GenesisAccessDirection direction, GenesisDiagnosticCategory diagnostic) {
   GenesisRuntimeStop stop = {0};
   uint32_t value = UINT32_C(0xDEADBEEF);
   assert(genesis_route_access(runtime, address, width, direction, &value, &stop) ==
          GENESIS_ACCESS_FAIL);
   assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS);
-  assert(stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_Z80_RAM);
+  assert(stop.diagnostic_category == diagnostic);
   assert(value == UINT32_C(0xDEADBEEF));
   assert(memcmp(runtime, snapshot, sizeof(*runtime)) == 0);
 }
+
+/* Without the bus grant the typed outcome is the missing-bus diagnostic; with it, only the LONG shape is rejected. */
+#define reject_z80_ram(rt, snap, addr, width, dir) \
+  reject_z80_ram_as((rt), (snap), (addr), (width), (dir), \
+                    (rt)->devices.z80_bus.bus_granted ? GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_Z80_RAM \
+                                                      : GENESIS_DIAG_68K_Z80_AREA_WITHOUT_BUS)
 
 static void grant_bus(GenesisRuntime *runtime) {
   GenesisRuntimeStop stop = {0};
@@ -169,12 +155,10 @@ int main(void) {
     grant_bus(&rej);
     {
       GenesisRuntime granted = rej;
-      reject_z80_ram(&rej, &granted, Z80_RAM_BASE, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE);
-      reject_z80_ram(&rej, &granted, Z80_RAM_BASE, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ);
       reject_z80_ram(&rej, &granted, Z80_RAM_BASE, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);
       reject_z80_ram(&rej, &granted, Z80_RAM_BASE, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ);
-      reject_z80_ram(&rej, &granted, Z80_RAM_BASE + GENESIS_Z80_RAM_BYTES - 2U,
-                     GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE);
+      reject_z80_ram(&rej, &granted, Z80_RAM_BASE + GENESIS_Z80_RAM_BYTES - 4U,
+                     GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);
     }
   }
 
@@ -191,21 +175,47 @@ int main(void) {
     /* grant, then unsupported width */
     grant_bus(&rej);
     before = rej;
-    reject_z80_ram(&rej, &before, Z80_RAM_BASE + 2U, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE);
+    reject_z80_ram(&rej, &before, Z80_RAM_BASE + 4U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);
     reject_z80_ram(&rej, &before, Z80_RAM_BASE + 4U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ);
   }
 
-  /* ---- The first address just past the window ($A00000 + GENESIS_Z80_RAM_BYTES,
-     i.e. the deliberately-excluded Z80-RAM mirror address) keeps the
-     PRE-EXISTING generic unmapped-region fail-close, NOT the new Z80-RAM
-     diagnostic -- even with the bus granted. ---- */
+  /* ---- The mirror: $A02000-$A03FFF aliases the 8 KiB RAM. ---- */
+  {
+    GenesisRuntime runtime = {0};
+    grant_bus(&runtime);
+    value = 0x7EU;
+    assert(genesis_route_access(&runtime, Z80_RAM_BASE + GENESIS_Z80_RAM_BYTES + 9U, GENESIS_ACCESS_BYTE,
+                                GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+    assert(runtime.devices.z80_bus.z80_ram[9] == 0x7EU);
+    value = 0U;
+    assert(genesis_route_access(&runtime, Z80_RAM_BASE + 9U, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &value,
+                                &stop) == GENESIS_ACCESS_OK);
+    assert(value == 0x7EU);
+  }
+
+  /* ---- WORD: a write stores the high byte, a read returns the byte in both halves. ---- */
+  {
+    GenesisRuntime runtime = {0};
+    grant_bus(&runtime);
+    value = 0xABCDU;
+    assert(genesis_route_access(&runtime, Z80_RAM_BASE + 0x20U, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &value,
+                                &stop) == GENESIS_ACCESS_OK);
+    assert(runtime.devices.z80_bus.z80_ram[0x20] == 0xABU && runtime.devices.z80_bus.z80_ram[0x21] == 0x00U);
+    value = 0U;
+    assert(genesis_route_access(&runtime, Z80_RAM_BASE + 0x20U, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &value,
+                                &stop) == GENESIS_ACCESS_OK);
+    assert(value == 0xABABU);
+  }
+
+  /* ---- The first address past the mirror and the bank register, with the bus granted, keeps the
+     PRE-EXISTING generic unmapped-region fail-close ($A04004 is outside every Z80-area lane). ---- */
   {
     GenesisRuntime rej = {0};
     GenesisRuntime before;
     grant_bus(&rej);
     before = rej;
     value = UINT32_C(0xDEADBEEF);
-    assert(genesis_route_access(&rej, Z80_RAM_BASE + GENESIS_Z80_RAM_BYTES, GENESIS_ACCESS_BYTE,
+    assert(genesis_route_access(&rej, UINT32_C(0x00A04004), GENESIS_ACCESS_BYTE,
                                 GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
     assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_MEMORY_REGION);
     assert(stop.diagnostic_category == GENESIS_DIAG_UNMAPPED_DATA_ACCESS);

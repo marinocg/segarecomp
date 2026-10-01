@@ -33,6 +33,8 @@ STOP_DIAGNOSTIC_PAIRS = {
         "unsupported_device_region_controller_io", "unsupported_device_region_vdp",
         "unsupported_device_region_z80_bus", "unsupported_device_region_z80_ram",
         "unsupported_device_region_psg",
+        # SEG-032-T004: fail-closed Z80-area outcomes (contract sections 2-3).
+        "z80_view_unmapped_access", "z80_bank_target_unsupported", "genesis_68k_z80_area_without_bus",
     },
     "unsupported_memory_region": {
         "effective_address_not_24bit", "odd_effective_address", "rom_write_prohibited",

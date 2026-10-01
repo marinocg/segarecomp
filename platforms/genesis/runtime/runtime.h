@@ -330,6 +330,8 @@ typedef struct GenesisZ80BusState {
                              core exists and the startup route drives this
                              register explicitly (policy doc, "intentional
                              deviations"). */
+  uint16_t bank;          /* SEG-032-T004: the 9-bit Z80 bank register (A23-A15 of the banked 68K view); a 68K or Z80 write
+                             shifts bit 0 in at bit 8 (contract section 2); power-on 0. Zero-initialized. */
   uint8_t z80_ram[GENESIS_Z80_RAM_BYTES]; /* SEG-007-T103: the flat
                              68000-visible Z80 program-RAM window backing
                              storage (window base $A00000, GENESIS_Z80_RAM_BYTES
@@ -1088,6 +1090,10 @@ typedef enum GenesisDiagnosticCategory {
      forever. Paired with GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT;
      the STOP itself has completed (SR loaded, PC at the next instruction). */
   GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE = 52,
+  /* SEG-032-T004 (contract sections 2-3): fail-closed Z80-area outcomes. Paired with GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS. */
+  GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS = 53,       /* a Z80 (or 68K) access to an unmapped / unsupported Z80-area address */
+  GENESIS_DIAG_Z80_BANK_TARGET_UNSUPPORTED = 54,    /* a Z80 banked-window access whose 68K target is not ROM read / work-RAM write */
+  GENESIS_DIAG_68K_Z80_AREA_WITHOUT_BUS = 55,       /* a 68K access to the Z80 area while it does not hold the Z80 bus */
 } GenesisDiagnosticCategory;
 
 typedef struct GenesisProvenance {
@@ -1397,6 +1403,16 @@ int m68k_emitted_code_address_member(const uint32_t *addresses, uint32_t count, 
  * tick + admission it performs.
  */
 GenesisControlTransfer genesis_runtime_step(GenesisRuntime *runtime, GenesisDispatchFunction dispatch);
+
+/*
+ * SEG-032-T004 (ADR 0072): the YM2612 / PSG port seam shared by both CPUs. `port` is the YM2612 address-decoded port 0..3
+ * (part I address, part I data, part II address, part II data); `master_ticks` is the access time. Return 1 when the access is
+ * supported, 0 for an unsupported shape (the caller raises the typed stop). SEG-032-T006/T007 replace the bodies (shared
+ * Sn76489, YM2612 device) without changing the signatures.
+ */
+int genesis_ym2612_port_read(GenesisRuntime *runtime, uint32_t port, uint64_t master_ticks, uint8_t *value);
+int genesis_ym2612_port_write(GenesisRuntime *runtime, uint32_t port, uint8_t value, uint64_t master_ticks);
+int genesis_psg_port_write(GenesisRuntime *runtime, uint8_t value, uint64_t master_ticks);
 
 /*
  * SEG-007-T252 / ADR-0040: the runner-owned finite dispatch allowance --

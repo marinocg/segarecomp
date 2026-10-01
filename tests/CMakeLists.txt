@@ -1096,9 +1096,12 @@ add_test(NAME z80_live_guard_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/z80_live_guard_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_z80_images_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_images_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
-set_property(TEST z80_live_guard_test genesis_z80_images_test APPEND PROPERTY LABELS full)
+# SEG-032-T004 (ADR 0072): the Genesis Z80 address space, bank window and 68K Z80-area view.
+add_test(NAME genesis_z80_view_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_view_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_live_guard_test genesis_z80_images_test genesis_z80_view_test APPEND PROPERTY LABELS full)
 set_property(TEST codegen_c11_z80_dependency_test z80_generated_pipeline_test z80_conformance_harness_test
-  z80_conformance_oracle_test z80_capability_ratchet_test z80_live_guard_test genesis_z80_images_test
+  z80_conformance_oracle_test z80_capability_ratchet_test z80_live_guard_test genesis_z80_images_test genesis_z80_view_test
   APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-008-T002 tests were registered after the label loop above and so carried no tier label: add them here.
 set_property(TEST cpu_z80_decode_tests z80_generated_pipeline_test z80_conformance_oracle_test APPEND PROPERTY LABELS full)

@@ -1454,89 +1454,67 @@ static int genesis_z80_bus_access(GenesisDeviceState *devices, uint32_t address,
   return 1;
 }
 
-/* SEG-007-T103: fail-closed-lane recognition of exactly the flat 68000-visible
-   Z80 program-RAM window -- a single tight interval `[0x00A00000, 0x00A00000 +
-   GENESIS_Z80_RAM_BYTES)`, mirroring genesis_is_z80_bus_region's
-   single-interval recognition shape. GTO1 v1.00 (1991) 68K memory map (p. 7,
-   overview p. 2) and Charles MacDonald's Sega Genesis hardware notes v0.8 SS1/
-   SS2 both document an 8 KiB Z80 RAM at $A00000. This interval deliberately
-   covers ONLY those 8 KiB: the documented Z80-RAM mirror ($A02000-$A03FFF, only
-   secondarily attested from the 68000 side) and the Z80 sound-chip / bank /
-   PSG addresses ($A04000+, $A06000, $A07F11) are excluded and stay fail-closed
-   / future scope. See
-   docs/architecture/genesis-z80-ram-window-compatibility-policy.md. */
+/* SEG-032-T004 (ADR 0072, contract section 3) -- the 68000 view of the Z80 area. Replaces the SEG-007-T103 flat byte window.
+   Reachable only while the 68000 holds the Z80 bus (GTO1 v1.00 p. 76 SS4; MacDonald SS2.2); otherwise the typed stop
+   GENESIS_DIAG_68K_Z80_AREA_WITHOUT_BUS. Frozen against Genesis Plus GX `z80_read_byte`/`z80_write_byte` and ares:
+     - $A00000-$A03FFF: the 8 KiB sound RAM and its mirror (`address & $1FFF`). A BYTE access reads/writes one byte; a WORD write
+       stores its HIGH byte at the (even) address, a WORD read returns the byte in both halves (MacDonald SS1.2 word-write quirk).
+     - $A06000-$A060FF: the write-only bank register; a BYTE write shifts `data & 1`, a WORD write the D8 of the word, into bit 8
+       of the 9-bit register (the previous value shifts right). A read is an unmapped access.
+   LONG (and any invalid width) fails closed with the pre-existing GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_Z80_RAM. Every
+   validation check precedes every mutation, so a rejected access is atomic. Returns 0 on success, else the diagnostic. */
 static int genesis_is_z80_ram_window_region(uint32_t address) {
-  /* SEG-007-T115: delegate to the shared contract predicate (byte-identical
-     interval; GENESIS_Z80_RAM_BYTES is itself that contract constant). */
-  return segarecomp_genesis_z80_ram_window_contains(address);
+  return segarecomp_genesis_z80_ram_window_contains(address) || segarecomp_genesis_z80_bank_register_contains(address);
 }
 
-/* SEG-007-T103 -- flat 68000-visible Z80 program-RAM window ($A00000).
-   ================ PROJECT COMPATIBILITY POLICY ================
-   This is NOT verified Z80-bus or Z80-area access behavior. No Z80 CPU
-   emulation of any kind exists here or anywhere else in this runtime -- no Z80
-   core, no runtime step-through, no JIT, no instruction fetch, and no
-   inspection of any Z80 or 68000 program byte: the only modeled effect is a
-   flat byte-array read/write into GenesisZ80BusState.z80_ram. This realises the
-   "68K copies the Z80 sound program into Z-80 S-RAM" step (GTO1 p. 91 Z-80
-   start-up sequence step 3) as a plain byte-stream copy target. See
-   docs/architecture/genesis-z80-ram-window-compatibility-policy.md.
-
-   Publicly documented hardware facts:
-     - GTO1 v1.00 (1991): 68K memory map (p. 7) / overview (p. 2) place an
-       8 KByte Z80/sound RAM at $A00000. p. 77 gives the Z80 area range
-       $A00000-$A0FFFF and states "Access from 68000 by BYTE."
-     - GTO1 v1.00 p. 76 SS4: the 68000 acquires the Z80 bus before accessing the
-       Z80 AREA -- "(1) Write $0100 in $A11100 by using a WORD access. (2) Check
-       to see that D8 of $A11100 becomes 0. (3) Access to Z80 AREA. (4) Write
-       $0000 in $A11100 by using a WORD access."
-     - Charles MacDonald, Sega Genesis hardware notes v0.8: SS2 "8k static RAM";
-       SS1 68000 memory map "A00000-A0FFFFh : Z80 address space"; SS2.1 Z80
-       memory map "0000-1FFFh : RAM" / "2000-3FFFh : RAM (mirror)"; SS2.2 "The
-       Z80 bus can only be accessed by the 68000 when the Z80 is running and the
-       68000 has the bus"; SS1.2 memory-access quirks: a 68000 word-wide write
-       to Z80 RAM writes only the MSB and ignores the LSB.
-
-   Policy decisions (replaceable; not hardware claims):
-     (a) Bus-grant gate. This access fails closed (returns 0, mutates nothing)
-         unless `devices->z80_bus.bus_granted` is set -- the documented
-         requirement that the 68000 hold the Z80 bus grant to reach the Z80 AREA
-         (GTO1 p. 76 SS4; MacDonald SS2.2). The grant latch is the SEG-007-T102
-         immediate-grant model.
-     (b) BYTE width only. A BYTE access maps to a single z80_ram element. WORD
-         and LONG (and any invalid width) fail closed: public documentation does
-         not unambiguously pin the 68000's word-width semantics against the
-         8-bit Z80 area -- GTO1 p. 77 documents BYTE access; MacDonald reports a
-         word-write MSB-only quirk for writes only, with read-side behavior
-         unspecified. This runtime rejects that ambiguity explicitly (the project charter,
-         "reject ambiguity explicitly"); the runtime frontier for this window is
-         byte-only.
-     (c) Flat, un-mirrored. `offset = address - 0x00A00000` indexes z80_ram
-         directly. The Z80-RAM mirror ($A02000-$A03FFF) is excluded (see
-         genesis_is_z80_ram_window_region) and stays fail-closed: it is only
-         secondarily attested from the 68000 side and folding it in without
-         direct evidence would be a guess.
-   Every validation check (bus grant, width, exact offset bound) precedes every
-   mutation, so a rejected access is atomic: it modifies neither *value nor any
-   GenesisRuntime field (T042 SS3 / genesis_route_access's own "on failure
-   neither *value nor the runtime is modified" contract). */
-static int genesis_z80_ram_window_access(GenesisDeviceState *devices, uint32_t address,
-                                         GenesisAccessWidth width, GenesisAccessDirection direction,
-                                         uint32_t *value) {
-  uint32_t offset;
-  if (!devices->z80_bus.bus_granted) return 0; /* policy (a): 68000 must hold the Z80 bus grant */
-  if (width != GENESIS_ACCESS_BYTE) return 0;  /* policy (b): BYTE only; WORD/LONG/invalid fail closed */
-  offset = address - UINT32_C(0x00A00000);
-  if (offset >= GENESIS_Z80_RAM_BYTES) return 0; /* defensive; the predicate already guarantees this */
-  if (direction == GENESIS_ACCESS_READ) {
-    *value = devices->z80_bus.z80_ram[offset];
-    return 1;
+static GenesisDiagnosticCategory genesis_z80_area_access(GenesisDeviceState *devices, uint32_t address,
+                                                         GenesisAccessWidth width, GenesisAccessDirection direction,
+                                                         uint32_t *value) {
+  if (!devices->z80_bus.bus_granted) return GENESIS_DIAG_68K_Z80_AREA_WITHOUT_BUS;
+  if (width != GENESIS_ACCESS_BYTE && width != GENESIS_ACCESS_WORD) return GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_Z80_RAM;
+  if (segarecomp_genesis_z80_bank_register_contains(address)) {
+    uint32_t bit;
+    if (direction != GENESIS_ACCESS_WRITE) return GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS;
+    bit = (width == GENESIS_ACCESS_WORD) ? ((*value >> 8) & 1U) : (*value & 1U);
+    devices->z80_bus.bank = (uint16_t)(((bit << 8) | (devices->z80_bus.bank >> 1)) & 0x1FFU);
+    return (GenesisDiagnosticCategory)0;
   }
-  if (direction == GENESIS_ACCESS_WRITE) {
-    devices->z80_bus.z80_ram[offset] = (uint8_t)(*value & 0xFFU);
-    return 1;
+  {
+    const uint32_t offset = (address - UINT32_C(0x00A00000)) & (GENESIS_Z80_RAM_BYTES - 1U);
+    if (direction == GENESIS_ACCESS_READ) {
+      const uint32_t byte = devices->z80_bus.z80_ram[offset];
+      *value = (width == GENESIS_ACCESS_WORD) ? ((byte << 8) | byte) : byte;
+      return (GenesisDiagnosticCategory)0;
+    }
+    if (direction == GENESIS_ACCESS_WRITE) {
+      devices->z80_bus.z80_ram[offset] = (uint8_t)((width == GENESIS_ACCESS_WORD) ? ((*value >> 8) & 0xFFU) : (*value & 0xFFU));
+      return (GenesisDiagnosticCategory)0;
+    }
   }
-  return 0;
+  return GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_Z80_RAM;
+}
+
+/* SEG-032-T004 (ADR 0072): the YM2612 / PSG port seam both CPUs reach (declared in runtime.h). Transitional bodies over the
+   SEG-007 compatibility models until SEG-032-T006 (shared Sn76489) and T007 (YM2612 device) replace them; the signatures stay. */
+int genesis_ym2612_port_read(GenesisRuntime *runtime, uint32_t port, uint64_t master_ticks, uint8_t *value) {
+  uint32_t routed = 0U;
+  (void)runtime; (void)master_ticks;
+  /* The compat model answers the PART-I status port ($A04000) only; every other port is write-only. */
+  if (port != 0U || !genesis_ym2612_access(UINT32_C(0x00A04000), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &routed)) return 0;
+  *value = (uint8_t)routed;
+  return 1;
+}
+
+int genesis_ym2612_port_write(GenesisRuntime *runtime, uint32_t port, uint8_t value, uint64_t master_ticks) {
+  uint32_t routed = value;
+  (void)runtime; (void)master_ticks;
+  return genesis_ym2612_access(UINT32_C(0x00A04000) + (port & 3U), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &routed);
+}
+
+int genesis_psg_port_write(GenesisRuntime *runtime, uint8_t value, uint64_t master_ticks) {
+  uint32_t routed = value;
+  (void)master_ticks;
+  return genesis_psg_access(&runtime->devices, UINT32_C(0x00C00011), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &routed);
 }
 
 /* SEG-032-T002 (ADR 0073): the generic Z80 image-epoch observer notifications. Pure side channel: they read the
@@ -1591,8 +1569,8 @@ static void genesis_z80_epoch_note_ram_write(GenesisRuntime *runtime, uint32_t a
   uint32_t offset;
   if (observer == 0) return;
   genesis_z80_epoch_init(observer);
-  offset = address - UINT32_C(0x00A00000);
-  if (offset < GENESIS_Z80_RAM_BYTES) observer->written[offset >> 3] |= (uint8_t)(1U << (offset & 7U));
+  offset = (address - UINT32_C(0x00A00000)) & (GENESIS_Z80_RAM_BYTES - 1U);
+  observer->written[offset >> 3] |= (uint8_t)(1U << (offset & 7U));
 }
 
 static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *runtime, uint32_t address,
@@ -1833,18 +1811,17 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
     return GENESIS_ACCESS_FAIL;
   }
   if (genesis_is_z80_ram_window_region(address)) {
-    /* SEG-007-T103: routed_value carries the caller's write value in on a WRITE
-       (genesis_z80_ram_window_access has no other way to learn it) and is read
-       back into *value only on a READ -- a write never mutates the caller's
-       *value, matching genesis_route_access's documented contract. */
+    /* SEG-032-T004: routed_value carries the caller's write value in on a WRITE and is read back into *value only on a READ --
+       a write never mutates the caller's *value, matching genesis_route_access's documented contract. */
     uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
-    if (genesis_z80_ram_window_access(&runtime->devices, address, width, direction, &routed_value)) {
+    const GenesisDiagnosticCategory diagnostic =
+        genesis_z80_area_access(&runtime->devices, address, width, direction, &routed_value);
+    if (diagnostic == (GenesisDiagnosticCategory)0) {
       if (direction == GENESIS_ACCESS_READ) *value = routed_value;
-      else genesis_z80_epoch_note_ram_write(runtime, address);
+      else if (segarecomp_genesis_z80_ram_window_contains(address)) genesis_z80_epoch_note_ram_write(runtime, address);
       return GENESIS_ACCESS_OK;
     }
-    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS,
-                                    GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_Z80_RAM);
+    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, diagnostic);
     return GENESIS_ACCESS_FAIL;
   }
   stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_UNMAPPED_DATA_ACCESS);
@@ -3400,6 +3377,9 @@ static const char *genesis_diagnostic_name(GenesisDiagnosticCategory value) {
   case GENESIS_DIAG_UNSUPPORTED_TRACE_EXCEPTION: return "unsupported_trace_exception";
   case GENESIS_DIAG_UNSUPPORTED_SOFTWARE_EXCEPTION: return "unsupported_software_exception";
   case GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE: return "stopped_without_wake_source";
+  case GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS: return "z80_view_unmapped_access";
+  case GENESIS_DIAG_Z80_BANK_TARGET_UNSUPPORTED: return "z80_bank_target_unsupported";
+  case GENESIS_DIAG_68K_Z80_AREA_WITHOUT_BUS: return "genesis_68k_z80_area_without_bus";
   default: return 0;
   }
 }

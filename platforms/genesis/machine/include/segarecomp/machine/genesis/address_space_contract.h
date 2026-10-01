@@ -71,17 +71,22 @@ static inline int segarecomp_genesis_discarded_read_admitted(uint32_t address, u
   return address == SEGARECOMP_GENESIS_Z80_ARBITRATION_RESET_REGISTER && (width_bytes == 1U || width_bytes == 2U);
 }
 
-/* Flat 68000-visible Z80 program-RAM window: 8 KiB at $A00000 (GTO1 v1.00 68K
- * memory map p. 7 / overview p. 2; Charles MacDonald hardware notes SS2).
- * Runtime owner: genesis_z80_ram_window_access (SEG-007-T103), which also
- * realises the byte count as GENESIS_Z80_RAM_BYTES. */
+/* 68000 view of the Z80 area (SEG-032-T004, contract section 3; GTO1 v1.00 p. 77, GPGX `z80_read_byte`/`z80_write_byte`, ares
+ * `cpu` bus): the 8 KiB sound RAM at $A00000 and its mirror at $A02000 ($A00000-$A03FFF, `address & $1FFF`), and the
+ * write-only bank register at $A06000-$A060FF. The YM2612 ports ($A04000-$A04003) and the BUSREQ/RESET registers are separate
+ * regions below. Runtime owner: genesis_z80_area_access, which realises the RAM byte count as GENESIS_Z80_RAM_BYTES. */
 #define SEGARECOMP_GENESIS_Z80_RAM_WINDOW_BEGIN UINT32_C(0x00A00000)
 #define SEGARECOMP_GENESIS_Z80_RAM_WINDOW_BYTES UINT32_C(8192)
+#define SEGARECOMP_GENESIS_Z80_RAM_MIRROR_END UINT32_C(0x00A04000)
+#define SEGARECOMP_GENESIS_Z80_BANK_REGISTER_BEGIN UINT32_C(0x00A06000)
+#define SEGARECOMP_GENESIS_Z80_BANK_REGISTER_END UINT32_C(0x00A06100)
 
 static inline int segarecomp_genesis_z80_ram_window_contains(uint32_t address) {
-  return address >= SEGARECOMP_GENESIS_Z80_RAM_WINDOW_BEGIN &&
-         address < SEGARECOMP_GENESIS_Z80_RAM_WINDOW_BEGIN +
-                       SEGARECOMP_GENESIS_Z80_RAM_WINDOW_BYTES;
+  return address >= SEGARECOMP_GENESIS_Z80_RAM_WINDOW_BEGIN && address < SEGARECOMP_GENESIS_Z80_RAM_MIRROR_END;
+}
+
+static inline int segarecomp_genesis_z80_bank_register_contains(uint32_t address) {
+  return address >= SEGARECOMP_GENESIS_Z80_BANK_REGISTER_BEGIN && address < SEGARECOMP_GENESIS_Z80_BANK_REGISTER_END;
 }
 
 /* Co-located PSG (SN76489) audio port: exactly the odd byte $C00011 (GTO1

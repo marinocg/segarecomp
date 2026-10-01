@@ -75,14 +75,17 @@ M68kGenesisDeviceRoutingResult m68k_route_genesis_device_access(const M68kMemory
         request.direction == M68kMemoryAccessDirection::write)
       return M68kDeviceRoutedAccess{request.direction};
   }
-  // SEG-007-T115: the flat 68000-visible Z80 program-RAM window ($A00000,
-  // GENESIS_Z80_RAM_BYTES). Runtime owner genesis_z80_ram_window_access
-  // (SEG-007-T103) supports a BYTE read or write, gated at runtime on the
-  // live bus-grant latch -- which the static seam neither models nor
-  // pre-decides; it only defers the shape to the runtime owner. WORD/LONG
-  // stay an unmapped-data frontier.
+  // SEG-032-T004: the 68000 view of the Z80 area (contract section 3): the sound RAM and its mirror ($A00000-$A03FFF) accept a
+  // BYTE or WORD read or write (a WORD write stores its high byte, a WORD read returns the byte in both halves), and the
+  // write-only bank register ($A06000-$A060FF) a BYTE or WORD write. Runtime owner genesis_z80_area_access, gated at run time on
+  // the live bus-grant state, which the static seam neither models nor pre-decides; it only defers the shape. LONG stays an
+  // unmapped-data frontier.
   if (segarecomp_genesis_z80_ram_window_contains(request.address.value) != 0 &&
-      request.width == M68kMemoryAccessWidth::byte)
+      (request.width == M68kMemoryAccessWidth::byte || request.width == M68kMemoryAccessWidth::word))
+    return M68kDeviceRoutedAccess{request.direction};
+  if (segarecomp_genesis_z80_bank_register_contains(request.address.value) != 0 &&
+      request.direction == M68kMemoryAccessDirection::write &&
+      (request.width == M68kMemoryAccessWidth::byte || request.width == M68kMemoryAccessWidth::word))
     return M68kDeviceRoutedAccess{request.direction};
   // SEG-007-T171: the YM2612 FM-synthesis register window ($A04000-$A04003).
   // Five runtime-confirmed shapes are accepted here, all BYTE width: a READ

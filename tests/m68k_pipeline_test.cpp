@@ -1537,7 +1537,7 @@ void startup_negative_recipe_precedence_and_records() {
                  "startup analysis rejects a selected ROM store with complete provenance");
   static_operand(0x00FF0001U, segarecomp::DirectFlowDiagnostic::odd_effective_address,
                  "startup analysis gives odd data EA precedence over RAM mapping");
-  static_operand(0x00A00000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
+  static_operand(0x00A08000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
                  "startup analysis rejects unmapped data EA without an execution artifact");
   static_operand(0x01000000U, segarecomp::DirectFlowDiagnostic::effective_address_not_24bit,
                  "startup analysis gives non-24-bit EA first precedence");
@@ -2186,7 +2186,7 @@ void tst_l_operand_resolution_matches_the_contracts_precedence() {
   expect(std::get<segarecomp::DirectFlowDiagnostic>(odd) == segarecomp::DirectFlowDiagnostic::odd_effective_address,
          "an odd address fails closed as odd_effective_address");
 
-  const auto unmapped = segarecomp::m68k_resolve_absolute_test_operand(rom_image, 0x00A00000U);
+  const auto unmapped = segarecomp::m68k_resolve_absolute_test_operand(rom_image, 0x00A08000U);
   expect(std::get<segarecomp::DirectFlowDiagnostic>(unmapped) == segarecomp::DirectFlowDiagnostic::unmapped_data_access,
           "an address outside both selected regions fails closed as unmapped_data_access");
 
@@ -13699,11 +13699,16 @@ void general_startup_routes_z80_and_psg_absolute_operands() {
     expect(routes(0x00A11200U, width, D::write),
            "a WORD/BYTE write of the Z80 RESET register routes to M68kDeviceRoutedAccess");
 
-  // Flat Z80 program-RAM window ($A00000 .. $A01FFF): BYTE, both directions.
-  for (const auto address : {UINT32_C(0x00A00000), UINT32_C(0x00A00ABC), UINT32_C(0x00A01FFF)})
+  // 68000 view of the Z80 area (SEG-032-T004): the sound RAM and its mirror ($A00000 .. $A03FFF), BYTE or WORD, both directions.
+  for (const auto address : {UINT32_C(0x00A00000), UINT32_C(0x00A00ABC), UINT32_C(0x00A01FFF), UINT32_C(0x00A02000), UINT32_C(0x00A03FFE)})
     for (const auto direction : {D::read, D::write})
-      expect(routes(address, W::byte, direction),
-             "a BYTE read or write anywhere inside the flat Z80 program-RAM window routes");
+      for (const auto width : {W::byte, W::word})
+        expect(routes(address, width, direction),
+               "a BYTE or WORD read or write anywhere inside the Z80 RAM and its mirror routes");
+  // The write-only bank register ($A06000 .. $A060FF).
+  for (const auto width : {W::byte, W::word})
+    expect(routes(0x00A06000U, width, D::write) && routes(0x00A060FEU, width, D::write),
+           "a BYTE or WORD write of the Z80 bank register routes");
 
   // Co-located PSG audio port ($C00011): BYTE write only.
   expect(routes(0x00C00011U, W::byte, D::write),
@@ -13717,15 +13722,18 @@ void general_startup_routes_z80_and_psg_absolute_operands() {
              is_unmapped(0x00A11080U, W::word, D::write) &&   // in-region, not a register
              is_unmapped(0x00A112FEU, W::word, D::write) &&   // in-region, not a register
              is_unmapped(0x00A11300U, W::word, D::write) &&   // just past the region end
-             is_unmapped(0x00A00000U, W::word, D::write) &&   // Z80 RAM is BYTE-only
+             is_unmapped(0x00A00000U, W::long_word, D::write) &&  // Z80 RAM is BYTE or WORD only
              is_unmapped(0x00A00000U, W::long_word, D::read) &&
-             is_unmapped(0x00A02000U, W::byte, D::write) &&   // the excluded Z80-RAM mirror base
+             is_unmapped(0x00A06000U, W::byte, D::read) &&    // the bank register is write-only
+             is_unmapped(0x00A06000U, W::long_word, D::write) &&
+             is_unmapped(0x00A06100U, W::byte, D::write) &&   // just past the bank register
+             is_unmapped(0x00A05FFFU, W::byte, D::write) &&   // YM2612 mirror space past the four ports
              is_unmapped(0x009FFFFFU, W::byte, D::read) &&     // one byte below the window
              is_unmapped(0x00C00011U, W::byte, D::read) &&    // PSG port is write-only
              is_unmapped(0x00C00013U, W::byte, D::write) &&   // the excluded PSG mirror
              is_unmapped(0x00C00010U, W::byte, D::write),      // the even PSG neighbour
          "LONG Z80-bus access, a RESET read, non-register in-region addresses, the region top edge, "
-         "WORD/LONG Z80-RAM access, the Z80-RAM mirror, a PSG read, and the PSG mirror/neighbour all "
+         "LONG Z80-RAM access, a bank register read/LONG write/neighbour, a PSG read, and the PSG mirror/neighbour all "
          "stay unmapped_data_access");
 
   // The resolver reduces exactly the routed shapes to a value-free
@@ -13839,7 +13847,7 @@ void general_startup_routes_ym2612_status_port_read() {
              is_unmapped(0x00A04002U, W::word, D::write) &&   // wrong width
              is_unmapped(0x00A04003U, W::byte, D::read) &&    // data port is write-only under this policy
              is_unmapped(0x00A04003U, W::word, D::write) &&   // wrong width
-             is_unmapped(0x00A03FFFU, W::byte, D::read) &&    // one byte below the window
+             is_unmapped(0x00A05FFFU, W::byte, D::read) &&    // YM2612 mirror space past the four ports
              is_unmapped(0x00A04004U, W::byte, D::read),      // one byte past the window
          "wrong width, unreached in-window port, and out-of-window neighbour all stay "
          "unmapped_data_access");
@@ -17455,7 +17463,7 @@ void general_startup_cmpi_static_destination_uses_shared_operand_resolver() {
   };
   reject_destination(0x00A10000U, segarecomp::DirectFlowDiagnostic::unsupported_device_region_controller_io,
                      "CMPI static device destination retains the shared resolver's device rejection");
-  reject_destination(0x00A00000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
+  reject_destination(0x00A08000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
                      "CMPI static unmapped destination retains the shared resolver's unmapped rejection");
   reject_destination(0x00FF0001U, segarecomp::DirectFlowDiagnostic::odd_effective_address,
                      "CMPI static odd destination retains the shared resolver's alignment rejection");
@@ -17487,7 +17495,7 @@ void general_startup_addition_static_operands_use_shared_resolver() {
   // ADD.L (xxx).L,D1: its static source is only read.
   reject({0xD2U, 0xB9U}, 0x00FF0001U, segarecomp::DirectFlowDiagnostic::odd_effective_address,
          "ADD static memory source preserves odd-address read rejection");
-  reject({0xD2U, 0xB9U}, 0x00A00000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
+  reject({0xD2U, 0xB9U}, 0x00A08000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
          "ADD static memory source preserves unmapped read rejection");
   reject({0xD2U, 0xB9U}, 0x00A10000U, segarecomp::DirectFlowDiagnostic::unsupported_device_region_controller_io,
          "ADD static memory source preserves device read rejection");
@@ -17495,7 +17503,7 @@ void general_startup_addition_static_operands_use_shared_resolver() {
   // after its read by the same resolver.
   reject({0xD3U, 0xB9U}, 0x00000000U, segarecomp::DirectFlowDiagnostic::rom_write_prohibited,
          "ADD static memory destination preserves ROM write rejection");
-  reject({0xD3U, 0xB9U}, 0x00A00000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
+  reject({0xD3U, 0xB9U}, 0x00A08000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
          "ADD static memory destination preserves unmapped RMW rejection");
   reject({0xD3U, 0xB9U}, 0x00A10000U, segarecomp::DirectFlowDiagnostic::unsupported_device_region_controller_io,
          "ADD static memory destination preserves device RMW rejection");
@@ -17504,7 +17512,7 @@ void general_startup_addition_static_operands_use_shared_resolver() {
   reject({0x06U, 0xB9U, 0U, 0U, 0U, 1U}, 0x00000000U,
          segarecomp::DirectFlowDiagnostic::rom_write_prohibited,
          "ADDI static memory destination uses the shared RMW resolver");
-  reject({0x50U, 0xB9U}, 0x00A00000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
+  reject({0x50U, 0xB9U}, 0x00A08000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
          "ADDQ static memory destination uses the shared RMW resolver");
 }
 
@@ -17533,14 +17541,14 @@ void general_startup_logical_static_operands_use_shared_resolver() {
   // AND.L (xxx).L,D1 is a source-only static read.
   reject({0xC2U, 0xB9U}, 0x00FF0001U, segarecomp::DirectFlowDiagnostic::odd_effective_address,
          "logical static source preserves odd-address read rejection");
-  reject({0xC2U, 0xB9U}, 0x00A00000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
+  reject({0xC2U, 0xB9U}, 0x00A08000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
          "logical static source preserves unmapped read rejection");
   reject({0xC2U, 0xB9U}, 0x00A10000U, segarecomp::DirectFlowDiagnostic::unsupported_device_region_controller_io,
          "logical static source preserves device read rejection");
   // AND.L D1,(xxx).L is a destination RMW read followed by write resolution.
   reject({0xC3U, 0xB9U}, 0x00000000U, segarecomp::DirectFlowDiagnostic::rom_write_prohibited,
          "logical static destination preserves ROM write rejection");
-  reject({0xC3U, 0xB9U}, 0x00A00000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
+  reject({0xC3U, 0xB9U}, 0x00A08000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
          "logical static destination preserves unmapped RMW rejection");
   reject({0xC3U, 0xB9U}, 0x00A10000U, segarecomp::DirectFlowDiagnostic::unsupported_device_region_controller_io,
          "logical static destination preserves device RMW rejection");
@@ -17585,9 +17593,9 @@ void general_startup_bit_operation_static_operands_use_shared_resolver() {
   // reject here; there is no write phase at all to reject on.
   // SEG-007-T115: the former $00A00000 sentinel is now the routed flat Z80
   // program-RAM window base (BYTE, runtime owner SEG-007-T103), so this
-  // "genuinely unmapped" check moves to $00A02000 -- the secondarily-attested
+  // "genuinely unmapped" check moves to $00A08000 -- the banked Z80 half, not a 68K lane
   // Z80-RAM mirror that T103 deliberately leaves fail-closed.
-  reject({0x08U, 0x39U, 0x00U, 0x00U}, 0x00A02000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
+  reject({0x08U, 0x39U, 0x00U, 0x00U}, 0x00A08000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
          "BTST static memory destination preserves unmapped read rejection");
   reject({0x08U, 0x39U, 0x00U, 0x00U}, 0x00A10000U,
          segarecomp::DirectFlowDiagnostic::unsupported_device_region_controller_io,
@@ -17601,8 +17609,8 @@ void general_startup_bit_operation_static_operands_use_shared_resolver() {
   reject({0x08U, 0xF9U, 0x00U, 0x00U}, 0x00000000U, segarecomp::DirectFlowDiagnostic::rom_write_prohibited,
          "BSET static memory destination preserves ROM write rejection");
   // SEG-007-T115: $00A00000 is now the routed Z80 program-RAM window; use the
-  // fail-closed Z80-RAM mirror base $00A02000 for the genuinely-unmapped case.
-  reject({0x08U, 0xF9U, 0x00U, 0x00U}, 0x00A02000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
+  // fail-closed banked-half base $00A08000 for the genuinely-unmapped case.
+  reject({0x08U, 0xF9U, 0x00U, 0x00U}, 0x00A08000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
          "BSET static memory destination preserves unmapped RMW rejection");
   reject({0x08U, 0xF9U, 0x00U, 0x00U}, 0x00A10000U,
          segarecomp::DirectFlowDiagnostic::unsupported_device_region_controller_io,
@@ -17753,7 +17761,7 @@ void general_startup_movem_static_operands_use_shared_resolver() {
          segarecomp::DirectFlowDiagnostic::unsupported_device_region_controller_io,
          "MOVEM.W register->memory absolute destination preserves device write rejection");
   // MOVEM.W (xxx).L,D0: memory->register, single selected register.
-  reject({0x4CU, 0xB9U, 0x00U, 0x01U}, 0x00A00000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
+  reject({0x4CU, 0xB9U, 0x00U, 0x01U}, 0x00A08000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
          "MOVEM.W memory->register absolute source preserves unmapped read rejection");
   reject({0x4CU, 0xB9U, 0x00U, 0x01U}, 0x00A10000U,
          segarecomp::DirectFlowDiagnostic::unsupported_device_region_controller_io,
@@ -19243,7 +19251,7 @@ void general_startup_shift_rotate_memory_static_operands_use_shared_resolver() {
   reject(0x00000000U, segarecomp::DirectFlowDiagnostic::rom_write_prohibited,
          "ASR.W (xxx).L static memory destination preserves ROM write rejection");
   // Genuinely unmapped destination.
-  reject(0x00A00000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
+  reject(0x00A08000U, segarecomp::DirectFlowDiagnostic::unmapped_data_access,
          "ASR.W (xxx).L static memory destination preserves unmapped rejection");
   // A mapped device region.
   reject(0x00A10000U, segarecomp::DirectFlowDiagnostic::unsupported_device_region_controller_io,

@@ -283,7 +283,7 @@ int main(void) {
      PRE-EXISTING generic unmapped fail-close, NOT the YM2612 diagnostic. ---- */
   {
     GenesisRuntime rej = {0};
-    reject_preexisting(&rej, &zeroed, UINT32_C(0x00A03FFF), GENESIS_ACCESS_BYTE,
+    reject_preexisting(&rej, &zeroed, UINT32_C(0x00A05FFF), GENESIS_ACCESS_BYTE,
                        GENESIS_ACCESS_READ, GENESIS_STOP_UNSUPPORTED_MEMORY_REGION,
                        GENESIS_DIAG_UNMAPPED_DATA_ACCESS);
     reject_preexisting(&rej, &zeroed, UINT32_C(0x00A04004), GENESIS_ACCESS_BYTE,

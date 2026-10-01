@@ -54,3 +54,19 @@ made the Sega PSG a platform-neutral device. SEG-032 must run a real Z80 image i
 - The M68K-only Genesis tests that do not touch the Z80 area are unchanged in outcome.
 - The sync-cadence invariance test (extra synchronization points change nothing) is the guard for decision 1.
 - 68K stalls caused by Z80 bus use and DMA/Z80 contention are not modelled (references disagree, no supported workload).
+
+## T004 implementation record (2026-10-01)
+
+- `platforms/genesis/runtime/z80_machine.[ch]` (one translation unit, plain C11) is the Z80's view: `Z80Host` callbacks over the runtime's
+  own state (`devices.z80_bus.z80_ram` is the one RAM both CPUs alias; `devices.z80_bus.bank` is the 9-bit bank register that both a
+  Z80 write at `$6000` and a 68K write at `$A06000` shift in). It is compiled only into programs that carry a Z80 image registry:
+  `runtime.c` never includes a Z80 header, so every 68K-only program and test links exactly as before.
+- Banked reads are served from the cartridge image the generated program already embeds as owned regions (no sample range, no manifest);
+  work-RAM writes are live; everything else is a typed stop. `+3` Z80 cycles are added per access to the 68K bus (the two references agree).
+- The 68K side of the Z80 area (`genesis_z80_area_access`) replaces the SEG-007-T103 flat window; its generation-time classifier
+  (`address_space_contract.h`, `address_space.cpp`) is widened to the same shapes. New typed diagnostics: `z80_view_unmapped_access`,
+  `z80_bank_target_unsupported`, `genesis_68k_z80_area_without_bus` (wire names registered in the bridge validator).
+- The YM2612/PSG seam `genesis_ym2612_port_{read,write}` / `genesis_psg_port_write` (runtime.h) is the one entry both CPUs use; its bodies
+  are the SEG-007 compat models until T006/T007 replace them. This is the only transitional path.
+- The bank register is added to the evidence-bearing `GenesisZ80BusState` (`checkpoint_evidence.h`); its digest/oracle coverage lands with the
+  other schema changes in T005.
