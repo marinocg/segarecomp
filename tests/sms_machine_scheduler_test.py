@@ -27,6 +27,8 @@ import tempfile
 EMITTER, CC = sys.argv[1], sys.argv[2]
 ROOT = pathlib.Path(sys.argv[3]).resolve()
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import sms_cc_cache  # noqa: E402
 import sms_fixture_rom as builder  # noqa: E402
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import sms_u11 as u11  # noqa: E402
@@ -66,7 +68,7 @@ def build(tmp, roms, name):
     for src in units + RUNTIME_SOURCES + [DRIVER, NO_DEVICES, TEST_DEVICES]:
         obj = out / (src.stem + ".o")
         if not obj.exists():
-            c = run([CC, *STRICT, "-O0", "-I", Z80_INCLUDE, "-I", RUNTIME, "-I", PLATFORM / "headless", "-I", PSG_LIB / "include", "-I", out, "-c", src, "-o", obj])
+            c = sms_cc_cache.compile_object([CC, *STRICT, "-O0", "-I", Z80_INCLUDE, "-I", RUNTIME, "-I", PLATFORM / "headless", "-I", PSG_LIB / "include", "-I", out, "-c", src, "-o", obj])
             check(c.returncode == 0, "%s: %s did not compile as strict C11: %s" % (name, src.name, c.stderr[:1500]))
             if c.returncode != 0:
                 return None

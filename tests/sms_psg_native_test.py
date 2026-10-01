@@ -22,6 +22,8 @@ EMITTER, CC = sys.argv[1], sys.argv[2]
 ROOT = pathlib.Path(sys.argv[3]).resolve()
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import sms_cc_cache  # noqa: E402
 sys.path.insert(0, str(HERE))
 import sms_fixture_rom as builder  # noqa: E402
 import sms_psg_model as model  # noqa: E402
@@ -122,7 +124,7 @@ def build_exe(tmp, name):
     objs = []
     for src in units + SOURCES:
         obj = out / (src.stem + ".o")
-        c = run([CC, *STRICT, "-O0", "-I", Z80_INCLUDE, "-I", RUNTIME, "-I", PLATFORM / "headless", "-I", PSG_LIB / "include", "-I", out, "-c", src, "-o", obj])
+        c = sms_cc_cache.compile_object([CC, *STRICT, "-O0", "-I", Z80_INCLUDE, "-I", RUNTIME, "-I", PLATFORM / "headless", "-I", PSG_LIB / "include", "-I", out, "-c", src, "-o", obj])
         check(c.returncode == 0, "%s: %s did not compile as strict C11: %s" % (name, src.name, c.stderr[:1500]))
         if c.returncode != 0:
             return None

@@ -24,6 +24,8 @@ import tempfile
 EMITTER, CC = sys.argv[1], sys.argv[2]
 ROOT = pathlib.Path(sys.argv[3]).resolve()
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import sms_cc_cache  # noqa: E402
 import sms_fixture_rom as builder  # noqa: E402
 
 RUNTIME_DIR = ROOT / "platforms" / "master-system" / "runtime"
@@ -56,7 +58,7 @@ def compile_program(workdir, stem):
     objs = []
     for src in sources:
         obj = workdir / (src.stem + ".o")
-        r = run([CC, *STRICT, "-O0", "-I", Z80_INCLUDE, "-I", RUNTIME_DIR, "-I", workdir, "-c", src, "-o", obj])
+        r = sms_cc_cache.compile_object([CC, *STRICT, "-O0", "-I", Z80_INCLUDE, "-I", RUNTIME_DIR, "-I", workdir, "-c", src, "-o", obj])
         if r.returncode != 0:
             return None, r.stderr[:2000]
         objs.append(obj)

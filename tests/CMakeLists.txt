@@ -1225,6 +1225,10 @@ add_test(NAME sms_psg_dependency_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST sms_psg_differential_test sms_psg_dependency_test APPEND PROPERTY LABELS full fast)
 set_property(TEST sms_psg_native_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_psg_differential_test sms_psg_native_test sms_psg_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+add_test(NAME sms_cc_cache_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_cc_cache_test.py ${CMAKE_C_COMPILER})
+set_property(TEST sms_cc_cache_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_cc_cache_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
 # SEG-009-T004: SMS VDP (direct API test), generated-native port/state/interrupt/mode differential against the independent
 # Python model (mutation-checked) and, when the pinned references are available, against both machine references.

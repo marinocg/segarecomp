@@ -9,6 +9,10 @@ import json
 import os
 import pathlib
 import subprocess
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import sms_cc_cache  # noqa: E402
 
 STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-D_CRT_SECURE_NO_WARNINGS"]
 
@@ -31,7 +35,7 @@ class Native:
 
     def compile(self, src, out, extra=()):
         obj = out / (src.stem + ".o")
-        c = self.run([self.cc, *STRICT, "-O0", *[a for d in self.include for a in ("-I", d)], "-I", out, *extra, "-c", src, "-o", obj])
+        c = sms_cc_cache.compile_object([self.cc, *STRICT, "-O0", *[a for d in self.include for a in ("-I", d)], "-I", out, *extra, "-c", src, "-o", obj])
         if c.returncode != 0:
             self.failures.append("%s did not compile as strict C11: %s" % (src.name, c.stderr[:1200]))
             return None
