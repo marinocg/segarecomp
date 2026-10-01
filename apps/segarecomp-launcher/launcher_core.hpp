@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace launcher {
 
@@ -17,7 +18,8 @@ struct Layout {
   std::filesystem::path root;         // directory holding bin/, toolchain/, runtime/, sdl3/
   std::filesystem::path cli;          // segarecomp build driver
   std::filesystem::path cc;           // bundled zig
-  std::filesystem::path runtime;      // runtime/genesis (runtime/, viewer/, compat/)
+  std::filesystem::path runtime;      // runtime/platforms/genesis (runtime/, viewer/, compat/)
+  std::filesystem::path runtime_sms;  // runtime/platforms/master-system (runtime/, headless/, viewer/); libs/ are siblings of platforms/
   std::filesystem::path sdl_include;
   std::filesystem::path sdl_lib;
   std::string problem;                // non-empty when the package is incomplete
@@ -27,8 +29,15 @@ struct RomView {
   std::filesystem::path path;
   std::string sha256;
   std::string title;
-  std::string platform;               // "Genesis / Mega Drive" when supported
+  std::string platform;               // "Genesis / Mega Drive" / "Master System" when supported
+  std::string platform_id;            // "genesis" or "master-system" when supported, else empty
   bool supported_platform = false;
+  // Master System only. The header never identifies the mapper: it is declared by the user (selection control or the
+  // headless --mapper option) or by a sidecar manifest `<rom>.mapper.json`, and never defaulted.
+  std::string mapper;                 // "sega" / "rom_only" (empty until declared)
+  std::filesystem::path mapper_manifest;  // sidecar manifest when present
+  std::string mapper_manifest_sha256;
+  [[nodiscard]] bool needs_mapper() const { return platform_id == "master-system" && mapper.empty() && mapper_manifest.empty(); }
   bool compat_known = false;          // ROM-hash-bound analysis metadata ships with this release
   std::string error;                  // non-empty: unreadable/too large
 };
@@ -36,6 +45,8 @@ struct RomView {
 [[nodiscard]] Layout locate_layout();
 [[nodiscard]] std::filesystem::path cache_root();
 [[nodiscard]] RomView inspect_rom_file(const std::filesystem::path &path, const Layout &layout);
+// The Master System baseline profile the launcher builds for (mirrors the machine library's one profile name).
+inline constexpr const char *sms_profile = "sms2_ntsc_export";
 [[nodiscard]] std::filesystem::path entry_dir(const RomView &rom, const Layout &layout);
 [[nodiscard]] bool entry_ready(const std::filesystem::path &entry);
 [[nodiscard]] std::filesystem::path entry_executable(const std::filesystem::path &entry);
@@ -76,7 +87,8 @@ private:
 // The launched native game; its output goes to <entry>/run.log.
 class GameRun {
 public:
-  GameRun(const RomView &rom, const Layout &layout, const std::filesystem::path &entry);
+  GameRun(const RomView &rom, const Layout &layout, const std::filesystem::path &entry,
+          const std::vector<std::string> &extra_args = {});
   ~GameRun();
   GameRun(const GameRun &) = delete;
   GameRun &operator=(const GameRun &) = delete;

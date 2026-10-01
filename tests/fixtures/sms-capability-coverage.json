@@ -1,0 +1,2659 @@
+{
+  "excluded": {
+    "bios.image": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_machine_scheduler_test",
+      "fail_closed": "SMS_ERROR_BIOS_UNSUPPORTED",
+      "reason": "bios_bytes_never_embedded"
+    },
+    "ingest.game_gear": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_machine_tests",
+      "fail_closed": "SMS_ERROR_PROFILE_UNSUPPORTED",
+      "reason": "game_gear_out_of_milestone"
+    },
+    "ingest.region_japan": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_machine_tests",
+      "fail_closed": "SMS_ERROR_PROFILE_UNSUPPORTED",
+      "reason": "japanese_profile_not_in_baseline"
+    },
+    "io.fm_unit": {
+      "approval": "pending T013",
+      "class": "device_absent",
+      "evidence_test": "sms_runtime_tests",
+      "fail_closed": null,
+      "reason": "fm_absent_on_export_sms2"
+    },
+    "mapper.bank_shift": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_runtime_tests",
+      "fail_closed": "SMS_ERROR_CONTROL_BIT_UNSUPPORTED",
+      "reason": "not used by known licensed software per the cited public source; fails closed"
+    },
+    "mapper.cart_ram_system_overlay": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_bank_crossing_test",
+      "fail_closed": "SMS_ERROR_CONTROL_BIT_UNSUPPORTED",
+      "reason": "not used by known licensed software per the cited public source; fails closed"
+    },
+    "mapper.codemasters": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_bank_crossing_test",
+      "fail_closed": "SMS_ERROR_MAPPER_UNSUPPORTED",
+      "reason": "non_baseline_mapper"
+    },
+    "mapper.eeprom_multicart": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_machine_tests",
+      "fail_closed": "SMS_ERROR_MAPPER_UNSUPPORTED",
+      "reason": "non_baseline_mapper"
+    },
+    "mapper.korean_msx_janggun": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_machine_tests",
+      "fail_closed": "SMS_ERROR_MAPPER_UNSUPPORTED",
+      "reason": "non_baseline_mapper"
+    },
+    "mapper.persistence": {
+      "approval": "pending T013",
+      "class": "device_absent",
+      "evidence_test": "sms_machine_tests",
+      "fail_closed": null,
+      "reason": "deterministic_in_memory_only"
+    },
+    "mem.3d_glasses": {
+      "approval": "pending T013",
+      "class": "device_absent",
+      "evidence_test": "sms_machine_tests",
+      "fail_closed": null,
+      "reason": "peripheral_absent"
+    },
+    "memctl.write_incompatible": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_machine_scheduler_test",
+      "fail_closed": "SMS_ERROR_CONTROL_BIT_UNSUPPORTED",
+      "reason": "bios_and_slot_switching_not_in_baseline"
+    },
+    "pad.peripherals": {
+      "approval": "pending T013",
+      "class": "device_absent",
+      "evidence_test": "sms_pad_tests",
+      "fail_closed": null,
+      "reason": "peripheral_absent"
+    },
+    "pad.reset_button": {
+      "approval": "pending T013",
+      "class": "device_absent",
+      "evidence_test": "sms_pad_tests",
+      "fail_closed": null,
+      "reason": "absent_on_sms2"
+    },
+    "psg.analog_imperfection": {
+      "approval": "pending T013",
+      "class": "device_absent",
+      "evidence_test": "sms_psg_differential_test",
+      "fail_closed": null,
+      "reason": "digital_model_only"
+    },
+    "psg.data_before_latch": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_psg_native_test",
+      "fail_closed": "SMS_ERROR_PSG_DATA_BEFORE_LATCH",
+      "reason": "references disagree on the power-on latch; typed stop kept, revisit if a workload hits it"
+    },
+    "psg.gg_stereo": {
+      "approval": "pending T013",
+      "class": "device_absent",
+      "evidence_test": "sms_runtime_tests",
+      "fail_closed": null,
+      "reason": "game_gear_out_of_milestone"
+    },
+    "timing.pal": {
+      "approval": "pending T013",
+      "class": "baseline_profile_fixed",
+      "evidence_test": "sms_machine_tests",
+      "fail_closed": null,
+      "reason": "baseline profile is NTSC SMS2; no request channel exists, no typed stop claimed"
+    },
+    "vdp.invalid_text_mode": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_vdp_tests",
+      "fail_closed": "SMS_ERROR_VDP_MODE_UNSUPPORTED",
+      "reason": "legacy_modes_not_in_baseline"
+    },
+    "vdp.mode4_240_ntsc": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_vdp_tests",
+      "fail_closed": "SMS_ERROR_VDP_MODE_UNSUPPORTED",
+      "reason": "invalid_on_ntsc"
+    },
+    "vdp.r0_bit0_nosync": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_vdp_tests",
+      "fail_closed": "SMS_ERROR_VDP_MODE_UNSUPPORTED",
+      "reason": "not used by known licensed software per the cited public source; fails closed"
+    },
+    "vdp.revision_5124": {
+      "approval": "pending T013",
+      "class": "baseline_profile_fixed",
+      "evidence_test": "sms_machine_tests",
+      "fail_closed": null,
+      "reason": "baseline profile is NTSC SMS2; no request channel exists, no typed stop claimed"
+    },
+    "vdp.tms9918_modes": {
+      "approval": "pending T013",
+      "class": "typed_stop",
+      "evidence_test": "sms_vdp_tests",
+      "fail_closed": "SMS_ERROR_VDP_MODE_UNSUPPORTED",
+      "reason": "legacy_modes_not_in_baseline"
+    }
+  },
+  "reference_na_reason": "evidence is a project decision (only PROJECT sources); there is no external or contract-derived reference to compare",
+  "rows": {
+    "audio.decimation": "11110",
+    "audio.pcm_format": "11110",
+    "audio.write_timestamp": "11110",
+    "bg.backdrop": "11110",
+    "bg.fine_scroll_gap": "11111",
+    "bg.flips_palette": "11110",
+    "bg.hscroll": "11110",
+    "bg.hscroll_lock": "11111",
+    "bg.left_column_blank": "11111",
+    "bg.name_table": "11110",
+    "bg.priority": "11111",
+    "bg.tiles_4bpp": "11110",
+    "bg.vscroll": "11110",
+    "bg.vscroll_lock": "11111",
+    "bios.not_executed": "11110",
+    "build.platform_route": "1-110",
+    "build.provenance": "1-110",
+    "exec.error_surface": "11110",
+    "exec.headless_budget": "11110",
+    "exec.mapper_trace": "1-110",
+    "exec.run_api": "11110",
+    "exec.state_digest": "1-110",
+    "fb.artifact": "11110",
+    "ingest.checksum_informational": "11110",
+    "ingest.header_platform": "11110",
+    "ingest.identity_record": "1-110",
+    "ingest.rom_sizes": "11110",
+    "input.script": "1-110",
+    "io.40_7f": "11110",
+    "io.80_bf": "11110",
+    "io.c0_ff": "11110",
+    "io.decode_a7_a6_a0": "11110",
+    "io.read_00_3f": "11110",
+    "io.unimplemented_class": "1-110",
+    "io.write_00_3f": "11110",
+    "ioctl.direction_level": "11110",
+    "ioctl.h_latch_trigger": "11110",
+    "ioctl.nationalization": "11110",
+    "ioctl.output_readback": "11110",
+    "ioctl.reset_state": "11110",
+    "irq.ack_status_read": "11110",
+    "irq.data_bus_ff": "11110",
+    "irq.enable_gating": "11110",
+    "irq.im1": "11110",
+    "irq.int_level": "11110",
+    "irq.nmi_pause": "11111",
+    "irq.trace": "1-110",
+    "mapper.bank_masking": "11111",
+    "mapper.cart_ram_slot2": "11111",
+    "mapper.cart_ram_state": "11110",
+    "mapper.code_image_dispatch": "11111",
+    "mapper.identity_cli": "1-110",
+    "mapper.identity_declared": "11110",
+    "mapper.identity_undeclared_error": "11110",
+    "mapper.imageset": "11111",
+    "mapper.registers": "11110",
+    "mapper.reset_values": "11110",
+    "mapper.rom_only": "11110",
+    "mapper.rom_write_enable_bit": "11110",
+    "mapper.slot0_remap": "11111",
+    "mapper.write_through": "11110",
+    "mem.code_image_rom_only": "11111",
+    "mem.fixed_first_1k": "11110",
+    "mem.ram_8k": "11110",
+    "mem.ram_mirror": "11110",
+    "mem.rom_slots": "11110",
+    "mem.rom_write_ignored": "11110",
+    "memctl.io_disable": "11110",
+    "memctl.post_bios_value": "11110",
+    "memctl.ram_copy_c000": "11110",
+    "memctl.write_compatible": "11110",
+    "pad.player2": "11110",
+    "pad.port_dc": "11111",
+    "pad.port_dd": "11111",
+    "pad.read_timing": "11110",
+    "pal.cram_rgb": "11110",
+    "psg.attenuation": "11111",
+    "psg.divider_16": "11111",
+    "psg.latch_data": "11110",
+    "psg.lfsr_16_taps_0_3": "11111",
+    "psg.lfsr_reset": "11111",
+    "psg.mono_mix": "11110",
+    "psg.noise_output_phase": "11110",
+    "psg.noise_rates": "11111",
+    "psg.reset_state": "11110",
+    "psg.tone_counter": "11110",
+    "psg.tone_immediate": "11110",
+    "psg.tone_period_0_1": "11110",
+    "raster.active_area": "11110",
+    "raster.display_enable": "11110",
+    "raster.per_line_latch": "11111",
+    "reset.cpu": "11110",
+    "reset.devices": "11110",
+    "reset.ram": "11110",
+    "reset.vdp_registers": "11110",
+    "spr.collision": "11110",
+    "spr.limit_overflow": "11111",
+    "spr.no_wrap": "11110",
+    "spr.pattern_base": "11110",
+    "spr.priority_order": "11110",
+    "spr.sat": "11110",
+    "spr.shift": "11110",
+    "spr.size_8x16": "11110",
+    "spr.terminator": "11111",
+    "spr.y_wrap": "11111",
+    "spr.zoom": "11110",
+    "timing.access_timestamp": "11110",
+    "timing.cpu_clock": "11110",
+    "timing.frame_boundary": "11110",
+    "timing.ntsc_262_lines": "11110",
+    "timing.timebase_tstates": "11110",
+    "timing.vdp_access_slots": "11110",
+    "timing.wait_states": "11110",
+    "vdp.autoincrement_wrap": "11111",
+    "vdp.buffered_read": "11111",
+    "vdp.code0_prefetch": "11111",
+    "vdp.control_latch": "11111",
+    "vdp.cram_32": "11111",
+    "vdp.data_write_target": "11110",
+    "vdp.first_byte_low_address": "11111",
+    "vdp.frame_irq_line": "11110",
+    "vdp.h_counter_latch": "11110",
+    "vdp.line_counter": "11111",
+    "vdp.line_irq_pending": "11110",
+    "vdp.mode4_192": "11110",
+    "vdp.mode4_224": "11110",
+    "vdp.mode_check_point": "11110",
+    "vdp.registers_0_10": "11110",
+    "vdp.revision_5246": "11110",
+    "vdp.status_flags": "11110",
+    "vdp.status_low_bits": "11110",
+    "vdp.trace": "11110",
+    "vdp.v_counter_ntsc": "11110",
+    "vdp.vram_16k": "11110",
+    "vdp.write_loads_buffer": "11111",
+    "view.audio_out": "1-110",
+    "view.equivalence": "1-110",
+    "view.input_frames": "1-110",
+    "view.pacing": "11110"
+  },
+  "schema": 1,
+  "stage_order": [
+    "implemented",
+    "reference_validated",
+    "fixture_exercised",
+    "generated_native_exercised",
+    "mutation_guarded"
+  ],
+  "tests": {
+    "audio.decimation": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_psg_differential_test"
+      ]
+    },
+    "audio.pcm_format": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_psg_differential_test"
+      ]
+    },
+    "audio.write_timestamp": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "reference_validated": [
+        "sms_psg_differential_test",
+        "sms_u11_oracle_test"
+      ]
+    },
+    "bg.backdrop": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "bg.fine_scroll_gap": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "mutation_guarded": [
+        "sms_render_native_test",
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "bg.flips_palette": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "bg.hscroll": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "bg.hscroll_lock": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "mutation_guarded": [
+        "sms_render_native_test",
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "bg.left_column_blank": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "mutation_guarded": [
+        "sms_render_native_test",
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "bg.name_table": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "bg.priority": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "mutation_guarded": [
+        "sms_render_native_test",
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "bg.tiles_4bpp": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "bg.vscroll": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "bg.vscroll_lock": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "mutation_guarded": [
+        "sms_render_native_test",
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "bios.not_executed": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "build.platform_route": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_native_build_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_native_build_test"
+      ],
+      "implemented": [
+        "sms_native_build_test"
+      ]
+    },
+    "build.provenance": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_native_build_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_native_build_test"
+      ],
+      "implemented": [
+        "sms_native_build_test"
+      ]
+    },
+    "exec.error_surface": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_machine_e2e_test",
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_machine_e2e_test",
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_fail_closed_inventory_test",
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_fail_closed_inventory_test"
+      ]
+    },
+    "exec.headless_budget": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_machine_e2e_test",
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_machine_e2e_test",
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_scheduler_test"
+      ]
+    },
+    "exec.mapper_trace": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ]
+    },
+    "exec.run_api": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_scheduler_test"
+      ]
+    },
+    "exec.state_digest": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ]
+    },
+    "fb.artifact": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "ingest.checksum_informational": {
+      "fixture_exercised": [
+        "sms_fixture_rom_test",
+        "sms_native_build_test"
+      ],
+      "generated_native_exercised": [
+        "sms_native_build_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_fixture_rom_test"
+      ]
+    },
+    "ingest.header_platform": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_fixture_rom_test",
+        "sms_native_build_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_native_build_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_fixture_rom_test"
+      ]
+    },
+    "ingest.identity_record": {
+      "fixture_exercised": [
+        "sms_native_build_test"
+      ],
+      "generated_native_exercised": [
+        "sms_native_build_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ]
+    },
+    "ingest.rom_sizes": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_native_build_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_native_build_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_fixture_rom_test"
+      ]
+    },
+    "input.script": {
+      "fixture_exercised": [
+        "sms_pad_native_test",
+        "sms_viewer_equivalence_test"
+      ],
+      "generated_native_exercised": [
+        "sms_pad_native_test",
+        "sms_viewer_equivalence_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ]
+    },
+    "io.40_7f": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "io.80_bf": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "io.c0_ff": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "io.decode_a7_a6_a0": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "io.read_00_3f": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "io.unimplemented_class": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ]
+    },
+    "io.write_00_3f": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "ioctl.direction_level": {
+      "fixture_exercised": [
+        "sms_pad_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_pad_native_test"
+      ],
+      "implemented": [
+        "sms_pad_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_pad_tests"
+      ]
+    },
+    "ioctl.h_latch_trigger": {
+      "fixture_exercised": [
+        "sms_pad_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_pad_native_test"
+      ],
+      "implemented": [
+        "sms_pad_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_pad_tests"
+      ]
+    },
+    "ioctl.nationalization": {
+      "fixture_exercised": [
+        "sms_pad_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_pad_native_test"
+      ],
+      "implemented": [
+        "sms_pad_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_pad_tests"
+      ]
+    },
+    "ioctl.output_readback": {
+      "fixture_exercised": [
+        "sms_pad_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_pad_native_test"
+      ],
+      "implemented": [
+        "sms_pad_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_pad_tests"
+      ]
+    },
+    "ioctl.reset_state": {
+      "fixture_exercised": [
+        "sms_pad_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_pad_native_test"
+      ],
+      "implemented": [
+        "sms_pad_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_pad_tests"
+      ]
+    },
+    "irq.ack_status_read": {
+      "fixture_exercised": [
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "irq.data_bus_ff": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "irq.enable_gating": {
+      "fixture_exercised": [
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "irq.im1": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "irq.int_level": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests",
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "irq.nmi_pause": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test",
+        "sms_pad_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test",
+        "sms_pad_native_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "mutation_guarded": [
+        "sms_machine_e2e_test",
+        "sms_pad_native_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "irq.trace": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ]
+    },
+    "mapper.bank_masking": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_machine_e2e_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_machine_e2e_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "mutation_guarded": [
+        "sms_machine_e2e_test",
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_machine_tests",
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "mapper.cart_ram_slot2": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "mutation_guarded": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_tests"
+      ]
+    },
+    "mapper.cart_ram_state": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_tests"
+      ]
+    },
+    "mapper.code_image_dispatch": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_emission_budget_test",
+        "sms_machine_e2e_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_emission_budget_test",
+        "sms_machine_e2e_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "mutation_guarded": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_machine_tests"
+      ]
+    },
+    "mapper.identity_cli": {
+      "fixture_exercised": [
+        "sms_native_build_test"
+      ],
+      "generated_native_exercised": [
+        "sms_native_build_test"
+      ],
+      "implemented": [
+        "sms_native_build_test"
+      ]
+    },
+    "mapper.identity_declared": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_native_build_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_native_build_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_fixture_rom_test"
+      ]
+    },
+    "mapper.identity_undeclared_error": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_native_build_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_native_build_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_fixture_rom_test"
+      ]
+    },
+    "mapper.imageset": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_emission_budget_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_emission_budget_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "mutation_guarded": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_tests"
+      ]
+    },
+    "mapper.registers": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_machine_e2e_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_machine_e2e_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_machine_tests"
+      ]
+    },
+    "mapper.reset_values": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_tests",
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "mapper.rom_only": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_tests"
+      ]
+    },
+    "mapper.rom_write_enable_bit": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_tests"
+      ]
+    },
+    "mapper.slot0_remap": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_machine_e2e_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_machine_e2e_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "mutation_guarded": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_machine_tests",
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "mapper.write_through": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test",
+        "sms_machine_e2e_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test",
+        "sms_machine_e2e_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_machine_tests",
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "mem.code_image_rom_only": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "mutation_guarded": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_tests"
+      ]
+    },
+    "mem.fixed_first_1k": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_tests",
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "mem.ram_8k": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_tests"
+      ]
+    },
+    "mem.ram_mirror": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_machine_tests",
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "mem.rom_slots": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_tests"
+      ]
+    },
+    "mem.rom_write_ignored": {
+      "fixture_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "generated_native_exercised": [
+        "sms_bank_crossing_test"
+      ],
+      "implemented": [
+        "sms_machine_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_tests"
+      ]
+    },
+    "memctl.io_disable": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "memctl.post_bios_value": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "memctl.ram_copy_c000": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "memctl.write_compatible": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "pad.player2": {
+      "fixture_exercised": [
+        "sms_pad_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_pad_native_test"
+      ],
+      "implemented": [
+        "sms_pad_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_pad_tests"
+      ]
+    },
+    "pad.port_dc": {
+      "fixture_exercised": [
+        "sms_pad_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_pad_native_test"
+      ],
+      "implemented": [
+        "sms_pad_tests"
+      ],
+      "mutation_guarded": [
+        "sms_pad_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_pad_tests"
+      ]
+    },
+    "pad.port_dd": {
+      "fixture_exercised": [
+        "sms_pad_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_pad_native_test"
+      ],
+      "implemented": [
+        "sms_pad_tests"
+      ],
+      "mutation_guarded": [
+        "sms_pad_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_pad_tests"
+      ]
+    },
+    "pad.read_timing": {
+      "fixture_exercised": [
+        "sms_pad_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_pad_native_test"
+      ],
+      "implemented": [
+        "sms_pad_tests"
+      ],
+      "reference_validated": [
+        "sms_oracle_smoke_test",
+        "sms_pad_tests",
+        "sms_u11_oracle_test"
+      ]
+    },
+    "pal.cram_rgb": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_render_test",
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_render_test",
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "psg.attenuation": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "mutation_guarded": [
+        "sms_psg_differential_test"
+      ],
+      "reference_validated": [
+        "sms_psg_differential_test",
+        "sms_psg_oracle_smoke_test"
+      ]
+    },
+    "psg.divider_16": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "mutation_guarded": [
+        "sms_psg_differential_test"
+      ],
+      "reference_validated": [
+        "sms_psg_differential_test",
+        "sms_psg_oracle_smoke_test"
+      ]
+    },
+    "psg.latch_data": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "reference_validated": [
+        "sms_psg_differential_test",
+        "sms_psg_oracle_smoke_test"
+      ]
+    },
+    "psg.lfsr_16_taps_0_3": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "mutation_guarded": [
+        "sms_machine_e2e_test",
+        "sms_psg_differential_test"
+      ],
+      "reference_validated": [
+        "sms_psg_differential_test",
+        "sms_psg_oracle_smoke_test"
+      ]
+    },
+    "psg.lfsr_reset": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "mutation_guarded": [
+        "sms_machine_e2e_test"
+      ],
+      "reference_validated": [
+        "sms_psg_differential_test",
+        "sms_psg_oracle_smoke_test"
+      ]
+    },
+    "psg.mono_mix": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_psg_differential_test"
+      ]
+    },
+    "psg.noise_output_phase": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "reference_validated": [
+        "sms_psg_differential_test",
+        "sms_psg_oracle_smoke_test"
+      ]
+    },
+    "psg.noise_rates": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "mutation_guarded": [
+        "sms_machine_e2e_test"
+      ],
+      "reference_validated": [
+        "sms_psg_differential_test",
+        "sms_psg_oracle_smoke_test"
+      ]
+    },
+    "psg.reset_state": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "reference_validated": [
+        "sms_psg_differential_test",
+        "sms_psg_oracle_smoke_test"
+      ]
+    },
+    "psg.tone_counter": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "reference_validated": [
+        "sms_psg_differential_test",
+        "sms_psg_oracle_smoke_test"
+      ]
+    },
+    "psg.tone_immediate": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "reference_validated": [
+        "sms_psg_differential_test",
+        "sms_psg_oracle_smoke_test"
+      ]
+    },
+    "psg.tone_period_0_1": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_psg_native_test"
+      ],
+      "implemented": [
+        "sms_psg_differential_test"
+      ],
+      "reference_validated": [
+        "sms_psg_differential_test",
+        "sms_psg_oracle_smoke_test"
+      ]
+    },
+    "raster.active_area": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "raster.display_enable": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "raster.per_line_latch": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "mutation_guarded": [
+        "sms_render_native_test",
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "reset.cpu": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "reset.devices": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "reset.ram": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test"
+      ]
+    },
+    "reset.vdp_registers": {
+      "fixture_exercised": [
+        "sms_vdp_oracle_test"
+      ],
+      "generated_native_exercised": [
+        "sms_vdp_oracle_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "spr.collision": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "spr.limit_overflow": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "mutation_guarded": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "spr.no_wrap": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "spr.pattern_base": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "spr.priority_order": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "spr.sat": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "spr.shift": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "spr.size_8x16": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "spr.terminator": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "mutation_guarded": [
+        "sms_render_native_test",
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "spr.y_wrap": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "mutation_guarded": [
+        "sms_render_native_test",
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "spr.zoom": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_render_native_test"
+      ],
+      "implemented": [
+        "sms_render_test"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_oracle_smoke_test",
+        "sms_render_native_test",
+        "sms_render_test"
+      ]
+    },
+    "timing.access_timestamp": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test",
+        "sms_u11_oracle_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test",
+        "sms_u11_oracle_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_u11_oracle_test",
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "timing.cpu_clock": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test",
+        "sms_viewer_equivalence_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test",
+        "sms_viewer_equivalence_test"
+      ],
+      "implemented": [
+        "sms_viewer_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test"
+      ]
+    },
+    "timing.frame_boundary": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "timing.ntsc_262_lines": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "timing.timebase_tstates": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "timing.vdp_access_slots": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test"
+      ]
+    },
+    "timing.wait_states": {
+      "fixture_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_scheduler_test"
+      ],
+      "implemented": [
+        "sms_runtime_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test"
+      ]
+    },
+    "vdp.autoincrement_wrap": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "mutation_guarded": [
+        "sms_vdp_native_test"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.buffered_read": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "mutation_guarded": [
+        "sms_vdp_native_test"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.code0_prefetch": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "mutation_guarded": [
+        "sms_vdp_native_test"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.control_latch": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "mutation_guarded": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.cram_32": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "mutation_guarded": [
+        "sms_vdp_native_test"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.data_write_target": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.first_byte_low_address": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "mutation_guarded": [
+        "sms_vdp_native_test"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.frame_irq_line": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.h_counter_latch": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_pad_native_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_pad_native_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_pad_tests",
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_hcounter_reference_test"
+      ]
+    },
+    "vdp.line_counter": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "mutation_guarded": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.line_irq_pending": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.mode4_192": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test"
+      ]
+    },
+    "vdp.mode4_224": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test"
+      ]
+    },
+    "vdp.mode_check_point": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test"
+      ]
+    },
+    "vdp.registers_0_10": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.revision_5246": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test"
+      ]
+    },
+    "vdp.status_flags": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.status_low_bits": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test",
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.trace": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_machine_e2e_oracle_test"
+      ]
+    },
+    "vdp.v_counter_ntsc": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.vram_16k": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "vdp.write_loads_buffer": {
+      "fixture_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "generated_native_exercised": [
+        "sms_machine_e2e_test",
+        "sms_vdp_native_test"
+      ],
+      "implemented": [
+        "sms_vdp_tests"
+      ],
+      "mutation_guarded": [
+        "sms_vdp_native_test"
+      ],
+      "reference_validated": [
+        "sms_vdp_oracle_test"
+      ]
+    },
+    "view.audio_out": {
+      "fixture_exercised": [
+        "sms_viewer_equivalence_test"
+      ],
+      "generated_native_exercised": [
+        "sms_viewer_equivalence_test"
+      ],
+      "implemented": [
+        "sms_viewer_tests"
+      ]
+    },
+    "view.equivalence": {
+      "fixture_exercised": [
+        "sms_viewer_equivalence_test"
+      ],
+      "generated_native_exercised": [
+        "sms_viewer_equivalence_test"
+      ],
+      "implemented": [
+        "sms_viewer_tests"
+      ]
+    },
+    "view.input_frames": {
+      "fixture_exercised": [
+        "sms_viewer_equivalence_test"
+      ],
+      "generated_native_exercised": [
+        "sms_viewer_equivalence_test"
+      ],
+      "implemented": [
+        "sms_viewer_tests"
+      ]
+    },
+    "view.pacing": {
+      "fixture_exercised": [
+        "sms_viewer_equivalence_test"
+      ],
+      "generated_native_exercised": [
+        "sms_viewer_equivalence_test"
+      ],
+      "implemented": [
+        "sms_viewer_tests"
+      ],
+      "reference_validated": [
+        "sms_viewer_tests"
+      ]
+    }
+  }
+}

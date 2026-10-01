@@ -16,9 +16,11 @@ are included in this package.
 Good to know
 ------------
 * No ROMs are included. Use only software you are legally entitled to analyze.
-* Compatibility is experimental. Only Sega Genesis / Mega Drive images are supported, and many games
-  will not translate or run correctly yet. "Compatibility unknown" means nothing is known about that ROM.
-* Controls: arrow keys = D-pad, Z = A, X = B, C = C, Return = Start, Escape = quit. There is no remapping.
+* Compatibility is experimental. Sega Genesis / Mega Drive images and (baseline) Sega Master System images
+  are supported, and many games will not translate or run correctly yet. A Master System cartridge's mapper cannot be
+  detected: the launcher asks you to choose it (or reads a `<rom name>.mapper.json` file beside the ROM). "Compatibility unknown" means nothing is known about that ROM.
+* Controls (Genesis): arrow keys = D-pad, Z = A, X = B, C = C, Return = Start, Escape = quit. There is no remapping.
+  Master System: arrow keys = D-pad, Z = button 1, X = button 2, P = pause, R = reset, Escape = quit.
 * Built games are cached per user:
     Windows: %LOCALAPPDATA%\Segarecomp\
     macOS:   ~/Library/Application Support/Segarecomp/

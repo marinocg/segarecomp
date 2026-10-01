@@ -252,6 +252,8 @@ int main(int argc, char **argv) {
   }
   printf("{\"frames\":%ld,\"complete\":%s,\"results\":\"", frames, done ? "true" : "false");
   for (unsigned i = 0x100; i < 0x200; ++i) printf("%02X", ram[i]);
+  printf("\",\"ram_ext\":\"");  /* RAM 0xC200-0xC7FF, for fixtures with larger result blocks (SEG-009-T004) */
+  for (unsigned i = 0x200; i < 0x800 && i < ram_size; ++i) printf("%02X", ram[i]);
   printf("\",%s,%s}\n", summary_a, summary_b);
   retro_unload_game();
   retro_deinit();

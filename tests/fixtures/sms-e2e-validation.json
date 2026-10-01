@@ -1,0 +1,110 @@
+{
+  "native": {
+    "artifact_sha256": {
+      "audio.pcm": "fe0abf1cc5de845a69f9440aa24e5ef760c0273796452fd33ad7e3bd5cba9d05",
+      "audio.sha256": "1a706672b1956ca235b234cd4b374cec192d8b6055edad8ef0c38cbcfc8a3d10",
+      "cram.bin": "51e1b6befb136d941292d909c99559273bb4f07294c81109a1be8a5d3e1e10d9",
+      "frame.json": "b6e81b846fb859cc4107685c387a2a6b350823a414741e6e4d78e3e0394b239c",
+      "framebuffer.bin": "c0ca809c834c531972e3d8df7a2462b557f78828bc3c585c1a1481fd0fae9857",
+      "frames.txt": "8dceef3db274d400ef160eb8f38d87f4c27b236ff65f3307273c88dd76eded30",
+      "irq.trace": "8d292d9ef4fafb528eacac06cc5320d6631f74bd9d3580f93fcba30445c3ff4a",
+      "mapper.trace": "9a3246cdbe5698b4e28561ae8a118460fe3e633b8eae7b9d859e028e13a89e16",
+      "ram.bin": "0f803b163ac0c1e01656d20365d578bdec88550fcc3ab79ee042be7c9d1c79e7",
+      "state.sha256": "95535323ae95eb3e9df49b5170f027e958e22757a309cfd412e263b331331d8e",
+      "status.json": "a5543e9a92ed37ea3256aae8fa414b2cb9dc40a70e7931eebf4e50d74b2a14db",
+      "vdp.json": "1f1846ef232434647f0f0a7f0ae6d586489b7ce6ad574b17e4cc1d288f29d965",
+      "vdp.trace": "fcd7fca7429ada3a6fd3f8a8f1d64fd088822c38cbb0b7fca6ae09c5ff26704f",
+      "vram.bin": "52841335e9a9eeb145b71ebafdcdd69b4e87fc7fa933cebb9b1119629ddcacbb"
+    },
+    "capability_areas": [
+      "background_scrolling",
+      "banked_table_reads",
+      "controllers_scripted",
+      "frame_interrupt_im1",
+      "io_control_readback",
+      "line_interrupt",
+      "mapper_bank_switch",
+      "mapper_mask",
+      "pause_nmi",
+      "psg_tone_noise",
+      "ram_and_mirror",
+      "reset_entry",
+      "same_pc_three_identities",
+      "sprites_overflow_collision",
+      "vdp_upload_vram_cram"
+    ],
+    "cycles": 3106275,
+    "fixture": {
+      "declaration_source": "fixture_builder",
+      "fixture": "machine_e2e",
+      "mapper": "sega",
+      "sha256": "0053df036e58d1a9d7002654bd08490e6bf9bb2c139d17e127d02aa22e4b3a1b",
+      "size": 131072
+    },
+    "frame_record_hashes_sha256": "e526924348e365267e8b9f6dbc7562789d55a0def03182e1350afeea070f18d1",
+    "frames_bound": 52,
+    "frames_completed": 52,
+    "input_script_sha256": "d7fe4af5e9e5d7dd65b68f521e2785a5f635180b1b4120be1d72933c1a21d120",
+    "irq_trace_entries": 715,
+    "mapper_trace_entries": 106,
+    "pcm_samples": 38269,
+    "pcm_sha256": "fe0abf1cc5de845a69f9440aa24e5ef760c0273796452fd33ad7e3bd5cba9d05",
+    "state_digest": "5d42146514423b5a53ecbad1cc8f59c5018f42402cfd134b05bb20896679ccfb",
+    "vdp_trace_entries": 788
+  },
+  "reference": {
+    "gearsystem": {
+      "audio": {
+        "frame_shift": 1,
+        "gain_db_vs_platform": -1.6,
+        "max_deviation_db": 0.95,
+        "silent_frame_rms_fraction": 0.0024,
+        "steady_loud_frames": 10,
+        "steady_silent_frames": 7,
+        "tolerance_db": 1.0
+      },
+      "colour_classes": 24,
+      "fixture_sha256": "0053df036e58d1a9d7002654bd08490e6bf9bb2c139d17e127d02aa22e4b3a1b",
+      "frames_compared": [
+        6,
+        49
+      ],
+      "gap_content": "wrapped background column (exact)",
+      "gap_mask": "U8 fine-scroll gap (x < R8 & 7 on every line outside the lock)",
+      "image_frame_offset": 0,
+      "init_block": "exact",
+      "log_records_compared": 39,
+      "native_state_digest": "5d42146514423b5a53ecbad1cc8f59c5018f42402cfd134b05bb20896679ccfb",
+      "pad_phase_offset_vs_platform": 1,
+      "pause_phase_offset_vs_platform": 1,
+      "pin": "704a92ebb702febc4c9c1dafc056339c09c4d5c4"
+    },
+    "genesis_plus_gx": {
+      "audio": {
+        "frame_shift": 0,
+        "gain_db_vs_platform": -11.9,
+        "max_deviation_db": 0.88,
+        "silent_frame_rms_fraction": 0.0008,
+        "steady_loud_frames": 10,
+        "steady_silent_frames": 7,
+        "tolerance_db": 1.0
+      },
+      "colour_classes": 24,
+      "fixture_sha256": "0053df036e58d1a9d7002654bd08490e6bf9bb2c139d17e127d02aa22e4b3a1b",
+      "frames_compared": [
+        6,
+        49
+      ],
+      "gap_content": "other (masked)",
+      "gap_mask": "U8 fine-scroll gap (x < R8 & 7 on every line outside the lock)",
+      "image_frame_offset": 0,
+      "init_block": "exact",
+      "log_records_compared": 39,
+      "native_state_digest": "5d42146514423b5a53ecbad1cc8f59c5018f42402cfd134b05bb20896679ccfb",
+      "pad_phase_offset_vs_platform": 1,
+      "pause_phase_offset_vs_platform": 0,
+      "pin": "939ce4f045f981f89965f24780cef045cc5e52d7"
+    }
+  },
+  "schema": 1
+}

@@ -61,7 +61,11 @@ bin/segarecomp[.exe]  (build driver)  bin/  toolchain/  runtime/  sdl3/  license
 toolchain/  (Zig)   sdl3/{include,lib}  runtime/{platforms,libs}  licenses/  README.txt
 ```
 
-`runtime/` mirrors the repository paths the Genesis runtime headers include by relative path.
+`runtime/` mirrors the repository paths the runtime headers include by relative path. It carries the Genesis runtime
+(`platforms/genesis`) and the Master System runtime (`platforms/master-system/{runtime,headless,viewer}` plus
+`libs/device/sega/psg` and the Z80 runtime ABI header under `libs/codegen/c11/include`); `segarecomp build --runtime-dir
+<root>/platforms/master-system` derives the shared library sources from the same root. The Master System mapper is
+declared (launcher selection control, `<rom>.mapper.json` sidecar, or `--mapper`), never inferred.
 
 ## Local staging (macOS/Linux)
 

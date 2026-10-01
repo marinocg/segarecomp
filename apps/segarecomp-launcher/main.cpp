@@ -25,6 +25,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 using namespace launcher;
@@ -49,13 +50,17 @@ fs::path from_u8(const char *text) { return fs::path(std::u8string(reinterpret_c
 
 int headless(int argc, char **argv) {
   fs::path rom_path, report_path;
+  std::string mapper;                  // Master System: explicit mapper declaration (never defaulted)
+  std::vector<std::string> game_args;  // forwarded to the launched game (automation passes a finite bound)
   bool run = false;
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--build" && i + 1 < argc) rom_path = from_u8(argv[++i]);
     else if (arg == "--report" && i + 1 < argc) report_path = from_u8(argv[++i]);
     else if (arg == "--run") run = true;
-    else { std::fprintf(stderr, "usage: Segarecomp [--build <rom> [--run] [--report <file>]]\n"); return 2; }
+    else if (arg == "--mapper" && i + 1 < argc) mapper = argv[++i];
+    else if (arg == "--game-arg" && i + 1 < argc) game_args.emplace_back(argv[++i]);
+    else { std::fprintf(stderr, "usage: Segarecomp [--build <rom> [--mapper <sega|rom_only>] [--run [--game-arg <arg>]...] [--report <file>]]\n"); return 2; }
   }
   std::string report;
   const auto emit = [&](const std::string &line) { report += line + "\n"; std::puts(line.c_str()); };
@@ -65,11 +70,15 @@ int headless(int argc, char **argv) {
   emit("compiler=" + u8s(layout.cc));
   if (!layout.problem.empty()) { emit("result=failed problem=" + layout.problem); rc = 1; }
   else {
-    const RomView rom = inspect_rom_file(rom_path, layout);
+    RomView rom = inspect_rom_file(rom_path, layout);
+    if (rom.platform_id == "master-system" && !mapper.empty()) rom.mapper = mapper;
     if (!rom.error.empty()) { emit("result=failed problem=" + rom.error); rc = 1; }
     else {
       const fs::path entry = entry_dir(rom, layout);
       emit("rom_sha256=" + rom.sha256);
+      emit("platform=" + (rom.platform_id.empty() ? std::string("unsupported") : rom.platform_id));
+      if (rom.platform_id == "master-system")
+        emit(std::string("mapper=") + (!rom.mapper.empty() ? rom.mapper : rom.mapper_manifest.empty() ? "undeclared" : "manifest"));
       emit(std::string("cache=") + (entry_ready(entry) ? "hit" : "miss"));
       if (!entry_ready(entry)) {
         BuildJob job(rom, layout);
@@ -79,7 +88,7 @@ int headless(int argc, char **argv) {
       }
       emit("entry=" + u8s(entry));
       if (rc == 0 && run) {
-        GameRun game(rom, layout, entry);
+        GameRun game(rom, layout, entry, game_args);
         if (!game.started()) { emit("run=failed_to_start"); rc = 4; }
         else {
           while (!game.poll()) SDL_Delay(50);
@@ -374,8 +383,8 @@ int gui() {
     state = State::Building;
   };
   const auto browse = [&] {
-    static const SDL_DialogFileFilter filters[] = {{"Genesis / Mega Drive ROMs", "md;bin;gen;smd"}, {"All files", "*"}};
-    SDL_ShowOpenFileDialog(dialog_callback, &pending, window, filters, 2, nullptr, false);
+    static const SDL_DialogFileFilter filters[] = {{"Genesis / Mega Drive ROMs", "md;bin;gen;smd"}, {"Master System ROMs", "sms"}, {"All files", "*"}};
+    SDL_ShowOpenFileDialog(dialog_callback, &pending, window, filters, 3, nullptr, false);
   };
   if (const char *preselect = SDL_getenv("SEGARECOMP_SHOT_ROM")) {  // review aid, see maybe_save_screenshot
     select_rom(preselect);
@@ -533,12 +542,27 @@ int gui() {
         ImGui::PopTextWrapPos();
       } else if (state == State::RomSelected) {
         if (!rom.supported_platform)
-          draw_text(dl, font_regular, centered.len(13), col_err, centered.at(content_x, row_y), "This is not a supported Genesis / Mega Drive ROM.");
-        if (bevel_button(centered, "recompile", content_x, row_y + 30.0F, 190.0F, 42.0F,
-                         rom.compat_known ? "Recompile & Play" : "Try anyway", font_bold, 16.0F))
-          start_build(false);
-        if (outline_button(centered, "choose1", content_x + 204.0F, row_y + 30.0F, 170.0F, 42.0F, "Choose another...", font_regular, 14.0F))
-          browse();
+          draw_text(dl, font_regular, centered.len(13), col_err, centered.at(content_x, row_y), "This is not a supported Genesis / Mega Drive or Master System ROM.");
+        if (rom.needs_mapper()) {
+          // The header never identifies the cartridge mapper and nothing is defaulted: the user declares it.
+          draw_text(dl, font_regular, centered.len(13), text_secondary, centered.at(content_x, row_y - 2.0F),
+                    "The mapper must be declared (it cannot be detected). Choose one:");
+          const char *declared = nullptr;
+          if (bevel_button(centered, "mapper_sega", content_x, row_y + 30.0F, 170.0F, 42.0F, "Sega mapper", font_bold, 16.0F)) declared = "sega";
+          if (outline_button(centered, "mapper_rom", content_x + 184.0F, row_y + 30.0F, 190.0F, 42.0F, "ROM only (32 KiB)", font_regular, 14.0F)) declared = "rom_only";
+          if (outline_button(centered, "choose_m", content_x + 388.0F, row_y + 30.0F, 130.0F, 42.0F, "Choose...", font_regular, 13.0F)) browse();
+          if (declared != nullptr) {
+            rom.mapper = declared;
+            entry = entry_dir(rom, layout);
+            if (entry_ready(entry)) state = State::Ready; else start_build(false);
+          }
+        } else {
+          if (bevel_button(centered, "recompile", content_x, row_y + 30.0F, 190.0F, 42.0F,
+                           rom.compat_known ? "Recompile & Play" : "Try anyway", font_bold, 16.0F))
+            start_build(false);
+          if (outline_button(centered, "choose1", content_x + 204.0F, row_y + 30.0F, 170.0F, 42.0F, "Choose another...", font_regular, 14.0F))
+            browse();
+        }
       } else if (state == State::Building) {
         static const char *names[BuildJob::stage_count] = {"Analyzing ROM", "Generating native C", "Compiling", "Linking"};
         draw_text(dl, font_bold, centered.len(15), text_primary, centered.at(content_x, row_y - 6.0F), "Preparing game...");
@@ -561,7 +585,8 @@ int gui() {
         const float controls_y = row_y + 96.0F;
         draw_text(dl, font_bold, centered.len(13), text_secondary, centered.at(content_x, controls_y), "Controls");
         draw_text(dl, font_regular, centered.len(13), text_footer, centered.at(content_x, controls_y + 20.0F),
-                 "Arrows = D-Pad   Z = A   X = B   C = C   Enter = Start");
+                 rom.platform_id == "master-system" ? "Arrows = D-Pad   Z = Button 1   X = Button 2   P = Pause   R = Reset"
+                                                    : "Arrows = D-Pad   Z = A   X = B   C = C   Enter = Start");
       } else if (state == State::Running) {
         draw_text(dl, font_bold, centered.len(16), text_primary, centered.at(content_x, row_y + 10.0F), "Playing...");
         draw_text(dl, font_regular, centered.len(13), text_secondary, centered.at(content_x, row_y + 38.0F), "Close the game window to return.");

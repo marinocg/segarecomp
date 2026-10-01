@@ -1154,3 +1154,152 @@ set_property(TEST sms_capabilities_test sms_fixture_rom_test sms_oracle_smoke_te
   APPEND PROPERTY LABELS full fast)
 set_property(TEST sms_capabilities_test sms_fixture_rom_test sms_oracle_smoke_test sms_psg_oracle_smoke_test
   APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T002: SMS cartridge ingestion, memory map/mapper, ImageSet declaration and the declaration-vs-run-time mapper
+# contract (hermetic, synthetic ROMs), plus the test-side SMS generation CLI and generated-native bank-crossing host.
+add_executable(sms_machine_tests sms_machine_test.cpp)
+target_link_libraries(sms_machine_tests PRIVATE segarecomp::machine_master_system segarecomp::runtime_master_system)
+segarecomp_enable_warnings(sms_machine_tests)
+add_test(NAME sms_machine_tests COMMAND sms_machine_tests)
+add_executable(sms_image_emitter tools/sms_image_emitter.cpp)
+target_link_libraries(sms_image_emitter PRIVATE segarecomp::machine_master_system)
+segarecomp_enable_warnings(sms_image_emitter)
+add_test(NAME sms_bank_crossing_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_bank_crossing_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_emission_budget_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR})
+# The 512 KiB tier (about 390 MiB of generated C, minutes of runtime) is `extended`, so it is not run on every CI host.
+add_test(NAME sms_emission_budget_512k_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR} 512k)
+add_test(NAME sms_machine_dependency_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_dependency_test.py ${PROJECT_SOURCE_DIR})
+# SEG-009-T010: `segarecomp build` for Master System images (platform routing, mapper declaration, T008 digest reproduction).
+add_test(NAME sms_native_build_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_native_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  $<TARGET_FILE:sms_image_emitter>)
+set_property(TEST sms_native_build_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_native_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-009-T011: authorized local images (skips cleanly without games/sms; not in the hermetic tiers).
+add_test(NAME sms_local_images_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_local_images_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_local_images_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_local_images_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-009-T013: durable dependency gate (reference scan, CMake link closure allowlist, negative controls, profile witness).
+add_test(NAME sms_dependency_gate_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_dependency_gate_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_machine_tests sms_machine_dependency_test sms_dependency_gate_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_dependency_gate_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST sms_bank_crossing_test sms_emission_budget_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_emission_budget_512k_test APPEND PROPERTY LABELS extended)
+set_property(TEST sms_bank_crossing_test sms_emission_budget_test sms_emission_budget_512k_test sms_machine_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T003: machine composition, deterministic scheduler, interrupt wiring and headless driver. The unit test supplies
+# a scripted fake `z80_run` (over the real z80_runtime.h boundary logic) so scheduler ordering is checked without a
+# generated image; the Python test builds generated-native fixtures with the real driver and stub devices.
+add_executable(sms_runtime_tests sms_runtime_test.cpp)
+target_link_libraries(sms_runtime_tests PRIVATE segarecomp::runtime_master_system)
+segarecomp_enable_warnings(sms_runtime_tests)
+add_test(NAME sms_runtime_tests COMMAND sms_runtime_tests)
+add_test(NAME sms_machine_scheduler_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_scheduler_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_u11_oracle_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_u11_oracle_test.py ${CMAKE_C_COMPILER})
+set_property(TEST sms_runtime_tests APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_u11_oracle_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_u11_oracle_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST sms_machine_scheduler_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_machine_scheduler_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T007: Sega PSG device library (platform-neutral: links only segarecomp::device_psg) and its hermetic tests.
+add_executable(sn76489_tests sn76489_test.cpp)
+target_link_libraries(sn76489_tests PRIVATE segarecomp::device_psg)
+segarecomp_enable_warnings(sn76489_tests)
+add_test(NAME sn76489_tests COMMAND sn76489_tests)
+set_property(TEST sn76489_tests APPEND PROPERTY LABELS full fast)
+add_test(NAME sms_psg_differential_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_psg_differential_test.py ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_psg_native_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_psg_native_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_psg_dependency_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_psg_dependency_test.py ${PROJECT_SOURCE_DIR} ${CMAKE_C_COMPILER})
+set_property(TEST sms_psg_differential_test sms_psg_dependency_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_psg_native_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_psg_differential_test sms_psg_native_test sms_psg_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+add_test(NAME sms_cc_cache_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_cc_cache_test.py ${CMAKE_C_COMPILER})
+set_property(TEST sms_cc_cache_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_cc_cache_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T004: SMS VDP (direct API test), generated-native port/state/interrupt/mode differential against the independent
+# Python model (mutation-checked) and, when the pinned references are available, against both machine references.
+add_executable(sms_vdp_tests sms_vdp_test.cpp)
+target_link_libraries(sms_vdp_tests PRIVATE segarecomp::runtime_master_system)
+segarecomp_enable_warnings(sms_vdp_tests)
+add_test(NAME sms_vdp_tests COMMAND sms_vdp_tests)
+add_test(NAME sms_vdp_native_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_vdp_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_vdp_oracle_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_vdp_oracle_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_vdp_tests APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_vdp_native_test sms_vdp_oracle_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_vdp_native_test sms_vdp_oracle_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T005: SMS deterministic renderer: state-injection differential against the independent model with mutation
+# controls (hermetic, no fixtures or ROMs), and the generated-native rendering fixtures (tests/sms_render_native_test.py).
+add_executable(sms_render_dump tools/sms_render_dump.c)
+set_target_properties(sms_render_dump PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+target_link_libraries(sms_render_dump PRIVATE segarecomp::runtime_master_system)
+segarecomp_enable_warnings(sms_render_dump)
+add_test(NAME sms_render_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_render_test.py $<TARGET_FILE:sms_render_dump> ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_render_native_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_render_native_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_render_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_render_native_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_render_test sms_render_native_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T006: SMS controllers, I/O control, TH-latched H counter and pause NMI: exhaustive pin-by-pin reference sweep with a
+# polarity mutation control (hermetic), the generated-native scripted-input fixtures, and the H counter table differential
+# against the pinned references (skips without SEGARECOMP_SMS_ORACLE_CHECKOUT).
+add_executable(sms_pad_tests sms_pad_test.cpp)
+target_link_libraries(sms_pad_tests PRIVATE segarecomp::runtime_master_system)
+segarecomp_enable_warnings(sms_pad_tests)
+add_test(NAME sms_pad_tests COMMAND sms_pad_tests)
+add_test(NAME sms_pad_native_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_pad_native_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_hcounter_reference_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_hcounter_reference_test.py ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_pad_tests APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_pad_native_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_hcounter_reference_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_pad_native_test sms_hcounter_reference_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T008: the end-to-end generated-native machine fixture (all baseline areas on the full SMS runtime) against the
+# independent models and the committed validation manifest (hermetic), with determinism, generated-native-only inspection and
+# six fault injections; the oracle comparison runs the same fixture on the pinned references (skips without
+# SEGARECOMP_SMS_ORACLE_CHECKOUT) and asserts the recorded `reference` section of tests/fixtures/sms-e2e-validation.json.
+add_test(NAME sms_machine_e2e_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_e2e_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_machine_e2e_oracle_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_e2e_oracle_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_machine_e2e_test sms_machine_e2e_oracle_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_machine_e2e_test sms_machine_e2e_oracle_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T009: SMS viewer core (fake host, fake CPU) and the generated-native viewer/headless equivalence.
+add_executable(sms_viewer_tests sms_viewer_test.cpp)
+target_link_libraries(sms_viewer_tests PRIVATE segarecomp::viewer_master_system)
+segarecomp_enable_warnings(sms_viewer_tests)
+add_test(NAME sms_viewer_tests COMMAND sms_viewer_tests)
+add_test(NAME sms_viewer_equivalence_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_viewer_equivalence_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_viewer_tests APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_viewer_equivalence_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_viewer_equivalence_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# SEG-009-T012: capability coverage ratchet (hermetic, pure Python) and the typed fail-closed inventory.
+add_test(NAME sms_capability_ratchet_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_capability_ratchet_test.py ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_fail_closed_inventory_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_fail_closed_inventory_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_capability_ratchet_test sms_fail_closed_inventory_test APPEND PROPERTY LABELS full fast)
+set_property(TEST sms_capability_ratchet_test sms_fail_closed_inventory_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")

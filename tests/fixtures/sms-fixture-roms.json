@@ -2,6 +2,27 @@
   "fixtures": [
     {
       "declaration_source": "fixture_builder",
+      "fixture": "bank_crossing",
+      "mapper": "sega",
+      "sha256": "7558184d0828103df9e3b53bdb1a5f4d7dea2813a88e59759af5107d5e1fa1e7",
+      "size": 65536
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "machine_e2e",
+      "mapper": "sega",
+      "sha256": "0053df036e58d1a9d7002654bd08490e6bf9bb2c139d17e127d02aa22e4b3a1b",
+      "size": 131072
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "memctl_bad",
+      "mapper": "rom_only",
+      "sha256": "315ca3928832c1a9d2073e9dca76b251e35b521f38e8fda991d16fabf8a909c0",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
       "fixture": "oracle_smoke",
       "mapper": "sega",
       "sha256": "ab65129ecda3fc5fdd4baa7b368e4d052f46af0cf43ba94d8cfa6250e6fb8be4",
@@ -9,9 +30,156 @@
     },
     {
       "declaration_source": "fixture_builder",
+      "fixture": "port_open",
+      "mapper": "rom_only",
+      "sha256": "e0529c0331a5c522cdd249876072b39149dadebf3c20084615f84a8d35c44f5a",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "port_vdp",
+      "mapper": "rom_only",
+      "sha256": "246355e3d7f026a4f5e6fdeba06c4011fd7d8cde92ba257d7813a60e26da77f2",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "render_raster",
+      "mapper": "rom_only",
+      "sha256": "173c8a7d0a7940b37e58fe8841aa9436caae03f7399d900f1f4b9b91cacac3e3",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "render_scene_a",
+      "mapper": "rom_only",
+      "sha256": "4551b69d88e93b293f3ee0ed841e9fb9ca44fe9bebd60517007b063a025cbc6e",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "render_scene_b",
+      "mapper": "rom_only",
+      "sha256": "afd1e4791a342570c02ff3ba88a85d6b8c619f243d6fb95d275aa78ff81e46b7",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "render_scene_c",
+      "mapper": "rom_only",
+      "sha256": "33eaea2f3e55fcb62798f26b53b276777a37f9d2aa911e4e6c66d478a07afe25",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "render_ywrap_192",
+      "mapper": "rom_only",
+      "sha256": "4d87a1352d98f9e7e4d98d6c525c540efaaa099fca7d0a86b1bad68d3e687b78",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "render_ywrap_224",
+      "mapper": "rom_only",
+      "sha256": "0aa5b07308f2bc5bf9f8720318b956f77e2e6440d60c397b0e1cb4e872a99092",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "sched_irq",
+      "mapper": "rom_only",
+      "sha256": "728c3fa7eada24cb7d9da77da10bdbcb944583e8079865df3606455e5dfb53bb",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "sched_straddle",
+      "mapper": "rom_only",
+      "sha256": "ed398f079251b24ba017201aecb9e4e846c4606a8b8f010ceee6c86ac4f41484",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
       "fixture": "trivial",
       "mapper": "rom_only",
       "sha256": "aa3642138e5d4e1ce17938b80337802a867404a5145e37a8f1899559c305c6b3",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "u11_probe",
+      "mapper": "rom_only",
+      "sha256": "38a00fc40b59306678dd61eeda2de2e87aa177d5540c2d2fb913662b7b6bae16",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_hcounter_stop",
+      "mapper": "rom_only",
+      "sha256": "1aeb4b92f48b6d3084a28dd1336352ca50719e99d648f53ea0b1e7c69d999230",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_irq",
+      "mapper": "rom_only",
+      "sha256": "f1a79d2548d63122db33aef6f97a557ae90ea1b7db7c2f2852e4e606e18f970a",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_mode_blank_ok",
+      "mapper": "rom_only",
+      "sha256": "814e74c902a83f715bd91e86a5befcc9d7d167c4b6a446e746c3bf9c5cc1123c",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_mode_display_stop",
+      "mapper": "rom_only",
+      "sha256": "51a1008637768532e60083879ad97a134ce8ca88d2611dc4b2497a6922edc379",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_mode_status_stop",
+      "mapper": "rom_only",
+      "sha256": "164ff22f9cec7073c4c9295889c0e72fc7166278375087e97a7449e387649e0d",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_reset_probe",
+      "mapper": "rom_only",
+      "sha256": "b2a304477735bdb64b81b40280c4d29bb39ad3e500d7186bce55b3c7a4c9d0fa",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_seq_a",
+      "mapper": "rom_only",
+      "sha256": "1a9459815ec66194f8dbafa4c7dfa21aa881e4f2b1ab2db54255176d3afd5c90",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_seq_b",
+      "mapper": "rom_only",
+      "sha256": "e8d5eb6eab13e4884b079041cbbe6169b0c528b91234ba04170ff94391b184ee",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_straddle",
+      "mapper": "rom_only",
+      "sha256": "4053b588fae2f4a3ad4187270dbbf2bb68c05d44a8858325b978097860d735f6",
+      "size": 32768
+    },
+    {
+      "declaration_source": "fixture_builder",
+      "fixture": "vdp_straddle_write",
+      "mapper": "rom_only",
+      "sha256": "6bb8c397db462b2f93cc1f358a725cd352dd1606d723cba25737b45b499504dc",
       "size": 32768
     }
   ],

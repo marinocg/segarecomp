@@ -1,5 +1,7 @@
 #include "build_command.hpp"
 
+#include "segarecomp/machine/master_system/cartridge.hpp"
+#include "segarecomp/machine/master_system/emit.hpp"
 #include "segarecomp/rom.hpp"
 #include "segarecomp/sha256.hpp"
 
@@ -30,6 +32,7 @@ extern char **environ;
 #endif
 
 namespace fs = std::filesystem;
+namespace sms = segarecomp::machine::master_system;
 
 namespace {
 
@@ -124,7 +127,13 @@ struct Options {
   std::optional<fs::path> sdl3_lib;
   std::string optimize = "2";
   unsigned jobs = 0;
+  // Master System routing (SEG-009-T010). `platform` empty: classify the image; the mapper is never inferred.
+  std::string platform;                 // "", "genesis" or "master-system"
+  std::string mapper;                   // explicit mapper family declaration (build option), e.g. "sega"
+  std::optional<fs::path> mapper_manifest;
 };
+
+enum class Target { genesis, master_system };
 
 struct Log {
   std::ofstream file;
@@ -151,17 +160,19 @@ std::string json_escape(const std::string &text) {
   return out;
 }
 
+// `extra` is a pre-formatted JSON member list (leading comma included) appended after rom_sha256: Master System
+// provenance and the typed diagnostic. Empty for Genesis, so Genesis status.json is unchanged.
 void write_status(const Options &options, const std::string &sha, const std::string &status,
-                  const std::string &stage, const std::string &message) {
+                  const std::string &stage, const std::string &message, const std::string &extra = "") {
   std::ofstream out(options.output / "status.json", std::ios::binary | std::ios::trunc);
   out << "{\"status\":\"" << status << "\",\"stage\":\"" << stage << "\",\"message\":\"" << json_escape(message)
-      << "\",\"rom_sha256\":\"" << sha << "\"}\n";
+      << "\",\"rom_sha256\":\"" << sha << "\"" << extra << "}\n";
 }
 
 int fail(const Options &options, Log &log, const std::string &sha, const std::string &stage, int code,
-         const std::string &message) {
+         const std::string &message, const std::string &diagnostic = "") {
   log.line("FAILED (" + stage + "): " + message);
-  write_status(options, sha, "failed", stage, message);
+  write_status(options, sha, "failed", stage, message, diagnostic.empty() ? "" : ",\"diagnostic\":\"" + json_escape(diagnostic) + "\"");
   std::cout << "@result failed stage=" << stage << " message=" << message << std::endl;
   return code;
 }
@@ -183,6 +194,9 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--runtime-dir") { options.runtime_dir = fs::path(value); have_runtime = true; }
     else if (key == "--sdl3-include") options.sdl3_include = fs::path(value);
     else if (key == "--sdl3-lib") options.sdl3_lib = fs::path(value);
+    else if (key == "--platform") options.platform = value;
+    else if (key == "--mapper") options.mapper = value;
+    else if (key == "--mapper-manifest") options.mapper_manifest = fs::path(value);
     else if (key == "--optimize") options.optimize = value;
     else if (key == "--jobs") options.jobs = static_cast<unsigned>(std::max(0, std::atoi(value.c_str())));
     else return std::nullopt;
@@ -190,6 +204,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
   if (!have_rom || !have_output || !have_runtime || options.cc.empty()) return std::nullopt;
   if (options.optimize != "0" && options.optimize != "2") return std::nullopt;
   if (options.sdl3_include.has_value() != options.sdl3_lib.has_value()) return std::nullopt;
+  if (!options.platform.empty() && options.platform != "genesis" && options.platform != "master-system") return std::nullopt;
   return options;
 }
 
@@ -228,6 +243,7 @@ int segarecomp_build_command(int argc, char **argv) {
   Log log;
   log.file.open(options.output / "build.log", std::ios::binary | std::ios::trunc);
   std::string sha;
+  std::string sms_provenance;  // status.json members recording the SMS identity (empty for Genesis)
   try {
     // ---- analyze ----
     stage("analyze", "begin");
@@ -235,10 +251,61 @@ int segarecomp_build_command(int argc, char **argv) {
     sha = segarecomp::sha256_hex(bytes);
     log.line("rom_sha256=" + sha);
     log.line("cc=" + options.cc);
-    const auto reset = segarecomp::analyze_genesis_reset_image(bytes);
-    if (reset.outcome != segarecomp::ResetOutcome::accepted) {
-      log.line(std::string("analyze diagnostic: ") + segarecomp::reset_diagnostic_name(reset.diagnostic));
-      return fail(options, log, sha, "analyze", 1, "This file is not a supported Genesis / Mega Drive ROM.");
+    // Platform routing: an explicit --platform wins; otherwise only a recognized Master System header selects the SMS
+    // route. Header absence or ambiguity never selects it implicitly (an unclassified image keeps the Genesis route and
+    // its existing rejection), and a Game Gear header is rejected rather than guessed.
+    Target target = Target::genesis;
+    if (options.platform == "master-system") {
+      target = Target::master_system;
+    } else if (options.platform.empty()) {
+      const auto info = segarecomp::inspect_rom(bytes);
+      if (info.outcome == segarecomp::ClassificationOutcome::recognized && info.platform == segarecomp::Platform::master_system)
+        target = Target::master_system;
+      else if (info.outcome == segarecomp::ClassificationOutcome::recognized && info.platform == segarecomp::Platform::game_gear)
+        return fail(options, log, sha, "analyze", 1, "Game Gear images are not supported.", "PLATFORM_UNSUPPORTED");
+    }
+    sms::IngestOptions ingest_options;
+    if (target == Target::master_system) {
+      log.line("platform=master-system");
+      ingest_options.explicit_profile = options.platform == "master-system";
+      if (!options.mapper.empty()) ingest_options.declarations.push_back({options.mapper, sms::DeclarationSource::build_option});
+      if (options.mapper_manifest) {
+        std::ifstream manifest(*options.mapper_manifest, std::ios::binary);
+        std::ostringstream text;
+        if (manifest) text << manifest.rdbuf();
+        sms::ManifestResult parsed;
+        if (manifest) parsed = sms::parse_mapper_manifest(text.str(), sha);
+        else { parsed.error = SMS_ERROR_MAPPER_UNDECLARED; parsed.detail = "cannot read the mapper manifest"; }
+        if (parsed.error != SMS_OK) {
+          log.line("analyze diagnostic: " + parsed.detail);
+          return fail(options, log, sha, "analyze", 1, "The Master System mapper manifest is not usable: " + parsed.detail,
+                      sms_error_name(parsed.error));
+        }
+        ingest_options.declarations.push_back(parsed.declaration);
+      }
+      const sms::IngestResult cartridge = sms::ingest_cartridge(bytes, ingest_options);
+      if (!cartridge.ok()) {
+        log.line("analyze diagnostic: " + cartridge.detail);
+        const std::string message = cartridge.error == SMS_ERROR_MAPPER_UNDECLARED
+            ? "The Master System cartridge mapper must be declared (--mapper sega|rom_only or --mapper-manifest); Segarecomp never guesses it: " + cartridge.detail
+            : "This Master System image is not supported: " + cartridge.detail;
+        return fail(options, log, sha, "analyze", 1, message, sms_error_name(cartridge.error));
+      }
+      const auto &id = cartridge.identity;
+      log.line("profile=" + id.profile);
+      log.line(std::string("mapper=") + sms::mapper_family_name(id.mapper));
+      log.line(std::string("mapper_declaration_source=") + sms::declaration_source_name(id.declaration_source));
+      sms_provenance = ",\"platform\":\"master-system\",\"profile\":\"" + json_escape(id.profile) + "\",\"mapper\":\"" +
+                       sms::mapper_family_name(id.mapper) + "\",\"mapper_source\":\"" +
+                       sms::declaration_source_name(id.declaration_source) + "\",\"toolchain\":\"" + json_escape(options.cc) + "\"";
+    } else {
+      if (!options.mapper.empty() || options.mapper_manifest)
+        return fail(options, log, sha, "analyze", 1, "A mapper declaration applies only to Master System images.", "MAPPER_NOT_APPLICABLE");
+      const auto reset = segarecomp::analyze_genesis_reset_image(bytes);
+      if (reset.outcome != segarecomp::ResetOutcome::accepted) {
+        log.line(std::string("analyze diagnostic: ") + segarecomp::reset_diagnostic_name(reset.diagnostic));
+        return fail(options, log, sha, "analyze", 1, "This file is not a supported Genesis / Mega Drive ROM.");
+      }
     }
     stage("analyze", "done");
 
@@ -248,36 +315,56 @@ int segarecomp_build_command(int argc, char **argv) {
     const fs::path shard_dir = options.output / "generated";
     fs::remove(source, ec);
     fs::remove_all(shard_dir, ec);
-    fs::path hints = options.runtime_dir / "compat" / (sha + ".json");
-    std::vector<std::string> emit_args{"segarecomp", "emit-general-startup-bridge-c", "--rom", options.rom.string(),
-                                       "--reset-entry", "--rom-sha256", sha, "--immutable-rom-aot"};
-    if (fs::is_regular_file(hints, ec)) { emit_args.push_back("--external-hints"); emit_args.push_back(hints.string()); }
-    emit_args.insert(emit_args.end(), {"--generated-c-output", source.string(), "--generated-c-shard-dir",
-                                       shard_dir.string()});
-    std::vector<char *> emit_argv;
-    for (auto &arg : emit_args) emit_argv.push_back(arg.data());
-    std::ostringstream captured_out, captured_err;
-    auto *old_out = std::cout.rdbuf(captured_out.rdbuf());
-    auto *old_err = std::cerr.rdbuf(captured_err.rdbuf());
-    const int emit_rc = run_cli(static_cast<int>(emit_argv.size()), emit_argv.data());
-    std::cout.rdbuf(old_out);
-    std::cerr.rdbuf(old_err);
-    log.line(captured_out.str().substr(0, 4096));
-    log.line(captured_err.str());
-    if (emit_rc != 0) {
-      fs::remove(source, ec);
-      fs::remove_all(shard_dir, ec);
-      return fail(options, log, sha, "generate", 1,
-                  "Segarecomp could not translate this game yet (compatibility is experimental).");
-    }
     std::vector<fs::path> units;
-    const fs::path manifest = shard_dir / "bridge_generated.units";
-    if (fs::is_regular_file(manifest, ec)) {
-      std::ifstream in(manifest);
+    if (target == Target::master_system) {
+      // The one SMS generation route (ingest -> ImageSet -> Z80 emitter, plus the embedded cartridge), in-process.
+      sms::EmitRequest request;
+      request.directory = shard_dir;
+      request.stem = "sms";
+      const auto outcome = sms::emit_cartridge(bytes, ingest_options, request);
+      if (!outcome.ok()) {
+        log.line("emit diagnostic: " + outcome.error);
+        fs::remove_all(shard_dir, ec);
+        return fail(options, log, sha, "generate", 1,
+                    "Segarecomp could not translate this Master System game yet (compatibility is experimental).",
+                    outcome.sms_error != SMS_OK ? sms_error_name(outcome.sms_error) : "");
+      }
+      log.line("emitted units=" + std::to_string(outcome.stats.translation_units) + " full_owners=" +
+               std::to_string(outcome.stats.full_owners));
+      std::ifstream in(shard_dir / "sms.units");
       for (std::string line; std::getline(in, line);)
         if (!line.empty()) units.push_back(shard_dir / line);
-    } else if (fs::is_regular_file(source, ec)) {
-      units.push_back(source);
+    } else {
+      fs::path hints = options.runtime_dir / "compat" / (sha + ".json");
+      std::vector<std::string> emit_args{"segarecomp", "emit-general-startup-bridge-c", "--rom", options.rom.string(),
+                                         "--reset-entry", "--rom-sha256", sha, "--immutable-rom-aot"};
+      if (fs::is_regular_file(hints, ec)) { emit_args.push_back("--external-hints"); emit_args.push_back(hints.string()); }
+      emit_args.insert(emit_args.end(), {"--generated-c-output", source.string(), "--generated-c-shard-dir",
+                                         shard_dir.string()});
+      std::vector<char *> emit_argv;
+      for (auto &arg : emit_args) emit_argv.push_back(arg.data());
+      std::ostringstream captured_out, captured_err;
+      auto *old_out = std::cout.rdbuf(captured_out.rdbuf());
+      auto *old_err = std::cerr.rdbuf(captured_err.rdbuf());
+      const int emit_rc = run_cli(static_cast<int>(emit_argv.size()), emit_argv.data());
+      std::cout.rdbuf(old_out);
+      std::cerr.rdbuf(old_err);
+      log.line(captured_out.str().substr(0, 4096));
+      log.line(captured_err.str());
+      if (emit_rc != 0) {
+        fs::remove(source, ec);
+        fs::remove_all(shard_dir, ec);
+        return fail(options, log, sha, "generate", 1,
+                    "Segarecomp could not translate this game yet (compatibility is experimental).");
+      }
+      const fs::path manifest = shard_dir / "bridge_generated.units";
+      if (fs::is_regular_file(manifest, ec)) {
+        std::ifstream in(manifest);
+        for (std::string line; std::getline(in, line);)
+          if (!line.empty()) units.push_back(shard_dir / line);
+      } else if (fs::is_regular_file(source, ec)) {
+        units.push_back(source);
+      }
     }
     if (units.empty() || !std::all_of(units.begin(), units.end(), [](const fs::path &p) { return fs::is_regular_file(p); }))
       return fail(options, log, sha, "generate", 1, "Generated code is incomplete.");
@@ -290,27 +377,53 @@ int segarecomp_build_command(int argc, char **argv) {
     const bool play = options.sdl3_include.has_value();
     std::vector<std::string> base{options.cc};
     base.insert(base.end(), options.cc_args.begin(), options.cc_args.end());
-    base.insert(base.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", "-O" + options.optimize,
-                             "-I", runtime.string()});
     struct Unit { fs::path source; std::vector<std::string> extra; };
     std::vector<Unit> compile;
-    // units[0] is the main TU (the only one whose main() calls genesis_runtime_run).
-    if (play) {
-      base.insert(base.end(), {"-I", viewer.string(), "-I", options.sdl3_include->string()});
-      compile.push_back({units[0], {"-Dgenesis_runtime_run=genesis_viewer_hook_run"}});
+    if (target == Target::master_system) {
+      // SMS link set (T008 headless / T009 viewer recipes): generated units + runtime + PSG device, then either the
+      // headless driver and its VDP/audio wiring or the viewer core, its SDL3 adapter and its `main`. The platform
+      // directory is <root>/platforms/master-system; the shared libraries sit at the same <root>.
+      fs::path platform_dir = options.runtime_dir;
+      if (!platform_dir.has_filename()) platform_dir = platform_dir.parent_path();  // tolerate a trailing separator
+      const fs::path root = platform_dir.parent_path().parent_path();
+      const fs::path headless = options.runtime_dir / "headless";
+      const fs::path psg = root / "libs" / "device" / "sega" / "psg";
+      base.insert(base.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", "-O" + options.optimize, "-D_CRT_SECURE_NO_WARNINGS",
+                               "-I", (root / "libs" / "codegen" / "c11" / "include").string(), "-I", runtime.string(),
+                               "-I", (psg / "include").string(), "-I", shard_dir.string()});
+      for (const auto &unit : units) compile.push_back({unit, {}});
+      for (const char *name : {"sms_memory.c", "sms_sha256.c", "sms_input.c", "sms_machine.c", "sms_psg.c", "sms_pad.c",
+                               "sms_vdp.c", "sms_render.c"})
+        compile.push_back({runtime / name, {}});
+      compile.push_back({psg / "src" / "sn76489.c", {}});
+      if (play) {
+        base.insert(base.end(), {"-I", viewer.string(), "-I", options.sdl3_include->string()});
+        for (const char *name : {"sms_viewer.c", "sms_viewer_sdl3.c", "sms_viewer_main.c"}) compile.push_back({viewer / name, {}});
+      } else {
+        base.insert(base.end(), {"-I", headless.string()});
+        for (const char *name : {"sms_audio.c", "sms_headless.c", "sms_devices_vdp.c"}) compile.push_back({headless / name, {}});
+      }
     } else {
-      compile.push_back({units[0], {}});
+      base.insert(base.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", "-O" + options.optimize,
+                               "-I", runtime.string()});
+      // units[0] is the main TU (the only one whose main() calls genesis_runtime_run).
+      if (play) {
+        base.insert(base.end(), {"-I", viewer.string(), "-I", options.sdl3_include->string()});
+        compile.push_back({units[0], {"-Dgenesis_runtime_run=genesis_viewer_hook_run"}});
+      } else {
+        compile.push_back({units[0], {}});
+      }
+      for (std::size_t i = 1; i < units.size(); ++i) compile.push_back({units[i], {"-I", units[0].parent_path().string()}});
+      if (units.size() > 1 || fs::is_directory(shard_dir, ec)) {
+        // sharded: generated headers live beside the units
+        for (auto &unit : compile) { unit.extra.push_back("-I"); unit.extra.push_back(shard_dir.string()); }
+      }
+      compile.push_back({runtime / "runtime.c", {}});
+      if (play)
+        for (const char *name : {"vdp_render.c"}) compile.push_back({runtime / name, {}});
+      if (play)
+        for (const char *name : {"viewer.c", "viewer_sdl3.c", "viewer_main_hook.c"}) compile.push_back({viewer / name, {}});
     }
-    for (std::size_t i = 1; i < units.size(); ++i) compile.push_back({units[i], {"-I", units[0].parent_path().string()}});
-    if (units.size() > 1 || fs::is_directory(shard_dir, ec)) {
-      // sharded: generated headers live beside the units
-      for (auto &unit : compile) { unit.extra.push_back("-I"); unit.extra.push_back(shard_dir.string()); }
-    }
-    compile.push_back({runtime / "runtime.c", {}});
-    if (play)
-      for (const char *name : {"vdp_render.c"}) compile.push_back({runtime / name, {}});
-    if (play)
-      for (const char *name : {"viewer.c", "viewer_sdl3.c", "viewer_main_hook.c"}) compile.push_back({viewer / name, {}});
     for (const auto &unit : compile)
       if (!fs::is_regular_file(unit.source, ec))
         return fail(options, log, sha, "compile", 2, "The Segarecomp runtime files are missing: " + unit.source.string());
@@ -363,7 +476,7 @@ int segarecomp_build_command(int argc, char **argv) {
     if (link_rc != 0) return fail(options, log, sha, "link", 3, "The native program could not be linked.");
     fs::remove_all(object_dir, ec);
     stage("link", "done");
-    write_status(options, sha, "ok", "done", "");
+    write_status(options, sha, "ok", "done", "", sms_provenance);
     std::cout << "@result ok executable=" << executable.string() << std::endl;
     return 0;
   } catch (const std::exception &error) {

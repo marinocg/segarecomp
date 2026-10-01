@@ -28,6 +28,14 @@ install(DIRECTORY ${_src}/platforms/genesis/machine/include/ DESTINATION ${_rt}/
 install(DIRECTORY ${_src}/libs/device/sega/genesis/include/ DESTINATION ${_rt}/libs/device/sega/genesis/include FILES_MATCHING PATTERN "*.h")
 install(DIRECTORY ${_src}/libs/cpu/m68k/include/ DESTINATION ${_rt}/libs/cpu/m68k/include FILES_MATCHING PATTERN "*.h")
 
+# Master System (SEG-009-T010): the tree mirrors the repository, `segarecomp build --runtime-dir <...>/platforms/master-system`
+# derives the shared library sources (PSG device, Z80 runtime ABI header) from the same root. No machine/codegen C++ ships here.
+foreach(_sms_dir runtime headless viewer)
+  install(DIRECTORY ${_src}/platforms/master-system/${_sms_dir}/ DESTINATION ${_rt}/platforms/master-system/${_sms_dir} FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
+endforeach()
+install(DIRECTORY ${_src}/libs/device/sega/psg/ DESTINATION ${_rt}/libs/device/sega/psg FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
+install(DIRECTORY ${_src}/libs/codegen/c11/include/ DESTINATION ${_rt}/libs/codegen/c11/include FILES_MATCHING PATTERN "*.h")
+
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/apps/segarecomp-launcher/assets/ DESTINATION ${_res}/assets
   PATTERN "README.md" EXCLUDE PATTERN "Silkscreen-OFL.txt" EXCLUDE)
 
