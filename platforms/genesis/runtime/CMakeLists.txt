@@ -31,3 +31,16 @@ set_target_properties(segarecomp_runtime_genesis_audio PROPERTIES C_STANDARD 11 
 target_include_directories(segarecomp_runtime_genesis_audio PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
   ${PROJECT_SOURCE_DIR}/libs/device/sega/psg/include ${PROJECT_SOURCE_DIR}/libs/device/sega/ym2612/include)
 segarecomp_enable_warnings(segarecomp_runtime_genesis_audio)
+
+# SEG-032-T008 (ADR 0073): the sound subsystem attach point and the two hook seams `segarecomp build` links (the final program's
+# hook and the build-time materialization pass hook define the same entry symbol; a program links exactly one of them, so the
+# pass hook is only compiled here as an object library to keep it under the project warning set).
+add_library(segarecomp_runtime_genesis_sound STATIC genesis_sound.c genesis_sound_hook.c)
+add_library(segarecomp::runtime_genesis_sound ALIAS segarecomp_runtime_genesis_sound)
+add_library(segarecomp_runtime_genesis_materialize_hook OBJECT genesis_materialize_hook.c)
+foreach(_t segarecomp_runtime_genesis_sound segarecomp_runtime_genesis_materialize_hook)
+  set_target_properties(${_t} PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  target_include_directories(${_t} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/libs/codegen/c11/include
+    ${PROJECT_SOURCE_DIR}/libs/device/sega/psg/include ${PROJECT_SOURCE_DIR}/libs/device/sega/ym2612/include)
+  segarecomp_enable_warnings(${_t})
+endforeach()

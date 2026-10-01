@@ -266,8 +266,10 @@ No fake/real dual path remains after a task retires its row; a transitional seam
 Any of: a title or game id, a ROM hash selecting behaviour, a Z80 driver address or range, a decompressor name, a PCM or
 sample range list, a manually produced Z80 RAM dump, recorded runtime coverage used as discovery authority, a per-game
 image list. Image content hashes and signatures are allowed only as generated build artifacts derived from the input
-ROM during the build. The identifier scan (`tests/genesis_z80_forbidden_identifiers_test.py`, added by T008) reads the
-word list in `tests/fixtures/genesis-z80-forbidden-identifiers.txt`.
+ROM during the build. The identifier scan (`tests/genesis_z80_forbidden_identifiers_test.py`, T008) reads the
+word list in `tests/fixtures/genesis-z80-forbidden-identifiers.txt` and covers the Z80/audio/materialization production surface
+(runtime, machine, YM2612 device, Z80 codegen/CPU libraries, the build command, packaging); the existing per-ROM 68K compat hint files are
+not part of it and must never describe the sound subsystem (the scan checks that too).
 
 ## 15. Fixture plan
 
@@ -276,3 +278,24 @@ fixtures; later tasks add): raw upload, M68K-loop "decompressed" upload, multi-e
 under two images, banked ROM reads, bank changes, unsupported bank target, YM2612/PSG writes from both CPUs, DAC streams, Z80
 interrupt, BUSREQ while executing, RESET while executing, illegal 68K Z80-area access, mutated executable bytes. All
 project-authored; none commercial.
+
+## 16. Build-time materialization pipeline (T008)
+
+`segarecomp build` for Genesis produces the final static program in one invocation (ADR 0073, T008 record):
+
+1. Stable objects are compiled once: the generated M68K units, the runtime, the Z80 machine, the shared PSG, the vendored ymfm YM2612 with the
+   C++-runtime shim (the C++ driver is `<cc> c++` derived from the C driver, or `--cxx`/`--cxx-arg`), and the sound attach point.
+2. Fixed point over a registry that starts empty: emit the registry and the Z80 C in-process, compile only units with a new content hash, link the
+   *pass program* (the same objects plus `genesis_materialize_hook.c`), run it from reset with no input under the frozen bounds: 600 virtual
+   frames, 100 M dispatches, 120 s wall. An image epoch whose hold-window signature (section 7) is unregistered makes the program write the
+   snapshot and stop (`z80_unknown_image`); the build registers it (images ordered by first activation) and repeats. The loop ends at the
+   first run with no unknown epoch; one confirming run must reproduce the outcome class, frame count and ordered epoch identities.
+3. The final program links the same objects with the production hook; every bound and nondeterminism violation is a typed build failure
+   (`z80_image_bound_exceeded`, `materialization_budget_exhausted`, `materialization_nondeterministic`, `z80_image_compile_failed`,
+   `materialization_no_convergence`, `z80_code_mismatch`, `z80_execution_unsupported`, `materialization_pass_failed`) with no executable.
+4. `status.json` records the outcome, image/epoch/run counts, frames reached, unit counts, generated/object/executable bytes and stage times.
+   `--keep-work 1` retains `obj/` and the emitted Z80 C for falsification tooling.
+
+Epochs after the observation window, and epochs that depend on input, surface at run time as `z80_unknown_image`. Z80 code that modifies
+its own bytes stops the pass with `z80_code_mismatch` (section 6): a workload with such a driver does not build until a contract amendment
+defines how mutable operand bytes are modelled.

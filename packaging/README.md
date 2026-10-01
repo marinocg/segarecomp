@@ -67,6 +67,9 @@ toolchain/  (Zig)   sdl3/{include,lib}  runtime/{platforms,libs}  licenses/  REA
 `libs/device/sega/psg` and the Z80 runtime ABI header under `libs/codegen/c11/include`); `segarecomp build --runtime-dir
 <root>/platforms/master-system` derives the shared library sources from the same root. The Master System mapper is
 declared (launcher selection control, `<rom>.mapper.json` sidecar, or `--mapper`), never inferred.
+The Genesis build (SEG-032-T008) also derives `libs/device/sega/{psg,ym2612}` and the Z80 runtime ABI header from the same root: it
+runs the build-time Z80 image materialization fixed point (several short headless runs of the program under the bundled compiler)
+and compiles the vendored ymfm core with `<cc> c++` (derived from the `cc` argument, or given by `--cxx`/`--cxx-arg`).
 
 ## Local staging (macOS/Linux)
 

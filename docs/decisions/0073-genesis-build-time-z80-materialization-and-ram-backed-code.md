@@ -1,6 +1,6 @@
 # ADR 0073: Build-Time Z80 Image Materialization and RAM-Backed Code Identity
 
-- Status: Accepted (SEG-032-T001); amended by SEG-032-T002 (activation signature S1\*, measured results below); T008 freezes the bounds.
+- Status: Accepted (SEG-032-T001); amended by SEG-032-T002 (activation signature S1\*, measured results below); T008 freezes the bounds and implements the pipeline (record below).
 - Date: 2026-10-01
 - Related: ADR 0058 (broad immutable-image AOT; "SEG-032-style materialization"), ADR 0071 (owners), ADR 0072,
   `docs/architecture/genesis-z80-audio-contract.md` §5-7.
@@ -106,3 +106,57 @@ Caveats recorded honestly:
   registry with the image bound, RAM-backed `ImageSet`, the generated `*_registry.c` with `genesis_z80_image_for_signature`).
   Two epochs with the same signature are the same image even when their snapshots differ; a code difference there is the guard's
   `z80_code_mismatch`, so no separate collision failure exists.
+
+## T008 implementation record (2026-10-01)
+
+**Pipeline (one `segarecomp build` invocation, Genesis route).** analyze, generate (the existing M68K emit route), compile the stable set once
+(M68K units, runtime, Z80 machine, shared PSG, vendored ymfm YM2612 + its C++-runtime shim, the sound attach point), then the fixed point
+(`platforms/genesis/machine` `z80_materialization.[hpp|cpp]`, pure platform logic over a `PassRunner`): emit the registry in-process
+(`emit_registry`), compile only Z80 units whose content hash is new, link the pass program, run it headless from reset with no input; an
+unknown activation signature stops the program with `z80_unknown_image` after writing the snapshot, the build derives identity, registers the
+image and repeats; a run that ends with no unknown epoch is the candidate and one further run of the same program must reproduce the
+outcome class, the frame count and the ordered epoch identities exactly. Then the final program is linked with the **same** generated
+units, registry and runtime objects and the production hook (`genesis_sound_hook.c`; the viewer hook attaches the same sound set).
+The pass differs from the final program only by its hook object (`genesis_materialize_hook.c`): there is no second configuration to drift.
+The pass observes `/RESET`, BUSREQ and Z80-RAM-write epochs only (the T002 observer's `on_epoch` seam) and never decodes a Z80 byte;
+the image code runs generated-native with the T003 guard, the Z80 machine and the devices attached, so epochs that depend on the
+executing Z80 (the T002 caveat) are now observed.
+
+**Bounds frozen (constants, not options; `z80_materialization.hpp`, `z80_images.hpp`).** image bound 8 (the authorized workloads show at most
+2 images: 4x; ceiling 16), observation window 600 virtual frames (the last epoch observed anywhere in T002 was frame 597; the window must
+not be shortened), per-run instruction budget **100,000,000** dispatches (re-frozen down from the provisional 400 M: the 600-frame runs
+retire 2-20 M dispatches and the only way to exhaust the budget is a guest that never advances virtual time, which 100 M ends in seconds),
+per-run wall timeout 120 s, discovery runs at most bound + 1 (the completing run included), plus the confirming run.
+
+**Typed build failures, no executable, `status.json` records outcome and counts only.** `z80_image_bound_exceeded`,
+`materialization_budget_exhausted` (instruction budget or wall timeout), `materialization_nondeterministic` (the confirming run differs;
+also a run that does not reproduce the previous run's epochs), `z80_image_compile_failed`, `materialization_no_convergence` (defensive: unreachable
+while each unknown image either registers or fails), `z80_code_mismatch` (a registered image's compiled bytes differ from the live RAM:
+the signature under-determines the workload, or the Z80 modified its own code), `z80_execution_unsupported` (any other typed Z80 stop in the pass),
+`materialization_pass_failed` (no usable report, or the pass and the build disagree on a signature). A non-Z80 guest stop inside the window
+ends the observation there (the final program stops at the same frontier); the frames reached are recorded.
+
+**Corrections found by running real workloads.** (1) The RAM-backed emitter treated a decoded start longer than four bytes (data that decodes
+as redundant prefixes, or an instruction running past the 8 KiB RAM) as a failure of the whole image; it is now the same typed never-run stub
+(`z80_mutable_code`) as an endless prefix run (`libs/codegen/c11/src/z80.cpp`; regression in `genesis_z80_images_test`). One authorized workload
+failed `z80_image_compile_failed` before this and converges after. (2) A guest that never advances virtual time (the degenerate BRA-to-self
+stub the older build tests used) can never finish the window: it is now the typed `materialization_budget_exhausted`; the build test was
+updated (its loop fixture is a real spin loop) and keeps the stuck stub as the typed-failure case.
+
+**Workload results (authorized local images, aggregates only; default `-O2`, cold, one machine).** Of six images, four converge:
+2 images each, 3-5 epochs, one confirming run; three reach the full 600-frame window and one stops earlier on an unrelated M68K frontier
+(frame 54, recorded as `guest_stop`). Two fail closed with `z80_code_mismatch` at the driver's first frames: a local-only instrumented
+rerun (not committed) shows the mismatching code byte is a byte the Z80 itself wrote (self-modifying driver code), the case the contract
+(section 6) declares unsupported; that is the successor frontier. Build cost on the converging images: the materialization stage is 11-18 s of a
+60-115 s build (3 discovery runs, 1 confirming run, 31 Z80 units compiled over the iterations for 19 in the final emission, 5-9 s of Z80
+compile wall, 10.2-10.7 MB of generated Z80 C, 3.8-4.1 MB of Z80 objects, final executable 34-51 MB); the vendored ymfm objects add a few seconds
+once per build. Unit reuse across iterations is by content hash but adding an image renames and reshards every unit (0 reused), so the
+Z80 compile cost is the sum over iterations; a per-image emission would make it linear (not needed at the measured bound).
+
+**Falsification evidence** (`tests/genesis_z80_materialization_test.cpp` scripted runners; `tests/genesis_z80_build_pipeline_test.py`, the
+real route on project-authored ROMs): exact image counts for multi-epoch (2 images from 4 epochs incl. a plain restart and a repeated
+signature), raw vs computed ("decompressed") upload of the same bytes = one image, byte-identical Z80 C, registry and M68K C across repeats and
+worker counts (1, 4, default), bound + 1 images and bound images, instruction-budget exhaustion, self-modifying Z80 code (`z80_code_mismatch`),
+an epoch after the window (not materialized; typed `z80_unknown_image` at run time), a registry with the image removed (typed unknown image),
+one image's emitted bytes mutated (`z80_code_mismatch`), the unmodified relink as the control, and a pipeline rebuild that restores it;
+`tests/genesis_z80_forbidden_identifiers_test.py` scans the production surface against `tests/fixtures/genesis-z80-forbidden-identifiers.txt`.

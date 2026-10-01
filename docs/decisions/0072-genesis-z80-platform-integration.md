@@ -122,3 +122,9 @@ made the Sega PSG a platform-neutral device. SEG-032 must run a real Z80 image i
   generation in one deterministic order up to the target time (ADR 0074 decision 3).
 - Tests: `genesis_ym2612_device_test` (device against the Nuked-OPN2 oracle), `genesis_audio_ym_test` (real runtime, Z80 machine and shared
   device from both CPUs), `genesis_startup_runtime_ym2612_test` (port semantics, updated), `packaging_trim_zig_test`.
+
+## T008 implementation record (2026-10-01)
+
+The attached sound subsystem is linked into every Genesis program by `segarecomp build`: `genesis_sound.[ch]` is the one attach point (Z80
+machine, shared PSG, YM2612) used by the production hook, the materialization pass hook and the viewer hook (`SEGARECOMP_GENESIS_SOUND`), so
+the pass and the final program run the same machine. The pipeline, bounds and typed failures are in ADR 0073 (T008 record).

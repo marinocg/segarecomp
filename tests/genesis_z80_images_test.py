@@ -129,6 +129,18 @@ def main():
                                        extra_flags=["-I", str(root / "platforms/genesis/runtime")])
         check(exe is not None and subprocess.run([str(exe)]).returncode == 0,
               "an empty registry still links and its z80_run is the typed unknown-image outcome (%s)" % (message or "ok"))
+        # SEG-032-T008: an 8 KiB snapshot is mixed code and data. Data that decodes as an instruction with redundant prefixes (longer than
+        # the four bytes the RAM-backed guard compares) must become a typed never-run stub, not a build failure of the whole image.
+        with_prefixes = bytearray(8192)
+        with_prefixes[0:3] = b"\x00\x00\x76"                      # NOP NOP HALT: real code
+        with_prefixes[64:70] = b"\xDD\xDD\xDD\xDD\xDD\x21"       # five redundant DD prefixes before LD IX,nn: a start longer than four bytes
+        with_prefixes[8190:8192] = b"\xDD\x21"                    # an instruction that runs past the end of the 8 KiB RAM
+        written = bytearray(1024)
+        written[0] = 0xFF
+        long_spec = "epoch %s %s\n" % (bytes(with_prefixes).hex(), bytes(written).hex())
+        long_run, long_out = run_emitter(long_spec, tmp, "longstart")
+        check(long_run.returncode == 0 and "emitted ok" in long_run.stdout,
+              "a start with redundant prefixes or past the window does not fail the image (typed stub) (%s)" % long_run.stdout.strip()[-80:])
     print("genesis z80 images: %s" % ("FAILED (%d)" % len(failures) if failures else "ok"))
     return 1 if failures else 0
 

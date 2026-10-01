@@ -11,6 +11,26 @@
     "multi_epoch_dirty": {
       "sha256": "0d40f92cdb920bd4f2933383cec77baf3cb18db95bad73e70b7716cdc57e75ee",
       "size": 16384
+    },
+    "sound_decoded": {
+      "sha256": "fdc20c805185a13384271b939285963eeb939ec2dd8b276d4d6315b33afbe983",
+      "size": 16384
+    },
+    "sound_late_epoch": {
+      "sha256": "f63df333a14cba9afb5fe4802f9d30d275a68e09ec5170c774e231e41b71cb60",
+      "size": 16384
+    },
+    "sound_multi_epoch": {
+      "sha256": "d0e8c0fe5cb369cc2071d793a968f13ca6cebf2bb4a9c1a846a96c08476d8cf3",
+      "size": 16384
+    },
+    "sound_raw": {
+      "sha256": "ea75eea15e03468fc6c96a78dd7117ce3a8e2717735f8f132471375d050aa8dc",
+      "size": 16384
+    },
+    "sound_smc": {
+      "sha256": "50cf09b94e8ece9135b926ad2187a0c398dc5c3f6afcb8c330436348e58d0b63",
+      "size": 16384
     }
   },
   "schema": 1

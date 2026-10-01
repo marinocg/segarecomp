@@ -37,3 +37,15 @@ regression to one function per start, which is the defect that made the build sl
 `sms_image_emitter` accepts `--owner-group N` and `--share-bodies 0|1`. `group 1` with `share 0` is byte-identical to the
 emission before SEG-033 and is the oracle of the differential gate. `SEGARECOMP_Z80_OWNER_GROUP=<n>` pins the group size of every
 `z80_conformance.py` toolchain, so any existing Z80 test can be rerun under another bound.
+
+## Genesis: build-time Z80 materialization (SEG-032-T008)
+
+`segarecomp build` of a Genesis image adds the materialization stage (ADR 0073, T008 record): one pass-program link and one bounded headless run
+per discovered image plus the completing run and one confirming run, the Z80 C of the registry compiled with the same flags as the Master System
+build, and the vendored ymfm objects (once per build). `status.json` carries the sanitized aggregates (`z80`: images, epochs, discovery runs,
+runs, frames reached, units, units compiled/reused, generated/object/executable bytes, emit/compile/materialize milliseconds); no title, ROM
+byte, address or image hash is recorded. Authorized-workload reference (default `-O2`, cold, one workstation): 2 images, 3-5 epochs, 4 runs,
+materialization stage 11-18 s of a 60-115 s build, 10.2-10.7 MB of generated Z80 C, 3.8-4.1 MB of Z80 objects, 34-51 MB executable.
+Protection: `genesis_z80_materialization_test` (the loop against scripted runners), `genesis_z80_build_pipeline_test` (the real route with
+project-authored ROMs: exact counts, determinism across repeats and worker counts, typed failures, removal/mutation falsification) and
+`genesis_z80_forbidden_identifiers_test`.

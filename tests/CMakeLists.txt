@@ -1074,6 +1074,21 @@ segarecomp_enable_warnings(z80_image_emitter)
 add_executable(genesis_z80_registry_emitter tools/genesis_z80_registry_emitter.cpp)
 target_link_libraries(genesis_z80_registry_emitter PRIVATE segarecomp::machine_genesis_z80)
 segarecomp_enable_warnings(genesis_z80_registry_emitter)
+# SEG-032-T008 (ADR 0073): the build-time materialization fixed point against scripted pass runners.
+add_executable(genesis_z80_materialization_test genesis_z80_materialization_test.cpp)
+target_link_libraries(genesis_z80_materialization_test PRIVATE segarecomp::machine_genesis_z80)
+segarecomp_enable_warnings(genesis_z80_materialization_test)
+add_test(NAME genesis_z80_materialization_test COMMAND genesis_z80_materialization_test)
+set_property(TEST genesis_z80_materialization_test APPEND PROPERTY LABELS full fast)
+add_test(NAME genesis_z80_forbidden_identifiers_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_forbidden_identifiers_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_z80_forbidden_identifiers_test APPEND PROPERTY LABELS full fast)
+# The real consumer route end to end (fixed point, link, run, falsification): the slowest Genesis Z80 test, `full` only.
+add_test(NAME genesis_z80_build_pipeline_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_build_pipeline_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_z80_build_pipeline_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_z80_build_pipeline_test PROPERTY TIMEOUT 1500)
+set_property(TEST genesis_z80_forbidden_identifiers_test genesis_z80_build_pipeline_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 add_executable(z80_lowering_probe tools/z80_lowering_probe.cpp)
 target_link_libraries(z80_lowering_probe PRIVATE segarecomp::codegen_c11_z80)
 segarecomp_enable_warnings(z80_lowering_probe)

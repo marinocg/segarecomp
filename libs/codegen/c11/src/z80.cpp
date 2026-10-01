@@ -452,8 +452,15 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
           }
           if (image.live_bytes && c.kind == StartKind::decoded) {
             const std::uint32_t length = c.instruction.provenance.logical_byte_count;
-            if (length == 0 || length > 4 || o + length > image.bytes.size()) return fail("a RAM-backed start longer than four bytes");
-            plan.guard.assign(image.bytes.begin() + o, image.bytes.begin() + o + length);
+            if (length == 0 || length > 4 || o + length > image.bytes.size()) {
+              // The guard compares at most four static bytes. A start with redundant prefixes (data decoded as code) or one that runs past
+              // the window is never supported RAM code: it is the same typed stub as an endless prefix run, never a build failure of
+              // the whole image (the snapshot is 8 KiB of mixed code and data).
+              c.kind = StartKind::mutable_code;
+              c.blocking_address = static_cast<std::uint16_t>(w.base + o);
+            } else {
+              plan.guard.assign(image.bytes.begin() + o, image.bytes.begin() + o + length);
+            }
           }
           auto same = std::ranges::find_if(plan.variants, [&](const Variant& v) { return same_semantics(v.classification, c); });
           if (same == plan.variants.end()) {

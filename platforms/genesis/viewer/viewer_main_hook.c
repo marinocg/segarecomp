@@ -19,6 +19,9 @@
 #include "vdp_render.h"
 #include "viewer.h"
 #include "viewer_sdl3.h"
+#ifdef SEGARECOMP_GENESIS_SOUND
+#include "genesis_sound.h" /* SEG-032-T008: the sound-carrying link set of `segarecomp build` */
+#endif
 
 GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                                uint32_t dispatch_allowance);
@@ -38,6 +41,9 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
     fprintf(stderr, "viewer: malformed viewer options\n");
     exit(3);
   }
+#ifdef SEGARECOMP_GENESIS_SOUND
+  (void)genesis_sound_attach(runtime); /* the Z80 machine and the shared PSG/YM2612, identical to the headless program */
+#endif
   GenesisSdl3Viewer *sdl = genesis_sdl3_viewer_open("segarecomp Genesis viewer", 2);
   if (sdl == NULL) {
     fprintf(stderr, "viewer: SDL3 window could not be opened\n");

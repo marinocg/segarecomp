@@ -117,6 +117,22 @@ class M68k:
         self.fixups.append((len(self.words), loop + ":dbra"))
         self.w(0)
 
+    def copy_decoded_to_z80(self, program_label, length, loop, key, destination=Z80_RAM):
+        """The 'decompressed upload' shape: the 68K computes every byte it stores (here XOR with `key`), it never copies a stored image."""
+        self.w(0x41FA)  # LEA d16(PC),A0
+        self.fixups.append((len(self.words), program_label + ":pcrel"))
+        self.w(0)
+        self.w(0x43F9)
+        self.l(destination)  # LEA abs.L,A1
+        self.w(0x303C, length - 1)  # MOVE.W #n-1,D0
+        self.label(loop)
+        self.w(0x1418)  # MOVE.B (A0)+,D2
+        self.w(0x0A02, key & 0xFF)  # EORI.B #key,D2
+        self.w(0x12C2)  # MOVE.B D2,(A1)+
+        self.w(0x51C8)  # DBRA D0
+        self.fixups.append((len(self.words), loop + ":dbra"))
+        self.w(0)
+
     def data(self, program_label, payload):
         self.label(program_label)
         padded = bytes(payload) + (b"\x00" if len(payload) % 2 else b"")
@@ -334,7 +350,112 @@ def access_script(ops, programs):
     return "\n".join(lines) + "\n"
 
 
-FIXTURES = {"multi_epoch_dirty": fixture_multi_epoch_dirty, "bus_reset_probe": fixture_bus_reset_probe, "bus_reset_control": fixture_bus_reset_control}
+# --- fixtures: generated-native Z80 sound programs for the build-time materialization pass (SEG-032-T008) -------------------
+# The 68K program touches only the Z80 control registers and Z80 RAM (no work-RAM operands: the bridge's static-fact admission
+# takes long-word work-RAM moves only) and ends in a spin. Every Z80 driver is a valid program that drives the PSG and the YM2612
+# and then loops; `variant` makes distinct images (a different register value and length).
+
+def sound_driver(variant):
+    lines = [".org 0x0000", "        ld sp,0x1F00", "        ld a,%d" % (0x90 | (variant & 0x0F)), "        ld (0x7F11),a",
+             "        ld a,%d" % (0x20 + variant), "        ld (0x7F11),a"]
+    for n, (port, value) in enumerate(((0, 0x2B), (1, 0x80), (0, 0x2A), (1, 0x40 + variant), (0, 0x2A), (1, 0x80 + variant))):
+        lines += ["w%d:     ld a,(0x4000)" % n, "        add a,a", "        jr c,w%d" % n, "        ld a,%d" % value, "        ld (0x%04X),a" % (0x4000 + port)]
+    lines += ["        nop"] * variant
+    lines += ["loop:   jr loop"]
+    return z80("\n".join(lines) + "\n")
+
+
+def sound_smc_driver():
+    """A Z80 program that overwrites the byte of its own next instruction: outside every 68K-written extent's identity, so the
+    RAM-backed code guard (z80_code_mismatch), not the signature, must catch it."""
+    return z80(".org 0x0000\n        ld sp,0x1F00\n        ld a,0x3C\n        ld (patch),a\npatch:  nop\nloop:   jr loop\n")
+
+
+def build_sound(plan, programs):
+    m = M68k()
+    # Prologue: MOVEQ #0,D0 / BEQ.W real / RESET. The 68K translator's startup prefix admits only a handful of operations and
+    # takes over the whole flow when no instruction it cannot model is reachable; the (never executed) RESET fallthrough is such an
+    # instruction, so everything from `real` on is compiled by the immutable-ROM AOT like any commercial program.
+    m.w(0x7000)
+    m.branch(0x67, "real")
+    m.w(0x4E70)
+    m.label("real")
+    waits = 0
+    uploads = {}
+    for kind, arg in plan:
+        if kind == "delay":
+            m.delay(arg, "delay_%d" % len(m.words))
+            continue
+        m.move_w_imm(0x0100, Z80_BUSREQ)
+        m.move_w_imm(0x0100, Z80_RESET)
+        waits += 1
+        m.label("ack_%d" % waits)
+        m.btst0(Z80_BUSREQ)
+        m.branch(0x66, "ack_%d" % waits)
+        if kind in ("raw", "decoded"):
+            program = programs[arg]
+            uploads[arg] = program
+            if kind == "raw":
+                m.copy_to_z80("prog_" + arg, len(program), "cp_%d" % len(m.words))
+            else:
+                m.copy_decoded_to_z80("enc_" + arg, len(program), "dec_%d" % len(m.words), 0x5A)
+        m.move_w_imm(0x0000, Z80_RESET)
+        m.move_w_imm(0x0000, Z80_BUSREQ)
+        m.move_w_imm(0x0100, Z80_RESET)
+    m.label("spin")
+    m.branch(0x60, "spin")
+    for name in sorted(uploads):
+        kinds = {k for k, a in plan if a == name}
+        if "raw" in kinds:
+            m.data("prog_" + name, uploads[name])
+        if "decoded" in kinds:
+            m.data("enc_" + name, bytes(b ^ 0x5A for b in uploads[name]))
+    return build_rom(m.resolve())
+
+
+MAX_IMAGES_FOR_TESTS = 8  # the production image bound (platforms/genesis/machine z80_images.hpp kMaxImages); the bound test uses it and +1
+
+SOUND_DELAY = 20000  # 68K iterations between epochs (about 280k M68K cycles, a few frames)
+
+
+def fixture_sound_raw():
+    return build_sound([("raw", "a")], {"a": sound_driver(1)})
+
+
+def fixture_sound_multi_epoch():
+    """A, B, a plain restart, A again (the same activation signature as the first epoch): 4 epochs, exactly 2 images."""
+    return build_sound([("raw", "a"), ("delay", SOUND_DELAY), ("raw", "b"), ("delay", SOUND_DELAY), ("restart", None),
+                        ("delay", SOUND_DELAY), ("raw", "a")], {"a": sound_driver(1), "b": sound_driver(2)})
+
+
+def fixture_sound_decoded():
+    """A raw upload and a computed (XOR-decoded) upload of the same driver bytes: identical activation signature, one image."""
+    return build_sound([("raw", "a"), ("delay", SOUND_DELAY), ("decoded", "a")], {"a": sound_driver(3)})
+
+
+def sound_many(count):
+    """`count` distinct drivers uploaded in turn: exactly `count` images (the bound test uses bound and bound + 1)."""
+    plan = []
+    programs = {}
+    for k in range(count):
+        plan += [("raw", "d%d" % k), ("delay", 4000)]
+        programs["d%d" % k] = sound_driver(k + 1)
+    return build_sound(plan[:-1], programs)
+
+
+def fixture_sound_smc():
+    return build_sound([("raw", "s")], {"s": sound_smc_driver()})
+
+
+def fixture_sound_late_epoch():
+    """A second, different driver is uploaded only after the observation window: the build sees one image, the second epoch
+    surfaces at run time as the typed z80_unknown_image."""
+    return build_sound([("raw", "a"), ("delay", 0x600000), ("raw", "b")], {"a": sound_driver(1), "b": sound_driver(2)})
+
+
+FIXTURES = {"multi_epoch_dirty": fixture_multi_epoch_dirty, "bus_reset_probe": fixture_bus_reset_probe, "bus_reset_control": fixture_bus_reset_control,
+            "sound_raw": fixture_sound_raw, "sound_multi_epoch": fixture_sound_multi_epoch, "sound_decoded": fixture_sound_decoded,
+            "sound_smc": fixture_sound_smc, "sound_late_epoch": fixture_sound_late_epoch}
 
 
 def build(name):

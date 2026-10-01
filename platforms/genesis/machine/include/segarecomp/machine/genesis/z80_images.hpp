@@ -28,7 +28,8 @@ namespace segarecomp::machine::genesis::z80 {
 inline constexpr std::size_t kRamBytes = 8192;
 inline constexpr std::size_t kWindowBytes = 0x4000;  // two mirrors of the sound RAM: the Z80 code window $0000-$3FFF
 inline constexpr std::size_t kBitmapBytes = kRamBytes / 8;
-// The materialization pass's finite image bound (ADR 0073; frozen from the measured workloads by SEG-032-T008).
+// The materialization pass's finite image bound (ADR 0073, frozen by SEG-032-T008: the authorized workloads show at most 2 images;
+// the bound is 4x that, and the ceiling kMaxImagesCeiling of z80_materialization.hpp is 16).
 inline constexpr std::size_t kMaxImages = 8;
 
 using Digest = std::array<std::uint8_t, 32>;
