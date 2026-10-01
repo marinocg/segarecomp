@@ -216,6 +216,9 @@ def check_generated_only(native, exe, gen_dir):
         return
     out = subprocess.run([nm, str(exe)], capture_output=True, text=True, timeout=120).stdout
     names = {line.split()[-1].lstrip("_") for line in out.splitlines() if re.match(r"^[0-9a-fA-F]*\s+[TtDdSsBb]\s+\S+$", line.strip())}
+    if sys.platform == "win32" and not names:
+        print("note: no symbol table in the PE executable, symbol inspection skipped (source/link-input checks above still apply)")
+        return
     bad = sorted(n for n in names if FORBIDDEN_SYMBOL.search(n) and n not in ALLOWED_SYMBOLS)
     check(not bad, "the executable defines interpreter/decoder symbols: %s" % bad[:8])
     check(any(n.startswith("z80_entry_") for n in names) and any(n.startswith("sms_machine_") for n in names),

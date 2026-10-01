@@ -54,7 +54,7 @@ def expect_failure(tmp, name, rom, *extra, stage="analyze", code=1, diagnostic=N
     if diagnostic:
         check(st.get("diagnostic") == diagnostic, "%s: diagnostic %s, expected %s" % (name, st.get("diagnostic"), diagnostic))
     check(all(w in st.get("message", "") for w in words), "%s: message lacks %s: %s" % (name, words, st.get("message")))
-    check(not (out / "generated").exists() and not (out / "game").exists(), "%s: generated C or an executable exists" % name)
+    check(not (out / "generated").exists() and not (out / "game").exists() and not (out / "game.exe").exists(), "%s: generated C or an executable exists" % name)
     check((out / "build.log").is_file() and "FAILED" in (out / "build.log").read_text(), "%s: build.log lacks the failure" % name)
 
 
@@ -85,7 +85,7 @@ def main():
         check("platform=master-system" in log and "mapper=sega" in log and "mapper_declaration_source=build_option" in log and
               "profile=sms2_ntsc_export" in log and "rom_sha256=" + digest in log, "build.log provenance")
         check(not (out / "obj").exists(), "intermediate objects must be removed")
-        exe = out / "game"
+        exe = out / ("game.exe" if sys.platform == "win32" else "game")
         check(exe.is_file(), "no executable")
 
         native = c.Native(EMITTER, CC, ROOT, tmp)

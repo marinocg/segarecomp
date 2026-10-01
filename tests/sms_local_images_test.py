@@ -61,7 +61,7 @@ def main():
             if r.returncode != 0:
                 continue
             used += 1
-            rc, st, d1, art = run(out / "game", tmp / ("r1_%d" % n))
+            rc, st, d1, art = run(out / ("game.exe" if sys.platform == "win32" else "game"), tmp / ("r1_%d" % n))
             check(rc == 0 and st["stop"] == "frame" and st["sms_error"] == "SMS_OK" and st["frames_completed"] == FRAMES,
                   "%s: did not sustain %d frames: %s" % (digest[:12], FRAMES, st))
             frames = [l.split()[3] for l in (art / "frames.txt").read_text().splitlines()]
@@ -71,9 +71,9 @@ def main():
             check(len((art / "mapper.trace").read_text().splitlines()) >= min_writes, "%s: no bank switching" % digest[:12])
             pcm = (art / "audio.pcm").read_bytes()
             check(any(pcm), "%s: PCM silent" % digest[:12])
-            _, _, d2, _ = run(out / "game", tmp / ("r2_%d" % n))
+            _, _, d2, _ = run(out / ("game.exe" if sys.platform == "win32" else "game"), tmp / ("r2_%d" % n))
             check(d1 == d2, "%s: two runs differ" % digest[:12])
-            _, _, d3, _ = run(out / "game", tmp / ("r3_%d" % n), "--slice-cycles", "997")
+            _, _, d3, _ = run(out / ("game.exe" if sys.platform == "win32" else "game"), tmp / ("r3_%d" % n), "--slice-cycles", "997")
             check(d1 == d3, "%s: slice split changes the state digest" % digest[:12])
     print("sms local images: %d used, %d failures" % (used, len(failed)))
     return 1 if failed else 0
