@@ -1,6 +1,6 @@
 /* Machine-neutral Z80 generated-code runtime ABI (SEG-008-T003; ADR 0058 sections 3-7, ADR 0059).
  *
- * Plain C11, no machine policy. Generated owners (one C function per instruction start) include this header and
+ * Plain C11, no machine policy. Generated owners include this header and
  * the platform that hosts a generated program supplies a `Z80Host`. It declares:
  *   - the Z80 state structure, including the explicit in-prefix-run bit and the internal state bits;
  *   - memory read/write and I/O in/out callbacks, interrupt acknowledge callback;
@@ -98,8 +98,11 @@ typedef struct Z80Runtime {
   Z80Outcome outcome;
 } Z80Runtime;
 
-/* An owner executes one instruction start and returns the next owner to run (direct binding, statically invariant
- * windows only) or a null reference to return to the dispatcher with `state.pc` set. */
+/* Every instruction start has an exact generated entry. An owner is one generated function holding a bounded set of exact entries
+ * (ADR 0071); it selects the active entry from PC (absolute-PC owners) or PC - window base (window-relative owners). It executes
+ * one or more directly chained entries, running the ordinary boundary prologue before every instruction, and returns the next
+ * owner to run (direct binding, statically invariant windows only) or a null reference to return to the dispatcher with
+ * `state.pc` set. */
 struct Z80OwnerRef;
 typedef struct Z80OwnerRef (*Z80Owner)(struct Z80Runtime *rt, uint16_t window_base);
 struct Z80OwnerRef {

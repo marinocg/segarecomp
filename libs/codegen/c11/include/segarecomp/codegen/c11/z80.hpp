@@ -84,6 +84,8 @@ struct EmitOptions {
   std::size_t owner_group_entries = kOwnerGroupEntries;  // >= 1; tests and the differential gate pin 1 (reference) vs N
 };
 
+// full_/prefix_lock_/stub_owners, variant_owners and bound_successors are legacy names: they count exact entries. `entries` is the
+// entry-table size and `owners` the number of host owner functions.
 struct EmitStats {
   std::size_t shared_bodies = 0;     // distinct shared effect functions
   std::size_t entries = 0;           // exact starts with an owner binding (the entry-table size)
