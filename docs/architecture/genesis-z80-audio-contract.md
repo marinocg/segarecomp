@@ -161,6 +161,10 @@ Two separate quantities are derived at the runnable transition:
   resume), i.e. while the Z80 was not executing. Consequently it contains the uploaded image and anything else the 68K
   wrote in the same hold, and it excludes: 68K command/mailbox writes made in earlier holds (before the Z80 last ran),
   every Z80-written byte, and the power-on fill. A write that stores the byte already present still counts as written.
+  **Empty hold window** (a plain Z80 restart: reset pulse and release with no 68K write to Z80 RAM): the signature is the one
+  bound by the previous epoch (the Z80 restarts the code already in RAM); at the first epoch an empty window means the
+  zero-filled RAM, which is itself materialized as an image. (Observed on an authorized workload: a restart epoch with
+  zero written bytes occurs between two uploads.)
   The matching rule: the first registered image (registry order) whose signature equals the computed one is bound; a
   signature shared by two registered images with different content hashes is a build failure (`z80_signature_collision`).
 - **Rejected definitions (T002 negative controls):** the whole 8 KiB RAM (varies with carry-over and fill: five images

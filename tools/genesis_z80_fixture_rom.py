@@ -268,7 +268,8 @@ def multi_epoch_ops():
     and as a raw 68K access script for the runtime-level harness (`access_script`). Epochs (each: BUSREQ, upload, /RESET pulse,
     BUSREQ cancel, /RESET release), with 68K 'command' writes into the mailbox area during separate holds between them:
       1: X over a clean mailbox        2: X again, mailbox dirty (A)     3: Y (different code), mailbox dirty (A)
-      4: X again, mailbox dirty (B)    5: X' (one code byte changed), mailbox dirty (B)"""
+      4: X again, mailbox dirty (B)    5: X' (one code byte changed), mailbox dirty (B)
+      6: a plain Z80 restart: reset pulse with no upload at all (the Z80 runs the code already in RAM)"""
     ops = []
 
     def epoch(program):
@@ -287,6 +288,7 @@ def multi_epoch_ops():
     dirty(0xB0)
     epoch("x")
     epoch("x2")
+    ops.extend([("busreq", 1), ("reset", 1), ("wait_ack",), ("reset", 0), ("busreq", 0), ("reset", 1)])  # epoch 6
     return ops
 
 

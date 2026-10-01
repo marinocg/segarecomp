@@ -116,9 +116,10 @@ GenesisControlTransfer genesis_z80_epoch_probe_hook_run(GenesisRuntime *runtime,
     if (runtime->scheduler.master_ticks >= window_ticks) { outcome = "window_complete"; break; }
   }
   runtime->z80_epoch_observer = NULL;
-  fprintf(stderr, "EPOCH_PROBE_SUMMARY {\"outcome\":\"%s\",\"window_frames\":%llu,\"virtual_frames\":%llu,\"dispatches\":%llu,"
-                  "\"fill\":%llu,\"epochs\":[",
-          outcome, (unsigned long long)frames,
+  fprintf(stderr, "EPOCH_PROBE_SUMMARY {\"outcome\":\"%s\",\"stop_class\":%d,\"diagnostic\":%d,\"window_frames\":%llu,"
+                  "\"virtual_frames\":%llu,\"dispatches\":%llu,\"fill\":%llu,\"epochs\":[",
+          outcome, transfer.kind == GENESIS_STOP ? (int)transfer.stop.stop_class : 0,
+          transfer.kind == GENESIS_STOP ? (int)transfer.stop.diagnostic_category : 0, (unsigned long long)frames,
           (unsigned long long)(runtime->scheduler.master_ticks / GENESIS_NTSC_MASTER_TICKS_PER_FRAME),
           (unsigned long long)dispatches, (unsigned long long)fill);
   for (index = 0U; index < state.count; ++index)

@@ -65,10 +65,18 @@ Generic epoch observer in the Genesis runtime (`GenesisZ80EpochObserver`, option
 `platforms/genesis/viewer/z80_epoch_probe_main_hook.c` (mirrors the execution-coverage seam; bridge option `--z80-epoch-probe`).
 Authorized-workload aggregates (zero input, quick profile, 600 virtual frames, power-on fill 0):
 
-| workload | epochs | virtual frames of the epochs | notes |
-| --- | --- | --- | --- |
-| Sonic 1 (authorized) | 3 | 0, 59, 348 | epoch 1 a 38-byte stub upload; epochs 2 and 3 a 7,110-byte image; the two images differ in exactly one byte outside the uploaded extent (carry-over data): content hash 3 classes, signature 2 classes |
-| Sonic 2 (authorized) | 2 | 0, 113 | 38-byte stub, then a 4,872-byte image |
+| workload (all six authorized local images) | epochs | restart epochs (empty hold window) | images (signature classes) | notes |
+| --- | --- | --- | --- | --- |
+| Sonic 1 | 3 | 0 | 2 | epoch 1 a 38-byte stub upload at frame 0; epochs 2 and 3 a 7,110-byte image at frames 59 and 348 that differ in exactly one byte outside the uploaded extent (carry-over data): content hash 3 classes, signature 2 |
+| Sonic 2 | 2 | 0 | 2 | 38-byte stub, then a 4,872-byte image at frame 113 |
+| Golden Axe | 3 | 0 | 2 | stub, then two 8,192-byte uploads at frames 46 and 48; then an unrelated M68K stop (`known_but_unemitted_target`) at frame 54 |
+| Streets of Rage | 4 | 1 | 2 | stub, a restart at frame 53, a 7,883-byte image at frames 60 and 74 |
+| Cool Spot | 3 | 1 | 2 | stub, a restart at frame 2, an 8,192-byte upload at frame 4 |
+| OutRun | 5 | 3 | 2 | stub, a 5,050-byte image at frame 80, three restarts (frames 80, 262, 597) |
+
+Every image set is a tiny boot stub plus at most one driver image: **maximum 2 images per workload**, 2-5 epochs. All six reach their first epoch within the first frame
+and their driver image within 113 frames. Restart epochs (reset pulse with no 68K write to Z80 RAM) are common (3 of 6 workloads), which is why an empty hold window re-binds
+the previously bound image (contract §7) instead of creating an image.
 
 Caveats recorded honestly:
 - The 600-frame window is long enough for the boot-time handoffs of both workloads; epoch 3 of Sonic 1 appears in this seam, where
@@ -79,6 +87,6 @@ Caveats recorded honestly:
   3.2-4.1 MB of C, 0.8-1.1 MB of objects, 0.2 s emit and 0.6-1.0 s strict-C11 `-O2` compile wall on 8 jobs per image; three repeated
   derivations are byte-identical. The cost of one more image is therefore about a second; the image bound is driven by correctness,
   not by build time.
-- Proposed constants (frozen by T008 after the executing-Z80 re-run): image bound 8 (observed maximum 3; rule: at least 2x the
-  maximum observed, at most 16), observation window 600 virtual frames, per-run instruction budget 400,000,000 retired dispatches
+- Proposed constants (frozen by T008 after the executing-Z80 re-run): image bound 8 (observed maximum 2 images, 5 epochs; rule: at least 2x the
+  maximum observed, at most 16), observation window 600 virtual frames (the last epoch observed anywhere is at frame 597, a restart; Sonic 1's driver reload at 348), per-run instruction budget 400,000,000 retired dispatches
   (the observed runs used 2.3-6.3 M), per-run wall timeout 120 s, loop iterations at most bound + 1.

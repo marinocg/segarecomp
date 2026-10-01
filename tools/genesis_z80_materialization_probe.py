@@ -59,6 +59,15 @@ def signature(ram, written):
     return digest.hexdigest()
 
 
+def effective_signatures(epochs):
+    """The signature the runtime binds per epoch: S1* of the hold window, or the previously bound signature when the 68K
+    wrote nothing (a plain restart of the code already in RAM). `epochs` is [(ram, written bitmap)]."""
+    out = []
+    for ram, written in epochs:
+        out.append(signature(ram, written) if extents(written) else (out[-1] if out else signature(ram, written)))
+    return out
+
+
 def image_spec(ram, group=None):
     """The `z80_image_emitter` spec of one materialized image: one invariant window `$0000-$3FFF` (two mirrors)."""
     text = "image 1 invariant\nwindow 1 0000 0 4000\n"
@@ -113,10 +122,11 @@ def load_epochs(directory):
 def derive(args):
     epochs = load_epochs(args.dir)
     out = {"epochs": len(epochs), "signature_classes": None, "content_classes": None, "images": []}
-    sigs = [signature(r, w) for r, w in epochs]
+    sigs = effective_signatures(epochs)
     hashes = [content_hash(r) for r, _ in epochs]
     out["signature_classes"] = len(set(sigs))
     out["content_classes"] = len(set(hashes))
+    out["restart_epochs"] = sum(1 for _, w in epochs if not extents(w))
     out["written_extent_counts"] = [len(extents(w)) for _, w in epochs]
     out["written_bytes"] = [sum(length for _, length in extents(w)) for _, w in epochs]
     out["nonzero_bytes"] = [sum(1 for b in r if b) for r, _ in epochs]

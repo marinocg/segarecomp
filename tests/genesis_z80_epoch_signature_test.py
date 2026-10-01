@@ -5,6 +5,7 @@ A raw 68K access script (rendered from the same backend-neutral operations as th
 replayed through genesis_route_access with the generic Z80 image-epoch observer installed. Five epochs occur:
   1 X over a clean mailbox   2 X again, mailbox dirty (A)   3 Y (different code), mailbox dirty (A)
   4 X again, mailbox dirty (B)   5 X' (one code byte changed), mailbox dirty (B)
+  6 a plain Z80 restart (reset pulse, no upload): the hold window is empty, so the epoch re-binds the image bound before it
 Proved here:
   * the activation signature S1* (the 68K-written extents of the hold window) selects X for epochs 1, 2 and 4 (identical
     despite different carry-over data and different power-on fills), Y for 3 and X' for 5 (three classes);
@@ -104,15 +105,16 @@ def main():
         script.write_text(script_text)
         runs = {fill: run_harness(binary, script, fill) for fill in (0x00, 0xFF, 0xA5)}
         base = runs[0x00]
-        check(all(len(r) == 5 for r in runs.values()), "five epochs under every power-on fill")
+        check(all(len(r) == 6 for r in runs.values()), "six epochs under every power-on fill")
         expected = [bitmap for bitmap in model(lines)]
-        check(len(expected) == 5 and all(bitmap_set(base[i][1]) == expected[i] for i in range(5)),
+        check(len(expected) == 6 and all(bitmap_set(base[i][1]) == expected[i] for i in range(6)),
               "runtime hold-window bitmap equals the independent model for every epoch")
-        sigs = {fill: [probe.signature(r, w) for r, w in eps] for fill, eps in runs.items()}
-        check(classes(sigs[0x00]) == [0, 0, 1, 0, 2], "S1* classes X X Y X X' (three images)")
+        sigs = {fill: probe.effective_signatures(eps) for fill, eps in runs.items()}
+        check(classes(sigs[0x00]) == [0, 0, 1, 0, 2, 2], "S1* classes X X Y X X' X' (three images; the empty hold window re-binds the previous image)")
+        check(not probe.extents(base[5][1]), "epoch 6 has an empty hold window")
         check(all(sigs[f] == sigs[0x00] for f in sigs), "S1* is identical under every power-on fill")
         content = {fill: [probe.content_hash(r) for r, _ in eps] for fill, eps in runs.items()}
-        check(classes(content[0x00]) == [0, 1, 2, 3, 4], "content hash differs for every epoch (carry-over data, X' code)")
+        check(classes(content[0x00]) == [0, 1, 2, 3, 4, 4], "content hash differs for every epoch that changed RAM (carry-over data, X' code); a plain restart changes nothing")
         check(all(content[f][0] != content[0x00][0] for f in content if f != 0x00), "content hash differs per power-on fill")
         check(len({r[:96] for r, _ in base[:1] + base[1:2] + base[3:4]}) == 1, "epochs 1, 2, 4 upload identical code bytes")
         # carry-over is outside the signature: mailbox bytes differ while the signature does not
@@ -123,7 +125,7 @@ def main():
               "a one-byte code change and different code change the signature")
         # negative controls: the discarded definitions fail the same assertions
         whole = [probe.content_hash(r) for r, _ in base]
-        check(classes(whole) != [0, 0, 1, 0, 2], "control: whole-RAM identity is NOT insensitive to carry-over data (rejected)")
+        check(classes(whole) != [0, 0, 1, 0, 2, 2], "control: whole-RAM identity is NOT insensitive to carry-over data (rejected)")
         since = model(lines, "since_assertion")
         collide = classes([frozenset(s) for s in since])
         check(since and all(not s for s in since) and len(set(collide)) == 1,
