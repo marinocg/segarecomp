@@ -45,6 +45,37 @@ def cmake_block(text, target):
     return m.group(1).split() if m else []
 
 
+# ADR 0072 layering amendment (SEG-032): the Genesis machine Z80 image registry/materialization may use exactly the Z80
+# emitter header and target. Every other codegen reference (common, M68k, Genesis wrapper) stays forbidden.
+ALLOWED_MACHINE_CODEGEN_INCLUDE = "segarecomp/codegen/c11/z80.hpp"
+ALLOWED_MACHINE_CODEGEN_TARGET = "segarecomp::codegen_c11_z80"
+
+
+def machine_include_failures(name, incs):
+    return [f"genesis machine {name} includes {i}" for i in incs
+            if "codegen/c11" in i and i != ALLOWED_MACHINE_CODEGEN_INCLUDE]
+
+
+def machine_cmake_failures(text):
+    stripped = text.replace(ALLOWED_MACHINE_CODEGEN_TARGET, "")
+    return ["genesis machine CMake references codegen"] if "codegen" in stripped else []
+
+
+def negative_controls():
+    bad = []
+    for inc in ("segarecomp/codegen/c11/genesis.hpp", "segarecomp/codegen/c11/m68k.hpp", "segarecomp/c_emitter.hpp/codegen/c11/x"):
+        if not machine_include_failures("x.hpp", [inc]):
+            bad.append(f"negative control: include {inc} not rejected")
+    if machine_include_failures("x.hpp", [ALLOWED_MACHINE_CODEGEN_INCLUDE]):
+        bad.append("negative control: allowed Z80 include rejected")
+    for t in ("target_link_libraries(a PUBLIC segarecomp::codegen_c11_genesis)",
+              "target_link_libraries(a PUBLIC segarecomp::codegen_c11)",
+              "target_link_libraries(a PUBLIC segarecomp::codegen_c11_m68k)"):
+        if not machine_cmake_failures(t):
+            bad.append(f"negative control: link {t} not rejected")
+    return bad
+
+
 def main():
     failures = []
     for path in COMMON_FILES:
@@ -63,11 +94,9 @@ def main():
             failures.append(f"{path.name}:{line} contains platform vocabulary {m.group(0)!r}")
     machine = ROOT / "platforms" / "genesis" / "machine"
     for path in list(machine.rglob("*.hpp")) + list(machine.rglob("*.cpp")):
-        for inc in includes(path):
-            if "codegen/c11" in inc:
-                failures.append(f"genesis machine {path.name} includes {inc}")
-    if "codegen" in (machine / "CMakeLists.txt").read_text():
-        failures.append("genesis machine CMake references codegen")
+        failures += machine_include_failures(path.name, includes(path))
+    failures += machine_cmake_failures((machine / "CMakeLists.txt").read_text())
+    failures += negative_controls()
     for path in WRAPPER_FILES:
         if not path.exists():
             failures.append(f"missing wrapper file {path}")

@@ -174,3 +174,11 @@ structure the public explanatory descriptions of these sound drivers give; no da
 not byte or sample agreement. The Nuked-OPN2/ymfm agreement already recorded for T007 (`genesis_ym2612_device_test`, oracle smoke) was rerun
 and passes. The packaged-Zig `zig c++` compile of ymfm was not tested (no bundled zig in this environment).
 Forbidden-identifier scan (`genesis_z80_forbidden_identifiers_test`) passes.
+
+## Layering amendment (SEG-032)
+
+`codegen_c11_layering_test` (SEG-018-T004) forbade every codegen reference from the Genesis machine. The machine Z80 image registry and
+build-time materialization (ADR 0073) must call the Z80 emitter, exactly as the Master System machine already does. The rule is amended
+narrowly: the Genesis machine may include `segarecomp/codegen/c11/z80.hpp` and link `segarecomp::codegen_c11_z80` only. `codegen_c11_z80`
+depends only on `codegen_c11` and `cpu_z80`, so no cycle arises. The common, M68k and Genesis-wrapper codegen headers and targets stay
+forbidden for the machine, and the test carries negative controls proving those are still rejected.
