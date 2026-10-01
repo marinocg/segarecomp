@@ -1096,6 +1096,17 @@ set_property(TEST cpu_z80_dependency_test z80_capability_ratchet_test codegen_c1
 # The harness self-test compiles several generated images and expands ~90k row vectors: `full` only (CI runs it there).
 set_property(TEST z80_conformance_harness_test APPEND PROPERTY LABELS full)
 # SEG-008-T008: per-form/per-outcome T-state validation and the deadline/resume property (oracle comparison skips cleanly).
+# SEG-033-T003: grouped Z80 owners are observably identical to the one-function-per-start reference (group size 1).
+add_test(NAME z80_owner_group_differential_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_owner_group_differential_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} quick)
+set_property(TEST z80_owner_group_differential_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST z80_owner_group_differential_test APPEND PROPERTY LABELS full)
+set_property(TEST z80_owner_group_differential_test APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
+add_test(NAME z80_owner_group_differential_test_forms COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_owner_group_differential_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} full)
+set_property(TEST z80_owner_group_differential_test_forms APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST z80_owner_group_differential_test_forms APPEND PROPERTY LABELS extended)
+set_property(TEST z80_owner_group_differential_test_forms APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
 add_test(NAME z80_timing_closure_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/z80_timing_closure_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST z80_timing_closure_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
