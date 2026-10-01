@@ -23,6 +23,29 @@ static void collect(void *context, uint64_t first, const int16_t *samples, uint3
   for (i = 0; i < count; ++i) printf("%d\n", (int)samples[i]);
 }
 
+/* Portable whitespace-separated token reader (avoids the deprecated MSVC-CRT scanf). */
+static int read_token(char *out, size_t cap) {
+  size_t n = 0;
+  int c = getchar();
+  while (c == ' ' || c == '\t' || c == '\n' || c == '\r') c = getchar();
+  if (c == EOF) return 0;
+  while (c != EOF && c != ' ' && c != '\t' && c != '\n' && c != '\r') {
+    if (n + 1 >= cap) return 0;
+    out[n++] = (char)c;
+    c = getchar();
+  }
+  out[n] = '\0';
+  return 1;
+}
+
+static int read_u64(unsigned long long *v) {
+  char tok[32];
+  char *end = NULL;
+  if (!read_token(tok, sizeof tok)) return 0;
+  *v = strtoull(tok, &end, 10);
+  return end != tok && *end == '\0';
+}
+
 int main(int argc, char **argv) {
   Sn76489Config config = sn76489_default_config();
   static uint16_t bad_table[16];
@@ -30,6 +53,7 @@ int main(int argc, char **argv) {
   char kind[8];
   unsigned long long a;
   unsigned b;
+  unsigned long long bv;
   int i;
   Sn76489 chip;
   for (i = 1; i < argc; ++i) {
@@ -42,12 +66,13 @@ int main(int argc, char **argv) {
       config.levels = bad_table;
     } else mode = argv[i];
   }
-  while (scanf("%7s %llu", kind, &a) == 2) {
+  while (read_token(kind, sizeof kind) && read_u64(&a)) {
     if (strcmp(kind, "end") == 0) {
       end_cycles = a;
       break;
     }
-    if (scanf("%u", &b) != 1 || write_count >= sizeof writes / sizeof writes[0]) return 2;
+    if (!read_u64(&bv) || write_count >= sizeof writes / sizeof writes[0]) return 2;
+    b = (unsigned)bv;
     writes[write_count].cycles = a;
     writes[write_count++].value = b;
   }
