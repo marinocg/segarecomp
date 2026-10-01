@@ -128,3 +128,49 @@ made the Sega PSG a platform-neutral device. SEG-032 must run a real Z80 image i
 The attached sound subsystem is linked into every Genesis program by `segarecomp build`: `genesis_sound.[ch]` is the one attach point (Z80
 machine, shared PSG, YM2612) used by the production hook, the materialization pass hook and the viewer hook (`SEGARECOMP_GENESIS_SOUND`), so
 the pass and the final program run the same machine. The pipeline, bounds and typed failures are in ADR 0073 (T008 record).
+
+## T010 implementation record (2026-10-02): authorized real-software bring-up (sanitized aggregates only)
+
+Route: `segarecomp build` only (default Genesis route, `--optimize 0`), then the produced program under `--instruction-budget 100000000` and a
+wall-clock limit, with the opt-in `SEGARECOMP_SOUND_SUMMARY` / `SEGARECOMP_AUDIO_PCM_OUT` environment. No title-specific production input.
+The only production change is counts-only evidence: the summary gained a `classes` object (Z80 `/RESET` and BUSREQ edges, Z80 bank-register
+writes and banked-window reads, YM2612 write classes: DAC data, DAC enable, key on/off, timer/mode, global, channel/operator, address port).
+It does not alter emulation, ordering or the PCM artifact.
+
+| Aggregate | Workload A (primary) | Workload B (second) |
+| --- | --- | --- |
+| Build result / stage | ok / done | ok / done |
+| Materialized images, epochs in pass | 2 images, 3 epochs | 2 images, 4 epochs |
+| Convergence | 3 discovery runs, 4 runs total, window complete (600 frames) | same |
+| Build wall time (`--jobs 4` / `--jobs 1`) | 42-53 s / 107 s | 45 s (default jobs) |
+| Z80 generated C / objects / final executable | 10.5 MB / 5.1 MB / 69 MB | 10.7 MB / 5.2 MB / 65 MB |
+| Z80 emit / compile / materialize time | 0.6-0.8 s / 2-7 s / 13-21 s | 1.1 s / 3 s / 18 s |
+| Run (budget 1e8 dispatches) | 10,471 virtual frames, budget end, no typed stop | 8,709 frames, budget end, no typed stop |
+| Epochs in run / `/RESET` assert+release | 6 / 7+8 | 6 / 6+7 |
+| BUSREQ assert+release | 19,708+19,708 | 61,435+61,435 |
+| Bank-register writes / banked-window reads | 45 / 108,000 | 36 / 18,129 |
+| PSG writes | 11,489 | 21,031 |
+| YM2612 writes (total) | 2,262,230 | 1,382,920 |
+| YM class: DAC data / DAC enable / key / timer / operator / global / address | 1,104,438 / 413 / 5,561 / 8 / 20,695 / 0 / 1,131,115 | 652,487 / 515 / 12,611 / 530 / 25,307 / 10 / 691,460 |
+| PCM | 44,100 Hz stereo s16, non-silent, fault 0, clipped 0 | non-silent, fault 0, clipped 0 |
+| PCM level class | RMS about 0.07 of full scale, peak below 0.65 | RMS about 0.05, peak below 0.36 |
+| Digest repeat | identical across 3 runs x 2 worker counts (6/6) | identical across 3 runs (same executable) |
+
+A third workload (also a build with 2 images, 5 epochs, 13 run epochs) built and ran to the budget with the same result classes (non-silent,
+no fault). The generated Z80 C and registry did not depend on the worker count (digest identical for `--jobs 1` and `--jobs 4`).
+
+Unsupported / typed cases observed (none fixed, per the residual-sweep rule):
+- One workload stops the *M68K* generated-native program at frame 54 with `known_but_unemitted_target` (an M68K reachability frontier, class 3:
+  a non-Z80 frontier, owner = M68K analysis/emission, not widened here). Its Z80 pass converged (2 images) and its audio before the stop is
+  deterministic and silent-valid.
+- Two workloads (per the T008 record; not re-run here) fail closed in the build with `z80_code_mismatch` (the Z80 driver rewrites its own code; contract section 6 unsupported).
+- Z80 reads of work-RAM through the banked window remain `z80_bank_target_unsupported` (open fact U3); not reached by any workload here.
+Residual sweep: no new Z80/audio-owner defect was found, so no iteration was spent; no classification 3 contradiction of the approved Z80
+architecture arose.
+
+Reference comparison (after the fact, classes only): the observed structure (a boot-time driver upload/reset epoch, DAC streaming from the
+banked window with bank writes before sample fetches, key-on/operator programming, and a second epoch after the driver restart) is the
+structure the public explanatory descriptions of these sound drivers give; no data came from any reference. This is a plausibility class,
+not byte or sample agreement. The Nuked-OPN2/ymfm agreement already recorded for T007 (`genesis_ym2612_device_test`, oracle smoke) was rerun
+and passes. The packaged-Zig `zig c++` compile of ymfm was not tested (no bundled zig in this environment).
+Forbidden-identifier scan (`genesis_z80_forbidden_identifiers_test`) passes.

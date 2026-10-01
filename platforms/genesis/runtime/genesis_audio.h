@@ -31,6 +31,10 @@ typedef struct GenesisAudio {
   uint64_t psg_writes;           /* bytes delivered to the device from either CPU */
   uint64_t psg_data_before_latch;/* bytes the device ignored because no register was latched yet */
   uint64_t ym_writes;            /* YM2612 port writes delivered from either CPU */
+  /* YM2612 data-write classes (SEG-032-T010 aggregate evidence): DAC data ($2A), DAC enable ($2B), key on/off ($28), timer/mode
+   * ($24-$27), global/LFO (<$24, $22 etc.), channel/operator ($30+), address-port writes. Counts only. */
+  uint64_t ym_class_dac, ym_class_dac_enable, ym_class_key, ym_class_timer, ym_class_global, ym_class_operator, ym_class_address;
+  uint8_t ym_latched[2];
   uint64_t ym_samples;           /* native stereo samples generated so far */
   uint64_t ym_sample_fnv;        /* FNV-1a 64 over the native sample stream (determinism evidence) */
   /* Bounded diagnostic tap (determinism evidence, never audio input): the first GENESIS_AUDIO_TRACE_CAPACITY PSG deliveries in

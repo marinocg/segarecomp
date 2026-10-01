@@ -33,6 +33,8 @@ typedef struct GenesisZ80Machine {
   GenesisDiagnosticCategory view_stop;    /* 0, or the first typed view stop latched since the last clear */
   GenesisZ80UnknownImageFunction on_unknown_image;
   void *unknown_image_context;
+  /* Opt-in aggregate evidence (counts only; never an address or value; SEG-032-T010). */
+  uint64_t count_reset_assert, count_reset_release, count_busreq_assert, count_busreq_release, count_bank_writes, count_banked_reads;
 } GenesisZ80Machine;
 
 /* Zeroes the machine, installs the host callbacks and puts the Z80 in its architectural reset state. The RAM is the

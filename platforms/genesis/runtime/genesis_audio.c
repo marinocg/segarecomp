@@ -58,6 +58,18 @@ static int audio_ym_write(void *context, GenesisRuntime *runtime, uint32_t port,
   ym2612_write(audio->ym, port, value, master_ticks);
   ym_trace(audio, master_ticks, (uint8_t)port, value);
   ++audio->ym_writes;
+  if ((port & 1U) == 0U) {
+    audio->ym_latched[(port >> 1) & 1U] = value;
+    ++audio->ym_class_address;
+  } else {
+    const uint8_t reg = audio->ym_latched[(port >> 1) & 1U];
+    if (port == 1U && reg == 0x2AU) ++audio->ym_class_dac;
+    else if (port == 1U && reg == 0x2BU) ++audio->ym_class_dac_enable;
+    else if (port == 1U && reg == 0x28U) ++audio->ym_class_key;
+    else if (port == 1U && reg >= 0x24U && reg <= 0x27U) ++audio->ym_class_timer;
+    else if (reg >= 0x30U) ++audio->ym_class_operator;
+    else ++audio->ym_class_global;
+  }
   return 1;
 }
 

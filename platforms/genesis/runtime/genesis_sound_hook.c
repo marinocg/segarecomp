@@ -16,6 +16,7 @@
 
 #include "genesis_sound.h"
 
+#define C(x) (unsigned long long)(x)
 GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch, uint32_t dispatch_allowance);
 
 typedef struct PcmFile {
@@ -98,6 +99,7 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
     }
     fprintf(stderr,
             "SOUND_SUMMARY {\"epochs\":%u,\"bound_image\":%u,\"psg_writes\":%llu,\"ym_writes\":%llu,\"virtual_frames\":%llu,\"result_kind\":%d,\"stop_class\":%d,\"diagnostic\":%d,"
+            "\"classes\":{\"reset_assert\":%llu,\"reset_release\":%llu,\"busreq_assert\":%llu,\"busreq_release\":%llu,\"bank_writes\":%llu,\"banked_reads\":%llu,\"ym_dac\":%llu,\"ym_dac_enable\":%llu,\"ym_key\":%llu,\"ym_timer\":%llu,\"ym_global\":%llu,\"ym_operator\":%llu,\"ym_address\":%llu},"
             "\"audio\":{\"rate_hz\":%llu,\"channels\":%u,\"frames\":%llu,\"sha256\":\"%s\",\"range_frames\":%llu,\"range_sha256\":\"%s\","
             "\"clipped\":%llu,\"changes\":%llu,\"span\":%d,\"non_silent\":%s,\"fault\":%d,\"ring_dropped\":%llu,\"pcm_file_errors\":%llu}}\n",
             (unsigned)runtime->z80_epoch.epoch_count, (unsigned)machine->bound_ordinal,
@@ -105,6 +107,11 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
             (unsigned long long)(runtime->scheduler.master_ticks / GENESIS_NTSC_MASTER_TICKS_PER_FRAME), (int)transfer.kind,
             transfer.kind == GENESIS_STOP ? (int)transfer.stop.stop_class : 0,
             transfer.kind == GENESIS_STOP ? (int)transfer.stop.diagnostic_category : 0,
+            C(machine->count_reset_assert), C(machine->count_reset_release), C(machine->count_busreq_assert), C(machine->count_busreq_release),
+            C(machine->count_bank_writes), C(machine->count_banked_reads),
+            C(audio != NULL ? audio->ym_class_dac : 0U), C(audio != NULL ? audio->ym_class_dac_enable : 0U), C(audio != NULL ? audio->ym_class_key : 0U),
+            C(audio != NULL ? audio->ym_class_timer : 0U), C(audio != NULL ? audio->ym_class_global : 0U), C(audio != NULL ? audio->ym_class_operator : 0U),
+            C(audio != NULL ? audio->ym_class_address : 0U),
             (unsigned long long)GENESIS_MIXER_RATE_HZ, (unsigned)GENESIS_MIXER_CHANNELS,
             (unsigned long long)(mixer != NULL ? mixer->frames : 0U), digest_hex,
             (unsigned long long)(mixer != NULL ? mixer->range_frames : 0U), range_hex,
@@ -115,3 +122,4 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
   }
   return transfer;
 }
+#undef C

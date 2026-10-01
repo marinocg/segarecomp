@@ -60,6 +60,7 @@ static uint8_t z80_view_read(void *context, uint16_t address, uint64_t cycles) {
     return 0xFFU;
   }
   machine->cpu.state.cycles += GENESIS_Z80_BUS_WAIT_CYCLES;
+  ++machine->count_banked_reads;
   if (!bank_rom_read(machine, banked_address(machine, address), &value)) {
     latch_stop(machine, GENESIS_DIAG_Z80_BANK_TARGET_UNSUPPORTED);  /* open bus, work-RAM reads (open fact U3), the Z80 area itself */
     return 0xFFU;
@@ -82,6 +83,7 @@ static void z80_view_write(void *context, uint16_t address, uint8_t value, uint6
   }
   if (address < Z80_BANK_REG_END && address >= UINT32_C(0x6000)) {
     devices->z80_bus.bank = (uint16_t)((((uint32_t)value & 1U) << 8) | (devices->z80_bus.bank >> 1));
+    ++machine->count_bank_writes;
     return;
   }
   if (address >= Z80_VDP_WINDOW && address < Z80_BANKED) {  /* PSG at $7F11/13/15/17 only (contract section 2) */
@@ -274,16 +276,21 @@ static int hook_bus_event(void *context, GenesisRuntime *runtime, GenesisZ80Even
   const uint64_t aligned = ceil_to_z80_clock(master_ticks);
   switch (event) {
     case GENESIS_Z80_EVENT_RESET_ASSERT:
+      ++machine->count_reset_assert;
       genesis_ym2612_port_reset(runtime, master_ticks);
       break;
     case GENESIS_Z80_EVENT_RESET_RELEASE:  /* the architectural reset happens at release (contract section 4.6) */
       genesis_ym2612_port_reset(runtime, master_ticks);
+      ++machine->count_reset_release;
       z80_reset(&machine->cpu.state);
       machine->view_stop = (GenesisDiagnosticCategory)0;
       machine->cycle_base_master_ticks = aligned;
       break;
     case GENESIS_Z80_EVENT_BUSREQ_RELEASE:
+      ++machine->count_busreq_release;
+      break;
     case GENESIS_Z80_EVENT_BUSREQ_ASSERT:
+      ++machine->count_busreq_assert;
       break;
   }
   if (transition) {  /* resume: time held on the bus is not made up (GPGX: the Z80 restarts at the next multiple of 15 ticks) */
