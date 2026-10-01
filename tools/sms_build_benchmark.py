@@ -129,7 +129,11 @@ def main():
     ap.add_argument("--json")
     ap.add_argument("--label", default="")
     ap.add_argument("--run-cycles", type=int, default=20000000)
+    ap.add_argument("--platform", default="master-system", choices=("master-system", "genesis"),
+                    help="genesis: only the build is measured (policy checks, SEG-033-T004); the image shape is `rom:<path>`")
     ap.add_argument("--keep", action="store_true")
+    ap.add_argument("--run-repeats", type=int, default=3, help="throughput runs; the median is reported")
+    ap.add_argument("--exe-out", help="copy the linked executable here (for a separate runtime comparison)")
     ap.add_argument("--extra", action="append", default=[], help="extra `segarecomp build` option pair, e.g. --extra=--cc-arg=-O1")
     args = ap.parse_args()
     root = pathlib.Path(args.root).resolve()
@@ -142,10 +146,12 @@ def main():
     else:
         cleanup = tempfile.TemporaryDirectory()
         work = pathlib.Path(cleanup.name)
-    (work / "image.sms").write_bytes(rom)
+    (work / "image.sms").write_bytes(rom)  # the file name is irrelevant to the route (classified by content)
     out = work / "out"
     cmd = [args.cli, "build", "--rom", str(work / "image.sms"), "--output", str(out), "--cc", args.cc, "--optimize", args.optimize,
-           "--runtime-dir", str(root / "platforms" / "master-system"), "--mapper", args.mapper]
+           "--runtime-dir", str(root / "platforms" / args.platform)]
+    if args.platform == "master-system":
+        cmd += ["--mapper", args.mapper]
     if args.jobs:
         cmd += ["--jobs", str(args.jobs)]
     for pair in args.extra:
@@ -175,11 +181,28 @@ def main():
     span = lambda a, b: round(stamps[(b, "done")] - stamps[(a, "begin")], 2) if (a, "begin") in stamps else None  # noqa: E731
     exe = out / "game"
     gen = generated_stats(out / "generated")
+    if args.platform == "genesis":  # build-only figures
+        result = {"label": args.label, "platform": "genesis", "optimize": args.optimize, "jobs": args.jobs or "default",
+                  "total_wall_s": round(total, 2), "generate_wall_s": span("analyze", "generate"), "compile_wall_s": span("compile", "compile"),
+                  "link_wall_s": span("link", "link"), "build_cpu_s": round(cpu, 1),
+                  "rss_mib": {stage: {k.replace("_kib", "_mib"): round(v / 1024) for k, v in peak.items()} for stage, peak in sampler.peaks.items()},
+                  "executable_mib": round(exe.stat().st_size / 1048576, 2), "generated_c_bytes": gen["generated_c_bytes"], "c_files": gen["c_files"]}
+        text = json.dumps(result, indent=1, sort_keys=True)
+        if args.json:
+            pathlib.Path(args.json).write_text(text + "\n")
+        print(text)
+        return 0
     startup, _ = run_game(exe, ["--cycle-budget", "1000"])
     # Throughput: fixed T-state budget (real images run it; a synthetic image may stop earlier on a typed outcome).
     art = work / "art"
     art.mkdir()
-    run_s, run_rc = run_game(exe, ["--cycle-budget", str(args.run_cycles), "--artifacts", str(art)])
+    times = []
+    for _ in range(max(1, args.run_repeats)):
+        run_s, run_rc = run_game(exe, ["--cycle-budget", str(args.run_cycles), "--artifacts", str(art)])
+        times.append(run_s)
+    run_s = statistics.median(times)
+    if args.exe_out:
+        shutil.copy2(exe, args.exe_out)
     digest = (art / "state.sha256").read_text().strip() if (art / "state.sha256").exists() else None
     status = json.loads((art / "status.json").read_text()) if (art / "status.json").exists() else {}
     result = {
@@ -189,7 +212,7 @@ def main():
         "link_wall_s": span("link", "link"), "build_cpu_s": round(cpu, 1),
         "rss_mib": {stage: {k.replace("_kib", "_mib"): round(v / 1024) for k, v in peak.items()} for stage, peak in sampler.peaks.items()},
         "executable_mib": round(exe.stat().st_size / 1048576, 2), "startup_s": round(startup, 3),
-        "run": {"cycle_budget": args.run_cycles, "wall_s": round(run_s, 3), "exit": run_rc,
+        "run": {"cycle_budget": args.run_cycles, "wall_s": round(run_s, 3), "exit": run_rc, "wall_s_runs": [round(x, 3) for x in times],
                 "mcycles_per_s": round((status.get("cycles") or args.run_cycles) / run_s / 1e6, 2) if run_s else None,
                 "state_sha256": digest},
         **gen,

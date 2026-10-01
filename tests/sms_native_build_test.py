@@ -9,6 +9,7 @@ exactly what the one SMS emitter (tests/tools/sms_image_emitter) emits, and that
 closed, before any generated C exists, with the typed diagnostic in status.json and the existing exit-code conventions.
 """
 import hashlib
+import os
 import json
 import pathlib
 import subprocess
@@ -33,6 +34,25 @@ def build(rom, out, *extra, platform_dir=None):
     return subprocess.run([CLI, "build", "--rom", str(rom), "--output", str(out), "--cc", CC, "--optimize", "0",
                            "--runtime-dir", str(platform_dir or ROOT / "platforms" / "master-system"), *extra],
                           text=True, capture_output=True, timeout=900)
+
+
+def build_default_policy(rom, out, *extra):
+    """The consumer defaults: no --optimize (the target's policy applies); the fixture's -Wmisleading-indentation relaxation only."""
+    return subprocess.run([CLI, "build", "--rom", str(rom), "--output", str(out), "--cc", CC, "--mapper", "sega",
+                           "--runtime-dir", str(ROOT / "platforms" / "master-system"), "--cc-arg", "-Wno-misleading-indentation", *extra],
+                          text=True, capture_output=True, timeout=900)
+
+
+def compile_levels(out):
+    """{source file name: last -O level} of every compile command recorded in build.log (the last -O flag wins)."""
+    levels = {}
+    for line in (out / "build.log").read_text().splitlines():
+        if not line.startswith("$ ") or " -c " not in line:
+            continue
+        words = line.split()
+        flags = [w for w in words if w in ("-O0", "-O1", "-O2")]
+        levels[pathlib.Path(words[-1]).name] = flags[-1] if flags else None
+    return levels
 
 
 def status(out):
@@ -111,6 +131,28 @@ def main():
         check(r.returncode == 0, "manifest build failed: %s" % (r.stdout + r.stderr)[-400:])
         if r.returncode == 0:
             check(status(out2).get("mapper_source") == "fixture_builder", "manifest source not recorded: %s" % status(out2))
+
+        # ---- SEG-033-T004 production compile policy: generated guest code -O1, handwritten units -O2, bounded jobs -----
+        out3 = tmp / "policy"
+        r = build_default_policy(rom, out3)
+        check(r.returncode == 0, "default-policy build failed: %s" % (r.stdout + r.stderr)[-400:])
+        if r.returncode == 0:
+            levels = compile_levels(out3)
+            generated = [n for n in levels if n.startswith("sms_main") or n.startswith("sms_owner_") or n.startswith("sms_entry_") or n == "sms_rom.c"]
+            handwritten = [n for n in ("sms_machine.c", "sms_vdp.c", "sms_render.c", "sms_psg.c", "sn76489.c", "sms_headless.c", "sms_memory.c")]
+            check(generated and all(levels[n] == "-O1" for n in generated), "generated guest-code units are not compiled at -O1: %s" % levels)
+            check(all(levels.get(n) == "-O2" for n in handwritten), "handwritten runtime/device units are not compiled at -O2: %s" % levels)
+            expected_jobs = min(8, os.cpu_count() or 1)
+            check("# compile jobs: %d\n" % expected_jobs in (out3 / "build.log").read_text() + "\n", "default jobs is not min(8, cpus)")
+        out4 = tmp / "policy_jobs"
+        r = build_default_policy(rom, out4, "--jobs", "3", "--optimize", "2")
+        check(r.returncode == 0, "explicit-policy build failed")
+        if r.returncode == 0:
+            check("# compile jobs: 3" in (out4 / "build.log").read_text(), "--jobs override not honored")
+            check(set(compile_levels(out4).values()) == {"-O2"}, "an explicit --optimize applies to every unit")
+        bad = subprocess.run([CLI, "build", "--rom", str(rom), "--output", str(tmp / "badopt"), "--cc", CC, "--optimize", "3",
+                              "--runtime-dir", str(ROOT / "platforms" / "master-system")], text=True, capture_output=True)
+        check(bad.returncode != 0 and not (tmp / "badopt" / "game").exists(), "--optimize 3 must be rejected")
 
         # ---- fail closed ---------------------------------------------------------------------------------------------
         # header-valid image, no mapper declaration: typed failure before any emission

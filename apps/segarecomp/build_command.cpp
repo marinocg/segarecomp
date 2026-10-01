@@ -125,7 +125,9 @@ struct Options {
   fs::path runtime_dir;  // contains runtime/, viewer/ and (optional) compat/
   std::optional<fs::path> sdl3_include;
   std::optional<fs::path> sdl3_lib;
-  std::string optimize = "2";
+  // Empty: the target's default policy. Master System: generated guest-code units -O1 and the handwritten runtime/device/viewer
+  // units -O2 (SEG-033-T004, measured). Genesis: -O2 everywhere. An explicit value applies to every unit.
+  std::string optimize;
   unsigned jobs = 0;
   // Master System routing (SEG-009-T010). `platform` empty: classify the image; the mapper is never inferred.
   std::string platform;                 // "", "genesis" or "master-system"
@@ -202,7 +204,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else return std::nullopt;
   }
   if (!have_rom || !have_output || !have_runtime || options.cc.empty()) return std::nullopt;
-  if (options.optimize != "0" && options.optimize != "1" && options.optimize != "2") return std::nullopt;
+  if (!options.optimize.empty() && options.optimize != "0" && options.optimize != "1" && options.optimize != "2") return std::nullopt;
   if (options.sdl3_include.has_value() != options.sdl3_lib.has_value()) return std::nullopt;
   if (!options.platform.empty() && options.platform != "genesis" && options.platform != "master-system") return std::nullopt;
   return options;
@@ -388,23 +390,25 @@ int segarecomp_build_command(int argc, char **argv) {
       const fs::path root = platform_dir.parent_path().parent_path();
       const fs::path headless = options.runtime_dir / "headless";
       const fs::path psg = root / "libs" / "device" / "sega" / "psg";
-      base.insert(base.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", "-O" + options.optimize, "-D_CRT_SECURE_NO_WARNINGS",
+      base.insert(base.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", "-O" + (options.optimize.empty() ? std::string("1") : options.optimize), "-D_CRT_SECURE_NO_WARNINGS",
                                "-I", (root / "libs" / "codegen" / "c11" / "include").string(), "-I", runtime.string(),
                                "-I", (psg / "include").string(), "-I", shard_dir.string()});
       for (const auto &unit : units) compile.push_back({unit, {}});
+      // Later flags win: the handwritten units restate -O2 over the generated-code level in `base`.
+      const std::vector<std::string> handwritten = options.optimize.empty() ? std::vector<std::string>{"-O2"} : std::vector<std::string>{};
       for (const char *name : {"sms_memory.c", "sms_sha256.c", "sms_input.c", "sms_machine.c", "sms_psg.c", "sms_pad.c",
                                "sms_vdp.c", "sms_render.c"})
-        compile.push_back({runtime / name, {}});
-      compile.push_back({psg / "src" / "sn76489.c", {}});
+        compile.push_back({runtime / name, handwritten});
+      compile.push_back({psg / "src" / "sn76489.c", handwritten});
       if (play) {
         base.insert(base.end(), {"-I", viewer.string(), "-I", options.sdl3_include->string()});
-        for (const char *name : {"sms_viewer.c", "sms_viewer_sdl3.c", "sms_viewer_main.c"}) compile.push_back({viewer / name, {}});
+        for (const char *name : {"sms_viewer.c", "sms_viewer_sdl3.c", "sms_viewer_main.c"}) compile.push_back({viewer / name, handwritten});
       } else {
         base.insert(base.end(), {"-I", headless.string()});
-        for (const char *name : {"sms_audio.c", "sms_headless.c", "sms_devices_vdp.c"}) compile.push_back({headless / name, {}});
+        for (const char *name : {"sms_audio.c", "sms_headless.c", "sms_devices_vdp.c"}) compile.push_back({headless / name, handwritten});
       }
     } else {
-      base.insert(base.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", "-O" + options.optimize,
+      base.insert(base.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", "-O" + (options.optimize.empty() ? std::string("2") : options.optimize),
                                "-I", runtime.string()});
       // units[0] is the main TU (the only one whose main() calls genesis_runtime_run).
       if (play) {
@@ -441,7 +445,9 @@ int segarecomp_build_command(int argc, char **argv) {
       logs.push_back(object_dir / (std::to_string(i) + ".log"));
       objects.push_back(object);
     }
-    unsigned jobs = options.jobs != 0 ? options.jobs : std::min(4U, std::max(1U, std::thread::hardware_concurrency()));
+    // One bounded default (SEG-033-T004): the host's concurrency capped at 8; --jobs overrides it.
+    unsigned jobs = options.jobs != 0 ? options.jobs : std::min(8U, std::max(1U, std::thread::hardware_concurrency()));
+    log.line("# compile jobs: " + std::to_string(jobs));
     std::vector<int> codes;
     const int failed = run_compiles(commands, logs, jobs, codes);
     for (std::size_t i = 0; i < commands.size(); ++i) {
