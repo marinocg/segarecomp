@@ -1166,6 +1166,19 @@ set_property(TEST sms_capabilities_test sms_fixture_rom_test sms_oracle_smoke_te
 set_property(TEST sms_capabilities_test sms_fixture_rom_test sms_oracle_smoke_test sms_psg_oracle_smoke_test
   APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
+# SEG-032-T001 (ADR 0072/0074): Genesis Z80/audio fixture ROM builder and the whole-machine reference smoke. The smoke skips
+# cleanly (exit 0) unless SEGARECOMP_GENESIS_ORACLE_CHECKOUT points at the directory holding the pinned checkouts.
+add_test(NAME genesis_z80_fixture_rom_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_fixture_rom_test.py)
+add_test(NAME genesis_z80_oracle_smoke_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_oracle_smoke_test.py ${CMAKE_C_COMPILER})
+add_test(NAME genesis_ym2612_oracle_smoke_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_ym2612_oracle_smoke_test.py ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER})
+set_property(TEST genesis_z80_fixture_rom_test genesis_z80_oracle_smoke_test genesis_ym2612_oracle_smoke_test
+  APPEND PROPERTY LABELS full fast)
+set_property(TEST genesis_z80_fixture_rom_test genesis_z80_oracle_smoke_test genesis_ym2612_oracle_smoke_test
+  APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
 # SEG-009-T002: SMS cartridge ingestion, memory map/mapper, ImageSet declaration and the declaration-vs-run-time mapper
 # contract (hermetic, synthetic ROMs), plus the test-side SMS generation CLI and generated-native bank-crossing host.
 add_executable(sms_machine_tests sms_machine_test.cpp)

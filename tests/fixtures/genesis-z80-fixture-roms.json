@@ -1,0 +1,13 @@
+{
+  "fixtures": {
+    "bus_reset_control": {
+      "sha256": "a5e5eb8123e83fc4928ec7bb2687ec65459f495591de066af5eea24c152093b3",
+      "size": 16384
+    },
+    "bus_reset_probe": {
+      "sha256": "1fd5ce35a01d1b9f4ca7af5924bcc0e048ee1f72eeb7485378177ce810b6b9aa",
+      "size": 16384
+    }
+  },
+  "schema": 1
+}
