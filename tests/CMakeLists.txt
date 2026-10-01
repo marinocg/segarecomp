@@ -1070,6 +1070,10 @@ set_property(TEST m68k_capability_ratchet_test APPEND PROPERTY ENVIRONMENT_MODIF
 add_executable(z80_image_emitter tools/z80_image_emitter.cpp)
 target_link_libraries(z80_image_emitter PRIVATE segarecomp::codegen_c11_z80)
 segarecomp_enable_warnings(z80_image_emitter)
+# SEG-032-T003 (ADR 0073): test-side CLI over the Genesis materialized-image registry and its RAM-backed emission.
+add_executable(genesis_z80_registry_emitter tools/genesis_z80_registry_emitter.cpp)
+target_link_libraries(genesis_z80_registry_emitter PRIVATE segarecomp::machine_genesis_z80)
+segarecomp_enable_warnings(genesis_z80_registry_emitter)
 add_executable(z80_lowering_probe tools/z80_lowering_probe.cpp)
 target_link_libraries(z80_lowering_probe PRIVATE segarecomp::codegen_c11_z80)
 segarecomp_enable_warnings(z80_lowering_probe)
@@ -1087,8 +1091,15 @@ add_test(NAME z80_conformance_harness_test COMMAND ${Python3_EXECUTABLE}
 # Oracle side (ADR 0057): skips cleanly unless SEGARECOMP_Z80_ORACLE_CHECKOUT names the pinned clones.
 add_test(NAME z80_conformance_oracle_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/z80_conformance_oracle_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-032-T003 (ADR 0073): the RAM-backed Z80 guard and the Genesis materialized-image registry.
+add_test(NAME z80_live_guard_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_live_guard_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME genesis_z80_images_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_images_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_live_guard_test genesis_z80_images_test APPEND PROPERTY LABELS full)
 set_property(TEST codegen_c11_z80_dependency_test z80_generated_pipeline_test z80_conformance_harness_test
-  z80_conformance_oracle_test z80_capability_ratchet_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  z80_conformance_oracle_test z80_capability_ratchet_test z80_live_guard_test genesis_z80_images_test
+  APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-008-T002 tests were registered after the label loop above and so carried no tier label: add them here.
 set_property(TEST cpu_z80_decode_tests z80_generated_pipeline_test z80_conformance_oracle_test APPEND PROPERTY LABELS full)
 set_property(TEST cpu_z80_dependency_test z80_capability_ratchet_test codegen_c11_z80_dependency_test

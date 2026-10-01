@@ -262,3 +262,18 @@ Defined in ADR 0058:
 
 The concrete runtime ABI (`libs/codegen/c11/include/segarecomp/codegen/c11/runtime/z80_runtime.h`), the owner emission
 shape and the differential harness are recorded in ADR 0060 and `docs/testing/z80-conformance-harness.md`.
+
+### RAM-backed code images (SEG-032-T003, ADR 0073)
+
+The platform may declare a code image *RAM-backed* (`CodeImage::live_bytes`): the compiled bytes are a snapshot of memory the
+machine can change after compilation (the Genesis sound RAM). The CPU library keeps its meaning: instruction semantics, owner
+structure and every outcome are unchanged. What a RAM-backed image adds, at the emitter and ABI level only:
+- the single emitted entry prologue is followed by a guard `z80_code_guard(rt, pc, length, b0..b3)`: the entry's 1-4 static
+  instruction bytes must equal the live bytes (host `code_matches`) before any effect; a difference stops with the fail-closed
+  `Z80_ERROR_CODE_MISMATCH` (`code_mismatch`), `state.pc` at the instruction start and no state change; a host without
+  `code_matches` fails every guard;
+- the image is a banked, one-window image: every instruction boundary returns to the dispatcher, so there is no in-group
+  `goto` chaining and no direct owner binding, and the host reports the bound image through `code_image`;
+- an endless DD/FD run is a typed `mutable_code` stub;
+- no self-modifying-code support, no mutable-immediate tolerance: a difference is a stop, never a re-decode.
+Immutable images emit exactly as before (golden-digest regression in `z80_live_guard_test.py`).

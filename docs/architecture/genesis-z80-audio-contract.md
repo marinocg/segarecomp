@@ -165,8 +165,10 @@ Two separate quantities are derived at the runnable transition:
   bound by the previous epoch (the Z80 restarts the code already in RAM); at the first epoch an empty window means the
   zero-filled RAM, which is itself materialized as an image. (Observed on an authorized workload: a restart epoch with
   zero written bytes occurs between two uploads.)
-  The matching rule: the first registered image (registry order) whose signature equals the computed one is bound; a
-  signature shared by two registered images with different content hashes is a build failure (`z80_signature_collision`).
+  The matching rule: the registered image whose signature equals the computed one is bound. Two epochs with the same
+  signature are the same image *by definition*, even when their snapshots differ in carry-over data; if the differing bytes
+  were executed code, the RAM-backed guard stops the Z80 with `z80_code_mismatch` (in the materialization pass: the build
+  fails with that typed outcome, the signature being under-determined for the workload).
 - **Rejected definitions (T002 negative controls):** the whole 8 KiB RAM (varies with carry-over and fill: five images
   where three suffice); "writes since the last /RESET assertion" (the documented upload sequence asserts `/RESET` after
   the upload, so the set is empty and every image collides); clearing the window only at an epoch (earlier holds' command

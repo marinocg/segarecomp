@@ -60,6 +60,8 @@ Z80_ERRORS = {
                                 "reserved by ADR 0056: the Z80 scope excludes no form (tests/z80_legal_forms_test.py)"),
     "Z80_ERROR_IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE": ("unreachable", "sms_runtime_tests", "IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE",
                                                    "the SMS acknowledge byte is always $FF (RST 38h); IM0/IM1/IM2 accepted in the runtime test"),
+    "Z80_ERROR_CODE_MISMATCH": ("unreachable", "z80_live_guard_test", "code_mismatch",
+                                "only RAM-backed images (Genesis sound RAM, SEG-032) emit the guard; every SMS image is immutable"),
 }
 
 

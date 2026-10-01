@@ -11,6 +11,7 @@
 //   window <identity> <base-hex> <first-offset-hex> <length-hex>
 //   bytes  <identity> <hex-bytes>          (appended; may repeat)
 //   fill   <identity> <byte-hex> <count-hex>
+//   live   <identity>                      (SEG-032-T003: mark a banked one-window image RAM-backed: every entry is byte-guarded)
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -72,6 +73,8 @@ int main(int argc, char** argv) {
       owner_group = static_cast<std::size_t>(identity);
     } else if (verb == "share") {  // `share <0|1>`: shared PC-independent effect bodies (0 = the reference emission)
       share_bodies = static_cast<int>(identity);
+    } else if (verb == "live") {
+      image_of(identity).live_bytes = true;
     } else if (verb == "fill") {
       std::string value, count;
       in >> value >> count;

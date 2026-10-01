@@ -31,7 +31,8 @@ typedef enum Z80Outcome {
   Z80_ERROR_UNRESOLVED_FETCH_MAPPING = 18,
   Z80_ERROR_UNKNOWN_IMAGE_IDENTITY = 19,
   Z80_ERROR_EXCLUDED_FORM = 20,
-  Z80_ERROR_IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE = 21
+  Z80_ERROR_IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE = 21,
+  Z80_ERROR_CODE_MISMATCH = 22 /* RAM-backed image: the live bytes of an instruction differ from the compiled ones */
 } Z80Outcome;
 
 static inline int z80_outcome_is_resumable(Z80Outcome outcome) {
@@ -51,6 +52,7 @@ static inline const char *z80_outcome_name(Z80Outcome outcome) {
     case Z80_ERROR_UNKNOWN_IMAGE_IDENTITY: return "unknown_image_identity";
     case Z80_ERROR_EXCLUDED_FORM: return "excluded_form";
     case Z80_ERROR_IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE: return "im0_unsupported_acknowledge_byte";
+    case Z80_ERROR_CODE_MISMATCH: return "code_mismatch";
   }
   return "invalid";
 }
@@ -90,6 +92,9 @@ typedef struct Z80Host {
   uint8_t (*interrupt_acknowledge)(void *context, uint64_t cycles);
   /* Non-zero and fills `image` if immutable code is mapped at `address`; zero means mutable/non-code (fail closed). */
   int (*code_image)(void *context, uint16_t address, Z80CodeImage *image);
+  /* RAM-backed images only (SEG-032-T003): non-zero iff the live memory at `address` (wrapping, mirrors resolved by the platform)
+   * equals `length` (1-4) expected instruction bytes. Absent (NULL) in a host that runs a RAM-backed image: every guard fails. */
+  int (*code_matches)(void *context, uint16_t address, const uint8_t *expected, uint32_t length);
 } Z80Host;
 
 typedef struct Z80Runtime {
@@ -169,6 +174,16 @@ static inline int z80_owner_prologue(Z80Runtime *rt, uint16_t pc) {
   s->int_deferral = 0;
   s->ld_a_ir = 0;
   return 0;
+}
+
+/* RAM-backed entry guard (ADR 0073): after the boundary prologue, before any effect. Returns non-zero (outcome set, PC at the
+ * instruction start, no state change) when the live bytes differ from the `length` compiled ones. */
+static inline int z80_code_guard(Z80Runtime *rt, uint16_t pc, unsigned length, unsigned b0, unsigned b1, unsigned b2, unsigned b3) {
+  const uint8_t expected[4] = {(uint8_t)b0, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3};
+  if (rt->host.code_matches != NULL && rt->host.code_matches(rt->host.context, pc, expected, length)) return 0;
+  rt->state.pc = pc;
+  rt->outcome = Z80_ERROR_CODE_MISMATCH;
+  return 1;
 }
 
 /* Prefix-lock owner entry (ADR 0058 section 5). Entered with in-prefix-run clear it runs the ordinary prologue and

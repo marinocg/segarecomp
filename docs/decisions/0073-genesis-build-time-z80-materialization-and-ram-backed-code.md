@@ -35,7 +35,7 @@ prerequisites and are not reproduced here. SEG-031 (admission policy over known 
 5. **Bounds are constants, not options** (provisional image bound 8, ceiling 16; observation window in virtual frames,
    instruction budget, wall timeout, `iterations <= bound + 1` measured and frozen by T002/T008). Exhaustion is a typed build
    failure with no executable: `z80_image_bound_exceeded`, `materialization_budget_exhausted`,
-   `materialization_nondeterministic`, `z80_image_compile_failed`, `z80_signature_collision`.
+   `materialization_nondeterministic`, `z80_image_compile_failed`. A snapshot that differs in executed code from the image its signature selected surfaces as the guard's `z80_code_mismatch` (a typed build failure in the pass).
 6. **Runtime selection.** At each runnable transition while pristine the runtime computes the signature from live state and
    looks it up in the fixed compiled registry; unknown -> `z80_unknown_image` (no compilation, no decoding, no learning).
 7. **RAM-backed code rule.** After activation mutable data is free. Before each generated instruction its 1-4 static bytes
@@ -90,3 +90,19 @@ Caveats recorded honestly:
 - Proposed constants (frozen by T008 after the executing-Z80 re-run): image bound 8 (observed maximum 2 images, 5 epochs; rule: at least 2x the
   maximum observed, at most 16), observation window 600 virtual frames (the last epoch observed anywhere is at frame 597, a restart; Sonic 1's driver reload at 348), per-run instruction budget 400,000,000 retired dispatches
   (the observed runs used 2.3-6.3 M), per-run wall timeout 120 s, loop iterations at most bound + 1.
+
+## T003 implementation record (2026-10-01)
+
+- `CodeImage::live_bytes` (banked, one window) makes `emit_entry` emit `z80_code_guard(rt, pc, n, b0..b3)` right after the unchanged
+  prologue. Because a banked image never has direct binding or in-group chaining (`Plan::successor` exists only for invariant images)
+  every instruction returns to the dispatcher and runs prologue + guard: **no RAM-backed mode change to the SEG-033 chaining was
+  needed**; the audit result of the refinement (the guard goes in the single `emit_entry` point) is confirmed, and the structural test
+  asserts no `goto z80_e_` / `Z80_OWNER_NEXT` in a live image. Cost: a dispatcher round trip per instruction (about 100-300 ns per
+  ADR 0058's measurement), roughly 3-10 million Z80 instructions per second, against about 1 million per second needed.
+- Exhaustive evidence in `tests/z80_live_guard_test.py` (every byte of every instruction of a straight-line program covering 1-4 byte
+  instructions, loop, block-repeat, interrupt-entry and missing-matcher cases, equivalence with the immutable reference for owner
+  groups 1 and 128, and a golden-digest regression of immutable emission).
+- `libs`-independent registry: `platforms/genesis/machine` `segarecomp_machine_genesis_z80` (content hash, signature, deterministic
+  registry with the image bound, RAM-backed `ImageSet`, the generated `*_registry.c` with `genesis_z80_image_for_signature`).
+  Two epochs with the same signature are the same image even when their snapshots differ; a code difference there is the guard's
+  `z80_code_mismatch`, so no separate collision failure exists.

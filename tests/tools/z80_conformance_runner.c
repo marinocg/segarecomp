@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
   while ((status = zc_read_vector(file, &vec)) == 1) {
     memset(&rt, 0, sizeof rt);
     load_state(&rt.state, &vec.state);
-    rt.host = (Z80Host){NULL, host_read, host_write, host_in, host_out, host_ack, host_code_image};
+    rt.host = (Z80Host){NULL, host_read, host_write, host_in, host_out, host_ack, host_code_image, NULL};
     in_position = ack_position = 0;
     for (int k = 0; k < vec.step_count; ++k) {
       const zc_step *st = &vec.steps[k];

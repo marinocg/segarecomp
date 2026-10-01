@@ -48,7 +48,8 @@ ABI_CHECK = r'''
 int main(void) {
   static const Z80Outcome resumable[] = {Z80_OUTCOME_DEADLINE, Z80_OUTCOME_HALTED, Z80_OUTCOME_PREFIX_LOCK};
   static const Z80Outcome errors[] = {Z80_ERROR_NO_OWNER, Z80_ERROR_MUTABLE_CODE, Z80_ERROR_UNRESOLVED_FETCH_MAPPING,
-      Z80_ERROR_UNKNOWN_IMAGE_IDENTITY, Z80_ERROR_EXCLUDED_FORM, Z80_ERROR_IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE};
+      Z80_ERROR_UNKNOWN_IMAGE_IDENTITY, Z80_ERROR_EXCLUDED_FORM, Z80_ERROR_IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE,
+      Z80_ERROR_CODE_MISMATCH};
   const char *seen[16]; int n = 0;
   for (size_t i = 0; i < sizeof resumable / sizeof resumable[0]; ++i) {
     if (!z80_outcome_is_resumable(resumable[i]) || z80_outcome_is_error(resumable[i])) return 1;

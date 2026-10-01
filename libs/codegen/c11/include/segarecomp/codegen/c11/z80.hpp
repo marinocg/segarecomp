@@ -43,6 +43,12 @@ struct CodeImage {
   ImageKind kind = ImageKind::banked;
   std::vector<std::uint8_t> bytes;
   std::vector<CodeWindow> windows;
+  // RAM-backed image (SEG-032-T003, ADR 0073): the bytes are a snapshot of memory the platform may change after
+  // compilation. Every entry verifies its exact 1-4 static instruction bytes against the live memory (host `code_matches`)
+  // right after the boundary prologue and stops with `Z80_ERROR_CODE_MISMATCH` on any difference. Requires a banked image with
+  // exactly one window (the platform reports which image is bound, so no direct binding or in-group chaining exists), and
+  // emits endless DD/FD runs as typed `mutable_code` stubs. Immutable images (false) emit exactly as before.
+  bool live_bytes = false;
 };
 
 struct ImageSet {

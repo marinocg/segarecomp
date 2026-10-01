@@ -54,6 +54,7 @@ struct Variant {
 };
 
 struct Plan {
+  std::vector<std::uint8_t> guard;  // RAM-backed image: the exact static instruction bytes verified before the effect
   std::uint32_t identity = 0;
   std::uint16_t key = 0;
   bool relative = false;
@@ -243,6 +244,11 @@ bool emit_entry(std::ostream& out, const Plan& plan, const std::string& indent, 
   const Pcs pc = pcs_for(plan, first.classification, plan.key);
   const bool lock = plan.variants.size() == 1 && first.classification.kind == StartKind::prefix_lock;
   if (!lock) out << indent << "if (z80_owner_prologue(rt, " << pc.start << ")) return Z80_OWNER_STOP;\n";
+  if (!plan.guard.empty()) {  // RAM-backed image: the live bytes must still be the compiled instruction before any effect
+    out << indent << "if (z80_code_guard(rt, " << pc.start << ", " << plan.guard.size() << "u";
+    for (std::size_t i = 0; i < 4; ++i) out << ", " << (i < plan.guard.size() ? static_cast<unsigned>(plan.guard[i]) : 0u) << "u";
+    out << ")) return Z80_OWNER_STOP;\n";
+  }
   if (plan.variants.size() == 1 && !plan.partial) return emit_variant_body(out, plan, first, plan.key, indent, successor, bodies);
   out << indent << "switch (window_base) {\n";
   for (const Variant& v : plan.variants) {
@@ -337,6 +343,8 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
     if (i > 0 && images[i - 1]->identity == image.identity) return fail("duplicate code-image identity");
     if (image.windows.empty()) return fail("code image without a window");
     if (image.kind == ImageKind::invariant && image.windows.size() != 1) return fail("an invariant image has exactly one window");
+    if (image.live_bytes && (image.kind != ImageKind::banked || image.windows.size() != 1))
+      return fail("a RAM-backed image is a banked image with exactly one window");
     for (const CodeWindow& w : image.windows) {
       if (w.length == 0 || w.first_offset + w.length > kSpace || static_cast<std::uint32_t>(w.base) + w.first_offset + w.length > kSpace)
         return fail("code window leaves the 16-bit logical address space");
@@ -437,7 +445,16 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
         for (std::size_t j = 0; j < image.windows.size(); ++j) {
           const CodeWindow& w = image.windows[j];
           if (o < w.first_offset || o >= w.first_offset + w.length) continue;
-          const StartClassification& c = classes[j][static_cast<std::uint16_t>(w.base + o)];
+          StartClassification c = classes[j][static_cast<std::uint16_t>(w.base + o)];
+          if (image.live_bytes && c.kind == StartKind::prefix_lock) {  // an endless prefix run in RAM is never supported code
+            c.kind = StartKind::mutable_code;
+            c.blocking_address = static_cast<std::uint16_t>(w.base + o);
+          }
+          if (image.live_bytes && c.kind == StartKind::decoded) {
+            const std::uint32_t length = c.instruction.provenance.logical_byte_count;
+            if (length == 0 || length > 4 || o + length > image.bytes.size()) return fail("a RAM-backed start longer than four bytes");
+            plan.guard.assign(image.bytes.begin() + o, image.bytes.begin() + o + length);
+          }
           auto same = std::ranges::find_if(plan.variants, [&](const Variant& v) { return same_semantics(v.classification, c); });
           if (same == plan.variants.end()) {
             plan.variants.push_back(make_variant(c));
