@@ -151,7 +151,7 @@ def main():
             exe, message = tc and z.compile_units(
                 tc, tmp / tag, "genesis_z80",
                 extra_sources=[harness, root / "platforms/genesis/runtime/runtime.c", root / "platforms/genesis/runtime/z80_machine.c",
-                               root / "platforms/genesis/runtime/genesis_audio.c", root / "libs/device/sega/psg/src/sn76489.c"],
+                               root / "platforms/genesis/runtime/genesis_audio.c", root / "platforms/genesis/runtime/genesis_mixer.c", root / "libs/device/sega/psg/src/sn76489.c"],
                 extra_flags=["-I", str(root / "platforms/genesis/runtime"), "-I", str(root / "libs/device/sega/psg/include"), "-I", str(root / "libs/device/sega/ym2612/include")],
                 extra_objects=ymbuild.build_objects(cc, cxx, root, tmp / "ymobj"))
             assert exe is not None, message

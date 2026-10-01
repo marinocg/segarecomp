@@ -1125,6 +1125,21 @@ add_test(NAME genesis_ym2612_device_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_ym2612_device_test.py ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_audio_ym_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_audio_ym_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})
+# SEG-032-T009 (ADR 0075): the deterministic audio mixer, the whole-machine PCM stream, headless-vs-viewer-core equivalence and the
+# headless PCM artifact of a built program.
+add_test(NAME genesis_audio_mixer_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_audio_mixer_test.py ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME genesis_audio_pcm_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_audio_pcm_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})
+add_test(NAME genesis_audio_equivalence_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_audio_equivalence_test.py $<TARGET_FILE:genesis_z80_registry_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} ${CMAKE_CXX_COMPILER})
+add_test(NAME genesis_audio_artifact_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_audio_artifact_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_audio_mixer_test genesis_audio_pcm_test genesis_audio_equivalence_test genesis_audio_artifact_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_audio_mixer_test APPEND PROPERTY LABELS fast)
+set_property(TEST genesis_audio_artifact_test PROPERTY TIMEOUT 1500)
+set_property(TEST genesis_audio_mixer_test genesis_audio_pcm_test genesis_audio_equivalence_test genesis_audio_artifact_test
+  APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 add_test(NAME packaging_trim_zig_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/packaging_trim_zig_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST packaging_trim_zig_test APPEND PROPERTY LABELS full)

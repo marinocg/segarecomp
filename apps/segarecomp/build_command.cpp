@@ -578,7 +578,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   if (build.play) main_final = {main_final.back()};
   for (std::size_t i = 1; i < units.size(); ++i)
     add(common, units[i], "m68k-" + std::to_string(i), with_shard({"-I", units[0].parent_path().string()}));
-  for (const char *name : {"runtime.c", "z80_machine.c", "genesis_audio.c", "genesis_sound.c"})
+  for (const char *name : {"runtime.c", "z80_machine.c", "genesis_audio.c", "genesis_mixer.c", "genesis_audio_present.c", "genesis_sound.c"})
     add(common, build.runtime / name, std::string("rt-") + std::string(name).substr(0, std::string(name).size() - 2));
   add(common, build.psg / "src" / "sn76489.c", "psg");
   add(common, build.ym / "src" / "cxx_runtime_shim.c", "ym-shim");

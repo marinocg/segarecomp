@@ -262,8 +262,10 @@ static int activate_image(GenesisZ80Machine *machine, const uint8_t *written, Ge
 }
 
 static int hook_run_to(void *context, GenesisRuntime *runtime, uint64_t master_ticks, GenesisRuntimeStop *stop) {
-  (void)runtime;
-  return genesis_z80_machine_run_to((GenesisZ80Machine *)context, master_ticks, stop);
+  const int stopped = genesis_z80_machine_run_to((GenesisZ80Machine *)context, master_ticks, stop);
+  if (!stopped && runtime->audio_hooks != NULL && runtime->audio_hooks->sync != NULL)
+    runtime->audio_hooks->sync(runtime->audio_hooks->context, runtime, master_ticks);
+  return stopped;
 }
 
 static int hook_bus_event(void *context, GenesisRuntime *runtime, GenesisZ80Event event, uint64_t master_ticks, int transition,

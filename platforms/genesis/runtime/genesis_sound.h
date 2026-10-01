@@ -16,6 +16,15 @@ GenesisZ80Machine *genesis_sound_attach(GenesisRuntime *runtime);
 /* The attached devices (NULL before the first attach): read-only access for aggregate counters. */
 const GenesisAudio *genesis_sound_audio(void);
 
+/* SEG-032-T009: the mixer of the attached devices (NULL before the first attach). The only consumer-side mutation allowed is
+ * draining its ring (genesis_mixer_ring_read). */
+GenesisMixer *genesis_sound_mixer(void);
+
+/* End-of-run flush: unless `guest_stopped`, runs the Z80 to the runtime's guest time (the same step any later synchronization would
+ * take), then runs both devices to that time so the mixer holds every frame whose window ended. The frame count is therefore a pure
+ * function of the final guest time. Safe without a prior attach. */
+void genesis_sound_finish(GenesisRuntime *runtime, int guest_stopped);
+
 /* Releases the devices (after the last run). Safe without a prior attach. */
 void genesis_sound_detach(void);
 

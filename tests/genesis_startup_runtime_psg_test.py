@@ -68,7 +68,7 @@ static void reject(GenesisRuntime *r, uint32_t address, GenesisAccessWidth width
 int main(void) {
   static const uint32_t ports[4] = {UINT32_C(0x00C00011), UINT32_C(0x00C00013), UINT32_C(0x00C00015), UINT32_C(0x00C00017)};
   static const uint8_t sequence[8] = {0x9F, 0x80, 0x0A, 0xBF, 0xDF, 0xFF, 0xE5, 0x03};
-  static const GenesisAudioHooks hooks = {0, recorder, 0, 0, 0};
+  static const GenesisAudioHooks hooks = {0, recorder, 0, 0, 0, 0};
   unsigned i;
 
   /* ---- no sound device attached: accepted and discarded, the log still counts ---- */

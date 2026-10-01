@@ -1,5 +1,7 @@
 #include "genesis_sound.h"
 
+#include <string.h>
+
 static GenesisZ80Machine g_machine;
 static GenesisAudio g_audio;
 static int g_attached;
@@ -14,6 +16,16 @@ GenesisZ80Machine *genesis_sound_attach(GenesisRuntime *runtime) {
 }
 
 const GenesisAudio *genesis_sound_audio(void) { return g_attached ? &g_audio : NULL; }
+
+GenesisMixer *genesis_sound_mixer(void) { return g_attached ? &g_audio.mixer : NULL; }
+
+void genesis_sound_finish(GenesisRuntime *runtime, int guest_stopped) {
+  GenesisRuntimeStop stop;
+  if (!g_attached) return;
+  memset(&stop, 0, sizeof(stop));
+  if (!guest_stopped) (void)genesis_z80_machine_run_to(&g_machine, runtime->scheduler.master_ticks, &stop);
+  genesis_audio_sync(&g_audio, runtime->scheduler.master_ticks);
+}
 
 void genesis_sound_detach(void) {
   if (g_attached) genesis_audio_detach(&g_audio);

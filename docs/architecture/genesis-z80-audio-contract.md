@@ -230,10 +230,10 @@ sequence, device timestamps or final digests (sync-cadence invariance).
 | PSG source | `Sn76489` ticks (240 master ticks): mean level scaled to `0 .. 8192` as `mean x 8192 / 131,068` (unipolar, equal in L and R); no DC removal |
 | mix | `clip16(ym + psg)` saturating at -32768/+32767; the number of clipped samples is counted |
 | empty window | a window containing no native sample of a source repeats the last decimated value of that source |
-| silence | the YM2612 idle output is the chip's DAC discontinuity offset, not zero (measured on both Nuked-OPN2 and ymfm by `genesis_ym2612_oracle_smoke_test`), so a silent run is a *constant* stream, not zeros; "non-silent" means the stream takes at least 2 distinct values with a non-trivial variation (T009 fixes the metric) |
+| silence | the YM2612 idle output is the chip's DAC discontinuity offset, not zero (measured on both Nuked-OPN2 and ymfm by `genesis_ym2612_oracle_smoke_test`), so a silent run is a *constant* stream, not zeros; "non-silent" is fixed by T009 as: at least one frame differs from the previous one AND the peak-to-peak span of the mixed stream (both channels) is at least 16 s16 units (`GENESIS_MIXER_NONSILENT_MIN_SPAN`) |
 | digest | SHA-256 over the canonical little-endian sample bytes (L then R per frame) followed by `u64le frame_count`; independent of chunk, frame or synchronization boundaries |
 
-The gains are project decisions (not hardware claims); T009 may change them only with a cited reference and an ADR note.
+The gains are project decisions (not hardware claims); T009 kept them unchanged (no cited reference to justify a change; ADR 0075). Section 17 records the T009 implementation.
 The presentation (SDL3) layer follows ADR 0070's queue/overrun/underrun/mute policy and never feeds anything back.
 
 ## 12. Retirement list (owner task in brackets)
@@ -258,7 +258,7 @@ No fake/real dual path remains after a task retires its row; a transitional seam
 | U2 | the activation signature | RESOLVED by T002: S1\* (hold-window written extents), §7 | T002 |
 | U3 | Z80 read of work RAM through the bank window (ARES forbids, GPGX allows) | typed stop `z80_bank_target_unsupported` for RAM reads; RAM **writes** admitted; reconsider only with a supported workload that needs it | T004/T010 |
 | U4 | Z80 access to VDP ports through `$7F00` | typed stop except PSG writes | T006/T010 |
-| U5 | audible mix ratio of PSG to FM on hardware | §11 constants; not claimed to be hardware accurate | T009 |
+| U5 | audible mix ratio of PSG to FM on hardware | §11 constants; not claimed to be hardware accurate; kept by T009 (ADR 0075) | closed as a project decision |
 | U6 | PAL timing | out of scope, NTSC constants only | later milestone |
 
 ## 14. Forbidden in production configuration
@@ -299,3 +299,31 @@ project-authored; none commercial.
 Epochs after the observation window, and epochs that depend on input, surface at run time as `z80_unknown_image`. Z80 code that modifies
 its own bytes stops the pass with `z80_code_mismatch` (section 6): a workload with such a driver does not build until a contract amendment
 defines how mutable operand bytes are modelled.
+
+## 17. Mixer, PCM artifact and viewer presentation (T009; ADR 0075)
+
+Implementation of section 11 (`platforms/genesis/runtime/genesis_mixer.[ch]`; the frozen constants live once in `genesis_audio_format.h` and as
+derived macros in `genesis_mixer.h`):
+
+- **Inputs.** The YM2612 sink delivers each native sample with its start tick (clipped to int16 on arrival, which is not a mix clip); the PSG
+  is run tick by tick (`sn76489_tick`, tick `j` starts at `j x 240` master ticks) and each tick level is delivered the same way. Both sources are
+  advanced by their own accesses AND by the Z80 synchronization point (`GenesisAudioHooks.sync`, called after every Z80 `run_to`), so a long run
+  without accesses still produces audio. Advancing a device to a time no access can still precede changes no device state (cadence invariance is
+  tested at quanta 1, 512, 4096 and 65536).
+- **Definition details fixed here.** Truncating division is C's (toward zero, also for negative YM sums). The PSG window mean is truncated
+  first and then scaled: `floor(mean x 8192 / 131068)`. The clip counter counts saturated channel samples (L and R separately). A window is
+  closed for a source as soon as the source's watermark (start of its first undelivered native) reaches the window end; an output frame is
+  produced once both sources closed it. The frame count is therefore a pure function of the final guest time and the native streams, and a
+  shorter run is an exact prefix of a longer one.
+- **Flush.** At the end of a run (`genesis_sound_finish`) the Z80 is run to the final guest time (unless the guest stopped) and then both devices;
+  the headless route reports the aggregates in the opt-in `SOUND_SUMMARY` line (`audio` object: `rate_hz`, `channels`, `frames`, `sha256`,
+  `range_frames`, `range_sha256`, `clipped`, `changes`, `span`, `non_silent`, `fault`, `ring_dropped`, `pcm_file_errors`) and optionally writes the
+  canonical PCM file (`SEGARECOMP_AUDIO_PCM_OUT`) and the digest of a frame range (`SEGARECOMP_AUDIO_RANGE=<first>:<count>`). `status.json` is a
+  build output and carries no run aggregates.
+- **Consumer ring.** 8,192 frames; overrun drops the oldest frame and counts it (`ring_dropped`); the digest, the PCM file and the observer sink
+  never see the drop. A source running 2,048 windows ahead of the other, a non-monotonic native or frame-index overflow sets a typed mixer
+  fault and stops frame production (fail closed).
+- **Viewer.** `viewer.c` calls an optional `after_slice` host callback; the Genesis viewer hook drains the ring there into
+  `genesis_audio_present.c` (ADR 0070 policy: <= 4,410 queued frames, overrun/underrun/refused/discarded counters, mute) and a one-way SDL3
+  audio stream (`viewer_sdl3.c`, stereo S16LE 44,100 Hz). Nothing flows back; `SEGARECOMP_VIEWER_MUTE=1` or a failed device open leaves the viewer
+  silent. The viewer prints `VIEWER_AUDIO_SUMMARY` (frames, digest, clip count, presenter counters) on exit.

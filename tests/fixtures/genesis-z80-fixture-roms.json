@@ -31,6 +31,10 @@
     "sound_smc": {
       "sha256": "50cf09b94e8ece9135b926ad2187a0c398dc5c3f6afcb8c330436348e58d0b63",
       "size": 16384
+    },
+    "sound_tone": {
+      "sha256": "68cbaa8c06b0c82956961a2f6ee026630141e75fd8503cfd642e7d6b1eab9bf7",
+      "size": 16384
     }
   },
   "schema": 1

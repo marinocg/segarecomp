@@ -114,6 +114,7 @@ GenesisViewerResult genesis_viewer_run(GenesisRuntime *runtime, GenesisDispatchF
     GenesisControlTransfer t = genesis_runtime_run(runtime, dispatch, slice);
     r.transfer = t;
     r.slices++;
+    if (host->after_slice != NULL) host->after_slice(host->ctx, runtime);
     if (t.kind == GENESIS_RUNNER_RESOURCE_LIMIT)
       r.dispatches += t.runner_dispatch_count;
     else

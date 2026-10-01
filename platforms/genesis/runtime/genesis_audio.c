@@ -2,13 +2,20 @@
 
 #include <string.h>
 
-static uint64_t psg_cycles(uint64_t master_ticks) { return master_ticks / GENESIS_PSG_CLOCK_DIVIDER; }
+/* Runs every whole PSG tick that ends at or before `master_ticks` (tick j starts at j x 240 master ticks); a time in the past does
+ * nothing, which is the monotonic device-time clamp of contract section 9. Each tick's level goes to the mixer. */
+static void psg_advance(GenesisAudio *audio, uint64_t master_ticks) {
+  const uint64_t target = (master_ticks / GENESIS_PSG_CLOCK_DIVIDER) / audio->psg.config.divider;
+  while (audio->psg.ticks < target) {
+    const uint64_t start = audio->psg.ticks * GENESIS_MIXER_PSG_TICK_MASTER;
+    genesis_mixer_push_psg(&audio->mixer, start, sn76489_tick(&audio->psg, NULL));
+  }
+}
 
 static int audio_psg_write(void *context, GenesisRuntime *runtime, uint8_t value, uint64_t master_ticks) {
   GenesisAudio *audio = (GenesisAudio *)context;
   (void)runtime;
-  /* sn76489_advance does nothing for a time in the past: that is the monotonic device-time clamp of contract section 9. */
-  sn76489_advance(&audio->psg, NULL, psg_cycles(master_ticks));
+  psg_advance(audio, master_ticks);
   if (sn76489_write(&audio->psg, value) == SN76489_WRITE_DATA_BEFORE_LATCH) ++audio->psg_data_before_latch;
   if (audio->trace_count < GENESIS_AUDIO_TRACE_CAPACITY) {
     audio->trace_ticks[audio->trace_count] = master_ticks;
@@ -23,7 +30,7 @@ static void ym_sink(void *context, uint64_t start_master_ticks, int32_t left, in
   GenesisAudio *audio = (GenesisAudio *)context;
   uint32_t bytes[2];
   unsigned i;
-  (void)start_master_ticks;
+  genesis_mixer_push_ym(&audio->mixer, start_master_ticks, left, right);
   bytes[0] = (uint32_t)left;
   bytes[1] = (uint32_t)right;
   for (i = 0U; i < 8U; ++i) audio->ym_sample_fnv = (audio->ym_sample_fnv ^ ((const uint8_t *)bytes)[i]) * UINT64_C(0x100000001b3);
@@ -61,9 +68,20 @@ static void audio_ym_reset(void *context, GenesisRuntime *runtime, uint64_t mast
   ym_trace(audio, master_ticks, 0xFFU, 0U);
 }
 
+void genesis_audio_sync(GenesisAudio *audio, uint64_t master_ticks) {
+  if (audio->ym != NULL) ym2612_advance(audio->ym, master_ticks);
+  psg_advance(audio, master_ticks);
+}
+
+static void audio_sync_hook(void *context, GenesisRuntime *runtime, uint64_t master_ticks) {
+  (void)runtime;
+  genesis_audio_sync((GenesisAudio *)context, master_ticks);
+}
+
 void genesis_audio_attach(GenesisAudio *audio, GenesisRuntime *runtime) {
   Sn76489Config config;
   memset(audio, 0, sizeof(*audio));
+  genesis_mixer_init(&audio->mixer);
   audio->runtime = runtime;
   config = sn76489_default_config();
   (void)sn76489_init(&audio->psg, &config);
@@ -76,6 +94,7 @@ void genesis_audio_attach(GenesisAudio *audio, GenesisRuntime *runtime) {
   audio->hooks.ym_read = audio_ym_read;
   audio->hooks.ym_write = audio_ym_write;
   audio->hooks.ym_reset = audio_ym_reset;
+  audio->hooks.sync = audio_sync_hook;
   runtime->audio_hooks = &audio->hooks;
 }
 
@@ -87,9 +106,7 @@ void genesis_audio_detach(GenesisAudio *audio) {
 
 void genesis_audio_ym_run_to(GenesisAudio *audio, uint64_t master_ticks) { ym2612_advance(audio->ym, master_ticks); }
 
-void genesis_audio_psg_run_to(GenesisAudio *audio, uint64_t master_ticks) {
-  sn76489_advance(&audio->psg, NULL, psg_cycles(master_ticks));
-}
+void genesis_audio_psg_run_to(GenesisAudio *audio, uint64_t master_ticks) { psg_advance(audio, master_ticks); }
 
 void genesis_audio_psg_state(const GenesisAudio *audio, uint8_t out[SN76489_STATE_BYTES]) {
   sn76489_state_bytes(&audio->psg, out);

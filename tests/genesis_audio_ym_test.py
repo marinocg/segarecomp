@@ -121,7 +121,7 @@ def main():
         rt = root / "platforms/genesis/runtime"
         exe, message = z.compile_units(
             tc, tmp / "gen", "genesis_z80",
-            extra_sources=[root / "tests/tools/genesis_z80_machine_harness.c", rt / "runtime.c", rt / "z80_machine.c", rt / "genesis_audio.c",
+            extra_sources=[root / "tests/tools/genesis_z80_machine_harness.c", rt / "runtime.c", rt / "z80_machine.c", rt / "genesis_audio.c", rt / "genesis_mixer.c",
                            root / "libs/device/sega/psg/src/sn76489.c"],
             extra_flags=["-I", str(rt), "-I", str(root / "libs/device/sega/psg/include"), "-I", str(root / "libs/device/sega/ym2612/include")],
             extra_objects=ymbuild.build_objects(cc, cxx, root, tmp / "ymobj"))

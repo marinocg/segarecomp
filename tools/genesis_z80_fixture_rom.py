@@ -365,6 +365,25 @@ def sound_driver(variant):
     return z80("\n".join(lines) + "\n")
 
 
+def sound_tone_driver():
+    """SEG-032-T009: a Z80 driver that plays all three sources and then loops: a PSG tone (two voices), a YM2612 FM tone (algorithm 7,
+    left channel only, key on) and DAC samples. Project-authored; every YM2612 write polls the busy flag first."""
+    ym = [(0, 0xB0), (1, 0x07), (0, 0xB4), (1, 0x80)]
+    for off in (0x00, 0x04, 0x08, 0x0C):
+        ym += [(0, 0x30 + off), (1, 1), (0, 0x40 + off), (1, 0x20), (0, 0x50 + off), (1, 0x1F), (0, 0x60 + off), (1, 0),
+               (0, 0x70 + off), (1, 0), (0, 0x80 + off), (1, 0x0F)]
+    ym += [(0, 0xA4), (1, 0x22), (0, 0xA0), (1, 0x69), (0, 0x28), (1, 0xF0), (0, 0x2B), (1, 0x80)]
+    for i in range(40):
+        ym += [(0, 0x2A), (1, (i * 53 + 7) & 0xFF)]
+    lines = [".org 0x0000", "        ld sp,0x1F00"]
+    for value in (0x8A, 0x0F, 0x90, 0xA5, 0x08, 0xB2):
+        lines += ["        ld a,%d" % value, "        ld (0x7F11),a"]
+    for n, (port, value) in enumerate(ym):
+        lines += ["w%d:     ld a,(0x4000)" % n, "        add a,a", "        jr c,w%d" % n, "        ld a,%d" % value, "        ld (0x%04X),a" % (0x4000 + port)]
+    lines += ["loop:   jr loop"]
+    return z80("\n".join(lines) + "\n")
+
+
 def sound_smc_driver():
     """A Z80 program that overwrites the byte of its own next instruction: outside every 68K-written extent's identity, so the
     RAM-backed code guard (z80_code_mismatch), not the signature, must catch it."""
@@ -428,6 +447,11 @@ def fixture_sound_multi_epoch():
                         ("delay", SOUND_DELAY), ("raw", "a")], {"a": sound_driver(1), "b": sound_driver(2)})
 
 
+def fixture_sound_tone():
+    """SEG-032-T009: one image that plays a PSG tone, an FM tone and DAC samples (the deterministic audio artifact fixture)."""
+    return build_sound([("raw", "t")], {"t": sound_tone_driver()})
+
+
 def fixture_sound_decoded():
     """A raw upload and a computed (XOR-decoded) upload of the same driver bytes: identical activation signature, one image."""
     return build_sound([("raw", "a"), ("delay", SOUND_DELAY), ("decoded", "a")], {"a": sound_driver(3)})
@@ -455,7 +479,7 @@ def fixture_sound_late_epoch():
 
 FIXTURES = {"multi_epoch_dirty": fixture_multi_epoch_dirty, "bus_reset_probe": fixture_bus_reset_probe, "bus_reset_control": fixture_bus_reset_control,
             "sound_raw": fixture_sound_raw, "sound_multi_epoch": fixture_sound_multi_epoch, "sound_decoded": fixture_sound_decoded,
-            "sound_smc": fixture_sound_smc, "sound_late_epoch": fixture_sound_late_epoch}
+            "sound_smc": fixture_sound_smc, "sound_tone": fixture_sound_tone, "sound_late_epoch": fixture_sound_late_epoch}
 
 
 def build(name):

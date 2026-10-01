@@ -14,19 +14,20 @@
 #ifndef SEGARECOMP_GENESIS_AUDIO_H
 #define SEGARECOMP_GENESIS_AUDIO_H
 
+#include "genesis_mixer.h"
 #include "runtime.h"
 #include "segarecomp/device/sega/psg/sn76489.h"
 #include "segarecomp/device/sega/ym2612/ym2612.h"
 
 #define GENESIS_AUDIO_TRACE_CAPACITY 64U
 #define GENESIS_AUDIO_YM_TRACE_CAPACITY 512U
-#define GENESIS_PSG_CLOCK_DIVIDER 15U /* master ticks per PSG input clock (= the Z80 clock) */
 
 typedef struct GenesisAudio {
   Sn76489 psg;
   Ym2612 *ym;                    /* the YM2612 (NULL only if creation failed) */
   GenesisAudioHooks hooks;       /* installed into runtime->audio_hooks by genesis_audio_attach */
   GenesisRuntime *runtime;
+  GenesisMixer mixer;            /* the frozen 44,100 Hz stereo s16 artifact (SEG-032-T009) */
   uint64_t psg_writes;           /* bytes delivered to the device from either CPU */
   uint64_t psg_data_before_latch;/* bytes the device ignored because no register was latched yet */
   uint64_t ym_writes;            /* YM2612 port writes delivered from either CPU */
@@ -53,8 +54,12 @@ void genesis_audio_detach(GenesisAudio *audio);
 /* Runs the YM2612 to guest time `master_ticks` (no access). */
 void genesis_audio_ym_run_to(GenesisAudio *audio, uint64_t master_ticks);
 
-/* Runs the PSG to guest time `master_ticks` (no write); used by the mixer and by tests. */
+/* Runs the PSG to guest time `master_ticks` (no write): every tick is delivered to the mixer. */
 void genesis_audio_psg_run_to(GenesisAudio *audio, uint64_t master_ticks);
+
+/* Runs BOTH devices to guest time `master_ticks` (the mixer then holds every frame whose window ended). Advancing a device to a time
+ * before which no access can still arrive changes no state, so any cadence of this call yields the same stream. */
+void genesis_audio_sync(GenesisAudio *audio, uint64_t master_ticks);
 
 /* Canonical PSG state serialization (determinism evidence). */
 void genesis_audio_psg_state(const GenesisAudio *audio, uint8_t out[SN76489_STATE_BYTES]);

@@ -32,14 +32,15 @@ void attach(Obs &s, GenesisRuntime &r) {
 
 struct Fake {
   uint64_t now = 0; std::vector<uint64_t> sleeps; int closed_after = -1, polls = 0, presents = 0;
-  int fail_present = 0; int use_pad = 0; uint8_t pad = 0; std::vector<uint64_t> advance; size_t ai = 0;
+  int fail_present = 0; int use_pad = 0; int use_after = 0; int after_calls = 0; uint8_t pad = 0; std::vector<uint64_t> advance; size_t ai = 0;
 };
 uint64_t f_now(void *c) { auto *f = (Fake *)c; uint64_t n = f->now; if (f->ai < f->advance.size()) f->now += f->advance[f->ai++]; return n; }
 void f_sleep(void *c, uint64_t ns) { auto *f = (Fake *)c; f->sleeps.push_back(ns); f->now += ns; }
 int f_present(void *c, const GenesisFrameArtifact *) { auto *f = (Fake *)c; ++f->presents; return f->fail_present; }
 int f_closed(void *c) { auto *f = (Fake *)c; return f->closed_after >= 0 && f->polls++ >= f->closed_after; }
 uint8_t f_pad(void *c) { return ((Fake *)c)->pad; }
-GenesisViewerHost host(Fake &f) { return {&f, f_now, f_sleep, f_present, f_closed, f.use_pad ? f_pad : nullptr}; }
+void f_after(void *c, GenesisRuntime *) { ++((Fake *)c)->after_calls; }
+GenesisViewerHost host(Fake &f) { return {&f, f_now, f_sleep, f_present, f_closed, f.use_pad ? f_pad : nullptr, f.use_after ? f_after : nullptr}; }
 
 void pacer_tests() {
   Fake f; auto h = host(f); GenesisPacer p; genesis_pacer_init(&p, 0);
@@ -66,7 +67,7 @@ void pacer_tests() {
   Fake g; auto hg = host(g); GenesisPacer u; genesis_pacer_init(&u, 1);
   for (int i = 0; i < 5; ++i) (void)genesis_pacer_wait(&u, &hg);
   check(g.sleeps.empty() && u.sleep_calls == 0, "unthrottled never sleeps");
-  GenesisViewerHost bad = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+  GenesisViewerHost bad = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
   check(genesis_pacer_wait(&p, &bad) == -1 && genesis_pacer_wait(nullptr, &h) == -1, "null args fail");
 }
 
@@ -123,6 +124,9 @@ void run_tests() {
   Fake w; w.closed_after = 2; Run rw;
   auto cl = go(rw, 5, false, w, 1000000, 200);
   check(cl.outcome == GENESIS_VIEWER_WINDOW_CLOSED && cl.slices == 2, "window closure stops");
+  Fake af; af.use_after = 1; Run rf;
+  auto ar = go(rf, 7, false, af, 1000000, 200);
+  check(ar.slices > 1 && af.after_calls == (int)ar.slices, "after_slice observer runs once per completed slice (SEG-032-T009 audio drain seam)");
   Fake pf; pf.fail_present = 1; Run rp;
   check(go(rp, 100, false, pf, 1000000, 200).outcome == GENESIS_VIEWER_HOST_ERROR, "present failure is host error");
   Fake nf; Run rn; auto nn = go(rn, 4, false, nf, 1000000, 3);

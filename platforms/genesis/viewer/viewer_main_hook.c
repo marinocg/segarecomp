@@ -20,13 +20,27 @@
 #include "viewer.h"
 #include "viewer_sdl3.h"
 #ifdef SEGARECOMP_GENESIS_SOUND
-#include "genesis_sound.h" /* SEG-032-T008: the sound-carrying link set of `segarecomp build` */
+#include "genesis_audio_present.h" /* SEG-032-T009: the shared mixer is presented, never advanced, by the viewer */
+#include "genesis_sound.h"         /* SEG-032-T008: the sound-carrying link set of `segarecomp build` */
 #endif
 
 GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                                uint32_t dispatch_allowance);
 
 static GenesisFrameArtifact g_latest_frame;
+
+#ifdef SEGARECOMP_GENESIS_SOUND
+/* SEG-032-T009 (ADR 0075): after each slice the viewer drains what the mixer already produced into the host sink. The mixer is fed by
+ * the devices on the runtime's own synchronization points, exactly as in the headless program; nothing flows back. */
+static GenesisAudioPresenter g_presenter;
+
+static void viewer_after_slice(void *ctx, GenesisRuntime *runtime) {
+  GenesisMixer *mixer = genesis_sound_mixer();
+  (void)ctx;
+  (void)runtime;
+  if (mixer != NULL) genesis_audio_present(&g_presenter, mixer);
+}
+#endif
 
 GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                                uint32_t dispatch_allowance) {
@@ -59,10 +73,38 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   GenesisViewerHost host;
   GenesisPacer pacer;
   genesis_sdl3_viewer_host(sdl, &host);
+#ifdef SEGARECOMP_GENESIS_SOUND
+  {
+    const char *mute = getenv("SEGARECOMP_VIEWER_MUTE");
+    const int muted = mute != NULL && strcmp(mute, "1") == 0;
+    /* A failed open, a missing audio subsystem or mute leaves the viewer silent; the ring is still drained. */
+    genesis_audio_presenter_init(&g_presenter, muted ? NULL : genesis_sdl3_viewer_audio_open(sdl), muted);
+    host.after_slice = viewer_after_slice;
+  }
+#endif
   genesis_pacer_init(&pacer, options.unthrottled);
   GenesisViewerResult r = genesis_viewer_run(runtime, dispatch, &options, &host, &pacer,
                                                 dispatch_allowance == UINT32_MAX ? UINT64_MAX : dispatch_allowance);
   runtime->live_frame_observer = NULL;
+#ifdef SEGARECOMP_GENESIS_SOUND
+  genesis_sound_finish(runtime, r.outcome == GENESIS_VIEWER_GUEST_STOP);
+  viewer_after_slice(NULL, runtime);
+  if (genesis_sound_mixer() != NULL) {
+    const GenesisMixer *mixer = genesis_sound_mixer();
+    uint8_t digest[32];
+    char digest_hex[65];
+    unsigned i;
+    genesis_mixer_digest(mixer, digest);
+    for (i = 0U; i < 32U; ++i) snprintf(digest_hex + 2U * i, 3U, "%02x", (unsigned)digest[i]);
+    fprintf(stderr,
+            "VIEWER_AUDIO_SUMMARY {\"frames\":%llu,\"sha256\":\"%s\",\"clipped\":%llu,\"non_silent\":%s,\"fault\":%d,"
+            "\"device\":%s,\"submitted\":%llu,\"overrun_dropped\":%llu,\"refused\":%llu,\"discarded\":%llu,\"underruns\":%llu}\n",
+            (unsigned long long)mixer->frames, digest_hex, (unsigned long long)mixer->clipped,
+            genesis_mixer_non_silent(mixer) ? "true" : "false", (int)mixer->fault, g_presenter.sink != NULL ? "true" : "false",
+            (unsigned long long)g_presenter.submitted, (unsigned long long)g_presenter.overrun_dropped,
+            (unsigned long long)g_presenter.refused, (unsigned long long)g_presenter.discarded, (unsigned long long)g_presenter.underruns);
+  }
+#endif
   genesis_sdl3_viewer_close(sdl);
 
   const char *name = r.outcome == GENESIS_VIEWER_GUEST_STOP        ? "guest_stop"

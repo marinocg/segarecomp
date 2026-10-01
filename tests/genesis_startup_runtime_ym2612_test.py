@@ -44,7 +44,7 @@ static int ym_write(void *context, GenesisRuntime *runtime, uint32_t port, uint8
   ++writes; last_port = port; last_value = value; last_ticks = ticks;
   return 1;
 }
-static const GenesisAudioHooks hooks = {0, 0, ym_read, ym_write, 0};
+static const GenesisAudioHooks hooks = {0, 0, ym_read, ym_write, 0, 0};
 
 static void reject(GenesisRuntime *r, uint32_t address, GenesisAccessWidth width, GenesisAccessDirection direction,
                    GenesisStopClass stop_class, GenesisDiagnosticCategory diagnostic) {

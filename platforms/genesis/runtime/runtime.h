@@ -1300,6 +1300,9 @@ typedef struct GenesisAudioHooks {
   int (*ym_read)(void *context, GenesisRuntime *runtime, uint32_t port, uint64_t master_ticks, uint8_t *value);
   int (*ym_write)(void *context, GenesisRuntime *runtime, uint32_t port, uint8_t value, uint64_t master_ticks);
   void (*ym_reset)(void *context, GenesisRuntime *runtime, uint64_t master_ticks);
+  /* SEG-032-T009: optional (NULL = none). Called by the Z80 machine each time it has been synchronized to `master_ticks`, so the devices
+   * can run to a time no access can still precede. Never changes device state beyond running it forward in time. */
+  void (*sync)(void *context, GenesisRuntime *runtime, uint64_t master_ticks);
 } GenesisAudioHooks;
 typedef struct GenesisReportMetadata {
   GenesisCpuDimensions cpu_dimensions;
