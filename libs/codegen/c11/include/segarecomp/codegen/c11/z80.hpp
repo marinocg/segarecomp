@@ -78,10 +78,12 @@ struct EmitOptions {
   // TU size and compiler memory, ADR 0058). The default only matters for images above 64 Ki owners; tests lower it to exercise
   // the chunk path on a small image.
   std::size_t entry_chunk_entries = 65536;
+  bool share_bodies = true;  // PC-independent instruction effects are emitted once and called (SEG-033-T005); false = reference
   std::size_t owner_group_entries = kOwnerGroupEntries;  // >= 1; tests and the differential gate pin 1 (reference) vs N
 };
 
 struct EmitStats {
+  std::size_t shared_bodies = 0;     // distinct shared effect functions
   std::size_t entries = 0;           // exact starts with an owner binding (the entry-table size)
   std::size_t owners = 0;            // host owner functions
   std::size_t max_group_entries = 0; // largest group

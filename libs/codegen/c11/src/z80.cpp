@@ -45,6 +45,12 @@ struct Variant {
   StartClassification classification;
   const LoweringRow* row = nullptr;  // set for a decoded start with a lowering row
   bool absent = false;               // decoded but not lowered
+  // Shared body (SEG-033-T005): the instruction's whole effect (R, statements, Q, T-states) is PC-independent text, so it
+  // lives once in an external function `z80_fb_<n>(rt)` and every entry with the same text calls it. `flow` is the tail the
+  // entry still emits itself.
+  static constexpr std::size_t kNoBody = static_cast<std::size_t>(-1);
+  std::size_t body = kNoBody;
+  Flow flow = Flow::fallthrough;
 };
 
 struct Plan {
@@ -116,6 +122,21 @@ const char* error_name(const Variant& v) {
   }
 }
 
+// Distinct shared bodies in first-use order (plan order, so deterministic). The text is the function body below the
+// `Z80State *s` line.
+struct BodyPool {
+  std::map<std::string, std::size_t> ids;
+  std::vector<const std::string*> texts;
+  std::size_t intern(const std::string& text) {
+    const auto [it, inserted] = ids.emplace(text, ids.size());
+    if (inserted) texts.push_back(&it->first);
+    return it->second;
+  }
+};
+
+std::string body_symbol(std::size_t id) { return "z80_fb_" + std::to_string(id); }
+std::string body_declaration(std::size_t id) { return "void " + body_symbol(id) + "(struct Z80Runtime *rt)"; }
+
 struct Pcs {
   std::string start;
   std::string next;
@@ -128,9 +149,41 @@ Pcs pcs_for(const Plan& plan, const StartClassification& c, std::uint16_t key) {
   return {"(uint16_t)(window_base + " + hex_literal(key, 4) + ")", "(uint16_t)(window_base + " + hex_literal(next, 4) + ")"};
 }
 
-// Returns true when the body ends in the in-group `goto` of `successor.label`.
+// The instruction's effect as C text: R accounting, the lowered statements, Q and T-states (everything but the owner prologue
+// and the control-flow tail).
+std::string effect_text(const DecodedInstruction& insn, const Lowered& lowered, const std::string& indent) {
+  std::ostringstream out;
+  out << indent << "s->r = z80_r_add(s->r, " << cpu::z80::m1_fetches(insn) << "u);\n";
+  std::istringstream body(lowered.statements);
+  for (std::string line; std::getline(body, line);) out << indent << line << "\n";
+  out << indent << (lowered.writes_flags ? "s->q = s->f;\n" : "s->q = 0u;\n");
+  if (lowered.cycles_expression.empty())
+    out << indent << "s->cycles += " << cpu::z80::t_states(insn, cpu::z80::TimingOutcome::primary) << "u;\n";
+  else
+    out << indent << "s->cycles += (uint64_t)(" << lowered.cycles_expression << ");\n";
+  return out.str();
+}
+
+// Shares the effect of a decoded variant when it is PC-independent. Rows must take every PC-dependent value from the context
+// expressions (z80_lowering.hpp), so lowering with two different placeholder PCs yields identical text exactly when the
+// effect does not depend on the instruction's address.
+void share_body(const Plan& plan, Variant& v, BodyPool& pool) {
+  const DecodedInstruction& insn = v.classification.instruction;
+  const cpu::z80::FormDescriptor& form = cpu::z80::form_descriptor(insn.form);
+  const Pcs pc = pcs_for(plan, v.classification, plan.key);
+  const Lowered real = v.row->lower(LowerContext{insn, form, pc.start, pc.next});
+  const Lowered probe = v.row->lower(LowerContext{insn, form, "0x7777u", "0x7779u"});
+  if (probe.statements != real.statements || probe.cycles_expression != real.cycles_expression ||
+      probe.writes_flags != real.writes_flags || probe.flow != real.flow)
+    return;
+  v.body = pool.intern(effect_text(insn, real, "  "));
+  v.flow = real.flow;
+}
+
+// Returns true when the body ends in the in-group `goto` of `successor.label`. Bodies the entry calls are added to `bodies`
+// (the caller declares them in block scope: the shared header deliberately declares no owner or body, ADR 0058 RSS budget).
 bool emit_variant_body(std::ostream& out, const Plan& plan, const Variant& v, std::uint16_t key, const std::string& indent,
-                       const Successor& successor) {
+                       const Successor& successor, std::set<std::size_t>& bodies) {
   const Pcs pc = pcs_for(plan, v.classification, key);
   switch (v.classification.kind) {
     case StartKind::prefix_lock:
@@ -147,18 +200,18 @@ bool emit_variant_body(std::ostream& out, const Plan& plan, const Variant& v, st
           << indent << "return Z80_OWNER_STOP;\n";
       return false;
   }
-  const DecodedInstruction& insn = v.classification.instruction;
-  const cpu::z80::FormDescriptor& form = cpu::z80::form_descriptor(insn.form);
-  const Lowered lowered = v.row->lower(LowerContext{insn, form, pc.start, pc.next});
-  out << indent << "s->r = z80_r_add(s->r, " << cpu::z80::m1_fetches(insn) << "u);\n";
-  std::istringstream body(lowered.statements);
-  for (std::string line; std::getline(body, line);) out << indent << line << "\n";
-  out << indent << (lowered.writes_flags ? "s->q = s->f;\n" : "s->q = 0u;\n");
-  if (lowered.cycles_expression.empty())
-    out << indent << "s->cycles += " << cpu::z80::t_states(insn, cpu::z80::TimingOutcome::primary) << "u;\n";
-  else
-    out << indent << "s->cycles += (uint64_t)(" << lowered.cycles_expression << ");\n";
-  switch (lowered.flow) {
+  Flow flow = v.flow;
+  if (v.body != Variant::kNoBody) {
+    bodies.insert(v.body);
+    out << indent << body_symbol(v.body) << "(rt);\n";
+  } else {
+    const DecodedInstruction& insn = v.classification.instruction;
+    const cpu::z80::FormDescriptor& form = cpu::z80::form_descriptor(insn.form);
+    const Lowered lowered = v.row->lower(LowerContext{insn, form, pc.start, pc.next});
+    out << effect_text(insn, lowered, indent);
+    flow = lowered.flow;
+  }
+  switch (flow) {
     case Flow::fallthrough:
       if (!successor.label.empty()) {
         out << indent << "goto " << successor.label << ";\n";
@@ -183,12 +236,13 @@ bool emit_variant_body(std::ostream& out, const Plan& plan, const Variant& v, st
 
 // The part of one entry after the function header: owner prologue and the variant body (or the per-window-base switch).
 // Returns true when the entry ends in the in-group `goto` of its successor's label.
-bool emit_entry(std::ostream& out, const Plan& plan, const std::string& indent, const Successor& successor) {
+bool emit_entry(std::ostream& out, const Plan& plan, const std::string& indent, const Successor& successor,
+                std::set<std::size_t>& bodies) {
   const Variant& first = plan.variants.front();
   const Pcs pc = pcs_for(plan, first.classification, plan.key);
   const bool lock = plan.variants.size() == 1 && first.classification.kind == StartKind::prefix_lock;
   if (!lock) out << indent << "if (z80_owner_prologue(rt, " << pc.start << ")) return Z80_OWNER_STOP;\n";
-  if (plan.variants.size() == 1 && !plan.partial) return emit_variant_body(out, plan, first, plan.key, indent, successor);
+  if (plan.variants.size() == 1 && !plan.partial) return emit_variant_body(out, plan, first, plan.key, indent, successor, bodies);
   out << indent << "switch (window_base) {\n";
   for (const Variant& v : plan.variants) {
     for (const std::uint16_t base : v.bases) out << indent << "  case " << hex_literal(base, 4) << ":\n";
@@ -197,7 +251,7 @@ bool emit_entry(std::ostream& out, const Plan& plan, const std::string& indent, 
       out << indent << "    z80_lock_run(rt, " << pcs_for(plan, v.classification, plan.key).start << ");\n"
           << indent << "    return Z80_OWNER_STOP;\n";
     else
-      emit_variant_body(out, plan, v, plan.key, indent + "    ", Successor{});
+      emit_variant_body(out, plan, v, plan.key, indent + "    ", Successor{}, bodies);
     out << indent << "  }\n";
   }
   out << indent << "  default:\n" << indent << "  {\n" << indent << "    s->pc = " << pc.start << ";\n"
@@ -208,12 +262,19 @@ bool emit_entry(std::ostream& out, const Plan& plan, const std::string& indent, 
 
 std::string entry_label(std::uint16_t key) { return "z80_e_" + hex(key, 4); }
 
+void emit_body_declarations(std::ostream& out, const std::set<std::size_t>& bodies) {
+  for (const std::size_t id : bodies) out << "  " << body_declaration(id) << ";\n";
+}
+
 void emit_owner(std::ostream& out, const Plan& plan, const std::string& symbol, const std::string& runtime_note, const Successor& successor) {
+  std::set<std::size_t> bodies;
+  std::ostringstream entry;
+  emit_entry(entry, plan, "  ", successor, bodies);
   out << "/* " << runtime_note << " */\n";
   out << "static " << owner_declaration(symbol) << " {\n  Z80State *s = &rt->state;\n  (void)s;\n";
   if (!plan.relative) out << "  (void)window_base;\n";
-  emit_entry(out, plan, "  ", successor);
-  out << "}\n";
+  emit_body_declarations(out, bodies);
+  out << entry.str() << "}\n";
 }
 
 // A grouped owner: one function holding `count` exact entries. The entry is selected from the PC the dispatcher (or a direct
@@ -223,22 +284,24 @@ void emit_group(std::ostream& out, const std::vector<Plan>& plans, const Group& 
                 const std::string& note, const std::vector<Successor>& successors) {
   const bool relative = plans[group.first].relative;
   // Render every entry first: an entry's label exists only if an earlier or later entry actually jumps to it.
-  std::vector<std::string> bodies;
+  std::vector<std::string> rendered;
   std::set<std::string> used;
+  std::set<std::size_t> bodies;
   for (std::size_t i = group.first; i < group.first + group.count; ++i) {
-    std::ostringstream body;
-    if (emit_entry(body, plans[i], "      ", successors[i])) used.insert(successors[i].label);
-    bodies.push_back(body.str());
+    std::ostringstream entry;
+    if (emit_entry(entry, plans[i], "      ", successors[i], bodies)) used.insert(successors[i].label);
+    rendered.push_back(entry.str());
   }
   out << "/* " << note << " */\n";
   out << "static " << owner_declaration(symbol) << " {\n  Z80State *s = &rt->state;\n  (void)s;\n";
   if (!relative) out << "  (void)window_base;\n";
+  emit_body_declarations(out, bodies);
   out << "  switch (" << (relative ? "(uint16_t)(s->pc - window_base)" : "s->pc") << ") {\n";
   for (std::size_t i = group.first; i < group.first + group.count; ++i) {
     const Plan& plan = plans[i];
     out << "    case " << hex_literal(plan.key, 4) << ":\n    {\n";
     if (used.contains(entry_label(plan.key))) out << entry_label(plan.key) << ":\n";
-    out << bodies[i - group.first] << "    }\n";
+    out << rendered[i - group.first] << "    }\n";
   }
   out << "    default:\n    {\n      rt->outcome = Z80_ERROR_NO_OWNER;\n      return Z80_OWNER_STOP;\n    }\n  }\n}\n";
 }
@@ -445,6 +508,14 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
     }
   }
 
+  // Shared bodies (SEG-033-T005): decided before emission so the body translation units can be sized.
+  BodyPool pool;
+  if (options.share_bodies)
+    for (Plan& plan : plans)
+      if (plan.variants.size() == 1 && !plan.partial && plan.variants.front().classification.kind == StartKind::decoded &&
+          !plan.variants.front().absent)
+        share_body(plan, plan.variants.front(), pool);
+
   // ---- emission ----
   std::size_t shards = static_cast<std::size_t>((dense + 2047) / 2048);
   shards = std::clamp<std::size_t>(shards, 1, 48);
@@ -457,6 +528,8 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
   chunking.declare_owner = [](std::string_view symbol) { return owner_declaration(std::string(symbol)); };
   const bool chunked_entries = plans.size() > kEntryChunk;
   std::vector<TranslationUnitFamily> families{TranslationUnitFamily{"owner", shards, 8}};
+  const std::size_t body_shards = std::clamp<std::size_t>((pool.texts.size() + 2047) / 2048, 1, 32);
+  if (!pool.texts.empty()) families.push_back(TranslationUnitFamily{"body", body_shards, 0});
   if (chunked_entries) families.push_back(TranslationUnitFamily{"entry", compiled_entry_chunk_count(plans.size(), kEntryChunk), 0});
   TranslationUnitSharder sharder(options.directory, options.stem, std::move(families));
   std::ostream& out = sharder.stream();
@@ -511,6 +584,12 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
     }
     if (options.record_owners) result.owners.push_back(record);
   }
+
+  for (std::size_t id = 0; id < pool.texts.size(); ++id) {
+    ShardUnitScope unit(out, "body", id, body_declaration(id), false);
+    out << body_declaration(id) << " {\n  Z80State *s = &rt->state;\n  (void)s;\n" << *pool.texts[id] << "}\n";
+  }
+  result.stats.shared_bodies = pool.texts.size();
 
   // Main translation unit: owner declarations (only here), identity table, entry table, dispatcher.
   out << (chunked_entries ? "\n/* Owner declarations live in the entry-chunk translation units. */\n"

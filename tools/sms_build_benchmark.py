@@ -121,7 +121,7 @@ def main():
     ap.add_argument("--cli", required=True)
     ap.add_argument("--root", required=True)
     ap.add_argument("--image", required=True)
-    ap.add_argument("--optimize", default="2")
+    ap.add_argument("--optimize", default="", help="empty: the build route's default policy")
     ap.add_argument("--jobs", type=int, default=0)
     ap.add_argument("--cc", default="cc")
     ap.add_argument("--mapper", default="sega")
@@ -148,10 +148,12 @@ def main():
         work = pathlib.Path(cleanup.name)
     (work / "image.sms").write_bytes(rom)  # the file name is irrelevant to the route (classified by content)
     out = work / "out"
-    cmd = [args.cli, "build", "--rom", str(work / "image.sms"), "--output", str(out), "--cc", args.cc, "--optimize", args.optimize,
+    cmd = [args.cli, "build", "--rom", str(work / "image.sms"), "--output", str(out), "--cc", args.cc,
            "--runtime-dir", str(root / "platforms" / args.platform)]
     if args.platform == "master-system":
         cmd += ["--mapper", args.mapper]
+    if args.optimize:
+        cmd += ["--optimize", args.optimize]
     if args.jobs:
         cmd += ["--jobs", str(args.jobs)]
     for pair in args.extra:
@@ -182,7 +184,7 @@ def main():
     exe = out / "game"
     gen = generated_stats(out / "generated")
     if args.platform == "genesis":  # build-only figures
-        result = {"label": args.label, "platform": "genesis", "optimize": args.optimize, "jobs": args.jobs or "default",
+        result = {"label": args.label, "platform": "genesis", "optimize": args.optimize or "default", "jobs": args.jobs or "default",
                   "total_wall_s": round(total, 2), "generate_wall_s": span("analyze", "generate"), "compile_wall_s": span("compile", "compile"),
                   "link_wall_s": span("link", "link"), "build_cpu_s": round(cpu, 1),
                   "rss_mib": {stage: {k.replace("_kib", "_mib"): round(v / 1024) for k, v in peak.items()} for stage, peak in sampler.peaks.items()},
@@ -207,7 +209,7 @@ def main():
     status = json.loads((art / "status.json").read_text()) if (art / "status.json").exists() else {}
     result = {
         "label": args.label, "image": "rom" if args.image.startswith("rom:") else args.image, "rom_kib": len(rom) // 1024,
-        "optimize": args.optimize, "jobs": args.jobs or "default", "cc": args.cc, "host_cpus": os.cpu_count(),
+        "optimize": args.optimize or "default", "jobs": args.jobs or "default", "cc": args.cc, "host_cpus": os.cpu_count(),
         "total_wall_s": round(total, 2), "generate_wall_s": span("analyze", "generate"), "compile_wall_s": span("compile", "compile"),
         "link_wall_s": span("link", "link"), "build_cpu_s": round(cpu, 1),
         "rss_mib": {stage: {k.replace("_kib", "_mib"): round(v / 1024) for k, v in peak.items()} for stage, peak in sampler.peaks.items()},

@@ -15,8 +15,9 @@ writes, I/O) must be identical:
   * seeded random programs over an invariant image and over an SMS-shaped banked map with remap steps and random INT/NMI.
 
 Every candidate emission must also keep the exact entry set and the owner classification of the reference, create strictly
-fewer host owners and respect the group bound. `quick` (default) compares the scenarios and random programs; `full` adds the
-form matrix. Candidate sizes include odd small bounds (2, 3, 7) that put group boundaries at every kind of position.
+fewer host owners and respect the group bound. Candidates vary the group bound (odd small bounds 2, 3, 7 put group boundaries at
+every kind of position; the production default) and the shared PC-independent effect bodies (SEG-033-T005) independently.
+`quick` (default) compares the scenarios and random programs; `full` adds the form matrix.
 """
 import json
 import pathlib
@@ -31,7 +32,10 @@ import z80_conformance as z  # noqa: E402
 EMITTER, CC = sys.argv[1], sys.argv[2]
 MODE = sys.argv[4] if len(sys.argv) > 4 else "quick"
 assert MODE in ("quick", "full"), MODE
-BOUNDS = (2, 3, 7, None)  # None: the emitter's default group size (the production setting)
+# (group bound, shared bodies): the reference is (1, 0) = one function per start with every effect inline (the merged emission).
+# None selects the emitter default (the production setting).
+REFERENCE = (1, 0)
+CONFIGS = ((2, None), (3, None), (7, None), (None, None), (None, 0), (1, None))
 FAILED = []
 COMPARED = 0
 
@@ -80,45 +84,54 @@ def random_documents():
 
 
 def comparable(stats):
-    return {k: v for k, v in stats.items() if not k.startswith("shape_")}
+    """The classification counts, which an emission layout must not change (shape_* and the TU count are layout)."""
+    return {k: v for k, v in stats.items() if not k.startswith("shape_") and k != "units"}
+
+
+def toolchain(config):
+    group, share = config
+    return z.Toolchain(CC, EMITTER, None, owner_group=group, share_bodies=share)
+
+
+def tag_of(config):
+    return "group=%s share=%s" % ("default" if config[0] is None else config[0], "default" if config[1] is None else config[1])
 
 
 def compare_batches(label, batches, work):
     global COMPARED
     for batch in batches:
         outputs = {}
-        for bound in (1, *BOUNDS):
-            tc = z.Toolchain(CC, EMITTER, None, owner_group=bound or 0)
-            if bound is None:  # the production default: do not pass a group line at all
-                tc = z.Toolchain(CC, EMITTER, None)
-                tc.owner_group = None
-            bdir = work / label / batch.name / ("g%s" % (bound or "default"))
-            built = z.build_generated(tc, batch.spec_text, bdir, stem="z80_" + batch.name, list_owners=True)
+        for config in (REFERENCE, *CONFIGS):
+            bdir = work / label / batch.name / ("g%s_s%s" % config)
+            built = z.build_generated(toolchain(config), batch.spec_text, bdir, stem="z80_" + batch.name, list_owners=True)
             if built["error"]:
-                check(False, "%s/%s group=%s: %s" % (label, batch.name, bound, built["error"][:300]))
+                check(False, "%s/%s %s: %s" % (label, batch.name, tag_of(config), built["error"][:300]))
                 break
-            outputs[bound] = (built, z.run_exe(built["exe"], batch.text, bdir))
+            outputs[config] = (built, z.run_exe(built["exe"], batch.text, bdir))
         else:
-            ref_built, ref_results = outputs[1]
+            ref_built, ref_results = outputs[REFERENCE]
+            ref_shape = ref_built["stats"]
+            check(ref_shape["shape_owners"] == ref_shape["shape_entries"] and ref_shape["shape_max_group"] == 1 and
+                  ref_shape["shape_shared_bodies"] == 0, "%s/%s: the reference must be one function per start, no shared body" % (label, batch.name))
             if label == "random":  # the random programs must really execute: not stop at the first fetch
                 steps = [s for v in ref_results.values() for s in v]
                 check(len(steps) >= 150 and len({s["cpu"]["pc"] for s in steps}) >= 60,
                       "%s/%s: the random programs execute too little (%d steps)" % (label, batch.name, len(steps)))
-            ref_shape = ref_built["stats"]
-            check(ref_shape["shape_owners"] == ref_shape["shape_entries"] and ref_shape["shape_max_group"] == 1,
-                  "%s/%s: group size 1 must emit one function per start" % (label, batch.name))
-            ref_records = [{k: v for k, v in o.items()} for o in ref_built["owners"]]
-            for bound in BOUNDS:
-                built, results = outputs[bound]
-                tag = "%s/%s group=%s" % (label, batch.name, bound or "default")
+            for config in CONFIGS:
+                built, results = outputs[config]
+                tag = "%s/%s %s" % (label, batch.name, tag_of(config))
                 stats = built["stats"]
                 check(comparable(stats) == comparable(ref_shape), "%s: classification stats differ from the reference" % tag)
                 check(stats["shape_entries"] == ref_shape["shape_entries"], "%s: the exact entry set changed" % tag)
-                check(built["owners"] == ref_records, "%s: per-entry owner records differ from the reference" % tag)
-                if bound is not None:
-                    check(stats["shape_max_group"] <= bound, "%s: a group exceeds its bound (%d)" % (tag, stats["shape_max_group"]))
-                if stats["shape_entries"] > 1 and (bound is None or bound > 1):
+                check(built["owners"] == ref_built["owners"], "%s: per-entry owner records differ from the reference" % tag)
+                if config[0] is not None:
+                    check(stats["shape_max_group"] <= config[0], "%s: a group exceeds its bound (%d)" % (tag, stats["shape_max_group"]))
+                if stats["shape_entries"] > 1 and config[0] != 1:
                     check(stats["shape_owners"] < stats["shape_entries"], "%s: nothing was grouped" % tag)
+                if config[1] == 0:
+                    check(stats["shape_shared_bodies"] == 0, "%s: bodies shared although sharing is off" % tag)
+                elif stats.get("full", 0) > 1:  # an image of only locks/stubs has no effect to share
+                    check(stats["shape_shared_bodies"] > 0, "%s: no effect body was shared" % tag)
                 check(set(results) == set(ref_results), "%s: vector set differs" % tag)
                 for name in sorted(ref_results):
                     COMPARED += 1
@@ -139,7 +152,7 @@ def main():
     if FAILED:
         print("\n".join(FAILED[:20]))
         return 1
-    print("grouped-owner differential (%s): %d vector results identical across group sizes 1 vs %s" % (MODE, COMPARED, list(BOUNDS)))
+    print("grouped-owner differential (%s): %d vector results identical between the reference %s and %s" % (MODE, COMPARED, REFERENCE, list(CONFIGS)))
     return 0
 
 
