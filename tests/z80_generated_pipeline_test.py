@@ -88,8 +88,8 @@ def abi_test(work):
         check(field in text, "ABI header lacks %s" % field)
 
 
-def emit_only(spec, directory, list_owners=False):
-    tc = z.Toolchain(CC, EMITTER)
+def emit_only(spec, directory, list_owners=False, group=None):
+    tc = z.Toolchain(CC, EMITTER, owner_group=group)
     stats, owners, error = z.emit_image(tc, spec, directory, "img", list_owners)
     return stats, owners, error
 
@@ -195,7 +195,9 @@ def main():
 
         # Windows exposing different sub-ranges: an owner exposed by only some windows must fail closed for the others.
         partial_spec = "image 1 banked\nwindow 1 4000 0 100\nwindow 1 8000 80 80\nfill 1 00 200\n"
-        _, partial_owners, error = emit_only(partial_spec, work / "partial", True)
+        # Pinned to one function per start (SEG-033 reference mode) so the text of a single owner can be inspected; the grouped
+        # form of the same image is covered by the owner-group differential test and the shape check below.
+        _, partial_owners, error = emit_only(partial_spec, work / "partial", True, group=1)
         check(error is None, "sub-range windows failed to emit: %s" % error)
         if error is None:
             keys = {o["key"] for o in partial_owners}
@@ -210,6 +212,9 @@ def main():
                   "an owner exposed only at base 0x4000 must check the window base and fail closed for 0x8000")
             check("switch (window_base)" not in owner_text("z80_o_0001_0090"),
                   "an owner exposed by every window serves every base without a base check")
+            grouped, _, error = emit_only(partial_spec, work / "partial_grouped", False)
+            check(error is None and grouped["shape_entries"] == 0x100 and grouped["shape_owners"] == 2,
+                  "the sub-range image must group its 256 starts into two bounded owners (default bound 128)")
 
         # Determinism: byte-identical output across two emissions, and a byte-identical build of the same units.
         spec = z.image_spec_text(doc["images"]["wrap64"]["images"])

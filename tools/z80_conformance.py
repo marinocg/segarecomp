@@ -437,11 +437,16 @@ def scenario_batches(doc):
 
 # ------------------------------------------------------------------------------------------------ build / run
 BUILD_CACHE_ENV = "SEGARECOMP_Z80_BUILD_CACHE"
+OWNER_GROUP_ENV = "SEGARECOMP_Z80_OWNER_GROUP"
 
 
 class Toolchain:
-    def __init__(self, cc, emitter, oracle_checkout=None, opt="-O0", include_dir=None, cache=True):
+    def __init__(self, cc, emitter, oracle_checkout=None, opt="-O0", include_dir=None, cache=True, owner_group=None):
         self.cc, self.emitter, self.oracle_checkout, self.opt = cc, emitter, oracle_checkout, opt
+        # Entries per host owner (SEG-033): None = the emitter default; 1 = the reference one-function-per-start mode. The
+        # environment variable lets a whole test run be pinned to one mode.
+        env_group = os.environ.get(OWNER_GROUP_ENV)
+        self.owner_group = owner_group if owner_group is not None else (int(env_group) if env_group else None)
         # Optional content-addressed cache of linked generated programs, shared by the test processes of one build
         # tree: identical (spec, stem, compiler, flags, emitter, runtime headers, runner) => identical executable.
         # A test that must observe a fresh compile (reproducibility) passes cache=False.
@@ -459,6 +464,8 @@ def emit_image(tc, spec_text, workdir, stem="z80_image", list_owners=False):
     workdir = pathlib.Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     spec = workdir / (stem + ".spec")
+    if tc.owner_group:
+        spec_text = "group %d\n" % tc.owner_group + spec_text
     spec.write_text(spec_text, encoding="utf-8")
     cmd = [str(tc.emitter), str(spec), str(workdir), stem] + (["--list"] if list_owners else [])
     out = run(cmd)
@@ -468,6 +475,8 @@ def emit_image(tc, spec_text, workdir, stem="z80_image", list_owners=False):
     for line in out.stdout.splitlines():
         if line.startswith("stats "):
             stats = {k: int(v) for k, v in (t.split("=") for t in line.split()[1:])}
+        elif line.startswith("shape "):
+            stats.update({"shape_" + k: int(v) for k, v in (t.split("=") for t in line.split()[1:])})
         elif line.startswith("owner "):
             _, ident, key, kind, variants, form, rel, bound = line.split()
             owners.append({"identity": int(ident), "key": int(key, 16), "kind": kind, "variants": int(variants),
@@ -509,7 +518,7 @@ def _file_digest(path):
 
 def _cache_key(tc, spec_text, stem):
     h = hashlib.sha256()
-    for part in (spec_text, stem, str(tc.cc), tc.opt, " ".join(STRICT), " ".join(GENERATED_UNIT_FLAGS), sys.platform):
+    for part in (spec_text, stem, str(tc.owner_group or 0), str(tc.cc), tc.opt, " ".join(STRICT), " ".join(GENERATED_UNIT_FLAGS), sys.platform):
         h.update(part.encode())
         h.update(b"\0")
     inputs = [tc.emitter, TOOLS_DIR / "z80_conformance_runner.c", TOOLS_DIR / "z80_conformance_common.h",

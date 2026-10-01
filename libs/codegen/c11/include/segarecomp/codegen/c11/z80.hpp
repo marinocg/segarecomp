@@ -58,7 +58,16 @@ struct OwnerRecord {
   std::uint32_t variants = 1;        // > 1: the owner selects among body variants from the run-time window base
   cpu::z80::FormId form = cpu::z80::kNoForm;
   bool bound_successor = false;      // fall-through is a direct owner-to-owner return
+  std::uint32_t group_entries = 1;   // exact entries sharing this start's host owner function (1 = a function of its own)
 };
+
+// Entries per host owner function (SEG-033-T002). One exact start maps to its owner through the unchanged generic entry
+// table; consecutive starts of one image share a bounded owner that selects its entry from the PC (absolute-PC owners) or the
+// window offset (window-relative owners). 1 reproduces the historical one-function-per-start emission byte for byte.
+// The production bound is 128 (SEG-033-T002 sweep over 16/32/64/128): host compile
+// CPU and object code roughly halve versus one function per start and do not improve beyond it. It is a constant, not a user
+// option.
+inline constexpr std::size_t kOwnerGroupEntries = 128;
 
 struct EmitOptions {
   std::filesystem::path directory;
@@ -69,9 +78,13 @@ struct EmitOptions {
   // TU size and compiler memory, ADR 0058). The default only matters for images above 64 Ki owners; tests lower it to exercise
   // the chunk path on a small image.
   std::size_t entry_chunk_entries = 65536;
+  std::size_t owner_group_entries = kOwnerGroupEntries;  // >= 1; tests and the differential gate pin 1 (reference) vs N
 };
 
 struct EmitStats {
+  std::size_t entries = 0;           // exact starts with an owner binding (the entry-table size)
+  std::size_t owners = 0;            // host owner functions
+  std::size_t max_group_entries = 0; // largest group
   std::size_t full_owners = 0;
   std::size_t prefix_lock_owners = 0;
   std::size_t stub_owners = 0;

@@ -1,10 +1,11 @@
 // SEG-009-T002: test-side CLI over the public SMS generation route (segarecomp::machine::master_system::emit_cartridge).
 //
-//   sms_image_emitter <rom> <outdir> <stem> [--mapper NAME] [--manifest FILE] [--explicit-profile] [--list]
+//   sms_image_emitter <rom> <outdir> <stem> [--mapper NAME] [--manifest FILE] [--explicit-profile] [--list] [--owner-group N]
 //
 // Exit 0: emitted (prints `ok ...`, `stats ...`, optional `owner ...` lines as z80_image_emitter). Exit 3: typed SMS
 // error (prints `sms_error <NAME> <detail>`). Exit 1: other failure. Exit 2: usage.
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -32,9 +33,12 @@ int main(int argc, char** argv) {
   const std::vector<std::uint8_t> rom((std::istreambuf_iterator<char>(rom_file)), std::istreambuf_iterator<char>());
   IngestOptions options;
   bool list = false;
+  std::size_t owner_group = 0;
   for (int i = 4; i < argc; ++i) {
     const std::string arg = argv[i];
-    if (arg == "--mapper" && i + 1 < argc) {
+    if (arg == "--owner-group" && i + 1 < argc) {
+      owner_group = static_cast<std::size_t>(std::strtoul(argv[++i], nullptr, 10));
+    } else if (arg == "--mapper" && i + 1 < argc) {
       options.declarations.push_back({argv[++i], DeclarationSource::build_option});
     } else if (arg == "--manifest" && i + 1 < argc) {
       std::ifstream file(argv[++i], std::ios::binary);
@@ -59,6 +63,7 @@ int main(int argc, char** argv) {
   request.directory = argv[2];
   request.stem = argv[3];
   request.codegen.record_owners = list;
+  if (owner_group != 0) request.codegen.owner_group_entries = owner_group;
   const EmitOutcome outcome = emit_cartridge(rom, options, request);
   if (!outcome.ok()) {
     if (outcome.sms_error != SMS_OK) {
@@ -75,6 +80,7 @@ int main(int argc, char** argv) {
               outcome.stats.full_owners, outcome.stats.prefix_lock_owners, outcome.stats.stub_owners,
               outcome.stats.unlowered_starts, outcome.stats.variant_owners, outcome.stats.bound_successors,
               outcome.stats.translation_units);
+  std::printf("shape entries=%zu owners=%zu max_group=%zu\n", outcome.stats.entries, outcome.stats.owners, outcome.stats.max_group_entries);
   for (const auto& r : outcome.owners) {
     std::printf("owner %u %04X %s %u %s %d %d\n", r.identity, r.key, segarecomp::codegen::z80::owner_kind_name(r.kind),
                 r.variants, r.form == segarecomp::cpu::z80::kNoForm ? "-" : segarecomp::cpu::z80::form_name(r.form).c_str(),
