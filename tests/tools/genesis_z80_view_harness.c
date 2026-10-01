@@ -65,7 +65,9 @@ int main(int argc, char **argv) {
       printf("M68K without_bus_write=%d diag=%d\n", accepted, (int)diag);
     }
     value = 0x0100U;
-    route(0xA11100U, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &value, &diag); /* grant (compat until T005) */
+    route(0xA11200U, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &value, &diag); /* release /RESET: the grant needs it */
+    value = 0x0100U;
+    route(0xA11100U, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &value, &diag); /* BUSREQ */
     value = 0x12U; route(0xA00010U, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &diag);
     value = 0U; route(0xA02010U, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &value, &diag);          /* mirror */
     printf("M68K mirror_read=%02x", (unsigned)value);

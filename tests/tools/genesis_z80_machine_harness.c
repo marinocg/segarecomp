@@ -1,0 +1,70 @@
+/*
+ * SEG-032-T005 (ADR 0072): replays a 68K bus script against the REAL Genesis runtime with an attached generated-native Z80 machine.
+ *   genesis_z80_machine_harness <script> [sync-quantum]
+ * script lines (decimal times, hex addresses/values):
+ *   retire <m68k cycles>          advance guest time through the real retirement hook (genesis_runtime_retire_m68k_instruction)
+ *   w8|w16 <addr> <value>         68K write through genesis_route_access        r8|r16 <addr>     68K read (prints R <addr> <value>)
+ *   quantum <ticks>               change the retirement-hook synchronization cadence
+ *   state                         print Z80 machine digest, Z80 time, bound image, bank, latches
+ * Any rejected access or retirement prints STOP <class> <diagnostic> and ends the run with exit status 0 (the stop is the result).
+ */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "z80_machine.h"
+
+static GenesisRuntime runtime;
+static GenesisZ80Machine machine;
+
+static void print_digest(const uint8_t digest[32]) {
+  unsigned i;
+  for (i = 0; i < 32U; ++i) printf("%02x", (unsigned)digest[i]);
+}
+
+int main(int argc, char **argv) {
+  char line[256];
+  FILE *script;
+  if (argc < 2) return 2;
+  script = fopen(argv[1], "r");
+  if (script == NULL) return 2;
+  genesis_z80_machine_attach(&machine, &runtime);
+  if (argc > 2) runtime.z80_sync_quantum = (uint32_t)strtoul(argv[2], NULL, 10);
+  while (fgets(line, sizeof line, script) != NULL) {
+    char op[16];
+    unsigned long a = 0, b = 0;
+    if (line[0] == '#' || line[0] == '\n') continue;
+    if (sscanf(line, "%15s %lx %lx", op, &a, &b) < 1) return 3;
+    if (strcmp(op, "retire") == 0) {
+      unsigned long cycles = strtoul(line + 7, NULL, 10);
+      GenesisControlTransfer t = genesis_runtime_retire_m68k_instruction(&runtime, (uint32_t)cycles, 0U);
+      if (t.kind == GENESIS_STOP) { printf("STOP %d %d\n", (int)t.stop.stop_class, (int)t.stop.diagnostic_category); return 0; }
+    } else if (strcmp(op, "quantum") == 0) {
+      runtime.z80_sync_quantum = (uint32_t)strtoul(line + 8, NULL, 10);
+    } else if (strcmp(op, "state") == 0) {
+      uint8_t digest[32];
+      const GenesisZ80BusState *bus = &runtime.devices.z80_bus;
+      genesis_z80_machine_state_digest(&machine, digest);
+      printf("STATE z80=");
+      print_digest(digest);
+      printf(" cycles=%llu pc=%04x bound=%u bank=%03x req=%u granted=%u released=%u view_stop=%d ticks=%llu\n",
+             (unsigned long long)machine.cpu.state.cycles, (unsigned)machine.cpu.state.pc, (unsigned)machine.bound_ordinal,
+             (unsigned)bus->bank, (unsigned)bus->bus_requested, (unsigned)bus->bus_granted, (unsigned)bus->reset_released,
+             (int)machine.view_stop, (unsigned long long)runtime.scheduler.master_ticks);
+    } else {
+      GenesisRuntimeStop stop;
+      uint32_t value = (uint32_t)b;
+      GenesisAccessWidth width = (op[1] == '8') ? GENESIS_ACCESS_BYTE : GENESIS_ACCESS_WORD;
+      GenesisAccessDirection direction = (op[0] == 'w') ? GENESIS_ACCESS_WRITE : GENESIS_ACCESS_READ;
+      memset(&stop, 0, sizeof stop);
+      if (genesis_route_access(&runtime, (uint32_t)a, width, direction, &value, &stop) != GENESIS_ACCESS_OK) {
+        printf("STOP %d %d\n", (int)stop.stop_class, (int)stop.diagnostic_category);
+        return 0;
+      }
+      if (direction == GENESIS_ACCESS_READ) printf("R %06lx %lx\n", a, (unsigned long)value);
+    }
+  }
+  printf("END\n");
+  fclose(script);
+  return 0;
+}

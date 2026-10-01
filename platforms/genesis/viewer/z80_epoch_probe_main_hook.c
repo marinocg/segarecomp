@@ -84,7 +84,6 @@ static void probe_on_epoch(void *context, const GenesisZ80EpochEvent *event) {
 
 GenesisControlTransfer genesis_z80_epoch_probe_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                                         uint32_t dispatch_allowance) {
-  static GenesisZ80EpochObserver observer;
   static ProbeState state;
   uint64_t frames = 0U, stop_at = 0U, fill = 0U, dispatches = 0U, window_ticks;
   const char *outcome = "budget_exhausted";
@@ -102,9 +101,8 @@ GenesisControlTransfer genesis_z80_epoch_probe_hook_run(GenesisRuntime *runtime,
   memset(runtime->devices.z80_bus.z80_ram, (int)fill, GENESIS_Z80_RAM_BYTES);
   state.dir = getenv("SEGARECOMP_Z80PROBE_DIR");
   state.stop_at = stop_at;
-  observer.on_epoch = probe_on_epoch;
-  observer.context = &state;
-  runtime->z80_epoch_observer = &observer;
+  runtime->z80_epoch.on_epoch = probe_on_epoch;
+  runtime->z80_epoch.context = &state;
   window_ticks = frames * GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
   while (dispatches < dispatch_allowance) {
     transfer = genesis_runtime_step(runtime, dispatch);
@@ -115,7 +113,7 @@ GenesisControlTransfer genesis_z80_epoch_probe_hook_run(GenesisRuntime *runtime,
     if (state.stop_requested) { outcome = "epoch_cap"; break; }
     if (runtime->scheduler.master_ticks >= window_ticks) { outcome = "window_complete"; break; }
   }
-  runtime->z80_epoch_observer = NULL;
+  runtime->z80_epoch.on_epoch = NULL;
   fprintf(stderr, "EPOCH_PROBE_SUMMARY {\"outcome\":\"%s\",\"stop_class\":%d,\"diagnostic\":%d,\"window_frames\":%llu,"
                   "\"virtual_frames\":%llu,\"dispatches\":%llu,\"fill\":%llu,\"epochs\":[",
           outcome, transfer.kind == GENESIS_STOP ? (int)transfer.stop.stop_class : 0,

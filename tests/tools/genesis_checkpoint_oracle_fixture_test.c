@@ -137,7 +137,7 @@ static void test_positive(void) {
   /* Device evidence. */
   assert(bundle.device.devices.z80_bus.bus_requested == 1U);
   assert(bundle.device.devices.z80_bus.bus_granted == 1U);
-  assert(bundle.device.devices.z80_bus.reset_asserted == 1U);
+  assert(bundle.device.devices.z80_bus.reset_released == 0U);
   { uint32_t i; for (i = 0U; i < GENESIS_Z80_RAM_BYTES; ++i) assert(bundle.device.devices.z80_bus.z80_ram[i] == 0U); }
 
   assert(bundle.device.devices.vdp.registers[1] == 0x04U);

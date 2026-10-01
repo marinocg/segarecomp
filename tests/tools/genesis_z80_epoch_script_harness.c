@@ -24,7 +24,6 @@ static void on_epoch(void *context, const GenesisZ80EpochEvent *event) {
 
 int main(int argc, char **argv) {
   static GenesisRuntime runtime;
-  static GenesisZ80EpochObserver observer;
   char line[256];
   FILE *script;
   unsigned long fill = 0;
@@ -33,8 +32,7 @@ int main(int argc, char **argv) {
   script = fopen(argv[1], "r");
   if (script == NULL) return 2;
   memset(runtime.devices.z80_bus.z80_ram, (int)fill, GENESIS_Z80_RAM_BYTES);
-  observer.on_epoch = on_epoch;
-  runtime.z80_epoch_observer = &observer;
+  runtime.z80_epoch.on_epoch = on_epoch;
   while (fgets(line, sizeof line, script) != NULL) {
     char kind[8];
     unsigned long address, value;
@@ -53,6 +51,6 @@ int main(int argc, char **argv) {
     }
   }
   fclose(script);
-  printf("END %u\n", (unsigned)observer.epoch_count);
+  printf("END %u\n", (unsigned)runtime.z80_epoch.epoch_count);
   return 0;
 }

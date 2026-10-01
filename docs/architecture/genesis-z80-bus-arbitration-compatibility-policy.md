@@ -1,3 +1,5 @@
+> **Superseded by SEG-032-T005 (ADR 0072, `docs/architecture/genesis-z80-audio-contract.md` section 4).** Policy (a) immediate grant and policy (c) reset-only latch are retired: power-on holds the Z80 in /RESET, the bus is granted iff BUSREQ is asserted AND /RESET is released, and the edges drive a real generated-native Z80 (`z80_machine.c`). Kept for history.
+
 # Genesis 68k-side Z80 bus-arbitration control-register compatibility policy (SEG-007-T102)
 
 ## Status and boundary

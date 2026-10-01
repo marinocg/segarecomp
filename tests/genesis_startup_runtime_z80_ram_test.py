@@ -52,6 +52,9 @@ static void reject_z80_ram_as(GenesisRuntime *runtime, const GenesisRuntime *sna
 static void grant_bus(GenesisRuntime *runtime) {
   GenesisRuntimeStop stop = {0};
   uint32_t value = UINT32_C(0x0100);
+  /* The documented acquire sequence needs /RESET released: the bus is granted iff BUSREQ AND /RESET released. */
+  assert(genesis_route_access(runtime, UINT32_C(0x00A11200), GENESIS_ACCESS_WORD,
+                              GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
   assert(genesis_route_access(runtime, UINT32_C(0x00A11100), GENESIS_ACCESS_WORD,
                               GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
   assert(runtime->devices.z80_bus.bus_granted == 1U);
@@ -227,8 +230,10 @@ int main(void) {
      entirely unaffected by this addition. ---- */
   {
     GenesisRuntime runtime = {0};
-    /* BUSREQ request/BUSACK read-back/release. */
+    /* BUSREQ request/BUSACK read-back/release (the grant needs /RESET released). */
     value = UINT32_C(0x0100);
+    assert(genesis_route_access(&runtime, UINT32_C(0x00A11200), GENESIS_ACCESS_WORD,
+                                GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
     assert(genesis_route_access(&runtime, UINT32_C(0x00A11100), GENESIS_ACCESS_WORD,
                                 GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
     value = UINT32_C(0xFFFFFFFF);
@@ -239,7 +244,7 @@ int main(void) {
     value = UINT32_C(0x0000);
     assert(genesis_route_access(&runtime, UINT32_C(0x00A11200), GENESIS_ACCESS_WORD,
                                 GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
-    assert(runtime.devices.z80_bus.reset_asserted == 1U);
+    assert(runtime.devices.z80_bus.reset_released == 0U);
     /* VDP status read still returns the zero-initialized status register. */
     value = UINT32_C(0xFFFFFFFF);
     assert(genesis_route_access(&runtime, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,

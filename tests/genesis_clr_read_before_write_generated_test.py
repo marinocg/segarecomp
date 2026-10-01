@@ -112,7 +112,7 @@ int main(void) {
            GENESIS_ACCESS_OK);
     value = 0;
     assert(genesis_route_access(&probe, 0x00A11200, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &value, &stop) ==
-           GENESIS_ACCESS_OK && probe.devices.z80_bus.reset_asserted == 1U);
+           GENESIS_ACCESS_OK && probe.devices.z80_bus.reset_released == 0U);
     assert(genesis_route_access(&probe, 0x00A11200, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &value, &stop) !=
            GENESIS_ACCESS_OK);
     {
@@ -146,23 +146,23 @@ int main(void) {
      reset (D8/D0 = 0), PC advances, CCR N=0 Z=1 V=0 C=0 with X kept, and an auto-update register is committed once. */
   runtime = fresh(0x0F0E, 0x2708); runtime.a[1] = 0x00A11200;  /* CLR.W (A1) */
   step(&runtime, 0x0F10, 12);
-  assert(runtime.a[1] == 0x00A11200 && runtime.sr == 0x2704 && runtime.devices.z80_bus.reset_asserted == 1U &&
+  assert(runtime.a[1] == 0x00A11200 && runtime.sr == 0x2704 && runtime.devices.z80_bus.reset_released == 0U &&
          runtime.devices.z80_bus.bus_requested == 0U && runtime.devices.z80_bus.bus_granted == 0U);
   runtime = fresh(0x0F10, 0x2711); runtime.a[2] = 0x00A11202;  /* CLR.W -(A2) */
   step(&runtime, 0x0F12, 14);
-  assert(runtime.a[2] == 0x00A11200 && runtime.sr == 0x2714 && runtime.devices.z80_bus.reset_asserted == 1U);
+  assert(runtime.a[2] == 0x00A11200 && runtime.sr == 0x2714 && runtime.devices.z80_bus.reset_released == 0U);
   runtime = fresh(0x0F0A, 0x2700); runtime.a[0] = 0x00A11200;  /* CLR.B (A0)+: even byte */
   step(&runtime, 0x0F0C, 12);
-  assert(runtime.a[0] == 0x00A11201 && runtime.sr == 0x2704 && runtime.devices.z80_bus.reset_asserted == 1U);
+  assert(runtime.a[0] == 0x00A11201 && runtime.sr == 0x2704 && runtime.devices.z80_bus.reset_released == 0U);
   /* LONG and the odd byte are not admitted: the stop is the READ, nothing committed or written. */
   runtime = fresh(0x0F12, 0x2701); runtime.a[3] = 0x00A11200;  /* CLR.L (A3)+ */
   expect_stop(&runtime, GENESIS_ACCESS_READ, 0x00A11200U);
   assert(runtime.pc == 0x0F12 && runtime.a[3] == 0x00A11200 && runtime.sr == 0x2701 &&
-         runtime.devices.z80_bus.reset_asserted == 0U);
+         runtime.devices.z80_bus.reset_released == 0U); /* nothing written: still the power-on state (held in reset) */
   runtime = fresh(0x0F0A, 0x2701); runtime.a[0] = 0x00A11201;  /* CLR.B (A0)+: odd byte */
   expect_stop(&runtime, GENESIS_ACCESS_READ, 0x00A11201U);
   assert(runtime.pc == 0x0F0A && runtime.a[0] == 0x00A11201 && runtime.sr == 0x2701 &&
-         runtime.devices.z80_bus.reset_asserted == 0U);
+         runtime.devices.z80_bus.reset_released == 0U);
 
   /* Write failure AFTER a successful read: an owned read-only cartridge region is readable but not writable. The stop
      is the WRITE (so the read was performed first); no auto-update commit, PC and CCR unchanged, region intact. */
@@ -231,7 +231,7 @@ int main(void) {
   runtime = fresh(); runtime.a[0] = 0x00A11200;
   do { transfer = genesis_bridge_dispatch(&runtime); } while (transfer.kind == GENESIS_CONTINUE_AT_PC);
   assert(transfer.kind == GENESIS_STOP && runtime.pc == 0x0B14 && runtime.a[0] == 0x00A11201 &&
-         runtime.devices.z80_bus.reset_asserted == 1U && runtime.sr == 0x2714);
+         runtime.devices.z80_bus.reset_released == 0U && runtime.sr == 0x2714);
 
   /* Read failure inside the C4 block: the READ of the PSG port stops CLR.B (A0)+ before any write or commit. */
   runtime = fresh(); runtime.a[0] = 0x00C00011;

@@ -137,12 +137,12 @@ int main(void) {
   assert(runtime.a[0] == 0x00FF0A00 && runtime.work_ram[0xA00] == 0x27 && runtime.work_ram[0xA01] == 0x04);
   /* SEG-021-T036: MOVE SR,-(A0) onto the write-only Z80 RESET register ($A11200). The discarded destination read is
      admitted (open bus, no side effect); the SR word is written (D8 = 1 releases reset), A0 is committed once. */
-  runtime = fresh(0x1020, 0x2704); runtime.a[0] = 0x00A11202; runtime.devices.z80_bus.reset_asserted = 1U;
+  runtime = fresh(0x1020, 0x2704); runtime.a[0] = 0x00A11202; runtime.devices.z80_bus.reset_released = 0U;
   step(&runtime, 0x1022, 14);
-  assert(runtime.a[0] == 0x00A11200 && runtime.devices.z80_bus.reset_asserted == 0U && runtime.sr == 0x2704);
+  assert(runtime.a[0] == 0x00A11200 && runtime.devices.z80_bus.reset_released == 1U && runtime.sr == 0x2704);
   runtime = fresh(0x1020, 0x2604); runtime.a[0] = 0x00A11202;  /* SR D8 = 0 asserts reset */
   step(&runtime, 0x1022, 14);
-  assert(runtime.a[0] == 0x00A11200 && runtime.devices.z80_bus.reset_asserted == 1U);
+  assert(runtime.a[0] == 0x00A11200 && runtime.devices.z80_bus.reset_released == 0U);
   /* MOVE SR,$FF0900.L (20 cycles). */
   runtime = fresh(0x1022, 0x2711);
   step(&runtime, 0x1028, 20);

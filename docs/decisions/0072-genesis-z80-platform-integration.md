@@ -70,3 +70,26 @@ made the Sega PSG a platform-neutral device. SEG-032 must run a real Z80 image i
   are the SEG-007 compat models until T006/T007 replace them. This is the only transitional path.
 - The bank register is added to the evidence-bearing `GenesisZ80BusState` (`checkpoint_evidence.h`); its digest/oracle coverage lands with the
   other schema changes in T005.
+
+## T005 implementation record (2026-10-01)
+
+- **Bus latches follow the hardware rules** (`genesis_z80_bus_write`, runtime.c): power-on `/RESET` asserted (`GenesisZ80BusState.reset_released`
+  replaces `reset_asserted`; a zeroed runtime is "held in reset"), `bus_granted = bus_requested AND reset_released`, edges (not level
+  writes) reach the machine. The SEG-007-T102 immediate-grant policy, the reset-only latch and the "no Z80 exists" statements are gone; the
+  policy document is marked superseded.
+- **One seam, `GenesisZ80Hooks`** (`runtime.h`, plain C): `run_to(master_ticks)` and `bus_event(...)`. `runtime.c` calls `run_to` after
+  every M68K retirement at a 512-tick quantum (configurable, results independent of it) and before every 68K access to Z80-domain state
+  (Z80 area, BUSREQ/RESET, YM2612, PSG); it never includes a Z80 header. A program without an attached machine keeps the bus latches
+  and tracker but executes nothing.
+- **`z80_machine.c` is the secondary CPU**: `genesis_z80_machine_attach`, `run_to` (instruction-boundary stop at or after the target, the INT
+  line a pure function of guest time with segment splitting at its two edges per frame), the edge actions (`/RESET` release = architectural
+  reset + YM reset + `cycle_base`; BUSREQ release = resume at the next multiple of 15 ticks, held time is not made up) and the activation
+  of an image at an epoch by signature (`genesis_z80_image_for_signature`; an empty hold window re-binds the previous image; unknown =
+  typed `z80_unknown_image`, with a materialization callback for T008). Typed outcomes: new stop class `unsupported_z80_execution` with
+  `z80_unknown_image`, `z80_code_mismatch`, `z80_no_owner`, `z80_mutable_code`, `z80_unresolved_fetch_mapping`, `z80_unsupported_acknowledge`.
+- **Tracker.** The T002 epoch observer is now the runtime's always-on hold-window tracker (`runtime->z80_epoch`); `on_epoch` is the optional
+  probe seam. Z80 CPU state is machine-private (like the VBlank scheduler state, ADR 0020 section 10) and is not checkpoint evidence; the
+  evidence-bearing `z80_bus` gained the bank register and the inverted reset field, and the independent checkpoint oracle was updated.
+- Evidence: `tests/genesis_z80_machine_test.py` (power-on, hold/resume with the 68K clock running, reset while executing, restart epoch,
+  same Z80 PC under two images with dirty carry-over data, unknown image, data vs code mutation, VBlank INT with and without IFF1,
+  determinism and sync-cadence invariance at quanta 1/512/4096, no decoder symbol in the linked executable).

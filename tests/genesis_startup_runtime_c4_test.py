@@ -1182,9 +1182,9 @@ int main(void) {
 # SEG-007-T115: full compile+link+execute proof that a direct absolute-operand
 # MOVE.W #$0100,($00A11100).L store is lowered to a runtime genesis_route_access
 # WORD/WRITE call. $0100 sets the documented D8 BUSREQ REQUEST bit, so the
-# routed store latches devices.z80_bus.{bus_requested,bus_granted} (policy (a)
-# immediate grant, SEG-007-T102); reset_asserted stays clear. Execution then
-# reaches the established RESET CPU frontier.
+# routed store latches devices.z80_bus.bus_requested. SEG-032-T005: /RESET is
+# still held (the power-on state), so the request is recorded but NOT granted.
+# Execution then reaches the established RESET CPU frontier.
 Z80_BUS_STORE_HARNESS = r'''
 #include <assert.h>
 #include <stdint.h>
@@ -1200,8 +1200,8 @@ int main(void) {
   assert(transfer.stop.stop_class == GENESIS_STOP_UNSUPPORTED_CPU_FORM); /* the trailing RESET */
   assert(runtime.pc == UINT32_C(0x00000B08));
   assert(runtime.devices.z80_bus.bus_requested == 1U);
-  assert(runtime.devices.z80_bus.bus_granted == 1U);
-  assert(runtime.devices.z80_bus.reset_asserted == 0U);
+  assert(runtime.devices.z80_bus.bus_granted == 0U);
+  assert(runtime.devices.z80_bus.reset_released == 0U);
   return 0;
 }
 '''

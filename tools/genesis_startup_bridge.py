@@ -36,6 +36,11 @@ STOP_DIAGNOSTIC_PAIRS = {
         # SEG-032-T004: fail-closed Z80-area outcomes (contract sections 2-3).
         "z80_view_unmapped_access", "z80_bank_target_unsupported", "genesis_68k_z80_area_without_bus",
     },
+    # SEG-032-T005 (ADR 0072): typed fail-closed outcomes of the generated-native Z80.
+    "unsupported_z80_execution": {
+        "z80_unknown_image", "z80_code_mismatch", "z80_no_owner", "z80_mutable_code", "z80_unresolved_fetch_mapping",
+        "z80_unsupported_acknowledge",
+    },
     "unsupported_memory_region": {
         "effective_address_not_24bit", "odd_effective_address", "rom_write_prohibited",
         "unmapped_data_access", "invalid_stack_alignment", "invalid_stack_range",

@@ -217,15 +217,15 @@ static void oracle_z80_bus_write(uint32_t address, uint32_t width, uint32_t valu
     return;
   }
   bit = (width == 2U) ? UINT32_C(0x0100) : UINT32_C(0x0001);
+  /* SEG-032-T005 (contract section 4): the bus is granted iff BUSREQ is asserted AND /RESET is released (two independent
+   * references agree); /RESET is asserted at power-on, so a zeroed world is "held in reset". The oracle executes no Z80. */
   if (address == UINT32_C(0x00A11100)) {
-    uint8_t requested = (uint8_t)((value & bit) != 0U);
-    g_world.devices.z80_bus.bus_requested = requested;
-    /* This oracle's own bounded policy (no Z80 core exists to contend for
-     * the bus): grant is immediate and tracks the request exactly. */
-    g_world.devices.z80_bus.bus_granted = requested;
+    g_world.devices.z80_bus.bus_requested = (uint8_t)((value & bit) != 0U);
   } else if (address == UINT32_C(0x00A11200)) {
-    g_world.devices.z80_bus.reset_asserted = (uint8_t)((value & bit) == 0U);
+    g_world.devices.z80_bus.reset_released = (uint8_t)((value & bit) != 0U);
   }
+  g_world.devices.z80_bus.bus_granted =
+      (uint8_t)(g_world.devices.z80_bus.bus_requested != 0U && g_world.devices.z80_bus.reset_released != 0U);
 }
 
 /* GTO1 p. 20: one-word register-set command (top 3 bits 100, RS4-0 =
@@ -544,7 +544,9 @@ static void oracle_sha_device(OracleSha256 *state, const GenesisDeviceState *dev
   uint32_t i;
   oracle_sha256_put_u8(state, devices->z80_bus.bus_requested);
   oracle_sha256_put_u8(state, devices->z80_bus.bus_granted);
-  oracle_sha256_put_u8(state, devices->z80_bus.reset_asserted);
+  oracle_sha256_put_u8(state, devices->z80_bus.reset_released);
+  oracle_sha256_put_u8(state, (uint8_t)(devices->z80_bus.bank >> 8));
+  oracle_sha256_put_u8(state, (uint8_t)devices->z80_bus.bank);
   oracle_sha256_update(state, devices->z80_bus.z80_ram, GENESIS_Z80_RAM_BYTES);
   for (i = 0U; i < GENESIS_VDP_REGISTER_COUNT; ++i) oracle_sha256_put_u16(state, devices->vdp.registers[i]);
   oracle_sha256_put_u8(state, devices->vdp.control_port_awaiting_second_word);

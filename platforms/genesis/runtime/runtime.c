@@ -1374,84 +1374,78 @@ static int genesis_is_z80_bus_region(uint32_t address) {
   return segarecomp_genesis_z80_arbitration_region_contains(address);
 }
 
-/* SEG-007-T102 -- 68k-side Z80 bus-arbitration control registers.
-   ================ PROJECT COMPATIBILITY POLICY ================
-   This is NOT verified bus-arbitration or bus-timing behavior. No Z80 CPU
-   emulation of any kind exists here or anywhere else in this runtime -- no
-   Z80 core, no runtime step-through, no JIT, no instruction fetch, and no
-   inspection of any Z80 or 68000 program byte: the only modeled effect is
-   latching three booleans (GenesisZ80BusState) and computing a deterministic
-   BUSACK read-back from them. See
-   docs/architecture/genesis-z80-bus-arbitration-compatibility-policy.md.
+/* SEG-032-T005 (ADR 0072, contract section 4) -- 68k-side Z80 bus-arbitration control registers, BUSREQ ($A11100) and RESET
+   ($A11200). Replaces the SEG-007-T102 compatibility policy (immediate grant, reset-only latch): the Z80 is a real secondary CPU.
 
-   Publicly documented hardware facts (Sega, *Genesis Technical Overview*
-   v1.00, 1991; already cited elsewhere in this project as GTO1):
-     - p. 76 SS4: "$A11100 D8 (W) 0 [=] BUSREQ CANCEL, 1 [=] BUSREQ REQUEST";
-       "$A11100 D8 (R) 0 [=] CPU FUNCTION STOP / ACCESSIBLE, 1 [=]
-       FUNCTIONING". Step (1) "Write $0100 in $A11100 by using a WORD access.";
-       step (2) "Check to see that D8 of $A11100 becomes 0."; step (4) "Write
-       $0000 in $A11100 by using a WORD access." "Access to $A11100 can also
-       be based on BYTE."
-     - p. 76 SS4: "$A11200 D8 (W) 0: RESET REQUEST, 1: RESET CANCEL." "Access
-       to $A11200 can also be based on BYTE."
-     - p. 91: "RESET ON: DATA 0H (Word) -> $A11200"; "RESET OFF: DATA 100H
-       (Word) -> $A11200".
-     - p. 76: "At the time of POWER ON RESET, the 68000 has access to the Z80
-       bus."
-   Documented bit lane for BYTE access: on the 68000, a BYTE access to the
-   even register address drives data lines D15-D8, so the documented D8
-   control/status bit is bit 0 of that transferred byte -- hence the BYTE
-   request/reset/BUSACK bit is D0 of the written/returned byte. (A BYTE access
-   to the odd half of either register address is not one of the documented
-   registers and fails closed.)
-
-   Policy decisions (replaceable; not hardware claims):
-     (a) Immediate grant. A BUSREQ request is granted deterministically and
-         immediately: `bus_granted` tracks `bus_requested` with no delay and
-         no device-step count, because no Z80 core is executing to contend for
-         the bus. This is within T042 contract SS4.1 (a state transition
-         caused by the documented BUSREQ access itself) and SS4.4's allowed
-         envelope (deterministic, access-caused, never PC/opcode/loop-shape
-         driven); it is the strongest form of that envelope (grant on the
-         write itself, N=0).
-     (b) Deterministic read-back. A read of $A11100 returns a word/byte whose
-         BUSACK bit (D8 word / D0 byte) is 0 when `bus_granted` and 1
-         otherwise; every other bit reads back 0. Real open-bus / 68000
-         prefetch fill of the unused bits is explicitly NOT modeled.
-     (c) RESET polarity per GTO1 p. 76 / p. 91: writing the bit as 0 asserts
-         /RESET (`reset_asserted = 1`); writing it as 1 releases /RESET
-         (`reset_asserted = 0`).
-   Fails closed (returns 0, mutating nothing): a read of $A11200 (SEG-021-T036: except the architecturally
-   DISCARDED read of memory CLR/Scc/MOVE from SR, admitted before this owner is reached -- see
-   genesis_route_access_classified; open bus per MCD1 section 1 note 4, write-only per GTO1 p. 76); any LONG
-   access to either register; and every other address inside
-   genesis_is_z80_bus_region. Every validation check precedes every mutation,
-   so a rejected access is atomic (T042 SS3 / genesis_route_access's own
-   "on failure neither *value nor the runtime is modified" contract). */
-static int genesis_z80_bus_access(GenesisDeviceState *devices, uint32_t address,
-                                  GenesisAccessWidth width, GenesisAccessDirection direction,
-                                  uint32_t *value) {
-  uint32_t bit;
-  if (width != GENESIS_ACCESS_WORD && width != GENESIS_ACCESS_BYTE)
-    return 0; /* LONG (and any invalid width) fails closed */
-  if (address != UINT32_C(0x00A11100) && address != UINT32_C(0x00A11200))
-    return 0; /* in-region but not one of the two documented registers */
-  bit = (width == GENESIS_ACCESS_WORD) ? UINT32_C(0x0100) : UINT32_C(0x0001);
-  if (address == UINT32_C(0x00A11100)) {
-    if (direction == GENESIS_ACCESS_WRITE) {
-      uint8_t requested = (uint8_t)((*value & bit) != 0U);
-      devices->z80_bus.bus_requested = requested;
-      devices->z80_bus.bus_granted = requested; /* policy (a): immediate grant */
-      return 1;
-    }
-    /* policy (b): BUSACK bit clear iff the 68000 currently holds the bus. */
-    *value = devices->z80_bus.bus_granted ? 0U : bit;
-    return 1;
-  }
-  /* address == $A11200: WRITE-only. */
-  if (direction != GENESIS_ACCESS_WRITE) return 0;
-  devices->z80_bus.reset_asserted = (uint8_t)((*value & bit) == 0U); /* policy (c) */
+   Frozen against the Genesis Technical Overview v1.00 p. 76/91 (register addresses, polarity, the documented acquire sequence),
+   Genesis Plus GX (`gen_zbusreq_w`, `gen_zreset_w`, mem68k.c BUSACK read) and ares (`APU::setBUSREQ/setRES`, `busgrantedCPU`):
+     - Power-on: /RESET is asserted (`reset_released == 0`), BUSREQ clear: the Z80 is held in reset.
+     - BUSACK ($A11100 D8 word / D0 byte, 0 = granted) is granted iff BUSREQ is asserted AND /RESET is released; BUSREQ with /RESET
+       low is recorded but never acknowledged.
+     - Before any edge is applied the attached Z80 machine is run to the access instant (the `run_to` hook), so a BUSREQ is acknowledged
+       once the Z80 reached the request time, and the 68K never observes a stale Z80.
+     - Edges (not level writes) reach the machine: BUSREQ assert/release, /RESET assert/release, together with the runnable
+       transition and image-epoch classification of the epoch tracker below. The machine resets the Z80 and the YM2612 on /RESET
+       release, resumes it on BUSREQ release, and activates an image at an epoch.
+   Documented bit lane for BYTE access: a BYTE access to the even register address drives D15-D8, so the control/status bit is D0.
+   Fails closed (returns 0, mutating nothing): a read of $A11200, any LONG access to either register, every other address inside
+   genesis_is_z80_bus_region. Every validation check precedes every mutation. */
+static int genesis_z80_bus_shape_ok(uint32_t address, GenesisAccessWidth width, GenesisAccessDirection direction) {
+  if (width != GENESIS_ACCESS_WORD && width != GENESIS_ACCESS_BYTE) return 0; /* LONG (and any invalid width) fails closed */
+  if (address != UINT32_C(0x00A11100) && address != UINT32_C(0x00A11200)) return 0; /* in-region but not a register */
+  if (address == UINT32_C(0x00A11200) && direction != GENESIS_ACCESS_WRITE) return 0; /* RESET is write-only */
   return 1;
+}
+
+/* Runs the attached Z80 machine up to the current guest time. 0 = ok (or no machine), 1 = typed stop in *stop. */
+static int genesis_z80_sync(GenesisRuntime *runtime, GenesisRuntimeStop *stop) {
+  const GenesisZ80Hooks *hooks = runtime->z80_hooks;
+  runtime->z80_synced_ticks = runtime->scheduler.master_ticks;
+  if (hooks == 0 || hooks->run_to == 0) return 0;
+  return hooks->run_to(hooks->context, runtime, runtime->scheduler.master_ticks, stop);
+}
+
+/* Applies one BUSREQ/RESET write: latches, epoch tracker, machine edge hook. The caller has already synchronized the Z80. */
+static int genesis_z80_bus_write(GenesisRuntime *runtime, uint32_t address, int set, GenesisRuntimeStop *stop) {
+  GenesisZ80BusState *bus = &runtime->devices.z80_bus;
+  GenesisZ80EpochObserver *tracker = &runtime->z80_epoch;
+  const uint8_t old_requested = bus->bus_requested;
+  const uint8_t old_released = bus->reset_released;
+  const int was_runnable = old_released && !old_requested;
+  GenesisZ80Event event;
+  int runnable, transition, epoch;
+  if (address == UINT32_C(0x00A11100)) {
+    if ((uint8_t)set == old_requested) return 0; /* no edge */
+    bus->bus_requested = (uint8_t)set;
+    event = set ? GENESIS_Z80_EVENT_BUSREQ_ASSERT : GENESIS_Z80_EVENT_BUSREQ_RELEASE;
+  } else {
+    if ((uint8_t)set == old_released) return 0; /* no edge */
+    bus->reset_released = (uint8_t)set;
+    if (set) tracker->executed = 0U; /* /RESET release: the Z80 is reset and pristine again (contract section 4.6) */
+    event = set ? GENESIS_Z80_EVENT_RESET_RELEASE : GENESIS_Z80_EVENT_RESET_ASSERT;
+  }
+  bus->bus_granted = (uint8_t)(bus->bus_requested && bus->reset_released);
+  runnable = bus->reset_released && !bus->bus_requested;
+  transition = runnable && !was_runnable;
+  epoch = transition && !tracker->executed;
+  if (epoch) {
+    ++tracker->epoch_count;
+    if (tracker->on_epoch != 0) {
+      GenesisZ80EpochEvent probe;
+      probe.ordinal = tracker->epoch_count;
+      probe.master_ticks = runtime->scheduler.master_ticks;
+      probe.ram = bus->z80_ram;
+      probe.written_bitmap = tracker->written;
+      tracker->on_epoch(tracker->context, &probe);
+    }
+  }
+  if (runtime->z80_hooks != 0 && runtime->z80_hooks->bus_event != 0 &&
+      runtime->z80_hooks->bus_event(runtime->z80_hooks->context, runtime, event, runtime->scheduler.master_ticks, transition, epoch,
+                                    tracker->written, stop))
+    return 1;
+  if (epoch) tracker->executed = 1U;
+  if (transition) memset(tracker->written, 0, sizeof(tracker->written)); /* the hold window ends at every runnable transition */
+  return 0;
 }
 
 /* SEG-032-T004 (ADR 0072, contract section 3) -- the 68000 view of the Z80 area. Replaces the SEG-007-T103 flat byte window.
@@ -1511,66 +1505,20 @@ int genesis_ym2612_port_write(GenesisRuntime *runtime, uint32_t port, uint8_t va
   return genesis_ym2612_access(UINT32_C(0x00A04000) + (port & 3U), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &routed);
 }
 
+void genesis_ym2612_port_reset(GenesisRuntime *runtime, uint64_t master_ticks) {
+  (void)runtime; (void)master_ticks; /* the compat model has no state to reset; the YM2612 device (SEG-032-T007) does */
+}
+
 int genesis_psg_port_write(GenesisRuntime *runtime, uint8_t value, uint64_t master_ticks) {
   uint32_t routed = value;
   (void)master_ticks;
   return genesis_psg_access(&runtime->devices, UINT32_C(0x00C00011), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &routed);
 }
 
-/* SEG-032-T002 (ADR 0073): the generic Z80 image-epoch observer notifications. Pure side channel: they read the
-   already-validated, already-applied access and never change guest state. */
-static void genesis_z80_epoch_init(GenesisZ80EpochObserver *observer) {
-  if (observer->initialized) return;
-  observer->initialized = 1U;
-  observer->reset_asserted = 1U; /* power-on: the Z80 is held in /RESET */
-  observer->busreq = 0U;
-  observer->pristine = 1U;
-  memset(observer->written, 0, sizeof(observer->written));
-}
-
-static void genesis_z80_epoch_check(GenesisRuntime *runtime, GenesisZ80EpochObserver *observer, int was_runnable) {
-  const int runnable = !observer->reset_asserted && !observer->busreq;
-  if (runnable && !was_runnable) {
-    if (observer->pristine) {
-      GenesisZ80EpochEvent event;
-      observer->pristine = 0U;
-      ++observer->epoch_count;
-      event.ordinal = observer->epoch_count;
-      event.master_ticks = runtime->scheduler.master_ticks;
-      event.ram = runtime->devices.z80_bus.z80_ram;
-      event.written_bitmap = observer->written;
-      if (observer->on_epoch != 0) observer->on_epoch(observer->context, &event);
-    }
-    /* Every runnable transition (an epoch or a plain resume) ends the hold window: later holds start a fresh one. */
-    memset(observer->written, 0, sizeof(observer->written));
-  }
-}
-
-static void genesis_z80_epoch_note_register(GenesisRuntime *runtime, uint32_t address, GenesisAccessWidth width,
-                                            uint32_t written_value) {
-  GenesisZ80EpochObserver *observer = runtime->z80_epoch_observer;
-  const uint32_t bit = (width == GENESIS_ACCESS_WORD) ? UINT32_C(0x0100) : UINT32_C(0x0001);
-  int was_runnable;
-  if (observer == 0) return;
-  genesis_z80_epoch_init(observer);
-  was_runnable = !observer->reset_asserted && !observer->busreq;
-  if (address == UINT32_C(0x00A11100)) {
-    observer->busreq = (uint8_t)((written_value & bit) != 0U);
-  } else {
-    const uint8_t asserted = (uint8_t)((written_value & bit) == 0U);
-    if (!asserted && observer->reset_asserted) observer->pristine = 1U; /* release: the Z80 is reset (contract 4.6) */
-    observer->reset_asserted = asserted;
-  }
-  genesis_z80_epoch_check(runtime, observer, was_runnable);
-}
-
+/* SEG-032-T002/T005 (ADR 0073): the 68K wrote one Z80 RAM byte (mirror resolved): it belongs to the hold window. */
 static void genesis_z80_epoch_note_ram_write(GenesisRuntime *runtime, uint32_t address) {
-  GenesisZ80EpochObserver *observer = runtime->z80_epoch_observer;
-  uint32_t offset;
-  if (observer == 0) return;
-  genesis_z80_epoch_init(observer);
-  offset = (address - UINT32_C(0x00A00000)) & (GENESIS_Z80_RAM_BYTES - 1U);
-  observer->written[offset >> 3] |= (uint8_t)(1U << (offset & 7U));
+  const uint32_t offset = (address - UINT32_C(0x00A00000)) & (GENESIS_Z80_RAM_BYTES - 1U);
+  runtime->z80_epoch.written[offset >> 3] |= (uint8_t)(1U << (offset & 7U));
 }
 
 static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *runtime, uint32_t address,
@@ -1654,6 +1602,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
     return GENESIS_ACCESS_FAIL;
   }
   if (genesis_is_psg_region(address)) {
+    if (genesis_z80_sync(runtime, stop_out)) return GENESIS_ACCESS_FAIL; /* SEG-032-T005: shared device, Z80 time first */
     /* SEG-007-T109: the co-located PSG (SN76489) audio port at the odd byte
        $C00011 is routed here BEFORE the VDP lane below, because that address is
        inside genesis_is_vdp_region's interval. routed_value carries the
@@ -1669,6 +1618,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
     return GENESIS_ACCESS_FAIL;
   }
   if (genesis_is_ym2612_region(address)) {
+    if (genesis_z80_sync(runtime, stop_out)) return GENESIS_ACCESS_FAIL; /* SEG-032-T005: shared device, Z80 time first */
     /* SEG-007-T171: routed_value carries the caller's write value in on a
        WRITE (matching every other routed owner's contract), though
        genesis_ym2612_access's own accepted WRITE shape never actually
@@ -1796,26 +1746,29 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
     return GENESIS_ACCESS_FAIL;
   }
   if (genesis_is_z80_bus_region(address)) {
-    /* SEG-007-T102: routed_value carries the caller's write value in on a
-       WRITE (genesis_z80_bus_access has no other way to learn it) and is read
-       back into *value only on a READ -- a write never mutates the caller's
-       *value, matching genesis_route_access's documented contract. */
-    uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
-    if (genesis_z80_bus_access(&runtime->devices, address, width, direction, &routed_value)) {
-      if (direction == GENESIS_ACCESS_READ) *value = routed_value;
-      else genesis_z80_epoch_note_register(runtime, address, width, routed_value);
-      return GENESIS_ACCESS_OK;
+    /* SEG-032-T005: the Z80 runs to the access time first; a read answers the live BUSACK; a write applies one edge. */
+    if (!genesis_z80_bus_shape_ok(address, width, direction)) {
+      *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_Z80_BUS);
+      return GENESIS_ACCESS_FAIL;
     }
-    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS,
-                                    GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_Z80_BUS);
-    return GENESIS_ACCESS_FAIL;
+    if (genesis_z80_sync(runtime, stop_out)) return GENESIS_ACCESS_FAIL;
+    {
+      const uint32_t bit = (width == GENESIS_ACCESS_WORD) ? UINT32_C(0x0100) : UINT32_C(0x0001);
+      if (direction == GENESIS_ACCESS_READ) {
+        *value = runtime->devices.z80_bus.bus_granted ? 0U : bit; /* BUSACK bit clear iff granted; other bits read 0 */
+        return GENESIS_ACCESS_OK;
+      }
+      if (genesis_z80_bus_write(runtime, address, (*value & bit) != 0U, stop_out)) return GENESIS_ACCESS_FAIL;
+    }
+    return GENESIS_ACCESS_OK;
   }
   if (genesis_is_z80_ram_window_region(address)) {
     /* SEG-032-T004: routed_value carries the caller's write value in on a WRITE and is read back into *value only on a READ --
        a write never mutates the caller's *value, matching genesis_route_access's documented contract. */
     uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
-    const GenesisDiagnosticCategory diagnostic =
-        genesis_z80_area_access(&runtime->devices, address, width, direction, &routed_value);
+    GenesisDiagnosticCategory diagnostic;
+    if (genesis_z80_sync(runtime, stop_out)) return GENESIS_ACCESS_FAIL; /* the 68K sees the Z80 as of now */
+    diagnostic = genesis_z80_area_access(&runtime->devices, address, width, direction, &routed_value);
     if (diagnostic == (GenesisDiagnosticCategory)0) {
       if (direction == GENESIS_ACCESS_READ) *value = routed_value;
       else if (segarecomp_genesis_z80_ram_window_contains(address)) genesis_z80_epoch_note_ram_write(runtime, address);
@@ -2067,7 +2020,8 @@ static void genesis_device_checkpoint_finalize(GenesisRuntime *runtime) {
   h = basis;
   h = genesis_fnv_bytes(h, d->z80_bus.bus_requested, 1U);
   h = genesis_fnv_bytes(h, d->z80_bus.bus_granted, 1U);
-  h = genesis_fnv_bytes(h, d->z80_bus.reset_asserted, 1U);
+  h = genesis_fnv_bytes(h, d->z80_bus.reset_released, 1U);
+  h = genesis_fnv_bytes(h, (uint32_t)d->z80_bus.bank, 2U);
   cp->component[7] = h;
   h = basis;
   for (i = 0; i < 3U; ++i) {
@@ -2748,6 +2702,17 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
     return 2;
   }
   runtime->scheduler.master_ticks = before + delta;
+  /* SEG-032-T005: the Z80 follows the leader. It is synchronized once the 68K clock has advanced a quantum past the last
+     synchronization (default 512 master ticks, about 34 Z80 cycles); every interaction with Z80-domain state synchronizes
+     first, so results never depend on this cadence (contract section 10, tested at three cadences). */
+  if (runtime->z80_hooks != 0 && runtime->z80_hooks->run_to != 0) {
+    const uint64_t quantum = runtime->z80_sync_quantum != 0U ? runtime->z80_sync_quantum : UINT64_C(512);
+    if (runtime->scheduler.master_ticks - runtime->z80_synced_ticks >= quantum &&
+        genesis_z80_sync(runtime, &result->stop)) {
+      result->kind = GENESIS_STOP;
+      return 2;
+    }
+  }
   /* An onset is crossed iff floor((t-onset)/frame) changes.  The addition is
      checked above, so no wrapped phase can manufacture an event. */
   if (crosses_onset) {
@@ -3164,7 +3129,7 @@ static void genesis_sha_bus_access(GenesisSha256 *state, const GenesisBusAccess 
 }
 static void genesis_sha_options(GenesisSha256 *state, const GenesisDeterministicOptions *options) { genesis_sha_u32(state,options->schema_version); genesis_sha_u32(state,options->instruction_budget); genesis_sha_u32(state,options->stable_frame_vblank_count); }
 static void genesis_sha_device(GenesisSha256 *s, const GenesisDeviceState *d) {
-  uint32_t i; genesis_sha_u8(s,d->z80_bus.bus_requested); genesis_sha_u8(s,d->z80_bus.bus_granted); genesis_sha_u8(s,d->z80_bus.reset_asserted); genesis_sha256_update(s,d->z80_bus.z80_ram,GENESIS_Z80_RAM_BYTES);
+  uint32_t i; genesis_sha_u8(s,d->z80_bus.bus_requested); genesis_sha_u8(s,d->z80_bus.bus_granted); genesis_sha_u8(s,d->z80_bus.reset_released); genesis_sha_u8(s,(uint8_t)(d->z80_bus.bank >> 8)); genesis_sha_u8(s,(uint8_t)d->z80_bus.bank); genesis_sha256_update(s,d->z80_bus.z80_ram,GENESIS_Z80_RAM_BYTES);
   for(i=0U;i<GENESIS_VDP_REGISTER_COUNT;++i) { genesis_sha_u16(s,d->vdp.registers[i]); }
   genesis_sha_u8(s,d->vdp.control_port_awaiting_second_word); genesis_sha_u16(s,d->vdp.control_port_first_word); genesis_sha_u32(s,d->vdp.addressed_pointer); genesis_sha_u16(s,d->vdp.auto_increment_value); genesis_sha_u16(s,d->vdp.status_register); genesis_sha_u8(s,d->vdp.data_port_transfer_code); genesis_sha_u8(s,d->vdp.data_port_transfer_code_valid); genesis_sha256_update(s,d->vdp.vram,GENESIS_VDP_VRAM_BYTES); genesis_sha256_update(s,d->vdp.cram,GENESIS_VDP_CRAM_BYTES); genesis_sha256_update(s,d->vdp.vsram,GENESIS_VDP_VSRAM_BYTES); genesis_sha_u8(s,(uint8_t)d->vdp.dma.phase); genesis_sha_u8(s,(uint8_t)d->vdp.dma.kind); genesis_sha_u32(s,d->vdp.dma.source_address); genesis_sha_u32(s,d->vdp.dma.remaining_length); genesis_sha_u32(s,d->vdp.dma.fill_byte_count); genesis_sha_u32(s,d->vdp.dma.transfer_access_count); genesis_sha_u8(s,d->vdp.dma.write_target_code);
   genesis_sha_u8(s,d->psg.latched_channel); genesis_sha_u8(s,d->psg.latched_volume); genesis_sha_u8(s,d->psg.latch_valid); for(i=0U;i<3U;++i) { genesis_sha_u16(s,d->psg.tone_period[i]); }
@@ -3323,6 +3288,7 @@ static const char *genesis_stop_class_name(GenesisStopClass value) {
   case GENESIS_STOP_DISCOVERY_PREFIX_BOUNDARY: return "discovery_prefix_boundary";
   case GENESIS_STOP_C4_LOWERING_GAP: return "c4_lowering_gap";
   case GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION: return "unsupported_cpu_exception";
+  case GENESIS_STOP_UNSUPPORTED_Z80_EXECUTION: return "unsupported_z80_execution";
   }
   return 0;
 }
@@ -3380,6 +3346,12 @@ static const char *genesis_diagnostic_name(GenesisDiagnosticCategory value) {
   case GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS: return "z80_view_unmapped_access";
   case GENESIS_DIAG_Z80_BANK_TARGET_UNSUPPORTED: return "z80_bank_target_unsupported";
   case GENESIS_DIAG_68K_Z80_AREA_WITHOUT_BUS: return "genesis_68k_z80_area_without_bus";
+  case GENESIS_DIAG_Z80_UNKNOWN_IMAGE: return "z80_unknown_image";
+  case GENESIS_DIAG_Z80_CODE_MISMATCH: return "z80_code_mismatch";
+  case GENESIS_DIAG_Z80_NO_OWNER: return "z80_no_owner";
+  case GENESIS_DIAG_Z80_MUTABLE_CODE: return "z80_mutable_code";
+  case GENESIS_DIAG_Z80_UNRESOLVED_FETCH_MAPPING: return "z80_unresolved_fetch_mapping";
+  case GENESIS_DIAG_Z80_UNSUPPORTED_ACKNOWLEDGE: return "z80_unsupported_acknowledge";
   default: return 0;
   }
 }
@@ -3396,7 +3368,13 @@ static int genesis_valid_stop_pair(GenesisStopClass stop_class,
            category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_Z80_BUS ||
            category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_Z80_RAM ||
            category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG ||
-           category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_YM2612;
+           category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_YM2612 ||
+           category == GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS || category == GENESIS_DIAG_Z80_BANK_TARGET_UNSUPPORTED ||
+           category == GENESIS_DIAG_68K_Z80_AREA_WITHOUT_BUS;
+  case GENESIS_STOP_UNSUPPORTED_Z80_EXECUTION:
+    return category == GENESIS_DIAG_Z80_UNKNOWN_IMAGE || category == GENESIS_DIAG_Z80_CODE_MISMATCH ||
+           category == GENESIS_DIAG_Z80_NO_OWNER || category == GENESIS_DIAG_Z80_MUTABLE_CODE ||
+           category == GENESIS_DIAG_Z80_UNRESOLVED_FETCH_MAPPING || category == GENESIS_DIAG_Z80_UNSUPPORTED_ACKNOWLEDGE;
   case GENESIS_STOP_UNSUPPORTED_MEMORY_REGION:
     return category == GENESIS_DIAG_EFFECTIVE_ADDRESS_NOT_24BIT ||
            category == GENESIS_DIAG_ODD_EFFECTIVE_ADDRESS ||

@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "z80_registry.h"
+
 /* Contract section 2: the Z80 memory map. */
 #define Z80_RAM_END UINT32_C(0x4000)        /* $0000-$3FFF: sound RAM and its mirror */
 #define Z80_YM_END UINT32_C(0x6000)         /* $4000-$5FFF: YM2612, `address & 3` */
@@ -149,3 +151,175 @@ void genesis_z80_machine_init(GenesisZ80Machine *machine, GenesisRuntime *runtim
 }
 
 uint64_t genesis_z80_machine_master_ticks(const GenesisZ80Machine *machine) { return access_master_ticks(machine); }
+
+/* ------------------------------------------------------------------------------------------------------------------------ */
+/* SEG-032-T005 (ADR 0072): the Z80 as a secondary CPU on the Genesis master clock.                                         */
+
+static uint64_t ceil_to_z80_clock(uint64_t master_ticks) {
+  return ((master_ticks + GENESIS_Z80_CLOCK_DIVIDER - 1U) / GENESIS_Z80_CLOCK_DIVIDER) * GENESIS_Z80_CLOCK_DIVIDER;
+}
+
+static int stop_with(GenesisRuntimeStop *stop, GenesisStopClass stop_class, GenesisDiagnosticCategory diagnostic) {
+  memset(stop, 0, sizeof(*stop));
+  stop->stop_class = stop_class;
+  stop->diagnostic_category = diagnostic;
+  return 1;
+}
+
+static GenesisDiagnosticCategory diagnostic_of_outcome(Z80Outcome outcome) {
+  switch (outcome) {
+    case Z80_ERROR_CODE_MISMATCH: return GENESIS_DIAG_Z80_CODE_MISMATCH;
+    case Z80_ERROR_UNKNOWN_IMAGE_IDENTITY: return GENESIS_DIAG_Z80_UNKNOWN_IMAGE;
+    case Z80_ERROR_MUTABLE_CODE: return GENESIS_DIAG_Z80_MUTABLE_CODE;
+    case Z80_ERROR_UNRESOLVED_FETCH_MAPPING: return GENESIS_DIAG_Z80_UNRESOLVED_FETCH_MAPPING;
+    case Z80_ERROR_IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE: return GENESIS_DIAG_Z80_UNSUPPORTED_ACKNOWLEDGE;
+    default: return GENESIS_DIAG_Z80_NO_OWNER; /* no_owner and the reserved excluded_form */
+  }
+}
+
+/* Contract section 8: the Z80 INT line is high during the VBlank onset scanline only. */
+static int int_level_at(uint64_t master_ticks) {
+  const uint64_t phase = master_ticks % GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
+  return phase >= GENESIS_NTSC_VBLANK_ONSET_TICK && phase < GENESIS_NTSC_VBLANK_ONSET_TICK + GENESIS_NTSC_MASTER_TICKS_PER_LINE;
+}
+
+static uint64_t next_int_edge(uint64_t master_ticks) {
+  const uint64_t phase = master_ticks % GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
+  const uint64_t base = master_ticks - phase;
+  if (phase < GENESIS_NTSC_VBLANK_ONSET_TICK) return base + GENESIS_NTSC_VBLANK_ONSET_TICK;
+  if (phase < GENESIS_NTSC_VBLANK_ONSET_TICK + GENESIS_NTSC_MASTER_TICKS_PER_LINE)
+    return base + GENESIS_NTSC_VBLANK_ONSET_TICK + GENESIS_NTSC_MASTER_TICKS_PER_LINE;
+  return base + GENESIS_NTSC_MASTER_TICKS_PER_FRAME + GENESIS_NTSC_VBLANK_ONSET_TICK;
+}
+
+static int machine_runnable(const GenesisZ80Machine *machine) {
+  const GenesisZ80BusState *bus = &machine->runtime->devices.z80_bus;
+  return bus->reset_released && !bus->bus_requested && machine->bound_ordinal != 0U;
+}
+
+int genesis_z80_machine_run_to(GenesisZ80Machine *machine, uint64_t master_ticks, GenesisRuntimeStop *stop) {
+  if (!machine_runnable(machine)) return 0;
+  for (;;) {
+    const uint64_t now = access_master_ticks(machine);
+    uint64_t segment_end, steps;
+    Z80Outcome outcome;
+    if (now >= master_ticks) return 0;
+    segment_end = next_int_edge(now);
+    if (segment_end > master_ticks) segment_end = master_ticks;
+    steps = (segment_end - now + GENESIS_Z80_CLOCK_DIVIDER - 1U) / GENESIS_Z80_CLOCK_DIVIDER;
+    machine->cpu.state.int_line = (uint8_t)int_level_at(now);
+    outcome = z80_run(&machine->cpu, machine->cpu.state.cycles + steps);
+    if (machine->view_stop != (GenesisDiagnosticCategory)0)
+      return stop_with(stop, GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, machine->view_stop);
+    if (z80_outcome_is_error(outcome))
+      return stop_with(stop, GENESIS_STOP_UNSUPPORTED_Z80_EXECUTION, diagnostic_of_outcome(outcome));
+  }
+}
+
+static const uint8_t k_signature_tag[] = "segarecomp.genesis.z80.signature.v1.extents";
+
+void genesis_z80_activation_signature(const uint8_t *ram, const uint8_t *written, uint32_t *extent_count, uint8_t out[32]) {
+  GenesisSha256 sha;
+  uint32_t offset = 0U, runs = 0U;
+  genesis_sha256_init(&sha);
+  genesis_sha256_update(&sha, k_signature_tag, (uint32_t)(sizeof(k_signature_tag) - 1U));
+  while (offset < GENESIS_Z80_RAM_BYTES) {
+    uint32_t end;
+    uint8_t header[4];
+    if (((written[offset >> 3] >> (offset & 7U)) & 1U) == 0U) { ++offset; continue; }
+    end = offset;
+    while (end < GENESIS_Z80_RAM_BYTES && ((written[end >> 3] >> (end & 7U)) & 1U) != 0U) ++end;
+    header[0] = (uint8_t)(offset & 0xFFU); header[1] = (uint8_t)(offset >> 8);
+    header[2] = (uint8_t)((end - offset) & 0xFFU); header[3] = (uint8_t)((end - offset) >> 8);
+    genesis_sha256_update(&sha, header, 4U);
+    genesis_sha256_update(&sha, ram + offset, end - offset);
+    offset = end;
+    ++runs;
+  }
+  genesis_sha256_final(&sha, out);
+  if (extent_count != NULL) *extent_count = runs;
+}
+
+/* Contract section 5 / ADR 0073: the image epoch activates a compiled image, or stops fail closed. */
+static int activate_image(GenesisZ80Machine *machine, const uint8_t *written, GenesisRuntimeStop *stop) {
+  uint8_t signature[32];
+  uint32_t extents, ordinal;
+  genesis_z80_activation_signature(machine->runtime->devices.z80_bus.z80_ram, written, &extents, signature);
+  if (extents == 0U && machine->last_bound != 0U) {  /* a plain restart: the code already in RAM, i.e. the previously bound image */
+    machine->bound_ordinal = machine->last_bound;
+    return 0;
+  }
+  ordinal = genesis_z80_image_for_signature(signature);
+  if (ordinal == 0U) {
+    if (machine->on_unknown_image != NULL)
+      machine->on_unknown_image(machine->unknown_image_context, machine->runtime->z80_epoch.epoch_count,
+                                machine->runtime->devices.z80_bus.z80_ram, written);
+    machine->bound_ordinal = 0U;
+    return stop_with(stop, GENESIS_STOP_UNSUPPORTED_Z80_EXECUTION, GENESIS_DIAG_Z80_UNKNOWN_IMAGE);
+  }
+  machine->bound_ordinal = machine->last_bound = ordinal;
+  return 0;
+}
+
+static int hook_run_to(void *context, GenesisRuntime *runtime, uint64_t master_ticks, GenesisRuntimeStop *stop) {
+  (void)runtime;
+  return genesis_z80_machine_run_to((GenesisZ80Machine *)context, master_ticks, stop);
+}
+
+static int hook_bus_event(void *context, GenesisRuntime *runtime, GenesisZ80Event event, uint64_t master_ticks, int transition,
+                          int epoch, const uint8_t *written, GenesisRuntimeStop *stop) {
+  GenesisZ80Machine *machine = (GenesisZ80Machine *)context;
+  const uint64_t aligned = ceil_to_z80_clock(master_ticks);
+  switch (event) {
+    case GENESIS_Z80_EVENT_RESET_ASSERT:
+      genesis_ym2612_port_reset(runtime, master_ticks);
+      break;
+    case GENESIS_Z80_EVENT_RESET_RELEASE:  /* the architectural reset happens at release (contract section 4.6) */
+      genesis_ym2612_port_reset(runtime, master_ticks);
+      z80_reset(&machine->cpu.state);
+      machine->view_stop = (GenesisDiagnosticCategory)0;
+      machine->cycle_base_master_ticks = aligned;
+      break;
+    case GENESIS_Z80_EVENT_BUSREQ_RELEASE:
+    case GENESIS_Z80_EVENT_BUSREQ_ASSERT:
+      break;
+  }
+  if (transition) {  /* resume: time held on the bus is not made up (GPGX: the Z80 restarts at the next multiple of 15 ticks) */
+    const uint64_t z80_time = access_master_ticks(machine);
+    if (z80_time < aligned) machine->cycle_base_master_ticks += aligned - z80_time;
+  }
+  if (epoch) return activate_image(machine, written, stop);
+  return 0;
+}
+
+void genesis_z80_machine_attach(GenesisZ80Machine *machine, GenesisRuntime *runtime) {
+  genesis_z80_machine_init(machine, runtime);
+  machine->hooks.context = machine;
+  machine->hooks.run_to = hook_run_to;
+  machine->hooks.bus_event = hook_bus_event;
+  runtime->z80_hooks = &machine->hooks;
+}
+
+void genesis_z80_machine_state_digest(const GenesisZ80Machine *machine, uint8_t out[32]) {
+  GenesisSha256 sha;
+  const Z80State *s = &machine->cpu.state;
+  uint8_t bytes[64];
+  uint64_t values[4];
+  uint32_t i;
+  genesis_sha256_init(&sha);
+  bytes[0] = s->a; bytes[1] = s->f; bytes[2] = s->b; bytes[3] = s->c; bytes[4] = s->d; bytes[5] = s->e; bytes[6] = s->h; bytes[7] = s->l;
+  bytes[8] = s->a2; bytes[9] = s->f2; bytes[10] = s->b2; bytes[11] = s->c2; bytes[12] = s->d2; bytes[13] = s->e2; bytes[14] = s->h2;
+  bytes[15] = s->l2; bytes[16] = (uint8_t)s->ix; bytes[17] = (uint8_t)(s->ix >> 8); bytes[18] = (uint8_t)s->iy; bytes[19] = (uint8_t)(s->iy >> 8);
+  bytes[20] = (uint8_t)s->sp; bytes[21] = (uint8_t)(s->sp >> 8); bytes[22] = (uint8_t)s->pc; bytes[23] = (uint8_t)(s->pc >> 8);
+  bytes[24] = (uint8_t)s->wz; bytes[25] = (uint8_t)(s->wz >> 8); bytes[26] = s->i; bytes[27] = s->r; bytes[28] = s->im; bytes[29] = s->iff1;
+  bytes[30] = s->iff2; bytes[31] = s->q; bytes[32] = s->halted; bytes[33] = s->int_deferral; bytes[34] = s->ld_a_ir; bytes[35] = s->in_prefix_run;
+  genesis_sha256_update(&sha, bytes, 36U);
+  values[0] = s->cycles; values[1] = machine->cycle_base_master_ticks; values[2] = machine->bound_ordinal; values[3] = machine->last_bound;
+  for (i = 0U; i < 4U; ++i) {
+    uint8_t word[8];
+    uint32_t b;
+    for (b = 0U; b < 8U; ++b) word[b] = (uint8_t)(values[i] >> (8U * b));
+    genesis_sha256_update(&sha, word, 8U);
+  }
+  genesis_sha256_final(&sha, out);
+}
