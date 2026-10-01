@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 """SEG-009-T002: a 512 KiB synthetic SMS cartridge through the SMS generation route stays inside the ADR 0058 shape/budget.
 
-usage: sms_emission_budget_test.py <sms_image_emitter> <z80_image_emitter> <product-root>
+usage: sms_emission_budget_test.py <sms_image_emitter> <z80_image_emitter> <product-root> [quick|512k]
+
+  Two tiers (the 512 KiB emission is about 390 MiB of C and takes minutes, so it is not in the per-host `full` gate):
+  * `quick` (default, label full): a 128 KiB ROM, emitted twice for byte-identical determinism, and compared with the
+    generic emitter over the ADR 0058 reference shape for that size;
+  * `512k` (label extended): the 512 KiB ROM emitted once, the ADR 0058 generated-C budget, and the byte-identity
+    comparison with the generic emitter at the full reference shape.
 
   * emission is byte-identical across two runs of the SMS route;
   * the SMS route's ImageSet is exactly the ADR 0058 reference shape measured by `tools/z80_static_budget.py`
@@ -20,6 +26,10 @@ import tempfile
 
 SMS_EMITTER, Z80_EMITTER = sys.argv[1], sys.argv[2]
 ROOT = pathlib.Path(sys.argv[3]).resolve()
+MODE = sys.argv[4] if len(sys.argv) > 4 else "quick"
+assert MODE in ("quick", "512k"), MODE
+ROM_SIZE = 0x80000 if MODE == "512k" else 0x20000
+RUN_NAMES = ("a",) if MODE == "512k" else ("a", "b")
 sys.path.insert(0, str(ROOT / "tools"))
 import sms_fixture_rom as builder  # noqa: E402
 import z80_static_budget as budget  # noqa: E402
@@ -44,23 +54,25 @@ def size_mib(directory):
 
 def main():
     rng = random.Random(512)
-    rom = bytearray(rng.randrange(256) for _ in range(0x80000))
-    builder.write_header(rom, 0x80000)
+    rom = bytearray(rng.randrange(256) for _ in range(ROM_SIZE))
+    builder.write_header(rom, ROM_SIZE)
     rom = bytes(rom)
     with tempfile.TemporaryDirectory() as tmp:
         tmp = pathlib.Path(tmp)
         (tmp / "big.sms").write_bytes(rom)
         runs = []
-        for name in ("a", "b"):
+        for name in RUN_NAMES:
             r = subprocess.run([SMS_EMITTER, tmp / "big.sms", tmp / name, "sms", "--mapper", "sega"], capture_output=True, text=True, timeout=900)
             check(r.returncode == 0 and r.stdout.startswith("ok mapper=sega"), "SMS emission %s failed: %s" % (name, r.stdout[:300]))
             runs.append(r.stdout)
         if FAILED:
             return
-        first, second = digests(tmp / "a"), digests(tmp / "b")
-        check(first == second and runs[0] == runs[1], "SMS emission of a 512 KiB ROM is not byte-identical across two runs")
-        check(size_mib(tmp / "a") <= budget.BUDGETS_512K["generated_c_mib"], "generated C exceeds the ADR 0058 512 KiB budget: %.0f MiB" % size_mib(tmp / "a"))
-        shutil.rmtree(tmp / "b")
+        if MODE == "quick":
+            first, second = digests(tmp / "a"), digests(tmp / "b")
+            check(first == second and runs[0] == runs[1], "SMS emission of a 128 KiB ROM is not byte-identical across two runs")
+            shutil.rmtree(tmp / "b")
+        else:
+            check(size_mib(tmp / "a") <= budget.BUDGETS_512K["generated_c_mib"], "generated C exceeds the ADR 0058 512 KiB budget: %.0f MiB" % size_mib(tmp / "a"))
         banks = [rom[i:i + 0x4000] for i in range(0, len(rom), 0x4000)]
         (tmp / "ref.spec").write_text(budget.sms_spec(rom[:0x400], banks), encoding="utf-8")
         ref = subprocess.run([Z80_EMITTER, tmp / "ref.spec", tmp / "ref", "sms"], capture_output=True, text=True, timeout=900)
@@ -73,7 +85,7 @@ def main():
     if FAILED:
         print("\n".join(FAILED[:10]))
         return 1
-    print("sms 512 KiB emission: ok")
+    print("sms %s emission: ok" % ("512 KiB" if MODE == "512k" else "128 KiB"))
     return 0
 
 

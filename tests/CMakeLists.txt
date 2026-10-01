@@ -1168,6 +1168,9 @@ add_test(NAME sms_bank_crossing_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_bank_crossing_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME sms_emission_budget_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR})
+# The 512 KiB tier (about 390 MiB of generated C, minutes of runtime) is `extended`, so it is not run on every CI host.
+add_test(NAME sms_emission_budget_512k_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR} 512k)
 add_test(NAME sms_machine_dependency_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_dependency_test.py ${PROJECT_SOURCE_DIR})
 # SEG-009-T010: `segarecomp build` for Master System images (platform routing, mapper declaration, T008 digest reproduction).
@@ -1187,7 +1190,8 @@ add_test(NAME sms_dependency_gate_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST sms_machine_tests sms_machine_dependency_test sms_dependency_gate_test APPEND PROPERTY LABELS full fast)
 set_property(TEST sms_dependency_gate_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST sms_bank_crossing_test sms_emission_budget_test APPEND PROPERTY LABELS full)
-set_property(TEST sms_bank_crossing_test sms_emission_budget_test sms_machine_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST sms_emission_budget_512k_test APPEND PROPERTY LABELS extended)
+set_property(TEST sms_bank_crossing_test sms_emission_budget_test sms_emission_budget_512k_test sms_machine_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
 # SEG-009-T003: machine composition, deterministic scheduler, interrupt wiring and headless driver. The unit test supplies
 # a scripted fake `z80_run` (over the real z80_runtime.h boundary logic) so scheduler ordering is checked without a
