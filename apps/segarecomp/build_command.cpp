@@ -202,7 +202,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else return std::nullopt;
   }
   if (!have_rom || !have_output || !have_runtime || options.cc.empty()) return std::nullopt;
-  if (options.optimize != "0" && options.optimize != "2") return std::nullopt;
+  if (options.optimize != "0" && options.optimize != "1" && options.optimize != "2") return std::nullopt;
   if (options.sdl3_include.has_value() != options.sdl3_lib.has_value()) return std::nullopt;
   if (!options.platform.empty() && options.platform != "genesis" && options.platform != "master-system") return std::nullopt;
   return options;
