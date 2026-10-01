@@ -64,6 +64,10 @@ ORACLE_DEFINES = ["-DZ80_STATIC", "-DZ80_WITH_EXECUTE", "-DZ80_WITH_Q", "-DZ80_W
                   "-DZ80_WITH_UNOFFICIAL_RETI", "-DZ80_WITH_ZILOG_NMOS_LD_A_IR_BUG"]
 # _CRT_SECURE_NO_WARNINGS: the MSVC CRT marks sscanf/fopen deprecated, which -Werror turns into a hard error on Windows.
 STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-D_CRT_SECURE_NO_WARNINGS"]
+# GCC's -Wmisleading-indentation (part of -Wall) roughly doubles the compile time of the huge machine-emitted owner units
+# (gcc 13: 22.7 s -> 11.3 s for one SMS shard set; clang has no such cost). Emitted layout is not authored, so the generated
+# TUs drop that one warning; test-authored harness sources and the oracle keep the full STRICT set.
+GENERATED_UNIT_FLAGS = ["-Wno-misleading-indentation"]
 SCHEMA = 1
 SLOT_BASE = 0x0100
 MAX_CODE = 0x2000          # code bytes per slot batch (bounded emitted C per batch)
@@ -477,11 +481,12 @@ def compile_units(tc, workdir, stem, extra_sources=(), extra_flags=()):
     units = (workdir / (stem + ".units")).read_text().split()
     sources = [workdir / u for u in units] + [pathlib.Path(s) for s in extra_sources]
     objs = [workdir / (s.stem + ".o") for s in sources]
+    generated = set(sources[:len(units)])
     common = [tc.cc, *STRICT, tc.opt, "-I", str(tc.include_dir), "-I", str(INCLUDE_DIR), "-I", str(workdir), "-I", str(TOOLS_DIR), *extra_flags]
 
     def one(pair):
         src, obj = pair
-        r = run(common + ["-c", str(src), "-o", str(obj)])
+        r = run(common + (GENERATED_UNIT_FLAGS if src in generated else []) + ["-c", str(src), "-o", str(obj)])
         return r.returncode, (r.stderr or r.stdout)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
@@ -504,7 +509,7 @@ def _file_digest(path):
 
 def _cache_key(tc, spec_text, stem):
     h = hashlib.sha256()
-    for part in (spec_text, stem, str(tc.cc), tc.opt, " ".join(STRICT), sys.platform):
+    for part in (spec_text, stem, str(tc.cc), tc.opt, " ".join(STRICT), " ".join(GENERATED_UNIT_FLAGS), sys.platform):
         h.update(part.encode())
         h.update(b"\0")
     inputs = [tc.emitter, TOOLS_DIR / "z80_conformance_runner.c", TOOLS_DIR / "z80_conformance_common.h",

@@ -22,6 +22,12 @@ import threading
 import uuid
 
 MAX_OBJECT_BYTES = 64 * 1024 * 1024
+# GCC's -Wmisleading-indentation (part of -Wall) costs about as much as the whole rest of the compile on the huge
+# machine-emitted owner units (measured with gcc 13 on a 32 KiB SMS fixture: 22.7 s -> 11.3 s for the shard set, clang has no
+# such cost). The emitter's layout is not hand-written, so the warning is only meaningful for authored sources: generated units
+# are compiled with this extra flag, authored runtime/driver sources keep the full strict set, and sms_native_build_test keeps
+# one build through the CLI's own unrelaxed -Wall -Wextra -pedantic.
+GENERATED_UNIT_FLAGS = ["-Wno-misleading-indentation"]
 _LINEMARKER = re.compile(rb"^#\s*(line\s+)?\d+\b.*$", re.M)
 _lock = threading.Lock()
 _stats = {"hit": 0, "miss": 0, "bypass": 0}

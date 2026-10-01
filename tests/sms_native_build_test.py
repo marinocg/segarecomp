@@ -105,7 +105,9 @@ def main():
 
         # the manifest declaration form (same image, declared through the manifest)
         out2 = tmp / "manifest"
-        r = build(rom, out2, "--mapper-manifest", str(manifest_file), "--platform", "master-system")
+        # the unrelaxed -Wall build above is the generated-code strict-warning evidence; this repeat of the same image drops
+        # GCC's expensive -Wmisleading-indentation (see sms_cc_cache.GENERATED_UNIT_FLAGS) without changing the emitted C
+        r = build(rom, out2, "--mapper-manifest", str(manifest_file), "--platform", "master-system", "--cc-arg", "-Wno-misleading-indentation")
         check(r.returncode == 0, "manifest build failed: %s" % (r.stdout + r.stderr)[-400:])
         if r.returncode == 0:
             check(status(out2).get("mapper_source") == "fixture_builder", "manifest source not recorded: %s" % status(out2))

@@ -58,7 +58,8 @@ def compile_program(workdir, stem):
     objs = []
     for src in sources:
         obj = workdir / (src.stem + ".o")
-        r = sms_cc_cache.compile_object([CC, *STRICT, "-O0", "-I", Z80_INCLUDE, "-I", RUNTIME_DIR, "-I", workdir, "-c", src, "-o", obj])
+        generated = sms_cc_cache.GENERATED_UNIT_FLAGS if src.parent == workdir else []  # authored sources keep the full strict set
+        r = sms_cc_cache.compile_object([CC, *STRICT, *generated, "-O0", "-I", Z80_INCLUDE, "-I", RUNTIME_DIR, "-I", workdir, "-c", src, "-o", obj])
         if r.returncode != 0:
             return None, r.stderr[:2000]
         objs.append(obj)

@@ -35,7 +35,8 @@ class Native:
 
     def compile(self, src, out, extra=()):
         obj = out / (src.stem + ".o")
-        c = sms_cc_cache.compile_object([self.cc, *STRICT, "-O0", *[a for d in self.include for a in ("-I", d)], "-I", out, *extra, "-c", src, "-o", obj])
+        generated = sms_cc_cache.GENERATED_UNIT_FLAGS if src.parent == out else []  # runtime sources keep the full strict set
+        c = sms_cc_cache.compile_object([self.cc, *STRICT, *generated, "-O0", *[a for d in self.include for a in ("-I", d)], "-I", out, *extra, "-c", src, "-o", obj])
         if c.returncode != 0:
             self.failures.append("%s did not compile as strict C11: %s" % (src.name, c.stderr[:1200]))
             return None

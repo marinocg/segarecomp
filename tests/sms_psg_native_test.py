@@ -124,7 +124,8 @@ def build_exe(tmp, name):
     objs = []
     for src in units + SOURCES:
         obj = out / (src.stem + ".o")
-        c = sms_cc_cache.compile_object([CC, *STRICT, "-O0", "-I", Z80_INCLUDE, "-I", RUNTIME, "-I", PLATFORM / "headless", "-I", PSG_LIB / "include", "-I", out, "-c", src, "-o", obj])
+        generated = sms_cc_cache.GENERATED_UNIT_FLAGS if src.parent == out else []  # authored sources keep the full strict set
+        c = sms_cc_cache.compile_object([CC, *STRICT, *generated, "-O0", "-I", Z80_INCLUDE, "-I", RUNTIME, "-I", PLATFORM / "headless", "-I", PSG_LIB / "include", "-I", out, "-c", src, "-o", obj])
         check(c.returncode == 0, "%s: %s did not compile as strict C11: %s" % (name, src.name, c.stderr[:1500]))
         if c.returncode != 0:
             return None
