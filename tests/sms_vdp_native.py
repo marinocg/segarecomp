@@ -14,12 +14,15 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import sms_cc_cache  # noqa: E402
 
-STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-D_CRT_SECURE_NO_WARNINGS"]
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "tools"))
+import host_cc  # noqa: E402
+STRICT = host_cc.STRICT_C11
 
 
 class Native:
-    def __init__(self, emitter, cc, root, tmp):
+    def __init__(self, emitter, cc, root, tmp, emitter_args=()):
         self.emitter, self.cc, self.root, self.tmp = emitter, cc, pathlib.Path(root).resolve(), pathlib.Path(tmp)
+        self.emitter_args = [str(a) for a in emitter_args]  # extra emitter options (SEG-033: --owner-group / --share-bodies)
         platform = self.root / "platforms" / "master-system"
         self.include = [self.root / "libs" / "codegen" / "c11" / "include", platform / "runtime", platform / "headless",
                         self.root / "libs" / "device" / "sega" / "psg" / "include"]
@@ -42,10 +45,12 @@ class Native:
             return None
         return obj
 
-    def build(self, roms, name):
-        """Returns the executable of fixture `name` (ROM + mapper manifest in `roms`), or None after recording a failure."""
+    def build(self, roms, name, mapper=None):
+        """Returns the executable of fixture `name` (ROM + mapper manifest in `roms`; `mapper` declares the family instead, for an
+        image without a manifest), or None after recording a failure."""
         out = self.tmp / ("gen_" + name)
-        r = self.run([self.emitter, roms / (name + ".sms"), out, "sms", "--manifest", roms / (name + ".mapper.json")])
+        declaration = ["--mapper", mapper] if mapper else ["--manifest", roms / (name + ".mapper.json")]
+        r = self.run([self.emitter, roms / (name + ".sms"), out, "sms", *declaration, *self.emitter_args])
         if r.returncode != 0:
             self.failures.append("%s: emission failed: %s" % (name, (r.stdout + r.stderr)[:300]))
             return None

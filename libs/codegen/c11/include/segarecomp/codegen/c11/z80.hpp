@@ -1,15 +1,17 @@
 #pragma once
 
-// Z80 image-level C11 emission (SEG-008-T003; ADR 0058 sections 1-6). Broad immutable-image AOT: one owner (a C
-// function) per instruction start of every code image, classified by the cpu_z80 logical-fetch decoder.
+// Z80 image-level C11 emission (SEG-008-T003; ADR 0058 sections 1-6, ADR 0071). Broad immutable-image AOT: one exact entry per
+// instruction start of every code image, classified by the cpu_z80 logical-fetch decoder. Consecutive entries of one image share
+// a bounded host function (an owner, at most kOwnerGroupEntries entries) that selects its entry from the PC or the window
+// offset; PC-independent instruction effects are emitted once as shared functions (SEG-033).
 //
-//   full owner         a decoded start whose form has a lowering row (z80_lowering.hpp)
-//   prefix_lock owner  a start of an endless DD/FD run
-//   typed stub owner   `mutable_code`, `unresolved_fetch_mapping` (and the reserved `excluded_form`) starts
-//   (no owner)         a decoded start whose form has no lowering row yet: dispatch fails closed with `no_owner`
+//   full entry         a decoded start whose form has a lowering row (z80_lowering.hpp)
+//   prefix_lock entry  a start of an endless DD/FD run
+//   typed stub entry   `mutable_code`, `unresolved_fetch_mapping` (and the reserved `excluded_form`) starts
+//   (no entry)         a decoded start whose form has no lowering row yet: dispatch fails closed with `no_owner`
 //
 // Absolute-PC owners serve statically invariant windows and banked images admissible in exactly one window.
-// A banked image admissible in several windows gets one window-relative owner per offset that derives every
+// A banked image admissible in several windows gets one window-relative entry per offset that derives every
 // PC-dependent value from the run-time window base. Direct owner-to-owner binding exists only from an invariant
 // window owner to an invariant-window successor; everything else returns to the generated dispatcher `z80_run`,
 // which asks the host for the current code-image identity and looks up (identity, PC) or (identity, PC - base)
@@ -58,7 +60,16 @@ struct OwnerRecord {
   std::uint32_t variants = 1;        // > 1: the owner selects among body variants from the run-time window base
   cpu::z80::FormId form = cpu::z80::kNoForm;
   bool bound_successor = false;      // fall-through is a direct owner-to-owner return
+  std::uint32_t group_entries = 1;   // exact entries sharing this start's host owner function (1 = a function of its own)
 };
+
+// Entries per host owner function (SEG-033-T002). One exact start maps to its owner through the unchanged generic entry
+// table; consecutive starts of one image share a bounded owner that selects its entry from the PC (absolute-PC owners) or the
+// window offset (window-relative owners). 1 reproduces the historical one-function-per-start emission byte for byte.
+// The production bound is 128 (SEG-033-T002 sweep over 16/32/64/128): host compile
+// CPU and object code roughly halve versus one function per start and do not improve beyond it. It is a constant, not a user
+// option.
+inline constexpr std::size_t kOwnerGroupEntries = 128;
 
 struct EmitOptions {
   std::filesystem::path directory;
@@ -69,9 +80,17 @@ struct EmitOptions {
   // TU size and compiler memory, ADR 0058). The default only matters for images above 64 Ki owners; tests lower it to exercise
   // the chunk path on a small image.
   std::size_t entry_chunk_entries = 65536;
+  bool share_bodies = true;  // PC-independent instruction effects are emitted once and called (SEG-033-T005); false = reference
+  std::size_t owner_group_entries = kOwnerGroupEntries;  // >= 1; tests and the differential gate pin 1 (reference) vs N
 };
 
+// full_/prefix_lock_/stub_owners, variant_owners and bound_successors are legacy names: they count exact entries. `entries` is the
+// entry-table size and `owners` the number of host owner functions.
 struct EmitStats {
+  std::size_t shared_bodies = 0;     // distinct shared effect functions
+  std::size_t entries = 0;           // exact starts with an owner binding (the entry-table size)
+  std::size_t owners = 0;            // host owner functions
+  std::size_t max_group_entries = 0; // largest group
   std::size_t full_owners = 0;
   std::size_t prefix_lock_owners = 0;
   std::size_t stub_owners = 0;

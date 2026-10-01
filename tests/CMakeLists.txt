@@ -1096,6 +1096,17 @@ set_property(TEST cpu_z80_dependency_test z80_capability_ratchet_test codegen_c1
 # The harness self-test compiles several generated images and expands ~90k row vectors: `full` only (CI runs it there).
 set_property(TEST z80_conformance_harness_test APPEND PROPERTY LABELS full)
 # SEG-008-T008: per-form/per-outcome T-state validation and the deadline/resume property (oracle comparison skips cleanly).
+# SEG-033-T003: grouped Z80 owners are observably identical to the one-function-per-start reference (group size 1).
+add_test(NAME z80_owner_group_differential_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_owner_group_differential_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} quick)
+set_property(TEST z80_owner_group_differential_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST z80_owner_group_differential_test APPEND PROPERTY LABELS full)
+set_property(TEST z80_owner_group_differential_test APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
+add_test(NAME z80_owner_group_differential_test_forms COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_owner_group_differential_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} full)
+set_property(TEST z80_owner_group_differential_test_forms APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST z80_owner_group_differential_test_forms APPEND PROPERTY LABELS extended)
+set_property(TEST z80_owner_group_differential_test_forms APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
 add_test(NAME z80_timing_closure_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/z80_timing_closure_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST z80_timing_closure_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
@@ -1168,7 +1179,8 @@ add_test(NAME sms_bank_crossing_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_bank_crossing_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME sms_emission_budget_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR})
-# The 512 KiB tier (about 390 MiB of generated C, minutes of runtime) is `extended`, so it is not run on every CI host.
+# The 512 KiB tier emits about 190 MiB of generated C in seconds since SEG-033 (grouped owners, shared bodies), so it is in the
+# `full` gate with its structural shape budgets; the `extended` tier below adds the real compile.
 add_test(NAME sms_emission_budget_512k_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR} 512k)
 add_test(NAME sms_machine_dependency_test COMMAND ${Python3_EXECUTABLE}
@@ -1179,6 +1191,26 @@ add_test(NAME sms_native_build_test COMMAND ${Python3_EXECUTABLE}
   $<TARGET_FILE:sms_image_emitter>)
 set_property(TEST sms_native_build_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_native_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-033-T003: the SMS machine fixtures (video, audio, input, mapper, interrupts) are artifact-identical between the reference
+# emission and grouped owners with shared bodies; the same on an authorized local image when one exists (extended).
+add_test(NAME sms_owner_group_equivalence_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_owner_group_equivalence_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_owner_group_local_images_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_owner_group_local_images_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_owner_group_equivalence_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_owner_group_local_images_test APPEND PROPERTY LABELS extended)
+set_property(TEST sms_owner_group_equivalence_test sms_owner_group_local_images_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-033-T009: injected emitter defects are killed by the gates; shape controls, -O0/-O1/-O2 equality, determinism and a hidden-worker-failure control.
+add_test(NAME z80_owner_group_mutation_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_owner_group_mutation_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  $<TARGET_FILE:segarecomp> $<TARGET_FILE:sms_image_emitter>)
+set_property(TEST z80_owner_group_mutation_test APPEND PROPERTY LABELS extended)
+set_property(TEST z80_owner_group_mutation_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-033-T006: the production build route's structural and resource budgets on a seeded 128 KiB image (real compile; extended).
+add_test(NAME sms_build_benchmark_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_build_benchmark_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR} ${CMAKE_C_COMPILER})
+set_property(TEST sms_build_benchmark_test APPEND PROPERTY LABELS extended)
+set_property(TEST sms_build_benchmark_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-009-T011: authorized local images (skips cleanly without games/sms; not in the hermetic tiers).
 add_test(NAME sms_local_images_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_local_images_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
@@ -1190,7 +1222,7 @@ add_test(NAME sms_dependency_gate_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST sms_machine_tests sms_machine_dependency_test sms_dependency_gate_test APPEND PROPERTY LABELS full fast)
 set_property(TEST sms_dependency_gate_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST sms_bank_crossing_test sms_emission_budget_test APPEND PROPERTY LABELS full)
-set_property(TEST sms_emission_budget_512k_test APPEND PROPERTY LABELS extended)
+set_property(TEST sms_emission_budget_512k_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_bank_crossing_test sms_emission_budget_test sms_emission_budget_512k_test sms_machine_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
 # SEG-009-T003: machine composition, deterministic scheduler, interrupt wiring and headless driver. The unit test supplies

@@ -125,6 +125,8 @@ struct Options {
   fs::path runtime_dir;  // contains runtime/, viewer/ and (optional) compat/
   std::optional<fs::path> sdl3_include;
   std::optional<fs::path> sdl3_lib;
+  // 0, 1 or 2 for every unit. -O2 stays the default: after the Z80 owner grouping and shared bodies (SEG-033) -O1 saved at most
+  // 4% of compile time on real images for a 4% slower generated program, so no split generated/handwritten policy exists.
   std::string optimize = "2";
   unsigned jobs = 0;
   // Master System routing (SEG-009-T010). `platform` empty: classify the image; the mapper is never inferred.
@@ -202,7 +204,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else return std::nullopt;
   }
   if (!have_rom || !have_output || !have_runtime || options.cc.empty()) return std::nullopt;
-  if (options.optimize != "0" && options.optimize != "2") return std::nullopt;
+  if (options.optimize != "0" && options.optimize != "1" && options.optimize != "2") return std::nullopt;
   if (options.sdl3_include.has_value() != options.sdl3_lib.has_value()) return std::nullopt;
   if (!options.platform.empty() && options.platform != "genesis" && options.platform != "master-system") return std::nullopt;
   return options;
@@ -441,7 +443,9 @@ int segarecomp_build_command(int argc, char **argv) {
       logs.push_back(object_dir / (std::to_string(i) + ".log"));
       objects.push_back(object);
     }
-    unsigned jobs = options.jobs != 0 ? options.jobs : std::min(4U, std::max(1U, std::thread::hardware_concurrency()));
+    // One bounded default (SEG-033-T004): the host's concurrency capped at 8; --jobs overrides it.
+    unsigned jobs = options.jobs != 0 ? options.jobs : std::min(8U, std::max(1U, std::thread::hardware_concurrency()));
+    log.line("# compile jobs: " + std::to_string(jobs));
     std::vector<int> codes;
     const int failed = run_compiles(commands, logs, jobs, codes);
     for (std::size_t i = 0; i < commands.size(); ++i) {

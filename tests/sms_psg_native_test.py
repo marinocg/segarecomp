@@ -32,7 +32,8 @@ PLATFORM = ROOT / "platforms" / "master-system"
 RUNTIME = PLATFORM / "runtime"
 PSG_LIB = ROOT / "libs" / "device" / "sega" / "psg"
 Z80_INCLUDE = ROOT / "libs" / "codegen" / "c11" / "include"
-STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-D_CRT_SECURE_NO_WARNINGS"]
+import host_cc  # noqa: E402
+STRICT = host_cc.STRICT_C11
 SOURCES = [RUNTIME / n for n in ("sms_memory.c", "sms_sha256.c", "sms_input.c", "sms_machine.c", "sms_psg.c", "sms_pad.c", "sms_vdp.c")] + [
     PSG_LIB / "src" / "sn76489.c", PLATFORM / "headless" / "sms_audio.c", PLATFORM / "headless" / "sms_headless.c", PLATFORM / "headless" / "sms_devices_none.c"]
 FRAME = 59736

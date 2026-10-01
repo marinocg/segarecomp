@@ -16,6 +16,8 @@ import tempfile
 ROOT = pathlib.Path(sys.argv[1]).resolve()
 CC = sys.argv[2]
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "tools"))
+import host_cc  # noqa: E402
 import sms_cc_cache  # noqa: E402
 LIB = ROOT / "libs" / "device" / "sega" / "psg"
 failed = []
@@ -42,7 +44,7 @@ for path in sources:
     check(not re.search(r"\bSms[A-Z]|\bsms_|genesis|Genesis|Z80|z80|M68k|m68k", stripped), "%s names a platform or CPU" % path.name)
 with tempfile.TemporaryDirectory() as tmp:
     obj = pathlib.Path(tmp) / "sn76489.o"
-    r = sms_cc_cache.compile_object([CC, "-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-I", str(LIB / "include"), "-c",
+    r = sms_cc_cache.compile_object([CC, *host_cc.STRICT_C11, "-I", str(LIB / "include"), "-c",
                                      str(LIB / "src" / "sn76489.c"), "-o", str(obj)])
     check(r.returncode == 0, "the device does not compile standalone as strict C11: " + r.stderr[:400])
 runtime = (ROOT / "platforms" / "master-system" / "runtime" / "CMakeLists.txt").read_text(encoding="utf-8")

@@ -63,7 +63,8 @@ SECONDARY_FORM_MASK = {"ccf.": {"f"}, "scf.": {"f"}, "ldir.": {"f", "wz"}, "lddr
 ORACLE_DEFINES = ["-DZ80_STATIC", "-DZ80_WITH_EXECUTE", "-DZ80_WITH_Q", "-DZ80_WITH_FULL_IM0", "-DZ80_WITH_SPECIAL_RESET",
                   "-DZ80_WITH_UNOFFICIAL_RETI", "-DZ80_WITH_ZILOG_NMOS_LD_A_IR_BUG"]
 # _CRT_SECURE_NO_WARNINGS: the MSVC CRT marks sscanf/fopen deprecated, which -Werror turns into a hard error on Windows.
-STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-D_CRT_SECURE_NO_WARNINGS"]
+import host_cc  # noqa: E402
+STRICT = host_cc.STRICT_C11
 # GCC's -Wmisleading-indentation (part of -Wall) roughly doubles the compile time of the huge machine-emitted owner units
 # (gcc 13: 22.7 s -> 11.3 s for one SMS shard set; clang has no such cost). Emitted layout is not authored, so the generated
 # TUs drop that one warning; test-authored harness sources and the oracle keep the full STRICT set.
@@ -437,11 +438,17 @@ def scenario_batches(doc):
 
 # ------------------------------------------------------------------------------------------------ build / run
 BUILD_CACHE_ENV = "SEGARECOMP_Z80_BUILD_CACHE"
+OWNER_GROUP_ENV = "SEGARECOMP_Z80_OWNER_GROUP"
 
 
 class Toolchain:
-    def __init__(self, cc, emitter, oracle_checkout=None, opt="-O0", include_dir=None, cache=True):
+    def __init__(self, cc, emitter, oracle_checkout=None, opt="-O0", include_dir=None, cache=True, owner_group=None, share_bodies=None):
         self.cc, self.emitter, self.oracle_checkout, self.opt = cc, emitter, oracle_checkout, opt
+        # Entries per host owner (SEG-033): None = the emitter default; 1 = the reference one-function-per-start mode. The
+        # environment variable lets a whole test run be pinned to one mode.
+        env_group = os.environ.get(OWNER_GROUP_ENV)
+        self.owner_group = owner_group if owner_group is not None else (int(env_group) if env_group else None)
+        self.share_bodies = share_bodies  # None = the emitter default; 0 = the reference emission (no shared effect bodies)
         # Optional content-addressed cache of linked generated programs, shared by the test processes of one build
         # tree: identical (spec, stem, compiler, flags, emitter, runtime headers, runner) => identical executable.
         # A test that must observe a fresh compile (reproducibility) passes cache=False.
@@ -459,6 +466,10 @@ def emit_image(tc, spec_text, workdir, stem="z80_image", list_owners=False):
     workdir = pathlib.Path(workdir)
     workdir.mkdir(parents=True, exist_ok=True)
     spec = workdir / (stem + ".spec")
+    if tc.owner_group:
+        spec_text = "group %d\n" % tc.owner_group + spec_text
+    if tc.share_bodies is not None:
+        spec_text = "share %d\n" % tc.share_bodies + spec_text
     spec.write_text(spec_text, encoding="utf-8")
     cmd = [str(tc.emitter), str(spec), str(workdir), stem] + (["--list"] if list_owners else [])
     out = run(cmd)
@@ -468,6 +479,8 @@ def emit_image(tc, spec_text, workdir, stem="z80_image", list_owners=False):
     for line in out.stdout.splitlines():
         if line.startswith("stats "):
             stats = {k: int(v) for k, v in (t.split("=") for t in line.split()[1:])}
+        elif line.startswith("shape "):
+            stats.update({"shape_" + k: int(v) for k, v in (t.split("=") for t in line.split()[1:])})
         elif line.startswith("owner "):
             _, ident, key, kind, variants, form, rel, bound = line.split()
             owners.append({"identity": int(ident), "key": int(key, 16), "kind": kind, "variants": int(variants),
@@ -509,7 +522,7 @@ def _file_digest(path):
 
 def _cache_key(tc, spec_text, stem):
     h = hashlib.sha256()
-    for part in (spec_text, stem, str(tc.cc), tc.opt, " ".join(STRICT), " ".join(GENERATED_UNIT_FLAGS), sys.platform):
+    for part in (spec_text, stem, str(tc.owner_group or 0), str(tc.share_bodies), str(tc.cc), tc.opt, " ".join(STRICT), " ".join(GENERATED_UNIT_FLAGS), sys.platform):
         h.update(part.encode())
         h.update(b"\0")
     inputs = [tc.emitter, TOOLS_DIR / "z80_conformance_runner.c", TOOLS_DIR / "z80_conformance_common.h",

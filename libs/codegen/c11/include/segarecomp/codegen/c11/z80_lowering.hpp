@@ -42,7 +42,9 @@ inline Lowered effect(std::string statements, bool writes_flags = false) {
 }
 
 // What a row sees. PC-dependent values must come from these expressions, never from literals: window-relative
-// owners are shared by every window of an image and derive them from the window base at run time.
+// owners are shared by every window of an image and derive them from the window base at run time. start_pc and next_pc are opaque
+// C expressions: rows may splice them into generated text but must not inspect or branch on their textual representation (shared
+// effect bodies, ADR 0071, rely on this: lowering with two placeholder PCs must differ only where a PC is spliced in).
 struct LowerContext {
   const cpu::z80::DecodedInstruction& instruction;
   const cpu::z80::FormDescriptor& form;

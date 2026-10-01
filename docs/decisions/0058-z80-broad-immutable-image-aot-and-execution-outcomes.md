@@ -7,6 +7,7 @@
 - Task: SEG-008-T001
 - Related: ADR 0002 (static translation, fail closed), ADR 0039 (M68K independent immutable-ROM AOT identities),
   ADR 0051/0053 (report-only experiments), ADR 0056 (Z80 contract), ADR 0059 (placement).
+- Amended by ADR 0071 (SEG-033): the semantics below are unchanged; an owner is now a bounded multi-entry host function selected by PC or window offset, and PC-independent effects are shared functions.
 
 ## Question
 

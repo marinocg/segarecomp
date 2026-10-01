@@ -514,6 +514,43 @@
     }
    ],
    "entry_chunk": 4096
+  },
+  "group_cross": {
+   "images": [
+    {
+     "identity": 1,
+     "kind": "invariant",
+     "windows": [
+      [
+       "0000",
+       "0000",
+       "0400"
+      ]
+     ],
+     "fill": "00",
+     "size": 1024,
+     "patch": []
+    },
+    {
+     "identity": 2,
+     "kind": "banked",
+     "windows": [
+      [
+       "4000",
+       "0000",
+       "4000"
+      ],
+      [
+       "8000",
+       "0000",
+       "4000"
+      ]
+     ],
+     "fill": "00",
+     "size": 16384,
+     "patch": []
+    }
+   ]
   }
  },
  "scenarios": [
@@ -6347,6 +6384,138 @@
      ]
     ]
    }
+  },
+  {
+   "name": "group_cross_direct_binding",
+   "image": "group_cross",
+   "steps": [
+    {
+     "mode": "t",
+     "budget": 12
+    }
+   ],
+   "state": {
+    "pc": "007F"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "expect": [
+    {
+     "out": "deadline",
+     "pc": "0082"
+    }
+   ]
+  },
+  {
+   "name": "group_cross_direct_binding_second_boundary",
+   "image": "group_cross",
+   "steps": [
+    {
+     "mode": "t",
+     "budget": 520
+    }
+   ],
+   "state": {
+    "pc": "007F"
+   },
+   "load": [
+    [
+     1,
+     "0000"
+    ]
+   ],
+   "expect": [
+    {
+     "out": "deadline",
+     "pc": "0101"
+    }
+   ]
+  },
+  {
+   "name": "group_cross_window_relative_slot1",
+   "image": "group_cross",
+   "steps": [
+    {
+     "mode": "t",
+     "budget": 12
+    }
+   ],
+   "state": {
+    "pc": "607F"
+   },
+   "load": [
+    [
+     2,
+     "4000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "400",
+      1,
+      "0"
+     ],
+     [
+      "4000",
+      "8000",
+      2,
+      "4000"
+     ]
+    ]
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "pc": "6082"
+    }
+   ]
+  },
+  {
+   "name": "group_cross_window_relative_slot2",
+   "image": "group_cross",
+   "steps": [
+    {
+     "mode": "t",
+     "budget": 12
+    }
+   ],
+   "state": {
+    "pc": "A07F"
+   },
+   "load": [
+    [
+     2,
+     "8000"
+    ]
+   ],
+   "maps": {
+    "0": [
+     [
+      "0",
+      "400",
+      1,
+      "0"
+     ],
+     [
+      "8000",
+      "C000",
+      2,
+      "8000"
+     ]
+    ]
+   },
+   "expect": [
+    {
+     "out": "deadline",
+     "pc": "A082"
+    }
+   ]
   }
  ]
 }

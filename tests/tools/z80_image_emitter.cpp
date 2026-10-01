@@ -3,6 +3,8 @@
 // internals.
 //
 //   z80_image_emitter <spec> <outdir> <stem> [--list]
+//   spec verbs `group <n>`: entries per host owner function (1 = reference mode); `share <0|1>`: shared effect bodies
+//   (0 = reference); `chunk <n>`: entry-table chunk size
 //
 // spec lines (`#` starts a comment):
 //   image  <identity> invariant|banked
@@ -34,6 +36,8 @@ int main(int argc, char** argv) {
   }
   ImageSet set;
   std::size_t entry_chunk = 0;
+  std::size_t owner_group = 0;
+  int share_bodies = -1;  // -1: the emitter default
   std::map<unsigned long, std::size_t> index;
   const auto image_of = [&](unsigned long identity) -> CodeImage& { return set.images.at(index.at(identity)); };
   for (std::string line; std::getline(spec, line);) {
@@ -64,6 +68,10 @@ int main(int argc, char** argv) {
         image_of(identity).bytes.push_back(static_cast<std::uint8_t>(std::stoul(hex.substr(i, 2), nullptr, 16)));
     } else if (verb == "chunk") {  // `chunk <entries>`: entry-table chunk size (test hook; the identity slot holds the count)
       entry_chunk = static_cast<std::size_t>(identity);
+    } else if (verb == "group") {  // `group <entries>`: entries per host owner (1 = the reference one-function-per-start mode)
+      owner_group = static_cast<std::size_t>(identity);
+    } else if (verb == "share") {  // `share <0|1>`: shared PC-independent effect bodies (0 = the reference emission)
+      share_bodies = static_cast<int>(identity);
     } else if (verb == "fill") {
       std::string value, count;
       in >> value >> count;
@@ -79,6 +87,8 @@ int main(int argc, char** argv) {
   options.stem = argv[3];
   options.record_owners = list;
   if (entry_chunk != 0) options.entry_chunk_entries = entry_chunk;
+  if (owner_group != 0) options.owner_group_entries = owner_group;
+  if (share_bodies >= 0) options.share_bodies = share_bodies != 0;
   const EmitResult result = emit_image_set(set, options);
   if (!result.error.empty()) {
     std::cout << "error " << result.error << "\n";
@@ -88,6 +98,8 @@ int main(int argc, char** argv) {
               result.stats.full_owners, result.stats.prefix_lock_owners, result.stats.stub_owners,
               result.stats.unlowered_starts, result.stats.variant_owners, result.stats.bound_successors,
               result.stats.translation_units);
+  std::printf("shape entries=%zu owners=%zu max_group=%zu shared_bodies=%zu\n", result.stats.entries, result.stats.owners,
+              result.stats.max_group_entries, result.stats.shared_bodies);
   for (const OwnerRecord& r : result.owners) {
     std::printf("owner %u %04X %s %u %s %d %d\n", r.identity, r.key, owner_kind_name(r.kind), r.variants,
                 r.form == segarecomp::cpu::z80::kNoForm ? "-" : segarecomp::cpu::z80::form_name(r.form).c_str(),
