@@ -1179,7 +1179,8 @@ add_test(NAME sms_bank_crossing_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_bank_crossing_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME sms_emission_budget_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR})
-# The 512 KiB tier (about 390 MiB of generated C, minutes of runtime) is `extended`, so it is not run on every CI host.
+# The 512 KiB tier emits about 190 MiB of generated C in seconds since SEG-033 (grouped owners, shared bodies), so it is in the
+# `full` gate with its structural shape budgets; the `extended` tier below adds the real compile.
 add_test(NAME sms_emission_budget_512k_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR} 512k)
 add_test(NAME sms_machine_dependency_test COMMAND ${Python3_EXECUTABLE}
@@ -1190,6 +1191,11 @@ add_test(NAME sms_native_build_test COMMAND ${Python3_EXECUTABLE}
   $<TARGET_FILE:sms_image_emitter>)
 set_property(TEST sms_native_build_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_native_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-033-T006: the production build route's structural and resource budgets on a seeded 128 KiB image (real compile; extended).
+add_test(NAME sms_build_benchmark_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_build_benchmark_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR} ${CMAKE_C_COMPILER})
+set_property(TEST sms_build_benchmark_test APPEND PROPERTY LABELS extended)
+set_property(TEST sms_build_benchmark_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-009-T011: authorized local images (skips cleanly without games/sms; not in the hermetic tiers).
 add_test(NAME sms_local_images_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_local_images_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
@@ -1201,7 +1207,7 @@ add_test(NAME sms_dependency_gate_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST sms_machine_tests sms_machine_dependency_test sms_dependency_gate_test APPEND PROPERTY LABELS full fast)
 set_property(TEST sms_dependency_gate_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST sms_bank_crossing_test sms_emission_budget_test APPEND PROPERTY LABELS full)
-set_property(TEST sms_emission_budget_512k_test APPEND PROPERTY LABELS extended)
+set_property(TEST sms_emission_budget_512k_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_bank_crossing_test sms_emission_budget_test sms_emission_budget_512k_test sms_machine_dependency_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
 # SEG-009-T003: machine composition, deterministic scheduler, interrupt wiring and headless driver. The unit test supplies

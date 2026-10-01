@@ -30,7 +30,7 @@ import time
 OWNER_DEF = re.compile(r"^(?:static )?struct Z80OwnerRef (z80_\w+)\(struct Z80Runtime \*rt, uint16_t window_base\) \{$", re.M)
 BODY_DEF = re.compile(r"^void (z80_fb_\d+)\(struct Z80Runtime \*rt\) \{$", re.M)
 KEY_LINE = re.compile(r"^  UINT32_C\(0x[0-9A-Fa-f]{8}\),$", re.M)
-KEY_ARRAY = re.compile(r"static const uint32_t z80_entry_keys(?!_chunk_first)\w*\[\] = \{\n(.*?)\n\};", re.S)
+KEY_ARRAY = re.compile(r"static const uint32_t z80_entry_keys(?!_chunk_first)\w*\[\] = \{\n(.*?\n)\};", re.S)
 
 
 def make_image(shape, root):
@@ -104,7 +104,7 @@ def generated_stats(directory):
             owners.add(m.group(1))
         bodies += len(BODY_DEF.findall(text))
         for m in KEY_ARRAY.finditer(text):
-            entries += len(KEY_LINE.findall(m.group(1) + ","))
+            entries += len(KEY_LINE.findall(m.group(1)))
     sizes.sort()
     return {"generated_c_bytes": sum(p.stat().st_size for p in files), "files": len(files), "c_files": len(c_files),
             "host_functions": defs + bodies, "owner_functions": defs, "shared_body_functions": bodies, "unique_owners": len(owners), "exact_entries": entries,

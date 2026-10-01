@@ -51,3 +51,7 @@ functions (per-owner `switch (runtime->pc)` entry dispatch and `genesis_aot_entr
 `aot_function` counts grouped owners and `aot_entry_label` counts entries; the per-owner entry switch
 is the new `owner_entry_dispatch` category (in T001 terms it was part of AOT boilerplate). The
 partition stays exact (residual 0). `--jobs N` compiles independent TUs concurrently.
+
+## Z80 / Master System (SEG-033)
+
+The Z80 AOT route has its own production-build measurements and gates: see `z80-build-performance.md` and ADR 0071.
