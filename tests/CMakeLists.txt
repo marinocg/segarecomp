@@ -1191,6 +1191,15 @@ add_test(NAME sms_native_build_test COMMAND ${Python3_EXECUTABLE}
   $<TARGET_FILE:sms_image_emitter>)
 set_property(TEST sms_native_build_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_native_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-033-T003: the SMS machine fixtures (video, audio, input, mapper, interrupts) are artifact-identical between the reference
+# emission and grouped owners with shared bodies; the same on an authorized local image when one exists (extended).
+add_test(NAME sms_owner_group_equivalence_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_owner_group_equivalence_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+add_test(NAME sms_owner_group_local_images_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_owner_group_local_images_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST sms_owner_group_equivalence_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_owner_group_local_images_test APPEND PROPERTY LABELS extended)
+set_property(TEST sms_owner_group_equivalence_test sms_owner_group_local_images_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-033-T006: the production build route's structural and resource budgets on a seeded 128 KiB image (real compile; extended).
 add_test(NAME sms_build_benchmark_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_build_benchmark_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR} ${CMAKE_C_COMPILER})
