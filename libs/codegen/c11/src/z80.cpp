@@ -232,6 +232,7 @@ bool emit_variant_body(std::ostream& out, const Plan& plan, const Variant& v, st
       out << indent << "return Z80_OWNER_STOP;\n";
       return false;
   }
+  return false;  // unreachable: every Flow is handled above (GCC's -Wreturn-type does not see through the enum switch)
 }
 
 // The part of one entry after the function header: owner prologue and the variant body (or the per-window-base switch).
