@@ -31,7 +31,8 @@ import sms_fixture_rom as builder  # noqa: E402
 RUNTIME_DIR = ROOT / "platforms" / "master-system" / "runtime"
 Z80_INCLUDE = ROOT / "libs" / "codegen" / "c11" / "include"
 HOST = ROOT / "tests" / "tools" / "sms_bank_host.c"
-STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-D_CRT_SECURE_NO_WARNINGS"]
+import host_cc  # noqa: E402
+STRICT = host_cc.STRICT_C11
 FAILED = []
 
 

@@ -63,7 +63,8 @@ SECONDARY_FORM_MASK = {"ccf.": {"f"}, "scf.": {"f"}, "ldir.": {"f", "wz"}, "lddr
 ORACLE_DEFINES = ["-DZ80_STATIC", "-DZ80_WITH_EXECUTE", "-DZ80_WITH_Q", "-DZ80_WITH_FULL_IM0", "-DZ80_WITH_SPECIAL_RESET",
                   "-DZ80_WITH_UNOFFICIAL_RETI", "-DZ80_WITH_ZILOG_NMOS_LD_A_IR_BUG"]
 # _CRT_SECURE_NO_WARNINGS: the MSVC CRT marks sscanf/fopen deprecated, which -Werror turns into a hard error on Windows.
-STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-D_CRT_SECURE_NO_WARNINGS"]
+import host_cc  # noqa: E402
+STRICT = host_cc.STRICT_C11
 # GCC's -Wmisleading-indentation (part of -Wall) roughly doubles the compile time of the huge machine-emitted owner units
 # (gcc 13: 22.7 s -> 11.3 s for one SMS shard set; clang has no such cost). Emitted layout is not authored, so the generated
 # TUs drop that one warning; test-authored harness sources and the oracle keep the full STRICT set.

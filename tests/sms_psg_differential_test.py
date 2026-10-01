@@ -36,7 +36,9 @@ from sms_psg_model import TABLE, decimate  # noqa: E402
 CC = sys.argv[1]
 CXX = sys.argv[2] if len(sys.argv) > 2 else "c++"
 ROOT = pathlib.Path(sys.argv[3]).resolve() if len(sys.argv) > 3 else HERE.parent
-STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror"]
+sys.path.insert(0, str(HERE.parent / "tools"))
+import host_cc  # noqa: E402
+STRICT = host_cc.STRICT_C11
 FAILED = []
 
 

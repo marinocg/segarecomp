@@ -14,7 +14,9 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import sms_cc_cache  # noqa: E402
 
-STRICT = ["-std=c11", "-Wall", "-Wextra", "-Wpedantic", "-Werror", "-D_CRT_SECURE_NO_WARNINGS"]
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "tools"))
+import host_cc  # noqa: E402
+STRICT = host_cc.STRICT_C11
 
 
 class Native:
