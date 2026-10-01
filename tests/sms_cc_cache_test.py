@@ -75,8 +75,12 @@ with tempfile.TemporaryDirectory() as tmp:
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(worker, range(16)))
     check(all(r.returncode == 0 and obj.stat().st_size > 0 for r, _, obj in results), "concurrent writers must all succeed")
-    sizes = {n % 2: results[n][2].read_bytes() for n in range(16)}
-    check(all(results[n][2].read_bytes() == sizes[n % 2] for n in range(16)), "concurrent builds of one key must be identical")
+    # Object files may embed the source file name (COFF does), and every worker uses its own name, so the objects are not
+    # compared byte for byte. What must hold is one published cache entry per distinct content (names are not in the key).
+    entries_before = {p.name for p in (tmp / "cache").iterdir() if p.name.endswith(".o")}
+    again = [build(tmp / "conc", SRC + "int g%d(void) { return 0; }\n" % (n % 2), name="x%d" % n) for n in range(4)]
+    check(all(o == "hit" for _, o, _ in again), "re-running the concurrent contents under new names must hit (%s)" % [o for _, o, _ in again])
+    check(entries_before == {p.name for p in (tmp / "cache").iterdir() if p.name.endswith(".o")}, "hits must not add cache entries")
     check(not [p for p in (tmp / "cache").iterdir() if p.name.endswith(".tmp")], "no temp files may remain in the cache")
 
     blocker = write(tmp / "blocker", "not a directory")
