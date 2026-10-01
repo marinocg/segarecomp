@@ -199,6 +199,12 @@ Two separate quantities are derived at the runnable transition:
 - YM2612: one instance reached by the Z80 (`$4000-$5FFF`) and by the 68K while it holds the bus (`$A04000-$A04003`);
   status read at any of the four addresses (ymfm: busy bit 7, timer B bit 1, timer A bit 0). Reset on `/RESET` assert and
   release. Timers are driven in master ticks (§11, ADR 0074).
+- **68K port semantics (confirmed by T007).** BYTE read and BYTE write only, at all four of `$A04000-$A04003`; every port reads the same
+  status byte; WORD and LONG accesses fail closed (typed stop), as does any access while the Z80 does not yield the bus.
+- **Device provenance and tolerance (T007).** Production is vendored ymfm (BSD-3-Clause, pinned, hash-manifested). The independent oracle is
+  Nuked-OPN2: streams must agree after gain and integer-lag alignment within NRMSE <= 0.12 (DAC <= 0.05). Busy (192 input clocks) and timers
+  are host-owned in master ticks (1 YM input clock = 7 master ticks).
+- **Build.** The C++ core is linked without a C++ runtime (`cxx_runtime_shim.c`); the packaged Zig keeps only the libc++/libc++abi headers.
 - **Device time.** Each device keeps a monotonic clock. A write from the other CPU whose timestamp is earlier than the
   device's clock (the Z80 may overshoot an M68K sync point by less than one instruction) is applied at the device clock
   (no reordering, no rewinding). One rule for both devices.
@@ -248,7 +254,7 @@ No fake/real dual path remains after a task retires its row; a transitional seam
 
 | id | fact | bound / decision until resolved | owner |
 | --- | --- | --- | --- |
-| U1 | exact YM2612 busy duration and timer reload alignment (ymfm leaves busy and timers to the host interface: `ymfm_set_busy_end`, `ymfm_set_timer`) | the host owns the clock: T007 implements both from master ticks and compares to NUKED within a documented tolerance; a write during busy is lost on the real chip (Nuked), so the Z80 drivers poll | T007 |
+| U1 | exact YM2612 busy duration and timer reload alignment (ymfm leaves busy and timers to the host interface: `ymfm_set_busy_end`, `ymfm_set_timer`) | RESOLVED by T007 within the documented tolerance: the host owns the clock, both are implemented from master ticks and compared to NUKED; a write during busy is lost on the real chip (Nuked), so the Z80 drivers poll | T007 |
 | U2 | the activation signature | RESOLVED by T002: S1\* (hold-window written extents), §7 | T002 |
 | U3 | Z80 read of work RAM through the bank window (ARES forbids, GPGX allows) | typed stop `z80_bank_target_unsupported` for RAM reads; RAM **writes** admitted; reconsider only with a supported workload that needs it | T004/T010 |
 | U4 | Z80 access to VDP ports through `$7F00` | typed stop except PSG writes | T006/T010 |

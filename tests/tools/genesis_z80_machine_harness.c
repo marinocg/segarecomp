@@ -5,7 +5,7 @@
  *   retire <m68k cycles>          advance guest time through the real retirement hook (genesis_runtime_retire_m68k_instruction)
  *   w8|w16 <addr> <value>         68K write through genesis_route_access        r8|r16 <addr>     68K read (prints R <addr> <value>)
  *   quantum <ticks>               change the retirement-hook synchronization cadence
-
+ *   ymstate                       (with `audio`) run the YM2612 to the current guest time; print its state digest, sample count/digest, write trace
  *   psgrun | psgstate             (with `audio`) run the shared PSG to the current guest time / print its state, counters and delivery trace
  *   state                         print Z80 machine digest, Z80 time, bound image, bank, latches
  * Any rejected access or retirement prints STOP <class> <diagnostic> and ends the run with exit status 0 (the stop is the result).
@@ -54,6 +54,13 @@ int main(int argc, char **argv) {
       for (i = 0; i < SN76489_STATE_BYTES; ++i) printf("%02x", (unsigned)bytes[i]);
       printf(" writes=%llu data_before_latch=%llu\n", (unsigned long long)audio.psg_writes, (unsigned long long)audio.psg_data_before_latch);
       for (i = 0; i < audio.trace_count; ++i) printf("TRACE %llu %02x\n", (unsigned long long)audio.trace_ticks[i], (unsigned)audio.trace_bytes[i]);
+    } else if (strcmp(op, "ymstate") == 0) {
+      uint32_t i;
+      genesis_audio_ym_run_to(&audio, runtime.scheduler.master_ticks);
+      printf("YM digest=%016llx samples=%llu fnv=%016llx writes=%llu\n", (unsigned long long)ym2612_state_digest(audio.ym),
+             (unsigned long long)audio.ym_samples, (unsigned long long)audio.ym_sample_fnv, (unsigned long long)audio.ym_writes);
+      for (i = 0; i < audio.ym_trace_count; ++i)
+        printf("YMTRACE %llu %u %u\n", (unsigned long long)audio.ym_trace_ticks[i], (unsigned)audio.ym_trace_port[i], (unsigned)audio.ym_trace_value[i]);
     } else if (strcmp(op, "psgrun") == 0) {
       genesis_audio_psg_run_to(&audio, runtime.scheduler.master_ticks);
     } else if (strcmp(op, "state") == 0) {

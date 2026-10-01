@@ -19,6 +19,48 @@ static int audio_psg_write(void *context, GenesisRuntime *runtime, uint8_t value
   return 1;
 }
 
+static void ym_sink(void *context, uint64_t start_master_ticks, int32_t left, int32_t right) {
+  GenesisAudio *audio = (GenesisAudio *)context;
+  uint32_t bytes[2];
+  unsigned i;
+  (void)start_master_ticks;
+  bytes[0] = (uint32_t)left;
+  bytes[1] = (uint32_t)right;
+  for (i = 0U; i < 8U; ++i) audio->ym_sample_fnv = (audio->ym_sample_fnv ^ ((const uint8_t *)bytes)[i]) * UINT64_C(0x100000001b3);
+  ++audio->ym_samples;
+}
+
+static void ym_trace(GenesisAudio *audio, uint64_t ticks, uint8_t port, uint8_t value) {
+  if (audio->ym_trace_count >= GENESIS_AUDIO_YM_TRACE_CAPACITY) return;
+  audio->ym_trace_ticks[audio->ym_trace_count] = ticks;
+  audio->ym_trace_port[audio->ym_trace_count] = port;
+  audio->ym_trace_value[audio->ym_trace_count] = value;
+  ++audio->ym_trace_count;
+}
+
+static int audio_ym_read(void *context, GenesisRuntime *runtime, uint32_t port, uint64_t master_ticks, uint8_t *value) {
+  GenesisAudio *audio = (GenesisAudio *)context;
+  (void)runtime;
+  *value = ym2612_read(audio->ym, port, master_ticks);
+  return 1;
+}
+
+static int audio_ym_write(void *context, GenesisRuntime *runtime, uint32_t port, uint8_t value, uint64_t master_ticks) {
+  GenesisAudio *audio = (GenesisAudio *)context;
+  (void)runtime;
+  ym2612_write(audio->ym, port, value, master_ticks);
+  ym_trace(audio, master_ticks, (uint8_t)port, value);
+  ++audio->ym_writes;
+  return 1;
+}
+
+static void audio_ym_reset(void *context, GenesisRuntime *runtime, uint64_t master_ticks) {
+  GenesisAudio *audio = (GenesisAudio *)context;
+  (void)runtime;
+  ym2612_reset(audio->ym, master_ticks);
+  ym_trace(audio, master_ticks, 0xFFU, 0U);
+}
+
 void genesis_audio_attach(GenesisAudio *audio, GenesisRuntime *runtime) {
   Sn76489Config config;
   memset(audio, 0, sizeof(*audio));
@@ -26,10 +68,24 @@ void genesis_audio_attach(GenesisAudio *audio, GenesisRuntime *runtime) {
   config = sn76489_default_config();
   (void)sn76489_init(&audio->psg, &config);
   sn76489_reset(&audio->psg);
+  audio->ym = ym2612_create();
+  audio->ym_sample_fnv = UINT64_C(0xcbf29ce484222325);
+  if (audio->ym != NULL) ym2612_set_sink(audio->ym, ym_sink, audio);
   audio->hooks.context = audio;
   audio->hooks.psg_write = audio_psg_write;
+  audio->hooks.ym_read = audio_ym_read;
+  audio->hooks.ym_write = audio_ym_write;
+  audio->hooks.ym_reset = audio_ym_reset;
   runtime->audio_hooks = &audio->hooks;
 }
+
+void genesis_audio_detach(GenesisAudio *audio) {
+  if (audio->runtime != NULL && audio->runtime->audio_hooks == &audio->hooks) audio->runtime->audio_hooks = NULL;
+  ym2612_destroy(audio->ym);
+  audio->ym = NULL;
+}
+
+void genesis_audio_ym_run_to(GenesisAudio *audio, uint64_t master_ticks) { ym2612_advance(audio->ym, master_ticks); }
 
 void genesis_audio_psg_run_to(GenesisAudio *audio, uint64_t master_ticks) {
   sn76489_advance(&audio->psg, NULL, psg_cycles(master_ticks));

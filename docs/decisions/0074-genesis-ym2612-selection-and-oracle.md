@@ -47,3 +47,22 @@
 
 - The distribution gains BSD-3-Clause third-party code and ~3 MB of libc++ headers; the final generated executable gains ~100-150 KB.
 - A vendored-source determinism and licence test (T007) and the packaging smoke test cover both.
+
+## T007 implementation record (2026-10-01)
+
+- **Vendored ymfm** (BSD-3-Clause, pinned commit) lives in `libs/device/sega/ym2612/third_party` with its licence text; only the OPN, ADPCM
+  and SSG translation units are built. A SHA-256 manifest (`tests/fixtures/ymfm-vendored-sha256.txt`) is checked by `genesis_ym2612_device_test`
+  so the sources cannot drift silently. `THIRD-PARTY-NOTICES` and `packaging/README.md` list ymfm.
+- **C ABI** in `libs/device/sega/ym2612/include`; `src/ym2612.cpp` implements the ymfm interface with host-owned busy (192 input clocks after a
+  data write) and timers (A: `(1024 - NA) x 144`, B: `(256 - NB) x 2304` input clocks, ymfm's own scaling) in master ticks.
+- **No C++ runtime at link time.** `src/cxx_runtime_shim.c` supplies `operator new/delete`, `__cxa_pure_virtual` and the libc++ verbose-abort
+  hook; the generated program is linked as C. The C++ files are built with `-fno-exceptions -fno-rtti` by `tools/genesis_ym2612_build.py`
+  (`zig c++` in the package, the host C++ compiler in development).
+- **Oracle.** Nuked-OPN2 driven by `tests/genesis_oracle/opn2_nuked_driver.c` from `SEGARECOMP_GENESIS_ORACLE_CHECKOUT` (never linked into the
+  product). Tone, FM-algorithm, chained-operator, LFO/AMS and SSG-EG streams are compared after gain and integer-lag alignment (Nuked emits a
+  fixed 3-4 sample later): normalized RMS error <= 0.12 (documented tolerance: ymfm and Nuked differ in output rounding and envelope
+  quantisation, not in algorithm); the DAC stream is held to <= 0.05 at lag 0. Busy and timer expiries are compared with the oracle within
+  its polling step. This closes open fact U1 within that bound.
+- **Packaging.** `packaging/trim-zig.sh` now keeps only `lib/libcxx/include` and `lib/libcxxabi/include` (libc++ headers); sources, tests,
+  modules, libunwind stay removed. `tests/packaging_trim_zig_test.py` checks all three host families on a fake tree. The release-workflow
+  package smoke test remains the real-toolchain check.

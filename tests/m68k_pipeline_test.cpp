@@ -13828,8 +13828,9 @@ void general_startup_routes_ym2612_status_port_read() {
   // (register-select latch, fourth frontier pass) routes. The PART-II data
   // port ($A04003): BYTE write (register-data write, fifth frontier pass)
   // routes.
-  expect(routes(0x00A04000U, W::byte, D::read),
-         "a BYTE read of the YM2612 PART-I status port routes to M68kDeviceRoutedAccess");
+  for (const auto port : {UINT32_C(0x00A04000), UINT32_C(0x00A04001), UINT32_C(0x00A04002), UINT32_C(0x00A04003)})
+    expect(routes(port, W::byte, D::read),
+           "a BYTE read of any YM2612 port (the status byte) routes to M68kDeviceRoutedAccess");
   expect(routes(0x00A04000U, W::byte, D::write),
          "a BYTE write of the YM2612 PART-I address port routes to M68kDeviceRoutedAccess");
   expect(routes(0x00A04001U, W::byte, D::write),
@@ -13843,11 +13844,11 @@ void general_startup_routes_ym2612_status_port_read() {
   expect(is_unmapped(0x00A04000U, W::word, D::read) &&    // wrong width
              is_unmapped(0x00A04000U, W::long_word, D::read) &&
              is_unmapped(0x00A04000U, W::word, D::write) &&
-             is_unmapped(0x00A04001U, W::byte, D::read) &&    // data port is write-only under this policy
+             is_unmapped(0x00A04001U, W::long_word, D::read) &&
              is_unmapped(0x00A04001U, W::word, D::write) &&   // wrong width
-             is_unmapped(0x00A04002U, W::byte, D::read) &&    // PART-II status port: not runtime-confirmed
+             is_unmapped(0x00A04002U, W::long_word, D::write) &&
              is_unmapped(0x00A04002U, W::word, D::write) &&   // wrong width
-             is_unmapped(0x00A04003U, W::byte, D::read) &&    // data port is write-only under this policy
+             is_unmapped(0x00A04003U, W::long_word, D::read) &&
              is_unmapped(0x00A04003U, W::word, D::write) &&   // wrong width
              is_unmapped(0x00A05FFFU, W::byte, D::read) &&    // YM2612 mirror space past the four ports
              is_unmapped(0x00A04004U, W::byte, D::read),      // one byte past the window
@@ -13867,9 +13868,9 @@ void general_startup_routes_ym2612_status_port_read() {
            "m68k_resolve_absolute_test_operand yields a value-free routed_device operand for the YM2612 status read");
   }
   expect(std::get<segarecomp::DirectFlowDiagnostic>(segarecomp::m68k_resolve_absolute_test_operand(
-             image, 0x00A04002U, W::byte, D::read, std::nullopt)) ==
+             image, 0x00A04002U, W::word, D::read, std::nullopt)) ==
              segarecomp::DirectFlowDiagnostic::unmapped_data_access,
-         "an unconfirmed YM2612 port (PART-II status) stays fail-closed via the resolver");
+         "a WORD access to a YM2612 port stays fail-closed via the resolver (SEG-032-T007: BYTE only)");
 
   // Discovery retains a value-free routed_device destination_read fact for a
   // TST.B ($A04000).L, and does not make that read the frontier.

@@ -87,30 +87,11 @@ M68kGenesisDeviceRoutingResult m68k_route_genesis_device_access(const M68kMemory
       request.direction == M68kMemoryAccessDirection::write &&
       (request.width == M68kMemoryAccessWidth::byte || request.width == M68kMemoryAccessWidth::word))
     return M68kDeviceRoutedAccess{request.direction};
-  // SEG-007-T171: the YM2612 FM-synthesis register window ($A04000-$A04003).
-  // Five runtime-confirmed shapes are accepted here, all BYTE width: a READ
-  // of the PART-I status port ($A04000); a WRITE of the PART-I address port
-  // ($A04000, register-select latch); a WRITE of the PART-I data port
-  // ($A04001, register-data write); a WRITE of the PART-II address port
-  // ($A04002, register-select latch for the PART-II register bank); and a
-  // WRITE of the PART-II data port ($A04003, register-data write for the
-  // PART-II register bank -- this task's own fifth frontier pass). The
-  // runtime device owner (genesis_route_access -> genesis_ym2612_access)
-  // owns all five; the static seam only recognizes the shape and defers to
-  // that owner, exactly like the PSG / Z80 precedents above. Every
-  // remaining shape (a READ of any of these four write-only ports, or the
-  // still-unconfirmed PART-II status-port READ) stays an unmapped-data
-  // frontier until it is itself runtime-confirmed.
+  // SEG-032-T007: the YM2612 ports ($A04000-$A04003): a BYTE read (the status byte, whatever the port) or a BYTE write of any of the
+  // four ports. The runtime device owner (genesis_route_access -> genesis_ym2612_access_68k) reaches the shared YM2612 through the
+  // audio hooks; the static seam only recognizes the shape and defers to it. WORD/LONG stay an unmapped-data frontier.
   if (segarecomp_genesis_ym2612_region_contains(request.address.value) != 0 &&
-      request.width == M68kMemoryAccessWidth::byte &&
-      request.address.value == SEGARECOMP_GENESIS_YM2612_PART1_ADDRESS_PORT)
-    return M68kDeviceRoutedAccess{request.direction};
-  if (segarecomp_genesis_ym2612_region_contains(request.address.value) != 0 &&
-      request.direction == M68kMemoryAccessDirection::write &&
-      request.width == M68kMemoryAccessWidth::byte &&
-      (request.address.value == SEGARECOMP_GENESIS_YM2612_PART1_DATA_PORT ||
-       request.address.value == SEGARECOMP_GENESIS_YM2612_PART2_ADDRESS_PORT ||
-       request.address.value == SEGARECOMP_GENESIS_YM2612_PART2_DATA_PORT))
+      request.width == M68kMemoryAccessWidth::byte)
     return M68kDeviceRoutedAccess{request.direction};
   // SEG-007-T121: the controller-I/O GPIO-register WRITE-direction selector
   // family (DATA1..DATA3 / CTRL1..CTRL3, BYTE width only; the runtime-reached

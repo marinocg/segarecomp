@@ -1190,100 +1190,23 @@ static int genesis_is_ym2612_region(uint32_t address) {
   return segarecomp_genesis_ym2612_region_contains(address);
 }
 
-/* SEG-007-T171: the bounded, runtime-reached YM2612 PART-I address/status
-   port ($A04000) BYTE READ, plus four same-task Scope item 6 absorption
-   passes, each a documented register-select/register-data write-latch
-   shape reached immediately after implementing the previous one: (2) the
-   PART-I address port's own BYTE WRITE (register-select latch); (3) the
-   PART-I data port's ($A04001) BYTE WRITE (register-data write); (4) the
-   PART-II address port's ($A04002) BYTE WRITE (register-select latch for
-   the PART-II register bank); (5) the PART-II data port's ($A04003) BYTE
-   WRITE (register-data write for the PART-II register bank). This is the
-   bound (this task's Scope item 6 caps same-task absorption at the
-   milestone's normal six-frontier-iteration advancement bound; this is the
-   fifth, and the pass that completes the register-select/register-data
-   write-latch protocol symmetrically across both PART-I and PART-II).
-   ================ scope ================
-   This models ONLY: (a) the CPU-visible PART-I status-port BYTE read, and
-   (b) accepting a BYTE write to the PART-I address port, the PART-I data
-   port, the PART-II address port, or the PART-II data port as the
-   documented register-select/register-data write protocol -- WITHOUT
-   modelling any resulting register state or FM effect for any write. It is
-   an explicitly labelled, replaceable PROJECT COMPATIBILITY POLICY (see
-   docs/architecture/genesis-ym2612-status-port-byte-read-compatibility-policy.md),
-   NOT verified YM2612 hardware behaviour. There is NO FM synthesis, NO
-   channel/operator/LFO state, NO timer A/B modelling, NO busy-flag timing,
-   and NO audio output of any kind -- this is the same "this project performs
-   no audio timing/DSP modelling" boundary genesis_psg_access already
-   documents for the co-located PSG, extended here to the YM2612's own
-   port shapes.
-
-   ================ public sources ================
-   - GTO1 (Sega, Genesis Technical Overview v1.00, 1991) p. 10 "Z80 AREA":
-     YM2612 at $A04000-$A04003.
-   - plutiedev.com "ym2612": PART-I address/status port $A04000, PART-I data
-     port $A04001, PART-II address/status port $A04002, PART-II data port
-     $A04003; a BYTE read of a status port returns bit 7 = "Busy" (writing
-     FM data) and bit 0 = "Timer A overflow", with the remaining bits
-     documented as unused. A BYTE write to an address port latches an 8-bit
-     register-select value (register number 0-255, PART-I selecting
-     channels 1-3's registers, PART-II selecting channels 4-6's registers)
-     that governs which register the *next* write to the corresponding data
-     port affects; a BYTE write to a data port writes that register's data
-     byte. None of these writes carries a documented side effect beyond the
-     register-write protocol itself.
-
-   ================ project compatibility policy (replaceable, not hardware) ==
-   - BYTE width only for every shape; exactly the PART-I address port
-     ($A04000, read or write), the PART-I data port ($A04001, write only),
-     the PART-II address port ($A04002, write only), or the PART-II data
-     port ($A04003, write only). Every other width/direction fails closed
-     (including a READ of any data port, and the still-unconfirmed PART-II
-     status-port READ).
-   - READ (PART-I address port): this project models no FM register-write
-     latency and no timer state, so "Busy" and "Timer A overflow" are always
-     deterministically clear: the status byte is a fixed $00 ("not busy",
-     "no timer overflow"), mirroring the SEG-007-T111 CTRL3 BYTE-read
-     compatibility-policy precedent exactly -- an explicit, cited project
-     choice, not asserted real YM2612 hardware timing truth. Side-effect-free.
-   - WRITE (any of the four accepted write-shaped ports): this project
-     implements no FM register/channel/operator model at all, so there is no
-     register-select state to store and no register-specific behaviour to
-     apply for any write -- a WRITE of any 8-bit value to any of the four
-     accepted ports is unconditionally accepted (the documented protocol
-     places no restriction on which value may be selected or written) and is
-     side-effect-free under this policy: it mutates no device/bus state.
-     This deliberately does NOT model any register-select latch or written
-     register value (no `GenesisDeviceState` field is added for any of
-     them), because no consumer of that state (real FM register/channel
-     semantics) is implemented; adding unread state would be dead weight,
-     not a compatibility policy. A later task that implements real FM
-     register semantics must add that state itself.
-
-   All validation precedes any mutation: a rejected access returns 0 having
-   modified neither *value nor any runtime state (T042 SS3 /
-   genesis_route_access's own "on failure neither it nor the runtime is
-   modified" contract). */
-static int genesis_ym2612_access(uint32_t address, GenesisAccessWidth width,
-                                 GenesisAccessDirection direction, uint32_t *value) {
-  if (width != GENESIS_ACCESS_BYTE) return 0; /* BYTE width only, every accepted port */
-  if (address == SEGARECOMP_GENESIS_YM2612_PART1_ADDRESS_PORT && direction == GENESIS_ACCESS_READ) {
-    *value = 0x00U; /* SEG-007-T171 policy: always "not busy", "no timer overflow". */
+/* SEG-032-T007 (ADR 0072/0074, contract section 9) -- the 68000's YM2612 ports, $A04000-$A04003: BYTE read or write at each
+   (a read returns the status byte whatever the port, Genesis Plus GX and ares). Replaces the SEG-007-T171 status-port-only
+   compatibility model: the device is the vendored-ymfm YM2612 attached through `audio_hooks` and shared with the Z80 (Z80 view
+   `$4000-$5FFF`, `address & 3`). The access reaches the device at the guest time of the 68000 access after the Z80 was run to that
+   time. WORD/LONG fail closed with GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_YM2612. The grant is not required here: the canonical
+   startup route is proved to reach the chip, and the references disagree about whether the decode needs the Z80 bus (open fact). */
+static int genesis_ym2612_access_68k(GenesisRuntime *runtime, uint32_t address, GenesisAccessWidth width,
+                                     GenesisAccessDirection direction, uint32_t *value) {
+  const uint32_t port = address & 3U;
+  if (width != GENESIS_ACCESS_BYTE) return 0;
+  if (direction == GENESIS_ACCESS_READ) {
+    uint8_t status = 0U;
+    if (!genesis_ym2612_port_read(runtime, port, runtime->scheduler.master_ticks, &status)) return 0;
+    *value = status;
     return 1;
   }
-  if (direction == GENESIS_ACCESS_WRITE &&
-      (address == SEGARECOMP_GENESIS_YM2612_PART1_ADDRESS_PORT ||
-       address == SEGARECOMP_GENESIS_YM2612_PART1_DATA_PORT ||
-       address == SEGARECOMP_GENESIS_YM2612_PART2_ADDRESS_PORT ||
-       address == SEGARECOMP_GENESIS_YM2612_PART2_DATA_PORT)) {
-    /* SEG-007-T171 (frontier passes 2-5): every accepted register-select /
-       register-data write-latch shape is unconditionally accepted and
-       modelled as a pure no-op -- no register state is stored anywhere.
-       *value is left unmodified (matching every other routed WRITE owner's
-       "a write never mutates the caller's own value" contract). */
-    return 1;
-  }
-  return 0; /* wrong port/direction/width combination */
+  return genesis_ym2612_port_write(runtime, port, (uint8_t)(*value & 0xFFU), runtime->scheduler.master_ticks);
 }
 
 /* SEG-007-T102: fail-closed-lane recognition of exactly the two 68k-side Z80
@@ -1415,27 +1338,24 @@ static GenesisDiagnosticCategory genesis_z80_area_access(GenesisDeviceState *dev
   return GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_Z80_RAM;
 }
 
-/* SEG-032-T004 (ADR 0072): the YM2612 / PSG port seam both CPUs reach (declared in runtime.h). Transitional bodies over the
-   SEG-007 compatibility models until SEG-032-T006 (shared Sn76489) and T007 (YM2612 device) replace them; the signatures stay. */
+/* SEG-032-T004/T007 (ADR 0072): the YM2612 port seam both CPUs reach (declared in runtime.h): forwards to the attached device. */
 int genesis_ym2612_port_read(GenesisRuntime *runtime, uint32_t port, uint64_t master_ticks, uint8_t *value) {
-  uint32_t routed = 0U;
-  (void)runtime; (void)master_ticks;
-  /* The compat model answers the PART-I status port ($A04000) only; every other port is write-only. */
-  if (port != 0U || !genesis_ym2612_access(UINT32_C(0x00A04000), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &routed)) return 0;
-  *value = (uint8_t)routed;
+  const GenesisAudioHooks *hooks = runtime->audio_hooks;
+  if (hooks != 0 && hooks->ym_read != 0) return hooks->ym_read(hooks->context, runtime, port & 3U, master_ticks, value);
+  *value = 0U; /* no sound device attached: absent hardware reads as zero */
   return 1;
 }
 
 int genesis_ym2612_port_write(GenesisRuntime *runtime, uint32_t port, uint8_t value, uint64_t master_ticks) {
-  uint32_t routed = value;
-  (void)runtime; (void)master_ticks;
-  return genesis_ym2612_access(UINT32_C(0x00A04000) + (port & 3U), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &routed);
+  const GenesisAudioHooks *hooks = runtime->audio_hooks;
+  if (hooks != 0 && hooks->ym_write != 0) return hooks->ym_write(hooks->context, runtime, port & 3U, value, master_ticks);
+  return 1; /* no sound device attached: accepted and discarded */
 }
 
 void genesis_ym2612_port_reset(GenesisRuntime *runtime, uint64_t master_ticks) {
-  (void)runtime; (void)master_ticks; /* the compat model has no state to reset; the YM2612 device (SEG-032-T007) does */
+  const GenesisAudioHooks *hooks = runtime->audio_hooks;
+  if (hooks != 0 && hooks->ym_reset != 0) hooks->ym_reset(hooks->context, runtime, master_ticks);
 }
-
 
 /* SEG-032-T002/T005 (ADR 0073): the 68K wrote one Z80 RAM byte (mirror resolved): it belongs to the hold window. */
 static void genesis_z80_epoch_note_ram_write(GenesisRuntime *runtime, uint32_t address) {
@@ -1547,7 +1467,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
        consumes it -- there is no register-select state to store under this
        policy. It is read back into *value only on the accepted READ shape. */
     uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
-    if (genesis_ym2612_access(address, width, direction, &routed_value)) {
+    if (genesis_ym2612_access_68k(runtime, address, width, direction, &routed_value)) {
       if (direction == GENESIS_ACCESS_READ) *value = routed_value;
       return GENESIS_ACCESS_OK;
     }

@@ -14,7 +14,7 @@ harness stores a scenario id at Z80 RAM $1F00 and the program branches on it. Th
   * the 68K side: no access without the bus grant (typed), the $A02000 mirror, WORD write stores the high byte, WORD read duplicates,
     LONG fails closed, the bank register shifts in from bytes and words and cannot be read;
   * the program is the same bytes the registry compiled: the guard runs on every instruction of the real run.
-usage: genesis_z80_view_test.py <registry_emitter> <cc> <source-root>
+usage: genesis_z80_view_test.py <registry_emitter> <cc> <source-root> <c++>
 """
 import pathlib
 import re
@@ -23,8 +23,10 @@ import sys
 import tempfile
 
 registry_emitter, cc, root = sys.argv[1], sys.argv[2], pathlib.Path(sys.argv[3])
+cxx = sys.argv[4] if len(sys.argv) > 4 else "c++"
 sys.path.insert(0, str(root / "tools"))
 import sms_fixture_rom as sms  # noqa: E402
+import genesis_ym2612_build as ymbuild  # noqa: E402
 import z80_conformance as z  # noqa: E402
 
 DIAG_VIEW, DIAG_BANK, DIAG_NO_BUS, DIAG_Z80_RAM = 53, 54, 55, 40
@@ -92,7 +94,8 @@ def main():
             tc, tmp / "gen", "genesis_z80",
             extra_sources=[harness, root / "platforms/genesis/runtime/runtime.c", root / "platforms/genesis/runtime/z80_machine.c",
                            root / "platforms/genesis/runtime/genesis_audio.c", root / "libs/device/sega/psg/src/sn76489.c"],
-            extra_flags=["-I", str(root / "platforms/genesis/runtime"), "-I", str(root / "libs/device/sega/psg/include")])
+            extra_flags=["-I", str(root / "platforms/genesis/runtime"), "-I", str(root / "libs/device/sega/psg/include"), "-I", str(root / "libs/device/sega/ym2612/include")],
+            extra_objects=ymbuild.build_objects(cc, cxx, root, tmp / "ymobj"))
         assert exe is not None, message
         hexfile = tmp / "ram.hex"
         hexfile.write_text(ram.hex())
@@ -109,7 +112,8 @@ def main():
               "banks 0, 1 and 3 read the right cartridge bytes (including the last byte of the region)")
         check(z80ram[3] == 0x5A, "a write at $2F05 is visible at $0F05 (the $2000 mirror)")
         check(int(r["work10"], 16) == 0xA7 and r["bank"] == "1c0", "a write through the window at bank $1C0 lands in work RAM (and the register holds $1C0)")
-        check(z80ram[4] == 0x00 and int(r["psg_tone0"]) == 0x0F, "the YM2612 status read and the PSG write reach the shared port seam")
+        check(z80ram[4] == 0x80 and int(r["psg_tone0"]) == 0x0F,
+              "the YM2612 write/status read (busy right after a data write) and the PSG write reach the shared devices")
         for scenario, diag, label in ((1, DIAG_VIEW, "an access in the unused $6100-$7EFF space"),
                                       (2, DIAG_BANK, "a bank target beyond the embedded cartridge region"),
                                       (3, DIAG_BANK, "a work-RAM read through the window (open fact U3)"),

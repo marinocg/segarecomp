@@ -12,7 +12,7 @@ writes the PSG through its `$7F11/13/15` window, the 68000 through `$C00011/13/1
   * mutation controls: a wrong clock ratio (/16) or a swapped writer order changes the state, so the comparison discriminates;
   * a data byte before any latch is accepted and ignored by the device (counted), never a fail-closed stop;
   * the library has no Genesis dependency (it builds and links with the PSG reference alone).
-usage: genesis_audio_psg_test.py <registry_emitter> <cc> <source-root>
+usage: genesis_audio_psg_test.py <registry_emitter> <cc> <source-root> <c++>
 """
 import pathlib
 import re
@@ -21,8 +21,10 @@ import sys
 import tempfile
 
 registry_emitter, cc, root = sys.argv[1], sys.argv[2], pathlib.Path(sys.argv[3])
+cxx = sys.argv[4] if len(sys.argv) > 4 else "c++"
 sys.path.insert(0, str(root / "tools"))
 import sms_fixture_rom as sms  # noqa: E402
+import genesis_ym2612_build as ymbuild  # noqa: E402
 import z80_conformance as z  # noqa: E402
 
 BUSREQ, RESET, ZRAM = 0xA11100, 0xA11200, 0xA00000
@@ -100,7 +102,8 @@ def main():
             tc, tmp / "gen", "genesis_z80",
             extra_sources=[root / "tests/tools/genesis_z80_machine_harness.c", rt / "runtime.c", rt / "z80_machine.c", rt / "genesis_audio.c",
                            root / "libs/device/sega/psg/src/sn76489.c"],
-            extra_flags=["-I", str(rt), "-I", str(PSG_INCLUDE)])
+            extra_flags=["-I", str(rt), "-I", str(PSG_INCLUDE), "-I", str(root / "libs/device/sega/ym2612/include")],
+            extra_objects=ymbuild.build_objects(cc, cxx, root, tmp / "ymobj"))
         assert exe is not None, message
         reference = tmp / "psg_reference"
         built = subprocess.run([cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-I", str(PSG_INCLUDE),

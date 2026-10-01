@@ -16,7 +16,7 @@ retirement hook. Proved:
   * determinism and sync-cadence invariance: the final Z80 state digest, counters and cycles are identical at retirement-hook
     quanta 1, 512 and 4096 and across repeated runs;
   * nothing decodes opcodes at run time: the linked executable contains no Z80 decoder symbol.
-usage: genesis_z80_machine_test.py <registry_emitter> <cc> <source-root>
+usage: genesis_z80_machine_test.py <registry_emitter> <cc> <source-root> <c++>
 """
 import pathlib
 import re
@@ -25,8 +25,10 @@ import sys
 import tempfile
 
 registry_emitter, cc, root = sys.argv[1], sys.argv[2], pathlib.Path(sys.argv[3])
+cxx = sys.argv[4] if len(sys.argv) > 4 else "c++"
 sys.path.insert(0, str(root / "tools"))
 import sms_fixture_rom as sms  # noqa: E402
+import genesis_ym2612_build as ymbuild  # noqa: E402
 import z80_conformance as z  # noqa: E402
 
 BUSREQ, RESET, ZRAM = 0xA11100, 0xA11200, 0xA00000
@@ -150,7 +152,8 @@ def main():
                 tc, tmp / tag, "genesis_z80",
                 extra_sources=[harness, root / "platforms/genesis/runtime/runtime.c", root / "platforms/genesis/runtime/z80_machine.c",
                                root / "platforms/genesis/runtime/genesis_audio.c", root / "libs/device/sega/psg/src/sn76489.c"],
-                extra_flags=["-I", str(root / "platforms/genesis/runtime"), "-I", str(root / "libs/device/sega/psg/include")])
+                extra_flags=["-I", str(root / "platforms/genesis/runtime"), "-I", str(root / "libs/device/sega/psg/include"), "-I", str(root / "libs/device/sega/ym2612/include")],
+                extra_objects=ymbuild.build_objects(cc, cxx, root, tmp / "ymobj"))
             assert exe is not None, message
             exes[tag] = exe
 

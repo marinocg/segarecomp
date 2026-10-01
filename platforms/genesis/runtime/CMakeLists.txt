@@ -24,10 +24,10 @@ target_include_directories(segarecomp_runtime_genesis_z80 PUBLIC ${CMAKE_CURRENT
 segarecomp_enable_warnings(segarecomp_runtime_genesis_z80)
 
 # SEG-032-T006 (ADR 0072): the Genesis sound devices as attached machine parts (the shared Sega PSG; the YM2612 and the mixer join
-# in SEG-032-T007/T009). Compiled only into programs that carry sound; a consumer links segarecomp::device_psg next to it.
+# in SEG-032-T007/T009). Compiled only into programs that carry sound; a consumer links segarecomp::device_psg and segarecomp::device_ym2612 next to it.
 add_library(segarecomp_runtime_genesis_audio STATIC genesis_audio.c)
 add_library(segarecomp::runtime_genesis_audio ALIAS segarecomp_runtime_genesis_audio)
 set_target_properties(segarecomp_runtime_genesis_audio PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
 target_include_directories(segarecomp_runtime_genesis_audio PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}
-  ${PROJECT_SOURCE_DIR}/libs/device/sega/psg/include)
+  ${PROJECT_SOURCE_DIR}/libs/device/sega/psg/include ${PROJECT_SOURCE_DIR}/libs/device/sega/ym2612/include)
 segarecomp_enable_warnings(segarecomp_runtime_genesis_audio)

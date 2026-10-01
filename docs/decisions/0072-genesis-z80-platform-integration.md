@@ -108,3 +108,17 @@ made the Sega PSG a platform-neutral device. SEG-032 must run a real Z80 image i
 - Tests: `genesis_startup_runtime_psg_test` (port semantics, stand-in device), `genesis_audio_psg_test` (real runtime + Z80 machine + shared
   device: 68000-only, Z80-only, interleaved with the overshoot case, state equal to the library driven directly at cycle = ticks / 15,
   cadence independence, wrong-ratio and dropped-writer controls, library builds with no Genesis code).
+
+## T007 implementation record (2026-10-01)
+
+- **68K YM2612 ports.** `genesis_ym2612_access_68k` (runtime) and `m68k_route_genesis_device_access` (static seam) accept BYTE read and BYTE
+  write at all four of `$A04000-$A04003`. Every port reads the shared device status byte (busy bit 7, timer B bit 1, timer A bit 0); a write to
+  an address port latches the register for its part, a write to a data port writes it. WORD and LONG accesses fail closed (typed stop), as
+  does every access without the Z80 bus (the T004/T005 gate). The old SEG-007-T171 status-port-only policy is superseded.
+- **One instance, two CPUs.** `genesis_audio.[ch]` owns the YM2612 next to the PSG and installs it through `GenesisAudioHooks`; the 68000
+  ports and the Z80 `$4000-$5FFF` window reach the same instance with the same device-time rule as the PSG (monotonic clock, no rewind).
+  The device is reset on Z80 `/RESET` assert and release (contract section 9). Time is master ticks; one YM input clock is 7 master ticks.
+- **Host-owned timers and busy.** The C ABI turns ymfm timer and busy requests into master-tick expiries and processes expiries and sample
+  generation in one deterministic order up to the target time (ADR 0074 decision 3).
+- Tests: `genesis_ym2612_device_test` (device against the Nuked-OPN2 oracle), `genesis_audio_ym_test` (real runtime, Z80 machine and shared
+  device from both CPUs), `genesis_startup_runtime_ym2612_test` (port semantics, updated), `packaging_trim_zig_test`.

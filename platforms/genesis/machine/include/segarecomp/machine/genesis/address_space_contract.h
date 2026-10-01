@@ -102,13 +102,13 @@ static inline int segarecomp_genesis_psg_port_contains(uint32_t address) {
 /* SEG-007-T171: YM2612 FM synthesis chip register window, $A04000-$A04003
  * (GTO1 v1.00 p. 10 "Z80 AREA" / plutiedev.com "ym2612": PART-I address/status
  * port $A04000, PART-I data port $A04001, PART-II address port $A04002,
- * PART-II data port $A04003). This is the full four-port window recognition
- * boundary only; it does not by itself authorize any access shape -- only the
- * runtime-confirmed PART-I status-port BYTE read is currently accepted (see
- * genesis_ym2612_access / m68k_route_genesis_device_access), one source of
- * truth shared byte-for-byte by the translation-time device-routing gate and
- * the generated runtime's own fail-closed recognition predicate, exactly like
- * the PSG port above. */
+ * PART-II data port $A04003). SEG-032-T007 (ADR 0074): all four ports accept
+ * BYTE reads (every port returns the shared device status) and BYTE writes,
+ * routed to the single YM2612 instance owned by genesis_audio; WORD and LONG
+ * accesses still fail closed (genesis_ym2612_access_68k /
+ * m68k_route_genesis_device_access). One source of truth shared byte-for-byte
+ * by the translation-time device-routing gate and the generated runtime's own
+ * fail-closed recognition predicate, exactly like the PSG port above. */
 #define SEGARECOMP_GENESIS_YM2612_REGION_BEGIN UINT32_C(0x00A04000)
 #define SEGARECOMP_GENESIS_YM2612_REGION_END UINT32_C(0x00A04004)
 #define SEGARECOMP_GENESIS_YM2612_PART1_ADDRESS_PORT UINT32_C(0x00A04000)

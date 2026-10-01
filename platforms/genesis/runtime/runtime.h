@@ -1295,6 +1295,11 @@ typedef struct GenesisAudioHooks {
   void *context;
   /* One PSG data-port byte at guest time `master_ticks`, from either CPU. 1 = accepted. */
   int (*psg_write)(void *context, GenesisRuntime *runtime, uint8_t value, uint64_t master_ticks);
+  /* SEG-032-T007: the YM2612, reached by both CPUs. `port` 0..3 (part I address / data, part II address / data); a read returns the
+   * status byte whatever the port. 1 = accepted. */
+  int (*ym_read)(void *context, GenesisRuntime *runtime, uint32_t port, uint64_t master_ticks, uint8_t *value);
+  int (*ym_write)(void *context, GenesisRuntime *runtime, uint32_t port, uint8_t value, uint64_t master_ticks);
+  void (*ym_reset)(void *context, GenesisRuntime *runtime, uint64_t master_ticks);
 } GenesisAudioHooks;
 typedef struct GenesisReportMetadata {
   GenesisCpuDimensions cpu_dimensions;
@@ -1448,8 +1453,8 @@ GenesisControlTransfer genesis_runtime_step(GenesisRuntime *runtime, GenesisDisp
 /*
  * SEG-032-T004 (ADR 0072): the YM2612 / PSG port seam shared by both CPUs. `port` is the YM2612 address-decoded port 0..3
  * (part I address, part I data, part II address, part II data); `master_ticks` is the access time. Return 1 when the access is
- * supported, 0 for an unsupported shape (the caller raises the typed stop). SEG-032-T006/T007 replace the bodies (shared
- * Sn76489, YM2612 device) without changing the signatures.
+ * supported, 0 for an unsupported shape (the caller raises the typed stop). The bodies forward to the attached sound devices
+ * (`audio_hooks`, SEG-032-T006/T007); without a device a read returns 0 and a write is accepted and discarded (absent hardware).
  */
 int genesis_ym2612_port_read(GenesisRuntime *runtime, uint32_t port, uint64_t master_ticks, uint8_t *value);
 int genesis_ym2612_port_write(GenesisRuntime *runtime, uint32_t port, uint8_t value, uint64_t master_ticks);
