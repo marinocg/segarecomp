@@ -1200,6 +1200,12 @@ add_test(NAME sms_owner_group_local_images_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST sms_owner_group_equivalence_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_owner_group_local_images_test APPEND PROPERTY LABELS extended)
 set_property(TEST sms_owner_group_equivalence_test sms_owner_group_local_images_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-033-T009: injected emitter defects are killed by the gates; shape controls, -O0/-O1/-O2 equality, determinism and a hidden-worker-failure control.
+add_test(NAME z80_owner_group_mutation_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_owner_group_mutation_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  $<TARGET_FILE:segarecomp> $<TARGET_FILE:sms_image_emitter>)
+set_property(TEST z80_owner_group_mutation_test APPEND PROPERTY LABELS extended)
+set_property(TEST z80_owner_group_mutation_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-033-T006: the production build route's structural and resource budgets on a seeded 128 KiB image (real compile; extended).
 add_test(NAME sms_build_benchmark_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_build_benchmark_test.py $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR} ${CMAKE_C_COMPILER})

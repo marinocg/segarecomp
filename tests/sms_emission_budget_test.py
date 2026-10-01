@@ -37,6 +37,7 @@ ROM_SIZE = 0x80000 if MODE == "512k" else 0x20000
 RUN_NAMES = ("a",) if MODE == "512k" else ("a", "b")
 sys.path.insert(0, str(ROOT / "tools"))
 import sms_fixture_rom as builder  # noqa: E402
+import sms_build_shape as build_shape  # noqa: E402
 import z80_static_budget as budget  # noqa: E402
 
 # SEG-033-T006 shape budgets per ROM size (measured 2026-10-01 on the seeded random image, which has the most distinct effect bodies:
@@ -71,19 +72,11 @@ def check_shape(stdout, directory):
         return
     shape = {k: int(v) for k, v in shape.items()}
     budget = SHAPE_BUDGETS[ROM_SIZE]
-    check(shape["entries"] == budget["entries"], "exact entry count changed: %d, expected %d (every start keeps its entry)" % (shape["entries"], budget["entries"]))
-    check(shape["owners"] <= budget["owners"], "host owner count %d exceeds %d (owner grouping regressed)" % (shape["owners"], budget["owners"]))
-    check(shape["max_group"] <= 128, "an owner holds %d entries (bound 128)" % shape["max_group"])
-    check(shape["entries"] / max(1, shape["owners"]) >= 100, "owner grouping ratio below 100 entries per owner")
-    functions = shape["owners"] + shape["shared_bodies"]
-    check(functions <= budget["functions"], "host function count %d exceeds %d" % (functions, budget["functions"]))
     files = [p for p in pathlib.Path(directory).iterdir() if p.suffix == ".c"]
-    largest = max(p.stat().st_size for p in files) / (1024 * 1024)
-    check(largest <= budget["max_tu_mib"], "largest translation unit %.1f MiB exceeds %.1f MiB" % (largest, budget["max_tu_mib"]))
-    check(size_mib(directory) <= budget["total_mib"], "generated C %.1f MiB exceeds the %.1f MiB shape budget" % (size_mib(directory), budget["total_mib"]))
     defined = sum(len(re.findall(r"^(?:static )?struct Z80OwnerRef z80_o_\w+\(struct Z80Runtime \*rt, uint16_t window_base\) \{$", p.read_text(), re.M))
                   for p in files)
-    check(defined == shape["owners"], "the C defines %d owner functions, the emitter reported %d" % (defined, shape["owners"]))
+    for message in build_shape.violations(shape, budget, max(p.stat().st_size for p in files) / (1024 * 1024), size_mib(directory), defined):
+        check(False, message)
 
 
 def main():

@@ -1,15 +1,17 @@
 #pragma once
 
-// Z80 image-level C11 emission (SEG-008-T003; ADR 0058 sections 1-6). Broad immutable-image AOT: one owner (a C
-// function) per instruction start of every code image, classified by the cpu_z80 logical-fetch decoder.
+// Z80 image-level C11 emission (SEG-008-T003; ADR 0058 sections 1-6, ADR 0071). Broad immutable-image AOT: one exact entry per
+// instruction start of every code image, classified by the cpu_z80 logical-fetch decoder. Consecutive entries of one image share
+// a bounded host function (an owner, at most kOwnerGroupEntries entries) that selects its entry from the PC or the window
+// offset; PC-independent instruction effects are emitted once as shared functions (SEG-033).
 //
-//   full owner         a decoded start whose form has a lowering row (z80_lowering.hpp)
-//   prefix_lock owner  a start of an endless DD/FD run
-//   typed stub owner   `mutable_code`, `unresolved_fetch_mapping` (and the reserved `excluded_form`) starts
-//   (no owner)         a decoded start whose form has no lowering row yet: dispatch fails closed with `no_owner`
+//   full entry         a decoded start whose form has a lowering row (z80_lowering.hpp)
+//   prefix_lock entry  a start of an endless DD/FD run
+//   typed stub entry   `mutable_code`, `unresolved_fetch_mapping` (and the reserved `excluded_form`) starts
+//   (no entry)         a decoded start whose form has no lowering row yet: dispatch fails closed with `no_owner`
 //
 // Absolute-PC owners serve statically invariant windows and banked images admissible in exactly one window.
-// A banked image admissible in several windows gets one window-relative owner per offset that derives every
+// A banked image admissible in several windows gets one window-relative entry per offset that derives every
 // PC-dependent value from the run-time window base. Direct owner-to-owner binding exists only from an invariant
 // window owner to an invariant-window successor; everything else returns to the generated dispatcher `z80_run`,
 // which asks the host for the current code-image identity and looks up (identity, PC) or (identity, PC - base)
