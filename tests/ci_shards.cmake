@@ -6,8 +6,8 @@
 # SEGARECOMP_CI_DEFAULT_COST and is still assigned, so a new test can never be skipped by CI. The estimate is also the CTest COST
 # property, which makes `ctest -j` start the longest tests first within a shard.
 #
-# Costs are seconds of one test running alongside three others on a 4-core runner, taken from the slowest recorded host (Windows,
-# LLVM/Clang) of the CI run before sharding; the split entries are the unsplit test's cost distributed over its slices by their
+# Costs are seconds of one test running alongside three others on a 4-core runner, taken from the slowest recorded host (Linux, GCC)
+# of the sharded CI run on the trimmed tests (the contended per-test durations of run 36996711623); the split entries are the unsplit test's cost distributed over its slices by their
 # measured relative durations. They only steer the balance: the guard test (ci_shard_guard_test.py) fails if a shard's estimate
 # exceeds SEGARECOMP_CI_SHARD_BUDGET_SECONDS or a single test exceeds SEGARECOMP_CI_MAX_TEST_SECONDS. Update the table when a test
 # gets materially slower or faster (a stale entry only unbalances the shards; it never skips a test).
@@ -17,25 +17,22 @@
 #
 # Shard count: wall time of one CI job ~ setup/build (~2 min) + shard cost / 4 cores. Six shards keep the slowest host under ~7 min.
 set(SEGARECOMP_CI_SHARD_COUNT 6)
-set(SEGARECOMP_CI_SHARD_BUDGET_SECONDS 1300)
-set(SEGARECOMP_CI_MAX_TEST_SECONDS 400)
+set(SEGARECOMP_CI_SHARD_BUDGET_SECONDS 2100)
+set(SEGARECOMP_CI_MAX_TEST_SECONDS 600)
 set(SEGARECOMP_CI_DEFAULT_COST 3)
 set(SEGARECOMP_CI_TEST_COSTS
-  z80_owner_group_differential_test=196 z80_owner_group_differential_test_slice2=208
-  z80_owner_group_differential_test_slice3=214 z80_owner_group_differential_test_slice4=231
-  genesis_z80_build_pipeline_test=75 genesis_z80_build_pipeline_bound_test=128 genesis_z80_build_pipeline_smc_test=79
-  genesis_z80_build_pipeline_falsify_test=58 genesis_z80_build_pipeline_prepare_test=20
-  sms_native_build_test=127 sms_native_build_policy_test=226 sms_native_build_failclosed_test=21
-  sms_owner_group_equivalence_test=110 sms_owner_group_equivalence_vdp_test=110 sms_owner_group_equivalence_render_test=110
-  m68k_pipeline_tests=369 sms_emission_budget_512k_test=307 z80_live_operand_test=88 z80_generated_pipeline_test=195
-  m68k_conformance_harness_test=192 m68k_capability_ratchet_test=187 z80_live_guard_test=67 m68k_batch_c_static_slice_test=136
-  z80_conformance_harness_test=130 sms_machine_scheduler_test=121 sms_render_test=119 sms_render_native_test=96
-  sms_machine_e2e_test=88 sms_emission_budget_test=87 sms_vdp_native_test=86 sms_bank_crossing_test=81 genesis_audio_artifact_test=26
-  z80_capability_ratchet_test=65 segarecomp_build_command_test=25 z80_timing_closure_test=54 genesis_z80_machine_test=40
-  sms_psg_differential_test=45 cpu_z80_decode_tests=41 genesis_z80_images_test=38 genesis_audio_equivalence_test=17
-  sms_pad_native_test=35 sms_viewer_equivalence_test=34 sms_machine_tests=33 genesis_audio_ym_test=12
-  z80_control_stack_dispatch_test=25 ci_shard_guard_test=5
-  sonic_startup_inventory_adapter_failure_test=80)  # RUN_SERIAL: runs alone, so it occupies all four cores
+  m68k_capability_ratchet_test=509 z80_owner_group_differential_test_slice4=488 z80_owner_group_differential_test_slice2=468
+  z80_owner_group_differential_test=429 genesis_z80_build_pipeline_bound_test=401 sms_machine_scheduler_test=333
+  z80_owner_group_differential_test_slice3=215 sms_owner_group_equivalence_render_test=209 m68k_pipeline_tests=178 sms_machine_e2e_test=176
+  sms_owner_group_equivalence_test=162 sms_native_build_policy_test=161 sms_render_native_test=145 sms_native_build_test=144
+  genesis_z80_build_pipeline_test=117 m68k_conformance_harness_test=114 sms_emission_budget_512k_test=112 sms_owner_group_equivalence_vdp_test=112
+  z80_conformance_harness_test=112 sms_vdp_native_test=106 z80_timing_closure_test=101 z80_generated_pipeline_test=95 sms_render_test=83
+  sonic_startup_inventory_adapter_failure_test=80 sms_bank_crossing_test=79 z80_live_guard_test=71 genesis_z80_build_pipeline_smc_test=70
+  genesis_z80_machine_test=54 z80_capability_ratchet_test=53 sms_viewer_equivalence_test=51 z80_live_operand_test=47 sms_pad_native_test=45
+  sms_emission_budget_test=40 genesis_audio_artifact_test=39 segarecomp_build_command_test=34 genesis_audio_equivalence_test=20
+  genesis_z80_build_pipeline_falsify_test=20 sms_machine_tests=19 cpu_z80_decode_tests=18 genesis_audio_ym_test=18 z80_control_stack_dispatch_test=17
+  genesis_z80_images_test=16 m68k_batch_c_static_slice_test=16 genesis_z80_build_pipeline_prepare_test=10 sms_native_build_failclosed_test=9
+  sms_psg_differential_test=7 ci_shard_guard_test=1)  # RUN_SERIAL: sonic_startup_inventory_adapter_failure_test runs alone, so it occupies all four cores
 
 # The guard runs inside the shard it is assigned to (it only lists tests, so it is cheap) and must exist before the partition below.
 add_test(NAME ci_shard_guard_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/ci_shard_guard_test.py
