@@ -52,8 +52,9 @@ The final executable never sees it. Only generated tables derived from it reach 
    Offsets are `std::uint32_t` image offsets. Nothing in the generic type knows the CPU's address width.
    - A Z80 consumer rejects an image whose mappings leave its 16-bit logical space (the existing `CodeWindow` validation).
    - An M68K consumer rejects anything outside 24 bits.
-   - A class-2 image (proven copy) *references* its source image's bytes (source `ImageId` plus offset range) rather than copying them,
-     exactly as ADR 0049 decodes the immutable source.
+   - The span may be owned or borrowed. An ADR 0049 alias image borrows its source claim's bytes rather than copying them, exactly as
+     ADR 0049 decodes the immutable source. The source image and offset range are recorded as producer evidence (question 6), not as
+     a generic derivation field.
 
 4. **Execution mapping without SMS mapper semantics.** `mappings` is a non-empty list of
    `{execution_base: uint32, first_offset: uint32, length: uint32}`: image offset `o` executes at `execution_base + o`.
@@ -69,27 +70,37 @@ The final executable never sees it. Only generated tables derived from it reach 
    - A RAM image's entry is reached by ordinary control flow.
    - Putting roots in the image would couple Problem A to Problem B.
 
-6. **Producer provenance.** `provenance = {class, producer, evidence}`:
-   - `class` is closed: `immutable_input`, `proven_copy`, `build_time_materialization`, `static_analysis` (ADR 0076 classification).
+6. **Producer provenance.** `provenance = {authority, producer, evidence}`:
+   - `authority` is closed, with three values (ADR 0076 "Image authority"). It says how the compiler establishes the bytes:
+     - `immutable_input`: the validated input image;
+     - `static_proof`: static reasoning over immutable input, with no guest execution;
+     - `bounded_build_time_materialization`: observed while running the generated-native program under the bounded build-time
+       execution rules.
+
+     A future analysis-based producer uses `static_proof`. It is not a separate authority.
    - `producer` is a stable producer name (for example `genesis.cartridge`, `genesis.copy_alias`, `sms.cartridge_bank`,
      `genesis.z80_materializer`).
-   - `evidence` is a producer-owned sanitized record. Examples:
-     - for a proven copy: the source `ImageId`, source offset and length;
-     - for materialization: the epoch ordinal, content digest and bounds used;
-     - for an immutable input: the mapping claim.
+   - `evidence` is a producer-owned sanitized record. It carries the **derivation relationship**, which stays producer-owned. Examples:
+     - ADR 0049: a verbatim source-image copy, with the source `ImageId`, source offset and length;
+     - Genesis materialization: the runnable-epoch ordinal, content digest, signature facts and bounds used;
+     - immutable input: the mapping claim.
 
-   Evidence is build-artifact data. Durable reports keep only the class and counts.
+     The generic artifact has **no closed derivation taxonomy** (copy, transform, decompression and so on). SEG-028 may promote a
+     derivation field only when two real consumers need it.
 
-7. **Distinguishing immutable input, guarded materialized snapshot and statically proven copy.** By `provenance.class` together with
-   `verification`. The three combinations that exist today:
+   Evidence is build-artifact data. Durable reports keep only the authority, the producer name and counts.
 
-   | class | verification | example |
-   | --- | --- | --- |
-   | `immutable_input` | `none` | cartridge claims, SMS banks |
-   | `proven_copy` | `byte_identity` | ADR 0049 |
-   | `build_time_materialization` | `structural` | Genesis Z80 |
+7. **Distinguishing immutable input, guarded materialized snapshot and statically proven copy.** By `provenance.authority`, the
+   producer evidence and `verification` together. The combinations that exist today:
 
-   A consumer must not infer the class from the address range.
+   | authority | producer evidence | verification | example |
+   | --- | --- | --- | --- |
+   | `immutable_input` | mapping claim | `none` | cartridge claims, SMS banks |
+   | `static_proof` | verbatim source-image copy | `byte_identity` | ADR 0049 |
+   | `bounded_build_time_materialization` | runnable-epoch snapshot and signature facts | `structural` | Genesis Z80 |
+
+   A future static producer replacing Genesis materialization would be `static_proof`, with evidence of the same platform image and
+   verification unchanged. Authority and verification are independent axes. A consumer must not infer either from the address range.
 
 8. **Verification policy.** The generic layer holds only a closed tag: `none` (bytes cannot change while mapped),
    `byte_identity` (every executed instruction's bytes must equal the image bytes), or `structural` (CPU-defined structural bytes
@@ -107,22 +118,29 @@ The final executable never sees it. Only generated tables derived from it reach 
 
 10. **`PassRunner`: it stays Genesis-specific.** Its single consumer is `segarecomp build`'s Genesis route. The ADR 0049 preparation
     loop is structurally different: it runs in Python tooling, iterates on fail-closed frontiers and finds verbatim runs, while
-    `PassRunner` iterates on hardware epochs. The generic part of materialization is only the *provenance class* and the rule that a
-    class-3 producer is deterministic, bounded, confirmed and fails with typed errors. Revisit if a second class-3 producer appears
-    (for example, M68K decompressed code).
+    `PassRunner` iterates on hardware epochs. The generic part of materialization is only the `bounded_build_time_materialization`
+    authority value, plus the bounded build-time execution rules: deterministic, bounded, confirmed, typed failures. Revisit if a second
+    producer with that authority appears (for example, M68K decompressed code).
 
 11. **How ADR 0049 consumes the seam without changing execution semantics.**
-    - A descriptor becomes a class-2 producer output: an M68K image that references the source claim's bytes, with one mapping at
-      the work-RAM execution base, `verification = byte_identity`, and evidence = (source image, offset, length).
+    - A descriptor becomes the output of a producer with `static_proof` authority: an M68K image that borrows the source claim's
+      bytes, with one mapping at the work-RAM execution base, `verification = byte_identity`, and producer evidence = verbatim
+      source-image copy (source image, offset, length). The authority is `static_proof` because the emitter re-validates every
+      descriptor against the owned immutable claim. The *origin* of a descriptor is producer evidence and does not change the
+      authority:
+      - supplied directly;
+      - proposed by the tooling preparation phase;
+      - proved by a future analysis.
     - The frontend alias path (`apply_genesis_immutable_copy_alias`, `ImmutableRomAotEntry::execution_alias`) consumes that image
       instead of the raw `ImmutableCopyAlias` triple.
     - Decode, guard and provenance are unchanged, so generated C is **byte-identical** for the same descriptors. This adaptation is
       intentionally emission-neutral.
-    - Moving alias production into `segarecomp build` is a separate, later child. It is behaviour-adding, has its own acceptance, and
-      is not part of the equivalence proof.
+    - Giving `segarecomp build` an alias producer is a separate, later child. It is behaviour-adding, has its own acceptance, and is
+      not part of the equivalence proof. If that producer proposes descriptors by executing generated code at build time, that
+      execution must satisfy the bounded build-time execution rules. The images it yields still have `static_proof` authority.
 
 12. **How a future static analyzer replaces the SEG-032 producer.**
-    - A class-4 producer must emit the same platform inputs the registry consumes today: per epoch, the 8 KiB content and the
+    - A replacement producer with `static_proof` authority must emit the same platform inputs the registry consumes today: per epoch, the 8 KiB content and the
       68K-written extents that define the activation signature.
     - The generic seam carries the image and its provenance. The Genesis registry keeps computing the content hash and signature from
       the platform record.
@@ -171,7 +189,7 @@ The dependency direction is unchanged: platforms depend on generic; generic depe
 
 ## 4. Invariants every SEG-028 child must preserve
 
-- The final executable stays fully static (ADR 0076). The build may materialize only under the class-3 rules.
+- The final executable stays fully static (ADR 0076). The build may execute generated code only under the bounded build-time execution rules (ADR 0076).
 - Broad AOT over any image remains legal and is the default admission.
 - Equivalence for adaptations follows the SEG-027-T003 no-regression rule:
   - byte-identical generated output where the adaptation is emission-neutral (both planned adaptations are);
