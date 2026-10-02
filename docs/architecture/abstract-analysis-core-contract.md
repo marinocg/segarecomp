@@ -1,0 +1,126 @@
+# Abstract-analysis core contract (draft, SEG-027-T004)
+
+- Status: **Draft**. This contract is input to the SEG-029 full refinement. It is not implemented, and no product code follows it yet.
+- Decision context: ADR 0076 (SEG-029 ACTIVATE as an incremental core); evidence in `gen3-evidence-ledger.md` (cited as `[L x]`) sections 2.2, 3 (S4, S5)
+  and 4.
+- Not this contract's job:
+  - the M68K instantiation (SEG-030);
+  - production admission (SEG-031);
+  - executable-image production (SEG-028, `executable-image-contract.md`).
+
+## 1. Shape
+
+```text
+CPU decoder + CPU effect owner  ->  CPU-owned abstract transfer (adapter)  ->  generic deterministic solver  ->  precise result OR Unknown
+       (libs/cpu/<cpu>)                    (libs/cpu/<cpu>)                       (generic library)
+```
+
+- The generic solver never decodes or interprets an instruction. It sees opaque program points, CPU-supplied successor edges, and
+  abstract states that it can only join, compare and hand back to the adapter.
+- There is no universal CPU IR. Each CPU adapter reads its own decoded instructions and effect owners:
+  - M68K: `m68k_operation_effect`, `M68kIrOperation`, `m68k_control_successors`;
+  - Z80: `DecodedInstruction` / `FormDescriptor`, plus a small CPU-owned effect projection (section 5).
+
+## 2. Generic / CPU boundary
+
+| generic (may name) | CPU adapter (owns) |
+| --- | --- |
+| program point (opaque, totally ordered key) | what a program point is: execution PC plus image identity |
+| edge kind: `fallthrough`, `branch`, `call`, `return`, `computed`, `exceptional` (closed vocabulary, used only for scheduling and reporting) | which instructions produce which edges, and the targets of computed edges as abstract values |
+| abstract state as an adapter-defined type with `join`, `leq`, `is_bottom` | registers, flags, stack, exception frames, addressing modes |
+| baseline domain building blocks (section 3) | the mapping from architectural locations to domain values |
+| worklist order, iteration and resource accounting, termination | the transfer function for one instruction |
+| result: per-query `Precise(set)` or `Unknown(reason)` | what a query means (for example "targets of this computed site") |
+
+The generic part names no M68K or Z80 register, effective address, stack frame, exception, prefix, bank or mapper concept. A
+forbidden-identifier scan of the generic library enforces this (`D0`-`D7`, `A0`-`A7`, `HL`, `IX`, `IY`, `SP`, `RTE`, `RETI`, `EA`, `bank`,
+`epoch` and similar terms).
+
+## 3. Baseline vs staged capabilities
+
+**Baseline** means it is justified by the first consumer and the fixtures. The first consumer is the re-expression of the SEG-026-T002
+exact PC-indexed recovery plus the existing Gen-2 finite register-state walker [L S5]: both are exact finite-set domains over registers
+with immutable-byte reads.
+
+- `Unknown`/top, bottom, a constant, and a **small finite set** with a set-size resource bound (exceeding it gives `Unknown`, never a
+  wider guess);
+- join;
+- a deterministic worklist / fixed-point solver with an iteration bound and a state-size bound;
+- an immutable-image read oracle supplied by the caller (an executable-image view; section 6);
+- the CPU-adapter seam.
+
+This list illustrates the baseline; it is not a frozen minimum. SEG-029's first child may shrink it if the first fixture needs less.
+
+**Staged capabilities.** Each one is admitted only under the four-part rule:
+
+1. a named consumer;
+2. a named precision problem;
+3. why the simpler domains already present are insufficient;
+4. observable acceptance.
+
+| candidate | likely consumer | precision problem it would address | status |
+| --- | --- | --- | --- |
+| address region plus offset | SEG-030 `(An)`/`d16(An)` object fields | 59 of 70 observed width-only sites read a register-relative field with a non-provable base [L 2.2] | staged: the first expected staged child |
+| points-to sets | SEG-030 `JSR (An)` (first gate for 5,367 missed PCs) | pointer provenance across calls | staged |
+| abstract memory (store/load over regions) | SEG-030 state-field dispatch | store-provenance poisoning (ADR 0055) | staged; needs regions first |
+| intervals / strided intervals | jump-table extents larger than the finite-set bound | sets exceed the bound | staged |
+| widening | loops over unbounded counters | non-termination without widening | staged; widening never yields certainty; the solver iteration bound remains |
+| call contexts / summaries | interprocedural object pointers | context-insensitive merge loses identity | staged; bounded context depth only |
+| exception/return state | RTE resumption (ADR 0051 first gate) | RTE target provenance | SEG-030 workstream, reported `Unknown` until proven |
+
+SEG-026-T002's exact PC-indexed recovery is the **regression baseline**, split in two levels. SEG-029's M68K first-consumer adapter
+reproduces the fixture-level finite-value results of the SEG-026-T002 index-domain proof (`reachability_pc_index_recovery_test`) exactly.
+SEG-030 reproduces the oracle-level result: `D/U = 2.75%` and 42.74% recall with zero escapes on the same oracle. It is not a foundation to extend, and nothing grows from the removed
+SEG-026-T003 code.
+
+## 4. Soundness, resource and determinism rules
+
+- **Never guess.** A query answer is `Precise(set)` only when every abstract value that contributes to it is exact. Otherwise it is
+  `Unknown(reason)`. The reason is a closed vocabulary: `resource_bound`, `set_bound`, `unsupported_transfer`, `unknown_input`,
+  `imprecise_join` and similar.
+- **Bounded.** Iteration count, state count and set sizes are constants (as SEG-032 bounds are). Exhaustion is `Unknown`, never partial
+  truth and never a silent widening into false certainty.
+- **Deterministic.** Worklist order is a pure function of the program-point order. There is no hash-order iteration and no wall-clock
+  dependence. Repeated runs give byte-identical results.
+- **Inputs.**
+  - No runtime evidence feeds analysis or admission: coverage, traces and external disassemblers are falsifiers only.
+  - Relative proofs must state their premise (for example "relative to the discovered predecessor set"). SEG-030 owns invalidation and
+    restart, as ADR 0054 does.
+
+## 5. Z80 second-CPU proof requirement
+
+SEG-029 must instantiate the generic interface with a **bounded, project-authored synthetic Z80 consumer**. It is architectural
+validation, not a production Z80 reachability mode.
+
+- It uses `libs/cpu/z80` decode (`DecodedInstruction`, `FormDescriptor`).
+- `libs/cpu/z80` has no effect projection comparable to `m68k_operation_effect` today: the semantics reach code only through C11
+  lowering (ADR 0059 split). SEG-029 therefore needs a small CPU-owned Z80 effect/successor projection inside `libs/cpu/z80`, covering
+  register reads/writes, memory access shape and control successors, for the forms the fixture uses. It must not parse lowering text,
+  and it must not move lowering into the CPU library.
+- The fixture exercises:
+  - constant and finite register values;
+  - a branch join;
+  - an HL/IX/IY-like address value;
+  - a memory load and store;
+  - a register-derived indirect jump (`JP (HL)` or similar).
+
+  A smaller fixture is acceptable if it proves the same seam.
+- It demonstrates that the solver carries no M68K register, EA, stack-frame or exception assumption (the forbidden-identifier scan plus
+  a code-review checklist).
+- Production Z80 stays broad AOT and does not link the analysis.
+
+## 6. Image input
+
+The analysis consumes an **executable-image view**: bytes, mapping and an immutable-read oracle.
+
+- Until SEG-028 lands, the M68K view is the immutable cartridge claim set and the Z80 fixture view is a project-authored byte array.
+- When SEG-028 lands, the view adapts to its artifact (`executable-image-contract.md` questions 1-4). This needs no change to the solver.
+- SEG-029 does **not** depend on SEG-028.
+
+## 7. What SEG-029 must not do
+
+- Implement full M68K indirect recovery (SEG-030) or change production admission (SEG-031).
+- Require SMT, or whole-program path-sensitive symbolic execution.
+- Pre-commit to a complete VSA framework, or build every staged domain up front.
+- Introduce a universal CPU IR, a generic hardware/memory emulator, or platform banking semantics in generic domains.
+- Carry the ADR 0076 STOP conditions in weakened form. They apply in full.
