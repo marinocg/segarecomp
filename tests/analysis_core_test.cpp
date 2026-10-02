@@ -201,7 +201,8 @@ void bound_exhaustion() {
 }
 
 // A computed site's resolution is the one of its latest transfer: a site first resolved from a precise value and later widened to
-// Unknown is reported unresolved, with no stale computed-target set (the earlier edge's target stays reached: sound).
+// Unknown is reported unresolved, with no stale computed-target set. Because its earlier edge is no longer justified, the solver pins
+// the site and restarts, so the earlier target is no longer reached through it (SEG-029-T006 finding 1).
 // Schedule: 0 -> {1,5}; 1 sets l0=10 -> 3 (resolved {10}); 5 -> 6 opaque l0 -> 3 (widened, re-transferred: unresolved).
 void site_resolution_is_latest() {
   ToyAdapter t;
@@ -215,7 +216,37 @@ void site_resolution_is_latest() {
   expect(s.complete && s.unresolved_computed.contains(3) && s.unresolved_computed.at(3) == UnknownReason::unsupported_transfer,
          "SITE: the widened site is unresolved with its typed reason");
   expect(!s.computed_targets.contains(3), "SITE: no stale computed-target set survives the latest transfer");
-  expect(s.reached(10), "SITE: the earlier computed edge's target stays reached (sound over-approximation)");
+  expect(s.pinned.contains(3) && s.restarts == 1U, "SITE: the site that lost its emitted target is pinned after one restart");
+  expect(!s.reached(10), "SITE: the earlier computed edge's target is no longer reached through the pinned site");
+}
+
+// SEG-029-T006 finding 1: the STATE at a target reached earlier by a later-unresolved computed site must never be the stale, narrower
+// one. 0 -> {1,5}; 1: l1=5 -> 2: l0=101 -> 3 jump_via l0 (emits 101 with l1={5}); 5: l1=7 -> 6: l0 opaque -> 3 (now unresolved).
+// Without the pin-and-restart, l1@101 would be the partial truth {5} although a concrete run can reach 101 with l1=7.
+void stale_computed_target_state() {
+  ToyAdapter t;
+  t.program[0] = {Op::nop, 0, 0, 0, {1, 5}};
+  t.program[1] = {Op::set, 1, 5, 0, {2}};
+  t.program[2] = {Op::set, 0, 101, 0, {3}};
+  t.program[3] = {Op::jump_via, 0, 0, 0, {}};
+  t.program[5] = {Op::set, 1, 7, 0, {6}};
+  t.program[6] = {Op::opaque, 0, 0, 0, {3}};
+  t.program[101] = {Op::stop, 0, 0, 0, {}};
+  const auto s = solve(t, entry());
+  expect(s.complete && loc_at(s, 3, 1) == FiniteValue::of({5, 7}), "STALE: the site's final input carries both values");
+  expect(loc_at(s, 101, 1).is_bottom() && s.pinned.contains(3),
+         "STALE: no precise-but-partial state at the stale target: " + loc_at(s, 101, 1).describe());
+  // A site whose final transfer still emits every earlier target is not pinned (the widened set is a superset).
+  ToyAdapter grow;
+  grow.program[0] = {Op::nop, 0, 0, 0, {1, 5}};
+  grow.program[1] = {Op::set, 0, 101, 0, {3}};
+  grow.program[3] = {Op::jump_via, 0, 0, 0, {}};
+  grow.program[5] = {Op::set, 0, 102, 0, {3}};
+  grow.program[101] = {Op::stop, 0, 0, 0, {}};
+  grow.program[102] = {Op::stop, 0, 0, 0, {}};
+  const auto g = solve(grow, entry());
+  expect(g.complete && g.pinned.empty() && g.restarts == 0U && g.computed_targets.at(3) == std::set<std::uint64_t>{101, 102},
+         "STALE: a growing precise site keeps all targets without a restart");
 }
 
 // The worklist always yields the smallest pending point: the transfer order is a function of the program alone, independent of
@@ -261,6 +292,7 @@ int main() {
   loop_termination();
   bound_exhaustion();
   site_resolution_is_latest();
+  stale_computed_target_state();
   worklist_order();
   determinism();
   if (failures != 0) {

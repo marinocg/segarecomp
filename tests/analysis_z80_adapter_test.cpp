@@ -245,6 +245,31 @@ void fixture_non_code() {
         r.solution.unresolved_computed.at(0x4000) == UnknownReason::non_immutable_read);
 }
 
+// Fixture F (SEG-029-T006 finding 1): a computed site resolved from a narrow input and unresolved once its input widens must not
+// leave its earlier target with a stale, precise-but-partial state.
+//   0000 21 10 00  LD HL,0x0010
+//   0003 06 05     LD B,5
+//   0005 E9        JP (HL)          first transfer: HL {0x0010} -> 0x0010 with B {5}
+//   0006 06 07     LD B,7
+//   0008 2A 00 80  LD HL,(0x8000)   RAM: HL Unknown(non_immutable_read)
+//   000B C3 05 00  JP 0x0005        widens the site: unresolved
+//   0010 C3 06 00  JP 0x0006
+// A concrete run with RAM holding 0x0010 reaches 0x0010 with B=7, so B@0x0010 = {5} would be partial truth: the site is pinned
+// unresolved and the solve restarts; 0x0010 is then not reached through it (bottom), never {5}.
+void fixture_stale_computed_target() {
+  const Image image(0x0020, {{0x0000, {0x21, 0x10, 0x00, 0x06, 0x05, 0xE9, 0x06, 0x07, 0x2A, 0x00, 0x80, 0xC3, 0x05, 0x00}},
+                             {0x0010, {0xC3, 0x06, 0x00}}});
+  const Run r = run(image);
+  CHECK(r.solution.complete);
+  CHECK(r.solution.pinned.count(0x0005) == 1U && r.solution.restarts == 1U);
+  CHECK(r.solution.unresolved_computed.count(0x0005) == 1U &&
+        r.solution.unresolved_computed.at(0x0005) == UnknownReason::non_immutable_read);
+  CHECK(r.solution.computed_targets.count(0x0005) == 0U);
+  // 0x0006.. is reachable only through the pinned site's suppressed target (relative to the discovered edge set, ADR 0054 premise).
+  CHECK(at(r, 0x0005, Reg::b) == set({5}));
+  CHECK(at(r, 0x0010, Reg::b).is_bottom() && !r.solution.reached(0x0006));
+}
+
 // Fixture E: pair/half consistency through the exact pointwise update, from a joined two-value pair.
 //   0000 20 05        JR NZ,+5 -> 0007
 //   0002 21 34 12     LD HL,0x1234
@@ -335,6 +360,7 @@ int main() {
   fixture_call_alu_store();
   fixture_non_code();
   fixture_pair_halves();
+  fixture_stale_computed_target();
   projection();
   determinism();
   if (failures != 0) {

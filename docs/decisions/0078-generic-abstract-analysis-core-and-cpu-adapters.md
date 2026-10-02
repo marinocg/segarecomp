@@ -32,11 +32,20 @@ the generic part is not M68K-shaped.
    the adapter derived from a *precise* abstract value. A computed site whose value is not precise reports `unresolved_computed(reason)`
    and contributes no edge, so results are relative to the discovered edge set (the ADR 0054 premise). The solver never decodes an
    instruction.
+   - `transfer` must be pure and monotone in every non-computed edge. Computed edges are legitimately non-monotone: a site
+     resolved from a narrow input may become unresolved, or drop a target, once its input grows. The solver owns this, not the adapters.
+     - After a fixed point, every site whose final transfer no longer emits every computed target it emitted during the run is pinned
+       unresolved (`Solution::pinned`).
+     - The solve then restarts from the entries with the pinned sites' computed edges suppressed.
+     - Each restart pins at least one new site, and all runs share the iteration bound, so the solve terminates.
+     - No target therefore keeps a precise state derived from a stale, narrower input. This is SEG-029-T006 finding 1, and it generalizes
+       the SEG-026-T002 challenger's pin-and-restart.
 3. **`Unknown` vocabulary (closed).** `unknown_input`, `unsupported_transfer`, `non_immutable_read`, `set_bound`, `iteration_bound`,
    `state_bound`. The enum order is the deterministic join priority (joining two Unknowns keeps the smaller reason). The draft's
    `imprecise_join` is dropped: a join never creates imprecision on its own; it only propagates an input's Unknown or exceeds the set bound.
 4. **Bounds (constants).** `default_set_bound = 4096` (equal to `m68k_finite_values_limit`, the first consumer's bound),
-   `default_max_iterations = 1,000,000`, `default_max_points = 2^20`. A caller may lower a bound, never raise it. Exhausting the set bound
+   `default_max_iterations = 1,000,000`, `default_max_points = 2^20`. A caller may lower a bound, never raise it (the solver clamps
+   requested bounds to these defaults; `FiniteValue::of` clamps the set bound). Exhausting the set bound
    gives `Unknown(set_bound)` for that value. Exhausting an iteration or point bound makes the whole solution incomplete: every query
    returns `Unknown(iteration_bound | state_bound)`, never a partial answer and never bottom.
 5. **Determinism.** The worklist is the ordered set of pending points and always pops the smallest key; states live in ordered maps;
@@ -101,4 +110,17 @@ the generic part is not M68K-shaped.
 - **Result:** 36 killed and 2 justified as equivalent.
   - `m68k_failed_read_ignored`: the CPU owner already returns Unknown on a failed read.
   - `m68k_flag_setter_adjacency_unchecked`: the provenance is created only on an edge to the physically next instruction.
-- Seven first-run survivors were closed by new fixtures. No product bug was found.
+- Seven first-run survivors were closed by new fixtures. No product bug was found by the gate itself.
+- After the T006 correction, two solver mutants were added: `stale_target_not_pinned` and `pinned_site_keeps_edges`. Both are killed,
+  for 40 mutants in total: 38 killed and 2 justified as equivalent.
+
+### T006: independent completion gate
+
+- **First pass: BLOCKED, with one major finding.** A computed site resolved earlier and widened later left its earlier target with a
+  precise state derived only from the narrower input. That was partial truth in the generic solver, reproduced on the Z80 adapter
+  and in the toy language. The M68K driver's own restart masked it there.
+  - **Corrected:** solver-owned pin-and-restart (decision 2), with fixtures `stale_computed_target_state` (core) and
+    `fixture_stale_computed_target` (Z80).
+- **Minor findings, both corrected:**
+  - requested bounds are now clamped (decision 4);
+  - the seam text now states that computed edges are non-monotone (decision 2).
