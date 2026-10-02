@@ -200,7 +200,8 @@ static int machine_runnable(const GenesisZ80Machine *machine) {
 }
 
 int genesis_z80_machine_run_to(GenesisZ80Machine *machine, uint64_t master_ticks, GenesisRuntimeStop *stop) {
-  if (!machine_runnable(machine)) return 0;
+  /* A faulted sound CPU executes nothing and answers nothing: it is quiesced (time is not advanced, no device write, no INT). */
+  if (genesis_z80_machine_sound_faulted(machine) || !machine_runnable(machine)) return 0;
   for (;;) {
     const uint64_t now = access_master_ticks(machine);
     uint64_t segment_end, steps;
@@ -213,6 +214,13 @@ int genesis_z80_machine_run_to(GenesisZ80Machine *machine, uint64_t master_ticks
     outcome = z80_run(&machine->cpu, machine->cpu.state.cycles + steps);
     if (machine->view_stop != (GenesisDiagnosticCategory)0)
       return stop_with(stop, GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, machine->view_stop);
+    if (outcome == Z80_ERROR_CODE_MISMATCH) {  /* structural mutation: isolate the sound CPU, never interpret the bytes */
+      machine->sound_fault = GENESIS_DIAG_Z80_CODE_MISMATCH;
+      machine->sound_fault_epoch = machine->runtime->z80_epoch.epoch_count;
+      machine->sound_fault_master_ticks = access_master_ticks(machine);
+      machine->bound_ordinal = 0U;
+      return 0;
+    }
     if (z80_outcome_is_error(outcome))
       return stop_with(stop, GENESIS_STOP_UNSUPPORTED_Z80_EXECUTION, diagnostic_of_outcome(outcome));
   }
@@ -246,6 +254,7 @@ void genesis_z80_activation_signature(const uint8_t *ram, const uint8_t *written
 static int activate_image(GenesisZ80Machine *machine, const uint8_t *written, GenesisRuntimeStop *stop) {
   uint8_t signature[32];
   uint32_t extents, ordinal;
+  if (genesis_z80_machine_sound_faulted(machine)) return 0;  /* a fault is permanent: no re-activation, no image lookup */
   genesis_z80_activation_signature(machine->runtime->devices.z80_bus.z80_ram, written, &extents, signature);
   if (extents == 0U && machine->last_bound != 0U) {  /* a plain restart: the code already in RAM, i.e. the previously bound image */
     machine->bound_ordinal = machine->last_bound;
@@ -282,6 +291,7 @@ static int hook_bus_event(void *context, GenesisRuntime *runtime, GenesisZ80Even
     case GENESIS_Z80_EVENT_RESET_RELEASE:  /* the architectural reset happens at release (contract section 4.6) */
       genesis_ym2612_port_reset(runtime, master_ticks);
       ++machine->count_reset_release;
+      if (genesis_z80_machine_sound_faulted(machine)) break;  /* the YM reset above is a device effect; the Z80 stays faulted */
       z80_reset(&machine->cpu.state);
       machine->view_stop = (GenesisDiagnosticCategory)0;
       machine->cycle_base_master_ticks = aligned;
@@ -293,7 +303,7 @@ static int hook_bus_event(void *context, GenesisRuntime *runtime, GenesisZ80Even
       ++machine->count_busreq_assert;
       break;
   }
-  if (transition) {  /* resume: time held on the bus is not made up (GPGX: the Z80 restarts at the next multiple of 15 ticks) */
+  if (transition && !genesis_z80_machine_sound_faulted(machine)) {  /* resume: time held on the bus is not made up (GPGX: the Z80 restarts at the next multiple of 15 ticks) */
     const uint64_t z80_time = access_master_ticks(machine);
     if (z80_time < aligned) machine->cycle_base_master_ticks += aligned - z80_time;
   }
@@ -313,7 +323,7 @@ void genesis_z80_machine_state_digest(const GenesisZ80Machine *machine, uint8_t 
   GenesisSha256 sha;
   const Z80State *s = &machine->cpu.state;
   uint8_t bytes[64];
-  uint64_t values[4];
+  uint64_t values[6];
   uint32_t i;
   genesis_sha256_init(&sha);
   bytes[0] = s->a; bytes[1] = s->f; bytes[2] = s->b; bytes[3] = s->c; bytes[4] = s->d; bytes[5] = s->e; bytes[6] = s->h; bytes[7] = s->l;
@@ -324,7 +334,8 @@ void genesis_z80_machine_state_digest(const GenesisZ80Machine *machine, uint8_t 
   bytes[30] = s->iff2; bytes[31] = s->q; bytes[32] = s->halted; bytes[33] = s->int_deferral; bytes[34] = s->ld_a_ir; bytes[35] = s->in_prefix_run;
   genesis_sha256_update(&sha, bytes, 36U);
   values[0] = s->cycles; values[1] = machine->cycle_base_master_ticks; values[2] = machine->bound_ordinal; values[3] = machine->last_bound;
-  for (i = 0U; i < 4U; ++i) {
+  values[4] = machine->sound_fault; values[5] = machine->sound_fault_master_ticks;
+  for (i = 0U; i < (genesis_z80_machine_sound_faulted(machine) ? 6U : 4U); ++i) {  /* a healthy digest is unchanged */
     uint8_t word[8];
     uint32_t b;
     for (b = 0U; b < 8U; ++b) word[b] = (uint8_t)(values[i] >> (8U * b));

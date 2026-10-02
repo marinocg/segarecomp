@@ -390,6 +390,13 @@ def sound_smc_driver():
     return z80(".org 0x0000\n        ld sp,0x1F00\n        ld a,0x3C\n        ld (patch),a\npatch:  nop\nloop:   jr loop\n")
 
 
+def sound_smc_psg_driver():
+    """One PSG write, then a structural self-modification of the next instruction (z80_code_mismatch), then PSG writes that must never
+    be executed: the isolated sound CPU performs no write after the fault."""
+    return z80(".org 0x0000\n        ld sp,0x1F00\n        ld a,0x9F\n        ld (0x7F11),a\n        ld a,0x3C\n        ld (patch),a\n"
+               "patch:  nop\n        ld a,0x8A\n        ld (0x7F11),a\nloop:   jr loop\n")
+
+
 def build_sound(plan, programs):
     m = M68k()
     # Prologue: MOVEQ #0,D0 / BEQ.W real / RESET. The 68K translator's startup prefix admits only a handful of operations and
@@ -471,6 +478,12 @@ def fixture_sound_smc():
     return build_sound([("raw", "s")], {"s": sound_smc_driver()})
 
 
+def fixture_sound_smc_fault():
+    """A structural mutation faults the sound CPU in the first epoch; a later, different (known-shaped) driver is uploaded and must neither
+    run nor stop the machine: 1 image, 2 epochs, the 68K keeps running."""
+    return build_sound([("raw", "s"), ("delay", SOUND_DELAY), ("raw", "a")], {"s": sound_smc_psg_driver(), "a": sound_driver(1)})
+
+
 def fixture_sound_late_epoch():
     """A second, different driver is uploaded only after the observation window: the build sees one image, the second epoch
     surfaces at run time as the typed z80_unknown_image."""
@@ -479,7 +492,7 @@ def fixture_sound_late_epoch():
 
 FIXTURES = {"multi_epoch_dirty": fixture_multi_epoch_dirty, "bus_reset_probe": fixture_bus_reset_probe, "bus_reset_control": fixture_bus_reset_control,
             "sound_raw": fixture_sound_raw, "sound_multi_epoch": fixture_sound_multi_epoch, "sound_decoded": fixture_sound_decoded,
-            "sound_smc": fixture_sound_smc, "sound_tone": fixture_sound_tone, "sound_late_epoch": fixture_sound_late_epoch}
+            "sound_smc": fixture_sound_smc, "sound_smc_fault": fixture_sound_smc_fault, "sound_tone": fixture_sound_tone, "sound_late_epoch": fixture_sound_late_epoch}
 
 
 def build(name):

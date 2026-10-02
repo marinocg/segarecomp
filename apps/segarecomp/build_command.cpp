@@ -509,6 +509,13 @@ class ProcessPassRunner final : public gz80::PassRunner {
       in >> key;
       if (key == "outcome") in >> outcome;
       else if (key == "frames") in >> observed.frames;
+      else if (key == "sound_fault") {
+        std::string kind;
+        gz80::SoundFault fault;
+        in >> kind >> fault.epochs >> fault.master_ticks;
+        if (!in || kind != "z80_code_mismatch" || observed.sound_fault) { well_formed = false; break; }
+        observed.sound_fault = fault;
+      }
       else if (key == "epoch") {
         unsigned ordinal = 0;
         std::string hex;
@@ -545,7 +552,7 @@ class ProcessPassRunner final : public gz80::PassRunner {
 
 // Builds the Genesis program. Returns 0 and fills `executable`, or the process exit code after recording the failure.
 int build_genesis_program(Options &options, Log &log, const std::string &sha, const std::vector<fs::path> &units,
-                          const fs::path &shard_dir, fs::path &executable, std::string &status_extra) {
+                          const fs::path &shard_dir, fs::path &executable, std::string &status_extra, bool &sound_degraded) {
   std::error_code ec;
   fs::path platform_dir = options.runtime_dir;
   if (!platform_dir.has_filename()) platform_dir = platform_dir.parent_path();  // tolerate a trailing separator
@@ -672,7 +679,11 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
 #endif
   if (!build.link(executable, objects, build.play)) return fail(options, log, sha, "link", 3, "The native program could not be linked.");
   const std::uint64_t exe_bytes = fs::file_size(executable, ec);
-  status_extra = ",\"z80\":{\"outcome\":\"converged\",\"end\":\"" + std::string(gz80::pass_outcome_name(summary.end)) +
+  // Machine-readable audio capability: a structural Z80 code mutation isolates the sound CPU (contract section 18) and the build
+  // still succeeds; every other Z80 failure already failed the build above.
+  status_extra = std::string(",\"genesis_audio\":\"") + (summary.sound_fault ? "degraded" : "supported") + "\"";
+  if (summary.sound_fault) status_extra += ",\"z80_audio_outcome\":\"structural_code_mismatch\"";
+  status_extra += ",\"z80\":{\"outcome\":\"converged\",\"end\":\"" + std::string(gz80::pass_outcome_name(summary.end)) +
                  "\",\"images\":" + std::to_string(summary.images) + ",\"discovery_runs\":" + std::to_string(summary.discovery_runs) +
                  ",\"runs\":" + std::to_string(summary.total_runs) + ",\"epochs\":" + std::to_string(summary.epochs) +
                  ",\"window_frames\":" + std::to_string(gz80::kObservationFrames) + ",\"frames_reached\":" + std::to_string(summary.frames) +
@@ -680,7 +691,11 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
                  ",\"units_reused\":" + std::to_string(build.z80_reused_units) + ",\"generated_bytes\":" + std::to_string(build.z80_generated_bytes) +
                  ",\"object_bytes\":" + std::to_string(build.z80_object_bytes) + ",\"emit_ms\":" + std::to_string(build.z80_emit_ms) +
                  ",\"compile_ms\":" + std::to_string(build.z80_compile_ms) + ",\"materialize_ms\":" + std::to_string(materialize_ms) +
-                 ",\"executable_bytes\":" + std::to_string(exe_bytes) + "}";
+                 ",\"executable_bytes\":" + std::to_string(exe_bytes) +
+                 (summary.sound_fault ? ",\"sound_fault_epochs\":" + std::to_string(summary.sound_fault->epochs) +
+                                            ",\"sound_fault_frame\":" + std::to_string(summary.sound_fault->master_ticks / (3420U * 262U /* NTSC master ticks per frame */))
+                                      : std::string()) + "}";
+  sound_degraded = summary.sound_fault.has_value();
   return 0;
 }
 
@@ -829,12 +844,14 @@ int segarecomp_build_command(int argc, char **argv) {
       // Genesis: M68K units + Z80 image materialization fixed point + sound devices + final link (SEG-032-T008).
       fs::path executable;
       std::string status_extra;
-      const int rc = build_genesis_program(options, log, sha, units, shard_dir, executable, status_extra);
+      bool sound_degraded = false;
+      const int rc = build_genesis_program(options, log, sha, units, shard_dir, executable, status_extra, sound_degraded);
       if (rc != 0) return rc;
       if (!options.keep_work) fs::remove_all(options.output / "obj", ec);
       stage("link", "done");
       write_status(options, sha, "ok", "done", "", status_extra);
-      std::cout << "@result ok executable=" << executable.string() << std::endl;
+      std::cout << "@result ok executable=" << executable.string()
+                << (sound_degraded ? " genesis_audio=degraded z80_audio_outcome=structural_code_mismatch" : "") << std::endl;
       return 0;
     }
     const fs::path runtime = options.runtime_dir / "runtime";

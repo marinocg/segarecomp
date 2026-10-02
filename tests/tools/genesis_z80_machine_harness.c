@@ -104,10 +104,10 @@ int main(int argc, char **argv) {
       genesis_z80_machine_state_digest(&machine, digest);
       printf("STATE z80=");
       print_digest(digest);
-      printf(" cycles=%llu pc=%04x bound=%u bank=%03x req=%u granted=%u released=%u view_stop=%d ticks=%llu\n",
+      printf(" cycles=%llu pc=%04x bound=%u bank=%03x req=%u granted=%u released=%u view_stop=%d fault=%d ticks=%llu\n",
              (unsigned long long)machine.cpu.state.cycles, (unsigned)machine.cpu.state.pc, (unsigned)machine.bound_ordinal,
              (unsigned)bus->bank, (unsigned)bus->bus_requested, (unsigned)bus->bus_granted, (unsigned)bus->reset_released,
-             (int)machine.view_stop, (unsigned long long)runtime.scheduler.master_ticks);
+             (int)machine.view_stop, (int)machine.sound_fault, (unsigned long long)runtime.scheduler.master_ticks);
     } else {
       GenesisRuntimeStop stop;
       uint32_t value = (uint32_t)b;

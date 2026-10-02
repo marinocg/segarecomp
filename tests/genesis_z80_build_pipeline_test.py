@@ -9,10 +9,14 @@ compile, materialize, link):
     upload of the same bytes are one image;
   * repeated builds and different worker counts produce byte-identical generated Z80 C and registry, and equal aggregates;
   * fail closed with a typed outcome and NO executable: image bound exceeded, instruction-budget exhaustion (a guest that never
-    advances virtual time), self-modifying Z80 code (z80_code_mismatch);
+    advances virtual time);
+  * a structural Z80 code mutation (self-modifying code, z80_code_mismatch) does NOT fail the build: the sound capability is classified
+    structurally unsupported (status `genesis_audio = degraded`, `z80_audio_outcome = structural_code_mismatch`), Z80 discovery stops, and
+    the final executable disables only its Z80 sound path (no later Z80 write, a later epoch neither runs nor stops it) while the 68K
+    keeps running; a fully supported title is `genesis_audio = supported`;
   * an epoch after the observation window is not materialized and surfaces at run time as the typed z80_unknown_image;
   * falsification of the produced program: a registry with one image removed stops at that image's epoch (z80_unknown_image), one
-    image's emitted code bytes mutated stops with z80_code_mismatch, and a pipeline rebuild restores the full behaviour.
+    image's emitted code bytes mutated isolates the Z80 (typed fault, 68K continues), and a pipeline rebuild restores the full behaviour.
 Sanitized aggregates (counts, ms, bytes) are printed as METRIC lines; no ROM byte, address or hash is.
 
 usage: genesis_z80_build_pipeline_test.py <segarecomp> <cc> <cxx> <source-root>
@@ -94,11 +98,12 @@ def main():
         tmp = pathlib.Path(directory)
         multi, decoded, raw = fx.build("sound_multi_epoch"), fx.build("sound_decoded"), fx.build("sound_raw")
         late, smc = fx.build("sound_late_epoch"), fx.build("sound_smc")
+        smc_fault = fx.build("sound_smc_fault")
         many_ok, many_over = fx.sound_many(fx.MAX_IMAGES_FOR_TESTS), fx.sound_many(fx.MAX_IMAGES_FOR_TESTS + 1)
         spin_no_time = bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x60, 0xFE))  # never advances virtual time
         jobs = {
             "multi": (multi, None), "multi_j1": (multi, 1), "multi_j4": (multi, 4), "multi_again": (multi, None),
-            "decoded": (decoded, None), "late": (late, None), "smc": (smc, None), "over": (many_over, None),
+            "decoded": (decoded, None), "late": (late, None), "smc": (smc, None), "smc_fault": (smc_fault, None), "smc_fault2": (smc_fault, 1), "over": (many_over, None),
             "ok_bound": (many_ok, None), "budget": (spin_no_time, None), "raw": (raw, 2),
         }
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
@@ -145,8 +150,26 @@ def main():
         check(done.returncode != 0 and status.get("diagnostic") == "materialization_budget_exhausted" and executable(tmp / "budget") is None,
               "a guest that never advances virtual time exhausts the instruction budget: materialization_budget_exhausted, no executable")
         done, status = results["smc"]
-        check(done.returncode != 0 and status.get("diagnostic") == "z80_code_mismatch" and executable(tmp / "smc") is None,
-              "self-modifying Z80 code: z80_code_mismatch, no executable")
+        check(done.returncode == 0 and status.get("status") == "ok" and executable(tmp / "smc") is not None and status.get("genesis_audio") == "degraded" and
+              status.get("z80_audio_outcome") == "structural_code_mismatch" and "genesis_audio=degraded z80_audio_outcome=structural_code_mismatch" in done.stdout,
+              "self-modifying Z80 code (z80_code_mismatch): the build succeeds and reports genesis_audio = degraded / structural_code_mismatch")
+        check(results["multi"][1].get("genesis_audio") == "supported" and "z80_audio_outcome" not in results["multi"][1] and "genesis_audio=degraded" not in results["multi"][0].stdout,
+              "a fully supported title is genesis_audio = supported, never degraded")
+        done, status = results["smc_fault"]
+        z = status.get("z80", {})
+        check(done.returncode == 0 and status.get("genesis_audio") == "degraded" and z.get("images") == 1 and z.get("epochs") == 2 and
+              z.get("sound_fault_epochs") == 1 and z.get("frames_reached") == z.get("window_frames"),
+              "the fault stops Z80 discovery: the later epoch is not materialized (1 image, 2 epochs) and the whole window is still observed")
+        check(stable(status) == stable(results["smc_fault2"][1]) and tree_digest(tmp / "smc_fault" / "generated-z80") == tree_digest(tmp / "smc_fault2" / "generated-z80"),
+              "the degraded outcome is deterministic across builds and worker counts (same fault epoch, frame and registry)")
+        ran, summary = run_program(executable(tmp / "smc_fault"), budget=60_000_000)
+        check(summary.get("result_kind") == 3 and summary.get("sound_fault", 0) != 0 and summary.get("sound_fault_epoch") == 1 and summary.get("epochs") == 2 and
+              summary.get("bound_image") == 0,
+              "the degraded program runs the 68K to the instruction budget; the faulted Z80 is isolated (no stop, nothing bound, 2 epochs seen)")
+        check(summary.get("psg_writes") == 1 and summary.get("ym_writes") == 0,
+              "no Z80-originated device write after the fault: the pre-fault PSG write only, the later driver never runs")
+        ran2, summary2 = run_program(executable(tmp / "smc_fault"), budget=60_000_000)
+        check(summary2 == summary, "the degraded program is deterministic across runs (summary, audio digest)")
 
         # ---- epochs after the window surface at run time as the typed unknown image ----
         done, status = results["late"]
@@ -196,8 +219,9 @@ def main():
                 mutated_sources[unit] = changed
         check(len(mutated_sources) >= 1, "the first instruction's guarded bytes were found in the emitted image code")
         mutated = relink(mutated_sources, "mutated")
-        ran, _ = run_program(mutated)
-        check('"diagnostic_category":"z80_code_mismatch"' in ran.stdout, "an image whose emitted bytes are mutated stops with z80_code_mismatch")
+        ran, summary = run_program(mutated)
+        check(summary.get("result_kind") == 3 and summary.get("sound_fault", 0) != 0,
+              "an image whose emitted bytes are mutated isolates the Z80 (typed fault) and the machine runs on")
         control = relink({}, "control")
         ran, summary = run_program(control)
         check(summary.get("epochs") == 1 and summary.get("result_kind") == 3 and summary.get("ym_writes", 0) > 0,

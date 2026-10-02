@@ -189,3 +189,8 @@ The RAM-code host callback of the Z80 ABI is `code_fetch` (copy the 1-4 live byt
 `code_matches`; the RAM-backed guard now verifies the structurally defining bytes and reads displacement/immediate payload from that snapshot
 (ADR 0073, T012 implementation record). The Genesis machine implements it over the mirrored sound RAM. Structural self-modifying code remains a typed
 `z80_code_mismatch` stop.
+
+## Sound-CPU fault isolation note
+
+Structural self-modifying code (`z80_code_mismatch`) isolates only the Z80 (permanent fault latch, quiesced for scheduling; the BUSACK model never depended on Z80
+execution state, so the documented grant semantics are unchanged); see ADR 0073 amendment and `docs/architecture/genesis-z80-audio-contract.md` section 18.

@@ -11,6 +11,7 @@
  * and unknown.written (1,024 bytes). pass.report:
  *   outcome <window_complete|guest_stop|guest_complete|budget_exhausted|unknown_image|z80_code_mismatch|z80_stop|io_error>
  *   frames <virtual frames reached>      dispatches <retired dispatches>
+ *   sound_fault z80_code_mismatch <epochs seen> <master ticks>     (only when the Z80 was isolated by a structural mutation)
  *   epoch <ordinal> <64 hex: activation signature> <extent count>      (one line per epoch, activation order)
  */
 #include <errno.h>
@@ -76,7 +77,7 @@ static void pass_on_unknown(void *context, uint32_t epoch_ordinal, const uint8_t
     g_pass.io_error = 1;
 }
 
-static int pass_write_report(const char *outcome, uint64_t frames, uint64_t dispatches) {
+static int pass_write_report(const char *outcome, uint64_t frames, uint64_t dispatches, const GenesisZ80Machine *machine) {
   char path[1024];
   FILE *file;
   uint32_t index, byte;
@@ -85,6 +86,9 @@ static int pass_write_report(const char *outcome, uint64_t frames, uint64_t disp
   file = fopen(path, "wb");
   if (file == NULL) return 1;
   fprintf(file, "outcome %s\nframes %llu\ndispatches %llu\n", outcome, (unsigned long long)frames, (unsigned long long)dispatches);
+  if (genesis_z80_machine_sound_faulted(machine))  /* the Z80 was isolated (contract section 18); the run continued */
+    fprintf(file, "sound_fault z80_code_mismatch %u %llu\n", (unsigned)machine->sound_fault_epoch,
+            (unsigned long long)machine->sound_fault_master_ticks);
   for (index = 0U; index < g_pass.count; ++index) {
     fprintf(file, "epoch %u ", (unsigned)(index + 1U));
     for (byte = 0U; byte < 32U; ++byte) fprintf(file, "%02x", (unsigned)g_pass.epochs[index].signature[byte]);
@@ -130,7 +134,7 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
   runtime->z80_epoch.on_epoch = NULL;
   machine->on_unknown_image = NULL;
   if (g_pass.io_error || g_pass.overflow) outcome = "io_error";
-  if (pass_write_report(outcome, runtime->scheduler.master_ticks / GENESIS_NTSC_MASTER_TICKS_PER_FRAME, dispatches) != 0) exit(4);
+  if (pass_write_report(outcome, runtime->scheduler.master_ticks / GENESIS_NTSC_MASTER_TICKS_PER_FRAME, dispatches, machine) != 0) exit(4);
   if (strcmp(outcome, "io_error") == 0) exit(4);
   if (transfer.kind != GENESIS_STOP && transfer.kind != GENESIS_COMPLETE) {
     memset(&transfer, 0, sizeof(transfer));

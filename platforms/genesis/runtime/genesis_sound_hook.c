@@ -98,11 +98,12 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
       hex(digest, range_hex);
     }
     fprintf(stderr,
-            "SOUND_SUMMARY {\"epochs\":%u,\"bound_image\":%u,\"psg_writes\":%llu,\"ym_writes\":%llu,\"virtual_frames\":%llu,\"result_kind\":%d,\"stop_class\":%d,\"diagnostic\":%d,"
+            "SOUND_SUMMARY {\"epochs\":%u,\"bound_image\":%u,\"sound_fault\":%d,\"sound_fault_epoch\":%u,\"psg_writes\":%llu,\"ym_writes\":%llu,\"virtual_frames\":%llu,\"result_kind\":%d,\"stop_class\":%d,\"diagnostic\":%d,"
             "\"classes\":{\"reset_assert\":%llu,\"reset_release\":%llu,\"busreq_assert\":%llu,\"busreq_release\":%llu,\"bank_writes\":%llu,\"banked_reads\":%llu,\"ym_dac\":%llu,\"ym_dac_enable\":%llu,\"ym_key\":%llu,\"ym_timer\":%llu,\"ym_global\":%llu,\"ym_operator\":%llu,\"ym_address\":%llu},"
             "\"audio\":{\"rate_hz\":%llu,\"channels\":%u,\"frames\":%llu,\"sha256\":\"%s\",\"range_frames\":%llu,\"range_sha256\":\"%s\","
             "\"clipped\":%llu,\"changes\":%llu,\"span\":%d,\"non_silent\":%s,\"fault\":%d,\"ring_dropped\":%llu,\"pcm_file_errors\":%llu}}\n",
-            (unsigned)runtime->z80_epoch.epoch_count, (unsigned)machine->bound_ordinal,
+            (unsigned)runtime->z80_epoch.epoch_count, (unsigned)machine->bound_ordinal, (int)machine->sound_fault,
+            (unsigned)machine->sound_fault_epoch,
             (unsigned long long)(audio != NULL ? audio->psg_writes : 0U), (unsigned long long)(audio != NULL ? audio->ym_writes : 0U),
             (unsigned long long)(runtime->scheduler.master_ticks / GENESIS_NTSC_MASTER_TICKS_PER_FRAME), (int)transfer.kind,
             transfer.kind == GENESIS_STOP ? (int)transfer.stop.stop_class : 0,

@@ -285,7 +285,11 @@ project-authored; none commercial.
 
 ## 16. Build-time materialization pipeline (T008)
 
-`segarecomp build` for Genesis produces the final static program in one invocation (ADR 0073, T008 record):
+`segarecomp build` for Genesis is a single user-visible invocation with no manual dump or export step. Internally it has a bounded
+*generated-native materialization phase* that DOES execute generated-native guest code (the pass program: the M68K AOT, the Z80 images known
+so far and the shared devices run headless from reset) to discover the Z80 images; that is observation of the program, not a model of it.
+The final executable contains only AOT code: it performs no materialization, learns no image, decodes no opcode and carries no JIT or
+interpreter. A later static image producer (SEG-028/029/030) may replace the pass; SEG-031 does not solve materialization. Steps (ADR 0073, T008 record):
 
 1. Stable objects are compiled once: the generated M68K units, the runtime, the Z80 machine, the shared PSG, the vendored ymfm YM2612 with the
    C++-runtime shim (the C++ driver is `<cc> c++` derived from the C driver, or `--cxx`/`--cxx-arg`), and the sound attach point.
@@ -296,13 +300,14 @@ project-authored; none commercial.
    first run with no unknown epoch; one confirming run must reproduce the outcome class, frame count and ordered epoch identities.
 3. The final program links the same objects with the production hook; every bound and nondeterminism violation is a typed build failure
    (`z80_image_bound_exceeded`, `materialization_budget_exhausted`, `materialization_nondeterministic`, `z80_image_compile_failed`,
-   `materialization_no_convergence`, `z80_code_mismatch`, `z80_execution_unsupported`, `materialization_pass_failed`) with no executable.
+   `materialization_no_convergence`, `z80_execution_unsupported`, `materialization_pass_failed`) with no executable. The one exception is a
+   structural Z80 code mutation (`z80_code_mismatch`), which degrades the sound capability instead (section 18).
 4. `status.json` records the outcome, image/epoch/run counts, frames reached, unit counts, generated/object/executable bytes and stage times.
    `--keep-work 1` retains `obj/` and the emitted Z80 C for falsification tooling.
 
 Epochs after the observation window, and epochs that depend on input, surface at run time as `z80_unknown_image`. Z80 code that patches only the displacement/immediate
 operands of unchanged instruction forms is supported (section 6, T012); Z80 code that changes a structurally defining byte stops the pass
-with `z80_code_mismatch`: a workload with such a driver does not build until a contract amendment defines structural variants.
+with `z80_code_mismatch`: the Z80 is isolated (section 18) and the workload builds with Genesis audio degraded until a contract amendment defines structural variants.
 
 ## 17. Mixer, PCM artifact and viewer presentation (T009; ADR 0075)
 
@@ -331,3 +336,36 @@ derived macros in `genesis_mixer.h`):
   `genesis_audio_present.c` (ADR 0070 policy: <= 4,410 queued frames, overrun/underrun/refused/discarded counters, mute) and a one-way SDL3
   audio stream (`viewer_sdl3.c`, stereo S16LE 44,100 Hz). Nothing flows back; `SEGARECOMP_VIEWER_MUTE=1` or a failed device open leaves the viewer
   silent. The viewer prints `VIEWER_AUDIO_SUMMARY` (frames, digest, clip count, presenter counters) on exit.
+
+## 18. Sound-CPU fault isolation (structural code mutation)
+
+Only the Z80 sound CPU is unsupported by a structural code mutation (section 6); the M68K, VDP, input and the devices are not. The machine therefore
+has a permanent, machine-private `sound_fault` latch (`GenesisZ80Machine`), set only when `z80_run` reports `z80_code_mismatch`. Every other typed
+Z80 or view outcome (unknown image, mutable code, no owner, unmapped Z80 view access, bank target, unsupported acknowledge) is unchanged and stops the machine.
+
+Faulted state, frozen semantics:
+
+1. **No Z80 execution, no Z80 clock.** `run_to` returns at once: no instruction runs, no INT is presented, Z80 time is not advanced, no YM2612 or PSG write
+   originates from the Z80, no device is fabricated or acknowledged on its behalf. The mutated bytes are never decoded or guessed.
+2. **BUSREQ/BUSACK is unchanged.** The grant is `BUSREQ asserted AND /RESET released` (section 4.2); it never depended on the Z80 execution state (no
+   modelled instruction-boundary latency), so a quiesced Z80 grants at once and reads stay deterministic. RESET/BUSREQ edges, the epoch tracker and
+   the bank register behave as documented; a /RESET assert or release still resets the YM2612 (a device effect).
+3. **M68K-visible state keeps its behaviour.** Z80 RAM reads and writes through the granted bus, M68K-originated YM2612/PSG accesses and the bank register are
+   the ordinary mapped accesses. Devices continue on their own clocks (PCM may be silent or degraded; no audio claim is made).
+4. **Permanent for the run.** A /RESET release does not run `z80_reset`; a later image epoch (also of an unregistered image) neither binds an image nor stops with
+   `z80_unknown_image`. Reactivation after a proven-safe image is a future decision and is not implemented.
+5. **Observable.** `SOUND_SUMMARY` carries `sound_fault` (the diagnostic, 0 = healthy) and `sound_fault_epoch`; the state digest includes the fault only when set
+   (a healthy digest is unchanged).
+
+Build interaction: the pass program continues after the fault, reports `sound_fault z80_code_mismatch <epochs> <master ticks>` and discovery stops by
+construction (later epochs are never looked up). The confirming run must reproduce the same fault epoch and time (otherwise
+`materialization_nondeterministic`). The build succeeds with `status.json` `genesis_audio = degraded`, `z80_audio_outcome = structural_code_mismatch`
+(and `z80.sound_fault_epochs`/`z80.sound_fault_frame`), `@result ok ... genesis_audio=degraded z80_audio_outcome=structural_code_mismatch`; a supported title reports
+`genesis_audio = supported`. The images found before the fault are linked.
+
+Product status distinction: a title in this state is "game execution supported through the observed route; Genesis audio degraded / Z80 structural mutation
+unsupported", never "fully supported audio".
+
+Unverified (not frozen, reported): the audible result of an abruptly silenced driver (FM notes held at their last key state), M68K code that polls a Z80-written
+RAM flag forever (it would not terminate; such a title stays unsupported and no handshake is fabricated), and whether any hardware-documented event should
+re-arm a faulted Z80 (the permanent choice is the simplest safe one).

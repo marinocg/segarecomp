@@ -202,3 +202,15 @@ immediate difference is no longer a mismatch; it is the residual class (opcode/l
 unsupported pending an operator decision. **>4-byte audit:** none of the five workloads executed a RAM-backed start of more than four logical bytes
 (no `z80_mutable_code` outcome in any converging run; the fifth stopped on the structural mismatch before any such start), so the typed limitation is kept
 without a workload that needs it.
+
+## Sound-CPU fault isolation amendment (SEG-032, supersedes the "fail the whole build on `z80_code_mismatch`" consequence)
+
+`segarecomp build` is a single user-visible invocation with an internal bounded generated-native materialization phase that DOES execute generated-native
+guest code; there is no manual dump/export. The final executable contains only AOT code: it performs no materialization, learns no image, decodes no opcode, and
+has no JIT or interpreter. Later SEG-028/029/030 may provide a static image producer; SEG-031 does not solve materialization.
+
+A structural Z80 code mutation no longer fails the whole build or stops the whole machine. It latches a permanent sound-CPU fault (contract section 18): the Z80
+neither executes nor writes devices, BUSREQ/RESET/bank/M68K device accesses keep their documented behaviour, a reset or re-upload does not clear the fault, and the
+build reports `genesis_audio = degraded` / `z80_audio_outcome = structural_code_mismatch`. All other typed failures (unknown image, bound exceeded, budget, nondeterminism,
+compile failure, bank target, unmapped view access) stay whole-build fail-closed. Product status of such a title: game execution supported through the observed route;
+Genesis audio degraded; never fully supported audio.

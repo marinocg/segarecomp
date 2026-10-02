@@ -31,11 +31,21 @@ typedef struct GenesisZ80Machine {
   uint32_t last_bound;                    /* the image bound by the previous epoch (a restart re-binds it) */
   uint64_t cycle_base_master_ticks;       /* master time at which this Z80 run's cycle counter was 0 */
   GenesisDiagnosticCategory view_stop;    /* 0, or the first typed view stop latched since the last clear */
+  /* Sound-CPU fault isolation (contract section 18). Latched once, never cleared for the run: a structural Z80 code mutation
+   * (z80_code_mismatch) disables only the Z80; the M68K, VDP, input and the devices continue. 0 = healthy. */
+  GenesisDiagnosticCategory sound_fault;
+  uint32_t sound_fault_epoch;             /* image epochs seen when the fault latched */
+  uint64_t sound_fault_master_ticks;      /* guest master time at the fault (the Z80 clock position) */
   GenesisZ80UnknownImageFunction on_unknown_image;
   void *unknown_image_context;
   /* Opt-in aggregate evidence (counts only; never an address or value; SEG-032-T010). */
   uint64_t count_reset_assert, count_reset_release, count_busreq_assert, count_busreq_release, count_bank_writes, count_banked_reads;
 } GenesisZ80Machine;
+
+/* Non-zero once the sound CPU is faulted (isolated). */
+static inline int genesis_z80_machine_sound_faulted(const GenesisZ80Machine *machine) {
+  return machine->sound_fault != (GenesisDiagnosticCategory)0;
+}
 
 /* Zeroes the machine, installs the host callbacks and puts the Z80 in its architectural reset state. The RAM is the
  * runtime's `devices.z80_bus.z80_ram`; the bank register is `devices.z80_bus.bank`. */

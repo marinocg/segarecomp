@@ -117,6 +117,38 @@ int main() {
     const auto s = run_script(r, registry);
     check(s.ok() && s.end == z80::PassOutcome::guest_stop && s.frames == 54, "guest stop inside the window: converged, frames reached recorded");
   }
+  {  // structural code mutation: the sound CPU is isolated; the build converges degraded and discovery stops
+    const z80::Epoch a = snapshot(1);
+    const auto ea = pass_epoch(a);
+    const auto faulted = [&](std::uint32_t epochs, std::uint64_t ticks) {
+      z80::PassObservation obs = done_run({ea});
+      obs.sound_fault = z80::SoundFault{epochs, ticks};
+      return obs;
+    };
+    Scripted r;
+    r.script = {unknown_run({}, a), faulted(1, 1000), faulted(1, 1000)};
+    z80::Registry registry;
+    const auto s = run_script(r, registry);
+    check(s.ok() && s.sound_fault && s.sound_fault->epochs == 1 && s.sound_fault->master_ticks == 1000 && s.images == 1,
+          "a fault-isolated run converges degraded with the images known so far");
+    Scripted healthy;
+    healthy.script = {unknown_run({}, a), done_run({ea}), done_run({ea})};
+    z80::Registry registry_healthy;
+    const auto h = run_script(healthy, registry_healthy);
+    check(h.ok() && !h.sound_fault, "a fault-free run is not degraded");
+    Scripted r2;
+    r2.script = {unknown_run({}, a), faulted(1, 1000), faulted(1, 1001)};
+    z80::Registry registry2;
+    check(run_script(r2, registry2).failure == z80::Failure::materialization_nondeterministic, "a confirming run faulting at a different time: materialization_nondeterministic");
+    Scripted r3;
+    r3.script = {unknown_run({}, a), faulted(1, 1000), done_run({ea})};
+    z80::Registry registry3;
+    check(run_script(r3, registry3).failure == z80::Failure::materialization_nondeterministic, "a confirming run that does not fault: materialization_nondeterministic");
+    Scripted r4;
+    r4.script = {unknown_run({}, a), done_run({ea}), faulted(1, 1000)};
+    z80::Registry registry4;
+    check(run_script(r4, registry4).failure == z80::Failure::materialization_nondeterministic, "a confirming run that newly faults: materialization_nondeterministic");
+  }
   {  // nondeterminism: the confirming run differs
     const z80::Epoch a = snapshot(1), b = snapshot(2);
     const auto ea = pass_epoch(a), eb = pass_epoch(b);

@@ -48,11 +48,19 @@ struct PassEpoch {
   friend bool operator==(const PassEpoch&, const PassEpoch&) = default;
 };
 
+// The Z80 was isolated by a structural code mutation during the run (contract section 18); the run itself continued.
+struct SoundFault {
+  std::uint32_t epochs = 0;         // image epochs seen when the fault latched
+  std::uint64_t master_ticks = 0;   // guest master time of the fault
+  friend bool operator==(const SoundFault&, const SoundFault&) = default;
+};
+
 struct PassObservation {
   PassOutcome outcome = PassOutcome::failed;
   std::uint32_t frames = 0;           // virtual frames reached
   std::vector<PassEpoch> epochs;      // every image epoch seen, activation order
   std::optional<Epoch> unknown;       // present exactly for PassOutcome::unknown_image
+  std::optional<SoundFault> sound_fault;  // present when the Z80 sound CPU was isolated (structural_code_mismatch)
 };
 
 // Which operation of PassRunner::prepare failed (a short stable name such as "emit", "unit-compile", "pass-link") and a bounded,
@@ -96,6 +104,7 @@ struct MaterializationSummary {
   std::size_t epochs = 0;           // image epochs of the confirmed run
   std::uint32_t frames = 0;         // virtual frames reached by the confirmed run
   PassOutcome end = PassOutcome::failed;
+  std::optional<SoundFault> sound_fault;  // set: Genesis audio degraded (z80_audio_outcome = structural_code_mismatch)
   [[nodiscard]] bool ok() const noexcept { return failure == Failure::none; }
 };
 

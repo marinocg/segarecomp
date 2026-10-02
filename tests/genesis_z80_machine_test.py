@@ -11,7 +11,10 @@ retirement hook. Proved:
   * the runnable transition after an upload activates the image by its activation signature: the same Z80 PC runs different code
     under two image identities (markers $11 / $22), with dirty carry-over data in between, and an unknown signature is the typed
     z80_unknown_image;
-  * RAM data mutation with valid code continues; executable-byte mutation is the typed z80_code_mismatch (no re-decode);
+  * RAM data mutation with valid code continues; an executable-byte mutation (z80_code_mismatch) permanently isolates the sound CPU
+    (contract section 18): nothing re-decodes the bytes, no further Z80 instruction executes or writes a device, the M68K, the BUSREQ/RESET
+    registers, M68K-originated YM2612/PSG writes and Z80 RAM accesses keep their documented behaviour, a reset or re-upload (even of an
+    unregistered image) does not clear the fault, and the isolation is sync-cadence invariant;
   * the VBlank INT line reaches the Z80 only while IFF1 is set (program Z never takes it);
   * determinism and sync-cadence invariance: the final Z80 state digest, counters and cycles are identical at retirement-hook
     quanta 1, 512 and 4096 and across repeated runs;
@@ -62,7 +65,26 @@ def assemble(marker, ei=True):
     return bytes(image.get(i, 0) for i in range(length)), labels["loop"]
 
 
-PROGRAMS = {"X": assemble(0x11)[0], "Y": assemble(0x22)[0], "Z": assemble(0x33, ei=False)[0]}
+FAULT_TEMPLATE = """
+.org 0x0000
+        im 1
+        ld sp,0x1F80
+        ld hl,0x1000
+loop:   inc (hl)
+        ld a,0x9F
+        ld (0x7F11),a
+        jr loop
+"""
+
+
+def assemble_fault():
+    image, labels = sms.Assembler(FAULT_TEMPLATE).assemble()
+    length = max(image) + 1
+    return bytes(image.get(i, 0) for i in range(length)), labels["loop"]
+
+
+PROGRAMS = {"X": assemble(0x11)[0], "Y": assemble(0x22)[0], "Z": assemble(0x33, ei=False)[0], "F": assemble_fault()[0]}
+FAULT_LOOP_OFFSET = assemble_fault()[1]  # the structural-mutation target (`inc (hl)`)
 LOOP_OFFSET = assemble(0x11)[1]  # the `inc (hl)` of the counting loop
 
 
@@ -143,7 +165,7 @@ def main():
         tc = z.Toolchain(cc, pathlib.Path("unused-emitter"), opt="-O0", cache=False)
         harness = root / "tests" / "tools" / "genesis_z80_machine_harness.c"
         exes = {}
-        for tag, names in (("full", ["X", "Y", "Z"]), ("only_y", ["Y"])):
+        for tag, names in (("full", ["X", "Y", "Z", "F"]), ("only_y", ["Y"]), ("only_f", ["F"])):
             spec = tmp / (tag + ".spec")
             spec.write_text(registry_spec(names))
             done = subprocess.run([registry_emitter, str(spec), str(tmp / tag), "genesis_z80"], text=True, capture_output=True)
@@ -157,10 +179,10 @@ def main():
             assert exe is not None, message
             exes[tag] = exe
 
-        def run(script, tag="full", quantum=None):
+        def run(script, tag="full", quantum=None, audio=False):
             path = tmp / "script.txt"
             path.write_text(script.text())
-            cmd = [str(exes[tag]), str(path)] + ([str(quantum)] if quantum else [])
+            cmd = [str(exes[tag]), str(path), str(quantum) if quantum else "-"] + (["audio"] if audio else [])
             out = subprocess.run(cmd, text=True, capture_output=True, check=True).stdout
             return parse(out) + (out,)
 
@@ -254,16 +276,83 @@ def main():
         s.read(ZRAM + 0x1000)
         reads, states, stop, _ = run(s)
         check(stop is None and reads[0][1] >= 0x40, "RAM data mutation while the code stays valid: the Z80 continues with the new data")
+        # ---- structural mutation: the sound CPU is isolated, the machine continues (contract section 18) ----
+        def fault_script():
+            s = Script()
+            s.epoch("F")
+            s.advance(300)
+            s.busreq(True)
+            s.read(ZRAM + 0x1000)                      # R0: counter before the mutation (the Z80 ran)
+            s.raw("psgstate")
+            s.write(ZRAM + FAULT_LOOP_OFFSET, 0x35)    # inc (hl) -> dec (hl): a structural mutation
+            s.busreq(False)
+            s.advance(300)
+            s.state()                                  # S0: faulted
+            s.busreq(True)
+            s.read16(BUSREQ)                           # R1: granted at once
+            s.read(ZRAM + 0x1000)                      # R2: counter
+            s.raw("psgstate")
+            s.state()                                  # S1
+            s.busreq(False)
+            s.advance(2000)
+            s.busreq(True)
+            s.read(ZRAM + 0x1000)                      # R3: unchanged: nothing executes
+            s.read(ZRAM + 0x1F00)                      # R4: M68K-visible Z80 RAM keeps working
+            s.write(ZRAM + 0x1F00, 0x5A)
+            s.read(ZRAM + 0x1F00)                      # R5: 0x5A
+            s.raw("psgstate")
+            s.state()                                  # S2: Z80 frozen
+            s.write(0xA04000, 0x22)                    # M68K-originated YM2612 writes keep the ordinary mapping
+            s.write(0xA04001, 0x00)
+            s.raw("ymstate")
+            s.write(0xC00011, 0x9F)                    # M68K-originated PSG write
+            s.raw("psgstate")                          # PSG writes +1
+            s.busreq(False)
+            s.advance(500)
+            s.reset(False)                             # reset and re-upload of the original image do not clear the fault
+            s.read16(BUSREQ)                           # R6: not granted (BUSREQ released)
+            s.epoch("F")
+            s.advance(1000)
+            s.busreq(True)
+            s.read16(BUSREQ)                           # R7: granted
+            s.read(ZRAM + 0x1000)                      # R8: still unchanged (the reset did not restart the Z80)
+            s.raw("psgstate")
+            s.state()                                  # S3
+            s.busreq(False)
+            s.epoch("Y")                               # an image absent from this registry: no unknown-image stop after the fault
+            s.advance(1000)
+            s.busreq(True)
+            s.read(ZRAM + 0x1002)
+            s.state()                                  # S4
+            return s
+
+        reads, states, stop, out = run(fault_script(), tag="only_f", audio=True)
+        psg = [int(m.group(1)) for m in re.finditer(r"^PSG [0-9a-f]+ writes=(\d+)", out, re.M)]
+        check(stop is None, "a structural executable-byte mutation does not stop the machine (the sound CPU is isolated)")
+        check(reads[0][1] > 0 and psg[0] > 0, "before the mutation the Z80 ran and wrote the PSG")
+        check(states[0]["fault"] != "0" and states[0]["view_stop"] == "0", "after the mutation the sound CPU is latched as faulted (typed diagnostic)")
+        check(reads[1] == (BUSREQ, 0) and reads[7] == (BUSREQ, 0), "BUSREQ is answered by the documented ownership model: granted at once, no fabricated Z80 behaviour")
+        check(reads[6] == (BUSREQ, 0x100), "with BUSREQ released the grant bit reads not-granted")
+        check(reads[2][1] == reads[3][1] == reads[8][1], "no further Z80 instruction executes after the fault (counter frozen across time, reset and re-upload)")
+        check(psg[1] == psg[2] and psg[4] == psg[3], "Z80-originated PSG writes cease after the fault")
+        check(reads[4][1] == 0 and reads[5][1] == 0x5A, "M68K-visible Z80 RAM accesses keep their documented behaviour")
+        check(psg[3] == psg[2] + 1, "an M68K-originated PSG write follows the ordinary mapped behaviour")
+        check(re.search(r"^YM digest=\w+ samples=\d+ fnv=\w+ writes=2$", out, re.M) is not None, "M68K-originated YM2612 writes keep the ordinary mapped behaviour (2 writes, none from the faulted Z80)")
+        check(states[1]["z80"] == states[2]["z80"] and states[1]["cycles"] == states[2]["cycles"] and states[2]["pc"] == states[1]["pc"], "the faulted Z80 state is frozen")
+        check(states[3]["fault"] == states[0]["fault"] and states[3]["z80"] == states[2]["z80"], "a reset and re-upload do not clear the fault")
+        check(states[4]["fault"] == states[0]["fault"] and states[4]["bound"] == "0", "an epoch with an unregistered image after the fault is not a stop and binds nothing")
+        again = run(fault_script(), tag="only_f", audio=True)
+        check(again[3] == out, "the isolation is deterministic across repeated runs")
+        cadence = {q: run(fault_script(), tag="only_f", quantum=q, audio=True) for q in (1, 512, 4096)}
+        keys = [(r[0], [st["z80"] for st in r[1][1:]]) for r in cadence.values()]  # S0 is taken before the lazy follower synchronized
+        check(keys[0] == keys[1] == keys[2], "the isolation is sync-cadence invariant (reads and Z80 digests at quanta 1, 512, 4096)")
+        # a healthy image is never reported as faulted; M68K YM2612 writes are unaffected by the Z80 state
         s = Script()
         s.epoch("X")
-        s.advance(300)
-        s.busreq(True)
-        s.write(ZRAM + LOOP_OFFSET, 0x35)   # inc (hl) -> dec (hl)
-        s.busreq(False)
-        s.advance(300)
+        s.advance(1000)
         s.state()
         reads, states, stop, _ = run(s)
-        check(stop == (STOP_CLASS_Z80, DIAG_MISMATCH), "an executable byte changed while the Z80 is held: typed z80_code_mismatch, never a re-decode")
+        check(stop is None and states[0]["fault"] == "0", "a supported image is not marked faulted")
         # ---- interrupts ----
         results = {}
         for name in ("X", "Z"):
