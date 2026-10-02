@@ -1109,6 +1109,8 @@ add_test(NAME analysis_core_test COMMAND analysis_core_test)
 add_test(NAME analysis_core_boundary_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/analysis_core_boundary_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST analysis_core_test analysis_core_boundary_test APPEND PROPERTY LABELS full fast)
+include(${CMAKE_CURRENT_SOURCE_DIR}/analysis_m68k_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/analysis_z80_tests.cmake)
 # The real consumer route end to end (fixed point, link, run, falsification): the slowest Genesis Z80 test, `full` only.
 # CI wall-clock: one CTest entry per independent case group of the script (see its docstring); the union is the whole matrix.
 add_test(NAME genesis_z80_build_pipeline_test COMMAND ${Python3_EXECUTABLE}
