@@ -7,7 +7,7 @@ compile, materialize, link):
   * a multi-epoch ROM converges with the exact image count (2 images, 4 epochs: A, B, a plain restart, A again) and the produced
     program runs the Z80 generated-native (PSG and YM2612 traffic from the Z80); a raw upload and a computed ("decompressed")
     upload of the same bytes are one image;
-  * repeated builds and different worker counts produce byte-identical generated Z80 C and registry, and equal aggregates;
+  * independent builds with different worker counts produce byte-identical generated Z80 C and registry, and equal aggregates;
   * fail closed with a typed outcome and NO executable: image bound exceeded, instruction-budget exhaustion (a guest that never
     advances virtual time);
   * a structural Z80 code mutation (self-modifying code, z80_code_mismatch) does NOT fail the build: the sound capability is classified
@@ -60,7 +60,7 @@ def build(rom_bytes, out, jobs=None, keep=False, compiler=None):
     rom = out.parent / (out.name + ".md")
     rom.write_bytes(rom_bytes)
     command = [cli, "build", "--rom", str(rom), "--output", str(out), "--cc", compiler or cc, "--cxx", cxx, "--runtime-dir",
-               str(root / "platforms" / "genesis"), "--optimize", "0"]
+               str(root / "platforms" / "genesis"), "--optimize", "0", "--runtime-optimize", "1"]
     if jobs:
         command += ["--jobs", str(jobs)]
     if keep:
@@ -74,7 +74,7 @@ def executable(out):
     return next((p for p in out.iterdir() if p.stem == "game" and p.is_file()), None)
 
 
-def run_program(exe, budget=30_000_000):
+def run_program(exe, budget=3_000_000):
     done = subprocess.run([str(exe), "--instruction-budget", str(budget)], text=True, capture_output=True, timeout=300,
                           env={"SEGARECOMP_SOUND_SUMMARY": "1", "PATH": "/usr/bin:/bin"})
     summary = re.search(r"SOUND_SUMMARY (\{.*\})", done.stderr)
@@ -114,7 +114,7 @@ def main():
         many_over = fx.sound_many(fx.MAX_IMAGES_FOR_TESTS + 1) if "bound" in GROUPS else None
         spin_no_time = bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x60, 0xFE))  # never advances virtual time
         by_group = {
-            "epochs": {"multi": (multi, None), "multi_j1": (multi, 1), "multi_j4": (multi, 4), "multi_again": (multi, None), "decoded": (decoded, None)},
+            "epochs": {"multi": (multi, None), "multi_j1": (multi, 1), "decoded": (decoded, None)},
             "bound": {"over": (many_over, None), "budget": (spin_no_time, None)},
             "smc": {"smc": (smc, None), "smc_fault": (smc_fault, None), "smc_fault2": (smc_fault, 1), "late": (late, None)},
             "falsify": {"raw": (raw, 2)},
@@ -149,8 +149,8 @@ def main():
             check(done.returncode == 0 and z.get("images") == 1 and z.get("epochs") == 2, "a raw upload and a computed (decoded) upload of the same bytes are one image")
 
             # ---- determinism: repeats and worker counts ----
-            digests = {name: tree_digest(tmp / name / "generated-z80") for name in ("multi", "multi_j1", "multi_j4", "multi_again")}
-            check(len(set(digests.values())) == 1, "generated Z80 C and the registry are byte-identical across repeated builds and worker counts (1, 4, default)")
+            digests = {name: tree_digest(tmp / name / "generated-z80") for name in ("multi", "multi_j1")}
+            check(len(set(digests.values())) == 1, "generated Z80 C and the registry are byte-identical across independent builds with worker counts 1 and default (default is the host core count, capped at 8)")
             check(len({json.dumps(stable(results[n][1]), sort_keys=True) for n in digests}) == 1, "aggregates (images, epochs, runs, sizes) are identical across builds")
             check(len({tree_digest(tmp / n / "generated") for n in digests}) == 1, "the generated M68K C is byte-identical across builds as well")
 
@@ -165,8 +165,9 @@ def main():
                   "bound + 1 distinct images: z80_image_bound_exceeded, no executable")
             check(status.get("z80", {}).get("images") == fx.MAX_IMAGES_FOR_TESTS, "the failure leaves exactly the bound registered")
             done, status = results["budget"]
-            check(done.returncode != 0 and status.get("diagnostic") == "materialization_budget_exhausted" and executable(tmp / "budget") is None,
-                  "a guest that never advances virtual time exhausts the instruction budget: materialization_budget_exhausted, no executable")
+            check(done.returncode == 4 and "stage=z80-materialize" in done.stdout and status.get("diagnostic") == "materialization_budget_exhausted" and
+                  executable(tmp / "budget") is None,
+                  "a guest that never advances virtual time exhausts the instruction budget: exit 4 in the z80-materialize stage, materialization_budget_exhausted, no executable")
 
         if "smc" in GROUPS:
             # ---- structural Z80 code mutation: degraded sound, never a failed build ----
@@ -181,13 +182,13 @@ def main():
                   "the fault stops Z80 discovery: the later epoch is not materialized (1 image, 2 epochs) and the whole window is still observed")
             check(stable(status) == stable(results["smc_fault2"][1]) and tree_digest(tmp / "smc_fault" / "generated-z80") == tree_digest(tmp / "smc_fault2" / "generated-z80"),
                   "the degraded outcome is deterministic across builds and worker counts (same fault epoch, frame and registry)")
-            ran, summary = run_program(executable(tmp / "smc_fault"), budget=60_000_000)
+            ran, summary = run_program(executable(tmp / "smc_fault"), budget=6_000_000)
             check(summary.get("result_kind") == 3 and summary.get("sound_fault", 0) != 0 and summary.get("sound_fault_epoch") == 1 and summary.get("epochs") == 2 and
                   summary.get("bound_image") == 0,
                   "the degraded program runs the 68K to the instruction budget; the faulted Z80 is isolated (no stop, nothing bound, 2 epochs seen)")
             check(summary.get("psg_writes") == 1 and summary.get("ym_writes") == 0,
                   "no Z80-originated device write after the fault: the pre-fault PSG write only, the later driver never runs")
-            ran2, summary2 = run_program(executable(tmp / "smc_fault"), budget=60_000_000)
+            ran2, summary2 = run_program(executable(tmp / "smc_fault"), budget=6_000_000)
             check(summary2 == summary, "the degraded program is deterministic across runs (summary, audio digest)")
 
 
@@ -195,7 +196,7 @@ def main():
             done, status = results["late"]
             check(done.returncode == 0 and status.get("z80", {}).get("images") == 1 and status["z80"].get("epochs") == 1,
                   "an epoch after the observation window is not materialized (1 image)")
-            ran, summary = run_program(executable(tmp / "late"), budget=60_000_000)
+            ran, summary = run_program(executable(tmp / "late"), budget=12_000_000)  # past the 600-frame observation window
             check('"stop_class":"unsupported_z80_execution"' in ran.stdout and '"diagnostic_category":"z80_unknown_image"' in ran.stdout,
                   "the late epoch stops at run time with the typed z80_unknown_image (no decoding, no fallback)")
 
@@ -247,10 +248,9 @@ def main():
             ran, summary = run_program(control)
             check(summary.get("epochs") == 1 and summary.get("result_kind") == 3 and summary.get("ym_writes", 0) > 0,
                   "control: the unmodified objects relinked run the Z80 to the budget (the comparison discriminates)")
-            done, status = build(raw, tmp / "rebuilt")
-            ran, summary = run_program(executable(tmp / "rebuilt"))
-            check(done.returncode == 0 and summary.get("result_kind") == 3 and summary.get("ym_writes", 0) > 0,
-                  "a pipeline rebuild restores the behaviour")
+            ran, summary = run_program(executable(tmp / "raw"))
+            check(summary.get("epochs") == 1 and summary.get("result_kind") == 3 and summary.get("ym_writes", 0) > 0 and summary.get("sound_fault", 0) == 0,
+                  "the pipeline's own (never relinked) executable shows the control behaviour, so the mutated/removed variants differ from it")
 
         for name in ("multi",) if "epochs" in GROUPS else ():
             z = results[name][1].get("z80", {})

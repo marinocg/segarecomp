@@ -25,6 +25,7 @@ window, every entry byte-guarded) and as the immutable reference (invariant wind
     bytes differs only by the guard.
 usage: z80_live_guard_test.py <z80_image_emitter> <cc> <source-root>
 """
+import concurrent.futures
 import hashlib
 import pathlib
 import re
@@ -148,13 +149,21 @@ def main():
         programs["P1"] = bytes(ram1)
 
         # ---- equivalence with the immutable reference, several owner-group modes ----
-        built = {}
+        # The immutable reference is built once per program (default grouping) and compared with the live image of every grouping: the
+        # reference semantics do not depend on the grouping (the group modes are proved equal by z80_owner_group_differential_test).
+        tcs = {group: z.Toolchain(cc, pathlib.Path(emitter), opt="-O0", cache=False, owner_group=group) for group in (1, 128)}
+        plan = [("live", name, group) for name in programs for group in (1, 128)] + [("ref", name, 128) for name in programs]
+
+        def build_one(item):
+            kind, name, group = item
+            return build(tcs[group], programs[name], kind == "live", tmp / ("%s_%s_%d" % (kind, name, group)))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            exes = dict(zip(plan, pool.map(build_one, plan)))
+        built = {(name, group): (exes[("live", name, group)], exes[("ref", name, 128)]) for name in programs for group in (1, 128)}
         for name, ram in programs.items():
             for group in (1, 128):
-                tcg = z.Toolchain(cc, pathlib.Path(emitter), opt="-O0", cache=False, owner_group=group)
-                live_exe = build(tcg, ram, True, tmp / ("live_%s_%d" % (name, group)))
-                ref_exe = build(tcg, ram, False, tmp / ("ref_%s_%d" % (name, group)))
-                built[(name, group)] = (live_exe, ref_exe)
+                live_exe, ref_exe = built[(name, group)]
                 extra = ["int-after", "3"] if name == "P4" else []
                 live_lines, live_end = run(live_exe, ram, 60, *extra, workdir=tmp)
                 ref_lines, ref_end = run(ref_exe, ram, 60, *extra, "immutable", workdir=tmp)

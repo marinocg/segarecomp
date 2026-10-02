@@ -183,6 +183,11 @@ struct Options {
   // 0, 1 or 2 for every unit. -O2 stays the default: after the Z80 owner grouping and shared bodies (SEG-033) -O1 saved at most
   // 4% of compile time on real images for a 4% slower generated program, so no split generated/handwritten policy exists.
   std::string optimize = "2";
+  // Genesis only: optimization of the stable set (generated M68K units, handwritten runtime, PSG, vendored YM2612) when it should differ
+  // from the generated Z80 image units. The Z80 image units are megabytes of machine-formatted C whose compile time dominates a build,
+  // while the stable set is small but is what the build-time materialization pass spends its run time in; `--optimize 0
+  // --runtime-optimize 1` keeps the first cheap and speeds the second up. Empty: same as --optimize. Output C is unaffected.
+  std::string runtime_optimize;
   unsigned jobs = 0;
   // Master System routing (SEG-009-T010). `platform` empty: classify the image; the mapper is never inferred.
   std::string platform;                 // "", "genesis" or "master-system"
@@ -258,11 +263,13 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--mapper") options.mapper = value;
     else if (key == "--mapper-manifest") options.mapper_manifest = fs::path(value);
     else if (key == "--optimize") options.optimize = value;
+    else if (key == "--runtime-optimize") options.runtime_optimize = value;
     else if (key == "--jobs") options.jobs = static_cast<unsigned>(std::max(0, std::atoi(value.c_str())));
     else return std::nullopt;
   }
   if (!have_rom || !have_output || !have_runtime || options.cc.empty()) return std::nullopt;
   if (options.optimize != "0" && options.optimize != "1" && options.optimize != "2") return std::nullopt;
+  if (!options.runtime_optimize.empty() && options.runtime_optimize != "0" && options.runtime_optimize != "1" && options.runtime_optimize != "2") return std::nullopt;
   if (options.sdl3_include.has_value() != options.sdl3_lib.has_value()) return std::nullopt;
   if (!options.platform.empty() && options.platform != "genesis" && options.platform != "master-system") return std::nullopt;
   return options;
@@ -593,6 +600,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     job.source = source;
     job.object = build.object_dir / (name + ".o");
     job.extra = std::move(extra);
+    if (!options.runtime_optimize.empty()) job.extra.push_back("-O" + options.runtime_optimize);  // the last -O wins over the base flags
     job.cxx = cxx;
     stable.push_back(job);
     set.push_back(job.object);

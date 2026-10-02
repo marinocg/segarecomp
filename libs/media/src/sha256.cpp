@@ -5,7 +5,7 @@
 
 namespace segarecomp {
 namespace {
-constexpr std::array<std::uint32_t, 64> k{
+constexpr std::uint32_t k[64] = {
     0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
     0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
     0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
@@ -15,33 +15,35 @@ constexpr std::array<std::uint32_t, 64> k{
     0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
 
-[[nodiscard]] constexpr std::uint32_t rotr(std::uint32_t value, unsigned amount) noexcept {
-  return (value >> amount) | (value << (32U - amount));
-}
+// Plain arrays and a macro rotate: this hashes whole generated-source trees on every Z80 materialization iteration, and the unoptimized
+// (Debug) builds the test suite uses pay a call per std::array::operator[] and per rotate. The arithmetic is the FIPS 180-4 one.
+#define SEGARECOMP_ROTR(value, amount) (((value) >> (amount)) | ((value) << (32U - (amount))))
 
 void compress(std::array<std::uint32_t, 8> &state, const std::uint8_t *block) {
-  std::array<std::uint32_t, 64> w{};
+  std::uint32_t w[64];
+  std::uint32_t v[8];
   for (std::size_t i = 0; i < 16; ++i)
     w[i] = (std::uint32_t{block[i * 4]} << 24U) | (std::uint32_t{block[i * 4 + 1]} << 16U) |
            (std::uint32_t{block[i * 4 + 2]} << 8U) | std::uint32_t{block[i * 4 + 3]};
   for (std::size_t i = 16; i < 64; ++i) {
-    const auto s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3U);
-    const auto s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10U);
+    const std::uint32_t s0 = SEGARECOMP_ROTR(w[i - 15], 7U) ^ SEGARECOMP_ROTR(w[i - 15], 18U) ^ (w[i - 15] >> 3U);
+    const std::uint32_t s1 = SEGARECOMP_ROTR(w[i - 2], 17U) ^ SEGARECOMP_ROTR(w[i - 2], 19U) ^ (w[i - 2] >> 10U);
     w[i] = w[i - 16] + s0 + w[i - 7] + s1;
   }
-  auto v = state;
+  for (std::size_t i = 0; i < 8; ++i) v[i] = state[i];
   for (std::size_t i = 0; i < 64; ++i) {
-    const auto s1 = rotr(v[4], 6) ^ rotr(v[4], 11) ^ rotr(v[4], 25);
-    const auto ch = (v[4] & v[5]) ^ (~v[4] & v[6]);
-    const auto t1 = v[7] + s1 + ch + k[i] + w[i];
-    const auto s0 = rotr(v[0], 2) ^ rotr(v[0], 13) ^ rotr(v[0], 22);
-    const auto maj = (v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]);
-    const auto t2 = s0 + maj;
+    const std::uint32_t s1 = SEGARECOMP_ROTR(v[4], 6U) ^ SEGARECOMP_ROTR(v[4], 11U) ^ SEGARECOMP_ROTR(v[4], 25U);
+    const std::uint32_t ch = (v[4] & v[5]) ^ (~v[4] & v[6]);
+    const std::uint32_t t1 = v[7] + s1 + ch + k[i] + w[i];
+    const std::uint32_t s0 = SEGARECOMP_ROTR(v[0], 2U) ^ SEGARECOMP_ROTR(v[0], 13U) ^ SEGARECOMP_ROTR(v[0], 22U);
+    const std::uint32_t maj = (v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]);
+    const std::uint32_t t2 = s0 + maj;
     v[7] = v[6]; v[6] = v[5]; v[5] = v[4]; v[4] = v[3] + t1;
     v[3] = v[2]; v[2] = v[1]; v[1] = v[0]; v[0] = t1 + t2;
   }
   for (std::size_t i = 0; i < 8; ++i) state[i] += v[i];
 }
+#undef SEGARECOMP_ROTR
 } // namespace
 
 std::string sha256_hex(std::span<const std::uint8_t> bytes) {

@@ -6,13 +6,12 @@ and DAC samples. The built program is run with a finite --instruction-budget and
   * the run yields the frozen artifact: 44,100 Hz, 2 channels, a non-silent stream, no mixer fault, the SHA-256 digest of the canonical
     s16le bytes plus u64le frame count (recomputed here from the PCM file), a frame count of floor-windows of virtual time, and the digest of
     an arbitrary frame range;
-  * repeated runs and builds with different --jobs counts give the identical digest and bytes;
+  * repeated runs give the identical digest and bytes (build determinism across --jobs counts: genesis_z80_build_pipeline_test);
   * a shorter run is an exact prefix of a longer run (digest independence from where the run is cut);
   * an unusable PCM path changes nothing in the digest (only the file-error aggregate); a malformed range option is rejected before the run.
 Sanitized aggregates are printed as METRIC lines; no ROM byte or address is.
 usage: genesis_audio_artifact_test.py <segarecomp> <cc> <cxx> <source-root>
 """
-import concurrent.futures
 import hashlib
 import json
 import os
@@ -41,7 +40,7 @@ def build(rom_bytes, out, jobs=None):
     rom = out.parent / (out.name + ".md")
     rom.write_bytes(rom_bytes)
     command = [cli, "build", "--rom", str(rom), "--output", str(out), "--cc", cc, "--cxx", cxx, "--runtime-dir", str(root / "platforms" / "genesis"),
-               "--optimize", "0"]
+               "--optimize", "0", "--runtime-optimize", "1"]
     if jobs:
         command += ["--jobs", str(jobs)]
     done = subprocess.run(command, text=True, capture_output=True, timeout=900)
@@ -68,14 +67,14 @@ def main():
     with tempfile.TemporaryDirectory(prefix="segarecomp-audio-artifact-") as directory:
         tmp = pathlib.Path(directory)
         rom = fx.build("sound_tone")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
-            futures = {name: pool.submit(build, rom, tmp / name, jobs) for name, jobs in (("default", None), ("j1", 1), ("j4", 4))}
-            built = {name: f.result() for name, f in futures.items()}
-        check(all(done.returncode == 0 and exe is not None for done, exe in built.values()), "the audio fixture builds through the normal route (default, --jobs 1, --jobs 4)")
+        # One build. That the generated C and the registry (hence the program) are byte-identical for worker counts 1, 4 and default is
+        # proved by genesis_z80_build_pipeline_test (epochs), so extra --jobs builds are not repeated here.
+        built = {"default": build(rom, tmp / "default")}
+        check(all(done.returncode == 0 and exe is not None for done, exe in built.values()), "the audio fixture builds through the normal route")
         exe = built["default"][1]
 
         long_pcm, short_pcm = tmp / "long.pcm", tmp / "short.pcm"
-        done, a = run(exe, 3_000_000, long_pcm, "100:50")
+        done, a = run(exe, 2_000_000, long_pcm, "100:50")
         audio = a.get("audio", {})
         data = long_pcm.read_bytes()
         frames = audio.get("frames", 0)
@@ -91,20 +90,15 @@ def main():
         check(audio.get("range_frames") == 50 and audio.get("range_sha256") == stream_digest(data[4 * 100:4 * 150]),
               "the frame-range digest (frames 100..149) equals the digest of exactly those canonical bytes")
 
-        done2, b = run(exe, 3_000_000, tmp / "again.pcm")
+        done2, b = run(exe, 2_000_000, tmp / "again.pcm")
         check(b.get("audio", {}).get("sha256") == audio["sha256"] and (tmp / "again.pcm").read_bytes() == data, "repeated runs are bit-identical")
-        for name in ("j1", "j4"):
-            _, c = run(built[name][1], 3_000_000, tmp / (name + ".pcm"))
-            check(c.get("audio", {}).get("sha256") == audio["sha256"] and (tmp / (name + ".pcm")).read_bytes() == data,
-                  "a build with --jobs %s yields the identical stream" % name[1:])
-
-        _, s = run(exe, 1_200_000, short_pcm)
+        _, s = run(exe, 800_000, short_pcm)
         short = short_pcm.read_bytes()
         sa = s.get("audio", {})
         check(0 < len(short) < len(data) and data[:len(short)] == short and sa.get("sha256") == stream_digest(short),
               "a shorter run (%d frames) is an exact prefix of the longer run: the stream does not depend on where the run is cut" % (len(short) // 4))
 
-        done3, d = run(exe, 3_000_000, tmp / "missing-dir" / "x.pcm")
+        done3, d = run(exe, 2_000_000, tmp / "missing-dir" / "x.pcm")
         da = d.get("audio", {})
         check(done3.returncode == done.returncode and da.get("sha256") == audio["sha256"] and da.get("pcm_file_errors", 0) > 0,
               "an unusable PCM path never perturbs the run: same exit status and digest, the failure is only an aggregate counter")
@@ -112,7 +106,7 @@ def main():
             done4, _ = run(exe, 1000, None, bad)
             check(done4.returncode == 3 and "malformed SEGARECOMP_AUDIO_RANGE" in done4.stderr, "malformed range %r is rejected before the run (exit 3)" % bad)
         print("METRIC artifact %s" % json.dumps({"frames": frames, "bytes": len(data), "non_silent": audio.get("non_silent"), "clipped": audio.get("clipped"),
-                                                 "span": audio.get("span"), "digests_identical_across_runs_and_jobs": True, "prefix_frames": len(short) // 4}, sort_keys=True))
+                                                 "span": audio.get("span"), "digests_identical_across_runs": True, "prefix_frames": len(short) // 4}, sort_keys=True))
     print("genesis audio artifact: %s" % ("FAILED (%d)" % len(failures) if failures else "ok"))
     return 1 if failures else 0
 

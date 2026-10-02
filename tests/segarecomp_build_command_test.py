@@ -22,7 +22,7 @@ def require(condition, message):
 
 def build(cli, compiler, root, rom, out, cc=None, extra=()):
     return subprocess.run([cli, "build", "--rom", str(rom), "--output", str(out), "--cc", cc or compiler,
-                           "--runtime-dir", str(root / "platforms" / "genesis"), "--optimize", "0", *extra],
+                           "--runtime-dir", str(root / "platforms" / "genesis"), "--optimize", "0", "--runtime-optimize", "1", *extra],
                           text=True, capture_output=True)
 
 
@@ -50,7 +50,7 @@ def main():
         require('"result":"stop"' in ran.stdout and digest in ran.stdout, "the native program must emit the sanitized stop report")
 
         # Instruction budget: an explicit budget is one finite run; with no flag the program is unbounded
-        # (it must still be running after a couple of seconds on a guest that never stops).
+        # (it must still be running after a moment (1.5 s) on a guest that never stops).
         # A real spin loop (every retired instruction advances virtual time), so the build-time Z80 materialization pass ends at its
         # observation window like any program that never stops. The prologue (MOVEQ, BEQ, RESET) keeps the 68K translator's startup
         # prefix to the operations it admits; the loop itself is compiled by the immutable-ROM AOT.
@@ -74,19 +74,16 @@ def main():
                                  env={"SEGARECOMP_SOUND_SUMMARY": "1", "PATH": "/usr/bin:/bin"})
         require('"result_kind":3' in bounded.stderr, "an explicit budget must end in the runner resource limit: " + bounded.stderr)
         try:
-            subprocess.run([str(loop_exe)], text=True, capture_output=True, timeout=3)
+            subprocess.run([str(loop_exe)], text=True, capture_output=True, timeout=1.5)
             require(False, "without --instruction-budget the program must keep running")
         except subprocess.TimeoutExpired:
             pass
 
-        # A guest that never advances virtual time can never finish the Z80 observation window: the build fails closed with the typed
-        # outcome, no executable and the materialization stage named in the result (SEG-032-T008).
+        # A guest that never advances virtual time can never finish the Z80 observation window: that build-time failure (exit 4, the
+        # z80-materialize stage, materialization_budget_exhausted, no executable) is proved end to end by genesis_z80_build_pipeline_test
+        # (group `bound`); only the ROM is needed here, for the hook regression below.
         stuck = tmp / "stuck.bin"
         stuck.write_bytes(bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x60, 0xFE)))
-        result = build(cli, compiler, root, stuck, tmp / "stuck-out")
-        require(result.returncode == 4 and "stage=z80-materialize" in result.stdout, "a stuck guest must fail in the materialization stage: " + result.stdout)
-        require("materialization_budget_exhausted" in (tmp / "stuck-out" / "status.json").read_text(), "the typed outcome must be recorded")
-        require(not any(p.stem == "game" for p in (tmp / "stuck-out").iterdir()), "a failed materialization leaves no executable")
 
         # Regression: a viewer window close / finished capture reports a runner resource limit with a count below
         # UINT32_MAX and must END the unbounded default run, never re-enter the runner (which reopened the window).

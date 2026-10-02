@@ -31,6 +31,16 @@ Wall times on a shared workstation vary by about 15%; compare CPU seconds and us
 No test compares a wall-clock time with a tight threshold; host variance makes that fragile. The structural invariants fail on a
 regression to one function per start, which is the defect that made the build slow.
 
+## Test builds of a Genesis image
+
+The Genesis route compiles megabytes of generated Z80 image C and then runs the materialization pass program up to four times (a
+600-frame observation window each). Tests build with `--optimize 0` (cheap Z80 units) and `--runtime-optimize 1`: the small stable set
+(generated M68K units, handwritten runtime, PSG, ymfm) is compiled at `-O1`, which cuts the pass run time by about 40% for a few
+hundred milliseconds of extra compile time. The flag defaults to `--optimize`, so a production build is unchanged and the generated C
+is identical either way. Tests that need several full builds share one build per ROM and rely on `genesis_z80_build_pipeline_test`
+(`epochs`) for byte-identical output across worker counts; the vendored YM2612 objects used by the Python-driven audio tests are
+content-addressed in the build tree's shared `z80_build_cache`.
+
 ## Reference mode
 
 `z80_image_emitter` accepts the spec verbs `group <n>` (entries per owner function) and `share <0|1>` (shared effect bodies);

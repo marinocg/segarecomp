@@ -8,6 +8,11 @@
  *              More options (SEG-032-T012): `repair` (on a code_mismatch after the mutation print `MISMATCH`, undo the mutation and retry the
  *              instruction), `int-on-repair` (raise INT, IM1, IFF1 for that retry), init keys `iff` and `im`, `start <hex pc>`, `init <reg>=<hex> ...` (a f b c d e h l ix iy sp i r), `dump <hex addr> <len>`
  *              (prints `DUMP <hex bytes>` before the END line).
+ *   z80_live_guard_runner batch <script>
+ *     Runs many `<ram.hex> run ...` invocations in one process (a process spawn dominates the cost of a tiny run on some hosts): each line of
+ *     <script> is one invocation's arguments (whitespace separated, same grammar as above, without the program name). The output of one
+ *     invocation is followed by the line `BATCH_END`; every invocation starts from fresh state, so a batch is exactly the sequence of the
+ *     individual runs.
  * Prints `STEP <n> <state>` after every executed instruction and `END <outcome> <n> <state>`; a state is
  * `pc=XXXX sp=.. af=.. bc=.. de=.. hl=.. ix=.. iy=.. cy=<cycles> r=.. iff=.. wz=.. df=<deferral> ai=<ld a,i/r marker> mem=<8 KiB digest>
  * io=<port-access digest>`.
@@ -99,7 +104,7 @@ static void apply_init(Z80State *s, const char *arg) {
   else exit(2);
 }
 
-int main(int argc, char **argv) {
+static int run_one(int argc, char **argv) {
   Z80Runtime rt;
   unsigned long max_steps, mutate_after = (unsigned long)-1, mutate_offset = 0, mutate_xor = 0, int_after = (unsigned long)-1;
   int matcher = 1, i;
@@ -108,6 +113,7 @@ int main(int argc, char **argv) {
   int repair = 0, int_on_repair = 0, mutate_done = 0, int_active = 0;
   const char *inits[16];
   int init_count = 0;
+  io_digest = 2166136261u;
   if (argc < 4 || strcmp(argv[2], "run") != 0) return 2;
   {
     FILE *file = fopen(argv[1], "r");
@@ -197,5 +203,25 @@ int main(int argc, char **argv) {
   printf("END max_steps %lu ", max_steps);
   print_state(&rt.state);
   printf("\n");
+  return 0;
+}
+
+int main(int argc, char **argv) {
+  FILE *script;
+  char line[1024];
+  if (argc != 3 || strcmp(argv[1], "batch") != 0) return run_one(argc, argv);
+  script = fopen(argv[2], "r");
+  if (script == NULL) return 2;
+  while (fgets(line, sizeof line, script) != NULL) {
+    char *args[32];
+    char *token;
+    int count = 1;
+    args[0] = argv[0];
+    for (token = strtok(line, " \t\r\n"); token != NULL && count < 32; token = strtok(NULL, " \t\r\n")) args[count++] = token;
+    if (count == 1) continue;
+    if (run_one(count, args) != 0) return 2;
+    printf("BATCH_END\n");
+  }
+  fclose(script);
   return 0;
 }

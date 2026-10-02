@@ -182,6 +182,38 @@ def run_exe(exe, hexfile, steps, *extra):
     return out
 
 
+BATCH = 128
+_batch_counter = [0]
+
+
+def run_batch(tmp, requests):
+    """Executes many (exe, hexfile, steps, args) runs, a chunk of runs per process (the runner's `batch` mode), in parallel. Returns the
+    outputs in request order; each equals what `run_exe` returns for the same arguments."""
+    outputs = [None] * len(requests)
+    chunks = []
+    by_exe = {}
+    for index, request in enumerate(requests):
+        by_exe.setdefault(request[0], []).append(index)
+    for exe, indices in by_exe.items():
+        for start in range(0, len(indices), BATCH):
+            chunks.append((exe, indices[start:start + BATCH]))
+
+    def one(chunk):
+        exe, indices = chunk
+        _batch_counter[0] += 1
+        script = tmp / ("batch%d.txt" % _batch_counter[0])
+        # The script is whitespace separated: RAM images are named relative to `tmp` (the working directory), never by an absolute path.
+        script.write_text("".join(" ".join([requests[i][1].name, "run", str(requests[i][2]), *requests[i][3]]) + "\n" for i in indices))
+        text = subprocess.run([str(exe), "batch", script.name], text=True, capture_output=True, check=True, cwd=tmp).stdout
+        parts = text.split("BATCH_END\n")
+        assert len(parts) == len(indices) + 1 and parts[-1] == "", "batch output does not match its script"
+        for i, part in zip(indices, parts):
+            outputs[i] = part
+
+    parallel(one, chunks)
+    return outputs
+
+
 def init_args(init):
     args = []
     for item in init:
@@ -230,19 +262,31 @@ def main():
         # ---- payload matrix ----
         jobs = [(c, i, j) for c in cases for i in range(len(INITS)) for j in range(6)]
 
-        def payload_job(job):
-            c, i, j = job
-            args = ["start", "%X" % c.address] + init_args(INITS[i])
-            live = run_exe(live_exe, hex_b[j], STEPS, *args)
-            live_ref_mode = run_exe(live_exe_ref_mode, hex_b[j], STEPS, *args)
-            ref = run_exe(refs[j], hex_b[j], STEPS, *args, "immutable")
-            base = run_exe(ref_a, hex_a, STEPS, *args, "immutable")
-            return live == ref, live_ref_mode == ref, base != ref, "code_mismatch" not in live
+        # The A-compiled reference run does not depend on the payload value: one run per (case, init). The one-function-per-start emission
+        # is exercised for two representative payload values per class (j=1 is the low boundary, j=3 the sign boundary of every table);
+        # the shared emission is compared for all six.
+        REF_MODE_VALUES = (1, 3)
 
-        results = parallel(payload_job, jobs)
+        def start_args(c, i):
+            return ["start", "%X" % c.address] + init_args(INITS[i])
+
+        base_out = dict(zip([(c, i) for c in cases for i in range(len(INITS))],
+                            run_batch(tmp, [(ref_a, hex_a, STEPS, [*start_args(c, i), "immutable"]) for c in cases for i in range(len(INITS))])))
+        requests = []
+        for c, i, j in jobs:
+            requests.append((live_exe, hex_b[j], STEPS, start_args(c, i)))
+            requests.append((refs[j], hex_b[j], STEPS, [*start_args(c, i), "immutable"]))
+            if j in REF_MODE_VALUES:
+                requests.append((live_exe_ref_mode, hex_b[j], STEPS, start_args(c, i)))
+        outputs = iter(run_batch(tmp, requests))
+        results = []
+        for c, i, j in jobs:
+            live, ref = next(outputs), next(outputs)
+            ref_mode = next(outputs) == ref if j in REF_MODE_VALUES else True
+            results.append((live == ref, ref_mode, base_out[(c, i)] != ref, "code_mismatch" not in live))
         check(all(r[0] for r in results), "payload matrix: %d of %d live executions equal the static reference compiled from the B bytes" %
               (sum(r[0] for r in results), len(results)))
-        check(all(r[1] for r in results), "payload matrix: the unshared one-function-per-start emission is equal as well")
+        check(all(r[1] for r in results), "payload matrix: the unshared one-function-per-start emission is equal as well (payload values 1 and 3)")
         check(all(r[3] for r in results), "payload matrix: no payload mutation is ever reported as code_mismatch")
         per_case = {}
         for (c, i, j), r in zip(jobs, results):
@@ -251,18 +295,16 @@ def main():
               "the payload is semantically live: %d of %d cases change behaviour between payload A and some B" % (sum(per_case.values()), len(cases)))
 
         # ---- structural matrix ----
-        def structural_job(job):
-            c, position, xor = job
-            args = ["start", "%X" % c.address] + init_args(INITS[0])
-            out = run_exe(live_exe, hex_a, STEPS, *args, "mutate-after", "0", "%X" % (c.address + position), "%X" % xor)
-            before = run_exe(live_exe, hex_a, 0, *args)
-            end = last_state(out)
-            return end.startswith("END code_mismatch 0 ") and out.count("STEP") == 0 and \
-                drop_mem(end.split(" ", 3)[3]) == drop_mem(last_state(before).split(" ", 3)[3]) and \
-                ("pc=%04X" % c.address) in end
-
+        before_out = run_batch(tmp, [(live_exe, hex_a, 0, ["start", "%X" % c.address, *init_args(INITS[0])]) for c in cases])
+        before_state = {id(c): drop_mem(last_state(out).split(" ", 3)[3]) for c, out in zip(cases, before_out)}
         sjobs = [(c, p, x) for c in cases for p in c.structural for x in (0x01, 0x08, 0x40)]
-        sresults = parallel(structural_job, sjobs)
+        mutated_out = run_batch(tmp, [(live_exe, hex_a, STEPS, ["start", "%X" % c.address, *init_args(INITS[0]), "mutate-after", "0", "%X" % (c.address + p), "%X" % x])
+                                      for c, p, x in sjobs])
+        sresults = []
+        for (c, p, x), out in zip(sjobs, mutated_out):
+            end = last_state(out)
+            sresults.append(end.startswith("END code_mismatch 0 ") and out.count("STEP") == 0 and
+                            drop_mem(end.split(" ", 3)[3]) == before_state[id(c)] and ("pc=%04X" % c.address) in end)
         check(all(sresults), "structural matrix: %d of %d single-bit prefix/opcode/selector mutations stop at entry with no effect" %
               (sum(sresults), len(sresults)))
 

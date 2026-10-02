@@ -12,6 +12,9 @@
 # exceeds SEGARECOMP_CI_SHARD_BUDGET_SECONDS or a single test exceeds SEGARECOMP_CI_MAX_TEST_SECONDS. Update the table when a test
 # gets materially slower or faster (a stale entry only unbalances the shards; it never skips a test).
 #
+# The Genesis Z80/audio tests were rescaled by their measured before/after ratio when they were trimmed (shared builds, batched runner
+# invocations, --runtime-optimize 1; see docs/testing/z80-build-performance.md), not re-measured on the runners: re-measure on the next CI run.
+#
 # Shard count: wall time of one CI job ~ setup/build (~2 min) + shard cost / 4 cores. Six shards keep the slowest host under ~7 min.
 set(SEGARECOMP_CI_SHARD_COUNT 6)
 set(SEGARECOMP_CI_SHARD_BUDGET_SECONDS 1300)
@@ -20,17 +23,17 @@ set(SEGARECOMP_CI_DEFAULT_COST 3)
 set(SEGARECOMP_CI_TEST_COSTS
   z80_owner_group_differential_test=196 z80_owner_group_differential_test_slice2=208
   z80_owner_group_differential_test_slice3=214 z80_owner_group_differential_test_slice4=231
-  genesis_z80_build_pipeline_test=150 genesis_z80_build_pipeline_bound_test=145 genesis_z80_build_pipeline_smc_test=205
-  genesis_z80_build_pipeline_falsify_test=195 genesis_z80_build_pipeline_prepare_test=20
+  genesis_z80_build_pipeline_test=75 genesis_z80_build_pipeline_bound_test=128 genesis_z80_build_pipeline_smc_test=79
+  genesis_z80_build_pipeline_falsify_test=58 genesis_z80_build_pipeline_prepare_test=20
   sms_native_build_test=127 sms_native_build_policy_test=226 sms_native_build_failclosed_test=21
   sms_owner_group_equivalence_test=110 sms_owner_group_equivalence_vdp_test=110 sms_owner_group_equivalence_render_test=110
-  m68k_pipeline_tests=369 sms_emission_budget_512k_test=307 z80_live_operand_test=303 z80_generated_pipeline_test=195
-  m68k_conformance_harness_test=192 m68k_capability_ratchet_test=187 z80_live_guard_test=152 m68k_batch_c_static_slice_test=136
+  m68k_pipeline_tests=369 sms_emission_budget_512k_test=307 z80_live_operand_test=88 z80_generated_pipeline_test=195
+  m68k_conformance_harness_test=192 m68k_capability_ratchet_test=187 z80_live_guard_test=67 m68k_batch_c_static_slice_test=136
   z80_conformance_harness_test=130 sms_machine_scheduler_test=121 sms_render_test=119 sms_render_native_test=96
-  sms_machine_e2e_test=88 sms_emission_budget_test=87 sms_vdp_native_test=86 sms_bank_crossing_test=81 genesis_audio_artifact_test=81
-  z80_capability_ratchet_test=65 segarecomp_build_command_test=60 z80_timing_closure_test=54 genesis_z80_machine_test=50
-  sms_psg_differential_test=45 cpu_z80_decode_tests=41 genesis_z80_images_test=38 genesis_audio_equivalence_test=36
-  sms_pad_native_test=35 sms_viewer_equivalence_test=34 sms_machine_tests=33 genesis_audio_ym_test=27
+  sms_machine_e2e_test=88 sms_emission_budget_test=87 sms_vdp_native_test=86 sms_bank_crossing_test=81 genesis_audio_artifact_test=26
+  z80_capability_ratchet_test=65 segarecomp_build_command_test=25 z80_timing_closure_test=54 genesis_z80_machine_test=40
+  sms_psg_differential_test=45 cpu_z80_decode_tests=41 genesis_z80_images_test=38 genesis_audio_equivalence_test=17
+  sms_pad_native_test=35 sms_viewer_equivalence_test=34 sms_machine_tests=33 genesis_audio_ym_test=12
   z80_control_stack_dispatch_test=25 ci_shard_guard_test=5
   sonic_startup_inventory_adapter_failure_test=80)  # RUN_SERIAL: runs alone, so it occupies all four cores
 

@@ -1159,6 +1159,10 @@ set_property(TEST z80_live_guard_test z80_live_operand_test genesis_z80_images_t
 set_property(TEST codegen_c11_z80_dependency_test z80_generated_pipeline_test z80_conformance_harness_test
   z80_conformance_oracle_test z80_capability_ratchet_test z80_live_guard_test z80_live_operand_test genesis_z80_images_test genesis_z80_view_test genesis_z80_machine_test genesis_audio_psg_test
   genesis_ym2612_device_test genesis_audio_ym_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# The vendored YM2612 core objects (tools/genesis_ym2612_build.py) are content-addressed in the shared test cache: the first test of a build tree
+# that needs them compiles them, the others link the same objects.
+set_property(TEST genesis_z80_view_test genesis_z80_machine_test genesis_audio_psg_test genesis_audio_ym_test genesis_audio_pcm_test
+  genesis_audio_equivalence_test APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
 # SEG-008-T002 tests were registered after the label loop above and so carried no tier label: add them here.
 set_property(TEST cpu_z80_decode_tests z80_generated_pipeline_test z80_conformance_oracle_test APPEND PROPERTY LABELS full)
 set_property(TEST cpu_z80_dependency_test z80_capability_ratchet_test codegen_c11_z80_dependency_test
