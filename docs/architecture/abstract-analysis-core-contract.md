@@ -1,6 +1,13 @@
-# Abstract-analysis core contract (draft, SEG-027-T004)
+# Abstract-analysis core contract (SEG-027-T004; accepted by SEG-029-T001)
 
-- Status: **Draft**. This contract is input to the SEG-029 full refinement. It is not implemented, and no product code follows it yet.
+- Status: **Accepted** by ADR 0078 (SEG-029-T001). Drafted by SEG-027-T004. Where this text and ADR 0078 differ, ADR 0078 is
+  authoritative. Corrections at acceptance:
+  - placement: generic `segarecomp::analysis` (header-only, `libs/analysis`); adapters `segarecomp::cpu_<cpu>_analysis` under
+    `libs/cpu/<cpu>/analysis`; no production target links any of them (ADR 0078 decision 1);
+  - the `Unknown` vocabulary is closed and final: `unknown_input`, `unsupported_transfer`, `non_immutable_read`, `set_bound`,
+    `iteration_bound`, `state_bound`; `imprecise_join` is dropped (decision 3);
+  - no staged capability is admitted in SEG-029 (decision 7);
+  - section 6: SEG-028 has landed; the generic core takes no image, and adapters own the immutable-read oracle (decision 9).
 - Decision context: ADR 0076 (SEG-029 ACTIVATE as an incremental core); evidence in `gen3-evidence-ledger.md` (cited as `[L x]`) sections 2.2, 3 (S4, S5)
   and 4.
 - Not this contract's job:
