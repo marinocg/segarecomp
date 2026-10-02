@@ -45,7 +45,9 @@ the generic part is not M68K-shaped.
    `imprecise_join` is dropped: a join never creates imprecision on its own; it only propagates an input's Unknown or exceeds the set bound.
 4. **Bounds (constants).** `default_set_bound = 4096` (equal to `m68k_finite_values_limit`, the first consumer's bound),
    `default_max_iterations = 1,000,000`, `default_max_points = 2^20`. A caller may lower a bound, never raise it (the solver clamps
-   requested bounds to these defaults; `FiniteValue::of` clamps the set bound). Exhausting the set bound
+   requested bounds to these defaults; `FiniteValue::of` clamps the set bound). The iteration bound is per `solve` call, and the solver's internal restarts
+   share it. A driver that re-solves, like the M68K driver's invalidation rounds (at most one round per PC-index site, plus one), is
+   bounded by the number of rounds times the bound. Exhausting the set bound
    gives `Unknown(set_bound)` for that value. Exhausting an iteration or point bound makes the whole solution incomplete: every query
    returns `Unknown(iteration_bound | state_bound)`, never a partial answer and never bottom.
 5. **Determinism.** The worklist is the ordered set of pending points and always pops the smallest key; states live in ordered maps;
@@ -89,6 +91,16 @@ the generic part is not M68K-shaped.
 - Documented sound differences:
   - **Invalidation:** both unresolved, with identical targets. The ordered worklist reaches the result without a round restart.
   - **Loop:** where the backward evaluator returns cycle-Unknown, the forward fixed point proves an exact single target, because only one writer of the index register exists.
+
+- **Beyond the fixtures.** T006's ephemeral randomized differential check covered 3,000 synthetic images against a concrete-state
+  oracle. It found 0 unsound results, but outcome classes differ in both directions, and every difference is sound:
+  - the adapter resolves loops through table re-entry that the challenger reports `invalidated` or `index_unknown` (the loop case above,
+    generalized);
+  - rarely (5 of 3,000 seeds), the adapter invalidates a site that the challenger resolves. The site's widening came only through
+    another site that was pinned in the same round, so this is cascaded over-invalidation, a precision loss only.
+
+  A pin-minimization pass is a recorded future candidate for SEG-030, not a SEG-029 deliverable. "Identical" above means identical on
+  the fixture set.
 
 ### T004: Z80 second-CPU adapter
 
@@ -134,3 +146,6 @@ the generic part is not M68K-shaped.
     was removed together with its mutant `m68k_invalidation_skipped`. Lost targets are now detected only by the solver.
   - **Mutants:** `bounds_raised` and `m68k_solver_pin_ignored` were added, for 41 mutants in total: 39 killed and 2 justified as
     equivalent.
+- **Third pass (correction cycle 2): PASS-with-minor.** The full gate passed 297/297 on `1ead98e`. The randomized check found 0
+  unsound results, 0 report/solution inconsistencies and 0 non-deterministic runs. Its minor (outcome classes differ in both
+  directions beyond the fixtures) and nit (iteration budget per `solve` call) are documented in the T003 record and decision 4.
