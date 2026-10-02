@@ -261,3 +261,15 @@ These hold unless a later ADR explicitly argues otherwise:
 - A class-4 replacement of the SEG-032 materializer is proven by registry equality.
 - The SEG-028 milestone record (harness backlog) carries the rewritten Outcome/Scope/Acceptance and a seven-child Refinement plan. Its
   fifth child is an evidence-gated go/no-go on giving `segarecomp build` a proven-copy producer.
+
+### T004 (SEG-029 plan)
+
+- Draft contract: `docs/architecture/abstract-analysis-core-contract.md`. It covers the CPU-adapter / generic-solver boundary, the
+  `Unknown` contract and its reason vocabulary, resource bounds, determinism, the forbidden-identifier rule and the image-view input.
+- The baseline is the smallest set of domains justified by the first consumer: exact finite register sets with immutable-byte reads,
+  re-expressing an existing M68K finite-value analysis. Address region, points-to, abstract memory, intervals, widening, contexts and
+  summaries are staged under a four-part admission rule. No complete VSA framework is pre-committed.
+- The Z80 second-CPU proof is a bounded synthetic adapter. It needs a small CPU-owned Z80 effect/successor projection in `libs/cpu/z80`,
+  because Z80 semantics currently reach code only through C11 lowering.
+- SEG-029 does not depend on SEG-028.
+- The SEG-029 milestone record (harness backlog) carries the rewritten Outcome/Scope/Acceptance and a seven-child Refinement plan.
