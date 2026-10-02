@@ -24,6 +24,7 @@ SCOPE = [
     "platforms/genesis/machine/include/segarecomp/machine/genesis/z80_images.hpp",
     "platforms/genesis/machine/include/segarecomp/machine/genesis/z80_materialization.hpp",
     "platforms/genesis/machine/src/z80_images.cpp", "platforms/genesis/machine/src/z80_materialization.cpp",
+    "platforms/genesis/machine/include/segarecomp/machine/genesis/m68k_copy_alias.hpp", "platforms/genesis/machine/src/m68k_copy_alias.cpp",
     "libs/device/sega/ym2612/include", "libs/device/sega/ym2612/src",
     "libs/codegen/c11/include/segarecomp/codegen/c11/z80.hpp", "libs/codegen/c11/include/segarecomp/codegen/c11/z80_lowering.hpp",
     "libs/codegen/c11/include/segarecomp/codegen/c11/runtime/z80_runtime.h", "libs/codegen/c11/src/z80.cpp",

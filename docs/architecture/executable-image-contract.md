@@ -194,7 +194,9 @@ The final executable never sees it. Only generated tables derived from it reach 
     not a borrowed span. The producer is `genesis_m68k_executable_images(program)` in `platforms/genesis/machine` (`frontend.hpp`),
     returning the set plus each image's claim index; `populate_immutable_rom_aot_entries` (`frontend.cpp`) consumes its `static_proof`
     images. `apply_genesis_immutable_copy_alias` and `ImmutableCopyAlias` remain the descriptor input to that producer. Emission is
-    byte-identical. The consumer-route producer is the T005 go/no-go in ADR 0077.
+    byte-identical. The consumer-route producer is the T005 go/no-go in ADR 0077 (GO: `segarecomp build` runs the bounded build-time
+    alias preparation on the headless materialization pass; its descriptors enter through the same `apply_genesis_immutable_copy_alias`
+    input and its images keep `static_proof` authority).
 
 12. **How a future static analyzer replaces the SEG-032 producer.**
     - A replacement producer with `static_proof` authority must emit the same platform inputs the registry consumes today: per epoch, the 8 KiB content and the
@@ -273,6 +275,7 @@ library.
 | Genesis Z80 producer (`genesis.z80_materializer`) | `platforms/genesis/machine/src/z80_images.cpp` | `z80::executable_images`, `z80::ImageProducer`, `z80::registries_equal`, `build_image_set`, `emit_registry` |
 | Genesis M68K producer (`genesis.cartridge`, `genesis.copy_alias`) | `platforms/genesis/machine/src/frontend.cpp` | `genesis_m68k_executable_images`, `GenesisM68kExecutableImages` |
 | ADR 0049 consumer | `platforms/genesis/machine/src/frontend.cpp` | `populate_immutable_rom_aot_entries` (alias loop) |
+| ADR 0049 consumer-route descriptor proposal (build-time preparation) | `platforms/genesis/machine/src/m68k_copy_alias.cpp`, `apps/segarecomp/build_command.cpp`, `platforms/genesis/runtime/genesis_materialize_hook.c` | `m68k_alias::derive_copy_alias`, `merge_copy_aliases`, `prepare`; `build_genesis_program`; the pass stop record (`stop.ram`) |
 | forbidden-identifier scan | `tests/executable_image_forbidden_identifiers_test.py` | |
 
 ## 4. Invariants every SEG-028 child must preserve

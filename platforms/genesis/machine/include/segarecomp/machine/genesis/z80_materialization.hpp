@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "segarecomp/machine/genesis/m68k_copy_alias.hpp"
 #include "segarecomp/machine/genesis/z80_images.hpp"
 
 namespace segarecomp::machine::genesis::z80 {
@@ -61,6 +62,9 @@ struct PassObservation {
   std::vector<PassEpoch> epochs;      // every image epoch seen, activation order
   std::optional<Epoch> unknown;       // present exactly for PassOutcome::unknown_image
   std::optional<SoundFault> sound_fault;  // present when the Z80 sound CPU was isolated (structural_code_mismatch)
+  // SEG-028-T005 (ADR 0077): the private M68K stop record (stop PC, stop class, work RAM), present for PassOutcome::guest_stop when
+  // the pass wrote it. Consumed only by the build's ADR 0049 alias preparation; never reported.
+  std::optional<m68k_alias::GuestStopRecord> guest_stop;
 };
 
 // Which operation of PassRunner::prepare failed (a short stable name such as "emit", "unit-compile", "pass-link") and a bounded,
@@ -105,6 +109,7 @@ struct MaterializationSummary {
   std::uint32_t frames = 0;         // virtual frames reached by the confirmed run
   PassOutcome end = PassOutcome::failed;
   std::optional<SoundFault> sound_fault;  // set: Genesis audio degraded (z80_audio_outcome = structural_code_mismatch)
+  std::optional<m68k_alias::GuestStopRecord> guest_stop;  // the confirmed run's M68K stop record (end == guest_stop)
   [[nodiscard]] bool ok() const noexcept { return failure == Failure::none; }
 };
 
