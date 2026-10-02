@@ -334,7 +334,7 @@ void genesis_z80_machine_state_digest(const GenesisZ80Machine *machine, uint8_t 
   bytes[30] = s->iff2; bytes[31] = s->q; bytes[32] = s->halted; bytes[33] = s->int_deferral; bytes[34] = s->ld_a_ir; bytes[35] = s->in_prefix_run;
   genesis_sha256_update(&sha, bytes, 36U);
   values[0] = s->cycles; values[1] = machine->cycle_base_master_ticks; values[2] = machine->bound_ordinal; values[3] = machine->last_bound;
-  values[4] = machine->sound_fault; values[5] = machine->sound_fault_master_ticks;
+  values[4] = (uint64_t)machine->sound_fault; values[5] = machine->sound_fault_master_ticks;
   for (i = 0U; i < (genesis_z80_machine_sound_faulted(machine) ? 6U : 4U); ++i) {  /* a healthy digest is unchanged */
     uint8_t word[8];
     uint32_t b;
