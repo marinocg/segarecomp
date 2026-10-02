@@ -71,39 +71,44 @@ static inline int segarecomp_genesis_discarded_read_admitted(uint32_t address, u
   return address == SEGARECOMP_GENESIS_Z80_ARBITRATION_RESET_REGISTER && (width_bytes == 1U || width_bytes == 2U);
 }
 
-/* Flat 68000-visible Z80 program-RAM window: 8 KiB at $A00000 (GTO1 v1.00 68K
- * memory map p. 7 / overview p. 2; Charles MacDonald hardware notes SS2).
- * Runtime owner: genesis_z80_ram_window_access (SEG-007-T103), which also
- * realises the byte count as GENESIS_Z80_RAM_BYTES. */
+/* 68000 view of the Z80 area (SEG-032-T004, contract section 3; GTO1 v1.00 p. 77, GPGX `z80_read_byte`/`z80_write_byte`, ares
+ * `cpu` bus): the 8 KiB sound RAM at $A00000 and its mirror at $A02000 ($A00000-$A03FFF, `address & $1FFF`), and the
+ * write-only bank register at $A06000-$A060FF. The YM2612 ports ($A04000-$A04003) and the BUSREQ/RESET registers are separate
+ * regions below. Runtime owner: genesis_z80_area_access, which realises the RAM byte count as GENESIS_Z80_RAM_BYTES. */
 #define SEGARECOMP_GENESIS_Z80_RAM_WINDOW_BEGIN UINT32_C(0x00A00000)
 #define SEGARECOMP_GENESIS_Z80_RAM_WINDOW_BYTES UINT32_C(8192)
+#define SEGARECOMP_GENESIS_Z80_RAM_MIRROR_END UINT32_C(0x00A04000)
+#define SEGARECOMP_GENESIS_Z80_BANK_REGISTER_BEGIN UINT32_C(0x00A06000)
+#define SEGARECOMP_GENESIS_Z80_BANK_REGISTER_END UINT32_C(0x00A06100)
 
 static inline int segarecomp_genesis_z80_ram_window_contains(uint32_t address) {
-  return address >= SEGARECOMP_GENESIS_Z80_RAM_WINDOW_BEGIN &&
-         address < SEGARECOMP_GENESIS_Z80_RAM_WINDOW_BEGIN +
-                       SEGARECOMP_GENESIS_Z80_RAM_WINDOW_BYTES;
+  return address >= SEGARECOMP_GENESIS_Z80_RAM_WINDOW_BEGIN && address < SEGARECOMP_GENESIS_Z80_RAM_MIRROR_END;
 }
 
-/* Co-located PSG (SN76489) audio port: exactly the odd byte $C00011 (GTO1
- * v1.00 p. 10 "VDP AREA": "PSG 76489").  Runtime owner: genesis_psg_access
- * (SEG-007-T109), routed ahead of the VDP lane because the address is inside
- * the VDP interval. */
+static inline int segarecomp_genesis_z80_bank_register_contains(uint32_t address) {
+  return address >= SEGARECOMP_GENESIS_Z80_BANK_REGISTER_BEGIN && address < SEGARECOMP_GENESIS_Z80_BANK_REGISTER_END;
+}
+
+/* Co-located PSG (SN76489) audio port: the odd byte $C00011 and its odd mirrors $C00013/$C00015/$C00017 (GTO1 v1.00 p. 10
+ * "VDP AREA": "PSG 76489"; MacDonald and Genesis Plus GX/ares agree on the four odd addresses, SEG-032-T006, contract section 9).
+ * Runtime owner: genesis_psg_access_68k, routed ahead of the VDP lane because the addresses are inside the VDP interval. */
 #define SEGARECOMP_GENESIS_PSG_PORT_ADDRESS UINT32_C(0x00C00011)
 
 static inline int segarecomp_genesis_psg_port_contains(uint32_t address) {
-  return address == SEGARECOMP_GENESIS_PSG_PORT_ADDRESS;
+  return address == UINT32_C(0x00C00011) || address == UINT32_C(0x00C00013) || address == UINT32_C(0x00C00015) ||
+         address == UINT32_C(0x00C00017);
 }
 
 /* SEG-007-T171: YM2612 FM synthesis chip register window, $A04000-$A04003
  * (GTO1 v1.00 p. 10 "Z80 AREA" / plutiedev.com "ym2612": PART-I address/status
  * port $A04000, PART-I data port $A04001, PART-II address port $A04002,
- * PART-II data port $A04003). This is the full four-port window recognition
- * boundary only; it does not by itself authorize any access shape -- only the
- * runtime-confirmed PART-I status-port BYTE read is currently accepted (see
- * genesis_ym2612_access / m68k_route_genesis_device_access), one source of
- * truth shared byte-for-byte by the translation-time device-routing gate and
- * the generated runtime's own fail-closed recognition predicate, exactly like
- * the PSG port above. */
+ * PART-II data port $A04003). SEG-032-T007 (ADR 0074): all four ports accept
+ * BYTE reads (every port returns the shared device status) and BYTE writes,
+ * routed to the single YM2612 instance owned by genesis_audio; WORD and LONG
+ * accesses still fail closed (genesis_ym2612_access_68k /
+ * m68k_route_genesis_device_access). One source of truth shared byte-for-byte
+ * by the translation-time device-routing gate and the generated runtime's own
+ * fail-closed recognition predicate, exactly like the PSG port above. */
 #define SEGARECOMP_GENESIS_YM2612_REGION_BEGIN UINT32_C(0x00A04000)
 #define SEGARECOMP_GENESIS_YM2612_REGION_END UINT32_C(0x00A04004)
 #define SEGARECOMP_GENESIS_YM2612_PART1_ADDRESS_PORT UINT32_C(0x00A04000)

@@ -488,7 +488,7 @@ def emit_image(tc, spec_text, workdir, stem="z80_image", list_owners=False):
     return stats, owners, None
 
 
-def compile_units(tc, workdir, stem, extra_sources=(), extra_flags=()):
+def compile_units(tc, workdir, stem, extra_sources=(), extra_flags=(), extra_objects=()):
     """Compiles every generated TU plus extra sources as strict C11 in parallel and links an executable."""
     workdir = pathlib.Path(workdir)
     units = (workdir / (stem + ".units")).read_text().split()
@@ -510,7 +510,7 @@ def compile_units(tc, workdir, stem, extra_sources=(), extra_flags=()):
     exe = workdir / (stem + ".exe")
     # PE images embed a link timestamp; /Brepro makes the link deterministic (the reproducibility check compares bytes).
     deterministic = ["-Wl,/Brepro"] if sys.platform == "win32" else []
-    linked = run([tc.cc, *[str(o) for o in objs], *deterministic, "-o", str(exe)])
+    linked = run([tc.cc, *[str(o) for o in objs], *[str(o) for o in extra_objects], *deterministic, "-o", str(exe)])
     if linked.returncode != 0:
         return None, linked.stderr
     return exe, None

@@ -295,6 +295,9 @@ check, then alignment check, then work-RAM, then ROM, then device) do not change
 is reached by exactly one new routing helper, kept in the same pure-C11 runtime translation unit,
 mirroring `genesis_is_device`/`genesis_controller_io_access`'s existing shape:
 
+> Superseded by SEG-032-T004/T005 (ADR 0072): `genesis_z80_bus_access` below is the historical flat
+> bus-region helper; the real Z80 bus-arbitration and sound-RAM semantics now live in the Z80 platform integration.
+
 ```c
 static int genesis_is_z80_bus_region(uint32_t address);
 static int genesis_z80_bus_access(GenesisDeviceState *devices, uint32_t address,

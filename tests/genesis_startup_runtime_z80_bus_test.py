@@ -1,36 +1,21 @@
 #!/usr/bin/env python3
-"""SEG-007-T102: direct, isolated coverage of genesis_route_access's 68k-side
-Z80 bus-arbitration control-register routing extension ($A11100 BUSREQ,
-$A11200 RESET).
+"""SEG-007-T102, rewritten by SEG-032-T005 (ADR 0072, contract section 4): direct, isolated coverage of genesis_route_access's
+68k-side Z80 bus-arbitration control-register routing ($A11100 BUSREQ, $A11200 RESET) without an attached Z80 machine.
 
-This proves the runtime routing function alone -- no compiled/executed
-generated program is involved. It calls `genesis_route_access` directly,
-exactly as tests/genesis_startup_runtime_vdp_test.py does for the VDP region,
-against a real `GenesisRuntime`, and asserts on the return value, `*value`,
-`stop`, and the resulting `runtime.devices.z80_bus` latch fields.
-
-The modeled behaviour is an explicitly labelled, replaceable PROJECT
-COMPATIBILITY POLICY (see
-docs/architecture/genesis-z80-bus-arbitration-compatibility-policy.md), not
-verified bus-arbitration timing. Hardware register facts are from Sega's
-*Genesis Technical Overview* v1.00 (1991) p. 76 SS4 "Z80 CONTROL" and p. 91.
+The SEG-007 immediate-grant compatibility policy is retired: the bus latches follow the hardware rules that two independent
+references agree on (Genesis Plus GX `gen_zbusreq_w`/`gen_zreset_w`, ares `setBUSREQ`/`setRES`): the Z80 is held in /RESET at
+power-on (a zeroed runtime), the bus is granted iff BUSREQ is asserted AND /RESET is released, /RESET assert drops the grant while
+the request stays recorded. Register facts: Sega *Genesis Technical Overview* v1.00 (1991) p. 76 SS4 "Z80 CONTROL" and p. 91.
+The attached-machine behaviour (running, stopping, resuming, image epochs) is covered by tests/genesis_z80_machine_test.py.
 
 Covered:
-- BUSREQ request/release (WORD D8 and BYTE D0) updating the latch, including
-  immediate grant and other-bit tolerance.
-- BUSACK read-back (WORD and BYTE) reflecting `bus_granted`.
-- Z80 RESET assert/release (WORD D8 and BYTE D0) updating `reset_asserted`,
-  and its independence from the BUSREQ latch.
-- Deterministic repeated execution of a mixed sequence.
-- Adversarial fail-closed-BEFORE-mutation for every excluded neighbour: LONG
-  width at either register, a READ of $A11200 (wrong direction) at WORD and
-  BYTE, a BYTE access to the odd half of a register address, unmodeled
-  sub-addresses inside the recognised region, the region's inclusive upper
-  boundary, and a non-arbitration address just past the region (which keeps
-  the pre-existing generic unmapped-region fail-close, NOT the new Z80-bus
-  diagnostic). Every rejected access leaves the whole `GenesisRuntime`
-  byte-identical to a zeroed copy (or to a pre-populated snapshot) and leaves
-  the caller's `value` untouched.
+- BUSREQ request/release (WORD D8 and BYTE D0) with /RESET held (never acknowledged) and released (acknowledged), other-bit
+  tolerance, BUSACK read-back (WORD and BYTE) reflecting `bus_granted`.
+- /RESET assert/release (WORD D8 and BYTE D0) updating `reset_released`; an assert drops the grant but keeps the request.
+- Deterministic repeated execution of the documented startup sequence.
+- Adversarial fail-closed-BEFORE-mutation for every excluded neighbour: LONG width at either register, a READ of $A11200, a BYTE
+  access to the odd half of a register address, unmodeled sub-addresses inside the recognised region, the region's inclusive upper
+  boundary, and a non-arbitration address just past the region (the pre-existing generic unmapped-region fail-close).
 """
 import pathlib
 import subprocess
@@ -65,14 +50,26 @@ int main(void) {
   GenesisRuntimeStop stop = {0};
   uint32_t value;
 
-  /* ---- BUSREQ request/release, WORD ($A11100 D8; GTO1 p. 76 step 1/4). ---- */
+  /* ---- Power-on: the Z80 is held in /RESET. BUSREQ is recorded but never acknowledged while it is low. ---- */
+  assert(runtime.devices.z80_bus.reset_released == 0U && runtime.devices.z80_bus.bus_requested == 0U &&
+         runtime.devices.z80_bus.bus_granted == 0U);
   value = UINT32_C(0x0100);
   assert(genesis_route_access(&runtime, UINT32_C(0x00A11100), GENESIS_ACCESS_WORD,
                                GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
   assert(value == UINT32_C(0x0100)); /* WRITE never mutates the caller's value */
   assert(runtime.devices.z80_bus.bus_requested == 1U);
-  assert(runtime.devices.z80_bus.bus_granted == 1U); /* immediate-grant policy */
-  assert(runtime.devices.z80_bus.reset_asserted == 0U);
+  assert(runtime.devices.z80_bus.bus_granted == 0U); /* /RESET is low */
+  value = 0U;
+  assert(genesis_route_access(&runtime, UINT32_C(0x00A11100), GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &value, &stop) ==
+         GENESIS_ACCESS_OK);
+  assert(value == UINT32_C(0x0100)); /* BUSACK bit set: not granted */
+  /* Releasing /RESET (WORD D8 = 1) grants the pending request. */
+  value = UINT32_C(0x0100);
+  assert(genesis_route_access(&runtime, UINT32_C(0x00A11200), GENESIS_ACCESS_WORD,
+                               GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+  assert(runtime.devices.z80_bus.reset_released == 1U);
+  assert(runtime.devices.z80_bus.bus_requested == 1U);
+  assert(runtime.devices.z80_bus.bus_granted == 1U);
 
   /* BUSACK read-back, WORD: granted => D8 clear, every other bit 0. */
   value = UINT32_C(0xFFFFFFFF);
@@ -100,7 +97,7 @@ int main(void) {
   assert(genesis_route_access(&runtime, UINT32_C(0x00A11100), GENESIS_ACCESS_BYTE,
                                GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
   assert(runtime.devices.z80_bus.bus_requested == 1U);
-  assert(runtime.devices.z80_bus.bus_granted == 1U);
+  assert(runtime.devices.z80_bus.bus_granted == 1U); /* /RESET is still released */
 
   /* BUSACK read-back, BYTE: granted => D0 clear. */
   value = UINT32_C(0xFF);
@@ -139,30 +136,41 @@ int main(void) {
   value = UINT32_C(0x0000);
   assert(genesis_route_access(&runtime, UINT32_C(0x00A11200), GENESIS_ACCESS_WORD,
                                GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
-  assert(runtime.devices.z80_bus.reset_asserted == 1U);
-  /* Independence: a RESET write leaves the BUSREQ latch untouched. */
+  assert(runtime.devices.z80_bus.reset_released == 0U);
+  /* The request latch is untouched by a RESET write; the grant follows requested AND released. */
   assert(runtime.devices.z80_bus.bus_requested == 0U);
   assert(runtime.devices.z80_bus.bus_granted == 0U);
+  {
+    GenesisRuntime held = {0};
+    value = UINT32_C(0x0100);
+    assert(genesis_route_access(&held, UINT32_C(0x00A11200), GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+    assert(genesis_route_access(&held, UINT32_C(0x00A11100), GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+    assert(held.devices.z80_bus.bus_granted == 1U);
+    value = UINT32_C(0x0000);
+    assert(genesis_route_access(&held, UINT32_C(0x00A11200), GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+    assert(held.devices.z80_bus.reset_released == 0U && held.devices.z80_bus.bus_requested == 1U);
+    assert(held.devices.z80_bus.bus_granted == 0U); /* a /RESET assert drops the grant; the request stays recorded */
+  }
 
   value = UINT32_C(0x0100);
   assert(genesis_route_access(&runtime, UINT32_C(0x00A11200), GENESIS_ACCESS_WORD,
                                GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
-  assert(runtime.devices.z80_bus.reset_asserted == 0U);
+  assert(runtime.devices.z80_bus.reset_released == 1U);
 
   /* ---- Z80 RESET assert/release, BYTE ($A11200 D0). ---- */
   value = UINT32_C(0x00);
   assert(genesis_route_access(&runtime, UINT32_C(0x00A11200), GENESIS_ACCESS_BYTE,
                                GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
-  assert(runtime.devices.z80_bus.reset_asserted == 1U);
+  assert(runtime.devices.z80_bus.reset_released == 0U);
   value = UINT32_C(0x01);
   assert(genesis_route_access(&runtime, UINT32_C(0x00A11200), GENESIS_ACCESS_BYTE,
                                GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
-  assert(runtime.devices.z80_bus.reset_asserted == 0U);
+  assert(runtime.devices.z80_bus.reset_released == 1U);
   /* Other-bit tolerance for RESET: only D0 (BYTE) selects the line. */
   value = UINT32_C(0xFE);
   assert(genesis_route_access(&runtime, UINT32_C(0x00A11200), GENESIS_ACCESS_BYTE,
                                GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
-  assert(runtime.devices.z80_bus.reset_asserted == 1U);
+  assert(runtime.devices.z80_bus.reset_released == 0U);
 
   /* ---- Deterministic repeated execution of the documented startup shape
      (GTO1 p. 91: BUSREQ on, RESET off, ..., RESET on, BUSREQ off). ---- */
@@ -195,7 +203,7 @@ int main(void) {
     assert(memcmp(&a, &b, sizeof(a)) == 0);
     assert(a.devices.z80_bus.bus_requested == 0U);
     assert(a.devices.z80_bus.bus_granted == 0U);
-    assert(a.devices.z80_bus.reset_asserted == 1U);
+    assert(a.devices.z80_bus.reset_released == 0U);
   }
 
   /* ---- Adversarial: every excluded neighbour fails closed BEFORE any
@@ -229,7 +237,7 @@ int main(void) {
     GenesisRuntime before;
     rej.devices.z80_bus.bus_requested = 1U;
     rej.devices.z80_bus.bus_granted = 1U;
-    rej.devices.z80_bus.reset_asserted = 1U;
+    rej.devices.z80_bus.reset_released = 0U;
     before = rej;
     reject_z80_bus(&rej, &before, UINT32_C(0x00A11100), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);
     reject_z80_bus(&rej, &before, UINT32_C(0x00A11200), GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ);
@@ -263,7 +271,7 @@ int main(void) {
     assert(value == 0U);
     assert(clean.devices.z80_bus.bus_requested == 0U &&
            clean.devices.z80_bus.bus_granted == 0U &&
-           clean.devices.z80_bus.reset_asserted == 0U);
+           clean.devices.z80_bus.reset_released == 0U); /* power-on: held in reset */
   }
 
   return 0;

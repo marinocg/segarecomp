@@ -1,0 +1,31 @@
+# SEG-032-T008 (contract section 14): identifiers that must never appear in the Genesis Z80/audio/materialization production tree.
+# One case-insensitive regular expression per line; '#' starts a comment. Reading this list never names a commercial byte, address or hash.
+# titles and game identifiers
+sonic
+hedgehog
+golden[ _-]?axe
+streets[ _-]?of[ _-]?rage
+\bout[ _-]?run\b
+cool[ _-]?spot
+\bgame[ _-]?id\b
+\btitle[ _-]?id\b
+# the known Sega-era compression / driver families (a decompressor name would be per-title knowledge)
+saxman
+kosinski
+nemesis
+enigma
+comper
+smps
+# per-game images, driver lists, sample ranges, manual dumps, recorded coverage used as discovery authority
+image[ _-]?list
+driver[ _-]?list
+driver[ _-]?manifest
+image[ _-]?manifest
+z80[ _-]?manifest
+per[ _-]?game
+pcm[ _-]?range
+sample[ _-]?(range|table)s?\b
+z80[ _-]?ram[ _-]?dump
+coverage[ _-]?(seed|hint|manifest)
+# a hash literal (a ROM hash selecting behaviour, or a content hash baked into the source)
+(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])

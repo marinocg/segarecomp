@@ -10,6 +10,7 @@ third-party inputs (`install.cmake`). `.github/workflows/release.yml` does exact
 | Input | Version | Notes |
 | --- | --- | --- |
 | Zig (bundled `zig cc`) | 0.15.2 | official archives, SHA-256 in `release.yml`; MIT; used only to compile generated C |
+| ymfm (vendored) | 81aec25 | YM2612 core, BSD-3-Clause; compiled with `zig c++` and linked without a C++ runtime (shim) |
 | SDL3 | 3.4.16 | macOS/Linux built from the official source tarball (shared); Windows: official `VC` devel (launcher, DLL) and `mingw` devel (import lib for Zig) |
 | Dear ImGui | 1.92.9b | fetched at configure time with a pinned hash (`apps/segarecomp-launcher/CMakeLists.txt`) |
 | stb_image.h | pinned commit | fetched at configure time with a pinned hash; decodes the launcher's own PNG assets only |
@@ -66,6 +67,9 @@ toolchain/  (Zig)   sdl3/{include,lib}  runtime/{platforms,libs}  licenses/  REA
 `libs/device/sega/psg` and the Z80 runtime ABI header under `libs/codegen/c11/include`); `segarecomp build --runtime-dir
 <root>/platforms/master-system` derives the shared library sources from the same root. The Master System mapper is
 declared (launcher selection control, `<rom>.mapper.json` sidecar, or `--mapper`), never inferred.
+The Genesis build (SEG-032-T008) also derives `libs/device/sega/{psg,ym2612}` and the Z80 runtime ABI header from the same root: it
+runs the build-time Z80 image materialization fixed point (several short headless runs of the program under the bundled compiler)
+and compiles the vendored ymfm core with `<cc> c++` (derived from the `cc` argument, or given by `--cxx`/`--cxx-arg`).
 
 ## Local staging (macOS/Linux)
 

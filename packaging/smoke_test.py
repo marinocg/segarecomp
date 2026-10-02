@@ -8,6 +8,7 @@ core the GUI uses. The child environment is scrubbed: an empty PATH (no cc/clang
 can be found), no CC/CXX, a throw-away HOME and cache. Nothing from the build tree is referenced.
 This script itself is CI glue and is not part of the shipped package.
 """
+import re
 import hashlib
 import os
 import pathlib
@@ -21,6 +22,16 @@ IMAGE = bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x70, 0x00, 0x4E,
 
 
 CACHE_FOR_DIAGNOSTICS = []
+
+
+# `segarecomp build` logs a link step as the pseudo-command `$ (link)` (target detail is on a `# link target=` comment line).
+LINK_LINE = re.compile(r"^\$ \(link\)$")
+
+def hermetic_compile_lines(build_log, compiler):
+    """True when the build log has command lines and every `$ ` line is the bundled compiler or the `$ (link)` pseudo-marker.
+    `#` comment lines (e.g. `# link target=`) are not commands and are ignored."""
+    lines = [line for line in build_log.splitlines() if line.startswith("$ ")]
+    return bool(lines) and all(line.startswith(f"$ {compiler}") or LINK_LINE.match(line) for line in lines)
 
 
 def require(condition, message):
@@ -69,9 +80,7 @@ def smoke_master_system(tmp, launch):
     build_log = (entry / "build.log").read_text(encoding="utf-8")
     require(f"cc={compiler}" in build_log and "mapper=sega" in build_log and "mapper_declaration_source=build_option" in build_log,
             "SMS build.log must record the toolchain, mapper and declaration source")
-    compile_lines = [line for line in build_log.splitlines() if line.startswith("$ ")]
-    require(compile_lines and all(line.startswith(f"$ {compiler}") or line.startswith("$ (link)") for line in compile_lines),
-            "every SMS compile command must invoke the bundled compiler")
+    require(hermetic_compile_lines(build_log, compiler), "every SMS compile command must invoke the bundled compiler")
     require("viewer outcome 1 frames 60" in (entry / "run.log").read_text(encoding="utf-8"), "the SMS viewer must run its 60 frames")
     meta = (entry / "metadata.json").read_text(encoding="utf-8")
     require('"platform":"master-system"' in meta and '"mapper":"sega"' in meta and '"profile":"sms2_ntsc_export"' in meta and str(rom) not in meta,
@@ -128,9 +137,7 @@ def main():
         entry = pathlib.Path(first["entry"])
         build_log = (entry / "build.log").read_text(encoding="utf-8")
         require(f"cc={compiler}" in build_log, "build.log must show the bundled compiler was configured")
-        compile_lines = [line for line in build_log.splitlines() if line.startswith("$ ")]
-        require(compile_lines and all(line.startswith(f"$ {compiler}") or line.startswith("$ (link)") for line in compile_lines),
-                "every compile command must invoke the bundled compiler")
+        require(hermetic_compile_lines(build_log, compiler), "every compile command must invoke the bundled compiler")
         run_log = (entry / "run.log").read_text(encoding="utf-8")
         require("VIEWER_SUMMARY" in run_log and '"result":"stop"' in run_log and digest in run_log,
                 "the launched program must reach the synthetic checkpoint (sanitized stop report)")

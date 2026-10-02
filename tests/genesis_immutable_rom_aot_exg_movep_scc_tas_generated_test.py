@@ -156,11 +156,11 @@ int main(void) {
   runtime = fresh(0x0F16, 0x2704); runtime.d[3] = 0xDEADBE00;
   runtime.a[0] = runtime.a[1] = runtime.a[7] = 0x00C00011;
   step(&runtime, 0x0F18, 6);
-  assert(runtime.d[3] == 0xDEADBEFF && runtime.sr == 0x2704 && runtime.devices.psg.latch_valid == 0U);
+  assert(runtime.d[3] == 0xDEADBEFF && runtime.sr == 0x2704 && runtime.devices.psg.write_count == 0U);
   runtime = fresh(0x0F16, 0x2700); runtime.d[3] = 0xDEADBEFF;
   runtime.a[0] = runtime.a[1] = runtime.a[7] = 0x00C00011;
   step(&runtime, 0x0F18, 4);
-  assert(runtime.d[3] == 0xDEADBE00 && runtime.devices.psg.latch_valid == 0U);
+  assert(runtime.d[3] == 0xDEADBE00 && runtime.devices.psg.write_count == 0U);
 
   /* Memory Scc reads its byte destination BEFORE writing it. The PSG port at 0xC00011 is an existing asymmetric
      lane: a byte WRITE is recognised (proved directly below) but a byte READ is rejected, so a write-only implementation
@@ -169,7 +169,7 @@ int main(void) {
     GenesisRuntime probe = fresh(0x0F18, 0x2700);
     uint32_t probe_value = 0xFF; GenesisRuntimeStop probe_stop = {0};
     assert(genesis_route_access(&probe, 0x00C00011, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &probe_value, &probe_stop) ==
-           GENESIS_ACCESS_OK && probe.devices.psg.latch_valid == 1U);
+           GENESIS_ACCESS_OK && probe.devices.psg.write_count == 1U);
     probe_value = 0;
     assert(genesis_route_access(&probe, 0x00C00011, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &probe_value, &probe_stop) !=
            GENESIS_ACCESS_OK);
@@ -179,19 +179,19 @@ int main(void) {
   transfer = genesis_bridge_dispatch(&runtime);
   assert(transfer.kind == GENESIS_STOP && transfer.stop.provenance.has_access &&
          transfer.stop.provenance.access_direction == GENESIS_ACCESS_READ && transfer.stop.provenance.access_address == 0x00C00011U);
-  assert(runtime.pc == 0x0F18 && runtime.a[0] == 0x00C00011 && runtime.sr == 0x2700 && runtime.devices.psg.latch_valid == 0U &&
-         runtime.devices.psg.attenuation[3] == 0U);
+  assert(runtime.pc == 0x0F18 && runtime.a[0] == 0x00C00011 && runtime.sr == 0x2700 && runtime.devices.psg.write_count == 0U &&
+         runtime.devices.psg.write_digest == 0U);
   /* ST -(A7): A7 = 0xC00013 decrements by two to the same port; the read stops it, A7 untouched. */
   runtime = fresh(0x0F1A, 0x2715); runtime.a[7] = 0x00C00013;
   transfer = genesis_bridge_dispatch(&runtime);
   assert(transfer.kind == GENESIS_STOP && transfer.stop.provenance.access_direction == GENESIS_ACCESS_READ &&
          transfer.stop.provenance.access_address == 0x00C00011U);
-  assert(runtime.pc == 0x0F1A && runtime.a[7] == 0x00C00013 && runtime.sr == 0x2715 && runtime.devices.psg.latch_valid == 0U);
+  assert(runtime.pc == 0x0F1A && runtime.a[7] == 0x00C00013 && runtime.sr == 0x2715 && runtime.devices.psg.write_count == 0U);
   /* SEQ (A1) (true: Z set). */
   runtime = fresh(0x0F24, 0x2704); runtime.a[1] = 0x00C00011;
   transfer = genesis_bridge_dispatch(&runtime);
   assert(transfer.kind == GENESIS_STOP && transfer.stop.provenance.access_direction == GENESIS_ACCESS_READ);
-  assert(runtime.pc == 0x0F24 && runtime.a[1] == 0x00C00011 && runtime.sr == 0x2704 && runtime.devices.psg.latch_valid == 0U);
+  assert(runtime.pc == 0x0F24 && runtime.a[1] == 0x00C00011 && runtime.sr == 0x2704 && runtime.devices.psg.write_count == 0U);
 
   /* SEG-021-T036: the write-only Z80 RESET register ($A11200). Memory Scc discards its read, and a discarded BYTE read of
      the even register address is admitted (open bus on hardware, no side effect: MacDonald hardware notes v0.8 section 1
@@ -208,23 +208,23 @@ int main(void) {
     assert(memcmp(&before, &probe.devices.z80_bus, sizeof before) == 0);
   }
   /* SNE (A0)+ (true: Z clear) writes 0xFF: D0 = 1 releases reset; A0 += 1. */
-  runtime = fresh(0x0F18, 0x2700); runtime.a[0] = 0x00A11200; runtime.devices.z80_bus.reset_asserted = 1U;
+  runtime = fresh(0x0F18, 0x2700); runtime.a[0] = 0x00A11200; runtime.devices.z80_bus.reset_released = 0U;
   step(&runtime, 0x0F1A, 12);
-  assert(runtime.a[0] == 0x00A11201 && runtime.devices.z80_bus.reset_asserted == 0U && runtime.sr == 0x2700);
+  assert(runtime.a[0] == 0x00A11201 && runtime.devices.z80_bus.reset_released == 1U && runtime.sr == 0x2700);
   /* ST -(A7): A7 = $A11202 steps two onto the register; 0xFF releases reset (14 cycles). */
-  runtime = fresh(0x0F1A, 0x2715); runtime.a[7] = 0x00A11202; runtime.devices.z80_bus.reset_asserted = 1U;
+  runtime = fresh(0x0F1A, 0x2715); runtime.a[7] = 0x00A11202; runtime.devices.z80_bus.reset_released = 0U;
   step(&runtime, 0x0F1C, 14);
-  assert(runtime.a[7] == 0x00A11200 && runtime.devices.z80_bus.reset_asserted == 0U && runtime.sr == 0x2715);
+  assert(runtime.a[7] == 0x00A11200 && runtime.devices.z80_bus.reset_released == 1U && runtime.sr == 0x2715);
   /* SEQ (A1) (false: Z clear) writes 0x00: D0 = 0 asserts reset; A1 never updated. */
   runtime = fresh(0x0F24, 0x2700); runtime.a[1] = 0x00A11200;
   step_to_end(&runtime, 0x0F26, 12);
-  assert(runtime.a[1] == 0x00A11200 && runtime.devices.z80_bus.reset_asserted == 1U && runtime.sr == 0x2700);
+  assert(runtime.a[1] == 0x00A11200 && runtime.devices.z80_bus.reset_released == 0U && runtime.sr == 0x2700);
   /* The odd byte $A11201 is not the register: SNE (A0)+ still stops at the READ, nothing committed. */
   runtime = fresh(0x0F18, 0x2700); runtime.a[0] = 0x00A11201;
   transfer = genesis_bridge_dispatch(&runtime);
   assert(transfer.kind == GENESIS_STOP && transfer.stop.provenance.access_direction == GENESIS_ACCESS_READ &&
          transfer.stop.provenance.access_address == 0x00A11201U);
-  assert(runtime.pc == 0x0F18 && runtime.a[0] == 0x00A11201 && runtime.devices.z80_bus.reset_asserted == 0U);
+  assert(runtime.pc == 0x0F18 && runtime.a[0] == 0x00A11201 && runtime.devices.z80_bus.reset_released == 0U); /* power-on: held in reset, unchanged */
   /* TAS (A2)+ consumes its read: stop at the READ of $A11200, A2/CCR/reset state unchanged. */
   runtime = fresh(0x0F1E, 0x2713); runtime.a[2] = 0x00A11200;
   transfer = genesis_bridge_dispatch(&runtime);
@@ -233,7 +233,7 @@ int main(void) {
          transfer.stop.provenance.access_address == 0x00A11200U &&
          transfer.stop.provenance.access_width == GENESIS_ACCESS_BYTE);
   assert(runtime.pc == 0x0F1E && runtime.a[2] == 0x00A11200 && runtime.sr == 0x2713 &&
-         runtime.devices.z80_bus.reset_asserted == 0U);
+         runtime.devices.z80_bus.reset_released == 0U); /* unchanged (power-on: held in reset) */
 
   /* Write failure AFTER a successful read: an owned read-only cartridge region is readable but not writable. The stop
      is the WRITE (so the read was performed first); no auto-update commit, PC and CCR unchanged, region data intact. */

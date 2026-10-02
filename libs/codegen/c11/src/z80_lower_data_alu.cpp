@@ -51,14 +51,13 @@ Acc access(const LowerContext& c, Operand op, unsigned field) {
     case Operand::hl_ind: return mem_acc("const uint16_t ea = " + hl_expr() + ";\n");
     case Operand::ix_d:
     case Operand::iy_d: {
-      const unsigned d = static_cast<unsigned>(cpu::z80::displacement(c.instruction).value_or(0)) & 0xFFFFu;
-      return mem_acc("const uint16_t ea = (uint16_t)(" + index_reg(c) + " + " + hex_literal(d, 4) + ");\ns->wz = ea;\n");
+      return mem_acc("const uint16_t ea = (uint16_t)(" + index_reg(c) + " + " + operand_disp16(c) + ");\ns->wz = ea;\n");
     }
     case Operand::ix_half: return half_acc("s->ix", field);
     case Operand::iy_half: return half_acc("s->iy", field);
     case Operand::n: {
       Acc a;
-      a.rd = "((uint8_t)" + hex_literal(cpu::z80::immediate(c.instruction).value_or(0) & 0xFFu, 2) + ")";
+      a.rd = "((uint8_t)" + operand_imm8(c) + ")";
       a.writable = false;
       return a;
     }
@@ -144,26 +143,22 @@ Lowered lower_ld_rr_ind_a(const LowerContext& c) {  // LD (BC|DE),A: MEMPTR = (A
 }
 
 Lowered lower_ld_a_nn(const LowerContext& c) {
-  const unsigned nn = cpu::z80::immediate(c.instruction).value_or(0);
-  return effect("s->a = z80_read(rt, " + hex_literal(nn, 4) + ");\ns->wz = " + hex_literal((nn + 1u) & 0xFFFFu, 4) + ";\n");
+  return effect("s->a = z80_read(rt, " + operand_imm16(c) + ");\ns->wz = " + operand_imm16_plus1(c) + ";\n");
 }
 
 Lowered lower_ld_nn_a(const LowerContext& c) {
-  const unsigned nn = cpu::z80::immediate(c.instruction).value_or(0);
-  return effect("z80_write(rt, " + hex_literal(nn, 4) + ", s->a);\ns->wz = (uint16_t)(((uint16_t)s->a << 8) | " +
-                hex_literal((nn + 1u) & 0xFFu, 2) + ");\n");
+  return effect("z80_write(rt, " + operand_imm16(c) + ", s->a);\ns->wz = (uint16_t)(((uint16_t)s->a << 8) | " +
+                operand_imm16_plus1_low8(c) + ");\n");
 }
 
 Lowered lower_ld_rr_nn(const LowerContext& c) {
-  const unsigned nn = cpu::z80::immediate(c.instruction).value_or(0);
-  return effect(set16(pick16(c.form.dst, rr_field(c)), hex_literal(nn, 4)));
+  return effect(set16(pick16(c.form.dst, rr_field(c)), operand_imm16(c)));
 }
 
 // LD (nn),rr and LD rr,(nn) for HL, IX, IY and the ED BC/DE/SP forms: low byte first, MEMPTR = nn + 1.
 Lowered lower_ld16_mem(const LowerContext& c) {
-  const unsigned nn = cpu::z80::immediate(c.instruction).value_or(0);
-  const std::string lo = hex_literal(nn, 4);
-  const std::string hi = hex_literal((nn + 1u) & 0xFFFFu, 4);
+  const std::string lo = operand_imm16(c);
+  const std::string hi = operand_imm16_plus1(c);
   const bool store = c.form.dst == Operand::nn_ind;
   const Operand reg_op = store ? c.form.src : c.form.dst;
   const P16 reg = pick16(reg_op, rr_field(c));

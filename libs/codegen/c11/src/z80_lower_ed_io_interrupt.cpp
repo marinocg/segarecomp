@@ -86,15 +86,13 @@ Lowered lower_retn_reti(const LowerContext&) {
 // ---- I/O ----
 
 Lowered lower_in_a_n(const LowerContext& c) {
-  const unsigned n = cpu::z80::immediate(c.instruction).value_or(0);
-  return effect("{ uint16_t port = (uint16_t)(((uint16_t)s->a << 8) | " + hex_literal(n, 2) + ");\n s->wz = (uint16_t)(port + 1u);\n"
+  return effect("{ uint16_t port = (uint16_t)(((uint16_t)s->a << 8) | " + operand_imm8(c) + ");\n s->wz = (uint16_t)(port + 1u);\n"
                 " s->a = z80_io_in(rt, port);\n}\n");
 }
 
 Lowered lower_out_n_a(const LowerContext& c) {
-  const unsigned n = cpu::z80::immediate(c.instruction).value_or(0);
-  return effect("{ uint16_t port = (uint16_t)(((uint16_t)s->a << 8) | " + hex_literal(n, 2) + ");\n"
-                " s->wz = (uint16_t)(((uint16_t)s->a << 8) | " + hex_literal((n + 1u) & 0xFFu, 2) + ");\n"
+  return effect("{ uint16_t port = (uint16_t)(((uint16_t)s->a << 8) | " + operand_imm8(c) + ");\n"
+                " s->wz = (uint16_t)(((uint16_t)s->a << 8) | " + operand_imm8_plus1(c) + ");\n"
                 " z80_io_out(rt, port, s->a);\n}\n");
 }
 

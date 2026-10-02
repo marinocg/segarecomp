@@ -52,7 +52,14 @@ case "$keep" in
     exit 2
     ;;
 esac
-# Never used: no C++ is ever compiled, and neither the sanitizer runtime, the web playground tool, nor
-# `zig init`'s templates are reachable from a plain `zig cc` invocation.
-rm -rf "$lib/docs" "$lib/libtsan" "$lib/libcxx" "$lib/libcxxabi" "$lib/libunwind" "$lib/build-web" "$lib/init"
+# Never used: neither the sanitizer runtime, the web playground tool, nor `zig init`'s templates are reachable from a
+# plain `zig cc` invocation. SEG-032-T007 (ADR 0074): the vendored YM2612 core is C++ and is compiled by the package with
+# `zig c++` WITHOUT a C++ runtime (the C-driver link uses src/cxx_runtime_shim.c), so ONLY the libc++/libc++abi HEADERS are
+# kept (lib/libcxx/include, lib/libcxxabi/include); their sources, tests and the unwinder stay removed.
+rm -rf "$lib/docs" "$lib/libtsan" "$lib/libunwind" "$lib/build-web" "$lib/init"
+for d in libcxx libcxxabi; do
+  if [ -d "$lib/$d" ]; then
+    find "$lib/$d" -mindepth 1 -maxdepth 1 ! -name include -exec rm -rf {} +
+  fi
+done
 du -sh "$lib"

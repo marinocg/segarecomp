@@ -46,9 +46,7 @@ Lowered lower_cb_bit_prefix(const LowerContext& c) {
     out += "uint16_t a = (uint16_t)(((uint16_t)s->h << 8) | s->l);\nuint8_t v = z80_read(rt, a);\n";
   } else if (indexed) {
     const bool ix = loc == Operand::ix_d || loc == Operand::ix_d_copy_r;
-    const unsigned d = static_cast<unsigned>(static_cast<std::uint16_t>(
-        static_cast<std::int16_t>(cpu::z80::displacement(c.instruction).value_or(0))));
-    out += std::string("uint16_t a = (uint16_t)(") + (ix ? "s->ix" : "s->iy") + " + " + hex_literal(d, 4) +
+    out += std::string("uint16_t a = (uint16_t)(") + (ix ? "s->ix" : "s->iy") + " + " + operand_disp16(c) +
            ");\ns->wz = a;\nuint8_t v = z80_read(rt, a);\n";
   } else {
     out += "uint8_t v = " + reg8(op & 7u) + ";\n";

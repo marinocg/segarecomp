@@ -1,42 +1,19 @@
 #!/usr/bin/env python3
-"""SEG-007-T109: direct, isolated coverage of genesis_route_access's PSG
-(SN76489) audio-port routing extension -- the single co-located port at the
-odd byte address $C00011.
+"""SEG-007-T109, rewritten by SEG-032-T006 (ADR 0072, contract section 9): the 68000's PSG (SN76489) port through
+genesis_route_access, without a sound device and with a recording stand-in device.
 
-This proves the runtime routing function alone -- no compiled/executed
-generated program is involved. It calls `genesis_route_access` directly,
-exactly as tests/genesis_startup_runtime_z80_bus_test.py does, against a real
-`GenesisRuntime`, and asserts on the return value, `*value`, `stop`, and the
-resulting `runtime.devices.psg` latch fields.
-
-The modelled behaviour is an explicitly labelled, replaceable PROJECT
-COMPATIBILITY POLICY (see
-docs/architecture/genesis-psg-sn76489-port-write-compatibility-policy.md), not
-verified SN76489/Genesis hardware behaviour. There is no audio synthesis. The
-SN76489 command-byte format is triangulated across SMS Power
-"Development/SN76489", plutiedev.com "psg", and Charles MacDonald's Sega
-Genesis hardware notes; the port address is GTO1 v1.00 p. 10.
-
-All values below are synthetic; none are commercial-derived.
-
-Covered:
-- LATCH+DATA byte for a tone channel updates the latch (channel + tone/noise
-  selector) and writes the low 4 bits of that channel's 10-bit period.
-- A following DATA byte sets the high 6 bits of the last-latched tone channel's
-  period.
-- Volume/attenuation LATCH byte per channel; a following DATA byte updates the
-  4-bit attenuation.
-- Noise-control LATCH byte (channel 3) and a following DATA byte.
-- Each of the four channels.
-- Determinism: a mixed write sequence run twice over two runtimes yields
-  byte-identical device state.
-- Adversarial fail-closed-BEFORE-mutation for every excluded neighbour: WORD
-  and LONG width, a PSG-port READ (WORD and BYTE), a wrong address just outside
-  the tight interval (must keep the PRE-EXISTING VDP / unmapped fail-close, NOT
-  the PSG diagnostic), the reserved noise LATCH encoding (channel 3, tone/noise
-  type, data bit 3 set), and a DATA byte with no prior LATCH. Every rejected
-  access leaves the whole `GenesisRuntime` byte-identical to a zeroed/snapshot
-  copy and the caller's `value` untouched.
+The SEG-007 command-latch compatibility model is retired: the PSG is the shared Sega device (libs/device/sega/psg) attached by the
+program through `runtime->audio_hooks` and reached by BOTH CPUs; the real device is covered by tests/genesis_audio_psg_test.py. What the
+runtime itself owns, and this test proves, is the 68000-side port:
+- BYTE writes at the four odd addresses $C00011/13/15/17 (GTO1 v1.00 p. 10; MacDonald, Genesis Plus GX and ares agree) are accepted
+  and delivered to the attached device with the byte and the guest time of the access; without a device they are accepted and
+  discarded (absent hardware);
+- the evidence-bearing PSG record is the log of the port traffic: byte count and an FNV-1a digest over the bytes in order;
+- fail closed BEFORE any mutation (the whole GenesisRuntime stays byte-identical, the caller's value untouched): a read (the chip is
+  write-only), WORD and LONG width, and a device that rejects the byte (typed GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG); the even
+  neighbours keep the pre-existing VDP lane's result, not the PSG diagnostic;
+- determinism: a mixed sequence run twice yields byte-identical runtimes.
+All values are synthetic.
 """
 import pathlib
 import subprocess
@@ -50,240 +27,107 @@ HARNESS = r'''
 #include <string.h>
 #include "runtime.h"
 
-#define PSG_PORT UINT32_C(0x00C00011)
+static uint8_t seen_bytes[64];
+static uint64_t seen_ticks[64];
+static unsigned seen_count;
+static int device_accepts = 1;
 
-/* A rejected access must fail closed with the PSG device diagnostic AND mutate
-   neither the runtime nor the caller's value. */
-static void reject_psg(GenesisRuntime *runtime, const GenesisRuntime *snapshot,
-                        uint32_t address, GenesisAccessWidth width,
-                        GenesisAccessDirection direction) {
-  GenesisRuntimeStop stop = {0};
-  uint32_t value = UINT32_C(0xDEADBEEF);
-  assert(genesis_route_access(runtime, address, width, direction, &value, &stop) ==
-         GENESIS_ACCESS_FAIL);
-  assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS);
-  assert(stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG);
-  assert(value == UINT32_C(0xDEADBEEF));
-  assert(memcmp(runtime, snapshot, sizeof(*runtime)) == 0);
+static int recorder(void *context, GenesisRuntime *runtime, uint8_t value, uint64_t master_ticks) {
+  (void)context; (void)runtime;
+  if (!device_accepts) return 0;
+  seen_bytes[seen_count] = value;
+  seen_ticks[seen_count++] = master_ticks;
+  return 1;
 }
 
-/* A rejected access that must keep a PRE-EXISTING (non-PSG) fail-close. */
-static void reject_preexisting(GenesisRuntime *runtime, const GenesisRuntime *snapshot,
-                                uint32_t address, GenesisAccessWidth width,
-                                GenesisAccessDirection direction,
-                                GenesisStopClass want_class,
-                                GenesisDiagnosticCategory want_category) {
-  GenesisRuntimeStop stop = {0};
-  uint32_t value = UINT32_C(0xDEADBEEF);
-  assert(genesis_route_access(runtime, address, width, direction, &value, &stop) ==
-         GENESIS_ACCESS_FAIL);
-  assert(stop.stop_class == want_class);
-  assert(stop.diagnostic_category == want_category);
-  assert(stop.diagnostic_category != GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG);
-  assert(value == UINT32_C(0xDEADBEEF));
-  assert(memcmp(runtime, snapshot, sizeof(*runtime)) == 0);
+static uint32_t digest_of(const uint8_t *bytes, unsigned count) {
+  uint32_t d = UINT32_C(2166136261);
+  unsigned i;
+  for (i = 0; i < count; ++i) d = (d ^ bytes[i]) * UINT32_C(16777619);
+  return d;
 }
 
-static void psg_write(GenesisRuntime *runtime, uint8_t command) {
+static void write_byte(GenesisRuntime *r, uint32_t address, uint8_t byte) {
   GenesisRuntimeStop stop = {0};
-  uint32_t value = command;
-  assert(genesis_route_access(runtime, PSG_PORT, GENESIS_ACCESS_BYTE,
-                               GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
-  assert(value == command); /* a WRITE never mutates the caller's value */
+  uint32_t value = byte;
+  assert(genesis_route_access(r, address, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+  assert(value == byte);
+}
+
+static void reject(GenesisRuntime *r, uint32_t address, GenesisAccessWidth width, GenesisAccessDirection direction,
+                   GenesisStopClass stop_class, GenesisDiagnosticCategory diagnostic) {
+  GenesisRuntime before = *r;
+  GenesisRuntimeStop stop = {0};
+  uint32_t value = UINT32_C(0xDEADBEEF);
+  assert(genesis_route_access(r, address, width, direction, &value, &stop) == GENESIS_ACCESS_FAIL);
+  assert(stop.stop_class == stop_class && stop.diagnostic_category == diagnostic);
+  assert(value == UINT32_C(0xDEADBEEF));
+  assert(memcmp(r, &before, sizeof(*r)) == 0);
 }
 
 int main(void) {
-  const GenesisRuntime zeroed = {0};
-  GenesisRuntimeStop stop = {0};
-  uint32_t value;
+  static const uint32_t ports[4] = {UINT32_C(0x00C00011), UINT32_C(0x00C00013), UINT32_C(0x00C00015), UINT32_C(0x00C00017)};
+  static const uint8_t sequence[8] = {0x9F, 0x80, 0x0A, 0xBF, 0xDF, 0xFF, 0xE5, 0x03};
+  static const GenesisAudioHooks hooks = {0, recorder, 0, 0, 0, 0};
+  unsigned i;
 
-  /* ---- LATCH+DATA byte for a tone channel, then a DATA byte. ----
-     Tone latch: %1 cc 0 dddd. Channel 1, tone/noise, low nibble 0xA => 0xAA.
-     ($80 | (1<<5) | 0x0A). */
+  /* ---- no sound device attached: accepted and discarded, the log still counts ---- */
   {
     GenesisRuntime r = {0};
-    psg_write(&r, 0xAAU);
-    assert(r.devices.psg.latch_valid == 1U);
-    assert(r.devices.psg.latched_channel == 1U);
-    assert(r.devices.psg.latched_volume == 0U);
-    assert(r.devices.psg.tone_period[1] == UINT16_C(0x000A));
-    /* DATA byte %0-DDDDDD: high 6 bits of the 10-bit period. 0x2D => 0x2D << 4. */
-    psg_write(&r, 0x2DU);
-    assert(r.devices.psg.tone_period[1] == (uint16_t)((0x2DU << 4) | 0x0AU));
-    /* Other channels/registers untouched. */
-    assert(r.devices.psg.tone_period[0] == 0U && r.devices.psg.tone_period[2] == 0U);
-    assert(r.devices.psg.attenuation[0] == 0U && r.devices.psg.attenuation[1] == 0U);
-    assert(r.devices.psg.noise_control == 0U);
+    for (i = 0; i < 8; ++i) write_byte(&r, ports[i % 4], sequence[i]);
+    assert(r.devices.psg.write_count == 8U && r.devices.psg.write_digest == digest_of(sequence, 8));
   }
 
-  /* ---- Volume/attenuation LATCH byte, then a DATA byte, each channel. ----
-     Volume latch: %1 cc 1 dddd => $90 | (channel<<5) | attenuation. */
+  /* ---- an attached device sees every byte with the guest time of the access ---- */
   {
     GenesisRuntime r = {0};
-    uint8_t channel;
-    for (channel = 0U; channel < 4U; ++channel) {
-      psg_write(&r, (uint8_t)(0x90U | (channel << 5) | 0x0FU)); /* attenuation 15 (silent) */
-      assert(r.devices.psg.latched_channel == channel);
-      assert(r.devices.psg.latched_volume == 1U);
-      assert(r.devices.psg.attenuation[channel] == 0x0FU);
+    r.audio_hooks = &hooks;
+    for (i = 0; i < 8; ++i) {
+      r.scheduler.master_ticks = 1000U + 7U * i;
+      write_byte(&r, ports[i % 4], sequence[i]);
     }
-    /* All four channels silenced; tone periods untouched. */
-    assert(r.devices.psg.attenuation[0] == 0x0FU && r.devices.psg.attenuation[1] == 0x0FU &&
-           r.devices.psg.attenuation[2] == 0x0FU && r.devices.psg.attenuation[3] == 0x0FU);
-    assert(r.devices.psg.tone_period[0] == 0U);
-    /* A DATA byte updates the last-latched (channel 3) attenuation, low 4 bits. */
-    psg_write(&r, 0x33U); /* %00 110011 -> low nibble 0x3 */
-    assert(r.devices.psg.attenuation[3] == 0x03U);
+    assert(seen_count == 8U && memcmp(seen_bytes, sequence, 8) == 0);
+    for (i = 0; i < 8; ++i) assert(seen_ticks[i] == 1000U + 7U * i);
+    assert(r.devices.psg.write_count == 8U && r.devices.psg.write_digest == digest_of(sequence, 8));
   }
 
-  /* ---- Each tone channel via LATCH low nibble. ---- */
+  /* ---- fail closed before any mutation ---- */
   {
     GenesisRuntime r = {0};
-    psg_write(&r, 0x80U | 0x03U);            /* channel 0 tone, nibble 3 */
-    assert(r.devices.psg.tone_period[0] == UINT16_C(0x0003));
-    psg_write(&r, 0x80U | (2U << 5) | 0x07U); /* channel 2 tone, nibble 7 */
-    assert(r.devices.psg.latched_channel == 2U);
-    assert(r.devices.psg.tone_period[2] == UINT16_C(0x0007));
+    r.audio_hooks = &hooks;
+    seen_count = 0;
+    write_byte(&r, ports[0], 0x90);
+    reject(&r, ports[0], GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG);
+    reject(&r, ports[1], GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG);
+    /* WORD/LONG at the odd address are caught by the odd-effective-address guard before the PSG lane */
+    reject(&r, ports[0], GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_ODD_EFFECTIVE_ADDRESS);
+    reject(&r, ports[0], GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_ODD_EFFECTIVE_ADDRESS);
+    /* a device that rejects the byte: typed stop, the log is not advanced */
+    device_accepts = 0;
+    reject(&r, ports[2], GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG);
+    device_accepts = 1;
+    assert(r.devices.psg.write_count == 1U && seen_count == 1U);
+    /* the even neighbours are not PSG ports: the pre-existing VDP lane answers */
+    {
+      GenesisRuntimeStop stop = {0};
+      uint32_t value = 0x55U;
+      assert(genesis_route_access(&r, UINT32_C(0x00C00010), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+      assert(stop.diagnostic_category != GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG);
+    }
   }
 
-  /* ---- Noise-control LATCH byte (channel 3) and a following DATA byte. ----
-     Noise latch: %1 11 0 dddd, documented set $E0-$E7. $E5 => bits: feedback
-     mode 1 (white), shift rate 1. */
+  /* ---- determinism ---- */
   {
-    GenesisRuntime r = {0};
-    psg_write(&r, 0xE5U);
-    assert(r.devices.psg.latched_channel == 3U);
-    assert(r.devices.psg.latched_volume == 0U);
-    assert(r.devices.psg.noise_control == 0x05U);
-    /* A DATA byte re-writes the 3-bit noise register (low 3 bits). */
-    psg_write(&r, 0x02U);
-    assert(r.devices.psg.noise_control == 0x02U);
-  }
-
-  /* ---- Determinism: a mixed write sequence run twice over two runtimes
-     yields byte-identical device state. ---- */
-  {
-    GenesisRuntime a = {0};
-    GenesisRuntime b = {0};
-    static const uint8_t sequence[] = {
-      0x9FU, 0xBFU, 0xDFU, 0xFFU, /* silence all four channels (standard mute) */
-      0x84U, 0x2CU,               /* channel 0 tone: low nibble 4, then high 6 bits 0x2C */
-      0xC1U, 0x08U,               /* channel 2 tone: low nibble 1, then high bits 0x08 */
-      0xE7U,                      /* noise: white, tone2 rate */
-      0x90U, 0x0AU,               /* channel 0 volume latch 0, then DATA atten 0x0A */
-    };
+    GenesisRuntime a = {0}, b = {0};
     int run;
-    size_t i;
     for (run = 0; run < 2; ++run) {
-      GenesisRuntime *r = (run == 0) ? &a : &b;
-      for (i = 0U; i < sizeof(sequence) / sizeof(sequence[0]); ++i)
-        psg_write(r, sequence[i]);
+      GenesisRuntime *r = run == 0 ? &a : &b;
+      r->audio_hooks = &hooks;
+      seen_count = 0;
+      for (i = 0; i < 8; ++i) { r->scheduler.master_ticks += 9U; write_byte(r, ports[(i * 3) % 4], sequence[i]); }
     }
     assert(memcmp(&a, &b, sizeof(a)) == 0);
-    assert(a.devices.psg.latch_valid == 1U);
   }
-
-  /* ---- Adversarial: every excluded neighbour fails closed BEFORE any
-     mutation, against an all-zero runtime left byte-identical to `zeroed`. ---- */
-  {
-    GenesisRuntime rej = {0};
-    /* A PSG-port READ (write-only device): BYTE reaches the PSG lane's own
-       direction check. */
-    reject_psg(&rej, &zeroed, PSG_PORT, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ);
-    /* The reserved noise LATCH encodings: channel 3, tone/noise type, data bit
-       3 set ($E8 = %1 11 0 1000, $EF = %1 11 0 1111) -- outside the documented
-       $E0-$E7 set -- plus a bare DATA byte with no prior LATCH. */
-    {
-      static const uint8_t reserved[] = {0xE8U, 0xEFU};
-      size_t i;
-      for (i = 0U; i < sizeof(reserved) / sizeof(reserved[0]); ++i) {
-        GenesisRuntimeStop s = {0};
-        uint32_t v = reserved[i];
-        assert(genesis_route_access(&rej, PSG_PORT, GENESIS_ACCESS_BYTE,
-                                     GENESIS_ACCESS_WRITE, &v, &s) == GENESIS_ACCESS_FAIL);
-        assert(s.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG);
-        assert(v == reserved[i]);
-        assert(memcmp(&rej, &zeroed, sizeof(rej)) == 0);
-      }
-    }
-    /* A DATA byte (bit 7 clear) with no prior LATCH. */
-    {
-      GenesisRuntimeStop s = {0};
-      uint32_t v = 0x3FU;
-      assert(genesis_route_access(&rej, PSG_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &v, &s) == GENESIS_ACCESS_FAIL);
-      assert(s.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG);
-      assert(v == 0x3FU);
-      assert(memcmp(&rej, &zeroed, sizeof(rej)) == 0);
-    }
-  }
-
-  /* ---- Adversarial: WORD and LONG width at the PSG port. The odd address
-     $C00011 is rejected by genesis_route_access's odd-effective-address guard
-     BEFORE the PSG lane -- a pre-existing fail-close, NOT the PSG diagnostic. ---- */
-  {
-    GenesisRuntime rej = {0};
-    reject_preexisting(&rej, &zeroed, PSG_PORT, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE,
-                       GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_ODD_EFFECTIVE_ADDRESS);
-    reject_preexisting(&rej, &zeroed, PSG_PORT, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE,
-                       GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_ODD_EFFECTIVE_ADDRESS);
-    /* A PSG-port READ at WORD width hits the same odd-address guard. */
-    reject_preexisting(&rej, &zeroed, PSG_PORT, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ,
-                       GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_ODD_EFFECTIVE_ADDRESS);
-  }
-
-  /* ---- Adversarial: wrong address just outside the tight interval keeps the
-     PRE-EXISTING fail-close (the co-located VDP lane), NOT the PSG diagnostic. ---- */
-  {
-    GenesisRuntime rej = {0};
-    /* $C00010 (even neighbour, inside the VDP window) -> VDP lane fail-close. */
-    reject_preexisting(&rej, &zeroed, UINT32_C(0x00C00010), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE,
-                       GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
-    /* $C00012 (even neighbour, inside the VDP window) -> VDP lane fail-close. */
-    reject_preexisting(&rej, &zeroed, UINT32_C(0x00C00012), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE,
-                       GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
-    /* $C00013 (the first secondarily-attested odd mirror, deliberately NOT
-       recognised) -> VDP lane fail-close, not PSG. */
-    reject_preexisting(&rej, &zeroed, UINT32_C(0x00C00013), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE,
-                       GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP);
-    /* $C00020 (just past the VDP window) -> generic unmapped fail-close. */
-    reject_preexisting(&rej, &zeroed, UINT32_C(0x00C00020), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE,
-                       GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_UNMAPPED_DATA_ACCESS);
-  }
-
-  /* ---- Adversarial with a pre-populated latch: rejection still mutates
-     nothing. ---- */
-  {
-    GenesisRuntime rej = {0};
-    GenesisRuntime before;
-    rej.devices.psg.latch_valid = 1U;
-    rej.devices.psg.latched_channel = 2U;
-    rej.devices.psg.tone_period[2] = UINT16_C(0x01F5);
-    rej.devices.psg.attenuation[3] = 0x07U;
-    rej.devices.psg.noise_control = 0x04U;
-    before = rej;
-    reject_psg(&rej, &before, PSG_PORT, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ);
-    reject_preexisting(&rej, &before, PSG_PORT, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE,
-                       GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_ODD_EFFECTIVE_ADDRESS);
-    {
-      GenesisRuntimeStop s = {0};
-      uint32_t v = 0xE8U; /* reserved noise encoding */
-      assert(genesis_route_access(&rej, PSG_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &v, &s) == GENESIS_ACCESS_FAIL);
-      assert(memcmp(&rej, &before, sizeof(rej)) == 0);
-    }
-  }
-
-  /* ---- Regression: the co-located VDP CONTROL-port selector is unaffected. ---- */
-  {
-    GenesisRuntime clean = {0};
-    value = UINT32_C(0xFFFFFFFF);
-    assert(genesis_route_access(&clean, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
-                                 GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
-    assert(value == 0U);
-    assert(clean.devices.psg.latch_valid == 0U);
-  }
-
   return 0;
 }
 '''
@@ -302,8 +146,7 @@ def main() -> None:
                "-o", str(directory / "runtime-psg")]
     compiled = subprocess.run(command, text=True, capture_output=True, check=False)
     assert compiled.returncode == 0, compiled.stderr
-    ran = subprocess.run([str(directory / "runtime-psg")], text=True,
-                         capture_output=True, check=False)
+    ran = subprocess.run([str(directory / "runtime-psg")], text=True, capture_output=True, check=False)
     assert ran.returncode == 0 and ran.stdout == "" and ran.stderr == "", ran
   print("genesis startup runtime PSG (SN76489) audio-port routing: ok")
 

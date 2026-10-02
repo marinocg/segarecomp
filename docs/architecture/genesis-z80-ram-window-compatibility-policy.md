@@ -1,3 +1,5 @@
+> **Superseded by SEG-032-T004 (ADR 0072, `docs/architecture/genesis-z80-audio-contract.md` section 3).** The flat, byte-only, un-mirrored window and its WORD fail-closed policy are replaced by the contract: the 8 KiB RAM plus its `$A02000` mirror, WORD write stores the high byte and WORD read duplicates the byte, the write-only bank register, typed `genesis_68k_z80_area_without_bus`. The bus-grant gate (a) is replaced by the real BUSREQ/RESET semantics in SEG-032-T005. Kept for history.
+
 # Genesis flat 68000-visible Z80 RAM-window compatibility policy (SEG-007-T103)
 
 ## Status and boundary

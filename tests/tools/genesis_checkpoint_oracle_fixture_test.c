@@ -137,7 +137,7 @@ static void test_positive(void) {
   /* Device evidence. */
   assert(bundle.device.devices.z80_bus.bus_requested == 1U);
   assert(bundle.device.devices.z80_bus.bus_granted == 1U);
-  assert(bundle.device.devices.z80_bus.reset_asserted == 1U);
+  assert(bundle.device.devices.z80_bus.reset_released == 0U);
   { uint32_t i; for (i = 0U; i < GENESIS_Z80_RAM_BYTES; ++i) assert(bundle.device.devices.z80_bus.z80_ram[i] == 0U); }
 
   assert(bundle.device.devices.vdp.registers[1] == 0x04U);
@@ -156,14 +156,9 @@ static void test_positive(void) {
   { uint32_t i; for (i = 0U; i < GENESIS_VDP_VSRAM_BYTES; ++i) assert(bundle.device.devices.vdp.vsram[i] == 0U); }
   assert(bundle.device.devices.vdp.dma.phase == GENESIS_VDP_DMA_IDLE);
 
-  assert(bundle.device.devices.psg.latched_channel == 1U);
-  assert(bundle.device.devices.psg.latched_volume == 1U);
-  assert(bundle.device.devices.psg.latch_valid == 1U);
-  assert(bundle.device.devices.psg.attenuation[1] == 5U);
-  assert(bundle.device.devices.psg.attenuation[0] == 0U && bundle.device.devices.psg.attenuation[2] == 0U &&
-         bundle.device.devices.psg.attenuation[3] == 0U);
-  { uint32_t i; for (i = 0U; i < 3U; ++i) assert(bundle.device.devices.psg.tone_period[i] == 0U); }
-  assert(bundle.device.devices.psg.noise_control == 0U);
+  /* SEG-032-T006: the evidence-bearing PSG record is the log of the 68000's port traffic (one byte, $B5). */
+  assert(bundle.device.devices.psg.write_count == 1U);
+  assert(bundle.device.devices.psg.write_digest == (uint32_t)((UINT32_C(2166136261) ^ UINT32_C(0xB5)) * UINT32_C(16777619)));
 
   assert(bundle.device.devices.controller_io.data[0] == 0x7FU);
   assert(bundle.device.devices.controller_io.data[1] == 0U && bundle.device.devices.controller_io.data[2] == 0U);

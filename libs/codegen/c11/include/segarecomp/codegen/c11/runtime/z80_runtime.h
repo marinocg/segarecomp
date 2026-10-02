@@ -31,7 +31,8 @@ typedef enum Z80Outcome {
   Z80_ERROR_UNRESOLVED_FETCH_MAPPING = 18,
   Z80_ERROR_UNKNOWN_IMAGE_IDENTITY = 19,
   Z80_ERROR_EXCLUDED_FORM = 20,
-  Z80_ERROR_IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE = 21
+  Z80_ERROR_IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE = 21,
+  Z80_ERROR_CODE_MISMATCH = 22 /* RAM-backed image: the live bytes of an instruction differ from the compiled ones */
 } Z80Outcome;
 
 static inline int z80_outcome_is_resumable(Z80Outcome outcome) {
@@ -51,6 +52,7 @@ static inline const char *z80_outcome_name(Z80Outcome outcome) {
     case Z80_ERROR_UNKNOWN_IMAGE_IDENTITY: return "unknown_image_identity";
     case Z80_ERROR_EXCLUDED_FORM: return "excluded_form";
     case Z80_ERROR_IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE: return "im0_unsupported_acknowledge_byte";
+    case Z80_ERROR_CODE_MISMATCH: return "code_mismatch";
   }
   return "invalid";
 }
@@ -90,12 +92,19 @@ typedef struct Z80Host {
   uint8_t (*interrupt_acknowledge)(void *context, uint64_t cycles);
   /* Non-zero and fills `image` if immutable code is mapped at `address`; zero means mutable/non-code (fail closed). */
   int (*code_image)(void *context, uint16_t address, Z80CodeImage *image);
+  /* RAM-backed images only (SEG-032-T003/T012): copies the `length` (1-4) live memory bytes at `address` (wrapping, mirrors resolved
+   * by the platform) into `bytes` and returns non-zero. Not an architectural read (no cycles, no side effects). Absent (NULL) in a
+   * host that runs a RAM-backed image: every entry guard fails. */
+  int (*code_fetch)(void *context, uint16_t address, uint8_t *bytes, uint32_t length);
 } Z80Host;
 
 typedef struct Z80Runtime {
   Z80State state;
   Z80Host host;
   Z80Outcome outcome;
+  /* Non-architectural: entry snapshot of the live bytes of the RAM-backed instruction being executed (ADR 0073). Displacement and
+   * immediate operands are read from it, never re-fetched, so an instruction that writes its own operand uses the entry value. */
+  uint8_t live_code[4];
 } Z80Runtime;
 
 /* Every instruction start has an exact generated entry. An owner is one generated function holding a bounded set of exact entries
@@ -160,15 +169,41 @@ static inline void z80_push16(Z80Runtime *rt, uint16_t value) {
 /* Owner prologue (ADR 0058 section 6): returns non-zero when the owner must return to the dispatcher with PC = its
  * own address because the deadline is reached or an interrupt may be accepted at this boundary. Otherwise the
  * instruction starts: the one-boundary deferral and the LD A,I/R marker have done their job. */
-static inline int z80_owner_prologue(Z80Runtime *rt, uint16_t pc) {
+static inline int z80_owner_boundary(Z80Runtime *rt, uint16_t pc) {
   Z80State *s = &rt->state;
   if (s->cycles >= s->deadline || s->nmi_pending || s->nmi_reject || (s->int_line && s->iff1 && !s->int_deferral)) {
     s->pc = pc;
     return 1;
   }
-  s->int_deferral = 0;
-  s->ld_a_ir = 0;
   return 0;
+}
+/* Instruction-begin bookkeeping: the one-boundary deferral and the LD A,I/R marker have done their job. */
+static inline void z80_owner_begin(Z80Runtime *rt) {
+  rt->state.int_deferral = 0;
+  rt->state.ld_a_ir = 0;
+}
+static inline int z80_owner_prologue(Z80Runtime *rt, uint16_t pc) {
+  if (z80_owner_boundary(rt, pc)) return 1;
+  z80_owner_begin(rt);
+  return 0;
+}
+
+/* RAM-backed entry guard (ADR 0073, SEG-032-T012): after the boundary check, before the instruction-begin bookkeeping and any
+ * effect. Snapshots the `length` live bytes into `rt->live_code`, then requires every byte whose bit is set in `structural` (bit i =
+ * byte i: prefixes, opcode, anything but a displacement/immediate payload) to equal the compiled one. Returns non-zero (outcome set,
+ * PC at the instruction start, no architectural state change, boundary state intact) on a mismatch or a missing `code_fetch`. */
+static inline int z80_live_guard(Z80Runtime *rt, uint16_t pc, unsigned length, unsigned structural, unsigned b0, unsigned b1, unsigned b2,
+                                 unsigned b3) {
+  const uint8_t expected[4] = {(uint8_t)b0, (uint8_t)b1, (uint8_t)b2, (uint8_t)b3};
+  unsigned i;
+  if (rt->host.code_fetch != NULL && rt->host.code_fetch(rt->host.context, pc, rt->live_code, length)) {
+    for (i = 0; i < length; ++i)
+      if (((structural >> i) & 1u) && rt->live_code[i] != expected[i]) break;
+    if (i == length) return 0;
+  }
+  rt->state.pc = pc;
+  rt->outcome = Z80_ERROR_CODE_MISMATCH;
+  return 1;
 }
 
 /* Prefix-lock owner entry (ADR 0058 section 5). Entered with in-prefix-run clear it runs the ordinary prologue and

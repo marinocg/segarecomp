@@ -22,7 +22,7 @@ def require(condition, message):
 
 def build(cli, compiler, root, rom, out, cc=None, extra=()):
     return subprocess.run([cli, "build", "--rom", str(rom), "--output", str(out), "--cc", cc or compiler,
-                           "--runtime-dir", str(root / "platforms" / "genesis"), "--optimize", "0", *extra],
+                           "--runtime-dir", str(root / "platforms" / "genesis"), "--optimize", "0", "--runtime-optimize", "1", *extra],
                           text=True, capture_output=True)
 
 
@@ -50,26 +50,47 @@ def main():
         require('"result":"stop"' in ran.stdout and digest in ran.stdout, "the native program must emit the sanitized stop report")
 
         # Instruction budget: an explicit budget is one finite run; with no flag the program is unbounded
-        # (it must still be running after a couple of seconds on a guest that never stops).
+        # (it must still be running after a moment (1.5 s) on a guest that never stops).
+        # A real spin loop (every retired instruction advances virtual time), so the build-time Z80 materialization pass ends at its
+        # observation window like any program that never stops. The prologue (MOVEQ, BEQ, RESET) keeps the 68K translator's startup
+        # prefix to the operations it admits; the loop itself is compiled by the immutable-ROM AOT.
+        sys.path.insert(0, str(root / "tools"))
+        import genesis_z80_fixture_rom as fx
+        spin = fx.M68k()
+        spin.w(0x7000)
+        spin.branch(0x67, "real")
+        spin.w(0x4E70)
+        spin.label("real")
+        spin.label("spin")
+        spin.branch(0x60, "spin")
         loop = tmp / "loop.bin"
-        loop.write_bytes(bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x60, 0xFE)))
+        loop.write_bytes(fx.build_rom(spin.resolve()))
         result = build(cli, compiler, root, loop, tmp / "loop-out")
         require(result.returncode == 0, "loop build must succeed: " + result.stdout + result.stderr)
         loop_exe = next(p for p in (tmp / "loop-out").iterdir() if p.stem == "game")
-        bounded = subprocess.run([str(loop_exe), "--instruction-budget", "1000"], text=True, capture_output=True, timeout=60)
-        require('"result":"runner_resource_limit"' in bounded.stdout, "an explicit budget must end in runner_resource_limit")
+        # (The program has an unmodelled-instruction frontier, so its sanitized stdout report is not written for a resource limit -- an
+        # existing property of partial programs; the sound hook's opt-in counter line names the runner result instead.)
+        bounded = subprocess.run([str(loop_exe), "--instruction-budget", "1000"], text=True, capture_output=True, timeout=60,
+                                 env={"SEGARECOMP_SOUND_SUMMARY": "1", "PATH": "/usr/bin:/bin"})
+        require('"result_kind":3' in bounded.stderr, "an explicit budget must end in the runner resource limit: " + bounded.stderr)
         try:
-            subprocess.run([str(loop_exe)], text=True, capture_output=True, timeout=3)
+            subprocess.run([str(loop_exe)], text=True, capture_output=True, timeout=1.5)
             require(False, "without --instruction-budget the program must keep running")
         except subprocess.TimeoutExpired:
             pass
+
+        # A guest that never advances virtual time can never finish the Z80 observation window: that build-time failure (exit 4, the
+        # z80-materialize stage, materialization_budget_exhausted, no executable) is proved end to end by genesis_z80_build_pipeline_test
+        # (group `bound`); only the ROM is needed here, for the hook regression below.
+        stuck = tmp / "stuck.bin"
+        stuck.write_bytes(bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x60, 0xFE)))
 
         # Regression: a viewer window close / finished capture reports a runner resource limit with a count below
         # UINT32_MAX and must END the unbounded default run, never re-enter the runner (which reopened the window).
         # No window is involved: the runner is replaced by a stub that fails if it is called a second time.
         gen = tmp / "hook-gen.c"
-        emit = subprocess.run([cli, "emit-general-startup-bridge-c", "--rom", str(loop), "--reset-entry", "--rom-sha256",
-                               hashlib.sha256(loop.read_bytes()).hexdigest(), "--immutable-rom-aot",
+        emit = subprocess.run([cli, "emit-general-startup-bridge-c", "--rom", str(stuck), "--reset-entry", "--rom-sha256",
+                               hashlib.sha256(stuck.read_bytes()).hexdigest(), "--immutable-rom-aot",
                                "--generated-c-output", str(gen)], text=True, capture_output=True)
         require(emit.returncode == 0 and gen.is_file(), "emit for the hook regression must succeed: " + emit.stderr)
         runtime_dir = root / "platforms" / "genesis" / "runtime"

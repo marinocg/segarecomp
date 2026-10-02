@@ -1,3 +1,5 @@
+> **Superseded by SEG-032-T007 (ADR 0072 and 0074, `docs/architecture/genesis-z80-audio-contract.md` section 9).** The status-port-only BYTE-read policy is replaced by the real YM2612 device: BYTE read and write at all four `$A04000-$A04003` ports (every port reads the shared status), WORD/LONG fail closed, host-owned busy and timers. Kept for history.
+
 # Genesis YM2612 PART-I status-port BYTE-read compatibility policy (SEG-007-T171)
 
 ## Status and boundary

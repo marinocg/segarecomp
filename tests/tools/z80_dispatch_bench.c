@@ -72,7 +72,7 @@ int main(int argc, char **argv) {
   const long iterations = atol(argv[2]);
   srand((unsigned)atoi(argv[3]));
   static Z80Runtime rt;
-  rt.host = (Z80Host){NULL, host_read, host_write, host_in, host_out, host_ack, host_image};
+  rt.host = (Z80Host){NULL, host_read, host_write, host_in, host_out, host_ack, host_image, NULL};
   const unsigned limit = bench_mode == 0 ? 0x10000u : 0xC000u;
   unsigned *pcs = malloc(sizeof(unsigned) * (size_t)iterations);
   for (long i = 0; i < iterations; ++i) pcs[i] = (unsigned)(((unsigned)rand() << 8 ^ (unsigned)rand()) % limit);

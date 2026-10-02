@@ -1,3 +1,5 @@
+> **Superseded by SEG-032-T006 (ADR 0072, `docs/architecture/genesis-z80-audio-contract.md` section 9).** The command-latch model is retired: the PSG is the shared Sega device (`libs/device/sega/psg`) attached through the audio hooks and written by both CPUs; the 68000 port accepts BYTE writes at `$C00011/13/15/17`, a data byte before a latch is the device's business (ignored), and the only evidence-bearing PSG record is the log of the 68000's port traffic. Kept for history.
+
 # Genesis PSG (SN76489) audio-port write compatibility policy (SEG-007-T109)
 
 ## Status and boundary

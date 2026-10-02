@@ -1,45 +1,18 @@
 #!/usr/bin/env python3
-"""SEG-007-T171: direct, isolated coverage of genesis_route_access's YM2612
-FM-synthesis register-window routing extension -- the PART-I address/status
-port BYTE read (status) and BYTE write (register-select latch, this task's
-own second frontier pass) at $A04000, the PART-I data port's own BYTE write
-(register-data write, this task's own third frontier pass) at $A04001, the
-PART-II address port's own BYTE write (register-select latch, this task's
-own fourth frontier pass) at $A04002, and the PART-II data port's own BYTE
-write (register-data write, this task's own fifth and final frontier pass)
-at $A04003 -- this project's first YM2612 owner.
+"""SEG-007-T171, rewritten by SEG-032-T007 (ADR 0072/0074, contract section 9): the 68000's YM2612 ports through genesis_route_access,
+without a sound device and with a recording stand-in device.
 
-This proves the runtime routing function alone -- no compiled/executed
-generated program is involved. It calls `genesis_route_access` directly,
-exactly as tests/genesis_startup_runtime_psg_test.py does, against a real
-`GenesisRuntime`, and asserts on the return value, `*value`, and `stop`.
-
-The modelled behaviour is an explicitly labelled, replaceable PROJECT
-COMPATIBILITY POLICY (see
-docs/architecture/genesis-ym2612-status-port-byte-read-compatibility-policy.md),
-not verified YM2612/Genesis hardware behaviour. There is no FM synthesis, no
-timer modelling, no busy-flag timing, and no register-select/data state
-stored. The window address is GTO1 v1.00 p. 10; the four-port layout and
-status-byte/register-select/register-data field meanings are triangulated
-from plutiedev.com "ym2612".
-
-All values below are synthetic; none are commercial-derived.
-
-Covered:
-- A BYTE READ of the PART-I address/status port ($A04000) returns the fixed
-  policy value 0x00 and mutates no runtime state.
-- A BYTE WRITE of the PART-I address port ($A04000), the PART-I data port
-  ($A04001), the PART-II address port ($A04002), and the PART-II data port
-  ($A04003), for several distinct 8-bit values, each succeeds as a pure
-  no-op and mutates no runtime state and never modifies the caller's own
-  value.
-- Determinism: repeated reads/writes over two independent runtimes yield the
-  same results and byte-identical runtime state.
-- Adversarial fail-closed-BEFORE-mutation for every excluded neighbour: a
-  WORD/LONG access of any of the four ports (either direction), and a BYTE
-  READ of any of the three write-only ports ($A04001, $A04002, $A04003).
-  Every rejected access leaves the whole `GenesisRuntime` byte-identical to
-  a zeroed snapshot and the caller's `value` untouched.
+The SEG-007 status-port-only compatibility model is retired: the YM2612 is the host-clocked device of libs/device/sega/ym2612 attached
+through `runtime->audio_hooks` and shared with the Z80 (covered by tests/genesis_audio_ym_test.py with the real chip). What the runtime
+owns, and this test proves, is the 68000-side port:
+- BYTE read or write at each of $A04000-$A04003: the access reaches the attached device with the port (`address & 3`), the value and
+  the guest time of the access; a read returns the device's status byte whatever the port; without a device a read returns 0 and a
+  write is accepted and discarded (absent hardware);
+- the device-reset hook is not driven by 68000 accesses;
+- fail closed BEFORE any mutation (the whole GenesisRuntime stays byte-identical): WORD and LONG width (typed
+  GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_YM2612 or the pre-existing odd-address guard), a device that rejects the access, and the
+  neighbours outside the four ports keep the pre-existing generic unmapped fail-close;
+- determinism. All values are synthetic.
 """
 import pathlib
 import subprocess
@@ -53,254 +26,107 @@ HARNESS = r'''
 #include <string.h>
 #include "runtime.h"
 
-#define YM2612_PART1_ADDRESS_PORT UINT32_C(0x00A04000)
-#define YM2612_PART1_DATA_PORT UINT32_C(0x00A04001)
-#define YM2612_PART2_ADDRESS_PORT UINT32_C(0x00A04002)
-#define YM2612_PART2_DATA_PORT UINT32_C(0x00A04003)
+static unsigned reads, writes;
+static uint32_t last_port, last_value;
+static uint64_t last_ticks;
+static int accepts = 1;
 
-/* A rejected access must fail closed with the YM2612 device diagnostic AND
-   mutate neither the runtime nor the caller's value. */
-static void reject_ym2612(GenesisRuntime *runtime, const GenesisRuntime *snapshot,
-                          uint32_t address, GenesisAccessWidth width,
-                          GenesisAccessDirection direction) {
-  GenesisRuntimeStop stop = {0};
-  uint32_t value = UINT32_C(0xDEADBEEF);
-  assert(genesis_route_access(runtime, address, width, direction, &value, &stop) ==
-         GENESIS_ACCESS_FAIL);
-  assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS);
-  assert(stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_YM2612);
-  assert(value == UINT32_C(0xDEADBEEF));
-  assert(memcmp(runtime, snapshot, sizeof(*runtime)) == 0);
+static int ym_read(void *context, GenesisRuntime *runtime, uint32_t port, uint64_t ticks, uint8_t *value) {
+  (void)context; (void)runtime;
+  if (!accepts) return 0;
+  ++reads; last_port = port; last_ticks = ticks;
+  *value = (uint8_t)(0xA0U | port);
+  return 1;
 }
+static int ym_write(void *context, GenesisRuntime *runtime, uint32_t port, uint8_t value, uint64_t ticks) {
+  (void)context; (void)runtime;
+  if (!accepts) return 0;
+  ++writes; last_port = port; last_value = value; last_ticks = ticks;
+  return 1;
+}
+static const GenesisAudioHooks hooks = {0, 0, ym_read, ym_write, 0, 0};
 
-/* A rejected access that must keep a PRE-EXISTING (non-YM2612) fail-close. */
-static void reject_preexisting(GenesisRuntime *runtime, const GenesisRuntime *snapshot,
-                                uint32_t address, GenesisAccessWidth width,
-                                GenesisAccessDirection direction,
-                                GenesisStopClass want_class,
-                                GenesisDiagnosticCategory want_category) {
+static void reject(GenesisRuntime *r, uint32_t address, GenesisAccessWidth width, GenesisAccessDirection direction,
+                   GenesisStopClass stop_class, GenesisDiagnosticCategory diagnostic) {
+  GenesisRuntime before = *r;
   GenesisRuntimeStop stop = {0};
   uint32_t value = UINT32_C(0xDEADBEEF);
-  assert(genesis_route_access(runtime, address, width, direction, &value, &stop) ==
-         GENESIS_ACCESS_FAIL);
-  assert(stop.stop_class == want_class);
-  assert(stop.diagnostic_category == want_category);
-  assert(stop.diagnostic_category != GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_YM2612);
+  assert(genesis_route_access(r, address, width, direction, &value, &stop) == GENESIS_ACCESS_FAIL);
+  assert(stop.stop_class == stop_class && stop.diagnostic_category == diagnostic);
   assert(value == UINT32_C(0xDEADBEEF));
-  assert(memcmp(runtime, snapshot, sizeof(*runtime)) == 0);
+  assert(memcmp(r, &before, sizeof(*r)) == 0);
 }
 
 int main(void) {
-  const GenesisRuntime zeroed = {0};
   GenesisRuntimeStop stop = {0};
-  uint32_t value;
+  uint32_t value, port;
 
-  /* ---- Positive: a BYTE READ of the PART-I status port returns the fixed
-     policy value 0x00 and mutates no runtime state. ---- */
+  /* ---- no sound device attached: a read is 0, a write is accepted and discarded, the runtime is untouched ---- */
   {
     GenesisRuntime r = {0};
-    value = UINT32_C(0xFFFFFFFF);
-    assert(genesis_route_access(&r, YM2612_PART1_ADDRESS_PORT, GENESIS_ACCESS_BYTE,
-                                 GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
-    assert(value == 0x00U);
+    const GenesisRuntime zeroed = {0};
+    for (port = 0; port < 4; ++port) {
+      value = UINT32_C(0xFFFFFFFF);
+      assert(genesis_route_access(&r, UINT32_C(0x00A04000) + port, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+      assert(value == 0U);
+      value = 0x5AU;
+      assert(genesis_route_access(&r, UINT32_C(0x00A04000) + port, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+      assert(value == 0x5AU); /* a write never modifies the caller's value */
+    }
     assert(memcmp(&r, &zeroed, sizeof(r)) == 0);
   }
 
-  /* ---- Positive: a BYTE WRITE of the PART-I address port, for several
-     distinct 8-bit values, succeeds as a pure no-op -- mutates no runtime
-     state and never modifies the caller's own value (matching every other
-     routed WRITE owner's "a write never mutates the caller's own value"
-     contract). ---- */
+  /* ---- an attached device sees port, value and guest time; a read returns its status byte ---- */
   {
-    static const uint8_t register_selects[] = {0x00U, 0x28U, 0xB6U, 0xFFU};
-    size_t i;
-    for (i = 0U; i < sizeof(register_selects) / sizeof(register_selects[0]); ++i) {
-      GenesisRuntime r = {0};
-      uint32_t v = register_selects[i];
-      assert(genesis_route_access(&r, YM2612_PART1_ADDRESS_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &v, &stop) == GENESIS_ACCESS_OK);
-      assert(v == register_selects[i]); /* a WRITE never mutates the caller's value */
-      assert(memcmp(&r, &zeroed, sizeof(r)) == 0);
+    GenesisRuntime r = {0};
+    r.audio_hooks = &hooks;
+    for (port = 0; port < 4; ++port) {
+      r.scheduler.master_ticks = 700U + 11U * port;
+      value = 0x30U + port;
+      assert(genesis_route_access(&r, UINT32_C(0x00A04000) + port, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+      assert(last_port == port && last_value == 0x30U + port && last_ticks == 700U + 11U * port);
+      value = 0U;
+      assert(genesis_route_access(&r, UINT32_C(0x00A04000) + port, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+      assert(value == (0xA0U | port) && last_port == port);
     }
+    assert(reads == 4U && writes == 4U);
   }
 
-  /* ---- Positive: a BYTE WRITE of the PART-I data port, for several
-     distinct 8-bit values, succeeds as a pure no-op -- mutates no runtime
-     state and never modifies the caller's own value. ---- */
+  /* ---- fail closed before any mutation ---- */
   {
-    static const uint8_t register_data[] = {0x00U, 0x7FU, 0x80U, 0xFFU};
-    size_t i;
-    for (i = 0U; i < sizeof(register_data) / sizeof(register_data[0]); ++i) {
-      GenesisRuntime r = {0};
-      uint32_t v = register_data[i];
-      assert(genesis_route_access(&r, YM2612_PART1_DATA_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &v, &stop) == GENESIS_ACCESS_OK);
-      assert(v == register_data[i]); /* a WRITE never mutates the caller's value */
-      assert(memcmp(&r, &zeroed, sizeof(r)) == 0);
-    }
+    GenesisRuntime r = {0};
+    r.audio_hooks = &hooks;
+    /* WORD/LONG at an even port: the pre-existing odd-address guard does not apply to $A04000/$A04002, so the YM2612 lane rejects */
+    reject(&r, UINT32_C(0x00A04000), GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_YM2612);
+    reject(&r, UINT32_C(0x00A04000), GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_YM2612);
+    reject(&r, UINT32_C(0x00A04002), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_YM2612);
+    /* odd-address WORD/LONG: the generic guard answers first */
+    reject(&r, UINT32_C(0x00A04001), GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_ODD_EFFECTIVE_ADDRESS);
+    /* a device that rejects the access */
+    accepts = 0;
+    reject(&r, UINT32_C(0x00A04001), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_YM2612);
+    reject(&r, UINT32_C(0x00A04000), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_YM2612);
+    accepts = 1;
+    /* outside the four ports: the pre-existing generic fail-close, not the YM2612 diagnostic */
+    reject(&r, UINT32_C(0x00A04004), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_UNMAPPED_DATA_ACCESS);
+    reject(&r, UINT32_C(0x00A05FFF), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_UNMAPPED_DATA_ACCESS);
   }
 
-  /* ---- Positive: a BYTE WRITE of the PART-II address port, for several
-     distinct 8-bit values, succeeds as a pure no-op -- mutates no runtime
-     state and never modifies the caller's own value. ---- */
+  /* ---- determinism ---- */
   {
-    static const uint8_t register_selects[] = {0x00U, 0x30U, 0xB4U, 0xFFU};
-    size_t i;
-    for (i = 0U; i < sizeof(register_selects) / sizeof(register_selects[0]); ++i) {
-      GenesisRuntime r = {0};
-      uint32_t v = register_selects[i];
-      assert(genesis_route_access(&r, YM2612_PART2_ADDRESS_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &v, &stop) == GENESIS_ACCESS_OK);
-      assert(v == register_selects[i]); /* a WRITE never mutates the caller's value */
-      assert(memcmp(&r, &zeroed, sizeof(r)) == 0);
-    }
-  }
-
-  /* ---- Positive: a BYTE WRITE of the PART-II data port, for several
-     distinct 8-bit values, succeeds as a pure no-op -- mutates no runtime
-     state and never modifies the caller's own value. ---- */
-  {
-    static const uint8_t register_data[] = {0x00U, 0x11U, 0xEEU, 0xFFU};
-    size_t i;
-    for (i = 0U; i < sizeof(register_data) / sizeof(register_data[0]); ++i) {
-      GenesisRuntime r = {0};
-      uint32_t v = register_data[i];
-      assert(genesis_route_access(&r, YM2612_PART2_DATA_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &v, &stop) == GENESIS_ACCESS_OK);
-      assert(v == register_data[i]); /* a WRITE never mutates the caller's value */
-      assert(memcmp(&r, &zeroed, sizeof(r)) == 0);
-    }
-  }
-
-  /* ---- Determinism: repeated reads/writes over two independent runtimes
-     yield the same results and byte-identical runtime state. ---- */
-  {
-    GenesisRuntime a = {0};
-    GenesisRuntime b = {0};
-    int i;
-    for (i = 0; i < 3; ++i) {
-      uint32_t va = UINT32_C(0xABCDEF01);
-      uint32_t vb = UINT32_C(0x12345678);
-      assert(genesis_route_access(&a, YM2612_PART1_ADDRESS_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_READ, &va, &stop) == GENESIS_ACCESS_OK);
-      assert(genesis_route_access(&b, YM2612_PART1_ADDRESS_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_READ, &vb, &stop) == GENESIS_ACCESS_OK);
-      assert(va == 0x00U && vb == 0x00U);
-      va = UINT32_C(0x2A);
-      vb = UINT32_C(0x2A);
-      assert(genesis_route_access(&a, YM2612_PART1_ADDRESS_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &va, &stop) == GENESIS_ACCESS_OK);
-      assert(genesis_route_access(&b, YM2612_PART1_ADDRESS_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &vb, &stop) == GENESIS_ACCESS_OK);
-      va = UINT32_C(0x55);
-      vb = UINT32_C(0x55);
-      assert(genesis_route_access(&a, YM2612_PART1_DATA_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &va, &stop) == GENESIS_ACCESS_OK);
-      assert(genesis_route_access(&b, YM2612_PART1_DATA_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &vb, &stop) == GENESIS_ACCESS_OK);
-      va = UINT32_C(0x63);
-      vb = UINT32_C(0x63);
-      assert(genesis_route_access(&a, YM2612_PART2_ADDRESS_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &va, &stop) == GENESIS_ACCESS_OK);
-      assert(genesis_route_access(&b, YM2612_PART2_ADDRESS_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &vb, &stop) == GENESIS_ACCESS_OK);
-      va = UINT32_C(0x77);
-      vb = UINT32_C(0x77);
-      assert(genesis_route_access(&a, YM2612_PART2_DATA_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &va, &stop) == GENESIS_ACCESS_OK);
-      assert(genesis_route_access(&b, YM2612_PART2_DATA_PORT, GENESIS_ACCESS_BYTE,
-                                   GENESIS_ACCESS_WRITE, &vb, &stop) == GENESIS_ACCESS_OK);
+    GenesisRuntime a = {0}, b = {0};
+    int run;
+    for (run = 0; run < 2; ++run) {
+      GenesisRuntime *r = run == 0 ? &a : &b;
+      r->audio_hooks = &hooks;
+      for (port = 0; port < 8; ++port) {
+        r->scheduler.master_ticks += 13U;
+        value = port * 3U;
+        assert(genesis_route_access(r, UINT32_C(0x00A04000) + (port & 3U), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+      }
     }
     assert(memcmp(&a, &b, sizeof(a)) == 0);
   }
-
-  /* ---- Adversarial: WORD/LONG access of the PART-I address port (either
-     direction) fails closed with the YM2612 diagnostic (still inside the
-     window, wrong width). ---- */
-  {
-    GenesisRuntime rej = {0};
-    reject_ym2612(&rej, &zeroed, YM2612_PART1_ADDRESS_PORT, GENESIS_ACCESS_WORD,
-                 GENESIS_ACCESS_READ);
-  }
-  {
-    GenesisRuntime rej = {0};
-    reject_ym2612(&rej, &zeroed, YM2612_PART1_ADDRESS_PORT, GENESIS_ACCESS_LONG,
-                 GENESIS_ACCESS_READ);
-  }
-  {
-    GenesisRuntime rej = {0};
-    reject_ym2612(&rej, &zeroed, YM2612_PART1_ADDRESS_PORT, GENESIS_ACCESS_WORD,
-                 GENESIS_ACCESS_WRITE);
-  }
-
-  /* ---- Adversarial: the PART-I data port fails closed for a READ (write-only
-     under this policy). ---- */
-  {
-    GenesisRuntime rej = {0};
-    reject_ym2612(&rej, &zeroed, YM2612_PART1_DATA_PORT, GENESIS_ACCESS_BYTE,
-                 GENESIS_ACCESS_READ);
-  }
-  /* $A04001 is an odd address: a WORD/LONG access is rejected by
-     genesis_route_access's own PRE-EXISTING odd-effective-address guard
-     BEFORE the YM2612 lane is ever reached -- not the YM2612 diagnostic. */
-  {
-    GenesisRuntime rej = {0};
-    reject_preexisting(&rej, &zeroed, YM2612_PART1_DATA_PORT, GENESIS_ACCESS_WORD,
-                       GENESIS_ACCESS_WRITE, GENESIS_STOP_UNSUPPORTED_MEMORY_REGION,
-                       GENESIS_DIAG_ODD_EFFECTIVE_ADDRESS);
-  }
-
-  /* ---- Adversarial: the PART-II address port fails closed for a READ
-     (write-only under this policy) and for WORD/LONG width. ---- */
-  {
-    GenesisRuntime rej = {0};
-    reject_ym2612(&rej, &zeroed, YM2612_PART2_ADDRESS_PORT, GENESIS_ACCESS_BYTE,
-                 GENESIS_ACCESS_READ);
-  }
-  {
-    GenesisRuntime rej = {0};
-    reject_ym2612(&rej, &zeroed, YM2612_PART2_ADDRESS_PORT, GENESIS_ACCESS_WORD,
-                 GENESIS_ACCESS_WRITE);
-  }
-
-  /* ---- Adversarial: the PART-II data port fails closed for a READ
-     (write-only under this policy). $A04003 is an odd address: a WORD/LONG
-     access is rejected by the PRE-EXISTING odd-effective-address guard
-     before the YM2612 lane is ever reached. ---- */
-  {
-    GenesisRuntime rej = {0};
-    reject_ym2612(&rej, &zeroed, YM2612_PART2_DATA_PORT, GENESIS_ACCESS_BYTE,
-                 GENESIS_ACCESS_READ);
-  }
-  {
-    GenesisRuntime rej = {0};
-    reject_preexisting(&rej, &zeroed, YM2612_PART2_DATA_PORT, GENESIS_ACCESS_WORD,
-                       GENESIS_ACCESS_WRITE, GENESIS_STOP_UNSUPPORTED_MEMORY_REGION,
-                       GENESIS_DIAG_ODD_EFFECTIVE_ADDRESS);
-  }
-
-  /* ---- Adversarial: wrong address just outside the tight window keeps the
-     PRE-EXISTING generic unmapped fail-close, NOT the YM2612 diagnostic. ---- */
-  {
-    GenesisRuntime rej = {0};
-    reject_preexisting(&rej, &zeroed, UINT32_C(0x00A03FFF), GENESIS_ACCESS_BYTE,
-                       GENESIS_ACCESS_READ, GENESIS_STOP_UNSUPPORTED_MEMORY_REGION,
-                       GENESIS_DIAG_UNMAPPED_DATA_ACCESS);
-    reject_preexisting(&rej, &zeroed, UINT32_C(0x00A04004), GENESIS_ACCESS_BYTE,
-                       GENESIS_ACCESS_READ, GENESIS_STOP_UNSUPPORTED_MEMORY_REGION,
-                       GENESIS_DIAG_UNMAPPED_DATA_ACCESS);
-  }
-
-  /* ---- Regression: the co-located PSG port and the Z80 bus-arbitration
-     registers remain unaffected. ---- */
-  {
-    GenesisRuntime clean = {0};
-    value = UINT32_C(0x000000AA); /* tone latch, channel 1, nibble 0x0A */
-    assert(genesis_route_access(&clean, UINT32_C(0x00C00011), GENESIS_ACCESS_BYTE,
-                                 GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
-    assert(clean.devices.psg.latch_valid == 1U);
-  }
-
   return 0;
 }
 '''
@@ -319,10 +145,9 @@ def main() -> None:
                "-o", str(directory / "runtime-ym2612")]
     compiled = subprocess.run(command, text=True, capture_output=True, check=False)
     assert compiled.returncode == 0, compiled.stderr
-    ran = subprocess.run([str(directory / "runtime-ym2612")], text=True,
-                         capture_output=True, check=False)
+    ran = subprocess.run([str(directory / "runtime-ym2612")], text=True, capture_output=True, check=False)
     assert ran.returncode == 0 and ran.stdout == "" and ran.stderr == "", ran
-  print("genesis startup runtime YM2612 FM-synthesis register-window routing: ok")
+  print("genesis startup runtime YM2612 port routing: ok")
 
 
 if __name__ == "__main__":

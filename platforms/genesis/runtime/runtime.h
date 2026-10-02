@@ -315,21 +315,15 @@ typedef struct GenesisZ80BusState {
                              SS8): at power-on the 68000 already has the Z80
                              bus (GTO1 p. 76), so "not requested" is the
                              correct zero default. */
-  uint8_t bus_granted;    /* 1 iff the Z80 bus is currently granted to the
-                             68000 side. Under the compatibility policy this
-                             tracks `bus_requested` exactly (deterministic
-                             immediate grant -- no Z80 core is executing to
-                             contend). */
-  uint8_t reset_asserted; /* 1 iff the 68000 currently holds the Z80 /RESET
-                             line asserted ($A11200 D8/D0 = 0, "RESET REQUEST",
-                             GTO1 p. 76); 0 when released (= 1, "RESET
-                             CANCEL"). Zero-initialized (T042 SS8). GTO1 p. 76
-                             notes the Z80 is reset during the console's own
-                             power-on-reset sequence; that initial-value detail
-                             is deliberately NOT modeled here because no Z80
-                             core exists and the startup route drives this
-                             register explicitly (policy doc, "intentional
-                             deviations"). */
+  uint8_t bus_granted;    /* 1 iff the Z80 bus is currently granted to the 68000: BUSREQ is asserted AND /RESET is released
+                             (contract section 4; the grant is acknowledged only once the Z80 has run to the request time,
+                             which the machine hooks guarantee before the latch changes). Replaces the SEG-007-T102
+                             immediate-grant compatibility policy. */
+  uint8_t reset_released; /* SEG-032-T005 (contract section 4): 1 iff the Z80 /RESET line is released ($A11200 D8/D0 = 1,
+                             "RESET CANCEL", GTO1 p. 76); 0 while it is asserted. Zero-initialized == the power-on state: the
+                             Z80 is held in /RESET until the 68000 releases it (GPGX zstate = 0, ares resLine = 0). */
+  uint16_t bank;          /* SEG-032-T004: the 9-bit Z80 bank register (A23-A15 of the banked 68K view); a 68K or Z80 write
+                             shifts bit 0 in at bit 8 (contract section 2); power-on 0. Zero-initialized. */
   uint8_t z80_ram[GENESIS_Z80_RAM_BYTES]; /* SEG-007-T103: the flat
                              68000-visible Z80 program-RAM window backing
                              storage (window base $A00000, GENESIS_Z80_RAM_BYTES
@@ -341,6 +335,11 @@ typedef struct GenesisZ80BusState {
 } GenesisZ80BusState;
 
 /*
+ * SEG-032-T006 (ADR 0072): the SEG-007-T109 command-latch model below is retired. The PSG is the shared Sega device
+ * (libs/device/sega/psg) attached through the audio hooks; the only PSG record left in the evidence-bearing device state is the
+ * log of the 68000's port traffic (count and running digest), which is what first-divergence diagnosis can observe: the chip is
+ * write-only from the 68000. The historical text follows for reference.
+ *
  * SEG-007-T109: minimal persistent PSG (SN76489) command-latch state. This is
  * a new genuinely-stateful subsystem (sound generation) added to
  * `GenesisDeviceState` per T042 SS1.1's extension discipline -- it does NOT
@@ -369,13 +368,8 @@ typedef struct GenesisZ80BusState {
  * Zero-initialised per T042 SS8.
  */
 typedef struct GenesisPsgState {
-  uint8_t latched_channel;  /* 0..3: the channel selected by the most recent LATCH byte. */
-  uint8_t latched_volume;   /* 1 iff that LATCH byte selected the volume register; 0 = tone/noise. */
-  uint8_t latch_valid;      /* 1 once any LATCH byte has been seen since reset; a DATA byte with
-                               this still 0 fails closed (no register is latched yet). */
-  uint16_t tone_period[3];  /* 10-bit period for tone channels 0..2 (0x000..0x3FF). */
-  uint8_t attenuation[4];   /* 4-bit attenuation for channels 0..3 (0 = loudest, 15 = silent). */
-  uint8_t noise_control;    /* 3-bit noise register for channel 3: bit 2 feedback, bits 1-0 rate. */
+  uint32_t write_count;   /* SEG-032-T006: bytes the 68000 has written to the PSG port ($C00011 and its odd mirrors) */
+  uint32_t write_digest;  /* FNV-1a (32-bit) over those bytes in order (basis 0 until the first write, then 2166136261) */
 } GenesisPsgState;
 
 /* Persistent interrupt/checkpoint timing state.  It is mutated only through
@@ -505,6 +499,34 @@ typedef struct GenesisLiveFrameObserver {
   GenesisFrameArtifact *latest;
   uint64_t sequence;
 } GenesisLiveFrameObserver;
+
+/*
+ * SEG-032-T002/T005 (ADR 0073, contract section 5): the generic Z80 image-epoch tracker, embedded in the runtime (`z80_epoch`).
+ * An epoch is the transition to a Z80-runnable state after a reset/upload epoch: /RESET released and BUSREQ not asserted
+ * while the Z80 is pristine (reset since its last instruction). The observer sees only generic hardware events -- the
+ * 68000 writes to $A11100/$A11200 and to Z80 RAM -- never an address, a title or a cartridge byte, and it never changes
+ * guest state. Absent (NULL) == the unobserved behavior. Power-on state per the contract: /RESET asserted, BUSREQ clear,
+ * pristine, nothing written.
+ *
+ * `on_epoch` receives the 8 KiB RAM snapshot at the transition and the bitmap (bit i of byte i/8) of the RAM bytes the
+ * 68000 wrote during the *hold window*: since power-on or the previous runnable transition (an epoch or a plain resume),
+ * i.e. while the Z80 was not executing (activation signature S1*, ADR 0073). 68K writes made in earlier holds, before
+ * the Z80 last ran, and every Z80-written byte are not in it.
+ */
+typedef struct GenesisZ80EpochEvent {
+  uint32_t ordinal;               /* 1-based epoch ordinal in activation order */
+  uint64_t master_ticks;          /* guest time of the transition */
+  const uint8_t *ram;             /* GENESIS_Z80_RAM_BYTES */
+  const uint8_t *written_bitmap;  /* GENESIS_Z80_RAM_BYTES / 8 bytes */
+} GenesisZ80EpochEvent;
+
+typedef struct GenesisZ80EpochObserver {
+  void (*on_epoch)(void *context, const GenesisZ80EpochEvent *event);  /* optional probe seam (NULL = absent) */
+  void *context;
+  uint32_t epoch_count;                       /* epochs reported so far */
+  uint8_t executed;                           /* the Z80 has begun executing since its last /RESET release (zero-init: pristine) */
+  uint8_t written[GENESIS_Z80_RAM_BYTES / 8U];
+} GenesisZ80EpochObserver;
 
 /* Fixed pure-C11 persistent state ABI for generated Genesis startup blocks. */
 /* SEG-020-T003 / ADR-0042 section 4: ONE fixed-capacity, allocation-free,
@@ -796,6 +818,18 @@ typedef struct GenesisRuntime {
   /* SEG-026-T001: host-owned optional execution-PC coverage observer (NULL = absent, the value in every
      ordinary build); non-semantic. See GenesisExecutionCoverage. */
   struct GenesisExecutionCoverage *execution_coverage;
+  /* SEG-032-T002/T005: the hold-window / epoch tracker (always tracking; `on_epoch` is the optional probe seam). */
+  GenesisZ80EpochObserver z80_epoch;
+  /* SEG-032-T005 (ADR 0072): the attached Z80 machine's hooks (NULL = no Z80 machine linked into this program: the bus
+     latches still follow the hardware rules, but nothing executes). Production programs attach one through the machine hook
+     seam (z80_machine.h); 68K-only unit tests do not. Never part of any serialization. */
+  const struct GenesisZ80Hooks *z80_hooks;
+  /* SEG-032-T006: the attached sound devices (NULL = none). Never part of any serialization. */
+  const struct GenesisAudioHooks *audio_hooks;
+  /* Last master time the Z80 was explicitly synchronized to, and the retirement-hook cadence in master ticks (0 = default 512).
+     Results never depend on the cadence: every interaction with Z80-domain state synchronizes first (contract section 10). */
+  uint64_t z80_synced_ticks;
+  uint32_t z80_sync_quantum;
 } GenesisRuntime;
 
 /* SEG-026-T001: optional, measurement-only, host-owned complete execution-PC coverage.
@@ -891,6 +925,8 @@ typedef enum GenesisStopClass {
    * build-resolved vector-8 handler or an unconstructible frame; trace,
    * which is deferred). No CPU state is changed before this stop. */
   GENESIS_STOP_UNSUPPORTED_CPU_EXCEPTION = 11,
+  /* SEG-032-T005 (ADR 0072): a typed fail-closed outcome of the generated-native Z80 (never recovered by decoding). */
+  GENESIS_STOP_UNSUPPORTED_Z80_EXECUTION = 12,
 } GenesisStopClass;
 
 typedef enum GenesisCpuVariant { GENESIS_CPU_MC68000 = 1 } GenesisCpuVariant;
@@ -1055,6 +1091,17 @@ typedef enum GenesisDiagnosticCategory {
      forever. Paired with GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT;
      the STOP itself has completed (SR loaded, PC at the next instruction). */
   GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE = 52,
+  /* SEG-032-T004 (contract sections 2-3): fail-closed Z80-area outcomes. Paired with GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS. */
+  GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS = 53,       /* a Z80 (or 68K) access to an unmapped / unsupported Z80-area address */
+  GENESIS_DIAG_Z80_BANK_TARGET_UNSUPPORTED = 54,    /* a Z80 banked-window access whose 68K target is not ROM read / work-RAM write */
+  GENESIS_DIAG_68K_Z80_AREA_WITHOUT_BUS = 55,       /* a 68K access to the Z80 area while it does not hold the Z80 bus */
+  /* SEG-032-T005: paired with GENESIS_STOP_UNSUPPORTED_Z80_EXECUTION. */
+  GENESIS_DIAG_Z80_UNKNOWN_IMAGE = 56,              /* the runnable transition's activation signature (or bound identity) is not in the compiled registry */
+  GENESIS_DIAG_Z80_CODE_MISMATCH = 57,              /* a RAM-backed instruction's live bytes differ from the compiled ones */
+  GENESIS_DIAG_Z80_NO_OWNER = 58,                   /* no generated owner for the executing address */
+  GENESIS_DIAG_Z80_MUTABLE_CODE = 59,               /* execution reached memory that is not a bound RAM-backed image */
+  GENESIS_DIAG_Z80_UNRESOLVED_FETCH_MAPPING = 60,   /* an instruction's bytes continue into an unresolved mapping */
+  GENESIS_DIAG_Z80_UNSUPPORTED_ACKNOWLEDGE = 61,    /* an interrupt acknowledge byte the IM0 contract does not admit */
 } GenesisDiagnosticCategory;
 
 typedef struct GenesisProvenance {
@@ -1216,6 +1263,47 @@ typedef struct GenesisRuntimeStop {
   GenesisC4LoweringDimensions c4_lowering_dimensions;
   GenesisProvenance provenance;
 } GenesisRuntimeStop;
+
+/*
+ * SEG-032-T005 (ADR 0072): the seam between the Genesis runtime (bus latches, M68K scheduler) and an attached Z80 machine
+ * (z80_machine.c). Plain C: runtime.c includes no Z80 header. A hook returns 0, or non-zero with `*stop` filled (a typed stop).
+ */
+typedef enum GenesisZ80Event {
+  GENESIS_Z80_EVENT_BUSREQ_ASSERT = 1,
+  GENESIS_Z80_EVENT_BUSREQ_RELEASE = 2,
+  GENESIS_Z80_EVENT_RESET_ASSERT = 3,
+  GENESIS_Z80_EVENT_RESET_RELEASE = 4
+} GenesisZ80Event;
+
+typedef struct GenesisZ80Hooks {
+  void *context;
+  /* Run the Z80 up to guest time `master_ticks` (a no-op while it is not runnable). Called after every M68K retirement
+   * (at the cadence above) and before any 68K access to Z80-domain state. */
+  int (*run_to)(void *context, GenesisRuntime *runtime, uint64_t master_ticks, GenesisRuntimeStop *stop);
+  /* A BUSREQ/RESET edge at `master_ticks` has been applied to the latches. `transition`: the Z80 just became runnable;
+   * `epoch`: that transition happened while the Z80 was pristine (a new image epoch, ADR 0073); `written`: the 68K-written
+   * hold-window bitmap (valid for the duration of the call). */
+  int (*bus_event)(void *context, GenesisRuntime *runtime, GenesisZ80Event event, uint64_t master_ticks, int transition, int epoch,
+                   const uint8_t *written, GenesisRuntimeStop *stop);
+} GenesisZ80Hooks;
+
+/*
+ * SEG-032-T006 (ADR 0072): the sound devices both CPUs reach, attached by the program (genesis_audio.c). Plain C. A program without an
+ * attached sound device accepts every supported PSG/YM2612 access and discards it (absent hardware, not an emulation of it).
+ */
+typedef struct GenesisAudioHooks {
+  void *context;
+  /* One PSG data-port byte at guest time `master_ticks`, from either CPU. 1 = accepted. */
+  int (*psg_write)(void *context, GenesisRuntime *runtime, uint8_t value, uint64_t master_ticks);
+  /* SEG-032-T007: the YM2612, reached by both CPUs. `port` 0..3 (part I address / data, part II address / data); a read returns the
+   * status byte whatever the port. 1 = accepted. */
+  int (*ym_read)(void *context, GenesisRuntime *runtime, uint32_t port, uint64_t master_ticks, uint8_t *value);
+  int (*ym_write)(void *context, GenesisRuntime *runtime, uint32_t port, uint8_t value, uint64_t master_ticks);
+  void (*ym_reset)(void *context, GenesisRuntime *runtime, uint64_t master_ticks);
+  /* SEG-032-T009: optional (NULL = none). Called by the Z80 machine each time it has been synchronized to `master_ticks`, so the devices
+   * can run to a time no access can still precede. Never changes device state beyond running it forward in time. */
+  void (*sync)(void *context, GenesisRuntime *runtime, uint64_t master_ticks);
+} GenesisAudioHooks;
 typedef struct GenesisReportMetadata {
   GenesisCpuDimensions cpu_dimensions;
 } GenesisReportMetadata;
@@ -1364,6 +1452,18 @@ int m68k_emitted_code_address_member(const uint32_t *addresses, uint32_t count, 
  * tick + admission it performs.
  */
 GenesisControlTransfer genesis_runtime_step(GenesisRuntime *runtime, GenesisDispatchFunction dispatch);
+
+/*
+ * SEG-032-T004 (ADR 0072): the YM2612 / PSG port seam shared by both CPUs. `port` is the YM2612 address-decoded port 0..3
+ * (part I address, part I data, part II address, part II data); `master_ticks` is the access time. Return 1 when the access is
+ * supported, 0 for an unsupported shape (the caller raises the typed stop). The bodies forward to the attached sound devices
+ * (`audio_hooks`, SEG-032-T006/T007); without a device a read returns 0 and a write is accepted and discarded (absent hardware).
+ */
+int genesis_ym2612_port_read(GenesisRuntime *runtime, uint32_t port, uint64_t master_ticks, uint8_t *value);
+int genesis_ym2612_port_write(GenesisRuntime *runtime, uint32_t port, uint8_t value, uint64_t master_ticks);
+int genesis_psg_port_write(GenesisRuntime *runtime, uint8_t value, uint64_t master_ticks);
+/* The Z80 /RESET line resets the YM2612 on assertion and release (contract section 4). */
+void genesis_ym2612_port_reset(GenesisRuntime *runtime, uint64_t master_ticks);
 
 /*
  * SEG-007-T252 / ADR-0040: the runner-owned finite dispatch allowance --

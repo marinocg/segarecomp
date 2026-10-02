@@ -54,6 +54,9 @@ struct Variant {
 };
 
 struct Plan {
+  std::vector<std::uint8_t> guard;  // RAM-backed image: the compiled instruction bytes (snapshotted live, structural ones verified)
+  unsigned structural = 0;          // RAM-backed image: bit i set = byte i is statically defining (not a displacement/immediate payload)
+  bool live = false;                // RAM-backed image entry
   std::uint32_t identity = 0;
   std::uint16_t key = 0;
   bool relative = false;
@@ -171,8 +174,8 @@ void share_body(const Plan& plan, Variant& v, BodyPool& pool) {
   const DecodedInstruction& insn = v.classification.instruction;
   const cpu::z80::FormDescriptor& form = cpu::z80::form_descriptor(insn.form);
   const Pcs pc = pcs_for(plan, v.classification, plan.key);
-  const Lowered real = v.row->lower(LowerContext{insn, form, pc.start, pc.next});
-  const Lowered probe = v.row->lower(LowerContext{insn, form, "0x7777u", "0x7779u"});
+  const Lowered real = v.row->lower(LowerContext{insn, form, pc.start, pc.next, plan.live});
+  const Lowered probe = v.row->lower(LowerContext{insn, form, "0x7777u", "0x7779u", plan.live});
   if (probe.statements != real.statements || probe.cycles_expression != real.cycles_expression ||
       probe.writes_flags != real.writes_flags || probe.flow != real.flow)
     return;
@@ -207,7 +210,7 @@ bool emit_variant_body(std::ostream& out, const Plan& plan, const Variant& v, st
   } else {
     const DecodedInstruction& insn = v.classification.instruction;
     const cpu::z80::FormDescriptor& form = cpu::z80::form_descriptor(insn.form);
-    const Lowered lowered = v.row->lower(LowerContext{insn, form, pc.start, pc.next});
+    const Lowered lowered = v.row->lower(LowerContext{insn, form, pc.start, pc.next, plan.live});
     out << effect_text(insn, lowered, indent);
     flow = lowered.flow;
   }
@@ -242,7 +245,19 @@ bool emit_entry(std::ostream& out, const Plan& plan, const std::string& indent, 
   const Variant& first = plan.variants.front();
   const Pcs pc = pcs_for(plan, first.classification, plan.key);
   const bool lock = plan.variants.size() == 1 && first.classification.kind == StartKind::prefix_lock;
-  if (!lock) out << indent << "if (z80_owner_prologue(rt, " << pc.start << ")) return Z80_OWNER_STOP;\n";
+  if (plan.live) {
+    // RAM-backed image: boundary acceptance, then the live snapshot + structural guard, then instruction-begin bookkeeping, so a
+    // rejected instruction consumes no boundary state (int_deferral, LD A,I/R marker).
+    out << indent << "if (z80_owner_boundary(rt, " << pc.start << ")) return Z80_OWNER_STOP;\n";
+    if (!plan.guard.empty()) {
+      out << indent << "if (z80_live_guard(rt, " << pc.start << ", " << plan.guard.size() << "u, " << plan.structural << "u";
+      for (std::size_t i = 0; i < 4; ++i) out << ", " << (i < plan.guard.size() ? static_cast<unsigned>(plan.guard[i]) : 0u) << "u";
+      out << ")) return Z80_OWNER_STOP;\n";
+      out << indent << "z80_owner_begin(rt);\n";
+    }
+  } else if (!lock) {
+    out << indent << "if (z80_owner_prologue(rt, " << pc.start << ")) return Z80_OWNER_STOP;\n";
+  }
   if (plan.variants.size() == 1 && !plan.partial) return emit_variant_body(out, plan, first, plan.key, indent, successor, bodies);
   out << indent << "switch (window_base) {\n";
   for (const Variant& v : plan.variants) {
@@ -337,6 +352,8 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
     if (i > 0 && images[i - 1]->identity == image.identity) return fail("duplicate code-image identity");
     if (image.windows.empty()) return fail("code image without a window");
     if (image.kind == ImageKind::invariant && image.windows.size() != 1) return fail("an invariant image has exactly one window");
+    if (image.live_bytes && (image.kind != ImageKind::banked || image.windows.size() != 1))
+      return fail("a RAM-backed image is a banked image with exactly one window");
     for (const CodeWindow& w : image.windows) {
       if (w.length == 0 || w.first_offset + w.length > kSpace || static_cast<std::uint32_t>(w.base) + w.first_offset + w.length > kSpace)
         return fail("code window leaves the 16-bit logical address space");
@@ -431,13 +448,37 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
       for (std::uint32_t o = lo; o < hi; ++o) {
         Plan plan;
         plan.identity = image.identity;
+        plan.live = image.live_bytes;
         plan.relative = relative;
         plan.dense = dense + (o - lo);
         plan.key = relative ? static_cast<std::uint16_t>(o) : static_cast<std::uint16_t>(first.base + o);
         for (std::size_t j = 0; j < image.windows.size(); ++j) {
           const CodeWindow& w = image.windows[j];
           if (o < w.first_offset || o >= w.first_offset + w.length) continue;
-          const StartClassification& c = classes[j][static_cast<std::uint16_t>(w.base + o)];
+          StartClassification c = classes[j][static_cast<std::uint16_t>(w.base + o)];
+          if (image.live_bytes && c.kind == StartKind::prefix_lock) {  // an endless prefix run in RAM is never supported code
+            c.kind = StartKind::mutable_code;
+            c.blocking_address = static_cast<std::uint16_t>(w.base + o);
+          }
+          if (image.live_bytes && c.kind == StartKind::decoded) {
+            const std::uint32_t length = c.instruction.provenance.logical_byte_count;
+            if (length == 0 || length > 4 || o + length > image.bytes.size()) {
+              // The guard compares at most four static bytes. A start with redundant prefixes (data decoded as code) or one that runs past
+              // the window is never supported RAM code: it is the same typed stub as an endless prefix run, never a build failure of
+              // the whole image (the snapshot is 8 KiB of mixed code and data).
+              c.kind = StartKind::mutable_code;
+              c.blocking_address = static_cast<std::uint16_t>(w.base + o);
+            } else {
+              plan.guard.assign(image.bytes.begin() + o, image.bytes.begin() + o + length);
+              // Statically defining bytes: every logical byte except the descriptor displacement and immediate payload.
+              const cpu::z80::FormDescriptor& form = cpu::z80::form_descriptor(c.instruction.form);
+              const std::uint32_t extra = c.instruction.extra_prefix_count;
+              plan.structural = (1u << length) - 1u;
+              if (form.displacement_index != cpu::z80::kNoIndex) plan.structural &= ~(1u << (extra + form.displacement_index));
+              if (form.immediate_index != cpu::z80::kNoIndex)
+                for (unsigned k = 0; k < form.immediate_size; ++k) plan.structural &= ~(1u << (extra + form.immediate_index + k));
+            }
+          }
           auto same = std::ranges::find_if(plan.variants, [&](const Variant& v) { return same_semantics(v.classification, c); });
           if (same == plan.variants.end()) {
             plan.variants.push_back(make_variant(c));

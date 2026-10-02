@@ -390,3 +390,10 @@ exe <= 256, -j8 <= 300 s, -j1 <= 1,800 s, RSS <= 1,536, lookup <= 100 ns. All pa
 - The chunk directory adds one more binary search, so the 512K exact lookup is about 67 ns (was 47 ns flat), still inside 100 ns.
   Peak RSS at 512K is now 868-921 MiB (was 1,388-1,549 flat), consistent with no TU carrying the whole table (the lookup-bench link, which still includes the main TU, fell from about 1.2 GiB to about 0.8 GiB). Single runs: compiler RSS varied by hundreds of MiB between repeated identical inputs in the earlier measurement, so treat the figures as a range.
 - The dispatcher round trip (image query + lookup + one owner step, not the budgeted quantity) is about 100-300 ns.
+
+## Amendment (SEG-032-T003, 2026-10-01)
+
+"RAM-generated code ... stop with `mutable_code`" is refined for one platform-declared case by ADR 0073: a Genesis sound-RAM image
+materialized at build time is a RAM-backed code image whose every instruction is byte-verified against the live RAM before it
+executes (`Z80_ERROR_CODE_MISMATCH` otherwise). Self-modifying code, code modified after the verification of the preceding
+instruction and any replacement opcode remain fail-closed; immutable images are unchanged.

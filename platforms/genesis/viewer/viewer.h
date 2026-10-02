@@ -25,6 +25,9 @@ typedef struct GenesisViewerHost {
   int (*present)(void *ctx, const GenesisFrameArtifact *frame); /* 0 == ok */
   int (*window_closed)(void *ctx);          /* pumps events; nonzero == closed */
   uint8_t (*pad1)(void *ctx);               /* optional GENESIS_PAD_* mask; NULL == released */
+  /* SEG-032-T009: optional. Called after every completed slice (a pure observer of the runtime, e.g. the audio drain: it must not
+   * mutate guest state and never feeds host time back). NULL == none. */
+  void (*after_slice)(void *ctx, GenesisRuntime *runtime);
 } GenesisViewerHost;
 
 typedef struct GenesisViewerOptions {

@@ -36,6 +36,11 @@ endforeach()
 install(DIRECTORY ${_src}/libs/device/sega/psg/ DESTINATION ${_rt}/libs/device/sega/psg FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
 install(DIRECTORY ${_src}/libs/codegen/c11/include/ DESTINATION ${_rt}/libs/codegen/c11/include FILES_MATCHING PATTERN "*.h")
 
+# Genesis sound (SEG-032-T008, ADR 0073/0074): `segarecomp build --runtime-dir <...>/platforms/genesis` compiles the vendored ymfm YM2612
+# core (C++14, no exceptions/RTTI, header-only libc++ from the bundled Zig), its C ABI and the C++-runtime shim with the generated program.
+install(DIRECTORY ${_src}/libs/device/sega/ym2612/ DESTINATION ${_rt}/libs/device/sega/ym2612 FILES_MATCHING PATTERN "*.c" PATTERN "*.cpp" PATTERN "*.h" PATTERN "*.ipp")
+install(FILES ${_src}/libs/device/sega/ym2612/third_party/ymfm/LICENSE DESTINATION ${_res}/licenses RENAME ymfm-BSD-3-Clause.txt)
+
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/apps/segarecomp-launcher/assets/ DESTINATION ${_res}/assets
   PATTERN "README.md" EXCLUDE PATTERN "Silkscreen-OFL.txt" EXCLUDE)
 
