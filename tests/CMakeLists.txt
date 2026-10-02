@@ -968,12 +968,6 @@ endforeach()
 get_property(_segarecomp_all_tests DIRECTORY PROPERTY TESTS)
 foreach(_t IN LISTS _segarecomp_all_tests)
   set_property(TEST ${_t} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
-  if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang")
-    # Test-authored C harnesses call ISO C stdio directly before any project header;
-    # the clang driver reads this to prepend the CRT selection to every compile.
-    set_property(TEST ${_t} APPEND PROPERTY ENVIRONMENT_MODIFICATION
-      "CCC_OVERRIDE_OPTIONS=set:#^-D_CRT_SECURE_NO_WARNINGS ^-D_CRT_NONSTDC_NO_WARNINGS")
-  endif()
 endforeach()
 
 # SEG-021-T001: independent legal base-MC68000 form dataset (test-side expectation only) and its
@@ -1410,3 +1404,14 @@ add_test(NAME sms_fail_closed_inventory_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_fail_closed_inventory_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST sms_capability_ratchet_test sms_fail_closed_inventory_test APPEND PROPERTY LABELS full fast)
 set_property(TEST sms_capability_ratchet_test sms_fail_closed_inventory_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# Windows/clang: test-authored C harnesses call ISO C stdio directly before any project header; the clang
+# driver reads CCC_OVERRIDE_OPTIONS to prepend the CRT selection to every compile the tests launch. This
+# must run after the LAST add_test of the directory so every test (including later ones) is covered.
+if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang")
+  get_property(_segarecomp_all_tests DIRECTORY PROPERTY TESTS)
+  foreach(_t IN LISTS _segarecomp_all_tests)
+    set_property(TEST ${_t} APPEND PROPERTY ENVIRONMENT_MODIFICATION
+      "CCC_OVERRIDE_OPTIONS=set:#^-D_CRT_SECURE_NO_WARNINGS ^-D_CRT_NONSTDC_NO_WARNINGS")
+  endforeach()
+endif()

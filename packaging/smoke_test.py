@@ -8,6 +8,7 @@ core the GUI uses. The child environment is scrubbed: an empty PATH (no cc/clang
 can be found), no CC/CXX, a throw-away HOME and cache. Nothing from the build tree is referenced.
 This script itself is CI glue and is not part of the shipped package.
 """
+import re
 import hashlib
 import os
 import pathlib
@@ -22,6 +23,9 @@ IMAGE = bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x70, 0x00, 0x4E,
 
 CACHE_FOR_DIAGNOSTICS = []
 
+
+# `segarecomp build` logs link steps as `$ (link)`, `$ (link game)`, `$ (link materialize-pass)`: not compiler invocations.
+LINK_LINE = re.compile(r"^\$ \(link(?: [A-Za-z0-9_.-]+)?\)")
 
 def require(condition, message):
     if not condition:
@@ -70,7 +74,7 @@ def smoke_master_system(tmp, launch):
     require(f"cc={compiler}" in build_log and "mapper=sega" in build_log and "mapper_declaration_source=build_option" in build_log,
             "SMS build.log must record the toolchain, mapper and declaration source")
     compile_lines = [line for line in build_log.splitlines() if line.startswith("$ ")]
-    require(compile_lines and all(line.startswith(f"$ {compiler}") or line.startswith("$ (link)") for line in compile_lines),
+    require(compile_lines and all(line.startswith(f"$ {compiler}") or LINK_LINE.match(line) for line in compile_lines),
             "every SMS compile command must invoke the bundled compiler")
     require("viewer outcome 1 frames 60" in (entry / "run.log").read_text(encoding="utf-8"), "the SMS viewer must run its 60 frames")
     meta = (entry / "metadata.json").read_text(encoding="utf-8")
@@ -129,7 +133,7 @@ def main():
         build_log = (entry / "build.log").read_text(encoding="utf-8")
         require(f"cc={compiler}" in build_log, "build.log must show the bundled compiler was configured")
         compile_lines = [line for line in build_log.splitlines() if line.startswith("$ ")]
-        require(compile_lines and all(line.startswith(f"$ {compiler}") or line.startswith("$ (link)") for line in compile_lines),
+        require(compile_lines and all(line.startswith(f"$ {compiler}") or LINK_LINE.match(line) for line in compile_lines),
                 "every compile command must invoke the bundled compiler")
         run_log = (entry / "run.log").read_text(encoding="utf-8")
         require("VIEWER_SUMMARY" in run_log and '"result":"stop"' in run_log and digest in run_log,
