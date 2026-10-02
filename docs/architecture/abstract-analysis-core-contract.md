@@ -68,8 +68,9 @@ This list illustrates the baseline; it is not a frozen minimum. SEG-029's first 
 | call contexts / summaries | interprocedural object pointers | context-insensitive merge loses identity | staged; bounded context depth only |
 | exception/return state | RTE resumption (ADR 0051 first gate) | RTE target provenance | SEG-030 workstream, reported `Unknown` until proven |
 
-SEG-026-T002's exact PC-indexed recovery is the **regression baseline**. SEG-030 re-expresses it and must reproduce
-`D/U = 2.75%` and 42.74% recall with zero escapes on the same oracle. It is not a foundation to extend, and nothing grows from the removed
+SEG-026-T002's exact PC-indexed recovery is the **regression baseline**, split in two levels. SEG-029's M68K first-consumer adapter
+reproduces the fixture-level finite-value results of the SEG-026-T002 index-domain proof (`reachability_pc_index_recovery_test`) exactly.
+SEG-030 reproduces the oracle-level result: `D/U = 2.75%` and 42.74% recall with zero escapes on the same oracle. It is not a foundation to extend, and nothing grows from the removed
 SEG-026-T003 code.
 
 ## 4. Soundness, resource and determinism rules

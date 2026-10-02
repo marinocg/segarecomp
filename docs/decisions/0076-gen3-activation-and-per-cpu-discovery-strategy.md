@@ -1,6 +1,8 @@
 # ADR 0076: Gen-3 Activation and Per-CPU Discovery Strategy
 
-- Status: Proposed (SEG-027-T002). Finalized by SEG-027-T006.
+- Status: Accepted (SEG-027-T006, independent gate PASS). Proposed by SEG-027-T002.
+- Final decisions: SEG-028 ACTIVATE (`p1`); SEG-029 ACTIVATE as an incremental core (`p2`), no dependency edge between them;
+  SEG-030 and SEG-031 DEFERRED; production unchanged (broad AOT on Z80 and M68K).
 - Date: 2026-10-02
 - Evidence: `docs/architecture/gen3-evidence-ledger.md` (SEG-027-T001). Citations of the form `[L 2.1]`, `[L C1]` and `[L S8]` point to
   ledger sections, contradiction rows and seam rows.
@@ -30,7 +32,7 @@ Two problems are kept separate throughout:
 
 | CPU / image class | current producer | current admission | future candidate | why (evidence) |
 | --- | --- | --- | --- | --- |
-| **M68K immutable cartridge image** | Immutable input image: structurally valid `raw_cartridge_rom` claims [L S1]. | Broad immutable-ROM AOT over every aligned decodable start (`U` = 246,293 of 262,144 on the 512 KiB reference) plus Gen-2 Tier-1 discovery. | Gen-3: reachability plus abstract value/pointer analysis (SEG-029/030), reported as `precise set OR Unknown`. Production admission is changed only by SEG-031, using bounded fallback; broad AOT stays the fallback/reference. | Need demonstrated: sound reduction gives `L = U` on 6/6 titles [L 2.2]. The best local analysis recovers 42.7% of observed execution at 2.75% of `U`. 94.4% of the remainder sits behind width-only dispatch fed by object fields whose bases are not locally provable; local store reasoning gained 0 PCs. Cost is linear in image size, not code size: 218 MB of C at 512 KiB, 1.72 GB at 4 MiB synthetic [L 2.1]. |
+| **M68K immutable cartridge image** | Immutable input image: structurally valid `raw_cartridge_rom` claims [L S1]. | Broad immutable-ROM AOT over every aligned decodable start (`U` = 246,293 of 262,144 on the 512 KiB reference) plus Gen-2 Tier-1 discovery. | Gen-3: reachability plus abstract value/pointer analysis (SEG-029/030), reported as `precise set OR Unknown`. Production admission is changed only by SEG-031, using bounded fallback; broad AOT stays the fallback/reference. | Need demonstrated: sound reduction gives `L = U` on 6/6 titles [L 2.2]. The best local analysis recovers 42.7% of observed execution at 2.75% of `U`. 94.4% of the remainder sits behind width-only dispatch, and 84.2% has a register-relative field with a non-provable base on its chain; local store reasoning gained 0 PCs. Cost is linear in image size, not code size: 218 MB of C at 512 KiB, 1.72 GB at 4 MiB synthetic [L 2.1]. |
 | **M68K statically proven RAM copy/alias (ADR 0049)** | Statically proven verbatim copy: descriptor `(execution_base, source_base, length)` validated against an owned cartridge claim. Descriptors come from an optional bounded preparation phase in tooling [L S2]. | Broad AOT of the alias span at the execution base, with a per-instruction byte-identity guard. | The first M68K consumer of the SEG-028 image/producer seam, and the route by which `segarecomp build` gains alias images through a producer interface rather than bridge flags. A future static producer (SEG-030 copy-loop proof) can replace the preparation phase. | `segarecomp build` consumes no alias today [L S2]. The mechanism exists only on tooling routes. Execution semantics (guard, execution-relative provenance) are proven and must be preserved byte for byte. |
 | **future transformed/materialized M68K RAM image** (decompressed or generated code) | None. Fail-closed frontier (ADR 0049 non-goals). | None (fail closed). | Either a bounded build-time materialization producer (the same producer class as SEG-032), or a static producer from SEG-030, behind the SEG-028 seam. Only when a workload requires it. | No measured workload requires it yet. Recorded as a SEG-028 revisit item, not a deliverable. |
 | **Z80 immutable SMS cartridge image** | Immutable input image: an invariant image plus one banked image per 16 KiB bank [L S7]. | Broad Z80 AOT (ADR 0058/0071). | Broad AOT, retained. A future static analysis is not required to ship. | SEG-033: 512 KiB in 23-28 s, 14,999 host functions, 30.7 MiB executable, behaviour unchanged [L 2.3, C1]. No measured blocker. |
@@ -87,7 +89,7 @@ multi-CPU fail-closed validation. It is not a universal loader. Genesis epochs, 
 Evidence:
 
 - the M68K need is demonstrated and was diagnosed precisely by SEG-024/026 [L 2.2];
-- two independent, ad-hoc, M68K-only finite-value worklists already exist (Gen-2 static discovery and the SEG-026 helper) [L S5], with
+- two independent, ad-hoc, M68K-only finite-value analyses already exist (Gen-2 static discovery and the SEG-026 helper) [L S5], with
   no shared solver;
 - the next precision step (pointer/alias/object/interprocedural) is beyond both, by measurement (ADR 0055);
 - Z80 is a genuine second-CPU perspective. It has a different decoder, register file, addressing (HL/IX/IY), stack/return and banking.
@@ -259,7 +261,7 @@ These hold unless a later ADR explicitly argues otherwise:
 - `CodeImage`/`ImageSet` stay Z80 codegen input behind a pure adapter. `PassRunner` stays Genesis-specific.
 - ADR 0049 becomes a class-2 producer with byte-identical output.
 - A class-4 replacement of the SEG-032 materializer is proven by registry equality.
-- The SEG-028 milestone record (harness backlog) carries the rewritten Outcome/Scope/Acceptance and a seven-child Refinement plan. Its
+- The SEG-028 milestone record carries the rewritten Outcome/Scope/Acceptance and a seven-child Refinement plan. Its
   fifth child is an evidence-gated go/no-go on giving `segarecomp build` a proven-copy producer.
 
 ### T004 (SEG-029 plan)
@@ -272,7 +274,7 @@ These hold unless a later ADR explicitly argues otherwise:
 - The Z80 second-CPU proof is a bounded synthetic adapter. It needs a small CPU-owned Z80 effect/successor projection in `libs/cpu/z80`,
   because Z80 semantics currently reach code only through C11 lowering.
 - SEG-029 does not depend on SEG-028.
-- The SEG-029 milestone record (harness backlog) carries the rewritten Outcome/Scope/Acceptance and a seven-child Refinement plan.
+- The SEG-029 milestone record carries the rewritten Outcome/Scope/Acceptance and a seven-child Refinement plan.
 
 ### T005 (future boundaries: SEG-030, SEG-031, cross-CPU validation)
 
@@ -292,3 +294,19 @@ These hold unless a later ADR explicitly argues otherwise:
   - Owner: SEG-031.
   - It is a prerequisite for any Z80-facing discovery or admission claim, but not for SEG-029's synthetic Z80 adapter.
   - A neutral observation seam is extracted only when it has two consumers.
+
+### T006 (independent gate)
+
+An independent adversarial review (no authorship of T001-T005) checked the 14 T006 criteria and found no blocking or major defect. It
+also falsified the code claims and judged both ACTIVATE decisions adequately evidenced. Seven minor wording and precision findings
+were corrected in the same change:
+
+- the SMS wall-time noise statement;
+- the 94.4% / 84.2% distinction;
+- the superseded Genesis Z80 C range;
+- the entry-table identifier;
+- the finite-value analysis description and ownership;
+- the two-level SEG-026-T002 baseline;
+- private-harness wording.
+
+The fast gate passed. Status set to Accepted.

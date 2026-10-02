@@ -155,7 +155,7 @@ The final executable never sees it. Only generated tables derived from it reach 
     - SMS slot admissibility and mapper registers.
     - ADR 0049 discovery: the maximal verbatim run search and preparation rounds.
     - M68K cartridge mirroring (ADR 0049 decision 5).
-    - Runtime entry tables beyond the already-neutral `CompiledEntryTable`.
+    - Runtime entry tables beyond the already-neutral `emit_compiled_entry_table` (`compiled_entry_table.hpp`).
     - Any decompression or transform semantics.
 
 ## 3. Proposed placement (to be confirmed by SEG-028's first child)
