@@ -27,7 +27,7 @@ the generic part is not M68K-shaped.
    - **No production target links any analysis target.** Only tests do. `tests/analysis_core_boundary_test.py` enforces this over every
      `CMakeLists.txt`. Production generated output and admission are therefore unchanged by construction; production Z80 stays broad AOT.
 2. **The seam.** The solver sees opaque, totally ordered 64-bit program points (the adapter encodes them), an adapter-defined
-   `State` with ADL `join`/`leq`, and a pure monotone `transfer(point, in) -> TransferResult` that returns typed edges. Edge kinds are the
+   `State` with ADL `join`/`leq`, and a pure `transfer(point, in) -> TransferResult` (monotone except for computed edges, below) that returns typed edges. Edge kinds are the
    closed set `fallthrough, branch, call, return_edge, computed, exceptional`, used for reporting only. A computed edge carries a target
    the adapter derived from a *precise* abstract value. A computed site whose value is not precise reports `unresolved_computed(reason)`
    and contributes no edge, so results are relative to the discovered edge set (the ADR 0054 premise). The solver never decodes an
@@ -124,3 +124,13 @@ the generic part is not M68K-shaped.
 - **Minor findings, both corrected:**
   - requested bounds are now clamped (decision 4);
   - the seam text now states that computed edges are non-monotone (decision 2).
+- **Second pass (correction cycle 1): BLOCKED, with one major regression.** The M68K driver re-derived "resolved" for a site the
+  solver had pinned, using the narrower input of the restarted solve, when the site's own target was what widened it.
+  - **Corrected (cycle 2):** the driver now maps every solver-pinned site to `invalidated`, and its documentation says
+    `M68kFiniteAnalysisResult::restarts` counts driver restarts only.
+  - **Fixtures:** `fixture_self_widening_site`, which matches the challenger's `invalidated` result, and a core clamp test
+    (`bounds_never_raised`, where requested bounds above the defaults stop at exactly the default iteration bound).
+  - The driver's own lost-target check duplicated the solver's pin on the same final transfer (its mutant became equivalent), so it
+    was removed together with its mutant `m68k_invalidation_skipped`. Lost targets are now detected only by the solver.
+  - **Mutants:** `bounds_raised` and `m68k_solver_pin_ignored` were added, for 41 mutants in total: 39 killed and 2 justified as
+    equivalent.

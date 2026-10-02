@@ -131,23 +131,19 @@ public:
   [[nodiscard]] M68kPcIndexSiteReport evaluate_pc_index_site(std::uint32_t pc, const M68kIrOperation &operation,
                                                              const State &in) const;
 
-  // Every computed target ever emitted per site during the solve (record only; never read by `transfer`).
-  [[nodiscard]] const std::map<std::uint32_t, std::set<std::uint32_t>> &emitted() const noexcept { return emitted_; }
-
   [[nodiscard]] std::optional<M68kAnalysisImage::Instruction> decode(std::uint32_t pc) const;
 
 private:
   const M68kAnalysisImage &image_;
   M68kAnalysisConfig config_;
   mutable std::map<std::uint32_t, std::optional<M68kAnalysisImage::Instruction>> decoded_;
-  std::map<std::uint32_t, std::set<std::uint32_t>> emitted_;
 };
 static_assert(analysis::Adapter<M68kFiniteAdapter>);
 
 struct M68kFiniteAnalysisResult {
   bool complete{};
   analysis::UnknownReason reason{analysis::UnknownReason::iteration_bound};  // when incomplete
-  std::uint32_t restarts{};
+  std::uint32_t restarts{};  // driver restarts only; the generic solver's own restarts are in `solution.restarts`
   std::size_t iterations{};  // of the final solve
   std::map<std::uint32_t, std::uint32_t> reached;  // decoded reached instruction start -> length
   std::set<std::uint32_t> undecodable;             // reached points with no decodable instruction
@@ -156,8 +152,9 @@ struct M68kFiniteAnalysisResult {
   analysis::Solution<M68kAnalysisState> solution;
 };
 
-// Runs the forward fixed point from `entries` (each seeded with the all-Unknown state). A site whose emitted targets
-// are not all retained by the final fixed point is pinned unresolved and the analysis restarts (monotone, terminates).
+// Runs the forward fixed point from `entries` (each seeded with the all-Unknown state). A site the generic solver pinned (it lost
+// a computed target it had emitted) is reported `invalidated`: the analysis restarts with it pinned at the adapter (monotone,
+// terminates).
 [[nodiscard]] M68kFiniteAnalysisResult analyze_m68k_finite_values(const M68kAnalysisImage &image,
                                                                   const std::vector<std::uint32_t> &entries,
                                                                   M68kAnalysisConfig config = {},

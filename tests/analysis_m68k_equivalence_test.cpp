@@ -429,7 +429,8 @@ void fixture_invalidation() {
   expect(outcome_of(p.challenger, jmp_b) == "invalidated", "INV: challenger detail is invalidated");
 }
 
-// The adapter's own invalidation path: a site whose emitted targets are lost later is pinned and the solve restarts.
+// The invalidation path: a site whose emitted targets are lost later is pinned (by the generic solver, then reported invalidated by
+// the driver) and the solve restarts.
 // Ordering forces it: B (low addresses) is transferred before the later edge from A (high addresses) widens its slice.
 void fixture_adapter_invalidation() {
   Image image;
@@ -454,6 +455,23 @@ void fixture_adapter_invalidation() {
          "INV-forward: an invalidated site contributes no target");
   expect(outcome_of(p.challenger, jmp_b) != "resolved", "INV-forward: the challenger also leaves B unresolved");
   expect(adapter_targets(p, 0x608U, {0x610U, 0x614U}), "INV-forward: A stays proven");
+}
+
+// SEG-029-T006 (correction cycle 2): a site whose own target re-enters its slice with an unbounded index. The generic solver pins
+// the site; the driver must report it invalidated (never resolved from the narrower input of the restarted solve), like the challenger.
+void fixture_self_widening_site() {
+  Image image;
+  const auto jmp = guarded_word_table_dispatch(image, 0x200U, 1U, 0x280U, 0x220U);  // ADD.W at 0x20C, JMP at 0x212
+  image.words(0x220U, {0x0040U, 0x0050U});                                           // targets 0x260, 0x270
+  Asm{image, 0x260U}.move_b_ram(0, 0xF100U).bra_w(0x20CU);                         // re-enters with a RAM index
+  Asm{image, 0x270U}.bra_self();
+  Asm{image, 0x280U}.bra_self();
+  const auto p = compare("SELF", image);
+  expect(adapter_outcome(p, jmp, M68kPcIndexOutcome::invalidated), "SELF: a solver-pinned site is reported invalidated");
+  expect(p.adapter.pc_index_sites.at(jmp).targets.empty() && !p.adapter.reached.contains(0x260U) &&
+             !p.adapter.reached.contains(0x270U),
+         "SELF: the pinned site names no target and reaches none");
+  expect(outcome_of(p.challenger, jmp) == "invalidated", "SELF: the challenger also invalidates the site");
 }
 
 void fixture_narrow_query() {
@@ -572,6 +590,7 @@ int main() {
   fixture12();
   fixture_invalidation();
   fixture_adapter_invalidation();
+  fixture_self_widening_site();
   fixture_narrow_query();
   fixture_loop_invariant_index();
   fixture_loop_growing_index();

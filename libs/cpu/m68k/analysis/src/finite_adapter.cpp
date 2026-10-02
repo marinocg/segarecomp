@@ -286,10 +286,7 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
       if (report.outcome == M68kPcIndexOutcome::resolved) {
         State edge = out;
         edge.flag_setter.reset();
-        for (const auto target : report.targets) {
-          result.edges.push_back({target, EdgeKind::computed, edge});
-          emitted_[pc].insert(target);
-        }
+        for (const auto target : report.targets) result.edges.push_back({target, EdgeKind::computed, edge});
       } else {
         result.unresolved_computed = report.reason;
       }
@@ -330,11 +327,10 @@ M68kFiniteAnalysisResult analyze_m68k_finite_values(const M68kAnalysisImage &ima
       out.reached.emplace(pc, decoded->length);
       if (!is_pc_index_site(decoded->operation)) continue;
       auto report = adapter.evaluate_pc_index_site(pc, decoded->operation, state);
-      const auto emitted = adapter.emitted().find(pc);
-      if (emitted != adapter.emitted().end() &&
-          (report.outcome != M68kPcIndexOutcome::resolved ||
-           !std::includes(report.targets.begin(), report.targets.end(), emitted->second.begin(), emitted->second.end())))
-        invalidated.insert(pc);
+      // Lost computed targets are detected by the generic solver, which pins the site and restarts (ADR 0078 decision 2). A pinned
+      // site is never reported resolved, even when the restarted solve's narrower input re-derives a precise set: the driver maps
+      // it to `invalidated` and restarts once more with the site pinned at the adapter, so it emits nothing (SEG-029-T006).
+      if (out.solution.pinned.contains(point) && !config.pinned_sites.contains(pc)) invalidated.insert(pc);
       out.pc_index_sites.emplace(pc, std::move(report));
     }
     if (invalidated.empty()) return out;

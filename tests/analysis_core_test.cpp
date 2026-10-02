@@ -249,6 +249,26 @@ void stale_computed_target_state() {
          "STALE: a growing precise site keeps all targets without a restart");
 }
 
+// A caller may lower a bound, never raise it: a chain just longer than the default iteration bound, solved with requested bounds far
+// above the defaults, still stops at exactly the default iteration bound with a typed Unknown.
+struct ChainAdapter {
+  using State = ValueVector<1>;
+  std::uint64_t length{};
+  TransferResult<State> transfer(std::uint64_t point, const State &in) const {
+    TransferResult<State> out;
+    if (point + 1U < length) out.edges.push_back({point + 1U, EdgeKind::fallthrough, in});
+    return out;
+  }
+};
+
+void bounds_never_raised() {
+  ChainAdapter chain{default_max_iterations + 10U};
+  const auto s = solve(chain, {{0U, ChainAdapter::State::all_unknown(UnknownReason::unknown_input)}},
+                       Bounds{default_max_iterations * 8U, default_max_points * 8U});
+  expect(!s.complete && s.reason == UnknownReason::iteration_bound && s.iterations == default_max_iterations,
+         "BOUND: requested bounds above the defaults are clamped to the defaults");
+}
+
 // The worklist always yields the smallest pending point: the transfer order is a function of the program alone, independent of
 // edge order, insertion order or container hashing.
 void worklist_order() {
@@ -293,6 +313,7 @@ int main() {
   bound_exhaustion();
   site_resolution_is_latest();
   stale_computed_target_state();
+  bounds_never_raised();
   worklist_order();
   determinism();
   if (failures != 0) {
