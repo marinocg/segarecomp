@@ -71,7 +71,10 @@ MaterializationSummary materialize(Registry& registry, PassRunner& runner) {
   bool candidate_found = false;
   PassObservation candidate;
   for (std::size_t run = 0; run < kMaxDiscoveryRuns && !candidate_found; ++run) {
-    if (!runner.prepare(registry)) return fail(Failure::z80_image_compile_failed);
+    if (!runner.prepare(registry)) {
+      summary.prepare_failure = runner.prepare_failure();
+      return fail(Failure::z80_image_compile_failed);
+    }
     PassObservation observed = runner.run();
     ++summary.discovery_runs;
     ++summary.total_runs;

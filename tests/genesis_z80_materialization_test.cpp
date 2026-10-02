@@ -62,6 +62,8 @@ class Scripted final : public z80::PassRunner {
     prepared_sizes.push_back(registry.images().size());
     return compile_ok;
   }
+  z80::PrepareFailure prepare_failure() const override { return failure; }
+  z80::PrepareFailure failure;
   z80::PassObservation run() override {
     ++runs;
     if (script.empty()) return {};  // outcome failed
@@ -191,6 +193,15 @@ int main() {
     r.compile_ok = false;
     z80::Registry registry;
     check(run_script(r, registry).failure == z80::Failure::z80_image_compile_failed && r.runs == 0, "image compile failure: z80_image_compile_failed, nothing is run");
+    Scripted staged;
+    staged.compile_ok = false;
+    staged.failure = {"unit-compile", "synthetic diagnostic"};
+    z80::Registry registry1;
+    const auto staged_summary = run_script(staged, registry1);
+    check(staged_summary.failure == z80::Failure::z80_image_compile_failed && staged_summary.prepare_failure.stage == "unit-compile" &&
+              staged_summary.prepare_failure.detail == "synthetic diagnostic",
+          "prepare failure: the typed failure is unchanged and the failed stage/detail are carried");
+    check(run_script(r, registry).prepare_failure.stage.empty(), "a runner without stage detail reports empty strings");
     const z80::Epoch a = snapshot(1);
     Scripted dup;
     dup.script = {unknown_run({}, a), unknown_run({pass_epoch(a)}, a)};  // the pass claims the registered image is unknown

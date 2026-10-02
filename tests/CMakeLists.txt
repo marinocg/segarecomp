@@ -1137,6 +1137,9 @@ set_property(TEST genesis_audio_mixer_test genesis_audio_pcm_test genesis_audio_
 add_test(NAME packaging_trim_zig_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/packaging_trim_zig_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST packaging_trim_zig_test APPEND PROPERTY LABELS full)
+add_test(NAME packaging_smoke_hermeticity_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/packaging_smoke_hermeticity_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST packaging_smoke_hermeticity_test APPEND PROPERTY LABELS full fast)
 set_property(TEST z80_live_guard_test genesis_z80_images_test genesis_z80_view_test genesis_z80_machine_test genesis_audio_psg_test
   genesis_ym2612_device_test genesis_audio_ym_test APPEND PROPERTY LABELS full)
 set_property(TEST codegen_c11_z80_dependency_test z80_generated_pipeline_test z80_conformance_harness_test

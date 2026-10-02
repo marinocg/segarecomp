@@ -39,11 +39,11 @@ def check(ok, label):
         failures.append(label)
 
 
-def build(rom_bytes, out, jobs=None, keep=False):
+def build(rom_bytes, out, jobs=None, keep=False, compiler=None):
     out.mkdir(parents=True, exist_ok=True)
     rom = out.parent / (out.name + ".md")
     rom.write_bytes(rom_bytes)
-    command = [cli, "build", "--rom", str(rom), "--output", str(out), "--cc", cc, "--cxx", cxx, "--runtime-dir",
+    command = [cli, "build", "--rom", str(rom), "--output", str(out), "--cc", compiler or cc, "--cxx", cxx, "--runtime-dir",
                str(root / "platforms" / "genesis"), "--optimize", "0"]
     if jobs:
         command += ["--jobs", str(jobs)]
@@ -77,6 +77,16 @@ def stable(status):
     for key in ("emit_ms", "compile_ms", "materialize_ms", "units_compiled", "units_reused"):
         z.pop(key, None)
     return z
+
+
+def failing_compiler(directory, mode):
+    """A POSIX wrapper around the real compiler that fails one operation with a synthetic diagnostic: `unit-compile` fails the
+    compile of a generated Z80 unit, `pass-link` fails the link of the materialization pass program."""
+    wrapper = directory / ("cc-fail-" + mode)
+    pattern = "*/z80-*.o" if mode == "unit-compile" else "*/materialize-pass"
+    wrapper.write_text('#!/bin/sh\nfor a in "$@"; do\n  case "$a" in %s) echo "synthetic-%s-diagnostic: scripted failure" >&2; exit 1;; esac\ndone\nexec "%s" "$@"\n' % (pattern, mode, cc))
+    wrapper.chmod(0o755)
+    return str(wrapper)
 
 
 def main():
@@ -202,6 +212,20 @@ def main():
             z = results[name][1].get("z80", {})
             print("METRIC %s %s" % (name, json.dumps({k: z.get(k) for k in ("images", "epochs", "discovery_runs", "runs", "units", "generated_bytes",
                                                                         "object_bytes", "emit_ms", "compile_ms", "materialize_ms", "executable_bytes")}, sort_keys=True)))
+    # ---- prepare() failure reports the failed operation and keeps the diagnostic (POSIX wrapper compiler) ----
+    if sys.platform != "win32":
+        with tempfile.TemporaryDirectory(prefix="segarecomp-z80-prepare-fail-") as directory:
+            tmp = pathlib.Path(directory)
+            for mode in ("unit-compile", "pass-link"):
+                done, status = build(fx.build("sound_raw"), tmp / mode, compiler=failing_compiler(tmp, mode))
+                log = (tmp / mode / "build.log").read_text(errors="replace")
+                check(done.returncode != 0 and status.get("diagnostic") == "z80_image_compile_failed" and executable(tmp / mode) is None,
+                      "%s failure: typed z80_image_compile_failed, no executable" % mode)
+                check(("message=z80_image_compile_failed stage=%s" % mode) in done.stdout and ("(%s)" % mode) in status.get("message", ""),
+                      "%s failure: the failed stage is in @result and status.json" % mode)
+                check(("z80 prepare failure: stage=%s" % mode) in log and ("synthetic-%s-diagnostic" % mode) in log.split("z80 prepare failure:", 1)[-1],
+                      "%s failure: the stage and the bounded compiler/link diagnostic are in build.log" % mode)
+
     print("genesis z80 build pipeline: %s" % ("FAILED (%d)" % len(failures) if failures else "ok"))
     return 1 if failures else 0
 

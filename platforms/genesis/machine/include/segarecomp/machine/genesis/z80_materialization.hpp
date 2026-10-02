@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "segarecomp/machine/genesis/z80_images.hpp"
@@ -54,11 +55,20 @@ struct PassObservation {
   std::optional<Epoch> unknown;       // present exactly for PassOutcome::unknown_image
 };
 
+// Which operation of PassRunner::prepare failed (a short stable name such as "emit", "unit-compile", "pass-link") and a bounded,
+// sanitized diagnostic text. Informational only: the typed Failure is unchanged.
+struct PrepareFailure {
+  std::string stage;
+  std::string detail;
+};
+
 class PassRunner {
  public:
   virtual ~PassRunner() = default;
   // Builds the program for the registry (emit, compile only what changed, link). False = z80_image_compile_failed.
   virtual bool prepare(const Registry& registry) = 0;
+  // After a false prepare(): the failed operation. Runners that do not report one return empty strings.
+  [[nodiscard]] virtual PrepareFailure prepare_failure() const { return {}; }
   // One bounded run of the most recently prepared program.
   virtual PassObservation run() = 0;
 };
@@ -79,6 +89,7 @@ enum class Failure : std::uint8_t {
 
 struct MaterializationSummary {
   Failure failure = Failure::none;
+  PrepareFailure prepare_failure;   // set exactly for z80_image_compile_failed
   std::size_t images = 0;
   std::size_t discovery_runs = 0;   // runs that were needed to reach the candidate (the completing run included)
   std::size_t total_runs = 0;       // discovery runs plus the confirming run

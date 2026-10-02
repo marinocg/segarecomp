@@ -366,6 +366,20 @@ struct GenesisSoundBuild {
   std::vector<fs::path> pass_stable;            // pass link set without the Z80 objects
   fs::path pass_executable;
   std::string failure_detail;
+  std::string failure_stage;       // operation of prepare() that failed: emit, unit-compile, pass-link
+  std::string failure_diagnostic;  // bounded tail of the failing compiler/link log
+
+  // The last bounded part of a tool log (diagnostics trail the first error lines; the full text stays in build.log).
+  static std::string bounded_log_text(const fs::path &path) {
+    constexpr std::size_t kLimit = 600;
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream text;
+    if (in) text << in.rdbuf();
+    std::string out = text.str();
+    while (!out.empty() && (out.back() == '\n' || out.back() == '\r' || out.back() == ' ')) out.pop_back();
+    if (out.size() > kLimit) out = "..." + out.substr(out.size() - kLimit);
+    return out;
+  }
 
   // Runs a batch of compile jobs with the worker pool; logs every command; returns the first failing index or -1.
   int compile(const std::vector<CompileJob> &batch) {
@@ -386,6 +400,7 @@ struct GenesisSoundBuild {
       log.line("$ " + joined);
       log.append_file(logs[i]);
     }
+    if (failed >= 0) failure_diagnostic = bounded_log_text(logs[static_cast<std::size_t>(failed)]);
     if (failed >= 0) failure_detail = codes[static_cast<std::size_t>(failed)] < 0 ? "The bundled C compiler could not be started." : "The bundled C compiler reported errors.";
     return failed;
   }
@@ -399,8 +414,10 @@ struct GenesisSoundBuild {
     command.insert(command.end(), options.link_args.begin(), options.link_args.end());
     const fs::path link_log = object_dir / (executable.filename().string() + ".link.log");
     const int rc = run_process(command, link_log);
-    log.line("$ (link " + executable.filename().string() + ")");
+    log.line("$ (link)");
+    log.line("# link target=" + executable.filename().string());
     log.append_file(link_log);
+    if (rc != 0) failure_diagnostic = bounded_log_text(link_log);
     return rc == 0;
   }
 
@@ -413,7 +430,7 @@ struct GenesisSoundBuild {
     const auto emit_started = Clock::now();
     const gz80::EmitOutcome emitted = gz80::emit_registry(registry, request);
     z80_emit_ms += millis_since(emit_started);
-    if (!emitted.ok()) { log.line("z80 emit diagnostic: " + emitted.error); failure_detail = "The Z80 image code could not be generated."; return false; }
+    if (!emitted.ok()) { log.line("z80 emit diagnostic: " + emitted.error); failure_detail = "The Z80 image code could not be generated."; failure_stage = "emit"; failure_diagnostic = emitted.error; return false; }
     std::vector<fs::path> sources;
     {
       std::ifstream list(z80_dir / "genesis_z80.units");
@@ -444,7 +461,7 @@ struct GenesisSoundBuild {
       z80_current.push_back(object);
     }
     const auto compile_started = Clock::now();
-    if (!batch.empty() && compile(batch) >= 0) return false;
+    if (!batch.empty() && compile(batch) >= 0) { failure_stage = "unit-compile"; return false; }
     z80_compile_ms += millis_since(compile_started);
     z80_compiled_units += batch.size();
     for (auto &entry : fresh) z80_objects.emplace(entry.first, entry.second);
@@ -452,7 +469,7 @@ struct GenesisSoundBuild {
     for (const fs::path &object : z80_current) z80_object_bytes += fs::file_size(object, ec);
     std::vector<fs::path> objects = pass_stable;
     objects.insert(objects.end(), z80_current.begin(), z80_current.end());
-    if (!link(pass_executable, objects, false)) { failure_detail = "The native program could not be linked."; return false; }
+    if (!link(pass_executable, objects, false)) { failure_detail = "The native program could not be linked."; failure_stage = "pass-link"; return false; }
     return true;
   }
 };
@@ -460,7 +477,12 @@ struct GenesisSoundBuild {
 class ProcessPassRunner final : public gz80::PassRunner {
  public:
   explicit ProcessPassRunner(GenesisSoundBuild &build) : build_(build) {}
-  bool prepare(const gz80::Registry &registry) override { return build_.prepare(registry); }
+  bool prepare(const gz80::Registry &registry) override {
+    build_.failure_stage.clear();
+    build_.failure_diagnostic.clear();
+    return build_.prepare(registry);
+  }
+  gz80::PrepareFailure prepare_failure() const override { return {build_.failure_stage, build_.failure_diagnostic}; }
 
   gz80::PassObservation run() override {
     gz80::PassObservation observed;
@@ -618,10 +640,14 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     const std::string extra = ",\"z80\":{\"outcome\":\"" + std::string(gz80::failure_name(summary.failure)) + "\",\"images\":" +
                               std::to_string(registry.images().size()) + ",\"discovery_runs\":" + std::to_string(summary.discovery_runs) +
                               ",\"runs\":" + std::to_string(summary.total_runs) + "}";
-    log.line("FAILED (z80-materialize): " + std::string(gz80::failure_name(summary.failure)));
+    const bool compile_failed = summary.failure == gz80::Failure::z80_image_compile_failed;
+    const std::string operation = compile_failed && !summary.prepare_failure.stage.empty() ? " stage=" + summary.prepare_failure.stage : "";
+    log.line("FAILED (z80-materialize): " + std::string(gz80::failure_name(summary.failure)) + operation);
+    if (compile_failed) log.line("z80 prepare failure: stage=" + summary.prepare_failure.stage + " detail=" + summary.prepare_failure.detail);
     write_status(options, sha, "failed", "z80-materialize",
-                 summary.failure == gz80::Failure::z80_image_compile_failed ? build.failure_detail : "The Z80 sound program could not be materialized.", extra + ",\"diagnostic\":\"" + gz80::failure_name(summary.failure) + "\"");
-    std::cout << "@result failed stage=z80-materialize message=" << gz80::failure_name(summary.failure) << std::endl;
+                 compile_failed ? build.failure_detail + (operation.empty() ? "" : " (" + summary.prepare_failure.stage + ")") : "The Z80 sound program could not be materialized.",
+                 extra + ",\"diagnostic\":\"" + gz80::failure_name(summary.failure) + "\"");
+    std::cout << "@result failed stage=z80-materialize message=" << gz80::failure_name(summary.failure) << operation << std::endl;
     return 4;
   }
   stage("z80-materialize", "done");
@@ -887,6 +913,7 @@ int segarecomp_build_command(int argc, char **argv) {
     const fs::path link_log = object_dir / "link.log";
     const int link_rc = run_process(link, link_log);
     log.line("$ (link)");
+    log.line("# link target=" + executable.filename().string());
     log.append_file(link_log);
     if (link_rc != 0) return fail(options, log, sha, "link", 3, "The native program could not be linked.");
     fs::remove_all(object_dir, ec);
