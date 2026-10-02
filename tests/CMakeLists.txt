@@ -1111,6 +1111,8 @@ add_test(NAME analysis_core_boundary_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST analysis_core_test analysis_core_boundary_test APPEND PROPERTY LABELS full fast)
 include(${CMAKE_CURRENT_SOURCE_DIR}/analysis_m68k_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/analysis_z80_tests.cmake)
+# SEG-030 (ADR 0079): the report-only Genesis M68K analysis driver.
+include(${CMAKE_CURRENT_SOURCE_DIR}/analysis_report_tests.cmake)
 # SEG-029-T005: adversarial mutation gate. Applies each planted soundness/determinism/bound defect of the analysis core and adapters
 # to a temporary copy of the tree, rebuilds the three fixture tests there and requires a kill (stale edit patterns fail closed).
 add_test(NAME analysis_mutation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/analysis_mutation_test.py

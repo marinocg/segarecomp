@@ -139,6 +139,26 @@ struct GenesisReachabilityChallengerResult {
   std::uint64_t exception_raising_instructions{};  // discovered ILLEGAL/line-A/line-F style words (decode indicator)
 };
 
+// SEG-030-T002: the architecture-owned discovery roots the Genesis machine delivers: the reset entry and the handler of every
+// installed machine-delivered exception/interrupt vector (IRQ6 and the synchronous vectors of ADR 0021 / ADR 0043). `roots` is
+// sorted and distinct; `vector_roots` counts installed delivered vectors (a handler shared by several vectors counts once per
+// vector). The challenger and the report-only analysis driver share this single owner.
+struct GenesisReachabilityRoots {
+  std::vector<std::uint32_t> roots;
+  std::uint32_t vector_roots{};
+};
+[[nodiscard]] GenesisReachabilityRoots genesis_reachability_roots(const FrontendProgram &program);
+
+// SEG-030-T002: the challenger's experiment-local mirror of ADR 0048's push-window scoping rule, over a caller-supplied
+// decoded instruction set: the RTS PCs reached within 8 stack-neutral instructions from a MOVE.L <ea>,-(A7). Classification
+// only (a computed jump rather than an ordinary return); never discovery.
+struct GenesisReachabilityInstruction {
+  M68kIrOperation operation;
+  std::uint32_t length{};
+};
+[[nodiscard]] std::set<std::uint32_t> genesis_push_window_rts(
+    const std::map<std::uint32_t, GenesisReachabilityInstruction> &instructions);
+
 [[nodiscard]] GenesisReachabilityChallengerResult run_genesis_reachability_challenger(
     const FrontendProgram &program, const GenesisReachabilityChallengerConfig &config);
 

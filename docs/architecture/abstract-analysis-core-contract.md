@@ -10,8 +10,9 @@
   - section 6: SEG-028 has landed; the generic core takes no image, and adapters own the immutable-read oracle (decision 9).
 - Decision context: ADR 0076 (SEG-029 ACTIVATE as an incremental core); evidence in `gen3-evidence-ledger.md` (cited as `[L x]`) sections 2.2, 3 (S4, S5)
   and 4.
+- Section 8 (M68K instantiation) is Accepted by ADR 0079 (SEG-030-T001); where it and ADR 0079 differ, ADR 0079 is authoritative.
 - Not this contract's job:
-  - the M68K instantiation (SEG-030);
+  - implementing the M68K staged domains (SEG-030-T003..T006; section 8 fixes their contract);
   - production admission (SEG-031);
   - executable-image production (SEG-028, `executable-image-contract.md`).
 
@@ -131,3 +132,31 @@ The analysis consumes an **executable-image view**: bytes, mapping and an immuta
 - Pre-commit to a complete VSA framework, or build every staged domain up front.
 - Introduce a universal CPU IR, a generic hardware/memory emulator, or platform banking semantics in generic domains.
 - Carry the ADR 0076 STOP conditions in weakened form. They apply in full.
+
+## 8. M68K instantiation (SEG-030; ADR 0079)
+
+- **Driver.** Report-only `platforms/genesis/analysis_report/` (`segarecomp::genesis_analysis_report` + `segarecomp-genesis-analysis-report`);
+  links `machine_genesis` and `cpu_m68k_analysis`; never installed; never linked by the `segarecomp` CLI or any production target
+  (`analysis_core_boundary_test`, amended by ADR 0079 decision 2).
+- **Roots.** `genesis_reachability_roots`: the reset entry plus every installed machine-delivered vector handler, the challenger's own
+  owner. Each root is seeded with the all-Unknown state.
+- **Image view.** `GenesisM68kAnalysisImage` over `genesis_m68k_executable_images`: `immutable_input` cartridge images plus `static_proof`
+  ADR 0049 aliases at their work-RAM base execute under the challenger's ownership rules; only `immutable_input` bytes at their cartridge
+  address are immutable. An alias execution address is mutable work RAM.
+- **Locations.** Data registers (baseline), address registers with points-to, abstract memory cells and stack/frame cells (staged).
+  CPU-owned regions: `image(id)`, `work_ram`, `io_device`, `unknown`; the stack is `work_ram` at the tracked absolute A7 offset.
+- **Staged domains (admitted, CPU-owned in `libs/cpu/m68k/analysis`, each inert when off).** Address region + offset / points-to (T003),
+  abstract memory with object fields and alias exclusion (T004), k = 1 contexts and summaries (T005), exception/return frames (T006).
+  Candidates, not admitted: intervals beyond 4,096, general widening, pin minimization, selective symbolic execution.
+- **Points.** `(ctx << 24) | pc`, ctx = 0 or call-site PC + 1; `D` = low 24 bits of reached points; at most 8 contexts per callee entry.
+- **Asynchronous writers.** Vector-root code is a potential asynchronous writer: its store cells are never strong-updated and read
+  Unknown outside handler code; initial work RAM is Unknown; handler entry state is Unknown except a derived A7. Bus-master writes are
+  excluded or poisoned as recorded in ADR 0079 decision 7.
+- **Rounds.** Monotone configuration growth, at most 16 rounds, mandatory final validation; non-convergence turns the dependent domain off
+  (`iteration_bound`).
+- **Results.** `Precise(set)` or `Unknown(generic reason x CPU sub-reason)` per site, in the ADR 0079 decision 10 families; no generic
+  `Unknown` vocabulary change.
+- **Resource constants.** Solver 10^6 iterations / 2^20 points; finite set 4,096; points-to <= 8 pairs; exact offsets <= 64 else strided;
+  <= 512 memory cells per state; K = 8; R = 16.
+- **Regression baseline.** With every staged domain off, the driver reproduces the SEG-026-T002 strict oracle row exactly
+  (`D` = 6,765, D/U 2.75%, recall 42.74%, zero escapes); see ADR 0079 T002 record.

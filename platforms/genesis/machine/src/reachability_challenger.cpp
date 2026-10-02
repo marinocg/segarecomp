@@ -20,10 +20,7 @@ namespace {
 
 constexpr std::uint32_t bus_mask = UINT32_C(0x00FFFFFF);
 
-struct Decoded {
-  M68kIrOperation operation;
-  std::uint32_t length{};
-};
+using Decoded = GenesisReachabilityInstruction;
 
 enum class DecodeFailure { none, odd, unmapped, rejected };
 
@@ -146,10 +143,12 @@ bool is_long_push_to_a7(const M68kIrOperation &op) {
          op.destination_ea.mode == M68kEaMode::address_predec && op.destination_ea.reg == 7U;
 }
 
+}  // namespace
+
 // Experiment-local mirror of ADR 0048's push-window scoping rule (libs/codegen/c11/src/frontend.cpp): an RTS
 // reached within 8 stack-neutral instructions from a MOVE.L <ea>,-(A7) is a computed jump, not an ordinary
-// return. Evaluated over the challenger's own discovered instructions only.
-std::set<std::uint32_t> push_window_rts(const std::map<std::uint32_t, Decoded> &instructions) {
+// return. Evaluated over the caller's (the challenger's own discovered) instructions only.
+std::set<std::uint32_t> genesis_push_window_rts(const std::map<std::uint32_t, GenesisReachabilityInstruction> &instructions) {
   constexpr unsigned window = 8U;
   std::set<std::uint32_t> result;
   for (const auto &[push_address, push] : instructions) {
@@ -183,6 +182,22 @@ std::set<std::uint32_t> push_window_rts(const std::map<std::uint32_t, Decoded> &
   }
   return result;
 }
+
+GenesisReachabilityRoots genesis_reachability_roots(const FrontendProgram &program) {
+  GenesisReachabilityRoots out;
+  std::set<std::uint32_t> roots;
+  if (program.startup_ingress) roots.insert(program.startup_ingress->entry.value & bus_mask);
+  for (const auto vector : machine_delivered_vectors()) {
+    if (const auto handler = vector_handler(program, static_cast<std::size_t>(vector) * 4U)) {
+      roots.insert(*handler);
+      ++out.vector_roots;
+    }
+  }
+  out.roots.assign(roots.begin(), roots.end());
+  return out;
+}
+
+namespace {
 
 std::string hex_list(const std::vector<std::uint32_t> &values) {
   std::ostringstream out;
@@ -423,15 +438,9 @@ GenesisReachabilityChallengerResult run_once(const FrontendProgram &program, con
   GenesisReachabilityChallengerResult result{};
   const Decoder decoder{program};
   const bool hypothesis = config.exception_model == GenesisReachabilityExceptionModel::normal_resumption;
-  std::set<std::uint32_t> roots;
-  if (program.startup_ingress) roots.insert(program.startup_ingress->entry.value & bus_mask);
-  for (const auto vector : machine_delivered_vectors()) {
-    if (const auto handler = vector_handler(program, static_cast<std::size_t>(vector) * 4U)) {
-      roots.insert(*handler);
-      ++result.vector_roots;
-    }
-  }
-  result.roots.assign(roots.begin(), roots.end());
+  auto roots = genesis_reachability_roots(program);
+  result.roots = std::move(roots.roots);
+  result.vector_roots = roots.vector_roots;
 
   std::map<std::uint32_t, Decoded> instructions;
   std::set<std::uint32_t> visited;
@@ -529,7 +538,7 @@ GenesisReachabilityChallengerResult run_once(const FrontendProgram &program, con
     drain();
     // Resumption step (deterministic, monotone once enabled).
     if (!result.continuations_enabled) {
-      const auto computed = push_window_rts(instructions);
+      const auto computed = genesis_push_window_rts(instructions);
       for (const auto site : rts_sites)
         if (!computed.contains(site)) { result.continuations_enabled = true; break; }
       if (hypothesis && !rtr_sites.empty()) result.continuations_enabled = true;
@@ -554,7 +563,7 @@ GenesisReachabilityChallengerResult run_once(const FrontendProgram &program, con
     ++result.recovery_rounds;
   }
   // Final ADR 0048 classification over the complete discovered set.
-  for (const auto site : push_window_rts(instructions)) {
+  for (const auto site : genesis_push_window_rts(instructions)) {
     result.sites[static_cast<std::size_t>(M68kDynamicControlFamily::return_from_subroutine)].erase(site);
     result.sites[genesis_challenger_family_push_window_rts].insert(site);
   }
@@ -645,7 +654,7 @@ std::map<std::uint32_t, GenesisReachabilityPcClassification> classify_genesis_re
     }
     out.emplace(pc, entry);
   }
-  for (const auto site : push_window_rts(instructions)) out[site].push_window_rts = true;
+  for (const auto site : genesis_push_window_rts(instructions)) out[site].push_window_rts = true;
   // SEG-026-T002: strict local domain labels of classified PC-indexed sites (measurement only).
   PredecessorMap predecessors;
   std::set<std::uint32_t> opaque;
@@ -656,10 +665,7 @@ std::map<std::uint32_t, GenesisReachabilityPcClassification> classify_genesis_re
     if (control.stacked != M68kStackedContinuationKind::none) opaque.insert(control.stacked_address & bus_mask);
   }
   // Machine roots (reset entry, delivered vectors) are opaque exactly as in discovery.
-  std::vector<std::uint32_t> roots;
-  if (program.startup_ingress) roots.push_back(program.startup_ingress->entry.value & bus_mask);
-  for (const auto vector : machine_delivered_vectors())
-    if (const auto handler = vector_handler(program, static_cast<std::size_t>(vector) * 4U)) roots.push_back(*handler);
+  const std::vector<std::uint32_t> roots = genesis_reachability_roots(program).roots;
   opaque.insert(roots.begin(), roots.end());
   std::set<std::uint32_t> entries;
   for (const auto &[pc, decoded] : instructions) {

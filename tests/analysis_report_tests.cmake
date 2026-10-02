@@ -1,0 +1,80 @@
+# SEG-030-T002 (ADR 0079): tests of the report-only Genesis M68K analysis driver.
+#
+# Included from tests/CMakeLists.txt it registers the tests. Run with `cmake -P` (CMAKE_SCRIPT_MODE_FILE) it is the driver test
+# itself: it runs `segarecomp-genesis-analysis-report` on the synthetic fixture written by analysis_report_test, checks
+# byte-identical repeated output and identity with the library report, fail-closed usage/digest rejection, and that the private
+# output is consumed unchanged by tools/reachability_coverage_compare.py (zero recovery escapes).
+
+if(CMAKE_SCRIPT_MODE_FILE)
+  foreach(required DRIVER PYTHON SOURCE DIR)
+    if(NOT DEFINED ${required})
+      message(FATAL_ERROR "analysis_report driver test: ${required} is not set")
+    endif()
+  endforeach()
+  file(READ "${DIR}/rom.sha256" sha)
+  file(READ "${DIR}/discovered.txt" discovered)
+  set(arguments --rom "${DIR}/rom.bin" --rom-sha256 "${sha}" --entry 00000200 --mapping-base 00000000
+    --immutable-copy-alias 00ff0000:00000400:00000080 --immutable-copy-alias 00ff0100:00000500:00000004)
+  foreach(run 1 2)
+    execute_process(COMMAND "${DRIVER}" ${arguments} --domains baseline --private-output "${DIR}/driver${run}.json"
+      OUTPUT_FILE "${DIR}/driver${run}.stdout" RESULT_VARIABLE status)
+    if(NOT status EQUAL 0)
+      message(FATAL_ERROR "driver run ${run} failed: ${status}")
+    endif()
+  endforeach()
+  foreach(pair "driver1.json;driver2.json" "driver1.stdout;driver2.stdout" "driver1.json;library.json")
+    list(GET pair 0 left)
+    list(GET pair 1 right)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E compare_files "${DIR}/${left}" "${DIR}/${right}" RESULT_VARIABLE differ)
+    if(NOT differ EQUAL 0)
+      message(FATAL_ERROR "${left} and ${right} differ")
+    endif()
+  endforeach()
+  file(READ "${DIR}/driver1.stdout" aggregate)
+  if(aggregate MATCHES "ff0|\"200\"|00ff")
+    message(FATAL_ERROR "the aggregate carries an address: ${aggregate}")
+  endif()
+  # Fail closed: a wrong digest, a staged domain not yet implemented, a malformed bound and a missing private output.
+  foreach(bad "--rom-sha256;0000000000000000000000000000000000000000000000000000000000000000"
+              "--domains;address" "--domains;baseline,memory" "--max-iterations;0" "--private-output")
+    set(candidate ${arguments})
+    list(GET bad 0 option)
+    if(option STREQUAL "--rom-sha256")
+      list(REMOVE_ITEM candidate "${sha}")
+      list(REMOVE_ITEM candidate --rom-sha256)
+    endif()
+    if(NOT option STREQUAL "--private-output")
+      list(APPEND candidate --private-output "${DIR}/rejected.json")
+    endif()
+    execute_process(COMMAND "${DRIVER}" ${candidate} ${bad} OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE status)
+    if(status EQUAL 0)
+      message(FATAL_ERROR "the driver accepted invalid input: ${bad}")
+    endif()
+  endforeach()
+  execute_process(COMMAND "${PYTHON}" "${SOURCE}/tools/reachability_coverage_compare.py" --coverage-dir "${DIR}/coverage"
+    --challenger "${DIR}/driver1.json" OUTPUT_VARIABLE compared RESULT_VARIABLE status)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "the compare tool rejected the private output: ${status}")
+  endif()
+  foreach(expected "\"D\":${discovered}," "\"O\":8," "\"O_and_D\":8," "\"escapes_outside_proven_targets\":0,"
+                   "\"resolved_sites\":1," "\"proven_targets_observed\":1,")
+    string(FIND "${compared}" "${expected}" at)
+    if(at EQUAL -1)
+      message(FATAL_ERROR "compare tool output lacks ${expected}: ${compared}")
+    endif()
+  endforeach()
+  message(STATUS "analysis_report_driver_test: all checks passed")
+  return()
+endif()
+
+add_executable(analysis_report_test analysis_report_test.cpp)
+target_link_libraries(analysis_report_test PRIVATE segarecomp::genesis_analysis_report)
+segarecomp_enable_warnings(analysis_report_test)
+set(SEGARECOMP_ANALYSIS_REPORT_TEST_DIR "${CMAKE_CURRENT_BINARY_DIR}/analysis_report_fixture")
+add_test(NAME analysis_report_test COMMAND analysis_report_test "${SEGARECOMP_ANALYSIS_REPORT_TEST_DIR}")
+add_test(NAME analysis_report_driver_test COMMAND ${CMAKE_COMMAND}
+  -DDRIVER=$<TARGET_FILE:segarecomp-genesis-analysis-report> -DPYTHON=${Python3_EXECUTABLE} -DSOURCE=${PROJECT_SOURCE_DIR}
+  -DDIR=${SEGARECOMP_ANALYSIS_REPORT_TEST_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/analysis_report_tests.cmake)
+set_tests_properties(analysis_report_test PROPERTIES FIXTURES_SETUP analysis_report_fixture)
+set_tests_properties(analysis_report_driver_test PROPERTIES FIXTURES_REQUIRED analysis_report_fixture)
+set_property(TEST analysis_report_test analysis_report_driver_test APPEND PROPERTY LABELS full fast)
