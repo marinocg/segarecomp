@@ -105,7 +105,15 @@ struct GenesisAnalysisDomains {
 struct GenesisAnalysisReportConfig {
   GenesisAnalysisDomains domains{};
   analysis::Bounds bounds{};
+  // SEG-030-T004 DIAGNOSTIC premise ablation (never credited): assume the Z80 never writes 68K work RAM. The outputs are labelled.
+  bool assume_no_z80_ram_writes{};
 };
+
+// SEG-030-T004 (ADR 0079 decision 7): the Genesis bus range a store to which may release the Z80 (the Z80 control block: memory
+// mode, BUSREQ $A11100 and RESET $A11200, with any partial-decode mirror). The Z80 is held in reset at power-on, so only such a store
+// lets it run and write 68K work RAM through its bank window.
+inline constexpr std::uint32_t genesis_z80_control_first = UINT32_C(0xA11000);
+inline constexpr std::uint32_t genesis_z80_control_last = UINT32_C(0xA12000);
 
 struct GenesisAnalysisComputedSite {
   GenesisAnalysisFamily family{GenesisAnalysisFamily::unclassified};
@@ -132,6 +140,15 @@ struct GenesisAnalysisReport {
   std::uint64_t exception_raising_instructions{};
   std::uint32_t rounds{};  // driver rounds (ADR 0079 decision 9; the baseline configuration converges in one)
   std::optional<std::size_t> universe;  // U, when requested
+  // SEG-030-T004 (ADR 0079 decision 8): with the memory domain, the same program under the address domain alone is the comparator
+  // of every memory-derived resolution (report only; it never enters D).
+  struct MemoryComparison {
+    std::size_t discovered_without_memory{};
+    std::size_t sites_resolved_only_with_memory{};
+    std::size_t sites_resolved_only_without_memory{};
+    std::size_t unresolved_sites{};  // unresolved computed sites of the memory run (next to every memory-derived resolution)
+  };
+  std::optional<MemoryComparison> memory_comparison;
 };
 
 [[nodiscard]] GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program,

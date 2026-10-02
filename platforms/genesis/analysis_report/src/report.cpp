@@ -116,10 +116,45 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
   adapter_config.call_continuations = true;
   adapter_config.exception_continuations = false;
   adapter_config.pushed_code_continuations = false;
-  adapter_config.domains.address = config.domains.address;
+  adapter_config.domains.address = config.domains.address || config.domains.memory;
+  adapter_config.domains.memory = config.domains.memory;
+  if (config.domains.memory) {
+    // ADR 0079 decision 7. The SR interrupt mask is not tracked, so an interrupt may be taken at any boundary (handler code
+    // included): every work-RAM cell has an asynchronous writer. The handler roots are the machine-delivered vector roots (every
+    // root other than the startup entry; the entry too when it is also a vector handler).
+    adapter_config.memory.interrupts = true;
+    const auto entry = program.startup_ingress ? std::optional<std::uint32_t>(program.startup_ingress->entry.value & bus_mask) : std::nullopt;
+    for (const auto root : report.roots.roots)
+      if (!entry || root != *entry || report.roots.vector_roots == report.roots.roots.size()) adapter_config.memory.handler_roots.push_back(root);
+    adapter_config.memory.release_ranges.emplace_back(genesis_z80_control_first, genesis_z80_control_last);
+    adapter_config.memory.assume_no_external_writer = config.assume_no_z80_ram_writes;
+  }
   report.analysis = analyze_m68k_finite_values(*image, report.roots.roots, adapter_config, config.bounds);
-  report.rounds = 1U;
+  report.rounds = config.domains.memory ? report.analysis.memory.rounds : 1U;
   if (!report.analysis.complete) return report;  // every query Unknown(bound): no partial D
+  if (config.domains.memory) {
+    auto comparator_config = adapter_config;
+    comparator_config.domains.memory = false;
+    const auto comparator = analyze_m68k_finite_values(*image, report.roots.roots, comparator_config, config.bounds);
+    GenesisAnalysisReport::MemoryComparison comparison{};
+    if (comparator.complete) {
+      comparison.discovered_without_memory = comparator.reached.size();
+      const auto resolved = [](const M68kFiniteAnalysisResult &result) {
+        std::set<std::uint32_t> out;
+        for (const auto &[pc, site] : result.pc_index_sites)
+          if (site.outcome == M68kPcIndexOutcome::resolved) out.insert(pc);
+        for (const auto &[pc, site] : result.address_sites)
+          if (site.resolved) out.insert(pc);
+        return out;
+      };
+      const auto with = resolved(report.analysis);
+      const auto without = resolved(comparator);
+      for (const auto pc : with) comparison.sites_resolved_only_with_memory += without.contains(pc) ? 0U : 1U;
+      for (const auto pc : without) comparison.sites_resolved_only_without_memory += with.contains(pc) ? 0U : 1U;
+    }
+    comparison.unresolved_sites = report.analysis.unresolved_computed.size();
+    report.memory_comparison = comparison;
+  }
 
   std::map<std::uint32_t, GenesisReachabilityInstruction> instructions;
   for (const auto &[point, state] : report.analysis.solution.in_states) {
@@ -213,7 +248,8 @@ std::optional<std::size_t> genesis_analysis_universe(FrontendProgram program) {
 
 std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport &report, const GenesisAnalysisReportConfig &config) {
   std::ostringstream out;
-  const auto &domains = config.domains;
+  auto domains = config.domains;
+  domains.address = domains.address || domains.memory;  // the memory domain implies the address domain
   out << "{\"schema\":\"segarecomp.m68k_core_report.aggregate.v1\",\"exception_model\":\"strict\",\"pea_continuations\":false"
       << ",\"domains\":{\"address\":" << (domains.address ? "true" : "false") << ",\"memory\":" << (domains.memory ? "true" : "false")
       << ",\"contexts\":" << (domains.contexts ? "true" : "false") << ",\"frames\":" << (domains.frames ? "true" : "false") << '}'
@@ -298,6 +334,7 @@ std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport
   if (domains.address)  // SEG-030-T003 constants (absent from the baseline output, which stays byte-identical)
     out << ",\"points_to_bound\":" << m68k_points_to_bound << ",\"exact_offset_bound\":" << m68k_exact_offset_bound
         << ",\"strided_growth_bound\":" << m68k_strided_growth_bound;
+  if (domains.memory) out << ",\"memory_cell_bound\":" << m68k_memory_cell_bound << ",\"round_bound\":" << m68k_memory_round_bound;
   out << '}';
   if (domains.address) {
     std::size_t resolved_sites = 0U, odd = 0U, max_site_targets = 0U;
@@ -313,6 +350,43 @@ std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport
     out << ",\"address_recovery\":{\"sites_encountered\":" << report.analysis.address_sites.size() << ",\"resolved\":" << resolved_sites
         << ",\"recovered_targets\":" << targets.size() << ",\"max_targets_per_site\":" << max_site_targets
         << ",\"odd_targets_excluded\":" << odd << '}';
+  }
+  if (domains.memory) {
+    const auto &memory = report.analysis.memory;
+    out << ",\"memory\":{\"converged\":" << (memory.converged ? "true" : "false") << ",\"rounds\":" << memory.rounds
+        << ",\"external_writer\":" << (memory.policy.external_writer ? "true" : "false")
+        << ",\"z80_release_store\":" << (memory.release_store ? "true" : "false")
+        << ",\"async_all\":" << (memory.policy.async_all ? "true" : "false") << ",\"async_ranges\":" << memory.policy.async.size()
+        << ",\"release_stores\":" << memory.release_stores << ",\"unknown_target_stores\":" << memory.unknown_target_stores
+        << ",\"undescribed_writers\":" << memory.undescribed_writers << ",\"handler_points\":" << memory.handler_points
+        << ",\"handler_store_sites\":" << memory.handler_store_sites << ",\"max_cells\":" << memory.max_cells
+        << ",\"reads\":{\"precise\":" << memory.precise_reads << ",\"unknown\":{";
+    std::map<std::string, std::map<std::string, std::size_t>> reads;
+    for (const auto &[key, count] : memory.unknown_reads)
+      reads[analysis::unknown_reason_name(key.first)][genesis_analysis_sub_reason_name(key.second)] += count;
+    bool first_reason = true;
+    for (const auto &[reason, details] : reads) {
+      out << (first_reason ? "" : ",") << '"' << reason << "\":{";
+      first_reason = false;
+      bool first_detail = true;
+      for (const auto &[detail, n] : details) {
+        out << (first_detail ? "" : ",") << '"' << detail << "\":" << n;
+        first_detail = false;
+      }
+      out << '}';
+    }
+    out << "}}";
+    if (report.memory_comparison) {
+      const auto &comparison = *report.memory_comparison;
+      out << ",\"comparator_address_only\":{\"discovered\":" << comparison.discovered_without_memory
+          << ",\"sites_resolved_only_with_memory\":" << comparison.sites_resolved_only_with_memory
+          << ",\"sites_resolved_only_without_memory\":" << comparison.sites_resolved_only_without_memory
+          << ",\"unresolved_sites\":" << comparison.unresolved_sites << '}';
+    }
+    out << '}';
+    if (config.assume_no_z80_ram_writes)
+      out << ",\"diagnostic_premise_ablation\":\"assume_no_z80_ram_writes (NOT credited: D, recall and resolved counts of this run "
+             "are diagnostic sensitivity only)\"";
   }
   if (report.universe) out << ",\"universe_immutable_rom_aot\":" << *report.universe;
   out << '}';

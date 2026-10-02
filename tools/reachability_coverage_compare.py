@@ -411,6 +411,12 @@ def main() -> int:
         sys.stderr.write("witness set does not match the coverage bitmap (overflow?)\n")
         return 3
     challenger = json.loads(pathlib.Path(args.challenger).read_text(encoding="utf-8"))
+    # SEG-030: a core-driver report whose solve exhausted a bound carries no discovered set (every query is Unknown); comparing
+    # it would report a vacuous recall with zero escapes. Reject it (the challenger's own format has no solver block).
+    solver = challenger.get("aggregate", {}).get("solver")
+    if challenger.get("complete") is False or (isinstance(solver, dict) and solver.get("complete") is False):
+        sys.stderr.write("the report's solve is incomplete (a bound was exhausted): no discovered set to compare\n")
+        return 4
     summary = None
     if args.coverage_summary:
         text = pathlib.Path(args.coverage_summary).read_text(encoding="utf-8").strip()

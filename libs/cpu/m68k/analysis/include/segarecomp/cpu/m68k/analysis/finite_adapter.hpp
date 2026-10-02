@@ -25,6 +25,14 @@
 // mapped image PC; any target outside the image fails the whole site; a strided set is never enumerated). With the flag clear
 // every address register stays Unknown and the baseline behaviour is unchanged.
 //
+// SEG-030-T004 (ADR 0079): when `domains.memory` is set (it implies `address`), the state also carries a CPU-owned abstract memory
+// (abstract_memory.hpp). Every instruction's memory writes follow the writer description (an undescribed writer poisons every cell);
+// a MOVE/ADD/SUB/AND/OR into Dn or a MOVEA whose memory source names precise cells reads their value; JSR/BSR/PEA push into the
+// cells below A7. Initial memory and opaque entries are Unknown. The driver rounds (decision 9) grow a monotone policy: the
+// asynchronous-writer ranges of the code reachable from the handler roots (every cell when interrupts can be taken, see
+// `M68kMemoryConfig::interrupts`, or when handler code stores through an Unknown address) and the external writer (when any store in
+// D may alias a release range or has an Unknown address); the final round's own policy must be below the one it ran with.
+//
 // Report-only: no production target links this library.
 
 #include <array>
@@ -40,6 +48,7 @@
 
 #include "segarecomp/analysis/finite_value.hpp"
 #include "segarecomp/analysis/solver.hpp"
+#include "segarecomp/cpu/m68k/analysis/abstract_memory.hpp"
 #include "segarecomp/cpu/m68k/analysis/address_value.hpp"
 #include "segarecomp/cpu/m68k/control_successors.hpp"
 #include "segarecomp/cpu/m68k/finite_register_values.hpp"
@@ -60,7 +69,8 @@ public:
   [[nodiscard]] virtual std::optional<Instruction> decode(std::uint32_t pc) const = 0;
   // True when `pc` is an even PC with executable image bytes (decodability aside).
   [[nodiscard]] virtual bool mapped(std::uint32_t pc) const = 0;
-  // Big-endian read of `bytes` (1, 2 or 4) at the bus `address` from provably immutable image bytes, else nullopt.
+  // Big-endian read of `bytes` (1, 2 or 4; any other width is nullopt) at the bus `address` from provably immutable image bytes,
+  // else nullopt.
   [[nodiscard]] virtual std::optional<std::uint32_t> immutable_read(std::uint32_t address, unsigned bytes) const = 0;
   // The machine region extent containing the 24-bit bus `address` (ADR 0079 decision 4), else nullopt (no region: a pointer
   // there is Unknown). The default view knows no region.
@@ -101,6 +111,8 @@ struct M68kAnalysisState {
   std::optional<std::uint32_t> flag_setter;
   // A0-A7 (SEG-030-T003). Unknown in every reachable state unless the address domain is enabled.
   std::array<M68kPointsTo, 8> address{};
+  // SEG-030-T004: abstract memory (no cell, annotation `none`, unless the memory domain is enabled).
+  M68kAbstractMemory memory;
 
   [[nodiscard]] static M68kAnalysisState unreachable() { return {}; }
   [[nodiscard]] static M68kAnalysisState all_unknown(analysis::UnknownReason reason = analysis::UnknownReason::unknown_input);
@@ -148,6 +160,42 @@ struct M68kAddressSiteReport {
   M68kAnalysisSubReason sub{M68kAnalysisSubReason::none};                         // when not resolved
 };
 
+// SEG-030-T004 (ADR 0079 decision 7): the asynchronous/external writer model of the memory domain.
+struct M68kMemoryConfig {
+  // Interrupts may be taken at any instruction boundary (the SR interrupt mask is not tracked). An interrupt can then also preempt
+  // handler code, whose entry A7 is therefore Unknown (the join over every interruptible point, handler points included, does not
+  // converge); the nested exception frame is a handler store through an Unknown address, so every cell is asynchronous.
+  bool interrupts{};
+  std::vector<std::uint32_t> handler_roots;  // machine-delivered vector handlers (potential asynchronous writers)
+  // Bus ranges [first, last) a store to which may release another bus master that writes work RAM (Genesis: the Z80 BUSREQ/RESET
+  // control block). A store with an Unknown address also counts.
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> release_ranges;
+  // DIAGNOSTIC premise ablation only (never credited): never derive the external writer.
+  bool assume_no_external_writer{};
+  M68kMemoryPolicy policy;  // the starting configuration (normally empty)
+};
+
+// ADR 0079 decision 11: R, the driver-round bound.
+inline constexpr std::uint32_t m68k_memory_round_bound = 16U;
+
+// SEG-030-T004: memory-domain outcome of a run.
+struct M68kMemoryReport {
+  bool enabled{};
+  bool converged{};                     // false: the rounds did not converge and the memory domain was switched off
+  std::uint32_t rounds{};
+  M68kMemoryPolicy policy;              // the policy of the final round
+  bool assumed_no_external_writer{};    // the diagnostic premise ablation was applied
+  bool release_store{};                 // a store in D may release an external writer
+  std::size_t release_stores{};         // stores in D that alias a release range or have an Unknown address
+  std::size_t unknown_target_stores{};  // stores in D with an Unknown address (undescribed writers included)
+  std::size_t undescribed_writers{};
+  std::size_t handler_points{};         // points reachable from the handler roots
+  std::size_t handler_store_sites{};
+  std::size_t max_cells{};
+  std::size_t precise_reads{};          // memory-source operands of work RAM (or an Unknown address) read precisely
+  std::map<std::pair<analysis::UnknownReason, M68kAnalysisSubReason>, std::size_t> unknown_reads;
+};
+
 struct M68kAnalysisConfig {
   bool accept_width_domains{};      // measurement variant: admit width-only index domains
   bool call_continuations{true};    // a call's stacked continuation is an opaque entry
@@ -155,6 +203,7 @@ struct M68kAnalysisConfig {
   bool pushed_code_continuations{}; // PEA of a code address (off)
   std::set<std::uint32_t> pinned_sites;  // computed sites forced unresolved (invalidated)
   M68kAnalysisDomains domains{};         // staged domains (all off: the SEG-029 baseline)
+  M68kMemoryConfig memory{};             // SEG-030-T004 (memory domain only)
 };
 
 class M68kFiniteAdapter {
@@ -174,8 +223,22 @@ public:
 
   [[nodiscard]] std::optional<M68kAnalysisImage::Instruction> decode(std::uint32_t pc) const;
 
+  // SEG-030-T004: the (address set, span) of every memory write of `operation` at `pc` from its input state; an Unknown address set
+  // for an undescribed writer or an untracked address.
+  [[nodiscard]] std::vector<std::pair<M68kPointsTo, std::uint32_t>> memory_write_targets(const M68kIrOperation &operation,
+                                                                                         const State &in) const;
+  // SEG-030-T004: the value of a memory source operand of `bytes` bytes (immutable image bytes or abstract-memory cells), with the
+  // generic reason and CPU sub-reason when Unknown. `tracked` reports whether a work-RAM cell (or an Unknown address) was involved.
+  [[nodiscard]] M68kMemoryRead read_memory_operand(const State &in, const M68kEffectiveAddress &ea, std::uint32_t bytes,
+                                                   bool *tracked = nullptr) const;
+  // The state of an entry: a root (initial memory) or an opaque continuation (callee stores).
+  [[nodiscard]] State entry_state(bool continuation) const;
+
 private:
   void transfer_address_registers(const M68kIrOperation &operation, const State &in, State &out) const;
+  void transfer_memory(const M68kIrOperation &operation, std::uint32_t next, const State &in, State &out) const;
+  [[nodiscard]] M68kPointsTo operand_address(const State &in, const M68kEffectiveAddress &ea, std::uint32_t predecrement) const;
+  [[nodiscard]] std::optional<M68kCellValue> operand_value(const State &in, const M68kEffectiveAddress &ea, std::uint32_t bytes) const;
   const M68kAnalysisImage &image_;
   M68kAnalysisConfig config_;
   mutable std::map<std::uint32_t, std::optional<M68kAnalysisImage::Instruction>> decoded_;
@@ -193,6 +256,7 @@ struct M68kFiniteAnalysisResult {
   bool address_domain{};                                     // the address domain was enabled
   std::map<std::uint32_t, M68kAddressSiteReport> address_sites;  // address-register-relative sites (address domain only)
   std::map<std::uint32_t, analysis::UnknownReason> unresolved_computed;  // every unresolved computed site
+  M68kMemoryReport memory;  // SEG-030-T004 (memory domain only)
   analysis::Solution<M68kAnalysisState> solution;
 };
 

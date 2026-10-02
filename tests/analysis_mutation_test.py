@@ -182,7 +182,7 @@ MUTANTS: list[Mutant] = [
            "",
            (M68K_TEST,), "an unresolved PC-indexed site is not reported unresolved"),
     Mutant("m68k_call_continuation_keeps_state", M68K,
-           "if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, State::all_unknown()});",
+           "if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true)});",
            "if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, out});",
            (M68K_TEST,), "a call continuation carries the pre-call state instead of an opaque entry"),
     # ---------------------------------------------------------------- Z80 projection and adapter

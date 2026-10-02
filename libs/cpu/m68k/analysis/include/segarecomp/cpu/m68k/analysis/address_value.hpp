@@ -59,6 +59,9 @@ struct M68kRegionExtent {
   std::uint32_t id{};    // image identity for `image`; 0 otherwise
   std::uint32_t base{};  // first bus address
   std::uint32_t size{};  // bytes (> 0; base + size <= 2^24)
+  // SEG-030-T004: physical mirror period in bytes (0: none). Region offsets that are congruent modulo `mirror` name the same
+  // physical byte (Genesis work RAM: 64 KiB mirrored over $E00000-$FFFFFF).
+  std::uint32_t mirror{};
 };
 
 // A region as a range of 32-bit register values: `base` = (upper register byte << 24) | bus base. Two register values with
@@ -68,6 +71,7 @@ struct M68kRegion {
   std::uint32_t id{};
   std::uint32_t base{};
   std::uint32_t size{};
+  std::uint32_t mirror{};  // SEG-030-T004: see M68kRegionExtent::mirror
   friend auto operator<=>(const M68kRegion &, const M68kRegion &) = default;
   // The largest admitted offset: one past the end, unless that register value would wrap past 2^32.
   [[nodiscard]] constexpr std::uint32_t limit() const noexcept {

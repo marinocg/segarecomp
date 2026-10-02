@@ -39,7 +39,7 @@ void usage(std::ostream &out) {
   out << "usage: segarecomp-genesis-analysis-report --rom <image> --rom-sha256 <sha256> (--reset-entry | --entry <address-hex8> "
          "--mapping-base <address-hex8>) [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... --private-output "
          "<path> [--universe] [--domains baseline|<address,memory,contexts,frames>|all] [--compare-challenger] [--metrics-output "
-         "<path>] [--max-iterations <n>] [--max-points <n>]\n";
+         "<path>] [--max-iterations <n>] [--max-points <n>] [--assume-no-z80-ram-writes (diagnostic premise ablation; needs memory)]\n";
 }
 
 std::optional<std::uint64_t> parse_hex(std::string_view text, std::size_t width) {
@@ -78,6 +78,19 @@ std::optional<segarecomp::GenesisAnalysisDomains> parse_domains(std::string_view
   return domains;
 }
 
+// Untrusted input: read at most `image_size_limit` + 1 bytes (a device or an oversized file is rejected before hashing, never
+// read unbounded).
+std::optional<std::vector<std::uint8_t>> read_bounded_image(const std::string &path) {
+  std::ifstream input(path, std::ios::binary);
+  if (!input) return std::nullopt;
+  std::vector<std::uint8_t> bytes(segarecomp::image_size_limit + 1U);
+  input.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+  const auto count = static_cast<std::size_t>(input.gcount());
+  if (count > segarecomp::image_size_limit || input.bad()) return std::nullopt;
+  bytes.resize(count);
+  return bytes;
+}
+
 std::uint64_t peak_rss_bytes() {
 #if defined(_WIN32)
   return 0U;
@@ -95,7 +108,8 @@ std::uint64_t peak_rss_bytes() {
 int run(int argc, char **argv) {
   std::optional<std::string> rom, digest, private_output, metrics_output;
   std::optional<std::uint32_t> entry_address, mapping_base;
-  bool reset_entry = false, universe = false, compare = false, domains_given = false;
+  bool reset_entry = false, universe = false, compare = false, domains_given = false, iterations_given = false,
+       points_given = false, assume_no_z80 = false;
   segarecomp::GenesisAnalysisReportConfig config{};
   std::vector<std::array<std::uint32_t, 3>> aliases;
   for (int index = 1; index < argc;) {
@@ -114,9 +128,15 @@ int run(int argc, char **argv) {
       if (!domains) { usage(std::cerr); return 2; }
       config.domains = *domains;
       domains_given = true;
+    } else if (option == "--assume-no-z80-ram-writes" && !assume_no_z80) {
+      assume_no_z80 = true;
+      ++index;
+      continue;
     } else if ((option == "--max-iterations" || option == "--max-points") && has_value) {
+      auto &given = option == "--max-iterations" ? iterations_given : points_given;
       const auto count = parse_count(value);
-      if (!count) { usage(std::cerr); return 2; }
+      if (!count || given) { usage(std::cerr); return 2; }
+      given = true;
       (option == "--max-iterations" ? config.bounds.max_iterations : config.bounds.max_points) = *count;
     } else if ((option == "--entry" || option == "--mapping-base") && has_value) {
       const auto parsed = parse_hex(value, 8);
@@ -146,13 +166,22 @@ int run(int argc, char **argv) {
     usage(std::cerr);
     return 2;
   }
-  if (config.domains.memory || config.domains.contexts || config.domains.frames) {
-    // ADR 0079: the address domain is delivered by SEG-030-T003; memory, contexts and frames by T004..T006 (fail closed).
+  // ADR 0079 decision 5: the memory domain needs the address domain (its cells are addressed through points-to values).
+  if (config.domains.memory) config.domains.address = true;
+  if (assume_no_z80 && !config.domains.memory) { usage(std::cerr); return 2; }
+  config.assume_no_z80_ram_writes = assume_no_z80;
+  if (config.domains.contexts || config.domains.frames) {
+    // ADR 0079: address (T003) and memory (T004) are delivered; contexts and frames by T005..T006 (fail closed).
     std::cerr << "segarecomp-genesis-analysis-report: staged domain not implemented\n";
     return 2;
   }
   const auto started = std::chrono::steady_clock::now();
-  const auto bytes = segarecomp::read_binary(*rom);
+  const auto read = read_bounded_image(*rom);
+  if (!read) {
+    std::cerr << "segarecomp-genesis-analysis-report: cannot read the image (missing, unreadable or larger than the image limit)\n";
+    return 2;
+  }
+  const auto &bytes = *read;
   std::string expected = *digest;
   std::transform(expected.begin(), expected.end(), expected.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   if (segarecomp::sha256_hex(bytes) != expected) {
@@ -216,7 +245,9 @@ int run(int argc, char **argv) {
     if (!metrics) { std::cerr << "segarecomp-genesis-analysis-report: cannot write metrics output\n"; return 2; }
   }
   std::cout << aggregate << '\n';
-  return 0;
+  // A solve that exhausted a bound has no discovered set (every query Unknown): the outputs say so (`solver.complete` false) and
+  // the run fails, so no caller mistakes it for an empty result.
+  return report.analysis.complete ? 0 : 3;
 }
 
 }  // namespace

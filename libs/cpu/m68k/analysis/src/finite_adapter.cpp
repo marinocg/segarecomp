@@ -49,6 +49,13 @@ public:
   StateInputs(const M68kAnalysisState &state, const M68kAnalysisImage &image) : state_(state), image_(image) {}
   M68kFiniteValues data_register_before(unsigned reg, unsigned width) override {
     if (reg >= 8U || (width != 16U && width != 32U)) return M68kFiniteValues::unknown();
+    if (override_ && override_->first == reg) {
+      // SEG-030-T004: the substituted source register carries a memory operand's precise value.
+      const auto mask = width == 32U ? UINT64_C(0xFFFFFFFF) : UINT64_C(0xFFFF);
+      std::vector<std::uint64_t> values;
+      for (const auto v : override_->second.data.values()) values.push_back(v & mask);
+      return to_cpu(FiniteValue::of(std::move(values)), override_->second.width_derived);
+    }
     const auto slot = m68k_analysis_slot(reg, width);
     const auto &value = state_.values.values[slot];
     if (value.is_unknown()) unknown_read_ = unknown_read_ ? std::min(*unknown_read_, value.reason()) : value.reason();
@@ -58,12 +65,14 @@ public:
     return image_.immutable_read(address, bytes);
   }
   void reset() { unknown_read_.reset(); }
+  void override_register(unsigned reg, M68kCellValue value) { override_.emplace(reg, std::move(value)); }
   [[nodiscard]] std::optional<UnknownReason> unknown_read() const { return unknown_read_; }
 
 private:
   const M68kAnalysisState &state_;
   const M68kAnalysisImage &image_;
   std::optional<UnknownReason> unknown_read_;
+  std::optional<std::pair<unsigned, M68kCellValue>> override_;
 };
 
 bool is_address_site_family(M68kDynamicControlFamily family) {
@@ -341,6 +350,7 @@ M68kAnalysisState join(const M68kAnalysisState &left, const M68kAnalysisState &r
     out.width_derived[i] = !out.values.values[i].is_unknown() && (left.width_derived[i] || right.width_derived[i]);
   out.flag_setter = left.flag_setter == right.flag_setter ? left.flag_setter : std::nullopt;
   for (std::size_t i = 0; i < out.address.size(); ++i) out.address[i] = join(left.address[i], right.address[i]);
+  out.memory = join(left.memory, right.memory);
   return out;
 }
 
@@ -352,6 +362,7 @@ bool leq(const M68kAnalysisState &left, const M68kAnalysisState &right) {
     if (!right.values.values[i].is_unknown() && left.width_derived[i] && !right.width_derived[i]) return false;
   for (std::size_t i = 0; i < left.address.size(); ++i)
     if (!leq(left.address[i], right.address[i])) return false;
+  if (!leq(left.memory, right.memory)) return false;
   return !right.flag_setter || left.flag_setter == right.flag_setter;
 }
 
@@ -367,7 +378,7 @@ M68kPointsTo classify(const M68kAnalysisImage &image, const Concrete &concrete) 
   for (const auto value : concrete.values) {
     const auto extent = image.region_of(value & bus_mask);
     if (!extent) return M68kPointsTo::unknown(UnknownReason::unsupported_transfer, Sub::region_exit);
-    const M68kRegion region{extent->kind, extent->id, (value & ~bus_mask) | extent->base, extent->size};
+    const M68kRegion region{extent->kind, extent->id, (value & ~bus_mask) | extent->base, extent->size, extent->mirror};
     grouped[region].push_back(value - region.base);
   }
   std::vector<std::pair<M68kRegion, M68kOffsetSet>> pairs;
@@ -552,9 +563,32 @@ void M68kFiniteAdapter::transfer_address_registers(const M68kIrOperation &operat
     break;
   case M68kIrKind::write_movea:
     if (!is_address_register(dst)) break;
-    if (src.mode == M68kEaMode::address_register && operation.size == M68kMemoryAccessWidth::long_word)
+    if (src.mode == M68kEaMode::address_register && operation.size == M68kMemoryAccessWidth::long_word) {
       destination(dst.reg, in.address[src.reg & 7U]);
-    else destination(dst.reg, classify(image_, source_values(image_, in, src, operation.size)));
+      break;
+    }
+    if (config_.domains.memory && m68k_memory_mode(src.mode)) {
+      // SEG-030-T004: a code or data pointer stored in work-RAM cells (an object field) feeds the address domain.
+      bool tracked = false;
+      const auto read = read_memory_operand(in, src, access_bytes(operation.size), &tracked);
+      if (tracked) {
+        if (!read.known) {
+          destination(dst.reg, M68kPointsTo::unknown(read.reason, read.sub));
+        } else if (read.value.is_pointer()) {
+          // Pointers are only stored in long cells, which a word read never matches.
+          destination(dst.reg, read.value.pointer);
+        } else {
+          std::vector<std::uint32_t> values;
+          for (const auto v : read.value.data.values()) {
+            const auto value = static_cast<std::uint32_t>(v);
+            values.push_back(operation.size == M68kMemoryAccessWidth::word ? sext16(value) : value);
+          }
+          destination(dst.reg, classify(image_, Concrete::of(std::move(values), read.value.width_derived)));
+        }
+        break;
+      }
+    }
+    destination(dst.reg, classify(image_, source_values(image_, in, src, operation.size)));
     break;
   case M68kIrKind::add_address:
   case M68kIrKind::subtract_address:
@@ -629,6 +663,250 @@ M68kAddressSiteReport M68kFiniteAdapter::evaluate_address_site(std::uint32_t pc,
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// SEG-030-T004: abstract memory.
+
+namespace {
+
+bool is_auto_update(const M68kEffectiveAddress &ea) {
+  return (ea.mode == M68kEaMode::address_postinc || ea.mode == M68kEaMode::address_predec) && ea.reg < 8U;
+}
+
+bool uses_address_register(const M68kEffectiveAddress &ea, unsigned reg) {
+  switch (ea.mode) {
+  case M68kEaMode::address_indirect:
+  case M68kEaMode::address_postinc:
+  case M68kEaMode::address_predec:
+  case M68kEaMode::address_disp16: return ea.reg == reg;
+  case M68kEaMode::address_index8: return ea.reg == reg || (ea.index_is_address && ea.index_reg == reg);
+  default: return false;
+  }
+}
+
+M68kCellValue data_value(std::vector<std::uint64_t> values, bool width_derived) {
+  M68kCellValue out;
+  out.data = FiniteValue::of(std::move(values));
+  out.width_derived = out.data.is_precise() && width_derived;
+  return out;
+}
+
+std::uint64_t byte_mask(std::uint32_t bytes) { return bytes >= 4U ? UINT64_C(0xFFFFFFFF) : (UINT64_C(1) << (8U * bytes)) - 1U; }
+
+// Kinds whose data-register result reads the source operand through the CPU data owner's `read_source`.
+bool memory_source_kind(M68kIrKind kind) {
+  switch (kind) {
+  case M68kIrKind::write_move:
+  case M68kIrKind::add:
+  case M68kIrKind::subtract:
+  case M68kIrKind::logical_and:
+  case M68kIrKind::logical_or: return true;
+  default: return false;
+  }
+}
+
+}  // namespace
+
+M68kAnalysisState M68kFiniteAdapter::entry_state(bool continuation) const {
+  auto state = State::all_unknown();
+  if (config_.domains.memory) state.memory.absent = continuation ? Sub::store_poison : Sub::initial_memory;
+  return state;
+}
+
+// The 32-bit register values (as region points-to) an operand addresses; `predecrement` is the -(An) step.
+M68kPointsTo M68kFiniteAdapter::operand_address(const State &in, const M68kEffectiveAddress &ea, std::uint32_t predecrement) const {
+  const auto displacement = static_cast<std::int64_t>(ea.displacement);
+  const auto &base = in.address[ea.reg & 7U];
+  switch (ea.mode) {
+  case M68kEaMode::absolute_word:
+  case M68kEaMode::absolute_long: return classify(image_, constant(ea.absolute_address));
+  case M68kEaMode::pc_disp16:
+    return classify(image_, constant(ea.pc_base_address + static_cast<std::uint32_t>(static_cast<std::int32_t>(ea.displacement))));
+  case M68kEaMode::pc_index8:
+    return classify(image_, sum(constant(ea.pc_base_address), index_values(in, ea),
+                                static_cast<std::uint32_t>(static_cast<std::int32_t>(ea.displacement))));
+  case M68kEaMode::address_indirect:
+  case M68kEaMode::address_postinc: return base;
+  case M68kEaMode::address_predec: return m68k_points_to_add(base, {-static_cast<std::int64_t>(predecrement)});
+  case M68kEaMode::address_disp16: return m68k_points_to_add(base, {displacement});
+  case M68kEaMode::address_index8: {
+    const auto index = index_values(in, ea);
+    if (!index.ok) return base.is_known() ? M68kPointsTo::unknown(index.reason, index.sub) : base;
+    std::vector<std::int64_t> deltas;
+    for (const auto value : index.values) deltas.push_back(static_cast<std::int64_t>(static_cast<std::int32_t>(value)) + displacement);
+    auto out = m68k_points_to_add(base, deltas);
+    if (out.is_known() && index.width_derived) out.width_derived = true;
+    return out;
+  }
+  default: break;
+  }
+  return M68kPointsTo::unknown(UnknownReason::unsupported_transfer);
+}
+
+M68kMemoryRead M68kFiniteAdapter::read_memory_operand(const State &in, const M68kEffectiveAddress &ea, std::uint32_t bytes,
+                                                      bool *tracked) const {
+  if (tracked != nullptr) *tracked = false;
+  M68kMemoryRead failed;
+  const auto fail = [&](UnknownReason reason, Sub sub) {
+    failed.known = false;
+    failed.reason = reason;
+    failed.sub = sub;
+    return failed;
+  };
+  const auto width = bytes == 1U ? M68kMemoryAccessWidth::byte : bytes == 2U ? M68kMemoryAccessWidth::word : M68kMemoryAccessWidth::long_word;
+  const auto targets = operand_address(in, ea, auto_update_step(ea.reg, width));
+  if (targets.is_unknown()) {
+    if (tracked != nullptr) *tracked = true;  // the address may name work RAM
+    return fail(targets.reason, targets.sub == Sub::none ? Sub::base_unknown : targets.sub);
+  }
+  if (!targets.is_known()) return fail(UnknownReason::unsupported_transfer, Sub::none);
+  std::optional<M68kCellValue> result;
+  const auto add = [&](const M68kCellValue &value) {
+    if (!result) result = value;
+    else result = m68k_cell_join(*result, value, bytes);
+    return result.has_value();
+  };
+  std::vector<std::pair<M68kRegion, M68kOffsetSet>> cells;
+  for (const auto &[region, offsets] : targets.pairs) {
+    if (m68k_memory_tracked(region.kind)) {
+      cells.emplace_back(region, offsets);
+      continue;
+    }
+    if (region.kind != M68kRegionKind::image) return fail(UnknownReason::unsupported_transfer, Sub::none);  // device registers
+    if (offsets.is_strided()) return fail(UnknownReason::set_bound, Sub::set_bound);
+    std::vector<std::uint64_t> values;
+    for (const auto offset : offsets.exact()) {
+      const auto address = region.base + offset;
+      if (bytes > 1U && (address & 1U) != 0U) continue;  // an address error, never a value
+      const auto read = image_.immutable_read(address & bus_mask, bytes);
+      if (!read) return fail(UnknownReason::non_immutable_read, Sub::none);
+      values.push_back(*read);
+    }
+    if (values.empty()) continue;
+    if (!add(data_value(std::move(values), targets.width_derived))) return fail(UnknownReason::set_bound, Sub::set_bound);
+  }
+  if (!cells.empty()) {
+    if (tracked != nullptr) *tracked = true;
+    auto pointer = M68kPointsTo::of(std::move(cells), targets.width_derived);
+    // Word and long cells are aligned: odd members raise an address error and are no value (an exact set is filtered).
+    if (bytes > 1U && pointer.is_exact()) {
+      std::vector<std::pair<M68kRegion, M68kOffsetSet>> even;
+      for (const auto &[region, offsets] : pointer.pairs) {
+        std::vector<std::uint32_t> kept;
+        for (const auto offset : offsets.exact())
+          if (((region.base + offset) & 1U) == 0U) kept.push_back(offset);
+        even.emplace_back(region, M68kOffsetSet::of(std::move(kept)));
+      }
+      pointer = M68kPointsTo::of(std::move(even), pointer.width_derived);
+    }
+    if (pointer.is_known()) {
+      auto read = m68k_memory_read(in.memory, pointer, bytes, config_.memory.policy);
+      if (!read.known) return read;
+      if (!add(read.value)) return fail(UnknownReason::set_bound, Sub::set_bound);
+    }
+  }
+  if (!result) return fail(UnknownReason::unsupported_transfer, Sub::none);
+  M68kMemoryRead out;
+  out.known = true;
+  out.value = std::move(*result);
+  return out;
+}
+
+std::optional<M68kCellValue> M68kFiniteAdapter::operand_value(const State &in, const M68kEffectiveAddress &ea, std::uint32_t bytes) const {
+  const auto mask = byte_mask(bytes);
+  switch (ea.mode) {
+  case M68kEaMode::immediate: return data_value({ea.immediate_value & mask}, false);
+  case M68kEaMode::data_register: {
+    const auto slot = m68k_analysis_slot(ea.reg & 7U, bytes == 4U ? 32U : 16U);
+    const auto &value = in.values.values[slot];
+    if (!value.is_precise()) return std::nullopt;
+    std::vector<std::uint64_t> values;
+    for (const auto v : value.values()) values.push_back(v & mask);
+    return data_value(std::move(values), in.width_derived[slot]);
+  }
+  case M68kEaMode::address_register: {
+    const auto &pointer = in.address[ea.reg & 7U];
+    if (!pointer.is_known()) return std::nullopt;
+    if (bytes == 4U) {
+      M68kCellValue out;
+      out.pointer = pointer;
+      return out;
+    }
+    const auto values = pointer.values();
+    if (!values) return std::nullopt;
+    std::vector<std::uint64_t> low;
+    for (const auto v : *values) low.push_back(v & mask);
+    return data_value(std::move(low), pointer.width_derived);
+  }
+  default: break;
+  }
+  if (!m68k_memory_mode(ea.mode)) return std::nullopt;
+  auto read = read_memory_operand(in, ea, bytes);
+  if (!read.known) return std::nullopt;
+  return std::move(read.value);
+}
+
+std::vector<std::pair<M68kPointsTo, std::uint32_t>> M68kFiniteAdapter::memory_write_targets(const M68kIrOperation &operation,
+                                                                                            const State &in) const {
+  std::vector<std::pair<M68kPointsTo, std::uint32_t>> out;
+  const auto writes = m68k_memory_writes(operation);
+  if (!writes.described) {
+    out.emplace_back(M68kPointsTo::unknown(UnknownReason::unsupported_transfer, Sub::store_poison), 4U);
+    return out;
+  }
+  for (const auto &write : writes.writes) {
+    switch (write.target) {
+    case M68kMemoryWrite::Target::unknown:
+      out.emplace_back(M68kPointsTo::unknown(UnknownReason::unsupported_transfer, Sub::store_poison), write.span);
+      break;
+    case M68kMemoryWrite::Target::push:
+      out.emplace_back(m68k_points_to_add(in.address[7], {-static_cast<std::int64_t>(write.span)}), write.span);
+      break;
+    case M68kMemoryWrite::Target::destination: {
+      const auto &source = operation.source_ea;
+      const auto &destination = operation.destination_ea;
+      // The source operand is evaluated first: its (An)+/-(An) update is visible to the destination's address (MOVE (A0)+,(A0)).
+      State effective = in;
+      if (is_auto_update(source) && uses_address_register(destination, source.reg) && operation.kind != M68kIrKind::movem_transfer) {
+        const auto step = static_cast<std::int64_t>(auto_update_step(source.reg, operation.size));
+        effective.address[source.reg] =
+            m68k_points_to_add(in.address[source.reg], {source.mode == M68kEaMode::address_postinc ? step : -step});
+      }
+      const auto predecrement =
+          operation.kind == M68kIrKind::movem_transfer ? write.span : auto_update_step(destination.reg, operation.size);
+      out.emplace_back(operand_address(effective, destination, predecrement), write.span);
+      break;
+    }
+    }
+  }
+  return out;
+}
+
+void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::uint32_t next, const State &in, State &out) const {
+  const auto writes = m68k_memory_writes(operation);
+  const auto targets = memory_write_targets(operation, in);
+  if (!writes.described) {
+    out.memory.poison_all();
+    return;
+  }
+  for (std::size_t i = 0; i < writes.writes.size(); ++i) {
+    const auto &write = writes.writes[i];
+    std::optional<M68kCellValue> value;
+    switch (write.value) {
+    case M68kMemoryWrite::Value::unknown: break;
+    case M68kMemoryWrite::Value::zero: value = data_value({0U}, false); break;
+    case M68kMemoryWrite::Value::return_address: value = data_value({next}, false); break;
+    case M68kMemoryWrite::Value::effective_address: {
+      const auto addresses = effective_addresses(in, operation.source_ea, M68kMemoryAccessWidth::long_word);
+      if (addresses.ok) value = data_value(std::vector<std::uint64_t>(addresses.values.begin(), addresses.values.end()), addresses.width_derived);
+      break;
+    }
+    case M68kMemoryWrite::Value::source: value = operand_value(in, operation.source_ea, write.span); break;
+    }
+    if (value && !value->is_pointer() && !value->data.is_precise()) value.reset();
+    m68k_memory_store(out.memory, targets[i].first, targets[i].second, value, config_.memory.policy);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Adapter.
 
 std::optional<M68kAnalysisImage::Instruction> M68kFiniteAdapter::decode(std::uint32_t pc) const {
@@ -690,10 +968,45 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
   // writing every Dn (their footprint is not claimed complete); with the address domain enabled the data registers are kept.
   const bool address_only = config_.domains.address && (operation.kind == M68kIrKind::load_effective_address ||
                                                         operation.kind == M68kIrKind::push_effective_address);
+  // SEG-030-T004: a memory source operand naming precise work-RAM cells is handed to the data owner as a substituted source register
+  // carrying the cells' value (the owner's own semantics then apply unchanged). Without precise cells the owner sees the original
+  // operation (a byte from mutable memory stays its width-only 0..255 domain).
+  const M68kIrOperation *data_operation = &operation;
+  M68kIrOperation substituted;
+  if (config_.domains.memory && memory_source_kind(operation.kind) && operation.destination_ea.mode == M68kEaMode::data_register &&
+      m68k_memory_mode(operation.source_ea.mode)) {
+    bool tracked = false;
+    const auto bytes = access_bytes(operation.size);
+    auto read = read_memory_operand(in, operation.source_ea, bytes, &tracked);
+    std::optional<M68kCellValue> value;
+    if (read.known && tracked) {
+      if (read.value.is_pointer()) {
+        if (const auto values = read.value.pointer.values()) {
+          std::vector<std::uint64_t> data;
+          for (const auto v : *values) data.push_back(v & byte_mask(bytes));
+          value = data_value(std::move(data), read.value.pointer.width_derived);
+        }
+      } else {
+        value = std::move(read.value);
+      }
+    }
+    if (value && value->data.is_precise()) {
+      substituted = operation;
+      substituted.source_ea.mode = M68kEaMode::data_register;
+      substituted.source_ea.reg = static_cast<std::uint8_t>((operation.destination_ea.reg + 1U) & 7U);
+      const auto original_effect = m68k_operation_effect(operation);
+      const auto substituted_effect = m68k_operation_effect(substituted);
+      if (original_effect.register_write_footprint_complete && substituted_effect.register_write_footprint_complete &&
+          original_effect.data_register_write_mask == substituted_effect.data_register_write_mask) {
+        inputs.override_register(substituted.source_ea.reg, std::move(*value));
+        data_operation = &substituted;
+      }
+    }
+  }
   for (unsigned reg = 0; reg < 8U && !address_only; ++reg) {
     for (const auto width : widths) {
       inputs.reset();
-      const auto transfer = m68k_finite_register_after(operation, reg, width, inputs);
+      const auto transfer = m68k_finite_register_after(*data_operation, reg, width, inputs);
       if (!transfer.writes) continue;
       const auto reason = transfer.immutable_read_failed ? UnknownReason::non_immutable_read
                                                          : inputs.unknown_read().value_or(UnknownReason::unsupported_transfer);
@@ -702,6 +1015,7 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
     }
   }
   if (config_.domains.address) transfer_address_registers(operation, in, out);
+  if (config_.domains.memory) transfer_memory(operation, next, in, out);
 
   const auto control = m68k_control_successors(operation);
   // Flags at this branch are exact only when its sole predecessor is the physically preceding flag setter.
@@ -746,13 +1060,13 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
   const auto stacked = control.stacked_address & bus_mask;
   switch (control.stacked) {
   case M68kStackedContinuationKind::call_continuation:
-    if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, State::all_unknown()});
+    if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true)});
     break;
   case M68kStackedContinuationKind::exception_continuation:
-    if (config_.exception_continuations) result.edges.push_back({stacked, EdgeKind::exceptional, State::all_unknown()});
+    if (config_.exception_continuations) result.edges.push_back({stacked, EdgeKind::exceptional, entry_state(true)});
     break;
   case M68kStackedContinuationKind::pushed_code_address:
-    if (config_.pushed_code_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, State::all_unknown()});
+    if (config_.pushed_code_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true)});
     break;
   case M68kStackedContinuationKind::none: break;
   }
@@ -804,12 +1118,15 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
 // ---------------------------------------------------------------------------------------------------------------
 // Driver.
 
-M68kFiniteAnalysisResult analyze_m68k_finite_values(const M68kAnalysisImage &image, const std::vector<std::uint32_t> &entries,
-                                                    M68kAnalysisConfig config, const analysis::Bounds &bounds) {
-  std::vector<std::pair<std::uint64_t, M68kAnalysisState>> seeds;
-  for (const auto entry : entries) seeds.emplace_back(entry & bus_mask, M68kAnalysisState::all_unknown());
+namespace {
+
+// One solve with the solver-owned pin-and-restart plus the driver's adapter pins (ADR 0078 decision 2; SEG-029-T006).
+M68kFiniteAnalysisResult solve_pinned(const M68kAnalysisImage &image, const std::vector<std::uint32_t> &entries, M68kAnalysisConfig config,
+                                      const analysis::Bounds &bounds) {
   for (std::uint32_t restarts = 0;; ++restarts) {
     M68kFiniteAdapter adapter{image, config};
+    std::vector<std::pair<std::uint64_t, M68kAnalysisState>> seeds;
+    for (const auto entry : entries) seeds.emplace_back(entry & bus_mask, adapter.entry_state(false));
     M68kFiniteAnalysisResult out{};
     out.restarts = restarts;
     out.address_domain = config.domains.address;
@@ -848,6 +1165,118 @@ M68kFiniteAnalysisResult analyze_m68k_finite_values(const M68kAnalysisImage &ima
     if (invalidated.empty()) return out;
     config.pinned_sites.insert(invalidated.begin(), invalidated.end());  // monotone: terminates
   }
+}
+
+// True when a store of `span` bytes at `targets` may touch a release range.
+bool may_release(const M68kPointsTo &targets, std::uint32_t span, const std::vector<std::pair<std::uint32_t, std::uint32_t>> &ranges) {
+  if (ranges.empty() || targets.is_bottom()) return false;  // no release range: no external bus master is modelled
+  if (!targets.is_known()) return true;
+  for (const auto &[region, offsets] : targets.pairs) {
+    const std::uint64_t lo = static_cast<std::uint64_t>(region.base & bus_mask) + offsets.lo();
+    const std::uint64_t hi = static_cast<std::uint64_t>(region.base & bus_mask) + offsets.hi() + span;
+    for (const auto &[first, last] : ranges)
+      if (lo < last && first < hi) return true;
+  }
+  return false;
+}
+
+// The policy the solution itself requires (ADR 0079 decisions 7 and 9) plus the memory statistics of the run.
+M68kMemoryPolicy derive_memory_policy(const M68kAnalysisImage &image, const M68kAnalysisConfig &config, M68kFiniteAnalysisResult &result) {
+  M68kMemoryPolicy derived;
+  derived.async_all = config.memory.interrupts;
+  auto &report = result.memory;
+  report = M68kMemoryReport{};
+  report.enabled = true;
+  report.assumed_no_external_writer = config.memory.assume_no_external_writer;
+  M68kFiniteAdapter adapter{image, config};
+  const auto &states = result.solution.in_states;
+  // Code reachable from the handler roots over every edge of the final solution (call, continuation and computed edges included).
+  std::set<std::uint64_t> handler;
+  std::vector<std::uint64_t> pending;
+  for (const auto root : config.memory.handler_roots)
+    if (states.contains(root & bus_mask) && handler.insert(root & bus_mask).second) pending.push_back(root & bus_mask);
+  while (!pending.empty()) {
+    const auto point = pending.back();
+    pending.pop_back();
+    for (const auto &edge : adapter.transfer(point, states.at(point)).edges)
+      if (states.contains(edge.target) && handler.insert(edge.target).second) pending.push_back(edge.target);
+  }
+  report.handler_points = handler.size();
+  bool release = false;
+  for (const auto &[point, state] : states) {
+    report.max_cells = std::max(report.max_cells, state.memory.cells.size());
+    const auto decoded = adapter.decode(static_cast<std::uint32_t>(point));
+    if (!decoded) continue;
+    const auto &operation = decoded->operation;
+    if (!m68k_memory_writes(operation).described) ++report.undescribed_writers;
+    const bool in_handler = handler.contains(point);
+    bool stores = false;
+    for (const auto &[targets, span] : adapter.memory_write_targets(operation, state)) {
+      if (targets.is_bottom()) continue;
+      stores = true;
+      if (!targets.is_known()) ++report.unknown_target_stores;
+      if (may_release(targets, span, config.memory.release_ranges)) {
+        ++report.release_stores;
+        release = true;
+      }
+      if (!in_handler) continue;
+      const auto touched = m68k_memory_touched(targets, span);
+      if (!touched) derived.async_all = true;
+      else
+        for (const auto &range : *touched) derived.add_async(range);
+    }
+    if (stores && in_handler) ++report.handler_store_sites;
+    // Memory-source operands that may read work RAM: precise or Unknown by generic reason x CPU sub-reason.
+    if (m68k_memory_mode(operation.source_ea.mode) && operation.kind != M68kIrKind::load_effective_address &&
+        operation.kind != M68kIrKind::push_effective_address && operation.kind != M68kIrKind::jump_general &&
+        operation.kind != M68kIrKind::call_general) {
+      bool tracked = false;
+      const auto read = adapter.read_memory_operand(state, operation.source_ea, access_bytes(operation.size), &tracked);
+      if (tracked) {
+        if (read.known) ++report.precise_reads;
+        else ++report.unknown_reads[{read.reason, read.sub}];
+      }
+    }
+  }
+  report.release_store = release;
+  if (release && !config.memory.assume_no_external_writer) derived.external_writer = true;
+  return derived;
+}
+
+}  // namespace
+
+M68kFiniteAnalysisResult analyze_m68k_finite_values(const M68kAnalysisImage &image, const std::vector<std::uint32_t> &entries,
+                                                    M68kAnalysisConfig config, const analysis::Bounds &bounds) {
+  if (!config.domains.memory) return solve_pinned(image, entries, std::move(config), bounds);
+  // ADR 0079 decision 9: monotone driver rounds over the memory policy, at most R rounds; the final round's derived policy must be
+  // below the one it ran with (final validation). Non-convergence switches the memory domain off.
+  config.domains.address = true;
+  config.memory.policy.async_all = config.memory.policy.async_all || config.memory.interrupts;
+  for (std::uint32_t round = 1U; round <= m68k_memory_round_bound; ++round) {
+    auto out = solve_pinned(image, entries, config, bounds);
+    if (!out.complete) {
+      out.memory.enabled = true;
+      out.memory.rounds = round;
+      out.memory.policy = config.memory.policy;
+      return out;
+    }
+    const auto derived = derive_memory_policy(image, config, out);
+    out.memory.rounds = round;
+    out.memory.policy = config.memory.policy;
+    if (leq(derived, config.memory.policy)) {
+      out.memory.converged = true;
+      return out;
+    }
+    config.memory.policy = join(config.memory.policy, derived);
+  }
+  auto fallback = config;
+  fallback.domains.memory = false;
+  auto out = solve_pinned(image, entries, fallback, bounds);
+  out.memory.enabled = true;
+  out.memory.converged = false;
+  out.memory.rounds = m68k_memory_round_bound;
+  out.memory.policy = config.memory.policy;
+  return out;
 }
 
 analysis::FiniteValue m68k_query_data_register(const M68kFiniteAnalysisResult &result, std::uint32_t pc, unsigned reg,
@@ -897,6 +1326,7 @@ std::string format_m68k_finite_analysis(const M68kFiniteAnalysisResult &result) 
           << (state.width_derived[slot] ? "~" : "");
     if (result.address_domain)
       for (unsigned reg = 0; reg < 8U; ++reg) out << " a" << reg << '=' << state.address[reg].describe();
+    if (result.memory.enabled) out << ' ' << state.memory.describe();
     out << '\n';
   }
   for (const auto &[pc, site] : result.pc_index_sites) {
@@ -916,6 +1346,14 @@ std::string format_m68k_finite_analysis(const M68kFiniteAnalysisResult &result) 
   }
   for (const auto &[pc, reason] : result.unresolved_computed)
     out << "unresolved " << hex(pc) << ' ' << analysis::unknown_reason_name(reason) << '\n';
+  if (result.memory.enabled) {
+    const auto &memory = result.memory;
+    out << "memory rounds=" << memory.rounds << " converged=" << (memory.converged ? 1 : 0)
+        << " external=" << (memory.policy.external_writer ? 1 : 0) << " async_all=" << (memory.policy.async_all ? 1 : 0)
+        << " async_ranges=" << memory.policy.async.size() << " release_stores=" << memory.release_stores
+        << " unknown_target_stores=" << memory.unknown_target_stores << " handler_points=" << memory.handler_points
+        << " max_cells=" << memory.max_cells << " precise_reads=" << memory.precise_reads << '\n';
+  }
   return out.str();
 }
 

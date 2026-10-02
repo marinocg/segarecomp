@@ -124,7 +124,8 @@ bool GenesisM68kAnalysisImage::mapped(std::uint32_t pc) const {
 std::optional<M68kRegionExtent> GenesisM68kAnalysisImage::region_of(std::uint32_t address) const {
   address &= bus_mask;
   constexpr std::uint32_t work_ram_base = UINT32_C(0xE00000), io_base = UINT32_C(0xA00000);
-  if (address >= work_ram_base) return M68kRegionExtent{M68kRegionKind::work_ram, 0U, work_ram_base, UINT32_C(0x1000000) - work_ram_base};
+  if (address >= work_ram_base)
+    return M68kRegionExtent{M68kRegionKind::work_ram, 0U, work_ram_base, UINT32_C(0x1000000) - work_ram_base, UINT32_C(0x10000)};
   if (address >= io_base) return M68kRegionExtent{M68kRegionKind::io_device, 0U, io_base, work_ram_base - io_base};
   const auto owner = unique_cartridge(address);
   if (!owner) return std::nullopt;
@@ -137,7 +138,10 @@ std::optional<M68kRegionExtent> GenesisM68kAnalysisImage::region_of(std::uint32_
 }
 
 std::optional<std::uint32_t> GenesisM68kAnalysisImage::immutable_read(std::uint32_t address, unsigned bytes) const {
-  if (bytes == 0U || bytes > 4U) return std::nullopt;
+  // The `M68kAnalysisImage` contract admits 1, 2 or 4 bytes (the only widths the CPU owners request), exactly as the flat view.
+  // The challenger's own reader also accepts 0 (an empty precise read) and 3; the owners never request either, so the D
+  // equality is unaffected and the view rejects both rather than invent a value.
+  if (bytes != 1U && bytes != 2U && bytes != 4U) return std::nullopt;
   std::uint32_t value = 0U;
   for (unsigned i = 0; i < bytes; ++i) {
     const auto at = (address + i) & bus_mask;

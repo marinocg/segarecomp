@@ -122,6 +122,14 @@ def check_computed_sites(compare: pathlib.Path, tmpdir: pathlib.Path) -> None:
     assert pc_index["escapes_outside_proven_targets"] == 0 and pc_index["proven_targets"] == 2, pc_index
     assert "jmp_an" not in check["families"], check
     assert "000500" not in out.stdout and "0x" not in out.stdout
+    # SEG-030: a core report whose solve exhausted a bound (empty D) is rejected, never compared as a vacuous result.
+    incomplete = json.loads(private.read_text())
+    incomplete["aggregate"]["solver"] = {"complete": False, "reason": "iteration_bound"}
+    incomplete["discovered"] = []
+    (tmpdir / "incomplete.json").write_text(json.dumps(incomplete))
+    out = subprocess.run([sys.executable, str(compare), "--coverage-dir", str(coverage), "--challenger",
+                          str(tmpdir / "incomplete.json")], capture_output=True, text=True)
+    assert out.returncode == 4 and out.stdout == "" and "incomplete" in out.stderr, (out.returncode, out.stderr)
 
 
 def bitmap_of(pcs: set[int]) -> bytes:
