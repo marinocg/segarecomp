@@ -288,6 +288,8 @@ These hold unless a later ADR explicitly argues otherwise:
 ### T003 (SEG-028 plan)
 
 - Draft contract: `docs/architecture/executable-image-contract.md`. It answers the 16 Problem-A questions.
+- Accepted by ADR 0077 (SEG-028-T001), which fixes the final artifact, placement and producer boundary and marks each answer Confirmed
+  or Corrected.
 - The artifact is minimal and layered: `cpu` tag, build-local `ImageId`, byte span or source reference, execution mappings, producer
   identity, image authority, producer-owned evidence, and a verification tag. Roots are not part of the image.
 - `CodeImage`/`ImageSet` stay Z80 codegen input behind a pure adapter. `PassRunner` stays Genesis-specific.
