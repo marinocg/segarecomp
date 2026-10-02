@@ -38,8 +38,10 @@ struct ToyAdapter {
   using State = ::State;
   std::map<std::uint64_t, ToyPoint> program;
   std::size_t transfers{};
+  std::vector<std::uint64_t> visits;  // transfer order (the worklist schedule)
   TransferResult<State> transfer(std::uint64_t point, const State &in) {
     ++transfers;
+    visits.push_back(point);
     TransferResult<State> out;
     const auto found = program.find(point);
     if (found == program.end()) return out;
@@ -98,8 +100,8 @@ void domain_laws() {
   const auto u = FiniteValue::unknown(UnknownReason::set_bound);
   expect(join(a, FiniteValue::bottom()) == a && join(FiniteValue::bottom(), a) == a, "DOM: bottom is the join identity");
   expect(join(a, u) == u && join(u, a) == u, "DOM: Unknown absorbs");
-  expect(join(FiniteValue::unknown(UnknownReason::set_bound), FiniteValue::unknown(UnknownReason::unknown_input)).reason() ==
-             UnknownReason::unknown_input,
+  expect(join(FiniteValue::unknown(UnknownReason::set_bound), FiniteValue::unknown(UnknownReason::unknown_input)) ==
+             FiniteValue::unknown(UnknownReason::unknown_input),
          "DOM: Unknown reasons join deterministically (smallest)");
   expect(join(FiniteValue::of({1, 2}), FiniteValue::of({3}), 2).reason() == UnknownReason::set_bound,
          "DOM: a union over the bound is Unknown(set_bound), never a truncated set");
@@ -133,7 +135,7 @@ void straight_line_and_join() {
   const auto s = solve(t, entry());
   expect(s.complete, "JOIN: solver completes");
   expect(loc_at(s, 4, 0) == FiniteValue::of({5, 9}), "JOIN: branch join is the exact union {5,9}: " + loc_at(s, 4, 0).describe());
-  expect(loc_at(s, 4, 1).reason() == UnknownReason::unknown_input, "JOIN: untouched location stays Unknown(unknown_input)");
+  expect(loc_at(s, 4, 1) == FiniteValue::unknown(UnknownReason::unknown_input), "JOIN: untouched location stays Unknown(unknown_input)");
   expect(loc_at(s, 99, 0).is_bottom(), "JOIN: an unreached point is bottom, not a value");
 }
 
@@ -195,6 +197,37 @@ void bound_exhaustion() {
   const auto p = solve(t, entry(), Bounds{default_max_iterations, 2U});
   expect(!p.complete && p.reason == UnknownReason::state_bound && loc_at(p, 0, 0).reason() == UnknownReason::state_bound,
          "BOUND: point bound exhaustion is typed Unknown(state_bound)");
+  expect(!s.reached(0) && !s.reached(1) && !p.reached(0), "BOUND: an incomplete solve reaches nothing (never partial truth)");
+}
+
+// A computed site's resolution is the one of its latest transfer: a site first resolved from a precise value and later widened to
+// Unknown is reported unresolved, with no stale computed-target set (the earlier edge's target stays reached: sound).
+// Schedule: 0 -> {1,5}; 1 sets l0=10 -> 3 (resolved {10}); 5 -> 6 opaque l0 -> 3 (widened, re-transferred: unresolved).
+void site_resolution_is_latest() {
+  ToyAdapter t;
+  t.program[0] = {Op::nop, 0, 0, 0, {1, 5}};
+  t.program[1] = {Op::set, 0, 10, 0, {3}};
+  t.program[3] = {Op::jump_via, 0, 0, 0, {}};
+  t.program[5] = {Op::nop, 0, 0, 0, {6}};
+  t.program[6] = {Op::opaque, 0, 0, 0, {3}};
+  t.program[10] = {Op::stop, 0, 0, 0, {}};
+  const auto s = solve(t, entry());
+  expect(s.complete && s.unresolved_computed.contains(3) && s.unresolved_computed.at(3) == UnknownReason::unsupported_transfer,
+         "SITE: the widened site is unresolved with its typed reason");
+  expect(!s.computed_targets.contains(3), "SITE: no stale computed-target set survives the latest transfer");
+  expect(s.reached(10), "SITE: the earlier computed edge's target stays reached (sound over-approximation)");
+}
+
+// The worklist always yields the smallest pending point: the transfer order is a function of the program alone, independent of
+// edge order, insertion order or container hashing.
+void worklist_order() {
+  ToyAdapter t;
+  t.program[0] = {Op::nop, 0, 0, 0, {3, 1}};  // edges listed largest first
+  t.program[1] = {Op::nop, 0, 0, 0, {2}};
+  t.program[2] = {Op::stop, 0, 0, 0, {}};
+  t.program[3] = {Op::stop, 0, 0, 0, {}};
+  const auto s = solve(t, entry());
+  expect(s.complete && t.visits == std::vector<std::uint64_t>{0, 1, 2, 3}, "DET: the smallest pending point is transferred first");
 }
 
 void determinism() {
@@ -227,6 +260,8 @@ int main() {
   computed_edges_and_propagation();
   loop_termination();
   bound_exhaustion();
+  site_resolution_is_latest();
+  worklist_order();
   determinism();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";

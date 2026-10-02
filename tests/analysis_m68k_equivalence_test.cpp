@@ -218,6 +218,8 @@ void fixture2() {
   const auto p = compare("F2", image);
   expect(adapter_targets(p, 0x208U, {0x210U, 0x214U, 0x218U, 0x21CU}), "F2: mask proves four targets");
   expect(p.adapter.pc_index_sites.at(0x208U).call && p.adapter.reached.contains(0x20CU), "F2: JSR site and continuation");
+  expect(m68k_query_data_register(p.adapter, 0x20CU, 0U, 16U) == analysis::FiniteValue::unknown(analysis::UnknownReason::unknown_input),
+         "F2: the call continuation is an opaque entry (no call summary): D0 is Unknown there, not the pre-call set");
 }
 
 void fixture3() {
@@ -313,6 +315,42 @@ void fixture7() {
   Asm{image, 0x270U}.bra_self();
   const auto p = compare("F7", image);
   expect(adapter_targets(p, jmp, {0x240U, 0x244U}), "F7: duplicates deduplicate");
+}
+
+// An odd table entry raises an address error at the JMP: it is excluded (counted), never a target and never a reason to fail
+// the whole site.
+void fixture_odd_target() {
+  Image image;
+  const auto jmp = guarded_word_table_dispatch(image, 0x200U, 2U, 0x270U, 0x220U);
+  image.words(0x220U, {0x0020U, 0x0021U, 0x0024U});
+  Asm{image, 0x240U}.bra_self();
+  Asm{image, 0x244U}.bra_self();
+  Asm{image, 0x270U}.bra_self();
+  const auto p = compare("ODD", image);
+  expect(adapter_targets(p, jmp, {0x240U, 0x244U}) && p.adapter.pc_index_sites.at(jmp).odd_targets_excluded == 1U,
+         "ODD: the odd entry is excluded and counted; the even targets stay proven");
+}
+
+// Flag provenance needs the setter to be the SOLE predecessor. The guarded branch is first reached from its physically preceding
+// CMPI (filter applies), then from a later BRA with the same register values but flags from a different instruction: the second
+// arrival must remove the provenance (the states are not leq) and the fallthrough loses the filter.
+void fixture_second_predecessor_removes_filter() {
+  Image image;
+  Asm a{image, 0x200U};
+  a.move_b_ram(2, 0xF104U).bcc_s(EQ, 0x260U).moveq(0, 0).move_b_ram(0, 0xF100U).cmpi_b(0, 2U);
+  const auto bhi = a.pc;
+  a.bcc_s(HI, 0x280U);
+  const auto fallthrough = a.pc;
+  a.nop().bra_self();
+  Asm{image, 0x280U}.bra_self();
+  Asm{image, 0x260U}.moveq(0, 0).move_b_ram(0, 0xF100U).bra_w(bhi);
+  const auto p = compare("FLAGS-2PRED", image);
+  const auto guarded = m68k_query_data_register(p.adapter, fallthrough, 0U, 16U);
+  expect(guarded.is_precise() && guarded.values().size() == 256U,
+         "FLAGS-2PRED: a second predecessor removes the CMPI filter (D0.w is every byte, not {0,1,2}): " + guarded.describe());
+  const auto at_branch = p.adapter.solution.in_states.find(bhi);
+  expect(at_branch != p.adapter.solution.in_states.end() && !at_branch->second.flag_setter,
+         "FLAGS-2PRED: the joined branch state carries no flag setter");
 }
 
 void fixture8_9() {
@@ -527,6 +565,8 @@ int main() {
   fixture5();
   fixture6();
   fixture7();
+  fixture_odd_target();
+  fixture_second_predecessor_removes_filter();
   fixture8_9();
   fixture11();
   fixture12();

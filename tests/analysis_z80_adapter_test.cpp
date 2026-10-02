@@ -245,6 +245,38 @@ void fixture_non_code() {
         r.solution.unresolved_computed.at(0x4000) == UnknownReason::non_immutable_read);
 }
 
+// Fixture E: pair/half consistency through the exact pointwise update, from a joined two-value pair.
+//   0000 20 05        JR NZ,+5 -> 0007
+//   0002 21 34 12     LD HL,0x1234
+//   0005 18 03        JR +3 -> 000A
+//   0007 21 78 56     LD HL,0x5678
+//   000A 2E 00        LD L,0x00          pointwise constant: HL {0x1200,0x5600}
+//   000C 24           INC H              pointwise same-pair: HL {0x1300,0x5700} (not the 4-element product of the halves)
+//   000D 65           LD H,L             pointwise same-pair copy: HL {0x0000}
+//   000E 2E 99        LD L,0x99          HL {0x0099}
+//   0010 7E           LD A,(HL)          0x0099 is outside the 0x0012-byte image: Unknown(non_immutable_read)
+//   0011 76           HALT
+// and a load through an Unknown address (entry HL) is Unknown(non_immutable_read), never bottom.
+void fixture_pair_halves() {
+  const Image image(0x0012, {{0x0000, {0x20, 0x05, 0x21, 0x34, 0x12, 0x18, 0x03, 0x21, 0x78, 0x56, 0x2E, 0x00, 0x24, 0x65,
+                                       0x2E, 0x99, 0x7E, 0x76}}});
+  const Run r = run(image);
+  CHECK(r.solution.complete);
+  CHECK(at(r, 0x000A, Reg::hl) == set({0x1234, 0x5678}));
+  CHECK(at(r, 0x000C, Reg::hl) == set({0x1200, 0x5600}));
+  CHECK(at(r, 0x000C, Reg::l) == set({0x00}));
+  CHECK(at(r, 0x000D, Reg::hl) == set({0x1300, 0x5700}));
+  CHECK(at(r, 0x000D, Reg::h) == set({0x13, 0x57}));
+  CHECK(at(r, 0x000E, Reg::hl) == set({0x0000}));
+  CHECK(at(r, 0x0010, Reg::hl) == set({0x0099}));
+  CHECK(at(r, 0x0010, Reg::h) == set({0x00}) && at(r, 0x0010, Reg::l) == set({0x99}));
+  CHECK(at(r, 0x0011, Reg::a) == unknown(UnknownReason::non_immutable_read));
+
+  // 0000 7E LD A,(HL) with HL Unknown(unknown_input); 0001 76 HALT
+  const Run u = run(Image(0x0002, {{0x0000, {0x7E, 0x76}}}));
+  CHECK(at(u, 0x0001, Reg::a) == unknown(UnknownReason::non_immutable_read));
+}
+
 // The projection itself (no analysis involved).
 segarecomp::cpu::z80::Z80Effect project(const std::vector<std::uint8_t>& bytes, std::uint16_t base = 0x1000) {
   const ImageView view(base, bytes);
@@ -302,6 +334,7 @@ int main() {
   fixture_table_dispatch();
   fixture_call_alu_store();
   fixture_non_code();
+  fixture_pair_halves();
   projection();
   determinism();
   if (failures != 0) {

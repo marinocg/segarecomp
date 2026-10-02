@@ -64,3 +64,41 @@ the generic part is not M68K-shaped.
 - SEG-031 owns any admission change; nothing here affects production.
 - The ADR 0076 STOP list applies in full: no universal CPU IR (each adapter reads its own decoded form), no generic memory emulator, no
   banking semantics or platform concepts in generic domains, no SMT, no whole-program path sensitivity, no unbounded contexts.
+
+## Records
+
+### T002: fixed-point core
+
+- `libs/analysis/include/segarecomp/analysis/{finite_value.hpp,solver.hpp}`. Covered by `analysis_core_test`, which uses a synthetic toy language with no instruction set: domain laws, join soundness, no false certainty, computed edges, loop termination, bound exhaustion, worklist order, latest-transfer site resolution, determinism and entry-order independence.
+- `analysis_core_boundary_test` covers the forbidden identifiers, the include rule and the production-linkage rule, with planted self-checks.
+
+### T003: M68K first-consumer adapter (report-only)
+
+- `segarecomp::cpu_m68k_analysis`: a forward adapter over `m68k_finite_register_after`, `m68k_finite_branch_filter` and `m68k_control_successors`. Image access goes through an adapter-owned interface.
+- The state is the 8 data registers at widths 16 and 32 as `FiniteValue`s, plus a CPU-owned `width_derived` annotation and flag-setter provenance. The provenance reproduces the challenger's rule: a guard filters only when the flag setter is the branch's sole, physically preceding fallthrough predecessor.
+- `analysis_m68k_equivalence_test` runs the SEG-026-T002 challenger and the adapter on the same fixtures. Per-site outcome class, target sets and the reached-instruction set are identical.
+- Documented sound differences:
+  - **Invalidation:** both unresolved, with identical targets. The ordered worklist reaches the result without a round restart.
+  - **Loop:** where the backward evaluator returns cycle-Unknown, the forward fixed point proves an exact single target, because only one writer of the index register exists.
+
+### T004: Z80 second-CPU adapter
+
+- **Projection.** A CPU-owned `project_effect` in `segarecomp::cpu_z80`, which still links only base. It uses form operand classes and opcode register fields, parses no lowering text, and returns typed unsupported outside an enumerated form set.
+- **Adapter.** `segarecomp::cpu_z80_analysis` instantiates the unchanged generic interface (`static_assert(Adapter<...>)`) with `ValueVector<13>` and pair/half consistency.
+  - Loads are exact only from the immutable view.
+  - Stores create no precise memory; a store into the image is unsupported.
+  - Unsupported forms invent no edge.
+  - `JP (HL)/(IX)/(IY)` gives computed edges only from precise values.
+- **Fixtures** (`analysis_z80_adapter_test`): constants and finite sets, a branch join, HL/IX/IY addresses, load and store, register-derived indirect jumps (resolved and unresolved), an unsupported form, bounds and determinism.
+
+### T005: mutation gate
+
+- `analysis_mutation_test` (`full` tier) copies the tree, builds the three SEG-029 tests once, then applies 38 source mutants:
+  - 13 core;
+  - 12 M68K;
+  - 13 Z80, covering both the projection and the adapter.
+- Each mutant is rebuilt incrementally and must be killed. The harness fails on a stale or ambiguous edit pattern, a mutant that does not compile, a surviving mutant, or a killed "equivalent" mutant.
+- **Result:** 36 killed and 2 justified as equivalent.
+  - `m68k_failed_read_ignored`: the CPU owner already returns Unknown on a failed read.
+  - `m68k_flag_setter_adjacency_unchecked`: the provenance is created only on an edge to the physically next instruction.
+- Seven first-run survivors were closed by new fixtures. No product bug was found.
