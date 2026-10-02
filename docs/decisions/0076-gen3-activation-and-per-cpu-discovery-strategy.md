@@ -302,6 +302,8 @@ These hold unless a later ADR explicitly argues otherwise:
 
 - Draft contract: `docs/architecture/abstract-analysis-core-contract.md`. It covers the CPU-adapter / generic-solver boundary, the
   `Unknown` contract and its reason vocabulary, resource bounds, determinism, the forbidden-identifier rule and the image-view input.
+- Accepted by ADR 0078 (SEG-029-T001), which fixes placement (generic `segarecomp::analysis`, CPU-owned adapter targets that no
+  production target links), the closed `Unknown` vocabulary, the bounds and the exact baseline domain; no staged capability is admitted.
 - The baseline is the smallest set of domains justified by the first consumer: exact finite register sets with immutable-byte reads,
   re-expressing an existing M68K finite-value analysis. Address region, points-to, abstract memory, intervals, widening, contexts and
   summaries are staged under a four-part admission rule. No complete VSA framework is pre-committed.

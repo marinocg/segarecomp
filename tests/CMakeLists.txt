@@ -1101,6 +1101,23 @@ add_test(NAME executable_image_mutation_test COMMAND executable_image_mutation_t
 set_property(TEST executable_image_test executable_image_forbidden_identifiers_test z80_executable_image_equivalence_test
   genesis_m68k_executable_image_test executable_image_mutation_test APPEND PROPERTY LABELS full fast)
 set_property(TEST executable_image_forbidden_identifiers_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+# SEG-029 (ADR 0078): generic abstract-analysis core (CPU-free) and its CPU-owned report-only adapters.
+add_executable(analysis_core_test analysis_core_test.cpp)
+target_link_libraries(analysis_core_test PRIVATE segarecomp::analysis)
+segarecomp_enable_warnings(analysis_core_test)
+add_test(NAME analysis_core_test COMMAND analysis_core_test)
+add_test(NAME analysis_core_boundary_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/analysis_core_boundary_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST analysis_core_test analysis_core_boundary_test APPEND PROPERTY LABELS full fast)
+include(${CMAKE_CURRENT_SOURCE_DIR}/analysis_m68k_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/analysis_z80_tests.cmake)
+# SEG-029-T005: adversarial mutation gate. Applies each planted soundness/determinism/bound defect of the analysis core and adapters
+# to a temporary copy of the tree, rebuilds the three fixture tests there and requires a kill (stale edit patterns fail closed).
+add_test(NAME analysis_mutation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/analysis_mutation_test.py
+  ${PROJECT_SOURCE_DIR} ${CMAKE_COMMAND} ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER}
+  "--generator=${CMAKE_GENERATOR}" "--make-program=${CMAKE_MAKE_PROGRAM}")
+set_property(TEST analysis_mutation_test APPEND PROPERTY LABELS full)
+set_property(TEST analysis_mutation_test PROPERTY TIMEOUT 1800)
 # The real consumer route end to end (fixed point, link, run, falsification): the slowest Genesis Z80 test, `full` only.
 # CI wall-clock: one CTest entry per independent case group of the script (see its docstring); the union is the whole matrix.
 add_test(NAME genesis_z80_build_pipeline_test COMMAND ${Python3_EXECUTABLE}
