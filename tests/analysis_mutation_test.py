@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import io
 import os
 import pathlib
 import shutil
@@ -247,6 +248,12 @@ MUTANTS: list[Mutant] = [
 ]
 
 
+def source_text(raw: bytes) -> str:
+    """The one textual form both the stale-pattern preflight and mutation use: UTF-8 with universal-newline normalization, so a
+    CRLF checkout (Windows) presents the same `\n` text the mutant patterns are authored in."""
+    return io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8").read()
+
+
 def apply_edit(text: str, mutant: Mutant) -> str:
     count = text.count(mutant.old)
     if count != 1:
@@ -264,13 +271,26 @@ def self_check_stale_detection() -> None:
         raise SystemExit(f"FAIL self-check: stale detection accepted {text!r}")
     if apply_edit("a needle", probe) != "a pin":
         raise SystemExit("FAIL self-check: a unique pattern was not applied")
+    # LF and CRLF sources are equivalent once read through source_text; zero and multiple matches stay stale on both.
+    lines = Mutant("probe_lines", "probe", "one;\ntwo;\n", "one;\n", (), "probe")
+    for newline in (b"\n", b"\r\n"):
+        def raw(*parts: bytes) -> bytes:
+            return b"".join(part + newline for part in parts)
+        if apply_edit(source_text(raw(b"x;", b"one;", b"two;")), lines) != "x;\none;\n":
+            raise SystemExit(f"FAIL self-check: a multiline pattern was not applied to {newline!r} source")
+        for text in (raw(b"one;", b"three;"), raw(b"one;", b"two;", b"one;", b"two;")):
+            try:
+                apply_edit(source_text(text), lines)
+            except StaleMutant:
+                continue
+            raise SystemExit(f"FAIL self-check: stale detection accepted {newline!r} source {text!r}")
     names = [m.name for m in MUTANTS]
     if len(names) != len(set(names)):
         raise SystemExit("FAIL self-check: duplicate mutant names")
     for m in MUTANTS:
         if m.old == m.new or not set(m.tests) <= set(ALL_TESTS):
             raise SystemExit(f"FAIL self-check: malformed mutant {m.name}")
-    print("ok    self-check: stale edit patterns (missing, duplicated) are rejected")
+    print("ok    self-check: stale edit patterns (missing, duplicated) are rejected; LF and CRLF sources are equivalent")
 
 
 def run(command: list[str], cwd: pathlib.Path | None = None, timeout: float = 1800) -> subprocess.CompletedProcess:
@@ -323,7 +343,7 @@ def main() -> int:
     stale = []
     for m in selected:
         try:
-            apply_edit((root / m.path).read_text(encoding="utf-8"), m)
+            apply_edit(source_text((root / m.path).read_bytes()), m)
         except StaleMutant as error:
             stale.append(str(error))
     if stale:
@@ -395,7 +415,7 @@ def main() -> int:
             path = source / m.path
             original = path.read_bytes()
             try:
-                path.write_text(apply_edit(original.decode("utf-8"), m), encoding="utf-8", newline="")
+                path.write_text(apply_edit(source_text(original), m), encoding="utf-8", newline="\n")
                 built = build_tests(m.tests)
                 if built.returncode != 0:
                     problems.append(f"{m.name}: mutant does not compile (fix the mutant; compilation failure is not a kill)")
