@@ -163,7 +163,7 @@ Unsupported / typed cases observed (none fixed, per the residual-sweep rule):
 - One workload stops the *M68K* generated-native program at frame 54 with `known_but_unemitted_target` (an M68K reachability frontier, class 3:
   a non-Z80 frontier, owner = M68K analysis/emission, not widened here). Its Z80 pass converged (2 images) and its audio before the stop is
   deterministic and silent-valid.
-- Two workloads (per the T008 record; not re-run here) fail closed in the build with `z80_code_mismatch` (the Z80 driver rewrites its own code; contract section 6 unsupported).
+- Two workloads (per the T008 record; not re-run here) fail closed in the build with `z80_code_mismatch` (the Z80 driver rewrites its own code; contract section 6 unsupported). *(Historical T010 text. Superseded: shape-stable operand patching is supported (T012), and a remaining structural mismatch is isolated as degraded Genesis audio instead of failing the build (T013); see contract sections 16 and 18.)*
 - Z80 reads of work-RAM through the banked window remain `z80_bank_target_unsupported` (open fact U3); not reached by any workload here.
 Residual sweep: no new Z80/audio-owner defect was found, so no iteration was spent; no classification 3 contradiction of the approved Z80
 architecture arose.

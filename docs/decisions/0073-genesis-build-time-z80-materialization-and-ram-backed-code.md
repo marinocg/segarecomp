@@ -196,7 +196,7 @@ code. The rule is replaced, for RAM-backed images only, by the structural-guard 
 `--instruction-budget 100000000`).** Sonic 1, Streets of Rage and OutRun do not regress: each still converges (2 images, 600-frame window,
 3-5 epochs), runs to the instruction budget with a non-silent audio stream, and the audio digest is identical across two runs. Sonic 2, which stopped with
 `z80_code_mismatch` before, now converges too (2 images, 2 epochs, 600-frame window); its audio is non-silent and its digest and linked executable are
-identical across two independent builds and two runs each. Cool Spot still stops with `z80_code_mismatch` in the materialization pass, now at a very early
+identical across two independent builds and two runs each. (Historical, superseded by T013: the build now completes with Genesis audio degraded, see contract section 18.) Cool Spot still stops with `z80_code_mismatch` in the materialization pass, now at a very early
 driver frame (single-digit frame count, 3 epochs seen): by construction of the guard the stop is a structural form change only, because a displacement or
 immediate difference is no longer a mismatch; it is the residual class (opcode/length-shape toggles of a patched instruction) that this ADR keeps
 unsupported pending an operator decision. **>4-byte audit:** none of the five workloads executed a RAM-backed start of more than four logical bytes

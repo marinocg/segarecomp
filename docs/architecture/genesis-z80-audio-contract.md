@@ -172,7 +172,7 @@ Two separate quantities are derived at the runnable transition:
   The matching rule: the registered image whose signature equals the computed one is bound. Two epochs with the same
   signature are the same image *by definition*, even when their snapshots differ in carry-over data; if the differing bytes
   were executed code, the RAM-backed guard stops the Z80 with `z80_code_mismatch` (in the materialization pass: the build
-  fails with that typed outcome, the signature being under-determined for the workload).
+  fails with that typed outcome, the signature being under-determined for the workload). **Superseded by sections 16 and 18 (SEG-032-T012/T013):** a displacement or immediate difference is no longer a mismatch, and a structural mismatch is isolated as a permanently faulted Z80 sound subsystem with Genesis audio reported as degraded instead of failing the build.
 - **Rejected definitions (T002 negative controls):** the whole 8 KiB RAM (varies with carry-over and fill: five images
   where three suffice); "writes since the last /RESET assertion" (the documented upload sequence asserts `/RESET` after
   the upload, so the set is empty and every image collides); clearing the window only at an epoch (earlier holds' command
