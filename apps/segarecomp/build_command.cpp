@@ -1,6 +1,8 @@
 #include "build_command.hpp"
 
 #include "segarecomp/machine/master_system/cartridge.hpp"
+#include "segarecomp/machine/genesis/frontend.hpp"
+#include "segarecomp/machine/genesis/m68k_copy_alias.hpp"
 #include "segarecomp/machine/genesis/z80_materialization.hpp"
 #include "segarecomp/machine/master_system/emit.hpp"
 #include "segarecomp/rom.hpp"
@@ -14,6 +16,7 @@
 #include <map>
 #include <exception>
 #include <filesystem>
+#include <functional>
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -41,6 +44,7 @@ extern char **environ;
 namespace fs = std::filesystem;
 namespace sms = segarecomp::machine::master_system;
 namespace gz80 = segarecomp::machine::genesis::z80;
+namespace m68k_alias = segarecomp::machine::genesis::m68k_alias;
 
 namespace {
 
@@ -223,7 +227,7 @@ std::string json_escape(const std::string &text) {
 }
 
 // `extra` is a pre-formatted JSON member list (leading comma included) appended after rom_sha256: Master System
-// provenance and the typed diagnostic. Empty for Genesis, so Genesis status.json is unchanged.
+// provenance, the executable-image provenance counts and the typed diagnostic.
 void write_status(const Options &options, const std::string &sha, const std::string &status,
                   const std::string &stage, const std::string &message, const std::string &extra = "") {
   std::ofstream out(options.output / "status.json", std::ios::binary | std::ios::trunc);
@@ -375,8 +379,15 @@ struct GenesisSoundBuild {
   std::uint64_t z80_compiled_units = 0, z80_reused_units = 0;
   std::map<std::string, fs::path> z80_objects;  // unit content hash -> object (reused across iterations)
   std::vector<fs::path> z80_current;            // objects of the most recent preparation
-  std::vector<fs::path> pass_stable;            // pass link set without the Z80 objects
   fs::path pass_executable;
+  // The generated M68K units (SEG-028-T005): compiled by content key so an ADR 0049 alias preparation round recompiles only the
+  // units its re-emission changed (the same reuse as the Z80 units). The key covers the compile flags, the non-unit files of the
+  // shard directory (the shared header and manifest every unit may include) and the unit text.
+  std::string runtime_optimize_flag;              // "-O<n>" from --runtime-optimize, or empty
+  std::map<std::string, fs::path> m68k_objects;   // content key -> object
+  std::vector<fs::path> m68k_pass, m68k_final;    // objects of the current emission: the pass program's and the final program's
+  std::uint64_t m68k_compiled_units = 0, m68k_reused_units = 0;
+  std::vector<fs::path> pass_runtime;             // pass link set without any generated unit (runtime, devices, pass hook)
   std::string failure_detail;
   std::string failure_stage;       // operation of prepare() that failed: emit, unit-compile, pass-link
   std::string failure_diagnostic;  // bounded tail of the failing compiler/link log
@@ -433,6 +444,75 @@ struct GenesisSoundBuild {
     return rc == 0;
   }
 
+  static std::string read_text(const fs::path &path) {
+    std::ifstream in(path, std::ios::binary);
+    std::ostringstream text;
+    if (in) text << in.rdbuf();
+    return text.str();
+  }
+
+  // Plans the compile of the generated M68K units of one emission: fills m68k_pass / m68k_final and returns the jobs of the units
+  // whose content key is not compiled yet (`fresh` receives their keys). units[0] is the main TU (the only one whose main() calls
+  // genesis_runtime_run); the pass program links it with the sound-hook entry, a viewer build's final program with the viewer one.
+  std::vector<CompileJob> plan_m68k(const std::vector<fs::path> &units, const fs::path &shard_dir,
+                                    std::vector<std::pair<std::string, fs::path>> &fresh) {
+    std::error_code ec;
+    std::vector<std::string> shard_include;
+    if (units.size() > 1 || fs::is_directory(shard_dir, ec)) shard_include = {"-I", shard_dir.string()};
+    std::string context;
+    if (fs::is_directory(shard_dir, ec)) {
+      std::vector<fs::path> shared;
+      for (const auto &entry : fs::directory_iterator(shard_dir, ec))
+        if (entry.is_regular_file() && entry.path().extension() != ".c") shared.push_back(entry.path());
+      std::sort(shared.begin(), shared.end());
+      for (const fs::path &file : shared) context += file.filename().string() + '\0' + read_text(file) + '\0';
+    }
+    m68k_pass.clear();
+    m68k_final.clear();
+    std::vector<CompileJob> batch;
+    const auto plan = [&](const fs::path &source, std::vector<std::string> extra, bool in_pass, bool in_final) {
+      extra.push_back(kGeneratedUnitFlag);
+      extra.insert(extra.end(), shard_include.begin(), shard_include.end());
+      if (!runtime_optimize_flag.empty()) extra.push_back(runtime_optimize_flag);  // the last -O wins over the base flags
+      std::string material;
+      for (const auto &arg : extra) material += arg + '\0';
+      material += context + '\0' + read_text(source);
+      const std::string key = segarecomp::sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(material.data()), material.size()));
+      const fs::path object = object_dir / ("m68k-" + key.substr(0, 20) + ".o");
+      const bool pending = std::any_of(fresh.begin(), fresh.end(), [&](const auto &entry) { return entry.first == key; });
+      if (m68k_objects.count(key) != 0 || pending) {
+        ++m68k_reused_units;
+      } else {
+        CompileJob job;
+        job.source = source;
+        job.object = object;
+        job.extra = std::move(extra);
+        batch.push_back(std::move(job));
+        fresh.emplace_back(key, object);
+        ++m68k_compiled_units;
+      }
+      if (in_pass) m68k_pass.push_back(object);
+      if (in_final) m68k_final.push_back(object);
+    };
+    plan(units[0], {"-Dgenesis_runtime_run=genesis_sound_hook_run"}, true, !play);
+    if (play) plan(units[0], {"-Dgenesis_runtime_run=genesis_viewer_hook_run"}, false, true);
+    for (std::size_t i = 1; i < units.size(); ++i) plan(units[i], {"-I", units[0].parent_path().string()}, true, true);
+    return batch;
+  }
+
+  // Removes the M68K objects of superseded emissions (kept-work object directories hold only the final program's objects).
+  void prune_m68k() {
+    std::error_code ec;
+    for (auto it = m68k_objects.begin(); it != m68k_objects.end();) {
+      const bool used = std::find(m68k_pass.begin(), m68k_pass.end(), it->second) != m68k_pass.end() ||
+                        std::find(m68k_final.begin(), m68k_final.end(), it->second) != m68k_final.end();
+      if (used) { ++it; continue; }
+      fs::remove(it->second, ec);
+      fs::remove(it->second.string() + ".log", ec);
+      it = m68k_objects.erase(it);
+    }
+  }
+
   // Emits the registry's Z80 C into a fresh directory, compiles only the units not compiled before, relinks the pass program.
   bool prepare(const gz80::Registry &registry) {
     std::error_code ec;
@@ -479,7 +559,8 @@ struct GenesisSoundBuild {
     for (auto &entry : fresh) z80_objects.emplace(entry.first, entry.second);
     z80_object_bytes = 0;
     for (const fs::path &object : z80_current) z80_object_bytes += fs::file_size(object, ec);
-    std::vector<fs::path> objects = pass_stable;
+    std::vector<fs::path> objects = m68k_pass;
+    objects.insert(objects.end(), pass_runtime.begin(), pass_runtime.end());
     objects.insert(objects.end(), z80_current.begin(), z80_current.end());
     if (!link(pass_executable, objects, false)) { failure_detail = "The native program could not be linked."; failure_stage = "pass-link"; return false; }
     return true;
@@ -499,7 +580,7 @@ class ProcessPassRunner final : public gz80::PassRunner {
   gz80::PassObservation run() override {
     gz80::PassObservation observed;
     std::error_code ec;
-    for (const char *name : {"pass.report", "unknown.ram", "unknown.written"}) fs::remove(build_.pass_dir / name, ec);
+    for (const char *name : {"pass.report", "unknown.ram", "unknown.written", "stop.ram"}) fs::remove(build_.pass_dir / name, ec);
     const Environment environment{{"SEGARECOMP_MATERIALIZE_DIR", build_.pass_dir.string()},
                                   {"SEGARECOMP_MATERIALIZE_FRAMES", std::to_string(gz80::kObservationFrames)}};
     const fs::path pass_log = build_.pass_dir / "pass.log";
@@ -550,6 +631,12 @@ class ProcessPassRunner final : public gz80::PassRunner {
       std::copy(written->begin(), written->end(), snapshot.written.begin());
       observed.unknown = snapshot;
     }
+    if (observed.outcome == gz80::PassOutcome::guest_stop) {
+      // SEG-028-T005: the private M68K stop record (absent or malformed: the alias preparation reports tool_failure).
+      if (const auto record = read_exact(build_.pass_dir / "stop.ram", m68k_alias::kStopRecordBytes))
+        observed.guest_stop = m68k_alias::parse_stop_record(*record);
+      fs::remove(build_.pass_dir / "stop.ram", ec);
+    }
     return observed;
   }
 
@@ -557,9 +644,92 @@ class ProcessPassRunner final : public gz80::PassRunner {
   GenesisSoundBuild &build_;
 };
 
+// The Genesis M68K side of one build: the image and its reset analysis, and where the generated M68K C is emitted.
+struct GenesisM68kRoute {
+  const std::vector<std::uint8_t> *rom = nullptr;
+  const segarecomp::GenesisResetImageReport *reset = nullptr;
+  fs::path source;     // generated.c (single-file emission)
+  fs::path shard_dir;  // generated/ (sharded emission)
+};
+
+// The existing M68K emit route, in-process (`emit-general-startup-bridge-c --reset-entry --immutable-rom-aot`), plus one
+// `--immutable-copy-alias` per ADR 0049 descriptor. Replaces the previous emission; fills `units` from the emitted manifest. False:
+// the emitter rejected the request.
+bool emit_genesis_m68k(const Options &options, Log &log, const std::string &sha, const GenesisM68kRoute &route,
+                       const std::vector<m68k_alias::CopyAlias> &aliases, std::vector<fs::path> &units) {
+  std::error_code ec;
+  fs::remove(route.source, ec);
+  fs::remove_all(route.shard_dir, ec);
+  units.clear();
+  const fs::path hints = options.runtime_dir / "compat" / (sha + ".json");
+  std::vector<std::string> emit_args{"segarecomp", "emit-general-startup-bridge-c", "--rom", options.rom.string(),
+                                     "--reset-entry", "--rom-sha256", sha, "--immutable-rom-aot"};
+  for (const m68k_alias::CopyAlias &alias : aliases) {
+    char text[32];
+    std::snprintf(text, sizeof(text), "%08x:%08x:%08x", static_cast<unsigned>(alias.execution), static_cast<unsigned>(alias.source),
+                  static_cast<unsigned>(alias.length));
+    emit_args.insert(emit_args.end(), {"--immutable-copy-alias", text});
+  }
+  if (fs::is_regular_file(hints, ec)) { emit_args.push_back("--external-hints"); emit_args.push_back(hints.string()); }
+  emit_args.insert(emit_args.end(), {"--generated-c-output", route.source.string(), "--generated-c-shard-dir", route.shard_dir.string()});
+  std::vector<char *> emit_argv;
+  for (auto &arg : emit_args) emit_argv.push_back(arg.data());
+  std::ostringstream captured_out, captured_err;
+  auto *old_out = std::cout.rdbuf(captured_out.rdbuf());
+  auto *old_err = std::cerr.rdbuf(captured_err.rdbuf());
+  const int emit_rc = run_cli(static_cast<int>(emit_argv.size()), emit_argv.data());
+  std::cout.rdbuf(old_out);
+  std::cerr.rdbuf(old_err);
+  log.line(captured_out.str().substr(0, 4096));
+  log.line(captured_err.str());
+  if (emit_rc != 0) {
+    fs::remove(route.source, ec);
+    fs::remove_all(route.shard_dir, ec);
+    return false;
+  }
+  const fs::path manifest = route.shard_dir / "bridge_generated.units";
+  if (fs::is_regular_file(manifest, ec)) {
+    std::ifstream in(manifest);
+    for (std::string line; std::getline(in, line);)
+      if (!line.empty()) units.push_back(route.shard_dir / line);
+  } else if (fs::is_regular_file(route.source, ec)) {
+    units.push_back(route.source);
+  }
+  return true;
+}
+
+bool units_complete(const std::vector<fs::path> &units) {
+  return !units.empty() && std::all_of(units.begin(), units.end(), [](const fs::path &p) { return fs::is_regular_file(p); });
+}
+
+// Sanitized provenance JSON of the M68K executable images of the program built with `aliases` (counts only). nullopt: the program
+// or one descriptor is not accepted.
+std::optional<std::string> genesis_m68k_images_json(const GenesisM68kRoute &route, const std::vector<m68k_alias::CopyAlias> &aliases) {
+  auto program = segarecomp::make_genesis_reset_bridge_startup_program(*route.rom, *route.reset, std::nullopt);
+  if (!program || !segarecomp::apply_genesis_immutable_rom_aot(*program)) return std::nullopt;
+  for (const m68k_alias::CopyAlias &alias : aliases)
+    if (!segarecomp::apply_genesis_immutable_copy_alias(*program, alias.execution, alias.source, alias.length)) return std::nullopt;
+  const auto images = segarecomp::genesis_m68k_executable_images(*program);
+  if (!images) return std::nullopt;
+  return segarecomp::format_image_provenance_json(segarecomp::count_image_provenance(images->set));
+}
+
+std::string alias_preparation_json(const m68k_alias::Summary &prep) {
+  return "{\"rounds\":" + std::to_string(prep.rounds) + ",\"aliases\":" + std::to_string(prep.aliases.size()) + ",\"alias_bytes\":" +
+         std::to_string(prep.alias_bytes()) + ",\"termination\":\"" + m68k_alias::termination_name(prep.termination) + "\"}";
+}
+
 // Builds the Genesis program. Returns 0 and fills `executable`, or the process exit code after recording the failure.
-int build_genesis_program(Options &options, Log &log, const std::string &sha, const std::vector<fs::path> &units,
-                          const fs::path &shard_dir, fs::path &executable, std::string &status_extra, bool &sound_degraded) {
+// `units` is the generate stage's (alias-less) M68K emission; `m68k_images` the sanitized provenance JSON of its executable images.
+//
+// SEG-028-T005 (ADR 0077, ADR 0049, ADR 0076): after the Z80 fixed point converges, the build-time ADR 0049 alias preparation runs.
+// When the confirmed run ended with an M68K guest stop that a verbatim cartridge copy in work RAM explains, the M68K C is re-emitted
+// with the merged immutable-copy aliases, only the changed M68K units are recompiled, the pass program is relinked and the fixed
+// point runs again (the Z80 registry is kept: its images are activation-keyed facts already proven by an observed run, and the new
+// fixed point re-confirms the program it builds), at most m68k_alias::kMaxRounds times. The final program links the last round's
+// M68K units; the last fixed point is its confirming run. Without such a stop no extra round runs and nothing changes.
+int build_genesis_program(Options &options, Log &log, const std::string &sha, const GenesisM68kRoute &route, std::vector<fs::path> units,
+                          std::string m68k_images, fs::path &executable, std::string &status_extra, bool &sound_degraded) {
   std::error_code ec;
   fs::path platform_dir = options.runtime_dir;
   if (!platform_dir.has_filename()) platform_dir = platform_dir.parent_path();  // tolerate a trailing separator
@@ -578,6 +748,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   build.jobs = options.jobs != 0 ? options.jobs : std::min(8U, std::max(1U, std::thread::hardware_concurrency()));
   log.line("# compile jobs: " + std::to_string(build.jobs));
   resolve_cxx(options);
+  if (!options.runtime_optimize.empty()) build.runtime_optimize_flag = "-O" + options.runtime_optimize;
 
   const std::string opt = "-O" + options.optimize;
   build.c_base = {options.cc};
@@ -590,7 +761,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   build.cxx_base.insert(build.cxx_base.end(), options.cxx_args.begin(), options.cxx_args.end());
   build.cxx_base.insert(build.cxx_base.end(), {"-std=c++14", "-fno-exceptions", "-fno-rtti", opt, "-I", (build.ym / "include").string()});
 
-  // ---- the stable compile set (compiled once) ----
+  // ---- the stable compile set (compiled once) and the generated M68K units of the generate stage's emission ----
   const fs::path vendor = build.ym / "third_party" / "ymfm";
   std::vector<CompileJob> stable;
   std::vector<fs::path> common, final_only, pass_only;
@@ -600,27 +771,11 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     job.source = source;
     job.object = build.object_dir / (name + ".o");
     job.extra = std::move(extra);
-    if (!options.runtime_optimize.empty()) job.extra.push_back("-O" + options.runtime_optimize);  // the last -O wins over the base flags
+    if (!build.runtime_optimize_flag.empty()) job.extra.push_back(build.runtime_optimize_flag);  // the last -O wins over the base flags
     job.cxx = cxx;
     stable.push_back(job);
     set.push_back(job.object);
   };
-  std::vector<std::string> shard_include;
-  if (units.size() > 1 || fs::is_directory(shard_dir, ec)) shard_include = {"-I", shard_dir.string()};
-  const auto with_shard = [&](std::vector<std::string> extra) {
-    extra.push_back(kGeneratedUnitFlag);
-    extra.insert(extra.end(), shard_include.begin(), shard_include.end());
-    return extra;
-  };
-  // units[0] is the main TU (the only one whose main() calls genesis_runtime_run).
-  const std::string sound_macro = "-Dgenesis_runtime_run=genesis_sound_hook_run";
-  std::vector<fs::path> main_pass, main_final;
-  add(main_pass, units[0], "m68k-main", with_shard({sound_macro}));
-  main_final = main_pass;
-  if (build.play) add(main_final, units[0], "m68k-main-viewer", with_shard({"-Dgenesis_runtime_run=genesis_viewer_hook_run"}));
-  if (build.play) main_final = {main_final.back()};
-  for (std::size_t i = 1; i < units.size(); ++i)
-    add(common, units[i], "m68k-" + std::to_string(i), with_shard({"-I", units[0].parent_path().string()}));
   for (const char *name : {"runtime.c", "z80_machine.c", "genesis_audio.c", "genesis_mixer.c", "genesis_audio_present.c", "genesis_sound.c"})
     add(common, build.runtime / name, std::string("rt-") + std::string(name).substr(0, std::string(name).size() - 2));
   add(common, build.psg / "src" / "sn76489.c", "psg");
@@ -640,41 +795,101 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   for (const auto &job : stable)
     if (!fs::is_regular_file(job.source, ec))
       return fail(options, log, sha, "compile", 2, "The Segarecomp runtime files are missing: " + job.source.string());
-
-  if (build.compile(stable) >= 0) return fail(options, log, sha, "compile", 3, build.failure_detail);
+  std::vector<std::pair<std::string, fs::path>> fresh;
+  std::vector<CompileJob> first = build.plan_m68k(units, route.shard_dir, fresh);
+  first.insert(first.end(), stable.begin(), stable.end());  // one batch: the generated units first, as before
+  if (build.compile(first) >= 0) return fail(options, log, sha, "compile", 3, build.failure_detail);
+  for (auto &entry : fresh) build.m68k_objects.emplace(entry.first, entry.second);
 
   // ---- build-time Z80 image materialization (fixed point) ----
   stage("z80-materialize", "begin");
-  build.pass_stable = main_pass;
-  build.pass_stable.insert(build.pass_stable.end(), common.begin(), common.end());
-  build.pass_stable.insert(build.pass_stable.end(), pass_only.begin(), pass_only.end());
+  build.pass_runtime = common;
+  build.pass_runtime.insert(build.pass_runtime.end(), pass_only.begin(), pass_only.end());
   build.pass_executable = build.object_dir / "materialize-pass";
   gz80::Registry registry;
   ProcessPassRunner runner(build);
-  const auto started = Clock::now();
-  const gz80::MaterializationSummary summary = gz80::materialize(registry, runner);
-  const std::uint64_t materialize_ms = millis_since(started);
-  log.line("z80 materialization: outcome=" + std::string(gz80::failure_name(summary.failure)) + " images=" +
-           std::to_string(registry.images().size()) + " discovery_runs=" + std::to_string(summary.discovery_runs) + " runs=" +
-           std::to_string(summary.total_runs) + " ms=" + std::to_string(materialize_ms));
-  if (!summary.ok()) {
-    const std::string extra = ",\"z80\":{\"outcome\":\"" + std::string(gz80::failure_name(summary.failure)) + "\",\"images\":" +
-                              std::to_string(registry.images().size()) + ",\"discovery_runs\":" + std::to_string(summary.discovery_runs) +
-                              ",\"runs\":" + std::to_string(summary.total_runs) + "}";
-    const bool compile_failed = summary.failure == gz80::Failure::z80_image_compile_failed;
-    const std::string operation = compile_failed && !summary.prepare_failure.stage.empty() ? " stage=" + summary.prepare_failure.stage : "";
-    log.line("FAILED (z80-materialize): " + std::string(gz80::failure_name(summary.failure)) + operation);
-    if (compile_failed) log.line("z80 prepare failure: stage=" + summary.prepare_failure.stage + " detail=" + summary.prepare_failure.detail);
+  std::uint64_t materialize_ms = 0;
+  const auto fixed_point = [&] {
+    const auto started = Clock::now();
+    gz80::MaterializationSummary result = gz80::materialize(registry, runner);
+    const std::uint64_t ms = millis_since(started);
+    materialize_ms += ms;
+    log.line("z80 materialization: outcome=" + std::string(gz80::failure_name(result.failure)) + " images=" +
+             std::to_string(registry.images().size()) + " discovery_runs=" + std::to_string(result.discovery_runs) + " runs=" +
+             std::to_string(result.total_runs) + " ms=" + std::to_string(ms) +
+             (result.ok() ? " end=" + std::string(gz80::pass_outcome_name(result.end)) : std::string()));
+    return result;
+  };
+  // A failed fixed point (of the generate stage's program or of an alias preparation round): typed z80-materialize failure.
+  const auto materialize_failed = [&](const gz80::MaterializationSummary &failed, const std::string &prep_extra) {
+    const std::string extra = ",\"z80\":{\"outcome\":\"" + std::string(gz80::failure_name(failed.failure)) + "\",\"images\":" +
+                              std::to_string(registry.images().size()) + ",\"discovery_runs\":" + std::to_string(failed.discovery_runs) +
+                              ",\"runs\":" + std::to_string(failed.total_runs) + "}" + prep_extra;
+    const bool compile_failed = failed.failure == gz80::Failure::z80_image_compile_failed;
+    const std::string operation = compile_failed && !failed.prepare_failure.stage.empty() ? " stage=" + failed.prepare_failure.stage : "";
+    log.line("FAILED (z80-materialize): " + std::string(gz80::failure_name(failed.failure)) + operation);
+    if (compile_failed) log.line("z80 prepare failure: stage=" + failed.prepare_failure.stage + " detail=" + failed.prepare_failure.detail);
     write_status(options, sha, "failed", "z80-materialize",
-                 compile_failed ? build.failure_detail + (operation.empty() ? "" : " (" + summary.prepare_failure.stage + ")") : "The Z80 sound program could not be materialized.",
-                 extra + ",\"diagnostic\":\"" + gz80::failure_name(summary.failure) + "\"");
-    std::cout << "@result failed stage=z80-materialize message=" << gz80::failure_name(summary.failure) << operation << std::endl;
+                 compile_failed ? build.failure_detail + (operation.empty() ? "" : " (" + failed.prepare_failure.stage + ")") : "The Z80 sound program could not be materialized.",
+                 extra + ",\"diagnostic\":\"" + gz80::failure_name(failed.failure) + "\"");
+    std::cout << "@result failed stage=z80-materialize message=" << gz80::failure_name(failed.failure) << operation << std::endl;
     return 4;
-  }
+  };
+  gz80::MaterializationSummary summary = fixed_point();
+  if (!summary.ok()) return materialize_failed(summary, "");
   stage("z80-materialize", "done");
 
+  // ---- build-time ADR 0049 alias preparation (SEG-028-T005) ----
+  stage("m68k-alias-prepare", "begin");
+  const auto observe = [](const gz80::MaterializationSummary &converged) {
+    m68k_alias::RoundObservation observed;
+    observed.guest_stop = converged.end == gz80::PassOutcome::guest_stop;
+    observed.record = converged.guest_stop;
+    return observed;
+  };
+  class Rounds final : public m68k_alias::RoundRunner {
+   public:
+    std::function<m68k_alias::RoundObservation(const std::vector<m68k_alias::CopyAlias> &, bool &)> body;
+    m68k_alias::RoundObservation run_round(const std::vector<m68k_alias::CopyAlias> &aliases, bool &abort) override { return body(aliases, abort); }
+  } rounds;
+  rounds.body = [&](const std::vector<m68k_alias::CopyAlias> &aliases, bool &abort) {
+    m68k_alias::RoundObservation observed;
+    log.line("m68k alias preparation round: aliases=" + std::to_string(aliases.size()));
+    if (!emit_genesis_m68k(options, log, sha, route, aliases, units) || !units_complete(units)) { observed.tool_failure = true; return observed; }
+    std::vector<std::pair<std::string, fs::path>> changed;
+    const std::vector<CompileJob> batch = build.plan_m68k(units, route.shard_dir, changed);
+    if (!batch.empty() && build.compile(batch) >= 0) { observed.tool_failure = true; return observed; }
+    for (auto &entry : changed) build.m68k_objects.emplace(entry.first, entry.second);
+    gz80::MaterializationSummary next = fixed_point();
+    if (!next.ok()) { summary = std::move(next); abort = true; return observed; }
+    summary = std::move(next);
+    return observe(summary);
+  };
+  const m68k_alias::Summary prep = m68k_alias::prepare(*route.rom, observe(summary), rounds);
+  const std::string prep_json = alias_preparation_json(prep);
+  const std::string prep_extra = ",\"m68k_alias_preparation\":" + prep_json;
+  log.line("m68k alias preparation: rounds=" + std::to_string(prep.rounds) + " aliases=" + std::to_string(prep.aliases.size()) +
+           " alias_bytes=" + std::to_string(prep.alias_bytes()) + " termination=" + m68k_alias::termination_name(prep.termination) +
+           (prep.aborted ? " (round fixed point failed)" : ""));
+  if (prep.aborted) return materialize_failed(summary, prep_extra);
+  std::optional<std::string> alias_images;
+  if (!m68k_alias::incomplete(prep.termination) && !prep.aliases.empty()) {
+    alias_images = genesis_m68k_images_json(route, prep.aliases);
+    if (!alias_images) log.line("m68k alias preparation: the accepted aliases do not form a valid executable-image set");
+  }
+  if (m68k_alias::incomplete(prep.termination) || (!prep.aliases.empty() && !alias_images)) {
+    log.line("FAILED (m68k-alias-prepare): alias_preparation_incomplete");
+    write_status(options, sha, "failed", "m68k-alias-prepare", "The work-RAM code of this game could not be prepared.",
+                 prep_extra + ",\"diagnostic\":\"alias_preparation_incomplete\"");
+    std::cout << "@result failed stage=m68k-alias-prepare message=alias_preparation_incomplete" << std::endl;
+    return 5;
+  }
+  if (alias_images) m68k_images = *alias_images;
+  build.prune_m68k();
+  stage("m68k-alias-prepare", "done");
+
   // ---- link the final program: the same generated units and registry, the production hook ----
-  std::vector<fs::path> objects = main_final;
+  std::vector<fs::path> objects = build.m68k_final;
   objects.insert(objects.end(), common.begin(), common.end());
   objects.insert(objects.end(), final_only.begin(), final_only.end());
   objects.insert(objects.end(), build.z80_current.begin(), build.z80_current.end());
@@ -703,6 +918,12 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
                  (summary.sound_fault ? ",\"sound_fault_epochs\":" + std::to_string(summary.sound_fault->epochs) +
                                             ",\"sound_fault_frame\":" + std::to_string(summary.sound_fault->master_ticks / (3420U * 262U /* NTSC master ticks per frame */))
                                       : std::string()) + "}";
+  status_extra += prep_extra;  // SEG-028-T005: sanitized aggregates of the alias preparation (counts and the termination only)
+  // SEG-028 (ADR 0077): the producer boundary, recorded as sanitized provenance counts only (no address, byte or hash).
+  const std::string images = "{\"m68k\":" + m68k_images + ",\"z80\":" +
+                             segarecomp::format_image_provenance_json(segarecomp::count_image_provenance(gz80::executable_images(registry))) + "}";
+  log.line("executable_images: " + images);
+  status_extra += ",\"executable_images\":" + images;
   sound_degraded = summary.sound_fault.has_value();
   return 0;
 }
@@ -720,6 +941,9 @@ int segarecomp_build_command(int argc, char **argv) {
   log.file.open(options.output / "build.log", std::ios::binary | std::ios::trunc);
   std::string sha;
   std::string sms_provenance;  // status.json members recording the SMS identity (empty for Genesis)
+  std::string sms_images;      // SMS: the status.json executable_images member
+  std::string m68k_images;     // Genesis: sanitized provenance JSON of the M68K executable images
+  std::optional<segarecomp::GenesisResetImageReport> genesis_reset;  // Genesis: the accepted reset analysis
   try {
     // ---- analyze ----
     stage("analyze", "begin");
@@ -777,11 +1001,19 @@ int segarecomp_build_command(int argc, char **argv) {
     } else {
       if (!options.mapper.empty() || options.mapper_manifest)
         return fail(options, log, sha, "analyze", 1, "A mapper declaration applies only to Master System images.", "MAPPER_NOT_APPLICABLE");
-      const auto reset = segarecomp::analyze_genesis_reset_image(bytes);
+      genesis_reset = segarecomp::analyze_genesis_reset_image(bytes);
+      const auto &reset = *genesis_reset;
       if (reset.outcome != segarecomp::ResetOutcome::accepted) {
         log.line(std::string("analyze diagnostic: ") + segarecomp::reset_diagnostic_name(reset.diagnostic));
         return fail(options, log, sha, "analyze", 1, "This file is not a supported Genesis / Mega Drive ROM.");
       }
+      // The M68K executable images of the program the generate stage builds (--reset-entry --immutable-rom-aot, no aliases).
+      auto program = segarecomp::make_genesis_reset_bridge_startup_program(bytes, reset, std::nullopt);
+      if (!program || !segarecomp::apply_genesis_immutable_rom_aot(*program))
+        return fail(options, log, sha, "analyze", 1, "This file is not a supported Genesis / Mega Drive ROM.");
+      const auto images = segarecomp::genesis_m68k_executable_images(*program);
+      if (!images) return fail(options, log, sha, "analyze", 1, "This file is not a supported Genesis / Mega Drive ROM.");
+      m68k_images = segarecomp::format_image_provenance_json(segarecomp::count_image_provenance(images->set));
     }
     stage("analyze", "done");
 
@@ -807,43 +1039,20 @@ int segarecomp_build_command(int argc, char **argv) {
       }
       log.line("emitted units=" + std::to_string(outcome.stats.translation_units) + " full_owners=" +
                std::to_string(outcome.stats.full_owners));
+      // SEG-028 (ADR 0077): sanitized executable-image provenance counts only (no address, byte or hash).
+      const std::string images = "{\"z80\":" + segarecomp::format_image_provenance_json(outcome.provenance) + "}";
+      log.line("executable_images: " + images);
+      sms_images = ",\"executable_images\":" + images;
       std::ifstream in(shard_dir / "sms.units");
       for (std::string line; std::getline(in, line);)
         if (!line.empty()) units.push_back(shard_dir / line);
     } else {
-      fs::path hints = options.runtime_dir / "compat" / (sha + ".json");
-      std::vector<std::string> emit_args{"segarecomp", "emit-general-startup-bridge-c", "--rom", options.rom.string(),
-                                         "--reset-entry", "--rom-sha256", sha, "--immutable-rom-aot"};
-      if (fs::is_regular_file(hints, ec)) { emit_args.push_back("--external-hints"); emit_args.push_back(hints.string()); }
-      emit_args.insert(emit_args.end(), {"--generated-c-output", source.string(), "--generated-c-shard-dir",
-                                         shard_dir.string()});
-      std::vector<char *> emit_argv;
-      for (auto &arg : emit_args) emit_argv.push_back(arg.data());
-      std::ostringstream captured_out, captured_err;
-      auto *old_out = std::cout.rdbuf(captured_out.rdbuf());
-      auto *old_err = std::cerr.rdbuf(captured_err.rdbuf());
-      const int emit_rc = run_cli(static_cast<int>(emit_argv.size()), emit_argv.data());
-      std::cout.rdbuf(old_out);
-      std::cerr.rdbuf(old_err);
-      log.line(captured_out.str().substr(0, 4096));
-      log.line(captured_err.str());
-      if (emit_rc != 0) {
-        fs::remove(source, ec);
-        fs::remove_all(shard_dir, ec);
+      // The existing emit route, in-process; no ADR 0049 alias yet (the build-time preparation adds them, SEG-028-T005).
+      if (!emit_genesis_m68k(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, {}, units))
         return fail(options, log, sha, "generate", 1,
                     "Segarecomp could not translate this game yet (compatibility is experimental).");
-      }
-      const fs::path manifest = shard_dir / "bridge_generated.units";
-      if (fs::is_regular_file(manifest, ec)) {
-        std::ifstream in(manifest);
-        for (std::string line; std::getline(in, line);)
-          if (!line.empty()) units.push_back(shard_dir / line);
-      } else if (fs::is_regular_file(source, ec)) {
-        units.push_back(source);
-      }
     }
-    if (units.empty() || !std::all_of(units.begin(), units.end(), [](const fs::path &p) { return fs::is_regular_file(p); }))
-      return fail(options, log, sha, "generate", 1, "Generated code is incomplete.");
+    if (!units_complete(units)) return fail(options, log, sha, "generate", 1, "Generated code is incomplete.");
     stage("generate", "done");
 
     // ---- compile ----
@@ -853,7 +1062,8 @@ int segarecomp_build_command(int argc, char **argv) {
       fs::path executable;
       std::string status_extra;
       bool sound_degraded = false;
-      const int rc = build_genesis_program(options, log, sha, units, shard_dir, executable, status_extra, sound_degraded);
+      const int rc = build_genesis_program(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, units,
+                                           m68k_images, executable, status_extra, sound_degraded);
       if (rc != 0) return rc;
       if (!options.keep_work) fs::remove_all(options.output / "obj", ec);
       stage("link", "done");
@@ -949,7 +1159,7 @@ int segarecomp_build_command(int argc, char **argv) {
     if (link_rc != 0) return fail(options, log, sha, "link", 3, "The native program could not be linked.");
     fs::remove_all(object_dir, ec);
     stage("link", "done");
-    write_status(options, sha, "ok", "done", "", sms_provenance);
+    write_status(options, sha, "ok", "done", "", sms_provenance + sms_images);
     std::cout << "@result ok executable=" << executable.string() << std::endl;
     return 0;
   } catch (const std::exception &error) {

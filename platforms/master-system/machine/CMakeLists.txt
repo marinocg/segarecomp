@@ -7,6 +7,6 @@ add_library(segarecomp_machine_master_system
 )
 add_library(segarecomp::machine_master_system ALIAS segarecomp_machine_master_system)
 target_link_libraries(segarecomp_machine_master_system PUBLIC
-  segarecomp::media segarecomp::codegen_c11_z80 segarecomp::runtime_master_system)
+  segarecomp::media segarecomp::codegen_c11_z80 segarecomp::codegen_c11_z80_image segarecomp::runtime_master_system)
 target_include_directories(segarecomp_machine_master_system PUBLIC include)
 segarecomp_enable_warnings(segarecomp_machine_master_system)

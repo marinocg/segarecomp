@@ -1077,6 +1077,30 @@ set_property(TEST genesis_z80_materialization_test APPEND PROPERTY LABELS full f
 add_test(NAME genesis_z80_forbidden_identifiers_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_forbidden_identifiers_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST genesis_z80_forbidden_identifiers_test APPEND PROPERTY LABELS full fast)
+# SEG-028 (ADR 0077): the CPU-neutral executable-image artifact, its Z80 projection/equivalence, the Genesis M68K producer, and the
+# mutation/replacement harness. Synthetic fixtures only.
+add_executable(executable_image_test executable_image_test.cpp)
+target_link_libraries(executable_image_test PRIVATE segarecomp::recompiler)
+segarecomp_enable_warnings(executable_image_test)
+add_test(NAME executable_image_test COMMAND executable_image_test)
+add_test(NAME executable_image_forbidden_identifiers_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/executable_image_forbidden_identifiers_test.py ${PROJECT_SOURCE_DIR})
+add_executable(z80_executable_image_equivalence_test z80_executable_image_equivalence_test.cpp)
+target_link_libraries(z80_executable_image_equivalence_test PRIVATE segarecomp::machine_master_system segarecomp::machine_genesis_z80)
+segarecomp_enable_warnings(z80_executable_image_equivalence_test)
+add_test(NAME z80_executable_image_equivalence_test COMMAND z80_executable_image_equivalence_test)
+add_executable(genesis_m68k_executable_image_test genesis_m68k_executable_image_test.cpp)
+target_link_libraries(genesis_m68k_executable_image_test PRIVATE segarecomp::machine_genesis)
+segarecomp_enable_warnings(genesis_m68k_executable_image_test)
+add_test(NAME genesis_m68k_executable_image_test COMMAND genesis_m68k_executable_image_test)
+add_executable(executable_image_mutation_test executable_image_mutation_test.cpp)
+target_link_libraries(executable_image_mutation_test PRIVATE
+  segarecomp::machine_master_system segarecomp::machine_genesis_z80 segarecomp::machine_genesis)
+segarecomp_enable_warnings(executable_image_mutation_test)
+add_test(NAME executable_image_mutation_test COMMAND executable_image_mutation_test)
+set_property(TEST executable_image_test executable_image_forbidden_identifiers_test z80_executable_image_equivalence_test
+  genesis_m68k_executable_image_test executable_image_mutation_test APPEND PROPERTY LABELS full fast)
+set_property(TEST executable_image_forbidden_identifiers_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # The real consumer route end to end (fixed point, link, run, falsification): the slowest Genesis Z80 test, `full` only.
 # CI wall-clock: one CTest entry per independent case group of the script (see its docstring); the union is the whole matrix.
 add_test(NAME genesis_z80_build_pipeline_test COMMAND ${Python3_EXECUTABLE}
@@ -1471,6 +1495,22 @@ endif()
 # z80_owner_group_differential_test finished 21 s before the default limit, so give the long compile-bound tests real headroom.
 set_property(TEST ${_z80_group_slices} sms_native_build_test sms_native_build_policy_test sms_owner_group_equivalence_test
   sms_owner_group_equivalence_vdp_test sms_owner_group_equivalence_render_test PROPERTY TIMEOUT 3600)
+
+# SEG-028-T005 (ADR 0077, ADR 0049, ADR 0076): the consumer-route ADR 0049 alias preparation of `segarecomp build`. The library
+# (stop record, derivation, merge, bounded loop with every termination), its parity with tools/genesis_startup_bridge.py on synthetic
+# inputs, and the real build route on project-authored ROMs (one alias; a computed, non-verbatim RAM routine stays fail-closed).
+add_executable(genesis_m68k_copy_alias_test genesis_m68k_copy_alias_test.cpp)
+target_link_libraries(genesis_m68k_copy_alias_test PRIVATE segarecomp::machine_genesis_copy_alias)
+segarecomp_enable_warnings(genesis_m68k_copy_alias_test)
+add_test(NAME genesis_m68k_copy_alias_test COMMAND genesis_m68k_copy_alias_test)
+add_test(NAME genesis_m68k_copy_alias_parity_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_m68k_copy_alias_parity_test.py $<TARGET_FILE:genesis_m68k_copy_alias_test> ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_m68k_copy_alias_test genesis_m68k_copy_alias_parity_test APPEND PROPERTY LABELS full fast)
+add_test(NAME genesis_m68k_alias_build_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_m68k_alias_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_m68k_alias_build_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_m68k_alias_build_test PROPERTY TIMEOUT 1800)
+set_property(TEST genesis_m68k_alias_build_test genesis_m68k_copy_alias_parity_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
 # CI sharding (see ci_shards.cmake, which also registers its guard test): must come after the LAST add_test and label assignment so
 # every tier test is partitioned.

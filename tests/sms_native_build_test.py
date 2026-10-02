@@ -19,6 +19,7 @@ import hashlib
 import os
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -116,6 +117,16 @@ def main():
             check("platform=master-system" in log and "mapper=sega" in log and "mapper_declaration_source=build_option" in log and
                   "profile=sms2_ntsc_export" in log and "rom_sha256=" + digest in log, "build.log provenance")
             check(not (out / "obj").exists(), "intermediate objects must be removed")
+            # SEG-028 (ADR 0077): sanitized executable-image provenance -- authority and producer counts only
+            images = st.get("executable_images", {})
+            z80 = images.get("z80", {})
+            check(list(images) == ["z80"] and z80.get("images", 0) >= 1 and z80.get("images") == sum(z80.get("authority", {}).values())
+                  and z80.get("images") == sum(z80.get("producers", {}).values()) and z80["authority"].get("immutable_input") == z80["images"],
+                  "status.json executable_images: %s" % images)
+            compact = json.dumps(images, separators=(",", ":"))  # key order is the emitted order
+            check(('"executable_images":' + compact) in (out / "status.json").read_text() and ("executable_images: " + compact) in log,
+                  "build.log records the same executable_images JSON")
+            check(not re.search(r"0x|[0-9a-fA-F]{8,}", compact), "executable_images carries no address or hash")
             exe = out / ("game.exe" if sys.platform == "win32" else "game")
             check(exe.is_file(), "no executable")
 
@@ -142,6 +153,8 @@ def main():
             check(r.returncode == 0, "manifest build failed: %s" % (r.stdout + r.stderr)[-400:])
             if r.returncode == 0:
                 check(status(out2).get("mapper_source") == "fixture_builder", "manifest source not recorded: %s" % status(out2))
+                check(status(out2).get("executable_images") == status(out).get("executable_images"),
+                      "executable_images is identical across independent builds of the same image")
 
         if "policy" in GROUPS:
             # ---- SEG-033-T004 production compile policy: one optimization level for every unit (-O2 by default), bounded jobs ----

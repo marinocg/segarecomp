@@ -107,13 +107,16 @@ MaterializationSummary materialize(Registry& registry, PassRunner& runner) {
                     : terminal_failure(confirmed.outcome));
   }
   if (confirmed.outcome != candidate.outcome || confirmed.epochs != candidate.epochs || confirmed.frames != candidate.frames ||
-      confirmed.sound_fault != candidate.sound_fault)
+      confirmed.sound_fault != candidate.sound_fault || confirmed.guest_stop.has_value() != candidate.guest_stop.has_value() ||
+      (confirmed.guest_stop && (confirmed.guest_stop->pc != candidate.guest_stop->pc ||
+                                confirmed.guest_stop->stop_class != candidate.guest_stop->stop_class)))
     return fail(Failure::materialization_nondeterministic);
   summary.images = registry.images().size();
   summary.epochs = confirmed.epochs.size();
   summary.frames = confirmed.frames;
   summary.end = confirmed.outcome;
   summary.sound_fault = confirmed.sound_fault;
+  summary.guest_stop = confirmed.guest_stop;
   return summary;
 }
 

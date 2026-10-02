@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "segarecomp/codegen/c11/z80_executable_image.hpp"
 #include "segarecomp/machine/master_system/image_set.hpp"
 
 namespace segarecomp::machine::master_system {
@@ -65,7 +66,16 @@ EmitOutcome emit_cartridge(std::span<const std::uint8_t> rom, const IngestOption
   codegen::z80::EmitOptions codegen = request.codegen;
   codegen.directory = request.directory;
   codegen.stem = request.stem;
-  const codegen::z80::EmitResult emitted = codegen::z80::emit_image_set(build_image_set(cartridge), codegen);
+  // SEG-028 (ADR 0077): the producer's executable images, projected onto the emitter input; the provenance counts reported by the
+  // build come from exactly these images.
+  const ExecutableImageSet images = executable_images(cartridge);
+  const codegen::z80::ImageProjection projected = codegen::z80::project_executable_images(images, image_kinds(images));
+  if (!projected.ok()) {
+    outcome.error = "executable image projection: " + projected.error;
+    return outcome;
+  }
+  outcome.provenance = count_image_provenance(images);
+  const codegen::z80::EmitResult emitted = codegen::z80::emit_image_set(projected.set, codegen);
   if (!emitted.error.empty()) {
     outcome.error = emitted.error;
     return outcome;

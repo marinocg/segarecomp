@@ -5,6 +5,7 @@
 // legacy report compatibility. MC68000 discovery consumes this policy only
 // through M68kStaticDiscoveryEnvironment; it never includes this header.
 
+#include "segarecomp/recompiler/executable_image.hpp"
 #include "segarecomp/cpu/m68k/static_program.hpp"
 #include "segarecomp/device/sega/genesis/controller_io.hpp"
 #include "segarecomp/machine/genesis/address_types.hpp"
@@ -345,6 +346,21 @@ void apply_genesis_code_pointer_table_descriptors(FrontendProgram &program);
 // as an exact duplicate.
 [[nodiscard]] bool apply_genesis_immutable_copy_alias(FrontendProgram &program, std::uint32_t execution_base,
                                                       std::uint32_t source_base, std::uint32_t length);
+
+// SEG-028-T004 (ADR 0077): the Genesis M68K executable-image producer. One `immutable_input` image (producer `genesis.cartridge`,
+// verification `none`) per structurally valid `raw_cartridge_rom` claim, in claim order, owning the claim's bytes and mapped at the
+// claim's program base; then one `static_proof` image (producer `genesis.copy_alias`, verification `byte_identity`) per ADR 0049
+// descriptor, in descriptor order, whose bytes are a source reference into the owning cartridge image (producer evidence: a verbatim
+// source-image copy) and whose single mapping is the work-RAM execution base. `claim_index[i]` is the index in `program.mapping_claims`
+// of image i's cartridge claim (an alias image: its source claim). Returns nullopt when a descriptor is not owned by exactly one
+// structurally valid raw cartridge claim inside the image, leaves the work-RAM window, or the set does not validate -- the same
+// fail-closed conditions the alias identities have always enforced. Work-RAM selection, cartridge mirroring and the guard stay here and
+// in the emitter; nothing Genesis-specific enters the generic artifact.
+struct GenesisM68kExecutableImages {
+  ExecutableImageSet set;
+  std::vector<std::size_t> claim_index;
+};
+[[nodiscard]] std::optional<GenesisM68kExecutableImages> genesis_m68k_executable_images(const FrontendProgram &program);
 
 // SEG-007-T204 / ADR-0033 (re-homed by the 2026-09-11 operator correction):
 // promotes zero or more `external_address_table_candidates` into ordinary

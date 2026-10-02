@@ -154,6 +154,20 @@ def main():
             check(len({json.dumps(stable(results[n][1]), sort_keys=True) for n in digests}) == 1, "aggregates (images, epochs, runs, sizes) are identical across builds")
             check(len({tree_digest(tmp / n / "generated") for n in digests}) == 1, "the generated M68K C is byte-identical across builds as well")
 
+            # ---- SEG-028 (ADR 0077): sanitized executable-image provenance, deterministic, counts only ----
+            images = results["multi"][1].get("executable_images", {})
+            m68k, z80 = images.get("m68k", {}), images.get("z80", {})
+            check(list(images) == ["m68k", "z80"] and m68k.get("images", 0) >= 1 and m68k.get("authority", {}).get("immutable_input") == m68k.get("images")
+                  and m68k.get("producers") == {"genesis.cartridge": m68k.get("images")},
+                  "M68K images: the cartridge as immutable input, no alias on the consumer route: %s" % images)
+            check(z80.get("images") == 2 and z80.get("authority", {}).get("bounded_build_time_materialization") == 2 and
+                  z80.get("producers") == {"genesis.z80_materializer": 2}, "Z80 images: the two materialized images: %s" % images)
+            check(results["multi_j1"][1].get("executable_images") == images, "executable_images is identical across independent builds")
+            compact = json.dumps(images, separators=(",", ":"))  # key order is the emitted order
+            check(('"executable_images":' + compact) in (tmp / "multi" / "status.json").read_text() and
+                  ("executable_images: " + compact) in (tmp / "multi" / "build.log").read_text(), "build.log records the same executable_images JSON")
+            check(not re.search(r"0x|[0-9a-fA-F]{8,}", compact), "executable_images carries no address or hash")
+
             # ---- supported-audio status ----
             check(results["multi"][1].get("genesis_audio") == "supported" and "z80_audio_outcome" not in results["multi"][1] and "genesis_audio=degraded" not in results["multi"][0].stdout,
                   "a fully supported title is genesis_audio = supported, never degraded")

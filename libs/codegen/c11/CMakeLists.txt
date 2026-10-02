@@ -29,3 +29,10 @@ add_library(segarecomp_codegen_c11_z80
 add_library(segarecomp::codegen_c11_z80 ALIAS segarecomp_codegen_c11_z80)
 target_link_libraries(segarecomp_codegen_c11_z80 PUBLIC segarecomp::codegen_c11 segarecomp::cpu_z80)
 segarecomp_enable_warnings(segarecomp_codegen_c11_z80)
+
+# SEG-028-T003 (ADR 0077): projection of CPU-neutral executable images onto the Z80 emitter input. A separate target so the Z80 lowering
+# itself keeps depending on codegen_c11 and cpu_z80 only.
+add_library(segarecomp_codegen_c11_z80_image src/z80_executable_image.cpp)
+add_library(segarecomp::codegen_c11_z80_image ALIAS segarecomp_codegen_c11_z80_image)
+target_link_libraries(segarecomp_codegen_c11_z80_image PUBLIC segarecomp::codegen_c11_z80 segarecomp::recompiler)
+segarecomp_enable_warnings(segarecomp_codegen_c11_z80_image)

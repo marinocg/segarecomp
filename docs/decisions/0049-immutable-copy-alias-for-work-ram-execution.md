@@ -97,6 +97,12 @@ and fail closed, exactly as a jump into unknown RAM must.
    Without `--discover-copy-aliases` there is no preparation: no extra execution, no work-RAM dump, no alias search,
    no extra compile round. The emitter re-validates every descriptor (`apply_genesis_immutable_copy_alias` fails
    closed on odd/zero/oversized/wrapping/overlapping/unowned input).
+   - **Consumer route (SEG-028-T005):** `segarecomp build` now runs this preparation phase itself, on the headless
+     build-time materialization pass runner under the ADR 0076 bounded build-time execution rules, with the same
+     derivation, merge, bound and termination vocabulary (C++ port, parity-tested); see ADR 0077 "Consumer-route ADR
+     0049 alias producer". The tooling route above is unchanged. Its capture hook renders every frame, which makes a
+     preparation round on the tooling route much slower than the headless pass; that cost is a property of the
+     tooling route only.
 4. **Static PEA return authority (same generic family, found by the rerun).** A `PEA` with a statically
    foldable effective address (absolute or PC-relative; execution-relative for an alias identity) pushes a fixed
    code address (the classic manual call `PEA next; JMP/BRA callee`). Such an address that is itself a final

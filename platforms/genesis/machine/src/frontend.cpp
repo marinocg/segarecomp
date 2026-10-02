@@ -1922,6 +1922,60 @@ bool apply_genesis_immutable_copy_alias(FrontendProgram &program, std::uint32_t 
   return true;
 }
 
+std::optional<GenesisM68kExecutableImages> genesis_m68k_executable_images(const FrontendProgram &program) {
+  GenesisM68kExecutableImages out;
+  out.set.cpu = CpuVariant::mc68000;
+  std::map<std::size_t, ImageId> cartridge_image;  // claim index -> image
+  for (std::size_t index = 0; index < program.mapping_claims.size(); ++index) {
+    const MappingClaim &claim = program.mapping_claims[index];
+    if (claim.name != "raw_cartridge_rom" || claim.target_begin.space != TargetAddressSpace::m68k_program ||
+        !structurally_valid_mapping_claim(claim) || claim.image_end.value > program.image.bytes.size())
+      continue;
+    ExecutableImage image;
+    image.id = ImageId{static_cast<std::uint32_t>(out.set.images.size() + 1U)};
+    image.bytes.assign(program.image.bytes.begin() + static_cast<std::ptrdiff_t>(claim.image_begin.value),
+                       program.image.bytes.begin() + static_cast<std::ptrdiff_t>(claim.image_end.value));
+    image.mappings.push_back({claim.target_begin.value, 0U, static_cast<std::uint32_t>(claim.image_end.value - claim.image_begin.value)});
+    image.provenance.authority = ImageAuthority::immutable_input;
+    image.provenance.producer = "genesis.cartridge";
+    image.provenance.evidence.push_back({"derivation", "mapping_claim"});
+    image.verification = ImageVerification::none;
+    cartridge_image.emplace(index, image.id);
+    out.set.images.push_back(std::move(image));
+    out.claim_index.push_back(index);
+  }
+  for (const auto &alias : program.immutable_copy_aliases) {
+    const auto owners = claims(program.mapping_claims, alias.source_base);
+    if (owners.size() != 1U || owners.front()->name != "raw_cartridge_rom" || !structurally_valid_mapping_claim(*owners.front()))
+      return std::nullopt;
+    const MappingClaim &claim = *owners.front();
+    const std::uint64_t source_end = static_cast<std::uint64_t>(alias.source_base) + alias.length;
+    if (alias.execution_base < genesis_alias_work_ram_begin ||
+        static_cast<std::uint64_t>(alias.execution_base) + alias.length > genesis_alias_work_ram_end ||
+        source_end > claim.target_end.value || claim.image_end.value > program.image.bytes.size())
+      return std::nullopt;
+    const auto claim_index = static_cast<std::size_t>(&claim - program.mapping_claims.data());
+    const auto source = cartridge_image.find(claim_index);
+    if (source == cartridge_image.end()) return std::nullopt;
+    const std::uint32_t source_offset = alias.source_base - claim.target_begin.value;
+    ExecutableImage image;
+    image.id = ImageId{static_cast<std::uint32_t>(out.set.images.size() + 1U)};
+    image.source = ImageSourceReference{source->second, source_offset, alias.length};
+    image.mappings.push_back({alias.execution_base, 0U, alias.length});
+    image.provenance.authority = ImageAuthority::static_proof;
+    image.provenance.producer = "genesis.copy_alias";
+    image.provenance.evidence.push_back({"derivation", "verbatim_source_copy"});
+    image.provenance.evidence.push_back({"source_image", std::to_string(source->second.value)});
+    image.provenance.evidence.push_back({"source_offset", std::to_string(source_offset)});
+    image.provenance.evidence.push_back({"length", std::to_string(alias.length)});
+    image.verification = ImageVerification::byte_identity;
+    out.set.images.push_back(std::move(image));
+    out.claim_index.push_back(claim_index);
+  }
+  if (!validate_executable_image_set(out.set).ok()) return std::nullopt;
+  return out;
+}
+
 bool apply_genesis_immutable_rom_aot(FrontendProgram &program) {
   std::vector<FrontendProgram::ImmutableRomAotRange> ranges;
   for (const auto &claim : program.mapping_claims) {
@@ -6131,39 +6185,39 @@ bool populate_immutable_rom_aot_entries(const FrontendProgram &program,
   // the image offset kept at the immutable source. PC-relative EAs, relative branch/DBcc/BSR targets,
   // fallthrough and call continuations therefore come out execution-relative, while absolute EAs/targets stay
   // absolute. An instruction is an alias identity only when its whole span lies inside its alias descriptor.
-  for (const auto &alias : program.immutable_copy_aliases) {
-    const auto owners = claims(program.mapping_claims, alias.source_base);
-    if (owners.size() != 1U || owners.front()->name != "raw_cartridge_rom" ||
-        !structurally_valid_mapping_claim(*owners.front()))
-      return false;
-    const auto &claim = *owners.front();
-    const std::uint64_t source_end = static_cast<std::uint64_t>(alias.source_base) + alias.length;
-    if (alias.execution_base < genesis_alias_work_ram_begin ||
-        static_cast<std::uint64_t>(alias.execution_base) + alias.length > genesis_alias_work_ram_end ||
-        source_end > claim.target_end.value || claim.image_end.value > program.image.bytes.size())
-      return false;
-    const auto claim_size = claim.image_end.value - claim.image_begin.value;
-    const auto claim_bytes = std::span<const std::uint8_t>(program.image.bytes).subspan(
-        static_cast<std::size_t>(claim.image_begin.value), static_cast<std::size_t>(claim_size));
-    for (std::uint32_t offset = 0U; offset < alias.length; offset += 2U) {
-      const Address execution = alias.execution_base + offset;
-      const std::uint64_t local = static_cast<std::uint64_t>(alias.source_base + offset) - claim.target_begin.value;
-      const std::uint64_t image_offset = claim.image_begin.value + local;
-      DecodeSource source{CpuVariant::mc68000, {TargetAddressSpace::m68k_program, execution}, MoveqImageOffset{local}};
-      auto decoded_result = decode_m68k_instruction(claim_bytes, source, M68kDecodeProfile::general_startup);
-      auto *decoded = std::get_if<M68kDecodedInstruction>(&decoded_result);
-      if (decoded == nullptr) continue;
-      decoded->provenance.source.image_offset = MoveqImageOffset{image_offset};
-      const std::uint64_t length = decoded->provenance.length.value;
-      if (length < 2U || offset + length > alias.length) continue;
-      auto operation = lift_m68k_instruction(*decoded);
-      if (!m68k_operation_is_immutable_rom_aot_safe(operation, return_target_authority_available)) continue;
-      FrontendAnalysis::ImmutableRomAotEntry candidate{*decoded, operation, claim, true, alias.source_base + offset};
-      const auto [found, inserted] = entries.emplace(execution, candidate);
-      if (!inserted &&
-          (!found->second.execution_alias || !same_decoded(found->second.decoded, candidate.decoded) ||
-           !same_ir(found->second.operation, candidate.operation)))
-        return false;
+  // SEG-028-T004 (ADR 0077): the identities are derived from the `static_proof` executable images of the Genesis M68K producer, whose
+  // bytes are a source reference into the owning cartridge image; the decode below reads exactly the bytes it always read.
+  if (!program.immutable_copy_aliases.empty()) {
+    const auto images = genesis_m68k_executable_images(program);
+    if (!images) return false;
+    for (std::size_t index = 0; index < images->set.images.size(); ++index) {
+      const ExecutableImage &image = images->set.images[index];
+      if (image.provenance.authority != ImageAuthority::static_proof || !image.source) continue;
+      const auto &claim = program.mapping_claims[images->claim_index[index]];
+      const auto claim_bytes = executable_image_bytes(images->set, images->set.images[image.source->source.value - 1U]);
+      const std::uint32_t execution_base = image.mappings.front().execution_base;
+      const std::uint32_t source_base = claim.target_begin.value + image.source->offset;
+      const std::uint32_t alias_length = image.source->length;
+      for (std::uint32_t offset = 0U; offset < alias_length; offset += 2U) {
+        const Address execution = execution_base + offset;
+        const std::uint64_t local = static_cast<std::uint64_t>(image.source->offset) + offset;
+        const std::uint64_t image_offset = claim.image_begin.value + local;
+        DecodeSource source{CpuVariant::mc68000, {TargetAddressSpace::m68k_program, execution}, MoveqImageOffset{local}};
+        auto decoded_result = decode_m68k_instruction(claim_bytes, source, M68kDecodeProfile::general_startup);
+        auto *decoded = std::get_if<M68kDecodedInstruction>(&decoded_result);
+        if (decoded == nullptr) continue;
+        decoded->provenance.source.image_offset = MoveqImageOffset{image_offset};
+        const std::uint64_t length = decoded->provenance.length.value;
+        if (length < 2U || offset + length > alias_length) continue;
+        auto operation = lift_m68k_instruction(*decoded);
+        if (!m68k_operation_is_immutable_rom_aot_safe(operation, return_target_authority_available)) continue;
+        FrontendAnalysis::ImmutableRomAotEntry candidate{*decoded, operation, claim, true, source_base + offset};
+        const auto [found, inserted] = entries.emplace(execution, candidate);
+        if (!inserted &&
+            (!found->second.execution_alias || !same_decoded(found->second.decoded, candidate.decoded) ||
+             !same_ir(found->second.operation, candidate.operation)))
+          return false;
+      }
     }
   }
   analysis.immutable_rom_aot_entries.clear();

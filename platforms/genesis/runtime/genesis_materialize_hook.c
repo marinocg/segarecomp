@@ -13,6 +13,9 @@
  *   frames <virtual frames reached>      dispatches <retired dispatches>
  *   sound_fault z80_code_mismatch <epochs seen> <master ticks>     (only when the Z80 was isolated by a structural mutation)
  *   epoch <ordinal> <64 hex: activation signature> <extent count>      (one line per epoch, activation order)
+ * SEG-028-T005 (ADR 0077): for outcome guest_stop the pass also writes the private stop record stop.ram: 4-byte big-endian stop PC,
+ * 4-byte big-endian stop class, then the 64 KiB work RAM (the SEGARECOMP_STOP_WORK_RAM_DUMP layout of frame_capture_main_hook.c).
+ * `segarecomp build` consumes it only to propose ADR 0049 immutable-copy aliases; it is never reported.
  */
 #include <errno.h>
 #include <stdio.h>
@@ -77,6 +80,16 @@ static void pass_on_unknown(void *context, uint32_t epoch_ordinal, const uint8_t
     g_pass.io_error = 1;
 }
 
+static int pass_write_stop_record(const GenesisRuntime *runtime, uint32_t stop_class) {
+  static uint8_t record[8U + sizeof(runtime->work_ram)];
+  const uint32_t pc = runtime->pc;
+  record[0] = (uint8_t)(pc >> 24); record[1] = (uint8_t)(pc >> 16); record[2] = (uint8_t)(pc >> 8); record[3] = (uint8_t)pc;
+  record[4] = (uint8_t)(stop_class >> 24); record[5] = (uint8_t)(stop_class >> 16);
+  record[6] = (uint8_t)(stop_class >> 8); record[7] = (uint8_t)stop_class;
+  memcpy(record + 8U, runtime->work_ram, sizeof(runtime->work_ram));
+  return pass_write("stop.ram", record, sizeof(record));
+}
+
 static int pass_write_report(const char *outcome, uint64_t frames, uint64_t dispatches, const GenesisZ80Machine *machine) {
   char path[1024];
   FILE *file;
@@ -126,6 +139,7 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
                   : diagnostic == (int)GENESIS_DIAG_Z80_CODE_MISMATCH ? "z80_code_mismatch" : "z80_stop";
       } else {
         outcome = "guest_stop";
+        if (pass_write_stop_record(runtime, (uint32_t)transfer.stop.stop_class) != 0) g_pass.io_error = 1;
       }
       break;
     }
