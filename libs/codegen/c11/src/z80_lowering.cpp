@@ -43,6 +43,56 @@ std::string reg8(unsigned index) {
   return index < 8 ? names[index] : "";
 }
 
+namespace {
+// Logical byte position of a descriptor index: superseded/ignored prefixes precede the canonical encoding.
+std::string live_byte(const LowerContext& c, unsigned descriptor_index, unsigned extra = 0) {
+  return "rt->live_code[" + std::to_string(c.instruction.extra_prefix_count + descriptor_index + extra) + "]";
+}
+std::string live_u16(const LowerContext& c) {
+  return "(uint16_t)(" + live_byte(c, c.form.immediate_index) + " | ((unsigned)" + live_byte(c, c.form.immediate_index, 1) + " << 8))";
+}
+}  // namespace
+
+std::string operand_disp16(const LowerContext& c) {
+  if (c.live_operands) return "(uint16_t)(((unsigned)" + live_byte(c, c.form.displacement_index) + " ^ 0x80u) - 0x80u)";
+  const unsigned d = static_cast<unsigned>(cpu::z80::displacement(c.instruction).value_or(0)) & 0xFFFFu;
+  return hex_literal(d, 4);
+}
+
+std::string operand_rel(const LowerContext& c) {
+  if (c.live_operands) {
+    const unsigned index = c.form.displacement_index != cpu::z80::kNoIndex ? c.form.displacement_index : c.form.immediate_index;
+    return "((int)((unsigned)" + live_byte(c, index) + " ^ 0x80u) - 128)";
+  }
+  if (const auto d = cpu::z80::displacement(c.instruction)) return std::to_string(static_cast<int>(*d));
+  return std::to_string(static_cast<int>(static_cast<std::int8_t>(cpu::z80::immediate(c.instruction).value_or(0) & 0xFFu)));
+}
+
+std::string operand_imm8(const LowerContext& c) {
+  if (c.live_operands) return live_byte(c, c.form.immediate_index);
+  return hex_literal(cpu::z80::immediate(c.instruction).value_or(0) & 0xFFu, 2);
+}
+
+std::string operand_imm8_plus1(const LowerContext& c) {
+  if (c.live_operands) return "(uint8_t)(" + live_byte(c, c.form.immediate_index) + " + 1u)";
+  return hex_literal((cpu::z80::immediate(c.instruction).value_or(0) + 1u) & 0xFFu, 2);
+}
+
+std::string operand_imm16(const LowerContext& c) {
+  if (c.live_operands) return live_u16(c);
+  return hex_literal(cpu::z80::immediate(c.instruction).value_or(0), 4);
+}
+
+std::string operand_imm16_plus1(const LowerContext& c) {
+  if (c.live_operands) return "(uint16_t)(" + live_u16(c) + " + 1u)";
+  return hex_literal((cpu::z80::immediate(c.instruction).value_or(0) + 1u) & 0xFFFFu, 4);
+}
+
+std::string operand_imm16_plus1_low8(const LowerContext& c) {
+  if (c.live_operands) return "(uint8_t)(" + live_u16(c) + " + 1u)";
+  return hex_literal((cpu::z80::immediate(c.instruction).value_or(0) + 1u) & 0xFFu, 2);
+}
+
 std::string hex_literal(unsigned value, unsigned digits) {
   static constexpr char hex[] = "0123456789ABCDEF";
   std::string text = "0x";

@@ -130,11 +130,11 @@ static int z80_view_code_image(void *context, uint16_t address, Z80CodeImage *im
   return 1;
 }
 
-static int z80_view_code_matches(void *context, uint16_t address, const uint8_t *expected, uint32_t length) {
+static int z80_view_code_fetch(void *context, uint16_t address, uint8_t *bytes, uint32_t length) {
   const GenesisZ80Machine *machine = machine_of(context);
   uint32_t index;
   for (index = 0U; index < length; ++index)
-    if (machine->runtime->devices.z80_bus.z80_ram[(address + index) & (GENESIS_Z80_RAM_BYTES - 1U)] != expected[index]) return 0;
+    bytes[index] = machine->runtime->devices.z80_bus.z80_ram[(address + index) & (GENESIS_Z80_RAM_BYTES - 1U)];
   return 1;
 }
 
@@ -148,7 +148,7 @@ void genesis_z80_machine_init(GenesisZ80Machine *machine, GenesisRuntime *runtim
   machine->cpu.host.io_out = z80_view_io_out;
   machine->cpu.host.interrupt_acknowledge = z80_view_interrupt_acknowledge;
   machine->cpu.host.code_image = z80_view_code_image;
-  machine->cpu.host.code_matches = z80_view_code_matches;
+  machine->cpu.host.code_fetch = z80_view_code_fetch;
   z80_reset(&machine->cpu.state);
 }
 

@@ -191,7 +191,7 @@ def main():
         mutated_sources = {}
         for unit in sorted(z80_dir.glob("genesis_z80_owner_*.c")):
             text = unit.read_text()
-            changed = text.replace("z80_code_guard(rt, 0x0000u, 3u, 49u,", "z80_code_guard(rt, 0x0000u, 3u, 50u,")
+            changed = text.replace("z80_live_guard(rt, 0x0000u, 3u, 1u, 49u,", "z80_live_guard(rt, 0x0000u, 3u, 1u, 50u,")
             if changed != text:
                 mutated_sources[unit] = changed
         check(len(mutated_sources) >= 1, "the first instruction's guarded bytes were found in the emitted image code")

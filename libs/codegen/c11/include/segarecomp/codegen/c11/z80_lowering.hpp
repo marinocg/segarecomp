@@ -50,7 +50,21 @@ struct LowerContext {
   const cpu::z80::FormDescriptor& form;
   std::string start_pc;  // C expression (uint16_t) of the address of the instruction's first byte (first prefix)
   std::string next_pc;   // C expression (uint16_t) of the address after the instruction (wrapping)
+  // RAM-backed image (ADR 0073): displacement and immediate payload bytes are not compile-time constants; the entry guard snapshots the
+  // live bytes into `rt->live_code` and rows reference them through the operand_* expressions below. False (immutable images):
+  // the operand_* expressions are the static literals of the decoded instruction, exactly as before.
+  bool live_operands = false;
 };
+
+// Operand expressions (C text). A row must take every displacement/immediate value from these, never from
+// cpu::z80::displacement()/immediate() directly. Static mode reproduces the historical literals byte for byte.
+std::string operand_disp16(const LowerContext& c);        // sign-extended (uint16_t) displacement of (IX+d)/(IY+d)/DDCB/FDCB
+std::string operand_rel(const LowerContext& c);           // signed int relative displacement of JR/DJNZ
+std::string operand_imm8(const LowerContext& c);          // 8-bit immediate / port number
+std::string operand_imm8_plus1(const LowerContext& c);    // (imm8 + 1) & 0xFF
+std::string operand_imm16(const LowerContext& c);         // 16-bit immediate / address
+std::string operand_imm16_plus1(const LowerContext& c);   // (imm16 + 1) & 0xFFFF
+std::string operand_imm16_plus1_low8(const LowerContext& c);  // (imm16 + 1) & 0xFF
 
 using LowerFn = Lowered (*)(const LowerContext&);
 

@@ -268,12 +268,19 @@ shape and the differential harness are recorded in ADR 0060 and `docs/testing/z8
 The platform may declare a code image *RAM-backed* (`CodeImage::live_bytes`): the compiled bytes are a snapshot of memory the
 machine can change after compilation (the Genesis sound RAM). The CPU library keeps its meaning: instruction semantics, owner
 structure and every outcome are unchanged. What a RAM-backed image adds, at the emitter and ABI level only:
-- the single emitted entry prologue is followed by a guard `z80_code_guard(rt, pc, length, b0..b3)`: the entry's 1-4 static
-  instruction bytes must equal the live bytes (host `code_matches`) before any effect; a difference stops with the fail-closed
-  `Z80_ERROR_CODE_MISMATCH` (`code_mismatch`), `state.pc` at the instruction start and no state change; a host without
-  `code_matches` fails every guard;
+- the single emitted entry runs, in this order, the boundary check (`z80_owner_boundary`), the live snapshot and structural guard
+  `z80_live_guard(rt, pc, length, structural_mask, b0..b3)` and only then the instruction-begin bookkeeping (`z80_owner_begin`: it
+  clears `int_deferral` and the LD A,I/R marker), so a rejected instruction consumes no boundary state. The guard fetches the
+  entry's 1-4 live bytes once (host `code_fetch`, not an architectural read) into non-architectural `rt->live_code` and requires every
+  *statically defining* byte (prefixes, opcode, final DDCB/FDCB opcode, bits selecting register/condition/bit/operation) to equal the
+  compiled byte; the descriptor displacement and immediate payload bytes (`FormDescriptor` indices shifted by
+  `extra_prefix_count`) are live operands read from the snapshot (SEG-032-T012; T003 required all bytes to be equal). A structural
+  difference stops with the fail-closed `Z80_ERROR_CODE_MISMATCH` (`code_mismatch`), `state.pc` at the instruction start and no state
+  change; a host without `code_fetch` fails every guard. An instruction that writes its own operand uses its entry snapshot;
 - the image is a banked, one-window image: every instruction boundary returns to the dispatcher, so there is no in-group
   `goto` chaining and no direct owner binding, and the host reports the bound image through `code_image`;
-- an endless DD/FD run is a typed `mutable_code` stub;
-- no self-modifying-code support, no mutable-immediate tolerance: a difference is a stop, never a re-decode.
+- an endless DD/FD run, and any start whose logical length (extra prefixes included) exceeds four bytes, is a typed `mutable_code` stub
+  (the legal-form matrix is supported in RAM-backed mode up to that four-byte limit);
+- operand payload mutation of an unchanged form is supported; structural self-modifying code is not: a structural difference is a stop,
+  never a re-decode, and no multi-form dispatch exists.
 Immutable images emit exactly as before (golden-digest regression in `z80_live_guard_test.py`).

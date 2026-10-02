@@ -38,9 +38,12 @@ prerequisites and are not reproduced here. SEG-031 (admission policy over known 
    `materialization_nondeterministic`, `z80_image_compile_failed`. A snapshot that differs in executed code from the image its signature selected surfaces as the guard's `z80_code_mismatch` (a typed build failure in the pass).
 6. **Runtime selection.** At each runnable transition while pristine the runtime computes the signature from live state and
    looks it up in the fixed compiled registry; unknown -> `z80_unknown_image` (no compilation, no decoding, no learning).
-7. **RAM-backed code rule.** After activation mutable data is free. Before each generated instruction its 1-4 static bytes
-   must equal the live RAM bytes (`z80_code_mismatch` otherwise), enforced in the single emitted entry prologue
-   (`emit_entry`). The SEG-033 owner structure is unchanged: group-internal `goto` and direct binding both land on the next
+7. **RAM-backed code rule (amended by T012; T003 originally required exact equality of all 1-4 bytes).** After activation mutable
+   data is free. Before each generated instruction the live RAM bytes are snapshotted once; every *statically defining* byte (prefixes,
+   the opcode, the final DDCB/FDCB opcode and every byte encoding a register, condition, bit or operation selection) must equal the
+   compiled byte (`z80_code_mismatch` otherwise), while the descriptor displacement and immediate payload bytes are live operands read
+   from the entry snapshot. Enforced in the single emitted entry (`emit_entry`): boundary acceptance, then snapshot + structural guard,
+   then instruction-begin bookkeeping, then the effect. The SEG-033 owner structure is unchanged: group-internal `goto` and direct binding both land on the next
    entry's prologue, so the guard covers every instruction boundary; T003 proves it by reading emitted code and by mutation
    tests and falls back to forced dispatcher return where any path skips a prologue. Immutable images (SMS) emit exactly as before.
 8. **Future producer swap.** A later static producer (SEG-029/030) replaces only step 1-4; the content hash, signature,
@@ -160,3 +163,42 @@ worker counts (1, 4, default), bound + 1 images and bound images, instruction-bu
 an epoch after the window (not materialized; typed `z80_unknown_image` at run time), a registry with the image removed (typed unknown image),
 one image's emitted bytes mutated (`z80_code_mismatch`), the unmodified relink as the control, and a pipeline rebuild that restores it;
 `tests/genesis_z80_forbidden_identifiers_test.py` scans the production surface against `tests/fixtures/genesis-z80-forbidden-identifiers.txt`.
+
+## T012 implementation record (2026-10-02): shape-stable live operands
+
+Evidence (Phase 1, sanitized aggregates) showed that the executed `z80_code_mismatch` stops of two authorized workloads were largely
+operand patches of an unchanged instruction form (relative displacements, indexed displacements, immediates), with only a small residue of
+opcode/length-shape toggles at a few PCs. T003's exact-byte rule was therefore too strict for a class that is not structural self-modifying
+code. The rule is replaced, for RAM-backed images only, by the structural-guard / live-payload rule of decision 7.
+
+- **Mechanism.** `CodeImage::live_bytes` entries compute a structural-byte mask from the CPU-owned `FormDescriptor` (`displacement_index`,
+  `immediate_index`, `immediate_size`) shifted by `DecodedInstruction::extra_prefix_count`; ignored/superseded prefixes, effective prefixes,
+  opcode bytes and register/condition/bit-selecting bits stay structural. The entry calls `z80_live_guard(rt, pc, length, mask, b0..b3)`: one
+  host `code_fetch` of the 1-4 live bytes into runtime-private `rt->live_code` (non-architectural, no cycles or side effects), a masked compare,
+  `Z80_ERROR_CODE_MISMATCH` before any effect on a difference or a missing callback. Lowering rows take every displacement/immediate from the
+  `operand_*` expressions of `LowerContext` (`live_operands`): the literals as before for immutable images (emission is byte-identical, golden
+  digests unchanged), `rt->live_code[...]` for RAM-backed images. No runtime decoder and no second decoder exist; shared effect bodies stay
+  shareable because the live text is operand-independent. An instruction that writes its own operand uses its entry snapshot.
+- **Prologue order fixed.** The T003 entry ran the merged `z80_owner_prologue` (which clears `int_deferral` and the LD A,I/R marker) before
+  the guard, so a `code_mismatch` consumed boundary state. RAM-backed entries now run `z80_owner_boundary`, the guard, then
+  `z80_owner_begin`; the merged prologue is unchanged for immutable owners.
+- **Typed limitation kept.** A RAM-backed start whose logical length (extra prefixes included) exceeds four bytes remains a `mutable_code` stub; the
+  host fetch and the mask are 4 bytes wide. Structural self-modifying code (any change to a structurally defining byte) stays unsupported
+  and fail-closed: no multi-form-per-PC dispatch, no per-write images, no all-opcode compilation.
+- **Evidence.** `tests/z80_live_operand_test.py`: every legal canonical form with a displacement or immediate field (106 forms, 147 cases,
+  base/ED/DD/FD/DDCB/FDCB) executed over six payload values and two register/flag initialisations equals an immutable reference compiled
+  directly from the mutated bytes (state, memory digest, port-access digest, cycles; shared and unshared emission); every single-bit
+  mutation of a structural byte stops at entry with no effect; loop, DJNZ and LDIR re-entry, self-written operands, patched and mutated
+  interrupt handlers, rejected-instruction boundary state after an EI deferral and after LD A,I, a host without the callback, and the absence
+  of decoder symbols. `tests/z80_live_guard_test.py` now distinguishes structural from payload bytes.
+
+**T012 real-software rerun (authorized local images, sanitized aggregates; `segarecomp build` at `-O2`, `--jobs 4`, executed with
+`--instruction-budget 100000000`).** Sonic 1, Streets of Rage and OutRun do not regress: each still converges (2 images, 600-frame window,
+3-5 epochs), runs to the instruction budget with a non-silent audio stream, and the audio digest is identical across two runs. Sonic 2, which stopped with
+`z80_code_mismatch` before, now converges too (2 images, 2 epochs, 600-frame window); its audio is non-silent and its digest and linked executable are
+identical across two independent builds and two runs each. Cool Spot still stops with `z80_code_mismatch` in the materialization pass, now at a very early
+driver frame (single-digit frame count, 3 epochs seen): by construction of the guard the stop is a structural form change only, because a displacement or
+immediate difference is no longer a mismatch; it is the residual class (opcode/length-shape toggles of a patched instruction) that this ADR keeps
+unsupported pending an operator decision. **>4-byte audit:** none of the five workloads executed a RAM-backed start of more than four logical bytes
+(no `z80_mutable_code` outcome in any converging run; the fifth stopped on the structural mismatch before any such start), so the typed limitation is kept
+without a workload that needs it.

@@ -44,8 +44,10 @@ struct CodeImage {
   std::vector<std::uint8_t> bytes;
   std::vector<CodeWindow> windows;
   // RAM-backed image (SEG-032-T003, ADR 0073): the bytes are a snapshot of memory the platform may change after
-  // compilation. Every entry verifies its exact 1-4 static instruction bytes against the live memory (host `code_matches`)
-  // right after the boundary prologue and stops with `Z80_ERROR_CODE_MISMATCH` on any difference. Requires a banked image with
+  // compilation. Every entry (SEG-032-T012) snapshots its 1-4 live instruction bytes through the host `code_fetch` after the
+  // boundary check and before any instruction-begin bookkeeping, verifies the statically defining bytes (prefixes, opcode, every
+  // byte that is not a descriptor displacement/immediate payload) against the compiled ones and stops with
+  // `Z80_ERROR_CODE_MISMATCH` on any difference; payload bytes are read from the snapshot. Requires a banked image with
   // exactly one window (the platform reports which image is bound, so no direct binding or in-group chaining exists), and
   // emits endless DD/FD runs as typed `mutable_code` stubs. Immutable images (false) emit exactly as before.
   bool live_bytes = false;

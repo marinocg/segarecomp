@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SEG-032-T003 (ADR 0073): the RAM-backed (live-bytes) Z80 image guard.
+"""SEG-032-T003/T012 (ADR 0073): the RAM-backed (live-bytes) Z80 image guard.
 
 A project-authored Z80 program is compiled twice by the public emitter: as a RAM-backed image (`live 1`: banked, one
 window, every entry byte-guarded) and as the immutable reference (invariant window). Both run in the host runner
@@ -8,13 +8,16 @@ window, every entry byte-guarded) and as the immutable reference (invariant wind
   * equivalence: while the live bytes match, the guarded image executes instruction-for-instruction exactly like the
     immutable reference (state and cycles after every instruction), for four programs and several owner-group modes;
   * EXHAUSTIVE byte mutation of a straight-line program covering one, two, three and four byte instructions: mutating any
-    one byte of any instruction before it runs stops at THAT instruction with `code_mismatch`, `state.pc` at its start and
-    the state of the reference after the preceding instructions (no effect of the mutated instruction);
+    one STRUCTURAL byte (prefix, opcode, register/condition/bit selection; everything but a descriptor displacement or
+    immediate payload byte) of any instruction before it runs stops at THAT instruction with `code_mismatch`, `state.pc` at
+    its start and the state of the reference after the preceding instructions (no effect of the mutated instruction);
+    mutating a payload byte is live (SEG-032-T012, ADR 0073) and runs on without `code_mismatch`
+    (z80_live_operand_test.py proves the payload semantics against static references);
   * data mutation: a byte that is never fetched as an instruction (a data table) changes nothing;
   * re-verification on every execution: a loop-body instruction mutated after the first iteration stops on the next
     iteration; a block-repeat instruction (LDIR) mutated between iterations stops on the next iteration;
   * the interrupt entry is guarded: a mutated IM1 handler stops at $0038;
-  * a host without `code_matches` fails closed at the first instruction;
+  * a host without `code_fetch` fails closed at the first instruction;
   * the immutable reference does NOT notice the same mutation (control: the guard is what detects it);
   * structure: a live image's C contains no in-group `goto` chaining and no direct owner binding, and an RAM-backed image
     that is not a one-window banked image is rejected by the emitter;
@@ -39,6 +42,8 @@ RUNNER = root / "tests" / "tools" / "z80_live_guard_runner.c"
 # One-, two-, three- and four-byte instructions (hand-encoded: the SMS assembler has no IX forms):
 # ld hl,1000h; ld a,12h; ld b,a; add a,b; ld (hl),a; inc hl; ld ix,1234h; ld (ix+5),77h; ld de,(1100h); bit 3,(hl);
 # push hl; pop bc; xor a; sub 3; ex de,hl; halt
+# Payload (descriptor displacement/immediate) byte offsets within P1's instructions, per instruction: the live operands.
+P1_PAYLOAD = [(1, 2), (1,), (), (), (), (), (2, 3), (2, 3), (2, 3), (), (), (), (), (1,), (), ()]
 P1_BYTES = bytes.fromhex("210010" "3E12" "47" "80" "77" "23" "DD213412" "DD360577" "ED5B0011" "CB5E" "E5" "C1" "AF" "D603" "EB" "76")
 P2 = """
 .org 0x0000
@@ -122,7 +127,9 @@ def check(ok, label):
 
 
 def state_of(line):
-    return line.split(" ", 2)[2] if line.startswith("STEP") else line.split(" ", 3)[3]
+    """The architectural state of a STEP/END line; the memory digest is dropped (a mutation changes memory by design)."""
+    text = line.split(" ", 2)[2] if line.startswith("STEP") else line.split(" ", 3)[3]
+    return re.sub(r" mem=[0-9A-F]+", "", text)
 
 
 def main():
@@ -162,19 +169,28 @@ def main():
         count = len(trace)
         lengths = [starts[i + 1] - starts[i] for i in range(count)]
         check(set(lengths) >= {1, 2, 3, 4}, "the program covers one, two, three and four byte instructions (%s)" % sorted(set(lengths)))
+        check(len(P1_PAYLOAD) == count + 1, "the payload table covers every instruction of the program")
         mismatched = 0
+        structural_total = 0
+        payload_live = 0
+        payload_total = 0
         for i in range(count):
-            for offset in range(starts[i], starts[i] + lengths[i]):
+            for position in range(lengths[i]):
+                offset = starts[i] + position
                 lines, endline = run(live_exe, ram, 60, "mutate-after", "0", "%X" % offset, "41", workdir=tmp)
+                if position in P1_PAYLOAD[i]:
+                    # a live operand byte: the instruction is still the compiled form, nothing is rejected
+                    payload_total += 1
+                    payload_live += 1 if endline.startswith("END halted") and len(lines) == count else 0
+                    continue
                 # the mutation is applied before the first instruction: the program stops at the first mutated instruction
-                expected_index = i
-                expect_state = state_of(trace[expected_index - 1]) if expected_index > 0 else None
-                ok = endline.startswith("END code_mismatch") and ("pc=%04X" % starts[i]) in endline
-                if expect_state is not None:
-                    ok = ok and len(lines) == expected_index
+                structural_total += 1
+                ok = endline.startswith("END code_mismatch") and ("pc=%04X" % starts[i]) in endline and len(lines) == i
                 mismatched += 1 if ok else 0
-        total = sum(lengths)
-        check(mismatched == total, "exhaustive mutation: %d of %d single-byte mutations stop at their own instruction with code_mismatch" % (mismatched, total))
+        check(mismatched == structural_total and structural_total > 0,
+              "exhaustive mutation: %d of %d single-byte structural mutations stop at their own instruction with code_mismatch" % (mismatched, structural_total))
+        check(payload_live == payload_total and payload_total > 0,
+              "exhaustive mutation: %d of %d payload (displacement/immediate) byte mutations run on without code_mismatch" % (payload_live, payload_total))
         # a mutation applied just before instruction i runs: effects of 0..i-1 are intact, instruction i has no effect
         for i in range(1, count):
             lines, endline = run(live_exe, ram, 60, "mutate-after", str(i), "%X" % starts[i], "FF", workdir=tmp)
@@ -184,10 +200,11 @@ def main():
             break  # one representative in the log; the exhaustive loop above covers every byte
         ok_all = True
         for i in range(1, count):
-            lines, endline = run(live_exe, ram, 60, "mutate-after", str(i), "%X" % (starts[i] + lengths[i] - 1), "FF", workdir=tmp)
+            structural = [p for p in range(lengths[i]) if p not in P1_PAYLOAD[i]]
+            lines, endline = run(live_exe, ram, 60, "mutate-after", str(i), "%X" % (starts[i] + structural[-1]), "FF", workdir=tmp)
             ok_all &= endline.startswith("END code_mismatch") and state_of(endline).startswith("pc=%04X" % starts[i]) \
                 and len(lines) == i
-        check(ok_all, "mid-run mutation of the last byte of every instruction stops exactly at it")
+        check(ok_all, "mid-run mutation of the last structural byte of every instruction stops exactly at it")
 
         # ---- control: the immutable reference does not notice ----
         lines, endline = run(ref_exe, ram, 60, "mutate-after", "0", "0", "41", "immutable", workdir=tmp)
@@ -221,12 +238,15 @@ def main():
         # ---- a host without the matcher fails closed ----
         live_exe, _ = built[("P1", 128)]
         lines, endline = run(live_exe, programs["P1"], 60, "no-matcher", workdir=tmp)
-        check(endline.startswith("END code_mismatch") and not lines, "a host without code_matches fails closed at the first instruction")
+        check(endline.startswith("END code_mismatch") and not lines, "a host without code_fetch fails closed at the first instruction")
 
         # ---- structure ----
         sources = "".join(p.read_text() for p in sorted((tmp / "live_P1_128").glob("*.c")))
         check("goto z80_e_" not in sources and "Z80_OWNER_NEXT(" not in sources, "a live image has no in-group goto chaining and no direct owner binding")
-        check("z80_code_guard(" in sources and "z80_owner_prologue(" in sources, "every entry runs the prologue and the guard")
+        check("z80_live_guard(" in sources and "z80_owner_boundary(" in sources and "z80_owner_begin(" in sources and "z80_owner_prologue(" not in sources,
+              "every entry runs the boundary check, the live guard and then the begin bookkeeping (never the merged prologue)")
+        order = [m.start() for m in (re.search(re.escape(t), sources) for t in ("z80_owner_boundary(", "z80_live_guard(", "z80_owner_begin("))]
+        check(order == sorted(order), "emission order in an entry: boundary, guard, begin")
         (tmp / "bad.spec").write_text("image 1 invariant\nwindow 1 0000 0 100\nfill 1 00 100\nlive 1\n")
         bad = subprocess.run([emitter, str(tmp / "bad.spec"), str(tmp / "bad"), "bad"], capture_output=True, text=True)
         check(bad.returncode != 0 and "RAM-backed" in bad.stdout, "a RAM-backed image that is not a one-window banked image is rejected")

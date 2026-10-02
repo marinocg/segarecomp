@@ -27,7 +27,7 @@ made the Sega PSG a platform-neutral device. SEG-032 must run a real Z80 image i
    Genesis device state next to the existing `GenesisZ80BusState` (which keeps `z80_ram` as the single RAM that both the
    68K window and the Z80 view alias). They enter the checkpoint evidence (schema bump coordinated with T005-T007).
 4. **Host callbacks.** One Genesis-local Z80 view module implements `Z80Host` (`read`, `write`, `io_in`, `io_out`,
-   `interrupt_acknowledge`, `code_image`, and T003's `code_matches`). The bank window routes to the already embedded owned
+   `interrupt_acknowledge`, `code_image`, and T003's RAM-code callback (`code_matches`, replaced in T012 by `code_fetch`)). The bank window routes to the already embedded owned
    cartridge regions (ROM) and to work RAM writes; everything unsupported is a typed stop that surfaces as a Genesis stop
    diagnostic. No manifest of samples or driver ranges exists; the cartridge image is already embedded as one owned region by the
    M68K path (measured cost for larger images is recorded by T004).
@@ -182,3 +182,10 @@ build-time materialization (ADR 0073) must call the Z80 emitter, exactly as the 
 narrowly: the Genesis machine may include `segarecomp/codegen/c11/z80.hpp` and link `segarecomp::codegen_c11_z80` only. `codegen_c11_z80`
 depends only on `codegen_c11` and `cpu_z80`, so no cycle arises. The common, M68k and Genesis-wrapper codegen headers and targets stay
 forbidden for the machine, and the test carries negative controls proving those are still rejected.
+
+## T012 note
+
+The RAM-code host callback of the Z80 ABI is `code_fetch` (copy the 1-4 live bytes of an instruction into the runtime snapshot) instead of T003's
+`code_matches`; the RAM-backed guard now verifies the structurally defining bytes and reads displacement/immediate payload from that snapshot
+(ADR 0073, T012 implementation record). The Genesis machine implements it over the mirrored sound RAM. Structural self-modifying code remains a typed
+`z80_code_mismatch` stop.

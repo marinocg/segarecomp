@@ -140,11 +140,15 @@ The materialized snapshot is the complete 8,192-byte sound RAM at that instant. 
 
 ## 6. RAM-backed code rule
 
-Before each generated instruction executes, its static instruction bytes (1-4) must equal the live RAM bytes at the
-(mirrored, wrapping) fetch addresses. A difference stops the Z80 with the typed outcome `z80_code_mismatch`, `state.pc` at
-the instruction start, no state change. The Z80 code window is `$0000-$3FFF` (two mirrors of the 8 KiB); an instruction
-whose fetch leaves the window is a generation-time typed stub (`mutable_code`). No self-modifying code, no mutable
-immediates or displacements and no runtime decoding of replacement bytes are supported.
+Before each generated instruction executes, the live RAM bytes at the (mirrored, wrapping) fetch addresses are snapshotted once
+and every statically defining byte (prefixes, opcode, final DDCB/FDCB opcode, register/condition/bit/operation selection) must
+equal the compiled byte; the displacement and immediate payload bytes of the compiled form are live and are taken from the entry
+snapshot (SEG-032-T012; T003 required all 1-4 bytes to be equal). A structural difference stops the Z80 with the typed outcome
+`z80_code_mismatch`, `state.pc` at the instruction start, no state change and no consumed boundary state (the EI deferral and the
+LD A,I/R marker are untouched). The Z80 code window is `$0000-$3FFF` (two mirrors of the 8 KiB); an instruction whose fetch leaves
+the window, or whose logical length exceeds four bytes, is a generation-time typed stub (`mutable_code`). Structural self-modifying
+code (a changed prefix, opcode or selector, or a different instruction shape) is not supported and there is no runtime decoding of
+replacement bytes; patching the operands of an unchanged instruction is.
 
 ## 7. Content hash and activation signature
 
@@ -296,9 +300,9 @@ project-authored; none commercial.
 4. `status.json` records the outcome, image/epoch/run counts, frames reached, unit counts, generated/object/executable bytes and stage times.
    `--keep-work 1` retains `obj/` and the emitted Z80 C for falsification tooling.
 
-Epochs after the observation window, and epochs that depend on input, surface at run time as `z80_unknown_image`. Z80 code that modifies
-its own bytes stops the pass with `z80_code_mismatch` (section 6): a workload with such a driver does not build until a contract amendment
-defines how mutable operand bytes are modelled.
+Epochs after the observation window, and epochs that depend on input, surface at run time as `z80_unknown_image`. Z80 code that patches only the displacement/immediate
+operands of unchanged instruction forms is supported (section 6, T012); Z80 code that changes a structurally defining byte stops the pass
+with `z80_code_mismatch`: a workload with such a driver does not build until a contract amendment defines structural variants.
 
 ## 17. Mixer, PCM artifact and viewer presentation (T009; ADR 0075)
 

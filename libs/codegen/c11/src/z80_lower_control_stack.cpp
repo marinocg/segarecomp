@@ -28,16 +28,9 @@ std::string condition(unsigned cc) {
   return text[cc & 7u];
 }
 
-unsigned nn_of(const LowerContext& c) { return cpu::z80::immediate(c.instruction).value_or(0); }
-
 // Signed 8-bit relative displacement of JR/DJNZ (the byte after the opcode).
-int rel_of(const LowerContext& c) {
-  if (const auto d = cpu::z80::displacement(c.instruction)) return *d;
-  return static_cast<std::int8_t>(cpu::z80::immediate(c.instruction).value_or(0) & 0xFFu);
-}
-
 std::string rel_target(const LowerContext& c) {
-  return "(uint16_t)((int)(" + c.next_pc + ") + (" + std::to_string(rel_of(c)) + "))";
+  return "(uint16_t)((int)(" + c.next_pc + ") + (" + operand_rel(c) + "))";
 }
 
 // Timing of a conditional form: not-taken vs taken (extra-prefix cost included by t_states).
@@ -58,12 +51,12 @@ Lowered transfer(std::string statements) {
 }
 
 Lowered lower_jp_nn(const LowerContext& c) {
-  const std::string nn = hex_literal(nn_of(c), 4);
+  const std::string nn = operand_imm16(c);
   return transfer("s->wz = " + nn + ";\ns->pc = " + nn + ";\n");
 }
 
 Lowered lower_jp_cc_nn(const LowerContext& c) {
-  const std::string nn = hex_literal(nn_of(c), 4);
+  const std::string nn = operand_imm16(c);
   const unsigned cc = (c.instruction.provenance.opcode >> 3) & 7u;
   return transfer("s->wz = " + nn + ";\nif (" + condition(cc) + ") s->pc = " + nn + "; else s->pc = " + c.next_pc + ";\n");
 }
@@ -85,12 +78,12 @@ Lowered lower_djnz(const LowerContext& c) {
 }
 
 Lowered lower_call(const LowerContext& c) {
-  const std::string nn = hex_literal(nn_of(c), 4);
+  const std::string nn = operand_imm16(c);
   return transfer("z80_push16(rt, " + c.next_pc + ");\ns->wz = " + nn + ";\ns->pc = " + nn + ";\n");
 }
 
 Lowered lower_call_cc(const LowerContext& c) {
-  const std::string nn = hex_literal(nn_of(c), 4);
+  const std::string nn = operand_imm16(c);
   const unsigned cc = (c.instruction.provenance.opcode >> 3) & 7u;
   return conditional(c, "const int z80_taken = " + condition(cc) + ";\ns->wz = " + nn + ";\nif (z80_taken) {\n  z80_push16(rt, " +
                             c.next_pc + ");\n  s->pc = " + nn + ";\n} else {\n  s->pc = " + c.next_pc + ";\n}\n");
