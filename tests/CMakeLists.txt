@@ -1078,11 +1078,22 @@ add_test(NAME genesis_z80_forbidden_identifiers_test COMMAND ${Python3_EXECUTABL
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_forbidden_identifiers_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST genesis_z80_forbidden_identifiers_test APPEND PROPERTY LABELS full fast)
 # The real consumer route end to end (fixed point, link, run, falsification): the slowest Genesis Z80 test, `full` only.
+# CI wall-clock: one CTest entry per independent case group of the script (see its docstring); the union is the whole matrix.
 add_test(NAME genesis_z80_build_pipeline_test COMMAND ${Python3_EXECUTABLE}
-  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_build_pipeline_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
-set_property(TEST genesis_z80_build_pipeline_test APPEND PROPERTY LABELS full)
-set_property(TEST genesis_z80_build_pipeline_test PROPERTY TIMEOUT 3000)
-set_property(TEST genesis_z80_forbidden_identifiers_test genesis_z80_build_pipeline_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_build_pipeline_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR} epochs)
+add_test(NAME genesis_z80_build_pipeline_bound_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_build_pipeline_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR} bound)
+add_test(NAME genesis_z80_build_pipeline_smc_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_build_pipeline_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR} smc)
+add_test(NAME genesis_z80_build_pipeline_falsify_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_build_pipeline_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR} falsify)
+add_test(NAME genesis_z80_build_pipeline_prepare_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_build_pipeline_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR} prepare)
+set(_z80_pipeline_tests genesis_z80_build_pipeline_test genesis_z80_build_pipeline_bound_test genesis_z80_build_pipeline_smc_test
+  genesis_z80_build_pipeline_falsify_test genesis_z80_build_pipeline_prepare_test)
+set_property(TEST ${_z80_pipeline_tests} APPEND PROPERTY LABELS full)
+set_property(TEST ${_z80_pipeline_tests} PROPERTY TIMEOUT 3000)
+set_property(TEST genesis_z80_forbidden_identifiers_test ${_z80_pipeline_tests} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 add_executable(z80_lowering_probe tools/z80_lowering_probe.cpp)
 target_link_libraries(z80_lowering_probe PRIVATE segarecomp::codegen_c11_z80)
 segarecomp_enable_warnings(z80_lowering_probe)
@@ -1156,11 +1167,25 @@ set_property(TEST cpu_z80_dependency_test z80_capability_ratchet_test codegen_c1
 set_property(TEST z80_conformance_harness_test APPEND PROPERTY LABELS full)
 # SEG-008-T008: per-form/per-outcome T-state validation and the deadline/resume property (oracle comparison skips cleanly).
 # SEG-033-T003: grouped Z80 owners are observably identical to the one-function-per-start reference (group size 1).
+# CI wall-clock: four disjoint, cost-balanced slices of the quick batches (the script fails on a name that matches no batch; the
+# slices below together name every scenario and random batch).
 add_test(NAME z80_owner_group_differential_test COMMAND ${Python3_EXECUTABLE}
-  ${CMAKE_CURRENT_SOURCE_DIR}/z80_owner_group_differential_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} quick)
-set_property(TEST z80_owner_group_differential_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
-set_property(TEST z80_owner_group_differential_test APPEND PROPERTY LABELS full)
-set_property(TEST z80_owner_group_differential_test APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_owner_group_differential_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} quick
+  wrap64,group_cross,t007_small)
+add_test(NAME z80_owner_group_differential_test_slice2 COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_owner_group_differential_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} quick
+  dd64,rnd_sms)
+add_test(NAME z80_owner_group_differential_test_slice3 COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_owner_group_differential_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} quick
+  two_image,sms_map,t007_prog)
+add_test(NAME z80_owner_group_differential_test_slice4 COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_owner_group_differential_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} quick
+  reloc,rnd_invariant)
+set(_z80_group_slices z80_owner_group_differential_test z80_owner_group_differential_test_slice2 z80_owner_group_differential_test_slice3
+  z80_owner_group_differential_test_slice4)
+set_property(TEST ${_z80_group_slices} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST ${_z80_group_slices} APPEND PROPERTY LABELS full)
+set_property(TEST ${_z80_group_slices} APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
 add_test(NAME z80_owner_group_differential_test_forms COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/z80_owner_group_differential_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR} full)
 set_property(TEST z80_owner_group_differential_test_forms APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
@@ -1261,20 +1286,36 @@ add_test(NAME sms_emission_budget_512k_test COMMAND ${Python3_EXECUTABLE}
 add_test(NAME sms_machine_dependency_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_dependency_test.py ${PROJECT_SOURCE_DIR})
 # SEG-009-T010: `segarecomp build` for Master System images (platform routing, mapper declaration, T008 digest reproduction).
+# CI wall-clock: one entry per independent case group of the script (see its docstring); the union is the whole matrix.
 add_test(NAME sms_native_build_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_native_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
-  $<TARGET_FILE:sms_image_emitter>)
-set_property(TEST sms_native_build_test APPEND PROPERTY LABELS full)
-set_property(TEST sms_native_build_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+  $<TARGET_FILE:sms_image_emitter> build)
+add_test(NAME sms_native_build_policy_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_native_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  $<TARGET_FILE:sms_image_emitter> policy)
+add_test(NAME sms_native_build_failclosed_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_native_build_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  $<TARGET_FILE:sms_image_emitter> failclosed)
+set_property(TEST sms_native_build_test sms_native_build_policy_test sms_native_build_failclosed_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_native_build_test sms_native_build_policy_test sms_native_build_failclosed_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-033-T003: the SMS machine fixtures (video, audio, input, mapper, interrupts) are artifact-identical between the reference
 # emission and grouped owners with shared bodies; the same on an authorized local image when one exists (extended).
+# CI wall-clock: three disjoint fixture slices (the script rejects an unknown fixture name; together they name every fixture).
 add_test(NAME sms_owner_group_equivalence_test COMMAND ${Python3_EXECUTABLE}
-  ${CMAKE_CURRENT_SOURCE_DIR}/sms_owner_group_equivalence_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_owner_group_equivalence_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  machine_e2e)
+add_test(NAME sms_owner_group_equivalence_vdp_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_owner_group_equivalence_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  vdp_seq_a vdp_irq vdp_straddle_write)
+add_test(NAME sms_owner_group_equivalence_render_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_owner_group_equivalence_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  render_scene_a render_raster vdp_reset_probe)
 add_test(NAME sms_owner_group_local_images_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_owner_group_local_images_test.py $<TARGET_FILE:sms_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
-set_property(TEST sms_owner_group_equivalence_test APPEND PROPERTY LABELS full)
+set_property(TEST sms_owner_group_equivalence_test sms_owner_group_equivalence_vdp_test sms_owner_group_equivalence_render_test APPEND PROPERTY LABELS full)
 set_property(TEST sms_owner_group_local_images_test APPEND PROPERTY LABELS extended)
-set_property(TEST sms_owner_group_equivalence_test sms_owner_group_local_images_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST sms_owner_group_equivalence_test sms_owner_group_equivalence_vdp_test sms_owner_group_equivalence_render_test
+  sms_owner_group_local_images_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-033-T009: injected emitter defects are killed by the gates; shape controls, -O0/-O1/-O2 equality, determinism and a hidden-worker-failure control.
 add_test(NAME z80_owner_group_mutation_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/z80_owner_group_mutation_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
@@ -1424,4 +1465,9 @@ endif()
 
 # CTest's default per-test timeout is 1500 s. These tests measured 580-1480 s on a 4-core CI runner running 8 tests wide (GCC):
 # z80_owner_group_differential_test finished 21 s before the default limit, so give the long compile-bound tests real headroom.
-set_property(TEST z80_owner_group_differential_test sms_native_build_test sms_owner_group_equivalence_test PROPERTY TIMEOUT 3600)
+set_property(TEST ${_z80_group_slices} sms_native_build_test sms_native_build_policy_test sms_owner_group_equivalence_test
+  sms_owner_group_equivalence_vdp_test sms_owner_group_equivalence_render_test PROPERTY TIMEOUT 3600)
+
+# CI sharding (see ci_shards.cmake, which also registers its guard test): must come after the LAST add_test and label assignment so
+# every tier test is partitioned.
+include(${CMAKE_CURRENT_SOURCE_DIR}/ci_shards.cmake)

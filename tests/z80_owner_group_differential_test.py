@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SEG-033-T003: grouped Z80 owners are observably identical to the one-function-per-start reference (hermetic).
 
-usage: z80_owner_group_differential_test.py <z80_image_emitter> <cc> <product-root> [quick|full]
+usage: z80_owner_group_differential_test.py <z80_image_emitter> <cc> <product-root> [quick|full [batch,batch,...]]
 
 The reference is the merged broad AOT: owner group size 1 (one C function per instruction start, the historical emission).
 The candidates are grouped emissions (bounded multi-entry owners that select the entry from the PC or the window offset).
@@ -18,6 +18,10 @@ Every candidate emission must also keep the exact entry set and the owner classi
 fewer host owners and respect the group bound. Candidates vary the group bound (odd small bounds 2, 3, 7 put group boundaries at
 every kind of position; the production default) and the shared PC-independent effect bodies (SEG-033-T005) independently.
 `quick` (default) compares the scenarios and random programs; `full` adds the form matrix.
+
+CI wall-clock: the optional fifth argument restricts the run to the named quick batches (scenario and random batch names); CTest
+registers disjoint slices whose union is every batch, and a name that matches no batch fails the run, so a slice can neither be
+empty nor silently skip a renamed batch. Without it every batch runs.
 """
 import pathlib
 import sys
@@ -31,12 +35,14 @@ from z80_random_programs import random_documents  # noqa: E402
 EMITTER, CC = sys.argv[1], sys.argv[2]
 MODE = sys.argv[4] if len(sys.argv) > 4 else "quick"
 assert MODE in ("quick", "full"), MODE
+ONLY = set(sys.argv[5].split(",")) if len(sys.argv) > 5 else None
 # (group bound, shared bodies): the reference is (1, 0) = one function per start with every effect inline (the merged emission).
 # None selects the emitter default (the production setting).
 REFERENCE = (1, 0)
 CONFIGS = ((2, None), (3, None), (7, None), (None, None), (None, 0), (1, None))
 FAILED = []
 COMPARED = 0
+SEEN = set()
 
 
 def check(cond, message):
@@ -61,6 +67,10 @@ def tag_of(config):
 def compare_batches(label, batches, work):
     global COMPARED
     for batch in batches:
+        if ONLY is not None:
+            if batch.name not in ONLY:
+                continue
+            SEEN.add(batch.name)
         outputs = {}
         for config in (REFERENCE, *CONFIGS):
             bdir = work / label / batch.name / ("g%s_s%s" % config)
@@ -107,6 +117,8 @@ def main():
         work = pathlib.Path(tmp)
         compare_batches("scenario", z.scenario_batches(z.load_scenarios()), work)
         compare_batches("random", z.scenario_batches(random_documents()), work)
+        if ONLY is not None:
+            check(SEEN == ONLY, "batch selection %s matched %s" % (sorted(ONLY), sorted(SEEN)))
         if MODE == "full":
             by_form = z.form_vectors()
             compare_batches("forms", z.slot_batches([v for f in sorted(by_form) for v in by_form[f]]), work)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SEG-033-T003: the Master System machine behaves identically with grouped owners and shared bodies (hermetic fixtures).
 
-usage: sms_owner_group_equivalence_test.py <sms_image_emitter> <cc> <product-root>
+usage: sms_owner_group_equivalence_test.py <sms_image_emitter> <cc> <product-root> [fixture ...]
 
 Builds the project-authored SMS fixtures twice through the one SMS generation route, once as the reference emission (one C
 function per start, every effect inline: `--owner-group 1 --share-bodies 0`, byte-identical to the emission before SEG-033) and
@@ -11,6 +11,9 @@ IRQ and mapper traces, RAM, VDP register trace, VRAM/CRAM, every frame record, t
 with its digest. The fixtures cover interrupts and pause NMI with scripted controllers, mapper bank switching, the VDP and the
 renderer (including raster effects) and audio. Authorized local images get the same comparison in the extended tier
 (`sms_owner_group_local_images_test`) with only digests compared; nothing from an image is stored.
+
+CI wall-clock: the optional fixture names restrict the run to those fixtures (CTest registers disjoint slices whose union is every
+fixture; an unknown name fails). Without them every fixture runs.
 """
 import pathlib
 import sys
@@ -27,6 +30,10 @@ from sms_vdp_native import Native  # noqa: E402
 FIXTURES = {"machine_e2e": (str(builder.E2E_FRAMES), True), "vdp_seq_a": ("60", False), "vdp_irq": ("60", False),
             "vdp_straddle_write": ("60", False), "render_scene_a": ("10", False), "render_raster": ("24", False),
             "vdp_reset_probe": ("120", False)}
+if len(sys.argv) > 4:
+    unknown = [n for n in sys.argv[4:] if n not in FIXTURES]
+    assert not unknown, "unknown fixtures: %s" % unknown
+    FIXTURES = {n: FIXTURES[n] for n in sys.argv[4:]}
 MODES = {"reference": ["--owner-group", "1", "--share-bodies", "0"], "default": []}
 FAILED = []
 

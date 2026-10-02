@@ -24,7 +24,7 @@ Wall times on a shared workstation vary by about 15%; compare CPU seconds and us
 | tier | test | checks |
 |---|---|---|
 | `full` | `sms_emission_budget_test` (128 KiB) and `_512k_test` | exact entry count, owner count and grouping ratio, bound of 128 entries per owner, host function count, largest TU and total generated C, determinism, byte identity with the generic Z80 emitter |
-| `full` | `z80_owner_group_differential_test` | grouped/shared emissions identical to the one-function-per-start reference on conformance scenarios and seeded random programs |
+| `full` | `z80_owner_group_differential_test` (+ `_slice2..4`, disjoint batch slices) | grouped/shared emissions identical to the one-function-per-start reference on conformance scenarios and seeded random programs |
 | `extended` | `z80_owner_group_differential_test_forms` | the same comparison over the complete legal-form matrix |
 | `extended` | `sms_build_benchmark_test` | a real compile of a seeded 128 KiB image through the CLI: structural shape, per-process compiler RSS inside the ADR 0058 budget, executable size, the program starts; wall time only against a very generous ceiling |
 
@@ -46,6 +46,6 @@ build, and the vendored ymfm objects (once per build). `status.json` carries the
 runs, frames reached, units, units compiled/reused, generated/object/executable bytes, emit/compile/materialize milliseconds); no title, ROM
 byte, address or image hash is recorded. Authorized-workload reference (default `-O2`, cold, one workstation): 2 images, 3-5 epochs, 4 runs,
 materialization stage 11-18 s of a 60-115 s build, 10.2-10.7 MB of generated Z80 C, 3.8-4.1 MB of Z80 objects, 34-51 MB executable.
-Protection: `genesis_z80_materialization_test` (the loop against scripted runners), `genesis_z80_build_pipeline_test` (the real route with
+Protection: `genesis_z80_materialization_test` (the loop against scripted runners), `genesis_z80_build_pipeline_test` and its `_bound`/`_smc`/`_falsify`/`_prepare` siblings (case groups of one script; the real route with
 project-authored ROMs: exact counts, determinism across repeats and worker counts, typed failures, removal/mutation falsification) and
 `genesis_z80_forbidden_identifiers_test`.
