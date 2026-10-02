@@ -40,8 +40,14 @@ for path in files(z80):
     if path.name == "CMakeLists.txt":
         text = "\n".join(l for l in path.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("#")).lower()
         links = re.findall(r"target_link_libraries\([^)]*\)", text, flags=re.S)
-        check(links and all("segarecomp::base" in l and l.count("segarecomp::") == 1 for l in links),
-              "cpu_z80 must link only segarecomp::base: %r" % links)
+        if path.parent.relative_to(z80).parts[:1] == ("analysis",):
+            # SEG-029 (ADR 0078): the report-only adapter target may link exactly cpu_z80, the generic analysis core and base.
+            allowed = {"segarecomp::base", "segarecomp::cpu_z80", "segarecomp::analysis"}
+            check(links and all(set(re.findall(r"segarecomp::[a-z0-9_]+", l)) <= allowed for l in links),
+                  "cpu_z80_analysis may link only cpu_z80, analysis and base: %r" % links)
+        else:
+            check(links and all("segarecomp::base" in l and l.count("segarecomp::") == 1 for l in links),
+                  "cpu_z80 must link only segarecomp::base: %r" % links)
     for token in FORBIDDEN_FROM_Z80:
         check(token not in text, "%s references forbidden dependency %r" % (path.relative_to(ROOT), token))
 
