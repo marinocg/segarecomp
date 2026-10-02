@@ -1,6 +1,7 @@
 #include "build_command.hpp"
 
 #include "segarecomp/machine/master_system/cartridge.hpp"
+#include "segarecomp/machine/genesis/frontend.hpp"
 #include "segarecomp/machine/genesis/z80_materialization.hpp"
 #include "segarecomp/machine/master_system/emit.hpp"
 #include "segarecomp/rom.hpp"
@@ -223,7 +224,7 @@ std::string json_escape(const std::string &text) {
 }
 
 // `extra` is a pre-formatted JSON member list (leading comma included) appended after rom_sha256: Master System
-// provenance and the typed diagnostic. Empty for Genesis, so Genesis status.json is unchanged.
+// provenance, the executable-image provenance counts and the typed diagnostic.
 void write_status(const Options &options, const std::string &sha, const std::string &status,
                   const std::string &stage, const std::string &message, const std::string &extra = "") {
   std::ofstream out(options.output / "status.json", std::ios::binary | std::ios::trunc);
@@ -558,8 +559,10 @@ class ProcessPassRunner final : public gz80::PassRunner {
 };
 
 // Builds the Genesis program. Returns 0 and fills `executable`, or the process exit code after recording the failure.
+// `m68k_images` is the sanitized provenance JSON of the M68K executable images the generate stage consumed.
 int build_genesis_program(Options &options, Log &log, const std::string &sha, const std::vector<fs::path> &units,
-                          const fs::path &shard_dir, fs::path &executable, std::string &status_extra, bool &sound_degraded) {
+                          const fs::path &shard_dir, const std::string &m68k_images, fs::path &executable,
+                          std::string &status_extra, bool &sound_degraded) {
   std::error_code ec;
   fs::path platform_dir = options.runtime_dir;
   if (!platform_dir.has_filename()) platform_dir = platform_dir.parent_path();  // tolerate a trailing separator
@@ -703,6 +706,11 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
                  (summary.sound_fault ? ",\"sound_fault_epochs\":" + std::to_string(summary.sound_fault->epochs) +
                                             ",\"sound_fault_frame\":" + std::to_string(summary.sound_fault->master_ticks / (3420U * 262U /* NTSC master ticks per frame */))
                                       : std::string()) + "}";
+  // SEG-028 (ADR 0077): the producer boundary, recorded as sanitized provenance counts only (no address, byte or hash).
+  const std::string images = "{\"m68k\":" + m68k_images + ",\"z80\":" +
+                             segarecomp::format_image_provenance_json(segarecomp::count_image_provenance(gz80::executable_images(registry))) + "}";
+  log.line("executable_images: " + images);
+  status_extra += ",\"executable_images\":" + images;
   sound_degraded = summary.sound_fault.has_value();
   return 0;
 }
@@ -720,6 +728,8 @@ int segarecomp_build_command(int argc, char **argv) {
   log.file.open(options.output / "build.log", std::ios::binary | std::ios::trunc);
   std::string sha;
   std::string sms_provenance;  // status.json members recording the SMS identity (empty for Genesis)
+  std::string sms_images;      // SMS: the status.json executable_images member
+  std::string m68k_images;     // Genesis: sanitized provenance JSON of the M68K executable images
   try {
     // ---- analyze ----
     stage("analyze", "begin");
@@ -782,6 +792,13 @@ int segarecomp_build_command(int argc, char **argv) {
         log.line(std::string("analyze diagnostic: ") + segarecomp::reset_diagnostic_name(reset.diagnostic));
         return fail(options, log, sha, "analyze", 1, "This file is not a supported Genesis / Mega Drive ROM.");
       }
+      // The M68K executable images of the program the generate stage builds (--reset-entry --immutable-rom-aot, no aliases).
+      auto program = segarecomp::make_genesis_reset_bridge_startup_program(bytes, reset, std::nullopt);
+      if (!program || !segarecomp::apply_genesis_immutable_rom_aot(*program))
+        return fail(options, log, sha, "analyze", 1, "This file is not a supported Genesis / Mega Drive ROM.");
+      const auto images = segarecomp::genesis_m68k_executable_images(*program);
+      if (!images) return fail(options, log, sha, "analyze", 1, "This file is not a supported Genesis / Mega Drive ROM.");
+      m68k_images = segarecomp::format_image_provenance_json(segarecomp::count_image_provenance(images->set));
     }
     stage("analyze", "done");
 
@@ -807,6 +824,10 @@ int segarecomp_build_command(int argc, char **argv) {
       }
       log.line("emitted units=" + std::to_string(outcome.stats.translation_units) + " full_owners=" +
                std::to_string(outcome.stats.full_owners));
+      // SEG-028 (ADR 0077): sanitized executable-image provenance counts only (no address, byte or hash).
+      const std::string images = "{\"z80\":" + segarecomp::format_image_provenance_json(outcome.provenance) + "}";
+      log.line("executable_images: " + images);
+      sms_images = ",\"executable_images\":" + images;
       std::ifstream in(shard_dir / "sms.units");
       for (std::string line; std::getline(in, line);)
         if (!line.empty()) units.push_back(shard_dir / line);
@@ -853,7 +874,7 @@ int segarecomp_build_command(int argc, char **argv) {
       fs::path executable;
       std::string status_extra;
       bool sound_degraded = false;
-      const int rc = build_genesis_program(options, log, sha, units, shard_dir, executable, status_extra, sound_degraded);
+      const int rc = build_genesis_program(options, log, sha, units, shard_dir, m68k_images, executable, status_extra, sound_degraded);
       if (rc != 0) return rc;
       if (!options.keep_work) fs::remove_all(options.output / "obj", ec);
       stage("link", "done");
@@ -949,7 +970,7 @@ int segarecomp_build_command(int argc, char **argv) {
     if (link_rc != 0) return fail(options, log, sha, "link", 3, "The native program could not be linked.");
     fs::remove_all(object_dir, ec);
     stage("link", "done");
-    write_status(options, sha, "ok", "done", "", sms_provenance);
+    write_status(options, sha, "ok", "done", "", sms_provenance + sms_images);
     std::cout << "@result ok executable=" << executable.string() << std::endl;
     return 0;
   } catch (const std::exception &error) {
