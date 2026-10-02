@@ -250,3 +250,14 @@ These hold unless a later ADR explicitly argues otherwise:
 ## Amendments
 
 (Added by SEG-027-T003, T004 and T005, and finalized by T006.)
+
+### T003 (SEG-028 plan)
+
+- Draft contract: `docs/architecture/executable-image-contract.md`. It answers the 16 Problem-A questions.
+- The artifact is minimal and layered: `cpu` tag, build-local `ImageId`, byte span or source reference, execution mappings, producer
+  provenance class, and a verification tag. Roots are not part of the image.
+- `CodeImage`/`ImageSet` stay Z80 codegen input behind a pure adapter. `PassRunner` stays Genesis-specific.
+- ADR 0049 becomes a class-2 producer with byte-identical output.
+- A class-4 replacement of the SEG-032 materializer is proven by registry equality.
+- The SEG-028 milestone record (harness backlog) carries the rewritten Outcome/Scope/Acceptance and a seven-child Refinement plan. Its
+  fifth child is an evidence-gated go/no-go on giving `segarecomp build` a proven-copy producer.
