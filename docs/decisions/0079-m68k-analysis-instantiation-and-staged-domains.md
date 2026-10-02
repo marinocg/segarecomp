@@ -172,3 +172,73 @@ reproduce the SEG-026-T002 strict row exactly.
   resolves in the cartridge and fails closed from the alias), an instruction crossing the alias end rejected, roots helper equal to the
   challenger, baseline equal to the challenger on the fixture, bounds exhaustion with no partial `D`, fail-closed CLI input, and the
   private output consumed by the compare tool with zero escapes on a synthetic coverage directory.
+
+### T003: address region plus offset and register points-to
+
+- **Domain** (`libs/cpu/m68k/analysis/address_value.{hpp,cpp}`, CPU-owned; the generic core is unchanged). Each of A0-A7 holds
+  bottom, at most 8 `(region, offset set)` pairs, or Unknown with a generic reason and a CPU sub-reason
+  (`M68kAnalysisSubReason`, the decision 10 vocabulary; the report's sub-reason type is now an alias of it). A region is an extent of
+  32-bit register values whose bus addresses lie in one machine region; the Genesis view reports the cartridge image (the unique
+  owning `immutable_input` claim), work RAM (`$E00000-$FFFFFF`; alias execution addresses are work RAM) and the I/O/device window
+  (`$A00000-$DFFFFF`). An offset set is exact (at most 64) or strided `{lo, stride, hi}`. Offsets stay inside `[0, size]` (one past
+  the end is admitted). Arithmetic leaving that range is `Unknown(region_exit)`, never a clamp.
+- **Widening.** Joins keep the tight hull and the gcd congruence. A strided set that keeps growing widens after 64 strict growths
+  (`m68k_strided_growth_bound`, a new CPU resource constant), and only to the region extent with its congruence. It never widens to
+  certainty, and a strided set is never enumerated into targets.
+- **Transfer** (only when `M68kAnalysisConfig::domains.address`; with the flag clear every An stays `Unknown(unknown_input)`):
+  - `LEA` (absolute, PC-relative, `(An)`, `d16(An)`, `(d8,An,Xn)`; the register-relative forms keep region and congruence);
+  - `MOVEA` from An, Dn, an immediate or exact immutable image bytes (word entries sign extended; odd word/long addresses
+    excluded; any non-immutable byte gives `non_immutable_read`);
+  - `ADDA`/`SUBA`/`ADDQ`/`SUBQ` to An, `EXG`, and the `(An)+`/`-(An)` auto-updates of size-exact kinds (a byte access through A7
+    steps 2);
+  - the MOVEM base update;
+  - a `CMPA #imm,An` + `Bcc` edge filter (exact sets through the shared subtraction/condition owners; strided sets by an unsigned
+    interval only).
+
+  Every other An writer is Unknown. Where the effect owner does not claim a complete footprint, the An writes come from the
+  M68000PRM entries: `LEA` writes its An; `MOVEQ`, `DBcc`, `EXT`, `SWAP`, `MULx` and `DIVx` write only a Dn; `JSR`/`BSR`/`PEA`
+  write only A7; any other incomplete kind writes all of A0-A7. With the domain enabled, `LEA`/`PEA` also keep the data registers.
+  The data owner reports them as writing every Dn; the baseline is unchanged.
+- **Sites.** `JMP/JSR (An)`, `d16(An)` and `(d8,An,Xn)` resolve only from an exact set. Each target must be an even, mapped image PC.
+  Odd targets are excluded and counted. One unmapped target fails the whole site (`non_immutable_read/target_outside_image`).
+  Other Unknown outcomes:
+  - a strided base: `set_bound/set_bound`;
+  - a width-only index or entry under the strict policy: `width_only`;
+  - an Unknown base: its reason, with `base_unknown`;
+  - a solver-pinned site: `invalidated`.
+
+  Computed edges use the existing pin-and-restart. Resolved sites leave the unresolved-site lists.
+- **Compare tool.** `computed_site_escape_check` falsifies every resolved computed site per report family. It counts first entries
+  whose witness predecessor is the site, both retire and interrupt-resumption witnesses. The existing `pc_index_recovery_check`
+  output is unchanged.
+- **Fixtures** (`analysis_m68k_value_test`, `analysis_report_test`, driver test):
+  - an object-slot loop (one work-RAM region, stride kept, exact exit);
+  - an unguarded walk ending `region_exit`;
+  - a code pointer from an immutable table;
+  - `d16(An)` and `(d8,An,Xn)` JSR/JMP;
+  - an unknown base (mutable load, unwritten register);
+  - auto-increment, predecrement, A7 byte push, `ADDA.W` and `EXG`;
+  - image-region overflow and one-past-the-end;
+  - a strided-only set staying `set_bound` with no member taken;
+  - a width-only index (strict rejected, measurement admitted);
+  - one target outside the image failing the whole site;
+  - Genesis region extents;
+  - the baseline inert;
+  - deterministic outputs.
+- **Sonic attract oracle (report-only, sanitized).**
+
+  | measure | `--domains baseline` | `--domains address` |
+  | --- | --- | --- |
+  | `D` (D/U) | 6,765 (2.75%) | 6,765 (2.75%) |
+  | `O ∩ D` / `D - O` / recall | 4,493 / 2,272 / 42.74% | 4,493 / 2,272 / 42.74% |
+  | resolved computed sites / escapes | 4 / 0 (`pc_index_explicit`) | 4 / 0 (`pc_index_explicit`) |
+  | `jsr_an` sites: resolved / Unknown | 0 / 2 | 0 / 2: `unsupported_transfer/base_unknown` 1, `unsupported_transfer/region_exit` 1 |
+  | `jmp_an` sites: resolved / Unknown | 0 / 1 | 0 / 1: `unknown_input/base_unknown` |
+  | `d16(An)` / `(d8,An,Xn)` sites | 0 | 0 |
+  | solver iterations | 110,079 | 159,181 |
+
+  The baseline private and aggregate outputs are byte-identical to the T002 baseline. Two address-domain runs are byte-identical.
+  The measured gain is zero, which is a valid recorded result (ADR 0055). Both `JSR (An)` sites take their pointer from a
+  PC-relative table whose index comes from a mutable-memory byte: one index is Unknown and the other spans entries that are not
+  pointers. The `JMP (An)` base enters through an opaque entry. The remaining gate is therefore memory and object-field
+  provenance plus calling context (T004/T005), not the address arithmetic itself.

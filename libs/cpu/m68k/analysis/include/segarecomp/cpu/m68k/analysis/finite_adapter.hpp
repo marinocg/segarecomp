@@ -18,6 +18,13 @@
 // domain, a width-only domain under the strict policy, or an Unknown index. Every other dynamic control form is
 // reported unresolved and never followed. Returns are modelled only through their continuations.
 //
+// SEG-030-T003 (ADR 0079): when `M68kAnalysisConfig::domains.address` is set, the state also tracks A0-A7 as CPU-owned
+// points-to values (address_value.hpp) through LEA, MOVEA, ADDA/SUBA, ADDQ/SUBQ, EXG, (An)+/-(An) and MOVEM auto-updates,
+// MOVEA from exact immutable table entries and CMPA #imm + Bcc guards; every other address-register writer is Unknown.
+// `JMP/JSR (An)`, `d16(An)` and `(d8,An,Xn)` then produce computed edges from an exact code-address set (each target an even,
+// mapped image PC; any target outside the image fails the whole site; a strided set is never enumerated). With the flag clear
+// every address register stays Unknown and the baseline behaviour is unchanged.
+//
 // Report-only: no production target links this library.
 
 #include <array>
@@ -33,6 +40,8 @@
 
 #include "segarecomp/analysis/finite_value.hpp"
 #include "segarecomp/analysis/solver.hpp"
+#include "segarecomp/cpu/m68k/analysis/address_value.hpp"
+#include "segarecomp/cpu/m68k/control_successors.hpp"
 #include "segarecomp/cpu/m68k/finite_register_values.hpp"
 #include "segarecomp/cpu/m68k/ir.hpp"
 
@@ -53,6 +62,12 @@ public:
   [[nodiscard]] virtual bool mapped(std::uint32_t pc) const = 0;
   // Big-endian read of `bytes` (1, 2 or 4) at the bus `address` from provably immutable image bytes, else nullopt.
   [[nodiscard]] virtual std::optional<std::uint32_t> immutable_read(std::uint32_t address, unsigned bytes) const = 0;
+  // The machine region extent containing the 24-bit bus `address` (ADR 0079 decision 4), else nullopt (no region: a pointer
+  // there is Unknown). The default view knows no region.
+  [[nodiscard]] virtual std::optional<M68kRegionExtent> region_of(std::uint32_t address) const {
+    (void)address;
+    return std::nullopt;
+  }
 };
 
 // A flat immutable image mapped at bus address `base` (caller-owned bytes; the span must outlive the view).
@@ -62,6 +77,8 @@ public:
   [[nodiscard]] std::optional<Instruction> decode(std::uint32_t pc) const override;
   [[nodiscard]] bool mapped(std::uint32_t pc) const override;
   [[nodiscard]] std::optional<std::uint32_t> immutable_read(std::uint32_t address, unsigned bytes) const override;
+  // The whole flat image is one immutable image region (id 0).
+  [[nodiscard]] std::optional<M68kRegionExtent> region_of(std::uint32_t address) const override;
 
 private:
   [[nodiscard]] bool contains(std::uint32_t address) const noexcept;
@@ -82,6 +99,8 @@ struct M68kAnalysisState {
   // PC of the physically preceding instruction when it is the sole predecessor via a sequential edge; nullopt:
   // any other (or an additional) predecessor, an entry, or a non-sequential edge.
   std::optional<std::uint32_t> flag_setter;
+  // A0-A7 (SEG-030-T003). Unknown in every reachable state unless the address domain is enabled.
+  std::array<M68kPointsTo, 8> address{};
 
   [[nodiscard]] static M68kAnalysisState unreachable() { return {}; }
   [[nodiscard]] static M68kAnalysisState all_unknown(analysis::UnknownReason reason = analysis::UnknownReason::unknown_input);
@@ -111,12 +130,31 @@ struct M68kPcIndexSiteReport {
   analysis::UnknownReason reason{analysis::UnknownReason::unknown_input};  // when not resolved
 };
 
+// ADR 0079 decision 5: the staged CPU-owned domains (T003: address; the others are delivered by later children).
+struct M68kAnalysisDomains {
+  bool address{};
+  bool memory{};
+  bool contexts{};
+  bool frames{};
+};
+
+// A `JMP/JSR (An)`, `d16(An)` or `(d8,An,Xn)` site (SEG-030-T003, address domain only).
+struct M68kAddressSiteReport {
+  M68kDynamicControlFamily family{M68kDynamicControlFamily::jump_address_indirect};
+  bool resolved{};
+  std::vector<std::uint32_t> targets;  // sorted distinct even mapped PCs; non-empty only when resolved
+  std::uint32_t odd_targets_excluded{};
+  analysis::UnknownReason reason{analysis::UnknownReason::unsupported_transfer};  // when not resolved
+  M68kAnalysisSubReason sub{M68kAnalysisSubReason::none};                         // when not resolved
+};
+
 struct M68kAnalysisConfig {
   bool accept_width_domains{};      // measurement variant: admit width-only index domains
   bool call_continuations{true};    // a call's stacked continuation is an opaque entry
   bool exception_continuations{};   // TRAP/TRAPV stacked continuation (strict model: off)
   bool pushed_code_continuations{}; // PEA of a code address (off)
-  std::set<std::uint32_t> pinned_sites;  // PC-indexed sites forced unresolved (invalidated)
+  std::set<std::uint32_t> pinned_sites;  // computed sites forced unresolved (invalidated)
+  M68kAnalysisDomains domains{};         // staged domains (all off: the SEG-029 baseline)
 };
 
 class M68kFiniteAdapter {
@@ -130,10 +168,14 @@ public:
   // Pure classification of a `JMP/JSR (d8,PC,Xn)` site against its input state.
   [[nodiscard]] M68kPcIndexSiteReport evaluate_pc_index_site(std::uint32_t pc, const M68kIrOperation &operation,
                                                              const State &in) const;
+  // Pure classification of an address-register-relative `JMP/JSR` site against its input state (address domain).
+  [[nodiscard]] M68kAddressSiteReport evaluate_address_site(std::uint32_t pc, const M68kIrOperation &operation,
+                                                            M68kDynamicControlFamily family, const State &in) const;
 
   [[nodiscard]] std::optional<M68kAnalysisImage::Instruction> decode(std::uint32_t pc) const;
 
 private:
+  void transfer_address_registers(const M68kIrOperation &operation, const State &in, State &out) const;
   const M68kAnalysisImage &image_;
   M68kAnalysisConfig config_;
   mutable std::map<std::uint32_t, std::optional<M68kAnalysisImage::Instruction>> decoded_;
@@ -148,6 +190,8 @@ struct M68kFiniteAnalysisResult {
   std::map<std::uint32_t, std::uint32_t> reached;  // decoded reached instruction start -> length
   std::set<std::uint32_t> undecodable;             // reached points with no decodable instruction
   std::map<std::uint32_t, M68kPcIndexSiteReport> pc_index_sites;
+  bool address_domain{};                                     // the address domain was enabled
+  std::map<std::uint32_t, M68kAddressSiteReport> address_sites;  // address-register-relative sites (address domain only)
   std::map<std::uint32_t, analysis::UnknownReason> unresolved_computed;  // every unresolved computed site
   analysis::Solution<M68kAnalysisState> solution;
 };
@@ -163,6 +207,10 @@ struct M68kFiniteAnalysisResult {
 // Data register `reg` modulo 2^width immediately before the instruction at `pc` (typed query).
 [[nodiscard]] analysis::FiniteValue m68k_query_data_register(const M68kFiniteAnalysisResult &result, std::uint32_t pc,
                                                              unsigned reg, unsigned width);
+
+// Address register `reg` (0..7) immediately before the instruction at `pc`: Unknown(reason) when the solve did not complete,
+// bottom when the point was not reached.
+[[nodiscard]] M68kPointsTo m68k_query_address_register(const M68kFiniteAnalysisResult &result, std::uint32_t pc, unsigned reg);
 
 // Deterministic serialization of the whole result (report/test use).
 [[nodiscard]] std::string format_m68k_finite_analysis(const M68kFiniteAnalysisResult &result);

@@ -7,6 +7,7 @@
 // cartridge mapping (or alias) and no other claim may own any of its bytes. Only cartridge bytes at their cartridge address are
 // immutable; an alias execution address is mutable work RAM.
 
+#include <algorithm>
 #include <span>
 #include <variant>
 
@@ -118,6 +119,21 @@ bool GenesisM68kAnalysisImage::mapped(std::uint32_t pc) const {
         .has_value();
   }
   return unique_cartridge(pc).has_value();
+}
+
+std::optional<M68kRegionExtent> GenesisM68kAnalysisImage::region_of(std::uint32_t address) const {
+  address &= bus_mask;
+  constexpr std::uint32_t work_ram_base = UINT32_C(0xE00000), io_base = UINT32_C(0xA00000);
+  if (address >= work_ram_base) return M68kRegionExtent{M68kRegionKind::work_ram, 0U, work_ram_base, UINT32_C(0x1000000) - work_ram_base};
+  if (address >= io_base) return M68kRegionExtent{M68kRegionKind::io_device, 0U, io_base, work_ram_base - io_base};
+  const auto owner = unique_cartridge(address);
+  if (!owner) return std::nullopt;
+  const auto &claim = program_->mapping_claims[images_.claim_index[*owner]];
+  const auto bytes = executable_image_bytes(images_.set, images_.set.images[*owner]).size();
+  const std::uint64_t end = std::min<std::uint64_t>(claim.target_end.value, claim.target_begin.value + bytes);
+  if (address >= end) return std::nullopt;
+  return M68kRegionExtent{M68kRegionKind::image, static_cast<std::uint32_t>(*owner), static_cast<std::uint32_t>(claim.target_begin.value),
+                          static_cast<std::uint32_t>(end - claim.target_begin.value)};
 }
 
 std::optional<std::uint32_t> GenesisM68kAnalysisImage::immutable_read(std::uint32_t address, unsigned bytes) const {

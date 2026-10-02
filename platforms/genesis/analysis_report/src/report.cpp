@@ -77,24 +77,7 @@ std::string site_label(const GenesisAnalysisComputedSite &site) {
 }  // namespace
 
 const char *genesis_analysis_sub_reason_name(GenesisAnalysisSubReason reason) noexcept {
-  switch (reason) {
-  case GenesisAnalysisSubReason::none: return "none";
-  case GenesisAnalysisSubReason::base_unknown: return "base_unknown";
-  case GenesisAnalysisSubReason::region_exit: return "region_exit";
-  case GenesisAnalysisSubReason::set_bound: return "set_bound";
-  case GenesisAnalysisSubReason::target_outside_image: return "target_outside_image";
-  case GenesisAnalysisSubReason::width_only: return "width_only";
-  case GenesisAnalysisSubReason::store_poison: return "store_poison";
-  case GenesisAnalysisSubReason::async_writer: return "async_writer";
-  case GenesisAnalysisSubReason::initial_memory: return "initial_memory";
-  case GenesisAnalysisSubReason::external_writer: return "external_writer";
-  case GenesisAnalysisSubReason::context_bound: return "context_bound";
-  case GenesisAnalysisSubReason::stack_unbalanced: return "stack_unbalanced";
-  case GenesisAnalysisSubReason::frame_unproven: return "frame_unproven";
-  case GenesisAnalysisSubReason::interrupt_resumption: return "interrupt_resumption";
-  case GenesisAnalysisSubReason::invalidated: return "invalidated";
-  }
-  return "invalid";
+  return m68k_analysis_sub_reason_name(reason);
 }
 
 const char *genesis_analysis_family_name(GenesisAnalysisFamily family) noexcept {
@@ -133,6 +116,7 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
   adapter_config.call_continuations = true;
   adapter_config.exception_continuations = false;
   adapter_config.pushed_code_continuations = false;
+  adapter_config.domains.address = config.domains.address;
   report.analysis = analyze_m68k_finite_values(*image, report.roots.roots, adapter_config, config.bounds);
   report.rounds = 1U;
   if (!report.analysis.complete) return report;  // every query Unknown(bound): no partial D
@@ -190,6 +174,11 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
         site.reason = recovery.reason;
         site.detail = pc_index_detail(recovery);
         if (site.resolved) site.targets = recovery.targets;
+      } else if (const auto address = report.analysis.address_sites.find(pc); address != report.analysis.address_sites.end()) {
+        site.resolved = address->second.resolved;
+        site.reason = address->second.reason;
+        site.detail = address->second.sub;
+        if (site.resolved) site.targets = address->second.targets;
       } else if (const auto reason = report.analysis.unresolved_computed.find(pc); reason != report.analysis.unresolved_computed.end()) {
         site.reason = reason->second;
       }
@@ -202,6 +191,8 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
     const auto family = site.call ? M68kDynamicControlFamily::call_pc_index : M68kDynamicControlFamily::jump_pc_index;
     report.sites[static_cast<std::size_t>(family)].erase(pc);
   }
+  for (const auto &[pc, site] : report.analysis.address_sites)
+    if (site.resolved) report.sites[static_cast<std::size_t>(site.family)].erase(pc);
   for (auto it = report.discovered.begin(); it != report.discovered.end(); ++it) {
     const auto next = std::next(it);
     if (next != report.discovered.end() && next->first < it->first + it->second) ++report.overlapping_starts;
@@ -303,7 +294,26 @@ std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport
   const analysis::Bounds effective{std::min(config.bounds.max_iterations, analysis::default_max_iterations),
                                    std::min(config.bounds.max_points, analysis::default_max_points)};
   out << ",\"bounds\":{\"max_iterations\":" << effective.max_iterations << ",\"max_points\":" << effective.max_points
-      << ",\"set_bound\":" << analysis::default_set_bound << '}';
+      << ",\"set_bound\":" << analysis::default_set_bound;
+  if (domains.address)  // SEG-030-T003 constants (absent from the baseline output, which stays byte-identical)
+    out << ",\"points_to_bound\":" << m68k_points_to_bound << ",\"exact_offset_bound\":" << m68k_exact_offset_bound
+        << ",\"strided_growth_bound\":" << m68k_strided_growth_bound;
+  out << '}';
+  if (domains.address) {
+    std::size_t resolved_sites = 0U, odd = 0U, max_site_targets = 0U;
+    std::set<std::uint32_t> targets;
+    for (const auto &[pc, site] : report.analysis.address_sites) {
+      (void)pc;
+      odd += site.odd_targets_excluded;
+      if (!site.resolved) continue;
+      ++resolved_sites;
+      max_site_targets = std::max(max_site_targets, site.targets.size());
+      targets.insert(site.targets.begin(), site.targets.end());
+    }
+    out << ",\"address_recovery\":{\"sites_encountered\":" << report.analysis.address_sites.size() << ",\"resolved\":" << resolved_sites
+        << ",\"recovered_targets\":" << targets.size() << ",\"max_targets_per_site\":" << max_site_targets
+        << ",\"odd_targets_excluded\":" << odd << '}';
+  }
   if (report.universe) out << ",\"universe_immutable_rom_aot\":" << *report.universe;
   out << '}';
   return out.str();

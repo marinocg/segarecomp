@@ -146,8 +146,8 @@ int run(int argc, char **argv) {
     usage(std::cerr);
     return 2;
   }
-  if (!config.domains.baseline()) {
-    // ADR 0079: the staged domains are delivered by SEG-030-T003..T006; until then only the baseline exists (fail closed).
+  if (config.domains.memory || config.domains.contexts || config.domains.frames) {
+    // ADR 0079: the address domain is delivered by SEG-030-T003; memory, contexts and frames by T004..T006 (fail closed).
     std::cerr << "segarecomp-genesis-analysis-report: staged domain not implemented\n";
     return 2;
   }

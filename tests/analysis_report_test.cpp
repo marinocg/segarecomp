@@ -145,6 +145,17 @@ void view_rules(const FrontendProgram &program) {
   expect(!view->immutable_read(0xFFFFFFU, 2U) && !view->immutable_read(0x7FFU, 2U), "immutable: reads past an image end fail closed");
   expect(!view->immutable_read(0x200U, 5U), "immutable: oversize read rejected");
 
+  // SEG-030-T003: region extents (ADR 0079 decision 4).
+  const auto cartridge = view->region_of(0x200U);
+  expect(cartridge && cartridge->kind == M68kRegionKind::image && cartridge->base == 0U && cartridge->size == 0x800U,
+         "regions: a cartridge address is in its immutable image extent");
+  const auto ram = view->region_of(alias_a);
+  expect(ram && ram->kind == M68kRegionKind::work_ram && ram->base == 0xE00000U && ram->size == 0x200000U,
+         "regions: an alias execution address is work RAM");
+  const auto io = view->region_of(0xC00004U);
+  expect(io && io->kind == M68kRegionKind::io_device, "regions: the VDP port window is the I/O/device region");
+  expect(!view->region_of(0x900U).has_value(), "regions: an address past the cartridge bytes has no region");
+
   expect(view->decode(alias_b_source + 2U).has_value(), "crossing: the instruction decodes at its cartridge address");
   expect(view->mapped(alias_b + 2U) && !view->decode(alias_b + 2U) &&
              view->status(alias_b + 2U) == GenesisM68kAnalysisImage::Status::rejected,
@@ -213,6 +224,49 @@ void baseline_against_challenger(const Fixture &f, const FrontendProgram &progra
          "bounds: an exhausted solve reports no partial D");
 }
 
+// SEG-030-T003: LEA $280(PC),A0; MOVEA.L (A0),A1; JSR (A1) through the Genesis view and the report families.
+void address_domain_report() {
+  Image image;
+  image.words(0x200U, {0x41FAU, 0x007EU, 0x2250U, 0x4E91U, 0x60FEU});
+  image.put32(0x280U, 0x300U);
+  image.words(0x300U, {0x4E71U, 0x4E75U});
+  auto program = make_genesis_bridge_startup_program(image.bytes, 0U, entry, std::nullopt);
+  expect(program && apply_genesis_immutable_rom_aot(*program), "address fixture program");
+  if (!program) return;
+  constexpr std::uint32_t site_pc = 0x206U;
+  const auto jsr_family = static_cast<std::size_t>(M68kDynamicControlFamily::call_address_indirect);
+
+  const GenesisAnalysisReportConfig baseline{};
+  const auto off = run_genesis_analysis_report(*program, baseline);
+  const auto off_site = off.computed_sites.find(site_pc);
+  expect(off_site != off.computed_sites.end() && off_site->second.family == GenesisAnalysisFamily::jsr_an &&
+             !off_site->second.resolved && off_site->second.reason == analysis::UnknownReason::unsupported_transfer &&
+             off_site->second.detail == GenesisAnalysisSubReason::none && !off.discovered.contains(0x300U) &&
+             off.sites[jsr_family].contains(site_pc),
+         "address off: the JSR (An) site is the baseline unresolved site");
+  expect(format_genesis_analysis_report_aggregate(off, baseline).find("address_recovery") == std::string::npos,
+         "address off: the baseline aggregate is unchanged (no address members)");
+
+  GenesisAnalysisReportConfig config{};
+  config.domains.address = true;
+  const auto on = run_genesis_analysis_report(*program, config);
+  const auto on_site = on.computed_sites.find(site_pc);
+  expect(on.analysis.complete && on_site != on.computed_sites.end() && on_site->second.family == GenesisAnalysisFamily::jsr_an &&
+             on_site->second.resolved && on_site->second.targets == std::vector<std::uint32_t>{0x300U},
+         "address on: JSR (An) resolves from the immutable table entry");
+  expect(on.discovered.contains(0x300U) && on.discovered.contains(0x302U) && !on.sites[jsr_family].contains(site_pc),
+         "address on: the target is discovered and the site is no longer an unresolved dynamic site");
+  const auto aggregate = format_genesis_analysis_report_aggregate(on, config);
+  expect(aggregate.find("\"jsr_an\":{\"sites\":1,\"resolved\":1,") != std::string::npos &&
+             aggregate.find("\"address_recovery\":{\"sites_encountered\":1,\"resolved\":1,") != std::string::npos,
+         "address on: per-family and address-recovery aggregates: " + aggregate);
+  expect(aggregate == format_genesis_analysis_report_aggregate(run_genesis_analysis_report(*program, config), config),
+         "address on: deterministic aggregate");
+  const auto private_output = format_genesis_analysis_report_private(on, aggregate);
+  expect(private_output.find("\"000206\":{\"family\":\"jsr_an\",\"outcome\":\"resolved\"") != std::string::npos,
+         "address on: the private computed_sites entry carries the resolved family");
+}
+
 void reject_invalid_images() {
   Image image;
   auto program = make_genesis_bridge_startup_program(image.bytes, 0U, entry, std::nullopt);
@@ -262,6 +316,7 @@ int main(int argc, char **argv) {
     baseline_against_challenger(f, *program);
     if (argc > 1) write_driver_inputs(argv[1], f, *program);
   }
+  address_domain_report();
   reject_invalid_images();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";

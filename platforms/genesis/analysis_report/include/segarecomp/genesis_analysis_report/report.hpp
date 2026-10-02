@@ -47,6 +47,10 @@ public:
   [[nodiscard]] std::optional<Instruction> decode(std::uint32_t pc) const override;
   [[nodiscard]] bool mapped(std::uint32_t pc) const override;
   [[nodiscard]] std::optional<std::uint32_t> immutable_read(std::uint32_t address, unsigned bytes) const override;
+  // SEG-030-T003 (ADR 0079 decision 4): a cartridge image (the unique owning `immutable_input` claim; id = its image index),
+  // 68K work RAM ($E00000-$FFFFFF, 64 KiB mirrored; ADR 0049 alias execution addresses are work RAM) or the I/O/device window
+  // ($A00000-$DFFFFF).
+  [[nodiscard]] std::optional<M68kRegionExtent> region_of(std::uint32_t address) const override;
 
   // Why `pc` does (not) decode, in the challenger's vocabulary (report use).
   [[nodiscard]] Status status(std::uint32_t pc) const;
@@ -66,25 +70,9 @@ private:
   GenesisM68kExecutableImages images_;
 };
 
-// ADR 0079 decision 10: CPU-owned sub-reasons; each Unknown carries one generic reason plus one of these.
-enum class GenesisAnalysisSubReason : std::uint8_t {
-  none,
-  base_unknown,
-  region_exit,
-  set_bound,
-  target_outside_image,
-  width_only,
-  store_poison,
-  async_writer,
-  initial_memory,
-  external_writer,
-  context_bound,
-  stack_unbalanced,
-  frame_unproven,
-  interrupt_resumption,
-  invalidated,
-};
-inline constexpr std::size_t genesis_analysis_sub_reason_count = 15U;
+// ADR 0079 decision 10: CPU-owned sub-reasons (`M68kAnalysisSubReason`); each Unknown carries one generic reason plus one of these.
+using GenesisAnalysisSubReason = M68kAnalysisSubReason;
+inline constexpr std::size_t genesis_analysis_sub_reason_count = m68k_analysis_sub_reason_count;
 [[nodiscard]] const char *genesis_analysis_sub_reason_name(GenesisAnalysisSubReason reason) noexcept;
 
 // ADR 0079 decision 10: report families of computed control sites.
@@ -105,7 +93,7 @@ enum class GenesisAnalysisFamily : std::uint8_t {
 inline constexpr std::size_t genesis_analysis_family_count = 12U;
 [[nodiscard]] const char *genesis_analysis_family_name(GenesisAnalysisFamily family) noexcept;
 
-// ADR 0079 decision 5: the staged domains (Phase A: only the baseline is implemented; every flag must be false).
+// ADR 0079 decision 5: the staged domains (T003 delivers `address`; the others are rejected until their children land).
 struct GenesisAnalysisDomains {
   bool address{};
   bool memory{};
