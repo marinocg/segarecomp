@@ -46,19 +46,22 @@ def cmake_block(text, target):
 
 
 # ADR 0072 layering amendment (SEG-032): the Genesis machine Z80 image registry/materialization may use exactly the Z80
-# emitter header and target. Every other codegen reference (common, M68k, Genesis wrapper) stays forbidden.
-ALLOWED_MACHINE_CODEGEN_INCLUDE = "segarecomp/codegen/c11/z80.hpp"
-ALLOWED_MACHINE_CODEGEN_TARGET = "segarecomp::codegen_c11_z80"
+# emitter header and target. ADR 0077 amendment (SEG-028): plus the CPU-neutral executable-image projection onto that emitter's
+# input (header z80_executable_image.hpp, target codegen_c11_z80_image). Every other codegen reference (common, M68k, Genesis
+# wrapper) stays forbidden. Targets are matched as whole tokens, so no other `codegen_c11_z80*` name passes by prefix.
+ALLOWED_MACHINE_CODEGEN_INCLUDES = ("segarecomp/codegen/c11/z80.hpp", "segarecomp/codegen/c11/z80_executable_image.hpp")
+ALLOWED_MACHINE_CODEGEN_TARGETS = ("segarecomp::codegen_c11_z80", "segarecomp::codegen_c11_z80_image")
+ALLOWED_MACHINE_CODEGEN_INCLUDE = ALLOWED_MACHINE_CODEGEN_INCLUDES[0]
 
 
 def machine_include_failures(name, incs):
     return [f"genesis machine {name} includes {i}" for i in incs
-            if "codegen/c11" in i and i != ALLOWED_MACHINE_CODEGEN_INCLUDE]
+            if "codegen/c11" in i and i not in ALLOWED_MACHINE_CODEGEN_INCLUDES]
 
 
 def machine_cmake_failures(text):
-    stripped = text.replace(ALLOWED_MACHINE_CODEGEN_TARGET, "")
-    return ["genesis machine CMake references codegen"] if "codegen" in stripped else []
+    tokens = re.findall(r"[A-Za-z0-9_:.\-]*codegen[A-Za-z0-9_:.\-]*", text)
+    return ["genesis machine CMake references codegen"] if any(t not in ALLOWED_MACHINE_CODEGEN_TARGETS for t in tokens) else []
 
 
 def negative_controls():
@@ -70,7 +73,8 @@ def negative_controls():
         bad.append("negative control: allowed Z80 include rejected")
     for t in ("target_link_libraries(a PUBLIC segarecomp::codegen_c11_genesis)",
               "target_link_libraries(a PUBLIC segarecomp::codegen_c11)",
-              "target_link_libraries(a PUBLIC segarecomp::codegen_c11_m68k)"):
+              "target_link_libraries(a PUBLIC segarecomp::codegen_c11_m68k)",
+              "target_link_libraries(a PUBLIC segarecomp::codegen_c11_z80_genesis)"):
         if not machine_cmake_failures(t):
             bad.append(f"negative control: link {t} not rejected")
     return bad

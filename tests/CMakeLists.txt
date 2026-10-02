@@ -1496,9 +1496,6 @@ endif()
 set_property(TEST ${_z80_group_slices} sms_native_build_test sms_native_build_policy_test sms_owner_group_equivalence_test
   sms_owner_group_equivalence_vdp_test sms_owner_group_equivalence_render_test PROPERTY TIMEOUT 3600)
 
-# CI sharding (see ci_shards.cmake, which also registers its guard test): must come after the LAST add_test and label assignment so
-# every tier test is partitioned.
-include(${CMAKE_CURRENT_SOURCE_DIR}/ci_shards.cmake)
 # SEG-028-T005 (ADR 0077, ADR 0049, ADR 0076): the consumer-route ADR 0049 alias preparation of `segarecomp build`. The library
 # (stop record, derivation, merge, bounded loop with every termination), its parity with tools/genesis_startup_bridge.py on synthetic
 # inputs, and the real build route on project-authored ROMs (one alias; a computed, non-verbatim RAM routine stays fail-closed).
@@ -1514,3 +1511,7 @@ add_test(NAME genesis_m68k_alias_build_test COMMAND ${Python3_EXECUTABLE}
 set_property(TEST genesis_m68k_alias_build_test APPEND PROPERTY LABELS full)
 set_property(TEST genesis_m68k_alias_build_test PROPERTY TIMEOUT 1800)
 set_property(TEST genesis_m68k_alias_build_test genesis_m68k_copy_alias_parity_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
+# CI sharding (see ci_shards.cmake, which also registers its guard test): must come after the LAST add_test and label assignment so
+# every tier test is partitioned.
+include(${CMAKE_CURRENT_SOURCE_DIR}/ci_shards.cmake)

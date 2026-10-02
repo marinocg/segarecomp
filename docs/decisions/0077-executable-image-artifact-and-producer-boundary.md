@@ -128,6 +128,11 @@ each existing producer is re-expressed without changing generated output.
       execution, same fail-closed behaviour, equivalent artifacts, deterministic output, no runtime decoder, no compatibility
       regression).
 
+**Layering amendment (ADR 0072).** The Genesis machine Z80 library (`segarecomp_machine_genesis_z80`) may additionally include
+`segarecomp/codegen/c11/z80_executable_image.hpp` and link `segarecomp::codegen_c11_z80_image`, the CPU-neutral projection onto the
+Z80 emitter input; every other codegen reference stays forbidden. `tests/codegen_c11_layering_test.py` enforces the two allowed headers
+and targets as exact tokens (no prefix match).
+
 ## Consequences
 
 - Every existing executable-image producer is expressed through one validated, copy-safe artifact, and generated output is unchanged.
