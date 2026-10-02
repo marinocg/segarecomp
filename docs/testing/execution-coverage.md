@@ -130,3 +130,31 @@ Several outputs are commercial-derived local diagnostics:
 Keep them under ignored build directories and never commit or persist them. Durable evidence may contain only
 the aggregate counts, ratios, digests, frame and dispatch counts, and generic family names printed by the
 tools above.
+
+## Planned, not implemented: cross-CPU execution-PC observation (SEG-027-T005, ADR 0076)
+
+Complete retired-PC observation exists only for M68K on Genesis (above). Neither the Master System Z80 nor the Genesis Z80 has one. The
+Genesis materialization pass observes image epochs, not PCs.
+
+**When it is needed.** It is not needed while Z80 stays broad AOT, because no Z80 admission claim exists. It **is** a prerequisite for:
+
+- any Z80-facing discovery or selective-admission claim;
+- comparing a future static Genesis Z80 image producer's executed footprint with a materialized image;
+- the SEG-031 multi-platform comparison, which needs observed coverage on Z80 titles.
+
+SEG-029's synthetic Z80 adapter does not need it, because its fixtures carry their own ground truth.
+
+**Owner.** SEG-031, as a child before its multi-platform comparison. Any earlier milestone that makes a Z80-facing claim must deliver
+the observer first.
+
+**Requirements.** These carry over from the M68K observer:
+
+- observational only, with zero semantic effect (whole-runtime equality with and without the observer);
+- disabled by default (a NULL host pointer), and excluded from every report and digest;
+- complete retired guest-PC observation, keyed by `(code-image identity, PC)` for Z80 so that banked images do not conflate;
+- a first-entry witness where useful, with interrupt-resumption attribution;
+- exact PCs stored only in private, ignored output;
+- durable persistence of sanitized aggregates only.
+
+**Seam.** A small CPU/platform-neutral observation interface is extracted from the M68K pattern only when the Z80 observer becomes its
+second real consumer. Until then nothing is generalized.

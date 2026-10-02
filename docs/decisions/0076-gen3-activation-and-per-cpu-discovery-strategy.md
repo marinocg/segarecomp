@@ -273,3 +273,22 @@ These hold unless a later ADR explicitly argues otherwise:
   because Z80 semantics currently reach code only through C11 lowering.
 - SEG-029 does not depend on SEG-028.
 - The SEG-029 milestone record (harness backlog) carries the rewritten Outcome/Scope/Acceptance and a seven-child Refinement plan.
+
+### T005 (future boundaries: SEG-030, SEG-031, cross-CPU validation)
+
+- **SEG-030** stays `deferred`. Its real prerequisites:
+  - SEG-029 is required.
+  - SEG-028 is required only for RAM-executed M68K images. Over immutable cartridge images it could proceed with SEG-029 alone, and it
+    may be re-pointed if SEG-028 is ever postponed.
+- **SEG-030 targets the measured blocker** (width-only dispatch fed by object fields; `(An)` gates) through staged workstreams. It must
+  first reproduce the SEG-026-T002 baseline exactly. It remains `precise set OR Unknown`, and report-only.
+- **SEG-031** stays `deferred` until report-only SEG-030 shows a substantial benefit, falsified on more than one title, with a safe
+  fallback design.
+  - The production candidate is a precise graph plus bounded fallback; broad AOT is first-class.
+  - The SEG-024 operand-width region rule is forbidden.
+  - Fallback islands need proven image or memory structure.
+  - Per-CPU asymmetry is intended: Z80 may stay broad AOT, and Z80 VSA is not required.
+- **Cross-CPU execution-PC observation** (Z80/SMS and Genesis Z80) is planned in `docs/testing/execution-coverage.md`.
+  - Owner: SEG-031.
+  - It is a prerequisite for any Z80-facing discovery or admission claim, but not for SEG-029's synthetic Z80 adapter.
+  - A neutral observation seam is extracted only when it has two consumers.
