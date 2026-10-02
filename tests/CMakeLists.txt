@@ -1081,7 +1081,7 @@ set_property(TEST genesis_z80_forbidden_identifiers_test APPEND PROPERTY LABELS 
 add_test(NAME genesis_z80_build_pipeline_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_build_pipeline_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST genesis_z80_build_pipeline_test APPEND PROPERTY LABELS full)
-set_property(TEST genesis_z80_build_pipeline_test PROPERTY TIMEOUT 1500)
+set_property(TEST genesis_z80_build_pipeline_test PROPERTY TIMEOUT 3000)
 set_property(TEST genesis_z80_forbidden_identifiers_test genesis_z80_build_pipeline_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 add_executable(z80_lowering_probe tools/z80_lowering_probe.cpp)
 target_link_libraries(z80_lowering_probe PRIVATE segarecomp::codegen_c11_z80)
@@ -1421,3 +1421,7 @@ if(WIN32 AND CMAKE_C_COMPILER_ID STREQUAL "Clang")
       "CCC_OVERRIDE_OPTIONS=set:#^-D_CRT_SECURE_NO_WARNINGS ^-D_CRT_NONSTDC_NO_WARNINGS")
   endforeach()
 endif()
+
+# CTest's default per-test timeout is 1500 s. These tests measured 580-1480 s on a 4-core CI runner running 8 tests wide (GCC):
+# z80_owner_group_differential_test finished 21 s before the default limit, so give the long compile-bound tests real headroom.
+set_property(TEST z80_owner_group_differential_test sms_native_build_test sms_owner_group_equivalence_test PROPERTY TIMEOUT 3600)

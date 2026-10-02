@@ -8,3 +8,9 @@ tools/z80_legal_forms.py text eol=lf
 tests/fixtures/sms-*.json text eol=lf
 tools/sms_capabilities.py text eol=lf
 tools/sms_fixture_rom.py text eol=lf
+# Vendored ymfm: checkout bytes must be the vendored bytes (the provenance test hashes them; autocrlf would break it).
+libs/device/sega/ym2612/third_party/ymfm/** -text
+tests/fixtures/ymfm-vendored-sha256.txt text eol=lf
+tests/fixtures/genesis-z80-*.json text eol=lf
+tests/fixtures/genesis-z80-forbidden-identifiers.txt text eol=lf
+tools/genesis_z80_fixture_rom.py text eol=lf

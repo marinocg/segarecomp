@@ -19,6 +19,11 @@ def main():
     if shutil.which("bash") is None:
         print("SKIP: no bash")
         return 0
+    if sys.platform == "win32":
+        # On a Windows host `bash` may resolve to the WSL launcher and `find` to find.exe, so a pass or fail here would not
+        # describe the script. The release workflow runs trim-zig.sh under Git-bash on the Windows package-smoke job.
+        print("SKIP: trim-zig.sh is exercised by the Windows package smoke job (Git-bash), not by a bare Windows PATH")
+        return 0
     failures = []
     for family in ("linux", "macos", "windows"):
         with tempfile.TemporaryDirectory() as tmp:

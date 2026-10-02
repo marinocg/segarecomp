@@ -350,6 +350,11 @@ std::optional<std::vector<std::uint8_t>> read_exact(const fs::path &path, std::s
   return bytes;
 }
 
+// GCC's -Wmisleading-indentation is super-linear in the size of a translation unit: on a generated ~800 KB Z80 owner unit it
+// costs 4-5x the whole -O0 compile (measured under GCC 13). The generated C is machine-formatted, so the warning cannot say
+// anything about it; every other -Wall/-Wextra/-pedantic diagnostic stays enabled. Unknown -Wno- options are ignored by GCC/Clang.
+inline const char *const kGeneratedUnitFlag = "-Wno-misleading-indentation";
+
 struct GenesisSoundBuild {
   GenesisSoundBuild(const Options &opts, Log &lg) : options(opts), log(lg) {}
   const Options &options;
@@ -455,7 +460,7 @@ struct GenesisSoundBuild {
       CompileJob job;
       job.source = source;
       job.object = object;
-      job.extra = {"-I", z80_dir.string()};
+      job.extra = {"-I", z80_dir.string(), kGeneratedUnitFlag};
       batch.push_back(job);
       fresh.emplace_back(key, object);
       z80_current.push_back(object);
@@ -588,6 +593,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   std::vector<std::string> shard_include;
   if (units.size() > 1 || fs::is_directory(shard_dir, ec)) shard_include = {"-I", shard_dir.string()};
   const auto with_shard = [&](std::vector<std::string> extra) {
+    extra.push_back(kGeneratedUnitFlag);
     extra.insert(extra.end(), shard_include.begin(), shard_include.end());
     return extra;
   };
@@ -850,7 +856,7 @@ int segarecomp_build_command(int argc, char **argv) {
       base.insert(base.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", "-O" + options.optimize, "-D_CRT_SECURE_NO_WARNINGS",
                                "-I", (root / "libs" / "codegen" / "c11" / "include").string(), "-I", runtime.string(),
                                "-I", (psg / "include").string(), "-I", shard_dir.string()});
-      for (const auto &unit : units) compile.push_back({unit, {}});
+      for (const auto &unit : units) compile.push_back({unit, {kGeneratedUnitFlag}});
       for (const char *name : {"sms_memory.c", "sms_sha256.c", "sms_input.c", "sms_machine.c", "sms_psg.c", "sms_pad.c",
                                "sms_vdp.c", "sms_render.c"})
         compile.push_back({runtime / name, {}});

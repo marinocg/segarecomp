@@ -49,7 +49,7 @@ def build(rom_bytes, out, jobs=None, keep=False, compiler=None):
         command += ["--jobs", str(jobs)]
     if keep:
         command += ["--keep-work", "1"]
-    done = subprocess.run(command, text=True, capture_output=True, timeout=900)
+    done = subprocess.run(command, text=True, capture_output=True, timeout=1800)
     status = json.loads((out / "status.json").read_text()) if (out / "status.json").exists() else {}
     return done, status
 
