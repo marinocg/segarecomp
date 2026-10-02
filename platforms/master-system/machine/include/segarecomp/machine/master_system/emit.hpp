@@ -18,6 +18,7 @@
 
 #include "segarecomp/codegen/c11/z80.hpp"
 #include "segarecomp/machine/master_system/cartridge.hpp"
+#include "segarecomp/recompiler/executable_image.hpp"
 
 namespace segarecomp::machine::master_system {
 
@@ -33,6 +34,7 @@ struct EmitOutcome {
   CartridgeIdentity identity;
   codegen::z80::EmitStats stats;
   std::vector<codegen::z80::OwnerRecord> owners;  // filled when request.codegen.record_owners is set
+  ImageProvenanceCounts provenance;               // sanitized executable-image provenance of the emitted images (SEG-028)
   [[nodiscard]] bool ok() const noexcept { return error.empty(); }
 };
 

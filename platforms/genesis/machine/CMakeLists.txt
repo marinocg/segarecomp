@@ -16,6 +16,6 @@ target_link_libraries(segarecomp_machine_genesis PUBLIC segarecomp::media)
 # hash, never the 68000 side.
 add_library(segarecomp_machine_genesis_z80 src/z80_images.cpp src/z80_materialization.cpp)
 add_library(segarecomp::machine_genesis_z80 ALIAS segarecomp_machine_genesis_z80)
-target_link_libraries(segarecomp_machine_genesis_z80 PUBLIC segarecomp::codegen_c11_z80 segarecomp::media)
+target_link_libraries(segarecomp_machine_genesis_z80 PUBLIC segarecomp::codegen_c11_z80 segarecomp::codegen_c11_z80_image segarecomp::media)
 target_include_directories(segarecomp_machine_genesis_z80 PUBLIC include)
 segarecomp_enable_warnings(segarecomp_machine_genesis_z80)

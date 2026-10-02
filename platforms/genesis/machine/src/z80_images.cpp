@@ -5,6 +5,7 @@
 #include <fstream>
 #include <sstream>
 
+#include "segarecomp/codegen/c11/z80_executable_image.hpp"
 #include "segarecomp/sha256.hpp"
 
 namespace segarecomp::machine::genesis::z80 {
@@ -121,19 +122,45 @@ AddOutcome Registry::add(const Epoch& epoch, std::uint32_t& bound_ordinal) {
   return AddOutcome::added;
 }
 
-codegen::z80::ImageSet build_image_set(const Registry& registry) {
-  codegen::z80::ImageSet set;
+ExecutableImageSet executable_images(const Registry& registry, const ImageProducer& producer) {
+  ExecutableImageSet set;
+  set.cpu = CpuVariant::z80;
+  set.platform_selector = true;  // every image maps $0000; the activation signature selects the live one (ADR 0073)
   for (const Image& image : registry.images()) {
-    codegen::z80::CodeImage code;
-    code.identity = image.ordinal;
-    code.kind = codegen::z80::ImageKind::banked;
-    code.live_bytes = true;
-    code.bytes.assign(image.ram.begin(), image.ram.end());
-    code.bytes.insert(code.bytes.end(), image.ram.begin(), image.ram.end());  // the 8 KiB RAM is mirrored at $2000
-    code.windows.push_back({0x0000, 0, static_cast<std::uint32_t>(kWindowBytes)});
-    set.images.push_back(std::move(code));
+    ExecutableImage out;
+    out.id = ImageId{image.ordinal};
+    out.bytes.assign(image.ram.begin(), image.ram.end());
+    out.bytes.insert(out.bytes.end(), image.ram.begin(), image.ram.end());  // the 8 KiB RAM is mirrored at $2000
+    out.mappings.push_back({0x0000, 0, static_cast<std::uint32_t>(kWindowBytes)});
+    out.provenance.authority = producer.authority;
+    out.provenance.producer = producer.name;
+    out.provenance.evidence.push_back({"derivation", "runnable_epoch_snapshot"});
+    out.provenance.evidence.push_back({"ordinal", std::to_string(image.ordinal)});
+    out.provenance.evidence.push_back({"content_digest", to_hex(image.content)});
+    out.provenance.evidence.push_back({"signature_digest", to_hex(image.signature)});
+    out.provenance.evidence.push_back({"ram_mirrors", std::to_string(kWindowBytes / kRamBytes)});
+    out.verification = ImageVerification::structural;
+    set.images.push_back(std::move(out));
   }
   return set;
+}
+
+bool registries_equal(const Registry& left, const Registry& right) {
+  const auto& a = left.images();
+  const auto& b = right.images();
+  if (a.size() != b.size()) return false;
+  for (std::size_t i = 0; i < a.size(); ++i)
+    if (a[i].ordinal != b[i].ordinal || a[i].content != b[i].content || a[i].signature != b[i].signature || a[i].ram != b[i].ram)
+      return false;
+  return true;
+}
+
+codegen::z80::ImageSet build_image_set(const Registry& registry) {
+  const ExecutableImageSet images = executable_images(registry);
+  const std::vector<codegen::z80::ImageKind> kinds(images.images.size(), codegen::z80::ImageKind::banked);
+  codegen::z80::ImageProjection projected = codegen::z80::project_executable_images(images, kinds);
+  // A registry always projects (dense ordinals <= kMaxImages, one 16 KiB window at $0000); fail closed to no images otherwise.
+  return projected.ok() ? std::move(projected.set) : codegen::z80::ImageSet{};
 }
 
 EmitOutcome emit_registry(const Registry& registry, const EmitRequest& request) {
@@ -145,7 +172,14 @@ EmitOutcome emit_registry(const Registry& registry, const EmitRequest& request) 
     codegen::z80::EmitOptions options = request.codegen;
     options.directory = request.directory;
     options.stem = request.stem;
-    const codegen::z80::EmitResult emitted = codegen::z80::emit_image_set(build_image_set(registry), options);
+    const ExecutableImageSet images = executable_images(registry);
+    const std::vector<codegen::z80::ImageKind> kinds(images.images.size(), codegen::z80::ImageKind::banked);
+    const codegen::z80::ImageProjection projected = codegen::z80::project_executable_images(images, kinds);
+    if (!projected.ok()) {
+      outcome.error = "z80 image projection: " + projected.error;
+      return outcome;
+    }
+    const codegen::z80::EmitResult emitted = codegen::z80::emit_image_set(projected.set, options);
     if (!emitted.error.empty()) {
       outcome.error = "z80 emit: " + emitted.error;
       return outcome;

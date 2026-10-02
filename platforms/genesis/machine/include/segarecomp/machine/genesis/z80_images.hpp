@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "segarecomp/codegen/c11/z80.hpp"
+#include "segarecomp/recompiler/executable_image.hpp"
 
 namespace segarecomp::machine::genesis::z80 {
 
@@ -76,7 +77,23 @@ class Registry {
   std::uint32_t last_bound_ = 0;
 };
 
+// SEG-028-T003 (ADR 0077): the producer boundary. A registry is described as CPU-neutral executable images: one image per registered
+// snapshot, id = ordinal, the 16 KiB Z80 code window (the 8 KiB snapshot twice) as owned bytes with one mapping at $0000, verification
+// `structural` (the RAM-backed guard), and the activation signature as the platform selector. The authority and producer name belong to
+// whoever filled the registry: the build-time materializer by default; a future static producer (or a test stand-in) that fills an equal
+// registry declares `static_proof` and yields the same projected ImageSet, so registry, AOT, runtime selection and devices are unchanged
+// (ADR 0073 decision 8).
+struct ImageProducer {
+  ImageAuthority authority = ImageAuthority::bounded_build_time_materialization;
+  std::string name = "genesis.z80_materializer";
+};
+[[nodiscard]] ExecutableImageSet executable_images(const Registry& registry, const ImageProducer& producer = {});
+
+// Registry equality (the replacement proof): the same ordered images with the same ordinal, content hash, signature and snapshot.
+[[nodiscard]] bool registries_equal(const Registry& left, const Registry& right);
+
 // One RAM-backed banked image per registered snapshot: window $0000-$3FFF (the snapshot twice), identity = ordinal.
+// = executable_images(registry) projected onto the Z80 emitter input with every image banked.
 [[nodiscard]] codegen::z80::ImageSet build_image_set(const Registry& registry);
 
 struct EmitRequest {
