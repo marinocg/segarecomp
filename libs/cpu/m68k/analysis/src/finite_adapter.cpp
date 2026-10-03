@@ -1663,6 +1663,34 @@ bool may_release(const M68kPointsTo &targets, std::uint32_t span, const std::vec
   return false;
 }
 
+// SEG-030-T010: the bus ranges a store of `span` bytes at known `targets` may touch, clipped to `ranges` and merged into `out`.
+// Returns false when the store touches no observed range.
+bool observe_store(const M68kPointsTo &targets, std::uint32_t span, const std::vector<std::pair<std::uint32_t, std::uint32_t>> &ranges,
+                   std::vector<std::pair<std::uint32_t, std::uint32_t>> &out) {
+  bool touched = false;
+  for (const auto &[region, offsets] : targets.pairs) {
+    const std::uint64_t lo = static_cast<std::uint64_t>(region.base & bus_mask) + offsets.lo();
+    const std::uint64_t hi = static_cast<std::uint64_t>(region.base & bus_mask) + offsets.hi() + span;
+    for (const auto &[first, last] : ranges) {
+      if (!(lo < last && first < hi)) continue;
+      touched = true;
+      out.emplace_back(static_cast<std::uint32_t>(std::max<std::uint64_t>(lo, first)),
+                       static_cast<std::uint32_t>(std::min<std::uint64_t>(hi, last)));
+    }
+  }
+  return touched;
+}
+
+void merge_ranges(std::vector<std::pair<std::uint32_t, std::uint32_t>> &ranges) {
+  std::sort(ranges.begin(), ranges.end());
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> merged;
+  for (const auto &range : ranges) {
+    if (!merged.empty() && range.first <= merged.back().second) merged.back().second = std::max(merged.back().second, range.second);
+    else merged.push_back(range);
+  }
+  ranges = std::move(merged);
+}
+
 // The policy the solution itself requires (ADR 0079 decisions 7 and 9) plus the memory statistics of the run.
 M68kMemoryPolicy derive_memory_policy(const M68kAnalysisImage &image, const M68kAnalysisConfig &config, M68kFiniteAnalysisResult &result) {
   M68kMemoryPolicy derived;
@@ -1704,6 +1732,11 @@ M68kMemoryPolicy derive_memory_policy(const M68kAnalysisImage &image, const M68k
       if (targets.is_bottom()) continue;
       stores = true;
       if (!targets.is_known()) ++report.unknown_target_stores;
+      if (!config.memory.observed_store_ranges.empty()) {
+        if (!targets.is_known()) ++report.observed_unknown_target_stores;
+        else if (observe_store(targets, span, config.memory.observed_store_ranges, report.observed_store_ranges))
+          ++report.observed_known_stores;
+      }
       if (may_release(targets, span, config.memory.release_ranges)) {
         ++report.release_stores;
         release = true;
@@ -1736,8 +1769,14 @@ M68kMemoryPolicy derive_memory_policy(const M68kAnalysisImage &image, const M68k
     if (!read) ++report.precise_reads;
     else ++report.unknown_reads[*read];
   }
+  merge_ranges(report.observed_store_ranges);
   report.release_store = release;
-  if (release && !config.memory.assume_no_external_writer) derived.external_writer = true;
+  // SEG-030-T010: a credited platform bound replaces the blanket rule (every cell) by the bounded ranges.
+  if (release && !config.memory.assume_no_external_writer) {
+    if (!config.memory.external_writer_bound) derived.external_writer = true;
+    else
+      for (const auto &range : *config.memory.external_writer_bound) derived.add_async(range);
+  }
   return derived;
 }
 

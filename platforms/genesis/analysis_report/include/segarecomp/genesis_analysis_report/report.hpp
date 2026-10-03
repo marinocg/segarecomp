@@ -32,6 +32,7 @@
 #include "segarecomp/analysis/solver.hpp"
 #include "segarecomp/cpu/m68k/analysis/finite_adapter.hpp"
 #include "segarecomp/genesis_analysis_report/interrupt_premise.hpp"
+#include "segarecomp/genesis_analysis_report/z80_ram_write_proof.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
 #include "segarecomp/machine/genesis/reachability_challenger.hpp"
 
@@ -114,6 +115,10 @@ struct GenesisAnalysisReportConfig {
   // SEG-030-T006: which installed, undelivered interrupt vectors are potential asynchronous sources (frames domain only). The
   // Genesis board premise is the default; `unconfigured` is the conservative MC68000 default (comparison and tests).
   GenesisInterruptPremise interrupt_premise{GenesisInterruptPremise::genesis_board};
+  // SEG-030-T010: the statically known Z80 image set of the program (z80_ram_write_proof.hpp). nullopt: unknown (no static
+  // derivation of 68K-uploaded Z80 images exists; the CLI never sets it, and a runtime snapshot is never an input). Synthetic tests
+  // supply project-authored images.
+  std::optional<std::vector<GenesisZ80Image>> z80_images;
 };
 
 // SEG-030-T004 (ADR 0079 decision 7): the Genesis bus range a store to which may release the Z80 (the Z80 control block: memory
@@ -156,6 +161,11 @@ struct GenesisAnalysisReport {
     std::size_t unresolved_sites{};  // unresolved computed sites of the memory run (next to every memory-derived resolution)
   };
   std::optional<MemoryComparison> memory_comparison;
+  // SEG-030-T010 (memory domain): the Z80 work-RAM store-freedom proof over the final run's 68K stores, and whether its bound was
+  // credited (the run used it instead of the blanket external-writer rule).
+  std::optional<GenesisZ80RamWriteProof> z80_proof;
+  bool z80_bound_credited{};
+  std::uint32_t z80_proof_runs{};  // analysis runs of the proof/analysis fixed point (1 when the blanket rule is used)
 };
 
 [[nodiscard]] GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program,

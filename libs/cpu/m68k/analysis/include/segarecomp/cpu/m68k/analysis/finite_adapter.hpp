@@ -204,6 +204,12 @@ struct M68kMemoryConfig {
   std::vector<std::pair<std::uint32_t, std::uint32_t>> release_ranges;
   // DIAGNOSTIC premise ablation only (never credited): never derive the external writer.
   bool assume_no_external_writer{};
+  // SEG-030-T010: a credited bound on the work-RAM writes of the released bus master, supplied by a platform proof. nullopt (the
+  // default) is unbounded: a release store makes every work-RAM cell externally written. Otherwise a release store makes exactly
+  // these tracked ranges asynchronous; an empty set means the released master never writes work RAM.
+  std::optional<std::vector<M68kAsyncRange>> external_writer_bound;
+  // SEG-030-T010: bus ranges [first, last) whose stores the run reports for a platform proof (Genesis: the Z80 area). Report only.
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> observed_store_ranges;
   M68kMemoryPolicy policy;  // the starting configuration (normally empty)
 };
 
@@ -422,6 +428,11 @@ struct M68kMemoryReport {
   std::size_t max_cells{};
   std::size_t precise_reads{};          // memory-source operands of work RAM (or an Unknown address) read precisely
   std::map<std::pair<analysis::UnknownReason, M68kAnalysisSubReason>, std::size_t> unknown_reads;
+  // SEG-030-T010: the stores in the analysed states (writer-only instances included) that may touch an observed range: the merged
+  // bus ranges [first, last) of the known targets, clipped to the observed ranges, and the count of stores with an Unknown target.
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> observed_store_ranges;
+  std::size_t observed_known_stores{};
+  std::size_t observed_unknown_target_stores{};
 };
 
 struct M68kAnalysisConfig {

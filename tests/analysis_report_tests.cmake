@@ -231,3 +231,10 @@ add_test(NAME analysis_build_graph_plant_test COMMAND ${Python3_EXECUTABLE} ${CM
   plant --source-root ${PROJECT_SOURCE_DIR} --cmake ${CMAKE_COMMAND} --generator ${CMAKE_GENERATOR})
 set_property(TEST analysis_build_graph_plant_test APPEND PROPERTY LABELS full)
 set_property(TEST analysis_build_graph_plant_test PROPERTY TIMEOUT 600)
+
+# SEG-030-T010 (ADR 0079 decision 7): the Genesis Z80 work-RAM store-freedom proof and its credited use by the report driver.
+add_executable(analysis_genesis_z80_proof_test analysis_genesis_z80_proof_test.cpp)
+target_link_libraries(analysis_genesis_z80_proof_test PRIVATE segarecomp::genesis_analysis_report)
+segarecomp_enable_warnings(analysis_genesis_z80_proof_test)
+add_test(NAME analysis_genesis_z80_proof_test COMMAND analysis_genesis_z80_proof_test)
+set_property(TEST analysis_genesis_z80_proof_test APPEND PROPERTY LABELS full fast)

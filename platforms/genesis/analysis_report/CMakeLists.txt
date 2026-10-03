@@ -4,9 +4,10 @@
 add_library(segarecomp_genesis_analysis_report
   src/image_view.cpp
   src/report.cpp
+  src/z80_ram_write_proof.cpp
 )
 add_library(segarecomp::genesis_analysis_report ALIAS segarecomp_genesis_analysis_report)
-target_link_libraries(segarecomp_genesis_analysis_report PUBLIC segarecomp::machine_genesis segarecomp::cpu_m68k_analysis)
+target_link_libraries(segarecomp_genesis_analysis_report PUBLIC segarecomp::machine_genesis segarecomp::cpu_m68k_analysis segarecomp::cpu_z80)
 target_include_directories(segarecomp_genesis_analysis_report PUBLIC include)
 segarecomp_enable_warnings(segarecomp_genesis_analysis_report)
 

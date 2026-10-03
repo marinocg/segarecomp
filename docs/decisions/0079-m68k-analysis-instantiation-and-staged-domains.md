@@ -187,8 +187,8 @@ reproduce the SEG-026-T002 strict row exactly.
      - every read of mutable work RAM is `Unknown` (`external_writer` -> `unknown_input`), and no work-RAM strong-update fact survives.
    - **Exclusion.** A program that provably never releases the Z80 (no such store in `D`, under the closure premise) excludes
      external writers; so does a successful T010 proof below.
-   - **Z80 store-freedom proof (owned by SEG-030-T010, a new bounded task; pending).** This is a SEG-030 precision blocker, not a
-     future candidate. T010 attempts a conservative static proof that no reachable Z80 store can target 68K work RAM while the analysed
+   - **Z80 store-freedom proof (SEG-030-T010; implemented as a Genesis-owned report-only proof, record T010; it does not hold for
+     Sonic: `image_set_unknown`, `m68k_store_into_z80_ram_unbounded`).** This is a SEG-030 precision blocker, not a future candidate. T010 attempts a conservative static proof that no reachable Z80 store can target 68K work RAM while the analysed
      program runs. Inputs:
      - the 68K release/BUSREQ/RESET state;
      - the known materialized Z80 executable images (ADR 0077 / SEG-028 model; Z80 support from SEG-008/009/032/033);
@@ -241,7 +241,8 @@ reproduce the SEG-026-T002 strict row exactly.
 - T002 lands the report-only driver and the oracle-level regression baseline before any domain is credited.
 - T003..T006 add the admitted domains in `libs/cpu/m68k/analysis`, each inert when its flag is off, so the baseline stays reproducible.
 - T006 (extended) and T010 own the two environmental writer proofs of decision 7 (interrupt/handler-stack precision; Z80 work-RAM
-  store freedom). T006 is implemented as the `frames` domain (record T006); T010 is pending.
+  store freedom). T006 is implemented as the `frames` domain (record T006); T010 is implemented as the Genesis Z80 work-RAM
+  store-freedom proof (record T010), which keeps the blanket external writer on Sonic with typed reasons.
 - A domain whose child cannot meet its observable acceptance stops and records why; zero measured gain is an acceptable recorded result.
 - **Accepted tradeoff.** Complexity is allowed when it is required for sound, general static recovery, provided it stays bounded,
   deterministic, CPU-owned where appropriate, evidence-driven and fail-closed. The invariant is "precise proof OR typed Unknown": a
@@ -773,3 +774,80 @@ reproduce the SEG-026-T002 strict row exactly.
       points: the continuation of an unproven callee (an unresolved computed site, an RTS away from its entry delta) and the
       context bound. It is no longer the interrupt-source premise. The remaining work-RAM read Unknowns stay dominated by
       `async_all` and the external writer (T010).
+
+### T010: Z80 work-RAM store-freedom proof
+
+- **Ownership and seam.** The proof is Genesis-owned (`platforms/genesis/analysis_report/{include/.../z80_ram_write_proof.hpp,
+  src/z80_ram_write_proof.cpp}`, report-only, linked only by the report driver and tests). The M68K library receives only a typed
+  bound: `M68kMemoryConfig::external_writer_bound` (nullopt, the default, is the unchanged blanket rule; otherwise a release store
+  makes exactly the bound's work-RAM ranges asynchronous; an empty set means no Z80 writes). The library also reports, as a generic
+  observation, the merged known bus ranges and the Unknown-target count of the stores that may touch configured ranges
+  (`observed_store_ranges`; the driver observes the Z80 area `$A00000-$A0FFFF`). The diagnostic `--assume-no-z80-ram-writes`
+  ablation is unchanged and never consults the proof.
+- **Data contract.** Input: the Z80 image set (every content Z80 RAM can hold when the Z80 leaves reset; nullopt is
+  `image_set_unknown`), and the 68K Z80-area stores as groups (known ranges, Unknown-target count, proven held under `/RESET` or
+  not). Output: `none | ranges | all`, the physical work-RAM ranges, the image content hashes, typed reasons (non-empty iff `all`) and
+  aggregate counts.
+- **Proof.** A bounded, flow-sensitive constant analysis per image from the architectural Z80 reset state (contract section 4 rule
+  6), not a value-set analysis: one constant or Unknown per 8-bit register, IX, IY and SP; the nine-bit bank latch as three-valued
+  bits, Unknown at entry (Z80 `/RESET` does not change it and the 68K may have written it); IFF with the EI shadow and IM as small
+  sets; return slots written by CALL/RST/interrupt/PUSH with bounded value sets. Loads are always Unknown. Every reachable start must
+  decode from image bytes. Stores are classified per byte: Z80 RAM (`& $1FFF`) is local data unless it hits a reachable instruction
+  byte (`self_modifying_store`); the bank window maps every completion of the latch, so a completion at or above `$1C0` adds the
+  work-RAM byte and one inside `$140-$141` (the Z80 area itself) is `window_store_into_z80_area`; an Unknown address is
+  `store_target_unknown`. Interrupts are accepted wherever IFF may be enabled: IM 0 and IM 1 enter `$0038` (acknowledge byte `$FF`,
+  contract section 8), IM 2 is `interrupt_mode_unbounded`; computed jumps need a known register (`indirect_control`); returns need a
+  known SP whose slot holds a bounded set (`return_unbounded`, `stack_pointer_unknown`). The 68K side: a store not proven under
+  `/RESET` that may hit a reachable instruction byte or a read return slot is `m68k_store_into_z80_code`; an Unknown-target store
+  not under `/RESET` is `m68k_store_into_z80_ram_unbounded`; any store that may reach the bank register makes the latch Unknown at
+  every Z80 point. No BUSREQ-only interval is credited: a BUSREQ pause resumes the same program, so a code-byte store under it is a
+  live patch (the ADR 0073 live-operand hazard).
+- **Credit (decision 9 style post-fixed point).** The driver starts from the Z80-only bound (the blanket rule whenever that fails),
+  runs the analysis, and re-proves over that run's own Z80-area stores. The bound is credited only when the re-proof's ranges are
+  covered by the bound the run used; otherwise the bound grows (join; `all` is the blanket rule) and the analysis reruns (at most
+  four runs; non-stabilization is `proof_not_stable` and the blanket rule).
+- **Fixtures** (`analysis_genesis_z80_proof_test`, project-authored Z80 and MC68000 encodings):
+  - constant stores below `$8000`: `none`; the same store flipped to `$9000` (unknown bank): `all`;
+  - a nine-write bank select of `$1FF`/`$1C0` then a window store: `ranges` (exactly that byte); a ROM bank, or a RAM bank changed to
+    a ROM bank before the store: `none`; a partially known latch: both work-RAM completions;
+  - an unknown bank value, a `(HL)` store with an Unknown HL, a PUSH with an Unknown SP: `all`; a PUSH at the reset SP under a RAM
+    bank: `ranges`;
+  - EI + IM 1 (and IM 0) with a `$0038` handler window store: `all` under an unknown bank, `none` under a ROM bank, `ranges` under a
+    RAM bank (RETI returns through the bounded slot); IM 2: `all`;
+  - JP (HL) with an Unknown HL: `all`; with a constant HL: bounded;
+  - a 68K store into an operand byte (or its mirror, or a read return slot) while the Z80 may run: `all`; under `/RESET` or into a
+    data byte: `none`; a 68K Unknown-target store while released: `all`; a 68K bank-register store: the latch becomes Unknown;
+  - CALL/RET from two sites: `none`; RET without a slot, a Z80 store into its own operand, code beyond the image, an unknown, empty
+    or oversized image set: `all`;
+  - driver (frames domain): unknown image set keeps `external_writer` (the read is `external_writer`); a proven-free image is credited
+    (no external writer, the read is precise); an image writing the read byte makes it `async_writer`, another byte keeps it precise;
+    a 68K store into the image's code invalidates the optimistic bound (second run, blanket rule); the ablation never credits.
+
+  Eleven mutants are killed (`analysis_mutation_test`): the Z80 cannot store RAM; a bank change is ignored; every 68K store is
+  treated as under `/RESET`; no store is; window stores are unclassified; a stack push (SP in the window) is unclassified; a 68K
+  operand rewrite is allowed; the EI enable is never accepted; the M68K domain ignores the bound; a `ranges` bound credits no writer;
+  the optimistic bound is credited without re-validation.
+- **Sonic attract oracle** (Release, report-only, sanitized aggregates; frames runs on one host in parallel with the other domains):
+
+  | measure | memory | contexts | frames (credited, 2 runs) | frames + ablation (diagnostic) |
+  | --- | --- | --- | --- | --- |
+  | proof outcome / reasons | `all` / `image_set_unknown`, `m68k_store_into_z80_ram_unbounded` | same | same | same (bound `ablation`) |
+  | credited bound / `external_writer` | blanket / true | blanket / true | blanket / true | ablation / false |
+  | Z80 images analysed | 0 | 0 | 0 | 0 |
+  | 68K Z80-area stores: merged known ranges / Unknown-target / bank latch volatile | 3 / 1,171 / yes | 3 / 1,894 / yes | 3 / 1,923 / yes | 3 / 1,923 / yes |
+  | work-RAM reads: precise / `external_writer` / `async_writer` | 0 / 412 / 0 | 0 / 428 / 0 | 0 / 429 / 0 | 0 / 0 / 420 |
+  | `D` / recall / escapes | 6,765 / 42.74% / 0 | 6,806 / 43.13% / 0 | 6,806 / 43.13% / 0 | 6,806 / 43.13% / 0 |
+  | frames wall / peak RSS | - | - | 141 s / 338 MB | - |
+
+  - The proof does not hold, so `external_writer` is unchanged. Apart from the new `z80_ram_write_proof` member of the aggregate (and
+    of the private output that embeds it), the `baseline`, `memory`, `contexts` and `frames` outputs are byte-identical to the T006
+    head; the baseline output, which has no memory object, is fully identical. Both credited frames runs are byte-identical.
+  - First reason: no static derivation of the Z80 image set exists. The driver is uploaded by 68K code from a compressed cartridge
+    stream (ADR 0073 materializes it from a build-time snapshot, which is observation and never a proof input). Second, independent
+    reason: 1,923 68K stores have an Unknown target while the Z80 may run, so 68K writes into Z80 code and operand bytes cannot be
+    bounded (the ADR 0073 live-operand class). A prior read-only classification of the driver (no call, return, push or interrupt
+    entry; constant SP; constant store targets below `$8000`; a constant ROM bank) fits the proof's handled subset, but that
+    classification came from observation and is not a static input here.
+  - Successor frontier (not implemented): a static Z80 image-set derivation from the 68K upload (immutable cartridge source plus a
+    bounded decompressor model) together with BUSREQ/RESET interval tracking in the M68K domains and a bound on the Unknown-target
+    68K stores. That is generic immutable cartridge-data ownership plus a new M68K domain, not a further T010 fold.

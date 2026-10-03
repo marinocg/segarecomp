@@ -139,6 +139,10 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
       if (!entry || root != *entry || report.roots.vector_roots == report.roots.roots.size()) adapter_config.memory.handler_roots.push_back(root);
     adapter_config.memory.release_ranges.emplace_back(genesis_z80_control_first, genesis_z80_control_last);
     adapter_config.memory.assume_no_external_writer = config.assume_no_z80_ram_writes;
+    // SEG-030-T010: the run reports its stores into the Z80 area for the proof; the credited bound starts from the Z80 side alone
+    // (nullopt, the blanket rule, whenever that already fails) and is validated against the run's own stores below.
+    adapter_config.memory.observed_store_ranges.emplace_back(genesis_z80_area_first, genesis_z80_area_last);
+    adapter_config.memory.external_writer_bound = prove_genesis_z80_ram_writes(config.z80_images, {}).bound();
     if (frames) {
       // SEG-030-T006: the delivered vectors (ADR 0021 / ADR 0043) and, for a reset-entry program, the 68000 reset state.
       for (const auto &[vector, handler] : report.roots.vectors) adapter_config.frames.vectors.push_back({vector, handler & bus_mask});
@@ -154,6 +158,50 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
     }
   }
   report.analysis = analyze_m68k_finite_values(*image, report.roots.roots, adapter_config, config.bounds);
+  if (memory && report.analysis.complete) {
+    // SEG-030-T010: the proof over the run's own 68K stores. A credited bound must cover the proof's result (a post-fixed point:
+    // the Z80 writes the run assumed include every write the proof derives from that run); otherwise the bound grows (join; `all`
+    // is the blanket rule) and the analysis reruns. The Z80 side fixes the ranges, so the bound takes at most three values.
+    report.z80_proof_runs = 1U;
+    for (;;) {
+      const auto &observed = report.analysis.memory;
+      auto proof = prove_genesis_z80_ram_writes(
+          config.z80_images, {GenesisZ80AreaStores{observed.observed_store_ranges, observed.observed_unknown_target_stores, false}});
+      const auto &used = adapter_config.memory.external_writer_bound;
+      const auto derived = proof.bound();
+      bool covered = used.has_value() && derived.has_value();
+      if (covered) {
+        M68kMemoryPolicy assumed, required;
+        for (const auto &range : *used) assumed.add_async(range);
+        for (const auto &range : *derived) required.add_async(range);
+        covered = leq(required, assumed);
+      }
+      if (!used || covered || report.z80_proof_runs >= 4U) {
+        report.z80_bound_credited = used.has_value() && covered;
+        if (used && !covered) {  // not stable within the bound: the blanket rule
+          proof.outcome = GenesisZ80RamWrites::all;
+          proof.work_ram.clear();
+          proof.reasons.insert(GenesisZ80ProofReason::proof_not_stable);
+          adapter_config.memory.external_writer_bound.reset();
+          report.analysis = analyze_m68k_finite_values(*image, report.roots.roots, adapter_config, config.bounds);
+          ++report.z80_proof_runs;
+        }
+        report.z80_proof = std::move(proof);
+        break;
+      }
+      if (!derived) {
+        adapter_config.memory.external_writer_bound.reset();
+      } else {
+        M68kMemoryPolicy grown;
+        for (const auto &range : *used) grown.add_async(range);
+        for (const auto &range : *derived) grown.add_async(range);
+        adapter_config.memory.external_writer_bound = grown.async;
+      }
+      report.analysis = analyze_m68k_finite_values(*image, report.roots.roots, adapter_config, config.bounds);
+      ++report.z80_proof_runs;
+      if (!report.analysis.complete) break;
+    }
+  }
   report.rounds = memory ? report.analysis.memory.rounds : 1U;
   if (!report.analysis.complete) return report;  // every query Unknown(bound): no partial D
   if (memory) {
@@ -437,6 +485,11 @@ std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport
           << ",\"sites_resolved_only_without_memory\":" << comparison.sites_resolved_only_without_memory
           << ",\"unresolved_sites\":" << comparison.unresolved_sites << '}';
     }
+    if (report.z80_proof)
+      out << ",\"z80_ram_write_proof\":"
+          << format_genesis_z80_ram_write_proof(*report.z80_proof, config.assume_no_z80_ram_writes ? "ablation"
+                                                                   : report.z80_bound_credited  ? "proof"
+                                                                                                : "blanket");
     out << '}';
     if (domains.contexts) {
       const auto &contexts = report.analysis.contexts;

@@ -4,8 +4,8 @@
 Every mutant below is one precise textual edit of PRODUCTION analysis code (the generic core headers, the M68K adapter, the Z80
 effect projection or the Z80 adapter) that plants a deliberate soundness, determinism or bound defect. The harness copies the
 product tree (without build/, .git/, games/, .tools/) to a temporary directory, configures ONE build there, builds the
-SEG-029 fixture tests plus the SEG-030-T005 contexts and SEG-030-T006 frames and Genesis interrupt-premise fixtures and
-requires the unmutated baseline to pass. Then, per mutant, it applies the edit to the temporary copy only, rebuilds the
+SEG-029 fixture tests plus the SEG-030-T005 contexts, SEG-030-T006 frames and Genesis interrupt-premise and the SEG-030-T010 Z80
+store-freedom proof fixtures and requires the unmutated baseline to pass. Then, per mutant, it applies the edit to the temporary copy only, rebuilds the
 affected fixture tests incrementally, runs them, and restores the file. A mutant is KILLED when one of its fixture tests exits non-zero (or times out). The worktree is never modified.
 
 Fail-closed rules:
@@ -45,8 +45,9 @@ Z80_TEST = "analysis_z80_adapter_test"
 CONTEXTS_TEST = "analysis_m68k_contexts_test"  # SEG-030-T005: call contexts and callee summaries
 FRAMES_TEST = "analysis_m68k_frames_test"  # SEG-030-T006: interrupt mask, handler instances, frames and returns
 PREMISE_TEST = "analysis_genesis_interrupt_premise_test"  # SEG-030-T006: the named Genesis interrupt-source premise
+Z80_PROOF_TEST = "analysis_genesis_z80_proof_test"  # SEG-030-T010: the Genesis Z80 work-RAM store-freedom proof and its credit
 # cheapest first: a core mutant is usually decided by the CPU-free fixture
-ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, CONTEXTS_TEST, FRAMES_TEST, PREMISE_TEST)
+ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, CONTEXTS_TEST, FRAMES_TEST, PREMISE_TEST, Z80_PROOF_TEST)
 TEST_TIMEOUT_SECONDS = 60  # the unmutated fixtures run in well under a second
 
 FINITE = "libs/analysis/include/segarecomp/analysis/finite_value.hpp"
@@ -56,6 +57,8 @@ M68K_FRAMES = "libs/cpu/m68k/analysis/src/frames.cpp"
 Z80_EFFECTS = "libs/cpu/z80/src/effects.cpp"
 Z80_ADAPTER = "libs/cpu/z80/analysis/src/adapter.cpp"
 GENESIS_PREMISE = "platforms/genesis/analysis_report/include/segarecomp/genesis_analysis_report/interrupt_premise.hpp"
+Z80_PROOF = "platforms/genesis/analysis_report/src/z80_ram_write_proof.cpp"
+REPORT = "platforms/genesis/analysis_report/src/report.cpp"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -366,6 +369,51 @@ MUTANTS: list[Mutant] = [
            "        if (is_alu(m) && d == O::a && (s == O::r || s == O::n || s == O::hl_ind)) {\n"
            "          if (m == Mnemonic::cp) write(Reg::a, opaque());",
            (Z80_TEST,), "ALU forms keep a precise A (and CP clobbers it)"),
+    # ---------------------------------------------------------------- SEG-030-T010: Genesis Z80 work-RAM store-freedom proof
+    Mutant("z80_proof_cannot_store_ram", Z80_PROOF,
+           "        if (bank >= genesis_z80_bank_ram_first) result.work_ram.insert(((bank << 15U) | (address & 0x7FFFU)) & 0xFFFFU);\n",
+           "",
+           (Z80_PROOF_TEST,), "assumes the Z80 cannot store into 68K RAM through the bank window"),
+    Mutant("z80_proof_bank_change_ignored", Z80_PROOF,
+           "        s.bank_known = known;\n        s.bank_value = static_cast<std::uint16_t>(value & known);\n",
+           "        (void)known;\n        (void)value;\n",
+           (Z80_PROOF_TEST,), "a bank-register write never changes the latch"),
+    Mutant("z80_proof_reset_interval_ignored", Z80_PROOF,
+           "    const bool running = !group.held_in_reset;",
+           "    const bool running = false;",
+           (Z80_PROOF_TEST,), "every 68K store counts as held in reset (the BUSREQ/RESET interval is ignored)"),
+    Mutant("z80_proof_reset_interval_never_held", Z80_PROOF,
+           "    const bool running = !group.held_in_reset;",
+           "    const bool running = true;",
+           (Z80_PROOF_TEST,), "no 68K store counts as held in reset (the image-construction interval is ignored)"),
+    Mutant("z80_proof_window_store_unclassified", Z80_PROOF,
+           "    } else if (address >= window_first) {",
+           "    } else if (address >= window_first && false) {",
+           (Z80_PROOF_TEST,), "a store target at or above $8000 is not classified as a bank-window store"),
+    Mutant("z80_proof_stack_push_unclassified", Z80_PROOF,
+           "      if (transfer.stores.empty()) continue;",
+           "      if (transfer.stores.empty() || transfer.stores.front().slot) continue;",
+           (Z80_PROOF_TEST,), "a stack push (SP in the window) is not a classified store"),
+    Mutant("z80_proof_m68k_operand_rewrite_allowed", Z80_PROOF,
+           "        if (result.control_bytes.contains(byte)) proof.reasons.insert(Reason::m68k_store_into_z80_code);",
+           "        (void)byte;",
+           (Z80_PROOF_TEST,), "a 68K store may rewrite a Z80 operand byte while the Z80 may run"),
+    Mutant("z80_proof_ei_shadow_permanent", Z80_PROOF,
+           "    if (s.iff & 4U) s.iff = static_cast<std::uint8_t>((s.iff & ~4U) | 2U);",
+           "",
+           (Z80_PROOF_TEST,), "interrupts enabled by EI are never accepted"),
+    Mutant("z80_proof_bound_ignored_by_m68k", M68K,
+           "    if (!config.memory.external_writer_bound) derived.external_writer = true;",
+           "    if (true) derived.external_writer = true;",
+           (Z80_PROOF_TEST,), "the M68K memory domain ignores the credited bound (blanket external writer)"),
+    Mutant("z80_proof_bound_ranges_dropped", M68K,
+           "      for (const auto &range : *config.memory.external_writer_bound) derived.add_async(range);",
+           "      (void)config.memory.external_writer_bound;",
+           (Z80_PROOF_TEST,), "a `ranges` bound credits no Z80 writer at all"),
+    Mutant("z80_proof_bound_not_validated", REPORT,
+           "      if (!used || covered || report.z80_proof_runs >= 4U) {",
+           "      if (true) {\n        covered = true;",
+           (Z80_PROOF_TEST,), "the optimistic bound is credited without validating it against the run's own 68K stores"),
 ]
 
 
