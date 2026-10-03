@@ -23,6 +23,11 @@ PC-indexed site with its proven exact target set. Runtime coverage then FALSIFIE
 entry whose witness predecessor is a resolved site but which lies outside that site's proven set is counted as a
 recovery escape (expected 0). The tool also reports how many proven targets were ever observed (a precision
 indicator). Nothing observed is ever fed back into the challenger.
+
+SEG-030-T003: when the private input carries `computed_sites` (the M68K core report), EVERY resolved computed site of
+every family (PC-indexed, (An), d16(An), (d8,An,Xn), ...) is falsified the same way, per family: a first entry whose
+witness predecessor is a resolved site, retired normally or resumed after an interrupt taken right after the site,
+must lie inside that site's proven target set; anything else is an escape (expected 0).
 """
 import argparse
 import json
@@ -162,6 +167,9 @@ def compare(observed: set[int], witnesses: dict, challenger: dict, summary: dict
     }
     if recovery is not None:
         report["pc_index_recovery_check"] = recovery
+    computed = computed_site_escape_check(observed, witnesses, challenger)
+    if computed is not None:
+        report["computed_site_escape_check"] = computed
     if report["U"]:
         u = report["U"]
         report["ratios"] = {"D_over_U": round(len(discovered) / u, 6), "O_over_U": round(len(observed) / u, 6),
@@ -210,6 +218,40 @@ def pc_index_recovery_check(observed: set[int], witnesses: dict, challenger: dic
         "first_entries_from_resolved_sites": entries_from_resolved,
         "escapes_outside_proven_targets": escapes,
         "sites_with_escapes": len(escape_sites),
+    }
+
+
+def computed_site_escape_check(observed: set[int], witnesses: dict, private: dict) -> dict | None:
+    """SEG-030-T003: falsification of every resolved computed site, per report family (aggregates only)."""
+    if "computed_sites" not in private:
+        return None
+    resolved = {int(pc, 16): (entry["family"], {int(t, 16) for t in entry["targets"]})
+                for pc, entry in private["computed_sites"].items() if entry["outcome"] == "resolved"}
+    families: dict[str, dict] = {}
+    for pc, (family, targets) in resolved.items():
+        counts = families.setdefault(family, {"resolved_sites": 0, "resolved_sites_executed": 0, "proven_targets": 0,
+                                              "proven_targets_observed": 0, "first_entries_from_resolved_sites": 0,
+                                              "escapes_outside_proven_targets": 0, "sites_with_escapes": 0})
+        counts["resolved_sites"] += 1
+        counts["resolved_sites_executed"] += pc in observed
+        counts["proven_targets"] += len(targets)
+        counts["proven_targets_observed"] += len(targets & observed)
+    escape_sites: set[int] = set()
+    for x, (_, previous, cause) in witnesses.items():
+        if cause not in (CAUSE_RETIRE, CAUSE_RESUMPTION) or previous not in resolved:
+            continue
+        family, targets = resolved[previous]
+        families[family]["first_entries_from_resolved_sites"] += 1
+        if x not in targets:
+            families[family]["escapes_outside_proven_targets"] += 1
+            if previous not in escape_sites:
+                escape_sites.add(previous)
+                families[family]["sites_with_escapes"] += 1
+    return {
+        "resolved_sites": len(resolved),
+        "escapes_outside_proven_targets": sum(c["escapes_outside_proven_targets"] for c in families.values()),
+        "sites_with_escapes": len(escape_sites),
+        "families": dict(sorted(families.items())),
     }
 
 
@@ -369,6 +411,12 @@ def main() -> int:
         sys.stderr.write("witness set does not match the coverage bitmap (overflow?)\n")
         return 3
     challenger = json.loads(pathlib.Path(args.challenger).read_text(encoding="utf-8"))
+    # SEG-030: a core-driver report whose solve exhausted a bound carries no discovered set (every query is Unknown); comparing
+    # it would report a vacuous recall with zero escapes. Reject it (the challenger's own format has no solver block).
+    solver = challenger.get("aggregate", {}).get("solver")
+    if challenger.get("complete") is False or (isinstance(solver, dict) and solver.get("complete") is False):
+        sys.stderr.write("the report's solve is incomplete (a bound was exhausted): no discovered set to compare\n")
+        return 4
     summary = None
     if args.coverage_summary:
         text = pathlib.Path(args.coverage_summary).read_text(encoding="utf-8").strip()

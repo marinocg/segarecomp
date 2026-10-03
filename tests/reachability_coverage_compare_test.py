@@ -3,7 +3,10 @@
 --execution-coverage flag validation (project-authored synthetic image; no ROM).
 
 SEG-026-T002: --pc-index-recovery CLI aggregates and the comparison's falsification of proven PC-indexed target
-sets (an observed escape outside a proven set is counted; runtime coverage never feeds the challenger)."""
+sets (an observed escape outside a proven set is counted; runtime coverage never feeds the challenger).
+
+SEG-030-T003: the generalized per-family falsification of every resolved computed site (`computed_sites` of the M68K core
+report), counting retire and interrupt-resumption witnesses."""
 import json
 import pathlib
 import subprocess
@@ -82,6 +85,51 @@ def check_recovery(root: pathlib.Path, segarecomp: str, compare: pathlib.Path, t
     assert report["structural_first_gate_missing_pcs"] == {"pc_index_recovery_escape": 1}, report
     assert report["observed_pc_index_sites_by_local_domain"] == {"resolved": 1}, report
     assert "000214" not in out.stdout and "0x" not in out.stdout
+
+
+def check_computed_sites(compare: pathlib.Path, tmpdir: pathlib.Path) -> None:
+    """Synthetic private core report (project-authored PCs): a resolved jsr_an site, a resolved pc_index_explicit site and an
+    unresolved jmp_an site. Observed: one in-set target of each resolved site, one escape from the jsr_an site entered on an
+    interrupt resumption, and an arbitrary entry from the unresolved site (never an escape)."""
+    private = tmpdir / "core.json"
+    private.write_text(json.dumps({
+        "aggregate": {"exception_model": "strict"},
+        "discovered": ["000200", "000204", "000300", "000400"],
+        "sites": {"jsr_(An)": [], "jmp_(An)": ["000208"], "jmp_(d8,PC,Xn)": []},
+        "computed_sites": {
+            "000204": {"family": "jsr_an", "outcome": "resolved", "reason": "none", "detail": "none", "targets": ["000300"]},
+            "000206": {"family": "pc_index_explicit", "outcome": "resolved", "reason": "none", "detail": "none",
+                       "targets": ["000400", "000410"]},
+            "000208": {"family": "jmp_an", "outcome": "unknown", "reason": "unknown_input", "detail": "base_unknown",
+                       "targets": []}}}))
+    coverage = tmpdir / "core-coverage"
+    coverage.mkdir()
+    observed = {0x200, 0x204, 0x206, 0x208, 0x300, 0x400, 0x500, 0x600}
+    (coverage / "coverage.bitmap").write_bytes(bitmap_of(observed))
+    witnesses = [(0, 0x0, 0x200, 0), (1, 0x200, 0x204, 1), (2, 0x204, 0x300, 1), (3, 0x300, 0x206, 1),
+                 (4, 0x206, 0x400, 1), (5, 0x400, 0x208, 1), (6, 0x208, 0x600, 1), (7, 0x204, 0x500, 4)]
+    (coverage / "witnesses.txt").write_text("".join(f"{o} {p:08x} {c:08x} {k}\n" for o, p, c, k in witnesses))
+    out = subprocess.run([sys.executable, str(compare), "--coverage-dir", str(coverage), "--challenger", str(private)],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    check = json.loads(out.stdout)["computed_site_escape_check"]
+    assert check["resolved_sites"] == 2 and check["escapes_outside_proven_targets"] == 1, check
+    assert check["sites_with_escapes"] == 1, check
+    jsr = check["families"]["jsr_an"]
+    assert jsr["first_entries_from_resolved_sites"] == 2 and jsr["escapes_outside_proven_targets"] == 1, jsr
+    assert jsr["proven_targets_observed"] == 1 and jsr["resolved_sites_executed"] == 1, jsr
+    pc_index = check["families"]["pc_index_explicit"]
+    assert pc_index["escapes_outside_proven_targets"] == 0 and pc_index["proven_targets"] == 2, pc_index
+    assert "jmp_an" not in check["families"], check
+    assert "000500" not in out.stdout and "0x" not in out.stdout
+    # SEG-030: a core report whose solve exhausted a bound (empty D) is rejected, never compared as a vacuous result.
+    incomplete = json.loads(private.read_text())
+    incomplete["aggregate"]["solver"] = {"complete": False, "reason": "iteration_bound"}
+    incomplete["discovered"] = []
+    (tmpdir / "incomplete.json").write_text(json.dumps(incomplete))
+    out = subprocess.run([sys.executable, str(compare), "--coverage-dir", str(coverage), "--challenger",
+                          str(tmpdir / "incomplete.json")], capture_output=True, text=True)
+    assert out.returncode == 4 and out.stdout == "" and "incomplete" in out.stderr, (out.returncode, out.stderr)
 
 
 def bitmap_of(pcs: set[int]) -> bytes:
@@ -171,6 +219,7 @@ def main() -> int:
                                    str(private)], capture_output=True, text=True)
         assert mismatch.returncode == 3
         check_recovery(root, segarecomp, compare, tmpdir)
+        check_computed_sites(compare, tmpdir)
     # Bridge flag validation happens before any generation (exit 8).
     bridge = root / "tools" / "genesis_startup_bridge.py"
     for extra in (["--coverage-epoch-frames", "10"], ["--coverage-disabled"], ["--coverage-no-render"],

@@ -3,10 +3,10 @@
 
 Every mutant below is one precise textual edit of PRODUCTION analysis code (the generic core headers, the M68K adapter, the Z80
 effect projection or the Z80 adapter) that plants a deliberate soundness, determinism or bound defect. The harness copies the
-product tree (without build/, .git/, games/, .tools/) to a temporary directory, configures ONE build there, builds the three
-SEG-029 fixture tests and requires the unmutated baseline to pass. Then, per mutant, it applies the edit to the temporary copy only,
-rebuilds the affected fixture tests incrementally, runs them, and restores the file. A mutant is KILLED when one of its fixture tests
-exits non-zero (or times out). The worktree is never modified.
+product tree (without build/, .git/, games/, .tools/) to a temporary directory, configures ONE build there, builds the
+SEG-029 fixture tests plus the SEG-030-T005 contexts, SEG-030-T006 frames and Genesis interrupt-premise and the SEG-030-T010 Z80
+store-freedom proof fixtures and requires the unmutated baseline to pass. Then, per mutant, it applies the edit to the temporary copy only, rebuilds the
+affected fixture tests incrementally, runs them, and restores the file. A mutant is KILLED when one of its fixture tests exits non-zero (or times out). The worktree is never modified.
 
 Fail-closed rules:
   * stale mutant: the edit's `old` text must occur exactly once in the current source, otherwise the harness FAILS (a refactor can
@@ -14,7 +14,7 @@ Fail-closed rules:
   * a mutant that does not compile FAILS the harness (compilation failure is not a kill);
   * a surviving mutant FAILS the harness, unless it is listed as `equivalent` with a written justification, in which case it must
     still compile and must SURVIVE (a killed "equivalent" mutant means the justification is stale and FAILS the harness).
-Self-checks: the baseline must pass all three tests, and the stale-edit detector must reject a missing and a duplicated pattern.
+Self-checks: the baseline must pass all fixture tests, and the stale-edit detector must reject a missing and a duplicated pattern.
 
 Equivalent mutants (justified, asserted to survive):
   * m68k_failed_read_ignored: `m68k_finite_register_after` (the CPU semantic owner) already returns a default, not-`known`
@@ -42,14 +42,23 @@ import time
 CORE_TEST = "analysis_core_test"
 M68K_TEST = "analysis_m68k_equivalence_test"
 Z80_TEST = "analysis_z80_adapter_test"
-ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST)  # cheapest first: a core mutant is usually decided by the CPU-free fixture
+CONTEXTS_TEST = "analysis_m68k_contexts_test"  # SEG-030-T005: call contexts and callee summaries
+FRAMES_TEST = "analysis_m68k_frames_test"  # SEG-030-T006: interrupt mask, handler instances, frames and returns
+PREMISE_TEST = "analysis_genesis_interrupt_premise_test"  # SEG-030-T006: the named Genesis interrupt-source premise
+Z80_PROOF_TEST = "analysis_genesis_z80_proof_test"  # SEG-030-T010: the Genesis Z80 work-RAM store-freedom proof and its credit
+# cheapest first: a core mutant is usually decided by the CPU-free fixture
+ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, CONTEXTS_TEST, FRAMES_TEST, PREMISE_TEST, Z80_PROOF_TEST)
 TEST_TIMEOUT_SECONDS = 60  # the unmutated fixtures run in well under a second
 
 FINITE = "libs/analysis/include/segarecomp/analysis/finite_value.hpp"
 SOLVER = "libs/analysis/include/segarecomp/analysis/solver.hpp"
 M68K = "libs/cpu/m68k/analysis/src/finite_adapter.cpp"
+M68K_FRAMES = "libs/cpu/m68k/analysis/src/frames.cpp"
 Z80_EFFECTS = "libs/cpu/z80/src/effects.cpp"
 Z80_ADAPTER = "libs/cpu/z80/analysis/src/adapter.cpp"
+GENESIS_PREMISE = "platforms/genesis/analysis_report/include/segarecomp/genesis_analysis_report/interrupt_premise.hpp"
+Z80_PROOF = "platforms/genesis/analysis_report/src/z80_ram_write_proof.cpp"
+REPORT = "platforms/genesis/analysis_report/src/report.cpp"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -156,8 +165,8 @@ MUTANTS: list[Mutant] = [
            "",
            (M68K_TEST,), "a site pinned by the generic solver is reported from its narrower final input"),
     Mutant("m68k_odd_target_kept", M68K,
-           "    if ((target & 1U) != 0U) {",
-           "    if ((target & 1U) != 0U && false) {",
+           "    if ((target & 1U) != 0U) {\n      ++out.odd_targets_excluded;  // an odd JMP/JSR target",
+           "    if ((target & 1U) != 0U && false) {\n      ++out.odd_targets_excluded;  // an odd JMP/JSR target",
            (M68K_TEST,), "odd JMP/JSR targets are not excluded"),
     Mutant("m68k_target_outside_partial", M68K,
            "    if (!image_.mapped(target)) return finish(M68kPcIndexOutcome::target_outside_image);",
@@ -182,9 +191,124 @@ MUTANTS: list[Mutant] = [
            "",
            (M68K_TEST,), "an unresolved PC-indexed site is not reported unresolved"),
     Mutant("m68k_call_continuation_keeps_state", M68K,
-           "if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, State::all_unknown()});",
+           "if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true, tag)});",
            "if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, out});",
            (M68K_TEST,), "a call continuation carries the pre-call state instead of an opaque entry"),
+    # ---------------------------------------------------------------- M68K call contexts and summaries (SEG-030-T005)
+    Mutant("m68k_stale_summary_accepted", M68K,
+           "      valid = false;  // the used summary is below what its own solution derives (stale): grow it\n",
+           "",
+           (CONTEXTS_TEST,), "a round whose used summary is exceeded by a newly discovered writer still validates (stale summary)"),
+    Mutant("m68k_stale_summary_kept", M68K,
+           "      out.next.summaries.emplace(context, join(previous->second, *summary));\n",
+           "      out.next.summaries.emplace(context, previous->second);\n",
+           (CONTEXTS_TEST,), "an exceeded summary is kept instead of being regrown with the newly discovered writer"),
+    Mutant("m68k_unbalanced_return_summarized", M68K,
+           "      else facts.unbalanced = true;\n",
+           "",
+           (CONTEXTS_TEST,), "an RTS away from the entry stack delta does not prevent a summary"),
+    Mutant("m68k_recursion_not_context_bound", M68K,
+           "        if (!activation.fail && cyclic) activation.fail = Sub::context_bound;\n",
+           "",
+           (CONTEXTS_TEST,), "a recursive activation is not reported context_bound"),
+    Mutant("m68k_writer_set_ignores_callee_contexts", M68K,
+           "    report.max_cells = std::max(report.max_cells, state.memory.cells.size());\n"
+           "    const auto decoded = adapter.decode(m68k_point_pc(point));\n",
+           "    report.max_cells = std::max(report.max_cells, state.memory.cells.size());\n"
+           "    const auto decoded = adapter.decode(static_cast<std::uint32_t>(point));\n",
+           (CONTEXTS_TEST,), "the asynchronous-writer set skips the stores of callee-context points"),
+    Mutant("m68k_summary_drops_memory_effects", M68K,
+           "    state = summary->second;\n",
+           "    state = summary->second;\n    state.memory = in.memory;\n",
+           (CONTEXTS_TEST,), "an applied summary keeps the caller's pre-call memory instead of the callee's memory effects"),
+    Mutant("m68k_exception_continuation_delta_bottom", M68K,
+           "    state.stack_delta = continuation ? FiniteValue::unknown(UnknownReason::unsupported_transfer) : FiniteValue::of({0U});\n",
+           "    state.stack_delta = continuation ? FiniteValue::bottom() : FiniteValue::of({0U});\n",
+           (CONTEXTS_TEST,), "a resuming exception's continuation has a bottom stack delta that joins away (unbalanced path proven)"),
+    Mutant("m68k_query_reads_context_zero", M68K,
+           "    out = join(out, state->values.values[m68k_analysis_slot(reg, width)]);\n",
+           "    if (point == (pc & bus_mask)) out = join(out, state->values.values[m68k_analysis_slot(reg, width)]);\n",
+           (CONTEXTS_TEST,), "the typed data-register query reads only the context-0 point of the PC"),
+    # ---------------------------------------------------------------- M68K interrupt mask, handler instances and frames (SEG-030-T006)
+    Mutant("m68k_unknown_sr_treated_as_masked", M68K_FRAMES,
+           "  if (status.is_unknown()) return true;\n  if (!level || *level == 7U)",
+           "  if (status.is_unknown()) return false;\n  if (!level || *level == 7U)",
+           (FRAMES_TEST,), "dropping interrupt-mask poison: an Unknown SR is treated as masking every interrupt"),
+    Mutant("m68k_preemption_at_equal_mask", M68K_FRAMES,
+           "return m68k_status_mask(v) < *level; });",
+           "return m68k_status_mask(v) <= *level; });",
+           (FRAMES_TEST,), "incorrect handler nesting: an interrupt preempts a boundary whose mask equals its level"),
+    Mutant("m68k_frame_at_a7", M68K,
+           "  return m68k_points_to_add(a7, {-static_cast<std::int64_t>(m68k_exception_frame_bytes)});",
+           "  return a7;",
+           (FRAMES_TEST,), "wrong supervisor-stack provenance: the exception frame address is A7 instead of A7 - 6"),
+    Mutant("m68k_reset_ssp_ignored", M68K,
+           "      if (config_.frames.reset_ssp) state.address[7] = classify(image_, constant(*config_.frames.reset_ssp));\n",
+           "",
+           (FRAMES_TEST,), "wrong supervisor-stack provenance: the reset SSP is not the main flow's A7"),
+    Mutant("m68k_rte_status_not_restored", M68K,
+           "            edge.status = report->restored_status;",
+           "            edge.status = out.status;",
+           (FRAMES_TEST,), "incorrect RTE SR restoration: a proven RTE keeps the pre-RTE status"),
+    Mutant("m68k_partition_policy_dropped", M68K,
+           "  for (const auto &[tag, policy] : config_.frames.policies) tag_policies_.emplace(tag, join(config_.memory.policy, policy));",
+           "  for (const auto &[tag, policy] : config_.frames.policies) tag_policies_.emplace(tag, config_.memory.policy);",
+           (FRAMES_TEST,), "stale memory fact after policy growth: a partition's grown asynchronous writers are not applied"),
+    Mutant("m68k_unanalysed_handler_precise", M68K,
+           "  every_cell.async_all = true;\n",
+           "",
+           (FRAMES_TEST,), "the code of a handler without an analysed instance reads work RAM without any asynchronous writer"),
+    Mutant("m68k_frame_integrity_ignored", M68K,
+           "    bool intact = !subtree[tag].overlaps(0, 2);",
+           "    bool intact = true;",
+           (FRAMES_TEST,), "a handler rewriting its saved SR keeps the interrupted status"),
+    Mutant("m68k_interrupt_resumption_unlabelled", M68K,
+           "    out.sub = rte && tag != 0U ? Sub::interrupt_resumption : sub;",
+           "    out.sub = sub;",
+           (FRAMES_TEST,), "a handler RTE resuming interrupted code is not reported interrupt_resumption"),
+    Mutant("m68k_undelivered_interrupt_ignored", M68K,
+           "    if (m68k_vector_class(vector.vector) == M68kVectorClass::interrupt) sources.emplace_back(vector, false);\n",
+           "    (void)vector;\n",
+           (FRAMES_TEST, PREMISE_TEST), "an installed but undelivered interrupt handler is not a potential asynchronous writer"),
+    Mutant("m68k_writer_only_points_credited", M68K,
+           "      if (!credited(point)) continue;\n",
+           "",
+           (FRAMES_TEST, PREMISE_TEST), "a writer-only (undelivered-interrupt) instance's points are credited to D and the site reports"),
+    Mutant("genesis_premise_drops_level_4", GENESIS_PREMISE,
+           "genesis_main_cpu_interrupt_levels{2U, 4U, 6U};",
+           "genesis_main_cpu_interrupt_levels{2U, 6U, 6U};",
+           (PREMISE_TEST,), "the Genesis premise omits the H-int (level 4) source"),
+    Mutant("genesis_premise_drops_level_2", GENESIS_PREMISE,
+           "genesis_main_cpu_interrupt_levels{2U, 4U, 6U};",
+           "genesis_main_cpu_interrupt_levels{4U, 4U, 6U};",
+           (PREMISE_TEST,), "the Genesis premise omits the external (level 2) source"),
+    Mutant("genesis_premise_admits_level_7", GENESIS_PREMISE,
+           "  if (premise == GenesisInterruptPremise::unconfigured) return true;\n",
+           "  if (premise == GenesisInterruptPremise::unconfigured || vector == 31U) return true;\n",
+           (PREMISE_TEST,), "the Genesis premise admits a level-7 source the board never asserts"),
+    Mutant("m68k_summary_absolute_exit_a7", M68K,
+           "    if (config_.domains.frames) state.address[7] = in.address[7];\n  } else {",
+           "  } else {",
+           (FRAMES_TEST,), "a balanced summary's continuation keeps the joined absolute exit A7 instead of the caller's A7"),
+    Mutant("m68k_unbalanced_callee_rebased", M68K,
+           "    state = opaque_continuation(opaque == contexts.opaque.end() ? Sub::none : opaque->second, tag);\n",
+           "    state = opaque_continuation(opaque == contexts.opaque.end() ? Sub::none : opaque->second, tag);\n"
+           "    state.address[7] = in.address[7];\n",
+           (FRAMES_TEST,), "an unproven (unbalanced) callee's continuation is rebased to the caller's A7"),
+    Mutant("m68k_non_resuming_raise_unknown_effect", M68K,
+           "    if (control.always_raises_exception && config.domains.frames) {\n",
+           "    if (false) {\n",
+           (FRAMES_TEST,), "an always-raising non-resuming instruction (ILLEGAL) still makes its activation unproven"),
+    Mutant("m68k_unmodelled_trap_terminates_path", M68K,
+           "        (control.stacked == M68kStackedContinuationKind::exception_continuation && !config.exception_continuations))\n",
+           "        false)\n",
+           (FRAMES_TEST,), "a TRAP whose resuming continuation is not modelled is treated as a path terminator (escape dropped)"),
+    Mutant("m68k_whole_program_status_bound", M68K,
+           "  return found == config_.frames.status_bounds.end() ? FiniteValue::bottom() : found->second;\n",
+           "  FiniteValue all;\n"
+           "  for (const auto &entry : config_.frames.status_bounds) all = join(all, entry.second);\n"
+           "  return found == config_.frames.status_bounds.end() ? all : all;\n",
+           (FRAMES_TEST,), "an opaque continuation takes the whole-program status bound (another partition's lower mask leaks in)"),
     # ---------------------------------------------------------------- Z80 projection and adapter
     Mutant("z80_ram_load_precise", Z80_ADAPTER,
            "        if (!image_.contains(at)) return FiniteValue::unknown(UnknownReason::non_immutable_read);",
@@ -245,6 +369,51 @@ MUTANTS: list[Mutant] = [
            "        if (is_alu(m) && d == O::a && (s == O::r || s == O::n || s == O::hl_ind)) {\n"
            "          if (m == Mnemonic::cp) write(Reg::a, opaque());",
            (Z80_TEST,), "ALU forms keep a precise A (and CP clobbers it)"),
+    # ---------------------------------------------------------------- SEG-030-T010: Genesis Z80 work-RAM store-freedom proof
+    Mutant("z80_proof_cannot_store_ram", Z80_PROOF,
+           "        if (bank >= genesis_z80_bank_ram_first) result.work_ram.insert(((bank << 15U) | (address & 0x7FFFU)) & 0xFFFFU);\n",
+           "",
+           (Z80_PROOF_TEST,), "assumes the Z80 cannot store into 68K RAM through the bank window"),
+    Mutant("z80_proof_bank_change_ignored", Z80_PROOF,
+           "        s.bank_known = known;\n        s.bank_value = static_cast<std::uint16_t>(value & known);\n",
+           "        (void)known;\n        (void)value;\n",
+           (Z80_PROOF_TEST,), "a bank-register write never changes the latch"),
+    Mutant("z80_proof_reset_interval_ignored", Z80_PROOF,
+           "    const bool running = !group.held_in_reset;",
+           "    const bool running = false;",
+           (Z80_PROOF_TEST,), "every 68K store counts as held in reset (the BUSREQ/RESET interval is ignored)"),
+    Mutant("z80_proof_reset_interval_never_held", Z80_PROOF,
+           "    const bool running = !group.held_in_reset;",
+           "    const bool running = true;",
+           (Z80_PROOF_TEST,), "no 68K store counts as held in reset (the image-construction interval is ignored)"),
+    Mutant("z80_proof_window_store_unclassified", Z80_PROOF,
+           "    } else if (address >= window_first) {",
+           "    } else if (address >= window_first && false) {",
+           (Z80_PROOF_TEST,), "a store target at or above $8000 is not classified as a bank-window store"),
+    Mutant("z80_proof_stack_push_unclassified", Z80_PROOF,
+           "      if (transfer.stores.empty()) continue;",
+           "      if (transfer.stores.empty() || transfer.stores.front().slot) continue;",
+           (Z80_PROOF_TEST,), "a stack push (SP in the window) is not a classified store"),
+    Mutant("z80_proof_m68k_operand_rewrite_allowed", Z80_PROOF,
+           "        if (result.control_bytes.contains(byte)) proof.reasons.insert(Reason::m68k_store_into_z80_code);",
+           "        (void)byte;",
+           (Z80_PROOF_TEST,), "a 68K store may rewrite a Z80 operand byte while the Z80 may run"),
+    Mutant("z80_proof_ei_shadow_permanent", Z80_PROOF,
+           "    if (s.iff & 4U) s.iff = static_cast<std::uint8_t>((s.iff & ~4U) | 2U);",
+           "",
+           (Z80_PROOF_TEST,), "interrupts enabled by EI are never accepted"),
+    Mutant("z80_proof_bound_ignored_by_m68k", M68K,
+           "    if (!config.memory.external_writer_bound) derived.external_writer = true;",
+           "    if (true) derived.external_writer = true;",
+           (Z80_PROOF_TEST,), "the M68K memory domain ignores the credited bound (blanket external writer)"),
+    Mutant("z80_proof_bound_ranges_dropped", M68K,
+           "      for (const auto &range : *config.memory.external_writer_bound) derived.add_async(range);",
+           "      (void)config.memory.external_writer_bound;",
+           (Z80_PROOF_TEST,), "a `ranges` bound credits no Z80 writer at all"),
+    Mutant("z80_proof_bound_not_validated", REPORT,
+           "      if (!used || covered || report.z80_proof_runs >= 4U) {",
+           "      if (true) {\n        covered = true;",
+           (Z80_PROOF_TEST,), "the optimistic bound is credited without validating it against the run's own 68K stores"),
 ]
 
 

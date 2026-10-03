@@ -37,6 +37,8 @@ endfunction()
 # apps/, and the test suite under tests/.
 add_subdirectory(libs)
 add_subdirectory(platforms)
+# SEG-030 (ADR 0079): report-only analysis driver; needs both libs/ (cpu_m68k_analysis) and platforms/ (machine_genesis).
+add_subdirectory(platforms/genesis/analysis_report)
 add_subdirectory(apps)
 
 include(CTest)
