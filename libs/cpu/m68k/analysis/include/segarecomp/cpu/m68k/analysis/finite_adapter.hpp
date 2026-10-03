@@ -309,6 +309,11 @@ struct M68kHandlerInstance {
   std::set<std::uint32_t> vectors;   // the vectors entering it from the parent
   bool resuming{};                   // some vector entering it resumes at an analysed point of its parent
   bool interrupt{};                  // some vector entering it is an interrupt
+  // Some delivered vector (M68kFrameConfig::vectors) enters it from a credited partition (the main flow or a credited instance):
+  // its points count towards the discovered set and the site and read reports. Otherwise it is entered only by potential
+  // interrupts (M68kFrameConfig::potential_interrupts) or below such an instance, and is analysed for asynchronous writers,
+  // eligibility and frame integrity only (writer-only; SEG-030-T006 iteration 3).
+  bool credited{};
   std::uint32_t growth{};            // rounds in which the entry A7 grew (widening, m68k_instance_growth_bound)
   friend bool operator==(const M68kHandlerInstance &, const M68kHandlerInstance &) = default;
 };
@@ -316,10 +321,12 @@ struct M68kHandlerInstance {
 // SEG-030-T006: the frames-domain part of the configuration (ADR 0079 decisions 7 and 9).
 struct M68kFrameConfig {
   std::vector<M68kHandlerVector> vectors;           // machine facts
-  // Installed interrupt vectors (autovectors of levels 1-7 and the spurious vector) the generated-native machine does not deliver.
-  // Real hardware may deliver them once the program enables their source (no analysed fact proves it never does), so they are
-  // potential asynchronous sources wherever their level is eligible: an unanalysed resuming interrupt (every cell asynchronous in
-  // that partition and its status Unknown after those boundaries). They are never seeded: discovery (D) keeps the delivered set.
+  // Installed interrupt vectors the machine model does not deliver but the machine may assert (the caller's machine premise selects
+  // them; an unconfigured machine passes every installed interrupt vector). Real hardware may deliver them once the program enables
+  // their source, so wherever their level is eligible they enter a handler instance exactly like a delivered interrupt (analysed
+  // when admitted, else an unanalysed resuming interrupt: every cell asynchronous in that partition and its status Unknown after
+  // those boundaries). Such an instance is writer-only (M68kHandlerInstance::credited): its handler is never seeded as a root and its
+  // points never enter the discovered set or the site reports.
   std::vector<M68kHandlerVector> potential_interrupts;
   std::set<std::uint32_t> main_entries;             // roots of the main flow (tag 0)
   std::optional<std::uint32_t> reset_entry;         // the reset root (S = 1, I = 7, A7 = reset_ssp)
@@ -366,11 +373,13 @@ struct M68kFrameReport {
   std::size_t interrupt_instances{};
   std::size_t resuming_instances{};  // resuming synchronous (not interrupt)
   std::size_t synchronous_instances{};
+  std::size_t writer_only_instances{};  // analysed instances that are not credited (entered only by potential interrupts)
+  std::size_t writer_only_points{};     // points of writer-only instances (analysed for writers only; not in `points`)
   std::size_t dead_handlers{};       // handler PCs with no analysed instance
   std::map<std::string, std::size_t> unanalysed;  // handlers taken from a live partition but not analysed, by cause
   std::size_t frame_integrity_failures{};
   std::size_t clobbered_partitions{};
-  // Points of live partitions.
+  // Points of live credited partitions (the main flow and the credited instances).
   std::size_t points{};
   std::size_t status_unknown{};
   std::size_t supervisor_proven{};
@@ -519,6 +528,9 @@ struct M68kFiniteAnalysisResult {
   M68kContextReport contexts;  // SEG-030-T005 (contexts domain only)
   std::map<std::uint32_t, M68kReturnSiteReport> return_sites;  // SEG-030-T006 (frames domain only)
   M68kFrameReport frames;      // SEG-030-T006 (frames domain only)
+  // SEG-030-T006: the partition tags of the writer-only instances of the returned round (M68kHandlerInstance::credited); their
+  // points are in `solution` but never in `reached`, `undecodable`, the site reports or the read counts.
+  std::set<std::uint32_t> writer_only_tags;
   analysis::Solution<M68kAnalysisState> solution;
 };
 

@@ -1531,6 +1531,14 @@ bool site_resolved(const M68kPcIndexSiteReport &site) { return site.outcome == M
 bool site_resolved(const M68kAddressSiteReport &site) { return site.resolved; }
 bool site_resolved(const M68kReturnSiteReport &site) { return site.resolved; }
 
+// SEG-030-T006: the tags of the writer-only (uncredited) instances.
+std::set<std::uint32_t> m68k_writer_only_tags(const M68kFrameConfig &frames) {
+  std::set<std::uint32_t> out;
+  for (const auto &[tag, instance] : frames.instances)
+    if (!instance.credited) out.insert(tag);
+  return out;
+}
+
 // SEG-030-T006: the distinct handler PCs of the delivered vectors, in order.
 std::vector<std::uint32_t> handler_pcs(const M68kFrameConfig &frames) {
   std::set<std::uint32_t> out;
@@ -1539,7 +1547,8 @@ std::vector<std::uint32_t> handler_pcs(const M68kFrameConfig &frames) {
 }
 
 // SEG-030-T006: the seeds of every partition: the main entries in tag 0, every live instance at its handler, and every handler PC
-// without a live instance in the dead-handler partition (kept so that the discovery roots are unchanged).
+// without a live credited instance in the dead-handler partition (kept so that the discovery roots are unchanged; a writer-only
+// instance never stands in for a delivered handler's root).
 std::vector<std::pair<std::uint64_t, M68kAnalysisState>> frame_seeds(const M68kFiniteAdapter &adapter, const M68kAnalysisConfig &config,
                                                                     const std::vector<std::uint32_t> &entries) {
   std::vector<std::pair<std::uint64_t, M68kAnalysisState>> seeds;
@@ -1547,7 +1556,7 @@ std::vector<std::pair<std::uint64_t, M68kAnalysisState>> frame_seeds(const M68kF
   std::set<std::uint32_t> live;
   for (const auto &[tag, instance] : config.frames.instances) {
     seeds.emplace_back(m68k_analysis_point(m68k_tagged_context(tag, 0U), instance.handler), adapter.root_state(tag, instance.handler));
-    live.insert(instance.handler);
+    if (instance.credited) live.insert(instance.handler);
   }
   for (const auto entry : entries) {
     const auto pc = entry & bus_mask;
@@ -1597,9 +1606,14 @@ M68kFiniteAnalysisResult solve_pinned(const M68kAnalysisImage &image, const std:
     if (!out.complete) return out;  // every query is Unknown(bound): no partial truth
     // Per-PC results: one point per PC without the contexts domain; with it, a PC's site is resolved only when it resolves in every
     // context that reaches it (the union of the targets), else the first unresolved context's outcome (point order) is reported.
-    for (const auto &[point, reason] : out.solution.unresolved_computed) out.unresolved_computed.emplace(m68k_point_pc(point), reason);
+    // SEG-030-T006: the points of a writer-only instance are analysed (asynchronous writers) but never credited.
+    out.writer_only_tags = m68k_writer_only_tags(config.frames);
+    const auto credited = [&](std::uint64_t point) { return !out.writer_only_tags.contains(m68k_point_tag(point)); };
+    for (const auto &[point, reason] : out.solution.unresolved_computed)
+      if (credited(point)) out.unresolved_computed.emplace(m68k_point_pc(point), reason);
     std::set<std::uint32_t> invalidated;
     for (const auto &[point, state] : out.solution.in_states) {
+      if (!credited(point)) continue;
       const auto pc = m68k_point_pc(point);
       const auto decoded = adapter.decode(pc);
       if (!decoded) {
@@ -1701,8 +1715,11 @@ M68kMemoryPolicy derive_memory_policy(const M68kAnalysisImage &image, const M68k
         for (const auto &range : *touched) derived.add_async(range);
     }
     if (stores && in_handler) ++report.handler_store_sites;
-    // Memory-source operands that may read work RAM: precise or Unknown by generic reason x CPU sub-reason.
-    if (m68k_memory_mode(operation.source_ea.mode) && operation.kind != M68kIrKind::load_effective_address &&
+    // Memory-source operands that may read work RAM: precise or Unknown by generic reason x CPU sub-reason. A writer-only instance's
+    // stores count above (they are real writes), its reads are never credited.
+    const auto instance = config.frames.instances.find(tag);
+    const bool credited = instance == config.frames.instances.end() || instance->second.credited;
+    if (credited && m68k_memory_mode(operation.source_ea.mode) && operation.kind != M68kIrKind::load_effective_address &&
         operation.kind != M68kIrKind::push_effective_address && operation.kind != M68kIrKind::jump_general &&
         operation.kind != M68kIrKind::call_general) {
       bool tracked = false;
@@ -2134,7 +2151,6 @@ enum class Unanalysed : std::uint8_t {
   nested,               // the handler is already on the parent's chain: unbounded nesting
   depth_bound,          // the parent's chain is at the instance depth bound
   entry_unknown,        // the frame address (its entry A7) is Unknown
-  undelivered,          // an installed interrupt vector the machine model does not deliver (M68kFrameConfig::potential_interrupts)
 };
 const char *unanalysed_name(Unanalysed why) {
   switch (why) {
@@ -2143,7 +2159,6 @@ const char *unanalysed_name(Unanalysed why) {
   case Unanalysed::nested: return "nested";
   case Unanalysed::depth_bound: return "depth_bound";
   case Unanalysed::entry_unknown: return "entry_unknown";
-  case Unanalysed::undelivered: return "undelivered_interrupt";
   }
   return "invalid";
 }
@@ -2189,6 +2204,7 @@ struct Contribution {
   M68kPointsTo a7;
   std::set<std::uint32_t> vectors;
   bool resuming{}, interrupt{};
+  bool credited{};  // some delivered vector enters it from a credited partition
   std::vector<M68kPointsTo> interrupt_frames;   // the frame address at every parent point where an interrupt vector enters it
   std::vector<std::uint64_t> taking_points;     // parent points where a resuming vector enters it
 };
@@ -2340,33 +2356,43 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
   // 1. Contributions: every boundary of a live partition (main, or an analysed instance) where a vector can be taken.
   std::map<std::pair<std::uint32_t, std::uint32_t>, Contribution> contributions;  // (handler, parent tag)
   std::map<std::uint32_t, std::vector<std::uint64_t>> partition_points;
-  std::map<std::pair<std::uint32_t, std::uint32_t>, std::set<std::uint32_t>> potential;  // (handler, parent tag) -> eligible vectors
   report.potential_interrupt_vectors = used.potential_interrupts.size();
+  // Every source: the delivered vectors, then the potential (installed, undelivered) interrupts, which enter writer-only instances.
+  std::vector<std::pair<M68kHandlerVector, bool>> sources;  // (vector, delivered)
+  for (const auto &vector : used.vectors) sources.emplace_back(vector, true);
+  for (const auto &vector : used.potential_interrupts)
+    if (m68k_vector_class(vector.vector) == M68kVectorClass::interrupt) sources.emplace_back(vector, false);
   for (const auto &[point, state] : states) {
     const auto tag = m68k_point_tag(point);
     if (tag != 0U && !used.instances.contains(tag)) continue;  // the dead-handler partition is never a writer or a parent
     partition_points[tag].push_back(point);
-    ++report.points;
+    // A writer-only partition is analysed exactly like a credited one, but its points are counted apart.
+    const bool parent_credited = tag == 0U || used.instances.at(tag).credited;
+    if (!parent_credited) ++report.writer_only_points;
+    std::size_t ignored = 0U;
+    const auto count = [&](std::size_t &counter) -> std::size_t & { return parent_credited ? counter : ignored; };
+    ++count(report.points);
     const auto decoded = adapter.decode(m68k_point_pc(point));
     const M68kIrOperation *operation = decoded ? &decoded->operation : nullptr;
     // An interrupt is taken at the boundary (its status); a synchronous exception while the instruction runs (after any clobbering
     // interrupt at the boundary).
     const auto &boundary = state.status;
     const auto status = adapter.effective_status(tag, state);
-    if (status.is_unknown()) ++report.status_unknown;
-    if (m68k_status_supervisor_proven(status)) ++report.supervisor_proven;
+    if (status.is_unknown()) ++count(report.status_unknown);
+    if (m68k_status_supervisor_proven(status)) ++count(report.supervisor_proven);
     const auto boundary_frame = adapter.frame_address(boundary, state);
     const auto running_frame = adapter.frame_address(status, state);
     const auto raised = m68k_raised_vectors(operation, status);
-    bool eligible = false, raising = false;
+    bool eligible = false, raising = false, potential_eligible = false;
     bool unknown_frame = false;
-    for (const auto &vector : used.vectors) {
+    for (const auto &[vector, delivered] : sources) {
       const auto cls = m68k_vector_class(vector.vector);
       const bool interrupt = cls == M68kVectorClass::interrupt;
       const bool takes = interrupt ? m68k_interrupt_eligible(boundary, m68k_interrupt_level(vector.vector))
                                    : std::binary_search(raised.begin(), raised.end(), vector.vector);
       if (!takes) continue;
       (interrupt ? eligible : raising) = true;
+      if (!delivered) potential_eligible = true;
       const auto &frame = interrupt ? boundary_frame : running_frame;
       unknown_frame = unknown_frame || frame.is_unknown();
       auto &contribution = contributions[{vector.handler & bus_mask, tag}];
@@ -2375,22 +2401,15 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
       contribution.vectors.insert(vector.vector);
       contribution.interrupt = contribution.interrupt || interrupt;
       contribution.resuming = contribution.resuming || cls != M68kVectorClass::synchronous;
+      contribution.credited = contribution.credited || (delivered && parent_credited);
       if (interrupt) contribution.interrupt_frames.push_back(frame);
       if (cls != M68kVectorClass::synchronous) contribution.taking_points.push_back(point);
     }
-    // A potential (installed, undelivered) interrupt: taken at the boundary when its level is eligible; never analysed.
-    bool potential_eligible = false;
-    for (const auto &vector : used.potential_interrupts) {
-      if (!m68k_interrupt_eligible(boundary, m68k_interrupt_level(vector.vector))) continue;
-      potential_eligible = true;
-      potential[{vector.handler & bus_mask, tag}].insert(vector.vector);
-    }
-    if (potential_eligible) ++report.potential_eligible;
-    eligible = eligible || potential_eligible;
-    if (eligible) ++report.interrupt_eligible;
-    else if (!status.is_unknown()) ++report.interrupt_masked;
-    if (raising) ++report.raising_points;
-    if (unknown_frame) {
+    if (potential_eligible) ++count(report.potential_eligible);
+    if (eligible) ++count(report.interrupt_eligible);
+    else if (!status.is_unknown()) ++count(report.interrupt_masked);
+    if (raising) ++count(report.raising_points);
+    if (unknown_frame && parent_credited) {
       if (!m68k_status_supervisor_proven(eligible ? boundary : status)) ++report.frame_unproven_supervisor;
       else {
         ++report.frame_unknown_a7;
@@ -2412,20 +2431,21 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
   bool valid = true;
   std::map<std::uint32_t, M68kMemoryPolicy> async;               // derived per-partition asynchronous writers
   std::map<std::uint32_t, std::set<std::uint32_t>> clobbered;    // derived clobber levels per partition
-  const auto unanalysed = [&](std::uint32_t parent, const std::set<std::uint32_t> &vectors, bool resuming, Unanalysed why) {
-    ++report.unanalysed[unanalysed_name(why)];
+  // A handler entered only by potential interrupts (or from a writer-only partition) is counted under `<cause>/writer_only`.
+  const auto unanalysed = [&](std::uint32_t parent, const std::set<std::uint32_t> &vectors, bool resuming, bool credited,
+                              Unanalysed why) {
+    ++report.unanalysed[std::string(unanalysed_name(why)) + (credited ? "" : "/writer_only")];
     if (!resuming) return;
     async[parent].async_all = true;
     const auto levels = clobber_levels(vectors);
     clobbered[parent].insert(levels.begin(), levels.end());
   };
-  for (const auto &[key, vectors] : potential) unanalysed(key.second, vectors, true, Unanalysed::undelivered);
   for (auto &[key, contribution] : contributions) {
     auto why = instance_admission(used, key.first, key.second);
     if (why == Unanalysed::none && contribution.a7.is_unknown()) why = Unanalysed::entry_unknown;
     auto found = tag_of.find(key);
     if (why != Unanalysed::none) {
-      unanalysed(key.second, contribution.vectors, contribution.resuming, why);
+      unanalysed(key.second, contribution.vectors, contribution.resuming, contribution.credited, why);
       if (found != tag_of.end() && used.instances.contains(found->second)) {
         valid = false;  // an analysed instance whose entry is no longer known
         out.next.instances.erase(found->second);
@@ -2447,6 +2467,7 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
     derived.vectors = contribution.vectors;
     derived.resuming = contribution.resuming;
     derived.interrupt = contribution.interrupt;
+    derived.credited = contribution.credited;
     const auto previous = used.instances.find(found->second);
     if (previous == used.instances.end()) {
       valid = false;  // a new live instance: not yet analysed
@@ -2456,7 +2477,8 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
     auto &instance = out.next.instances[found->second];
     const bool below = leq(derived.status, instance.status) && leq(derived.a7, instance.a7) &&
                        std::includes(instance.vectors.begin(), instance.vectors.end(), derived.vectors.begin(), derived.vectors.end()) &&
-                       (!derived.resuming || instance.resuming) && (!derived.interrupt || instance.interrupt);
+                       (!derived.resuming || instance.resuming) && (!derived.interrupt || instance.interrupt) &&
+                       (!derived.credited || instance.credited);
     if (below) continue;
     valid = false;
     const bool grew = !leq(derived.a7, instance.a7);
@@ -2465,6 +2487,7 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
     instance.vectors.insert(derived.vectors.begin(), derived.vectors.end());
     instance.resuming = instance.resuming || derived.resuming;
     instance.interrupt = instance.interrupt || derived.interrupt;
+    instance.credited = instance.credited || derived.credited;
     if (grew && ++instance.growth > m68k_instance_growth_bound)
       instance.a7 = M68kPointsTo::unknown(UnknownReason::iteration_bound, Sub::frame_unproven);  // widening
   }
@@ -2629,7 +2652,8 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
   std::set<std::uint32_t> live_handlers;
   for (const auto &[tag, instance] : used.instances) {
     ++report.instances;
-    live_handlers.insert(instance.handler);
+    if (instance.credited) live_handlers.insert(instance.handler);
+    else ++report.writer_only_instances;
     if (instance.interrupt) ++report.interrupt_instances;
     else if (instance.resuming) ++report.resuming_instances;
     else ++report.synchronous_instances;
@@ -2988,6 +3012,7 @@ std::string format_m68k_finite_analysis(const M68kFiniteAnalysisResult &result) 
     out << "frames validated=" << (frames.validated ? 1 : 0) << " warm=" << frames.warm_rounds << " rounds=" << frames.frame_rounds
         << " instances=" << frames.instances << " interrupt=" << frames.interrupt_instances
         << " resuming=" << frames.resuming_instances << " synchronous=" << frames.synchronous_instances
+        << " writer_only=" << frames.writer_only_instances << " writer_only_points=" << frames.writer_only_points
         << " dead=" << frames.dead_handlers << " integrity_failures=" << frames.frame_integrity_failures
         << " clobbered=" << frames.clobbered_partitions << " eligible=" << frames.interrupt_eligible
         << " masked=" << frames.interrupt_masked << " main_async_all=" << (frames.main_async_all ? 1 : 0)

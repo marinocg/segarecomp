@@ -142,9 +142,10 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
     if (frames) {
       // SEG-030-T006: the delivered vectors (ADR 0021 / ADR 0043) and, for a reset-entry program, the 68000 reset state.
       for (const auto &[vector, handler] : report.roots.vectors) adapter_config.frames.vectors.push_back({vector, handler & bus_mask});
-      // Installed but undelivered interrupt vectors: potential asynchronous sources only (never roots; D keeps the delivered set).
-      for (const auto &[vector, handler] : report.roots.potential_interrupts)
-        adapter_config.frames.potential_interrupts.push_back({vector, handler & bus_mask});
+      // Installed but undelivered interrupt vectors the machine premise admits: potential asynchronous sources, analysed as
+      // writer-only handler instances (never roots; D keeps the delivered set).
+      adapter_config.frames.potential_interrupts =
+          genesis_potential_interrupt_sources(report.roots.potential_interrupts, config.interrupt_premise);
       if (entry) adapter_config.frames.main_entries.insert(*entry);
       if (config.reset_entry && entry) {
         adapter_config.frames.reset_entry = *entry;
@@ -184,6 +185,7 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
   std::map<std::uint32_t, GenesisReachabilityInstruction> instructions;
   for (const auto &[point, state] : report.analysis.solution.in_states) {
     (void)state;
+    if (report.analysis.writer_only_tags.contains(m68k_point_tag(point))) continue;  // analysed for writers only, never D
     const auto pc = static_cast<std::uint32_t>(point) & bus_mask;
     const auto decoded = image->decode(pc);
     if (!decoded) {
@@ -479,13 +481,16 @@ std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport
       };
       out << ",\"warm_rounds\":" << frames.warm_rounds << ",\"frame_rounds\":" << frames.frame_rounds
           << ",\"reset_state\":" << (frames.reset_state ? "true" : "false") << ",\"handler_vectors\":" << frames.handler_vectors
+          << ",\"interrupt_premise\":\"" << genesis_interrupt_premise_name(config.interrupt_premise) << '"'
           << ",\"potential_interrupt_vectors\":" << frames.potential_interrupt_vectors
           << ",\"instances\":{\"analysed\":" << frames.instances << ",\"interrupt\":" << frames.interrupt_instances
           << ",\"synchronous_resuming\":" << frames.resuming_instances << ",\"synchronous\":" << frames.synchronous_instances
+          << ",\"writer_only\":" << frames.writer_only_instances
           << ",\"dead_handlers\":" << frames.dead_handlers << ",\"unanalysed\":" << counts(frames.unanalysed)
           << ",\"frame_integrity_failures\":" << frames.frame_integrity_failures
           << ",\"clobbered_partitions\":" << frames.clobbered_partitions << '}'
-          << ",\"points\":{\"live\":" << frames.points << ",\"status_unknown\":" << frames.status_unknown
+          << ",\"points\":{\"live\":" << frames.points << ",\"writer_only\":" << frames.writer_only_points
+          << ",\"status_unknown\":" << frames.status_unknown
           << ",\"supervisor_proven\":" << frames.supervisor_proven << ",\"interrupt_eligible\":" << frames.interrupt_eligible
           << ",\"interrupt_masked\":" << frames.interrupt_masked << ",\"potential_eligible\":" << frames.potential_eligible
           << ",\"raising\":" << frames.raising_points

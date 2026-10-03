@@ -487,16 +487,20 @@ void frame_integrity() {
 
 
 // An installed level-4 autovector the machine model does not deliver is still a potential asynchronous source (real hardware delivers
-// it once the program enables its source): wherever level 4 is eligible it is an unanalysed resuming interrupt, so every cell of
-// that partition is asynchronous; its handler is never seeded (D unchanged). Where the mask excludes level 4 it has no effect.
+// it once the program enables its source). SEG-030-T006 iteration 3: wherever level 4 is eligible it enters a handler instance
+// exactly like the delivered level 6, analysed for asynchronous writers only (writer-only: never seeded, never in D or the site
+// reports), so the main flow's writers are its bounded store set and frame. Where the mask excludes level 4 it has no effect; where
+// its entry A7 is Unknown it is an unanalysed resuming interrupt and every cell is asynchronous, as before.
 void undelivered_interrupt_source() {
   constexpr std::uint32_t irq4 = 0x600U;
   const std::vector<M68kHandlerVector> potential{{28U, irq4}};
+  std::uint32_t irq4_rte = 0U;
   const auto build = [&](std::uint32_t sr) {
     Asm a;
     const auto flow = main_flow(a, sr);
     a.at(irq6).rte();                  // the delivered level-6 handler writes nothing
     a.at(irq4).store_imm(5U, cell_b);  // the installed level-4 handler writes cell B
+    irq4_rte = a.pc;
     a.rte();
     return std::make_pair(a, flow);
   };
@@ -504,21 +508,38 @@ void undelivered_interrupt_source() {
   const auto result = run(open, irq_only, true, true, potential);
   if (debug()) std::cerr << describe(result);
   expect(result.complete && result.frames.validated && result.frames.potential_interrupt_vectors == 1U &&
-             result.frames.potential_eligible >= 1U && unanalysed(result, "undelivered_interrupt") >= 1U,
-         "undelivered: the installed level-4 handler is an eligible, unanalysed interrupt source");
-  expect(result.frames.main_async_all && word_at(result, flow.read_done, 2U).is_unknown() &&
-             word_at(result, flow.read_done, 1U).is_unknown(),
-         "undelivered: its writes are unproven, so every main-flow cell is asynchronous (cell B not precise)");
-  expect(m68k_points_of(result, irq4).empty() && !result.reached.contains(irq4), "undelivered: its handler is never seeded (D unchanged)");
+             result.frames.potential_eligible >= 1U && result.frames.writer_only_instances >= 1U &&
+             result.frames.writer_only_points >= 2U && result.frames.unanalysed.empty(),
+         "undelivered: the installed level-4 handler is analysed as a writer-only instance");
+  std::uint32_t tag = 0U;
+  for (std::uint32_t t = 1U; t < 8U; ++t)
+    if (reached_in(result, irq4, t) && status_at(result, irq4, t) == FiniteValue::of({0xCU})) tag = t;
+  expect(tag != 0U && result.writer_only_tags.contains(tag), "undelivered: the instance is entered with S = 1, I = 4, writer-only");
+  expect(!result.frames.main_async_all && word_at(result, flow.read_done, 2U).is_unknown() &&
+             word_at(result, flow.read_done, 1U) == FiniteValue::of({1U}),
+         "undelivered: the main flow's writers are bounded: cell B (its store) is asynchronous, cell A stays precise");
+  expect(!result.reached.contains(irq4) && !result.reached.contains(irq4_rte) && !result.return_sites.contains(irq4_rte),
+         "undelivered: its handler is never credited (D and the site reports unchanged)");
   const auto [masked, masked_flow] = build(0x2500U);  // I = 5: level 4 masked, level 6 eligible
   const auto closed = run(masked, irq_only, true, true, potential);
   expect(closed.complete && closed.frames.validated && closed.frames.potential_eligible == 0U &&
-             unanalysed(closed, "undelivered_interrupt") == 0U && !closed.frames.main_async_all &&
+             closed.frames.writer_only_instances == 0U && closed.writer_only_tags.empty() && !closed.frames.main_async_all &&
              word_at(closed, masked_flow.read_done, 2U) == FiniteValue::of({1U}),
-         "undelivered: with level 4 masked cell B stays precise");
+         "undelivered: with level 4 masked (I = 5) there is no instance and cell B stays precise");
+  const auto [at_four, four_flow] = build(0x2400U);  // I = 4: level 4 is not eligible at an equal mask
+  const auto equal = run(at_four, irq_only, true, true, potential);
+  expect(equal.complete && equal.frames.potential_eligible == 0U && word_at(equal, four_flow.read_done, 2U) == FiniteValue::of({1U}),
+         "undelivered: level 4 is not eligible at I = 4");
   const auto without = run(open, irq_only);
   expect(!without.frames.main_async_all && word_at(without, flow.read_done, 2U) == FiniteValue::of({1U}),
          "undelivered: the delivered-only premise (the previous, unsound model) would keep cell B precise");
+  // An Unknown status and supervisor stack (no reset state): the level-4 entry A7 is Unknown, so it stays an unanalysed resuming
+  // interrupt and every cell of the main flow is asynchronous.
+  const auto unknown = run(open, irq_only, false, true, potential);
+  expect(unknown.complete && unknown.frames.validated && unknown.frames.writer_only_instances == 0U &&
+             unanalysed(unknown, "entry_unknown/writer_only") >= 1U && unknown.frames.main_async_all &&
+             word_at(unknown, flow.read_done, 1U).is_unknown(),
+         "undelivered: an Unknown entry A7 still clobbers (every cell asynchronous)");
 }
 
 // The A7 of the points of `pc` in the call-site context of `site` (main partition).

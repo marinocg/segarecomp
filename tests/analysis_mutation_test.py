@@ -4,9 +4,9 @@
 Every mutant below is one precise textual edit of PRODUCTION analysis code (the generic core headers, the M68K adapter, the Z80
 effect projection or the Z80 adapter) that plants a deliberate soundness, determinism or bound defect. The harness copies the
 product tree (without build/, .git/, games/, .tools/) to a temporary directory, configures ONE build there, builds the
-SEG-029 fixture tests plus the SEG-030-T005 contexts and SEG-030-T006 frames fixtures and requires the unmutated baseline to pass. Then, per mutant, it
-applies the edit to the temporary copy only, rebuilds the affected fixture tests incrementally, runs them, and restores the file. A
-mutant is KILLED when one of its fixture tests exits non-zero (or times out). The worktree is never modified.
+SEG-029 fixture tests plus the SEG-030-T005 contexts and SEG-030-T006 frames and Genesis interrupt-premise fixtures and
+requires the unmutated baseline to pass. Then, per mutant, it applies the edit to the temporary copy only, rebuilds the
+affected fixture tests incrementally, runs them, and restores the file. A mutant is KILLED when one of its fixture tests exits non-zero (or times out). The worktree is never modified.
 
 Fail-closed rules:
   * stale mutant: the edit's `old` text must occur exactly once in the current source, otherwise the harness FAILS (a refactor can
@@ -44,8 +44,9 @@ M68K_TEST = "analysis_m68k_equivalence_test"
 Z80_TEST = "analysis_z80_adapter_test"
 CONTEXTS_TEST = "analysis_m68k_contexts_test"  # SEG-030-T005: call contexts and callee summaries
 FRAMES_TEST = "analysis_m68k_frames_test"  # SEG-030-T006: interrupt mask, handler instances, frames and returns
+PREMISE_TEST = "analysis_genesis_interrupt_premise_test"  # SEG-030-T006: the named Genesis interrupt-source premise
 # cheapest first: a core mutant is usually decided by the CPU-free fixture
-ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, CONTEXTS_TEST, FRAMES_TEST)
+ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, CONTEXTS_TEST, FRAMES_TEST, PREMISE_TEST)
 TEST_TIMEOUT_SECONDS = 60  # the unmutated fixtures run in well under a second
 
 FINITE = "libs/analysis/include/segarecomp/analysis/finite_value.hpp"
@@ -54,6 +55,7 @@ M68K = "libs/cpu/m68k/analysis/src/finite_adapter.cpp"
 M68K_FRAMES = "libs/cpu/m68k/analysis/src/frames.cpp"
 Z80_EFFECTS = "libs/cpu/z80/src/effects.cpp"
 Z80_ADAPTER = "libs/cpu/z80/analysis/src/adapter.cpp"
+GENESIS_PREMISE = "platforms/genesis/analysis_report/include/segarecomp/genesis_analysis_report/interrupt_premise.hpp"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -262,9 +264,25 @@ MUTANTS: list[Mutant] = [
            "    out.sub = sub;",
            (FRAMES_TEST,), "a handler RTE resuming interrupted code is not reported interrupt_resumption"),
     Mutant("m68k_undelivered_interrupt_ignored", M68K,
-           "  for (const auto &[key, vectors] : potential) unanalysed(key.second, vectors, true, Unanalysed::undelivered);\n",
+           "    if (m68k_vector_class(vector.vector) == M68kVectorClass::interrupt) sources.emplace_back(vector, false);\n",
+           "    (void)vector;\n",
+           (FRAMES_TEST, PREMISE_TEST), "an installed but undelivered interrupt handler is not a potential asynchronous writer"),
+    Mutant("m68k_writer_only_points_credited", M68K,
+           "      if (!credited(point)) continue;\n",
            "",
-           (FRAMES_TEST,), "an installed but undelivered interrupt handler is not a potential asynchronous writer"),
+           (FRAMES_TEST, PREMISE_TEST), "a writer-only (undelivered-interrupt) instance's points are credited to D and the site reports"),
+    Mutant("genesis_premise_drops_level_4", GENESIS_PREMISE,
+           "genesis_main_cpu_interrupt_levels{2U, 4U, 6U};",
+           "genesis_main_cpu_interrupt_levels{2U, 6U, 6U};",
+           (PREMISE_TEST,), "the Genesis premise omits the H-int (level 4) source"),
+    Mutant("genesis_premise_drops_level_2", GENESIS_PREMISE,
+           "genesis_main_cpu_interrupt_levels{2U, 4U, 6U};",
+           "genesis_main_cpu_interrupt_levels{4U, 4U, 6U};",
+           (PREMISE_TEST,), "the Genesis premise omits the external (level 2) source"),
+    Mutant("genesis_premise_admits_level_7", GENESIS_PREMISE,
+           "  if (premise == GenesisInterruptPremise::unconfigured) return true;\n",
+           "  if (premise == GenesisInterruptPremise::unconfigured || vector == 31U) return true;\n",
+           (PREMISE_TEST,), "the Genesis premise admits a level-7 source the board never asserts"),
     Mutant("m68k_summary_absolute_exit_a7", M68K,
            "    if (config_.domains.frames) state.address[7] = in.address[7];\n  } else {",
            "  } else {",

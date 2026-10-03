@@ -210,6 +210,14 @@ set_tests_properties(analysis_report_test PROPERTIES FIXTURES_SETUP analysis_rep
 set_tests_properties(analysis_report_driver_test PROPERTIES FIXTURES_REQUIRED analysis_report_fixture)
 set_property(TEST analysis_report_test analysis_report_driver_test APPEND PROPERTY LABELS full fast)
 
+# SEG-030-T006 (ADR 0079 decision 7): the named Genesis interrupt-source premise (header-only, over the CPU analysis library).
+add_executable(analysis_genesis_interrupt_premise_test analysis_genesis_interrupt_premise_test.cpp)
+target_link_libraries(analysis_genesis_interrupt_premise_test PRIVATE segarecomp::cpu_m68k_analysis)
+target_include_directories(analysis_genesis_interrupt_premise_test PRIVATE ${PROJECT_SOURCE_DIR}/platforms/genesis/analysis_report/include)
+segarecomp_enable_warnings(analysis_genesis_interrupt_premise_test)
+add_test(NAME analysis_genesis_interrupt_premise_test COMMAND analysis_genesis_interrupt_premise_test)
+set_property(TEST analysis_genesis_interrupt_premise_test APPEND PROPERTY LABELS full fast)
+
 # SEG-030 (ADR 0079 decision 1): the build graph, not the text scan, proves that no production target links, compiles or
 # includes the analysis. CMake >= 3.27 adds the codemodel query to this configure; an older CMake makes the test configure a
 # private tree instead. The planted-bypass demonstration configures several private copies of the source tree (full tier only).

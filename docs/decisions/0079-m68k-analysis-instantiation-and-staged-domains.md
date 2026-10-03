@@ -132,17 +132,37 @@ reproduce the SEG-026-T002 strict row exactly.
        an unresolved computed site and a TRAP/TRAPV whose continuation is not modelled stay unknown effects. The status of an opaque
        continuation is its own partition's status bound (relative to the closure premise of decision 8), never another partition's. Register preservation across an interrupt remains the existing resumption
        premise; only the saved SR is checked.
-     - **Two premises, two consumers.** *Discovery* (`D`, roots, recall, analysed handler instances) keeps the challenger's machine
-       root premise: only the delivered vectors of ADR 0021 / ADR 0043 (level-6 autovector and the synchronous vectors) are roots and
-       analysed handlers. *Asynchronous writers, interrupt eligibility and status* use the hardware premise: real hardware delivers
-       the level-4 (VDP H-interrupt) and level-2 (external, I/O port) autovectors once the program enables their source through
-       device registers, which the analysis does not model, so non-delivery is never proven. Every installed interrupt vector the
-       machine model does not deliver (the spurious vector 24 and the autovectors 25-31 other than IRQ6;
-       `GenesisReachabilityRoots::potential_interrupts`, `M68kFrameConfig::potential_interrupts`) is therefore a potential
-       asynchronous source wherever its level is eligible (level > mask; level 7 and the spurious vector always): an unanalysed
-       resuming interrupt, so that partition's asynchronous writers are every cell and its status is Unknown after those boundaries
-       (frame integrity is not proven for code the analysis never visits). Its handler is never seeded, so `D` is unchanged. Narrowing
-       this to the levels the board can assert, or analysing those handlers as instances, would be a separate precision step.
+     - **Two premises, two consumers.** *Discovery* (`D`, roots, recall, the site and read reports) keeps the challenger's machine
+       root premise: only the delivered vectors of ADR 0021 / ADR 0043 (level-6 autovector and the synchronous vectors) are roots
+       and credited handler instances. *Asynchronous writers, interrupt eligibility and status* use the hardware premise: real
+       hardware delivers the level-4 (VDP H-interrupt) and level-2 (external, I/O port) autovectors once the program enables their
+       source through device registers, which the analysis does not model, so non-delivery is never proven. The installed interrupt
+       vectors the machine model does not deliver (`GenesisReachabilityRoots::potential_interrupts`: the spurious vector 24 and the
+       autovectors 25-31 other than IRQ6) are filtered by a named machine premise into `M68kFrameConfig::potential_interrupts`, and
+       each selected vector enters a handler instance wherever its level is eligible exactly like the delivered level 6 (admission,
+       nesting, mask, frame address, per-partition writers, frame integrity). Such an instance is *writer-only*
+       (`M68kHandlerInstance::credited` false, also for every instance below it): its handler is never seeded as a root and its
+       points never enter `D`, the site reports or the read counts (they are reported apart as writer-only instances and points);
+       its stores still count as stores, release stores included. An admitted instance whose entry is Unknown, or that nests on its
+       own chain, is an unanalysed resuming interrupt as before (every cell of its parent asynchronous, the parent's status Unknown
+       after those boundaries).
+     - **The Genesis interrupt-source premise** (`GenesisInterruptPremise::genesis_board`, platform-owned in
+       `platforms/genesis/analysis_report/include/segarecomp/genesis_analysis_report/interrupt_premise.hpp`; the CPU library stays
+       machine-agnostic and takes the source set as configuration). On the Genesis main 68000 the interrupt request levels are a
+       subset of {2, 4, 6}, every acknowledge autovectored (vectors 26, 28, 30): level 6 is the V-interrupt (VDP register 1 IE0),
+       level 4 the H-interrupt (VDP register 0 IE1), level 2 the external interrupt (VDP register 11 IE2 together with the I/O-port
+       TH interrupt). Levels 1, 3, 5 and 7 are never asserted. There is no spurious interrupt (vector 24 needs /BERR during the
+       acknowledge cycle; every acknowledge is autovectored through /VPA) and no uninitialized interrupt (vector 15 needs a vectored
+       acknowledge); the cartridge slot carries no IPL, /VPA or /BERR line. This holds for a plain cartridge and with a Mega-CD or
+       32X attached (their interrupts go to the sub-68000 and the SH-2s). Public sources: Genesis Plus GX `core/vdp_ctrl.c`
+       (`vdp_68k_irq_ack` sets only levels 6, 4 and 0, `M68K_INT_ACK_AUTOVECTOR`) and `core/input_hw/lightgun.c` (level 2 gated by
+       register 11 bit 3); BlastEm `genesis.c` (schedules only levels 6, 4 and 2); MAME `sega/megadriv.cpp` (lines 6 and 4);
+       plutiedev "VDP registers" (IE0/IE1/IE2) and the cartridge-slot pinout (no interrupt pins); the project's
+       `docs/references/genesis-controller-io-read-semantics-contract.md` (TH interrupt). ADR 0043 already marks vectors 15 and 24
+       "not produced by Genesis". Caveat: the VDP's IPL0-inactive wiring is not schematic-verified, but every cited emulator agrees.
+       The potential sources are therefore the installed handlers of levels 2 and 4 (level 6 is delivered). The *unconfigured*
+       premise (`GenesisInterruptPremise::unconfigured`, the conservative MC68000 default) keeps every installed interrupt vector;
+       under it a level-7 or spurious handler is never masked, nests on itself without bound, and makes every cell asynchronous.
    - Handler entry: registers and work RAM Unknown, A7 as above.
    - Initial work RAM is Unknown (`initial_memory`). ADR 0055's zero-reset assumption is not reused: real hardware leaves work RAM
      undefined.
@@ -572,7 +592,8 @@ reproduce the SEG-026-T002 strict row exactly.
   - Handlers with no live instance are seeded in a dead-handler partition (tag 254) so that `D` keeps its roots; every cell is
     asynchronous there.
   - Installed interrupt vectors the machine model does not deliver are potential sources under the hardware premise of decision 7:
-    an unanalysed resuming interrupt wherever their level is eligible, never seeded (`D` unchanged).
+    an unanalysed resuming interrupt wherever their level is eligible, never seeded (`D` unchanged). Superseded by advancement
+    iteration 3: the Genesis premise selects levels 2 and 4 only, and each is analysed as a writer-only instance.
 - **Per-partition asynchronous writers.** A partition receives the stores and interrupt frames of every analysed resuming child
   instance (interrupts; divide by zero, CHK, TRAPV) and, transitively, that child's own writers. Frame integrity: a resuming
   instance whose writes (or its resuming descendants') may reach its saved SR word clobbers the parent's status after its taking
@@ -698,3 +719,57 @@ reproduce the SEG-026-T002 strict row exactly.
     - A private diagnostic restricted the potential sources to levels 2 and 4. It is never credited, and the level choice is not a
       hardware fact. It still left 6,239 of 6,550 live statuses Unknown (311 masked), because level 2 and level 4 are eligible at
       the main flow's mask. Step 4 (frame-integrity attribution) is therefore not reached: no instance is admitted.
+- **Advancement iteration 3: the Genesis interrupt-source premise and writer-only instances** (frames domain only; `baseline`,
+  `memory` and `contexts` outputs stay byte-identical on Sonic).
+  - *Premise.* The level choice of the iteration-2 diagnostic is now a resolved hardware fact, recorded with its public sources in
+    decision 7 and applied by the platform (`GenesisInterruptPremise::genesis_board`): the potential sources are the installed
+    level-2 and level-4 handlers; the level-7 and spurious vectors are no longer sources. The CPU library keeps taking the source
+    set as configuration; `unconfigured` keeps the conservative MC68000 default (every installed interrupt vector).
+  - *Writer-only instances.* A potential source enters a handler instance wherever its level is eligible, exactly like level 6:
+    admission, mask, nesting, frame address, per-partition writers and frame integrity. Its instance (and every instance below it)
+    is writer-only: never seeded, never in `D`, the site reports or the read counts. Its points are reported apart
+    (`writer_only` instances and points), and an unanalysed one is counted as `<cause>/writer_only`. An instance whose entry is
+    Unknown still clobbers its parent as before. The `undelivered_interrupt` cause is gone.
+  - Fixtures:
+    - `analysis_m68k_frames_test`: a level-4 handler at I = 3 is a writer-only instance at S = 1, I = 4. The main flow's writers
+      are bounded: its cell is asynchronous and the other cell stays precise. Its handler and RTE are absent from `D` and the
+      return sites. At I = 4 and I = 5 there is no instance, and with an Unknown supervisor stack it is
+      `entry_unknown/writer_only` and every cell is asynchronous.
+    - `analysis_genesis_interrupt_premise_test`: under the Genesis premise the installed level-2 and level-4 handlers are writers
+      and the level-7 and spurious handlers are not. Under the unconfigured default they are, and their unbounded self-nesting makes
+      every cell asynchronous.
+
+    Five mutants are killed (`analysis_mutation_test`):
+    - potential sources are ignored;
+    - writer-only points are credited;
+    - the Genesis premise drops level 4;
+    - the Genesis premise drops level 2;
+    - the Genesis premise admits level 7.
+  - **Sonic attract oracle** (Release; seven runs in parallel on one host, while the mutation gate was running; sanitized aggregates):
+
+    | measure | iteration 2 (step 3) | iteration 3 (credited) | iteration 3 + ablation (diagnostic) |
+    | --- | --- | --- | --- |
+    | potential sources (installed, undelivered) | 7 | 2 | 2 |
+    | live / status Unknown / masked / eligible | 6,550 / 6,550 / 0 / 6,550 | 6,550 / 6,239 / 311 / 6,239 | same as credited |
+    | S proven / raising | 0 / 30 | 311 / 28 | same |
+    | frame address Unknown: S unproven / A7 Unknown | 6,532 / 5 | 6,234 / 6 | same |
+    | first frames round: eligible / masked / A7 Unknown (`context_bound` / `none`) | 6,550 / 0 / 6,204 (1,885 / 4,319) | 6,203 / 347 / 6,204 (1,885 / 4,319) | same |
+    | instances analysed / writer-only / unanalysed | 0 / - / `entry_unknown` 3, `undelivered_interrupt` 3 | 0 / 0 / `entry_unknown` 3, `entry_unknown/writer_only` 2 | same |
+    | writer-only points / integrity failures / clobbered partitions | - / 0 / 1 | 0 / 0 / 1 | same |
+    | `async_all` / ranges / release stores / Unknown-target stores | true / 0 / 1,969 / 1,930 | true / 0 / 1,962 / 1,923 | same |
+    | work-RAM reads: precise / `external_writer` / `async_writer` | 0 / 428 / 0 | 0 / 429 / 0 | 0 / 0 / 420 |
+    | other work-RAM-or-Unknown reads Unknown (`base_unknown`; `context_bound`) | 577 (468; 15) | 576 (467; 15) | 585 (467; 24) |
+    | `D` / recall / escapes; width-only, `jsr_an`, `jmp_an`, `rte`, `rts_computed` resolved | 6,806 / 43.13% / 0; 0, 0, 0, 0, 0 | same | same |
+    | frames rounds / all-round iterations / wall / peak RSS | 5 / 5,662,615 / 134 s / 336 MB | 5 / 5,662,714 / 140 s / 338 MB | 5 / 5,662,840 / 137 s / 338 MB |
+
+    - Both credited runs and both ablation runs are byte-identical (private, aggregate and compare-tool outputs).
+    - The premise removes the non-maskable sources, so 311 live points now have a proven S = 1 and a mask that excludes every
+      potential level. The remaining 6,239 Unknown statuses follow from the level-6, level-4 and level-2 instances all being
+      unanalysable: each is eligible at main-flow points whose A7 is Unknown, so each is `entry_unknown`. That clobbers the main
+      flow, whose status bound becomes Unknown. The first frames round already has 6,204 eligible points with S proven and A7
+      Unknown (`context_bound` 1,885, unproven continuation 4,319). Frame integrity is never evaluated, because no interrupt instance
+      is admitted.
+    - The dominant remaining cause of status and frame Unknown is therefore the main flow's Unknown A7 at interrupt-eligible
+      points: the continuation of an unproven callee (an unresolved computed site, an RTS away from its entry delta) and the
+      context bound. It is no longer the interrupt-source premise. The remaining work-RAM read Unknowns stay dominated by
+      `async_all` and the external writer (T010).

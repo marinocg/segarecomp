@@ -31,6 +31,7 @@
 
 #include "segarecomp/analysis/solver.hpp"
 #include "segarecomp/cpu/m68k/analysis/finite_adapter.hpp"
+#include "segarecomp/genesis_analysis_report/interrupt_premise.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
 #include "segarecomp/machine/genesis/reachability_challenger.hpp"
 
@@ -110,6 +111,9 @@ struct GenesisAnalysisReportConfig {
   // SEG-030-T006: the program starts at the cartridge reset vector (the 68000 reset state: S = 1, I = 7, SSP = the long at 0). Only
   // the frames domain reads it.
   bool reset_entry{};
+  // SEG-030-T006: which installed, undelivered interrupt vectors are potential asynchronous sources (frames domain only). The
+  // Genesis board premise is the default; `unconfigured` is the conservative MC68000 default (comparison and tests).
+  GenesisInterruptPremise interrupt_premise{GenesisInterruptPremise::genesis_board};
 };
 
 // SEG-030-T004 (ADR 0079 decision 7): the Genesis bus range a store to which may release the Z80 (the Z80 control block: memory
