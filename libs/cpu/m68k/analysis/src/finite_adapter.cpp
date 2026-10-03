@@ -351,6 +351,7 @@ M68kAnalysisState join(const M68kAnalysisState &left, const M68kAnalysisState &r
   out.flag_setter = left.flag_setter == right.flag_setter ? left.flag_setter : std::nullopt;
   for (std::size_t i = 0; i < out.address.size(); ++i) out.address[i] = join(left.address[i], right.address[i]);
   out.memory = join(left.memory, right.memory);
+  out.stack_delta = join(left.stack_delta, right.stack_delta, m68k_exact_offset_bound);
   return out;
 }
 
@@ -363,6 +364,7 @@ bool leq(const M68kAnalysisState &left, const M68kAnalysisState &right) {
   for (std::size_t i = 0; i < left.address.size(); ++i)
     if (!leq(left.address[i], right.address[i])) return false;
   if (!leq(left.memory, right.memory)) return false;
+  if (!leq(left.stack_delta, right.stack_delta)) return false;
   return !right.flag_setter || left.flag_setter == right.flag_setter;
 }
 
@@ -708,7 +710,77 @@ bool memory_source_kind(M68kIrKind kind) {
 M68kAnalysisState M68kFiniteAdapter::entry_state(bool continuation) const {
   auto state = State::all_unknown();
   if (config_.domains.memory) state.memory.absent = continuation ? Sub::store_poison : Sub::initial_memory;
+  if (config_.domains.contexts && !continuation) state.stack_delta = FiniteValue::of({0U});
   return state;
+}
+
+// SEG-030-T005: the generic reason of an opaque continuation's CPU sub-reason.
+namespace {
+UnknownReason continuation_reason(Sub sub) {
+  switch (sub) {
+  case Sub::context_bound: return UnknownReason::state_bound;
+  case Sub::stack_unbalanced: return UnknownReason::unsupported_transfer;
+  default: return UnknownReason::unknown_input;
+  }
+}
+}  // namespace
+
+M68kAnalysisState M68kFiniteAdapter::opaque_continuation(Sub sub) const {
+  if (sub == Sub::none) return entry_state(true);
+  auto state = State::all_unknown(continuation_reason(sub));
+  state.address.fill(M68kPointsTo::unknown(continuation_reason(sub), sub));
+  if (config_.domains.memory) state.memory.absent = sub;
+  return state;
+}
+
+namespace {
+// The synthetic extent the stack delta is carried in through the CPU-owned A7 transfer (never a machine region: it is only ever
+// read back from a scratch state, never stored, read or reported).
+constexpr std::uint32_t delta_origin = UINT32_C(0x00800000);
+const M68kRegion delta_region{M68kRegionKind::io_device, UINT32_C(0xFFFFFFFF), UINT32_C(0x40000000), UINT32_C(0x01000000), 0U};
+
+// Kinds after which the stack delta is not tracked: an SR write may switch between the supervisor and user stack pointers (the
+// active A7 changes); LINK/UNLK move A7 through another address register.
+bool stack_delta_untracked(M68kIrKind kind) {
+  switch (kind) {
+  case M68kIrKind::write_status_register:
+  case M68kIrKind::logical_immediate_to_sr:
+  case M68kIrKind::link_frame:
+  case M68kIrKind::unlink_frame: return true;
+  default: return false;
+  }
+}
+}  // namespace
+
+FiniteValue M68kFiniteAdapter::stack_delta_after(const M68kIrOperation &operation, const State &in) const {
+  const auto &delta = in.stack_delta;
+  if (!delta.is_precise()) return delta;
+  if (stack_delta_untracked(operation.kind)) return FiniteValue::unknown(UnknownReason::unsupported_transfer);
+  // PEA pushes 4 bytes (the address transfer has no exact A7 effect for it); a call's own push is undone by its continuation, and its
+  // callee starts a fresh delta.
+  if (operation.kind == M68kIrKind::push_effective_address)
+    return delta.map([](std::uint64_t v) { return (v - 4U) & UINT64_C(0xFFFFFFFF); });
+  if ((address_write_mask(operation) & 0x80U) == 0U || operation.kind == M68kIrKind::call_general ||
+      operation.kind == M68kIrKind::bsr_call)
+    return delta;
+  // Every other A7 writer goes through the CPU-owned address transfer, with A7 a synthetic exact pointer at the delta.
+  std::vector<std::uint32_t> offsets;
+  for (const auto v : delta.values()) {
+    const auto signed_delta = static_cast<std::int64_t>(static_cast<std::int32_t>(static_cast<std::uint32_t>(v)));
+    if (signed_delta < -static_cast<std::int64_t>(delta_origin) || signed_delta >= static_cast<std::int64_t>(delta_origin))
+      return FiniteValue::unknown(UnknownReason::unsupported_transfer);
+    offsets.push_back(static_cast<std::uint32_t>(static_cast<std::int64_t>(delta_origin) + signed_delta));
+  }
+  State scratch = in;
+  scratch.address[7] = M68kPointsTo::of({{delta_region, M68kOffsetSet::of(std::move(offsets))}});
+  State after = scratch;
+  transfer_address_registers(operation, scratch, after);
+  const auto &a7 = after.address[7];
+  if (!a7.is_known() || !a7.is_exact() || a7.pairs.size() != 1U || a7.pairs.front().first != delta_region)
+    return FiniteValue::unknown(UnknownReason::unsupported_transfer);
+  std::vector<std::uint64_t> out;
+  for (const auto offset : a7.pairs.front().second.exact()) out.push_back((offset - delta_origin) & UINT32_C(0xFFFFFFFF));
+  return FiniteValue::of(std::move(out), m68k_exact_offset_bound);
 }
 
 // The 32-bit register values (as region points-to) an operand addresses; `predecrement` is the -(An) step.
@@ -955,6 +1027,7 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
   analysis::TransferResult<State> result;
   if (!in.values.reachable) return result;
   const auto pc = static_cast<std::uint32_t>(point) & bus_mask;
+  const auto context = m68k_point_context(point);  // always 0 unless the contexts domain is enabled
   const auto decoded = decode(pc);
   if (!decoded) return result;  // odd, unmapped or rejected: reached, no successor
   const auto &operation = decoded->operation;
@@ -1016,8 +1089,27 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
   }
   if (config_.domains.address) transfer_address_registers(operation, in, out);
   if (config_.domains.memory) transfer_memory(operation, next, in, out);
+  if (config_.domains.contexts) {
+    out.stack_delta = stack_delta_after(operation, in);
+    // The call frame (M68000PRM JSR/BSR/PEA: A7 - 4, then the push). The address domain alone leaves A7 Unknown there (T003, kept
+    // byte-identical); the contexts domain tracks it so a callee is entered, and its summary returns, at an exact frame.
+    if (operation.kind == M68kIrKind::call_general || operation.kind == M68kIrKind::bsr_call ||
+        operation.kind == M68kIrKind::push_effective_address)
+      out.address[7] = m68k_points_to_add(in.address[7], {-4});
+  }
 
   const auto control = m68k_control_successors(operation);
+  // SEG-030-T005: a call enters its callee in the call-site context (context 0 when the callee is merged past K) with a fresh
+  // stack delta; every other edge stays in the current context. Without the contexts domain every point is its PC.
+  const bool call = control.stacked == M68kStackedContinuationKind::call_continuation;
+  std::vector<std::uint32_t> callees;
+  const auto edge_target = [&](std::uint32_t target, bool enters_callee, State &edge) -> std::uint64_t {
+    if (!config_.domains.contexts) return target;
+    if (!enters_callee) return m68k_analysis_point(context, target);
+    callees.push_back(target);
+    edge.stack_delta = FiniteValue::of({0U});
+    return m68k_analysis_point(config_.contexts.merged.contains(target) ? 0U : m68k_call_context(pc), target);
+  };
   // Flags at this branch are exact only when its sole predecessor is the physically preceding flag setter.
   std::optional<M68kAnalysisImage::Instruction> setter;
   if (in.flag_setter) {
@@ -1054,23 +1146,22 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
     }
     case M68kControlSuccessorKind::call_target: kind = EdgeKind::call; break;
     }
-    result.edges.push_back({target, kind, std::move(edge)});
+    const auto point_target = edge_target(target, successor.kind == M68kControlSuccessorKind::call_target, edge);
+    result.edges.push_back({point_target, kind, std::move(edge)});
   }
 
-  const auto stacked = control.stacked_address & bus_mask;
-  switch (control.stacked) {
-  case M68kStackedContinuationKind::call_continuation:
-    if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true)});
-    break;
-  case M68kStackedContinuationKind::exception_continuation:
-    if (config_.exception_continuations) result.edges.push_back({stacked, EdgeKind::exceptional, entry_state(true)});
-    break;
-  case M68kStackedContinuationKind::pushed_code_address:
-    if (config_.pushed_code_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true)});
-    break;
-  case M68kStackedContinuationKind::none: break;
-  }
-
+  // Computed targets (resolved below) of a call are callees as well. They are emitted after the stacked continuation (the T004 edge
+  // order), but evaluated first: the continuation depends on the callees.
+  std::vector<analysis::Edge<State>> computed;
+  const auto computed_edges = [&](const std::vector<std::uint32_t> &targets) {
+    State edge = out;
+    edge.flag_setter.reset();
+    for (const auto target : targets) {
+      State target_edge = edge;
+      const auto point_target = edge_target(target, call, target_edge);
+      computed.push_back({point_target, EdgeKind::computed, std::move(target_edge)});
+    }
+  };
   switch (control.dynamic) {
   case M68kDynamicControlFamily::none:
   case M68kDynamicControlFamily::return_from_subroutine:
@@ -1081,9 +1172,7 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
     if (is_pc_index_site(operation)) {
       const auto report = evaluate_pc_index_site(pc, operation, in);
       if (report.outcome == M68kPcIndexOutcome::resolved) {
-        State edge = out;
-        edge.flag_setter.reset();
-        for (const auto target : report.targets) result.edges.push_back({target, EdgeKind::computed, edge});
+        computed_edges(report.targets);
       } else {
         result.unresolved_computed = report.reason;
       }
@@ -1100,9 +1189,7 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
     if (config_.domains.address) {
       const auto report = evaluate_address_site(pc, operation, control.dynamic, in);
       if (report.resolved) {
-        State edge = out;
-        edge.flag_setter.reset();
-        for (const auto target : report.targets) result.edges.push_back({target, EdgeKind::computed, edge});
+        computed_edges(report.targets);
       } else {
         result.unresolved_computed.emplace(report.reason);
       }
@@ -1112,13 +1199,74 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
     break;
   default: result.unresolved_computed = UnknownReason::unsupported_transfer; break;
   }
+
+  const auto stacked = control.stacked_address & bus_mask;
+  const auto stacked_point = m68k_analysis_point(context, stacked);
+  switch (control.stacked) {
+  case M68kStackedContinuationKind::call_continuation:
+    if (config_.domains.contexts) {
+      if (config_.call_continuations) result.edges.push_back({stacked_point, EdgeKind::return_edge, continuation(pc, callees, in)});
+      break;
+    }
+    if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true)});
+    break;
+  case M68kStackedContinuationKind::exception_continuation:
+    if (config_.exception_continuations) result.edges.push_back({stacked_point, EdgeKind::exceptional, entry_state(true)});
+    break;
+  case M68kStackedContinuationKind::pushed_code_address:
+    if (config_.pushed_code_continuations) result.edges.push_back({stacked_point, EdgeKind::return_edge, entry_state(true)});
+    break;
+  case M68kStackedContinuationKind::none: break;
+  }
+  for (auto &edge : computed) result.edges.push_back(std::move(edge));
   return result;
+}
+
+// SEG-030-T005: the continuation state of the call at `pc` whose callees in this transfer are `callees`.
+M68kAnalysisState M68kFiniteAdapter::continuation(std::uint32_t pc, const std::vector<std::uint32_t> &callees, const State &in) const {
+  State state;
+  const auto &contexts = config_.contexts;
+  const auto context = m68k_call_context(pc);
+  if (callees.empty()) {
+    state = opaque_continuation(Sub::none);  // an unresolved callee: unknown effect
+  } else if (std::any_of(callees.begin(), callees.end(), [&](std::uint32_t callee) { return contexts.merged.contains(callee); })) {
+    state = opaque_continuation(Sub::context_bound);
+  } else if (const auto summary = contexts.summaries.find(context); summary != contexts.summaries.end()) {
+    state = summary->second;
+  } else {
+    const auto opaque = contexts.opaque.find(context);
+    state = opaque_continuation(opaque == contexts.opaque.end() ? Sub::none : opaque->second);
+  }
+  state.flag_setter.reset();
+  // The caller's own stack delta: a balanced callee restores A7 (an unbalanced one makes its callers unproven, see the driver).
+  state.stack_delta = in.stack_delta;
+  return state;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
 // Driver.
 
 namespace {
+
+bool site_resolved(const M68kPcIndexSiteReport &site) { return site.outcome == M68kPcIndexOutcome::resolved; }
+bool site_resolved(const M68kAddressSiteReport &site) { return site.resolved; }
+
+// SEG-030-T005: one PC reached in several contexts.
+template <typename Report>
+void merge_site(std::map<std::uint32_t, Report> &sites, std::uint32_t pc, Report report) {
+  const auto [found, inserted] = sites.emplace(pc, report);
+  if (inserted) return;
+  auto &kept = found->second;
+  if (!site_resolved(kept)) return;
+  if (!site_resolved(report)) {
+    kept = std::move(report);
+    return;
+  }
+  std::set<std::uint32_t> targets(kept.targets.begin(), kept.targets.end());
+  targets.insert(report.targets.begin(), report.targets.end());
+  kept.targets.assign(targets.begin(), targets.end());
+  kept.odd_targets_excluded = std::max(kept.odd_targets_excluded, report.odd_targets_excluded);
+}
 
 // One solve with the solver-owned pin-and-restart plus the driver's adapter pins (ADR 0078 decision 2; SEG-029-T006).
 M68kFiniteAnalysisResult solve_pinned(const M68kAnalysisImage &image, const std::vector<std::uint32_t> &entries, M68kAnalysisConfig config,
@@ -1135,10 +1283,12 @@ M68kFiniteAnalysisResult solve_pinned(const M68kAnalysisImage &image, const std:
     out.reason = out.solution.reason;
     out.iterations = out.solution.iterations;
     if (!out.complete) return out;  // every query is Unknown(bound): no partial truth
-    for (const auto &[point, reason] : out.solution.unresolved_computed) out.unresolved_computed.emplace(static_cast<std::uint32_t>(point), reason);
+    // Per-PC results: one point per PC without the contexts domain; with it, a PC's site is resolved only when it resolves in every
+    // context that reaches it (the union of the targets), else the first unresolved context's outcome (point order) is reported.
+    for (const auto &[point, reason] : out.solution.unresolved_computed) out.unresolved_computed.emplace(m68k_point_pc(point), reason);
     std::set<std::uint32_t> invalidated;
     for (const auto &[point, state] : out.solution.in_states) {
-      const auto pc = static_cast<std::uint32_t>(point);
+      const auto pc = m68k_point_pc(point);
       const auto decoded = adapter.decode(pc);
       if (!decoded) {
         out.undecodable.insert(pc);
@@ -1150,7 +1300,7 @@ M68kFiniteAnalysisResult solve_pinned(const M68kAnalysisImage &image, const std:
         if (is_address_site_family(family)) {
           auto report = adapter.evaluate_address_site(pc, decoded->operation, family, state);
           if (!config.pinned_sites.contains(pc) && out.solution.pinned.contains(point)) invalidated.insert(pc);
-          out.address_sites.emplace(pc, std::move(report));
+          merge_site(out.address_sites, pc, std::move(report));
           continue;
         }
       }
@@ -1160,7 +1310,7 @@ M68kFiniteAnalysisResult solve_pinned(const M68kAnalysisImage &image, const std:
       // site is never reported resolved, even when the restarted solve's narrower input re-derives a precise set: the driver maps
       // it to `invalidated` and restarts once more with the site pinned at the adapter, so it emits nothing (SEG-029-T006).
       if (out.solution.pinned.contains(point) && !config.pinned_sites.contains(pc)) invalidated.insert(pc);
-      out.pc_index_sites.emplace(pc, std::move(report));
+      merge_site(out.pc_index_sites, pc, std::move(report));
     }
     if (invalidated.empty()) return out;
     config.pinned_sites.insert(invalidated.begin(), invalidated.end());  // monotone: terminates
@@ -1203,9 +1353,11 @@ M68kMemoryPolicy derive_memory_policy(const M68kAnalysisImage &image, const M68k
   }
   report.handler_points = handler.size();
   bool release = false;
+  // Memory-source reads per PC: precise only when precise in every context (one point per PC without the contexts domain).
+  std::map<std::uint32_t, std::optional<std::pair<UnknownReason, M68kAnalysisSubReason>>> reads;
   for (const auto &[point, state] : states) {
     report.max_cells = std::max(report.max_cells, state.memory.cells.size());
-    const auto decoded = adapter.decode(static_cast<std::uint32_t>(point));
+    const auto decoded = adapter.decode(m68k_point_pc(point));
     if (!decoded) continue;
     const auto &operation = decoded->operation;
     if (!m68k_memory_writes(operation).described) ++report.undescribed_writers;
@@ -1233,20 +1385,408 @@ M68kMemoryPolicy derive_memory_policy(const M68kAnalysisImage &image, const M68k
       bool tracked = false;
       const auto read = adapter.read_memory_operand(state, operation.source_ea, access_bytes(operation.size), &tracked);
       if (tracked) {
-        if (read.known) ++report.precise_reads;
-        else ++report.unknown_reads[{read.reason, read.sub}];
+        const auto [found, inserted] = reads.emplace(m68k_point_pc(point), std::nullopt);
+        if (!read.known && !found->second) found->second = std::make_pair(read.reason, read.sub);
+        (void)inserted;
       }
     }
+  }
+  for (const auto &[pc, read] : reads) {
+    (void)pc;
+    if (!read) ++report.precise_reads;
+    else ++report.unknown_reads[*read];
   }
   report.release_store = release;
   if (release && !config.memory.assume_no_external_writer) derived.external_writer = true;
   return derived;
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------
+// SEG-030-T005: call contexts and callee summaries (ADR 0079 decisions 6 and 9).
+
+// An activation: a call-site context (its key is the context) or a callee merged into context 0 (key `merged_key | entry`).
+constexpr std::uint64_t merged_key = UINT64_C(1) << 32U;
+
+struct PointFacts {
+  std::vector<std::uint64_t> intra;    // successors inside the activation (every edge except a call's callee edges)
+  std::vector<std::uint64_t> callees;  // callee entry points of a call
+  bool call{};
+  bool unknown_effect{};  // control may leave the analysed flow: unresolved computed control, an unmodelled exception
+                          // continuation (TRAP/TRAPV), an exception-raising or undecodable instruction
+  bool unbalanced{};      // RTS not at the entry stack delta, or RTE/RTR
+  bool exit{};            // RTS at the entry stack delta
+};
+
+struct Activation {
+  std::vector<std::uint64_t> points;
+  std::set<std::uint64_t> nested;
+  std::optional<Sub> fail;  // why its returns are not proven (none: unknown effect)
+  bool balanced{};
+  bool recursive{};
+};
+
+std::uint64_t activation_of(std::uint64_t callee_point) {
+  const auto context = m68k_point_context(callee_point);
+  return context == 0U ? merged_key | m68k_point_pc(callee_point) : context;
+}
+
+// The facts of every reached point, from one transfer of its final input state.
+std::map<std::uint64_t, PointFacts> point_facts(M68kFiniteAdapter &adapter, const M68kAnalysisConfig &config,
+                                                const M68kFiniteAnalysisResult &result) {
+  std::map<std::uint64_t, PointFacts> out;
+  const auto zero = FiniteValue::of({0U});
+  for (const auto &[point, state] : result.solution.in_states) {
+    auto &facts = out[point];
+    const auto decoded = adapter.decode(m68k_point_pc(point));
+    if (!decoded) {
+      facts.unknown_effect = true;
+      continue;
+    }
+    const auto control = m68k_control_successors(decoded->operation);
+    facts.call = control.stacked == M68kStackedContinuationKind::call_continuation;
+    // A pushed code address is not an escape by itself: a return through it is an RTS away from the entry stack delta.
+    if (control.always_raises_exception || result.solution.unresolved_computed.contains(point) ||
+        (control.stacked == M68kStackedContinuationKind::exception_continuation && !config.exception_continuations))
+      facts.unknown_effect = true;
+    if (control.dynamic == M68kDynamicControlFamily::return_from_subroutine) {
+      if (state.stack_delta == zero) facts.exit = true;
+      else facts.unbalanced = true;
+    }
+    if (control.dynamic == M68kDynamicControlFamily::return_from_exception ||
+        control.dynamic == M68kDynamicControlFamily::return_restore_condition_codes)
+      facts.unbalanced = true;
+    for (const auto &edge : adapter.transfer(point, state).edges) {
+      if (facts.call && (edge.kind == EdgeKind::call || edge.kind == EdgeKind::computed)) facts.callees.push_back(edge.target);
+      else facts.intra.push_back(edge.target);
+    }
+  }
+  return out;
+}
+
+struct ContextDerivation {
+  M68kContextConfig next;  // the derived configuration (merges grown, summaries joined where the used ones were exceeded)
+  bool valid{};            // every used summary is above the derived one and no callee exceeds K
+};
+
+// The summary of an exit (an RTS at the entry stack delta): the state after the RTS pops the return address.
+M68kAnalysisState exit_state(const M68kAnalysisState &in) {
+  auto out = in;
+  out.address[7] = m68k_points_to_add(in.address[7], {4});
+  out.flag_setter.reset();
+  out.stack_delta = FiniteValue::bottom();
+  return out;
+}
+
+// The precision content of a summary: every Unknown is the same top, whatever its generic reason or CPU sub-reason (those are labels
+// of why a value is Unknown, which can change between rounds without any change of precision).
+M68kAnalysisState precision_view(const M68kAnalysisState &state) {
+  auto out = state;
+  for (auto &value : out.values.values)
+    if (value.is_unknown()) value = FiniteValue::unknown(UnknownReason::unknown_input);
+  for (auto &pointer : out.address)
+    if (pointer.is_unknown()) pointer = M68kPointsTo::unknown(UnknownReason::unknown_input);
+  out.memory.absent = Sub::store_poison;
+  return out;
+}
+
+ContextDerivation derive_contexts(const M68kAnalysisImage &image, const M68kAnalysisConfig &config, M68kFiniteAnalysisResult &result) {
+  M68kFiniteAdapter adapter{image, config};
+  const auto &states = result.solution.in_states;
+  const auto facts = point_facts(adapter, config, result);
+  const auto &used = config.contexts;
+  auto &report = result.contexts;
+  const auto rounds = report.rounds;
+  report = M68kContextReport{};
+  report.enabled = true;
+  report.rounds = rounds;
+
+  // Activations: every call-site context, and every merged callee (walked from its context-0 entry over intra-activation edges).
+  std::map<std::uint64_t, Activation> activations;
+  std::map<std::uint32_t, std::set<std::uint32_t>> contexts_of;  // callee entry -> call-site contexts
+  for (const auto &[point, fact] : facts) {
+    if (m68k_point_context(point) != 0U) activations[m68k_point_context(point)].points.push_back(point);
+    for (const auto callee : fact.callees) {
+      if (m68k_point_context(callee) != 0U) contexts_of[m68k_point_pc(callee)].insert(m68k_point_context(callee));
+      else activations[activation_of(callee)];
+    }
+  }
+  for (auto &[key, activation] : activations) {
+    if ((key & merged_key) == 0U) continue;
+    std::set<std::uint64_t> seen{m68k_analysis_point(0U, static_cast<std::uint32_t>(key))};
+    std::vector<std::uint64_t> pending(seen.begin(), seen.end());
+    while (!pending.empty()) {
+      const auto point = pending.back();
+      pending.pop_back();
+      const auto found = facts.find(point);
+      if (found == facts.end()) continue;
+      for (const auto target : found->second.intra)
+        if (seen.insert(target).second) pending.push_back(target);
+    }
+    activation.points.assign(seen.begin(), seen.end());
+  }
+  // Local facts.
+  for (auto &[key, activation] : activations) {
+    (void)key;
+    bool unbalanced = false, unknown = false;
+    for (const auto point : activation.points) {
+      const auto found = facts.find(point);
+      if (found == facts.end()) continue;
+      const auto &fact = found->second;
+      unbalanced = unbalanced || fact.unbalanced;
+      unknown = unknown || fact.unknown_effect;
+      for (const auto callee : fact.callees) activation.nested.insert(activation_of(callee));
+    }
+    if (unbalanced) activation.fail = Sub::stack_unbalanced;
+    else if (unknown) activation.fail = Sub::none;
+  }
+  // Balance over the activation graph: strongly connected components (Tarjan, iterative), each emitted after the components it
+  // reaches. A recursive activation (a cycle) is never proven: Unknown(context_bound).
+  {
+    std::map<std::uint64_t, std::size_t> index, low;
+    std::set<std::uint64_t> on_stack;
+    std::vector<std::uint64_t> stack;
+    std::size_t counter = 0U;
+    const auto finish_component = [&](std::uint64_t root) {
+      std::vector<std::uint64_t> component;
+      for (;;) {
+        const auto node = stack.back();
+        stack.pop_back();
+        on_stack.erase(node);
+        component.push_back(node);
+        if (node == root) break;
+      }
+      const bool cyclic = component.size() > 1U || activations.at(root).nested.contains(root);
+      for (const auto node : component) {
+        auto &activation = activations.at(node);
+        activation.recursive = cyclic;
+        if (!activation.fail && cyclic) activation.fail = Sub::context_bound;
+        if (!activation.fail) {
+          for (const auto nested : activation.nested) {
+            const auto &callee = activations.at(nested);
+            if (callee.balanced) continue;
+            const auto why = callee.fail.value_or(Sub::none);
+            activation.fail = activation.fail ? std::max(*activation.fail, why) : why;
+          }
+        }
+        activation.balanced = !activation.fail;
+      }
+    };
+    for (const auto &[start, unused] : activations) {
+      (void)unused;
+      if (index.contains(start)) continue;
+      // Frames of (node, iterator position into its nested set).
+      std::vector<std::pair<std::uint64_t, std::set<std::uint64_t>::const_iterator>> frames;
+      const auto enter = [&](std::uint64_t node) {
+        index[node] = low[node] = counter++;
+        stack.push_back(node);
+        on_stack.insert(node);
+        frames.emplace_back(node, activations.at(node).nested.begin());
+      };
+      enter(start);
+      while (!frames.empty()) {
+        auto &[node, it] = frames.back();
+        const auto &nested = activations.at(node).nested;
+        if (it != nested.end()) {
+          const auto next = *it++;
+          if (!index.contains(next)) {
+            enter(next);
+          } else if (on_stack.contains(next)) {
+            low[node] = std::min(low[node], index[next]);
+          }
+          continue;
+        }
+        const auto done = node;
+        frames.pop_back();
+        if (!frames.empty()) low[frames.back().first] = std::min(low[frames.back().first], low[done]);
+        if (low[done] == index[done]) finish_component(done);
+      }
+    }
+  }
+
+  ContextDerivation out;
+  out.next.merged = used.merged;
+  out.next.round_bound = used.round_bound;
+  bool valid = true;
+  for (const auto &[callee, contexts] : contexts_of) {
+    report.max_contexts_per_callee = std::max(report.max_contexts_per_callee, contexts.size());
+    if (contexts.size() > m68k_context_bound) {
+      out.next.merged.insert(callee);  // merged into context 0 next round (ADR 0079 decision 6)
+      valid = false;
+    }
+  }
+  for (const auto &[key, activation] : activations) {
+    ++report.activations;
+    if (activation.balanced) ++report.balanced_activations;
+    if (activation.recursive) ++report.recursive_activations;
+    if ((key & merged_key) != 0U) continue;
+    const auto context = static_cast<std::uint32_t>(key);
+    ++report.contexts;
+    std::optional<M68kAnalysisState> summary;
+    if (activation.balanced) {
+      for (const auto point : activation.points) {
+        if (!facts.at(point).exit) continue;
+        const auto exit = exit_state(states.at(point));
+        summary = summary ? join(*summary, exit) : exit;
+      }
+    }
+    const auto previous = used.summaries.find(context);
+    if (!summary) {
+      const auto sub = activation.balanced ? Sub::none : activation.fail.value_or(Sub::none);
+      out.next.opaque.emplace(context, sub);
+      ++report.unproven[sub];
+      if (previous != used.summaries.end()) valid = false;  // a used summary is no longer proven
+      continue;
+    }
+    ++report.summaries;
+    if (previous == used.summaries.end()) {
+      out.next.summaries.emplace(context, std::move(*summary));
+      continue;
+    }
+    const auto derived = precision_view(*summary);
+    const auto applied = precision_view(previous->second);
+    if (!leq(derived, applied)) {
+      valid = false;  // the used summary is below what its own solution derives (stale): grow it
+      out.next.summaries.emplace(context, join(previous->second, *summary));
+    } else {
+      // Valid: the more precise derived summary is the next candidate (kept as is when only its Unknown labels differ).
+      out.next.summaries.emplace(context, derived == applied ? previous->second : std::move(*summary));
+    }
+  }
+  out.valid = valid;
+  report.merged_callees = out.next.merged.size();
+  // The continuations this round applied.
+  for (const auto &[point, fact] : facts) {
+    if (!fact.call) continue;
+    const auto context = m68k_call_context(m68k_point_pc(point));
+    if (fact.callees.empty()) ++report.opaque_continuations[Sub::none];
+    else if (std::any_of(fact.callees.begin(), fact.callees.end(), [](std::uint64_t c) { return m68k_point_context(c) == 0U; }))
+      ++report.opaque_continuations[Sub::context_bound];
+    else if (used.summaries.contains(context)) ++report.summary_continuations;
+    else {
+      const auto opaque = used.opaque.find(context);
+      ++report.opaque_continuations[opaque == used.opaque.end() ? Sub::none : opaque->second];
+    }
+  }
+  return out;
+}
+
+// The callee entries with more than K distinct call sites in a context-free solution (the starting merges).
+std::set<std::uint32_t> seed_merged(const M68kAnalysisImage &image, const M68kAnalysisConfig &config,
+                                    const M68kFiniteAnalysisResult &result) {
+  M68kFiniteAdapter adapter{image, config};
+  const auto facts = point_facts(adapter, config, result);
+  std::map<std::uint32_t, std::set<std::uint32_t>> sites;
+  for (const auto &[point, fact] : facts)
+    for (const auto callee : fact.callees) sites[m68k_point_pc(callee)].insert(m68k_point_pc(point));
+  std::set<std::uint32_t> out;
+  for (const auto &[callee, callers] : sites)
+    if (callers.size() > m68k_context_bound) out.insert(callee);
+  return out;
+}
+
+std::set<std::uint32_t> resolved_sites(const M68kFiniteAnalysisResult &result) {
+  std::set<std::uint32_t> out;
+  for (const auto &[pc, site] : result.pc_index_sites)
+    if (site.outcome == M68kPcIndexOutcome::resolved) out.insert(pc);
+  for (const auto &[pc, site] : result.address_sites)
+    if (site.resolved) out.insert(pc);
+  return out;
+}
+
+M68kFiniteAnalysisResult analyze_memory(const M68kAnalysisImage &image, const std::vector<std::uint32_t> &entries,
+                                        M68kAnalysisConfig config, const analysis::Bounds &bounds);
+
+// ADR 0079 decisions 6 and 9 (SEG-030-T005). The T004 memory result (contexts off) is the comparator and the starting point (its
+// memory policy and the callees with more than K call sites). Each round solves under the current configuration and derives the
+// summaries, merges and memory policy its own solution implies. A round is valid when every summary it used is above the derived
+// one, no callee exceeds K and the derived memory policy is below the one it used: its configuration is then a post-fixed point,
+// so its solution is sound. The next configuration takes the derived summaries (a used summary that was exceeded is joined with
+// the derived one, never kept), the grown merges and the joined policy. The run stops when a valid round reproduces its own
+// configuration; at R rounds it returns the latest valid round; with no valid round (or an incomplete solve and no valid round) the
+// contexts domain is switched off and the T004 result is returned (reason recorded).
+M68kFiniteAnalysisResult analyze_contexts(const M68kAnalysisImage &image, const std::vector<std::uint32_t> &entries,
+                                          M68kAnalysisConfig config, const analysis::Bounds &bounds) {
+  auto free_config = config;
+  free_config.domains.contexts = false;
+  auto memory = analyze_memory(image, entries, free_config, bounds);
+  const auto finish_without = [&](UnknownReason reason, std::uint32_t rounds, std::size_t iterations) {
+    memory.contexts = M68kContextReport{};
+    memory.contexts.enabled = true;
+    memory.contexts.reason = reason;
+    memory.contexts.rounds = rounds;
+    memory.contexts.total_iterations = iterations;
+    return std::move(memory);
+  };
+  if (!memory.complete) return finish_without(memory.reason, 0U, 0U);
+  if (!memory.memory.converged) return finish_without(UnknownReason::iteration_bound, 0U, 0U);
+  const auto memory_rounds = memory.memory.rounds;
+  config.domains.address = true;
+  config.domains.memory = true;
+  config.memory.policy = memory.memory.policy;
+  const auto seeded = seed_merged(image, free_config, memory);
+  config.contexts.merged.insert(seeded.begin(), seeded.end());
+  const auto round_bound = std::min(config.contexts.round_bound, m68k_memory_round_bound);
+  std::optional<M68kFiniteAnalysisResult> best;
+  std::size_t iterations = 0U;
+  bool converged = false;
+  UnknownReason failure = UnknownReason::iteration_bound;
+  std::uint32_t round = 1U;
+  for (; round <= round_bound; ++round) {
+    auto out = solve_pinned(image, entries, config, bounds);
+    iterations += out.iterations;
+    if (!out.complete) {
+      failure = out.reason;
+      break;
+    }
+    const auto policy = derive_memory_policy(image, config, out);
+    out.contexts.rounds = round;
+    const auto derivation = derive_contexts(image, config, out);
+    const bool valid = derivation.valid && leq(policy, config.memory.policy);
+    out.memory.rounds = memory_rounds + round;
+    out.memory.policy = config.memory.policy;
+    out.memory.converged = valid;
+    auto next = config;
+    next.memory.policy = join(config.memory.policy, policy);
+    next.contexts = derivation.next;
+    const bool fixed = next.contexts == config.contexts && next.memory.policy == config.memory.policy;
+    if (valid) {
+      out.contexts.validated = true;
+      out.contexts.returned_round = round;
+      best = std::move(out);
+      if (fixed) {
+        converged = true;
+        break;
+      }
+    }
+    config = std::move(next);
+  }
+  if (!best) return finish_without(failure, std::min(round, round_bound), iterations);
+  auto out = std::move(*best);
+  out.contexts.converged = converged;
+  out.contexts.rounds = std::min(round, round_bound);
+  out.contexts.total_iterations = iterations;
+  out.contexts.discovered_without_contexts = memory.reached.size();
+  const auto with = resolved_sites(out);
+  const auto without = resolved_sites(memory);
+  for (const auto pc : with) out.contexts.sites_resolved_only_with_contexts += without.contains(pc) ? 0U : 1U;
+  for (const auto pc : without) out.contexts.sites_resolved_only_without_contexts += with.contains(pc) ? 0U : 1U;
+  out.contexts.unresolved_sites = out.unresolved_computed.size();
+  return out;
+}
+
 }  // namespace
 
 M68kFiniteAnalysisResult analyze_m68k_finite_values(const M68kAnalysisImage &image, const std::vector<std::uint32_t> &entries,
                                                     M68kAnalysisConfig config, const analysis::Bounds &bounds) {
+  if (config.domains.contexts) return analyze_contexts(image, entries, std::move(config), bounds);
+  return analyze_memory(image, entries, std::move(config), bounds);
+}
+
+namespace {
+
+M68kFiniteAnalysisResult analyze_memory(const M68kAnalysisImage &image, const std::vector<std::uint32_t> &entries,
+                                        M68kAnalysisConfig config, const analysis::Bounds &bounds) {
   if (!config.domains.memory) return solve_pinned(image, entries, std::move(config), bounds);
   // ADR 0079 decision 9: monotone driver rounds over the memory policy, at most R rounds; the final round's derived policy must be
   // below the one it ran with (final validation). Non-convergence switches the memory domain off.
@@ -1276,6 +1816,16 @@ M68kFiniteAnalysisResult analyze_m68k_finite_values(const M68kAnalysisImage &ima
   out.memory.converged = false;
   out.memory.rounds = m68k_memory_round_bound;
   out.memory.policy = config.memory.policy;
+  return out;
+}
+
+}  // namespace
+
+std::vector<std::pair<std::uint64_t, const M68kAnalysisState *>> m68k_points_of(const M68kFiniteAnalysisResult &result,
+                                                                                std::uint32_t pc) {
+  std::vector<std::pair<std::uint64_t, const M68kAnalysisState *>> out;
+  for (const auto &[point, state] : result.solution.in_states)
+    if (m68k_point_pc(point) == (pc & bus_mask)) out.emplace_back(point, &state);
   return out;
 }
 
@@ -1317,7 +1867,7 @@ std::string format_m68k_finite_analysis(const M68kFiniteAnalysisResult &result) 
   out << " restarts=" << result.restarts << " iterations=" << result.iterations << '\n';
   for (const auto &[point, state] : result.solution.in_states) {
     out << hex(point);
-    const auto found = result.reached.find(static_cast<std::uint32_t>(point));
+    const auto found = result.reached.find(m68k_point_pc(point));
     if (found == result.reached.end()) out << " undecodable";
     else out << " len=" << found->second;
     out << " flags=" << (state.flag_setter ? hex(*state.flag_setter) : std::string("-"));
@@ -1327,6 +1877,7 @@ std::string format_m68k_finite_analysis(const M68kFiniteAnalysisResult &result) 
     if (result.address_domain)
       for (unsigned reg = 0; reg < 8U; ++reg) out << " a" << reg << '=' << state.address[reg].describe();
     if (result.memory.enabled) out << ' ' << state.memory.describe();
+    if (result.contexts.enabled) out << " delta=" << state.stack_delta.describe();
     out << '\n';
   }
   for (const auto &[pc, site] : result.pc_index_sites) {
@@ -1353,6 +1904,17 @@ std::string format_m68k_finite_analysis(const M68kFiniteAnalysisResult &result) 
         << " async_ranges=" << memory.policy.async.size() << " release_stores=" << memory.release_stores
         << " unknown_target_stores=" << memory.unknown_target_stores << " handler_points=" << memory.handler_points
         << " max_cells=" << memory.max_cells << " precise_reads=" << memory.precise_reads << '\n';
+  }
+  if (result.contexts.enabled) {
+    const auto &contexts = result.contexts;
+    out << "contexts rounds=" << contexts.rounds << " returned=" << contexts.returned_round
+        << " validated=" << (contexts.validated ? 1 : 0) << " converged=" << (contexts.converged ? 1 : 0)
+        << " contexts=" << contexts.contexts << " merged=" << contexts.merged_callees
+        << " activations=" << contexts.activations << " balanced=" << contexts.balanced_activations
+        << " recursive=" << contexts.recursive_activations << " summaries=" << contexts.summaries
+        << " summary_continuations=" << contexts.summary_continuations;
+    for (const auto &[sub, n] : contexts.opaque_continuations) out << " opaque_" << m68k_analysis_sub_reason_name(sub) << '=' << n;
+    out << '\n';
   }
   return out.str();
 }

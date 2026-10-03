@@ -93,7 +93,7 @@ enum class GenesisAnalysisFamily : std::uint8_t {
 inline constexpr std::size_t genesis_analysis_family_count = 12U;
 [[nodiscard]] const char *genesis_analysis_family_name(GenesisAnalysisFamily family) noexcept;
 
-// ADR 0079 decision 5: the staged domains (T003 delivers `address`; the others are rejected until their children land).
+// ADR 0079 decision 5: the staged domains (T003 `address`, T004 `memory`, T005 `contexts`; `frames` is rejected until T006 lands).
 struct GenesisAnalysisDomains {
   bool address{};
   bool memory{};

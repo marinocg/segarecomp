@@ -397,3 +397,130 @@ reproduce the SEG-026-T002 strict row exactly.
   - SEG-030 must attempt a bounded sound proof for both.
   - A proof that does not succeed leaves the affected reads Unknown with their reason; it never becomes an unsound exclusion. A zero
     or modest gain after both proofs have been attempted is valid recorded evidence.
+
+### T005: bounded call contexts and callee summaries
+
+- **Points and contexts** (`libs/cpu/m68k/analysis/finite_adapter.{hpp,cpp}`, CPU-owned; the generic solver is unchanged).
+  - With `M68kAnalysisConfig::domains.contexts` (it implies `memory`, which implies `address`), a point is `(context << 24) | pc`, as
+    decision 6 states. Context 0 holds the roots and the merged callees; a call site's context is its PC + 1 (k = 1).
+  - A call edge (BSR/JSR, and the computed targets of `JSR (An)`/`JSR (d8,PC,Xn)`) enters the callee in the call site's context.
+  - Every other edge stays in the current context.
+  - Reports stay per PC. A site is resolved only when it resolves in every context that reaches it; its targets are then the union.
+    Otherwise the first unresolved context's outcome (in point order) is reported. A work-RAM read is precise only when it is
+    precise in every context.
+- **Stack delta.** A CPU-owned scalar of the state: A7 minus A7 at the entry of the current activation, modulo 2^32.
+  - It is an exact set of at most 64 values, else Unknown.
+  - Roots and callee entries start at 0. Every A7 writer goes through the T003 address transfer, with A7 a synthetic exact pointer.
+    This covers pushes, pops, the byte step of 2, MOVEM, `LEA d16(A7),A7` and `ADDA`.
+  - PEA subtracts 4.
+  - SR writers (a possible supervisor/user stack switch), LINK and UNLK make the delta Unknown.
+  - A call's continuation keeps the caller's delta.
+  - With contexts only, JSR/BSR/PEA also move A7 by -4 in the address domain. The callee is then entered at an exact frame, and its
+    summary returns at one. The T003/T004 address transfer is unchanged when the domain is off.
+- **Activations and proofs** (each round, from the solution).
+  - An activation is either a call-site context (all of its points) or a merged callee. A merged callee is walked from its
+    context-0 entry over every non-callee edge.
+  - An activation is **unproven** in four cases:
+    - an RTS not at delta {0}, or an RTE/RTR (`stack_unbalanced`);
+    - an unresolved or pinned computed site, a TRAP/TRAPV whose exception continuation is not modelled, an exception-raising
+      instruction or an undecodable point (an unknown effect, `none`);
+    - membership in a cycle of the activation graph (recursion, `context_bound`);
+    - an unproven nested activation (its reason is inherited).
+  - The proof uses the strongly connected components of the activation graph. Each component is resolved after the components it
+    reaches.
+  - A proven call-site context with at least one exit has a **summary**: the join of the input states at its exits (RTS at delta
+    0), with the return address popped (A7 + 4).
+    - The summary holds the register values, A0-A7 points-to and the whole abstract memory, so a callee's strong, weak, strided
+      and poisoning stores, and the async/external policy, all reach the continuation.
+    - The continuation receives the summary of the call-site context, with the caller's own stack delta.
+  - Otherwise the continuation is opaque, typed by the context's sub-reason:
+    - `context_bound` for a merged callee or a recursive activation: generic `state_bound` in registers, A0-A7 and absent memory
+      (`m68k_memory_generic_reason` maps `context_bound` to `state_bound`);
+    - `stack_unbalanced`: generic `unsupported_transfer`;
+    - the T004 opaque entry for an unresolved callee or an unknown effect.
+  - An unresolved PC-indexed index whose generic reason is `state_bound` is reported `context_bound`. Only a merged or recursive
+    continuation produces it.
+- **Bounds** (decision 6 applied, with one documented correction).
+  - The starting merges are the callee entries that have more than K = 8 distinct call sites in the context-free (T004) solution.
+  - A round in which a callee reaches more than K contexts merges it into context 0 for the next round and is not valid.
+  - So a returned round never exceeds K (`max_contexts_per_callee` is reported).
+  - A merged callee's continuation is Unknown(`context_bound`).
+  - **Correction:** the merged callee's balance is still checked, from its context-0 walk, so its callers are not made unproven by
+    the merge alone.
+- **Rounds** (decision 9 applied, with one documented correction).
+  - The T004 result (contexts off) is computed first. It is the starting memory policy, the comparator, and the fallback.
+  - Each contexts round solves under the current configuration (memory policy, merges, summaries, opaque labels), then derives the
+    configuration its own solution implies.
+  - A round is **valid** when all three hold:
+    - every summary it used is at or above the derived one, compared on precision content (Unknown labels are ignored);
+    - no callee exceeds K;
+    - the derived memory policy is at or below the used one.
+  - A valid round's configuration is a post-fixed point, so its solution is sound.
+  - The memory policy and the merges grow by join, as in T004.
+  - **Correction:** summaries are not join-only.
+    - A valid round replaces each summary with the more precise derived one; if they differ only in Unknown labels, the used one
+      is kept.
+    - A summary that a newly discovered writer exceeds is joined with the derived one, never kept. This is how invalidation enters
+      the round and pin-and-restart model.
+    - A join-only chain cannot do this: its first, opaque-continuation summaries would bound every later round.
+  - The run stops at a valid round that reproduces its own configuration (`converged`).
+  - At R = 16 rounds the latest valid round is returned (`converged` false).
+  - With no valid round, or a contexts solve that exhausts a solver bound, the contexts domain is switched off. The T004 result is
+    returned, with the reason recorded.
+  - Contexts rounds use the solver's own pin-and-restart unchanged.
+- **Driver.** `--domains contexts` is accepted (`frames` is still rejected).
+  - The aggregate adds `context_depth`/`context_bound` to the bounds, plus a `contexts` object: validation, rounds, contexts,
+    merges, activations, summaries, unproven and opaque continuations by sub-reason, and a memory-only comparator.
+  - `--domains baseline` and `--domains memory` (credited and ablation) are byte-identical to T002/T004 on Sonic: private,
+    aggregate and compare-tool outputs.
+- **Fixtures** (`analysis_m68k_contexts_test`, plus the deterministic contexts run in `analysis_report_driver_test`):
+  - two callers with different objects resolving one handler site per context;
+  - a balanced return keeping the caller's index (the ADR 0054 shape, `index_unknown/unknown_input` without contexts);
+  - a callee field clobber, strong and conditional (memory effects in the summary);
+  - an unbalanced callee and its caller (`stack_unbalanced`);
+  - an unresolved callee and an unresolved exit (an unknown effect);
+  - recursion (`context_bound`, `state_bound`);
+  - K and K + 1 call sites (summaries kept, then a merge into context 0);
+  - summary invalidation after a newly discovered writer. It converges at a later round with D3 {4, 8}, and every lower round bound
+    returns a valid round, never the stale precise D3 = 4;
+  - a handler subroutine's store, discovered only with contexts, entering the asynchronous set;
+  - the stack delta across push, MOVEM, PEA and pops;
+  - determinism, and the domain inert when off.
+- **Mutations.** `analysis_mutation_test` now also builds the contexts fixture. Six new mutants are killed:
+  - a stale summary accepted;
+  - a stale summary kept;
+  - an unbalanced RTS summarized;
+  - recursion not `context_bound`;
+  - summary memory effects dropped;
+  - the writer set ignoring callee-context stores.
+- **Sonic attract oracle (report-only, sanitized; Release build of the same sources, comparator runs included).**
+
+  | measure | baseline | memory (credited) | contexts (credited) | contexts + ablation (diagnostic) |
+  | --- | --- | --- | --- | --- |
+  | `D` (D/U) | 6,765 (2.75%) | 6,765 (2.75%) | 6,806 (2.76%) | 6,806 (2.76%) |
+  | `O ∩ D` / `O - D` / `D - O` | 4,493 / 6,019 / 2,272 | same | 4,534 / 5,978 / 2,272 | 4,534 / 5,978 / 2,272 |
+  | observed recall | 42.74% | 42.74% | 43.13% | 43.13% |
+  | resolved computed sites / escapes | 4 / 0 | 4 / 0 | 5 / 0 | 5 / 0 |
+  | `pc_index_explicit` resolved / Unknown | 4 / 1 (`unknown_input`) | 4 / 1 | 5 / 0 | 5 / 0 |
+  | `pc_index_width_only` resolved / Unknown | 0 / 9 (`width_only`) | 0 / 9 | 0 / 9 | 0 / 9 |
+  | `jsr_an` resolved / Unknown | 0 / 2 | 0 / 2 (`base_unknown` 1, `region_exit` 1) | same as memory | same as memory |
+  | `jmp_an` resolved / Unknown | 0 / 1 | 0 / 1 (`unknown_input/base_unknown`) | same | same |
+  | work-RAM reads: precise / `external_writer` / `async_writer` | - | 0 / 412 / 0 | 0 / 428 / 0 | 0 / 0 / 419 |
+  | other work-RAM-or-Unknown reads Unknown | - | 597 (`base_unknown` 535, `region_exit` 62) | 577 (`base_unknown` 467, `region_exit` 77, `context_bound` 16, `stack_unbalanced` 11, `set_bound` 6) | 586 (as credited, `context_bound` 25) |
+  | contexts: call-site contexts / merged callees / max per callee | - | - | 335 / 12 / 8 | same |
+  | activations: balanced / recursive / summaries | - | - | 347: 272 / 1 / 263 | same |
+  | continuations: summary / opaque `context_bound` / `stack_unbalanced` / unknown | - | - | 431 / 233 / 49 / 49 | same |
+  | rounds (memory + contexts) / validated, converged | 1 | 2 | 2 + 7 / yes, yes | 1 + 7 / yes, yes |
+  | final-solve iterations / points | 110,079 / 6,766 | 159,149 / 6,766 | 403,102 / 12,263 | 403,102 / 12,263 |
+  | wall / peak RSS (Release) | 3.5 s / 308 MB | 11.0 s / 317 MB | 72.7 s / 362 MB | 67.8 s / 366 MB |
+
+  - On the dev (Debug) build, the T002-T004 cost basis, the credited contexts run takes about 1,121 s and 346 MB peak RSS, with
+    outputs byte-identical to the Release run.
+  - The contexts rounds total 2,818,102 solver iterations. Every solve stays under the 10^6 iteration and 2^20 point bounds.
+  - Two credited and two ablation contexts runs are each byte-identical.
+  - The memory-only comparator reports 1 site resolved only with contexts, 0 lost, and 12 unresolved sites next to it.
+  - The gain is the ADR 0054 `index_unknown` PC-indexed site reached through a return continuation: it is now resolved from a
+    callee summary. It adds 41 discovered PCs, all observed, and 0 escapes.
+  - Every work-RAM read stays Unknown under both the credited model and the ablation, so the object-field `JSR (An)` gate (2,480
+    attributed missing PCs) and the 9 width-only sites stay blocked. Their causes are the T006 interrupt/handler-stack proof and the
+    T010 Z80 store-freedom proof, not calling context.

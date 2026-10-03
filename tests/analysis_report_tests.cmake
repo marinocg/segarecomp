@@ -68,6 +68,28 @@ if(CMAKE_SCRIPT_MODE_FILE)
       endif()
     endforeach()
   endforeach()
+  # SEG-030-T005: the contexts domain (implies memory and address) runs deterministically and reports its bounds and rounds.
+  foreach(run 1 2)
+    execute_process(COMMAND "${DRIVER}" ${arguments} --domains contexts --private-output "${DIR}/contexts${run}.json"
+      OUTPUT_FILE "${DIR}/contexts${run}.stdout" RESULT_VARIABLE status)
+    if(NOT status EQUAL 0)
+      message(FATAL_ERROR "driver contexts run ${run} failed: ${status}")
+    endif()
+  endforeach()
+  foreach(pair "contexts1.json;contexts2.json" "contexts1.stdout;contexts2.stdout")
+    list(GET pair 0 left)
+    list(GET pair 1 right)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E compare_files "${DIR}/${left}" "${DIR}/${right}" RESULT_VARIABLE differ)
+    if(NOT differ EQUAL 0)
+      message(FATAL_ERROR "${left} and ${right} differ")
+    endif()
+  endforeach()
+  file(READ "${DIR}/contexts1.stdout" contexts_aggregate)
+  if(NOT contexts_aggregate MATCHES "\"contexts\":true" OR NOT contexts_aggregate MATCHES "\"memory\":true" OR
+     NOT contexts_aggregate MATCHES "\"context_bound\":8" OR NOT contexts_aggregate MATCHES "\"contexts\":\\{\"validated\":true" OR
+     contexts_aggregate MATCHES "ff0|\"200\"|00ff")
+    message(FATAL_ERROR "the contexts aggregate is not the validated contexts model: ${contexts_aggregate}")
+  endif()
   file(READ "${DIR}/memory1.stdout" memory_aggregate)
   file(READ "${DIR}/ablation1.stdout" ablation_aggregate)
   if(NOT memory_aggregate MATCHES "\"memory\":true" OR NOT memory_aggregate MATCHES "\"address\":true" OR
@@ -90,7 +112,7 @@ if(CMAKE_SCRIPT_MODE_FILE)
   endif()
   # Fail closed: a wrong digest, a staged domain not yet implemented, a malformed bound and a missing private output.
   foreach(bad "--rom-sha256;0000000000000000000000000000000000000000000000000000000000000000"
-              "--domains;contexts" "--domains;address,frames" "--domains;baseline,memory" "--max-iterations;0"
+              "--domains;frames" "--domains;address,frames" "--domains;baseline,memory" "--max-iterations;0"
               "--assume-no-z80-ram-writes" "--domains;address;--assume-no-z80-ram-writes" "--max-points;8;--max-points;8"
               "--max-iterations;8;--max-iterations;8" "--private-output")
     set(candidate ${arguments})

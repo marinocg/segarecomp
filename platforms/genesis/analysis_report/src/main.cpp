@@ -166,12 +166,14 @@ int run(int argc, char **argv) {
     usage(std::cerr);
     return 2;
   }
-  // ADR 0079 decision 5: the memory domain needs the address domain (its cells are addressed through points-to values).
+  // ADR 0079 decision 5: the contexts domain needs the memory domain (callee summaries carry memory effects), which needs the
+  // address domain (its cells are addressed through points-to values).
+  if (config.domains.contexts) config.domains.memory = true;
   if (config.domains.memory) config.domains.address = true;
   if (assume_no_z80 && !config.domains.memory) { usage(std::cerr); return 2; }
   config.assume_no_z80_ram_writes = assume_no_z80;
-  if (config.domains.contexts || config.domains.frames) {
-    // ADR 0079: address (T003) and memory (T004) are delivered; contexts and frames by T005..T006 (fail closed).
+  if (config.domains.frames) {
+    // ADR 0079: address (T003), memory (T004) and contexts (T005) are delivered; frames by T006 (fail closed).
     std::cerr << "segarecomp-genesis-analysis-report: staged domain not implemented\n";
     return 2;
   }

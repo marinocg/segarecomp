@@ -96,7 +96,8 @@ UnknownReason m68k_memory_generic_reason(M68kAnalysisSubReason sub) noexcept {
   case Sub::initial_memory:
   case Sub::async_writer:
   case Sub::external_writer: return UnknownReason::unknown_input;
-  case Sub::set_bound: return UnknownReason::state_bound;
+  case Sub::set_bound:
+  case Sub::context_bound: return UnknownReason::state_bound;  // SEG-030-T005: a merged or recursive activation's continuation
   default: return UnknownReason::unsupported_transfer;
   }
 }

@@ -3,10 +3,10 @@
 
 Every mutant below is one precise textual edit of PRODUCTION analysis code (the generic core headers, the M68K adapter, the Z80
 effect projection or the Z80 adapter) that plants a deliberate soundness, determinism or bound defect. The harness copies the
-product tree (without build/, .git/, games/, .tools/) to a temporary directory, configures ONE build there, builds the three
-SEG-029 fixture tests and requires the unmutated baseline to pass. Then, per mutant, it applies the edit to the temporary copy only,
-rebuilds the affected fixture tests incrementally, runs them, and restores the file. A mutant is KILLED when one of its fixture tests
-exits non-zero (or times out). The worktree is never modified.
+product tree (without build/, .git/, games/, .tools/) to a temporary directory, configures ONE build there, builds the
+SEG-029 fixture tests plus the SEG-030-T005 contexts fixture and requires the unmutated baseline to pass. Then, per mutant, it
+applies the edit to the temporary copy only, rebuilds the affected fixture tests incrementally, runs them, and restores the file. A
+mutant is KILLED when one of its fixture tests exits non-zero (or times out). The worktree is never modified.
 
 Fail-closed rules:
   * stale mutant: the edit's `old` text must occur exactly once in the current source, otherwise the harness FAILS (a refactor can
@@ -14,7 +14,7 @@ Fail-closed rules:
   * a mutant that does not compile FAILS the harness (compilation failure is not a kill);
   * a surviving mutant FAILS the harness, unless it is listed as `equivalent` with a written justification, in which case it must
     still compile and must SURVIVE (a killed "equivalent" mutant means the justification is stale and FAILS the harness).
-Self-checks: the baseline must pass all three tests, and the stale-edit detector must reject a missing and a duplicated pattern.
+Self-checks: the baseline must pass all fixture tests, and the stale-edit detector must reject a missing and a duplicated pattern.
 
 Equivalent mutants (justified, asserted to survive):
   * m68k_failed_read_ignored: `m68k_finite_register_after` (the CPU semantic owner) already returns a default, not-`known`
@@ -42,7 +42,9 @@ import time
 CORE_TEST = "analysis_core_test"
 M68K_TEST = "analysis_m68k_equivalence_test"
 Z80_TEST = "analysis_z80_adapter_test"
-ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST)  # cheapest first: a core mutant is usually decided by the CPU-free fixture
+CONTEXTS_TEST = "analysis_m68k_contexts_test"  # SEG-030-T005: call contexts and callee summaries
+# cheapest first: a core mutant is usually decided by the CPU-free fixture
+ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, CONTEXTS_TEST)
 TEST_TIMEOUT_SECONDS = 60  # the unmutated fixtures run in well under a second
 
 FINITE = "libs/analysis/include/segarecomp/analysis/finite_value.hpp"
@@ -185,6 +187,33 @@ MUTANTS: list[Mutant] = [
            "if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true)});",
            "if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, out});",
            (M68K_TEST,), "a call continuation carries the pre-call state instead of an opaque entry"),
+    # ---------------------------------------------------------------- M68K call contexts and summaries (SEG-030-T005)
+    Mutant("m68k_stale_summary_accepted", M68K,
+           "      valid = false;  // the used summary is below what its own solution derives (stale): grow it\n",
+           "",
+           (CONTEXTS_TEST,), "a round whose used summary is exceeded by a newly discovered writer still validates (stale summary)"),
+    Mutant("m68k_stale_summary_kept", M68K,
+           "      out.next.summaries.emplace(context, join(previous->second, *summary));\n",
+           "      out.next.summaries.emplace(context, previous->second);\n",
+           (CONTEXTS_TEST,), "an exceeded summary is kept instead of being regrown with the newly discovered writer"),
+    Mutant("m68k_unbalanced_return_summarized", M68K,
+           "      else facts.unbalanced = true;\n",
+           "",
+           (CONTEXTS_TEST,), "an RTS away from the entry stack delta does not prevent a summary"),
+    Mutant("m68k_recursion_not_context_bound", M68K,
+           "        if (!activation.fail && cyclic) activation.fail = Sub::context_bound;\n",
+           "",
+           (CONTEXTS_TEST,), "a recursive activation is not reported context_bound"),
+    Mutant("m68k_writer_set_ignores_callee_contexts", M68K,
+           "    report.max_cells = std::max(report.max_cells, state.memory.cells.size());\n"
+           "    const auto decoded = adapter.decode(m68k_point_pc(point));\n",
+           "    report.max_cells = std::max(report.max_cells, state.memory.cells.size());\n"
+           "    const auto decoded = adapter.decode(static_cast<std::uint32_t>(point));\n",
+           (CONTEXTS_TEST,), "the asynchronous-writer set skips the stores of callee-context points"),
+    Mutant("m68k_summary_drops_memory_effects", M68K,
+           "    state = summary->second;\n",
+           "    state = summary->second;\n    state.memory = in.memory;\n",
+           (CONTEXTS_TEST,), "an applied summary keeps the caller's pre-call memory instead of the callee's memory effects"),
     # ---------------------------------------------------------------- Z80 projection and adapter
     Mutant("z80_ram_load_precise", Z80_ADAPTER,
            "        if (!image_.contains(at)) return FiniteValue::unknown(UnknownReason::non_immutable_read);",

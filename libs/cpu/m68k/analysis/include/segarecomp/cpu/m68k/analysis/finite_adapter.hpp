@@ -33,6 +33,16 @@
 // `M68kMemoryConfig::interrupts`, or when handler code stores through an Unknown address) and the external writer (when any store in
 // D may alias a release range or has an Unknown address); the final round's own policy must be below the one it ran with.
 //
+// SEG-030-T005 (ADR 0079 decisions 6 and 9): when `domains.contexts` is set (it implies `memory` and `address`), a program point is
+// `(context << 24) | pc` with a call string of depth k = 1: context 0 (roots, and callees merged past the context bound) or the call
+// site's PC + 1. A call edge enters the callee in the call site's context (or in context 0 when the callee is merged) and resets the
+// CPU-owned stack delta (A7 relative to the activation's entry; `stack_delta`). The call's continuation receives the proven summary
+// of the call-site context from the driver configuration (the join of the callee's exit states at every RTS, with the return address
+// popped; register AND memory effects, weak and poisoning stores included), or a typed opaque entry: `context_bound` (generic
+// `state_bound`) for a merged callee or a recursive activation, `stack_unbalanced` for an RTS/RTE/RTR not at the entry stack delta or
+// a nested unbalanced activation, and the T004 opaque entry for an unresolved callee or an unknown effect. The driver rounds derive
+// the summaries from each solve and validate them against the configuration the solve used; only a validated round is returned.
+//
 // Report-only: no production target links this library.
 
 #include <array>
@@ -113,6 +123,8 @@ struct M68kAnalysisState {
   std::array<M68kPointsTo, 8> address{};
   // SEG-030-T004: abstract memory (no cell, annotation `none`, unless the memory domain is enabled).
   M68kAbstractMemory memory;
+  // SEG-030-T005: A7 minus A7 at the entry of the current activation (modulo 2^32), contexts domain only (bottom otherwise).
+  analysis::FiniteValue stack_delta;
 
   [[nodiscard]] static M68kAnalysisState unreachable() { return {}; }
   [[nodiscard]] static M68kAnalysisState all_unknown(analysis::UnknownReason reason = analysis::UnknownReason::unknown_input);
@@ -178,6 +190,64 @@ struct M68kMemoryConfig {
 // ADR 0079 decision 11: R, the driver-round bound.
 inline constexpr std::uint32_t m68k_memory_round_bound = 16U;
 
+// SEG-030-T005 (ADR 0079 decisions 6 and 11): call-string depth k and K, the contexts per callee entry.
+inline constexpr std::uint32_t m68k_context_depth = 1U;
+inline constexpr std::size_t m68k_context_bound = 8U;
+// A program point of the contexts domain: `(context << 24) | pc`. Context 0 is the context-free point (every point when the contexts
+// domain is off); a call site's context is its PC + 1.
+[[nodiscard]] constexpr std::uint64_t m68k_analysis_point(std::uint32_t context, std::uint32_t pc) noexcept {
+  return (static_cast<std::uint64_t>(context) << 24U) | (pc & UINT32_C(0x00FFFFFF));
+}
+[[nodiscard]] constexpr std::uint32_t m68k_point_pc(std::uint64_t point) noexcept {
+  return static_cast<std::uint32_t>(point) & UINT32_C(0x00FFFFFF);
+}
+[[nodiscard]] constexpr std::uint32_t m68k_point_context(std::uint64_t point) noexcept {
+  return static_cast<std::uint32_t>(point >> 24U);
+}
+[[nodiscard]] constexpr std::uint32_t m68k_call_context(std::uint32_t call_site) noexcept {
+  return (call_site & UINT32_C(0x00FFFFFF)) + 1U;
+}
+
+// SEG-030-T005: the contexts-domain part of the driver configuration (ADR 0079 decision 9).
+struct M68kContextConfig {
+  // Callee entries with more than K call-site contexts: analysed in context 0, continuation Unknown(context_bound). Monotone.
+  std::set<std::uint32_t> merged;
+  // Call-site context -> the proven continuation state (the callee summary). A candidate: a round is returned only when every
+  // summary it used is above the summary its own solution derives (final validation).
+  std::map<std::uint32_t, M68kAnalysisState> summaries;
+  // Call-site context without a proven summary -> the CPU sub-reason of its opaque continuation (none, stack_unbalanced,
+  // context_bound).
+  std::map<std::uint32_t, M68kAnalysisSubReason> opaque;
+  std::uint32_t round_bound{m68k_memory_round_bound};  // R (tests may lower it, never raise it)
+  friend bool operator==(const M68kContextConfig &, const M68kContextConfig &) = default;
+};
+
+// SEG-030-T005: contexts-domain outcome of a run.
+struct M68kContextReport {
+  bool enabled{};
+  bool converged{};   // the returned round reproduced its own configuration exactly
+  bool validated{};   // the returned round's summaries, merges and memory policy passed the final validation
+  analysis::UnknownReason reason{analysis::UnknownReason::iteration_bound};  // when not validated (the T004 result is returned)
+  std::uint32_t rounds{};           // contexts rounds run
+  std::uint32_t returned_round{};   // the (validated) round whose solution is returned
+  std::size_t total_iterations{};   // over every contexts round
+  std::size_t contexts{};           // call-site contexts reached
+  std::size_t max_contexts_per_callee{};
+  std::size_t merged_callees{};
+  std::size_t activations{};        // call-site contexts plus merged-callee activations
+  std::size_t balanced_activations{};
+  std::size_t recursive_activations{};
+  std::size_t summaries{};          // call-site contexts with a proven summary
+  std::map<M68kAnalysisSubReason, std::size_t> unproven;  // call-site contexts without a summary, by sub-reason
+  std::size_t summary_continuations{};  // call points whose continuation applied a summary
+  std::map<M68kAnalysisSubReason, std::size_t> opaque_continuations;  // the other call points, by sub-reason
+  // Comparator (decision 8): the same program without contexts (the T004 memory result); report only.
+  std::size_t discovered_without_contexts{};
+  std::size_t sites_resolved_only_with_contexts{};
+  std::size_t sites_resolved_only_without_contexts{};
+  std::size_t unresolved_sites{};
+};
+
 // SEG-030-T004: memory-domain outcome of a run.
 struct M68kMemoryReport {
   bool enabled{};
@@ -204,6 +274,7 @@ struct M68kAnalysisConfig {
   std::set<std::uint32_t> pinned_sites;  // computed sites forced unresolved (invalidated)
   M68kAnalysisDomains domains{};         // staged domains (all off: the SEG-029 baseline)
   M68kMemoryConfig memory{};             // SEG-030-T004 (memory domain only)
+  M68kContextConfig contexts{};          // SEG-030-T005 (contexts domain only)
 };
 
 class M68kFiniteAdapter {
@@ -233,6 +304,12 @@ public:
                                                    bool *tracked = nullptr) const;
   // The state of an entry: a root (initial memory) or an opaque continuation (callee stores).
   [[nodiscard]] State entry_state(bool continuation) const;
+  // SEG-030-T005: an opaque continuation typed by `sub` (none: the T004 opaque entry).
+  [[nodiscard]] State opaque_continuation(M68kAnalysisSubReason sub) const;
+  // SEG-030-T005: the stack delta after `operation` (normal successors), from its input state.
+  [[nodiscard]] analysis::FiniteValue stack_delta_after(const M68kIrOperation &operation, const State &in) const;
+  // SEG-030-T005: the continuation state of the call at `pc` whose callees in this transfer are `callees` (empty: unresolved).
+  [[nodiscard]] State continuation(std::uint32_t pc, const std::vector<std::uint32_t> &callees, const State &in) const;
 
 private:
   void transfer_address_registers(const M68kIrOperation &operation, const State &in, State &out) const;
@@ -257,6 +334,7 @@ struct M68kFiniteAnalysisResult {
   std::map<std::uint32_t, M68kAddressSiteReport> address_sites;  // address-register-relative sites (address domain only)
   std::map<std::uint32_t, analysis::UnknownReason> unresolved_computed;  // every unresolved computed site
   M68kMemoryReport memory;  // SEG-030-T004 (memory domain only)
+  M68kContextReport contexts;  // SEG-030-T005 (contexts domain only)
   analysis::Solution<M68kAnalysisState> solution;
 };
 
@@ -267,6 +345,10 @@ struct M68kFiniteAnalysisResult {
                                                                   const std::vector<std::uint32_t> &entries,
                                                                   M68kAnalysisConfig config = {},
                                                                   const analysis::Bounds &bounds = {});
+
+// Every reached point of `pc` (any context) with its input state, in point order (contexts-domain queries).
+[[nodiscard]] std::vector<std::pair<std::uint64_t, const M68kAnalysisState *>> m68k_points_of(const M68kFiniteAnalysisResult &result,
+                                                                                             std::uint32_t pc);
 
 // Data register `reg` modulo 2^width immediately before the instruction at `pc` (typed query).
 [[nodiscard]] analysis::FiniteValue m68k_query_data_register(const M68kFiniteAnalysisResult &result, std::uint32_t pc,
