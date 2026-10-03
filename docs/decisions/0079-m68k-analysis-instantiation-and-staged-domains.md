@@ -130,8 +130,17 @@ reproduce the SEG-026-T002 strict row exactly.
        callee, is Unknown (its A7 is not restored). The status of an opaque continuation is the whole-program status bound
        (relative to the closure premise of decision 8). Register preservation across an interrupt remains the existing resumption
        premise; only the saved SR is checked.
-     - **Machine root premise.** Only the delivered vectors of ADR 0021 / ADR 0043 (level-6 autovector and the synchronous vectors)
-       are handlers; an installed but undelivered interrupt (level 2 or 4) is outside the analysed program, as for the challenger.
+     - **Two premises, two consumers.** *Discovery* (`D`, roots, recall, analysed handler instances) keeps the challenger's machine
+       root premise: only the delivered vectors of ADR 0021 / ADR 0043 (level-6 autovector and the synchronous vectors) are roots and
+       analysed handlers. *Asynchronous writers, interrupt eligibility and status* use the hardware premise: real hardware delivers
+       the level-4 (VDP H-interrupt) and level-2 (external, I/O port) autovectors once the program enables their source through
+       device registers, which the analysis does not model, so non-delivery is never proven. Every installed interrupt vector the
+       machine model does not deliver (the spurious vector 24 and the autovectors 25-31 other than IRQ6;
+       `GenesisReachabilityRoots::potential_interrupts`, `M68kFrameConfig::potential_interrupts`) is therefore a potential
+       asynchronous source wherever its level is eligible (level > mask; level 7 and the spurious vector always): an unanalysed
+       resuming interrupt, so that partition's asynchronous writers are every cell and its status is Unknown after those boundaries
+       (frame integrity is not proven for code the analysis never visits). Its handler is never seeded, so `D` is unchanged. Narrowing
+       this to the levels the board can assert, or analysing those handlers as instances, would be a separate precision step.
    - Handler entry: registers and work RAM Unknown, A7 as above.
    - Initial work RAM is Unknown (`initial_memory`). ADR 0055's zero-reset assumption is not reused: real hardware leaves work RAM
      undefined.
@@ -425,6 +434,12 @@ reproduce the SEG-026-T002 strict row exactly.
   - PEA subtracts 4.
   - SR writers (a possible supervisor/user stack switch), LINK and UNLK make the delta Unknown.
   - A call's continuation keeps the caller's delta.
+  - **Correction (T006 review).** A resuming exception's continuation and a pushed code address's continuation start at an Unknown
+    delta, never bottom. They are reached only after code the activation does not summarise (a handler ending in RTE, an RTS through
+    a pushed address) whose effect on A7 is never proven. A bottom delta joined away at the next RTS, so with
+    `exception_continuations` a path that popped its caller's return slot after a TRAP passed as balanced and produced a precise
+    but wrong summary. The typed per-PC queries `m68k_query_data_register`/`m68k_query_address_register` join every point of the PC
+    (every context and partition) instead of reading the context-0 point alone. Both have fixtures and killed mutants.
   - With contexts only, JSR/BSR/PEA also move A7 by -4 in the address domain. The callee is then entered at an exact frame, and its
     summary returns at one. The T003/T004 address transfer is unchanged when the domain is off.
 - **Activations and proofs** (each round, from the solution).
@@ -478,7 +493,7 @@ reproduce the SEG-026-T002 strict row exactly.
   - With no valid round, or a contexts solve that exhausts a solver bound, the contexts domain is switched off. The T004 result is
     returned, with the reason recorded.
   - Contexts rounds use the solver's own pin-and-restart unchanged.
-- **Driver.** `--domains contexts` is accepted (`frames` is still rejected).
+- **Driver.** `--domains contexts` is accepted (`frames` was still rejected until T006).
   - The aggregate adds `context_depth`/`context_bound` to the bounds, plus a `contexts` object: validation, rounds, contexts,
     merges, activations, summaries, unproven and opaque continuations by sub-reason, and a memory-only comparator.
   - `--domains baseline` and `--domains memory` (credited and ablation) are byte-identical to T002/T004 on Sonic: private,
@@ -534,3 +549,92 @@ reproduce the SEG-026-T002 strict row exactly.
   - Every work-RAM read stays Unknown under both the credited model and the ablation, so the object-field `JSR (An)` gate (2,480
     attributed missing PCs) and the 9 width-only sites stay blocked. Their causes are the T006 interrupt/handler-stack proof and the
     T010 Z80 store-freedom proof, not calling context.
+
+### T006: interrupt mask, handler instances and code-built frames
+
+- **Status** (`libs/cpu/m68k/analysis/frames.{hpp,cpp}` for the public MC68000 rules; `finite_adapter.{hpp,cpp}` for the domain).
+  - With `M68kAnalysisConfig::domains.frames` (it implies `contexts`, `memory` and `address`) the state carries the CPU-owned status
+    `(S << 3) | I` as a generic finite set (Unknown: SR not tracked).
+  - The reset entry starts at S = 1, I = 7 with A7 = the long at vector 0; any other root starts Unknown.
+  - MOVE/ANDI/ORI/EORI to SR and STOP replace it; a proven RTE restores it from its frame; RTR leaves it unchanged.
+  - A7 is kept across an SR writer only when S = 1 is proven before and after (no USP/SSP switch).
+- **Eligibility and frames.** An interrupt of level L is eligible at a boundary when L > I (level 7 and unknown levels always). A
+  synchronous vector is raised where `m68k_raised_vectors` says so (privilege violation only when user mode is possible). The 6-byte
+  frame is at A7 - 6 only when S = 1 is proven; otherwise the frame address is Unknown (`frame_unproven`).
+- **Partitions.** A point is `(tag << 48) | (context << 24) | pc`. Tag 0 is the main flow. Every other tag is one handler instance
+  (handler, parent partition), entered with S = 1, the accepted mask (or the parent's for a synchronous vector) and the frame
+  address joined over the parent's taking boundaries. Partitions never share an edge.
+  - A handler is not analysed when it is already on its parent's chain, the chain is at depth 3, its parent is non-resuming, or its
+    frame address is Unknown. An unanalysed resuming child makes its parent's asynchronous writers every cell and the parent's
+    status Unknown after the boundaries where it can be taken.
+  - Handlers with no live instance are seeded in a dead-handler partition (tag 254) so that `D` keeps its roots; every cell is
+    asynchronous there.
+  - Installed interrupt vectors the machine model does not deliver are potential sources under the hardware premise of decision 7:
+    an unanalysed resuming interrupt wherever their level is eligible, never seeded (`D` unchanged).
+- **Per-partition asynchronous writers.** A partition receives the stores and interrupt frames of every analysed resuming child
+  instance (interrupts; divide by zero, CHK, TRAPV) and, transitively, that child's own writers. Frame integrity: a resuming
+  instance whose writes (or its resuming descendants') may reach its saved SR word clobbers the parent's status after its taking
+  boundaries.
+- **Returns.** RTE/RTR, and an RTS away from the activation's entry delta (`rts_computed`), are resolved only from precise frame or
+  return cells written by analysed code. Every other one stays Unknown with its reason; a handler RTE is `interrupt_resumption`.
+- **Rounds and bounds.** Contexts rounds first settle with no frames configuration (warm start). The frames configuration
+  (instances, per-partition policies, clobbered partitions, the whole-program status bound) then grows by join, only from settled
+  rounds, and only a validated round is returned. Otherwise the T005 contexts result is returned with the reason. Bounds: instance
+  chain depth 3, 253 instance tags (beyond: the domain fails closed), 4 growth rounds per instance entry A7 (then Unknown), R = 16.
+- **Driver.** `--domains frames` is accepted. The aggregate adds a `frames` object: validation, rounds, instances by class,
+  unanalysed causes, live-point counts (status Unknown, S proven, eligible, masked, potential-eligible, raising, frame address
+  Unknown by cause), the same counts for the first frames round, main-flow asynchronous writers, and return outcomes.
+- **Fixtures** (`analysis_m68k_frames_test`, plus the deterministic frames run in `analysis_report_driver_test`):
+  - the reset mask excluding level 6 (no instance, precise reads), and the domain inert when off;
+  - level 6 enabled: one instance at SSP - 6 with I = 6, the main flow's writers exactly the handler cell and its frame;
+  - a handler raising the mask (no nesting) and lowering it (unbounded nesting, every cell asynchronous);
+  - nested synchronous handlers (non-resuming parent; a resuming divide nested in itself; the single resuming divide);
+  - an interrupt preempting a synchronous handler;
+  - Unknown status and Unknown supervisor stack;
+  - RTE/RTR from a code-built frame, unproven and modified frames, computed RTS from PEA and pushed constants;
+  - frame integrity (saved SR rewritten directly or through a handler subroutine; saved PC only leaves SR intact);
+  - an installed but undelivered level-4 handler that writes a cell: with I = 3 the cell is asynchronous; with I = 5 it stays
+    precise; the delivered-only premise would have kept it precise.
+- **Mutations** (`analysis_mutation_test` builds the frames fixture). Ten frames mutants are killed: an Unknown SR treated as masked;
+  preemption at an equal mask; the frame at A7 instead of A7 - 6; the reset SSP ignored; RTE not restoring SR; partition policy
+  growth dropped; dead-handler code without asynchronous writers; frame integrity ignored; a handler RTE not labelled
+  `interrupt_resumption`; an undelivered installed interrupt not treated as a writer. Two T005 corrections add two contexts mutants
+  (bottom exception-continuation delta; context-0-only query).
+- **Sonic attract oracle (report-only, sanitized; Release build, seven runs in parallel on one host).**
+
+  | measure | frames (credited) | frames + ablation (diagnostic) |
+  | --- | --- | --- |
+  | `D` (D/U) | 6,806 (2.76%) | 6,806 (2.76%) |
+  | `O ∩ D` / `O - D` / `D - O` | 4,534 / 5,978 / 2,272 | same |
+  | observed recall / escapes | 43.13% / 0 | same |
+  | `pc_index_explicit` / `pc_index_width_only` resolved / Unknown | 5 / 0; 0 / 9 (`width_only`) | same |
+  | `jsr_an` / `jmp_an` resolved / Unknown | 0 / 2 (`base_unknown` 1, `region_exit` 1); 0 / 1 (`unknown_input/base_unknown`) | same |
+  | `rte` / `rtr` resolved / Unknown | 0 / 2 (`interrupt_resumption`); 0 sites | same |
+  | `rts_computed` resolved / Unknown | 0 / 26 (`stack_unbalanced` 22, `unknown_input/base_unknown` 4) | same |
+  | work-RAM reads: precise / `external_writer` / `async_writer` | 0 / 428 / 0 | 0 / 0 / 419 |
+  | other work-RAM-or-Unknown reads Unknown | 577 (`base_unknown` 471, `region_exit` 77, `context_bound` 12, `stack_unbalanced` 11, `set_bound` 6) | 586 (`context_bound` 21) |
+  | memory: `async_all` / async ranges / release stores / Unknown-target stores | true / 0 / 1,969 / 1,930 | same |
+  | handler vectors delivered / potential (installed, undelivered) | 24 / 7 | same |
+  | instances analysed / dead handlers / unanalysed (`entry_unknown`, `undelivered_interrupt`) | 0 / 9 / 3, 3 | same |
+  | live points / status Unknown / S proven | 6,550 / 6,550 / 0 | same |
+  | eligible / masked / potential-eligible / raising | 6,550 / 0 / 6,550 / 30 | same |
+  | delivered-vector frame address Unknown: S unproven / A7 Unknown | 6,532 / 5 | same |
+  | first frames round: status Unknown / eligible / masked / frame address Unknown | 0 / 6,550 / 0 / 6,204 (S proven, A7 Unknown) | same |
+  | contexts: call-site contexts / merged / activations / summaries | 343 / 12 / 357 / 271 | same |
+  | rounds (memory + warm + frames) / validated, converged | 2 + 9 + 10 / yes, yes | same |
+  | final-solve iterations / points; all rounds | 403,860 / 12,765; 7,679,399 | 403,860 / 12,765; 7,679,525 |
+  | wall / peak RSS (Release, contended) | 181.4 s / 338 MB | 181.5 s / 336 MB |
+
+  - Two credited and two ablation frames runs are each byte-identical (private, aggregate and compare-tool outputs).
+  - `--domains baseline`, `memory` and `contexts` stay byte-identical to their previous outputs after the T006 corrections (the
+    Genesis driver runs with `exception_continuations` off, so the continuation-delta correction does not reach them).
+  - `D` is unchanged from contexts: the frames domain adds no discovered PC and no resolved site.
+  - Under the hardware premise the installed level-7 and spurious vectors are eligible at every boundary, the reset mask included,
+    so the first frames round already finds an unanalysed resuming interrupt in the main flow and the returned round has every live
+    status Unknown. Under the superseded delivered-only premise the returned round had 6,239 of 6,550 live points with an Unknown
+    status (311 proven S = 1 and masked), while its first frames round had none (6,203 eligible, 347 masked); that loss between the
+    first and the returned round is recorded as observed, not diagnosed here.
+  - The main flow's asynchronous writers are every cell in both models and every work-RAM read stays Unknown, so the object-field
+    `JSR (An)` gate and the 9 width-only sites stay blocked. Narrowing the potential sources to the interrupt levels the board can
+    assert, or analysing those handlers as instances, is a separate precision step; it would not by itself remove the external
+    writer (T010).

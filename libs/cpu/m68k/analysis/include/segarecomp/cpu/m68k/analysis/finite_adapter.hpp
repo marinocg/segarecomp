@@ -315,6 +315,11 @@ struct M68kHandlerInstance {
 // SEG-030-T006: the frames-domain part of the configuration (ADR 0079 decisions 7 and 9).
 struct M68kFrameConfig {
   std::vector<M68kHandlerVector> vectors;           // machine facts
+  // Installed interrupt vectors (autovectors of levels 1-7 and the spurious vector) the generated-native machine does not deliver.
+  // Real hardware may deliver them once the program enables their source (no analysed fact proves it never does), so they are
+  // potential asynchronous sources wherever their level is eligible: an unanalysed resuming interrupt (every cell asynchronous in
+  // that partition and its status Unknown after those boundaries). They are never seeded: discovery (D) keeps the delivered set.
+  std::vector<M68kHandlerVector> potential_interrupts;
   std::set<std::uint32_t> main_entries;             // roots of the main flow (tag 0)
   std::optional<std::uint32_t> reset_entry;         // the reset root (S = 1, I = 7, A7 = reset_ssp)
   std::optional<std::uint32_t> reset_ssp;           // the long at vector 0
@@ -365,8 +370,10 @@ struct M68kFrameReport {
   std::size_t points{};
   std::size_t status_unknown{};
   std::size_t supervisor_proven{};
-  std::size_t interrupt_eligible{};  // some delivered interrupt can be taken
-  std::size_t interrupt_masked{};    // status known and no delivered interrupt can be taken
+  std::size_t potential_interrupt_vectors{};
+  std::size_t interrupt_eligible{};  // some delivered or potential interrupt can be taken
+  std::size_t interrupt_masked{};    // status known and no delivered or potential interrupt can be taken
+  std::size_t potential_eligible{};  // some potential (installed, undelivered) interrupt can be taken
   std::size_t raising_points{};      // some delivered synchronous vector may be raised
   std::size_t frame_unknown_a7{};          // eligible/raising points whose frame address is Unknown: S = 1 proven, A7 Unknown
   std::size_t frame_unproven_supervisor{}; // ... S = 1 not proven

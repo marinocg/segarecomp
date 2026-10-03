@@ -725,7 +725,13 @@ M68kFiniteAdapter::M68kFiniteAdapter(const M68kAnalysisImage &image, M68kAnalysi
 M68kAnalysisState M68kFiniteAdapter::entry_state(bool continuation) const {
   auto state = State::all_unknown();
   if (config_.domains.memory) state.memory.absent = continuation ? Sub::store_poison : Sub::initial_memory;
-  if (config_.domains.contexts && !continuation) state.stack_delta = FiniteValue::of({0U});
+  // SEG-030-T005 (B1): a root starts its activation at delta 0. A continuation built here (a resuming exception's or a pushed code
+  // address's) is reached only after code the activation does not summarise (a handler ending in RTE, an RTS through a pushed
+  // address) whose effect on A7 is never proven: its delta is Unknown, never bottom (bottom would join away and let an RTS on
+  // that path pass as balanced). A call continuation instead receives the caller's delta from `continuation`, because an
+  // unproven callee makes its callers unproven through the activation graph.
+  if (config_.domains.contexts)
+    state.stack_delta = continuation ? FiniteValue::unknown(UnknownReason::unsupported_transfer) : FiniteValue::of({0U});
   // SEG-030-T006: a root's status is Unknown unless it is the reset entry (root_state); an opaque continuation's status is the
   // whole-program status bound (closure premise, ADR 0079 decision 8).
   if (config_.domains.frames)
@@ -2105,6 +2111,7 @@ enum class Unanalysed : std::uint8_t {
   nested,               // the handler is already on the parent's chain: unbounded nesting
   depth_bound,          // the parent's chain is at the instance depth bound
   entry_unknown,        // the frame address (its entry A7) is Unknown
+  undelivered,          // an installed interrupt vector the machine model does not deliver (M68kFrameConfig::potential_interrupts)
 };
 const char *unanalysed_name(Unanalysed why) {
   switch (why) {
@@ -2113,6 +2120,7 @@ const char *unanalysed_name(Unanalysed why) {
   case Unanalysed::nested: return "nested";
   case Unanalysed::depth_bound: return "depth_bound";
   case Unanalysed::entry_unknown: return "entry_unknown";
+  case Unanalysed::undelivered: return "undelivered_interrupt";
   }
   return "invalid";
 }
@@ -2282,6 +2290,8 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
   // 1. Contributions: every boundary of a live partition (main, or an analysed instance) where a vector can be taken.
   std::map<std::pair<std::uint32_t, std::uint32_t>, Contribution> contributions;  // (handler, parent tag)
   std::map<std::uint32_t, std::vector<std::uint64_t>> partition_points;
+  std::map<std::pair<std::uint32_t, std::uint32_t>, std::set<std::uint32_t>> potential;  // (handler, parent tag) -> eligible vectors
+  report.potential_interrupt_vectors = used.potential_interrupts.size();
   for (const auto &[point, state] : states) {
     const auto tag = m68k_point_tag(point);
     if (tag != 0U && !used.instances.contains(tag)) continue;  // the dead-handler partition is never a writer or a parent
@@ -2318,6 +2328,15 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
       if (interrupt) contribution.interrupt_frames.push_back(frame);
       if (cls != M68kVectorClass::synchronous) contribution.taking_points.push_back(point);
     }
+    // A potential (installed, undelivered) interrupt: taken at the boundary when its level is eligible; never analysed.
+    bool potential_eligible = false;
+    for (const auto &vector : used.potential_interrupts) {
+      if (!m68k_interrupt_eligible(boundary, m68k_interrupt_level(vector.vector))) continue;
+      potential_eligible = true;
+      potential[{vector.handler & bus_mask, tag}].insert(vector.vector);
+    }
+    if (potential_eligible) ++report.potential_eligible;
+    eligible = eligible || potential_eligible;
     if (eligible) ++report.interrupt_eligible;
     else if (!status.is_unknown()) ++report.interrupt_masked;
     if (raising) ++report.raising_points;
@@ -2350,6 +2369,7 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
     const auto levels = clobber_levels(vectors);
     clobbered[parent].insert(levels.begin(), levels.end());
   };
+  for (const auto &[key, vectors] : potential) unanalysed(key.second, vectors, true, Unanalysed::undelivered);
   for (auto &[key, contribution] : contributions) {
     auto why = instance_admission(used, key.first, key.second);
     if (why == Unanalysed::none && contribution.a7.is_unknown()) why = Unanalysed::entry_unknown;
@@ -2807,18 +2827,27 @@ std::vector<std::pair<std::uint64_t, const M68kAnalysisState *>> m68k_points_of(
   return out;
 }
 
+// Both queries join over every point of the PC (every call context and handler partition): reading one context's point alone would
+// present a context-restricted fact as the fact of the instruction. Without contexts the PC is its only point.
 analysis::FiniteValue m68k_query_data_register(const M68kFiniteAnalysisResult &result, std::uint32_t pc, unsigned reg,
                                                unsigned width) {
-  return result.solution.query(pc & bus_mask, [&](const M68kAnalysisState &state) {
-    return state.values.values[m68k_analysis_slot(reg, width)];
-  });
+  if (!result.solution.complete) return FiniteValue::unknown(result.solution.reason);
+  FiniteValue out = FiniteValue::bottom();
+  for (const auto &[point, state] : m68k_points_of(result, pc)) {
+    (void)point;
+    out = join(out, state->values.values[m68k_analysis_slot(reg, width)]);
+  }
+  return out;
 }
 
 M68kPointsTo m68k_query_address_register(const M68kFiniteAnalysisResult &result, std::uint32_t pc, unsigned reg) {
   if (!result.solution.complete) return M68kPointsTo::unknown(result.solution.reason);
-  const auto found = result.solution.in_states.find(pc & bus_mask);
-  if (found == result.solution.in_states.end()) return M68kPointsTo::bottom();
-  return found->second.address[reg & 7U];
+  auto out = M68kPointsTo::bottom();
+  for (const auto &[point, state] : m68k_points_of(result, pc)) {
+    (void)point;
+    out = join(out, state->address[reg & 7U]);
+  }
+  return out;
 }
 
 const char *m68k_pc_index_outcome_name(M68kPcIndexOutcome outcome) noexcept {

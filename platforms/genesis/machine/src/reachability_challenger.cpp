@@ -194,6 +194,12 @@ GenesisReachabilityRoots genesis_reachability_roots(const FrontendProgram &progr
       out.vectors.emplace_back(vector, *handler);
     }
   }
+  const auto delivered = machine_delivered_vectors();
+  for (std::uint32_t vector = 24U; vector <= 31U; ++vector) {
+    if (std::find(delivered.begin(), delivered.end(), vector) != delivered.end()) continue;
+    if (const auto handler = vector_handler(program, static_cast<std::size_t>(vector) * 4U))
+      out.potential_interrupts.emplace_back(vector, *handler);
+  }
   out.roots.assign(roots.begin(), roots.end());
   return out;
 }

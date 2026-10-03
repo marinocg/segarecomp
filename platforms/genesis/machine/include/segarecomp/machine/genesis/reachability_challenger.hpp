@@ -149,6 +149,10 @@ struct GenesisReachabilityRoots {
   std::uint32_t vector_roots{};
   // SEG-030-T006: every installed delivered vector as (vector number, handler), in delivery-list order (report-only consumers).
   std::vector<std::pair<std::uint32_t, std::uint32_t>> vectors;
+  // SEG-030-T006: every installed interrupt vector the machine model does not deliver (the spurious vector 24 and the autovectors
+  // 25-31 other than IRQ6), as (vector number, handler). Never roots: report-only consumers treat them as potential asynchronous
+  // sources (real hardware delivers them once the program enables their source).
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> potential_interrupts;
 };
 [[nodiscard]] GenesisReachabilityRoots genesis_reachability_roots(const FrontendProgram &program);
 

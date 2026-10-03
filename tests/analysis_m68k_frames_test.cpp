@@ -96,7 +96,8 @@ private:
   M68kFlatAnalysisImage flat_;
 };
 
-M68kFiniteAnalysisResult run(const Asm &program, const std::vector<M68kHandlerVector> &vectors, bool reset = true, bool frames = true) {
+M68kFiniteAnalysisResult run(const Asm &program, const std::vector<M68kHandlerVector> &vectors, bool reset = true, bool frames = true,
+                             const std::vector<M68kHandlerVector> &potential = {}) {
   const RegionImage view{program};
   M68kAnalysisConfig config{};
   config.domains.address = true;
@@ -110,6 +111,7 @@ M68kFiniteAnalysisResult run(const Asm &program, const std::vector<M68kHandlerVe
     if (!frames) config.memory.handler_roots.push_back(vector.handler);
   }
   config.frames.vectors = vectors;
+  config.frames.potential_interrupts = potential;
   config.frames.main_entries = {entry};
   if (reset) {
     config.frames.reset_entry = entry;
@@ -482,6 +484,42 @@ void frame_integrity() {
   expect(through(0U).first, "integrity: a subroutine of the handler rewriting its own return address keeps the interrupted status");
 }
 
+
+// An installed level-4 autovector the machine model does not deliver is still a potential asynchronous source (real hardware delivers
+// it once the program enables its source): wherever level 4 is eligible it is an unanalysed resuming interrupt, so every cell of
+// that partition is asynchronous; its handler is never seeded (D unchanged). Where the mask excludes level 4 it has no effect.
+void undelivered_interrupt_source() {
+  constexpr std::uint32_t irq4 = 0x600U;
+  const std::vector<M68kHandlerVector> potential{{28U, irq4}};
+  const auto build = [&](std::uint32_t sr) {
+    Asm a;
+    const auto flow = main_flow(a, sr);
+    a.at(irq6).rte();                  // the delivered level-6 handler writes nothing
+    a.at(irq4).store_imm(5U, cell_b);  // the installed level-4 handler writes cell B
+    a.rte();
+    return std::make_pair(a, flow);
+  };
+  const auto [open, flow] = build(0x2300U);  // I = 3: levels 4 and 6 are eligible
+  const auto result = run(open, irq_only, true, true, potential);
+  if (debug()) std::cerr << describe(result);
+  expect(result.complete && result.frames.validated && result.frames.potential_interrupt_vectors == 1U &&
+             result.frames.potential_eligible >= 1U && unanalysed(result, "undelivered_interrupt") >= 1U,
+         "undelivered: the installed level-4 handler is an eligible, unanalysed interrupt source");
+  expect(result.frames.main_async_all && word_at(result, flow.read_done, 2U).is_unknown() &&
+             word_at(result, flow.read_done, 1U).is_unknown(),
+         "undelivered: its writes are unproven, so every main-flow cell is asynchronous (cell B not precise)");
+  expect(m68k_points_of(result, irq4).empty() && !result.reached.contains(irq4), "undelivered: its handler is never seeded (D unchanged)");
+  const auto [masked, masked_flow] = build(0x2500U);  // I = 5: level 4 masked, level 6 eligible
+  const auto closed = run(masked, irq_only, true, true, potential);
+  expect(closed.complete && closed.frames.validated && closed.frames.potential_eligible == 0U &&
+             unanalysed(closed, "undelivered_interrupt") == 0U && !closed.frames.main_async_all &&
+             word_at(closed, masked_flow.read_done, 2U) == FiniteValue::of({1U}),
+         "undelivered: with level 4 masked cell B stays precise");
+  const auto without = run(open, irq_only);
+  expect(!without.frames.main_async_all && word_at(without, flow.read_done, 2U) == FiniteValue::of({1U}),
+         "undelivered: the delivered-only premise (the previous, unsound model) would keep cell B precise");
+}
+
 }  // namespace
 
 int main() {
@@ -497,6 +535,7 @@ int main() {
   rte_unproven();
   computed_rts();
   frame_integrity();
+  undelivered_interrupt_source();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";
     return EXIT_FAILURE;

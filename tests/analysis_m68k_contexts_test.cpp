@@ -464,6 +464,69 @@ void stack_delta_and_inert() {
   expect(inert, "inert: without the contexts domain every point is its PC and no state carries a stack delta");
 }
 
+
+// B1 (soundness): a resuming exception's continuation is reached only after a handler whose effect on A7 is never proven. Its stack
+// delta must be Unknown (never bottom, which would join away): a leaf whose TRAP path pops its caller's return slot (ADDQ.L #4,A7)
+// before its RTS is unbalanced, so neither the leaf nor its caller has a proven summary and the caller's dispatch stays Unknown.
+void exception_continuation_delta() {
+  const auto build = [](bool trap) {
+    Asm a;
+    constexpr std::uint32_t mid = 0x400U, leaf = 0x500U;
+    a.stack().moveq(0, 4U);
+    a.bsr(mid);
+    const auto site = a.dispatch();
+    a.w({0x4E71U, 0x4E71U, 0x4E71U, 0x4E71U, 0x4E71U, 0x4E71U}).stop();
+    a.at(mid);
+    a.bsr(leaf);
+    a.moveq(0, 8U).rts();
+    // TST.B D1; BEQ.S L; TRAP #0 (or NOP); ADDQ.L #4,A7 (or NOP); L: RTS
+    a.at(leaf).w({0x4A01U, 0x6704U, trap ? 0x4E40U : 0x4E71U, trap ? 0x588FU : 0x4E71U}).rts();
+    return std::make_pair(a, site);
+  };
+  const auto run_exc = [](const Asm &program) {
+    const RegionImage view{program};
+    M68kAnalysisConfig config{};
+    config.domains.address = true;
+    config.domains.memory = true;
+    config.domains.contexts = true;
+    config.exception_continuations = true;
+    return analyze_m68k_finite_values(view, {entry}, config);
+  };
+  const auto [trapping, site] = build(true);
+  const auto result = run_exc(trapping);
+  expect(unresolved(result, site) && !data_before(result, site, 0U).is_precise(),
+         "exception continuation: the TRAP path's untracked A7 leaves the dispatch Unknown: " + text(result, site) +
+             " D0=" + data_before(result, site, 0U).describe());
+  bool untracked = false;
+  for (const auto &[point, state] : result.solution.in_states)
+    if (m68k_point_pc(point) == 0x506U) untracked = untracked || state.stack_delta.is_unknown();
+  expect(untracked, "exception continuation: the continuation's stack delta is Unknown, never bottom");
+  // Control: the same program without the TRAP path is balanced and proven.
+  const auto [plain, plain_site] = build(false);
+  const auto control = run_exc(plain);
+  expect(resolved(control, plain_site, {plain_site + 12U}), "exception continuation control: a balanced leaf is proven: " +
+                                                                 text(control, plain_site));
+}
+
+// M1: the typed per-PC queries join every context's point (a context-0 point alone is a context-restricted fact).
+void queries_join_contexts() {
+  Asm a;
+  constexpr std::uint32_t f = 0x400U;
+  a.stack().moveq(0, 1U).lea(1, object_a);
+  a.bsr(f);
+  a.moveq(0, 2U).lea(1, object_b).w({0x6000U, (f - (a.pc + 2U)) & 0xFFFFU});  // BRA.W f (context 0)
+  a.at(f).w({0x4E71U}).rts();
+  const auto result = run(a);
+  expect(result.complete && m68k_points_of(result, f).size() >= 2U, "queries: the callee is reached in two contexts");
+  const auto d0 = m68k_query_data_register(result, f, 0U, 16U);
+  expect(d0 == FiniteValue::of({1U, 2U}), "queries: D0 joins every context: " + d0.describe());
+  const auto a1 = m68k_query_address_register(result, f, 1U);
+  expect(a1.is_known() && a1.values() == std::vector<std::uint32_t>{object_a, object_b},
+         "queries: A1 joins every context: " + a1.describe());
+  expect(m68k_query_data_register(result, 0x800U, 0U, 16U).is_bottom() && m68k_query_address_register(result, 0x800U, 1U).is_bottom(),
+         "queries: an unreached PC is bottom");
+}
+
 }  // namespace
 
 int main() {
@@ -477,6 +540,8 @@ int main() {
   summary_invalidation();
   handler_writer_in_callee();
   stack_delta_and_inert();
+  exception_continuation_delta();
+  queries_join_contexts();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";
     return EXIT_FAILURE;
