@@ -2,7 +2,7 @@
 
 - Status: Accepted (SEG-030-T001).
 - Date: 2026-10-02
-- Task: SEG-030-T001..T009 (T001 accepts this ADR; later children append their records below).
+- Task: SEG-030-T001..T010 (T001 accepts this ADR; later children append their records below).
 - Contract: `docs/architecture/abstract-analysis-core-contract.md` section 8 (M68K instantiation), Accepted by this ADR.
 - Related: ADR 0078 (generic core and adapters), ADR 0076 (STOP list; SEG-030 targets the measured blocker), ADR 0077 (executable
   images), ADR 0049 (immutable-copy aliases), ADR 0048 (push-window RTS), ADR 0051 (RTE as the first broad gate), ADR 0053/0054/0055
@@ -110,8 +110,20 @@ reproduce the SEG-026-T002 strict row exactly.
      every boundary is interruptible, and the join over handler points (each entry A7 minus a further frame) never converges, so the
      handler entry A7 is Unknown. Consequence: when interrupts can be taken, the nested exception frame is a handler store through an
      Unknown address, and every work-RAM cell is asynchronous. The implementation applies exactly this consequence for the Genesis
-     driver (`M68kMemoryConfig::interrupts`). Precise asynchronous cell sets require interrupt-mask and handler-stack tracking (a future
-     candidate).
+     driver (`M68kMemoryConfig::interrupts`).
+   - **Interrupt and handler-stack precision (owned by SEG-030-T006, extended).** Precise asynchronous cell sets require
+     interrupt-mask and handler-stack tracking. This is a SEG-030 precision blocker, not a future candidate. T006 (pending) adds,
+     CPU-owned in `libs/cpu/m68k/analysis`:
+     - SR interrupt-mask tracking, and supervisor/user mode where a question depends on it;
+     - A7/supervisor-stack provenance;
+     - exception-frame pushes at proven stack locations, only when the supervisor-stack provenance is sound;
+     - handler nesting per the actual SR mask semantics, and per-point interrupt eligibility;
+     - RTE SR/PC restoration only from proven code-built frames.
+
+     It answers, soundly: can this point be interrupted; where can its frame be written; can this handler be nested or preempted;
+     which cells are truly asynchronous. Whatever is not provable keeps the current conservative consequence above (Unknown entry A7,
+     every cell asynchronous). There is no universal "RTE resumes here" rule: asynchronous resumption may stay Unknown
+     (`interrupt_resumption`).
    - Handler entry: registers and work RAM Unknown, A7 as above.
    - Initial work RAM is Unknown (`initial_memory`). ADR 0055's zero-reset assumption is not reused: real hardware leaves work RAM
      undefined.
@@ -125,8 +137,8 @@ reproduce the SEG-026-T002 strict row exactly.
      - Whether banked reads work is disputed, but that does not matter here: this model only concerns writers.
      - YM2612, PSG, controller/IO and the Z80-control registers are bus slaves and never write 68K RAM.
      - Sega CD and 32X add-on bus masters are unsupported and explicitly excluded.
-   - **Credited policy.** Z80 code and the bank value are runtime state, and SEG-030 does not try to prove a Z80 program free of
-     bank-window stores. The exclusion below relies on the power-on state: the Z80 is held in reset (`/RESET` asserted, BUSREQ not
+   - **Credited policy.** Z80 code and the bank value are runtime state. Until the SEG-030-T010 proof below succeeds, the exclusion
+     relies on the power-on state: the Z80 is held in reset (`/RESET` asserted, BUSREQ not
      requested; `docs/architecture/genesis-z80-audio-contract.md` section 4 rule 1, citing GPGX `zstate = 0` and ARES `resLine = 0`),
      so it cannot run, and cannot write 68K RAM, until the 68K writes the Z80 control block. A store in `D` counts as a potential
      release when its target may alias the Z80 control block (memory mode, BUSREQ `$A11100`, RESET `$A11200`; the driver uses the whole
@@ -134,11 +146,25 @@ reproduce the SEG-026-T002 strict row exactly.
      value it stores. If any such store exists:
      - every mutable work-RAM cell is potentially written externally at every program point;
      - every read of mutable work RAM is `Unknown` (`external_writer` -> `unknown_input`), and no work-RAM strong-update fact survives.
-   - **Exclusion.** Only a program that provably never releases the Z80 (no such store in `D`, under the closure premise) excludes
-     external writers.
-   - **Premise ablation.** A labelled ablation that assumes no Z80 work-RAM writes may be reported for sensitivity only. It is never mixed
-     into `D`, recall or credited counts.
-   - **Future candidate.** Z80 bank-store freedom and BUSREQ-interval proofs.
+   - **Exclusion.** A program that provably never releases the Z80 (no such store in `D`, under the closure premise) excludes
+     external writers; so does a successful T010 proof below.
+   - **Z80 store-freedom proof (owned by SEG-030-T010, a new bounded task; pending).** This is a SEG-030 precision blocker, not a
+     future candidate. T010 attempts a conservative static proof that no reachable Z80 store can target 68K work RAM while the analysed
+     program runs. Inputs:
+     - the 68K release/BUSREQ/RESET state;
+     - the known materialized Z80 executable images (ADR 0077 / SEG-028 model; Z80 support from SEG-008/009/032/033);
+     - the Z80 bank-register writes;
+     - the Z80 store instructions and their targets.
+
+     Acceptable proof shapes: the bank register never reaches a 68K-RAM-selecting value; no reachable Z80 store uses the banked
+     `$8000-$FFFF` window; Z80 stores into the window occur only while BUSREQ/reset prevents Z80 execution; or a bounded finite Z80
+     control/data proof over the materialized images. A full second Z80 value-set analysis is not built unless evidence requires it.
+     Runtime observation is never proof; it may only falsify. If the proof does not succeed, `external_writer` stays true with a
+     recorded reason. A successful proof must carry a mutation test in which changing the relevant bank or store fact makes the proof
+     fail.
+   - **Premise ablation.** A labelled ablation that assumes no Z80 work-RAM writes (`--assume-no-z80-ram-writes`) may be reported for
+     sensitivity only. It is diagnostic-only, never credited, never mixed into `D`, recall or credited counts, and distinct from the
+     T010 proof.
 8. **Closure premise.** Every fact is relative to the discovered set `D`. Runtime escapes on the coverage oracle are the falsifier;
    nothing observed is fed back. Every memory-derived resolution is reported next to the count of unresolved sites it depends on.
 9. **Driver rounds.** A monotone configuration (pinned sites, asynchronous cells, callee summaries, merged callees) grows as
@@ -173,7 +199,13 @@ reproduce the SEG-026-T002 strict row exactly.
 
 - T002 lands the report-only driver and the oracle-level regression baseline before any domain is credited.
 - T003..T006 add the admitted domains in `libs/cpu/m68k/analysis`, each inert when its flag is off, so the baseline stays reproducible.
+- T006 (extended) and T010 own the two environmental writer proofs of decision 7 (interrupt/handler-stack precision; Z80 work-RAM
+  store freedom). Both are pending.
 - A domain whose child cannot meet its observable acceptance stops and records why; zero measured gain is an acceptable recorded result.
+- **Accepted tradeoff.** Complexity is allowed when it is required for sound, general static recovery, provided it stays bounded,
+  deterministic, CPU-owned where appropriate, evidence-driven and fail-closed. The invariant is "precise proof OR typed Unknown": a
+  fact that cannot be proven stays Unknown with its reason and is never excluded unsoundly. No speculative machinery is added without a
+  concrete consumer.
 
 ## Records
 
@@ -352,5 +384,16 @@ reproduce the SEG-026-T002 strict row exactly.
 
   Under the credited model, the program releases the Z80, so every work-RAM read is `external_writer`. The ablation shows that
   removing that premise would not help: interrupts can preempt any boundary, the handler stacks therefore have Unknown addresses,
-  and every cell is asynchronous. The next memory blocker is interrupt-mask and handler-stack tracking, plus a proof that the Z80 is
-  free of bank-window stores. Both are future candidates outside SEG-030.
+  and every cell is asynchronous.
+
+  Disposition:
+  - T004's local abstract-memory semantics (cells, strong/weak updates, alias exclusion, writer description, policy rounds) are
+    accepted.
+  - The credited Sonic gain is zero because of two environmental writer proofs that do not yet exist: possible Z80 stores into work
+    RAM (`external_writer`, 412 reads) and unbounded interrupt/handler-stack aliasing (`async_writer`, 411 reads plus 1 `store_poison`
+    under the ablation).
+  - These are SEG-030 precision blockers, not postponed work: T006 (extended) owns the interrupt/handler-stack proof and T010 owns the
+    Z80 store-freedom proof (decision 7).
+  - SEG-030 must attempt a bounded sound proof for both.
+  - A proof that does not succeed leaves the affected reads Unknown with their reason; it never becomes an unsound exclusion. A zero
+    or modest gain after both proofs have been attempted is valid recorded evidence.
