@@ -722,7 +722,7 @@ M68kFiniteAdapter::M68kFiniteAdapter(const M68kAnalysisImage &image, M68kAnalysi
   tag_policies_[m68k_dead_handler_tag] = every_cell;
 }
 
-M68kAnalysisState M68kFiniteAdapter::entry_state(bool continuation) const {
+M68kAnalysisState M68kFiniteAdapter::entry_state(bool continuation, std::uint32_t tag) const {
   auto state = State::all_unknown();
   if (config_.domains.memory) state.memory.absent = continuation ? Sub::store_poison : Sub::initial_memory;
   // SEG-030-T005 (B1): a root starts its activation at delta 0. A continuation built here (a resuming exception's or a pushed code
@@ -732,11 +732,17 @@ M68kAnalysisState M68kFiniteAdapter::entry_state(bool continuation) const {
   // unproven callee makes its callers unproven through the activation graph.
   if (config_.domains.contexts)
     state.stack_delta = continuation ? FiniteValue::unknown(UnknownReason::unsupported_transfer) : FiniteValue::of({0U});
-  // SEG-030-T006: a root's status is Unknown unless it is the reset entry (root_state); an opaque continuation's status is the
-  // whole-program status bound (closure premise, ADR 0079 decision 8).
-  if (config_.domains.frames)
-    state.status = continuation ? config_.frames.status_bound : FiniteValue::unknown(UnknownReason::unknown_input);
+  // SEG-030-T006: a root's status is Unknown unless it is the reset entry (root_state); an opaque continuation's status is its
+  // partition's status bound (closure premise, ADR 0079 decision 8).
+  if (config_.domains.frames) state.status = continuation ? status_bound(tag) : FiniteValue::unknown(UnknownReason::unknown_input);
   return state;
+}
+
+FiniteValue M68kFiniteAdapter::status_bound(std::uint32_t tag) const {
+  // The dead-handler partition has no entry status (its roots start Unknown): its bound is Unknown.
+  if (tag != 0U && !config_.frames.instances.contains(tag)) return FiniteValue::unknown(UnknownReason::unknown_input);
+  const auto found = config_.frames.status_bounds.find(tag);
+  return found == config_.frames.status_bounds.end() ? FiniteValue::bottom() : found->second;
 }
 
 M68kAnalysisState M68kFiniteAdapter::root_state(std::uint32_t tag, std::uint32_t pc) const {
@@ -798,13 +804,13 @@ UnknownReason continuation_reason(Sub sub) {
 }
 }  // namespace
 
-M68kAnalysisState M68kFiniteAdapter::opaque_continuation(Sub sub) const {
-  if (sub == Sub::none) return entry_state(true);
+M68kAnalysisState M68kFiniteAdapter::opaque_continuation(Sub sub, std::uint32_t tag) const {
+  if (sub == Sub::none) return entry_state(true, tag);
   auto state = State::all_unknown(continuation_reason(sub));
   state.address.fill(M68kPointsTo::unknown(continuation_reason(sub), sub));
   if (config_.domains.memory) state.memory.absent = sub;
-  // SEG-030-T006: an opaque continuation's status is the whole-program status bound (closure premise, ADR 0079 decision 8).
-  if (config_.domains.frames) state.status = config_.frames.status_bound;
+  // SEG-030-T006: an opaque continuation's status is its partition's status bound (closure premise, ADR 0079 decision 8).
+  if (config_.domains.frames) state.status = status_bound(tag);
   return state;
 }
 
@@ -1370,13 +1376,13 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
         result.edges.push_back({stacked_point, EdgeKind::return_edge, continuation(pc, callees, in, tag)});
       break;
     }
-    if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true)});
+    if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true, tag)});
     break;
   case M68kStackedContinuationKind::exception_continuation:
-    if (config_.exception_continuations) result.edges.push_back({stacked_point, EdgeKind::exceptional, entry_state(true)});
+    if (config_.exception_continuations) result.edges.push_back({stacked_point, EdgeKind::exceptional, entry_state(true, tag)});
     break;
   case M68kStackedContinuationKind::pushed_code_address:
-    if (config_.pushed_code_continuations) result.edges.push_back({stacked_point, EdgeKind::return_edge, entry_state(true)});
+    if (config_.pushed_code_continuations) result.edges.push_back({stacked_point, EdgeKind::return_edge, entry_state(true, tag)});
     break;
   case M68kStackedContinuationKind::none: break;
   }
@@ -1481,9 +1487,9 @@ M68kAnalysisState M68kFiniteAdapter::continuation(std::uint32_t pc, const std::v
   const auto &contexts = config_.contexts;
   const auto context = m68k_tagged_context(tag, m68k_call_context(pc));
   if (callees.empty()) {
-    state = opaque_continuation(Sub::none);  // an unresolved callee: unknown effect
+    state = opaque_continuation(Sub::none, tag);  // an unresolved callee: unknown effect
   } else if (std::any_of(callees.begin(), callees.end(), [&](std::uint32_t callee) { return contexts.merged.contains(callee); })) {
-    state = opaque_continuation(Sub::context_bound);
+    state = opaque_continuation(Sub::context_bound, tag);
     // SEG-030-T006 (frames domain only): every callee a balanced merged callee: the caller's A7 and the callees' exit statuses.
     if (config_.domains.frames) {
       FiniteValue exits;
@@ -1500,9 +1506,15 @@ M68kAnalysisState M68kFiniteAdapter::continuation(std::uint32_t pc, const std::v
     }
   } else if (const auto summary = contexts.summaries.find(context); summary != contexts.summaries.end()) {
     state = summary->second;
+    // SEG-030-T006 (frames domain only): a summary exists only for a balanced activation (every exit is an RTS at stack delta {0}),
+    // so every invocation returns at its own entry A7 + 4, which is this caller's A7 at the call. The summary's own A7 is the join
+    // of the exits over every invocation of the context (a nested callee's context is shared by every invocation of its outer
+    // callee), so it is replaced by the caller-relative value, as for a balanced merged callee. The summary's other facts (registers,
+    // A0-A6, memory) are joins over every invocation's exits, sound for each one, and are kept as they are.
+    if (config_.domains.frames) state.address[7] = in.address[7];
   } else {
     const auto opaque = contexts.opaque.find(context);
-    state = opaque_continuation(opaque == contexts.opaque.end() ? Sub::none : opaque->second);
+    state = opaque_continuation(opaque == contexts.opaque.end() ? Sub::none : opaque->second, tag);
   }
   state.flag_setter.reset();
   // The caller's own stack delta: a balanced callee restores A7 (an unbalanced one makes its callers unproven, see the driver).
@@ -1759,8 +1771,19 @@ std::map<std::uint64_t, PointFacts> point_facts(M68kFiniteAdapter &adapter, cons
     }
     const auto control = m68k_control_successors(decoded->operation);
     facts.call = control.stacked == M68kStackedContinuationKind::call_continuation;
+    // SEG-030-T006 (frames domain only): an instruction that always raises only non-resuming synchronous vectors (ILLEGAL, line
+    // 1010/1111) ends its path. Its handler never resumes into this activation (m68k_vector_class, ADR 0079 decision 7: a handler
+    // RTE is interrupt_resumption, never an analysed edge), so it is not an unknown effect. A TRAP/TRAPV whose continuation is not
+    // modelled, an unresolved computed site and an undecodable point stay unknown effects.
+    bool non_resuming_raise = false;
+    if (control.always_raises_exception && config.domains.frames) {
+      const auto raised = m68k_raised_vectors(&decoded->operation, state.status);
+      non_resuming_raise = !raised.empty() && std::all_of(raised.begin(), raised.end(), [](std::uint32_t vector) {
+        return m68k_vector_class(vector) == M68kVectorClass::synchronous;
+      });
+    }
     // A pushed code address is not an escape by itself: a return through it is an RTS away from the entry stack delta.
-    if (control.always_raises_exception || result.solution.unresolved_computed.contains(point) ||
+    if ((control.always_raises_exception && !non_resuming_raise) || result.solution.unresolved_computed.contains(point) ||
         (control.stacked == M68kStackedContinuationKind::exception_continuation && !config.exception_continuations))
       facts.unknown_effect = true;
     const auto edges = adapter.transfer(point, state).edges;
@@ -2246,21 +2269,26 @@ std::map<std::uint64_t, FiniteValue> relative_a7(M68kFiniteAdapter &adapter, con
   return rel;
 }
 
-// The whole-program status bound the solution implies (M68kFrameConfig::status_bound): every live root and instance entry status,
-// every SR writer's result and every proven RTE's restored status in a live partition; Unknown when a partition is clobbered.
-FiniteValue derive_status_bound(const M68kAnalysisImage &image, const M68kAnalysisConfig &config, const M68kFiniteAnalysisResult &result,
-                                const std::vector<std::uint32_t> &entries) {
+using StatusBounds = std::map<std::uint32_t, FiniteValue>;
+
+// The per-partition status bounds the solution implies (M68kFrameConfig::status_bounds). For each live partition (the main flow and
+// every analysed instance): its entry statuses (the main roots, or the instance's entry), every SR writer's result and every proven
+// RTE's restored status in that partition. A partition whose clobber levels (M68kFrameConfig::clobbered) can be taken under that
+// join (a level eligible under it, or a resuming synchronous child: level 0) has an Unknown bound: its boundaries may then run with
+// an Unknown status. Otherwise no clobber fires there, and every status of the partition is one of the joined statuses.
+StatusBounds derive_status_bounds(const M68kAnalysisImage &image, const M68kAnalysisConfig &config,
+                                  const M68kFiniteAnalysisResult &result, const std::vector<std::uint32_t> &entries) {
   M68kFiniteAdapter adapter{image, config};
   const auto &frames = config.frames;
-  if (!frames.clobbered.empty()) return FiniteValue::unknown(UnknownReason::unsupported_transfer);
-  FiniteValue out;
+  StatusBounds out;
   const auto handlers = handler_pcs(frames);
+  auto &main = out[0U];
   for (const auto entry : entries) {
     const auto pc = entry & bus_mask;
     if (!std::binary_search(handlers.begin(), handlers.end(), pc) || frames.main_entries.contains(pc))
-      out = join(out, adapter.root_state(0U, pc).status);
+      main = join(main, adapter.root_state(0U, pc).status);
   }
-  for (const auto &[tag, instance] : frames.instances) out = join(out, instance.status);
+  for (const auto &[tag, instance] : frames.instances) out[tag] = join(out[tag], instance.status);
   for (const auto &[point, state] : result.solution.in_states) {
     const auto tag = m68k_point_tag(point);
     if (tag != 0U && !frames.instances.contains(tag)) continue;
@@ -2268,9 +2296,31 @@ FiniteValue derive_status_bound(const M68kAnalysisImage &image, const M68kAnalys
     if (!decoded) continue;
     const auto family = m68k_control_successors(decoded->operation).dynamic;
     if (!m68k_status_register_writer(decoded->operation.kind) && family != M68kDynamicControlFamily::return_from_exception) continue;
-    for (const auto &edge : adapter.transfer(point, state).edges) out = join(out, edge.state.status);
+    auto &bound = out[tag];
+    for (const auto &edge : adapter.transfer(point, state).edges) bound = join(bound, edge.state.status);
+  }
+  for (auto &[tag, bound] : out) {
+    const auto found = frames.clobbered.find(tag);
+    if (found == frames.clobbered.end()) continue;
+    const bool taken = std::any_of(found->second.begin(), found->second.end(), [&](std::uint32_t level) {
+      return level == 0U || m68k_interrupt_eligible(bound, level == 8U ? std::nullopt : std::optional<unsigned>(level));
+    });
+    if (taken) bound = FiniteValue::unknown(UnknownReason::unsupported_transfer);
   }
   return out;
+}
+
+StatusBounds join(const StatusBounds &left, const StatusBounds &right) {
+  auto out = left;
+  for (const auto &[tag, bound] : right) out[tag] = join(out[tag], bound);
+  return out;
+}
+
+bool leq(const StatusBounds &left, const StatusBounds &right) {
+  return std::all_of(left.begin(), left.end(), [&](const auto &entry) {
+    const auto found = right.find(entry.first);
+    return leq(entry.second, found == right.end() ? FiniteValue::bottom() : found->second);
+  });
 }
 
 FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysisConfig &config, M68kFiniteAnalysisResult &result) {
@@ -2680,9 +2730,9 @@ M68kFiniteAnalysisResult analyze_contexts(const M68kAnalysisImage &image, const 
     auto next = config;
     next.memory.policy = join(config.memory.policy, policy);
     next.contexts = derivation.next;
-    next.frames.status_bound = join(config.frames.status_bound, derive_status_bound(image, config, out, entries));
+    next.frames.status_bounds = join(config.frames.status_bounds, derive_status_bounds(image, config, out, entries));
     const bool fixed = derivation.valid && next.contexts == config.contexts && next.memory.policy == config.memory.policy &&
-                       next.frames.status_bound == config.frames.status_bound;
+                       next.frames.status_bounds == config.frames.status_bounds;
     config = std::move(next);
     if (fixed) break;
   }
@@ -2702,9 +2752,9 @@ M68kFiniteAnalysisResult analyze_contexts(const M68kAnalysisImage &image, const 
     if (frames) {
       frame_derivation = derive_frames(image, config, out);
       if (frame_derivation.failed) return without_frames(UnknownReason::state_bound, "instance_bound", round, iterations);
-      const auto bound = derive_status_bound(image, config, out, entries);
-      if (!leq(bound, config.frames.status_bound)) frame_derivation.valid = false;
-      frame_derivation.next.status_bound = join(config.frames.status_bound, bound);
+      const auto bounds = derive_status_bounds(image, config, out, entries);
+      if (!leq(bounds, config.frames.status_bounds)) frame_derivation.valid = false;
+      frame_derivation.next.status_bounds = join(config.frames.status_bounds, bounds);
       std::size_t writer_points = 0U;
       for (const auto &[point, state] : out.solution.in_states) {
         (void)state;

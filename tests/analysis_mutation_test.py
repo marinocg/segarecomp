@@ -186,7 +186,7 @@ MUTANTS: list[Mutant] = [
            "",
            (M68K_TEST,), "an unresolved PC-indexed site is not reported unresolved"),
     Mutant("m68k_call_continuation_keeps_state", M68K,
-           "if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true)});",
+           "if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true, tag)});",
            "if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, out});",
            (M68K_TEST,), "a call continuation carries the pre-call state instead of an opaque entry"),
     # ---------------------------------------------------------------- M68K call contexts and summaries (SEG-030-T005)
@@ -265,6 +265,29 @@ MUTANTS: list[Mutant] = [
            "  for (const auto &[key, vectors] : potential) unanalysed(key.second, vectors, true, Unanalysed::undelivered);\n",
            "",
            (FRAMES_TEST,), "an installed but undelivered interrupt handler is not a potential asynchronous writer"),
+    Mutant("m68k_summary_absolute_exit_a7", M68K,
+           "    if (config_.domains.frames) state.address[7] = in.address[7];\n  } else {",
+           "  } else {",
+           (FRAMES_TEST,), "a balanced summary's continuation keeps the joined absolute exit A7 instead of the caller's A7"),
+    Mutant("m68k_unbalanced_callee_rebased", M68K,
+           "    state = opaque_continuation(opaque == contexts.opaque.end() ? Sub::none : opaque->second, tag);\n",
+           "    state = opaque_continuation(opaque == contexts.opaque.end() ? Sub::none : opaque->second, tag);\n"
+           "    state.address[7] = in.address[7];\n",
+           (FRAMES_TEST,), "an unproven (unbalanced) callee's continuation is rebased to the caller's A7"),
+    Mutant("m68k_non_resuming_raise_unknown_effect", M68K,
+           "    if (control.always_raises_exception && config.domains.frames) {\n",
+           "    if (false) {\n",
+           (FRAMES_TEST,), "an always-raising non-resuming instruction (ILLEGAL) still makes its activation unproven"),
+    Mutant("m68k_unmodelled_trap_terminates_path", M68K,
+           "        (control.stacked == M68kStackedContinuationKind::exception_continuation && !config.exception_continuations))\n",
+           "        false)\n",
+           (FRAMES_TEST,), "a TRAP whose resuming continuation is not modelled is treated as a path terminator (escape dropped)"),
+    Mutant("m68k_whole_program_status_bound", M68K,
+           "  return found == config_.frames.status_bounds.end() ? FiniteValue::bottom() : found->second;\n",
+           "  FiniteValue all;\n"
+           "  for (const auto &entry : config_.frames.status_bounds) all = join(all, entry.second);\n"
+           "  return found == config_.frames.status_bounds.end() ? all : all;\n",
+           (FRAMES_TEST,), "an opaque continuation takes the whole-program status bound (another partition's lower mask leaks in)"),
     # ---------------------------------------------------------------- Z80 projection and adapter
     Mutant("z80_ram_load_precise", Z80_ADAPTER,
            "        if (!image_.contains(at)) return FiniteValue::unknown(UnknownReason::non_immutable_read);",

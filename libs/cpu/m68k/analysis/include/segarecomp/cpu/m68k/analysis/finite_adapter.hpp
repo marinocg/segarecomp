@@ -54,7 +54,8 @@
 // RTS away from the entry stack delta are resolved only from precise frame or return cells written by analysed code (computed
 // edges); every other one stays Unknown (`frame_unproven`, `interrupt_resumption` in a handler partition, ...). A resuming child that
 // may rewrite its saved SR (frame integrity) makes its parent's status Unknown after the boundaries where it can be taken. An
-// opaque continuation's status is the whole-program status bound; a balanced merged callee's continuation keeps the caller's A7.
+// opaque continuation's status is its partition's status bound; a balanced callee's continuation (summary or merged) keeps the
+// caller's A7.
 // The handlers without an analysed instance are seeded in one more partition (for D) whose every cell is asynchronous. The driver
 // first settles the contexts rounds with no frames configuration (warm start), then grows the frames configuration only from
 // settled rounds and returns a validated round only (else the T005 contexts result, with the reason).
@@ -330,10 +331,13 @@ struct M68kFrameConfig {
   // with the interrupt levels of those children (1-7; 8: an interrupt of unknown level; 0: a resuming synchronous vector, at its
   // raising instruction).
   std::map<std::uint32_t, std::set<std::uint32_t>> clobbered;
-  // The whole-program status bound: the join of every live entry status, every SR writer's result and every proven RTE's restored
-  // status in D (Unknown when a partition is clobbered). It is the status of an opaque continuation, relative to the closure premise
-  // (ADR 0079 decision 8). Grows monotonically from bottom.
-  analysis::FiniteValue status_bound;
+  // The status bound of every live partition (tag 0 and each analysed instance): the join of its entry statuses (its main roots, or
+  // the instance's entry), every SR writer's result and every proven RTE's restored status in the partition; Unknown when a clobber
+  // level of the partition is eligible under that join (or a resuming synchronous child may clobber it). It is the status of an
+  // opaque continuation in that partition, relative to the closure premise (ADR 0079 decision 8): the code an opaque continuation
+  // skips runs in the same partition, and a child instance either restores the partition's status (frame integrity) or clobbers it.
+  // Each bound grows monotonically from bottom (an absent tag is bottom).
+  std::map<std::uint32_t, analysis::FiniteValue> status_bounds;
   friend bool operator==(const M68kFrameConfig &, const M68kFrameConfig &) = default;
 };
 
@@ -465,11 +469,14 @@ public:
   [[nodiscard]] std::optional<M68kReturnSiteReport> evaluate_return_site(std::uint64_t point, const M68kIrOperation &operation,
                                                                          const State &in) const;
   // The state of an entry: a root (initial memory) or an opaque continuation (callee stores).
-  [[nodiscard]] State entry_state(bool continuation) const;
+  // SEG-030-T006: an opaque continuation's status is the status bound of its partition `tag`.
+  [[nodiscard]] State entry_state(bool continuation, std::uint32_t tag = 0U) const;
   // SEG-030-T006: the seed of a root in partition `tag` (the reset state, a live handler instance's entry, or the entry state).
   [[nodiscard]] State root_state(std::uint32_t tag, std::uint32_t pc) const;
   // SEG-030-T005: an opaque continuation typed by `sub` (none: the T004 opaque entry).
-  [[nodiscard]] State opaque_continuation(M68kAnalysisSubReason sub) const;
+  [[nodiscard]] State opaque_continuation(M68kAnalysisSubReason sub, std::uint32_t tag = 0U) const;
+  // SEG-030-T006: the status bound of partition `tag` (M68kFrameConfig::status_bounds; Unknown in the dead-handler partition).
+  [[nodiscard]] analysis::FiniteValue status_bound(std::uint32_t tag) const;
   // SEG-030-T005: the stack delta after `operation` (normal successors), from its input state.
   [[nodiscard]] analysis::FiniteValue stack_delta_after(const M68kIrOperation &operation, const State &in) const;
   // SEG-030-T005: the continuation state of the call at `pc` whose callees in this transfer are `callees` (empty: unresolved).

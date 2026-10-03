@@ -15,6 +15,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -520,6 +521,134 @@ void undelivered_interrupt_source() {
          "undelivered: the delivered-only premise (the previous, unsound model) would keep cell B precise");
 }
 
+// The A7 of the points of `pc` in the call-site context of `site` (main partition).
+M68kPointsTo a7_in_context(const M68kFiniteAnalysisResult &result, std::uint32_t pc, std::uint32_t site) {
+  M68kPointsTo out{};
+  for (const auto &[point, state] : m68k_points_of(result, pc))
+    if (m68k_point_tag(point) == 0U && m68k_context_site(m68k_point_context(point)) == m68k_call_context(site))
+      out = join(out, state->address[7]);
+  return out;
+}
+
+// A balanced summary returns at its caller's own A7. The nested callee's context is shared by every invocation of its outer callee,
+// one from a known A7 and one from an Unknown A7, so the summary's joined exit A7 is Unknown; the continuation in the known
+// invocation still keeps that invocation's A7 (the callee's entry A7 + 4). An unbalanced callee has no summary: its continuation's
+// A7 stays Unknown.
+void balanced_summary_relative_a7() {
+  constexpr std::uint32_t outer = 0x300U, inner = 0x340U, unbalanced = 0x380U;
+  const auto bsr = [](Asm &a, std::uint32_t callee) { return a.w({0x6100U, (callee - (a.pc + 2U)) & 0xFFFFU}); };
+  Asm a;
+  const auto known_site = a.pc;
+  bsr(a, outer);
+  const auto after_known = a.pc;
+  a.w({0x2E79U}).l(cell_c);  // MOVEA.L (cell C).L,A7: an Unknown A7 from here on
+  bsr(a, outer);
+  bsr(a, unbalanced);
+  const auto after_unbalanced = a.pc;
+  a.nop().stop();
+  a.at(outer);
+  bsr(a, inner);
+  const auto after_nested = a.pc;
+  a.nop().rts();
+  a.at(inner).nop().rts();
+  a.at(unbalanced).w({0x548FU}).rts();  // ADDQ.L #2,A7; RTS (an RTS at delta {2})
+  const auto result = run(a, {});
+  if (debug()) std::cerr << describe(result);
+  expect(result.complete && result.frames.validated, "relative A7: a validated frames round");
+  const auto nested = a7_in_context(result, after_nested, known_site);
+  expect(nested.is_known() && nested.values() == std::vector<std::uint32_t>{ssp - 4U},
+         "relative A7: after the shared nested callee the known invocation keeps its own A7 (SSP - 4): " + nested.describe());
+  const auto main_a7 = a7_at(result, after_known);
+  expect(main_a7.is_known() && main_a7.values() == std::vector<std::uint32_t>{ssp},
+         "relative A7: the outer callee returns at the caller's A7 (SSP): " + main_a7.describe());
+  expect(a7_at(result, after_unbalanced).is_unknown(), "relative A7: an unbalanced callee's continuation A7 stays Unknown");
+  // A known caller of the unbalanced callee: its continuation is still Unknown (no summary, never rebased).
+  Asm b;
+  bsr(b, unbalanced);
+  const auto after = b.pc;
+  b.nop().stop();
+  b.at(unbalanced).w({0x548FU}).rts();
+  const auto unbalanced_result = run(b, {});
+  expect(unbalanced_result.frames.validated && a7_at(unbalanced_result, after).is_unknown(),
+         "relative A7: a known caller of an unbalanced callee keeps an Unknown continuation A7");
+}
+
+// An instruction that always raises a non-resuming synchronous vector (ILLEGAL) ends its path: its callee stays balanced, so the
+// caller's continuation applies the summary (A7 back at SSP). A TRAP whose continuation is not modelled and an unresolved computed
+// jump stay unknown effects: their callees are unproven (`none`) and the continuation is opaque.
+void non_resuming_raise_ends_path() {
+  constexpr std::uint32_t callee = 0x300U;
+  const auto build = [&](std::initializer_list<std::uint32_t> escape) {
+    Asm a;
+    a.w({0x6100U, (callee - (a.pc + 2U)) & 0xFFFFU});  // BSR.W callee
+    const auto after = a.pc;
+    a.nop().stop();
+    a.at(callee).w({0x4A40U, static_cast<std::uint32_t>(0x6700U | (2U * escape.size()))});  // TST.W D0; BEQ.S over the escape
+    a.w(escape).rts();
+    return std::make_pair(a, after);
+  };
+  const auto unproven_none = [](const M68kFiniteAnalysisResult &result) {
+    const auto found = result.contexts.unproven.find(Sub::none);
+    return found == result.contexts.unproven.end() ? std::size_t{0} : found->second;
+  };
+  const auto [illegal, illegal_after] = build({0x4AFCU});  // ILLEGAL
+  const auto proven = run(illegal, {});
+  if (debug()) std::cerr << describe(proven);
+  const auto a7 = a7_at(proven, illegal_after);
+  expect(proven.frames.validated && proven.contexts.summaries == 1U && unproven_none(proven) == 0U && a7.is_known() &&
+             a7.values() == std::vector<std::uint32_t>{ssp},
+         "non-resuming raise: an ILLEGAL path does not make its callee unproven (summary applied, A7 = SSP): " + a7.describe());
+  const auto [trap, trap_after] = build({0x4E40U});  // TRAP #0 (continuation not modelled)
+  const auto trapped = run(trap, {});
+  expect(trapped.frames.validated && trapped.contexts.summaries == 0U && unproven_none(trapped) == 1U &&
+             a7_at(trapped, trap_after).is_unknown(),
+         "non-resuming raise: a TRAP whose continuation is not modelled stays an unknown effect");
+  const auto [jump, jump_after] = build({0x4ED0U});  // JMP (A0), A0 Unknown
+  const auto escaped = run(jump, {});
+  expect(escaped.frames.validated && escaped.contexts.summaries == 0U && unproven_none(escaped) == 1U &&
+             a7_at(escaped, jump_after).is_unknown(),
+         "non-resuming raise: an unresolved computed jump stays an unknown effect");
+}
+
+// The status of an opaque continuation is its own partition's bound. The main flow runs at I = 3; the level-6 handler calls an
+// unresolved callee (JSR (A0)): its opaque continuation runs with the handler partition's statuses (I = 6), so level 6 is still
+// masked there and the handler is not nested at its own level. The whole-program bound would admit the main flow's I = 3 and
+// nest it (every cell asynchronous). A handler that itself lowers its mask before the call is still nested.
+void per_partition_status_bound() {
+  const auto build = [](bool lowers) {
+    Asm a;
+    const auto flow = main_flow(a, 0x2300U);
+    a.at(irq6);
+    if (lowers) a.move_sr(0x2300U);
+    a.w({0x4E90U});  // JSR (A0), A0 Unknown
+    const auto after = a.pc;
+    a.nop().rte();
+    return std::make_tuple(a, flow, after);
+  };
+  const auto [a, flow, after] = build(false);
+  const auto result = run(a, irq_only);
+  if (debug()) std::cerr << describe(result);
+  std::uint32_t tag = 0U;
+  for (std::uint32_t t = 1U; t < 8U; ++t)
+    if (reached_in(result, after, t)) tag = t;
+  expect(result.complete && result.frames.validated && result.frames.instances == 1U && tag != 0U,
+         "partition bound: one validated level-6 instance");
+  expect(status_at(result, after, tag) == FiniteValue::of({0xEU}),
+         "partition bound: the handler's opaque continuation runs with the handler's own status (S = 1, I = 6): " +
+             status_at(result, after, tag).describe());
+  expect(unanalysed(result, "nested") == 0U && !result.frames.main_async_all &&
+             word_at(result, flow.read_done, 2U) == FiniteValue::of({1U}),
+         "partition bound: the handler is not nested at its own level; cell B stays precise in the main flow");
+  const auto [lowered, lowered_flow, lowered_after] = build(true);
+  const auto nested = run(lowered, irq_only);
+  if (debug()) std::cerr << describe(nested);
+  (void)lowered_after;
+  expect(nested.frames.validated && unanalysed(nested, "nested") + unanalysed(nested, "entry_unknown") >= 1U &&
+             nested.frames.main_async_all &&
+             word_at(nested, lowered_flow.read_done, 2U).is_unknown(),
+         "partition bound: a handler lowering its own mask is still nested (every cell asynchronous)");
+}
+
 }  // namespace
 
 int main() {
@@ -536,6 +665,9 @@ int main() {
   computed_rts();
   frame_integrity();
   undelivered_interrupt_source();
+  balanced_summary_relative_a7();
+  non_resuming_raise_ends_path();
+  per_partition_status_bound();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";
     return EXIT_FAILURE;

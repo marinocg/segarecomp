@@ -127,8 +127,10 @@ reproduce the SEG-026-T002 strict row exactly.
        and an RTS away from the entry stack delta resolved only from code-built frame cells.
      - **Still Unknown.** An unanalysed resuming child makes its parent's writers every cell. A handler RTE never resumes anywhere the
        analysis names (`interrupt_resumption`). The frame address after a call into a callee with an unknown effect, or an unbalanced
-       callee, is Unknown (its A7 is not restored). The status of an opaque continuation is the whole-program status bound
-       (relative to the closure premise of decision 8). Register preservation across an interrupt remains the existing resumption
+       callee, is Unknown (its A7 is not restored); a balanced callee (a summary or a proven merged callee) returns at the caller's
+       own A7. An instruction that always raises only non-resuming synchronous vectors ends its path and is not an unknown effect;
+       an unresolved computed site and a TRAP/TRAPV whose continuation is not modelled stay unknown effects. The status of an opaque
+       continuation is its own partition's status bound (relative to the closure premise of decision 8), never another partition's. Register preservation across an interrupt remains the existing resumption
        premise; only the saved SR is checked.
      - **Two premises, two consumers.** *Discovery* (`D`, roots, recall, analysed handler instances) keeps the challenger's machine
        root premise: only the delivered vectors of ADR 0021 / ADR 0043 (level-6 autovector and the synchronous vectors) are roots and
@@ -578,7 +580,7 @@ reproduce the SEG-026-T002 strict row exactly.
 - **Returns.** RTE/RTR, and an RTS away from the activation's entry delta (`rts_computed`), are resolved only from precise frame or
   return cells written by analysed code. Every other one stays Unknown with its reason; a handler RTE is `interrupt_resumption`.
 - **Rounds and bounds.** Contexts rounds first settle with no frames configuration (warm start). The frames configuration
-  (instances, per-partition policies, clobbered partitions, the whole-program status bound) then grows by join, only from settled
+  (instances, per-partition policies, clobbered partitions, the per-partition status bounds) then grows by join, only from settled
   rounds, and only a validated round is returned. Otherwise the T005 contexts result is returned with the reason. Bounds: instance
   chain depth 3, 253 instance tags (beyond: the domain fails closed), 4 growth rounds per instance entry A7 (then Unknown), R = 16.
 - **Driver.** `--domains frames` is accepted. The aggregate adds a `frames` object: validation, rounds, instances by class,
@@ -638,3 +640,61 @@ reproduce the SEG-026-T002 strict row exactly.
     `JSR (An)` gate and the 9 width-only sites stay blocked. Narrowing the potential sources to the interrupt levels the board can
     assert, or analysing those handlers as instances, is a separate precision step; it would not by itself remove the external
     writer (T010).
+- **Advancement iteration 2: return-continuation A7 and status precision** (frames domain only; `baseline`, `memory` and `contexts`
+  outputs stay byte-identical on Sonic).
+  - *Relative A7 at a balanced summary.* A summary exists only for a balanced activation (every exit an RTS at stack delta {0}), so
+    its continuation now takes the caller's own A7 at the call instead of the summary's A7. That A7 is the join of the exits over
+    every invocation of the context: a nested callee's context is shared by every invocation of its outer callee, so one
+    Unknown-A7 invocation made every invocation's continuation Unknown. The summary's registers, A0-A6 and memory stay as they
+    are: they are joins over every invocation's exits (abstract-memory join is an intersection), sound for each one, so no
+    A7-relative cell keeps a stale absolute address. An unbalanced or otherwise unproven callee is never rebased.
+  - *Non-resuming raises.* An instruction that always raises only non-resuming synchronous vectors (ILLEGAL, line 1010/1111;
+    `m68k_vector_class`) ends its path and no longer makes its activation unproven. Unresolved computed sites, undecodable points
+    and a TRAP/TRAPV whose continuation is not modelled stay unknown effects. Merged callees already used the balanced-merged rule.
+    The three unproven merged activations contain an unresolved computed site (2) or an RTS away from the entry delta (1), so none
+    can be proven.
+  - *Per-partition status bound.* `M68kFrameConfig::status_bounds` holds one bound per live partition: its entry statuses, its SR
+    writers' results and its proven RTEs' restored statuses. It is Unknown when one of the partition's clobber levels is eligible
+    under that join, or when a resuming synchronous child may clobber it. An opaque continuation takes its own partition's bound;
+    the dead-handler partition's bound is Unknown. Validation and growth are per partition.
+  - Fixtures (`analysis_m68k_frames_test`):
+    - a nested callee shared by a known-A7 and an Unknown-A7 invocation keeps the known invocation's A7, while an unbalanced
+      callee's continuation stays Unknown;
+    - an ILLEGAL path keeps its callee balanced, while TRAP and an unresolved `JMP (A0)` stay unproven;
+    - a level-6 handler with an unresolved call is not nested when the main flow runs at I = 3, and is still nested when the handler
+      lowers its own mask.
+
+    Five mutants are killed (`analysis_mutation_test`):
+    - the absolute summary exit A7 is kept;
+    - an unbalanced callee is rebased;
+    - a non-resuming raise is still an unknown effect;
+    - an unmodelled TRAP terminates the path;
+    - the whole-program status bound is used.
+  - **Sonic attract oracle, credited frames run** (Release; per step; sanitized aggregates):
+
+    | measure | before | 1: relative A7 | 2: non-resuming raises | 3: partition bound |
+    | --- | --- | --- | --- | --- |
+    | live / status Unknown / masked / eligible | 6,550 / 6,550 / 0 / 6,550 | same | same | same |
+    | frame address Unknown: S unproven / A7 Unknown | 6,532 / 5 | same | same | same |
+    | first frames round, A7 Unknown: total (`context_bound` / `none` / `stack_unbalanced`) | 6,204 (539 / 5,643 / 22) | 6,204 (1,885 / 4,319 / 0) | same as 1 | same as 1 |
+    | main-flow A7-dropping continuation edges at the first frames round: summary / unproven merged / opaque `none` / unresolved callee | 250 / 27 / 26 / 5 | 0 / 27 / 26 / 5 | same as 1 | same as 1 |
+    | instances analysed / unanalysed (`entry_unknown`, `undelivered_interrupt`) / integrity failures / clobbered partitions | 0 / 3, 3 / 0 / 1 | same | same | same |
+    | `async_all` / ranges / Unknown-target stores | true / 0 / 1,930 | same | same | same |
+    | work-RAM-or-Unknown reads Unknown (`external_writer`; `base_unknown`; `context_bound`) | 1,005 (428; 471; 12) | 1,005 (428; 468; 15) | same as 1 | same as 1 |
+    | `D` / recall / escapes; width-only, `jsr_an`, `jmp_an` resolved | 6,806 / 43.13% / 0; 0, 0, 0 | same | same | same |
+    | frames rounds / all-round iterations / wall / peak RSS | 10 / 7,679,399 / 181 s / 338 MB | 10 / 7,682,482 / 180 s / 336 MB | 10 / 7,682,482 / 184 s / 338 MB | 5 / 5,662,615 / 134 s / 336 MB |
+
+    - Step 3 was run twice; both runs are byte-identical (private, aggregate and compare-tool outputs).
+    - Steps 1 to 3 remove the summary-continuation cycle, but the credited counts do not move: every point it covered is also
+      downstream of a genuinely unproven continuation.
+    - The first A7 loss on the main flow is now a sound typed Unknown. It is a continuation of one of these:
+      - a merged callee with an unresolved computed site or an RTS away from its entry delta;
+      - a call-site context that contains (20) or inherits (20) an unresolved computed site;
+      - a context that pops its caller's return slot (RTS at a non-zero delta: 7 local, 32 inherited);
+      - an unresolved callee.
+    - Step 2 removes no Sonic cause: its only always-raising activation is also unbalanced and undecodable.
+    - Independently, every partition stays clobbered under the hardware premise, because the installed level-7 and spurious vectors
+      are eligible at every mask.
+    - A private diagnostic restricted the potential sources to levels 2 and 4. It is never credited, and the level choice is not a
+      hardware fact. It still left 6,239 of 6,550 live statuses Unknown (311 masked), because level 2 and level 4 are eligible at
+      the main flow's mask. Step 4 (frame-integrity attribution) is therefore not reached: no instance is admitted.
