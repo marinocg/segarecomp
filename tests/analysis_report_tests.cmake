@@ -84,6 +84,33 @@ if(CMAKE_SCRIPT_MODE_FILE)
       message(FATAL_ERROR "${left} and ${right} differ")
     endif()
   endforeach()
+  # SEG-030-T006: the frames domain (implies contexts, memory and address) runs deterministically and reports its own object.
+  foreach(run 1 2)
+    execute_process(COMMAND "${DRIVER}" ${arguments} --domains frames --private-output "${DIR}/frames${run}.json"
+      OUTPUT_FILE "${DIR}/frames${run}.stdout" RESULT_VARIABLE status)
+    if(NOT status EQUAL 0)
+      message(FATAL_ERROR "driver frames run ${run} failed: ${status}")
+    endif()
+  endforeach()
+  foreach(pair "frames1.json;frames2.json" "frames1.stdout;frames2.stdout")
+    list(GET pair 0 left)
+    list(GET pair 1 right)
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E compare_files "${DIR}/${left}" "${DIR}/${right}" RESULT_VARIABLE differ)
+    if(NOT differ EQUAL 0)
+      message(FATAL_ERROR "${left} and ${right} differ")
+    endif()
+  endforeach()
+  file(READ "${DIR}/frames1.stdout" frames_aggregate)
+  if(NOT frames_aggregate MATCHES "\"frames\":true" OR NOT frames_aggregate MATCHES "\"contexts\":true" OR
+     NOT frames_aggregate MATCHES "\"frames\":\\{\"validated\":true" OR NOT frames_aggregate MATCHES "\"instance_depth_bound\":3" OR
+     frames_aggregate MATCHES "ff0|\"200\"|00ff")
+    message(FATAL_ERROR "the frames aggregate is not the validated frames model: ${frames_aggregate}")
+  endif()
+  execute_process(COMMAND "${PYTHON}" "${SOURCE}/tools/reachability_coverage_compare.py" --coverage-dir "${DIR}/coverage"
+    --challenger "${DIR}/frames1.json" OUTPUT_VARIABLE compared RESULT_VARIABLE status)
+  if(NOT status EQUAL 0 OR NOT compared MATCHES "\"escapes_outside_proven_targets\":0")
+    message(FATAL_ERROR "the compare tool rejected the frames private output: ${status} ${compared}")
+  endif()
   file(READ "${DIR}/contexts1.stdout" contexts_aggregate)
   if(NOT contexts_aggregate MATCHES "\"contexts\":true" OR NOT contexts_aggregate MATCHES "\"memory\":true" OR
      NOT contexts_aggregate MATCHES "\"context_bound\":8" OR NOT contexts_aggregate MATCHES "\"contexts\":\\{\"validated\":true" OR
@@ -110,9 +137,9 @@ if(CMAKE_SCRIPT_MODE_FILE)
   if(aggregate MATCHES "ff0|\"200\"|00ff")
     message(FATAL_ERROR "the aggregate carries an address: ${aggregate}")
   endif()
-  # Fail closed: a wrong digest, a staged domain not yet implemented, a malformed bound and a missing private output.
+  # Fail closed: a wrong digest, a malformed or repeated domain list, a malformed bound and a missing private output.
   foreach(bad "--rom-sha256;0000000000000000000000000000000000000000000000000000000000000000"
-              "--domains;frames" "--domains;address,frames" "--domains;baseline,memory" "--max-iterations;0"
+              "--domains;frames,frames" "--domains;address,bogus" "--domains;baseline,memory" "--max-iterations;0"
               "--assume-no-z80-ram-writes" "--domains;address;--assume-no-z80-ram-writes" "--max-points;8;--max-points;8"
               "--max-iterations;8;--max-iterations;8" "--private-output")
     set(candidate ${arguments})

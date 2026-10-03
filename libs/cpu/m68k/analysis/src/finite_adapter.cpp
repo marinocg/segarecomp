@@ -352,6 +352,7 @@ M68kAnalysisState join(const M68kAnalysisState &left, const M68kAnalysisState &r
   for (std::size_t i = 0; i < out.address.size(); ++i) out.address[i] = join(left.address[i], right.address[i]);
   out.memory = join(left.memory, right.memory);
   out.stack_delta = join(left.stack_delta, right.stack_delta, m68k_exact_offset_bound);
+  out.status = join(left.status, right.status);
   return out;
 }
 
@@ -365,6 +366,7 @@ bool leq(const M68kAnalysisState &left, const M68kAnalysisState &right) {
     if (!leq(left.address[i], right.address[i])) return false;
   if (!leq(left.memory, right.memory)) return false;
   if (!leq(left.stack_delta, right.stack_delta)) return false;
+  if (!leq(left.status, right.status)) return false;
   return !right.flag_setter || left.flag_setter == right.flag_setter;
 }
 
@@ -502,7 +504,8 @@ bool address_branch_filter(const M68kIrOperation &setter, const M68kIrOperation 
 
 }  // namespace
 
-void M68kFiniteAdapter::transfer_address_registers(const M68kIrOperation &operation, const State &in, State &out) const {
+void M68kFiniteAdapter::transfer_address_registers(const M68kIrOperation &operation, const State &in, State &out,
+                                                   const M68kMemoryPolicy *policy) const {
   const std::uint8_t written = address_write_mask(operation);
   if (written == 0U) return;
   std::array<std::optional<M68kPointsTo>, 8> next{};
@@ -572,7 +575,8 @@ void M68kFiniteAdapter::transfer_address_registers(const M68kIrOperation &operat
     if (config_.domains.memory && m68k_memory_mode(src.mode)) {
       // SEG-030-T004: a code or data pointer stored in work-RAM cells (an object field) feeds the address domain.
       bool tracked = false;
-      const auto read = read_memory_operand(in, src, access_bytes(operation.size), &tracked);
+      const auto read = read_memory_with(policy != nullptr ? *policy : config_.memory.policy, in, src, access_bytes(operation.size),
+                                         &tracked);
       if (tracked) {
         if (!read.known) {
           destination(dst.reg, M68kPointsTo::unknown(read.reason, read.sub));
@@ -707,11 +711,74 @@ bool memory_source_kind(M68kIrKind kind) {
 
 }  // namespace
 
+M68kFiniteAdapter::M68kFiniteAdapter(const M68kAnalysisImage &image, M68kAnalysisConfig config)
+    : image_(image), config_(std::move(config)) {
+  if (!config_.domains.frames) return;
+  for (const auto &[tag, policy] : config_.frames.policies) tag_policies_.emplace(tag, join(config_.memory.policy, policy));
+  // The partition of the handlers without an analysed instance (never taken, or taken but unanalysed) has no eligibility, preemption
+  // or resumption analysis: every cell is asynchronous there (the T004 consequence).
+  auto every_cell = config_.memory.policy;
+  every_cell.async_all = true;
+  tag_policies_[m68k_dead_handler_tag] = every_cell;
+}
+
 M68kAnalysisState M68kFiniteAdapter::entry_state(bool continuation) const {
   auto state = State::all_unknown();
   if (config_.domains.memory) state.memory.absent = continuation ? Sub::store_poison : Sub::initial_memory;
   if (config_.domains.contexts && !continuation) state.stack_delta = FiniteValue::of({0U});
+  // SEG-030-T006: a root's status is Unknown unless it is the reset entry (root_state); an opaque continuation's status is the
+  // whole-program status bound (closure premise, ADR 0079 decision 8).
+  if (config_.domains.frames)
+    state.status = continuation ? config_.frames.status_bound : FiniteValue::unknown(UnknownReason::unknown_input);
   return state;
+}
+
+M68kAnalysisState M68kFiniteAdapter::root_state(std::uint32_t tag, std::uint32_t pc) const {
+  auto state = entry_state(false);
+  if (!config_.domains.frames) return state;
+  if (tag == 0U) {
+    // M68000PRM reset: S = 1, T = 0, I = 7; SSP <- the long at vector 0 (the machine supplies it for a reset-entry program only).
+    if (config_.frames.reset_entry && *config_.frames.reset_entry == (pc & bus_mask)) {
+      state.status = FiniteValue::of({m68k_reset_status});
+      if (config_.frames.reset_ssp) state.address[7] = classify(image_, constant(*config_.frames.reset_ssp));
+    }
+    return state;
+  }
+  const auto found = config_.frames.instances.find(tag);
+  if (found == config_.frames.instances.end()) return state;  // the dead-handler partition: no frame fact
+  state.status = found->second.status;
+  state.address[7] = found->second.a7;
+  return state;
+}
+
+FiniteValue M68kFiniteAdapter::effective_status(std::uint32_t tag, const State &in) const {
+  if (!config_.domains.frames) return in.status;
+  const auto found = config_.frames.clobbered.find(tag);
+  if (found == config_.frames.clobbered.end()) return in.status;
+  // A resuming child that may rewrite its saved SR can be taken at this boundary (an interrupt the boundary status admits): the
+  // instruction then runs with an Unknown status.
+  for (const auto level : found->second)
+    if (level != 0U && m68k_interrupt_eligible(in.status, level == 8U ? std::nullopt : std::optional<unsigned>(level)))
+      return FiniteValue::unknown(UnknownReason::unsupported_transfer);
+  return in.status;
+}
+
+bool M68kFiniteAdapter::clobbered_after(std::uint32_t tag, const M68kIrOperation &operation, const FiniteValue &status) const {
+  if (!config_.domains.frames) return false;
+  const auto found = config_.frames.clobbered.find(tag);
+  if (found == config_.frames.clobbered.end() || !found->second.contains(0U)) return false;
+  // A resuming synchronous child (divide by zero, CHK, TRAPV) that may rewrite its saved SR resumes after this instruction.
+  const auto raised = m68k_raised_vectors(&operation, status);
+  return std::any_of(raised.begin(), raised.end(),
+                     [](std::uint32_t v) { return m68k_vector_class(v) == M68kVectorClass::synchronous_resuming; });
+}
+
+M68kPointsTo M68kFiniteAdapter::frame_address(const FiniteValue &status, const State &in) const {
+  // M68000PRM: an exception pushes its 6-byte group 1/2 frame below the SSP, which is A7 only in supervisor mode.
+  if (!m68k_status_supervisor_proven(status)) return M68kPointsTo::unknown(UnknownReason::unsupported_transfer, Sub::frame_unproven);
+  const auto &a7 = in.address[7];
+  if (a7.is_unknown()) return M68kPointsTo::unknown(a7.reason, a7.sub == Sub::none ? Sub::base_unknown : a7.sub);
+  return m68k_points_to_add(a7, {-static_cast<std::int64_t>(m68k_exception_frame_bytes)});
 }
 
 // SEG-030-T005: the generic reason of an opaque continuation's CPU sub-reason.
@@ -730,6 +797,8 @@ M68kAnalysisState M68kFiniteAdapter::opaque_continuation(Sub sub) const {
   auto state = State::all_unknown(continuation_reason(sub));
   state.address.fill(M68kPointsTo::unknown(continuation_reason(sub), sub));
   if (config_.domains.memory) state.memory.absent = sub;
+  // SEG-030-T006: an opaque continuation's status is the whole-program status bound (closure premise, ADR 0079 decision 8).
+  if (config_.domains.frames) state.status = config_.frames.status_bound;
   return state;
 }
 
@@ -815,6 +884,22 @@ M68kPointsTo M68kFiniteAdapter::operand_address(const State &in, const M68kEffec
 
 M68kMemoryRead M68kFiniteAdapter::read_memory_operand(const State &in, const M68kEffectiveAddress &ea, std::uint32_t bytes,
                                                       bool *tracked) const {
+  return read_memory_with(config_.memory.policy, in, ea, bytes, tracked);
+}
+
+M68kMemoryRead M68kFiniteAdapter::read_memory_operand(std::uint32_t tag, const State &in, const M68kEffectiveAddress &ea,
+                                                      std::uint32_t bytes, bool *tracked) const {
+  return read_memory_with(policy_for(tag), in, ea, bytes, tracked);
+}
+
+const M68kMemoryPolicy &M68kFiniteAdapter::policy_for(std::uint32_t tag) const {
+  if (!config_.domains.frames) return config_.memory.policy;
+  const auto found = tag_policies_.find(tag);
+  return found == tag_policies_.end() ? config_.memory.policy : found->second;
+}
+
+M68kMemoryRead M68kFiniteAdapter::read_memory_with(const M68kMemoryPolicy &policy, const State &in, const M68kEffectiveAddress &ea,
+                                                   std::uint32_t bytes, bool *tracked) const {
   if (tracked != nullptr) *tracked = false;
   M68kMemoryRead failed;
   const auto fail = [&](UnknownReason reason, Sub sub) {
@@ -870,7 +955,7 @@ M68kMemoryRead M68kFiniteAdapter::read_memory_operand(const State &in, const M68
       pointer = M68kPointsTo::of(std::move(even), pointer.width_derived);
     }
     if (pointer.is_known()) {
-      auto read = m68k_memory_read(in.memory, pointer, bytes, config_.memory.policy);
+      auto read = m68k_memory_read(in.memory, pointer, bytes, policy);
       if (!read.known) return read;
       if (!add(read.value)) return fail(UnknownReason::set_bound, Sub::set_bound);
     }
@@ -882,7 +967,8 @@ M68kMemoryRead M68kFiniteAdapter::read_memory_operand(const State &in, const M68
   return out;
 }
 
-std::optional<M68kCellValue> M68kFiniteAdapter::operand_value(const State &in, const M68kEffectiveAddress &ea, std::uint32_t bytes) const {
+std::optional<M68kCellValue> M68kFiniteAdapter::operand_value(const State &in, const M68kEffectiveAddress &ea, std::uint32_t bytes,
+                                                              const M68kMemoryPolicy &policy) const {
   const auto mask = byte_mask(bytes);
   switch (ea.mode) {
   case M68kEaMode::immediate: return data_value({ea.immediate_value & mask}, false);
@@ -911,13 +997,19 @@ std::optional<M68kCellValue> M68kFiniteAdapter::operand_value(const State &in, c
   default: break;
   }
   if (!m68k_memory_mode(ea.mode)) return std::nullopt;
-  auto read = read_memory_operand(in, ea, bytes);
+  auto read = read_memory_with(policy, in, ea, bytes, nullptr);
   if (!read.known) return std::nullopt;
   return std::move(read.value);
 }
 
 std::vector<std::pair<M68kPointsTo, std::uint32_t>> M68kFiniteAdapter::memory_write_targets(const M68kIrOperation &operation,
                                                                                             const State &in) const {
+  return memory_write_targets(operation, in, in.status);
+}
+
+std::vector<std::pair<M68kPointsTo, std::uint32_t>> M68kFiniteAdapter::memory_write_targets(const M68kIrOperation &operation,
+                                                                                            const State &in,
+                                                                                            const FiniteValue &status) const {
   std::vector<std::pair<M68kPointsTo, std::uint32_t>> out;
   const auto writes = m68k_memory_writes(operation);
   if (!writes.described) {
@@ -927,6 +1019,18 @@ std::vector<std::pair<M68kPointsTo, std::uint32_t>> M68kFiniteAdapter::memory_wr
   for (const auto &write : writes.writes) {
     switch (write.target) {
     case M68kMemoryWrite::Target::unknown:
+      // SEG-030-T006: the exception frame of the writer description (DIVx/CHK/TRAPV/TRAP/instruction exceptions and the interrupt
+      // STOP waits for) is pushed below A7 when S = 1 is proven (for STOP: before and after its SR load), else Unknown.
+      if (config_.domains.frames) {
+        const auto frame_status =
+            operation.kind == M68kIrKind::stop_until_interrupt && m68k_status_supervisor_proven(status)
+                ? m68k_status_after(operation, status, std::nullopt)
+                : status;
+        auto target = frame_address(frame_status, in);
+        if (target.is_unknown()) target = M68kPointsTo::unknown(UnknownReason::unsupported_transfer, Sub::store_poison);
+        out.emplace_back(std::move(target), write.span);
+        break;
+      }
       out.emplace_back(M68kPointsTo::unknown(UnknownReason::unsupported_transfer, Sub::store_poison), write.span);
       break;
     case M68kMemoryWrite::Target::push:
@@ -952,9 +1056,10 @@ std::vector<std::pair<M68kPointsTo, std::uint32_t>> M68kFiniteAdapter::memory_wr
   return out;
 }
 
-void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::uint32_t next, const State &in, State &out) const {
+void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::uint32_t next, const State &in, State &out,
+                                        const M68kMemoryPolicy &policy, const FiniteValue &status) const {
   const auto writes = m68k_memory_writes(operation);
-  const auto targets = memory_write_targets(operation, in);
+  const auto targets = memory_write_targets(operation, in, status);
   if (!writes.described) {
     out.memory.poison_all();
     return;
@@ -971,10 +1076,10 @@ void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::u
       if (addresses.ok) value = data_value(std::vector<std::uint64_t>(addresses.values.begin(), addresses.values.end()), addresses.width_derived);
       break;
     }
-    case M68kMemoryWrite::Value::source: value = operand_value(in, operation.source_ea, write.span); break;
+    case M68kMemoryWrite::Value::source: value = operand_value(in, operation.source_ea, write.span, policy); break;
     }
     if (value && !value->is_pointer() && !value->data.is_precise()) value.reset();
-    m68k_memory_store(out.memory, targets[i].first, targets[i].second, value, config_.memory.policy);
+    m68k_memory_store(out.memory, targets[i].first, targets[i].second, value, policy);
   }
 }
 
@@ -1028,10 +1133,14 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
   if (!in.values.reachable) return result;
   const auto pc = static_cast<std::uint32_t>(point) & bus_mask;
   const auto context = m68k_point_context(point);  // always 0 unless the contexts domain is enabled
+  const auto tag = m68k_context_tag(context);       // always 0 unless the frames domain is enabled
   const auto decoded = decode(pc);
   if (!decoded) return result;  // odd, unmapped or rejected: reached, no successor
   const auto &operation = decoded->operation;
   const auto next = (pc + decoded->length) & bus_mask;
+  const auto &policy = policy_for(tag);
+  // SEG-030-T006: the status this boundary runs with (Unknown after a clobbering child instance may have been taken).
+  const auto status = effective_status(tag, in);
 
   // Register values after the instruction, each slot through the CPU semantic owner.
   State out = in;
@@ -1050,7 +1159,7 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
       m68k_memory_mode(operation.source_ea.mode)) {
     bool tracked = false;
     const auto bytes = access_bytes(operation.size);
-    auto read = read_memory_operand(in, operation.source_ea, bytes, &tracked);
+    auto read = read_memory_with(policy, in, operation.source_ea, bytes, &tracked);
     std::optional<M68kCellValue> value;
     if (read.known && tracked) {
       if (read.value.is_pointer()) {
@@ -1087,8 +1196,8 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
             reason);
     }
   }
-  if (config_.domains.address) transfer_address_registers(operation, in, out);
-  if (config_.domains.memory) transfer_memory(operation, next, in, out);
+  if (config_.domains.address) transfer_address_registers(operation, in, out, &policy);
+  if (config_.domains.memory) transfer_memory(operation, next, in, out, policy, status);
   if (config_.domains.contexts) {
     out.stack_delta = stack_delta_after(operation, in);
     // The call frame (M68000PRM JSR/BSR/PEA: A7 - 4, then the push). The address domain alone leaves A7 Unknown there (T003, kept
@@ -1096,6 +1205,27 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
     if (operation.kind == M68kIrKind::call_general || operation.kind == M68kIrKind::bsr_call ||
         operation.kind == M68kIrKind::push_effective_address)
       out.address[7] = m68k_points_to_add(in.address[7], {-4});
+  }
+  if (config_.domains.frames) {
+    // SEG-030-T006: the status after an SR writer (M68000PRM MOVE/ANDI/ORI/EORI to SR, STOP). The stack pointer the address and
+    // contexts transfers dropped is kept when S = 1 is proven both before and after (no USP/SSP switch).
+    out.status = status;
+    if (m68k_status_register_writer(operation.kind)) {
+      std::optional<std::vector<std::uint32_t>> source;
+      if (operation.kind == M68kIrKind::write_status_register) {
+        if (const auto value = operand_value(in, operation.source_ea, 2U, policy); value && value->data.is_precise()) {
+          source.emplace();
+          for (const auto v : value->data.values()) source->push_back(static_cast<std::uint32_t>(v & 0xFFFFU));
+        }
+      }
+      out.status = m68k_status_after(operation, status, source);
+      if (m68k_status_supervisor_proven(status) && m68k_status_supervisor_proven(out.status)) {
+        const bool a7_update = is_auto_update(operation.source_ea) && operation.source_ea.reg == 7U;  // MOVE (A7)+,SR: not tracked
+        out.address[7] = a7_update ? M68kPointsTo::unknown(UnknownReason::unsupported_transfer) : in.address[7];
+        out.stack_delta = a7_update ? FiniteValue::unknown(UnknownReason::unsupported_transfer) : in.stack_delta;
+      }
+    }
+    if (clobbered_after(tag, operation, status)) out.status = FiniteValue::unknown(UnknownReason::unsupported_transfer);
   }
 
   const auto control = m68k_control_successors(operation);
@@ -1108,7 +1238,8 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
     if (!enters_callee) return m68k_analysis_point(context, target);
     callees.push_back(target);
     edge.stack_delta = FiniteValue::of({0U});
-    return m68k_analysis_point(config_.contexts.merged.contains(target) ? 0U : m68k_call_context(pc), target);
+    // SEG-030-T006: a callee stays in the caller's partition.
+    return m68k_analysis_point(m68k_tagged_context(tag, config_.contexts.merged.contains(target) ? 0U : m68k_call_context(pc)), target);
   };
   // Flags at this branch are exact only when its sole predecessor is the physically preceding flag setter.
   std::optional<M68kAnalysisImage::Instruction> setter;
@@ -1163,10 +1294,34 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
     }
   };
   switch (control.dynamic) {
-  case M68kDynamicControlFamily::none:
   case M68kDynamicControlFamily::return_from_subroutine:
   case M68kDynamicControlFamily::return_from_exception:
-  case M68kDynamicControlFamily::return_restore_condition_codes: break;  // modelled through continuations
+  case M68kDynamicControlFamily::return_restore_condition_codes:
+    // SEG-030-T006: an RTE/RTR, or an RTS away from the entry stack delta, whose frame or return cells were written precisely by
+    // analysed code is a computed jump in the same activation (frames domain). Every other return is modelled through continuations.
+    if (config_.domains.frames) {
+      const auto report = evaluate_return_site(point, operation, in);
+      if (report && report->resolved) {
+        const auto popped = operation.kind == M68kIrKind::return_from_subroutine ? 4 : static_cast<std::int64_t>(m68k_exception_frame_bytes);
+        for (const auto target : report->targets) {
+          State edge = out;
+          edge.flag_setter.reset();
+          edge.address[7] = m68k_points_to_add(in.address[7], {popped});
+          edge.stack_delta = in.stack_delta.map([&](std::uint64_t v) { return (v + static_cast<std::uint64_t>(popped)) & UINT64_C(0xFFFFFFFF); });
+          if (operation.kind == M68kIrKind::return_from_exception) {
+            // The SR restored from the proven frame: a user-mode SR switches A7 to the untracked USP.
+            edge.status = report->restored_status;
+            if (!m68k_status_supervisor_proven(edge.status)) {
+              edge.address[7] = M68kPointsTo::unknown(UnknownReason::unsupported_transfer, Sub::frame_unproven);
+              edge.stack_delta = FiniteValue::unknown(UnknownReason::unsupported_transfer);
+            }
+          }
+          computed.push_back({m68k_analysis_point(context, target), EdgeKind::computed, std::move(edge)});
+        }
+      }
+    }
+    break;
+  case M68kDynamicControlFamily::none: break;
   case M68kDynamicControlFamily::jump_pc_index:
   case M68kDynamicControlFamily::call_pc_index:
     if (is_pc_index_site(operation)) {
@@ -1205,7 +1360,8 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
   switch (control.stacked) {
   case M68kStackedContinuationKind::call_continuation:
     if (config_.domains.contexts) {
-      if (config_.call_continuations) result.edges.push_back({stacked_point, EdgeKind::return_edge, continuation(pc, callees, in)});
+      if (config_.call_continuations)
+        result.edges.push_back({stacked_point, EdgeKind::return_edge, continuation(pc, callees, in, tag)});
       break;
     }
     if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true)});
@@ -1222,15 +1378,120 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
   return result;
 }
 
+// SEG-030-T006: RTE (M68000PRM: SR <- (SP), PC <- (SP + 2), SP + 6; privileged), RTR (CCR <- (SP), PC <- (SP + 2), SP + 6) and an
+// RTS away from the activation's entry stack delta (PC <- (SP), SP + 4) read their frame or return address from abstract-memory cells
+// only: a cell exists only when analysed code wrote it precisely (never a hardware exception frame, never an asynchronous cell), so
+// a resolved site is a code-built frame. Every other one is Unknown with its reason.
+std::optional<M68kReturnSiteReport> M68kFiniteAdapter::evaluate_return_site(std::uint64_t point, const M68kIrOperation &operation,
+                                                                            const State &in) const {
+  if (!config_.domains.frames) return std::nullopt;
+  const auto family = m68k_control_successors(operation).dynamic;
+  const bool rts = family == M68kDynamicControlFamily::return_from_subroutine;
+  const bool rte = family == M68kDynamicControlFamily::return_from_exception;
+  if (!rts && !rte && family != M68kDynamicControlFamily::return_restore_condition_codes) return std::nullopt;
+  const auto pc = m68k_point_pc(point);
+  const auto tag = m68k_point_tag(point);
+  M68kReturnSiteReport out;
+  out.family = family;
+  const auto finish = [&](UnknownReason reason, Sub sub) {
+    out.resolved = false;
+    out.reason = reason;
+    // An RTE of a handler partition returns through the hardware frame of an asynchronous or exception entry: never a normal
+    // resumption the analysis can name.
+    out.sub = rte && tag != 0U ? Sub::interrupt_resumption : sub;
+    out.targets.clear();
+    out.restored_status = FiniteValue::bottom();
+    return out;
+  };
+  if (rts) {
+    // An RTS at the entry delta is an ordinary return (call continuations); only one away from it is a computed jump.
+    if (in.stack_delta == FiniteValue::of({0U})) return std::nullopt;
+    if (!in.stack_delta.is_precise() ||
+        std::find(in.stack_delta.values().begin(), in.stack_delta.values().end(), 0U) != in.stack_delta.values().end())
+      return finish(UnknownReason::unsupported_transfer, Sub::stack_unbalanced);
+  }
+  if (config_.pinned_sites.contains(pc)) return finish(UnknownReason::unsupported_transfer, Sub::invalidated);
+  const auto status = effective_status(tag, in);
+  if (rte && !m68k_status_supervisor_proven(status)) return finish(UnknownReason::unsupported_transfer, Sub::frame_unproven);
+  const auto &policy = policy_for(tag);
+  const auto read_cells = [&](std::int16_t displacement, std::uint32_t bytes) {
+    M68kEffectiveAddress ea{};
+    ea.mode = displacement == 0 ? M68kEaMode::address_indirect : M68kEaMode::address_disp16;
+    ea.reg = 7U;
+    ea.displacement = displacement;
+    return read_memory_with(policy, in, ea, bytes, nullptr);
+  };
+  const auto unproven = [&](const M68kMemoryRead &read) {
+    return finish(read.reason, read.sub == Sub::initial_memory || read.sub == Sub::none ? Sub::frame_unproven : read.sub);
+  };
+  const auto precise = [](const M68kMemoryRead &read, std::uint32_t bytes) -> std::optional<std::vector<std::uint32_t>> {
+    if (!read.known) return std::nullopt;
+    std::vector<std::uint32_t> values;
+    if (read.value.is_pointer()) {
+      const auto exact = read.value.pointer.values();
+      if (!exact || read.value.pointer.width_derived) return std::nullopt;
+      values = *exact;
+    } else {
+      if (!read.value.data.is_precise() || read.value.width_derived) return std::nullopt;
+      for (const auto v : read.value.data.values()) values.push_back(static_cast<std::uint32_t>(v));
+    }
+    if (bytes == 2U)
+      for (auto &v : values) v &= 0xFFFFU;
+    return values;
+  };
+  const auto target_read = read_cells(rts ? 0 : 2, 4U);
+  const auto targets = precise(target_read, 4U);
+  if (!target_read.known) return unproven(target_read);
+  if (!targets) return finish(UnknownReason::unsupported_transfer, Sub::frame_unproven);
+  if (rte) {
+    const auto sr_read = read_cells(0, 2U);
+    const auto sr = precise(sr_read, 2U);
+    if (!sr_read.known) return unproven(sr_read);
+    if (!sr) return finish(UnknownReason::unsupported_transfer, Sub::frame_unproven);
+    std::vector<std::uint64_t> restored;
+    for (const auto v : *sr) restored.push_back(m68k_status_of_sr(v));
+    out.restored_status = FiniteValue::of(std::move(restored));
+  }
+  std::set<std::uint32_t> exact;
+  for (const auto value : *targets) {
+    const auto target = value & bus_mask;
+    if ((target & 1U) != 0U) {
+      ++out.odd_targets_excluded;  // an odd PC raises an address error: never a normal target
+      continue;
+    }
+    if (!image_.mapped(target)) return finish(UnknownReason::non_immutable_read, Sub::target_outside_image);
+    exact.insert(target);
+  }
+  if (exact.empty()) return finish(UnknownReason::unsupported_transfer, Sub::none);
+  out.targets.assign(exact.begin(), exact.end());
+  out.resolved = true;
+  return out;
+}
+
 // SEG-030-T005: the continuation state of the call at `pc` whose callees in this transfer are `callees`.
-M68kAnalysisState M68kFiniteAdapter::continuation(std::uint32_t pc, const std::vector<std::uint32_t> &callees, const State &in) const {
+M68kAnalysisState M68kFiniteAdapter::continuation(std::uint32_t pc, const std::vector<std::uint32_t> &callees, const State &in,
+                                                  std::uint32_t tag) const {
   State state;
   const auto &contexts = config_.contexts;
-  const auto context = m68k_call_context(pc);
+  const auto context = m68k_tagged_context(tag, m68k_call_context(pc));
   if (callees.empty()) {
     state = opaque_continuation(Sub::none);  // an unresolved callee: unknown effect
   } else if (std::any_of(callees.begin(), callees.end(), [&](std::uint32_t callee) { return contexts.merged.contains(callee); })) {
     state = opaque_continuation(Sub::context_bound);
+    // SEG-030-T006 (frames domain only): every callee a balanced merged callee: the caller's A7 and the callees' exit statuses.
+    if (config_.domains.frames) {
+      FiniteValue exits;
+      const bool proven = std::all_of(callees.begin(), callees.end(), [&](std::uint32_t callee) {
+        const auto found = contexts.merged_exits.find(m68k_tagged_context(tag, callee));
+        if (!contexts.merged.contains(callee) || found == contexts.merged_exits.end()) return false;
+        exits = join(exits, found->second);
+        return true;
+      });
+      if (proven) {
+        state.address[7] = in.address[7];
+        state.status = exits;
+      }
+    }
   } else if (const auto summary = contexts.summaries.find(context); summary != contexts.summaries.end()) {
     state = summary->second;
   } else {
@@ -1250,6 +1511,37 @@ namespace {
 
 bool site_resolved(const M68kPcIndexSiteReport &site) { return site.outcome == M68kPcIndexOutcome::resolved; }
 bool site_resolved(const M68kAddressSiteReport &site) { return site.resolved; }
+bool site_resolved(const M68kReturnSiteReport &site) { return site.resolved; }
+
+// SEG-030-T006: the distinct handler PCs of the delivered vectors, in order.
+std::vector<std::uint32_t> handler_pcs(const M68kFrameConfig &frames) {
+  std::set<std::uint32_t> out;
+  for (const auto &vector : frames.vectors) out.insert(vector.handler & bus_mask);
+  return {out.begin(), out.end()};
+}
+
+// SEG-030-T006: the seeds of every partition: the main entries in tag 0, every live instance at its handler, and every handler PC
+// without a live instance in the dead-handler partition (kept so that the discovery roots are unchanged).
+std::vector<std::pair<std::uint64_t, M68kAnalysisState>> frame_seeds(const M68kFiniteAdapter &adapter, const M68kAnalysisConfig &config,
+                                                                    const std::vector<std::uint32_t> &entries) {
+  std::vector<std::pair<std::uint64_t, M68kAnalysisState>> seeds;
+  const auto handlers = handler_pcs(config.frames);
+  std::set<std::uint32_t> live;
+  for (const auto &[tag, instance] : config.frames.instances) {
+    seeds.emplace_back(m68k_analysis_point(m68k_tagged_context(tag, 0U), instance.handler), adapter.root_state(tag, instance.handler));
+    live.insert(instance.handler);
+  }
+  for (const auto entry : entries) {
+    const auto pc = entry & bus_mask;
+    const bool handler = std::binary_search(handlers.begin(), handlers.end(), pc);
+    if (!handler || config.frames.main_entries.contains(pc)) seeds.emplace_back(pc, adapter.root_state(0U, pc));
+    if (handler && !live.contains(pc))
+      seeds.emplace_back(m68k_analysis_point(m68k_tagged_context(m68k_dead_handler_tag, 0U), pc),
+                         adapter.root_state(m68k_dead_handler_tag, pc));
+  }
+  std::sort(seeds.begin(), seeds.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
+  return seeds;
+}
 
 // SEG-030-T005: one PC reached in several contexts.
 template <typename Report>
@@ -1274,7 +1566,9 @@ M68kFiniteAnalysisResult solve_pinned(const M68kAnalysisImage &image, const std:
   for (std::uint32_t restarts = 0;; ++restarts) {
     M68kFiniteAdapter adapter{image, config};
     std::vector<std::pair<std::uint64_t, M68kAnalysisState>> seeds;
-    for (const auto entry : entries) seeds.emplace_back(entry & bus_mask, adapter.entry_state(false));
+    if (config.domains.frames) seeds = frame_seeds(adapter, config, entries);
+    else
+      for (const auto entry : entries) seeds.emplace_back(entry & bus_mask, adapter.entry_state(false));
     M68kFiniteAnalysisResult out{};
     out.restarts = restarts;
     out.address_domain = config.domains.address;
@@ -1295,6 +1589,13 @@ M68kFiniteAnalysisResult solve_pinned(const M68kAnalysisImage &image, const std:
         continue;
       }
       out.reached.emplace(pc, decoded->length);
+      if (config.domains.frames) {
+        if (auto report = adapter.evaluate_return_site(point, decoded->operation, state)) {
+          if (!config.pinned_sites.contains(pc) && out.solution.pinned.contains(point)) invalidated.insert(pc);
+          merge_site(out.return_sites, pc, std::move(*report));
+          continue;
+        }
+      }
       if (config.domains.address) {
         const auto family = m68k_control_successors(decoded->operation).dynamic;
         if (is_address_site_family(family)) {
@@ -1333,7 +1634,10 @@ bool may_release(const M68kPointsTo &targets, std::uint32_t span, const std::vec
 // The policy the solution itself requires (ADR 0079 decisions 7 and 9) plus the memory statistics of the run.
 M68kMemoryPolicy derive_memory_policy(const M68kAnalysisImage &image, const M68kAnalysisConfig &config, M68kFiniteAnalysisResult &result) {
   M68kMemoryPolicy derived;
-  derived.async_all = config.memory.interrupts;
+  // SEG-030-T006: with the frames domain the asynchronous writers are per partition (derive_frames); the global policy carries only
+  // the external writer.
+  const bool frames = config.domains.frames;
+  derived.async_all = config.memory.interrupts && !frames;
   auto &report = result.memory;
   report = M68kMemoryReport{};
   report.enabled = true;
@@ -1344,7 +1648,7 @@ M68kMemoryPolicy derive_memory_policy(const M68kAnalysisImage &image, const M68k
   std::set<std::uint64_t> handler;
   std::vector<std::uint64_t> pending;
   for (const auto root : config.memory.handler_roots)
-    if (states.contains(root & bus_mask) && handler.insert(root & bus_mask).second) pending.push_back(root & bus_mask);
+    if (!frames && states.contains(root & bus_mask) && handler.insert(root & bus_mask).second) pending.push_back(root & bus_mask);
   while (!pending.empty()) {
     const auto point = pending.back();
     pending.pop_back();
@@ -1362,8 +1666,9 @@ M68kMemoryPolicy derive_memory_policy(const M68kAnalysisImage &image, const M68k
     const auto &operation = decoded->operation;
     if (!m68k_memory_writes(operation).described) ++report.undescribed_writers;
     const bool in_handler = handler.contains(point);
+    const auto tag = m68k_point_tag(point);
     bool stores = false;
-    for (const auto &[targets, span] : adapter.memory_write_targets(operation, state)) {
+    for (const auto &[targets, span] : adapter.memory_write_targets(operation, state, adapter.effective_status(tag, state))) {
       if (targets.is_bottom()) continue;
       stores = true;
       if (!targets.is_known()) ++report.unknown_target_stores;
@@ -1383,7 +1688,7 @@ M68kMemoryPolicy derive_memory_policy(const M68kAnalysisImage &image, const M68k
         operation.kind != M68kIrKind::push_effective_address && operation.kind != M68kIrKind::jump_general &&
         operation.kind != M68kIrKind::call_general) {
       bool tracked = false;
-      const auto read = adapter.read_memory_operand(state, operation.source_ea, access_bytes(operation.size), &tracked);
+      const auto read = adapter.read_memory_operand(tag, state, operation.source_ea, access_bytes(operation.size), &tracked);
       if (tracked) {
         const auto [found, inserted] = reads.emplace(m68k_point_pc(point), std::nullopt);
         if (!read.known && !found->second) found->second = std::make_pair(read.reason, read.sub);
@@ -1428,7 +1733,10 @@ struct Activation {
 
 std::uint64_t activation_of(std::uint64_t callee_point) {
   const auto context = m68k_point_context(callee_point);
-  return context == 0U ? merged_key | m68k_point_pc(callee_point) : context;
+  // SEG-030-T006: a merged callee is one activation per partition (the tag is the context's top byte; 0 without frames).
+  return m68k_context_site(context) == 0U ? merged_key | (static_cast<std::uint64_t>(m68k_context_tag(context)) << 24U) |
+                                                m68k_point_pc(callee_point)
+                                          : context;
 }
 
 // The facts of every reached point, from one transfer of its final input state.
@@ -1449,14 +1757,18 @@ std::map<std::uint64_t, PointFacts> point_facts(M68kFiniteAdapter &adapter, cons
     if (control.always_raises_exception || result.solution.unresolved_computed.contains(point) ||
         (control.stacked == M68kStackedContinuationKind::exception_continuation && !config.exception_continuations))
       facts.unknown_effect = true;
-    if (control.dynamic == M68kDynamicControlFamily::return_from_subroutine) {
+    const auto edges = adapter.transfer(point, state).edges;
+    // SEG-030-T006: a return resolved from a code-built frame is a computed jump inside the activation (frames domain only).
+    const bool resolved_return = std::any_of(edges.begin(), edges.end(), [](const auto &edge) { return edge.kind == EdgeKind::computed; });
+    if (control.dynamic == M68kDynamicControlFamily::return_from_subroutine && !resolved_return) {
       if (state.stack_delta == zero) facts.exit = true;
       else facts.unbalanced = true;
     }
-    if (control.dynamic == M68kDynamicControlFamily::return_from_exception ||
-        control.dynamic == M68kDynamicControlFamily::return_restore_condition_codes)
+    if ((control.dynamic == M68kDynamicControlFamily::return_from_exception ||
+         control.dynamic == M68kDynamicControlFamily::return_restore_condition_codes) &&
+        !resolved_return)
       facts.unbalanced = true;
-    for (const auto &edge : adapter.transfer(point, state).edges) {
+    for (const auto &edge : edges) {
       if (facts.call && (edge.kind == EdgeKind::call || edge.kind == EdgeKind::computed)) facts.callees.push_back(edge.target);
       else facts.intra.push_back(edge.target);
     }
@@ -1487,6 +1799,7 @@ M68kAnalysisState precision_view(const M68kAnalysisState &state) {
   for (auto &pointer : out.address)
     if (pointer.is_unknown()) pointer = M68kPointsTo::unknown(UnknownReason::unknown_input);
   out.memory.absent = Sub::store_poison;
+  if (out.status.is_unknown()) out.status = FiniteValue::unknown(UnknownReason::unknown_input);
   return out;
 }
 
@@ -1505,15 +1818,16 @@ ContextDerivation derive_contexts(const M68kAnalysisImage &image, const M68kAnal
   std::map<std::uint64_t, Activation> activations;
   std::map<std::uint32_t, std::set<std::uint32_t>> contexts_of;  // callee entry -> call-site contexts
   for (const auto &[point, fact] : facts) {
-    if (m68k_point_context(point) != 0U) activations[m68k_point_context(point)].points.push_back(point);
+    if (m68k_context_site(m68k_point_context(point)) != 0U) activations[m68k_point_context(point)].points.push_back(point);
     for (const auto callee : fact.callees) {
-      if (m68k_point_context(callee) != 0U) contexts_of[m68k_point_pc(callee)].insert(m68k_point_context(callee));
+      if (m68k_context_site(m68k_point_context(callee)) != 0U) contexts_of[m68k_point_pc(callee)].insert(m68k_point_context(callee));
       else activations[activation_of(callee)];
     }
   }
   for (auto &[key, activation] : activations) {
     if ((key & merged_key) == 0U) continue;
-    std::set<std::uint64_t> seen{m68k_analysis_point(0U, static_cast<std::uint32_t>(key))};
+    const auto low = static_cast<std::uint32_t>(key);
+    std::set<std::uint64_t> seen{m68k_analysis_point(m68k_tagged_context(m68k_context_tag(low), 0U), m68k_context_site(low))};
     std::vector<std::uint64_t> pending(seen.begin(), seen.end());
     while (!pending.empty()) {
       const auto point = pending.back();
@@ -1619,7 +1933,30 @@ ContextDerivation derive_contexts(const M68kAnalysisImage &image, const M68kAnal
     ++report.activations;
     if (activation.balanced) ++report.balanced_activations;
     if (activation.recursive) ++report.recursive_activations;
-    if ((key & merged_key) != 0U) continue;
+    if ((key & merged_key) != 0U) {
+      // SEG-030-T006 (frames domain only): a balanced merged callee returns at its caller's A7, with a status among its exits'. The
+      // claim is validated like a summary (a used claim must still hold, and its status must cover the derived one).
+      if (config.domains.frames) {
+        const auto low = static_cast<std::uint32_t>(key);
+        const auto previous = used.merged_exits.find(low);
+        if (activation.balanced) {
+          FiniteValue exits;
+          for (const auto point : activation.points) {
+            const auto found = facts.find(point);
+            if (found != facts.end() && found->second.exit) exits = join(exits, states.at(point).status);
+          }
+          if (previous != used.merged_exits.end() && !leq(exits, previous->second)) {
+            valid = false;
+            out.next.merged_exits[low] = join(previous->second, exits);
+          } else {
+            out.next.merged_exits[low] = exits;
+          }
+        } else if (previous != used.merged_exits.end()) {
+          valid = false;  // a used claim no longer holds
+        }
+      }
+      continue;
+    }
     const auto context = static_cast<std::uint32_t>(key);
     ++report.contexts;
     std::optional<M68kAnalysisState> summary;
@@ -1658,9 +1995,10 @@ ContextDerivation derive_contexts(const M68kAnalysisImage &image, const M68kAnal
   // The continuations this round applied.
   for (const auto &[point, fact] : facts) {
     if (!fact.call) continue;
-    const auto context = m68k_call_context(m68k_point_pc(point));
+    const auto context = m68k_tagged_context(m68k_point_tag(point), m68k_call_context(m68k_point_pc(point)));
     if (fact.callees.empty()) ++report.opaque_continuations[Sub::none];
-    else if (std::any_of(fact.callees.begin(), fact.callees.end(), [](std::uint64_t c) { return m68k_point_context(c) == 0U; }))
+    else if (std::any_of(fact.callees.begin(), fact.callees.end(),
+                         [](std::uint64_t c) { return m68k_context_site(m68k_point_context(c)) == 0U; }))
       ++report.opaque_continuations[Sub::context_bound];
     else if (used.summaries.contains(context)) ++report.summary_continuations;
     else {
@@ -1685,11 +2023,564 @@ std::set<std::uint32_t> seed_merged(const M68kAnalysisImage &image, const M68kAn
   return out;
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// SEG-030-T006: handler instances, per-partition asynchronous writers and frame integrity (ADR 0079 decisions 7 and 9).
+
+// Relative byte intervals [lo, hi) (offsets from a handler instance's entry A7, the address of its saved SR), sorted and merged; more
+// than the exact bound collapses to the hull. `unknown`: some write's position relative to the entry is not known.
+struct RelativeWrites {
+  bool unknown{};
+  std::vector<std::pair<std::int64_t, std::int64_t>> intervals;
+
+  void add(std::int64_t lo, std::int64_t hi) {
+    if (unknown || lo >= hi) return;
+    intervals.emplace_back(lo, hi);
+    std::sort(intervals.begin(), intervals.end());
+    std::vector<std::pair<std::int64_t, std::int64_t>> merged;
+    for (const auto &next : intervals) {
+      if (!merged.empty() && next.first <= merged.back().second) merged.back().second = std::max(merged.back().second, next.second);
+      else merged.push_back(next);
+    }
+    if (merged.size() > m68k_exact_offset_bound) merged = {{merged.front().first, merged.back().second}};
+    intervals = std::move(merged);
+  }
+  void add_shifted(const RelativeWrites &other, std::int64_t shift) {
+    if (other.unknown) unknown = true;
+    if (unknown) {
+      intervals.clear();
+      return;
+    }
+    for (const auto &[lo, hi] : other.intervals) add(lo + shift, hi + shift);
+  }
+  [[nodiscard]] bool overlaps(std::int64_t lo, std::int64_t hi) const {
+    if (unknown) return true;
+    return std::any_of(intervals.begin(), intervals.end(), [&](const auto &interval) { return interval.first < hi && lo < interval.second; });
+  }
+};
+
+std::int64_t signed32(std::uint64_t value) { return static_cast<std::int64_t>(static_cast<std::int32_t>(static_cast<std::uint32_t>(value))); }
+
+// { a + b } modulo 2^32 over two precise sets, bounded by the exact offset bound (else Unknown).
+FiniteValue add_sets(const FiniteValue &left, const FiniteValue &right) {
+  if (left.is_bottom() || right.is_bottom()) return FiniteValue::bottom();
+  if (!left.is_precise() || !right.is_precise()) return FiniteValue::unknown(UnknownReason::unsupported_transfer);
+  if (left.values().size() * right.values().size() > m68k_address_enumeration_bound) return FiniteValue::unknown(UnknownReason::set_bound);
+  std::vector<std::uint64_t> out;
+  for (const auto a : left.values())
+    for (const auto b : right.values()) out.push_back((a + b) & UINT64_C(0xFFFFFFFF));
+  return FiniteValue::of(std::move(out), m68k_exact_offset_bound);
+}
+
+// The offsets, relative to A7 before the instruction, of the `index`th memory write of `operation` when it is A7-relative (a push,
+// an exception frame, or (A7), (A7)+, -(A7), d16(A7) destinations), else nullopt.
+std::optional<std::int64_t> a7_relative_offset(const M68kIrOperation &operation, const M68kMemoryWrite &write) {
+  switch (write.target) {
+  case M68kMemoryWrite::Target::push: return -static_cast<std::int64_t>(write.span);
+  case M68kMemoryWrite::Target::unknown: return -static_cast<std::int64_t>(m68k_exception_frame_bytes);
+  case M68kMemoryWrite::Target::destination: break;
+  }
+  const auto &destination = operation.destination_ea;
+  if (destination.reg != 7U) return std::nullopt;
+  std::int64_t base = 0;
+  const auto &source = operation.source_ea;
+  if (operation.kind != M68kIrKind::movem_transfer && is_auto_update(source) && source.reg == 7U) {
+    const auto step = static_cast<std::int64_t>(auto_update_step(7U, operation.size));
+    base = source.mode == M68kEaMode::address_postinc ? step : -step;
+  }
+  switch (destination.mode) {
+  case M68kEaMode::address_indirect:
+  case M68kEaMode::address_postinc: return base;
+  case M68kEaMode::address_predec:
+    return base - static_cast<std::int64_t>(operation.kind == M68kIrKind::movem_transfer ? write.span
+                                                                                         : auto_update_step(7U, operation.size));
+  case M68kEaMode::address_disp16: return base + destination.displacement;
+  default: return std::nullopt;
+  }
+}
+
+// Why a handler taken from a partition is not analysed as an instance of its own; its consequences then fall on the parent.
+enum class Unanalysed : std::uint8_t {
+  none,
+  non_resuming_parent,  // taken inside a non-resuming instance: it can only resume into that instance, never into an analysed flow
+  nested,               // the handler is already on the parent's chain: unbounded nesting
+  depth_bound,          // the parent's chain is at the instance depth bound
+  entry_unknown,        // the frame address (its entry A7) is Unknown
+};
+const char *unanalysed_name(Unanalysed why) {
+  switch (why) {
+  case Unanalysed::none: return "none";
+  case Unanalysed::non_resuming_parent: return "non_resuming_parent";
+  case Unanalysed::nested: return "nested";
+  case Unanalysed::depth_bound: return "depth_bound";
+  case Unanalysed::entry_unknown: return "entry_unknown";
+  }
+  return "invalid";
+}
+
+Unanalysed instance_admission(const M68kFrameConfig &frames, std::uint32_t handler, std::uint32_t parent_tag) {
+  if (parent_tag == 0U) return Unanalysed::none;
+  const auto parent = frames.instances.find(parent_tag);
+  if (parent == frames.instances.end() || !parent->second.resuming) return Unanalysed::non_resuming_parent;
+  std::uint32_t depth = 0U;
+  for (auto tag = parent_tag; tag != 0U;) {
+    const auto found = frames.instances.find(tag);
+    if (found == frames.instances.end()) return Unanalysed::depth_bound;
+    if (found->second.handler == handler) return Unanalysed::nested;
+    if (++depth >= m68k_instance_depth_bound) return Unanalysed::depth_bound;
+    tag = found->second.parent;
+  }
+  return Unanalysed::none;
+}
+
+// The clobber levels of a set of vectors (ADR 0079 decision 7): 1-7 for an autovector, 8 for an interrupt of unknown level, 0 for a
+// resuming synchronous vector. A non-resuming synchronous vector never resumes into its parent.
+std::set<std::uint32_t> clobber_levels(const std::set<std::uint32_t> &vectors) {
+  std::set<std::uint32_t> out;
+  for (const auto vector : vectors) {
+    const auto cls = m68k_vector_class(vector);
+    if (cls == M68kVectorClass::synchronous) continue;
+    const auto level = m68k_interrupt_level(vector);
+    out.insert(cls == M68kVectorClass::interrupt ? (level ? *level : 8U) : 0U);
+  }
+  return out;
+}
+
+struct FrameDerivation {
+  M68kFrameConfig next;  // the used configuration joined with what this solution derives
+  bool valid{};          // everything this solution derives is below the used configuration (a post-fixed point)
+  bool failed{};         // the instance tag bound was exceeded (the frames domain fails closed)
+  std::set<std::uint32_t> writer_tags;  // analysed partitions that are asynchronous writers of their parent
+};
+
+// One handler (taken from one parent partition) contribution of this round.
+struct Contribution {
+  FiniteValue status;
+  M68kPointsTo a7;
+  std::set<std::uint32_t> vectors;
+  bool resuming{}, interrupt{};
+  std::vector<M68kPointsTo> interrupt_frames;   // the frame address at every parent point where an interrupt vector enters it
+  std::vector<std::uint64_t> taking_points;     // parent points where a resuming vector enters it
+};
+
+// The A7 of every point of partition `tag` relative to the entry A7 of the partition's handler instance (the saved SR), from the
+// activation structure: the root activation starts at 0, a callee activation at the call point's relative A7 - 4.
+std::map<std::uint64_t, FiniteValue> relative_a7(M68kFiniteAdapter &adapter, const M68kFiniteAnalysisResult &result, std::uint32_t tag,
+                                                 std::uint32_t handler) {
+  const auto &states = result.solution.in_states;
+  const std::uint64_t root_key = ~UINT64_C(0);
+  std::map<std::uint64_t, std::vector<std::uint64_t>> intra, callees;
+  std::vector<std::uint64_t> points;
+  for (const auto &[point, state] : states) {
+    if (m68k_point_tag(point) != tag) continue;
+    points.push_back(point);
+    const auto decoded = adapter.decode(m68k_point_pc(point));
+    if (!decoded) continue;
+    const bool call = m68k_control_successors(decoded->operation).stacked == M68kStackedContinuationKind::call_continuation;
+    for (const auto &edge : adapter.transfer(point, state).edges) {
+      if (call && (edge.kind == EdgeKind::call || edge.kind == EdgeKind::computed)) callees[point].push_back(edge.target);
+      else intra[point].push_back(edge.target);
+    }
+  }
+  // Membership of the context-site-0 activations (the root and every merged callee): walks over intra edges.
+  std::map<std::uint64_t, std::set<std::uint64_t>> member;  // point -> activation keys
+  const auto walk = [&](std::uint64_t start, std::uint64_t key) {
+    std::vector<std::uint64_t> pending{start};
+    std::set<std::uint64_t> seen{start};
+    while (!pending.empty()) {
+      const auto point = pending.back();
+      pending.pop_back();
+      if (!states.contains(point)) continue;
+      member[point].insert(key);
+      for (const auto target : intra[point])
+        if (seen.insert(target).second) pending.push_back(target);
+    }
+  };
+  walk(m68k_analysis_point(m68k_tagged_context(tag, 0U), handler), root_key);
+  std::set<std::uint64_t> merged_entries;
+  for (const auto &[point, targets] : callees)
+    for (const auto target : targets)
+      if (m68k_context_site(m68k_point_context(target)) == 0U) merged_entries.insert(target);
+  for (const auto entry : merged_entries) walk(entry, merged_key | entry);
+  for (const auto point : points) {
+    const auto context = m68k_point_context(point);
+    if (m68k_context_site(context) != 0U) member[point].insert(context);
+  }
+  std::map<std::uint64_t, FiniteValue> entry{{root_key, FiniteValue::of({0U})}};
+  std::map<std::uint64_t, FiniteValue> rel;
+  for (std::uint32_t pass = 0U; pass < 4U * m68k_exact_offset_bound; ++pass) {
+    bool changed = false;
+    for (const auto point : points) {
+      FiniteValue value;
+      for (const auto key : member[point]) {
+        const auto found = entry.find(key);
+        if (found != entry.end()) value = join(value, add_sets(found->second, states.at(point).stack_delta), m68k_exact_offset_bound);
+      }
+      if (rel[point] != value) {
+        rel[point] = value;
+        changed = true;
+      }
+    }
+    for (const auto &[point, targets] : callees) {
+      const auto at = add_sets(rel[point], FiniteValue::of({UINT64_C(0xFFFFFFFC)}));
+      for (const auto target : targets) {
+        const auto key = m68k_context_site(m68k_point_context(target)) == 0U ? merged_key | target : m68k_point_context(target);
+        auto &current = entry[key];
+        const auto joined = join(current, at, m68k_exact_offset_bound);
+        if (joined != current) {
+          current = joined;
+          changed = true;
+        }
+      }
+    }
+    if (!changed) return rel;
+  }
+  for (auto &[point, value] : rel) value = FiniteValue::unknown(UnknownReason::iteration_bound);
+  return rel;
+}
+
+// The whole-program status bound the solution implies (M68kFrameConfig::status_bound): every live root and instance entry status,
+// every SR writer's result and every proven RTE's restored status in a live partition; Unknown when a partition is clobbered.
+FiniteValue derive_status_bound(const M68kAnalysisImage &image, const M68kAnalysisConfig &config, const M68kFiniteAnalysisResult &result,
+                                const std::vector<std::uint32_t> &entries) {
+  M68kFiniteAdapter adapter{image, config};
+  const auto &frames = config.frames;
+  if (!frames.clobbered.empty()) return FiniteValue::unknown(UnknownReason::unsupported_transfer);
+  FiniteValue out;
+  const auto handlers = handler_pcs(frames);
+  for (const auto entry : entries) {
+    const auto pc = entry & bus_mask;
+    if (!std::binary_search(handlers.begin(), handlers.end(), pc) || frames.main_entries.contains(pc))
+      out = join(out, adapter.root_state(0U, pc).status);
+  }
+  for (const auto &[tag, instance] : frames.instances) out = join(out, instance.status);
+  for (const auto &[point, state] : result.solution.in_states) {
+    const auto tag = m68k_point_tag(point);
+    if (tag != 0U && !frames.instances.contains(tag)) continue;
+    const auto decoded = adapter.decode(m68k_point_pc(point));
+    if (!decoded) continue;
+    const auto family = m68k_control_successors(decoded->operation).dynamic;
+    if (!m68k_status_register_writer(decoded->operation.kind) && family != M68kDynamicControlFamily::return_from_exception) continue;
+    for (const auto &edge : adapter.transfer(point, state).edges) out = join(out, edge.state.status);
+  }
+  return out;
+}
+
+FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysisConfig &config, M68kFiniteAnalysisResult &result) {
+  M68kFiniteAdapter adapter{image, config};
+  const auto &states = result.solution.in_states;
+  const auto &used = config.frames;
+  FrameDerivation out;
+  out.next = used;
+  auto &report = result.frames;
+  const bool validated = report.validated;
+  report = M68kFrameReport{};
+  report.enabled = true;
+  report.validated = validated;
+  report.handler_vectors = used.vectors.size();
+  report.reset_state = used.reset_entry.has_value();
+
+  // 1. Contributions: every boundary of a live partition (main, or an analysed instance) where a vector can be taken.
+  std::map<std::pair<std::uint32_t, std::uint32_t>, Contribution> contributions;  // (handler, parent tag)
+  std::map<std::uint32_t, std::vector<std::uint64_t>> partition_points;
+  for (const auto &[point, state] : states) {
+    const auto tag = m68k_point_tag(point);
+    if (tag != 0U && !used.instances.contains(tag)) continue;  // the dead-handler partition is never a writer or a parent
+    partition_points[tag].push_back(point);
+    ++report.points;
+    const auto decoded = adapter.decode(m68k_point_pc(point));
+    const M68kIrOperation *operation = decoded ? &decoded->operation : nullptr;
+    // An interrupt is taken at the boundary (its status); a synchronous exception while the instruction runs (after any clobbering
+    // interrupt at the boundary).
+    const auto &boundary = state.status;
+    const auto status = adapter.effective_status(tag, state);
+    if (status.is_unknown()) ++report.status_unknown;
+    if (m68k_status_supervisor_proven(status)) ++report.supervisor_proven;
+    const auto boundary_frame = adapter.frame_address(boundary, state);
+    const auto running_frame = adapter.frame_address(status, state);
+    const auto raised = m68k_raised_vectors(operation, status);
+    bool eligible = false, raising = false;
+    bool unknown_frame = false;
+    for (const auto &vector : used.vectors) {
+      const auto cls = m68k_vector_class(vector.vector);
+      const bool interrupt = cls == M68kVectorClass::interrupt;
+      const bool takes = interrupt ? m68k_interrupt_eligible(boundary, m68k_interrupt_level(vector.vector))
+                                   : std::binary_search(raised.begin(), raised.end(), vector.vector);
+      if (!takes) continue;
+      (interrupt ? eligible : raising) = true;
+      const auto &frame = interrupt ? boundary_frame : running_frame;
+      unknown_frame = unknown_frame || frame.is_unknown();
+      auto &contribution = contributions[{vector.handler & bus_mask, tag}];
+      contribution.status = join(contribution.status, m68k_handler_entry_status(vector.vector, interrupt ? boundary : status));
+      contribution.a7 = join(contribution.a7, frame);
+      contribution.vectors.insert(vector.vector);
+      contribution.interrupt = contribution.interrupt || interrupt;
+      contribution.resuming = contribution.resuming || cls != M68kVectorClass::synchronous;
+      if (interrupt) contribution.interrupt_frames.push_back(frame);
+      if (cls != M68kVectorClass::synchronous) contribution.taking_points.push_back(point);
+    }
+    if (eligible) ++report.interrupt_eligible;
+    else if (!status.is_unknown()) ++report.interrupt_masked;
+    if (raising) ++report.raising_points;
+    if (unknown_frame) {
+      if (!m68k_status_supervisor_proven(eligible ? boundary : status)) ++report.frame_unproven_supervisor;
+      else {
+        ++report.frame_unknown_a7;
+        const auto &a7 = state.address[7];
+        ++report.frame_a7_unknown_by_reason[std::string(analysis::unknown_reason_name(a7.reason)) + "/" +
+                                            m68k_analysis_sub_reason_name(a7.sub)];
+      }
+    }
+  }
+
+  // 2. Instances. An admitted contribution with a known entry A7 is an instance (the used ones keep their tags; a new one gets the
+  //    next tag); any other is unanalysed, and a resuming unanalysed child makes its parent's writers and status Unknown.
+  std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint32_t> tag_of;
+  std::uint32_t next_tag = std::max(used.next_tag, 1U);
+  for (const auto &[tag, instance] : used.instances) {
+    tag_of[{instance.handler, instance.parent}] = tag;
+    next_tag = std::max(next_tag, tag + 1U);
+  }
+  bool valid = true;
+  std::map<std::uint32_t, M68kMemoryPolicy> async;               // derived per-partition asynchronous writers
+  std::map<std::uint32_t, std::set<std::uint32_t>> clobbered;    // derived clobber levels per partition
+  const auto unanalysed = [&](std::uint32_t parent, const std::set<std::uint32_t> &vectors, bool resuming, Unanalysed why) {
+    ++report.unanalysed[unanalysed_name(why)];
+    if (!resuming) return;
+    async[parent].async_all = true;
+    const auto levels = clobber_levels(vectors);
+    clobbered[parent].insert(levels.begin(), levels.end());
+  };
+  for (auto &[key, contribution] : contributions) {
+    auto why = instance_admission(used, key.first, key.second);
+    if (why == Unanalysed::none && contribution.a7.is_unknown()) why = Unanalysed::entry_unknown;
+    auto found = tag_of.find(key);
+    if (why != Unanalysed::none) {
+      unanalysed(key.second, contribution.vectors, contribution.resuming, why);
+      if (found != tag_of.end() && used.instances.contains(found->second)) {
+        valid = false;  // an analysed instance whose entry is no longer known
+        out.next.instances.erase(found->second);
+      }
+      continue;
+    }
+    if (found == tag_of.end()) {
+      if (next_tag > m68k_max_instance_tag) {
+        out.failed = true;
+        return out;
+      }
+      found = tag_of.emplace(key, next_tag++).first;
+    }
+    M68kHandlerInstance derived{};
+    derived.handler = key.first;
+    derived.parent = key.second;
+    derived.status = contribution.status;
+    derived.a7 = contribution.a7;
+    derived.vectors = contribution.vectors;
+    derived.resuming = contribution.resuming;
+    derived.interrupt = contribution.interrupt;
+    const auto previous = used.instances.find(found->second);
+    if (previous == used.instances.end()) {
+      valid = false;  // a new live instance: not yet analysed
+      out.next.instances[found->second] = derived;
+      continue;
+    }
+    auto &instance = out.next.instances[found->second];
+    const bool below = leq(derived.status, instance.status) && leq(derived.a7, instance.a7) &&
+                       std::includes(instance.vectors.begin(), instance.vectors.end(), derived.vectors.begin(), derived.vectors.end()) &&
+                       (!derived.resuming || instance.resuming) && (!derived.interrupt || instance.interrupt);
+    if (below) continue;
+    valid = false;
+    const bool grew = !leq(derived.a7, instance.a7);
+    instance.status = join(instance.status, derived.status);
+    instance.a7 = join(instance.a7, derived.a7);
+    instance.vectors.insert(derived.vectors.begin(), derived.vectors.end());
+    instance.resuming = instance.resuming || derived.resuming;
+    instance.interrupt = instance.interrupt || derived.interrupt;
+    if (grew && ++instance.growth > m68k_instance_growth_bound)
+      instance.a7 = M68kPointsTo::unknown(UnknownReason::iteration_bound, Sub::frame_unproven);  // widening
+  }
+  // An instance whose entry A7 became Unknown is no longer analysed (its consequences fall on its parent); neither is any
+  // instance below it.
+  for (bool removed = true; removed;) {
+    removed = false;
+    for (auto it = out.next.instances.begin(); it != out.next.instances.end();) {
+      const auto &instance = it->second;
+      const bool orphan = instance.parent != 0U && !out.next.instances.contains(instance.parent);
+      if (!instance.a7.is_unknown() && !orphan) {
+        ++it;
+        continue;
+      }
+      if (instance.resuming && !orphan) {
+        out.next.policies[instance.parent].async_all = true;
+        const auto levels = clobber_levels(instance.vectors);
+        out.next.clobbered[instance.parent].insert(levels.begin(), levels.end());
+      }
+      it = out.next.instances.erase(it);
+      removed = true;
+    }
+  }
+
+  // 3. The writes of every analysed instance partition: absolute ranges (stores plus its interrupt frames into its parent), its
+  //    A7-relative writes (relative to its entry, the saved SR) and the writes whose position relative to the entry is not known.
+  std::map<std::uint32_t, M68kMemoryPolicy> writes;
+  std::map<std::uint32_t, RelativeWrites> relative;
+  std::map<std::uint32_t, M68kMemoryPolicy> absolute;
+  std::map<std::uint32_t, std::map<std::uint64_t, FiniteValue>> rel_a7;
+  for (const auto &[tag, instance] : used.instances) {
+    auto &own = writes[tag];
+    auto &rel_writes = relative[tag];
+    auto &abs_writes = absolute[tag];
+    rel_a7[tag] = relative_a7(adapter, result, tag, instance.handler);
+    const auto &rel = rel_a7[tag];
+    for (const auto point : partition_points[tag]) {
+      const auto &state = states.at(point);
+      const auto decoded = adapter.decode(m68k_point_pc(point));
+      if (!decoded) continue;
+      const auto &operation = decoded->operation;
+      const auto status = adapter.effective_status(tag, state);
+      const auto description = m68k_memory_writes(operation);
+      const auto targets = adapter.memory_write_targets(operation, state, status);
+      for (std::size_t i = 0; i < targets.size(); ++i) {
+        const auto &[target, span] = targets[i];
+        if (target.is_bottom()) continue;
+        const auto touched = m68k_memory_touched(target, span);
+        if (!touched) {
+          own.async_all = true;
+          abs_writes.async_all = true;
+          if (instance.resuming) ++report.unknown_target_writer_stores;
+        } else {
+          for (const auto &range : *touched) own.add_async(range);
+        }
+        const auto offset = description.described && i < description.writes.size()
+                                ? a7_relative_offset(operation, description.writes[i])
+                                : std::nullopt;
+        const auto found = rel.find(point);
+        if (offset && found != rel.end() && found->second.is_precise()) {
+          for (const auto r : found->second.values()) rel_writes.add(signed32(r) + *offset, signed32(r) + *offset + span);
+        } else if (touched) {
+          for (const auto &range : *touched) abs_writes.add_async(range);
+        }
+      }
+    }
+    const auto contribution = contributions.find({instance.handler, instance.parent});
+    if (contribution == contributions.end()) continue;
+    for (const auto &frame : contribution->second.interrupt_frames) {
+      const auto touched = m68k_memory_touched(frame, m68k_exception_frame_bytes);
+      if (!touched) own.async_all = true;
+      else
+        for (const auto &range : *touched) own.add_async(range);
+    }
+  }
+
+  // 4. Per-partition asynchronous writers: a partition receives the writes (stores and interrupt frames) of every analysed resuming
+  //    child instance and, transitively, that child's own asynchronous writers (they persist when the child resumes into it).
+  const auto analysed_resuming = [&](std::uint32_t tag) {
+    const auto found = out.next.instances.find(tag);
+    return used.instances.contains(tag) && found != out.next.instances.end() && found->second.resuming;
+  };
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (const auto &[tag, instance] : used.instances) {
+      if (!analysed_resuming(tag)) continue;
+      const auto contributed = join(writes[tag], async[tag]);
+      auto &target = async[instance.parent];
+      if (leq(contributed, target)) continue;
+      target = join(target, contributed);
+      changed = true;
+    }
+  }
+  for (const auto &[tag, instance] : used.instances)
+    if (analysed_resuming(tag)) out.writer_tags.insert(tag);
+
+  // 5. Frame integrity: a resuming instance whose own writes, or those of its resuming descendants, may reach its saved SR word makes
+  //    the status of its parent Unknown after every boundary where it can be taken (the analysis never assumes the SR an RTE
+  //    restores).
+  std::map<std::uint32_t, RelativeWrites> subtree;
+  std::map<std::uint32_t, M68kMemoryPolicy> subtree_absolute;
+  for (const auto &[tag, instance] : used.instances) {
+    subtree[tag] = relative[tag];
+    subtree_absolute[tag] = join(absolute[tag], async[tag].async_all ? async[tag] : M68kMemoryPolicy{});
+  }
+  // Children have larger tags than their parents: one pass in decreasing tag order.
+  for (auto it = used.instances.rbegin(); it != used.instances.rend(); ++it) {
+    const auto tag = it->first;
+    const auto parent = it->second.parent;
+    if (!analysed_resuming(tag) || parent == 0U || !used.instances.contains(parent)) continue;
+    subtree_absolute[parent] = join(subtree_absolute[parent], subtree_absolute[tag]);
+    const auto contribution = contributions.find({it->second.handler, parent});
+    if (contribution == contributions.end()) continue;
+    const auto &rel = rel_a7[parent];
+    for (const auto point : contribution->second.taking_points) {
+      const auto at = rel.find(point);
+      if (at == rel.end() || !at->second.is_precise()) {
+        subtree[parent].add_shifted(RelativeWrites{true, {}}, 0);
+        continue;
+      }
+      for (const auto r : at->second.values()) {
+        // The child's entry (its saved SR) is 6 bytes below the parent's A7 at the taking boundary.
+        RelativeWrites child = subtree[tag];
+        if (it->second.interrupt) child.add(0, static_cast<std::int64_t>(m68k_exception_frame_bytes));
+        subtree[parent].add_shifted(child, signed32(r) - static_cast<std::int64_t>(m68k_exception_frame_bytes));
+      }
+    }
+  }
+  for (const auto &[tag, instance] : used.instances) {
+    if (!analysed_resuming(tag)) continue;
+    bool intact = !subtree[tag].overlaps(0, 2);
+    if (intact) {
+      const auto &abs_writes = subtree_absolute[tag];
+      const auto sr = m68k_memory_touched(instance.a7, 2U);
+      if (!sr || abs_writes.async_all) intact = !abs_writes.async_all && abs_writes.async.empty();
+      else
+        for (const auto &range : *sr) intact = intact && !abs_writes.asynchronous(M68kCell{range.kind, range.id, range.lo, range.hi - range.lo});
+    }
+    if (intact) continue;
+    ++report.frame_integrity_failures;
+    const auto levels = clobber_levels(instance.vectors);
+    clobbered[instance.parent].insert(levels.begin(), levels.end());
+  }
+
+  // 6. The next configuration (join-only) and the final validation of this round.
+  for (const auto &[tag, policy] : async) {
+    const auto previous = used.policies.find(tag);
+    if (previous == used.policies.end() ? !(policy == M68kMemoryPolicy{}) : !leq(policy, previous->second)) valid = false;
+    out.next.policies[tag] = join(out.next.policies[tag], policy);
+  }
+  for (const auto &[tag, levels] : clobbered) {
+    const auto previous = used.clobbered.find(tag);
+    if (previous == used.clobbered.end() ? !levels.empty()
+                                         : !std::includes(previous->second.begin(), previous->second.end(), levels.begin(), levels.end()))
+      valid = false;
+    out.next.clobbered[tag].insert(levels.begin(), levels.end());
+  }
+  out.next.next_tag = next_tag;
+  out.valid = valid;
+
+  // Report (counts only).
+  std::set<std::uint32_t> live_handlers;
+  for (const auto &[tag, instance] : used.instances) {
+    ++report.instances;
+    live_handlers.insert(instance.handler);
+    if (instance.interrupt) ++report.interrupt_instances;
+    else if (instance.resuming) ++report.resuming_instances;
+    else ++report.synchronous_instances;
+  }
+  for (const auto handler : handler_pcs(used)) report.dead_handlers += live_handlers.contains(handler) ? 0U : 1U;
+  report.clobbered_partitions = used.clobbered.size();
+  if (const auto main = used.policies.find(0U); main != used.policies.end()) {
+    report.main_async_all = main->second.async_all;
+    report.main_async_ranges = main->second.async.size();
+    for (const auto &range : main->second.async) report.main_async_bytes += range.hi - range.lo;
+  }
+  return out;
+}
+
 std::set<std::uint32_t> resolved_sites(const M68kFiniteAnalysisResult &result) {
   std::set<std::uint32_t> out;
   for (const auto &[pc, site] : result.pc_index_sites)
     if (site.outcome == M68kPcIndexOutcome::resolved) out.insert(pc);
   for (const auto &[pc, site] : result.address_sites)
+    if (site.resolved) out.insert(pc);
+  for (const auto &[pc, site] : result.return_sites)
     if (site.resolved) out.insert(pc);
   return out;
 }
@@ -1707,8 +2598,11 @@ M68kFiniteAnalysisResult analyze_memory(const M68kAnalysisImage &image, const st
 // contexts domain is switched off and the T004 result is returned (reason recorded).
 M68kFiniteAnalysisResult analyze_contexts(const M68kAnalysisImage &image, const std::vector<std::uint32_t> &entries,
                                           M68kAnalysisConfig config, const analysis::Bounds &bounds) {
+  const bool frames = config.domains.frames;
+  const auto original = config;
   auto free_config = config;
   free_config.domains.contexts = false;
+  free_config.domains.frames = false;
   auto memory = analyze_memory(image, entries, free_config, bounds);
   const auto finish_without = [&](UnknownReason reason, std::uint32_t rounds, std::size_t iterations) {
     memory.contexts = M68kContextReport{};
@@ -1724,6 +2618,26 @@ M68kFiniteAnalysisResult analyze_contexts(const M68kAnalysisImage &image, const 
   config.domains.address = true;
   config.domains.memory = true;
   config.memory.policy = memory.memory.policy;
+  if (frames) {
+    // SEG-030-T006: the asynchronous writers are per partition and grow from nothing (the T004 policy, every cell asynchronous
+    // under the untracked mask, is only the fallback); the instances grow from none.
+    config.memory.interrupts = false;
+    config.memory.policy = M68kMemoryPolicy{};
+    config.frames.instances.clear();
+    config.frames.policies.clear();
+    config.frames.clobbered.clear();
+  }
+  // SEG-030-T006: when the frames domain cannot return a validated round, the T005 contexts result is returned (reason recorded).
+  const auto without_frames = [&](UnknownReason reason, const std::string &failure, std::uint32_t rounds, std::size_t total) {
+    auto fallback = original;
+    fallback.domains.frames = false;
+    auto out = analyze_contexts(image, entries, fallback, bounds);
+    out.frames = M68kFrameReport{};
+    out.frames.enabled = true;
+    out.frames.reason = reason;
+    out.frames.failure = failure + " after " + std::to_string(rounds) + " rounds, " + std::to_string(total) + " iterations";
+    return out;
+  };
   const auto seeded = seed_merged(image, free_config, memory);
   config.contexts.merged.insert(seeded.begin(), seeded.end());
   const auto round_bound = std::min(config.contexts.round_bound, m68k_memory_round_bound);
@@ -1731,7 +2645,29 @@ M68kFiniteAnalysisResult analyze_contexts(const M68kAnalysisImage &image, const 
   std::size_t iterations = 0U;
   bool converged = false;
   UnknownReason failure = UnknownReason::iteration_bound;
+  // SEG-030-T006 warm start: with the frames configuration held at nothing (no handler instance, no asynchronous writer, which is
+  // never returned), the contexts rounds first settle the callee summaries, so that the frames configuration then grows from nothing
+  // over precise summaries (a least fixed point) instead of from the opaque continuations of the first rounds.
+  std::uint32_t warm_rounds = 0U;
+  while (frames && warm_rounds < round_bound) {
+    ++warm_rounds;
+    auto out = solve_pinned(image, entries, config, bounds);
+    iterations += out.iterations;
+    if (!out.complete) return without_frames(out.reason, "warm_solve_bound", warm_rounds, iterations);
+    const auto policy = derive_memory_policy(image, config, out);
+    out.contexts.rounds = warm_rounds;
+    const auto derivation = derive_contexts(image, config, out);
+    auto next = config;
+    next.memory.policy = join(config.memory.policy, policy);
+    next.contexts = derivation.next;
+    next.frames.status_bound = join(config.frames.status_bound, derive_status_bound(image, config, out, entries));
+    const bool fixed = derivation.valid && next.contexts == config.contexts && next.memory.policy == config.memory.policy &&
+                       next.frames.status_bound == config.frames.status_bound;
+    config = std::move(next);
+    if (fixed) break;
+  }
   std::uint32_t round = 1U;
+  M68kFrameReport first_round;
   for (; round <= round_bound; ++round) {
     auto out = solve_pinned(image, entries, config, bounds);
     iterations += out.iterations;
@@ -1742,14 +2678,47 @@ M68kFiniteAnalysisResult analyze_contexts(const M68kAnalysisImage &image, const 
     const auto policy = derive_memory_policy(image, config, out);
     out.contexts.rounds = round;
     const auto derivation = derive_contexts(image, config, out);
-    const bool valid = derivation.valid && leq(policy, config.memory.policy);
+    FrameDerivation frame_derivation;
+    if (frames) {
+      frame_derivation = derive_frames(image, config, out);
+      if (frame_derivation.failed) return without_frames(UnknownReason::state_bound, "instance_bound", round, iterations);
+      const auto bound = derive_status_bound(image, config, out, entries);
+      if (!leq(bound, config.frames.status_bound)) frame_derivation.valid = false;
+      frame_derivation.next.status_bound = join(config.frames.status_bound, bound);
+      std::size_t writer_points = 0U;
+      for (const auto &[point, state] : out.solution.in_states) {
+        (void)state;
+        if (frame_derivation.writer_tags.contains(m68k_point_tag(point))) ++writer_points;
+      }
+      out.memory.handler_points = writer_points;
+    }
+    const bool valid = derivation.valid && leq(policy, config.memory.policy) && (!frames || frame_derivation.valid);
     out.memory.rounds = memory_rounds + round;
     out.memory.policy = config.memory.policy;
     out.memory.converged = valid;
+    if (frames) {
+      out.frames.validated = valid;
+      // The reported memory policy is the main flow's (the global external writer plus the main partition's asynchronous writers).
+      if (const auto main = config.frames.policies.find(0U); main != config.frames.policies.end())
+        out.memory.policy = join(out.memory.policy, main->second);
+      // The first frames round's boundary counts, before any clobbered status propagates (diagnosis of the first loss).
+      if (round == 1U) first_round = out.frames;
+      out.frames.first_round_points = first_round.points;
+      out.frames.first_round_status_unknown = first_round.status_unknown;
+      out.frames.first_round_interrupt_eligible = first_round.interrupt_eligible;
+      out.frames.first_round_interrupt_masked = first_round.interrupt_masked;
+      out.frames.first_round_frame_unknown_a7 = first_round.frame_unknown_a7;
+      out.frames.first_round_frame_unproven_supervisor = first_round.frame_unproven_supervisor;
+      out.frames.first_round_a7_unknown_by_reason = first_round.frame_a7_unknown_by_reason;
+    }
     auto next = config;
     next.memory.policy = join(config.memory.policy, policy);
     next.contexts = derivation.next;
-    const bool fixed = next.contexts == config.contexts && next.memory.policy == config.memory.policy;
+    // SEG-030-T006: the frames configuration grows only from a round whose contexts configuration is settled (its summaries are
+    // those of the current partitions), so a new handler instance is never judged on the opaque continuations of its first round.
+    const bool settled = derivation.valid && next.contexts == config.contexts && next.memory.policy == config.memory.policy;
+    if (frames && settled) next.frames = frame_derivation.next;
+    const bool fixed = next.contexts == config.contexts && next.memory.policy == config.memory.policy && next.frames == config.frames;
     if (valid) {
       out.contexts.validated = true;
       out.contexts.returned_round = round;
@@ -1761,8 +2730,15 @@ M68kFiniteAnalysisResult analyze_contexts(const M68kAnalysisImage &image, const 
     }
     config = std::move(next);
   }
-  if (!best) return finish_without(failure, std::min(round, round_bound), iterations);
+  if (!best) {
+    if (frames) return without_frames(failure, "no_validated_round", std::min(round, round_bound), iterations);
+    return finish_without(failure, std::min(round, round_bound), iterations);
+  }
   auto out = std::move(*best);
+  if (frames) {
+    out.frames.warm_rounds = warm_rounds;
+    out.frames.frame_rounds = std::min(round, round_bound);
+  }
   out.contexts.converged = converged;
   out.contexts.rounds = std::min(round, round_bound);
   out.contexts.total_iterations = iterations;
@@ -1779,6 +2755,8 @@ M68kFiniteAnalysisResult analyze_contexts(const M68kAnalysisImage &image, const 
 
 M68kFiniteAnalysisResult analyze_m68k_finite_values(const M68kAnalysisImage &image, const std::vector<std::uint32_t> &entries,
                                                     M68kAnalysisConfig config, const analysis::Bounds &bounds) {
+  // SEG-030-T006: the frames domain implies the contexts domain (handler partitions are contexts), which implies memory and address.
+  if (config.domains.frames) config.domains.contexts = true;
   if (config.domains.contexts) return analyze_contexts(image, entries, std::move(config), bounds);
   return analyze_memory(image, entries, std::move(config), bounds);
 }
@@ -1878,6 +2856,7 @@ std::string format_m68k_finite_analysis(const M68kFiniteAnalysisResult &result) 
       for (unsigned reg = 0; reg < 8U; ++reg) out << " a" << reg << '=' << state.address[reg].describe();
     if (result.memory.enabled) out << ' ' << state.memory.describe();
     if (result.contexts.enabled) out << " delta=" << state.stack_delta.describe();
+    if (result.frames.enabled) out << " status=" << state.status.describe();
     out << '\n';
   }
   for (const auto &[pc, site] : result.pc_index_sites) {
@@ -1892,6 +2871,15 @@ std::string format_m68k_finite_analysis(const M68kFiniteAnalysisResult &result) 
     if (!site.resolved)
       out << " reason=" << analysis::unknown_reason_name(site.reason) << '/' << m68k_analysis_sub_reason_name(site.sub);
     out << " odd=" << site.odd_targets_excluded << " targets=";
+    for (const auto target : site.targets) out << hex(target) << ',';
+    out << '\n';
+  }
+  for (const auto &[pc, site] : result.return_sites) {
+    out << "return-site " << hex(pc) << ' ' << m68k_dynamic_control_family_name(site.family) << ' '
+        << (site.resolved ? "resolved" : "unknown");
+    if (!site.resolved)
+      out << " reason=" << analysis::unknown_reason_name(site.reason) << '/' << m68k_analysis_sub_reason_name(site.sub);
+    out << " targets=";
     for (const auto target : site.targets) out << hex(target) << ',';
     out << '\n';
   }
@@ -1914,6 +2902,19 @@ std::string format_m68k_finite_analysis(const M68kFiniteAnalysisResult &result) 
         << " recursive=" << contexts.recursive_activations << " summaries=" << contexts.summaries
         << " summary_continuations=" << contexts.summary_continuations;
     for (const auto &[sub, n] : contexts.opaque_continuations) out << " opaque_" << m68k_analysis_sub_reason_name(sub) << '=' << n;
+    out << '\n';
+  }
+  if (result.frames.enabled) {
+    const auto &frames = result.frames;
+    out << "frames validated=" << (frames.validated ? 1 : 0) << " warm=" << frames.warm_rounds << " rounds=" << frames.frame_rounds
+        << " instances=" << frames.instances << " interrupt=" << frames.interrupt_instances
+        << " resuming=" << frames.resuming_instances << " synchronous=" << frames.synchronous_instances
+        << " dead=" << frames.dead_handlers << " integrity_failures=" << frames.frame_integrity_failures
+        << " clobbered=" << frames.clobbered_partitions << " eligible=" << frames.interrupt_eligible
+        << " masked=" << frames.interrupt_masked << " main_async_all=" << (frames.main_async_all ? 1 : 0)
+        << " main_async_bytes=" << frames.main_async_bytes;
+    for (const auto &[name, n] : frames.unanalysed) out << " unanalysed_" << name << '=' << n;
+    if (!frames.validated) out << " failure=" << frames.failure;
     out << '\n';
   }
   return out.str();

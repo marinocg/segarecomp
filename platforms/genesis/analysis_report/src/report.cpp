@@ -119,21 +119,35 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
   adapter_config.call_continuations = true;
   adapter_config.exception_continuations = false;
   adapter_config.pushed_code_continuations = false;
-  // SEG-030-T005: the contexts domain implies the memory domain, which implies the address domain.
-  const bool memory = config.domains.memory || config.domains.contexts;
+  // SEG-030-T005/T006: the frames domain implies the contexts domain, which implies the memory domain, which implies the address
+  // domain.
+  const bool frames = config.domains.frames;
+  const bool contexts = config.domains.contexts || frames;
+  const bool memory = config.domains.memory || contexts;
   adapter_config.domains.address = config.domains.address || memory;
   adapter_config.domains.memory = memory;
-  adapter_config.domains.contexts = config.domains.contexts;
+  adapter_config.domains.contexts = contexts;
+  adapter_config.domains.frames = frames;
   if (memory) {
-    // ADR 0079 decision 7. The SR interrupt mask is not tracked, so an interrupt may be taken at any boundary (handler code
-    // included): every work-RAM cell has an asynchronous writer. The handler roots are the machine-delivered vector roots (every
-    // root other than the startup entry; the entry too when it is also a vector handler).
-    adapter_config.memory.interrupts = true;
+    // ADR 0079 decision 7. Without the frames domain the SR interrupt mask is not tracked, so an interrupt may be taken at any
+    // boundary (handler code included): every work-RAM cell has an asynchronous writer. The handler roots are the machine-delivered
+    // vector roots (every root other than the startup entry; the entry too when it is also a vector handler). With the frames
+    // domain (SEG-030-T006) the asynchronous writers are derived per partition from the delivered vectors instead.
+    adapter_config.memory.interrupts = !frames;
     const auto entry = program.startup_ingress ? std::optional<std::uint32_t>(program.startup_ingress->entry.value & bus_mask) : std::nullopt;
     for (const auto root : report.roots.roots)
       if (!entry || root != *entry || report.roots.vector_roots == report.roots.roots.size()) adapter_config.memory.handler_roots.push_back(root);
     adapter_config.memory.release_ranges.emplace_back(genesis_z80_control_first, genesis_z80_control_last);
     adapter_config.memory.assume_no_external_writer = config.assume_no_z80_ram_writes;
+    if (frames) {
+      // SEG-030-T006: the delivered vectors (ADR 0021 / ADR 0043) and, for a reset-entry program, the 68000 reset state.
+      for (const auto &[vector, handler] : report.roots.vectors) adapter_config.frames.vectors.push_back({vector, handler & bus_mask});
+      if (entry) adapter_config.frames.main_entries.insert(*entry);
+      if (config.reset_entry && entry) {
+        adapter_config.frames.reset_entry = *entry;
+        adapter_config.frames.reset_ssp = image->immutable_read(0U, 4U);
+      }
+    }
   }
   report.analysis = analyze_m68k_finite_values(*image, report.roots.roots, adapter_config, config.bounds);
   report.rounds = memory ? report.analysis.memory.rounds : 1U;
@@ -142,6 +156,7 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
     auto comparator_config = adapter_config;
     comparator_config.domains.memory = false;
     comparator_config.domains.contexts = false;
+    comparator_config.domains.frames = false;
     const auto comparator = analyze_m68k_finite_values(*image, report.roots.roots, comparator_config, config.bounds);
     GenesisAnalysisReport::MemoryComparison comparison{};
     if (comparator.complete) {
@@ -221,11 +236,32 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
         site.reason = address->second.reason;
         site.detail = address->second.sub;
         if (site.resolved) site.targets = address->second.targets;
+      } else if (const auto ret = report.analysis.return_sites.find(pc); ret != report.analysis.return_sites.end()) {
+        site.resolved = ret->second.resolved;
+        site.reason = ret->second.reason;
+        site.detail = ret->second.sub;
+        if (site.resolved) site.targets = ret->second.targets;
       } else if (const auto reason = report.analysis.unresolved_computed.find(pc); reason != report.analysis.unresolved_computed.end()) {
         site.reason = reason->second;
       }
       report.computed_sites.emplace(pc, std::move(site));
     }
+  }
+  // SEG-030-T006: an RTS away from its activation's entry stack delta is a computed RTS (frames domain), push-window or not.
+  for (const auto &[pc, ret] : report.analysis.return_sites) {
+    if (ret.family != M68kDynamicControlFamily::return_from_subroutine || report.computed_sites.contains(pc)) continue;
+    GenesisAnalysisComputedSite site{};
+    site.family = GenesisAnalysisFamily::rts_computed;
+    site.resolved = ret.resolved;
+    site.reason = ret.reason;
+    site.detail = ret.sub;
+    if (site.resolved) site.targets = ret.targets;
+    report.computed_sites.emplace(pc, std::move(site));
+  }
+  for (const auto &[pc, ret] : report.analysis.return_sites) {
+    if (!ret.resolved) continue;
+    report.sites[static_cast<std::size_t>(ret.family)].erase(pc);
+    report.sites[genesis_challenger_family_push_window_rts].erase(pc);
   }
   // Resolved PC-indexed sites are no longer unresolved dynamic sites.
   for (const auto &[pc, site] : report.analysis.pc_index_sites) {
@@ -256,6 +292,7 @@ std::optional<std::size_t> genesis_analysis_universe(FrontendProgram program) {
 std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport &report, const GenesisAnalysisReportConfig &config) {
   std::ostringstream out;
   auto domains = config.domains;
+  domains.contexts = domains.contexts || domains.frames;  // the frames domain implies the contexts domain
   domains.memory = domains.memory || domains.contexts;   // the contexts domain implies the memory domain
   domains.address = domains.address || domains.memory;  // the memory domain implies the address domain
   out << "{\"schema\":\"segarecomp.m68k_core_report.aggregate.v1\",\"exception_model\":\"strict\",\"pea_continuations\":false"
@@ -344,6 +381,9 @@ std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport
         << ",\"strided_growth_bound\":" << m68k_strided_growth_bound;
   if (domains.memory) out << ",\"memory_cell_bound\":" << m68k_memory_cell_bound << ",\"round_bound\":" << m68k_memory_round_bound;
   if (domains.contexts) out << ",\"context_depth\":" << m68k_context_depth << ",\"context_bound\":" << m68k_context_bound;
+  if (domains.frames)
+    out << ",\"instance_depth_bound\":" << m68k_instance_depth_bound << ",\"instance_tag_bound\":" << m68k_max_instance_tag
+        << ",\"instance_growth_bound\":" << m68k_instance_growth_bound;
   out << '}';
   if (domains.address) {
     std::size_t resolved_sites = 0U, odd = 0U, max_site_targets = 0U;
@@ -415,6 +455,60 @@ std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport
           << ",\"sites_resolved_only_with_contexts\":" << contexts.sites_resolved_only_with_contexts
           << ",\"sites_resolved_only_without_contexts\":" << contexts.sites_resolved_only_without_contexts
           << ",\"unresolved_sites\":" << contexts.unresolved_sites << "}}";
+    }
+    if (domains.frames) {
+      const auto &frames = report.analysis.frames;
+      out << ",\"frames\":{\"validated\":" << (frames.validated ? "true" : "false");
+      if (!frames.validated)
+        out << ",\"reason\":\"" << analysis::unknown_reason_name(frames.reason) << "\",\"failure\":\"" << frames.failure << '"';
+      std::map<std::string, std::map<std::string, std::size_t>> returns;
+      std::map<std::string, std::size_t> resolved_returns;
+      for (const auto &[pc, ret] : report.analysis.return_sites) {
+        (void)pc;
+        const std::string family = m68k_dynamic_control_family_name(ret.family);
+        if (ret.resolved) ++resolved_returns[family];
+        else ++returns[family][std::string(analysis::unknown_reason_name(ret.reason)) + "/" + genesis_analysis_sub_reason_name(ret.sub)];
+      }
+      const auto counts = [](const std::map<std::string, std::size_t> &map) {
+        std::string text = "{";
+        for (const auto &[name, n] : map) text += (text.size() == 1U ? "\"" : ",\"") + name + "\":" + std::to_string(n);
+        return text + "}";
+      };
+      out << ",\"warm_rounds\":" << frames.warm_rounds << ",\"frame_rounds\":" << frames.frame_rounds
+          << ",\"reset_state\":" << (frames.reset_state ? "true" : "false") << ",\"handler_vectors\":" << frames.handler_vectors
+          << ",\"instances\":{\"analysed\":" << frames.instances << ",\"interrupt\":" << frames.interrupt_instances
+          << ",\"synchronous_resuming\":" << frames.resuming_instances << ",\"synchronous\":" << frames.synchronous_instances
+          << ",\"dead_handlers\":" << frames.dead_handlers << ",\"unanalysed\":" << counts(frames.unanalysed)
+          << ",\"frame_integrity_failures\":" << frames.frame_integrity_failures
+          << ",\"clobbered_partitions\":" << frames.clobbered_partitions << '}'
+          << ",\"points\":{\"live\":" << frames.points << ",\"status_unknown\":" << frames.status_unknown
+          << ",\"supervisor_proven\":" << frames.supervisor_proven << ",\"interrupt_eligible\":" << frames.interrupt_eligible
+          << ",\"interrupt_masked\":" << frames.interrupt_masked << ",\"raising\":" << frames.raising_points
+          << ",\"frame_unknown_a7\":" << frames.frame_unknown_a7
+          << ",\"frame_supervisor_unproven\":" << frames.frame_unproven_supervisor
+          << ",\"frame_a7_unknown_by_reason\":" << counts(frames.frame_a7_unknown_by_reason) << '}'
+          << ",\"first_round_points\":{\"live\":" << frames.first_round_points
+          << ",\"status_unknown\":" << frames.first_round_status_unknown
+          << ",\"interrupt_eligible\":" << frames.first_round_interrupt_eligible
+          << ",\"interrupt_masked\":" << frames.first_round_interrupt_masked
+          << ",\"frame_unknown_a7\":" << frames.first_round_frame_unknown_a7
+          << ",\"frame_supervisor_unproven\":" << frames.first_round_frame_unproven_supervisor
+          << ",\"frame_a7_unknown_by_reason\":" << counts(frames.first_round_a7_unknown_by_reason) << '}'
+          << ",\"main_async\":{\"all\":" << (frames.main_async_all ? "true" : "false") << ",\"ranges\":" << frames.main_async_ranges
+          << ",\"bytes\":" << frames.main_async_bytes << ",\"unknown_target_writer_stores\":" << frames.unknown_target_writer_stores
+          << '}' << ",\"returns\":{";
+      bool first_family = true;
+      for (const auto *family : {"rte", "rtr", "rts"}) {
+        out << (first_family ? "" : ",") << '"' << family << "\":{\"resolved\":" << resolved_returns[family] << ",\"unknown\":{";
+        first_family = false;
+        bool first_class = true;
+        for (const auto &[label, n] : returns[family]) {
+          out << (first_class ? "" : ",") << '"' << label << "\":" << n;
+          first_class = false;
+        }
+        out << "}}";
+      }
+      out << "}}";
     }
     if (config.assume_no_z80_ram_writes)
       out << ",\"diagnostic_premise_ablation\":\"assume_no_z80_ram_writes (NOT credited: D, recall and resolved counts of this run "

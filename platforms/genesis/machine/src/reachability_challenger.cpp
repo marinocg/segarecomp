@@ -191,6 +191,7 @@ GenesisReachabilityRoots genesis_reachability_roots(const FrontendProgram &progr
     if (const auto handler = vector_handler(program, static_cast<std::size_t>(vector) * 4U)) {
       roots.insert(*handler);
       ++out.vector_roots;
+      out.vectors.emplace_back(vector, *handler);
     }
   }
   out.roots.assign(roots.begin(), roots.end());

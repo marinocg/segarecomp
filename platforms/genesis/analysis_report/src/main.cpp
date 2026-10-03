@@ -166,17 +166,14 @@ int run(int argc, char **argv) {
     usage(std::cerr);
     return 2;
   }
-  // ADR 0079 decision 5: the contexts domain needs the memory domain (callee summaries carry memory effects), which needs the
-  // address domain (its cells are addressed through points-to values).
+  // ADR 0079 decision 5: the frames domain needs the contexts domain (handler partitions are contexts), which needs the memory
+  // domain (callee summaries carry memory effects), which needs the address domain (its cells are addressed through points-to values).
+  if (config.domains.frames) config.domains.contexts = true;
   if (config.domains.contexts) config.domains.memory = true;
   if (config.domains.memory) config.domains.address = true;
   if (assume_no_z80 && !config.domains.memory) { usage(std::cerr); return 2; }
   config.assume_no_z80_ram_writes = assume_no_z80;
-  if (config.domains.frames) {
-    // ADR 0079: address (T003), memory (T004) and contexts (T005) are delivered; frames by T006 (fail closed).
-    std::cerr << "segarecomp-genesis-analysis-report: staged domain not implemented\n";
-    return 2;
-  }
+  config.reset_entry = reset_entry;
   const auto started = std::chrono::steady_clock::now();
   const auto read = read_bounded_image(*rom);
   if (!read) {

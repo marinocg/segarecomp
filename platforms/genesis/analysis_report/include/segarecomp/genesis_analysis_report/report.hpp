@@ -93,7 +93,7 @@ enum class GenesisAnalysisFamily : std::uint8_t {
 inline constexpr std::size_t genesis_analysis_family_count = 12U;
 [[nodiscard]] const char *genesis_analysis_family_name(GenesisAnalysisFamily family) noexcept;
 
-// ADR 0079 decision 5: the staged domains (T003 `address`, T004 `memory`, T005 `contexts`; `frames` is rejected until T006 lands).
+// ADR 0079 decision 5: the staged domains (T003 `address`, T004 `memory`, T005 `contexts`, T006 `frames`; each implies the previous).
 struct GenesisAnalysisDomains {
   bool address{};
   bool memory{};
@@ -107,6 +107,9 @@ struct GenesisAnalysisReportConfig {
   analysis::Bounds bounds{};
   // SEG-030-T004 DIAGNOSTIC premise ablation (never credited): assume the Z80 never writes 68K work RAM. The outputs are labelled.
   bool assume_no_z80_ram_writes{};
+  // SEG-030-T006: the program starts at the cartridge reset vector (the 68000 reset state: S = 1, I = 7, SSP = the long at 0). Only
+  // the frames domain reads it.
+  bool reset_entry{};
 };
 
 // SEG-030-T004 (ADR 0079 decision 7): the Genesis bus range a store to which may release the Z80 (the Z80 control block: memory

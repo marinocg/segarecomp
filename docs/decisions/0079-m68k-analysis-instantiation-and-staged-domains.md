@@ -87,7 +87,7 @@ reproduce the SEG-026-T002 strict row exactly.
    | address region + offset, points-to for A0-A7, exact offset set or stride widening only to the region extent (T003) | `JSR/JMP (An)`, `d16(An)`, `(d8,An,Xn)` sites | `JSR (An)` is the first gate of 5,367 missing PCs (89.2%); 59 of 70 width-only sites read a register-relative field (ADR 0054/0055) | the baseline tracks data registers only; an address register is always Unknown | per-family resolved counts with zero escapes on the oracle; fixtures for object-slot loops, code pointers from immutable tables, unknown bases, auto-increment, region overflow, strided-only Unknown |
    | abstract memory with object-field identity and region alias exclusion (T004) | width-only `(d8,PC,Xn)` dispatch fed by object fields | 0 of 6 state locations resolved; every one poisoned by stack, frame, unknown-base, indexed and auto-update stores (ADR 0055) | without regions an unknown-base store must poison all memory; excluding the stack alone resolved nothing | width-only sites becoming exact only from strong-updated cells; fixtures for field dispatch, interfering unknown-base stores, stack exclusion, IRQ writers, initial-memory Unknown |
    | bounded call contexts and summaries (T005) | object pointers passed across calls; the ADR 0054 `index_unknown` via-return site | call continuations are opaque all-Unknown entries; context-insensitive merge loses object identity | a context-free fixed point joins every caller's object region | sites resolved only under contexts, with `context_bound` reported; fixtures for two callers, context exhaustion, recursion, clobbers, unbalanced stacks |
-   | exception and return-frame state (T006) | RTE/RTR (ADR 0051 first gate) and computed RTS | RTE/RTR discover nothing under the strict model; push-window RTS is unresolved | the baseline has no stack cells | `rts_computed`/RTE/RTR resolved only from code-built frames; handler-entry frames stay Unknown (`interrupt_resumption`) |
+   | exception and return-frame state, interrupt mask and handler instances (T006, `frames`) | RTE/RTR (ADR 0051 first gate), computed RTS and the asynchronous-writer set | RTE/RTR discover nothing under the strict model; push-window RTS is unresolved | the baseline has no stack cells | `rts_computed`/RTE/RTR resolved only from code-built frames; handler-entry frames stay Unknown (`interrupt_resumption`) |
 
    **Not admitted (candidates):** intervals beyond the finite-set bound (no measured site hit the 4,096 bound); general widening (the
    stride form above widens only to a region extent, never to certainty); pin minimization (ADR 0078 T003 record: cascaded
@@ -95,6 +95,9 @@ reproduce the SEG-026-T002 strict row exactly.
 6. **Context bound.** Call string of depth k = 1, encoded in the adapter's opaque 64-bit point: `point = (ctx << 24) | pc`, with
    `ctx = 0` (no context) or the call-site PC + 1. `D` is the set of the low 24 bits of reached points. At most K = 8 contexts per callee
    entry; beyond K the callee is merged into context 0 in the next driver round and reported `context_bound` (generic `state_bound`).
+   SEG-030-T006: with the `frames` domain the context's top byte is the partition tag (0: the main flow; a handler instance; 254: the
+   handlers without an analysed instance, kept for `D`): `point = (tag << 48) | (ctx << 24) | pc`. Calls stay in their partition and
+   a merged callee is merged per partition.
 7. **Asynchronous writers.** The machine-delivered vector roots (`genesis_reachability_roots`, shared with the challenger) are
    potential asynchronous writers.
    - The asynchronous cell set is the union of the store cells over the code reachable from those roots in `D` (every edge of the
@@ -111,19 +114,24 @@ reproduce the SEG-026-T002 strict row exactly.
      handler entry A7 is Unknown. Consequence: when interrupts can be taken, the nested exception frame is a handler store through an
      Unknown address, and every work-RAM cell is asynchronous. The implementation applies exactly this consequence for the Genesis
      driver (`M68kMemoryConfig::interrupts`).
-   - **Interrupt and handler-stack precision (owned by SEG-030-T006, extended).** Precise asynchronous cell sets require
-     interrupt-mask and handler-stack tracking. This is a SEG-030 precision blocker, not a future candidate. T006 (pending) adds,
-     CPU-owned in `libs/cpu/m68k/analysis`:
-     - SR interrupt-mask tracking, and supervisor/user mode where a question depends on it;
-     - A7/supervisor-stack provenance;
-     - exception-frame pushes at proven stack locations, only when the supervisor-stack provenance is sound;
-     - handler nesting per the actual SR mask semantics, and per-point interrupt eligibility;
-     - RTE SR/PC restoration only from proven code-built frames.
-
-     It answers, soundly: can this point be interrupted; where can its frame be written; can this handler be nested or preempted;
-     which cells are truly asynchronous. Whatever is not provable keeps the current conservative consequence above (Unknown entry A7,
-     every cell asynchronous). There is no universal "RTE resumes here" rule: asynchronous resumption may stay Unknown
-     (`interrupt_resumption`).
+   - **Interrupt and handler-stack precision (SEG-030-T006, implemented as the staged `frames` domain).** Without `frames` the
+     consequence above applies unchanged. With `frames` (CPU-owned in `libs/cpu/m68k/analysis`, record T006):
+     - **Implemented.** SR status tracking (S and I2-I0) through MOVE/ANDI/ORI/EORI to SR, STOP, proven RTE and the 68000 reset state
+       (S = 1, I = 7, SSP = the long at vector 0); per-boundary interrupt eligibility (level > mask, level 7 and unknown levels always);
+       the 6-byte group 1/2 frame at A7 - 6 only when S = 1 is proven; one analysed partition per handler instance (handler, parent
+       partition), entered with the accepted mask and the frame address, so that handler code is never joined with the code it
+       preempts; nesting and preemption per the mask (a handler on its own chain, deeper than the depth bound, inside a non-resuming
+       instance, or with an Unknown frame address is not analysed); per-partition asynchronous writers (the stores, interrupt frames
+       and asynchronous writers of the resuming child instances: interrupts and divide-by-zero/CHK/TRAPV); a frame-integrity check
+       (a child that may rewrite its saved SR makes the parent's status Unknown after the boundaries where it can be taken); RTE/RTR
+       and an RTS away from the entry stack delta resolved only from code-built frame cells.
+     - **Still Unknown.** An unanalysed resuming child makes its parent's writers every cell. A handler RTE never resumes anywhere the
+       analysis names (`interrupt_resumption`). The frame address after a call into a callee with an unknown effect, or an unbalanced
+       callee, is Unknown (its A7 is not restored). The status of an opaque continuation is the whole-program status bound
+       (relative to the closure premise of decision 8). Register preservation across an interrupt remains the existing resumption
+       premise; only the saved SR is checked.
+     - **Machine root premise.** Only the delivered vectors of ADR 0021 / ADR 0043 (level-6 autovector and the synchronous vectors)
+       are handlers; an installed but undelivered interrupt (level 2 or 4) is outside the analysed program, as for the challenger.
    - Handler entry: registers and work RAM Unknown, A7 as above.
    - Initial work RAM is Unknown (`initial_memory`). ADR 0055's zero-reset assumption is not reused: real hardware leaves work RAM
      undefined.
@@ -179,7 +187,9 @@ reproduce the SEG-026-T002 strict row exactly.
     `interrupt_resumption`, `invalidated`. Ordinary RTS is modelled through call continuations and is not a computed site.
 11. **Resource constants.** Solver 1,000,000 iterations and 2^20 points (unchanged, ADR 0078 decision 4); finite set 4,096; points-to at
     most 8 `(region, offset-set)` pairs; exact offset set at most 64, else strided; memory at most 512 cells per state (overflow: memory
-    Unknown, `state_bound`); K = 8; R = 16.
+    Unknown, `state_bound`); K = 8; R = 16. SEG-030-T006: handler-instance chain depth at most 3, at most 253 instance tags (beyond:
+    the frames domain fails closed, `state_bound`), an instance's entry A7 widened to Unknown after 4 growing rounds; the frames
+    rounds run after at most R warm-start contexts rounds and are themselves bounded by R.
 12. **ADR 0076 STOP check.**
     - Universal CPU IR: no; the adapter reads `M68kIrOperation` and CPU effect owners only.
     - Generic memory emulator in the core: no; abstract memory is CPU-owned and bounded.
@@ -200,7 +210,7 @@ reproduce the SEG-026-T002 strict row exactly.
 - T002 lands the report-only driver and the oracle-level regression baseline before any domain is credited.
 - T003..T006 add the admitted domains in `libs/cpu/m68k/analysis`, each inert when its flag is off, so the baseline stays reproducible.
 - T006 (extended) and T010 own the two environmental writer proofs of decision 7 (interrupt/handler-stack precision; Z80 work-RAM
-  store freedom). Both are pending.
+  store freedom). T006 is implemented as the `frames` domain (record T006); T010 is pending.
 - A domain whose child cannot meet its observable acceptance stops and records why; zero measured gain is an acceptable recorded result.
 - **Accepted tradeoff.** Complexity is allowed when it is required for sound, general static recovery, provided it stays bounded,
   deterministic, CPU-owned where appropriate, evidence-driven and fail-closed. The invariant is "precise proof OR typed Unknown": a

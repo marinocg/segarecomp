@@ -43,6 +43,22 @@
 // a nested unbalanced activation, and the T004 opaque entry for an unresolved callee or an unknown effect. The driver rounds derive
 // the summaries from each solve and validate them against the configuration the solve used; only a validated round is returned.
 //
+// SEG-030-T006 (ADR 0079 decisions 5, 7, 9 and 10): when `domains.frames` is set (it implies `contexts`, `memory` and `address`),
+// the state also carries the CPU-owned status (S and I2-I0, frames.hpp) and the analysis runs one partition per handler INSTANCE: a
+// program point is `(tag << 48) | (context << 24) | pc`, tag 0 being the main flow (the reset or bridge entry) and every other tag
+// one handler taken from one parent partition (M68kHandlerInstance). Partitions never share an edge. A handler instance is entered
+// with S = 1, the mask of the accepted interrupt (or the parent's for a synchronous exception) and A7 = the frame address (the join
+// over the parent's eligible or raising points of A7 - 6, only when S = 1 is proven there; else Unknown). The asynchronous writers
+// of a partition are the stores, interrupt frames and asynchronous writers of the handler instances that can preempt it AND whose
+// resumption is analysed (interrupts; divide-by-zero, CHK and TRAPV): a per-partition policy instead of every cell. RTE/RTR and an
+// RTS away from the entry stack delta are resolved only from precise frame or return cells written by analysed code (computed
+// edges); every other one stays Unknown (`frame_unproven`, `interrupt_resumption` in a handler partition, ...). A resuming child that
+// may rewrite its saved SR (frame integrity) makes its parent's status Unknown after the boundaries where it can be taken. An
+// opaque continuation's status is the whole-program status bound; a balanced merged callee's continuation keeps the caller's A7.
+// The handlers without an analysed instance are seeded in one more partition (for D) whose every cell is asynchronous. The driver
+// first settles the contexts rounds with no frames configuration (warm start), then grows the frames configuration only from
+// settled rounds and returns a validated round only (else the T005 contexts result, with the reason).
+//
 // Report-only: no production target links this library.
 
 #include <array>
@@ -60,6 +76,7 @@
 #include "segarecomp/analysis/solver.hpp"
 #include "segarecomp/cpu/m68k/analysis/abstract_memory.hpp"
 #include "segarecomp/cpu/m68k/analysis/address_value.hpp"
+#include "segarecomp/cpu/m68k/analysis/frames.hpp"
 #include "segarecomp/cpu/m68k/control_successors.hpp"
 #include "segarecomp/cpu/m68k/finite_register_values.hpp"
 #include "segarecomp/cpu/m68k/ir.hpp"
@@ -125,6 +142,8 @@ struct M68kAnalysisState {
   M68kAbstractMemory memory;
   // SEG-030-T005: A7 minus A7 at the entry of the current activation (modulo 2^32), contexts domain only (bottom otherwise).
   analysis::FiniteValue stack_delta;
+  // SEG-030-T006: the status `(S << 3) | I` (frames.hpp), frames domain only (bottom otherwise; Unknown: SR not tracked).
+  analysis::FiniteValue status;
 
   [[nodiscard]] static M68kAnalysisState unreachable() { return {}; }
   [[nodiscard]] static M68kAnalysisState all_unknown(analysis::UnknownReason reason = analysis::UnknownReason::unknown_input);
@@ -207,6 +226,25 @@ inline constexpr std::size_t m68k_context_bound = 8U;
 [[nodiscard]] constexpr std::uint32_t m68k_call_context(std::uint32_t call_site) noexcept {
   return (call_site & UINT32_C(0x00FFFFFF)) + 1U;
 }
+// SEG-030-T006: a context carries the partition tag in its top byte (always 0 unless the frames domain is enabled).
+[[nodiscard]] constexpr std::uint32_t m68k_context_tag(std::uint32_t context) noexcept { return context >> 24U; }
+[[nodiscard]] constexpr std::uint32_t m68k_context_site(std::uint32_t context) noexcept { return context & UINT32_C(0x00FFFFFF); }
+[[nodiscard]] constexpr std::uint32_t m68k_tagged_context(std::uint32_t tag, std::uint32_t site) noexcept {
+  return (tag << 24U) | (site & UINT32_C(0x00FFFFFF));
+}
+[[nodiscard]] constexpr std::uint32_t m68k_point_tag(std::uint64_t point) noexcept {
+  return m68k_context_tag(m68k_point_context(point));
+}
+// SEG-030-T006: the largest instance tag; above it the frames domain fails closed (`state_bound`).
+inline constexpr std::uint32_t m68k_max_instance_tag = 0xFDU;
+// The tag of the partition that seeds the roots of handlers without an analysed instance (kept for D; never a writer or a parent; every
+// cell is asynchronous there).
+inline constexpr std::uint32_t m68k_dead_handler_tag = 0xFEU;
+// The instance depth bound: a handler taken from a chain of this many handler instances is not analysed (its parent's writers are
+// every cell).
+inline constexpr std::uint32_t m68k_instance_depth_bound = 3U;
+// Growth bound of an instance's entry A7 across rounds: beyond it the entry A7 is Unknown(frame_unproven) (widening).
+inline constexpr std::uint32_t m68k_instance_growth_bound = 4U;
 
 // SEG-030-T005: the contexts-domain part of the driver configuration (ADR 0079 decision 9).
 struct M68kContextConfig {
@@ -218,6 +256,9 @@ struct M68kContextConfig {
   // Call-site context without a proven summary -> the CPU sub-reason of its opaque continuation (none, stack_unbalanced,
   // context_bound).
   std::map<std::uint32_t, M68kAnalysisSubReason> opaque;
+  // SEG-030-T006 (frames domain only): `m68k_tagged_context(tag, callee)` of a merged callee proven balanced -> the join of its exit
+  // statuses. Its continuations keep the caller's A7 and take this status (registers and memory stay opaque).
+  std::map<std::uint32_t, analysis::FiniteValue> merged_exits;
   std::uint32_t round_bound{m68k_memory_round_bound};  // R (tests may lower it, never raise it)
   friend bool operator==(const M68kContextConfig &, const M68kContextConfig &) = default;
 };
@@ -248,6 +289,103 @@ struct M68kContextReport {
   std::size_t unresolved_sites{};
 };
 
+// SEG-030-T006: one machine-delivered vector and its handler (ADR 0021 / ADR 0043 delivered set).
+struct M68kHandlerVector {
+  std::uint32_t vector{};
+  std::uint32_t handler{};  // 24-bit bus PC
+  friend bool operator==(const M68kHandlerVector &, const M68kHandlerVector &) = default;
+};
+
+// SEG-030-T006: one handler instance (a partition): `handler` taken from the partition `parent` (0: the main flow). An instance is
+// analysed only when its entry A7 is known, its parent is the main flow or a resuming instance, its handler is not already on the
+// parent's chain and the chain is below the depth bound; any other handler taken from a partition is unanalysed and, when it can
+// resume, makes that partition's asynchronous writers every cell and its status Unknown after the boundaries where it can be taken.
+struct M68kHandlerInstance {
+  std::uint32_t handler{};
+  std::uint32_t parent{};
+  analysis::FiniteValue status;      // entry status
+  M68kPointsTo a7;                   // entry A7 (the frame address)
+  std::set<std::uint32_t> vectors;   // the vectors entering it from the parent
+  bool resuming{};                   // some vector entering it resumes at an analysed point of its parent
+  bool interrupt{};                  // some vector entering it is an interrupt
+  std::uint32_t growth{};            // rounds in which the entry A7 grew (widening, m68k_instance_growth_bound)
+  friend bool operator==(const M68kHandlerInstance &, const M68kHandlerInstance &) = default;
+};
+
+// SEG-030-T006: the frames-domain part of the configuration (ADR 0079 decisions 7 and 9).
+struct M68kFrameConfig {
+  std::vector<M68kHandlerVector> vectors;           // machine facts
+  std::set<std::uint32_t> main_entries;             // roots of the main flow (tag 0)
+  std::optional<std::uint32_t> reset_entry;         // the reset root (S = 1, I = 7, A7 = reset_ssp)
+  std::optional<std::uint32_t> reset_ssp;           // the long at vector 0
+  std::map<std::uint32_t, M68kHandlerInstance> instances;  // tag (1..m68k_max_instance_tag) -> analysed instance
+  std::uint32_t next_tag{1U};  // tags are never reused (a dropped instance's tag stays retired)
+  std::map<std::uint32_t, M68kMemoryPolicy> policies;      // tag -> its asynchronous writers; grows monotonically
+  // Partitions whose status after an interrupted boundary is Unknown because a resuming child instance may rewrite its saved SR,
+  // with the interrupt levels of those children (1-7; 8: an interrupt of unknown level; 0: a resuming synchronous vector, at its
+  // raising instruction).
+  std::map<std::uint32_t, std::set<std::uint32_t>> clobbered;
+  // The whole-program status bound: the join of every live entry status, every SR writer's result and every proven RTE's restored
+  // status in D (Unknown when a partition is clobbered). It is the status of an opaque continuation, relative to the closure premise
+  // (ADR 0079 decision 8). Grows monotonically from bottom.
+  analysis::FiniteValue status_bound;
+  friend bool operator==(const M68kFrameConfig &, const M68kFrameConfig &) = default;
+};
+
+// SEG-030-T006: an RTE, RTR, or RTS away from the entry stack delta, resolved only from precise analysed frame/return cells.
+struct M68kReturnSiteReport {
+  M68kDynamicControlFamily family{M68kDynamicControlFamily::return_from_exception};
+  bool resolved{};
+  std::vector<std::uint32_t> targets;  // sorted distinct even mapped PCs; non-empty only when resolved
+  std::uint32_t odd_targets_excluded{};
+  analysis::UnknownReason reason{analysis::UnknownReason::unsupported_transfer};
+  M68kAnalysisSubReason sub{M68kAnalysisSubReason::none};
+  analysis::FiniteValue restored_status;  // RTE only: the status restored from the proven frame
+};
+
+// SEG-030-T006: frames-domain outcome of a run (counts only; the configuration of the returned round).
+struct M68kFrameReport {
+  bool enabled{};
+  bool validated{};
+  analysis::UnknownReason reason{analysis::UnknownReason::iteration_bound};  // when not validated (frames switched off)
+  std::string failure;               // a generic failure class when not validated
+  std::uint32_t warm_rounds{};       // contexts rounds before the frames configuration grows
+  std::uint32_t frame_rounds{};      // rounds of the frames configuration
+  bool reset_state{};                // the main flow starts from the 68000 reset state
+  std::size_t handler_vectors{};
+  std::size_t instances{};           // analysed instances
+  std::size_t interrupt_instances{};
+  std::size_t resuming_instances{};  // resuming synchronous (not interrupt)
+  std::size_t synchronous_instances{};
+  std::size_t dead_handlers{};       // handler PCs with no analysed instance
+  std::map<std::string, std::size_t> unanalysed;  // handlers taken from a live partition but not analysed, by cause
+  std::size_t frame_integrity_failures{};
+  std::size_t clobbered_partitions{};
+  // Points of live partitions.
+  std::size_t points{};
+  std::size_t status_unknown{};
+  std::size_t supervisor_proven{};
+  std::size_t interrupt_eligible{};  // some delivered interrupt can be taken
+  std::size_t interrupt_masked{};    // status known and no delivered interrupt can be taken
+  std::size_t raising_points{};      // some delivered synchronous vector may be raised
+  std::size_t frame_unknown_a7{};          // eligible/raising points whose frame address is Unknown: S = 1 proven, A7 Unknown
+  std::size_t frame_unproven_supervisor{}; // ... S = 1 not proven
+  std::map<std::string, std::size_t> frame_a7_unknown_by_reason;  // the first: by A7's generic reason / CPU sub-reason
+  // The same boundary counts in the first frames round (before a clobbered status propagates): where the frame address is lost first.
+  std::size_t first_round_points{};
+  std::size_t first_round_status_unknown{};
+  std::size_t first_round_interrupt_eligible{};
+  std::size_t first_round_interrupt_masked{};
+  std::size_t first_round_frame_unknown_a7{};
+  std::size_t first_round_frame_unproven_supervisor{};
+  std::map<std::string, std::size_t> first_round_a7_unknown_by_reason;
+  // The main-flow (tag 0) asynchronous writers.
+  bool main_async_all{};
+  std::size_t main_async_ranges{};
+  std::size_t main_async_bytes{};
+  std::size_t unknown_target_writer_stores{};  // stores with an Unknown target in analysed resuming instances
+};
+
 // SEG-030-T004: memory-domain outcome of a run.
 struct M68kMemoryReport {
   bool enabled{};
@@ -275,13 +413,14 @@ struct M68kAnalysisConfig {
   M68kAnalysisDomains domains{};         // staged domains (all off: the SEG-029 baseline)
   M68kMemoryConfig memory{};             // SEG-030-T004 (memory domain only)
   M68kContextConfig contexts{};          // SEG-030-T005 (contexts domain only)
+  M68kFrameConfig frames{};              // SEG-030-T006 (frames domain only)
 };
 
 class M68kFiniteAdapter {
 public:
   using State = M68kAnalysisState;
 
-  M68kFiniteAdapter(const M68kAnalysisImage &image, M68kAnalysisConfig config) : image_(image), config_(std::move(config)) {}
+  M68kFiniteAdapter(const M68kAnalysisImage &image, M68kAnalysisConfig config);
 
   [[nodiscard]] analysis::TransferResult<State> transfer(std::uint64_t point, const State &in);
 
@@ -302,22 +441,51 @@ public:
   // generic reason and CPU sub-reason when Unknown. `tracked` reports whether a work-RAM cell (or an Unknown address) was involved.
   [[nodiscard]] M68kMemoryRead read_memory_operand(const State &in, const M68kEffectiveAddress &ea, std::uint32_t bytes,
                                                    bool *tracked = nullptr) const;
+  // SEG-030-T006: the same read under the asynchronous-writer policy of partition `tag`.
+  [[nodiscard]] M68kMemoryRead read_memory_operand(std::uint32_t tag, const State &in, const M68kEffectiveAddress &ea,
+                                                   std::uint32_t bytes, bool *tracked = nullptr) const;
+  // SEG-030-T006: the memory policy of partition `tag` (the global policy unless the frames domain is enabled).
+  [[nodiscard]] const M68kMemoryPolicy &policy_for(std::uint32_t tag) const;
+  // SEG-030-T006: the status an instruction of partition `tag` runs with (Unknown when a child instance that may rewrite its saved SR
+  // can be taken at the boundary before it).
+  [[nodiscard]] analysis::FiniteValue effective_status(std::uint32_t tag, const State &in) const;
+  // SEG-030-T006: true when a resuming synchronous child that may rewrite its saved SR resumes after `operation` (its status is then
+  // Unknown).
+  [[nodiscard]] bool clobbered_after(std::uint32_t tag, const M68kIrOperation &operation, const analysis::FiniteValue &status) const;
+  // SEG-030-T006: the exception frame address of a boundary (A7 - 6 when S = 1 is proven, else Unknown).
+  [[nodiscard]] M68kPointsTo frame_address(const analysis::FiniteValue &status, const State &in) const;
+  // SEG-030-T006: classification of an RTE, RTR or RTS-away-from-the-entry-delta site (frames domain).
+  [[nodiscard]] std::optional<M68kReturnSiteReport> evaluate_return_site(std::uint64_t point, const M68kIrOperation &operation,
+                                                                         const State &in) const;
   // The state of an entry: a root (initial memory) or an opaque continuation (callee stores).
   [[nodiscard]] State entry_state(bool continuation) const;
+  // SEG-030-T006: the seed of a root in partition `tag` (the reset state, a live handler instance's entry, or the entry state).
+  [[nodiscard]] State root_state(std::uint32_t tag, std::uint32_t pc) const;
   // SEG-030-T005: an opaque continuation typed by `sub` (none: the T004 opaque entry).
   [[nodiscard]] State opaque_continuation(M68kAnalysisSubReason sub) const;
   // SEG-030-T005: the stack delta after `operation` (normal successors), from its input state.
   [[nodiscard]] analysis::FiniteValue stack_delta_after(const M68kIrOperation &operation, const State &in) const;
   // SEG-030-T005: the continuation state of the call at `pc` whose callees in this transfer are `callees` (empty: unresolved).
-  [[nodiscard]] State continuation(std::uint32_t pc, const std::vector<std::uint32_t> &callees, const State &in) const;
+  [[nodiscard]] State continuation(std::uint32_t pc, const std::vector<std::uint32_t> &callees, const State &in,
+                                   std::uint32_t tag = 0U) const;
+  // SEG-030-T006: the memory write targets with the exception frame of `status` (frames domain).
+  [[nodiscard]] std::vector<std::pair<M68kPointsTo, std::uint32_t>> memory_write_targets(const M68kIrOperation &operation,
+                                                                                         const State &in,
+                                                                                         const analysis::FiniteValue &status) const;
 
 private:
-  void transfer_address_registers(const M68kIrOperation &operation, const State &in, State &out) const;
-  void transfer_memory(const M68kIrOperation &operation, std::uint32_t next, const State &in, State &out) const;
+  void transfer_address_registers(const M68kIrOperation &operation, const State &in, State &out,
+                                  const M68kMemoryPolicy *policy = nullptr) const;
+  void transfer_memory(const M68kIrOperation &operation, std::uint32_t next, const State &in, State &out,
+                       const M68kMemoryPolicy &policy, const analysis::FiniteValue &status) const;
   [[nodiscard]] M68kPointsTo operand_address(const State &in, const M68kEffectiveAddress &ea, std::uint32_t predecrement) const;
-  [[nodiscard]] std::optional<M68kCellValue> operand_value(const State &in, const M68kEffectiveAddress &ea, std::uint32_t bytes) const;
+  [[nodiscard]] std::optional<M68kCellValue> operand_value(const State &in, const M68kEffectiveAddress &ea, std::uint32_t bytes,
+                                                           const M68kMemoryPolicy &policy) const;
+  [[nodiscard]] M68kMemoryRead read_memory_with(const M68kMemoryPolicy &policy, const State &in, const M68kEffectiveAddress &ea,
+                                                std::uint32_t bytes, bool *tracked) const;
   const M68kAnalysisImage &image_;
   M68kAnalysisConfig config_;
+  std::map<std::uint32_t, M68kMemoryPolicy> tag_policies_;  // SEG-030-T006: the global policy joined with each partition's
   mutable std::map<std::uint32_t, std::optional<M68kAnalysisImage::Instruction>> decoded_;
 };
 static_assert(analysis::Adapter<M68kFiniteAdapter>);
@@ -335,6 +503,8 @@ struct M68kFiniteAnalysisResult {
   std::map<std::uint32_t, analysis::UnknownReason> unresolved_computed;  // every unresolved computed site
   M68kMemoryReport memory;  // SEG-030-T004 (memory domain only)
   M68kContextReport contexts;  // SEG-030-T005 (contexts domain only)
+  std::map<std::uint32_t, M68kReturnSiteReport> return_sites;  // SEG-030-T006 (frames domain only)
+  M68kFrameReport frames;      // SEG-030-T006 (frames domain only)
   analysis::Solution<M68kAnalysisState> solution;
 };
 

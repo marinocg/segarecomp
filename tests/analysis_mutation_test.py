@@ -4,7 +4,7 @@
 Every mutant below is one precise textual edit of PRODUCTION analysis code (the generic core headers, the M68K adapter, the Z80
 effect projection or the Z80 adapter) that plants a deliberate soundness, determinism or bound defect. The harness copies the
 product tree (without build/, .git/, games/, .tools/) to a temporary directory, configures ONE build there, builds the
-SEG-029 fixture tests plus the SEG-030-T005 contexts fixture and requires the unmutated baseline to pass. Then, per mutant, it
+SEG-029 fixture tests plus the SEG-030-T005 contexts and SEG-030-T006 frames fixtures and requires the unmutated baseline to pass. Then, per mutant, it
 applies the edit to the temporary copy only, rebuilds the affected fixture tests incrementally, runs them, and restores the file. A
 mutant is KILLED when one of its fixture tests exits non-zero (or times out). The worktree is never modified.
 
@@ -43,13 +43,15 @@ CORE_TEST = "analysis_core_test"
 M68K_TEST = "analysis_m68k_equivalence_test"
 Z80_TEST = "analysis_z80_adapter_test"
 CONTEXTS_TEST = "analysis_m68k_contexts_test"  # SEG-030-T005: call contexts and callee summaries
+FRAMES_TEST = "analysis_m68k_frames_test"  # SEG-030-T006: interrupt mask, handler instances, frames and returns
 # cheapest first: a core mutant is usually decided by the CPU-free fixture
-ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, CONTEXTS_TEST)
+ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, CONTEXTS_TEST, FRAMES_TEST)
 TEST_TIMEOUT_SECONDS = 60  # the unmutated fixtures run in well under a second
 
 FINITE = "libs/analysis/include/segarecomp/analysis/finite_value.hpp"
 SOLVER = "libs/analysis/include/segarecomp/analysis/solver.hpp"
 M68K = "libs/cpu/m68k/analysis/src/finite_adapter.cpp"
+M68K_FRAMES = "libs/cpu/m68k/analysis/src/frames.cpp"
 Z80_EFFECTS = "libs/cpu/z80/src/effects.cpp"
 Z80_ADAPTER = "libs/cpu/z80/analysis/src/adapter.cpp"
 
@@ -214,6 +216,43 @@ MUTANTS: list[Mutant] = [
            "    state = summary->second;\n",
            "    state = summary->second;\n    state.memory = in.memory;\n",
            (CONTEXTS_TEST,), "an applied summary keeps the caller's pre-call memory instead of the callee's memory effects"),
+    # ---------------------------------------------------------------- M68K interrupt mask, handler instances and frames (SEG-030-T006)
+    Mutant("m68k_unknown_sr_treated_as_masked", M68K_FRAMES,
+           "  if (status.is_unknown()) return true;\n  if (!level || *level == 7U)",
+           "  if (status.is_unknown()) return false;\n  if (!level || *level == 7U)",
+           (FRAMES_TEST,), "dropping interrupt-mask poison: an Unknown SR is treated as masking every interrupt"),
+    Mutant("m68k_preemption_at_equal_mask", M68K_FRAMES,
+           "return m68k_status_mask(v) < *level; });",
+           "return m68k_status_mask(v) <= *level; });",
+           (FRAMES_TEST,), "incorrect handler nesting: an interrupt preempts a boundary whose mask equals its level"),
+    Mutant("m68k_frame_at_a7", M68K,
+           "  return m68k_points_to_add(a7, {-static_cast<std::int64_t>(m68k_exception_frame_bytes)});",
+           "  return a7;",
+           (FRAMES_TEST,), "wrong supervisor-stack provenance: the exception frame address is A7 instead of A7 - 6"),
+    Mutant("m68k_reset_ssp_ignored", M68K,
+           "      if (config_.frames.reset_ssp) state.address[7] = classify(image_, constant(*config_.frames.reset_ssp));\n",
+           "",
+           (FRAMES_TEST,), "wrong supervisor-stack provenance: the reset SSP is not the main flow's A7"),
+    Mutant("m68k_rte_status_not_restored", M68K,
+           "            edge.status = report->restored_status;",
+           "            edge.status = out.status;",
+           (FRAMES_TEST,), "incorrect RTE SR restoration: a proven RTE keeps the pre-RTE status"),
+    Mutant("m68k_partition_policy_dropped", M68K,
+           "  for (const auto &[tag, policy] : config_.frames.policies) tag_policies_.emplace(tag, join(config_.memory.policy, policy));",
+           "  for (const auto &[tag, policy] : config_.frames.policies) tag_policies_.emplace(tag, config_.memory.policy);",
+           (FRAMES_TEST,), "stale memory fact after policy growth: a partition's grown asynchronous writers are not applied"),
+    Mutant("m68k_unanalysed_handler_precise", M68K,
+           "  every_cell.async_all = true;\n",
+           "",
+           (FRAMES_TEST,), "the code of a handler without an analysed instance reads work RAM without any asynchronous writer"),
+    Mutant("m68k_frame_integrity_ignored", M68K,
+           "    bool intact = !subtree[tag].overlaps(0, 2);",
+           "    bool intact = true;",
+           (FRAMES_TEST,), "a handler rewriting its saved SR keeps the interrupted status"),
+    Mutant("m68k_interrupt_resumption_unlabelled", M68K,
+           "    out.sub = rte && tag != 0U ? Sub::interrupt_resumption : sub;",
+           "    out.sub = sub;",
+           (FRAMES_TEST,), "a handler RTE resuming interrupted code is not reported interrupt_resumption"),
     # ---------------------------------------------------------------- Z80 projection and adapter
     Mutant("z80_ram_load_precise", Z80_ADAPTER,
            "        if (!image_.contains(at)) return FiniteValue::unknown(UnknownReason::non_immutable_read);",

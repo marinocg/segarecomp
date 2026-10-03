@@ -25,3 +25,10 @@ target_link_libraries(analysis_m68k_contexts_test PRIVATE segarecomp::cpu_m68k_a
 segarecomp_enable_warnings(analysis_m68k_contexts_test)
 add_test(NAME analysis_m68k_contexts_test COMMAND analysis_m68k_contexts_test)
 set_property(TEST analysis_m68k_contexts_test APPEND PROPERTY LABELS full fast)
+
+# SEG-030-T006 (ADR 0079): interrupt mask, handler instances, exception frames and RTE/RTR/computed-RTS provenance.
+add_executable(analysis_m68k_frames_test analysis_m68k_frames_test.cpp)
+target_link_libraries(analysis_m68k_frames_test PRIVATE segarecomp::cpu_m68k_analysis)
+segarecomp_enable_warnings(analysis_m68k_frames_test)
+add_test(NAME analysis_m68k_frames_test COMMAND analysis_m68k_frames_test)
+set_property(TEST analysis_m68k_frames_test APPEND PROPERTY LABELS full fast)

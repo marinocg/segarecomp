@@ -44,6 +44,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "segarecomp/cpu/m68k/control_successors.hpp"
@@ -146,6 +147,8 @@ struct GenesisReachabilityChallengerResult {
 struct GenesisReachabilityRoots {
   std::vector<std::uint32_t> roots;
   std::uint32_t vector_roots{};
+  // SEG-030-T006: every installed delivered vector as (vector number, handler), in delivery-list order (report-only consumers).
+  std::vector<std::pair<std::uint32_t, std::uint32_t>> vectors;
 };
 [[nodiscard]] GenesisReachabilityRoots genesis_reachability_roots(const FrontendProgram &program);
 
