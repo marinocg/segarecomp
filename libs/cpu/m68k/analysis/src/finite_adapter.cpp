@@ -1990,6 +1990,10 @@ std::optional<M68kReturnSiteReport> M68kFiniteAdapter::evaluate_return_site(std:
   const auto tag = m68k_point_tag(point);
   M68kReturnSiteReport out;
   out.family = family;
+  if (rte && tag != 0U) {
+    if (const auto offset = frame_pc_offset(tag, in)) out.resumption_offsets.push_back(*offset);
+    else out.resumption_unproven = true;
+  }
   const auto finish = [&](UnknownReason reason, Sub sub) {
     out.resolved = false;
     out.reason = reason;
@@ -2211,6 +2215,13 @@ void merge_site(std::map<std::uint32_t, Report> &sites, std::uint32_t pc, Report
   const auto [found, inserted] = sites.emplace(pc, report);
   if (inserted) return;
   auto &kept = found->second;
+  if constexpr (requires { kept.resumption_offsets; }) {
+    std::set<std::int32_t> offsets(kept.resumption_offsets.begin(), kept.resumption_offsets.end());
+    offsets.insert(report.resumption_offsets.begin(), report.resumption_offsets.end());
+    kept.resumption_offsets.assign(offsets.begin(), offsets.end());
+    report.resumption_offsets = kept.resumption_offsets;
+    kept.resumption_unproven = report.resumption_unproven = kept.resumption_unproven || report.resumption_unproven;
+  }
   if (!site_resolved(kept)) return;
   if (!site_resolved(report)) {
     kept = std::move(report);

@@ -441,6 +441,10 @@ struct M68kReturnSiteReport {
   analysis::UnknownReason reason{analysis::UnknownReason::unsupported_transfer};
   M68kAnalysisSubReason sub{M68kAnalysisSubReason::none};
   analysis::FiniteValue restored_status;  // RTE only: the status restored from the proven frame
+  // Exact hardware-frame PC offsets proven for this handler RTE. The site remains a typed Unknown because its target is relative to
+  // the parent taking point; consumers use this set to distinguish a modelled resumption from an unproven RTE.
+  std::vector<std::int32_t> resumption_offsets;
+  bool resumption_unproven{};  // at least one merged handler context cannot prove its hardware-frame PC relation
 };
 
 // SEG-030-T008 (ADR 0079 decision 8): the classification of an RTS at its activation's entry stack delta (or of any RTS when the stack

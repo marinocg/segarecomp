@@ -938,11 +938,13 @@ void hardware_frame_pc_resumption() {
   {
     const auto [a, trap, next, plus_two, rte] = build({});
     const auto result = run(a, {{32U, sync_a}});
+    const auto *site = return_site(result, rte);
     (void)trap;
     (void)plus_two;
     (void)rte;
-    expect(result.frames.validated && reached_in(result, next, 0U) && includes(word_at(result, next, 0U), 7U),
-           "hardware frame: unchanged PC resumes the original stacked target with the handler D0 effect");
+    expect(result.frames.validated && reached_in(result, next, 0U) && includes(word_at(result, next, 0U), 7U) && site != nullptr &&
+               !site->resumption_unproven && site->resumption_offsets == std::vector<std::int32_t>{0},
+            "hardware frame: unchanged PC resumes the original stacked target with the handler D0 effect");
   }
 
   const std::vector<std::pair<const char *, std::vector<std::uint32_t>>> plus_two_forms{
@@ -954,9 +956,11 @@ void hardware_frame_pc_resumption() {
   for (const auto &[name, body] : plus_two_forms) {
     const auto [a, trap, next, plus_two, rte] = build(body);
     const auto result = run(a, {{32U, sync_a}});
+    const auto *site = return_site(result, rte);
     const bool negative = std::string(name).find("negative") != std::string::npos;
     const auto resumed = negative ? trap : plus_two;
-    expect(result.frames.validated && result.frames.offset_resumptions > 0U && reached_in(result, resumed, 0U),
+    expect(result.frames.validated && result.frames.offset_resumptions > 0U && reached_in(result, resumed, 0U) && site != nullptr &&
+               !site->resumption_unproven && site->resumption_offsets == std::vector<std::int32_t>{negative ? -2 : 2},
            std::string("hardware frame ") + name + ": exact signed long transform resumes stacked PC plus its offset");
     expect(includes(word_at(result, resumed, 0U), 7U), std::string("hardware frame ") + name + ": handler D0 reaches resumption");
     (void)next;
@@ -979,12 +983,12 @@ void hardware_frame_pc_resumption() {
   const auto fail_closed = [&](const char *name, const std::vector<std::uint32_t> &body, M68kMemoryPolicy policy = {}) {
     const auto [a, trap, next, plus_two, rte] = build(body);
     const auto result = run(a, {{32U, sync_a}}, true, true, {}, std::move(policy));
+    const auto *site = return_site(result, rte);
     expect(result.frames.validated && result.frames.unproven_resumptions > 0U && reached_in(result, next, 0U) &&
-               word_at(result, next, 0U).is_unknown(),
-           std::string("hardware frame ") + name + ": possible return is fail-closed, not credited unchanged");
+                word_at(result, next, 0U).is_unknown() && site != nullptr && site->resumption_offsets.empty() && site->resumption_unproven,
+            std::string("hardware frame ") + name + ": possible return is fail-closed, not credited unchanged");
     (void)trap;
     (void)plus_two;
-    (void)rte;
   };
   fail_closed("unknown replacement", {0x2F45U, 0x0002U});  // MOVE.L D5,2(A7)
   fail_closed("partial overlap", {0x3F45U, 0x0002U});       // MOVE.W D5,2(A7)
@@ -1029,6 +1033,23 @@ void interrupt_frame_pc_offset_edge() {
   if (debug()) std::cerr << describe(result);
   expect(result.complete && result.frames.validated && result.frames.offset_resumptions > 0U && reached_in(result, 0x208U, 0U),
          "interrupt frame offset: non-zero saved-PC transform emits the shifted ordinary-edge resumption");
+}
+
+void synchronous_offset_loop_register_effects() {
+  // A TRAP handler returning to the raising PC must feed its D4/A1 effects into that self-edge before the point is reprocessed.
+  Asm a;
+  a.moveq(4, 1U).w({0x43F9U}).l(0x600U);  // LEA ($600).L,A1
+  const auto trap = a.pc;
+  a.w({0x4E40U}).stop();
+  a.at(0x600U).stop();
+  a.at(0x680U).stop();
+  a.at(sync_a).moveq(4, 7U).w({0x43F9U}).l(0x680U).w({0x55AFU, 0x0002U}).rte();
+  const auto result = run(a, {{32U, sync_a}});
+  if (debug()) std::cerr << describe(result);
+  const auto a1 = m68k_query_address_register(result, trap, 1U).values();
+  expect(result.complete && result.frames.validated && word_at(result, trap, 4U) == FiniteValue::of({1U, 7U}) &&
+             a1 == std::vector<std::uint32_t>({0x600U, 0x680U}),
+         "synchronous offset loop: handler D4/A1 effects join the raising point before its precise input");
 }
 
 void synchronous_vector_resumption() {
@@ -1131,6 +1152,7 @@ int main() {
   synchronous_and_interrupt_nesting();
   hardware_frame_pc_resumption();
   interrupt_frame_pc_offset_edge();
+  synchronous_offset_loop_register_effects();
   synchronous_vector_resumption();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";

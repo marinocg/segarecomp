@@ -490,6 +490,48 @@ Image pinned_resumption_case(bool trap_rewrite) {
   return image;
 }
 
+// Minimized broad-batch reproducers in which an Unknown-target handler store makes its frame-PC transform unproven. The concrete
+// store is safely outside the frame, but the static result must classify the RTE as typed Unknown rather than accidentally treating a
+// coincidentally reached shifted PC as a modelled resumption and checking its unrelated precise state.
+Image pinned_unproven_offset_case(bool synchronous) {
+  Image image;
+  image.seed = synchronous ? UINT64_C(0x5E60300F4) : UINT64_C(0x5E60300F3);
+  image.bytes.assign(image_size, 0U);
+  image.a[5] = global_base;
+  Asm a;
+  a.bytes = image.bytes;
+  a.begin(0U, 0x100U);
+  a.l(ssp).l(main_entry);
+  const auto handler = synchronous ? trap_handler : irq_handler;
+  if (synchronous) {
+    image.trap = true;
+    a.pc = 32U * 4U;
+    a.l(handler);
+  } else {
+    image.irq = true;
+    a.pc = 30U * 4U;
+    a.l(handler);
+  }
+  a.begin(main_entry, sub_base);
+  if (synchronous) {
+    a.note("known pre-TRAP D4/A1").w(0x7801U).w(0x43F9U).l(sub_base);
+    a.note("TRAP loopback collision").w(0x4E40U).w(0x60FEU);
+  } else {
+    a.note("enabled IRQ with differing A7 states").w(0x46FCU).w(0x2300U).w(0x2F3CU).l(pad_base).w(0x588FU);
+    image.forced_interrupt_pc = main_entry + 12U;
+    a.w(0x60FEU);
+  }
+  a.begin(handler, handler + 0x100U);
+  a.note("Unknown-target store invalidates frame-PC proof").w(0x2ABCU).l(0U);
+  a.note("handler D4 effect").w(0x7807U);
+  if (synchronous) a.note("handler A1 effect").w(0x43F9U).l(sub_base + sub_stride);
+  a.note("unproven saved-PC decrement").w(0x55AFU).w(2U).w(0x4E73U);
+  image.bytes = std::move(a.bytes);
+  image.listing = a.listing.str();
+  image.ram_seed = image.seed;
+  return image;
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Concrete executor of exactly the generated subset.
 
@@ -1008,25 +1050,27 @@ struct Checked {
 struct SiteStatus {
   enum Kind : std::uint8_t { resolved, unknown, none } kind{none};
   std::vector<std::uint32_t> targets;
+  std::vector<std::int32_t> resumption_offsets;
+  bool resumption_unproven{};
 };
 SiteStatus dynamic_site(const M68kFiniteAnalysisResult &result, std::uint32_t pc) {
   if (const auto found = result.pc_index_sites.find(pc); found != result.pc_index_sites.end()) {
-    if (found->second.outcome == M68kPcIndexOutcome::resolved) return {SiteStatus::resolved, found->second.targets};
-    return {SiteStatus::unknown, {}};
+    if (found->second.outcome == M68kPcIndexOutcome::resolved) return {SiteStatus::resolved, found->second.targets, {}, false};
+    return {SiteStatus::unknown, {}, {}, false};
   }
   if (const auto found = result.address_sites.find(pc); found != result.address_sites.end()) {
-    if (found->second.resolved) return {SiteStatus::resolved, found->second.targets};
-    return {SiteStatus::unknown, {}};
+    if (found->second.resolved) return {SiteStatus::resolved, found->second.targets, {}, false};
+    return {SiteStatus::unknown, {}, {}, false};
   }
-  if (result.unresolved_computed.contains(pc)) return {SiteStatus::unknown, {}};
+  if (result.unresolved_computed.contains(pc)) return {SiteStatus::unknown, {}, {}, false};
   return {};
 }
 SiteStatus return_site(const M68kFiniteAnalysisResult &result, std::uint32_t pc) {
   if (const auto found = result.return_sites.find(pc); found != result.return_sites.end()) {
-    if (found->second.resolved) return {SiteStatus::resolved, found->second.targets};
-    return {SiteStatus::unknown, {}};
+    if (found->second.resolved) return {SiteStatus::resolved, found->second.targets, {}, false};
+    return {SiteStatus::unknown, {}, found->second.resumption_offsets, found->second.resumption_unproven};
   }
-  if (result.unresolved_computed.contains(pc)) return {SiteStatus::unknown, {}};
+  if (result.unresolved_computed.contains(pc)) return {SiteStatus::unknown, {}, {}, false};
   return {};
 }
 bool contains(const std::vector<std::uint32_t> &targets, std::uint32_t pc) {
@@ -1092,7 +1136,10 @@ Checked check(const M68kFiniteAnalysisResult &result, const Trace &trace, Mode m
       const bool bounded_offset = step.hardware_frame && (step.frame_pc_offset % 2 == 0) && step.frame_pc_offset >= -128 &&
                                   step.frame_pc_offset <= 126;
       if (mode == Mode::all && bounded_offset) {
-        if (!result.reached.contains(step.pc) && site.kind == SiteStatus::unknown)
+        const bool modelled = !site.resumption_unproven &&
+                              std::find(site.resumption_offsets.begin(), site.resumption_offsets.end(), step.frame_pc_offset) !=
+                                  site.resumption_offsets.end();
+        if (site.kind == SiteStatus::unknown && !modelled)
           return {Verdict::explained, "typed-Unknown bounded hardware-frame resumption", i};
         break;
       }
@@ -1136,10 +1183,11 @@ int main(int argc, char **argv) {
   std::map<Mode, Totals> totals;
   std::size_t images = 0U, rejected = 0U, failures = 0U;
   std::map<std::string, std::size_t> ends;
-  for (std::size_t n = 0; n < count + 2U; ++n) {
-    const bool pinned = n < 2U;
-    const auto seed = pinned ? (n == 0U ? UINT64_C(0x5E60300F1) : UINT64_C(0x5E60300F2)) : base + n - 2U;
-    const auto image = pinned ? pinned_resumption_case(n == 1U) : Generator{seed}.build();
+  for (std::size_t n = 0; n < count + 4U; ++n) {
+    const bool pinned = n < 4U;
+    const auto seed = pinned ? UINT64_C(0x5E60300F1) + n : base + n - 4U;
+    const auto image = pinned ? (n < 2U ? pinned_resumption_case(n == 1U) : pinned_unproven_offset_case(n == 3U))
+                              : Generator{seed}.build();
     if (image.bytes.empty()) {
       ++rejected;  // a random routine overflowed its slot (deterministic; never silently counted as checked)
       continue;
@@ -1177,8 +1225,10 @@ int main(int argc, char **argv) {
         if (check(result, preserved, mode, scratch).verdict != Verdict::unsound) checked.verdict = Verdict::historical;
       }
       if (pinned && mode == Mode::all) {
-        const bool expected = n == 0U ? checked.verdict == Verdict::clean
-                                      : checked.verdict == Verdict::explained && checked.why == "typed-Unknown dynamic site";
+        const bool expected = n == 0U   ? checked.verdict == Verdict::clean
+                              : n == 1U ? checked.verdict == Verdict::explained && checked.why == "typed-Unknown dynamic site"
+                                        : checked.verdict == Verdict::explained &&
+                                              checked.why == "typed-Unknown bounded hardware-frame resumption";
         if (!expected) {
           std::cerr << "FAIL: pinned all-model resumption did not reach its expected post-RTE check, seed " << seed << ": "
                     << checked.why << '\n';
@@ -1204,7 +1254,7 @@ int main(int argc, char **argv) {
     }
   }
   const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-  std::cout << "analysis_m68k_differential_test: pinned=2 seeds " << base << ".." << base + count - 1U << " images=" << images
+  std::cout << "analysis_m68k_differential_test: pinned=4 seeds " << base << ".." << base + count - 1U << " images=" << images
             << " rejected=" << rejected << " seconds=" << elapsed << '\n';
   for (const auto &[why, n] : ends) std::cout << "  concrete end " << why << '=' << n << '\n';
   for (const auto &[mode, sum] : totals)
