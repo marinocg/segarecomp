@@ -55,18 +55,25 @@ Low recall alone does not decide production value. The production question is:
    PC that the analysis cannot decode is a broad identity (otherwise the hybrid could stop where broad runs).
 7. **Machine roots.** The roots are the machine-delivered vector roots (`genesis_reachability_roots`, shared with SEG-030), always
    analysed. Every `static_proof` (ADR 0049) executable image is admitted whole as a mandatory root set, entered as opaque all-Unknown
-   entries from the startup entry (no proven source transfer gives their entry state). A handler that SEG-030 cannot analyse precisely
-   is covered conservatively, never removed.
-8. **Inherited premise.** The hybrid inherits exactly SEG-030's named return-slot integrity premise for an ordinary RTS (ADR 0079
-   decision 8); the planner reports the premise sites. It adds no premise of its own.
+   entries from the startup entry (no proven source transfer gives their entry state). A delivered handler that SEG-030 cannot
+   analyse precisely is covered conservatively (entered with an Unknown state), never removed. Installed interrupt vectors the
+   generated runtime does not deliver (the Genesis level-2/level-4 autovectors and the spurious vector under the ADR 0079 machine
+   premise) are analysed only as writer-only instances and are not admitted: see decision 8.
+8. **Inherited premises.** The hybrid inherits exactly two SEG-030 premises and adds none of its own: (a) the named return-slot
+   integrity premise for an ordinary RTS (ADR 0079 decision 8; the planner reports the premise sites); (b) the machine-delivery premise
+   (ADR 0079 decision 7, `genesis_reachability_roots`): only the vectors the generated runtime can raise (IRQ6 and the synchronous
+   vectors) are roots, so the code of installed but undelivered interrupt vectors is not admitted even though broad `U` contains it.
+   (b) is exact for the current runtime; if interrupt delivery is ever extended (for example H-interrupts), those vectors become
+   delivered roots of the same owner and every plan must be recomputed (the universe fingerprint of decision 10 does not detect a
+   runtime change, so such a change must invalidate existing plans explicitly).
 9. **Placement.** The planner consumes the analysis, so it lives in the report-only `platforms/genesis/analysis_report` target (ADR 0079
    decision 1); `segarecomp-genesis-analysis-report --hybrid-plan <path>` writes the plan. Production never links the analysis
    (`analysis_build_graph_test` unchanged). The M68K interpretation of SEG-030 facts is M68K/Genesis-owned; no generic CPU-neutral
    abstraction is added because no second CPU exercises it.
 10. **Production seam (explicit candidate).** The plan is a strict, bounded text artifact (`segarecomp.m68k_hybrid_admission_plan.v1`:
-    ROM digest, alias set, strategy, admitted half-open ranges over the broad identities). The production emitter consumes it only
+    ROM digest, broad-universe fingerprint, alias set, strategy, admitted half-open ranges over the broad identities). The production emitter consumes it only
     through `emit-general-startup-bridge-c --immutable-rom-aot-admission <plan>` (and `segarecomp build --admission-plan <plan>`). The
-    machine owner (`platforms/genesis/machine` `hybrid_admission.hpp`) validates it fail-closed (digest, alias set, well-formed ranges,
+    machine owner (`platforms/genesis/machine` `hybrid_admission.hpp`) validates it fail-closed (digest, universe fingerprint, alias set, well-formed ranges,
     non-empty, structural closure over the broad identities: machine roots, `static_proof` identities, fixed successors and stacked call
     continuations) and only then filters `FrontendAnalysis::immutable_rom_aot_entries`. Dynamic containment is the planner's proof; the
     production owner cannot re-derive it without the analysis. The filtered program is an ordinary generated-native program: no
@@ -102,7 +109,7 @@ Low recall alone does not decide production value. The production question is:
     4. **resource completion**: SEG-030 `all` does not complete on three authorized titles (`iteration_bound`), so no hybrid can be
        credited there.
 
-    Every complete title has triggers in at least two of classes 1-3 (Sonic 1 and Sonic 2: 1 and 2; Cool Spot: 1, 2 and 3) and the
+    Every complete title has triggers in at least two of classes 1-3 (Sonic 1 and Cool Spot: 1, 2 and 3; Sonic 2: 1 and 2) and the
     three other titles are blocked by class 4, so a candidate that fixes one class alone cannot change any measured title's admission.
     Removing a title's current triggers only reaches the next closure round: island code may expose further unbounded sites, which
     the planner measures before any production claim.
@@ -199,3 +206,13 @@ runtime change none (identical program and state); zero escapes on the complete 
 No unknown identity and no Z80 error occurred: every observed (code-image identity, PC) executed through an exact broad entry. Build
 times of the measurement builds (8-56 s) stay within the existing Z80 economics (SEG-033, ADR 0071), which give no reason to leave broad
 AOT; no Z80 analysis or selective admission was attempted.
+
+### SEG-031-T007 (independent completion gate)
+
+Independent adversarial gate at product `dd5c701`: PASS-with-minor. Full tier 318/319; the only failure, `restricted_files_test`,
+is environmental (Git refuses `check-ignore` beyond the linked worktree's `games` symlink) and passes against the product root.
+Adversarial fixtures (pin-and-restart around island-fed targets; `JMP d16(An)` with negative displacement, upper register byte and
+32-bit wrap) produced no hybrid plan whose execution leaves `H`. Minor findings, corrected in the same PR: the second inherited premise
+(decision 8 b) is now named; Sonic 1's blocker classes are corrected; the plan now carries a broad-universe fingerprint checked by the
+production owner (`universe_mismatch`); the validator rejects a reached dynamic site that is neither uncovered nor resolved
+(`unclassified_dynamic_site`) instead of passing it. Two mutants cover the new checks (19 hybrid mutants in total).

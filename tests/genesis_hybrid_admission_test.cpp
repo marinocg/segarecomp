@@ -73,6 +73,7 @@ std::vector<std::uint32_t> addresses(const std::vector<FrontendAnalysis::Immutab
 GenesisHybridAdmissionPlan plan_of(const Program &program, const std::vector<std::uint32_t> &admitted) {
   GenesisHybridAdmissionPlan plan;
   plan.rom_sha256 = sha;
+  plan.universe_sha256 = genesis_hybrid_admission_universe_digest(addresses(program.entries));
   plan.aliases = program.program.immutable_copy_aliases;
   plan.strategy = GenesisAdmissionStrategy::hybrid;
   plan.ranges = genesis_hybrid_admission_ranges(addresses(program.entries), admitted);
@@ -80,7 +81,7 @@ GenesisHybridAdmissionPlan plan_of(const Program &program, const std::vector<std
 }
 
 void parser() {
-  const std::string good = "segarecomp.m68k_hybrid_admission_plan.v1\nrom_sha256 " + sha +
+  const std::string good = "segarecomp.m68k_hybrid_admission_plan.v1\nrom_sha256 " + sha + "\nuniverse_sha256 " + sha +
                            "\nalias 00ff0000:00000600:00000004\nstrategy hybrid\nrange 00000200 00000206\nrange 00000300 00000304\nend\n";
   const auto parsed = parse_genesis_hybrid_admission_plan(good);
   expect(parsed && parsed->ranges.size() == 2U && parsed->aliases.size() == 1U && format_genesis_hybrid_admission_plan(*parsed) == good,
@@ -89,9 +90,10 @@ void parser() {
     std::string error;
     expect(!parse_genesis_hybrid_admission_plan(text, &error) && error == reason, "parser rejects (" + reason + "): got " + error);
   };
-  const std::string head = "segarecomp.m68k_hybrid_admission_plan.v1\nrom_sha256 " + sha + "\n";
+  const std::string head = "segarecomp.m68k_hybrid_admission_plan.v1\nrom_sha256 " + sha + "\nuniverse_sha256 " + sha + "\n";
+  bad("segarecomp.m68k_hybrid_admission_plan.v1\nrom_sha256 " + sha + "\nstrategy broad\nend\n", "plan_universe_sha256");
   bad("segarecomp.m68k_hybrid_admission_plan.v0\n", "plan_schema");
-  bad(head.substr(0, head.size() - 2U) + "\n", "plan_rom_sha256");
+  bad("segarecomp.m68k_hybrid_admission_plan.v1\nrom_sha256 " + sha.substr(1) + "\n", "plan_rom_sha256");
   bad(head + "strategy maybe\nend\n", "plan_strategy");
   bad(head + "strategy hybrid\nend\n", "plan_empty");
   bad(head + "strategy broad\nrange 00000200 00000202\nend\n", "plan_range_in_broad");
@@ -133,6 +135,9 @@ void apply() {
     expect(entries.size() == program.entries.size(), "apply: a rejected plan filters nothing (" + reason + ")");
   };
   rejects(base, plan_of(base, needed), std::string(64U, 'b'), "rom_sha256_mismatch");
+  auto stale = plan_of(base, needed);
+  stale.universe_sha256 = std::string(64U, 'c');
+  rejects(base, stale, sha, "universe_mismatch");  // a plan computed for another broad universe (frontend, entry mode, image set)
   auto without = [&](std::uint32_t pc) {
     auto admitted = needed;
     admitted.erase(std::remove(admitted.begin(), admitted.end(), pc), admitted.end());
@@ -152,6 +157,7 @@ void apply() {
   {
     GenesisHybridAdmissionPlan broad;
     broad.rom_sha256 = sha;
+    broad.universe_sha256 = genesis_hybrid_admission_universe_digest(addresses(base.entries));
     auto entries = base.entries;
     expect(!apply_genesis_hybrid_admission(base.program, sha, broad, entries) && entries.size() == base.entries.size(),
            "apply: a broad plan filters nothing");

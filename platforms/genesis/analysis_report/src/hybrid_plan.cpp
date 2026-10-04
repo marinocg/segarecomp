@@ -225,9 +225,14 @@ std::optional<std::string> validate_genesis_hybrid_round(const GenesisAnalysisRe
         return "site_container_not_configured";
       continue;
     }
-    if (const auto targets = resolved_targets(report, pc))
+    if (const auto targets = resolved_targets(report, pc)) {
       for (const auto target : *targets)
         if (!covered(target)) return "resolved_target_not_admitted";
+      continue;
+    }
+    // What remains must be an ordinary RTS covered by the continuation model (normal or the inherited premise); any other dynamic
+    // site that is neither uncovered nor resolved is unexpected and rejected rather than passed silently.
+    if (control.dynamic != M68kDynamicControlFamily::return_from_subroutine) return "unclassified_dynamic_site";
   }
   for (const auto &[pc, entries] : island_entries)
     for (const auto entry : entries)
@@ -346,6 +351,7 @@ GenesisHybridAdmissionPlan genesis_hybrid_admission_plan(const GenesisHybridPlan
                                                          const std::string &rom_sha256) {
   GenesisHybridAdmissionPlan out;
   out.rom_sha256 = rom_sha256;
+  out.universe_sha256 = genesis_hybrid_admission_universe_digest(plan.universe);
   out.aliases = program.immutable_copy_aliases;
   if (plan.outcome != GenesisHybridOutcome::hybrid || plan.admitted.empty()) return out;  // broad
   out.strategy = GenesisAdmissionStrategy::hybrid;

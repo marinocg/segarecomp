@@ -7,11 +7,13 @@
 #include <cstdio>
 #include <map>
 #include <set>
+#include <span>
 #include <sstream>
 #include <tuple>
 
 #include "segarecomp/cpu/m68k/control_successors.hpp"
 #include "segarecomp/machine/genesis/reachability_challenger.hpp"
+#include "segarecomp/sha256.hpp"
 
 namespace segarecomp {
 
@@ -55,7 +57,8 @@ const char *genesis_admission_strategy_name(GenesisAdmissionStrategy strategy) n
 
 std::string format_genesis_hybrid_admission_plan(const GenesisHybridAdmissionPlan &plan) {
   std::ostringstream out;
-  out << genesis_hybrid_admission_plan_schema << '\n' << "rom_sha256 " << plan.rom_sha256 << '\n';
+  out << genesis_hybrid_admission_plan_schema << '\n' << "rom_sha256 " << plan.rom_sha256 << '\n'
+      << "universe_sha256 " << plan.universe_sha256 << '\n';
   for (const auto &alias : plan.aliases)
     out << "alias " << hex8(alias.execution_base) << ':' << hex8(alias.source_base) << ':' << hex8(alias.length) << '\n';
   out << "strategy " << genesis_admission_strategy_name(plan.strategy) << '\n';
@@ -88,6 +91,9 @@ std::optional<GenesisHybridAdmissionPlan> parse_genesis_hybrid_admission_plan(st
   const auto sha = next();
   if (!sha || sha->substr(0, 11U) != "rom_sha256 " || !valid_sha256(sha->substr(11U))) return fail("plan_rom_sha256");
   plan.rom_sha256 = std::string(sha->substr(11U));
+  const auto universe = next();
+  if (!universe || universe->substr(0, 16U) != "universe_sha256 " || !valid_sha256(universe->substr(16U))) return fail("plan_universe_sha256");
+  plan.universe_sha256 = std::string(universe->substr(16U));
   std::optional<std::string_view> line = next();
   while (line && line->substr(0, 6U) == "alias ") {
     const auto value = line->substr(6U);
@@ -141,6 +147,13 @@ std::vector<FrontendProgram::ImmutableRomAotRange> genesis_hybrid_admission_rang
   return out;
 }
 
+std::string genesis_hybrid_admission_universe_digest(const std::vector<std::uint32_t> &universe) {
+  std::string text;
+  text.reserve(universe.size() * 9U);
+  for (const auto address : universe) text += hex8(address) + '\n';
+  return sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(text.data()), text.size()));
+}
+
 bool genesis_hybrid_admission_contains(const std::vector<FrontendProgram::ImmutableRomAotRange> &ranges, std::uint32_t address) {
   auto it = std::upper_bound(ranges.begin(), ranges.end(), address,
                              [](std::uint32_t value, const FrontendProgram::ImmutableRomAotRange &range) { return value < range.begin_address; });
@@ -159,6 +172,14 @@ std::optional<std::string> apply_genesis_hybrid_admission(const FrontendProgram 
         return std::tie(a.execution_base, a.source_base, a.length) == std::tie(b.execution_base, b.source_base, b.length);
       }))
     return "alias_set_mismatch";
+  {
+    std::vector<std::uint32_t> universe;
+    universe.reserve(entries.size());
+    for (const auto &entry : entries) universe.push_back(entry_address(entry));
+    std::sort(universe.begin(), universe.end());
+    universe.erase(std::unique(universe.begin(), universe.end()), universe.end());
+    if (genesis_hybrid_admission_universe_digest(universe) != plan.universe_sha256) return "universe_mismatch";
+  }
   if (plan.strategy == GenesisAdmissionStrategy::broad) return std::nullopt;
   if (plan.ranges.empty()) return "empty_admission";
   for (std::size_t i = 0; i < plan.ranges.size(); ++i) {

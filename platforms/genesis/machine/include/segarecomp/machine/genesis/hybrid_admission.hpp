@@ -7,7 +7,9 @@
 // (`FrontendAnalysis::immutable_rom_aot_entries`, the universe `U`). The emitter consumes it only through an explicit opt-in, and only
 // after this owner has validated it fail-closed:
 //
-// - the ROM digest and the ADR 0049 alias set equal the emission's;
+// - the ROM digest, the ADR 0049 alias set and the broad-universe fingerprint (the SHA-256 of the sorted broad identity execution
+//   addresses, one `%08x\n` line each) equal the emission's, so a plan computed for another frontend version, entry mode or image
+//   set never applies;
 // - the admitted ranges are well formed (sorted, disjoint, even, non-empty) and admit at least one identity;
 // - CPU-owned structural closure over the broad identities: every machine root that is a broad identity is admitted; every
 //   `static_proof` alias identity is admitted; every fixed successor and stacked call continuation (`m68k_control_successors`) of an
@@ -22,6 +24,7 @@
 //
 //   segarecomp.m68k_hybrid_admission_plan.v1
 //   rom_sha256 <64 lowercase hex>
+//   universe_sha256 <64 lowercase hex>
 //   alias <execution hex8>:<source hex8>:<length hex8>      (zero or more, ascending execution base)
 //   strategy hybrid|broad
 //   range <begin hex8> <end hex8>                           (hybrid only; half-open, ascending, disjoint; every broad identity whose
@@ -52,6 +55,7 @@ enum class GenesisAdmissionStrategy : std::uint8_t { broad, hybrid };
 
 struct GenesisHybridAdmissionPlan {
   std::string rom_sha256;
+  std::string universe_sha256;
   std::vector<FrontendProgram::ImmutableCopyAlias> aliases;  // ascending execution base
   GenesisAdmissionStrategy strategy{GenesisAdmissionStrategy::broad};
   std::vector<FrontendProgram::ImmutableRomAotRange> ranges;  // hybrid only
@@ -62,7 +66,7 @@ struct GenesisHybridAdmissionPlan {
     const auto same_range = [](const FrontendProgram::ImmutableRomAotRange &a, const FrontendProgram::ImmutableRomAotRange &b) {
       return a.begin_address == b.begin_address && a.end_address == b.end_address;
     };
-    return left.rom_sha256 == right.rom_sha256 && left.strategy == right.strategy &&
+    return left.rom_sha256 == right.rom_sha256 && left.universe_sha256 == right.universe_sha256 && left.strategy == right.strategy &&
            std::equal(left.aliases.begin(), left.aliases.end(), right.aliases.begin(), right.aliases.end(), same_alias) &&
            std::equal(left.ranges.begin(), left.ranges.end(), right.ranges.begin(), right.ranges.end(), same_range);
   }
@@ -77,6 +81,9 @@ struct GenesisHybridAdmissionPlan {
 // so the plan admits exactly `admitted ∩ universe`.
 [[nodiscard]] std::vector<FrontendProgram::ImmutableRomAotRange> genesis_hybrid_admission_ranges(
     const std::vector<std::uint32_t> &universe, const std::vector<std::uint32_t> &admitted);
+
+// The broad-universe fingerprint of the sorted distinct execution addresses `universe`.
+[[nodiscard]] std::string genesis_hybrid_admission_universe_digest(const std::vector<std::uint32_t> &universe);
 
 // True when `address` lies in one of the sorted disjoint half-open `ranges`.
 [[nodiscard]] bool genesis_hybrid_admission_contains(const std::vector<FrontendProgram::ImmutableRomAotRange> &ranges,

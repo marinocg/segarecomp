@@ -73,7 +73,9 @@ def main():
     assert aggregate["outcome"] == "hybrid" and aggregate["fallback_island_count"] == 1, aggregate
     assert aggregate["hybrid_total"] < aggregate["broad_u"], aggregate
     plan_text = plan_path.read_text()
-    assert plan_text.splitlines()[2] == "strategy hybrid", plan_text
+    assert plan_text.splitlines()[3] == "strategy hybrid", plan_text
+    universe_line = plan_text.splitlines()[2]
+    assert universe_line.startswith("universe_sha256 "), plan_text
 
     bridge = [sys.executable, str(pathlib.Path(source) / "tools/genesis_startup_bridge.py"), "--segarecomp", segarecomp,
               "--rom", str(rom), "--mode", "synthetic", "--immutable-rom-aot", "--instruction-budget", str(BUDGET)]
@@ -99,7 +101,7 @@ def main():
     plain = run(emit)
     assert plain.returncode == 0, plain.stderr
     broad_plan = work / "broad.plan"
-    broad_plan.write_text(f"segarecomp.m68k_hybrid_admission_plan.v1\nrom_sha256 {sha}\nstrategy broad\nend\n")
+    broad_plan.write_text(f"segarecomp.m68k_hybrid_admission_plan.v1\nrom_sha256 {sha}\n{universe_line}\nstrategy broad\nend\n")
     with_broad = run(emit + ["--immutable-rom-aot-admission", str(broad_plan)])
     assert with_broad.returncode == 0 and with_broad.stdout == plain.stdout, "a broad plan must not change the emission"
     first = run(emit + ["--immutable-rom-aot-admission", str(plan_path)])
@@ -116,7 +118,8 @@ def main():
     lines = plan_text.splitlines()
     rejected(plan_text.replace(sha, "0" * 64), "rom_sha256_mismatch")
     rejected(plan_text.replace("strategy hybrid", "strategy maybe"), "plan_strategy")
-    rejected("\n".join(lines[:2] + ["alias 00ff0000:00002000:00000010"] + lines[2:]) + "\n", "alias_set_mismatch")
+    rejected("\n".join(lines[:3] + ["alias 00ff0000:00002000:00000010"] + lines[3:]) + "\n", "alias_set_mismatch")
+    rejected(plan_text.replace(universe_line, "universe_sha256 " + "0" * 64), "universe_mismatch")
     ranges = [line for line in lines if line.startswith("range ")]
     # Dropping the identity at $204 (the fallthrough of the entry instruction at $200) leaves a structurally open plan.
     fallthrough = next(line for line in ranges if int(line.split()[1], 16) <= 0x204 < int(line.split()[2], 16))

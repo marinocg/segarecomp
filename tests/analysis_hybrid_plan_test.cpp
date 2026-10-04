@@ -416,6 +416,18 @@ void validator_rejects_missing_configuration() {
          "validator: an island missing one proven member is rejected");
   expect(validate_genesis_hybrid_round(report, *view, {}, plan.universe) == std::optional<std::string>("site_not_configured"),
          "validator: an unconfigured uncovered site is rejected");
+  // A reached dynamic site the round neither reports uncovered nor resolved (a site missing from every site map: an inconsistent
+  // report) is rejected, never passed silently.
+  auto inconsistent = report;
+  const auto site_pc = plan.island_entries.begin()->first;
+  inconsistent.analysis.unresolved_computed.erase(site_pc);
+  inconsistent.analysis.address_sites.erase(site_pc);
+  inconsistent.analysis.pc_index_sites.erase(site_pc);
+  inconsistent.analysis.return_sites.erase(site_pc);
+  inconsistent.computed_sites.erase(site_pc);
+  expect(validate_genesis_hybrid_round(inconsistent, *view, plan.island_entries, plan.universe) ==
+             std::optional<std::string>("unclassified_dynamic_site"),
+         "validator: an unexpected dynamic site is rejected");
 }
 
 }  // namespace
