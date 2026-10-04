@@ -59,7 +59,7 @@ public:
   }
   [[nodiscard]] std::optional<M68kRegionExtent> region_of(std::uint32_t address) const override {
     if (address >= work_ram_base && address < 0x1000000U)
-      return M68kRegionExtent{M68kRegionKind::work_ram, 0U, work_ram_base, 0x1000000U - work_ram_base};
+      return M68kRegionExtent{M68kRegionKind::mutable_ram, 0U, work_ram_base, 0x1000000U - work_ram_base};
     return flat_.region_of(address);
   }
 
@@ -96,7 +96,7 @@ using Targets = std::vector<std::uint32_t>;
 // Lattice.
 
 void lattice() {
-  const M68kRegion ram{M68kRegionKind::work_ram, 0U, work_ram_base, 0x200000U};
+  const M68kRegion ram{M68kRegionKind::mutable_ram, 0U, work_ram_base, 0x200000U};
   std::vector<std::uint32_t> many;
   for (std::uint32_t i = 0; i < 65U; ++i) many.push_back(0x100U + 8U * i);
   const auto strided = M68kOffsetSet::of(many);
@@ -148,7 +148,7 @@ void object_slot_loop() {
   const auto result = run(image, true);
   expect(result.complete, "object loop: complete");
   const auto head = m68k_query_address_register(result, 0x206U, 0);
-  const bool one_region = head.is_known() && head.pairs.size() == 1U && head.pairs[0].first.kind == M68kRegionKind::work_ram;
+  const bool one_region = head.is_known() && head.pairs.size() == 1U && head.pairs[0].first.kind == M68kRegionKind::mutable_ram;
   expect(one_region && head.pairs[0].second.is_strided() && head.pairs[0].second.stride() == 0x40U &&
              head.pairs[0].second.lo() == 0xFF0000U - work_ram_base && head.pairs[0].second.hi() == 0xFF18C0U - work_ram_base,
          "object loop: one region, stride $40, exactly the 100 slot offsets at the head: " + head.describe());

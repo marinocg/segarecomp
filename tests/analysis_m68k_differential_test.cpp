@@ -764,7 +764,7 @@ public:
   }
   [[nodiscard]] std::optional<M68kRegionExtent> region_of(std::uint32_t address) const override {
     if (address >= work_ram_base && address < 0x1000000U)
-      return M68kRegionExtent{M68kRegionKind::work_ram, 0U, work_ram_base, 0x1000000U - work_ram_base, 0x10000U};
+      return M68kRegionExtent{M68kRegionKind::mutable_ram, 0U, work_ram_base, 0x1000000U - work_ram_base, 0x10000U};
     return flat_.region_of(address);
   }
 

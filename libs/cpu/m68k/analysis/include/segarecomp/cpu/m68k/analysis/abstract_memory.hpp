@@ -2,7 +2,7 @@
 
 // SEG-030-T004 (ADR 0079 decisions 4, 5, 7, 11; report-only): the CPU-owned M68K abstract memory.
 //
-// A cell is one physical location of a mutable machine region (work RAM; the I/O/device window and the immutable images are never
+// A cell is one physical location of a mutable machine region (mutable RAM; the I/O/device window and the immutable images are never
 // cells): region kind and identity, the physical offset (the region offset modulo its mirror size) and an access width of 1, 2 or 4
 // bytes. A cell holds a precise finite value of that width or a points-to value (a long cell written from an address register). An
 // absent cell is Unknown (top); `absent` records why (initial memory, a poisoning store, the cell bound). The join keeps only the
@@ -44,11 +44,11 @@ inline constexpr std::size_t m68k_memory_cell_bound = 512U;
 // The generic reason of a memory sub-reason.
 [[nodiscard]] analysis::UnknownReason m68k_memory_generic_reason(M68kAnalysisSubReason sub) noexcept;
 
-// True for a region kind whose locations are abstract-memory cells (mutable work RAM only).
-[[nodiscard]] constexpr bool m68k_memory_tracked(M68kRegionKind kind) noexcept { return kind == M68kRegionKind::work_ram; }
+// True for a region kind whose locations are abstract-memory cells (mutable RAM only).
+[[nodiscard]] constexpr bool m68k_memory_tracked(M68kRegionKind kind) noexcept { return kind == M68kRegionKind::mutable_ram; }
 
 struct M68kCell {
-  M68kRegionKind kind{M68kRegionKind::work_ram};
+  M68kRegionKind kind{M68kRegionKind::mutable_ram};
   std::uint32_t id{};
   std::uint32_t offset{};  // physical offset (region offset modulo the mirror)
   std::uint32_t width{};   // 1, 2 or 4 bytes
@@ -66,7 +66,7 @@ struct M68kCellValue {
 
 // Asynchronous-writer range of one tracked region: physical offsets [lo, hi).
 struct M68kAsyncRange {
-  M68kRegionKind kind{M68kRegionKind::work_ram};
+  M68kRegionKind kind{M68kRegionKind::mutable_ram};
   std::uint32_t id{};
   std::uint32_t lo{};
   std::uint32_t hi{};
@@ -75,7 +75,7 @@ struct M68kAsyncRange {
 
 // ADR 0079 decision 7: what the analysed flow cannot own. Monotone configuration of the driver rounds (decision 9).
 struct M68kMemoryPolicy {
-  bool external_writer{};               // another bus master may write all of work RAM at any point
+  bool external_writer{};               // another bus master may write all of mutable RAM at any point
   bool async_all{};                     // every tracked cell has an asynchronous writer
   std::vector<M68kAsyncRange> async;    // sorted, merged
 

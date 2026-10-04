@@ -150,7 +150,7 @@ void view_rules(const FrontendProgram &program) {
   expect(cartridge && cartridge->kind == M68kRegionKind::image && cartridge->base == 0U && cartridge->size == 0x800U,
          "regions: a cartridge address is in its immutable image extent");
   const auto ram = view->region_of(alias_a);
-  expect(ram && ram->kind == M68kRegionKind::work_ram && ram->base == 0xE00000U && ram->size == 0x200000U,
+  expect(ram && ram->kind == M68kRegionKind::mutable_ram && ram->base == 0xE00000U && ram->size == 0x200000U,
          "regions: an alias execution address is work RAM");
   const auto io = view->region_of(0xC00004U);
   expect(io && io->kind == M68kRegionKind::io_device, "regions: the VDP port window is the I/O/device region");

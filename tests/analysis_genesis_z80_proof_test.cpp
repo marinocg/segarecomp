@@ -100,7 +100,7 @@ std::string describe(const GenesisZ80RamWriteProof &proof) {
 
 bool exactly(const GenesisZ80RamWriteProof &proof, std::uint32_t lo, std::uint32_t hi) {
   return proof.outcome == Writes::ranges && proof.reasons.empty() && proof.work_ram.size() == 1U &&
-         proof.work_ram[0].kind == M68kRegionKind::work_ram && proof.work_ram[0].lo == lo && proof.work_ram[0].hi == hi;
+         proof.work_ram[0].kind == M68kRegionKind::mutable_ram && proof.work_ram[0].lo == lo && proof.work_ram[0].hi == hi;
 }
 
 // 1. Constant stores below $8000.

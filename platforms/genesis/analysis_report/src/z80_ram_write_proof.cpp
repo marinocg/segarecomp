@@ -732,7 +732,7 @@ GenesisZ80RamWriteProof prove_genesis_z80_ram_writes(const std::optional<std::ve
     if (images->empty()) proof.reasons.insert(Reason::image_set_unknown);  // an empty set is not a statically known image set
     for (const auto offset : work_ram) {
       if (!proof.work_ram.empty() && proof.work_ram.back().hi == offset) ++proof.work_ram.back().hi;
-      else proof.work_ram.push_back({M68kRegionKind::work_ram, 0U, offset, offset + 1U});
+      else proof.work_ram.push_back({M68kRegionKind::mutable_ram, 0U, offset, offset + 1U});
     }
   }
   if (!proof.reasons.empty()) {

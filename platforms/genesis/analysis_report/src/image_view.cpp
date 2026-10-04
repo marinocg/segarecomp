@@ -125,7 +125,7 @@ std::optional<M68kRegionExtent> GenesisM68kAnalysisImage::region_of(std::uint32_
   address &= bus_mask;
   constexpr std::uint32_t work_ram_base = UINT32_C(0xE00000), io_base = UINT32_C(0xA00000);
   if (address >= work_ram_base)
-    return M68kRegionExtent{M68kRegionKind::work_ram, 0U, work_ram_base, UINT32_C(0x1000000) - work_ram_base, UINT32_C(0x10000)};
+    return M68kRegionExtent{M68kRegionKind::mutable_ram, 0U, work_ram_base, UINT32_C(0x1000000) - work_ram_base, UINT32_C(0x10000)};
   if (address >= io_base) return M68kRegionExtent{M68kRegionKind::io_device, 0U, io_base, work_ram_base - io_base};
   const auto owner = unique_cartridge(address);
   if (!owner) return std::nullopt;

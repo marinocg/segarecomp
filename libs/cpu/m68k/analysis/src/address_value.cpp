@@ -59,7 +59,7 @@ const char *m68k_analysis_sub_reason_name(M68kAnalysisSubReason reason) noexcept
 const char *m68k_region_kind_name(M68kRegionKind kind) noexcept {
   switch (kind) {
   case M68kRegionKind::image: return "image";
-  case M68kRegionKind::work_ram: return "work_ram";
+  case M68kRegionKind::mutable_ram: return "mutable_ram";
   case M68kRegionKind::io_device: return "io_device";
   }
   return "invalid";

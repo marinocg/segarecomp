@@ -86,7 +86,7 @@ public:
   }
   [[nodiscard]] std::optional<M68kRegionExtent> region_of(std::uint32_t address) const override {
     if (address >= work_ram_base && address < 0x1000000U)
-      return M68kRegionExtent{M68kRegionKind::work_ram, 0U, work_ram_base, 0x1000000U - work_ram_base, 0x10000U};
+      return M68kRegionExtent{M68kRegionKind::mutable_ram, 0U, work_ram_base, 0x1000000U - work_ram_base, 0x10000U};
     return flat_.region_of(address);
   }
 
@@ -430,7 +430,7 @@ void handler_writer_in_callee() {
   config.memory.handler_roots = {handler};
   const auto result = analyze_m68k_finite_values(view, {entry, handler}, config);
   // The field's physical cell: object_a + $10 folded into the 64 KiB work-RAM mirror.
-  const M68kCell field{M68kRegionKind::work_ram, 0U, (object_a + 0x10U - work_ram_base) % 0x10000U, 1U};
+  const M68kCell field{M68kRegionKind::mutable_ram, 0U, (object_a + 0x10U - work_ram_base) % 0x10000U, 1U};
   expect(result.reached.contains(writer) && unresolved(result, site) && !result.memory.policy.async_all &&
              result.memory.policy.asynchronous(field),
          "handler writer in a callee: the store of a callee context makes the field asynchronous: " + text(result, site));

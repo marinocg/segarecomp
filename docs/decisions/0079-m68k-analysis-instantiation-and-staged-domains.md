@@ -76,8 +76,12 @@ reproduce the SEG-026-T002 strict row exactly.
      - decode profile `general_startup`.
    - **Immutable read:** only `immutable_input` bytes at their cartridge address. An alias execution address is mutable work RAM and is
      never read as immutable, even though its bytes are proven equal to the source when the copy runs.
-4. **CPU-owned region vocabulary.** `image(id)`, `work_ram`, `io_device`, `unknown`. The stack is not a separate region: it is `work_ram`
-   at the tracked absolute A7 offset. Regions, offsets and points-to live in `libs/cpu/m68k/analysis`; the generic core is unchanged.
+4. **CPU-owned region vocabulary.** `image(id)`, `mutable_ram`, `io_device`, `unknown`. The stack is not a separate region: it is
+   `mutable_ram` at the tracked absolute A7 offset. Regions, offsets and points-to live in `libs/cpu/m68k/analysis`; the generic core is
+   unchanged. The CPU library names no machine (`m68k_reuse_boundary_test`): `mutable_ram` is the machine-configured RAM region whose
+   extent the machine view supplies. The Genesis platform layer maps it onto its work RAM (`$E00000-$FFFFFF`, 64 KiB mirrored) and keeps
+   the Genesis naming (for example the report's `work_ram_*` fields); in this record "work RAM" means that Genesis instance of
+   `mutable_ram` (T009 correction cycle 1).
 5. **Admission under the four-part rule.** Every domain below is CPU-owned in `libs/cpu/m68k/analysis`. No generic change: `solver.hpp`
    and `finite_value.hpp` stay untouched, and CPU sub-reasons (decision 10) map onto the six generic reasons. Abstract memory is not
    CPU-free (it names the stack, exception frames and MOVEM/MOVEP spans), and ADR 0076 forbids a generic memory emulator.
@@ -837,6 +841,10 @@ reproduce the SEG-026-T002 strict row exactly.
   observation, the merged known bus ranges and the Unknown-target count of the stores that may touch configured ranges
   (`observed_store_ranges`; the driver observes the Z80 area `$A00000-$A0FFFF`). The diagnostic `--assume-no-z80-ram-writes`
   ablation is unchanged and never consults the proof.
+- **Dependency-guard amendment (T009 correction cycle 1).** The proof decodes Z80 code, so the report-only library
+  `segarecomp_genesis_analysis_report` links `segarecomp::cpu_z80`. `cpu_z80_dependency_test` (ADR 0059) allows exactly that target
+  by name; every other non-z80 target that links `cpu_z80`, production targets included, still fails, and negative controls in the
+  test prove it. The library stays report-only and is never linked by the CLI or a production target (`analysis_core_boundary_test`).
 - **Data contract.** Input: the Z80 image set (every content Z80 RAM can hold when the Z80 leaves reset; nullopt is
   `image_set_unknown`), and the 68K Z80-area stores as groups (known ranges, Unknown-target count, proven held under `/RESET` or
   not). Output: `none | ranges | all`, the physical work-RAM ranges, the image content hashes, typed reasons (non-empty iff `all`) and

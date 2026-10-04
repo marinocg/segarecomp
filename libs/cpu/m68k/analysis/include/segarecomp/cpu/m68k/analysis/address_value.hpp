@@ -4,8 +4,8 @@
 //
 // An address register holds a bounded points-to value: bottom, at most `m68k_points_to_bound` pairs (region, offset set), or
 // Unknown with one generic reason plus one CPU sub-reason. A region is one contiguous extent of 32-bit register values whose
-// 24-bit bus addresses fall inside one machine region (an immutable image, work RAM or the I/O/device window); the machine view
-// supplies the extents (`M68kAnalysisImage::region_of`). The stack is not a region of its own: it is work RAM.
+// 24-bit bus addresses fall inside one machine region (an immutable image, mutable RAM or the I/O/device window); the machine view
+// supplies the extents (`M68kAnalysisImage::region_of`). The stack is not a region of its own: it is mutable RAM.
 //
 // An offset set is either an exact set of at most `m68k_exact_offset_bound` offsets or a stride/congruence {lo, stride, hi}.
 // Offsets always lie in [0, size] of their region (one past the end is admitted so a pointer may step to a table end); any
@@ -51,7 +51,7 @@ inline constexpr std::size_t m68k_analysis_sub_reason_count = 16U;
 [[nodiscard]] const char *m68k_analysis_sub_reason_name(M68kAnalysisSubReason reason) noexcept;
 
 // ADR 0079 decision 4: the CPU-owned region vocabulary (Unknown is the points-to top, not a region).
-enum class M68kRegionKind : std::uint8_t { image, work_ram, io_device };
+enum class M68kRegionKind : std::uint8_t { image, mutable_ram, io_device };
 [[nodiscard]] const char *m68k_region_kind_name(M68kRegionKind kind) noexcept;
 
 // One region extent on the 24-bit bus, as reported by the machine view.

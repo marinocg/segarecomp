@@ -927,7 +927,7 @@ M68kMemoryRead M68kFiniteAdapter::read_memory_with(const M68kMemoryPolicy &polic
   const auto width = bytes == 1U ? M68kMemoryAccessWidth::byte : bytes == 2U ? M68kMemoryAccessWidth::word : M68kMemoryAccessWidth::long_word;
   const auto targets = operand_address(in, ea, auto_update_step(ea.reg, width));
   if (targets.is_unknown()) {
-    if (tracked != nullptr) *tracked = true;  // the address may name work RAM
+    if (tracked != nullptr) *tracked = true;  // the address may name mutable RAM
     return fail(targets.reason, targets.sub == Sub::none ? Sub::base_unknown : targets.sub);
   }
   if (!targets.is_known()) return fail(UnknownReason::unsupported_transfer, Sub::none);
@@ -1926,7 +1926,7 @@ M68kMemoryPolicy derive_memory_policy(const M68kAnalysisImage &image, const M68k
         for (const auto &range : *touched) derived.add_async(range);
     }
     if (stores && in_handler) ++report.handler_store_sites;
-    // Memory-source operands that may read work RAM: precise or Unknown by generic reason x CPU sub-reason. A writer-only instance's
+    // Memory-source operands that may read mutable RAM: precise or Unknown by generic reason x CPU sub-reason. A writer-only instance's
     // stores count above (they are real writes), its reads are never credited.
     const auto instance = config.frames.instances.find(tag);
     const bool credited = instance == config.frames.instances.end() || instance->second.credited;

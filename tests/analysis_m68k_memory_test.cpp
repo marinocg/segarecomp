@@ -82,7 +82,7 @@ public:
   }
   [[nodiscard]] std::optional<M68kRegionExtent> region_of(std::uint32_t address) const override {
     if (address >= work_ram_base && address < 0x1000000U)
-      return M68kRegionExtent{M68kRegionKind::work_ram, 0U, work_ram_base, 0x1000000U - work_ram_base, 0x10000U};
+      return M68kRegionExtent{M68kRegionKind::mutable_ram, 0U, work_ram_base, 0x1000000U - work_ram_base, 0x10000U};
     if (address >= io_base && address < work_ram_base)
       return M68kRegionExtent{M68kRegionKind::io_device, 0U, io_base, work_ram_base - io_base};
     return flat_.region_of(address);
@@ -146,8 +146,8 @@ std::string site_text(const M68kFiniteAnalysisResult &result, std::uint32_t pc) 
 // Lattice and store semantics.
 
 void lattice() {
-  const M68kRegion ram{M68kRegionKind::work_ram, 0U, work_ram_base, 0x200000U, 0x10000U};
-  const M68kRegion high{M68kRegionKind::work_ram, 0U, 0xFF000000U | work_ram_base, 0x200000U, 0x10000U};
+  const M68kRegion ram{M68kRegionKind::mutable_ram, 0U, work_ram_base, 0x200000U, 0x10000U};
+  const M68kRegion high{M68kRegionKind::mutable_ram, 0U, 0xFF000000U | work_ram_base, 0x200000U, 0x10000U};
   const auto at = [&](const M68kRegion &region, std::vector<std::uint32_t> offsets) {
     return M68kPointsTo::of({{region, M68kOffsetSet::of(std::move(offsets))}});
   };
@@ -197,7 +197,7 @@ void lattice() {
   expect(!read.known && read.sub == Sub::initial_memory, "summary cell: a strided store over uninitialized RAM reads Unknown");
   // Policy: asynchronous and external writers.
   M68kMemoryPolicy async{};
-  async.add_async({M68kRegionKind::work_ram, 0U, 0x100U, 0x101U});
+  async.add_async({M68kRegionKind::mutable_ram, 0U, 0x100U, 0x101U});
   M68kAbstractMemory guarded;
   m68k_memory_store(guarded, at(ram, {0x100U}), 1U, value({1U}), async);
   m68k_memory_store(guarded, at(ram, {0x110U}), 1U, value({1U}), async);
