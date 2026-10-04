@@ -4,8 +4,9 @@
 Every mutant below is one precise textual edit of PRODUCTION analysis code (the generic core headers, the M68K adapter, the Z80
 effect projection or the Z80 adapter) that plants a deliberate soundness, determinism or bound defect. The harness copies the
 product tree (without build/, .git/, games/, .tools/) to a temporary directory, configures ONE build there, builds the
-SEG-029 fixture tests plus the SEG-030-T005 contexts, SEG-030-T006 frames and Genesis interrupt-premise and the SEG-030-T010 Z80
-store-freedom proof fixtures and requires the unmutated baseline to pass. Then, per mutant, it applies the edit to the temporary copy only, rebuilds the
+SEG-029 fixture tests plus the SEG-030-T003 address-domain, SEG-030-T004 memory, SEG-030-T005 contexts, SEG-030-T006 frames and Genesis
+interrupt-premise and the SEG-030-T010 Z80 store-freedom proof fixtures (SEG-030-T008 maps every SEG-030 mutant of its record to a
+killed mutant here; ADR 0079, T008 record) and requires the unmutated baseline to pass. Then, per mutant, it applies the edit to the temporary copy only, rebuilds the
 affected fixture tests incrementally, runs them, and restores the file. A mutant is KILLED when one of its fixture tests exits non-zero (or times out). The worktree is never modified.
 
 Fail-closed rules:
@@ -46,14 +47,19 @@ CONTEXTS_TEST = "analysis_m68k_contexts_test"  # SEG-030-T005: call contexts and
 FRAMES_TEST = "analysis_m68k_frames_test"  # SEG-030-T006: interrupt mask, handler instances, frames and returns
 PREMISE_TEST = "analysis_genesis_interrupt_premise_test"  # SEG-030-T006: the named Genesis interrupt-source premise
 Z80_PROOF_TEST = "analysis_genesis_z80_proof_test"  # SEG-030-T010: the Genesis Z80 work-RAM store-freedom proof and its credit
+VALUE_TEST = "analysis_m68k_value_test"  # SEG-030-T003: the address region plus offset domain (added by SEG-030-T008)
+MEMORY_TEST = "analysis_m68k_memory_test"  # SEG-030-T004: abstract memory and alias exclusion (added by SEG-030-T008)
 # cheapest first: a core mutant is usually decided by the CPU-free fixture
-ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, CONTEXTS_TEST, FRAMES_TEST, PREMISE_TEST, Z80_PROOF_TEST)
+ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, VALUE_TEST, MEMORY_TEST, CONTEXTS_TEST, FRAMES_TEST, PREMISE_TEST, Z80_PROOF_TEST)
 TEST_TIMEOUT_SECONDS = 60  # the unmutated fixtures run in well under a second
 
 FINITE = "libs/analysis/include/segarecomp/analysis/finite_value.hpp"
 SOLVER = "libs/analysis/include/segarecomp/analysis/solver.hpp"
 M68K = "libs/cpu/m68k/analysis/src/finite_adapter.cpp"
 M68K_FRAMES = "libs/cpu/m68k/analysis/src/frames.cpp"
+M68K_ADDRESS = "libs/cpu/m68k/analysis/src/address_value.cpp"
+M68K_MEMORY = "libs/cpu/m68k/analysis/src/abstract_memory.cpp"
+M68K_ADAPTER_HEADER = "libs/cpu/m68k/analysis/include/segarecomp/cpu/m68k/analysis/finite_adapter.hpp"
 Z80_EFFECTS = "libs/cpu/z80/src/effects.cpp"
 Z80_ADAPTER = "libs/cpu/z80/analysis/src/adapter.cpp"
 GENESIS_PREMISE = "platforms/genesis/analysis_report/include/segarecomp/genesis_analysis_report/interrupt_premise.hpp"
@@ -164,6 +170,11 @@ MUTANTS: list[Mutant] = [
            "      if (out.solution.pinned.contains(point) && !config.pinned_sites.contains(pc)) invalidated.insert(pc);\n",
            "",
            (M68K_TEST,), "a site pinned by the generic solver is reported from its narrower final input"),
+    Mutant("m68k_store_derived_invalidation_skipped", M68K,
+           "      if (out.solution.pinned.contains(point) && !config.pinned_sites.contains(pc)) invalidated.insert(pc);\n",
+           "",
+           (MEMORY_TEST,), "skipped store-derived invalidation: a field-dispatch proof undone by the store it exposed is not reported "
+           "invalidated (the same edit as m68k_solver_pin_ignored, decided by the SEG-030-T004 store-derived fixture alone)"),
     Mutant("m68k_odd_target_kept", M68K,
            "    if ((target & 1U) != 0U) {\n      ++out.odd_targets_excluded;  // an odd JMP/JSR target",
            "    if ((target & 1U) != 0U && false) {\n      ++out.odd_targets_excluded;  // an odd JMP/JSR target",
@@ -194,6 +205,34 @@ MUTANTS: list[Mutant] = [
            "if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, entry_state(true, tag)});",
            "if (config_.call_continuations) result.edges.push_back({stacked, EdgeKind::return_edge, out});",
            (M68K_TEST,), "a call continuation carries the pre-call state instead of an opaque entry"),
+    # ---------------------------------------------------------------- M68K address domain and abstract memory (SEG-030-T003/T004;
+    # added by the SEG-030-T008 soundness gate)
+    Mutant("m68k_offset_region_exit_accepted", M68K_ADDRESS,
+           "  if (new_lo < 0 || new_hi > static_cast<std::int64_t>(limit)) return std::nullopt;  // leaves the region: never clamped",
+           "  if (new_lo < 0 && limit == 0U) return std::nullopt;",
+           (VALUE_TEST,), "out-of-region offset accepted: address arithmetic leaving the region extent is not region_exit"),
+    Mutant("m68k_congruence_as_exact", M68K_ADDRESS,
+           "  return is_known() && std::none_of(pairs.begin(), pairs.end(), [](const auto &pair) { return pair.second.is_strided(); });",
+           "  return is_known();",
+           (VALUE_TEST,), "congruence widened to certainty: a strided (congruence-only) points-to set counts as an exact set"),
+    Mutant("m68k_memory_weak_update_dropped", M68K_MEMORY,
+           "                      if (!strong && storable && it->first == cell) {\n"
+           "                        auto joined = m68k_cell_join(it->second, *value, span);",
+           "                      if (!strong && storable && it->first == cell) {\n"
+           "                        auto joined = std::optional<M68kCellValue>(it->second);",
+           (MEMORY_TEST,), "dropped weak update: a may-store keeps the old cell value instead of joining the stored value"),
+    Mutant("m68k_memory_unknown_base_not_poisoned", M68K_MEMORY,
+           "  if (!targets.is_known()) {\n    memory.poison_all();\n    return;\n  }",
+           "  if (!targets.is_known()) {\n    return;\n  }",
+           (MEMORY_TEST,), "ignored unknown-base poison: a store through an Unknown address leaves every cell"),
+    Mutant("m68k_memory_push_at_a7", M68K,
+           "      out.emplace_back(m68k_points_to_add(in.address[7], {-static_cast<std::int64_t>(write.span)}), write.span);",
+           "      out.emplace_back(in.address[7], write.span);",
+           (MEMORY_TEST,), "excluded stack writer that actually aliases: a push is placed at A7 instead of below it"),
+    Mutant("m68k_memory_async_writer_ignored", M68K_MEMORY,
+           "    if (policy.asynchronous(cell)) return fail(Sub::async_writer);\n",
+           "",
+           (MEMORY_TEST, FRAMES_TEST), "ignored interrupt-handler writer: a read of an asynchronously written cell is precise"),
     # ---------------------------------------------------------------- M68K call contexts and summaries (SEG-030-T005)
     Mutant("m68k_stale_summary_accepted", M68K,
            "      valid = false;  // the used summary is below what its own solution derives (stale): grow it\n",
@@ -225,6 +264,10 @@ MUTANTS: list[Mutant] = [
            "    state.stack_delta = continuation ? FiniteValue::unknown(UnknownReason::unsupported_transfer) : FiniteValue::of({0U});\n",
            "    state.stack_delta = continuation ? FiniteValue::bottom() : FiniteValue::of({0U});\n",
            (CONTEXTS_TEST,), "a resuming exception's continuation has a bottom stack delta that joins away (unbalanced path proven)"),
+    Mutant("m68k_context_bound_raised", M68K_ADAPTER_HEADER,
+           "inline constexpr std::size_t m68k_context_bound = 8U;",
+           "inline constexpr std::size_t m68k_context_bound = 9U;",
+           (CONTEXTS_TEST,), "raised context bound: K = 9 instead of ADR 0079 decision 11's K = 8 (SEG-030-T008)"),
     Mutant("m68k_query_reads_context_zero", M68K,
            "    out = join(out, state->values.values[m68k_analysis_slot(reg, width)]);\n",
            "    if (point == (pc & bus_mask)) out = join(out, state->values.values[m68k_analysis_slot(reg, width)]);\n",
@@ -250,6 +293,17 @@ MUTANTS: list[Mutant] = [
            "            edge.status = report->restored_status;",
            "            edge.status = out.status;",
            (FRAMES_TEST,), "incorrect RTE SR restoration: a proven RTE keeps the pre-RTE status"),
+    Mutant("m68k_rte_without_frame", M68K,
+           "    if (!sr_read.known) return unproven(sr_read);\n"
+           "    if (!sr) return finish(UnknownReason::unsupported_transfer, Sub::frame_unproven);\n"
+           "    std::vector<std::uint64_t> restored;\n"
+           "    for (const auto v : *sr) restored.push_back(m68k_status_of_sr(v));\n"
+           "    out.restored_status = FiniteValue::of(std::move(restored));\n",
+           "    (void)sr_read;\n"
+           "    std::vector<std::uint64_t> restored;\n"
+           "    if (sr) for (const auto v : *sr) restored.push_back(m68k_status_of_sr(v));\n"
+           "    out.restored_status = sr ? FiniteValue::of(std::move(restored)) : FiniteValue::unknown(UnknownReason::unsupported_transfer);\n",
+           (FRAMES_TEST,), "RTE proven without a frame: the saved-SR word need not be a proven code-built cell (SEG-030-T008)"),
     Mutant("m68k_partition_policy_dropped", M68K,
            "  for (const auto &[tag, policy] : config_.frames.policies) tag_policies_.emplace(tag, join(config_.memory.policy, policy));",
            "  for (const auto &[tag, policy] : config_.frames.policies) tag_policies_.emplace(tag, config_.memory.policy);",

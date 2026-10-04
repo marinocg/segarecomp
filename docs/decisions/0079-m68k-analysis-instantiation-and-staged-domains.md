@@ -942,3 +942,47 @@ reproduce the SEG-026-T002 strict row exactly.
   unchanged. Memory facts do not survive on any title (`async_all`, 0 precise reads). The blockers remain the intrinsic
   Unknown-base store cycle (`base_unknown` targets through pointers loaded from work RAM, record T006 advancement stop) and the
   environmental writers (Z80 image set unknown and unbounded 68K Z80-area stores, record T010; handler entries `entry_unknown`).
+
+### T008: adversarial soundness and mutation gate
+
+- **Mutant mapping.** `analysis_mutation_test` now also builds `analysis_m68k_value_test` (T003) and `analysis_m68k_memory_test`
+  (T004). Every mutant of the T008 record maps to a killed mutant; none is justified as equivalent.
+
+  | record mutant | `analysis_mutation_test` mutant | killing fixture |
+  | --- | --- | --- |
+  | dropped weak update | `m68k_memory_weak_update_dropped` (new) | memory: a weak update joins |
+  | ignored unknown-base poison | `m68k_memory_unknown_base_not_poisoned` (new) | memory: an Unknown-target store poisons every cell |
+  | excluded stack writer that actually aliases | `m68k_memory_push_at_a7` (new) | memory: stack aliasing (new fixture: PEA with A7 = field + 4) |
+  | ignored interrupt-handler writer | `m68k_memory_async_writer_ignored` (new); `m68k_unanalysed_handler_precise`, `m68k_undelivered_interrupt_ignored` | memory: policy; frames |
+  | raised context bound | `m68k_context_bound_raised` (new) | contexts: context exhaustion (now at the literal K = 8) |
+  | congruence widened to certainty | `m68k_congruence_as_exact` (new) | value: strided only |
+  | RTE proven without a frame | `m68k_rte_without_frame` (new) | frames: RTE unproven SR |
+  | skipped store-derived invalidation | `m68k_store_derived_invalidation_skipped` (new); `m68k_solver_pin_ignored`, `stale_target_not_pinned` | memory: invalidation |
+  | out-of-region offset accepted | `m68k_offset_region_exit_accepted` (new) | value: stepping past the extent |
+  | non-deterministic order | `nondeterministic_order` | core: pinned site |
+  | dropped interrupt-mask poison | `m68k_unknown_sr_treated_as_masked` | frames |
+  | incorrect handler nesting | `m68k_preemption_at_equal_mask` | frames |
+  | wrong supervisor-stack provenance | `m68k_frame_at_a7`, `m68k_reset_ssp_ignored` | frames |
+  | incorrect RTE SR restoration | `m68k_rte_status_not_restored` | frames |
+  | Z80 cannot store RAM | `z80_proof_cannot_store_ram` | Z80 proof |
+  | ignored Z80 bank change | `z80_proof_bank_change_ignored` | Z80 proof |
+  | ignored BUSREQ/reset interval | `z80_proof_reset_interval_ignored`, `z80_proof_reset_interval_never_held` | Z80 proof |
+  | stale memory fact after policy growth | `m68k_partition_policy_dropped` | frames |
+  | stale summary after discovered writer | `m68k_stale_summary_accepted`, `m68k_stale_summary_kept` | contexts |
+
+- **Randomized synthetic differential: halted on an unsound result.** Before the seeded generator was built, a hand probe of its
+  "unbalanced stack" shape falsified the call-continuation model. Minimized synthetic reproducer (flat image at 0, work RAM
+  `$E00000-$FFFFFF`, reset entry `$200`, reset SSP `$FFFF00`; the same result with every domain off and with `frames`):
+
+  ```text
+  $200: JSR ($300).L      $206: NOP; BRA *
+  $300: MOVE.L #$400,(A7) ; overwrite the return slot at the entry stack delta
+  $306: RTS               ; concretely PC <- $400
+  $400: NOP; BRA *
+  ```
+
+  The solve is complete. `$400` is not in `D`. No site at `$306` is reported Unknown: an RTS at the entry delta is an ordinary
+  return, modelled through the call continuation at `$206` (decision 10), with no check that the return cell still holds the
+  pushed return address. Under decision 8 an escape not justified by a typed Unknown site is a falsification. The randomized
+  differential, its seeds and its counts are therefore not delivered by this record; the return-slot premise needs a decision
+  first (declare it, or check the return cell and report such an RTS as a computed or typed Unknown site).

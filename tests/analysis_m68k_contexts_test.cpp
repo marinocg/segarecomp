@@ -315,7 +315,9 @@ void recursion() {
 void context_exhaustion() {
   // MOVEQ #4,D0; n x BSR g; JMP 2(PC,D0.W) with g: RTS. With n = K the summaries carry D0; with n = K + 1 the callee is merged into
   // context 0 and its continuations are Unknown(context_bound).
-  for (const std::size_t n : {m68k_context_bound, m68k_context_bound + 1U}) {
+  // ADR 0079 decision 11 fixes K = 8: the fixture uses the literal so a raised bound is observable (SEG-030-T008).
+  static constexpr std::size_t adr_k = 8U;
+  for (const std::size_t n : {adr_k, adr_k + 1U}) {
     Asm a;
     constexpr std::uint32_t g = 0x400U;
     a.moveq(0, 4U);
@@ -324,7 +326,7 @@ void context_exhaustion() {
     a.w({0x4E71U, 0x4E71U}).stop();
     a.at(g).rts();
     const auto result = run(a);
-    if (n == m68k_context_bound) {
+    if (n == adr_k) {
       expect(resolved(result, site, {site + 8U}) && result.contexts.max_contexts_per_callee == n && result.contexts.merged_callees == 0U,
              "context bound: K contexts keep their summaries: " + text(result, site));
     } else {

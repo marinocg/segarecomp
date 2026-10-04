@@ -226,10 +226,10 @@ struct Dispatch {
   std::uint32_t base{};  // the target of D0 = 0
 };
 
-Dispatch field_dispatch_program(std::initializer_list<std::uint32_t> interference = {}, bool set_stack = false) {
+Dispatch field_dispatch_program(std::initializer_list<std::uint32_t> interference = {}, std::uint32_t stack = 0U) {
   Dispatch out;
   auto &a = out.program;
-  if (set_stack) a.w({0x2E7CU}).l(0x00FFFF00U);  // MOVEA.L #$00FFFF00,A7
+  if (stack != 0U) a.w({0x2E7CU}).l(stack);  // MOVEA.L #stack,A7
   a.lea_object(0);
   a.w({0x4A01U});  // TST.B D1
   const auto beq = a.pc;
@@ -272,13 +272,18 @@ void interfering_unknown_base_store() {
 
 void stack_store_excluded() {
   // MOVE.L D3,-(A7) with a known A7 ($FFFF00) cannot alias the field at $FF0110; PEA and the A7-relative frame keep it too.
-  const auto program = field_dispatch_program({0x2F03U, 0x4879U, 0x0000U, 0x0300U}, true);  // MOVE.L D3,-(A7); PEA ($300).L
+  const auto program = field_dispatch_program({0x2F03U, 0x4879U, 0x0000U, 0x0300U}, 0x00FFFF00U);  // MOVE.L D3,-(A7); PEA ($300).L
   const auto result = run(program.program);
   expect(resolved(result, program.site, {program.base, program.base + 4U}),
          "stack exclusion: pushes at a known A7 offset leave the field: " + site_text(result, program.site));
   // The same pushes with an Unknown A7 may hit any cell.
   const auto unknown_stack = field_dispatch_program({0x2F03U});
   expect(unresolved(run(unknown_stack.program), unknown_stack.site), "stack exclusion: a push through an Unknown A7 poisons");
+  // SEG-030-T008: a stack writer that actually aliases is never excluded. With A7 = field + 4, PEA writes its long at A7 - 4, i.e.
+  // over the field byte: the byte cell is removed and the field read is Unknown (a push placed at A7 would miss it).
+  const auto aliasing = field_dispatch_program({0x4879U, 0x0000U, 0x0300U}, object + 0x14U);  // PEA ($300).L
+  expect(unresolved(run(aliasing.program), aliasing.site),
+         "stack aliasing: a push below a known A7 that overlaps the field removes it: " + site_text(run(aliasing.program), aliasing.site));
 }
 
 // A handler root: MOVE.B #8,(target).L; RTE.
