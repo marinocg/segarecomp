@@ -62,6 +62,7 @@ import sys
 BITMAP_BYTES = 1 << 20
 CAUSE_INITIAL, CAUSE_RETIRE, CAUSE_INTERRUPT, CAUSE_DISPATCH, CAUSE_RESUMPTION = 0, 1, 2, 3, 4
 EXIT_PREMISE_VIOLATION = 5
+EXIT_INCOMPLETE_ORACLE = 6
 WORK_RAM_BEGIN = 0xE00000
 
 # Fine challenger family -> the experiment's coarse first-miss categories.
@@ -213,9 +214,7 @@ def compare(observed: set[int], witnesses: dict, challenger: dict, summary: dict
             "target_frames": summary.get("target_frames"),
             "frames_published": summary.get("frames_published"),
             "witness_overflow": summary.get("witness_overflow"),
-            "complete": (summary.get("outcome") == "frames_reached" and summary.get("witness_overflow") == 0
-                         and summary.get("unknown_retirements") == 0
-                         and summary.get("frames_published") == summary.get("target_frames")),
+            "complete": oracle_complete(summary),
         }
         # Recall at each coverage checkpoint, reconstructed from first-entry retirement ordinals.
         ordinals = sorted((w[0], pc) for pc, w in witnesses.items())
@@ -228,6 +227,15 @@ def compare(observed: set[int], witnesses: dict, challenger: dict, summary: dict
                                 "recall": round(hits / len(seen), 6) if seen else None})
         report["checkpoints"] = checkpoints
     return report
+
+
+def oracle_complete(summary: dict) -> bool:
+    """Whether runtime coverage is a complete fixed-frame oracle rather than static-only evidence."""
+    target = summary.get("target_frames")
+    published = summary.get("frames_published")
+    return (type(target) is int and target > 0 and type(published) is int and published == target
+            and summary.get("outcome") == "frames_reached" and summary.get("witness_overflow") == 0
+            and summary.get("unknown_retirements") == 0)
 
 
 def resolved_pc_index_targets(challenger: dict) -> dict[int, set[int]]:
@@ -548,6 +556,8 @@ def main() -> int:
     parser.add_argument("--coverage-dir", required=True)
     parser.add_argument("--challenger", required=True)
     parser.add_argument("--coverage-summary")
+    parser.add_argument("--require-complete-oracle", action="store_true",
+                        help="gate mode: reject a missing or incomplete runtime coverage oracle")
     parser.add_argument("--checkpoint-frames", help="comma-separated frames to keep from the per-epoch recall")
     parser.add_argument("--classification",
                         help="private classification of the observed PCs (segarecomp genesis-reachability-challenger "
@@ -570,6 +580,9 @@ def main() -> int:
     if args.coverage_summary:
         text = pathlib.Path(args.coverage_summary).read_text(encoding="utf-8").strip()
         summary = json.loads(text[len("COVERAGE_SUMMARY "):] if text.startswith("COVERAGE_SUMMARY ") else text)
+    if args.require_complete_oracle and (summary is None or not oracle_complete(summary)):
+        sys.stderr.write("a complete coverage oracle is required (frames target, witnesses and retirements must be complete)\n")
+        return EXIT_INCOMPLETE_ORACLE
     classification = None
     if args.classification:
         classification = json.loads(pathlib.Path(args.classification).read_text(encoding="utf-8"))

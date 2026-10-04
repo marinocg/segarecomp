@@ -141,10 +141,24 @@ def check_computed_sites(compare: pathlib.Path, tmpdir: pathlib.Path) -> None:
             "outcome": outcome, "target_frames": 4, "frames_published": published, "witness_overflow": 0,
             "unknown_retirements": 0, "epochs": []}))
         out = subprocess.run([sys.executable, str(compare), "--coverage-dir", str(coverage), "--challenger", str(private),
-                              "--coverage-summary", str(summary)], capture_output=True, text=True)
+                               "--coverage-summary", str(summary)], capture_output=True, text=True)
         assert out.returncode == 0, out.stderr
         oracle = json.loads(out.stdout)["oracle"]
         assert oracle["complete"] is complete and oracle["outcome"] == outcome, oracle
+        gated = subprocess.run([sys.executable, str(compare), "--coverage-dir", str(coverage), "--challenger", str(private),
+                                "--coverage-summary", str(summary), "--require-complete-oracle"],
+                               capture_output=True, text=True)
+        assert gated.returncode == (0 if complete else 6), (gated.returncode, gated.stderr)
+        if not complete:
+            assert gated.stdout == "" and "complete coverage oracle" in gated.stderr, gated.stderr
+    missing_oracle = subprocess.run([sys.executable, str(compare), "--coverage-dir", str(coverage), "--challenger", str(private),
+                                     "--require-complete-oracle"], capture_output=True, text=True)
+    assert missing_oracle.returncode == 6 and missing_oracle.stdout == "", (missing_oracle.returncode, missing_oracle.stderr)
+    summary.write_text(json.dumps({"outcome": "frames_reached", "witness_overflow": 0, "unknown_retirements": 0}))
+    missing_target = subprocess.run([sys.executable, str(compare), "--coverage-dir", str(coverage), "--challenger", str(private),
+                                     "--coverage-summary", str(summary), "--require-complete-oracle"],
+                                    capture_output=True, text=True)
+    assert missing_target.returncode == 6 and missing_target.stdout == "", (missing_target.returncode, missing_target.stderr)
     # SEG-030: a core report whose solve exhausted a bound (empty D) is rejected, never compared as a vacuous result.
     incomplete = json.loads(private.read_text())
     incomplete["aggregate"]["solver"] = {"complete": False, "reason": "iteration_bound"}
