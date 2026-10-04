@@ -468,6 +468,17 @@ void rte_unproven() {
   const auto *poisoned_site = return_site(poisoned, poisoned_rte);
   expect(poisoned_site != nullptr && !poisoned_site->resolved && poisoned_site->sub == Sub::store_poison,
          "RTE frame overwritten through an Unknown base: Unknown(store_poison)");
+  // A precise code-built frame is insufficient when the current effective status does not prove supervisor mode.
+  Asm d;
+  d.w({0x46C5U}).push_long(target).push_word(0x2300U);  // MOVE D5,SR; precise frame
+  const auto unknown_status_rte = d.pc;
+  d.rte();
+  d.at(target).stop();
+  const auto unknown_status = run(d, {});
+  const auto *unknown_status_site = return_site(unknown_status, unknown_status_rte);
+  expect(unknown_status_site != nullptr && !unknown_status_site->resolved && unknown_status_site->sub == Sub::frame_unproven &&
+             !reached_in(unknown_status, target, 0U),
+         "RTE unknown effective status: precise frame remains Unknown(frame_unproven), no edge");
 }
 
 void computed_rts() {

@@ -299,16 +299,9 @@ MUTANTS: list[Mutant] = [
            "            edge.status = out.status;",
            (FRAMES_TEST,), "incorrect RTE SR restoration: a proven RTE keeps the pre-RTE status"),
     Mutant("m68k_rte_without_frame", M68K,
-           "    if (!sr_read.known) return unproven(sr_read);\n"
-           "    if (!sr) return finish(UnknownReason::unsupported_transfer, Sub::frame_unproven);\n"
-           "    std::vector<std::uint64_t> restored;\n"
-           "    for (const auto v : *sr) restored.push_back(m68k_status_of_sr(v));\n"
-           "    out.restored_status = FiniteValue::of(std::move(restored));\n",
-           "    (void)sr_read;\n"
-           "    std::vector<std::uint64_t> restored;\n"
-           "    if (sr) for (const auto v : *sr) restored.push_back(m68k_status_of_sr(v));\n"
-           "    out.restored_status = sr ? FiniteValue::of(std::move(restored)) : FiniteValue::unknown(UnknownReason::unsupported_transfer);\n",
-           (FRAMES_TEST,), "RTE proven without a frame: the saved-SR word need not be a proven code-built cell (SEG-030-T008)"),
+           "  if (rte && !m68k_status_supervisor_proven(status)) return finish(UnknownReason::unsupported_transfer, Sub::frame_unproven);",
+           "  if (false) return finish(UnknownReason::unsupported_transfer, Sub::frame_unproven);",
+           (FRAMES_TEST,), "RTE proven without a frame context whose effective status proves supervisor mode"),
     Mutant("m68k_partition_policy_dropped", M68K,
            "  for (const auto &[tag, policy] : config_.frames.policies) tag_policies_.emplace(tag, join(config_.memory.policy, policy));",
            "  for (const auto &[tag, policy] : config_.frames.policies) tag_policies_.emplace(tag, config_.memory.policy);",
@@ -330,7 +323,9 @@ MUTANTS: list[Mutant] = [
     Mutant("m68k_non_resuming_instance_not_preemptible", M68K,
            "  if (!frames.instances.contains(parent_tag)) return Unanalysed::unmodelled_parent;\n",
            "  if (!frames.instances.contains(parent_tag) || !frames.instances.at(parent_tag).resuming) return Unanalysed::unmodelled_parent;\n",
-           (FRAMES_TEST,), "a non-resuming instance is not preemptible: no child instance is entered at its frame address"),
+           (FRAMES_TEST,), "a non-resuming instance is not preemptible: no child instance is entered at its frame address",
+           "correction cycle 2 makes every synchronous handler potentially resuming because any handler may execute RTE; "
+           "there is no longer a non-resuming instance for this historical guard to exclude"),
     Mutant("m68k_unanalysed_taking_entry_dropped", M68K,
            "    if (credited) unknown_entries.insert(handler);\n",
            "    (void)handler;\n",
@@ -368,13 +363,16 @@ MUTANTS: list[Mutant] = [
            "    state = opaque_continuation(opaque == contexts.opaque.end() ? Sub::none : opaque->second, tag);\n"
            "    state.address[7] = in.address[7];\n",
            (FRAMES_TEST,), "an unproven (unbalanced) callee's continuation is rebased to the caller's A7"),
-    Mutant("m68k_non_resuming_raise_unknown_effect", M68K,
-           "    if (control.always_raises_exception && config.domains.frames) {\n",
-           "    if (false) {\n",
-           (FRAMES_TEST,), "an always-raising non-resuming instruction (ILLEGAL) still makes its activation unproven"),
+    Mutant("m68k_unmodelled_always_raise_unknown_effect", M68K,
+           "    if (result.solution.unresolved_computed.contains(point) ||\n",
+           "    if (result.solution.unresolved_computed.contains(point) || (control.always_raises_exception && !modelled_raise) ||\n",
+           (FRAMES_TEST,), "an unconfigured always-raising instruction is treated as an opaque effect instead of a terminal path"),
     Mutant("m68k_unmodelled_trap_terminates_path", M68K,
-           "        (control.stacked == M68kStackedContinuationKind::exception_continuation && !config.exception_continuations))\n",
-           "        false)\n",
+           "        (control.stacked == M68kStackedContinuationKind::exception_continuation && !config.exception_continuations &&\n"
+           "         !(modelled_raise && decoded->operation.kind == M68kIrKind::trap_exception)))\n",
+           "        (control.stacked == M68kStackedContinuationKind::exception_continuation && !config.exception_continuations &&\n"
+           "         decoded->operation.kind != M68kIrKind::trap_exception &&\n"
+           "         !(modelled_raise && decoded->operation.kind == M68kIrKind::trap_exception)))\n",
            (FRAMES_TEST,), "a TRAP whose resuming continuation is not modelled is treated as a path terminator (escape dropped)"),
     Mutant("m68k_whole_program_status_bound", M68K,
            "  return found == config_.frames.status_bounds.end() ? FiniteValue::bottom() : found->second;\n",
