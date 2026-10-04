@@ -245,3 +245,11 @@ target_link_libraries(analysis_hybrid_plan_test PRIVATE segarecomp::genesis_anal
 segarecomp_enable_warnings(analysis_hybrid_plan_test)
 add_test(NAME analysis_hybrid_plan_test COMMAND analysis_hybrid_plan_test)
 set_property(TEST analysis_hybrid_plan_test APPEND PROPERTY LABELS full fast)
+
+# SEG-031 (ADR 0080): the explicit hybrid candidate end to end (planner -> plan -> filtered emission -> strict C11 build and run with
+# an explicit instruction budget), identical behaviour to broad, and the emitter's fail-closed plan validation.
+add_test(NAME genesis_hybrid_admission_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_hybrid_admission_generated_test.py $<TARGET_FILE:segarecomp>
+  $<TARGET_FILE:segarecomp-genesis-analysis-report> ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/hybrid_admission_generated)
+set_property(TEST genesis_hybrid_admission_generated_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_hybrid_admission_generated_test PROPERTY TIMEOUT 900)

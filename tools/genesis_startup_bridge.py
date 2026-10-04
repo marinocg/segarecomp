@@ -1974,6 +1974,11 @@ def main() -> int:
                              "COPY_ALIAS_DISCOVERY aggregate summary, and fails closed when incomplete. It finds only "
                              "copies executed on the preparation run's path. Requires --immutable-rom-aot; "
                              "ephemeral, never persisted. The FINAL program is then built once (see --one-shot)")
+    parser.add_argument("--admission-plan",
+                        help="SEG-031 (ADR 0080): explicit hybrid admission candidate. A plan written by "
+                             "segarecomp-genesis-analysis-report --hybrid-plan; forwarded to the FINAL emission as "
+                             "--immutable-rom-aot-admission (the emitter validates it fail-closed). Requires "
+                             "--immutable-rom-aot; copy-alias preparation stays broad. Private for a commercial input")
     parser.add_argument("--provenance-diagnostics", action="store_true",
                         help="SEG-020-T002: opt in to the generated provenance lookup; the table is "
                              "extracted to <out-dir>/provenance-diagnostics.c (ephemeral, not for commit)")
@@ -2123,6 +2128,11 @@ def main() -> int:
                     if discovered["termination_reason"] == ALIAS_TERMINATION_MAX_ROUNDS else 2)
         for execution, source, length in discovered["aliases"]:
             emitter_command += ["--immutable-copy-alias", f"{execution:08x}:{source:08x}:{length:08x}"]
+    if args.admission_plan:
+        if not args.immutable_rom_aot:
+            sys.stderr.write("--admission-plan requires --immutable-rom-aot\n")
+            return 8
+        emitter_command += ["--immutable-rom-aot-admission", args.admission_plan]
     viewer_sdl3 = None
     if args.viewer:
         # Fail clearly before any generation/guest execution; never fall back to headless.

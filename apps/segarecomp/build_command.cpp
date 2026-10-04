@@ -2,6 +2,7 @@
 
 #include "segarecomp/machine/master_system/cartridge.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
+#include "segarecomp/machine/genesis/hybrid_admission.hpp"
 #include "segarecomp/machine/genesis/m68k_copy_alias.hpp"
 #include "segarecomp/machine/genesis/z80_materialization.hpp"
 #include "segarecomp/machine/master_system/emit.hpp"
@@ -197,6 +198,10 @@ struct Options {
   std::string platform;                 // "", "genesis" or "master-system"
   std::string mapper;                   // explicit mapper family declaration (build option), e.g. "sega"
   std::optional<fs::path> mapper_manifest;
+  // SEG-031 (ADR 0080): explicit Genesis M68K hybrid admission candidate (a plan written by the report-only planner). Parsed once,
+  // strictly; each M68K emission applies it only when its alias set equals the emission's (otherwise that emission is broad).
+  std::optional<fs::path> admission_plan;
+  std::optional<segarecomp::GenesisHybridAdmissionPlan> admission;
 };
 
 enum class Target { genesis, master_system };
@@ -269,6 +274,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--optimize") options.optimize = value;
     else if (key == "--runtime-optimize") options.runtime_optimize = value;
     else if (key == "--jobs") options.jobs = static_cast<unsigned>(std::max(0, std::atoi(value.c_str())));
+    else if (key == "--admission-plan" && !options.admission_plan) options.admission_plan = fs::path(value);
     else return std::nullopt;
   }
   if (!have_rom || !have_output || !have_runtime || options.cc.empty()) return std::nullopt;
@@ -652,6 +658,16 @@ struct GenesisM68kRoute {
   fs::path shard_dir;  // generated/ (sharded emission)
 };
 
+// SEG-031 (ADR 0080): a hybrid plan applies to an emission only when it names exactly that emission's ADR 0049 alias set.
+bool admission_applies(const segarecomp::GenesisHybridAdmissionPlan &plan, const std::vector<m68k_alias::CopyAlias> &aliases) {
+  if (plan.aliases.size() != aliases.size()) return false;
+  for (std::size_t i = 0; i < aliases.size(); ++i)
+    if (plan.aliases[i].execution_base != aliases[i].execution || plan.aliases[i].source_base != aliases[i].source ||
+        plan.aliases[i].length != aliases[i].length)
+      return false;
+  return true;
+}
+
 // The existing M68K emit route, in-process (`emit-general-startup-bridge-c --reset-entry --immutable-rom-aot`), plus one
 // `--immutable-copy-alias` per ADR 0049 descriptor. Replaces the previous emission; fills `units` from the emitted manifest. False:
 // the emitter rejected the request.
@@ -671,6 +687,13 @@ bool emit_genesis_m68k(const Options &options, Log &log, const std::string &sha,
     emit_args.insert(emit_args.end(), {"--immutable-copy-alias", text});
   }
   if (fs::is_regular_file(hints, ec)) { emit_args.push_back("--external-hints"); emit_args.push_back(hints.string()); }
+  if (options.admission) {
+    if (admission_applies(*options.admission, aliases)) {
+      emit_args.insert(emit_args.end(), {"--immutable-rom-aot-admission", options.admission_plan->string()});
+    } else {
+      log.line("m68k admission: broad for this emission (the plan's alias set differs)");
+    }
+  }
   emit_args.insert(emit_args.end(), {"--generated-c-output", route.source.string(), "--generated-c-shard-dir", route.shard_dir.string()});
   std::vector<char *> emit_argv;
   for (auto &arg : emit_args) emit_argv.push_back(arg.data());
@@ -919,6 +942,13 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
                                             ",\"sound_fault_frame\":" + std::to_string(summary.sound_fault->master_ticks / (3420U * 262U /* NTSC master ticks per frame */))
                                       : std::string()) + "}";
   status_extra += prep_extra;  // SEG-028-T005: sanitized aggregates of the alias preparation (counts and the termination only)
+  if (options.admission) {
+    // SEG-031 (ADR 0080): which admission the final M68K emission used (sanitized: the strategy only).
+    const bool hybrid = options.admission->strategy == segarecomp::GenesisAdmissionStrategy::hybrid &&
+                        admission_applies(*options.admission, prep.aliases);
+    status_extra += std::string(",\"m68k_admission\":\"") + (hybrid ? "hybrid" : "broad") + "\"";
+    log.line(std::string("m68k admission: final=") + (hybrid ? "hybrid" : "broad"));
+  }
   // SEG-028 (ADR 0077): the producer boundary, recorded as sanitized provenance counts only (no address, byte or hash).
   const std::string images = "{\"m68k\":" + m68k_images + ",\"z80\":" +
                              segarecomp::format_image_provenance_json(segarecomp::count_image_provenance(gz80::executable_images(registry))) + "}";
@@ -939,6 +969,21 @@ int segarecomp_build_command(int argc, char **argv) {
   if (ec) { std::cerr << "segarecomp: cannot create output directory\n"; return 2; }
   Log log;
   log.file.open(options.output / "build.log", std::ios::binary | std::ios::trunc);
+  if (options.admission_plan) {
+    std::ifstream in(*options.admission_plan, std::ios::binary);
+    std::string text;
+    if (in) {
+      text.resize(segarecomp::genesis_hybrid_admission_plan_max_bytes + 1U);
+      in.read(text.data(), static_cast<std::streamsize>(text.size()));
+      text.resize(static_cast<std::size_t>(in.gcount()));
+    }
+    std::string error = "plan_unreadable";
+    if (in || in.eof()) options.admission = segarecomp::parse_genesis_hybrid_admission_plan(text, &error);
+    if (!options.admission) {
+      std::cerr << "segarecomp: hybrid admission plan rejected: " << error << '\n';
+      return 2;
+    }
+  }
   std::string sha;
   std::string sms_provenance;  // status.json members recording the SMS identity (empty for Genesis)
   std::string sms_images;      // SMS: the status.json executable_images member
@@ -965,6 +1010,8 @@ int segarecomp_build_command(int argc, char **argv) {
         return fail(options, log, sha, "analyze", 1, "Game Gear images are not supported.", "PLATFORM_UNSUPPORTED");
     }
     sms::IngestOptions ingest_options;
+    if (target == Target::master_system && options.admission)
+      return fail(options, log, sha, "analyze", 1, "A hybrid admission plan applies only to Genesis images.", "ADMISSION_NOT_APPLICABLE");
     if (target == Target::master_system) {
       log.line("platform=master-system");
       ingest_options.explicit_profile = options.platform == "master-system";
