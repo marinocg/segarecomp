@@ -653,7 +653,7 @@ class SourceStamper:
             for file in self.build_files():
                 try:
                     if os.lstat(file).st_mtime_ns > floor:
-                        os.utime(file, ns=(floor, floor), follow_symlinks=False)
+                        set_mtime_no_follow(file, floor)
                 except OSError:
                     continue
         self.pending.clear()
@@ -661,6 +661,19 @@ class SourceStamper:
     def built(self, complete_and_successful: bool) -> None:
         """Record whether the build just finished left every output of the whole fixture set up to date."""
         self.consistent = complete_and_successful
+
+
+def set_mtime_no_follow(path: str | os.PathLike[str], timestamp_ns: int) -> None:
+    """Set a build entry's mtime without dereferencing links where the platform supports it.
+
+    CPython on Windows rejects ``follow_symlinks=False`` for ``os.utime``. Mutation builds contain ordinary files and directories,
+    so use the portable call there, but continue to skip a link rather than changing its target if one is encountered.
+    """
+    try:
+        os.utime(path, ns=(timestamp_ns, timestamp_ns), follow_symlinks=False)
+    except NotImplementedError:
+        if not os.path.islink(path):
+            os.utime(path, ns=(timestamp_ns, timestamp_ns))
 
 
 def executable_stamps(executables: list[pathlib.Path]) -> dict[pathlib.Path, tuple[int, int]]:

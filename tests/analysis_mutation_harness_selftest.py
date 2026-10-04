@@ -55,11 +55,35 @@ def files(build: pathlib.Path) -> list[pathlib.Path]:
     return list(build.rglob("*"))
 
 
-def pin_same_second(build: pathlib.Path) -> None:
+def pin_same_second(harness, build: pathlib.Path) -> None:
     """Simulate that the previous build finished in the current whole second (the source write that follows shares that tick)."""
     second = time.time_ns() // SECOND_NS * SECOND_NS
     for p in files(build):
-        os.utime(p, ns=(second, second), follow_symlinks=False)
+        harness.set_mtime_no_follow(p, second)
+
+
+def no_follow_fallback(harness, work: pathlib.Path) -> None:
+    """Exercise the Windows branch even on hosts whose os.utime supports follow_symlinks=False."""
+    probe = work / "utime-probe"
+    probe.parent.mkdir(parents=True, exist_ok=True)
+    probe.write_text("probe", encoding="utf-8")
+    original = harness.os.utime
+    fallback_called = False
+
+    def windows_utime(path, *, ns, follow_symlinks=True):
+        nonlocal fallback_called
+        if not follow_symlinks:
+            raise NotImplementedError("simulated Windows os.utime")
+        fallback_called = True
+        return original(path, ns=ns)
+
+    harness.os.utime = windows_utime
+    try:
+        harness.set_mtime_no_follow(probe, time.time_ns())
+    finally:
+        harness.os.utime = original
+    if not fallback_called:
+        raise SystemExit("FAIL: unsupported no-follow utime did not use the portable regular-file fallback")
 
 
 def scenario(harness, cmake: str, c_compiler: str, generator: str, make_program: str, work: pathlib.Path) -> None:
@@ -89,7 +113,7 @@ def scenario(harness, cmake: str, c_compiler: str, generator: str, make_program:
 
     def step(label: str, data: bytes, expected: str) -> None:
         nonlocal previous
-        pin_same_second(build)
+        pin_same_second(harness, build)
         stamper.write(source, data)
         stamper.settle()
         # The helper's contract, independent of the build tool: the written source is at least one stamp step (> 1 s) newer than
@@ -131,6 +155,7 @@ def main() -> int:
     started = time.monotonic()
     work = pathlib.Path(tempfile.mkdtemp(prefix="segarecomp-mutation-selftest-"))
     try:
+        no_follow_fallback(harness, work / "portable")
         scenario(harness, args.cmake, args.c_compiler, args.generator, args.make_program, work / "configured")
         # The whole-second build tool the defect was observed with, when present and not already the configured generator.
         if args.generator != "Unix Makefiles" and os.name != "nt" and shutil.which("make"):
