@@ -247,6 +247,11 @@ inline constexpr std::uint32_t m68k_max_instance_tag = 0xFDU;
 // The tag of the partition that seeds the roots of handlers without an analysed instance (kept for D; never a writer or a parent; every
 // cell is asynchronous there).
 inline constexpr std::uint32_t m68k_dead_handler_tag = 0xFEU;
+// SEG-030-T006/T008: the partition of the handlers entered from a taking point whose state is not modelled (M68kFrameConfig::
+// unknown_entries): a boundary of this partition itself, or a handler taken but not analysed as an instance (any unanalysed cause:
+// Unknown entry A7, nesting, the depth bound, a widened entry). Its roots start Unknown, every cell is asynchronous there, and its own
+// boundaries are taking points (their handlers join this partition, and a resuming one clobbers its status).
+inline constexpr std::uint32_t m68k_unknown_entry_tag = 0xFFU;
 // The instance depth bound: a handler taken from a chain of this many handler instances is not analysed (its parent's writers are
 // every cell).
 inline constexpr std::uint32_t m68k_instance_depth_bound = 3U;
@@ -304,9 +309,11 @@ struct M68kHandlerVector {
 };
 
 // SEG-030-T006: one handler instance (a partition): `handler` taken from the partition `parent` (0: the main flow). An instance is
-// analysed only when its entry A7 is known, its parent is the main flow or a resuming instance, its handler is not already on the
-// parent's chain and the chain is below the depth bound; any other handler taken from a partition is unanalysed and, when it can
-// resume, makes that partition's asynchronous writers every cell and its status Unknown after the boundaries where it can be taken.
+// analysed only when its entry A7 is known, its parent is the main flow or an analysed instance (resuming or not: every boundary of
+// an analysed partition is a taking point), its handler is not already on the parent's chain and the chain is below the depth bound;
+// any other handler taken from a partition is unanalysed: it is entered with an Unknown entry (M68kFrameConfig::unknown_entries) and,
+// when it can resume, makes that partition's asynchronous writers every cell and its status Unknown after the boundaries where it can
+// be taken.
 struct M68kHandlerInstance {
   std::uint32_t handler{};
   std::uint32_t parent{};
@@ -351,6 +358,10 @@ struct M68kFrameConfig {
   // skips runs in the same partition, and a child instance either restores the partition's status (frame integrity) or clobbers it.
   // Each bound grows monotonically from bottom (an absent tag is bottom).
   std::map<std::uint32_t, analysis::FiniteValue> status_bounds;
+  // Delivered handler PCs also entered from a taking point whose state is not modelled (an unanalysed taking from a credited partition,
+  // a dropped instance, or a boundary of the unknown-entry partition itself): seeded in m68k_unknown_entry_tag with an Unknown entry,
+  // so that the handler's entry state joins an Unknown entry and never only the analysed instances' entries. Grows monotonically.
+  std::set<std::uint32_t> unknown_entries;
   friend bool operator==(const M68kFrameConfig &, const M68kFrameConfig &) = default;
 };
 
@@ -424,6 +435,7 @@ struct M68kFrameReport {
   std::size_t writer_only_instances{};  // analysed instances that are not credited (entered only by potential interrupts)
   std::size_t writer_only_points{};     // points of writer-only instances (analysed for writers only; not in `points`)
   std::size_t dead_handlers{};       // handler PCs with no analysed instance
+  std::size_t unknown_entry_handlers{};  // handler PCs also entered with an Unknown entry (M68kFrameConfig::unknown_entries)
   std::map<std::string, std::size_t> unanalysed;  // handlers taken from a live partition but not analysed, by cause
   std::size_t frame_integrity_failures{};
   std::size_t clobbered_partitions{};

@@ -121,8 +121,10 @@ reproduce the SEG-026-T002 strict row exactly.
        (S = 1, I = 7, SSP = the long at vector 0); per-boundary interrupt eligibility (level > mask, level 7 and unknown levels always);
        the 6-byte group 1/2 frame at A7 - 6 only when S = 1 is proven; one analysed partition per handler instance (handler, parent
        partition), entered with the accepted mask and the frame address, so that handler code is never joined with the code it
-       preempts; nesting and preemption per the mask (a handler on its own chain, deeper than the depth bound, inside a non-resuming
-       instance, or with an Unknown frame address is not analysed); per-partition asynchronous writers (the stores, interrupt frames
+       preempts; nesting and preemption per the mask at every boundary of every analysed partition, non-resuming instances included (a
+       handler on its own chain, deeper than the depth bound, or with an Unknown frame address is not analysed, and is then also
+       entered with an Unknown entry in the unknown-entry partition, whose own boundaries are taking points too: SEG-030-T008
+       correction); per-partition asynchronous writers (the stores, interrupt frames
        and asynchronous writers of the resuming child instances: interrupts and divide-by-zero/CHK/TRAPV); a frame-integrity check
        (a child that may rewrite its saved SR makes the parent's status Unknown after the boundaries where it can be taken); RTE/RTR
        and an RTS away from the entry stack delta resolved only from code-built frame cells.
@@ -617,9 +619,10 @@ reproduce the SEG-026-T002 strict row exactly.
 - **Partitions.** A point is `(tag << 48) | (context << 24) | pc`. Tag 0 is the main flow. Every other tag is one handler instance
   (handler, parent partition), entered with S = 1, the accepted mask (or the parent's for a synchronous vector) and the frame
   address joined over the parent's taking boundaries. Partitions never share an edge.
-  - A handler is not analysed when it is already on its parent's chain, the chain is at depth 3, its parent is non-resuming, or its
-    frame address is Unknown. An unanalysed resuming child makes its parent's asynchronous writers every cell and the parent's
-    status Unknown after the boundaries where it can be taken.
+  - A handler is not analysed when it is already on its parent's chain, the chain is at depth 3, or its frame address is Unknown.
+    An unanalysed resuming child makes its parent's asynchronous writers every cell and the parent's status Unknown after the
+    boundaries where it can be taken. (Superseded by the T008 correction below: a non-resuming parent no longer prevents analysis,
+    and every unanalysed credited taking also enters the handler with an Unknown entry.)
   - Handlers with no live instance are seeded in a dead-handler partition (tag 254) so that `D` keeps its roots; every cell is
     asynchronous there.
   - Installed interrupt vectors the machine model does not deliver are potential sources under the hardware premise of decision 7:
@@ -1059,8 +1062,8 @@ reproduce the SEG-026-T002 strict row exactly.
     `baseline` 164 clean / 221 explained / 15 premise violations; `address+memory+contexts` 164 / 232 / 4; every domain 171 / 226 /
     1, with 4,699 checked steps, 8,570 precise values, 102 resolved transfers and 16 concrete slot rewrites (411 injected
     interrupts). No bound was reached and every determinism check held.
-  - **Halted on an unsound result (frames domain, not a premise violation).** Two seeds of the list (and one more of 600) falsify a
-    precise A7 at the level-6 handler entry. Minimized synthetic reproducer (every domain, reset SSP `$FFFF00`):
+  - **Finding (frames domain, not a premise violation), now corrected.** Two seeds of the list (base + 19 and base + 175, decimal seeds ending 795 and 951) falsified
+    a precise A7 at the level-6 handler entry. Minimized synthetic reproducer (every domain, reset SSP `$FFFF00`):
 
     ```text
     $200: MOVE #$2300,SR    $204: TRAP #0    $206: BRA *
@@ -1069,15 +1072,55 @@ reproduce the SEG-026-T002 strict row exactly.
     ```
 
     Concretely TRAP enters `$1900` with A7 `$FFFEFA` and I = 3, and a level-6 interrupt taken inside the TRAP handler enters `$1800`
-    with A7 `$FFFEF4`. The analysis reports A7 = `{$FFFEFA}` at `$1800`: the TRAP handler is not an analysed resuming instance (its
-    continuation is not modelled), so an interrupt preempting it is not entered from that partition, and the handler's points carry
-    only the analysed instance's entry. The same holds for a handler seeded in the dead-handler partition. A preemption of an
-    unanalysed or non-resuming handler instance by an eligible interrupt must enter the interrupt handler from an Unknown entry
-    (the T006 instance model), which is a frames-domain change outside the return-slot capability. The differential is therefore
-    built but not registered with CTest until that fix lands; its seed list is fixed and reproduces the finding.
+    with A7 `$FFFEF4`. The analysis reported A7 = `{$FFFEFA}` at `$1800`: a handler taken inside a non-resuming instance was
+    `non_resuming_parent` (unanalysed), so the interrupt handler was never entered from that partition, and the handler's points
+    carried only the main-flow instance's entry. The same hole existed for every unanalysed taking (an Unknown frame address,
+    nesting, the depth bound, a widened entry) whenever the same handler also had an analysed instance, and for a vector raised
+    inside code whose state is not modelled.
+  - **Correction (SEG-030-T006 instance model; `finite_adapter.{hpp,cpp}`).** Every boundary of every modelled partition is a taking
+    point:
+    - A non-resuming instance is an analysed parent like any other; its eligible interrupts and raised vectors enter child instances
+      at its own frame address (the `non_resuming_parent` cause is gone).
+    - A taking whose state is not modelled enters the handler with an Unknown entry. Every unanalysed credited contribution (any
+      cause) and every credited instance dropped by the entry-A7 widening adds its handler to `M68kFrameConfig::unknown_entries`
+      (monotone, part of the post-fixed-point validation). Those handlers are seeded in the unknown-entry partition (tag 255; roots
+      Unknown, every cell asynchronous, credited to `D`), so the per-PC join at the handler entry is Unknown, never only the
+      analysed instances' precise entries. The unanalysed contribution keeps its consequences on its parent (writers every cell,
+      status clobbered after its taking boundaries).
+    - The unknown-entry partition is itself a taker (cause `unmodelled_parent`): a delivered interrupt eligible there, or a TRAP,
+      divide-by-zero or CHK raised there, enters its handler in the same partition, and a resuming one clobbers its status. The
+      dead-handler partition (tag 254) now holds only handlers that no modelled boundary takes; its boundaries never run, so it is
+      not a taker.
+    - Writer-only partitions were already parents; a delivered vector taken there remains a writer-only child (the discovery
+      premise of decision 7).
+    - Report: `frames.instances.unknown_entry_handlers` and the `unmodelled_parent` cause.
+    - Fixture (`analysis_m68k_frames_test`, `interrupt_preempts_non_resuming`): the reproducer has three instances and the level-6
+      entry A7 is exactly `{SSP - 12, SSP - 6}`; an Unknown A7 at a taking point inside the TRAP instance makes the entry Unknown
+      (`entry_unknown`, one unknown-entry handler); a TRAP raised inside the unknown-entry partition makes the TRAP entry Unknown
+      although its main-flow instance is precise. The nested-TRAP fixture now has two synchronous instances.
+    - Mutants (killed): `m68k_non_resuming_instance_not_preemptible`, `m68k_unanalysed_taking_entry_dropped`,
+      `m68k_unknown_entry_partition_not_taker`. `m68k_unanalysed_handler_precise` now covers both Unknown-entry partitions.
+  - **A second defect found by a 2,000-seed run (outside the fixed list).** Seed base + 1,920 crashed the contexts derivation
+    (`std::out_of_range`): it read the computed edges of a site the solver had pinned (pin-and-restart suppresses them, so their
+    targets had no state). `point_facts` now ignores a pinned site's computed edges (the site is already an unknown effect). It is
+    pinned as its own CTest entry, `analysis_m68k_differential_pinned_call_test`.
+  - **Registered** (`analysis_m68k_differential_test`, labels `full`, about 56 s on the Debug build). Seeds `0x5E6030008 + 0 .. 399`
+    (400 images, none rejected), 0 unsound, 0 non-deterministic in every configuration: `baseline` 164 clean / 221 explained / 15
+    premise violations; `address+memory+contexts` 164 / 232 / 4; every domain 171 / 228 / 1 (4,709 checked steps, 8,571 precise
+    values, 102 resolved transfers, 16 concrete slot rewrites, 411 injected interrupts). A 2,000-seed run (base + 0 .. 1,999) after
+    both fixes: 0 unsound in every configuration (every domain 852 / 1,142 / 6 premise violations).
 - **Sonic attract oracle, every domain (Release driver at this head, sanitized).** `D` 6,806, `O ∩ D` 4,534, recall 43.13%, 0 escapes:
   unchanged from T007. 240 RTS sites are classified: 0 normal, 0 computed, 0 Unknown, 240 premise sites (`slot_untracked` 237: A7 is
   Unknown at the RTS, lost through opaque continuations and Unknown handler entries, record T006; `external_writer` 3). The
   `rts_computed` family is unchanged (26 Unknown: 22 `stack_unbalanced`, 4 `base_unknown`); contexts, summaries and continuations are
   unchanged. 136 s / 338 MB. `--domains baseline` private, aggregate and compare-tool outputs are byte-identical to T007; two
   `--domains all` runs are byte-identical.
+- **Sonic delta of the frames correction (Release driver rebuilt at the corrected tree, sanitized).** `D` 6,806, recall 43.13%, 0
+  escapes; the compare-tool output is byte-identical to the previous T008 run, and so are the work-RAM reads (0 precise; 429
+  `external_writer`, 467 `base_unknown`) and the return-slot classification. Frames stays validated with 0 analysed instances (as
+  before, every interrupt instance is `entry_unknown`), and is now more conservative: 6 handlers are entered with an Unknown entry
+  (`unknown_entry_handlers`), 5 credited and 2 writer-only takings occur inside the unknown-entry partition (`unmodelled_parent`),
+  and 2 partitions are clobbered (was 1). The handlers' code now runs in the unknown-entry partition (solver points 12,765 to 12,852),
+  which settles 6 more callee summaries (277; 288 of 363 activations balanced) and adds 7 Unknown-target stores (1,930). Frames
+  rounds 5 to 7; 159 s / 366 MB (was 136 s / 338 MB). `--domains baseline` private, aggregate and compare-tool outputs stay
+  byte-identical to T007; two `--domains all` runs are byte-identical.

@@ -41,9 +41,13 @@ add_test(NAME analysis_m68k_return_slot_test COMMAND analysis_m68k_return_slot_t
 set_property(TEST analysis_m68k_return_slot_test APPEND PROPERTY LABELS full fast)
 
 # SEG-030-T008 part 2 (ADR 0079 decision 8): the seeded randomized differential of the analysis against a bounded test-only
-# concrete executor (fixed seed list; never linked into production). Built but NOT yet registered with CTest: its fixed seed list
-# exposes an open frames-domain soundness finding (ADR 0079 T008 record, "interrupt preempting an unanalysed handler"); the test is
-# registered (labels `full`) together with that fix.
+# concrete executor (fixed seed list 0x5E6030008 + 0..399; never linked into production). It requires 0 unsound results and 0
+# non-deterministic runs in all three configurations (premise violations are counted apart). The second entry pins one seed beyond
+# the list (base + 1920, found by a 2,000-seed run) that crashed the contexts derivation on a pinned computed call site (ADR 0079 T008 record).
 add_executable(analysis_m68k_differential_test analysis_m68k_differential_test.cpp)
 target_link_libraries(analysis_m68k_differential_test PRIVATE segarecomp::cpu_m68k_analysis)
 segarecomp_enable_warnings(analysis_m68k_differential_test)
+add_test(NAME analysis_m68k_differential_test COMMAND analysis_m68k_differential_test)
+add_test(NAME analysis_m68k_differential_pinned_call_test COMMAND analysis_m68k_differential_test 1 0x5E6030788)
+set_property(TEST analysis_m68k_differential_test analysis_m68k_differential_pinned_call_test APPEND PROPERTY LABELS full)
+set_property(TEST analysis_m68k_differential_test PROPERTY TIMEOUT 600)

@@ -552,7 +552,8 @@ std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport
           << ",\"instances\":{\"analysed\":" << frames.instances << ",\"interrupt\":" << frames.interrupt_instances
           << ",\"synchronous_resuming\":" << frames.resuming_instances << ",\"synchronous\":" << frames.synchronous_instances
           << ",\"writer_only\":" << frames.writer_only_instances
-          << ",\"dead_handlers\":" << frames.dead_handlers << ",\"unanalysed\":" << counts(frames.unanalysed)
+          << ",\"dead_handlers\":" << frames.dead_handlers << ",\"unknown_entry_handlers\":" << frames.unknown_entry_handlers
+          << ",\"unanalysed\":" << counts(frames.unanalysed)
           << ",\"frame_integrity_failures\":" << frames.frame_integrity_failures
           << ",\"clobbered_partitions\":" << frames.clobbered_partitions << '}'
           << ",\"points\":{\"live\":" << frames.points << ",\"writer_only\":" << frames.writer_only_points

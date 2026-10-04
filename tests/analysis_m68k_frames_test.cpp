@@ -262,8 +262,9 @@ void handler_lowers_mask() {
 }
 
 void nested_synchronous() {
-  // TRAP #0 from the main flow (I = 7). Its handler raises TRAP #1: a non-resuming handler inside a non-resuming instance is not
-  // analysed and has no consequence on the main flow (neither resumes into an analysed boundary).
+  // TRAP #0 from the main flow (I = 7). Its handler raises TRAP #1: a non-resuming handler inside a non-resuming instance is an
+  // analysed instance of its own (SEG-030-T008 correction: every analysed partition is a taker) and has no consequence on the main
+  // flow (neither resumes into an analysed boundary).
   Asm a;
   a.moveq(0, 1U).store_word(0, cell_b).load_word(2, cell_b);
   const auto trap = a.pc;
@@ -272,8 +273,10 @@ void nested_synchronous() {
   a.at(sync_b).rte();
   const auto result = run(a, {{32U, sync_a}, {33U, sync_b}});
   if (debug()) std::cerr << describe(result);
-  expect(result.frames.validated && result.frames.synchronous_instances == 1U && unanalysed(result, "non_resuming_parent") == 1U,
-         "nested sync: one TRAP #0 instance; the TRAP #1 inside it is unanalysed");
+  expect(result.frames.validated && result.frames.synchronous_instances == 2U && result.frames.unanalysed.empty(),
+         "nested sync: one TRAP #0 instance and the TRAP #1 instance inside it");
+  expect(m68k_query_address_register(result, sync_b, 7U).values() == std::vector<std::uint32_t>{ssp - 2U * m68k_exception_frame_bytes},
+         "nested sync: the TRAP #1 instance is entered below the TRAP #0 frame");
   expect(!result.frames.main_async_all && word_at(result, trap, 2U) == FiniteValue::of({1U}),
          "nested sync: the main flow has no asynchronous writer");
   // A resuming handler (divide by zero) that divides again: nested in itself, so its writers, and the main flow's, are every cell.
@@ -325,6 +328,49 @@ void interrupt_preempts_synchronous() {
          "preempts sync: cell A is asynchronous for the main flow through the resuming divide instance; cell B stays precise");
 }
 
+// SEG-030-T008 differential finding (minimized seeded reproducer): `MOVE #$2300,SR; TRAP #0; BRA *`, IRQ6 `NOP; RTE`, TRAP
+// `NOP; NOP; RTE`. The TRAP handler runs at I = 3, so level 6 preempts it: the IRQ6 handler is entered from the main flow at SSP - 6
+// and from inside the (non-resuming) TRAP instance at SSP - 12. The handler's entry A7 must cover both taking points.
+void interrupt_preempts_non_resuming() {
+  Asm a;
+  a.move_sr(0x2300U);
+  a.w({0x4E40U});  // TRAP #0
+  a.stop();
+  a.at(irq6).nop().rte();
+  a.at(sync_a).nop().nop().rte();
+  const auto result = run(a, {{30U, irq6}, {32U, sync_a}});
+  if (debug()) std::cerr << describe(result);
+  const auto entry_a7 = m68k_query_address_register(result, irq6, 7U);
+  expect(result.frames.validated && result.frames.instances == 3U && result.frames.unanalysed.empty(),
+         "preempts non-resuming: the TRAP instance and one level-6 instance below each of the main flow and the TRAP instance");
+  expect(entry_a7.values() == std::vector<std::uint32_t>{ssp - 2U * m68k_exception_frame_bytes, ssp - m68k_exception_frame_bytes},
+         "preempts non-resuming: the level-6 entry A7 covers both taking points: " + entry_a7.describe());
+  // The same handler also preempted at an unmodelled point (the TRAP handler loads A7 from never-written memory first): its entry
+  // joins an Unknown entry, never only the analysed instance's precise one.
+  Asm b = a;
+  b.at(sync_a).w({0x2E79U}).l(cell_c).nop().rte();  // MOVEA.L (cell C).L,A7
+  const auto unknown = run(b, {{30U, irq6}, {32U, sync_a}});
+  if (debug()) std::cerr << describe(unknown);
+  expect(unknown.frames.validated && unanalysed(unknown, "entry_unknown") >= 1U && unknown.frames.unknown_entry_handlers == 1U &&
+             reached_in(unknown, irq6, m68k_unknown_entry_tag) && m68k_query_address_register(unknown, irq6, 7U).is_unknown(),
+         "preempts non-resuming: a taking point with an Unknown A7 enters the handler with an Unknown entry");
+  // A TRAP raised inside the unknown-entry partition (the level-6 handler entered with an Unknown entry raises TRAP #0) enters the
+  // TRAP handler with an Unknown entry too, although the TRAP instance from the main flow is precise.
+  Asm c;
+  c.w({0x2E79U}).l(cell_c);  // MOVEA.L (cell C).L,A7: the main flow's A7 is Unknown
+  c.move_sr(0x2000U).nop().move_sr(0x2700U).w({0x4FF9U}).l(ssp);  // ...; LEA (SSP).L,A7
+  c.w({0x4E40U});  // TRAP #0 at a precise A7
+  c.stop();
+  c.at(irq6).w({0x4E40U}).rte();
+  c.at(sync_a).nop().rte();
+  const auto raised = run(c, {{30U, irq6}, {32U, sync_a}});
+  if (debug()) std::cerr << describe(raised);
+  expect(raised.frames.validated && reached_in(raised, sync_a, m68k_unknown_entry_tag) &&
+             m68k_query_address_register(raised, sync_a, 7U).is_unknown(),
+         "preempts non-resuming: a TRAP raised in the unknown-entry partition enters its handler with an Unknown entry: " +
+             m68k_query_address_register(raised, sync_a, 7U).describe());
+}
+
 void unknown_status() {
   // No reset state (a bridge entry): the SR is Unknown, every boundary may be interrupted and no frame address is proven.
   Asm a;
@@ -338,7 +384,7 @@ void unknown_status() {
          "unknown SR: every boundary is eligible and the frame address is not proven");
   expect(result.frames.main_async_all && word_at(result, flow.read_done, 2U).is_unknown(),
          "unknown SR: the main flow's writers are every cell (the T004 consequence)");
-  expect(reached_in(result, rte, m68k_dead_handler_tag) && word_at(result, rte, 3U, m68k_dead_handler_tag).is_unknown(),
+  expect(reached_in(result, rte, m68k_unknown_entry_tag) && word_at(result, rte, 3U, m68k_unknown_entry_tag).is_unknown(),
          "unknown SR: the unanalysed handler's own code keeps every cell asynchronous (no unchecked precision)");
 }
 
@@ -679,6 +725,7 @@ int main() {
   handler_lowers_mask();
   nested_synchronous();
   interrupt_preempts_synchronous();
+  interrupt_preempts_non_resuming();
   unknown_status();
   unknown_supervisor_stack();
   rte_from_code_built_frame();

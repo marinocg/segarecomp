@@ -720,6 +720,9 @@ M68kFiniteAdapter::M68kFiniteAdapter(const M68kAnalysisImage &image, M68kAnalysi
   auto every_cell = config_.memory.policy;
   every_cell.async_all = true;
   tag_policies_[m68k_dead_handler_tag] = every_cell;
+  // The unknown-entry partition (handlers entered from a taking point whose state is not modelled): every cell is asynchronous too
+  // (this subsumes any writer derived for it).
+  tag_policies_[m68k_unknown_entry_tag] = every_cell;
 }
 
 M68kAnalysisState M68kFiniteAdapter::entry_state(bool continuation, std::uint32_t tag) const {
@@ -1687,9 +1690,10 @@ std::vector<std::uint32_t> handler_pcs(const M68kFrameConfig &frames) {
   return {out.begin(), out.end()};
 }
 
-// SEG-030-T006: the seeds of every partition: the main entries in tag 0, every live instance at its handler, and every handler PC
-// without a live credited instance in the dead-handler partition (kept so that the discovery roots are unchanged; a writer-only
-// instance never stands in for a delivered handler's root).
+// SEG-030-T006: the seeds of every partition: the main entries in tag 0, every live instance at its handler, every handler PC also
+// entered with an Unknown entry in the unknown-entry partition (SEG-030-T008 correction), and every other handler PC without a live
+// credited instance in the dead-handler partition (kept so that the discovery roots are unchanged; a writer-only instance never
+// stands in for a delivered handler's root).
 std::vector<std::pair<std::uint64_t, M68kAnalysisState>> frame_seeds(const M68kFiniteAdapter &adapter, const M68kAnalysisConfig &config,
                                                                     const std::vector<std::uint32_t> &entries) {
   std::vector<std::pair<std::uint64_t, M68kAnalysisState>> seeds;
@@ -1703,10 +1707,13 @@ std::vector<std::pair<std::uint64_t, M68kAnalysisState>> frame_seeds(const M68kF
     const auto pc = entry & bus_mask;
     const bool handler = std::binary_search(handlers.begin(), handlers.end(), pc);
     if (!handler || config.frames.main_entries.contains(pc)) seeds.emplace_back(pc, adapter.root_state(0U, pc));
-    if (handler && !live.contains(pc))
+    if (handler && !live.contains(pc) && !config.frames.unknown_entries.contains(pc))
       seeds.emplace_back(m68k_analysis_point(m68k_tagged_context(m68k_dead_handler_tag, 0U), pc),
                          adapter.root_state(m68k_dead_handler_tag, pc));
   }
+  for (const auto pc : config.frames.unknown_entries)
+    seeds.emplace_back(m68k_analysis_point(m68k_tagged_context(m68k_unknown_entry_tag, 0U), pc),
+                       adapter.root_state(m68k_unknown_entry_tag, pc));
   std::sort(seeds.begin(), seeds.end(), [](const auto &a, const auto &b) { return a.first < b.first; });
   return seeds;
 }
@@ -2029,7 +2036,11 @@ std::map<std::uint64_t, PointFacts> point_facts(M68kFiniteAdapter &adapter, cons
          control.dynamic == M68kDynamicControlFamily::return_restore_condition_codes) &&
         !resolved_return)
       facts.unbalanced = true;
+    // A pinned computed site contributes no computed edge to the solution (solver pin-and-restart): its transfer's computed edges
+    // are not part of the final edge set (their targets may have no state), and the site is already an unknown effect.
+    const bool pinned = result.solution.unresolved_computed.contains(point);
     for (const auto &edge : edges) {
+      if (pinned && edge.kind == EdgeKind::computed) continue;
       if (facts.call && (edge.kind == EdgeKind::call || edge.kind == EdgeKind::computed)) facts.callees.push_back(edge.target);
       else facts.intra.push_back(edge.target);
     }
@@ -2364,7 +2375,7 @@ std::optional<std::int64_t> a7_relative_offset(const M68kIrOperation &operation,
 // Why a handler taken from a partition is not analysed as an instance of its own; its consequences then fall on the parent.
 enum class Unanalysed : std::uint8_t {
   none,
-  non_resuming_parent,  // taken inside a non-resuming instance: it can only resume into that instance, never into an analysed flow
+  unmodelled_parent,    // taken inside the unknown-entry partition (its state is not modelled)
   nested,               // the handler is already on the parent's chain: unbounded nesting
   depth_bound,          // the parent's chain is at the instance depth bound
   entry_unknown,        // the frame address (its entry A7) is Unknown
@@ -2372,7 +2383,7 @@ enum class Unanalysed : std::uint8_t {
 const char *unanalysed_name(Unanalysed why) {
   switch (why) {
   case Unanalysed::none: return "none";
-  case Unanalysed::non_resuming_parent: return "non_resuming_parent";
+  case Unanalysed::unmodelled_parent: return "unmodelled_parent";
   case Unanalysed::nested: return "nested";
   case Unanalysed::depth_bound: return "depth_bound";
   case Unanalysed::entry_unknown: return "entry_unknown";
@@ -2380,10 +2391,11 @@ const char *unanalysed_name(Unanalysed why) {
   return "invalid";
 }
 
+// SEG-030-T008 correction: a non-resuming instance is an analysed partition like any other; every one of its interrupt-eligible or
+// raising boundaries enters its children as instances (their frame address is that partition's own A7), never not at all.
 Unanalysed instance_admission(const M68kFrameConfig &frames, std::uint32_t handler, std::uint32_t parent_tag) {
   if (parent_tag == 0U) return Unanalysed::none;
-  const auto parent = frames.instances.find(parent_tag);
-  if (parent == frames.instances.end() || !parent->second.resuming) return Unanalysed::non_resuming_parent;
+  if (!frames.instances.contains(parent_tag)) return Unanalysed::unmodelled_parent;
   std::uint32_t depth = 0U;
   for (auto tag = parent_tag; tag != 0U;) {
     const auto found = frames.instances.find(tag);
@@ -2570,7 +2582,8 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
   report.handler_vectors = used.vectors.size();
   report.reset_state = used.reset_entry.has_value();
 
-  // 1. Contributions: every boundary of a live partition (main, or an analysed instance) where a vector can be taken.
+  // 1. Contributions: every boundary of a live partition (main, an analysed instance, or the unknown-entry partition) where a vector
+  //    can be taken. The dead-handler partition holds only handlers that no modelled boundary takes: its boundaries never run.
   std::map<std::pair<std::uint32_t, std::uint32_t>, Contribution> contributions;  // (handler, parent tag)
   std::map<std::uint32_t, std::vector<std::uint64_t>> partition_points;
   report.potential_interrupt_vectors = used.potential_interrupts.size();
@@ -2581,13 +2594,15 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
     if (m68k_vector_class(vector.vector) == M68kVectorClass::interrupt) sources.emplace_back(vector, false);
   for (const auto &[point, state] : states) {
     const auto tag = m68k_point_tag(point);
-    if (tag != 0U && !used.instances.contains(tag)) continue;  // the dead-handler partition is never a writer or a parent
+    const bool unmodelled = tag == m68k_unknown_entry_tag;
+    if (tag != 0U && !unmodelled && !used.instances.contains(tag)) continue;  // the dead-handler partition is never a parent
     partition_points[tag].push_back(point);
-    // A writer-only partition is analysed exactly like a credited one, but its points are counted apart.
-    const bool parent_credited = tag == 0U || used.instances.at(tag).credited;
+    // A writer-only partition is analysed exactly like a credited one, but its points are counted apart; the unknown-entry
+    // partition's points are takers but are not counted.
+    const bool parent_credited = tag == 0U || unmodelled || used.instances.at(tag).credited;
     if (!parent_credited) ++report.writer_only_points;
     std::size_t ignored = 0U;
-    const auto count = [&](std::size_t &counter) -> std::size_t & { return parent_credited ? counter : ignored; };
+    const auto count = [&](std::size_t &counter) -> std::size_t & { return parent_credited && !unmodelled ? counter : ignored; };
     ++count(report.points);
     const auto decoded = adapter.decode(m68k_point_pc(point));
     const M68kIrOperation *operation = decoded ? &decoded->operation : nullptr;
@@ -2626,7 +2641,7 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
     if (eligible) ++count(report.interrupt_eligible);
     else if (!status.is_unknown()) ++count(report.interrupt_masked);
     if (raising) ++count(report.raising_points);
-    if (unknown_frame && parent_credited) {
+    if (unknown_frame && parent_credited && !unmodelled) {
       if (!m68k_status_supervisor_proven(eligible ? boundary : status)) ++report.frame_unproven_supervisor;
       else {
         ++report.frame_unknown_a7;
@@ -2638,7 +2653,8 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
   }
 
   // 2. Instances. An admitted contribution with a known entry A7 is an instance (the used ones keep their tags; a new one gets the
-  //    next tag); any other is unanalysed, and a resuming unanalysed child makes its parent's writers and status Unknown.
+  //    next tag); any other is unanalysed: a credited one enters its handler with an Unknown entry (the unknown-entry partition), and a
+  //    resuming unanalysed child makes its parent's writers and status Unknown.
   std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint32_t> tag_of;
   std::uint32_t next_tag = std::max(used.next_tag, 1U);
   for (const auto &[tag, instance] : used.instances) {
@@ -2648,10 +2664,12 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
   bool valid = true;
   std::map<std::uint32_t, M68kMemoryPolicy> async;               // derived per-partition asynchronous writers
   std::map<std::uint32_t, std::set<std::uint32_t>> clobbered;    // derived clobber levels per partition
+  std::set<std::uint32_t> unknown_entries;                        // derived handlers entered with an Unknown entry
   // A handler entered only by potential interrupts (or from a writer-only partition) is counted under `<cause>/writer_only`.
-  const auto unanalysed = [&](std::uint32_t parent, const std::set<std::uint32_t> &vectors, bool resuming, bool credited,
-                              Unanalysed why) {
+  const auto unanalysed = [&](std::uint32_t handler, std::uint32_t parent, const std::set<std::uint32_t> &vectors, bool resuming,
+                              bool credited, Unanalysed why) {
     ++report.unanalysed[std::string(unanalysed_name(why)) + (credited ? "" : "/writer_only")];
+    if (credited) unknown_entries.insert(handler);
     if (!resuming) return;
     async[parent].async_all = true;
     const auto levels = clobber_levels(vectors);
@@ -2662,7 +2680,7 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
     if (why == Unanalysed::none && contribution.a7.is_unknown()) why = Unanalysed::entry_unknown;
     auto found = tag_of.find(key);
     if (why != Unanalysed::none) {
-      unanalysed(key.second, contribution.vectors, contribution.resuming, contribution.credited, why);
+      unanalysed(key.first, key.second, contribution.vectors, contribution.resuming, contribution.credited, why);
       if (found != tag_of.end() && used.instances.contains(found->second)) {
         valid = false;  // an analysed instance whose entry is no longer known
         out.next.instances.erase(found->second);
@@ -2719,6 +2737,7 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
         ++it;
         continue;
       }
+      if (instance.credited) unknown_entries.insert(instance.handler);
       if (instance.resuming && !orphan) {
         out.next.policies[instance.parent].async_all = true;
         const auto levels = clobber_levels(instance.vectors);
@@ -2862,6 +2881,9 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
       valid = false;
     out.next.clobbered[tag].insert(levels.begin(), levels.end());
   }
+  if (!std::includes(used.unknown_entries.begin(), used.unknown_entries.end(), unknown_entries.begin(), unknown_entries.end()))
+    valid = false;
+  out.next.unknown_entries.insert(unknown_entries.begin(), unknown_entries.end());
   out.next.next_tag = next_tag;
   out.valid = valid;
 
@@ -2876,6 +2898,7 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
     else ++report.synchronous_instances;
   }
   for (const auto handler : handler_pcs(used)) report.dead_handlers += live_handlers.contains(handler) ? 0U : 1U;
+  report.unknown_entry_handlers = used.unknown_entries.size();
   report.clobbered_partitions = used.clobbered.size();
   if (const auto main = used.policies.find(0U); main != used.policies.end()) {
     report.main_async_all = main->second.async_all;
@@ -2937,6 +2960,7 @@ M68kFiniteAnalysisResult analyze_contexts(const M68kAnalysisImage &image, const 
     config.frames.instances.clear();
     config.frames.policies.clear();
     config.frames.clobbered.clear();
+    config.frames.unknown_entries.clear();
   }
   // SEG-030-T006: when the frames domain cannot return a validated round, the T005 contexts result is returned (reason recorded).
   const auto without_frames = [&](UnknownReason reason, const std::string &failure, std::uint32_t rounds, std::size_t total) {
@@ -3249,7 +3273,7 @@ std::string format_m68k_finite_analysis(const M68kFiniteAnalysisResult &result) 
         << " instances=" << frames.instances << " interrupt=" << frames.interrupt_instances
         << " resuming=" << frames.resuming_instances << " synchronous=" << frames.synchronous_instances
         << " writer_only=" << frames.writer_only_instances << " writer_only_points=" << frames.writer_only_points
-        << " dead=" << frames.dead_handlers << " integrity_failures=" << frames.frame_integrity_failures
+        << " dead=" << frames.dead_handlers << " unknown_entry=" << frames.unknown_entry_handlers << " integrity_failures=" << frames.frame_integrity_failures
         << " clobbered=" << frames.clobbered_partitions << " eligible=" << frames.interrupt_eligible
         << " masked=" << frames.interrupt_masked << " main_async_all=" << (frames.main_async_all ? 1 : 0)
         << " main_async_bytes=" << frames.main_async_bytes;
