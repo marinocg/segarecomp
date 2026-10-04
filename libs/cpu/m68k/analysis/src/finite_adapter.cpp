@@ -1783,6 +1783,8 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
     break;
   default: result.unresolved_computed = UnknownReason::unsupported_transfer; break;
   }
+  // SEG-031 (ADR 0080): the configured island targets of this site, as computed edges carrying this site's state (callees of a call).
+  if (const auto island = config_.island_entries.find(pc); island != config_.island_entries.end()) computed_edges(island->second);
 
   const auto stacked = control.stacked_address & bus_mask;
   const auto stacked_point = m68k_analysis_point(context, stacked);
@@ -1847,6 +1849,11 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
     }
     for (auto &edge : resumed) result.edges.push_back(std::move(edge));
   }
+  // SEG-031 (ADR 0080): the configured opaque entries of this source, each an opaque entry of this partition (context 0).
+  if (const auto opaque = config_.opaque_entries.find(pc); opaque != config_.opaque_entries.end())
+    for (const auto target : opaque->second)
+      result.edges.push_back(
+          {m68k_analysis_point(m68k_tagged_context(tag, 0U), target & bus_mask), EdgeKind::exceptional, entry_state(true, tag)});
   return result;
 }
 

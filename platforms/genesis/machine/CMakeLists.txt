@@ -2,6 +2,7 @@
 add_library(segarecomp_machine_genesis
   src/address_space.cpp
   src/frontend.cpp
+  src/hybrid_admission.cpp
   src/reachability_challenger.cpp
   src/startup.cpp
 )

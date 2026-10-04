@@ -238,3 +238,10 @@ target_link_libraries(analysis_genesis_z80_proof_test PRIVATE segarecomp::genesi
 segarecomp_enable_warnings(analysis_genesis_z80_proof_test)
 add_test(NAME analysis_genesis_z80_proof_test COMMAND analysis_genesis_z80_proof_test)
 set_property(TEST analysis_genesis_z80_proof_test APPEND PROPERTY LABELS full fast)
+
+# SEG-031 (ADR 0080): the report-only hybrid admission planner on synthetic adversarial shapes.
+add_executable(analysis_hybrid_plan_test analysis_hybrid_plan_test.cpp)
+target_link_libraries(analysis_hybrid_plan_test PRIVATE segarecomp::genesis_analysis_report)
+segarecomp_enable_warnings(analysis_hybrid_plan_test)
+add_test(NAME analysis_hybrid_plan_test COMMAND analysis_hybrid_plan_test)
+set_property(TEST analysis_hybrid_plan_test APPEND PROPERTY LABELS full fast)

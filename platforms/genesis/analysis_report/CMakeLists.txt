@@ -2,6 +2,7 @@
 # non-test place allowed to link the analysis (analysis_core_boundary_test): a static library (executable-image view + driver
 # core) and its report executable. Never installed; the segarecomp CLI and every production target never link either.
 add_library(segarecomp_genesis_analysis_report
+  src/hybrid_plan.cpp
   src/image_view.cpp
   src/report.cpp
   src/z80_ram_write_proof.cpp
