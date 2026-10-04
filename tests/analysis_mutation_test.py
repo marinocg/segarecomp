@@ -7,7 +7,10 @@ product tree (without build/, .git/, games/, .tools/) to a temporary directory, 
 SEG-029 fixture tests plus the SEG-030-T003 address-domain, SEG-030-T004 memory, SEG-030-T005 contexts, SEG-030-T006 frames and Genesis
 interrupt-premise and the SEG-030-T010 Z80 store-freedom proof fixtures (SEG-030-T008 maps every SEG-030 mutant of its record to a
 killed mutant here; ADR 0079, T008 record; T008 part 2 adds the return-slot fixture) and requires the unmutated baseline to pass. Then, per mutant, it applies the edit to the temporary copy only, rebuilds the
-affected fixture tests incrementally, runs them, and restores the file. A mutant is KILLED when one of its fixture tests exits non-zero (or times out). The worktree is never modified.
+fixture tests incrementally, runs the affected ones, and restores the file (SourceStamper: strictly increasing source stamps plus a
+settled build tree, so neither a mutation nor a restoration is ever skipped by a whole-second build tool; an executable that is not
+relinked after a mutation fails the harness as a stale build). A mutant is KILLED when one of its fixture tests exits non-zero (or
+times out). The worktree is never modified.
 
 Fail-closed rules:
   * stale mutant: the edit's `old` text must occur exactly once in the current source, otherwise the harness FAILS (a refactor can
@@ -558,6 +561,91 @@ def self_check_stale_detection() -> None:
     print("ok    self-check: stale edit patterns (missing, duplicated) are rejected; LF and CRLF sources are equivalent")
 
 
+class SourceStamper:
+    """Incremental-rebuild timestamp discipline: a mutation or a restoration can never be skipped by the build tool. No sleeping.
+
+    make and Ninja rebuild a target only when a prerequisite is strictly newer than it; GNU Make 3.81 (and any coarse filesystem)
+    compares whole seconds. Two holes follow when a mutate/build/restore cycle is faster than the timestamp tick:
+      1. a source written in the same tick as the previous build's outputs is not newer than its object, so it is not recompiled;
+      2. even when the object is recompiled, the archive and executable linked by the previous build in that same tick are not
+         older than it, so the archive/relink is skipped and the stale executable runs.
+    `write` closes hole 1: after every mutation and restoration it stamps the file with
+    `max(previous stamp, now, the file's own mtime, newest mtime anywhere in the build tree) + STEP_NS`; the stamp is kept across
+    operations so stamps strictly increase even within one wall-clock second and exceed every output (and the build tool's own
+    logs) the source is compared against. `settle`, called immediately before every build, closes hole 2: when the previous build
+    of the WHOLE fixture set succeeded (every output up to date, so no out-of-date relation can be hidden), it back-dates every
+    build-tree file to one whole second strictly older than the current second and than every source stamp written since, so
+    every output of the coming build is strictly newer than every older output, and every stamped source stays newer than them.
+    """
+
+    STEP_NS = 2_000_000_000  # > 1 s so a coarse (1 s or 2 s FAT-style) filesystem still orders the stamp strictly after outputs
+    SECOND_NS = 1_000_000_000
+
+    def __init__(self, build: pathlib.Path) -> None:
+        self.build = build
+        self.stamp = 0
+        self.pending: list[int] = []  # stamps written since the last settle
+        self.consistent = False  # the last build of the whole fixture set succeeded
+
+    def build_files(self) -> list[str]:
+        files = []
+        pending = [str(self.build)]
+        while pending:
+            with os.scandir(pending.pop()) as entries:
+                for entry in entries:
+                    files.append(entry.path)
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(entry.path)
+        return files
+
+    def newest_output_ns(self) -> int:
+        newest = 0
+        for file in self.build_files():
+            try:
+                newest = max(newest, os.lstat(file).st_mtime_ns)
+            except OSError:
+                continue
+        return newest
+
+    def write(self, path: pathlib.Path, data: bytes) -> int:
+        """Write a mutation or restoration and stamp it strictly after every build output and every earlier stamp."""
+        path.write_bytes(data)
+        self.stamp = max(self.stamp, time.time_ns(), path.stat().st_mtime_ns, self.newest_output_ns()) + self.STEP_NS
+        os.utime(path, ns=(self.stamp, self.stamp))
+        self.pending.append(self.stamp)
+        return self.stamp
+
+    def settle(self) -> None:
+        """Back-date a fully up-to-date build tree below the current second (and below every pending stamp) before a build."""
+        if self.consistent:
+            floor = min([time.time_ns()] + self.pending) // self.SECOND_NS * self.SECOND_NS - self.SECOND_NS
+            for file in self.build_files():
+                try:
+                    if os.lstat(file).st_mtime_ns > floor:
+                        os.utime(file, ns=(floor, floor), follow_symlinks=False)
+                except OSError:
+                    continue
+        self.pending.clear()
+
+    def built(self, complete_and_successful: bool) -> None:
+        """Record whether the build just finished left every output of the whole fixture set up to date."""
+        self.consistent = complete_and_successful
+
+
+def executable_stamps(executables: list[pathlib.Path]) -> dict[pathlib.Path, tuple[int, int]]:
+    stamps = {}
+    for executable in executables:
+        st = executable.stat()
+        stamps[executable] = (st.st_mtime_ns, st.st_size)
+    return stamps
+
+
+def rebuilt(before: dict[pathlib.Path, tuple[int, int]]) -> bool:
+    """True when at least one of the executables was relinked by the last build (the changed source was really recompiled)."""
+    return any(executable.stat().st_mtime_ns != stamp[0] or executable.stat().st_size != stamp[1]
+               for executable, stamp in before.items())
+
+
 def run(command: list[str], cwd: pathlib.Path | None = None, timeout: float = 1800) -> subprocess.CompletedProcess:
     return subprocess.run(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
                           timeout=timeout)
@@ -643,8 +731,18 @@ def main() -> int:
             return 1
         jobs = str(max(1, min(8, os.cpu_count() or 1)))
 
-        def build_tests(tests: tuple[str, ...]) -> subprocess.CompletedProcess:
-            return run([args.cmake, "--build", str(build), "--config", "Debug", "--parallel", jobs, "--target", *tests])
+        stamper = SourceStamper(build)
+
+        # Always the whole fixture set: a successful build then leaves every output up to date, which is what lets the stamper
+        # settle (back-date) the tree soundly before the next build (see SourceStamper).
+        # `watch`: fixture executables that must be relinked (the written source change must really reach them); the snapshot is
+        # taken after settling, so `relinked` reflects the build alone.
+        def build_tests(watch: tuple[str, ...] = ()) -> tuple[subprocess.CompletedProcess, bool]:
+            stamper.settle()
+            before = executable_stamps([find_executable(build, t) for t in watch])
+            result = run([args.cmake, "--build", str(build), "--config", "Debug", "--parallel", jobs, "--target", *ALL_TESTS])
+            stamper.built(result.returncode == 0)
+            return result, (not watch or rebuilt(before))
 
         # Tests run in the listed order; with `stop_at_kill` the first failing test decides (a mutant can make a later fixture slow,
         # e.g. a join defect that oscillates until the solver's iteration bound). A timeout is an observable failure (a kill).
@@ -662,7 +760,7 @@ def main() -> int:
                     break
             return outcome
 
-        result = build_tests(ALL_TESTS)
+        result, _ = build_tests()
         if result.returncode != 0:
             print(result.stdout[-4000:])
             print("FAIL  baseline build")
@@ -680,16 +778,22 @@ def main() -> int:
             path = source / m.path
             original = path.read_bytes()
             try:
-                path.write_text(apply_edit(source_text(original), m), encoding="utf-8", newline="\n")
-                built = build_tests(m.tests)
+                stamper.write(path, apply_edit(source_text(original), m).encode("utf-8"))
+                built, relinked = build_tests(m.tests)
                 if built.returncode != 0:
                     problems.append(f"{m.name}: mutant does not compile (fix the mutant; compilation failure is not a kill)")
                     print(built.stdout[-3000:])
                     rows.append((m, "NO-BUILD", ""))
                     continue
+                if not relinked:
+                    problems.append(f"{m.name}: stale build: no fixture executable of {', '.join(m.tests)} was relinked after "
+                                    "the mutation was written")
+                    rows.append((m, "STALE", ""))
+                    print(f"{'STALE':12} {m.name:40} {m.path}: stale build, mutant not judged")
+                    continue
                 outcome = run_tests(m.tests, stop_at_kill=True)
             finally:
-                path.write_bytes(original)
+                stamper.write(path, original)
             killers = [f"{t}: {why}" for t, (failed, why) in outcome.items() if failed]
             if m.equivalent:
                 status = "EQUIV-KILLED" if killers else "equivalent"
@@ -705,8 +809,11 @@ def main() -> int:
             if killers or m.equivalent:
                 print(f"{'':12} -> {rows[-1][2]}")
         # A final rebuild proves the copy was restored (the restored tree builds and passes again).
-        if build_tests(ALL_TESTS).returncode != 0 or any(failed for failed, _ in run_tests(ALL_TESTS).values()):
+        final, relinked = build_tests(ALL_TESTS if selected else ())
+        if final.returncode != 0 or any(failed for failed, _ in run_tests(ALL_TESTS).values()):
             problems.append("restored tree no longer builds/passes after the mutation loop")
+        elif not relinked:
+            problems.append("stale build: the restored tree was not rebuilt after the mutation loop")
         killed = sum(1 for _, status, _ in rows if status == "killed")
         equivalent = sum(1 for _, status, _ in rows if status == "equivalent")
         print(f"summary: {killed} killed, {equivalent} justified equivalent, {len(rows) - killed - equivalent} problem(s), "

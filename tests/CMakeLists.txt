@@ -1120,6 +1120,12 @@ add_test(NAME analysis_mutation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRE
   "--generator=${CMAKE_GENERATOR}" "--make-program=${CMAKE_MAKE_PROGRAM}")
 set_property(TEST analysis_mutation_test APPEND PROPERTY LABELS full)
 set_property(TEST analysis_mutation_test PROPERTY TIMEOUT 1800)
+# SEG-030-T009: the mutation harness's source stamping and build-tree settling survive same-second mutate/restore/mutate rebuilds.
+add_test(NAME analysis_mutation_harness_selftest COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/analysis_mutation_harness_selftest.py ${CMAKE_COMMAND} ${CMAKE_C_COMPILER}
+  "--generator=${CMAKE_GENERATOR}" "--make-program=${CMAKE_MAKE_PROGRAM}")
+set_property(TEST analysis_mutation_harness_selftest APPEND PROPERTY LABELS full fast)
+set_property(TEST analysis_mutation_harness_selftest PROPERTY TIMEOUT 120)
 # The real consumer route end to end (fixed point, link, run, falsification): the slowest Genesis Z80 test, `full` only.
 # CI wall-clock: one CTest entry per independent case group of the script (see its docstring); the union is the whole matrix.
 add_test(NAME genesis_z80_build_pipeline_test COMMAND ${Python3_EXECUTABLE}
