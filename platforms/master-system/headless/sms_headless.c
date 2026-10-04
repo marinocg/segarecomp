@@ -12,6 +12,12 @@
  * `sms_write_device_artifacts` (the VDP unit: `vdp.trace`, `vram.bin`, `cram.bin`, `vdp.json`). `--bios` is rejected: the
  * BIOS is never executed.
  *
+ * SEG-031 (ADR 0080): a program compiled with SEGARECOMP_Z80_EXECUTION_COVERAGE (a measurement build, never the default) also accepts
+ * `--execution-coverage <dir>` (directory must exist): every instruction that begins is keyed by (code-image identity, PC)
+ * (z80_execution_coverage.h); `<dir>/z80-coverage.txt` receives the PRIVATE canonical list (identity hex8, PC hex4, ascending) and stderr
+ * one sanitized `Z80_COVERAGE_SUMMARY` line (counts and a digest of that list). The observer has no semantic effect: the state digest
+ * is identical with and without it.
+ *
  * Exit status: 0 frame target reached (or the guest stopped normally with no bound); 2 cycle budget reached first;
  * 3 fail-closed Z80 outcome; 4 SMS_ERROR_*; 64 usage. Plain C11; the ROM is the build-time embedded array. */
 #include <errno.h>
@@ -23,6 +29,10 @@
 #include "sms_machine.h"
 #include "sms_pad.h"
 #include "sms_psg.h"
+#if defined(SEGARECOMP_Z80_EXECUTION_COVERAGE)
+#include "sms_sha256.h"
+#include "segarecomp/codegen/c11/runtime/z80_execution_coverage.h"
+#endif
 
 extern const uint8_t sms_rom_data[];
 extern const uint32_t sms_rom_size;
@@ -138,6 +148,52 @@ static int load_input(const char *path) {
   return 1;
 }
 
+#if defined(SEGARECOMP_Z80_EXECUTION_COVERAGE)
+static Z80ExecutionCoverage z80_coverage; /* large: static storage, zero-initialized */
+
+/* The canonical private list (identities ascending, then PCs ascending) and the sanitized summary line on stderr. */
+static int write_z80_coverage(const char *dir) {
+  char path[4096];
+  uint32_t order[Z80_COVERAGE_MAX_IMAGES];
+  uint32_t n, k;
+  SmsSha256 sha;
+  uint8_t digest[32];
+  FILE *out;
+  if (snprintf(path, sizeof path, "%s/z80-coverage.txt", dir) >= (int)sizeof path) return 0;
+  out = fopen(path, "wb");
+  if (out == NULL) return 0;
+  for (n = 0; n < z80_coverage.image_count; ++n) order[n] = n;
+  for (n = 1; n < z80_coverage.image_count; ++n)
+    for (k = n; k > 0 && z80_coverage.identities[order[k - 1]] > z80_coverage.identities[order[k]]; --k) {
+      const uint32_t t = order[k];
+      order[k] = order[k - 1];
+      order[k - 1] = t;
+    }
+  sms_sha256_init(&sha);
+  for (n = 0; n < z80_coverage.image_count; ++n)
+    for (k = 0; k < 65536u; ++k)
+      if (z80_execution_coverage_contains(&z80_coverage, order[n], (uint16_t)k)) {
+        char line[32];
+        const int length = snprintf(line, sizeof line, "%08x %04x\n", (unsigned)z80_coverage.identities[order[n]], (unsigned)k);
+        fwrite(line, 1, (size_t)length, out);
+        sms_sha256_update(&sha, line, (size_t)length);
+      }
+  sms_sha256_final(&sha, digest);
+  if (fclose(out) != 0) return 0;
+  {
+    char digest_hex[65];
+    hex(digest, sizeof digest, digest_hex);
+    fprintf(stderr,
+            "Z80_COVERAGE_SUMMARY {\"images\":%u,\"distinct_pcs\":%llu,\"retirements\":%llu,\"unknown_identity\":%llu,"
+            "\"identity_overflow\":%llu,\"coverage_digest\":\"%s\"}\n",
+            (unsigned)z80_coverage.image_count, (unsigned long long)z80_execution_coverage_distinct(&z80_coverage, Z80_COVERAGE_MAX_IMAGES),
+            (unsigned long long)z80_coverage.retirements, (unsigned long long)z80_coverage.unknown_identity,
+            (unsigned long long)z80_coverage.identity_overflow, digest_hex);
+  }
+  return 1;
+}
+#endif
+
 static int is_terminal(const SmsStop *stop) { return !sms_stop_is_resumable(stop->kind) || stop->kind == SMS_STOP_HALT_IDLE; }
 
 int main(int argc, char **argv) {
@@ -146,6 +202,9 @@ int main(int argc, char **argv) {
   int psg_attached = 0;
   const char *input_path = NULL;
   const char *artifacts = NULL;
+#if defined(SEGARECOMP_Z80_EXECUTION_COVERAGE)
+  const char *coverage_dir = NULL;
+#endif
   SmsStop stop;
   SmsError init;
   uint8_t digest[32];
@@ -162,6 +221,9 @@ int main(int argc, char **argv) {
       ++i;
     } else if (strcmp(arg, "--input") == 0 && value != NULL) input_path = argv[++i];
     else if (strcmp(arg, "--artifacts") == 0 && value != NULL) artifacts = argv[++i];
+#if defined(SEGARECOMP_Z80_EXECUTION_COVERAGE)
+    else if (strcmp(arg, "--execution-coverage") == 0 && value != NULL) coverage_dir = argv[++i];
+#endif
     else if (strcmp(arg, "--bios") == 0) {
       printf("sms_error %s\n", sms_error_name(SMS_ERROR_BIOS_UNSUPPORTED)); /* the BIOS is never executed or supplied */
       return 4;
@@ -190,6 +252,9 @@ int main(int argc, char **argv) {
   if (input_path != NULL && !load_input(input_path)) return 64;
   machine.stop_on_halt_idle = cycle_budget == SMS_NO_LIMIT && frames == SMS_NO_LIMIT;
   sms_machine_reset(&machine); /* device resets run after the devices are attached */
+#if defined(SEGARECOMP_Z80_EXECUTION_COVERAGE)
+  if (coverage_dir != NULL) z80_execution_coverage_attach(&z80_coverage, &machine.rt); /* after the reset: non-architectural */
+#endif
   if (frames != SMS_NO_LIMIT && frames > UINT64_MAX / SMS_CYCLES_PER_FRAME) return 64;
   {
     const uint64_t frame_limit = frames == SMS_NO_LIMIT ? SMS_NO_LIMIT : frames * SMS_CYCLES_PER_FRAME;
@@ -226,6 +291,12 @@ int main(int argc, char **argv) {
     fprintf(stderr, "cannot write audio artifacts to %s\n", artifacts);
     return 64;
   }
+#if defined(SEGARECOMP_Z80_EXECUTION_COVERAGE)
+  if (coverage_dir != NULL && !write_z80_coverage(coverage_dir)) {
+    fprintf(stderr, "cannot write execution coverage to %s\n", coverage_dir);
+    return 64;
+  }
+#endif
   if (artifacts != NULL && !write_artifacts(artifacts, &stop, digest_hex)) {
     fprintf(stderr, "cannot write artifacts to %s\n", artifacts);
     return 64;

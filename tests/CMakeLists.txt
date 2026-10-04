@@ -1350,6 +1350,12 @@ add_test(NAME sms_emission_budget_512k_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR} 512k)
 add_test(NAME sms_machine_dependency_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_dependency_test.py ${PROJECT_SOURCE_DIR})
+# SEG-031 (ADR 0080): the Z80 execution-PC observer (measurement builds only) on the hermetic SMS fixture.
+add_test(NAME z80_execution_coverage_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_execution_coverage_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_execution_coverage_test APPEND PROPERTY LABELS full)
+set_property(TEST z80_execution_coverage_test PROPERTY TIMEOUT 900)
+set_property(TEST z80_execution_coverage_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-009-T010: `segarecomp build` for Master System images (platform routing, mapper declaration, T008 digest reproduction).
 # CI wall-clock: one entry per independent case group of the script (see its docstring); the union is the whole matrix.
 add_test(NAME sms_native_build_test COMMAND ${Python3_EXECUTABLE}

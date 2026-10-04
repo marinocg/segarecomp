@@ -131,30 +131,33 @@ Keep them under ignored build directories and never commit or persist them. Dura
 the aggregate counts, ratios, digests, frame and dispatch counts, and generic family names printed by the
 tools above.
 
-## Planned, not implemented: cross-CPU execution-PC observation (SEG-027-T005, ADR 0076)
+## Z80 execution-PC observation (SEG-031, ADR 0080)
 
-Complete retired-PC observation exists only for M68K on Genesis (above). Neither the Master System Z80 nor the Genesis Z80 has one. The
-Genesis materialization pass observes image epochs, not PCs.
+SEG-027-T005 planned this observer for SEG-031's multi-platform comparison; SEG-031-T006 delivers it for the Master System Z80 and the
+Genesis materialized Z80 images. It is a falsifier and regression oracle only: Z80 production stays broad AOT, and no Z80 admission
+claim depends on it.
 
-**When it is needed.** It is not needed while Z80 stays broad AOT, because no Z80 admission claim exists. It **is** a prerequisite for:
+- **Hook.** `Z80Runtime` (`libs/codegen/c11/include/segarecomp/codegen/c11/runtime/z80_runtime.h`) carries a non-architectural
+  `observe_pc` / `observer` pair, NULL in every program. The call `Z80_OBSERVE_PC` is compiled only with
+  `SEGARECOMP_Z80_EXECUTION_COVERAGE`; it fires with the logical PC of every instruction that begins executing: after the boundary
+  check (`z80_owner_prologue`) and, for a RAM-backed image, after the live guard accepted it (`z80_live_guard`). An instruction that
+  begins always completes, so this is the retired set. Generated Z80 C is unchanged (the header is included, not emitted), and an
+  ordinary program never calls the observer.
+- **Collector.** `z80_execution_coverage.h` (header-only, machine-neutral) keys every observed PC by `(code-image identity, PC)`, the
+  identity being the host's own `code_image` answer at that PC, so banked ROM images and materialized RAM images never conflate. At
+  most 256 identities; overflow and identity failures are counted.
+- **Master System.** A measurement build (`segarecomp build ... --cc-arg -DSEGARECOMP_Z80_EXECUTION_COVERAGE`) adds
+  `--execution-coverage <dir>` to the headless program: `<dir>/z80-coverage.txt` is the private canonical list (identity hex8, PC hex4,
+  ascending) and stderr carries one sanitized `Z80_COVERAGE_SUMMARY` (identities, distinct PCs, retirements, unknown identities, a digest
+  of the list). The default build rejects the option.
+- **Genesis.** The materialization pass of a measurement build (`--keep-work 1`, the same macro) honours
+  `SEGARECOMP_Z80_COVERAGE_DIR` beside `SEGARECOMP_MATERIALIZE_DIR`/`_FRAMES`: the full game runs headless with the final image
+  registry, keyed by materialized image identity. `pass.report` is unchanged.
+- **Tooling.** `tools/z80_execution_coverage.py --platform master-system|genesis` builds, runs twice (deterministic list) and, for the
+  Master System, once without the observer (identical machine state digest), and prints sanitized JSON. Broad Z80 AOT is falsified by
+  a Z80 error or an unknown identity during the run (every observed PC executed through an exact generated entry otherwise).
+- **Tests.** `z80_execution_coverage_test` (hermetic SMS fixture): zero semantic effect, determinism, canonical private list, and the
+  default program's rejection of the option.
 
-- any Z80-facing discovery or selective-admission claim;
-- comparing a future static Genesis Z80 image producer's executed footprint with a materialized image;
-- the SEG-031 multi-platform comparison, which needs observed coverage on Z80 titles.
-
-SEG-029's synthetic Z80 adapter does not need it, because its fixtures carry their own ground truth.
-
-**Owner.** SEG-031, as a child before its multi-platform comparison. Any earlier milestone that makes a Z80-facing claim must deliver
-the observer first.
-
-**Requirements.** These carry over from the M68K observer:
-
-- observational only, with zero semantic effect (whole-runtime equality with and without the observer);
-- disabled by default (a NULL host pointer), and excluded from every report and digest;
-- complete retired guest-PC observation, keyed by `(code-image identity, PC)` for Z80 so that banked images do not conflate;
-- a first-entry witness where useful, with interrupt-resumption attribution;
-- exact PCs stored only in private, ignored output;
-- durable persistence of sanitized aggregates only.
-
-**Seam.** A small CPU/platform-neutral observation interface is extracted from the M68K pattern only when the Z80 observer becomes its
-second real consumer. Until then nothing is generalized.
+No first-entry witness is recorded for Z80 (no Z80 admission claim needs attribution). The M68K and Z80 observers share no code: the
+generic interface stays unextracted until a second consumer needs the same shape.
