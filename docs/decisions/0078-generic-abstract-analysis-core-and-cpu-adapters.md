@@ -26,6 +26,8 @@ the generic part is not M68K-shaped.
      analysis.
    - **No production target links any analysis target.** Only tests do. `tests/analysis_core_boundary_test.py` enforces this over every
      `CMakeLists.txt`. Production generated output and admission are therefore unchanged by construction; production Z80 stays broad AOT.
+   - Amended by ADR 0079 decision 1-2: the report-only SEG-030 driver (`platforms/genesis/analysis_report`, never installed, never
+     linked by the `segarecomp` CLI) is the one non-test target pair allowed to link the analysis.
 2. **The seam.** The solver sees opaque, totally ordered 64-bit program points (the adapter encodes them), an adapter-defined
    `State` with ADL `join`/`leq`, and a pure `transfer(point, in) -> TransferResult` (monotone except for computed edges, below) that returns typed edges. Edge kinds are the
    closed set `fallthrough, branch, call, return_edge, computed, exceptional`, used for reporting only. A computed edge carries a target

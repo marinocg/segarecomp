@@ -23,6 +23,36 @@ PC-indexed site with its proven exact target set. Runtime coverage then FALSIFIE
 entry whose witness predecessor is a resolved site but which lies outside that site's proven set is counted as a
 recovery escape (expected 0). The tool also reports how many proven targets were ever observed (a precision
 indicator). Nothing observed is ever fed back into the challenger.
+
+SEG-030-T003: when the private input carries `computed_sites` (the M68K core report), EVERY resolved computed site of
+every family (PC-indexed, (An), d16(An), (d8,An,Xn), ...) is falsified the same way, per family: a first entry whose
+witness predecessor is a resolved site, retired normally or resumed after an interrupt taken right after the site,
+must lie inside that site's proven target set; anything else is an escape (expected 0).
+
+SEG-030-T007: with --coverage-summary the report carries an `oracle` block (outcome, frame target/published, witness
+overflow, `complete`). An incomplete oracle is static-only evidence and never counts toward a falsified-title quorum.
+
+SEG-030-T009 correction cycle: the named premises of ADR 0079 decision 8 are falsified site by site where the oracle permits, in
+a `named_premises` block (aggregates only):
+  return_slot_integrity  the RTS sites the analysis credits as ordinary returns (D's RTS sites that are not `computed_sites`:
+                         return-slot `normal` or `premise`; only premise sites when the report counts no normal site; a premise
+                         site that is also a typed Unknown return is not credited and is counted apart) are
+                         checked on every first-entry witness edge they own (retired, or resumed after an interrupt taken right
+                         after them). The analysed continuation of such a site is the continuation of the call that pushed its
+                         slot. An edge into a call continuation of D, or into the stacked continuation of a call the oracle
+                         executed earlier (a caller outside D: an ordinary closure miss), is consistent; any other edge is a
+                         `premise_violation`. Deciding the second case needs --classification; without it such edges are counted
+                         `undecided`. When the private report lists `return_slot_premise_sites` (memory domain: every
+                         premise site with its cause) attribution is exact (`per_site`): premise executions, by cause, and
+                         violations at premise sites are counted site by site; otherwise the count-based attribution applies.
+                         Limits: the oracle records first entries only (a return into an already-entered PC is
+                         invisible) and no call stack (a return into another call's continuation is indistinguishable).
+                         A violation is reported in its own fields and first-miss category, never as an ordinary miss, and the
+                         tool exits 5 because it falsifies a credited result.
+  interrupt_register     the report's `interrupt_register_model`. Under `historical_assumption` (absent: the baseline/challenger
+                         historical model) the resolved sites that depend on the assumption are not exposed by the report:
+                         `not_site_attributable`, and no credited result of the run is claimed sound for interrupt registers.
+Runtime coverage stays a falsifier only: nothing observed is fed back into the analysis.
 """
 import argparse
 import json
@@ -31,6 +61,8 @@ import sys
 
 BITMAP_BYTES = 1 << 20
 CAUSE_INITIAL, CAUSE_RETIRE, CAUSE_INTERRUPT, CAUSE_DISPATCH, CAUSE_RESUMPTION = 0, 1, 2, 3, 4
+EXIT_PREMISE_VIOLATION = 5
+EXIT_INCOMPLETE_ORACLE = 6
 WORK_RAM_BEGIN = 0xE00000
 
 # Fine challenger family -> the experiment's coarse first-miss categories.
@@ -51,7 +83,7 @@ COARSE = {
 }
 CATEGORIES = ["ordinary_rts", "rte_rtr", "jmp_jsr_(An)", "pc_indexed", "an_displacement_or_indexed",
               "computed_jump_rts", "ram_alias_materialized", "interrupt_entry", "fixed_flow_not_discovered",
-              "initial", "other"]
+              "initial", "return_slot_premise_violation", "other"]
 
 
 def load_bitmap(path: pathlib.Path) -> set[int]:
@@ -75,7 +107,8 @@ def load_witnesses(path: pathlib.Path) -> dict[int, tuple[int, int, int]]:
     return witnesses
 
 
-def compare(observed: set[int], witnesses: dict, challenger: dict, summary: dict | None) -> dict:
+def compare(observed: set[int], witnesses: dict, challenger: dict, summary: dict | None,
+            violations: set[tuple[int, int]] = frozenset()) -> dict:
     discovered = {int(x, 16) for x in challenger["discovered"]}
     site_family = {}
     for family, pcs in challenger["sites"].items():
@@ -104,7 +137,10 @@ def compare(observed: set[int], witnesses: dict, challenger: dict, summary: dict
                 break
             if previous in discovered:
                 family = site_family.get(previous)
-                if x >= WORK_RAM_BEGIN:
+                if (previous, x) in violations:
+                    coarse = "return_slot_premise_violation"
+                    family = coarse
+                elif x >= WORK_RAM_BEGIN:
                     coarse = "ram_alias_materialized"
                 elif cause == CAUSE_INTERRUPT:
                     coarse = "interrupt_entry"
@@ -162,11 +198,24 @@ def compare(observed: set[int], witnesses: dict, challenger: dict, summary: dict
     }
     if recovery is not None:
         report["pc_index_recovery_check"] = recovery
+    computed = computed_site_escape_check(observed, witnesses, challenger)
+    if computed is not None:
+        report["computed_site_escape_check"] = computed
     if report["U"]:
         u = report["U"]
         report["ratios"] = {"D_over_U": round(len(discovered) / u, 6), "O_over_U": round(len(observed) / u, 6),
                             "O_over_D": round(len(observed) / len(discovered), 6) if discovered else None}
     if summary is not None:
+        # SEG-030-T007: oracle completeness. Only a run that reached its fixed no-input frame target with no witness overflow and
+        # no unknown retirement is a complete workload; an incomplete oracle (e.g. a guest stop) is static-only and does not count
+        # toward a falsified-title quorum. Its comparison is still reported, never silently promoted.
+        report["oracle"] = {
+            "outcome": summary.get("outcome"),
+            "target_frames": summary.get("target_frames"),
+            "frames_published": summary.get("frames_published"),
+            "witness_overflow": summary.get("witness_overflow"),
+            "complete": oracle_complete(summary),
+        }
         # Recall at each coverage checkpoint, reconstructed from first-entry retirement ordinals.
         ordinals = sorted((w[0], pc) for pc, w in witnesses.items())
         checkpoints = []
@@ -178,6 +227,15 @@ def compare(observed: set[int], witnesses: dict, challenger: dict, summary: dict
                                 "recall": round(hits / len(seen), 6) if seen else None})
         report["checkpoints"] = checkpoints
     return report
+
+
+def oracle_complete(summary: dict) -> bool:
+    """Whether runtime coverage is a complete fixed-frame oracle rather than static-only evidence."""
+    target = summary.get("target_frames")
+    published = summary.get("frames_published")
+    return (type(target) is int and target > 0 and type(published) is int and published == target
+            and summary.get("outcome") == "frames_reached" and summary.get("witness_overflow") == 0
+            and summary.get("unknown_retirements") == 0)
 
 
 def resolved_pc_index_targets(challenger: dict) -> dict[int, set[int]]:
@@ -213,12 +271,151 @@ def pc_index_recovery_check(observed: set[int], witnesses: dict, challenger: dic
     }
 
 
+def computed_site_escape_check(observed: set[int], witnesses: dict, private: dict) -> dict | None:
+    """SEG-030-T003: falsification of every resolved computed site, per report family (aggregates only)."""
+    if "computed_sites" not in private:
+        return None
+    resolved = {int(pc, 16): (entry["family"], {int(t, 16) for t in entry["targets"]})
+                for pc, entry in private["computed_sites"].items() if entry["outcome"] == "resolved"}
+    families: dict[str, dict] = {}
+    for pc, (family, targets) in resolved.items():
+        counts = families.setdefault(family, {"resolved_sites": 0, "resolved_sites_executed": 0, "proven_targets": 0,
+                                              "proven_targets_observed": 0, "first_entries_from_resolved_sites": 0,
+                                              "escapes_outside_proven_targets": 0, "sites_with_escapes": 0})
+        counts["resolved_sites"] += 1
+        counts["resolved_sites_executed"] += pc in observed
+        counts["proven_targets"] += len(targets)
+        counts["proven_targets_observed"] += len(targets & observed)
+    escape_sites: set[int] = set()
+    for x, (_, previous, cause) in witnesses.items():
+        if cause not in (CAUSE_RETIRE, CAUSE_RESUMPTION) or previous not in resolved:
+            continue
+        family, targets = resolved[previous]
+        families[family]["first_entries_from_resolved_sites"] += 1
+        if x not in targets:
+            families[family]["escapes_outside_proven_targets"] += 1
+            if previous not in escape_sites:
+                escape_sites.add(previous)
+                families[family]["sites_with_escapes"] += 1
+    return {
+        "resolved_sites": len(resolved),
+        "escapes_outside_proven_targets": sum(c["escapes_outside_proven_targets"] for c in families.values()),
+        "sites_with_escapes": len(escape_sites),
+        "families": dict(sorted(families.items())),
+    }
+
+
+def observed_call_continuations(observed: set[int], classification: dict | None) -> dict[int, int] | None:
+    """Stacked call continuation -> the observed call that pushed it (private classification of observed PCs; same decoder)."""
+    if classification is None:
+        return None
+    stacked_call: dict[int, int] = {}
+    for pc, entry in classification["pcs"].items():
+        if int(pc, 16) in observed and entry.get("decoded") and entry.get("stacked") == "call":
+            stacked_call.setdefault(int(entry["stacked_address"], 16), int(pc, 16))
+    return stacked_call
+
+
+def named_premise_check(observed: set[int], witnesses: dict, private: dict,
+                        classification: dict | None) -> tuple[dict, set[tuple[int, int]]]:
+    """SEG-030-T009: site-by-site falsification of the named premises of ADR 0079 decision 8 (aggregates only).
+
+    Returns the `named_premises` block and the private set of violating (site, entry) edges."""
+    aggregate = private.get("aggregate", {})
+    slots = aggregate.get("memory", {}).get("return_slots") if isinstance(aggregate.get("memory"), dict) else None
+    computed = {int(pc, 16) for pc in private.get("computed_sites", {})}
+    checked = {int(pc, 16) for pc in private.get("sites", {}).get("rts", [])} - computed
+    # The report counts a site as a premise site when some point applied the premise; a site whose other points are a typed
+    # Unknown return is reported as an Unknown `rts_computed` site, is not credited, and is not checked here.
+    # The memory-domain private report lists every premise site with its cause: exact site attribution.
+    listed = private.get("return_slot_premise_sites")
+    premise_causes = ({int(pc, 16): cause for pc, cause in listed.items()}
+                      if slots is not None and isinstance(listed, dict) else None)
+    if slots is None:
+        attribution = "no_return_slot_classification"  # baseline/challenger: every ordinary RTS carries the premise implicitly
+    elif premise_causes is not None:
+        attribution = "per_site"
+    elif len(checked) > slots["normal"] + slots["return_slot_premise_sites"]:
+        attribution = "superset_unverified"
+    elif slots["normal"] == 0:
+        attribution = "credited_premise_sites"  # every checked site is a premise site
+    else:
+        attribution = "normal_or_premise_sites"
+    continuations = {int(pc, 16) for pc in private.get("call_continuations", [])}
+    stacked_call = observed_call_continuations(observed, classification)
+    entries = consistent = closure_misses = undecided = 0
+    violations: set[tuple[int, int]] = set()
+    for x, (ordinal, previous, cause) in witnesses.items():
+        if cause not in (CAUSE_RETIRE, CAUSE_RESUMPTION) or previous not in checked:
+            continue
+        entries += 1
+        if x in continuations:
+            consistent += 1
+        elif stacked_call is None:
+            undecided += 1
+        elif x in stacked_call and witnesses.get(stacked_call[x], (ordinal + 1,))[0] < ordinal:
+            closure_misses += 1  # the continuation of an executed call outside D: an ordinary closure miss
+        else:
+            violations.add((previous, x))
+    violating_sites = {site for site, _ in violations}
+    if premise_causes is not None:
+        credited_premise = set(premise_causes) & checked
+        executed_by_cause: dict[str, int] = {}
+        for pc in sorted(credited_premise & observed):
+            executed_by_cause[premise_causes[pc]] = executed_by_cause.get(premise_causes[pc], 0) + 1
+        not_credited = len(set(premise_causes) - checked)
+        executions = len(credited_premise & observed)
+    else:
+        not_credited = (slots["return_slot_premise_sites"] - len(checked)
+                        if attribution == "credited_premise_sites" else "not_site_attributable")
+        executions = len(checked & observed) if attribution == "credited_premise_sites" else "not_site_attributable"
+    return_slot = {
+        "site_attribution": attribution,
+        "premise_sites": slots["return_slot_premise_sites"] if slots else None,
+        "premise_by_cause": slots["premise_by_cause"] if slots else None,
+        "normal_sites": slots["normal"] if slots else None,
+        "checked_sites": len(checked),
+        "checked_sites_executed": len(checked & observed),
+        "premise_sites_not_credited": not_credited,
+        "premise_executions_observed": executions,
+        "first_entries_from_checked_sites": entries,
+        "first_entries_into_analysed_continuations": consistent,
+        "first_entries_into_executed_call_continuations_outside_d": closure_misses,
+        "first_entries_undecided_without_classification": undecided,
+        "premise_violations": len(violations),
+        "sites_with_premise_violations": len(violating_sites),
+        "credited_premise_violations": len(violations),  # every checked site is a credited ordinary return of D
+        "oracle_limit": "first_entry_witness_edges_only; no call stack (a return into another call's continuation is "
+                        "not distinguishable)" + ("" if stacked_call is not None else
+                                                  "; no --classification: edges outside D's continuations undecided"),
+    }
+    if premise_causes is not None:
+        return_slot["premise_sites_listed"] = len(premise_causes)
+        return_slot["premise_executions_observed_by_cause"] = executed_by_cause
+        return_slot["premise_violations_at_premise_sites"] = sum(1 for site, _ in violations if site in premise_causes)
+        return_slot["premise_sites_with_violations"] = len(violating_sites & set(premise_causes))
+    model = aggregate.get("interrupt_register_model")
+    historical = model != "proven_or_unknown"
+    resolved = sum(1 for e in private.get("computed_sites", {}).values() if e.get("outcome") == "resolved")
+    resolved += sum(1 for e in private.get("pc_index_sites", {}).values()
+                    if e.get("outcome") == "resolved" and "computed_sites" not in private)
+    interrupt = {
+        "model": model if model is not None else "historical_assumption",
+        "model_reported": model is not None,
+        "resolved_sites": resolved,
+        "resolved_sites_depending_on_assumption": "not_site_attributable" if historical else 0,
+        "credited_results_sound_for_interrupt_registers": not historical,
+    }
+    return {"return_slot_integrity": return_slot, "interrupt_register": interrupt}, violations
+
+
 DYNAMIC_FAMILIES = {"rts", "rts_push_window", "rte", "rtr", "jmp_(An)", "jsr_(An)", "jmp_d16(An)", "jsr_d16(An)",
                     "jmp_(d8,An,Xn)", "jsr_(d8,An,Xn)", "jmp_(d8,PC,Xn)", "jsr_(d8,PC,Xn)", "unclassified"}
 
 
 def structural_attribution(observed: set[int], witnesses: dict, discovered: set[int], classification: dict,
-                           resolved: dict[int, set[int]] | None = None) -> dict:
+                           resolved: dict[int, set[int]] | None = None,
+                           violations: set[tuple[int, int]] = frozenset()) -> dict:
     """Attribution using a private classification of observed PCs (same decoder; never discovery input).
 
     Each first entry prev -> x is labelled structurally:
@@ -254,6 +451,8 @@ def structural_attribution(observed: set[int], witnesses: dict, discovered: set[
         family = entry["family"]
         if x in {int(t, 16) for t in entry["successors"]}:
             return previous, "fixed", None
+        if (previous, x) in violations:
+            return previous, "dynamic", "return_slot_premise_violation"
         if resolved and previous in resolved:
             # SEG-026-T002: a proven exact PC-indexed edge is structural; leaving the proven set is an escape.
             if x in resolved[previous]:
@@ -357,6 +556,8 @@ def main() -> int:
     parser.add_argument("--coverage-dir", required=True)
     parser.add_argument("--challenger", required=True)
     parser.add_argument("--coverage-summary")
+    parser.add_argument("--require-complete-oracle", action="store_true",
+                        help="gate mode: reject a missing or incomplete runtime coverage oracle")
     parser.add_argument("--checkpoint-frames", help="comma-separated frames to keep from the per-epoch recall")
     parser.add_argument("--classification",
                         help="private classification of the observed PCs (segarecomp genesis-reachability-challenger "
@@ -369,19 +570,35 @@ def main() -> int:
         sys.stderr.write("witness set does not match the coverage bitmap (overflow?)\n")
         return 3
     challenger = json.loads(pathlib.Path(args.challenger).read_text(encoding="utf-8"))
+    # SEG-030: a core-driver report whose solve exhausted a bound carries no discovered set (every query is Unknown); comparing
+    # it would report a vacuous recall with zero escapes. Reject it (the challenger's own format has no solver block).
+    solver = challenger.get("aggregate", {}).get("solver")
+    if challenger.get("complete") is False or (isinstance(solver, dict) and solver.get("complete") is False):
+        sys.stderr.write("the report's solve is incomplete (a bound was exhausted): no discovered set to compare\n")
+        return 4
     summary = None
     if args.coverage_summary:
         text = pathlib.Path(args.coverage_summary).read_text(encoding="utf-8").strip()
         summary = json.loads(text[len("COVERAGE_SUMMARY "):] if text.startswith("COVERAGE_SUMMARY ") else text)
-    report = compare(observed, witnesses, challenger, summary)
+    if args.require_complete_oracle and (summary is None or not oracle_complete(summary)):
+        sys.stderr.write("a complete coverage oracle is required (frames target, witnesses and retirements must be complete)\n")
+        return EXIT_INCOMPLETE_ORACLE
+    classification = None
     if args.classification:
         classification = json.loads(pathlib.Path(args.classification).read_text(encoding="utf-8"))
+    premises, violations = named_premise_check(observed, witnesses, challenger, classification)
+    report = compare(observed, witnesses, challenger, summary, violations)
+    report["named_premises"] = premises
+    if classification is not None:
         report.update(structural_attribution(observed, witnesses, {int(x, 16) for x in challenger["discovered"]},
-                                             classification, resolved_pc_index_targets(challenger)))
+                                             classification, resolved_pc_index_targets(challenger), violations))
     if args.checkpoint_frames and "checkpoints" in report:
         keep = {int(x) for x in args.checkpoint_frames.split(",")}
         report["checkpoints"] = [c for c in report["checkpoints"] if c["frame"] in keep]
     print(json.dumps(report, separators=(",", ":"), sort_keys=True))
+    if violations:
+        sys.stderr.write("return-slot integrity premise violated at a credited site (see named_premises)\n")
+        return EXIT_PREMISE_VIOLATION
     return 0
 
 
