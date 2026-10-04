@@ -249,7 +249,8 @@ std::uint8_t auto_update_mask(const M68kIrOperation &operation) {
 // The address registers an operation may write on its normal (non-exception) successors. The effect owner's footprint is used
 // when it is complete. For the lifted kinds whose footprint it does not claim complete, the An writes are stated here from the
 // M68000PRM instruction entries (as the data owner states EXT's): LEA writes only its An; MOVEQ, DBcc, EXT, SWAP, MULx and DIVx write
-// only a Dn (a divide exception enters a machine vector, never the fallthrough); JSR/BSR/PEA move only A7; MOVEM writes the
+// only a Dn (a divide exception enters a machine vector, never the fallthrough); TRAPV and CHK write no register (SEG-030-T009
+// correction cycle: their resuming handler returns to the fallthrough); JSR/BSR/PEA move only A7; MOVEM writes the
 // loaded address registers and its base auto-update. Every other incomplete kind is assumed to write all of A0-A7. Decoded
 // (An)+/-(An) auto-updates are always included.
 std::uint8_t address_write_mask(const M68kIrOperation &operation) {
@@ -269,7 +270,9 @@ std::uint8_t address_write_mask(const M68kIrOperation &operation) {
   case M68kIrKind::multiply_signed_word:
   case M68kIrKind::multiply_unsigned_word:
   case M68kIrKind::divide_signed_word:
-  case M68kIrKind::divide_unsigned_word: return updates;
+  case M68kIrKind::divide_unsigned_word:
+  case M68kIrKind::trap_on_overflow:
+  case M68kIrKind::check_bounds: return updates;
   case M68kIrKind::call_general:
   case M68kIrKind::bsr_call:
   case M68kIrKind::push_effective_address: return static_cast<std::uint8_t>(updates | 0x80U);
@@ -353,6 +356,11 @@ M68kAnalysisState join(const M68kAnalysisState &left, const M68kAnalysisState &r
   out.memory = join(left.memory, right.memory);
   out.stack_delta = join(left.stack_delta, right.stack_delta, m68k_exact_offset_bound);
   out.status = join(left.status, right.status);
+  // SEG-030-T009 correction cycle: only the facts both sides hold.
+  for (std::size_t i = 0; i < out.origin.size(); ++i) out.origin[i] = left.origin[i] == right.origin[i] ? left.origin[i] : 0U;
+  for (const auto &[cell, fact] : left.saved)
+    if (const auto found = right.saved.find(cell); found != right.saved.end() && found->second == fact) out.saved.emplace(cell, fact);
+  out.resumption_unknown = static_cast<std::uint8_t>(left.resumption_unknown | right.resumption_unknown);
   return out;
 }
 
@@ -367,7 +375,35 @@ bool leq(const M68kAnalysisState &left, const M68kAnalysisState &right) {
   if (!leq(left.memory, right.memory)) return false;
   if (!leq(left.stack_delta, right.stack_delta)) return false;
   if (!leq(left.status, right.status)) return false;
+  for (std::size_t i = 0; i < left.origin.size(); ++i)
+    if (right.origin[i] != 0U && left.origin[i] != right.origin[i]) return false;
+  for (const auto &[cell, fact] : right.saved)
+    if (const auto found = left.saved.find(cell); found == left.saved.end() || found->second != fact) return false;
+  if ((left.resumption_unknown & ~right.resumption_unknown) != 0U) return false;
   return !right.flag_setter || left.flag_setter == right.flag_setter;
+}
+
+M68kResumption join(const M68kResumption &left, const M68kResumption &right) {
+  M68kResumption out;
+  out.unproven = left.unproven || right.unproven;
+  for (std::size_t i = 0; i < m68k_analysis_slot_count; ++i) {
+    out.data[i] = join(left.data[i], right.data[i]);
+    out.width_derived[i] = !out.data[i].is_unknown() && (right.width_derived[i] || left.width_derived[i]);
+  }
+  for (std::size_t i = 0; i < out.address.size(); ++i) out.address[i] = join(left.address[i], right.address[i]);
+  return out;
+}
+
+bool leq(const M68kResumption &left, const M68kResumption &right) {
+  if (right.unproven) return true;
+  if (left.unproven) return false;
+  for (std::size_t i = 0; i < m68k_analysis_slot_count; ++i) {
+    if (!leq(left.data[i], right.data[i])) return false;
+    if (!right.data[i].is_unknown() && left.width_derived[i] && !right.width_derived[i]) return false;
+  }
+  for (std::size_t i = 0; i < left.address.size(); ++i)
+    if (!leq(left.address[i], right.address[i])) return false;
+  return true;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -757,12 +793,17 @@ M68kAnalysisState M68kFiniteAdapter::root_state(std::uint32_t tag, std::uint32_t
       state.status = FiniteValue::of({m68k_reset_status});
       if (config_.frames.reset_ssp) state.address[7] = classify(image_, constant(*config_.frames.reset_ssp));
     }
+    apply_resumptions(0U, state);
     return state;
   }
   const auto found = config_.frames.instances.find(tag);
   if (found == config_.frames.instances.end()) return state;  // the dead-handler partition: no frame fact
   state.status = found->second.status;
   state.address[7] = found->second.a7;
+  // SEG-030-T009 correction cycle: every register holds its own entry value at the handler's root.
+  for (std::size_t i = 0; i < state.origin.size(); ++i) state.origin[i] = static_cast<std::uint8_t>(i + 1U);
+  // The root is a boundary too: a child eligible there may already have been taken.
+  apply_resumptions(tag, state);
   return state;
 }
 
@@ -1104,6 +1145,221 @@ void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::u
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// SEG-030-T009 correction cycle (ADR 0079 decisions 7 and 8): handler register resumptions.
+
+namespace {
+
+// The origin index of a register operand (D0-D7: 0-7, A0-A6: 8-14); nullopt for A7 and every other operand.
+std::optional<std::size_t> origin_index(const M68kEffectiveAddress &ea) {
+  if (ea.reg >= 8U) return std::nullopt;
+  if (ea.mode == M68kEaMode::data_register) return ea.reg;
+  if (ea.mode == M68kEaMode::address_register && ea.reg < 7U) return 8U + ea.reg;
+  return std::nullopt;
+}
+
+// SEG-030-T006 (defined with the handler-instance derivation below): the offset, relative to A7 before the instruction, of an
+// A7-relative memory write.
+std::optional<std::int64_t> a7_relative_offset(const M68kIrOperation &operation, const M68kMemoryWrite &write);
+
+// The precise signed stack delta of a state (nullopt when it is not one value).
+std::optional<std::int64_t> precise_delta(const M68kAnalysisState &state) {
+  if (!state.stack_delta.is_precise() || state.stack_delta.values().size() != 1U) return std::nullopt;
+  return static_cast<std::int64_t>(static_cast<std::int32_t>(static_cast<std::uint32_t>(state.stack_delta.values().front())));
+}
+
+// The A7-relative offset (relative to A7 before the instruction) of a source operand read through A7.
+std::optional<std::int64_t> a7_source_offset(const M68kEffectiveAddress &ea, std::uint32_t bytes) {
+  if (ea.reg != 7U) return std::nullopt;
+  switch (ea.mode) {
+  case M68kEaMode::address_indirect:
+  case M68kEaMode::address_postinc: return 0;
+  case M68kEaMode::address_predec: return -static_cast<std::int64_t>(bytes);
+  case M68kEaMode::address_disp16: return static_cast<std::int64_t>(ea.displacement);
+  default: return std::nullopt;
+  }
+}
+
+// The registers of a MOVEM list in memory order (ascending addresses: D0-D7 then A0-A7, as normal-order indices 0-15). The
+// predecrement form encodes the list reversed (bit 0: A7).
+std::vector<unsigned> movem_registers(const M68kIrOperation &operation, bool predecrement) {
+  std::vector<unsigned> out;
+  for (unsigned index = 0; index < 16U; ++index) {
+    const unsigned bit = predecrement ? 15U - index : index;
+    if (((operation.movem_register_mask >> bit) & 1U) != 0U) out.push_back(index);
+  }
+  return out;
+}
+
+}  // namespace
+
+void M68kFiniteAdapter::transfer_origins(const M68kIrOperation &operation, const State &in, State &out, std::uint8_t data_written,
+                                         const M68kMemoryPolicy &policy, const FiniteValue &status) const {
+  out.resumption_unknown = static_cast<std::uint8_t>(in.resumption_unknown & ~data_written);
+  if ((operation.kind == M68kIrKind::write_move || operation.kind == M68kIrKind::write_movea) &&
+      operation.destination_ea.mode == M68kEaMode::data_register && operation.source_ea.mode == M68kEaMode::data_register &&
+      operation.source_ea.reg < 8U && operation.destination_ea.reg < 8U &&
+      ((in.resumption_unknown >> operation.source_ea.reg) & 1U) != 0U)
+    out.resumption_unknown = static_cast<std::uint8_t>(out.resumption_unknown | (1U << operation.destination_ea.reg));
+  const bool facts = std::any_of(in.origin.begin(), in.origin.end(), [](std::uint8_t o) { return o != 0U; }) || !in.saved.empty();
+  out.saved.clear();
+  if (!facts) {
+    out.origin.fill(0U);
+    return;
+  }
+  const auto delta = precise_delta(in);
+  // The absolute bytes of the slot at activation offset `offset` (nullopt: unknown, e.g. A7 or the delta is not tracked).
+  const auto slot_bytes = [&](std::int64_t offset) -> std::optional<std::vector<M68kAsyncRange>> {
+    if (!delta) return std::nullopt;
+    return m68k_memory_touched(m68k_points_to_add(in.address[7], {offset - *delta}), 4U);
+  };
+  // A slot fact is usable only when no asynchronous or external writer of the partition may have rewritten the slot.
+  const auto saved_fact = [&](std::int64_t offset) -> std::uint8_t {
+    const auto found = in.saved.find(offset);
+    if (found == in.saved.end() || policy.external_writer || policy.async_all) return 0U;
+    const auto bytes = slot_bytes(offset);
+    if (!bytes) return 0U;
+    for (const auto &range : *bytes)
+      if (policy.asynchronous(M68kCell{range.kind, range.id, range.lo, range.hi - range.lo})) return 0U;
+    return found->second;
+  };
+  // 1. Registers: a written register loses its fact, except a whole-register copy of a register or of a saved slot.
+  auto origin = in.origin;
+  const auto address_written = address_write_mask(operation);
+  for (unsigned reg = 0; reg < 8U; ++reg)
+    if (((data_written >> reg) & 1U) != 0U) origin[reg] = 0U;
+  for (unsigned reg = 0; reg < 7U; ++reg)
+    if (((address_written >> reg) & 1U) != 0U) origin[8U + reg] = 0U;
+  const bool long_size = operation.size == M68kMemoryAccessWidth::long_word;
+  const auto &src = operation.source_ea;
+  const auto &dst = operation.destination_ea;
+  if ((operation.kind == M68kIrKind::write_move || operation.kind == M68kIrKind::write_movea) && long_size) {
+    if (const auto to = origin_index(dst)) {
+      if (const auto from = origin_index(src)) {
+        origin[*to] = in.origin[*from];
+      } else if (const auto offset = a7_source_offset(src, 4U); offset && delta) {
+        origin[*to] = saved_fact(*delta + *offset);
+      }
+    }
+  } else if (operation.kind == M68kIrKind::exchange_registers) {
+    const auto a = origin_index(src);
+    const auto b = origin_index(dst);
+    if (a && b) {
+      origin[*a] = in.origin[*b];
+      origin[*b] = in.origin[*a];
+    }
+  } else if (operation.kind == M68kIrKind::movem_transfer && long_size &&
+             operation.movem_direction == M68kMovemDirection::memory_to_registers) {
+    const auto base = src.mode == M68kEaMode::address_predec ? std::nullopt : a7_source_offset(src, 0U);
+    const auto registers = movem_registers(operation, false);
+    for (std::size_t k = 0; k < registers.size(); ++k) {
+      const auto index = registers[k];
+      if (index >= m68k_origin_registers) continue;
+      origin[index] = base && delta ? saved_fact(*delta + *base + static_cast<std::int64_t>(4U * k)) : 0U;
+    }
+  }
+  out.origin = origin;
+  if (!delta) return;  // no slot can be named without a precise stack delta
+  // 2. Saved slots: every store removes the facts of the slots it may touch (all of them when that is not known), then a long store
+  //    of a register with a fact through A7 records it.
+  out.saved = in.saved;
+  const auto description = m68k_memory_writes(operation);
+  const auto targets = memory_write_targets(operation, in, status);
+  for (std::size_t i = 0; i < targets.size() && !out.saved.empty(); ++i) {
+    const auto &[target, span] = targets[i];
+    if (target.is_bottom()) continue;
+    const auto relative =
+        description.described && i < description.writes.size() ? a7_relative_offset(operation, description.writes[i]) : std::nullopt;
+    if (relative) {
+      const auto lo = *delta + *relative;
+      const auto hi = lo + static_cast<std::int64_t>(span);
+      for (auto it = out.saved.begin(); it != out.saved.end();) it = it->first < hi && lo < it->first + 4 ? out.saved.erase(it) : std::next(it);
+      continue;
+    }
+    const auto touched = m68k_memory_touched(target, span);
+    if (!touched) {
+      out.saved.clear();
+      break;
+    }
+    for (auto it = out.saved.begin(); it != out.saved.end();) {
+      const auto bytes = slot_bytes(it->first);
+      const bool overlaps = !bytes || std::any_of(bytes->begin(), bytes->end(), [&](const M68kAsyncRange &slot) {
+        return std::any_of(touched->begin(), touched->end(), [&](const M68kAsyncRange &range) {
+          return range.kind == slot.kind && range.id == slot.id && slot.lo < range.hi && range.lo < slot.hi;
+        });
+      });
+      it = overlaps ? out.saved.erase(it) : std::next(it);
+    }
+  }
+  if (operation.kind == M68kIrKind::write_move && long_size && description.described && !description.writes.empty()) {
+    const auto from = origin_index(src);
+    const auto relative = a7_relative_offset(operation, description.writes.front());
+    if (from && relative && in.origin[*from] != 0U) out.saved[*delta + *relative] = in.origin[*from];
+  } else if (operation.kind == M68kIrKind::movem_transfer && long_size &&
+             operation.movem_direction == M68kMovemDirection::registers_to_memory && description.described &&
+             !description.writes.empty()) {
+    const auto relative = a7_relative_offset(operation, description.writes.front());
+    const auto registers = movem_registers(operation, dst.mode == M68kEaMode::address_predec);
+    for (std::size_t k = 0; relative && k < registers.size(); ++k) {
+      const auto index = registers[k];
+      if (index >= m68k_origin_registers || in.origin[index] == 0U) continue;
+      out.saved[*delta + *relative + static_cast<std::int64_t>(4U * k)] = in.origin[index];
+    }
+  }
+  if (out.saved.size() > m68k_memory_cell_bound) out.saved.clear();
+}
+
+void M68kFiniteAdapter::apply_resumptions(std::uint32_t tag, State &edge, const State *raised_from) const {
+  if (!config_.domains.frames || !edge.values.reachable) return;
+  const auto found = config_.frames.resumptions.find(tag);
+  if (found == config_.frames.resumptions.end()) return;
+  const auto apply = [&](const M68kResumption &resumption) {
+    if (resumption.unproven) {
+      for (std::size_t slot = 0; slot < m68k_analysis_slot_count; ++slot) {
+        edge.values.values[slot] = FiniteValue::unknown(UnknownReason::unknown_input);
+        edge.width_derived[slot] = false;
+      }
+      for (std::size_t reg = 0; reg < 7U; ++reg)
+        edge.address[reg] = M68kPointsTo::unknown(UnknownReason::unknown_input, Sub::interrupt_resumption_unproven);
+      edge.origin.fill(0U);
+      edge.resumption_unknown = 0xFFU;
+      return;
+    }
+    for (unsigned reg = 0; reg < 8U; ++reg) {
+      for (const auto width : widths) {
+        const auto slot = m68k_analysis_slot(reg, width);
+        if (resumption.data[slot].is_bottom()) continue;
+        auto joined = join(edge.values.values[slot], resumption.data[slot]);
+        edge.width_derived[slot] = !joined.is_unknown() && (edge.width_derived[slot] || resumption.width_derived[slot]);
+        edge.values.values[slot] = std::move(joined);
+        edge.origin[reg] = 0U;
+      }
+    }
+    for (std::size_t reg = 0; reg < 7U; ++reg) {
+      if (resumption.address[reg].is_bottom()) continue;
+      edge.address[reg] = join(edge.address[reg], resumption.address[reg]);
+      edge.origin[8U + reg] = 0U;
+    }
+  };
+  for (const auto &[level, resumption] : found->second) {
+    if (level == 0U) continue;
+    if (m68k_interrupt_eligible(edge.status, level == 8U ? std::nullopt : std::optional<unsigned>(level))) apply(resumption);
+  }
+  if (raised_from == nullptr) return;
+  const auto synchronous = found->second.find(0U);
+  if (synchronous == found->second.end()) return;
+  // A resuming synchronous handler returns after the raising instruction, which did not complete: its preserved registers hold
+  // the values the instruction was entered with.
+  State entered = edge;
+  entered.values = raised_from->values;
+  entered.width_derived = raised_from->width_derived;
+  for (std::size_t reg = 0; reg < 7U; ++reg) entered.address[reg] = raised_from->address[reg];
+  entered.origin = raised_from->origin;
+  entered.resumption_unknown = raised_from->resumption_unknown;
+  edge = join(edge, entered);
+  apply(synchronous->second);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
 // Adapter.
 
 std::optional<M68kAnalysisImage::Instruction> M68kFiniteAdapter::decode(std::uint32_t pc) const {
@@ -1128,6 +1384,7 @@ M68kPcIndexSiteReport M68kFiniteAdapter::evaluate_pc_index_site(std::uint32_t pc
   const unsigned width = ea.index_is_long ? 32U : 16U;
   const auto slot = m68k_analysis_slot(ea.index_reg, width);
   const auto &index = in.values.values[slot];
+  if (index.is_unknown() && ((in.resumption_unknown >> (ea.index_reg & 7U)) & 1U) != 0U) out.sub = Sub::interrupt_resumption_unproven;
   if (index.is_unknown())
     return finish(index.reason() == UnknownReason::non_immutable_read ? M68kPcIndexOutcome::entry_outside_immutable_image
                                                                        : M68kPcIndexOutcome::index_unknown,
@@ -1205,11 +1462,13 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
       }
     }
   }
+  std::uint8_t data_written = 0U;
   for (unsigned reg = 0; reg < 8U && !address_only; ++reg) {
     for (const auto width : widths) {
       inputs.reset();
       const auto transfer = m68k_finite_register_after(*data_operation, reg, width, inputs);
       if (!transfer.writes) continue;
+      data_written = static_cast<std::uint8_t>(data_written | (1U << reg));
       const auto reason = transfer.immutable_read_failed ? UnknownReason::non_immutable_read
                                                          : inputs.unknown_read().value_or(UnknownReason::unsupported_transfer);
       store(out, m68k_analysis_slot(reg, width), transfer.immutable_read_failed ? M68kFiniteValues::unknown() : transfer.values,
@@ -1246,6 +1505,8 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
       }
     }
     if (clobbered_after(tag, operation, status)) out.status = FiniteValue::unknown(UnknownReason::unsupported_transfer);
+    // SEG-030-T009 correction cycle: the register-preservation facts the handler resumptions are proven from.
+    transfer_origins(operation, in, out, data_written, policy, status);
   }
 
   const auto control = m68k_control_successors(operation);
@@ -1257,6 +1518,14 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
     if (!config_.domains.contexts) return target;
     if (!enters_callee) return m68k_analysis_point(context, target);
     callees.push_back(target);
+    // SEG-030-T009 correction cycle: the saved slots, relative to the callee's entry A7 (the caller's A7 at the call minus 4).
+    if (!edge.saved.empty()) {
+      const auto delta = precise_delta(in);
+      std::map<std::int64_t, std::uint8_t> rebased;
+      if (delta)
+        for (const auto &[offset, fact] : edge.saved) rebased.emplace(offset - (*delta - 4), fact);
+      edge.saved = std::move(rebased);
+    }
     edge.stack_delta = FiniteValue::of({0U});
     // SEG-030-T006: a callee stays in the caller's partition.
     return m68k_analysis_point(m68k_tagged_context(tag, config_.contexts.merged.contains(target) ? 0U : m68k_call_context(pc)), target);
@@ -1406,6 +1675,19 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
   case M68kStackedContinuationKind::none: break;
   }
   for (auto &edge : computed) result.edges.push_back(std::move(edge));
+  // SEG-030-T009 correction cycle (frames domain): every successor is a boundary of this partition; the children that can be taken
+  // there resume into it with their analysed register effect (or an unproven one). A resuming synchronous vector raised by this
+  // instruction resumes at its fallthrough.
+  if (config_.domains.frames && config_.frames.resumptions.contains(tag)) {
+    const auto raised = m68k_raised_vectors(&operation, status);
+    const bool resuming_raise = std::any_of(raised.begin(), raised.end(), [](std::uint32_t v) {
+      return m68k_vector_class(v) == M68kVectorClass::synchronous_resuming;
+    });
+    for (auto &edge : result.edges) {
+      const bool fallthrough = resuming_raise && edge.kind == EdgeKind::fallthrough && (edge.target & bus_mask) == next;
+      apply_resumptions(tag, edge.state, fallthrough ? &in : nullptr);
+    }
+  }
   return result;
 }
 
@@ -1661,6 +1943,14 @@ M68kAnalysisState M68kFiniteAdapter::continuation(std::uint32_t pc, const std::v
     state = opaque_continuation(opaque == contexts.opaque.end() ? Sub::none : opaque->second, tag);
   }
   state.flag_setter.reset();
+  // SEG-030-T009 correction cycle: the callee's saved slots back in the caller's activation.
+  if (!state.saved.empty()) {
+    const auto delta = precise_delta(in);
+    std::map<std::int64_t, std::uint8_t> rebased;
+    if (delta)
+      for (const auto &[offset, fact] : state.saved) rebased.emplace(offset + (*delta - 4), fact);
+    state.saved = std::move(rebased);
+  }
   // The caller's own stack delta: a balanced callee restores A7 (an unbalanced one makes its callers unproven, see the driver).
   state.stack_delta = in.stack_delta;
   return state;
@@ -2072,6 +2362,7 @@ M68kAnalysisState precision_view(const M68kAnalysisState &state) {
     if (pointer.is_unknown()) pointer = M68kPointsTo::unknown(UnknownReason::unknown_input);
   out.memory.absent = Sub::store_poison;
   if (out.status.is_unknown()) out.status = FiniteValue::unknown(UnknownReason::unknown_input);
+  out.resumption_unknown = 0U;  // SEG-030-T009 correction cycle: an attribution label, not precision
   return out;
 }
 
@@ -2441,7 +2732,7 @@ struct Contribution {
 // The A7 of every point of partition `tag` relative to the entry A7 of the partition's handler instance (the saved SR), from the
 // activation structure: the root activation starts at 0, a callee activation at the call point's relative A7 - 4.
 std::map<std::uint64_t, FiniteValue> relative_a7(M68kFiniteAdapter &adapter, const M68kFiniteAnalysisResult &result, std::uint32_t tag,
-                                                 std::uint32_t handler) {
+                                                 std::uint32_t handler, std::set<std::uint64_t> *root_points = nullptr) {
   const auto &states = result.solution.in_states;
   const std::uint64_t root_key = ~UINT64_C(0);
   std::map<std::uint64_t, std::vector<std::uint64_t>> intra, callees;
@@ -2477,6 +2768,9 @@ std::map<std::uint64_t, FiniteValue> relative_a7(M68kFiniteAdapter &adapter, con
     for (const auto target : targets)
       if (m68k_context_site(m68k_point_context(target)) == 0U) merged_entries.insert(target);
   for (const auto entry : merged_entries) walk(entry, merged_key | entry);
+  if (root_points != nullptr)
+    for (const auto &[point, keys] : member)
+      if (keys.contains(root_key)) root_points->insert(point);
   for (const auto point : points) {
     const auto context = m68k_point_context(point);
     if (m68k_context_site(context) != 0U) member[point].insert(context);
@@ -2637,6 +2931,23 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
       if (interrupt) contribution.interrupt_frames.push_back(frame);
       if (cls != M68kVectorClass::synchronous) contribution.taking_points.push_back(point);
     }
+    // SEG-030-T009 correction cycle: the children whose register resumption joins this boundary (an interrupt eligible at it, or a
+    // resuming synchronous vector this instruction raises, at its fallthrough).
+    if (const auto resumed = used.resumptions.find(tag); resumed != used.resumptions.end()) {
+      bool joined = false, unproven = false;
+      const bool resuming_raise = std::any_of(raised.begin(), raised.end(), [](std::uint32_t v) {
+        return m68k_vector_class(v) == M68kVectorClass::synchronous_resuming;
+      });
+      for (const auto &[level, resumption] : resumed->second) {
+        const bool taken = level == 0U ? resuming_raise
+                                       : m68k_interrupt_eligible(boundary, level == 8U ? std::nullopt : std::optional<unsigned>(level));
+        if (!taken || resumption == M68kResumption{}) continue;
+        joined = true;
+        unproven = unproven || resumption.unproven;
+      }
+      if (joined) ++count(report.resumption_points);
+      if (unproven) ++count(report.resumption_unproven_points);
+    }
     if (potential_eligible) ++count(report.potential_eligible);
     if (eligible) ++count(report.interrupt_eligible);
     else if (!status.is_unknown()) ++count(report.interrupt_masked);
@@ -2665,6 +2976,13 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
   std::map<std::uint32_t, M68kMemoryPolicy> async;               // derived per-partition asynchronous writers
   std::map<std::uint32_t, std::set<std::uint32_t>> clobbered;    // derived clobber levels per partition
   std::set<std::uint32_t> unknown_entries;                        // derived handlers entered with an Unknown entry
+  // SEG-030-T009 correction cycle: derived register resumptions per partition and clobber level.
+  std::map<std::uint32_t, std::map<std::uint32_t, M68kResumption>> resumptions;
+  const auto unproven_resumption = [&](std::map<std::uint32_t, std::map<std::uint32_t, M68kResumption>> &into, std::uint32_t parent,
+                                       const std::set<std::uint32_t> &vectors, const std::string &cause) {
+    ++report.unproven_resumption_causes[cause];
+    for (const auto level : clobber_levels(vectors)) into[parent][level].unproven = true;
+  };
   // A handler entered only by potential interrupts (or from a writer-only partition) is counted under `<cause>/writer_only`.
   const auto unanalysed = [&](std::uint32_t handler, std::uint32_t parent, const std::set<std::uint32_t> &vectors, bool resuming,
                               bool credited, Unanalysed why) {
@@ -2674,6 +2992,7 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
     async[parent].async_all = true;
     const auto levels = clobber_levels(vectors);
     clobbered[parent].insert(levels.begin(), levels.end());
+    unproven_resumption(resumptions, parent, vectors, std::string("unanalysed/") + unanalysed_name(why));
   };
   for (auto &[key, contribution] : contributions) {
     auto why = instance_admission(used, key.first, key.second);
@@ -2742,6 +3061,7 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
         out.next.policies[instance.parent].async_all = true;
         const auto levels = clobber_levels(instance.vectors);
         out.next.clobbered[instance.parent].insert(levels.begin(), levels.end());
+        unproven_resumption(out.next.resumptions, instance.parent, instance.vectors, "unanalysed/entry_unknown");
       }
       it = out.next.instances.erase(it);
       removed = true;
@@ -2754,11 +3074,12 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
   std::map<std::uint32_t, RelativeWrites> relative;
   std::map<std::uint32_t, M68kMemoryPolicy> absolute;
   std::map<std::uint32_t, std::map<std::uint64_t, FiniteValue>> rel_a7;
+  std::map<std::uint32_t, std::set<std::uint64_t>> root_points;
   for (const auto &[tag, instance] : used.instances) {
     auto &own = writes[tag];
     auto &rel_writes = relative[tag];
     auto &abs_writes = absolute[tag];
-    rel_a7[tag] = relative_a7(adapter, result, tag, instance.handler);
+    rel_a7[tag] = relative_a7(adapter, result, tag, instance.handler, &root_points[tag]);
     const auto &rel = rel_a7[tag];
     for (const auto point : partition_points[tag]) {
       const auto &state = states.at(point);
@@ -2798,6 +3119,83 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
       else
         for (const auto &range : *touched) own.add_async(range);
     }
+  }
+
+  // 3b. SEG-030-T009 correction cycle: the register resumption of every analysed resuming instance, from its exits. An exit is a
+  //     proven RTE of its own frame: an unresolved RTE whose A7 is exactly the instance's entry A7 (the frame the vector pushed). Its
+  //     input state already joins the resumptions of the instance's own children (transitive nesting). A register whose origin fact
+  //     says it holds its entry value contributes nothing (the boundary keeps its own value); any other contributes its exit value.
+  //     The resumption is unproven when the partition may leave through anything else: an undecodable point, an unresolved computed
+  //     site, a stacked continuation the configuration does not model, an unresolved RTE/RTR away from the frame, or an RTS of the
+  //     handler's own activation (no caller: it pops the frame as a return address).
+  for (const auto &[tag, instance] : used.instances) {
+    if (!instance.resuming) continue;
+    M68kResumption resumption;
+    std::string cause;
+    const auto &rel = rel_a7[tag];
+    const auto &root = root_points[tag];
+    for (const auto point : partition_points[tag]) {
+      const auto &state = states.at(point);
+      const auto decoded = adapter.decode(m68k_point_pc(point));
+      if (!decoded) {
+        cause = "undecodable";
+        break;
+      }
+      const auto &operation = decoded->operation;
+      const auto control = m68k_control_successors(operation);
+      const auto transfer = adapter.transfer(point, state);
+      if (transfer.unresolved_computed) {
+        cause = "unresolved_computed";
+        break;
+      }
+      // A stacked continuation is unmodelled when the configuration does not follow it and no normal successor reaches it (a
+      // resuming DIVx/CHK/TRAPV falls through to it; TRAP #n does not).
+      const auto stacked = control.stacked_address & bus_mask;
+      const bool falls_through = std::any_of(control.successors.begin(), control.successors.end(),
+                                             [&](const auto &successor) { return (successor.target & bus_mask) == stacked; });
+      const bool unmodelled_continuation =
+          !falls_through &&
+          ((control.stacked == M68kStackedContinuationKind::call_continuation && !config.call_continuations) ||
+           (control.stacked == M68kStackedContinuationKind::exception_continuation && !config.exception_continuations) ||
+           (control.stacked == M68kStackedContinuationKind::pushed_code_address && !config.pushed_code_continuations));
+      if (unmodelled_continuation) {
+        cause = "unmodelled_continuation";
+        break;
+      }
+      const bool resolved = std::any_of(transfer.edges.begin(), transfer.edges.end(),
+                                        [](const auto &edge) { return edge.kind == EdgeKind::computed; });
+      if (resolved) continue;
+      if (control.dynamic == M68kDynamicControlFamily::return_from_exception) {
+        const auto at = rel.find(point);
+        if (at == rel.end() || at->second != FiniteValue::of({0U})) {
+          cause = "exit_not_own_frame";
+          break;
+        }
+        for (unsigned reg = 0; reg < 8U; ++reg) {
+          if (state.origin[reg] == reg + 1U) continue;
+          for (const auto width : widths) {
+            const auto slot = m68k_analysis_slot(reg, width);
+            const auto joined = join(resumption.data[slot], state.values.values[slot]);
+            resumption.width_derived[slot] = !joined.is_unknown() && (resumption.width_derived[slot] || state.width_derived[slot]);
+            resumption.data[slot] = joined;
+          }
+        }
+        for (unsigned reg = 0; reg < 7U; ++reg)
+          if (state.origin[8U + reg] != 8U + reg + 1U) resumption.address[reg] = join(resumption.address[reg], state.address[reg]);
+      } else if (control.dynamic == M68kDynamicControlFamily::return_restore_condition_codes) {
+        cause = "exit_not_own_frame";
+        break;
+      } else if (control.dynamic == M68kDynamicControlFamily::return_from_subroutine && root.contains(point)) {
+        cause = "exit_not_own_frame";
+        break;
+      }
+    }
+    if (!cause.empty()) {
+      unproven_resumption(resumptions, instance.parent, instance.vectors, "exit/" + cause);
+      continue;
+    }
+    for (const auto level : clobber_levels(instance.vectors))
+      resumptions[instance.parent][level] = join(resumptions[instance.parent][level], resumption);
   }
 
   // 4. Per-partition asynchronous writers: a partition receives the writes (stores and interrupt frames) of every analysed resuming
@@ -2881,6 +3279,18 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
       valid = false;
     out.next.clobbered[tag].insert(levels.begin(), levels.end());
   }
+  for (const auto &[tag, levels] : resumptions) {
+    for (const auto &[level, resumption] : levels) {
+      const auto previous_tag = used.resumptions.find(tag);
+      const auto *previous = previous_tag == used.resumptions.end() ? nullptr : [&]() -> const M68kResumption * {
+        const auto found = previous_tag->second.find(level);
+        return found == previous_tag->second.end() ? nullptr : &found->second;
+      }();
+      if (!leq(resumption, previous == nullptr ? M68kResumption{} : *previous)) valid = false;
+      auto &next = out.next.resumptions[tag][level];
+      next = join(next, resumption);
+    }
+  }
   if (!std::includes(used.unknown_entries.begin(), used.unknown_entries.end(), unknown_entries.begin(), unknown_entries.end()))
     valid = false;
   out.next.unknown_entries.insert(unknown_entries.begin(), unknown_entries.end());
@@ -2900,6 +3310,11 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
   for (const auto handler : handler_pcs(used)) report.dead_handlers += live_handlers.contains(handler) ? 0U : 1U;
   report.unknown_entry_handlers = used.unknown_entries.size();
   report.clobbered_partitions = used.clobbered.size();
+  report.resumed_partitions = used.resumptions.size();
+  for (const auto &[tag, levels] : used.resumptions) {
+    report.resumptions += levels.size();
+    for (const auto &[level, resumption] : levels) report.unproven_resumptions += resumption.unproven ? 1U : 0U;
+  }
   if (const auto main = used.policies.find(0U); main != used.policies.end()) {
     report.main_async_all = main->second.async_all;
     report.main_async_ranges = main->second.async.size();

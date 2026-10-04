@@ -497,6 +497,19 @@ MUTANTS: list[Mutant] = [
            "      if (range.kind == cell.kind && range.id == cell.id && range.lo < hi && lo < range.hi) slot.rewritten = true;",
            "      (void)range, (void)lo, (void)hi;",
            (RETURN_SLOT_TEST,), "a known-target store is never related to the recorded return slots"),
+    # SEG-030-T009 correction cycle: handler register resumptions (ADR 0079 decisions 7 and 8).
+    Mutant("m68k_resumption_exit_not_joined", M68K,
+           "        if (resumption.data[slot].is_bottom()) continue;",
+           "        if (true) continue;",
+           (FRAMES_TEST,), "a resuming handler's exit data registers are not joined into the boundaries where it can be taken"),
+    Mutant("m68k_unproven_resumption_preserving", M68K,
+           "    if (resumption.unproven) {",
+           "    if (false) {",
+           (FRAMES_TEST,), "an unanalysed/unproven handler resumption is treated as preserving every register"),
+    Mutant("m68k_nested_resumption_not_propagated", M68K,
+           "  if (found == config_.frames.resumptions.end()) return;",
+           "  if (found == config_.frames.resumptions.end() || tag != 0U) return;",
+           (FRAMES_TEST,), "a nested child's register effects do not reach its parent handler's exit (only the main flow joins)"),
 ]
 
 

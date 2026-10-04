@@ -145,14 +145,19 @@ struct M68kAnalysisState {
   analysis::FiniteValue stack_delta;
   // SEG-030-T006: the status `(S << 3) | I` (frames.hpp), frames domain only (bottom otherwise; Unknown: SR not tracked).
   analysis::FiniteValue status;
-  // SEG-030-T009 correction cycle 1 (frames domain only; all zero otherwise): register-preservation facts of a handler partition.
-  // origin[i] for register i (D0-D7, then A0-A6): 0 = no fact; r + 1 = the register provably holds the value register r had at the
-  // entry of the partition's handler (its root); `m68k_origin_premise` set = the fact relies on the interrupt register-preservation
-  // premise (a save cell some store the analysis cannot relate may have rewritten). `saved` maps a long stack cell, as its byte
-  // offset from the current activation's entry A7, to the same encoding (the cell holds that entry value). Join keeps equal facts
-  // (premise bits or-ed); a call rebases `saved` into the callee's activation and its continuation rebases the callee's back.
+  // SEG-030-T009 correction cycle (frames domain only; all zero otherwise): register-preservation facts of a handler instance
+  // partition, used only to prove which registers a handler's exits restore (M68kResumption). origin[i] for register i (D0-D7, then
+  // A0-A6): 0 = no fact; r + 1 = the register provably holds the value register r had at the entry of the partition's handler (its
+  // root). `saved` maps a long stack slot, as its byte offset from the current activation's entry A7, to the same encoding: the slot
+  // provably holds that entry value (written by a long MOVE/MOVEM of the register through A7, and no store since may have touched
+  // it). A fact is used only when the slot is not asynchronous or externally written under the partition's policy. A call rebases the
+  // slots into the callee's activation and its continuation rebases them back (both need a precise stack delta). Join keeps the
+  // equal facts only.
   std::array<std::uint8_t, 15> origin{};
   std::map<std::int64_t, std::uint8_t> saved;
+  // SEG-030-T009 correction cycle (frames domain only): D0-D7 (bit n: Dn) made Unknown at a boundary by an unproven handler
+  // resumption (M68kAnalysisSubReason::interrupt_resumption_unproven); cleared when the register is written. Report attribution only.
+  std::uint8_t resumption_unknown{};
 
   [[nodiscard]] static M68kAnalysisState unreachable() { return {}; }
   [[nodiscard]] static M68kAnalysisState all_unknown(analysis::UnknownReason reason = analysis::UnknownReason::unknown_input);
@@ -180,6 +185,9 @@ struct M68kPcIndexSiteReport {
   std::vector<std::uint32_t> targets;  // sorted distinct; non-empty only when resolved
   std::uint32_t odd_targets_excluded{};
   analysis::UnknownReason reason{analysis::UnknownReason::unknown_input};  // when not resolved
+  // SEG-030-T009 correction cycle (frames domain): interrupt_resumption_unproven when the Unknown index comes from an unproven
+  // handler resumption; none otherwise.
+  M68kAnalysisSubReason sub{M68kAnalysisSubReason::none};
 };
 
 // ADR 0079 decision 5: the staged CPU-owned domains (T003: address; the others are delivered by later children).
@@ -309,21 +317,19 @@ struct M68kContextReport {
   std::size_t unresolved_sites{};
 };
 
-// SEG-030-T009 correction cycle 1 (ADR 0079 decisions 7 and 8): the bit of an origin/saved fact that relies on the interrupt
-// register-preservation premise.
-inline constexpr std::uint8_t m68k_origin_premise = 0x80U;
 inline constexpr std::size_t m68k_origin_registers = 15U;  // D0-D7, A0-A6 (A7 follows the frame: the RTE pops the frame taken there)
 
-// SEG-030-T009 correction cycle 1: what resuming one or more handler instances does to the registers of the boundary it resumes
-// at. A data slot / address register that every analysed exit of the handler provably restores to its entry value is bottom (the
-// boundary keeps its own value); any other is the join of the handler's exit values, which the boundary state joins. `premise`: some
-// restored value relies on the interrupt register-preservation premise, or no analysis of the handler's exit exists (an unanalysed
-// writer-only taking), so the boundary's registers are kept under that named premise (counted per eligible point).
+// SEG-030-T009 correction cycle (ADR 0079 decisions 7 and 8): what resuming one or more handler instances does to D0-D7/A0-A6 of the
+// boundary it resumes at. A register every analysed exit of the handler provably restores to its entry value (origin facts) is bottom:
+// the boundary keeps its own value (the no-interrupt path already carries it). Any other is the join of the handler's exit values at
+// its proven RTEs of its own frame, which the boundary state joins. `unproven`: the handler's resumption is not proven (unanalysed,
+// Unknown entry, unmodelled parent, depth bound, or an exit that is not a proven RTE of its frame): every D0-D7/A0-A6 at the
+// boundary becomes Unknown(interrupt_resumption_unproven). No register-preservation premise is ever applied.
 struct M68kResumption {
   std::array<analysis::FiniteValue, m68k_analysis_slot_count> data{};
   std::array<bool, m68k_analysis_slot_count> width_derived{};
   std::array<M68kPointsTo, 7> address{};
-  bool premise{};
+  bool unproven{};
   friend M68kResumption join(const M68kResumption &left, const M68kResumption &right);
   friend bool leq(const M68kResumption &left, const M68kResumption &right);
   friend bool operator==(const M68kResumption &, const M68kResumption &) = default;
@@ -390,11 +396,11 @@ struct M68kFrameConfig {
   // a dropped instance, or a boundary of the unknown-entry partition itself): seeded in m68k_unknown_entry_tag with an Unknown entry,
   // so that the handler's entry state joins an Unknown entry and never only the analysed instances' entries. Grows monotonically.
   std::set<std::uint32_t> unknown_entries;
-  // SEG-030-T009 correction cycle 1: per partition, per clobber level of its resuming children (1-7, 8: unknown level, 0: a resuming
-  // synchronous vector), the register resumption joined at every boundary where such a child can be taken (an interrupt eligible
-  // under the boundary status; level 0 on the successors of a raising instruction). An analysed child contributes its own partition's
-  // exits; an unanalysed credited one the exits of the unknown-entry partition (analysed from an Unknown entry, so sound for any
-  // taking); an unanalysed writer-only one has no analysed exit (`premise`). Grows monotonically.
+  // SEG-030-T009 correction cycle: per partition, per clobber level of its resuming children (1-7, 8: unknown level, 0: a resuming
+  // synchronous vector), the join of their register resumptions, applied at every boundary where such a child can be taken (an
+  // interrupt eligible under the boundary status; level 0 on the fallthrough of a raising instruction). An analysed child contributes
+  // its own exits (which already include its own children's resumptions: the join is transitive); an unanalysed or unproven one is
+  // `unproven`. Grows monotonically.
   std::map<std::uint32_t, std::map<std::uint32_t, M68kResumption>> resumptions;
   friend bool operator==(const M68kFrameConfig &, const M68kFrameConfig &) = default;
 };
@@ -498,11 +504,14 @@ struct M68kFrameReport {
   std::size_t main_async_ranges{};
   std::size_t main_async_bytes{};
   std::size_t unknown_target_writer_stores{};  // stores with an Unknown target in analysed resuming instances
-  // SEG-030-T009 correction cycle 1: live credited points where a child whose register resumption relies on the interrupt
-  // register-preservation premise can be taken, and the PCs of every such point (any modelled partition; falsification attribution).
-  std::size_t register_premise_points{};
-  std::size_t resumed_partitions{};  // partitions whose boundaries join some handler's register resumption
-  std::set<std::uint32_t> register_premise_pcs;
+  // SEG-030-T009 correction cycle: live credited points where some child's register resumption is joined (a register effect, or
+  // an unproven resumption), the subset where it is unproven, the partitions with a resumption, and the (partition, level) entries.
+  std::size_t resumption_points{};
+  std::size_t resumption_unproven_points{};
+  std::size_t resumed_partitions{};
+  std::size_t resumptions{};
+  std::size_t unproven_resumptions{};
+  std::map<std::string, std::size_t> unproven_resumption_causes;  // per unproven child resumption, by cause
 };
 
 // SEG-030-T004: memory-domain outcome of a run.
@@ -614,12 +623,18 @@ private:
                                                            const M68kMemoryPolicy &policy) const;
   [[nodiscard]] M68kMemoryRead read_memory_with(const M68kMemoryPolicy &policy, const State &in, const M68kEffectiveAddress &ea,
                                                 std::uint32_t bytes, bool *tracked) const;
-  // SEG-030-T009 correction cycle 1 (frames domain): the register-preservation facts after `operation` (origin and saved cells).
+  // SEG-030-T009 correction cycle (frames domain): the register-preservation facts after `operation` (origin and saved cells).
   void transfer_origins(const M68kIrOperation &operation, const State &in, State &out, std::uint8_t data_written,
                         const M68kMemoryPolicy &policy, const analysis::FiniteValue &status) const;
-  // SEG-030-T009 correction cycle 1 (frames domain): joins into an edge the register resumption of every child of partition `tag`
-  // that can be taken at the edge's target boundary (or that `raising` resumes after the instruction).
-  void apply_resumptions(std::uint32_t tag, bool raising, State &edge) const;
+
+public:
+  // SEG-030-T009 correction cycle (frames domain): joins into `edge` (a state entering a boundary of partition `tag`) the register
+  // resumption of every child of the partition that can be taken there (an interrupt eligible under the edge's status). With
+  // `raised_from` (the input of an instruction raising a resuming synchronous vector, on its fallthrough edge), also the level-0
+  // resumption, whose preserved registers hold the values the instruction was entered with.
+  void apply_resumptions(std::uint32_t tag, State &edge, const State *raised_from = nullptr) const;
+
+private:
   const M68kAnalysisImage &image_;
   M68kAnalysisConfig config_;
   std::map<std::uint32_t, M68kMemoryPolicy> tag_policies_;  // SEG-030-T006: the global policy joined with each partition's

@@ -137,8 +137,22 @@ reproduce the SEG-026-T002 strict row exactly.
        callee, is Unknown (its A7 is not restored); a balanced callee (a summary or a proven merged callee) returns at the caller's
        own A7. An instruction that always raises only non-resuming synchronous vectors ends its path and is not an unknown effect;
        an unresolved computed site and a TRAP/TRAPV whose continuation is not modelled stay unknown effects. The status of an opaque
-       continuation is its own partition's status bound (relative to the closure premise of decision 8), never another partition's. Register preservation across an interrupt remains the existing resumption
-       premise; only the saved SR is checked.
+       continuation is its own partition's status bound (relative to the closure premise of decision 8), never another partition's.
+     - **Register resumption (SEG-030-T009 correction cycle).** No handler is assumed to preserve the registers it interrupts. At
+       every boundary of a modelled partition where a resuming handler instance can be taken (an interrupt eligible under the
+       boundary status; a divide-by-zero, CHK or TRAPV handler on the fallthrough of its raising instruction), the state after the
+       boundary is the join of the no-interrupt state and the instance's resumption state: D0-D7/A0-A6 at its proven RTEs of its own
+       frame (an unresolved RTE whose A7 is exactly the instance's entry A7). Those exit states already join the resumptions of the
+       instance's own children, so nested and preempting effects reach the parent transitively. A register that every exit provably
+       restores to its handler-entry value (origin facts through register copies, and long MOVE/MOVEM saves into A7-relative stack
+       slots that no store, asynchronous writer or external writer may have touched since) contributes nothing; any other
+       contributes its exit value. A handler that cannot be proven to resume through its own frame (unanalysed: `entry_unknown`,
+       `nested`, `depth_bound`, `unmodelled_parent`, a dropped instance; or an analysed instance with an undecodable point, an
+       unresolved computed site, an unmodelled stacked continuation, an RTE/RTR away from its frame, or an RTS of its own
+       activation) makes every D0-D7/A0-A6 at those boundaries Unknown (`interrupt_resumption_unproven`). A7, SR and PC are handled
+       as above (frame address, frame integrity); a non-resuming exception has no resumption. Report:
+       `frames.register_resumptions` (partitions, entries, unproven entries and causes, joined and unproven live points) and the
+       aggregate field `interrupt_register_model` (decision 8).
      - **Two premises, two consumers.** *Discovery* (`D`, roots, recall, the site and read reports) keeps the challenger's machine
        root premise: only the delivered vectors of ADR 0021 / ADR 0043 (level-6 autovector and the synchronous vectors) are roots
        and credited handler instances. *Asynchronous writers, interrupt eligibility and status* use the hardware premise: real
@@ -213,6 +227,17 @@ reproduce the SEG-026-T002 strict row exactly.
      T010 proof.
 8. **Closure premise.** Every fact is relative to the discovered set `D`. Runtime escapes on the coverage oracle are the falsifier;
    nothing observed is fed back. Every memory-derived resolution is reported next to the count of unresolved sites it depends on.
+
+   **Interrupt-register scope (SEG-030-T009 correction cycle).** The SEG-030 interrupt-register proof invariant (a handler's effect
+   on D0-D7/A0-A6 is joined at every boundary where it can resume, or those registers are typed Unknown; decision 7, register
+   resumption) holds only for a validated `frames` round, i.e. `--domains all` (or `frames`). `baseline` (the SEG-026-T002 reference,
+   kept byte-identical) and the non-frames stages (`address`, `memory`, `contexts`) model no interrupt resumption: they are
+   reference/historical models that carry the inherited assumption that a handler preserves the registers it interrupts, and are
+   **not** claimed to satisfy that invariant. A frames run that does not validate returns the contexts result and is historical too.
+   The aggregate report states it: `"interrupt_register_model": "proven_or_unknown"` for a validated frames round,
+   `"historical_assumption"` otherwise (absent from the baseline output, which is that historical model and stays byte-identical).
+   The randomized differential counts a historical configuration's divergence caused only by handler register writes as
+   `historical_interrupt_register_assumption`, never as sound.
 
    **Return-slot integrity premise (SEG-030-T008).** An RTS at its activation's entry stack delta (any RTS when the delta is not
    tracked) pops the return cell `(A7).L`. With the memory domain it is classified from that cell and from the *recorded return
@@ -925,7 +950,8 @@ reproduce the SEG-026-T002 strict row exactly.
   overflow and no unknown retirement (`complete`). Golden Axe stops early (guest stop, 55 frames): **static-only**, excluded from the
   falsified-title quorum. The quorum is therefore Sonic plus four further titles.
 - **Results** (baseline -> all; recall = |O ∩ D| / |O|; escapes = observed first entries from a resolved computed site outside its
-  proven target set, all families):
+  proven target set, all families). **Superseded:** the `all` column was measured under the inherited interrupt-register
+  assumption; the corrected model (record T008, T009 correction cycle) gives lower numbers, recorded there.
 
   | title | U | D | D/U (all) | O | O ∩ D | O - D | D - O | recall | escapes | resolved / sites (all) | wall / peak RSS (all) |
   | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -1055,7 +1081,7 @@ reproduce the SEG-026-T002 strict row exactly.
     (`JMP (2,PC,D0.W)` over a four-entry table, the index from an immediate, an object field or a global, masked with `ANDI.W`),
     direct calls (`JSR`/`BSR.W`), stores through known and Unknown bases, balanced pushes, conditional skips, TRAP and SR mask
     changes. Subroutine epilogues cover the plain RTS, strong, weak and Unknown-base return-slot rewrites, an unbalanced pop, and
-    `PEA`/`MOVE.L -(A7)` push windows. Handlers write no register (register preservation is the resumption premise).
+    `PEA`/`MOVE.L -(A7)` push windows. Handlers wrote no register here (superseded by the T009 correction cycle below: handlers now write registers).
   - *Executor.* A test-only interpreter of exactly that subset (anything else ends the run), from the 68000 reset state (S = 1,
     I = 7, SSP `$FFFF00`), with seeded register inputs (half drawn from a pool of return-slot, object and global addresses) and
     seeded work RAM, a 3,000-step budget, and a level-6 interrupt injected at boundaries its mask permits. It records whether each
@@ -1132,3 +1158,86 @@ reproduce the SEG-026-T002 strict row exactly.
   which settles 6 more callee summaries (277; 288 of 363 activations balanced) and adds 7 Unknown-target stores (1,930). Frames
   rounds 5 to 7; 159 s / 366 MB (was 136 s / 338 MB). `--domains baseline` private, aggregate and compare-tool outputs stay
   byte-identical to T007; two `--domains all` runs are byte-identical.
+
+### T009 correction cycle: interrupt register resumption (track A)
+
+- **Defect (T009 validator).** Every configuration assumed that a handler preserves the registers it interrupts; the T008
+  differential generator excluded handlers that write registers, so it could not see this. Minimized synthetic reproducer (flat
+  image at 0, reset SSP `$FFFF00`):
+
+  ```text
+  $200: MOVEQ #0,D0; MOVE #$2300,SR; NOP
+  $208: ADD.W D0,D0; MOVE.W (6,PC,D0.W),D0; JMP (2,PC,D0.W)   ; table $10,$20,$30,$40
+  vector 30 (IRQ6) -> $400: MOVEQ #1,D0; RTE
+  ```
+
+  Every mode resolved the JMP to `{$222}`; concretely the interrupt taken at the NOP reaches `$232`. The same held through
+  `JSR (A1)` with a handler that sets A1.
+- **Fix** (`finite_adapter.{hpp,cpp}`; decision 7 "Register resumption", decision 8 "Interrupt-register scope").
+  - `M68kFrameConfig::resumptions`: per partition and clobber level, the join of the resuming children's `M68kResumption` (exit
+    D0-D7/A0-A6 values, or `unproven`). It grows monotonically and takes part in the post-fixed-point validation.
+  - `derive_frames` derives an analysed instance's resumption from its proven RTEs of its own frame (relative A7 exactly 0);
+    registers whose origin fact proves the entry value are omitted. Any other exit shape is `unproven` (cause `exit/...`); an
+    unanalysed or dropped resuming child is `unproven` (cause `unanalysed/<why>`).
+  - `transfer` joins the resumptions into every successor edge whose boundary admits the child (level 0: the fallthrough of a
+    DIVx/CHK/TRAPV, with the preserved registers taken from the instruction's input); `root_state` does the same at partition
+    roots. `unproven` makes D0-D7 Unknown and A0-A6 Unknown(`interrupt_resumption_unproven`), and a PC-indexed site whose index is
+    such a register reports that sub-reason (new `M68kAnalysisSubReason`, report detail).
+  - Origin facts (`M68kAnalysisState::origin`, `saved`): a handler root holds every register's own entry value; register copies,
+    EXG, and long MOVE/MOVEM saves into A7-relative stack slots (keyed by the offset from the activation's entry A7, rebased across
+    calls and continuations) keep them; any store that may touch a slot removes it, and a slot is unusable when the partition's
+    policy has an asynchronous or external writer there.
+  - TRAPV and CHK are stated to write no address register (M68000PRM), so their resumption keeps A7.
+  - `precision_view` ignores the attribution label `resumption_unknown` (it is not precision).
+- **Fixtures** (`analysis_m68k_frames_test`): the reproducer (`{$222, $232}`); an IRQ setting A1 before `JSR (A1)`
+  (`{$600, $680}`); preserving handlers (MOVEM.L save/restore, MOVE.L push/pop, untouched register: `{$600}` and D0 precise); a
+  handler giving D0 4 or 8 on two paths (`{$600, $680, $700}`); unproven resumptions (`entry_unknown`, and an analysed handler with
+  an unresolved `JMP (A2)`: Unknown(`interrupt_resumption_unproven`) with its cause); level 6 preempting level 4 (D0 = 8 only through
+  the nested taking); a TRAPV handler inside the level-6 handler (both clobber D0). The partition-bound fixture now expects D2
+  Unknown (its handler's resumption is unproven), and the unknown-SR fixture checks the unanalysed handler's cell directly (its
+  register read is now Unknown through the resumption too, which let `m68k_unanalysed_handler_precise` survive).
+- **Mutants** (killed by the frames fixture): `m68k_resumption_exit_not_joined`, `m68k_unproven_resumption_preserving`,
+  `m68k_nested_resumption_not_propagated`. The differential also kills `m68k_unproven_resumption_preserving` (400 seeds: 5
+  unsound results in `all`).
+- **Differential** (`analysis_m68k_differential_test`). Handlers now write registers: clobbering D0 (a table index), A2 (a code
+  pointer), A1 (an object pointer) and any data register, and preserving them (MOVEM.L D0/A1/A2 save/restore, MOVE.L D0 push/pop);
+  the test-only interpreter gains MOVEA.L #imm, MOVE.L Dn,-(A7), MOVE.L (A7)+,Dn and MOVEM.L to/from the stack. In `all` every
+  divergence is unsound. In `baseline`/`contexts` a divergence after a concrete resumption with a changed register is
+  `historical_interrupt_register_assumption` when the same image under the preserving reference semantics (an interrupt's RTE
+  restores D0-D7/A0-A6) is not unsound; it is counted apart. Unsound / historical (all three configurations: baseline, contexts,
+  all):
+
+  | seeds | unsound | historical (baseline / contexts / all) | all: clean / explained / premise violations |
+  | --- | --- | --- | --- |
+  | registered `0x5E6030008` + 0 .. 399 | 0 / 0 / 0 | 3 / 7 / 0 | 177 / 223 / 0 |
+  | `0x5E6030008` + 0 .. 1,999 | 0 / 0 / 0 | 17 / 38 / 0 | 841 / 1,154 / 5 |
+  | `0xD1FF0000000` + 0 .. 2,999 | 0 / 0 / 0 | 11 / 33 / 0 | 1,295 / 1,702 / 3 |
+  | `0x123456789AB` + 0 .. 2,999 | 0 / 0 / 0 | 7 / 31 / 0 | 1,319 / 1,675 / 6 |
+
+  No determinism check failed and no image was rejected. The 400-seed list takes about 53 s on the Debug build.
+- **Measurement** (Release driver at this tree, sanitized; T007 corpus; baseline -> all). `--domains baseline` on Sonic is
+  byte-identical to the T007/T008 baseline (private, aggregate and compare-tool outputs). Two `all` runs of Sonic and of Streets of
+  Rage are byte-identical.
+
+  | title | D (all) | D/U | O ∩ D / O - D / D - O | recall | escapes | sites resolved / Unknown (`interrupt_resumption_unproven`) | model | wall / RSS |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | Sonic | 1,276 | 0.52% | 1,023 / 9,489 / 253 | 9.73% | 0 | 0 / 14 (4) | proven_or_unknown | 158 s / 330 MB |
+  | Sonic 2 | 335 | 0.07% | 267 / 2,211 / 68 | 10.77% | 0 | 0 / 5 (2) | proven_or_unknown | 118 s / 628 MB |
+  | Cool Spot | 6,907 | 1.39% | 4,031 / 897 / 2,876 | 81.80% | 0 | 0 / 22 (7) | proven_or_unknown | 28 s / 592 MB |
+  | OutRun | 6,036 | 1.21% | 3,761 / 1,525 / 2,275 | 71.15% | 0 | 1 / 35 (13) | proven_or_unknown | 170 s / 588 MB |
+  | Streets of Rage | 1,949 | 0.79% | 1,643 / 7,115 / 306 | 18.76% | 0 | 5 / 11 (0) | historical_assumption | 8 s / 307 MB |
+  | Golden Axe (static-only) | 17,843 | 7.14% | 536 / 35 / 17,307 | 93.87% | 0 | 25 / 255 (0) | historical_assumption | 30 s / 489 MB |
+
+  - Frames validated on Sonic, Sonic 2, Cool Spot and OutRun, with 0 analysed instances (every candidate `entry_unknown`, some
+    `writer_only`) and 2 clobbered partitions; every resumption entry is unproven (`unanalysed/entry_unknown` 3-4,
+    `unanalysed/unmodelled_parent` 3). Live points joined with an unproven resumption: Sonic 23 of 240, Sonic 2 87 of 260, Cool
+    Spot 11,246 of 11,300, OutRun 7,180 of 8,204. Return-slot premise sites: Sonic 41, Sonic 2 3, Cool Spot 211, OutRun 163.
+  - Streets of Rage: the frames rounds no longer validate (`iteration_bound`, `no_validated_round` after 16 rounds: after the first
+    frames growth the contexts derivation alternates between two summary configurations), so the run returns the contexts result,
+    reported `historical_assumption`. Golden Axe is unchanged (frames warm solve `iteration_bound`, static-only).
+  - Sonic 2 has one first-miss edge entered through an RTE (`rte_rtr_counterexamples_to_normal_resumption` 1): the RTE site is typed
+    Unknown (`interrupt_resumption`) and returns into code that is no longer in `D`; it is not an escape from a resolved site.
+  - Discovery drops where the dominant dispatch depends on registers live across interrupt-eligible boundaries whose handlers are
+    unanalysed (Sonic 6,806 -> 1,276, Sonic 2 6,792 -> 335, OutRun 9,757 -> 6,036). This is the sound result: no handler instance
+    is analysable on these titles (Unknown supervisor status or stack at the taking points, record T006), so their resumptions are
+    unproven and the registers are typed Unknown.

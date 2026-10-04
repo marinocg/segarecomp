@@ -13,6 +13,12 @@
 //   * every reached PC is in D, or the run left D through a typed-Unknown site (`explained`: checking stops there);
 //   * an RTS whose slot was rewritten concretely is resolved, typed Unknown, or a site where the return-slot integrity premise was
 //     applied (`premise_violation`, counted apart, never sound and never dropped); a normal classification there is unsound.
+// SEG-030-T009 correction cycle: interrupt and TRAP handlers write registers (clobbering D0/A1/A2/Dn that feed later dispatches, and
+// preserving through MOVEM or MOVE.L save/restore). In `all` (the corrected frames model) every divergence is unsound. In the
+// historical configurations (baseline, contexts: they keep the inherited assumption that a handler preserves the registers it
+// interrupts) a divergence after a concrete resumption with a changed register is `historical_interrupt_register_assumption` when
+// the same image run under the preserving reference semantics (an interrupt's RTE restores D0-D7/A0-A6) is not unsound; it is
+// counted apart, never as sound and never dropped. Any other divergence is unsound.
 // Determinism: each analysis runs twice and its serialization must be byte-identical; so must the concrete transcript.
 // Any unsound result prints the image seed, the configuration, the step and the generated listing (a minimizable reproducer).
 
@@ -372,13 +378,33 @@ private:
   void handler(std::uint32_t at) {
     a_.begin(at, at + 0x100U);
     a_.note(at == irq_handler ? "irq handler" : "trap handler");
+    // SEG-030-T009 correction cycle: handlers write registers, both clobbering (D0 with a table index, A2 with a code pointer, A1
+    // with an object pointer, any data register) and preserving (MOVEM save/restore of D0/A1/A2, or a MOVE.L push/pop of D0). The
+    // clobbered registers feed the main flow's dispatches (D0: JMP (2,PC,D0.W); A2: JSR (A2); A1: the field load).
+    const bool save = rng_.chance(3U);
+    if (save) a_.note("movem.l d0/a1/a2,-(a7)").w(0x48E7U).w(0x8060U);
     const auto stores = 1U + rng_.below(3U);
-    // No register writes: register preservation across an interrupt is the analysis's resumption premise.
     for (std::uint32_t i = 0; i < stores; ++i) {
       if (rng_.chance(4U)) a_.note("move.l #imm,(a5)").w(0x2ABCU).l(rng_.below(16U));
       else if (rng_.chance(3U)) a_.note("move.l #imm,(0,a1)").w(0x237CU).l(code_pointer()).w(0U);
       else a_.note("move.w #imm,abs").w(0x33FCU).w(rng_.below(4U) * 4U).l(global());
     }
+    const auto writes = rng_.below(4U);
+    for (std::uint32_t i = 0; i < writes; ++i) {
+      switch (rng_.below(6U)) {
+      case 0: a_.note("moveq #i*4,d0").w(0x7000U | (rng_.below(4U) * 4U)); break;
+      case 1: a_.note("movea.l #code,a2").w(0x247CU).l(code_pointer()); break;
+      case 2: a_.note("lea obj,a1").w(0x43F9U).l(object(rng_.below(object_count))); break;
+      case 3: a_.note("moveq").w(0x7000U | (data_reg() << 9U) | rng_.below(256U)); break;
+      case 4:
+        a_.note("move.l d0,-(a7)").w(0x2F00U);
+        a_.note("moveq #i*4,d0").w(0x7000U | (rng_.below(4U) * 4U));
+        a_.note("move.l (a7)+,d0").w(0x201FU);
+        break;
+      default: a_.note("move.l #imm,dn").w(0x203CU | (data_reg() << 9U)).l(rng_.below(4U) * 4U); break;
+      }
+    }
+    if (save) a_.note("movem.l (a7)+,d0/a1/a2").w(0x4CDFU).w(0x0601U);
     a_.note("rte").w(0x4E73U);
   }
 
@@ -402,6 +428,7 @@ struct Step {
   Entry entry{Entry::start};
   std::uint32_t from{};  // the PC of the transferring instruction (dynamic, rts, rte)
   bool intact{};         // rts: the slot still holds its call's pushed address; rte: an intact interrupt frame
+  bool modified{};       // rte from an intact interrupt frame: some D0-D7/A0-A6 differs from its value when the interrupt was taken
 };
 
 struct Trace {
@@ -412,7 +439,10 @@ struct Trace {
 
 class Machine {
 public:
-  Machine(const Image &image, std::uint64_t interrupt_seed) : image_(image), rng_{interrupt_seed} {
+  // `preserve`: the historical reference semantics (SEG-030-T009 correction cycle): an RTE from an intact interrupt frame restores
+  // D0-D7/A0-A6 to their values when the interrupt was taken (the inherited assumption of the baseline and non-frames models).
+  Machine(const Image &image, std::uint64_t interrupt_seed, bool preserve = false)
+      : image_(image), rng_{interrupt_seed}, preserve_(preserve) {
     Rng fill{image.ram_seed};
     for (auto &byte : ram_) byte = static_cast<std::uint8_t>(fill.next());
     for (unsigned i = 0; i < 8U; ++i) d_[i] = image.d[i];
@@ -426,21 +456,23 @@ public:
     Entry entry = Entry::start;
     std::uint32_t from = 0U;
     bool intact = false;
+    bool modified = false;
     for (std::uint32_t step = 0; step < step_budget; ++step) {
       // A level-6 interrupt at a boundary its mask permits (a handler preserves every register).
       if (image_.irq && ((sr_ >> 8U) & 7U) < 6U && entry == Entry::flow && rng_.chance(6U)) {
-        frames_.push_back({a_[7] - 6U, pc_, sr_, true});
+        frames_.push_back({a_[7] - 6U, pc_, sr_, true, d_, a_});
         if (!push32(pc_) || !push16(sr_)) return finish(trace, "bus");
         sr_ = static_cast<std::uint16_t>((sr_ & 0xF8FFU) | 0x0600U);
         pc_ = irq_handler;
         entry = Entry::interrupt;
         ++trace.interrupts;
       }
-      trace.steps.push_back({pc_, d_, a_, entry, from, intact});
+      trace.steps.push_back({pc_, d_, a_, entry, from, intact, modified});
       entry = Entry::flow;
       from = pc_;
       intact = false;
-      const auto result = execute(entry, intact);
+      modified = false;
+      const auto result = execute(entry, intact, modified);
       if (result) return finish(trace, *result);
     }
     return finish(trace, "budget");
@@ -452,6 +484,8 @@ private:
     std::uint32_t pc;
     std::uint16_t sr;
     bool interrupt;
+    std::array<std::uint32_t, 8> d;  // the registers when the exception was taken
+    std::array<std::uint32_t, 8> a;
   };
 
   static Trace finish(Trace &trace, const std::string &why) {
@@ -511,7 +545,7 @@ private:
   static std::uint32_t sext16(std::uint32_t v) { return static_cast<std::uint32_t>(static_cast<std::int32_t>(static_cast<std::int16_t>(v))); }
 
   // Executes one instruction; returns the reason the run ends, or nullopt.
-  std::optional<std::string> execute(Entry &entry, bool &intact) {
+  std::optional<std::string> execute(Entry &entry, bool &intact, bool &modified) {
     const auto at = pc_;
     const auto op = fetch();
     if (!op) return std::string("fetch");
@@ -545,6 +579,40 @@ private:
     }
     if ((w & 0xF1F8U) == 0x2040U) {
       a_[high] = d_[low];
+      return std::nullopt;
+    }
+    if ((w & 0xF1FFU) == 0x207CU) {  // MOVEA.L #imm,An
+      const auto v = lit();
+      if (!v) return std::string("fetch");
+      a_[high] = *v;
+      return std::nullopt;
+    }
+    if ((w & 0xFFF8U) == 0x2F00U) {  // MOVE.L Dn,-(A7)
+      return push32(d_[low]) ? std::nullopt : std::optional<std::string>("bus");
+    }
+    if ((w & 0xF1FFU) == 0x201FU) {  // MOVE.L (A7)+,Dn
+      const auto value = read(a_[7], 4U);
+      if (!value) return std::string("bus");
+      a_[7] += 4U;
+      d_[high] = *value;
+      return std::nullopt;
+    }
+    if (w == 0x48E7U || w == 0x4CDFU) {  // MOVEM.L list,-(A7) / MOVEM.L (A7)+,list (A7 never in a generated list)
+      const auto mask = ext();
+      if (!mask) return std::string("fetch");
+      const auto reg = [&](unsigned index) -> std::uint32_t & { return index < 8U ? d_[index] : a_[index - 8U]; };
+      if (w == 0x48E7U) {
+        for (unsigned index = 16U; index-- > 0U;)
+          if (((*mask >> (15U - index)) & 1U) != 0U && !push32(reg(index))) return std::string("bus");
+      } else {
+        for (unsigned index = 0; index < 16U; ++index) {
+          if (((*mask >> index) & 1U) == 0U) continue;
+          const auto value = read(a_[7], 4U);
+          if (!value) return std::string("bus");
+          a_[7] += 4U;
+          reg(index) = *value;
+        }
+      }
       return std::nullopt;
     }
     if ((w & 0xF1F8U) == 0x2048U) {
@@ -691,6 +759,14 @@ private:
       if (!sr || !pc) return std::string("bus");
       intact = !frames_.empty() && frames_.back().address == a_[7] && frames_.back().pc == *pc && frames_.back().sr == *sr &&
                frames_.back().interrupt;
+      if (intact) {
+        const auto &frame = frames_.back();
+        for (unsigned i = 0; i < 8U; ++i) modified = modified || d_[i] != frame.d[i] || (i < 7U && a_[i] != frame.a[i]);
+        if (preserve_) {
+          d_ = frame.d;
+          for (unsigned i = 0; i < 7U; ++i) a_[i] = frame.a[i];
+        }
+      }
       if (!frames_.empty() && frames_.back().address == a_[7]) frames_.pop_back();
       sr_ = static_cast<std::uint16_t>(*sr);
       a_[7] += 6U;
@@ -699,7 +775,7 @@ private:
       return std::nullopt;
     }
     if (w == 0x4E40U) {  // TRAP #0
-      frames_.push_back({a_[7] - 6U, pc_, sr_, false});
+      frames_.push_back({a_[7] - 6U, pc_, sr_, false, d_, a_});
       if (!push32(pc_) || !push16(sr_)) return std::string("bus");
       sr_ = static_cast<std::uint16_t>(sr_ | 0x2000U);
       const auto vector = read(32U * 4U, 4U);
@@ -720,6 +796,7 @@ private:
 
   const Image &image_;
   Rng rng_;
+  bool preserve_{};
   std::array<std::uint8_t, 0x10000> ram_{};
   std::array<std::uint32_t, 8> d_{};
   std::array<std::uint32_t, 8> a_{};
@@ -798,10 +875,14 @@ M68kFiniteAnalysisResult analyze(const Image &image, Mode mode) {
   return analyze_m68k_finite_values(view, entries, config);
 }
 
-enum class Verdict : std::uint8_t { clean, explained, premise_violation, incomplete, unsound };
+// `historical`: a divergence of a historical configuration (baseline, contexts) caused only by handler register writes (SEG-030-T009
+// correction cycle; ADR 0079 decision 8): those models keep the inherited assumption that a handler preserves the registers it
+// interrupts. It is counted apart, never as sound and never dropped; in `all` (the corrected model) every divergence is unsound.
+enum class Verdict : std::uint8_t { clean, explained, premise_violation, incomplete, historical, unsound };
 
 struct Totals {
-  std::size_t runs{}, clean{}, explained{}, premise_violation{}, incomplete{}, unsound{};
+  std::size_t runs{}, clean{}, explained{}, premise_violation{}, incomplete{}, historical{}, unsound{};
+  std::size_t modified_resumptions{};  // concrete RTEs from an intact interrupt frame with some register changed by the handler
   std::size_t steps_checked{}, precise_values{}, resolved_transfers{}, slot_rewrite_returns{}, interrupts{};
 };
 
@@ -809,6 +890,7 @@ struct Checked {
   Verdict verdict{Verdict::clean};
   std::string why;
   std::size_t step{};
+  bool after_modified{};  // an interrupt resumed with a register its handler changed at or before `step`
 };
 
 // The status of a dynamic site: resolved with targets, typed Unknown, or not classified.
@@ -842,9 +924,14 @@ bool contains(const std::vector<std::uint32_t> &targets, std::uint32_t pc) {
 
 Checked check(const M68kFiniteAnalysisResult &result, const Trace &trace, Mode mode, Totals &totals) {
   if (!result.complete) return {Verdict::incomplete, "analysis incomplete (typed bound)", 0U};
-  const auto unsound = [&](std::size_t step, const std::string &why) { return Checked{Verdict::unsound, why, step}; };
+  bool modified = false;
+  const auto unsound = [&](std::size_t step, const std::string &why) { return Checked{Verdict::unsound, why, step, modified}; };
   for (std::size_t i = 0; i < trace.steps.size(); ++i) {
     const auto &step = trace.steps[i];
+    if (step.modified) {
+      modified = true;
+      ++totals.modified_resumptions;
+    }
     std::ostringstream where;
     where << "pc " << std::hex << step.pc << " from " << step.from;
     // How the step was entered.
@@ -936,6 +1023,9 @@ int main(int argc, char **argv) {
     }
     ++images;
     const auto trace = Machine{image, seed ^ UINT64_C(0xA5A5A5A5)}.run();
+    // The same run under the historical reference semantics (an interrupt's RTE restores D0-D7/A0-A6): it attributes a historical
+    // configuration's divergence to handler register writes only when that run is not itself unsound.
+    const auto preserved = Machine{image, seed ^ UINT64_C(0xA5A5A5A5), true}.run();
     if (transcript(trace) != transcript(Machine{image, seed ^ UINT64_C(0xA5A5A5A5)}.run())) {
       std::cerr << "FAIL: non-deterministic concrete run, seed " << seed << '\n';
       ++failures;
@@ -950,12 +1040,17 @@ int main(int argc, char **argv) {
       }
       ++sum.runs;
       sum.interrupts += trace.interrupts;
-      const auto checked = check(result, trace, mode, sum);
+      auto checked = check(result, trace, mode, sum);
+      if (checked.verdict == Verdict::unsound && mode != Mode::all && checked.after_modified) {
+        Totals scratch;
+        if (check(result, preserved, mode, scratch).verdict != Verdict::unsound) checked.verdict = Verdict::historical;
+      }
       switch (checked.verdict) {
       case Verdict::clean: ++sum.clean; break;
       case Verdict::explained: ++sum.explained; break;
       case Verdict::premise_violation: ++sum.premise_violation; break;
       case Verdict::incomplete: ++sum.incomplete; break;
+      case Verdict::historical: ++sum.historical; break;
       case Verdict::unsound:
         ++sum.unsound;
         ++failures;
@@ -974,10 +1069,11 @@ int main(int argc, char **argv) {
   for (const auto &[why, n] : ends) std::cout << "  concrete end " << why << '=' << n << '\n';
   for (const auto &[mode, sum] : totals)
     std::cout << "  " << mode_name(mode) << ": runs=" << sum.runs << " clean=" << sum.clean << " explained=" << sum.explained
-              << " premise_violation=" << sum.premise_violation << " incomplete=" << sum.incomplete << " unsound=" << sum.unsound
+              << " premise_violation=" << sum.premise_violation << " incomplete=" << sum.incomplete
+              << " historical_interrupt_register_assumption=" << sum.historical << " unsound=" << sum.unsound
               << " steps_checked=" << sum.steps_checked << " precise_values=" << sum.precise_values
               << " resolved_transfers=" << sum.resolved_transfers << " slot_rewrite_returns=" << sum.slot_rewrite_returns
-              << " interrupts=" << sum.interrupts << '\n';
+              << " interrupts=" << sum.interrupts << " modified_resumptions=" << sum.modified_resumptions << '\n';
   if (failures != 0U) {
     std::cerr << failures << " failure(s)\n";
     return 1;

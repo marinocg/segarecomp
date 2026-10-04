@@ -8,6 +8,7 @@
 // Project-authored synthetic fixtures only: real MC68000 encodings decoded by the unchanged decoder/lifter over a small flat cartridge
 // image plus a work-RAM region extent, so exact synthetic addresses may be asserted. No commercial input.
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <initializer_list>
@@ -386,6 +387,12 @@ void unknown_status() {
          "unknown SR: the main flow's writers are every cell (the T004 consequence)");
   expect(reached_in(result, rte, m68k_unknown_entry_tag) && word_at(result, rte, 3U, m68k_unknown_entry_tag).is_unknown(),
          "unknown SR: the unanalysed handler's own code keeps every cell asynchronous (no unchecked precision)");
+  // SEG-030-T009 correction cycle: D3 is also Unknown through the unproven resumptions joined at the handler's boundaries, so the
+  // memory claim is checked on the cell itself: the handler's store never leaves a precise cell A in its own partition.
+  const auto at_load = join_at(result, irq6 + 8U, m68k_unknown_entry_tag, [](const M68kAnalysisState &state) { return state; });
+  expect(at_load.values.reachable &&
+             !at_load.memory.cells.contains(M68kCell{M68kRegionKind::mutable_ram, 0U, (cell_a - work_ram_base) % 0x10000U, 2U}),
+         "unknown SR: the unanalysed handler's store leaves no precise cell (every cell asynchronous in its partition)");
 }
 
 void unknown_supervisor_stack() {
@@ -703,9 +710,13 @@ void per_partition_status_bound() {
   expect(status_at(result, after, tag) == FiniteValue::of({0xEU}),
          "partition bound: the handler's opaque continuation runs with the handler's own status (S = 1, I = 6): " +
              status_at(result, after, tag).describe());
-  expect(unanalysed(result, "nested") == 0U && !result.frames.main_async_all &&
-             word_at(result, flow.read_done, 2U) == FiniteValue::of({1U}),
-         "partition bound: the handler is not nested at its own level; cell B stays precise in the main flow");
+  // SEG-030-T009 correction cycle: the handler's unresolved call makes its register resumption unproven, so the value stored into
+  // cell B (D0) and the value read back into D2 are Unknown after the boundaries where it can be taken. The memory part of the
+  // claim is unchanged: the handler is not nested and the main flow's asynchronous writers stay bounded (cell A and the frame).
+  expect(unanalysed(result, "nested") == 0U && !result.frames.main_async_all && result.frames.main_async_ranges > 0U,
+         "partition bound: the handler is not nested at its own level; the main flow's writers stay bounded");
+  expect(word_at(result, flow.read_done, 2U).is_unknown() && result.frames.unproven_resumption_causes.contains("exit/unresolved_computed"),
+         "partition bound: the handler's resumption is unproven (unresolved call), so D2 is Unknown");
   const auto [lowered, lowered_flow, lowered_after] = build(true);
   const auto nested = run(lowered, irq_only);
   if (debug()) std::cerr << describe(nested);
@@ -717,6 +728,180 @@ void per_partition_status_bound() {
 }
 
 }  // namespace
+
+
+// ---------------------------------------------------------------------------------------------------------------
+// SEG-030-T009 correction cycle (ADR 0079 decisions 7 and 8): handler register resumptions. With the frames domain the state after
+// every boundary where a resuming handler can be taken joins that handler's analysed register exit (its proven RTEs of its own
+// frame); a handler whose resumption is not proven makes D0-D7/A0-A6 Unknown(interrupt_resumption_unproven). No register-preservation
+// premise.
+
+constexpr std::uint32_t irq4 = 0x480U;    // level-4 autovector handler (vector 28)
+constexpr std::uint32_t table = 0x300U;   // three code pointers for the JSR (A1) dispatch
+
+// MOVEQ #0,D0; MOVE #$2300,SR; NOP; LEA (table,PC),A0; MOVEA.L (0,A0,D0.W),A1; JSR (A1) at $210; the table holds $600, $680 and
+// target ($700), each an RTS. D0 = 0 selects only $600 unless a handler taken on the way changes D0.
+constexpr std::uint32_t jsr_site = 0x210U;
+void jsr_dispatch_main(Asm &a) {
+  a.moveq(0, 0U).move_sr(0x2300U).nop();
+  a.w({0x41FAU, table - 0x20AU});  // 208 LEA (table,PC),A0
+  a.w({0x2270U, 0x0000U});          // 20C MOVEA.L (0,A0,D0.W),A1
+  a.w({0x4E91U});                   // 210 JSR (A1)
+  a.stop();
+  a.at(table).l(0x600U).l(0x680U).l(target);
+  a.at(0x600U).rts();
+  a.at(0x680U).rts();
+  a.at(target).rts();
+}
+const M68kAddressSiteReport *address_site(const M68kFiniteAnalysisResult &result, std::uint32_t pc) {
+  const auto found = result.address_sites.find(pc);
+  return found == result.address_sites.end() ? nullptr : &found->second;
+}
+bool resolved_to(const M68kAddressSiteReport *site, const std::vector<std::uint32_t> &targets) {
+  return site != nullptr && site->resolved && site->targets == targets;
+}
+
+void interrupt_clobbers_pc_index_dispatch() {
+  // The minimized T009 reproducer: the level-6 handler sets D0 = 1. Taken at the NOP, it makes ADD.W D0,D0 select the second table
+  // entry, so a concrete run reaches $232. The site is {$222, $232} (or a typed Unknown), never {$222}.
+  Asm a;
+  a.moveq(0, 0U).move_sr(0x2300U).nop();  // 200..206
+  a.w({0xD040U});                         // 208 ADD.W D0,D0
+  a.w({0x303BU, 0x0006U});                // 20A MOVE.W (6,PC,D0.W),D0 (table at $212)
+  a.w({0x4EFBU, 0x0002U});                // 20E JMP (2,PC,D0.W)
+  a.w({0x0010U, 0x0020U, 0x0030U, 0x0040U});
+  a.at(0x222U).stop();
+  a.at(0x232U).stop();
+  a.at(0x242U).stop();
+  a.at(0x252U).stop();
+  a.at(irq6).moveq(0, 1U).rte();
+  const auto result = run(a, irq_only);
+  if (debug()) std::cerr << describe(result);
+  const auto found = result.pc_index_sites.find(0x20EU);
+  expect(result.complete && result.frames.validated && found != result.pc_index_sites.end(), "IRQ D0: a validated frames round");
+  if (found == result.pc_index_sites.end()) return;
+  const auto &site = found->second;
+  const bool sound = site.outcome != M68kPcIndexOutcome::resolved ||
+                     (std::find(site.targets.begin(), site.targets.end(), 0x232U) != site.targets.end() &&
+                      std::find(site.targets.begin(), site.targets.end(), 0x222U) != site.targets.end());
+  expect(sound, "IRQ D0: the resumed PC-indexed dispatch is {$222, $232} or Unknown, never {$222}");
+  expect(site.outcome == M68kPcIndexOutcome::resolved && result.reached.contains(0x232U),
+         "IRQ D0: the handler's exit D0 = 1 is joined precisely ({$222, $232})");
+  expect(result.frames.resumed_partitions == 1U && result.frames.unproven_resumptions == 0U && result.frames.resumption_points > 0U,
+         "IRQ D0: one proven resumption into the main flow");
+}
+
+void interrupt_clobbers_address_register() {
+  // The handler sets A1 = $680 before the main flow's JSR (A1): the site is {$600, $680}.
+  Asm a;
+  jsr_dispatch_main(a);
+  a.at(irq6).w({0x227CU}).l(0x680U).rte();  // MOVEA.L #$680,A1; RTE
+  const auto result = run(a, irq_only);
+  if (debug()) std::cerr << describe(result);
+  expect(result.complete && result.frames.validated, "IRQ A1: a validated frames round");
+  expect(resolved_to(address_site(result, jsr_site), {0x600U, 0x680U}), "IRQ A1: JSR (A1) is {$600, $680}");
+  // D0 is not written: the D0-indexed load keeps only the first entry; the second comes only from the handler's A1.
+  expect(word_at(result, jsr_site, 0U) == FiniteValue::of({0U}), "IRQ A1: D0 (not written by the handler) stays precise");
+}
+
+void handler_preserves_registers() {
+  // The handler writes D0 and A1 but restores both (MOVEM save/restore, or MOVE.L push/pop), or never writes them: precision
+  // survives (JSR (A1) stays {$600}).
+  const std::vector<std::pair<const char *, std::vector<std::uint32_t>>> variants{
+      {"movem", {0x48E7U, 0x8040U, 0x7008U, 0x227CU, 0x0000U, 0x0680U, 0x4CDFU, 0x0201U}},  // MOVEM.L D0/A1,-(A7) .. MOVEM.L (A7)+,D0/A1
+      {"move_long", {0x2F00U, 0x7008U, 0x201FU}},                                             // MOVE.L D0,-(A7); MOVEQ #8,D0; MOVE.L (A7)+,D0
+      {"untouched", {0x7608U}},                                                               // MOVEQ #8,D3
+  };
+  for (const auto &[name, body] : variants) {
+    Asm a;
+    jsr_dispatch_main(a);
+    a.at(irq6);
+    for (const auto word : body) a.w({word});
+    a.rte();
+    const auto result = run(a, irq_only);
+    if (debug()) std::cerr << describe(result);
+    const std::string label = std::string("preserving handler (") + name + ")";
+    expect(result.complete && result.frames.validated && result.frames.unproven_resumptions == 0U, label + ": a validated round");
+    expect(resolved_to(address_site(result, jsr_site), {0x600U}), label + ": JSR (A1) stays {$600}");
+    expect(word_at(result, jsr_site, 0U) == FiniteValue::of({0U}), label + ": D0 stays precise");
+  }
+}
+
+void handler_finite_set_across_paths() {
+  // The handler sets D0 = 4 or D0 = 8 on two paths (an Unknown cell decides): the join keeps the finite set {0, 4, 8}.
+  Asm a;
+  jsr_dispatch_main(a);
+  a.at(irq6).load_word(1, cell_c);  // MOVE.W cell_c,D1 (Unknown)
+  a.w({0x6704U});                    // BEQ.S +4
+  a.moveq(0, 4U).rte();
+  a.moveq(0, 8U).rte();
+  const auto result = run(a, irq_only);
+  if (debug()) std::cerr << describe(result);
+  expect(result.complete && result.frames.validated, "finite set: a validated frames round");
+  expect(resolved_to(address_site(result, jsr_site), {0x600U, 0x680U, target}), "finite set: JSR (A1) is {$600, $680, $700}");
+}
+
+void unproven_resumption() {
+  // (a) An Unknown supervisor stack (no reset state): the handler is entry_unknown, so the boundary's registers are Unknown.
+  {
+    Asm a;
+    jsr_dispatch_main(a);
+    a.at(irq6).moveq(3, 1U).rte();
+    const auto result = run(a, irq_only, false);
+    if (debug()) std::cerr << describe(result);
+    const auto *site = address_site(result, jsr_site);
+    expect(result.complete && site != nullptr && !site->resolved && site->sub == Sub::interrupt_resumption_unproven,
+           "unproven (entry_unknown): JSR (A1) is Unknown(interrupt_resumption_unproven)");
+    expect(result.frames.unproven_resumption_causes.contains("unanalysed/entry_unknown"), "unproven (entry_unknown): the cause is reported");
+  }
+  // (b) An analysed handler that may leave through an unresolved JMP (A2): no proven exit, so the resumption is unproven even though
+  //     the handler never writes D0 on the RTE path.
+  {
+    Asm a;
+    a.moveq(0, 0U).move_sr(0x2300U).nop();
+    a.w({0xD040U, 0x303BU, 0x0006U, 0x4EFBU, 0x0002U, 0x0010U, 0x0020U, 0x0030U, 0x0040U});
+    a.at(0x222U).stop();
+    a.at(0x232U).stop();
+    a.at(irq6).load_word(1, cell_c).w({0x6702U}).w({0x4ED2U}).rte();  // BEQ.S +2; JMP (A2); RTE
+    const auto result = run(a, irq_only);
+    if (debug()) std::cerr << describe(result);
+    const auto found = result.pc_index_sites.find(0x20EU);
+    expect(result.complete && found != result.pc_index_sites.end() && found->second.outcome != M68kPcIndexOutcome::resolved &&
+               found->second.sub == Sub::interrupt_resumption_unproven,
+           "unproven (unresolved exit): the PC-indexed dispatch is Unknown(interrupt_resumption_unproven)");
+    expect(result.frames.unproven_resumption_causes.contains("exit/unresolved_computed"),
+           "unproven (unresolved exit): the cause is reported");
+  }
+}
+
+void nested_register_effects() {
+  // Level 4 (I = 4) loads D1 = 4 and copies it to D0; level 6 preempts it (and the main flow) and sets D1 = 8. Only the nested
+  // taking between the two level-4 instructions gives D0 = 8 in the main flow: the child's effect reaches the parent's resumption.
+  Asm a;
+  jsr_dispatch_main(a);
+  a.at(irq4).moveq(1, 4U).nop().w({0x2001U}).rte();  // MOVEQ #4,D1; NOP; MOVE.L D1,D0; RTE
+  a.at(irq6).moveq(1, 8U).rte();
+  const auto result = run(a, {{28U, irq4}, {30U, irq6}});
+  if (debug()) std::cerr << describe(result);
+  expect(result.complete && result.frames.validated && result.frames.unproven_resumptions == 0U, "nested: a validated frames round");
+  expect(resolved_to(address_site(result, jsr_site), {0x600U, 0x680U, target}),
+         "nested: JSR (A1) is {$600, $680, $700} ($700 only through level 6 preempting level 4)");
+}
+
+void synchronous_and_interrupt_nesting() {
+  // The level-6 handler sets D0 = 4 and runs TRAPV (V Unknown); the TRAPV handler (vector 7, resuming at the fallthrough) sets
+  // D0 = 8. Both clobber D0: the level-6 exit is {4, 8}, so the main flow's dispatch is {$600, $680, $700}.
+  Asm a;
+  jsr_dispatch_main(a);
+  a.at(irq6).moveq(0, 4U).w({0x4E76U}).rte();  // MOVEQ #4,D0; TRAPV; RTE
+  a.at(sync_a).moveq(0, 8U).rte();
+  const auto result = run(a, {{7U, sync_a}, {30U, irq6}});
+  if (debug()) std::cerr << describe(result);
+  expect(result.complete && result.frames.validated && result.frames.unproven_resumptions == 0U,
+         "synchronous nesting: a validated frames round");
+  expect(resolved_to(address_site(result, jsr_site), {0x600U, 0x680U, target}),
+         "synchronous nesting: JSR (A1) is {$600, $680, $700} ($700 only through the TRAPV handler)");
+}
 
 int main() {
   interrupt_masked();
@@ -736,6 +921,13 @@ int main() {
   balanced_summary_relative_a7();
   non_resuming_raise_ends_path();
   per_partition_status_bound();
+  interrupt_clobbers_pc_index_dispatch();
+  interrupt_clobbers_address_register();
+  handler_preserves_registers();
+  handler_finite_set_across_paths();
+  unproven_resumption();
+  nested_register_effects();
+  synchronous_and_interrupt_nesting();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";
     return EXIT_FAILURE;

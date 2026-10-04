@@ -60,6 +60,7 @@ GenesisAnalysisSubReason pc_index_detail(const M68kPcIndexSiteReport &site) {
   case M68kPcIndexOutcome::target_outside_image: return GenesisAnalysisSubReason::target_outside_image;
   case M68kPcIndexOutcome::invalidated: return GenesisAnalysisSubReason::invalidated;
   case M68kPcIndexOutcome::index_unknown:
+    if (site.sub != GenesisAnalysisSubReason::none) return site.sub;  // SEG-030-T009 correction cycle (frames domain only)
     if (site.reason == UnknownReason::set_bound) return GenesisAnalysisSubReason::set_bound;
     // SEG-030-T005: only the opaque continuation of a merged or recursive activation makes a data register Unknown(state_bound).
     if (site.reason == UnknownReason::state_bound) return GenesisAnalysisSubReason::context_bound;
@@ -350,7 +351,17 @@ std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport
   domains.address = domains.address || domains.memory;  // the memory domain implies the address domain
   out << "{\"schema\":\"segarecomp.m68k_core_report.aggregate.v1\",\"exception_model\":\"strict\",\"pea_continuations\":false"
       << ",\"domains\":{\"address\":" << (domains.address ? "true" : "false") << ",\"memory\":" << (domains.memory ? "true" : "false")
-      << ",\"contexts\":" << (domains.contexts ? "true" : "false") << ",\"frames\":" << (domains.frames ? "true" : "false") << '}'
+      << ",\"contexts\":" << (domains.contexts ? "true" : "false") << ",\"frames\":" << (domains.frames ? "true" : "false") << '}';
+  // SEG-030-T009 correction cycle (ADR 0079 decision 8): which interrupt-register model the returned result carries. Only a validated
+  // frames round joins every resuming handler's register effect (or makes the registers Unknown); every other configuration is a
+  // reference model that keeps the inherited assumption that a handler preserves the registers it interrupts. Absent from the
+  // baseline output, which stays byte-identical (the baseline is that historical model).
+  if (domains.address)
+    out << ",\"interrupt_register_model\":\""
+        << (domains.frames && report.analysis.frames.enabled && report.analysis.frames.validated ? "proven_or_unknown"
+                                                                                                  : "historical_assumption")
+        << '"';
+  out
       << ",\"images_valid\":" << (report.images_valid ? "true" : "false") << ",\"root_count\":" << report.roots.roots.size()
       << ",\"vector_roots\":" << report.roots.vector_roots << ",\"discovered\":" << report.discovered.size()
       << ",\"call_continuations\":" << report.call_continuations.size()
@@ -573,7 +584,10 @@ std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport
           << ",\"frame_a7_unknown_by_reason\":" << counts(frames.first_round_a7_unknown_by_reason) << '}'
           << ",\"main_async\":{\"all\":" << (frames.main_async_all ? "true" : "false") << ",\"ranges\":" << frames.main_async_ranges
           << ",\"bytes\":" << frames.main_async_bytes << ",\"unknown_target_writer_stores\":" << frames.unknown_target_writer_stores
-          << '}' << ",\"returns\":{";
+          << '}' << ",\"register_resumptions\":{\"partitions\":" << frames.resumed_partitions
+          << ",\"entries\":" << frames.resumptions << ",\"unproven\":" << frames.unproven_resumptions
+          << ",\"unproven_causes\":" << counts(frames.unproven_resumption_causes) << ",\"joined_points\":" << frames.resumption_points
+          << ",\"unproven_points\":" << frames.resumption_unproven_points << '}' << ",\"returns\":{";
       bool first_family = true;
       for (const auto *family : {"rte", "rtr", "rts"}) {
         out << (first_family ? "" : ",") << '"' << family << "\":{\"resolved\":" << resolved_returns[family] << ",\"unknown\":{";
