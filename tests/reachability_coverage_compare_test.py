@@ -6,7 +6,10 @@ SEG-026-T002: --pc-index-recovery CLI aggregates and the comparison's falsificat
 sets (an observed escape outside a proven set is counted; runtime coverage never feeds the challenger).
 
 SEG-030-T003: the generalized per-family falsification of every resolved computed site (`computed_sites` of the M68K core
-report), counting retire and interrupt-resumption witnesses."""
+report), counting retire and interrupt-resumption witnesses.
+
+SEG-030-T007: unresolved rts_computed/rte entries are accepted and never falsified; the coverage summary yields an oracle
+completeness verdict; a report incomplete at the top level or in its solver is rejected."""
 import json
 import pathlib
 import subprocess
@@ -101,7 +104,11 @@ def check_computed_sites(compare: pathlib.Path, tmpdir: pathlib.Path) -> None:
             "000206": {"family": "pc_index_explicit", "outcome": "resolved", "reason": "none", "detail": "none",
                        "targets": ["000400", "000410"]},
             "000208": {"family": "jmp_an", "outcome": "unknown", "reason": "unknown_input", "detail": "base_unknown",
-                       "targets": []}}}))
+                       "targets": []},
+            "00020a": {"family": "rts_computed", "outcome": "unknown", "reason": "unsupported_transfer",
+                       "detail": "stack_unbalanced", "targets": []},
+            "00020c": {"family": "rte", "outcome": "unknown", "reason": "unsupported_transfer",
+                       "detail": "interrupt_resumption", "targets": []}}}))
     coverage = tmpdir / "core-coverage"
     coverage.mkdir()
     observed = {0x200, 0x204, 0x206, 0x208, 0x300, 0x400, 0x500, 0x600}
@@ -120,8 +127,19 @@ def check_computed_sites(compare: pathlib.Path, tmpdir: pathlib.Path) -> None:
     assert jsr["proven_targets_observed"] == 1 and jsr["resolved_sites_executed"] == 1, jsr
     pc_index = check["families"]["pc_index_explicit"]
     assert pc_index["escapes_outside_proven_targets"] == 0 and pc_index["proven_targets"] == 2, pc_index
-    assert "jmp_an" not in check["families"], check
+    assert not {"jmp_an", "rts_computed", "rte"} & set(check["families"]), check
     assert "000500" not in out.stdout and "0x" not in out.stdout
+    # SEG-030-T007: oracle completeness from the coverage summary; a guest-stopped oracle is reported incomplete.
+    for outcome, published, complete in (("frames_reached", 4, True), ("guest_stop", 2, False)):
+        summary = tmpdir / f"summary-{outcome}.txt"
+        summary.write_text("COVERAGE_SUMMARY " + json.dumps({
+            "outcome": outcome, "target_frames": 4, "frames_published": published, "witness_overflow": 0,
+            "unknown_retirements": 0, "epochs": []}))
+        out = subprocess.run([sys.executable, str(compare), "--coverage-dir", str(coverage), "--challenger", str(private),
+                              "--coverage-summary", str(summary)], capture_output=True, text=True)
+        assert out.returncode == 0, out.stderr
+        oracle = json.loads(out.stdout)["oracle"]
+        assert oracle["complete"] is complete and oracle["outcome"] == outcome, oracle
     # SEG-030: a core report whose solve exhausted a bound (empty D) is rejected, never compared as a vacuous result.
     incomplete = json.loads(private.read_text())
     incomplete["aggregate"]["solver"] = {"complete": False, "reason": "iteration_bound"}
@@ -130,6 +148,13 @@ def check_computed_sites(compare: pathlib.Path, tmpdir: pathlib.Path) -> None:
     out = subprocess.run([sys.executable, str(compare), "--coverage-dir", str(coverage), "--challenger",
                           str(tmpdir / "incomplete.json")], capture_output=True, text=True)
     assert out.returncode == 4 and out.stdout == "" and "incomplete" in out.stderr, (out.returncode, out.stderr)
+    # A report marked incomplete at the top level is rejected the same way.
+    incomplete = json.loads(private.read_text())
+    incomplete["complete"] = False
+    (tmpdir / "incomplete-top.json").write_text(json.dumps(incomplete))
+    out = subprocess.run([sys.executable, str(compare), "--coverage-dir", str(coverage), "--challenger",
+                          str(tmpdir / "incomplete-top.json")], capture_output=True, text=True)
+    assert out.returncode == 4 and out.stdout == "", (out.returncode, out.stderr)
 
 
 def bitmap_of(pcs: set[int]) -> bytes:

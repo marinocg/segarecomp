@@ -114,7 +114,8 @@ reproduce the SEG-026-T002 strict row exactly.
      handler entry A7 is Unknown. Consequence: when interrupts can be taken, the nested exception frame is a handler store through an
      Unknown address, and every work-RAM cell is asynchronous. The implementation applies exactly this consequence for the Genesis
      driver (`M68kMemoryConfig::interrupts`).
-   - **Interrupt and handler-stack precision (SEG-030-T006, implemented as the staged `frames` domain).** Without `frames` the
+   - **Interrupt and handler-stack precision (SEG-030-T006, implemented as the staged `frames` domain; it does not hold for Sonic:
+     `entry_unknown`, and no validated handler-stack window is built, record T006 advancement stop).** Without `frames` the
      consequence above applies unchanged. With `frames` (CPU-owned in `libs/cpu/m68k/analysis`, record T006):
      - **Implemented.** SR status tracking (S and I2-I0) through MOVE/ANDI/ORI/EORI to SR, STOP, proven RTE and the 68000 reset state
        (S = 1, I = 7, SSP = the long at vector 0); per-boundary interrupt eligibility (level > mask, level 7 and unknown levels always);
@@ -242,7 +243,10 @@ reproduce the SEG-026-T002 strict row exactly.
 - T003..T006 add the admitted domains in `libs/cpu/m68k/analysis`, each inert when its flag is off, so the baseline stays reproducible.
 - T006 (extended) and T010 own the two environmental writer proofs of decision 7 (interrupt/handler-stack precision; Z80 work-RAM
   store freedom). T006 is implemented as the `frames` domain (record T006); T010 is implemented as the Genesis Z80 work-RAM
-  store-freedom proof (record T010), which keeps the blanket external writer on Sonic with typed reasons.
+  store-freedom proof (record T010), which keeps the blanket external writer on Sonic with typed reasons. Neither proof holds on
+  Sonic (T006: `entry_unknown`; T010: `image_set_unknown`, `m68k_store_into_z80_ram_unbounded`). A validated handler-stack window
+  was evaluated by an unsound step-0 upper bound and not built (record T006, advancement stop): the remaining blocker is intrinsic
+  (`base_unknown` Unknown-target stores through pointers loaded from work RAM), not environmental.
 - A domain whose child cannot meet its observable acceptance stops and records why; zero measured gain is an acceptable recorded result.
 - **Accepted tradeoff.** Complexity is allowed when it is required for sound, general static recovery, provided it stays bounded,
   deterministic, CPU-owned where appropriate, evidence-driven and fail-closed. The invariant is "precise proof OR typed Unknown": a
@@ -774,6 +778,26 @@ reproduce the SEG-026-T002 strict row exactly.
       points: the continuation of an unproven callee (an unresolved computed site, an RTS away from its entry delta) and the
       context bound. It is no longer the interrupt-source premise. The remaining work-RAM read Unknowns stay dominated by
       `async_all` and the external writer (T010).
+- **Advancement stop (step-0 gate).** Before building a validated handler-stack window, a step-0 gate measured its best case.
+  - *What was measured.* An unsound diagnostic upper bound, never credited and never committed as a mode. It forced A7 into a fixed
+    work-RAM window (2 KiB and 8 KiB gave identical results), with and without the Z80 ablation, and additionally with frame
+    integrity forced. Result: **NO-GO**.
+    - Frames never validated within R = 16.
+    - Instances were admitted in round 1, then all failed frame integrity; the instance count grew from 3 to 27.
+    - Clobbered partitions rose from 1 to 17; the main flow was `async_all` again.
+    - Precise work-RAM reads were 0 without the ablation, and at most 25 with the window, forced integrity and the ablation.
+    - No site was resolved; `D`, recall and escapes were unchanged.
+    - The resolved activation graph is already cyclic (1 recursive component, with 2 `jsr_(An)` sites unresolved), so the planned
+      window's acyclicity premise fails.
+    - Cost was about 570 s per run.
+  - *Conclusion.* The dominant blocker is now intrinsic, not environmental: Unknown-target stores whose base is not A7
+    (`base_unknown`). They exceed 1,000 already in round 1, before any handler instance exists. Their bases are pointers loaded from
+    work RAM, which is never precise. The cycle is self-sustaining: Unknown reads give Unknown pointers, which give Unknown-target
+    stores, which give `async_all` and frame-integrity failure, which keep the reads Unknown.
+  - *Decision.* The validated stack window was therefore **not built**.
+  - *Environmental proofs.* T006 (interrupt/handler stack, this record) and T010 (Z80) are implemented soundly and attempted. On
+    Sonic neither holds (T006: `entry_unknown`; T010: `image_set_unknown` and `m68k_store_into_z80_ram_unbounded`), so the affected
+    facts stay typed Unknown, as the invariant requires.
 
 ### T010: Z80 work-RAM store-freedom proof
 
@@ -851,3 +875,70 @@ reproduce the SEG-026-T002 strict row exactly.
   - Successor frontier (not implemented): a static Z80 image-set derivation from the 68K upload (immutable cartridge source plus a
     bounded decompressor model) together with BUSREQ/RESET interval tracking in the M68K domains and a bound on the Unknown-target
     68K stores. That is generic immutable cartridge-data ownership plus a new M68K domain, not a further T010 fold.
+
+### T007: integrated fixed point and multi-title O/D/U measurement
+
+- **Configuration.** One report-only driver run per title with every admitted domain enabled together (`--domains all`: address,
+  memory, contexts and frames) in a single fixed-point expansion: memory rounds, contexts warm rounds and frame rounds, each over the
+  solver's own pin-and-restart, with the T010 Z80 proof crediting its bound. The baseline is `--domains baseline` from the same head.
+  Coverage oracles are the 23,200-frame no-input `--execution-coverage` runs; they only falsify (`reachability_coverage_compare.py`),
+  never feed the analysis. Sanitized aggregates only.
+- **Oracle validity.** The compare tool now reports an `oracle` block from the coverage summary (outcome, frame target/published,
+  witness overflow, `complete`). Sonic, Sonic 2, Cool Spot, OutRun and Streets of Rage reach the frame target with no witness
+  overflow and no unknown retirement (`complete`). Golden Axe stops early (guest stop, 55 frames): **static-only**, excluded from the
+  falsified-title quorum. The quorum is therefore Sonic plus four further titles.
+- **Results** (baseline -> all; recall = |O ∩ D| / |O|; escapes = observed first entries from a resolved computed site outside its
+  proven target set, all families):
+
+  | title | U | D | D/U (all) | O | O ∩ D | O - D | D - O | recall | escapes | resolved / sites (all) | wall / peak RSS (all) |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | Sonic | 246,293 | 6,765 -> 6,806 | 2.76% | 10,512 | 4,493 -> 4,534 | 6,019 -> 5,978 | 2,272 -> 2,272 | 42.74% -> 43.13% | 0 | 5 / 45 | 137 s / 337 MB |
+  | Sonic 2 | 496,387 | 6,660 -> 6,792 | 1.37% | 2,478 | 1,326 -> 1,436 | 1,152 -> 1,042 | 5,334 -> 5,356 | 53.51% -> 57.95% | 0 | 3 / 67 | 131 s / 618 MB |
+  | Cool Spot | 498,276 | 6,907 -> 6,907 | 1.39% | 4,928 | 4,031 -> 4,031 | 897 -> 897 | 2,876 -> 2,876 | 81.80% -> 81.80% | 0 | 0 / 22 | 26 s / 603 MB |
+  | OutRun | 496,950 | 9,757 -> 9,757 | 1.96% | 5,286 | 5,156 -> 5,156 | 130 -> 130 | 4,601 -> 4,601 | 97.54% -> 97.54% | 0 | 26 / 56 | 195 s / 619 MB |
+  | Streets of Rage | 247,761 | 1,841 -> 1,949 | 0.79% | 8,758 | 1,535 -> 1,643 | 7,223 -> 7,115 | 306 -> 306 | 17.53% -> 18.76% | 0 | 5 / 16 | 3.2 s / 309 MB |
+  | Golden Axe (static-only) | 249,843 | 17,790 -> 17,843 | 7.14% | 571 | 536 -> 536 | 35 -> 35 | 17,254 -> 17,307 | 93.87% -> 93.87% | 0 | 25 / 39 | 25 s / 687 MB |
+
+  - Observed PCs outside `D` first entered from a resolved site: **0** on every title (no falsification). Resolved sites executed by
+    the oracles: Sonic 5/5, Sonic 2 3/3, OutRun 16/26, Streets of Rage 5/5 (Golden Axe 1/25; Cool Spot has none).
+  - RTE/RTR counterexamples to normal resumption: 0 on every title.
+- **Per-family outcome (all).** Resolved sites are `pc_index_explicit` everywhere, plus one `jmp_an` on Sonic 2 and one `jsr_an`
+  on Golden Axe. Unknown by reason:
+  - `pc_index_width_only`: every site `unsupported_transfer/width_only` (Sonic 9, Sonic 2 10, Golden Axe 5);
+  - `rts_computed` (Sonic 26, Sonic 2 39, Cool Spot 14, OutRun 23, Streets of Rage 7): dominated by `stack_unbalanced`, plus a few
+    `base_unknown` and, on Cool Spot, `context_bound`;
+  - `jsr_an`/`jmp_an` unresolved: `base_unknown`, `region_exit`, `external_writer` (Cool Spot) and `context_bound` (Sonic 2);
+  - `rte`: `interrupt_resumption` on every title (Golden Axe, frames off: `none`); `rtr`: no sites.
+  - Overlapping starts / exception-raising decodes (all): Sonic 70 / 31, Sonic 2 3 / 0, Cool Spot 0 / 0, OutRun 367 / 149,
+    Streets of Rage 159 / 192, Golden Axe 798 / 686.
+- **Memory consumer after T006/T010.** On every title `async_all` holds, **0 precise work-RAM reads**, and the Z80 proof is `all`
+  (`image_set_unknown`, `m68k_store_into_z80_ram_unbounded`; blanket bound). Work-RAM-or-Unknown reads by class (total:
+  `external_writer` / `base_unknown` / `region_exit` / `context_bound` / `stack_unbalanced` / `set_bound`; `initial_memory`,
+  `store_poison` and `async_writer` are 0 everywhere):
+  - Sonic 1,005: 429 / 467 / 77 / 15 / 11 / 6 (T004 contrast retained: 412 `external_writer`; ablation 411 `async_writer` + 1
+    `store_poison`);
+  - Sonic 2 1,020: 550 / 378 / 74 / 2 / 12 / 4;
+  - Cool Spot 1,021: 545 / 207 / 87 / 146 / 36 / 0;
+  - OutRun 1,280: 704 / 327 / 116 / 131 / 2 / 0;
+  - Streets of Rage 265: 58 / 68 / 27 / 12 / 100 / 0;
+  - Golden Axe 1,707: 449 / 907 / 87 / 264 / 0 / 0.
+  - Frames: validated on the five complete titles, with 0 analysed handler instances (every candidate `entry_unknown`, some also
+    `writer_only`) and one clobbered partition; the main flow stays `async_all`.
+- **Rounds and bounds.** Solver complete on every title, 0 solver and 0 driver restarts. Memory rounds / contexts rounds / frames
+  warm + frame rounds: Sonic 7 / 5 / 9 + 5; Sonic 2 5 / 3 / 14 + 3; Cool Spot 4 / 2 / 9 + 2; OutRun 7 / 5 / 13 + 5; Streets of Rage
+  6 / 4 / 16 + 4 (the warm start reached R = 16 without settling; the validated rounds that follow converged). Contexts validated and
+  converged on the five complete titles. One bound is exhausted, and it is typed: on Golden Axe a frames warm solve exhausts the
+  iteration bound, so `frames` is switched off with `iteration_bound` and contexts return their latest validated round (`converged`
+  false). No title returns a partial result.
+- **Determinism.** Two `all` runs per title: private output, aggregate and compare-tool output byte-identical on all six titles; the
+  metrics files differ only in wall time and peak RSS.
+- **Production unchanged.** Since `main` (`397bc5e`), production-target sources changed only in the report-only analysis library,
+  the report driver and the reachability challenger (a shared roots/push-window owner; not on the emitter path), and
+  `analysis_build_graph_test` keeps the analysis out of the production targets. Generating Sonic's startup-bridge C with
+  `emit-general-startup-bridge-c --immutable-rom-aot` (generation only, nothing executed) from `main` and from this head gives
+  byte-identical output (all 62 generated files, units and manifest; emitter stdout/stderr also identical).
+- **Conclusion.** The integrated fixed point is sound on every oracle (0 escapes, 0 falsifications) and bounded. Its gains come from
+  contexts/frames continuation precision: Sonic 2 +4.44 pp, Streets of Rage +1.23 pp, Sonic +0.39 pp; Cool Spot and OutRun are
+  unchanged. Memory facts do not survive on any title (`async_all`, 0 precise reads). The blockers remain the intrinsic
+  Unknown-base store cycle (`base_unknown` targets through pointers loaded from work RAM, record T006 advancement stop) and the
+  environmental writers (Z80 image set unknown and unbounded 68K Z80-area stores, record T010; handler entries `entry_unknown`).

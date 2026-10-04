@@ -28,6 +28,9 @@ SEG-030-T003: when the private input carries `computed_sites` (the M68K core rep
 every family (PC-indexed, (An), d16(An), (d8,An,Xn), ...) is falsified the same way, per family: a first entry whose
 witness predecessor is a resolved site, retired normally or resumed after an interrupt taken right after the site,
 must lie inside that site's proven target set; anything else is an escape (expected 0).
+
+SEG-030-T007: with --coverage-summary the report carries an `oracle` block (outcome, frame target/published, witness
+overflow, `complete`). An incomplete oracle is static-only evidence and never counts toward a falsified-title quorum.
 """
 import argparse
 import json
@@ -175,6 +178,18 @@ def compare(observed: set[int], witnesses: dict, challenger: dict, summary: dict
         report["ratios"] = {"D_over_U": round(len(discovered) / u, 6), "O_over_U": round(len(observed) / u, 6),
                             "O_over_D": round(len(observed) / len(discovered), 6) if discovered else None}
     if summary is not None:
+        # SEG-030-T007: oracle completeness. Only a run that reached its fixed no-input frame target with no witness overflow and
+        # no unknown retirement is a complete workload; an incomplete oracle (e.g. a guest stop) is static-only and does not count
+        # toward a falsified-title quorum. Its comparison is still reported, never silently promoted.
+        report["oracle"] = {
+            "outcome": summary.get("outcome"),
+            "target_frames": summary.get("target_frames"),
+            "frames_published": summary.get("frames_published"),
+            "witness_overflow": summary.get("witness_overflow"),
+            "complete": (summary.get("outcome") == "frames_reached" and summary.get("witness_overflow") == 0
+                         and summary.get("unknown_retirements") == 0
+                         and summary.get("frames_published") == summary.get("target_frames")),
+        }
         # Recall at each coverage checkpoint, reconstructed from first-entry retirement ordinals.
         ordinals = sorted((w[0], pc) for pc, w in witnesses.items())
         checkpoints = []
