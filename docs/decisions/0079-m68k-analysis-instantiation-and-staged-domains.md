@@ -1241,3 +1241,36 @@ reproduce the SEG-026-T002 strict row exactly.
     unanalysed (Sonic 6,806 -> 1,276, Sonic 2 6,792 -> 335, OutRun 9,757 -> 6,036). This is the sound result: no handler instance
     is analysable on these titles (Unknown supervisor status or stack at the taking points, record T006), so their resumptions are
     unproven and the registers are typed Unknown.
+- **Named-premise falsification (T009 correction cycle, `tools/reachability_coverage_compare.py`).** The comparison now reports a
+  `named_premises` block. Runtime coverage stays a falsifier only.
+  - *Return-slot integrity.* Checked sites: the RTS sites of `D` that are not `computed_sites` (the credited ordinary returns;
+    only premise sites when the report counts no `normal` site, `site_attribution: credited_premise_sites`). A premise site whose
+    other points are a typed Unknown `rts_computed` return is not credited and is counted apart (`premise_sites_not_credited`).
+    Every first-entry witness edge owned by a checked site (retired, or resumed after an interrupt taken right after it) must enter
+    a call continuation of `D` or the stacked continuation of a call the oracle executed earlier (a caller outside `D`: an
+    ordinary closure miss, decided with `--classification`). Anything else is a `premise_violation`: own fields, own first-miss
+    category `return_slot_premise_violation` (never `ordinary_rts`), structural label of the same name, exit status 5 (every
+    checked site is credited). Without `--classification` such edges are `undecided`, never passed. Oracle limits: first-entry
+    edges only (a return into an already-entered PC is invisible) and no call stack (a return into another call's continuation is
+    indistinguishable). The private report does not list premise sites by PC; the attribution relies on the aggregate counts.
+  - *Interrupt-register model.* Reports the model (absent field: the baseline/challenger historical model). Under
+    `historical_assumption` the resolved sites that depend on the assumption are not exposed by the report:
+    `not_site_attributable`, and `credited_results_sound_for_interrupt_registers` is false.
+  - Incomplete analyses are still rejected (exit 4); the oracle-completeness verdict is unchanged.
+  - Fixtures (`reachability_coverage_compare_test`): a premise site returning normally (0 violations) and into an executed caller
+    outside `D` (closure miss); a violation (exit 5, counted apart, not an ordinary miss); the same edge without a classification
+    (`undecided`); a report with a normal site (not site-attributable); the historical model, explicit and absent; rejection of an
+    incomplete report.
+  - Measurement (the `all` outputs above, private classification of the observed PCs from the same decoder; sanitized):
+
+    | title | premise sites (not credited) | premise sites executed | first entries from them: into `D` continuations / closure misses | violations | interrupt-register model (resolved sites; dependent) |
+    | --- | --- | --- | --- | --- | --- |
+    | Sonic | 41 (0) | 29 | 42 / 13 | 0 | proven_or_unknown (0; 0) |
+    | Sonic 2 | 3 (0) | 3 | 4 / 2 | 0 | proven_or_unknown (0; 0) |
+    | Cool Spot | 211 (1) | 140 | 342 / 36 | 0 | proven_or_unknown (0; 0) |
+    | OutRun | 163 (0) | 108 | 177 / 27 | 0 | proven_or_unknown (1; 0) |
+    | Streets of Rage | 82 (1) | 70 | 100 / 34 | 0 | historical_assumption (5; not site-attributable) |
+    | Golden Axe (static-only oracle) | 536 (191) | 15 | 24 / 0 | 0 | historical_assumption (25; not site-attributable) |
+
+    No premise violation was observed; all other comparison fields are unchanged. The Streets of Rage and Golden Axe credited
+    results are not claimed sound for interrupt registers.
