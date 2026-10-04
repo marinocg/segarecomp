@@ -586,6 +586,7 @@ std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport
           << ",\"bytes\":" << frames.main_async_bytes << ",\"unknown_target_writer_stores\":" << frames.unknown_target_writer_stores
           << '}' << ",\"register_resumptions\":{\"partitions\":" << frames.resumed_partitions
           << ",\"entries\":" << frames.resumptions << ",\"unproven\":" << frames.unproven_resumptions
+          << ",\"frame_pc_offset_entries\":" << frames.offset_resumptions
           << ",\"unproven_causes\":" << counts(frames.unproven_resumption_causes) << ",\"joined_points\":" << frames.resumption_points
           << ",\"unproven_points\":" << frames.resumption_unproven_points << '}' << ",\"returns\":{";
       bool first_family = true;

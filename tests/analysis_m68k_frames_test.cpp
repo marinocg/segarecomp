@@ -99,7 +99,7 @@ private:
 };
 
 M68kFiniteAnalysisResult run(const Asm &program, const std::vector<M68kHandlerVector> &vectors, bool reset = true, bool frames = true,
-                             const std::vector<M68kHandlerVector> &potential = {}) {
+                              const std::vector<M68kHandlerVector> &potential = {}, M68kMemoryPolicy policy = {}) {
   const RegionImage view{program};
   M68kAnalysisConfig config{};
   config.domains.address = true;
@@ -115,6 +115,7 @@ M68kFiniteAnalysisResult run(const Asm &program, const std::vector<M68kHandlerVe
   config.frames.vectors = vectors;
   config.frames.potential_interrupts = potential;
   config.frames.main_entries = {entry};
+  config.memory.policy = std::move(policy);
   if (reset) {
     config.frames.reset_entry = entry;
     config.frames.reset_ssp = ssp;
@@ -270,6 +271,7 @@ void nested_synchronous() {
   a.moveq(0, 1U).store_word(0, cell_b).load_word(2, cell_b);
   const auto trap = a.pc;
   a.w({0x4E40U});  // TRAP #0
+  a.stop();         // the now-modelled RTE resumes after TRAP, not into zero-filled fixture space
   a.at(sync_a).w({0x4E41U}).rte();
   a.at(sync_b).rte();
   const auto result = run(a, {{32U, sync_a}, {33U, sync_b}});
@@ -352,7 +354,7 @@ void interrupt_preempts_non_resuming() {
   b.at(sync_a).w({0x2E79U}).l(cell_c).nop().rte();  // MOVEA.L (cell C).L,A7
   const auto unknown = run(b, {{30U, irq6}, {32U, sync_a}});
   if (debug()) std::cerr << describe(unknown);
-  expect(unknown.frames.validated && unanalysed(unknown, "entry_unknown") >= 1U && unknown.frames.unknown_entry_handlers == 1U &&
+  expect(unknown.frames.validated && unanalysed(unknown, "entry_unknown") >= 1U && unknown.frames.unknown_entry_handlers >= 1U &&
              reached_in(unknown, irq6, m68k_unknown_entry_tag) && m68k_query_address_register(unknown, irq6, 7U).is_unknown(),
          "preempts non-resuming: a taking point with an Unknown A7 enters the handler with an Unknown entry");
   // A TRAP raised inside the unknown-entry partition (the level-6 handler entered with an Unknown entry raises TRAP #0) enters the
@@ -883,9 +885,14 @@ void nested_register_effects() {
   a.at(irq6).moveq(1, 8U).rte();
   const auto result = run(a, {{28U, irq4}, {30U, irq6}});
   if (debug()) std::cerr << describe(result);
-  expect(result.complete && result.frames.validated && result.frames.unproven_resumptions == 0U, "nested: a validated frames round");
-  expect(resolved_to(address_site(result, jsr_site), {0x600U, 0x680U, target}),
-         "nested: JSR (A1) is {$600, $680, $700} ($700 only through level 6 preempting level 4)");
+  // The level-4 instance joins entries above and below a live call return slot. A nested level-6 frame at one entry can overlap the
+  // level-4 frame-PC cell at the other, so the correlation-free asynchronous policy must not credit an unchanged RTE. This old exact
+  // three-target expectation was unsound; the permanent result is fail-closed.
+  const auto *site = address_site(result, jsr_site);
+  expect(result.complete && result.frames.validated && result.frames.unproven_resumptions > 0U,
+         "nested: overlapping possible hardware frames make the parent resumption unproven");
+  expect(site != nullptr && !site->resolved && site->sub == Sub::interrupt_resumption_unproven,
+         "nested: the dispatch is Unknown(interrupt_resumption_unproven), never an exact set from an overlapped frame");
 }
 
 void synchronous_and_interrupt_nesting() {
@@ -901,6 +908,188 @@ void synchronous_and_interrupt_nesting() {
          "synchronous nesting: a validated frames round");
   expect(resolved_to(address_site(result, jsr_site), {0x600U, 0x680U, target}),
          "synchronous nesting: JSR (A1) is {$600, $680, $700} ($700 only through the TRAPV handler)");
+}
+
+// Correction-cycle run 2: an RTE from a hardware frame is a resumption only while the frame-PC provenance survives. Exact
+// ADDQ/SUBQ/ADDI/SUBI.L transforms carry a bounded signed offset; replacement, overlap and asynchronous/external ownership do not
+// masquerade as an unchanged frame. These are deliberately tiny synthetic programs so every resumed PC is independently visible.
+void hardware_frame_pc_resumption() {
+  const auto build = [](const std::vector<std::uint32_t> &body) {
+    Asm a;
+    a.moveq(0, 0U);
+    const auto trap = a.pc;
+    a.w({0x4E40U});  // TRAP #0: stacks the next PC
+    const auto next = a.pc;
+    a.nop();
+    const auto plus_two = a.pc;
+    a.stop();
+    a.at(sync_a);
+    for (const auto word : body) a.w({word});
+    a.moveq(0, 7U);
+    const auto rte = a.pc;
+    a.rte();
+    a.at(target).stop();
+    return std::make_tuple(a, trap, next, plus_two, rte);
+  };
+  const auto includes = [](const FiniteValue &value, std::uint64_t wanted) {
+    return value.is_precise() && std::find(value.values().begin(), value.values().end(), wanted) != value.values().end();
+  };
+
+  {
+    const auto [a, trap, next, plus_two, rte] = build({});
+    const auto result = run(a, {{32U, sync_a}});
+    (void)trap;
+    (void)plus_two;
+    (void)rte;
+    expect(result.frames.validated && reached_in(result, next, 0U) && includes(word_at(result, next, 0U), 7U),
+           "hardware frame: unchanged PC resumes the original stacked target with the handler D0 effect");
+  }
+
+  const std::vector<std::pair<const char *, std::vector<std::uint32_t>>> plus_two_forms{
+      {"ADDQ", {0x54AFU, 0x0002U}},                         // ADDQ.L #2,2(A7)
+      {"ADDI", {0x06AFU, 0x0000U, 0x0002U, 0x0002U}},     // ADDI.L #2,2(A7)
+      {"SUBQ-negative", {0x55AFU, 0x0002U}},                // SUBQ.L #2,2(A7)
+      {"SUBI-negative", {0x04AFU, 0x0000U, 0x0002U, 0x0002U}},  // SUBI.L #2,2(A7)
+  };
+  for (const auto &[name, body] : plus_two_forms) {
+    const auto [a, trap, next, plus_two, rte] = build(body);
+    const auto result = run(a, {{32U, sync_a}});
+    const bool negative = std::string(name).find("negative") != std::string::npos;
+    const auto resumed = negative ? trap : plus_two;
+    expect(result.frames.validated && result.frames.offset_resumptions > 0U && reached_in(result, resumed, 0U),
+           std::string("hardware frame ") + name + ": exact signed long transform resumes stacked PC plus its offset");
+    expect(includes(word_at(result, resumed, 0U), 7U), std::string("hardware frame ") + name + ": handler D0 reaches resumption");
+    (void)next;
+    (void)rte;
+  }
+
+  {
+    // A precise replacement is not an offset resumption. It can only take the ordinary RTE computed target, using the proven
+    // untouched hardware SR; the original stacked continuation is absent.
+    const auto [a, trap, next, plus_two, rte] = build({0x2F7CU, 0x0000U, target, 0x0002U});  // MOVE.L #target,2(A7)
+    const auto result = run(a, {{32U, sync_a}});
+    const auto *site = return_site(result, rte);
+    expect(result.frames.validated && site != nullptr && site->resolved && site->targets == std::vector<std::uint32_t>{target} &&
+               reached_in(result, target, 1U) && !reached_in(result, next, 0U),
+           "hardware frame replacement: only the ordinary RTE target is followed, never the original stacked PC");
+    (void)trap;
+    (void)plus_two;
+  }
+
+  const auto fail_closed = [&](const char *name, const std::vector<std::uint32_t> &body, M68kMemoryPolicy policy = {}) {
+    const auto [a, trap, next, plus_two, rte] = build(body);
+    const auto result = run(a, {{32U, sync_a}}, true, true, {}, std::move(policy));
+    expect(result.frames.validated && result.frames.unproven_resumptions > 0U && reached_in(result, next, 0U) &&
+               word_at(result, next, 0U).is_unknown(),
+           std::string("hardware frame ") + name + ": possible return is fail-closed, not credited unchanged");
+    (void)trap;
+    (void)plus_two;
+    (void)rte;
+  };
+  fail_closed("unknown replacement", {0x2F45U, 0x0002U});  // MOVE.L D5,2(A7)
+  fail_closed("partial overlap", {0x3F45U, 0x0002U});       // MOVE.W D5,2(A7)
+  fail_closed("unknown-target overlap", {0x2079U, cell_c >> 16U, cell_c & 0xFFFFU, 0x2085U});
+
+  M68kMemoryPolicy asynchronous;
+  asynchronous.add_async(
+      {M68kRegionKind::mutable_ram, 0U, (ssp - 4U - work_ram_base) % 0x10000U, (ssp - work_ram_base) % 0x10000U});
+  fail_closed("asynchronous overlap", {}, asynchronous);
+  M68kMemoryPolicy external;
+  external.external_writer = true;
+  fail_closed("external overlap", {}, external);
+
+  {
+    const auto [a, trap, next, plus_two, rte] = build({0x3F45U, 0x0008U});  // unrelated MOVE.W D5,8(A7)
+    const auto result = run(a, {{32U, sync_a}});
+    expect(result.frames.validated && result.frames.unproven_resumptions == 0U && reached_in(result, next, 0U) &&
+               includes(word_at(result, next, 0U), 7U),
+           "hardware frame: an unrelated stack write preserves unchanged resumption");
+    (void)trap;
+    (void)plus_two;
+    (void)rte;
+  }
+
+  // Full-width key fields cannot alias by signed-16 truncation; round trips are deterministic at the representable extremes.
+  const auto low = m68k_resumption_key(m68k_level_trap, INT32_MIN);
+  const auto high = m68k_resumption_key(m68k_level_trap, INT32_MAX);
+  expect(low != high && m68k_resumption_level(low) == m68k_level_trap && m68k_resumption_offset(low) == INT32_MIN &&
+             m68k_resumption_offset(high) == INT32_MAX,
+         "resumption key: full-width offsets are collision-free and deterministic");
+  // The frame provenance bound rejects a transform outside its exact range instead of wrapping it into another key.
+  fail_closed("offset bound", {0x06AFU, 0x0000U, 0x0080U, 0x0002U});  // ADDI.L #128,2(A7)
+}
+
+void synchronous_vector_resumption() {
+  struct Case {
+    const char *name;
+    std::vector<std::uint32_t> instruction;
+    std::uint32_t vector;
+    bool stacks_next;
+  };
+  const std::vector<Case> cases{
+      {"TRAP #n", {0x4E40U}, 32U, true}, {"TRAPV", {0x4E76U}, 7U, true}, {"CHK", {0x4180U}, 6U, true},
+      {"DIV0", {0x80C1U}, 5U, true},     {"ILLEGAL", {0x4AFCU}, 4U, false}, {"line A", {0xA000U}, 10U, false},
+      {"line F", {0xF000U}, 11U, false},
+  };
+  for (const auto &c : cases) {
+    Asm a;
+    a.moveq(0, 0U);
+    if (c.vector == 5U) a.moveq(1, 0U);  // make DIV0 unconditional instead of joining the normal divide result
+    const auto faulting = a.pc;
+    for (const auto word : c.instruction) a.w({word});
+    const auto after = a.pc;
+    a.nop().stop();
+    a.at(sync_a).moveq(0, 4U);
+    if (!c.stacks_next) a.w({0x54AFU, 0x0002U});  // advance a fault frame to the ordinary post-instruction dispatch point
+    a.rte();
+    const auto result = run(a, {{c.vector, sync_a}});
+    expect(m68k_exception_stacks_next(c.vector) == c.stacks_next, std::string("synchronous ") + c.name + ": stacked-PC class");
+    expect(result.frames.validated && reached_in(result, after, 0U), std::string("synchronous ") + c.name + ": RTE resumes at after");
+    const auto d0 = word_at(result, after, 0U);
+    if (c.vector == 5U) {
+      // The finite-value owner conservatively keeps DIV's normal Unknown result even with a zero divisor; this fixture checks the
+      // frame target, while the exact handler-effect/dispatch assertion below uses always-taken TRAP.
+      expect(result.frames.unproven_resumptions == 0U, "synchronous DIV0: unchanged hardware frame is a proven resumption");
+    } else {
+      expect(d0.is_precise() && std::find(d0.values().begin(), d0.values().end(), 4U) != d0.values().end(),
+             std::string("synchronous ") + c.name + ": handler D0 effect joins resumed execution");
+    }
+    (void)faulting;
+  }
+
+  // Privilege violation from user mode cannot name the active SSP or the stacked SR in this domain. It must not synthesize a
+  // supervisor-stack resumption merely because the handler contains RTE.
+  Asm privileged;
+  privileged.move_sr(0x0000U);          // enter user mode
+  const auto faulting = privileged.pc;
+  privileged.move_sr(0x2700U);          // privileged in user mode: vector 8, stacks this instruction
+  const auto after = privileged.pc;
+  privileged.stop();
+  privileged.at(sync_a).moveq(0, 4U).w({0x54AFU, 0x0002U}).rte();
+  const auto result = run(privileged, {{8U, sync_a}});
+  expect(result.frames.validated && unanalysed(result, "entry_unknown") > 0U &&
+             (word_at(result, after, 0U).is_unknown() ||
+              std::find(word_at(result, after, 0U).values().begin(), word_at(result, after, 0U).values().end(), 4U) ==
+                  word_at(result, after, 0U).values().end()),
+         "synchronous privilege: unknown active supervisor stack does not carry the handler effect through a fabricated RTE edge");
+  (void)faulting;
+
+  // One always-taken TRAP feeds the existing address-indirect dispatch seam with the handler's D0 effect.
+  Asm dispatch;
+  dispatch.moveq(0, 0U).w({0x4E40U});
+  dispatch.w({0x41FAU, table - 0x206U});  // 204 LEA (table,PC),A0
+  dispatch.w({0x2270U, 0x0000U});         // 208 MOVEA.L (0,A0,D0.W),A1
+  const auto site_pc = dispatch.pc;
+  dispatch.w({0x4E91U}).stop();
+  dispatch.at(table).l(0x600U).l(0x680U);
+  dispatch.at(0x600U).rts();
+  dispatch.at(0x680U).rts();
+  dispatch.at(sync_a).moveq(0, 4U).rte();
+  const auto dispatched = run(dispatch, {{32U, sync_a}});
+  const auto *site = address_site(dispatched, site_pc);
+  expect(dispatched.frames.validated && site != nullptr && site->resolved &&
+             std::find(site->targets.begin(), site->targets.end(), 0x680U) != site->targets.end(),
+         "synchronous TRAP: handler D0 effect feeds resumed indirect dispatch");
 }
 
 int main() {
@@ -928,6 +1117,8 @@ int main() {
   unproven_resumption();
   nested_register_effects();
   synchronous_and_interrupt_nesting();
+  hardware_frame_pc_resumption();
+  synchronous_vector_resumption();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";
     return EXIT_FAILURE;

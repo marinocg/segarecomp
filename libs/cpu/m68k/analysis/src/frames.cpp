@@ -70,6 +70,10 @@ M68kVectorClass m68k_vector_class(std::uint32_t vector) noexcept {
   return M68kVectorClass::synchronous;
 }
 
+bool m68k_exception_stacks_next(std::uint32_t vector) noexcept {
+  return vector == 5U || vector == 6U || vector == 7U || (vector >= 32U && vector <= 47U);
+}
+
 std::optional<unsigned> m68k_interrupt_level(std::uint32_t vector) noexcept {
   if (vector >= 25U && vector <= 31U) return vector - 24U;
   return std::nullopt;

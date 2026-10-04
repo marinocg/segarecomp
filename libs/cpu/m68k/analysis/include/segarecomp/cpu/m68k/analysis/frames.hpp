@@ -64,6 +64,10 @@ enum class M68kVectorClass : std::uint8_t {
   synchronous,           // every other synchronous exception: no analysed resumption (TRAP, illegal, line A/F, privilege, ...)
 };
 [[nodiscard]] M68kVectorClass m68k_vector_class(std::uint32_t vector) noexcept;
+// SEG-030-T009 correction cycle 2: the PC a synchronous exception stacks (MC68000 User's Manual, exception processing): the next
+// instruction for TRAP #n, TRAPV, CHK and divide by zero (true); the first word of the faulting instruction itself for illegal,
+// line 1010, line 1111 and privilege violation (false). A handler's RTE through an unmodified frame resumes there.
+[[nodiscard]] bool m68k_exception_stacks_next(std::uint32_t vector) noexcept;
 // The interrupt level of an autovector (25-31 -> 1-7); nullopt for any other vector (an interrupt of unknown level).
 [[nodiscard]] std::optional<unsigned> m68k_interrupt_level(std::uint32_t vector) noexcept;
 

@@ -155,6 +155,11 @@ struct M68kAnalysisState {
   // equal facts only.
   std::array<std::uint8_t, 15> origin{};
   std::map<std::int64_t, std::uint8_t> saved;
+  // Location of this handler instance's saved hardware-frame SR while it is proven untouched by analysed code. The
+  // asynchronous/external policy is checked separately when the fact is consumed. Absent for main/code-built frames and opaque
+  // entries. This permits an exact replacement of the hardware frame's PC to use ordinary RTE target resolution without inventing
+  // a restored SR; an Unknown restored SR still fails closed.
+  std::optional<std::int64_t> hardware_sr_offset;  // byte offset from this activation's entry A7
   // SEG-030-T009 correction cycle (frames domain only): D0-D7 (bit n: Dn) made Unknown at a boundary by an unproven handler
   // resumption (M68kAnalysisSubReason::interrupt_resumption_unproven); cleared when the register is written. Report attribution only.
   std::uint8_t resumption_unknown{};
@@ -335,6 +340,26 @@ struct M68kResumption {
   friend bool operator==(const M68kResumption &, const M68kResumption &) = default;
 };
 
+// SEG-030-T009 correction cycle 2 (ADR 0079 decision 7): the clobber level of a child, i.e. where its handler's RTE through an
+// unmodified frame resumes: 1-7 an autovector interrupt and 8 an interrupt of unknown level (at the interrupted boundary); 0 divide by
+// zero, CHK or TRAPV and 9 TRAP #n (after the raising instruction); 10 illegal, line 1010/1111 or privilege violation (the raising
+// instruction itself, which re-executes).
+inline constexpr std::uint32_t m68k_level_resuming_synchronous = 0U;
+inline constexpr std::uint32_t m68k_level_unknown_interrupt = 8U;
+inline constexpr std::uint32_t m68k_level_trap = 9U;
+inline constexpr std::uint32_t m68k_level_fault = 10U;
+[[nodiscard]] constexpr bool m68k_interrupt_clobber_level(std::uint32_t level) noexcept { return level >= 1U && level <= 8U; }
+// A resumption key (M68kFrameConfig::resumptions): the clobber level and the byte offset the handler's exits add to the stacked PC
+// (0: an unmodified frame PC; an ADDQ/SUBQ/ADDI/SUBI.L #imm of the frame PC cell gives the immediate). The full-width fields avoid
+// aliases: malformed/out-of-contract values cannot collide after truncation.
+[[nodiscard]] constexpr std::uint64_t m68k_resumption_key(std::uint32_t level, std::int32_t offset) noexcept {
+  return static_cast<std::uint64_t>(level) | (static_cast<std::uint64_t>(static_cast<std::uint32_t>(offset)) << 32U);
+}
+[[nodiscard]] constexpr std::uint32_t m68k_resumption_level(std::uint64_t key) noexcept { return static_cast<std::uint32_t>(key); }
+[[nodiscard]] constexpr std::int32_t m68k_resumption_offset(std::uint64_t key) noexcept {
+  return static_cast<std::int32_t>(static_cast<std::uint32_t>(key >> 32U));
+}
+
 // SEG-030-T006: one machine-delivered vector and its handler (ADR 0021 / ADR 0043 delivered set).
 struct M68kHandlerVector {
   std::uint32_t vector{};
@@ -352,6 +377,7 @@ struct M68kHandlerInstance {
   std::uint32_t handler{};
   std::uint32_t parent{};
   analysis::FiniteValue status;      // entry status
+  analysis::FiniteValue stacked_status;  // status saved in this instance's hardware frame
   M68kPointsTo a7;                   // entry A7 (the frame address)
   std::set<std::uint32_t> vectors;   // the vectors entering it from the parent
   bool resuming{};                   // some vector entering it resumes at an analysed point of its parent
@@ -382,7 +408,7 @@ struct M68kFrameConfig {
   std::uint32_t next_tag{1U};  // tags are never reused (a dropped instance's tag stays retired)
   std::map<std::uint32_t, M68kMemoryPolicy> policies;      // tag -> its asynchronous writers; grows monotonically
   // Partitions whose status after an interrupted boundary is Unknown because a resuming child instance may rewrite its saved SR,
-  // with the interrupt levels of those children (1-7; 8: an interrupt of unknown level; 0: a resuming synchronous vector, at its
+  // with the clobber levels of those children (m68k_level_*: 1-7, 8 interrupts; 0, 9, 10 synchronous vectors, at or after their
   // raising instruction).
   std::map<std::uint32_t, std::set<std::uint32_t>> clobbered;
   // The status bound of every live partition (tag 0 and each analysed instance): the join of its entry statuses (its main roots, or
@@ -396,12 +422,13 @@ struct M68kFrameConfig {
   // a dropped instance, or a boundary of the unknown-entry partition itself): seeded in m68k_unknown_entry_tag with an Unknown entry,
   // so that the handler's entry state joins an Unknown entry and never only the analysed instances' entries. Grows monotonically.
   std::set<std::uint32_t> unknown_entries;
-  // SEG-030-T009 correction cycle: per partition, per clobber level of its resuming children (1-7, 8: unknown level, 0: a resuming
-  // synchronous vector), the join of their register resumptions, applied at every boundary where such a child can be taken (an
-  // interrupt eligible under the boundary status; level 0 on the fallthrough of a raising instruction). An analysed child contributes
-  // its own exits (which already include its own children's resumptions: the join is transitive); an unanalysed or unproven one is
-  // `unproven`. Grows monotonically.
-  std::map<std::uint32_t, std::map<std::uint32_t, M68kResumption>> resumptions;
+  // SEG-030-T009 correction cycle: per partition, per resumption key of its children (m68k_resumption_key: the clobber level and the
+  // frame-PC offset of the exits), the join of their register resumptions, applied where such a child resumes: an interrupt at the
+  // boundary eligible under its status, a synchronous vector after (levels 0, 9) or at (level 10) its raising instruction, each plus
+  // the offset (correction cycle 2: every synchronous class may resume; an offset exit resumes at the stacked PC plus the offset). An
+  // analysed child contributes its own exits (which already include its own children's resumptions: the join is transitive); an
+  // unanalysed or unproven one is `unproven` (at offset 0). Grows monotonically.
+  std::map<std::uint32_t, std::map<std::uint64_t, M68kResumption>> resumptions;
   friend bool operator==(const M68kFrameConfig &, const M68kFrameConfig &) = default;
 };
 
@@ -511,6 +538,7 @@ struct M68kFrameReport {
   std::size_t resumed_partitions{};
   std::size_t resumptions{};
   std::size_t unproven_resumptions{};
+  std::size_t offset_resumptions{};  // SEG-030-T009 correction cycle 2: entries whose exits advance the frame PC (offset != 0)
   std::map<std::string, std::size_t> unproven_resumption_causes;  // per unproven child resumption, by cause
 };
 
@@ -629,10 +657,17 @@ private:
 
 public:
   // SEG-030-T009 correction cycle (frames domain): joins into `edge` (a state entering a boundary of partition `tag`) the register
-  // resumption of every child of the partition that can be taken there (an interrupt eligible under the edge's status). With
-  // `raised_from` (the input of an instruction raising a resuming synchronous vector, on its fallthrough edge), also the level-0
-  // resumption, whose preserved registers hold the values the instruction was entered with.
-  void apply_resumptions(std::uint32_t tag, State &edge, const State *raised_from = nullptr) const;
+  // resumption of every child of the partition that can be taken there (an interrupt eligible under the edge's status, unless
+  // `interrupts` is false). With `raised_from` (the input of an instruction raising synchronous vectors), also the resumptions of the
+  // synchronous clobber levels in `synchronous` (bit l: level l), whose preserved registers hold the values the instruction was
+  // entered with. Correction cycle 2: only the entries whose exits advance the frame PC by `offset`. True when some entry applied.
+  bool apply_resumptions(std::uint32_t tag, State &edge, const State *raised_from = nullptr, std::uint32_t synchronous = 0U,
+                         std::int32_t offset = 0, bool interrupts = true) const;
+  // SEG-030-T009 correction cycle 2 (frames domain): the offset the frame PC cell (A7)+2 of handler partition `tag` holds relative to
+  // the stacked PC at `in` (an RTE there resumes at the stacked PC plus it), when the frame-PC fact proves it: the cell was written by
+  // no store since the exception built it, or only by ADDQ/SUBQ/ADDI/SUBI.L #imm, and no asynchronous or external writer of the
+  // partition may write it. nullopt otherwise (the frame PC may differ: never a resumption at the stacked PC).
+  [[nodiscard]] std::optional<std::int32_t> frame_pc_offset(std::uint32_t tag, const State &in) const;
 
 private:
   const M68kAnalysisImage &image_;
