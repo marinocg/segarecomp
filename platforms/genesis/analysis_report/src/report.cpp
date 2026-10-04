@@ -646,7 +646,19 @@ std::string format_genesis_analysis_report_private(const GenesisAnalysisReport &
         << "\",\"targets\":" << hex_list(site.targets) << '}';
     first = false;
   }
-  out << '}' << extra_members << "}\n";
+  out << '}';
+  // SEG-030-T009 correction: every return-slot premise site with its cause (memory domain only, so the baseline output is
+  // unchanged); the comparator attributes premise executions and violations site by site.
+  if (report.analysis.return_slots.enabled) {
+    out << ",\"return_slot_premise_sites\":{";
+    first = true;
+    for (const auto &[pc, cause] : report.analysis.return_slots.premise_pcs) {
+      out << (first ? "" : ",") << '"' << hex6(pc) << "\":\"" << m68k_return_slot_premise_name(cause) << '"';
+      first = false;
+    }
+    out << '}';
+  }
+  out << extra_members << "}\n";
   return out.str();
 }
 

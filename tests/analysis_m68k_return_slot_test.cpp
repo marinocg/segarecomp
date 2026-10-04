@@ -152,7 +152,9 @@ void reproducer_baseline_premise() {
   // the premise, counted.
   const auto memory = run(a, Domains::memory);
   expect(memory.complete && !reached(memory, target) && memory.return_slots.premise_sites == 1U &&
-             premise(memory, M68kReturnSlotPremise::slot_untracked) == 1U && memory.return_slots.premise_pcs.contains(rts),
+             premise(memory, M68kReturnSlotPremise::slot_untracked) == 1U && memory.return_slots.premise_pcs.size() == 1U &&
+             memory.return_slots.premise_pcs.contains(rts) &&
+             memory.return_slots.premise_pcs.at(rts) == M68kReturnSlotPremise::slot_untracked,
          "memory only: premise (slot_untracked), counted");
   const auto contexts = run(a, Domains::contexts);
   expect(contexts.complete && !reached(contexts, target) && premise(contexts, M68kReturnSlotPremise::slot_untracked) == 1U,

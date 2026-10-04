@@ -1252,7 +1252,10 @@ reproduce the SEG-026-T002 strict row exactly.
     category `return_slot_premise_violation` (never `ordinary_rts`), structural label of the same name, exit status 5 (every
     checked site is credited). Without `--classification` such edges are `undecided`, never passed. Oracle limits: first-entry
     edges only (a return into an already-entered PC is invisible) and no call stack (a return into another call's continuation is
-    indistinguishable). The private report does not list premise sites by PC; the attribution relies on the aggregate counts.
+    indistinguishable). A memory-domain private report lists every premise site with its cause (`return_slot_premise_sites`;
+    absent from baseline outputs, which stay byte-identical), and the comparison then attributes premise executions (by cause) and
+    violations site by site (`site_attribution: per_site`), falling back to the aggregate counts only when the list is absent;
+    re-measured per site, Sonic (29 of 41 executed) and Cool Spot (140 of 211) keep 0 violations.
   - *Interrupt-register model.* Reports the model (absent field: the baseline/challenger historical model). Under
     `historical_assumption` the resolved sites that depend on the assumption are not exposed by the report:
     `not_site_attributable`, and `credited_results_sound_for_interrupt_registers` is false.

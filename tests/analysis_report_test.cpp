@@ -265,6 +265,42 @@ void address_domain_report() {
   const auto private_output = format_genesis_analysis_report_private(on, aggregate);
   expect(private_output.find("\"000206\":{\"family\":\"jsr_an\",\"outcome\":\"resolved\"") != std::string::npos,
          "address on: the private computed_sites entry carries the resolved family");
+  // SEG-030-T009 correction: the per-site premise list is a private member of memory-domain runs only.
+  expect(private_output.find("return_slot_premise_sites") == std::string::npos &&
+             format_genesis_analysis_report_private(off, format_genesis_analysis_report_aggregate(off, baseline))
+                     .find("return_slot_premise_sites") == std::string::npos,
+         "premise sites: absent without the memory domain");
+}
+
+// SEG-030-T009 correction: BSR to a callee that overwrites its return slot (MOVE.L #$400,(A7); RTS). With the memory domain the
+// RTS is classified from its slot; every premise site is listed with its cause in the private output only.
+void return_slot_premise_sites_report() {
+  Image image;
+  image.words(0x200U, {0x610EU, 0x60FEU});                   // $200: BSR.S $210; $202: BRA.S $202
+  image.words(0x210U, {0x2EBCU, 0x0000U, 0x0400U, 0x4E75U});  // $210: MOVE.L #$400,(A7); $216: RTS
+  image.words(0x400U, {0x4E71U, 0x60FEU});
+  auto program = make_genesis_bridge_startup_program(image.bytes, 0U, entry, std::nullopt);
+  expect(program && apply_genesis_immutable_rom_aot(*program), "premise fixture program");
+  if (!program) return;
+  GenesisAnalysisReportConfig config{};
+  config.domains.memory = true;
+  const auto report = run_genesis_analysis_report(*program, config);
+  const auto &slots = report.analysis.return_slots;
+  const auto output = format_genesis_analysis_report_private(report, format_genesis_analysis_report_aggregate(report, config));
+  if (std::getenv("SEGARECOMP_DEBUG") != nullptr) std::cerr << output << '\n';
+  const auto rts = slots.premise_pcs.find(0x216U);
+  expect(slots.enabled && slots.premise_pcs.size() == slots.premise_sites && rts != slots.premise_pcs.end(),
+         "premise sites: the overwritten-slot RTS is a premise site");
+  if (rts == slots.premise_pcs.end()) return;
+  const std::string expected = std::string(",\"return_slot_premise_sites\":{\"000216\":\"") +
+                               m68k_return_slot_premise_name(rts->second) + "\"}";
+  expect(slots.premise_pcs.size() == 1U && output.find(expected) != std::string::npos,
+         "premise sites: the private output lists the site with its cause: " + output);
+  const GenesisAnalysisReportConfig baseline{};
+  const auto off = run_genesis_analysis_report(*program, baseline);
+  expect(format_genesis_analysis_report_private(off, format_genesis_analysis_report_aggregate(off, baseline))
+                 .find("return_slot_premise_sites") == std::string::npos,
+         "premise sites: absent without the memory domain");
 }
 
 void reject_invalid_images() {
@@ -317,6 +353,7 @@ int main(int argc, char **argv) {
     if (argc > 1) write_driver_inputs(argv[1], f, *program);
   }
   address_domain_report();
+  return_slot_premise_sites_report();
   reject_invalid_images();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";

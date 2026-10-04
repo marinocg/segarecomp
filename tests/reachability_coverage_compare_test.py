@@ -166,8 +166,8 @@ def check_named_premises(compare: pathlib.Path, tmpdir: pathlib.Path) -> None:
     """Synthetic private core report (project-authored PCs): callers at $200 (BSR to $210, continuation $202, in D) and $230
     (outside D, continuation $234); the callee $210: NOP; RTS at $212 is the one return-slot premise site. A resolved jsr_an
     site at $204 supplies a credited precise result."""
-    def private(model: str, normal: int = 0) -> dict:
-        return {
+    def private(model: str, normal: int = 0, listed: dict | None = None) -> dict:
+        report = {
             "aggregate": {"exception_model": "strict", "interrupt_register_model": model,
                           "solver": {"complete": True},
                           "memory": {"return_slots": {"sites": 1 + normal, "normal": normal, "computed": 0, "unknown": 0,
@@ -178,6 +178,9 @@ def check_named_premises(compare: pathlib.Path, tmpdir: pathlib.Path) -> None:
             "sites": {"rts": ["000212"] + (["000220"] if normal else []), "jsr_(An)": []},
             "computed_sites": {"000204": {"family": "jsr_an", "outcome": "resolved", "reason": "none", "detail": "none",
                                           "targets": ["000300"]}}}
+        if listed is not None:
+            report["return_slot_premise_sites"] = listed
+        return report
 
     def classification(pcs: dict) -> pathlib.Path:
         path = tmpdir / "premise-classification.json"
@@ -250,6 +253,22 @@ def check_named_premises(compare: pathlib.Path, tmpdir: pathlib.Path) -> None:
     slot = json.loads(out.stdout)["named_premises"]["return_slot_integrity"]
     assert slot["site_attribution"] == "normal_or_premise_sites", slot
     assert slot["premise_executions_observed"] == "not_site_attributable" and slot["checked_sites"] == 2, slot
+    # The memory-domain per-site premise list makes attribution exact even with normal sites; a listed premise site that is not
+    # a checked (credited) RTS site is counted not credited.
+    listed = {"000212": "slot_untracked", "000240": "opaque_callee"}
+    out = run("premise-per-site", private("proven_or_unknown", normal=1, listed=listed), observed, normal_path)
+    assert out.returncode == 0, (out.returncode, out.stderr)
+    slot = json.loads(out.stdout)["named_premises"]["return_slot_integrity"]
+    assert slot["site_attribution"] == "per_site" and slot["premise_sites_listed"] == 2, slot
+    assert slot["premise_executions_observed"] == 1 and slot["premise_sites_not_credited"] == 1, slot
+    assert slot["premise_executions_observed_by_cause"] == {"slot_untracked": 1}, slot
+    assert slot["premise_violations_at_premise_sites"] == 0 and slot["premise_sites_with_violations"] == 0, slot
+    out = run("premise-per-site-violation", private("proven_or_unknown", normal=1, listed=listed), observed | {0x500, 0x502},
+              normal_path + [(6, 0x212, 0x500, 1), (7, 0x500, 0x502, 1)])
+    assert out.returncode == 5, (out.returncode, out.stderr)
+    slot = json.loads(out.stdout)["named_premises"]["return_slot_integrity"]
+    assert slot["premise_violations"] == 1 and slot["premise_violations_at_premise_sites"] == 1, slot
+    assert slot["premise_sites_with_violations"] == 1 and "000212" not in out.stdout, slot
     # 3. The historical interrupt-register model: dependent sites are not site-attributable and not claimed sound.
     out = run("premise-historical", private("historical_assumption"), observed, normal_path)
     assert out.returncode == 0, (out.returncode, out.stderr)

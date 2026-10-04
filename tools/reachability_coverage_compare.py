@@ -42,7 +42,10 @@ a `named_premises` block (aggregates only):
                          slot. An edge into a call continuation of D, or into the stacked continuation of a call the oracle
                          executed earlier (a caller outside D: an ordinary closure miss), is consistent; any other edge is a
                          `premise_violation`. Deciding the second case needs --classification; without it such edges are counted
-                         `undecided`. Limits: the oracle records first entries only (a return into an already-entered PC is
+                         `undecided`. When the private report lists `return_slot_premise_sites` (memory domain: every
+                         premise site with its cause) attribution is exact (`per_site`): premise executions, by cause, and
+                         violations at premise sites are counted site by site; otherwise the count-based attribution applies.
+                         Limits: the oracle records first entries only (a return into an already-entered PC is
                          invisible) and no call stack (a return into another call's continuation is indistinguishable).
                          A violation is reported in its own fields and first-miss category, never as an ordinary miss, and the
                          tool exits 5 because it falsifies a credited result.
@@ -316,8 +319,14 @@ def named_premise_check(observed: set[int], witnesses: dict, private: dict,
     checked = {int(pc, 16) for pc in private.get("sites", {}).get("rts", [])} - computed
     # The report counts a site as a premise site when some point applied the premise; a site whose other points are a typed
     # Unknown return is reported as an Unknown `rts_computed` site, is not credited, and is not checked here.
+    # The memory-domain private report lists every premise site with its cause: exact site attribution.
+    listed = private.get("return_slot_premise_sites")
+    premise_causes = ({int(pc, 16): cause for pc, cause in listed.items()}
+                      if slots is not None and isinstance(listed, dict) else None)
     if slots is None:
         attribution = "no_return_slot_classification"  # baseline/challenger: every ordinary RTS carries the premise implicitly
+    elif premise_causes is not None:
+        attribution = "per_site"
     elif len(checked) > slots["normal"] + slots["return_slot_premise_sites"]:
         attribution = "superset_unverified"
     elif slots["normal"] == 0:
@@ -341,6 +350,17 @@ def named_premise_check(observed: set[int], witnesses: dict, private: dict,
         else:
             violations.add((previous, x))
     violating_sites = {site for site, _ in violations}
+    if premise_causes is not None:
+        credited_premise = set(premise_causes) & checked
+        executed_by_cause: dict[str, int] = {}
+        for pc in sorted(credited_premise & observed):
+            executed_by_cause[premise_causes[pc]] = executed_by_cause.get(premise_causes[pc], 0) + 1
+        not_credited = len(set(premise_causes) - checked)
+        executions = len(credited_premise & observed)
+    else:
+        not_credited = (slots["return_slot_premise_sites"] - len(checked)
+                        if attribution == "credited_premise_sites" else "not_site_attributable")
+        executions = len(checked & observed) if attribution == "credited_premise_sites" else "not_site_attributable"
     return_slot = {
         "site_attribution": attribution,
         "premise_sites": slots["return_slot_premise_sites"] if slots else None,
@@ -348,10 +368,8 @@ def named_premise_check(observed: set[int], witnesses: dict, private: dict,
         "normal_sites": slots["normal"] if slots else None,
         "checked_sites": len(checked),
         "checked_sites_executed": len(checked & observed),
-        "premise_sites_not_credited": (slots["return_slot_premise_sites"] - len(checked)
-                                       if attribution == "credited_premise_sites" else "not_site_attributable"),
-        "premise_executions_observed": (len(checked & observed) if attribution == "credited_premise_sites"
-                                        else "not_site_attributable"),
+        "premise_sites_not_credited": not_credited,
+        "premise_executions_observed": executions,
         "first_entries_from_checked_sites": entries,
         "first_entries_into_analysed_continuations": consistent,
         "first_entries_into_executed_call_continuations_outside_d": closure_misses,
@@ -363,6 +381,11 @@ def named_premise_check(observed: set[int], witnesses: dict, private: dict,
                         "not distinguishable)" + ("" if stacked_call is not None else
                                                   "; no --classification: edges outside D's continuations undecided"),
     }
+    if premise_causes is not None:
+        return_slot["premise_sites_listed"] = len(premise_causes)
+        return_slot["premise_executions_observed_by_cause"] = executed_by_cause
+        return_slot["premise_violations_at_premise_sites"] = sum(1 for site, _ in violations if site in premise_causes)
+        return_slot["premise_sites_with_violations"] = len(violating_sites & set(premise_causes))
     model = aggregate.get("interrupt_register_model")
     historical = model != "proven_or_unknown"
     resolved = sum(1 for e in private.get("computed_sites", {}).values() if e.get("outcome") == "resolved")

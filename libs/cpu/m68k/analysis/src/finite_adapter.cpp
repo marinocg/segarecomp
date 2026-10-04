@@ -2105,7 +2105,7 @@ M68kFiniteAnalysisResult solve_pinned(const M68kAnalysisImage &image, const std:
         ++slots.sites;
         if (site.cause != M68kReturnSlotPremise::none) {
           ++slots.premise_sites;
-          slots.premise_pcs.insert(pc);
+          slots.premise_pcs.emplace(pc, site.cause);
           ++slots.premise_by_cause[site.cause];
         }
         if (site.unknown) ++slots.unknown_sites;

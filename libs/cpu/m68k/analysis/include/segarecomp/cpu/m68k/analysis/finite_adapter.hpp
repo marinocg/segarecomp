@@ -455,7 +455,7 @@ struct M68kReturnSlotReport {
   std::map<M68kReturnSlotPremise, std::size_t> premise_by_cause;  // premise sites by the cause of their first premise point
   std::size_t computed_sites{};  // some point computed, none unknown
   std::size_t unknown_sites{};   // some point unknown
-  std::set<std::uint32_t> premise_pcs;  // the premise sites (falsification attribution)
+  std::map<std::uint32_t, M68kReturnSlotPremise> premise_pcs;  // the premise sites and their causes (falsification attribution)
 };
 
 // SEG-030-T006: frames-domain outcome of a run (counts only; the configuration of the returned round).
