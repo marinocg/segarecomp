@@ -1019,6 +1019,18 @@ void hardware_frame_pc_resumption() {
   fail_closed("offset bound", {0x06AFU, 0x0000U, 0x0080U, 0x0002U});  // ADDI.L #128,2(A7)
 }
 
+void interrupt_frame_pc_offset_edge() {
+  // An asynchronous IRQ may be taken at each ordinary main-flow edge. Advancing its saved PC by two therefore creates a distinct
+  // resumed edge at $208; the uninterrupted flow stops at $206 and cannot reach that address.
+  Asm a;
+  a.move_sr(0x2300U).nop().stop().stop();
+  a.at(irq6).w({0x54AFU, 0x0002U}).rte();  // ADDQ.L #2,2(A7); RTE
+  const auto result = run(a, irq_only);
+  if (debug()) std::cerr << describe(result);
+  expect(result.complete && result.frames.validated && result.frames.offset_resumptions > 0U && reached_in(result, 0x208U, 0U),
+         "interrupt frame offset: non-zero saved-PC transform emits the shifted ordinary-edge resumption");
+}
+
 void synchronous_vector_resumption() {
   struct Case {
     const char *name;
@@ -1118,6 +1130,7 @@ int main() {
   nested_register_effects();
   synchronous_and_interrupt_nesting();
   hardware_frame_pc_resumption();
+  interrupt_frame_pc_offset_edge();
   synchronous_vector_resumption();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";

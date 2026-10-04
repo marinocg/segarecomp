@@ -134,6 +134,8 @@ struct Image {
   std::vector<std::uint8_t> bytes;
   bool irq{};
   bool trap{};
+  std::optional<std::uint32_t> fault_vector;
+  std::optional<std::uint32_t> forced_interrupt_pc;  // deterministic minimized fixtures only
   std::string listing;
   std::array<std::uint32_t, 8> d{};
   std::array<std::uint32_t, 7> a{};  // A0-A6 (A7 is the reset SSP)
@@ -149,8 +151,13 @@ public:
     image.seed = seed_;
     image.irq = rng_.below(10U) < 6U;
     image.trap = rng_.below(10U) < 4U;
+    if (rng_.chance(4U)) {
+      static constexpr std::array<std::uint32_t, 3> faults{4U, 10U, 11U};
+      image.fault_vector = faults[rng_.below(faults.size())];
+    }
     irq_ = image.irq;
     trap_ = image.trap;
+    fault_ = image.fault_vector;
     // Vector table: SSP, reset PC, level-6 autovector (30), TRAP #0 (32).
     a_.begin(0U, 0x100U);
     a_.l(ssp).l(main_entry);
@@ -160,6 +167,10 @@ public:
     }
     if (trap_) {
       a_.pc = 32U * 4U;
+      a_.l(trap_handler);
+    }
+    if (fault_) {
+      a_.pc = *fault_ * 4U;
       a_.l(trap_handler);
     }
     // Main flow.
@@ -187,7 +198,7 @@ public:
       else a_.note("halt").w(0x60FEU);
     }
     if (irq_) handler(irq_handler);
-    if (trap_) handler(trap_handler);
+    if (trap_ || fault_) handler(trap_handler);
     image.bytes = a_.resolve() && !a_.overflow ? a_.bytes : std::vector<std::uint8_t>{};
     image.listing = a_.listing.str();
     // Concrete inputs (Unknown to the analysis): registers from a pool that includes return-slot and object addresses.
@@ -222,7 +233,7 @@ private:
   }
 
   void block(bool main) {
-    switch (rng_.below(main ? 15U : 14U)) {
+    switch (rng_.below(main ? 16U : 14U)) {
     case 0:
       a_.note("moveq").w(0x7000U | (data_reg() << 9U) | rng_.below(256U));
       break;
@@ -336,6 +347,14 @@ private:
       if (trap_) a_.note("trap #0").w(0x4E40U);
       else a_.note("nop").w(0x4E71U);
       break;
+    case 14:
+      if (fault_) {
+        const auto opcode = *fault_ == 4U ? 0x4AFCU : (*fault_ == 10U ? 0xA000U : 0xF000U);
+        a_.note("fault exception").w(opcode);
+      } else {
+        a_.note("nop").w(0x4E71U);
+      }
+      break;
     default:
       sr_change();
       break;
@@ -405,6 +424,15 @@ private:
       }
     }
     if (save) a_.note("movem.l (a7)+,d0/a1/a2").w(0x4CDFU).w(0x0601U);
+    // Run-2 frame-PC families. The bounded arithmetic forms remain resumptions; a precise replacement is an ordinary RTE target.
+    switch (rng_.below(8U)) {
+    case 0: a_.note("addq.l #2,2(a7)").w(0x54AFU).w(2U); break;
+    case 1: a_.note("subq.l #2,2(a7)").w(0x55AFU).w(2U); break;
+    case 2: a_.note("addi.l #2,2(a7)").w(0x06AFU).l(2U).w(2U); break;
+    case 3: a_.note("subi.l #2,2(a7)").w(0x04AFU).l(2U).w(2U); break;
+    case 4: a_.note("move.l #pad,2(a7)").w(0x2F7CU).l(pad_address()).w(2U); break;
+    default: break;
+    }
     a_.note("rte").w(0x4E73U);
   }
 
@@ -413,8 +441,54 @@ private:
   Asm a_;
   bool irq_{};
   bool trap_{};
+  std::optional<std::uint32_t> fault_;
   int current_sub_{-1};
 };
+
+// Two permanent minimized correction-cycle reproducers. Case 1 is the interrupt-register blind spot: an IRQ immediately before an
+// indirect call changes A2 and unchanged RTE must expose the concrete target. Case 2 is the TRAP/RTE blind spot: the handler changes
+// A2 and precisely rewrites the saved PC past one instruction; concrete checking must continue at the ordinary RTE target.
+Image pinned_resumption_case(bool trap_rewrite) {
+  Image image;
+  image.seed = trap_rewrite ? UINT64_C(0x5E60300F2) : UINT64_C(0x5E60300F1);
+  image.bytes.assign(image_size, 0U);
+  Asm a;
+  a.bytes = image.bytes;
+  a.begin(0U, 0x100U);
+  a.l(ssp).l(main_entry);
+  if (trap_rewrite) {
+    image.trap = true;
+    a.pc = 32U * 4U;
+    a.l(trap_handler);
+  } else {
+    image.irq = true;
+    image.forced_interrupt_pc = main_entry + 12U;
+    a.pc = 30U * 4U;
+    a.l(irq_handler);
+  }
+  a.begin(main_entry, sub_base);
+  a.note(trap_rewrite ? "pinned trap saved-PC rewrite" : "pinned IRQ unchanged frame");
+  a.note("known original A2").w(0x247CU).l(sub_base);
+  if (trap_rewrite) {
+    a.w(0x4E40U).w(0x4E71U);  // TRAP; skipped NOP
+  } else {
+    a.w(0x46FCU).w(0x2300U).w(0x4E71U);  // enable IRQ6; NOP
+  }
+  a.note("jsr (a2)").w(0x4E92U).w(0x60FEU);
+  for (const auto target : {sub_base, sub_base + sub_stride}) {
+    a.begin(target, target + 0x10U);
+    a.w(0x4E75U);
+  }
+  const auto handler = trap_rewrite ? trap_handler : irq_handler;
+  a.begin(handler, handler + 0x100U);
+  a.note("handler clobbers A2").w(0x247CU).l(sub_base + sub_stride);
+  if (trap_rewrite) a.note("replace saved PC").w(0x2F7CU).l(main_entry + 10U).w(2U);
+  a.w(0x4E73U);
+  image.bytes = std::move(a.bytes);
+  image.listing = a.listing.str();
+  image.ram_seed = image.seed;
+  return image;
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Concrete executor of exactly the generated subset.
@@ -428,6 +502,8 @@ struct Step {
   Entry entry{Entry::start};
   std::uint32_t from{};  // the PC of the transferring instruction (dynamic, rts, rte)
   bool intact{};         // rts: the slot still holds its call's pushed address; rte: an intact interrupt frame
+  bool hardware_frame{}; // rte: SR/stack provenance still names the concrete hardware frame (the PC may have an exact offset)
+  std::int32_t frame_pc_offset{};
   bool modified{};       // rte from an intact interrupt frame: some D0-D7/A0-A6 differs from its value when the interrupt was taken
 };
 
@@ -456,23 +532,29 @@ public:
     Entry entry = Entry::start;
     std::uint32_t from = 0U;
     bool intact = false;
+    bool hardware_frame = false;
+    std::int32_t frame_pc_offset = 0;
     bool modified = false;
     for (std::uint32_t step = 0; step < step_budget; ++step) {
       // A level-6 interrupt at a boundary its mask permits (a handler preserves every register).
-      if (image_.irq && ((sr_ >> 8U) & 7U) < 6U && entry == Entry::flow && rng_.chance(6U)) {
+      const bool forced = image_.forced_interrupt_pc && !forced_interrupt_taken_ && pc_ == *image_.forced_interrupt_pc;
+      if (image_.irq && ((sr_ >> 8U) & 7U) < 6U && entry == Entry::flow && (forced || rng_.chance(6U))) {
         frames_.push_back({a_[7] - 6U, pc_, sr_, true, d_, a_});
         if (!push32(pc_) || !push16(sr_)) return finish(trace, "bus");
         sr_ = static_cast<std::uint16_t>((sr_ & 0xF8FFU) | 0x0600U);
         pc_ = irq_handler;
         entry = Entry::interrupt;
         ++trace.interrupts;
+        forced_interrupt_taken_ = forced_interrupt_taken_ || forced;
       }
-      trace.steps.push_back({pc_, d_, a_, entry, from, intact, modified});
+      trace.steps.push_back({pc_, d_, a_, entry, from, intact, hardware_frame, frame_pc_offset, modified});
       entry = Entry::flow;
       from = pc_;
       intact = false;
+      hardware_frame = false;
+      frame_pc_offset = 0;
       modified = false;
-      const auto result = execute(entry, intact, modified);
+      const auto result = execute(entry, intact, hardware_frame, frame_pc_offset, modified);
       if (result) return finish(trace, *result);
     }
     return finish(trace, "budget");
@@ -545,7 +627,8 @@ private:
   static std::uint32_t sext16(std::uint32_t v) { return static_cast<std::uint32_t>(static_cast<std::int32_t>(static_cast<std::int16_t>(v))); }
 
   // Executes one instruction; returns the reason the run ends, or nullopt.
-  std::optional<std::string> execute(Entry &entry, bool &intact, bool &modified) {
+  std::optional<std::string> execute(Entry &entry, bool &intact, bool &hardware_frame, std::int32_t &frame_pc_offset,
+                                     bool &modified) {
     const auto at = pc_;
     const auto op = fetch();
     if (!op) return std::string("fetch");
@@ -553,6 +636,16 @@ private:
     const unsigned high = (w >> 9U) & 7U, low = w & 7U;
     const auto ext = [&]() { return fetch(); };
     const auto lit = [&]() { return fetch32(); };
+    const auto raise = [&](std::uint32_t vector, std::uint32_t stacked_pc) -> std::optional<std::string> {
+      frames_.push_back({a_[7] - 6U, stacked_pc, sr_, false, d_, a_});
+      if (!push32(stacked_pc) || !push16(sr_)) return std::string("bus");
+      sr_ = static_cast<std::uint16_t>(sr_ | 0x2000U);
+      const auto target = read(vector * 4U, 4U);
+      if (!target || *target == 0U) return std::string("vector");
+      pc_ = *target;
+      entry = Entry::trap;
+      return std::nullopt;
+    };
     if (w == 0x4E71U) return std::nullopt;
     if (w == 0x60FEU) return std::string("halt");
     if ((w & 0xF100U) == 0x7000U) {
@@ -680,6 +773,25 @@ private:
       a_[7] += 4U;
       return std::nullopt;
     }
+    if (w == 0x54AFU || w == 0x55AFU) {  // ADDQ/SUBQ.L #2,d16(A7), generated only for saved-PC transforms
+      const auto disp = ext();
+      if (!disp) return std::string("fetch");
+      const auto address = a_[7] + sext16(*disp);
+      const auto value = read(address, 4U);
+      if (!value) return std::string("bus");
+      const auto next = w == 0x54AFU ? *value + 2U : *value - 2U;
+      return write(address, next, 4U) ? std::nullopt : std::optional<std::string>("bus");
+    }
+    if (w == 0x06AFU || w == 0x04AFU) {  // ADDI/SUBI.L #imm,d16(A7)
+      const auto immediate = lit();
+      const auto disp = ext();
+      if (!immediate || !disp) return std::string("fetch");
+      const auto address = a_[7] + sext16(*disp);
+      const auto value = read(address, 4U);
+      if (!value) return std::string("bus");
+      const auto next = w == 0x06AFU ? *value + *immediate : *value - *immediate;
+      return write(address, next, 4U) ? std::nullopt : std::optional<std::string>("bus");
+    }
     if ((w & 0xFFF8U) == 0x5240U) {
       d_[low] = (d_[low] & 0xFFFF0000U) | ((d_[low] + 1U) & 0xFFFFU);
       return std::nullopt;
@@ -757,12 +869,13 @@ private:
       const auto sr = read(a_[7], 2U);
       const auto pc = read(a_[7] + 2U, 4U);
       if (!sr || !pc) return std::string("bus");
-      intact = !frames_.empty() && frames_.back().address == a_[7] && frames_.back().pc == *pc && frames_.back().sr == *sr &&
-               frames_.back().interrupt;
-      if (intact) {
+      hardware_frame = !frames_.empty() && frames_.back().address == a_[7] && frames_.back().sr == *sr;
+      intact = hardware_frame && frames_.back().pc == *pc && frames_.back().interrupt;
+      if (hardware_frame) {
         const auto &frame = frames_.back();
+        frame_pc_offset = static_cast<std::int32_t>(static_cast<std::int64_t>(*pc) - static_cast<std::int64_t>(frame.pc));
         for (unsigned i = 0; i < 8U; ++i) modified = modified || d_[i] != frame.d[i] || (i < 7U && a_[i] != frame.a[i]);
-        if (preserve_) {
+        if (preserve_ && frame.interrupt) {
           d_ = frame.d;
           for (unsigned i = 0; i < 7U; ++i) a_[i] = frame.a[i];
         }
@@ -775,15 +888,11 @@ private:
       return std::nullopt;
     }
     if (w == 0x4E40U) {  // TRAP #0
-      frames_.push_back({a_[7] - 6U, pc_, sr_, false, d_, a_});
-      if (!push32(pc_) || !push16(sr_)) return std::string("bus");
-      sr_ = static_cast<std::uint16_t>(sr_ | 0x2000U);
-      const auto vector = read(32U * 4U, 4U);
-      if (!vector || *vector == 0U) return std::string("vector");
-      pc_ = *vector;
-      entry = Entry::trap;
-      return std::nullopt;
+      return raise(32U, pc_);
     }
+    if (w == 0x4AFCU) return raise(4U, at);  // ILLEGAL stacks the faulting PC
+    if ((w & 0xF000U) == 0xA000U) return raise(10U, at);
+    if ((w & 0xF000U) == 0xF000U) return raise(11U, at);
     if (w == 0x46FCU) {
       const auto v = ext();
       if (!v) return std::string("fetch");
@@ -805,6 +914,7 @@ private:
   bool zero_{};
   std::map<std::uint32_t, std::uint32_t> call_slots_;  // physical work-RAM offset -> the return address a call pushed there
   std::vector<Frame> frames_;
+  bool forced_interrupt_taken_{};
 };
 
 std::string transcript(const Trace &trace) {
@@ -859,6 +969,7 @@ M68kFiniteAnalysisResult analyze(const Image &image, Mode mode) {
   std::vector<M68kHandlerVector> vectors;
   if (image.irq) vectors.push_back({30U, irq_handler});
   if (image.trap) vectors.push_back({32U, trap_handler});
+  if (image.fault_vector) vectors.push_back({*image.fault_vector, trap_handler});
   for (const auto &vector : vectors) entries.push_back(vector.handler);
   if (mode != Mode::baseline) {
     config.domains.address = config.domains.memory = config.domains.contexts = true;
@@ -974,10 +1085,21 @@ Checked check(const M68kFiniteAnalysisResult &result, const Trace &trace, Mode m
         if (!contains(site.targets, step.pc)) return unsound(i, "resolved RTE outside its set: " + where.str());
         break;
       }
-      // An intact interrupt frame resumes the preempted flow (the analysis's resumption premise); a TRAP's continuation is not
-      // modelled (typed Unknown: interrupt_resumption, or the rte family without frames).
-      if (step.intact) break;
-      return {Verdict::explained, "typed-Unknown RTE (exception continuation not modelled)", i};
+      // The complete frames model names unchanged and exactly bounded offset hardware-frame resumptions through D rather than as
+      // ordinary return-site targets. Continue checking the concrete target and register state. A replacement outside that bounded
+      // relation must be an ordinary resolved RTE above, or a typed Unknown. Historical configurations retain their old intact-
+      // interrupt premise; TRAP/fault continuations remain outside those models.
+      const bool bounded_offset = step.hardware_frame && (step.frame_pc_offset % 2 == 0) && step.frame_pc_offset >= -128 &&
+                                  step.frame_pc_offset <= 126;
+      if (mode == Mode::all && bounded_offset) {
+        if (!result.reached.contains(step.pc) && site.kind == SiteStatus::unknown)
+          return {Verdict::explained, "typed-Unknown bounded hardware-frame resumption", i};
+        break;
+      }
+      if (mode != Mode::all && step.intact) break;
+      if (mode != Mode::all) return {Verdict::explained, "historical model has no non-intact exception resumption", i};
+      if (site.kind == SiteStatus::unknown) return {Verdict::explained, "typed-Unknown RTE", i};
+      return unsound(i, "unclassified concrete RTE transfer: " + where.str());
     }
     }
     if (!result.reached.contains(step.pc)) return unsound(i, "reached PC outside D: " + where.str());
@@ -1014,11 +1136,12 @@ int main(int argc, char **argv) {
   std::map<Mode, Totals> totals;
   std::size_t images = 0U, rejected = 0U, failures = 0U;
   std::map<std::string, std::size_t> ends;
-  for (std::size_t n = 0; n < count; ++n) {
-    const auto seed = base + n;
-    const auto image = Generator{seed}.build();
+  for (std::size_t n = 0; n < count + 2U; ++n) {
+    const bool pinned = n < 2U;
+    const auto seed = pinned ? (n == 0U ? UINT64_C(0x5E60300F1) : UINT64_C(0x5E60300F2)) : base + n - 2U;
+    const auto image = pinned ? pinned_resumption_case(n == 1U) : Generator{seed}.build();
     if (image.bytes.empty()) {
-      ++rejected;  // a routine overflowed its slot (deterministic; never silently counted as checked)
+      ++rejected;  // a random routine overflowed its slot (deterministic; never silently counted as checked)
       continue;
     }
     ++images;
@@ -1026,6 +1149,14 @@ int main(int argc, char **argv) {
     // The same run under the historical reference semantics (an interrupt's RTE restores D0-D7/A0-A6): it attributes a historical
     // configuration's divergence to handler register writes only when that run is not itself unsound.
     const auto preserved = Machine{image, seed ^ UINT64_C(0xA5A5A5A5), true}.run();
+    if (pinned) {
+      bool exercised = false;
+      for (const auto &step : trace.steps) exercised = exercised || (step.entry == Entry::rte && step.modified);
+      if (!exercised) {
+        std::cerr << "FAIL: pinned resumption did not exercise a handler-modified RTE, seed " << seed << '\n';
+        ++failures;
+      }
+    }
     if (transcript(trace) != transcript(Machine{image, seed ^ UINT64_C(0xA5A5A5A5)}.run())) {
       std::cerr << "FAIL: non-deterministic concrete run, seed " << seed << '\n';
       ++failures;
@@ -1044,6 +1175,15 @@ int main(int argc, char **argv) {
       if (checked.verdict == Verdict::unsound && mode != Mode::all && checked.after_modified) {
         Totals scratch;
         if (check(result, preserved, mode, scratch).verdict != Verdict::unsound) checked.verdict = Verdict::historical;
+      }
+      if (pinned && mode == Mode::all) {
+        const bool expected = n == 0U ? checked.verdict == Verdict::clean
+                                      : checked.verdict == Verdict::explained && checked.why == "typed-Unknown dynamic site";
+        if (!expected) {
+          std::cerr << "FAIL: pinned all-model resumption did not reach its expected post-RTE check, seed " << seed << ": "
+                    << checked.why << '\n';
+          if (checked.verdict != Verdict::unsound) ++failures;
+        }
       }
       switch (checked.verdict) {
       case Verdict::clean: ++sum.clean; break;
@@ -1064,7 +1204,7 @@ int main(int argc, char **argv) {
     }
   }
   const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-  std::cout << "analysis_m68k_differential_test: seeds " << base << ".." << base + count - 1U << " images=" << images
+  std::cout << "analysis_m68k_differential_test: pinned=2 seeds " << base << ".." << base + count - 1U << " images=" << images
             << " rejected=" << rejected << " seconds=" << elapsed << '\n';
   for (const auto &[why, n] : ends) std::cout << "  concrete end " << why << '=' << n << '\n';
   for (const auto &[mode, sum] : totals)
