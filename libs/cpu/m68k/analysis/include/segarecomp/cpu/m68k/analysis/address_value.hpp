@@ -45,8 +45,9 @@ enum class M68kAnalysisSubReason : std::uint8_t {
   frame_unproven,
   interrupt_resumption,
   invalidated,
+  return_slot_rewritten,  // SEG-030-T008: a known-target store may have rewritten an RTS's return slot
 };
-inline constexpr std::size_t m68k_analysis_sub_reason_count = 15U;
+inline constexpr std::size_t m68k_analysis_sub_reason_count = 16U;
 [[nodiscard]] const char *m68k_analysis_sub_reason_name(M68kAnalysisSubReason reason) noexcept;
 
 // ADR 0079 decision 4: the CPU-owned region vocabulary (Unknown is the points-to top, not a region).

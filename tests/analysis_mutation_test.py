@@ -6,7 +6,7 @@ effect projection or the Z80 adapter) that plants a deliberate soundness, determ
 product tree (without build/, .git/, games/, .tools/) to a temporary directory, configures ONE build there, builds the
 SEG-029 fixture tests plus the SEG-030-T003 address-domain, SEG-030-T004 memory, SEG-030-T005 contexts, SEG-030-T006 frames and Genesis
 interrupt-premise and the SEG-030-T010 Z80 store-freedom proof fixtures (SEG-030-T008 maps every SEG-030 mutant of its record to a
-killed mutant here; ADR 0079, T008 record) and requires the unmutated baseline to pass. Then, per mutant, it applies the edit to the temporary copy only, rebuilds the
+killed mutant here; ADR 0079, T008 record; T008 part 2 adds the return-slot fixture) and requires the unmutated baseline to pass. Then, per mutant, it applies the edit to the temporary copy only, rebuilds the
 affected fixture tests incrementally, runs them, and restores the file. A mutant is KILLED when one of its fixture tests exits non-zero (or times out). The worktree is never modified.
 
 Fail-closed rules:
@@ -49,8 +49,10 @@ PREMISE_TEST = "analysis_genesis_interrupt_premise_test"  # SEG-030-T006: the na
 Z80_PROOF_TEST = "analysis_genesis_z80_proof_test"  # SEG-030-T010: the Genesis Z80 work-RAM store-freedom proof and its credit
 VALUE_TEST = "analysis_m68k_value_test"  # SEG-030-T003: the address region plus offset domain (added by SEG-030-T008)
 MEMORY_TEST = "analysis_m68k_memory_test"  # SEG-030-T004: abstract memory and alias exclusion (added by SEG-030-T008)
+RETURN_SLOT_TEST = "analysis_m68k_return_slot_test"  # SEG-030-T008: the return slot and the return-slot integrity premise
 # cheapest first: a core mutant is usually decided by the CPU-free fixture
-ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, VALUE_TEST, MEMORY_TEST, CONTEXTS_TEST, FRAMES_TEST, PREMISE_TEST, Z80_PROOF_TEST)
+ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, VALUE_TEST, MEMORY_TEST, RETURN_SLOT_TEST, CONTEXTS_TEST, FRAMES_TEST, PREMISE_TEST,
+             Z80_PROOF_TEST)
 TEST_TIMEOUT_SECONDS = 60  # the unmutated fixtures run in well under a second
 
 FINITE = "libs/analysis/include/segarecomp/analysis/finite_value.hpp"
@@ -468,6 +470,19 @@ MUTANTS: list[Mutant] = [
            "      if (!used || covered || report.z80_proof_runs >= 4U) {",
            "      if (true) {\n        covered = true;",
            (Z80_PROOF_TEST,), "the optimistic bound is credited without validating it against the run's own 68K stores"),
+    # SEG-030-T008 part 2: the return slot of an RTS at the entry stack delta (ADR 0079 decision 8).
+    Mutant("m68k_return_slot_precise_rewrite_ignored", M68K,
+           "    if (std::all_of(values->begin(), values->end(), [&](std::uint32_t v) { return expected.contains(v & bus_mask); })) return out;",
+           "    if (recorded) return out;",
+           (RETURN_SLOT_TEST,), "a precise rewrite of a recorded return slot is ignored (the RTS stays a normal return)"),
+    Mutant("m68k_return_slot_weak_rewrite_normal", M68K,
+           "  if (read.known || (recorded && rewritten)) return unknown(UnknownReason::unsupported_transfer, Sub::return_slot_rewritten);",
+           "  if (read.known) return unknown(UnknownReason::unsupported_transfer, Sub::return_slot_rewritten);",
+           (RETURN_SLOT_TEST,), "a weak rewrite of a return slot is treated as a normal return"),
+    Mutant("m68k_return_slot_store_not_related", M68K_MEMORY,
+           "      if (range.kind == cell.kind && range.id == cell.id && range.lo < hi && lo < range.hi) slot.rewritten = true;",
+           "      (void)range, (void)lo, (void)hi;",
+           (RETURN_SLOT_TEST,), "a known-target store is never related to the recorded return slots"),
 ]
 
 

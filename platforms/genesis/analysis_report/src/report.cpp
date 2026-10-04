@@ -485,6 +485,19 @@ std::string format_genesis_analysis_report_aggregate(const GenesisAnalysisReport
           << ",\"sites_resolved_only_without_memory\":" << comparison.sites_resolved_only_without_memory
           << ",\"unresolved_sites\":" << comparison.unresolved_sites << '}';
     }
+    // SEG-030-T008: the RTS sites classified from their return slot (ADR 0079 decision 8, return-slot integrity premise).
+    {
+      const auto &slots = report.analysis.return_slots;
+      out << ",\"return_slots\":{\"sites\":" << slots.sites << ",\"normal\":" << slots.normal_sites
+          << ",\"computed\":" << slots.computed_sites << ",\"unknown\":" << slots.unknown_sites
+          << ",\"return_slot_premise_sites\":" << slots.premise_sites << ",\"premise_by_cause\":{";
+      bool first_cause = true;
+      for (const auto &[cause, n] : slots.premise_by_cause) {
+        out << (first_cause ? "\"" : ",\"") << m68k_return_slot_premise_name(cause) << "\":" << n;
+        first_cause = false;
+      }
+      out << "}}";
+    }
     if (report.z80_proof)
       out << ",\"z80_ram_write_proof\":"
           << format_genesis_z80_ram_write_proof(*report.z80_proof, config.assume_no_z80_ram_writes ? "ablation"

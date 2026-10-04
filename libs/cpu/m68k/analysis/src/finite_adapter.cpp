@@ -798,7 +798,8 @@ namespace {
 UnknownReason continuation_reason(Sub sub) {
   switch (sub) {
   case Sub::context_bound: return UnknownReason::state_bound;
-  case Sub::stack_unbalanced: return UnknownReason::unsupported_transfer;
+  case Sub::stack_unbalanced:
+  case Sub::return_slot_rewritten: return UnknownReason::unsupported_transfer;
   default: return UnknownReason::unknown_input;
   }
 }
@@ -1074,6 +1075,7 @@ void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::u
   const auto targets = memory_write_targets(operation, in, status);
   if (!writes.described) {
     out.memory.poison_all();
+    m68k_return_slots_unknown_store(out.memory);
     return;
   }
   for (std::size_t i = 0; i < writes.writes.size(); ++i) {
@@ -1092,6 +1094,9 @@ void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::u
     }
     if (value && !value->is_pointer() && !value->data.is_precise()) value.reset();
     m68k_memory_store(out.memory, targets[i].first, targets[i].second, value, policy);
+    // SEG-030-T008: every store is related to the recorded return slots (a call's push records one).
+    m68k_return_slots_store(out.memory, targets[i].first, targets[i].second,
+                            write.value == M68kMemoryWrite::Value::return_address ? std::optional<std::uint32_t>(next) : std::nullopt);
   }
 }
 
@@ -1310,9 +1315,20 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
   case M68kDynamicControlFamily::return_from_exception:
   case M68kDynamicControlFamily::return_restore_condition_codes:
     // SEG-030-T006: an RTE/RTR, or an RTS away from the entry stack delta, whose frame or return cells were written precisely by
-    // analysed code is a computed jump in the same activation (frames domain). Every other return is modelled through continuations.
-    if (config_.domains.frames) {
-      const auto report = evaluate_return_site(point, operation, in);
+    // analysed code is a computed jump in the same activation (frames domain). SEG-030-T008: an RTS at the entry delta whose return
+    // cell holds a precise set with a value no call pushed is a computed return to the values its callers' continuations do not
+    // already reach (memory domain). Every other return is modelled through continuations.
+    if (config_.domains.memory) {
+      std::optional<M68kReturnSiteReport> report;
+      if (const auto slot = classify_return_slot(point, operation, in)) {
+        if (slot->kind == M68kReturnSlotClass::computed) {
+          report.emplace();
+          report->resolved = true;
+          report->targets = slot->fresh;
+        }
+      } else {
+        report = evaluate_return_site(point, operation, in);
+      }
       if (report && report->resolved) {
         const auto popped = operation.kind == M68kIrKind::return_from_subroutine ? 4 : static_cast<std::int64_t>(m68k_exception_frame_bytes);
         for (const auto target : report->targets) {
@@ -1394,13 +1410,138 @@ analysis::TransferResult<M68kAnalysisState> M68kFiniteAdapter::transfer(std::uin
 // RTS away from the activation's entry stack delta (PC <- (SP), SP + 4) read their frame or return address from abstract-memory cells
 // only: a cell exists only when analysed code wrote it precisely (never a hardware exception frame, never an asynchronous cell), so
 // a resolved site is a code-built frame. Every other one is Unknown with its reason.
+// SEG-030-T008 (ADR 0079 decision 8): an RTS at its activation's entry stack delta pops the return cell (A7).L (M68000PRM RTS: PC <-
+// (SP), SP + 4). It is a normal return only when that cell provably holds a return address a call pushed into it, or when the
+// recorded slot cannot have been written by any store; a precise cell with another value is a computed return to that set; a slot
+// a known-target store may have rewritten is Unknown(return_slot_rewritten). What remains (Unknown-target stores, opaque callee
+// effects, asynchronous and external writers, an untracked A7) is the named return-slot integrity premise, reported per site.
+std::optional<M68kReturnSlotOutcome> M68kFiniteAdapter::classify_return_slot(std::uint64_t point, const M68kIrOperation &operation,
+                                                                            const State &in) const {
+  if (!config_.domains.memory) return std::nullopt;
+  if (m68k_control_successors(operation).dynamic != M68kDynamicControlFamily::return_from_subroutine) return std::nullopt;
+  if (config_.domains.contexts && !(in.stack_delta == FiniteValue::of({0U}))) return std::nullopt;
+  const auto pc = m68k_point_pc(point);
+  const auto tag = m68k_point_tag(point);
+  M68kReturnSlotOutcome out;
+  const auto unknown = [&](UnknownReason reason, Sub sub) {
+    out.kind = M68kReturnSlotClass::unknown;
+    out.reason = reason;
+    out.sub = sub;
+    out.targets.clear();
+    out.fresh.clear();
+    return out;
+  };
+  const auto premise = [&](M68kReturnSlotPremise cause) {
+    out.kind = M68kReturnSlotClass::premise;
+    out.premise = cause;
+    return out;
+  };
+  if (config_.pinned_sites.contains(pc)) return unknown(UnknownReason::unsupported_transfer, Sub::invalidated);
+  const auto &a7 = in.address[7];
+  if (!a7.is_known()) return premise(M68kReturnSlotPremise::slot_untracked);
+  // The recorded slot at every exact A7 cell (recorded only when every cell is).
+  bool recorded = a7.is_exact();
+  bool rewritten = false, unknown_store = false;
+  FiniteValue pushed;
+  for (const auto &[region, offsets] : a7.pairs) {
+    if (!recorded) break;
+    if (!m68k_memory_tracked(region.kind)) {
+      recorded = false;
+      break;
+    }
+    for (const auto offset : offsets.exact()) {
+      const auto at = region.mirror != 0U ? offset % region.mirror : offset;
+      const auto found = in.memory.slots.find(M68kCell{region.kind, region.id, at, 4U});
+      if (found == in.memory.slots.end()) {
+        recorded = false;
+        break;
+      }
+      pushed = join(pushed, found->second.pushed);
+      rewritten = rewritten || found->second.rewritten;
+      unknown_store = unknown_store || found->second.unknown_store;
+    }
+  }
+  if (recorded && !pushed.is_precise()) recorded = false;
+  M68kEffectiveAddress ea{};
+  ea.mode = M68kEaMode::address_indirect;
+  ea.reg = 7U;
+  const auto read = read_memory_with(policy_for(tag), in, ea, 4U, nullptr);
+  std::optional<std::vector<std::uint32_t>> values;
+  if (read.known) {
+    if (read.value.is_pointer()) {
+      if (auto exact = read.value.pointer.values(); exact && !read.value.pointer.width_derived) values = std::move(*exact);
+    } else if (read.value.data.is_precise() && !read.value.width_derived) {
+      values.emplace();
+      for (const auto v : read.value.data.values()) values->push_back(static_cast<std::uint32_t>(v));
+    }
+  }
+  if (values) {
+    std::set<std::uint32_t> expected;
+    if (recorded)
+      for (const auto v : pushed.values()) expected.insert(static_cast<std::uint32_t>(v) & bus_mask);
+    if (std::all_of(values->begin(), values->end(), [&](std::uint32_t v) { return expected.contains(v & bus_mask); })) return out;
+    std::set<std::uint32_t> exact;
+    for (const auto value : *values) {
+      const auto target = value & bus_mask;
+      if ((target & 1U) != 0U) {
+        ++out.odd_targets_excluded;  // an odd PC raises an address error: never a normal target
+        continue;
+      }
+      if (!image_.mapped(target)) return unknown(UnknownReason::non_immutable_read, Sub::target_outside_image);
+      exact.insert(target);
+    }
+    if (exact.empty()) return unknown(UnknownReason::unsupported_transfer, Sub::none);
+    out.kind = M68kReturnSlotClass::computed;
+    out.targets.assign(exact.begin(), exact.end());
+    for (const auto target : exact)
+      if (!expected.contains(target)) out.fresh.push_back(target);
+    return out;
+  }
+  // Partially known (a strided or width-only value), or a known-target store may have written the slot: never the premise.
+  if (read.known || (recorded && rewritten)) return unknown(UnknownReason::unsupported_transfer, Sub::return_slot_rewritten);
+  if (recorded && unknown_store) return premise(M68kReturnSlotPremise::unknown_target_store);
+  if (read.sub == Sub::async_writer) return premise(M68kReturnSlotPremise::async_writer);
+  if (read.sub == Sub::external_writer) return premise(M68kReturnSlotPremise::external_writer);
+  // Every store since the push was related to the recorded slot and none may write it: the cell still holds the pushed address.
+  if (recorded) return out;
+  switch (in.memory.absent) {
+  case Sub::store_poison: return premise(M68kReturnSlotPremise::unknown_target_store);
+  case Sub::none:
+  case Sub::initial_memory: return unknown(UnknownReason::unknown_input, Sub::initial_memory);  // no call pushed this slot
+  case Sub::set_bound: return unknown(UnknownReason::state_bound, Sub::set_bound);
+  default: return premise(M68kReturnSlotPremise::opaque_callee);  // an opaque continuation's memory (context_bound, ...)
+  }
+}
+
 std::optional<M68kReturnSiteReport> M68kFiniteAdapter::evaluate_return_site(std::uint64_t point, const M68kIrOperation &operation,
                                                                             const State &in) const {
-  if (!config_.domains.frames) return std::nullopt;
+  if (!config_.domains.memory) return std::nullopt;
   const auto family = m68k_control_successors(operation).dynamic;
   const bool rts = family == M68kDynamicControlFamily::return_from_subroutine;
   const bool rte = family == M68kDynamicControlFamily::return_from_exception;
   if (!rts && !rte && family != M68kDynamicControlFamily::return_restore_condition_codes) return std::nullopt;
+  // SEG-030-T008: an RTS at the entry delta is a site only when its return slot makes it computed or Unknown.
+  if (const auto slot = classify_return_slot(point, operation, in)) {
+    if (slot->kind == M68kReturnSlotClass::normal || slot->kind == M68kReturnSlotClass::premise) return std::nullopt;
+    M68kReturnSiteReport report;
+    report.family = family;
+    report.resolved = slot->kind == M68kReturnSlotClass::computed;
+    report.targets = slot->targets;
+    report.odd_targets_excluded = slot->odd_targets_excluded;
+    report.reason = slot->reason;
+    report.sub = slot->sub;
+    return report;
+  }
+  if (!config_.domains.frames) {
+    // SEG-030-T008: without the frames domain an RTS away from the entry stack delta (a push window, an unbalanced pop) is never
+    // resolved: a typed Unknown site (its activation is unproven, stack_unbalanced).
+    if (!rts || !config_.domains.contexts) return std::nullopt;
+    M68kReturnSiteReport report;
+    report.family = family;
+    report.reason = UnknownReason::unsupported_transfer;
+    report.sub = config_.pinned_sites.contains(m68k_point_pc(point)) ? Sub::invalidated : Sub::stack_unbalanced;
+    return report;
+  }
   const auto pc = m68k_point_pc(point);
   const auto tag = m68k_point_tag(point);
   M68kReturnSiteReport out;
@@ -1612,6 +1753,12 @@ M68kFiniteAnalysisResult solve_pinned(const M68kAnalysisImage &image, const std:
     for (const auto &[point, reason] : out.solution.unresolved_computed)
       if (credited(point)) out.unresolved_computed.emplace(m68k_point_pc(point), reason);
     std::set<std::uint32_t> invalidated;
+    struct SlotSite {
+      M68kReturnSlotPremise cause{M68kReturnSlotPremise::none};
+      bool computed{};
+      bool unknown{};
+    };
+    std::map<std::uint32_t, SlotSite> slot_sites;
     for (const auto &[point, state] : out.solution.in_states) {
       if (!credited(point)) continue;
       const auto pc = m68k_point_pc(point);
@@ -1621,7 +1768,16 @@ M68kFiniteAnalysisResult solve_pinned(const M68kAnalysisImage &image, const std:
         continue;
       }
       out.reached.emplace(pc, decoded->length);
-      if (config.domains.frames) {
+      if (config.domains.memory) {
+        // SEG-030-T008: the return-slot class of every RTS at the entry delta (a pinned one whose computed targets were lost is
+        // invalidated even when its final class is normal).
+        if (const auto slot = adapter.classify_return_slot(point, decoded->operation, state)) {
+          if (!config.pinned_sites.contains(pc) && out.solution.pinned.contains(point)) invalidated.insert(pc);
+          auto &site = slot_sites[pc];
+          if (slot->kind == M68kReturnSlotClass::premise && site.cause == M68kReturnSlotPremise::none) site.cause = slot->premise;
+          site.computed = site.computed || slot->kind == M68kReturnSlotClass::computed;
+          site.unknown = site.unknown || slot->kind == M68kReturnSlotClass::unknown;
+        }
         if (auto report = adapter.evaluate_return_site(point, decoded->operation, state)) {
           if (!config.pinned_sites.contains(pc) && out.solution.pinned.contains(point)) invalidated.insert(pc);
           merge_site(out.return_sites, pc, std::move(*report));
@@ -1644,6 +1800,21 @@ M68kFiniteAnalysisResult solve_pinned(const M68kAnalysisImage &image, const std:
       // it to `invalidated` and restarts once more with the site pinned at the adapter, so it emits nothing (SEG-029-T006).
       if (out.solution.pinned.contains(point) && !config.pinned_sites.contains(pc)) invalidated.insert(pc);
       merge_site(out.pc_index_sites, pc, std::move(report));
+    }
+    if (config.domains.memory) {
+      auto &slots = out.return_slots;
+      slots.enabled = true;
+      for (const auto &[pc, site] : slot_sites) {
+        ++slots.sites;
+        if (site.cause != M68kReturnSlotPremise::none) {
+          ++slots.premise_sites;
+          slots.premise_pcs.insert(pc);
+          ++slots.premise_by_cause[site.cause];
+        }
+        if (site.unknown) ++slots.unknown_sites;
+        else if (site.computed) ++slots.computed_sites;
+        else if (site.cause == M68kReturnSlotPremise::none) ++slots.normal_sites;
+      }
     }
     if (invalidated.empty()) return out;
     config.pinned_sites.insert(invalidated.begin(), invalidated.end());  // monotone: terminates
@@ -1795,6 +1966,7 @@ struct PointFacts {
                           // continuation (TRAP/TRAPV), an exception-raising or undecodable instruction
   bool unbalanced{};      // RTS not at the entry stack delta, or RTE/RTR
   bool exit{};            // RTS at the entry stack delta
+  bool slot_unproven{};   // SEG-030-T008: RTS at the entry stack delta whose return slot is computed or Unknown
 };
 
 struct Activation {
@@ -1845,7 +2017,11 @@ std::map<std::uint64_t, PointFacts> point_facts(M68kFiniteAdapter &adapter, cons
     const auto edges = adapter.transfer(point, state).edges;
     // SEG-030-T006: a return resolved from a code-built frame is a computed jump inside the activation (frames domain only).
     const bool resolved_return = std::any_of(edges.begin(), edges.end(), [](const auto &edge) { return edge.kind == EdgeKind::computed; });
-    if (control.dynamic == M68kDynamicControlFamily::return_from_subroutine && !resolved_return) {
+    // SEG-030-T008: an RTS at the entry delta is an exit only when its return slot is normal or under the named premise.
+    if (const auto slot = adapter.classify_return_slot(point, decoded->operation, state)) {
+      if (slot->kind == M68kReturnSlotClass::normal || slot->kind == M68kReturnSlotClass::premise) facts.exit = true;
+      else facts.slot_unproven = true;
+    } else if (control.dynamic == M68kDynamicControlFamily::return_from_subroutine && !resolved_return) {
       if (state.stack_delta == zero) facts.exit = true;
       else facts.unbalanced = true;
     }
@@ -1927,16 +2103,18 @@ ContextDerivation derive_contexts(const M68kAnalysisImage &image, const M68kAnal
   // Local facts.
   for (auto &[key, activation] : activations) {
     (void)key;
-    bool unbalanced = false, unknown = false;
+    bool unbalanced = false, unknown = false, slot = false;
     for (const auto point : activation.points) {
       const auto found = facts.find(point);
       if (found == facts.end()) continue;
       const auto &fact = found->second;
       unbalanced = unbalanced || fact.unbalanced;
+      slot = slot || fact.slot_unproven;
       unknown = unknown || fact.unknown_effect;
       for (const auto callee : fact.callees) activation.nested.insert(activation_of(callee));
     }
     if (unbalanced) activation.fail = Sub::stack_unbalanced;
+    else if (slot) activation.fail = Sub::return_slot_rewritten;
     else if (unknown) activation.fail = Sub::none;
   }
   // Balance over the activation graph: strongly connected components (Tarjan, iterative), each emitted after the components it
@@ -2963,6 +3141,18 @@ M68kPointsTo m68k_query_address_register(const M68kFiniteAnalysisResult &result,
   return out;
 }
 
+const char *m68k_return_slot_premise_name(M68kReturnSlotPremise premise) noexcept {
+  switch (premise) {
+  case M68kReturnSlotPremise::none: return "none";
+  case M68kReturnSlotPremise::slot_untracked: return "slot_untracked";
+  case M68kReturnSlotPremise::unknown_target_store: return "unknown_target_store";
+  case M68kReturnSlotPremise::opaque_callee: return "opaque_callee";
+  case M68kReturnSlotPremise::async_writer: return "async_writer";
+  case M68kReturnSlotPremise::external_writer: return "external_writer";
+  }
+  return "invalid";
+}
+
 const char *m68k_pc_index_outcome_name(M68kPcIndexOutcome outcome) noexcept {
   switch (outcome) {
   case M68kPcIndexOutcome::resolved: return "resolved";
@@ -3034,6 +3224,13 @@ std::string format_m68k_finite_analysis(const M68kFiniteAnalysisResult &result) 
         << " async_ranges=" << memory.policy.async.size() << " release_stores=" << memory.release_stores
         << " unknown_target_stores=" << memory.unknown_target_stores << " handler_points=" << memory.handler_points
         << " max_cells=" << memory.max_cells << " precise_reads=" << memory.precise_reads << '\n';
+  }
+  if (result.return_slots.enabled) {
+    const auto &slots = result.return_slots;
+    out << "return-slots sites=" << slots.sites << " normal=" << slots.normal_sites << " premise=" << slots.premise_sites
+        << " computed=" << slots.computed_sites << " unknown=" << slots.unknown_sites;
+    for (const auto &[cause, n] : slots.premise_by_cause) out << " premise_" << m68k_return_slot_premise_name(cause) << '=' << n;
+    out << '\n';
   }
   if (result.contexts.enabled) {
     const auto &contexts = result.contexts;

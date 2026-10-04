@@ -207,6 +207,31 @@ reproduce the SEG-026-T002 strict row exactly.
      T010 proof.
 8. **Closure premise.** Every fact is relative to the discovered set `D`. Runtime escapes on the coverage oracle are the falsifier;
    nothing observed is fed back. Every memory-derived resolution is reported next to the count of unresolved sites it depends on.
+
+   **Return-slot integrity premise (SEG-030-T008).** An RTS at its activation's entry stack delta (any RTS when the delta is not
+   tracked) pops the return cell `(A7).L`. With the memory domain it is classified from that cell and from the *recorded return
+   slot* (the long cell a JSR/BSR pushed its return address into; every later store is related to it):
+   - **normal:** the cell holds only return addresses a call pushed into it, or the slot is recorded and no store in `D` may have
+     written it under the existing alias rules;
+   - **computed** (`rts_computed`, resolved): the cell holds a precise set with a value no call pushed into it. The set is sound
+     because the cell is precise; its targets are seeded into `D` as a resolved site, so escape checks cover it;
+   - **Unknown(`return_slot_rewritten`):** a store with a known target (strong or weak) may have written the slot and the cell is
+     not precise, or the cell is only partially known (strided, width-only). No call pushed the slot and the cell is Unknown:
+     Unknown(`initial_memory`) (a root's RTS) or Unknown(`set_bound`);
+   - **premise:** what remains is assumed away by the named premise: *a return slot is not rewritten by stores whose target the
+     analysis cannot relate to it, nor by asynchronous writers*. The causes are reported per site (`return_slot_premise_sites`, by
+     cause): `unknown_target_store` (an Unknown-target store or an undescribed writer, including the opaque entry of an unknown
+     effect), `opaque_callee` (the slot's memory went through an opaque call continuation: a merged, recursive or unproven
+     callee), `async_writer`, `external_writer`, and `slot_untracked` (A7 is Unknown at the RTS, so no store can be related to the
+     slot).
+
+   This is the SEG-026/SEG-029 call-continuation premise that the T002 baseline inherits. It is falsifiable by runtime escapes and
+   by the T008 randomized differential (a concrete run that rewrites a premise site's slot is counted as `premise_violation`). It
+   is never applied when the analysis has precise or weak knowledge of a contradicting write: that is `computed` or
+   `return_slot_rewritten`. A `computed` or Unknown RTS is never an exit of a proven activation (T005 summaries, T006 merged-callee
+   exits), so its callers' continuations are opaque (`return_slot_rewritten`). Without the frames domain an RTS away from the entry
+   delta is a typed Unknown return site (`stack_unbalanced`). `--domains baseline` keeps the inherited behaviour exactly (no
+   memory, no classification, no new report field): the T002 baseline output stays byte-identical.
 9. **Driver rounds.** A monotone configuration (pinned sites, asynchronous cells, callee summaries, merged callees) grows as
    `config_{r+1} = config_r ⊔ computed(r)`, at most R = 16 rounds. A mandatory final validation checks that the values derived from the
    final solution are below the configuration used to compute it. Non-convergence switches the dependent domain off and reports
@@ -216,7 +241,8 @@ reproduce the SEG-026-T002 strict row exactly.
     `jmp_an_index`, `rte`, `rtr`, `rts_computed` (plus `unclassified`). Each family reports sites, resolved, and Unknown by generic
     reason x CPU sub-reason. Sub-reasons: `none`, `base_unknown`, `region_exit`, `set_bound`, `target_outside_image`, `width_only`,
     `store_poison`, `async_writer`, `initial_memory`, `external_writer`, `context_bound`, `stack_unbalanced`, `frame_unproven`,
-    `interrupt_resumption`, `invalidated`. Ordinary RTS is modelled through call continuations and is not a computed site.
+    `interrupt_resumption`, `invalidated`, `return_slot_rewritten` (SEG-030-T008). Ordinary RTS is modelled through call continuations and is
+    not a computed site; an RTS whose return slot is rewritten is (decision 8).
 11. **Resource constants.** Solver 1,000,000 iterations and 2^20 points (unchanged, ADR 0078 decision 4); finite set 4,096; points-to at
     most 8 `(region, offset-set)` pairs; exact offset set at most 64, else strided; memory at most 512 cells per state (overflow: memory
     Unknown, `state_bound`); K = 8; R = 16. SEG-030-T006: handler-instance chain depth at most 3, at most 253 instance tags (beyond:
@@ -986,3 +1012,72 @@ reproduce the SEG-026-T002 strict row exactly.
   pushed return address. Under decision 8 an escape not justified by a typed Unknown site is a falsification. The randomized
   differential, its seeds and its counts are therefore not delivered by this record; the return-slot premise needs a decision
   first (declare it, or check the return cell and report such an RTS as a computed or typed Unknown site).
+
+- **Return-slot resolution (T008 part 2; decision 8 amended with the return-slot integrity premise).**
+  - CPU-owned in `libs/cpu/m68k/analysis`. The abstract memory records *return slots*: the long cell a JSR/BSR pushed its return
+    address into, recorded whether or not the policy lets the cell hold the value. Every later store is related to the recorded slots:
+    a known-target store that may touch a slot marks it `rewritten`; an Unknown-target store or an undescribed writer marks it
+    `unknown_store`. Slots join pointwise and are kept only when every path recorded them; at most 512 (beyond: forgotten).
+  - `M68kFiniteAdapter::classify_return_slot` classifies an RTS at the entry delta (any RTS when the delta is untracked) as
+    normal / premise / computed / Unknown (decision 8). A computed RTS emits computed edges to the targets its callers' continuations
+    do not already reach, and is reported as a resolved `rts_computed` site with its whole target set. A computed or Unknown RTS
+    makes its activation unproven (`return_slot_rewritten`), so no T005 summary and no T006 merged-callee exit is derived from it.
+    A site whose computed targets were lost is pinned and reported `invalidated`, even when its final class is normal.
+  - Without the frames domain an RTS away from the entry delta is now a typed Unknown return site (`stack_unbalanced`); before, it
+    made its activation unproven without a site (found by the differential below on a push window under `address+memory+contexts`).
+  - The result and the report carry `return_slots` (sites, normal, computed, unknown, `return_slot_premise_sites` by cause).
+    `--domains baseline` is unchanged: no memory domain, no classification, no new field.
+- **Fixtures** (`analysis_m68k_return_slot_test`): the reproducer with every domain resolves the RTS to `{$400}` and `$400` is in
+  `D` (no summary; the continuation is opaque `return_slot_rewritten`); the same shape with the baseline domains is unchanged, and
+  under `memory` or `contexts` without frames (A7 never located) it is the premise (`slot_untracked`, counted); an untouched slot
+  and a slot rewritten with its own return address are normal with a summary; a weak rewrite with an Unknown value is
+  Unknown(`return_slot_rewritten`) and never the premise; a weak rewrite with a precise value is a computed return to
+  `{$206, $400}`; an Unknown-base store is the premise (`unknown_target_store`, counted), and a later precise rewrite of the same
+  slot is computed, not the premise; a root RTS is Unknown(`initial_memory`); the output is deterministic.
+- **Mutants** (`analysis_mutation_test`, which now also builds the return-slot fixture). Killed: a precise rewrite ignored
+  (`m68k_return_slot_precise_rewrite_ignored`), a weak rewrite treated as normal (`m68k_return_slot_weak_rewrite_normal`), and a
+  known-target store never related to the slots (`m68k_return_slot_store_not_related`).
+- **Randomized differential** (`tests/analysis_m68k_differential_test.cpp`, test-only; it links only the analysis library).
+  - *Generator.* A seeded SplitMix64 generator builds small synthetic images: a main flow, eight subroutines (a subroutine calls only
+    later ones), eight landing pads, an optional level-6 interrupt handler (vector 30) and an optional TRAP #0 handler. Blocks cover
+    object init and object loops (`DBF`), field dispatch (an object pointer, a field load and `JSR (A2)`), PC-indexed dispatch
+    (`JMP (2,PC,D0.W)` over a four-entry table, the index from an immediate, an object field or a global, masked with `ANDI.W`),
+    direct calls (`JSR`/`BSR.W`), stores through known and Unknown bases, balanced pushes, conditional skips, TRAP and SR mask
+    changes. Subroutine epilogues cover the plain RTS, strong, weak and Unknown-base return-slot rewrites, an unbalanced pop, and
+    `PEA`/`MOVE.L -(A7)` push windows. Handlers write no register (register preservation is the resumption premise).
+  - *Executor.* A test-only interpreter of exactly that subset (anything else ends the run), from the 68000 reset state (S = 1,
+    I = 7, SSP `$FFFF00`), with seeded register inputs (half drawn from a pool of return-slot, object and global addresses) and
+    seeded work RAM, a 3,000-step budget, and a level-6 interrupt injected at boundaries its mask permits. It records whether each
+    RTS pops a slot still holding its call's pushed address, and whether each RTE pops an intact interrupt frame.
+  - *Checks*, against `baseline`, `address+memory+contexts` and every domain: a transfer from a resolved site lies in its target
+    set; a precise D0-D7 (16 and 32 bits) or A0-A7 value before an instruction holds the concrete value; every reached PC is in `D`
+    unless the run left through a typed-Unknown site (`explained`, checking stops); an RTS whose slot was rewritten concretely is
+    resolved, typed Unknown, or a premise site (`premise_violation`, counted apart; the baseline inherits the premise wholesale),
+    and a normal classification there is unsound. Each analysis runs twice with byte-identical serialization; so does the
+    concrete transcript.
+  - *Seeds and counts.* Seeds `0x5E6030008 + 0 .. 399` (400 images, none rejected), about 55 s on the dev (Debug) build:
+    `baseline` 164 clean / 221 explained / 15 premise violations; `address+memory+contexts` 164 / 232 / 4; every domain 171 / 226 /
+    1, with 4,699 checked steps, 8,570 precise values, 102 resolved transfers and 16 concrete slot rewrites (411 injected
+    interrupts). No bound was reached and every determinism check held.
+  - **Halted on an unsound result (frames domain, not a premise violation).** Two seeds of the list (and one more of 600) falsify a
+    precise A7 at the level-6 handler entry. Minimized synthetic reproducer (every domain, reset SSP `$FFFF00`):
+
+    ```text
+    $200: MOVE #$2300,SR    $204: TRAP #0    $206: BRA *
+    vector 30 (IRQ6) -> $1800: NOP; RTE
+    vector 32 (TRAP) -> $1900: NOP; NOP; RTE
+    ```
+
+    Concretely TRAP enters `$1900` with A7 `$FFFEFA` and I = 3, and a level-6 interrupt taken inside the TRAP handler enters `$1800`
+    with A7 `$FFFEF4`. The analysis reports A7 = `{$FFFEFA}` at `$1800`: the TRAP handler is not an analysed resuming instance (its
+    continuation is not modelled), so an interrupt preempting it is not entered from that partition, and the handler's points carry
+    only the analysed instance's entry. The same holds for a handler seeded in the dead-handler partition. A preemption of an
+    unanalysed or non-resuming handler instance by an eligible interrupt must enter the interrupt handler from an Unknown entry
+    (the T006 instance model), which is a frames-domain change outside the return-slot capability. The differential is therefore
+    built but not registered with CTest until that fix lands; its seed list is fixed and reproduces the finding.
+- **Sonic attract oracle, every domain (Release driver at this head, sanitized).** `D` 6,806, `O ∩ D` 4,534, recall 43.13%, 0 escapes:
+  unchanged from T007. 240 RTS sites are classified: 0 normal, 0 computed, 0 Unknown, 240 premise sites (`slot_untracked` 237: A7 is
+  Unknown at the RTS, lost through opaque continuations and Unknown handler entries, record T006; `external_writer` 3). The
+  `rts_computed` family is unchanged (26 Unknown: 22 `stack_unbalanced`, 4 `base_unknown`); contexts, summaries and continuations are
+  unchanged. 136 s / 338 MB. `--domains baseline` private, aggregate and compare-tool outputs are byte-identical to T007; two
+  `--domains all` runs are byte-identical.

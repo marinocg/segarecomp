@@ -32,3 +32,18 @@ target_link_libraries(analysis_m68k_frames_test PRIVATE segarecomp::cpu_m68k_ana
 segarecomp_enable_warnings(analysis_m68k_frames_test)
 add_test(NAME analysis_m68k_frames_test COMMAND analysis_m68k_frames_test)
 set_property(TEST analysis_m68k_frames_test APPEND PROPERTY LABELS full fast)
+
+# SEG-030-T008 (ADR 0079 decision 8): the return slot of an RTS at the entry stack delta and the return-slot integrity premise.
+add_executable(analysis_m68k_return_slot_test analysis_m68k_return_slot_test.cpp)
+target_link_libraries(analysis_m68k_return_slot_test PRIVATE segarecomp::cpu_m68k_analysis)
+segarecomp_enable_warnings(analysis_m68k_return_slot_test)
+add_test(NAME analysis_m68k_return_slot_test COMMAND analysis_m68k_return_slot_test)
+set_property(TEST analysis_m68k_return_slot_test APPEND PROPERTY LABELS full fast)
+
+# SEG-030-T008 part 2 (ADR 0079 decision 8): the seeded randomized differential of the analysis against a bounded test-only
+# concrete executor (fixed seed list; never linked into production). Built but NOT yet registered with CTest: its fixed seed list
+# exposes an open frames-domain soundness finding (ADR 0079 T008 record, "interrupt preempting an unanalysed handler"); the test is
+# registered (labels `full`) together with that fix.
+add_executable(analysis_m68k_differential_test analysis_m68k_differential_test.cpp)
+target_link_libraries(analysis_m68k_differential_test PRIVATE segarecomp::cpu_m68k_analysis)
+segarecomp_enable_warnings(analysis_m68k_differential_test)

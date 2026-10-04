@@ -165,9 +165,45 @@ std::optional<M68kCellValue> m68k_cell_join(const M68kCellValue &left, const M68
   return out;
 }
 
+namespace {
+// SEG-030-T008: slots are kept only when both sides recorded them (a path that never pushed proves nothing about the cell).
+std::map<M68kCell, M68kReturnSlot> join_slots(const std::map<M68kCell, M68kReturnSlot> &left,
+                                              const std::map<M68kCell, M68kReturnSlot> &right) {
+  std::map<M68kCell, M68kReturnSlot> out;
+  auto a = left.begin();
+  auto b = right.begin();
+  while (a != left.end() && b != right.end()) {
+    if (a->first < b->first) ++a;
+    else if (b->first < a->first) ++b;
+    else {
+      M68kReturnSlot slot;
+      slot.pushed = join(a->second.pushed, b->second.pushed);
+      slot.rewritten = a->second.rewritten || b->second.rewritten;
+      slot.unknown_store = a->second.unknown_store || b->second.unknown_store;
+      if (slot.pushed.is_precise()) out.emplace_hint(out.end(), a->first, std::move(slot));
+      ++a;
+      ++b;
+    }
+  }
+  return out;
+}
+
+bool leq_slots(const std::map<M68kCell, M68kReturnSlot> &left, const std::map<M68kCell, M68kReturnSlot> &right) {
+  for (const auto &[cell, slot] : right) {
+    const auto found = left.find(cell);
+    if (found == left.end()) return false;
+    if (!leq(found->second.pushed, slot.pushed)) return false;
+    if (found->second.rewritten && !slot.rewritten) return false;
+    if (found->second.unknown_store && !slot.unknown_store) return false;
+  }
+  return true;
+}
+}  // namespace
+
 M68kAbstractMemory join(const M68kAbstractMemory &left, const M68kAbstractMemory &right) {
   M68kAbstractMemory out;
   out.absent = larger(left.absent, right.absent);
+  out.slots = join_slots(left.slots, right.slots);
   auto a = left.cells.begin();
   auto b = right.cells.begin();
   while (a != left.cells.end() && b != right.cells.end()) {
@@ -185,6 +221,7 @@ M68kAbstractMemory join(const M68kAbstractMemory &left, const M68kAbstractMemory
 
 bool leq(const M68kAbstractMemory &left, const M68kAbstractMemory &right) {
   if (larger(left.absent, right.absent) != right.absent) return false;
+  if (!leq_slots(left.slots, right.slots)) return false;
   for (const auto &[cell, value] : right.cells) {
     const auto found = left.cells.find(cell);
     if (found == left.cells.end()) return false;  // absent (Unknown) is not below a known cell
@@ -212,6 +249,9 @@ std::string M68kAbstractMemory::describe() const {
            std::to_string(cell.width) + '=';
     out += value.is_pointer() ? value.pointer.describe() : value.data.describe() + (value.width_derived ? "~" : "");
   }
+  for (const auto &[cell, slot] : slots)
+    out += " slot#" + std::to_string(cell.id) + '+' + hex(cell.offset) + '=' + slot.pushed.describe() + (slot.rewritten ? "!" : "") +
+           (slot.unknown_store ? "?" : "");
   return out + ']';
 }
 
@@ -343,6 +383,41 @@ M68kMemoryRead m68k_memory_read(const M68kAbstractMemory &memory, const M68kPoin
   out.known = true;
   out.value = std::move(*result);
   return out;
+}
+
+void m68k_return_slots_unknown_store(M68kAbstractMemory &memory) {
+  for (auto &[cell, slot] : memory.slots) slot.unknown_store = true;
+}
+
+void m68k_return_slots_store(M68kAbstractMemory &memory, const M68kPointsTo &targets, std::uint32_t span,
+                             std::optional<std::uint32_t> return_address) {
+  if (targets.is_bottom() || span == 0U) return;
+  if (!targets.is_known()) {
+    m68k_return_slots_unknown_store(memory);
+    return;
+  }
+  // The physical byte ranges the store may touch (nullopt: it may spill past a region end into any byte).
+  const auto touched = m68k_memory_touched(targets, span);
+  if (!touched) {
+    for (auto &[cell, slot] : memory.slots) slot.rewritten = true;
+    return;
+  }
+  std::optional<M68kCell> exact;
+  if (return_address && span == 4U && targets.is_exact() && targets.pairs.size() == 1U && targets.pairs.front().second.exact().size() == 1U &&
+      m68k_memory_tracked(targets.pairs.front().first.kind)) {
+    const auto &region = targets.pairs.front().first;
+    const auto at = physical(region, targets.pairs.front().second.exact().front());
+    if (static_cast<std::uint64_t>(at) + span <= physical_extent(region)) exact = M68kCell{region.kind, region.id, at, 4U};
+  }
+  for (auto &[cell, slot] : memory.slots) {
+    if (exact && cell == *exact) continue;
+    const std::uint64_t lo = cell.offset, hi = static_cast<std::uint64_t>(cell.offset) + cell.width;
+    for (const auto &range : *touched)
+      if (range.kind == cell.kind && range.id == cell.id && range.lo < hi && lo < range.hi) slot.rewritten = true;
+  }
+  if (!exact) return;
+  memory.slots[*exact] = M68kReturnSlot{FiniteValue::of({*return_address}), false, false};
+  if (memory.slots.size() > m68k_memory_cell_bound) memory.slots.clear();
 }
 
 std::optional<std::vector<M68kAsyncRange>> m68k_memory_touched(const M68kPointsTo &targets, std::uint32_t span) {

@@ -88,11 +88,25 @@ struct M68kMemoryPolicy {
   friend bool operator==(const M68kMemoryPolicy &, const M68kMemoryPolicy &) = default;
 };
 
+// SEG-030-T008 (ADR 0079 decision 8, the return-slot integrity premise): a return slot is the long cell a call (JSR/BSR) pushed its
+// return address into. It is recorded whether or not the policy lets the cell hold the value, so that every later store can be
+// related to it: a store with a known target that may touch a byte of it marks it `rewritten` (precise or weak knowledge of a
+// contradicting write), a store with an Unknown target (or an undescribed writer) marks it `unknown_store` (the premise).
+struct M68kReturnSlot {
+  analysis::FiniteValue pushed;  // the return addresses pushed into it (precise)
+  bool rewritten{};
+  bool unknown_store{};
+  friend bool operator==(const M68kReturnSlot &, const M68kReturnSlot &) = default;
+};
+
 class M68kAbstractMemory {
 public:
   std::map<M68kCell, M68kCellValue> cells;
   // Why an absent cell is Unknown (none while the memory domain is off; join keeps the larger).
   M68kAnalysisSubReason absent{M68kAnalysisSubReason::none};
+  // SEG-030-T008: the return slots recorded on every path (the join keeps the slots of both sides, pointwise). At most
+  // `m68k_memory_cell_bound`; beyond, every slot is forgotten (an unrecorded slot is never proven intact).
+  std::map<M68kCell, M68kReturnSlot> slots;
 
   friend M68kAbstractMemory join(const M68kAbstractMemory &left, const M68kAbstractMemory &right);
   friend bool leq(const M68kAbstractMemory &left, const M68kAbstractMemory &right);
@@ -125,6 +139,15 @@ void m68k_memory_store(M68kAbstractMemory &memory, const M68kPointsTo &targets, 
 // The physical byte ranges [lo, hi) a store of `span` bytes at `targets` may touch in tracked regions, or nullopt when `targets` is
 // Unknown (the store may touch any byte). Used for asynchronous-writer ranges.
 [[nodiscard]] std::optional<std::vector<M68kAsyncRange>> m68k_memory_touched(const M68kPointsTo &targets, std::uint32_t span);
+
+// SEG-030-T008: relates one store of `span` bytes at `targets` to the recorded return slots. `return_address` is set for the push of a
+// call (JSR/BSR): a push at one exact tracked cell records (or replaces) that slot. Every other store with a known target marks the
+// slots it may touch `rewritten` (a target that may spill past its region marks every slot); a store with an Unknown target marks
+// every slot `unknown_store`.
+void m68k_return_slots_store(M68kAbstractMemory &memory, const M68kPointsTo &targets, std::uint32_t span,
+                             std::optional<std::uint32_t> return_address);
+// SEG-030-T008: an undescribed writer (it may write any byte): every slot `unknown_store`.
+void m68k_return_slots_unknown_store(M68kAbstractMemory &memory);
 
 // Joins two read values of the same width (nullopt: the join is Unknown).
 [[nodiscard]] std::optional<M68kCellValue> m68k_cell_join(const M68kCellValue &left, const M68kCellValue &right, std::uint32_t width);

@@ -365,6 +365,48 @@ struct M68kReturnSiteReport {
   analysis::FiniteValue restored_status;  // RTE only: the status restored from the proven frame
 };
 
+// SEG-030-T008 (ADR 0079 decision 8): the classification of an RTS at its activation's entry stack delta (or of any RTS when the stack
+// delta is not tracked), from the abstract return cell (A7).L and the recorded return slot (abstract_memory.hpp), memory domain only.
+//   normal:   the cell holds only return addresses a call pushed into it, or the slot is recorded and no store may have written it;
+//   premise:  the cell is Unknown only through what the return-slot integrity premise assumes away (see M68kReturnSlotPremise);
+//   computed: the cell holds a precise set with some value no call pushed: a computed return resolved to that set;
+//   unknown:  a known-target store may have rewritten the slot and the cell is not precise (return_slot_rewritten), or no call
+//             pushed the slot and the cell is Unknown (initial memory, the cell bound), or the site was pinned (invalidated).
+// A `computed` or `unknown` RTS is never an exit of a proven activation.
+enum class M68kReturnSlotClass : std::uint8_t { normal, premise, computed, unknown };
+// What the return-slot integrity premise assumes away at a `premise` RTS.
+enum class M68kReturnSlotPremise : std::uint8_t {
+  none,
+  slot_untracked,        // A7 is Unknown at the RTS: the slot cannot be located (every store relation is unknown)
+  unknown_target_store,  // a store with an Unknown target (or an undescribed writer) may have written the slot
+  opaque_callee,         // the slot's memory went through an opaque call continuation (an unmodelled callee effect)
+  async_writer,          // the cell has an asynchronous writer (an interrupt handler)
+  external_writer,       // the cell may be written by another bus master (the Z80)
+};
+[[nodiscard]] const char *m68k_return_slot_premise_name(M68kReturnSlotPremise premise) noexcept;
+
+struct M68kReturnSlotOutcome {
+  M68kReturnSlotClass kind{M68kReturnSlotClass::normal};
+  M68kReturnSlotPremise premise{M68kReturnSlotPremise::none};
+  std::vector<std::uint32_t> fresh;  // computed: the targets no call continuation of this slot already covers (the computed edges)
+  std::uint32_t odd_targets_excluded{};
+  std::vector<std::uint32_t> targets;  // computed: every even mapped target (the site's target set)
+  analysis::UnknownReason reason{analysis::UnknownReason::unsupported_transfer};  // unknown only
+  M68kAnalysisSubReason sub{M68kAnalysisSubReason::none};                         // unknown only
+};
+
+// SEG-030-T008: the RTS sites of a run classified from their return slot (per PC, credited points only).
+struct M68kReturnSlotReport {
+  bool enabled{};
+  std::size_t sites{};           // RTS PCs with a classified point
+  std::size_t normal_sites{};    // every point normal
+  std::size_t premise_sites{};   // some point applied the return-slot integrity premise (return_slot_premise_sites)
+  std::map<M68kReturnSlotPremise, std::size_t> premise_by_cause;  // premise sites by the cause of their first premise point
+  std::size_t computed_sites{};  // some point computed, none unknown
+  std::size_t unknown_sites{};   // some point unknown
+  std::set<std::uint32_t> premise_pcs;  // the premise sites (falsification attribution)
+};
+
 // SEG-030-T006: frames-domain outcome of a run (counts only; the configuration of the returned round).
 struct M68kFrameReport {
   bool enabled{};
@@ -488,6 +530,10 @@ public:
   // SEG-030-T006: classification of an RTE, RTR or RTS-away-from-the-entry-delta site (frames domain).
   [[nodiscard]] std::optional<M68kReturnSiteReport> evaluate_return_site(std::uint64_t point, const M68kIrOperation &operation,
                                                                          const State &in) const;
+  // SEG-030-T008: the return-slot classification of an RTS at the entry stack delta (or with the delta untracked), memory domain
+  // only; nullopt for any other point.
+  [[nodiscard]] std::optional<M68kReturnSlotOutcome> classify_return_slot(std::uint64_t point, const M68kIrOperation &operation,
+                                                                          const State &in) const;
   // The state of an entry: a root (initial memory) or an opaque continuation (callee stores).
   // SEG-030-T006: an opaque continuation's status is the status bound of its partition `tag`.
   [[nodiscard]] State entry_state(bool continuation, std::uint32_t tag = 0U) const;
@@ -539,6 +585,7 @@ struct M68kFiniteAnalysisResult {
   M68kContextReport contexts;  // SEG-030-T005 (contexts domain only)
   std::map<std::uint32_t, M68kReturnSiteReport> return_sites;  // SEG-030-T006 (frames domain only)
   M68kFrameReport frames;      // SEG-030-T006 (frames domain only)
+  M68kReturnSlotReport return_slots;  // SEG-030-T008 (memory domain only)
   // SEG-030-T006: the partition tags of the writer-only instances of the returned round (M68kHandlerInstance::credited); their
   // points are in `solution` but never in `reached`, `undecodable`, the site reports or the read counts.
   std::set<std::uint32_t> writer_only_tags;

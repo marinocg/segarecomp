@@ -51,6 +51,7 @@ const char *m68k_analysis_sub_reason_name(M68kAnalysisSubReason reason) noexcept
   case M68kAnalysisSubReason::frame_unproven: return "frame_unproven";
   case M68kAnalysisSubReason::interrupt_resumption: return "interrupt_resumption";
   case M68kAnalysisSubReason::invalidated: return "invalidated";
+  case M68kAnalysisSubReason::return_slot_rewritten: return "return_slot_rewritten";
   }
   return "invalid";
 }
