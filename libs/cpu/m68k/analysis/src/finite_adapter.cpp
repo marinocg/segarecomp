@@ -3620,11 +3620,15 @@ M68kFiniteAnalysisResult analyze_contexts(const M68kAnalysisImage &image, const 
     config.frames.clobbered.clear();
     config.frames.unknown_entries.clear();
   }
-  // SEG-030-T006: when the frames domain cannot return a validated round, the T005 contexts result is returned (reason recorded).
+  // SEG-030-T006/T009 correction cycle 2: retain the T005 contexts result only as diagnostic detail when a requested frames domain
+  // cannot return a validated round. It carries the historical register-preservation model, so it must be explicitly incomplete:
+  // no caller may credit its precise states or discovery set as the requested all/frames result.
   const auto without_frames = [&](UnknownReason reason, const std::string &failure, std::uint32_t rounds, std::size_t total) {
     auto fallback = original;
     fallback.domains.frames = false;
     auto out = analyze_contexts(image, entries, fallback, bounds);
+    out.complete = false;
+    out.reason = reason;
     out.frames = M68kFrameReport{};
     out.frames.enabled = true;
     out.frames.reason = reason;

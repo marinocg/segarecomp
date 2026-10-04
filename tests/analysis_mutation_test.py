@@ -540,6 +540,10 @@ MUTANTS: list[Mutant] = [
             "      if (offset != 0)\n        for (const auto &edge : result.edges) {",
             "      if (false)\n        for (const auto &edge : result.edges) {",
             (FRAMES_TEST,), "a proven non-zero interrupt frame-PC offset emits no resumed edge"),
+    Mutant("m68k_frames_fallback_marked_complete", M68K,
+            "    out.complete = false;",
+            "    out.complete = true;",
+            (FRAMES_TEST,), "a historical contexts fallback is exposed as a complete requested frames result"),
 ]
 
 

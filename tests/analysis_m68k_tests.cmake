@@ -50,5 +50,7 @@ target_link_libraries(analysis_m68k_differential_test PRIVATE segarecomp::cpu_m6
 segarecomp_enable_warnings(analysis_m68k_differential_test)
 add_test(NAME analysis_m68k_differential_test COMMAND analysis_m68k_differential_test)
 add_test(NAME analysis_m68k_differential_pinned_call_test COMMAND analysis_m68k_differential_test 1 0x5E6030788)
-set_property(TEST analysis_m68k_differential_test analysis_m68k_differential_pinned_call_test APPEND PROPERTY LABELS full)
+add_test(NAME analysis_m68k_differential_frames_fallback_test COMMAND analysis_m68k_differential_test 1 50159748471)
+set_property(TEST analysis_m68k_differential_test analysis_m68k_differential_pinned_call_test
+                  analysis_m68k_differential_frames_fallback_test APPEND PROPERTY LABELS full)
 set_property(TEST analysis_m68k_differential_test PROPERTY TIMEOUT 600)

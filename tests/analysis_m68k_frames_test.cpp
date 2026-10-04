@@ -99,7 +99,8 @@ private:
 };
 
 M68kFiniteAnalysisResult run(const Asm &program, const std::vector<M68kHandlerVector> &vectors, bool reset = true, bool frames = true,
-                              const std::vector<M68kHandlerVector> &potential = {}, M68kMemoryPolicy policy = {}) {
+                              const std::vector<M68kHandlerVector> &potential = {}, M68kMemoryPolicy policy = {},
+                              std::uint32_t round_bound = m68k_memory_round_bound) {
   const RegionImage view{program};
   M68kAnalysisConfig config{};
   config.domains.address = true;
@@ -115,6 +116,7 @@ M68kFiniteAnalysisResult run(const Asm &program, const std::vector<M68kHandlerVe
   config.frames.vectors = vectors;
   config.frames.potential_interrupts = potential;
   config.frames.main_entries = {entry};
+  config.contexts.round_bound = round_bound;
   config.memory.policy = std::move(policy);
   if (reset) {
     config.frames.reset_entry = entry;
@@ -1136,6 +1138,18 @@ void synchronous_vector_resumption() {
          "synchronous TRAP: handler D0 effect feeds resumed indirect dispatch");
 }
 
+// A requested frames result may retain a contexts solve for diagnosis when no frame round validates, but that historical state is
+// never a complete all-model result. The handler shape is the correction-cycle-2 counterexample: an exact saved-PC +2 relation.
+void failed_frame_round_is_incomplete() {
+  Asm a;
+  a.move_sr(0x2300U).nop().stop();
+  a.at(irq6).w({0x54AFU, 0x0002U}).rte();  // ADDQ.L #2,2(A7); RTE
+  const auto result = run(a, irq_only, true, true, {}, {}, 0U);
+  expect(!result.complete && result.reason == UnknownReason::iteration_bound && result.frames.enabled && !result.frames.validated &&
+             result.frames.failure.starts_with("no_validated_round"),
+         "frame validation failure: a shifted hardware-PC fallback is explicitly incomplete, never a precise frames result");
+}
+
 int main() {
   interrupt_masked();
   interrupt_enabled();
@@ -1165,6 +1179,7 @@ int main() {
   interrupt_frame_pc_offset_edge();
   synchronous_offset_loop_register_effects();
   synchronous_vector_resumption();
+  failed_frame_round_is_incomplete();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";
     return EXIT_FAILURE;

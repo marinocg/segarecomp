@@ -315,6 +315,23 @@ void reject_invalid_images() {
   expect(!report.images_valid && report.discovered.empty(), "driver: an invalid image set yields no D");
 }
 
+void incomplete_frames_report_is_not_credited() {
+  GenesisAnalysisReport report{};
+  report.images_valid = true;
+  report.analysis.complete = false;
+  report.analysis.reason = analysis::UnknownReason::iteration_bound;
+  report.analysis.frames.enabled = true;
+  report.analysis.frames.validated = false;
+  report.analysis.frames.failure = "no_validated_round";
+  GenesisAnalysisReportConfig config{};
+  config.domains.frames = true;
+  const auto aggregate = format_genesis_analysis_report_aggregate(report, config);
+  expect(aggregate.find("\"complete\":false") != std::string::npos &&
+             aggregate.find("\"interrupt_register_model\":\"historical_assumption\"") != std::string::npos &&
+             aggregate.find("\"interrupt_register_model\":\"proven_or_unknown\"") == std::string::npos,
+         "an incomplete frames fallback is rejected and never labelled as the credited proven-or-unknown model");
+}
+
 void write_driver_inputs(const std::filesystem::path &dir, const Fixture &f, const FrontendProgram &program) {
   std::filesystem::create_directories(dir / "coverage");
   {
@@ -355,6 +372,7 @@ int main(int argc, char **argv) {
   address_domain_report();
   return_slot_premise_sites_report();
   reject_invalid_images();
+  incomplete_frames_report_is_not_credited();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";
     return EXIT_FAILURE;
