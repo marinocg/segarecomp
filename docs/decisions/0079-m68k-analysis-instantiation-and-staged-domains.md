@@ -91,7 +91,7 @@ reproduce the SEG-026-T002 strict row exactly.
    | address region + offset, points-to for A0-A7, exact offset set or stride widening only to the region extent (T003) | `JSR/JMP (An)`, `d16(An)`, `(d8,An,Xn)` sites | `JSR (An)` is the first gate of 5,367 missing PCs (89.2%); 59 of 70 width-only sites read a register-relative field (ADR 0054/0055) | the baseline tracks data registers only; an address register is always Unknown | per-family resolved counts with zero escapes on the oracle; fixtures for object-slot loops, code pointers from immutable tables, unknown bases, auto-increment, region overflow, strided-only Unknown |
    | abstract memory with object-field identity and region alias exclusion (T004) | width-only `(d8,PC,Xn)` dispatch fed by object fields | 0 of 6 state locations resolved; every one poisoned by stack, frame, unknown-base, indexed and auto-update stores (ADR 0055) | without regions an unknown-base store must poison all memory; excluding the stack alone resolved nothing | width-only sites becoming exact only from strong-updated cells; fixtures for field dispatch, interfering unknown-base stores, stack exclusion, IRQ writers, initial-memory Unknown |
    | bounded call contexts and summaries (T005) | object pointers passed across calls; the ADR 0054 `index_unknown` via-return site | call continuations are opaque all-Unknown entries; context-insensitive merge loses object identity | a context-free fixed point joins every caller's object region | sites resolved only under contexts, with `context_bound` reported; fixtures for two callers, context exhaustion, recursion, clobbers, unbalanced stacks |
-   | exception and return-frame state, interrupt mask and handler instances (T006, `frames`) | RTE/RTR (ADR 0051 first gate), computed RTS and the asynchronous-writer set | RTE/RTR discover nothing under the strict model; push-window RTS is unresolved | the baseline has no stack cells | `rts_computed`/RTE/RTR resolved only from code-built frames; handler-entry frames stay Unknown (`interrupt_resumption`) |
+   | exception and return-frame state, interrupt mask and handler instances (T006, `frames`) | RTE/RTR (ADR 0051 first gate), computed RTS, hardware-frame resumptions and the asynchronous-writer set | RTE/RTR discover nothing under the strict model; push-window RTS is unresolved | the baseline has no stack cells | `rts_computed`/RTE/RTR resolved only from proven frame provenance; handler RTE resumes at an exact related stacked PC or is typed unproven |
 
    **Not admitted (candidates):** intervals beyond the finite-set bound (no measured site hit the 4,096 bound); general widening (the
    stride form above widens only to a region extent, never to certainty); pin minimization (ADR 0078 T003 record: cascaded
@@ -118,41 +118,47 @@ reproduce the SEG-026-T002 strict row exactly.
      handler entry A7 is Unknown. Consequence: when interrupts can be taken, the nested exception frame is a handler store through an
      Unknown address, and every work-RAM cell is asynchronous. The implementation applies exactly this consequence for the Genesis
      driver (`M68kMemoryConfig::interrupts`).
-   - **Interrupt and handler-stack precision (SEG-030-T006, implemented as the staged `frames` domain; it does not hold for Sonic:
-     `entry_unknown`, and no validated handler-stack window is built, record T006 advancement stop).** Without `frames` the
+   - **Interrupt and handler-stack precision (SEG-030-T006, implemented as the staged `frames` domain; the historical T006 Sonic run
+     stopped at `entry_unknown` and built no validated handler-stack window).** Without `frames` the
      consequence above applies unchanged. With `frames` (CPU-owned in `libs/cpu/m68k/analysis`, record T006):
      - **Implemented.** SR status tracking (S and I2-I0) through MOVE/ANDI/ORI/EORI to SR, STOP, proven RTE and the 68000 reset state
        (S = 1, I = 7, SSP = the long at vector 0); per-boundary interrupt eligibility (level > mask, level 7 and unknown levels always);
        the 6-byte group 1/2 frame at A7 - 6 only when S = 1 is proven; one analysed partition per handler instance (handler, parent
        partition), entered with the accepted mask and the frame address, so that handler code is never joined with the code it
-       preempts; nesting and preemption per the mask at every boundary of every analysed partition, non-resuming instances included (a
-       handler on its own chain, deeper than the depth bound, or with an Unknown frame address is not analysed, and is then also
-       entered with an Unknown entry in the unknown-entry partition, whose own boundaries are taking points too: SEG-030-T008
-       correction); per-partition asynchronous writers (the stores, interrupt frames
-       and asynchronous writers of the resuming child instances: interrupts and divide-by-zero/CHK/TRAPV); a frame-integrity check
-       (a child that may rewrite its saved SR makes the parent's status Unknown after the boundaries where it can be taken); RTE/RTR
-       and an RTS away from the entry stack delta resolved only from code-built frame cells.
-     - **Still Unknown.** An unanalysed resuming child makes its parent's writers every cell. A handler RTE never resumes anywhere the
-       analysis names (`interrupt_resumption`). The frame address after a call into a callee with an unknown effect, or an unbalanced
-       callee, is Unknown (its A7 is not restored); a balanced callee (a summary or a proven merged callee) returns at the caller's
-       own A7. An instruction that always raises only non-resuming synchronous vectors ends its path and is not an unknown effect;
-       an unresolved computed site and a TRAP/TRAPV whose continuation is not modelled stay unknown effects. The status of an opaque
-       continuation is its own partition's status bound (relative to the closure premise of decision 8), never another partition's.
-     - **Register resumption (SEG-030-T009 correction cycle).** No handler is assumed to preserve the registers it interrupts. At
-       every boundary of a modelled partition where a resuming handler instance can be taken (an interrupt eligible under the
-       boundary status; a divide-by-zero, CHK or TRAPV handler on the fallthrough of its raising instruction), the state after the
-       boundary is the join of the no-interrupt state and the instance's resumption state: D0-D7/A0-A6 at its proven RTEs of its own
-       frame (an unresolved RTE whose A7 is exactly the instance's entry A7). Those exit states already join the resumptions of the
-       instance's own children, so nested and preempting effects reach the parent transitively. A register that every exit provably
-       restores to its handler-entry value (origin facts through register copies, and long MOVE/MOVEM saves into A7-relative stack
-       slots that no store, asynchronous writer or external writer may have touched since) contributes nothing; any other
-       contributes its exit value. A handler that cannot be proven to resume through its own frame (unanalysed: `entry_unknown`,
-       `nested`, `depth_bound`, `unmodelled_parent`, a dropped instance; or an analysed instance with an undecodable point, an
-       unresolved computed site, an unmodelled stacked continuation, an RTE/RTR away from its frame, or an RTS of its own
-       activation) makes every D0-D7/A0-A6 at those boundaries Unknown (`interrupt_resumption_unproven`). A7, SR and PC are handled
-       as above (frame address, frame integrity); a non-resuming exception has no resumption. Report:
-       `frames.register_resumptions` (partitions, entries, unproven entries and causes, joined and unproven live points) and the
-       aggregate field `interrupt_register_model` (decision 8).
+       preempts; nesting and preemption per the mask at every boundary of every analysed partition, including instances without a
+       proven resumption (a handler on its own chain, deeper than the depth bound, or with an Unknown frame address is not analysed,
+       and is then also entered with an Unknown entry in the unknown-entry partition, whose own boundaries are taking points too:
+       SEG-030-T008 correction); per-partition asynchronous writers (the stores, interrupt frames and asynchronous writers of
+       resuming interrupt and configured synchronous-vector child instances); a frame-integrity check (a child that may rewrite its
+       saved SR makes the parent's status Unknown after the boundaries where it can be taken); RTE/RTR and an RTS away from the entry
+       stack delta resolved only from code-built frame cells.
+     - **Fail-closed cases.** An unanalysed resuming child makes its parent's writers every cell. A handler RTE resumes only when its
+       hardware-frame provenance gives an exact unchanged or bounded-offset saved PC and the SR/frame conditions are proven;
+       otherwise the resumption is typed unproven (`interrupt_resumption`). The frame address after a call into a callee with an
+       unknown effect, or an unbalanced callee, is Unknown (its A7 is not restored); a balanced callee (a summary or a proven merged
+       callee) returns at the caller's own A7. An always-raising instruction whose vector has no configured handler ends its path and
+       is not an unknown effect; an unresolved computed site and a TRAP whose continuation is not modelled stay unknown effects. The
+       status of an opaque continuation is its own partition's status bound (relative to the closure premise of decision 8), never
+       another partition's.
+     - **Register and PC resumption (SEG-030-T009 correction cycles 1 and 2).** No handler is assumed to preserve the registers it
+       interrupts. At every boundary of a modelled partition where a resuming handler instance can be taken (an interrupt eligible
+       under the boundary status; or any configured synchronous exception handler at the architecturally stacked PC), the state
+       after the boundary is the join of the no-interrupt state and the instance's resumption state: D0-D7/A0-A6 at its proven RTEs
+       of its own frame (an unresolved RTE whose A7 is exactly the instance's entry A7). Those exit states already join the
+       resumptions of the instance's own children, so nested and preempting effects reach the parent transitively. A register that
+       every exit provably restores to its handler-entry value (origin facts through register copies, and long MOVE/MOVEM saves into
+       A7-relative stack slots that no store, asynchronous writer or external writer may have touched since) contributes nothing;
+       any other contributes its exit value. A handler that cannot be proven to resume through its own frame (unanalysed:
+       `entry_unknown`, `nested`, `depth_bound`, `unmodelled_parent`, a dropped instance; or an analysed instance with an undecodable
+       point, an unresolved computed site, an unmodelled stacked continuation, an RTE/RTR away from its frame, or an RTS of its own
+       activation) makes every D0-D7/A0-A6 at those boundaries Unknown (`interrupt_resumption_unproven`). Interrupts stack their
+       boundary PC. DIV0, CHK, TRAPV and TRAP #n stack the next instruction; ILLEGAL, line-A, line-F and privilege violations stack
+       the faulting instruction. A proven unchanged saved PC resumes there; exact ADDQ/SUBQ/ADDI/SUBI long updates resume at the
+       stacked PC plus the bounded signed offset. A precise replacement is only an ordinary resolved RTE, and only with a proven
+       SR/frame. Partial overlap, unsupported arithmetic, an Unknown value, or an asynchronous/external writer makes the resumption
+       typed unproven. Handler register effects join on every such edge; restored SR, mode and active A7 fail closed when not proven.
+       Report: `frames.register_resumptions` (partitions, entries, unproven entries and causes, joined and unproven live points) and
+       the aggregate field `interrupt_register_model` (decision 8).
      - **Two premises, two consumers.** *Discovery* (`D`, roots, recall, the site and read reports) keeps the challenger's machine
        root premise: only the delivered vectors of ADR 0021 / ADR 0043 (level-6 autovector and the synchronous vectors) are roots
        and credited handler instances. *Asynchronous writers, interrupt eligibility and status* use the hardware premise: real
@@ -442,8 +448,8 @@ reproduce the SEG-026-T002 strict row exactly.
   - Read-modify-write forms store an Unknown value at the operation size (byte-only and word-only forms at their architectural
     width). MOVEP spans `2 * size` bytes and MOVEM `count * size` bytes (below An for `-(An)`).
   - JSR/BSR push their return address and PEA its effective address below A7; LINK pushes an Unknown value.
-  - DIVx/CHK/TRAPV/TRAP/STOP and instruction exceptions write a frame at an Unknown supervisor-stack address, because supervisor mode
-    is not proven.
+  - In this pre-frames memory domain, DIVx/CHK/TRAPV/TRAP/STOP and instruction exceptions write a frame at an Unknown
+    supervisor-stack address, because supervisor mode is not proven.
   - The destination address is computed after the source's `(An)+`/`-(An)` update (`MOVE.L (A0)+,(A0)`).
 - **Reads.** MOVE/ADD/SUB/AND/OR into Dn, and MOVEA, read precise cells. The data owner sees a substituted source register that
   carries the cells' value; this needs equal and complete effect footprints, and the owner itself is unchanged. Without precise cells
@@ -658,11 +664,12 @@ reproduce the SEG-026-T002 strict row exactly.
     an unanalysed resuming interrupt wherever their level is eligible, never seeded (`D` unchanged). Superseded by advancement
     iteration 3: the Genesis premise selects levels 2 and 4 only, and each is analysed as a writer-only instance.
 - **Per-partition asynchronous writers.** A partition receives the stores and interrupt frames of every analysed resuming child
-  instance (interrupts; divide by zero, CHK, TRAPV) and, transitively, that child's own writers. Frame integrity: a resuming
+  instance (interrupts and configured synchronous exceptions) and, transitively, that child's own writers. Frame integrity: a resuming
   instance whose writes (or its resuming descendants') may reach its saved SR word clobbers the parent's status after its taking
   boundaries.
 - **Returns.** RTE/RTR, and an RTS away from the activation's entry delta (`rts_computed`), are resolved only from precise frame or
-  return cells written by analysed code. Every other one stays Unknown with its reason; a handler RTE is `interrupt_resumption`.
+  return cells written by analysed code. For a handler RTE, the hardware-frame PC relation must be exact and its SR/frame proof must
+  hold; otherwise its return and possible resumption stay typed Unknown with `interrupt_resumption` attribution.
 - **Rounds and bounds.** Contexts rounds first settle with no frames configuration (warm start). The frames configuration
   (instances, per-partition policies, clobbered partitions, the per-partition status bounds) then grows by join, only from settled
   rounds, and only a validated round is returned. Otherwise the T005 contexts result is returned with the reason. Bounds: instance
@@ -674,19 +681,22 @@ reproduce the SEG-026-T002 strict row exactly.
   - the reset mask excluding level 6 (no instance, precise reads), and the domain inert when off;
   - level 6 enabled: one instance at SSP - 6 with I = 6, the main flow's writers exactly the handler cell and its frame;
   - a handler raising the mask (no nesting) and lowering it (unbounded nesting, every cell asynchronous);
-  - nested synchronous handlers (non-resuming parent; a resuming divide nested in itself; the single resuming divide);
+  - nested synchronous handlers, including next-PC traps and fault-PC exceptions, with interrupts preempting them;
   - an interrupt preempting a synchronous handler;
   - Unknown status and Unknown supervisor stack;
   - RTE/RTR from a code-built frame, unproven and modified frames, computed RTS from PEA and pushed constants;
+  - unchanged and bounded-offset hardware-frame PC resumptions, precise replacement, overlap, Unknown and writer-owned fail-closed cases;
   - frame integrity (saved SR rewritten directly or through a handler subroutine; saved PC only leaves SR intact);
   - an installed but undelivered level-4 handler that writes a cell: with I = 3 the cell is asynchronous; with I = 5 it stays
     precise; the delivered-only premise would have kept it precise.
-- **Mutations** (`analysis_mutation_test` builds the frames fixture). Ten frames mutants are killed: an Unknown SR treated as masked;
+- **Mutations** (`analysis_mutation_test` builds the frames fixture). The original ten frames mutants are killed: an Unknown SR treated as masked;
   preemption at an equal mask; the frame at A7 instead of A7 - 6; the reset SSP ignored; RTE not restoring SR; partition policy
   growth dropped; dead-handler code without asynchronous writers; frame integrity ignored; a handler RTE not labelled
   `interrupt_resumption`; an undelivered installed interrupt not treated as a writer. Two T005 corrections add two contexts mutants
-  (bottom exception-continuation delta; context-0-only query).
-- **Sonic attract oracle (report-only, sanitized; Release build, seven runs in parallel on one host).**
+  (bottom exception-continuation delta; context-0-only query). Correction-cycle-2 mutants for saved-PC provenance, offset handling,
+  synchronous stacked-PC class, handler-effect propagation and fail-closed rewrites are recorded below.
+- **Historical Sonic attract oracle (report-only, sanitized; Release build, seven runs in parallel on one host).** These T006 values
+  predate the T009 correction cycles and are not measurements of the current handler-resumption model.
 
   | measure | frames (credited) | frames + ablation (diagnostic) |
   | --- | --- | --- |
@@ -724,17 +734,19 @@ reproduce the SEG-026-T002 strict row exactly.
     `JSR (An)` gate and the 9 width-only sites stay blocked. Narrowing the potential sources to the interrupt levels the board can
     assert, or analysing those handlers as instances, is a separate precision step; it would not by itself remove the external
     writer (T010).
-- **Advancement iteration 2: return-continuation A7 and status precision** (frames domain only; `baseline`, `memory` and `contexts`
-  outputs stay byte-identical on Sonic).
+- **Historical advancement iteration 2: return-continuation A7 and status precision** (frames domain only; `baseline`, `memory` and
+  `contexts` outputs stayed byte-identical on Sonic). Its synchronous “non-resuming” classification and measurements below are
+  superseded by the T009 correction-cycle-2 hardware-frame resumption model; they remain here as the recorded historical baseline.
   - *Relative A7 at a balanced summary.* A summary exists only for a balanced activation (every exit an RTS at stack delta {0}), so
     its continuation now takes the caller's own A7 at the call instead of the summary's A7. That A7 is the join of the exits over
     every invocation of the context: a nested callee's context is shared by every invocation of its outer callee, so one
     Unknown-A7 invocation made every invocation's continuation Unknown. The summary's registers, A0-A6 and memory stay as they
     are: they are joins over every invocation's exits (abstract-memory join is an intersection), sound for each one, so no
     A7-relative cell keeps a stale absolute address. An unbalanced or otherwise unproven callee is never rebased.
-  - *Non-resuming raises.* An instruction that always raises only non-resuming synchronous vectors (ILLEGAL, line 1010/1111;
-    `m68k_vector_class`) ends its path and no longer makes its activation unproven. Unresolved computed sites, undecodable points
-    and a TRAP/TRAPV whose continuation is not modelled stay unknown effects. Merged callees already used the balanced-merged rule.
+  - *Then-current non-resuming raises (superseded).* An instruction then classified as always raising only non-resuming synchronous
+    vectors (ILLEGAL, line 1010/1111; `m68k_vector_class`) ended its path and no longer made its activation unproven. Unresolved
+    computed sites, undecodable points and a TRAP/TRAPV whose continuation was not modelled stayed unknown effects. Correction cycle
+    2 instead models a configured handler's RTE at the architecturally stacked faulting or next PC. Merged callees already used the balanced-merged rule.
     The three unproven merged activations contain an unresolved computed site (2) or an RTS away from the entry delta (1), so none
     can be proven.
   - *Per-partition status bound.* `M68kFrameConfig::status_bounds` holds one bound per live partition: its entry statuses, its SR
@@ -744,14 +756,15 @@ reproduce the SEG-026-T002 strict row exactly.
   - Fixtures (`analysis_m68k_frames_test`):
     - a nested callee shared by a known-A7 and an Unknown-A7 invocation keeps the known invocation's A7, while an unbalanced
       callee's continuation stays Unknown;
-    - an ILLEGAL path keeps its callee balanced, while TRAP and an unresolved `JMP (A0)` stay unproven;
+    - under that historical model, an ILLEGAL path kept its callee balanced, while TRAP and an unresolved `JMP (A0)` stayed unproven;
     - a level-6 handler with an unresolved call is not nested when the main flow runs at I = 3, and is still nested when the handler
       lowers its own mask.
 
-    Five mutants are killed (`analysis_mutation_test`):
+    Five historical-iteration mutants are killed (`analysis_mutation_test`); correction cycle 2 re-anchors the two synchronous-raise
+    cases to the current configured-handler semantics:
     - the absolute summary exit A7 is kept;
     - an unbalanced callee is rebased;
-    - a non-resuming raise is still an unknown effect;
+    - an unconfigured always-raising instruction is made an unknown effect instead of ending its path;
     - an unmodelled TRAP terminates the path;
     - the whole-program status bound is used.
   - **Sonic attract oracle, credited frames run** (Release; per step; sanitized aggregates):
@@ -1019,7 +1032,7 @@ reproduce the SEG-026-T002 strict row exactly.
   | ignored interrupt-handler writer | `m68k_memory_async_writer_ignored` (new); `m68k_unanalysed_handler_precise`, `m68k_undelivered_interrupt_ignored` | memory: policy; frames |
   | raised context bound | `m68k_context_bound_raised` (new) | contexts: context exhaustion (now at the literal K = 8) |
   | congruence widened to certainty | `m68k_congruence_as_exact` (new) | value: strided only |
-  | RTE proven without a frame | `m68k_rte_without_frame` (new) | frames: RTE unproven SR |
+  | RTE proven without a frame | `m68k_rte_without_frame` (new) | frames: precise frame with an effective status that does not prove supervisor mode |
   | skipped store-derived invalidation | `m68k_store_derived_invalidation_skipped` (new); `m68k_solver_pin_ignored`, `stale_target_not_pinned` | memory: invalidation |
   | out-of-region offset accepted | `m68k_offset_region_exit_accepted` (new) | value: stepping past the extent |
   | non-deterministic order | `nondeterministic_order` | core: pinned site |
@@ -1113,7 +1126,7 @@ reproduce the SEG-026-T002 strict row exactly.
     inside code whose state is not modelled.
   - **Correction (SEG-030-T006 instance model; `finite_adapter.{hpp,cpp}`).** Every boundary of every modelled partition is a taking
     point:
-    - A non-resuming instance is an analysed parent like any other; its eligible interrupts and raised vectors enter child instances
+    - An instance then classified as non-resuming is an analysed parent like any other; its eligible interrupts and raised vectors enter child instances
       at its own frame address (the `non_resuming_parent` cause is gone).
     - A taking whose state is not modelled enters the handler with an Unknown entry. Every unanalysed credited contribution (any
       cause) and every credited instance dropped by the entry-A7 widening adds its handler to `M68kFrameConfig::unknown_entries`
@@ -1159,7 +1172,7 @@ reproduce the SEG-026-T002 strict row exactly.
   rounds 5 to 7; 159 s / 366 MB (was 136 s / 338 MB). `--domains baseline` private, aggregate and compare-tool outputs stay
   byte-identical to T007; two `--domains all` runs are byte-identical.
 
-### T009 correction cycle: interrupt register resumption (track A)
+### T009 correction cycle 1: interrupt register resumption (track A; retained historical measurements)
 
 - **Defect (T009 validator).** Every configuration assumed that a handler preserves the registers it interrupts; the T008
   differential generator excluded handlers that write registers, so it could not see this. Minimized synthetic reproducer (flat
@@ -1179,10 +1192,11 @@ reproduce the SEG-026-T002 strict row exactly.
   - `derive_frames` derives an analysed instance's resumption from its proven RTEs of its own frame (relative A7 exactly 0);
     registers whose origin fact proves the entry value are omitted. Any other exit shape is `unproven` (cause `exit/...`); an
     unanalysed or dropped resuming child is `unproven` (cause `unanalysed/<why>`).
-  - `transfer` joins the resumptions into every successor edge whose boundary admits the child (level 0: the fallthrough of a
-    DIVx/CHK/TRAPV, with the preserved registers taken from the instruction's input); `root_state` does the same at partition
-    roots. `unproven` makes D0-D7 Unknown and A0-A6 Unknown(`interrupt_resumption_unproven`), and a PC-indexed site whose index is
-    such a register reports that sub-reason (new `M68kAnalysisSubReason`, report detail).
+  - `transfer` joined the resumptions into every successor edge whose boundary admitted the child (level 0 then covered the
+    fallthrough of DIVx/CHK/TRAPV, with the preserved registers taken from the instruction's input); `root_state` did the same at
+    partition roots. Correction cycle 2 supersedes that limited synchronous edge set with the architectural stacked-PC classes.
+    `unproven` makes D0-D7 Unknown and A0-A6 Unknown(`interrupt_resumption_unproven`), and a PC-indexed site whose index is such a
+    register reports that sub-reason (new `M68kAnalysisSubReason`, report detail).
   - Origin facts (`M68kAnalysisState::origin`, `saved`): a handler root holds every register's own entry value; register copies,
     EXG, and long MOVE/MOVEM saves into A7-relative stack slots (keyed by the offset from the activation's entry A7, rebased across
     calls and continuations) keep them; any store that may touch a slot removes it, and a slot is unusable when the partition's
@@ -1215,7 +1229,8 @@ reproduce the SEG-026-T002 strict row exactly.
   | `0x123456789AB` + 0 .. 2,999 | 0 / 0 / 0 | 7 / 31 / 0 | 1,319 / 1,675 / 6 |
 
   No determinism check failed and no image was rejected. The 400-seed list takes about 53 s on the Debug build.
-- **Measurement** (Release driver at this tree, sanitized; T007 corpus; baseline -> all). `--domains baseline` on Sonic is
+- **Historical measurement before correction cycle 2** (Release driver at that tree, sanitized; T007 corpus; baseline -> all).
+  `--domains baseline` on Sonic is
   byte-identical to the T007/T008 baseline (private, aggregate and compare-tool outputs). Two `all` runs of Sonic and of Streets of
   Rage are byte-identical.
 
@@ -1277,3 +1292,35 @@ reproduce the SEG-026-T002 strict row exactly.
 
     No premise violation was observed; all other comparison fields are unchanged. The Streets of Rage and Golden Axe credited
     results are not claimed sound for interrupt registers.
+
+### T009 correction cycle 2: hardware-frame PC provenance and synchronous resumption
+
+- **Current frames semantics.** A configured handler's RTE is no longer categorically non-resuming. Exception entry records the
+  architectural stacked PC: an interrupt stacks its boundary PC; divide by zero, CHK, TRAPV and TRAP #n stack the next instruction;
+  ILLEGAL, line-A, line-F and privilege violations stack the faulting instruction. Thus synchronous exception handlers are governed
+  by the same proven-or-unproven resumption contract as interrupt handlers, not by the earlier divide/CHK/TRAPV-only fallthrough rule.
+- **Saved-PC relation.** An unchanged hardware-frame PC resumes at the stacked PC. Exact long ADDQ, SUBQ, ADDI and SUBI updates of
+  that saved PC carry a bounded signed offset and resume at `stacked_pc + offset`. A precise replacement that is not related by that
+  rule is not credited as a hardware-frame resumption; it can only be an ordinary resolved RTE target when the saved SR and frame are
+  independently proven. Partial overlap, unsupported arithmetic, an Unknown replacement, or an asynchronous/external writer yields
+  a typed unproven resumption rather than an invented edge. Offset keys retain the full signed value and do not alias by truncation.
+- **State on the resumed edge.** D0-D7/A0-A6 include the handler's analysed register exit effects, including effects propagated from
+  nested children. Restored SR, supervisor/user mode and the corresponding active A7 come only from a proven frame. If saved-SR
+  integrity, mode selection or stack provenance is not proven, the return and its resumption fail closed with the existing typed
+  frame/resumption reason; an exact PC relation alone is insufficient.
+- **Differential and complete-oracle gate.** The synthetic interpreter and differential now continue beyond interrupt and synchronous
+  RTEs, checking the resumed PC and subsequent register state instead of treating RTE as the end of evidence. Four pinned resumption
+  cases require the expected post-RTE check (including handler-modified and typed-unproven paths), so an oracle run that stops before
+  that continuation fails the complete-oracle gate rather than passing vacuously. Randomized checking retains the distinction in
+  decision 8: `all` checks the current model, while `baseline`, `address`, `memory` and `contexts` remain historical models and are
+  not claimed to implement handler resumption.
+- **Fixtures and mutants.** `analysis_m68k_frames_test` covers unchanged, positive and negative bounded offsets, precise replacement,
+  overlap and writer-owned frames, all synchronous stacked-PC classes, handler register effects, and SR/mode/A7 fail-closed behavior.
+  `analysis_mutation_test` kills `m68k_saved_frame_pc_rewrite_ignored`, `m68k_frame_pc_offset_treated_as_zero`,
+  `m68k_trap_resumption_drops_handler_effect`, `m68k_fault_resumes_next`, `m68k_trap_resumes_current`,
+  `m68k_unknown_frame_pc_rewrite_credited` and `m68k_offset_resumption_edge_omitted`. The re-anchored
+  `m68k_rte_without_frame`, `m68k_unmodelled_always_raise_unknown_effect` and `m68k_unmodelled_trap_terminates_path` guard the current
+  supervisor-frame and configured-handler classifications.
+- **Evidence boundary.** The focused frames and differential checks, complete-oracle gate and listed mutants have exercised these
+  semantics. No correction-cycle-2 commercial measurement, deterministic corpus comparison or final full validation gate is claimed
+  here yet; every earlier table in this ADR remains evidence for its explicitly identified historical tree only.
