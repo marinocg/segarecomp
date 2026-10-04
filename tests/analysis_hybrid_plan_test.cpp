@@ -346,6 +346,34 @@ void width_rule() {
   expect(plan.outcome == GenesisHybridOutcome::broad_whole_image, "width rule: an operand-width-only index never bounds an island");
 }
 
+void width_rule_address() {
+  Image image;
+  Asm a{image, entry};
+  // A code pointer read through an index bounded only by the operand width of a mutable byte (D0 in [0, 255] times 4): the
+  // pointer set is width-derived, so it never bounds an island (the forbidden SEG-024 rule), even though it is finite.
+  a.w(0x7000U).move_b_ram(0, 0xF000U).w(0xD040U).w(0xD040U).lea_abs(0, ptrs).movea_idx(1, 0, 0).jmp_an(1);  // MOVEQ #0; ADD.W D0,D0 x2
+  for (std::uint32_t k = 0; k < 256U; ++k) image.put32(ptrs + 4U * k, table + 16U * (k % slots));
+  fill_slots(image, table, [](Asm &s, std::uint32_t) { s.bra_self(); });
+  const auto program = program_of(image);
+  const auto plan = plan_of(*program);
+  expect(plan.outcome == GenesisHybridOutcome::broad_whole_image && plan.admitted == plan.universe,
+         std::string("width rule (address): a width-derived pointer set never bounds an island: ") + genesis_hybrid_outcome_name(plan.outcome));
+}
+
+void incomplete_solve() {
+  Image image;
+  Asm a{image, entry};
+  strided_pointer(a, ptrs).jmp_an(1);
+  pointer_table(image, ptrs, table);
+  fill_slots(image, table, [](Asm &s, std::uint32_t) { s.bra_self(); });
+  const auto program = program_of(image);
+  GenesisHybridPlanConfig config{};
+  config.analysis.bounds.max_iterations = 2U;
+  const auto plan = plan_of(*program, config);
+  expect(plan.outcome == GenesisHybridOutcome::broad_analysis_incomplete && plan.admitted == plan.universe,
+         "incomplete: an exhausted solve is whole broad, never credited");
+}
+
 void vector_root() {
   Image image;
   Asm{image, entry}.bra_self();
@@ -405,6 +433,8 @@ int main() {
   materialized_image();
   unknown_identity();
   width_rule();
+  width_rule_address();
+  incomplete_solve();
   vector_root();
   invalid_provenance();
   validator_rejects_missing_configuration();

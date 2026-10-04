@@ -1126,6 +1126,12 @@ add_test(NAME analysis_mutation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRE
   "--generator=${CMAKE_GENERATOR}" "--make-program=${CMAKE_MAKE_PROGRAM}")
 set_property(TEST analysis_mutation_test APPEND PROPERTY LABELS full)
 set_property(TEST analysis_mutation_test PROPERTY TIMEOUT 1800)
+# SEG-031 (ADR 0080): the hybrid admission mutation gate (same harness, `--group hybrid`: the planner and production-seam fixtures).
+add_test(NAME analysis_hybrid_mutation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/analysis_mutation_test.py
+  ${PROJECT_SOURCE_DIR} ${CMAKE_COMMAND} ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER}
+  "--generator=${CMAKE_GENERATOR}" "--make-program=${CMAKE_MAKE_PROGRAM}" --group hybrid)
+set_property(TEST analysis_hybrid_mutation_test APPEND PROPERTY LABELS full)
+set_property(TEST analysis_hybrid_mutation_test PROPERTY TIMEOUT 1800)
 # SEG-030-T009: the mutation harness's source stamping and build-tree settling survive same-second mutate/restore/mutate rebuilds.
 add_test(NAME analysis_mutation_harness_selftest COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/analysis_mutation_harness_selftest.py ${CMAKE_COMMAND} ${CMAKE_C_COMPILER}

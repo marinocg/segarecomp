@@ -18,6 +18,7 @@ import shutil
 import struct
 import subprocess
 import sys
+import tempfile
 
 BUDGET = 20000
 
@@ -55,10 +56,10 @@ def run(command, **kwargs):
 
 
 def main():
-    segarecomp, driver, source, work = sys.argv[1:]
-    work = pathlib.Path(work)
-    shutil.rmtree(work, ignore_errors=True)
-    work.mkdir(parents=True)
+    segarecomp, driver, source = sys.argv[1:4]
+    # The bridge requires an ignored output directory inside the product root (the precedent of the other bridge tests).
+    (pathlib.Path(source) / "build").mkdir(exist_ok=True)
+    work = pathlib.Path(tempfile.mkdtemp(dir=pathlib.Path(source) / "build", prefix="hybrid-e2e-"))
     rom = work / "rom.bin"
     data = rom_image()
     rom.write_bytes(data)
@@ -139,6 +140,7 @@ def main():
     tampered.write_text("\n".join(tampered_lines) + "\n")
     escaped, _, _ = build_and_run("tampered", ["--admission-plan", str(tampered)])
     assert escaped["result"] != "runner_resource_limit" and escaped["stop_class"] is not None, escaped
+    shutil.rmtree(work, ignore_errors=True)
     print("genesis_hybrid_admission_generated_test: OK", json.dumps({"broad_generated_bytes": broad_bytes,
                                                                        "hybrid_generated_bytes": hybrid_bytes,
                                                                        "broad_u": aggregate["broad_u"],
