@@ -672,8 +672,10 @@ reproduce the SEG-026-T002 strict row exactly.
   hold; otherwise its return and possible resumption stay typed Unknown with `interrupt_resumption` attribution.
 - **Rounds and bounds.** Contexts rounds first settle with no frames configuration (warm start). The frames configuration
   (instances, per-partition policies, clobbered partitions, the per-partition status bounds) then grows by join, only from settled
-  rounds, and only a validated round is returned. Otherwise the T005 contexts result is returned with the reason. Bounds: instance
-  chain depth 3, 253 instance tags (beyond: the domain fails closed), 4 growth rounds per instance entry A7 (then Unknown), R = 16.
+  rounds, and only a validated round is returned. Otherwise the T005 contexts result is retained only as diagnostic detail, with the
+  frame failure reason and the whole result marked `complete=false`; no discovered set or precise state from that historical
+  register-preservation model may be credited as the requested `frames`/`all` result. Bounds: instance chain depth 3, 253 instance
+  tags (beyond: the domain fails closed), 4 growth rounds per instance entry A7 (then Unknown), R = 16.
 - **Driver.** `--domains frames` is accepted. The aggregate adds a `frames` object: validation, rounds, instances by class,
   unanalysed causes, live-point counts (status Unknown, S proven, eligible, masked, potential-eligible, raising, frame address
   Unknown by cause), the same counts for the first frames round, main-flow asynchronous writers, and return outcomes.
@@ -1248,8 +1250,10 @@ reproduce the SEG-026-T002 strict row exactly.
     `unanalysed/unmodelled_parent` 3). Live points joined with an unproven resumption: Sonic 23 of 240, Sonic 2 87 of 260, Cool
     Spot 11,246 of 11,300, OutRun 7,180 of 8,204. Return-slot premise sites: Sonic 41, Sonic 2 3, Cool Spot 211, OutRun 163.
   - Streets of Rage: the frames rounds no longer validate (`iteration_bound`, `no_validated_round` after 16 rounds: after the first
-    frames growth the contexts derivation alternates between two summary configurations), so the run returns the contexts result,
-    reported `historical_assumption`. Golden Axe is unchanged (frames warm solve `iteration_bound`, static-only).
+    frames growth the contexts derivation alternates between two summary configurations). The historical run returned the contexts
+    result and reported `historical_assumption`; correction cycle 2 now keeps that fallback only diagnostically and marks the whole
+    requested frames result incomplete, so comparison and measurement consumers reject it. Golden Axe remains static-only when its
+    frames warm solve exhausts the iteration bound.
   - Sonic 2 has one first-miss edge entered through an RTE (`rte_rtr_counterexamples_to_normal_resumption` 1): the RTE site is typed
     Unknown (`interrupt_resumption`) and returns into code that is no longer in `D`; it is not an escape from a resolved site.
   - Discovery drops where the dominant dispatch depends on registers live across interrupt-eligible boundaries whose handlers are
