@@ -82,7 +82,7 @@ them a complete finite value set because Unknown-target stores poison every cell
   the 13 would be plausibility filtering, which this experiment forbids.
 - Sonic 2: a mask-bounded VBlank dispatch (32 entries) has one target outside the image: the same outcome the analysis already reports.
 
-**5. Even a perfect table authority does not unblock any title.** Upper bound: if every table-related unresolved site in finding 3
+**5. Even a perfect table authority does not unblock any title.** Best-case lower bound on the remaining whole-image triggers: even if every table-related unresolved site in finding 3
 were resolved, whole-image triggers would still be at least 12 (Sonic 1), 40 (Sonic 2) and 17 (Cool Spot) in the *uncredited* ceiling
 run (computed returns 9 / 39 / 14, RTE 2 / 1 / 1, plus non-table `(An)` sites: 1 / 0 / 2), and every credited run stays blocked by the
 interrupt class first. `hybrid_total == U` on every title with or without it.
@@ -97,7 +97,7 @@ recovered by it: 0. Whole-image triggers before = after (13 / 5 / 22 credited; 2
 Pre-registered STOP conditions met: the real remaining table sites are width-only with no independent program bound; the cells that
 would need a bound would need the heap / store-provenance framework ADR 0055 stopped; the only program-bounded candidates produce
 accidental targets and fail validation; at most one near-candidate per title class could benefit; and no downstream blocker class
-changes (the computed-return and interrupt classes remain). Even resolving all 3 near-candidates leaves at least 22 ceiling triggers per title.
+changes (the computed-return and interrupt classes remain). Resolving the one near-candidate of each title would move the ceiling triggers only 23 -> 22 (Sonic 1), 64 -> 63 (Sonic 2) and 22 -> 21 (Cool Spot).
 
 Per the inventory gate ("if the answer is zero, stop without building machinery") no authority, synthetic fixtures or mutants were
 added: there is no code whose soundness would need them. The product change is this ADR and the private `--trace-points` register dump.
