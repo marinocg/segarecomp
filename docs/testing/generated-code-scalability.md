@@ -98,3 +98,6 @@ AOT-owned, so the count + SHA-256 digests stay comparable across both forms.
 `measure --legacy-aot-entries` (forwarded to the emitter) selects the previous owner/wrapper form for before/after comparisons.
 `generated_code_scalability_report.py fingerprints <shard-dir>` prints the three compiled-address digests of an existing sharded
 output directory.
+
+`tools/generated_aot_entry_crosscheck.py <legacy-dir> <direct-dir>` is the exhaustive whole-image equivalence check used for ADR 0083: every
+helper-backed PC selects the same helper, provenance fields and own-PC argument in both forms, and all shared helper bodies are identical.
