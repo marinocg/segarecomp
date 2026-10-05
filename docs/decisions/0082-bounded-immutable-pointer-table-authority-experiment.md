@@ -45,7 +45,8 @@ and 5 targets) and 3 PC-indexed sites plus one `JMP (An)` pointer-table site on 
 "authority" would credit is missing there.
 
 **2. Credited run: zero sites for a new authority.** The 6 explicitly bounded PC-indexed sites (Sonic 1: 4, Sonic 2: 2) that remain
-whole-image are exactly the ones the analysis resolves in the ceiling run; they fail only because the register is Unknown across an
+whole-image: 4 of them resolve in the ceiling run (3 on Sonic 1, 1 on Sonic 2) and the other 2 are the near-candidates of findings 3 and 4.
+They fail in the credited run only because the register is Unknown across an
 unproven interrupt boundary (`interrupt_resumption_unproven` / `invalidated`). That is a premise, not a table or index proof gap.
 Cool Spot's 7 `(An)` sites have the same cause in the credited run.
 
@@ -55,24 +56,28 @@ Cool Spot's 7 `(An)` sites have the same cause in the credited run.
 | --- | --- | --- | --- |
 | RAM byte index, no mask, no guard (`width_only`; PC-indexed two-level, or `(An)` object/routine tables) | 10 | 10 + 2 `(An)` | 4 (`(An)`) |
 | one-sided guard, upper bound is the byte width | 1 | 0 | 0 |
-| RAM word / unknown index (bit-loop counters of a decompressor, word read from RAM) | 0 | 11 | 0 |
+| RAM word / unknown index (decompressor loop counters, which would need a loop-invariant analysis, not a table authority; word read from RAM) | 0 | 11 | 0 |
 | program-bounded but the access set fails target validation | 0 | 1 | 1 |
 | mutable function-pointer cell (not a table) | 0 | 0 | 2 |
 | `JMP (An)` continuation register (not a table) | 1 | 0 | 0 |
 | **total unresolved non-return sites** | 12 | 24 | 7 |
 | already resolved by the existing analysis | 5 | 4 | 0 |
 
-No site has a bounded index and is blocked only by its base: every failure is the index domain (width or unknown). No index of the 26
+No site is blocked only by its base: every failure is the index domain (width or unknown), or the width rule applied to a finite set. No index of the 26
 width-only sites is bounded by a program fact: the object id, game-mode / routine counter and
 sound-command bytes are RAM values whose only static bound is the width. This is the same classification ADR 0054 measured with
 the strict challenger (9 width-only on Sonic 1 including the one-sided-guard byte; 1 target outside the image and 9 width-only /
 13 unknown on Sonic 2), and ADR 0055 already stopped the store-provenance route for those cells; SEG-030's memory domain cannot give
 them a complete finite value set because Unknown-target stores poison every cell.
 
-**4. The only guard-bounded candidates fail target validation, and show the accidental-target risk.**
+**4. The near-candidates: two fail target validation, one is stopped only by the width rule; all show the accidental-target risk.**
+- Sonic 1: a one-sided guard (lower bound from a guard, upper bound the byte width) gives an exact 32-value set that the analysis
+  already computes and flags `width_derived`. It would be rejected only by "width is not authority"; its reads include a few code
+  bytes (valid even targets), i.e. accidental targets that validation does not catch.
 - Cool Spot: a pointer-table dispatch whose index is guarded below 32 and doubled (32 reads of a long at stride 2 from an exact
   immutable base). Of the 32 access addresses, 16 produce odd targets (address error, excluded exactly as today), 13 distinct valid
-  targets, and **3 produce targets outside the image**. Under the fail-closed rule the whole site stays unresolved. The guard
+  targets, and **3 produce targets outside the image** (counted after the 24-bit bus mask; some are work-RAM-class addresses, so
+  "outside the image" is the existing validity rule, not a new one). Under the fail-closed rule the whole site stays unresolved. The guard
   bounds the index soundly but is looser than the data's own invariant (even opcodes only), so the access set contains junk. Admitting
   the 13 would be plausibility filtering, which this experiment forbids.
 - Sonic 2: a mask-bounded VBlank dispatch (32 entries) has one target outside the image: the same outcome the analysis already reports.
@@ -83,7 +88,7 @@ run (computed returns 9 / 39 / 14, RTE 2 / 1 / 1, plus non-table `(An)` sites: 1
 interrupt class first. `hybrid_total == U` on every title with or without it.
 
 **6. Measurements (A credited, B uncredited ceiling; `credited:false` on every ceiling output).** Candidate sites for a new authority:
-0 credited, 0 ceiling (2 near-candidates fail validation, 1 is one-sided). Sites resolved by a new authority: 0. Exact targets
+0 credited, 0 ceiling (3 near-candidates: 2 fail validation, 1 is stopped by the width rule alone). Sites resolved by a new authority: 0. Exact targets
 recovered by it: 0. Whole-image triggers before = after (13 / 5 / 22 credited; 23 / 64 / 22 ceiling), `D` before = after (1,276 / 335 /
 6,907 credited; 6,806 / 6,792 / 6,907 ceiling), outcome `broad_whole_image` on all three, closure rounds 1, new closure sites 0.
 
@@ -92,7 +97,7 @@ recovered by it: 0. Whole-image triggers before = after (13 / 5 / 22 credited; 2
 Pre-registered STOP conditions met: the real remaining table sites are width-only with no independent program bound; the cells that
 would need a bound would need the heap / store-provenance framework ADR 0055 stopped; the only program-bounded candidates produce
 accidental targets and fail validation; at most one near-candidate per title class could benefit; and no downstream blocker class
-changes (the computed-return and interrupt classes remain).
+changes (the computed-return and interrupt classes remain). Even resolving all 3 near-candidates leaves at least 22 ceiling triggers per title.
 
 Per the inventory gate ("if the answer is zero, stop without building machinery") no authority, synthetic fixtures or mutants were
 added: there is no code whose soundness would need them. The product change is this ADR and the private `--trace-points` register dump.
