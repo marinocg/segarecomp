@@ -28,15 +28,17 @@ operand-width authority, no moved thresholds).
    offset `o <= size` reaches bytes `[o, o + span)`, so the bytes beyond the region lie in `[size, size + span)`: the first `span`
    bytes of the bus region that follows, which the machine view (`region_of`) names. `M68kFiniteAdapter::resolve_store_spill`
    replaces the target by (a) the in-region part clipped to the region's last `span` bytes, which covers every partially in-region
-   store, plus (b) one bounded landing store in the next region when that region is tracked (work RAM). An untracked next region
-   (cartridge, I/O) holds no abstract-memory cell; a bus hole holds none; anything the clip is not defined for stays the original
-   (fail-closed) target. The replacement is an over-approximation of the touched bytes, never a strong update. Soundness fixtures
+   store, plus (b) one bounded landing store in the next bus region (work RAM, but also an untracked region: it holds no cell, yet the
+   release and observed-store consumers read the target extent, so the landing pair is kept). A bus hole adds nothing; anything the clip
+   is not defined for stays the original (fail-closed) target. The replacement over-approximates the touched bytes and is never a
+   strong update: a clipped target that would be a single exact member of a tracked region gets a second member, because the real
+   bytes cover only part of the clipped cell (found by the independent gate; fixtures use known-value stores and a bus hole). Soundness fixtures
    cover the landing (a cell on the landing bytes is Unknown), the in-region part (the last cell of RAM), the wrapped bus and the
-   negative that a store which lands on the return slot still makes it `Unknown(return_slot_rewritten)`; three mutants (resolution
-   disabled, landing dropped, in-region part dropped) are killed.
+   negative that a store which lands on the return slot still makes it `Unknown(return_slot_rewritten)`; six mutants (resolution
+   disabled, landing dropped, untracked landing dropped, in-region part dropped, clipped member dropped, weakening removed) are killed.
 3. **Private diagnostics.** `segarecomp-genesis-analysis-report --trace-points <path>` writes the abstract state of every point of the
    final solve (exact PCs; private, ignored locations only) so that each trigger is attributed to the fact that became Unknown.
-   `--diagnostic-transparent-handlers` (with `--hybrid-plan`) is an **uncredited ceiling measurement**, in the family of
+   `--diagnostic-transparent-handlers` (also in the plain report, whose aggregate then carries the same marker) is an **uncredited ceiling measurement**, in the family of
    `--assume-no-z80-ram-writes`: handler instances the frames domain cannot analyse are treated as transparent. It writes no plan, its
    aggregate carries `"credited":false`, and it exists only to answer what the interrupt-resumption class costs. It does not
    reinstate the removed assumption: the default analysis never reads it.

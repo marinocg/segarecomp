@@ -273,6 +273,8 @@ int run(int argc, char **argv) {
     if (!report.universe) { std::cerr << "segarecomp-genesis-analysis-report: broad analysis rejected\n"; return 1; }
   }
   std::string aggregate = segarecomp::format_genesis_analysis_report_aggregate(report, config);
+  if (diagnostic_transparent)
+    aggregate.insert(aggregate.size() - 1U, ",\"diagnostic_ablation\":\"transparent_handlers\",\"credited\":false");
   std::string extra;
   if (compare) {
     segarecomp::GenesisReachabilityChallengerConfig challenger_config{};

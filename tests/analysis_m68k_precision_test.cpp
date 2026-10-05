@@ -82,6 +82,28 @@ private:
   M68kFlatAnalysisImage flat_;
 };
 
+// An image region covering 0..$9FFFFF (a large mapper layout): its end is the Z80 / I/O window start.
+class WideImage final : public M68kAnalysisImage {
+public:
+  explicit WideImage(const Asm &program, bool hole_below_io = false) : flat_(program.bytes, 0U), hole_(hole_below_io) {}
+  [[nodiscard]] std::optional<Instruction> decode(std::uint32_t pc) const override { return flat_.decode(pc); }
+  [[nodiscard]] bool mapped(std::uint32_t pc) const override { return flat_.mapped(pc); }
+  [[nodiscard]] std::optional<std::uint32_t> immutable_read(std::uint32_t address, unsigned bytes) const override {
+    return flat_.immutable_read(address, bytes);
+  }
+  [[nodiscard]] std::optional<M68kRegionExtent> region_of(std::uint32_t address) const override {
+    if (address >= work_ram_base && address < 0x1000000U)
+      return M68kRegionExtent{M68kRegionKind::mutable_ram, 0U, work_ram_base, 0x1000000U - work_ram_base, 0x10000U};
+    if (address >= io_base && address < work_ram_base) return M68kRegionExtent{M68kRegionKind::io_device, 0U, io_base, work_ram_base - io_base};
+    if (address < io_base && !hole_) return M68kRegionExtent{M68kRegionKind::image, 0U, 0U, io_base};
+    return std::nullopt;
+  }
+
+private:
+  M68kFlatAnalysisImage flat_;
+  bool hole_;
+};
+
 enum class Domains { memory, all };
 
 M68kFiniteAnalysisResult run(const Asm &program, Domains domains) {
@@ -174,6 +196,7 @@ void spill_off_the_end_of_ram() {
   Asm a;
   a.store_abs_long(0x4444U, 0x00FFFFF0U);  // away from the last four bytes
   a.store_abs_long(0x5555U, 0x00FFFFFCU);  // the last cell
+  a.w({0x13FCU, 0x0099U}).l(0x00FFFFFFU);  // MOVE.B #$99,($FFFFFF).L: the very last byte
   a.lea_abs(1, 0x00FFFFFEU).w({0x2281U});  // MOVE.L D1,($FFFFFE): two bytes in RAM, two on the wrapped bus
   a.load_abs_long(3, 0x00FFFFF0U);
   a.load_abs_long(4, 0x00FFFFFCU);
@@ -182,6 +205,10 @@ void spill_off_the_end_of_ram() {
   const auto result = run(a, Domains::memory);
   const auto far = data_values(result, probe, 3);
   const auto last = data_values(result, probe, 4);
+  bool byte_cell_kept = false;
+  for (const auto &[point, state] : m68k_points_of(result, probe))
+    byte_cell_kept = byte_cell_kept || state->memory.cells.contains(M68kCell{M68kRegionKind::mutable_ram, 0U, 0xFFFFU, 1U});
+  expect(result.complete && !byte_cell_kept, "spill off the end of RAM: the very last byte, covered only by the clipped member, is Unknown");
   expect(result.complete && far && *far == std::vector<std::uint64_t>{0x4444U} && !last,
          "spill off the end of RAM: the wrapped bytes are untracked, the in-region part still poisons the last cell");
 }
@@ -193,6 +220,7 @@ void exact_set_with_one_spilling_member_stays_exact() {
   a.store_abs_long(0x7777U, 0x00FF8000U);  // between the two members: must survive
   a.store_abs_long(0x1111U, 0x00FF0100U);  // the first member
   a.store_abs_long(0x5555U, 0x00FFFFFCU);  // the last cell of RAM (the spilling member's in-region bytes)
+  a.w({0x13FCU, 0x0099U}).l(0x00FFFFFFU);  // MOVE.B #$99,($FFFFFF).L: the very last byte, covered only by the clipped member
   a.lea_abs(1, 0x00FF0100U);
   a.w({0x4A41U, 0x6706U});          // TST.W D1; BEQ.S +6 (skip the second LEA)
   a.lea_abs(1, 0x00FFFFFEU);
@@ -209,6 +237,68 @@ void exact_set_with_one_spilling_member_stays_exact() {
   expect(result.complete && middle && *middle == std::vector<std::uint64_t>{0x7777U},
          "spill in a pointer set: the cell between two exact members keeps its value (no hull)");
   expect(result.complete && !first && !last, "spill in a pointer set: both members' cells are Unknown (weak update)");
+  bool byte_cell_kept = false;
+  for (const auto &[point, state] : m68k_points_of(result, probe))
+    byte_cell_kept = byte_cell_kept || state->memory.cells.contains(M68kCell{M68kRegionKind::mutable_ram, 0U, 0xFFFFU, 1U});
+  expect(result.complete && !byte_cell_kept, "spill in a pointer set: the last byte of RAM is covered by the clipped member");
+}
+
+// A known-value store whose clipped target would be one exact member must stay a weak update: the real bytes only partly cover the
+// clipped cell. $FFFFFE long: two bytes in the last RAM cell, two on the wrapped bus.
+void spilling_known_value_store_is_not_a_strong_update() {
+  Asm a;
+  a.store_abs_long(0x5555U, 0x00FFFFFCU);
+  a.lea_abs(1, 0x00FFFFFEU).w({0x22BCU}).l(0x1234U);  // MOVE.L #$1234,(A1)
+  a.load_abs_long(4, 0x00FFFFFCU);
+  const auto probe = a.pc;
+  a.nop().stop();
+  const auto result = run(a, Domains::memory);
+  const auto cell = data_values(result, probe, 4);
+  expect(result.complete && !(cell && *cell == std::vector<std::uint64_t>{0x1234U}),
+         "spill: a known-value long store is never recorded as an exact write of the clipped cell");
+  expect(result.complete && !(cell && *cell == std::vector<std::uint64_t>{0x5555U}),
+         "spill: the cell the store partly covers does not keep its old value");
+  Asm b;
+  b.store_abs_long(0x5555U, 0x00FFFFFCU);
+  b.lea_abs(1, 0x00FFFFFFU).w({0x32BCU, 0x4321U});  // MOVE.W #$4321,(A1)
+  b.load_abs_long(4, 0x00FFFFFCU);
+  const auto probe_b = b.pc;
+  b.nop().stop();
+  const auto word = run(b, Domains::memory);
+  const auto word_cell = data_values(word, probe_b, 4);
+  expect(word.complete && !word_cell, "spill: a known-value word store at the last byte leaves the last cell Unknown");
+}
+
+// The same store where the wrapped bus lands on no region at all (a hole): the clipped target must still be a weak update.
+void spill_into_a_bus_hole_is_not_a_strong_update() {
+  Asm a;
+  a.store_abs_long(0x5555U, 0x00FFFFFCU);
+  a.lea_abs(1, 0x00FFFFFEU).w({0x22BCU}).l(0x1234U);  // MOVE.L #$1234,(A1)
+  a.load_abs_long(4, 0x00FFFFFCU);
+  const auto probe = a.pc;
+  a.nop().stop();
+  const WideImage view{a, true};
+  M68kAnalysisConfig config{};
+  config.domains.address = true;
+  config.domains.memory = true;
+  const auto result = analyze_m68k_finite_values(view, {entry}, config);
+  const auto cell = data_values(result, probe, 4);
+  expect(result.complete && !cell, "spill into a bus hole: the partly covered last cell is Unknown, never an exact write");
+}
+
+// A ROM-region store spilling into the I/O window is still seen by the release and observed-store consumers.
+void untracked_landing_is_still_observed() {
+  Asm a;
+  a.lea_abs(1, 0x009FFFFEU).w({0x2281U});  // MOVE.L D1,(A1): two bytes in the image, two in $A00000-$A00001
+  a.nop().stop();
+  const WideImage view{a};
+  M68kAnalysisConfig config{};
+  config.domains.address = true;
+  config.domains.memory = true;
+  config.memory.release_ranges.emplace_back(io_base, io_base + 2U);
+  const auto result = analyze_m68k_finite_values(view, {entry}, config);
+  expect(result.complete && result.memory.release_stores == 1U,
+         "spill: a store spilling out of an image region into a release range still counts as a release store");
 }
 
 // The return slot: a called routine storing across the I/O/RAM boundary far from the stack does not rewrite its own slot
@@ -252,6 +342,9 @@ int main() {
   spill_one_byte_in_region();
   spill_off_the_end_of_ram();
   exact_set_with_one_spilling_member_stays_exact();
+  spilling_known_value_store_is_not_a_strong_update();
+  spill_into_a_bus_hole_is_not_a_strong_update();
+  untracked_landing_is_still_observed();
   spill_does_not_rewrite_the_return_slot();
   store_over_the_stack_still_rewrites();
   if (failures != 0) {

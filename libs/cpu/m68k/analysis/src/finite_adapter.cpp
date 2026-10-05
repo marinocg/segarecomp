@@ -1195,12 +1195,20 @@ M68kPointsTo M68kFiniteAdapter::resolve_store_spill(const M68kPointsTo &target, 
         inside = M68kOffsetSet::strided(std::min(offsets.lo(), inside.lo()), 1U, last);
       }
     }
+    // Never a single exact member of a tracked region: the memory domain would take it for a strong update of a cell that the real
+    // (clipped-away) bytes only partly cover. A second member keeps the update weak; it is an over-approximation of the same bytes.
+    if (!inside.is_strided() && inside.exact().size() == 1U && last >= 1U) {
+      auto exact = inside.exact();
+      exact.push_back(last - 1U);
+      inside = M68kOffsetSet::of(std::move(exact));
+    }
     pairs.emplace_back(region, std::move(inside));
     // The bytes after the region end, on the 24-bit bus (the byte after the last bus address wraps to 0).
     const std::uint32_t end = (static_cast<std::uint32_t>(region.base & bus_mask) + region.size) & bus_mask;
     const auto next = image_.region_of(end);
     if (!next) continue;  // no region at all there: no tracked byte can be written (a hole of the bus)
-    if (!m68k_memory_tracked(next->kind)) continue;  // untracked bytes (cartridge, devices) hold no abstract-memory cell
+    // The landing pair is kept for an untracked next region too: it holds no abstract-memory cell, but the release / observed-store
+    // consumers read the target extent (a ROM store spilling into the Z80 area is still seen).
     const std::uint64_t start = static_cast<std::uint64_t>(end) - next->base;
     if (start + span > next->size) return target;  // the landing bytes are not inside one extent: fail closed
     M68kRegion landing{next->kind, next->id, next->base, next->size, next->mirror};
