@@ -5,6 +5,7 @@
 // over a flat image at 0 plus a work-RAM region at $E00000 (64 KiB mirrored) and an I/O window at $A00000, reset entry $200 and reset
 // SSP $FFFF00. No commercial input.
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <initializer_list>
@@ -14,6 +15,7 @@
 #include <string>
 #include <vector>
 
+#include "segarecomp/cpu/m68k/analysis/abstract_memory.hpp"
 #include "segarecomp/cpu/m68k/analysis/finite_adapter.hpp"
 
 namespace {
@@ -286,6 +288,56 @@ void spilling_set_member_never_joins_its_value() {
   expect(result.complete && !cell, "spill: a known value is never joined into the cell of a clipped member");
 }
 
+// A strided pointer set (more than the exact bound, so a hull) with a known-value long store whose last members cross the RAM end:
+// the clipped and landing cells become Unknown, no synthetic cell receives the value, and an unrelated cell stays precise.
+void strided_spill_with_a_known_value() {
+  Asm a;
+  a.store_abs_long(0x7777U, 0x00FFF000U);  // unrelated: below the strided range
+  a.store_abs_long(0x5555U, 0x00FFFFFCU);  // inside the range, in the clipped part
+  a.store_abs_long(0x6666U, 0x00FFFC04U);  // inside the range, a member position
+  a.w({0x0241U, 0x03FCU});                  // ANDI.W #$3FC,D1: 256 values, a strided pointer after the index add
+  a.lea_abs(1, 0x00FFFC02U);
+  a.w({0x23BCU}).l(0x1234U).w({0x1000U});   // MOVE.L #$1234,(0,A1,D1.W): offsets $FFFC02 + {0..$3FC step 4}; the last spills
+  a.load_abs_long(2, 0x00FFF000U);
+  a.load_abs_long(3, 0x00FFFFFCU);
+  a.load_abs_long(4, 0x00FFFC04U);
+  const auto probe = a.pc;
+  a.nop().stop();
+  const auto result = run(a, Domains::memory);
+  const auto unrelated = data_values(result, probe, 2);
+  const auto clipped = data_values(result, probe, 3);
+  const auto member = data_values(result, probe, 4);
+  expect(result.complete && unrelated && *unrelated == std::vector<std::uint64_t>{0x7777U}, "strided spill: an unrelated cell stays precise");
+  expect(result.complete && !clipped && !member, "strided spill: the clipped and member cells are Unknown");
+  bool synthetic_value = false;
+  for (const auto &[point, state] : m68k_points_of(result, probe))
+    for (const auto &[cell, value] : state->memory.cells) {
+      const auto data = value.is_pointer() ? std::optional<std::vector<std::uint64_t>>{} : std::optional(value.data.values());
+      if (data && std::find(data->begin(), data->end(), 0x1234U) != data->end()) synthetic_value = true;
+    }
+  expect(result.complete && !synthetic_value, "strided spill: no cell receives the stored value");
+}
+
+// The return-slot recorder: a spill-resolved (synthetic) target never records a slot even for a return-address writer, and marks the
+// slots it may touch rewritten; a real exact push still records.
+void synthetic_target_never_records_a_return_slot() {
+  const M68kRegion ram{M68kRegionKind::mutable_ram, 0U, work_ram_base, 0x200000U, 0x10000U};
+  const auto cell = M68kPointsTo::of({{ram, M68kOffsetSet::of({0x1ffff0U})}});
+  const auto other = M68kPointsTo::of({{ram, M68kOffsetSet::of({0x1ffffcU})}});
+  M68kAbstractMemory real;
+  m68k_return_slots_store(real, cell, 4U, 0x206U, false);
+  expect(real.slots.size() == 1U, "return slot: a real exact push records its slot");
+  M68kAbstractMemory synthetic;
+  m68k_return_slots_store(synthetic, cell, 4U, 0x206U, true);
+  expect(synthetic.slots.empty(), "return slot: a spill-resolved target records no slot");
+  m68k_return_slots_store(real, other, 4U, std::nullopt, true);  // a synthetic store elsewhere leaves it intact
+  const auto it = real.slots.begin();
+  expect(it != real.slots.end() && !it->second.rewritten, "return slot: a disjoint synthetic store does not rewrite the slot");
+  m68k_return_slots_store(real, cell, 4U, 0x206U, true);  // a synthetic store ON the slot rewrites it and does not replace it
+  expect(real.slots.size() == 1U && real.slots.begin()->second.rewritten && real.slots.begin()->second.pushed == analysis::FiniteValue::of({0x206U}),
+         "return slot: a synthetic store on the slot marks it rewritten and keeps the old record");
+}
+
 // The same store where the wrapped bus lands on no region at all (a hole): the clipped target must still be a weak update.
 void spill_into_a_bus_hole_is_not_a_strong_update() {
   Asm a;
@@ -362,6 +414,8 @@ int main() {
   spilling_known_value_store_is_not_a_strong_update();
   spill_into_a_bus_hole_is_not_a_strong_update();
   spilling_set_member_never_joins_its_value();
+  strided_spill_with_a_known_value();
+  synthetic_target_never_records_a_return_slot();
   untracked_landing_is_still_observed();
   spill_does_not_rewrite_the_return_slot();
   store_over_the_stack_still_rewrites();

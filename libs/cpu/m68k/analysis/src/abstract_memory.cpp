@@ -390,7 +390,7 @@ void m68k_return_slots_unknown_store(M68kAbstractMemory &memory) {
 }
 
 void m68k_return_slots_store(M68kAbstractMemory &memory, const M68kPointsTo &targets, std::uint32_t span,
-                             std::optional<std::uint32_t> return_address) {
+                             std::optional<std::uint32_t> return_address, bool synthetic_target) {
   if (targets.is_bottom() || span == 0U) return;
   if (!targets.is_known()) {
     m68k_return_slots_unknown_store(memory);
@@ -403,7 +403,7 @@ void m68k_return_slots_store(M68kAbstractMemory &memory, const M68kPointsTo &tar
     return;
   }
   std::optional<M68kCell> exact;
-  if (return_address && span == 4U && targets.is_exact() && targets.pairs.size() == 1U && targets.pairs.front().second.exact().size() == 1U &&
+  if (return_address && !synthetic_target && span == 4U && targets.is_exact() && targets.pairs.size() == 1U && targets.pairs.front().second.exact().size() == 1U &&
       m68k_memory_tracked(targets.pairs.front().first.kind)) {
     const auto &region = targets.pairs.front().first;
     const auto at = physical(region, targets.pairs.front().second.exact().front());

@@ -1254,7 +1254,8 @@ void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::u
     m68k_memory_store(out.memory, targets[i].first, targets[i].second, value, policy);
     // SEG-030-T008: every store is related to the recorded return slots (a call's push records one).
     m68k_return_slots_store(out.memory, targets[i].first, targets[i].second,
-                            write.value == M68kMemoryWrite::Value::return_address ? std::optional<std::uint32_t>(next) : std::nullopt);
+                            write.value == M68kMemoryWrite::Value::return_address ? std::optional<std::uint32_t>(next) : std::nullopt,
+                            i < spilled.size() && spilled[i]);
   }
 }
 

@@ -33,7 +33,8 @@ operand-width authority, no moved thresholds).
    is not defined for stays the original (fail-closed) target. The replacement over-approximates the touched bytes and is never a
    strong update and never carries a value: the clipped member is not the real store position, so a store whose target was replaced
    records no value and erases the cells it may touch (found by the independent gate in two rounds; fixtures use known-value
-   stores, multi-member sets and a bus hole). Soundness fixtures
+   stores, multi-member sets, a strided hull and a bus hole). The return-slot recorder is told as well: a spill-resolved target never
+   records a slot, even for a return-address writer (unreachable for a real push today; closed explicitly and tested directly). Soundness fixtures
    cover the landing (a cell on the landing bytes is Unknown), the in-region part (the last cell of RAM), the wrapped bus and the
    negative that a store which lands on the return slot still makes it `Unknown(return_slot_rewritten)`; six mutants (resolution
    disabled, landing dropped, untracked landing dropped, in-region part dropped, clipped member dropped, value joined) are killed.
@@ -163,9 +164,23 @@ Each `base_unknown` / `context_bound` site was traced back to the missing proven
 * The object dispatcher: `A1 <- ROM pointer table[object-id byte read from RAM]; JSR (A1)`. The missing fact is the value set of a
   RAM byte (the object id) written from level-layout data. Its only static bound is the operand width (256 entries), which ADR 0080
   decision 3 forbids as an authority. It is the same fact that leaves nine PC-indexed sites width-only on Sonic 1.
-* A decompressor continuation passed in a register by its caller (`JMP (A3)`) in a callee merged past the context bound K = 8. A
-  per-call-site context would resolve it; raising K or the depth globally for one site is excluded by the milestone.
+* A decompressor continuation register (`JMP (A3)`, set by the routine's own entry stubs). In every call-site context the register
+  is exact (a two-member set); it is Unknown only in the unknown-entry handler partition, which enters the loop body directly with
+  an all-Unknown state. It is therefore not a context merge, and a call-site split cannot help (see the experiment below).
 * Computed returns whose popped cell has an Unknown base after the unbalanced idiom of T003.
+
+**Bounded context-specialization experiment (correction cycle).** T004's scope allows a bounded call-context refinement at the
+responsible producer, so it was falsified instead of dismissed. The most generous split is the context bound itself: the per-callee
+bound K was raised from 8 to 512 (a diagnostic build, not committed), so that no callee is merged and every call site has its own
+context, and the planner was rerun on Cool Spot (default and `--diagnostic-transparent-handlers`) and Sonic 1 (ceiling):
+
+* Cool Spot: the three `context_bound` computed returns become one `context_bound` plus `stack_unbalanced` 10 -> 13; the whole-image
+  total stays 22 and no site becomes exact or bounded. The sites are `MOVE.L <RAM variable or frame field>,-(A7); RTS`: the popped
+  value is read from RAM, so even a known A7 yields no target set. The merge only hid the A7; the data is the blocker.
+* Sonic 1 (ceiling): identical 23 triggers in the same classes. The `JMP (A3)` site is Unknown only in the unknown-entry handler
+  partition, which a per-call-site context does not touch.
+* Conclusion: no measured `context_bound` / `base_unknown` obligation has its provenance destroyed by a merge; a per-site split would
+  add contexts without resolving any site, so none was implemented (no title-specific or K-escalation mechanism is kept).
 
 No finite object or region identity exists for these pointers: the objects are runtime-allocated slots of a RAM array whose
 contents come from ROM data. A field-sensitive refinement of an array of homogeneous objects requires a heap abstraction the
@@ -204,20 +219,43 @@ What would have to hold for a selective admission, by class, and what each costs
 | --- | --- | --- |
 | interrupt resumption (every title) | a named, counted register-preservation / frame-integrity premise for delivered handlers, or the provenance of every pointer a handler uses | a trust decision SEG-030-T009 refused; alone it moves no title (ceiling run: 22-64 triggers remain) |
 | computed returns (Sonic 1, Sonic 2, Cool Spot) | the return-slot integrity premise widened to RTS that pop a caller's slot or a pushed value, plus a per-path split of the stack delta | an ADR 0079 amendment; still rests on a premise |
-| RAM-indexed dispatch (object routine tables, every title) | the value set of an object-id byte filled from level data; the only static bound is the operand width | forbidden authority (ADR 0080 decision 3); a heap/object abstraction is excluded |
+| RAM-indexed dispatch (object routine tables, every title) | a sound bounded index domain plus a proven table extent (the bounded immutable pointer-table authority below); the operand width alone is not one | not evaluated here; the width rule stays forbidden (ADR 0080 decision 3) and a heap/object abstraction is excluded |
 | external writer (Z80) | the materialized Z80 images as an input of the store-freedom proof (SEG-030-T010) | a plumbing change; not a Sonic blocker today because the handler class dominates |
 | resource completion (OutRun, Streets of Rage, Golden Axe) | a summary representation that does not climb over shared stack-slot records | a new analysis design |
 
-The decisive row is the third: even with the first, second and fourth removed, the object dispatch leaves a whole-image trigger on
-every complete title, and it has no sound bounded refinement under the current authority set. A materially smaller sound hybrid is
-therefore **not reachable by precision work in this architecture**; the only real reduction found is the spill resolution, which
-removes a defect (one trigger on one title) and leaves the admission unchanged.
+The third row is the most consequential one measured: even with the first, second and fourth removed, the RAM-indexed object
+dispatch leaves a whole-image trigger on every complete title, and none of the bounded refinements evaluated here bounds it.
+
+**What this milestone disproves, and what it does not.**
+
+* DISPROVEN: the bounded refinements SEG-034 evaluated (the spill resolution, per-register handler effects, a relative-A7 return
+  stack, finite pointer-set provenance and the bounded per-site context split) are sufficient to produce a materially smaller hybrid
+  under ADR 0080's current authority set. The only real reduction is the spill resolution, which removes a defect (one trigger on
+  one title) and leaves the admission unchanged.
+* NOT DISPROVEN: that any future sound selective admission is possible. ADR 0051 named the remaining proof routes explicitly (index
+  ranges plus table extents for jump tables, and pointer-table provenance) and said the experiment "does not prove that only such a
+  subsystem could ever resolve these domains". ADR 0054 showed that exact, explicitly bounded immutable-table recovery materially
+  enlarges sound discovery, and that raw width-only recovery is poor and unstable, so it stays forbidden as a direct authority. This
+  milestone neither contradicts nor re-tests either result.
+
+**Future architecture candidate: bounded immutable pointer-table authority.** Conceptually
+
+    proven immutable table base and extent
+    + a sound bounded index domain (a mask, a range guard, or a proven finite set)
+    + exact immutable table reads
+    + every resulting target validated (mapped, even, decodable)
+    = a finite exact target set
+
+This is materially different from the forbidden `8/16-bit operand -> broad executable address region` (ADR 0051 / SEG-024 width
+rule), which stays forbidden and is not re-enabled here. It would address the RAM-indexed dispatch only where the index domain is
+actually bounded in the code (several measured sites carry a range guard or mask) and the table extent is provable; sites with
+neither stay whole-image. Whether that covers enough of the measured dispatches is an open measurement for a separate milestone.
 
 Consequences:
 
 - Generated-C economics (220 MB for Sonic 1) are a representation question (SEG-022 / SEG-025 style), to be reconsidered in a separate
   evidence-driven milestone; this milestone adds no helper or factoring scheme.
-- Admission narrowing would need an explicit decision to admit the operand-width authority (and a measurement of its closure on the
-  authorized corpus) together with the premise decisions above; each is a separate architecture decision, not a refinement.
+- Admission narrowing needs separate architecture decisions: the bounded immutable pointer-table authority above (the avenue left
+  open), and the premise decisions in the table; none is a refinement, and the operand-width region rule is not among the options.
 - The instruments stay: `--trace-points` (private attribution) and `--diagnostic-transparent-handlers` (an uncredited ceiling) cost
   nothing when unused, and the planner reruns the question after any such decision.
