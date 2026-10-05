@@ -57,9 +57,10 @@ Z80_PROOF_TEST = "analysis_genesis_z80_proof_test"  # SEG-030-T010: the Genesis 
 VALUE_TEST = "analysis_m68k_value_test"  # SEG-030-T003: the address region plus offset domain (added by SEG-030-T008)
 MEMORY_TEST = "analysis_m68k_memory_test"  # SEG-030-T004: abstract memory and alias exclusion (added by SEG-030-T008)
 RETURN_SLOT_TEST = "analysis_m68k_return_slot_test"  # SEG-030-T008: the return slot and the return-slot integrity premise
+PRECISION_TEST = "analysis_m68k_precision_test"  # SEG-034: the whole-image-trigger precision refinements (ADR 0081)
 # cheapest first: a core mutant is usually decided by the CPU-free fixture
-ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, VALUE_TEST, MEMORY_TEST, RETURN_SLOT_TEST, CONTEXTS_TEST, FRAMES_TEST, PREMISE_TEST,
-             Z80_PROOF_TEST)
+ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, VALUE_TEST, MEMORY_TEST, RETURN_SLOT_TEST, PRECISION_TEST, CONTEXTS_TEST, FRAMES_TEST,
+             PREMISE_TEST, Z80_PROOF_TEST)
 # Per-fixture time limit: a mutant that makes a fixture loop is killed by it, and a baseline that exceeds it fails the harness (a timeout
 # is never a pass). The SEG-029/SEG-030 fixtures run unmutated in well under a second and keep 60 s.
 TEST_TIMEOUT_SECONDS = 60
@@ -565,6 +566,19 @@ MUTANTS: list[Mutant] = [
             "    out.complete = false;",
             "    out.complete = true;",
             (FRAMES_TEST,), "a historical contexts fallback is exposed as a complete requested frames result"),
+    # ---- SEG-034 (ADR 0081): whole-image-trigger precision refinements ----
+    Mutant("m68k_spill_resolution_disabled", M68K,
+           "  if (config_.domains.memory)\n    for (auto &[target, span] : out) target = resolve_store_spill(target, span);",
+           "  if (false)\n    for (auto &[target, span] : out) target = resolve_store_spill(target, span);",
+           (PRECISION_TEST,), "a store spilling past its region end is no longer resolved (fail-closed baseline: a precision regression)"),
+    Mutant("m68k_spill_landing_dropped", M68K,
+           "    pairs.emplace_back(landing, M68kOffsetSet::of({static_cast<std::uint32_t>(start)}));",
+           "    (void)landing;",
+           (PRECISION_TEST,), "the bytes a spilling store lands on in the next region are not written (unsound)"),
+    Mutant("m68k_spill_inside_part_dropped", M68K,
+           "    pairs.emplace_back(region, std::move(inside));",
+           "    (void)inside;",
+           (PRECISION_TEST,), "the in-region part of a partially spilling store is dropped (unsound)"),
     # ---- SEG-031 (ADR 0080): hybrid admission safety properties (`--group hybrid`) ----
     Mutant("hybrid_island_member_omitted", HYBRID_PLAN,
            "for (std::uint64_t offset = offsets.lo(); offset <= offsets.hi(); offset += offsets.stride())",

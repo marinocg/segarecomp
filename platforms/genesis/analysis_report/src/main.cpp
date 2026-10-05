@@ -41,7 +41,9 @@ void usage(std::ostream &out) {
          "--mapping-base <address-hex8>) [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... --private-output "
          "<path> [--universe] [--domains baseline|<address,memory,contexts,frames>|all] [--compare-challenger] [--metrics-output "
          "<path>] [--max-iterations <n>] [--max-points <n>] [--assume-no-z80-ram-writes (diagnostic premise ablation; needs memory)] "
-         "[--hybrid-plan <plan-path> (SEG-031: plan the hybrid admission; forces --domains all)]\n";
+         "[--hybrid-plan <plan-path> (SEG-031: plan the hybrid admission; forces --domains all)] "
+         "[--trace-points <path> (SEG-034: private per-point state dump of the final solve)] "
+         "[--diagnostic-transparent-handlers (SEG-034: uncredited ablation: unanalysed interrupt handlers are transparent; writes no plan)]\n";
 }
 
 std::optional<std::uint64_t> parse_hex(std::string_view text, std::size_t width) {
@@ -108,7 +110,8 @@ std::uint64_t peak_rss_bytes() {
 }
 
 int run(int argc, char **argv) {
-  std::optional<std::string> rom, digest, private_output, metrics_output, hybrid_plan;
+  std::optional<std::string> rom, digest, private_output, metrics_output, hybrid_plan, trace_points;
+  bool diagnostic_transparent = false;
   std::optional<std::uint32_t> entry_address, mapping_base;
   bool reset_entry = false, universe = false, compare = false, domains_given = false, iterations_given = false,
        points_given = false, assume_no_z80 = false;
@@ -123,6 +126,8 @@ int run(int argc, char **argv) {
     else if (option == "--private-output" && has_value && !private_output) private_output = std::string(value);
     else if (option == "--metrics-output" && has_value && !metrics_output) metrics_output = std::string(value);
     else if (option == "--hybrid-plan" && has_value && !hybrid_plan) hybrid_plan = std::string(value);
+    else if (option == "--trace-points" && has_value && !trace_points) trace_points = std::string(value);
+    else if (option == "--diagnostic-transparent-handlers" && !diagnostic_transparent) { diagnostic_transparent = true; ++index; continue; }
     else if (option == "--reset-entry" && !reset_entry) { reset_entry = true; ++index; continue; }
     else if (option == "--universe" && !universe) { universe = true; ++index; continue; }
     else if (option == "--compare-challenger" && !compare) { compare = true; ++index; continue; }
@@ -175,6 +180,8 @@ int run(int argc, char **argv) {
   if (config.domains.contexts) config.domains.memory = true;
   if (config.domains.memory) config.domains.address = true;
   if (assume_no_z80 && !config.domains.memory) { usage(std::cerr); return 2; }
+  if (diagnostic_transparent && !hybrid_plan && !config.domains.frames) { usage(std::cerr); return 2; }
+  config.diagnostic_transparent_handlers = diagnostic_transparent;
   config.assume_no_z80_ram_writes = assume_no_z80;
   config.reset_entry = reset_entry;
   const auto started = std::chrono::steady_clock::now();
@@ -222,13 +229,14 @@ int run(int argc, char **argv) {
     }
     segarecomp::GenesisHybridPlanConfig plan_config{};
     plan_config.analysis = config;
+    plan_config.diagnostic_transparent_handlers = diagnostic_transparent;
     const auto plan = segarecomp::plan_genesis_hybrid_admission(*program, plan_config);
     {
       std::ofstream sink{*private_output, std::ios::binary};
       sink << segarecomp::format_genesis_hybrid_plan_private(plan) << '\n';
       if (!sink) { std::cerr << "segarecomp-genesis-analysis-report: cannot write private output\n"; return 2; }
     }
-    {
+    if (!diagnostic_transparent) {  // a diagnostic ablation never writes a production plan
       std::ofstream sink{*hybrid_plan, std::ios::binary};
       sink << segarecomp::format_genesis_hybrid_admission_plan(segarecomp::genesis_hybrid_admission_plan(plan, *program, expected));
       if (!sink) { std::cerr << "segarecomp-genesis-analysis-report: cannot write hybrid plan\n"; return 2; }
@@ -244,6 +252,18 @@ int run(int argc, char **argv) {
     return plan.outcome == segarecomp::GenesisHybridOutcome::broad_images_invalid ? 1 : 0;
   }
   auto report = segarecomp::run_genesis_analysis_report(*program, config);
+  if (trace_points && report.images_valid) {
+    // SEG-034 private diagnostic: the abstract state at every point of the final solve (exact PCs; never persisted).
+    std::ofstream sink{*trace_points, std::ios::binary};
+    for (const auto &[point, state] : report.analysis.solution.in_states) {
+      sink << std::hex << std::setw(2) << std::setfill('0') << segarecomp::m68k_point_tag(point) << ' ' << std::setw(6)
+           << segarecomp::m68k_point_pc(point) << std::dec << " ctx=" << segarecomp::m68k_context_site(segarecomp::m68k_point_context(point))
+           << " delta=" << state.stack_delta.describe() << " status=" << state.status.describe() << " A7=" << state.address[7].describe()
+           << " A6=" << state.address[6].describe() << " A5=" << state.address[5].describe() << " A4=" << state.address[4].describe() << " A3=" << state.address[3].describe() << " A2=" << state.address[2].describe() << " A1=" << state.address[1].describe() << " A0=" << state.address[0].describe()
+           << " D0w=" << state.values.values[segarecomp::m68k_analysis_slot(0, 16)].describe() << " rn=" << int(state.resumption_unknown)
+           << '\n';
+    }
+  }
   if (!report.images_valid) {
     std::cerr << "segarecomp-genesis-analysis-report: executable-image set rejected\n";
     return 1;

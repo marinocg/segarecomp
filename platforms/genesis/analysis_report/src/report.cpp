@@ -146,6 +146,7 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
     // (nullopt, the blanket rule, whenever that already fails) and is validated against the run's own stores below.
     adapter_config.memory.observed_store_ranges.emplace_back(genesis_z80_area_first, genesis_z80_area_last);
     adapter_config.memory.external_writer_bound = prove_genesis_z80_ram_writes(config.z80_images, {}).bound();
+    adapter_config.diagnostic_transparent_handlers = config.diagnostic_transparent_handlers;
     if (frames) {
       // SEG-030-T006: the delivered vectors (ADR 0021 / ADR 0043) and, for a reset-entry program, the 68000 reset state.
       for (const auto &[vector, handler] : report.roots.vectors) adapter_config.frames.vectors.push_back({vector, handler & bus_mask});

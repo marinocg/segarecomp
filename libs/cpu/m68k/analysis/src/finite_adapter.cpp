@@ -1155,7 +1155,50 @@ std::vector<std::pair<M68kPointsTo, std::uint32_t>> M68kFiniteAdapter::memory_wr
     }
     }
   }
+  if (config_.domains.memory)
+    for (auto &[target, span] : out) target = resolve_store_spill(target, span);
   return out;
+}
+
+// SEG-034 (ADR 0081). A pointer set widened to the end of its region (`limit`: one past the last byte) used for a store of `span`
+// bytes "may spill" past the region end, and the memory domain then fails closed (every cell poisoned, every return slot rewritten,
+// every asynchronous range widened to all of memory). The spill is in fact bounded exactly: an offset o <= size reaches bytes
+// [o, o + span), so the bytes beyond the region are a subset of [size, size + span), i.e. the first `span` bytes of the bus region
+// that follows (its extent is the machine view's, not a guess). The replacement keeps the in-region part (offsets clipped to
+// size - span, the last `span` in-region bytes covering every partially in-region store) and adds the bounded landing store.
+M68kPointsTo M68kFiniteAdapter::resolve_store_spill(const M68kPointsTo &target, std::uint32_t span) const {
+  if (!target.is_known() || span == 0U) return target;
+  const auto spills = [&](const M68kRegion &region, const M68kOffsetSet &offsets) {
+    return static_cast<std::uint64_t>(offsets.hi()) + span > region.size;
+  };
+  if (std::none_of(target.pairs.begin(), target.pairs.end(), [&](const auto &pair) { return spills(pair.first, pair.second); }))
+    return target;
+  std::vector<std::pair<M68kRegion, M68kOffsetSet>> pairs;
+  for (const auto &[region, offsets] : target.pairs) {
+    if (!spills(region, offsets)) {
+      pairs.emplace_back(region, offsets);
+      continue;
+    }
+    if (region.size < span) return target;  // not a region the clip is defined for: fail closed
+    const std::uint32_t last = region.size - span;  // the last offset whose whole store stays inside the region
+    M68kOffsetSet inside = offsets.restricted(0U, last);
+    // A partially in-region store starts after `last`: the clip adds `last` itself (never through the widening join, which would
+    // saturate a strided set back to the region end).
+    if (offsets.hi() > last)
+      inside = inside.empty() ? M68kOffsetSet::of({last}) : M68kOffsetSet::strided(std::min(offsets.lo(), inside.lo()), 1U, last);
+    pairs.emplace_back(region, std::move(inside));
+    // The bytes after the region end, on the 24-bit bus (the byte after the last bus address wraps to 0).
+    const std::uint32_t end = (static_cast<std::uint32_t>(region.base & bus_mask) + region.size) & bus_mask;
+    const auto next = image_.region_of(end);
+    if (!next) continue;  // no region at all there: no tracked byte can be written (a hole of the bus)
+    if (!m68k_memory_tracked(next->kind)) continue;  // untracked bytes (cartridge, devices) hold no abstract-memory cell
+    const std::uint64_t start = static_cast<std::uint64_t>(end) - next->base;
+    if (start + span > next->size) return target;  // the landing bytes are not inside one extent: fail closed
+    M68kRegion landing{next->kind, next->id, next->base, next->size, next->mirror};
+    pairs.emplace_back(landing, M68kOffsetSet::of({static_cast<std::uint32_t>(start)}));
+  }
+  // `of` merges the equal regions by join and turns more regions than the pair bound into Unknown(set_bound) (fail closed).
+  return M68kPointsTo::of(std::move(pairs), target.width_derived);
 }
 
 void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::uint32_t next, const State &in, State &out,
@@ -3213,7 +3256,7 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
                               bool credited, Unanalysed why) {
     ++report.unanalysed[std::string(unanalysed_name(why)) + (credited ? "" : "/writer_only")];
     if (credited) unknown_entries.insert(handler);
-    if (!resuming) return;
+    if (!resuming || config.diagnostic_transparent_handlers) return;
     async[parent].async_all = true;
     const auto levels = clobber_levels(vectors);
     clobbered[parent].insert(levels.begin(), levels.end());
@@ -3285,7 +3328,7 @@ FrameDerivation derive_frames(const M68kAnalysisImage &image, const M68kAnalysis
         continue;
       }
       if (instance.credited) unknown_entries.insert(instance.handler);
-      if (instance.resuming && !orphan) {
+      if (instance.resuming && !orphan && !config.diagnostic_transparent_handlers) {
         out.next.policies[instance.parent].async_all = true;
         const auto levels = clobber_levels(instance.vectors);
         out.next.clobbered[instance.parent].insert(levels.begin(), levels.end());

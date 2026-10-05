@@ -40,6 +40,13 @@ segarecomp_enable_warnings(analysis_m68k_return_slot_test)
 add_test(NAME analysis_m68k_return_slot_test COMMAND analysis_m68k_return_slot_test)
 set_property(TEST analysis_m68k_return_slot_test APPEND PROPERTY LABELS full fast)
 
+# SEG-034 (ADR 0081): the generic precision refinements that remove SEG-031 whole-image fallback triggers (spill, ...).
+add_executable(analysis_m68k_precision_test analysis_m68k_precision_test.cpp)
+target_link_libraries(analysis_m68k_precision_test PRIVATE segarecomp::cpu_m68k_analysis)
+segarecomp_enable_warnings(analysis_m68k_precision_test)
+add_test(NAME analysis_m68k_precision_test COMMAND analysis_m68k_precision_test)
+set_property(TEST analysis_m68k_precision_test APPEND PROPERTY LABELS full fast)
+
 # SEG-030-T008 part 2 (ADR 0079 decision 8): the seeded randomized differential of the analysis against a bounded test-only
 # concrete executor (fixed seed list 0x5E6030008 + 0..399; never linked into production). It requires 0 unsound results and 0
 # non-deterministic runs in all three configurations (premise violations, and in the historical baseline/contexts configurations the

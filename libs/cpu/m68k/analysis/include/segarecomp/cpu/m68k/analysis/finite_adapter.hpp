@@ -589,6 +589,11 @@ struct M68kAnalysisConfig {
   // (`entry_state(true, tag)`: registers and memory Unknown, stack delta Unknown, status = the partition's status bound) in context 0.
   // Used only for code with no proven source transfer (mandatory materialized executable images, entered from the startup entry).
   std::map<std::uint32_t, std::vector<std::uint32_t>> opaque_entries;
+  // SEG-034 DIAGNOSTIC premise ablation, never credited (report-only ceiling measurements): a handler instance that the frames domain
+  // cannot analyse (unmodelled parent, Unknown entry A7, depth bound) is treated as transparent: its resumption does not clobber
+  // registers, memory, the status or the frame integrity of its parent. The handler's own code is still entered (covered). This is
+  // exactly the assumption SEG-030-T009 removed; the flag measures what the interrupt-resumption class costs, nothing more.
+  bool diagnostic_transparent_handlers{};
 };
 
 class M68kFiniteAdapter {
@@ -654,6 +659,12 @@ public:
   [[nodiscard]] std::vector<std::pair<M68kPointsTo, std::uint32_t>> memory_write_targets(const M68kIrOperation &operation,
                                                                                          const State &in,
                                                                                          const analysis::FiniteValue &status) const;
+
+  // SEG-034 (ADR 0081): a store of `span` bytes through `target` whose offsets may run past a region's end is replaced by an
+  // over-approximation that stays inside the regions: the in-region part clipped to the region's last `span` bytes plus the bytes
+  // the spill can reach in the bus region that follows (at most `span` bytes starting at the region's end). Identical to `target`
+  // when nothing spills; the unchanged (fail-closed) target when the following bytes are not a bounded region.
+  [[nodiscard]] M68kPointsTo resolve_store_spill(const M68kPointsTo &target, std::uint32_t span) const;
 
 private:
   void transfer_address_registers(const M68kIrOperation &operation, const State &in, State &out,

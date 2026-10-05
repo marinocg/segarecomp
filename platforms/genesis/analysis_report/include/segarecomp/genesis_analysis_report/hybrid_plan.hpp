@@ -55,6 +55,11 @@ struct GenesisHybridPlanConfig {
   GenesisAnalysisReportConfig analysis;
   std::uint32_t max_rounds{genesis_hybrid_max_rounds};
   std::size_t max_island_entries{genesis_hybrid_max_island_entries};
+  // SEG-034 DIAGNOSTIC premise ablation, never credited and never written as a production plan: handler instances the frames
+  // domain cannot analyse are treated as transparent (M68kAnalysisConfig::diagnostic_transparent_handlers). It answers one question
+  // for the operator: how much smaller a hybrid would be if the interrupt-resumption class could be assumed away. A result of this
+  // mode is a ceiling for the class, not a plan.
+  bool diagnostic_transparent_handlers{};
 };
 
 enum class GenesisHybridOutcome : std::uint8_t {
@@ -96,6 +101,7 @@ struct GenesisHybridPlan {
   std::map<std::uint32_t, std::vector<std::uint32_t>> island_entries;    // the final island configuration
   std::size_t materialized_entries{};   // mandatory `static_proof` image entries
   std::string validation_failure;       // broad_validation_failed only
+  bool diagnostic_transparent_handlers{};  // SEG-034: produced under the uncredited transparent-handler ablation
 };
 
 // Plans the hybrid admission of `program` (which may carry ADR 0049 aliases). Deterministic.

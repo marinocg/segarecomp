@@ -252,6 +252,8 @@ GenesisHybridPlan plan_genesis_hybrid_admission(const FrontendProgram &program, 
   plan.universe = *universe;
   plan.admitted = plan.universe;  // broad until a validated fixed point says otherwise
   auto analysis_config = config.analysis;
+  plan.diagnostic_transparent_handlers = config.diagnostic_transparent_handlers;
+  analysis_config.diagnostic_transparent_handlers = config.diagnostic_transparent_handlers;
   analysis_config.domains = GenesisAnalysisDomains{true, true, true, true};
   const auto materialized = materialized_entries(*image);
   plan.materialized_entries = materialized.size();
@@ -399,6 +401,7 @@ std::string format_genesis_hybrid_plan_aggregate(const GenesisHybridPlan &plan) 
   }
   out << '}';
   if (!plan.validation_failure.empty()) out << ",\"validation_failure\":\"" << plan.validation_failure << '"';
+  if (plan.diagnostic_transparent_handlers) out << ",\"diagnostic_ablation\":\"transparent_handlers\",\"credited\":false";
   out << '}';
   return out.str();
 }
