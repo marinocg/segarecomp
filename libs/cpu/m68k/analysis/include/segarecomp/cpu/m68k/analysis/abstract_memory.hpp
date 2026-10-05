@@ -144,8 +144,10 @@ void m68k_memory_store(M68kAbstractMemory &memory, const M68kPointsTo &targets, 
 // call (JSR/BSR): a push at one exact tracked cell records (or replaces) that slot. Every other store with a known target marks the
 // slots it may touch `rewritten` (a target that may spill past its region marks every slot); a store with an Unknown target marks
 // every slot `unknown_store`.
+// SEG-034: `synthetic_target` marks a target the spill resolution replaced (an over-approximation whose clipped member is not the real
+// store position): it never records a slot, even for a return-address writer; the slots it may touch are marked `rewritten`.
 void m68k_return_slots_store(M68kAbstractMemory &memory, const M68kPointsTo &targets, std::uint32_t span,
-                             std::optional<std::uint32_t> return_address);
+                             std::optional<std::uint32_t> return_address, bool synthetic_target = false);
 // SEG-030-T008: an undescribed writer (it may write any byte): every slot `unknown_store`.
 void m68k_return_slots_unknown_store(M68kAbstractMemory &memory);
 

@@ -123,6 +123,8 @@ struct GenesisAnalysisReportConfig {
   // `opaque_entries`). Empty for every SEG-030 report.
   std::map<std::uint32_t, std::vector<std::uint32_t>> island_entries;
   std::map<std::uint32_t, std::vector<std::uint32_t>> opaque_entries;
+  // SEG-034 DIAGNOSTIC premise ablation, never credited: see M68kAnalysisConfig::diagnostic_transparent_handlers.
+  bool diagnostic_transparent_handlers{};
 };
 
 // SEG-030-T004 (ADR 0079 decision 7): the Genesis bus range a store to which may release the Z80 (the Z80 control block: memory
