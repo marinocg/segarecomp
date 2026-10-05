@@ -213,6 +213,6 @@ machine.
 
 The M68K broad-AOT entry representation changed (helper-backed entries are table rows; admission and the compiled-address set are
 unchanged and digest-equal). For the 512 KiB reference title (re-measured, product `main` after SEG-035 vs SEG-036): generated C 220.2 ->
-177.9 MB, compile CPU `-O0` 70.1 -> 57.3 s, executable `-O0` 64.9 -> 54.9 MB and `-O2` 33.7 -> 25.1 MB, dispatch-bound runtime +5.5%.
+177.9 MB, compile CPU `-O0` 70.1 -> 57.3 s, executable `-O0` 64.9 -> 54.9 MB and `-O2` 33.7 -> 25.1 MB, dispatch-bound runtime +5.3% (min) / +5.7% (median).
 1 MiB titles: executable `-O0` -18.5% to -25.1%. The rows above keep their original head label and are superseded by ADR 0083 for current
 size/time figures. The Gen-3 activation decision (ADR 0076) is unchanged: this reduced cost, not the admitted set.

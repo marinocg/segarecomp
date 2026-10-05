@@ -51,8 +51,9 @@ executable evidence, and the prototype was built.
    `== NULL` checks at indirect transfers) keeps its signature and semantics: a direct entry returns a real function that resolves the
    same table row.
 3. All helpers of a direct build share one signature `(runtime, provenance, own_pc)`. A parameter the exact body does not use is discarded
-   with `(void)`; the body text is unchanged. Inline (unique-body) entries, ordinary blocks, frontier stops and every
-   helper-ineligible form keep the owner `switch (runtime->pc)` representation (a hybrid; there were no ineligible entries on the measured titles).
+   with `(void)`; the body text is unchanged. Unique-body (single-use) entries, bodies whose own-PC normalization is declined, ordinary blocks and frontier stops keep the owner
+   `switch (runtime->pc)` representation (a hybrid). An exact-shared body, whatever its text, becomes a helper and so a direct entry.
+   There were no `case`/`static`/`switch` bodies among the measured titles' unique-body entries.
 4. The generator proves each packed word: it rebuilds the legacy spelling from the unpacked fields and rejects the whole translation
    unless it equals `instruction_source(operation)`. It also rejects a length over 255, an offset of 2^40 or more, or a source address
    that is not the entry's own address. There is no fallback guess.
@@ -72,8 +73,9 @@ same struct a literal used to spell. The differential tests assert the absence o
 - **PC set.** The table authority is unchanged and produced by the same code. Admitted, final compiled, AOT-owned and block-owned
   address-set digests (count + SHA-256) are identical to baseline on all six inputs (below). The AOT-owned set is recomputed from the
   new id space (id at or above the owner count is AOT-owned) and equals the baseline set.
-- **Right helper for the right PC.** The helper id is the id of the same body identity the wrapper called. Mutants (a rotation of helper
-  ids across direct entries, a shifted packed word, swapped packed words, a wrong own-PC argument) are all detected by the differential.
+- **Right helper for the right PC.** The helper id is the id of the same body identity the wrapper called. Table-wide mutants (a rotation of all helper
+  ids, a shifted packed word on every row, pair-swapped packed words, a wrong own-PC argument) are all detected by the differential.
+  Single-row mutants are not covered by the committed test.
 - **Behaviour.** Every compiled entry of the project fixture is entered under five architectural scenarios (mapped, unmapped, odd address
   registers, supervisor/user, handlers present/absent), single step and 12-step runs, for the factored, unfactored and direct forms. Full
   observable output (transfer, stop class and diagnostic, full stop provenance, access, mapping claims, bus accesses, registers, SR, USP,
@@ -99,7 +101,7 @@ Sonic 1 production route, `-O2`, `/usr/bin/time` around the unchanged `genesis_s
 | full route wall / CPU, `-O2` | 41.5 s / 134 s | 35.2 s / 111 s (-15% / -17%) |
 | generation wall / peak RSS | 4.2 s / 519 MiB | 3.5 s / 619 MiB (+19% RSS) |
 | largest compiler RSS | 187 MiB | 211 MiB (+13%) |
-| dispatch-bound benchmark, 40 M instructions, `-O2` (min / median of 9) | 4.349 / 4.368 s | 4.579 / 4.616 s (+5.3% / +5.7%) |
+| dispatch-bound benchmark, 40 M instructions, `-O2` (min / median of 9) | 4.349 / 4.368 s | 4.579 / 4.616 s (+5.3% min / +5.7% median) |
 | 120-frame coverage run, `-O2` | 0.95-0.96 s | 0.87-0.90 s |
 
 Other inputs (`-O0`):
