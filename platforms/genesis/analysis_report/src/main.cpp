@@ -261,6 +261,16 @@ int run(int argc, char **argv) {
            << " delta=" << state.stack_delta.describe() << " status=" << state.status.describe() << " A7=" << state.address[7].describe()
            << " A6=" << state.address[6].describe() << " A5=" << state.address[5].describe() << " A4=" << state.address[4].describe() << " A3=" << state.address[3].describe() << " A2=" << state.address[2].describe() << " A1=" << state.address[1].describe() << " A0=" << state.address[0].describe()
            << " D0w=" << state.values.values[segarecomp::m68k_analysis_slot(0, 16)].describe() << " rn=" << int(state.resumption_unknown)
+           << [&] {  // SEG-035: every data-register slot and its CPU-owned width-derived flag (private output only)
+                std::string slots;
+                for (unsigned reg = 0; reg < 8U; ++reg)
+                  for (const unsigned width : {16U, 32U}) {
+                    const auto slot = segarecomp::m68k_analysis_slot(reg, width);
+                    slots += " D" + std::to_string(reg) + (width == 16U ? "w=" : "l=") + state.values.values[slot].describe() +
+                             (state.width_derived[slot] ? "[W]" : "");
+                  }
+                return slots;
+              }()
            << '\n';
     }
   }
