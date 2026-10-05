@@ -139,17 +139,20 @@ int main(int argc, char **argv) {
   }
   {
     // SEG-036-T002: the direct-entry table fails closed on malformed bindings.
-    std::ostringstream sink;
-    check(!emit_compiled_entry_table_direct(sink, {}).empty(), "direct: empty rejected");
-    check(!emit_compiled_entry_table_direct(sink, {{5U, "a", ""}, {4U, "", "h", "0ULL"}}).empty(), "direct: descending rejected");
-    check(!emit_compiled_entry_table_direct(sink, {{4U, "a", "h", "0ULL"}}).empty(), "direct: owner and helper together rejected");
-    check(!emit_compiled_entry_table_direct(sink, {{4U, "", "", ""}}).empty(), "direct: neither owner nor helper rejected");
-    check(!emit_compiled_entry_table_direct(sink, {{4U, "", "h", ""}}).empty(), "direct: missing provenance word rejected");
-    std::ostringstream all_direct;
-    check(emit_compiled_entry_table_direct(all_direct, {{4U, "", "h0", "0x0000000400000204ULL"}, {6U, "", "h1", "0ULL"}}).empty(),
+    std::ostringstream header, unit;
+    check(!emit_compiled_entry_table_direct(header, unit, {}).empty(), "direct: empty rejected");
+    check(!emit_compiled_entry_table_direct(header, unit, {{5U, "a", ""}, {4U, "", "h", "0ULL"}}).empty(), "direct: descending rejected");
+    check(!emit_compiled_entry_table_direct(header, unit, {{4U, "a", "h", "0ULL"}}).empty(), "direct: owner and helper together rejected");
+    check(!emit_compiled_entry_table_direct(header, unit, {{4U, "", "", ""}}).empty(), "direct: neither owner nor helper rejected");
+    check(!emit_compiled_entry_table_direct(header, unit, {{4U, "", "h", ""}}).empty(), "direct: missing provenance word rejected");
+    std::ostringstream all_header, all_direct;
+    check(emit_compiled_entry_table_direct(all_header, all_direct,
+                                           {{4U, "", "h0", "0x0000000400000204ULL"}, {6U, "", "h1", "0ULL"}}).empty(),
           "direct: all-direct table accepted");
     check(all_direct.str().find("  NULL,\n") != std::string::npos, "direct: placeholder owner when every entry is direct");
     check(all_direct.str().find("  1,\n  2,\n") != std::string::npos, "direct: helper ids start after the owner count");
+    check(all_header.str().find("static inline size_t genesis_compiled_entry_find") != std::string::npos,
+          "direct: inline find in the header");
   }
   check_lookup(dir, "empty_like", {0U}, 1U, 8U);
   check_lookup(dir, "small", {2U, 4U, 6U, 0x200U, 0x00FFFFFEU, 0xFFFFFFFFU}, 2U, 8U);

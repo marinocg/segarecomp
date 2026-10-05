@@ -9792,9 +9792,12 @@ void negate_disp16_aot_admission_and_dispatch_are_bounded() {
 }
 
 // SEG-022-T008: forced-sharded production emission of the dense owner fixture into <dir>.
-int emit_aot_owner_shards(const char *directory) {
+// SEG-036: `legacy` selects the owner/wrapper entry form (the representation this fixture pins); the default is the
+// compact direct-entry form.
+int emit_aot_owner_shards(const char *directory, bool legacy = false) {
   using namespace segarecomp;
   using namespace aot_owner_fixture;
+  const ImmutableRomAotDirectEntriesScope direct_entries(!legacy);
   const auto image = make_image();
   auto program = program_with(image);
   if (!apply_genesis_immutable_rom_aot_range(program, base + 8U, static_cast<std::uint32_t>(base + image.size()))) return 4;
@@ -30743,6 +30746,8 @@ int main(int argc, char **argv) {
     return emit_aot_owner_single_source();
   if (argc == 3 && std::string_view(argv[1]) == "--emit-aot-owner-shards")
     return emit_aot_owner_shards(argv[2]);
+  if (argc == 4 && std::string_view(argv[1]) == "--emit-aot-owner-shards" && std::string_view(argv[3]) == "legacy")
+    return emit_aot_owner_shards(argv[2], true);
   if (argc == 2 && std::string_view(argv[1]) == "--emit-negate-disp16-aot")
     return emit_negate_disp16_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-extended-arithmetic-aot")

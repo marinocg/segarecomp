@@ -48,7 +48,7 @@ _REGION_STARTS = (
     # function bytes (same categories) and they are counted separately.
     ("aot_shared_helper", re.compile(rb"^(?:static )?GenesisControlTransfer genesis_aot_shared_[0-9]+\([^;]*\{\s*$")),
     ("aot_function", re.compile(rb"^(?:static )?GenesisControlTransfer genesis_aot_(?:owner_)?[0-9A-Fa-f]+\([^;]*\{\s*$")),
-    ("entry_table", re.compile(rb"^static const uint32_t genesis_compiled_entry_addresses\[\]")),
+    ("entry_table", re.compile(rb"^(?:static )?const uint32_t genesis_compiled_entry_addresses\[\]")),
     ("dispatch", re.compile(rb"^(?:static )?GenesisCompiledEntry genesis_compiled_entry_lookup\([^;]*\{")),
     ("owned_literals", re.compile(rb"^static const uint8_t genesis_owned_region_data_")),
     ("main_glue", re.compile(rb"^int main\(")),
@@ -76,7 +76,7 @@ _ENTRY_OWNER_ROW = re.compile(rb"^\s*(genesis_(aot|block)\w*),")
 # SEG-036-T002: direct-entry tables (helper pointer rows are `genesis_aot_shared_N,`; provenance rows are one packed
 # `UINT64_C(...)` word per compiled entry, zero for an entry that has an owner).
 _DIRECT_TABLE_ROW = re.compile(rb"^\s*(?:0x[0-9A-F]{16}ULL,|0ULL,|genesis_aot_shared_[0-9]+,)")
-_TABLE_ARRAY_START = re.compile(rb"^static const \w+ (genesis_\w+)\[\] = \{")
+_TABLE_ARRAY_START = re.compile(rb"^(?:static )?const \w+ (genesis_\w+)\[\] = \{")
 _OWNER_TABLE_ROW = re.compile(rb"^\s*(\w+),\s*$")
 _ENTRY_ROW = re.compile(rb"^\s*(?:UINT32_C\(0x[0-9A-Fa-f]+\)|0x[0-9A-Fa-f]{8}u|UINT(?:8|16|32)_C\([0-9]+\)|[0-9]+|NULL|genesis_(?:aot|block)\w*),")
 
@@ -415,6 +415,30 @@ def timed(command: list[str], stdout=None, cwd=None) -> dict:
     return {"returncode": done.returncode, "wall_seconds": round(wall, 2), "peak_rss_bytes": rss, "stderr": text}
 
 
+def shard_entry_fingerprints(shard_dir) -> dict:
+    """Final compiled-address authority = the sorted compiled-entry table (its own `entries` TU)."""
+    t_addr: list[int] = []
+    t_ids: list[int] = []
+    t_kinds: list[str] = []
+    t_array = b""
+    with (pathlib.Path(shard_dir) / "bridge_generated_entries_00.c").open("rb") as handle:
+        for line in handle:
+            if (match := _TABLE_ARRAY_START.match(line)):
+                t_array = match.group(1)
+            if t_array == b"genesis_compiled_entry_addresses" and (match := _ENTRY_ADDR_ROW.match(line)):
+                t_addr.append(int(match.group(1) or match.group(2), 16))
+            elif t_array == b"genesis_compiled_entry_owner_ids" and (match := _ENTRY_ID_ROW.match(line)):
+                t_ids.append(int(match.group(1) or match.group(2)))
+            elif t_array == b"genesis_compiled_owners" and (match := _OWNER_TABLE_ROW.match(line)):
+                t_kinds.append("block" if match.group(1).startswith(b"genesis_block") else "aot")
+    entry_addresses = split_entry_addresses(t_addr, t_ids, t_kinds)
+    return {
+        "final_compiled_entry_address_set": set_fingerprint(entry_addresses["aot"] + entry_addresses["block"]),
+        "aot_owned_entry_address_set": set_fingerprint(entry_addresses["aot"]),
+        "ordinary_block_entry_address_set": set_fingerprint(entry_addresses["block"]),
+    }
+
+
 def measure(args) -> dict:
     out = pathlib.Path(args.out_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -437,8 +461,8 @@ def measure(args) -> dict:
     shard_dir = out / "generated"
     shutil.rmtree(shard_dir, ignore_errors=True)
     cmd += ["--generated-c-output", str(src), "--generated-c-shard-dir", str(shard_dir)]
-    if getattr(args, "aot_direct_entries", False):
-        cmd += ["--aot-direct-entries"]
+    if getattr(args, "legacy_aot_entries", False):
+        cmd += ["--legacy-aot-entries"]
     gen = timed(cmd)
     manifest = shard_dir / "bridge_generated.units"
     sharded = manifest.is_file()
@@ -470,26 +494,7 @@ def measure(args) -> dict:
     report["fingerprints"] = {"admitted_immutable_rom_aot_address_set": set_fingerprint(addresses)}
     if sharded:
         # Final compiled-address authority = the sorted compiled-entry table (its own `entries` TU).
-        t_addr: list[int] = []
-        t_ids: list[int] = []
-        t_kinds: list[str] = []
-        t_array = b""
-        with (shard_dir / "bridge_generated_entries_00.c").open("rb") as handle:
-            for line in handle:
-                if (match := _TABLE_ARRAY_START.match(line)):
-                    t_array = match.group(1)
-                if t_array == b"genesis_compiled_entry_addresses" and (match := _ENTRY_ADDR_ROW.match(line)):
-                    t_addr.append(int(match.group(1) or match.group(2), 16))
-                elif t_array == b"genesis_compiled_entry_owner_ids" and (match := _ENTRY_ID_ROW.match(line)):
-                    t_ids.append(int(match.group(1) or match.group(2)))
-                elif t_array == b"genesis_compiled_owners" and (match := _OWNER_TABLE_ROW.match(line)):
-                    t_kinds.append("block" if match.group(1).startswith(b"genesis_block") else "aot")
-        entry_addresses = split_entry_addresses(t_addr, t_ids, t_kinds)
-        report["fingerprints"].update({
-            "final_compiled_entry_address_set": set_fingerprint(entry_addresses["aot"] + entry_addresses["block"]),
-            "aot_owned_entry_address_set": set_fingerprint(entry_addresses["aot"]),
-            "ordinary_block_entry_address_set": set_fingerprint(entry_addresses["block"]),
-        })
+        report["fingerprints"].update(shard_entry_fingerprints(shard_dir))
     runtime_dir = pathlib.Path(args.product_root) / "platforms" / "genesis" / "runtime"
     flags = [args.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", args.opt, "-I", str(runtime_dir)]
     robj = out / "runtime.o"
@@ -552,6 +557,8 @@ def main() -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("attribute")
     a.add_argument("file")
+    f = sub.add_parser("fingerprints", help="compiled-address-set fingerprints of an existing sharded output directory")
+    f.add_argument("shard_dir")
     m = sub.add_parser("measure")
     m.add_argument("--segarecomp", required=True)
     m.add_argument("--product-root", default=str(pathlib.Path(__file__).resolve().parents[1]))
@@ -559,13 +566,16 @@ def main() -> int:
     m.add_argument("--opt", default="-O0")
     m.add_argument("--rom", required=True)
     m.add_argument("--external-hints")
-    m.add_argument("--aot-direct-entries", action="store_true", help="SEG-036: compact direct-entry representation")
+    m.add_argument("--legacy-aot-entries", action="store_true",
+                   help="SEG-036: previous owner/wrapper entry representation (default is the compact direct-entry form)")
     m.add_argument("--out-dir", required=True)
     m.add_argument("--report")
     m.add_argument("--jobs", type=int, default=1, help="concurrent per-TU compiles (sharded output only)")
     args = parser.parse_args()
     if args.cmd == "attribute":
         result = attribute(pathlib.Path(args.file))
+    elif args.cmd == "fingerprints":
+        result = shard_entry_fingerprints(args.shard_dir)
     else:
         result = measure(args)
         result["toolchain"] = toolchain(args.cc)

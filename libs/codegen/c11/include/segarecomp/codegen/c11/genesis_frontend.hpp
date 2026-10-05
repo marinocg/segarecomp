@@ -96,8 +96,9 @@ class ImmutableRomAotBodyFactoringScope {
 
 // SEG-036-T002 / ADR 0083: generation-time selection of the compact direct-entry representation for a sharded
 // build with factored AOT bodies. A helper-backed AOT entry is then a row of static tables (compiled address ->
-// statically selected exact helper id, own provenance row) instead of a generated owner `case`, label and call.
-// Off by default; it never changes admission, the compiled-address set, or any lowered statement.
+// statically selected exact helper id, packed provenance word) instead of a generated owner `case`, label and call.
+// On by default; disabling it on the calling thread reproduces the previous owner/wrapper form exactly (differential
+// evidence and bisection). It never changes admission, the compiled-address set, or any lowered statement.
 class ImmutableRomAotDirectEntriesScope {
  public:
   explicit ImmutableRomAotDirectEntriesScope(bool enabled);

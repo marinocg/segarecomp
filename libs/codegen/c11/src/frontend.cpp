@@ -45,7 +45,7 @@ struct ExecutionHistoryHooksScope {
 // SEG-022-T011: see ImmutableRomAotBodyFactoringScope (genesis_frontend.hpp).
 thread_local bool g_aot_body_factoring = true;
 // SEG-036-T002: see ImmutableRomAotDirectEntriesScope (genesis_frontend.hpp).
-thread_local bool g_aot_direct_entries = false;
+thread_local bool g_aot_direct_entries = true;
 const char *history_transfer_kind(M68kIrKind kind) {
   switch (kind) {
   case M68kIrKind::branch_ne_short: case M68kIrKind::branch_always_short: case M68kIrKind::general_branch:
@@ -6077,16 +6077,6 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   std::size_t aot_helper_count = 0U;
   // SEG-036-T002 / ADR 0083: compact direct entries exist only in a sharded build with factored bodies.
   const bool direct_entries = sharded && factor_aot_bodies && g_aot_direct_entries;
-  if (direct_entries) {
-    // Shared-header vocabulary of the direct-entry tables (the provenance word is unpacked by the entries unit).
-    shard_begin_header(out);
-    out << "typedef GenesisControlTransfer (*GenesisAotDirectHelper)(GenesisRuntime *runtime, const "
-           "GenesisInstructionProvenance *genesis_aot_source, uint32_t genesis_aot_pc);\n"
-           "#define GENESIS_NO_COMPILED_ENTRY ((size_t)-1)\n"
-           "size_t genesis_compiled_entry_find(uint32_t address);\n"
-           "GenesisControlTransfer genesis_compiled_entry_invoke(GenesisRuntime *runtime, size_t index);\n";
-    shard_end_header(out);
-  }
   for (std::uint32_t id = 0U; id < aot_body_text.size(); ++id) {
     if (aot_body_uses[id] < 2U) continue;
     std::ostringstream name;
@@ -6179,7 +6169,6 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
         << std::setfill('0') << address << "(GenesisRuntime *runtime) " << emit_aot_entry(index);
   }
   // SEG-022-T003: the sorted compiled-entry table and its binary-search lookup form the one `entries` unit.
-  if (sharded) shard_begin_unit(out, "entries", 0U, "GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address)");
   std::vector<CompiledEntryBinding> compiled_entry_bindings;
   compiled_entry_bindings.reserve(emitted_code_addresses.size());
   for (const auto address : emitted_code_addresses) {
@@ -6238,11 +6227,23 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   }
   const bool any_direct_binding = std::any_of(compiled_entry_bindings.begin(), compiled_entry_bindings.end(),
                                               [](const CompiledEntryBinding &binding) { return !binding.direct_helper.empty(); });
-  if (auto rejection = any_direct_binding ? emit_compiled_entry_table_direct(out, compiled_entry_bindings)
-                                          : emit_compiled_entry_table(out, compiled_entry_bindings);
-      !rejection.empty())
-    return rejection;
-  if (sharded) shard_end_unit(out);
+  if (any_direct_binding) {
+    // SEG-036-T002: the direct tables' header vocabulary precedes the unit; the unit holds the definitions.
+    std::ostringstream direct_header, direct_unit;
+    if (auto rejection = emit_compiled_entry_table_direct(direct_header, direct_unit, compiled_entry_bindings);
+        !rejection.empty())
+      return rejection;
+    shard_begin_header(out);
+    out << direct_header.str();
+    shard_end_header(out);
+    shard_begin_unit(out, "entries", 0U, "GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address)");
+    out << direct_unit.str();
+    shard_end_unit(out);
+  } else {
+    if (sharded) shard_begin_unit(out, "entries", 0U, "GenesisCompiledEntry genesis_compiled_entry_lookup(uint32_t address)");
+    if (auto rejection = emit_compiled_entry_table(out, compiled_entry_bindings); !rejection.empty()) return rejection;
+    if (sharded) shard_end_unit(out);
+  }
   out << "\nstatic GenesisControlTransfer genesis_dispatch(GenesisRuntime *runtime) {\n";
   if (any_direct_binding)
     out << "  { const size_t entry_index = genesis_compiled_entry_find(runtime->pc);\n"

@@ -85,3 +85,16 @@ Entries with an inline body are `inline_helper_eligible` or `inline_helper_ineli
 `routing_only_bytes` = case rows + labels + call syntax + own-PC arguments, i.e. the C that only routes a known PC to an already
 selected helper; `routing_plus_provenance_argument_bytes` adds the repeated provenance compound literals.
 Only counts and byte totals are reported. The existing category partition is unchanged.
+
+## Direct-entry representation (SEG-036, ADR 0083)
+
+Sharded Genesis output with factored bodies now emits helper-backed AOT entries as rows of static tables instead of owner `case` rows,
+labels and wrapper calls: `genesis_compiled_entry_addresses[]` / `genesis_compiled_entry_owner_ids[]` (an id at or above the owner count
+names `genesis_aot_direct_helpers[id - owner_count]`) and `genesis_aot_direct_meta[]` (one packed provenance word per compiled entry).
+`measure` / `attribute` report the new rows as `direct_entry_tables` (and `counts.direct_helper_rows` / `counts.direct_meta_rows`);
+owner-backed entries keep their `entry_representation` split. The AOT-owned compiled-address set treats an id past the owner list as
+AOT-owned, so the count + SHA-256 digests stay comparable across both forms.
+
+`measure --legacy-aot-entries` (forwarded to the emitter) selects the previous owner/wrapper form for before/after comparisons.
+`generated_code_scalability_report.py fingerprints <shard-dir>` prints the three compiled-address digests of an existing sharded
+output directory.

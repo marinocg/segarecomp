@@ -109,17 +109,20 @@ struct CompiledEntryTableNames {
 // `genesis_compiled_entry_invoke` rebuilds from it exactly the `GenesisInstructionProvenance` value a legacy entry passed
 // (CPU variant constant, source address = the entry's own PC). Nothing decodes guest code at run time: the generator chose
 // each helper and packed each word; the tables only map a compiled address to that choice.
-// Requires a shared header that declares `GenesisAotDirectHelper`, `GENESIS_NO_COMPILED_ENTRY`, `genesis_compiled_entry_find`,
-// `genesis_compiled_entry_invoke` and `genesis_internal_dispatch_inconsistency_stop`.
+//
+// The emitter writes two texts: `header` (shared-header vocabulary: the helper type, extern tables and `static inline`
+// find/invoke, so every translation unit that dispatches inlines the search and the table-indexed call) and `unit` (the
+// table definitions plus the `genesis_compiled_entry_lookup` membership function). The caller places each.
 struct CompiledEntryDirectNames {
   std::string stop_fn = "genesis_internal_dispatch_inconsistency_stop";
   std::string helpers = "genesis_aot_direct_helpers";
   std::string meta = "genesis_aot_direct_meta";
+  std::string count = "genesis_compiled_entry_count";
   std::string find = "genesis_compiled_entry_find";
   std::string invoke = "genesis_compiled_entry_invoke";
 };
 
-[[nodiscard]] inline std::string emit_compiled_entry_table_direct(std::ostream &out,
+[[nodiscard]] inline std::string emit_compiled_entry_table_direct(std::ostream &header, std::ostream &unit,
                                                                   const std::vector<CompiledEntryBinding> &bindings,
                                                                   const CompiledEntryTableNames &names = {},
                                                                   const CompiledEntryDirectNames &direct = {}) {
@@ -154,50 +157,58 @@ struct CompiledEntryDirectNames {
   const unsigned bits = compiled_entry_owner_id_bits(owner_count + helpers.size());
   const std::string id_type = "uint" + std::to_string(bits) + "_t";
   const std::string owner_bound = std::to_string(owner_count) + "U";
-  out << "static const uint32_t " << names.addresses << "[] = {\n";
+  header << "typedef GenesisControlTransfer (*GenesisAotDirectHelper)(GenesisRuntime *runtime, const "
+            "GenesisInstructionProvenance *genesis_aot_source, uint32_t genesis_aot_pc);\n"
+         << "#define GENESIS_NO_COMPILED_ENTRY ((size_t)-1)\n"
+         << "extern const uint32_t " << names.addresses << "[];\n"
+         << "extern const " << id_type << " " << names.owner_ids << "[];\n"
+         << "extern const " << names.entry_type << " " << names.owners << "[];\n"
+         << "extern const GenesisAotDirectHelper " << direct.helpers << "[];\n"
+         << "extern const uint64_t " << direct.meta << "[];\n"
+         << "extern const size_t " << direct.count << ";\n"
+         << "static inline size_t " << direct.find << "(uint32_t address) {\n"
+         << "  size_t low = 0U;\n"
+         << "  size_t high = " << direct.count << ";\n"
+         << "  while (low < high) {\n"
+         << "    const size_t middle = low + (high - low) / 2U;\n"
+         << "    if (" << names.addresses << "[middle] < address) low = middle + 1U; else high = middle;\n"
+         << "  }\n"
+         << "  if (low < " << direct.count << " && " << names.addresses << "[low] == address) return low;\n"
+         << "  return GENESIS_NO_COMPILED_ENTRY;\n}\n"
+         << "static inline GenesisControlTransfer " << direct.invoke << "(GenesisRuntime *runtime, size_t index) {\n"
+         << "  const size_t id = " << names.owner_ids << "[index];\n"
+         << "  if (id < " << owner_bound << ") return " << names.owners << "[id](runtime);\n"
+         << "  { const uint64_t meta = " << direct.meta << "[index];\n"
+         << "    const GenesisInstructionProvenance source = {GENESIS_CPU_MC68000, runtime->pc, meta >> 24,\n"
+         << "      {(uint8_t)(meta >> 8), (uint8_t)(meta >> 16)}, (uint32_t)(meta & UINT64_C(0xFF))};\n"
+         << "    return " << direct.helpers << "[id - " << owner_bound << "](runtime, &source, runtime->pc); }\n}\n";
   // Bare suffixed literals (not UINT*_C macros): a million-row table costs the compiler far less memory.
-  for (const auto &binding : bindings) out << "  " << hex8(binding.address) << "u,\n";
-  out << "};\nstatic const " << id_type << " " << names.owner_ids << "[] = {\n";
+  unit << "const uint32_t " << names.addresses << "[] = {\n";
+  for (const auto &binding : bindings) unit << "  " << hex8(binding.address) << "u,\n";
+  unit << "};\nconst " << id_type << " " << names.owner_ids << "[] = {\n";
   for (const auto &binding : bindings)
-    out << "  "
-        << std::to_string(binding.direct_helper.empty() ? owner_id_of.at(binding.owner_symbol)
-                                                        : owner_count + helper_id_of.at(binding.direct_helper))
-        << ",\n";
-  out << "};\nstatic const " << names.entry_type << " " << names.owners << "[] = {\n";
-  if (placeholder_owner) out << "  NULL,\n";
-  for (const auto owner : owners) out << "  " << owner << ",\n";
-  out << "};\nstatic const GenesisAotDirectHelper " << direct.helpers << "[] = {\n";
-  for (const auto helper : helpers) out << "  " << helper << ",\n";
-  out << "};\nstatic const uint64_t " << direct.meta << "[] = {\n";
+    unit << "  "
+         << std::to_string(binding.direct_helper.empty() ? owner_id_of.at(binding.owner_symbol)
+                                                         : owner_count + helper_id_of.at(binding.direct_helper))
+         << ",\n";
+  unit << "};\nconst " << names.entry_type << " " << names.owners << "[] = {\n";
+  if (placeholder_owner) unit << "  NULL,\n";
+  for (const auto owner : owners) unit << "  " << owner << ",\n";
+  unit << "};\nconst GenesisAotDirectHelper " << direct.helpers << "[] = {\n";
+  for (const auto helper : helpers) unit << "  " << helper << ",\n";
+  unit << "};\nconst uint64_t " << direct.meta << "[] = {\n";
   for (const auto &binding : bindings)
-    out << "  " << (binding.direct_helper.empty() ? std::string("0ULL") : binding.direct_provenance) << ",\n";
-  out << "};\n"
-      << "size_t " << direct.find << "(uint32_t address) {\n"
-      << "  size_t low = 0U;\n"
-      << "  size_t high = sizeof(" << names.addresses << ") / sizeof(" << names.addresses << "[0]);\n"
-      << "  while (low < high) {\n"
-      << "    const size_t middle = low + (high - low) / 2U;\n"
-      << "    if (" << names.addresses << "[middle] < address) low = middle + 1U; else high = middle;\n"
-      << "  }\n"
-      << "  if (low < sizeof(" << names.addresses << ") / sizeof(" << names.addresses << "[0]) && "
-      << names.addresses << "[low] == address) return low;\n"
-      << "  return GENESIS_NO_COMPILED_ENTRY;\n}\n"
-      << "GenesisControlTransfer " << direct.invoke << "(GenesisRuntime *runtime, size_t index) {\n"
-      << "  const size_t id = " << names.owner_ids << "[index];\n"
-      << "  if (id < " << owner_bound << ") return " << names.owners << "[id](runtime);\n"
-      << "  { const uint64_t meta = " << direct.meta << "[index];\n"
-      << "    const GenesisInstructionProvenance source = {GENESIS_CPU_MC68000, runtime->pc, meta >> 24,\n"
-      << "      {(uint8_t)(meta >> 8), (uint8_t)(meta >> 16)}, (uint32_t)(meta & UINT64_C(0xFF))};\n"
-      << "    return " << direct.helpers << "[id - " << owner_bound << "](runtime, &source, runtime->pc); }\n}\n"
-      << "static GenesisControlTransfer genesis_direct_entry_stub(GenesisRuntime *runtime) {\n"
-      << "  const size_t index = " << direct.find << "(runtime->pc);\n"
-      << "  if (index == GENESIS_NO_COMPILED_ENTRY) return " << direct.stop_fn << "(runtime);\n"
-      << "  return " << direct.invoke << "(runtime, index);\n}\n"
-      << names.entry_type << " " << names.lookup << "(uint32_t address) {\n"
-      << "  const size_t index = " << direct.find << "(address);\n"
-      << "  if (index == GENESIS_NO_COMPILED_ENTRY) return NULL;\n"
-      << "  { const size_t id = " << names.owner_ids << "[index];\n"
-      << "    return id < " << owner_bound << " ? " << names.owners << "[id] : genesis_direct_entry_stub; }\n}\n";
+    unit << "  " << (binding.direct_helper.empty() ? std::string("0ULL") : binding.direct_provenance) << ",\n";
+  unit << "};\nconst size_t " << direct.count << " = sizeof(" << names.addresses << ") / sizeof(" << names.addresses << "[0]);\n"
+       << "static GenesisControlTransfer genesis_direct_entry_stub(GenesisRuntime *runtime) {\n"
+       << "  const size_t index = " << direct.find << "(runtime->pc);\n"
+       << "  if (index == GENESIS_NO_COMPILED_ENTRY) return " << direct.stop_fn << "(runtime);\n"
+       << "  return " << direct.invoke << "(runtime, index);\n}\n"
+       << names.entry_type << " " << names.lookup << "(uint32_t address) {\n"
+       << "  const size_t index = " << direct.find << "(address);\n"
+       << "  if (index == GENESIS_NO_COMPILED_ENTRY) return NULL;\n"
+       << "  { const size_t id = " << names.owner_ids << "[index];\n"
+       << "    return id < " << owner_bound << " ? " << names.owners << "[id] : genesis_direct_entry_stub; }\n}\n";
   return {};
 }
 

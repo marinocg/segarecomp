@@ -38,7 +38,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--aot-direct-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--immutable-rom-aot-admission <plan>]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--immutable-rom-aot-admission <plan>]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
@@ -108,8 +108,9 @@ int run_cli(int argc, char **argv) {
       // manifest). Alone it forces sharding; --generated-c-output alone forces the single file; given both,
       // the emitter shards iff the accepted program has >= generated_c_shard_threshold compiled units.
       std::optional<std::string_view> generated_c_shard_dir;
-      // SEG-036-T002: compact direct-entry representation for helper-backed AOT entries (sharded output only).
-      bool aot_direct_entries = false;
+      // SEG-036-T002: the compact direct-entry representation of helper-backed AOT entries is the default for sharded
+      // output; --legacy-aot-entries selects the previous owner/wrapper form (differential evidence and bisection).
+      bool aot_direct_entries = true;
       for (int index = 4; index < argc;) {
         const std::string_view option = argv[index];
         if (option == "--reset-entry") {
@@ -149,9 +150,9 @@ int run_cli(int argc, char **argv) {
           if (generated_c_shard_dir || index + 1 >= argc) { print_usage(std::cerr); return 2; }
           generated_c_shard_dir = argv[index + 1];
           index += 2;
-        } else if (option == "--aot-direct-entries") {
-          if (aot_direct_entries) { print_usage(std::cerr); return 2; }
-          aot_direct_entries = true;
+        } else if (option == "--legacy-aot-entries") {
+          if (!aot_direct_entries) { print_usage(std::cerr); return 2; }
+          aot_direct_entries = false;
           ++index;
         } else if (option == "--provenance-diagnostics") {
           if (provenance_diagnostics) { print_usage(std::cerr); return 2; }

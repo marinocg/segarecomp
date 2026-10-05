@@ -252,7 +252,7 @@ def main():
             word = int(m.group(1), 16 if m.group(1).startswith("0x") else 10)
             assert word == 0 or (word & 0xFF) in (2, 4, 6, 8, 10), "a packed word carries a legal instruction length"
         # No runtime decode: the dispatch is a binary search plus table indexing; nothing switches on guest code.
-        invoke = re.search(r"GenesisControlTransfer genesis_compiled_entry_invoke\(.*?\n\}\n", direct_text, re.S).group(0)
+        invoke = re.search(r"static inline GenesisControlTransfer genesis_compiled_entry_invoke\(.*?\n\}\n", direct_text, re.S).group(0)
         assert "switch" not in invoke and "opcode" not in invoke and "meta" in invoke
 
         # SEG-036-T003: mutants of the compact tables must be observably different from the reference, i.e. the
@@ -262,13 +262,15 @@ def main():
         shard = tmp / "direct_a"
         entries_name = next(n for n in (shard / "bridge_generated.units").read_text().split() if "_entries_" in n)
         original = (shard / entries_name).read_text()
+        header_original = (shard / "bridge_generated.h").read_text()
 
-        def mutant(tag, transform):
+        def mutant(tag, transform, header=False):
             target = tmp / f"mutant_{tag}"
             shutil.copytree(shard, target)
-            text = transform(original)
-            assert text != original, f"mutation {tag} changed nothing"
-            (target / entries_name).write_text(text)
+            file_name, source_text = ("bridge_generated.h", header_original) if header else (entries_name, original)
+            text = transform(source_text)
+            assert text != source_text, f"mutation {tag} changed nothing"
+            (target / file_name).write_text(text)
             names = (target / "bridge_generated.units").read_text().split()
             out = build_and_run(compiler, runtime, [target / n for n in names], target, "bridge_generated.h",
                                 entries, tmp, f"mutant_{tag}")
@@ -280,7 +282,7 @@ def main():
 
         def wrong_helper(text):
             m, ids = ids_of(text)
-            owners = int(re.search(r"if \(id < (\d+)U\) return", text).group(1))
+            owners = int(re.search(r"if \(id < (\d+)U\) return", header_original).group(1))
             direct = sorted({v for v in ids if v >= owners})
             assert len(direct) > 2
             rotate = {a: b for a, b in zip(direct, direct[1:] + direct[:1])}
@@ -307,8 +309,9 @@ def main():
         def wrong_own_pc(text):
             return text.replace("(runtime, &source, runtime->pc); }", "(runtime, &source, runtime->pc + 2U); }")
 
-        for tag, transform in (("helper", wrong_helper), ("meta", wrong_meta), ("swap", swapped_meta), ("ownpc", wrong_own_pc)):
-            mutant(tag, transform)
+        for tag, transform, in_header in (("helper", wrong_helper, False), ("meta", wrong_meta, False),
+                                          ("swap", swapped_meta, False), ("ownpc", wrong_own_pc, True)):
+            mutant(tag, transform, in_header)
         # The unfactored single-file and legacy forms keep their historical wrapper-only representation.
         assert "GenesisAotDirectHelper" not in factored_sharded and "genesis_aot_direct_meta" not in factored_sharded
 
