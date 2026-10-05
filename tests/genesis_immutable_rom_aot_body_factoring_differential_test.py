@@ -116,7 +116,7 @@ int main(void) {
 def entry_addresses(text):
     body = re.search(r"\bgenesis_compiled_entry_addresses\[\] = \{\n(.*?)\n\};", text, re.S)
     assert body, "compiled-entry address table"
-    return [int(a, 16) for a in re.findall(r"UINT32_C\(0x([0-9A-Fa-f]{8})\)", body.group(1))]
+    return [int(a or b, 16) for a, b in re.findall(r"UINT32_C\(0x([0-9A-Fa-f]{8})\)|^\s*0x([0-9A-Fa-f]{8})u,", body.group(1), re.M)]
 
 
 def build_and_run(compiler, runtime, sources, include_dir, header, entries, tmp, tag):
@@ -145,7 +145,7 @@ def main():
         tmp = pathlib.Path(tmp)
         results = {}
         texts = {}
-        for form in ("factored", "unfactored"):
+        for form in ("factored", "unfactored", "direct"):
             # Sharded form, emitted twice to prove determinism.
             for copy in ("a", "b"):
                 run(pipeline, "--emit-aot-factoring", form, tmp / f"{form}_{copy}")
@@ -156,6 +156,13 @@ def main():
             units = (shard / "bridge_generated.units").read_text().split()
             sharded_text = "".join((shard / n).read_text() for n in units) + (shard / "bridge_generated.h").read_text()
             entries = entry_addresses("".join((shard / n).read_text() for n in units if "_entries_" in n))
+            if form == "direct":
+                # SEG-036-T002: the compact direct-entry representation exists only for sharded output.
+                texts[form] = (sharded_text, None)
+                results[(form, "sharded")] = build_and_run(compiler, runtime, [shard / n for n in units], shard,
+                                                           "bridge_generated.h", entries, tmp, f"{form}_sh")
+                results[(form, "entries")] = entries
+                continue
             # Single-file form.
             single = run(pipeline, "--emit-aot-factoring", form).stdout
             single_path = tmp / f"{form}_single.c"
@@ -173,7 +180,8 @@ def main():
         entries = results[("factored", "entries")]
         assert len(entries) > 100, len(entries)
         reference = results[("unfactored", "sharded")]
-        for key in (("unfactored", "single"), ("factored", "sharded"), ("factored", "single")):
+        assert results[("direct", "entries")] == entries, "the compiled-address set is unchanged by direct entries"
+        for key in (("unfactored", "single"), ("factored", "sharded"), ("factored", "single"), ("direct", "sharded")):
             if results[key] != reference:
                 for left, right in zip(reference.splitlines(), results[key].splitlines()):
                     assert left == right, f"{key} diverges from the unfactored reference:\n  {left}\n  {right}"
@@ -219,6 +227,91 @@ def main():
         for text in (unfactored_sharded, unfactored_single):
             assert "genesis_aot_pc" not in text
         assert re.search(r"^step .* s=4 kind=0 next=", reference, re.M), "handler-present exception entries are compared"
+        # SEG-036-T002 / ADR 0083: the compact representation is table-driven, statically selected and mutation-checked.
+        direct_text = texts["direct"][0]
+        assert "GenesisAotDirectHelper" in direct_text and "genesis_aot_direct_helpers[]" in direct_text
+        assert len(direct_text) < len(factored_sharded), "direct entries remove per-entry generated scaffolding"
+        # Every helper has the uniform signature and is reached only through the table (no per-entry wrapper).
+        shared = re.findall(r"GenesisControlTransfer (genesis_aot_shared_\d{5})\(GenesisRuntime \*runtime, "
+                            r"const GenesisInstructionProvenance \*genesis_aot_source, uint32_t genesis_aot_pc\) \{", direct_text)
+        assert shared and len(shared) == len(set(shared))
+        helper_rows = re.search(r"genesis_aot_direct_helpers\[\] = \{\n(.*?)\n\};", direct_text, re.S).group(1)
+        listed = re.findall(r"genesis_aot_shared_\d{5}", helper_rows)
+        assert sorted(listed) == sorted(set(shared)), "the helper table names every generated helper exactly once"
+        for name in shared:
+            assert not re.search(r"return " + name + r"\(runtime", direct_text), f"{name} has no per-entry wrapper"
+        # Table rows: address / id / provenance-word arrays are parallel; a word packs the exact legacy literal's fields.
+        addresses = entry_addresses(direct_text)
+        ids = re.search(r"genesis_compiled_entry_owner_ids\[\] = \{\n(.*?)\n\};", direct_text, re.S).group(1)
+        assert len(re.findall(r"^\s*\d+,$", ids, re.M)) == len(addresses)
+        meta = re.search(r"genesis_aot_direct_meta\[\] = \{\n(.*?)\n\};", direct_text, re.S).group(1).splitlines()
+        assert len(meta) == len(addresses)
+        for row in meta:
+            m = re.match(r"\s*(0|0x[0-9A-F]{16})ULL,$", row)
+            assert m, row
+            word = int(m.group(1), 16 if m.group(1).startswith("0x") else 10)
+            assert word == 0 or (word & 0xFF) in (2, 4, 6, 8, 10), "a packed word carries a legal instruction length"
+        # No runtime decode: the dispatch is a binary search plus table indexing; nothing switches on guest code.
+        invoke = re.search(r"GenesisControlTransfer genesis_compiled_entry_invoke\(.*?\n\}\n", direct_text, re.S).group(0)
+        assert "switch" not in invoke and "opcode" not in invoke and "meta" in invoke
+
+        # SEG-036-T003: mutants of the compact tables must be observably different from the reference, i.e. the
+        # differential detects (a) a correct PC mapped to a wrong helper, (b) a corrupted/misassigned provenance word and
+        # (c) a wrong own-PC argument. Only the entries translation unit is edited.
+        import shutil
+        shard = tmp / "direct_a"
+        entries_name = next(n for n in (shard / "bridge_generated.units").read_text().split() if "_entries_" in n)
+        original = (shard / entries_name).read_text()
+
+        def mutant(tag, transform):
+            target = tmp / f"mutant_{tag}"
+            shutil.copytree(shard, target)
+            text = transform(original)
+            assert text != original, f"mutation {tag} changed nothing"
+            (target / entries_name).write_text(text)
+            names = (target / "bridge_generated.units").read_text().split()
+            out = build_and_run(compiler, runtime, [target / n for n in names], target, "bridge_generated.h",
+                                entries, tmp, f"mutant_{tag}")
+            assert out != reference, f"mutant {tag} survived the differential"
+
+        def ids_of(text):
+            m = re.search(r"(genesis_compiled_entry_owner_ids\[\] = \{\n)(.*?)(\n\};)", text, re.S)
+            return m, [int(v) for v in re.findall(r"^\s*(\d+),$", m.group(2), re.M)]
+
+        def wrong_helper(text):
+            m, ids = ids_of(text)
+            owners = int(re.search(r"if \(id < (\d+)U\) return", text).group(1))
+            direct = sorted({v for v in ids if v >= owners})
+            assert len(direct) > 2
+            rotate = {a: b for a, b in zip(direct, direct[1:] + direct[:1])}
+            new = [rotate.get(v, v) for v in ids]
+            return text[:m.start(2)] + "\n".join(f"  {v}," for v in new) + text[m.end(2):]
+
+        def wrong_meta(text):
+            m = re.search(r"(genesis_aot_direct_meta\[\] = \{\n)(.*?)(\n\};)", text, re.S)
+            rows = m.group(2).splitlines()
+            def bump(row):
+                found = re.match(r"\s*0x([0-9A-F]{16})ULL,$", row)
+                return "  0x%016XULL," % (int(found.group(1), 16) + 0x200) if found else row   # primary byte 0 + 2
+            return text[:m.start(2)] + "\n".join(bump(r) for r in rows) + text[m.end(2):]
+
+        def swapped_meta(text):
+            m = re.search(r"(genesis_aot_direct_meta\[\] = \{\n)(.*?)(\n\};)", text, re.S)
+            rows = m.group(2).splitlines()
+            live = [i for i, r in enumerate(rows) if r.strip() != "0ULL,"]
+            assert len(live) > 4
+            for a, b in zip(live[0::2], live[1::2]):
+                rows[a], rows[b] = rows[b], rows[a]
+            return text[:m.start(2)] + "\n".join(rows) + text[m.end(2):]
+
+        def wrong_own_pc(text):
+            return text.replace("(runtime, &source, runtime->pc); }", "(runtime, &source, runtime->pc + 2U); }")
+
+        for tag, transform in (("helper", wrong_helper), ("meta", wrong_meta), ("swap", swapped_meta), ("ownpc", wrong_own_pc)):
+            mutant(tag, transform)
+        # The unfactored single-file and legacy forms keep their historical wrapper-only representation.
+        assert "GenesisAotDirectHelper" not in factored_sharded and "genesis_aot_direct_meta" not in factored_sharded
+
     print("genesis_immutable_rom_aot_body_factoring_differential_test: OK")
 
 

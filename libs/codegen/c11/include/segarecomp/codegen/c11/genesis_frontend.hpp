@@ -93,6 +93,21 @@ class ImmutableRomAotBodyFactoringScope {
  private:
   bool previous_;
 };
+
+// SEG-036-T002 / ADR 0083: generation-time selection of the compact direct-entry representation for a sharded
+// build with factored AOT bodies. A helper-backed AOT entry is then a row of static tables (compiled address ->
+// statically selected exact helper id, own provenance row) instead of a generated owner `case`, label and call.
+// Off by default; it never changes admission, the compiled-address set, or any lowered statement.
+class ImmutableRomAotDirectEntriesScope {
+ public:
+  explicit ImmutableRomAotDirectEntriesScope(bool enabled);
+  ~ImmutableRomAotDirectEntriesScope();
+  ImmutableRomAotDirectEntriesScope(const ImmutableRomAotDirectEntriesScope &) = delete;
+  ImmutableRomAotDirectEntriesScope &operator=(const ImmutableRomAotDirectEntriesScope &) = delete;
+
+ private:
+  bool previous_;
+};
 // SEG-022-T002: streaming forms. The generated program is written to `sink` as it is produced and is never
 // materialized as one string. The return value is empty on success; a non-empty return is the
 // "/* translation rejected: ... */" text and any bytes already written to `sink` MUST be discarded.

@@ -69,10 +69,16 @@ _RETIRE = re.compile(rb"^\s*(?:\{ const uint32_t m68k_retirement_pc\b|if \(retir
                      rb"runtime->pc = pc;|uint32_t pc = runtime->pc;|#define pc |#undef pc)")
 _INDIRECT_ARRAY_START = re.compile(rb"static const uint32_t m68k_indirect_targets_\w+\[\]")
 # SEG-022-T009: the compact table is three parallel arrays: sorted guest addresses, owner ids, owner symbols.
-_ENTRY_ADDR_ROW = re.compile(rb"^\s*UINT32_C\(0x([0-9A-Fa-f]+)\),")
-_ENTRY_ID_ROW = re.compile(rb"^\s*UINT(?:8|16|32)_C\(([0-9]+)\),")
+_ENTRY_ADDR_ROW = re.compile(rb"^\s*(?:UINT32_C\(0x([0-9A-Fa-f]+)\)|0x([0-9A-Fa-f]{8})u),")
+# The direct-entry form (SEG-036) writes bare decimal ids; they are only read inside the owner-id array.
+_ENTRY_ID_ROW = re.compile(rb"^\s*(?:UINT(?:8|16|32)_C\(([0-9]+)\)|([0-9]+)),")
 _ENTRY_OWNER_ROW = re.compile(rb"^\s*(genesis_(aot|block)\w*),")
-_ENTRY_ROW = re.compile(rb"^\s*(?:UINT32_C\(0x[0-9A-Fa-f]+\)|UINT(?:8|16|32)_C\([0-9]+\)|genesis_(?:aot|block)\w*),")
+# SEG-036-T002: direct-entry tables (helper pointer rows are `genesis_aot_shared_N,`; provenance rows are one packed
+# `UINT64_C(...)` word per compiled entry, zero for an entry that has an owner).
+_DIRECT_TABLE_ROW = re.compile(rb"^\s*(?:0x[0-9A-F]{16}ULL,|0ULL,|genesis_aot_shared_[0-9]+,)")
+_TABLE_ARRAY_START = re.compile(rb"^static const \w+ (genesis_\w+)\[\] = \{")
+_OWNER_TABLE_ROW = re.compile(rb"^\s*(\w+),\s*$")
+_ENTRY_ROW = re.compile(rb"^\s*(?:UINT32_C\(0x[0-9A-Fa-f]+\)|0x[0-9A-Fa-f]{8}u|UINT(?:8|16|32)_C\([0-9]+\)|[0-9]+|NULL|genesis_(?:aot|block)\w*),")
 
 # SEG-036-T001: per-entry representation attribution. A helper-backed entry is one line
 # `genesis_aot_entry_<PC>: { return <helper>(runtime[, <provenance literal>][, <own PC>]); }`.
@@ -152,13 +158,16 @@ def split_entry_addresses(addresses, ids, owner_kinds) -> dict:
     assert len(addresses) == len(ids), "entry table arrays disagree"
     result = {"aot": [], "block": []}
     for address, owner in zip(addresses, ids):
-        result[owner_kinds[owner]].append(address)
+        # SEG-036-T002: an id at or above the owner count names a direct (helper-backed AOT) entry.
+        result[owner_kinds[owner] if owner < len(owner_kinds) else "aot"].append(address)
     return result
 
 
 def classify_line(region: str, line: bytes) -> str:
     """Return the line class inside a region."""
     if region == "entry_table":
+        if _DIRECT_TABLE_ROW.match(line):
+            return "direct_entry_metadata"
         return "compiled_entry_table" if _ENTRY_ROW.match(line) else "table_scaffold"
     if region == "owned_literals":
         return "owned_rom_literal"
@@ -217,12 +226,14 @@ def attribute(paths) -> dict:
         paths = [paths]
     cells: dict[str, list[int]] = {}
     counts = {"aot_function": 0, "ordinary_block": 0, "frontier_stop_fn": 0, "tier1_stop_fn": 0,
-              "compiled_entry_rows": 0, "forward_declarations": 0, "aot_entry_label": 0, "aot_shared_helper": 0}
+              "compiled_entry_rows": 0, "forward_declarations": 0, "aot_entry_label": 0, "aot_shared_helper": 0,
+              "direct_helper_rows": 0, "direct_meta_rows": 0}
     total_bytes = total_lines = 0
     region = "prelude"
     fn_sizes: dict[str, list[int]] = {"aot_function": [], "ordinary_block": []}
     fn_array_bytes: dict[str, list[int]] = {"aot_function": [], "ordinary_block": []}
     in_array = False
+    table_array = b""
     rep = _new_entry_representation()
     rep["inline_helper_eligible"] = {"entries": 0, "bytes": 0}
     array_count = array_elements = array_bytes = array_max = cur_elements = 0
@@ -259,12 +270,18 @@ def attribute(paths) -> dict:
             elif rep["_inline_open"] is not None:
                 _close_inline(rep)
             if region == "entry_table":
-                if (em := _ENTRY_ADDR_ROW.match(line)):
-                    table_addresses.append(int(em.group(1), 16))
-                elif (em := _ENTRY_ID_ROW.match(line)):
-                    table_ids.append(int(em.group(1)))
-                elif (em := _ENTRY_OWNER_ROW.match(line)):
-                    table_owner_kinds.append(em.group(2).decode())
+                if (am := _TABLE_ARRAY_START.match(line)):
+                    table_array = am.group(1)
+                if table_array == b"genesis_compiled_entry_addresses" and (em := _ENTRY_ADDR_ROW.match(line)):
+                    table_addresses.append(int(em.group(1) or em.group(2), 16))
+                elif table_array == b"genesis_compiled_entry_owner_ids" and (em := _ENTRY_ID_ROW.match(line)):
+                    table_ids.append(int(em.group(1) or em.group(2)))
+                elif table_array == b"genesis_compiled_owners" and (em := _OWNER_TABLE_ROW.match(line)):
+                    table_owner_kinds.append("block" if em.group(1).startswith(b"genesis_block") else "aot")
+                elif table_array == b"genesis_aot_direct_helpers" and _DIRECT_TABLE_ROW.match(line):
+                    counts["direct_helper_rows"] += 1
+                elif table_array == b"genesis_aot_direct_meta" and _DIRECT_TABLE_ROW.match(line):
+                    counts["direct_meta_rows"] += 1
             # Site-local indirect-target membership arrays (possibly multi-line) are target
             # membership data wherever they are emitted, not instruction-lowering body.
             if not in_array and region not in ("entry_table", "owned_literals") \
@@ -283,7 +300,7 @@ def attribute(paths) -> dict:
                 if b"};" in line:
                     in_array = False
                     array_max = max(array_max, cur_elements)
-            if region == "entry_table" and _ENTRY_ADDR_ROW.match(line):
+            if region == "entry_table" and table_array == b"genesis_compiled_entry_addresses" and _ENTRY_ADDR_ROW.match(line):
                 counts["compiled_entry_rows"] += 1
             if region == "aot_function" and _ENTRY_LABEL.match(line):
                 counts["aot_entry_label"] += 1
@@ -301,6 +318,7 @@ def attribute(paths) -> dict:
         "owner_entry_dispatch": ("aot_function.entry_dispatch", "ordinary_block.entry_dispatch"),
         "dispatch_structures": ("dispatch.glue", "entry_table.table_scaffold", "main_glue.glue"),
         "compiled_entry_tables": ("entry_table.compiled_entry_table",),
+        "direct_entry_tables": ("entry_table.direct_entry_metadata",),
         "target_membership_structures": ("aot_function.target_membership", "ordinary_block.target_membership",
                                          "tier1_stop_fn.target_membership", "frontier_stop_fn.target_membership"),
         "provenance": ("provenance_fn.provenance", "route_record_table.provenance", "aot_function.provenance", "ordinary_block.provenance",
@@ -419,6 +437,8 @@ def measure(args) -> dict:
     shard_dir = out / "generated"
     shutil.rmtree(shard_dir, ignore_errors=True)
     cmd += ["--generated-c-output", str(src), "--generated-c-shard-dir", str(shard_dir)]
+    if getattr(args, "aot_direct_entries", False):
+        cmd += ["--aot-direct-entries"]
     gen = timed(cmd)
     manifest = shard_dir / "bridge_generated.units"
     sharded = manifest.is_file()
@@ -453,14 +473,17 @@ def measure(args) -> dict:
         t_addr: list[int] = []
         t_ids: list[int] = []
         t_kinds: list[str] = []
+        t_array = b""
         with (shard_dir / "bridge_generated_entries_00.c").open("rb") as handle:
             for line in handle:
-                if (match := _ENTRY_ADDR_ROW.match(line)):
-                    t_addr.append(int(match.group(1), 16))
-                elif (match := _ENTRY_ID_ROW.match(line)):
-                    t_ids.append(int(match.group(1)))
-                elif (match := _ENTRY_OWNER_ROW.match(line)):
-                    t_kinds.append(match.group(2).decode())
+                if (match := _TABLE_ARRAY_START.match(line)):
+                    t_array = match.group(1)
+                if t_array == b"genesis_compiled_entry_addresses" and (match := _ENTRY_ADDR_ROW.match(line)):
+                    t_addr.append(int(match.group(1) or match.group(2), 16))
+                elif t_array == b"genesis_compiled_entry_owner_ids" and (match := _ENTRY_ID_ROW.match(line)):
+                    t_ids.append(int(match.group(1) or match.group(2)))
+                elif t_array == b"genesis_compiled_owners" and (match := _OWNER_TABLE_ROW.match(line)):
+                    t_kinds.append("block" if match.group(1).startswith(b"genesis_block") else "aot")
         entry_addresses = split_entry_addresses(t_addr, t_ids, t_kinds)
         report["fingerprints"].update({
             "final_compiled_entry_address_set": set_fingerprint(entry_addresses["aot"] + entry_addresses["block"]),
@@ -536,6 +559,7 @@ def main() -> int:
     m.add_argument("--opt", default="-O0")
     m.add_argument("--rom", required=True)
     m.add_argument("--external-hints")
+    m.add_argument("--aot-direct-entries", action="store_true", help="SEG-036: compact direct-entry representation")
     m.add_argument("--out-dir", required=True)
     m.add_argument("--report")
     m.add_argument("--jobs", type=int, default=1, help="concurrent per-TU compiles (sharded output only)")

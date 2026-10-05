@@ -44,6 +44,8 @@ struct ExecutionHistoryHooksScope {
 };
 // SEG-022-T011: see ImmutableRomAotBodyFactoringScope (genesis_frontend.hpp).
 thread_local bool g_aot_body_factoring = true;
+// SEG-036-T002: see ImmutableRomAotDirectEntriesScope (genesis_frontend.hpp).
+thread_local bool g_aot_direct_entries = false;
 const char *history_transfer_kind(M68kIrKind kind) {
   switch (kind) {
   case M68kIrKind::branch_ne_short: case M68kIrKind::branch_always_short: case M68kIrKind::general_branch:
@@ -6073,6 +6075,18 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   // own-PC bodies in the order they were re-keyed (also ascending address). Both orders are deterministic.
   std::vector<std::string> aot_body_helper(aot_body_text.size());
   std::size_t aot_helper_count = 0U;
+  // SEG-036-T002 / ADR 0083: compact direct entries exist only in a sharded build with factored bodies.
+  const bool direct_entries = sharded && factor_aot_bodies && g_aot_direct_entries;
+  if (direct_entries) {
+    // Shared-header vocabulary of the direct-entry tables (the provenance word is unpacked by the entries unit).
+    shard_begin_header(out);
+    out << "typedef GenesisControlTransfer (*GenesisAotDirectHelper)(GenesisRuntime *runtime, const "
+           "GenesisInstructionProvenance *genesis_aot_source, uint32_t genesis_aot_pc);\n"
+           "#define GENESIS_NO_COMPILED_ENTRY ((size_t)-1)\n"
+           "size_t genesis_compiled_entry_find(uint32_t address);\n"
+           "GenesisControlTransfer genesis_compiled_entry_invoke(GenesisRuntime *runtime, size_t index);\n";
+    shard_end_header(out);
+  }
   for (std::uint32_t id = 0U; id < aot_body_text.size(); ++id) {
     if (aot_body_uses[id] < 2U) continue;
     std::ostringstream name;
@@ -6080,12 +6094,21 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     aot_body_helper[id] = name.str();
     const bool uses_source = aot_body_text[id]->find(aot_source_symbol) != std::string::npos;
     const bool uses_pc = aot_body_text[id]->find(aot_pc_symbol) != std::string::npos;
-    const auto declaration = "GenesisControlTransfer " + aot_body_helper[id] + "(GenesisRuntime *runtime" +
-                             (uses_source ? ", const GenesisInstructionProvenance *" + std::string(aot_source_symbol)
-                                          : std::string()) +
-                             (uses_pc ? ", uint32_t " + std::string(aot_pc_symbol) : std::string()) + ")";
+    // SEG-036-T002: a direct-entry build calls every helper through one uniform signature (runtime, provenance row,
+    // own PC); a parameter the exact body does not use is explicitly discarded. The body text is unchanged.
+    const auto declaration =
+        direct_entries
+            ? "GenesisControlTransfer " + aot_body_helper[id] + "(GenesisRuntime *runtime, const GenesisInstructionProvenance *" +
+                  std::string(aot_source_symbol) + ", uint32_t " + std::string(aot_pc_symbol) + ")"
+            : "GenesisControlTransfer " + aot_body_helper[id] + "(GenesisRuntime *runtime" +
+                  (uses_source ? ", const GenesisInstructionProvenance *" + std::string(aot_source_symbol)
+                               : std::string()) +
+                  (uses_pc ? ", uint32_t " + std::string(aot_pc_symbol) : std::string()) + ")";
     ShardUnitScope unit(out, "shared", aot_helper_count, declaration);
-    out << "static " << declaration << " {\n" << *aot_body_text[id] << "}\n";
+    out << "static " << declaration << " {\n";
+    if (direct_entries && !uses_source) out << "  (void)" << aot_source_symbol << ";\n";
+    if (direct_entries && !uses_pc) out << "  (void)" << aot_pc_symbol << ";\n";
+    out << *aot_body_text[id] << "}\n";
     ++aot_helper_count;
   }
   // One entry's compound statement: a call of its shared helper, or the inline body with its provenance
@@ -6143,6 +6166,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       pending.clear();
     };
     for (std::size_t index = 0; index < aot_order.size(); ++index) {
+      if (direct_entries && !aot_body_helper[aot_entry_body[index]].empty()) continue;  // a direct entry has no owner
       pending.push_back(index);
       if (pending.size() >= aot_owner_max_entries) flush_owner();
     }
@@ -6168,6 +6192,43 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       const auto aot = aot_entries->find(address);
       if (aot == aot_entries->end())
         return "/* translation rejected: compiled entry lacks generated body */\n";
+      if (direct_entries) {
+        const auto order = std::lower_bound(aot_order.begin(), aot_order.end(), address);
+        if (order == aot_order.end() || *order != address)
+          return "/* translation rejected: compiled entry lacks generated body */\n";
+        const auto index = static_cast<std::size_t>(order - aot_order.begin());
+        const auto id = aot_entry_body[index];
+        if (!aot_body_helper[id].empty()) {
+          const auto &provenance = aot_entries->at(address)->operation.provenance;
+          const bool uses_source = aot_body_text[id]->find(aot_source_symbol) != std::string::npos;
+          std::string row = "0ULL";
+          if (uses_source) {
+            const auto length = provenance.length.value;
+            const auto offset = provenance.source.image_offset.value;
+            constexpr std::uint64_t offset_limit = std::uint64_t{1} << 40U;
+            if (length > 0xFFU || offset >= offset_limit || provenance.source.address.value != address)
+              return "/* translation rejected: direct entry provenance is not representable */\n";
+            const std::uint64_t word = (offset << 24U) | (std::uint64_t{provenance.bytes[1]} << 16U) |
+                                       (std::uint64_t{provenance.bytes[0]} << 8U) | length;
+            std::ostringstream packed;
+            packed << "0x" << std::uppercase << std::hex << std::setw(16) << std::setfill('0') << word << "ULL";
+            row = packed.str();
+            // Fail closed unless the unpacked word is exactly the literal a legacy entry passes (single spelling
+            // authority): rebuild the spelling from the unpacked fields and compare.
+            const auto decimal = [](auto value) { return std::to_string(value); };
+            const std::string legacy = genesis_m68k_runtime_c_emitter().instruction_source(aot_entries->at(address)->operation);
+            constexpr std::string_view legacy_prefix = "&(const GenesisInstructionProvenance)";
+            const std::string unpacked =
+                "{GENESIS_CPU_MC68000, UINT32_C(" + hex(address, 8) + "), UINT64_C(" + decimal(word >> 24U) +
+                "), {UINT8_C(" + hex((word >> 8U) & 0xFFU, 2) + "), UINT8_C(" + hex((word >> 16U) & 0xFFU, 2) +
+                ")}, UINT32_C(" + decimal(word & 0xFFU) + ")}";
+            if (!legacy.starts_with(legacy_prefix) || legacy.substr(legacy_prefix.size()) != unpacked)
+              return "/* translation rejected: direct entry provenance word differs from the instruction source */\n";
+          }
+          compiled_entry_bindings.push_back({static_cast<std::uint32_t>(address), {}, aot_body_helper[id], std::move(row)});
+          continue;
+        }
+      }
       if (const auto owner = aot_owner_of.find(address); owner != aot_owner_of.end())
         symbol << owner->second;
       else
@@ -6175,12 +6236,22 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     }
     compiled_entry_bindings.push_back({static_cast<std::uint32_t>(address), symbol.str()});
   }
-  if (auto rejection = emit_compiled_entry_table(out, compiled_entry_bindings); !rejection.empty()) return rejection;
+  const bool any_direct_binding = std::any_of(compiled_entry_bindings.begin(), compiled_entry_bindings.end(),
+                                              [](const CompiledEntryBinding &binding) { return !binding.direct_helper.empty(); });
+  if (auto rejection = any_direct_binding ? emit_compiled_entry_table_direct(out, compiled_entry_bindings)
+                                          : emit_compiled_entry_table(out, compiled_entry_bindings);
+      !rejection.empty())
+    return rejection;
   if (sharded) shard_end_unit(out);
   out << "\nstatic GenesisControlTransfer genesis_dispatch(GenesisRuntime *runtime) {\n";
-  out << "  { GenesisCompiledEntry entry = genesis_compiled_entry_lookup(runtime->pc);\n"
-      << "    if (entry != NULL) return entry(runtime);\n"
-      << "  }\n";
+  if (any_direct_binding)
+    out << "  { const size_t entry_index = genesis_compiled_entry_find(runtime->pc);\n"
+        << "    if (entry_index != GENESIS_NO_COMPILED_ENTRY) return genesis_compiled_entry_invoke(runtime, entry_index);\n"
+        << "  }\n";
+  else
+    out << "  { GenesisCompiledEntry entry = genesis_compiled_entry_lookup(runtime->pc);\n"
+        << "    if (entry != NULL) return entry(runtime);\n"
+        << "  }\n";
   // ADR 0013 Decision §6: one runtime->pc comparison per represented
   // frontier exit, uniform across every frontier class, immediately before
   // the internal-dispatch-inconsistency fallback. The existing per-block
@@ -6542,5 +6613,10 @@ ImmutableRomAotBodyFactoringScope::ImmutableRomAotBodyFactoringScope(bool enable
   g_aot_body_factoring = enabled;
 }
 ImmutableRomAotBodyFactoringScope::~ImmutableRomAotBodyFactoringScope() { g_aot_body_factoring = previous_; }
+
+ImmutableRomAotDirectEntriesScope::ImmutableRomAotDirectEntriesScope(bool enabled) : previous_(g_aot_direct_entries) {
+  g_aot_direct_entries = enabled;
+}
+ImmutableRomAotDirectEntriesScope::~ImmutableRomAotDirectEntriesScope() { g_aot_direct_entries = previous_; }
 
 } // namespace segarecomp
