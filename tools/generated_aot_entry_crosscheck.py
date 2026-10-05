@@ -2,11 +2,15 @@
 """SEG-036 (ADR 0083): exhaustive cross-check of the direct-entry representation against the legacy owner/wrapper form.
 
 Usage: generated_aot_entry_crosscheck.py <legacy-shard-dir> <direct-shard-dir>
-(both emitted from the same image: the second without and the first with `--legacy-aot-entries`, i.e. pass the legacy
-directory first). For every helper-backed compiled PC it proves that the direct tables select the same shared helper, rebuild the
+(both emitted from the same image: the first with `--legacy-aot-entries`, the second with the default direct form). For every helper-backed compiled PC it proves that the direct tables select the same shared helper, rebuild the
 same provenance fields the legacy wrapper spelled, and that an own-PC argument was that PC; that no owner-backed PC changed
 representation; and that every shared helper body is identical (ignoring the uniform-signature `(void)` lines). Prints aggregates only.
 """
+import glob
+import hashlib
+import re
+import sys
+
 leg, dr = sys.argv[1:3]
 # legacy wrappers: pc -> (helper, prov tuple or None, pcarg or None)
 call=re.compile(rb"^genesis_aot_entry_([0-9A-F]{8}): \{ return (genesis_aot_shared_\d+)\(runtime(?:, &\(const GenesisInstructionProvenance\)\{GENESIS_CPU_MC68000, UINT32_C\(0x([0-9A-F]{8})\), UINT64_C\((\d+)\), \{UINT8_C\(0x([0-9A-F]{2})\), UINT8_C\(0x([0-9A-F]{2})\)\}, UINT32_C\((\d+)\)\})?(?:, UINT32_C\(0x([0-9A-F]{8})\))?\); \}\n$")
