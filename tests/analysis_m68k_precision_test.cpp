@@ -269,6 +269,23 @@ void spilling_known_value_store_is_not_a_strong_update() {
   expect(word.complete && !word_cell, "spill: a known-value word store at the last byte leaves the last cell Unknown");
 }
 
+// A known-value store through a pointer set with several natural members, the last of which spills: the value must not be joined into
+// the cell at the clipped member (the real store covers only part of it).
+void spilling_set_member_never_joins_its_value() {
+  Asm a;
+  a.w({0x23FCU}).l(0x11115555U).l(0x00FFFFFCU);  // MOVE.L #$11115555,($FFFFFC).L
+  a.lea_abs(1, 0x00FFFFF8U);
+  a.w({0x4A41U, 0x6706U}).lea_abs(1, 0x00FFFFFCU);  // TST.W D1; BEQ.S +6; LEA ($FFFFFC),A1
+  a.w({0x4A42U, 0x6706U}).lea_abs(1, 0x00FFFFFEU);  // TST.W D2; BEQ.S +6; LEA ($FFFFFE),A1
+  a.w({0x22BCU}).l(0U);                              // MOVE.L #0,(A1)
+  a.load_abs_long(4, 0x00FFFFFCU);
+  const auto probe = a.pc;
+  a.nop().stop();
+  const auto result = run(a, Domains::memory);
+  const auto cell = data_values(result, probe, 4);
+  expect(result.complete && !cell, "spill: a known value is never joined into the cell of a clipped member");
+}
+
 // The same store where the wrapped bus lands on no region at all (a hole): the clipped target must still be a weak update.
 void spill_into_a_bus_hole_is_not_a_strong_update() {
   Asm a;
@@ -344,6 +361,7 @@ int main() {
   exact_set_with_one_spilling_member_stays_exact();
   spilling_known_value_store_is_not_a_strong_update();
   spill_into_a_bus_hole_is_not_a_strong_update();
+  spilling_set_member_never_joins_its_value();
   untracked_landing_is_still_observed();
   spill_does_not_rewrite_the_return_slot();
   store_over_the_stack_still_rewrites();

@@ -1112,6 +1112,14 @@ std::vector<std::pair<M68kPointsTo, std::uint32_t>> M68kFiniteAdapter::memory_wr
 std::vector<std::pair<M68kPointsTo, std::uint32_t>> M68kFiniteAdapter::memory_write_targets(const M68kIrOperation &operation,
                                                                                             const State &in,
                                                                                             const FiniteValue &status) const {
+  auto out = memory_write_targets_unresolved(operation, in, status);
+  if (config_.domains.memory)
+    for (auto &[target, span] : out) target = resolve_store_spill(target, span);
+  return out;
+}
+
+std::vector<std::pair<M68kPointsTo, std::uint32_t>> M68kFiniteAdapter::memory_write_targets_unresolved(
+    const M68kIrOperation &operation, const State &in, const FiniteValue &status) const {
   std::vector<std::pair<M68kPointsTo, std::uint32_t>> out;
   const auto writes = m68k_memory_writes(operation);
   if (!writes.described) {
@@ -1155,8 +1163,6 @@ std::vector<std::pair<M68kPointsTo, std::uint32_t>> M68kFiniteAdapter::memory_wr
     }
     }
   }
-  if (config_.domains.memory)
-    for (auto &[target, span] : out) target = resolve_store_spill(target, span);
   return out;
 }
 
@@ -1195,13 +1201,6 @@ M68kPointsTo M68kFiniteAdapter::resolve_store_spill(const M68kPointsTo &target, 
         inside = M68kOffsetSet::strided(std::min(offsets.lo(), inside.lo()), 1U, last);
       }
     }
-    // Never a single exact member of a tracked region: the memory domain would take it for a strong update of a cell that the real
-    // (clipped-away) bytes only partly cover. A second member keeps the update weak; it is an over-approximation of the same bytes.
-    if (!inside.is_strided() && inside.exact().size() == 1U && last >= 1U) {
-      auto exact = inside.exact();
-      exact.push_back(last - 1U);
-      inside = M68kOffsetSet::of(std::move(exact));
-    }
     pairs.emplace_back(region, std::move(inside));
     // The bytes after the region end, on the 24-bit bus (the byte after the last bus address wraps to 0).
     const std::uint32_t end = (static_cast<std::uint32_t>(region.base & bus_mask) + region.size) & bus_mask;
@@ -1221,7 +1220,16 @@ M68kPointsTo M68kFiniteAdapter::resolve_store_spill(const M68kPointsTo &target, 
 void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::uint32_t next, const State &in, State &out,
                                         const M68kMemoryPolicy &policy, const FiniteValue &status) const {
   const auto writes = m68k_memory_writes(operation);
-  const auto targets = memory_write_targets(operation, in, status);
+  auto targets = memory_write_targets_unresolved(operation, in, status);
+  // A target the spill resolution replaced is an over-approximation of the touched bytes (its clipped member is not the real
+  // store position), so its value is never recorded or joined into a cell: the overlapping cells are erased instead.
+  std::vector<bool> spilled(targets.size(), false);
+  if (config_.domains.memory)
+    for (std::size_t i = 0; i < targets.size(); ++i) {
+      auto resolved = resolve_store_spill(targets[i].first, targets[i].second);
+      spilled[i] = !(resolved == targets[i].first);
+      targets[i].first = std::move(resolved);
+    }
   if (!writes.described) {
     out.memory.poison_all();
     m68k_return_slots_unknown_store(out.memory);
@@ -1242,6 +1250,7 @@ void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::u
     case M68kMemoryWrite::Value::source: value = operand_value(in, operation.source_ea, write.span, policy); break;
     }
     if (value && !value->is_pointer() && !value->data.is_precise()) value.reset();
+    if (i < spilled.size() && spilled[i]) value.reset();
     m68k_memory_store(out.memory, targets[i].first, targets[i].second, value, policy);
     // SEG-030-T008: every store is related to the recorded return slots (a call's push records one).
     m68k_return_slots_store(out.memory, targets[i].first, targets[i].second,

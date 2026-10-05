@@ -665,6 +665,10 @@ public:
   // the spill can reach in the bus region that follows (at most `span` bytes starting at the region's end). Identical to `target`
   // when nothing spills; the unchanged (fail-closed) target when the following bytes are not a bounded region.
   [[nodiscard]] M68kPointsTo resolve_store_spill(const M68kPointsTo &target, std::uint32_t span) const;
+  // The same targets before the spill resolution (the raw operand addresses).
+  [[nodiscard]] std::vector<std::pair<M68kPointsTo, std::uint32_t>> memory_write_targets_unresolved(const M68kIrOperation &operation,
+                                                                                                const State &in,
+                                                                                                const analysis::FiniteValue &status) const;
 
 private:
   void transfer_address_registers(const M68kIrOperation &operation, const State &in, State &out,
