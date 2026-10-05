@@ -104,6 +104,7 @@ void parser() {
   bad(head + "strategy hybrid\nrange 00000200 0000020A\nend\n", "plan_range");  // uppercase hex is not canonical
   bad(head + "alias 00ff0100:00000600:00000004\nalias 00ff0000:00000600:00000004\nstrategy broad\nend\n", "plan_alias_order");
   bad(head + "strategy broad\nend", "plan_unterminated_line");
+  bad("segarecomp.m68k_hybrid_admission_plan.v1\r\nrom_sha256 " + sha + "\r\n", "plan_schema");  // the format is LF-only
   bad(head + "strategy broad\nend\nextra\n", "plan_trailer");
   bad(std::string(genesis_hybrid_admission_plan_max_bytes + 1U, 'x'), "plan_too_large");
 }

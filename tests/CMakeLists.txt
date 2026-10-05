@@ -1131,7 +1131,9 @@ add_test(NAME analysis_hybrid_mutation_test COMMAND ${Python3_EXECUTABLE} ${CMAK
   ${PROJECT_SOURCE_DIR} ${CMAKE_COMMAND} ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER}
   "--generator=${CMAKE_GENERATOR}" "--make-program=${CMAKE_MAKE_PROGRAM}" --group hybrid)
 set_property(TEST analysis_hybrid_mutation_test APPEND PROPERTY LABELS full)
-set_property(TEST analysis_hybrid_mutation_test PROPERTY TIMEOUT 1800)
+# The harness rebuilds and reruns the planner fixture per mutant (about 5 minutes on a developer host); the long-test headroom keeps a
+# contended CI runner from timing the whole gate out while every fixture keeps its own finite limit (analysis_mutation_test.py).
+set_property(TEST analysis_hybrid_mutation_test PROPERTY TIMEOUT 3600)
 # SEG-030-T009: the mutation harness's source stamping and build-tree settling survive same-second mutate/restore/mutate rebuilds.
 add_test(NAME analysis_mutation_harness_selftest COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/analysis_mutation_harness_selftest.py ${CMAKE_COMMAND} ${CMAKE_C_COMPILER}

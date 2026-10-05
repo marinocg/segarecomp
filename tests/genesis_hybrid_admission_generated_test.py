@@ -51,6 +51,11 @@ def rom_image() -> bytes:
     return bytes(rom)
 
 
+def write_plan(path, text):
+    # The plan format is LF-only (the strict parser rejects CR): write bytes, never text mode (CRLF on Windows).
+    path.write_bytes(text.encode("ascii"))
+
+
 def run(command, **kwargs):
     return subprocess.run(command, text=True, capture_output=True, **kwargs)
 
@@ -72,7 +77,8 @@ def main():
     aggregate = json.loads(planned.stdout)
     assert aggregate["outcome"] == "hybrid" and aggregate["fallback_island_count"] == 1, aggregate
     assert aggregate["hybrid_total"] < aggregate["broad_u"], aggregate
-    plan_text = plan_path.read_text()
+    plan_text = plan_path.read_bytes().decode("ascii")
+    assert "\r" not in plan_text, "the planner writes an LF-only plan"
     assert plan_text.splitlines()[3] == "strategy hybrid", plan_text
     universe_line = plan_text.splitlines()[2]
     assert universe_line.startswith("universe_sha256 "), plan_text
@@ -101,7 +107,7 @@ def main():
     plain = run(emit)
     assert plain.returncode == 0, plain.stderr
     broad_plan = work / "broad.plan"
-    broad_plan.write_text(f"segarecomp.m68k_hybrid_admission_plan.v1\nrom_sha256 {sha}\n{universe_line}\nstrategy broad\nend\n")
+    write_plan(broad_plan, f"segarecomp.m68k_hybrid_admission_plan.v1\nrom_sha256 {sha}\n{universe_line}\nstrategy broad\nend\n")
     with_broad = run(emit + ["--immutable-rom-aot-admission", str(broad_plan)])
     assert with_broad.returncode == 0 and with_broad.stdout == plain.stdout, "a broad plan must not change the emission"
     first = run(emit + ["--immutable-rom-aot-admission", str(plan_path)])
@@ -111,7 +117,7 @@ def main():
 
     def rejected(text, reason):
         bad = work / "bad.plan"
-        bad.write_text(text)
+        write_plan(bad, text)
         result = run(emit + ["--immutable-rom-aot-admission", str(bad)])
         assert result.returncode == 2 and reason in result.stderr, (reason, result.returncode, result.stderr)
 
@@ -140,7 +146,7 @@ def main():
                 continue
         tampered_lines.append(line)
     tampered = work / "tampered.plan"
-    tampered.write_text("\n".join(tampered_lines) + "\n")
+    write_plan(tampered, "\n".join(tampered_lines) + "\n")
     escaped, _, _ = build_and_run("tampered", ["--admission-plan", str(tampered)])
     assert escaped["result"] != "runner_resource_limit" and escaped["stop_class"] is not None, escaped
     shutil.rmtree(work, ignore_errors=True)

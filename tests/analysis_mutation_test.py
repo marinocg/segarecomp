@@ -60,7 +60,9 @@ RETURN_SLOT_TEST = "analysis_m68k_return_slot_test"  # SEG-030-T008: the return 
 # cheapest first: a core mutant is usually decided by the CPU-free fixture
 ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, VALUE_TEST, MEMORY_TEST, RETURN_SLOT_TEST, CONTEXTS_TEST, FRAMES_TEST, PREMISE_TEST,
              Z80_PROOF_TEST)
-TEST_TIMEOUT_SECONDS = 60  # the unmutated fixtures run in well under a second
+# Per-fixture time limit: a mutant that makes a fixture loop is killed by it, and a baseline that exceeds it fails the harness (a timeout
+# is never a pass). The SEG-029/SEG-030 fixtures run unmutated in well under a second and keep 60 s.
+TEST_TIMEOUT_SECONDS = 60
 
 FINITE = "libs/analysis/include/segarecomp/analysis/finite_value.hpp"
 SOLVER = "libs/analysis/include/segarecomp/analysis/solver.hpp"
@@ -79,6 +81,13 @@ HYBRID_PLAN_TEST = "analysis_hybrid_plan_test"  # the report-only planner on syn
 ADMISSION_TEST = "genesis_hybrid_admission_test"  # the production plan parser and fail-closed validate-and-filter seam
 HYBRID_TESTS = (ADMISSION_TEST, HYBRID_PLAN_TEST)
 GROUP_TESTS = {"analysis": ALL_TESTS, "hybrid": HYBRID_TESTS}
+# SEG-031: the hybrid planner fixture plans every adversarial shape through the full SEG-030 instantiation in an unoptimized build
+# (about 20 s on a developer host, 97 s observed for the unmutated fixture beside a concurrent mutation build on a 4-core Linux CI
+# runner, where 60 s timed the baseline out). It gets an explicit limit with headroom over that contended observation (still finite, so
+# a non-terminating mutant is killed), and `--fail-fast` (exit at the first failed check) so that a killed mutant stops early; an
+# unmutated baseline always runs every check.
+FIXTURE_TIMEOUT_SECONDS = {HYBRID_PLAN_TEST: 600}
+FIXTURE_ARGUMENTS = {HYBRID_PLAN_TEST: ("--fail-fast",)}
 HYBRID_PLAN = "platforms/genesis/analysis_report/src/hybrid_plan.cpp"
 ADMISSION = "platforms/genesis/machine/src/hybrid_admission.cpp"
 
@@ -889,11 +898,12 @@ def main() -> int:
             for test in tests:
                 executable = find_executable(build, test)
                 try:
-                    r = run([str(executable)], cwd=executable.parent, timeout=TEST_TIMEOUT_SECONDS)
+                    limit = FIXTURE_TIMEOUT_SECONDS.get(test, TEST_TIMEOUT_SECONDS)
+                    r = run([str(executable), *FIXTURE_ARGUMENTS.get(test, ())], cwd=executable.parent, timeout=limit)
                     why = first_failure_line(r.stdout.replace(str(source) + os.sep, "")) if r.returncode != 0 else ""
                     outcome[test] = (r.returncode != 0, why)
                 except subprocess.TimeoutExpired:
-                    outcome[test] = (True, f"timeout ({TEST_TIMEOUT_SECONDS} s)")
+                    outcome[test] = (True, f"timeout ({limit} s)")
                 if stop_at_kill and outcome[test][0]:
                     break
             return outcome

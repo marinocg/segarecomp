@@ -26,10 +26,12 @@ namespace {
 using namespace segarecomp;
 
 int failures = 0;
+bool fail_fast = false;  // `--fail-fast`: exit at the first failed check (the mutation harness uses it so killed mutants stop early)
 void expect(bool condition, const std::string &message) {
   if (!condition) {
     ++failures;
     std::cerr << "FAIL: " << message << '\n';
+    if (fail_fast) std::exit(EXIT_FAILURE);
   }
 }
 
@@ -432,7 +434,15 @@ void validator_rejects_missing_configuration() {
 
 }  // namespace
 
-int main() {
+int main(int argc, char **argv) {
+  for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--fail-fast") {
+      fail_fast = true;
+    } else {
+      std::cerr << "usage: analysis_hybrid_plan_test [--fail-fast]\n";
+      return EXIT_FAILURE;
+    }
+  }
   exact_target();
   bounded_region();
   called_island();
