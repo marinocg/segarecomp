@@ -238,3 +238,34 @@ target_link_libraries(analysis_genesis_z80_proof_test PRIVATE segarecomp::genesi
 segarecomp_enable_warnings(analysis_genesis_z80_proof_test)
 add_test(NAME analysis_genesis_z80_proof_test COMMAND analysis_genesis_z80_proof_test)
 set_property(TEST analysis_genesis_z80_proof_test APPEND PROPERTY LABELS full fast)
+
+# SEG-031 (ADR 0080): the report-only hybrid admission planner on synthetic adversarial shapes.
+add_executable(analysis_hybrid_plan_test analysis_hybrid_plan_test.cpp)
+target_link_libraries(analysis_hybrid_plan_test PRIVATE segarecomp::genesis_analysis_report)
+segarecomp_enable_warnings(analysis_hybrid_plan_test)
+add_test(NAME analysis_hybrid_plan_test COMMAND analysis_hybrid_plan_test)
+set_property(TEST analysis_hybrid_plan_test APPEND PROPERTY LABELS full fast)
+
+# SEG-031 (ADR 0080): the explicit hybrid candidate end to end (planner -> plan -> filtered emission -> strict C11 build and run with
+# an explicit instruction budget), identical behaviour to broad, and the emitter's fail-closed plan validation.
+add_test(NAME genesis_hybrid_admission_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_hybrid_admission_generated_test.py $<TARGET_FILE:segarecomp>
+  $<TARGET_FILE:segarecomp-genesis-analysis-report> ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_hybrid_admission_generated_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_hybrid_admission_generated_test PROPERTY TIMEOUT 900)
+
+# SEG-031 (ADR 0080): seeded randomized differential of the hybrid planner against the SEG-030-T008 concrete executor (reused):
+# every concretely executed PC of a hybrid plan must lie in the hybrid admission.
+add_executable(analysis_hybrid_differential_test analysis_hybrid_differential_test.cpp)
+target_link_libraries(analysis_hybrid_differential_test PRIVATE segarecomp::genesis_analysis_report)
+segarecomp_enable_warnings(analysis_hybrid_differential_test)
+add_test(NAME analysis_hybrid_differential_test COMMAND analysis_hybrid_differential_test)
+set_property(TEST analysis_hybrid_differential_test APPEND PROPERTY LABELS full)
+set_property(TEST analysis_hybrid_differential_test PROPERTY TIMEOUT 900)
+
+# SEG-031 (ADR 0080): the generated program as the concrete executor: seeded random island images, hybrid against broad.
+add_test(NAME genesis_hybrid_admission_differential_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_hybrid_admission_differential_test.py $<TARGET_FILE:segarecomp>
+  $<TARGET_FILE:segarecomp-genesis-analysis-report> ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_hybrid_admission_differential_test APPEND PROPERTY LABELS full)
+set_property(TEST genesis_hybrid_admission_differential_test PROPERTY TIMEOUT 1200)

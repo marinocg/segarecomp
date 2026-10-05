@@ -69,6 +69,8 @@ Authorized Sonic 1 attract workload: 23,200 frames, no input. Only aggregates ar
 | width-only PC-index dispatch: share of `O - D` | 94.4%. 59 of 70 observed sites read a register-relative field whose base is not locally provable. | committed (ADR 0054/0055) | SEG-026-T002/T003 | current |
 | store provenance (strict / unsound ceiling) | 0 of 6 locations resolved / net 0 PCs | committed (ADR 0055) | SEG-026-T003 | current, experiment not retained |
 | challenger cost | about 1.2 s including `U` | committed (ADR 0053) | SEG-026-T001 | current |
+| SEG-030 sound `all` (`proven_or_unknown`): `D` / recall / escapes | 1,276 (0.52%) / 9.73% / 0; the earlier ~43% `all` recall relied on an unsound interrupt-register assumption | committed (ADR 0079) | SEG-030-T009 | current |
+| SEG-031 hybrid admission `D ∪ islands ∪ closure`: hybrid / `U` | 246,293 / 246,293 (1.000000): degenerates to broad in round 1 (14 unbounded sites); Sonic 2 1.000000 (5), Cool Spot 1.000000 (22); OutRun, Streets of Rage, Golden Axe: SEG-030 `all` incomplete, broad | committed (ADR 0080) | SEG-031-T005 | current |
 
 Reading: the remaining M68K gap needs pointer, alias, object-identity and interprocedural program-state analysis. Local heuristics are
 exhausted.
@@ -166,7 +168,10 @@ Observations used by ADR 0076:
 
 - **M68K:** need demonstrated by SEG-024/026. Cost is linear in image size: 218 MB of C at 512 KiB, 1.72 GB at 4 MiB synthetic. Recall of
   the best local analysis is 42.7%, at 2.75% of `U`. Larger cartridges (2-4 MiB) are the measured cost driver, but no 2-4 MiB
-  authorized workload is in the corpus.
+  authorized workload is in the corpus. **SEG-031 (ADR 0080):** a sound hybrid (`D` plus bounded fallback islands plus closure) equals
+  broad on every authorized title: each title has at least one uncovered site with no bound narrower than the whole program
+  (interrupt-resumption register effects, unbalanced/computed RTS, pointer provenance, or an incomplete SEG-030 solve). Production
+  stays broad AOT; selective admission is not established until those generic blockers are removed.
 - **Z80:** not established. SMS broad AOT costs 23-28 s at 512 KiB after SEG-033. A Genesis Z80 image is 8 KiB and costs about 1 s.
   Selective Z80 admission would need new evidence: for example a materially larger Z80 code space, a compile/RSS budget violation on a
   supported host, or per-image counts well above the bound of 8.
@@ -176,8 +181,8 @@ Observations used by ADR 0076:
 | CPU / platform | complete retired-PC observation | first-entry witness | consequence |
 | --- | --- | --- | --- |
 | M68K / Genesis | yes (S10, ADR 0053) | yes | Falsifies any M68K discovery claim (`O - D`). |
-| Z80 / SMS | no. SEG-033-T009 records it as not added. | no | No `O - D` falsification is possible for any future SMS/Z80 discovery claim. |
-| Z80 / Genesis | no. The materialization pass observes epochs, not PCs. | no | A future static Genesis Z80 image producer (ADR 0073 decision 8) can be checked by image identity equality, but any Z80 reachability claim cannot be falsified. |
+| Z80 / SMS | yes (SEG-031-T006, ADR 0080): measurement builds only, keyed by (code-image identity, PC) | no | Falsifies any future SMS/Z80 discovery claim; 3 authorized titles observed with 0 escapes. |
+| Z80 / Genesis | yes (SEG-031-T006, ADR 0080): inside the materialization pass, keyed by materialized image identity | no | A future static Genesis Z80 producer's executed footprint can be compared against the materialized images. |
 
 Need for future validation:
 
@@ -187,7 +192,7 @@ Need for future validation:
 - SEG-029's synthetic Z80 adapter is architectural validation over project-authored fixtures with known ground truth, so it does not
   need the observer.
 
-The owner is recorded by SEG-027-T005 and ADR 0076. Nothing is implemented here.
+The owner was recorded by SEG-027-T005 and ADR 0076; SEG-031-T006 delivered the Z80 observer (docs/testing/execution-coverage.md).
 
 ## 6. Reproduction (local, authorized images; aggregates only)
 

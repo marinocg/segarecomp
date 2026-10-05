@@ -120,6 +120,8 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
   adapter_config.call_continuations = true;
   adapter_config.exception_continuations = false;
   adapter_config.pushed_code_continuations = false;
+  adapter_config.island_entries = config.island_entries;  // SEG-031: empty unless the hybrid planner configures islands
+  adapter_config.opaque_entries = config.opaque_entries;
   // SEG-030-T005/T006: the frames domain implies the contexts domain, which implies the memory domain, which implies the address
   // domain.
   const bool frames = config.domains.frames;

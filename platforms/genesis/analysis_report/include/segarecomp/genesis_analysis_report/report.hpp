@@ -119,6 +119,10 @@ struct GenesisAnalysisReportConfig {
   // derivation of 68K-uploaded Z80 images exists; the CLI never sets it, and a runtime snapshot is never an input). Synthetic tests
   // supply project-authored images.
   std::optional<std::vector<GenesisZ80Image>> z80_images;
+  // SEG-031 (ADR 0080): the hybrid planner's island targets and opaque entries (`M68kAnalysisConfig::island_entries`,
+  // `opaque_entries`). Empty for every SEG-030 report.
+  std::map<std::uint32_t, std::vector<std::uint32_t>> island_entries;
+  std::map<std::uint32_t, std::vector<std::uint32_t>> opaque_entries;
 };
 
 // SEG-030-T004 (ADR 0079 decision 7): the Genesis bus range a store to which may release the Z80 (the Z80 control block: memory

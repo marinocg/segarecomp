@@ -16,6 +16,10 @@
  * SEG-028-T005 (ADR 0077): for outcome guest_stop the pass also writes the private stop record stop.ram: 4-byte big-endian stop PC,
  * 4-byte big-endian stop class, then the 64 KiB work RAM (the SEGARECOMP_STOP_WORK_RAM_DUMP layout of frame_capture_main_hook.c).
  * `segarecomp build` consumes it only to propose ADR 0049 immutable-copy aliases; it is never reported.
+ * SEG-031 (ADR 0080): a pass program compiled with SEGARECOMP_Z80_EXECUTION_COVERAGE (a measurement build, never the default) also
+ * honours SEGARECOMP_Z80_COVERAGE_DIR: every Z80 instruction that begins is keyed by (materialized image identity, PC)
+ * (z80_execution_coverage.h); the directory receives the PRIVATE canonical list z80-coverage.txt (identity hex8, PC hex4, ascending)
+ * and stderr one sanitized Z80_COVERAGE_SUMMARY line (counts only). pass.report is unchanged.
  */
 #include <errno.h>
 #include <stdio.h>
@@ -23,6 +27,38 @@
 #include <string.h>
 
 #include "genesis_sound.h"
+#if defined(SEGARECOMP_Z80_EXECUTION_COVERAGE)
+#include "segarecomp/codegen/c11/runtime/z80_execution_coverage.h"
+static Z80ExecutionCoverage g_z80_coverage; /* large: static storage, zero-initialized */
+
+static int pass_write_z80_coverage(const char *dir) {
+  char path[1024];
+  uint32_t order[Z80_COVERAGE_MAX_IMAGES], n, k;
+  FILE *file;
+  const int written = snprintf(path, sizeof(path), "%s/z80-coverage.txt", dir);
+  if (written < 0 || (size_t)written >= sizeof(path)) return 1;
+  file = fopen(path, "wb");
+  if (file == NULL) return 1;
+  for (n = 0U; n < g_z80_coverage.image_count; ++n) order[n] = n;
+  for (n = 1U; n < g_z80_coverage.image_count; ++n)
+    for (k = n; k > 0U && g_z80_coverage.identities[order[k - 1U]] > g_z80_coverage.identities[order[k]]; --k) {
+      const uint32_t t = order[k];
+      order[k] = order[k - 1U];
+      order[k - 1U] = t;
+    }
+  for (n = 0U; n < g_z80_coverage.image_count; ++n)
+    for (k = 0U; k < 65536U; ++k)
+      if (z80_execution_coverage_contains(&g_z80_coverage, order[n], (uint16_t)k))
+        fprintf(file, "%08x %04x\n", (unsigned)g_z80_coverage.identities[order[n]], (unsigned)k);
+  fprintf(stderr,
+          "Z80_COVERAGE_SUMMARY {\"images\":%u,\"distinct_pcs\":%llu,\"retirements\":%llu,\"unknown_identity\":%llu,"
+          "\"identity_overflow\":%llu}\n",
+          (unsigned)g_z80_coverage.image_count, (unsigned long long)z80_execution_coverage_distinct(&g_z80_coverage, Z80_COVERAGE_MAX_IMAGES),
+          (unsigned long long)g_z80_coverage.retirements, (unsigned long long)g_z80_coverage.unknown_identity,
+          (unsigned long long)g_z80_coverage.identity_overflow);
+  return fclose(file) != 0 ? 1 : 0;
+}
+#endif
 
 GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch, uint32_t dispatch_allowance);
 
@@ -126,6 +162,9 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
   machine = genesis_sound_attach(runtime);
   machine->on_unknown_image = pass_on_unknown;
   runtime->z80_epoch.on_epoch = pass_on_epoch;
+#if defined(SEGARECOMP_Z80_EXECUTION_COVERAGE)
+  if (getenv("SEGARECOMP_Z80_COVERAGE_DIR") != NULL) z80_execution_coverage_attach(&g_z80_coverage, &machine->cpu);
+#endif
   window_ticks = frames * GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
   while (dispatches < dispatch_allowance) {
     transfer = genesis_runtime_step(runtime, dispatch);
@@ -149,6 +188,9 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
   machine->on_unknown_image = NULL;
   if (g_pass.io_error || g_pass.overflow) outcome = "io_error";
   if (pass_write_report(outcome, runtime->scheduler.master_ticks / GENESIS_NTSC_MASTER_TICKS_PER_FRAME, dispatches, machine) != 0) exit(4);
+#if defined(SEGARECOMP_Z80_EXECUTION_COVERAGE)
+  if (getenv("SEGARECOMP_Z80_COVERAGE_DIR") != NULL && pass_write_z80_coverage(getenv("SEGARECOMP_Z80_COVERAGE_DIR")) != 0) exit(4);
+#endif
   if (strcmp(outcome, "io_error") == 0) exit(4);
   if (transfer.kind != GENESIS_STOP && transfer.kind != GENESIS_COMPLETE) {
     memset(&transfer, 0, sizeof(transfer));

@@ -27,8 +27,12 @@ Equivalent mutants (justified, asserted to survive):
     the physically next instruction (`target == next`), joins keep only agreeing setters, and entries/continuations carry none, so
     the re-check of physical adjacency at the consumer can never fail.
 
+SEG-031 (ADR 0080) adds the `hybrid` group (`--group hybrid`, its own CTest `analysis_hybrid_mutation_test`): mutants of the hybrid
+admission planner, the CPU-owned island edges and the production validate-and-filter seam, judged by the cheap hybrid fixtures only
+(`analysis_hybrid_plan_test`, `genesis_hybrid_admission_test`). The default group is unchanged.
+
 usage: analysis_mutation_test.py <product-root> <cmake> <c-compiler> <cxx-compiler> [--generator G] [--make-program P]
-                                 [--only NAME[,NAME...]] [--keep]
+                                 [--group analysis|hybrid] [--only NAME[,NAME...]] [--keep]
 """
 from __future__ import annotations
 
@@ -56,7 +60,9 @@ RETURN_SLOT_TEST = "analysis_m68k_return_slot_test"  # SEG-030-T008: the return 
 # cheapest first: a core mutant is usually decided by the CPU-free fixture
 ALL_TESTS = (CORE_TEST, Z80_TEST, M68K_TEST, VALUE_TEST, MEMORY_TEST, RETURN_SLOT_TEST, CONTEXTS_TEST, FRAMES_TEST, PREMISE_TEST,
              Z80_PROOF_TEST)
-TEST_TIMEOUT_SECONDS = 60  # the unmutated fixtures run in well under a second
+# Per-fixture time limit: a mutant that makes a fixture loop is killed by it, and a baseline that exceeds it fails the harness (a timeout
+# is never a pass). The SEG-029/SEG-030 fixtures run unmutated in well under a second and keep 60 s.
+TEST_TIMEOUT_SECONDS = 60
 
 FINITE = "libs/analysis/include/segarecomp/analysis/finite_value.hpp"
 SOLVER = "libs/analysis/include/segarecomp/analysis/solver.hpp"
@@ -70,6 +76,20 @@ Z80_ADAPTER = "libs/cpu/z80/analysis/src/adapter.cpp"
 GENESIS_PREMISE = "platforms/genesis/analysis_report/include/segarecomp/genesis_analysis_report/interrupt_premise.hpp"
 Z80_PROOF = "platforms/genesis/analysis_report/src/z80_ram_write_proof.cpp"
 REPORT = "platforms/genesis/analysis_report/src/report.cpp"
+# SEG-031 (ADR 0080): the hybrid admission gate (`--group hybrid`): its own cheap fixture set.
+HYBRID_PLAN_TEST = "analysis_hybrid_plan_test"  # the report-only planner on synthetic adversarial shapes
+ADMISSION_TEST = "genesis_hybrid_admission_test"  # the production plan parser and fail-closed validate-and-filter seam
+HYBRID_TESTS = (ADMISSION_TEST, HYBRID_PLAN_TEST)
+GROUP_TESTS = {"analysis": ALL_TESTS, "hybrid": HYBRID_TESTS}
+# SEG-031: the hybrid planner fixture plans every adversarial shape through the full SEG-030 instantiation in an unoptimized build
+# (about 20 s on a developer host, 97 s observed for the unmutated fixture beside a concurrent mutation build on a 4-core Linux CI
+# runner, where 60 s timed the baseline out). It gets an explicit limit with headroom over that contended observation (still finite, so
+# a non-terminating mutant is killed), and `--fail-fast` (exit at the first failed check) so that a killed mutant stops early; an
+# unmutated baseline always runs every check.
+FIXTURE_TIMEOUT_SECONDS = {HYBRID_PLAN_TEST: 600}
+FIXTURE_ARGUMENTS = {HYBRID_PLAN_TEST: ("--fail-fast",)}
+HYBRID_PLAN = "platforms/genesis/analysis_report/src/hybrid_plan.cpp"
+ADMISSION = "platforms/genesis/machine/src/hybrid_admission.cpp"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -81,6 +101,7 @@ class Mutant:
     tests: tuple[str, ...]
     summary: str
     equivalent: str = ""  # non-empty: written justification; the mutant must compile and survive
+    group: str = "analysis"  # "analysis" (SEG-029/SEG-030, the default run) or "hybrid" (SEG-031, `--group hybrid`)
 
 
 class StaleMutant(Exception):
@@ -544,6 +565,85 @@ MUTANTS: list[Mutant] = [
             "    out.complete = false;",
             "    out.complete = true;",
             (FRAMES_TEST,), "a historical contexts fallback is exposed as a complete requested frames result"),
+    # ---- SEG-031 (ADR 0080): hybrid admission safety properties (`--group hybrid`) ----
+    Mutant("hybrid_island_member_omitted", HYBRID_PLAN,
+           "for (std::uint64_t offset = offsets.lo(); offset <= offsets.hi(); offset += offsets.stride())",
+           "for (std::uint64_t offset = offsets.lo(); offset < offsets.hi(); offset += offsets.stride())",
+           (HYBRID_PLAN_TEST,), "an island omits the last member of its proven strided set", group="hybrid"),
+    Mutant("hybrid_closure_skipped", HYBRID_PLAN,
+           "    if (grown == islands && grown_opaque == opaque) {",
+           "    if (round > 1U || (grown == islands && grown_opaque == opaque)) {",
+           (HYBRID_PLAN_TEST,), "the closure stops after the first island round without re-analysing island code", group="hybrid"),
+    Mutant("hybrid_island_code_transfers_ignored", HYBRID_PLAN,
+           "    for (const auto pc : uncovered_sites(report)) {",
+           "    for (const auto pc : round == 1U ? uncovered_sites(report) : std::set<std::uint32_t>{}) {",
+           (HYBRID_PLAN_TEST,), "uncovered transfers introduced by island code are ignored", group="hybrid"),
+    Mutant("hybrid_island_shrunk_to_reached", HYBRID_PLAN,
+           "      else merge_into(grown[pc], site.entries);",
+           "      else { std::vector<std::uint32_t> seen; for (const auto e : site.entries) if (report.discovered.contains(e)) "
+           "seen.push_back(e); merge_into(grown[pc], seen); }",
+           (HYBRID_PLAN_TEST,), "an island is shrunk to what was already reached (evidence-style shrinking)", group="hybrid"),
+    Mutant("hybrid_operand_width_bound", HYBRID_PLAN,
+           "  if (!value.is_known() || value.width_derived) return site;",
+           "  if (!value.is_known()) return site;",
+           (HYBRID_PLAN_TEST,), "a width-derived pointer set bounds an island (the forbidden SEG-024 rule)", group="hybrid"),
+    Mutant("hybrid_alias_mapping_ignored", HYBRID_PLAN,
+           "      if ((target & 1U) == 0U && image.mapped(target)) entries.insert(target);",
+           "      if ((target & 1U) == 0U && image.mapped(target) && target < 0xE00000U) entries.insert(target);",
+           (HYBRID_PLAN_TEST,), "island members inside a static_proof RAM alias mapping are dropped", group="hybrid"),
+    Mutant("hybrid_incomplete_closure_complete", HYBRID_PLAN,
+           "  plan.outcome = GenesisHybridOutcome::broad_closure_bound;",
+           "  plan.outcome = GenesisHybridOutcome::hybrid;",
+           (HYBRID_PLAN_TEST,), "round-bound exhaustion is reported as a hybrid result", group="hybrid"),
+    Mutant("hybrid_incomplete_solve_credited", HYBRID_PLAN,
+           "      plan.outcome = GenesisHybridOutcome::broad_analysis_incomplete;\n      return plan;",
+           "      plan.outcome = GenesisHybridOutcome::broad_analysis_incomplete;",
+           (HYBRID_PLAN_TEST,), "an incomplete solve is not a broad fallback", group="hybrid"),
+    Mutant("hybrid_unknown_provenance_not_widened", HYBRID_PLAN,
+           "  if (!value.is_known() || value.width_derived) return site;",
+           "  if (!value.is_known() || value.width_derived) { site.container = GenesisHybridContainer::points_to_region; return site; }",
+           (HYBRID_PLAN_TEST,), "an Unknown pointer gets an empty island instead of widening to broad", group="hybrid"),
+    Mutant("hybrid_whole_image_ignored", HYBRID_PLAN,
+           "      if (site.container == GenesisHybridContainer::whole_image) whole = true;",
+           "      if (site.container == GenesisHybridContainer::whole_image) {}",
+           (HYBRID_PLAN_TEST,), "an unbounded container does not degenerate to broad", group="hybrid"),
+    Mutant("hybrid_materialized_roots_dropped", HYBRID_PLAN,
+           "      merge_into(grown_opaque[*entry], materialized);",
+           "      (void)materialized;",
+           (HYBRID_PLAN_TEST,), "static_proof executable images are not admitted as mandatory roots", group="hybrid"),
+    Mutant("hybrid_island_edges_dropped", M68K,
+           "  if (const auto island = config_.island_entries.find(pc); island != config_.island_entries.end()) computed_edges(island->second);",
+           "",
+           (HYBRID_PLAN_TEST,), "the adapter never follows configured island targets (island code unanalysed)", group="hybrid"),
+    Mutant("admission_fixed_successor_unchecked", ADMISSION,
+           "      if (broad.contains(target) && !admitted(target)) return \"fixed_successor_not_admitted\";",
+           "      (void)target;",
+           (ADMISSION_TEST,), "production accepts a plan that omits a fixed successor (cross-island direct edge)", group="hybrid"),
+    Mutant("admission_vector_root_unchecked", ADMISSION,
+           "    if (broad.contains(root & bus_mask) && !admitted(root)) return \"machine_root_not_admitted\";",
+           "    (void)root;",
+           (ADMISSION_TEST,), "production accepts a plan that drops a reset/vector root", group="hybrid"),
+    Mutant("admission_materialized_unchecked", ADMISSION,
+           "      if (entry->execution_alias) return \"materialized_image_not_admitted\";",
+           "",
+           (ADMISSION_TEST,), "production accepts a plan that drops a static_proof alias identity", group="hybrid"),
+    Mutant("admission_range_overshoot", ADMISSION,
+           "    const std::uint32_t end = address + 2U;",
+           "    const std::uint32_t end = address + 4U;",
+           (ADMISSION_TEST,), "plan ranges admit a broad identity outside H", group="hybrid"),
+    Mutant("admission_universe_unchecked", ADMISSION,
+           "    if (genesis_hybrid_admission_universe_digest(universe) != plan.universe_sha256) return \"universe_mismatch\";",
+           "    (void)universe;",
+           (ADMISSION_TEST,), "production applies a plan computed for another broad universe", group="hybrid"),
+    Mutant("hybrid_validator_unexpected_site_passes", HYBRID_PLAN,
+           "    if (control.dynamic != M68kDynamicControlFamily::return_from_subroutine) return \"unclassified_dynamic_site\";",
+           "",
+           (HYBRID_PLAN_TEST,), "the validator passes a reached dynamic site that is neither uncovered nor resolved", group="hybrid"),
+    Mutant("admission_alias_set_unchecked", ADMISSION,
+           "    return \"alias_set_mismatch\";",
+           "    {}",
+           (ADMISSION_TEST,), "production applies a plan computed for another executable-image set", group="hybrid"),
+
 ]
 
 
@@ -587,7 +687,7 @@ def self_check_stale_detection() -> None:
     if len(names) != len(set(names)):
         raise SystemExit("FAIL self-check: duplicate mutant names")
     for m in MUTANTS:
-        if m.old == m.new or not set(m.tests) <= set(ALL_TESTS):
+        if m.old == m.new or m.group not in GROUP_TESTS or not set(m.tests) <= set(GROUP_TESTS[m.group]):
             raise SystemExit(f"FAIL self-check: malformed mutant {m.name}")
     print("ok    self-check: stale edit patterns (missing, duplicated) are rejected; LF and CRLF sources are equivalent")
 
@@ -723,19 +823,22 @@ def main() -> int:
     parser.add_argument("--generator", default="", help="CMake generator of the temporary build (default: Ninja when found)")
     parser.add_argument("--make-program", default="", help="build tool of that generator (CMAKE_MAKE_PROGRAM)")
     parser.add_argument("--only", default="")
+    parser.add_argument("--group", default="analysis", choices=sorted(GROUP_TESTS),
+                        help="mutant group: analysis (SEG-029/SEG-030, default) or hybrid (SEG-031)")
     parser.add_argument("--keep", action="store_true", help="keep the temporary build directory")
     args = parser.parse_args()
     root = args.product_root.resolve()
     started = time.monotonic()
 
     self_check_stale_detection()
-    selected = MUTANTS
+    fixtures = GROUP_TESTS[args.group]
+    selected = [m for m in MUTANTS if m.group == args.group]
     if args.only:
         wanted = set(args.only.split(","))
-        unknown = wanted - {m.name for m in MUTANTS}
+        unknown = wanted - {m.name for m in selected}
         if unknown:
-            raise SystemExit(f"FAIL: unknown mutant(s) {sorted(unknown)}")
-        selected = [m for m in MUTANTS if m.name in wanted]
+            raise SystemExit(f"FAIL: unknown mutant(s) {sorted(unknown)} in group {args.group}")
+        selected = [m for m in selected if m.name in wanted]
     # Stale detection against the real sources before any build: every edit must match exactly once.
     stale = []
     for m in selected:
@@ -784,7 +887,7 @@ def main() -> int:
         def build_tests(watch: tuple[str, ...] = ()) -> tuple[subprocess.CompletedProcess, bool]:
             stamper.settle()
             before = executable_stamps([find_executable(build, t) for t in watch])
-            result = run([args.cmake, "--build", str(build), "--config", "Debug", "--parallel", jobs, "--target", *ALL_TESTS])
+            result = run([args.cmake, "--build", str(build), "--config", "Debug", "--parallel", jobs, "--target", *fixtures])
             stamper.built(result.returncode == 0)
             return result, (not watch or rebuilt(before))
 
@@ -795,11 +898,12 @@ def main() -> int:
             for test in tests:
                 executable = find_executable(build, test)
                 try:
-                    r = run([str(executable)], cwd=executable.parent, timeout=TEST_TIMEOUT_SECONDS)
+                    limit = FIXTURE_TIMEOUT_SECONDS.get(test, TEST_TIMEOUT_SECONDS)
+                    r = run([str(executable), *FIXTURE_ARGUMENTS.get(test, ())], cwd=executable.parent, timeout=limit)
                     why = first_failure_line(r.stdout.replace(str(source) + os.sep, "")) if r.returncode != 0 else ""
                     outcome[test] = (r.returncode != 0, why)
                 except subprocess.TimeoutExpired:
-                    outcome[test] = (True, f"timeout ({TEST_TIMEOUT_SECONDS} s)")
+                    outcome[test] = (True, f"timeout ({limit} s)")
                 if stop_at_kill and outcome[test][0]:
                     break
             return outcome
@@ -809,11 +913,11 @@ def main() -> int:
             print(result.stdout[-4000:])
             print("FAIL  baseline build")
             return 1
-        baseline = run_tests(ALL_TESTS)
+        baseline = run_tests(fixtures)
         if any(failed for failed, _ in baseline.values()):
             print(f"FAIL  baseline: the unmutated fixtures must pass: {baseline}")
             return 1
-        print(f"ok    baseline: {', '.join(ALL_TESTS)} pass unmutated")
+        print(f"ok    baseline: {', '.join(fixtures)} pass unmutated")
 
         problems = []
         rows = []
@@ -853,8 +957,8 @@ def main() -> int:
             if killers or m.equivalent:
                 print(f"{'':12} -> {rows[-1][2]}")
         # A final rebuild proves the copy was restored (the restored tree builds and passes again).
-        final, relinked = build_tests(ALL_TESTS if selected else ())
-        if final.returncode != 0 or any(failed for failed, _ in run_tests(ALL_TESTS).values()):
+        final, relinked = build_tests(fixtures if selected else ())
+        if final.returncode != 0 or any(failed for failed, _ in run_tests(fixtures).values()):
             problems.append("restored tree no longer builds/passes after the mutation loop")
         elif not relinked:
             problems.append("stale build: the restored tree was not rebuilt after the mutation loop")

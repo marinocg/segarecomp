@@ -4,6 +4,7 @@
 #include "segarecomp/codegen/c11/genesis_frontend.hpp"
 #include "segarecomp/codegen/c11/provenance_diagnostics.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
+#include "segarecomp/machine/genesis/hybrid_admission.hpp"
 #include "segarecomp/machine/genesis/reachability_challenger.hpp"
 #include "build_command.hpp"
 #include "segarecomp/rom.hpp"
@@ -37,7 +38,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]...] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--immutable-rom-aot-admission <plan>]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
@@ -95,6 +96,10 @@ int run_cli(int argc, char **argv) {
       // hashes it and never stores the addresses. It reads the existing analysis result
       // and cannot alter generation.
       std::optional<std::string_view> immutable_aot_address_report;
+      // SEG-031 (ADR 0080): explicit hybrid admission candidate. A plan produced by the report-only planner names the admitted subset
+      // of the broad immutable-ROM AOT identities; it is validated fail-closed (digest, alias set, structural closure) before the
+      // identities are filtered. Absent: broad admission, byte-identical to before SEG-031.
+      std::optional<std::string_view> immutable_rom_aot_admission;
       // SEG-022-T002: stream the generated C to this file (fail-closed: written as `<path>.partial`
       // and atomically renamed only on complete success; removed on any failure).
       std::optional<std::string_view> generated_c_output;
@@ -125,6 +130,10 @@ int run_cli(int argc, char **argv) {
           immutable_copy_aliases.push_back({static_cast<std::uint32_t>(*execution),
                                             static_cast<std::uint32_t>(*source),
                                             static_cast<std::uint32_t>(*length)});
+          index += 2;
+        } else if (option == "--immutable-rom-aot-admission") {
+          if (immutable_rom_aot_admission || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          immutable_rom_aot_admission = argv[index + 1];
           index += 2;
         } else if (option == "--immutable-aot-address-report") {
           if (immutable_aot_address_report || index + 1 >= argc) { print_usage(std::cerr); return 2; }
@@ -180,6 +189,9 @@ int run_cli(int argc, char **argv) {
         } else {
           print_usage(std::cerr); return 2;
         }
+      }
+      if (immutable_rom_aot_admission && !immutable_rom_aot) {
+        std::cerr << "segarecomp: --immutable-rom-aot-admission requires --immutable-rom-aot\n"; return 2;
       }
       if (!digest || (reset_entry && (entry_address || mapping_base)) ||
           (!reset_entry && (!entry_address || !mapping_base)) ||
@@ -289,7 +301,31 @@ int run_cli(int argc, char **argv) {
         for (const auto &frame : frames) calls.push_back(frame.call);
         return calls;
       };
-      const auto result = segarecomp::analyze_m68k_frontend(*program);
+      auto result = segarecomp::analyze_m68k_frontend(*program);
+      if (immutable_rom_aot_admission) {
+        std::ifstream plan_file{std::string(*immutable_rom_aot_admission), std::ios::binary};
+        std::string plan_text;
+        if (plan_file) {
+          plan_text.resize(segarecomp::genesis_hybrid_admission_plan_max_bytes + 1U);
+          plan_file.read(plan_text.data(), static_cast<std::streamsize>(plan_text.size()));
+          plan_text.resize(static_cast<std::size_t>(plan_file.gcount()));
+        }
+        if (!plan_file && !plan_file.eof()) { std::cerr << "segarecomp: cannot read hybrid admission plan\n"; return 2; }
+        std::string parse_error;
+        const auto plan = segarecomp::parse_genesis_hybrid_admission_plan(plan_text, &parse_error);
+        if (!plan) { std::cerr << "segarecomp: hybrid admission plan rejected: " << parse_error << '\n'; return 2; }
+        std::vector<segarecomp::FrontendAnalysis::ImmutableRomAotEntry> *entries = nullptr;
+        if (auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) entries = &partial->accepted_prefix.immutable_rom_aot_entries;
+        else if (auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result)) entries = &accepted->immutable_rom_aot_entries;
+        if (entries != nullptr) {
+          const auto broad_count = entries->size();
+          if (const auto failure = segarecomp::apply_genesis_hybrid_admission(*program, digest_value, *plan, *entries)) {
+            std::cerr << "segarecomp: hybrid admission plan rejected: " << *failure << '\n'; return 2;
+          }
+          std::cerr << "segarecomp: m68k admission: strategy=" << segarecomp::genesis_admission_strategy_name(plan->strategy)
+                    << " admitted=" << entries->size() << " broad=" << broad_count << '\n';
+        }
+      }
       if (immutable_rom_aot) {
         std::uint64_t aligned_start_count = 0U;
         for (const auto &range : program->immutable_rom_aot_ranges)

@@ -105,7 +105,22 @@ typedef struct Z80Runtime {
   /* Non-architectural: entry snapshot of the live bytes of the RAM-backed instruction being executed (ADR 0073). Displacement and
    * immediate operands are read from it, never re-fetched, so an instruction that writes its own operand uses the entry value. */
   uint8_t live_code[4];
+  /* SEG-031 (ADR 0080): optional host-attached execution-PC observer. Non-architectural, NULL in every ordinary program and never
+   * read back into guest state. It is called only in programs compiled with SEGARECOMP_Z80_EXECUTION_COVERAGE (measurement builds),
+   * with the logical PC of every instruction that begins executing (after the boundary check and, for a RAM-backed image, after the
+   * live guard accepted it; an instruction that begins always completes). See z80_execution_coverage.h. */
+  void (*observe_pc)(void *observer, uint16_t pc);
+  void *observer;
 } Z80Runtime;
+
+#if defined(SEGARECOMP_Z80_EXECUTION_COVERAGE)
+#define Z80_OBSERVE_PC(rt, pc)                                                    \
+  do {                                                                            \
+    if ((rt)->observe_pc != NULL) (rt)->observe_pc((rt)->observer, (uint16_t)(pc)); \
+  } while (0)
+#else
+#define Z80_OBSERVE_PC(rt, pc) ((void)0)
+#endif
 
 /* Every instruction start has an exact generated entry. An owner is one generated function holding a bounded set of exact entries
  * (ADR 0071); it selects the active entry from PC (absolute-PC owners) or PC - window base (window-relative owners). It executes
@@ -184,6 +199,7 @@ static inline void z80_owner_begin(Z80Runtime *rt) {
 }
 static inline int z80_owner_prologue(Z80Runtime *rt, uint16_t pc) {
   if (z80_owner_boundary(rt, pc)) return 1;
+  Z80_OBSERVE_PC(rt, pc);
   z80_owner_begin(rt);
   return 0;
 }
@@ -199,7 +215,10 @@ static inline int z80_live_guard(Z80Runtime *rt, uint16_t pc, unsigned length, u
   if (rt->host.code_fetch != NULL && rt->host.code_fetch(rt->host.context, pc, rt->live_code, length)) {
     for (i = 0; i < length; ++i)
       if (((structural >> i) & 1u) && rt->live_code[i] != expected[i]) break;
-    if (i == length) return 0;
+    if (i == length) {
+      Z80_OBSERVE_PC(rt, pc);
+      return 0;
+    }
   }
   rt->state.pc = pc;
   rt->outcome = Z80_ERROR_CODE_MISMATCH;
@@ -215,7 +234,7 @@ static inline int z80_lock_enter(Z80Runtime *rt, uint16_t pc) {
     s->pc = pc;
     return 1;
   }
-  if (z80_owner_prologue(rt, pc)) return 1;
+  if (z80_owner_prologue(rt, pc)) return 1;  /* observes the prefix run's first instruction */
   s->in_prefix_run = 1;
   return 0;
 }

@@ -29,6 +29,7 @@
 #include <sys/resource.h>
 #endif
 
+#include "segarecomp/genesis_analysis_report/hybrid_plan.hpp"
 #include "segarecomp/genesis_analysis_report/report.hpp"
 #include "segarecomp/rom.hpp"
 #include "segarecomp/sha256.hpp"
@@ -39,7 +40,8 @@ void usage(std::ostream &out) {
   out << "usage: segarecomp-genesis-analysis-report --rom <image> --rom-sha256 <sha256> (--reset-entry | --entry <address-hex8> "
          "--mapping-base <address-hex8>) [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... --private-output "
          "<path> [--universe] [--domains baseline|<address,memory,contexts,frames>|all] [--compare-challenger] [--metrics-output "
-         "<path>] [--max-iterations <n>] [--max-points <n>] [--assume-no-z80-ram-writes (diagnostic premise ablation; needs memory)]\n";
+         "<path>] [--max-iterations <n>] [--max-points <n>] [--assume-no-z80-ram-writes (diagnostic premise ablation; needs memory)] "
+         "[--hybrid-plan <plan-path> (SEG-031: plan the hybrid admission; forces --domains all)]\n";
 }
 
 std::optional<std::uint64_t> parse_hex(std::string_view text, std::size_t width) {
@@ -106,7 +108,7 @@ std::uint64_t peak_rss_bytes() {
 }
 
 int run(int argc, char **argv) {
-  std::optional<std::string> rom, digest, private_output, metrics_output;
+  std::optional<std::string> rom, digest, private_output, metrics_output, hybrid_plan;
   std::optional<std::uint32_t> entry_address, mapping_base;
   bool reset_entry = false, universe = false, compare = false, domains_given = false, iterations_given = false,
        points_given = false, assume_no_z80 = false;
@@ -120,6 +122,7 @@ int run(int argc, char **argv) {
     else if (option == "--rom-sha256" && has_value && !digest) digest = std::string(value);
     else if (option == "--private-output" && has_value && !private_output) private_output = std::string(value);
     else if (option == "--metrics-output" && has_value && !metrics_output) metrics_output = std::string(value);
+    else if (option == "--hybrid-plan" && has_value && !hybrid_plan) hybrid_plan = std::string(value);
     else if (option == "--reset-entry" && !reset_entry) { reset_entry = true; ++index; continue; }
     else if (option == "--universe" && !universe) { universe = true; ++index; continue; }
     else if (option == "--compare-challenger" && !compare) { compare = true; ++index; continue; }
@@ -210,6 +213,36 @@ int run(int argc, char **argv) {
       return 2;
     }
 
+  if (hybrid_plan) {
+    // SEG-031 (ADR 0080): the hybrid planner (forces `--domains all`; the challenger comparison and premise ablation do not apply).
+    if (compare || assume_no_z80 || (domains_given && !(config.domains.address && config.domains.memory && config.domains.contexts &&
+                                                        config.domains.frames))) {
+      usage(std::cerr);
+      return 2;
+    }
+    segarecomp::GenesisHybridPlanConfig plan_config{};
+    plan_config.analysis = config;
+    const auto plan = segarecomp::plan_genesis_hybrid_admission(*program, plan_config);
+    {
+      std::ofstream sink{*private_output, std::ios::binary};
+      sink << segarecomp::format_genesis_hybrid_plan_private(plan) << '\n';
+      if (!sink) { std::cerr << "segarecomp-genesis-analysis-report: cannot write private output\n"; return 2; }
+    }
+    {
+      std::ofstream sink{*hybrid_plan, std::ios::binary};
+      sink << segarecomp::format_genesis_hybrid_admission_plan(segarecomp::genesis_hybrid_admission_plan(plan, *program, expected));
+      if (!sink) { std::cerr << "segarecomp-genesis-analysis-report: cannot write hybrid plan\n"; return 2; }
+    }
+    if (metrics_output) {
+      const auto seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+      std::ofstream metrics{*metrics_output, std::ios::binary};
+      metrics << "{\"schema\":\"segarecomp.m68k_hybrid_plan.metrics.v1\",\"wall_seconds\":" << std::fixed << std::setprecision(3)
+              << seconds << ",\"peak_rss_bytes\":" << peak_rss_bytes() << "}\n";
+      if (!metrics) { std::cerr << "segarecomp-genesis-analysis-report: cannot write metrics output\n"; return 2; }
+    }
+    std::cout << segarecomp::format_genesis_hybrid_plan_aggregate(plan) << '\n';
+    return plan.outcome == segarecomp::GenesisHybridOutcome::broad_images_invalid ? 1 : 0;
+  }
   auto report = segarecomp::run_genesis_analysis_report(*program, config);
   if (!report.images_valid) {
     std::cerr << "segarecomp-genesis-analysis-report: executable-image set rejected\n";

@@ -55,3 +55,21 @@ partition stays exact (residual 0). `--jobs N` compiles independent TUs concurre
 ## Z80 / Master System (SEG-033)
 
 The Z80 AOT route has its own production-build measurements and gates: see `z80-build-performance.md` and ADR 0071.
+
+## Hybrid admission candidate (SEG-031, ADR 0080)
+
+Broad immutable-ROM AOT stays the production default. The explicit candidate filters the broad identities to a hybrid admission
+proven by the report-only planner (`segarecomp-genesis-analysis-report --hybrid-plan <plan>`), consumed by
+`emit-general-startup-bridge-c --immutable-rom-aot-admission <plan>`, `segarecomp build --admission-plan <plan>` or
+`genesis_startup_bridge.py --admission-plan <plan>`. A plan holds exact addresses: keep it in an ignored location for a commercial input.
+
+```sh
+python3 tools/genesis_hybrid_admission_compare.py --segarecomp <cli> --driver <analysis-report> --rom games/<rom> \
+  --work build/<ignored>/cmp --reference-segarecomp <pre-change cli> --coverage-dir <private complete oracle> --run-frames 3000
+```
+
+It reports, as sanitized JSON: the plan aggregate (`broad_u`, `precise_d`, fallback islands and admitted identities, hybrid total,
+ratio, whole-image triggers by generic reason) and its cost; generated C bytes/files broad vs planned and whether the trees are
+identical (and identical to the reference CLI's broad tree); production build wall/CPU time, peak child RSS and executable size, and
+whether the executables are identical; fixed-frame runtime and whether final-state, frame-stream and coverage digests agree; and the
+oracle falsification (observed broad identities outside the admission, which must be 0).

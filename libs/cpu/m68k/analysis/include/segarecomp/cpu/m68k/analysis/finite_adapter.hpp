@@ -579,6 +579,16 @@ struct M68kAnalysisConfig {
   M68kMemoryConfig memory{};             // SEG-030-T004 (memory domain only)
   M68kContextConfig contexts{};          // SEG-030-T005 (contexts domain only)
   M68kFrameConfig frames{};              // SEG-030-T006 (frames domain only)
+  // SEG-031 (ADR 0080, hybrid admission closure). Both maps are empty for every SEG-030 report, whose output is unchanged.
+  // island_entries: computed-site PC -> sorted distinct island target PCs (a proven finite superset of the site's targets). Wherever
+  // the site is reached, each target is a computed edge carrying the site's own output state, exactly as a resolved site's targets
+  // (a call enters the callee in the call-site context, and the targets are callees of its continuation). The edges are emitted
+  // whether or not the site resolves (monotone; a superset of targets is sound).
+  std::map<std::uint32_t, std::vector<std::uint32_t>> island_entries;
+  // opaque_entries: source PC -> sorted distinct PCs entered with the opaque continuation state of the source's partition
+  // (`entry_state(true, tag)`: registers and memory Unknown, stack delta Unknown, status = the partition's status bound) in context 0.
+  // Used only for code with no proven source transfer (mandatory materialized executable images, entered from the startup entry).
+  std::map<std::uint32_t, std::vector<std::uint32_t>> opaque_entries;
 };
 
 class M68kFiniteAdapter {

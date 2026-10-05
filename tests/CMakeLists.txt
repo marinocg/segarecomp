@@ -1089,6 +1089,12 @@ add_executable(z80_executable_image_equivalence_test z80_executable_image_equiva
 target_link_libraries(z80_executable_image_equivalence_test PRIVATE segarecomp::machine_master_system segarecomp::machine_genesis_z80)
 segarecomp_enable_warnings(z80_executable_image_equivalence_test)
 add_test(NAME z80_executable_image_equivalence_test COMMAND z80_executable_image_equivalence_test)
+# SEG-031 (ADR 0080): the production hybrid admission plan parser and fail-closed validate-and-filter seam.
+add_executable(genesis_hybrid_admission_test genesis_hybrid_admission_test.cpp)
+target_link_libraries(genesis_hybrid_admission_test PRIVATE segarecomp::machine_genesis)
+segarecomp_enable_warnings(genesis_hybrid_admission_test)
+add_test(NAME genesis_hybrid_admission_test COMMAND genesis_hybrid_admission_test)
+set_property(TEST genesis_hybrid_admission_test APPEND PROPERTY LABELS full fast)
 add_executable(genesis_m68k_executable_image_test genesis_m68k_executable_image_test.cpp)
 target_link_libraries(genesis_m68k_executable_image_test PRIVATE segarecomp::machine_genesis)
 segarecomp_enable_warnings(genesis_m68k_executable_image_test)
@@ -1120,6 +1126,14 @@ add_test(NAME analysis_mutation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRE
   "--generator=${CMAKE_GENERATOR}" "--make-program=${CMAKE_MAKE_PROGRAM}")
 set_property(TEST analysis_mutation_test APPEND PROPERTY LABELS full)
 set_property(TEST analysis_mutation_test PROPERTY TIMEOUT 1800)
+# SEG-031 (ADR 0080): the hybrid admission mutation gate (same harness, `--group hybrid`: the planner and production-seam fixtures).
+add_test(NAME analysis_hybrid_mutation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/analysis_mutation_test.py
+  ${PROJECT_SOURCE_DIR} ${CMAKE_COMMAND} ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER}
+  "--generator=${CMAKE_GENERATOR}" "--make-program=${CMAKE_MAKE_PROGRAM}" --group hybrid)
+set_property(TEST analysis_hybrid_mutation_test APPEND PROPERTY LABELS full)
+# The harness rebuilds and reruns the planner fixture per mutant (about 5 minutes on a developer host); the long-test headroom keeps a
+# contended CI runner from timing the whole gate out while every fixture keeps its own finite limit (analysis_mutation_test.py).
+set_property(TEST analysis_hybrid_mutation_test PROPERTY TIMEOUT 3600)
 # SEG-030-T009: the mutation harness's source stamping and build-tree settling survive same-second mutate/restore/mutate rebuilds.
 add_test(NAME analysis_mutation_harness_selftest COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/analysis_mutation_harness_selftest.py ${CMAKE_COMMAND} ${CMAKE_C_COMPILER}
@@ -1338,6 +1352,12 @@ add_test(NAME sms_emission_budget_512k_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_emission_budget_test.py $<TARGET_FILE:sms_image_emitter> $<TARGET_FILE:z80_image_emitter> ${PROJECT_SOURCE_DIR} 512k)
 add_test(NAME sms_machine_dependency_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_machine_dependency_test.py ${PROJECT_SOURCE_DIR})
+# SEG-031 (ADR 0080): the Z80 execution-PC observer (measurement builds only) on the hermetic SMS fixture.
+add_test(NAME z80_execution_coverage_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_execution_coverage_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST z80_execution_coverage_test APPEND PROPERTY LABELS full)
+set_property(TEST z80_execution_coverage_test PROPERTY TIMEOUT 900)
+set_property(TEST z80_execution_coverage_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 # SEG-009-T010: `segarecomp build` for Master System images (platform routing, mapper declaration, T008 digest reproduction).
 # CI wall-clock: one entry per independent case group of the script (see its docstring); the union is the whole matrix.
 add_test(NAME sms_native_build_test COMMAND ${Python3_EXECUTABLE}
