@@ -259,3 +259,5 @@ Consequences:
   open), and the premise decisions in the table; none is a refinement, and the operand-width region rule is not among the options.
 - The instruments stay: `--trace-points` (private attribution) and `--diagnostic-transparent-handlers` (an uncredited ceiling) cost
   nothing when unused, and the planner reruns the question after any such decision.
+
+**Resolved by ADR 0082 (SEG-035): the bounded immutable pointer-table authority was evaluated and stopped.**
