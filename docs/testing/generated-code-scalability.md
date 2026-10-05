@@ -73,3 +73,15 @@ ratio, whole-image triggers by generic reason) and its cost; generated C bytes/f
 identical (and identical to the reference CLI's broad tree); production build wall/CPU time, peak child RSS and executable size, and
 whether the executables are identical; fixed-frame runtime and whether final-state, frame-stream and coverage digests agree; and the
 oracle falsification (observed broad identities outside the admission, which must be 0).
+
+## Entry-representation attribution (SEG-036-T001)
+
+`attribute` / `measure` also report `source.entry_representation`: an exact split of the AOT per-entry
+generated text. Helper-backed entries (`genesis_aot_entry_<PC>: { return genesis_aot_shared_N(runtime[, <provenance literal>][, <own PC>]); }`)
+are counted as `helper_exact` / `helper_own_pc` and their bytes split into `label`, `call_syntax`,
+`provenance_argument` and `own_pc_argument` (the split must sum exactly to the entry-line bytes).
+Entries with an inline body are `inline_helper_eligible` or `inline_helper_ineligible` (contains
+`case`/`static`/`switch (`). `case_dispatch_lines` counts the owner `switch` rows.
+`routing_only_bytes` = case rows + labels + call syntax + own-PC arguments, i.e. the C that only routes a known PC to an already
+selected helper; `routing_plus_provenance_argument_bytes` adds the repeated provenance compound literals.
+Only counts and byte totals are reported. The existing category partition is unchanged.

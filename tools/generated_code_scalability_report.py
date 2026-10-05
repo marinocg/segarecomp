@@ -74,6 +74,71 @@ _ENTRY_ID_ROW = re.compile(rb"^\s*UINT(?:8|16|32)_C\(([0-9]+)\),")
 _ENTRY_OWNER_ROW = re.compile(rb"^\s*(genesis_(aot|block)\w*),")
 _ENTRY_ROW = re.compile(rb"^\s*(?:UINT32_C\(0x[0-9A-Fa-f]+\)|UINT(?:8|16|32)_C\([0-9]+\)|genesis_(?:aot|block)\w*),")
 
+# SEG-036-T001: per-entry representation attribution. A helper-backed entry is one line
+# `genesis_aot_entry_<PC>: { return <helper>(runtime[, <provenance literal>][, <own PC>]); }`.
+_ENTRY_LABEL_PREFIX = re.compile(rb"^(genesis_aot_entry_[0-9A-Fa-f]{8}: )(.*)$", re.S)
+_ENTRY_HELPER_CALL = re.compile(
+    rb"^\{ return (genesis_aot_shared_[0-9]+)\(runtime(, &\(const GenesisInstructionProvenance\)\{[^;]*\})?"
+    rb"(, UINT32_C\(0x[0-9A-Fa-f]{8}\))?\); \}\n$")
+_ENTRY_CASE_LINE = re.compile(rb"^  case UINT32_C\(0x[0-9A-Fa-f]{8}\): goto genesis_aot_entry_[0-9A-Fa-f]{8};\n$")
+
+
+def _new_entry_representation() -> dict:
+    zero = lambda: {"entries": 0, "bytes": 0}
+    return {"helper_exact": zero(), "helper_own_pc": zero(), "inline_helper_eligible": zero(),
+            "inline_helper_ineligible": zero(),
+            "helper_entry_bytes": {"label": 0, "call_syntax": 0, "provenance_argument": 0, "own_pc_argument": 0},
+            "case_dispatch_lines": zero(), "_inline_open": None}
+
+
+def _close_inline(rep: dict) -> None:
+    open_entry = rep["_inline_open"]
+    if open_entry is None:
+        return
+    text = open_entry
+    cell = rep["inline_helper_ineligible" if (b"switch (" in text or b"static " in text or b"case " in text)
+                else "inline_helper_eligible"]
+    cell["entries"] += 1
+    cell["bytes"] += len(text)
+    rep["_inline_open"] = None
+
+
+def _entry_representation_line(rep: dict, line: bytes) -> None:
+    """Account one line of an AOT owner function (called for every aot_function-region line)."""
+    if rep["_inline_open"] is not None:
+        if _ENTRY_LABEL.match(line) or line[:1] == b"}" and not line.startswith(b"}\n}"):
+            # A new entry label, or the `}` closing the entry (inline bodies end with a column-0 `}`).
+            if line[:1] == b"}":
+                rep["_inline_open"] += line
+            _close_inline(rep)
+            if line[:1] == b"}":
+                return
+        else:
+            rep["_inline_open"] += line
+            return
+    if _ENTRY_CASE_LINE.match(line):
+        rep["case_dispatch_lines"]["entries"] += 1
+        rep["case_dispatch_lines"]["bytes"] += len(line)
+        return
+    labelled = _ENTRY_LABEL_PREFIX.match(line)
+    if not labelled:
+        return
+    label, rest = labelled.groups()
+    call = _ENTRY_HELPER_CALL.match(rest)
+    if call:
+        helper, provenance, own_pc = call.groups()
+        key = "helper_own_pc" if own_pc else "helper_exact"
+        rep[key]["entries"] += 1
+        rep[key]["bytes"] += len(line)
+        sizes = rep["helper_entry_bytes"]
+        sizes["label"] += len(label)
+        sizes["provenance_argument"] += len(provenance or b"")
+        sizes["own_pc_argument"] += len(own_pc or b"")
+        sizes["call_syntax"] += len(line) - len(label) - len(provenance or b"") - len(own_pc or b"")
+    else:
+        rep["_inline_open"] = line
+
+
 _FUNC_RE = {
     "aot_function": re.compile(rb"^static GenesisControlTransfer genesis_aot_"),
     "ordinary_block": re.compile(rb"^static GenesisControlTransfer genesis_block_"),
@@ -126,6 +191,19 @@ def classify_line(region: str, line: bytes) -> str:
     return "body"
 
 
+def _finish_entry_representation(rep: dict, cells: dict) -> dict:
+    _close_inline(rep)
+    rep.pop("_inline_open")
+    helper = rep["helper_exact"]["bytes"] + rep["helper_own_pc"]["bytes"]
+    sizes = rep["helper_entry_bytes"]
+    assert sum(sizes.values()) == helper, "helper-entry byte split must be exact"
+    routing = rep["case_dispatch_lines"]["bytes"] + sizes["label"] + sizes["call_syntax"] + sizes["own_pc_argument"]
+    rep["routing_only_bytes"] = routing
+    rep["routing_plus_provenance_argument_bytes"] = routing + sizes["provenance_argument"]
+    rep["owner_switch_overhead_bytes"] = cells.get("aot_function.entry_dispatch", [0, 0])[0]
+    return rep
+
+
 def set_fingerprint(addresses) -> dict:
     """Count + SHA-256 over the sorted, canonical `%08x\\n` serialization (no addresses retained)."""
     ordered = sorted(set(addresses))
@@ -145,6 +223,8 @@ def attribute(paths) -> dict:
     fn_sizes: dict[str, list[int]] = {"aot_function": [], "ordinary_block": []}
     fn_array_bytes: dict[str, list[int]] = {"aot_function": [], "ordinary_block": []}
     in_array = False
+    rep = _new_entry_representation()
+    rep["inline_helper_eligible"] = {"entries": 0, "bytes": 0}
     array_count = array_elements = array_bytes = array_max = cur_elements = 0
     entry_addresses = {"aot": [], "block": []}
     table_addresses: list[int] = []
@@ -174,6 +254,10 @@ def attribute(paths) -> dict:
             if region in fn_sizes:
                 fn_sizes[region][-1] += len(line)
             cls = classify_line(region, line)
+            if region == "aot_function":
+                _entry_representation_line(rep, line)
+            elif rep["_inline_open"] is not None:
+                _close_inline(rep)
             if region == "entry_table":
                 if (em := _ENTRY_ADDR_ROW.match(line)):
                     table_addresses.append(int(em.group(1), 16))
@@ -252,6 +336,7 @@ def attribute(paths) -> dict:
                 "indirect_target_array_bytes_in_all_functions": sum(arrays)}
 
     return {
+        "entry_representation": _finish_entry_representation(rep, cells),
         "function_size_distribution": {k: distribution(v, fn_array_bytes[k]) for k, v in fn_sizes.items()},
         "total_bytes": total_bytes,
         "total_lines": total_lines,

@@ -87,6 +87,36 @@ assert fp == {"count": 2, "sha256": hashlib.sha256(b"00000010\n00000020\n").hexd
 assert gcs.set_fingerprint([0x20, 0x10, 0x10]) == fp
 metrics = gcs.parse_emitter_metrics("segarecomp: immutable-rom AOT enumeration: aligned_start_count=4 accepted_count=3 rejected_count=1\n")
 assert metrics["immutable_rom_aot"] == {"aligned_start_count": 4, "accepted_count": 3, "rejected_count": 1}
+
+# SEG-036-T001: per-entry representation attribution (exact split of helper-backed entry lines).
+ENTRY_SAMPLE = b"""static GenesisControlTransfer genesis_aot_owner_0000(GenesisRuntime *runtime) {
+  switch (runtime->pc) {
+  case UINT32_C(0x00000010): goto genesis_aot_entry_00000010;
+  case UINT32_C(0x00000012): goto genesis_aot_entry_00000012;
+  case UINT32_C(0x00000014): goto genesis_aot_entry_00000014;
+  default: return genesis_internal_dispatch_inconsistency_stop(runtime);
+  }
+genesis_aot_entry_00000010: { return genesis_aot_shared_00001(runtime); }
+genesis_aot_entry_00000012: { return genesis_aot_shared_00002(runtime, &(const GenesisInstructionProvenance){GENESIS_CPU_MC68000, UINT32_C(0x00000012), UINT64_C(18), {UINT8_C(0x4E), UINT8_C(0x71)}, UINT32_C(2)}, UINT32_C(0x00000012)); }
+genesis_aot_entry_00000014: {
+  const GenesisInstructionProvenance *const genesis_aot_source = 0;
+  return genesis_aot_shared_00003(runtime);
+}
+}
+"""
+with tempfile.TemporaryDirectory() as tmp:
+    path = pathlib.Path(tmp) / "e.c"
+    path.write_bytes(ENTRY_SAMPLE)
+    rep = gcs.attribute(path)
+assert rep["category_sum_bytes"] == len(ENTRY_SAMPLE) == rep["total_bytes"]
+er = rep["entry_representation"]
+assert er["helper_exact"]["entries"] == 1 and er["helper_own_pc"]["entries"] == 1, er
+assert er["inline_helper_eligible"]["entries"] == 1 and er["inline_helper_ineligible"]["entries"] == 0, er
+assert er["case_dispatch_lines"]["entries"] == 3, er
+sizes = er["helper_entry_bytes"]
+assert sum(sizes.values()) == er["helper_exact"]["bytes"] + er["helper_own_pc"]["bytes"], er
+assert sizes["own_pc_argument"] == len(b", UINT32_C(0x00000012)") and sizes["provenance_argument"] > 0, sizes
+assert er["routing_only_bytes"] + sizes["provenance_argument"] == er["routing_plus_provenance_argument_bytes"]
 print("ok")
 
 # SEG-022-T002: `measure` must use the streaming --generated-c-output path, never stdout.
