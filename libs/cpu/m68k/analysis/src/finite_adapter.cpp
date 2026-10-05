@@ -1184,8 +1184,17 @@ M68kPointsTo M68kFiniteAdapter::resolve_store_spill(const M68kPointsTo &target, 
     M68kOffsetSet inside = offsets.restricted(0U, last);
     // A partially in-region store starts after `last`: the clip adds `last` itself (never through the widening join, which would
     // saturate a strided set back to the region end).
-    if (offsets.hi() > last)
-      inside = inside.empty() ? M68kOffsetSet::of({last}) : M68kOffsetSet::strided(std::min(offsets.lo(), inside.lo()), 1U, last);
+    if (offsets.hi() > last) {
+      if (inside.empty()) {
+        inside = M68kOffsetSet::of({last});
+      } else if (!inside.is_strided()) {
+        auto exact = inside.exact();  // an exact set stays exact (no hull between its members and `last`)
+        exact.push_back(last);  // keep the clipped member
+        inside = M68kOffsetSet::of(std::move(exact));
+      } else {
+        inside = M68kOffsetSet::strided(std::min(offsets.lo(), inside.lo()), 1U, last);
+      }
+    }
     pairs.emplace_back(region, std::move(inside));
     // The bytes after the region end, on the 24-bit bus (the byte after the last bus address wraps to 0).
     const std::uint32_t end = (static_cast<std::uint32_t>(region.base & bus_mask) + region.size) & bus_mask;

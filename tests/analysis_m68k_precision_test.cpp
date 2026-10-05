@@ -186,6 +186,31 @@ void spill_off_the_end_of_ram() {
          "spill off the end of RAM: the wrapped bytes are untracked, the in-region part still poisons the last cell");
 }
 
+// A pointer set of two exact targets, one of them spilling off the end of RAM, must not widen to the hull between them: the cell in
+// the middle keeps its value.
+void exact_set_with_one_spilling_member_stays_exact() {
+  Asm a;
+  a.store_abs_long(0x7777U, 0x00FF8000U);  // between the two members: must survive
+  a.store_abs_long(0x1111U, 0x00FF0100U);  // the first member
+  a.store_abs_long(0x5555U, 0x00FFFFFCU);  // the last cell of RAM (the spilling member's in-region bytes)
+  a.lea_abs(1, 0x00FF0100U);
+  a.w({0x4A41U, 0x6706U});          // TST.W D1; BEQ.S +6 (skip the second LEA)
+  a.lea_abs(1, 0x00FFFFFEU);
+  a.w({0x2281U});                   // MOVE.L D1,(A1): A1 is {$FF0100, $FFFFFE}
+  a.load_abs_long(2, 0x00FF8000U);
+  a.load_abs_long(3, 0x00FF0100U);
+  a.load_abs_long(4, 0x00FFFFFCU);
+  const auto probe = a.pc;
+  a.nop().stop();
+  const auto result = run(a, Domains::memory);
+  const auto middle = data_values(result, probe, 2);
+  const auto first = data_values(result, probe, 3);
+  const auto last = data_values(result, probe, 4);
+  expect(result.complete && middle && *middle == std::vector<std::uint64_t>{0x7777U},
+         "spill in a pointer set: the cell between two exact members keeps its value (no hull)");
+  expect(result.complete && !first && !last, "spill in a pointer set: both members' cells are Unknown (weak update)");
+}
+
 // The return slot: a called routine storing across the I/O/RAM boundary far from the stack does not rewrite its own slot
 // (previously: every slot rewritten, Unknown(return_slot_rewritten), an unproven activation).
 void spill_does_not_rewrite_the_return_slot() {
@@ -226,6 +251,7 @@ int main() {
   no_spill_touches_nothing();
   spill_one_byte_in_region();
   spill_off_the_end_of_ram();
+  exact_set_with_one_spilling_member_stays_exact();
   spill_does_not_rewrite_the_return_slot();
   store_over_the_stack_still_rewrites();
   if (failures != 0) {
