@@ -70,7 +70,8 @@ int main(void) {
   {
     GenesisRuntime r = fresh(UINT32_C(0x00001030));
     GenesisControlTransfer t;
-    assert(genesis_compiled_entry_lookup(UINT32_C(0x00001030)) != genesis_compiled_entry_lookup(%(rep_target)s));
+    /* Owner identity (legacy form only: a direct entry's lookup is the one table-resolving function). */
+    if (%(owner_identity)s) assert(genesis_compiled_entry_lookup(UINT32_C(0x00001030)) != genesis_compiled_entry_lookup(%(rep_target)s));
     r.d[0] = %(rep_target)s - UINT32_C(0x00001032);
     t = genesis_bridge_dispatch(&r);
     assert(t.kind == GENESIS_CONTINUE_AT_PC && r.pc == %(rep_target)s);
@@ -111,7 +112,7 @@ int main(void) {
       }
       for (k = 0; k < 8U; ++k) { int dup = 0; for (j = 0; j < k; ++j) dup |= seen[j] == seen[k]; if (!dup) ++distinct; }
       (void)n;
-      assert(distinct >= 2U && walk.pc == whole.pc);
+      assert((!%(owner_identity)s || distinct >= 2U) && walk.pc == whole.pc);
     }
   }
   puts("aot owner harness OK");
@@ -121,31 +122,26 @@ int main(void) {
 
 
 def compiled_entry_table(text):
-    """SEG-022-T009: resolve the compact address -> owner-id -> owner-symbol tables to (address, symbol) pairs."""
+    """SEG-022-T009: resolve the compact address -> owner-id -> owner-symbol tables to (address, symbol) pairs.
+    SEG-036: bare-literal tables (direct-entry form) are read too; an id past the owner list is a direct helper entry."""
     import re as _re
     def body(name):
         m = _re.search(r"\b" + name + r"\[\] = \{\n(.*?)\n\};", text, _re.S)
         assert m, name
         return m.group(1)
-    addresses = _re.findall(r"UINT32_C\(0x([0-9A-Fa-f]{8})\)", body("genesis_compiled_entry_addresses"))
-    ids = [int(i) for i in _re.findall(r"UINT(?:8|16|32)_C\((\d+)\)", body("genesis_compiled_entry_owner_ids"))]
+    addresses = [a or b for a, b in _re.findall(r"UINT32_C\(0x([0-9A-Fa-f]{8})\)|^\s*0x([0-9A-Fa-f]{8})u,", body("genesis_compiled_entry_addresses"), _re.M)]
+    ids = [int(a or b) for a, b in _re.findall(r"UINT(?:8|16|32)_C\((\d+)\)|^\s*(\d+),", body("genesis_compiled_entry_owner_ids"), _re.M)]
     owners = [o.strip().rstrip(",") for o in body("genesis_compiled_owners").splitlines()]
     assert len(addresses) == len(ids)
-    return [(a, owners[i]) for a, i in zip(addresses, ids)]
+    return [(a, owners[i] if i < len(owners) else "<direct>") for a, i in zip(addresses, ids)]
 
 
-def main():
-    pipeline, compiler, root = sys.argv[1:4]
-    root = pathlib.Path(root)
-    runtime = root / "platforms/genesis/runtime"
-    single = run(pipeline, "--emit-aot-owner-single").stdout
-    baseline = sorted(int(a, 16) for a in re.findall(r"static GenesisControlTransfer genesis_aot_([0-9A-F]{8})\(GenesisRuntime", single))
-    assert len(baseline) > 256, len(baseline)
+def check_variant(variant, pipeline, compiler, root, runtime, baseline):
     with tempfile.TemporaryDirectory(dir=root / "build", prefix="aot-owner-") as tmp:
         tmp = pathlib.Path(tmp)
         shards = []
         for name in ("a", "b"):
-            run(pipeline, "--emit-aot-owner-shards", tmp / name)
+            run(pipeline, "--emit-aot-owner-shards", tmp / name, *(["legacy"] if variant == "legacy" else []))
             shards.append({p.name: p.read_bytes() for p in (tmp / name).iterdir()})
         assert shards[0] == shards[1], "owner grouping must be deterministic"
         out = tmp / "a"
@@ -153,18 +149,26 @@ def main():
         aot_text = "".join((out / n).read_text() for n in units if "_aot_" in n)
         owners = re.findall(r"^static GenesisControlTransfer (genesis_aot_owner_\d+)\(", aot_text, re.M) or \
             re.findall(r"^GenesisControlTransfer (genesis_aot_owner_\d+)\(", aot_text, re.M)
-        assert len(owners) >= 2 and len(owners) < len(baseline) // 32, owners
+        assert len(owners) < len(baseline) // 32 and (variant == "direct" or len(owners) >= 2), owners
         assert "static GenesisControlTransfer genesis_aot_0" not in aot_text
         # An owner lives in exactly one TU, and every owner is a bounded switch with a fail-closed default.
         for owner in owners:
             assert sum(owner + "(GenesisRuntime *runtime) {" in (out / n).read_text() for n in units) == 1, owner
         cases = sorted(int(a, 16) for a in re.findall(r"case UINT32_C\(0x([0-9A-F]{8})\): goto genesis_aot_entry_", aot_text))
-        assert cases == baseline, "admitted AOT PC set must equal the pre-owner baseline exactly"
+        if variant == "legacy":
+            assert cases == baseline, "admitted AOT PC set must equal the pre-owner baseline exactly"
         assert aot_text.count("default: return genesis_internal_dispatch_inconsistency_stop(runtime);") == len(owners)
         table = compiled_entry_table("".join((out / n).read_text() for n in units if "_entries_" in n))
         compiled = sorted(int(a, 16) for a, _ in table)
         assert set(baseline) <= set(compiled), "final compiled-address set keeps every AOT PC"
-        assert {int(a, 16) for a, b in table if b.startswith("genesis_aot_owner_")} == set(baseline)
+        owner_backed = {int(a, 16) for a, b in table if b.startswith("genesis_aot_owner_")}
+        direct_backed = {int(a, 16) for a, b in table if b == "<direct>"}
+        if variant == "legacy":
+            assert owner_backed == set(baseline) and not direct_backed
+        else:
+            # SEG-036: the same admitted AOT set, now split between the remaining owners and direct table rows.
+            assert owner_backed == set(cases) and direct_backed and not (owner_backed & direct_backed)
+            assert owner_backed | direct_backed == set(baseline), "direct entries keep the exact AOT PC set"
 
         aot_pcs = set(baseline)
         lo, hi = min(baseline), max(baseline)
@@ -177,7 +181,8 @@ def main():
         fmt = lambda values: ", ".join("UINT32_C(0x%08X)" % v for v in values) or "UINT32_C(0)"
         sample = baseline[:: max(1, len(baseline) // 64)] + [baseline[-1]]
         (tmp / "harness.c").write_text(HARNESS % {"represented": fmt(sample), "unrepresented": fmt([0x10D0, 0x0FF0, hi + 2, 0x1009]),
-                                                  "probes": fmt(probes), "rep_target": "UINT32_C(0x%08X)" % rep_target})
+                                                  "probes": fmt(probes), "rep_target": "UINT32_C(0x%08X)" % rep_target,
+                                                  "owner_identity": "1" if variant == "legacy" else "0"})
         flags = ["-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-O0", "-I", str(runtime), "-I", str(out)]
         objects = []
         for index, source in enumerate([out / n for n in units] + [tmp / "harness.c", runtime / "runtime.c"]):
@@ -188,6 +193,17 @@ def main():
         run(compiler, "-o", tmp / "harness", *objects)
         ran = run(tmp / "harness")
         assert "aot owner harness OK" in ran.stdout
+
+
+def main():
+    pipeline, compiler, root = sys.argv[1:4]
+    root = pathlib.Path(root)
+    runtime = root / "platforms/genesis/runtime"
+    single = run(pipeline, "--emit-aot-owner-single").stdout
+    baseline = sorted(int(a, 16) for a in re.findall(r"static GenesisControlTransfer genesis_aot_([0-9A-F]{8})\(GenesisRuntime", single))
+    assert len(baseline) > 256, len(baseline)
+    for variant in ("legacy", "direct"):
+        check_variant(variant, pipeline, compiler, root, runtime, baseline)
     print("genesis_immutable_rom_aot_owner_generated_test: OK")
 
 

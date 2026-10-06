@@ -48,7 +48,7 @@ _REGION_STARTS = (
     # function bytes (same categories) and they are counted separately.
     ("aot_shared_helper", re.compile(rb"^(?:static )?GenesisControlTransfer genesis_aot_shared_[0-9]+\([^;]*\{\s*$")),
     ("aot_function", re.compile(rb"^(?:static )?GenesisControlTransfer genesis_aot_(?:owner_)?[0-9A-Fa-f]+\([^;]*\{\s*$")),
-    ("entry_table", re.compile(rb"^static const uint32_t genesis_compiled_entry_addresses\[\]")),
+    ("entry_table", re.compile(rb"^(?:static )?const uint32_t genesis_compiled_entry_addresses\[\]")),
     ("dispatch", re.compile(rb"^(?:static )?GenesisCompiledEntry genesis_compiled_entry_lookup\([^;]*\{")),
     ("owned_literals", re.compile(rb"^static const uint8_t genesis_owned_region_data_")),
     ("main_glue", re.compile(rb"^int main\(")),
@@ -69,10 +69,81 @@ _RETIRE = re.compile(rb"^\s*(?:\{ const uint32_t m68k_retirement_pc\b|if \(retir
                      rb"runtime->pc = pc;|uint32_t pc = runtime->pc;|#define pc |#undef pc)")
 _INDIRECT_ARRAY_START = re.compile(rb"static const uint32_t m68k_indirect_targets_\w+\[\]")
 # SEG-022-T009: the compact table is three parallel arrays: sorted guest addresses, owner ids, owner symbols.
-_ENTRY_ADDR_ROW = re.compile(rb"^\s*UINT32_C\(0x([0-9A-Fa-f]+)\),")
-_ENTRY_ID_ROW = re.compile(rb"^\s*UINT(?:8|16|32)_C\(([0-9]+)\),")
+_ENTRY_ADDR_ROW = re.compile(rb"^\s*(?:UINT32_C\(0x([0-9A-Fa-f]+)\)|0x([0-9A-Fa-f]{8})u),")
+# The direct-entry form (SEG-036) writes bare decimal ids; they are only read inside the owner-id array.
+_ENTRY_ID_ROW = re.compile(rb"^\s*(?:UINT(?:8|16|32)_C\(([0-9]+)\)|([0-9]+)),")
 _ENTRY_OWNER_ROW = re.compile(rb"^\s*(genesis_(aot|block)\w*),")
-_ENTRY_ROW = re.compile(rb"^\s*(?:UINT32_C\(0x[0-9A-Fa-f]+\)|UINT(?:8|16|32)_C\([0-9]+\)|genesis_(?:aot|block)\w*),")
+# SEG-036-T002: direct-entry tables (helper pointer rows are `genesis_aot_shared_N,`; provenance rows are one packed
+# `UINT64_C(...)` word per compiled entry, zero for an entry that has an owner).
+_DIRECT_TABLE_ROW = re.compile(rb"^\s*(?:0x[0-9A-F]{16}ULL,|0ULL,|genesis_aot_shared_[0-9]+,)")
+_TABLE_ARRAY_START = re.compile(rb"^(?:static )?const \w+ (genesis_\w+)\[\] = \{")
+_OWNER_TABLE_ROW = re.compile(rb"^\s*(\w+),\s*$")
+_ENTRY_ROW = re.compile(rb"^\s*(?:UINT32_C\(0x[0-9A-Fa-f]+\)|0x[0-9A-Fa-f]{8}u|UINT(?:8|16|32)_C\([0-9]+\)|[0-9]+|NULL|genesis_(?:aot|block)\w*),")
+
+# SEG-036-T001: per-entry representation attribution. A helper-backed entry is one line
+# `genesis_aot_entry_<PC>: { return <helper>(runtime[, <provenance literal>][, <own PC>]); }`.
+_ENTRY_LABEL_PREFIX = re.compile(rb"^(genesis_aot_entry_[0-9A-Fa-f]{8}: )(.*)$", re.S)
+_ENTRY_HELPER_CALL = re.compile(
+    rb"^\{ return (genesis_aot_shared_[0-9]+)\(runtime(, &\(const GenesisInstructionProvenance\)\{[^;]*\})?"
+    rb"(, UINT32_C\(0x[0-9A-Fa-f]{8}\))?\); \}\n$")
+_ENTRY_CASE_LINE = re.compile(rb"^  case UINT32_C\(0x[0-9A-Fa-f]{8}\): goto genesis_aot_entry_[0-9A-Fa-f]{8};\n$")
+
+
+def _new_entry_representation() -> dict:
+    zero = lambda: {"entries": 0, "bytes": 0}
+    return {"helper_exact": zero(), "helper_own_pc": zero(), "inline_helper_eligible": zero(),
+            "inline_helper_ineligible": zero(),
+            "helper_entry_bytes": {"label": 0, "call_syntax": 0, "provenance_argument": 0, "own_pc_argument": 0},
+            "case_dispatch_lines": zero(), "_inline_open": None}
+
+
+def _close_inline(rep: dict) -> None:
+    open_entry = rep["_inline_open"]
+    if open_entry is None:
+        return
+    text = open_entry
+    cell = rep["inline_helper_ineligible" if (b"switch (" in text or b"static " in text or b"case " in text)
+                else "inline_helper_eligible"]
+    cell["entries"] += 1
+    cell["bytes"] += len(text)
+    rep["_inline_open"] = None
+
+
+def _entry_representation_line(rep: dict, line: bytes) -> None:
+    """Account one line of an AOT owner function (called for every aot_function-region line)."""
+    if rep["_inline_open"] is not None:
+        if _ENTRY_LABEL.match(line) or line[:1] == b"}" and not line.startswith(b"}\n}"):
+            # A new entry label, or the `}` closing the entry (inline bodies end with a column-0 `}`).
+            if line[:1] == b"}":
+                rep["_inline_open"] += line
+            _close_inline(rep)
+            if line[:1] == b"}":
+                return
+        else:
+            rep["_inline_open"] += line
+            return
+    if _ENTRY_CASE_LINE.match(line):
+        rep["case_dispatch_lines"]["entries"] += 1
+        rep["case_dispatch_lines"]["bytes"] += len(line)
+        return
+    labelled = _ENTRY_LABEL_PREFIX.match(line)
+    if not labelled:
+        return
+    label, rest = labelled.groups()
+    call = _ENTRY_HELPER_CALL.match(rest)
+    if call:
+        helper, provenance, own_pc = call.groups()
+        key = "helper_own_pc" if own_pc else "helper_exact"
+        rep[key]["entries"] += 1
+        rep[key]["bytes"] += len(line)
+        sizes = rep["helper_entry_bytes"]
+        sizes["label"] += len(label)
+        sizes["provenance_argument"] += len(provenance or b"")
+        sizes["own_pc_argument"] += len(own_pc or b"")
+        sizes["call_syntax"] += len(line) - len(label) - len(provenance or b"") - len(own_pc or b"")
+    else:
+        rep["_inline_open"] = line
+
 
 _FUNC_RE = {
     "aot_function": re.compile(rb"^static GenesisControlTransfer genesis_aot_"),
@@ -87,13 +158,16 @@ def split_entry_addresses(addresses, ids, owner_kinds) -> dict:
     assert len(addresses) == len(ids), "entry table arrays disagree"
     result = {"aot": [], "block": []}
     for address, owner in zip(addresses, ids):
-        result[owner_kinds[owner]].append(address)
+        # SEG-036-T002: an id at or above the owner count names a direct (helper-backed AOT) entry.
+        result[owner_kinds[owner] if owner < len(owner_kinds) else "aot"].append(address)
     return result
 
 
 def classify_line(region: str, line: bytes) -> str:
     """Return the line class inside a region."""
     if region == "entry_table":
+        if _DIRECT_TABLE_ROW.match(line):
+            return "direct_entry_metadata"
         return "compiled_entry_table" if _ENTRY_ROW.match(line) else "table_scaffold"
     if region == "owned_literals":
         return "owned_rom_literal"
@@ -126,6 +200,19 @@ def classify_line(region: str, line: bytes) -> str:
     return "body"
 
 
+def _finish_entry_representation(rep: dict, cells: dict) -> dict:
+    _close_inline(rep)
+    rep.pop("_inline_open")
+    helper = rep["helper_exact"]["bytes"] + rep["helper_own_pc"]["bytes"]
+    sizes = rep["helper_entry_bytes"]
+    assert sum(sizes.values()) == helper, "helper-entry byte split must be exact"
+    routing = rep["case_dispatch_lines"]["bytes"] + sizes["label"] + sizes["call_syntax"] + sizes["own_pc_argument"]
+    rep["routing_only_bytes"] = routing
+    rep["routing_plus_provenance_argument_bytes"] = routing + sizes["provenance_argument"]
+    rep["owner_switch_overhead_bytes"] = cells.get("aot_function.entry_dispatch", [0, 0])[0]
+    return rep
+
+
 def set_fingerprint(addresses) -> dict:
     """Count + SHA-256 over the sorted, canonical `%08x\\n` serialization (no addresses retained)."""
     ordered = sorted(set(addresses))
@@ -139,12 +226,16 @@ def attribute(paths) -> dict:
         paths = [paths]
     cells: dict[str, list[int]] = {}
     counts = {"aot_function": 0, "ordinary_block": 0, "frontier_stop_fn": 0, "tier1_stop_fn": 0,
-              "compiled_entry_rows": 0, "forward_declarations": 0, "aot_entry_label": 0, "aot_shared_helper": 0}
+              "compiled_entry_rows": 0, "forward_declarations": 0, "aot_entry_label": 0, "aot_shared_helper": 0,
+              "direct_helper_rows": 0, "direct_meta_rows": 0}
     total_bytes = total_lines = 0
     region = "prelude"
     fn_sizes: dict[str, list[int]] = {"aot_function": [], "ordinary_block": []}
     fn_array_bytes: dict[str, list[int]] = {"aot_function": [], "ordinary_block": []}
     in_array = False
+    table_array = b""
+    rep = _new_entry_representation()
+    rep["inline_helper_eligible"] = {"entries": 0, "bytes": 0}
     array_count = array_elements = array_bytes = array_max = cur_elements = 0
     entry_addresses = {"aot": [], "block": []}
     table_addresses: list[int] = []
@@ -174,13 +265,23 @@ def attribute(paths) -> dict:
             if region in fn_sizes:
                 fn_sizes[region][-1] += len(line)
             cls = classify_line(region, line)
+            if region == "aot_function":
+                _entry_representation_line(rep, line)
+            elif rep["_inline_open"] is not None:
+                _close_inline(rep)
             if region == "entry_table":
-                if (em := _ENTRY_ADDR_ROW.match(line)):
-                    table_addresses.append(int(em.group(1), 16))
-                elif (em := _ENTRY_ID_ROW.match(line)):
-                    table_ids.append(int(em.group(1)))
-                elif (em := _ENTRY_OWNER_ROW.match(line)):
-                    table_owner_kinds.append(em.group(2).decode())
+                if (am := _TABLE_ARRAY_START.match(line)):
+                    table_array = am.group(1)
+                if table_array == b"genesis_compiled_entry_addresses" and (em := _ENTRY_ADDR_ROW.match(line)):
+                    table_addresses.append(int(em.group(1) or em.group(2), 16))
+                elif table_array == b"genesis_compiled_entry_owner_ids" and (em := _ENTRY_ID_ROW.match(line)):
+                    table_ids.append(int(em.group(1) or em.group(2)))
+                elif table_array == b"genesis_compiled_owners" and (em := _OWNER_TABLE_ROW.match(line)):
+                    table_owner_kinds.append("block" if em.group(1).startswith(b"genesis_block") else "aot")
+                elif table_array == b"genesis_aot_direct_helpers" and _DIRECT_TABLE_ROW.match(line):
+                    counts["direct_helper_rows"] += 1
+                elif table_array == b"genesis_aot_direct_meta" and _DIRECT_TABLE_ROW.match(line):
+                    counts["direct_meta_rows"] += 1
             # Site-local indirect-target membership arrays (possibly multi-line) are target
             # membership data wherever they are emitted, not instruction-lowering body.
             if not in_array and region not in ("entry_table", "owned_literals") \
@@ -199,7 +300,7 @@ def attribute(paths) -> dict:
                 if b"};" in line:
                     in_array = False
                     array_max = max(array_max, cur_elements)
-            if region == "entry_table" and _ENTRY_ADDR_ROW.match(line):
+            if region == "entry_table" and table_array == b"genesis_compiled_entry_addresses" and _ENTRY_ADDR_ROW.match(line):
                 counts["compiled_entry_rows"] += 1
             if region == "aot_function" and _ENTRY_LABEL.match(line):
                 counts["aot_entry_label"] += 1
@@ -217,6 +318,7 @@ def attribute(paths) -> dict:
         "owner_entry_dispatch": ("aot_function.entry_dispatch", "ordinary_block.entry_dispatch"),
         "dispatch_structures": ("dispatch.glue", "entry_table.table_scaffold", "main_glue.glue"),
         "compiled_entry_tables": ("entry_table.compiled_entry_table",),
+        "direct_entry_tables": ("entry_table.direct_entry_metadata",),
         "target_membership_structures": ("aot_function.target_membership", "ordinary_block.target_membership",
                                          "tier1_stop_fn.target_membership", "frontier_stop_fn.target_membership"),
         "provenance": ("provenance_fn.provenance", "route_record_table.provenance", "aot_function.provenance", "ordinary_block.provenance",
@@ -252,6 +354,7 @@ def attribute(paths) -> dict:
                 "indirect_target_array_bytes_in_all_functions": sum(arrays)}
 
     return {
+        "entry_representation": _finish_entry_representation(rep, cells),
         "function_size_distribution": {k: distribution(v, fn_array_bytes[k]) for k, v in fn_sizes.items()},
         "total_bytes": total_bytes,
         "total_lines": total_lines,
@@ -312,6 +415,30 @@ def timed(command: list[str], stdout=None, cwd=None) -> dict:
     return {"returncode": done.returncode, "wall_seconds": round(wall, 2), "peak_rss_bytes": rss, "stderr": text}
 
 
+def shard_entry_fingerprints(shard_dir) -> dict:
+    """Final compiled-address authority = the sorted compiled-entry table (its own `entries` TU)."""
+    t_addr: list[int] = []
+    t_ids: list[int] = []
+    t_kinds: list[str] = []
+    t_array = b""
+    with (pathlib.Path(shard_dir) / "bridge_generated_entries_00.c").open("rb") as handle:
+        for line in handle:
+            if (match := _TABLE_ARRAY_START.match(line)):
+                t_array = match.group(1)
+            if t_array == b"genesis_compiled_entry_addresses" and (match := _ENTRY_ADDR_ROW.match(line)):
+                t_addr.append(int(match.group(1) or match.group(2), 16))
+            elif t_array == b"genesis_compiled_entry_owner_ids" and (match := _ENTRY_ID_ROW.match(line)):
+                t_ids.append(int(match.group(1) or match.group(2)))
+            elif t_array == b"genesis_compiled_owners" and (match := _OWNER_TABLE_ROW.match(line)):
+                t_kinds.append("block" if match.group(1).startswith(b"genesis_block") else "aot")
+    entry_addresses = split_entry_addresses(t_addr, t_ids, t_kinds)
+    return {
+        "final_compiled_entry_address_set": set_fingerprint(entry_addresses["aot"] + entry_addresses["block"]),
+        "aot_owned_entry_address_set": set_fingerprint(entry_addresses["aot"]),
+        "ordinary_block_entry_address_set": set_fingerprint(entry_addresses["block"]),
+    }
+
+
 def measure(args) -> dict:
     out = pathlib.Path(args.out_dir).resolve()
     out.mkdir(parents=True, exist_ok=True)
@@ -334,6 +461,8 @@ def measure(args) -> dict:
     shard_dir = out / "generated"
     shutil.rmtree(shard_dir, ignore_errors=True)
     cmd += ["--generated-c-output", str(src), "--generated-c-shard-dir", str(shard_dir)]
+    if getattr(args, "legacy_aot_entries", False):
+        cmd += ["--legacy-aot-entries"]
     gen = timed(cmd)
     manifest = shard_dir / "bridge_generated.units"
     sharded = manifest.is_file()
@@ -365,23 +494,7 @@ def measure(args) -> dict:
     report["fingerprints"] = {"admitted_immutable_rom_aot_address_set": set_fingerprint(addresses)}
     if sharded:
         # Final compiled-address authority = the sorted compiled-entry table (its own `entries` TU).
-        t_addr: list[int] = []
-        t_ids: list[int] = []
-        t_kinds: list[str] = []
-        with (shard_dir / "bridge_generated_entries_00.c").open("rb") as handle:
-            for line in handle:
-                if (match := _ENTRY_ADDR_ROW.match(line)):
-                    t_addr.append(int(match.group(1), 16))
-                elif (match := _ENTRY_ID_ROW.match(line)):
-                    t_ids.append(int(match.group(1)))
-                elif (match := _ENTRY_OWNER_ROW.match(line)):
-                    t_kinds.append(match.group(2).decode())
-        entry_addresses = split_entry_addresses(t_addr, t_ids, t_kinds)
-        report["fingerprints"].update({
-            "final_compiled_entry_address_set": set_fingerprint(entry_addresses["aot"] + entry_addresses["block"]),
-            "aot_owned_entry_address_set": set_fingerprint(entry_addresses["aot"]),
-            "ordinary_block_entry_address_set": set_fingerprint(entry_addresses["block"]),
-        })
+        report["fingerprints"].update(shard_entry_fingerprints(shard_dir))
     runtime_dir = pathlib.Path(args.product_root) / "platforms" / "genesis" / "runtime"
     flags = [args.cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", args.opt, "-I", str(runtime_dir)]
     robj = out / "runtime.o"
@@ -444,6 +557,8 @@ def main() -> int:
     sub = parser.add_subparsers(dest="cmd", required=True)
     a = sub.add_parser("attribute")
     a.add_argument("file")
+    f = sub.add_parser("fingerprints", help="compiled-address-set fingerprints of an existing sharded output directory")
+    f.add_argument("shard_dir")
     m = sub.add_parser("measure")
     m.add_argument("--segarecomp", required=True)
     m.add_argument("--product-root", default=str(pathlib.Path(__file__).resolve().parents[1]))
@@ -451,12 +566,16 @@ def main() -> int:
     m.add_argument("--opt", default="-O0")
     m.add_argument("--rom", required=True)
     m.add_argument("--external-hints")
+    m.add_argument("--legacy-aot-entries", action="store_true",
+                   help="SEG-036: previous owner/wrapper entry representation (default is the compact direct-entry form)")
     m.add_argument("--out-dir", required=True)
     m.add_argument("--report")
     m.add_argument("--jobs", type=int, default=1, help="concurrent per-TU compiles (sharded output only)")
     args = parser.parse_args()
     if args.cmd == "attribute":
         result = attribute(pathlib.Path(args.file))
+    elif args.cmd == "fingerprints":
+        result = shard_entry_fingerprints(args.shard_dir)
     else:
         result = measure(args)
         result["toolchain"] = toolchain(args.cc)

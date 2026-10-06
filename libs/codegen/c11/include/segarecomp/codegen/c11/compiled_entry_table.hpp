@@ -35,6 +35,10 @@ namespace segarecomp {
 struct CompiledEntryBinding {
   std::uint32_t address = 0U;
   std::string owner_symbol;
+  // SEG-036-T002: a direct entry has no owner. It names the statically selected exact generated helper
+  // (uniform signature, see emit_compiled_entry_table_direct) and its packed provenance word initializer.
+  std::string direct_helper{};
+  std::string direct_provenance{};
 };
 
 struct CompiledEntryTableNames {
@@ -93,6 +97,118 @@ struct CompiledEntryTableNames {
       << "  if (low < sizeof(" << names.addresses << ") / sizeof(" << names.addresses << "[0]) && "
       << names.addresses << "[low] == address) return " << names.owners << "[" << names.owner_ids << "[low]];\n"
       << "  return NULL;\n}\n";
+  return {};
+}
+
+// ---- Direct-entry variant (SEG-036-T002 / ADR 0083) ---------------------------------------------------------------------
+//
+// Same sorted address table and owner-id table; an id below the legacy-owner count names an owner symbol as before, an id at or
+// above it names `id - owner_count` in a table of statically selected exact helper functions. A direct entry's static
+// provenance is one packed 64-bit word of `meta` (aligned with the address table; owner rows are zero):
+//   bits 0-7 instruction length, bits 8-15 / 16-23 the two primary bytes, bits 24-63 the image offset.
+// `genesis_compiled_entry_invoke` rebuilds from it exactly the `GenesisInstructionProvenance` value a legacy entry passed
+// (CPU variant constant, source address = the entry's own PC). Nothing decodes guest code at run time: the generator chose
+// each helper and packed each word; the tables only map a compiled address to that choice.
+//
+// The emitter writes two texts: `header` (shared-header vocabulary: the helper type, extern tables and `static inline`
+// find/invoke, so every translation unit that dispatches inlines the search and the table-indexed call) and `unit` (the
+// table definitions plus the `genesis_compiled_entry_lookup` membership function). The caller places each.
+struct CompiledEntryDirectNames {
+  std::string stop_fn = "genesis_internal_dispatch_inconsistency_stop";
+  std::string helpers = "genesis_aot_direct_helpers";
+  std::string meta = "genesis_aot_direct_meta";
+  std::string count = "genesis_compiled_entry_count";
+  std::string find = "genesis_compiled_entry_find";
+  std::string invoke = "genesis_compiled_entry_invoke";
+};
+
+[[nodiscard]] inline std::string emit_compiled_entry_table_direct(std::ostream &header, std::ostream &unit,
+                                                                  const std::vector<CompiledEntryBinding> &bindings,
+                                                                  const CompiledEntryTableNames &names = {},
+                                                                  const CompiledEntryDirectNames &direct = {}) {
+  if (bindings.empty()) return "/* translation rejected: direct entry table requires entries */\n";
+  for (std::size_t i = 1U; i < bindings.size(); ++i)
+    if (bindings[i - 1U].address >= bindings[i].address)
+      return "/* translation rejected: compiled entry addresses are not strictly ascending */\n";
+  static constexpr char digits[] = "0123456789ABCDEF";
+  const auto hex8 = [](std::uint32_t value) {
+    std::string text = "0x00000000";
+    for (int i = 0; i < 8; ++i) text[static_cast<std::size_t>(9 - i)] = digits[(value >> (4 * i)) & 0xFU];
+    return text;
+  };
+  std::map<std::string_view, std::size_t> owner_id_of;
+  std::map<std::string_view, std::size_t> helper_id_of;
+  std::vector<std::string_view> owners;
+  std::vector<std::string_view> helpers;
+  for (const auto &binding : bindings) {
+    if (!binding.direct_helper.empty() != binding.owner_symbol.empty())
+      return "/* translation rejected: compiled entry must be exactly one of owner or direct helper */\n";
+    if (binding.direct_helper.empty()) {
+      if (owner_id_of.emplace(binding.owner_symbol, owners.size()).second) owners.push_back(binding.owner_symbol);
+    } else {
+      if (binding.direct_provenance.empty())
+        return "/* translation rejected: direct compiled entry lacks a provenance word */\n";
+      if (helper_id_of.emplace(binding.direct_helper, helpers.size()).second) helpers.push_back(binding.direct_helper);
+    }
+  }
+  // C forbids an empty initializer; a build whose entries are all direct keeps one never-selected placeholder owner.
+  const bool placeholder_owner = owners.empty();
+  const std::size_t owner_count = placeholder_owner ? 1U : owners.size();
+  const unsigned bits = compiled_entry_owner_id_bits(owner_count + helpers.size());
+  const std::string id_type = "uint" + std::to_string(bits) + "_t";
+  const std::string owner_bound = std::to_string(owner_count) + "U";
+  header << "typedef GenesisControlTransfer (*GenesisAotDirectHelper)(GenesisRuntime *runtime, const "
+            "GenesisInstructionProvenance *genesis_aot_source, uint32_t genesis_aot_pc);\n"
+         << "#define GENESIS_NO_COMPILED_ENTRY ((size_t)-1)\n"
+         << "extern const uint32_t " << names.addresses << "[];\n"
+         << "extern const " << id_type << " " << names.owner_ids << "[];\n"
+         << "extern const " << names.entry_type << " " << names.owners << "[];\n"
+         << "extern const GenesisAotDirectHelper " << direct.helpers << "[];\n"
+         << "extern const uint64_t " << direct.meta << "[];\n"
+         << "extern const size_t " << direct.count << ";\n"
+         << "static inline size_t " << direct.find << "(uint32_t address) {\n"
+         << "  size_t low = 0U;\n"
+         << "  size_t high = " << direct.count << ";\n"
+         << "  while (low < high) {\n"
+         << "    const size_t middle = low + (high - low) / 2U;\n"
+         << "    if (" << names.addresses << "[middle] < address) low = middle + 1U; else high = middle;\n"
+         << "  }\n"
+         << "  if (low < " << direct.count << " && " << names.addresses << "[low] == address) return low;\n"
+         << "  return GENESIS_NO_COMPILED_ENTRY;\n}\n"
+         << "static inline GenesisControlTransfer " << direct.invoke << "(GenesisRuntime *runtime, size_t index) {\n"
+         << "  const size_t id = " << names.owner_ids << "[index];\n"
+         << "  if (id < " << owner_bound << ") return " << names.owners << "[id](runtime);\n"
+         << "  { const uint64_t meta = " << direct.meta << "[index];\n"
+         << "    const GenesisInstructionProvenance source = {GENESIS_CPU_MC68000, runtime->pc, meta >> 24,\n"
+         << "      {(uint8_t)(meta >> 8), (uint8_t)(meta >> 16)}, (uint32_t)(meta & UINT64_C(0xFF))};\n"
+         << "    return " << direct.helpers << "[id - " << owner_bound << "](runtime, &source, runtime->pc); }\n}\n";
+  // Bare suffixed literals (not UINT*_C macros): a million-row table costs the compiler far less memory.
+  unit << "const uint32_t " << names.addresses << "[] = {\n";
+  for (const auto &binding : bindings) unit << "  " << hex8(binding.address) << "u,\n";
+  unit << "};\nconst " << id_type << " " << names.owner_ids << "[] = {\n";
+  for (const auto &binding : bindings)
+    unit << "  "
+         << std::to_string(binding.direct_helper.empty() ? owner_id_of.at(binding.owner_symbol)
+                                                         : owner_count + helper_id_of.at(binding.direct_helper))
+         << ",\n";
+  unit << "};\nconst " << names.entry_type << " " << names.owners << "[] = {\n";
+  if (placeholder_owner) unit << "  NULL,\n";
+  for (const auto owner : owners) unit << "  " << owner << ",\n";
+  unit << "};\nconst GenesisAotDirectHelper " << direct.helpers << "[] = {\n";
+  for (const auto helper : helpers) unit << "  " << helper << ",\n";
+  unit << "};\nconst uint64_t " << direct.meta << "[] = {\n";
+  for (const auto &binding : bindings)
+    unit << "  " << (binding.direct_helper.empty() ? std::string("0ULL") : binding.direct_provenance) << ",\n";
+  unit << "};\nconst size_t " << direct.count << " = sizeof(" << names.addresses << ") / sizeof(" << names.addresses << "[0]);\n"
+       << "static GenesisControlTransfer genesis_direct_entry_stub(GenesisRuntime *runtime) {\n"
+       << "  const size_t index = " << direct.find << "(runtime->pc);\n"
+       << "  if (index == GENESIS_NO_COMPILED_ENTRY) return " << direct.stop_fn << "(runtime);\n"
+       << "  return " << direct.invoke << "(runtime, index);\n}\n"
+       << names.entry_type << " " << names.lookup << "(uint32_t address) {\n"
+       << "  const size_t index = " << direct.find << "(address);\n"
+       << "  if (index == GENESIS_NO_COMPILED_ENTRY) return NULL;\n"
+       << "  { const size_t id = " << names.owner_ids << "[index];\n"
+       << "    return id < " << owner_bound << " ? " << names.owners << "[id] : genesis_direct_entry_stub; }\n}\n";
   return {};
 }
 

@@ -9792,9 +9792,12 @@ void negate_disp16_aot_admission_and_dispatch_are_bounded() {
 }
 
 // SEG-022-T008: forced-sharded production emission of the dense owner fixture into <dir>.
-int emit_aot_owner_shards(const char *directory) {
+// SEG-036: `legacy` selects the owner/wrapper entry form (the representation this fixture pins); the default is the
+// compact direct-entry form.
+int emit_aot_owner_shards(const char *directory, bool legacy = false) {
   using namespace segarecomp;
   using namespace aot_owner_fixture;
+  const ImmutableRomAotDirectEntriesScope direct_entries(!legacy);
   const auto image = make_image();
   auto program = program_with(image);
   if (!apply_genesis_immutable_rom_aot_range(program, base + 8U, static_cast<std::uint32_t>(base + image.size()))) return 4;
@@ -9811,7 +9814,7 @@ int emit_aot_owner_shards(const char *directory) {
 // SEG-022-T008: single-file (per-entry function) emission of the same fixture: the pre-owner baseline shape.
 // SEG-022-T011: the differential fixture emitted with the factored (default) or unfactored AOT body form,
 // either sharded into <dir> or as the single-file form on stdout.
-int emit_aot_factoring(bool factored, const char *directory) {
+int emit_aot_factoring(bool factored, const char *directory, bool direct = false) {
   using namespace segarecomp;
   using namespace aot_factoring_fixture;
   const auto image = make_image();
@@ -9821,6 +9824,7 @@ int emit_aot_factoring(bool factored, const char *directory) {
   const auto *partial = std::get_if<FrontendPartialProgram>(&result);
   if (partial == nullptr) return 5;
   ImmutableRomAotBodyFactoringScope factoring(factored);
+  ImmutableRomAotDirectEntriesScope direct_entries(direct);
   if (directory == nullptr) {
     const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, '0'));
     if (emitted.starts_with("/* translation rejected:")) return 6;
@@ -9829,7 +9833,7 @@ int emit_aot_factoring(bool factored, const char *directory) {
   }
   TranslationUnitSharder sharder{directory, "bridge_generated", genesis_bridge_translation_unit_families()};
   const auto rejection = emit_m68k_general_startup_bridge_c_to(sharder.stream(), *partial, std::string(64U, '0'));
-  if (!rejection.empty()) return 6;
+  if (!rejection.empty()) { std::cerr << rejection; return 6; }
   return sharder.finish().empty() ? 0 : 7;
 }
 
@@ -30734,12 +30738,16 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::string_view(argv[1]) == "--emit-general-arithmetic-memory-operand-aot")
     return emit_general_arithmetic_memory_operand_aot_source();
   if ((argc == 3 || argc == 4) && std::string_view(argv[1]) == "--emit-aot-factoring" &&
-      (std::string_view(argv[2]) == "factored" || std::string_view(argv[2]) == "unfactored"))
-    return emit_aot_factoring(std::string_view(argv[2]) == "factored", argc == 4 ? argv[3] : nullptr);
+      (std::string_view(argv[2]) == "factored" || std::string_view(argv[2]) == "unfactored" ||
+       std::string_view(argv[2]) == "direct"))
+    return emit_aot_factoring(std::string_view(argv[2]) != "unfactored", argc == 4 ? argv[3] : nullptr,
+                              std::string_view(argv[2]) == "direct");
   if (argc == 2 && std::string_view(argv[1]) == "--emit-aot-owner-single")
     return emit_aot_owner_single_source();
   if (argc == 3 && std::string_view(argv[1]) == "--emit-aot-owner-shards")
     return emit_aot_owner_shards(argv[2]);
+  if (argc == 4 && std::string_view(argv[1]) == "--emit-aot-owner-shards" && std::string_view(argv[3]) == "legacy")
+    return emit_aot_owner_shards(argv[2], true);
   if (argc == 2 && std::string_view(argv[1]) == "--emit-negate-disp16-aot")
     return emit_negate_disp16_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-extended-arithmetic-aot")
