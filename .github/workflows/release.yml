@@ -6,6 +6,7 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+  # (Also triggered by changes to this file, e.g. CI infrastructure fixes.)
   # Packaging changes are exercised (build + package + smoke test, never published) on pull requests.
   pull_request:
     paths:

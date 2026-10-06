@@ -105,9 +105,23 @@ jobs:
       - name: Windows MSVC environment
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
+      - name: Cache vcpkg downloads and binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}/vcpkg-binary-cache
+            ${{ runner.os == 'Windows' && 'C:/vcpkg/downloads' || '/usr/local/share/vcpkg/downloads' }}
+          key: vcpkg-sdl3-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yml', '.github/scripts/vcpkg_gnu_mirror.sh') }}
+          restore-keys: vcpkg-sdl3-${{ runner.os }}-
       - name: Install SDL3 (macOS/Linux/Windows via vcpkg)
         shell: bash
+        env:
+          VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-binary-cache
+          # GNU hosts (ftp.gnu.org / ftpmirror.gnu.org) are occasionally unreachable; try other mirrors first.
+          # vcpkg still verifies every SHA-512 and falls back to the original URL.
+          X_VCPKG_ASSET_SOURCES: "x-script,bash ${{ github.workspace }}/.github/scripts/vcpkg_gnu_mirror.sh {url} {dst}"
         run: |
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
           "$VCPKG_INSTALLATION_ROOT/vcpkg" install sdl3
       - name: Configure with the SDL3 viewer
         shell: bash
