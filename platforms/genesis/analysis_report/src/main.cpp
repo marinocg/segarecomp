@@ -46,7 +46,9 @@ void usage(std::ostream &out) {
          "[--trace-points <path> (SEG-034: private per-point state dump of the final solve)] "
          "[--diagnostic-transparent-handlers (SEG-034: uncredited ablation: unanalysed interrupt handlers are transparent; writes no plan)] "
          "[--inspect-cells <offset-hex:width>[,<offset-hex:width>...] (SEG-038: uncredited report-only mutable-RAM cell domain "
-         "inspection; needs --trace-points and --domains memory|contexts|frames|all; never production authority)]\n";
+         "inspection; needs --trace-points and --domains memory|contexts|frames|all; never production authority)] "
+         "[--inspect-all-cells (SEG-038: uncredited report-only dump of every distinct cell the solve ever tracked, address-"
+         "agnostic; same requirements as --inspect-cells)]\n";
 }
 
 // SEG-038-T001 (report-only, uncredited diagnostic): one requested mutable-RAM cell (physical offset in the work-RAM mirror,
@@ -152,7 +154,7 @@ std::uint64_t peak_rss_bytes() {
 
 int run(int argc, char **argv) {
   std::optional<std::string> rom, digest, private_output, metrics_output, hybrid_plan, trace_points, inspect_cells_spec;
-  bool diagnostic_transparent = false;
+  bool diagnostic_transparent = false, inspect_all_cells = false;
   std::optional<std::uint32_t> entry_address, mapping_base;
   bool reset_entry = false, universe = false, compare = false, domains_given = false, iterations_given = false,
        points_given = false, assume_no_z80 = false;
@@ -169,6 +171,7 @@ int run(int argc, char **argv) {
     else if (option == "--hybrid-plan" && has_value && !hybrid_plan) hybrid_plan = std::string(value);
     else if (option == "--trace-points" && has_value && !trace_points) trace_points = std::string(value);
     else if (option == "--inspect-cells" && has_value && !inspect_cells_spec) inspect_cells_spec = std::string(value);
+    else if (option == "--inspect-all-cells" && !inspect_all_cells) { inspect_all_cells = true; ++index; continue; }
     else if (option == "--diagnostic-transparent-handlers" && !diagnostic_transparent) { diagnostic_transparent = true; ++index; continue; }
     else if (option == "--reset-entry" && !reset_entry) { reset_entry = true; ++index; continue; }
     else if (option == "--universe" && !universe) { universe = true; ++index; continue; }
@@ -228,6 +231,7 @@ int run(int argc, char **argv) {
     inspect_cells = parse_cell_inspections(*inspect_cells_spec);
     if (!inspect_cells || !trace_points || !config.domains.memory || hybrid_plan) { usage(std::cerr); return 2; }
   }
+  if (inspect_all_cells && (!trace_points || !config.domains.memory || hybrid_plan)) { usage(std::cerr); return 2; }
   config.diagnostic_transparent_handlers = diagnostic_transparent;
   config.assume_no_z80_ram_writes = assume_no_z80;
   config.reset_entry = reset_entry;
@@ -345,6 +349,36 @@ int run(int argc, char **argv) {
         sink << "CELL offset=" << std::hex << std::setw(4) << std::setfill('0') << cell.offset << std::dec << " width=" << cell.width
              << " present=" << present << "/" << total << " domain="
              << (collapsed ? std::string("unknown(join_collapsed)") : joined ? joined->data.describe() : std::string("never_present"))
+             << " credited=false\n";
+      }
+    }
+    if (inspect_all_cells) {
+      // SEG-038-T001 (report-only, uncredited, address-agnostic): every distinct mutable-RAM cell the solve ever tracked at
+      // any reached point, joined across every point it appears at. No offset is supplied by the caller or baked into source;
+      // this answers "what, if anything, did the solve ever manage to track" without any title-specific hint.
+      std::map<segarecomp::M68kCell, std::optional<segarecomp::M68kCellValue>> joined_by_cell;
+      std::map<segarecomp::M68kCell, bool> collapsed_by_cell;
+      std::map<segarecomp::M68kCell, std::size_t> present_by_cell;
+      std::size_t total = 0U;
+      for (const auto &[point, state] : report.analysis.solution.in_states) {
+        ++total;
+        for (const auto &[cell, value] : state.memory.cells) {
+          ++present_by_cell[cell];
+          auto &collapsed = collapsed_by_cell[cell];
+          if (collapsed) continue;
+          auto &joined = joined_by_cell[cell];
+          if (!joined) { joined = value; continue; }
+          const auto next = segarecomp::m68k_cell_join(*joined, value, cell.width);
+          if (!next) { collapsed = true; joined.reset(); continue; }
+          joined = next;
+        }
+      }
+      for (const auto &[cell, present] : present_by_cell) {
+        const auto joined = joined_by_cell.at(cell);
+        sink << "ALLCELL offset=" << std::hex << std::setw(4) << std::setfill('0') << cell.offset << std::dec << " width=" << cell.width
+             << " present=" << present << "/" << total << " domain="
+             << (collapsed_by_cell.at(cell) ? std::string("unknown(join_collapsed)")
+                                            : joined ? joined->data.describe() : std::string("never_present"))
              << " credited=false\n";
       }
     }

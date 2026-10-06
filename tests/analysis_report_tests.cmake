@@ -98,6 +98,27 @@ if(CMAKE_SCRIPT_MODE_FILE)
   if(status EQUAL 0)
     message(FATAL_ERROR "the driver accepted --inspect-cells without a memory-tracking domain")
   endif()
+  # SEG-038-T001: --inspect-all-cells is address-agnostic (no offset is supplied); on this fixture (no RAM cell is ever
+  # written) it deterministically emits no ALLCELL line at all, and shares --inspect-cells' requirements.
+  execute_process(COMMAND "${DRIVER}" ${arguments} --domains memory --trace-points "${DIR}/allcells.trace" --inspect-all-cells
+    --private-output "${DIR}/allcells.json" RESULT_VARIABLE status)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "driver inspect-all-cells run failed: ${status}")
+  endif()
+  file(READ "${DIR}/allcells.trace" allcells_trace)
+  if(allcells_trace MATCHES "ALLCELL")
+    message(FATAL_ERROR "inspect-all-cells reported a cell on a fixture that never writes RAM: ${allcells_trace}")
+  endif()
+  execute_process(COMMAND "${DRIVER}" ${arguments} --domains memory --inspect-all-cells --private-output "${DIR}/cells-rejected.json"
+    OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE status)
+  if(status EQUAL 0)
+    message(FATAL_ERROR "the driver accepted --inspect-all-cells without --trace-points")
+  endif()
+  execute_process(COMMAND "${DRIVER}" ${arguments} --domains address --trace-points "${DIR}/cells-rejected.trace" --inspect-all-cells
+    --private-output "${DIR}/cells-rejected.json" OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE status)
+  if(status EQUAL 0)
+    message(FATAL_ERROR "the driver accepted --inspect-all-cells without a memory-tracking domain")
+  endif()
   # SEG-030-T005: the contexts domain (implies memory and address) runs deterministically and reports its bounds and rounds.
   foreach(run 1 2)
     execute_process(COMMAND "${DRIVER}" ${arguments} --domains contexts --private-output "${DIR}/contexts${run}.json"
