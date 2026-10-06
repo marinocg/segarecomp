@@ -94,13 +94,39 @@ decision 11 and ADR 0083's compact broad-AOT representation remain the unmodifie
 
 ## Independent adversarial review
 
-A fresh independent review was run over the final combined head (branch `task/seg-037-t001`, product PR #76). Because the
-entire product diff across all seven checkpoints is exactly one file addition — `docs/decisions/0084-activation-design-for-
-bounded-memory-alias-and-object-provenance.md` — with zero lines of production or test code changed by T002 through T006,
-the review's purpose narrows from "falsify a new mechanism" (there is none) to two sharper questions: (a) is ADR 0084's and
-T002's hard-stop reasoning actually sound, or does it conceal a case that should have rebutted the hard-stop and been
-implemented; and (b) is the exact head clean, green, and mergeable. See the adversarial-validator's verdict recorded below
-once complete.
+A fresh independent review was run over the final combined head (branch `task/seg-037-t001`, product PR #76, head
+`4315f96`). Because the entire product diff across all seven checkpoints is exactly two file additions —
+`docs/decisions/0084-activation-design-for-bounded-memory-alias-and-object-provenance.md` and this ADR — with zero lines of
+production or test code changed by T002 through T006, the review's purpose narrowed from "falsify a new mechanism" (there
+is none) to two sharper questions: (a) is ADR 0084's and T002's hard-stop reasoning actually sound, or does it conceal a
+case that should have rebutted the hard-stop and been implemented; and (b) is the exact head clean, green, and mergeable.
+
+**Verdict: PASS.**
+
+- **Reasoning soundness.** The reviewer independently re-read the real source rather than trusting the ADR/record prose,
+  and confirmed each of the four claimed mechanisms directly: (1) `address_value.hpp` really does define exactly
+  `{image, mutable_ram, io_device}` with the stack explicitly documented as `mutable_ram`, not a separate region, so ADR
+  0084's "Correction" rejecting a region-only bucket is factually grounded, not an invented simplification, and did not
+  overcorrect — a region-only bucket genuinely adds nothing when there is only one trackable region kind; (2)
+  `finite_adapter.cpp`'s `apply_resumptions` really does deliberately set every address register to
+  `Unknown(unknown_input, interrupt_resumption_unproven)` on an unproven resumption, confirming the "deliberate
+  cross-boundary propagation" mechanism is real engineering, not a missed propagation step; (3) `stack_delta_after`
+  really does deliberately exclude `write_status_register`/`LINK`/`UNLK` from delta tracking, with a comment citing the
+  real supervisor/user-stack-pointer hardware fact T002's record relies on; (4) Cool Spot's `context_bound` sites really
+  do trace to the pre-existing, non-raiseable `m68k_context_bound` resource limit (ADR 0079 decision 9/11). Given these
+  four origins are each a point with no established finite/points-to fact to chain from — not a value one arithmetic step
+  short of one — the reviewer found no structural code path by which decision 1's four named forms could narrow any of
+  them, and reported that negative finding plainly rather than manufacturing a defect to seem thorough.
+- **PR/task hygiene.** Diff confirmed as exactly two new files, 394 insertions, 0 deletions; no restricted-path content
+  (no ROM bytes/addresses/sha256/private trace dumps) anywhere in it; exactly one combined implementation issue's scope
+  (SEG-037, pre-authorized as a combined T001-T007 delivery before any implementation began); ADR 0084/0085 mutually
+  consistent with every SEG-037-T00x harness Evidence section. `agent_verify.py control --task SEG-037-T007`: PASS.
+  `gh pr view 76`: `headRefOid` matches local `HEAD` exactly, `mergeable=MERGEABLE`, `mergeStateStatus=CLEAN`,
+  correctly still `isDraft=true` pending this gate.
+- **No defect found.** No regression fixture or mutant is required — there is no new mechanism to regress.
+
+This independent PASS, together with T001/T002/T006's own evidence, is the basis for closing SEG-037-T007 and the SEG-037
+milestone as done.
 
 ## Consequences
 
