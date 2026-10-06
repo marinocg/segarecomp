@@ -107,6 +107,10 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
       - name: Install SDL3 (macOS/Linux/Windows via vcpkg)
         shell: bash
+        env:
+          # GNU hosts (ftp.gnu.org / ftpmirror.gnu.org) are occasionally unreachable; try other mirrors first.
+          # vcpkg still verifies every SHA-512 and falls back to the original URL.
+          X_VCPKG_ASSET_SOURCES: "x-script,bash ${{ github.workspace }}/.github/scripts/vcpkg_gnu_mirror.sh {url} {dst}"
         run: |
           "$VCPKG_INSTALLATION_ROOT/vcpkg" install sdl3
       - name: Configure with the SDL3 viewer
