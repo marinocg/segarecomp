@@ -68,6 +68,36 @@ if(CMAKE_SCRIPT_MODE_FILE)
       endif()
     endforeach()
   endforeach()
+  # SEG-038-T001 (report-only, uncredited diagnostic): --inspect-cells needs --trace-points and a memory-tracking domain, is
+  # deterministic, and reports a requested, never-written fixture cell as never_present with the offset/width it was asked for.
+  execute_process(COMMAND "${DRIVER}" ${arguments} --domains memory --trace-points "${DIR}/cells.trace"
+    --inspect-cells f100:1,0:2 --private-output "${DIR}/cells.json" RESULT_VARIABLE status)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "driver inspect-cells run failed: ${status}")
+  endif()
+  file(READ "${DIR}/cells.trace" cells_trace)
+  if(NOT cells_trace MATCHES "CELL offset=f100 width=1 present=0/[0-9]+ domain=never_present credited=false" OR
+     NOT cells_trace MATCHES "CELL offset=0000 width=2 present=0/[0-9]+ domain=never_present credited=false")
+    message(FATAL_ERROR "inspect-cells did not report the requested never-written cells: ${cells_trace}")
+  endif()
+  foreach(bad "--inspect-cells;zz:1" "--inspect-cells;f100:3" "--inspect-cells;f100" "--inspect-cells;f100:1:2")
+    execute_process(COMMAND "${DRIVER}" ${arguments} --domains memory --trace-points "${DIR}/cells-rejected.trace" ${bad}
+      --private-output "${DIR}/cells-rejected.json" OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE status)
+    if(status EQUAL 0)
+      message(FATAL_ERROR "the driver accepted a malformed --inspect-cells spec: ${bad}")
+    endif()
+  endforeach()
+  # Needs --trace-points and a memory-tracking domain; forbidden together with --hybrid-plan.
+  execute_process(COMMAND "${DRIVER}" ${arguments} --domains memory --inspect-cells f100:1 --private-output "${DIR}/cells-rejected.json"
+    OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE status)
+  if(status EQUAL 0)
+    message(FATAL_ERROR "the driver accepted --inspect-cells without --trace-points")
+  endif()
+  execute_process(COMMAND "${DRIVER}" ${arguments} --domains address --trace-points "${DIR}/cells-rejected.trace"
+    --inspect-cells f100:1 --private-output "${DIR}/cells-rejected.json" OUTPUT_QUIET ERROR_QUIET RESULT_VARIABLE status)
+  if(status EQUAL 0)
+    message(FATAL_ERROR "the driver accepted --inspect-cells without a memory-tracking domain")
+  endif()
   # SEG-030-T005: the contexts domain (implies memory and address) runs deterministically and reports its bounds and rounds.
   foreach(run 1 2)
     execute_process(COMMAND "${DRIVER}" ${arguments} --domains contexts --private-output "${DIR}/contexts${run}.json"

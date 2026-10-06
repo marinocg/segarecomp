@@ -29,6 +29,7 @@
 #include <sys/resource.h>
 #endif
 
+#include "segarecomp/cpu/m68k/analysis/abstract_memory.hpp"
 #include "segarecomp/genesis_analysis_report/hybrid_plan.hpp"
 #include "segarecomp/genesis_analysis_report/report.hpp"
 #include "segarecomp/rom.hpp"
@@ -43,7 +44,47 @@ void usage(std::ostream &out) {
          "<path>] [--max-iterations <n>] [--max-points <n>] [--assume-no-z80-ram-writes (diagnostic premise ablation; needs memory)] "
          "[--hybrid-plan <plan-path> (SEG-031: plan the hybrid admission; forces --domains all)] "
          "[--trace-points <path> (SEG-034: private per-point state dump of the final solve)] "
-         "[--diagnostic-transparent-handlers (SEG-034: uncredited ablation: unanalysed interrupt handlers are transparent; writes no plan)]\n";
+         "[--diagnostic-transparent-handlers (SEG-034: uncredited ablation: unanalysed interrupt handlers are transparent; writes no plan)] "
+         "[--inspect-cells <offset-hex:width>[,<offset-hex:width>...] (SEG-038: uncredited report-only mutable-RAM cell domain "
+         "inspection; needs --trace-points and --domains memory|contexts|frames|all; never production authority)]\n";
+}
+
+// SEG-038-T001 (report-only, uncredited diagnostic): one requested mutable-RAM cell (physical offset in the work-RAM mirror,
+// width 1/2/4 bytes) and the aggregate domain the final solve actually reaches for it, across every point reached by the solver.
+// This never supplies a production fact; it only answers "does this cell have a small, apparently-complete finite domain once the
+// solve is examined directly", independent of any title-specific address knowledge baked into source (the caller supplies the
+// offset at the command line or from an ignored local file; this tool never stores or interprets what the offset means).
+struct CellInspection {
+  std::uint32_t offset{};
+  std::uint32_t width{};
+};
+
+std::optional<std::vector<CellInspection>> parse_cell_inspections(std::string_view text) {
+  std::vector<CellInspection> cells;
+  while (!text.empty()) {
+    const auto comma = text.find(',');
+    const auto entry = text.substr(0, comma);
+    const auto colon = entry.find(':');
+    if (colon == std::string_view::npos) return std::nullopt;
+    const auto offset_text = entry.substr(0, colon);
+    const auto width_text = entry.substr(colon + 1U);
+    if (offset_text.empty() || offset_text.size() > 4U) return std::nullopt;
+    std::uint64_t offset{};
+    const auto offset_result = std::from_chars(offset_text.data(), offset_text.data() + offset_text.size(), offset, 16);
+    if (offset_result.ec != std::errc{} || offset_result.ptr != offset_text.data() + offset_text.size()) return std::nullopt;
+    std::uint64_t width{};
+    const auto width_result = std::from_chars(width_text.data(), width_text.data() + width_text.size(), width, 10);
+    if (width_result.ec != std::errc{} || width_result.ptr != width_text.data() + width_text.size() ||
+        (width != 1U && width != 2U && width != 4U)) {
+      return std::nullopt;
+    }
+    cells.push_back({static_cast<std::uint32_t>(offset), static_cast<std::uint32_t>(width)});
+    if (comma == std::string_view::npos) break;
+    text.remove_prefix(comma + 1U);
+    if (text.empty()) return std::nullopt;
+  }
+  if (cells.empty()) return std::nullopt;
+  return cells;
 }
 
 std::optional<std::uint64_t> parse_hex(std::string_view text, std::size_t width) {
@@ -110,7 +151,7 @@ std::uint64_t peak_rss_bytes() {
 }
 
 int run(int argc, char **argv) {
-  std::optional<std::string> rom, digest, private_output, metrics_output, hybrid_plan, trace_points;
+  std::optional<std::string> rom, digest, private_output, metrics_output, hybrid_plan, trace_points, inspect_cells_spec;
   bool diagnostic_transparent = false;
   std::optional<std::uint32_t> entry_address, mapping_base;
   bool reset_entry = false, universe = false, compare = false, domains_given = false, iterations_given = false,
@@ -127,6 +168,7 @@ int run(int argc, char **argv) {
     else if (option == "--metrics-output" && has_value && !metrics_output) metrics_output = std::string(value);
     else if (option == "--hybrid-plan" && has_value && !hybrid_plan) hybrid_plan = std::string(value);
     else if (option == "--trace-points" && has_value && !trace_points) trace_points = std::string(value);
+    else if (option == "--inspect-cells" && has_value && !inspect_cells_spec) inspect_cells_spec = std::string(value);
     else if (option == "--diagnostic-transparent-handlers" && !diagnostic_transparent) { diagnostic_transparent = true; ++index; continue; }
     else if (option == "--reset-entry" && !reset_entry) { reset_entry = true; ++index; continue; }
     else if (option == "--universe" && !universe) { universe = true; ++index; continue; }
@@ -181,6 +223,11 @@ int run(int argc, char **argv) {
   if (config.domains.memory) config.domains.address = true;
   if (assume_no_z80 && !config.domains.memory) { usage(std::cerr); return 2; }
   if (diagnostic_transparent && !hybrid_plan && !config.domains.frames) { usage(std::cerr); return 2; }
+  std::optional<std::vector<CellInspection>> inspect_cells;
+  if (inspect_cells_spec) {
+    inspect_cells = parse_cell_inspections(*inspect_cells_spec);
+    if (!inspect_cells || !trace_points || !config.domains.memory || hybrid_plan) { usage(std::cerr); return 2; }
+  }
   config.diagnostic_transparent_handlers = diagnostic_transparent;
   config.assume_no_z80_ram_writes = assume_no_z80;
   config.reset_entry = reset_entry;
@@ -272,6 +319,34 @@ int run(int argc, char **argv) {
                 return slots;
               }()
            << '\n';
+    }
+    if (inspect_cells) {
+      // SEG-038-T001 (report-only, uncredited): for each requested mutable-RAM cell, join its value across every point the
+      // solver actually reached and report whether that aggregate domain is a small finite set, Unknown, or never observed.
+      // This never emits a plan and never feeds `apply_resumptions` or any production consumer; it is private-output only.
+      // Reuses the already-open `sink` above (never a second independent stream on the same path: a second handle's
+      // buffered flush at its own destructor can clobber bytes the first handle already wrote past that point).
+      for (const auto &cell : *inspect_cells) {
+        const segarecomp::M68kCell key{segarecomp::M68kRegionKind::mutable_ram, 0U, cell.offset, cell.width};
+        std::optional<segarecomp::M68kCellValue> joined;
+        bool collapsed = false;  // sticky: the aggregate join already exceeded the finite-set bound (treat as Unknown)
+        std::size_t present{}, total{};
+        for (const auto &[point, state] : report.analysis.solution.in_states) {
+          ++total;
+          const auto found = state.memory.cells.find(key);
+          if (found == state.memory.cells.end()) continue;
+          ++present;
+          if (collapsed) continue;
+          if (!joined) { joined = found->second; continue; }
+          const auto next = segarecomp::m68k_cell_join(*joined, found->second, cell.width);
+          if (!next) { collapsed = true; joined.reset(); continue; }
+          joined = next;
+        }
+        sink << "CELL offset=" << std::hex << std::setw(4) << std::setfill('0') << cell.offset << std::dec << " width=" << cell.width
+             << " present=" << present << "/" << total << " domain="
+             << (collapsed ? std::string("unknown(join_collapsed)") : joined ? joined->data.describe() : std::string("never_present"))
+             << " credited=false\n";
+      }
     }
   }
   if (!report.images_valid) {
