@@ -274,10 +274,14 @@ GenesisHybridSite apply_external_fact(GenesisHybridSite site, const GenesisM68kA
   return site;
 }
 
-}  // namespace
-
-GenesisHybridSite genesis_hybrid_container(const GenesisAnalysisReport &report, const GenesisM68kAnalysisImage &image, std::uint32_t pc,
-                                           std::size_t max_entries, const std::optional<GenesisExternalM68kFacts> &external) {
+// The pre-existing (SEG-031/ADR 0080), entirely unmodified-by-SEG-041-T008 containment ladder. Kept as its own
+// internal helper, byte-for-byte identical to the original `genesis_hybrid_container` body, so that every one of
+// its "return site;" early exits remains exactly the text the project's own mutation-testing harness
+// (tests/analysis_mutation_test.py's `hybrid_operand_width_bound`/`hybrid_unknown_provenance_not_widened` mutants)
+// targets -- SEG-041-T008 adds a single, centralized external-fact consultation around the one call site below,
+// never inside this internal ladder.
+GenesisHybridSite compute_internal_hybrid_container(const GenesisAnalysisReport &report, const GenesisM68kAnalysisImage &image,
+                                                     std::uint32_t pc, std::size_t max_entries) {
   GenesisHybridSite site{};
   if (const auto found = report.computed_sites.find(pc); found != report.computed_sites.end()) {
     site.family = found->second.family;
@@ -287,21 +291,21 @@ GenesisHybridSite genesis_hybrid_container(const GenesisAnalysisReport &report, 
     site.reason = reason->second;
   }
   const auto decoded = image.decode(pc);
-  if (!decoded) return site;  // whole_image (defensive: a site's own PC that cannot even decode is not a case external facts can help)
+  if (!decoded) return site;  // whole_image
   const auto &operation = decoded->operation;
   const auto family = m68k_control_successors(operation).dynamic;
   const bool address_form = family == M68kDynamicControlFamily::jump_address_indirect || family == M68kDynamicControlFamily::call_address_indirect ||
                             family == M68kDynamicControlFamily::jump_address_disp16 || family == M68kDynamicControlFamily::call_address_disp16;
-  if (!address_form) return apply_external_fact(site, image, pc, max_entries, external);  // indexed/PC-indexed/returns/unclassified
+  if (!address_form) return site;  // indexed forms, PC-indexed (the operand-width rule is forbidden), returns, unclassified
   // The address register before the instruction, joined over every context and partition of the site.
   const auto value = m68k_query_address_register(report.analysis, pc, operation.source_ea.reg & 7U);
-  if (!value.is_known() || value.width_derived) return apply_external_fact(site, image, pc, max_entries, external);
+  if (!value.is_known() || value.width_derived) return site;
   const auto displacement = operation.source_ea.mode == M68kEaMode::address_disp16
                                 ? static_cast<std::uint32_t>(static_cast<std::int32_t>(operation.source_ea.displacement))
                                 : 0U;
   std::uint64_t count = 0;
   for (const auto &[region, offsets] : value.pairs) count += offsets.count();
-  if (count > max_entries) return apply_external_fact(site, image, pc, max_entries, external);  // over the island bound: whole
+  if (count > max_entries) return site;  // over the island bound: whole
   std::set<std::uint32_t> entries;
   bool whole_image_stride = false;
   for (const auto &[region, offsets] : value.pairs) {
@@ -322,6 +326,18 @@ GenesisHybridSite genesis_hybrid_container(const GenesisAnalysisReport &report, 
   if (std::any_of(site.entries.begin(), site.entries.end(), [&](std::uint32_t target) { return alias_pc(image, target); }))
     site.container = GenesisHybridContainer::materialized_image;
   else site.container = whole_image_stride ? GenesisHybridContainer::executable_image : GenesisHybridContainer::points_to_region;
+  return site;
+}
+
+}  // namespace
+
+GenesisHybridSite genesis_hybrid_container(const GenesisAnalysisReport &report, const GenesisM68kAnalysisImage &image, std::uint32_t pc,
+                                           std::size_t max_entries, const std::optional<GenesisExternalM68kFacts> &external) {
+  auto site = compute_internal_hybrid_container(report, image, pc, max_entries);
+  // SEG-041-T008: external facts are consulted at exactly one centralized point, only for a site the unmodified
+  // internal ladder above already classified `whole_image` -- never overriding an already-sound internally-derived
+  // container (`exact`/`points_to_region`/`executable_image`/`materialized_image` all return above unchanged).
+  if (site.container == GenesisHybridContainer::whole_image) return apply_external_fact(site, image, pc, max_entries, external);
   return site;
 }
 

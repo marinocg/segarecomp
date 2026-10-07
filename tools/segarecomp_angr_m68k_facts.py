@@ -38,18 +38,33 @@ A state that reaches `--target-pc` is removed from further exploration the momen
 value is queried (it is not stepped again) -- this is what lets a self-looping or otherwise
 non-terminating target site be handled soundly without any timing-based heuristic standing in for proof.
 
-## Proof-path opcode-class check (the smallest existing mechanism, not a new certificate framework)
+## Proof-path qualification: RTE is explicitly excluded; general requalification is a named successor gate
 
-Every opcode word any explored state actually fetches is checked against segarecomp's own
-pre-existing, already-validated `tests/fixtures/m68k-legal-forms.json` primary-word partition
-(`legal_user`/`legal_privileged` required; `line_a_reserved_exception`/`line_f_reserved_exception`/
-`illegal_reserved_unassigned`/`illegal_post_68000_encoding` fail the proof). This is a per-opcode-word
-class check reusing existing project data, not a per-instruction structural legality re-derivation (the
-C++ consumer still independently re-verifies every CITED TARGET's full structural legality via
-`image.decode()`; this check additionally screens the PATH angr traversed to reach that conclusion, at
-the coarser word-class granularity SEG-041-T002 already used). Full proof-path structural requalification
-against segarecomp's own decoder is deliberately NOT built here (that would be a new certificate
-framework); it remains a required gate of the real-title successor milestone (SEG-042-T001).
+This tool does NOT independently re-verify that every opcode word angr fetches while exploring a path
+is itself MC68000-legal in general -- an earlier revision attempted a per-opcode-word class screen
+against the project's independent legal-base-MC68000-form baseline dataset (documented under
+`docs/testing/`), but that dataset is deliberately decoupled from every production/tool consumer except
+two specifically whitelisted, already-reviewed ones, enforced by its own dedicated independence test in
+both directions -- this tool reading it at all is correctly treated as a violation of that boundary, not
+an oversight to work around. The production-side authority for this exact question already exists as a
+generation-time primary-word classifier in the M68K CPU library, but it is C++, with no existing CLI
+exposing it to a caller outside the build; wiring a Python caller to it cleanly remains a named,
+required gate of the real-title successor milestone, not attempted here (building one now risked either
+re-violating that independence boundary or growing a new cross-language certificate framework this
+milestone's own non-goals forbid).
+
+**One specific exclusion IS enforced directly, because SEG-041-T002 already named it explicitly and it
+needs no dataset or framework at all**: `RTE` ($4E73) is a legal base-MC68000 opcode (so a general
+word-class screen would not catch it), but SEG-041-T002 demonstrated it has no usable exception-return
+semantics in any available p-code variant -- a proof path that executes `RTE` before reaching
+`--target-pc` would be issuing a semantic-completeness claim about instruction behavior this backend
+was never qualified for, even if the rest of the path is ordinary and ordinary-looking. Every traversed
+opcode word is checked for this single, exact value; encountering it anywhere on an otherwise-feasible
+path invalidates the whole proof (`unsupported_proof_path_rte`), the same way an errored or
+unconstrained path does. This is a single known exclusion, not a general instruction-blacklist
+framework: the qualified subset remains "ordinary control-flow/data semantics, explicitly excluding
+RTE," exactly as SEG-041-T002 scoped it. The C++ consumer's own independent re-verification of every
+CITED TARGET (`image.decode()`/`image.mapped()`, unaffected by this) remains fully in force regardless.
 
 ## Scope and premises (deliberately narrow, deliberately not globally automatic)
 
@@ -79,24 +94,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
-import pathlib
 import struct
 import sys
 
-LEGAL_FORMS_PATH = pathlib.Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "m68k-legal-forms.json"
-LEGAL_CLASSES = {"L", "P"}  # legal_user, legal_privileged (see m68k-legal-forms.json's own legend)
-
-
-def load_legal_word_classifier():
-    data = json.loads(LEGAL_FORMS_PATH.read_text(encoding="utf-8"))
-    rows = data["primary_word_partition"]["rows"]
-
-    def classify(word: int) -> str:
-        hi, lo = (word >> 8) & 0xFF, word & 0xFF
-        return rows[hi][lo]
-
-    return classify
+RTE_OPCODE = 0x4E73  # SEG-041-T002: legal base-MC68000, but no usable exception-return semantics in any
+                      # available p-code variant -- the one proof-path exclusion this tool enforces directly
+                      # (see the module docstring's "Proof-path qualification" section).
 
 
 def explore_exact_target(rom_path, start_pc, target_pc, target_register, ram_premises, max_entries, max_steps):
@@ -106,7 +109,6 @@ def explore_exact_target(rom_path, start_pc, target_pc, target_register, ram_pre
     logging.getLogger("angr").setLevel(logging.ERROR)
     from archinfo import ArchPcode
 
-    classify_word = load_legal_word_classifier()
     rom_bytes = open(rom_path, "rb").read()
 
     arch = ArchPcode("68000:BE:32:CPU32")
@@ -117,9 +119,13 @@ def explore_exact_target(rom_path, start_pc, target_pc, target_register, ram_pre
 
     simgr = proj.factory.simulation_manager(state)
     found = set()
-    visited_pcs = set()
     steps = 0
-    non_concrete = {"hit": False}
+    poison = {"non_concrete": False, "rte": False}
+
+    def fetched_word(pc: int):
+        if pc + 2 > len(rom_bytes):
+            return None  # outside the backing image; nothing this check can classify
+        return struct.unpack(">H", rom_bytes[pc:pc + 2])[0]
 
     def is_query_complete(s) -> bool:
         pc_candidates = s.solver.eval_upto(s.regs.pc, 2)
@@ -130,10 +136,17 @@ def explore_exact_target(rom_path, start_pc, target_pc, target_register, ram_pre
             # feasible PC value here would mean this tool is about to use a single arbitrary `eval()`
             # as if it were proof of a unique target -- flag it and refuse, rather than silently
             # picking one value.
-            non_concrete["hit"] = True
+            poison["non_concrete"] = True
             return False
         pc = pc_candidates[0]
-        visited_pcs.add(pc)
+        if fetched_word(pc) == RTE_OPCODE:
+            # SEG-041-T002: RTE is legal base-MC68000 (so it would pass any general legal-opcode screen)
+            # but has no usable exception-return semantics in any available p-code variant -- a path that
+            # fetches it is issuing a semantic-completeness claim this backend was never qualified for,
+            # even if the rest of the path looks ordinary. Poison immediately, the same way an
+            # errored/unconstrained path does.
+            poison["rte"] = True
+            return False
         return pc == target_pc
 
     while simgr.active and steps < max_steps:
@@ -142,7 +155,9 @@ def explore_exact_target(rom_path, start_pc, target_pc, target_register, ram_pre
         # stepping schedule intact -- this is what makes a self-looping or otherwise non-terminating
         # target site safe without any idle/timing heuristic standing in for proof.
         simgr.move(from_stash="active", to_stash="query_complete", filter_func=is_query_complete)
-        if non_concrete["hit"]:
+        if poison["rte"]:
+            return None, steps, "unsupported_proof_path_rte"
+        if poison["non_concrete"]:
             # Independent review could not make this branch fire under this angr version's actual
             # active-stash semantics (a genuinely non-unique/symbolic PC is routed straight to the
             # `unconstrained` stash before ever appearing in `active`) -- kept as a defensive, fail-closed
@@ -175,14 +190,6 @@ def explore_exact_target(rom_path, start_pc, target_pc, target_register, ram_pre
         return None, steps, "empty_target_set"
     if len(found) > max_entries:
         return None, steps, "entry_bound_exceeded"
-
-    for pc in visited_pcs:
-        if pc + 2 > len(rom_bytes):
-            continue  # outside the backing image; not a traversed opcode fetch this check can classify
-        word = struct.unpack(">H", rom_bytes[pc:pc + 2])[0]
-        word_class = classify_word(word)
-        if word_class not in LEGAL_CLASSES:
-            return None, steps, f"proof_path_opcode_class_{word_class}_at_{pc:06x}"
 
     return sorted(found), steps, "closed"
 

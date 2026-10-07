@@ -183,6 +183,32 @@ def test_d_target_side_loop_terminates(tmpdir: Path) -> None:
     expect(steps < 100, f"D: must terminate quickly without stepping into the target's own self-loop (steps={steps})")
 
 
+def test_f_rte_on_path_poisons_proof(tmpdir: Path) -> None:
+    """SEG-041-T002: RTE is legal base-MC68000 (so a general legal-opcode screen would not catch it) but
+    has no usable exception-return semantics in the available p-code backend -- it lifts to an
+    unconditional jump to address 0, confirmed empirically, not merely asserted. Constructs a path that
+    executes RTE and -- if RTE were (incorrectly) treated as ordinary control transfer -- would reach a
+    normal-looking, decodable target: a `movea.l`+`jmp` sequence placed at address 0 (where RTE's actual
+    p-code lift transfers control), landing on a legal `bra.s *` at 0x300. Without this task's explicit
+    RTE exclusion, this exact fixture soundly (by the algorithm's own other rules) produces `exact
+    {0x300}` -- confirmed by a one-off negative control during development, not shipped here, since the
+    point of this regression is that the REAL producer must refuse it, not that a hypothetically-
+    unguarded one would reach it."""
+    entry = 0x400
+    rte = w(0x4E73)
+    movea_and_jmp = movea_l_imm(0, 0x300) + JMP_A0
+    rom = bytearray(make_rom(rte, entry=entry))
+    rom[0:len(movea_and_jmp)] = movea_and_jmp  # RTE's p-code lift jumps to address 0 in this backend
+    rom[0x300:0x300 + len(BRA_SELF)] = BRA_SELF
+    rom_path = write_rom(tmpdir, bytes(rom))
+    target_pc = len(movea_l_imm(0, 0x300))  # the jmp (A0) instruction, now living at address 0
+
+    targets, steps, reason = producer.explore_exact_target(
+        str(rom_path), entry, target_pc, "a0", [], max_entries=64, max_steps=1000)
+    expect(targets is None, f"F: a path through RTE must never emit a fact (got {targets})")
+    expect(reason == "unsupported_proof_path_rte", f"F: expected unsupported_proof_path_rte, got {reason}")
+
+
 def test_e_entry_bound(tmpdir: Path) -> None:
     # Four feasible, concretely-determined targets (no symbolic branch needed): a small jump table
     # indexed by a bounded, concrete register value, reached via four distinct concrete entries.
@@ -218,6 +244,7 @@ def main() -> int:
         test_c_unresolved_path(tmpdir)
         test_d_target_side_loop_terminates(tmpdir)
         test_e_entry_bound(tmpdir)
+        test_f_rte_on_path_poisons_proof(tmpdir)
     if failures:
         print(f"{failures} failure(s)", file=sys.stderr)
         return 1
