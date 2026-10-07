@@ -143,6 +143,11 @@ def explore_exact_target(rom_path, start_pc, target_pc, target_register, ram_pre
         # target site safe without any idle/timing heuristic standing in for proof.
         simgr.move(from_stash="active", to_stash="query_complete", filter_func=is_query_complete)
         if non_concrete["hit"]:
+            # Independent review could not make this branch fire under this angr version's actual
+            # active-stash semantics (a genuinely non-unique/symbolic PC is routed straight to the
+            # `unconstrained` stash before ever appearing in `active`) -- kept as a defensive, fail-closed
+            # guard rather than removed, since relying on that routing behavior being permanent across
+            # angr versions would itself be an unverified assumption.
             return None, steps, "non_concrete_active_pc"
         for s in simgr.stashes.get("query_complete", []):
             reg = getattr(s.regs, target_register)
@@ -198,7 +203,12 @@ def main() -> int:
                               "the CALLER (not this tool, not segarecomp) vouches that the supplied starting scope "
                               "covers every relevant execution reaching --target-pc")
     parser.add_argument("--output", required=True)
-    parser.add_argument("--max-entries", type=int, default=64)
+    parser.add_argument("--max-entries", type=int, default=64,
+                         help="keep this bounded (default 64): an unusually large value can let the solver spend "
+                              "disproportionate time enumerating a wide/illegal-opcode-influenced value set before "
+                              "this tool still correctly fails closed to entry_bound_exceeded -- a performance "
+                              "footnote raised by independent review, not a soundness gap (it never emits a "
+                              "partial/unsound result either way)")
     parser.add_argument("--max-steps", type=int, default=100_000)
     parser.add_argument("--producer", default="segarecomp-angr-m68k-v1")
     args = parser.parse_args()
