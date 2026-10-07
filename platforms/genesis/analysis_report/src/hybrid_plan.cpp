@@ -337,7 +337,14 @@ GenesisHybridSite genesis_hybrid_container(const GenesisAnalysisReport &report, 
   // SEG-041-T008: external facts are consulted at exactly one centralized point, only for a site the unmodified
   // internal ladder above already classified `whole_image` -- never overriding an already-sound internally-derived
   // container (`exact`/`points_to_region`/`executable_image`/`materialized_image` all return above unchanged).
-  if (site.container == GenesisHybridContainer::whole_image) return apply_external_fact(site, image, pc, max_entries, external);
+  // Independent review (SEG-041-T008 third correction pass): explicitly re-excludes a site whose own PC cannot
+  // decode -- the internal ladder's `!decoded` branch also defaults to `whole_image`, but a site external
+  // analysis cannot even identify as a real instruction is not a case it can soundly help with (matching the
+  // original, reviewed three-call-site version's explicit exclusion of exactly this branch). Unreachable today
+  // (every caller only queries PCs already proven decodable earlier in the same report/round), kept explicit
+  // so a future caller cannot silently reacquire the gap.
+  if (site.container == GenesisHybridContainer::whole_image && image.decode(pc))
+    return apply_external_fact(site, image, pc, max_entries, external);
   return site;
 }
 
