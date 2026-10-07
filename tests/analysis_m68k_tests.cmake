@@ -58,6 +58,18 @@ segarecomp_enable_warnings(analysis_m68k_frames_priority_order_test)
 add_test(NAME analysis_m68k_frames_priority_order_test COMMAND analysis_m68k_frames_priority_order_test)
 set_property(TEST analysis_m68k_frames_priority_order_test APPEND PROPERTY LABELS full fast)
 
+# SEG-040-T003 (report-only): tests the premise of a proposed priority-aware (vector-level-gated) interrupt-
+# preemption mechanism and finds it does not match the actual shared cross-candidate status collapse: an
+# unrelated, non-self-nesting, strictly-lower-level "bad" handler (one that cannot legally preempt "good" at
+# all) with only an undescribed-target write still collaterally blocks "good" via bad's own frame-integrity
+# failure against the SHARED PARENT partition, independent of any preemption relation to good. Never links into
+# production; the production diff of this task is empty.
+add_executable(analysis_m68k_frames_preemption_scope_test analysis_m68k_frames_preemption_scope_test.cpp)
+target_link_libraries(analysis_m68k_frames_preemption_scope_test PRIVATE segarecomp::cpu_m68k_analysis)
+segarecomp_enable_warnings(analysis_m68k_frames_preemption_scope_test)
+add_test(NAME analysis_m68k_frames_preemption_scope_test COMMAND analysis_m68k_frames_preemption_scope_test)
+set_property(TEST analysis_m68k_frames_preemption_scope_test APPEND PROPERTY LABELS full fast)
+
 # SEG-034 (ADR 0081): the generic precision refinements that remove SEG-031 whole-image fallback triggers (spill, ...).
 add_executable(analysis_m68k_precision_test analysis_m68k_precision_test.cpp)
 target_link_libraries(analysis_m68k_precision_test PRIVATE segarecomp::cpu_m68k_analysis)

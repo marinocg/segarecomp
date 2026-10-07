@@ -43,6 +43,22 @@
 // 68K write this producer never credits into the boot window either, but it is still folded into the "running" (never
 // held_in_reset) area-store group so it is never silently dropped relative to the pre-existing, all-partition
 // `observed_store_ranges` aggregate this producer's output replaces in report.cpp.
+//
+// SEG-040-T001 (bounded investigation, no mechanism added): a loop-aware extension of the boot-window image accumulation above
+// was investigated against three authorized commercial Genesis titles using this project's own M68K decoder/analysis tooling
+// (never Ghidra, never a console-behavior oracle). The real upload idiom this producer's Z80-area-store classification reaches
+// in the main flow of every title inspected is NOT a statically-bounded, fixed-trip-count copy loop (e.g. a single
+// `move.b (Ax)+,(Ay)+` / `dbf Dn,loop` pair): it is a general-purpose, data-dependent bitstream (LZ/run-length-style)
+// decompression routine whose per-iteration trip counts are themselves decoded at runtime from compressed immutable cartridge
+// bytes, and which also performs back-reference reads from its own (already-written) destination bytes rather than only
+// linear, monotonic reads from the immutable source image. Soundly crediting that shape would require this producer to encode
+// the cartridge's compression-format semantics as a bounded interpreter -- precisely the "new CPU-adjacent semantics" /
+// "general loop-recognition framework" this producer must not become. A Genesis-generic bounded single-copy-loop recognizer
+// was therefore deliberately NOT implemented here: it would be dead code on every real title measured, and shipping an
+// unexercised mechanism risks silently papering over the real (compression) frontier instead of reporting it honestly. The
+// fail-closed, non-loop-aware image accumulation below (SEG-040-T004) is unchanged and remains exactly as conservative as
+// before; `GenesisZ80BootDerivation::image` stays nullopt for these titles, and the Z80-area store classification still
+// reports every such write under the "running" (not boot-window) or blanket-unknown-target accounting, same as pre-T004.
 
 #include <cstdint>
 #include <optional>
