@@ -173,9 +173,37 @@ save slot; recursive handler/exception interaction; candidate facts escaping fai
 candidate accidentally retained in a later round; state/resource bound producing an optimistic rather
 than `Unknown` result; diagnostic/oracle fact leaking into the credited path.
 
-**Verdict: PASS** (recorded below once the review completes; see the harness SEG-039-T007 record's
-Evidence for the reviewer's findings, the regression-fixture/mutant status for any defect found, and
-the exact-head CI/mergeability confirmation).
+**Verdict: PASS.** The reviewer independently re-derived the shared-partition-poisoning mechanism from
+the unchanged production code (not merely trusting this ADR's prose), confirmed via `FRAMES_DEBUG=1`
+instrumentation that `clobbered`/`async` are keyed by *parent tag* and that an outer, otherwise-
+provable contribution at `parent_tag==0` is always admissible until *any* sibling's defect poisons it
+— and confirmed that combining co-resident vectors into one candidate (the natural "overlooked
+alternative" to probe) does not escape this, because the poisoning is a property of the shared,
+tag-0-keyed `clobbered` map inside the unchanged engine, not of candidate scoping; the plain
+multi-vector fixture already exercises exactly that combined scope and still fails identically. The
+reviewer independently verified `apply_resumptions()` never touches `edge.status` (directly refuting
+the originally-hypothesized self-contamination shape, confirming the ADR's narrower shared-fact
+finding instead), confirmed the SR interrupt-mask encoding (`$2000` = S=1, mask=0, re-opening every
+level), hand-decoded the trickiest mutation encodings against the production decoder, and confirmed
+zero bytes differ under `libs/`/`platforms/`/`apps/`.
+
+One genuine defect was found and fixed, entirely confined to the new test file: mutation 6's
+"corrupted RTE exit" fixture was mis-encoded (a `BEQ.S` guarding branch's PC-relative target landed on
+the following instruction's extension word rather than its opcode) and, once that was fixed, its
+intended "corruption" (`ADDQ.L #2,2(A7)` on the stacked return PC) turned out not to be corruption at
+all — `finite_adapter.cpp`'s `frame_pc_identity`/`frame_pc_fact` tracking deliberately and soundly
+treats an immediate ADDQ/SUBQ adjustment of the stacked PC as an exact-offset resumption. The fixture
+was corrected to use a genuine corruption (storing an Unknown-valued register onto the stacked PC
+slot) with two new regression assertions pinning the branch target and decode-agreement so the defect
+cannot silently recur. This is a test-fixture-local correction, not a change to the shared-partition-
+poisoning finding (independently re-derived by the reviewer from unchanged production code), and does
+not alter the STOP classification.
+
+A fresh full gate was run against the exact corrected head (product branch `task/seg-039-t001`,
+commit `87b8342`): **100% tests passed, 0 tests failed out of 321** (`agent_verify.py full`, no
+authorized local ROM available in this environment, so the Sonic differential-ROM leg was omitted).
+The reviewer agreed the STOP classification (not CONTINUE, not the stronger `STOP
+SELECTIVE-ADMISSION RESEARCH`) is correctly justified by the evidence.
 
 ## Consequences
 
