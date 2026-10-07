@@ -5,6 +5,7 @@ add_library(segarecomp_genesis_analysis_report
   src/hybrid_plan.cpp
   src/image_view.cpp
   src/report.cpp
+  src/z80_boot_image.cpp
   src/z80_ram_write_proof.cpp
 )
 add_library(segarecomp::genesis_analysis_report ALIAS segarecomp_genesis_analysis_report)

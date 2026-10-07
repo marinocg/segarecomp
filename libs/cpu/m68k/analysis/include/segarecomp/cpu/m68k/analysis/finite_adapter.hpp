@@ -617,6 +617,18 @@ public:
   // for an undescribed writer or an untracked address.
   [[nodiscard]] std::vector<std::pair<M68kPointsTo, std::uint32_t>> memory_write_targets(const M68kIrOperation &operation,
                                                                                          const State &in) const;
+  // SEG-040-T004: the exact (precise, non-pointer) value of every memory write of `operation` at a point whose input state is `in`,
+  // next PC `next` and frame `status` -- one entry per entry of `memory_write_targets(operation, in, status)`, in the same order;
+  // nullopt per entry when the write's value is Unknown, a pointer value, or (the whole vector, one entry) an undescribed writer.
+  // Pure query: no state is mutated. Reuses `write_value()`, the same per-write value-resolution helper `transfer_memory` applies
+  // (SEG-030-T004), so a platform-owned producer (the Genesis Z80 boot-image derivation, z80_boot_image.cpp) never re-derives
+  // CPU-level exact-value semantics of its own -- NOTE: unlike `transfer_memory`, this query does not itself re-apply
+  // `transfer_memory`'s two post-`write_value()` filters (the imprecision reset, and `resolve_store_spill`'s spilled-value drop);
+  // a caller whose target region could plausibly land inside a spill boundary must apply those filters itself, or independently
+  // re-check exactness as z80_boot_image.cpp's own `exact_single_address`/`exact_single_value` already do.
+  [[nodiscard]] std::vector<std::optional<M68kCellValue>> memory_write_values(std::uint32_t tag, const M68kIrOperation &operation,
+                                                                              std::uint32_t next, const State &in,
+                                                                              const analysis::FiniteValue &status) const;
   // SEG-030-T004: the value of a memory source operand of `bytes` bytes (immutable image bytes or abstract-memory cells), with the
   // generic reason and CPU sub-reason when Unknown. `tracked` reports whether a work-RAM cell (or an Unknown address) was involved.
   [[nodiscard]] M68kMemoryRead read_memory_operand(const State &in, const M68kEffectiveAddress &ea, std::uint32_t bytes,
@@ -678,6 +690,10 @@ private:
   [[nodiscard]] M68kPointsTo operand_address(const State &in, const M68kEffectiveAddress &ea, std::uint32_t predecrement) const;
   [[nodiscard]] std::optional<M68kCellValue> operand_value(const State &in, const M68kEffectiveAddress &ea, std::uint32_t bytes,
                                                            const M68kMemoryPolicy &policy) const;
+  // SEG-030-T004 (factored out of `transfer_memory` for SEG-040-T004's read-only `memory_write_values` query): the value a memory
+  // write description resolves to, from its input state.
+  [[nodiscard]] std::optional<M68kCellValue> write_value(const M68kMemoryWrite &write, const M68kIrOperation &operation,
+                                                         std::uint32_t next, const State &in, const M68kMemoryPolicy &policy) const;
   [[nodiscard]] M68kMemoryRead read_memory_with(const M68kMemoryPolicy &policy, const State &in, const M68kEffectiveAddress &ea,
                                                 std::uint32_t bytes, bool *tracked) const;
   // SEG-030-T009 correction cycle (frames domain): the register-preservation facts after `operation` (origin and saved cells).

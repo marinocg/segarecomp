@@ -9,6 +9,7 @@
 #include <variant>
 
 #include "segarecomp/cpu/m68k/control_successors.hpp"
+#include "segarecomp/genesis_analysis_report/z80_boot_image.hpp"
 
 namespace segarecomp {
 namespace {
@@ -131,13 +132,17 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
   adapter_config.domains.memory = memory;
   adapter_config.domains.contexts = contexts;
   adapter_config.domains.frames = frames;
+  // SEG-040-T004: the startup entry, and (only when the caller has established the genuine 68000 architectural reset state
+  // there, GenesisAnalysisReportConfig::reset_entry) the Genesis power-on BUSREQ/RESET defaults the Z80 boot-image producer
+  // seeds its one power-on root with (derive_genesis_z80_boot_image, z80_boot_image.hpp).
+  const auto entry = program.startup_ingress ? std::optional<std::uint32_t>(program.startup_ingress->entry.value & bus_mask) : std::nullopt;
+  const std::optional<std::uint32_t> reset_entry_pc = config.reset_entry ? entry : std::nullopt;
   if (memory) {
     // ADR 0079 decision 7. Without the frames domain the SR interrupt mask is not tracked, so an interrupt may be taken at any
     // boundary (handler code included): every work-RAM cell has an asynchronous writer. The handler roots are the machine-delivered
     // vector roots (every root other than the startup entry; the entry too when it is also a vector handler). With the frames
     // domain (SEG-030-T006) the asynchronous writers are derived per partition from the delivered vectors instead.
     adapter_config.memory.interrupts = !frames;
-    const auto entry = program.startup_ingress ? std::optional<std::uint32_t>(program.startup_ingress->entry.value & bus_mask) : std::nullopt;
     for (const auto root : report.roots.roots)
       if (!entry || root != *entry || report.roots.vector_roots == report.roots.roots.size()) adapter_config.memory.handler_roots.push_back(root);
     adapter_config.memory.release_ranges.emplace_back(genesis_z80_control_first, genesis_z80_control_last);
@@ -162,15 +167,43 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
     }
   }
   report.analysis = analyze_m68k_finite_values(*image, report.roots.roots, adapter_config, config.bounds);
+  // SEG-040-T004: when the caller did not already supply a statically known Z80 image set (the production CLI never does), derive
+  // one from the 68K's own boot-time upload -- the M68K store group(s) that write into the Z80 RAM mirror while BUSREQ/RESET
+  // provably hold the Z80 in its never-yet-run ("pristine") power-on state (derive_genesis_z80_boot_image, z80_boot_image.hpp;
+  // root cause of the previous blanket `image_set_unknown`, SEG-040-T001 census). Derived once, from this first completed round:
+  // never re-derived as the external-writer bound below grows (a later round's analysis is not a new ground truth for what the
+  // 68K's own startup code provably uploads).
+  auto effective_z80_images = config.z80_images;
+  if (memory && report.analysis.complete && !effective_z80_images) {
+    const auto boot = derive_genesis_z80_boot_image(*image, adapter_config, report.analysis, reset_entry_pc, report.roots.roots);
+    if (boot.image) {
+      // A credited bound must have shaped the analysis that produced `report.analysis`/D (ADR 0079 decision 7): this first
+      // round necessarily ran with no bound at all (the image did not exist to seed it with, line ~148). Re-run once more
+      // with the newly derived bound -- exactly the round a caller who pre-supplied `config.z80_images` would have gotten
+      // from the start -- so the stabilization loop below can actually credit it instead of trivially exiting on `!used`.
+      effective_z80_images = std::vector<GenesisZ80Image>{*boot.image};
+      adapter_config.memory.external_writer_bound = prove_genesis_z80_ram_writes(effective_z80_images, {}).bound();
+      report.analysis = analyze_m68k_finite_values(*image, report.roots.roots, adapter_config, config.bounds);
+    }
+  }
   if (memory && report.analysis.complete) {
     // SEG-030-T010: the proof over the run's own 68K stores. A credited bound must cover the proof's result (a post-fixed point:
     // the Z80 writes the run assumed include every write the proof derives from that run); otherwise the bound grows (join; `all`
     // is the blanket rule) and the analysis reruns. The Z80 side fixes the ranges, so the bound takes at most three values.
     report.z80_proof_runs = 1U;
     for (;;) {
+      // SEG-040-T004: `held_in_reset` is now a genuine per-store classification (derive_genesis_z80_boot_image), not the
+      // previous hardcoded `false` for every observed store; recomputed every round from the round's own analysis (the same
+      // freshness guarantee `observed_store_ranges` itself already had) so bound growth never hides a real store. A bounded
+      // worklist exhaustion inside the producer (defensive only; never observed for a realistic program) falls back to
+      // exactly the pre-SEG-040-T004 single always-running group.
       const auto &observed = report.analysis.memory;
-      auto proof = prove_genesis_z80_ram_writes(
-          config.z80_images, {GenesisZ80AreaStores{observed.observed_store_ranges, observed.observed_unknown_target_stores, false}});
+      const auto boot = derive_genesis_z80_boot_image(*image, adapter_config, report.analysis, reset_entry_pc, report.roots.roots);
+      const auto area_stores = boot.area_stores.empty()
+                                   ? std::vector<GenesisZ80AreaStores>{
+                                         GenesisZ80AreaStores{observed.observed_store_ranges, observed.observed_unknown_target_stores, false}}
+                                   : boot.area_stores;
+      auto proof = prove_genesis_z80_ram_writes(effective_z80_images, area_stores);
       const auto &used = adapter_config.memory.external_writer_bound;
       const auto derived = proof.bound();
       bool covered = used.has_value() && derived.has_value();

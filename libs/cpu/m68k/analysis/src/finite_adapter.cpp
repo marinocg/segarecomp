@@ -1217,6 +1217,22 @@ M68kPointsTo M68kFiniteAdapter::resolve_store_spill(const M68kPointsTo &target, 
   return M68kPointsTo::of(std::move(pairs), target.width_derived);
 }
 
+std::optional<M68kCellValue> M68kFiniteAdapter::write_value(const M68kMemoryWrite &write, const M68kIrOperation &operation,
+                                                            std::uint32_t next, const State &in, const M68kMemoryPolicy &policy) const {
+  switch (write.value) {
+  case M68kMemoryWrite::Value::unknown: return std::nullopt;
+  case M68kMemoryWrite::Value::zero: return data_value({0U}, false);
+  case M68kMemoryWrite::Value::return_address: return data_value({next}, false);
+  case M68kMemoryWrite::Value::effective_address: {
+    const auto addresses = effective_addresses(in, operation.source_ea, M68kMemoryAccessWidth::long_word);
+    if (!addresses.ok) return std::nullopt;
+    return data_value(std::vector<std::uint64_t>(addresses.values.begin(), addresses.values.end()), addresses.width_derived);
+  }
+  case M68kMemoryWrite::Value::source: return operand_value(in, operation.source_ea, write.span, policy);
+  }
+  return std::nullopt;
+}
+
 void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::uint32_t next, const State &in, State &out,
                                         const M68kMemoryPolicy &policy, const FiniteValue &status) const {
   const auto writes = m68k_memory_writes(operation);
@@ -1237,18 +1253,7 @@ void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::u
   }
   for (std::size_t i = 0; i < writes.writes.size(); ++i) {
     const auto &write = writes.writes[i];
-    std::optional<M68kCellValue> value;
-    switch (write.value) {
-    case M68kMemoryWrite::Value::unknown: break;
-    case M68kMemoryWrite::Value::zero: value = data_value({0U}, false); break;
-    case M68kMemoryWrite::Value::return_address: value = data_value({next}, false); break;
-    case M68kMemoryWrite::Value::effective_address: {
-      const auto addresses = effective_addresses(in, operation.source_ea, M68kMemoryAccessWidth::long_word);
-      if (addresses.ok) value = data_value(std::vector<std::uint64_t>(addresses.values.begin(), addresses.values.end()), addresses.width_derived);
-      break;
-    }
-    case M68kMemoryWrite::Value::source: value = operand_value(in, operation.source_ea, write.span, policy); break;
-    }
+    auto value = write_value(write, operation, next, in, policy);
     if (value && !value->is_pointer() && !value->data.is_precise()) value.reset();
     if (i < spilled.size() && spilled[i]) value.reset();
     m68k_memory_store(out.memory, targets[i].first, targets[i].second, value, policy);
@@ -1257,6 +1262,21 @@ void M68kFiniteAdapter::transfer_memory(const M68kIrOperation &operation, std::u
                             write.value == M68kMemoryWrite::Value::return_address ? std::optional<std::uint32_t>(next) : std::nullopt,
                             i < spilled.size() && spilled[i]);
   }
+}
+
+std::vector<std::optional<M68kCellValue>> M68kFiniteAdapter::memory_write_values(std::uint32_t tag, const M68kIrOperation &operation,
+                                                                                 std::uint32_t next, const State &in,
+                                                                                 const FiniteValue &status) const {
+  (void)status;  // SEG-040-T004: kept for API symmetry with `memory_write_targets`; the value resolution itself never needs the frame.
+  const auto writes = m68k_memory_writes(operation);
+  // `memory_write_targets` emits exactly one (Unknown) entry for an undescribed writer (memory_write_targets_unresolved); keep the
+  // same one-entry correspondence here so callers may zip the two vectors by index.
+  if (!writes.described) return {std::nullopt};
+  const auto &policy = policy_for(tag);
+  std::vector<std::optional<M68kCellValue>> out;
+  out.reserve(writes.writes.size());
+  for (const auto &write : writes.writes) out.push_back(write_value(write, operation, next, in, policy));
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------------------------
