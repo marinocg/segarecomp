@@ -304,6 +304,14 @@ segarecomp_enable_warnings(analysis_hybrid_plan_test)
 add_test(NAME analysis_hybrid_plan_test COMMAND analysis_hybrid_plan_test)
 set_property(TEST analysis_hybrid_plan_test APPEND PROPERTY LABELS full fast)
 
+# SEG-041-T008: the angr-based external-facts producer's own exhaustiveness-proof algorithm (distinct from
+# analysis_hybrid_plan_test's C++ consumer tests, which only exercise the already-written fact-file format).
+# Project-authored synthetic MC68000 bytes; SKIPPED (exit 0) when angr is not importable, matching this suite's
+# existing optional-dependency convention (see m68k_conformance_harness_test's pinned-Musashi handling).
+add_test(NAME segarecomp_angr_m68k_facts_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_angr_m68k_facts_test.py)
+set_property(TEST segarecomp_angr_m68k_facts_test APPEND PROPERTY LABELS full)
+
 # SEG-031 (ADR 0080): the explicit hybrid candidate end to end (planner -> plan -> filtered emission -> strict C11 build and run with
 # an explicit instruction budget), identical behaviour to broad, and the emitter's fail-closed plan validation.
 add_test(NAME genesis_hybrid_admission_generated_test COMMAND ${Python3_EXECUTABLE}
