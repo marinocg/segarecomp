@@ -329,14 +329,12 @@ overstates what was actually measured; "angr failed" is never conflated with "th
 failed"; the Z80-track real-title success, the M68K-track synthetic-only success, and the real-title
 M68K negative result are all stated without minimizing any of them.
 
-A fresh full gate was run against the exact final head (product branch `task/seg-041-t001`, commit
-`c4a097e`): see this ADR's companion harness record (SEG-041-T007/T008) for the exact recorded pass
-count. Includes the new `segarecomp_angr_m68k_facts_test` (gracefully SKIPPED under whatever Python
-interpreter CMake resolves in an environment lacking working angr M68K p-code support, matching this
-suite's existing optional-dependency convention — independently confirmed PASSING for real, including
-the new RTE-exclusion regression, under the interpreter that does have it) and
-`analysis_hybrid_mutation_test`/`m68k_legal_forms_test` (both previously broken by an intermediate
-commit in this same task, both confirmed passing again at this final head).
+A full gate ran against the exact final head (product branch `task/seg-041-t001`, commit
+`f473332`): **100% tests passed, 0 failed, out of 325** (`ctest --preset full`, authorized local Sonic
+1 ROM, ~686s real test time). Includes `segarecomp_angr_m68k_facts_test` (the producer's own
+exhaustiveness/RTE-exclusion regressions, genuinely passing under the interpreter with working angr
+M68K p-code support) and `analysis_hybrid_mutation_test`/`m68k_legal_forms_test` (both previously
+broken by an intermediate commit in this same task, both confirmed passing again at this final head).
 
 ## Consequences
 
