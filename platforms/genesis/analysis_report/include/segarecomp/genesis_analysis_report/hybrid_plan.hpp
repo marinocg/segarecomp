@@ -54,13 +54,21 @@ inline constexpr std::size_t genesis_hybrid_max_island_entries = 65536U;
 // SEG-041-T008: an optional, ROM-bound, fail-closed set of externally-proven dynamic-control-site facts
 // (e.g. from a qualified external analysis backend such as angr -- SEG-041-T002/T003/T004). This is
 // strictly an additional INPUT to the existing, unmodified `genesis_hybrid_container()`/
-// `validate_genesis_hybrid_round()` pure functions: every fact is structurally re-verified against
-// segarecomp's own CPU decoder/legality authority (`image.decode`/`image.mapped`) before it is trusted,
-// exactly like every other admission authority in this file (ADR 0080's "no silently trusted file"
-// invariant). A fact that fails re-verification is discarded for that site, never partially trusted;
-// the site falls back to the existing (angr-free) classification unchanged. External analysis therefore
-// remains an optimization input, never a correctness authority: omitting this struct entirely (the
-// default, `std::nullopt`) reproduces today's unmodified broad/hybrid behavior exactly.
+// `validate_genesis_hybrid_round()` pure functions. Two distinct trust tiers (SEG-041-T001's design):
+//   - structurally re-verifiable: every cited target's own CPU legality/mapping is independently
+//     re-derived against segarecomp's own decoder (`image.decode`/`image.mapped`) before it is trusted,
+//     exactly like every other admission authority in this file (ADR 0080's "no silently trusted file"
+//     invariant) -- fully mitigated; a fact with even one entry that fails this check is discarded in
+//     its entirety, never partially trusted, and the site falls back to the existing (angr-free)
+//     classification unchanged.
+//   - semantic completeness: that the supplied target/entry set is actually EXHAUSTIVE (that no other
+//     feasible target exists) is NOT independently re-derived here -- it is accepted under the explicit,
+//     ROM-bound, producer-identified contract this struct itself carries, exactly as SEG-041-T001
+//     designed. An incomplete-but-individually-legal fact (the external backend proved a real, legal
+//     target yet missed another real, legal one) is a producer-trust risk this structural check cannot
+//     catch; it is an accepted, documented risk of consuming external analysis at all, not a defect in
+//     this re-verification gate. Omitting this struct entirely (the default, `std::nullopt`) reproduces
+//     today's unmodified broad/hybrid behavior exactly and carries neither risk.
 struct GenesisExternalM68kFact {
   std::uint32_t pc{};                  // the dynamic-control site's own PC
   std::vector<std::uint32_t> entries;  // candidate targets (exact) or island members (contained); sorted, deduped by the parser

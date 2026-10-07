@@ -406,6 +406,27 @@ void external_fact_discarded_when_unverifiable() {
   }
 }
 
+// An otherwise-well-formed fact whose entry count exceeds the configured island bound is discarded in
+// its entirety, exactly like an internally-derived points-to set over the same bound (`count > max_entries`).
+void external_fact_discarded_over_entry_bound() {
+  Image image;
+  Asm{image, entry}.movea_l_ram(0, 0xF000U).jmp_an(0);
+  Asm{image, 0x300U}.bra_self();
+  Asm{image, 0x400U}.bra_self();
+  const auto program = program_of(image);
+  GenesisHybridPlanConfig config{};
+  config.max_island_entries = 1U;  // one legal entry alone would fit; two cannot
+  GenesisExternalM68kFacts facts;
+  facts.rom_sha256 = std::string(64U, 'a');
+  facts.producer = "test-producer-bound";
+  facts.facts.push_back(GenesisExternalM68kFact{entry + 4U, {0x300U, 0x400U}, true});
+  config.external_m68k_facts = facts;
+  const auto plan = plan_of(*program, config);
+  expect(plan.outcome == GenesisHybridOutcome::broad_whole_image && plan.admitted == plan.universe,
+         "external discarded (bound): a fact over the configured island-entry bound is never partially trusted");
+  expect(plan.external_facts_applied == 0U, "external discarded (bound): zero sites credited");
+}
+
 // The validator must consult the SAME external facts the plan was built with; omitting them on a re-check correctly rejects a
 // configuration the validator can no longer independently re-derive (the existing "freshly recompute and compare" property,
 // now also covering the external input -- it is never blindly trusted just because `island_entries` already names it).
@@ -602,6 +623,7 @@ int main(int argc, char **argv) {
   external_fact_exact_resolves_unknown_site();
   external_fact_contained_resolves_unknown_site();
   external_fact_discarded_when_unverifiable();
+  external_fact_discarded_over_entry_bound();
   external_fact_validator_requires_matching_facts();
   external_facts_parser();
   width_rule();

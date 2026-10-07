@@ -506,6 +506,10 @@ std::string format_genesis_hybrid_plan_aggregate(const GenesisHybridPlan &plan) 
   const std::size_t total = hybrid ? plan.admitted.size() : broad_u;
   const std::size_t fallback = total >= plan.precise_d_in_universe ? total - plan.precise_d_in_universe : 0U;
   std::array<std::size_t, genesis_hybrid_container_count> containers{};
+  // The `exact` bucket is intentionally dual-sourced: it starts at `resolved_sites` (D's own exact computed-site resolutions,
+  // never uncovered) and the loop below additionally credits any UNCOVERED site resolved via an external exact fact
+  // (SEG-041-T008). Both are genuinely "exact," so sharing one bucket is not a soundness concern, but a reader who needs to
+  // separate the two should use `external_facts_applied` (uncovered sites specifically) rather than this aggregate alone.
   containers[static_cast<std::size_t>(GenesisHybridContainer::exact)] = plan.resolved_sites;
   std::size_t islands = 0, whole = 0;
   // Fallback attribution by generic reason (family / generic reason / CPU sub-reason / container): sites and island entries.
