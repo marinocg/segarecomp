@@ -47,6 +47,9 @@ void usage(std::ostream &out) {
          "[--diagnostic-transparent-handlers (SEG-034: uncredited ablation: unanalysed interrupt handlers are transparent; writes no plan)] "
          "[--inspect-cells <offset-hex:width>[,<offset-hex:width>...] (SEG-038: uncredited report-only mutable-RAM cell domain "
          "inspection; needs --trace-points and --domains memory|contexts|frames|all; never production authority)] "
+         "[--z80-image <path> (SEG-041-T003: report-only, caller-supplied Z80 RAM image bytes from $0000, at most 8 KiB; forces "
+         "--domains memory or wider; feeds the existing config.z80_images input the production driver already consumes when "
+         "non-nullopt, exactly as a same-process derived image would -- never a build/runtime dependency, diagnostic only)] "
          "[--inspect-all-cells (SEG-038: uncredited report-only dump of every distinct cell the solve ever tracked, address-"
          "agnostic; same requirements as --inspect-cells)]\n";
 }
@@ -153,7 +156,7 @@ std::uint64_t peak_rss_bytes() {
 }
 
 int run(int argc, char **argv) {
-  std::optional<std::string> rom, digest, private_output, metrics_output, hybrid_plan, trace_points, inspect_cells_spec;
+  std::optional<std::string> rom, digest, private_output, metrics_output, hybrid_plan, trace_points, inspect_cells_spec, z80_image;
   bool diagnostic_transparent = false, inspect_all_cells = false;
   std::optional<std::uint32_t> entry_address, mapping_base;
   bool reset_entry = false, universe = false, compare = false, domains_given = false, iterations_given = false,
@@ -171,6 +174,7 @@ int run(int argc, char **argv) {
     else if (option == "--hybrid-plan" && has_value && !hybrid_plan) hybrid_plan = std::string(value);
     else if (option == "--trace-points" && has_value && !trace_points) trace_points = std::string(value);
     else if (option == "--inspect-cells" && has_value && !inspect_cells_spec) inspect_cells_spec = std::string(value);
+    else if (option == "--z80-image" && has_value && !z80_image) z80_image = std::string(value);
     else if (option == "--inspect-all-cells" && !inspect_all_cells) { inspect_all_cells = true; ++index; continue; }
     else if (option == "--diagnostic-transparent-handlers" && !diagnostic_transparent) { diagnostic_transparent = true; ++index; continue; }
     else if (option == "--reset-entry" && !reset_entry) { reset_entry = true; ++index; continue; }
@@ -225,6 +229,7 @@ int run(int argc, char **argv) {
   if (config.domains.contexts) config.domains.memory = true;
   if (config.domains.memory) config.domains.address = true;
   if (assume_no_z80 && !config.domains.memory) { usage(std::cerr); return 2; }
+  if (z80_image && (!config.domains.memory || assume_no_z80)) { usage(std::cerr); return 2; }
   if (diagnostic_transparent && !hybrid_plan && !config.domains.frames) { usage(std::cerr); return 2; }
   std::optional<std::vector<CellInspection>> inspect_cells;
   if (inspect_cells_spec) {
@@ -247,6 +252,15 @@ int run(int argc, char **argv) {
   if (segarecomp::sha256_hex(bytes) != expected) {
     std::cerr << "segarecomp-genesis-analysis-report: image digest mismatch\n";
     return 2;
+  }
+  if (z80_image) {
+    const auto z80_bytes = read_bounded_image(*z80_image);
+    if (!z80_bytes || z80_bytes->size() > 0x2000U) {
+      std::cerr << "segarecomp-genesis-analysis-report: invalid --z80-image (missing, unreadable or larger than 8 KiB)\n";
+      return 2;
+    }
+    config.z80_images = std::vector<segarecomp::GenesisZ80Image>{
+        segarecomp::GenesisZ80Image{*z80_bytes, "external_concrete_execution"}};
   }
   std::optional<segarecomp::FrontendProgram> program;
   if (reset_entry) {
