@@ -48,6 +48,16 @@ segarecomp_enable_warnings(analysis_m68k_frames_circularity_test)
 add_test(NAME analysis_m68k_frames_circularity_test COMMAND analysis_m68k_frames_circularity_test)
 set_property(TEST analysis_m68k_frames_circularity_test APPEND PROPERTY LABELS full fast)
 
+# SEG-040-T002 (ADR 0087 follow-up, report-only): formalizes, against the SEG-039 collateral-poisoning fixture family, that
+# the shared cross-candidate status/clobbered fact ADR 0087 identified is priority-order-independent (reproduces identically
+# whether the self-nesting vector's own level is numerically above or below the unrelated sibling's). Never links into
+# production; the production diff of this task is empty.
+add_executable(analysis_m68k_frames_priority_order_test analysis_m68k_frames_priority_order_test.cpp)
+target_link_libraries(analysis_m68k_frames_priority_order_test PRIVATE segarecomp::cpu_m68k_analysis)
+segarecomp_enable_warnings(analysis_m68k_frames_priority_order_test)
+add_test(NAME analysis_m68k_frames_priority_order_test COMMAND analysis_m68k_frames_priority_order_test)
+set_property(TEST analysis_m68k_frames_priority_order_test APPEND PROPERTY LABELS full fast)
+
 # SEG-034 (ADR 0081): the generic precision refinements that remove SEG-031 whole-image fallback triggers (spill, ...).
 add_executable(analysis_m68k_precision_test analysis_m68k_precision_test.cpp)
 target_link_libraries(analysis_m68k_precision_test PRIVATE segarecomp::cpu_m68k_analysis)
