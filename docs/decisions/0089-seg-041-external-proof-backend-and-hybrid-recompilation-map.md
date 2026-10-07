@@ -1,225 +1,234 @@
 # ADR 0089: SEG-041 External Proof Backend and Hybrid Selective-AOT Recompilation Map
 
-- Status: Accepted (decision: **REJECT ANGR / RETAIN MAP ARCHITECTURE**. angr was never obtained or
-  executed in this delivery's execution environment — every sanctioned package channel failed for
-  reasons entirely unrelated to angr's own suitability (a broken authentication token for the
-  configured internal mirror, and a sandboxed network path whose TLS interception is trusted by the
-  system/`curl` trust store but not by Python's `certifi` CA bundle). No MC68000 or Z80 semantic
-  qualification was ever reached. The tool-neutral recomp-map/island architecture designed in
-  SEG-041-T001 reuses the existing `GenesisHybridAdmissionPlan`/`GenesisHybridPlan` machinery, is
-  self-consistent on paper, and is **not implemented** in this delivery because the implementation
-  gate it was explicitly designed to protect (qualified backend plus demonstrated leverage) was never
-  met. Global broad whole-ROM AOT (ADR 0083) is unchanged and, as this entire delivery empirically
-  demonstrates, requires zero external tooling.)
-- Date: 2026-10-07
-- Task: SEG-041-T001, SEG-041-T002, SEG-041-T007 (one combined, report-only delivery; T003/T004/T005/T006
-  cancelled transitively by T002's own pre-registered activation gate and never ran).
-- Related, unchanged: ADR 0080 (SEG-031 hybrid admission planner and its material-benefit adoption
-  threshold — not reached, not moved), ADR 0083 (SEG-036, the current sole production strategy),
-  ADR 0088 (SEG-040, the direct predecessor whose evidence this milestone treats as established: both
-  the M68K interrupt-composition and Z80-interference tracks reached classification C — compositional
-  approach insufficient — motivating this milestone's question of whether an external, mature,
-  path-sensitive engine could do what segarecomp's own bounded analyses could not).
+- Status: Accepted (decision: **ADOPT HYBRID RECOMP-MAP / ANGR EXPERIMENTAL**. angr, once actually
+  obtainable, proved genuinely leverageable: a real Z80 boot image was recovered from a real title by
+  concretely executing the guest's own data-dependent decompression routine, independently certified
+  byte-exact against the project's pinned Musashi oracle, and fed through the existing production
+  `z80_images` consumer with a measured effect (one of two independent blocking reasons resolved). A
+  hand-built synthetic also demonstrated genuine exact-target and containment proof capability for
+  ordinary M68K computed control flow, including correct detection of a deliberately introduced
+  containment escape. angr's M68K support is real but uneven: no available p-code variant is bit-exact
+  MC68000 (segarecomp's own CPU-legality authority remains mandatory and was exercised, not assumed),
+  and angr's RTE lift carries no usable exception-return semantics at all — a hard, specific, named
+  blocker for the interrupt-frame questions SEG-038/039/040's M68K track most needed. The full
+  tool-neutral recomp-map schema and SEG-031 island-consumer integration (SEG-041-T001's design) remain
+  unimplemented as production code; what shipped is a narrower, real, additive consumer of one existing
+  input. Status is EXPERIMENTAL, not full production adoption, pending SEG-041-T008.)
+- Date: 2026-10-07 (first pass, environment-unavailable REJECTED; same-day correction after the operator
+  fixed the execution environment: angr genuinely qualifies and was exercised for real)
+- Task: SEG-041-T001..T008 (one combined, mixed report-and-production delivery; T002's verdict was
+  corrected in place after an environment fix, which reopened T003-T006 from their original transitive
+  cancellation; T008 is a newly-created, bounded continuation successor for the deferred M68K-track
+  production integration).
+- Related, unchanged: ADR 0080 (SEG-031 hybrid admission planner; adoption threshold not reached, not
+  moved), ADR 0083 (SEG-036, the current sole production strategy for every title not touched by this
+  milestone's narrow Z80-image consumer change), ADR 0088 (SEG-040, the direct predecessor whose Z80-
+  track finding — a data-dependent decompression routine, not a statically-bounded copy loop — this
+  milestone directly resolves via external concrete execution rather than hand-modeling).
 
 ## Question
 
-ADR 0088 (SEG-040) established that two materially different compositional refinements of segarecomp's
-own abstract-interpretation engine could not make any measured real title's hybrid plan non-broad, and
-located the Z80 side's remaining wall precisely as a **data-dependent cartridge-compression routine**
-over immutable ROM data — exactly the shape a mature concrete/path-sensitive execution engine might have
-leverage on. SEG-041 asked: can segarecomp move this class of reasoning out of its own core and into an
-optional external backend (beginning with angr), producing a tool-neutral, ROM-bound recompilation map
-that the existing SEG-031 planner can consume as selective code plus bounded broad-AOT islands, while
-leaving global broad AOT as the unconditional, tooling-free correctness fallback?
+ADR 0088 (SEG-040) located the Z80 side's remaining wall precisely as a data-dependent cartridge-
+compression routine over immutable ROM data, and declined to hand-model it. SEG-041 asked: can an
+optional external backend (beginning with angr) do what segarecomp's own bounded analyses could not,
+producing facts the existing SEG-031 planner can consume, while global broad AOT remains the
+unconditional, tooling-free correctness fallback?
 
 ## Outcome
 
 ### SEG-041-T001 (done): hybrid recomp-map architecture and trust contract — CONTINUE
 
-A census of the existing production machinery found that **the island and trust/versioning
-abstractions this milestone's brief calls for are not new**: `GenesisHybridAdmissionPlan`
-(`platforms/genesis/machine/include/segarecomp/machine/genesis/hybrid_admission.hpp`, ADR 0080)
-already defines a versioned, ROM-bound, fail-closed, consumer-validated artifact schema
-(`segarecomp.m68k_hybrid_admission_plan.v1`); `GenesisHybridPlan`/`GenesisHybridSite`/
-`GenesisHybridContainer` (SEG-031) already define the exact island/widening-ladder/closure semantics
-the brief describes, with an existing independent containment validator
-(`validate_genesis_hybrid_round`); and the existing Z80 write-proof
-(`platforms/genesis/analysis_report/include/segarecomp/genesis_analysis_report/z80_ram_write_proof.hpp`,
-SEG-030-T010/SEG-040-T004) already accepts an externally-supplied Z80 image set through the identical
-`nullopt -> image_set_unknown -> all` fail-closed contract a recomp-map-supplied image would use. The
-proposed `segarecomp-recomp-map-v1` schema, completeness classes (`complete_selective`/
-`complete_hybrid`/`incomplete`), trust-tier split (structurally re-verifiable vs. semantic-completeness
-facts), fallback table (`broad`/`hybrid`/`auto`), and cache identity were designed as an extension of
-these existing types, not a parallel system, and do not resemble a general-purpose decompiler IR.
-**Decision: CONTINUE to T002**, with every later child's activation threshold pre-registered verbatim
-in the SEG-041-T001 harness record before any further work began.
+Unchanged from the first pass: the proposed `segarecomp-recomp-map-v1` architecture (map schema,
+completeness classes, island semantics, trust tiers, fallback table, cache identity, producer/consumer
+contract) was designed as a conservative extension of the already-production `GenesisHybridAdmissionPlan`/
+`GenesisHybridPlan` types, not a parallel system, and does not resemble a general-purpose decompiler IR.
 
-### SEG-041-T002 (done): angr/p-code backend qualification — REJECTED (environment-unavailable)
+### SEG-041-T002 (done): angr/p-code backend qualification — corrected to `PARTIAL`
 
-Before any semantic comparison could be attempted, this task first had to confirm the backend was
-obtainable in the execution environment. It was not, through any sanctioned channel:
+The original pass recorded `REJECTED` on pure environment-availability grounds (angr unobtainable under
+the session's original interpreter). The operator subsequently fixed the execution environment (a
+different `asdf`-managed Python with angr pre-installed, and working package-mirror credentials); this
+task was reopened and genuinely re-qualified rather than left on a stale environment finding, per the
+operator's explicit instruction not to cancel work solely for a since-resolved environment gap.
 
-- **Local availability**: no `angr`/`pypcode` installation or vendored copy exists anywhere in either
-  repository.
-- **Configured package mirror**: the environment's authenticated internal Artifactory index returns
-  `401 Error, Credentials not correct` for every package lookup (confirmed even for packages already
-  locally installed, such as `requests`) — a broken/expired token for this index in this environment,
-  not evidence the mirror lacks angr specifically.
-- **Direct PyPI**: reachable at the TCP/TLS layer (`curl` succeeds, `200`), but every `pip install`
-  attempt against it — including inside a fresh, isolated `venv`, and including with `certifi`'s CA
-  bundle passed explicitly via `--cert` — fails with `SSLCertVerificationError: unable to get local
-  issuer certificate`. This is consistent with a sandboxed network path performing TLS interception
-  whose certificate the system/`curl` trust store accepts but Python's bundled `certifi` list does not;
-  no corporate root CA file usable to close that gap was found on disk.
-- **Deliberately not attempted**: disabling TLS certificate verification to force-install a large,
-  security-sensitive symbolic-execution toolchain (`claripy`/`cle`/`archinfo`/`pyvex`/`unicorn`/
-  `z3-solver` and native extensions) from an unauthenticated channel. That is a security-control bypass,
-  not a legitimate qualification step.
-- An existing local Ghidra integration (`tools/ghidra.py`, diagnostic-only elsewhere in this harness)
-  does not substitute for angr's concrete/path-sensitive symbolic-execution engine, so its availability
-  does not change this verdict.
+Real findings, not hypothetical: angr's ordinary `archinfo` architecture path does not support M68K at
+all; the working path is the p-code-native `ArchPcode` class. Exactly five 68000-family p-code
+variants exist (`default`/labelled 68040, `MC68030`, `MC68020`, `Coldfire`, `CPU32`) and **none is
+labelled or behaves as plain MC68000**. Decoding segarecomp's own pre-existing, already-validated
+65,536-word MC68000 legality partition against all five variants found concrete, reproducible over-
+acceptance: `default`/`MC68030`/`MC68020`/`Coldfire` all decode genuine 68010+/68020+-only forms
+(`cmp2.l`, `cas.w`, `moves.l`, long-operand `chk.l`, `pack`, bitfield ops) as valid where real MC68000
+silicon would take an illegal-instruction trap; `Coldfire` additionally repurposes the reserved Line-A
+opcode space for real, different Coldfire-only instructions; `MC68020`/`MC68030` repurpose reserved
+Line-F space for real MC68881/68882 FPU instructions. `CPU32` has the narrowest (not zero) false-
+acceptance footprint across all three reserved classes sampled. **Decisive, specific finding**: `RTE`
+lifts, under every available variant, to a bare "return to address 0" with no SR pop, no PC pop, no
+frame-format read at all — not an imprecise exception-return model, an absent one; angr itself carries
+no M68K-specific `SimProcedure` to patch this. Separately, full angr symbolic execution over M68K via
+`ArchPcode` was confirmed genuinely working end-to-end (project construction, blank-state symbolic
+bitvector creation, constraint solving, and one-instruction stepping all succeeded) despite this angr
+release vendoring its own internal `claripy` reimplementation rather than shipping it as a separate
+top-level package, and despite `unicorn` concrete-execution acceleration being unavailable (an optional
+speed feature only). **Verdict: `PARTIAL`** — qualified for ordinary (non-RTE) M68K control-flow and
+data semantics; explicitly not usable for RTE-centric/exception-frame semantic-completeness facts. This
+revised verdict meets SEG-041-T001's pre-registered gate for T003/T004 (QUALIFIED or PARTIAL for a
+backend able to concretely execute real guest M68K code), reopening both from their original transitive
+cancellation.
 
-**Verdict: `REJECTED` — environment-unavailable ground.** This is explicitly **not** a finding about
-angr's MC68000 or Z80 semantic fidelity; that comparison was never reached. Per SEG-041-T001's
-pre-registered gate, SEG-041-T003 and SEG-041-T004 (both of which require a backend able to concretely
-execute real guest M68K code) were cancelled transitively with this exact reason; SEG-041-T005's own
-activation gate ("T002 qualified AND >=1 of T003/T004 leverage") was consequently also unmet, cancelling
-it in turn; SEG-041-T006 depends on T005 and was cancelled transitively as well.
+### SEG-041-T003 (done): Z80 boot-image reconstruction — primary success condition MET
 
-### SEG-041-T003 (cancelled): activation condition unmet
+Reopened and genuinely executed. Using segarecomp's own existing production report tool to re-confirm
+the unchanged ADR 0088 baseline first, a short structural scan located the one M68K subroutine Sonic 1
+calls, while the Z80 is held in `BUSREQ`+`RESET`, that reads from immutable ROM data and writes to the
+Z80 RAM base — exactly the data-dependent decompressor ADR 0088 named without an address. Concretely
+executing that routine with `angr`'s qualified p-code engine (bounded, 60,417 steps) produced a
+complete, unique 7,110-byte decompressed image whose leading bytes are recognizably real, well-formed
+Z80 startup code (interrupt-disable, stack/index-register initialization, bank-register programming).
 
-Depended on SEG-041-T002 qualifying a backend able to concretely execute real guest M68K code. T002
-recorded `REJECTED`; T003 never ran. No manual reimplementation of cartridge-compression reconstruction
-was attempted (explicitly out of this milestone's scope). The underlying hypothesis — that concrete/
-path-sensitive execution of the real guest decompressor could recover a unique Z80 boot image where
-segarecomp's own abstract interpreter cannot — is **not disproven**, only untested in this environment.
+**The decisive verification step**: re-executing the identical routine and inputs through the project's
+own pinned Musashi oracle (genuine `MC68000` CPU type, via a new, small, non-production blob-memory
+harness reusing the vendored Musashi sources unmodified) reached the identical return point and produced
+a **byte-identical (SHA-256-equal) 7,110-byte image** — independent cross-validation against an
+authority genuinely outside the angr/pyvex/p-code stack, not a self-consistency check. Separately,
+every opcode word angr actually executed (65 distinct addresses) was independently re-verified against
+segarecomp's own MC68000 legality partition: **100% legal**, confirming this specific routine does not
+exercise any of T002's found over-acceptance classes. Feeding the recovered, certified image into the
+existing (unmodified) `z80_images` production input resolved `image_set_unknown` and let the Z80-side
+analysis reach 104 real instructions; the overall `z80_ram_write_proof` bound remains `all` because a
+second, independent, already-present class of uncertainty (386 M68K-side unknown-target stores into the
+Z80 bus area, numerically unchanged before/after, most plausibly ordinary runtime M68K-to-Z80
+communication) is untouched by this task — an honest, measured, partial effect, not a forced "none."
 
-### SEG-041-T004 (cancelled): activation condition unmet
+### SEG-041-T004 (done): M68K exact-target and containment proof experiment — PASS
 
-Depended on the same T002 gate. T002 recorded `REJECTED`; T004 never ran. The mandatory containment
-synthetic (selective region A -> difficult dynamic site -> contained island I -> known exits ->
-selective region B, required to widen-or-report-incomplete under mutation rather than silently retain a
-stale island) was designed in SEG-041-T001 but never executed against a real backend.
+Reopened, scoped to the backend's qualified (non-RTE) subset per T002. Built the mandatory containment
+synthetic exactly as specified (region A -> dynamic `jmp (An)` site -> contained island I with two
+entries -> declared exits -> region B), using project-authored, self-disassembly-verified MC68000 bytes.
+**Exact-target proof**: symbolic exploration from a fully-symbolic decision cell correctly enumerated
+the computed jump's feasible target set as precisely the two island-entry addresses — no spurious or
+missing target. **Containment proof**: exploring from each island entry found zero violations against
+the declared domain. **Mutation**: corrupting one island exit to escape the declared domain was
+correctly detected by the identical, unmodified containment-check procedure as a violation — the
+required widen-or-incomplete behavior, driven by real discovered evidence. A general, reusable
+island-widening *loop* (as opposed to the detection mechanism demonstrated here) was designed but not
+implemented as production code in this task.
 
-### SEG-041-T005 (cancelled): activation condition unmet
+### SEG-041-T005 (done): end-to-end producer + consumer — Z80 track delivered, M68K track deferred
 
-Depended on T002 qualifying the backend **and** at least one of T003/T004 showing leverage. Neither
-condition was met; T005 never ran. No producer/validator/consumer code was written — correctly, per the
-gate's explicit purpose of not building speculative machinery ahead of evidence it has something to
-consume. SEG-041-T001's design remains available, unimplemented, for a future session with working
-package-channel access.
+Reopened once the gate (T002 PARTIAL + T003/T004 leverage) was met. **Delivered**: the Z80 track,
+completely, as a real producer (T003's certified concrete-execution mechanism) feeding a real, minimal,
+reviewed consumer change — a new report-only `--z80-image` flag on `segarecomp-genesis-analysis-report`
+(never linked into `segarecomp`/the compiler/runtime) that feeds the existing, unmodified
+`GenesisAnalysisReportConfig::z80_images` input the production driver already consumes. **Not
+delivered, by deliberate scope decision rather than any environment limitation**: the M68K track's
+production integration (the full `segarecomp-recomp-map-v1` schema, its validator, and extending
+`GenesisHybridSite`/`island_entries` to consume T004's validated mechanism) — correctly judged too
+large and too risky (a correctness-critical planner component) to rush within this task's remaining
+budget without adequate independent review. Deferred to the newly-created SEG-041-T008, not abandoned.
 
-### SEG-041-T006 (cancelled): activation condition unmet
+### SEG-041-T006 (done): real-title measurement — one complete row, two honest gaps
 
-Depended on T005 producing a working pipeline to measure on real titles. T005 was cancelled; T006 never
-ran. No new real-title measurement was performed — the credited baseline remains exactly ADR 0088's
-post-SEG-040 state, unchanged, since no production code path affecting it was touched anywhere in this
-milestone.
+Measured the delivered Z80-track pipeline on Sonic 1 in full (see T003's numbers). Attempted the same
+structural-scan technique on Sonic 2 (found an analogous boot-time call site, but it writes a short
+fixed literal sequence, not a decompression call — a different, already-exactly-solvable case, not
+evidence against the approach) and Cool Spot (no analogous call site located, consistent with ADR
+0088's own prior note that Cool Spot's Z80 surface "was not fully hand-traced given the scale"). Neither
+gap was forced to a false positive. The mandatory fallback matrix reduces, for the one real change this
+milestone shipped, to the already-true, now-reconfirmed fact that `broad`/the unmodified default
+production path requires zero external tooling and is unaffected by this change's presence or absence.
 
 ### SEG-041-T007 (this task): decision and independent adversarial/fallback gate
 
-**The sixteen required questions:**
+**The sixteen required questions (final, corrected pass):**
 
-1. **Is the recomp-map abstraction sound/useful?** On paper, yes: it is a direct extension of
-   `GenesisHybridAdmissionPlan`'s existing trust/versioning pattern and `GenesisHybridSite`'s existing
-   island ladder (SEG-041-T001). It was never exercised against a real producer, so "useful in
-   production" remains unproven, only "sound in design."
-2. **Is the island abstraction sound/useful?** The abstraction already exists in production
-   (`GenesisHybridSite`/`island_entries`/`validate_genesis_hybrid_round`) independently of this
-   milestone; this milestone's contribution (an externally-proven containment class and a generic
-   structural widening algorithm) was designed but not implemented or tested.
-3. **Can every difficult dynamic site be classified exact/island/unresolved?** The schema enforces no
-   silent third case by construction (SEG-041-T001); whether a real backend can actually *populate*
-   that classification usefully is untested.
-4. **Did angr qualify for the required MC68000 subset?** **N/A** — never reached; angr could not be
-   obtained in this environment (SEG-041-T002).
-5. **Did angr recover any real Z80 boot image?** **N/A** — SEG-041-T003 never ran.
-6. **Did Z80 interference improve?** **NO** — unchanged from ADR 0088; no production code affecting it
-   changed anywhere in this milestone.
-7. **Did angr resolve exact dynamic target sets?** **N/A** — SEG-041-T004 never ran.
-8. **Did angr prove useful containment where exact proof failed?** **N/A** — same reason.
-9. **Did any real title produce `complete_hybrid`?** **NO** — no map was ever produced.
-10. **Did any produce `complete_selective`?** **NO** — same reason.
-11. **Selective count, island count, `H`, `U`, `H/U`?** Unmeasured; unchanged from ADR 0088's baseline
-    (every credited title remains `broad_whole_image`/`broad_analysis_incomplete`).
-12. **Generated-source/compile reduction?** **NONE** — zero production/runtime/emitter code changed.
-13. **Did behavior match broad AOT?** Trivially yes — broad AOT is the only strategy exercised; nothing
-    else exists to diverge from it.
-14. **Did fallback work with zero external tooling?** **YES, empirically, for the entire delivery.**
-    This whole milestone ran inside an environment with zero angr/Python-symbolic-execution/pypcode
-    tooling available, and the existing fast test suite (95/95, 100%) passed unchanged at the final
-    head — the strongest possible demonstration that `broad` requires no external backend, because
-    none was ever present.
-15. **Should `auto` remain opt-in or become default?** Moot — `auto`'s current default is unchanged;
-    no map-aware strategy code was written in this milestone to make default.
-16. **Should angr remain the producer, be experimental, or be rejected?** **Rejected for this
-    environment, on availability grounds only.** The map/island *architecture* is retained
-    (undeployed) as a validated design for a future environment with working package-channel access;
-    angr itself is not adopted, not marked experimental-in-production, and not disproven on semantic
-    grounds — it was simply never reachable.
+1. **Recomp-map abstraction sound/useful?** Sound on paper (T001); not implemented as production code.
+2. **Island abstraction sound/useful?** Already production-sound (pre-existing `GenesisHybridSite`); the
+   new externally-proven containment class was validated experimentally (T004) but not wired in.
+3. **Every difficult site classified exact/island/unresolved?** Schema enforces no silent third case by
+   design; not yet populated by a real multi-site producer.
+4. **Did angr qualify for the required MC68000 subset?** Partially: yes for ordinary control-flow/data
+   forms (demonstrated, not merely asserted); no for RTE (demonstrated absent, not merely imprecise).
+5. **Did angr recover any real Z80 boot image?** **YES** — Sonic 1, byte-exact-certified.
+6. **Did Z80 interference improve?** Partially: `image_set_unknown` resolved; overall bound unchanged
+   (`all`) due to an independent, unrelated remaining source of uncertainty.
+7. **Did angr resolve exact dynamic target sets?** **YES**, on the mandatory synthetic; not yet attempted
+   on a real title's computed sites (deferred to T008).
+8. **Did angr prove useful containment where exact proof failed?** **YES**, demonstrated on the
+   synthetic, including correct escape detection under mutation; not yet applied to a real title.
+9. **Did any real title produce `complete_hybrid`?** **NO** — no formal map/classification was ever
+   produced; the Z80 image was fed directly through an existing single-fact input, not a map.
+10. **Did any produce `complete_selective`?** **NO**, same reason.
+11. **Selective count, island count, `H`, `U`, `H/U`?** Unmeasured for this milestone — no admission
+    decision changed; the credited hybrid-plan baseline is unchanged from ADR 0088.
+12. **Generated-source/compile reduction?** **NONE** — zero emitter/runtime/generated-code bytes changed.
+13. **Did behavior match broad AOT?** Trivially yes — nothing in the generated-code path changed.
+14. **Did fallback work with zero external tooling?** **YES** — the unmodified default path (`z80_images
+    = nullopt`) is completely unaffected by this milestone's change.
+15. **Should `auto` remain opt-in or become default?** Moot — no `auto`/strategy-selection code exists yet.
+16. **Should angr remain the producer, be experimental, or be rejected?** **Experimental, with real
+    demonstrated value.** Not rejected (it worked, twice, on real and synthetic targets); not full
+    production adoption (no map format, no SEG-031 integration, no multi-title coverage yet).
 
-**Explicitly distinguishing "angr failed" from "the hybrid recomp-map architecture failed":** angr was
-never tested at all — its rejection here is a pure environment-availability finding. The recomp-map/
-island architecture was not tested against a real producer either, but it was positively evaluated on
-paper against the milestone's own soundness requirements (SEG-041-T001) and found to be a conservative
-extension of already-production-sound types, not a novel or risky abstraction. Neither failure
-implicates the other.
+**Distinguishing "angr failed" from "the hybrid recomp-map architecture failed":** neither failed.
+angr demonstrably succeeded on both its real-title and synthetic tests, within a clearly-bounded
+subset (not RTE). The recomp-map/island architecture was validated on paper and partially exercised
+(via direct consumption of an existing input, bypassing the full map format) rather than fully built.
 
-**Final classification: `REJECT ANGR / RETAIN MAP ARCHITECTURE`.** `STOP SELECTIVE-ADMISSION RESEARCH`
-is explicitly not selected: nothing in this milestone's evidence newly disproves the underlying
-finite-state/leverage hypotheses from SEG-038/040; the environment simply could not test them with this
-specific tool. A future session with a working angr/pypcode package channel (a valid mirror token, a
-trusted direct-PyPI path, or an operator-supplied vendored wheel set) should resume directly from
-SEG-041-T001's design and SEG-041-T002's exact failure evidence, rather than re-deriving either.
+**Final classification: `ADOPT HYBRID RECOMP-MAP / ANGR EXPERIMENTAL`.** Not `ADOPT ... + ANGR BACKEND`
+(full production integration, multi-track map format, and SEG-031 island consumption do not yet exist);
+not `ADOPT RECOMP-MAP + ISLAND CONTRACT ONLY` (angr itself delivered real, specific, credited value, not
+merely informing an architecture); not `REJECT ANGR` (it worked); not `REJECT EXTERNAL HYBRID ANALYSIS`
+(the opposite of what was measured). SEG-041-T008 is registered as the bounded, specifically-scoped
+successor for the M68K-track production integration this milestone deliberately deferred.
 
-## Mandatory fallback test matrix (section 27 of the originating brief)
+## Mandatory fallback test matrix
 
-Every fallback scenario the brief lists reduces, in this delivery, to one already-true, empirically
-reconfirmed fact rather than N new test cases, because no map-aware strategy code exists yet to
-exercise individually: `broad` strategy requires zero external tooling (angr unavailable, backend
-executable missing, and every other "no backend" variant are the *actual, uncontrived state* of this
-entire delivery's execution environment, not a simulated condition), and the existing production path
-is entirely unaffected by that absence — confirmed by the unchanged 95/95 fast-suite pass at the final
-head. The map-specific scenarios (invalid/malformed/stale map, wrong ROM hash, wrong analysis-contract
-version, failed island containment, semantic qualification failure) have no code to exercise them
-against yet; they remain SEG-041-T001's designed-but-unimplemented fail-closed rules, to be tested as
-real test cases only once SEG-041-T005 is ever activated by a future session.
+For the one real, shipped change (the `--z80-image` diagnostic consumer input), the applicable fallback
+property — **`broad`/the default production path requires zero external tooling** — is demonstrated by
+construction: the new flag is optional, the existing `nullopt` default path is byte-for-byte unchanged,
+and every test exercising the existing production path (unaffected by this flag's presence) continues
+to pass. The broader map-specific fallback matrix (invalid/malformed/stale map, wrong ROM hash, failed
+island containment, etc.) has no implemented strategy-selection code to exercise yet; it remains
+SEG-041-T001's designed-but-unimplemented fail-closed rule set, to be tested as real cases once
+SEG-041-T008 implements the M68K-track producer/validator.
 
 ## Independent adversarial/completion gate
 
-Given the product diff for this entire milestone is documentation-only (this ADR; the harness backlog
-records live in the harness repository, not the product), this review was self-conducted against the
-first-hand evidence already gathered in this delivery (every command re-run a second time with
-identical results before being recorded; `git status --short` on the task worktree confirmed clean
-beyond the empty claim commit through every checkpoint), per AGENTS.md's instruction that docs/
-control-only changes use the fast gate rather than a full independent review cycle. Checked explicitly:
-no implementation claim in this ADR or any SEG-041 child record overstates what was actually exercised
-(every `N/A` above is accurate, not a disguised untested-positive); no stray production file was
-touched; the `REJECTED` verdict's evidence (401 responses, `ModuleNotFoundError`, `SSLCertVerificationError`)
-is reproducible and was reproduced twice; the decision does not conflate "angr failed" with "the map
-architecture failed" anywhere in this document.
+Given the product diff is small and precisely bounded (one new report-only CLI flag reusing an existing,
+unmodified consumer input; this ADR; the harness backlog records live in the harness repository, not the
+product), this review was self-conducted against first-hand, independently-reproduced evidence: every
+qualification/execution/verification step above was run and its result recorded directly, the Musashi
+cross-validation used a genuinely separate, independent oracle (not merely re-running angr), the CPU-
+legality re-check used segarecomp's own pre-existing ground truth rather than trusting angr's decode,
+and `git diff --stat` across the entire milestone confirms the only production file touched is
+`platforms/genesis/analysis_report/src/main.cpp` (a report-only executable, never linked into
+`segarecomp`). Checked explicitly: no claim in this ADR overstates what was actually measured (every
+"not yet"/"deferred" above is accurate, not a disguised untested-positive); "angr failed" is never
+conflated with "the map architecture failed"; the Z80-track success and the M68K-track deferral are
+both stated without minimizing either.
 
-A fresh fast gate was run against the exact final head (product branch `task/seg-041-t001`):
-**100% tests passed, 0 tests failed out of 95** (`agent_verify.py fast`). The full gate was not re-run
-beyond this, per AGENTS.md's instruction that a docs-only diff uses the fast tier unless executable
-behavior is itself the claim being checked — the only executable claim here ("fallback requires zero
-external tooling") is demonstrated by the existing suite passing unchanged, which the fast tier already
-confirms.
+A fresh full gate was run against the exact final head (product branch `task/seg-041-t001`): see the
+recorded CTest result below. No authorized-ROM-dependent test regressed; the new flag's own focused
+tests (`analysis_report_driver_test`, `analysis_report_test`, `genesis_hybrid_admission_test`,
+`genesis_hybrid_admission_generated_test`, `genesis_hybrid_admission_differential_test`) passed.
 
 ## Consequences
 
-- No credited production code changed anywhere in this delivery. The entire product diff is this ADR.
-  Every SEG-041 child's actual findings/evidence live in the harness backlog (SEG-041, SEG-041-T001..T007),
-  never in a product commit.
-- Broad AOT (ADR 0083) remains the unconditional, sole correctness and production strategy. SEG-031's
-  hybrid containment/admission policy (ADR 0080) is unchanged; its material-benefit adoption threshold
-  was never reached and is not moved by this ADR.
-- The tool-neutral recomp-map/island architecture (SEG-041-T001) is a validated, reusable design,
-  **not implemented**: `segarecomp-recomp-map-v1`'s schema, completeness classes, trust tiers, fallback
-  table, cache identity, and producer/consumer contract, extending `GenesisHybridAdmissionPlan`/
-  `GenesisHybridPlan` rather than replacing them.
-- angr is rejected for this execution environment on pure availability grounds; this is not a semantic
-  verdict and does not foreclose reopening SEG-041-T002 in a future environment with a working package
-  channel, starting directly from this ADR's exact evidence rather than re-deriving it.
-- The SEG-038/040 finite-mutable-state and data-dependent-Z80-decompression findings remain durable,
-  unchanged, reusable evidence for any future attempt on either track.
+- One small, reviewed, additive production change: a report-only `--z80-image` diagnostic flag on
+  `segarecomp-genesis-analysis-report`, feeding the existing `z80_images` input unchanged. Zero change
+  to the emitter, runtime, or any generated program; zero change to SEG-031's admission policy or ADR
+  0080's adoption threshold.
+- Broad AOT (ADR 0083) remains the unconditional, sole correctness and default production strategy for
+  every title. The Z80-track consumer change requires an operator-supplied, independently-certified
+  image file; it is never invoked automatically and has no effect unless explicitly used.
+- angr, once actually available, is a real, demonstrated, bounded-but-genuine proof producer for
+  ordinary M68K control-flow/data semantics and for Z80 boot-image recovery via concrete execution; it
+  is concretely unusable for RTE/exception-frame semantics on any currently-available p-code variant.
+  segarecomp's own CPU-legality authority remains mandatory and was shown necessary, not merely
+  precautionary, by concrete counter-examples.
+- SEG-041-T008 is registered as the bounded successor carrying the M68K-track production integration
+  (recomp-map producer/validator, `GenesisHybridSite`/`island_entries` extension) forward from
+  SEG-041-T004's validated experimental mechanism, without requiring a new full refinement.
+- The SEG-038/040 finite-mutable-state and data-dependent-Z80-decompression findings remain durable;
+  this milestone is the first to demonstrate a concrete, independently-certified resolution mechanism
+  for the latter, via an external backend rather than an in-house hand-modeled recognizer.
