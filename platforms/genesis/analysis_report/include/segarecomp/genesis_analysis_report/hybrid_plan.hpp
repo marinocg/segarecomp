@@ -39,6 +39,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "segarecomp/genesis_analysis_report/report.hpp"
@@ -50,6 +51,38 @@ namespace segarecomp {
 inline constexpr std::uint32_t genesis_hybrid_max_rounds = 8U;
 inline constexpr std::size_t genesis_hybrid_max_island_entries = 65536U;
 
+// SEG-041-T008: an optional, ROM-bound, fail-closed set of externally-proven dynamic-control-site facts
+// (e.g. from a qualified external analysis backend such as angr -- SEG-041-T002/T003/T004). This is
+// strictly an additional INPUT to the existing, unmodified `genesis_hybrid_container()`/
+// `validate_genesis_hybrid_round()` pure functions: every fact is structurally re-verified against
+// segarecomp's own CPU decoder/legality authority (`image.decode`/`image.mapped`) before it is trusted,
+// exactly like every other admission authority in this file (ADR 0080's "no silently trusted file"
+// invariant). A fact that fails re-verification is discarded for that site, never partially trusted;
+// the site falls back to the existing (angr-free) classification unchanged. External analysis therefore
+// remains an optimization input, never a correctness authority: omitting this struct entirely (the
+// default, `std::nullopt`) reproduces today's unmodified broad/hybrid behavior exactly.
+struct GenesisExternalM68kFact {
+  std::uint32_t pc{};                  // the dynamic-control site's own PC
+  std::vector<std::uint32_t> entries;  // candidate targets (exact) or island members (contained); sorted, deduped by the parser
+  bool exact{};                        // true: an exhaustive exact target set; false: a bounded contained-region entry set
+};
+
+struct GenesisExternalM68kFacts {
+  std::string rom_sha256;                       // lowercase hex; must equal the plan's own ROM digest or the whole set is rejected
+  std::string producer;                         // generic, non-reconstructable producer identity (e.g. "segarecomp-angr-m68k-v1")
+  std::vector<GenesisExternalM68kFact> facts;    // sorted by `pc`, one entry per PC (the parser rejects a duplicate PC)
+};
+
+inline constexpr std::string_view genesis_external_m68k_facts_schema = "segarecomp.m68k_external_facts.v1";
+inline constexpr std::size_t genesis_external_m68k_facts_max_bytes = std::size_t{1} << 20U;    // 1 MiB; defence in depth
+inline constexpr std::size_t genesis_external_m68k_facts_max_facts = std::size_t{1} << 16U;     // bounded like every other untrusted input
+
+// Parses and structurally validates the bounded ASCII text format (ROM hash must equal `rom_sha256`; schema line must match;
+// every PC/entry must be a well-formed even hex8 address; no duplicate PC; bounded size/count). Returns `nullopt` on any
+// malformed input -- a malformed/mismatched file is identical in effect to no file (callers must not partially trust it).
+[[nodiscard]] std::optional<GenesisExternalM68kFacts> parse_genesis_external_m68k_facts(const std::string &text,
+                                                                                         const std::string &rom_sha256);
+
 struct GenesisHybridPlanConfig {
   // The SEG-030 driver configuration. The planner forces `--domains all` (the only interrupt-register model proven sound).
   GenesisAnalysisReportConfig analysis;
@@ -60,6 +93,9 @@ struct GenesisHybridPlanConfig {
   // for the operator: how much smaller a hybrid would be if the interrupt-resumption class could be assumed away. A result of this
   // mode is a ceiling for the class, not a plan.
   bool diagnostic_transparent_handlers{};
+  // SEG-041-T008: optional externally-proven facts (see `GenesisExternalM68kFacts` above). `nullopt` (the default) reproduces
+  // today's unmodified behavior exactly -- this input is never required for correctness.
+  std::optional<GenesisExternalM68kFacts> external_m68k_facts;
 };
 
 enum class GenesisHybridOutcome : std::uint8_t {
@@ -85,6 +121,8 @@ struct GenesisHybridSite {
   GenesisAnalysisSubReason sub{GenesisAnalysisSubReason::none};
   GenesisHybridContainer container{GenesisHybridContainer::whole_image};
   std::vector<std::uint32_t> entries;  // the site's island entries this round (sorted; empty for whole_image)
+  bool external{};                     // SEG-041-T008: `entries` came from a structurally-re-verified external fact, not from
+                                        // segarecomp's own points-to value (disambiguates provenance regardless of `container`)
 };
 
 struct GenesisHybridPlan {
@@ -102,6 +140,9 @@ struct GenesisHybridPlan {
   std::size_t materialized_entries{};   // mandatory `static_proof` image entries
   std::string validation_failure;       // broad_validation_failed only
   bool diagnostic_transparent_handlers{};  // SEG-034: produced under the uncredited transparent-handler ablation
+  std::size_t external_facts_applied{};    // SEG-041-T008: uncovered sites of the final round whose container used an
+                                            // externally-proven, structurally-re-verified fact (0 when `external_m68k_facts`
+                                            // is absent, or when every supplied fact failed re-verification/was unused)
 };
 
 // Plans the hybrid admission of `program` (which may carry ADR 0049 aliases). Deterministic.
@@ -110,14 +151,25 @@ struct GenesisHybridPlan {
 // Independent containment validator over one analysis round: nullopt when every root, fixed successor, stacked call continuation,
 // resolved target and island entry that decodes is in the round's discovered set, every uncovered site is configured with its whole
 // container, and no reached undecodable PC is a broad identity; else the first failure class. `universe` is U (sorted).
+// `external` (SEG-041-T008): the same optional externally-proven fact set `genesis_hybrid_container()` was configured with when
+// the round being validated was planned. Passing a different (or omitted) set than the one actually used to plan the round is a
+// caller error that this validator will correctly reject as unsound (a configured island/exact entry the fresh recomputation no
+// longer derives fails closed as before); this is exactly the existing "freshly recompute and compare" trust property, now
+// extended to cover the external input too, never weakened by it.
 [[nodiscard]] std::optional<std::string> validate_genesis_hybrid_round(
     const GenesisAnalysisReport &report, const GenesisM68kAnalysisImage &image,
     const std::map<std::uint32_t, std::vector<std::uint32_t>> &island_entries, const std::vector<std::uint32_t> &universe,
-    std::size_t max_island_entries = genesis_hybrid_max_island_entries);
+    std::size_t max_island_entries = genesis_hybrid_max_island_entries,
+    const std::optional<GenesisExternalM68kFacts> &external = std::nullopt);
 
 // The container of one site of `report` under the ladder above (entries sorted; whole_image when unbounded or over `max_entries`).
+// `external` (SEG-041-T008): consulted only for a site this function would otherwise classify `whole_image` (never overriding an
+// already-sound internally-derived container); every externally-supplied entry is independently re-verified against `image`
+// (mapped, even, and MC68000-decodable per segarecomp's own decoder) before being trusted -- a fact that fails re-verification is
+// discarded for that site, falling back to the existing (angr-free) `whole_image` classification, never partially trusted.
 [[nodiscard]] GenesisHybridSite genesis_hybrid_container(const GenesisAnalysisReport &report, const GenesisM68kAnalysisImage &image,
-                                                         std::uint32_t pc, std::size_t max_entries = genesis_hybrid_max_island_entries);
+                                                         std::uint32_t pc, std::size_t max_entries = genesis_hybrid_max_island_entries,
+                                                         const std::optional<GenesisExternalM68kFacts> &external = std::nullopt);
 
 // The production artifact of a plan (ROM digest and alias set of `program`; `broad` unless the outcome is hybrid).
 [[nodiscard]] GenesisHybridAdmissionPlan genesis_hybrid_admission_plan(const GenesisHybridPlan &plan, const FrontendProgram &program,
