@@ -40,6 +40,14 @@ segarecomp_enable_warnings(analysis_m68k_return_slot_test)
 add_test(NAME analysis_m68k_return_slot_test COMMAND analysis_m68k_return_slot_test)
 set_property(TEST analysis_m68k_return_slot_test APPEND PROPERTY LABELS full fast)
 
+# SEG-039-T001 (ADR 0086 follow-up, report-only): formalizes/reproduces the frames-domain monotone status/clobbered
+# circularity and tests a bounded propose/solve/validate/commit-or-reject breaker hypothesis. Never linked into production.
+add_executable(analysis_m68k_frames_circularity_test analysis_m68k_frames_circularity_test.cpp)
+target_link_libraries(analysis_m68k_frames_circularity_test PRIVATE segarecomp::cpu_m68k_analysis)
+segarecomp_enable_warnings(analysis_m68k_frames_circularity_test)
+add_test(NAME analysis_m68k_frames_circularity_test COMMAND analysis_m68k_frames_circularity_test)
+set_property(TEST analysis_m68k_frames_circularity_test APPEND PROPERTY LABELS full fast)
+
 # SEG-034 (ADR 0081): the generic precision refinements that remove SEG-031 whole-image fallback triggers (spill, ...).
 add_executable(analysis_m68k_precision_test analysis_m68k_precision_test.cpp)
 target_link_libraries(analysis_m68k_precision_test PRIVATE segarecomp::cpu_m68k_analysis)
