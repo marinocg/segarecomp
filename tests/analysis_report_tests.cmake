@@ -290,6 +290,13 @@ segarecomp_enable_warnings(analysis_genesis_z80_proof_test)
 add_test(NAME analysis_genesis_z80_proof_test COMMAND analysis_genesis_z80_proof_test)
 set_property(TEST analysis_genesis_z80_proof_test APPEND PROPERTY LABELS full fast)
 
+# SEG-040-T004 (ADR 0072 section 4): the M68K-side Z80 boot-image producer and its credited use by the report driver.
+add_executable(analysis_genesis_z80_boot_image_test analysis_genesis_z80_boot_image_test.cpp)
+target_link_libraries(analysis_genesis_z80_boot_image_test PRIVATE segarecomp::genesis_analysis_report)
+segarecomp_enable_warnings(analysis_genesis_z80_boot_image_test)
+add_test(NAME analysis_genesis_z80_boot_image_test COMMAND analysis_genesis_z80_boot_image_test)
+set_property(TEST analysis_genesis_z80_boot_image_test APPEND PROPERTY LABELS full fast)
+
 # SEG-031 (ADR 0080): the report-only hybrid admission planner on synthetic adversarial shapes.
 add_executable(analysis_hybrid_plan_test analysis_hybrid_plan_test.cpp)
 target_link_libraries(analysis_hybrid_plan_test PRIVATE segarecomp::genesis_analysis_report)
