@@ -216,6 +216,40 @@ void device_register_write_does_not_corrupt_ram_image() {
          "device_register_write_does_not_corrupt_ram_image: the device-register write did not disqualify the RAM image");
 }
 
+// 6. SEG-040-T007 adversarial finding: a reachable interrupt-handler partition's own store into the Z80 RAM mirror is a real
+// 68K write this producer's main-flow-only (tag 0) replay never visits. The pre-existing, all-partition
+// `observed_store_ranges` aggregate (SEG-030-T010) already saw such a store; this producer must not silently discard that fact
+// merely because it also found a main-flow write of its own (report.cpp unconditionally *replaces*, rather than unions, the
+// all-partition aggregate with `boot.area_stores` whenever the latter is non-empty).
+void handler_partition_store_is_not_dropped() {
+  M68k m;
+  m.move_w_abs(0x0100U, z80_busreq);
+  m.move_w_abs(0x0100U, z80_reset);
+  const auto &z80 = proven_free_z80_bytes();
+  for (std::size_t i = 0; i < z80.size(); ++i) m.move_b_abs(z80[i], z80_ram + static_cast<std::uint32_t>(i));
+  m.move_w_abs(0x0000U, z80_busreq);
+  m.bra_self();
+  // Install a delivered interrupt vector (level 6, vector 30: the Genesis VBlank source) whose handler also stores into the
+  // Z80 RAM mirror, overwriting one of the uploaded bytes. The vector table slot makes the handler a reachable root
+  // (SEG-030-T006) regardless of whether main flow ever raises the interrupt mask.
+  constexpr std::uint32_t handler_pc = 0x300U;
+  m.put32(30U * 4U, handler_pc);
+  m.pc = handler_pc;
+  m.move_b_abs(0x99U, z80_ram + 5U);  // conflicts with the uploaded program's own byte at offset 5
+  m.w(0x4E73U);                       // RTE
+  const auto program = build(m);
+  expect(program.has_value(), "handler_partition_store_is_not_dropped: program");
+  if (!program) return;
+  auto config = memory_config();
+  config.domains.frames = true;  // required for the handler to be analysed as its own partition
+  const auto report = run_genesis_analysis_report(*program, config);
+  expect(report.analysis.complete && report.z80_proof.has_value(), "handler_partition_store_is_not_dropped: a proof is produced");
+  if (!report.z80_proof) return;
+  expect(report.z80_proof->outcome != GenesisZ80RamWrites::none,
+         "handler_partition_store_is_not_dropped: a handler-partition store into Z80 RAM must not be silently dropped (" +
+             std::string(genesis_z80_ram_writes_name(report.z80_proof->outcome)) + ")");
+}
+
 }  // namespace
 
 int main() {
@@ -224,6 +258,7 @@ int main() {
   z80_side_unknown_preserved();
   read_never_promotes_to_write();
   device_register_write_does_not_corrupt_ram_image();
+  handler_partition_store_is_not_dropped();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";
     return EXIT_FAILURE;

@@ -32,12 +32,17 @@
 // entirely inside z80_ram_write_proof.cpp. The only Z80-bank-specific facts referenced here are the same bus-geometry constants
 // (`genesis_z80_control_first/last`, `genesis_z80_area_first/last`) the existing Z80 proof and report driver already use.
 //
-// Fail-closed throughout: the main-flow (tag 0) partition only (an interrupt/exception handler instance's state at its taking
-// point is never provably related to the architectural power-on state, so this producer never credits one); a BUSREQ/RESET
-// control write whose exact bit cannot be read, or whose target is not exactly one of the two documented register addresses, or
-// a bounded worklist-iteration exhaustion, collapses every fact from that point forward to "not provably in the boot window" --
-// never the other way. A boot-window Z80-area store with an imprecise target or value abandons the WHOLE derived image (never a
-// partially-filled one): `image` stays nullopt and the report driver keeps `z80_images = std::nullopt` exactly as before.
+// Fail-closed throughout: the pristine/boot-window lattice (busreq/reset_released/pristine) and the image byte accumulation are
+// replayed over the main-flow (tag 0) partition only (an interrupt/exception handler instance's state at its taking point is
+// never provably related to the architectural power-on state, so this producer never credits one as part of the boot window or
+// the image); a BUSREQ/RESET control write whose exact bit cannot be read, or whose target is not exactly one of the two
+// documented register addresses, or a bounded worklist-iteration exhaustion, collapses every fact from that point forward to
+// "not provably in the boot window" -- never the other way. A boot-window Z80-area store with an imprecise target or value
+// abandons the WHOLE derived image (never a partially-filled one): `image` stays nullopt and the report driver keeps
+// `z80_images = std::nullopt` exactly as before. A reachable handler-instance (tag != 0) store into the Z80 bus area is a real
+// 68K write this producer never credits into the boot window either, but it is still folded into the "running" (never
+// held_in_reset) area-store group so it is never silently dropped relative to the pre-existing, all-partition
+// `observed_store_ranges` aggregate this producer's output replaces in report.cpp.
 
 #include <cstdint>
 #include <optional>

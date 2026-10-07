@@ -199,6 +199,27 @@ GenesisZ80BootDerivation derive_genesis_z80_boot_image(const M68kAnalysisImage &
 
   if (exhausted) return GenesisZ80BootDerivation{};  // fail closed: the caller keeps its own pre-T004 behaviour entirely
 
+  // Every store from a handler-instance partition (tag != 0, SEG-030-T006): this producer's worklist above replays only the
+  // main-flow (tag 0) partition (an interrupt/exception handler instance's state at its taking point is never provably related
+  // to the architectural power-on invariant, so it never contributes to `reset_ranges`/the image), but a reachable handler's own
+  // store into the Z80 bus area is still a real 68K write. The pre-existing, all-partition `observed_store_ranges` aggregate
+  // (SEG-030-T010, `analyze_m68k_finite_values`) already counted every such store; report.cpp replaces that aggregate with this
+  // producer's own `area_stores` whenever the latter is non-empty (the ordinary case once any main-flow write exists), so a
+  // handler-partition store must be folded in here too, or it is silently dropped. Always classified "running" (never
+  // held_in_reset): a handler instance is never credited into the boot window.
+  for (const auto &[point, state] : states) {
+    if (m68k_point_tag(point) == 0U) continue;
+    const auto pc = m68k_point_pc(point);
+    const auto decoded = adapter.decode(pc);
+    if (!decoded) continue;
+    const auto &operation = decoded->operation;
+    const auto status = adapter.effective_status(m68k_point_tag(point), state);
+    for (const auto &[target, span] : adapter.memory_write_targets(operation, state, status)) {
+      if (!touches_range(target, span, genesis_z80_area_first, genesis_z80_area_last)) continue;
+      if (!clip_range(target, span, genesis_z80_area_first, genesis_z80_area_last, running_ranges)) ++running_unknown;
+    }
+  }
+
   if (!reset_ranges.empty()) result.area_stores.push_back(GenesisZ80AreaStores{reset_ranges, reset_unknown, true});
   else if (reset_unknown != 0U) result.area_stores.push_back(GenesisZ80AreaStores{{}, reset_unknown, true});
   result.area_stores.push_back(GenesisZ80AreaStores{running_ranges, running_unknown, false});
