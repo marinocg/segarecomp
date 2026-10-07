@@ -329,7 +329,62 @@ priority-order-independence claim, the deconfounded preemption-scope claim, and 
 "gating would be unsound" argument from unchanged production code rather than trusting this ADR's
 prose.
 
-[Independent adversarial review results recorded below once the review completes.]
+**Verdict: PASS. No code fix required** (the worktree was left unmodified by the reviewer at the
+reviewed head, `5128737`); one non-blocking documentation-accuracy finding was independently corrected
+afterward (see below).
+
+**M68K track**: confirmed, directly from unchanged production code, that `clobbered` is
+`std::map<parent_tag, std::set<level>>`, populated exclusively keyed by an unanalysed child's own
+**parent** partition tag inside the `unanalysed()` lambda — never by any (parent, specific-sibling)
+pair — and that `effective_status()` consults `clobbered[tag]` for the querying point's own tag against
+the ambient ("local") ancestor status, with no reference anywhere to any other candidate's vector
+level. This independently reproduces, from the code alone, the ADR's "the hazard is a parent-partition
+fact, not a pairwise relation" claim. The reviewer additionally found, strengthening the claim beyond
+what the ADR states: the same guarded block that inserts into `clobbered[parent]` unconditionally also
+sets `async_all = true` for the same parent in the same branch — there is no code path where an
+unanalysed/resuming child poisons one of {`clobbered`, `async_all`} without the other, so *any* cause of
+"unanalysed" (not only T003's specific undescribed-write class) collaterally blocks a sibling the same
+way; the reviewer could not construct, and the architecture does not admit, a narrower counterexample.
+Both new test files were independently built and run and pass, including T003's deconfounded fixture
+and its control. No preemption-graph/SCC mechanism exists anywhere in the diff (confirmed by direct
+inspection), and the "gating would be unsound" argument is independently verified true: gating on
+`good`'s mask has no code path to even consult `good`'s level at the point the actual check happens.
+
+**Z80 track**: the adversarial-fix regression test (`handler_partition_store_is_not_dropped`) is
+present, builds, and passes; the fix's logic (folding every `tag != 0` Z80-area store into the
+"running" group, never the boot-window/image accumulation) was independently re-derived as sound.
+Bank-register/control-register handling, READ-vs-WRITE, device-vs-RAM, work-RAM-write,
+multiple-bank-value, indirect-Z80-address (N/A, no Z80 decoding exists in this producer at all),
+BUSREQ/RESET sequencing across every CFG edge, and bound exhaustion were all independently re-checked
+against `docs/architecture/genesis-z80-audio-contract.md` and the existing synthetic tests and found
+sound. No loop-aware mechanism exists anywhere in the diff (confirmed); the reviewer reasoned through
+why a synthetic loop writing into the Z80 RAM mirror would necessarily fail closed (a non-exact/widened
+`M68kPointsTo` target at the loop body is correctly rejected by `exact_single_address`/
+`exact_single_value`'s exactness requirement) without needing to hand-build a new fixture, citing the
+project's own existing precision-domain test coverage for non-exact/strided targets. The
+declined-extension diff was independently confirmed to be comment-only (`z80_boot_image.cpp`'s own
+`git log` shows zero behavioral change between the adversarial-fix commit and the declined-extension
+commit).
+
+**One non-blocking finding, independently corrected after the review** (not a soundness defect, no
+reachable exploit found): the reviewer noted `memory_write_values()`'s doc comment overstated that it
+"reuses exactly" `transfer_memory`'s write-value resolution — it reuses the same per-write
+`write_value()` helper, but not `transfer_memory`'s two post-resolution filters (the imprecision reset,
+and `resolve_store_spill`'s spilled-value drop). The reviewer confirmed this is not currently
+exploitable by its one consumer (`z80_boot_image.cpp`), because the Genesis image view's own region
+sizing (`GenesisM68kAnalysisImage::region_of`) places the Z80 bus area inside one large I/O device
+region whose own spill boundary never falls near the Z80 RAM mirror for any real or plausible synthetic
+ROM, and because `z80_boot_image.cpp`'s own `exact_single_value()` independently re-checks precision.
+The doc comment was corrected (production, comment-only; `64e2cba`) to accurately describe the
+difference and to tell any future caller to apply the missing filters itself if its own target region
+could plausibly land inside a spill boundary. Full gate re-run at this exact corrected head:
+`ctest --test-dir build/dev --output-on-failure -j 8` — 100% tests passed, 0 tests failed out of 333.
+
+**Governance note considered and resolved**: the reviewer separately verified that advancing
+SEG-040-T002 through T007 sequentially within one product branch/PR is the pre-declared,
+established combined-delivery pattern for this milestone (stated in the parent milestone record at
+milestone-creation time, before any product commit, following the SEG-034..039 precedent) — not
+undisclosed scope-smuggling introduced by this task. No action required.
 
 ## Consequences
 
