@@ -335,15 +335,41 @@ void mutation_5_bad_a7_restore() {
 
 // Mutation 6: two RTE exits, one corrupt (a branch picks between a clean exit and a corrupted-frame exit) -> the whole
 // resumption must be rejected: a good exit's proof must never paper over a bad one.
+//
+// Adversarial-review correction: an earlier revision used "ADDQ.L #2,2(A7)" before RTE as the "corrupted" exit. Two bugs
+// stacked there: (1) its guarding BEQ.S used displacement +4, whose M68000PRM PC-relative target (opcode address + 2 +
+// displacement) landed on the ADDQ instruction's own extension word rather than the ADDQ opcode itself -- the breaker still
+// rejected the resulting decode-garbled handler, but for the wrong reason. (2) even with that encoding fixed, ADDQ/SUBQ on
+// the frame's own stacked-PC cell is not corruption at all: finite_adapter.cpp's frame_pc_identity tracking (SEG-030-T009
+// correction cycle 2) deliberately and precisely tracks an immediate ADDQ/SUBQ/ADDI/SUBI adjustment of that cell as a sound,
+// offset-exact resumption (a legitimate "return 2 bytes past the stacked PC" pattern) -- so the breaker correctly COMMITTED
+// it once the branch-target bug was fixed, which is not a production defect, only a mischaracterized fixture. The actually
+// corrupting exit used below instead stores an Unknown-valued register (D1, loaded from the never-written cell_a) directly
+// into the frame's PC slot: a plain (non-ADDQ/SUBQ) long store onto that cell degrades its fact to frame_pc_identity, which
+// carries no offset (frame_pc_fact_offset returns nullopt below 0x80) -- so that exit's resumption is genuinely unprovable,
+// never an exact alternate return address.
 void mutation_6_mixed_exits() {
   Asm a;
   a.move_sr(0x2000U).moveq(0, 9U);
   const auto after = a.pc;
   a.nop().bra_self();
   a.at(irq6).load_word(1, cell_a);  // D1 <- an Unknown cell: picks either path
-  a.w({0x6704U});                    // BEQ.S +4: clean exit
+  const auto beq_pc = a.pc;
+  a.w({0x6702U});                    // BEQ.S +2: lands exactly on the corrupted exit's own opcode (see regression check below)
   a.rte();                           // clean exit: unmodified frame
-  a.w({0x54AFU, 0x0002U}).rte();     // corrupted exit: ADDQ.L #2,2(A7) then RTE (frame PC perturbed, still "proven" alone)
+  const auto corrupt_entry = a.pc;
+  a.w({0x2F41U, 0x0002U}).rte();     // corrupted exit: MOVE.L D1,2(A7) then RTE -- D1 (Unknown) overwrites the stacked PC
+
+  // Regression (found during adversarial review): confirm the BEQ's PC-relative target is genuinely the corrupted exit's own
+  // opcode address, not a byte or two into its extension word (the original encoding bug this replaced).
+  const RegionImage decode_view{a};
+  expect(beq_pc + 2U + 2U == corrupt_entry,
+         "mutation 6: BEQ.S +2's PC-relative target is exactly the corrupted exit's own opcode address, not mid-instruction");
+  const auto at_target = decode_view.decode(beq_pc + 2U + 2U);
+  const auto at_corrupt_entry = decode_view.decode(corrupt_entry);
+  expect(at_target.has_value() && at_corrupt_entry.has_value() && at_target->length == at_corrupt_entry->length,
+         "mutation 6: decoding at the branch target agrees with decoding the corrupted exit directly (not garbled)");
+
   const auto breaker = propose_solve_validate(a, irq6_only, irq6);
   expect(!breaker.committed || breaker.isolated.frames.unproven_resumptions > 0U,
          "mutation 6: a handler with a mixed-quality set of RTE exits never commits an unconditionally clean resumption");
