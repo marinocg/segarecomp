@@ -250,9 +250,38 @@ causes an omitted feasible target while the tool still emits `exact`) — includ
 second poisoning mechanism (an illegal/reserved opcode fetched mid-path) tried across 160 sampled cases
 with zero false `exact` credits.
 
+**A third, independent (human) review identified one more bounded correctness issue before this task
+could be considered complete**: the corrected (exhaustive) producer could still traverse an `RTE`
+(0x4E73) instruction on its way to a queried site and emit a credited `exact` fact, even though
+SEG-041-T002 already established `RTE` has no usable MC68000 exception-return semantics in the
+available p-code backend — a violation of the producer's own qualified subset (ordinary, non-RTE
+control/data semantics only), since `RTE` is itself a legal base-MC68000 opcode and so was never caught
+by any prior check. **Corrected**: every opcode word any explored state fetches is now checked for this
+single, exact value; encountering it anywhere poisons the whole proof immediately
+(`unsupported_proof_path_rte`) — a one-line qualification-boundary check, not RTE emulation, p-code
+patching, exception-frame reconstruction, or a general instruction-blacklist framework. (A prior,
+incorrect attempt at a *general* proof-path legality screen, reading the project's independent
+legal-base-MC68000-form test-side dataset, was removed in the same correction: that dataset is
+deliberately decoupled from every consumer except two specifically whitelisted ones, enforced by its
+own dedicated independence test in both directions, which the full gate correctly caught as a
+violation.) A second, unrelated full-gate regression from an earlier commit in this same task — three
+`return site;` lines inside `genesis_hybrid_container()` had been rewritten, breaking two of the
+project's own exact-string-match mutation-testing operators — was fixed in the same correction by
+restructuring into an internal helper byte-for-byte identical to the pre-T008 function body, with a
+single, centralized external-fact consultation added only where that unmodified internal ladder
+returns `whole_image`. **A third independent re-review returned `PASS-WITH-MINOR`**: the RTE exclusion
+was confirmed sound (fires pre-execution, confirmed load-bearing via a disabled-check negative control
+that reproduced the original unsound `exact` claim on the identical fixture) and narrowly scoped (a
+single exact-value check, not a broader framework); the restructuring was confirmed line-for-line
+identical to the pre-T008 baseline and behavior-preserving, with one real-but-currently-unreachable gap
+identified (the centralized wrapper had stopped distinguishing an undecodable-site early exit from the
+other three `whole_image` exits) and fixed in the same task (the wrapper now re-checks `image.decode(pc)`
+explicitly alongside the `whole_image` condition).
+
 **End-to-end result (project-authored synthetic, no commercial input, now backed by a genuinely sound
-exhaustiveness proof rather than the earlier unsound one): `broad_whole_image` (`H/U = 1.000000`) ->
-`hybrid` (`H/U = 0.000366`)** via the real pipeline: the corrected angr producer -> a written
+exhaustiveness proof, with RTE explicitly excluded, rather than either earlier unsound/under-scoped
+version): `broad_whole_image` (`H/U = 1.000000`) -> `hybrid` (`H/U = 0.000366`)** via the real pipeline:
+the corrected angr producer -> a written
 `segarecomp.m68k_external_facts.v1` file -> the unmodified structural re-verification gate -> the
 unmodified SEG-031 planner -> the CLI's `--hybrid-plan` artifact. **This result was not re-derived from
 a real title in this task**: a real Sonic 1 measurement was attempted (all 13 of Sonic 1's currently-
@@ -300,11 +329,14 @@ overstates what was actually measured; "angr failed" is never conflated with "th
 failed"; the Z80-track real-title success, the M68K-track synthetic-only success, and the real-title
 M68K negative result are all stated without minimizing any of them.
 
-A fresh full gate was run against the exact final head (product branch `task/seg-041-t001`): see the
-recorded CTest result below (includes the new `segarecomp_angr_m68k_facts_test`, gracefully SKIPPED
-under whatever Python interpreter CMake resolves in an environment lacking working angr M68K p-code
-support, matching this suite's existing optional-dependency convention — independently confirmed PASSING
-for real under the interpreter that does have it).
+A fresh full gate was run against the exact final head (product branch `task/seg-041-t001`, commit
+`c4a097e`): see this ADR's companion harness record (SEG-041-T007/T008) for the exact recorded pass
+count. Includes the new `segarecomp_angr_m68k_facts_test` (gracefully SKIPPED under whatever Python
+interpreter CMake resolves in an environment lacking working angr M68K p-code support, matching this
+suite's existing optional-dependency convention — independently confirmed PASSING for real, including
+the new RTE-exclusion regression, under the interpreter that does have it) and
+`analysis_hybrid_mutation_test`/`m68k_legal_forms_test` (both previously broken by an intermediate
+commit in this same task, both confirmed passing again at this final head).
 
 ## Consequences
 
