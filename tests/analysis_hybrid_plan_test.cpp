@@ -338,6 +338,172 @@ void unknown_identity() {
   expect(plan.sites.size() == 1U && plan.sites.begin()->second.container == GenesisHybridContainer::whole_image, "unknown identity: whole_image");
 }
 
+// SEG-041-T008: the same "Unknown pointer" shape as `unknown_identity()` above, now resolved by a structurally-re-verified
+// external fact (modelling a qualified external backend's exact-target proof -- SEG-041-T004). `genesis_hybrid_container()`/
+// `validate_genesis_hybrid_round()` must consult the SAME fact set identically; external analysis remains an additional input
+// to the unchanged planner, never a second admission policy.
+void external_fact_exact_resolves_unknown_site() {
+  Image image;
+  Asm{image, entry}.movea_l_ram(0, 0xF000U).jmp_an(0);  // the jmp (A0) site sits at entry+4
+  Asm{image, 0x300U}.bra_self();
+  const auto program = program_of(image);
+  GenesisHybridPlanConfig config{};
+  GenesisExternalM68kFacts facts;
+  facts.rom_sha256 = std::string(64U, 'a');
+  facts.producer = "test-producer-exact";
+  facts.facts.push_back(GenesisExternalM68kFact{entry + 4U, {0x300U}, true});
+  config.external_m68k_facts = facts;
+  const auto plan = plan_of(*program, config);
+  expect(plan.outcome == GenesisHybridOutcome::hybrid,
+         "external exact: resolves to hybrid (got " + std::string(genesis_hybrid_outcome_name(plan.outcome)) + ")");
+  expect(plan.external_facts_applied == 1U, "external exact: exactly one site used the external fact");
+  expect(admitted(plan, 0x300U), "external exact: the externally-proven target is admitted");
+  common("external exact", *program, plan, config);
+  const auto found = plan.sites.find(entry + 4U);
+  expect(found != plan.sites.end() && found->second.container == GenesisHybridContainer::exact && found->second.external,
+         "external exact: the site is classified exact and marked external");
+}
+
+// A "contained" (non-exact) external fact uses the identical mechanism -- entries become island members subject to the SAME
+// unmodified round-based closure, exactly like an internally-derived points-to region.
+void external_fact_contained_resolves_unknown_site() {
+  Image image;
+  Asm{image, entry}.movea_l_ram(0, 0xF000U).jmp_an(0);
+  Asm{image, 0x300U}.bra_self();
+  const auto program = program_of(image);
+  GenesisHybridPlanConfig config{};
+  GenesisExternalM68kFacts facts;
+  facts.rom_sha256 = std::string(64U, 'a');
+  facts.producer = "test-producer-contained";
+  facts.facts.push_back(GenesisExternalM68kFact{entry + 4U, {0x300U}, false});
+  config.external_m68k_facts = facts;
+  const auto plan = plan_of(*program, config);
+  expect(plan.outcome == GenesisHybridOutcome::hybrid, "external contained: resolves to hybrid");
+  const auto found = plan.sites.find(entry + 4U);
+  expect(found != plan.sites.end() && found->second.container == GenesisHybridContainer::points_to_region && found->second.external,
+         "external contained: the site is classified points_to_region (the unchanged island mechanism) and marked external");
+}
+
+// A fact citing even one structurally-unverifiable entry (odd target, or a target outside the mapped image) is discarded in
+// its ENTIRETY -- never partially trusted -- and the site falls back to exactly the unmodified `unknown_identity()` outcome.
+void external_fact_discarded_when_unverifiable() {
+  Image image;
+  Asm{image, entry}.movea_l_ram(0, 0xF000U).jmp_an(0);
+  Asm{image, 0x300U}.bra_self();
+  const auto program = program_of(image);
+  for (const auto bad_target : {UINT32_C(0x301), UINT32_C(0x8000)}) {  // odd; and past the end of the mapped image (0x4000 bytes)
+    GenesisHybridPlanConfig config{};
+    GenesisExternalM68kFacts facts;
+    facts.rom_sha256 = std::string(64U, 'a');
+    facts.producer = "test-producer-bad";
+    facts.facts.push_back(GenesisExternalM68kFact{entry + 4U, {0x300U, bad_target}, true});  // one good, one bad entry
+    config.external_m68k_facts = facts;
+    const auto plan = plan_of(*program, config);
+    expect(plan.outcome == GenesisHybridOutcome::broad_whole_image && plan.admitted == plan.universe,
+           "external discarded: an unverifiable fact (target " + std::to_string(bad_target) +
+               ") never partially trusted -- falls back to broad");
+    expect(plan.external_facts_applied == 0U, "external discarded: zero sites credited to the discarded fact");
+  }
+}
+
+// An otherwise-well-formed fact whose entry count exceeds the configured island bound is discarded in
+// its entirety, exactly like an internally-derived points-to set over the same bound (`count > max_entries`).
+void external_fact_discarded_over_entry_bound() {
+  Image image;
+  Asm{image, entry}.movea_l_ram(0, 0xF000U).jmp_an(0);
+  Asm{image, 0x300U}.bra_self();
+  Asm{image, 0x400U}.bra_self();
+  const auto program = program_of(image);
+  GenesisHybridPlanConfig config{};
+  config.max_island_entries = 1U;  // one legal entry alone would fit; two cannot
+  GenesisExternalM68kFacts facts;
+  facts.rom_sha256 = std::string(64U, 'a');
+  facts.producer = "test-producer-bound";
+  facts.facts.push_back(GenesisExternalM68kFact{entry + 4U, {0x300U, 0x400U}, true});
+  config.external_m68k_facts = facts;
+  const auto plan = plan_of(*program, config);
+  expect(plan.outcome == GenesisHybridOutcome::broad_whole_image && plan.admitted == plan.universe,
+         "external discarded (bound): a fact over the configured island-entry bound is never partially trusted");
+  expect(plan.external_facts_applied == 0U, "external discarded (bound): zero sites credited");
+}
+
+// The validator must consult the SAME external facts the plan was built with; omitting them on a re-check correctly rejects a
+// configuration the validator can no longer independently re-derive (the existing "freshly recompute and compare" property,
+// now also covering the external input -- it is never blindly trusted just because `island_entries` already names it).
+void external_fact_validator_requires_matching_facts() {
+  Image image;
+  Asm{image, entry}.movea_l_ram(0, 0xF000U).jmp_an(0);
+  Asm{image, 0x300U}.bra_self();
+  const auto program = program_of(image);
+  GenesisHybridPlanConfig config{};
+  GenesisExternalM68kFacts facts;
+  facts.rom_sha256 = std::string(64U, 'a');
+  facts.producer = "test-producer-validator";
+  facts.facts.push_back(GenesisExternalM68kFact{entry + 4U, {0x300U}, true});
+  config.external_m68k_facts = facts;
+  const auto plan = plan_of(*program, config);
+  expect(plan.outcome == GenesisHybridOutcome::hybrid, "external validator: setup plan is hybrid");
+  GenesisAnalysisReportConfig analysis_config{};
+  analysis_config.domains = GenesisAnalysisDomains{true, true, true, true};
+  analysis_config.island_entries = plan.island_entries;
+  const auto report = run_genesis_analysis_report(*program, analysis_config);
+  const auto view = GenesisM68kAnalysisImage::create(*program);
+  expect(!validate_genesis_hybrid_round(report, *view, plan.island_entries, plan.universe, genesis_hybrid_max_island_entries, facts),
+         "external validator: validates when given the matching facts");
+  expect(validate_genesis_hybrid_round(report, *view, plan.island_entries, plan.universe) ==
+             std::optional<std::string>("unbounded_site"),
+         "external validator: without the matching facts it can no longer re-derive the island, and fails closed");
+}
+
+// SEG-041-T008 text-format parser: valid round-trip plus every malformed-input class fails closed (identical in effect to no
+// file at all -- never partially parsed/trusted).
+void external_facts_parser() {
+  const std::string rom = std::string(64U, 'b');
+  const std::string valid = "segarecomp.m68k_external_facts.v1\nrom_sha256 " + rom +
+                            "\nproducer segarecomp-angr-m68k-v1\nfact 00001004 exact 00000300\nfact 00002000 contained "
+                            "00002100,00002200\nend\n";
+  const auto parsed = parse_genesis_external_m68k_facts(valid, rom);
+  expect(parsed.has_value(), "parser: a well-formed file parses");
+  if (parsed) {
+    expect(parsed->rom_sha256 == rom && parsed->producer == "segarecomp-angr-m68k-v1", "parser: rom_sha256/producer round-trip");
+    expect(parsed->facts.size() == 2U, "parser: both facts parsed");
+    expect(parsed->facts[0].pc == 0x1004U && parsed->facts[0].exact && parsed->facts[0].entries == std::vector<std::uint32_t>{0x300U},
+           "parser: first fact (exact)");
+    expect(parsed->facts[1].pc == 0x2000U && !parsed->facts[1].exact &&
+               parsed->facts[1].entries == std::vector<std::uint32_t>{0x2100U, 0x2200U},
+           "parser: second fact (contained, two entries)");
+  }
+  expect(!parse_genesis_external_m68k_facts(valid, std::string(64U, 'c')).has_value(), "parser: wrong rom_sha256 is rejected");
+  expect(!parse_genesis_external_m68k_facts("wrong.schema.v1\nrom_sha256 " + rom + "\nproducer x\nend\n", rom).has_value(),
+         "parser: wrong schema line is rejected");
+  expect(!parse_genesis_external_m68k_facts("segarecomp.m68k_external_facts.v1\nrom_sha256 " + rom + "\nproducer x\n"
+                                            "fact 00001004 exact 00000300\nfact 00001000 exact 00000400\nend\n",
+                                            rom)
+             .has_value(),
+         "parser: non-ascending fact PCs are rejected");
+  expect(!parse_genesis_external_m68k_facts("segarecomp.m68k_external_facts.v1\nrom_sha256 " + rom + "\nproducer x\n"
+                                            "fact 00001004 exact 00000400,00000300\nend\n",
+                                            rom)
+             .has_value(),
+         "parser: non-ascending entries within one fact are rejected");
+  expect(!parse_genesis_external_m68k_facts("segarecomp.m68k_external_facts.v1\nrom_sha256 " + rom + "\nproducer x\n"
+                                            "fact 00001004 exact 00000300\nfact 00001004 exact 00000400\nend\n",
+                                            rom)
+             .has_value(),
+         "parser: a duplicate PC is rejected");
+  expect(!parse_genesis_external_m68k_facts("segarecomp.m68k_external_facts.v1\nrom_sha256 " + rom + "\nproducer x\n"
+                                            "fact 00001004 exact 00000300\n",
+                                            rom)
+             .has_value(),
+         "parser: a missing 'end' trailer is rejected");
+  expect(!parse_genesis_external_m68k_facts("segarecomp.m68k_external_facts.v1\nrom_sha256 " + rom + "\nproducer x\nend\ntrailing\n",
+                                            rom)
+             .has_value(),
+         "parser: trailing content after 'end' is rejected");
+  expect(!parse_genesis_external_m68k_facts(std::string(genesis_external_m68k_facts_max_bytes + 1U, 'x'), rom).has_value(),
+         "parser: an oversized file is rejected");
+}
+
 void width_rule() {
   Image image;
   Asm a{image, entry};
@@ -454,6 +620,12 @@ int main(int argc, char **argv) {
   ram_mirror();
   materialized_image();
   unknown_identity();
+  external_fact_exact_resolves_unknown_site();
+  external_fact_contained_resolves_unknown_site();
+  external_fact_discarded_when_unverifiable();
+  external_fact_discarded_over_entry_bound();
+  external_fact_validator_requires_matching_facts();
+  external_facts_parser();
   width_rule();
   width_rule_address();
   incomplete_solve();

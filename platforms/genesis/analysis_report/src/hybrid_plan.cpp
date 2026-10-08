@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstdio>
 #include <iomanip>
 #include <set>
@@ -22,6 +23,48 @@ std::string hex6(std::uint32_t value) {
   char text[16];
   std::snprintf(text, sizeof(text), "%06x", static_cast<unsigned>(value & bus_mask));
   return text;
+}
+
+// SEG-041-T008 parsing helpers, mirroring the existing `GenesisHybridAdmissionPlan` text-format conventions
+// (hybrid_admission.cpp's own `parse_hex8`/`valid_sha256`) rather than inventing a second parsing style.
+std::optional<std::uint32_t> fact_parse_hex8(std::string_view text) {
+  if (text.size() != 8U) return std::nullopt;
+  for (const char c : text)
+    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return std::nullopt;
+  std::uint32_t value{};
+  const auto result = std::from_chars(text.data(), text.data() + text.size(), value, 16);
+  if (result.ec != std::errc{} || result.ptr != text.data() + text.size()) return std::nullopt;
+  return value;
+}
+
+bool fact_valid_sha256(std::string_view text) {
+  return text.size() == 64U && std::all_of(text.begin(), text.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+}
+
+// A bounded, non-empty ASCII token (no whitespace, no control characters): the producer identity field must stay generic and
+// non-reconstructable (never a path, never a commercial identifier) -- this only enforces shape, not content policy.
+bool fact_valid_token(std::string_view text) {
+  if (text.empty() || text.size() > 128U) return false;
+  return std::all_of(text.begin(), text.end(), [](char c) { return c > 0x20 && c < 0x7F; });
+}
+
+// Strictly ascending, unique hex8 values (the same "sorted, disjoint" convention `GenesisHybridAdmissionPlan`'s own text format
+// already requires elsewhere in this product) -- an out-of-order or duplicate entry is rejected rather than silently normalized.
+std::optional<std::vector<std::uint32_t>> fact_parse_entry_list(std::string_view text) {
+  std::vector<std::uint32_t> out;
+  while (!text.empty()) {
+    const auto comma = text.find(',');
+    const auto token = text.substr(0, comma);
+    const auto value = fact_parse_hex8(token);
+    if (!value) return std::nullopt;
+    if (!out.empty() && *value <= out.back()) return std::nullopt;
+    out.push_back(*value);
+    if (comma == std::string_view::npos) break;
+    text.remove_prefix(comma + 1U);
+    if (text.empty()) return std::nullopt;  // no trailing comma
+  }
+  if (out.empty()) return std::nullopt;
+  return out;
 }
 
 // U: the sorted execution addresses of the broad immutable-ROM AOT identities of an independent copy of `program`.
@@ -141,8 +184,104 @@ const char *genesis_hybrid_container_name(GenesisHybridContainer container) noex
   return "invalid";
 }
 
-GenesisHybridSite genesis_hybrid_container(const GenesisAnalysisReport &report, const GenesisM68kAnalysisImage &image, std::uint32_t pc,
-                                           std::size_t max_entries) {
+std::optional<GenesisExternalM68kFacts> parse_genesis_external_m68k_facts(const std::string &text, const std::string &rom_sha256) {
+  if (text.size() > genesis_external_m68k_facts_max_bytes) return std::nullopt;
+  if (!fact_valid_sha256(rom_sha256)) return std::nullopt;
+  std::vector<std::string_view> lines;
+  std::string_view remaining = text;
+  while (!remaining.empty()) {
+    const auto newline = remaining.find('\n');
+    if (newline == std::string_view::npos) return std::nullopt;  // unterminated trailing line: malformed, reject the whole file
+    lines.push_back(remaining.substr(0, newline));
+    remaining.remove_prefix(newline + 1U);
+  }
+  std::size_t index = 0;
+  const auto next = [&]() -> std::optional<std::string_view> {
+    if (index >= lines.size()) return std::nullopt;
+    return lines[index++];
+  };
+  if (next() != genesis_external_m68k_facts_schema) return std::nullopt;
+  const auto sha_line = next();
+  if (!sha_line || sha_line->substr(0, 11U) != "rom_sha256 " || sha_line->substr(11U) != rom_sha256) return std::nullopt;
+  // The ROM hash must equal the caller's own digest of the exact image being analysed -- a file produced for a different ROM
+  // (or for a stale build of the same title) is rejected outright, never partially trusted.
+  const auto producer_line = next();
+  if (!producer_line || producer_line->substr(0, 9U) != "producer " || !fact_valid_token(producer_line->substr(9U))) return std::nullopt;
+  GenesisExternalM68kFacts facts;
+  facts.rom_sha256 = rom_sha256;
+  facts.producer = std::string(producer_line->substr(9U));
+  auto line = next();
+  while (line && line->substr(0, 5U) == "fact ") {
+    const auto value = line->substr(5U);
+    if (value.size() < 8U + 1U + 7U + 1U) return std::nullopt;  // "pc"+' '+"exact "/"contained "+at least one hex8
+    const auto pc = fact_parse_hex8(value.substr(0, 8U));
+    if (!pc || value[8] != ' ') return std::nullopt;
+    bool exact{};
+    std::string_view rest;
+    if (value.substr(9U, 6U) == "exact ") {
+      exact = true;
+      rest = value.substr(15U);
+    } else if (value.substr(9U, 10U) == "contained ") {
+      exact = false;
+      rest = value.substr(19U);
+    } else {
+      return std::nullopt;
+    }
+    const auto entries = fact_parse_entry_list(rest);
+    if (!entries) return std::nullopt;
+    if (!facts.facts.empty() && *pc <= facts.facts.back().pc) return std::nullopt;  // strictly ascending, unique PCs (determinism)
+    if (facts.facts.size() >= genesis_external_m68k_facts_max_facts) return std::nullopt;
+    facts.facts.push_back(GenesisExternalM68kFact{*pc, *entries, exact});
+    line = next();
+  }
+  if (line != std::string_view{"end"} || index != lines.size()) return std::nullopt;
+  return facts;
+}
+
+namespace {
+
+// SEG-041-T008: structurally re-verifies one externally-supplied fact against `image` -- segarecomp's own CPU decoder/legality
+// and mapping authority, unchanged and unweakened. A fact that fails any check here is discarded entirely (never partially
+// applied); the caller must then fall back to its own existing (angr-free) classification. This is the only place external
+// facts touch the hybrid planner, and it never trusts `image.decode`/`image.mapped`'s callers less than the planner already
+// does for every other admission authority in this file.
+std::optional<std::vector<std::uint32_t>> reverify_external_entries(const GenesisM68kAnalysisImage &image,
+                                                                     const std::vector<std::uint32_t> &entries, std::size_t max_entries) {
+  if (entries.empty() || entries.size() > max_entries) return std::nullopt;
+  std::set<std::uint32_t> verified;
+  for (const auto raw : entries) {
+    const std::uint32_t target = raw & bus_mask;
+    if ((target & 1U) != 0U) return std::nullopt;         // an odd target raises an address error: discard the whole fact
+    if (!image.mapped(target)) return std::nullopt;        // not a legal image address per segarecomp's own mapping authority
+    if (!image.decode(target)) return std::nullopt;        // not an MC68000-legal instruction per segarecomp's own decoder
+    verified.insert(target);
+  }
+  return std::vector<std::uint32_t>(verified.begin(), verified.end());
+}
+
+// Looks up and re-verifies `pc`'s externally-supplied fact, if any. Returns `site` unchanged (still `whole_image`) when there is
+// no fact for `pc`, or when the fact fails re-verification.
+GenesisHybridSite apply_external_fact(GenesisHybridSite site, const GenesisM68kAnalysisImage &image, std::uint32_t pc,
+                                      std::size_t max_entries, const std::optional<GenesisExternalM68kFacts> &external) {
+  if (!external) return site;
+  const auto found = std::find_if(external->facts.begin(), external->facts.end(), [&](const auto &fact) { return fact.pc == pc; });
+  if (found == external->facts.end()) return site;
+  auto verified = reverify_external_entries(image, found->entries, max_entries);
+  if (!verified) return site;
+  site.entries = std::move(*verified);
+  site.external = true;
+  site.container = found->exact ? GenesisHybridContainer::exact : GenesisHybridContainer::points_to_region;
+  return site;
+}
+
+// The pre-existing (SEG-031/ADR 0080), entirely unmodified-by-SEG-041-T008 containment ladder. Kept as its own
+// internal helper, byte-for-byte identical to the original `genesis_hybrid_container` body, so that every one of
+// its "return site;" early exits remains exactly the text the project's own mutation-testing harness
+// (tests/analysis_mutation_test.py's `hybrid_operand_width_bound`/`hybrid_unknown_provenance_not_widened` mutants)
+// targets -- SEG-041-T008 adds a single, centralized external-fact consultation around the one call site below,
+// never inside this internal ladder.
+GenesisHybridSite compute_internal_hybrid_container(const GenesisAnalysisReport &report, const GenesisM68kAnalysisImage &image,
+                                                     std::uint32_t pc, std::size_t max_entries) {
   GenesisHybridSite site{};
   if (const auto found = report.computed_sites.find(pc); found != report.computed_sites.end()) {
     site.family = found->second.family;
@@ -190,9 +329,29 @@ GenesisHybridSite genesis_hybrid_container(const GenesisAnalysisReport &report, 
   return site;
 }
 
+}  // namespace
+
+GenesisHybridSite genesis_hybrid_container(const GenesisAnalysisReport &report, const GenesisM68kAnalysisImage &image, std::uint32_t pc,
+                                           std::size_t max_entries, const std::optional<GenesisExternalM68kFacts> &external) {
+  auto site = compute_internal_hybrid_container(report, image, pc, max_entries);
+  // SEG-041-T008: external facts are consulted at exactly one centralized point, only for a site the unmodified
+  // internal ladder above already classified `whole_image` -- never overriding an already-sound internally-derived
+  // container (`exact`/`points_to_region`/`executable_image`/`materialized_image` all return above unchanged).
+  // Independent review (SEG-041-T008 third correction pass): explicitly re-excludes a site whose own PC cannot
+  // decode -- the internal ladder's `!decoded` branch also defaults to `whole_image`, but a site external
+  // analysis cannot even identify as a real instruction is not a case it can soundly help with (matching the
+  // original, reviewed three-call-site version's explicit exclusion of exactly this branch). Unreachable today
+  // (every caller only queries PCs already proven decodable earlier in the same report/round), kept explicit
+  // so a future caller cannot silently reacquire the gap.
+  if (site.container == GenesisHybridContainer::whole_image && image.decode(pc))
+    return apply_external_fact(site, image, pc, max_entries, external);
+  return site;
+}
+
 std::optional<std::string> validate_genesis_hybrid_round(const GenesisAnalysisReport &report, const GenesisM68kAnalysisImage &image,
                                                          const std::map<std::uint32_t, std::vector<std::uint32_t>> &island_entries,
-                                                         const std::vector<std::uint32_t> &universe, std::size_t max_island_entries) {
+                                                         const std::vector<std::uint32_t> &universe, std::size_t max_island_entries,
+                                                         const std::optional<GenesisExternalM68kFacts> &external) {
   if (!report.images_valid || !report.analysis.complete) return "analysis_incomplete";
   const auto &reached = report.discovered;
   const auto covered = [&](std::uint32_t target) -> bool {
@@ -217,7 +376,7 @@ std::optional<std::string> validate_genesis_hybrid_round(const GenesisAnalysisRe
       return "call_continuation_not_admitted";
     if (control.dynamic == M68kDynamicControlFamily::none) continue;
     if (uncovered.contains(pc)) {
-      const auto site = genesis_hybrid_container(report, image, pc, max_island_entries);
+      const auto site = genesis_hybrid_container(report, image, pc, max_island_entries, external);
       if (site.container == GenesisHybridContainer::whole_image) return "unbounded_site";
       const auto configured = island_entries.find(pc);
       if (configured == island_entries.end()) return "site_not_configured";
@@ -286,6 +445,7 @@ GenesisHybridPlan plan_genesis_hybrid_admission(const FrontendProgram &program, 
       return plan;
     }
     plan.sites.clear();
+    plan.external_facts_applied = 0U;
     plan.resolved_sites = 0U;
     for (const auto &[pc, site] : report.computed_sites) plan.resolved_sites += site.resolved ? 1U : 0U;
     plan.premise_returns = report.analysis.return_slots.premise_sites;
@@ -293,9 +453,10 @@ GenesisHybridPlan plan_genesis_hybrid_admission(const FrontendProgram &program, 
     auto grown_opaque = opaque;
     bool whole = false;
     for (const auto pc : uncovered_sites(report)) {
-      auto site = genesis_hybrid_container(report, *image, pc, config.max_island_entries);
+      auto site = genesis_hybrid_container(report, *image, pc, config.max_island_entries, config.external_m68k_facts);
       if (site.container == GenesisHybridContainer::whole_image) whole = true;
       else merge_into(grown[pc], site.entries);
+      if (site.external) ++plan.external_facts_applied;
       plan.sites.emplace(pc, std::move(site));
     }
     if (whole) {
@@ -320,7 +481,8 @@ GenesisHybridPlan plan_genesis_hybrid_admission(const FrontendProgram &program, 
     }
     if (grown == islands && grown_opaque == opaque) {
       plan.island_entries = islands;
-      if (const auto failure = validate_genesis_hybrid_round(report, *image, islands, plan.universe, config.max_island_entries)) {
+      if (const auto failure = validate_genesis_hybrid_round(report, *image, islands, plan.universe, config.max_island_entries,
+                                                              config.external_m68k_facts)) {
         plan.outcome = GenesisHybridOutcome::broad_validation_failed;
         plan.validation_failure = *failure;
         return plan;
@@ -367,6 +529,10 @@ std::string format_genesis_hybrid_plan_aggregate(const GenesisHybridPlan &plan) 
   const std::size_t total = hybrid ? plan.admitted.size() : broad_u;
   const std::size_t fallback = total >= plan.precise_d_in_universe ? total - plan.precise_d_in_universe : 0U;
   std::array<std::size_t, genesis_hybrid_container_count> containers{};
+  // The `exact` bucket is intentionally dual-sourced: it starts at `resolved_sites` (D's own exact computed-site resolutions,
+  // never uncovered) and the loop below additionally credits any UNCOVERED site resolved via an external exact fact
+  // (SEG-041-T008). Both are genuinely "exact," so sharing one bucket is not a soundness concern, but a reader who needs to
+  // separate the two should use `external_facts_applied` (uncovered sites specifically) rather than this aggregate alone.
   containers[static_cast<std::size_t>(GenesisHybridContainer::exact)] = plan.resolved_sites;
   std::size_t islands = 0, whole = 0;
   // Fallback attribution by generic reason (family / generic reason / CPU sub-reason / container): sites and island entries.
@@ -402,6 +568,7 @@ std::string format_genesis_hybrid_plan_aggregate(const GenesisHybridPlan &plan) 
   out << '}';
   if (!plan.validation_failure.empty()) out << ",\"validation_failure\":\"" << plan.validation_failure << '"';
   if (plan.diagnostic_transparent_handlers) out << ",\"diagnostic_ablation\":\"transparent_handlers\",\"credited\":false";
+  out << ",\"external_facts_applied\":" << plan.external_facts_applied;
   out << '}';
   return out.str();
 }
