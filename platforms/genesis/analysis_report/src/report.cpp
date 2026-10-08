@@ -671,6 +671,19 @@ std::string format_genesis_analysis_report_private(const GenesisAnalysisReport &
   }
   out << "{\"schema\":\"segarecomp.m68k_core_report.private.v1\",\"aggregate\":" << aggregate
       << ",\"roots\":" << hex_list(report.roots.roots) << ",\"discovered\":" << hex_list(discovered)
+      << ",\"discovered_lengths\":{";
+  {
+    // SEG-042-T001: the same `report.discovered` map's own instruction lengths, keyed by PC, alongside the
+    // existing flat `discovered` address list above (left byte-for-byte unchanged for its existing
+    // consumers). Lets an external containment/starting-scope consumer soundly test straight-line
+    // contiguity (`prev_pc + length(prev_pc) == pc`) without re-decoding anything itself.
+    bool first_length = true;
+    for (const auto &[pc, length] : report.discovered) {
+      out << (first_length ? "" : ",") << '"' << hex6(pc) << "\":" << length;
+      first_length = false;
+    }
+  }
+  out << "}"
       << ",\"call_continuations\":" << hex_list(report.call_continuations)
       << ",\"call_target_continuations\":{";
   {

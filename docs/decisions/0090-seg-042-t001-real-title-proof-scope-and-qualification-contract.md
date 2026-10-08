@@ -53,12 +53,14 @@ For a site whose family uses an address-register/index-derived target (every fam
 report facts (never from a new reachability framework):
 
 1. **A deterministic `start_pc` candidate, derived only from existing report facts.** Walk backward
-   through `discovered` (PC -> length) from the site's own PC along strictly contiguous predecessors
-   (`prev_pc + length(prev_pc) == pc`, i.e. the straight-line layout segarecomp's own exact discovery
-   already proved reachable) until the first address that is itself a proven call-target entry (a key of
-   the new `call_target_continuations` map, §4.4 below) is reached, or the walk cannot continue (a gap, or
-   the program's own root). This candidate needs no new analysis: `discovered`'s contiguity and
-   `call_target_continuations`'s keys are both already-existing report facts.
+   through the new `discovered_lengths` map (PC -> instruction length, a thin per-PC projection of the
+   already-existing `report.discovered` map the existing flat `discovered` address list is built from)
+   from the site's own PC along strictly contiguous predecessors (`prev_pc + length(prev_pc) == pc`, i.e.
+   the straight-line layout segarecomp's own exact discovery already proved reachable) until the first
+   address that is itself a proven call-target entry (a key of the new `call_target_continuations` map,
+   §4 below) is reached, or the walk cannot continue (a gap, or the program's own root). This candidate
+   needs no new analysis: `discovered_lengths`'s contiguity and `call_target_continuations`'s keys are
+   both thin projections of already-existing report facts.
 2. **No external entry into the candidate span.** The one residual risk a purely local, nearest-preceding-
    entry heuristic cannot rule out on its own is a jump from *outside* the candidate span landing *inside*
    it from somewhere this walk never saw. This is checked directly, generically, against the new

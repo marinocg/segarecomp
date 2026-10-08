@@ -346,6 +346,8 @@ void static_call_graph_report() {
          "static call graph: private JSON carries the callee -> continuations map: " + private_output);
   expect(private_output.find("\"static_successors\":{\"000200\":[\"000300\"]") != std::string::npos,
          "static call graph: private JSON carries the static successor map: " + private_output);
+  expect(private_output.find("\"discovered_lengths\":{\"000200\":6,") != std::string::npos,
+         "static call graph: private JSON carries per-PC instruction lengths for the contiguity walk: " + private_output);
 }
 
 void reject_invalid_images() {
