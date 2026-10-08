@@ -209,6 +209,75 @@ def test_f_rte_on_path_poisons_proof(tmpdir: Path) -> None:
     expect(reason == "unsupported_proof_path_rte", f"F: expected unsupported_proof_path_rte, got {reason}")
 
 
+def jmp_pcidx_word(d_register: bool, index_num: int, long_index: bool, disp8: int) -> bytes:
+    ext = (0x0000 if d_register else 0x8000) | (index_num << 12) | (0x0800 if long_index else 0x0000) | (disp8 & 0xFF)
+    return w(0x4EFB) + w(ext)
+
+
+def test_g_pc_step_matches_register_read(tmpdir: Path) -> None:
+    """SEG-042-T002: `explore_exact_target_pc` (read the PC one step after the dynamic-control
+    instruction) must agree with `explore_exact_target` (read the target register directly beforehand)
+    on the shared case both can describe -- a plain `jmp (a0)`."""
+    entry = 0x400
+    code = movea_l_imm(0, 0x300) + JMP_A0
+    target_pc = entry + len(movea_l_imm(0, 0x300))
+    rom = bytearray(make_rom(bytes(code), entry=entry))
+    rom[0x300:0x300 + len(BRA_SELF)] = BRA_SELF
+    rom_path = write_rom(tmpdir, bytes(rom))
+
+    register_targets, _, register_reason = producer.explore_exact_target(
+        str(rom_path), entry, target_pc, "a0", [], max_entries=64, max_steps=1000)
+    pc_targets, steps, pc_reason, fetched_words = producer.explore_exact_target_pc(
+        str(rom_path), entry, target_pc, [], max_entries=64, max_steps=1000)
+    expect(register_reason == "closed" and pc_reason == "closed", f"G: both modes must close ({register_reason}, {pc_reason})")
+    expect(pc_targets == register_targets == [0x300], f"G: PC-step and register-read modes must agree (got {pc_targets} vs {register_targets})")
+    expect(0x4ED0 in fetched_words, f"G: the jmp (a0) opcode word itself must be in fetched_words (got {[hex(x) for x in fetched_words]})")
+    expect(steps >= 1, "G: the PC-step mode must have taken at least one step to execute the jmp itself")
+
+
+def test_h_pc_step_resolves_pc_relative_index_form(tmpdir: Path) -> None:
+    """SEG-042-T002: the actual new capability -- a `jmp (d8,PC,D0.w)` site, whose effective address is
+    only computed as part of EXECUTING the instruction (address-of-extension-word + sign-extended D0.w +
+    disp8), not sitting in any single register beforehand. `explore_exact_target` (register-read) cannot
+    describe this family at all; `explore_exact_target_pc` must resolve it exactly, enumerating both
+    concrete values a small, bounded D0 (set to 0 or 2 -- MC68000's brief extension word has no scale
+    field, so two cleanly 2-byte-separated, even-aligned landing pads need an index that itself differs
+    by 2) takes along the two feasible paths reaching it."""
+    entry = 0x400
+    code = tst_b_abs_l(SYM_CELL)              # 6 bytes
+    beq_pos = len(code)
+    code += w(0x6700)                          # beq.b (fixup) -> short path: D0 = 0
+    bra_pos = len(code)
+    code += w(0x6000)                          # bra.b (fixup) -> long path: D0 = 2
+    l_short = len(code)
+    code += w(0x7000)                           # moveq #0,D0
+    bra2_pos = len(code)
+    code += w(0x6000)                           # bra.b (fixup) -> l_join
+    l_long = len(code)
+    code += w(0x7002)                           # moveq #2,D0
+    l_join = len(code)
+    target_pc = entry + l_join                  # the jmp instruction's own opcode-word PC (the site)
+    ext_word_pc = target_pc + 2
+    pad_a_addr = target_pc + 4                   # right after the 4-byte jmp (d8,PC,D0.w) instruction
+    pad_b_addr = pad_a_addr + 2
+    disp8 = pad_a_addr - ext_word_pc
+    code += jmp_pcidx_word(d_register=True, index_num=0, long_index=False, disp8=disp8)
+    code += w(0x4E71) + w(0x4E71)                 # pad_a, pad_b: never executed, just need to exist as addresses
+
+    code = bytearray(code)
+    code[beq_pos + 1] = (entry + l_short - (entry + beq_pos + 2)) & 0xFF
+    code[bra_pos + 1] = (entry + l_long - (entry + bra_pos + 2)) & 0xFF
+    code[bra2_pos + 1] = (entry + l_join - (entry + bra2_pos + 2)) & 0xFF
+    rom = make_rom(bytes(code), entry=entry)
+    rom_path = write_rom(tmpdir, rom)
+
+    targets, steps, reason, fetched_words = producer.explore_exact_target_pc(
+        str(rom_path), entry, target_pc, [], max_entries=64, max_steps=1000)
+    expect(reason == "closed", f"H: pc-relative index form must close soundly (got {reason})")
+    expect(targets == [pad_a_addr, pad_b_addr], f"H: expected both D0-selected landing pads, got {targets}")
+    expect(0x4EFB in fetched_words, "H: the jmp (d8,PC,Xn) opcode word itself must be in fetched_words")
+
+
 def test_e_entry_bound(tmpdir: Path) -> None:
     # Four feasible, concretely-determined targets (no symbolic branch needed): a small jump table
     # indexed by a bounded, concrete register value, reached via four distinct concrete entries.
@@ -245,6 +314,8 @@ def main() -> int:
         test_d_target_side_loop_terminates(tmpdir)
         test_e_entry_bound(tmpdir)
         test_f_rte_on_path_poisons_proof(tmpdir)
+        test_g_pc_step_matches_register_read(tmpdir)
+        test_h_pc_step_resolves_pc_relative_index_form(tmpdir)
     if failures:
         print(f"{failures} failure(s)", file=sys.stderr)
         return 1
