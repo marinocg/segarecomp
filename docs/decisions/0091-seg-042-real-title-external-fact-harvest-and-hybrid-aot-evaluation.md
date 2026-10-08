@@ -2,12 +2,18 @@
 
 - Status: Accepted (decision: **REAL-TITLE CLOSURE STILL BROAD** -- real, structural, zero-angr
   `rts_computed` containment facts were produced automatically on every one of the three real titles
-  tested (6/11 Sonic 1, 1/4 Sonic 2, 10/14 Cool Spot), but the pre-existing, unmodified SEG-031
-  all-or-nothing closure rule means no title reaches `complete_hybrid`: any single remaining uncovered
-  site degenerates the entire plan back to broad, regardless of how many other sites were soundly
-  closed. angr's own exact-target mechanism (this milestone's central new experiment) produced **zero**
-  real-title facts across all three titles and every eligible family attempted -- a second, narrower,
-  independently informative negative result, not the same finding as the containment result above.)
+  tested (6/11 Sonic 1, 1/4 Sonic 2, 10/14 Cool Spot), but no title reaches `complete_hybrid`: on every
+  title, at least one reachable dynamic-control site still has no *proven* container narrower than the
+  whole executable universe `U`. Under the current static-AOT architecture, a `whole_image` container is
+  not a conservative label that could simply be loosened -- it means no sound sub-`U` target/container
+  bound has been established for that site, so admitting anything less than `U` for it would be unsound.
+  The unmodified SEG-031 planner's `whole_image -> broad` behavior is therefore the *correct*, sound
+  consequence of the currently-available proof, not a separately relaxable policy; closing the remaining
+  gap requires a new sound sub-`U` proof (or a reachability-unreachable proof) for each such site, not a
+  change to that rule. angr's own exact-target mechanism (this milestone's central new experiment)
+  produced **zero** real-title facts across all three titles and every eligible family attempted -- a
+  second, narrower, independently informative negative result, not the same finding as the containment
+  result above.)
 - Date: 2026-10-08 (single combined session, after SEG-041/PR #80's merge was confirmed).
 - Task: SEG-042-T001..T007 (one combined, measurement-only delivery; T004's one allowed blocker-directed
   refinement ran against all three titles, not just Sonic 1).
@@ -63,10 +69,12 @@ Baseline confirmed matching ADR 0089 exactly: `U=246293`, `D=1276`, 13 unresolve
 **the first real-title external-fact success this architecture has ever produced** -- all six via the
 zero-angr structural containment mechanism, zero via angr exact-target proof. Feeding the result through
 the unchanged SEG-031 planner: `external_facts_applied=6`, `whole_image_fallback_count` drops `13 -> 7`,
-but the overall outcome **remains `broad_whole_image`, `H/U=1.000000` unchanged**. The planner's own,
-pre-existing, deliberately conservative rule -- any remaining uncovered site with no bound narrower than
-the whole program degenerates the *entire* plan to broad -- means real, majority partial closure buys
-*zero* measured reduction in `H` unless every uncovered site closes.
+but the overall outcome **remains `broad_whole_image`, `H/U=1.000000` unchanged**. This is the sound
+consequence, not a policy artifact: the 7 still-unresolved sites each remain `whole_image` because no
+sub-`U` container has been proven for them, and the unmodified SEG-031 planner correctly admits `U` for
+any site it cannot soundly bound narrower -- real, majority partial closure (6 of 11 sites) buys *zero*
+measured reduction in `H` because the admission is only as narrow as its *least*-proven remaining site,
+not an average or a majority.
 
 ### SEG-042-T004 (done): one blocker-directed refinement -- diagnosed, did not close
 
@@ -85,14 +93,16 @@ rejection) are recorded honestly rather than bypassed.
 
 ### SEG-042-T005 (done): Sonic 2 and Cool Spot -- identical mechanism, same qualitative shape
 
-Zero title-specific code. Sonic 2: 1/4 sites contained, same all-or-nothing degeneration. Cool Spot (a
-structurally different title: real `jsr_an`/`jmp_an` sites, zero `pc_index_explicit`): **10/14**
-`rts_computed` sites contained -- the largest single real-title containment result this milestone
-measured -- with the remaining 7 `jsr_an`/`jmp_an` sites all independently already classified
-`interrupt_resumption_unproven` by segarecomp's own pre-existing sound analysis, consistent with being
-interrupt-handler-adjacent code no mechanism in this milestone (or SEG-034..041) could bound. Every title
-tested shows the identical shape: real containment succeeds broadly, angr exact-target proof succeeds
-nowhere, and the all-or-nothing rule blocks closure regardless.
+Zero title-specific code. Sonic 2: 1/4 sites contained; the same sound consequence applies (one
+remaining unproven site is enough to keep `H=U`). Cool Spot (a structurally different title: real
+`jsr_an`/`jmp_an` sites, zero `pc_index_explicit`): **10/14** `rts_computed` sites contained -- the
+largest single real-title containment result this milestone measured -- with the remaining 7
+`jsr_an`/`jmp_an` sites all independently already classified `interrupt_resumption_unproven` by
+segarecomp's own pre-existing sound analysis, consistent with being interrupt-handler-adjacent code no
+mechanism in this milestone (or SEG-034..041) could bound. Every title tested shows the identical shape:
+real containment succeeds broadly, angr exact-target proof succeeds nowhere, and at least one reachable
+site per title still lacks any proven sub-`U` container, so the sound planner result is `H=U` on all
+three regardless of how much partial progress was made elsewhere.
 
 ### SEG-042-T006 (done): economics -- not measured, by this task's own pre-registered non-goal
 
@@ -117,10 +127,12 @@ performed (this task's explicit non-goal: "No economics measurement for a title 
    out) in several of them.
 2. **Does bounded containment stop local uncertainty from widening to U?** Yes, *locally and genuinely*:
    every credited containment fact is a small, bounded, sound island (2-10 entries, never the whole
-   program), independently re-verified by the unmodified SEG-031 consumer. But *globally*, no -- the
-   pre-existing all-or-nothing closure rule means a real title's measured `H` stays at `U` the instant
-   even one site remains open, so bounded local containment does not, by itself, stop the *overall plan*
-   from widening to the full universe on any title tested.
+   program), independently re-verified by the unmodified SEG-031 consumer. But *globally*, no -- not
+   because local containment is somehow undone, but because the sites it has not yet reached remain
+   genuinely unproven: the planner's measured `H` stays at `U` the instant even one site has no proven
+   sub-`U` container, which is the sound admission for an unproven site, so bounded local containment on
+   *some* sites does not, by itself, establish a narrower sound bound for the *sites it was never applied
+   to*, on any title tested.
 3. **Does hybrid admission materially reduce H?** No. `H/U=1.000000`, unchanged from broad, on every one
    of the three titles measured.
 4. **Is the economic benefit enough to change production strategy?** Not evaluated (SEG-042-T006): no
@@ -138,27 +150,38 @@ tooling crash, never an environment gap). This does **not** erase angr's already
 specific value (SEG-041-T003's Sonic 1 Z80 boot-image recovery, independently Musashi-confirmed
 byte-exact): angr remains a real, demonstrated, narrowly-scoped generation-time proof/evaluation tool.
 It is specifically the *M68K exact-target reachability* use case that this milestone's real-title
-evidence now weighs against, not external analysis in general.
+evidence now weighs against, not external analysis in general. Characterized precisely: angr as a
+**targeted, bounded guest evaluator/proof helper** (concrete execution of a specific, already-isolated
+routine, as in the Z80 decompressor) remains demonstrated and useful; angr as the **primary M68K
+dynamic-control exact-target reachability producer** has a poor real-title yield so far (zero credited
+facts across three titles). This milestone does not claim angr is useless -- it claims this one specific
+use case underperformed, repeatedly, under fair conditions.
 
-**Distinguishing "the architecture failed" from "angr failed" from "closure requires full coverage":**
-none of the three is the same claim, and this ADR states all three separately rather than conflating
-them. The recomp-map/island architecture did not fail: it correctly, soundly consumed every fact handed
-to it, on every title, exactly as designed, and its own closure/validation round-trip is the reason a
-weak or wrong external guess could never have produced an unsound result even if one had been supplied.
-Angr specifically produced zero real-title exact-target value in this milestone, a real, narrow, now
-twice-independently-replicated (Sonic 1 and Sonic 2's resource-exhaustion; Sonic 1 and Cool Spot's
-genuinely-unconstrained paths) negative finding. The reason no title closes is an entirely separate,
-third fact: the pre-existing all-or-nothing closure rule, which this milestone did not change and was
-never asked to change.
+**Distinguishing "the architecture failed" from "angr failed" from "a residual site remains
+unproven":** none of the three is the same claim, and this ADR states all three separately rather than
+conflating them. The recomp-map/island architecture did not fail: it correctly, soundly consumed every
+fact handed to it, on every title, exactly as designed, and its own closure/validation round-trip is the
+reason a weak or wrong external guess could never have produced an unsound result even if one had been
+supplied. Angr specifically produced zero real-title exact-target value in this milestone, a real,
+narrow, now twice-independently-replicated (Sonic 1 and Sonic 2's resource-exhaustion; Sonic 1 and Cool
+Spot's genuinely-unconstrained paths) negative finding. The reason no title closes is an entirely
+separate, third fact, and it is not a policy this milestone chose not to change: **on every title, at
+least one reachable dynamic-control site still has no sound container narrower than `U`**, and the
+planner's unmodified `whole_image -> broad` behavior is the architecturally-required, correct response to
+that fact under the current static-AOT contract (reachable site with no proven sub-`U` bound -> the only
+sound target approximation is `U` -> static AOT must admit `U`). Closing that gap needs a new sound
+proof per remaining site (or a proof the site is unreachable), never a loosening of the admission rule
+itself -- loosening it without such a proof would be unsound, not merely conservative.
 
 **Final classification: `REAL-TITLE CLOSURE STILL BROAD`** (one of this task's four pre-registered
 labels) -- equivalently, outcome class **B, "ANALYSIS USEFUL, CLOSURE STILL BLOCKED"** in the milestone's
-own broader framing: real, sound, automatically-produced facts exist on every title tested, but the
-remaining blocker (the all-or-nothing closure rule, compounded by angr's own zero real-title exact-target
-yield) still forces `H=U` everywhere. Not `ADOPT HYBRID AOT AS PRODUCTION CANDIDATE` (nothing closed);
-not `RETAIN HYBRID AS OPT-IN / BROAD DEFAULT` alone (too weak a label for what was actually found -- real
-automated facts, not merely an inert opt-in mechanism); not `EXTERNAL FACTS USEFUL BUT ECONOMICS
-INSUFFICIENT` (economics was never reached, not merely insufficient).
+own broader framing: real, sound, automatically-produced facts exist on every title tested, but at least
+one reachable site per title still lacks a proven sub-`U` container -- correctly forcing `H=U` under the
+planner's existing, unmodified, sound rule, compounded by angr's own zero real-title exact-target yield
+toward closing those specific remaining sites. Not `ADOPT HYBRID AOT AS PRODUCTION CANDIDATE` (nothing
+closed); not `RETAIN HYBRID AS OPT-IN / BROAD DEFAULT` alone (too weak a label for what was actually
+found -- real automated facts, not merely an inert opt-in mechanism); not `EXTERNAL FACTS USEFUL BUT
+ECONOMICS INSUFFICIENT` (economics was never reached, not merely insufficient).
 
 ## Independent adversarial/completion gate
 
@@ -228,9 +251,20 @@ committed).
   control-site closure question this milestone centrally investigated; its narrower, already-established
   value (generation-time concrete-execution evaluation, as in the Z80 boot-image case) is unaffected and
   undiminished by this finding.
-- A future milestone revisiting this question should not re-attempt angr exact-target proof on these
-  same sites and call a repeated failure new evidence; it should instead examine whether the all-or-
-  nothing closure rule itself is the right place to invest (e.g. a title-independent, structurally sound
-  way to admit a *partial* hybrid closure without degenerating fully to broad), since that is now the
-  measured, title-independent blocker standing between real, working containment and a materially smaller
-  `H`.
+- A future milestone revisiting this question should **not** re-attempt angr exact-target proof on these
+  same sites and call a repeated failure new evidence, and should **not** target the admission rule
+  itself: `whole_image -> broad` is the correct, sound consequence of an unproven site under the current
+  static-AOT contract, not a relaxable policy -- loosening it without a new proof would trade soundness
+  for a smaller `H`, which this project does not do. The measured, title-independent blocker is instead
+  that at least one reachable dynamic-control site per title still lacks *any* sound sub-`U`
+  target/container proof. SEG-043 ("Bound residual whole-image M68K control sites") is registered on
+  harness `main` (not started on this PR) to pursue exactly that: whether the remaining real-title
+  `whole_image` sites can be converted, generically, into sound sub-`U` containers, via (in priority
+  order) a CFG-shaped proof-scope test that distinguishes a same-function backedge from a genuine
+  external entry (the exact gap SEG-042-T004 found and left unresolved), a generalized branch-entered/
+  shared-epilogue `rts_computed` containment region reusing existing SEG-031/report/return-slot facts
+  (not a second whole-program stack analyzer), bounded selector-domain recovery for `pc_index_explicit`
+  sites from existing finite-value evidence before resorting to fully-symbolic angr execution, and only
+  then -- if RTE/interrupt-frame semantics remain the dominant blocker once every other site is sound --
+  a narrow, segarecomp-owned RTE semantic summary (never a second emulator). Economics (SEG-042-T006's
+  question) is deferred again until a title actually reaches `H < U` under the unchanged SEG-031 planner.
