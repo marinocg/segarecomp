@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+"""SEG-044-T002: deterministic, ROM-bound, fail-closed source-derived M68K executable-universe extractor.
+
+Input: an assembler LISTING (never source text) for an exact external source project that rebuilds the pinned ROM,
+plus that ROM. Output: `segarecomp.m68k_source_universe.v1`, the set `C` of instruction-start addresses of every
+listing row that was assembled while the effective CPU was MC68000 and whose mnemonic is in the closed MC68000 set.
+
+Trust contract (ADR 0093): `C` is an EXTERNAL semantic-completeness authority; segarecomp re-verifies structure only
+(mapped/even/decodable/bounded/ROM hash). Anything this tool does not recognise is NO AUTHORITY: the whole extraction
+fails with a stable error class, it never guesses a code/data classification. The listing and its contents are
+commercial-derived and are never printed; diagnostics contain only the error class and counts.
+
+Listing dialect: the Macroassembler AS `-L` listing with `listing purecode` (macro invocations appear as `(MACRO)` rows
+followed by their expanded rows; skipped conditional regions are absent; macro DEFINITION bodies appear without bytes).
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import subprocess
+import sys
+
+SCHEMA = "segarecomp.m68k_source_universe.v1"
+MAX_ENTRIES = 1 << 16          # same defence-in-depth bound as the island bound
+MAX_LISTING_BYTES = 256 << 20  # bounded input
+MAX_ROM_BYTES = 1 << 24
+
+# Closed MC68000 mnemonic set (base mnemonic, size suffix stripped). Anything else with emitted bytes is NO AUTHORITY.
+M68K = frozenset("""
+abcd add adda addi addq addx and andi asl asr
+bcc bcs beq bge bgt bhi bhs ble blo bls blt bmi bne bpl bvc bvs bra bsr bchg bclr bset btst
+chk clr cmp cmpa cmpi cmpm
+dbcc dbcs dbeq dbf dbge dbgt dbhi dble dbls dblt dbmi dbne dbpl dbra dbt dbvc dbvs dbhs dblo
+divs divu eor eori exg ext illegal jmp jsr lea link lsl lsr
+move movea movem movep moveq muls mulu nbcd neg negx nop not or ori pea reset rol ror roxl roxr rte rtr rts
+sbcd scc scs seq sf sge sgt shi sle sls slt smi sne spl st svc svs shs slo stop sub suba subi subq subx swap tas trap trapv tst unlk
+""".split())
+# Directives that legitimately emit bytes but assert nothing about execution.
+DATA = frozenset("dc dw db ds dcb even cnop align padding".split())
+# Directives allowed to START an otherwise unexplained ROM range (binary assets, padding, Z80 blocks).
+GAP = frozenset("binclude incbin even cnop align org ds dcb save padding".split())
+
+ROW = re.compile(r"^(?:\(\d+\))?\s*(\d+)/\s*([0-9A-F]+) :(?: (.*))?$")
+CONT = re.compile(r"^\s+([0-9A-F]+) : (.*)$")
+HEX = re.compile(r"(?:[0-9A-F]{2}(?:[0-9A-F]{2})?(?: |$))+")
+SHA = re.compile(r"[0-9a-f]{64}")
+REV = re.compile(r"[0-9a-f]{40}")
+LABEL = re.compile(r"^[A-Za-z_.@][\w.@]*:(.*)$")
+TOKEN = re.compile(r"[A-Za-z0-9._+-]{1,64}")
+
+
+class SourceMapError(Exception):
+    """Stable, content-free failure class (never includes listing text)."""
+
+    def __init__(self, code: str, count: int = 0):
+        super().__init__(code)
+        self.code = code
+        self.count = count
+
+
+def _fail(code: str, count: int = 0):
+    raise SourceMapError(code, count)
+
+
+def _tokens(src: str) -> list[str]:
+    text = src.split(";", 1)[0].strip()
+    parts = text.split()
+    if parts:
+        label = LABEL.match(parts[0])
+        if label:  # `label:` or `label:directive`
+            parts = ([label.group(1)] if label.group(1) else []) + parts[1:]
+    return parts
+
+
+def parse_listing(listing: str, rom: bytes):
+    """Returns (instruction_starts, summary). Raises SourceMapError."""
+    if len(listing) > MAX_LISTING_BYTES:
+        _fail("listing_too_large")
+    if len(rom) == 0 or len(rom) > MAX_ROM_BYTES or len(rom) % 2:
+        _fail("rom_size")
+    stack: list[str] = []
+    mode = "68000"
+    in_macro = False
+    rows = []  # [addr, bytearray, kind, tokens]
+    gap_tokens: dict[int, set[str]] = {}
+    last = None
+    seen_row = False
+    for raw in listing.split("\n"):
+        line = raw.rstrip("\r")
+        match = ROW.match(line.rstrip())
+        if match:
+            seen_row = True
+            last = None
+            addr = int(match.group(2), 16)
+            rest = match.group(3) or ""
+            field = rest[:20].ljust(20)
+            src = rest[20:]
+            tokens = _tokens(src)
+            if field.strip() == "ALL":
+                field = " " * 20
+            first = tokens[0].lower().lstrip("!") if tokens else ""
+            if in_macro:
+                if field.strip() and HEX.fullmatch(field.rstrip()):
+                    _fail("bytes_inside_macro_definition")
+                if first == "endm":
+                    in_macro = False
+                elif "macro" in [t.lower() for t in tokens[:2]]:
+                    _fail("nested_macro_definition")
+                continue
+            if len(tokens) >= 1 and (first == "macro" or (len(tokens) >= 2 and tokens[1].lower() == "macro")):
+                in_macro = True
+                continue
+            if first == "save":
+                stack.append(mode)
+                gap_tokens.setdefault(addr, set()).add("save")
+                continue
+            if first == "restore":
+                if not stack:
+                    _fail("unbalanced_restore")
+                mode = stack.pop()
+                continue
+            if first == "cpu":
+                if len(tokens) != 2 or tokens[1].lower() not in ("68000", "z80"):
+                    _fail("unknown_cpu")
+                mode = "z80" if tokens[1].lower() == "z80" else "68000"
+                continue
+            fieldtxt = field.rstrip()
+            if fieldtxt and HEX.fullmatch(fieldtxt):
+                data = bytes.fromhex(fieldtxt.replace(" ", ""))
+                base = first.split(".")[0]
+                if mode == "z80":
+                    kind = "Z"
+                elif base in M68K:
+                    kind = "I"
+                elif base in DATA:
+                    kind = "D"
+                else:
+                    _fail("unknown_construct_with_bytes")
+                row = [addr, bytearray(data), kind, base]
+                rows.append(row)
+                last = row
+            elif first in GAP:
+                gap_tokens.setdefault(addr, set()).add(first)
+            continue
+        cont = CONT.match(line.rstrip())
+        if cont and last is not None:
+            field = cont.group(2)[:20].rstrip()
+            if field and HEX.fullmatch(field):
+                addr = int(cont.group(1), 16)
+                if addr != last[0] + len(last[1]):
+                    _fail("listing_continuation_gap")
+                last[1] += bytes.fromhex(field.replace(" ", ""))
+            continue
+    if not seen_row:
+        _fail("not_a_listing")
+    if in_macro:
+        _fail("unterminated_macro_definition")
+    if stack or mode != "68000":
+        _fail("cpu_mode_not_restored")
+
+    # cell state: 0 none, 1 instruction opcode word, 3 instruction operand byte, 2 data, 4 operand byte overwritten by data
+    cover = bytearray(len(rom))
+    starts = set()
+    counts = {"I": 0, "D": 0}
+    pending_diffs: set[int] = set()
+    overlays = 0
+    for addr, data, kind, base in rows:
+        if kind == "Z":
+            continue
+        end = addr + len(data)
+        if end > len(rom):
+            _fail("row_outside_rom")
+        if kind == "I":
+            if addr & 1 or len(data) < 2 or len(data) & 1:
+                _fail("instruction_odd")
+            if bytes(data[:2]) != rom[addr:addr + 2]:
+                _fail("instruction_opcode_differs_from_rom")
+            for offset in range(len(data)):
+                if data[offset] != rom[addr + offset]:
+                    pending_diffs.add(addr + offset)  # must later be explained by a data overwrite
+            starts.add(addr)
+            counts["I"] += len(data)
+        else:
+            if bytes(data) != rom[addr:end]:
+                _fail("data_differs_from_rom")
+            counts["D"] += len(data)
+        for position in range(addr, end):
+            state = cover[position]
+            if state:
+                # The source's own `org *-1` / `dc.b` fixup idiom: a DATA row may overwrite an instruction OPERAND byte
+                # (never an opcode word, other data, or another instruction) with the final ROM value.
+                if kind == "D" and state == 3:
+                    cover[position] = 4
+                    overlays += 1
+                    continue
+                _fail("overlapping_rows")
+            cover[position] = (1 if position - addr < 2 else 3) if kind == "I" else 2
+    if pending_diffs and any(cover[position] != 4 for position in pending_diffs):
+        _fail("listing_bytes_differ_from_rom")
+    # Every uncovered ROM range must START at a directive that explains it (binary include, padding, Z80 block).
+    unexplained = 0
+    position = 0
+    uncovered = 0
+    while position < len(rom):
+        if cover[position]:
+            position += 1
+            continue
+        begin = position
+        while position < len(rom) and not cover[position]:
+            position += 1
+        uncovered += position - begin
+        if not (gap_tokens.get(begin, set()) & GAP):
+            unexplained += 1
+    if unexplained:
+        _fail("unexplained_rom_range", unexplained)
+    if not starts:
+        _fail("empty_universe")
+    if len(starts) > MAX_ENTRIES:
+        _fail("universe_too_large")
+    return sorted(starts), {
+        "instruction_starts": len(starts), "instruction_bytes": counts["I"], "data_bytes": counts["D"],
+        "other_bytes": uncovered, "operand_overlays": overlays,
+    }
+
+
+def format_universe(starts, rom_sha256: str, producer: str, source_revision: str, source_config: str) -> str:
+    if not SHA.fullmatch(rom_sha256) or not REV.fullmatch(source_revision):
+        _fail("bad_identity")
+    for value in (producer, source_config):
+        if not TOKEN.fullmatch(value):
+            _fail("bad_identity")
+    out = [SCHEMA, f"rom_sha256 {rom_sha256}", f"producer {producer}", f"source_revision {source_revision}",
+           f"source_config {source_config}", f"entries {len(starts)}"]
+    out += [f"{a:08x}" for a in starts]
+    out.append("end")
+    return "\n".join(out) + "\n"
+
+
+def extract(listing: str, rom: bytes, source_revision: str, expect_source_revision: str | None,
+            producer: str = "s1disasm-listing-v1", source_config: str = "none", expect_rom_sha256: str | None = None):
+    rom_sha256 = hashlib.sha256(rom).hexdigest()
+    if expect_rom_sha256 is not None and expect_rom_sha256 != rom_sha256:
+        _fail("rom_hash_mismatch")
+    if expect_source_revision is not None and expect_source_revision != source_revision:
+        _fail("source_revision_mismatch")
+    starts, summary = parse_listing(listing, rom)
+    return format_universe(starts, rom_sha256, producer, source_revision, source_config), summary
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("--listing", required=True)
+    parser.add_argument("--rom", required=True)
+    parser.add_argument("--output", required=True)
+    parser.add_argument("--source-revision", required=True, help="exact 40-hex source revision the listing was built from")
+    parser.add_argument("--source-dir", help="checkout; HEAD must equal --source-revision")
+    parser.add_argument("--source-config", default="none", help="token naming the source's own configuration switch (e.g. Revision0)")
+    parser.add_argument("--expect-rom-sha256")
+    parser.add_argument("--producer", default="s1disasm-listing-v1")
+    args = parser.parse_args(argv)
+    try:
+        if args.source_dir:
+            head = subprocess.run(["git", "-C", args.source_dir, "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+            if head.returncode != 0 or head.stdout.strip() != args.source_revision:
+                _fail("source_revision_mismatch")
+        rom = open(args.rom, "rb").read(MAX_ROM_BYTES + 1)
+        listing = open(args.listing, "rb").read(MAX_LISTING_BYTES + 1).decode("ascii", errors="replace")
+        text, summary = extract(listing, rom, args.source_revision, None, args.producer, args.source_config, args.expect_rom_sha256)
+    except SourceMapError as error:
+        print(json.dumps({"schema": "segarecomp.m68k_source_universe.error.v1", "error": error.code, "count": error.count}))
+        return 1
+    except OSError:
+        print(json.dumps({"schema": "segarecomp.m68k_source_universe.error.v1", "error": "io", "count": 0}))
+        return 1
+    with open(args.output, "w", encoding="ascii", newline="\n") as sink:
+        sink.write(text)
+    print(json.dumps({"schema": "segarecomp.m68k_source_universe.summary.v1", **summary}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
