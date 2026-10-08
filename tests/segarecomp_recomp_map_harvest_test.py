@@ -54,21 +54,25 @@ def test_backward_walk_and_external_entry_check() -> None:
     discovered_lengths = {"000200": 4, "000204": 4, "000300": 4}
     call_target_entries = {0x200}
     roots = {0x200}
-    static_successors = {"000300": ["000206"]}  # g jumps into the middle of entry's span
+    static_successors = {"000300": ["000204"]}  # g jumps into the middle of entry's span
     predecessor_index = harvest_module.build_predecessor_index(discovered_lengths)
     expect(predecessor_index == {0x204: 0x200, 0x208: 0x204, 0x304: 0x300},
            f"build_predecessor_index: unexpected index {predecessor_index}")
 
     # Without the external successor, 0x200 is immediately sound for a site at 0x204.
-    clean_start = harvest_module.find_sound_start_pc(0x204, predecessor_index, call_target_entries, roots, {}, set())
+    clean_start, _ = harvest_module.find_sound_start_pc(0x204, predecessor_index, call_target_entries, roots, {}, set(),
+                                                         {0x204: {0x200}, 0x208: {0x204}}, "span")
     expect(clean_start == 0x200, f"find_sound_start_pc: expected 0x200 with no external entries, got {clean_start}")
 
     # With the external successor landing inside (0x200, 0x208], a site at 0x208 must reject 0x200 and find
     # no further candidate (0x200 is the only call-target entry/root reachable by the backward walk here).
     violated = harvest_module.external_entry_violates(0x200, 0x208, static_successors)
     expect(violated, "external_entry_violates: must detect the edge from 0x300 into (0x200, 0x208]")
-    rejected = harvest_module.find_sound_start_pc(0x208, predecessor_index, call_target_entries, roots, static_successors, set())
-    expect(rejected is None, f"find_sound_start_pc: must reject the only candidate and return None, got {rejected}")
+    for model in ("span", "cfg"):
+        preds = harvest_module.build_predecessor_graph(discovered_lengths, static_successors)
+        rejected, _ = harvest_module.find_sound_start_pc(0x208, predecessor_index, call_target_entries, roots,
+                                                         static_successors, set(), preds, model)
+        expect(rejected is None, f"find_sound_start_pc[{model}]: must reject the only candidate, got {rejected}")
 
 
 def test_gap_termination_point_is_a_sound_candidate() -> None:
@@ -88,14 +92,134 @@ def test_gap_termination_point_is_a_sound_candidate() -> None:
     expect(jump_targets == {0x300}, f"static_jump_targets: unexpected set {jump_targets}")
     predecessor_index = harvest_module.build_predecessor_index(discovered_lengths)
 
-    found = harvest_module.find_sound_start_pc(0x304, predecessor_index, call_target_entries, roots,
-                                                static_successors, jump_targets)
+    preds = harvest_module.build_predecessor_graph(discovered_lengths, static_successors)
+    found, _ = harvest_module.find_sound_start_pc(0x304, predecessor_index, call_target_entries, roots,
+                                                  static_successors, jump_targets, preds)
     expect(found == 0x300, f"find_sound_start_pc: expected the gap-termination branch target 0x300, got {found}")
 
     # An UNCONFIRMED gap (nothing names it as a jump target at all) must never be credited: that would be
     # trusting an arbitrary address boundary, not a proven incoming edge.
-    unconfirmed = harvest_module.find_sound_start_pc(0x304, predecessor_index, call_target_entries, roots, {}, set())
+    unconfirmed, _ = harvest_module.find_sound_start_pc(0x304, predecessor_index, call_target_entries, roots, {}, set(),
+                                                        harvest_module.build_predecessor_graph(discovered_lengths, {}))
     expect(unconfirmed is None, f"find_sound_start_pc: an unconfirmed gap must never be credited, got {unconfirmed}")
+
+
+def region(start, site, nodes, edges, roots, max_nodes=4096):
+    """Build the predecessor graph for a synthetic layout of 2-byte instructions at `nodes` (hex ints) with
+    explicit static `edges` {src: [dst]} and return entry_closed_region's result."""
+    lengths = {format(n, "06x"): 2 for n in nodes}
+    succ = {format(k, "06x"): [format(t, "06x") for t in v] for k, v in edges.items()}
+    preds = harvest_module.build_predecessor_graph(lengths, succ)
+    result = harvest_module.entry_closed_region(start, site, preds, set(roots), max_nodes)
+    span = not harvest_module.external_entry_violates(start, site, succ)
+    return result, span
+
+
+def test_cfg_region_adversarial_cases() -> None:
+    body = [0x300, 0x302, 0x304, 0x306, 0x308, 0x30A, 0x30C]  # contiguous 2-byte instructions
+    # 1. internal backward edge whose source lies numerically PAST the site: old span rejects, region accepts.
+    (reg, why), span = region(0x300, 0x306, body, {0x30A: [0x304]}, {0x300})
+    expect(not span, "case 1: the linear span model must (conservatively) reject the backedge")
+    expect(reg is not None and why == "ok" and 0x30A in reg, f"case 1: region must accept the internal backedge: {why}")
+    # 2. a genuine second external entry into an interior node: both models reject.
+    other = body + [0x500, 0x502]
+    (reg, why), span = region(0x300, 0x306, other, {0x500: [0x304]}, {0x300, 0x500})
+    expect(reg is None and why == "root_entry_into_region" and not span, f"case 2: external root entry must reject: {why}")
+    # 2b. external entry from a node with no known predecessor at all (unaccounted): reject.
+    (reg, why), _ = region(0x300, 0x306, other, {0x500: [0x304]}, {0x300})
+    expect(reg is None and why == "unaccounted_entry", f"case 2b: unaccounted external entry must reject: {why}")
+    # 3. multiple internal branches / nested loops: accepted.
+    (reg, why), _ = region(0x300, 0x30A, body, {0x306: [0x302], 0x30C: [0x304], 0x308: [0x300]}, {0x300})
+    expect(reg is not None, f"case 3: nested internal loops must be accepted: {why}")
+    # 4. call-target entry + unrelated outside branch into the middle. The outside node has its own
+    # independent entry (a second root) -> reject; if instead it is reachable ONLY through the region it is
+    # an internal edge -> accept.
+    far = body + [0x700, 0x702]
+    (reg, why), _ = region(0x300, 0x306, far, {0x700: [0x304]}, {0x300, 0x700})
+    expect(reg is None, "case 4a: unrelated outside branch with an independent entry must reject")
+    (reg, why), _ = region(0x300, 0x306, far, {0x30C: [0x700], 0x700: [0x304]}, {0x300})
+    expect(reg is not None, f"case 4b: an outside node reachable ONLY through the region is internal: {why}")
+    # 5. no sound closed boundary: closure reaches a root other than start, or exceeds the fixed bound,
+    # or never reaches `start` at all.
+    (reg, why), _ = region(0x304, 0x30A, body, {}, {0x300, 0x306})
+    expect(reg is None and why == "root_entry_into_region", f"case 5a: a root inside the region must reject: {why}")
+    (reg, why), _ = region(0x304, 0x30A, body, {}, {0x300})
+    expect(reg is not None, f"case 5a': a root BEFORE the start (behind the cut) is fine: {why}")
+    (reg, why), _ = region(0x300, 0x30C, body, {}, {0x300}, max_nodes=3)
+    expect(reg is None and why == "region_bound_exceeded", f"case 5b: bound exhaustion is Unknown: {why}")
+    (reg, why), _ = region(0x700, 0x30A, far, {}, {0x300})
+    expect(reg is None, "case 5c: a start that is not an ancestor of the site must reject")
+    # A root equal to the site itself is a direct entry unless the site is the start.
+    (reg, why), _ = region(0x300, 0x304, body, {}, {0x300, 0x304})
+    expect(reg is None and why == "root_entry_into_region", f"site that is itself a root must reject: {why}")
+    (reg, why), _ = region(0x304, 0x304, body, {}, {0x304})
+    expect(reg == frozenset({0x304}), "degenerate start == site is accepted (matches the span model)")
+
+
+def test_cfg_region_matches_bruteforce_dominance() -> None:
+    """Independent oracle: with entries = roots + predecessor-less nodes, accept iff the site is unreachable
+    from any entry (other than start) in the graph with `start` removed, and start reaches the site."""
+    import random
+    rng = random.Random(0x043)
+    for _ in range(600):
+        count = rng.randint(2, 9)
+        nodes = [0x100 + 2 * i for i in range(count)]
+        edges = {}
+        for src in nodes:
+            if rng.random() < 0.5:
+                edges[src] = [rng.choice(nodes) for _ in range(rng.randint(1, 2))]
+        roots = {n for n in nodes if rng.random() < 0.25}
+        start, site = rng.choice(nodes), rng.choice(nodes)
+        lengths = {format(n, "06x"): 2 for n in nodes}
+        succ = {format(k, "06x"): [format(t, "06x") for t in v] for k, v in edges.items()}
+        preds = harvest_module.build_predecessor_graph(lengths, succ)
+        got, _ = harvest_module.entry_closed_region(start, site, preds, roots)
+        forward = {n: set() for n in nodes}
+        for dst, srcs in preds.items():
+            for src in srcs:
+                if dst in forward:
+                    forward[src].add(dst)
+        entries = {n for n in nodes if n in roots or not preds.get(n)}
+
+        def reach(seeds, banned):
+            seen, work = set(), [x for x in seeds if x != banned]
+            while work:
+                n = work.pop()
+                if n in seen or n == banned:
+                    continue
+                seen.add(n)
+                work.extend(forward.get(n, ()))
+            return seen
+        if start == site:
+            expected = True  # closure is just {site}; accepted without looking behind the start
+        else:
+            expected = site not in reach(entries, start) and site in reach([start], None)
+            expected = expected and start in reach([start], None)
+        expect((got is not None) == expected,
+               f"region != brute-force dominance (start={start:x} site={site:x} roots={roots} edges={edges}): "
+               f"got={got is not None} expected={expected}")
+
+
+def test_interrupt_unproven_sites_never_get_external_exact_facts() -> None:
+    report = {
+        "computed_sites": {"000204": {"family": "jmp_an", "outcome": "unknown", "reason": "unknown_input",
+                                       "detail": "interrupt_resumption_unproven"}},
+        "discovered_lengths": {"000200": 4, "000204": 2},
+        "roots": ["000200"], "static_successors": {}, "call_target_continuations": {},
+    }
+    original = harvest_module.attempt_exact
+    harvest_module.attempt_exact = lambda *a, **k: {"outcome": "exact", "targets": [0x300], "cost": {}}
+    try:
+        results = harvest_module.harvest(report, "/nonexistent-rom", "/nonexistent-classifier", 64, 10, "cfg", True)
+        expect(results[0].get("uncredited_program_order_result", {}).get("targets") == [0x300],
+               "diagnostic mode must record the uncredited program-order result")
+    finally:
+        harvest_module.attempt_exact = original
+    for diag in (False,):
+        results = harvest_module.harvest(report, "/nonexistent-rom", "/nonexistent-classifier", 64, 10, "cfg", diag)
+        expect(len(results) == 1 and results[0]["outcome"] == "unsupported" and
+               results[0]["reason"] == "external_exact_proof_ignores_interrupt_resumption",
+               f"interrupt-unproven site must never be credited (diag={diag}): {results}")
 
 
 def test_write_facts_format() -> None:
@@ -202,6 +326,9 @@ def main() -> int:
     test_eligible_sites_excludes_rte_and_unclassified()
     test_backward_walk_and_external_entry_check()
     test_gap_termination_point_is_a_sound_candidate()
+    test_cfg_region_adversarial_cases()
+    test_cfg_region_matches_bruteforce_dominance()
+    test_interrupt_unproven_sites_never_get_external_exact_facts()
     test_write_facts_format()
 
     classifier_path = sys.argv[1] if len(sys.argv) > 1 else None

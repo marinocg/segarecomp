@@ -45,6 +45,11 @@ import segarecomp_angr_m68k_facts as angr_producer  # noqa: E402
 
 INELIGIBLE_FAMILIES = {"rte", "unclassified"}
 RTS_COMPUTED_FAMILY = "rts_computed"
+# SEG-043-T001: segarecomp's own analysis reports this detail when it cannot prove that an asynchronous
+# interrupt between the instruction that defines a site's input and the site itself preserves that input.
+# An external proof that executes in program order (angr) never models interrupt resumption, so it cannot
+# discharge this premise: an `exact` fact for such a site would silently assume transparent handlers.
+INTERRUPT_UNPROVEN_DETAIL = "interrupt_resumption_unproven"
 DEFAULT_CLASSIFIER = TOOLS_DIR.parent / "build" / "dev" / "apps" / "m68k-primary-word-classify" / \
     "segarecomp-m68k-primary-word-classify"
 
@@ -139,12 +144,79 @@ def external_entry_violates(start_pc: int, site_pc: int, static_successors: dict
     return False
 
 
+MAX_REGION_NODES = 4096  # fixed up front; exceeding it is Unknown (fail closed), never raised to get a result
+
+
+def build_predecessor_graph(discovered_lengths: dict, static_successors: dict) -> dict[int, set[int]]:
+    """target -> every known predecessor, from existing report facts only (SEG-043-T001).
+
+    Edges are (a) every static branch/taken-branch/call-target edge in `static_successors` and (b) the
+    contiguous-layout edge `q -> q + length(q)` for EVERY discovered instruction q. (b) deliberately
+    over-approximates (it also adds an edge after an unconditional `bra`/`rts`/`jmp`, which does not fall
+    through, and treats a call as continuing to its continuation): extra predecessor edges can only add
+    nodes the closure below must account for, never hide one, so the over-approximation is conservative."""
+    preds: dict[int, set[int]] = {}
+    for pc_hex, length in discovered_lengths.items():
+        pc = int(pc_hex, 16)
+        preds.setdefault(pc + length, set()).add(pc)
+    for source_hex, targets_hex in static_successors.items():
+        source = int(source_hex, 16)
+        for target_hex in targets_hex:
+            preds.setdefault(int(target_hex, 16), set()).add(source)
+    return preds
+
+
+def entry_closed_region(start_pc: int, site_pc: int, preds: dict[int, set[int]], roots: set,
+                         max_nodes: int = MAX_REGION_NODES) -> tuple[frozenset | None, str]:
+    """SEG-043-T001 CFG-shaped proof scope: the region is the backward closure of `site_pc` over the known
+    predecessor graph, cut at `start_pc`. It is accepted iff `start_pc` dominates `site_pc` in that graph:
+    the closure reaches no program root other than `start_pc`, reaches no node whose entry is unaccounted
+    for (no known predecessor at all), stays within `max_nodes`, and actually reaches `start_pc`. Every
+    edge into a region node other than `start_pc` therefore comes from inside the region -- an ordinary
+    internal loop/backedge, wherever it lies numerically -- and any genuine second entry (an edge from a
+    node that is not itself only reachable through `start_pc`) walks the closure to a root, to an
+    unaccounted node, or past the bound, and is rejected. Returns (region, "ok") or (None, reason)."""
+    region = {site_pc}
+    work = [site_pc]
+    while work:
+        node = work.pop()
+        if node == start_pc:
+            continue  # the proof scope's single entry: do not look behind it
+        if node in roots:
+            return None, "root_entry_into_region"
+        node_preds = preds.get(node)
+        if not node_preds:
+            return None, "unaccounted_entry"
+        for pred in node_preds:
+            if pred in region:
+                continue
+            if len(region) >= max_nodes:
+                return None, "region_bound_exceeded"
+            region.add(pred)
+            work.append(pred)
+    if start_pc not in region:
+        return None, "start_does_not_dominate_site"
+    return frozenset(region), "ok"
+
+
 def find_sound_start_pc(site_pc: int, predecessor_index: dict, call_target_entries: set, roots: set,
-                         static_successors: dict, jump_targets: set) -> int | None:
+                         static_successors: dict, jump_targets: set, preds: dict | None = None,
+                         scope_model: str = "cfg") -> tuple[int | None, dict]:
+    """First nearest-first candidate whose proof scope is sound. Returns (start_pc|None, info) where `info`
+    records the scope model, the accepted region size and each rejected candidate's reason."""
+    rejected = []
     for candidate in backward_entry_candidates(site_pc, predecessor_index, call_target_entries, roots, jump_targets):
-        if not external_entry_violates(candidate, site_pc, static_successors):
-            return candidate
-    return None
+        if scope_model == "span":
+            if external_entry_violates(candidate, site_pc, static_successors):
+                rejected.append([hex6(candidate), "external_entry_into_span"])
+                continue
+            return candidate, {"scope_model": "span", "rejected_candidates": rejected}
+        region, reason = entry_closed_region(candidate, site_pc, preds, roots)
+        if region is None:
+            rejected.append([hex6(candidate), reason])
+            continue
+        return candidate, {"scope_model": "cfg", "region_nodes": len(region), "rejected_candidates": rejected}
+    return None, {"scope_model": scope_model, "rejected_candidates": rejected}
 
 
 def classify_words(classifier_path: str, words: list[int]) -> dict[int, str]:
@@ -189,27 +261,36 @@ def attempt_containment(site_pc: int, start_pc: int, call_target_continuations: 
     return {"outcome": "contained", "targets": targets}
 
 
-def harvest(report: dict, rom_path: str, classifier_path: str, max_entries: int, max_steps: int) -> list[dict]:
+def harvest(report: dict, rom_path: str, classifier_path: str, max_entries: int, max_steps: int,
+            scope_model: str = "cfg", diagnostic_interrupt_sites: bool = False) -> list[dict]:
     predecessor_index = build_predecessor_index(report.get("discovered_lengths", {}))
     call_target_continuations = report.get("call_target_continuations", {})
     call_target_entries = {int(k, 16) for k in call_target_continuations}
     roots = {int(r, 16) for r in report.get("roots", [])}
     static_successors = report.get("static_successors", {})
     jump_targets = static_jump_targets(static_successors)
+    preds = build_predecessor_graph(report.get("discovered_lengths", {}), static_successors)
 
     results = []
     for site in eligible_sites(report):
         site_pc = site["pc"]
-        start_pc = find_sound_start_pc(site_pc, predecessor_index, call_target_entries, roots, static_successors,
-                                        jump_targets)
+        start_pc, scope = find_sound_start_pc(site_pc, predecessor_index, call_target_entries, roots,
+                                              static_successors, jump_targets, preds, scope_model)
         if start_pc is None:
-            results.append({**site, "outcome": "unresolved", "reason": "no_sound_starting_scope"})
+            results.append({**site, "outcome": "unresolved", "reason": "no_sound_starting_scope", "scope": scope})
             continue
         if site["family"] == RTS_COMPUTED_FAMILY:
             outcome = attempt_containment(site_pc, start_pc, call_target_continuations)
+        elif site.get("detail") == INTERRUPT_UNPROVEN_DETAIL:
+            if diagnostic_interrupt_sites:
+                diag = attempt_exact(site_pc, start_pc, rom_path, classifier_path, max_entries, max_steps)
+                outcome = {"outcome": "unsupported", "reason": "external_exact_proof_ignores_interrupt_resumption",
+                           "uncredited_program_order_result": {k: v for k, v in diag.items() if k != "cost"}}
+            else:
+                outcome = {"outcome": "unsupported", "reason": "external_exact_proof_ignores_interrupt_resumption"}
         else:
             outcome = attempt_exact(site_pc, start_pc, rom_path, classifier_path, max_entries, max_steps)
-        results.append({**site, "start_pc": hex6(start_pc), **outcome})
+        results.append({**site, "start_pc": hex6(start_pc), "scope": scope, **outcome})
     return results
 
 
@@ -238,6 +319,13 @@ def main() -> int:
     parser.add_argument("--summary-output")
     parser.add_argument("--max-entries", type=int, default=64)
     parser.add_argument("--max-steps", type=int, default=100_000)
+    parser.add_argument("--scope-model", choices=("cfg", "span"), default="cfg",
+                        help="starting-scope proof model: cfg (SEG-043-T001 default) or span (SEG-042 linear, "
+                             "retained for before/after measurement and regression comparison)")
+    parser.add_argument("--diagnostic-interrupt-sites", action="store_true",
+                        help="UNCREDITED measurement: still run the program-order exact attempt on "
+                             "interrupt_resumption_unproven sites and record the result in the summary only; the "
+                             "outcome stays 'unsupported' and no fact is ever written for such a site")
     parser.add_argument("--producer", default="segarecomp-recomp-map-harvest-v1")
     args = parser.parse_args()
 
@@ -249,7 +337,8 @@ def main() -> int:
         return 2
 
     report = load_report(args.report)
-    results = harvest(report, args.rom, args.classifier, args.max_entries, args.max_steps)
+    results = harvest(report, args.rom, args.classifier, args.max_entries, args.max_steps, args.scope_model,
+                       args.diagnostic_interrupt_sites)
     written = write_facts(results, digest, args.producer, args.output)
 
     summary = {
