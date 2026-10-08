@@ -60,15 +60,42 @@ def test_backward_walk_and_external_entry_check() -> None:
            f"build_predecessor_index: unexpected index {predecessor_index}")
 
     # Without the external successor, 0x200 is immediately sound for a site at 0x204.
-    clean_start = harvest_module.find_sound_start_pc(0x204, predecessor_index, call_target_entries, roots, {})
+    clean_start = harvest_module.find_sound_start_pc(0x204, predecessor_index, call_target_entries, roots, {}, set())
     expect(clean_start == 0x200, f"find_sound_start_pc: expected 0x200 with no external entries, got {clean_start}")
 
     # With the external successor landing inside (0x200, 0x208], a site at 0x208 must reject 0x200 and find
     # no further candidate (0x200 is the only call-target entry/root reachable by the backward walk here).
     violated = harvest_module.external_entry_violates(0x200, 0x208, static_successors)
     expect(violated, "external_entry_violates: must detect the edge from 0x300 into (0x200, 0x208]")
-    rejected = harvest_module.find_sound_start_pc(0x208, predecessor_index, call_target_entries, roots, static_successors)
+    rejected = harvest_module.find_sound_start_pc(0x208, predecessor_index, call_target_entries, roots, static_successors, set())
     expect(rejected is None, f"find_sound_start_pc: must reject the only candidate and return None, got {rejected}")
+
+
+def test_gap_termination_point_is_a_sound_candidate() -> None:
+    """A real Sonic 1 finding: a site reached only through an ordinary branch (not a call) into a
+    function with no JSR/BSR caller at all has an empty backward-walk candidate list under the
+    call-target/root-only rule -- even though the branch target is itself a perfectly sound, proven-
+    unique entry (segarecomp's own discovery could only have found it via that one edge). The point
+    where the contiguous walk naturally runs out of predecessors (a gap) must be credited as a final-
+    resort candidate when it is itself a confirmed jump target, still subject to the same external-entry
+    check as every other candidate."""
+    # g(0x300, 4 bytes) is reached only by a plain branch from 0x280; site(0x304) is g's second instruction.
+    discovered_lengths = {"000300": 4, "000304": 4}
+    call_target_entries: set[int] = set()
+    roots: set[int] = set()
+    static_successors = {"000280": ["000300"]}
+    jump_targets = harvest_module.static_jump_targets(static_successors)
+    expect(jump_targets == {0x300}, f"static_jump_targets: unexpected set {jump_targets}")
+    predecessor_index = harvest_module.build_predecessor_index(discovered_lengths)
+
+    found = harvest_module.find_sound_start_pc(0x304, predecessor_index, call_target_entries, roots,
+                                                static_successors, jump_targets)
+    expect(found == 0x300, f"find_sound_start_pc: expected the gap-termination branch target 0x300, got {found}")
+
+    # An UNCONFIRMED gap (nothing names it as a jump target at all) must never be credited: that would be
+    # trusting an arbitrary address boundary, not a proven incoming edge.
+    unconfirmed = harvest_module.find_sound_start_pc(0x304, predecessor_index, call_target_entries, roots, {}, set())
+    expect(unconfirmed is None, f"find_sound_start_pc: an unconfirmed gap must never be credited, got {unconfirmed}")
 
 
 def test_write_facts_format() -> None:
@@ -174,6 +201,7 @@ def test_end_to_end_exact_and_contained(classifier_path: str) -> None:
 def main() -> int:
     test_eligible_sites_excludes_rte_and_unclassified()
     test_backward_walk_and_external_entry_check()
+    test_gap_termination_point_is_a_sound_candidate()
     test_write_facts_format()
 
     classifier_path = sys.argv[1] if len(sys.argv) > 1 else None

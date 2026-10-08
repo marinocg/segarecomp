@@ -82,12 +82,28 @@ def build_predecessor_index(discovered_lengths: dict) -> dict[int, int]:
     return index
 
 
+def static_jump_targets(static_successors: dict) -> set[int]:
+    """Every address named as a target by at least one discovered instruction's own static successor
+    (branch, taken-conditional-branch or call target) -- i.e. every address segarecomp's own discovery
+    can already prove has at least one accounted-for incoming edge."""
+    targets = set()
+    for targets_hex in static_successors.values():
+        for target_hex in targets_hex:
+            targets.add(int(target_hex, 16))
+    return targets
+
+
 def backward_entry_candidates(site_pc: int, predecessor_index: dict, call_target_entries: set, roots: set,
-                               max_candidates: int = 64) -> list[int]:
+                               jump_targets: set, max_candidates: int = 64) -> list[int]:
     """Nearest-first candidates: the site's own PC first (the degenerate case where the site IS its own
     function's entry, e.g. a one-instruction `rts`-only function), then walk backward through strictly
     contiguous predecessors, collecting every address that is itself a proven call-target entry or one of
-    the program's own reachability roots, until the walk cannot continue (a gap) or the bound is hit."""
+    the program's own reachability roots, until the walk cannot continue (a gap) or the bound is hit. The
+    point where a genuine gap stops the walk is itself always a sound final-resort candidate: a discovered
+    address that is not reached by straight-line fallthrough from a lower discovered address was
+    necessarily found via some other proven edge (a branch, a call, or a root) -- confirmed directly
+    against `jump_targets`/`call_target_entries`/`roots` rather than merely assumed, and still subject to
+    the same external-entry check every other candidate is."""
     candidates = []
     if site_pc in call_target_entries or site_pc in roots:
         candidates.append(site_pc)
@@ -101,6 +117,9 @@ def backward_entry_candidates(site_pc: int, predecessor_index: dict, call_target
         if prev in call_target_entries or prev in roots:
             candidates.append(prev)
         cur = prev
+    if (cur not in predecessor_index and cur != site_pc and len(candidates) < max_candidates and
+            cur not in candidates and (cur in jump_targets or cur in call_target_entries or cur in roots)):
+        candidates.append(cur)  # the gap-termination point itself, confirmed to have a proven incoming edge
     return candidates
 
 
@@ -121,8 +140,8 @@ def external_entry_violates(start_pc: int, site_pc: int, static_successors: dict
 
 
 def find_sound_start_pc(site_pc: int, predecessor_index: dict, call_target_entries: set, roots: set,
-                         static_successors: dict) -> int | None:
-    for candidate in backward_entry_candidates(site_pc, predecessor_index, call_target_entries, roots):
+                         static_successors: dict, jump_targets: set) -> int | None:
+    for candidate in backward_entry_candidates(site_pc, predecessor_index, call_target_entries, roots, jump_targets):
         if not external_entry_violates(candidate, site_pc, static_successors):
             return candidate
     return None
@@ -176,11 +195,13 @@ def harvest(report: dict, rom_path: str, classifier_path: str, max_entries: int,
     call_target_entries = {int(k, 16) for k in call_target_continuations}
     roots = {int(r, 16) for r in report.get("roots", [])}
     static_successors = report.get("static_successors", {})
+    jump_targets = static_jump_targets(static_successors)
 
     results = []
     for site in eligible_sites(report):
         site_pc = site["pc"]
-        start_pc = find_sound_start_pc(site_pc, predecessor_index, call_target_entries, roots, static_successors)
+        start_pc = find_sound_start_pc(site_pc, predecessor_index, call_target_entries, roots, static_successors,
+                                        jump_targets)
         if start_pc is None:
             results.append({**site, "outcome": "unresolved", "reason": "no_sound_starting_scope"})
             continue
