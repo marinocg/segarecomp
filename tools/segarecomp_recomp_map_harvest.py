@@ -147,17 +147,23 @@ def external_entry_violates(start_pc: int, site_pc: int, static_successors: dict
 MAX_REGION_NODES = 4096  # fixed up front; exceeding it is Unknown (fail closed), never raised to get a result
 
 
-def build_predecessor_graph(discovered_lengths: dict, static_successors: dict) -> dict[int, set[int]]:
+def build_predecessor_graph(discovered_lengths: dict, static_successors: dict,
+                             no_fallthrough: set | None = None) -> dict[int, set[int]]:
     """target -> every known predecessor, from existing report facts only (SEG-043-T001).
 
     Edges are (a) every static branch/taken-branch/call-target edge in `static_successors` and (b) the
-    contiguous-layout edge `q -> q + length(q)` for EVERY discovered instruction q. (b) deliberately
-    over-approximates (it also adds an edge after an unconditional `bra`/`rts`/`jmp`, which does not fall
-    through, and treats a call as continuing to its continuation): extra predecessor edges can only add
-    nodes the closure below must account for, never hide one, so the over-approximation is conservative."""
+    contiguous-layout edge `q -> q + length(q)` for every discovered instruction q that can continue
+    sequentially (calls and TRAPs count: their continuation is reached through the return). When the report
+    carries `no_fallthrough` (SEG-043-T002) an instruction in it contributes NO layout edge, so the mere
+    adjacency of the next function is not mistaken for a fall-in. Without that field every instruction is
+    assumed to fall through (SEG-043-T001's original approximation, kept for old reports): note an
+    over-approximated edge is NOT purely conservative -- it can give a node a predecessor it does not really
+    have and thereby hide an unaccounted entry -- which is why the exact field is preferred."""
     preds: dict[int, set[int]] = {}
     for pc_hex, length in discovered_lengths.items():
         pc = int(pc_hex, 16)
+        if no_fallthrough is not None and pc in no_fallthrough:
+            continue
         preds.setdefault(pc + length, set()).add(pc)
     for source_hex, targets_hex in static_successors.items():
         source = int(source_hex, 16)
@@ -253,34 +259,115 @@ def attempt_exact(site_pc: int, start_pc: int, rom_path: str, classifier_path: s
     return {"outcome": "exact", "targets": targets, "cost": cost}
 
 
-def attempt_containment(site_pc: int, start_pc: int, call_target_continuations: dict) -> dict:
-    entries = call_target_continuations.get(hex6(start_pc))
-    if not entries:
-        return {"outcome": "unresolved", "reason": "no_known_callers"}
-    targets = sorted({int(e, 16) for e in entries})
-    return {"outcome": "contained", "targets": targets}
+MAX_CONTINUATIONS = 256   # fixed bound on a contained fact's continuation set; exceeded => Unknown
+MAX_ENTRY_CHAIN = 4       # fixed bound on branch-entry frame inheritance depth; exceeded => Unknown
+
+
+class RegionContext:
+    """Immutable view of the report facts the region/containment proofs read (SEG-043-T001/T002)."""
+
+    def __init__(self, report: dict, scope_model: str = "cfg"):
+        self.lengths = {int(k, 16): v for k, v in report.get("discovered_lengths", {}).items()}
+        self.call_target_continuations = {int(k, 16): {int(e, 16) for e in v}
+                                          for k, v in report.get("call_target_continuations", {}).items()}
+        self.call_target_entries = set(self.call_target_continuations)
+        self.roots = {int(r, 16) for r in report.get("roots", [])}
+        self.pushed_code_addresses = {int(a, 16) for a in report.get("pushed_code_addresses", [])}
+        self.static_successors = report.get("static_successors", {})
+        self.no_fallthrough = ({int(a, 16) for a in report["no_fallthrough"]} if "no_fallthrough" in report else None)
+        self.predecessor_index = build_predecessor_index(report.get("discovered_lengths", {}))
+        self.jump_targets = static_jump_targets(self.static_successors)
+        self.preds = build_predecessor_graph(report.get("discovered_lengths", {}), self.static_successors,
+                                             self.no_fallthrough)
+        # Program roots and statically pushed code addresses (a manual `PEA`+`RTS` call) are entries whose
+        # stack is not an ordinary call frame: reaching one inside a region is an unaccounted entry.
+        self.entry_points = self.roots | self.pushed_code_addresses
+        self.scope_model = scope_model
+
+    def is_static_call(self, pred: int, entry: int) -> bool:
+        succ = self.static_successors.get(hex6(pred), ())
+        return (hex6(entry) in succ and pred in self.lengths and
+                pred + self.lengths[pred] in self.call_target_continuations.get(entry, ()))
+
+    def sound_start(self, site_pc: int) -> tuple[int | None, dict]:
+        return find_sound_start_pc(site_pc, self.predecessor_index, self.call_target_entries, self.entry_points,
+                                   self.static_successors, self.jump_targets, self.preds, self.scope_model)
+
+
+def frame_continuations(ctx: RegionContext, entry: int, site_pc: int, depth: int = 0,
+                         visiting: frozenset = frozenset()) -> tuple[set | None, str, dict]:
+    """SEG-043-T002: the continuation PCs a `rts` at `site_pc` (inside the region dominated by `entry`) may
+    return to, from the STRUCTURAL ENTRIES of `entry`:
+
+      * a static call into `entry`      -> that call's continuation;
+      * any other entry (a branch, a layout fall-in, a shared epilogue reached by branch) -> the same
+        question asked of the entering instruction's own dominating frame, recursively (bounded).
+
+    Fails closed (returns None + reason) when `entry` is a program root / statically pushed address, when an
+    entering instruction has no sound dominating frame (an unaccounted entry), when the chain is cyclic or
+    too deep, when no entry is known at all, or when the union exceeds the fixed bound. Like the SEG-042 rule
+    this is a structural proposal; the unmodified SEG-031 closure and `validate_genesis_hybrid_round`
+    remain the soundness backstop for anything it cannot see (unresolved dynamic edges, stack discipline)."""
+    if entry in visiting:
+        return None, "cyclic_entry_chain", {}
+    if depth > MAX_ENTRY_CHAIN:
+        return None, "entry_chain_too_deep", {}
+    if entry in ctx.entry_points:
+        return None, "entry_is_program_root_or_pushed_address", {}
+    region, _ = entry_closed_region(entry, site_pc, ctx.preds, ctx.entry_points)
+    internal = region or frozenset()
+    targets: set[int] = set()
+    stats = {"call_entries": 0, "inherited_entries": 0}
+    for pred in sorted(ctx.preds.get(entry, ())):
+        if pred in internal:
+            continue  # an internal loop edge back to the entry
+        if ctx.is_static_call(pred, entry):
+            targets.add(pred + ctx.lengths[pred])
+            stats["call_entries"] += 1
+            continue
+        frame, _info = ctx.sound_start(pred)
+        if frame is None:
+            return None, "unaccounted_branch_entry", {}
+        sub, reason, sub_stats = frame_continuations(ctx, frame, pred, depth + 1, visiting | {entry})
+        if sub is None:
+            return None, reason, {}
+        targets |= sub
+        stats["inherited_entries"] += 1 + sub_stats.get("inherited_entries", 0)
+        stats["call_entries"] += sub_stats.get("call_entries", 0)
+    if not targets:
+        return None, "no_known_callers", {}
+    if len(targets) > MAX_CONTINUATIONS:
+        return None, "continuation_bound_exceeded", {}
+    return targets, "ok", stats
+
+
+def attempt_containment(site_pc: int, start_pc: int, call_target_continuations: dict,
+                         ctx: RegionContext | None = None, model: str = "entries") -> dict:
+    if model == "callers" or ctx is None:  # SEG-042's rule: the site's enclosing entry must be a call target
+        entries = call_target_continuations.get(hex6(start_pc))
+        if not entries:
+            return {"outcome": "unresolved", "reason": "no_known_callers"}
+        return {"outcome": "contained", "targets": sorted({int(e, 16) for e in entries})}
+    targets, reason, stats = frame_continuations(ctx, start_pc, site_pc)
+    if targets is None:
+        return {"outcome": "unresolved", "reason": reason}
+    return {"outcome": "contained", "targets": sorted(targets), "entries": stats}
 
 
 def harvest(report: dict, rom_path: str, classifier_path: str, max_entries: int, max_steps: int,
-            scope_model: str = "cfg", diagnostic_interrupt_sites: bool = False) -> list[dict]:
-    predecessor_index = build_predecessor_index(report.get("discovered_lengths", {}))
-    call_target_continuations = report.get("call_target_continuations", {})
-    call_target_entries = {int(k, 16) for k in call_target_continuations}
-    roots = {int(r, 16) for r in report.get("roots", [])}
-    static_successors = report.get("static_successors", {})
-    jump_targets = static_jump_targets(static_successors)
-    preds = build_predecessor_graph(report.get("discovered_lengths", {}), static_successors)
-
+            scope_model: str = "cfg", diagnostic_interrupt_sites: bool = False,
+            containment_model: str = "entries") -> list[dict]:
+    ctx = RegionContext(report, scope_model)
     results = []
     for site in eligible_sites(report):
         site_pc = site["pc"]
-        start_pc, scope = find_sound_start_pc(site_pc, predecessor_index, call_target_entries, roots,
-                                              static_successors, jump_targets, preds, scope_model)
+        start_pc, scope = ctx.sound_start(site_pc)
         if start_pc is None:
             results.append({**site, "outcome": "unresolved", "reason": "no_sound_starting_scope", "scope": scope})
             continue
         if site["family"] == RTS_COMPUTED_FAMILY:
-            outcome = attempt_containment(site_pc, start_pc, call_target_continuations)
+            outcome = attempt_containment(site_pc, start_pc, report.get("call_target_continuations", {}), ctx,
+                                          containment_model)
         elif site.get("detail") == INTERRUPT_UNPROVEN_DETAIL:
             if diagnostic_interrupt_sites:
                 diag = attempt_exact(site_pc, start_pc, rom_path, classifier_path, max_entries, max_steps)
@@ -322,6 +409,9 @@ def main() -> int:
     parser.add_argument("--scope-model", choices=("cfg", "span"), default="cfg",
                         help="starting-scope proof model: cfg (SEG-043-T001 default) or span (SEG-042 linear, "
                              "retained for before/after measurement and regression comparison)")
+    parser.add_argument("--containment-model", choices=("entries", "callers"), default="entries",
+                        help="rts containment: entries (SEG-043-T002 structural-entry accounting, default) or "
+                             "callers (SEG-042: the enclosing entry's call-site continuations only)")
     parser.add_argument("--diagnostic-interrupt-sites", action="store_true",
                         help="UNCREDITED measurement: still run the program-order exact attempt on "
                              "interrupt_resumption_unproven sites and record the result in the summary only; the "
@@ -338,7 +428,7 @@ def main() -> int:
 
     report = load_report(args.report)
     results = harvest(report, args.rom, args.classifier, args.max_entries, args.max_steps, args.scope_model,
-                       args.diagnostic_interrupt_sites)
+                       args.diagnostic_interrupt_sites, args.containment_model)
     written = write_facts(results, digest, args.producer, args.output)
 
     summary = {

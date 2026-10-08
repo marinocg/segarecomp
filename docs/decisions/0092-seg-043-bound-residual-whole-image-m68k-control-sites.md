@@ -55,3 +55,41 @@ test (kept as `--scope-model span` for before/after measurement only).
 
 (Measurements and the T001 disposition are in the task Evidence; the closing sections of this ADR collect the
 final numbers.)
+
+### T001 refinement made in T002: exact fall-through accounting
+
+T001's first cut assumed every discovered instruction falls through to the next one. That over-approximation
+is *not* purely conservative: an extra predecessor edge can hand a node a predecessor it does not have and
+thereby mask an unaccounted entry. The report therefore gained one thin projection of the existing
+`m68k_control_successors()` data, `no_fallthrough` (instructions with no sequential successor; calls and
+TRAPs are excluded because their continuation is reached through the return). The layout edge is now
+`q -> q + length(q)` only for `q` outside `no_fallthrough`, and statically pushed code addresses
+(`pushed_code_addresses`, a manual `PEA`/`RTS` call) join the program roots as entries whose stack is not an
+ordinary call frame. T001's accepted pairs were re-measured under this stricter graph (see T002 evidence).
+
+## SEG-043-T002 -- branch-entered / shared-epilogue RTS containment (implemented)
+
+The SEG-042 rule contained a `rts_computed` site only if its dominating entry `s` was a key of
+`call_target_continuations`, and used *only* that call set. It never looked at the other entries of `s`.
+
+`frame_continuations(s, p)` now accounts for every structural entry of `s` (predecessors of `s` outside the
+region that loop back to it):
+
+* a static call into `s` -> its continuation;
+* any other entry (branch, real layout fall-in, shared epilogue reached by branch, tail transfer) -> the same
+  question asked of the entering instruction's own dominating frame, recursively (depth <= 4, continuation set
+  <= 256, cycles Unknown);
+* fails closed when `s` is a program root or a statically pushed address, when an entering instruction has no
+  sound dominating frame, when no entry is known, or when any bound is hit.
+
+It is a structural **proposal**, not a stack-discipline proof: it assumes the `rts` pops the return slot of
+its frame's entry. The `rts_computed` class exists exactly because segarecomp's own return-slot analysis could
+not prove that, so the unmodified SEG-031 consumer remains responsible only for what it checks.
+
+**Consumer limits (measured, relevant to T006).** `--external-m68k-facts` re-verifies each entry's
+mapping/evenness/decode and rejects the whole file when it is malformed, but it does **not** check that a
+`contained` fact's target set is *complete*. Mutating a real Cool Spot fact by dropping a legitimate
+continuation was silently accepted (12 islands, unchanged result); an odd or unmapped target demotes that site
+to `whole_image`; a malformed file is rejected outright; an extra unrelated target is accepted (a superset is
+sound). Completeness of a contained set therefore rests on the harvester proof, and any future `H < U` claim
+must be backed by the runtime-PC-escape check required by ADR 0080 rather than by the consumer.

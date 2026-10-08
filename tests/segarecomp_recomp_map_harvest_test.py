@@ -222,6 +222,117 @@ def test_interrupt_unproven_sites_never_get_external_exact_facts() -> None:
                f"interrupt-unproven site must never be credited (diag={diag}): {results}")
 
 
+def synth_report(nodes, edges, roots, no_fallthrough, calls, pushed=()):
+    """Synthetic report: `nodes` {pc: length}, `edges` {src: [dst]} (non-fallthrough static successors),
+    `calls` {call_site_pc: callee} (also static successors, and contribute call_target_continuations)."""
+    succ = {}
+    for src, dsts in edges.items():
+        succ.setdefault(src, []).extend(dsts)
+    cont = {}
+    for site, callee in calls.items():
+        succ.setdefault(site, []).append(callee)
+        cont.setdefault(callee, set()).add(site + 2)  # call sites are 2 bytes wide in these layouts
+    return {
+        "discovered_lengths": {format(p, "06x"): n for p, n in nodes.items()},
+        "static_successors": {format(k, "06x"): [format(d, "06x") for d in v] for k, v in succ.items()},
+        "call_target_continuations": {format(k, "06x"): [format(c, "06x") for c in sorted(v)] for k, v in cont.items()},
+        "roots": [format(r, "06x") for r in roots],
+        "no_fallthrough": [format(n, "06x") for n in no_fallthrough],
+        "pushed_code_addresses": [format(p, "06x") for p in pushed],
+    }
+
+
+def contain(report, site):
+    ctx = harvest_module.RegionContext(report)
+    start, _ = ctx.sound_start(site)
+    if start is None:
+        return {"outcome": "unresolved", "reason": "no_sound_starting_scope"}
+    return harvest_module.attempt_containment(site, start, report["call_target_continuations"], ctx)
+
+
+def epilogue_layout():
+    # f1 @0x100 (call target of c1@0x10), f2 @0x200 (call target of c2@0x20); both end with a `bra E`;
+    # E @0x300 is the shared epilogue: 0x300 -> 0x302 (`rts`, the site). c1/c2 are roots' callers (undiscovered).
+    nodes = {0x100: 2, 0x102: 2, 0x104: 2, 0x200: 2, 0x202: 2, 0x300: 2, 0x302: 2, 0x10: 2, 0x20: 2}
+    edges = {0x104: [0x300], 0x202: [0x300]}
+    return nodes, edges, {0x10, 0x20}, {0x104, 0x202, 0x302, 0x10 - 0, 0x20 - 0} - {0x10, 0x20}
+
+
+def test_rts_entry_accounting() -> None:
+    nodes, edges, roots, nofall = epilogue_layout()
+    calls = {0x10: 0x100, 0x20: 0x200}
+    # shared epilogue with two valid callers: contained = union of both callers' continuations
+    got = contain(synth_report(nodes, edges, roots, nofall | {0x302}, calls), 0x302)
+    expect(got["outcome"] == "contained" and got["targets"] == [0x12, 0x22], f"shared epilogue: {got}")
+    # the SEG-042 'callers' rule cannot see branch-entered epilogues at all
+    rep = synth_report(nodes, edges, roots, nofall | {0x302}, calls)
+    ctx = harvest_module.RegionContext(rep)
+    expect(harvest_module.attempt_containment(0x302, 0x300, rep["call_target_continuations"], ctx, "callers")["outcome"] == "unresolved",
+           "callers model must stay unresolved on a branch-entered epilogue")
+    # branch-entered epilogue with a single branching function
+    one = {k: v for k, v in edges.items() if k != 0x202}
+    got = contain(synth_report(nodes, one, roots, nofall | {0x302}, {0x10: 0x100}), 0x302)
+    expect(got["outcome"] == "contained" and got["targets"] == [0x12], f"branch-entered epilogue: {got}")
+    # unaccounted external entry: a node entering the epilogue that is not itself provably entered (no preds)
+    bad_nodes = dict(nodes); bad_nodes[0x400] = 2
+    bad_edges = dict(edges); bad_edges[0x400] = [0x300]
+    got = contain(synth_report(bad_nodes, bad_edges, roots, nofall | {0x302, 0x400}, calls), 0x302)
+    expect(got["outcome"] == "unresolved", f"unaccounted external entry must not be contained: {got}")
+    # the same entering node being a program root (stack is not a call frame) is also rejected
+    got = contain(synth_report(bad_nodes, bad_edges, roots | {0x400}, nofall | {0x302, 0x400}, calls), 0x302)
+    expect(got["outcome"] == "unresolved", f"root entry into the epilogue must not be contained: {got}")
+    # manually manipulated return slot: the entry is a statically pushed code address (PEA ... RTS)
+    got = contain(synth_report(nodes, edges, roots, nofall | {0x302}, calls, pushed=[0x300]), 0x302)
+    expect(got["outcome"] == "unresolved", f"pushed-address entry must not be contained: {got}")
+    # layout fall-in is a real entry: f1 (@0x100) runs into g (@0x106, also a call target of c2@0x20)
+    fl_nodes = {0x100: 2, 0x102: 2, 0x104: 2, 0x106: 2, 0x108: 2, 0x10: 2, 0x20: 2}
+    fl_calls = {0x10: 0x100, 0x20: 0x106}
+    got = contain(synth_report(fl_nodes, {}, {0x10, 0x20}, {0x108}, fl_calls), 0x108)
+    expect(got["outcome"] == "contained" and got["targets"] == [0x12, 0x22],
+           f"a falling-through predecessor donates its frame to the next entry: {got}")
+    got = contain(synth_report(fl_nodes, {}, {0x10, 0x20}, {0x104, 0x108}, fl_calls), 0x108)
+    expect(got["outcome"] == "contained" and got["targets"] == [0x22],
+           f"a terminating predecessor must not donate its frame: {got}")
+    # a function whose last instruction does NOT fall through must not donate its frame to the next function
+    plain = synth_report({0x100: 2, 0x102: 2, 0x104: 2, 0x10: 2}, {}, {0x10}, {0x102 + 0, 0x104}, {0x10: 0x100})
+    got = contain(plain, 0x102)
+    expect(got["outcome"] == "contained" and got["targets"] == [0x12], f"plain callee: {got}")
+    # a no_fallthrough instruction directly before the entry contributes no layout predecessor
+    adj = synth_report({0x100: 2, 0x102: 2, 0x10: 2, 0xfe: 2}, {}, {0x10}, {0x102, 0xfe}, {0x10: 0x100})
+    got = contain(adj, 0x102)
+    expect(got["outcome"] == "contained" and got["targets"] == [0x12], f"adjacent terminator: {got}")
+    # mutation: adding one more unaccounted entry can only turn contained into unresolved, never shrink the set
+    mut_edges = dict(edges); mut_edges[0x500] = [0x300]
+    mut_nodes = dict(nodes); mut_nodes[0x500] = 2
+    got = contain(synth_report(mut_nodes, mut_edges, roots, nofall | {0x302, 0x500}, calls), 0x302)
+    expect(got["outcome"] == "unresolved", f"mutation adding an unaccounted entry must be rejected: {got}")
+    # cyclic entry chain: two blocks that enter each other by branch, neither reached by a call
+    cyc = synth_report({0x100: 2, 0x102: 2, 0x200: 2, 0x202: 2}, {0x102: [0x200], 0x202: [0x100]}, set(), {0x102, 0x202}, {})
+    got = contain(cyc, 0x202)
+    expect(got["outcome"] == "unresolved", f"cyclic chain must not be contained: {got}")
+
+
+def test_rts_entry_depth_bound() -> None:
+    # a chain of N branch-entered blocks, the first a call target: contained when within the bound, Unknown beyond
+    def chain(n):
+        nodes = {0x10: 2}
+        edges = {}
+        for i in range(n):
+            nodes[0x100 + 0x10 * i] = 2
+            nodes[0x102 + 0x10 * i] = 2
+            if i:
+                edges[0x102 + 0x10 * (i - 1)] = [0x100 + 0x10 * i]
+        nodes_nf = {0x102 + 0x10 * i for i in range(n)}
+        return synth_report(nodes, edges, {0x10}, nodes_nf, {0x10: 0x100}), 0x102 + 0x10 * (n - 1)
+    rep, site = chain(3)
+    got = contain(rep, site)
+    expect(got["outcome"] == "contained" and got["targets"] == [0x12], f"short chain: {got}")
+    rep, site = chain(harvest_module.MAX_ENTRY_CHAIN + 3)
+    got = contain(rep, site)
+    expect(got["outcome"] == "unresolved" and got["reason"] == "entry_chain_too_deep", f"long chain must be Unknown: {got}")
+
+
+
 def test_write_facts_format() -> None:
     results = [
         {"pc": 0x300, "outcome": "exact", "targets": [0x400, 0x500]},
@@ -329,6 +440,8 @@ def main() -> int:
     test_cfg_region_adversarial_cases()
     test_cfg_region_matches_bruteforce_dominance()
     test_interrupt_unproven_sites_never_get_external_exact_facts()
+    test_rts_entry_accounting()
+    test_rts_entry_depth_bound()
     test_write_facts_format()
 
     classifier_path = sys.argv[1] if len(sys.argv) > 1 else None
