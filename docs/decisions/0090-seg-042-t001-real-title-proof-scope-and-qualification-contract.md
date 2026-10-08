@@ -101,18 +101,29 @@ sound containment:
   feasible return addresses for that epilogue is therefore bounded, structurally, by
   `call_target_continuations[entry]` -- a fact segarecomp can derive and re-verify entirely on its own,
   with **zero angr dependency**, from data it already has.
-- SEG-042-T002 emits this as a **contained** (`exact: false`) `GenesisExternalM68kFact` whose `entries`
-  are exactly that continuation-PC set (sorted, deduped) -- using the identical
-  `segarecomp.m68k_external_facts.v1` artifact and the identical, unmodified
-  `genesis_hybrid_container()`/`validate_genesis_hybrid_round()` consumer SEG-041-T008 built; the fact's
-  `producer` field records the generic token `segarecomp-call-graph-containment-v1` (not an angr
-  producer) so the final report can distinguish angr-derived facts from this structural-only class.
-  **No parallel island planner is built; this reuses the SEG-031 consumer's existing `points_to_region`
-  container tier exactly.**
-- If the enclosing function's own call sites are not all exact (one of its own callers is itself an
-  unresolved dynamic site), the containment set is not yet sound; SEG-042-T002 must widen transitively
-  (the call sites of *that* caller, boundedly, mirroring the milestone's deterministic-widening ladder)
-  or stop at honest `unresolved`/`I = U` -- it must never assume a partial caller set is complete.
+- SEG-042-T002 emits this as a **`contained`** (not `exact`) fact line (`fact <pc> contained
+  <entry>,...`) whose entries are exactly that continuation-PC set (sorted, deduped) -- using the
+  identical `segarecomp.m68k_external_facts.v1` artifact and the identical, unmodified
+  `genesis_hybrid_container()`/`validate_genesis_hybrid_round()` consumer SEG-041-T008 built. The
+  `exact`/`contained` keyword on each fact line (the format's own existing discriminator; there is one
+  `producer` line per whole file, not per fact) is sufficient provenance for this harvester's design,
+  since every `exact` line it writes comes from `explore_exact_target_pc` and every `contained` line
+  comes from this structural mechanism; the single combined file's `producer` line still names the
+  harvester as a whole (`segarecomp-recomp-map-harvest-v1`). **No parallel island planner is built; this
+  reuses the SEG-031 consumer's existing `points_to_region` container tier exactly.**
+- Every entry in `call_target_continuations` comes, by construction, from an already-exactly-discovered,
+  already-exactly-resolved static `JSR`/`BSR` (D's own closure); there is no "the caller itself is
+  unresolved" case for this specific map. The residual risk is a *different*, currently-unresolved
+  dynamic site elsewhere whose own (unknown) target set happens to include an address inside this island
+  -- `static_successors` cannot name an edge no analysis has resolved yet. SEG-042-T002 does **not** need
+  its own transitive-widening loop to stay sound against this: the unmodified SEG-031 closure/fixed-point
+  loop (`plan_genesis_hybrid_admission`'s existing `rounds`) already re-admits every island's entries
+  into D itself and re-solves, and the independent `validate_genesis_hybrid_round` re-verification
+  (SEG-031/ADR 0080's pre-existing "freshly recompute and compare" property, never weakened by SEG-041)
+  fails the whole round closed if admitting this island reveals a reachable address outside it. This
+  harvester's one-round initial guess (`call_target_continuations[entry]`) only needs to be a reasonable
+  attempt at soundness, not a self-proof of it: an insufficient guess costs a wasted closure round or an
+  honest `broad` fallback, never an unsound credited result.
 - This mechanism deliberately does not touch `RTE`'s own semantics: containment here only ever reasons
   about which exact call sites exist in segarecomp's own call graph, never about executing or modeling an
   exception return.
