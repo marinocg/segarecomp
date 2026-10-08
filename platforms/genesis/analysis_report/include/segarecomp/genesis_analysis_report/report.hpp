@@ -164,6 +164,12 @@ struct GenesisAnalysisReport {
   // purely local (nearest-preceding-call-target-entry) function-boundary heuristic cannot rule out on its
   // own -- without re-deriving the control-flow graph outside segarecomp.
   std::map<std::uint32_t, std::vector<std::uint32_t>> static_successors;
+  // SEG-043-T002: every discovered instruction with NO sequential successor (unconditional branch/jump,
+  // computed jump, RTS/RTE/RTR, an instruction that always raises an exception). Calls and TRAPs are NOT
+  // listed: their continuation is reached later through the callee's/handler's return. A thin projection of
+  // the same `m68k_control_successors()` data as `static_successors`; lets an external region proof tell a
+  // real layout fall-in from the mere adjacency of the next function.
+  std::set<std::uint32_t> no_fallthrough;
   std::set<std::uint32_t> exception_continuations;
   std::set<std::uint32_t> pushed_code_addresses;
   std::set<std::uint32_t> rejected_decode_targets;

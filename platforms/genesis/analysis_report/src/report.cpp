@@ -290,6 +290,14 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
       if (successor.kind != M68kControlSuccessorKind::fallthrough &&
           successor.kind != M68kControlSuccessorKind::conditional_fallthrough)
         report.static_successors[pc].push_back(successor.target & bus_mask);
+    {
+      bool sequential = control.stacked == M68kStackedContinuationKind::call_continuation ||
+                        control.stacked == M68kStackedContinuationKind::exception_continuation;
+      for (const auto &successor : control.successors)
+        sequential = sequential || successor.kind == M68kControlSuccessorKind::fallthrough ||
+                     successor.kind == M68kControlSuccessorKind::conditional_fallthrough;
+      if (!sequential) report.no_fallthrough.insert(pc);
+    }
     switch (control.stacked) {
     case M68kStackedContinuationKind::call_continuation: {
       const auto continuation_pc = control.stacked_address & bus_mask;
@@ -703,6 +711,7 @@ std::string format_genesis_analysis_report_private(const GenesisAnalysisReport &
     }
   }
   out << "}"
+      << ",\"no_fallthrough\":" << hex_list(report.no_fallthrough)
       << ",\"exception_continuations\":" << hex_list(report.exception_continuations)
       << ",\"pushed_code_addresses\":" << hex_list(report.pushed_code_addresses)
       << ",\"rejected_decode_targets\":" << hex_list(report.rejected_decode_targets)
