@@ -147,6 +147,23 @@ struct GenesisAnalysisReport {
   M68kFiniteAnalysisResult analysis;
   std::map<std::uint32_t, std::uint32_t> discovered;  // D: decoded reached instruction start -> length
   std::set<std::uint32_t> call_continuations;
+  // SEG-042-T001: for every STATIC call (`BSR`/direct `JSR <label>`) in D, the set of return-continuation
+  // PCs of every call site that targets this callee entry PC. A thin, already-available projection of the
+  // same per-instruction `m68k_control_successors()` call/stacked-continuation data `call_continuations`
+  // above is built from -- no new analysis, no dynamic (indirect) call edges (out of this report's existing
+  // scope; a real site exercising one would need a separate, explicitly-scoped extension). This exists so
+  // an external containment consumer can soundly bound a `rts_computed` site's feasible return-address set
+  // to "the continuations of every call site that can reach this function" without re-deriving the call
+  // graph outside segarecomp.
+  std::map<std::uint32_t, std::set<std::uint32_t>> call_target_continuations;
+  // SEG-042-T001: every discovered instruction's own non-fallthrough fixed successor(s) (branch target,
+  // taken conditional-branch target, call target -- never a plain or conditional fallthrough, which is
+  // already implied by `discovered`'s own contiguity; a thin, already-available projection of the same
+  // `m68k_control_successors()` data the two fields above are built from). Lets an external containment consumer soundly check "does any
+  // instruction OUTSIDE a candidate function span jump INTO the middle of it", the one residual risk a
+  // purely local (nearest-preceding-call-target-entry) function-boundary heuristic cannot rule out on its
+  // own -- without re-deriving the control-flow graph outside segarecomp.
+  std::map<std::uint32_t, std::vector<std::uint32_t>> static_successors;
   std::set<std::uint32_t> exception_continuations;
   std::set<std::uint32_t> pushed_code_addresses;
   std::set<std::uint32_t> rejected_decode_targets;

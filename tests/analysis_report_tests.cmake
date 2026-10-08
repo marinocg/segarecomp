@@ -312,6 +312,14 @@ add_test(NAME segarecomp_angr_m68k_facts_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_angr_m68k_facts_test.py)
 set_property(TEST segarecomp_angr_m68k_facts_test APPEND PROPERTY LABELS full)
 
+# SEG-042-T002: the automatic real-title external-fact harvester's own pure-logic (backward-walk starting-
+# scope rule, external-entry check, fact-file formatting) and angr+native-classifier end-to-end tests. The
+# pure-logic tests are hermetic; the end-to-end test is SKIPPED (exit 0) when angr is not importable, same
+# convention as segarecomp_angr_m68k_facts_test above.
+add_test(NAME segarecomp_recomp_map_harvest_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_recomp_map_harvest_test.py $<TARGET_FILE:segarecomp-m68k-primary-word-classify>)
+set_property(TEST segarecomp_recomp_map_harvest_test APPEND PROPERTY LABELS full)
+
 # SEG-031 (ADR 0080): the explicit hybrid candidate end to end (planner -> plan -> filtered emission -> strict C11 build and run with
 # an explicit instruction budget), identical behaviour to broad, and the emitter's fail-closed plan validation.
 add_test(NAME genesis_hybrid_admission_generated_test COMMAND ${Python3_EXECUTABLE}

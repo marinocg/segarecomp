@@ -1,4 +1,5 @@
 add_subdirectory(segarecomp)
+add_subdirectory(m68k-primary-word-classify)
 
 # Consumer launcher and release packaging (opt-in; needs SDL3 and downloads Dear ImGui at configure time).
 option(SEGARECOMP_BUILD_LAUNCHER "Build the consumer launcher (SDL3 + Dear ImGui)" OFF)

@@ -286,8 +286,22 @@ GenesisAnalysisReport run_genesis_analysis_report(const FrontendProgram &program
     instructions.emplace(pc, GenesisReachabilityInstruction{decoded->operation, decoded->length});
     const auto control = m68k_control_successors(decoded->operation);
     if (control.always_raises_exception) ++report.exception_raising_instructions;
+    for (const auto &successor : control.successors)
+      if (successor.kind != M68kControlSuccessorKind::fallthrough &&
+          successor.kind != M68kControlSuccessorKind::conditional_fallthrough)
+        report.static_successors[pc].push_back(successor.target & bus_mask);
     switch (control.stacked) {
-    case M68kStackedContinuationKind::call_continuation: report.call_continuations.insert(control.stacked_address & bus_mask); break;
+    case M68kStackedContinuationKind::call_continuation: {
+      const auto continuation_pc = control.stacked_address & bus_mask;
+      report.call_continuations.insert(continuation_pc);
+      // SEG-042-T001: a static call's own fixed successor already names its callee; thread the resulting
+      // (callee -> continuation) edge through for the real-title containment consumer (no dynamic/indirect
+      // call edges here -- those are a separate, explicitly-scoped extension, not attempted by this report).
+      for (const auto &successor : control.successors)
+        if (successor.kind == M68kControlSuccessorKind::call_target)
+          report.call_target_continuations[successor.target & bus_mask].insert(continuation_pc);
+      break;
+    }
     case M68kStackedContinuationKind::exception_continuation:
       report.exception_continuations.insert(control.stacked_address & bus_mask);
       break;
@@ -657,7 +671,38 @@ std::string format_genesis_analysis_report_private(const GenesisAnalysisReport &
   }
   out << "{\"schema\":\"segarecomp.m68k_core_report.private.v1\",\"aggregate\":" << aggregate
       << ",\"roots\":" << hex_list(report.roots.roots) << ",\"discovered\":" << hex_list(discovered)
+      << ",\"discovered_lengths\":{";
+  {
+    // SEG-042-T001: the same `report.discovered` map's own instruction lengths, keyed by PC, alongside the
+    // existing flat `discovered` address list above (left byte-for-byte unchanged for its existing
+    // consumers). Lets an external containment/starting-scope consumer soundly test straight-line
+    // contiguity (`prev_pc + length(prev_pc) == pc`) without re-decoding anything itself.
+    bool first_length = true;
+    for (const auto &[pc, length] : report.discovered) {
+      out << (first_length ? "" : ",") << '"' << hex6(pc) << "\":" << length;
+      first_length = false;
+    }
+  }
+  out << "}"
       << ",\"call_continuations\":" << hex_list(report.call_continuations)
+      << ",\"call_target_continuations\":{";
+  {
+    bool first_edge = true;
+    for (const auto &[callee, continuations] : report.call_target_continuations) {
+      out << (first_edge ? "" : ",") << '"' << hex6(callee) << "\":" << hex_list(continuations);
+      first_edge = false;
+    }
+  }
+  out << "}"
+      << ",\"static_successors\":{";
+  {
+    bool first_succ = true;
+    for (const auto &[source, targets] : report.static_successors) {
+      out << (first_succ ? "" : ",") << '"' << hex6(source) << "\":" << hex_list(targets);
+      first_succ = false;
+    }
+  }
+  out << "}"
       << ",\"exception_continuations\":" << hex_list(report.exception_continuations)
       << ",\"pushed_code_addresses\":" << hex_list(report.pushed_code_addresses)
       << ",\"rejected_decode_targets\":" << hex_list(report.rejected_decode_targets)

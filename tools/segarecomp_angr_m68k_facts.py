@@ -194,6 +194,107 @@ def explore_exact_target(rom_path, start_pc, target_pc, target_register, ram_pre
     return sorted(found), steps, "closed"
 
 
+def explore_exact_target_pc(rom_path, start_pc, target_pc, ram_premises, max_entries, max_steps):
+    """SEG-042-T002: like `explore_exact_target` above, but generalizes to every eligible dynamic-control
+    family uniformly, including `(d8,An,Xn)`/`(d8,PC,Xn)` index forms a single named register cannot
+    describe (their effective address is only computed as part of EXECUTING the instruction at
+    `target_pc`, not sitting in any one register beforehand). Instead of reading a caller-named register
+    the moment a state reaches `target_pc`, this steps that state exactly ONE further instruction (the
+    dynamic-control instruction itself) and reads the resulting program counter -- correct and equivalent
+    to `explore_exact_target`'s register read for the simple register-indirect forms too, so the
+    automated real-title harvester (SEG-042-T002) uses this function exclusively and never has to
+    determine which family or register a site uses. Returns (sorted_targets, steps, reason,
+    fetched_words) on a sound exhaustive proof, or (None, steps, reason, fetched_words) otherwise;
+    `fetched_words` is the sorted list of every distinct opcode word any explored state fetched (RTE
+    exclusion is enforced the same way as `explore_exact_target`; a general base-MC68000 proof-path
+    legality screen over `fetched_words` is the automated harvester's job, via
+    `segarecomp-m68k-primary-word-classify`, ADR 0090 section 4 -- not this function's, which stays a
+    pure angr-exploration primitive)."""
+    import angr
+    import logging
+    logging.getLogger("angr").setLevel(logging.ERROR)
+    from archinfo import ArchPcode
+
+    rom_bytes = open(rom_path, "rb").read()
+
+    arch = ArchPcode("68000:BE:32:CPU32")
+    proj = angr.Project(rom_path, main_opts={"backend": "blob", "arch": arch, "base_addr": 0, "entry_point": start_pc})
+    state = proj.factory.blank_state(addr=start_pc)
+    for addr, value in ram_premises:
+        state.memory.store(addr, value.to_bytes(4, "big"))
+
+    simgr = proj.factory.simulation_manager(state)
+    found = set()
+    fetched_words = set()
+    steps = 0
+    poison = {"non_concrete": False, "rte": False}
+
+    def fetched_word(pc: int):
+        if pc + 2 > len(rom_bytes):
+            return None
+        return struct.unpack(">H", rom_bytes[pc:pc + 2])[0]
+
+    def is_arrived(s) -> bool:
+        pc_candidates = s.solver.eval_upto(s.regs.pc, 2)
+        if len(pc_candidates) != 1:
+            poison["non_concrete"] = True
+            return False
+        pc = pc_candidates[0]
+        word = fetched_word(pc)
+        if word is not None:
+            fetched_words.add(word)
+        if word == RTE_OPCODE:
+            poison["rte"] = True
+            return False
+        return pc == target_pc
+
+    while simgr.active and steps < max_steps:
+        # Same `simgr.move` discipline as `explore_exact_target` (never a direct `simgr.active`
+        # reassignment -- see that function's own comment for why).
+        simgr.move(from_stash="active", to_stash="arrived", filter_func=is_arrived)
+        if poison["rte"]:
+            return None, steps, "unsupported_proof_path_rte", sorted(fetched_words)
+        if poison["non_concrete"]:
+            return None, steps, "non_concrete_active_pc", sorted(fetched_words)
+        if simgr.stashes.get("arrived"):
+            # Step the arrived stash specifically, in place, exactly once (the dynamic-control instruction
+            # itself); this is what lets a self-looping or otherwise non-terminating target site be
+            # handled soundly without any timing heuristic, exactly like `explore_exact_target`'s
+            # query-complete removal, generalized to "one more step" instead of "read a register now".
+            simgr.step(stash="arrived", num_inst=1)
+            if simgr.errored:
+                return None, steps, "errored_path", sorted(fetched_words)
+            if simgr.unconstrained:
+                return None, steps, "unconstrained_path", sorted(fetched_words)
+            for s in simgr.stashes.get("arrived", []):
+                pcs = s.solver.eval_upto(s.regs.pc, max_entries + 1)
+                found.update(pcs)
+                if len(found) > max_entries:
+                    return None, steps, "entry_bound_exceeded", sorted(fetched_words)
+            simgr.drop(stash="arrived")  # already folded into `found`; do not re-query on the next round
+        if not simgr.active:
+            break
+        simgr.step(num_inst=1)
+        steps += 1
+        if simgr.errored:
+            return None, steps, "errored_path", sorted(fetched_words)
+        if simgr.unconstrained:
+            return None, steps, "unconstrained_path", sorted(fetched_words)
+
+    if simgr.active:
+        return None, steps, "resource_exhausted", sorted(fetched_words)
+    if simgr.errored:
+        return None, steps, "errored_path", sorted(fetched_words)
+    if simgr.unconstrained:
+        return None, steps, "unconstrained_path", sorted(fetched_words)
+    if not found:
+        return None, steps, "empty_target_set", sorted(fetched_words)
+    if len(found) > max_entries:
+        return None, steps, "entry_bound_exceeded", sorted(fetched_words)
+
+    return sorted(found), steps, "closed", sorted(fetched_words)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--rom", required=True)

@@ -76,9 +76,11 @@ struct Asm {
   }
   Asm &jmp_pcidx(unsigned index, std::uint32_t table) { return w(0x4EFBU).index_ext(index, table); }
   Asm &jmp_abs(std::uint32_t to) { return w(0x4EF9U).w(to >> 16U).w(to); }
+  Asm &jsr_abs(std::uint32_t to) { return w(0x4EB9U).w(to >> 16U).w(to); }
   Asm &nop() { return w(0x4E71U); }
   Asm &bra_self() { return w(0x60FEU); }
   Asm &rte() { return w(0x4E73U); }
+  Asm &rts() { return w(0x4E75U); }
 };
 
 // A guarded word-offset table dispatch at `at` (table at `table`, out-of-range path at `out`); returns the JMP's PC.
@@ -303,6 +305,51 @@ void return_slot_premise_sites_report() {
          "premise sites: absent without the memory domain");
 }
 
+// SEG-042-T001: the static call-graph projection (`call_target_continuations`/`static_successors`) a
+// real-title external-fact containment consumer needs, built entirely from the already-computed
+// `m68k_control_successors()` data -- no new analysis. Entry JSRs a callee twice (two call sites, one
+// callee, proving the continuation set unions correctly) and the callee RTS's back; a conditional branch
+// inside the callee exercises a non-call static successor too.
+void static_call_graph_report() {
+  Image image;
+  constexpr std::uint32_t callee = 0x300U;
+  Asm{image, entry}.jsr_abs(callee).jsr_abs(callee).bra_self();  // two call sites, same callee
+  constexpr std::uint32_t first_continuation = entry + 6U;       // JSR.L is 6 bytes (opcode + abs32)
+  constexpr std::uint32_t second_continuation = entry + 12U;
+  Asm{image, callee}.moveq(0, 0).cmpi_b(0, 1U).bcc_s(HI, callee + 0x10U).rts();
+  constexpr std::uint32_t branch_site = callee + 6U;  // moveq(2) + cmpi_b(4) bytes before the BCC.S
+  Asm{image, callee + 0x10U}.rts();
+  auto program = make_genesis_bridge_startup_program(image.bytes, 0U, entry, std::nullopt);
+  expect(program && apply_genesis_immutable_rom_aot(*program), "static call graph fixture program");
+  if (!program) return;
+  const auto report = run_genesis_analysis_report(*program, {});
+  expect(report.images_valid, "static call graph: valid image");
+  const auto callees = report.call_target_continuations.find(callee);
+  expect(callees != report.call_target_continuations.end() &&
+             callees->second == std::set<std::uint32_t>{first_continuation, second_continuation},
+         "static call graph: both call sites' continuations are attributed to the one callee entry");
+  const auto entry_successors = report.static_successors.find(entry);
+  expect(entry_successors != report.static_successors.end() &&
+             entry_successors->second == std::vector<std::uint32_t>{callee},
+         "static call graph: the entry JSR's own static successor names the callee");
+  const auto second_call_successors = report.static_successors.find(first_continuation);
+  expect(second_call_successors != report.static_successors.end() &&
+             second_call_successors->second == std::vector<std::uint32_t>{callee},
+         "static call graph: the second call site's static successor also names the callee");
+  const auto branch_successors = report.static_successors.find(branch_site);
+  expect(branch_successors != report.static_successors.end() &&
+             branch_successors->second == std::vector<std::uint32_t>{callee + 0x10U},
+         "static call graph: a plain conditional branch's taken target is exposed too");
+  const auto aggregate = format_genesis_analysis_report_aggregate(report, {});
+  const auto private_output = format_genesis_analysis_report_private(report, aggregate);
+  expect(private_output.find("\"call_target_continuations\":{\"000300\":[\"000206\",\"00020c\"]}") != std::string::npos,
+         "static call graph: private JSON carries the callee -> continuations map: " + private_output);
+  expect(private_output.find("\"static_successors\":{\"000200\":[\"000300\"]") != std::string::npos,
+         "static call graph: private JSON carries the static successor map: " + private_output);
+  expect(private_output.find("\"discovered_lengths\":{\"000200\":6,") != std::string::npos,
+         "static call graph: private JSON carries per-PC instruction lengths for the contiguity walk: " + private_output);
+}
+
 void reject_invalid_images() {
   Image image;
   auto program = make_genesis_bridge_startup_program(image.bytes, 0U, entry, std::nullopt);
@@ -371,6 +418,7 @@ int main(int argc, char **argv) {
   }
   address_domain_report();
   return_slot_premise_sites_report();
+  static_call_graph_report();
   reject_invalid_images();
   incomplete_frames_report_is_not_credited();
   if (failures != 0) {
