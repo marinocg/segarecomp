@@ -334,6 +334,50 @@ def test_rts_entry_depth_bound() -> None:
 
 
 
+def test_rts_region_is_not_a_stack_frame_region() -> None:
+    """Adversarial-review findings (SEG-043-T006): calls inside the dominated region push continuations the `rts`
+    may pop, and a call-to-next is also a fall-in."""
+    # recursion: f(0x100) bcc -> L(0x108: rts); 0x102 calls f again; main (0x10) calls f.
+    nodes = {0x10: 2, 0x100: 2, 0x102: 2, 0x104: 2, 0x106: 2, 0x108: 2}
+    got = contain(synth_report(nodes, {0x100: [0x108]}, {0x10}, {0x108}, {0x10: 0x100, 0x102: 0x100}), 0x108)
+    expect(got["outcome"] == "contained" and {0x12, 0x104} <= set(got["targets"]),
+           f"recursive call continuation must be accounted: {got}")
+    # callee body inside the region branches into the caller's rts: A(0x100): call B; ret_x; ret_y; B(0x200): bra ret_y
+    nodes = {0x10: 2, 0x100: 2, 0x102: 2, 0x104: 2, 0x200: 2}
+    got = contain(synth_report(nodes, {0x200: [0x104]}, {0x10}, {0x102, 0x104, 0x200}, {0x10: 0x100, 0x100: 0x200}), 0x104)
+    expect(got["outcome"] == "contained" and {0x12, 0x102} <= set(got["targets"]),
+           f"in-region callee continuation must be accounted: {got}")
+    # a call to a callee OUTSIDE the region adds nothing
+    nodes = {0x10: 2, 0x100: 2, 0x102: 2, 0x300: 2, 0x302: 2}
+    got = contain(synth_report(nodes, {}, {0x10}, {0x102, 0x302}, {0x10: 0x100, 0x100: 0x300}), 0x102)
+    expect(got["outcome"] == "contained" and got["targets"] == [0x12], f"outside callee must not widen: {got}")
+    # call-to-next (get-PC): the entry is also entered by fall-in with the caller's frame
+    nodes = {0x10: 2, 0x100: 2, 0x102: 2}
+    got = contain(synth_report(nodes, {}, {0x10}, {0x102}, {0x10: 0x100, 0x100: 0x102}), 0x102)
+    expect(got["outcome"] == "contained" and got["targets"] == [0x12, 0x102], f"call-to-next: {got}")
+
+
+def test_interrupt_guard_is_an_allowlist_and_covers_rts() -> None:
+    base = {"discovered_lengths": {"000200": 4, "000204": 2}, "roots": ["000200"], "static_successors": {},
+            "call_target_continuations": {}}
+    original = harvest_module.attempt_exact
+    harvest_module.attempt_exact = lambda *a, **k: {"outcome": "exact", "targets": [0x300], "cost": {}}
+    try:
+        for detail, credited in (("frame_unproven", False), ("interrupt_resumption", False), ("brand_new_detail", False),
+                                 ("invalidated", False), ("stack_unbalanced", True), ("context_bound", True)):
+            report = dict(base, computed_sites={"000204": {"family": "jmp_an", "outcome": "unknown",
+                                                           "reason": "unknown_input", "detail": detail}})
+            outcome = harvest_module.harvest(report, "r", "c", 64, 10)[0]["outcome"]
+            expect((outcome == "exact") == credited, f"detail {detail!r}: expected credited={credited}, got {outcome}")
+    finally:
+        harvest_module.attempt_exact = original
+    report = dict(base, computed_sites={"000204": {"family": "rts_computed", "outcome": "unknown", "reason": "x",
+                                                   "detail": "interrupt_resumption_unproven"}})
+    outcome = harvest_module.harvest(report, "r", "c", 64, 10)[0]["outcome"]
+    expect(outcome == "unsupported", f"rts_computed with an interrupt-sensitive detail must not be contained: {outcome}")
+
+
+
 def test_write_facts_format() -> None:
     results = [
         {"pc": 0x300, "outcome": "exact", "targets": [0x400, 0x500]},
@@ -443,6 +487,8 @@ def main() -> int:
     test_interrupt_unproven_sites_never_get_external_exact_facts()
     test_rts_entry_accounting()
     test_rts_entry_depth_bound()
+    test_rts_region_is_not_a_stack_frame_region()
+    test_interrupt_guard_is_an_allowlist_and_covers_rts()
     test_write_facts_format()
 
     classifier_path = sys.argv[1] if len(sys.argv) > 1 else None

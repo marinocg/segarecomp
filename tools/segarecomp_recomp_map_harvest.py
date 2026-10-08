@@ -53,7 +53,11 @@ INTERRUPT_UNPROVEN_DETAIL = "interrupt_resumption_unproven"
 # SEG-043-T003: `invalidated` is the PC-index recovery's pinned-unresolved state for targets that a growing fixed
 # point later lost; measured on the real titles it is the same interrupt-resumption poisoning (every register and
 # the stack pointer become Unknown at an interruptible loop), so an external program-order proof cannot credit it.
-INTERRUPT_SENSITIVE_DETAILS = frozenset({INTERRUPT_UNPROVEN_DETAIL, "invalidated"})
+INTERRUPT_SENSITIVE_DETAILS = frozenset({INTERRUPT_UNPROVEN_DETAIL, "invalidated", "interrupt_resumption",
+                                         "frame_unproven"})
+# Details a report is known to emit that carry no interrupt hazard. An external EXACT fact is credited only for a
+# site whose detail is absent or in this allowlist (fail closed: any other/new detail is unsupported).
+NON_INTERRUPT_DETAILS = frozenset({"", "none", "context_bound", "base_unknown", "stack_unbalanced"})
 DEFAULT_CLASSIFIER = TOOLS_DIR.parent / "build" / "dev" / "apps" / "m68k-primary-word-classify" / \
     "segarecomp-m68k-primary-word-classify"
 
@@ -310,8 +314,10 @@ def frame_continuations(ctx: RegionContext, entry: int, site_pc: int, depth: int
     Fails closed (returns None + reason) when `entry` is a program root / statically pushed address, when an
     entering instruction has no sound dominating frame (an unaccounted entry), when the chain is cyclic or
     too deep, when no entry is known at all, or when the union exceeds the fixed bound. Like the SEG-042 rule
-    this is a structural proposal; the unmodified SEG-031 closure and `validate_genesis_hybrid_round`
-    remain the soundness backstop for anything it cannot see (unresolved dynamic edges, stack discipline)."""
+    this is a structural proposal under an ASSUMED stack discipline (the `rts` pops its frame's return slot). The
+    SEG-031 consumer re-verifies fact form (mapping/evenness/decode) and the admitted set's closure only; it does NOT
+    check that a contained set is complete (reproduced by mutation), so completeness rests on this function and, for
+    any `H < U` claim, on the ADR 0080 runtime-PC-escape check."""
     if entry in visiting:
         return None, "cyclic_entry_chain", {}
     if depth > MAX_ENTRY_CHAIN:
@@ -322,13 +328,24 @@ def frame_continuations(ctx: RegionContext, entry: int, site_pc: int, depth: int
     internal = region or frozenset()
     targets: set[int] = set()
     stats = {"call_entries": 0, "inherited_entries": 0}
+    # A static call INSIDE the region whose callee is the entry (recursion) or lies in the region (a callee body only
+    # the entry can reach, which may branch into this frame's `rts`) pushes a continuation that this `rts` may pop:
+    # the region is a dominance region, not a stack-frame region, so account for those continuations (over-approximate).
+    for node in sorted(internal):
+        for target_hex in ctx.static_successors.get(hex6(node), ()):
+            callee = int(target_hex, 16)
+            if (callee == entry or callee in internal) and ctx.is_static_call(node, callee):
+                targets.add(node + ctx.lengths[node])
+                stats["internal_call_continuations"] = stats.get("internal_call_continuations", 0) + 1
     for pred in sorted(ctx.preds.get(entry, ())):
         if pred in internal:
-            continue  # an internal loop edge back to the entry
+            continue  # an internal loop edge back to the entry (internal calls were accounted above)
         if ctx.is_static_call(pred, entry):
             targets.add(pred + ctx.lengths[pred])
             stats["call_entries"] += 1
-            continue
+            if pred + ctx.lengths[pred] != entry:
+                continue
+            # call-to-next (get-PC): the same instruction is also a fall-in with the caller's own frame
         frame, _info = ctx.sound_start(pred)
         if frame is None:
             return None, "unaccounted_branch_entry", {}
@@ -362,6 +379,10 @@ def harvest(report: dict, rom_path: str, classifier_path: str, max_entries: int,
             scope_model: str = "cfg", diagnostic_interrupt_sites: bool = False,
             containment_model: str = "entries") -> list[dict]:
     ctx = RegionContext(report, scope_model)
+    if ctx.no_fallthrough is None:
+        print("segarecomp_recomp_map_harvest: WARNING: report has no `no_fallthrough` field (pre-SEG-043-T002 report); "
+              "assuming every instruction falls through, which can mask unaccounted entries -- regenerate the report",
+              file=sys.stderr)
     results = []
     for site in eligible_sites(report):
         site_pc = site["pc"]
@@ -369,10 +390,12 @@ def harvest(report: dict, rom_path: str, classifier_path: str, max_entries: int,
         if start_pc is None:
             results.append({**site, "outcome": "unresolved", "reason": "no_sound_starting_scope", "scope": scope})
             continue
-        if site["family"] == RTS_COMPUTED_FAMILY:
+        if site["family"] == RTS_COMPUTED_FAMILY and site.get("detail") in INTERRUPT_SENSITIVE_DETAILS:
+            outcome = {"outcome": "unsupported", "reason": "external_proof_ignores_interrupt_resumption"}
+        elif site["family"] == RTS_COMPUTED_FAMILY:
             outcome = attempt_containment(site_pc, start_pc, report.get("call_target_continuations", {}), ctx,
                                           containment_model)
-        elif site.get("detail") in INTERRUPT_SENSITIVE_DETAILS:
+        elif (site.get("detail") or "") not in NON_INTERRUPT_DETAILS:
             if diagnostic_interrupt_sites:
                 diag = attempt_exact(site_pc, start_pc, rom_path, classifier_path, max_entries, max_steps)
                 outcome = {"outcome": "unsupported", "reason": "external_exact_proof_ignores_interrupt_resumption",
