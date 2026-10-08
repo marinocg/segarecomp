@@ -215,6 +215,7 @@ def test_interrupt_unproven_sites_never_get_external_exact_facts() -> None:
                "diagnostic mode must record the uncredited program-order result")
     finally:
         harvest_module.attempt_exact = original
+    report["computed_sites"]["000204"]["detail"] = "invalidated"
     for diag in (False,):
         results = harvest_module.harvest(report, "/nonexistent-rom", "/nonexistent-classifier", 64, 10, "cfg", diag)
         expect(len(results) == 1 and results[0]["outcome"] == "unsupported" and

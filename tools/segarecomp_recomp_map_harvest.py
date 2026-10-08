@@ -50,6 +50,10 @@ RTS_COMPUTED_FAMILY = "rts_computed"
 # An external proof that executes in program order (angr) never models interrupt resumption, so it cannot
 # discharge this premise: an `exact` fact for such a site would silently assume transparent handlers.
 INTERRUPT_UNPROVEN_DETAIL = "interrupt_resumption_unproven"
+# SEG-043-T003: `invalidated` is the PC-index recovery's pinned-unresolved state for targets that a growing fixed
+# point later lost; measured on the real titles it is the same interrupt-resumption poisoning (every register and
+# the stack pointer become Unknown at an interruptible loop), so an external program-order proof cannot credit it.
+INTERRUPT_SENSITIVE_DETAILS = frozenset({INTERRUPT_UNPROVEN_DETAIL, "invalidated"})
 DEFAULT_CLASSIFIER = TOOLS_DIR.parent / "build" / "dev" / "apps" / "m68k-primary-word-classify" / \
     "segarecomp-m68k-primary-word-classify"
 
@@ -368,7 +372,7 @@ def harvest(report: dict, rom_path: str, classifier_path: str, max_entries: int,
         if site["family"] == RTS_COMPUTED_FAMILY:
             outcome = attempt_containment(site_pc, start_pc, report.get("call_target_continuations", {}), ctx,
                                           containment_model)
-        elif site.get("detail") == INTERRUPT_UNPROVEN_DETAIL:
+        elif site.get("detail") in INTERRUPT_SENSITIVE_DETAILS:
             if diagnostic_interrupt_sites:
                 diag = attempt_exact(site_pc, start_pc, rom_path, classifier_path, max_entries, max_steps)
                 outcome = {"outcome": "unsupported", "reason": "external_exact_proof_ignores_interrupt_resumption",

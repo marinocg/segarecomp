@@ -93,3 +93,30 @@ continuation was silently accepted (12 islands, unchanged result); an odd or unm
 to `whole_image`; a malformed file is rejected outright; an extra unrelated target is accepted (a superset is
 sound). Completeness of a contained set therefore rests on the harvester proof, and any future `H < U` claim
 must be backed by the runtime-PC-escape check required by ADR 0080 rather than by the consumer.
+
+## SEG-043-T003 -- PC-index selector-domain recovery (STOP: no sound credited domain exists)
+
+Residual `pc_index_explicit` sites: Sonic 1 four (`0x390` pinned `invalidated`; three `index_unknown` with
+`interrupt_resumption_unproven`), Sonic 2 two (both `interrupt_resumption_unproven`), Cool Spot none.
+
+**Where precision is lost (measured with the private per-point trace).** For the Sonic 1 loop site the entry
+state is clean at the region entry (stack pointer known, no register facts) and Unknown inside the
+region: at an interruptible point of the loop `apply_resumptions` deliberately joins an *unproven* interrupt
+handler resumption, which makes every D/A register and the stack pointer Unknown(`interrupt_resumption_unproven`),
+and the previously resolved targets are `invalidated` by the growing fixed point. The selector is never a
+missing finite domain in the credited analysis; it is a domain the analysis refuses to carry across an
+interrupt boundary it cannot prove transparent (ADR 0079 decision on interrupt resumption).
+
+**Uncredited attribution experiment** (`--diagnostic-transparent-handlers --assume-no-z80-ram-writes`; never
+credited, never fed to a fact file): the same sites would resolve to finite sets on Sonic 1 `0x390` (8
+targets), `0xb5a` (25) and `0x71f94` (5), and Sonic 2 `0x390` (16); Sonic 1 `0x72a60` stays `width_only` and Sonic
+2 `0x44e` stays `target_outside_image` even under the ablation. So finite selector domains exist, but only
+under the transparent-handler premise that SEG-038/039/040 (ADR 0086/0087/0088) already tried and failed to
+discharge soundly. SEG-043 does not build another abstract domain or re-run that STOPped path.
+
+**Fallback.** The angr program-order exact attempt also cannot be credited at these sites for the same reason
+(it never models interrupt resumption); the harvester guard now covers `interrupt_resumption_unproven` *and*
+`invalidated`. The one site that is not itself `interrupt_resumption_unproven`-detailed (Sonic 1 `0x390`) was
+re-tried from T001's improved region at the unchanged bound: `resource_exhausted` after 100000 steps = Unknown.
+Result: closed via a credited finite domain **0**; closed via angr **0**; unresolved **6/6**, every one with
+the named reason above. Cool Spot (no PC-index site) is unchanged.
