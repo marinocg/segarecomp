@@ -45,7 +45,7 @@ import segarecomp_angr_m68k_facts as angr_producer  # noqa: E402
 
 INELIGIBLE_FAMILIES = {"rte", "unclassified"}
 RTS_COMPUTED_FAMILY = "rts_computed"
-DEFAULT_CLASSIFIER = TOOLS_DIR.parent / "build" / "dev" / "platforms" / "genesis" / "analysis_report" / \
+DEFAULT_CLASSIFIER = TOOLS_DIR.parent / "build" / "dev" / "apps" / "m68k-primary-word-classify" / \
     "segarecomp-m68k-primary-word-classify"
 
 

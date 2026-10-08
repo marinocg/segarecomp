@@ -16,9 +16,3 @@ segarecomp_enable_warnings(segarecomp_genesis_analysis_report)
 add_executable(segarecomp-genesis-analysis-report src/main.cpp)
 target_link_libraries(segarecomp-genesis-analysis-report PRIVATE segarecomp::genesis_analysis_report)
 segarecomp_enable_warnings(segarecomp-genesis-analysis-report)
-
-# SEG-042-T001: tiny, bounded, non-production batch query CLI over the generation-time primary-word
-# legality classifier, so an external proof-path producer never has to duplicate decoder logic.
-add_executable(segarecomp-m68k-primary-word-classify src/primary_word_classify_main.cpp)
-target_link_libraries(segarecomp-m68k-primary-word-classify PRIVATE segarecomp::cpu_m68k)
-segarecomp_enable_warnings(segarecomp-m68k-primary-word-classify)

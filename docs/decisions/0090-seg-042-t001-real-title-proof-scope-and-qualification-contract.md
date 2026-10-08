@@ -139,8 +139,10 @@ illegal). A real title's proof paths can fetch other words no screen currently c
 This task adds the smallest possible mechanism rather than a new cross-language certificate framework:
 a tiny, bounded, non-production batch CLI,
 `segarecomp-m68k-primary-word-classify --words <hex4>[,<hex4>...]`
-(`platforms/genesis/analysis_report/src/primary_word_classify_main.cpp`, linked only against
-`segarecomp::cpu_m68k`, never installed, never linked into `segarecomp`/the compiler/runtime), that
+(`apps/m68k-primary-word-classify/main.cpp`, a standalone top-level diagnostic tool living outside
+`platforms/genesis/analysis_report/` specifically because that directory's `CMakeLists.txt` is reserved
+by `analysis_core_boundary_test` for exactly the analysis-report driver's own three targets; linked only
+against `segarecomp::cpu_m68k`, never installed, never linked into `segarecomp`/the compiler/runtime), that
 calls the exact same pure generation-time authority the decoder itself uses,
 `m68k_classify_primary_word` (ADR 0043 section 3, `libs/cpu/m68k/src/legality.cpp`), and prints each
 word's classification (`legal` / `line_a_emulator` / `line_f_emulator` / `illegal`). This is **not** the
