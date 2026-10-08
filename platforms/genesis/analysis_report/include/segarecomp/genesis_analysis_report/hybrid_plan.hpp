@@ -75,7 +75,32 @@ struct GenesisExternalM68kFact {
   bool exact{};                        // true: an exhaustive exact target set; false: a bounded contained-region entry set
 };
 
+// SEG-044-T003 (ADR 0093): an optional, ROM-bound, fail-closed SOURCE-DERIVED executable-PC universe `C` (every M68K
+// instruction start the exact external source project assembles as code). It is the smallest shared container: it carries
+// no per-site fact. When supplied it is consulted at the same single centralized point as the per-site facts, only for a site
+// the unmodified internal ladder (and any per-site fact) left `whole_image`, and only as a `contained` entry set:
+// PossibleTargets(site) subset of C. Like every external input, structure is re-verified (every member even, mapped and
+// decodable by segarecomp's own decoder, bounded) and completeness ("no executed PC lies outside C") is the external
+// source authority's claim, never proven here. A malformed or ROM-mismatched file is rejected outright.
+struct GenesisSourceM68kUniverse {
+  std::string rom_sha256;
+  std::string producer;
+  std::string source_revision;  // exact source revision token the producer was bound to (provenance only)
+  std::string source_config;
+  std::vector<std::uint32_t> entries;  // strictly ascending, even
+};
+
+inline constexpr std::string_view genesis_source_m68k_universe_schema = "segarecomp.m68k_source_universe.v1";
+inline constexpr std::size_t genesis_source_m68k_universe_max_bytes = std::size_t{1} << 20U;
+inline constexpr std::size_t genesis_source_m68k_universe_max_entries = std::size_t{1} << 16U;
+
+// Parses and structurally validates the bounded ASCII universe text. `nullopt` on any malformation, bound violation, duplicate or
+// unsorted/odd entry, count mismatch or ROM-hash mismatch (identical in effect to no file).
+[[nodiscard]] std::optional<GenesisSourceM68kUniverse> parse_genesis_source_m68k_universe(const std::string &text,
+                                                                                          const std::string &rom_sha256);
+
 struct GenesisExternalM68kFacts {
+  std::optional<GenesisSourceM68kUniverse> source_universe;  // SEG-044-T003: shared source-derived container (see above)
   std::string rom_sha256;                       // lowercase hex; must equal the plan's own ROM digest or the whole set is rejected
   std::string producer;                         // generic, non-reconstructable producer identity (e.g. "segarecomp-angr-m68k-v1")
   std::vector<GenesisExternalM68kFact> facts;    // sorted by `pc`, one entry per PC (the parser rejects a duplicate PC)
@@ -129,6 +154,7 @@ struct GenesisHybridSite {
   GenesisAnalysisSubReason sub{GenesisAnalysisSubReason::none};
   GenesisHybridContainer container{GenesisHybridContainer::whole_image};
   std::vector<std::uint32_t> entries;  // the site's island entries this round (sorted; empty for whole_image)
+  bool source_universe{};              // SEG-044-T003: `entries` are the shared source-derived universe (implies `external`)
   bool external{};                     // SEG-041-T008: `entries` came from a structurally-re-verified external fact, not from
                                         // segarecomp's own points-to value (disambiguates provenance regardless of `container`)
 };
@@ -148,6 +174,8 @@ struct GenesisHybridPlan {
   std::size_t materialized_entries{};   // mandatory `static_proof` image entries
   std::string validation_failure;       // broad_validation_failed only
   bool diagnostic_transparent_handlers{};  // SEG-034: produced under the uncredited transparent-handler ablation
+  std::size_t source_universe_applied{};   // SEG-044-T003: uncovered sites of the final round contained by the source universe
+  std::size_t source_universe_size{};      // SEG-044-T003: |C| of the supplied (structurally parsed) universe, 0 when absent
   std::size_t external_facts_applied{};    // SEG-041-T008: uncovered sites of the final round whose container used an
                                             // externally-proven, structurally-re-verified fact (0 when `external_m68k_facts`
                                             // is absent, or when every supplied fact failed re-verification/was unused)

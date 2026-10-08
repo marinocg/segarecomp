@@ -238,6 +238,61 @@ std::optional<GenesisExternalM68kFacts> parse_genesis_external_m68k_facts(const 
   return facts;
 }
 
+std::optional<GenesisSourceM68kUniverse> parse_genesis_source_m68k_universe(const std::string &text, const std::string &rom_sha256) {
+  if (text.size() > genesis_source_m68k_universe_max_bytes) return std::nullopt;
+  if (!fact_valid_sha256(rom_sha256)) return std::nullopt;
+  std::vector<std::string_view> lines;
+  std::string_view remaining = text;
+  while (!remaining.empty()) {
+    const auto newline = remaining.find('\n');
+    if (newline == std::string_view::npos) return std::nullopt;
+    lines.push_back(remaining.substr(0, newline));
+    remaining.remove_prefix(newline + 1U);
+  }
+  std::size_t index = 0;
+  const auto next = [&]() -> std::optional<std::string_view> {
+    if (index >= lines.size()) return std::nullopt;
+    return lines[index++];
+  };
+  const auto field = [&](std::string_view key) -> std::optional<std::string_view> {
+    const auto line = next();
+    if (!line || line->size() <= key.size() + 1U || line->substr(0, key.size()) != key || (*line)[key.size()] != ' ') return std::nullopt;
+    return line->substr(key.size() + 1U);
+  };
+  if (next() != genesis_source_m68k_universe_schema) return std::nullopt;
+  const auto sha = field("rom_sha256");
+  if (!sha || *sha != rom_sha256) return std::nullopt;
+  const auto producer = field("producer");
+  const auto revision = field("source_revision");
+  const auto config = field("source_config");
+  if (!producer || !fact_valid_token(*producer) || !revision || !fact_valid_token(*revision) || !config || !fact_valid_token(*config))
+    return std::nullopt;
+  const auto count_text = field("entries");
+  if (!count_text || count_text->empty() || count_text->size() > 6U) return std::nullopt;
+  std::size_t count = 0;
+  for (const char digit : *count_text) {
+    if (digit < '0' || digit > '9') return std::nullopt;
+    count = count * 10U + static_cast<std::size_t>(digit - '0');
+  }
+  if (count == 0U || count > genesis_source_m68k_universe_max_entries) return std::nullopt;
+  GenesisSourceM68kUniverse universe;
+  universe.rom_sha256 = rom_sha256;
+  universe.producer = std::string(*producer);
+  universe.source_revision = std::string(*revision);
+  universe.source_config = std::string(*config);
+  universe.entries.reserve(count);
+  for (std::size_t i = 0; i < count; ++i) {
+    const auto line = next();
+    if (!line || line->size() != 8U) return std::nullopt;
+    const auto value = fact_parse_hex8(*line);
+    if (!value || (*value & 1U) != 0U) return std::nullopt;
+    if (!universe.entries.empty() && *value <= universe.entries.back()) return std::nullopt;  // strictly ascending, deduplicated
+    universe.entries.push_back(*value);
+  }
+  if (next() != std::string_view{"end"} || index != lines.size()) return std::nullopt;
+  return universe;
+}
+
 namespace {
 
 // SEG-041-T008: structurally re-verifies one externally-supplied fact against `image` -- segarecomp's own CPU decoder/legality
@@ -265,12 +320,24 @@ GenesisHybridSite apply_external_fact(GenesisHybridSite site, const GenesisM68kA
                                       std::size_t max_entries, const std::optional<GenesisExternalM68kFacts> &external) {
   if (!external) return site;
   const auto found = std::find_if(external->facts.begin(), external->facts.end(), [&](const auto &fact) { return fact.pc == pc; });
-  if (found == external->facts.end()) return site;
-  auto verified = reverify_external_entries(image, found->entries, max_entries);
-  if (!verified) return site;
-  site.entries = std::move(*verified);
-  site.external = true;
-  site.container = found->exact ? GenesisHybridContainer::exact : GenesisHybridContainer::points_to_region;
+  if (found != external->facts.end()) {
+    if (auto verified = reverify_external_entries(image, found->entries, max_entries)) {
+      site.entries = std::move(*verified);
+      site.external = true;
+      site.container = found->exact ? GenesisHybridContainer::exact : GenesisHybridContainer::points_to_region;
+      return site;
+    }
+  }
+  // SEG-044-T003: the shared source-derived universe is strictly weaker than any per-site fact (a superset), so it is consulted only
+  // after a per-site fact is absent or failed re-verification, and only ever as a contained region.
+  if (external->source_universe) {
+    if (auto verified = reverify_external_entries(image, external->source_universe->entries, max_entries)) {
+      site.entries = std::move(*verified);
+      site.external = true;
+      site.source_universe = true;
+      site.container = GenesisHybridContainer::points_to_region;
+    }
+  }
   return site;
 }
 
@@ -409,6 +476,9 @@ GenesisHybridPlan plan_genesis_hybrid_admission(const FrontendProgram &program, 
     return plan;
   }
   plan.universe = *universe;
+  plan.source_universe_size = (config.external_m68k_facts && config.external_m68k_facts->source_universe)
+                                  ? config.external_m68k_facts->source_universe->entries.size()
+                                  : 0U;
   plan.admitted = plan.universe;  // broad until a validated fixed point says otherwise
   auto analysis_config = config.analysis;
   plan.diagnostic_transparent_handlers = config.diagnostic_transparent_handlers;
@@ -446,6 +516,7 @@ GenesisHybridPlan plan_genesis_hybrid_admission(const FrontendProgram &program, 
     }
     plan.sites.clear();
     plan.external_facts_applied = 0U;
+    plan.source_universe_applied = 0U;
     plan.resolved_sites = 0U;
     for (const auto &[pc, site] : report.computed_sites) plan.resolved_sites += site.resolved ? 1U : 0U;
     plan.premise_returns = report.analysis.return_slots.premise_sites;
@@ -457,6 +528,7 @@ GenesisHybridPlan plan_genesis_hybrid_admission(const FrontendProgram &program, 
       if (site.container == GenesisHybridContainer::whole_image) whole = true;
       else merge_into(grown[pc], site.entries);
       if (site.external) ++plan.external_facts_applied;
+      if (site.source_universe) ++plan.source_universe_applied;
       plan.sites.emplace(pc, std::move(site));
     }
     if (whole) {
@@ -569,6 +641,8 @@ std::string format_genesis_hybrid_plan_aggregate(const GenesisHybridPlan &plan) 
   if (!plan.validation_failure.empty()) out << ",\"validation_failure\":\"" << plan.validation_failure << '"';
   if (plan.diagnostic_transparent_handlers) out << ",\"diagnostic_ablation\":\"transparent_handlers\",\"credited\":false";
   out << ",\"external_facts_applied\":" << plan.external_facts_applied;
+  if (plan.source_universe_size != 0U)
+    out << ",\"source_universe_size\":" << plan.source_universe_size << ",\"source_universe_applied\":" << plan.source_universe_applied;
   out << '}';
   return out.str();
 }
