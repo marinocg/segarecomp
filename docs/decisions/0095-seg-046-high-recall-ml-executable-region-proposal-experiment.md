@@ -71,3 +71,43 @@ Baselines. Product main `a4664ed4abbb357f04976a2a8525ba5988214880` (PR #84 merge
 Isolated experiment environment (no repository dependency added; ignored `<HARNESS_ROOT>/.cache/seg046-ml-venv`, created with
 `python3 -m venv` + `pip install scikit-learn==1.9.1`): Python 3.13.5, scikit-learn 1.9.1, numpy 2.5.3, scipy 1.18.1 (linux aarch64 wheels,
 dev container). The public product build, CI and tests do not import any ML package (the unit tests cover only the pure-Python parts).
+
+## 2. Window-feature export and tool (T002, report-only)
+
+`genesis_window_feature_report` (C++, `hybrid_admission`, reusing `m68k_control_successors` / decoder / IR) writes 27 generic per-window
+counts of the broad identities (identity count, instruction-span histogram, IR family histogram, conditional/unconditional/call/return/
+indirect/terminator/exception counts, fixed-edge landing same/adjacent/far/dangling, sequential fall-off, incoming local/external fixed
+edges); CLI `--window-feature-report <path> --window-feature-bytes <256|512>` (report-only; broad emission unchanged). Python
+(`tools/segarecomp_ml_region.py`) adds 16 byte statistics and the previous/next window context: 3 x 44 = 132 features. Window start is a row
+key only. Tests: `genesis_window_features_test` (C++), `segarecomp_ml_region_test` (forbidden-feature rejection, extraction determinism and
+order independence, title/path independence, wrong-ROM-hash and malformed-universe fail-closed, dropped-source-positive containment failure,
+oracle-input refusal, artifact digest mismatch, blocked-fold purge).
+
+## 3. Sonic 1 blocked CV, model shootout, freeze (T003; Sonic 1 is the only title that influenced anything)
+
+Sonic 1: 512 KiB; 2048 windows of 256 B (434 positive, 1614 negative); 1024 windows of 512 B (230 positive). Blocked CV: 16 contiguous groups,
+2-window purge, fixed seed 46. Threshold = lowest positive out-of-fold score (100% observed OOF recall). R includes the 25-34 certain-code
+windows. Out-of-fold results (the CV was run once; the selection rule above was fixed in the tool before it was run):
+
+| window | model | OOF AUC | threshold | selected ROM fraction at 100% OOF recall |
+| --- | --- | --- | --- | --- |
+| 256 | logistic regression | 0.9991 | 0.00136 | 0.3179 |
+| 256 | hist. gradient boosting | 0.9994 | 0.01378 | 0.2764 |
+| 512 | logistic regression | 0.9985 | 0.00835 | 0.2588 |
+| 512 | hist. gradient boosting | 0.9995 | 0.04535 | 0.2500 |
+
+Rule outcome: the minimum is 512/HGB (0.2500); 512/logistic regression is within 0.01 and simpler, so it is chosen. (The 256 B primary size was
+not retained because the frozen selection order puts selected-ROM fraction ahead of the window-size preference. This is recorded honestly: the
+choice was made on Sonic 1 numbers alone, before any blind title was processed.)
+
+Frozen definition (`tools/segarecomp_ml_region.frozen.json`): window 512 B; feature version `seg046-features-v1`, 132 features, schema hash
+`d2e7c82913139c29450511326d6de76e91579ec654edde81afae16b13cd1f570`; logistic regression (standardize, C=1, lbfgs, balanced classes, 2000
+iterations); seed 46; threshold 0.00835406801187952; certain-code union = windows containing a precise direct-control-discovery identity
+(includes the machine roots); final model trained on all 1024 Sonic 1 windows; two independent fits produce the identical artifact;
+model artifact SHA-256 `b5ddae5aa0fe6571455803c244d2a6be4a2c3349e3436c8780bfc3d8aa8fa62b` (private, ignored; not committed).
+
+Sonic 1 calibration gate (Release CLI, 4 vCPU): R = 257 windows = 131,584 B = 25.1% of the ROM (all selected by the model; the 25 certain-code
+windows are a subset); U 246,293; K0 64,510; K 64,233 (277 pruned, 42 rounds); K/U 0.2608; C 24,180 ⊆ R yes; C ⊆ K yes (C ∩ U = C); C/K 0.376;
+unchanged production validator accepted; Sonic 1 oracle sanity (23,200 frames, clang): broad and selective `frames_reached`, 10,512 distinct
+PCs, 0 escapes outside K, coverage/final-state/frame-stream digests identical. GATE: PASS. (C ⊆ R is in-sample for the final model; the
+meaningful recall evidence is the blocked OOF recall.) Freeze committed before any blind title was processed.
