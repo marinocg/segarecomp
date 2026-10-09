@@ -259,5 +259,23 @@ class FreezeGuardTest(unittest.TestCase):
             self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), hashlib.sha256(b"not a pickle").hexdigest())
 
 
+class NativeEmbeddingDriftTest(unittest.TestCase):
+    """SEG-047 (ADR 0096): the checked-in native model table and the vendored zlib subset must not drift."""
+
+    def test_native_model_table_matches_committed_model_json(self):
+        gen = importlib.util.spec_from_file_location("native_data", pathlib.Path(__file__).resolve().parent.parent / "tools" / "segarecomp_ml_region_native_data.py")
+        mod = importlib.util.module_from_spec(gen)
+        gen.loader.exec_module(mod)
+        self.assertEqual(mod.OUTPUT.read_text(), mod.render(mod.MODEL.read_bytes()))
+
+    def test_vendored_zlib_files_match_recorded_digests(self):
+        root = pathlib.Path(__file__).resolve().parent.parent / "third_party" / "zlib"
+        recorded = dict(line.split("  ")[::-1] for line in (root / "README.md").read_text().split("```")[1].strip().splitlines())
+        self.assertEqual(len(recorded), 10)
+        for name, digest in recorded.items():
+            self.assertEqual(hashlib.sha256((root / name).read_bytes()).hexdigest(), digest, name)
+        self.assertIn('#define ZLIB_VERSION "1.3.1"', (root / "zlib.h").read_text())
+
+
 if __name__ == "__main__":
     unittest.main()

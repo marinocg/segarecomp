@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -162,6 +163,10 @@ struct GenesisRegionPruneResult {
 //   <window start hex8> <count> <count> ...       (only windows holding at least one broad identity or an incoming fixed edge)
 //   end
 inline constexpr std::string_view genesis_window_features_schema = "segarecomp.m68k_window_features.v1";
+// The raw per-window counts (`window index -> 27 counts in column order`), the single source of both the report and the native ML
+// producer (SEG-047). Nullopt for a window size other than 256/512.
+[[nodiscard]] std::optional<std::map<std::uint32_t, std::vector<std::uint64_t>>> genesis_window_feature_rows(
+    const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries, std::uint32_t window_bytes);
 [[nodiscard]] std::optional<std::string> genesis_window_feature_report(
     const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries, std::uint32_t window_bytes);
 

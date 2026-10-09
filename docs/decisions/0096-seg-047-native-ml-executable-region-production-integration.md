@@ -124,3 +124,12 @@ option is user-visible. Compatibility stays the default in SEG-047. The existing
 producer (`broad` | `ml_region`), fallback flag and stable sanitized reason, model/schema identity, candidate/admitted metrics, validator status
 and a stable cache identity that includes the mode, model identity and the K digest, so Compatibility and Optimized artifacts never alias. The
 launcher is a thin consumer of that interface.
+
+## 10. Amendments discovered during implementation (no model or feature change)
+
+- T002: the v1 reference computes `b_entropy` with Python's builtin `sum()`, which since CPython 3.12 is Neumaier-compensated (the frozen
+  features were produced by Python 3.13.5). The native extraction therefore uses the same compensated left-to-right (ascending byte value)
+  summation; a plain accumulation differs by ~2e-15. This is a reproduction of the existing v1 definition, not a feature change. Only `b_entropy`
+  depends on libm `log2`; the native test allows 1e-15 there and requires equality for every other feature.
+- T002: the vendored subset is the files found in the zlib 1.3.1 release that product needs plus one local `crc32` definition (see
+  `third_party/zlib/README.md`); drift is guarded by recorded SHA-256 digests in `tests/segarecomp_ml_region_test.py`.
