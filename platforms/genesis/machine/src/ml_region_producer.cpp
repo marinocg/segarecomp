@@ -6,6 +6,7 @@
 #include <iterator>
 #include <set>
 #include <cmath>
+#include <cstring>
 #include <limits>
 
 #include "segarecomp/sha256.hpp"
@@ -172,9 +173,20 @@ std::string genesis_ml_model_identity_failure() {
   if (digest != frozen_schema || std::string_view(ml_feature_schema_sha256) != frozen_schema) return "model_identity";
   if (std::string_view(ml_original_artifact_sha256) != frozen_artifact) return "model_identity";
   if (ml_probability_threshold != frozen_probability_threshold) return "model_identity";
-  if (!(std::isfinite(ml_logit_threshold) && std::isfinite(ml_folded_bias))) return "model_identity";
-  for (const double w : ml_folded_weight)
+  // The values actually used by the scorer are bound too: the logit threshold, the folded bias and a digest of the folded weight table
+  // (little-endian binary64, index order) must equal the frozen v1 constants, so any edited parameter fails closed.
+  constexpr double frozen_logit_threshold = -4.776617512896361, frozen_folded_bias = -18.84590147386012;
+  constexpr std::string_view frozen_weights_digest = "72a61409e3fc82020a7515019f0bf85e7bfd55573b4be0f2286d07392a9a8986";
+  if (ml_logit_threshold != frozen_logit_threshold || ml_folded_bias != frozen_folded_bias) return "model_identity";
+  std::vector<std::uint8_t> weight_bytes;
+  weight_bytes.reserve(sizeof(ml_folded_weight));
+  for (const double w : ml_folded_weight) {
     if (!std::isfinite(w)) return "model_identity";
+    std::uint64_t bits = 0U;
+    std::memcpy(&bits, &w, sizeof bits);
+    for (unsigned shift = 0U; shift < 64U; shift += 8U) weight_bytes.push_back(static_cast<std::uint8_t>(bits >> shift));
+  }
+  if (sha256_hex(weight_bytes) != frozen_weights_digest) return "model_identity";
   return {};
 }
 

@@ -257,3 +257,17 @@ selected state (Mode row: Compatibility selected, Optimized available), a Compat
 Ready entry that fell back (distinct cache entry loaded; red "Optimized unavailable for this game: built Compatibility" and a "Why?" button).
 The interactive click paths, the real zig toolchain build and Windows/macOS rendering are not exercised in this container (SDL3 CI job builds
 the launcher; T010 reviews the code path).
+
+## 17. T010 independent adversarial gate
+
+Independent reviewer (separate session) on head 1212779: **PASS WITH FINDINGS, no blocking finding.** Reproduced: five-title exact native parity
+(also re-derived with the pure-Python reference for three titles); 0 vendored-zlib length mismatches on 22,000 buffers; Python-free configure+build;
+mutation rejection of feature-name/NaN/version/probability-threshold edits; byte-identical fallback emission; mutual exclusion of plan and ML
+option; `U` count/digest, window-feature report and full broad generated-C SHA-256 IDENTICAL to origin/main on all five titles; K counts equal
+ADR 0095; hints audit reproduced; Streets of Rage real `segarecomp build` Compatibility → Optimized: generated C −70.2%, compile CPU −62.8%
+(SEG-046: −65.6% / −65.2%; within the 5 pp tolerance on the sharded-tree measure only; single-file measure −72.1% is 6.5 pp away), wall −58.7%.
+Fixed in response: (1) the runtime identity check now also binds the logit threshold, the folded bias and a SHA-256 of the folded weight table;
+(3) `status.json` reports `effective=broad, fallback=true, reason=plan_alias_set_mismatch` when an explicit plan did not apply to an emission;
+(4) stale bridge help text. Accepted non-blocking: coarse `prune_rejected` detail; cross-platform (MSVC/clang-cl/x87/libm) determinism argued
+by margin (≥4.1e-5 vs ~1e-13 error) and left to the CI matrix; 23,200-frame oracle not re-measured (R bit-identical, K counts identical);
+`segarecomp_build_command_test` (fdopen hook) and `m68k_conformance_harness_test` (killed) fail identically on origin/main.

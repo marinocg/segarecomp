@@ -213,6 +213,7 @@ enum class Target { genesis, master_system };
 
 struct Log {
   std::ofstream file;
+  bool plan_applied = false;   // the last emission applied the explicit --admission-plan (alias set matched)
   std::string admission_line;  // SEG-047: the last emission's sanitized `m68k admission: requested=optimized ...` report
   void line(const std::string &text) { file << text << '\n'; file.flush(); }
   void append_file(const fs::path &path) {
@@ -691,7 +692,11 @@ std::string aot_policy_json(const Options &options, const Log &log, const std::s
   bool fallback = false;
   if (options.aot_policy == "optimized") {
     if (!genesis) { fallback = true; reason = "platform_not_applicable"; }
-    else if (options.admission) { effective = "admission_plan"; reason = "exact_plan_precedence"; }
+    else if (options.admission) {
+      effective = log.plan_applied ? "admission_plan" : "broad";
+      reason = log.plan_applied ? "exact_plan_precedence" : "plan_alias_set_mismatch";
+      fallback = !log.plan_applied;
+    }
     else if (kv.count("producer") == 0U) { fallback = true; reason = "no_report"; }
     else { effective = kv["producer"]; fallback = kv["fallback"] == "1"; reason = kv["reason"]; }
   }
@@ -739,8 +744,10 @@ bool emit_genesis_m68k(const Options &options, Log &log, const std::string &sha,
     emit_args.insert(emit_args.end(), {"--immutable-copy-alias", text});
   }
   if (fs::is_regular_file(hints, ec)) { emit_args.push_back("--external-hints"); emit_args.push_back(hints.string()); }
+  log.plan_applied = false;
   if (options.admission) {
     if (admission_applies(*options.admission, aliases)) {
+      log.plan_applied = true;
       emit_args.insert(emit_args.end(), {"--immutable-rom-aot-admission", options.admission_plan->string()});
     } else {
       log.line("m68k admission: broad for this emission (the plan's alias set differs)");

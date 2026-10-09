@@ -60,7 +60,7 @@ def main():
             require(policy["model"] == "seg046-features-v1" and policy["validator"] == "accepted" and policy["k"] <= policy["universe"] and
                     len(policy["k_sha256"]) == 64 and len(policy["schema_sha256"]) == 64, "ML metrics: " + str(policy))
         else:
-            require(policy["reason"] in ("model_identity", "rom_size", "empty_proposal", "prune_rejected", "validator_rejected", "no_analysis"),
+            require(policy["reason"] in ("model_identity", "rom_size", "empty_proposal", "prune_rejected", "validator_rejected", "no_analysis", "plan_alias_set_mismatch"),
                     "fallback reason must be a stable code: " + str(policy))
         require(subprocess.run([cli, "build", "--rom", str(rom), "--output", str(tmp / "bad"), "--cc", compiler, "--runtime-dir",
                                 str(root / "platforms" / "genesis"), "--aot-policy", "turbo"], text=True, capture_output=True).returncode == 2,

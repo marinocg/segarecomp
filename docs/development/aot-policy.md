@@ -23,7 +23,7 @@ Every successful build writes `status.json` with an always-present `aot_policy` 
   "effective": "ml_region",            // broad | ml_region | admission_plan
   "fallback": false,                   // true when Optimized fell back to broad
   "reason": "none",                    // none | exact_plan_precedence | platform_not_applicable | model_identity | rom_size |
-                                       // empty_proposal | prune_rejected | validator_rejected | no_analysis | no_report
+                                       // empty_proposal | prune_rejected | validator_rejected | no_analysis | no_report | plan_alias_set_mismatch
   "model": "seg046-features-v1", "schema_sha256": "d2e7c829…",     // only when effective = ml_region
   "windows": 2048, "ml_selected": 244, "seed_windows": 14,          // candidate metrics (aggregates only)
   "universe": 498276, "k0": 60459, "k": 56980, "pruned": 3479, "rounds": 77,

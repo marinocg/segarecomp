@@ -1976,7 +1976,7 @@ def main() -> int:
                              "ephemeral, never persisted. The FINAL program is then built once (see --one-shot)")
     parser.add_argument("--admission-plan",
                         help="SEG-031 (ADR 0080): explicit hybrid admission candidate. A plan written by "
-                             "segarecomp-genesis-analysis-report --hybrid-plan; forwarded to the FINAL emission as "
+                             "an exact-map plan builder (tools/segarecomp_source_universe_plan.py); forwarded to the FINAL emission as "
                              "--immutable-rom-aot-admission (the emitter validates it fail-closed). Requires "
                              "--immutable-rom-aot; copy-alias preparation stays broad. Private for a commercial input")
     parser.add_argument("--ml-admission", action="store_true",
