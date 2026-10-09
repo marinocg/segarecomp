@@ -1,6 +1,6 @@
 # ADR 0093: SEG-044 Source-derived recomp map and first real selective-AOT proof
 
-- Status: In progress (T001 section frozen; later sections are appended by T002..T006).
+- Status: Accepted (SEG-044 done; all sections T001..T006 recorded).
 - Related, unchanged: ADR 0080 (hybrid selective admission), ADR 0089/0090/0091 (external facts and the real-title
   harvest), ADR 0092 (SEG-043 final result: interrupt-resumption premise is the sole remaining automatic blocker).
 
