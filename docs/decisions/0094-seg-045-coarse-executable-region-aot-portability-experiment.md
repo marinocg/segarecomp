@@ -83,7 +83,7 @@ scratch copy and again by the emitter in the build).
 | Cool Spot | 1 MiB | 37.50% | 498,276 | 187,822 | - | - | rounds 206 | machine root pruned | REJECTED (`machine_root_not_admitted`, class `pruned`) | 0.5 s / 432 MiB |
 | Streets of Rage | 512 KiB | 23.44% | 247,761 | 59,971 | 59,753 | 0.2412 | 218 (57) | retained | accepted | 0.4 s / 307 MiB |
 
-Pruning rounds never widened anything (`K ⊆ K0`, unit-tested and asserted in the kernel). No result depended on SEG-030/031 analysis.
+Pruning rounds never widened anything (`K ⊆ K0`, unit-tested). No result depended on SEG-030/031 analysis.
 Sonic 2 source-truth oracle: NOT AVAILABLE. A public disassembly project exists, but building it requires executing downloaded
 third-party code (a Lua build script and prebuilt assembler binaries) which the execution environment did not authorize; no ROM was
 downloaded and no `C2` was derived. The oracle was optional and did not block the experiment.
