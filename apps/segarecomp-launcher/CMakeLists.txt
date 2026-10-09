@@ -54,14 +54,6 @@ endif()
 add_executable(launcher_policy_test launcher_policy_test.cpp)
 target_link_libraries(launcher_policy_test PRIVATE segarecomp_launcher_core)
 segarecomp_enable_warnings(launcher_policy_test)
-# Build-time contract check: building the launcher (the CI SDL3 job and every native release build) runs the window-less policy test, so
-# the CI workflow needs no extra step. Skipped when cross-compiling (the test binary cannot run on the build host).
-if(NOT CMAKE_CROSSCOMPILING)
-  add_dependencies(segarecomp-launcher launcher_policy_test)
-  add_custom_command(TARGET segarecomp-launcher POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E env SDL_VIDEODRIVER=dummy $<TARGET_FILE:launcher_policy_test>
-    COMMENT "launcher AOT-policy contract test")
-endif()
 if(BUILD_TESTING)
   add_test(NAME launcher_policy_test COMMAND launcher_policy_test)
   set_property(TEST launcher_policy_test APPEND PROPERTY LABELS full fast)
