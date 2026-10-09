@@ -191,3 +191,39 @@ Removed: `tools/segarecomp_region_proposal.py` (the frozen FLOW8-D page policy),
 parity digest, the exact-map plan route and `tools/segarecomp_region_oracle_compare.py`), structural pruning, admission validation, the
 broad universe, exact-map support, `--window-feature-report` (the Python reference oracle's input) and the historical ADRs 0094/0095. (The two
 deleted files appear in the T005 commit because they were staged with `git rm` before the commits were split.)
+
+## 14. T007 decommission of the report-only analysis architecture (audit-driven)
+
+A live-consumer audit (CMake graph, includes, CTest, tools, release packaging, launcher) preceded every deletion. The abstract-analysis
+framework had no product consumer: `analysis_build_graph_test` had always proved that no production target linked it; the release and
+launcher builds never used it; its only runtime-adjacent role was producing offline hybrid plans and external-fact reports.
+
+| item | decision | evidence |
+| --- | --- | --- |
+| `libs/analysis` (SEG-029 generic solver) | REMOVE | consumed only by the two CPU adapters, the driver and their tests |
+| `libs/cpu/m68k/analysis`, `libs/cpu/z80/analysis` | REMOVE | report-only adapters; Z80 adapter synthetic-only |
+| `platforms/genesis/analysis_report` (driver + library) | REMOVE | not linked by `segarecomp`, the launcher or any release target; planner replaced by the native ML producer |
+| 21 `analysis_*` test sources, the mutation harness + selftest, `analysis_build_graph/core_boundary` guards, `genesis_hybrid_admission_{differential,generated}_test` | REMOVE | all required the removed targets; validator coverage retained by `genesis_hybrid_admission_test`, `genesis_region_prune_test`, `genesis_ml_*` and `genesis_ml_admission_cli_test` |
+| `apps/m68k-primary-word-classify`, `tools/segarecomp_recomp_map_harvest.py`, `tools/segarecomp_angr_m68k_facts.py` (+ tests) | REMOVE | external-proof producers feeding the removed `--external-m68k-facts` consumer; the classifier helper's only consumer was the harvester |
+| `tools/genesis_hybrid_admission_compare.py` | REMOVE | needed the driver; replaced by `tools/genesis_ml_admission_differential.py` |
+| active doc presenting the framework as architecture | UPDATED | `abstract-analysis-core-contract.md` carries a RETIRED banner (historical ADR input); the scalability doc describes Optimized AOT |
+| `hybrid_admission` plan format/validator, structural pruning, region proposal format, machine roots, broad universe, universe hashes, ML features, window-feature export, reachability challenger, `segarecomp_region_oracle_compare.py`, startup bridge, `segarecomp_source_map_extract.py` + `segarecomp_source_universe_plan.py` (exact source/recomp-map route) | KEEP | live correctness/admission inputs or useful differential/oracle tooling |
+| `--external-hints`, `runtime/compat/<rom-sha>.json` | KEEP (AUDITED) | see below |
+| Ghidra tooling (`tools/ghidra*`, MCP config) | KEEP, optional | developer-only diagnostic evidence; `report_only_analysis_absent_test` asserts no build file references it; no product/release/launcher path depends on it |
+
+Removed: 62 files, ~24.4k lines. The replacement guard `report_only_analysis_absent_test` fails if a retired directory, target, include or a
+Ghidra build dependency returns.
+
+External-hints audit (broad `U`, ML proposal `R`, final admitted `K`, five parity titles, hints off vs on where a hint file exists):
+`U` count and digest are IDENTICAL with and without hints on both titles that have a hint file (Sonic 1 `logical_table_descriptor`
+shipped file; Streets of Rage 4,425 local Ghidra `code_entry_candidate`/`address_table_candidate` records), and the other three titles have no
+hint file. `U` therefore never silently depends on hints. Hints are NOT inert for emitted C, however: the committed Sonic 1 table
+descriptors change the generated program by ~55 KB (R and K unchanged, `K` digest identical, one extra certain-code window already selected
+by the model); the unshipped Streets of Rage candidates add certain-code windows (R digest and K change: 61,374 → 77,163) and ~80 MB of
+generated C. Disposition: the opt-in hint parsers live in the product frontend (not in the analysis framework), the shipped file affects
+generated code, and removing them is a frontend semantic change that needs its own behavioural evidence, so they are RETAINED unchanged as
+explicit opt-in inputs (nothing reads a candidate hint implicitly; only the committed Sonic 1 descriptor file is auto-applied). Pruning the
+unshipped `code_entry_candidate` / `address_table_candidate` / code-pointer-table kinds is deferred to SEG-052 (analysis prioritization).
+
+After the cleanup: the full dev build succeeds; `U` counts (246,293 / 496,387 / 498,276 / 247,761 / 496,950) and, for Sonic 1 and Streets
+of Rage, the `U` digest and the broad generated-C SHA-256 equal their pre-cleanup values; the five-title native parity is still exact.

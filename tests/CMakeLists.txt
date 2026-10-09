@@ -1120,7 +1120,7 @@ set_property(TEST genesis_ml_scorer_test APPEND PROPERTY LABELS full fast)
 add_test(NAME genesis_ml_region_native_parity_local_test
   COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/segarecomp_ml_region_native_parity.py
     --binary $<TARGET_FILE:segarecomp> --games ${PROJECT_SOURCE_DIR}/games)
-set_tests_properties(genesis_ml_region_native_parity_local_test PROPERTIES SKIP_RETURN_CODE 77)
+set_tests_properties(genesis_ml_region_native_parity_local_test PROPERTIES SKIP_RETURN_CODE 77 LABELS full)
 # SEG-047-T005 (ADR 0096): the opt-in native ML admission on a synthetic image (report line, determinism, fallback = broad, exclusion,
 # bridge build+run equal-or-fail-closed).
 add_test(NAME genesis_ml_admission_cli_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_ml_admission_cli_test.py
@@ -1139,39 +1139,7 @@ add_test(NAME executable_image_mutation_test COMMAND executable_image_mutation_t
 set_property(TEST executable_image_test executable_image_forbidden_identifiers_test z80_executable_image_equivalence_test
   genesis_m68k_executable_image_test executable_image_mutation_test APPEND PROPERTY LABELS full fast)
 set_property(TEST executable_image_forbidden_identifiers_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
-# SEG-029 (ADR 0078): generic abstract-analysis core (CPU-free) and its CPU-owned report-only adapters.
-add_executable(analysis_core_test analysis_core_test.cpp)
-target_link_libraries(analysis_core_test PRIVATE segarecomp::analysis)
-segarecomp_enable_warnings(analysis_core_test)
-add_test(NAME analysis_core_test COMMAND analysis_core_test)
-add_test(NAME analysis_core_boundary_test COMMAND ${Python3_EXECUTABLE}
-  ${CMAKE_CURRENT_SOURCE_DIR}/analysis_core_boundary_test.py ${PROJECT_SOURCE_DIR})
-set_property(TEST analysis_core_test analysis_core_boundary_test APPEND PROPERTY LABELS full fast)
-include(${CMAKE_CURRENT_SOURCE_DIR}/analysis_m68k_tests.cmake)
-include(${CMAKE_CURRENT_SOURCE_DIR}/analysis_z80_tests.cmake)
-# SEG-030 (ADR 0079): the report-only Genesis M68K analysis driver.
-include(${CMAKE_CURRENT_SOURCE_DIR}/analysis_report_tests.cmake)
-# SEG-029-T005: adversarial mutation gate. Applies each planted soundness/determinism/bound defect of the analysis core and adapters
-# to a temporary copy of the tree, rebuilds the fixture tests there and requires a kill (stale edit patterns fail closed).
-add_test(NAME analysis_mutation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/analysis_mutation_test.py
-  ${PROJECT_SOURCE_DIR} ${CMAKE_COMMAND} ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER}
-  "--generator=${CMAKE_GENERATOR}" "--make-program=${CMAKE_MAKE_PROGRAM}")
-set_property(TEST analysis_mutation_test APPEND PROPERTY LABELS full)
-set_property(TEST analysis_mutation_test PROPERTY TIMEOUT 1800)
-# SEG-031 (ADR 0080): the hybrid admission mutation gate (same harness, `--group hybrid`: the planner and production-seam fixtures).
-add_test(NAME analysis_hybrid_mutation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/analysis_mutation_test.py
-  ${PROJECT_SOURCE_DIR} ${CMAKE_COMMAND} ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER}
-  "--generator=${CMAKE_GENERATOR}" "--make-program=${CMAKE_MAKE_PROGRAM}" --group hybrid)
-set_property(TEST analysis_hybrid_mutation_test APPEND PROPERTY LABELS full)
-# The harness rebuilds and reruns the planner fixture per mutant (about 5 minutes on a developer host); the long-test headroom keeps a
-# contended CI runner from timing the whole gate out while every fixture keeps its own finite limit (analysis_mutation_test.py).
-set_property(TEST analysis_hybrid_mutation_test PROPERTY TIMEOUT 3600)
-# SEG-030-T009: the mutation harness's source stamping and build-tree settling survive same-second mutate/restore/mutate rebuilds.
-add_test(NAME analysis_mutation_harness_selftest COMMAND ${Python3_EXECUTABLE}
-  ${CMAKE_CURRENT_SOURCE_DIR}/analysis_mutation_harness_selftest.py ${CMAKE_COMMAND} ${CMAKE_C_COMPILER}
-  "--generator=${CMAKE_GENERATOR}" "--make-program=${CMAKE_MAKE_PROGRAM}")
-set_property(TEST analysis_mutation_harness_selftest APPEND PROPERTY LABELS full fast)
-set_property(TEST analysis_mutation_harness_selftest PROPERTY TIMEOUT 120)
+include(${CMAKE_CURRENT_SOURCE_DIR}/ml_region_tests.cmake)
 # The real consumer route end to end (fixed point, link, run, falsification): the slowest Genesis Z80 test, `full` only.
 # CI wall-clock: one CTest entry per independent case group of the script (see its docstring); the union is the whole matrix.
 add_test(NAME genesis_z80_build_pipeline_test COMMAND ${Python3_EXECUTABLE}

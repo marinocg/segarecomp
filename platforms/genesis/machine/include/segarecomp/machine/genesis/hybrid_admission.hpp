@@ -2,8 +2,9 @@
 
 // SEG-031 (ADR 0080): the production side of the explicit hybrid admission candidate for Genesis M68K immutable-ROM AOT.
 //
-// A hybrid admission plan is a build-time artifact produced by the report-only planner (`segarecomp-genesis-analysis-report
-// --hybrid-plan`, which links the analysis; production never does). It names a subset of the broad immutable-ROM AOT identities
+// A hybrid admission plan is a build-time artifact produced by an exact source/recomp-map plan builder (`tools/segarecomp_source_universe_plan.py`)
+// or derived in-process from a region proposal by structural pruning (the native ML region producer, SEG-047; the report-only abstract
+// analysis planner that once produced plans was retired). It names a subset of the broad immutable-ROM AOT identities
 // (`FrontendAnalysis::immutable_rom_aot_entries`, the universe `U`). The emitter consumes it only through an explicit opt-in, and only
 // after this owner has validated it fail-closed:
 //
@@ -15,7 +16,7 @@
 //   `static_proof` alias identity is admitted; every fixed successor and stacked call continuation (`m68k_control_successors`) of an
 //   admitted identity that is itself a broad identity is admitted.
 //
-// Dynamic-transfer containment (the island proof) is established by the planner, not here: this owner cannot see analysis facts. A
+// Dynamic-transfer containment (the island proof) is the producer's claim, not proved here: this owner cannot see semantic facts. A
 // plan that fails any check is rejected and nothing is filtered (never a partial program). A `broad` plan filters nothing. The filtered
 // program is an ordinary generated-native program: no identity knows whether it came from precise discovery, an island or broad
 // admission, and the runtime is unchanged.

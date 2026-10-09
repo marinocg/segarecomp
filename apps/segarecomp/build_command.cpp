@@ -198,7 +198,7 @@ struct Options {
   std::string platform;                 // "", "genesis" or "master-system"
   std::string mapper;                   // explicit mapper family declaration (build option), e.g. "sega"
   std::optional<fs::path> mapper_manifest;
-  // SEG-031 (ADR 0080): explicit Genesis M68K hybrid admission candidate (a plan written by the report-only planner). Parsed once,
+  // SEG-031 (ADR 0080): explicit Genesis M68K hybrid admission candidate (a plan from an exact-map plan builder). Parsed once,
   // strictly; each M68K emission applies it only when its alias set equals the emission's (otherwise that emission is broad).
   std::optional<fs::path> admission_plan;
   std::optional<segarecomp::GenesisHybridAdmissionPlan> admission;

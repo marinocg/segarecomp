@@ -98,7 +98,7 @@ int run_cli(int argc, char **argv) {
       // hashes it and never stores the addresses. It reads the existing analysis result
       // and cannot alter generation.
       std::optional<std::string_view> immutable_aot_address_report;
-      // SEG-031 (ADR 0080): explicit hybrid admission candidate. A plan produced by the report-only planner names the admitted subset
+      // SEG-031 (ADR 0080): explicit hybrid admission candidate. A plan from an exact-map plan builder or a region proposal names the admitted subset
       // of the broad immutable-ROM AOT identities; it is validated fail-closed (digest, alias set, structural closure) before the
       // identities are filtered. Absent: broad admission, byte-identical to before SEG-031.
       std::optional<std::string_view> immutable_rom_aot_admission;
