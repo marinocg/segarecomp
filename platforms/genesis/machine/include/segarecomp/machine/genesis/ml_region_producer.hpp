@@ -47,4 +47,23 @@ inline constexpr std::string_view genesis_ml_feature_version = "seg046-features-
 [[nodiscard]] std::vector<double> genesis_ml_window_matrix(std::span<const std::uint8_t> rom,
                                                            const std::map<std::uint32_t, std::vector<std::uint64_t>> &rows);
 
+// ---- Folded logistic scorer (T003) ----------------------------------------------------------------------------------------------
+// `logit = bias; for i in 0..140: logit += weight[i] * x[i]` (left to right, one binary64 multiply and add per feature, no contraction).
+// Free function so tests can score synthetic parameter sets independently of the embedded model.
+[[nodiscard]] double genesis_ml_fold_score(const double *weights, double bias, const double *features, std::size_t count) noexcept;
+
+// The embedded frozen model: identity constants and the folded parameters (generated from tools/segarecomp_ml_region.model.json).
+[[nodiscard]] double genesis_ml_logit(std::span<const double> features);  // 141 values, embedded folded model; NaN on a wrong width
+[[nodiscard]] double genesis_ml_logit_threshold() noexcept;
+// Fail-closed identity check of the embedded model against the frozen v1 constants (feature version, count, window size, the SHA-256 of
+// the canonical schema payload built from the embedded feature names, and the original artifact digest). Empty string => ok; otherwise a
+// stable sanitized reason ("model_identity").
+[[nodiscard]] std::string genesis_ml_model_identity_failure();
+
+// Windows (indices) whose logit >= the frozen logit threshold (non-strict), ascending. Empty on a malformed matrix.
+[[nodiscard]] std::vector<std::uint32_t> genesis_ml_select_windows(std::span<const double> matrix);
+// Merges ascending window indices (512 B each, final range clipped to `rom_size`) into half-open ascending disjoint ranges.
+[[nodiscard]] std::vector<FrontendProgram::ImmutableRomAotRange> genesis_ml_window_ranges(const std::vector<std::uint32_t> &windows,
+                                                                                       std::size_t rom_size);
+
 }  // namespace segarecomp

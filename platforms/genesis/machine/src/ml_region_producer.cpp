@@ -4,10 +4,17 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+
+#include "segarecomp/sha256.hpp"
 
 #include "zlib.h"
 
 namespace segarecomp {
+
+namespace {
+#include "ml_region_model_v1_data.inc"
+}  // namespace
 
 std::size_t genesis_ml_zlib_level6_length(std::span<const std::uint8_t> bytes) {
   z_stream stream{};
@@ -125,6 +132,77 @@ std::vector<double> genesis_ml_window_matrix(std::span<const std::uint8_t> rom,
     if (w + 1U < count) std::copy(self + genesis_ml_base_feature_count, self + 2U * genesis_ml_base_feature_count, dst + 2U * genesis_ml_base_feature_count);
   }
   return matrix;
+}
+
+double genesis_ml_fold_score(const double *weights, double bias, const double *features, std::size_t count) noexcept {
+  double logit = bias;
+  for (std::size_t i = 0U; i < count; ++i) {
+    const double product = weights[i] * features[i];  // stored before the add: no fused multiply-add
+    logit += product;
+  }
+  return logit;
+}
+
+double genesis_ml_logit(std::span<const double> features) {
+  if (features.size() != genesis_ml_feature_count) return std::numeric_limits<double>::quiet_NaN();
+  return genesis_ml_fold_score(ml_folded_weight, ml_folded_bias, features.data(), genesis_ml_feature_count);
+}
+
+double genesis_ml_logit_threshold() noexcept { return ml_logit_threshold; }
+
+std::string genesis_ml_model_identity_failure() {
+  // Frozen v1 identity constants (ADR 0096 section 2). The embedded table carries its own copy; both must agree.
+  constexpr std::string_view frozen_schema = "d2e7c82913139c29450511326d6de76e91579ec654edde81afae16b13cd1f570";
+  constexpr std::string_view frozen_artifact = "b5ddae5aa0fe6571455803c244d2a6be4a2c3349e3436c8780bfc3d8aa8fa62b";
+  constexpr double frozen_probability_threshold = 0.00835406801187952;
+  if (std::string_view(ml_feature_version) != genesis_ml_feature_version) return "model_identity";
+  if (sizeof(ml_feature_names) / sizeof(ml_feature_names[0]) != genesis_ml_feature_count) return "model_identity";
+  // json.dumps({"version", "window_bytes", "features"}, sort_keys=True): keys sorted features < version < window_bytes.
+  std::string payload = "{\"features\": [";
+  for (std::size_t i = 0U; i < genesis_ml_feature_count; ++i) {
+    if (i != 0U) payload += ", ";
+    payload += '"';
+    payload += ml_feature_names[i];
+    payload += '"';
+  }
+  payload += "], \"version\": \"" + std::string(genesis_ml_feature_version) + "\", \"window_bytes\": " + std::to_string(genesis_ml_window_bytes) + "}";
+  const std::string digest = sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(payload.data()), payload.size()));
+  if (digest != frozen_schema || std::string_view(ml_feature_schema_sha256) != frozen_schema) return "model_identity";
+  if (std::string_view(ml_original_artifact_sha256) != frozen_artifact) return "model_identity";
+  if (ml_probability_threshold != frozen_probability_threshold) return "model_identity";
+  if (!(std::isfinite(ml_logit_threshold) && std::isfinite(ml_folded_bias))) return "model_identity";
+  for (const double w : ml_folded_weight)
+    if (!std::isfinite(w)) return "model_identity";
+  return {};
+}
+
+std::vector<std::uint32_t> genesis_ml_select_windows(std::span<const double> matrix) {
+  std::vector<std::uint32_t> out;
+  if (matrix.size() % genesis_ml_feature_count != 0U) return out;
+  const std::size_t windows = matrix.size() / genesis_ml_feature_count;
+  for (std::size_t w = 0U; w < windows; ++w) {
+    const double logit = genesis_ml_logit(matrix.subspan(w * genesis_ml_feature_count, genesis_ml_feature_count));
+    if (logit >= ml_logit_threshold) out.push_back(static_cast<std::uint32_t>(w));  // NaN never selects
+  }
+  return out;
+}
+
+std::vector<FrontendProgram::ImmutableRomAotRange> genesis_ml_window_ranges(const std::vector<std::uint32_t> &windows, std::size_t rom_size) {
+  std::vector<FrontendProgram::ImmutableRomAotRange> runs;
+  for (const std::uint32_t w : windows) {
+    const std::uint64_t begin = static_cast<std::uint64_t>(w) * genesis_ml_window_bytes;
+    if (begin >= rom_size) continue;
+    const std::uint64_t end = std::min<std::uint64_t>(begin + genesis_ml_window_bytes, rom_size);
+    if (!runs.empty() && runs.back().end_address == begin) {
+      runs.back().end_address = static_cast<std::uint32_t>(end);
+    } else {
+      FrontendProgram::ImmutableRomAotRange range{};
+      range.begin_address = static_cast<std::uint32_t>(begin);
+      range.end_address = static_cast<std::uint32_t>(end);
+      runs.push_back(range);
+    }
+  }
+  return runs;
 }
 
 }  // namespace segarecomp
