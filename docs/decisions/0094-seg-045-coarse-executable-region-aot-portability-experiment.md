@@ -54,9 +54,9 @@ caps) and `segarecomp_region_proposal_test`.
 Calibration truth: the SEG-044 exact source universe `C` (24,180 identities, 32 pages of 4 KiB; 25.0% of the 512 KiB ROM).
 
 Rejected on Sonic 1 (criterion: 100% page coverage of `C` and R <= 40% of ROM):
-- Code-seed policies P0/P1/P2 over the precise direct-control discovery (599 identities) at 2/4/8 KiB: P2 at 8 KiB reaches only 12.5%
-  of ROM yet misses 11 of 15 `C` pages (jump/object tables are not seen by direct discovery). All fail; no manual page added.
-- ROM-only flow-terminator density at 4 KiB: no threshold works (<= 0.007 gives R > 40%... at 0.006-0.007 R = 40.6-41.4%; >= 0.008
+- Code-seed policies P0/P1/P2 over the precise direct-control discovery (599 identities) at 2/4/8 KiB: P2 at 8 KiB selects only 12.5%
+  of ROM and misses 11 `C` pages (jump/object tables are not seen by direct discovery). All fail; no manual page added.
+- ROM-only flow-terminator density at 4 KiB: no threshold works (thresholds <= 0.007 give R = 40.6-41.4% or more, > 40%; >= 0.008
   misses the sparse C page 29 holding 93 `C` identities).
 
 Frozen policy `FLOW8-D` (`tools/segarecomp_region_proposal.py`; constants are code-frozen and unit-tested):
