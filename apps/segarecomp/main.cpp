@@ -38,7 +38,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--page-structure-report <path>] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--immutable-rom-aot-admission <plan>]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--page-structure-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--immutable-rom-aot-admission <plan>]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
@@ -109,6 +109,9 @@ int run_cli(int argc, char **argv) {
       // SEG-045: report-only per-2-KiB-bin structure counts of the broad identities (identities, flow terminators = no sequential
       // continuation: BRA/JMP/RTS/RTE/RTR/exception-raising), derived only from the MC68000-owned control-successor projection.
       std::optional<std::string_view> page_structure_report;
+      // SEG-046: report-only generic per-window structure features (ADR 0095); both options are required together.
+      std::optional<std::string_view> window_feature_report;
+      std::uint32_t window_feature_bytes = 0U;
       std::optional<std::string_view> region_proposal_path;
       std::optional<std::string_view> region_plan_output;
       // SEG-022-T002: stream the generated C to this file (fail-closed: written as `<path>.partial`
@@ -156,6 +159,17 @@ int run_cli(int argc, char **argv) {
         } else if (option == "--page-structure-report") {
           if (page_structure_report || index + 1 >= argc) { print_usage(std::cerr); return 2; }
           page_structure_report = argv[index + 1];
+          index += 2;
+        } else if (option == "--window-feature-report") {
+          if (window_feature_report || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          window_feature_report = argv[index + 1];
+          index += 2;
+        } else if (option == "--window-feature-bytes") {
+          if (window_feature_bytes != 0U || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          const std::string_view value = argv[index + 1];
+          if (value == "256") window_feature_bytes = 256U;
+          else if (value == "512") window_feature_bytes = 512U;
+          else { print_usage(std::cerr); return 2; }
           index += 2;
         } else if (option == "--immutable-aot-region-proposal") {
           if (region_proposal_path || index + 1 >= argc) { print_usage(std::cerr); return 2; }
@@ -413,6 +427,18 @@ int run_cli(int argc, char **argv) {
           sink << line;
         }
         if (!sink) { std::cerr << "segarecomp: cannot write page structure report\n"; return 2; }
+      }
+      if (window_feature_report.has_value() != (window_feature_bytes != 0U)) { print_usage(std::cerr); return 2; }
+      if (window_feature_report) {
+        const std::vector<segarecomp::FrontendAnalysis::ImmutableRomAotEntry> *entries = nullptr;
+        if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) entries = &partial->accepted_prefix.immutable_rom_aot_entries;
+        else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result)) entries = &accepted->immutable_rom_aot_entries;
+        if (entries == nullptr) { std::cerr << "segarecomp: window feature report: no broad analysis result\n"; return 3; }
+        const auto report = segarecomp::genesis_window_feature_report(*entries, window_feature_bytes);
+        if (!report) { std::cerr << "segarecomp: invalid window size\n"; return 2; }
+        std::ofstream sink{std::string(*window_feature_report), std::ios::binary};
+        sink << *report;
+        if (!sink) { std::cerr << "segarecomp: cannot write window feature report\n"; return 2; }
       }
       if (region_proposal_path.has_value() != region_plan_output.has_value() ||
           (region_proposal_path && (!immutable_rom_aot || immutable_rom_aot_admission))) {

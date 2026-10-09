@@ -375,4 +375,120 @@ std::optional<GenesisHybridAdmissionPlan> plan_genesis_region_admission(
   return plan;
 }
 
+
+// SEG-046: report-only window structure features (see hybrid_admission.hpp).
+namespace {
+constexpr const char *window_feature_columns[] = {
+    "ident",        "len2",         "len4",        "len6",        "len8p",       "fam_move",    "fam_arith",    "fam_logic_bit",
+    "fam_shift",    "fam_control",  "fam_other",   "cond_branch", "uncond_direct", "call_direct", "call_any",     "ret",
+    "indirect",     "terminator",   "exception",   "edge_out",    "edge_same",   "edge_adjacent", "edge_far_ident", "edge_dangling",
+    "fall_dangling", "edge_in_local", "edge_in_external"};
+constexpr std::size_t window_feature_column_count = sizeof(window_feature_columns) / sizeof(window_feature_columns[0]);
+
+std::size_t window_ir_family(M68kIrKind kind) noexcept {
+  switch (kind) {
+    case M68kIrKind::write_moveq: case M68kIrKind::write_move: case M68kIrKind::write_movea: case M68kIrKind::write_clr:
+    case M68kIrKind::load_effective_address: case M68kIrKind::push_effective_address: case M68kIrKind::movem_transfer:
+    case M68kIrKind::write_swap: case M68kIrKind::sign_extend_word: case M68kIrKind::sign_extend_long:
+      return 0;
+    case M68kIrKind::test_operand: case M68kIrKind::compare: case M68kIrKind::compare_immediate: case M68kIrKind::compare_address:
+    case M68kIrKind::add: case M68kIrKind::add_address: case M68kIrKind::add_immediate: case M68kIrKind::add_quick:
+    case M68kIrKind::subtract: case M68kIrKind::subtract_address: case M68kIrKind::subtract_immediate: case M68kIrKind::subtract_quick:
+    case M68kIrKind::subtract_quick_long_d0:
+      return 1;
+    case M68kIrKind::logical_and: case M68kIrKind::logical_and_immediate: case M68kIrKind::logical_or: case M68kIrKind::logical_or_immediate:
+    case M68kIrKind::exclusive_or: case M68kIrKind::exclusive_or_immediate: case M68kIrKind::bit_test: case M68kIrKind::bit_change:
+    case M68kIrKind::bit_clear: case M68kIrKind::bit_set:
+      return 2;
+    case M68kIrKind::shift_rotate_register: case M68kIrKind::shift_rotate_memory:
+      return 3;
+    case M68kIrKind::branch_ne_short: case M68kIrKind::branch_always_short: case M68kIrKind::return_from_subroutine:
+    case M68kIrKind::return_from_exception: case M68kIrKind::jump_general: case M68kIrKind::call_general: case M68kIrKind::general_branch:
+    case M68kIrKind::bsr_call: case M68kIrKind::dbcc_loop:
+      return 4;
+    default:
+      return 5;
+  }
+}
+}  // namespace
+
+std::optional<std::string> genesis_window_feature_report(const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
+                                                         std::uint32_t window_bytes) {
+  if (window_bytes != 256U && window_bytes != 512U) return std::nullopt;
+  std::set<std::uint32_t> identities;
+  for (const auto &entry : entries)
+    if (!entry.execution_alias) identities.insert(static_cast<std::uint32_t>(entry.decoded.provenance.source.address.value) & bus_mask);
+  std::map<std::uint32_t, std::vector<std::uint64_t>> rows;
+  const auto row = [&rows](std::uint32_t window) -> std::vector<std::uint64_t> & {
+    auto &r = rows[window];
+    if (r.empty()) r.assign(window_feature_column_count, 0U);
+    return r;
+  };
+  const auto col = [](const char *name) {
+    for (std::size_t i = 0; i < window_feature_column_count; ++i)
+      if (std::string_view(window_feature_columns[i]) == name) return i;
+    return window_feature_column_count;
+  };
+  const std::size_t c_ident = col("ident"), c_len2 = col("len2"), c_fam = col("fam_move"), c_cond = col("cond_branch"),
+                    c_uncond = col("uncond_direct"), c_calld = col("call_direct"), c_calla = col("call_any"), c_ret = col("ret"),
+                    c_ind = col("indirect"), c_term = col("terminator"), c_exc = col("exception"), c_out = col("edge_out"),
+                    c_same = col("edge_same"), c_adj = col("edge_adjacent"), c_far = col("edge_far_ident"), c_dang = col("edge_dangling"),
+                    c_fall = col("fall_dangling"), c_inl = col("edge_in_local"), c_inx = col("edge_in_external");
+  for (const auto &entry : entries) {
+    if (entry.execution_alias) continue;
+    const std::uint32_t address = static_cast<std::uint32_t>(entry.decoded.provenance.source.address.value) & bus_mask;
+    const std::uint32_t window = address / window_bytes;
+    auto &r = row(window);
+    ++r[c_ident];
+    const std::size_t span = entry.decoded.raw_bytes.empty() ? 2U : entry.decoded.raw_bytes.size();
+    ++r[c_len2 + (span <= 2U ? 0U : span <= 4U ? 1U : span <= 6U ? 2U : 3U)];
+    ++r[c_fam + window_ir_family(entry.operation.kind)];
+    const auto control = m68k_control_successors(entry.operation);
+    bool sequential = control.stacked == M68kStackedContinuationKind::call_continuation, direct_jump = false;
+    for (const auto &successor : control.successors) {
+      const bool sequential_kind = successor.kind == M68kControlSuccessorKind::fallthrough ||
+                                   successor.kind == M68kControlSuccessorKind::conditional_fallthrough ||
+                                   successor.kind == M68kControlSuccessorKind::conditional_target;
+      if (sequential_kind) sequential = true;
+      if (successor.kind == M68kControlSuccessorKind::conditional_target) ++r[c_cond];
+      if (successor.kind == M68kControlSuccessorKind::branch_target) { direct_jump = true; ++r[c_uncond]; }
+      if (successor.kind == M68kControlSuccessorKind::call_target) ++r[c_calld];
+      const std::uint32_t target = successor.target & bus_mask;
+      const bool is_identity = identities.count(target) != 0U;
+      if (successor.kind == M68kControlSuccessorKind::fallthrough || successor.kind == M68kControlSuccessorKind::conditional_fallthrough) {
+        if (!is_identity) ++r[c_fall];
+        continue;
+      }
+      ++r[c_out];
+      const std::uint32_t target_window = target / window_bytes;
+      if (!is_identity) ++r[c_dang];
+      else if (target_window == window) ++r[c_same];
+      else if (target_window + 1U == window || window + 1U == target_window) ++r[c_adj];
+      else ++r[c_far];
+      if (is_identity) ++row(target_window)[target_window == window ? c_inl : c_inx];
+    }
+    if (control.stacked == M68kStackedContinuationKind::call_continuation) ++r[c_calla];
+    if (control.stacked == M68kStackedContinuationKind::exception_continuation || control.always_raises_exception) ++r[c_exc];
+    using Family = M68kDynamicControlFamily;
+    const bool returns = control.dynamic == Family::return_from_subroutine || control.dynamic == Family::return_from_exception ||
+                         control.dynamic == Family::return_restore_condition_codes;
+    const bool dynamic_jump = control.dynamic == Family::jump_address_indirect || control.dynamic == Family::jump_address_disp16 ||
+                              control.dynamic == Family::jump_address_index || control.dynamic == Family::jump_pc_index;
+    if (returns) ++r[c_ret];
+    if (control.dynamic != Family::none && !returns) ++r[c_ind];
+    if (!direct_jump && !returns && !dynamic_jump) sequential = true;
+    if (!sequential) ++r[c_term];
+  }
+  std::string out = "segarecomp.m68k_window_features.v1 window_bytes " + std::to_string(window_bytes) + "\ncolumns";
+  for (const auto *name : window_feature_columns) out += std::string(" ") + name;
+  out += '\n';
+  for (const auto &[window, values] : rows) {
+    out += hex8(window * window_bytes);
+    for (const auto value : values) out += " " + std::to_string(value);
+    out += '\n';
+  }
+  out += "end\n";
+  return out;
+}
+
 }  // namespace segarecomp

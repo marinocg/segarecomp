@@ -152,4 +152,17 @@ struct GenesisRegionPruneResult {
     const GenesisExecutableRegionProposal &proposal, GenesisRegionPruneResult &result,
     std::size_t max_rounds = genesis_region_prune_default_max_rounds);
 
+// SEG-046 (ADR 0095): REPORT-ONLY generic per-window structure features of the broad identities `U`, for an offline ML region-proposal
+// experiment. Every column is derived solely from the MC68000-owned decoder/IR/control-successor projection of the immutable ROM
+// identities; no address, ordinal or title information is a column (the window start is only the row key). The producer never alters
+// admission, generation or runtime. Text format (ASCII):
+//
+//   segarecomp.m68k_window_features.v1 window_bytes <256|512>
+//   columns <name> <name> ...
+//   <window start hex8> <count> <count> ...       (only windows holding at least one broad identity or an incoming fixed edge)
+//   end
+inline constexpr std::string_view genesis_window_features_schema = "segarecomp.m68k_window_features.v1";
+[[nodiscard]] std::optional<std::string> genesis_window_feature_report(
+    const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries, std::uint32_t window_bytes);
+
 }  // namespace segarecomp
