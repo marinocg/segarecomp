@@ -1,6 +1,7 @@
 Segarecomp is licensed under the Mozilla Public License 2.0 (MPL-2.0.txt).
 
-This package redistributes the following third-party components unmodified, under their own licenses:
+This package redistributes or incorporates the following third-party components under their respective licenses
+(unmodified, except that the vendored zlib sources carry added provenance comments, as permitted by the zlib license):
 
 * SDL3 (Simple DirectMedia Layer), zlib license                       -> SDL3.txt
 * Zig 0.15.2 toolchain (bundled only to compile generated C), MIT     -> Zig.txt
@@ -9,6 +10,8 @@ This package redistributes the following third-party components unmodified, unde
   ship inside toolchain/lib next to the files they cover.
 * ymfm (YM2612 FM core, vendored at libs/device/sega/ym2612/third_party/ymfm), BSD-3-Clause -> compiled in; license
   text ships with the sources (libs/device/sega/ym2612/third_party/ymfm/LICENSE)
+* zlib 1.3.1 (vendored subset at third_party/zlib: adler32/deflate/trees/zutil; computes the deflate-length
+  feature of the native executable-region producer in the Segarecomp CLI), zlib license -> zlib.txt
 * Dear ImGui (launcher user interface), MIT                            -> DearImGui.txt
 * stb_image.h (launcher PNG asset decoding), public domain / MIT       -> compiled in, not redistributed as a
   separate file; see https://github.com/nothings/stb

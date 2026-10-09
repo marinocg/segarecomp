@@ -67,7 +67,7 @@ strategy, windowBits 15, memLevel 8, no dictionary, single-shot). A custom DEFLA
 changed (SEG-048 owns any removal).
 
 Decision: **vendor a pinned subset of the real zlib 1.3.1 C sources** under `third_party/zlib/` (`adler32.c deflate.c trees.c zutil.c` and their
-headers, unmodified apart from provenance comments; zlib license kept in the tree and in `THIRD-PARTY-NOTICES`), compiled as a private static
+headers, unmodified apart from provenance comments; zlib license kept in the tree as `third_party/zlib/LICENSE` and listed in `packaging/THIRD-PARTY-NOTICES.txt`, shipped as `licenses/zlib.txt`), compiled as a private static
 library with the machine platform; one small local `zlib_compress6` wrapper calls `deflateInit/deflate(Z_FINISH)/deflateEnd` exactly as zlib's
 `compress2` does. `deflate.c` references `crc32` only in gzip-wrapper paths (`windowBits` > 15), which the wrapper never selects; a minimal local
 `crc32` definition satisfies the linker for those unreachable paths. The decision rests on: (a) the release builds are zig cross-builds for
@@ -250,8 +250,7 @@ image ignores the request, as it has no Optimized producer). After a build or on
 "Why?" button that opens the sanitized reason code in the diagnostics panel. The ROM -> build -> ready -> play flow and the Master System
 mapper flow are unchanged. The headless smoke mode accepts `--aot-policy` and reports `aot_policy_requested/effective/fallback/reason`.
 The launcher's non-UI core became its own target (`segarecomp_launcher_core`) so `launcher_policy_test` can assert, without a window: default
-Compatibility, Genesis-only Optimized, distinct and deterministic cache entries, status parsing and fallback wording; CI runs it in the SDL3
-job (the push token lacks the `workflow` scope, so the workflow file was not edited; a POST_BUILD run of the test was tried and removed because the Windows release build cannot find `SDL3.dll` at build time). The test is therefore a local CTest (`-DBUILD_TESTING=ON` with the launcher) and the SDL3 CI job still builds the launcher it covers; wiring it into CI needs an operator workflow edit. Verification here: the launcher links and its POST_BUILD contract test passes on Linux against a static SDL 3.4.16 build; the GUI was
+Compatibility, Genesis-only Optimized, distinct and deterministic cache entries, status parsing and fallback wording; the SDL3 CI job builds and runs it through CTest on macOS, Linux and Windows (`ctest -R launcher_policy_test`, a plain CI step, never POST_BUILD, because a POST_BUILD run broke the Windows release build, which cannot find `SDL3.dll` at build time; wiring added in the post-merge hygiene PR, see the addendum). Verification here: the launcher links and its contract test passed on Linux (then run as a POST_BUILD step, since removed) against a static SDL 3.4.16 build; the GUI was
 rendered headless (SDL dummy video + software renderer, a fake package home and cache) and the screenshots reviewed for the Genesis ROM
 selected state (Mode row: Compatibility selected, Optimized available), a Compatibility Ready entry ("Compatibility build"), and an Optimized
 Ready entry that fell back (distinct cache entry loaded; red "Optimized unavailable for this game: built Compatibility" and a "Why?" button).
@@ -271,3 +270,30 @@ Fixed in response: (1) the runtime identity check now also binds the logit thres
 (4) stale bridge help text. Accepted non-blocking: coarse `prune_rejected` detail; cross-platform (MSVC/clang-cl/x87/libm) determinism argued
 by margin (≥4.1e-5 vs ~1e-13 error) and left to the CI matrix; 23,200-frame oracle not re-measured (R bit-identical, K counts identical);
 `segarecomp_build_command_test` (fdopen hook) and `m68k_conformance_harness_test` (killed) fail identically on origin/main.
+
+
+## Addendum (post-merge hygiene, no behaviour change)
+
+**Final-K identity.** Digest = SHA-256 of the sorted admitted source identities as `%08x\n` lines (the same digest the production route logs as
+`k_sha256`; no address listing is stored). Reference route: window features from the C++ export -> pure-Python canonical model
+(`tools/segarecomp_ml_region.py`, model JSON; the private sklearn pickle is not required) -> regions file (SHA-256 equal to the committed SEG-046
+`regions_sha256` for all five titles) -> explicit `--immutable-aot-region-proposal` plan -> K = universe ∩ plan ranges. Native route: the integrated
+`--immutable-rom-aot-ml-admission`. Both sets were produced from the same current binary.
+
+| title | K | K SHA-256 | reference vs native |
+| --- | --- | --- | --- |
+| Sonic 1 | 64,233 | `c195721ca2170533e8acdb3dd7a753657acb419acf56e83d3de18b9eb82d122e` | equal |
+| Sonic 2 | 137,230 | `0948039b5bcad5ac2d6f38e60c8e69a183e12a7b74742e7905a22c4255506c95` | equal |
+| Cool Spot | 56,980 | `41c37f6ece4d65eb10f1851f2378916c4e1df3d3ef0a309527e2c5c3ff3aa7d9` | equal |
+| Streets of Rage | 61,374 | `ca2c0f94812fc2cceee089c81b338708dab39af9d6f06e8cf71a1ae356a1fd8e` | equal |
+| OutRun | 78,283 | `77ad497c5f8158a9bb0091cd98756f518a404cab7a66493453060d53cffadaf8` | equal |
+
+**Long-run differential (rerun, same tooling).** `tools/genesis_ml_admission_differential.py` workload at 23,200 no-render frames (clang 18, explicit
+instruction budget), broad vs integrated optimized, plus a second optimized run for determinism: all five titles `frames_reached` x3; outcome,
+frames, final-state, frame-stream and coverage digests equal broad-vs-optimized and optimized-vs-optimized-repeat; coverage digest equality means the
+observed execution-PC set is identical, so 0 PCs outside K (an escape would stop or change coverage). Generated C reduction: Sonic 1 -73.8%, Sonic 2
+-71.2%, Cool Spot -81.1%, Streets of Rage -70.2%, OutRun -73.8%. The original SEG-046 bitmaps were not used or recreated. No model, threshold or
+schema change.
+
+**Notices.** The zlib license is `third_party/zlib/LICENSE`, listed in `packaging/THIRD-PARTY-NOTICES.txt` and installed as `licenses/zlib.txt`.
+**CI.** `launcher_policy_test` is registered with CTest and run by the SDL3 CI job on macOS, Linux and Windows (`ctest -R launcher_policy_test`), never POST_BUILD.

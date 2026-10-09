@@ -50,7 +50,7 @@ elseif(UNIX)
     INSTALL_RPATH "$ORIGIN/sdl3/lib")
 endif()
 
-# SEG-047-T009 (ADR 0096): the AOT-policy cache identity and status reading (no window). CI runs this binary in the SDL3 job.
+# SEG-047-T009 (ADR 0096): the AOT-policy cache identity and status reading (no window). Registered with CTest; the CI SDL3 job (macOS/Linux/Windows) builds and runs it with `ctest -R launcher_policy_test`. Never a POST_BUILD step (it must not gate packaging on runtime SDL3 DLL lookup).
 add_executable(launcher_policy_test launcher_policy_test.cpp)
 target_link_libraries(launcher_policy_test PRIVATE segarecomp_launcher_core)
 segarecomp_enable_warnings(launcher_policy_test)
