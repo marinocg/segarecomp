@@ -50,7 +50,7 @@ void usage(std::ostream &out) {
          "[--z80-image <path> (SEG-041-T003: report-only, caller-supplied Z80 RAM image bytes from $0000, at most 8 KiB; forces "
          "--domains memory or wider; feeds the existing config.z80_images input the production driver already consumes when "
          "non-nullopt, exactly as a same-process derived image would -- never a build/runtime dependency, diagnostic only)] "
-         "[--external-m68k-facts <path> (SEG-041-T008: report-only, caller-supplied externally-proven dynamic-control-site facts, "
+         "[--source-m68k-universe <path> (SEG-044-T003: shared source-derived executable universe, hybrid plan only)] [--external-m68k-facts <path> (SEG-041-T008: report-only, caller-supplied externally-proven dynamic-control-site facts, "
          "`segarecomp.m68k_external_facts.v1`; requires --hybrid-plan; every fact is structurally re-verified against this "
          "run's own decoder/legality authority before being trusted -- a malformed, mismatched-ROM, or unverifiable file is "
          "rejected outright, never partially trusted; never a build/runtime dependency, diagnostic only)] "
@@ -161,7 +161,7 @@ std::uint64_t peak_rss_bytes() {
 
 int run(int argc, char **argv) {
   std::optional<std::string> rom, digest, private_output, metrics_output, hybrid_plan, trace_points, inspect_cells_spec, z80_image,
-      external_m68k_facts_path;
+      external_m68k_facts_path, source_universe_path;
   bool diagnostic_transparent = false, inspect_all_cells = false;
   std::optional<std::uint32_t> entry_address, mapping_base;
   bool reset_entry = false, universe = false, compare = false, domains_given = false, iterations_given = false,
@@ -181,6 +181,7 @@ int run(int argc, char **argv) {
     else if (option == "--inspect-cells" && has_value && !inspect_cells_spec) inspect_cells_spec = std::string(value);
     else if (option == "--z80-image" && has_value && !z80_image) z80_image = std::string(value);
     else if (option == "--external-m68k-facts" && has_value && !external_m68k_facts_path) external_m68k_facts_path = std::string(value);
+    else if (option == "--source-m68k-universe" && has_value && !source_universe_path) source_universe_path = std::string(value);
     else if (option == "--inspect-all-cells" && !inspect_all_cells) { inspect_all_cells = true; ++index; continue; }
     else if (option == "--diagnostic-transparent-handlers" && !diagnostic_transparent) { diagnostic_transparent = true; ++index; continue; }
     else if (option == "--reset-entry" && !reset_entry) { reset_entry = true; ++index; continue; }
@@ -236,7 +237,7 @@ int run(int argc, char **argv) {
   if (config.domains.memory) config.domains.address = true;
   if (assume_no_z80 && !config.domains.memory) { usage(std::cerr); return 2; }
   if (z80_image && (!config.domains.memory || assume_no_z80)) { usage(std::cerr); return 2; }
-  if (external_m68k_facts_path && !hybrid_plan) { usage(std::cerr); return 2; }
+  if ((external_m68k_facts_path || source_universe_path) && !hybrid_plan) { usage(std::cerr); return 2; }
   if (diagnostic_transparent && !hybrid_plan && !config.domains.frames) { usage(std::cerr); return 2; }
   std::optional<std::vector<CellInspection>> inspect_cells;
   if (inspect_cells_spec) {
@@ -316,6 +317,26 @@ int run(int argc, char **argv) {
         return 2;
       }
       plan_config.external_m68k_facts = *parsed;
+    }
+    if (source_universe_path) {
+      // SEG-044-T003 (ADR 0093): the optional shared source-derived executable universe; rejected outright when malformed.
+      const auto raw = read_bounded_image(*source_universe_path);
+      if (!raw) {
+        std::cerr << "segarecomp-genesis-analysis-report: cannot read --source-m68k-universe\n";
+        return 2;
+      }
+      const auto universe = segarecomp::parse_genesis_source_m68k_universe(std::string(raw->begin(), raw->end()), expected);
+      if (!universe) {
+        std::cerr << "segarecomp-genesis-analysis-report: invalid --source-m68k-universe (malformed, oversized, or ROM-hash "
+                      "mismatch; rejected outright, never partially trusted)\n";
+        return 2;
+      }
+      if (!plan_config.external_m68k_facts) {
+        plan_config.external_m68k_facts = segarecomp::GenesisExternalM68kFacts{};
+        plan_config.external_m68k_facts->rom_sha256 = expected;
+        plan_config.external_m68k_facts->producer = universe->producer;
+      }
+      plan_config.external_m68k_facts->source_universe = *universe;
     }
     const auto plan = segarecomp::plan_genesis_hybrid_admission(*program, plan_config);
     {

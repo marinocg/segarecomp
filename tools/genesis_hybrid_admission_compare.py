@@ -15,7 +15,7 @@ Output: one sanitized JSON object (counts, bytes, seconds, booleans and generic 
 intermediate artifact stays in the ignored `--work` directory, which must be inside the product root.
 
 usage: genesis_hybrid_admission_compare.py --segarecomp <cli> --driver <analysis-report> --rom <image> --work <ignored-dir>
-       [--reference-segarecomp <cli>] [--cc <c-compiler>] [--coverage-dir <private-oracle-dir>] [--run-frames N] [--label NAME]
+       [--source-universe <universe-file>] [--reference-segarecomp <cli>] [--cc <c-compiler>] [--coverage-dir <private-oracle-dir>] [--run-frames N] [--label NAME]
        [--skip-build]
 """
 from __future__ import annotations
@@ -109,12 +109,16 @@ def coverage_run(root: pathlib.Path, cli: str, rom: pathlib.Path, out: pathlib.P
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--segarecomp", required=True)
-    parser.add_argument("--driver", required=True)
+    parser.add_argument("--driver", default=None)
     parser.add_argument("--rom", required=True, type=pathlib.Path)
     parser.add_argument("--work", required=True, type=pathlib.Path)
     parser.add_argument("--reference-segarecomp")
     parser.add_argument("--cc", default=os.environ.get("CC", "cc"))
     parser.add_argument("--coverage-dir", type=pathlib.Path)
+    parser.add_argument("--plan-file", type=pathlib.Path,
+                        help="SEG-044 diagnostic: use this plan instead of running the planner (report marks origin=external_plan_file)")
+    parser.add_argument("--source-universe", type=pathlib.Path,
+                        help="SEG-044: optional segarecomp.m68k_source_universe.v1 passed to the unchanged planner (--source-m68k-universe)")
     parser.add_argument("--run-frames", type=int, default=0)
     parser.add_argument("--label", default="title")
     parser.add_argument("--skip-build", action="store_true")
@@ -130,14 +134,22 @@ def main() -> int:
     report: dict = {"schema": "segarecomp.m68k_hybrid_compare.v1", "label": args.label}
 
     plan = work / "hybrid.plan"
-    planned = subprocess.run([args.driver, "--rom", str(args.rom), "--rom-sha256", sha, "--reset-entry", "--private-output",
-                              str(work / "plan.private.json"), "--hybrid-plan", str(plan), "--metrics-output", str(work / "plan.metrics.json")],
-                             capture_output=True, text=True)
-    if planned.returncode != 0:
-        raise SystemExit(f"planner failed: {planned.returncode}")
-    report["plan"] = json.loads(planned.stdout)
-    metrics = json.loads((work / "plan.metrics.json").read_text())
-    report["plan_cost"] = {"wall_seconds": metrics["wall_seconds"], "peak_rss_mib": round(metrics["peak_rss_bytes"] / 1048576, 1)}
+    if args.plan_file:
+        # SEG-044 DIAGNOSTIC: measure a caller-supplied plan (not produced by the SEG-031 planner in this run). The production seam
+        # (`--admission-plan` / `--immutable-rom-aot-admission`) validates it fail-closed exactly as for a planner-written plan.
+        shutil.copyfile(args.plan_file, plan)
+        report["plan"] = {"origin": "external_plan_file", "planner_run": False}
+        report["plan_cost"] = None
+    else:
+        planned = subprocess.run([args.driver, "--rom", str(args.rom), "--rom-sha256", sha, "--reset-entry", "--private-output",
+                                  str(work / "plan.private.json"), "--hybrid-plan", str(plan), "--metrics-output", str(work / "plan.metrics.json")]
+                                 + (["--source-m68k-universe", str(args.source_universe)] if args.source_universe else []),
+                                 capture_output=True, text=True)
+        if planned.returncode != 0:
+            raise SystemExit(f"planner failed: {planned.returncode}")
+        report["plan"] = json.loads(planned.stdout)
+        metrics = json.loads((work / "plan.metrics.json").read_text())
+        report["plan_cost"] = {"wall_seconds": metrics["wall_seconds"], "peak_rss_mib": round(metrics["peak_rss_bytes"] / 1048576, 1)}
     strategy, ranges = parse_plan(plan.read_text())
 
     # Generation only: broad, reference broad, planned.

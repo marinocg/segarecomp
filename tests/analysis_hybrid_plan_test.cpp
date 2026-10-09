@@ -455,6 +455,174 @@ void external_fact_validator_requires_matching_facts() {
          "external validator: without the matching facts it can no longer re-derive the island, and fails closed");
 }
 
+// SEG-044-T003 (ADR 0093): the shared source-derived executable universe C. It is an additional INPUT to the unchanged planner:
+// consulted only where the internal ladder (and any per-site fact) left a site `whole_image`, as a contained region only.
+GenesisExternalM68kFacts universe_facts(std::initializer_list<std::uint32_t> entries) {
+  GenesisExternalM68kFacts facts;
+  facts.rom_sha256 = std::string(64U, 'a');
+  facts.producer = "test-source-universe";
+  GenesisSourceM68kUniverse universe;
+  universe.rom_sha256 = facts.rom_sha256;
+  universe.producer = "test-source-universe";
+  universe.source_revision = std::string(40U, '1');
+  universe.source_config = "none";
+  universe.entries.assign(entries.begin(), entries.end());
+  std::sort(universe.entries.begin(), universe.entries.end());
+  facts.source_universe = std::move(universe);
+  return facts;
+}
+
+void source_universe_contains_unknown_site() {
+  Image image;
+  Asm{image, entry}.movea_l_ram(0, 0xF000U).jmp_an(0);  // Unknown pointer: whole_image without an external authority
+  Asm{image, 0x300U}.bra_self();
+  const auto program = program_of(image);
+  GenesisHybridPlanConfig config{};
+  config.external_m68k_facts = universe_facts({entry, entry + 4U, 0x300U});
+  const auto plan = plan_of(*program, config);
+  common("source universe", *program, plan, config);
+  expect(plan.source_universe_applied == 1U && plan.external_facts_applied == 1U && plan.source_universe_size == 3U,
+         "source universe: exactly the unknown site used the shared universe");
+  expect(admitted(plan, 0x300U) && admitted(plan, entry), "source universe: the universe members are admitted");
+  const auto found = plan.sites.find(entry + 4U);
+  expect(found != plan.sites.end() && found->second.container == GenesisHybridContainer::points_to_region &&
+             found->second.source_universe && found->second.entries.size() == 3U,
+         "source universe: the site is a contained points_to_region over the universe");
+  const auto aggregate = format_genesis_hybrid_plan_aggregate(plan);
+  expect(aggregate.find("\"source_universe_size\":3,\"source_universe_applied\":1") != std::string::npos,
+         "source universe: the aggregate reports the universe size and applied count");
+}
+
+// Safe superset: a harmless extra executable PC is admitted (more code in H), never rejected.
+void source_universe_superset_is_safe() {
+  Image image;
+  Asm{image, entry}.movea_l_ram(0, 0xF000U).jmp_an(0);
+  Asm{image, 0x300U}.bra_self();
+  Asm{image, 0x400U}.bra_self();
+  const auto program = program_of(image);
+  GenesisHybridPlanConfig config{};
+  config.external_m68k_facts = universe_facts({entry, entry + 4U, 0x300U, 0x400U});
+  const auto plan = plan_of(*program, config);
+  common("source universe superset", *program, plan, config);
+  expect(admitted(plan, 0x300U) && admitted(plan, 0x400U), "source universe superset: the extra decodable PC is admitted");
+}
+
+// Mutation: omitting a feasible executable PC from C is NOT detectable by the consumer (the documented trust limit): the plan stays
+// structurally valid and simply does not admit the omitted PC. This is exactly why the complete execution-PC oracle is mandatory.
+void source_universe_omission_is_not_consumer_detectable() {
+  Image image;
+  Asm{image, entry}.movea_l_ram(0, 0xF000U).jmp_an(0);
+  Asm{image, 0x300U}.bra_self();
+  const auto program = program_of(image);
+  GenesisHybridPlanConfig config{};
+  config.external_m68k_facts = universe_facts({entry, entry + 4U});  // 0x300 deliberately omitted
+  const auto plan = plan_of(*program, config);
+  expect(plan.outcome == GenesisHybridOutcome::hybrid && !admitted(plan, 0x300U),
+         "source universe omission: accepted structurally, omitted PC not admitted (runtime oracle must catch it)");
+}
+
+// The universe never overrides a stronger internal result and loses to any per-site fact.
+void source_universe_never_overrides_stronger() {
+  {
+    Image image;
+    Asm{image, entry}.lea_abs(0, 0x300U).jmp_an(0);
+    Asm{image, 0x300U}.bra_self();
+    Asm{image, 0x400U}.bra_self();
+    const auto program = program_of(image);
+    const auto without = plan_of(*program);
+    GenesisHybridPlanConfig config{};
+    config.external_m68k_facts = universe_facts({entry, entry + 6U, 0x300U, 0x400U});
+    const auto with = plan_of(*program, config);
+    expect(with.source_universe_applied == 0U && with.admitted == without.admitted && with.island_entries == without.island_entries &&
+               !admitted(with, 0x400U),
+           "source universe: an internally exact site is not overridden or widened");
+  }
+  {
+    Image image;
+    Asm{image, entry}.movea_l_ram(0, 0xF000U).jmp_an(0);
+    Asm{image, 0x300U}.bra_self();
+    Asm{image, 0x400U}.bra_self();
+    const auto program = program_of(image);
+    GenesisHybridPlanConfig config{};
+    auto facts = universe_facts({entry, entry + 4U, 0x300U, 0x400U});
+    facts.facts.push_back(GenesisExternalM68kFact{entry + 4U, {0x300U}, true});
+    config.external_m68k_facts = facts;
+    const auto plan = plan_of(*program, config);
+    const auto found = plan.sites.find(entry + 4U);
+    expect(plan.outcome == GenesisHybridOutcome::hybrid && plan.source_universe_applied == 0U && found != plan.sites.end() &&
+               found->second.container == GenesisHybridContainer::exact && !admitted(plan, 0x400U),
+           "source universe: a per-site exact fact wins over the shared universe");
+  }
+}
+
+// A universe with even one member that fails structural re-verification (unmapped, or not decodable) is discarded entirely.
+void source_universe_discarded_when_unverifiable() {
+  Image image;
+  Asm{image, entry}.movea_l_ram(0, 0xF000U).jmp_an(0);
+  Asm{image, 0x300U}.bra_self();
+  image.words(0x3FFEU, {0x4EB9U});  // JSR (xxx).L truncated by the end of the image: not decodable
+  const auto program = program_of(image);
+  for (const auto bad : {UINT32_C(0x8000), UINT32_C(0x3FFE)}) {
+    GenesisHybridPlanConfig config{};
+    config.external_m68k_facts = universe_facts({entry, entry + 4U, 0x300U, bad});
+    const auto plan = plan_of(*program, config);
+    expect(plan.outcome == GenesisHybridOutcome::broad_whole_image && plan.source_universe_applied == 0U && plan.admitted == plan.universe,
+           "source universe discarded: a member failing re-verification (" + std::to_string(bad) + ") leaves the site whole_image");
+  }
+  GenesisHybridPlanConfig config{};
+  config.max_island_entries = 2U;
+  config.external_m68k_facts = universe_facts({entry, entry + 4U, 0x300U});
+  expect(plan_of(*program, config).outcome == GenesisHybridOutcome::broad_whole_image,
+         "source universe discarded: a universe over the configured entry bound is never partially trusted");
+}
+
+void source_universe_validator_requires_matching_universe() {
+  Image image;
+  Asm{image, entry}.movea_l_ram(0, 0xF000U).jmp_an(0);
+  Asm{image, 0x300U}.bra_self();
+  const auto program = program_of(image);
+  GenesisHybridPlanConfig config{};
+  const auto facts = universe_facts({entry, entry + 4U, 0x300U});
+  config.external_m68k_facts = facts;
+  const auto plan = plan_of(*program, config);
+  expect(plan.outcome == GenesisHybridOutcome::hybrid, "source universe validator: setup plan is hybrid");
+  GenesisAnalysisReportConfig analysis_config{};
+  analysis_config.domains = GenesisAnalysisDomains{true, true, true, true};
+  analysis_config.island_entries = plan.island_entries;
+  const auto report = run_genesis_analysis_report(*program, analysis_config);
+  const auto view = GenesisM68kAnalysisImage::create(*program);
+  expect(!validate_genesis_hybrid_round(report, *view, plan.island_entries, plan.universe, genesis_hybrid_max_island_entries, facts),
+         "source universe validator: validates with the matching universe");
+  expect(validate_genesis_hybrid_round(report, *view, plan.island_entries, plan.universe) == std::optional<std::string>("unbounded_site"),
+         "source universe validator: without it the island cannot be re-derived and fails closed");
+}
+
+void source_universe_parser() {
+  const std::string rom(64U, 'c');
+  const std::string rev(40U, '2');
+  const auto make = [&](const std::string &entries_line, const std::string &body, const std::string &tail = "end\n") {
+    return "segarecomp.m68k_source_universe.v1\nrom_sha256 " + rom + "\nproducer s1disasm-listing-v1\nsource_revision " + rev +
+           "\nsource_config Revision0\nentries " + entries_line + "\n" + body + tail;
+  };
+  const auto good = parse_genesis_source_m68k_universe(make("2", "00000200\n00000300\n"), rom);
+  expect(good && good->entries == std::vector<std::uint32_t>{0x200U, 0x300U} && good->source_revision == rev &&
+             good->source_config == "Revision0" && good->producer == "s1disasm-listing-v1",
+         "universe parser: a well-formed file round-trips");
+  expect(!parse_genesis_source_m68k_universe(make("2", "00000200\n00000300\n"), std::string(64U, 'd')), "universe parser: ROM-hash mismatch rejected");
+  expect(!parse_genesis_source_m68k_universe(make("2", "00000300\n00000200\n"), rom), "universe parser: unsorted rejected");
+  expect(!parse_genesis_source_m68k_universe(make("2", "00000200\n00000200\n"), rom), "universe parser: duplicate rejected");
+  expect(!parse_genesis_source_m68k_universe(make("2", "00000200\n00000301\n"), rom), "universe parser: odd entry rejected");
+  expect(!parse_genesis_source_m68k_universe(make("3", "00000200\n00000300\n"), rom), "universe parser: count mismatch (short) rejected");
+  expect(!parse_genesis_source_m68k_universe(make("1", "00000200\n00000300\n"), rom), "universe parser: count mismatch (long) rejected");
+  expect(!parse_genesis_source_m68k_universe(make("0", ""), rom), "universe parser: empty universe rejected");
+  expect(!parse_genesis_source_m68k_universe(make("65537", ""), rom), "universe parser: over the entry bound rejected");
+  expect(!parse_genesis_source_m68k_universe(make("1", "00000200\n", "end"), rom), "universe parser: unterminated file rejected");
+  expect(!parse_genesis_source_m68k_universe(make("1", "00000200\n", "end\nextra\n"), rom), "universe parser: trailing data rejected");
+  expect(!parse_genesis_source_m68k_universe(make("1", "200\n"), rom), "universe parser: non hex8 entry rejected");
+  expect(!parse_genesis_source_m68k_universe("segarecomp.m68k_source_universe.v2\n", rom), "universe parser: wrong schema rejected");
+  expect(!parse_genesis_source_m68k_universe(std::string(genesis_source_m68k_universe_max_bytes + 1U, 'x'), rom), "universe parser: oversized rejected");
+}
+
 // SEG-041-T008 text-format parser: valid round-trip plus every malformed-input class fails closed (identical in effect to no
 // file at all -- never partially parsed/trusted).
 void external_facts_parser() {
@@ -626,6 +794,13 @@ int main(int argc, char **argv) {
   external_fact_discarded_over_entry_bound();
   external_fact_validator_requires_matching_facts();
   external_facts_parser();
+  source_universe_contains_unknown_site();
+  source_universe_superset_is_safe();
+  source_universe_omission_is_not_consumer_detectable();
+  source_universe_never_overrides_stronger();
+  source_universe_discarded_when_unverifiable();
+  source_universe_validator_requires_matching_universe();
+  source_universe_parser();
   width_rule();
   width_rule_address();
   incomplete_solve();
