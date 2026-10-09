@@ -1,0 +1,33 @@
+{
+ "blocked_cv": {
+  "groups": 16,
+  "purge_windows": 2
+ },
+ "certain_code_union": "windows containing a precise direct-control-discovery identity (includes machine roots)",
+ "environment": {
+  "numpy": "2.5.3",
+  "python": "3.13.5",
+  "sklearn": "1.9.1"
+ },
+ "experiment": "SEG-046",
+ "feature_count": 141,
+ "feature_schema_sha256": "d2e7c82913139c29450511326d6de76e91579ec654edde81afae16b13cd1f570",
+ "feature_version": "seg046-features-v1",
+ "model": "logreg",
+ "model_artifact_sha256": "b5ddae5aa0fe6571455803c244d2a6be4a2c3349e3436c8780bfc3d8aa8fa62b",
+ "prediction_digest_sha256": "25c227c8775f86ae8f79ccc2cf97da2052af403e2336384c49c11b23dd060e12",
+ "recipe": {
+  "C": 1.0,
+  "class_weight": "balanced",
+  "family": "LogisticRegression",
+  "max_iter": 2000,
+  "scaler": "standard",
+  "solver": "lbfgs"
+ },
+ "seed": 46,
+ "status": "FROZEN",
+ "threshold": 0.00835406801187952,
+ "training_rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+ "training_title": "Sonic 1 REV00",
+ "window_bytes": 512
+}

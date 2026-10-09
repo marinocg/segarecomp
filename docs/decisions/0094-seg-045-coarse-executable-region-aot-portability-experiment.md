@@ -1,6 +1,6 @@
 # ADR 0094: SEG-045 coarse executable-region AOT portability experiment
 
-- Status: In progress (section 1 frozen by T001; later sections appended by T003..T006).
+- Status: Complete. Gate FAIL (1 of 3; region-detector recall); no implementation successor (T001-T006 done, PR #84).
 - Predecessor: ADR 0093 (SEG-044), ADR 0080 (hybrid admission seam).
 
 ## 1. Contract (frozen before any region measurement)

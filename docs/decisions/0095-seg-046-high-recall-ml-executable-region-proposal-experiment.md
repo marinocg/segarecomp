@@ -1,0 +1,255 @@
+# ADR 0095: SEG-046 high-recall ML executable-region proposal experiment
+
+- Status: Complete. Pre-registered gate PASS (4 of 4 blind titles; economics PASS); classification ML REGION PRODUCER PORTABLE (candidate; narrow evidence).
+- Predecessor: ADR 0094 (SEG-045, gate FAIL: region-detector recall), ADR 0093 (SEG-044 exact source universe).
+
+## 1. Contract (frozen before any model was trained)
+
+Question: can a small, deterministic ML classifier trained ONLY from Sonic 1 exact source truth propose executable ROM regions `R` with
+enough recall that the unchanged SEG-045 machinery (`K0 = U ∩ R`, structural pruning to `K`, unchanged admission validator, existing AOT
+emitter/runtime) works on unrelated blind Genesis titles - in particular the two sparse code islands inside data-like pages that falsified
+FLOW8-D (Cool Spot, Streets of Rage)?
+
+This is a bounded ML PRODUCER experiment, not a production milestone. ML is never a correctness oracle and never runs in generated programs.
+Correctness stays with the existing broad decoder, structural pruning, admission validator, generated-native dispatcher and fail-closed
+missing-target stop. SEG-030 analysis, pruning redesign, Ghidra and runtime ML/decode/JIT/fallback are out of scope.
+
+Corpus. Training/calibration: Sonic 1 REV00 only (ROM SHA-256 `46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6`; SEG-044
+exact source universe `C`, 24,180 instruction starts). Blind falsification: Sonic 2, Cool Spot, Streets of Rage, OutRun (existing complete
+23,200-frame no-input M68K execution oracles; runtime coverage is a FALSIFIER only, read after the freeze). Golden Axe: exploratory only.
+Only operator-authorized local images are used; none is fetched.
+
+Unit and labels. Primary unit: 256-byte ROM window; one bounded sensitivity comparison may use 512 bytes; no other size. Label: positive iff
+the window contains >= 1 exact source instruction start of `C`; else negative. Labels exist for Sonic 1 only and are bound to its ROM hash
+(wrong hash fails closed). Execution coverage never creates labels; unknown windows of any other title are never labelled.
+
+Features (generic; frozen schema, version `seg046-features-v1`). A feature is a pure function of ROM bytes and the report-only C++
+window-feature export (`segarecomp ... --window-feature-report`, owner `hybrid_admission`, built on `m68k_control_successors` / the decoder /
+the IR; Python duplicates no M68K classification). Families: byte statistics (entropy, zero / 0xFF / printable fractions, unique-byte
+fraction, longest run, word-repeat rate, zlib ratio, 8-bin value histogram); decoder/control (identity density, length histogram, IR-family
+histogram, conditional/unconditional/call/return/indirect/terminator/exception densities, fixed-edge landing same-window / adjacent / far /
+dangling, sequential fall-off, incoming local/external fixed edges and ratios); neighbour context = previous and next window's base vector.
+FORBIDDEN as a feature: title identity, absolute address, normalized offset, window/page ordinal, source symbols/names/labels/filenames,
+runtime counts or PC coverage, human annotation. `assert_feature_schema` rejects any feature whose name carries such a fragment; the window
+start is only a row key and is dropped before modelling.
+
+Models. At most two families: (1) logistic regression (standardized, balanced class weights); (2) one shallow histogram gradient boosting
+model (depth 3, 60 iterations). No neural network, no raw-byte embedding, no hyperparameter search. Fixed seed 46. Bounded size, CPU only.
+
+Validation. BLOCKED cross-validation, never random windows: 16 contiguous groups, training excludes the held-out group plus 2 purge windows on
+each side (neighbour features overlap). Objective: false negatives are far costlier than false positives. Selection order: (1) highest
+out-of-fold positive recall (the threshold is lowered to the lowest positive out-of-fold score, i.e. 100% observed recall); (2) among those,
+lower selected-ROM fraction (R includes the certain-code union); (3) among materially equal choices (within 0.01 of the minimum fraction),
+the simpler model (logistic regression; 256 before 512). The frozen threshold is that lowest positive out-of-fold score. If exact 100% recall
+requires essentially the whole ROM the experiment fails calibration.
+
+Certain-code union (frozen): `R = ML-selected windows ∪ windows containing a precise direct-control-discovery identity (includes the
+machine roots)`. No title-specific seeds.
+
+Sonic 1 calibration gate (all required, else STOP SEG-046 before any blind title): `C ⊆ R`; `C ⊆ K`; `K/U <= 0.50`; the unchanged production
+admission validator accepts `K`; zero observed Sonic 1 oracle escape (sanity only).
+
+Freeze. Before any blind title is processed the definition (window size, schema hash, model family, hyperparameters, seed, threshold, union
+rule, pruning behaviour, model artifact SHA-256) is committed. After it: no retraining, feature, threshold, window-size, per-title model,
+page/window addition or escape-driven correction. The trained artifact stays private (ignored `.cache`); only its digest and the
+deterministic recipe are recorded. No ROM-derived table, listing, address or byte is committed.
+
+Pre-registered primary gate (a production/expanded-training successor is justified only if ALL hold): >= 3 of 4 blind titles PASS; AND Cool
+Spot PASS; AND Streets of Rage PASS; every passing title has 0 runtime escapes / missing-admission stops, broad and selective state evidence
+equal, the unchanged validator accepting `K`, no title-specific feature/threshold/model, and no blind title influencing training or model
+selection. A title may pass behaviourally up to `K/U <= 0.60` (preferred `<= 0.50`).
+
+Economics gate (>= 3 passing blind titles): generated C <= broad -30%, compile CPU <= broad -25%, runtime regression <= +15%. Thresholds are
+never tuned after a blind result. A failing title is not repaired; post-hoc analysis is uncredited diagnostic only.
+
+Classifications: ML REGION PRODUCER PORTABLE / ML IMPROVES RECALL BUT NOT ENOUGH / ML OVERSELECTS / ML DOES NOT GENERALIZE / INSUFFICIENT
+TRAINING MATERIAL / DEPENDENCY OR TOOLING STOP. On a full pass exactly one successor SEG-047 is registered; otherwise none.
+
+Baselines. Product main `a4664ed4abbb357f04976a2a8525ba5988214880` (PR #84 merged 2026-10-09); harness main
+`06e625a89293ef1e5f1553f3db3915f67ef3c5da`.
+
+Isolated experiment environment (no repository dependency added; ignored `<HARNESS_ROOT>/.cache/seg046-ml-venv`, created with
+`python3 -m venv` + `pip install scikit-learn==1.9.1`): Python 3.13.5, scikit-learn 1.9.1, numpy 2.5.3, scipy 1.18.1 (linux aarch64 wheels,
+dev container). The public product build, CI and tests do not import any ML package (the unit tests cover only the pure-Python parts).
+
+## 2. Window-feature export and tool (T002, report-only)
+
+`genesis_window_feature_report` (C++, `hybrid_admission`, reusing `m68k_control_successors` / decoder / IR) writes 27 generic per-window
+counts of the broad identities (identity count, instruction-span histogram, IR family histogram, conditional/unconditional/call/return/
+indirect/terminator/exception counts, fixed-edge landing same/adjacent/far/dangling, sequential fall-off, incoming local/external fixed
+edges); CLI `--window-feature-report <path> --window-feature-bytes <256|512>` (report-only; broad emission unchanged). Python
+(`tools/segarecomp_ml_region.py`) adds 16 byte statistics and the previous/next window context: 3 x 47 = 141 features. Window start is a row
+key only. Tests: `genesis_window_features_test` (C++), `segarecomp_ml_region_test` (forbidden-feature rejection, extraction determinism and
+order independence, title/path independence, wrong-ROM-hash and malformed-universe fail-closed, dropped-source-positive containment failure,
+oracle-input refusal, artifact digest mismatch, blocked-fold purge).
+
+## 3. Sonic 1 blocked CV, model shootout, freeze (T003; Sonic 1 is the only title that influenced anything)
+
+Sonic 1: 512 KiB; 2048 windows of 256 B (434 positive, 1614 negative); 1024 windows of 512 B (230 positive). Blocked CV: 16 contiguous groups,
+2-window purge, fixed seed 46. Threshold = lowest positive out-of-fold score (100% observed OOF recall). R includes the 25-34 certain-code
+windows. Out-of-fold results (the CV was run once; the selection rule above was fixed in the tool before it was run):
+
+| window | model | OOF AUC | threshold | selected ROM fraction at 100% OOF recall |
+| --- | --- | --- | --- | --- |
+| 256 | logistic regression | 0.9991 | 0.00136 | 0.3179 |
+| 256 | hist. gradient boosting | 0.9994 | 0.01378 | 0.2764 |
+| 512 | logistic regression | 0.9985 | 0.00835 | 0.2588 |
+| 512 | hist. gradient boosting | 0.9995 | 0.04535 | 0.2500 |
+
+Rule outcome: the minimum is 512/HGB (0.2500); 512/logistic regression is within 0.01 and simpler, so it is chosen. (The 256 B primary size was
+not retained because the frozen selection order puts selected-ROM fraction ahead of the window-size preference. This is recorded honestly: the
+choice was made on Sonic 1 numbers alone, before any blind title was processed.)
+
+Frozen definition (`tools/segarecomp_ml_region.frozen.json`): window 512 B; feature version `seg046-features-v1`, 141 features, schema hash
+`d2e7c82913139c29450511326d6de76e91579ec654edde81afae16b13cd1f570`; logistic regression (standardize, C=1, lbfgs, balanced classes, 2000
+iterations); seed 46; threshold 0.00835406801187952; certain-code union = windows containing a precise direct-control-discovery identity
+(includes the machine roots); final model trained on all 1024 Sonic 1 windows; two independent fits produce the identical artifact;
+model artifact SHA-256 `b5ddae5aa0fe6571455803c244d2a6be4a2c3349e3436c8780bfc3d8aa8fa62b` (private, ignored; not committed).
+
+Sonic 1 calibration gate (Release CLI, 4 vCPU): R = 257 windows = 131,584 B = 25.1% of the ROM (all selected by the model; the 25 certain-code
+windows are a subset); U 246,293; K0 64,510; K 64,233 (277 pruned, 42 rounds); K/U 0.2608; C 24,180 ⊆ R yes; C ⊆ K yes (C ∩ U = C); C/K 0.376;
+unchanged production validator accepted; Sonic 1 oracle sanity (23,200 frames, clang): broad and selective `frames_reached`, 10,512 distinct
+PCs, 0 escapes outside K, coverage/final-state/frame-stream digests identical. GATE: PASS. (C ⊆ R is in-sample for the final model; the
+meaningful recall evidence is the blocked OOF recall.) Freeze committed before any blind title was processed.
+
+## 4. Blind region + prune (T004; frozen definition of section 3 applied unchanged, no per-title input; BEFORE any blind runtime result was read)
+
+Release CLI, 4 vCPU, same unchanged production validator (run inside the CLI on a scratch copy; again by the emitter in the build).
+"extract" = broad analysis + window export (wall / RSS); "infer" = Python byte features + model (wall / RSS, includes interpreter and sklearn import).
+
+| title | ROM | R | R/ROM | U | K0 | K | K/U | pruned (rounds) | validator | extract | infer |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Sonic 2 | 1 MiB | 286,720 B (560 windows) | 27.34% | 496,387 | 140,439 | 137,230 | 0.2765 | 3,209 (80) | accepted | 31.6 s / 950 MiB | 16.7 s / 132 MiB |
+| Cool Spot | 1 MiB | 124,928 B (244) | 11.91% | 498,276 | 60,459 | 56,980 | 0.1144 | 3,479 (77) | accepted | 20.7 s / 917 MiB | 7.7 s / 132 MiB |
+| Streets of Rage | 512 KiB | 126,464 B (247) | 24.12% | 247,761 | 61,771 | 61,374 | 0.2477 | 397 (70) | accepted | 12.9 s / 484 MiB | 9.4 s / 125 MiB |
+| OutRun | 1 MiB | 174,592 B (341) | 16.65% | 496,950 | 84,289 | 78,283 | 0.1575 | 6,006 (427) | accepted | 17.0 s / 858 MiB | 4.3 s / 132 MiB |
+| Golden Axe (exploratory) | 512 KiB | 129,024 B (252) | 24.61% | 249,843 | 63,077 | 61,939 | 0.2479 | 1,138 (49) | accepted | 9.7 s / 478 MiB | 3.1 s / 125 MiB |
+
+Prune CLI wall 0.6-3.8 s, peak RSS 306-594 MiB. No machine root or materialized identity was pruned, no proposal was rejected. In every title all
+certain-code (direct-control-discovery) windows were already selected by the model, so the union added nothing.
+
+## 5. Build, runtime, oracle and economics (T005; runtime coverage read only now, after the plans were frozen and written)
+
+Workload: the existing complete execution-PC oracle (23,200 no-render no-input frames, dispatch cap 1.5e9), ordinary production emitter and
+runtime, no runtime change, `clang` for every build (digests are compiler independent; Sonic 2 / Cool Spot / Streets broad runs are the
+unchanged SEG-045 broad runs of the same ROMs, OutRun broad was run in this task).
+
+| title | outcome (broad / ML-selective) | distinct PCs | observed PCs outside K | coverage / final-state / frame-stream / dispatch / retirement digests | verdict |
+| --- | --- | --- | --- | --- | --- |
+| Sonic 1 (calibration sanity) | frames_reached x2 | 10,512 | 0 | identical | pass |
+| Sonic 2 | frames_reached x2 | 2,478 | 0 (broad) / 0 (selective) | identical | PASS |
+| Cool Spot | frames_reached x2 | 4,928 | 0 | identical | PASS |
+| Streets of Rage | frames_reached x2 | 8,758 | 0 | identical | PASS |
+| OutRun | frames_reached x2 | 5,286 | 0 | identical | PASS |
+| Golden Axe (exploratory) | guest_stop x2 (frame 55, same `known_but_unemitted_target` class; pre-existing incomplete-oracle stop) | 571 | - | identical | not gated |
+
+No new guest stop, no runtime PC escape and no fail-closed missing-target stop was caused by missing admission in any gated title; observed PC
+sets of broad and selective runs are equal. The two FLOW8-D counterexamples are now inside `R`: Cool Spot's 176 FLOW8-D-missed executed PCs fall in
+3 of the 512 B windows (ML score >= 0.9999, 120x the threshold); Streets of Rage's 13 fall in 2 windows with scores 0.0094-0.0663 against the
+threshold 0.00835 - included, but by a margin of only 1.12x for the weakest window (a fragile pass, see section 7).
+
+Economics (`segarecomp build`, clang, 4 vCPU, quiet machine, broad -> ML-selective):
+
+| title | generated C | compile CPU | build wall | peak RSS | executable | 23,200-frame run wall |
+| --- | --- | --- | --- | --- | --- | --- |
+| Sonic 2 | 314.4 -> 98.4 MB (-68.7%) | 472.6 -> 124.9 s (-73.6%) | 171.3 -> 44.0 s (-74.3%) | 994 -> 438 MiB (-55.9%) | 48.2 -> 15.4 MB (-68.1%) | 22.8 / 28.6 s and 35.4 / 28.5 s (two samples; machine noise) |
+| Cool Spot | 284.7 -> 63.2 MB (-77.8%) | 370.0 -> 86.8 s (-76.5%) | 117.4 -> 32.2 s (-72.6%) | 955 -> 438 MiB (-54.1%) | 43.1 -> 9.7 MB (-77.5%) | 20.6 -> 19.8 s (-4%) |
+| Streets of Rage | 175.1 -> 60.3 MB (-65.6%) | 262.1 -> 91.1 s (-65.2%) | 86.7 -> 31.9 s (-63.2%) | 512 -> 233 MiB (-54.5%) | 27.4 -> 9.8 MB (-64.3%) | 35.0 -> 35.6 s (+2%) |
+| OutRun | 228.5 -> 68.3 MB (-70.1%) | 308.7 -> 81.4 s (-73.6%) | 99.9 -> 29.4 s (-70.6%) | 899 -> 439 MiB (-51.2%) | 35.9 -> 10.5 MB (-70.7%) | 41.3 -> 31.4 s (-24%) |
+
+Economic gate: 4 of 4 titles satisfy generated C <= -30%, compile CPU <= -25%, runtime regression <= +15% (the only >15% single sample, Sonic 2's
+first pass, was not reproduced on a quiet rerun; machine run-to-run noise on broad is about +-35%). Broad emission is byte-identical to the
+SEG-045 broad emission of Sonic 1 with the new report flags present.
+
+## 6. Mutation / adversarial checks run by the implementer (T006, before independent review)
+
+- Shuffled Sonic 1 labels (same features, blocked CV): OOF AUC 0.457-0.498 for all four configurations and, at 100% observed recall, the selected
+  fraction is 99.6-100% of the ROM - the model loses all discriminating power, so the real result is not a feature/leak artifact of the CV
+  harness itself.
+- Injected `abs_address` / `rom_offset` / `window_ordinal` / `title_code` / `source_hit` / `exec_count` / `coverage_ratio` / `window_start`
+  feature: rejected by `assert_feature_schema` (unit test).
+- Renamed and relocated Cool Spot image (title-like filename): identical regions file; re-run: identical; reordered/independent per-window
+  extraction: identical rows (unit test); two fits of the final model: identical artifact and prediction digests.
+- Wrong ROM hash for the source labels: `train` stops ("source labels are bound to the pinned Sonic 1 image"); wrong hash in a universe file,
+  unsorted/odd/out-of-range/short-count universe: fail closed (unit test).
+- Dropping or forcing a low score on a source-positive window: the `C ⊆ R` containment check reports the uncovered source address (unit test).
+- A runtime coverage/oracle file given to `train`/`freeze`/`propose`: refused. A modified (1-byte-appended) model artifact: refused by digest
+  before any unpickling. An unfrozen / schema-mismatched frozen definition: refused.
+- Blocked folds are contiguous, purged by 2 windows each side and cover each window exactly once (unit test); no random split exists in the tool.
+- Broad emission of Sonic 1 with the new report flags is byte-identical to the SEG-045 broad emission; the new options are report-only.
+- No ML package is imported by generated programs, the CLI binary, the runtime, or CI tests (the product binary is C++ only).
+
+## 7. Gate decision and caveats
+
+Primary gate: 4 of 4 blind titles PASS, including Cool Spot and Streets of Rage; every passing title has 0 runtime escapes, equal broad/selective
+coverage and final-state digests, unchanged-validator acceptance, K/U <= 0.28 (<= 0.50 preferred), no title-specific feature/threshold/model,
+and no blind title influenced training or selection. Economics gate: PASS on 4 of 4 (generated C -66..-78%, compile CPU -65..-77%).
+**GATE: PASS.** Classification: **ML REGION PRODUCER PORTABLE - candidate, narrow evidence.** What is and is not shown:
+
+- Shown: no observed escape and identical final-state/coverage digests for four no-input, no-render 23,200-frame traces; both FLOW8-D islands are
+  now inside R.
+- Not shown: recall for unexecuted real code. The independent reviewer measured executed 512 B windows per title (Sonic 2 49 of 2048, Cool Spot
+  74 of 2048, Streets of Rage 132 of 1024, OutRun 82 of 2048) against 5-10x more selected windows; recall is proven only for the traced code.
+  The frame-stream digest is the empty-input hash (nothing is rendered), so behavioural equality rests on the final-state and coverage digests.
+- Fragile margin: Streets of Rage's weakest executed window scored 1.12x the frozen threshold (another under 3x, two under 10x); the other titles'
+  minimum margins are 3.8x (Sonic 2), 8.2x (Cool Spot) and 22.9x (OutRun). The threshold is the minimum of 230 OOF positive scores, so one
+  near-miss window would have failed the title: the pass is not a robust recall guarantee. Single training title; blocked CV cannot measure
+  cross-title style transfer.
+- Weak positional signal: the previous/next context is an all-zero vector beyond the ROM ends, so the model can recognise the first/last window of an
+  image (bounded to two windows per title, not decision-relevant here). Left unchanged because the definition is frozen; a successor should replace it
+  with an explicit missing-neighbour treatment that is not distinguishable.
+- The tool name-fragment check guards feature names only; the feature list itself was audited by hand and by the reviewer.
+
+## 8. Independent review (T006)
+
+Independent adversarial validator on HEAD 474fd6c: PASS WITH FINDINGS, no blocking finding. Reproduced independently: frozen artifact digest
+(two processes, different hash seeds), byte-identical CV and frozen JSON, deterministic window export, source-label correctness (512 B label = OR of
+the two 256 B labels), C within K (in-sample), 0 broad/selective PCs outside K for four titles, fail-closed rejection of a region excluding a machine
+root and of a wrong ROM hash, byte-identical broad emission, no ML in the CLI/runtime/generated code, no commercial data committed. Findings: the
+over-claim wording and missing gate section (fixed by sections 7-8), the Streets margin (recorded), the ROM-end context signal (recorded), a task/
+branch metadata mismatch for T006 (the combined PR lives on `task/seg-046-t001`; verify with T001), `tools/agent_exec.py` crashing on a missing
+`container` import (harness issue, outside this PR), and two fast-gate failures unrelated to this diff (`segarecomp_build_command_test` strict-C11
+`fdopen` in its own hook C, `m68k_conformance_harness_test` killed under load - the same two noted in ADR 0094; CI is the arbiter). Four focused
+suites pass: genesis_window_features, segarecomp_ml_region, genesis_region_prune, segarecomp_region_proposal.
+
+## 9. Final answers and successor
+
+Successor: SEG-047 is drafted (record held out of the backlog until this PR merges, because the task-PR verifier rejects a milestone added during a task); it needs full refinement first. It must not be read as more than "worth expanding the
+source-backed corpus and replacing the single-title, minimum-score threshold with leave-one-title-out calibration and a margin". Broad AOT stays
+the unconditional fallback and the default; exact source maps remain the strongest selective authority; heuristic ML selective admission is not
+made a default by this experiment. Failure-mode reading if SEG-047 later fails: more labelled titles are needed before blaming the feature/model class.
+
+## 10. Post-gate artifact preservation (added after the gate; cannot influence the completed evaluation)
+
+Sections 1-9 are the historical record: the contract of section 1 kept the trained artifact private and recorded only its digest and recipe,
+and that was correct for the frozen experiment. After the gate and independent review, and before this PR merges, the exact fitted parameters
+were exported into a framework-independent representation so a successor can implement deterministic native inference without Python or
+scikit-learn. This is artifact preservation only: it does NOT change the model, features, threshold, selection rule or any experiment outcome,
+and SEG-046 remains an experiment that enables no production ML admission route.
+
+- The private pickle (digest `b5ddae5aa0fe6571455803c244d2a6be4a2c3349e3436c8780bfc3d8aa8fa62b`, authenticated before reading) stays private and is NOT committed;
+  it is the reference until a native scorer's parity is independently proven.
+- `tools/segarecomp_ml_region.model.json` (schema `segarecomp.ml_region_model.v1`, SHA-256 `5863742d3b84a934d7ab335695a3748426de53e43ddc9d42ca679a6fc9fab0a2`):
+  scaler means/scales, logistic coefficients/intercept (141 each; class order [0,1]), the folded classifier (`folded_weight = coef/scale`,
+  `folded_bias = intercept - fsum(coef*mean/scale)`), probability threshold 0.00835406801187952 and its logit 
+  -4.776617512896361, feature names/version/schema hash. Numbers are binary64 shortest round-trip decimals. Two exports are byte-identical.
+  Decision rule: select a window iff `folded_bias + Σ folded_weight[i]·x[i] >= logit_threshold`.
+- Parity (`tools/segarecomp_ml_region.parity.json`, `segarecomp_ml_region.py verify-parity`, experiment-only, needs sklearn): canonical vs sklearn
+  `decision_function` max absolute difference 1.8e-14 (folded) / 1.4e-14 (unfolded); selected-window sets are EXACTLY equal on the local Sonic 1,
+  Sonic 2, Cool Spot, Streets of Rage and OutRun matrices, and the counts equal sections 3-4. For each title only aggregates and digests are
+  recorded: ROM SHA-256, window / ML-selected / seed / final counts, region bytes and fraction, the SHA-256 of the canonical
+  `segarecomp.m68k_executable_regions.v1` serialization of the final and of the ML-only selection, and the SHA-256 of the sklearn float64
+  probability vector (informational; a native scorer matches the selection digests, not the last bits of the probabilities).
+  A future native implementation reproduces SEG-046 by: scorer output -> canonical regions text -> SHA-256 -> compare.
+  Final-selection digests (first 16 hex): Sonic 1 e5210d14a347aa65, Sonic 2 1a34f38e928a9444, Cool Spot 7260ec3033711220,
+  Streets of Rage fcfcf2231c42a312, OutRun 8e310d363a57f647 (full values in the parity file).
+- Data-boundary audit (inspected, not assumed): the model file holds only public metadata, the 141 generic feature names, and 4 x 141 learned
+  aggregate numbers plus 2 scalars. It contains no ROM bytes, address/offset, window start or ordinal, title identity feature, source
+  label/name, source-universe listing, runtime coverage or per-ROM region data (`range ` lines and index lists are absent; a hermetic test asserts
+  it). The parity file holds ROM digests, counts and digests only: no selected-window indexes, region addresses, per-window probabilities
+  or instruction addresses. The coefficients are generic aggregate statistics of 1,024 windows and are not reconstructable commercial data. No blocker found.
+- Hermetic tests (`segarecomp_ml_region_test`, pure Python, no sklearn/numpy): artifact parses; 141 parameters everywhere; version/schema hash/
+  threshold/original-artifact digest match the frozen definition; export re-derivation is byte-identical; folded and unfolded forms agree on
+  synthetic vectors; the decision flips exactly at the boundary; malformed dimensions/schema/version/digests/classes/NaN fail closed.
+- Out of scope (SEG-047+): native feature extraction and scorer, CLI integration, retraining, threshold/margin changes, removing zlib, any
+  production or default ML route.
