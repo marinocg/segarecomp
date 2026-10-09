@@ -326,6 +326,11 @@ add_test(NAME segarecomp_source_map_extract_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_source_map_extract_test.py)
 set_property(TEST segarecomp_source_map_extract_test APPEND PROPERTY LABELS full fast)
 
+# SEG-044-T005: the diagnostic H = C intersect U plan builder (synthetic inputs only).
+add_test(NAME segarecomp_source_universe_plan_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_source_universe_plan_test.py)
+set_property(TEST segarecomp_source_universe_plan_test APPEND PROPERTY LABELS full fast)
+
 # SEG-031 (ADR 0080): the explicit hybrid candidate end to end (planner -> plan -> filtered emission -> strict C11 build and run with
 # an explicit instruction budget), identical behaviour to broad, and the emitter's fail-closed plan validation.
 add_test(NAME genesis_hybrid_admission_generated_test COMMAND ${Python3_EXECUTABLE}

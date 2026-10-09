@@ -81,3 +81,80 @@ one v1 `contained` fact (9 bytes per entry), so repeating it once per residual s
 four sites (the SEG-043 Sonic 1 residual has six). The planner's island bound is *not* the obstacle: `total_entries`
 counts distinct entries across sites (24,180 < 65,536). T003 therefore needs only the single smallest shared
 source-container representation (one universe, sites reference it), not a planner change.
+
+## SEG-044-T002 -- deterministic producer (implemented)
+
+`tools/segarecomp_source_map_extract.py` turns the assembler listing into `segarecomp.m68k_source_universe.v1`
+(ROM SHA-256, producer, exact source revision, source configuration token, sorted unique even entries, count, `end`). It
+fails closed with a stable content-free class on: unknown construct with emitted bytes, unknown CPU, unbalanced
+`save`/`restore`, bytes inside a macro definition, odd/outside-ROM/overlapping rows, opcode or data bytes that differ from the
+ROM, an unexplained uncovered ROM range, count/size exhaustion, ROM-hash or source-revision mismatch. Only the source project's own
+`org *-1` / `dc.b` operand-fixup idiom may overlap an instruction *operand* byte (never an opcode word or data). Skipped
+conditional regions do not appear in the listing and macro-definition bodies carry no bytes, so neither can create authority.
+Real run (aggregate): two clean rebuilds give byte-identical universes; 24,180 entries; instruction bytes 90,150; `dc` data bytes
+57,001; other bytes (binary assets, Z80 blocks, padding) 377,239; 102 operand overlays. Cross-check with segarecomp's own
+decoder: all 24,180 entries decode and every decoded length equals the listing length (0 mismatches, 0 undecodable) -- two
+independent toolchains agree on the instruction stream. 20 hermetic synthetic tests (hash/revision mismatch, duplicate, odd,
+unmapped, opcode mismatch, malformed listing, continuation gap, unknown construct, unknown CPU, unbalanced modes, macro bodies and
+skipped regions, macro-expanded instruction, overlay idiom only, reordering, omission mutation, size/count exhaustion, CLI
+determinism).
+
+## SEG-044-T003 -- integration with the unchanged planner (implemented)
+
+The shared universe enters through the existing external-input seam, nothing else: `GenesisExternalM68kFacts::source_universe`,
+`parse_genesis_source_m68k_universe`, `--source-m68k-universe`. In `genesis_hybrid_container` the single centralized
+`apply_external_fact` consults it after any per-site fact and only for a site the internal ladder left `whole_image`, as a
+`points_to_region` contained set. Every member is re-verified (even, mapped, decodable, within the entry bound) or the
+whole universe is discarded. `plan_genesis_hybrid_admission`, `validate_genesis_hybrid_round`, the fixed point, bounds, universe
+fingerprint and production seam are untouched; an absent universe reproduces today's behavior exactly. Tests: universe resolves an
+Unknown site; closed superset safe; omission of a feasible PC is *not* consumer-detectable (documented trust limit); never overrides
+an internally exact site or a per-site fact; unmapped/undecodable member or over-bound discards the universe; validator requires
+the matching universe; 13 parser rejection classes.
+
+## SEG-044-T004 -- Sonic 1 under the UNCHANGED planner (result: H = U, `broad_analysis_incomplete`)
+
+| configuration | sites contained | outcome | rounds | H | H/U |
+|---|---|---|---|---|---|
+| baseline, no external input (reproduces SEG-042) | 0 of 13 | `broad_whole_image` | 1 | 246,293 | 1.000000 |
+| source universe only | 13 of 13 (all `points_to_region`, 24,180 entries) | `broad_analysis_incomplete` | 2 | 246,293 | 1.000000 |
+| SEG-043 facts (7 contained, regenerated) + source universe on the 6 residual sites | 13 of 13 (7 per-site, 6 source) | `broad_analysis_incomplete` | 2 | 246,293 | 1.000000 |
+| same, RTE sites given a 1-entry placeholder (uncredited ablation) | 13 of 13 | `broad_analysis_incomplete` | 2 | 246,293 | 1.000000 |
+| same, PC-index sites given a 1-entry placeholder (uncredited ablation) | 13 of 13 | `broad_analysis_incomplete` | 2 | 246,293 | 1.000000 |
+
+`U` 246,293, `D` 1,276, `|C|` 24,180 (`C/U` 0.0982). **The source authority resolved the structural obstacle completely**: every
+one of the 13 baseline `whole_image` sites (and in particular the 6 SEG-043 residuals -- 4 PC-relative table dispatches and 2
+`rte`) obtained a re-verified container, and round 1 converged. Round 2, which analyses the island entries as opaque-state roots,
+returns `broad_analysis_incomplete`: the SEG-030 memory-domain fixed point does not converge within `m68k_memory_round_bound`
+(16) once a 24k-entry island of unknown-state code is rooted (reason `iteration_bound`; about 663k solver iterations and 286k program
+points when it stopped; 2.2 GB peak RSS; 423 s wall on a Release build). It is a capacity/precision limit of the unchanged
+analysis, not a trust failure, and the planner correctly answers broad. A raise of the solver caps (x64, uncredited scratch
+build) gave the identical stop, so the solver iteration/point caps are not the binding limit; a scratch raise of the memory round
+bound to 256 had not finished after 10 minutes and was abandoned. Both single-class ablations stop identically, so neither
+PC-relative table dispatch nor `rte` alone can be contained by a code-universe-sized island under this analysis. The planner was
+not modified to obtain a result.
+
+## SEG-044-T005 -- economics and correctness of the source authority itself (DIAGNOSTIC plan, not a planner result)
+
+Because the unchanged planner cannot consume a `|C|`-sized island, the *source authority* was evaluated without the planner:
+`tools/segarecomp_source_universe_plan.py` writes the admission plan `H = C ∩ U` (diagnostic, never a production route, never
+credited as the SEG-031 planner's result), which then goes through the unchanged production seam
+(`segarecomp build --admission-plan`). The production validator independently accepted it (fingerprint, ROM hash, structural closure over
+fixed successors, call continuations and machine roots): no static control edge leaves `C` into a broad identity.
+
+| | broad | source-direct plan (diagnostic) | change |
+|---|---|---|---|
+| admitted identities | 246,293 | 24,180 | -90.18% |
+| generated C | 177.9 MB | 25.8 MB | -85.49% |
+| compile CPU (`segarecomp build`) | 490.6 s | 106.3 s | -78.3% |
+| build wall | 135.2 s | 31.9 s | -76.4% |
+| compiler peak RSS | 531 MiB | 232 MiB | -56% |
+| executable | 39.3 MB | 7.7 MB | -80.3% |
+| 3,000-frame run (bridge `run_wall_seconds`, 2 runs each) | 2.66, 2.72 s | 2.71, 2.65 s | within noise |
+
+Complete execution-PC oracle (broad generated-native program, 23,200 frames, explicit instruction budget): 10,512 distinct
+observed PCs, all inside `C` and inside `U`: **0 escapes**. Broad and selective produce identical final-state, frame-stream and
+execution-coverage digests (3,000 frames, both repetitions). Mutations: omitting any of 7 observed (executed) PCs from `C` was
+rejected by the production validator (`fixed_successor_not_admitted` / `machine_root_not_admitted`) *and* is an oracle escape;
+adding closed supersets (extra `RTS` words in data) is accepted with 0 escapes; adding arbitrary decodable data PCs is rejected
+(not closed under fixed successors). These meet ADR 0080 decision 11's per-title thresholds (generated C -30%, compile CPU -25%,
+runtime <= +15%) *for the diagnostic plan only*; zero oracle escapes proves nothing about unobserved paths.
