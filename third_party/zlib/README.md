@@ -6,6 +6,8 @@ Source: the zlib 1.3.1 C sources (https://www.zlib.net/, zlib license, see `zlib
 release except for a provenance comment added by the redistributor at the top of each file. `segarecomp_crc32.c` is the only file
 written for this project (see the comment in it). Not built into generated programs or the runtime; only the native region producer links it.
 
+License: `LICENSE` in this directory is the zlib license text copied from `zlib.h`; releases ship it as `licenses/zlib.txt` and list it in `packaging/THIRD-PARTY-NOTICES.txt`.
+
 SHA-256 of the vendored files (drift-checked by `tests/segarecomp_ml_region_test.py`):
 
 ```
