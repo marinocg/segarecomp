@@ -40,7 +40,11 @@ sbcd scc scs seq sf sge sgt shi sle sls slt smi sne spl st svc svs shs slo stop 
 # Directives that legitimately emit bytes but assert nothing about execution.
 DATA = frozenset("dc dw db ds dcb even cnop align padding".split())
 # Directives allowed to START an otherwise unexplained ROM range (binary assets, padding, Z80 blocks).
-GAP = frozenset("binclude incbin even cnop align org ds dcb save padding".split())
+BLOCK_CLOSERS = frozenset(["endm", "endr", "endw"])
+BLOCK_OPENERS = frozenset("while rept irp irpc".split())
+ASSET_GAP = frozenset("binclude incbin save".split())        # sized by the directive (binary assets, Z80 blocks)
+PAD_GAP = frozenset("even cnop align org ds dcb padding".split())  # must be a uniform 00/FF fill
+GAP = ASSET_GAP | PAD_GAP
 
 ROW = re.compile(r"^(?:\(\d+\))?\s*(\d+)/\s*([0-9A-F]+) :(?: (.*))?$")
 CONT = re.compile(r"^\s+([0-9A-F]+) : (.*)$")
@@ -82,7 +86,7 @@ def parse_listing(listing: str, rom: bytes):
         _fail("rom_size")
     stack: list[str] = []
     mode = "68000"
-    in_macro = False
+    macro_depth = 0
     rows = []  # [addr, bytearray, kind, tokens]
     gap_tokens: dict[int, set[str]] = {}
     last = None
@@ -101,16 +105,17 @@ def parse_listing(listing: str, rom: bytes):
             if field.strip() == "ALL":
                 field = " " * 20
             first = tokens[0].lower().lstrip("!") if tokens else ""
-            if in_macro:
+            if macro_depth:
                 if field.strip() and HEX.fullmatch(field.rstrip()):
                     _fail("bytes_inside_macro_definition")
-                if first == "endm":
-                    in_macro = False
-                elif "macro" in [t.lower() for t in tokens[:2]]:
-                    _fail("nested_macro_definition")
+                lowered = [t.lower() for t in tokens[:2]]
+                if first in BLOCK_CLOSERS:
+                    macro_depth -= 1
+                elif first in BLOCK_OPENERS or "macro" in lowered:
+                    macro_depth += 1  # nested `while`/`rept`/`irp`/`macro` blocks also close with `endm`
                 continue
             if len(tokens) >= 1 and (first == "macro" or (len(tokens) >= 2 and tokens[1].lower() == "macro")):
-                in_macro = True
+                macro_depth = 1
                 continue
             if first == "save":
                 stack.append(mode)
@@ -155,7 +160,7 @@ def parse_listing(listing: str, rom: bytes):
             continue
     if not seen_row:
         _fail("not_a_listing")
-    if in_macro:
+    if macro_depth:
         _fail("unterminated_macro_definition")
     if stack or mode != "68000":
         _fail("cpu_mode_not_restored")
@@ -211,7 +216,16 @@ def parse_listing(listing: str, rom: bytes):
         while position < len(rom) and not cover[position]:
             position += 1
         uncovered += position - begin
-        if not (gap_tokens.get(begin, set()) & GAP):
+        # Split the gap at every directive row inside it; each segment must start at its own explaining directive.
+        marks = [begin] + [a for a in sorted(gap_tokens) if begin < a < position and gap_tokens[a] & GAP]
+        marks.append(position)
+        for seg_begin, seg_end in zip(marks, marks[1:]):
+            tokens_here = gap_tokens.get(seg_begin, set())
+            if tokens_here & ASSET_GAP:
+                continue
+            fill = set(rom[seg_begin:seg_end])
+            if (tokens_here & PAD_GAP) and len(fill) == 1 and fill <= {0x00, 0xFF}:
+                continue
             unexplained += 1
     if unexplained:
         _fail("unexplained_rom_range", unexplained)

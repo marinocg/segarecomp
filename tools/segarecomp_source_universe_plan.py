@@ -74,6 +74,7 @@ def main() -> int:
     text, summary = build_plan(open(args.universe).read(), open(args.address_report).read(), args.rom_sha256)
     with open(args.output, "w", newline="\n") as sink:
         sink.write(text)
+    print("DIAGNOSTIC ONLY: source-direct admission plan, not a SEG-031 planner result; never a production route", file=sys.stderr)
     print(summary)
     return 0
 

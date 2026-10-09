@@ -222,6 +222,28 @@ class Extract(unittest.TestCase):
             ex.extract(mutated, rom, REV, None)
         self.assertEqual(ctx.exception.code, "unexplained_rom_range")
 
+    def test_nested_block_inside_macro_definition_does_not_end_it_early(self):
+        # reviewer repro: `while ... endm` inside a macro body used to end macro mode early, so a following `cpu z80` took effect
+        f = good(); f.directive(24, "\tbinclude\t\"t\"")
+        f.directive(24, "m:\tmacro")
+        f.directive(24, "\twhile 0")
+        f.directive(24, "\tendm")
+        f.directive(24, "\tsave")
+        f.directive(24, "\tcpu z80")
+        f.directive(24, "\tendm")  # closes the macro definition (still hidden in the body)
+        text, _ = self.run_ok(f)
+        self.assertIn("entries 4", text)
+
+    def test_pad_directive_cannot_mask_a_deleted_instruction_row(self):
+        # reviewer repro: an `even` row at the address of a deleted instruction row must not explain a non-fill gap
+        f = good(); f.directive(24, "\tbinclude\t\"t\"")
+        f.directive(20, "\teven")
+        listing, rom = f.build()
+        mutated = "\n".join(l for l in listing.split("\n") if "move.w" not in l)
+        with self.assertRaises(ex.SourceMapError) as ctx:
+            ex.extract(mutated, rom, REV, None)
+        self.assertEqual(ctx.exception.code, "unexplained_rom_range")
+
     def test_size_and_count_exhaustion(self):
         f = good(); f.directive(24, "\tbinclude\t\"t\"")
         listing, rom = f.build()

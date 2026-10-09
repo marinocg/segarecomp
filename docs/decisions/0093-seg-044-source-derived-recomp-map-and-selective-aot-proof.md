@@ -145,16 +145,90 @@ fixed successors, call continuations and machine roots): no static control edge 
 |---|---|---|---|
 | admitted identities | 246,293 | 24,180 | -90.18% |
 | generated C | 177.9 MB | 25.8 MB | -85.49% |
-| compile CPU (`segarecomp build`) | 490.6 s | 106.3 s | -78.3% |
+| compile CPU (`segarecomp build`; fresh-process run, the in-process comparison tool run gave 488.9 / 106.3 s) | 490.6 s | 106.3 s | -78.3% |
 | build wall | 135.2 s | 31.9 s | -76.4% |
 | compiler peak RSS | 531 MiB | 232 MiB | -56% |
 | executable | 39.3 MB | 7.7 MB | -80.3% |
 | 3,000-frame run (bridge `run_wall_seconds`, 2 runs each) | 2.66, 2.72 s | 2.71, 2.65 s | within noise |
 
-Complete execution-PC oracle (broad generated-native program, 23,200 frames, explicit instruction budget): 10,512 distinct
-observed PCs, all inside `C` and inside `U`: **0 escapes**. Broad and selective produce identical final-state, frame-stream and
-execution-coverage digests (3,000 frames, both repetitions). Mutations: omitting any of 7 observed (executed) PCs from `C` was
+Execution-PC oracle (broad generated-native program, complete instrumentation but one no-input workload: 23,200 frames, explicit instruction budget; it observes 43.5% of `C`): 10,512 distinct
+observed PCs, all inside `C` and inside `U`: **0 escapes**. Broad and selective produce identical final-state and execution-coverage digests (3,000 frames, both repetitions); the
+frame-stream digest is the empty-input digest in both because the coverage route does not render, so it carries no evidence. Mutations: omitting any of 7 observed (executed) PCs from `C` was
 rejected by the production validator (`fixed_successor_not_admitted` / `machine_root_not_admitted`) *and* is an oracle escape;
 adding closed supersets (extra `RTS` words in data) is accepted with 0 escapes; adding arbitrary decodable data PCs is rejected
 (not closed under fixed successors). These meet ADR 0080 decision 11's per-title thresholds (generated C -30%, compile CPU -25%,
 runtime <= +15%) *for the diagnostic plan only*; zero oracle escapes proves nothing about unobserved paths.
+
+Note on the aggregate counters: `external_facts_applied` counts every site that used an external input including the source
+universe (`source_universe_applied` is the universe-only subset).
+
+## SEG-044-T006 -- independent adversarial review (PASS WITH FINDINGS) and hardening
+
+An independent reviewer (no edit rights) rebuilt REV01 and REV00 in fresh clones with the Python port (REV01 MD5 equals the
+repository constant; REV00 SHA-256 equals the pinned digest, ROM byte-identical to ours), re-parsed the 10 MB listing with its own
+row accounting (52,955 byte-emitting rows, identical; byte accounting reconciles), decoded all 24,180 members with segarecomp's
+decoder (0 undecodable; every fixed successor, branch, call and stacked continuation that lands in the ROM is itself in `C`; no
+fixed edge reaches data or mid-instruction; all 15 exception-vector targets in `C`), parsed all 203 PC-relative index tables from
+the listing (827 entries, all in `C`), and found no planner logic altered. Findings and disposition:
+
+* Extractor gap masking (minor): a zero-width directive row (`even`, `org`, ...) at the address of a deleted instruction row could
+  explain the resulting hole. **Fixed**: asset directives (`binclude`, `incbin`, Z80 `save` blocks) explain a segment; pad
+  directives explain it only when the ROM bytes are one uniform `00`/`FF` fill; gaps are split at every inner directive row.
+* Extractor nested blocks (minor): an inner `while`/`rept`/`irp` `... endm` ended macro-definition mode early. **Fixed**: block
+  depth is counted (`endm`/`endr`/`endw`). The real universe is byte-identical after both fixes; two regression tests added.
+* Documented trust limit, quantified: relabelling a real instruction row as `dc.w` passes the extractor, and 799 of the 24,180
+  members have no fixed or stacked in-edge, so only the runtime oracle (or the external authority) could notice their omission.
+* Wording corrections (frame-stream digest, "complete" oracle, figure provenance): applied above.
+* The production validator checks structural closure only (fixed successors, call continuations, roots); dynamic containment is the
+  planner's job, so "validator accepted" is structural evidence, not a completeness proof (stated in T005).
+* The diagnostic plan builder is judged acceptable as a labelled diagnostic (it emits no `alias` lines, prints a banner, is not wired into
+  CI or defaults); a hand-written plan is already possible because the seam validates structure only.
+* Fast-gate result: the focus suites (`analysis_hybrid_plan`, extractor, plan builder, harvest) passed 4/4; the fast preset showed
+  two failures not attributable to this diff -- `segarecomp_build_command_test` (generated `hook-gen.c` rejected by gcc 14 for
+  implicit `fdopen`; files untouched here, base behavior unconfirmed locally) and `m68k_conformance_harness_test` (killed by load,
+  passes alone in 83 s). GitHub CI is the arbiter. Harness defect noted: `tools/agent_exec.py` crashes on a missing `container` import.
+* Process: the work is one combined branch/PR (`task/seg-044-t001`, PR #83) bound to T001..T006 by operator instruction; per-child
+  branch metadata follows the SEG-043 precedent of the schema-mandated names.
+
+## Final answers
+
+1. **Exact ROM from the selected source?** Yes: s1disasm `7ebe4b3d0c182b2566026b6d3f423d33539558da`, its bundled AS/p2bin, REV00 via the
+   repository's own `Revision = 0` switch, SHA-256 equals the pinned ROM, twice from fresh clones (plus the reviewer's third).
+   The `build.lua` driver was executed through a validated Python port (no Lua interpreter available).
+2. **Accepted authority constructs:** only 68000-mode assembler-listing rows with a closed MC68000 mnemonic and emitted bytes
+   (macro-expanded rows included); everything else (data, assets, Z80, padding) asserts nothing.
+3. **Global executable universe `C` (path A)** was defensible and mechanically derived: 24,180 instruction starts.
+4. **SEG-043 residual Sonic 1 sites source-resolved:** 6 of 6 (4 PC-relative table dispatches, 2 `rte`), all as `contained`
+   (0 exact); 13 of 13 baseline sites.
+5. **Did the unchanged SEG-031 planner reach `H < U`?** **No.** `broad_analysis_incomplete`.
+6. **U 246,293; C 24,180 (C/U 0.0982); planner H 246,293 (H/U 1.000000, reduction 0).** Diagnostic source-direct H 24,180
+   (0.0982; reduction 222,113, 90.18%) -- not a planner result.
+7. **Runtime-PC escapes (diagnostic plan):** 0 of 10,512 observed PCs (23,200-frame no-input workload; 43.5% of `C`); not a proof.
+8. **Behaviour identical to broad:** final-state and coverage digests identical over 3,000 frames, two repetitions each.
+9. **Economics (diagnostic plan):** generated C 177.9 -> 25.8 MB (-85.49%); compile CPU 490.6 -> 106.3 s (-78.3%); compiler peak
+   RSS 531 -> 232 MiB; executable 39.3 -> 7.7 MB; build wall 135 -> 32 s; runtime unchanged.
+10. **ADR 0080 per-title thresholds:** met by the diagnostic plan; not creditable because the planner route yields H = U.
+11. **Broad AOT remains the production default.** (Needs >= 2 complete-oracle titles *and* a planner-credited or newly-decided
+    admission route.)
+12. **Retain?** The deterministic fail-closed producer and the inert shared-universe input are small, tested and worth keeping as
+    the experiment's reproducible basis. The finding that matters is negative for the planner route and positive for the authority.
+13. **Generic recomp-map format/registry?** No. The evidence does not support a registry or multi-game framework.
+
+## Classification
+
+**SOURCE AUTHORITY PARTIAL (planner cannot consume it): H = U under the unchanged SEG-031 planner.** The exact-ROM gate passed and
+the source universe resolved every residual site structurally, but the unchanged analysis stack cannot take a code-universe-sized
+island (memory-domain fixed point does not converge), so the credited result stays `broad_analysis_incomplete`, H/U = 1.000000.
+Separately and uncredited, the source authority itself survives the available falsifiers (decoder agreement 24,180/24,180, static
+control-flow closure, 0 oracle escapes, rejected/accepted mutations) and, used directly, would admit 9.82% of `U` with large
+generated-C and compile savings. This distinguishes the two statements in the milestone brief: selective-AOT *machinery* (emitter, seam,
+validator, runtime) works on a real title; what fails is the planner's ability to carry the completeness claim, not the claim's plausibility.
+
+## Successor decision
+
+No successor is registered by this milestone. If the operator wants to pursue the value, the one bounded and evidence-supported next
+step is a **decision milestone, not an implementation**: (a) an ADR deciding whether a source-authority admission route that
+bypasses the analysis (plan = authority universe, validated by the production closure check and the execution-PC oracle) is an
+acceptable trust boundary at all, and (b) if yes, a second source-backed title (Sonic 2 via its public disassembly) to meet ADR 0080's
+two-title rule. Making the SEG-030 analysis consume a 24k-entry island is the SEG-038..043 line this milestone deliberately did not
+reopen. Merge of PR #83 remains an operator decision; broad stays the default.
