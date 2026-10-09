@@ -97,4 +97,55 @@ struct GenesisHybridAdmissionPlan {
     const FrontendProgram &program, std::string_view rom_sha256, const GenesisHybridAdmissionPlan &plan,
     std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries);
 
+// SEG-045 (ADR 0094): REPORT-ONLY structural pruning of an externally proposed executable region.
+//
+// A region proposal `R` is an *assumption* ("all executable ROM code lies somewhere in these half-open even ranges"); this owner never
+// proves it. `K0 = U ∩ R`; `K` is the greatest subset of `K0` closed under exactly the structural obligations that
+// `apply_genesis_hybrid_admission` enforces (fixed control successors and call continuations that are themselves broad identities).
+// Pruning only removes (`K ⊆ K0 ⊆ U`): a decoded-data identity whose mandatory edge leaves `K` is dropped, and so, transitively, is every
+// identity requiring it. The greatest fixed point is unique, so the result is independent of any iteration/seed/page order. After
+// convergence a machine root or ADR 0049 materialized identity of `U` that is absent from `K`, or an empty `K`, REJECTS the proposal; a
+// resource cap (rounds) is exhausted => REJECTED, never broadened. The product is an ordinary hybrid plan that the unchanged validator
+// accepts; there is no second validator.
+//
+// Region text format (ASCII, bounded; a private artifact for a commercial input):
+//
+//   segarecomp.m68k_executable_regions.v1
+//   rom_sha256 <64 lowercase hex>
+//   range <begin hex8> <end hex8>          (half-open, even, ascending, disjoint, non-empty)
+//   end
+inline constexpr std::string_view genesis_executable_regions_schema = "segarecomp.m68k_executable_regions.v1";
+inline constexpr std::size_t genesis_region_prune_default_max_rounds = std::size_t{1} << 20U;
+
+struct GenesisExecutableRegionProposal {
+  std::string rom_sha256;
+  std::vector<FrontendProgram::ImmutableRomAotRange> ranges;
+};
+
+[[nodiscard]] std::string format_genesis_executable_regions(const GenesisExecutableRegionProposal &proposal);
+[[nodiscard]] std::optional<GenesisExecutableRegionProposal> parse_genesis_executable_regions(std::string_view text,
+                                                                                              std::string *error = nullptr);
+
+struct GenesisRegionPruneResult {
+  std::vector<std::uint32_t> admitted;  // K: sorted broad execution addresses; empty when rejected
+  std::size_t universe_count{};         // |U|
+  std::size_t k0_count{};               // |U ∩ R|
+  std::size_t pruned_count{};           // |K0 \ K|
+  std::size_t rounds{};                 // removal waves until convergence (0 when K0 was already closed)
+  std::optional<std::string> failure;   // rejection reason; K is not usable when set
+};
+
+// Pure function of (program roots/aliases, entries, regions): never mutates `entries`.
+[[nodiscard]] GenesisRegionPruneResult prune_genesis_region_admission(
+    const FrontendProgram &program, const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
+    const std::vector<FrontendProgram::ImmutableRomAotRange> &regions,
+    std::size_t max_rounds = genesis_region_prune_default_max_rounds);
+
+// Builds the ordinary hybrid plan for the pruned `K` (aliases and universe fingerprint of this emission). Nullopt plan => see
+// `result.failure`.
+[[nodiscard]] std::optional<GenesisHybridAdmissionPlan> plan_genesis_region_admission(
+    const FrontendProgram &program, std::string_view rom_sha256, const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
+    const GenesisExecutableRegionProposal &proposal, GenesisRegionPruneResult &result,
+    std::size_t max_rounds = genesis_region_prune_default_max_rounds);
+
 }  // namespace segarecomp
