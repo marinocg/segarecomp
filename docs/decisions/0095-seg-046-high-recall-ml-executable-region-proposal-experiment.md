@@ -111,3 +111,19 @@ windows are a subset); U 246,293; K0 64,510; K 64,233 (277 pruned, 42 rounds); K
 unchanged production validator accepted; Sonic 1 oracle sanity (23,200 frames, clang): broad and selective `frames_reached`, 10,512 distinct
 PCs, 0 escapes outside K, coverage/final-state/frame-stream digests identical. GATE: PASS. (C ⊆ R is in-sample for the final model; the
 meaningful recall evidence is the blocked OOF recall.) Freeze committed before any blind title was processed.
+
+## 4. Blind region + prune (T004; frozen definition of section 3 applied unchanged, no per-title input; BEFORE any blind runtime result was read)
+
+Release CLI, 4 vCPU, same unchanged production validator (run inside the CLI on a scratch copy; again by the emitter in the build).
+"extract" = broad analysis + window export (wall / RSS); "infer" = Python byte features + model (wall / RSS, includes interpreter and sklearn import).
+
+| title | ROM | R | R/ROM | U | K0 | K | K/U | pruned (rounds) | validator | extract | infer |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Sonic 2 | 1 MiB | 286,720 B (560 windows) | 27.34% | 496,387 | 140,439 | 137,230 | 0.2765 | 3,209 (80) | accepted | 31.6 s / 950 MiB | 16.7 s / 132 MiB |
+| Cool Spot | 1 MiB | 124,928 B (244) | 11.91% | 498,276 | 60,459 | 56,980 | 0.1144 | 3,479 (77) | accepted | 20.7 s / 917 MiB | 7.7 s / 132 MiB |
+| Streets of Rage | 512 KiB | 126,464 B (247) | 24.12% | 247,761 | 61,771 | 61,374 | 0.2477 | 397 (70) | accepted | 12.9 s / 484 MiB | 9.4 s / 125 MiB |
+| OutRun | 1 MiB | 174,592 B (341) | 16.65% | 496,950 | 84,289 | 78,283 | 0.1575 | 6,006 (427) | accepted | 17.0 s / 858 MiB | 4.3 s / 132 MiB |
+| Golden Axe (exploratory) | 512 KiB | 129,024 B (252) | 24.61% | 249,843 | 63,077 | 61,939 | 0.2479 | 1,138 (49) | accepted | 9.7 s / 478 MiB | 3.1 s / 125 MiB |
+
+Prune CLI wall 0.6-3.8 s, peak RSS 306-594 MiB. No machine root or materialized identity was pruned, no proposal was rejected. Every ML-selected
+region is a subset of the certain-code union's complement plus the union (the certain-code windows were all already selected by the model).
