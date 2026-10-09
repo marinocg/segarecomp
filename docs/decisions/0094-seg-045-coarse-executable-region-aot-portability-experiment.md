@@ -36,3 +36,37 @@ Baselines. Product main 8abcd947552907d0bc903164caccbf0552521667; harness main 2
 Current-main `U` (aligned starts / accepted identities): Sonic 1 262,144 / 246,293; Sonic 2 524,288 / 496,387;
 Cool Spot 524,288 / 498,276; Streets of Rage 262,144 / 247,761 (broad enumeration 4.0 / 9.3 / 7.7 / 4.4 s, peak RSS
 500 / 949 / 917 / 485 MiB; Release, 4 vCPU). These equal the historical figures.
+
+## 2. Structural-pruning kernel (T002, report-only)
+
+`prune_genesis_region_admission` / `plan_genesis_region_admission` (C++, `hybrid_admission`) compute the greatest fixed point by a
+reverse-edge worklist in removal waves (`rounds`), reusing `m68k_control_successors`, `genesis_reachability_roots` and the
+hybrid range builder; a Python re-implementation of M68K classification does not exist. Region proposals travel as
+`segarecomp.m68k_executable_regions.v1`; the output is an ordinary `segarecomp.m68k_hybrid_admission_plan.v1`. CLI: `segarecomp
+emit-general-startup-bridge-c --immutable-rom-aot --immutable-aot-region-proposal <regions> --region-admission-plan-output <plan>`
+(report-only: no C is generated). Note: sequential fall-through is itself an obligation, so any run of code-looking data whose
+fall-through chain reaches the region boundary is pruned; a true region must therefore be terminated by an unconditional transfer.
+Tests: `genesis_region_prune_test` (explicit scenarios, 24 random images against a naive reference fixed point, order independence,
+caps) and `segarecomp_region_proposal_test`.
+
+## 3. Frozen region policy (T003; frozen on Sonic 1 ONLY, before Sonic 2 / Cool Spot / Streets of Rage were processed)
+
+Calibration truth: the SEG-044 exact source universe `C` (24,180 identities, 32 pages of 4 KiB; 25.0% of the 512 KiB ROM).
+
+Rejected on Sonic 1 (criterion: 100% page coverage of `C` and R <= 40% of ROM):
+- Code-seed policies P0/P1/P2 over the precise direct-control discovery (599 identities) at 2/4/8 KiB: P2 at 8 KiB reaches only 12.5%
+  of ROM yet misses 11 of 15 `C` pages (jump/object tables are not seen by direct discovery). All fail; no manual page added.
+- ROM-only flow-terminator density at 4 KiB: no threshold works (<= 0.007 gives R > 40%... at 0.006-0.007 R = 40.6-41.4%; >= 0.008
+  misses the sparse C page 29 holding 93 `C` identities).
+
+Frozen policy `FLOW8-D` (`tools/segarecomp_region_proposal.py`; constants are code-frozen and unit-tested):
+- page size 8 KiB (an allowed sensitivity size; the primary 4 KiB failed as above);
+- select a page when `flow_terminators / (page_bytes/2) >= 0.010` (flow terminator = BRA / direct JMP / RTS / RTE / RTR / JMP ea as
+  classified by the C++ control-successor owner; 0.010 is twice the random-data baseline of ~0.005 and the middle of the passing plateau
+  0.008-0.020 on Sonic 1) OR the page contains a precise direct-control-discovery identity (machine-root reachable); merge adjacent pages;
+- no halo, bridging, per-title exclusion or addition. Anything not stated here is not part of the policy.
+
+Sonic 1 calibration result (current main, Release): ROM 524,288 B; R 180,224 B = 34.38%; U 246,293; |K0| 87,422; |K| 87,372
+(50 pruned, 8 rounds); K/U 0.3547; |C| 24,180, C/K 0.2767; C ⊆ R yes; C ⊆ K yes; unchanged production validator accepted;
+analysis+prune CLI wall 0.6 s, peak RSS 306 MiB (report-only run; no code generation). Sonic execution oracle is a sanity check only
+(T005).
