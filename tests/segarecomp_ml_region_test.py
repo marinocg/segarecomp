@@ -273,7 +273,7 @@ class NativeEmbeddingDriftTest(unittest.TestCase):
         recorded = dict(line.split("  ")[::-1] for line in (root / "README.md").read_text().split("```")[1].strip().splitlines())
         self.assertEqual(len(recorded), 10)
         for name, digest in recorded.items():
-            self.assertEqual(hashlib.sha256((root / name).read_bytes()).hexdigest(), digest, name)
+            self.assertEqual(hashlib.sha256((root / name).read_bytes().replace(b"\r\n", b"\n")).hexdigest(), digest, name)  # LF form (autocrlf-safe)
         self.assertIn('#define ZLIB_VERSION "1.3.1"', (root / "zlib.h").read_text())
 
 

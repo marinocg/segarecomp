@@ -17,6 +17,7 @@ OUTPUT = ROOT / "platforms" / "genesis" / "machine" / "src" / "ml_region_model_v
 
 
 def render(model_bytes: bytes) -> str:
+    model_bytes = model_bytes.replace(b"\r\n", b"\n")  # a Windows checkout may translate line endings; the digest is of the LF form
     model = json.loads(model_bytes)
     n = model["feature_count"]
     if (n != 141 or len(model["folded_weight"]) != n or len(model["feature_names"]) != n or model["window_bytes"] != 512
