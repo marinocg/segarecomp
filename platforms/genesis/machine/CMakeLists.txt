@@ -3,6 +3,7 @@ add_library(segarecomp_machine_genesis
   src/address_space.cpp
   src/frontend.cpp
   src/hybrid_admission.cpp
+  src/ml_region_producer.cpp
   src/reachability_challenger.cpp
   src/startup.cpp
 )
@@ -11,6 +12,12 @@ target_link_libraries(segarecomp_machine_genesis PUBLIC segarecomp::recompiler s
 target_include_directories(segarecomp_machine_genesis PUBLIC include)
 segarecomp_enable_warnings(segarecomp_machine_genesis)
 target_link_libraries(segarecomp_machine_genesis PUBLIC segarecomp::media)
+# SEG-047 (ADR 0096): vendored zlib 1.3.1 deflate subset for the frozen b_zlib feature; private, and the producer must never be
+# compiled with floating-point contraction or fast-math (exact folded-scorer determinism).
+target_link_libraries(segarecomp_machine_genesis PRIVATE segarecomp_zlib)
+if(NOT MSVC)
+  set_source_files_properties(src/ml_region_producer.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-fno-fast-math")
+endif()
 
 # SEG-028-T005 (ADR 0077): consumer-route ADR 0049 alias preparation (stop record, verbatim-copy proposal, bounded loop). Byte
 # comparison only: no CPU, emitter or device dependency.

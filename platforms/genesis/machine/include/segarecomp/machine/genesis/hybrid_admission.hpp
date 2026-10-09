@@ -2,8 +2,9 @@
 
 // SEG-031 (ADR 0080): the production side of the explicit hybrid admission candidate for Genesis M68K immutable-ROM AOT.
 //
-// A hybrid admission plan is a build-time artifact produced by the report-only planner (`segarecomp-genesis-analysis-report
-// --hybrid-plan`, which links the analysis; production never does). It names a subset of the broad immutable-ROM AOT identities
+// A hybrid admission plan is a build-time artifact produced by an exact source/recomp-map plan builder (`tools/segarecomp_source_universe_plan.py`)
+// or derived in-process from a region proposal by structural pruning (the native ML region producer, SEG-047; the report-only abstract
+// analysis planner that once produced plans was retired). It names a subset of the broad immutable-ROM AOT identities
 // (`FrontendAnalysis::immutable_rom_aot_entries`, the universe `U`). The emitter consumes it only through an explicit opt-in, and only
 // after this owner has validated it fail-closed:
 //
@@ -15,7 +16,7 @@
 //   `static_proof` alias identity is admitted; every fixed successor and stacked call continuation (`m68k_control_successors`) of an
 //   admitted identity that is itself a broad identity is admitted.
 //
-// Dynamic-transfer containment (the island proof) is established by the planner, not here: this owner cannot see analysis facts. A
+// Dynamic-transfer containment (the island proof) is the producer's claim, not proved here: this owner cannot see semantic facts. A
 // plan that fails any check is rejected and nothing is filtered (never a partial program). A `broad` plan filters nothing. The filtered
 // program is an ordinary generated-native program: no identity knows whether it came from precise discovery, an island or broad
 // admission, and the runtime is unchanged.
@@ -36,6 +37,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -162,6 +164,10 @@ struct GenesisRegionPruneResult {
 //   <window start hex8> <count> <count> ...       (only windows holding at least one broad identity or an incoming fixed edge)
 //   end
 inline constexpr std::string_view genesis_window_features_schema = "segarecomp.m68k_window_features.v1";
+// The raw per-window counts (`window index -> 27 counts in column order`), the single source of both the report and the native ML
+// producer (SEG-047). Nullopt for a window size other than 256/512.
+[[nodiscard]] std::optional<std::map<std::uint32_t, std::vector<std::uint64_t>>> genesis_window_feature_rows(
+    const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries, std::uint32_t window_bytes);
 [[nodiscard]] std::optional<std::string> genesis_window_feature_report(
     const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries, std::uint32_t window_bytes);
 

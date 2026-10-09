@@ -1,3 +1,7 @@
+> **RETIRED (SEG-047-T007, ADR 0096).** The abstract-analysis core, its M68K/Z80 adapters and the Genesis analysis-report driver described
+> below were removed from the product: the live admission path is the broad immutable-ROM universe, the native ML region producer, structural
+> pruning and the admission validator. This document is kept only as the historical contract of ADRs 0076-0091.
+
 # Abstract-analysis core contract (SEG-027-T004; accepted by SEG-029-T001)
 
 - Status: **Accepted** by ADR 0078 (SEG-029-T001). Drafted by SEG-027-T004. Where this text and ADR 0078 differ, ADR 0078 is

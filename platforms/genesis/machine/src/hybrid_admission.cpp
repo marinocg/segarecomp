@@ -412,8 +412,8 @@ std::size_t window_ir_family(M68kIrKind kind) noexcept {
 }
 }  // namespace
 
-std::optional<std::string> genesis_window_feature_report(const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
-                                                         std::uint32_t window_bytes) {
+std::optional<std::map<std::uint32_t, std::vector<std::uint64_t>>> genesis_window_feature_rows(
+    const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries, std::uint32_t window_bytes) {
   if (window_bytes != 256U && window_bytes != 512U) return std::nullopt;
   std::set<std::uint32_t> identities;
   for (const auto &entry : entries)
@@ -479,6 +479,14 @@ std::optional<std::string> genesis_window_feature_report(const std::vector<Front
     if (!direct_jump && !returns && !dynamic_jump) sequential = true;
     if (!sequential) ++r[c_term];
   }
+  return rows;
+}
+
+std::optional<std::string> genesis_window_feature_report(const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
+                                                         std::uint32_t window_bytes) {
+  const auto computed = genesis_window_feature_rows(entries, window_bytes);
+  if (!computed.has_value()) return std::nullopt;
+  const auto &rows = *computed;
   std::string out = "segarecomp.m68k_window_features.v1 window_bytes " + std::to_string(window_bytes) + "\ncolumns";
   for (const auto *name : window_feature_columns) out += std::string(" ") + name;
   out += '\n';

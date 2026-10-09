@@ -35,10 +35,9 @@ endfunction()
 # SEG-018-T002: the root is workspace orchestration only. Reusable libraries live
 # under libs/, machine/platform products under platforms/, applications under
 # apps/, and the test suite under tests/.
+add_subdirectory(third_party/zlib)
 add_subdirectory(libs)
 add_subdirectory(platforms)
-# SEG-030 (ADR 0079): report-only analysis driver; needs both libs/ (cpu_m68k_analysis) and platforms/ (machine_genesis).
-add_subdirectory(platforms/genesis/analysis_report)
 add_subdirectory(apps)
 
 include(CTest)

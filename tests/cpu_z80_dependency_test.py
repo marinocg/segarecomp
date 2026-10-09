@@ -40,28 +40,16 @@ for path in files(z80):
     if path.name == "CMakeLists.txt":
         text = "\n".join(l for l in path.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("#")).lower()
         links = re.findall(r"target_link_libraries\([^)]*\)", text, flags=re.S)
-        if path.parent.relative_to(z80).parts[:1] == ("analysis",):
-            # SEG-029 (ADR 0078): the report-only adapter target may link exactly cpu_z80, the generic analysis core and base.
-            allowed = {"segarecomp::base", "segarecomp::cpu_z80", "segarecomp::analysis"}
-            check(links and all(set(re.findall(r"segarecomp::[a-z0-9_]+", l)) <= allowed for l in links),
-                  "cpu_z80_analysis may link only cpu_z80, analysis and base: %r" % links)
-        else:
-            check(links and all("segarecomp::base" in l and l.count("segarecomp::") == 1 for l in links),
-                  "cpu_z80 must link only segarecomp::base: %r" % links)
+        check(links and all("segarecomp::base" in l and l.count("segarecomp::") == 1 for l in links),
+              "cpu_z80 must link only segarecomp::base: %r" % links)
     for token in FORBIDDEN_FROM_Z80:
         check(token not in text, "%s references forbidden dependency %r" % (path.relative_to(ROOT), token))
 
-# SEG-030-T010 (ADR 0079 T010 record, T009 correction cycle 1): the report-only Genesis analysis driver library links cpu_z80 for its
-# conservative Z80-store-into-68K-RAM proof. It is never installed and no production target links it (analysis_core_boundary_test).
-# Exactly this target name is allowed; every other non-z80 target that links cpu_z80 still fails.
-REPORT_ONLY_Z80_PROOF_TARGETS = frozenset({"segarecomp_genesis_analysis_report"})
-
-
 def cmake_links_z80_from_generic_target(text):
-    """A target_link_libraries block of a non-z80, non-report-only target that names cpu_z80."""
+    """A target_link_libraries block of a non-z80 target that names cpu_z80."""
     for block in re.findall(r"target_link_libraries\(([^)]*)\)", text, flags=re.S):
         words = block.split()
-        if (words and "z80" not in words[0].lower() and words[0] not in REPORT_ONLY_Z80_PROOF_TARGETS
+        if (words and "z80" not in words[0].lower()
                 and any("cpu_z80" in w for w in words[1:])):
             return True
     return False
@@ -85,11 +73,7 @@ check("cpu/m68k" in strip('#include "segarecomp/cpu/m68k/decode.hpp"\n').lower()
 check("cpu/z80" not in strip("// cpu/z80 mentioned in a comment\n"), "control: comment stripping")
 check(cmake_links_z80_from_generic_target("target_link_libraries(segarecomp_recompiler PUBLIC segarecomp::cpu_z80)"), "control: cmake scanner")
 check(not cmake_links_z80_from_generic_target("target_link_libraries(segarecomp_codegen_c11_z80 PUBLIC segarecomp::cpu_z80)"), "control: sibling target allowed")
-check(not cmake_links_z80_from_generic_target(
-    "target_link_libraries(segarecomp_genesis_analysis_report PUBLIC segarecomp::cpu_m68k_analysis segarecomp::cpu_z80)"),
-      "control: report-only analysis proof target allowed")
-for production in ("segarecomp_machine_genesis", "segarecomp-genesis-analysis-report", "segarecomp_genesis_analysis_report_extra",
-                   "segarecomp", "segarecomp_genesis_runtime"):
+for production in ("segarecomp_machine_genesis", "segarecomp", "segarecomp_genesis_runtime"):
     check(cmake_links_z80_from_generic_target("target_link_libraries(%s PUBLIC segarecomp::cpu_z80)" % production),
           "control: production target %s linking cpu_z80 still fails" % production)
 

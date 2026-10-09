@@ -1976,9 +1976,13 @@ def main() -> int:
                              "ephemeral, never persisted. The FINAL program is then built once (see --one-shot)")
     parser.add_argument("--admission-plan",
                         help="SEG-031 (ADR 0080): explicit hybrid admission candidate. A plan written by "
-                             "segarecomp-genesis-analysis-report --hybrid-plan; forwarded to the FINAL emission as "
+                             "an exact-map plan builder (tools/segarecomp_source_universe_plan.py); forwarded to the FINAL emission as "
                              "--immutable-rom-aot-admission (the emitter validates it fail-closed). Requires "
                              "--immutable-rom-aot; copy-alias preparation stays broad. Private for a commercial input")
+    parser.add_argument("--ml-admission", action="store_true",
+                        help="SEG-047 (ADR 0096): opt-in native ML selective admission for the FINAL emission "
+                             "(--immutable-rom-aot-ml-admission): frozen region model -> structural pruning -> the unchanged "
+                             "validator, with broad fallback. Mutually exclusive with --admission-plan; requires --immutable-rom-aot")
     parser.add_argument("--provenance-diagnostics", action="store_true",
                         help="SEG-020-T002: opt in to the generated provenance lookup; the table is "
                              "extracted to <out-dir>/provenance-diagnostics.c (ephemeral, not for commit)")
@@ -2133,6 +2137,11 @@ def main() -> int:
             sys.stderr.write("--admission-plan requires --immutable-rom-aot\n")
             return 8
         emitter_command += ["--immutable-rom-aot-admission", args.admission_plan]
+    if args.ml_admission:
+        if not args.immutable_rom_aot or args.admission_plan:
+            sys.stderr.write("--ml-admission requires --immutable-rom-aot and excludes --admission-plan\n")
+            return 8
+        emitter_command += ["--immutable-rom-aot-ml-admission"]
     viewer_sdl3 = None
     if args.viewer:
         # Fail clearly before any generation/guest execution; never fall back to headless.

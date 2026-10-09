@@ -56,23 +56,23 @@ partition stays exact (residual 0). `--jobs N` compiles independent TUs concurre
 
 The Z80 AOT route has its own production-build measurements and gates: see `z80-build-performance.md` and ADR 0071.
 
-## Hybrid admission candidate (SEG-031, ADR 0080)
+## Selective admission: Optimized AOT (SEG-031 validator, SEG-047 native ML producer, ADR 0096)
 
-Broad immutable-ROM AOT stays the production default. The explicit candidate filters the broad identities to a hybrid admission
-proven by the report-only planner (`segarecomp-genesis-analysis-report --hybrid-plan <plan>`), consumed by
-`emit-general-startup-bridge-c --immutable-rom-aot-admission <plan>`, `segarecomp build --admission-plan <plan>` or
-`genesis_startup_bridge.py --admission-plan <plan>`. A plan holds exact addresses: keep it in an ignored location for a commercial input.
+Broad immutable-ROM AOT ("Compatibility") stays the production default. The "Optimized" policy filters the broad identities to a
+validated subset `K`: the native frozen region model proposes an executable region `R`, structural pruning derives `K`, and the unchanged
+hybrid-admission validator decides (any failure falls back to broad, visibly). It is requested with `segarecomp build --aot-policy optimized`
+(status.json `aot_policy`), `emit-general-startup-bridge-c --immutable-rom-aot --immutable-rom-aot-ml-admission` or
+`genesis_startup_bridge.py --ml-admission`. An exact source/recomp-map plan (`--immutable-rom-aot-admission <plan>`, `segarecomp build
+--admission-plan <plan>`, built by `tools/segarecomp_source_universe_plan.py`) outranks it. A plan holds exact addresses: keep it in an
+ignored location for a commercial input.
 
 ```sh
-python3 tools/genesis_hybrid_admission_compare.py --segarecomp <cli> --driver <analysis-report> --rom games/<rom> \
-  --work build/<ignored>/cmp --reference-segarecomp <pre-change cli> --coverage-dir <private complete oracle> --run-frames 3000
+python3 tools/genesis_ml_admission_differential.py --segarecomp <cli> --rom games/<rom> --work .cache/<ignored> --frames 600
+python3 tools/segarecomp_ml_region_native_parity.py --binary <cli> --games games      # exact native-vs-SEG-046 selection digests
 ```
 
-It reports, as sanitized JSON: the plan aggregate (`broad_u`, `precise_d`, fallback islands and admitted identities, hybrid total,
-ratio, whole-image triggers by generic reason) and its cost; generated C bytes/files broad vs planned and whether the trees are
-identical (and identical to the reference CLI's broad tree); production build wall/CPU time, peak child RSS and executable size, and
-whether the executables are identical; fixed-frame runtime and whether final-state, frame-stream and coverage digests agree; and the
-oracle falsification (observed broad identities outside the admission, which must be 0).
+The differential builds and runs broad and Optimized programs through the unchanged bridge (explicit instruction budget) and prints
+sanitized JSON: equality of outcome/final-state/frame-stream/coverage digests, wall time and generated C bytes with the reduction.
 
 ## Entry-representation attribution (SEG-036-T001)
 
