@@ -104,6 +104,27 @@ class LabelTest(unittest.TestCase):
                 m.regions_text(SHA, 0x400, bad_windows, 256)
 
 
+class CalibrationMutationTest(unittest.TestCase):
+    def selected(self, scores, threshold, seeds=()):
+        return {w for w, v in enumerate(scores) if v >= threshold} | set(seeds)
+
+    def test_forced_low_score_for_a_source_positive_window_fails_containment(self):
+        universe = m.read_universe(universe_text(SHA, [0x0, 0x102, 0x300]), SHA, 0x400)
+        scores = [0.9, 0.8, 0.1, 0.7]
+        self.assertEqual(m.uncovered_source_addresses(universe, self.selected(scores, 0.5), 256), [])
+        scores[1] = 0.0  # force a low score on a positive window
+        self.assertEqual(m.uncovered_source_addresses(universe, self.selected(scores, 0.5), 256), [0x102])
+        self.assertEqual(m.uncovered_source_addresses(universe, self.selected(scores, 0.5, seeds={1}), 256), [])
+
+    def test_committed_frozen_definition_is_consistent(self):
+        import json
+        frozen = json.loads(pathlib.Path(__file__).resolve().parents[1].joinpath("tools", "segarecomp_ml_region.frozen.json").read_text())
+        m.require_frozen(frozen)
+        self.assertEqual((frozen["window_bytes"], frozen["model"], frozen["seed"], frozen["feature_count"]), (512, "logreg", 46, len(m.feature_names())))
+        self.assertEqual(frozen["training_rom_sha256"], "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6")
+        self.assertEqual(sorted(frozen["environment"]), ["numpy", "python", "sklearn"])
+
+
 class CrossValidationTest(unittest.TestCase):
     def test_blocked_folds_are_contiguous_purged_and_cover_everything_once(self):
         folds = m.blocked_folds(2048, 16, 2)

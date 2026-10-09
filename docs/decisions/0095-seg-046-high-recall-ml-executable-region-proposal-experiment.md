@@ -125,5 +125,38 @@ Release CLI, 4 vCPU, same unchanged production validator (run inside the CLI on 
 | OutRun | 1 MiB | 174,592 B (341) | 16.65% | 496,950 | 84,289 | 78,283 | 0.1575 | 6,006 (427) | accepted | 17.0 s / 858 MiB | 4.3 s / 132 MiB |
 | Golden Axe (exploratory) | 512 KiB | 129,024 B (252) | 24.61% | 249,843 | 63,077 | 61,939 | 0.2479 | 1,138 (49) | accepted | 9.7 s / 478 MiB | 3.1 s / 125 MiB |
 
-Prune CLI wall 0.6-3.8 s, peak RSS 306-594 MiB. No machine root or materialized identity was pruned, no proposal was rejected. Every ML-selected
-region is a subset of the certain-code union's complement plus the union (the certain-code windows were all already selected by the model).
+Prune CLI wall 0.6-3.8 s, peak RSS 306-594 MiB. No machine root or materialized identity was pruned, no proposal was rejected. In every title all
+certain-code (direct-control-discovery) windows were already selected by the model, so the union added nothing.
+
+## 5. Build, runtime, oracle and economics (T005; runtime coverage read only now, after the plans were frozen and written)
+
+Workload: the existing complete execution-PC oracle (23,200 no-render no-input frames, dispatch cap 1.5e9), ordinary production emitter and
+runtime, no runtime change, `clang` for every build (digests are compiler independent; Sonic 2 / Cool Spot / Streets broad runs are the
+unchanged SEG-045 broad runs of the same ROMs, OutRun broad was run in this task).
+
+| title | outcome (broad / ML-selective) | distinct PCs | observed PCs outside K | coverage / final-state / frame-stream / dispatch / retirement digests | verdict |
+| --- | --- | --- | --- | --- | --- |
+| Sonic 1 (calibration sanity) | frames_reached x2 | 10,512 | 0 | identical | pass |
+| Sonic 2 | frames_reached x2 | 2,478 | 0 (broad) / 0 (selective) | identical | PASS |
+| Cool Spot | frames_reached x2 | 4,928 | 0 | identical | PASS |
+| Streets of Rage | frames_reached x2 | 8,758 | 0 | identical | PASS |
+| OutRun | frames_reached x2 | 5,286 | 0 | identical | PASS |
+| Golden Axe (exploratory) | guest_stop x2 (frame 55, same `known_but_unemitted_target` class; pre-existing incomplete-oracle stop) | 571 | - | identical | not gated |
+
+No new guest stop, no runtime PC escape and no fail-closed missing-target stop was caused by missing admission in any gated title; observed PC
+sets of broad and selective runs are equal. The two FLOW8-D counterexamples are now inside `R`: Cool Spot's 176 FLOW8-D-missed executed PCs fall in
+3 of the 512 B windows (ML score >= 0.9999, 120x the threshold); Streets of Rage's 13 fall in 2 windows with scores 0.0094-0.0663 against the
+threshold 0.00835 - included, but by a margin of only 1.12x for the weakest window (a fragile pass, see section 7).
+
+Economics (`segarecomp build`, clang, 4 vCPU, quiet machine, broad -> ML-selective):
+
+| title | generated C | compile CPU | build wall | peak RSS | executable | 23,200-frame run wall |
+| --- | --- | --- | --- | --- | --- | --- |
+| Sonic 2 | 314.4 -> 98.4 MB (-68.7%) | 472.6 -> 124.9 s (-73.6%) | 171.3 -> 44.0 s (-74.3%) | 994 -> 438 MiB (-55.9%) | 48.2 -> 15.4 MB (-68.1%) | 22.8 / 28.6 s and 35.4 / 28.5 s (two samples; machine noise) |
+| Cool Spot | 284.7 -> 63.2 MB (-77.8%) | 370.0 -> 86.8 s (-76.5%) | 117.4 -> 32.2 s (-72.6%) | 955 -> 438 MiB (-54.1%) | 43.1 -> 9.7 MB (-77.5%) | 20.6 -> 19.8 s (-4%) |
+| Streets of Rage | 175.1 -> 60.3 MB (-65.6%) | 262.1 -> 91.1 s (-65.2%) | 86.7 -> 31.9 s (-63.2%) | 512 -> 233 MiB (-54.5%) | 27.4 -> 9.8 MB (-64.3%) | 35.0 -> 35.6 s (+2%) |
+| OutRun | 228.5 -> 68.3 MB (-70.1%) | 308.7 -> 81.4 s (-73.6%) | 99.9 -> 29.4 s (-70.6%) | 899 -> 439 MiB (-51.2%) | 35.9 -> 10.5 MB (-70.7%) | 41.3 -> 31.4 s (-24%) |
+
+Economic gate: 4 of 4 titles satisfy generated C <= -30%, compile CPU <= -25%, runtime regression <= +15% (the only >15% single sample, Sonic 2's
+first pass, was not reproduced on a quiet rerun; machine run-to-run noise on broad is about +-35%). Broad emission is byte-identical to the
+SEG-045 broad emission of Sonic 1 with the new report flags present.
