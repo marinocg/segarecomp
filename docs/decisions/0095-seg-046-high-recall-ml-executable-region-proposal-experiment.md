@@ -1,6 +1,6 @@
 # ADR 0095: SEG-046 high-recall ML executable-region proposal experiment
 
-- Status: In progress (section 1 frozen by T001; later sections appended by T002..T006).
+- Status: Complete. Pre-registered gate PASS (4 of 4 blind titles; economics PASS); classification ML REGION PRODUCER PORTABLE (candidate; narrow evidence).
 - Predecessor: ADR 0094 (SEG-045, gate FAIL: region-detector recall), ADR 0093 (SEG-044 exact source universe).
 
 ## 1. Contract (frozen before any model was trained)
@@ -178,3 +178,43 @@ SEG-045 broad emission of Sonic 1 with the new report flags present.
 - Blocked folds are contiguous, purged by 2 windows each side and cover each window exactly once (unit test); no random split exists in the tool.
 - Broad emission of Sonic 1 with the new report flags is byte-identical to the SEG-045 broad emission; the new options are report-only.
 - No ML package is imported by generated programs, the CLI binary, the runtime, or CI tests (the product binary is C++ only).
+
+## 7. Gate decision and caveats
+
+Primary gate: 4 of 4 blind titles PASS, including Cool Spot and Streets of Rage; every passing title has 0 runtime escapes, equal broad/selective
+coverage and final-state digests, unchanged-validator acceptance, K/U <= 0.28 (<= 0.50 preferred), no title-specific feature/threshold/model,
+and no blind title influenced training or selection. Economics gate: PASS on 4 of 4 (generated C -66..-78%, compile CPU -65..-77%).
+**GATE: PASS.** Classification: **ML REGION PRODUCER PORTABLE - candidate, narrow evidence.** What is and is not shown:
+
+- Shown: no observed escape and identical final-state/coverage digests for four no-input, no-render 23,200-frame traces; both FLOW8-D islands are
+  now inside R.
+- Not shown: recall for unexecuted real code. The independent reviewer measured executed 512 B windows per title (Sonic 2 49 of 2048, Cool Spot
+  74 of 2048, Streets of Rage 132 of 1024, OutRun 82 of 2048) against 5-10x more selected windows; recall is proven only for the traced code.
+  The frame-stream digest is the empty-input hash (nothing is rendered), so behavioural equality rests on the final-state and coverage digests.
+- Fragile margin: Streets of Rage's weakest executed window scored 1.12x the frozen threshold (another under 3x, two under 10x); the other titles'
+  minimum margins are 3.8x (Sonic 2), 8.2x (Cool Spot) and 22.9x (OutRun). The threshold is the minimum of 230 OOF positive scores, so one
+  near-miss window would have failed the title: the pass is not a robust recall guarantee. Single training title; blocked CV cannot measure
+  cross-title style transfer.
+- Weak positional signal: the previous/next context is an all-zero vector beyond the ROM ends, so the model can recognise the first/last window of an
+  image (bounded to two windows per title, not decision-relevant here). Left unchanged because the definition is frozen; a successor should replace it
+  with an explicit missing-neighbour treatment that is not distinguishable.
+- The tool name-fragment check guards feature names only; the feature list itself was audited by hand and by the reviewer.
+
+## 8. Independent review (T006)
+
+Independent adversarial validator on HEAD 474fd6c: PASS WITH FINDINGS, no blocking finding. Reproduced independently: frozen artifact digest
+(two processes, different hash seeds), byte-identical CV and frozen JSON, deterministic window export, source-label correctness (512 B label = OR of
+the two 256 B labels), C within K (in-sample), 0 broad/selective PCs outside K for four titles, fail-closed rejection of a region excluding a machine
+root and of a wrong ROM hash, byte-identical broad emission, no ML in the CLI/runtime/generated code, no commercial data committed. Findings: the
+over-claim wording and missing gate section (fixed by sections 7-8), the Streets margin (recorded), the ROM-end context signal (recorded), a task/
+branch metadata mismatch for T006 (the combined PR lives on `task/seg-046-t001`; verify with T001), `tools/agent_exec.py` crashing on a missing
+`container` import (harness issue, outside this PR), and two fast-gate failures unrelated to this diff (`segarecomp_build_command_test` strict-C11
+`fdopen` in its own hook C, `m68k_conformance_harness_test` killed under load - the same two noted in ADR 0094; CI is the arbiter). Four focused
+suites pass: genesis_window_features, segarecomp_ml_region, genesis_region_prune, segarecomp_region_proposal.
+
+## 9. Final answers and successor
+
+Successor: SEG-047 registered as a DRAFT milestone only (full refinement required first). It must not be read as more than "worth expanding the
+source-backed corpus and replacing the single-title, minimum-score threshold with leave-one-title-out calibration and a margin". Broad AOT stays
+the unconditional fallback and the default; exact source maps remain the strongest selective authority; heuristic ML selective admission is not
+made a default by this experiment. Failure-mode reading if SEG-047 later fails: more labelled titles are needed before blaming the feature/model class.
