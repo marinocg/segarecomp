@@ -38,6 +38,11 @@ struct RomView {
   std::filesystem::path mapper_manifest;  // sidecar manifest when present
   std::string mapper_manifest_sha256;
   [[nodiscard]] bool needs_mapper() const { return platform_id == "master-system" && mapper.empty() && mapper_manifest.empty(); }
+  // AOT optimization policy (ADR 0096), the same two values as `segarecomp build --aot-policy`. Compatibility is the default; Optimized
+  // is a Genesis M68K policy (a Master System image has no Optimized producer). The launcher never sees a model, threshold or schema.
+  std::string aot_policy = "compatibility";
+  [[nodiscard]] bool supports_optimized() const { return platform_id == "genesis"; }
+  [[nodiscard]] bool optimized() const { return supports_optimized() && aot_policy == "optimized"; }
   bool compat_known = false;          // ROM-hash-bound analysis metadata ships with this release
   std::string error;                  // non-empty: unreadable/too large
 };
@@ -50,6 +55,17 @@ inline constexpr const char *sms_profile = "sms2_ntsc_export";
 [[nodiscard]] std::filesystem::path entry_dir(const RomView &rom, const Layout &layout);
 [[nodiscard]] bool entry_ready(const std::filesystem::path &entry);
 [[nodiscard]] std::filesystem::path entry_executable(const std::filesystem::path &entry);
+// The machine-readable `aot_policy` member of a finished build's status.json (a thin read; no human text is parsed).
+struct PolicyReport {
+  bool present = false;
+  std::string requested;  // compatibility | optimized
+  std::string effective;  // broad | ml_region | admission_plan
+  std::string reason;     // stable sanitized code (none, validator_rejected, ...)
+  bool fallback = false;  // Optimized was requested but the build is the broad (Compatibility) program
+};
+[[nodiscard]] PolicyReport read_policy_report(const std::filesystem::path &entry);
+// User-facing wording of a report (one short line; empty when there is nothing to say).
+[[nodiscard]] std::string policy_summary(const PolicyReport &report);
 [[nodiscard]] std::string read_tail(const std::filesystem::path &path, std::size_t max_bytes);
 [[nodiscard]] std::string host_description();
 

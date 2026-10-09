@@ -51,6 +51,7 @@ fs::path from_u8(const char *text) { return fs::path(std::u8string(reinterpret_c
 int headless(int argc, char **argv) {
   fs::path rom_path, report_path;
   std::string mapper;                  // Master System: explicit mapper declaration (never defaulted)
+  std::string aot_policy = "compatibility";  // compatibility | optimized (Genesis); Compatibility is the default
   std::vector<std::string> game_args;  // forwarded to the launched game (automation passes a finite bound)
   bool run = false;
   for (int i = 1; i < argc; ++i) {
@@ -59,8 +60,9 @@ int headless(int argc, char **argv) {
     else if (arg == "--report" && i + 1 < argc) report_path = from_u8(argv[++i]);
     else if (arg == "--run") run = true;
     else if (arg == "--mapper" && i + 1 < argc) mapper = argv[++i];
+    else if (arg == "--aot-policy" && i + 1 < argc && (std::string(argv[i + 1]) == "compatibility" || std::string(argv[i + 1]) == "optimized")) aot_policy = argv[++i];
     else if (arg == "--game-arg" && i + 1 < argc) game_args.emplace_back(argv[++i]);
-    else { std::fprintf(stderr, "usage: Segarecomp [--build <rom> [--mapper <sega|rom_only>] [--run [--game-arg <arg>]...] [--report <file>]]\n"); return 2; }
+    else { std::fprintf(stderr, "usage: Segarecomp [--build <rom> [--mapper <sega|rom_only>] [--aot-policy <compatibility|optimized>] [--run [--game-arg <arg>]...] [--report <file>]]\n"); return 2; }
   }
   std::string report;
   const auto emit = [&](const std::string &line) { report += line + "\n"; std::puts(line.c_str()); };
@@ -72,6 +74,7 @@ int headless(int argc, char **argv) {
   else {
     RomView rom = inspect_rom_file(rom_path, layout);
     if (rom.platform_id == "master-system" && !mapper.empty()) rom.mapper = mapper;
+    if (rom.supports_optimized()) rom.aot_policy = aot_policy;
     if (!rom.error.empty()) { emit("result=failed problem=" + rom.error); rc = 1; }
     else {
       const fs::path entry = entry_dir(rom, layout);
@@ -79,6 +82,7 @@ int headless(int argc, char **argv) {
       emit("platform=" + (rom.platform_id.empty() ? std::string("unsupported") : rom.platform_id));
       if (rom.platform_id == "master-system")
         emit(std::string("mapper=") + (!rom.mapper.empty() ? rom.mapper : rom.mapper_manifest.empty() ? "undeclared" : "manifest"));
+      emit(std::string("aot_policy_requested=") + rom.aot_policy);
       emit(std::string("cache=") + (entry_ready(entry) ? "hit" : "miss"));
       if (!entry_ready(entry)) {
         BuildJob job(rom, layout);
@@ -87,6 +91,14 @@ int headless(int argc, char **argv) {
         if (!job.succeeded()) { emit("message=" + job.message()); rc = 3; }
       }
       emit("entry=" + u8s(entry));
+      if (rc == 0) {
+        const PolicyReport policy = read_policy_report(entry);
+        if (policy.present) {
+          emit("aot_policy_effective=" + policy.effective);
+          emit(std::string("aot_policy_fallback=") + (policy.fallback ? "yes" : "no"));
+          emit("aot_policy_reason=" + policy.reason);
+        }
+      }
       if (rc == 0 && run) {
         GameRun game(rom, layout, entry, game_args);
         if (!game.started()) { emit("run=failed_to_start"); rc = 4; }
@@ -368,14 +380,33 @@ int gui() {
   std::string diagnostics;
   std::unique_ptr<BuildJob> job;
   std::unique_ptr<GameRun> game;
+  // AOT policy chosen in this session (Compatibility is the default and the only value unless the user picks Optimized).
+  std::string policy_choice = "compatibility";
+  PolicyReport policy_report;  // of the Ready entry (read from its status.json), for the requested/effective note
+  const auto refresh_report = [&] { policy_report = state == State::Ready ? read_policy_report(entry) : PolicyReport{}; };
+  const auto fallback_details = [&] {
+    diagnostics = "Optimized AOT was requested but this game was built as Compatibility (the broad, always-correct program).\n"
+                  "Reason code: " + policy_report.reason + "\nThe build log and status.json in the cache folder hold the sanitized details.";
+  };
 
   const auto select_rom = [&](const std::string &path_text) {
     if (state == State::Building || state == State::Running) return;
     rom = inspect_rom_file(from_u8(path_text.c_str()), layout);
     show_diagnostics = false;
     if (!rom.error.empty()) { failure = "That file could not be read: " + rom.error; diagnostics = failure; state = State::Failed; return; }
+    if (rom.supports_optimized()) rom.aot_policy = policy_choice;
     entry = entry_dir(rom, layout);
     state = entry_ready(entry) ? State::Ready : State::RomSelected;
+    refresh_report();
+  };
+  const auto set_policy = [&](const char *choice) {
+    if (rom.aot_policy == choice) return;
+    policy_choice = choice;
+    rom.aot_policy = choice;
+    show_diagnostics = false;
+    entry = entry_dir(rom, layout);  // the policy is part of the cache identity: the two modes never alias
+    state = entry_ready(entry) ? State::Ready : State::RomSelected;
+    refresh_report();
   };
   const auto start_build = [&](bool force) {
     if (force) { std::error_code ec; fs::remove_all(entry, ec); }
@@ -420,7 +451,7 @@ int gui() {
       }
     }
     if (state == State::Building && job->finished()) {
-      if (job->succeeded()) state = State::Ready;
+      if (job->succeeded()) { state = State::Ready; refresh_report(); }
       else {
         failure = job->message();
         diagnostics = read_tail(entry.parent_path() / (entry.filename().string() + ".failed") / "build.log", 24000);
@@ -531,6 +562,19 @@ int gui() {
       draw_text(dl, font_regular, centered.len(13), text_secondary, centered.at(content_x, panel_y0 + 54.0F), meta.c_str());
       const float row_y = panel_y0 + 86.0F;
 
+      // Mode (AOT policy): two plain options, Genesis only. No model, threshold or schema control exists.
+      const auto mode_row = [&](float y) {
+        if (!rom.supports_optimized()) return;
+        draw_text(dl, font_regular, centered.len(12), text_secondary, centered.at(content_x, y + 6.0F), "Mode");
+        const bool opt = rom.optimized();
+        if ((opt ? outline_button(centered, "mode_compat", content_x + 52.0F, y, 150.0F, 26.0F, "Compatibility", font_regular, 12.0F)
+                 : bevel_button(centered, "mode_compat", content_x + 52.0F, y, 150.0F, 26.0F, "Compatibility", font_bold, 12.0F)))
+          set_policy("compatibility");
+        if ((opt ? bevel_button(centered, "mode_opt", content_x + 212.0F, y, 120.0F, 26.0F, "Optimized", font_bold, 12.0F)
+                 : outline_button(centered, "mode_opt", content_x + 212.0F, y, 120.0F, 26.0F, "Optimized", font_regular, 12.0F)))
+          set_policy("optimized");
+      };
+
       if (!layout.problem.empty()) {
         ImGui::SetCursorPos(centered.at(content_x, row_y));
         ImGui::PushTextWrapPos(centered.at(panel_x1 - 20.0F, 0).x);
@@ -562,6 +606,7 @@ int gui() {
             start_build(false);
           if (outline_button(centered, "choose1", content_x + 204.0F, row_y + 30.0F, 170.0F, 42.0F, "Choose another...", font_regular, 14.0F))
             browse();
+          if (rom.supported_platform) mode_row(row_y + 90.0F);
         }
       } else if (state == State::Building) {
         static const char *names[BuildJob::stage_count] = {"Analyzing ROM", "Generating native C", "Compiling", "Linking"};
@@ -571,7 +616,13 @@ int gui() {
         draw_text(dl, font_regular, centered.len(12), text_dim, centered.at(content_x, panel_y0 + panel_h - 34.0F),
                  "Large games can take several minutes the first time.");
       } else if (state == State::Ready) {
-        draw_text(dl, font_regular, centered.len(14), col_ok, centered.at(content_x, row_y), "Native build ready");
+        draw_text(dl, font_regular, centered.len(14), col_ok, centered.at(content_x, row_y - 6.0F), "Native build ready");
+        {
+          // Requested vs effective mode, visible: a fallback is never silent.
+          const std::string note = policy_summary(policy_report);
+          if (!note.empty())
+            draw_text(dl, font_regular, centered.len(12), policy_report.fallback ? col_err : text_secondary, centered.at(content_x, row_y + 12.0F), note.c_str());
+        }
         if (bevel_button(centered, "play", content_x, row_y + 30.0F, 120.0F, 42.0F, "Play", font_bold, 17.0F)) {
           game = std::make_unique<GameRun>(rom, layout, entry);
           if (game->started()) state = State::Running;
@@ -582,7 +633,12 @@ int gui() {
         if (outline_button(centered, "choose2", content_x + 268.0F, row_y + 30.0F, 140.0F, 42.0F, "Choose...", font_regular, 14.0F))
           browse();
         // Fixed control scheme (the runtime has no remapping UI yet): keep it visible right where "Play" is.
-        const float controls_y = row_y + 96.0F;
+        mode_row(row_y + 82.0F);
+        if (policy_report.fallback && outline_button(centered, "fb_details", content_x + 346.0F, row_y + 82.0F, 58.0F, 26.0F, "Why?", font_regular, 12.0F)) {
+          show_diagnostics = !show_diagnostics;
+          fallback_details();
+        }
+        const float controls_y = row_y + 118.0F;
         draw_text(dl, font_bold, centered.len(13), text_secondary, centered.at(content_x, controls_y), "Controls");
         draw_text(dl, font_regular, centered.len(13), text_footer, centered.at(content_x, controls_y + 20.0F),
                  rom.platform_id == "master-system" ? "Arrows = D-Pad   Z = Button 1   X = Button 2   P = Pause   R = Reset"
@@ -612,7 +668,7 @@ int gui() {
 
     // ---- below the panel: diagnostics (when asked for) or the compact legal/info panel; then the footer ----
     const float below_y = panel_y1 + 22.0F;
-    if (show_diagnostics && state == State::Failed) {
+    if (show_diagnostics && (state == State::Failed || (state == State::Ready && policy_report.fallback))) {
       const float dh = 130.0F;
       dl->AddRectFilled(centered.at(panel_x0, below_y), centered.at(panel_x1, below_y + dh), rgba(5, 9, 20, 235), centered.len(4));
       dl->AddRect(centered.at(panel_x0, below_y), centered.at(panel_x1, below_y + dh), panel_edge, centered.len(4));

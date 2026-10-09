@@ -156,7 +156,8 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
 // Genesis keeps its historical key segment; Master System adds the platform, profile and declared mapper (and the sidecar
 // manifest's content digest), so a different declaration or manifest always selects a fresh cache entry.
 std::string platform_key(const RomView &rom) {
-  if (rom.platform_id != "master-system") return "genesis";
+  // Compatibility keeps the historical Genesis key; Optimized adds the policy, so the two never share a cache entry (ADR 0096).
+  if (rom.platform_id != "master-system") return rom.optimized() ? "genesis:aot=optimized" : "genesis";
   return std::string("master-system:") + sms_profile + ":mapper=" + rom.mapper + ":manifest=" + rom.mapper_manifest_sha256;
 }
 
@@ -179,6 +180,45 @@ bool entry_ready(const fs::path &entry) {
   std::error_code ec;
   return fs::is_regular_file(entry_executable(entry), ec) &&
          read_all(entry / "status.json").find("\"status\":\"ok\"") != std::string::npos;
+}
+
+namespace {
+// Extracts `"key":"value"` / `"key":true|false` from the aot_policy object of status.json (a flat, sanitized, machine-written object).
+std::string policy_field(const std::string &object, const std::string &key) {
+  const std::string needle = "\"" + key + "\":";
+  const auto at = object.find(needle);
+  if (at == std::string::npos) return {};
+  std::size_t begin = at + needle.size();
+  if (begin < object.size() && object[begin] == '"') {
+    const auto end = object.find('"', begin + 1);
+    return end == std::string::npos ? std::string() : object.substr(begin + 1, end - begin - 1);
+  }
+  const auto end = object.find_first_of(",}", begin);
+  return object.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+}
+}  // namespace
+
+PolicyReport read_policy_report(const fs::path &entry) {
+  PolicyReport report;
+  const std::string status = read_all(entry / "status.json");
+  const auto at = status.find("\"aot_policy\":{");
+  if (at == std::string::npos) return report;
+  const auto end = status.find('}', at);
+  const std::string object = status.substr(at, end == std::string::npos ? std::string::npos : end - at + 1);
+  report.requested = policy_field(object, "requested");
+  report.effective = policy_field(object, "effective");
+  report.reason = policy_field(object, "reason");
+  report.fallback = policy_field(object, "fallback") == "true";
+  report.present = !report.requested.empty() && !report.effective.empty();
+  return report;
+}
+
+std::string policy_summary(const PolicyReport &report) {
+  if (!report.present) return {};
+  if (report.requested != "optimized") return "Compatibility build";
+  if (report.fallback) return "Optimized unavailable for this game: built Compatibility";
+  if (report.effective == "admission_plan") return "Optimized build (exact map)";
+  return "Optimized build";
 }
 
 std::string read_tail(const fs::path &path, std::size_t max_bytes) {
@@ -228,6 +268,7 @@ void BuildJob::run() {
     if (!rom_.mapper.empty()) args.insert(args.end(), {"--mapper", rom_.mapper});
     if (!rom_.mapper_manifest.empty()) args.insert(args.end(), {"--mapper-manifest", utf8(rom_.mapper_manifest)});
   }
+  if (rom_.optimized()) args.insert(args.end(), {"--aot-policy", "optimized"});
 #if defined(_WIN32)
   // The runtime keeps whole-machine state in automatic storage; match the POSIX 8 MiB main-thread stack.
   args.insert(args.end(), {"--link-arg", "-Wl,--stack,8388608"});

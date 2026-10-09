@@ -23,12 +23,20 @@ add_library(segarecomp_imgui STATIC
 target_include_directories(segarecomp_imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 
-add_executable(segarecomp-launcher WIN32 launcher_core.cpp pixel_assets.cpp main.cpp)
-target_include_directories(segarecomp-launcher SYSTEM PRIVATE ${_stb_dir})
-target_link_libraries(segarecomp-launcher PRIVATE segarecomp_imgui segarecomp::media)
-target_compile_definitions(segarecomp-launcher PRIVATE
+# The launcher's non-UI core (layout, cache identity, `segarecomp build` orchestration, status reading) is a separate target so its
+# policy/cache-identity contract is unit-testable without a window.
+add_library(segarecomp_launcher_core STATIC launcher_core.cpp)
+target_include_directories(segarecomp_launcher_core PUBLIC .)
+target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media)
+target_compile_definitions(segarecomp_launcher_core PUBLIC
   SEGARECOMP_LAUNCHER_VERSION="${SEGARECOMP_RELEASE_VERSION}"
-  SEGARECOMP_ZIG_VERSION="${SEGARECOMP_ZIG_VERSION}"
+  SEGARECOMP_ZIG_VERSION="${SEGARECOMP_ZIG_VERSION}")
+segarecomp_enable_warnings(segarecomp_launcher_core)
+
+add_executable(segarecomp-launcher WIN32 pixel_assets.cpp main.cpp)
+target_include_directories(segarecomp-launcher SYSTEM PRIVATE ${_stb_dir})
+target_link_libraries(segarecomp-launcher PRIVATE segarecomp_imgui segarecomp_launcher_core segarecomp::media)
+target_compile_definitions(segarecomp-launcher PRIVATE
   SEGARECOMP_LAUNCHER_SOURCE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 set_target_properties(segarecomp-launcher PROPERTIES OUTPUT_NAME Segarecomp)
 segarecomp_enable_warnings(segarecomp-launcher)
@@ -40,6 +48,15 @@ if(APPLE)
 elseif(UNIX)
   set_target_properties(segarecomp-launcher PROPERTIES BUILD_WITH_INSTALL_RPATH ON
     INSTALL_RPATH "$ORIGIN/sdl3/lib")
+endif()
+
+# SEG-047-T009 (ADR 0096): the AOT-policy cache identity and status reading (no window). CI runs this binary in the SDL3 job.
+add_executable(launcher_policy_test launcher_policy_test.cpp)
+target_link_libraries(launcher_policy_test PRIVATE segarecomp_launcher_core)
+segarecomp_enable_warnings(launcher_policy_test)
+if(BUILD_TESTING)
+  add_test(NAME launcher_policy_test COMMAND launcher_policy_test)
+  set_property(TEST launcher_policy_test APPEND PROPERTY LABELS full fast)
 endif()
 
 include(${PROJECT_SOURCE_DIR}/packaging/install.cmake)

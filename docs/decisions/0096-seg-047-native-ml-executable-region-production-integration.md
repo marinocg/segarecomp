@@ -237,3 +237,21 @@ candidate/admitted aggregates, validator status and a stable `identity` digest; 
 `segarecomp_build_command_test` (default Compatibility report; Optimized report with distinct identity; fallback reasons are stable codes;
 exact-plan precedence; invalid value rejected) and `genesis_ml_admission_cli_test`. Master System images accept the flag and report
 `platform_not_applicable` (Genesis/SMS behaviour unchanged). Compatibility remains the default.
+
+## 16. T009 launcher integration (PASS; GUI not exercised in this container)
+
+The existing SDL3/Dear ImGui launcher stays a thin consumer of `segarecomp build`: it gains a two-option Mode control (Compatibility, the
+default; Optimized) for Genesis images, with no model, threshold or schema control and no inference in launcher code. The choice is passed as
+`--aot-policy`, so CLI and launcher share the same policy semantics. The cache identity includes the policy for Genesis (`genesis` for
+Compatibility keeps the historical key; `genesis:aot=optimized` for Optimized), so the two modes never alias a cache entry (a Master System
+image ignores the request, as it has no Optimized producer). After a build or on a cache hit the launcher reads the machine-readable
+`aot_policy` member of status.json and shows the requested vs effective result under "Native build ready": "Compatibility build",
+"Optimized build", "Optimized build (exact map)" or, in the error colour, "Optimized unavailable for this game: built Compatibility" with a
+"Why?" button that opens the sanitized reason code in the diagnostics panel. The ROM -> build -> ready -> play flow and the Master System
+mapper flow are unchanged. The headless smoke mode accepts `--aot-policy` and reports `aot_policy_requested/effective/fallback/reason`.
+The launcher's non-UI core became its own target (`segarecomp_launcher_core`) so `launcher_policy_test` can assert, without a window: default
+Compatibility, Genesis-only Optimized, distinct and deterministic cache entries, status parsing and fallback wording; CI runs it in the SDL3
+job. Verification here: warning-clean syntax/type check of the launcher sources against SDL 3.4.16 headers and ImGui 1.92, and
+`launcher_policy_test` compiled and run against a Linux static SDL build; the interactive window and the packaged zig toolchain are not
+available in this container, so the visual layout (a Mode row added below the action buttons; "Native build ready" note) is reviewed by T010
+from the code and by the SDL3 CI job's build, not from a screenshot.
