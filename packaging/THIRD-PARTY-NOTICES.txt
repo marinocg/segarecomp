@@ -1,6 +1,7 @@
 Segarecomp is licensed under the Mozilla Public License 2.0 (MPL-2.0.txt).
 
-This package redistributes the following third-party components unmodified, under their own licenses:
+This package redistributes or incorporates the following third-party components under their respective licenses
+(unmodified, except that the vendored zlib sources carry added provenance comments, as permitted by the zlib license):
 
 * SDL3 (Simple DirectMedia Layer), zlib license                       -> SDL3.txt
 * Zig 0.15.2 toolchain (bundled only to compile generated C), MIT     -> Zig.txt
