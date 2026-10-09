@@ -78,7 +78,7 @@ dev container). The public product build, CI and tests do not import any ML pack
 counts of the broad identities (identity count, instruction-span histogram, IR family histogram, conditional/unconditional/call/return/
 indirect/terminator/exception counts, fixed-edge landing same/adjacent/far/dangling, sequential fall-off, incoming local/external fixed
 edges); CLI `--window-feature-report <path> --window-feature-bytes <256|512>` (report-only; broad emission unchanged). Python
-(`tools/segarecomp_ml_region.py`) adds 16 byte statistics and the previous/next window context: 3 x 44 = 132 features. Window start is a row
+(`tools/segarecomp_ml_region.py`) adds 16 byte statistics and the previous/next window context: 3 x 47 = 141 features. Window start is a row
 key only. Tests: `genesis_window_features_test` (C++), `segarecomp_ml_region_test` (forbidden-feature rejection, extraction determinism and
 order independence, title/path independence, wrong-ROM-hash and malformed-universe fail-closed, dropped-source-positive containment failure,
 oracle-input refusal, artifact digest mismatch, blocked-fold purge).
@@ -100,7 +100,7 @@ Rule outcome: the minimum is 512/HGB (0.2500); 512/logistic regression is within
 not retained because the frozen selection order puts selected-ROM fraction ahead of the window-size preference. This is recorded honestly: the
 choice was made on Sonic 1 numbers alone, before any blind title was processed.)
 
-Frozen definition (`tools/segarecomp_ml_region.frozen.json`): window 512 B; feature version `seg046-features-v1`, 132 features, schema hash
+Frozen definition (`tools/segarecomp_ml_region.frozen.json`): window 512 B; feature version `seg046-features-v1`, 141 features, schema hash
 `d2e7c82913139c29450511326d6de76e91579ec654edde81afae16b13cd1f570`; logistic regression (standardize, C=1, lbfgs, balanced classes, 2000
 iterations); seed 46; threshold 0.00835406801187952; certain-code union = windows containing a precise direct-control-discovery identity
 (includes the machine roots); final model trained on all 1024 Sonic 1 windows; two independent fits produce the identical artifact;
