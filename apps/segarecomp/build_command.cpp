@@ -202,12 +202,18 @@ struct Options {
   // strictly; each M68K emission applies it only when its alias set equals the emission's (otherwise that emission is broad).
   std::optional<fs::path> admission_plan;
   std::optional<segarecomp::GenesisHybridAdmissionPlan> admission;
+  // SEG-047 (ADR 0096): the user-visible AOT optimization policy. `compatibility` (default): the broad immutable-ROM universe.
+  // `optimized`: Genesis M68K selective admission proposed by the native frozen region model (never a user-configurable model);
+  // any producer failure falls back to the broad universe (visible in status.json), and an explicit --admission-plan (exact map)
+  // outranks it.
+  std::string aot_policy = "compatibility";
 };
 
 enum class Target { genesis, master_system };
 
 struct Log {
   std::ofstream file;
+  std::string admission_line;  // SEG-047: the last emission's sanitized `m68k admission: requested=optimized ...` report
   void line(const std::string &text) { file << text << '\n'; file.flush(); }
   void append_file(const fs::path &path) {
     // Not `file << in.rdbuf()`: that sets failbit on an empty source and silently drops every later line.
@@ -275,6 +281,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--runtime-optimize") options.runtime_optimize = value;
     else if (key == "--jobs") options.jobs = static_cast<unsigned>(std::max(0, std::atoi(value.c_str())));
     else if (key == "--admission-plan" && !options.admission_plan) options.admission_plan = fs::path(value);
+    else if (key == "--aot-policy" && (value == "compatibility" || value == "optimized")) options.aot_policy = value;
     else return std::nullopt;
   }
   if (!have_rom || !have_output || !have_runtime || options.cc.empty()) return std::nullopt;
@@ -668,6 +675,51 @@ bool admission_applies(const segarecomp::GenesisHybridAdmissionPlan &plan, const
   return true;
 }
 
+// SEG-047 (ADR 0096): the machine-readable `aot_policy` status member: requested policy, effective producer, fallback and a stable
+// sanitized reason, plus (when the native producer ran) the model identity and aggregate candidate/admitted metrics. No address, byte or
+// per-window datum. Always present, so a consumer never parses text.
+std::string aot_policy_json(const Options &options, const Log &log, const std::string &rom_sha256, bool genesis) {
+  std::map<std::string, std::string> kv;
+  {
+    std::istringstream tokens(log.admission_line);
+    for (std::string token; tokens >> token;) {
+      const auto eq = token.find('=');
+      if (eq != std::string::npos) kv[token.substr(0, eq)] = token.substr(eq + 1);
+    }
+  }
+  std::string effective = "broad", reason = "none";
+  bool fallback = false;
+  if (options.aot_policy == "optimized") {
+    if (!genesis) { fallback = true; reason = "platform_not_applicable"; }
+    else if (options.admission) { effective = "admission_plan"; reason = "exact_plan_precedence"; }
+    else if (kv.count("producer") == 0U) { fallback = true; reason = "no_report"; }
+    else { effective = kv["producer"]; fallback = kv["fallback"] == "1"; reason = kv["reason"]; }
+  }
+  const auto safe = [](const std::string &value) {
+    std::string out;
+    for (const char c : value) out.push_back((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' ? c : '_');
+    return out;
+  };
+  std::string json = ",\"aot_policy\":{\"requested\":\"" + options.aot_policy + "\",\"effective\":\"" + safe(effective) +
+                     "\",\"fallback\":" + (fallback ? "true" : "false") + ",\"reason\":\"" + safe(reason) + "\"";
+  if (effective == "ml_region") {
+    const auto number = [&kv, &safe](const char *key) { return kv.count(key) != 0U ? safe(kv[key]) : std::string("0"); };
+    json += ",\"model\":\"" + safe(kv["model"]) + "\",\"schema_sha256\":\"" + safe(kv["schema"]) + "\"";
+    for (const char *key : {"windows", "ml_selected", "seed_windows", "universe", "k0", "k", "pruned", "rounds"})
+      json += std::string(",\"") + key + "\":" + number(key);
+    json += ",\"k_sha256\":\"" + safe(kv["k_sha256"]) + "\",\"validator\":\"" + safe(kv["validator"]) + "\"";
+  }
+  // Stable cache identity: a pure function of the image, the requested policy, the effective producer and (for the native producer)
+  // the frozen model/schema and the admitted-set digest. Compatibility and Optimized builds therefore never share an identity, and a
+  // fallback build never aliases an ML build. Sanitized: a digest only.
+  const std::string identity_text = "segarecomp.aot_policy.v1|rom=" + rom_sha256 + "|requested=" + options.aot_policy + "|effective=" + safe(effective) +
+                                    "|model=" + (effective == "ml_region" ? safe(kv["model"]) : std::string("-")) + "|schema=" +
+                                    (effective == "ml_region" ? safe(kv["schema"]) : std::string("-")) + "|k=" +
+                                    (effective == "ml_region" ? safe(kv["k_sha256"]) : std::string("-"));
+  json += ",\"identity\":\"" + segarecomp::sha256_hex({reinterpret_cast<const std::uint8_t *>(identity_text.data()), identity_text.size()}) + "\"";
+  return json + "}";
+}
+
 // The existing M68K emit route, in-process (`emit-general-startup-bridge-c --reset-entry --immutable-rom-aot`), plus one
 // `--immutable-copy-alias` per ADR 0049 descriptor. Replaces the previous emission; fills `units` from the emitted manifest. False:
 // the emitter rejected the request.
@@ -694,6 +746,8 @@ bool emit_genesis_m68k(const Options &options, Log &log, const std::string &sha,
       log.line("m68k admission: broad for this emission (the plan's alias set differs)");
     }
   }
+  if (options.aot_policy == "optimized" && !options.admission) emit_args.push_back("--immutable-rom-aot-ml-admission");
+  log.admission_line.clear();
   emit_args.insert(emit_args.end(), {"--generated-c-output", route.source.string(), "--generated-c-shard-dir", route.shard_dir.string()});
   std::vector<char *> emit_argv;
   for (auto &arg : emit_args) emit_argv.push_back(arg.data());
@@ -705,6 +759,11 @@ bool emit_genesis_m68k(const Options &options, Log &log, const std::string &sha,
   std::cerr.rdbuf(old_err);
   log.line(captured_out.str().substr(0, 4096));
   log.line(captured_err.str());
+  {
+    std::istringstream lines(captured_err.str());
+    for (std::string line; std::getline(lines, line);)
+      if (line.rfind("segarecomp: m68k admission: requested=optimized", 0) == 0) log.admission_line = line;
+  }
   if (emit_rc != 0) {
     fs::remove(route.source, ec);
     fs::remove_all(route.shard_dir, ec);
@@ -949,6 +1008,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     status_extra += std::string(",\"m68k_admission\":\"") + (hybrid ? "hybrid" : "broad") + "\"";
     log.line(std::string("m68k admission: final=") + (hybrid ? "hybrid" : "broad"));
   }
+  status_extra += aot_policy_json(options, log, sha, true);
   // SEG-028 (ADR 0077): the producer boundary, recorded as sanitized provenance counts only (no address, byte or hash).
   const std::string images = "{\"m68k\":" + m68k_images + ",\"z80\":" +
                              segarecomp::format_image_provenance_json(segarecomp::count_image_provenance(gz80::executable_images(registry))) + "}";
@@ -1206,7 +1266,7 @@ int segarecomp_build_command(int argc, char **argv) {
     if (link_rc != 0) return fail(options, log, sha, "link", 3, "The native program could not be linked.");
     fs::remove_all(object_dir, ec);
     stage("link", "done");
-    write_status(options, sha, "ok", "done", "", sms_provenance + sms_images);
+    write_status(options, sha, "ok", "done", "", sms_provenance + sms_images + aot_policy_json(options, log, sha, false));
     std::cout << "@result ok executable=" << executable.string() << std::endl;
     return 0;
   } catch (const std::exception &error) {

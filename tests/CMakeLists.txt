@@ -1121,6 +1121,12 @@ add_test(NAME genesis_ml_region_native_parity_local_test
   COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/segarecomp_ml_region_native_parity.py
     --binary $<TARGET_FILE:segarecomp> --games ${PROJECT_SOURCE_DIR}/games)
 set_tests_properties(genesis_ml_region_native_parity_local_test PROPERTIES SKIP_RETURN_CODE 77)
+# SEG-047-T005 (ADR 0096): the opt-in native ML admission on a synthetic image (report line, determinism, fallback = broad, exclusion,
+# bridge build+run equal-or-fail-closed).
+add_test(NAME genesis_ml_admission_cli_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_ml_admission_cli_test.py
+  $<TARGET_FILE:segarecomp> ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_ml_admission_cli_test APPEND PROPERTY LABELS full fast)
+set_property(TEST genesis_ml_admission_cli_test PROPERTY TIMEOUT 300)
 add_executable(genesis_m68k_executable_image_test genesis_m68k_executable_image_test.cpp)
 target_link_libraries(genesis_m68k_executable_image_test PRIVATE segarecomp::machine_genesis)
 segarecomp_enable_warnings(genesis_m68k_executable_image_test)

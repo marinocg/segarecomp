@@ -132,6 +132,23 @@ int main() {
   expect(same(genesis_ml_window_ranges({1U, 3U}, 1536U), {{512U, 1024U}}), "window past the end is dropped, not clipped to empty");
   expect(same(genesis_ml_window_ranges({0U, 2U}, 1300U), {{0U, 512U}, {1024U, 1300U}}), "final short window clips to the image size");
   expect(genesis_ml_window_ranges({}, 4096U).empty(), "no windows => no ranges");
+  // Proposal wrapper: fail-closed reasons and the certain-code union (no entries => decoder columns are zero).
+  const std::string sha(64, 'a');
+  const std::vector<FrontendAnalysis::ImmutableRomAotEntry> no_entries;
+  const std::vector<std::uint8_t> zero_rom(4096, 0U);
+  expect(propose_genesis_ml_executable_regions({}, sha, no_entries, {}).failure == "rom_size", "empty image is rejected");
+  expect(propose_genesis_ml_executable_regions(std::span<const std::uint8_t>(zero_rom).first(4095), sha, no_entries, {}).failure == "rom_size", "odd-sized image is rejected");
+  const auto none = propose_genesis_ml_executable_regions(zero_rom, sha, no_entries, {});
+  expect(!none.proposal.has_value() && none.failure == "empty_proposal", "no ML window and no seed => empty_proposal (never an empty plan)");
+  const std::vector<std::uint32_t> seeds{0x0U, 0x200U, 0xA02U, 0xFFFFFFFFU};  // windows 0, 1, 5; out-of-image address ignored
+  const auto seeded = propose_genesis_ml_executable_regions(zero_rom, sha, no_entries, seeds);
+  expect(seeded.proposal.has_value() && seeded.stats.seed_windows == 3U && seeded.stats.ml_selected == 0U && !seeded.ml_only.has_value(), "seed windows form the proposal");
+  expect(seeded.proposal && seeded.proposal->ranges.size() == 2U && seeded.proposal->ranges[0].begin_address == 0U &&
+             seeded.proposal->ranges[0].end_address == 1024U && seeded.proposal->ranges[1].begin_address == 2560U &&
+             seeded.proposal->ranges[1].end_address == 3072U,
+         "seed windows become half-open even ranges");
+  expect(seeded.stats.region_bytes == 1536U && seeded.stats.windows == 8U && seeded.stats.min_logit_margin > 0.0, "stats");
+  expect(seeded.proposal && seeded.proposal->rom_sha256 == sha, "proposal is bound to the ROM digest");
   if (failures != 0) return 1;
   std::cout << "genesis_ml_scorer_test: ok\n";
   return 0;

@@ -45,6 +45,39 @@ def main():
         require(digest in (out / "status.json").read_text(), "status.json must carry the ROM digest")
         require("cc=" in (out / "build.log").read_text(), "build.log must record the compiler")
         require(not (out / "obj").exists(), "intermediate objects must be removed")
+        # SEG-047 (ADR 0096): the machine-readable AOT policy member is always present; Compatibility is the default.
+        import json
+        compat = json.loads((out / "status.json").read_text())["aot_policy"]
+        require(compat["requested"] == "compatibility" and compat["effective"] == "broad" and compat["fallback"] is False and
+                compat["reason"] == "none" and len(compat["identity"]) == 64, "default build must report the Compatibility policy: " + str(compat))
+        opt = build(cli, compiler, root, rom, tmp / "opt", extra=("--aot-policy", "optimized"))
+        require(opt.returncode == 0, "optimized build must succeed: " + opt.stdout + opt.stderr)
+        policy = json.loads((tmp / "opt" / "status.json").read_text())["aot_policy"]
+        require(policy["requested"] == "optimized" and policy["effective"] in ("ml_region", "broad"), "optimized status: " + str(policy))
+        require(policy["fallback"] == (policy["effective"] == "broad") and policy["identity"] != compat["identity"],
+                "Compatibility and Optimized identities must never alias, a fallback must be visible: " + str(policy))
+        if policy["effective"] == "ml_region":
+            require(policy["model"] == "seg046-features-v1" and policy["validator"] == "accepted" and policy["k"] <= policy["universe"] and
+                    len(policy["k_sha256"]) == 64 and len(policy["schema_sha256"]) == 64, "ML metrics: " + str(policy))
+        else:
+            require(policy["reason"] in ("model_identity", "rom_size", "empty_proposal", "prune_rejected", "validator_rejected", "no_analysis"),
+                    "fallback reason must be a stable code: " + str(policy))
+        require(subprocess.run([cli, "build", "--rom", str(rom), "--output", str(tmp / "bad"), "--cc", compiler, "--runtime-dir",
+                                str(root / "platforms" / "genesis"), "--aot-policy", "turbo"], text=True, capture_output=True).returncode == 2,
+                "an unknown policy is a usage error")
+        # Exact-map precedence: an explicit admission plan outranks the optimized producer and is reported as such.
+        regions = tmp / "x.regions"
+        regions.write_bytes(f"segarecomp.m68k_executable_regions.v1\nrom_sha256 {digest}\nrange 00000000 0000000c\nend\n".encode())
+        plan = tmp / "x.plan"
+        planned = subprocess.run([cli, "emit-general-startup-bridge-c", "--rom", str(rom), "--reset-entry", "--rom-sha256", digest,
+                                  "--immutable-rom-aot", "--immutable-aot-region-proposal", str(regions), "--region-admission-plan-output", str(plan)],
+                                 text=True, capture_output=True)
+        require(planned.returncode == 0, "region plan for the precedence check: " + planned.stderr)
+        precedence = build(cli, compiler, root, rom, tmp / "prec", extra=("--aot-policy", "optimized", "--admission-plan", str(plan)))
+        require(precedence.returncode == 0, "plan + optimized build: " + precedence.stdout + precedence.stderr)
+        won = json.loads((tmp / "prec" / "status.json").read_text())["aot_policy"]
+        require(won["effective"] == "admission_plan" and won["reason"] == "exact_plan_precedence" and won["fallback"] is False,
+                "an explicit plan must outrank the ML producer: " + str(won))
         executable = next(p for p in out.iterdir() if p.stem == "game")
         ran = subprocess.run([str(executable)], text=True, capture_output=True)
         require('"result":"stop"' in ran.stdout and digest in ran.stdout, "the native program must emit the sanitized stop report")
