@@ -35,12 +35,13 @@ endfunction()
 # SEG-018-T002: the root is workspace orchestration only. Reusable libraries live
 # under libs/, machine/platform products under platforms/, applications under
 # apps/, and the test suite under tests/.
+# CTest must be included before the subdirectories so that tests registered by apps/ (the launcher policy test) are not silently dropped.
+include(CTest)
 add_subdirectory(third_party/zlib)
 add_subdirectory(libs)
 add_subdirectory(platforms)
 add_subdirectory(apps)
 
-include(CTest)
 if(BUILD_TESTING)
   add_subdirectory(tests)
 endif()
