@@ -125,6 +125,98 @@ class CalibrationMutationTest(unittest.TestCase):
         self.assertEqual(sorted(frozen["environment"]), ["numpy", "python", "sklearn"])
 
 
+TOOLS = pathlib.Path(__file__).resolve().parents[1] / "tools"
+
+
+class CanonicalModelTest(unittest.TestCase):
+    def setUp(self):
+        import json
+        self.json = json
+        self.frozen = json.loads((TOOLS / "segarecomp_ml_region.frozen.json").read_text())
+        self.text = (TOOLS / "segarecomp_ml_region.model.json").read_text()
+        self.model = json.loads(self.text)
+
+    def vectors(self):
+        # deterministic synthetic 141-element vectors (not ROM-derived)
+        out = []
+        state = 12345
+        for _ in range(20):
+            row = []
+            for _ in range(141):
+                state = (state * 1103515245 + 12345) & 0x7FFFFFFF
+                row.append(state / 0x7FFFFFFF * 2.0 - 0.5)
+            out.append(row)
+        return out
+
+    def test_artifact_matches_frozen_definition(self):
+        m.validate_canonical_model(self.model, self.frozen)
+        self.assertEqual(self.model["feature_count"], 141)
+        for key in ("scaler_mean", "scaler_scale", "coef", "folded_weight"):
+            self.assertEqual(len(self.model[key]), 141)
+        self.assertEqual(self.model["probability_threshold"], 0.00835406801187952)
+        self.assertEqual(self.model["feature_schema_sha256"], "d2e7c82913139c29450511326d6de76e91579ec654edde81afae16b13cd1f570")
+        self.assertEqual(self.model["original_sklearn_artifact_sha256"], "b5ddae5aa0fe6571455803c244d2a6be4a2c3349e3436c8780bfc3d8aa8fa62b")
+        self.assertEqual(self.model["feature_names"], m.feature_names())
+        m.assert_feature_schema(self.model["feature_names"])
+
+    def test_export_is_deterministic_and_rederivable(self):
+        again = m.canonical_model_from_arrays(self.frozen, self.model["scaler_mean"], self.model["scaler_scale"], self.model["coef"],
+                                              self.model["intercept"])
+        self.assertEqual(m.canonical_json(again), self.text)
+
+    def test_folded_and_unfolded_agree(self):
+        for row in self.vectors():
+            a, b = m.canonical_logit(self.model, row), m.canonical_logit(self.model, row, folded=False)
+            self.assertLess(abs(a - b), 1e-9 * max(1.0, abs(a)))
+
+    def test_decision_is_exact_around_the_boundary(self):
+        import math
+        row = self.vectors()[0]
+        k = max(range(141), key=lambda i: abs(self.model["folded_weight"][i]))
+        weight = self.model["folded_weight"][k]
+        gap = self.model["logit_threshold"] - m.canonical_logit(self.model, row)
+        for delta, expected in ((1e-6, True), (-1e-6, False)):
+            shifted = list(row)
+            shifted[k] += (gap + delta) / weight
+            self.assertEqual(m.canonical_logit(self.model, shifted) >= self.model["logit_threshold"], expected)
+        p = self.model["probability_threshold"]
+        self.assertEqual(self.model["logit_threshold"], math.log(p / (1.0 - p)))
+        self.assertEqual(m.canonical_selected(self.model, [row, shifted]), m.canonical_selected(self.model, [row, shifted]))
+
+    def test_malformed_models_fail_closed(self):
+        import copy
+        def broken(mutate):
+            model = copy.deepcopy(self.model)
+            mutate(model)
+            with self.assertRaises(SystemExit):
+                m.validate_canonical_model(model, self.frozen)
+        broken(lambda x: x["coef"].pop())
+        broken(lambda x: x.__setitem__("scaler_scale", x["scaler_scale"][:-1] + [0.0]))
+        broken(lambda x: x.__setitem__("schema", "other"))
+        broken(lambda x: x.__setitem__("feature_version", "v0"))
+        broken(lambda x: x.__setitem__("feature_schema_sha256", "0" * 64))
+        broken(lambda x: x.__setitem__("original_sklearn_artifact_sha256", "0" * 64))
+        broken(lambda x: x.__setitem__("probability_threshold", 0.01))
+        broken(lambda x: x.__setitem__("logit_threshold", x["logit_threshold"] + 1e-9))
+        broken(lambda x: x.__setitem__("folded_bias", float("nan")))
+        broken(lambda x: x.__setitem__("class_order", [1, 0]))
+        with self.assertRaises(SystemExit):
+            m.canonical_logit(self.model, [0.0] * 140)
+
+    def test_no_forbidden_data_in_artifacts(self):
+        parity = self.json.loads((TOOLS / "segarecomp_ml_region.parity.json").read_text())
+        self.assertEqual(sorted(parity["titles"]), ["cs", "or", "s1", "s2", "sor"])
+        for entry in parity["titles"].values():
+            self.assertTrue(entry["selected_equal_sklearn_vs_canonical"])
+            for key in ("rom_sha256", "regions_sha256", "ml_only_regions_sha256", "sklearn_proba_float64_le_sha256"):
+                self.assertRegex(entry[key], r"^[0-9a-f]{64}$")
+            self.assertTrue(all(not isinstance(v, (list, dict)) for v in entry.values()))  # aggregates and digests only
+        for text in (self.text, (TOOLS / "segarecomp_ml_region.parity.json").read_text()):
+            self.assertNotIn("range ", text)
+        self.assertEqual(sorted(k for k in self.model if isinstance(self.model[k], list)),
+                         sorted(["class_order", "coef", "feature_names", "folded_weight", "scaler_mean", "scaler_scale"]))
+
+
 class CrossValidationTest(unittest.TestCase):
     def test_blocked_folds_are_contiguous_purged_and_cover_everything_once(self):
         folds = m.blocked_folds(2048, 16, 2)

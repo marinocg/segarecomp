@@ -218,3 +218,38 @@ Successor: SEG-047 is drafted (record held out of the backlog until this PR merg
 source-backed corpus and replacing the single-title, minimum-score threshold with leave-one-title-out calibration and a margin". Broad AOT stays
 the unconditional fallback and the default; exact source maps remain the strongest selective authority; heuristic ML selective admission is not
 made a default by this experiment. Failure-mode reading if SEG-047 later fails: more labelled titles are needed before blaming the feature/model class.
+
+## 10. Post-gate artifact preservation (added after the gate; cannot influence the completed evaluation)
+
+Sections 1-9 are the historical record: the contract of section 1 kept the trained artifact private and recorded only its digest and recipe,
+and that was correct for the frozen experiment. After the gate and independent review, and before this PR merges, the exact fitted parameters
+were exported into a framework-independent representation so a successor can implement deterministic native inference without Python or
+scikit-learn. This is artifact preservation only: it does NOT change the model, features, threshold, selection rule or any experiment outcome,
+and SEG-046 remains an experiment that enables no production ML admission route.
+
+- The private pickle (digest `b5ddae5aa0fe6571455803c244d2a6be4a2c3349e3436c8780bfc3d8aa8fa62b`, authenticated before reading) stays private and is NOT committed;
+  it is the reference until a native scorer's parity is independently proven.
+- `tools/segarecomp_ml_region.model.json` (schema `segarecomp.ml_region_model.v1`, SHA-256 `5863742d3b84a934d7ab335695a3748426de53e43ddc9d42ca679a6fc9fab0a2`):
+  scaler means/scales, logistic coefficients/intercept (141 each; class order [0,1]), the folded classifier (`folded_weight = coef/scale`,
+  `folded_bias = intercept - fsum(coef*mean/scale)`), probability threshold 0.00835406801187952 and its logit 
+  -4.776617512896361, feature names/version/schema hash. Numbers are binary64 shortest round-trip decimals. Two exports are byte-identical.
+  Decision rule: select a window iff `folded_bias + Σ folded_weight[i]·x[i] >= logit_threshold`.
+- Parity (`tools/segarecomp_ml_region.parity.json`, `segarecomp_ml_region.py verify-parity`, experiment-only, needs sklearn): canonical vs sklearn
+  `decision_function` max absolute difference 1.8e-14 (folded) / 1.4e-14 (unfolded); selected-window sets are EXACTLY equal on the local Sonic 1,
+  Sonic 2, Cool Spot, Streets of Rage and OutRun matrices, and the counts equal sections 3-4. For each title only aggregates and digests are
+  recorded: ROM SHA-256, window / ML-selected / seed / final counts, region bytes and fraction, the SHA-256 of the canonical
+  `segarecomp.m68k_executable_regions.v1` serialization of the final and of the ML-only selection, and the SHA-256 of the sklearn float64
+  probability vector (informational; a native scorer matches the selection digests, not the last bits of the probabilities).
+  A future native implementation reproduces SEG-046 by: scorer output -> canonical regions text -> SHA-256 -> compare.
+  Final-selection digests (first 16 hex): Sonic 1 e5210d14a347aa65, Sonic 2 1a34f38e928a9444, Cool Spot 7260ec3033711220,
+  Streets of Rage fcfcf2231c42a312, OutRun 8e310d363a57f647 (full values in the parity file).
+- Data-boundary audit (inspected, not assumed): the model file holds only public metadata, the 141 generic feature names, and 4 x 141 learned
+  aggregate numbers plus 2 scalars. It contains no ROM bytes, address/offset, window start or ordinal, title identity feature, source
+  label/name, source-universe listing, runtime coverage or per-ROM region data (`range ` lines and index lists are absent; a hermetic test asserts
+  it). The parity file holds ROM digests, counts and digests only: no selected-window indexes, region addresses, per-window probabilities
+  or instruction addresses. The coefficients are generic aggregate statistics of 1,024 windows and are not reconstructable commercial data. No blocker found.
+- Hermetic tests (`segarecomp_ml_region_test`, pure Python, no sklearn/numpy): artifact parses; 141 parameters everywhere; version/schema hash/
+  threshold/original-artifact digest match the frozen definition; export re-derivation is byte-identical; folded and unfolded forms agree on
+  synthetic vectors; the decision flips exactly at the boundary; malformed dimensions/schema/version/digests/classes/NaN fail closed.
+- Out of scope (SEG-047+): native feature extraction and scorer, CLI integration, retraining, threshold/margin changes, removing zlib, any
+  production or default ML route.

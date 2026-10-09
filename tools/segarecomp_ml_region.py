@@ -392,6 +392,160 @@ def cmd_propose(args) -> int:
     return 0
 
 
+# ------------------------------------------------------------------------------------- canonical framework-independent model
+CANONICAL_SCHEMA = "segarecomp.ml_region_model.v1"
+CANONICAL_MODEL_ID = "SEG-046 M68K executable-region model v1"
+FROZEN_SKLEARN_ARTIFACT_SHA256 = "b5ddae5aa0fe6571455803c244d2a6be4a2c3349e3436c8780bfc3d8aa8fa62b"
+
+
+def canonical_model_from_arrays(frozen: dict, mean: list[float], scale: list[float], coef: list[float], intercept: float) -> dict:
+    """Pure-Python derivation of the folded classifier and logit threshold from the exact fitted parameters."""
+    n = len(feature_names())
+    if not (len(mean) == len(scale) == len(coef) == n == frozen["feature_count"]):
+        raise SystemExit("canonical model: dimension mismatch")
+    if any(s_ == 0.0 or not math.isfinite(s_) for s_ in scale):
+        raise SystemExit("canonical model: invalid scale")
+    folded = [c / s_ for c, s_ in zip(coef, scale)]
+    bias = intercept - math.fsum(c * m_ / s_ for c, m_, s_ in zip(coef, mean, scale))
+    p = frozen["threshold"]
+    return {
+        "schema": CANONICAL_SCHEMA, "model_id": CANONICAL_MODEL_ID, "experiment": "SEG-046", "cpu": "MC68000",
+        "owner": "Genesis executable-region producer (report-only experiment; not a production route)",
+        "feature_version": frozen["feature_version"], "feature_schema_sha256": frozen["feature_schema_sha256"],
+        "feature_count": n, "window_bytes": frozen["window_bytes"],
+        "feature_names": feature_names(),
+        "original_sklearn_artifact_sha256": frozen["model_artifact_sha256"],
+        "training": {"model": frozen["model"], "recipe": frozen["recipe"], "seed": frozen["seed"], "training_title": frozen["training_title"],
+                     "environment": frozen["environment"], "blocked_cv": frozen["blocked_cv"]},
+        "probability_threshold": p, "logit_threshold": math.log(p / (1.0 - p)),
+        "decision_rule": "select window iff folded_bias + sum(folded_weight[i] * x[i]) >= logit_threshold (equivalent to probability >= threshold)",
+        "numeric_representation": "IEEE-754 binary64, shortest round-trip decimal (Python repr); folded_weight = coef/scale, "
+                                  "folded_bias = intercept - fsum(coef*mean/scale)",
+        "class_order": [0, 1], "positive_class": 1,
+        "scaler_mean": mean, "scaler_scale": scale, "coef": coef, "intercept": intercept,
+        "folded_weight": folded, "folded_bias": bias,
+        "data_boundary": "Generic learned aggregate parameters only. No ROM bytes, address, offset, window start/ordinal, title, source label, "
+                         "runtime coverage or per-ROM data is part of the model or its features.",
+    }
+
+
+def canonical_json(model: dict) -> str:
+    return json.dumps(model, indent=1, sort_keys=True) + "\n"
+
+
+def validate_canonical_model(model: dict, frozen: dict) -> None:
+    """Fail closed on any schema/dimension/identity mismatch against the committed frozen definition."""
+    required = {"schema", "model_id", "feature_version", "feature_schema_sha256", "feature_count", "window_bytes", "feature_names",
+                "original_sklearn_artifact_sha256", "probability_threshold", "logit_threshold", "scaler_mean", "scaler_scale", "coef",
+                "intercept", "folded_weight", "folded_bias", "class_order", "positive_class"}
+    if not isinstance(model, dict) or required - set(model):
+        raise SystemExit("canonical model: missing fields")
+    if model["schema"] != CANONICAL_SCHEMA or model["feature_version"] != FEATURE_VERSION:
+        raise SystemExit("canonical model: schema or feature version mismatch")
+    n = model["feature_count"]
+    if n != 141 or n != len(feature_names()) or model["feature_names"] != feature_names():
+        raise SystemExit("canonical model: feature list mismatch")
+    for key in ("scaler_mean", "scaler_scale", "coef", "folded_weight"):
+        if not isinstance(model[key], list) or len(model[key]) != n or not all(isinstance(v, float) and math.isfinite(v) for v in model[key]):
+            raise SystemExit(f"canonical model: bad {key}")
+    for key in ("intercept", "folded_bias", "probability_threshold", "logit_threshold"):
+        if not isinstance(model[key], float) or not math.isfinite(model[key]):
+            raise SystemExit(f"canonical model: bad {key}")
+    if (model["feature_schema_sha256"] != frozen["feature_schema_sha256"] or model["window_bytes"] != frozen["window_bytes"]
+            or model["original_sklearn_artifact_sha256"] != frozen["model_artifact_sha256"]
+            or model["probability_threshold"] != frozen["threshold"]):
+        raise SystemExit("canonical model: does not match the frozen definition")
+    if model["original_sklearn_artifact_sha256"] != FROZEN_SKLEARN_ARTIFACT_SHA256 or model["feature_schema_sha256"] != schema_hash(model["window_bytes"]):
+        raise SystemExit("canonical model: identity digest mismatch")
+    if model["logit_threshold"] != math.log(model["probability_threshold"] / (1.0 - model["probability_threshold"])):
+        raise SystemExit("canonical model: logit threshold mismatch")
+    if model["class_order"] != [0, 1] or model["positive_class"] != 1 or any(s_ <= 0.0 for s_ in model["scaler_scale"]):
+        raise SystemExit("canonical model: class order or scale invalid")
+
+
+def canonical_logit(model: dict, row: list[float], folded: bool = True) -> float:
+    if len(row) != model["feature_count"]:
+        raise SystemExit("canonical model: feature vector dimension mismatch")
+    if folded:
+        return model["folded_bias"] + math.fsum(w * x for w, x in zip(model["folded_weight"], row))
+    return model["intercept"] + math.fsum(c * ((x - m_) / s_) for c, x, m_, s_ in zip(model["coef"], row, model["scaler_mean"], model["scaler_scale"]))
+
+
+def canonical_selected(model: dict, rows: list[list[float]]) -> set[int]:
+    return {w for w, row in enumerate(rows) if canonical_logit(model, row) >= model["logit_threshold"]}
+
+
+def selection_digest(rom_sha256: str, rom_size: int, selected: set[int], window_bytes: int) -> str:
+    """SHA-256 of the canonical regions serialization of the selected windows (nothing about the windows is stored)."""
+    return hashlib.sha256(regions_text(rom_sha256, rom_size, selected, window_bytes).encode()).hexdigest()
+
+
+def _pipeline_arrays(pipeline):
+    scaler, logreg = pipeline.steps[0][1], pipeline.steps[-1][1]
+    if list(logreg.classes_) != [0, 1] or logreg.coef_.shape != (1, 141) or scaler.mean_.shape != (141,):
+        raise SystemExit("unexpected sklearn pipeline shape")
+    return ([float(v) for v in scaler.mean_], [float(v) for v in scaler.scale_], [float(v) for v in logreg.coef_[0]], float(logreg.intercept_[0]))
+
+
+def cmd_export_model(args) -> int:
+    frozen = json.loads(pathlib.Path(args.frozen_json).read_text())
+    require_frozen(frozen)
+    if hashlib.sha256(pathlib.Path(args.artifact).read_bytes()).hexdigest() != FROZEN_SKLEARN_ARTIFACT_SHA256:
+        raise SystemExit("original artifact digest mismatch: refusing to export")
+    pipeline = load_artifact(args.artifact, frozen["model_artifact_sha256"])
+    model = canonical_model_from_arrays(frozen, *_pipeline_arrays(pipeline))
+    validate_canonical_model(model, frozen)
+    text = canonical_json(model)
+    if canonical_json(canonical_model_from_arrays(frozen, *_pipeline_arrays(pipeline))) != text:
+        raise SystemExit("nondeterministic export")
+    pathlib.Path(args.output).write_text(text, newline="\n")
+    print(json.dumps({"canonical_sha256": hashlib.sha256(text.encode()).hexdigest(), "features": model["feature_count"],
+                      "logit_threshold": model["logit_threshold"]}))
+    return 0
+
+
+def cmd_verify_parity(args) -> int:
+    """Experiment-only preservation check: canonical scoring vs the sklearn pipeline on the locally available SEG-046 titles."""
+    import numpy as np
+    frozen = json.loads(pathlib.Path(args.frozen_json).read_text())
+    require_frozen(frozen)
+    model = json.loads(pathlib.Path(args.model).read_text())
+    validate_canonical_model(model, frozen)
+    pipeline = load_artifact(args.artifact, frozen["model_artifact_sha256"])
+    report = {"max_abs_logit_diff_folded": 0.0, "max_abs_logit_diff_unfolded": 0.0, "titles": {}}
+    for spec in args.title:  # label:rom:window_report:direct_report
+        label, rom_path, window_report_path, direct_path = spec.split(":", 3)
+        rom = pathlib.Path(rom_path).read_bytes()
+        rom_sha = hashlib.sha256(rom).hexdigest()
+        _, matrix, count = load_inputs(rom_path, window_report_path, frozen["window_bytes"])
+        x = np.asarray(matrix, dtype=np.float64)
+        proba = pipeline.predict_proba(x)[:, 1]
+        reference = {w for w in range(count) if proba[w] >= frozen["threshold"]}
+        decision = pipeline.decision_function(x)
+        folded = [canonical_logit(model, row) for row in matrix]
+        unfolded = [canonical_logit(model, row, folded=False) for row in matrix]
+        diff_f = max(abs(a - float(b)) for a, b in zip(folded, decision))
+        diff_u = max(abs(a - float(b)) for a, b in zip(unfolded, decision))
+        canonical = canonical_selected(model, matrix)
+        if canonical != reference:
+            raise SystemExit(f"selected-window mismatch for {label}: refusing to record parity")
+        seeds = seed_windows(pathlib.Path(direct_path).read_text(), len(rom), frozen["window_bytes"])
+        final = reference | seeds
+        region_bytes = sum(min((w + 1) * frozen["window_bytes"], len(rom)) - w * frozen["window_bytes"] for w in final)
+        report["titles"][label] = {
+            "rom_sha256": rom_sha, "rom_bytes": len(rom), "windows": count, "ml_selected_windows": len(reference), "seed_windows": len(seeds),
+            "final_selected_windows": len(final), "region_bytes": region_bytes, "region_fraction": round(region_bytes / len(rom), 4),
+            "selected_equal_sklearn_vs_canonical": True,
+            "regions_sha256": selection_digest(rom_sha, len(rom), final, frozen["window_bytes"]),
+            "ml_only_regions_sha256": selection_digest(rom_sha, len(rom), reference, frozen["window_bytes"]),
+            "sklearn_proba_float64_le_sha256": hashlib.sha256(proba.astype("<f8").tobytes()).hexdigest()}
+        report["max_abs_logit_diff_folded"] = max(report["max_abs_logit_diff_folded"], diff_f)
+        report["max_abs_logit_diff_unfolded"] = max(report["max_abs_logit_diff_unfolded"], diff_u)
+    pathlib.Path(args.output).write_text(json.dumps(report, indent=1, sort_keys=True) + "\n")
+    print(json.dumps({k: v for k, v in report.items() if k != "titles"}))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -411,6 +565,15 @@ def main() -> int:
         propose.add_argument(flag, required=True)
     propose.add_argument("--scores-out")
     propose.set_defaults(func=cmd_propose)
+    export = sub.add_parser("export-model")
+    for flag in ("--frozen-json", "--artifact", "--output"):
+        export.add_argument(flag, required=True)
+    export.set_defaults(func=cmd_export_model)
+    parity = sub.add_parser("verify-parity")
+    for flag in ("--frozen-json", "--artifact", "--model", "--output"):
+        parity.add_argument(flag, required=True)
+    parity.add_argument("--title", action="append", required=True, help="label:rom:window_report:direct_report")
+    parity.set_defaults(func=cmd_verify_parity)
     args = parser.parse_args()
     return args.func(args)
 
