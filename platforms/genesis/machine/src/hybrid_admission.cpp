@@ -328,10 +328,21 @@ GenesisRegionPruneResult prune_genesis_region_admission(const FrontendProgram &p
   result.pruned_count = result.k0_count - result.admitted.size();
   if (result.admitted.empty()) return reject("empty_admission");
   const auto kept = [&](std::uint32_t address) { return std::binary_search(result.admitted.begin(), result.admitted.end(), address & bus_mask); };
+  const auto classify = [&](std::uint32_t address) { return genesis_hybrid_admission_contains(regions, address & bus_mask) ? "pruned" : "outside_region"; };
   for (const auto &[address, entry] : broad)
-    if (entry->execution_alias && !kept(address)) return reject("materialized_image_not_admitted");
+    if (entry->execution_alias && !kept(address)) {
+      const auto *reason = classify(address);
+      reject("materialized_image_not_admitted");
+      result.failure_class = reason;
+      return result;
+    }
   for (const auto root : genesis_reachability_roots(program).roots)
-    if (broad.contains(root & bus_mask) && !kept(root)) return reject("machine_root_not_admitted");
+    if (broad.contains(root & bus_mask) && !kept(root)) {
+      const auto *reason = classify(root);
+      reject("machine_root_not_admitted");
+      result.failure_class = reason;
+      return result;
+    }
   return result;
 }
 

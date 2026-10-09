@@ -133,6 +133,10 @@ struct GenesisRegionPruneResult {
   std::size_t pruned_count{};           // |K0 \ K|
   std::size_t rounds{};                 // removal waves until convergence (0 when K0 was already closed)
   std::optional<std::string> failure;   // rejection reason; K is not usable when set
+  // Diagnostic classification of a mandatory-identity rejection (sanitized; no address): the first offending root / materialized
+  // identity was OUTSIDE the proposed region ("outside_region", a region recall miss) or inside it but removed by structural
+  // pruning ("pruned", a pruning collapse). Empty otherwise.
+  std::string failure_class;
 };
 
 // Pure function of (program roots/aliases, entries, regions): never mutates `entries`.

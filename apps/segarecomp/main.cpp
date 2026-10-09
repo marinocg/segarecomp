@@ -438,7 +438,7 @@ int run_cli(int argc, char **argv) {
         segarecomp::GenesisRegionPruneResult pruned;
         const auto plan = segarecomp::plan_genesis_region_admission(*program, digest_value, *entries, *proposal, pruned);
         if (!plan) {
-          std::cerr << "segarecomp: region proposal REJECTED: " << pruned.failure.value_or("unknown") << " universe=" << pruned.universe_count
+          std::cerr << "segarecomp: region proposal REJECTED: " << pruned.failure.value_or("unknown") << (pruned.failure_class.empty() ? "" : " class=" + pruned.failure_class) << " universe=" << pruned.universe_count
                     << " k0=" << pruned.k0_count << " rounds=" << pruned.rounds << '\n';
           return 3;
         }
