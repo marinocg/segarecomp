@@ -227,3 +227,13 @@ unshipped `code_entry_candidate` / `address_table_candidate` / code-pointer-tabl
 
 After the cleanup: the full dev build succeeds; `U` counts (246,293 / 496,387 / 498,276 / 247,761 / 496,950) and, for Sonic 1 and Streets
 of Rage, the `U` digest and the broad generated-C SHA-256 equal their pre-cleanup values; the five-title native parity is still exact.
+
+## 15. T008 optimized-AOT CLI (PASS)
+
+`segarecomp build --aot-policy <compatibility|optimized>` (default `compatibility`; unknown values are a usage error, exit 2). No model,
+threshold, coefficient or schema option exists. The existing machine-readable seam (`status.json`) gains an always-present `aot_policy` object
+(requested mode, effective producer `broad|ml_region|admission_plan`, fallback flag, stable sanitized reason code, model/schema identity,
+candidate/admitted aggregates, validator status and a stable `identity` digest; see `docs/development/aot-policy.md`). Tested by
+`segarecomp_build_command_test` (default Compatibility report; Optimized report with distinct identity; fallback reasons are stable codes;
+exact-plan precedence; invalid value rejected) and `genesis_ml_admission_cli_test`. Master System images accept the flag and report
+`platform_not_applicable` (Genesis/SMS behaviour unchanged). Compatibility remains the default.
