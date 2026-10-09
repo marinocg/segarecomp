@@ -133,3 +133,19 @@ launcher is a thin consumer of that interface.
   depends on libm `log2`; the native test allows 1e-15 there and requires equality for every other feature.
 - T002: the vendored subset is the files found in the zlib 1.3.1 release that product needs plus one local `crc32` definition (see
   `third_party/zlib/README.md`); drift is guarded by recorded SHA-256 digests in `tests/segarecomp_ml_region_test.py`.
+
+## 11. T004 hard gate result: exact five-title native parity (PASS)
+
+`segarecomp emit-general-startup-bridge-c ... --immutable-rom-aot --ml-region-proposal-output` (report-only; native features + folded scorer +
+union with the precise direct-control discovery windows) was run on the five locally held parity images by
+`tools/segarecomp_ml_region_native_parity.py` (also CTest `genesis_ml_region_native_parity_local_test`, skipped when no parity image is held).
+For every title the window count, ML-selected count, seed-window count, final-selected count, region bytes, the SHA-256 of the final
+canonical regions text, and the SHA-256 of the ML-only regions text equal `tools/segarecomp_ml_region.parity.json` EXACTLY
+(Sonic 1 257/25, Sonic 2 560/16, Cool Spot 244/14, Streets of Rage 247/21, OutRun 341/23 selected/seed windows; digests
+e5210d14…, 1a34f38e…, 7260ec30…, fcfcf223…, 8e310d36…). No threshold, coefficient, feature, schema, epsilon or window exclusion was touched.
+Minimum |logit − threshold| per title (the exact-parity fragility measure): Sonic 1 0.048, Sonic 2 0.014, Streets of Rage 0.011, OutRun
+2.95e-4, Cool Spot 4.1e-5 — all more than eight orders of magnitude above the binary64 accumulation error (~1e-14), so the result is not
+sensitive to summation order, libm `log2` last-ulp differences or FMA. Reproduced with GCC 14.2 aarch64 `-O3` (Release) and `-O0` (Debug) builds.
+Clang could not be used as a second product compiler in this container because `frontend.cpp` already fails to build with clang +
+libstdc++ (incomplete `JsonValue` in a `std::pair`, unrelated to this PR); x86-64, macOS and Windows determinism is delegated to the CI
+matrix and re-checked at T010.

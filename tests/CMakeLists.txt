@@ -1116,6 +1116,11 @@ target_link_libraries(genesis_ml_scorer_test PRIVATE segarecomp::machine_genesis
 segarecomp_enable_warnings(genesis_ml_scorer_test)
 add_test(NAME genesis_ml_scorer_test COMMAND genesis_ml_scorer_test)
 set_property(TEST genesis_ml_scorer_test APPEND PROPERTY LABELS full fast)
+# SEG-047-T004 (ADR 0096): exact native-vs-committed-parity digests on whichever of the five parity images are held locally (skip: 77).
+add_test(NAME genesis_ml_region_native_parity_local_test
+  COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/segarecomp_ml_region_native_parity.py
+    --binary $<TARGET_FILE:segarecomp> --games ${PROJECT_SOURCE_DIR}/games)
+set_tests_properties(genesis_ml_region_native_parity_local_test PROPERTIES SKIP_RETURN_CODE 77)
 add_executable(genesis_m68k_executable_image_test genesis_m68k_executable_image_test.cpp)
 target_link_libraries(genesis_m68k_executable_image_test PRIVATE segarecomp::machine_genesis)
 segarecomp_enable_warnings(genesis_m68k_executable_image_test)

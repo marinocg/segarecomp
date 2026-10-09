@@ -3,6 +3,8 @@
 #include "segarecomp/machine/genesis/ml_region_producer.hpp"
 
 #include <algorithm>
+#include <iterator>
+#include <set>
 #include <cmath>
 #include <limits>
 
@@ -203,6 +205,56 @@ std::vector<FrontendProgram::ImmutableRomAotRange> genesis_ml_window_ranges(cons
     }
   }
   return runs;
+}
+
+GenesisMlRegionResult propose_genesis_ml_executable_regions(std::span<const std::uint8_t> rom, std::string_view rom_sha256,
+                                                            const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
+                                                            std::span<const std::uint32_t> seed_addresses) {
+  GenesisMlRegionResult result;
+  if (!genesis_ml_model_identity_failure().empty()) {
+    result.failure = "model_identity";
+    return result;
+  }
+  if (rom.empty() || (rom.size() & 1U) != 0U || rom.size() > genesis_ml_max_rom_bytes) {
+    result.failure = "rom_size";
+    return result;
+  }
+  const auto rows = genesis_window_feature_rows(entries, static_cast<std::uint32_t>(genesis_ml_window_bytes));
+  if (!rows.has_value()) {
+    result.failure = "model_identity";
+    return result;
+  }
+  const std::vector<double> matrix = genesis_ml_window_matrix(rom, *rows);
+  const std::size_t windows = matrix.size() / genesis_ml_feature_count;
+  std::vector<std::uint32_t> ml;
+  double margin = std::numeric_limits<double>::infinity();
+  for (std::size_t w = 0U; w < windows; ++w) {
+    const double logit = genesis_ml_logit(std::span<const double>(matrix).subspan(w * genesis_ml_feature_count, genesis_ml_feature_count));
+    margin = std::min(margin, std::fabs(logit - ml_logit_threshold));
+    if (logit >= ml_logit_threshold) ml.push_back(static_cast<std::uint32_t>(w));
+  }
+  std::vector<std::uint32_t> seeds;
+  for (const std::uint32_t address : seed_addresses)
+    if (address < rom.size()) seeds.push_back(static_cast<std::uint32_t>(address / genesis_ml_window_bytes));
+  std::sort(seeds.begin(), seeds.end());
+  seeds.erase(std::unique(seeds.begin(), seeds.end()), seeds.end());
+  std::vector<std::uint32_t> all;
+  std::set_union(ml.begin(), ml.end(), seeds.begin(), seeds.end(), std::back_inserter(all));
+  if (all.empty()) {
+    result.failure = "empty_proposal";
+    return result;
+  }
+  GenesisExecutableRegionProposal final_proposal{std::string(rom_sha256), genesis_ml_window_ranges(all, rom.size())};
+  GenesisExecutableRegionProposal ml_proposal{std::string(rom_sha256), genesis_ml_window_ranges(ml, rom.size())};
+  for (const auto &range : final_proposal.ranges) result.stats.region_bytes += range.end_address - range.begin_address;
+  result.stats.windows = windows;
+  result.stats.ml_selected = ml.size();
+  result.stats.seed_windows = seeds.size();
+  result.stats.final_selected = all.size();
+  result.stats.min_logit_margin = margin;
+  result.proposal = std::move(final_proposal);
+  if (!ml.empty()) result.ml_only = std::move(ml_proposal);
+  return result;
 }
 
 }  // namespace segarecomp

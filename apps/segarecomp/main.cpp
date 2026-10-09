@@ -5,6 +5,8 @@
 #include "segarecomp/codegen/c11/provenance_diagnostics.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
 #include "segarecomp/machine/genesis/hybrid_admission.hpp"
+#include "segarecomp/machine/genesis/ml_region_producer.hpp"
+#include "segarecomp/sha256.hpp"
 #include "segarecomp/machine/genesis/reachability_challenger.hpp"
 #include "build_command.hpp"
 #include "segarecomp/rom.hpp"
@@ -38,7 +40,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--page-structure-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--immutable-rom-aot-admission <plan>]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--page-structure-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--immutable-rom-aot-admission <plan>]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
@@ -113,6 +115,8 @@ int run_cli(int argc, char **argv) {
       std::optional<std::string_view> window_feature_report;
       std::uint32_t window_feature_bytes = 0U;
       std::optional<std::string_view> region_proposal_path;
+      // SEG-047 (ADR 0096): report-only native ML region proposal (frozen v1 model) written as `segarecomp.m68k_executable_regions.v1`.
+      std::optional<std::string_view> ml_region_proposal_output;
       std::optional<std::string_view> region_plan_output;
       // SEG-022-T002: stream the generated C to this file (fail-closed: written as `<path>.partial`
       // and atomically renamed only on complete success; removed on any failure).
@@ -170,6 +174,10 @@ int run_cli(int argc, char **argv) {
           if (value == "256") window_feature_bytes = 256U;
           else if (value == "512") window_feature_bytes = 512U;
           else { print_usage(std::cerr); return 2; }
+          index += 2;
+        } else if (option == "--ml-region-proposal-output") {
+          if (ml_region_proposal_output || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          ml_region_proposal_output = argv[index + 1];
           index += 2;
         } else if (option == "--immutable-aot-region-proposal") {
           if (region_proposal_path || index + 1 >= argc) { print_usage(std::cerr); return 2; }
@@ -439,6 +447,37 @@ int run_cli(int argc, char **argv) {
         std::ofstream sink{std::string(*window_feature_report), std::ios::binary};
         sink << *report;
         if (!sink) { std::cerr << "segarecomp: cannot write window feature report\n"; return 2; }
+      }
+      if (ml_region_proposal_output) {
+        const std::vector<segarecomp::FrontendAnalysis::ImmutableRomAotEntry> *entries = nullptr;
+        std::vector<std::uint32_t> seeds;
+        const auto collect_seeds = [&seeds](const segarecomp::FrontendAnalysis &analysis) {
+          for (const auto &decoded : analysis.decoded)
+            seeds.push_back(static_cast<std::uint32_t>(decoded.provenance.source.address.value) & UINT32_C(0x00FFFFFF));
+        };
+        if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) {
+          entries = &partial->accepted_prefix.immutable_rom_aot_entries;
+          collect_seeds(partial->accepted_prefix);
+        } else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result)) {
+          entries = &accepted->immutable_rom_aot_entries;
+          collect_seeds(*accepted);
+        }
+        if (entries == nullptr) { std::cerr << "segarecomp: ml region proposal: no broad analysis result\n"; return 3; }
+        const auto proposal = segarecomp::propose_genesis_ml_executable_regions(bytes, digest_value, *entries, seeds);
+        if (!proposal.proposal) { std::cerr << "segarecomp: ml region proposal failed: " << proposal.failure << '\n'; return 3; }
+        const auto text = segarecomp::format_genesis_executable_regions(*proposal.proposal);
+        std::ofstream sink{std::string(*ml_region_proposal_output), std::ios::binary};
+        sink << text;
+        if (!sink) { std::cerr << "segarecomp: cannot write ml region proposal\n"; return 2; }
+        const auto digest_of = [](const std::string &payload) {
+          return segarecomp::sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(payload.data()), payload.size()));
+        };
+        std::cerr << "segarecomp: ml region proposal: windows=" << proposal.stats.windows << " ml_selected=" << proposal.stats.ml_selected
+                  << " seed_windows=" << proposal.stats.seed_windows << " final_selected=" << proposal.stats.final_selected
+                  << " region_bytes=" << proposal.stats.region_bytes << " min_logit_margin=" << proposal.stats.min_logit_margin
+                  << " regions_sha256=" << digest_of(text) << " ml_only_regions_sha256="
+                  << (proposal.ml_only ? digest_of(segarecomp::format_genesis_executable_regions(*proposal.ml_only)) : std::string("none")) << '\n';
+        return 0;
       }
       if (region_proposal_path.has_value() != region_plan_output.has_value() ||
           (region_proposal_path && (!immutable_rom_aot || immutable_rom_aot_admission))) {

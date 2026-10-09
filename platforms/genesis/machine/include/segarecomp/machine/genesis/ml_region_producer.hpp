@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "segarecomp/machine/genesis/frontend.hpp"
+#include "segarecomp/machine/genesis/hybrid_admission.hpp"
 
 namespace segarecomp {
 
@@ -65,5 +66,32 @@ inline constexpr std::string_view genesis_ml_feature_version = "seg046-features-
 // Merges ascending window indices (512 B each, final range clipped to `rom_size`) into half-open ascending disjoint ranges.
 [[nodiscard]] std::vector<FrontendProgram::ImmutableRomAotRange> genesis_ml_window_ranges(const std::vector<std::uint32_t> &windows,
                                                                                        std::size_t rom_size);
+
+// ---- Region proposal (T004/T005) ------------------------------------------------------------------------------------------------
+// Resource bound on the image the producer accepts (defence in depth; a Genesis cartridge is at most 4 MiB).
+inline constexpr std::size_t genesis_ml_max_rom_bytes = std::size_t{32} << 20U;
+
+struct GenesisMlRegionStats {
+  std::size_t windows{};          // ceil(size / 512)
+  std::size_t ml_selected{};      // windows scored at/above the threshold
+  std::size_t seed_windows{};     // windows holding a precise direct-control-discovery identity (includes machine roots)
+  std::size_t final_selected{};   // |ML ∪ seeds|
+  std::size_t region_bytes{};     // bytes of the final proposal
+  double min_logit_margin{};      // min over windows of |logit - threshold| (reported for the exact-parity gate)
+};
+
+struct GenesisMlRegionResult {
+  std::optional<GenesisExecutableRegionProposal> proposal;  // R = ML-selected ∪ certain-code windows (nullopt on failure)
+  std::optional<GenesisExecutableRegionProposal> ml_only;   // ML-selected windows only (diagnostic / parity)
+  GenesisMlRegionStats stats;
+  std::string failure;  // stable sanitized reason when `proposal` is empty: model_identity | rom_size | empty_proposal
+};
+
+// The frozen v1 proposal: features of every 512-byte window of `rom` (decoder columns from the broad identities `entries`), folded scoring,
+// threshold, union with the windows of `seed_addresses` (the precise direct-control discovery instruction addresses). Pure and
+// deterministic; never mutates its inputs; fail-closed with a stable reason. It does not validate or prune anything.
+[[nodiscard]] GenesisMlRegionResult propose_genesis_ml_executable_regions(std::span<const std::uint8_t> rom, std::string_view rom_sha256,
+                                                                          const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
+                                                                          std::span<const std::uint32_t> seed_addresses);
 
 }  // namespace segarecomp
