@@ -149,3 +149,45 @@ sensitive to summation order, libm `log2` last-ulp differences or FMA. Reproduce
 Clang could not be used as a second product compiler in this container because `frontend.cpp` already fails to build with clang +
 libstdc++ (incomplete `JsonValue` in a `std::pair`, unrelated to this PR); x86-64, macOS and Windows determinism is delegated to the CI
 matrix and re-checked at T010.
+
+## 12. T005 integration result (PASS)
+
+Final admission architecture (Genesis M68K, `segarecomp emit-general-startup-bridge-c --immutable-rom-aot --immutable-rom-aot-ml-admission`, and
+`segarecomp build --aot-policy optimized`):
+
+```
+broad immutable-ROM universe U (decoder, unchanged)
+  -> native ML region proposal R  (frozen v1 model; R = ML windows ∪ precise direct-control-discovery windows)
+  -> unchanged structural pruning  K = greatest closed subset of U ∩ R
+  -> ordinary hybrid admission plan for K
+  -> unchanged apply_genesis_hybrid_admission validator on the real entries
+  -> ordinary selective generated-native AOT (runtime unchanged, ML-free)
+```
+Any producer failure (`model_identity`, `rom_size`, `empty_proposal`, `prune_rejected[outside_region|pruned]`, `validator_rejected`, `no_analysis`)
+broadens to the full universe with one sanitized `m68k admission:` report line; nothing is filtered on failure and the validator is never
+weakened or bypassed. An explicit `--immutable-rom-aot-admission` plan (the exact source/recomp-map route) is mutually exclusive with the ML
+option at the emitter and, in `segarecomp build`, outranks `--aot-policy optimized` (reported as `effective=admission_plan`,
+`reason=exact_plan_precedence`). Copy-alias preparation emissions run the same producer per emission, so no alias-set mismatch can silently
+re-broaden a plan.
+
+K counts equal ADR 0095 §4 exactly (the proposal is bit-identical, pruning is unchanged): Sonic 1 64,233 (pruned 277, 42 rounds); Sonic 2
+137,230 (3,209, 80); Cool Spot 56,980 (3,479, 77); Streets of Rage 61,374 (397, 70); OutRun 78,283 (6,006, 427). The generated C of the
+integrated route is byte-identical to the SEG-046 explicit-plan route (checked on Streets of Rage by SHA-256 of the full emission).
+
+Bounded broad-vs-selective differential (`tools/genesis_ml_admission_differential.py`: unchanged bridge, clang, 600 no-render frames,
+explicit instruction budget; final-state, frame-stream and coverage digests and outcome compared): all five titles `frames_reached`, digests
+EQUAL; generated C reduction (sharded tree bytes): Sonic 1 −73.8%, Sonic 2 −71.2%, Cool Spot −81.1%, Streets of Rage −70.2%, OutRun −73.8%;
+bridge wall (build + 600 frames, 4 vCPU, noisy): 58→14 s, 96→27 s, 87→14 s, 49→15 s, 60→14 s. The 23,200-frame execution-PC oracle bitmaps of
+SEG-046 are not present in this checkout, so the long-trace escape check is carried by K-identity with the SEG-046 plan (same K ⇒ same
+evidence) rather than re-measured; T010 treats this honestly. Synthetic end-to-end (`genesis_ml_admission_cli_test`): a recall miss of a
+dynamic-jump island yields a fail-closed guest stop, never wrong execution. gcc `-Werror` rejects constant division in generated broad C, so the
+differential uses clang for the generated programs (as SEG-046 did).
+
+## 13. T006 retirement of the FLOW8-D coarse region producer
+
+Removed: `tools/segarecomp_region_proposal.py` (the frozen FLOW8-D page policy), `tests/segarecomp_region_proposal_test.py` and its CTest, the
+`--page-structure-report` option and its per-2-KiB-bin report in the CLI. Retained: the region-proposal text representation
+(`segarecomp.m68k_executable_regions.v1`) and `--immutable-aot-region-proposal`/`--region-admission-plan-output` (used by the native producer's
+parity digest, the exact-map plan route and `tools/segarecomp_region_oracle_compare.py`), structural pruning, admission validation, the
+broad universe, exact-map support, `--window-feature-report` (the Python reference oracle's input) and the historical ADRs 0094/0095. (The two
+deleted files appear in the T005 commit because they were staged with `git rm` before the commits were split.)
