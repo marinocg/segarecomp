@@ -214,7 +214,7 @@ suites pass: genesis_window_features, segarecomp_ml_region, genesis_region_prune
 
 ## 9. Final answers and successor
 
-Successor: SEG-047 registered as a DRAFT milestone only (full refinement required first). It must not be read as more than "worth expanding the
+Successor: SEG-047 is drafted (record held out of the backlog until this PR merges, because the task-PR verifier rejects a milestone added during a task); it needs full refinement first. It must not be read as more than "worth expanding the
 source-backed corpus and replacing the single-title, minimum-score threshold with leave-one-title-out calibration and a margin". Broad AOT stays
 the unconditional fallback and the default; exact source maps remain the strongest selective authority; heuristic ML selective admission is not
 made a default by this experiment. Failure-mode reading if SEG-047 later fails: more labelled titles are needed before blaming the feature/model class.
