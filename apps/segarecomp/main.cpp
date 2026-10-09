@@ -38,7 +38,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--immutable-rom-aot-admission <plan>]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--page-structure-report <path>] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--immutable-rom-aot-admission <plan>]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
@@ -100,6 +100,17 @@ int run_cli(int argc, char **argv) {
       // of the broad immutable-ROM AOT identities; it is validated fail-closed (digest, alias set, structural closure) before the
       // identities are filtered. Absent: broad admission, byte-identical to before SEG-031.
       std::optional<std::string_view> immutable_rom_aot_admission;
+      // SEG-045 (ADR 0094): REPORT-ONLY structural pruning of an externally proposed executable region. The proposal
+      // (`segarecomp.m68k_executable_regions.v1`) is pruned to the greatest structurally closed subset of the broad identities and the
+      // resulting ordinary hybrid admission plan is written; nothing is generated. Both options are required together.
+      // SEG-045: report-only sink for the instruction addresses of the PRECISE direct-control discovery (`FrontendAnalysis::decoded`),
+      // one hex address per line, ascending. A region-seed input only; it cannot alter generation.
+      std::optional<std::string_view> direct_control_address_report;
+      // SEG-045: report-only per-2-KiB-bin structure counts of the broad identities (identities, flow terminators = no sequential
+      // continuation: BRA/JMP/RTS/RTE/RTR/exception-raising), derived only from the MC68000-owned control-successor projection.
+      std::optional<std::string_view> page_structure_report;
+      std::optional<std::string_view> region_proposal_path;
+      std::optional<std::string_view> region_plan_output;
       // SEG-022-T002: stream the generated C to this file (fail-closed: written as `<path>.partial`
       // and atomically renamed only on complete success; removed on any failure).
       std::optional<std::string_view> generated_c_output;
@@ -137,6 +148,22 @@ int run_cli(int argc, char **argv) {
         } else if (option == "--immutable-rom-aot-admission") {
           if (immutable_rom_aot_admission || index + 1 >= argc) { print_usage(std::cerr); return 2; }
           immutable_rom_aot_admission = argv[index + 1];
+          index += 2;
+        } else if (option == "--direct-control-address-report") {
+          if (direct_control_address_report || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          direct_control_address_report = argv[index + 1];
+          index += 2;
+        } else if (option == "--page-structure-report") {
+          if (page_structure_report || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          page_structure_report = argv[index + 1];
+          index += 2;
+        } else if (option == "--immutable-aot-region-proposal") {
+          if (region_proposal_path || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          region_proposal_path = argv[index + 1];
+          index += 2;
+        } else if (option == "--region-admission-plan-output") {
+          if (region_plan_output || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          region_plan_output = argv[index + 1];
           index += 2;
         } else if (option == "--immutable-aot-address-report") {
           if (immutable_aot_address_report || index + 1 >= argc) { print_usage(std::cerr); return 2; }
@@ -332,6 +359,102 @@ int run_cli(int argc, char **argv) {
           std::cerr << "segarecomp: m68k admission: strategy=" << segarecomp::genesis_admission_strategy_name(plan->strategy)
                     << " admitted=" << entries->size() << " broad=" << broad_count << '\n';
         }
+      }
+      if (direct_control_address_report) {
+        std::vector<std::uint32_t> seen;
+        const auto collect_direct = [&seen](const segarecomp::FrontendAnalysis &analysis) {
+          for (const auto &decoded : analysis.decoded)
+            seen.push_back(static_cast<std::uint32_t>(decoded.provenance.source.address.value) & UINT32_C(0x00FFFFFF));
+        };
+        if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) collect_direct(partial->accepted_prefix);
+        else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result)) collect_direct(*accepted);
+        std::sort(seen.begin(), seen.end());
+        seen.erase(std::unique(seen.begin(), seen.end()), seen.end());
+        std::ofstream sink{std::string(*direct_control_address_report)};
+        for (const auto address : seen) sink << std::hex << address << '\n';
+        if (!sink) { std::cerr << "segarecomp: cannot write direct-control address report\n"; return 2; }
+      }
+      if (page_structure_report) {
+        std::map<std::uint32_t, std::pair<std::uint64_t, std::uint64_t>> bins;  // 2 KiB bin -> (identities, flow terminators)
+        const auto collect_pages = [&bins](const segarecomp::FrontendAnalysis &analysis) {
+          for (const auto &entry : analysis.immutable_rom_aot_entries) {
+            if (entry.execution_alias) continue;
+            const auto control = segarecomp::m68k_control_successors(entry.operation);
+            // A flow terminator ends sequential flow by an explicit unconditional transfer: BRA / direct JMP (a branch target and no
+            // sequential or conditional successor), or a dynamic return / jump family (RTS, RTE, RTR, JMP ea).
+            bool sequential = control.stacked == segarecomp::M68kStackedContinuationKind::call_continuation;
+            bool direct_jump = false;
+            for (const auto &successor : control.successors) {
+              if (successor.kind == segarecomp::M68kControlSuccessorKind::fallthrough ||
+                  successor.kind == segarecomp::M68kControlSuccessorKind::conditional_fallthrough ||
+                  successor.kind == segarecomp::M68kControlSuccessorKind::conditional_target)
+                sequential = true;
+              if (successor.kind == segarecomp::M68kControlSuccessorKind::branch_target) direct_jump = true;
+            }
+            using Family = segarecomp::M68kDynamicControlFamily;
+            const bool dynamic_end = control.dynamic == Family::return_from_subroutine || control.dynamic == Family::return_from_exception ||
+                                     control.dynamic == Family::return_restore_condition_codes || control.dynamic == Family::jump_address_indirect ||
+                                     control.dynamic == Family::jump_address_disp16 || control.dynamic == Family::jump_address_index ||
+                                     control.dynamic == Family::jump_pc_index;
+            if (!direct_jump && !dynamic_end) sequential = true;  // not an explicit terminator: count as sequential
+            auto &bin = bins[(static_cast<std::uint32_t>(entry.decoded.provenance.source.address.value) & UINT32_C(0x00FFFFFF)) >> 11U];
+            ++bin.first;
+            if (!sequential) ++bin.second;
+          }
+        };
+        if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) collect_pages(partial->accepted_prefix);
+        else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result)) collect_pages(*accepted);
+        std::ofstream sink{std::string(*page_structure_report)};
+        sink << "segarecomp.m68k_page_structure.v1 bin_bytes 2048\n";
+        for (const auto &[bin, counts] : bins) {
+          char line[64];
+          std::snprintf(line, sizeof(line), "%08x %llu %llu\n", static_cast<unsigned>(bin << 11U), static_cast<unsigned long long>(counts.first),
+                        static_cast<unsigned long long>(counts.second));
+          sink << line;
+        }
+        if (!sink) { std::cerr << "segarecomp: cannot write page structure report\n"; return 2; }
+      }
+      if (region_proposal_path.has_value() != region_plan_output.has_value() ||
+          (region_proposal_path && (!immutable_rom_aot || immutable_rom_aot_admission))) {
+        std::cerr << "segarecomp: region proposal requires --immutable-rom-aot, the plan output, and excludes --immutable-rom-aot-admission\n";
+        return 2;
+      }
+      if (region_proposal_path) {
+        std::ifstream proposal_file{std::string(*region_proposal_path), std::ios::binary};
+        std::string proposal_text;
+        if (proposal_file) {
+          proposal_text.resize(segarecomp::genesis_hybrid_admission_plan_max_bytes + 1U);
+          proposal_file.read(proposal_text.data(), static_cast<std::streamsize>(proposal_text.size()));
+          proposal_text.resize(static_cast<std::size_t>(proposal_file.gcount()));
+        }
+        if (!proposal_file && !proposal_file.eof()) { std::cerr << "segarecomp: cannot read region proposal\n"; return 2; }
+        std::string parse_error;
+        const auto proposal = segarecomp::parse_genesis_executable_regions(proposal_text, &parse_error);
+        if (!proposal) { std::cerr << "segarecomp: region proposal rejected: " << parse_error << '\n'; return 2; }
+        const std::vector<segarecomp::FrontendAnalysis::ImmutableRomAotEntry> *entries = nullptr;
+        if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) entries = &partial->accepted_prefix.immutable_rom_aot_entries;
+        else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result)) entries = &accepted->immutable_rom_aot_entries;
+        if (entries == nullptr) { std::cerr << "segarecomp: region proposal: no broad analysis result\n"; return 3; }
+        segarecomp::GenesisRegionPruneResult pruned;
+        const auto plan = segarecomp::plan_genesis_region_admission(*program, digest_value, *entries, *proposal, pruned);
+        if (!plan) {
+          std::cerr << "segarecomp: region proposal REJECTED: " << pruned.failure.value_or("unknown") << (pruned.failure_class.empty() ? "" : " class=" + pruned.failure_class) << " universe=" << pruned.universe_count
+                    << " k0=" << pruned.k0_count << " rounds=" << pruned.rounds << '\n';
+          return 3;
+        }
+        // The unchanged production validator must accept the plan on a scratch copy (defence in depth).
+        auto scratch = *entries;
+        if (const auto failure = segarecomp::apply_genesis_hybrid_admission(*program, digest_value, *plan, scratch)) {
+          std::cerr << "segarecomp: region plan rejected by the production validator: " << *failure << '\n';
+          return 3;
+        }
+        std::ofstream sink{std::string(*region_plan_output), std::ios::binary};
+        sink << segarecomp::format_genesis_hybrid_admission_plan(*plan);
+        if (!sink) { std::cerr << "segarecomp: cannot write region admission plan\n"; return 2; }
+        std::cerr << "segarecomp: region prune: universe=" << pruned.universe_count << " k0=" << pruned.k0_count
+                  << " k=" << pruned.admitted.size() << " pruned=" << pruned.pruned_count << " rounds=" << pruned.rounds
+                  << " validator=accepted ranges=" << plan->ranges.size() << '\n';
+        return 0;
       }
       if (immutable_rom_aot) {
         std::uint64_t aligned_start_count = 0U;

@@ -217,4 +217,162 @@ std::optional<std::string> apply_genesis_hybrid_admission(const FrontendProgram 
   return std::nullopt;
 }
 
+std::string format_genesis_executable_regions(const GenesisExecutableRegionProposal &proposal) {
+  std::ostringstream out;
+  out << genesis_executable_regions_schema << '\n' << "rom_sha256 " << proposal.rom_sha256 << '\n';
+  for (const auto &range : proposal.ranges) out << "range " << hex8(range.begin_address) << ' ' << hex8(range.end_address) << '\n';
+  out << "end\n";
+  return out.str();
+}
+
+std::optional<GenesisExecutableRegionProposal> parse_genesis_executable_regions(std::string_view text, std::string *error) {
+  const auto fail = [&](const char *reason) -> std::optional<GenesisExecutableRegionProposal> {
+    if (error != nullptr) *error = reason;
+    return std::nullopt;
+  };
+  if (text.size() > genesis_hybrid_admission_plan_max_bytes) return fail("regions_too_large");
+  std::vector<std::string_view> lines;
+  while (!text.empty()) {
+    const auto newline = text.find('\n');
+    if (newline == std::string_view::npos) return fail("regions_unterminated_line");
+    lines.push_back(text.substr(0, newline));
+    text.remove_prefix(newline + 1U);
+  }
+  if (lines.size() < 4U || lines[0] != genesis_executable_regions_schema) return fail("regions_schema");
+  GenesisExecutableRegionProposal proposal;
+  if (lines[1].substr(0, 11U) != "rom_sha256 " || !valid_sha256(lines[1].substr(11U))) return fail("regions_rom_sha256");
+  proposal.rom_sha256 = std::string(lines[1].substr(11U));
+  for (std::size_t i = 2U; i + 1U < lines.size(); ++i) {
+    const auto line = lines[i];
+    if (line.substr(0, 6U) != "range " || line.size() != 23U || line[14] != ' ') return fail("regions_range");
+    const auto begin = parse_hex8(line.substr(6U, 8U));
+    const auto end = parse_hex8(line.substr(15U, 8U));
+    if (!begin || !end || *begin >= *end || (*begin & 1U) != 0U || (*end & 1U) != 0U || *end > bus_mask + 1U) return fail("regions_range");
+    if (!proposal.ranges.empty() && *begin <= proposal.ranges.back().end_address) return fail("regions_range_order");
+    if (proposal.ranges.size() >= genesis_hybrid_admission_plan_max_ranges) return fail("regions_too_many_ranges");
+    proposal.ranges.push_back({*begin, *end});
+  }
+  if (lines.back() != "end") return fail("regions_trailer");
+  if (proposal.ranges.empty()) return fail("regions_empty");
+  return proposal;
+}
+
+GenesisRegionPruneResult prune_genesis_region_admission(const FrontendProgram &program,
+                                                        const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
+                                                        const std::vector<FrontendProgram::ImmutableRomAotRange> &regions,
+                                                        std::size_t max_rounds) {
+  GenesisRegionPruneResult result;
+  const auto reject = [&](const char *reason) {
+    result.admitted.clear();
+    result.failure = reason;
+    return result;
+  };
+  for (std::size_t i = 0; i < regions.size(); ++i) {
+    const auto &range = regions[i];
+    if (range.begin_address >= range.end_address || (range.begin_address & 1U) != 0U || (range.end_address & 1U) != 0U ||
+        (i > 0U && range.begin_address <= regions[i - 1U].end_address))
+      return reject("malformed_region");
+  }
+  // U by execution address (first identity wins, exactly as the validator's `broad` map).
+  std::map<std::uint32_t, const FrontendAnalysis::ImmutableRomAotEntry *> broad;
+  for (const auto &entry : entries) broad.emplace(entry_address(entry), &entry);
+  result.universe_count = broad.size();
+  // Nodes of K0 in ascending address order; indices are stable and independent of any input order.
+  std::vector<std::uint32_t> nodes;
+  std::vector<const FrontendAnalysis::ImmutableRomAotEntry *> node_entry;
+  for (const auto &[address, entry] : broad)
+    if (genesis_hybrid_admission_contains(regions, address)) {
+      nodes.push_back(address);
+      node_entry.push_back(entry);
+    }
+  result.k0_count = nodes.size();
+  const auto node_index = [&](std::uint32_t address) -> std::optional<std::size_t> {
+    const auto it = std::lower_bound(nodes.begin(), nodes.end(), address);
+    if (it == nodes.end() || *it != address) return std::nullopt;
+    return static_cast<std::size_t>(it - nodes.begin());
+  };
+  std::vector<std::vector<std::size_t>> required_by(nodes.size());  // reverse edges: target -> identities requiring it
+  std::vector<std::size_t> violating;                               // identities whose obligation leaves K0 outright
+  for (std::size_t i = 0; i < nodes.size(); ++i) {
+    std::vector<std::uint32_t> targets;
+    const auto control = m68k_control_successors(node_entry[i]->operation);
+    for (const auto &successor : control.successors) targets.push_back(successor.target & bus_mask);
+    if (control.stacked == M68kStackedContinuationKind::call_continuation) targets.push_back(control.stacked_address & bus_mask);
+    bool leaves = false;
+    for (const auto target : targets) {
+      if (!broad.contains(target)) continue;  // not a broad identity: no obligation (validator behaviour)
+      if (const auto index = node_index(target)) required_by[*index].push_back(i);
+      else leaves = true;
+    }
+    if (leaves) violating.push_back(i);
+  }
+  std::vector<bool> removed(nodes.size(), false);
+  std::vector<bool> queued(nodes.size(), false);
+  for (const auto i : violating) queued[i] = true;
+  std::vector<std::size_t> wave = violating;
+  while (!wave.empty()) {
+    if (++result.rounds > max_rounds) return reject("region_prune_cap_exhausted");
+    for (const auto i : wave) removed[i] = true;
+    std::vector<std::size_t> next;
+    for (const auto i : wave)
+      for (const auto parent : required_by[i])
+        if (!queued[parent]) {
+          queued[parent] = true;
+          next.push_back(parent);
+        }
+    std::sort(next.begin(), next.end());
+    wave = std::move(next);
+  }
+  for (std::size_t i = 0; i < nodes.size(); ++i)
+    if (!removed[i]) result.admitted.push_back(nodes[i]);
+  result.pruned_count = result.k0_count - result.admitted.size();
+  if (result.admitted.empty()) return reject("empty_admission");
+  const auto kept = [&](std::uint32_t address) { return std::binary_search(result.admitted.begin(), result.admitted.end(), address & bus_mask); };
+  const auto classify = [&](std::uint32_t address) { return genesis_hybrid_admission_contains(regions, address & bus_mask) ? "pruned" : "outside_region"; };
+  for (const auto &[address, entry] : broad)
+    if (entry->execution_alias && !kept(address)) {
+      const auto *reason = classify(address);
+      reject("materialized_image_not_admitted");
+      result.failure_class = reason;
+      return result;
+    }
+  for (const auto root : genesis_reachability_roots(program).roots)
+    if (broad.contains(root & bus_mask) && !kept(root)) {
+      const auto *reason = classify(root);
+      reject("machine_root_not_admitted");
+      result.failure_class = reason;
+      return result;
+    }
+  return result;
+}
+
+std::optional<GenesisHybridAdmissionPlan> plan_genesis_region_admission(
+    const FrontendProgram &program, std::string_view rom_sha256, const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries,
+    const GenesisExecutableRegionProposal &proposal, GenesisRegionPruneResult &result, std::size_t max_rounds) {
+  if (!program.immutable_rom_aot_enabled) {
+    result = {};
+    result.failure = "broad_aot_not_enabled";
+    return std::nullopt;
+  }
+  if (proposal.rom_sha256 != rom_sha256) {
+    result = {};
+    result.failure = "rom_sha256_mismatch";
+    return std::nullopt;
+  }
+  result = prune_genesis_region_admission(program, entries, proposal.ranges, max_rounds);
+  if (result.failure) return std::nullopt;
+  std::vector<std::uint32_t> universe;
+  universe.reserve(entries.size());
+  for (const auto &entry : entries) universe.push_back(entry_address(entry));
+  std::sort(universe.begin(), universe.end());
+  universe.erase(std::unique(universe.begin(), universe.end()), universe.end());
+  GenesisHybridAdmissionPlan plan;
+  plan.rom_sha256 = std::string(rom_sha256);
+  plan.universe_sha256 = genesis_hybrid_admission_universe_digest(universe);
+  plan.aliases = program.immutable_copy_aliases;
+  plan.strategy = GenesisAdmissionStrategy::hybrid;
+  plan.ranges = genesis_hybrid_admission_ranges(universe, result.admitted);
+  return plan;
+}
+
 }  // namespace segarecomp

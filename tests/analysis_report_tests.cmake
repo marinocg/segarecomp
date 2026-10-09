@@ -330,6 +330,9 @@ set_property(TEST segarecomp_source_map_extract_test APPEND PROPERTY LABELS full
 add_test(NAME segarecomp_source_universe_plan_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_source_universe_plan_test.py)
 set_property(TEST segarecomp_source_universe_plan_test APPEND PROPERTY LABELS full fast)
+add_test(NAME segarecomp_region_proposal_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_region_proposal_test.py)
+set_property(TEST segarecomp_region_proposal_test APPEND PROPERTY LABELS full fast)
 
 # SEG-031 (ADR 0080): the explicit hybrid candidate end to end (planner -> plan -> filtered emission -> strict C11 build and run with
 # an explicit instruction budget), identical behaviour to broad, and the emitter's fail-closed plan validation.
