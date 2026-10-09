@@ -417,6 +417,7 @@ int gui() {
     static const SDL_DialogFileFilter filters[] = {{"Genesis / Mega Drive ROMs", "md;bin;gen;smd"}, {"Master System ROMs", "sms"}, {"All files", "*"}};
     SDL_ShowOpenFileDialog(dialog_callback, &pending, window, filters, 3, nullptr, false);
   };
+  if (const char *shot_policy = SDL_getenv("SEGARECOMP_SHOT_POLICY"); shot_policy && std::string(shot_policy) == "optimized") policy_choice = "optimized";  // review aid
   if (const char *preselect = SDL_getenv("SEGARECOMP_SHOT_ROM")) {  // review aid, see maybe_save_screenshot
     select_rom(preselect);
     if (SDL_getenv("SEGARECOMP_SHOT_BUILD") && state == State::RomSelected) start_build(false);
@@ -633,12 +634,12 @@ int gui() {
         if (outline_button(centered, "choose2", content_x + 268.0F, row_y + 30.0F, 140.0F, 42.0F, "Choose...", font_regular, 14.0F))
           browse();
         // Fixed control scheme (the runtime has no remapping UI yet): keep it visible right where "Play" is.
-        mode_row(row_y + 82.0F);
-        if (policy_report.fallback && outline_button(centered, "fb_details", content_x + 346.0F, row_y + 82.0F, 58.0F, 26.0F, "Why?", font_regular, 12.0F)) {
+        mode_row(row_y + 80.0F);
+        if (policy_report.fallback && outline_button(centered, "fb_details", content_x + 346.0F, row_y + 80.0F, 58.0F, 26.0F, "Why?", font_regular, 12.0F)) {
           show_diagnostics = !show_diagnostics;
           fallback_details();
         }
-        const float controls_y = row_y + 118.0F;
+        const float controls_y = row_y + 112.0F;
         draw_text(dl, font_bold, centered.len(13), text_secondary, centered.at(content_x, controls_y), "Controls");
         draw_text(dl, font_regular, centered.len(13), text_footer, centered.at(content_x, controls_y + 20.0F),
                  rom.platform_id == "master-system" ? "Arrows = D-Pad   Z = Button 1   X = Button 2   P = Pause   R = Reset"

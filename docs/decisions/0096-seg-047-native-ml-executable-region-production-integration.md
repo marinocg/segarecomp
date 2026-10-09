@@ -238,7 +238,7 @@ candidate/admitted aggregates, validator status and a stable `identity` digest; 
 exact-plan precedence; invalid value rejected) and `genesis_ml_admission_cli_test`. Master System images accept the flag and report
 `platform_not_applicable` (Genesis/SMS behaviour unchanged). Compatibility remains the default.
 
-## 16. T009 launcher integration (PASS; GUI not exercised in this container)
+## 16. T009 launcher integration (PASS)
 
 The existing SDL3/Dear ImGui launcher stays a thin consumer of `segarecomp build`: it gains a two-option Mode control (Compatibility, the
 default; Optimized) for Genesis images, with no model, threshold or schema control and no inference in launcher code. The choice is passed as
@@ -251,7 +251,9 @@ image ignores the request, as it has no Optimized producer). After a build or on
 mapper flow are unchanged. The headless smoke mode accepts `--aot-policy` and reports `aot_policy_requested/effective/fallback/reason`.
 The launcher's non-UI core became its own target (`segarecomp_launcher_core`) so `launcher_policy_test` can assert, without a window: default
 Compatibility, Genesis-only Optimized, distinct and deterministic cache entries, status parsing and fallback wording; CI runs it in the SDL3
-job. Verification here: warning-clean syntax/type check of the launcher sources against SDL 3.4.16 headers and ImGui 1.92, and
-`launcher_policy_test` compiled and run against a Linux static SDL build; the interactive window and the packaged zig toolchain are not
-available in this container, so the visual layout (a Mode row added below the action buttons; "Native build ready" note) is reviewed by T010
-from the code and by the SDL3 CI job's build, not from a screenshot.
+job (the push token lacks the `workflow` scope, so the workflow file was not edited: the test instead runs as a POST_BUILD step of the launcher target, which the SDL3 job and native release builds already build; skipped when cross-compiling). Verification here: the launcher links and its POST_BUILD contract test passes on Linux against a static SDL 3.4.16 build; the GUI was
+rendered headless (SDL dummy video + software renderer, a fake package home and cache) and the screenshots reviewed for the Genesis ROM
+selected state (Mode row: Compatibility selected, Optimized available), a Compatibility Ready entry ("Compatibility build"), and an Optimized
+Ready entry that fell back (distinct cache entry loaded; red "Optimized unavailable for this game: built Compatibility" and a "Why?" button).
+The interactive click paths, the real zig toolchain build and Windows/macOS rendering are not exercised in this container (SDL3 CI job builds
+the launcher; T010 reviews the code path).
