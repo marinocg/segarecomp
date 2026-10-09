@@ -160,3 +160,21 @@ Economics (`segarecomp build`, clang, 4 vCPU, quiet machine, broad -> ML-selecti
 Economic gate: 4 of 4 titles satisfy generated C <= -30%, compile CPU <= -25%, runtime regression <= +15% (the only >15% single sample, Sonic 2's
 first pass, was not reproduced on a quiet rerun; machine run-to-run noise on broad is about +-35%). Broad emission is byte-identical to the
 SEG-045 broad emission of Sonic 1 with the new report flags present.
+
+## 6. Mutation / adversarial checks run by the implementer (T006, before independent review)
+
+- Shuffled Sonic 1 labels (same features, blocked CV): OOF AUC 0.457-0.498 for all four configurations and, at 100% observed recall, the selected
+  fraction is 99.6-100% of the ROM - the model loses all discriminating power, so the real result is not a feature/leak artifact of the CV
+  harness itself.
+- Injected `abs_address` / `rom_offset` / `window_ordinal` / `title_code` / `source_hit` / `exec_count` / `coverage_ratio` / `window_start`
+  feature: rejected by `assert_feature_schema` (unit test).
+- Renamed and relocated Cool Spot image (title-like filename): identical regions file; re-run: identical; reordered/independent per-window
+  extraction: identical rows (unit test); two fits of the final model: identical artifact and prediction digests.
+- Wrong ROM hash for the source labels: `train` stops ("source labels are bound to the pinned Sonic 1 image"); wrong hash in a universe file,
+  unsorted/odd/out-of-range/short-count universe: fail closed (unit test).
+- Dropping or forcing a low score on a source-positive window: the `C ⊆ R` containment check reports the uncovered source address (unit test).
+- A runtime coverage/oracle file given to `train`/`freeze`/`propose`: refused. A modified (1-byte-appended) model artifact: refused by digest
+  before any unpickling. An unfrozen / schema-mismatched frozen definition: refused.
+- Blocked folds are contiguous, purged by 2 windows each side and cover each window exactly once (unit test); no random split exists in the tool.
+- Broad emission of Sonic 1 with the new report flags is byte-identical to the SEG-045 broad emission; the new options are report-only.
+- No ML package is imported by generated programs, the CLI binary, the runtime, or CI tests (the product binary is C++ only).
