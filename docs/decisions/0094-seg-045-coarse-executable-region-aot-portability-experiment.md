@@ -57,7 +57,7 @@ Rejected on Sonic 1 (criterion: 100% page coverage of `C` and R <= 40% of ROM):
 - Code-seed policies P0/P1/P2 over the precise direct-control discovery (599 identities) at 2/4/8 KiB: P2 at 8 KiB selects only 12.5%
   of ROM and misses 11 `C` pages (jump/object tables are not seen by direct discovery). All fail; no manual page added.
 - ROM-only flow-terminator density at 4 KiB: no threshold works (thresholds <= 0.007 give R = 40.6-41.4% or more, > 40%; >= 0.008
-  misses the sparse C page 29 holding 93 `C` identities).
+  misses one sparse `C` page holding under 100 `C` identities).
 
 Frozen policy `FLOW8-D` (`tools/segarecomp_region_proposal.py`; constants are code-frozen and unit-tested):
 - page size 8 KiB (an allowed sensitivity size; the primary 4 KiB failed as above);
@@ -150,3 +150,15 @@ No page, threshold or policy was changed after observing any title.
     capture small code islands in data pages (for example a high-recall code-entry inventory) before the pruning + fail-closed machinery
     is worth productionizing; that is a new experiment, not a successor of this one.
 14. Yes. Broad AOT remains the unconditional fallback and default; exact source maps remain the best case.
+
+## 8. Independent review (T006)
+
+Independent adversarial validator: PASS WITH FINDINGS, no blocking finding, validated HEAD 6ab3f09. Pruning kernel matches the production
+obligations (no off-by-one), order independent, never widens; rejection mutations (dropped root range, reordered/overlapping/truncated/CRLF
+region files, wrong ROM hash) all fail closed; policy constants unchanged since the freeze commit; the old broad emission is byte-identical to
+origin/main with and without `--immutable-rom-aot`. Findings: a locator-style page detail was removed from section 3; the reference fixed
+point shares `m68k_control_successors` with the kernel (production-obligation equality is checked by the unchanged validator acceptance instead);
+the diagnostic-only `failure_class` field was added to the kernel after the blind run (no change to K, rules or rounds); the Sonic 2 pass rests on
+a 2,478-PC no-input workload and "0 escapes outside K" is true by construction for a selective program, real detection being the typed
+fail-closed stop. Local fast gate: focused suites passed; `segarecomp_build_command_test` (gcc 14 `fdopen` implicit declaration in the test's
+own hook C) and `m68k_conformance_harness_test` (killed after 659 s under CPU contention) are unrelated to this diff; CI is the arbiter.
