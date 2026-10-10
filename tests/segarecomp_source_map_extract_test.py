@@ -286,5 +286,104 @@ class Extract(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(tmp, "z")))
 
 
+def a68(addr, field, src, trunc=False, macro=False):
+    """One ASM68K 2.53 listing line: 8-hex address, 24-column byte field, '+' truncation flag, 'M' macro marker, source."""
+    return f"{addr:08X} {field:<24}{'+' if trunc else ' '}{'M' if macro else ' '} {src}"
+
+
+class Asm68kAndAdapters(unittest.TestCase):
+    """SEG-048 (ADR 0099) adapters; synthetic project-authored listings only."""
+
+    def test_as_bld89_addressless_continuation(self):
+        rom = bytearray(32)
+        rom[0:16] = bytes(range(0x11, 0x21))
+        rom[16:18] = bytes.fromhex("4E75")
+        lines = ["AS V1.42 Beta [Bld 89]", f"{1:>6}/{0:>8X} : {'1112 1314 1516 1718':<20}\tdc.l\ta,b,c,d", f"{'':<20}191A 1B1C 1D1E 1F20 ",
+                 row(2, 16, "4E75", "\trts"), row(3, 18, "", "\tbinclude \"t.bin\"")]
+        text, summary = ex.extract("\n".join(lines) + "\n", bytes(rom), REV, None)
+        self.assertEqual(summary["instruction_starts"], 1)
+        self.assertEqual(summary["data_bytes"], 16)
+
+    def test_org_forward_padding_gap(self):
+        rom = bytearray(b"\xff" * 16)
+        rom[0:2] = bytes.fromhex("4E75")
+        lines = [row(1, 0, "4E75", "\trts"), row(2, 2, "", "Pad:"), row(3, 14, "", "\torg\t$E"), row(4, 14, "FFFF", "\tdc.w $FFFF")]
+        text, _ = ex.extract("\n".join(lines) + "\n", bytes(rom), REV, None)
+        self.assertIn("entries 1", text)
+        rom[5] = 0x12  # non-uniform fill: no longer plain padding
+        with self.assertRaises(ex.SourceMapError) as ctx:
+            ex.extract("\n".join(lines) + "\n", bytes(rom), REV, None)
+        self.assertEqual(ctx.exception.code, "unexplained_rom_range")
+
+    def test_z80_save_block_after_rebasing_org(self):
+        rom = bytearray(32)
+        rom[0:2] = bytes.fromhex("4E75")
+        rom[2:6] = bytes([0xAF, 0xAF, 0xAF, 0xAF])  # Z80 block bytes live in the ROM gap
+        rom[6:8] = bytes.fromhex("4E75")
+        lines = [row(1, 0, "4E75", "\trts"), row(2, 2, "", "Z80Block:"), row(3, 0, "", "\t!org 0"), row(4, 0, "", "\tsave"),
+                 row(5, 0, "", "\tCPU Z80"), row(6, 0, "AFAFAFAF", "\tdb 1,2,3,4"), row(7, 4, "", "\trestore"), row(8, 6, "", "\t!org 6"),
+                 row(9, 6, "4E75", "\trts"), row(10, 8, "", "\tbinclude \"t\"")]
+        text, _ = ex.extract("\n".join(lines) + "\n", bytes(rom), REV, None)
+        self.assertIn("entries 2", text)
+
+    def asm68k_fixture(self):
+        rom = bytearray(0x40)
+        code = {0x00: "4E71", 0x02: "6100", 0x04: "7200"}
+        rom[0:2] = bytes.fromhex("4E71")
+        rom[2:4] = bytes.fromhex("610C")   # bsr.s: displacement byte is a first-pass placeholder 00 in the listing
+        rom[4:6] = bytes.fromhex("7212")   # moveq with a forward equate
+        rom[6:22] = bytes(range(0x30, 0x40))  # 16-byte dc.b row: listing truncates it
+        rom[22:24] = bytes.fromhex("4E75")
+        rom[24:26] = bytes([0x05, 0x06])       # bytes emitted by a data-only macro, no listing row
+        rom[26:28] = bytes.fromhex("4E71")
+        lines = [
+            a68(0, "", "dataOnly: macro"), a68(0, "", "    case narg"), a68(0, "", "=1  dc.b strlen(\\1)"), a68(0, "", "    endcase"), a68(0, "", "    endm"),
+            a68(0, "4E71", "Start:\tnop"), a68(2, "6100", "\tbsr.s\tLater"), a68(4, "7200", "\tmoveq\t#FWD,d1"),
+            a68(6, "3031 3233 3435 3637 3839", "\tdc.b 'xxxxxxxxxxxxxxxx'", trunc=True), a68(22, "4E75", "Later:rts"),
+            a68(24, "", "\tdataOnly \"A\""), a68(26, "4E71", "\tnop"), a68(28, "", "\tincbin \"x.bin\""),
+        ]
+        return "\n".join(lines) + "\n", bytes(rom)
+
+    def test_asm68k_listing(self):
+        listing, rom = self.asm68k_fixture()
+        text, summary = ex.extract(listing, rom, REV, None, dialect="asm68k")
+        self.assertEqual(summary["instruction_starts"], 5)
+        self.assertEqual(summary["data_bytes"], 18)
+        self.assertIn("entries 5", text)
+
+    def test_asm68k_forward_placeholder_is_limited_to_branch_and_moveq(self):
+        listing, rom = self.asm68k_fixture()
+        bad = bytearray(rom)
+        bad[0] = 0x4E; bad[1] = 0x75  # a placeholder-looking difference on a non-branch opcode word
+        with self.assertRaises(ex.SourceMapError) as ctx:
+            ex.extract(listing, bytes(bad), REV, None, dialect="asm68k")
+        self.assertEqual(ctx.exception.code, "instruction_opcode_differs_from_rom")
+        bad = bytearray(rom)
+        bad[2] = 0x70  # different operation in the high byte of a branch word
+        with self.assertRaises(ex.SourceMapError) as ctx:
+            ex.extract(listing, bytes(bad), REV, None, dialect="asm68k")
+        self.assertEqual(ctx.exception.code, "instruction_opcode_differs_from_rom")
+
+    def test_asm68k_unlisted_bytes_need_a_data_only_macro(self):
+        listing, rom = self.asm68k_fixture()
+        broken = listing.replace('=1  dc.b strlen(\\1)', "=1  move.b d0,d1")  # the macro body now contains an instruction
+        with self.assertRaises(ex.SourceMapError) as ctx:
+            ex.extract(broken, rom, REV, None, dialect="asm68k")
+        self.assertEqual(ctx.exception.code, "unexplained_rom_range")
+
+    def test_asm68k_truncated_instruction_and_unknown_dialect(self):
+        lines = [a68(0, "4E71 4E71 4E71 4E71 4E71", "\tnop", trunc=True)]
+        with self.assertRaises(ex.SourceMapError) as ctx:
+            ex.extract("\n".join(lines) + "\n", bytes(16), REV, None, dialect="asm68k")
+        self.assertEqual(ctx.exception.code, "instruction_truncated")
+        with self.assertRaises(ex.SourceMapError) as ctx:
+            ex.extract("x\n", bytes(16), REV, None, dialect="other")
+        self.assertEqual(ctx.exception.code, "unknown_dialect")
+
+    def test_deterministic(self):
+        listing, rom = self.asm68k_fixture()
+        self.assertEqual(ex.extract(listing, rom, REV, None, dialect="asm68k"), ex.extract(listing, rom, REV, None, dialect="asm68k"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -190,3 +190,34 @@ handling, fixed here before any model result exists:
 4. Post-freeze, non-gating supplementary evidence is allowed and clearly labelled as such: Landstalker evaluated on the *source-built BETA
    variant image* (an exact rebuild of the pinned source, one header byte different from the authorized image; truth is exact for that rebuilt
    image, not for the authorized one), and the Sonic & Knuckles control (G, exact). Neither participates in any decision above.
+
+---
+
+# Results (appended chronologically; sections 1-12 above are the immutable T001 protocol)
+
+## 13. T002 - exact source truth for the four LOTO titles (commit C2)
+
+Produced after C1, with `tools/segarecomp_source_map_extract.py` extended by the adapters of section 5, each extraction run **twice
+independently with identical artifact digests** (private store `<harness>/.cache/seg048/truth/`; nothing below is address-level):
+
+| id | opaque title | producer / config id | dialect | instruction starts `|C|` | broad `|U|` | `|C|/|U|` | positive 512 B windows | truth artifact SHA-256 | repro |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A | Sonic 1 REV00 | `s1disasm-listing-v1` / `Revision0` | AS Bld 212 | 24,180 | 246,293 | 0.0982 | 230 / 1024 | `fd21b96bc0d79d62152fa172e2609026822b577d126ddebe5e7f70888127fc13` | 2/2 identical |
+| B | Flicky | `as-listing-v1` / `default` | AS Bld 212 | 5,707 | 64,352 | 0.0887 | 52 / 256 | `33916a8e6800a10aa3601a4c35ce5ca929067876994dd9e4c9b1c36e9cf8d6e0` | 2/2 identical |
+| C | Shining Force | `asm68k-listing-v1` / `default` | ASM68K 2.53 | 44,740 | 735,560 | 0.0608 | 352 / 3072 | `7f5289dce66deecde1d3a9aa18e5ec7992ef055deb2fe9bee6936a4fd9387059` | 2/2 identical |
+| D | Phantasy Star II | `as-listing-v1` / `rev2` | AS Bld 89 | 19,261 | 367,930 | 0.0523 | 145 / 1536 | `87174c5685eddc09c7ea00ac826e2ec1d5d5c470548529a2b3d25a77a17dea96` | 2/2 identical |
+
+Sanity (all four): every address even and inside the ROM; every emitted construct explained (the whole extraction fails closed otherwise);
+`C` contained in the broad `U` (0 outside); exact ROM identity (digest bound in the artifact); deterministic. The Sonic 1 universe is
+**byte-identical to the pre-adapter extractor's** (same digest, 24,180 starts). Observations kept honest: in Phantasy Star II and Shining Force the
+precise direct-control discovery reports 2 addresses each that fall inside a source instruction (not an instruction start) - the certain-code
+union still selects the right windows; they are not truth. The ASM68K listing prints first-pass placeholders for forward-referenced
+displacements (`bra.s`/`moveq` low byte) and data; the extractor therefore verifies the opcode word (high byte only for 2-byte branch/moveq),
+extents and exact coverage, and relies on the byte-exact rebuild of section 4 for operand values. The ASM68K `case`-arm bytes that the
+listing omits are explained only when the invoked macro is *data-only* (its echoed definition body contains no instruction and only
+data-only calls). `incbin` regions in Shining Force are graphics/maps/scripts/text/sound data by directory taxonomy (no 68000 code is binary-included).
+Amendment of adapter 2: `--trailing-pad` was not needed; the equivalent sound rule is "a uniform 00/FF gap ending at an `org` row" (Flicky), plus the
+Z80 `save` block anchor for a rebasing `org 0` (Phantasy Star II); `tests/segarecomp_source_map_extract_test.py` covers all adapters.
+
+Blind seal (checked at this commit): `segarecomp_ml_region_v2.py seal-check` over the whole private artifact store reports **INTACT** (no universe
+bound to Alien Soldier, Land Stalker or Sonic & Knuckles exists).

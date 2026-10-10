@@ -16,3 +16,7 @@ set_property(TEST segarecomp_ml_region_test APPEND PROPERTY LABELS full fast)
 add_test(NAME report_only_analysis_absent_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/report_only_analysis_absent_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST report_only_analysis_absent_test APPEND PROPERTY LABELS full fast)
+# SEG-048 (ADR 0099): offline multi-title hardening experiment tooling (LOTO folds, candidates, blind barrier). Hermetic: synthetic data only.
+add_test(NAME segarecomp_ml_region_v2_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_region_v2_test.py)
+set_property(TEST segarecomp_ml_region_v2_test APPEND PROPERTY LABELS full fast)
