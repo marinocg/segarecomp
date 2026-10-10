@@ -200,7 +200,7 @@ handling, fixed here before any model result exists:
 Produced after C1, with `tools/segarecomp_source_map_extract.py` extended by the adapters of section 5, each extraction run **twice
 independently with identical artifact digests** (private store `<harness>/.cache/seg048/truth/`; nothing below is address-level):
 
-| id | opaque title | producer / config id | dialect | instruction starts `|C|` | broad `|U|` | `|C|/|U|` | positive 512 B windows | truth artifact SHA-256 | repro |
+| id | opaque title | producer / config id | dialect | instruction starts C | broad U | C/U | positive 512 B windows | truth artifact SHA-256 | repro |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | A | Sonic 1 REV00 | `s1disasm-listing-v1` / `Revision0` | AS Bld 212 | 24,180 | 246,293 | 0.0982 | 230 / 1024 | `fd21b96bc0d79d62152fa172e2609026822b577d126ddebe5e7f70888127fc13` | 2/2 identical |
 | B | Flicky | `as-listing-v1` / `default` | AS Bld 212 | 5,707 | 64,352 | 0.0887 | 52 / 256 | `33916a8e6800a10aa3601a4c35ce5ca929067876994dd9e4c9b1c36e9cf8d6e0` | 2/2 identical |
@@ -221,3 +221,38 @@ Z80 `save` block anchor for a rebasing `org 0` (Phantasy Star II); `tests/segare
 
 Blind seal (checked at this commit): `segarecomp_ml_region_v2.py seal-check` over the whole private artifact store reports **INTACT** (no universe
 bound to Alien Soldier, Land Stalker or Sonic & Knuckles exists).
+
+## 14. T003 - frozen-v1 zero-shot comparator and v1-family LOTO baseline (commit C3)
+
+Release CLI (`emit-general-startup-bridge-c`, native broad analysis + window export + prune + unchanged production validator), 4 vCPU. `R` = ML
+windows (probability >= threshold) union the certain-code windows. `K` = admitted set after pruning. `margin_factor` = (minimum probability of any positive
+truth window) / (threshold). "C outside R/K" count instruction starts of the source truth.
+
+### 14.1 T003-A - exact committed SEG-046/047 v1 model, no retraining, no threshold change (threshold 0.00835406801187952)
+
+| held-out | C | R windows | R/ROM | U | K | K/U | C outside R | C outside K | validator | min positive p | threshold | margin_factor |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Sonic 1 | 24180 | 257 | 0.251 | 246293 | 64,233 | 0.2608 | 0 | 0 | accepted | 9.576e-01 | 8.354e-03 | 115 |
+| Flicky | 5707 | 60 | 0.234 | 64352 | 14,924 | 0.2319 | 34 | 37 | accepted | 2.074e-04 | 8.354e-03 | 0.0248 |
+| Shining Force | 44740 | 409 | 0.133 | 735560 | - | - | 11 | - | rejected (`region proposal REJECTED: machine_root_not_admitted class=pruned`) | 2.922e-08 | 8.354e-03 | 3.5e-06 |
+| Phantasy Star II | 19261 | 533 | 0.347 | 367930 | 127,389 | 0.3462 | 0 | 0 | accepted | 1.581e-01 | 8.354e-03 | 18.9 |
+
+Reading: the Sonic 1 row is the model's own training title (in-sample; it reproduces the SEG-046 record exactly: R 257 windows, K 64,233, K/U 0.2608).
+It is **not** cross-title evidence. On the three titles the v1 model never saw, containment holds only for Phantasy Star II (margin 18.9x);
+**Flicky leaves 34 source instruction starts outside R (37 outside K)** and **Shining Force leaves 11 outside R and the unchanged prune/validator
+fail-closes it (`machine_root_not_admitted`: the proposal is not structurally closed over a machine root)**. This is direct evidence about the
+production v1 route (which falls back to broad AOT on a prune rejection, but silently loses code windows on Flicky).
+
+### 14.2 T003-B - v1-family LOTO (F0 schema, logistic C=1, balanced, standardized, seed 46; scaler/model/threshold fitted on the three training titles only; P0 = minimum positive probability of the training titles' own positive windows)
+
+| held-out | C | R windows | R/ROM | U | K | K/U | C outside R | C outside K | validator | min positive p | threshold | margin_factor |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Sonic 1 | 24180 | 222 | 0.217 | 246293 | 53,876 | 0.2187 | 377 | 1302 | accepted | 3.833e-03 | 8.029e-01 | 0.00477 |
+| Flicky | 5707 | 51 | 0.199 | 64352 | 12,728 | 0.1978 | 63 | 67 | accepted | 1.149e-02 | 7.297e-01 | 0.0157 |
+| Shining Force | 44740 | 347 | 0.113 | 735560 | - | - | 921 | - | rejected (`region proposal REJECTED: machine_root_not_admitted class=pruned`) | 4.565e-09 | 8.968e-01 | 5.09e-09 |
+| Phantasy Star II | 19261 | 234 | 0.152 | 367930 | 55,578 | 0.1511 | 0 | 0 | accepted | 7.977e-01 | 7.683e-01 | 1.04 |
+
+Reading: the retrained-v1 family is *worse* than the single-title v1 on every held-out title except Phantasy Star II: the in-sample minimum positive
+probability of a nearly separable 141-feature logistic fit is a high, fragile threshold (0.73-0.90), and one low-scoring genuine code window in a
+held-out title (Shining Force's weakest positive window scores 4.6e-9; in the zero-shot run its weakest window is ordinary code - 101 source instruction starts, decoder identification density 0.98, 22 % zero bytes - so this is a real cross-title distribution shift, not a truth artifact) breaks
+containment. Only Phantasy Star II passes the static gates, with margin 1.04 (< 2.0). The two baselines are separate evidence and are not conflated.
