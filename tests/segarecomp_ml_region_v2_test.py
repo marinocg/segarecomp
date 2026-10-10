@@ -15,12 +15,12 @@ import segarecomp_ml_region_v2 as m  # noqa: E402
 
 
 def put(path, text, mode="w"):
-    with open(path, mode) as sink:
+    with open(path, mode, newline="\n") as sink:
         sink.write(text)
 
 
 def get(path):
-    with open(path) as source:
+    with open(path, newline="") as source:
         return source.read()
 
 
@@ -160,7 +160,7 @@ class Folds(unittest.TestCase):
 class Barrier(unittest.TestCase):
     def write_universe(self, root, name, sha):
         os.makedirs(os.path.dirname(os.path.join(root, name)), exist_ok=True)
-        with open(os.path.join(root, name), "w") as sink:
+        with open(os.path.join(root, name), "w", newline="\n") as sink:
             sink.write(f"segarecomp.m68k_source_universe.v1\nrom_sha256 {sha}\nproducer p\nsource_revision {'0' * 40}\nsource_config none\nentries 1\n00000000\nend\n")
 
     def test_seal_check(self):
@@ -213,12 +213,12 @@ class Barrier(unittest.TestCase):
         tools = os.path.join(root, "tools")
         os.makedirs(tools)
         for name in m.V1_ARTIFACTS:
-            with open(os.path.join(tools, name), "w") as sink:
+            with open(os.path.join(tools, name), "w", newline="\n") as sink:
                 sink.write(f"v1 {name}\n")
         if no_candidate:
             frozen = {"schema": m.FREEZE_SCHEMA, "status": "NO_QUALIFYING_CANDIDATE",
                       "v1_artifact_sha256": {n: hashlib.sha256(get(os.path.join(tools, n)).encode()).hexdigest() for n in m.V1_ARTIFACTS}}
-            with open(os.path.join(tools, "segarecomp_ml_region_v2.frozen.json"), "w") as sink:
+            with open(os.path.join(tools, "segarecomp_ml_region_v2.frozen.json"), "w", newline="\n") as sink:
                 sink.write(json.dumps(frozen, indent=1, sort_keys=True) + "\n")
             return tools
         names = m.schema_names("F2")
@@ -226,14 +226,14 @@ class Barrier(unittest.TestCase):
                  "feature_names": names}
         model_text = json.dumps(model, sort_keys=True) + "\n"
         parity_text = json.dumps({"folds": []}) + "\n"
-        with open(os.path.join(tools, "segarecomp_ml_region_v2.model.json"), "w") as sink:
+        with open(os.path.join(tools, "segarecomp_ml_region_v2.model.json"), "w", newline="\n") as sink:
             sink.write(model_text)
-        with open(os.path.join(tools, "segarecomp_ml_region_v2.parity.json"), "w") as sink:
+        with open(os.path.join(tools, "segarecomp_ml_region_v2.parity.json"), "w", newline="\n") as sink:
             sink.write(parity_text)
         frozen = {"schema": m.FREEZE_SCHEMA, "status": "FROZEN", "candidate": "F2", "feature_schema_sha256": m.schema_hash("F2"), "threshold": 0.25,
                   "feature_version": m.CANDIDATES["F2"]["version"], "model_json_sha256": hashlib.sha256(model_text.encode()).hexdigest(),
                   "parity_json_sha256": hashlib.sha256(parity_text.encode()).hexdigest()}
-        with open(os.path.join(tools, "segarecomp_ml_region_v2.frozen.json"), "w") as sink:
+        with open(os.path.join(tools, "segarecomp_ml_region_v2.frozen.json"), "w", newline="\n") as sink:
             sink.write(json.dumps(frozen, indent=1, sort_keys=True) + "\n")
         return tools
 
@@ -270,7 +270,7 @@ class Barrier(unittest.TestCase):
                 m.verify_freeze(tools)
 
     def git(self, root, *args):
-        subprocess.run(["git", "-C", root, "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args], check=True, capture_output=True)
+        subprocess.run(["git", "-C", root, "-c", "core.autocrlf=false", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args], check=True, capture_output=True)
 
     def test_post_freeze_mutation_and_v1_drift_detected_through_git(self):
         with tempfile.TemporaryDirectory() as tmp:

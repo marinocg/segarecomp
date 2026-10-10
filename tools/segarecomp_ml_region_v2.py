@@ -336,7 +336,7 @@ def seal_check(store: str) -> list[str]:
         if not path.is_file() or path.stat().st_size > (64 << 20):
             continue
         head = path.read_bytes()[:200].decode("ascii", errors="ignore")
-        lines = head.split("\n")
+        lines = head.replace("\r", "").split("\n")
         if len(lines) > 1 and lines[0] == "segarecomp.m68k_source_universe.v1" and lines[1].startswith("rom_sha256 "):
             if lines[1].split(" ", 1)[1] in SEALED_ROM_SHA256:
                 violations.append(str(path))
