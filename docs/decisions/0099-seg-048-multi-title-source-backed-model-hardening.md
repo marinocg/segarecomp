@@ -300,3 +300,31 @@ section 7 rule, which presumed at least one qualifying setting); the pre-registe
 carried forward unchanged to T006. The HGB comparator also fails its own admission criteria (Flicky 21 and Sonic 1 125 starts outside R; Shining Force
 1,827 outside R and rejected by the prune) and the required `>= 0.05` mean `K/U` improvement is not even defined without a qualifying baseline; it is not
 simpler to embed than a logistic. This choice of `C = 1.0` is the baseline value fixed in advance, not a result-tuned choice.
+
+## 17. T006 - cross-title threshold/margin policy and the freeze decision (commit C6 = `T006_FREEZE_COMMIT`)
+
+F0 + logistic C=1 (the carried-forward defaults of T004/T005); policies `P0 = 1.00x`, `P1 = 0.50x`, `P2 = 0.25x` the minimum positive probability of the training
+titles' own positive windows; every threshold derived from the three training titles only; four LOTO folds:
+
+| policy | features | Sonic 1 | Flicky | Shining Force | Phantasy Star II | all folds C subset R and K |
+| --- | --- | --- | --- | --- | --- | --- |
+| P0 (1.00x) | 141 | R-377 / K-1302 / 0.219 / m=0.00477 | R-63 / K-67 / 0.198 / m=0.0157 | R-921 / K-- / - REJ / m=5.09e-09 | R-0 / K-0 / 0.151 / m=1.04 | **no** |
+| P1 (0.50x) | 141 | R-191 / K-980 / 0.224 / m=0.00955 | R-63 / K-67 / 0.202 / m=0.0315 | R-440 / K-- / - REJ / m=1.02e-08 | R-0 / K-0 / 0.180 / m=2.08 | **no** |
+| P2 (0.25x) | 141 | R-109 / K-486 / 0.229 / m=0.0191 | R-63 / K-67 / 0.202 / m=0.063 | R-45 / K-- / - REJ / m=2.04e-08 | R-0 / K-0 / 0.203 / m=4.15 | **no** |
+
+Required on all four folds: `C subset R`, `C subset K`, `margin_factor >= 2.0`, `K/U <= 0.60`, validator accepted. **No policy satisfies any fold set**:
+Shining Force is rejected by the unchanged prune/validator under every policy (and still leaves 45 starts outside R at the most permissive 0.25x), Sonic 1
+leaves 109-377 starts outside R, Flicky leaves 63 outside R under all three, and Phantasy Star II alone passes the static gates (from 0.50x on; margin
+2.08 and 4.15). Lowering the factor further would be a new policy search and is forbidden (section 7).
+
+**Decision (pre-registered rule): `V1 RETAINED`.** No v2 candidate qualifies, so **no v2 model, parity or candidate artifact is produced** (training
+a "least bad" model would fabricate a candidate the protocol does not allow). The hard-freeze record
+`tools/segarecomp_ml_region_v2.frozen.json` (`status: NO_QUALIFYING_CANDIDATE`) records the decision, the per-policy fold aggregates, the corpus/truth
+digests, the environment and the SHA-256 of every v1 artifact. The barrier tool (`verify-freeze`) accepts exactly this record (and a `FROZEN` candidate
+record) and also pins the v1 artifacts to their recorded digests. Amendment note: section 9 anticipated only a `FROZEN` candidate record; the same
+barrier discipline applies to the negative record, no gate was changed, and its only effect is to allow the post-freeze supplementary evaluation of
+the *retained v1 model* described in section 12.4. From this commit on nothing about the model, schema, thresholds, margin rule, union, prune or
+validator may change.
+
+Final-answer implication already fixed here: the formal blind gate is moot as a model decision (there is no v2 to gate) in addition to being
+unsatisfiable for lack of corresponding images (section 12). Production Optimized AOT is untouched: v1 stays the production optimized model.

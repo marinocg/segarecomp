@@ -1,0 +1,180 @@
+{
+ "blind_barrier": "No feature, schema, window, family, hyperparameter, coefficient, scaler, threshold, margin, union, prune or validator change is permitted after this record is committed (ADR 0099 section 9). No v2 candidate artifact exists.",
+ "corpus": [
+  {
+   "id": "A",
+   "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+   "truth_sha256": "fd21b96bc0d79d62152fa172e2609026822b577d126ddebe5e7f70888127fc13"
+  },
+  {
+   "id": "B",
+   "rom_sha256": "4df1a91e08376ae773a6eb8e5abe310f94ca39d8f81583b91a9477fedcb68c11",
+   "truth_sha256": "33916a8e6800a10aa3601a4c35ce5ca929067876994dd9e4c9b1c36e9cf8d6e0"
+  },
+  {
+   "id": "C",
+   "rom_sha256": "6c43b41b60ae8147945b4420caeb5eb266e1dd57a0d125b7496fa8fb6fde522d",
+   "truth_sha256": "7f5289dce66deecde1d3a9aa18e5ec7992ef055deb2fe9bee6936a4fd9387059"
+  },
+  {
+   "id": "D",
+   "rom_sha256": "a0bd97f5aaa67301923ccc367511606bd3471ea9542919165311d4a23a2b696b",
+   "truth_sha256": "87174c5685eddc09c7ea00ac826e2ec1d5d5c470548529a2b3d25a77a17dea96"
+  }
+ ],
+ "decision": "V1 RETAINED",
+ "environment": {
+  "numpy": "2.5.3",
+  "python": "3.13.14",
+  "scikit-learn": "1.9.1",
+  "scipy": "1.18.1"
+ },
+ "experiment": "SEG-048",
+ "policies": {
+  "P0": {
+   "all_folds_pass": false,
+   "factor": 1.0,
+   "folds": {
+    "flicky": {
+     "c_outside_k": 67,
+     "c_outside_r": 63,
+     "gates_pass": false,
+     "k_over_u": 0.1977871705619095,
+     "margin_factor": 0.01574676078052382,
+     "threshold": 0.7296517665262346,
+     "validator": "accepted"
+    },
+    "ps2": {
+     "c_outside_k": 0,
+     "c_outside_r": 0,
+     "gates_pass": false,
+     "k_over_u": 0.1510559073736852,
+     "margin_factor": 1.038206290157327,
+     "threshold": 0.7683368503263075,
+     "validator": "accepted"
+    },
+    "s1": {
+     "c_outside_k": 1302,
+     "c_outside_r": 377,
+     "gates_pass": false,
+     "k_over_u": 0.21874758925345017,
+     "margin_factor": 0.004773574352488364,
+     "threshold": 0.8029227432742622,
+     "validator": "accepted"
+    },
+    "sf1": {
+     "c_outside_k": null,
+     "c_outside_r": 921,
+     "gates_pass": false,
+     "k_over_u": null,
+     "margin_factor": 5.090620338320666e-09,
+     "threshold": 0.89676908869202,
+     "validator": "rejected"
+    }
+   }
+  },
+  "P1": {
+   "all_folds_pass": false,
+   "factor": 0.5,
+   "folds": {
+    "flicky": {
+     "c_outside_k": 67,
+     "c_outside_r": 63,
+     "gates_pass": false,
+     "k_over_u": 0.20176529090004972,
+     "margin_factor": 0.03149352156104764,
+     "threshold": 0.3648258832631173,
+     "validator": "accepted"
+    },
+    "ps2": {
+     "c_outside_k": 0,
+     "c_outside_r": 0,
+     "gates_pass": true,
+     "k_over_u": 0.18020547386731173,
+     "margin_factor": 2.076412580314654,
+     "threshold": 0.38416842516315375,
+     "validator": "accepted"
+    },
+    "s1": {
+     "c_outside_k": 980,
+     "c_outside_r": 191,
+     "gates_pass": false,
+     "k_over_u": 0.22377818289598161,
+     "margin_factor": 0.009547148704976728,
+     "threshold": 0.4014613716371311,
+     "validator": "accepted"
+    },
+    "sf1": {
+     "c_outside_k": null,
+     "c_outside_r": 440,
+     "gates_pass": false,
+     "k_over_u": null,
+     "margin_factor": 1.0181240676641332e-08,
+     "threshold": 0.44838454434601,
+     "validator": "rejected"
+    }
+   }
+  },
+  "P2": {
+   "all_folds_pass": false,
+   "factor": 0.25,
+   "folds": {
+    "flicky": {
+     "c_outside_k": 67,
+     "c_outside_r": 63,
+     "gates_pass": false,
+     "k_over_u": 0.20176529090004972,
+     "margin_factor": 0.06298704312209528,
+     "threshold": 0.18241294163155866,
+     "validator": "accepted"
+    },
+    "ps2": {
+     "c_outside_k": 0,
+     "c_outside_r": 0,
+     "gates_pass": true,
+     "k_over_u": 0.20305221101840024,
+     "margin_factor": 4.152825160629308,
+     "threshold": 0.19208421258157687,
+     "validator": "accepted"
+    },
+    "s1": {
+     "c_outside_k": 486,
+     "c_outside_r": 109,
+     "gates_pass": false,
+     "k_over_u": 0.22926351946665152,
+     "margin_factor": 0.019094297409953456,
+     "threshold": 0.20073068581856554,
+     "validator": "accepted"
+    },
+    "sf1": {
+     "c_outside_k": null,
+     "c_outside_r": 45,
+     "gates_pass": false,
+     "k_over_u": null,
+     "margin_factor": 2.0362481353282664e-08,
+     "threshold": 0.224192272173005,
+     "validator": "rejected"
+    }
+   }
+  }
+ },
+ "reason": "no pre-registered threshold policy (P0/P1/P2) satisfies C subset R, C subset K, margin_factor >= 2.0, K/U <= 0.60 and validator acceptance on all four LOTO folds; no feature simplification (T004) and no model-family change (T005) qualified either",
+ "schema": "segarecomp.ml_region_freeze.v2",
+ "selected_model": {
+  "c": 1.0,
+  "family": "logreg",
+  "seed": 46
+ },
+ "selected_schema": "F0",
+ "selected_schema_sha256": "d2e7c82913139c29450511326d6de76e91579ec654edde81afae16b13cd1f570",
+ "status": "NO_QUALIFYING_CANDIDATE",
+ "v1_artifact_sha256": {
+  "segarecomp_ml_region.frozen.json": "3ef087800bd90b1de312c901aa305f5aa4ca61e8fd013348bc0b4f5471f016e1",
+  "segarecomp_ml_region.model.json": "5863742d3b84a934d7ab335695a3748426de53e43ddc9d42ca679a6fc9fab0a2",
+  "segarecomp_ml_region.parity.json": "2165e2522378496d2cfa402a503622a6b0208236efb41fbdbffbcad869235ac9",
+  "segarecomp_ml_region.py": "b4b801b8fe3b7ef6d3593ad454e2a4ac4123db8b760b62e084b84c34a14531e8",
+  "segarecomp_ml_region_native_data.py": "df8eb816e3b79d8fcd42c9d87222de5603cce269b1251e3fb87ef495a0210cc6",
+  "segarecomp_ml_region_native_parity.py": "61f2520b7322a5bebba6ef2807353d2411507618bb440721d0e17058d82da875"
+ },
+ "window_bytes": 512
+}
