@@ -55,7 +55,7 @@ STOP_DIAGNOSTIC_PAIRS = {
     "known_but_unemitted_target": {"known_but_unemitted_target"},
     # SEG-021-T020 / ADR 0043: STOP halted the CPU and no interrupt the machine
     # can raise could ever be accepted.
-    "unsupported_interrupt_or_scheduling_event": {"stopped_without_wake_source"},
+    "unsupported_interrupt_or_scheduling_event": {"stopped_without_wake_source", "irq6_vector_in_work_ram"},
     "internal_dispatch_inconsistency": {"internal_dispatch_inconsistency"},
     # SEG-007-T252 / ADR-0040: this stop pair is now unreachable via the
     # runner-owned genesis_runtime_run path -- there is no longer any

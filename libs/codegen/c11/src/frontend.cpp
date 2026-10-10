@@ -4968,7 +4968,14 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     // above); the actual runtime dispatch target is the literal popped
     // stack value validated against the whole-program continuation set
     // below, not a statically predicted count.
-    if (((is_branch || is_direct_jump) &&
+    // Compat repair: a statically foldable direct JMP whose discovery recorded no edge at all (its target could not be
+    // admitted in a walk whose issue the aggregation dropped, e.g. a jump into an unmapped cartridge window) is retained
+    // as a plain terminal: the emitted operation sets the folded target and the unchanged dispatcher reaches its typed
+    // unemitted-target stop only if control ever gets there, instead of the whole program being rejected here.
+    const bool edgeless_direct_jump =
+        is_direct_jump && edges_by_source[terminal.source.address.value].empty() &&
+        !blocks.contains(effect.direct_target) && !frontier_addresses.contains(effect.direct_target);
+    if ((!edgeless_direct_jump && (is_branch || is_direct_jump) &&
          (direct_count != 1U || fallthrough_count != ((unconditional || is_direct_jump) ? 0U : 1U) ||
                         edges_by_source[terminal.source.address.value].size() != direct_count + fallthrough_count)) ||
         (is_call && (call_count != 1U || direct_count != 0U || fallthrough_count != 0U || return_count != 0U)) ||
@@ -5387,8 +5394,12 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       case M68kIrKind::bit_change:
       case M68kIrKind::bit_clear:
       case M68kIrKind::bit_set: {
+        // Compat repair: BCHG/BCLR/BSET are read-then-write like memory CLR/Scc, so a routed-device absolute
+        // destination (for example BSET on the Z80 bus-request register) is admitted exactly as those are: both
+        // retained facts must be routed-device facts and both accesses go through the runtime owner.
         const auto *destination = fact_for(M68kStaticMemoryFactRole::destination_write);
-        if (destination != nullptr && destination->region != M68kAbsoluteOperandRegion::synthetic_work_ram)
+        if (destination != nullptr && destination->region != M68kAbsoluteOperandRegion::synthetic_work_ram &&
+            !c4_read_then_write_destination_admitted(destination, fact_for(M68kStaticMemoryFactRole::destination_read)))
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         if (destination == nullptr && m68k_is_statically_foldable_control_ea(found->second->destination_ea))
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
@@ -6409,6 +6420,8 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
       hex(partial.accepted_prefix.startup_ingress->initial_ssp, 8),
       hex(partial.accepted_prefix.startup_ingress->entry.value, 8), irq6_handler_hex,
       divide_by_zero_handler_hex, privilege_violation_handler_hex, software_exception_handler_hex);
+  if (partial.accepted_prefix.irq6_vector_in_work_ram && irq6_handler_hex.empty())
+    sink << "runtime.irq6_vector_in_work_ram = 1; ";
   if (g_execution_history_hooks) sink << "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; ";
   if (owned_region_count != 0U) {
     sink << "  runtime.owned_regions = genesis_owned_cartridge_regions;\n";

@@ -416,6 +416,9 @@ struct FrontendAnalysis { M68kFrontendProfile profile{M68kFrontendProfile::direc
   // dispatch set; it is a bounded static hardware discovery root entirely
   // outside ADR-0013 §7's seed set S.
   std::optional<M68kProgramAddress> irq6_handler_entry;
+  // Compat repair: the IRQ6 vector slot resolves into work RAM (RAM jump-table convention). No handler is rooted;
+  // the emitted program stops fail-closed when it would have to deliver a VBlank interrupt.
+  bool irq6_vector_in_work_ram{false};
   // SEG-007-T222 / ADR-0037: the build-time-resolved MC68000 vector-5
   // (Zero Divide) handler entry (the long word at mapped cartridge image
   // vector-table offset 0x14), mirroring `irq6_handler_entry`'s own

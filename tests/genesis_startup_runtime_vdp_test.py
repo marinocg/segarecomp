@@ -457,6 +457,19 @@ int main(void) {
    assert(runtime.devices.vdp.dma.remaining_length == 0U);
    assert(runtime.devices.vdp.dma.transfer_access_count == 2U);
 
+   /* A finished memory-to-VDP DMA leaves the command code and address register where the transfer ended: a plain
+      DATA-port write now continues in the same VRAM target at the post-transfer address (0x2008) with no fresh
+      address command, and honours the auto-increment. */
+   {
+     GenesisRuntime after = runtime;
+     value = UINT32_C(0xA55A);
+     assert(genesis_route_access(&after, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                  GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+     assert(after.devices.vdp.vram[UINT32_C(0x2008)] == UINT8_C(0xA5) &&
+            after.devices.vdp.vram[UINT32_C(0x2009)] == UINT8_C(0x5A));
+     assert(after.devices.vdp.addressed_pointer == UINT32_C(0x200A));
+   }
+
    /* Memory-to-VDP DMA's register #23 bit 6 is source A23, not a mode bit.
       This reaches the documented 68000 work-RAM source through the existing
       routed work-RAM owner: source word address 0x7F8000 encodes $FF0000. */
@@ -956,6 +969,29 @@ int main(void) {
       assert(fill.devices.vdp.addressed_pointer == UINT32_C(0x2006) &&
               fill.devices.vdp.dma.fill_byte_count == 0U &&
               fill.devices.vdp.dma.phase == GENESIS_VDP_DMA_IDLE);
+
+      /* A programmed fill length of zero means 0x10000 (the 16-bit DMA length counter wraps): the fill is armed with the
+         full 64 KiB count and one source WORD then fills every VRAM byte (the same rule memory-to-VRAM DMA already uses). */
+      {
+        GenesisRuntime zero = {0};
+        uint32_t zero_index;
+        const uint32_t zero_commands[] = {UINT32_C(0x8164), UINT32_C(0x8110), UINT32_C(0x9300), UINT32_C(0x9400),
+                                          UINT32_C(0x9780), UINT32_C(0x8F01), UINT32_C(0x4000), UINT32_C(0x0080)};
+        for (zero_index = 0U; zero_index < sizeof(zero_commands) / sizeof(zero_commands[0]); ++zero_index) {
+          value = zero_commands[zero_index];
+          assert(genesis_route_access(&zero, UINT32_C(0x00C00004), GENESIS_ACCESS_WORD,
+                                      GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+        }
+        assert(zero.devices.vdp.dma.phase == GENESIS_VDP_DMA_BUSY &&
+               zero.devices.vdp.dma.kind == GENESIS_VDP_DMA_VRAM_FILL &&
+               zero.devices.vdp.dma.fill_byte_count == UINT32_C(65536));
+        value = UINT32_C(0x5A5A);
+        assert(genesis_route_access(&zero, UINT32_C(0x00C00000), GENESIS_ACCESS_WORD,
+                                    GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+        assert(zero.devices.vdp.dma.phase == GENESIS_VDP_DMA_IDLE && zero.devices.vdp.dma.fill_byte_count == 0U);
+        for (zero_index = 0U; zero_index < GENESIS_VDP_VRAM_BYTES; ++zero_index)
+          assert(zero.devices.vdp.vram[zero_index] == UINT8_C(0x5A));
+      }
 
       /* Both CPU DATA-port BYTE lanes drive the same mirrored 16-bit fill
          trigger. Compare the entire VDP state against a WORD trigger through

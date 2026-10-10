@@ -14076,14 +14076,19 @@ void general_startup_routes_data1_data2_byte_reads_to_the_runtime() {
   // Fail-closed neighbours -- every one stays unrouted, reaching the
   // unchanged fixed-selector fallback table (which itself continues to
   // reject them exactly as before this task).
-  expect(not_routed(0x00A10007U, W::byte, D::read) &&   // DATA3: deliberately out of scope
+  // Compat repair: DATA3 and the CTRL1/CTRL2 direction latches are now BYTE-read routed too (their value is the
+  // runtime latch / pin model); CTRL3 keeps its fixed read-selector constant and is never routed.
+  expect(routes(0x00A10007U, W::byte, D::read) && routes(0x00A10009U, W::byte, D::read) &&
+             routes(0x00A1000BU, W::byte, D::read),
+         "a BYTE read of DATA3, CTRL1 or CTRL2 routes to M68kDeviceRoutedAccess");
+  expect(not_routed(0x00A1000DU, W::byte, D::read) &&   // CTRL3 keeps the fixed read-selector policy constant
              not_routed(0x00A10003U, W::word, D::read) &&  // WORD read at DATA1
              not_routed(0x00A10003U, W::long_word, D::read) && // LONG read at DATA1
              not_routed(0x00A10005U, W::word, D::read) &&  // WORD read at DATA2
-             not_routed(0x00A10009U, W::byte, D::read) &&  // CTRL1 read (write-only GPIO family)
+             not_routed(0x00A10009U, W::word, D::read) &&  // WORD read at CTRL1
              not_routed(0x00A10001U, W::byte, D::write) &&  // Version register write (unrelated, read-only)
              not_routed(0x00A10021U, W::byte, D::read),    // just past the controller-I/O region end
-         "DATA3, non-BYTE DATA1/DATA2 reads, and every neighbouring controller-I/O shape stay unrouted");
+         "CTRL3, non-BYTE port reads, and every neighbouring controller-I/O shape stay unrouted");
 
   // The DATA1 write shape is still separately routed by the SEG-007-T121
   // write family above (this task does not change it).

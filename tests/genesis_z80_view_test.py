@@ -12,7 +12,7 @@ harness stores a scenario id at Z80 RAM $1F00 and the program branches on it. Th
     beyond the embedded region, a work-RAM read (open fact U3), a ROM write, a VDP-port write and a PSG read through the window;
     I/O ports are inert;
   * the 68K side: no access without the bus grant (typed), the $A02000 mirror, WORD write stores the high byte, WORD read duplicates,
-    LONG fails closed, the bank register shifts in from bytes and words and cannot be read;
+    a LONG access inside the RAM window is two WORD accesses, the bank register shifts in from bytes and words and cannot be read;
   * the program is the same bytes the registry compiled: the guard runs on every instruction of the real run.
 usage: genesis_z80_view_test.py <registry_emitter> <cc> <source-root> <c++>
 """
@@ -133,7 +133,8 @@ def main():
         check(first["without_bus_write"] == "0" and first["diag"] == str(DIAG_NO_BUS), "no 68K access to the Z80 area without the bus grant (typed)")
         check(m["mirror_read"] == "12", "the 68K reads its own write back through the $A02000 mirror")
         check(m["word_write_byte"] == "ab" and m["word_read"] == "abab", "a WORD write stores the high byte; a WORD read returns the byte in both halves")
-        check(m["long_read"] == "0" and m["long_diag"] == str(DIAG_Z80_RAM), "a LONG access fails closed")
+        check(m["long_read"] == "1" and m["long_value"] == "abab0000",
+              "a LONG read is two WORD reads (byte replicated into both halves of each), the second half at +2")
         check(m["bank68"] == "101", "nine byte writes to $A06000 shift the bank register in LSB first")
         check(m["bank68w"] == "180", "a WORD write contributes D8 of the word and shifts the register right")
         check(m["bankreg_read"] == "0" and m["bankreg_diag"] == str(DIAG_VIEW), "the bank register cannot be read from the 68K (typed)")

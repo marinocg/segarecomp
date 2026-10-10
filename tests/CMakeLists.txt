@@ -594,6 +594,11 @@ add_test(NAME genesis_execution_history_generated_test COMMAND ${Python3_EXECUTA
 add_test(NAME genesis_startup_bridge_c6_persistence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_startup_bridge_c6_persistence_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# Bounded Genesis compatibility repairs (BSET on routed devices, work-RAM IRQ6 vector): synthetic images through the
+# production emit route, strict-C11 compile and run.
+add_test(NAME genesis_compat_repairs_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_compat_repairs_generated_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 # SEG-007-T252 / ADR-0040: the former SEG-007-T107 generated-runtime
 # loop-progress watchdog test has been replaced by
 # genesis_runtime_run_test.cpp and by the end-to-end
