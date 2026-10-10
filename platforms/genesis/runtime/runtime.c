@@ -1421,6 +1421,36 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
     return GENESIS_ACCESS_OK;
   }
   if (address < UINT32_C(0x00400000)) {
+    /* ADR 0098: the header-declared cartridge SRAM extent overlays the ROM; the SRAM owner answers every access that touches
+       it, in both directions, before the immutable-ROM paths below. Everything outside the extent is unchanged. */
+    if (runtime->cartridge_sram != 0 && address >= SEGARECOMP_GENESIS_CARTRIDGE_SRAM_WINDOW_BEGIN) {
+      const GenesisCartridgeSramConfig *sram = runtime->cartridge_sram;
+      const int sram_class = segarecomp_genesis_cartridge_sram_classify(sram->start, sram->end, sram->lane_odd, address,
+                                                                        byte_count);
+      /* While the SRAM is hidden ($A130F1 bit 0 clear over a ROM that extends into the extent) the extent is plain cartridge
+         ROM, handled by the immutable-ROM paths below with every width; a write there is the ordinary ROM-write stop. */
+      const int visible = sram->always_mapped != 0U ||
+                          (runtime->cartridge_sram_control & SEGARECOMP_GENESIS_CARTRIDGE_SRAM_CONTROL_MAP) != 0U;
+      if (sram_class != SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_OUTSIDE && (visible || !sram->layout_supported)) {
+        if (!sram->layout_supported) {
+          *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS,
+                                          GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_LAYOUT);
+          return GENESIS_ACCESS_FAIL;
+        }
+        if (sram_class == SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_BYTE && runtime->cartridge_sram_storage != 0 &&
+            ((address - sram->start) >> 1U) < sram->storage_bytes) {
+          const uint32_t sram_index = (address - sram->start) >> 1U;
+          if (direction == GENESIS_ACCESS_READ)
+            *value = runtime->cartridge_sram_storage[sram_index];
+          else if ((runtime->cartridge_sram_control & SEGARECOMP_GENESIS_CARTRIDGE_SRAM_CONTROL_PROTECT) == 0U)
+            runtime->cartridge_sram_storage[sram_index] = (uint8_t)(*value & UINT32_C(0xFF));
+          return GENESIS_ACCESS_OK; /* a write-protected store is ignored, like the hardware */
+        }
+        *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS,
+                                        GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS);
+        return GENESIS_ACCESS_FAIL;
+      }
+    }
     /* SEG-007-T077: a runtime-computed (non-constant-foldable) read whose
        address falls inside a statically proven, generated, build-time-
        embedded, read-only cartridge-data region resolves against that
@@ -1449,6 +1479,17 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
                                                                        : GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY,
                                     direction == GENESIS_ACCESS_WRITE ? GENESIS_DIAG_ROM_WRITE_PROHIBITED
                                                                      : GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY);
+    return GENESIS_ACCESS_FAIL;
+  }
+  if (address == SEGARECOMP_GENESIS_MAPPER_SRAM_CONTROL_REGISTER && runtime->cartridge_sram != 0 &&
+      runtime->cartridge_sram->layout_supported) {
+    /* ADR 0098: a cartridge with supported SRAM owns the mapper's SRAM control register (BYTE write, defined bits only). */
+    if (direction == GENESIS_ACCESS_WRITE &&
+        segarecomp_genesis_cartridge_sram_control_write_admitted((uint32_t)width, *value) != 0) {
+      runtime->cartridge_sram_control = (uint8_t)(*value & SEGARECOMP_GENESIS_CARTRIDGE_SRAM_CONTROL_DEFINED);
+      return GENESIS_ACCESS_OK;
+    }
+    *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS);
     return GENESIS_ACCESS_FAIL;
   }
   if (direction == GENESIS_ACCESS_WRITE && segarecomp_genesis_idle_control_register(address) != 0 &&
@@ -2941,6 +2982,16 @@ void genesis_runtime_set_pad1(GenesisRuntime *runtime, uint8_t mask) {
   if (runtime != NULL) runtime->pad1 = mask;
 }
 
+void genesis_cartridge_sram_install(GenesisRuntime *runtime, const GenesisCartridgeSramConfig *config, uint8_t *storage) {
+  uint32_t index;
+  if (runtime == 0 || config == 0) return;
+  runtime->cartridge_sram = config;
+  runtime->cartridge_sram_storage = storage;
+  runtime->cartridge_sram_control = 0U;
+  if (storage != 0)
+    for (index = 0U; index < config->storage_bytes; ++index) storage[index] = SEGARECOMP_GENESIS_CARTRIDGE_SRAM_FILL;
+}
+
 GenesisControlTransfer genesis_runtime_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                            uint32_t dispatch_allowance) {
   GenesisControlTransfer result = {0};
@@ -3245,6 +3296,8 @@ static const char *genesis_diagnostic_name(GenesisDiagnosticCategory value) {
   case GENESIS_DIAG_Z80_UNRESOLVED_FETCH_MAPPING: return "z80_unresolved_fetch_mapping";
   case GENESIS_DIAG_Z80_UNSUPPORTED_ACKNOWLEDGE: return "z80_unsupported_acknowledge";
   case GENESIS_DIAG_IRQ6_VECTOR_IN_WORK_RAM: return "irq6_vector_in_work_ram";
+  case GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_LAYOUT: return "unsupported_cartridge_sram_layout";
+  case GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS: return "unsupported_cartridge_sram_access";
   default: return 0;
   }
 }
@@ -3263,7 +3316,9 @@ static int genesis_valid_stop_pair(GenesisStopClass stop_class,
            category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG ||
            category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_YM2612 ||
            category == GENESIS_DIAG_Z80_VIEW_UNMAPPED_ACCESS || category == GENESIS_DIAG_Z80_BANK_TARGET_UNSUPPORTED ||
-           category == GENESIS_DIAG_68K_Z80_AREA_WITHOUT_BUS;
+           category == GENESIS_DIAG_68K_Z80_AREA_WITHOUT_BUS ||
+           category == GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_LAYOUT ||
+           category == GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS;
   case GENESIS_STOP_UNSUPPORTED_Z80_EXECUTION:
     return category == GENESIS_DIAG_Z80_UNKNOWN_IMAGE || category == GENESIS_DIAG_Z80_CODE_MISMATCH ||
            category == GENESIS_DIAG_Z80_NO_OWNER || category == GENESIS_DIAG_Z80_MUTABLE_CODE ||

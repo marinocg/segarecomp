@@ -1516,7 +1516,8 @@ bool c4_read_then_write_destination_admitted(const M68kStaticMemoryFact *write, 
 
 bool valid_c4_static_memory_fact(
     const M68kStaticMemoryFact &fact,
-    const std::map<Address, const M68kDecodedInstruction *> &decoded) {
+    const std::map<Address, const M68kDecodedInstruction *> &decoded,
+    const std::optional<GenesisCartridgeSramDescriptor> &cartridge_sram) {
   const auto instruction = decoded.find(fact.operation.source.address.value);
   if (instruction == decoded.end() ||
       !same_provenance(fact.operation, instruction->second->provenance) ||
@@ -1742,6 +1743,11 @@ bool valid_c4_static_memory_fact(
   const bool is_ram = m68k_startup_ram_range_in_range(
       fact.address.value, static_cast<std::uint32_t>(fact.width));
   if (is_ram) return fact.region == M68kAbsoluteOperandRegion::synthetic_work_ram;
+  // ADR 0098: an operand touching the header-declared cartridge SRAM extent is owned by the runtime SRAM owner and is
+  // valid only as a routed operand (never as an immutable ROM fold).
+  if (cartridge_sram && genesis_cartridge_sram_touches(*cartridge_sram, fact.address.value,
+                                                       static_cast<std::uint32_t>(fact.width)))
+    return fact.region == M68kAbsoluteOperandRegion::routed_device;
   if (fact.region == M68kAbsoluteOperandRegion::raw_cartridge_rom)
     return fact.direction == M68kMemoryAccessDirection::read;
   const auto routed = m68k_route_genesis_device_access(
@@ -3012,7 +3018,7 @@ M68kC4Preflight preflight_m68k_general_startup_c4(const FrontendPartialProgram &
 
   std::set<std::pair<Address, M68kStaticMemoryFactRole>> facts;
   for (const auto &fact : prefix.static_memory_facts) {
-    if (!valid_c4_static_memory_fact(fact, decoded) ||
+    if (!valid_c4_static_memory_fact(fact, decoded, prefix.cartridge_sram) ||
         !facts.emplace(fact.operation.source.address.value, fact.role).second)
       return result;
   }
@@ -3490,7 +3496,13 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     if (is_ram != (fact.region == M68kAbsoluteOperandRegion::synthetic_work_ram))
       return "/* translation rejected: invalid C4 static memory fact */\n";
     if (!is_ram) {
-      if (fact.region == M68kAbsoluteOperandRegion::raw_cartridge_rom) {
+      if (partial.accepted_prefix.cartridge_sram &&
+          genesis_cartridge_sram_touches(*partial.accepted_prefix.cartridge_sram, fact.address.value,
+                                         static_cast<std::uint32_t>(fact.width))) {
+        // ADR 0098: re-verified like the shared validator above -- only a routed operand may name the SRAM extent.
+        if (fact.region != M68kAbsoluteOperandRegion::routed_device)
+          return "/* translation rejected: invalid C4 static memory fact */\n";
+      } else if (fact.region == M68kAbsoluteOperandRegion::raw_cartridge_rom) {
         if (fact.direction != M68kMemoryAccessDirection::read)
           return "/* translation rejected: invalid C4 static memory fact */\n";
       } else if (fact.region == M68kAbsoluteOperandRegion::controller_io) {
@@ -6417,6 +6429,18 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
     sink << owned_region_data.str() << "static const GenesisOwnedCartridgeRegion genesis_owned_cartridge_regions[] = {\n"
          << owned_region_table.str() << "\n};\n";
   }
+  // ADR 0098: the cartridge's header-declared SRAM -- a generated, build-time-constant config plus bounded zero-initialized
+  // storage the runtime fills with the documented deterministic contents when `main` installs it. Nothing is emitted for a
+  // cartridge without a declared extent.
+  const auto &cartridge_sram = partial.accepted_prefix.cartridge_sram;
+  if (cartridge_sram) {
+    const std::uint32_t storage_bytes = cartridge_sram->supported ? cartridge_sram->storage_bytes() : 0U;
+    sink << "static const GenesisCartridgeSramConfig genesis_cartridge_sram_config = { UINT32_C(" << hex(cartridge_sram->start, 8)
+         << "), UINT32_C(" << hex(cartridge_sram->end, 8) << "), UINT32_C(" << std::to_string(storage_bytes) << "), UINT8_C("
+         << (cartridge_sram->odd_lane ? 1 : 0) << "), UINT8_C(" << (cartridge_sram->supported ? 1 : 0) << "), UINT8_C("
+         << (cartridge_sram->always_mapped ? 1 : 0) << ") };\n";
+    if (storage_bytes != 0U) sink << "static uint8_t genesis_cartridge_sram_storage[" << std::to_string(storage_bytes) << "];\n";
+  }
   // SEG-007-T047 / ADR-0020 §6: emit the build-resolved IRQ6 autovector handler
   // entry only when its handler block was actually retained in the emitted
   // dispatch set (a member of accepted_prefix.static_blocks); otherwise the
@@ -6472,6 +6496,10 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
     sink << "  runtime.owned_regions = genesis_owned_cartridge_regions;\n";
     sink << "  runtime.owned_region_count = UINT32_C(" + std::to_string(owned_region_count) + ");\n";
   }
+  if (cartridge_sram)
+    sink << "  genesis_cartridge_sram_install(&runtime, &genesis_cartridge_sram_config, "
+         << (cartridge_sram->supported && cartridge_sram->storage_bytes() != 0U ? "genesis_cartridge_sram_storage" : "0")
+         << ");\n";
   sink << emit_genesis_bridge_c11_main_finish("genesis_bridge_dispatch");
   return {};
 }

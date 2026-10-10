@@ -639,6 +639,11 @@ FrontendRejected build_static_call_target_rejection(const FrontendProgram &progr
 std::optional<DirectFlowDiagnostic> m68k_classify_general_memory_access(
     const FrontendProgram &program, std::uint32_t address, M68kMemoryAccessWidth width,
     M68kMemoryAccessDirection direction, const InstructionProvenance &provenance) {
+  // ADR 0098: an access touching the header-declared cartridge SRAM extent is never immutable ROM and never a generic ROM
+  // write: the runtime SRAM owner answers it (including its typed rejection of an unsupported width or lane).
+  if (const auto sram = parse_genesis_cartridge_sram_header(program.image.bytes).descriptor;
+      sram && genesis_cartridge_sram_touches(*sram, address, static_cast<std::uint32_t>(width)))
+    return std::nullopt;
   if (direction == M68kMemoryAccessDirection::write) {
     // Preserve the established region order: ROM is prohibited first, then
     // RAM is accepted, then an intersecting device request is routed through
@@ -3743,6 +3748,7 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   if (irq6_handler_entry_value)
     analysis.irq6_handler_entry = M68kProgramAddress{TargetAddressSpace::m68k_program, *irq6_handler_entry_value};
   analysis.irq6_vector_in_work_ram = irq6_vector_in_work_ram;
+  analysis.cartridge_sram = parse_genesis_cartridge_sram_header(program.image.bytes).descriptor;
   analysis.irq6_vector_ram_entry = irq6_vector_ram_entry_value;
   // SEG-007-T222 / ADR-0037: retain the build-time-resolved vector-5 handler
   // entry, mirroring `irq6_handler_entry` exactly.
@@ -4476,6 +4482,10 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
       fact.source_provenance = decoded.provenance;
       if (m68k_startup_ram_range_in_range(address, static_cast<std::uint32_t>(decoded.size))) {
         fact.region = M68kAbsoluteOperandRegion::synthetic_work_ram;
+      } else if (prefix.cartridge_sram &&
+                 genesis_cartridge_sram_touches(*prefix.cartridge_sram, address, static_cast<std::uint32_t>(decoded.size))) {
+        // ADR 0098: deferred to the runtime cartridge-SRAM owner (the same value-free routed operand as any other device).
+        fact.region = M68kAbsoluteOperandRegion::routed_device;
       } else {
         const auto mapped = claims(program.mapping_claims, address);
         if (direction == M68kMemoryAccessDirection::read && mapped.empty()) {
@@ -4852,6 +4862,10 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
           const auto &claim = *mapped.front();
           const auto span = static_cast<std::uint64_t>(order.size()) * width;
           if (static_cast<std::uint64_t>(base) + span > claim.target_end.value) continue;
+          // ADR 0098: bytes under the cartridge SRAM extent are not immutable; the runtime owner answers those reads.
+          if (prefix.cartridge_sram &&
+              genesis_cartridge_sram_touches(*prefix.cartridge_sram, base, static_cast<std::uint32_t>(span)))
+            continue;
           std::vector<std::uint32_t> values;
           values.reserve(order.size());
           bool bounds_ok = true;

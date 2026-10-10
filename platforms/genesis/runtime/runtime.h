@@ -90,6 +90,22 @@ typedef struct GenesisOwnedCartridgeRegion {
 } GenesisOwnedCartridgeRegion;
 
 /*
+ * Standard header-declared cartridge SRAM (ADR 0098).  `config` is generated, build-time constant data derived from the ROM
+ * header; `storage` is a generated, bounded `uint8_t[storage_bytes]` array that the runtime fills with
+ * SEGARECOMP_GENESIS_CARTRIDGE_SRAM_FILL at install time.  `control` mirrors the mapper's $A130F1 register (bit 0 map, bit 1
+ * write protect), zero at power on.  A zero `config` (the default) means the cartridge owns no SRAM and nothing here applies.
+ * No file is ever read or written: persistence is a later, separate feature that can use `storage` as-is.
+ */
+typedef struct GenesisCartridgeSramConfig {
+  uint32_t start;         /* inclusive, on the lane's parity */
+  uint32_t end;           /* inclusive, on the lane's parity */
+  uint32_t storage_bytes; /* (end - start) / 2 + 1 */
+  uint8_t lane_odd;       /* 1 = odd addresses, 0 = even addresses */
+  uint8_t layout_supported; /* 0 = declared but unsupported (16-bit or EEPROM-like form): every access to the extent fails closed */
+  uint8_t always_mapped;  /* the ROM ends at or below `start`: nothing lies beneath the SRAM, so $A130F1 bit 0 is irrelevant */
+} GenesisCartridgeSramConfig;
+
+/*
  * SEG-007-T091: the documented VDP write-only register count. GTO1 p. 22
  * SS4 "VDP REGISTER": "VDP has write only register #0 through #23 and read
  * only status register total 25 register." -- i.e. 24 write-only registers
@@ -727,6 +743,10 @@ typedef struct GenesisRuntime {
      fail-closed ROM-read behavior. */
   const GenesisOwnedCartridgeRegion *owned_regions;
   uint32_t owned_region_count;
+  /* ADR 0098: the cartridge's header-declared SRAM; NULL by default (no SRAM). See GenesisCartridgeSramConfig. */
+  const GenesisCartridgeSramConfig *cartridge_sram;
+  uint8_t *cartridge_sram_storage;
+  uint8_t cartridge_sram_control;
   /* SEG-007-T081: zero-initialized identically to every other GenesisRuntime
      field (T042 SS8); see GenesisDeviceState above. */
   GenesisDeviceState devices;
@@ -1110,6 +1130,9 @@ typedef enum GenesisDiagnosticCategory {
      into work RAM (a RAM jump stub), which this architecture does not execute. Paired with
      GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT. Nothing is mutated. */
   GENESIS_DIAG_IRQ6_VECTOR_IN_WORK_RAM = 62,
+  /* ADR 0098: cartridge SRAM outcomes, paired with GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS. Nothing is mutated. */
+  GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_LAYOUT = 63, /* an access to a header-declared extra-memory extent whose layout is not supported */
+  GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS = 64, /* SRAM extent access (width/lane) or $A130F1 write the SRAM model does not admit */
 } GenesisDiagnosticCategory;
 
 typedef struct GenesisProvenance {
@@ -1494,6 +1517,8 @@ GenesisControlTransfer genesis_runtime_run(GenesisRuntime *runtime, GenesisDispa
 
 /* SEG-011-T004: sets the host-supplied player-1 pad state (GENESIS_PAD_* mask,
  * 1 == pressed). Port 2 always reads released. */
+/* ADR 0098: bind the generated SRAM config and its bounded storage and give the SRAM its deterministic power-on contents. */
+void genesis_cartridge_sram_install(GenesisRuntime *runtime, const GenesisCartridgeSramConfig *config, uint8_t *storage);
 void genesis_runtime_set_pad1(GenesisRuntime *runtime, uint8_t mask);
 
 /*
