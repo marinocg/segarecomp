@@ -416,3 +416,30 @@ def prediction_digest(per_title_scores: dict) -> str:
         for s in per_title_scores[t]:
             h.update(f"{s:.9e}".encode() + b"\n")
     return h.hexdigest()
+
+
+# ------------------------------------------------------------------------------------------------------------- label / artifact guards
+RUNTIME_LABEL_FRAGMENTS = ("coverage", "oracle", "bitmap", "trace", "runtime", "executed", "frame")
+
+
+def refuse_runtime_label_paths(paths) -> None:
+    """Labels are exact source-backed truth only; a runtime coverage / oracle / trace artifact is never accepted as a label source."""
+    for path in paths:
+        lowered = pathlib.PurePath(str(path)).name.lower()
+        if any(fragment in lowered for fragment in RUNTIME_LABEL_FRAGMENTS):
+            raise SystemExit("refused: runtime coverage / oracle / trace artifacts are not accepted as labels")
+
+
+def verify_frozen_artifact(frozen_path, base_dir=None) -> dict:
+    """The frozen research record names the model artifact by SHA-256; the file's bytes must match (fail closed)."""
+    frozen_path = pathlib.Path(frozen_path)
+    frozen = json.loads(frozen_path.read_text())
+    base = pathlib.Path(base_dir) if base_dir else frozen_path.parent
+    for key in ("model_artifact", "plan_artifact"):
+        entry = frozen.get(key)
+        if not entry or not SHA.fullmatch(entry.get("sha256", "")):
+            raise SystemExit(f"frozen record: missing {key} digest")
+        path = base / entry["file"]
+        if not path.is_file() or sha256_file(path) != entry["sha256"]:
+            raise SystemExit(f"frozen record: {key} digest mismatch")
+    return frozen

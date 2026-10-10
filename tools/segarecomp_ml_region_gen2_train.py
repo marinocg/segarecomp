@@ -23,6 +23,7 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import segarecomp_ml_region as v1  # noqa: E402
 import segarecomp_ml_region_gen2 as g  # noqa: E402
+import segarecomp_ml_region_v2 as v2  # noqa: E402
 
 PLAN_NAME = "segarecomp_ml_region_gen2.plan.json"
 TOOLS = pathlib.Path(__file__).resolve().parent
@@ -107,6 +108,7 @@ class Title:
         self.labels = None
         self.truth_sha = None
         if with_truth:
+            g.refuse_runtime_label_paths([SEG048 / "truth" / f"{tid}.1.u"])
             text = (SEG048 / "truth" / f"{tid}.1.u").read_text()
             truth = v1.read_universe(text, self.sha, self.size)
             if (len(truth) != meta["truth_starts"] or not truth <= set(self.universe)
@@ -570,10 +572,228 @@ def cmd_plan(args) -> int:
     return 0
 
 
+# ------------------------------------------------------------------------------------------------------------------- LOTO (M1..M4)
+def auroc(scores, labels) -> float:
+    """Secondary diagnostic only (rank-sum AUC, ties averaged)."""
+    np = np_()
+    s, y = np.asarray(scores), np.asarray(labels)
+    order = np.argsort(s, kind="mergesort")
+    ranks = np.empty(len(s))
+    sorted_s = s[order]
+    i = 0
+    while i < len(s):
+        j = i
+        while j + 1 < len(s) and sorted_s[j + 1] == sorted_s[i]:
+            j += 1
+        ranks[order[i:j + 1]] = (i + j) / 2.0 + 1
+        i = j + 1
+    n1 = int(y.sum())
+    return float((ranks[y == 1].sum() - n1 * (n1 + 1) / 2) / (n1 * (len(s) - n1)))
+
+
+def scores_path(model: str, held_out: str) -> pathlib.Path:
+    return ROOT / "scores" / f"{model}.{held_out}.npy"
+
+
+def cmd_loto(args) -> int:
+    np = np_()
+    verify_plan()
+    held = args.held_out
+    folds = dict(g.loto_folds())
+    if held not in folds:
+        raise SystemExit("unknown held-out title")
+    train_ids = folds[held]
+    g.assert_split(train_ids, held)
+    titles = {t: Title(t) for t in g.TITLE_ORDER}
+    started = time.time()
+    # the held-out title only supplies bytes/tokens for scoring; the fit receives exactly the training ids
+    out = fit_and_score(args.model, {t: titles[t] for t in train_ids} | {held: titles[held]}, train_ids, [held],
+                        log=lambda m: print(f"[{args.model}/{held}] {m}", flush=True))
+    scores = out[held]
+    path = scores_path(args.model, held)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(path, scores)
+    labels = titles[held].labels
+    record = {"model": args.model, "held_out": held, "train": train_ids, "cells": int(len(scores)), "positive_cells": int(labels.sum()),
+              "frf": g.frf(scores, labels.tolist()), "auroc_secondary": auroc(scores, labels),
+              "params": out["_meta"]["params"], "fit_and_score_seconds": time.time() - started,
+              "score_digest": g.prediction_digest({held: scores.tolist()})}
+    res = ROOT / "results" / f"loto.{args.model}.{held}.json"
+    res.parent.mkdir(parents=True, exist_ok=True)
+    res.write_text(json.dumps(record, indent=1, sort_keys=True))
+    print(json.dumps({"model": args.model, "held_out": held, "frf": round(record["frf"]["frf"], 4), "secs": round(record["fit_and_score_seconds"])}))
+    return 0
+
+
+# --------------------------------------------------------------------------------------------- nested calibration and R / K stages
+def inner_path(model: str, held_out: str, inner_title: str) -> pathlib.Path:
+    return ROOT / "scores" / f"inner.{model}.{held_out}.{inner_title}.npy"
+
+
+def cmd_inner(args) -> int:
+    """Inner title-LOTO fit: score `inner_title` with a model trained on the OTHER training titles of the outer fold (held-out never loaded)."""
+    np = np_()
+    verify_plan()
+    outer = dict(g.loto_folds())[args.held_out]
+    inner = dict(g.inner_folds(outer))
+    train_ids = inner[args.inner_title]
+    g.assert_split(train_ids, args.inner_title)
+    if args.held_out in train_ids or args.held_out == args.inner_title:
+        raise SystemExit("calibration leak: outer held-out title in an inner fit")
+    titles = {t: Title(t) for t in outer}  # the outer held-out title is not even loaded
+    out = fit_and_score(args.model, titles, train_ids, [args.inner_title], log=lambda m: print(f"[inner {args.model}/{args.held_out}/{args.inner_title}] {m}", flush=True))
+    path = inner_path(args.model, args.held_out, args.inner_title)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.save(path, out[args.inner_title])
+    print("ok", args.inner_title)
+    return 0
+
+
+def min_positive_inner(model: str, held_out: str, titles: dict) -> float:
+    np = np_()
+    outer = dict(g.loto_folds())[held_out]
+    inner_scores = {t: np.load(inner_path(model, held_out, t)) for t in outer}
+    inner_labels = {t: titles[t].labels for t in outer}
+    return g.inner_oof_min_positive(inner_scores, inner_labels, train_ids=outer, held_out=held_out)
+
+
+class _PruneTitle:
+    def __init__(self, t: Title):
+        self.sha, self.rom_path, self.universe = t.sha, str(GAMES / ROM_FILES[t.id]), t.universe
+
+
+def evaluate_fold(model: str, held: str, titles: dict, runner, with_k: bool = True) -> dict:
+    np = np_()
+    t = titles[held]
+    scores = np.load(scores_path(model, held))
+    m_h = min_positive_inner(model, held, titles)
+    labels = t.labels
+    pos_scores = scores[labels == 1]
+    record = {"held_out": held, "inner_min_positive": m_h, "outer_min_positive": float(pos_scores.min()), "frf": g.frf(scores, labels.tolist()),
+              "positive_score_quantiles": {q: float(np.quantile(pos_scores, q)) for q in (0.0, 0.001, 0.01, 0.05, 0.5)}, "policies": {}}
+    for name, factor in g.POLICY_FACTORS.items():
+        thr = g.threshold_for(m_h, factor)
+        sel = g.selected_cells(scores.tolist(), thr)
+        region = sel | t.seeds
+        out_ml = g.c_outside_cells(t.truth, sel)
+        out_r = g.c_outside_cells(t.truth, region)
+        near = int(((scores >= thr / 2.0) & (scores < thr * 2.0)).sum())
+        rec = {"factor": factor, "threshold": thr, "ml_selected_cells": len(sel), "seed_cells": len(t.seeds), "r_cells": len(region),
+               "r_bytes": g.region_bytes(region, t.size), "rom_bytes": t.size, "r_over_rom": g.region_bytes(region, t.size) / t.size,
+               "ml_only_over_rom": g.region_bytes(sel, t.size) / t.size, "c_outside_r": len(out_r), "c_outside_ml_only": len(out_ml),
+               "score_margin_factor": float(pos_scores.min()) / thr, "cells_within_2x_of_threshold": near}
+        if with_k and region:
+            stats = runner.run(t, g.regions_text(t.sha, t.size, region))
+            accepted = stats.get("returncode") == 0 and stats.get("validator") == "accepted"
+            k_set = v2.admitted_set(t.universe, stats["ranges"]) if accepted else None
+            att = g.attribute(t.truth, region, k_set, accepted)
+            rec.update({"validator": "accepted" if accepted else "rejected", "k": len(k_set) if accepted else None,
+                        "k_over_u": len(k_set) / len(t.universe) if accepted else None, "universe_u": len(t.universe),
+                        "pruned": int(stats["pruned"]) if accepted else None, "attribution": att,
+                        "reason": "" if accepted else stats.get("reason", "")})
+        record["policies"][name] = rec
+    return record
+
+
+def cmd_evaluate(args) -> int:
+    verify_plan()
+    titles = {t: Title(t) for t in g.TITLE_ORDER}
+    runner = v2.PruneRunner(str(CLI), str(ROOT / "prune"))
+    folds = [evaluate_fold(args.model, h, titles, runner) for h in g.TITLE_ORDER]
+    chosen = g.choose_policy(folds)
+    summary = {"model": args.model, "folds": folds, "policy_passes": g.policy_passes(folds), "chosen_policy": chosen}
+    if chosen:
+        recs = [f["policies"][chosen] for f in folds]
+        summary["chosen"] = {"all_c_outside_r_zero": all(r["c_outside_r"] == 0 for r in recs),
+                             "all_c_outside_k_zero": all(r.get("attribution", {}).get("c_outside_k") == 0 for r in recs),
+                             "all_validator_accepted": all(r.get("validator") == "accepted" for r in recs),
+                             "max_r_over_rom": max(r["r_over_rom"] for r in recs)}
+    out = ROOT / "results" / f"evaluate.{args.model}.json"
+    out.write_text(json.dumps(summary, indent=1, sort_keys=True))
+    print(json.dumps({"chosen_policy": chosen, "passes": summary["policy_passes"]}))
+    return 0
+
+
+def recall_at_fraction(title: Title, scores, fraction: float) -> dict:
+    """Threshold-independent recall: instruction starts outside the top `fraction` of cells (descending score, ties broken by cell order)."""
+    np = np_()
+    keep = int(math.ceil(fraction * title.n_cells))
+    top = set(np.argsort(-np.asarray(scores), kind="stable")[:keep].tolist())
+    outside = g.c_outside_cells(title.truth, top)
+    return {"cells_kept": keep, "c_outside": len(outside), "recall": 1.0 - len(outside) / len(title.truth)}
+
+
+def cmd_table(args) -> int:
+    """Five-way LOTO table (M0 zero-shot comparator + M1..M4): FRF, recall at fixed cell budgets, secondary AUROC; plus the selection."""
+    np = np_()
+    verify_plan()
+    titles = {t: Title(t) for t in g.TITLE_ORDER}
+    table = {"M0": {"frf": {}, "recall_at": {}, "note": "frozen production v1, zero-shot; s1 is its training title (in-sample); each cell inherits its 512-B window"}}
+    for tid in g.TITLE_ORDER:
+        s, _ = v1_cell_scores(titles[tid])
+        table["M0"]["frf"][tid] = g.frf(s, titles[tid].labels.tolist())["frf"]
+        table["M0"]["recall_at"][tid] = {str(f): recall_at_fraction(titles[tid], s, f) for f in (0.30, 0.45, 0.60)}
+    for m in MODELS:
+        row = {"frf": {}, "frf_detail": {}, "recall_at": {}, "auroc_secondary": {}}
+        for tid in g.TITLE_ORDER:
+            s = np.load(scores_path(m, tid))
+            rec = json.loads((ROOT / "results" / f"loto.{m}.{tid}.json").read_text())
+            row["frf"][tid] = rec["frf"]["frf"]
+            row["frf_detail"][tid] = {k: rec["frf"][k] for k in ("cells_needed", "cells", "positive_cells")}
+            row["recall_at"][tid] = {str(f): recall_at_fraction(titles[tid], s, f) for f in (0.30, 0.45, 0.60)}
+            row["auroc_secondary"][tid] = rec["auroc_secondary"]
+            row["params"] = rec["params"]
+        table[m] = row
+    for m, row in table.items():
+        v = list(row["frf"].values())
+        row["worst_frf"], row["mean_frf"] = max(v), sum(v) / len(v)
+        row["viable"] = row["worst_frf"] <= g.FRF_VIABLE
+        row["preferred"] = row["worst_frf"] <= g.FRF_PREFERRED
+        row["strong_mean"] = row["mean_frf"] <= g.FRF_STRONG_MEAN
+    selected = g.select_model({m: table[m] for m in MODELS}, COMPLEXITY)
+    out = {"table": table, "selected": selected, "selection_rule": "g.select_model (plan 'selection')"}
+    (ROOT / "results" / "table.json").write_text(json.dumps(out, indent=1, sort_keys=True))
+    for m in ("M0",) + MODELS:
+        r = table[m]
+        print(m, {k: round(v, 3) for k, v in r["frf"].items()}, "worst", round(r["worst_frf"], 3), "mean", round(r["mean_frf"], 3), "viable", r["viable"])
+    print("selected", selected)
+    return 0
+
+
+def cmd_assemble(args) -> int:
+    """Merge the private per-stage aggregate result files into the committed (aggregate-only) results record."""
+    parts = {"characterization": "characterization.json", "loto": "table.json", "calibration_and_evaluation": "evaluate.M3.json",
+             "native_estimate": "native_estimate.json", "freeze": "freeze.json", "economics": "economics.json", "runtime": "runtime.json",
+             "determinism": "determinism.json"}
+    out = {"schema": "segarecomp.ml_region_gen2_results.v1", "plan_sha256": plan_digest(json.loads((TOOLS / PLAN_NAME).read_text())),
+           "data_boundary": "aggregates only: counts, fractions, digests, identities. No ROM bytes, address, per-cell label or truth array."}
+    for key, name in parts.items():
+        path = ROOT / "results" / name
+        if path.exists():
+            out[key] = json.loads(path.read_text())
+    (TOOLS / "segarecomp_ml_region_gen2.results.json").write_text(json.dumps(out, indent=1, sort_keys=True) + "\n")
+    print("stages:", [k for k in out if k in parts])
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("characterize").set_defaults(func=cmd_characterize)
+    loto = sub.add_parser("loto")
+    loto.add_argument("--model", required=True, choices=MODELS)
+    loto.add_argument("--held-out", required=True, choices=g.TITLE_ORDER)
+    loto.set_defaults(func=cmd_loto)
+    sub.add_parser("table").set_defaults(func=cmd_table)
+    sub.add_parser("assemble").set_defaults(func=cmd_assemble)
+    inner = sub.add_parser("inner")
+    inner.add_argument("--model", required=True, choices=MODELS)
+    inner.add_argument("--held-out", required=True, choices=g.TITLE_ORDER)
+    inner.add_argument("--inner-title", required=True, choices=g.TITLE_ORDER)
+    inner.set_defaults(func=cmd_inner)
+    evaluate = sub.add_parser("evaluate")
+    evaluate.add_argument("--model", required=True, choices=MODELS)
+    evaluate.set_defaults(func=cmd_evaluate)
     plan = sub.add_parser("plan")
     plan.add_argument("--force", action="store_true")
     plan.set_defaults(func=cmd_plan)
