@@ -256,3 +256,28 @@ Reading: the retrained-v1 family is *worse* than the single-title v1 on every he
 probability of a nearly separable 141-feature logistic fit is a high, fragile threshold (0.73-0.90), and one low-scoring genuine code window in a
 held-out title (Shining Force's weakest positive window scores 4.6e-9; in the zero-shot run its weakest window is ordinary code - 101 source instruction starts, decoder identification density 0.98, 22 % zero bytes - so this is a real cross-title distribution shift, not a truth artifact) breaks
 containment. Only Phantasy Star II passes the static gates, with margin 1.04 (< 2.0). The two baselines are separate evidence and are not conflated.
+
+## 15. T004 - pre-registered feature ablation (commit C4)
+
+F0..F5 exactly as defined in section 6, each under T003-B conditions (logistic C=1, P0, four LOTO folds). Each cell is
+`C-outside-R / C-outside-K / K/U / margin_factor` (`REJ` = the unchanged prune/validator rejected the proposal, K unavailable).
+
+| candidate | features | Sonic 1 | Flicky | Shining Force | Phantasy Star II | all folds C subset R and K |
+| --- | --- | --- | --- | --- | --- | --- |
+| F0 | 141 | R-377 / K-1302 / 0.219 / m=0.00477 | R-63 / K-67 / 0.198 / m=0.0157 | R-921 / K-- / - REJ / m=5.09e-09 | R-0 / K-0 / 0.151 / m=1.04 | **no** |
+| F1 | 138 | R-426 / K-1420 / 0.217 / m=0.00388 | R-63 / K-67 / 0.198 / m=0.019 | R-921 / K-- / - REJ / m=1.32e-08 | R-0 / K-0 / 0.145 / m=1 | **no** |
+| F2 | 138 | R-426 / K-1420 / 0.217 / m=0.00382 | R-63 / K-67 / 0.198 / m=0.0286 | R-969 / K-- / - REJ / m=6.44e-09 | R-138 / K-234 / 0.122 / m=0.9 | **no** |
+| F3 | 46 | R-22 / K-22 / 0.303 / m=0.0142 | R-0 / K-0 / 0.221 / m=14.6 | R-154 / K-- / - REJ / m=0.00756 | R-0 / K-0 / 0.360 / m=22.5 | **no** |
+| F4 | 93 | R-251 / K-833 / 0.223 / m=0.00102 | R-21 / K-22 / 0.202 / m=0.142 | R-897 / K-- / - REJ / m=2.59e-08 | R-280 / K-1126 / 0.117 / m=0.639 | **no** |
+| F5 | 45 | R-0 / K-0 / 0.966 / m=40.1 | R-13 / K-15 / 0.988 / m=0.606 | R-1589 / K-- / - REJ / m=5.74e-16 | R-0 / K-0 / 0.960 / m=1.92e+03 | **no** |
+
+Schema hashes: F0 `d2e7c82913139c29450511326d6de76e91579ec654edde81afae16b13cd1f570` (== v1); the others are derived from `seg048-features-v2-F<k>`
+and recorded in `tools/segarecomp_ml_region_v2.py` (`schema_hash`).
+
+Decision under the frozen rule (a simplification may replace F0 only if **every fold** has `C subset R` and `C subset K` and the per-fold/mean `K/U`
+degradation bounds hold): **no candidate qualifies - every one of F0..F5 leaves source instruction starts outside R in at least one held-out fold,
+and Shining Force is rejected by the prune/validator for F0-F5.** Therefore **F0 (the v1 schema, 141 features) is retained**; there is nothing to
+re-version. Observations (descriptive, not used for any selection): removing `b_zlib` (F1) changes nothing material; replicating the edge (F2) does not
+help; dropping the neighbour context (F3) is the only variant that contains Flicky and Phantasy Star II (and loses only 22 Sonic 1 starts and 154 Shining
+Force starts) but at K/U 0.22-0.36; the decoder-only schema (F4) loses recall; the byte-only schema (F5) selects 73-99 % of every ROM, i.e. it is a
+non-selective model. These do not satisfy the pre-registered gate and are not pursued (no feature fishing).
