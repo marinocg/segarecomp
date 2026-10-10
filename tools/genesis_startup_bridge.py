@@ -1388,6 +1388,8 @@ GENESIS_ALIAS_MIN_RUN = 16
 GENESIS_ALIAS_MAX_ROUNDS = 64
 GUEST_STOP_KNOWN_BUT_UNEMITTED_TARGET = 5
 GUEST_STOP_INTERNAL_DISPATCH_INCONSISTENCY = 7
+GUEST_STOP_UNSUPPORTED_INTERRUPT = 6  # ADR 0097 amendment: an IRQ6 delivery through a work-RAM vector
+IRQ6_VECTOR_OFFSET = 0x78
 
 
 def derive_copy_alias(rom: bytes, work_ram: bytes, pc: int) -> tuple[int, int, int] | None:
@@ -1474,6 +1476,7 @@ def discover_copy_aliases(emitter_command: list[str], compiler: pathlib.Path, ro
     Returns {"aliases", "termination_reason", "complete"}; `complete` is False for max_rounds / tool_failure."""
     limit = max_rounds if max_rounds is not None else alias_max_rounds()
     aliases: list[tuple[int, int, int]] = []
+    thunks: list[tuple[int, str]] = []  # ADR 0097 amendment: (work-RAM address, JMP bytes hex) found by the CPU-owned decoder
     work = out_dir / "alias-discovery"
     work.mkdir(parents=True, exist_ok=True)
     dump_path = work / "stop-work-ram.dump"
@@ -1483,6 +1486,7 @@ def discover_copy_aliases(emitter_command: list[str], compiler: pathlib.Path, ro
         counts["rounds"] += 1
         command = emitter_command + [arg for alias in aliases
                                      for arg in ("--immutable-copy-alias", f"{alias[0]:08x}:{alias[1]:08x}:{alias[2]:08x}")]
+        command += [arg for thunk in thunks for arg in ("--ram-thunk", f"{thunk[0]:08x}:{thunk[1]}")]
         counts["generation_attempts"] += 1
         status, _, executable = generate_and_compile(command, compiler, root, work, "quick", None, capture=True)
         if status != 1:  # status 1 = emitter rejection before any C compiler invocation
@@ -1517,16 +1521,42 @@ def discover_copy_aliases(emitter_command: list[str], compiler: pathlib.Path, ro
             break
         pc = int.from_bytes(dump[0:4], "big")
         stop_class = int.from_bytes(dump[4:8], "big")
-        if stop_class not in (GUEST_STOP_KNOWN_BUT_UNEMITTED_TARGET, GUEST_STOP_INTERNAL_DISPATCH_INCONSISTENCY):
+        if stop_class == GUEST_STOP_UNSUPPORTED_INTERRUPT:
+            # The cartridge's own IRQ6 vector slot (immutable data) names the work-RAM stub address.
+            vector = int.from_bytes(rom_bytes[IRQ6_VECTOR_OFFSET:IRQ6_VECTOR_OFFSET + 4], "big") & 0xFFFFFF
+            if len(rom_bytes) < IRQ6_VECTOR_OFFSET + 4 or vector < GENESIS_WORK_RAM_BEGIN:
+                reason = ALIAS_TERMINATION_NON_ALIAS_FRONTIER
+                break
+            pc = vector
+            thunk_only = True
+        elif stop_class not in (GUEST_STOP_KNOWN_BUT_UNEMITTED_TARGET, GUEST_STOP_INTERNAL_DISPATCH_INCONSISTENCY):
             reason = ALIAS_TERMINATION_NON_ALIAS_FRONTIER
             break
+        else:
+            thunk_only = False
         if (pc & 1) or not GENESIS_WORK_RAM_BEGIN <= pc < GENESIS_WORK_RAM_BEGIN + GENESIS_WORK_RAM_SIZE:
             reason = ALIAS_TERMINATION_NO_WORK_RAM_FRONTIER
             break
-        proposal = derive_copy_alias(rom_bytes, dump[8:], pc)
+        proposal = None if thunk_only else derive_copy_alias(rom_bytes, dump[8:], pc)
         if proposal is None:
-            reason = ALIAS_TERMINATION_NOT_VERBATIM_COPY
-            break
+            # Not a verbatim copy: offer the live bytes to the CPU-owned decoder (never decoded here). Exactly one
+            # JMP (xxx).W/.L yields a thunk; anything else keeps the fail-closed frontier.
+            offset = pc - GENESIS_WORK_RAM_BEGIN
+            window = dump[8 + offset:8 + offset + 6].hex()
+            try:
+                classified = subprocess.run(
+                    [*emitter_command[:emitter_command.index("emit-general-startup-bridge-c")], "classify-ram-jump-thunk",
+                     f"{pc:08x}", window], text=True, capture_output=True)
+                thunk_hex = classified.stdout.strip() if classified.returncode == 0 else None
+            except OSError:
+                thunk_hex = None  # no recognizer available: no thunk is ever proposed
+            if thunk_hex is None or any(pc < t[0] + len(t[1]) // 2 and t[0] < pc + len(thunk_hex) // 2 for t in thunks) or \
+                    any(pc < a[0] + a[2] and a[0] < pc + len(thunk_hex) // 2 for a in aliases):
+                reason = ALIAS_TERMINATION_NOT_VERBATIM_COPY if thunk_hex is None else ALIAS_TERMINATION_REPEATED_ALIAS
+                break
+            thunks.append((pc, thunk_hex))
+            thunks.sort()
+            continue
         merged = merge_copy_aliases(aliases + [proposal])
         if merged == aliases:
             reason = ALIAS_TERMINATION_REPEATED_ALIAS  # not explained by a further verbatim copy: no progress
@@ -1535,8 +1565,9 @@ def discover_copy_aliases(emitter_command: list[str], compiler: pathlib.Path, ro
     dump_path.unlink(missing_ok=True)
     sys.stderr.write("COPY_ALIAS_DISCOVERY " + json.dumps(
         {**counts, "alias_count": len(aliases), "alias_total_bytes": sum(alias[2] for alias in aliases),
+         **({"ram_thunk_count": len(thunks), "ram_thunk_total_bytes": sum(len(t[1]) // 2 for t in thunks)} if thunks else {}),
          "termination_reason": reason}, separators=(",", ":")) + "\n")
-    return {"aliases": aliases, "termination_reason": reason,
+    return {"aliases": aliases, "thunks": thunks, "termination_reason": reason,
             "complete": reason not in ALIAS_INCOMPLETE_TERMINATIONS}
 
 
@@ -2132,6 +2163,8 @@ def main() -> int:
                     if discovered["termination_reason"] == ALIAS_TERMINATION_MAX_ROUNDS else 2)
         for execution, source, length in discovered["aliases"]:
             emitter_command += ["--immutable-copy-alias", f"{execution:08x}:{source:08x}:{length:08x}"]
+        for execution, thunk_hex in discovered["thunks"]:
+            emitter_command += ["--ram-thunk", f"{execution:08x}:{thunk_hex}"]
     if args.admission_plan:
         if not args.immutable_rom_aot:
             sys.stderr.write("--admission-plan requires --immutable-rom-aot\n")

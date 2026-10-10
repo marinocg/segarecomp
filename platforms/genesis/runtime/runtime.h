@@ -752,7 +752,6 @@ typedef struct GenesisRuntime {
      rooted statically. A recognized VBlank interrupt then stops fail-closed (GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_
      SCHEDULING_EVENT) instead of being dropped. Zero default: never set by a program with a ROM handler. */
   uint8_t irq6_vector_in_work_ram;
-  uint32_t irq6_vector_ram_entry; /* the work-RAM address of that stub (valid iff irq6_vector_in_work_ram) */
   /* SEG-007-T222 / ADR-0037: the build-time-resolved MC68000 vector-5
      (Zero Divide) handler entry address (the long word at vector-table
      offset 0x14), mirroring `irq6_handler_entry`'s own resolution/ownership

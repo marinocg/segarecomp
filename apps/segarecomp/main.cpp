@@ -20,6 +20,8 @@
 #include <algorithm>
 #include "segarecomp/codegen/c11/translation_units.hpp"
 #include <array>
+#include <cstdio>
+#include <vector>
 #include <charconv>
 #include <cstdint>
 #include <exception>
@@ -40,9 +42,10 @@ void print_usage(std::ostream &output) {
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
                 "  segarecomp genesis-general-startup <image>\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
+               "  segarecomp classify-ram-jump-thunk <execution-hex8> <hex-bytes>\n"
                "  segarecomp probe-genesis-startup-decode <primary-hex4> <extension-hex8-or-dash>\n"
                "  segarecomp probe-genesis-startup-mapping <address-hex8> <width-decimal> <image-length-hex16>\n";
 }
@@ -52,6 +55,16 @@ void print_usage(std::ostream &output) {
   const auto result = std::from_chars(text.data(), text.data() + text.size(), value, 16);
   if (result.ec != std::errc{} || result.ptr != text.data() + text.size()) return std::nullopt;
   return value;
+}
+[[nodiscard]] std::optional<std::vector<std::uint8_t>> parse_hex_bytes(std::string_view text) {
+  if (text.empty() || text.size() % 2U != 0U || text.size() > 16U) return std::nullopt;
+  std::vector<std::uint8_t> bytes;
+  for (std::size_t index = 0; index < text.size(); index += 2U) {
+    const auto value = parse_hex(text.substr(index, 2U), 2);
+    if (!value) return std::nullopt;
+    bytes.push_back(static_cast<std::uint8_t>(*value));
+  }
+  return bytes;
 }
 } // namespace
 
@@ -91,6 +104,8 @@ int run_cli(int argc, char **argv) {
       bool immutable_rom_aot = false;
       // SEG-021-T041 / ADR 0049: generated-data immutable-copy alias proposals (execution:source:length).
       std::vector<std::array<std::uint32_t, 3>> immutable_copy_aliases;
+      // ADR 0097 amendment: materialized work-RAM JMP thunks (execution:observed bytes), validated by the CPU-owned decoder.
+      std::vector<std::pair<std::uint32_t, std::vector<std::uint8_t>>> ram_thunks;
       // SEG-020-T002: opt-in provenance diagnostic table appended to the generated C.
       bool provenance_diagnostics = false;
       // SEG-022-T001: opt-in, measurement-only sink for the admitted immutable-ROM AOT
@@ -152,6 +167,16 @@ int run_cli(int argc, char **argv) {
           immutable_copy_aliases.push_back({static_cast<std::uint32_t>(*execution),
                                             static_cast<std::uint32_t>(*source),
                                             static_cast<std::uint32_t>(*length)});
+          index += 2;
+        } else if (option == "--ram-thunk") {
+          if (index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          const std::string_view text = argv[index + 1];
+          const auto colon = text.find(':');
+          if (colon == std::string_view::npos) { print_usage(std::cerr); return 2; }
+          const auto execution = parse_hex(text.substr(0, colon), 8);
+          auto bytes = parse_hex_bytes(text.substr(colon + 1U));
+          if (!execution || !bytes) { print_usage(std::cerr); return 2; }
+          ram_thunks.emplace_back(static_cast<std::uint32_t>(*execution), std::move(*bytes));
           index += 2;
         } else if (option == "--immutable-rom-aot-admission") {
           if (immutable_rom_aot_admission || index + 1 >= argc) { print_usage(std::cerr); return 2; }
@@ -348,8 +373,12 @@ int run_cli(int argc, char **argv) {
           if (!segarecomp::apply_genesis_immutable_copy_alias(*program, alias[0], alias[1], alias[2])) {
             std::cerr << "segarecomp: invalid immutable-copy alias\n"; return 2;
           }
-      } else if (!immutable_copy_aliases.empty()) {
-        std::cerr << "segarecomp: --immutable-copy-alias requires --immutable-rom-aot\n"; return 2;
+        for (const auto &thunk : ram_thunks)
+          if (!segarecomp::apply_genesis_materialized_ram_thunk(*program, thunk.first, thunk.second)) {
+            std::cerr << "segarecomp: invalid materialized RAM thunk\n"; return 2;
+          }
+      } else if (!immutable_copy_aliases.empty() || !ram_thunks.empty()) {
+        std::cerr << "segarecomp: --immutable-copy-alias/--ram-thunk require --immutable-rom-aot\n"; return 2;
       }
       // ADR-0013 Decision §7 Phase B seed transport: an out-of-mapping seed
       // is not rejected here -- discover_m68k_general_startup's per-seed walk
@@ -945,6 +974,19 @@ int run_cli(int argc, char **argv) {
                  << "\",\"unsupported_instruction_form\":"
                  << (rejected.unsupported_instruction_form ? "true" : "false")
                  << ",\"support\":\"unsupported\"}\n";
+      return 0;
+    }
+    if (command == "classify-ram-jump-thunk") {
+      // Build-time recognition for tooling: the CPU-owned decoder decides whether the bytes begin with exactly one
+      // JMP (xxx).W/.L; prints that instruction's bytes (hex) or exits 1.
+      if (argc != 4) { print_usage(std::cerr); return 2; }
+      const auto execution = parse_hex(argv[2], 8);
+      const auto window = parse_hex_bytes(argv[3]);
+      if (!execution || !window) { print_usage(std::cerr); return 2; }
+      const auto bytes = segarecomp::genesis_ram_jump_thunk_bytes(static_cast<std::uint32_t>(*execution), *window);
+      if (!bytes) return 1;
+      for (const auto byte : *bytes) std::printf("%02x", static_cast<unsigned>(byte));
+      std::printf("\n");
       return 0;
     }
     if (command == "probe-genesis-startup-mapping") {

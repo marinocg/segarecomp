@@ -2384,34 +2384,6 @@ static int genesis_construct_exception_frame_and_transfer(GenesisRuntime *runtim
  * Returns 1 (entered; `result` holds the handler) or 0 (failed closed with the
  * interrupt diagnostic; nothing changed).
  */
-/* Compat repair: decode the live work-RAM bytes at `address` as a single `JMP (xxx).L` (4EF9) or `JMP (xxx).W` (4EF8).
-   Returns 1 and the 24-bit target / MC68000 cycle count on a match, else 0. Reads only live RAM (nothing is cached, so a
-   rewritten stub is honoured), decodes exactly these two fixed-shape instructions and nothing else. */
-static int genesis_ram_jump_thunk_decode(const GenesisRuntime *runtime, uint32_t address, uint32_t *target_out,
-                                         uint32_t *cycles_out) {
-  uint32_t offset;
-  uint32_t opcode;
-  address &= UINT32_C(0x00FFFFFF);
-  if ((address & 1U) != 0U || address < UINT32_C(0x00E00000)) return 0;
-  offset = address & UINT32_C(0xFFFF);
-  if (offset > 65536U - 6U) return 0;
-  opcode = ((uint32_t)runtime->work_ram[offset] << 8) | runtime->work_ram[offset + 1U];
-  if (opcode == UINT32_C(0x4EF9)) {
-    if (target_out != 0)
-      *target_out = (((uint32_t)runtime->work_ram[offset + 2U] << 24) | ((uint32_t)runtime->work_ram[offset + 3U] << 16) |
-                     ((uint32_t)runtime->work_ram[offset + 4U] << 8) | runtime->work_ram[offset + 5U]) & UINT32_C(0x00FFFFFF);
-    if (cycles_out != 0) *cycles_out = 12U;
-    return 1;
-  }
-  if (opcode == UINT32_C(0x4EF8)) {
-    const uint32_t word = ((uint32_t)runtime->work_ram[offset + 2U] << 8) | runtime->work_ram[offset + 3U];
-    if (target_out != 0) *target_out = (uint32_t)((word & 0x8000U) != 0U ? (word | UINT32_C(0xFFFF0000)) : word) & UINT32_C(0x00FFFFFF);
-    if (cycles_out != 0) *cycles_out = 10U;
-    return 1;
-  }
-  return 0;
-}
-
 static int genesis_accept_interrupt(GenesisRuntime *runtime, uint32_t level, GenesisControlTransfer *result) {
   GenesisM68kExceptionContext context = {0};
   SegarecompM68kMachineHooks hooks;
@@ -2661,13 +2633,6 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
   level = segarecomp_m68k_interrupt_recognized_level(&runtime->m68k_interrupt, runtime->sr);
   if (level == 0U) return 0;
 
-  if (!runtime->irq6_handler_present && runtime->irq6_vector_in_work_ram &&
-      genesis_ram_jump_thunk_decode(runtime, runtime->irq6_vector_ram_entry, 0, 0)) {
-    /* The vector slot points at a live `JMP` stub in work RAM: deliver the interrupt to the stub address; the step-level
-       thunk resolution then follows the jump (and fails closed if its target has no compiled code). */
-    runtime->irq6_handler_entry = runtime->irq6_vector_ram_entry;
-    runtime->irq6_handler_present = 1U;
-  }
   if (!runtime->irq6_handler_present) {                            /* no build-resolved handler */
     if (runtime->irq6_vector_in_work_ram) {
       /* The vector slot points at work-RAM (a RAM jump stub), which this architecture cannot execute: the recognized
@@ -2876,19 +2841,6 @@ GenesisControlTransfer genesis_runtime_step(GenesisRuntime *runtime, GenesisDisp
      not follow it. */
   if (!genesis_vdp_drain_memory_to_vdp_dma(runtime, &result)) return result;
   result = dispatch(runtime);
-  /* Compat repair: control reached work-RAM code that has no compiled entry and the live bytes there are a single
-     `JMP (xxx).L/.W` stub (the common RAM jump-table convention). Executing that one fixed-shape instruction is the
-     architectural behaviour: retire it with its cycle count and continue at the (24-bit) target, which the dispatcher then
-     resolves or rejects like any other target. Any other live RAM content keeps the typed unemitted-target stop. */
-  /* (An unknown PC at the dispatcher itself, e.g. an interrupt delivered straight to the stub address, arrives as the
-     generic internal-dispatch stop; the decode below only accepts work-RAM PCs holding a live JMP.) */
-  if (result.kind == GENESIS_STOP && (result.stop.stop_class == GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET ||
-                                      result.stop.stop_class == GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY)) {
-    uint32_t thunk_target = 0U;
-    uint32_t thunk_cycles = 0U;
-    if (genesis_ram_jump_thunk_decode(runtime, runtime->pc, &thunk_target, &thunk_cycles))
-      result = genesis_runtime_retire_m68k_instruction(runtime, thunk_cycles, thunk_target);
-  }
   if (result.kind != GENESIS_CONTINUE_AT_PC) return result;
   /* T131 deliberately defines only UNKNOWN, so this pure resolved-target
    * classifier is presently a no-op.  Keeping it here makes a later,

@@ -138,6 +138,52 @@ void unit_cases() {
   check(!first.termination && first.aliases == std::vector<ma::CopyAlias>{{0xFF0400, 0x200, 48}}, "step: a verbatim copy -> one alias");
   check(ma::next_step(f.rom, stop_at(f.ram, 0xFF0410), first.aliases).termination == ma::Termination::repeated_alias_no_progress,
         "step: an already covered proposal -> repeated_alias_no_progress");
+  // ADR 0097 amendment: the RAM-thunk decision. The recognizer is injected (the library never knows an opcode); this fake accepts the
+  // 4-byte pattern AA BB CC DD only.
+  const ma::RamThunkRecognizer fake = [](std::uint32_t, std::span<const std::uint8_t> window) -> std::optional<std::vector<std::uint8_t>> {
+    if (window.size() >= 4 && window[0] == 0xAA && window[1] == 0xBB && window[2] == 0xCC && window[3] == 0xDD)
+      return std::vector<std::uint8_t>(window.begin(), window.begin() + 4);
+    return std::nullopt;
+  };
+  {
+    Fixture t(0x200, 0x400, 48);
+    t.ram[0x0800] = 0xAA; t.ram[0x0801] = 0xBB; t.ram[0x0802] = 0xCC; t.ram[0x0803] = 0xDD;
+    // not a verbatim copy and a recognised stub: one thunk (no recognizer: the old fail-closed termination)
+    check(ma::next_step(t.rom, stop_at(t.ram, 0xFF0800), none).termination == ma::Termination::frontier_not_verbatim_copy,
+          "thunk: without a recognizer nothing is proposed");
+    const auto proposed = ma::next_step(t.rom, stop_at(t.ram, 0xFF0800), none, {}, fake);
+    check(!proposed.termination && proposed.thunks.size() == 1 && proposed.thunks[0].execution == 0xFF0800 &&
+              proposed.thunks[0].bytes == std::vector<std::uint8_t>{0xAA, 0xBB, 0xCC, 0xDD},
+          "thunk: a recognised non-copy frontier proposes exactly the recognised bytes");
+    check(ma::next_step(t.rom, stop_at(t.ram, 0xFF0802), none, {}, fake).termination == ma::Termination::frontier_not_verbatim_copy,
+          "thunk: a frontier inside a stub (not its first byte) is not recognised");
+    check(ma::next_step(t.rom, stop_at(t.ram, 0xFF0800), none, proposed.thunks, fake).termination == ma::Termination::repeated_alias_no_progress,
+          "thunk: an already compiled (or rewritten) stub is no progress: fail closed");
+    check(ma::next_step(t.rom, stop_at(t.ram, 0xFF0400), none, {}, fake).aliases == std::vector<ma::CopyAlias>{{0xFF0400, 0x200, 48}},
+          "thunk: a verbatim copy keeps priority over the thunk path");
+    // IRQ6 through a work-RAM vector: the cartridge's own vector slot names the stub address
+    t.rom[0x78] = 0x00; t.rom[0x79] = 0xFF; t.rom[0x7A] = 0x08; t.rom[0x7B] = 0x00;
+    const auto irq = ma::next_step(t.rom, stop_at(t.ram, 0xFF0123, ma::kStopUnsupportedInterrupt), none, {}, fake);
+    check(!irq.termination && irq.thunks.size() == 1 && irq.thunks[0].execution == 0xFF0800, "thunk: an IRQ6 stop proposes the stub the vector names");
+    t.rom[0x78] = 0x00; t.rom[0x79] = 0x00; t.rom[0x7A] = 0x02; t.rom[0x7B] = 0x00;
+    check(ma::next_step(t.rom, stop_at(t.ram, 0xFF0123, ma::kStopUnsupportedInterrupt), none, {}, fake).termination ==
+              ma::Termination::non_alias_frontier, "thunk: an IRQ6 stop whose vector is in ROM is not ours");
+    // the loop threads the thunk set through the runner and terminates on no progress
+    struct Thunks final : ma::RoundRunner {
+      std::vector<std::vector<ma::RamThunk>> seen;
+      ma::RoundObservation next;
+      ma::RoundObservation run_round(const std::vector<ma::CopyAlias>&, bool&) override { return {}; }
+      ma::RoundObservation run_round(const std::vector<ma::CopyAlias>&, const std::vector<ma::RamThunk>& thunks, bool&) override {
+        seen.push_back(thunks);
+        return next;
+      }
+    } runner;
+    runner.next = stop_at(t.ram, 0xFF0800);
+    const auto summary = ma::prepare(t.rom, stop_at(t.ram, 0xFF0800), runner, ma::kMaxRounds, fake);
+    check(summary.termination == ma::Termination::repeated_alias_no_progress && summary.rounds == 1 && summary.thunks.size() == 1 &&
+              runner.seen.size() == 1 && runner.seen[0].size() == 1,
+          "thunk: the bounded loop builds the thunk once, then stops on no progress");
+  }
   ma::RoundObservation missing;
   missing.guest_stop = true;
   check(ma::next_step(f.rom, missing, none).termination == ma::Termination::tool_failure, "step: guest stop without a record -> tool_failure");

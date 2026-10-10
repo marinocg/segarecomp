@@ -13,6 +13,7 @@
 #include "segarecomp/cpu/m68k/timing.hpp"
 #include "segarecomp/recompiler/frontend.hpp"
 
+#include <span>
 #include <array>
 #include <cstdint>
 #include <map>
@@ -314,6 +315,11 @@ struct FrontendProgram {
   // is the sole authority, so a wrong proposal can never execute wrong code. Empty by default.
   struct ImmutableCopyAlias { std::uint32_t execution_base{}; std::uint32_t source_base{}; std::uint32_t length{}; };
   std::vector<ImmutableCopyAlias> immutable_copy_aliases{};
+  // Narrow M68K RAM-thunk descriptors: one work-RAM `JMP (xxx).W/.L` instruction whose exact bytes a bounded build-time
+  // preparation run observed. Like an ADR 0049 alias the descriptor is only a request to compile one more guarded entry; the
+  // runtime byte-identity guard emitted with the entry is the authority. Empty by default.
+  struct MaterializedRamThunk { std::uint32_t execution_base{}; std::vector<std::uint8_t> bytes{}; };
+  std::vector<MaterializedRamThunk> materialized_ram_thunks{};
   // Test-only synthetic seam for exercising block partitioning independently
   // from admission. Production input parsing never populates this vector; it
   // is honored only for project-authored `synthetic/` images.
@@ -346,6 +352,16 @@ void apply_genesis_code_pointer_table_descriptors(FrontendProgram &program);
 // as an exact duplicate.
 [[nodiscard]] bool apply_genesis_immutable_copy_alias(FrontendProgram &program, std::uint32_t execution_base,
                                                       std::uint32_t source_base, std::uint32_t length);
+
+// Narrow build-time RAM-thunk producer (ADR 0097 amendment). `genesis_ram_jump_thunk_bytes` asks the CPU-owned MC68000 decoder
+// whether `window` (the live work-RAM bytes at `execution_base`) begins with exactly one `JMP (xxx).W` / `JMP (xxx).L`; it returns
+// that instruction's bytes (length from the decoder) or nullopt. `apply_genesis_materialized_ram_thunk` records the descriptor
+// (fails closed, changing nothing, for an odd/out-of-work-RAM base, a window that is not such a JMP, or an execution span that
+// overlaps an alias or a different thunk; an exact duplicate is accepted). No runtime component decodes instructions.
+[[nodiscard]] std::optional<std::vector<std::uint8_t>> genesis_ram_jump_thunk_bytes(std::uint32_t execution_base,
+                                                                                    std::span<const std::uint8_t> window);
+[[nodiscard]] bool apply_genesis_materialized_ram_thunk(FrontendProgram &program, std::uint32_t execution_base,
+                                                        std::span<const std::uint8_t> window);
 
 // SEG-028-T004 (ADR 0077): the Genesis M68K executable-image producer. One `immutable_input` image (producer `genesis.cartridge`,
 // verification `none`) per structurally valid `raw_cartridge_rom` claim, in claim order, owning the claim's bytes and mapped at the
@@ -400,6 +416,8 @@ struct FrontendAnalysis { M68kFrontendProfile profile{M68kFrontendProfile::direc
     // address of the same instruction. `decoded.raw_bytes` are the bytes the runtime guard must find in RAM.
     bool execution_alias{false};
     std::uint32_t alias_source_address{};
+    // A materialized work-RAM JMP thunk (guarded like an alias identity, but its bytes have no cartridge source).
+    bool materialized_ram_thunk{false};
   };
   // Independent executable identities. Provenance lives in `decoded` and
   // `operation`; `source_mapping` preserves the unique immutable byte owner.

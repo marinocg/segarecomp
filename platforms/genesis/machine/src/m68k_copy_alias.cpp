@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <functional>
 
+
 namespace segarecomp::machine::genesis::m68k_alias {
 
 std::optional<GuestStopRecord> parse_stop_record(std::span<const std::uint8_t> bytes) {
@@ -82,12 +83,49 @@ const char* termination_name(Termination termination) noexcept {
   return "tool_failure";
 }
 
-Step next_step(std::span<const std::uint8_t> rom, const RoundObservation& observed, const std::vector<CopyAlias>& aliases) {
+namespace {
+// The RAM-thunk decision for a frontier at work-RAM `pc` (a non-copy execution target, or an IRQ6 vector entry).
+Step thunk_step(const GuestStopRecord& record, std::uint32_t pc, const std::vector<CopyAlias>& aliases, const std::vector<RamThunk>& thunks,
+                const RamThunkRecognizer& recognizer) {
+  Step step;
+  if ((pc & 1U) != 0 || pc < kWorkRamBegin || pc >= kWorkRamBegin + kWorkRamBytes) { step.termination = Termination::no_work_ram_frontier; return step; }
+  const std::size_t offset = pc - kWorkRamBegin;
+  const std::size_t window = std::min<std::size_t>(6, record.work_ram.size() - offset);
+  const auto bytes = recognizer ? recognizer(pc, std::span<const std::uint8_t>(record.work_ram).subspan(offset, window)) : std::nullopt;
+  if (!bytes) { step.termination = Termination::frontier_not_verbatim_copy; return step; }
+  for (const RamThunk& existing : thunks)
+    if (pc < existing.execution + existing.bytes.size() && existing.execution < pc + bytes->size()) {
+      step.termination = Termination::repeated_alias_no_progress;  // already compiled (or rewritten): fail closed, no progress
+      return step;
+    }
+  for (const CopyAlias& alias : aliases)
+    if (pc < static_cast<std::uint64_t>(alias.execution) + alias.length && alias.execution < pc + bytes->size()) {
+      step.termination = Termination::repeated_alias_no_progress;
+      return step;
+    }
+  step.aliases = aliases;
+  step.thunks = thunks;
+  step.thunks.push_back({pc, *bytes});
+  std::sort(step.thunks.begin(), step.thunks.end(), [](const RamThunk& a, const RamThunk& b) { return a.execution < b.execution; });
+  return step;
+}
+}  // namespace
+
+Step next_step(std::span<const std::uint8_t> rom, const RoundObservation& observed, const std::vector<CopyAlias>& aliases,
+               const std::vector<RamThunk>& thunks, const RamThunkRecognizer& recognizer) {
   Step step;
   if (observed.tool_failure) { step.termination = Termination::tool_failure; return step; }
   if (!observed.guest_stop) { step.termination = Termination::route_advanced; return step; }
   if (!observed.record || observed.record->work_ram.size() != kWorkRamBytes) { step.termination = Termination::tool_failure; return step; }
   const GuestStopRecord& record = *observed.record;
+  if (record.stop_class == kStopUnsupportedInterrupt) {
+    // An IRQ6 delivery through a work-RAM vector: the cartridge's own vector slot names the stub address (immutable data).
+    if (rom.size() < kIrq6VectorOffset + 4U) { step.termination = Termination::non_alias_frontier; return step; }
+    const std::uint32_t vector = ((static_cast<std::uint32_t>(rom[kIrq6VectorOffset]) << 24) | (static_cast<std::uint32_t>(rom[kIrq6VectorOffset + 1U]) << 16) |
+                                  (static_cast<std::uint32_t>(rom[kIrq6VectorOffset + 2U]) << 8) | rom[kIrq6VectorOffset + 3U]) & 0x00FFFFFFU;
+    if (vector < kWorkRamBegin) { step.termination = Termination::non_alias_frontier; return step; }
+    return thunk_step(record, vector, aliases, thunks, recognizer);
+  }
   if (record.stop_class != kStopKnownButUnemittedTarget && record.stop_class != kStopInternalDispatchInconsistency) {
     step.termination = Termination::non_alias_frontier;
     return step;
@@ -97,12 +135,13 @@ Step next_step(std::span<const std::uint8_t> rom, const RoundObservation& observ
     return step;
   }
   const auto proposal = derive_copy_alias(rom, record.work_ram, record.pc);
-  if (!proposal) { step.termination = Termination::frontier_not_verbatim_copy; return step; }
+  if (!proposal) return thunk_step(record, record.pc, aliases, thunks, recognizer);  // not a verbatim copy: maybe one JMP thunk
   std::vector<CopyAlias> next = aliases;
   next.push_back(*proposal);
   next = merge_copy_aliases(std::move(next));
   if (next == aliases) { step.termination = Termination::repeated_alias_no_progress; return step; }
   step.aliases = std::move(next);
+  step.thunks = thunks;
   return step;
 }
 
@@ -112,17 +151,19 @@ std::uint64_t Summary::alias_bytes() const noexcept {
   return total;
 }
 
-Summary prepare(std::span<const std::uint8_t> rom, const RoundObservation& initial, RoundRunner& runner, std::size_t max_rounds) {
+Summary prepare(std::span<const std::uint8_t> rom, const RoundObservation& initial, RoundRunner& runner, std::size_t max_rounds,
+                const RamThunkRecognizer& recognizer) {
   Summary summary;
   RoundObservation observed = initial;
   for (;;) {
-    Step step = next_step(rom, observed, summary.aliases);
+    Step step = next_step(rom, observed, summary.aliases, summary.thunks, recognizer);
     if (step.termination) { summary.termination = *step.termination; break; }
     if (summary.rounds >= max_rounds) { summary.termination = Termination::max_rounds; break; }
     ++summary.rounds;
     summary.aliases = std::move(step.aliases);
+    summary.thunks = std::move(step.thunks);
     bool abort = false;
-    observed = runner.run_round(summary.aliases, abort);
+    observed = runner.run_round(summary.aliases, summary.thunks, abort);
     if (abort) { summary.aborted = true; summary.termination = Termination::tool_failure; break; }
   }
   return summary;

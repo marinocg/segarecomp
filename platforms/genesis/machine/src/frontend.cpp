@@ -1922,6 +1922,42 @@ bool apply_genesis_immutable_copy_alias(FrontendProgram &program, std::uint32_t 
   return true;
 }
 
+std::optional<std::vector<std::uint8_t>> genesis_ram_jump_thunk_bytes(std::uint32_t execution_base,
+                                                                       std::span<const std::uint8_t> window) {
+  if ((execution_base & 1U) != 0U || execution_base < genesis_alias_work_ram_begin ||
+      static_cast<std::uint64_t>(execution_base) + 2U > genesis_alias_work_ram_end)
+    return std::nullopt;
+  DecodeSource source{CpuVariant::mc68000, {TargetAddressSpace::m68k_program, execution_base}, MoveqImageOffset{0U}};
+  auto result = decode_m68k_instruction(window, source, M68kDecodeProfile::general_startup);
+  const auto *decoded = std::get_if<M68kDecodedInstruction>(&result);
+  if (decoded == nullptr || decoded->kind != M68kInstructionKind::jmp ||
+      (decoded->source_ea.mode != M68kEaMode::absolute_word && decoded->source_ea.mode != M68kEaMode::absolute_long))
+    return std::nullopt;
+  const std::uint64_t length = decoded->provenance.length.value;
+  if (length < 4U || length > window.size() || length != decoded->raw_bytes.size() ||
+      static_cast<std::uint64_t>(execution_base) + length > genesis_alias_work_ram_end)
+    return std::nullopt;
+  return std::vector<std::uint8_t>(window.begin(), window.begin() + static_cast<std::ptrdiff_t>(length));
+}
+
+bool apply_genesis_materialized_ram_thunk(FrontendProgram &program, std::uint32_t execution_base,
+                                          std::span<const std::uint8_t> window) {
+  auto bytes = genesis_ram_jump_thunk_bytes(execution_base, window);
+  if (!bytes) return false;
+  const std::uint64_t end = static_cast<std::uint64_t>(execution_base) + bytes->size();
+  for (const auto &alias : program.immutable_copy_aliases)
+    if (execution_base < static_cast<std::uint64_t>(alias.execution_base) + alias.length && alias.execution_base < end) return false;
+  for (const auto &existing : program.materialized_ram_thunks) {
+    if (existing.execution_base == execution_base && existing.bytes == *bytes) return true;  // exact duplicate
+    if (execution_base < static_cast<std::uint64_t>(existing.execution_base) + existing.bytes.size() && existing.execution_base < end)
+      return false;  // a different thunk over the same bytes: ambiguous, fail closed
+  }
+  program.materialized_ram_thunks.push_back({execution_base, std::move(*bytes)});
+  std::sort(program.materialized_ram_thunks.begin(), program.materialized_ram_thunks.end(),
+            [](const auto &left, const auto &right) { return left.execution_base < right.execution_base; });
+  return true;
+}
+
 std::optional<GenesisM68kExecutableImages> genesis_m68k_executable_images(const FrontendProgram &program) {
   GenesisM68kExecutableImages out;
   out.set.cpu = CpuVariant::mc68000;
@@ -1971,6 +2007,26 @@ std::optional<GenesisM68kExecutableImages> genesis_m68k_executable_images(const 
     image.verification = ImageVerification::byte_identity;
     out.set.images.push_back(std::move(image));
     out.claim_index.push_back(claim_index);
+  }
+  for (const auto &thunk : program.materialized_ram_thunks) {
+    // The bytes are decoded again here by the CPU-owned decoder: a descriptor is only a proposal until it validates.
+    const auto bytes = genesis_ram_jump_thunk_bytes(thunk.execution_base, thunk.bytes);
+    if (!bytes || *bytes != thunk.bytes) return std::nullopt;
+    for (const auto &alias : program.immutable_copy_aliases)
+      if (thunk.execution_base < static_cast<std::uint64_t>(alias.execution_base) + alias.length &&
+          alias.execution_base < static_cast<std::uint64_t>(thunk.execution_base) + thunk.bytes.size())
+        return std::nullopt;
+    ExecutableImage image;
+    image.id = ImageId{static_cast<std::uint32_t>(out.set.images.size() + 1U)};
+    image.bytes = thunk.bytes;
+    image.mappings.push_back({thunk.execution_base, 0U, static_cast<std::uint32_t>(thunk.bytes.size())});
+    image.provenance.authority = ImageAuthority::bounded_build_time_materialization;
+    image.provenance.producer = "genesis.ram_thunk";
+    image.provenance.evidence.push_back({"derivation", "observed_work_ram_jump_thunk"});
+    image.provenance.evidence.push_back({"length", std::to_string(thunk.bytes.size())});
+    image.verification = ImageVerification::byte_identity;
+    out.set.images.push_back(std::move(image));
+    out.claim_index.push_back(std::numeric_limits<std::size_t>::max());  // no cartridge claim owns these bytes
   }
   if (!validate_executable_image_set(out.set).ok()) return std::nullopt;
   return out;
@@ -6230,6 +6286,35 @@ bool populate_immutable_rom_aot_entries(const FrontendProgram &program,
              !same_ir(found->second.operation, candidate.operation)))
           return false;
       }
+    }
+  }
+  // ADR 0097 amendment: materialized work-RAM JMP thunks. The bounded-build-time-materialization images own their exact bytes;
+  // the CPU-owned decoder and lifter produce the identity (execution-relative provenance, semantics and timing), and the entry
+  // keeps the runtime whole-instruction byte-identity guard every execution alias carries.
+  if (!program.materialized_ram_thunks.empty()) {
+    const auto images = genesis_m68k_executable_images(program);
+    if (!images) return false;
+    for (const ExecutableImage &image : images->set.images) {
+      if (image.provenance.authority != ImageAuthority::bounded_build_time_materialization ||
+          image.provenance.producer != "genesis.ram_thunk")
+        continue;
+      const std::uint32_t execution = image.mappings.front().execution_base;
+      const auto bytes = executable_image_bytes(images->set, image);
+      DecodeSource source{CpuVariant::mc68000, {TargetAddressSpace::m68k_program, execution}, MoveqImageOffset{0U}};
+      auto decoded_result = decode_m68k_instruction(bytes, source, M68kDecodeProfile::general_startup);
+      auto *decoded = std::get_if<M68kDecodedInstruction>(&decoded_result);
+      if (decoded == nullptr || decoded->provenance.length.value != bytes.size()) return false;
+      auto operation = lift_m68k_instruction(*decoded);
+      if (!m68k_operation_is_immutable_rom_aot_safe(operation, return_target_authority_available)) return false;
+      MappingClaim thunk_claim;
+      thunk_claim.name = "materialized_work_ram_thunk";
+      thunk_claim.target_begin = {TargetAddressSpace::m68k_program, execution};
+      thunk_claim.target_end = {TargetAddressSpace::m68k_program, execution + static_cast<std::uint32_t>(bytes.size())};
+      thunk_claim.image_begin = {0U};
+      thunk_claim.image_end = {static_cast<std::uint64_t>(bytes.size())};
+      FrontendAnalysis::ImmutableRomAotEntry candidate{*decoded, operation, thunk_claim, true, execution};
+      candidate.materialized_ram_thunk = true;
+      if (!entries.emplace(execution, std::move(candidate)).second) return false;
     }
   }
   analysis.immutable_rom_aot_entries.clear();

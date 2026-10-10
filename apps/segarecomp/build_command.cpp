@@ -729,7 +729,8 @@ std::string aot_policy_json(const Options &options, const Log &log, const std::s
 // `--immutable-copy-alias` per ADR 0049 descriptor. Replaces the previous emission; fills `units` from the emitted manifest. False:
 // the emitter rejected the request.
 bool emit_genesis_m68k(const Options &options, Log &log, const std::string &sha, const GenesisM68kRoute &route,
-                       const std::vector<m68k_alias::CopyAlias> &aliases, std::vector<fs::path> &units) {
+                       const std::vector<m68k_alias::CopyAlias> &aliases, const std::vector<m68k_alias::RamThunk> &thunks,
+                       std::vector<fs::path> &units) {
   std::error_code ec;
   fs::remove(route.source, ec);
   fs::remove_all(route.shard_dir, ec);
@@ -743,10 +744,17 @@ bool emit_genesis_m68k(const Options &options, Log &log, const std::string &sha,
                   static_cast<unsigned>(alias.length));
     emit_args.insert(emit_args.end(), {"--immutable-copy-alias", text});
   }
+  for (const m68k_alias::RamThunk &thunk : thunks) {
+    char text[32];
+    std::snprintf(text, sizeof(text), "%08x:", static_cast<unsigned>(thunk.execution));
+    std::string arg = text;
+    for (const std::uint8_t byte : thunk.bytes) { std::snprintf(text, sizeof(text), "%02x", static_cast<unsigned>(byte)); arg += text; }
+    emit_args.insert(emit_args.end(), {"--ram-thunk", arg});
+  }
   if (fs::is_regular_file(hints, ec)) { emit_args.push_back("--external-hints"); emit_args.push_back(hints.string()); }
   log.plan_applied = false;
   if (options.admission) {
-    if (admission_applies(*options.admission, aliases)) {
+    if (thunks.empty() && admission_applies(*options.admission, aliases)) {
       log.plan_applied = true;
       emit_args.insert(emit_args.end(), {"--immutable-rom-aot-admission", options.admission_plan->string()});
     } else {
@@ -793,19 +801,26 @@ bool units_complete(const std::vector<fs::path> &units) {
 
 // Sanitized provenance JSON of the M68K executable images of the program built with `aliases` (counts only). nullopt: the program
 // or one descriptor is not accepted.
-std::optional<std::string> genesis_m68k_images_json(const GenesisM68kRoute &route, const std::vector<m68k_alias::CopyAlias> &aliases) {
+std::optional<std::string> genesis_m68k_images_json(const GenesisM68kRoute &route, const std::vector<m68k_alias::CopyAlias> &aliases,
+                         const std::vector<m68k_alias::RamThunk> &thunks) {
   auto program = segarecomp::make_genesis_reset_bridge_startup_program(*route.rom, *route.reset, std::nullopt);
   if (!program || !segarecomp::apply_genesis_immutable_rom_aot(*program)) return std::nullopt;
   for (const m68k_alias::CopyAlias &alias : aliases)
     if (!segarecomp::apply_genesis_immutable_copy_alias(*program, alias.execution, alias.source, alias.length)) return std::nullopt;
+  for (const m68k_alias::RamThunk &thunk : thunks)
+    if (!segarecomp::apply_genesis_materialized_ram_thunk(*program, thunk.execution, thunk.bytes)) return std::nullopt;
   const auto images = segarecomp::genesis_m68k_executable_images(*program);
   if (!images) return std::nullopt;
   return segarecomp::format_image_provenance_json(segarecomp::count_image_provenance(images->set));
 }
 
 std::string alias_preparation_json(const m68k_alias::Summary &prep) {
+  std::uint64_t thunk_bytes = 0;
+  for (const m68k_alias::RamThunk &thunk : prep.thunks) thunk_bytes += thunk.bytes.size();
   return "{\"rounds\":" + std::to_string(prep.rounds) + ",\"aliases\":" + std::to_string(prep.aliases.size()) + ",\"alias_bytes\":" +
-         std::to_string(prep.alias_bytes()) + ",\"termination\":\"" + m68k_alias::termination_name(prep.termination) + "\"}";
+         std::to_string(prep.alias_bytes()) +
+         (prep.thunks.empty() ? std::string() : ",\"ram_thunks\":" + std::to_string(prep.thunks.size()) + ",\"ram_thunk_bytes\":" +
+                                                    std::to_string(thunk_bytes)) + ",\"termination\":\"" + m68k_alias::termination_name(prep.termination) + "\"}";
 }
 
 // Builds the Genesis program. Returns 0 and fills `executable`, or the process exit code after recording the failure.
@@ -938,13 +953,15 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   };
   class Rounds final : public m68k_alias::RoundRunner {
    public:
-    std::function<m68k_alias::RoundObservation(const std::vector<m68k_alias::CopyAlias> &, bool &)> body;
-    m68k_alias::RoundObservation run_round(const std::vector<m68k_alias::CopyAlias> &aliases, bool &abort) override { return body(aliases, abort); }
+    std::function<m68k_alias::RoundObservation(const std::vector<m68k_alias::CopyAlias> &, const std::vector<m68k_alias::RamThunk> &, bool &)> body;
+    m68k_alias::RoundObservation run_round(const std::vector<m68k_alias::CopyAlias> &aliases, bool &abort) override { return body(aliases, {}, abort); }
+    m68k_alias::RoundObservation run_round(const std::vector<m68k_alias::CopyAlias> &aliases, const std::vector<m68k_alias::RamThunk> &thunks,
+                                           bool &abort) override { return body(aliases, thunks, abort); }
   } rounds;
-  rounds.body = [&](const std::vector<m68k_alias::CopyAlias> &aliases, bool &abort) {
+  rounds.body = [&](const std::vector<m68k_alias::CopyAlias> &aliases, const std::vector<m68k_alias::RamThunk> &thunks, bool &abort) {
     m68k_alias::RoundObservation observed;
-    log.line("m68k alias preparation round: aliases=" + std::to_string(aliases.size()));
-    if (!emit_genesis_m68k(options, log, sha, route, aliases, units) || !units_complete(units)) { observed.tool_failure = true; return observed; }
+    log.line("m68k alias preparation round: aliases=" + std::to_string(aliases.size()) + (thunks.empty() ? std::string() : " ram_thunks=" + std::to_string(thunks.size())));
+    if (!emit_genesis_m68k(options, log, sha, route, aliases, thunks, units) || !units_complete(units)) { observed.tool_failure = true; return observed; }
     std::vector<std::pair<std::string, fs::path>> changed;
     const std::vector<CompileJob> batch = build.plan_m68k(units, route.shard_dir, changed);
     if (!batch.empty() && build.compile(batch) >= 0) { observed.tool_failure = true; return observed; }
@@ -954,19 +971,19 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     summary = std::move(next);
     return observe(summary);
   };
-  const m68k_alias::Summary prep = m68k_alias::prepare(*route.rom, observe(summary), rounds);
+  const m68k_alias::Summary prep = m68k_alias::prepare(*route.rom, observe(summary), rounds, m68k_alias::kMaxRounds, segarecomp::genesis_ram_jump_thunk_bytes);
   const std::string prep_json = alias_preparation_json(prep);
   const std::string prep_extra = ",\"m68k_alias_preparation\":" + prep_json;
-  log.line("m68k alias preparation: rounds=" + std::to_string(prep.rounds) + " aliases=" + std::to_string(prep.aliases.size()) +
+  log.line("m68k alias preparation: rounds=" + std::to_string(prep.rounds) + " aliases=" + std::to_string(prep.aliases.size()) + (prep.thunks.empty() ? std::string() : " ram_thunks=" + std::to_string(prep.thunks.size())) +
            " alias_bytes=" + std::to_string(prep.alias_bytes()) + " termination=" + m68k_alias::termination_name(prep.termination) +
            (prep.aborted ? " (round fixed point failed)" : ""));
   if (prep.aborted) return materialize_failed(summary, prep_extra);
   std::optional<std::string> alias_images;
-  if (!m68k_alias::incomplete(prep.termination) && !prep.aliases.empty()) {
-    alias_images = genesis_m68k_images_json(route, prep.aliases);
+  if (!m68k_alias::incomplete(prep.termination) && (!prep.aliases.empty() || !prep.thunks.empty())) {
+    alias_images = genesis_m68k_images_json(route, prep.aliases, prep.thunks);
     if (!alias_images) log.line("m68k alias preparation: the accepted aliases do not form a valid executable-image set");
   }
-  if (m68k_alias::incomplete(prep.termination) || (!prep.aliases.empty() && !alias_images)) {
+  if (m68k_alias::incomplete(prep.termination) || ((!prep.aliases.empty() || !prep.thunks.empty()) && !alias_images)) {
     log.line("FAILED (m68k-alias-prepare): alias_preparation_incomplete");
     write_status(options, sha, "failed", "m68k-alias-prepare", "The work-RAM code of this game could not be prepared.",
                  prep_extra + ",\"diagnostic\":\"alias_preparation_incomplete\"");
@@ -1011,7 +1028,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   if (options.admission) {
     // SEG-031 (ADR 0080): which admission the final M68K emission used (sanitized: the strategy only).
     const bool hybrid = options.admission->strategy == segarecomp::GenesisAdmissionStrategy::hybrid &&
-                        admission_applies(*options.admission, prep.aliases);
+                        prep.thunks.empty() && admission_applies(*options.admission, prep.aliases);
     status_extra += std::string(",\"m68k_admission\":\"") + (hybrid ? "hybrid" : "broad") + "\"";
     log.line(std::string("m68k admission: final=") + (hybrid ? "hybrid" : "broad"));
   }
@@ -1162,7 +1179,7 @@ int segarecomp_build_command(int argc, char **argv) {
         if (!line.empty()) units.push_back(shard_dir / line);
     } else {
       // The existing emit route, in-process; no ADR 0049 alias yet (the build-time preparation adds them, SEG-028-T005).
-      if (!emit_genesis_m68k(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, {}, units))
+      if (!emit_genesis_m68k(options, log, sha, GenesisM68kRoute{&bytes, &*genesis_reset, source, shard_dir}, {}, {}, units))
         return fail(options, log, sha, "generate", 1,
                     "Segarecomp could not translate this game yet (compatibility is experimental).");
     }
