@@ -281,3 +281,22 @@ re-version. Observations (descriptive, not used for any selection): removing `b_
 help; dropping the neighbour context (F3) is the only variant that contains Flicky and Phantasy Star II (and loses only 22 Sonic 1 starts and 154 Shining
 Force starts) but at K/U 0.22-0.36; the decoder-only schema (F4) loses recall; the byte-only schema (F5) selects 73-99 % of every ROM, i.e. it is a
 non-selective model. These do not satisfy the pre-registered gate and are not pursued (no feature fishing).
+
+## 16. T005 - bounded model-family comparison on the retained F0 schema (commit C5)
+
+Logistic regression `C in {0.25, 1.0, 4.0}` (standardized, balanced, seed 46) versus the single pre-registered comparator
+`HistGradientBoostingClassifier(max_iter=60, max_depth=3, learning_rate=0.1, min_samples_leaf=20, early_stopping=False, balanced, seed 46)`; P0 thresholds, four LOTO folds.
+
+| model | features | Sonic 1 | Flicky | Shining Force | Phantasy Star II | all folds C subset R and K |
+| --- | --- | --- | --- | --- | --- | --- |
+| logistic C 0.25 | 141 | R-191 / K-980 / 0.224 / m=0.0381 | R-63 / K-67 / 0.202 / m=0.0304 | R-736 / K-- / - REJ / m=1.54e-05 | R-0 / K-0 / 0.157 / m=1.46 | **no** |
+| logistic C 1.0 (T003-B) | 141 | R-377 / K-1302 / 0.219 / m=0.00477 | R-63 / K-67 / 0.198 / m=0.0157 | R-921 / K-- / - REJ / m=5.09e-09 | R-0 / K-0 / 0.151 / m=1.04 | **no** |
+| logistic C 4.0 | 141 | R-505 / K-1530 / 0.214 / m=0.000127 | R-63 / K-67 / 0.194 / m=0.0011 | R-927 / K-- / - REJ / m=9.45e-14 | R-280 / K-1126 / 0.128 / m=0.384 | **no** |
+| HGB | 141 | R-125 / K-544 / 0.227 / m=0.0396 | R-21 / K-22 / 0.198 / m=0.15 | R-1827 / K-- / - REJ / m=0.00775 | R-0 / K-0 / 0.099 / m=1.07 | **no** |
+
+
+Decision: **LOGISTIC RETAINED.** No logistic setting has all four folds `C subset R`/`C subset K` (so no "best logistic by mean K/U" exists under the
+section 7 rule, which presumed at least one qualifying setting); the pre-registered default `C = 1.0` (the v1 recipe, preferred on a tie) is therefore
+carried forward unchanged to T006. The HGB comparator also fails its own admission criteria (Flicky 21 and Sonic 1 125 starts outside R; Shining Force
+1,827 outside R and rejected by the prune) and the required `>= 0.05` mean `K/U` improvement is not even defined without a qualifying baseline; it is not
+simpler to embed than a logistic. This choice of `C = 1.0` is the baseline value fixed in advance, not a result-tuned choice.
