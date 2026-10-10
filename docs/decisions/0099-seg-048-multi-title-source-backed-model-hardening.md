@@ -338,7 +338,7 @@ records (a bogus commit SHA was refused in a negative control; nothing was writt
 
 ### 18.1 Formal blind gate (Alien Soldier E, Land Stalker F): not satisfiable, nothing was unsealed
 
-- **E - Alien Soldier (U), SHA-256 `2754fa0d...2d1f2`**: the pinned source reconstructs exactly one Japanese image (SHA-1 `8f6eb584...`) and refuses every
+- **E - Alien Soldier (U), SHA-256 `2754fa0d...0f2d1`**: the pinned source reconstructs exactly one Japanese image (SHA-1 `8f6eb584...`) and refuses every
   other image in its split/init scripts; the Japanese image is not an authorized local input and the authorized (U) image has SHA-1 `fa64d7f8...`. No
   byte-identical rebuild exists, hence no sound truth. **No truth was ever materialized or read for E.**
 - **F - Land Stalker (U), SHA-256 `497958ca...2004`**: the closest pinned variant (`BETA`) rebuilds a different image (one header region character,
@@ -375,8 +375,7 @@ vacuous because there is no v2; this is evidence about the route that stays in p
 | Shining Force | 600 frames | 600 frames | **`broad` (prune rejected -> fallback)** | yes (identical program) | 488.5 MB -> 488.5 MB (0 %) | 284.7 s -> 285.2 s |
 | Sonic & Knuckles | guest_stop at frame 9, `irq6_vector_in_work_ram` (pre-existing device frontier) | guest_stop at frame 9, **`reached_unresolved_direct_edge`** | `ml_region` | **NO** | 510.3 MB -> 188.8 MB (-63.0 %) | 208.5 s -> 77.6 s |
 
-Flicky stops identically at an unrelated pre-existing frontier before reaching any of the 37 missed source starts, so it neither confirms nor refutes an
-escape. **Sonic & Knuckles is a real production-v1 runtime divergence**: the broad run executes 270 distinct PCs and reaches the device frontier; the v1-selective
+Flicky stops identically at an unrelated pre-existing frontier after 26 frames; the equal coverage digests mean no executed PC lay outside K in that window, so it neither confirms nor refutes an escape for the 37 missed source starts. **Sonic & Knuckles is a real production-v1 runtime divergence**: the broad run executes 270 distinct PCs and reaches the device frontier; the v1-selective
 run executes 255 and fail-closes 14 dispatches earlier. Execution-PC analysis (private bitmaps, aggregates only): **3 PCs executed by the broad run lie
 outside K** - all three are genuine source instruction starts inside one 512 B window that *is* in R (the structural prune removed them) - and the selective run
 has 0 PCs outside its own K. The failure is fail-closed (a typed guest stop, never wrong execution), but the opt-in Optimized AOT route regresses behaviour
