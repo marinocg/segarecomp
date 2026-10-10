@@ -415,6 +415,8 @@ def materialize_truth(listing: str, rom_path: str, output: str, extractor_args: 
     """The only entry that may write truth for a SEALED title: it requires a valid freeze record first."""
     sha = hashlib.sha256(pathlib.Path(rom_path).read_bytes()).hexdigest()
     if sha in SEALED_ROM_SHA256:
+        if not freeze_commit:
+            raise SystemExit("blind barrier: a sealed ROM requires --freeze-commit")
         verify_freeze(tools_dir, freeze_commit, repo)
     extractor = str(pathlib.Path(__file__).resolve().parent / "segarecomp_source_map_extract.py")
     return subprocess.run([sys.executable, "-I", extractor, "--listing", listing, "--rom", rom_path, "--output", output] + extractor_args,
@@ -453,6 +455,8 @@ def _titles(args, allow_sealed_after_freeze: bool = False) -> dict:
         if t.sha in SEALED_ROM_SHA256:
             if not allow_sealed_after_freeze:
                 raise SystemExit("refused: sealed title cannot enter a LOTO/training run")
+            if not args.freeze_commit:
+                raise SystemExit("blind barrier: a sealed ROM requires --freeze-commit")
             verify_freeze(args.tools_dir, args.freeze_commit, args.repo)  # evaluation only; a valid freeze record is mandatory
         titles[t.id] = t
     return titles

@@ -392,3 +392,37 @@ stops earlier than broad and is therefore not a like-for-like runtime comparison
 `materialize-truth` strips the argument separator; extractor options `--placeholder-fill`, `--max-entries` (default unchanged, 65,536), duplicate-line
 echo handling in the ASM68K path; `zero-shot` accepts a sealed ROM only after `verify-freeze`. After these changes the Sonic 1, Flicky, Shining Force
 and Phantasy Star II truth artifacts re-extract with the digests of section 13 (byte-identical). Tests added for each.
+
+## 19. Production regression gate (unchanged v1)
+
+No file under `libs/`, `apps/`, `platforms/` and none of the six v1 artifacts differs from `origin/main`. Local gate: configure + build (Debug, warnings as errors),
+`ctest --preset fast` 84/84 pass; focused suites (`segarecomp_ml_region_v2_test`, `segarecomp_source_map_extract_test`, `segarecomp_ml_region_test`,
+`report_only_analysis_absent_test`, `genesis_ml_*`, `genesis_region_*`, `genesis_window_*`) 10 pass, 1 skip (the ROM-gated parity test, run by hand below). Native v1
+selected-set parity (`segarecomp_ml_region_native_parity.py`, five historical titles): all exact. Native v1 K identities unchanged: Sonic 1 64,233; Sonic 2 137,230;
+Cool Spot 56,980; Streets of Rage 61,374; OutRun 78,283. Broad-vs-v1 differential (600 frames, clang) on the five historical titles: all `frames_reached`,
+equal digests, producer `ml_region`, generated C -73.9 %, -71.4 %, -81.1 %, -70.4 %, -73.8 %. Compatibility (broad) route, exact-map precedence, broad fallback,
+launcher policy: no source change. GitHub CI is the full gate (recorded in the PR).
+
+## 20. Independent review (T008) and final classification
+
+A fresh adversarial-validator session (not the implementer) attacked identity, truth, leakage, barrier, determinism, arithmetic, drift and hygiene.
+Verdict **PASS WITH FINDINGS, no blocker**: all five exact rebuilds, all five truth digests, two LOTO configurations (different work directory) and the zero-shot
+rows were reproduced independently; Flicky and Phantasy Star II folds were refit independently (R, C outside R/K, K/U identical); the S&K divergence was
+re-run (3 broad-executed PCs outside K, 0 selective); sections 1-12 are byte-unchanged since the T001 commit; truth timestamps follow the freeze; no commercial or
+address-level data is committed. Findings and dispositions:
+1. *Barrier weaker than text (should-fix)*: `--freeze-commit` was optional. **Fixed** (implementation-only): a sealed ROM now requires it for `materialize-truth` and `zero-shot`; test added.
+2. *"V1 RETAINED" must not read as "v1 validated" (should-fix)*: accepted - see the final statement below.
+3. *Negative result is bounded by the pre-registered sequential search (note)*: accepted; policies were swept only on F0/C=1 by design. An oracle probe by the reviewer (R built from the true windows) is accepted
+   by the prune/validator on Shining Force (K/U 0.12): the failure is model quality, not an unsatisfiable gate.
+4. *Truth trusts `binclude`/`incbin` gaps and `dc.w`-encoded code (note)*: accepted; it biases towards fewer positives (a negative result is conservative); on S&K 270/270 broad-executed PCs are in C.
+5. *Private cache held two ROM copies (note)*: removed.
+6. *Tool commit time vs results (note)*: the protocol commit precedes all truth/results; tool code timing cannot be proven by git alone - accepted.
+7. *Flicky wrapper byte counts (note)*: the §18.3 sizes are the differential tool's own metric; concatenated-C sizes differ by <1 %.
+8. *§17 amendment (note)*: not a protocol violation (pure append, only enables supplementary evidence that made v1 look worse).
+
+**FINAL CLASSIFICATION: `V1 RETAINED` (no v2 candidate qualifies).** Additionally the formal blind gate is unsatisfiable (no byte-identical source-to-image rebuild for Alien Soldier or Land Stalker); the precedence of
+section 12 makes the failed LOTO/selection stage the governing class, and a measured negative result must not be hidden under BLOCKED. Plain statement of what this does *not* mean: v1 is retained as the only
+available opt-in producer, **not validated**: on non-training source-backed titles it leaves source instruction starts outside R/K (Flicky 34/37, Sonic & Knuckles 237/6,383), is fail-closed-rejected on Shining Force
+(broad fallback) and diverges from broad at runtime on Sonic & Knuckles (3 executed PCs excluded by the prune; fail-closed, never wrong execution). Compatibility (broad AOT) remains the default and the unconditional fallback.
+
+**SEG-049 decision:** stays gated. No v2 exists to port; T002 (native v2 port) is moot. Any SEG-049 work on v1 lifecycle/UX must carry the documented v1 cross-title containment gaps as a known limitation, and the broad fallback stays the default.

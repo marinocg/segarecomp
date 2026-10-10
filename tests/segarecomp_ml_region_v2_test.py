@@ -190,6 +190,20 @@ class Barrier(unittest.TestCase):
                 m.SEALED_ROM_SHA256.clear()
                 m.SEALED_ROM_SHA256.update(old)
 
+    def test_sealed_rom_requires_freeze_commit_even_with_a_valid_record(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tools = self.make_repo(tmp)
+            rom = os.path.join(tmp, "r.bin")
+            with open(rom, "wb") as sink:
+                sink.write(b"\x00" * 16)
+            sha = hashlib.sha256(b"\x00" * 16).hexdigest()
+            m.SEALED_ROM_SHA256[sha] = "T"
+            try:
+                with self.assertRaises(SystemExit):
+                    m.materialize_truth("x.lst", rom, os.path.join(tmp, "out"), [], tools, None)
+            finally:
+                del m.SEALED_ROM_SHA256[sha]
+
     def test_oracle_and_coverage_inputs_refused(self):
         for name in ("run.coverage.txt", "execution_oracle.bin", "x.bitmap"):
             with self.assertRaises(SystemExit):
