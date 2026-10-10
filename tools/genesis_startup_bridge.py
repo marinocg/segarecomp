@@ -1560,12 +1560,15 @@ def discover_copy_aliases(emitter_command: list[str], compiler: pathlib.Path, ro
             window = dump[8 + offset:8 + offset + 6].hex()
             # A materialized thunk is an observed fact: the same address must show the same bytes again (then this stop is simply
             # no progress); other bytes are a typed, INCOMPLETE preparation, never silently re-materialized.
-            clash = [t for t in thunks if t[0] < pc + len(window) // 2 and pc < t[0] + len(t[1]) // 2]
+            clash = [t for t in thunks if t[0] <= pc < t[0] + len(t[1]) // 2]  # the stop is inside a materialized stub
             if clash:
                 same = clash[0][0] == pc and window.startswith(clash[0][1])
                 reason = ALIAS_TERMINATION_REPEATED_ALIAS if same else ALIAS_TERMINATION_RAM_THUNK_MISMATCH
                 break
             thunk_hex = classify_ram_jump_thunk(emitter_command, pc, window)
+            if thunk_hex is not None and any(t[0] < pc + len(thunk_hex) // 2 and pc < t[0] + len(t[1]) // 2 for t in thunks):
+                reason = ALIAS_TERMINATION_RAM_THUNK_MISMATCH  # the recognized instruction straddles another materialized stub
+                break
             if thunk_hex is None or any(pc < t[0] + len(t[1]) // 2 and t[0] < pc + len(thunk_hex) // 2 for t in thunks) or \
                     any(pc < a[0] + a[2] and a[0] < pc + len(thunk_hex) // 2 for a in aliases):
                 reason = ALIAS_TERMINATION_NOT_VERBATIM_COPY if thunk_hex is None else ALIAS_TERMINATION_REPEATED_ALIAS

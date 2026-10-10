@@ -197,6 +197,21 @@ void unit_cases() {
     check(summary.termination == ma::Termination::repeated_alias_no_progress && summary.rounds == 1 && summary.thunks.size() == 1 &&
               runner.seen.size() == 1 && runner.seen[0].size() == 1,
           "thunk: the bounded loop builds the thunk once, then stops on no progress");
+    // Adjacent but distinct stubs are not a mismatch: a stub already materialized right after this one (inside the 6-byte probe
+    // window, outside the decoder-trimmed instruction) leaves the new proposal valid; only a recognized instruction that really
+    // straddles a materialized stub is.
+    {
+      Fixture adj(0x200, 0x400, 48);
+      for (std::size_t i = 0; i < 4; ++i) { adj.ram[0x0800 + i] = proposed.thunks[0].bytes[i]; adj.ram[0x0804 + i] = static_cast<std::uint8_t>(0x10 + i); }
+      const std::vector<ma::RamThunk> later{{0xFF0804, {0x10, 0x11, 0x12, 0x13}}};
+      const auto next = ma::next_step(adj.rom, stop_at(adj.ram, 0xFF0800), none, later, fake);
+      check(!next.termination && next.thunks.size() == 2 && next.thunks[0].execution == 0xFF0800 && next.thunks[1].execution == 0xFF0804,
+            "thunk: an adjacent, distinct materialized stub is not a mismatch");
+      adj.ram[0x0802] = 0xAA; adj.ram[0x0803] = 0xBB; adj.ram[0x0804] = 0xCC; adj.ram[0x0805] = 0xDD;  // recognized at 0x802, straddles 0x804
+      const std::vector<ma::RamThunk> straddled{{0xFF0804, {0xCC, 0xDD, 0x00, 0x00}}};
+      check(ma::next_step(adj.rom, stop_at(adj.ram, 0xFF0802), none, straddled, fake).termination == ma::Termination::ram_thunk_mismatch,
+            "thunk: a recognized instruction straddling a materialized stub -> ram_thunk_mismatch");
+    }
     // The loop: a later observation of the same address with different bytes ends the preparation INCOMPLETE; the changed target is
     // never proposed or built (the runner saw exactly one thunk set, the original one).
     runner.seen.clear();

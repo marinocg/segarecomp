@@ -96,7 +96,7 @@ Step thunk_step(const GuestStopRecord& record, std::uint32_t pc, const std::vect
   // again must show the same bytes (then the stop is simply no progress); different bytes mean the observation is not
   // reproducible, which is a typed, incomplete preparation, never "no progress" and never silently re-materialized.
   for (const RamThunk& existing : thunks) {
-    if (pc < existing.execution + existing.bytes.size() && existing.execution < pc + window) {
+    if (pc >= existing.execution && pc < existing.execution + existing.bytes.size()) {  // the stop is inside a materialized stub
       const bool same = existing.execution == pc && window >= existing.bytes.size() &&
                         std::equal(existing.bytes.begin(), existing.bytes.end(), record.work_ram.begin() + static_cast<std::ptrdiff_t>(offset));
       step.termination = same ? Termination::repeated_alias_no_progress : Termination::ram_thunk_mismatch;
@@ -105,6 +105,11 @@ Step thunk_step(const GuestStopRecord& record, std::uint32_t pc, const std::vect
   }
   const auto bytes = recognizer ? recognizer(pc, std::span<const std::uint8_t>(record.work_ram).subspan(offset, window)) : std::nullopt;
   if (!bytes) { step.termination = Termination::frontier_not_verbatim_copy; return step; }
+  for (const RamThunk& existing : thunks)  // the recognized (decoder-trimmed) instruction must not straddle another materialized stub
+    if (existing.execution < pc + bytes->size() && pc < existing.execution + existing.bytes.size()) {
+      step.termination = Termination::ram_thunk_mismatch;
+      return step;
+    }
   for (const CopyAlias& alias : aliases)
     if (pc < static_cast<std::uint64_t>(alias.execution) + alias.length && alias.execution < pc + bytes->size()) {
       step.termination = Termination::repeated_alias_no_progress;
