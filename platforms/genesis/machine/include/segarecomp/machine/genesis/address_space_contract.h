@@ -104,7 +104,8 @@ static inline int segarecomp_genesis_psg_port_contains(uint32_t address) {
  *   - the three serial-port control registers S-CTRL1/2/3 ($A10013, $A10019, $A1001F; GTO1 v1.00 pp. 72-75): writing
  *     zero leaves every serial port disabled, the power-on state (no serial device is modelled);
  *   - the Sega mapper's SRAM/ROM control register ($A130F1; plutiedev "Sega mapper"): bit 0 clear keeps the cartridge ROM
- *     mapped at $000000-$3FFFFF, which is the only mapping this machine models (no cartridge SRAM exists here).
+ *     mapped at $000000-$3FFFFF, which is the only mapping a cartridge WITHOUT supported header-declared SRAM models (a
+ *     cartridge with supported SRAM owns this register instead; see the cartridge SRAM block above).
  * Only a BYTE write that keeps the idle state is admitted (S-CTRL: the value zero; $A130F1: bit 0 clear). Every other
  * value, width, direction and neighbouring address stays fail-closed.  Shared byte-for-byte by the translation-time
  * routing gate (which defers the shape) and the generated runtime (which inspects the value). */
@@ -125,6 +126,42 @@ static inline int segarecomp_genesis_idle_control_write_admitted(uint32_t addres
 static inline int segarecomp_genesis_idle_control_register(uint32_t address) {
   return segarecomp_genesis_serial_control_register(address) ||
          address == SEGARECOMP_GENESIS_MAPPER_SRAM_CONTROL_REGISTER;
+}
+
+/* Standard header-declared cartridge SRAM (ADR 0098).  A ROM whose header declares extra memory ("RA", type byte, $20, start,
+ * end; plutiedev "ROM header reference") with a supported 8-bit byte-lane layout owns one bounded, in-memory SRAM extent
+ * [start, end] (inclusive, both ends on the lane's parity) inside the $200000-$3FFFFF cartridge window.  The extent holds
+ * one byte per lane address, so the dense storage index of an address is (address - start) / 2.  Whether the extent shows
+ * the SRAM or the cartridge ROM beneath it is the Sega mapper's SRAM control register $A130F1 (bit 0 = map SRAM, bit 1 =
+ * write protect; Genesis Plus GX `mapper_sega_w`); a ROM that ends at or below `start` has nothing underneath, so its SRAM
+ * is always visible.  Only BYTE accesses on the lane's own addresses are admitted; every other access that touches the
+ * extent is rejected.  Shared byte-for-byte by the translation-time routing gate and the generated runtime.  This is not a
+ * mapper framework: no bank switching, lock-on or EEPROM exists here. */
+#define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_WINDOW_BEGIN UINT32_C(0x00200000)
+#define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_WINDOW_END UINT32_C(0x00400000)
+#define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_MAX_SPAN UINT32_C(0x00010000)    /* end - start must be below this */
+#define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_MAX_STORAGE_BYTES UINT32_C(0x8000) /* one byte per lane address of the maximum span */
+#define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_FILL UINT8_C(0xFF)               /* deterministic power-on contents (never random) */
+#define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_CONTROL_MAP UINT32_C(0x01)       /* $A130F1 bit 0: SRAM replaces the ROM in the extent */
+#define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_CONTROL_PROTECT UINT32_C(0x02)   /* $A130F1 bit 1: writes to the SRAM are ignored */
+#define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_CONTROL_DEFINED UINT32_C(0x03)
+
+#define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_OUTSIDE 0  /* does not touch the extent: not this device's access */
+#define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_BYTE 1     /* BYTE on a lane address of the extent */
+#define SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_REJECTED 2 /* touches the extent with an unsupported width or lane */
+
+static inline int segarecomp_genesis_cartridge_sram_classify(uint32_t start, uint32_t end, uint32_t lane_odd,
+                                                              uint32_t address, uint32_t width_bytes) {
+  if (width_bytes == UINT32_C(0) || address > end || (uint64_t)address + width_bytes <= (uint64_t)start)
+    return SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_OUTSIDE;
+  if (width_bytes != UINT32_C(1) || address < start || (address & UINT32_C(1)) != (lane_odd & UINT32_C(1)))
+    return SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_REJECTED;
+  return SEGARECOMP_GENESIS_CARTRIDGE_SRAM_ACCESS_BYTE;
+}
+
+/* A $A130F1 write of a cartridge that owns SRAM: a BYTE whose only set bits are the two defined ones. */
+static inline int segarecomp_genesis_cartridge_sram_control_write_admitted(uint32_t width_bytes, uint32_t value) {
+  return width_bytes == UINT32_C(1) && (value & ~SEGARECOMP_GENESIS_CARTRIDGE_SRAM_CONTROL_DEFINED & UINT32_C(0xFF)) == 0U;
 }
 
 /* SEG-007-T171: YM2612 FM synthesis chip register window, $A04000-$A04003

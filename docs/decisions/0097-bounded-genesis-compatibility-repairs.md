@@ -10,7 +10,7 @@ a bounded gap inside an existing semantic owner (CPU lowering, runtime device mo
 architecture. This ADR records the repairs and, equally important, the explicit non-goals. Only non-reconstructable
 classifications are recorded: no address, byte, or instruction from any commercial image appears in this repository.
 
-Non-goals (new architecture, deliberately not decided here): general work-RAM-resident code (anything but a verbatim ADR 0049 alias or one absolute `JMP` thunk), rewritten/self-modifying RAM code, cartridge SRAM, lock-on/bank-switched mappers, any new device family.
+Non-goals (new architecture, deliberately not decided here): general work-RAM-resident code (anything but a verbatim ADR 0049 alias or one absolute `JMP` thunk), rewritten/self-modifying RAM code, cartridge SRAM (since decided: ADR 0098), lock-on/bank-switched mappers, any new device family.
 
 ## 2. Repairs
 

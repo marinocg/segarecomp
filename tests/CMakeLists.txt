@@ -599,6 +599,15 @@ add_test(NAME genesis_startup_bridge_c6_persistence_test COMMAND ${Python3_EXECU
 # ADR 0097 amendment: the runtime contains no M68K opcode decoder (RAM thunks are a build-time producer plus a byte guard).
 add_test(NAME genesis_runtime_no_m68k_opcode_decoder_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_runtime_no_m68k_opcode_decoder_test.py ${PROJECT_SOURCE_DIR})
+# ADR 0098: header-declared cartridge SRAM -- descriptor parsing/classification (unit) and the generated-native route (emit, strict C11,
+# run) on project-authored ROMs.
+add_executable(genesis_cartridge_sram_test genesis_cartridge_sram_test.cpp)
+target_link_libraries(genesis_cartridge_sram_test PRIVATE segarecomp::machine_genesis)
+segarecomp_enable_warnings(genesis_cartridge_sram_test)
+add_test(NAME genesis_cartridge_sram_test COMMAND genesis_cartridge_sram_test)
+add_test(NAME genesis_cartridge_sram_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_cartridge_sram_generated_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_compat_repairs_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_compat_repairs_generated_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

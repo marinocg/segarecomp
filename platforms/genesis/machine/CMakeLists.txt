@@ -1,6 +1,7 @@
 # Genesis address-space/frontend composition over reusable CPU and device libraries.
 add_library(segarecomp_machine_genesis
   src/address_space.cpp
+  src/cartridge_sram.cpp
   src/frontend.cpp
   src/hybrid_admission.cpp
   src/ml_region_producer.cpp

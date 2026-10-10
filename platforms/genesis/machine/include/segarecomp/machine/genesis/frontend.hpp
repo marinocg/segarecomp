@@ -9,6 +9,7 @@
 #include "segarecomp/cpu/m68k/static_program.hpp"
 #include "segarecomp/device/sega/genesis/controller_io.hpp"
 #include "segarecomp/machine/genesis/address_types.hpp"
+#include "segarecomp/machine/genesis/cartridge_sram.hpp"
 #include "segarecomp/cpu/m68k/c4.hpp"
 #include "segarecomp/cpu/m68k/timing.hpp"
 #include "segarecomp/recompiler/frontend.hpp"
@@ -437,6 +438,9 @@ struct FrontendAnalysis { M68kFrontendProfile profile{M68kFrontendProfile::direc
   // Compat repair: the IRQ6 vector slot resolves into work RAM (RAM jump-table convention). No handler is rooted;
   // the emitted program stops fail-closed when it would have to deliver a VBlank interrupt.
   bool irq6_vector_in_work_ram{false};
+  // ADR 0098: the cartridge's header-declared SRAM (derived from the immutable image). Absolute operands touching its extent are
+  // routed to the runtime SRAM owner instead of being folded as immutable ROM.
+  std::optional<GenesisCartridgeSramDescriptor> cartridge_sram;
   std::uint32_t irq6_vector_ram_entry{0};  // the work-RAM address the slot points at (valid iff the flag is set)
   // SEG-007-T222 / ADR-0037: the build-time-resolved MC68000 vector-5
   // (Zero Divide) handler entry (the long word at mapped cartridge image
