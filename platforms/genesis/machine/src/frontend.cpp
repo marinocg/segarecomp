@@ -2944,6 +2944,7 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
 
   std::optional<Address> irq6_handler_entry_value;
   bool irq6_vector_in_work_ram = false;
+  Address irq6_vector_ram_entry_value = 0U;
   {
     constexpr std::size_t kIrq6VectorOffset = 0x78U;
     // The autovector root is resolved from the mapped cartridge image's fixed
@@ -2965,6 +2966,7 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
       // fail-closed (typed interrupt stop) at the first VBlank interrupt it would have to deliver, instead of the
       // whole build being rejected or the interrupt being silently dropped.
       irq6_vector_in_work_ram = true;
+      irq6_vector_ram_entry_value = *resolved_handler;
     } else {
     const Address handler = *resolved_handler;
     const M68kProgramAddress handler_address{TargetAddressSpace::m68k_program, handler};
@@ -3685,6 +3687,7 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   if (irq6_handler_entry_value)
     analysis.irq6_handler_entry = M68kProgramAddress{TargetAddressSpace::m68k_program, *irq6_handler_entry_value};
   analysis.irq6_vector_in_work_ram = irq6_vector_in_work_ram;
+  analysis.irq6_vector_ram_entry = irq6_vector_ram_entry_value;
   // SEG-007-T222 / ADR-0037: retain the build-time-resolved vector-5 handler
   // entry, mirroring `irq6_handler_entry` exactly.
   if (divide_by_zero_handler_entry_value)

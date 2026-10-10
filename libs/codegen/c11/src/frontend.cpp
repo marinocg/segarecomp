@@ -6421,7 +6421,7 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
       hex(partial.accepted_prefix.startup_ingress->entry.value, 8), irq6_handler_hex,
       divide_by_zero_handler_hex, privilege_violation_handler_hex, software_exception_handler_hex);
   if (partial.accepted_prefix.irq6_vector_in_work_ram && irq6_handler_hex.empty())
-    sink << "runtime.irq6_vector_in_work_ram = 1; ";
+    sink << "runtime.irq6_vector_in_work_ram = 1; runtime.irq6_vector_ram_entry = UINT32_C(" << hex(partial.accepted_prefix.irq6_vector_ram_entry, 8) << "); ";
   if (g_execution_history_hooks) sink << "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; ";
   if (owned_region_count != 0U) {
     sink << "  runtime.owned_regions = genesis_owned_cartridge_regions;\n";

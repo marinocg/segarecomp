@@ -419,6 +419,7 @@ struct FrontendAnalysis { M68kFrontendProfile profile{M68kFrontendProfile::direc
   // Compat repair: the IRQ6 vector slot resolves into work RAM (RAM jump-table convention). No handler is rooted;
   // the emitted program stops fail-closed when it would have to deliver a VBlank interrupt.
   bool irq6_vector_in_work_ram{false};
+  std::uint32_t irq6_vector_ram_entry{0};  // the work-RAM address the slot points at (valid iff the flag is set)
   // SEG-007-T222 / ADR-0037: the build-time-resolved MC68000 vector-5
   // (Zero Divide) handler entry (the long word at mapped cartridge image
   // vector-table offset 0x14), mirroring `irq6_handler_entry`'s own

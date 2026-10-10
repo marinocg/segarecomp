@@ -252,6 +252,62 @@ void ram_resident_irq6_vector_fails_closed() {
   check(spun.kind == GENESIS_RUNNER_RESOURCE_LIMIT, "no handler and no RAM vector: IRQ6 stays inert");
 }
 
+// A RAM jump stub: the vector slot points at live `JMP (xxx).L` bytes in work RAM. The interrupt is delivered to the stub
+// address and the runner follows the single JMP to its 24-bit target (12 cycles); an unresolvable stub keeps the typed stop.
+void ram_jump_stub_is_followed() {
+  constexpr uint32_t kStub = 0x00FFFA7Cu;
+  constexpr uint32_t kTarget = 0x00001234u;
+  GenesisRuntime r;
+  prime(r);
+  r.irq6_handler_present = 0u;
+  r.irq6_handler_entry = 0u;
+  r.irq6_vector_in_work_ram = 1u;
+  r.irq6_vector_ram_entry = kStub;
+  const uint32_t o = kStub - kRamBegin;
+  r.work_ram[o] = 0x4E; r.work_ram[o + 1] = 0xF9;
+  r.work_ram[o + 2] = 0x00; r.work_ram[o + 3] = 0x00; r.work_ram[o + 4] = 0x12; r.work_ram[o + 5] = 0x34;
+  int stub_dispatches = 0;
+  bool reached_target = false;
+  g_step = [&](GenesisRuntime *rt) -> GenesisControlTransfer {
+    if (rt->pc == kStub) {  // no compiled entry for the stub: the generic dispatcher stop
+      ++stub_dispatches;
+      GenesisControlTransfer t{};
+      t.kind = GENESIS_STOP;
+      t.stop.stop_class = GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET;
+      t.stop.diagnostic_category = GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET;
+      return t;
+    }
+    if (rt->pc == kTarget) {
+      reached_target = true;
+      GenesisControlTransfer t{};
+      t.kind = GENESIS_COMPLETE;
+      return t;
+    }
+    return continue_at(kOrdinaryPc);
+  };
+  const auto result = genesis_runtime_run(&r, trampoline, 4096u);
+  check(result.kind == GENESIS_COMPLETE && reached_target && stub_dispatches == 1,
+        "RAM jump stub: the interrupt reaches the stub and the runner follows its JMP target");
+
+  // JMP (xxx).W form, sign-extended to 24 bits.
+  GenesisRuntime w;
+  prime(w);
+  w.irq6_handler_present = 0u; w.irq6_vector_in_work_ram = 1u; w.irq6_vector_ram_entry = kStub;
+  w.work_ram[o] = 0x4E; w.work_ram[o + 1] = 0xF8; w.work_ram[o + 2] = 0x12; w.work_ram[o + 3] = 0x34;
+  reached_target = false;
+  const auto word_result = genesis_runtime_run(&w, trampoline, 4096u);
+  check(word_result.kind == GENESIS_COMPLETE && reached_target, "RAM jump stub: JMP (xxx).W is followed too");
+
+  // Live bytes that are not a JMP keep the typed fail-closed stop.
+  GenesisRuntime bad;
+  prime(bad);
+  bad.irq6_handler_present = 0u; bad.irq6_vector_in_work_ram = 1u; bad.irq6_vector_ram_entry = kStub;
+  bad.work_ram[o] = 0x4E; bad.work_ram[o + 1] = 0x71;  // NOP: not a stub
+  const auto bad_result = genesis_runtime_run(&bad, trampoline, 4096u);
+  check(bad_result.kind == GENESIS_STOP && bad_result.stop.diagnostic_category == GENESIS_DIAG_IRQ6_VECTOR_IN_WORK_RAM,
+        "RAM vector whose live bytes are not a JMP stub still stops typed");
+}
+
 void stack_wrap_fails_closed_with_no_frame_write() {
   GenesisRuntime r;
   prime(r);
@@ -736,6 +792,7 @@ int main() {
   exception_entry_frame_is_correct();
   user_mode_admission_is_rejected();
   ram_resident_irq6_vector_fails_closed();
+  ram_jump_stub_is_followed();
   stack_wrap_fails_closed_with_no_frame_write();
   rte_atomic_restore_and_failure();
   high_alias_stack_entry_and_returns();
