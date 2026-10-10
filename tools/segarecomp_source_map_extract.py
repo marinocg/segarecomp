@@ -214,10 +214,14 @@ def _collect_asm68k(listing: str):
     addrs: list[int] = []
     pending = None  # truncated data row waiting for the next address to fix its extent
     seen = False
+    previous = None
     for raw in listing.split("\n"):
         line = raw.rstrip("\r")
         if len(line) < 9 or line[8] != " " or not HEX8.fullmatch(line[:8]):
             continue
+        if line == previous:
+            continue  # ASM68K echoes the final line of some blocks twice; a second emission would have advanced the PC, so it is a listing repeat
+        previous = line
         seen = True
         addr = int(line[:8], 16)
         addrs.append(addr)
@@ -297,7 +301,7 @@ def _collect_asm68k(listing: str):
     return rows, gap_tokens, spans
 
 
-def parse_listing(listing: str, rom: bytes, dialect: str = "as"):
+def parse_listing(listing: str, rom: bytes, dialect: str = "as", placeholder_fill: bool = False, max_entries: int | None = None):
     """Returns (instruction_starts, summary). Raises SourceMapError."""
     if len(listing) > MAX_LISTING_BYTES:
         _fail("listing_too_large")
@@ -312,10 +316,10 @@ def parse_listing(listing: str, rom: bytes, dialect: str = "as"):
         exact = False  # the listing shows first-pass placeholder operands/data; opcode words and final addresses are still checked
     else:
         _fail("unknown_dialect")
-    return _account(rows, gap_tokens, rom, exact, spans)
+    return _account(rows, gap_tokens, rom, exact, spans, placeholder_fill, max_entries)
 
 
-def _account(rows, gap_tokens, rom: bytes, exact: bool, data_spans=()):
+def _account(rows, gap_tokens, rom: bytes, exact: bool, data_spans=(), placeholder_fill: bool = False, max_entries: int | None = None):
     # cell state: 0 none, 1 instruction opcode word, 3 instruction operand byte, 2 data, 4 operand byte overwritten by data
     cover = bytearray(len(rom))
     starts = set()
@@ -346,7 +350,10 @@ def _account(rows, gap_tokens, rom: bytes, exact: bool, data_spans=()):
             counts["I"] += length
         else:
             if exact and bytes(data) != rom[addr:end]:
-                _fail("data_differs_from_rom")
+                # opt-in: a data row that is ONE uniform 00/FF fill is a reserved-space placeholder that p2bin post-processing (`-z` compression of a
+                # sound driver) replaces; it stays DATA, so nothing is ever claimed about its ROM bytes.
+                if not (placeholder_fill and len(set(data)) == 1 and data[0] in (0x00, 0xFF)):
+                    _fail("data_differs_from_rom")
             counts["D"] += length
         for position in range(addr, end):
             state = cover[position]
@@ -397,7 +404,7 @@ def _account(rows, gap_tokens, rom: bytes, exact: bool, data_spans=()):
         _fail("unexplained_rom_range", unexplained)
     if not starts:
         _fail("empty_universe")
-    if len(starts) > MAX_ENTRIES:
+    if len(starts) > (MAX_ENTRIES if max_entries is None else max_entries):
         _fail("universe_too_large")
     return sorted(starts), {
         "instruction_starts": len(starts), "instruction_bytes": counts["I"], "data_bytes": counts["D"],
@@ -420,13 +427,13 @@ def format_universe(starts, rom_sha256: str, producer: str, source_revision: str
 
 def extract(listing: str, rom: bytes, source_revision: str, expect_source_revision: str | None,
             producer: str = "s1disasm-listing-v1", source_config: str = "none", expect_rom_sha256: str | None = None,
-            dialect: str = "as"):
+            dialect: str = "as", placeholder_fill: bool = False, max_entries: int | None = None):
     rom_sha256 = hashlib.sha256(rom).hexdigest()
     if expect_rom_sha256 is not None and expect_rom_sha256 != rom_sha256:
         _fail("rom_hash_mismatch")
     if expect_source_revision is not None and expect_source_revision != source_revision:
         _fail("source_revision_mismatch")
-    starts, summary = parse_listing(listing, rom, dialect)
+    starts, summary = parse_listing(listing, rom, dialect, placeholder_fill, max_entries)
     return format_universe(starts, rom_sha256, producer, source_revision, source_config), summary
 
 
@@ -441,6 +448,10 @@ def main(argv=None) -> int:
     parser.add_argument("--expect-rom-sha256")
     parser.add_argument("--producer", default="s1disasm-listing-v1")
     parser.add_argument("--dialect", choices=("as", "asm68k"), default="as")
+    parser.add_argument("--max-entries", type=int, default=None,
+                        help="upper bound on instruction starts (default: the 65,536 island bound; evaluation-only truth of larger images raises it)")
+    parser.add_argument("--placeholder-fill", action="store_true",
+                        help="a data row that is a single uniform 00/FF fill may differ from the ROM (p2bin -z compression placeholder)")
     args = parser.parse_args(argv)
     try:
         if args.source_dir:
@@ -449,7 +460,7 @@ def main(argv=None) -> int:
                 _fail("source_revision_mismatch")
         rom = open(args.rom, "rb").read(MAX_ROM_BYTES + 1)
         listing = open(args.listing, "rb").read(MAX_LISTING_BYTES + 1).decode("ascii", errors="replace")
-        text, summary = extract(listing, rom, args.source_revision, None, args.producer, args.source_config, args.expect_rom_sha256, args.dialect)
+        text, summary = extract(listing, rom, args.source_revision, None, args.producer, args.source_config, args.expect_rom_sha256, args.dialect, args.placeholder_fill, args.max_entries)
     except SourceMapError as error:
         print(json.dumps({"schema": "segarecomp.m68k_source_universe.error.v1", "error": error.code, "count": error.count}))
         return 1

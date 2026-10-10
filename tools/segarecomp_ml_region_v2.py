@@ -446,12 +446,14 @@ def canonical_v2(frozen_core: dict, mean, scale, coef, intercept) -> dict:
 
 
 # ------------------------------------------------------------------------------------------------------------------------ commands
-def _titles(args) -> dict:
+def _titles(args, allow_sealed_after_freeze: bool = False) -> dict:
     titles = {}
     for spec in args.title:
         t = parse_title_spec(spec)
         if t.sha in SEALED_ROM_SHA256:
-            raise SystemExit("refused: sealed title cannot enter a LOTO/training run")
+            if not allow_sealed_after_freeze:
+                raise SystemExit("refused: sealed title cannot enter a LOTO/training run")
+            verify_freeze(args.tools_dir, args.freeze_commit, args.repo)  # evaluation only; a valid freeze record is mandatory
         titles[t.id] = t
     return titles
 
@@ -475,7 +477,7 @@ def cmd_loto(args) -> int:
 
 
 def cmd_zero_shot(args) -> int:
-    titles = _titles(args)
+    titles = _titles(args, allow_sealed_after_freeze=True)
     records = zero_shot(args.model_json, args.frozen_json, titles, PruneRunner(args.cli, args.workdir))
     text = json.dumps(records, indent=1, sort_keys=True) + "\n"
     if args.output:
@@ -501,7 +503,8 @@ def cmd_verify_freeze(args) -> int:
 
 
 def cmd_materialize_truth(args) -> int:
-    return materialize_truth(args.listing, args.rom, args.output, args.extractor_args, args.tools_dir, args.freeze_commit, args.repo)
+    extractor_args = args.extractor_args[1:] if args.extractor_args[:1] == ["--"] else args.extractor_args
+    return materialize_truth(args.listing, args.rom, args.output, extractor_args, args.tools_dir, args.freeze_commit, args.repo)
 
 
 def cmd_freeze(args) -> int:
@@ -588,6 +591,9 @@ def main() -> int:
     zs.add_argument("--model-json", required=True)
     zs.add_argument("--frozen-json", required=True)
     zs.add_argument("--output")
+    zs.add_argument("--tools-dir", default=str(pathlib.Path(__file__).resolve().parent))
+    zs.add_argument("--freeze-commit")
+    zs.add_argument("--repo")
     zs.set_defaults(func=cmd_zero_shot)
     seal = sub.add_parser("seal-check")
     seal.add_argument("--store", required=True)

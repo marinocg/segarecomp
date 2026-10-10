@@ -328,3 +328,68 @@ validator may change.
 
 Final-answer implication already fixed here: the formal blind gate is moot as a model decision (there is no v2 to gate) in addition to being
 unsatisfiable for lack of corresponding images (section 12). Production Optimized AOT is untouched: v1 stays the production optimized model.
+
+## 18. T007 - post-freeze evaluation (commit C7; everything below happened after `T006_FREEZE_COMMIT=25d06a2ddb47358bef4d4e3567251e96b566058e`)
+
+Mandatory order kept: source truth first, then the static gate, then runtime. At the freeze the seal check over the whole private artifact store reported
+INTACT (no universe bound to Alien Soldier, Land Stalker or Sonic & Knuckles existed). Truth for a sealed ROM can only be produced through
+`segarecomp_ml_region_v2.py materialize-truth`, which verifies the freeze record and that the given commit is an ancestor of HEAD containing byte-identical
+records (a bogus commit SHA was refused in a negative control; nothing was written).
+
+### 18.1 Formal blind gate (Alien Soldier E, Land Stalker F): not satisfiable, nothing was unsealed
+
+- **E - Alien Soldier (U), SHA-256 `2754fa0d...2d1f2`**: the pinned source reconstructs exactly one Japanese image (SHA-1 `8f6eb584...`) and refuses every
+  other image in its split/init scripts; the Japanese image is not an authorized local input and the authorized (U) image has SHA-1 `fa64d7f8...`. No
+  byte-identical rebuild exists, hence no sound truth. **No truth was ever materialized or read for E.**
+- **F - Land Stalker (U), SHA-256 `497958ca...2004`**: the closest pinned variant (`BETA`) rebuilds a different image (one header region character,
+  offset `0x1F0`); all other variants differ by >= 1.09 M bytes. No byte-identical rebuild of the authorized image exists. **No truth for the authorized
+  image was ever materialized.** Supplementary, non-gating attempt on the *source-built* BETA image: the ASM68K listing does not print the bytes of
+  instructions emitted by an instruction-emitting macro (e.g. `ExpandBsr`), the extractor therefore finds 953 unexplained ROM ranges and **fails closed**
+  (`unexplained_rom_range`): sound truth for Landstalker is not obtainable from this listing, so no Landstalker metric exists in any form.
+- Required gate (`C subset R`, `C subset K`, `margin >= 2.0`, `K/U <= 0.60`, validator accepted for both E and F): **NOT EVALUATED / UNSATISFIABLE**. There is also
+  no frozen v2 candidate to evaluate (section 17).
+
+### 18.2 Post-freeze related-engine control (Sonic & Knuckles G; exact rebuild; not a formal gate title) - frozen production v1, unchanged
+
+Truth: `skdisasm` `044fa467...` (`buildSK.lua`, `Sonic3_Complete=0`), extracted twice with the identical artifact SHA-256
+`76be1cccdbb5160e4c61830fe29c41c01a213bc3c04944baded51e7cedf57b72` (119,319 instruction starts; the p2bin `-z` sound-driver placeholders are the only
+data rows allowed to differ from the image, opt-in `--placeholder-fill`; the evaluation-only bound is raised with `--max-entries`). Static result of the
+**unchanged frozen v1** (threshold 0.00835406801187952):
+
+| ROM | C | R windows | R/ROM | U | K | K/U | C outside R | C outside K | validator | min positive p | margin_factor |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Sonic & Knuckles | 119,319 | 1,332 / 4,096 | 0.325 | 989,195 | 319,694 | 0.3232 | **237** | **6,383** | accepted | 9.55e-08 | 1.1e-05 |
+
+Even for a Sonic-lineage engine the frozen v1 does not contain the source truth (237 instruction starts outside R; the prune then removes 6,383 outside K).
+This is supporting evidence only (it cannot change a formal pass/fail) and it agrees with sections 14-17.
+
+### 18.3 Runtime falsifier of the retained production v1 (broad vs `--ml-admission`, 600 no-render frames, explicit instruction budget, clang)
+
+`tools/genesis_ml_admission_differential.py` (unchanged bridge; production native v1; no v2 exists). Statements about v2 runtime behaviour are
+vacuous because there is no v2; this is evidence about the route that stays in production.
+
+| ROM | broad outcome | v1 outcome | producer | equal digests | generated C broad -> v1 | bridge wall broad -> v1 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Flicky | guest_stop at frame 26 | same | `ml_region` | yes | 26.6 MB -> 13.5 MB (-49.4 %) | 9.8 s -> 5.4 s |
+| Phantasy Star II | 600 frames | 600 frames | `ml_region` | yes | 221.3 MB -> 89.7 MB (-59.5 %) | 79.5 s -> 30.9 s |
+| Shining Force | 600 frames | 600 frames | **`broad` (prune rejected -> fallback)** | yes (identical program) | 488.5 MB -> 488.5 MB (0 %) | 284.7 s -> 285.2 s |
+| Sonic & Knuckles | guest_stop at frame 9, `irq6_vector_in_work_ram` (pre-existing device frontier) | guest_stop at frame 9, **`reached_unresolved_direct_edge`** | `ml_region` | **NO** | 510.3 MB -> 188.8 MB (-63.0 %) | 208.5 s -> 77.6 s |
+
+Flicky stops identically at an unrelated pre-existing frontier before reaching any of the 37 missed source starts, so it neither confirms nor refutes an
+escape. **Sonic & Knuckles is a real production-v1 runtime divergence**: the broad run executes 270 distinct PCs and reaches the device frontier; the v1-selective
+run executes 255 and fail-closes 14 dispatches earlier. Execution-PC analysis (private bitmaps, aggregates only): **3 PCs executed by the broad run lie
+outside K** - all three are genuine source instruction starts inside one 512 B window that *is* in R (the structural prune removed them) - and the selective run
+has 0 PCs outside its own K. The failure is fail-closed (a typed guest stop, never wrong execution), but the opt-in Optimized AOT route regresses behaviour
+relative to Compatibility on this title. Shining Force shows the other safe mode: the unchanged prune rejects the proposal and the route broadens to the full universe.
+
+### 18.4 Economics
+
+The v2 gates (generated C -30 %, compile CPU -25 %, runtime +15 %) apply to a v2 candidate and are not evaluated (none exists). For the retained v1 the table above
+gives generated-C and bridge-wall reductions on the three titles where the producer is accepted (-49 % to -63 % C; the S&K figure is for a run that
+stops earlier than broad and is therefore not a like-for-like runtime comparison). Compile CPU was not separated from bridge wall in this run.
+
+### 18.5 Post-freeze implementation-only changes (no frozen candidate semantics exist to change)
+
+`materialize-truth` strips the argument separator; extractor options `--placeholder-fill`, `--max-entries` (default unchanged, 65,536), duplicate-line
+echo handling in the ASM68K path; `zero-shot` accepts a sealed ROM only after `verify-freeze`. After these changes the Sonic 1, Flicky, Shining Force
+and Phantasy Star II truth artifacts re-extract with the digests of section 13 (byte-identical). Tests added for each.

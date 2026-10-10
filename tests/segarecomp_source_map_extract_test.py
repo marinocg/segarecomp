@@ -380,6 +380,40 @@ class Asm68kAndAdapters(unittest.TestCase):
             ex.extract("x\n", bytes(16), REV, None, dialect="other")
         self.assertEqual(ctx.exception.code, "unknown_dialect")
 
+
+    def test_asm68k_duplicate_echo_line_is_ignored_but_other_repeats_are_not(self):
+        listing, rom = self.asm68k_fixture()
+        lines = listing.splitlines()
+        echo = lines.index(a68(22, "4E75", "Later:rts"))
+        doubled = "\n".join(lines[:echo + 1] + [lines[echo]] + lines[echo + 1:]) + "\n"
+        self.assertEqual(ex.extract(doubled, rom, REV, None, dialect="asm68k")[0], ex.extract(listing, rom, REV, None, dialect="asm68k")[0])
+        other = "\n".join(lines[:echo + 1] + [a68(0, "", "; interleaved"), lines[echo]] + lines[echo + 1:]) + "\n"
+        with self.assertRaises(ex.SourceMapError):
+            ex.extract(other, rom, REV, None, dialect="asm68k")   # a non-adjacent repeat is a genuine overlap
+
+    def test_placeholder_fill_is_opt_in_and_uniform_only(self):
+        rom = bytearray(32)
+        rom[0:2] = bytes.fromhex("4E75")
+        rom[2:10] = bytes([0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88])
+        lines = [row(1, 0, "4E75", "\trts"), row(2, 2, "FFFFFFFFFFFFFFFF", "\tdc.b [8]$FF"), row(3, 10, "", "\tbinclude \"t\"")]
+        listing = "\n".join(lines) + "\n"
+        with self.assertRaises(ex.SourceMapError) as ctx:
+            ex.extract(listing, bytes(rom), REV, None)
+        self.assertEqual(ctx.exception.code, "data_differs_from_rom")
+        text, summary = ex.extract(listing, bytes(rom), REV, None, placeholder_fill=True)
+        self.assertEqual(summary["instruction_starts"], 1)
+        mixed = "\n".join([lines[0], row(2, 2, "FFFFFFFFFFFFFF00", "\tdc.b 1,2"), lines[2]]) + "\n"
+        with self.assertRaises(ex.SourceMapError) as ctx:
+            ex.extract(mixed, bytes(rom), REV, None, placeholder_fill=True)   # not one uniform fill
+        self.assertEqual(ctx.exception.code, "data_differs_from_rom")
+
+    def test_max_entries_bound_is_explicit(self):
+        listing, rom = self.asm68k_fixture()
+        with self.assertRaises(ex.SourceMapError) as ctx:
+            ex.extract(listing, rom, REV, None, dialect="asm68k", max_entries=2)
+        self.assertEqual(ctx.exception.code, "universe_too_large")
+        self.assertIn("entries 5", ex.extract(listing, rom, REV, None, dialect="asm68k", max_entries=5)[0])
+
     def test_deterministic(self):
         listing, rom = self.asm68k_fixture()
         self.assertEqual(ex.extract(listing, rom, REV, None, dialect="asm68k"), ex.extract(listing, rom, REV, None, dialect="asm68k"))
