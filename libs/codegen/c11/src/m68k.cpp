@@ -1645,8 +1645,15 @@ std::string emit_m68k_operation_c(const M68kIrOperation &operation, std::string_
                << "{ const uint16_t divide_divisor = (uint16_t)(" << source.expression << "); "
                << "if (divide_divisor == 0U) { "
                << emit_runtime(*memory).divide_by_zero(*memory, operation.provenance.source.address.value + operation.provenance.length.value,
-                                                        m68k_exception_entry_cycles(operation).value_or(0U))
-               << "else { ";
+                                                        m68k_exception_entry_cycles(operation).value_or(0U));
+        // Compat repair: an immediate zero divisor (data decoded as DIVU/DIVS #0 by the broad immutable-ROM universe) makes
+        // the division arm statically dead, and a strict -O2 compile rejects the then-constant `x / 0` under -Werror
+        // (-Wdiv-by-zero). The architectural behaviour is the unconditional divide-by-zero exception, so emit only that arm.
+        if (operation.source_ea.mode == M68kEaMode::immediate && (operation.source_ea.immediate_value & 0xFFFFU) == 0U) {
+          output << " }\n" << destination.postlude << "pc += UINT32_C(" << operation.provenance.length.value << ");\n}\n";
+          break;
+        }
+        output << "else { ";
         // SEG-021-T022: the exact DIV timing reads the dividend before the quotient/remainder write.
         if (!memory->timing_div_dividend.empty() && !memory->timing_div_divisor.empty())
           output << memory->timing_div_dividend << " = (uint32_t)(" << destination.expression << "); "

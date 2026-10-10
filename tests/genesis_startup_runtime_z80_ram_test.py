@@ -158,11 +158,42 @@ int main(void) {
     grant_bus(&rej);
     {
       GenesisRuntime granted = rej;
-      reject_z80_ram(&rej, &granted, Z80_RAM_BASE, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);
-      reject_z80_ram(&rej, &granted, Z80_RAM_BASE, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ);
-      reject_z80_ram(&rej, &granted, Z80_RAM_BASE + GENESIS_Z80_RAM_BYTES - 4U,
-                     GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);
+      /* A LONG access that is not wholly inside the sound RAM window (it runs into the YM2612 ports) stays fail-closed. */
+      reject_z80_ram(&rej, &granted, UINT32_C(0x00A03FFE), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);
+      reject_z80_ram(&rej, &granted, UINT32_C(0x00A03FFE), GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ);
+      /* The write-only bank register has no LONG form. */
+      reject_z80_ram(&rej, &granted, UINT32_C(0x00A06000), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);
     }
+    /* Without the bus grant a LONG access is rejected before anything is touched. */
+    {
+      GenesisRuntime ungranted = {0};
+      GenesisRuntime ungranted_before = ungranted;
+      reject_z80_ram(&ungranted, &ungranted_before, Z80_RAM_BASE, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);
+      reject_z80_ram(&ungranted, &ungranted_before, Z80_RAM_BASE, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ);
+    }
+  }
+
+  /* ---- A LONG access is two WORD accesses on the 16-bit bus: a write stores the high byte of each half at the
+     address and address + 2; a read returns each half's byte replicated into both halves of the word. ---- */
+  {
+    GenesisRuntime runtime = {0};
+    grant_bus(&runtime);
+    value = UINT32_C(0xA1B2C3D4);
+    assert(genesis_route_access(&runtime, Z80_RAM_BASE + 0x10U, GENESIS_ACCESS_LONG,
+                                GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+    assert(value == UINT32_C(0xA1B2C3D4));
+    assert(runtime.devices.z80_bus.z80_ram[0x10] == 0xA1U && runtime.devices.z80_bus.z80_ram[0x11] == 0U &&
+           runtime.devices.z80_bus.z80_ram[0x12] == 0xC3U && runtime.devices.z80_bus.z80_ram[0x13] == 0U);
+    value = 0U;
+    assert(genesis_route_access(&runtime, Z80_RAM_BASE + 0x10U, GENESIS_ACCESS_LONG,
+                                GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+    assert(value == UINT32_C(0xA1A1C3C3));
+    /* The mirror and the last in-window long both route. */
+    value = UINT32_C(0x11223344);
+    assert(genesis_route_access(&runtime, UINT32_C(0x00A03FFC), GENESIS_ACCESS_LONG,
+                                GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+    assert(runtime.devices.z80_bus.z80_ram[(0x1FFC) & (GENESIS_Z80_RAM_BYTES - 1U)] == 0x11U &&
+           runtime.devices.z80_bus.z80_ram[(0x1FFE) & (GENESIS_Z80_RAM_BYTES - 1U)] == 0x33U);
   }
 
   /* ---- Adversarial with a pre-populated window snapshot: rejection mutates
@@ -178,8 +209,8 @@ int main(void) {
     /* grant, then unsupported width */
     grant_bus(&rej);
     before = rej;
-    reject_z80_ram(&rej, &before, Z80_RAM_BASE + 4U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);
-    reject_z80_ram(&rej, &before, Z80_RAM_BASE + 4U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ);
+    reject_z80_ram(&rej, &before, UINT32_C(0x00A03FFE), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);
+    reject_z80_ram(&rej, &before, UINT32_C(0x00A03FFE), GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ);
   }
 
   /* ---- The mirror: $A02000-$A03FFF aliases the 8 KiB RAM. ---- */

@@ -169,8 +169,9 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
                  << "); GenesisRuntimeStop m68k_route_stop = {0};\n"
                  << "    if ((" << a7 << " & 1U) != 0U) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_ALIGNMENT, "
                  << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);\n"
-                  << "    if (" << a7 << " < UINT32_C(4)) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
-                  << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE);\n"
+                  // The 32-bit A7 register wraps (SP=0 pushes to 0xFFFFFFFC, whose 24-bit bus address is the top of work RAM:
+                  // carts that boot with a zero initial SP rely on it). The bus-range check below still rejects any extent that
+                  // leaves linear memory, so only the former blanket A7 < 4 underflow stop is removed.
                   << "    { const uint32_t m68k_new_a7 = " << a7 << " - UINT32_C(4);\n"
                   << "      const uint32_t m68k_stack_bus = m68k_new_a7 & UINT32_C(0x00FFFFFF);\n"
                   << "      if (m68k_stack_bus < UINT32_C(0x" << hex(ctx.linear_memory_begin, 8)
@@ -196,8 +197,6 @@ class GenesisM68kRuntimeCEmitter final : public M68kRuntimeCEmitter {
                        << hex(ctx.continuation, 8) << "); GenesisRuntimeStop m68k_route_stop = {0}; "
                        << "if ((" << a7 << " & 1U) != 0U) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_ALIGNMENT, "
                        << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE); "
-                        << "if (" << a7 << " < UINT32_C(4)) return genesis_static_stop(GENESIS_STOP_UNSUPPORTED_MEMORY_REGION, GENESIS_DIAG_INVALID_STACK_RANGE, "
-                        << ctx.runtime_source << ", 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE); "
                         << "{ const uint32_t m68k_new_a7 = " << a7 << " - UINT32_C(4); "
                         << "const uint32_t m68k_stack_bus = m68k_new_a7 & UINT32_C(0x00FFFFFF); "
                         << "if (m68k_stack_bus < UINT32_C(0x" << hex(ctx.linear_memory_begin, 8)

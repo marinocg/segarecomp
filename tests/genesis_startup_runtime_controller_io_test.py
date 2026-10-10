@@ -231,10 +231,15 @@ int main(void) {
      Version reads are all unaffected by this new family. */
   {
     GenesisRuntime neg = {0};
-    /* DATA3 ($A10007) BYTE read: deliberately out of scope, stays
-       fail-closed. */
+    /* DATA3 ($A10007, expansion port, no device) BYTE read: every input line released (0x7F); a WORD read of it
+       stays fail-closed. */
     value = UINT32_C(0xFFFFFFFF);
     assert(genesis_route_access(&neg, UINT32_C(0x00A10007), GENESIS_ACCESS_BYTE,
+                                 GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+    assert(value == UINT32_C(0x7F));
+    assert(memcmp(&neg, &zeroed, sizeof(neg)) == 0);
+    value = UINT32_C(0xFFFFFFFF);
+    assert(genesis_route_access(&neg, UINT32_C(0x00A10006), GENESIS_ACCESS_WORD,
                                  GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
     assert(stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_CONTROLLER_IO &&
            value == UINT32_C(0xFFFFFFFF));
@@ -297,6 +302,45 @@ int main(void) {
     assert(genesis_route_access(&neg, UINT32_C(0x00A10013), GENESIS_ACCESS_BYTE,
                                  GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
     assert(stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_CONTROLLER_IO);
+    /* The serial S-CTRL registers and the Sega-mapper SRAM control register accept a BYTE write of their idle value
+       (serial disabled / cartridge ROM stays mapped) and change nothing; every other value, width or neighbour stays
+       fail-closed. */
+    {
+      const uint32_t idle_registers[] = {UINT32_C(0x00A10013), UINT32_C(0x00A10019), UINT32_C(0x00A1001F),
+                                         UINT32_C(0x00A130F1)};
+      size_t idle_index;
+      GenesisRuntime idle = {0};
+      const GenesisRuntime idle_zero = {0};
+      for (idle_index = 0U; idle_index < sizeof(idle_registers) / sizeof(idle_registers[0]); ++idle_index) {
+        value = UINT32_C(0);
+        assert(genesis_route_access(&idle, idle_registers[idle_index], GENESIS_ACCESS_BYTE,
+                                     GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+        assert(memcmp(&idle, &idle_zero, sizeof(idle)) == 0);
+        value = UINT32_C(0);
+        assert(genesis_route_access(&idle, idle_registers[idle_index], GENESIS_ACCESS_WORD,
+                                     GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+        value = UINT32_C(0);
+        assert(genesis_route_access(&idle, idle_registers[idle_index], GENESIS_ACCESS_BYTE,
+                                     GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+      }
+      /* Serial control: any non-zero value (a serial mode) is unsupported. */
+      value = UINT32_C(0x00000080);
+      assert(genesis_route_access(&idle, UINT32_C(0x00A10019), GENESIS_ACCESS_BYTE,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+      /* Mapper SRAM control: bit 0 set would map cartridge SRAM over the ROM, which is not modelled. */
+      value = UINT32_C(0x00000001);
+      assert(genesis_route_access(&idle, UINT32_C(0x00A130F1), GENESIS_ACCESS_BYTE,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+      assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_MEMORY_REGION);
+      value = UINT32_C(0x00000002);  /* write protect bit only: ROM stays mapped */
+      assert(genesis_route_access(&idle, UINT32_C(0x00A130F1), GENESIS_ACCESS_BYTE,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+      /* A neighbouring mapper register is not admitted. */
+      value = UINT32_C(0);
+      assert(genesis_route_access(&idle, UINT32_C(0x00A130F3), GENESIS_ACCESS_BYTE,
+                                   GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+      assert(memcmp(&idle, &idle_zero, sizeof(idle)) == 0);
+    }
     /* A BYTE write of the Version register remains fail-closed (read-only). */
     value = UINT32_C(0x000000A0);
     assert(genesis_route_access(&neg, UINT32_C(0x00A10001), GENESIS_ACCESS_BYTE,
@@ -307,13 +351,31 @@ int main(void) {
     assert(genesis_route_access(&neg, UINT32_C(0x00A1000C), GENESIS_ACCESS_BYTE,
                                  GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
     assert(stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_CONTROLLER_IO);
-    /* A READ of a GPIO write-only register address remains fail-closed. */
+    /* A READ of an unwritten CTRL1 direction latch ($A10009, documented R/W) returns zero and mutates nothing; a
+       WORD read of it is not the BYTE register and stays fail-closed. */
     value = UINT32_C(0xFFFFFFFF);
     assert(genesis_route_access(&neg, UINT32_C(0x00A10009), GENESIS_ACCESS_BYTE,
-                                 GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
-    assert(stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_CONTROLLER_IO &&
-           value == UINT32_C(0xFFFFFFFF));
+                                 GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+    assert(value == UINT32_C(0));
     assert(memcmp(&neg, &neg_zero, sizeof(neg)) == 0);
+    value = UINT32_C(0xFFFFFFFF);
+    assert(genesis_route_access(&neg, UINT32_C(0x00A10008), GENESIS_ACCESS_WORD,
+                                 GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+    assert(memcmp(&neg, &neg_zero, sizeof(neg)) == 0);
+    /* CTRL1/CTRL2 read back exactly what was last written; CTRL3 ($A1000D) keeps its fixed read-selector constant. */
+    value = UINT32_C(0x00000040);
+    assert(genesis_route_access(&neg, UINT32_C(0x00A10009), GENESIS_ACCESS_BYTE,
+                                 GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+    value = UINT32_C(0x0000000F);
+    assert(genesis_route_access(&neg, UINT32_C(0x00A1000B), GENESIS_ACCESS_BYTE,
+                                 GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+    value = UINT32_C(0xFFFFFFFF);
+    assert(genesis_route_access(&neg, UINT32_C(0x00A10009), GENESIS_ACCESS_BYTE,
+                                 GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+    assert(value == UINT32_C(0x40));
+    assert(genesis_route_access(&neg, UINT32_C(0x00A1000B), GENESIS_ACCESS_BYTE,
+                                 GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+    assert(value == UINT32_C(0x0F));
   }
   return 0;
 }

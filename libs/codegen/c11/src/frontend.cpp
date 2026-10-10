@@ -1987,6 +1987,25 @@ validated_immutable_rom_aot_entries(const FrontendAnalysis &analysis) {
     // wholly in the 64 KiB work-RAM window (no wrap), the source and execution addresses must share parity and
     // the instruction length, and the raw bytes (the runtime guard's expected bytes) must be present in full.
     InstructionProvenance mapping_provenance = entry.decoded.provenance;
+    if (entry.materialized_ram_thunk) {
+      // ADR 0097 amendment: a materialized work-RAM JMP thunk has no cartridge mapping; its authority is the build-time image
+      // plus the whole-instruction runtime byte guard. It must be exactly one statically foldable direct JMP wholly inside work
+      // RAM, with its complete raw bytes present for the guard.
+      const auto span = entry.decoded.provenance.length.value;
+      if (address < UINT32_C(0x00FF0000) || (address & 1U) != 0U ||
+          static_cast<std::uint64_t>(address) + span > UINT64_C(0x01000000) || entry.decoded.raw_bytes.size() != span ||
+          entry.decoded.kind != M68kInstructionKind::jmp || entry.operation.kind != M68kIrKind::jump_general ||
+          !m68k_is_statically_foldable_control_ea(entry.decoded.source_ea) ||
+          !m68k_operation_is_immutable_rom_aot_safe(entry.operation, return_target_authority_available) ||
+          !m68k_operation_has_complete_c_emission(entry.operation) ||
+          !independently_decoded_and_lifted(entry.decoded, entry.operation))
+        return std::nullopt;
+      const auto [found, inserted] = result.emplace(address, &entry);
+      if (!inserted && (!same_decoded(found->second->decoded, entry.decoded) ||
+                        !same_ir(found->second->operation, entry.operation)))
+        return std::nullopt;
+      continue;
+    }
     if (entry.execution_alias) {
       const auto span = entry.decoded.provenance.length.value;
       if (address < UINT32_C(0x00FF0000) || (address & 1U) != 0U || (entry.alias_source_address & 1U) != 0U ||
@@ -4968,7 +4987,14 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     // above); the actual runtime dispatch target is the literal popped
     // stack value validated against the whole-program continuation set
     // below, not a statically predicted count.
-    if (((is_branch || is_direct_jump) &&
+    // Compat repair: a statically foldable direct JMP whose discovery recorded no edge at all (its target could not be
+    // admitted in a walk whose issue the aggregation dropped, e.g. a jump into an unmapped cartridge window) is retained
+    // as a plain terminal: the emitted operation sets the folded target and the unchanged dispatcher reaches its typed
+    // unemitted-target stop only if control ever gets there, instead of the whole program being rejected here.
+    const bool edgeless_direct_jump =
+        is_direct_jump && edges_by_source[terminal.source.address.value].empty() &&
+        !blocks.contains(effect.direct_target) && !frontier_addresses.contains(effect.direct_target);
+    if ((!edgeless_direct_jump && (is_branch || is_direct_jump) &&
          (direct_count != 1U || fallthrough_count != ((unconditional || is_direct_jump) ? 0U : 1U) ||
                         edges_by_source[terminal.source.address.value].size() != direct_count + fallthrough_count)) ||
         (is_call && (call_count != 1U || direct_count != 0U || fallthrough_count != 0U || return_count != 0U)) ||
@@ -5029,6 +5055,20 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       const auto retirement_cycles = m68k_retirement_cycle_expression(*found->second);
       if (!retirement_cycles)
         return "/* translation rejected: unaccounted MC68000 instruction timing */\n";
+      // A retained statically foldable direct JMP with no admitted edge (target not represented anywhere): reaching it is a
+      // typed pre-effect stop at this instruction instead of an untyped dispatcher miss after the jump.
+      if (found->second->kind == M68kIrKind::jump_general && m68k_is_statically_foldable_control_ea(found->second->source_ea) &&
+          edges_by_source[provenance.source.address.value].empty() &&
+          !blocks.contains(m68k_operation_effect(*found->second).direct_target) &&
+          !frontier_addresses.contains(m68k_operation_effect(*found->second).direct_target)) {
+        out << "  return genesis_static_stop(GENESIS_STOP_KNOWN_BUT_UNEMITTED_TARGET, GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET, "
+            << "&(const GenesisInstructionProvenance){GENESIS_CPU_MC68000, UINT32_C(" << hex(provenance.source.address.value, 8)
+            << "), UINT64_C(" << std::dec << provenance.source.image_offset.value << "), {UINT8_C(" << hex(provenance.bytes[0], 2)
+            << "), UINT8_C(" << hex(provenance.bytes[1], 2) << ")}, UINT32_C(" << provenance.length.value
+            << ")}, 0U, UINT32_C(0), GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ);\n";
+        block_cut = true;
+        break;
+      }
       const auto fact_for = [&](M68kStaticMemoryFactRole role) -> const M68kStaticMemoryFact * {
         const auto found = facts.find({provenance.source.address.value, role});
         return found == facts.end() ? nullptr : found->second;
@@ -5387,8 +5427,12 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
       case M68kIrKind::bit_change:
       case M68kIrKind::bit_clear:
       case M68kIrKind::bit_set: {
+        // Compat repair: BCHG/BCLR/BSET are read-then-write like memory CLR/Scc, so a routed-device absolute
+        // destination (for example BSET on the Z80 bus-request register) is admitted exactly as those are: both
+        // retained facts must be routed-device facts and both accesses go through the runtime owner.
         const auto *destination = fact_for(M68kStaticMemoryFactRole::destination_write);
-        if (destination != nullptr && destination->region != M68kAbsoluteOperandRegion::synthetic_work_ram)
+        if (destination != nullptr && destination->region != M68kAbsoluteOperandRegion::synthetic_work_ram &&
+            !c4_read_then_write_destination_admitted(destination, fact_for(M68kStaticMemoryFactRole::destination_read)))
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
         if (destination == nullptr && m68k_is_statically_foldable_control_ea(found->second->destination_ea))
           return "/* translation rejected: C4 prefix lacks retained resolver fact */\n";
@@ -6383,6 +6427,18 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
     for (const auto &block : partial.accepted_prefix.static_blocks)
       if (block.id.entry.value == handler) { irq6_handler_hex = hex(handler, 8); break; }
   }
+  // ADR 0097 amendment: a work-RAM IRQ6 vector whose stub address carries a materialized, byte-guarded JMP thunk entry is an
+  // ordinary compiled handler entry: the CPU-owned exception entry delivers the interrupt to the stub address and the stub
+  // instruction retires normally. Without such an entry the typed irq6_vector_in_work_ram stop remains.
+  bool irq6_vector_thunk_compiled = false;
+  if (irq6_handler_hex.empty() && partial.accepted_prefix.irq6_vector_in_work_ram)
+    for (const auto &aot_entry : partial.accepted_prefix.immutable_rom_aot_entries)
+      if (aot_entry.materialized_ram_thunk &&
+          aot_entry.decoded.provenance.source.address.value == partial.accepted_prefix.irq6_vector_ram_entry) {
+        irq6_handler_hex = hex(partial.accepted_prefix.irq6_vector_ram_entry, 8);
+        irq6_vector_thunk_compiled = true;
+        break;
+      }
   // SEG-007-T222 / ADR-0037: same "only when the handler block is actually
   // emitted" rule as the IRQ6 autovector above.
   std::string divide_by_zero_handler_hex;
@@ -6409,6 +6465,8 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
       hex(partial.accepted_prefix.startup_ingress->initial_ssp, 8),
       hex(partial.accepted_prefix.startup_ingress->entry.value, 8), irq6_handler_hex,
       divide_by_zero_handler_hex, privilege_violation_handler_hex, software_exception_handler_hex);
+  if (partial.accepted_prefix.irq6_vector_in_work_ram && irq6_handler_hex.empty() && !irq6_vector_thunk_compiled)
+    sink << "runtime.irq6_vector_in_work_ram = 1; ";
   if (g_execution_history_hooks) sink << "runtime.execution_history.detail_enabled = 1; runtime.m68k_checkpoint.enabled = 1; runtime.device_checkpoint.enabled = 1; ";
   if (owned_region_count != 0U) {
     sink << "  runtime.owned_regions = genesis_owned_cartridge_regions;\n";

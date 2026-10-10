@@ -748,6 +748,10 @@ typedef struct GenesisRuntime {
      established an IRQ6 handler, and interrupt admission never fires. */
   uint32_t irq6_handler_entry;
   uint8_t irq6_handler_present;
+  /* Compat repair: the IRQ6 vector slot points into work RAM (RAM jump-table convention) so no handler could be
+     rooted statically. A recognized VBlank interrupt then stops fail-closed (GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_
+     SCHEDULING_EVENT) instead of being dropped. Zero default: never set by a program with a ROM handler. */
+  uint8_t irq6_vector_in_work_ram;
   /* SEG-007-T222 / ADR-0037: the build-time-resolved MC68000 vector-5
      (Zero Divide) handler entry address (the long word at vector-table
      offset 0x14), mirroring `irq6_handler_entry`'s own resolution/ownership
@@ -1102,6 +1106,10 @@ typedef enum GenesisDiagnosticCategory {
   GENESIS_DIAG_Z80_MUTABLE_CODE = 59,               /* execution reached memory that is not a bound RAM-backed image */
   GENESIS_DIAG_Z80_UNRESOLVED_FETCH_MAPPING = 60,   /* an instruction's bytes continue into an unresolved mapping */
   GENESIS_DIAG_Z80_UNSUPPORTED_ACKNOWLEDGE = 61,    /* an interrupt acknowledge byte the IM0 contract does not admit */
+  /* Compat repair: a recognized VBlank interrupt could not be delivered because the build-time IRQ6 vector slot points
+     into work RAM (a RAM jump stub), which this architecture does not execute. Paired with
+     GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT. Nothing is mutated. */
+  GENESIS_DIAG_IRQ6_VECTOR_IN_WORK_RAM = 62,
 } GenesisDiagnosticCategory;
 
 typedef struct GenesisProvenance {

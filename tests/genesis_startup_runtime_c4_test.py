@@ -881,7 +881,15 @@ int main(void) {
   assert(transfer.kind == GENESIS_CONTINUE_AT_PC && runtime.a[7] == UINT32_C(0x00FFFFFC));
   /* Alignment takes precedence over range.  Every invalid matrix member
      remains atomic and has source/fetch/mapping provenance only. */
-  expect_push_rejection(UINT32_C(0), GENESIS_DIAG_INVALID_STACK_RANGE);
+  /* A zero SP (carts that boot with a zero initial SSP): the 32-bit A7 wraps to 0xFFFFFFFC, whose 24-bit bus address is
+     the last work-RAM long word, so the push is valid. */
+  memset(&runtime, 0, sizeof(runtime)); runtime.pc = UINT32_C(0x00000B00); runtime.a[7] = UINT32_C(0);
+  transfer = genesis_bridge_dispatch(&runtime);
+  assert(transfer.kind == GENESIS_CONTINUE_AT_PC && runtime.a[7] == UINT32_C(0xFFFFFFFC));
+  assert(runtime.work_ram[0xFFFC] == (uint8_t)((EXPECT_CONTINUATION >> 24) & 0xFFU) &&
+         runtime.work_ram[0xFFFD] == (uint8_t)((EXPECT_CONTINUATION >> 16) & 0xFFU) &&
+         runtime.work_ram[0xFFFE] == (uint8_t)((EXPECT_CONTINUATION >> 8) & 0xFFU) &&
+         runtime.work_ram[0xFFFF] == (uint8_t)(EXPECT_CONTINUATION & 0xFFU));
   expect_push_rejection(UINT32_C(1), GENESIS_DIAG_INVALID_STACK_ALIGNMENT);
   expect_push_rejection(UINT32_C(2), GENESIS_DIAG_INVALID_STACK_RANGE);
   expect_push_rejection(UINT32_C(3), GENESIS_DIAG_INVALID_STACK_ALIGNMENT);

@@ -82,7 +82,7 @@ int main(int argc, char **argv) {
     value = 0U;
     {
       const int accepted = route(0xA00020U, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ, &value, &diag);
-      printf(" long_read=%d long_diag=%d", accepted, (int)diag);
+      printf(" long_read=%d long_value=%08x long_diag=%d", accepted, (unsigned)value, (int)diag);
     }
     /* bank register through the 68K: nine bytes, 1 0 0 0 0 0 0 0 1 -> LSB first: bank = 0x101 */
     {

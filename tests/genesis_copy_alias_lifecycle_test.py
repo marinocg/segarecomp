@@ -25,13 +25,19 @@ random.seed(11)
 ROM = bytes(random.randrange(256) for _ in range(0x8000))
 RAM_BEGIN = b.GENESIS_WORK_RAM_BEGIN
 # Each stage is a ROM->RAM executable copy the guest reaches in order: (ram_offset, rom_offset, length).
+THUNK_OFFSET = 0x0A00
+THUNK_BYTES = bytes.fromhex("4ef900000200")    # observed JMP stub (recognition is the CPU decoder's; here a stand-in)
+THUNK_CHANGED = bytes.fromhex("4ef900000400")  # the same address, later observation: a different target
 STAGES = [(0x0400, 0x1230, 0x40), (0x0800, 0x2460, 0x40), (0x0C00, 0x3000, 0x40)]
 
 
 class Guest:
     """Synthetic guest. The stop reached by a program depends only on the aliases in its emitter command."""
 
-    def __init__(self, stages, end="runner", ignore_aliases=False, corrupt=False, stop_class=5, pc_outside=False):
+    def __init__(self, stages, end="runner", ignore_aliases=False, corrupt=False, stop_class=5, pc_outside=False, thunk_mode=None):
+        self.thunk_mode = thunk_mode  # None | "advance" | "same" | "changed": scripted ADR 0097 RAM-thunk scenarios
+        self.classify_calls = []
+        self.thunk_programs = {}
         self.stages, self.end, self.ignore_aliases, self.corrupt = stages, end, ignore_aliases, corrupt
         self.stop_class, self.pc_outside = stop_class, pc_outside
         self.generations = []      # emitter commands, in order
@@ -46,6 +52,7 @@ class Guest:
         covered = sum(1 for arg in command if arg == "--immutable-copy-alias")
         executable = out_dir / f"bridge{len(self.generations)}"
         self.programs[str(executable)] = covered
+        self.thunk_programs[str(executable)] = sum(1 for arg in command if arg == "--ram-thunk")
         return 0, b"", executable
 
     def _stop_index(self, executable):
@@ -60,6 +67,19 @@ class Guest:
             returncode = 0
             stdout = ""
         result = Completed()
+        if self.thunk_mode:
+            # The guest needs one absolute-JMP stub at RAM_BEGIN + THUNK_OFFSET. Before it is materialized the run stops there; after,
+            # "advance" completes the window, "same" stops there again with the same bytes, "changed" with different bytes.
+            built = self.thunk_programs[str(command[0])]
+            if built and self.thunk_mode == "advance":
+                result.stderr = "CAPTURE_SUMMARY " + json.dumps({"outcome": "window_complete"}) + "\n"
+                return result
+            ram = bytearray(random.Random(11).randbytes(b.GENESIS_WORK_RAM_SIZE))
+            ram[THUNK_OFFSET:THUNK_OFFSET + 6] = THUNK_CHANGED if built and self.thunk_mode == "changed" else THUNK_BYTES
+            pathlib.Path(env["SEGARECOMP_STOP_WORK_RAM_DUMP"]).write_bytes(
+                (RAM_BEGIN + THUNK_OFFSET).to_bytes(4, "big") + (5).to_bytes(4, "big") + bytes(ram))
+            result.stderr = "CAPTURE_SUMMARY " + json.dumps({"outcome": "incomplete_guest_stop"}) + "\n"
+            return result
         if index >= len(self.stages):
             outcome = {"runner": "incomplete_runner_resource_limit", "window": "window_complete"}[self.end]
             result.stderr = "CAPTURE_SUMMARY " + json.dumps({"outcome": outcome}) + "\n"
@@ -74,6 +94,11 @@ class Guest:
         result.stderr = "CAPTURE_SUMMARY " + json.dumps({"outcome": "incomplete_guest_stop"}) + "\n"
         return result
 
+    def classify(self, emitter_command, pc, window_hex):
+        """Stand-in for the CPU-owned recognizer seam (never spawns a process): exactly THUNK_BYTES is a JMP stub."""
+        self.classify_calls.append((pc, window_hex))
+        return THUNK_BYTES.hex() if self.thunk_mode and window_hex.startswith(THUNK_BYTES.hex()) else None
+
     def run_bridge(self, executable, root, **kwargs):
         self.runs.append((str(executable), False))
         covered = self._stop_index(str(executable)) >= len(self.stages)
@@ -86,10 +111,11 @@ def invoke(guest, *flags, rom_path, out_dir, env=None):
             "--rom", str(rom_path), "--mode", "commercial", "--one-shot", "--diagnose-frontier",
             "--immutable-rom-aot", "--out-dir", str(out_dir), *flags]
     saved = {name: getattr(b, name) for name in (
-        "generate_and_compile", "run_bridge", "report_sha_status", "valid_sanitized", "parse_canonical_full",
+        "classify_ram_jump_thunk", "generate_and_compile", "run_bridge", "report_sha_status", "valid_sanitized", "parse_canonical_full",
         "valid_full", "offline_inventory_stitch_metrics", "ephemeral_frontier", "with_execution_history",
         "parse_ephemeral_pc_history", "write_combined_diagnosis")}
     original_run = b.subprocess.run
+    b.classify_ram_jump_thunk = guest.classify
     b.generate_and_compile = guest.generate
     b.run_bridge = guest.run_bridge
     b.report_sha_status = lambda report, digest: 0
@@ -124,6 +150,10 @@ def line(stderr, prefix):
     found = [json.loads(text[len(prefix) + 1:]) for text in stderr.splitlines() if text.startswith(prefix + " ")]
     assert len(found) <= 1, (prefix, found)
     return found[0] if found else None
+
+
+def thunk_args(command):
+    return [command[i + 1] for i, arg in enumerate(command) if arg == "--ram-thunk"]
 
 
 def alias_args(command):
@@ -238,6 +268,39 @@ def main():
             "rounds": 1, "generation_attempts": 1, "compile_attempts": 0, "run_attempts": 0, "alias_count": 0,
             "alias_total_bytes": 0, "termination_reason": "tool_failure"}
         assert len(guest.generations) == 1 and line(err, "ONE_SHOT_SUMMARY") is None
+
+        # 9. ADR 0097 RAM thunks (reproducible materialization). First observation materializes exactly the recognized bytes and the
+        # next round carries it; the route then advances.
+        guest = Guest([], thunk_mode="advance")
+        status, err = run(guest, "--discover-copy-aliases")
+        summary = line(err, "COPY_ALIAS_DISCOVERY")
+        assert status == 0 and summary["termination_reason"] == "route_advanced" and summary["ram_thunk_count"] == 1, (summary, err)
+        assert summary["ram_thunk_total_bytes"] == 6 and summary["alias_count"] == 0
+        assert thunk_args(guest.generations[1]) == [f"{RAM_BEGIN + THUNK_OFFSET:08x}:{THUNK_BYTES.hex()}"]
+        assert thunk_args(guest.generations[-1]) == thunk_args(guest.generations[1])  # the final program is built with it
+        assert len(guest.classify_calls) == 1
+        # Identical bytes observed again at the materialized address: deterministic, no new thunk, no progress (the preparation ends,
+        # the final program is built with the one thunk, which stays fail-closed at runtime).
+        guest = Guest([], thunk_mode="same")
+        status, err = run(guest, "--discover-copy-aliases")
+        summary = line(err, "COPY_ALIAS_DISCOVERY")
+        assert status == 0 and summary["termination_reason"] == "repeated_alias_no_progress" and summary["ram_thunk_count"] == 1, summary
+        assert len(guest.classify_calls) == 1 and len(thunk_args(guest.generations[-1])) == 1
+        # Changed bytes at the same materialized address: typed, INCOMPLETE; no final program is generated, built or run, and the
+        # changed target is never offered to the emitter (every generated command carries only the first observation's bytes).
+        guest = Guest([], thunk_mode="changed")
+        status, err = run(guest, "--discover-copy-aliases")
+        summary = line(err, "COPY_ALIAS_DISCOVERY")
+        assert status == 2 and summary["termination_reason"] == "ram_thunk_mismatch" and summary["ram_thunk_count"] == 1, (status, summary)
+        assert "ram_thunk_mismatch" in b.ALIAS_INCOMPLETE_TERMINATIONS
+        assert line(err, "ONE_SHOT_SUMMARY") is None and "incomplete" in err
+        assert len(guest.generations) == 2 and all(prep for _, prep in guest.runs), guest.runs  # only preparation rounds ran
+        assert all(THUNK_CHANGED.hex() not in " ".join(command) for command in guest.generations)
+        assert len(guest.classify_calls) == 1  # the changed bytes were not even offered to the recognizer
+        # Existing copy-alias behaviour is unchanged by all of the above (cases 1-8) and no alias run ever consults the recognizer.
+        guest = Guest(STAGES[:1], end="window")
+        run(guest, "--discover-copy-aliases")
+        assert guest.classify_calls == []
     print("genesis_copy_alias_lifecycle_test: OK")
 
 

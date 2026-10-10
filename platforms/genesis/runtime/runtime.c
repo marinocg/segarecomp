@@ -156,6 +156,14 @@ static int genesis_controller_io_access(GenesisDeviceState *devices, uint8_t pad
                                                       data_port_slot == 0 ? pad1 : 0U);
       return 1;
     }
+    if (data_port_slot == 2) { /* DATA3 (expansion port, no device): same pin model as DATA1/DATA2 with every line released */
+      *value = genesis_controller_io_data_port_read(devices->controller_io.ctrl[2], devices->controller_io.data[2], 0U);
+      return 1;
+    }
+    if (data_port_slot >= 3 && data_port_slot <= 4) { /* CTRL1, CTRL2: documented R/W direction latches read back */
+      *value = devices->controller_io.ctrl[data_port_slot - 3];
+      return 1;
+    }
   }
   for (index = 0U; index < SEGARECOMP_GENESIS_CONTROLLER_IO_SELECTOR_COUNT; ++index) {
     const SegarecompGenesisControllerIoSelector *selector =
@@ -385,7 +393,15 @@ static GenesisAccessResultKind genesis_vdp_progress_dma(GenesisRuntime *runtime,
   dma->source_address = (dma->source_address + 2U) & UINT32_C(0x00FFFFFE);
   --dma->remaining_length;
   ++dma->transfer_access_count;
-  if (dma->remaining_length == 0U) dma->phase = GENESIS_VDP_DMA_IDLE;
+  if (dma->remaining_length == 0U) {
+    dma->phase = GENESIS_VDP_DMA_IDLE;
+    /* Compat repair: a finished memory-to-VDP DMA leaves the VDP's command code and address register where the transfer ended
+       (the DMA bit is ignored by the data port), so the cartridge may continue with plain DATA-port writes into the same
+       target without a fresh address command. The armed write target (VRAM/CRAM/VSRAM, already restricted to the documented
+       write codes) becomes the selected plain-write transfer code and the post-transfer address is the pointer above. */
+    vdp->data_port_transfer_code = dma->write_target_code;
+    vdp->data_port_transfer_code_valid = 1U;
+  }
   return GENESIS_ACCESS_OK;
 }
 
@@ -539,7 +555,9 @@ static int genesis_vdp_control_port_write_word(GenesisDeviceState *devices, uint
                                          : GENESIS_VDP_DMA_MEMORY_TO_VRAM;
       devices->vdp.dma.source_address = memory_mode ? source : 0U;
       devices->vdp.dma.remaining_length = memory_mode ? (length == 0U ? UINT32_C(65536) : length) : 0U;
-      devices->vdp.dma.fill_byte_count = fill_mode ? length : 0U;
+      /* Compat repair: as for memory-to-VRAM DMA just above, a programmed DMA length of zero means 0x10000 (the 16-bit
+         length counter wraps), which cartridges use to clear all of VRAM with one fill. */
+      devices->vdp.dma.fill_byte_count = fill_mode ? (length == 0U ? UINT32_C(65536) : length) : 0U;
       devices->vdp.dma.transfer_access_count = 0U;
       devices->vdp.dma.write_target_code = write_target_code;
       /* SEG-007-T108: a DMA command supersedes any previously selected non-DMA
@@ -1433,6 +1451,10 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
                                                                      : GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY);
     return GENESIS_ACCESS_FAIL;
   }
+  if (direction == GENESIS_ACCESS_WRITE && segarecomp_genesis_idle_control_register(address) != 0 &&
+      segarecomp_genesis_idle_control_write_admitted(address, (uint32_t)width, *value) != 0) {
+    return GENESIS_ACCESS_OK; /* idle-state control register written with its idle value: no state to change */
+  }
   if (genesis_is_device(address)) {
     uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
     if (genesis_controller_io_access(&runtime->devices, runtime->pad1, address, width, direction, &routed_value)) {
@@ -1610,6 +1632,28 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
     uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
     GenesisDiagnosticCategory diagnostic;
     if (genesis_z80_sync(runtime, stop_out)) return GENESIS_ACCESS_FAIL; /* the 68K sees the Z80 as of now */
+    /* Compat repair: a LONG access to the sound RAM window is, on the 68000's 16-bit bus, two consecutive WORD accesses (high
+       half first), each following the window's own WORD rule (a write stores its high byte, a read returns the byte in both
+       halves). Both halves must lie inside the RAM window and the 68K must hold the Z80 bus; the bus-grant gate is evaluated
+       once for both halves, so a rejected access mutates nothing. The write-only bank register keeps its BYTE/WORD-only rule. */
+    if (width == GENESIS_ACCESS_LONG && segarecomp_genesis_z80_ram_window_contains(address) &&
+        segarecomp_genesis_z80_ram_window_contains(address + 3U) && runtime->devices.z80_bus.bus_granted) {
+      uint32_t high = (direction == GENESIS_ACCESS_WRITE) ? ((*value >> 16) & 0xFFFFU) : 0U;
+      uint32_t low = (direction == GENESIS_ACCESS_WRITE) ? (*value & 0xFFFFU) : 0U;
+      diagnostic = genesis_z80_area_access(&runtime->devices, address, GENESIS_ACCESS_WORD, direction, &high);
+      if (diagnostic == (GenesisDiagnosticCategory)0)
+        diagnostic = genesis_z80_area_access(&runtime->devices, address + 2U, GENESIS_ACCESS_WORD, direction, &low);
+      if (diagnostic == (GenesisDiagnosticCategory)0) {
+        if (direction == GENESIS_ACCESS_READ) *value = (high << 16) | low;
+        else {
+          genesis_z80_epoch_note_ram_write(runtime, address);
+          genesis_z80_epoch_note_ram_write(runtime, address + 2U);
+        }
+        return GENESIS_ACCESS_OK;
+      }
+      *stop_out = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, diagnostic);
+      return GENESIS_ACCESS_FAIL;
+    }
     diagnostic = genesis_z80_area_access(&runtime->devices, address, width, direction, &routed_value);
     if (diagnostic == (GenesisDiagnosticCategory)0) {
       if (direction == GENESIS_ACCESS_READ) *value = routed_value;
@@ -2589,7 +2633,18 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
   level = segarecomp_m68k_interrupt_recognized_level(&runtime->m68k_interrupt, runtime->sr);
   if (level == 0U) return 0;
 
-  if (!runtime->irq6_handler_present) return 0;                    /* no build-resolved handler */
+  if (!runtime->irq6_handler_present) {                            /* no build-resolved handler */
+    if (runtime->irq6_vector_in_work_ram) {
+      /* The vector slot points at work-RAM (a RAM jump stub), which this architecture cannot execute: the recognized
+         interrupt cannot be delivered, so stop fail-closed rather than silently dropping it. Nothing is mutated. */
+      *result = (GenesisControlTransfer){0};
+      result->kind = GENESIS_STOP;
+      result->stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+                                         GENESIS_DIAG_IRQ6_VECTOR_IN_WORK_RAM);
+      return 2;
+    }
+    return 0;
+  }
 
   /* SEG-007-T222 / ADR-0037, SEG-021-T020: the frame and commit go through the
      M68K-owned interrupt entry (identical checks/order/commit: vector 30, SR <-
@@ -2632,7 +2687,7 @@ static void genesis_m68k_wait_while_stopped(GenesisRuntime *runtime, GenesisCont
   const uint64_t now = runtime->scheduler.master_ticks;
   const uint64_t frame = GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
   const uint64_t onset = GENESIS_NTSC_VBLANK_ONSET_TICK;
-  const int vblank_source = runtime->irq6_handler_present &&
+  const int vblank_source = (runtime->irq6_handler_present || runtime->irq6_vector_in_work_ram) &&
                             (runtime->devices.interrupt.vblank_pending ||
                              (runtime->devices.vdp.registers[1] & UINT16_C(0x0020)) != 0U);
   uint64_t target;
@@ -3189,6 +3244,7 @@ static const char *genesis_diagnostic_name(GenesisDiagnosticCategory value) {
   case GENESIS_DIAG_Z80_MUTABLE_CODE: return "z80_mutable_code";
   case GENESIS_DIAG_Z80_UNRESOLVED_FETCH_MAPPING: return "z80_unresolved_fetch_mapping";
   case GENESIS_DIAG_Z80_UNSUPPORTED_ACKNOWLEDGE: return "z80_unsupported_acknowledge";
+  case GENESIS_DIAG_IRQ6_VECTOR_IN_WORK_RAM: return "irq6_vector_in_work_ram";
   default: return 0;
   }
 }
@@ -3227,7 +3283,7 @@ static int genesis_valid_stop_pair(GenesisStopClass stop_class,
     return category == GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET;
   case GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT:
     /* SEG-021-T020: a STOP with no possible wake source. */
-    return category == GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE;
+    return category == GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE || category == GENESIS_DIAG_IRQ6_VECTOR_IN_WORK_RAM;
   case GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY:
     return category == GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY;
   case GENESIS_STOP_INSTRUCTION_BUDGET_EXHAUSTED:

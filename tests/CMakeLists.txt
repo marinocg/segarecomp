@@ -594,6 +594,14 @@ add_test(NAME genesis_execution_history_generated_test COMMAND ${Python3_EXECUTA
 add_test(NAME genesis_startup_bridge_c6_persistence_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_startup_bridge_c6_persistence_test.py
   $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# Bounded Genesis compatibility repairs (BSET on routed devices, work-RAM IRQ6 vector): synthetic images through the
+# production emit route, strict-C11 compile and run.
+# ADR 0097 amendment: the runtime contains no M68K opcode decoder (RAM thunks are a build-time producer plus a byte guard).
+add_test(NAME genesis_runtime_no_m68k_opcode_decoder_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_runtime_no_m68k_opcode_decoder_test.py ${PROJECT_SOURCE_DIR})
+add_test(NAME genesis_compat_repairs_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_compat_repairs_generated_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 # SEG-007-T252 / ADR-0040: the former SEG-007-T107 generated-runtime
 # loop-progress watchdog test has been replaced by
 # genesis_runtime_run_test.cpp and by the end-to-end
@@ -915,6 +923,9 @@ add_test(NAME genesis_copy_alias_discovery_test COMMAND ${Python3_EXECUTABLE}
 # SEG-021-T041 / ADR 0049: preparation-phase lifecycle, accounting and termination vocabulary (hermetic).
 add_test(NAME genesis_copy_alias_lifecycle_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_copy_alias_lifecycle_test.py)
+# Hermetic and fully mocked (measured ~0.2 s). A cap far below CTest's 1500 s default keeps a future runaway (the test's own
+# `--segarecomp` is this script) from pinning a CI shard.
+set_tests_properties(genesis_copy_alias_lifecycle_test PROPERTIES TIMEOUT 120)
 
 add_executable(codegen_c11_provenance_diagnostics_tests codegen_c11_provenance_diagnostics_test.cpp)
 target_link_libraries(codegen_c11_provenance_diagnostics_tests PRIVATE segarecomp::codegen_c11_m68k)

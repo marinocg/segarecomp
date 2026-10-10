@@ -93,6 +93,11 @@ M68kGenesisDeviceRoutingResult m68k_route_genesis_device_access(const M68kMemory
   if (segarecomp_genesis_ym2612_region_contains(request.address.value) != 0 &&
       request.width == M68kMemoryAccessWidth::byte)
     return M68kDeviceRoutedAccess{request.direction};
+  // Compat repair: the idle-state control registers (serial S-CTRL1/2/3, Sega-mapper SRAM control) accept a BYTE write
+  // of their idle value; the runtime owner checks the value, the static seam only defers the shape.
+  if (request.direction == M68kMemoryAccessDirection::write && request.width == M68kMemoryAccessWidth::byte &&
+      segarecomp_genesis_idle_control_register(request.address.value) != 0)
+    return M68kDeviceRoutedAccess{request.direction};
   // SEG-007-T121: the controller-I/O GPIO-register WRITE-direction selector
   // family (DATA1..DATA3 / CTRL1..CTRL3, BYTE width only; the runtime-reached
   // form is a CTRL3 $A1000D BYTE write). The runtime device
@@ -122,6 +127,13 @@ M68kGenesisDeviceRoutingResult m68k_route_genesis_device_access(const M68kMemory
     const int data_port_slot = segarecomp_genesis_controller_io_gpio_register_index(
         request.address.value, static_cast<std::uint32_t>(request.width));
     if (data_port_slot == 0 || data_port_slot == 1) return M68kDeviceRoutedAccess{request.direction};
+    // Compat repair: the CTRL1/CTRL2 direction latches ($A10009/$A1000B, documented R/W) read
+    // back the last value written (BYTE only; CTRL3 $A1000D keeps its fixed read-selector policy constant below). Cartridges
+    // reach them through read-modify-write instructions such as CLR.B/BSET on the port setup. The runtime device owner
+    // returns the latch.
+    if (data_port_slot >= 3 && data_port_slot <= 4) return M68kDeviceRoutedAccess{request.direction};
+    // DATA3 ($A10007, the expansion port with no device attached) reads back through the same pin model as DATA1/DATA2.
+    if (data_port_slot == 2) return M68kDeviceRoutedAccess{request.direction};
   }
   if (request.address.value >= m68k_controller_io_region_end || end <= m68k_controller_io_region_begin)
     return DirectFlowDiagnostic::unmapped_data_access;

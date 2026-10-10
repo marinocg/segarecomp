@@ -258,6 +258,54 @@ void producer_shape() {
   }
 }
 
+// ---- ADR 0097 amendment: the materialized RAM-thunk producer ---------------------------------------------------------------------
+
+void ram_thunk_producer() {
+  const std::vector<std::uint8_t> jmp_long{0x4E, 0xF9, 0x00, 0x00, 0x02, 0x00};
+  const std::vector<std::uint8_t> jmp_word{0x4E, 0xF8, 0x12, 0x34};
+  auto program = program_with();
+  check(apply_genesis_immutable_copy_alias(program, execution_base, base + source_offset, routine_length), "alias accepted");
+  // recognition is the CPU decoder's: exactly one JMP (xxx).W/.L, trimmed to the decoded length
+  const std::vector<std::uint8_t> longer{0x4E, 0xF9, 0x00, 0x00, 0x02, 0x00, 0x4E, 0x71};
+  check(genesis_ram_jump_thunk_bytes(0x00FFFA7CU, longer) == jmp_long, "recognised: JMP (xxx).L, trimmed to the decoded length");
+  check(genesis_ram_jump_thunk_bytes(0x00FFFA7CU, jmp_word) == jmp_word, "recognised: JMP (xxx).W");
+  check(!genesis_ram_jump_thunk_bytes(0x00FFFA7CU, std::vector<std::uint8_t>{0x4E, 0xB9, 0, 0, 2, 0}), "refused: JSR");
+  check(!genesis_ram_jump_thunk_bytes(0x00FFFA7CU, std::vector<std::uint8_t>{0x4E, 0xD0, 0x4E, 0x71, 0, 0}), "refused: JMP (An)");
+  check(!genesis_ram_jump_thunk_bytes(0x00FFFA7CU, std::vector<std::uint8_t>{0x4E, 0x71, 0x4E, 0x71, 0, 0}), "refused: NOP");
+  check(!genesis_ram_jump_thunk_bytes(0x00FFFA7DU, jmp_long), "refused: odd base");
+  check(!genesis_ram_jump_thunk_bytes(0x00000400U, jmp_long), "refused: not work RAM");
+  check(!genesis_ram_jump_thunk_bytes(0x00FFFA7CU, std::vector<std::uint8_t>{0x4E, 0xF9, 0x00}), "refused: truncated");
+  check(apply_genesis_materialized_ram_thunk(program, 0x00FFFA7CU, longer) &&
+            apply_genesis_materialized_ram_thunk(program, 0x00FFFA7CU, jmp_long) /* exact duplicate */ &&
+            apply_genesis_materialized_ram_thunk(program, 0x00FFFAD6U, jmp_word),
+        "two thunks accepted (duplicate tolerated)");
+  check(!apply_genesis_materialized_ram_thunk(program, 0x00FFFA7CU, jmp_word), "a different thunk over the same bytes is refused");
+  check(!apply_genesis_materialized_ram_thunk(program, execution_base + 2U, jmp_long), "a thunk overlapping an alias is refused");
+  check(program.materialized_ram_thunks.size() == 2 && program.materialized_ram_thunks[0].execution_base == 0x00FFFA7CU, "sorted descriptors");
+  const auto images = genesis_m68k_executable_images(program);
+  check(images && images->set.images.size() == 4 && validate_executable_image_set(images->set).ok(), "cartridge + alias + two thunk images validate");
+  if (images && images->set.images.size() == 4) {
+    const auto& t = images->set.images[2];
+    check(t.id == ImageId{3} && t.bytes == jmp_long && !t.source && t.mappings == std::vector<ImageMapping>{{0x00FFFA7CU, 0, 6}} &&
+              t.provenance.authority == ImageAuthority::bounded_build_time_materialization && t.provenance.producer == "genesis.ram_thunk" &&
+              t.verification == ImageVerification::byte_identity,
+          "thunk image: owned exact bytes, work-RAM mapping, bounded_build_time_materialization (never static_proof), byte_identity");
+    const auto counts = format_image_provenance_json(count_image_provenance(images->set));
+    check(counts ==
+              "{\"images\":4,\"authority\":{\"immutable_input\":1,\"static_proof\":1,\"bounded_build_time_materialization\":2},"
+              "\"producers\":{\"genesis.cartridge\":1,\"genesis.copy_alias\":1,\"genesis.ram_thunk\":2}}",
+          "sanitized provenance: " + counts);
+  }
+  // Injected descriptors are re-validated by the decoder: a forged one is refused.
+  auto forged = program_with();
+  forged.materialized_ram_thunks.push_back({0x00FFFA7CU, std::vector<std::uint8_t>{0x4E, 0x71, 0x4E, 0x71}});
+  check(!genesis_m68k_executable_images(forged).has_value(), "nullopt: a forged non-JMP thunk descriptor");
+  // The AOT identity of a thunk carries the guard: derived by the CPU lifter, flagged as a materialized thunk.
+  auto analysis_program = program_with();
+  check(apply_genesis_immutable_rom_aot(analysis_program) && apply_genesis_materialized_ram_thunk(analysis_program, 0x00FFFA7CU, jmp_long),
+        "thunk on top of the immutable-ROM AOT program");
+}
+
 // ---- fail-closed descriptor conditions (descriptors injected directly, bypassing the descriptor validator) ------------------------
 
 void fail_closed() {
@@ -358,6 +406,7 @@ void identity_equivalence() {
 
 int main() {
   producer_shape();
+  ram_thunk_producer();
   fail_closed();
   identity_equivalence();
   if (failures != 0) {

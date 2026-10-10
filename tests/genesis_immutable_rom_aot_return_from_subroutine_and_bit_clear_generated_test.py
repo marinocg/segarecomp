@@ -256,10 +256,10 @@ int main(void) {
      touched. */
   runtime = (GenesisRuntime){0};
   runtime.pc = UINT32_C(0x00000D1A);
-  runtime.a[7] = UINT32_C(0x00000000);
+  runtime.a[7] = UINT32_C(0x00000010);  /* (A7 == 0 now wraps to the top work-RAM long word and is a valid push) */
   transfer = genesis_bridge_dispatch(&runtime);
   assert(transfer.kind == GENESIS_STOP);
-  assert(runtime.a[7] == UINT32_C(0x00000000));
+  assert(runtime.a[7] == UINT32_C(0x00000010));
   assert(runtime.pc == UINT32_C(0x00000D1A));
 
   return 0;

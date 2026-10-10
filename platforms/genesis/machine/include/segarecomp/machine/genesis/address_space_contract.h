@@ -99,6 +99,34 @@ static inline int segarecomp_genesis_psg_port_contains(uint32_t address) {
          address == UINT32_C(0x00C00017);
 }
 
+/* Compat repair: idle-state hardware control registers that cartridges write once during boot with their power-on
+ * value, and whose idle value this machine model already embodies:
+ *   - the three serial-port control registers S-CTRL1/2/3 ($A10013, $A10019, $A1001F; GTO1 v1.00 pp. 72-75): writing
+ *     zero leaves every serial port disabled, the power-on state (no serial device is modelled);
+ *   - the Sega mapper's SRAM/ROM control register ($A130F1; plutiedev "Sega mapper"): bit 0 clear keeps the cartridge ROM
+ *     mapped at $000000-$3FFFFF, which is the only mapping this machine models (no cartridge SRAM exists here).
+ * Only a BYTE write that keeps the idle state is admitted (S-CTRL: the value zero; $A130F1: bit 0 clear). Every other
+ * value, width, direction and neighbouring address stays fail-closed.  Shared byte-for-byte by the translation-time
+ * routing gate (which defers the shape) and the generated runtime (which inspects the value). */
+#define SEGARECOMP_GENESIS_MAPPER_SRAM_CONTROL_REGISTER UINT32_C(0x00A130F1)
+
+static inline int segarecomp_genesis_serial_control_register(uint32_t address) {
+  return address == UINT32_C(0x00A10013) || address == UINT32_C(0x00A10019) || address == UINT32_C(0x00A1001F);
+}
+
+static inline int segarecomp_genesis_idle_control_write_admitted(uint32_t address, uint32_t width_bytes,
+                                                                 uint32_t value) {
+  if (width_bytes != 1U) return 0;
+  if (segarecomp_genesis_serial_control_register(address)) return (value & UINT32_C(0xFF)) == 0U;
+  if (address == SEGARECOMP_GENESIS_MAPPER_SRAM_CONTROL_REGISTER) return (value & UINT32_C(0x01)) == 0U;
+  return 0;
+}
+
+static inline int segarecomp_genesis_idle_control_register(uint32_t address) {
+  return segarecomp_genesis_serial_control_register(address) ||
+         address == SEGARECOMP_GENESIS_MAPPER_SRAM_CONTROL_REGISTER;
+}
+
 /* SEG-007-T171: YM2612 FM synthesis chip register window, $A04000-$A04003
  * (GTO1 v1.00 p. 10 "Z80 AREA" / plutiedev.com "ym2612": PART-I address/status
  * port $A04000, PART-I data port $A04001, PART-II address port $A04002,

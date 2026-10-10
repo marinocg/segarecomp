@@ -14,6 +14,7 @@
 // vocabulary of `discover_copy_aliases` (parity: tests/genesis_m68k_copy_alias_parity_test.py).
 
 #include <cstddef>
+#include <functional>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -37,6 +38,23 @@ struct CopyAlias {
   friend bool operator==(const CopyAlias&, const CopyAlias&) = default;
   friend auto operator<=>(const CopyAlias&, const CopyAlias&) = default;
 };
+
+// ADR 0097 amendment: a narrow RAM-thunk proposal. When the confirmed run's frontier is a work-RAM execution target that is NOT a
+// verbatim cartridge copy (or the stop is an IRQ6 delivery through a work-RAM vector), the live bytes at that address are
+// offered to the CPU-owned decoder (`genesis_ram_jump_thunk_bytes`); only exactly one `JMP (xxx).W/.L` yields a proposal. The
+// descriptor carries the decoder-trimmed bytes; the emitter re-validates them and every compiled thunk keeps its runtime
+// whole-instruction byte guard. Nothing here knows an opcode: recognition is the CPU decoder's.
+struct RamThunk {
+  std::uint32_t execution = 0;
+  std::vector<std::uint8_t> bytes;
+  friend bool operator==(const RamThunk&, const RamThunk&) = default;
+};
+// CPU-owned recognition, injected so this library stays byte-comparison-only: given the execution address and the live bytes
+// there it returns the bytes of exactly one `JMP (xxx).W/.L` or nullopt. (build_command passes
+// `genesis_ram_jump_thunk_bytes`, which asks the MC68000 decoder.) Without a recognizer no thunk is ever proposed.
+using RamThunkRecognizer = std::function<std::optional<std::vector<std::uint8_t>>(std::uint32_t, std::span<const std::uint8_t>)>;
+inline constexpr std::uint32_t kStopUnsupportedInterrupt = 6;  // GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT
+inline constexpr std::uint32_t kIrq6VectorOffset = 0x78;
 
 // The private record of one M68K guest stop of the headless pass (never persisted beyond the build's work directory).
 struct GuestStopRecord {
@@ -63,13 +81,15 @@ enum class Termination : std::uint8_t {
   no_work_ram_frontier,        // the stop PC is not an even work-RAM address
   frontier_not_verbatim_copy,  // work-RAM stop without a verbatim ROM run of at least kMinRun bytes
   repeated_alias_no_progress,  // the proposal is already covered by the current aliases
+  ram_thunk_mismatch,          // a materialized RAM thunk's address now holds different live bytes: preparation INCOMPLETE
   max_rounds,                  // still discovering after kMaxRounds rounds: preparation INCOMPLETE
   tool_failure,                // emit/compile/link/run or stop-record failure: preparation INCOMPLETE
 };
 
 [[nodiscard]] const char* termination_name(Termination termination) noexcept;
 [[nodiscard]] constexpr bool incomplete(Termination termination) noexcept {
-  return termination == Termination::max_rounds || termination == Termination::tool_failure;
+  return termination == Termination::max_rounds || termination == Termination::tool_failure ||
+         termination == Termination::ram_thunk_mismatch;
 }
 
 // The outcome of one fixed-point run as the preparation sees it.
@@ -83,8 +103,10 @@ struct RoundObservation {
 struct Step {
   std::optional<Termination> termination;
   std::vector<CopyAlias> aliases;
+  std::vector<RamThunk> thunks;
 };
-[[nodiscard]] Step next_step(std::span<const std::uint8_t> rom, const RoundObservation& observed, const std::vector<CopyAlias>& aliases);
+[[nodiscard]] Step next_step(std::span<const std::uint8_t> rom, const RoundObservation& observed, const std::vector<CopyAlias>& aliases,
+                             const std::vector<RamThunk>& thunks = {}, const RamThunkRecognizer& recognizer = {});
 
 class RoundRunner {
  public:
@@ -92,6 +114,11 @@ class RoundRunner {
   // Builds and runs the program with `aliases` (re-emit, recompile changed units, relink, fixed point). `abort` set: the round
   // failed with a typed failure the caller owns (the loop stops without a termination of its own).
   virtual RoundObservation run_round(const std::vector<CopyAlias>& aliases, bool& abort) = 0;
+  // Same, with the RAM thunks found so far (default: alias-only runners ignore them).
+  virtual RoundObservation run_round(const std::vector<CopyAlias>& aliases, const std::vector<RamThunk>& thunks, bool& abort) {
+    (void)thunks;
+    return run_round(aliases, abort);
+  }
 };
 
 struct Summary {
@@ -99,11 +126,12 @@ struct Summary {
   bool aborted = false;              // a round failed with the runner's own typed failure
   std::size_t rounds = 0;            // extra rounds (re-emit + fixed point) after the initial one
   std::vector<CopyAlias> aliases;    // the alias set of the last built program
+  std::vector<RamThunk> thunks;      // the RAM-thunk set of the last built program
   [[nodiscard]] std::uint64_t alias_bytes() const noexcept;
 };
 
 // The bounded loop. `initial` is the observation of the already-built alias-less program.
 [[nodiscard]] Summary prepare(std::span<const std::uint8_t> rom, const RoundObservation& initial, RoundRunner& runner,
-                              std::size_t max_rounds = kMaxRounds);
+                              std::size_t max_rounds = kMaxRounds, const RamThunkRecognizer& recognizer = {});
 
 }  // namespace segarecomp::machine::genesis::m68k_alias

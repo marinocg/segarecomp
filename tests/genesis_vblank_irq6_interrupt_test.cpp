@@ -225,6 +225,33 @@ void user_mode_admission_is_rejected() {
   check(r.pc == kOrdinaryPc && r.a[7] == kRamBegin + 0x8000u, "no CPU mutation on user-mode reject");
 }
 
+// A cartridge whose IRQ6 vector slot points into work RAM (a RAM jump stub) has no statically rooted handler. The
+// recognized VBlank interrupt then fails closed instead of being silently dropped, and mutates nothing.
+void ram_resident_irq6_vector_fails_closed() {
+  GenesisRuntime r;
+  prime(r);
+  r.irq6_handler_present = 0u;
+  r.irq6_handler_entry = 0u;
+  r.irq6_vector_in_work_ram = 1u;
+  g_step = [&](GenesisRuntime *rt) -> GenesisControlTransfer {
+    (void)rt;
+    return continue_at(kOrdinaryPc);
+  };
+  const auto result = genesis_runtime_run(&r, trampoline, 64u);
+  check(result.kind == GENESIS_STOP &&
+            result.stop.stop_class == GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT &&
+            result.stop.diagnostic_category == GENESIS_DIAG_IRQ6_VECTOR_IN_WORK_RAM,
+        "RAM-resident IRQ6 vector: a recognized VBlank interrupt fails closed");
+  check(r.pc == kOrdinaryPc && r.a[7] == kRamBegin + 0x8000u, "no CPU mutation on the RAM-vector stop");
+
+  // Without the RAM-vector flag the historical behaviour is unchanged: no handler means the interrupt is inert.
+  GenesisRuntime inert;
+  prime(inert);
+  inert.irq6_handler_present = 0u;
+  const auto spun = genesis_runtime_run(&inert, trampoline, 64u);
+  check(spun.kind == GENESIS_RUNNER_RESOURCE_LIMIT, "no handler and no RAM vector: IRQ6 stays inert");
+}
+
 void stack_wrap_fails_closed_with_no_frame_write() {
   GenesisRuntime r;
   prime(r);
@@ -708,6 +735,7 @@ int main() {
   mask_boundary_matches_level_6();
   exception_entry_frame_is_correct();
   user_mode_admission_is_rejected();
+  ram_resident_irq6_vector_fails_closed();
   stack_wrap_fails_closed_with_no_frame_write();
   rte_atomic_restore_and_failure();
   high_alias_stack_entry_and_returns();
