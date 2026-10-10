@@ -77,6 +77,7 @@ const char* termination_name(Termination termination) noexcept {
     case Termination::no_work_ram_frontier: return "no_work_ram_frontier";
     case Termination::frontier_not_verbatim_copy: return "frontier_not_verbatim_copy";
     case Termination::repeated_alias_no_progress: return "repeated_alias_no_progress";
+    case Termination::ram_thunk_mismatch: return "ram_thunk_mismatch";
     case Termination::max_rounds: return "max_rounds";
     case Termination::tool_failure: return "tool_failure";
   }
@@ -91,13 +92,19 @@ Step thunk_step(const GuestStopRecord& record, std::uint32_t pc, const std::vect
   if ((pc & 1U) != 0 || pc < kWorkRamBegin || pc >= kWorkRamBegin + kWorkRamBytes) { step.termination = Termination::no_work_ram_frontier; return step; }
   const std::size_t offset = pc - kWorkRamBegin;
   const std::size_t window = std::min<std::size_t>(6, record.work_ram.size() - offset);
-  const auto bytes = recognizer ? recognizer(pc, std::span<const std::uint8_t>(record.work_ram).subspan(offset, window)) : std::nullopt;
-  if (!bytes) { step.termination = Termination::frontier_not_verbatim_copy; return step; }
-  for (const RamThunk& existing : thunks)
-    if (pc < existing.execution + existing.bytes.size() && existing.execution < pc + bytes->size()) {
-      step.termination = Termination::repeated_alias_no_progress;  // already compiled (or rewritten): fail closed, no progress
+  // A materialized thunk is a bounded-build-time-materialization image: its bytes are an observed fact. Observing the same address
+  // again must show the same bytes (then the stop is simply no progress); different bytes mean the observation is not
+  // reproducible, which is a typed, incomplete preparation, never "no progress" and never silently re-materialized.
+  for (const RamThunk& existing : thunks) {
+    if (pc < existing.execution + existing.bytes.size() && existing.execution < pc + window) {
+      const bool same = existing.execution == pc && window >= existing.bytes.size() &&
+                        std::equal(existing.bytes.begin(), existing.bytes.end(), record.work_ram.begin() + static_cast<std::ptrdiff_t>(offset));
+      step.termination = same ? Termination::repeated_alias_no_progress : Termination::ram_thunk_mismatch;
       return step;
     }
+  }
+  const auto bytes = recognizer ? recognizer(pc, std::span<const std::uint8_t>(record.work_ram).subspan(offset, window)) : std::nullopt;
+  if (!bytes) { step.termination = Termination::frontier_not_verbatim_copy; return step; }
   for (const CopyAlias& alias : aliases)
     if (pc < static_cast<std::uint64_t>(alias.execution) + alias.length && alias.execution < pc + bytes->size()) {
       step.termination = Termination::repeated_alias_no_progress;

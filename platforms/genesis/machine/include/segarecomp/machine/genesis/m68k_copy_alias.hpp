@@ -81,13 +81,15 @@ enum class Termination : std::uint8_t {
   no_work_ram_frontier,        // the stop PC is not an even work-RAM address
   frontier_not_verbatim_copy,  // work-RAM stop without a verbatim ROM run of at least kMinRun bytes
   repeated_alias_no_progress,  // the proposal is already covered by the current aliases
+  ram_thunk_mismatch,          // a materialized RAM thunk's address now holds different live bytes: preparation INCOMPLETE
   max_rounds,                  // still discovering after kMaxRounds rounds: preparation INCOMPLETE
   tool_failure,                // emit/compile/link/run or stop-record failure: preparation INCOMPLETE
 };
 
 [[nodiscard]] const char* termination_name(Termination termination) noexcept;
 [[nodiscard]] constexpr bool incomplete(Termination termination) noexcept {
-  return termination == Termination::max_rounds || termination == Termination::tool_failure;
+  return termination == Termination::max_rounds || termination == Termination::tool_failure ||
+         termination == Termination::ram_thunk_mismatch;
 }
 
 // The outcome of one fixed-point run as the preparation sees it.

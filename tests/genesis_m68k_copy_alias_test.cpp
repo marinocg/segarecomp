@@ -158,7 +158,21 @@ void unit_cases() {
     check(ma::next_step(t.rom, stop_at(t.ram, 0xFF0802), none, {}, fake).termination == ma::Termination::frontier_not_verbatim_copy,
           "thunk: a frontier inside a stub (not its first byte) is not recognised");
     check(ma::next_step(t.rom, stop_at(t.ram, 0xFF0800), none, proposed.thunks, fake).termination == ma::Termination::repeated_alias_no_progress,
-          "thunk: an already compiled (or rewritten) stub is no progress: fail closed");
+          "thunk: the same bytes observed again at a materialized stub are no progress (deterministic)");
+    // Reproducibility: the materialized image is an observed fact. Different live bytes at its address are a typed, INCOMPLETE
+    // preparation (never no-progress, never re-materialized), whether the new bytes are another JMP or not a JMP at all.
+    auto changed = t.ram;
+    changed[0x0800] = 0xAA; changed[0x0801] = 0xBB; changed[0x0802] = 0xCC; changed[0x0803] = 0xEE;  // a different recognized stub
+    const auto mismatch = ma::next_step(t.rom, stop_at(changed, 0xFF0800), none, proposed.thunks, fake);
+    check(mismatch.termination == ma::Termination::ram_thunk_mismatch && ma::incomplete(*mismatch.termination) && mismatch.thunks.empty(),
+          "thunk: changed bytes at a materialized address -> ram_thunk_mismatch (incomplete), nothing re-materialized");
+    changed[0x0800] = 0x00;  // no longer a stub at all
+    check(ma::next_step(t.rom, stop_at(changed, 0xFF0800), none, proposed.thunks, fake).termination == ma::Termination::ram_thunk_mismatch,
+          "thunk: bytes that are no longer a stub at a materialized address -> ram_thunk_mismatch");
+    check(ma::next_step(t.rom, stop_at(changed, 0xFF0802), none, proposed.thunks, fake).termination == ma::Termination::ram_thunk_mismatch,
+          "thunk: a stop inside a materialized stub whose bytes changed -> ram_thunk_mismatch");
+    check(ma::next_step(t.rom, stop_at(t.ram, 0xFF0802), none, proposed.thunks, fake).termination == ma::Termination::ram_thunk_mismatch,
+          "thunk: a stop inside a materialized stub is never explained by it -> ram_thunk_mismatch");
     check(ma::next_step(t.rom, stop_at(t.ram, 0xFF0400), none, {}, fake).aliases == std::vector<ma::CopyAlias>{{0xFF0400, 0x200, 48}},
           "thunk: a verbatim copy keeps priority over the thunk path");
     // IRQ6 through a work-RAM vector: the cartridge's own vector slot names the stub address
@@ -183,6 +197,14 @@ void unit_cases() {
     check(summary.termination == ma::Termination::repeated_alias_no_progress && summary.rounds == 1 && summary.thunks.size() == 1 &&
               runner.seen.size() == 1 && runner.seen[0].size() == 1,
           "thunk: the bounded loop builds the thunk once, then stops on no progress");
+    // The loop: a later observation of the same address with different bytes ends the preparation INCOMPLETE; the changed target is
+    // never proposed or built (the runner saw exactly one thunk set, the original one).
+    runner.seen.clear();
+    runner.next = stop_at(changed, 0xFF0800);
+    const auto bad = ma::prepare(t.rom, stop_at(t.ram, 0xFF0800), runner, ma::kMaxRounds, fake);
+    check(bad.termination == ma::Termination::ram_thunk_mismatch && ma::incomplete(bad.termination) && bad.rounds == 1 &&
+              bad.thunks.size() == 1 && bad.thunks[0].bytes == std::vector<std::uint8_t>{0xAA, 0xBB, 0xCC, 0xDD} && runner.seen.size() == 1,
+          "thunk: the loop ends ram_thunk_mismatch (incomplete) with the original bytes only");
   }
   ma::RoundObservation missing;
   missing.guest_stop = true;
@@ -240,6 +262,9 @@ void unit_cases() {
   for (const auto t : {ma::Termination::route_advanced, ma::Termination::non_alias_frontier, ma::Termination::no_work_ram_frontier,
                        ma::Termination::frontier_not_verbatim_copy, ma::Termination::repeated_alias_no_progress})
     check(!ma::incomplete(t), ma::termination_name(t));
+  check(ma::incomplete(ma::Termination::ram_thunk_mismatch) && std::string(ma::termination_name(ma::Termination::ram_thunk_mismatch)) ==
+                                                                  "ram_thunk_mismatch",
+        "ram_thunk_mismatch is an incomplete termination with its own name");
 }
 
 }  // namespace

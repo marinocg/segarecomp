@@ -923,6 +923,9 @@ add_test(NAME genesis_copy_alias_discovery_test COMMAND ${Python3_EXECUTABLE}
 # SEG-021-T041 / ADR 0049: preparation-phase lifecycle, accounting and termination vocabulary (hermetic).
 add_test(NAME genesis_copy_alias_lifecycle_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_copy_alias_lifecycle_test.py)
+# Hermetic and fully mocked (measured ~0.2 s). A cap far below CTest's 1500 s default keeps a future runaway (the test's own
+# `--segarecomp` is this script) from pinning a CI shard.
+set_tests_properties(genesis_copy_alias_lifecycle_test PROPERTIES TIMEOUT 120)
 
 add_executable(codegen_c11_provenance_diagnostics_tests codegen_c11_provenance_diagnostics_test.cpp)
 target_link_libraries(codegen_c11_provenance_diagnostics_tests PRIVATE segarecomp::codegen_c11_m68k)

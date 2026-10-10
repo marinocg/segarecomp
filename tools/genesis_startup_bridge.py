@@ -1453,7 +1453,9 @@ ALIAS_TERMINATION_RUNNER_RESOURCE_LIMIT = "runner_resource_limit"  # host dispat
 ALIAS_TERMINATION_NON_ALIAS_FRONTIER = "non_alias_frontier"  # a guest stop of a class no copy alias can explain
 ALIAS_TERMINATION_MAX_ROUNDS = "max_rounds"  # bound exhausted while still discovering: preparation INCOMPLETE
 ALIAS_TERMINATION_TOOL_FAILURE = "tool_failure"  # generation/compile/run/dump failure: preparation INCOMPLETE
-ALIAS_INCOMPLETE_TERMINATIONS = (ALIAS_TERMINATION_MAX_ROUNDS, ALIAS_TERMINATION_TOOL_FAILURE)
+ALIAS_TERMINATION_RAM_THUNK_MISMATCH = "ram_thunk_mismatch"  # a materialized RAM thunk address now holds other bytes: INCOMPLETE
+ALIAS_INCOMPLETE_TERMINATIONS = (ALIAS_TERMINATION_MAX_ROUNDS, ALIAS_TERMINATION_TOOL_FAILURE,
+                                 ALIAS_TERMINATION_RAM_THUNK_MISMATCH)
 ALIAS_MAX_ROUNDS_ENV = "SEGARECOMP_TEST_ALIAS_MAX_ROUNDS"  # test-only override of GENESIS_ALIAS_MAX_ROUNDS
 GENESIS_EXIT_ALIAS_PREPARATION_INCOMPLETE = 11
 
@@ -1461,6 +1463,19 @@ GENESIS_EXIT_ALIAS_PREPARATION_INCOMPLETE = 11
 def alias_max_rounds() -> int:
     override = os.environ.get(ALIAS_MAX_ROUNDS_ENV)
     return int(override) if override and override.isdigit() and int(override) > 0 else GENESIS_ALIAS_MAX_ROUNDS
+
+
+def classify_ram_jump_thunk(emitter_command: list[str], pc: int, window_hex: str) -> str | None:
+    """ADR 0097: ask the CPU-owned decoder (the segarecomp CLI, build time only) whether `window_hex`, the live work-RAM bytes at
+    `pc`, begins with exactly one JMP (xxx).W/.L. Returns that instruction's bytes (hex) or None. Never decodes anything itself.
+    A seam: tests that do not run a real emitter replace it."""
+    prefix = emitter_command[:emitter_command.index("emit-general-startup-bridge-c")]
+    try:
+        completed = subprocess.run([*prefix, "classify-ram-jump-thunk", f"{pc:08x}", window_hex], text=True, capture_output=True,
+                                   timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None  # no recognizer available: no thunk is ever proposed
+    return completed.stdout.strip() if completed.returncode == 0 and completed.stdout.strip() else None
 
 
 def discover_copy_aliases(emitter_command: list[str], compiler: pathlib.Path, root: pathlib.Path,
@@ -1543,13 +1558,14 @@ def discover_copy_aliases(emitter_command: list[str], compiler: pathlib.Path, ro
             # JMP (xxx).W/.L yields a thunk; anything else keeps the fail-closed frontier.
             offset = pc - GENESIS_WORK_RAM_BEGIN
             window = dump[8 + offset:8 + offset + 6].hex()
-            try:
-                classified = subprocess.run(
-                    [*emitter_command[:emitter_command.index("emit-general-startup-bridge-c")], "classify-ram-jump-thunk",
-                     f"{pc:08x}", window], text=True, capture_output=True)
-                thunk_hex = classified.stdout.strip() if classified.returncode == 0 else None
-            except OSError:
-                thunk_hex = None  # no recognizer available: no thunk is ever proposed
+            # A materialized thunk is an observed fact: the same address must show the same bytes again (then this stop is simply
+            # no progress); other bytes are a typed, INCOMPLETE preparation, never silently re-materialized.
+            clash = [t for t in thunks if t[0] < pc + len(window) // 2 and pc < t[0] + len(t[1]) // 2]
+            if clash:
+                same = clash[0][0] == pc and window.startswith(clash[0][1])
+                reason = ALIAS_TERMINATION_REPEATED_ALIAS if same else ALIAS_TERMINATION_RAM_THUNK_MISMATCH
+                break
+            thunk_hex = classify_ram_jump_thunk(emitter_command, pc, window)
             if thunk_hex is None or any(pc < t[0] + len(t[1]) // 2 and t[0] < pc + len(thunk_hex) // 2 for t in thunks) or \
                     any(pc < a[0] + a[2] and a[0] < pc + len(thunk_hex) // 2 for a in aliases):
                 reason = ALIAS_TERMINATION_NOT_VERBATIM_COPY if thunk_hex is None else ALIAS_TERMINATION_REPEATED_ALIAS
