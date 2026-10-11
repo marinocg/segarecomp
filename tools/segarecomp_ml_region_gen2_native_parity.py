@@ -129,7 +129,7 @@ def cmd_local(args) -> int:
             if scores is not None and tid in scores.files:
                 research = sorted(rk.rank_select(scores[tid].tolist(), 35))
                 research_regions = tmp / f"{tid}.research.regions"
-                research_regions.write_text(g.regions_text(sha, rom_size, research))
+                research_regions.write_text(g.regions_text(sha, rom_size, research), newline="\n")
                 research_stage = prune_stage(args.binary, path, sha, research_regions, tmp, tid + "r")
                 record["research_scores_selected_parity"] = selected_digest(research) == first["selected_cells_sha256"]
                 record["research_region_parity"] = g.sha256_bytes(research_regions.read_bytes()) == first["ml_only_regions_sha256"]

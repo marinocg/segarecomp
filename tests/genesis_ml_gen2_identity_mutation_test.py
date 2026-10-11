@@ -51,7 +51,7 @@ def run(name, tmp):
     work = pathlib.Path(tmp) / name
     work.mkdir()
     (work / "ml_region_gen2_producer.cpp").write_text((machine / "src" / "ml_region_gen2_producer.cpp").read_text())
-    (work / "ml_region_gen2_model_data.inc").write_text(mutate(inc))
+    (work / "ml_region_gen2_model_data.inc").write_text(mutate(inc), newline="\n")
     (work / "driver.cpp").write_text(DRIVER)
     exe = work / ("driver.exe" if sys.platform == "win32" else "driver")
     cmd = [cxx, "-std=c++20", "-O0", "-ffp-contract=off", *[f"-I{p}" for p in includes], str(work / "driver.cpp"), str(work / "ml_region_gen2_producer.cpp"),

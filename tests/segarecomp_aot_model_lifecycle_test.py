@@ -84,7 +84,7 @@ def main():
         both = run(emit + ["--immutable-rom-aot-ml-admission", "--immutable-rom-aot-ml-gen2-admission"])
         require(both.returncode == 2 and "mutually exclusive" in both.stderr, both.stderr)
         planfile = tmp / "x.plan"
-        planfile.write_text(f"segarecomp.m68k_hybrid_admission_plan.v1\nrom_sha256 {sha}\nuniverse_sha256 {'0' * 64}\nstrategy broad\nend\n")
+        planfile.write_text(f"segarecomp.m68k_hybrid_admission_plan.v1\nrom_sha256 {sha}\nuniverse_sha256 {'0' * 64}\nstrategy broad\nend\n", newline="\n")
         excl = run(emit + ["--immutable-rom-aot-admission", str(planfile), "--immutable-rom-aot-ml-gen2-admission"])
         require(excl.returncode == 2 and "excludes" in excl.stderr, "exact map and gen2 are mutually exclusive: " + excl.stderr)
         require(run(emit[:-1] + ["--immutable-rom-aot-ml-gen2-admission"]).returncode == 2, "gen2 admission requires --immutable-rom-aot")
@@ -151,7 +151,7 @@ def main():
         tiny.write_bytes(IMAGE)
         tsha = hashlib.sha256(IMAGE).hexdigest()
         regions = tmp / "x.regions"
-        regions.write_text(f"segarecomp.m68k_executable_regions.v1\nrom_sha256 {tsha}\nrange 00000000 0000000c\nend\n")
+        regions.write_text(f"segarecomp.m68k_executable_regions.v1\nrom_sha256 {tsha}\nrange 00000000 0000000c\nend\n", newline="\n")
         plan = tmp / "t.plan"
         planned = run([cli, "emit-general-startup-bridge-c", "--rom", str(tiny), "--reset-entry", "--rom-sha256", tsha, "--immutable-rom-aot",
                        "--immutable-aot-region-proposal", str(regions), "--region-admission-plan-output", str(plan)])

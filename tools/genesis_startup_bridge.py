@@ -2035,6 +2035,9 @@ def main() -> int:
                         help="SEG-047 (ADR 0096): opt-in native ML selective admission for the FINAL emission "
                              "(--immutable-rom-aot-ml-admission): frozen region model -> structural pruning -> the unchanged "
                              "validator, with broad fallback. Mutually exclusive with --admission-plan; requires --immutable-rom-aot")
+    parser.add_argument("--ml-gen2-admission", action="store_true",
+                        help="SEG-049 (ADR 0103): the experimental gen2 (M3 + B35) producer for the FINAL emission "
+                             "(--immutable-rom-aot-ml-gen2-admission). Mutually exclusive with --admission-plan and --ml-admission; requires --immutable-rom-aot")
     parser.add_argument("--provenance-diagnostics", action="store_true",
                         help="SEG-020-T002: opt in to the generated provenance lookup; the table is "
                              "extracted to <out-dir>/provenance-diagnostics.c (ephemeral, not for commit)")
@@ -2196,6 +2199,11 @@ def main() -> int:
             sys.stderr.write("--ml-admission requires --immutable-rom-aot and excludes --admission-plan\n")
             return 8
         emitter_command += ["--immutable-rom-aot-ml-admission"]
+    if args.ml_gen2_admission:
+        if not args.immutable_rom_aot or args.admission_plan or args.ml_admission:
+            sys.stderr.write("--ml-gen2-admission requires --immutable-rom-aot and excludes --admission-plan and --ml-admission\n")
+            return 8
+        emitter_command += ["--immutable-rom-aot-ml-gen2-admission"]
     viewer_sdl3 = None
     if args.viewer:
         # Fail clearly before any generation/guest execution; never fall back to headless.
