@@ -143,7 +143,20 @@ ROMs, 0.27-0.54 s for the historical ROMs - far below the compile savings, so `R
 
 ## 12. Independent review
 
-(See the review section appended at the end of the task; results are recorded verbatim in the pull request.)
+A fresh adversarial reviewer session (head `e4533bc`) attacked held-out leakage, post-hoc budget search, rank order/tie determinism, FRF / headroom / R/ROM arithmetic,
+truth or runtime leakage into selection, v1 drift, M3/recipe/corpus drift, K/R conflation, private-data leakage and model nondeterminism. **No blocker or major finding; verdict
+ACCEPT.** Confirmed independently (numpy + truth lists, not the repository code): plan commit `fb3e829` precedes the first evaluation output and is the only commit of the plan;
+outer score digests match the plan; FRF and headroom match to 4 decimals (S&K B30 headroom 1.116, B35 1.302); ML-only misses are 0 at B30/B35/B50; the six v1 artifact digests are
+unchanged; the two final fits are byte-identical; gen2 == broad on all nine titles from the raw results. Minor findings, all accepted as stated limits:
+
+- **Tie groups are low-score, not saturated.** The plan text says saturated ties sit at the top; in fact the large tie groups are low-score groups of identical-context cells
+  (Flicky: a 559-cell group straddling every budget boundary; S&K: a 24-cell tie at the B35 boundary). The ordinal tie-break is deterministic and cost no truth cell (the worst
+  positive is far above), but it spends some budget on arbitrary cells. The frozen plan wording is left unchanged (it is part of the pre-registration); this ADR is the correction.
+- **`frame_stream` equality is vacuous** (the digest of an empty stream for every run, `--coverage-no-render`); the runtime claim rests on outcome, frames, final state and coverage
+  digests plus the executed-PC set comparison. Flicky and S&K stop at a pre-existing frontier after 26 and 9 frames, so their equality is weak, bounded-window evidence.
+- **v1 comparison:** v1 is smaller / cheaper to compile than gen2 on every title where it is accepted (compile CPU gap largest on OutRun and Cool Spot); gen2's advantage is correctness
+  (S&K) and acceptance (Shining Force). The economics gate is against broad, not against v1 (section 10).
+- The Sonic 2 falsifier is engine-correlated with Sonic 1 / S&K; the four historical titles are runtime-only evidence.
 
 ## 13. Next SEG-049 action
 
