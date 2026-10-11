@@ -1,0 +1,726 @@
+{
+ "adr": "0100",
+ "calibration": {
+  "after": "representation selection (never simultaneously)",
+  "choice": "highest factor passing all five outer folds",
+  "inner": "for each outer held-out title H, each of the 4 training titles is scored by a model trained on the other 3 training titles; m_H = minimum positive-cell score over those inner held-out predictions; H contributes nothing",
+  "policies": {
+   "Q0": 1.0,
+   "Q1": 0.5,
+   "Q2": 0.25,
+   "Q3": 0.1
+  },
+  "r_definition": "R = ML-selected cells UNION certain-code seed cells (cells holding a precise direct-control-discovery identity)",
+  "r_gate": "C outside R = 0 and R/ROM <= 0.6 (preferred 0.5) on every outer title",
+  "score": "model probability",
+  "threshold": "factor * m_H"
+ },
+ "classes": [
+  "GEN2_ML_READY_FOR_NATIVE_SPIKE",
+  "GEN2_ML_VALID_POSTPROCESS_BLOCKED",
+  "GEN2_REPRESENTATION_VALID_CALIBRATION_UNSOLVED",
+  "GEN2_ML_INSUFFICIENT"
+ ],
+ "complexity_order": "M1 < M2 < M3 < M4",
+ "corpus": {
+  "flicky": {
+   "revision": "d9a0d4799c25fb23ba6251306508ee40a1ce9a89",
+   "rom_sha256": "4df1a91e08376ae773a6eb8e5abe310f94ca39d8f81583b91a9477fedcb68c11",
+   "source": "github.com/oranguthang/flicky_src",
+   "title": "Flicky",
+   "truth_sha256": "33916a8e6800a10aa3601a4c35ce5ca929067876994dd9e4c9b1c36e9cf8d6e0",
+   "truth_starts": 5707
+  },
+  "ps2": {
+   "revision": "c23877b8aa090473562ae2ed571ace2869289167",
+   "rom_sha256": "a0bd97f5aaa67301923ccc367511606bd3471ea9542919165311d4a23a2b696b",
+   "source": "github.com/wyatt8740/ps2disasm",
+   "title": "Phantasy Star II (REV02)",
+   "truth_sha256": "87174c5685eddc09c7ea00ac826e2ec1d5d5c470548529a2b3d25a77a17dea96",
+   "truth_starts": 19261
+  },
+  "s1": {
+   "revision": "7ebe4b3d0c182b2566026b6d3f423d33539558da",
+   "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+   "source": "github.com/sonicretro/s1disasm",
+   "title": "Sonic the Hedgehog (REV00)",
+   "truth_sha256": "fd21b96bc0d79d62152fa172e2609026822b577d126ddebe5e7f70888127fc13",
+   "truth_starts": 24180
+  },
+  "sf1": {
+   "revision": "1f466bf038a64f6bdf3113e484bace0c3c66c6f7",
+   "rom_sha256": "6c43b41b60ae8147945b4420caeb5eb266e1dd57a0d125b7496fa8fb6fde522d",
+   "source": "github.com/ShiningForceCentral/SF1DISASM",
+   "title": "Shining Force",
+   "truth_sha256": "7f5289dce66deecde1d3a9aa18e5ec7992ef055deb2fe9bee6936a4fd9387059",
+   "truth_starts": 44740
+  },
+  "sk": {
+   "revision": "044fa46725c71187399e13f5ddb70e11d32dc024",
+   "rom_sha256": "6e12e6b33c26ebfcd0be433251d21cf6284eafe9f71b027bda3767ae59affec1",
+   "source": "github.com/sonicretro/skdisasm",
+   "title": "Sonic & Knuckles",
+   "truth_sha256": "76be1cccdbb5160e4c61830fe29c41c01a213bc3c04944baded51e7cedf57b72",
+   "truth_starts": 119319
+  }
+ },
+ "environment": {
+  "deterministic": "torch.use_deterministic_algorithms(True), fixed seed and fixed thread count",
+  "device": "CPU only",
+  "numpy": "2.5.3",
+  "python": "3.13.14",
+  "scikit_learn": "1.9.1",
+  "torch": "2.14.1"
+ },
+ "experiment": "SEG-049-T001",
+ "loto": [
+  {
+   "held_out": "s1",
+   "train": [
+    "flicky",
+    "sf1",
+    "ps2",
+    "sk"
+   ]
+  },
+  {
+   "held_out": "flicky",
+   "train": [
+    "s1",
+    "sf1",
+    "ps2",
+    "sk"
+   ]
+  },
+  {
+   "held_out": "sf1",
+   "train": [
+    "s1",
+    "flicky",
+    "ps2",
+    "sk"
+   ]
+  },
+  {
+   "held_out": "ps2",
+   "train": [
+    "s1",
+    "flicky",
+    "sf1",
+    "sk"
+   ]
+  },
+  {
+   "held_out": "sk",
+   "train": [
+    "s1",
+    "flicky",
+    "sf1",
+    "ps2"
+   ]
+  }
+ ],
+ "metrics": {
+  "frf": "smallest fraction of cells, taken in descending model score, containing every positive cell; ties with the lowest positive are all counted",
+  "primary": [
+   "source recall (C outside R)",
+   "FRF (full-recall fraction)",
+   "R/ROM"
+  ],
+  "secondary_only": [
+   "precision",
+   "accuracy",
+   "AUROC"
+  ]
+ },
+ "models": {
+  "M0": {
+   "role": "comparator only",
+   "what": "frozen production SEG-047 v1 (512-B windows, 141 features, Sonic-1-trained logistic, threshold 0.00835406801187952), no retraining; each 128-B cell inherits its window probability"
+  },
+  "M1": {
+   "config": {
+    "class_weight": "balanced",
+    "early_stopping": false,
+    "l2_regularization": 1.0,
+    "learning_rate": 0.08,
+    "max_bins": 255,
+    "max_depth": 4,
+    "max_iter": 200,
+    "min_samples_leaf": 40,
+    "random_state": 49
+   },
+   "estimator": "sklearn HistGradientBoostingClassifier",
+   "features": {
+    "count": 219,
+    "names": [
+     "cell_entropy",
+     "cell_zero",
+     "cell_ff",
+     "cell_printable",
+     "cell_unique",
+     "cell_word_repeat",
+     "cell_hist0",
+     "cell_hist1",
+     "cell_hist2",
+     "cell_hist3",
+     "cell_hist4",
+     "cell_hist5",
+     "cell_hist6",
+     "cell_hist7",
+     "cell_tok_status_0",
+     "cell_tok_status_1",
+     "cell_tok_status_2",
+     "cell_tok_length_0",
+     "cell_tok_length_1",
+     "cell_tok_length_2",
+     "cell_tok_length_3",
+     "cell_tok_length_4",
+     "cell_tok_length_5",
+     "cell_tok_family_0",
+     "cell_tok_family_1",
+     "cell_tok_family_2",
+     "cell_tok_family_3",
+     "cell_tok_family_4",
+     "cell_tok_family_5",
+     "cell_tok_family_6",
+     "cell_tok_family_7",
+     "cell_tok_control_0",
+     "cell_tok_control_1",
+     "cell_tok_control_2",
+     "cell_tok_control_3",
+     "cell_tok_control_4",
+     "cell_tok_control_5",
+     "cell_tok_control_6",
+     "cell_tok_control_7",
+     "cell_tok_ea_src_0",
+     "cell_tok_ea_src_1",
+     "cell_tok_ea_src_2",
+     "cell_tok_ea_src_3",
+     "cell_tok_ea_src_4",
+     "cell_tok_ea_src_5",
+     "cell_tok_ea_src_6",
+     "cell_tok_ea_src_7",
+     "cell_tok_ea_src_8",
+     "cell_tok_ea_src_9",
+     "cell_tok_ea_src_10",
+     "cell_tok_ea_src_11",
+     "cell_tok_ea_src_12",
+     "cell_tok_ea_dst_0",
+     "cell_tok_ea_dst_1",
+     "cell_tok_ea_dst_2",
+     "cell_tok_ea_dst_3",
+     "cell_tok_ea_dst_4",
+     "cell_tok_ea_dst_5",
+     "cell_tok_ea_dst_6",
+     "cell_tok_ea_dst_7",
+     "cell_tok_ea_dst_8",
+     "cell_tok_ea_dst_9",
+     "cell_tok_ea_dst_10",
+     "cell_tok_ea_dst_11",
+     "cell_tok_ea_dst_12",
+     "cell_tok_width_0",
+     "cell_tok_width_1",
+     "cell_tok_width_2",
+     "cell_tok_width_3",
+     "cell_tok_flags_0",
+     "cell_tok_flags_1",
+     "cell_tok_flags_2",
+     "cell_tok_flags_3",
+     "mid_entropy",
+     "mid_zero",
+     "mid_ff",
+     "mid_printable",
+     "mid_unique",
+     "mid_word_repeat",
+     "mid_hist0",
+     "mid_hist1",
+     "mid_hist2",
+     "mid_hist3",
+     "mid_hist4",
+     "mid_hist5",
+     "mid_hist6",
+     "mid_hist7",
+     "mid_tok_status_0",
+     "mid_tok_status_1",
+     "mid_tok_status_2",
+     "mid_tok_length_0",
+     "mid_tok_length_1",
+     "mid_tok_length_2",
+     "mid_tok_length_3",
+     "mid_tok_length_4",
+     "mid_tok_length_5",
+     "mid_tok_family_0",
+     "mid_tok_family_1",
+     "mid_tok_family_2",
+     "mid_tok_family_3",
+     "mid_tok_family_4",
+     "mid_tok_family_5",
+     "mid_tok_family_6",
+     "mid_tok_family_7",
+     "mid_tok_control_0",
+     "mid_tok_control_1",
+     "mid_tok_control_2",
+     "mid_tok_control_3",
+     "mid_tok_control_4",
+     "mid_tok_control_5",
+     "mid_tok_control_6",
+     "mid_tok_control_7",
+     "mid_tok_ea_src_0",
+     "mid_tok_ea_src_1",
+     "mid_tok_ea_src_2",
+     "mid_tok_ea_src_3",
+     "mid_tok_ea_src_4",
+     "mid_tok_ea_src_5",
+     "mid_tok_ea_src_6",
+     "mid_tok_ea_src_7",
+     "mid_tok_ea_src_8",
+     "mid_tok_ea_src_9",
+     "mid_tok_ea_src_10",
+     "mid_tok_ea_src_11",
+     "mid_tok_ea_src_12",
+     "mid_tok_ea_dst_0",
+     "mid_tok_ea_dst_1",
+     "mid_tok_ea_dst_2",
+     "mid_tok_ea_dst_3",
+     "mid_tok_ea_dst_4",
+     "mid_tok_ea_dst_5",
+     "mid_tok_ea_dst_6",
+     "mid_tok_ea_dst_7",
+     "mid_tok_ea_dst_8",
+     "mid_tok_ea_dst_9",
+     "mid_tok_ea_dst_10",
+     "mid_tok_ea_dst_11",
+     "mid_tok_ea_dst_12",
+     "mid_tok_width_0",
+     "mid_tok_width_1",
+     "mid_tok_width_2",
+     "mid_tok_width_3",
+     "mid_tok_flags_0",
+     "mid_tok_flags_1",
+     "mid_tok_flags_2",
+     "mid_tok_flags_3",
+     "ctx_entropy",
+     "ctx_zero",
+     "ctx_ff",
+     "ctx_printable",
+     "ctx_unique",
+     "ctx_word_repeat",
+     "ctx_hist0",
+     "ctx_hist1",
+     "ctx_hist2",
+     "ctx_hist3",
+     "ctx_hist4",
+     "ctx_hist5",
+     "ctx_hist6",
+     "ctx_hist7",
+     "ctx_tok_status_0",
+     "ctx_tok_status_1",
+     "ctx_tok_status_2",
+     "ctx_tok_length_0",
+     "ctx_tok_length_1",
+     "ctx_tok_length_2",
+     "ctx_tok_length_3",
+     "ctx_tok_length_4",
+     "ctx_tok_length_5",
+     "ctx_tok_family_0",
+     "ctx_tok_family_1",
+     "ctx_tok_family_2",
+     "ctx_tok_family_3",
+     "ctx_tok_family_4",
+     "ctx_tok_family_5",
+     "ctx_tok_family_6",
+     "ctx_tok_family_7",
+     "ctx_tok_control_0",
+     "ctx_tok_control_1",
+     "ctx_tok_control_2",
+     "ctx_tok_control_3",
+     "ctx_tok_control_4",
+     "ctx_tok_control_5",
+     "ctx_tok_control_6",
+     "ctx_tok_control_7",
+     "ctx_tok_ea_src_0",
+     "ctx_tok_ea_src_1",
+     "ctx_tok_ea_src_2",
+     "ctx_tok_ea_src_3",
+     "ctx_tok_ea_src_4",
+     "ctx_tok_ea_src_5",
+     "ctx_tok_ea_src_6",
+     "ctx_tok_ea_src_7",
+     "ctx_tok_ea_src_8",
+     "ctx_tok_ea_src_9",
+     "ctx_tok_ea_src_10",
+     "ctx_tok_ea_src_11",
+     "ctx_tok_ea_src_12",
+     "ctx_tok_ea_dst_0",
+     "ctx_tok_ea_dst_1",
+     "ctx_tok_ea_dst_2",
+     "ctx_tok_ea_dst_3",
+     "ctx_tok_ea_dst_4",
+     "ctx_tok_ea_dst_5",
+     "ctx_tok_ea_dst_6",
+     "ctx_tok_ea_dst_7",
+     "ctx_tok_ea_dst_8",
+     "ctx_tok_ea_dst_9",
+     "ctx_tok_ea_dst_10",
+     "ctx_tok_ea_dst_11",
+     "ctx_tok_ea_dst_12",
+     "ctx_tok_width_0",
+     "ctx_tok_width_1",
+     "ctx_tok_width_2",
+     "ctx_tok_width_3",
+     "ctx_tok_flags_0",
+     "ctx_tok_flags_1",
+     "ctx_tok_flags_2",
+     "ctx_tok_flags_3"
+    ],
+    "per_scale": "6 byte statistics + 8 byte-bucket fractions + 57 token-class fractions (from the same 128-B cell / 1024-B context representation)",
+    "scales": [
+     "cell",
+     "mid",
+     "ctx"
+    ]
+   },
+   "role": "richer-feature boosted-tree control"
+  },
+  "M2": {
+   "architecture": {
+    "blocks": [
+     {
+      "act": "ReLU",
+      "channels": 48,
+      "dilation": 1,
+      "kernel": 5,
+      "name": "stem",
+      "norm": "BatchNorm1d",
+      "op": "Conv1d valid"
+     },
+     {
+      "act": "ReLU",
+      "channels": 48,
+      "dilation": 2,
+      "kernel": 5,
+      "name": "b2",
+      "norm": "BatchNorm1d",
+      "op": "Conv1d valid"
+     },
+     {
+      "kernel": 2,
+      "name": "pool",
+      "op": "MaxPool1d",
+      "stride": 2
+     },
+     {
+      "act": "ReLU",
+      "channels": 64,
+      "dilation": 2,
+      "kernel": 5,
+      "name": "b3",
+      "norm": "BatchNorm1d",
+      "op": "Conv1d valid"
+     },
+     {
+      "act": "ReLU",
+      "channels": 64,
+      "dilation": 4,
+      "kernel": 5,
+      "name": "b4",
+      "norm": "BatchNorm1d",
+      "op": "Conv1d valid"
+     }
+    ],
+    "byte_embedding": {
+     "hi": [
+      256,
+      8
+     ],
+     "lo": [
+      256,
+      8
+     ]
+    },
+    "equivalence": "a valid-convolution trunk makes every cell's logit a function of exactly its 512-word context; whole-ROM/segment evaluation is therefore identical to per-cell evaluation (checked by test)",
+    "head": "concat(mean over cell positions, max over cell positions, mean over all 226 context positions, max over all 226) = 256 -> Linear(256,64) -> ReLU -> Linear(64,1) -> logit; probability = sigmoid(logit)",
+    "input": "word-resolution sequence of 512 positions (1024-byte context); per position concat(embed(hi byte), embed(lo byte)[, token embeddings])",
+    "token_embedding_dims": {
+     "control": 3,
+     "ea_dst": 3,
+     "ea_src": 3,
+     "family": 3,
+     "flags": 2,
+     "length": 2,
+     "status": 2,
+     "width": 2
+    },
+    "valid_geometry": "context 512 words -> stem 508 -> b2 500 -> pool 250 -> b3 242 -> b4 226 final positions; the cell occupies final positions [97, 129) (32 positions = 64 words)"
+   },
+   "role": "raw-byte CNN",
+   "token_channels": false,
+   "trainable_parameters": 72481
+  },
+  "M3": {
+   "architecture": {
+    "blocks": [
+     {
+      "act": "ReLU",
+      "channels": 48,
+      "dilation": 1,
+      "kernel": 5,
+      "name": "stem",
+      "norm": "BatchNorm1d",
+      "op": "Conv1d valid"
+     },
+     {
+      "act": "ReLU",
+      "channels": 48,
+      "dilation": 2,
+      "kernel": 5,
+      "name": "b2",
+      "norm": "BatchNorm1d",
+      "op": "Conv1d valid"
+     },
+     {
+      "kernel": 2,
+      "name": "pool",
+      "op": "MaxPool1d",
+      "stride": 2
+     },
+     {
+      "act": "ReLU",
+      "channels": 64,
+      "dilation": 2,
+      "kernel": 5,
+      "name": "b3",
+      "norm": "BatchNorm1d",
+      "op": "Conv1d valid"
+     },
+     {
+      "act": "ReLU",
+      "channels": 64,
+      "dilation": 4,
+      "kernel": 5,
+      "name": "b4",
+      "norm": "BatchNorm1d",
+      "op": "Conv1d valid"
+     }
+    ],
+    "byte_embedding": {
+     "hi": [
+      256,
+      8
+     ],
+     "lo": [
+      256,
+      8
+     ]
+    },
+    "equivalence": "a valid-convolution trunk makes every cell's logit a function of exactly its 512-word context; whole-ROM/segment evaluation is therefore identical to per-cell evaluation (checked by test)",
+    "head": "concat(mean over cell positions, max over cell positions, mean over all 226 context positions, max over all 226) = 256 -> Linear(256,64) -> ReLU -> Linear(64,1) -> logit; probability = sigmoid(logit)",
+    "input": "word-resolution sequence of 512 positions (1024-byte context); per position concat(embed(hi byte), embed(lo byte)[, token embeddings])",
+    "token_embedding_dims": {
+     "control": 3,
+     "ea_dst": 3,
+     "ea_src": 3,
+     "family": 3,
+     "flags": 2,
+     "length": 2,
+     "status": 2,
+     "width": 2
+    },
+    "valid_geometry": "context 512 words -> stem 508 -> b2 500 -> pool 250 -> b3 242 -> b4 226 final positions; the cell occupies final positions [97, 129) (32 positions = 64 words)"
+   },
+   "role": "raw-byte + MC68000 token CNN (primary)",
+   "token_channels": true,
+   "trainable_parameters": 77441
+  },
+  "M4": {
+   "architecture": {
+    "blocks": [
+     {
+      "act": "ReLU",
+      "channels": 48,
+      "dilation": 1,
+      "kernel": 5,
+      "name": "stem",
+      "norm": "BatchNorm1d",
+      "op": "Conv1d valid"
+     },
+     {
+      "act": "ReLU",
+      "channels": 48,
+      "dilation": 2,
+      "kernel": 5,
+      "name": "b2",
+      "norm": "BatchNorm1d",
+      "op": "Conv1d valid"
+     },
+     {
+      "kernel": 2,
+      "name": "pool",
+      "op": "MaxPool1d",
+      "stride": 2
+     },
+     {
+      "act": "ReLU",
+      "channels": 64,
+      "dilation": 2,
+      "kernel": 5,
+      "name": "b3",
+      "norm": "BatchNorm1d",
+      "op": "Conv1d valid"
+     },
+     {
+      "act": "ReLU",
+      "channels": 64,
+      "dilation": 4,
+      "kernel": 5,
+      "name": "b4",
+      "norm": "BatchNorm1d",
+      "op": "Conv1d valid"
+     }
+    ],
+    "byte_embedding": {
+     "hi": [
+      256,
+      8
+     ],
+     "lo": [
+      256,
+      8
+     ]
+    },
+    "equivalence": "a valid-convolution trunk makes every cell's logit a function of exactly its 512-word context; whole-ROM/segment evaluation is therefore identical to per-cell evaluation (checked by test)",
+    "head": "concat(mean over cell positions, max over cell positions, mean over all 226 context positions, max over all 226) = 256 -> Linear(256,64) -> ReLU -> Linear(64,1) -> logit; probability = sigmoid(logit)",
+    "input": "word-resolution sequence of 512 positions (1024-byte context); per position concat(embed(hi byte), embed(lo byte)[, token embeddings])",
+    "token_embedding_dims": {
+     "control": 3,
+     "ea_dst": 3,
+     "ea_src": 3,
+     "family": 3,
+     "flags": 2,
+     "length": 2,
+     "status": 2,
+     "width": 2
+    },
+    "valid_geometry": "context 512 words -> stem 508 -> b2 500 -> pool 250 -> b3 242 -> b4 226 final positions; the cell occupies final positions [97, 129) (32 positions = 64 words)"
+   },
+   "hard_positive": {
+    "applies_to": "M4 only",
+    "loss_multiplier": 4.0,
+    "mining_epochs": [
+     10,
+     20
+    ],
+    "quantile": 0.1,
+    "rule": "at the end of epochs 10 and 20, score the TRAINING titles only (eval mode); training positive cells whose score is below the 10th percentile of the pooled training-positive scores get loss multiplier 4.0 (weights are reset to 1 and re-mined at each mining epoch); cell identities are runtime-only"
+   },
+   "role": "M3 + training-title hard-positive emphasis",
+   "token_channels": true,
+   "trainable_parameters": 77441
+  }
+ },
+ "recipe": {
+  "betas": [
+   0.9,
+   0.999
+  ],
+  "dropout": 0.0,
+  "epoch_definition": "per training title a random cell offset in [0, 32) (seeded) partitions the title into 32-cell segments; the segment list of all training titles is shuffled and consumed in batches of 8",
+  "epochs": 30,
+  "grad_clip_norm": 5.0,
+  "hard_positive": {
+   "applies_to": "M4 only",
+   "loss_multiplier": 4.0,
+   "mining_epochs": [
+    10,
+    20
+   ],
+   "quantile": 0.1,
+   "rule": "at the end of epochs 10 and 20, score the TRAINING titles only (eval mode); training positive cells whose score is below the 10th percentile of the pooled training-positive scores get loss multiplier 4.0 (weights are reset to 1 and re-mined at each mining epoch); cell identities are runtime-only"
+  },
+  "learning_rate": 0.002,
+  "loss": "BCEWithLogits, pos_weight = (#negative cells)/(#positive cells) over the TRAINING titles, per-cell weight",
+  "lr_schedule": "cosine annealing to 0 over all steps (per-step)",
+  "optimizer": "AdamW",
+  "seed": 49,
+  "segment_cells": 32,
+  "segments_per_batch": 8,
+  "torch_threads": 4,
+  "weight_decay": 0.0001
+ },
+ "representation": {
+  "byte_channels": [
+   "byte_hi",
+   "byte_lo"
+  ],
+  "cell_bytes": 128,
+  "context_bytes": 1024,
+  "edge": "word-block symmetric reflection; no positional input",
+  "label": "cell positive iff it contains >= 1 source-backed MC68000 instruction start",
+  "sha256": "cf43e758da215283c08b3f8c1271c6119fd83b44eee755974559a6cb5af40c67",
+  "token_cardinality": {
+   "control": 8,
+   "ea_dst": 13,
+   "ea_src": 13,
+   "family": 8,
+   "flags": 4,
+   "length": 6,
+   "status": 3,
+   "width": 4
+  },
+  "token_channels": [
+   "tok_status",
+   "tok_length",
+   "tok_family",
+   "tok_control",
+   "tok_ea_src",
+   "tok_ea_dst",
+   "tok_width",
+   "tok_flags"
+  ],
+  "token_definition": {
+   "control": "0 none, 1 conditional (Bcc/DBcc), 2 direct jump, 3 direct call, 4 dynamic jump, 5 dynamic call, 6 return, 7 always-exception or trap",
+   "ea_dst": "M68kEaMode ordinal of the destination operand (0 unused .. 12 pc_index8)",
+   "ea_src": "M68kEaMode ordinal of the source operand (0 unused .. 12 pc_index8)",
+   "family": "1 move, 2 arithmetic/compare, 3 logic/bit, 4 shift/rotate, 5 control-flow, 6 exception-raising, 7 other; 0 when status = 0",
+   "flags": "bit0 privileged instruction, bit1 PC-relative displacement control form",
+   "length": "instruction length in words 1..4, 5 = five or more; 0 when status = 0",
+   "never_emitted": "decoded target address, ROM position, ordinal, title, symbol, source label, runtime frequency",
+   "status": "0 rejected by the decoder, 1 architectural exception form (illegal / line A / line F), 2 ordinary instruction",
+   "width": "operand width when an operand EA exists: 1 byte, 2 word, 3 long; 0 otherwise"
+  },
+  "token_fields": [
+   "status",
+   "length",
+   "family",
+   "control",
+   "ea_src",
+   "ea_dst",
+   "width",
+   "flags"
+  ],
+  "token_schema": "segarecomp.m68k_decode_tokens.v1",
+  "token_schema_sha256": "9a1f4f4fc03d26c63209128fc59fec1584b266bd1f61dbe8236f1105a1d61d75",
+  "version": "seg049-gen2-repr-v1"
+ },
+ "schema": "segarecomp.ml_region_gen2_plan.v1",
+ "scope": "OFFLINE research; production Optimized AOT and SEG-047 v1 artifacts are unchanged",
+ "selection": {
+  "materiality": "candidates whose worst-title FRF is within 0.02 of the best form the tie set; a more complex candidate replaces a simpler one only if its mean (or worst) FRF is lower by >= 0.02; otherwise the simpler model wins",
+  "model_size": "complexity order, not artifact bytes",
+  "order": "viable -> lowest worst-title FRF -> lowest mean FRF -> smaller/simpler model",
+  "preferred": "FRF <= 0.45 on every title",
+  "strong_mean": "mean FRF <= 0.35",
+  "viable": "FRF <= 0.6 on every one of the five held-out titles"
+ },
+ "stage_separation": "C outside R is computed from the ML proposal first; K comes from the unchanged structural prune; C in R but outside K is POST_ML_PRUNING_BLOCKER and never an ML false negative",
+ "status": "FROZEN BEFORE ANY M1-M4 TITLE-HELD-OUT RESULT",
+ "v1_artifact_sha256": {
+  "tools/segarecomp_ml_region.frozen.json": "3ef087800bd90b1de312c901aa305f5aa4ca61e8fd013348bc0b4f5471f016e1",
+  "tools/segarecomp_ml_region.model.json": "5863742d3b84a934d7ab335695a3748426de53e43ddc9d42ca679a6fc9fab0a2",
+  "tools/segarecomp_ml_region.parity.json": "2165e2522378496d2cfa402a503622a6b0208236efb41fbdbffbcad869235ac9",
+  "tools/segarecomp_ml_region.py": "b4b801b8fe3b7ef6d3593ad454e2a4ac4123db8b760b62e084b84c34a14531e8",
+  "tools/segarecomp_ml_region_native_data.py": "df8eb816e3b79d8fcd42c9d87222de5603cce269b1251e3fb87ef495a0210cc6",
+  "tools/segarecomp_ml_region_native_parity.py": "61f2520b7322a5bebba6ef2807353d2411507618bb440721d0e17058d82da875"
+ }
+}

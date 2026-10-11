@@ -41,7 +41,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp m68k-frontend <image> <source-id> <entry> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
-                "  segarecomp genesis-general-startup <image>\n"
+                "  segarecomp genesis-general-startup <image>\n  segarecomp m68k-decode-token-report --rom <image> --output <path>\n"
                   "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
@@ -935,6 +935,16 @@ int run_cli(int argc, char **argv) {
         std::cout << segarecomp::emit_m68k_frontend_c(std::get<segarecomp::FrontendAnalysis>(analysis), emission_initial, 5U);
       }
       else std::cout << segarecomp::format_genesis_rom_startup_result(result) << '\n';
+      return 0;
+    }
+    if (command == "m68k-decode-token-report") {
+      // SEG-049 (ADR 0100): report-only generic CPU-owned decode tokens of every even ROM position (offline ML experiment input).
+      if (argc != 6 || std::string_view(argv[2]) != "--rom" || std::string_view(argv[4]) != "--output") { print_usage(std::cerr); return 2; }
+      const auto bytes = segarecomp::read_binary(argv[3]);
+      const auto report = segarecomp::genesis_decode_token_report(bytes);
+      std::ofstream sink{argv[5], std::ios::binary};
+      sink << report;
+      if (!sink) { std::cerr << "segarecomp: cannot write decode token report\n"; return 2; }
       return 0;
     }
     if (command == "probe-genesis-startup-decode") {

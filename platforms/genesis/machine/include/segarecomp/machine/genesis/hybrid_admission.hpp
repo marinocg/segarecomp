@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -170,5 +171,20 @@ inline constexpr std::string_view genesis_window_features_schema = "segarecomp.m
     const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries, std::uint32_t window_bytes);
 [[nodiscard]] std::optional<std::string> genesis_window_feature_report(
     const std::vector<FrontendAnalysis::ImmutableRomAotEntry> &entries, std::uint32_t window_bytes);
+
+// SEG-049 (ADR 0100): REPORT-ONLY generic per-word-position MC68000 decode tokens of the immutable ROM for the offline second-generation
+// ML region experiment. For EVERY even position of the image the CPU-owned decoder/IR/control-successor projection yields exactly eight
+// bounded generic classes. No decoded target address, ROM position, ordinal or title information is emitted. Fields (all 0 when the
+// position does not decode): status (0 rejected, 1 architectural exception form, 2 ordinary), length (instruction words 1..5, 5 = 5+),
+// family (1 move, 2 arith, 3 logic/bit, 4 shift, 5 control, 6 exception-raising, 7 other), control (1 conditional, 2 direct jump,
+// 3 direct call, 4 dynamic jump, 5 dynamic call, 6 return, 7 always-exception/trap), ea_src and ea_dst (M68kEaMode ordinal), width
+// (1 byte, 2 word, 3 long; 0 without an operand EA), flags (bit0 privileged, bit1 PC-relative displacement control form). Binary format:
+//
+//   segarecomp.m68k_decode_tokens.v1 positions <N> fields status length family control ea_src ea_dst width flags\n
+//   <N * 8 raw bytes>
+//   end\n
+inline constexpr std::string_view genesis_decode_tokens_schema = "segarecomp.m68k_decode_tokens.v1";
+inline constexpr std::size_t genesis_decode_token_fields = 8U;
+[[nodiscard]] std::string genesis_decode_token_report(std::span<const std::uint8_t> rom);
 
 }  // namespace segarecomp

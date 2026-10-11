@@ -1126,6 +1126,12 @@ target_link_libraries(genesis_window_features_test PRIVATE segarecomp::machine_g
 segarecomp_enable_warnings(genesis_window_features_test)
 add_test(NAME genesis_window_features_test COMMAND genesis_window_features_test)
 set_property(TEST genesis_window_features_test APPEND PROPERTY LABELS full fast)
+# SEG-049 (ADR 0100): generic CPU-owned decode-token export for the offline second-generation ML region experiment (report-only).
+add_executable(genesis_decode_tokens_test genesis_decode_tokens_test.cpp)
+target_link_libraries(genesis_decode_tokens_test PRIVATE segarecomp::machine_genesis)
+segarecomp_enable_warnings(genesis_decode_tokens_test)
+add_test(NAME genesis_decode_tokens_test COMMAND genesis_decode_tokens_test)
+set_property(TEST genesis_decode_tokens_test APPEND PROPERTY LABELS full fast)
 add_executable(genesis_ml_features_test genesis_ml_features_test.cpp)
 target_link_libraries(genesis_ml_features_test PRIVATE segarecomp::machine_genesis)
 segarecomp_enable_warnings(genesis_ml_features_test)
