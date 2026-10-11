@@ -52,3 +52,11 @@ Every successful build writes `status.json` with an always-present `aot_policy` 
 ```
 `identity` is a pure function of the inputs: Compatibility, v1 and gen2 builds of the same image never share it, and a fallback build never aliases a successful
 Optimized build. The Compatibility and v1 `identity` values are frozen at their SEG-047 text. No address, byte or per-unit datum is reported.
+
+## Alias and RAM-thunk builds (ADR 0111)
+
+Games that copy cartridge code into work RAM add ADR 0049 alias identities (and possibly observed RAM `JMP` thunks) during the build-time preparation. Under
+Optimized, a copy-alias identity is admitted when the immutable cartridge source it is byte-identical to is inside the proposed executable region (no region
+is widened; every alias identity remains a mandatory root of the unchanged validator). A build that also needs RAM thunks still falls back to the broad program
+(`prune_rejected`). Compatibility, the default policy and the experimental status of `--aot-model gen2` are unchanged. ML selection inside a materialized image
+is not supported (ADR 0113: the validator admits no proper subset of an alias image).
