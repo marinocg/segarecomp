@@ -499,4 +499,66 @@ std::optional<std::string> genesis_window_feature_report(const std::vector<Front
   return out;
 }
 
+std::string genesis_decode_token_report(std::span<const std::uint8_t> rom) {
+  const std::size_t positions = rom.size() / 2U;
+  std::string out = std::string(genesis_decode_tokens_schema) + " positions " + std::to_string(positions) +
+                    " fields status length family control ea_src ea_dst width flags\n";
+  out.reserve(out.size() + positions * genesis_decode_token_fields + 4U);
+  for (std::size_t position = 0; position < positions; ++position) {
+    std::uint8_t token[genesis_decode_token_fields] = {};
+    const std::size_t offset = position * 2U;
+    const DecodeSource source{CpuVariant::mc68000, {TargetAddressSpace::m68k_program, static_cast<std::uint32_t>(offset)},
+                              MoveqImageOffset{offset}};
+    const auto result = decode_m68k_instruction(rom, source, M68kDecodeProfile::general_startup);
+    if (const auto *decoded = std::get_if<M68kDecodedInstruction>(&result)) {
+      const auto op = lift_m68k_instruction(*decoded);
+      const std::size_t words = std::max<std::size_t>(1U, std::min<std::size_t>(5U, decoded->provenance.length.value / 2U));
+      const bool exception_form = op.kind == M68kIrKind::instruction_exception;
+      const bool raising = exception_form || op.kind == M68kIrKind::trap_exception || op.kind == M68kIrKind::trap_on_overflow ||
+                           op.kind == M68kIrKind::check_bounds;
+      const std::size_t family = window_ir_family(op.kind);
+      token[0] = exception_form ? 1U : 2U;
+      token[1] = static_cast<std::uint8_t>(words);
+      token[2] = static_cast<std::uint8_t>(raising ? 6U : family == 5U ? 7U : 1U + family);
+      const auto control = m68k_control_successors(op);
+      std::uint8_t cls = 0U;
+      bool conditional = false, direct_jump = false, direct_call = false;
+      for (const auto &successor : control.successors) {
+        conditional = conditional || successor.kind == M68kControlSuccessorKind::conditional_target;
+        direct_jump = direct_jump || successor.kind == M68kControlSuccessorKind::branch_target;
+        direct_call = direct_call || successor.kind == M68kControlSuccessorKind::call_target;
+      }
+      using Family = M68kDynamicControlFamily;
+      const auto dynamic = control.dynamic;
+      const bool returns = dynamic == Family::return_from_subroutine || dynamic == Family::return_from_exception ||
+                           dynamic == Family::return_restore_condition_codes;
+      const bool dyn_call = dynamic == Family::call_address_indirect || dynamic == Family::call_address_disp16 ||
+                            dynamic == Family::call_address_index || dynamic == Family::call_pc_index;
+      const bool dyn_jump = dynamic == Family::jump_address_indirect || dynamic == Family::jump_address_disp16 ||
+                            dynamic == Family::jump_address_index || dynamic == Family::jump_pc_index;
+      if (control.always_raises_exception || control.stacked == M68kStackedContinuationKind::exception_continuation) cls = 7U;
+      else if (returns) cls = 6U;
+      else if (dyn_call) cls = 5U;
+      else if (dyn_jump) cls = 4U;
+      else if (direct_call) cls = 3U;
+      else if (direct_jump) cls = 2U;
+      else if (conditional) cls = 1U;
+      token[3] = cls;
+      token[4] = static_cast<std::uint8_t>(op.source_ea.mode);
+      token[5] = static_cast<std::uint8_t>(op.destination_ea.mode);
+      if (op.source_ea.mode != M68kEaMode::unused || op.destination_ea.mode != M68kEaMode::unused)
+        token[6] = op.size == M68kMemoryAccessWidth::byte ? 1U : op.size == M68kMemoryAccessWidth::word ? 2U : 3U;
+      const bool privileged = op.kind == M68kIrKind::return_from_exception || op.kind == M68kIrKind::write_user_stack_pointer ||
+                              op.kind == M68kIrKind::read_user_stack_pointer || op.kind == M68kIrKind::logical_immediate_to_sr ||
+                              op.kind == M68kIrKind::write_status_register || op.kind == M68kIrKind::stop_until_interrupt;
+      const bool relative = op.kind == M68kIrKind::branch_ne_short || op.kind == M68kIrKind::branch_always_short ||
+                            op.kind == M68kIrKind::general_branch || op.kind == M68kIrKind::bsr_call || op.kind == M68kIrKind::dbcc_loop;
+      token[7] = static_cast<std::uint8_t>((privileged ? 1U : 0U) | (relative ? 2U : 0U));
+    }
+    out.append(reinterpret_cast<const char *>(token), genesis_decode_token_fields);
+  }
+  out += "end\n";
+  return out;
+}
+
 }  // namespace segarecomp

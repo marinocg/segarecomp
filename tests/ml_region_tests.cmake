@@ -20,3 +20,8 @@ set_property(TEST report_only_analysis_absent_test APPEND PROPERTY LABELS full f
 add_test(NAME segarecomp_ml_region_v2_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_region_v2_test.py)
 set_property(TEST segarecomp_ml_region_v2_test APPEND PROPERTY LABELS full fast)
+# SEG-049 (ADR 0100): offline second-generation cross-title ML region experiment tooling (representation, FRF, nested calibration, leakage guards,
+# v1 immutability). Hermetic: synthetic data only; the numpy/torch/scikit-learn tests self-skip where the private research packages are absent.
+add_test(NAME segarecomp_ml_region_gen2_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_region_gen2_test.py)
+set_property(TEST segarecomp_ml_region_gen2_test APPEND PROPERTY LABELS full fast)
