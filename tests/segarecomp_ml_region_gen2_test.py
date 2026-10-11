@@ -442,6 +442,27 @@ class PrivateEnvironment(unittest.TestCase):
         for name in self.t.m1_feature_names():
             self.assertFalse(any(f in name for f in g.FORBIDDEN_FRAGMENTS), name)
 
+    def test_stdlib_reference_evaluator_reproduces_the_torch_model(self):
+        import torch
+        t, np = self.t, self.np
+        import segarecomp_ml_region_gen2_reference as ref
+        torch.manual_seed(3)
+        model = t.build_model(True)
+        for mod in model.modules():  # non-trivial eval-mode batch-norm statistics exercise the folding arithmetic
+            if isinstance(mod, torch.nn.BatchNorm1d):
+                mod.running_mean.normal_(0, 0.3)
+                mod.running_var.uniform_(0.5, 1.5)
+                mod.weight.data.uniform_(0.5, 1.5)
+                mod.bias.data.normal_(0, 0.2)
+        model.eval()
+        rng = np.random.RandomState(1)
+        hi, lo = rng.randint(0, 256, 512), rng.randint(0, 256, 512)
+        tok = np.stack([rng.randint(0, g.TOKEN_CARDINALITY[f], 512) for f in g.TOKEN_FIELDS], axis=1)
+        with torch.no_grad():
+            want = float(model(torch.tensor(hi)[None].long(), torch.tensor(lo)[None].long(), torch.tensor(tok)[None].long())[0, 0])
+        got = ref.cnn_logit(t.export_weights(model), hi.tolist(), lo.tolist(), tok.tolist())
+        self.assertAlmostEqual(got, want, places=5)
+
     def test_training_set_must_not_contain_the_held_out_title(self):
         with self.assertRaises(SystemExit):
             g.assert_split(["s1", "flicky"], "s1")

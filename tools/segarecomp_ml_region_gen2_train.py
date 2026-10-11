@@ -91,6 +91,7 @@ class Title:
         if self.sha != meta["rom_sha256"]:
             raise SystemExit(f"{tid}: ROM identity mismatch")
         self.size = len(self.rom)
+        self.rom_path = str(GAMES / ROM_FILES[tid])
         self.n_words = self.size // 2
         self.n_cells = g.cell_count(self.size)
         tok_path = ROOT / "tok" / f"{tid}.tok"
@@ -671,14 +672,16 @@ def evaluate_fold(model: str, held: str, titles: dict, runner, with_k: bool = Tr
     pos_scores = scores[labels == 1]
     record = {"held_out": held, "inner_min_positive": m_h, "outer_min_positive": float(pos_scores.min()), "frf": g.frf(scores, labels.tolist()),
               "positive_score_quantiles": {q: float(np.quantile(pos_scores, q)) for q in (0.0, 0.001, 0.01, 0.05, 0.5)}, "policies": {}}
-    for name, factor in g.POLICY_FACTORS.items():
-        thr = g.threshold_for(m_h, factor)
+    # ORACLE diagnostic (NOT a policy, never selected from): the exact full-recall threshold of this fold, which uses held-out labels. It shows
+    # what the structural stage does at the tightest possible R and what the ideal R/ROM would be, to scope the follow-up calibration task.
+    for name, factor in list(g.POLICY_FACTORS.items()) + [("ORACLE_DIAGNOSTIC", None)]:
+        thr = float(pos_scores.min()) if factor is None else g.threshold_for(m_h, factor)
         sel = g.selected_cells(scores.tolist(), thr)
         region = sel | t.seeds
         out_ml = g.c_outside_cells(t.truth, sel)
         out_r = g.c_outside_cells(t.truth, region)
         near = int(((scores >= thr / 2.0) & (scores < thr * 2.0)).sum())
-        rec = {"factor": factor, "threshold": thr, "ml_selected_cells": len(sel), "seed_cells": len(t.seeds), "r_cells": len(region),
+        rec = {"factor": factor, "oracle_diagnostic_not_a_policy": factor is None, "threshold": thr, "ml_selected_cells": len(sel), "seed_cells": len(t.seeds), "r_cells": len(region),
                "r_bytes": g.region_bytes(region, t.size), "rom_bytes": t.size, "r_over_rom": g.region_bytes(region, t.size) / t.size,
                "ml_only_over_rom": g.region_bytes(sel, t.size) / t.size, "c_outside_r": len(out_r), "c_outside_ml_only": len(out_ml),
                "score_margin_factor": float(pos_scores.min()) / thr, "cells_within_2x_of_threshold": near}
@@ -763,8 +766,8 @@ def cmd_table(args) -> int:
 def cmd_assemble(args) -> int:
     """Merge the private per-stage aggregate result files into the committed (aggregate-only) results record."""
     parts = {"characterization": "characterization.json", "loto": "table.json", "calibration_and_evaluation": "evaluate.M3.json",
-             "native_estimate": "native_estimate.json", "freeze": "freeze.json", "economics": "economics.json", "runtime": "runtime.json",
-             "determinism": "determinism.json"}
+             "native_estimate": "native_estimate.json", "determinism": "determinism.json", "training_cost": "training_cost.json",
+             "tail_diagnostic": "tail_diagnostic.json", "inner_frf_diagnostic": "inner_frf_diagnostic.json", "review": "review.json"}
     out = {"schema": "segarecomp.ml_region_gen2_results.v1", "plan_sha256": plan_digest(json.loads((TOOLS / PLAN_NAME).read_text())),
            "data_boundary": "aggregates only: counts, fractions, digests, identities. No ROM bytes, address, per-cell label or truth array."}
     for key, name in parts.items():
@@ -776,6 +779,61 @@ def cmd_assemble(args) -> int:
     return 0
 
 
+def native_estimate(use_tokens: bool = True) -> dict:
+    """Arithmetic estimate for a future native build-time evaluator of the selected CNN (nothing is productionized here)."""
+    cin = 16 + (sum(CNN_ARCH["token_embedding_dims"].values()) if use_tokens else 0)
+    stem, b2, b3, b4 = cin * 48 * 5, 48 * 48 * 5, 48 * 64 * 5, 64 * 64 * 5
+    head = 256 * 64 + 64
+    per_word_shared = stem + b2 + (b3 + b4) / 2.0  # fully-convolutional trunk: every word position computed once
+    per_cell_shared = per_word_shared * g.CELL_WORDS + head
+    per_cell_naive = (stem + b2) * g.CONTEXT_WORDS + (b3 + b4) * (g.CONTEXT_WORDS // 2) + head  # every cell recomputes its own 512-word context
+    params = parameter_count(build_model(use_tokens))
+    # eval-mode BatchNorm folds into the preceding convolution, leaving only conv weights/biases, embeddings and the head
+    bn = 2 * (48 + 48 + 64 + 64)
+    out = {"trainable_parameters": params, "float32_weight_bytes_unfolded": params * 4, "float32_weight_bytes_bn_folded": (params - bn) * 4,
+           "macs_per_128B_cell_shared_trunk": per_cell_shared, "macs_per_128B_cell_naive_recompute": per_cell_naive,
+           "activation_peak_bytes_64_cell_chunk": 2 * 48 * (64 * g.CELL_WORDS + 448) * 4,
+           "note": "shared = whole-ROM fully-convolutional evaluation (identical results, checked by test); naive = per-cell recompute"}
+    for mib in (1, 2, 4):
+        cells = mib * 1024 * 1024 // g.CELL_BYTES
+        out[f"rom_{mib}MiB"] = {"cells": cells, "macs_shared": per_cell_shared * cells, "macs_naive": per_cell_naive * cells,
+                                "seconds_at_1_GMAC_per_s_shared": per_cell_shared * cells / 1e9,
+                                "seconds_at_4_GMAC_per_s_shared": per_cell_shared * cells / 4e9}
+    return out
+
+
+def cmd_native_estimate(args) -> int:
+    import torch
+    torch.set_num_threads(1)
+    torch.manual_seed(1)
+    title = Title("sk", with_truth=False)
+    model = build_model(True)
+    started = time.time()
+    score_logits(model, title, True)
+    est = native_estimate(True)
+    est["m2_trainable_parameters"] = parameter_count(build_model(False))
+    est["reference_pytorch_cpu_1_thread_seconds_2MiB_rom"] = time.time() - started
+    (ROOT / "results" / "native_estimate.json").write_text(json.dumps(est, indent=1, sort_keys=True))
+    print(json.dumps({k: est[k] for k in ("trainable_parameters", "float32_weight_bytes_bn_folded", "macs_per_128B_cell_shared_trunk", "reference_pytorch_cpu_1_thread_seconds_2MiB_rom")}))
+    return 0
+
+
+# ------------------------------------------------------------------------------------------------------------------------ export
+def _round9(x):
+    return float("%.9g" % x)
+
+
+def _nested(v):
+    return _round9(v) if isinstance(v, float) else [_nested(x) for x in v]
+
+
+def export_weights(model) -> dict:
+    """State dict as nested lists (9 significant digits round-trip every float32); input of the stdlib reference evaluator."""
+    return {name: _nested(tensor.detach().double().numpy().tolist()) for name, tensor in model.state_dict().items()
+            if not name.endswith("num_batches_tracked")}
+
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -785,6 +843,7 @@ def main() -> int:
     loto.add_argument("--held-out", required=True, choices=g.TITLE_ORDER)
     loto.set_defaults(func=cmd_loto)
     sub.add_parser("table").set_defaults(func=cmd_table)
+    sub.add_parser("native-estimate").set_defaults(func=cmd_native_estimate)
     sub.add_parser("assemble").set_defaults(func=cmd_assemble)
     inner = sub.add_parser("inner")
     inner.add_argument("--model", required=True, choices=MODELS)
