@@ -41,3 +41,7 @@ Split by lineage; the five M3 titles are known-corpus; copies of one title are o
 ## 5. Classification and consequences
 
 `CORPUS_BLOCKER` (primary; precedence). Independent structural facts recorded for the decision: B35 cannot reach full recall on a code-dense copy (39.3 % > 35 %), and even a perfect recall could not pass K1 because of the mandatory-root rule. **T005 is closed NOT_JUSTIFIED: no production ML code for materialized images is added.** Acquisition follow-up (exact inputs): see ADR 0110 section 11.
+
+## 6. T005 closure (checkpoint C5): NOT_JUSTIFIED
+
+SEG-050-T005 is conditional on `MATERIALIZED_ML_GATES_PASSED` (T004). T004 classified `CORPUS_BLOCKER`, so no native materialized-image ML integration was started: no production ML code, no model/schema/weight change, no new registry or runtime path; the ADR 0102/0103 model lifecycle, the v1 and gen2 artifact identities and the Compatibility default are untouched (no file under `platforms/genesis/machine/src/ml_*` or the embedded weight tables changed on this branch). Savings from T002 are not counted for any ML claim. The record is closed `done` with this NOT_JUSTIFIED statement, not cancelled.
