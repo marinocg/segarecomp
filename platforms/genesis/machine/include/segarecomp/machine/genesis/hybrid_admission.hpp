@@ -186,5 +186,8 @@ inline constexpr std::string_view genesis_window_features_schema = "segarecomp.m
 inline constexpr std::string_view genesis_decode_tokens_schema = "segarecomp.m68k_decode_tokens.v1";
 inline constexpr std::size_t genesis_decode_token_fields = 8U;
 [[nodiscard]] std::string genesis_decode_token_report(std::span<const std::uint8_t> rom);
+// SEG-049-T003 (ADR 0102): the same tokens without the report framing: exactly `rom.size() / 2 * genesis_decode_token_fields` bytes, position-major.
+// This is the single CPU-owned definition consumed by both the report and the native gen2 scorer (no second token implementation).
+[[nodiscard]] std::vector<std::uint8_t> genesis_decode_tokens(std::span<const std::uint8_t> rom);
 
 }  // namespace segarecomp

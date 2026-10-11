@@ -29,3 +29,12 @@ set_property(TEST segarecomp_ml_region_gen2_test APPEND PROPERTY LABELS full fas
 add_test(NAME segarecomp_ml_region_gen2_rank_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_region_gen2_rank_test.py)
 set_property(TEST segarecomp_ml_region_gen2_rank_test APPEND PROPERTY LABELS full fast)
+# SEG-049-T003 (ADR 0102): native gen2 M3 + B35 route (generator drift, identity pins, CLI parity seams, bitwise goldens). Hermetic, synthetic data only.
+add_test(NAME segarecomp_ml_region_gen2_native_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_region_gen2_native_test.py $<TARGET_FILE:segarecomp>)
+set_property(TEST segarecomp_ml_region_gen2_native_test APPEND PROPERTY LABELS full fast)
+# SEG-049-T003 (ADR 0102): the five-ROM native-vs-research selected-cell / region / K-stage gate on whichever source-backed images are held locally (skip: 77).
+add_test(NAME genesis_ml_gen2_native_parity_local_test
+  COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/segarecomp_ml_region_gen2_native_parity.py local
+    --binary $<TARGET_FILE:segarecomp> --games ${PROJECT_SOURCE_DIR}/games)
+set_tests_properties(genesis_ml_gen2_native_parity_local_test PROPERTIES SKIP_RETURN_CODE 77 LABELS full)

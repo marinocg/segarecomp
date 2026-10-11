@@ -499,11 +499,10 @@ std::optional<std::string> genesis_window_feature_report(const std::vector<Front
   return out;
 }
 
-std::string genesis_decode_token_report(std::span<const std::uint8_t> rom) {
+std::vector<std::uint8_t> genesis_decode_tokens(std::span<const std::uint8_t> rom) {
   const std::size_t positions = rom.size() / 2U;
-  std::string out = std::string(genesis_decode_tokens_schema) + " positions " + std::to_string(positions) +
-                    " fields status length family control ea_src ea_dst width flags\n";
-  out.reserve(out.size() + positions * genesis_decode_token_fields + 4U);
+  std::vector<std::uint8_t> out;
+  out.reserve(positions * genesis_decode_token_fields);
   for (std::size_t position = 0; position < positions; ++position) {
     std::uint8_t token[genesis_decode_token_fields] = {};
     const std::size_t offset = position * 2U;
@@ -555,8 +554,17 @@ std::string genesis_decode_token_report(std::span<const std::uint8_t> rom) {
                             op.kind == M68kIrKind::general_branch || op.kind == M68kIrKind::bsr_call || op.kind == M68kIrKind::dbcc_loop;
       token[7] = static_cast<std::uint8_t>((privileged ? 1U : 0U) | (relative ? 2U : 0U));
     }
-    out.append(reinterpret_cast<const char *>(token), genesis_decode_token_fields);
+    out.insert(out.end(), token, token + genesis_decode_token_fields);
   }
+  return out;
+}
+
+std::string genesis_decode_token_report(std::span<const std::uint8_t> rom) {
+  const std::size_t positions = rom.size() / 2U;
+  std::string out = std::string(genesis_decode_tokens_schema) + " positions " + std::to_string(positions) +
+                    " fields status length family control ea_src ea_dst width flags\n";
+  const auto tokens = genesis_decode_tokens(rom);
+  out.append(reinterpret_cast<const char *>(tokens.data()), tokens.size());
   out += "end\n";
   return out;
 }

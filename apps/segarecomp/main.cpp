@@ -6,6 +6,7 @@
 #include "segarecomp/machine/genesis/frontend.hpp"
 #include "segarecomp/machine/genesis/hybrid_admission.hpp"
 #include "segarecomp/machine/genesis/ml_region_producer.hpp"
+#include "segarecomp/machine/genesis/ml_region_gen2_producer.hpp"
 #include "segarecomp/sha256.hpp"
 #include "segarecomp/machine/genesis/reachability_challenger.hpp"
 #include "build_command.hpp"
@@ -18,6 +19,7 @@
 #endif
 
 #include <algorithm>
+#include <cstring>
 #include "segarecomp/codegen/c11/translation_units.hpp"
 #include <array>
 #include <cstdio>
@@ -41,8 +43,8 @@ void print_usage(std::ostream &output) {
                "  segarecomp m68k-frontend <image> <source-id> <entry> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
-                "  segarecomp genesis-general-startup <image>\n  segarecomp m68k-decode-token-report --rom <image> --output <path>\n"
-                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
+                "  segarecomp genesis-general-startup <image>\n  segarecomp m68k-decode-token-report --rom <image> --output <path>\n  segarecomp ml-gen2-cell-logits --rom <image> --output <path>\n  segarecomp ml-gen2-probe-report --synthetic\n"
+                  "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--ml-gen2-region-proposal-output <path> [--ml-gen2-logits-output <path>]] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
                "  segarecomp classify-ram-jump-thunk <execution-hex8> <hex-bytes>\n"
@@ -133,6 +135,9 @@ int run_cli(int argc, char **argv) {
       std::optional<std::string_view> region_proposal_path;
       // SEG-047 (ADR 0096): report-only native ML region proposal (frozen v1 model) written as `segarecomp.m68k_executable_regions.v1`.
       std::optional<std::string_view> ml_region_proposal_output;
+      // SEG-049-T003 (ADR 0102): report-only native gen2 (M3 + B35) region proposal and, optionally, the raw binary32 cell logits (little-endian).
+      std::optional<std::string_view> ml_gen2_region_proposal_output;
+      std::optional<std::string_view> ml_gen2_logits_output;
       std::optional<std::string_view> region_plan_output;
       // SEG-022-T002: stream the generated C to this file (fail-closed: written as `<path>.partial`
       // and atomically renamed only on complete success; removed on any failure).
@@ -205,6 +210,14 @@ int run_cli(int argc, char **argv) {
           if (ml_region_proposal_output || index + 1 >= argc) { print_usage(std::cerr); return 2; }
           ml_region_proposal_output = argv[index + 1];
           index += 2;
+        } else if (option == "--ml-gen2-region-proposal-output") {
+          if (ml_gen2_region_proposal_output || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          ml_gen2_region_proposal_output = argv[index + 1];
+          index += 2;
+        } else if (option == "--ml-gen2-logits-output") {
+          if (ml_gen2_logits_output || index + 1 >= argc) { print_usage(std::cerr); return 2; }
+          ml_gen2_logits_output = argv[index + 1];
+          index += 2;
         } else if (option == "--immutable-aot-region-proposal") {
           if (region_proposal_path || index + 1 >= argc) { print_usage(std::cerr); return 2; }
           region_proposal_path = argv[index + 1];
@@ -272,6 +285,7 @@ int run_cli(int argc, char **argv) {
           print_usage(std::cerr); return 2;
         }
       }
+      if (ml_gen2_logits_output && !ml_gen2_region_proposal_output) { print_usage(std::cerr); return 2; }
       if (immutable_rom_aot_ml_admission && (!immutable_rom_aot || immutable_rom_aot_admission)) {
         std::cerr << "segarecomp: --immutable-rom-aot-ml-admission requires --immutable-rom-aot and excludes --immutable-rom-aot-admission\n";
         return 2;
@@ -519,6 +533,47 @@ int run_cli(int argc, char **argv) {
                   << " region_bytes=" << proposal.stats.region_bytes << " min_logit_margin=" << proposal.stats.min_logit_margin
                   << " regions_sha256=" << digest_of(text) << " ml_only_regions_sha256="
                   << (proposal.ml_only ? digest_of(segarecomp::format_genesis_executable_regions(*proposal.ml_only)) : std::string("none")) << '\n';
+        return 0;
+      }
+      if (ml_gen2_region_proposal_output) {
+        std::vector<std::uint32_t> seeds;
+        const auto collect_seeds = [&seeds](const segarecomp::FrontendAnalysis &analysis) {
+          for (const auto &decoded : analysis.decoded)
+            seeds.push_back(static_cast<std::uint32_t>(decoded.provenance.source.address.value) & UINT32_C(0x00FFFFFF));
+        };
+        if (const auto *partial = std::get_if<segarecomp::FrontendPartialProgram>(&result)) collect_seeds(partial->accepted_prefix);
+        else if (const auto *accepted = std::get_if<segarecomp::FrontendAnalysis>(&result)) collect_seeds(*accepted);
+        else { std::cerr << "segarecomp: ml gen2 region proposal: no broad analysis result\n"; return 3; }
+        const auto proposal = segarecomp::propose_genesis_ml2_executable_regions(bytes, digest_value, seeds);
+        if (!proposal.proposal) { std::cerr << "segarecomp: ml gen2 region proposal failed: " << proposal.failure << '\n'; return 3; }
+        const auto text = segarecomp::format_genesis_executable_regions(*proposal.proposal);
+        std::ofstream sink{std::string(*ml_gen2_region_proposal_output), std::ios::binary};
+        sink << text;
+        if (!sink) { std::cerr << "segarecomp: cannot write ml gen2 region proposal\n"; return 2; }
+        const auto digest_of = [](const std::string &payload) {
+          return segarecomp::sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(payload.data()), payload.size()));
+        };
+        std::string selected_text;
+        for (const std::uint32_t cell : proposal.selected_cells) selected_text += std::to_string(cell) + "\n";
+        // The logits are recomputed only for the report (bit-identical to the proposal's: pure and deterministic).
+        const auto logits = segarecomp::genesis_ml2_cell_logits(bytes, segarecomp::genesis_decode_tokens(bytes));
+        std::string logit_bytes;
+        for (const float value : logits) {
+          std::uint32_t bits = 0U;
+          std::memcpy(&bits, &value, sizeof bits);
+          for (unsigned shift = 0U; shift < 32U; shift += 8U) logit_bytes.push_back(static_cast<char>((bits >> shift) & 0xFFU));
+        }
+        if (ml_gen2_logits_output) {
+          std::ofstream logit_sink{std::string(*ml_gen2_logits_output), std::ios::binary};
+          logit_sink << logit_bytes;
+          if (!logit_sink) { std::cerr << "segarecomp: cannot write ml gen2 logits\n"; return 2; }
+        }
+        std::cerr << "segarecomp: ml gen2 region proposal: cells=" << proposal.stats.cells << " ml_selected=" << proposal.stats.ml_selected
+                  << " seed_cells=" << proposal.stats.seed_cells << " final_selected=" << proposal.stats.final_selected
+                  << " region_bytes=" << proposal.stats.region_bytes << " boundary_tie_cells=" << proposal.stats.boundary_tie_cells
+                  << " boundary_gap=" << proposal.stats.boundary_gap << " selected_cells_sha256=" << digest_of(selected_text)
+                  << " logits_sha256=" << digest_of(logit_bytes) << " regions_sha256=" << digest_of(text)
+                  << " ml_only_regions_sha256=" << digest_of(segarecomp::format_genesis_executable_regions(*proposal.ml_only)) << '\n';
         return 0;
       }
       if (region_proposal_path.has_value() != region_plan_output.has_value() ||
@@ -935,6 +990,58 @@ int run_cli(int argc, char **argv) {
         std::cout << segarecomp::emit_m68k_frontend_c(std::get<segarecomp::FrontendAnalysis>(analysis), emission_initial, 5U);
       }
       else std::cout << segarecomp::format_genesis_rom_startup_result(result) << '\n';
+      return 0;
+    }
+    if (command == "ml-gen2-cell-logits") {
+      // SEG-049-T003 (ADR 0102): report-only raw binary32 (little-endian) logits of every 128-byte cell of an image and the B35 selection, with no
+      // analysis. Parity / hermetic-test seam; it cannot alter generation.
+      if (argc != 6 || std::string_view(argv[2]) != "--rom" || std::string_view(argv[4]) != "--output") { print_usage(std::cerr); return 2; }
+      const auto bytes = segarecomp::read_binary(argv[3]);
+      const auto logits = segarecomp::genesis_ml2_cell_logits(bytes, segarecomp::genesis_decode_tokens(bytes));
+      if (logits.empty()) { std::cerr << "segarecomp: ml gen2 cell logits failed: rom_size_or_token_range\n"; return 3; }
+      std::string logit_bytes;
+      for (const float value : logits) {
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &value, sizeof bits);
+        for (unsigned shift = 0U; shift < 32U; shift += 8U) logit_bytes.push_back(static_cast<char>((bits >> shift) & 0xFFU));
+      }
+      std::ofstream sink{argv[5], std::ios::binary};
+      sink << logit_bytes;
+      if (!sink) { std::cerr << "segarecomp: cannot write ml gen2 logits\n"; return 2; }
+      const auto selection = segarecomp::genesis_ml2_rank_select(logits, segarecomp::genesis_ml2_identity().policy_percent);
+      std::string selected_text;
+      for (const std::uint32_t cell : selection.cells) selected_text += std::to_string(cell) + "\n";
+      const auto digest_of = [](const std::string &payload) {
+        return segarecomp::sha256_hex(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t *>(payload.data()), payload.size()));
+      };
+      std::cerr << "segarecomp: ml gen2 cell logits: cells=" << logits.size() << " ml_selected=" << selection.cells.size()
+                << " boundary_tie_cells=" << selection.boundary_tie_cells << " selected_cells_sha256=" << digest_of(selected_text)
+                << " logits_sha256=" << digest_of(logit_bytes) << '\n';
+      return 0;
+    }
+    if (command == "ml-gen2-probe-report") {
+      // SEG-049-T003 (ADR 0102): report-only logits of the deterministic SYNTHETIC parity probes of tools/segarecomp_ml_region_gen2_rank.py
+      // (64-bit LCG seeded from the gen2 seed 49; no ROM data): one `%.9e` binary32 logit per probe plus its raw bits. Parity seam only.
+      if (argc != 3 || std::string_view(argv[2]) != "--synthetic") { print_usage(std::cerr); return 2; }
+      std::uint64_t state = 49ULL * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
+      const auto next = [&state](std::uint64_t bound) {
+        state = state * UINT64_C(6364136223846793005) + UINT64_C(1442695040888963407);
+        return (state >> 33U) % bound;
+      };
+      constexpr std::uint64_t cardinality[8] = {3, 6, 8, 8, 13, 13, 4, 4};
+      for (int probe = 0; probe < 3; ++probe) {
+        std::vector<std::uint8_t> hi(512U), lo(512U), tok(512U * 8U);
+        for (auto &v : hi) v = static_cast<std::uint8_t>(next(256));
+        for (auto &v : lo) v = static_cast<std::uint8_t>(next(256));
+        for (std::size_t w = 0; w < 512U; ++w)
+          for (std::size_t f = 0; f < 8U; ++f) tok[w * 8U + f] = static_cast<std::uint8_t>(next(cardinality[f]));
+        const float logit = segarecomp::genesis_ml2_context_logit(hi, lo, tok);
+        std::uint32_t bits = 0U;
+        std::memcpy(&bits, &logit, sizeof bits);
+        char line[96];
+        std::snprintf(line, sizeof line, "probe %d logit %.9e bits %08x\n", probe, static_cast<double>(logit), static_cast<unsigned>(bits));
+        std::cout << line;
+      }
       return 0;
     }
     if (command == "m68k-decode-token-report") {

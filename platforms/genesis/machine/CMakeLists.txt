@@ -5,6 +5,7 @@ add_library(segarecomp_machine_genesis
   src/frontend.cpp
   src/hybrid_admission.cpp
   src/ml_region_producer.cpp
+  src/ml_region_gen2_producer.cpp
   src/reachability_challenger.cpp
   src/startup.cpp
 )
@@ -18,6 +19,9 @@ target_link_libraries(segarecomp_machine_genesis PUBLIC segarecomp::media)
 target_link_libraries(segarecomp_machine_genesis PRIVATE segarecomp_zlib)
 if(NOT MSVC)
   set_source_files_properties(src/ml_region_producer.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-fno-fast-math")
+  # SEG-049-T003 (ADR 0102): the gen2 binary32 evaluator has the same contract (bit-identical logits on every IEEE-754 host), and is always optimized (-O2) so the
+  # Debug developer/CI builds can still evaluate synthetic fixtures quickly; optimization cannot change IEEE results without fast-math/contraction.
+  set_source_files_properties(src/ml_region_gen2_producer.cpp PROPERTIES COMPILE_OPTIONS "-O2;-ffp-contract=off;-fno-fast-math")
 endif()
 
 # SEG-028-T005 (ADR 0077): consumer-route ADR 0049 alias preparation (stop record, verbatim-copy proposal, bounded loop). Byte
