@@ -22,7 +22,7 @@ import subprocess
 import sys
 
 FORBIDDEN_LIB = re.compile(r"python|libtorch|torch_|libc10|(^|[/\\])c10\.dll|numpy|onnx|tensorflow|sklearn|scipy|libmkl|mkl_|openblas|libblas|liblapack|cudart|cublas|cudnn|(^|[/\\])libz[.\-]|zlib1|libz\.|(^|[/\\])z\.dll", re.I)
-FORBIDDEN_FILE = re.compile(r"(\.pyc?$|\.pyd$|\.npz?$|\.onnx$|\.pt$|\.pth$|\.safetensors$|\.model\.json$|^python[0-9.]*(\.exe)?$|(^|[/\\])site-packages|segarecomp_ml_region|libpython|torch|numpy|sklearn)", re.I)
+FORBIDDEN_FILE = re.compile(r"(\.pyc?$|\.pyd$|\.npz?$|\.onnx$|\.pt$|\.pth$|\.safetensors$|\.gguf$|\.tflite$|\.h5$|\.pkl$|\.joblib$|\.ckpt$|\.pb$|\.model\.json$|^python[0-9.]*(\.exe)?$|(^|[/\\])site-packages|segarecomp_ml_region|libpython|torch|numpy|sklearn)", re.I)
 MODEL_DIGESTS = {  # embedded in `segarecomp` (the frozen native models), see ADR 0096 / 0102
     "gen2 model": b"11258708285e4427a3e38e02732e8f93b4c5d497883101f0629223d2366a98e1",
     "v1 feature schema": b"d2e7c82913139c29450511326d6de76e91579ec654edde81afae16b13cd1f570",
@@ -67,8 +67,9 @@ def dependencies(path, root):
     pack_names = {p.name.lower() for p in root.rglob("*") if p.is_file()}
     if sys.platform.startswith("linux"):
         needed = re.findall(r"\(NEEDED\)\s+Shared library: \[([^\]]+)\]", subprocess.run(["readelf", "-d", str(path)], capture_output=True, text=True, check=True).stdout)
+        allowed = re.compile(r"^(libc|libm|libdl|libpthread|librt|libutil|libstdc\+\+|libgcc_s)\.so(\.[0-9]+)*$|^ld-linux[\w.\-]*\.so(\.[0-9]+)*$|^linux-vdso")
         for name in needed:
-            found.append((name, "package" if name.lower() in pack_names else "system"))
+            found.append((name, "package" if name.lower() in pack_names else "system" if allowed.match(name) else "unresolved"))
     elif sys.platform == "darwin":
         lines = subprocess.run(["otool", "-L", str(path)], capture_output=True, text=True, check=True).stdout.splitlines()[1:]
         for line in lines:
@@ -103,7 +104,7 @@ def main():
                 problems.append(f"{label}: forbidden dependency {name}")
             if kind == "unresolved":
                 problems.append(f"{label}: dependency {name} is neither packaged nor an operating-system library")
-    files = [p for p in root.rglob("*") if p.is_file()]
+    files = [p for p in root.rglob("*") if p.is_file() or p.is_symlink()]  # dangling symlinks count
     for p in files:
         rel = p.relative_to(root).as_posix()
         if FORBIDDEN_FILE.search(p.name) or FORBIDDEN_FILE.search(rel):
@@ -116,9 +117,11 @@ def main():
         report["embedded_models"][label] = present
         if not present:
             problems.append(f"the {label} digest is not embedded in {cli.name}")
-    for needle in (b"libpython", b"libtorch", b"onnxruntime", b"numpy.core"):
-        if needle in blob:
-            problems.append(f"{cli.name} references {needle.decode()}")
+    for binary in (cli, launcher):
+        content = blob if binary == cli else binary.read_bytes()
+        for needle in (b"libpython", b"libtorch", b"onnxruntime", b"numpy.core"):
+            if needle in content:
+                problems.append(f"{binary.name} references {needle.decode()}")
     print(json.dumps(report, indent=1, sort_keys=True))
     if problems:
         print("\n".join(problems), file=sys.stderr)

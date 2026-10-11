@@ -96,8 +96,9 @@ def smoke_master_system(tmp, launch):
 
 
 # ---- SEG-049-T007 (ADR 0106): Optimized (v1) and the experimental gen2 model through the PACKAGED launcher and CLI ------------------------------
-# Golden values of the project-authored synthetic Genesis image of tests/genesis_ml_admission_cli_test.py in a development build; the packaged
-# build must reproduce them exactly on every platform (same model, schema, analysis contract, and bit-identical native inference).
+# Golden values of the 512-byte synthetic cartridge below, captured from the Linux package of this checkpoint (and reproduced by the macOS-arm64 and
+# Windows package jobs of the same change). Every platform's package must reproduce them exactly: same model, schema and analysis contract, and
+# bit-identical native inference (a divergence of the native model on any platform fails the package job).
 OPT_GOLDEN = {
     "v1": {"effective": "ml_region", "model_family": "v1", "selected_ppm": "0", "admitted_ppm": "1000000",
            "k_sha256": "5f299d8b8999df7b8f2917e650cc39c768ddf71a9532a5ed553846602ca6a2b2"},
