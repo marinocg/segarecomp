@@ -1103,8 +1103,24 @@ static int genesis_vdp_live_vblank_status_bit(uint64_t master_ticks) {
    except for bit 3, which SEG-021-T040 overrides with the live projection
    above so every lane samples one identical, truthful status word. */
 static uint16_t genesis_vdp_status_read(GenesisDeviceState *devices, uint64_t master_ticks) {
-  uint16_t status = (uint16_t)(devices->vdp.status_register & (uint16_t)~UINT16_C(0x0008));
+  uint16_t status = (uint16_t)(devices->vdp.status_register &
+                               (uint16_t)~(UINT16_C(0x0008) | UINT16_C(0x0004) | UINT16_C(0x0010)));
   if (genesis_vdp_live_vblank_status_bit(master_ticks)) status |= UINT16_C(0x0008);
+  /* SEG-055: bit 2 is the horizontal-blanking flag, a function of the position inside the current scanline (guest code
+     polls it to wait for HBlank, e.g. the Sonic 2/3 split-screen handlers). The window is, in master ticks from the
+     start of the line, 228-872 in H40 and 280-860 in H32 (the public Genesis Plus GX `core/vdp_ctrl.c` measurements,
+     HBLANK_H40/H32_START/END_MCYCLE). Bit 4 is the odd-field flag, alternating every frame while an interlaced mode
+     (register #12 LSM0) is selected. Both are pure functions of deterministic guest time. */
+  {
+    const uint32_t in_line = (uint32_t)(master_ticks % GENESIS_NTSC_MASTER_TICKS_PER_LINE);
+    const int h40 = (devices->vdp.registers[12] & UINT16_C(0x0081)) == UINT16_C(0x0081);
+    const uint32_t blank_start = h40 ? 228U : 280U;
+    const uint32_t blank_end = h40 ? 872U : 860U;
+    if (in_line >= blank_start && in_line < blank_end) status |= UINT16_C(0x0004);
+    if ((devices->vdp.registers[12] & UINT16_C(0x0002)) != 0U &&
+        ((master_ticks / GENESIS_NTSC_MASTER_TICKS_PER_FRAME) & 1U) != 0U)
+      status |= UINT16_C(0x0010);
+  }
   devices->vdp.control_port_awaiting_second_word = 0U;
   devices->vdp.control_port_first_word = 0U;
   return status;
@@ -2501,8 +2517,12 @@ static void genesis_raster_enter_line(GenesisRuntime *runtime, uint64_t absolute
 
 static void genesis_raster_advance(GenesisRuntime *runtime, uint64_t now_ticks) {
   GenesisRasterScheduler *raster = &runtime->raster;
-  const uint64_t line_now = now_ticks / GENESIS_NTSC_MASTER_TICKS_PER_LINE;
+  uint64_t line_now;
   uint64_t line;
+  /* Hot path: almost every retirement stays inside the current scanline. */
+  if (raster->initialized && now_ticks < raster->next_line_tick) return;
+  line_now = now_ticks / GENESIS_NTSC_MASTER_TICKS_PER_LINE;
+  raster->next_line_tick = (line_now + 1U) * GENESIS_NTSC_MASTER_TICKS_PER_LINE;
   if (!raster->initialized) {
     raster->initialized = 1U;
     raster->hint_counter = (uint8_t)(runtime->devices.vdp.registers[10] & UINT16_C(0x00FF));
@@ -2795,7 +2815,7 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
       *result = (GenesisControlTransfer){0};
       result->kind = GENESIS_STOP;
       result->stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
-                                         GENESIS_DIAG_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT);
+                                         GENESIS_DIAG_HINT_HANDLER_NOT_INSTALLED);
       return 2;
     }
     if (!genesis_accept_interrupt(runtime, level, result)) return 2;
@@ -3531,6 +3551,8 @@ static const char *genesis_diagnostic_name(GenesisDiagnosticCategory value) {
   case GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_LAYOUT: return "unsupported_cartridge_sram_layout";
   case GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS: return "unsupported_cartridge_sram_access";
   case GENESIS_DIAG_UNSUPPORTED_REGION_TIMING: return "unsupported_region_timing";
+  case GENESIS_DIAG_HINT_HANDLER_NOT_INSTALLED: return "hint_handler_not_installed";
+  case GENESIS_DIAG_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT: return "unsupported_interrupt_or_scheduling_event";
   default: return 0;
   }
 }
@@ -3575,7 +3597,7 @@ static int genesis_valid_stop_pair(GenesisStopClass stop_class,
        whose timing is not implemented. */
     return category == GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE || category == GENESIS_DIAG_IRQ6_VECTOR_IN_WORK_RAM ||
            category == GENESIS_DIAG_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT ||
-           category == GENESIS_DIAG_UNSUPPORTED_REGION_TIMING;
+           category == GENESIS_DIAG_UNSUPPORTED_REGION_TIMING || category == GENESIS_DIAG_HINT_HANDLER_NOT_INSTALLED;
   case GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY:
     return category == GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY;
   case GENESIS_STOP_INSTRUCTION_BUDGET_EXHAUSTED:

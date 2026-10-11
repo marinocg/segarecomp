@@ -172,7 +172,7 @@ void test_hint_missing_handler_fails_closed() {
   r->devices.vdp.registers[10] = 9;
   const Trace t = drive(*r, 1);
   check(t.stopped && t.stop.stop.stop_class == GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT &&
-            t.stop.stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+            t.stop.stop.diagnostic_category == GENESIS_DIAG_HINT_HANDLER_NOT_INSTALLED,
         "an enabled H-interrupt without a build-resolved handler stops fail-closed (never silently dropped)");
   auto q = make_runtime();  // disabled: no handler is needed
   q->devices.vdp.registers[0] = 0x00;
@@ -223,6 +223,55 @@ void test_hint_stop_wake() {
             with_hint->scheduler.master_ticks == without_hint->scheduler.master_ticks &&
             with_hint->scheduler.master_ticks >= GENESIS_NTSC_VBLANK_ONSET_TICK,
         "STOP with a mask that blocks level 4 still wakes at the VBlank onset with exactly the pre-H-interrupt timing");
+}
+
+// ---- VDP status register: HBlank and field-parity bits -------------------------------------------------------------
+uint32_t read_status_word(GenesisRuntime &r) {
+  uint32_t value = 0xDEADBEEFu;
+  GenesisRuntimeStop stop{};
+  check(genesis_route_access(&r, 0xC00004, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK, "VDP status read is routed");
+  return value;
+}
+
+void test_status_hblank_and_field_bits() {
+  const uint64_t line = GENESIS_NTSC_MASTER_TICKS_PER_LINE;
+  auto r = make_runtime();
+  r->devices.vdp.registers[12] = 0x81;  // H40
+  // Documented behavior (the flag guest code polls to wait for horizontal blanking): clear early in the line, set during the
+  // blanking window, clear again at the very end; the window differs between H40 and H32.
+  r->scheduler.master_ticks = 10ull * line + 100u;
+  check((read_status_word(*r) & 0x0004u) == 0u, "HBlank flag clear at the start of a line");
+  r->scheduler.master_ticks = 10ull * line + 500u;
+  check((read_status_word(*r) & 0x0004u) != 0u, "HBlank flag set inside the H40 blanking window");
+  r->scheduler.master_ticks = 10ull * line + 900u;
+  check((read_status_word(*r) & 0x0004u) == 0u, "HBlank flag clear after the H40 blanking window");
+  r->devices.vdp.registers[12] = 0x00;  // H32
+  r->scheduler.master_ticks = 10ull * line + 270u;
+  check((read_status_word(*r) & 0x0004u) == 0u, "H32 window starts later than H40's");
+  r->scheduler.master_ticks = 10ull * line + 500u;
+  check((read_status_word(*r) & 0x0004u) != 0u, "HBlank flag set inside the H32 blanking window");
+  // A guest polling loop `wait until bit 2 is set` terminates by virtue of instruction time alone.
+  auto p = make_runtime();
+  p->devices.vdp.registers[12] = 0x81;
+  unsigned guard = 0;
+  uint32_t pc = kMain;
+  while ((read_status_word(*p) & 0x0004u) == 0u && guard++ < 2000u) pc = genesis_runtime_retire_m68k_instruction(p.get(), 12u, pc).next_pc;
+  check(guard < 2000u, "polling the HBlank status bit with instruction time reaches the blanking window within a line");
+
+  // Field parity (status bit 4) toggles every frame only while interlaced (LSM0 set).
+  auto f = make_runtime();
+  f->devices.vdp.registers[12] = 0x87;  // H40 + interlace mode 2
+  f->scheduler.master_ticks = 100;
+  const uint32_t even = read_status_word(*f) & 0x0010u;
+  f->scheduler.master_ticks = GENESIS_NTSC_MASTER_TICKS_PER_FRAME + 100u;
+  const uint32_t odd = read_status_word(*f) & 0x0010u;
+  f->scheduler.master_ticks = 2ull * GENESIS_NTSC_MASTER_TICKS_PER_FRAME + 100u;
+  const uint32_t even2 = read_status_word(*f) & 0x0010u;
+  check(even == 0u && odd == 0x0010u && even2 == 0u, "interlaced: the odd-field flag alternates every frame, deterministically from guest time");
+  auto n = make_runtime();
+  n->devices.vdp.registers[12] = 0x81;
+  n->scheduler.master_ticks = GENESIS_NTSC_MASTER_TICKS_PER_FRAME + 100u;
+  check((read_status_word(*n) & 0x0010u) == 0u, "non-interlaced: the odd-field flag stays clear");
 }
 
 // ---- region ------------------------------------------------------------------------------------------------------
@@ -392,6 +441,7 @@ int main() {
   test_hint_sr_mask_and_priority();
   test_hint_missing_handler_fails_closed();
   test_hint_stop_wake();
+  test_status_hblank_and_field_bits();
   test_region_profiles_and_version_register();
   test_region_sensitive_guest_branches();
   test_independent_player_ports();

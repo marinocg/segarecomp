@@ -116,10 +116,17 @@ bool render(const Scene &s, GenesisFrameArtifact *frame) {
   return rc_raster == 0;
 }
 
+// Independent artifact -> RGB decode (CRAM word layout ----BBB-GGG-RRR-, 3-bit channel value * 255 / 7) so the expectations never
+// depend on the renderer's own conversion helper (that helper is cross-checked against this in test_export_and_presentation_agree).
 Rgb pixel(const GenesisFrameArtifact &frame, unsigned x, unsigned row) {
-  uint8_t rgb[GENESIS_FRAME_MAX_WIDTH * 3U];
-  if (genesis_vdp_frame_row_rgb888(&frame, row, rgb) != 0) return {999, 999, 999};
-  return {rgb[x * 3U], rgb[x * 3U + 1U], rgb[x * 3U + 2U]};
+  const unsigned width = GENESIS_FRAME_ARTIFACT_WIDTH(&frame);
+  if (row >= GENESIS_FRAME_ARTIFACT_HEIGHT(&frame) || x >= width) return {999, 999, 999};
+  const unsigned index = frame.pixels[(size_t)row * width + x];
+  const unsigned slot = frame.row_palette[row];
+  if (index >= 64U || slot >= GENESIS_FRAME_MAX_PALETTES || (slot != 0U && slot >= frame.palette_count)) return {999, 999, 999};
+  const uint8_t *palette = slot == 0U ? frame.palette_snapshot : frame.extra_palettes[slot - 1U];
+  const unsigned word = ((unsigned)palette[index * 2U] << 8) | palette[index * 2U + 1U];
+  return {((word >> 1) & 7U) * 255U / 7U, ((word >> 5) & 7U) * 255U / 7U, ((word >> 9) & 7U) * 255U / 7U};
 }
 bool is_color(const GenesisFrameArtifact &frame, unsigned x, unsigned row, unsigned cram_index, int variant = 0) {
   const Rgb p = pixel(frame, x, row);

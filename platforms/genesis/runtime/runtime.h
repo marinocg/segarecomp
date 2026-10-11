@@ -485,6 +485,7 @@ typedef struct GenesisInterruptScheduler {
 typedef struct GenesisRasterScheduler {
   uint8_t initialized;
   uint64_t last_line;     /* the last absolute scanline whose start the schedule has processed */
+  uint64_t next_line_tick;/* master tick at which the next scanline begins (skips the per-retirement division) */
   uint8_t hint_counter;   /* the VDP H-interrupt line counter */
   uint8_t hint_pending;   /* a latched H-interrupt request, cleared when the level-4 interrupt is taken */
 } GenesisRasterScheduler;
@@ -1188,6 +1189,7 @@ typedef enum GenesisDiagnosticCategory {
   GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_LAYOUT = 63, /* an access to a header-declared extra-memory extent whose layout is not supported */
   GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS = 64, /* SRAM extent access (width/lane) or $A130F1 write the SRAM model does not admit */
   GENESIS_DIAG_UNSUPPORTED_REGION_TIMING = 65, /* SEG-055: a console region whose timing is not implemented (PAL), or an unknown region name */
+  GENESIS_DIAG_HINT_HANDLER_NOT_INSTALLED = 66, /* SEG-055: an enabled H-interrupt fired but no handler was resolved at build time (unadmittable/RAM-resident vector slot) */
 } GenesisDiagnosticCategory;
 
 typedef struct GenesisProvenance {

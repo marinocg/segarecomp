@@ -1457,3 +1457,11 @@ title-screen-completion claim. It adds one controller-I/O read-selector family a
 "all buttons released" input constant; it adds no new persisted state and no new struct field. It is
 otherwise a decision record, exactly like the SEG-007-T020/T038/T079/T111/T121 sections above.
 
+
+
+## SEG-055 addendum: the version register is the configured console region
+
+The Version-register BYTE read (`$A10001`, SEG-007-T079) is no longer a build-time-folded constant. The static routing seam defers it to the runtime device owner like the
+DATA1/DATA2 reads, and the runtime returns the value of the configured console region profile (Japan NTSC `0x20`, USA NTSC `0xA0`, Europe PAL `0xE0`; default USA NTSC = the original
+policy value). The host-side selector table (`m68k_controller_io_access`) keeps the USA value for analysis-only callers. See `docs/architecture/genesis-raster-and-display-modes.md` section 5. Consequently the
+analysis can no longer prune code behind a version-dependent branch, so such branches (for example the TMSS `'SEGA'` write guarded by the hardware revision nibble) are discovered; such a path is only *executed* on a console reporting a non-zero revision nibble, which no modelled profile does, and the TMSS write to `$A14000` remains an unsupported device access (typed stop) if it ever were.

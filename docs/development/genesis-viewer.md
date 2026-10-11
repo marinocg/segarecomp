@@ -40,11 +40,32 @@ Mechanism: viewer builds compile the unmodified generated C with
 dispatcher and allowance to `platforms/genesis/viewer/viewer_main_hook.c`. Headless builds do not define the
 macro and link no viewer or SDL code.
 
-## Player-1 keyboard input (SEG-011-T004)
+## Keyboard input (SEG-011-T004, SEG-055)
 
-Fixed map: arrow keys = D-pad, Z = A, X = B, C = C, Return = Start. Escape and window close quit.
-The pad mask is polled once per host slice and injected with `genesis_runtime_set_pad1`; it is host
-input and is not part of device checkpoints or divergence digests. Port 2 always reads released.
+Fixed maps. Player 1: arrow keys = D-pad, Z = A, X = B, C = C, Return = Start. Player 2: I/K/J/L = Up/Down/Left/Right,
+U = A, O = B, P = C, Right Shift = Start. Escape and window close quit.
+Each pad mask is polled once per host slice and injected with `genesis_runtime_set_pad1` / `genesis_runtime_set_pad2`; both ports are
+independent three-button pads on DATA1/DATA2 and are host input, not part of device checkpoints or divergence digests.
+
+## Console region (SEG-055)
+
+`--region {usa,japan,europe,auto}` (default `usa`, the historical console) selects the console the guest sees through the hardware
+version register ($A10001): `usa` = overseas NTSC `0xA0`, `japan` = domestic NTSC `0x20`, `europe` = overseas PAL `0xE0`. The generated program is the
+same for every region, so switching needs no rebuild; the choice is exported to the program as `SEGARECOMP_GENESIS_REGION`, fixed before the
+first instruction and stable for the whole run (set that variable directly for a built `segarecomp build ... --play` product). `auto` derives a
+*hint* from the ROM header's region-support field (overseas NTSC if declared, else Japan); an explicit choice always wins, and header metadata is never
+treated as proof of the console. `europe` is refused before any generation: 50 Hz timing is not implemented. Cartridges with a region lockout
+(for example a Japan-only image) show their own lockout screen under a console they reject -- a normal guest outcome, not an emulator error;
+select `--region japan` for such an image. The bridge prints a `REGION_PROFILE {...}` line to stderr when `--region` is given.
+
+## Display modes, pacing and presentation (SEG-055)
+
+The window shows whatever geometry the frame carries -- H40 (320x224), H32 (256x224) or interlace mode 2 (320x448 / 256x448) -- stretched over the
+fixed 2x client area, using the same RGB conversion as the headless PPM export (`genesis_vdp_frame_row_rgb888`), including per-row palettes for
+mid-frame palette switches. Presentation is paced by the guest's deterministic *virtual frame boundaries*, not by successfully published frames: a frame
+the renderer rejects (an unsupported display mode, or a mode switch inside one frame) costs its period and leaves the previous image on screen, so the
+guest can never run ahead of real time because of a render failure. `--viewer-unthrottled` still only skips the sleeping. Guest results never depend on host
+timing or slicing.
 
 ## Headless bounded frame capture (SEG-021-T031)
 

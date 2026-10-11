@@ -271,6 +271,10 @@ add_test(NAME genesis_divide_by_zero_exception_tests COMMAND genesis_divide_by_z
 add_test(NAME genesis_vblank_irq6_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_vblank_irq6_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+# SEG-055: generated-native H-interrupt (vector 28) -- emit, strict-C11 compile, run (ROM handler, disabled, RAM/absent vector).
+add_test(NAME genesis_hint_generated_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_hint_generated_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 add_test(NAME genesis_divide_by_zero_generated_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_divide_by_zero_generated_test.py
   $<TARGET_FILE:m68k_pipeline_tests> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})

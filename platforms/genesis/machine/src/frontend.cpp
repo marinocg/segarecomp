@@ -3111,6 +3111,8 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   std::optional<Address> divide_by_zero_handler_entry_value;
   std::optional<Address> privilege_violation_handler_entry_value;
   std::map<std::uint8_t, Address> software_exception_handler_entry_values;
+  bool hint_vector_in_work_ram = false;  // SEG-055: vector 28 slot resolves into work RAM (RAM jump-table convention)
+  Address hint_vector_ram_entry_value = 0U;
   // SEG-055: vector 28 is the VDP H-interrupt (level-4 autovector). It is resolved, discovered and rooted exactly like
   // the synchronous vectors (same NOT INSTALLED fallback: a ROM whose slot cannot be admitted builds unchanged and an
   // enabled H-interrupt then stops fail-closed at runtime); the machine hook only sources it.
@@ -3119,6 +3121,14 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   for (const auto synchronous_vector : synchronous_vectors) {
     const std::size_t kSynchronousVectorOffset = static_cast<std::size_t>(synchronous_vector) * 4U;
     if (const auto resolved_handler = resolve_vector_handler(kSynchronousVectorOffset)) {
+      if (synchronous_vector == 28U && *resolved_handler >= UINT32_C(0x00E00000)) {
+        // SEG-055: the H-interrupt vector points into work RAM like the common IRQ6 convention; there is no static
+        // handler body to root (a RAM-resident stub is not executable code in this architecture unless a byte-guarded
+        // thunk is materialized by the build-time preparation). Retain the stub address for that mechanism.
+        hint_vector_in_work_ram = true;
+        hint_vector_ram_entry_value = *resolved_handler;
+        continue;
+      }
       const Address handler = *resolved_handler;
       const M68kProgramAddress handler_address{TargetAddressSpace::m68k_program, handler};
       // Every synchronous-exception slot (5, 8, and the software-exception
@@ -3135,6 +3145,13 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
       exception_boundary.erase(handler);
       auto discovery = discover_m68k_static_graph(handler_address, limits, environment, exception_boundary,
                                                    continuation_roots);
+      // SEG-055: the H-interrupt root is installed only when its handler is discovered COMPLETELY (no frontier of any
+      // kind). A handler that leaves an open control edge -- typically a jump through a RAM stub written at run time --
+      // is treated exactly like an unadmittable slot: the build and every other root's analysis stay unchanged, and an
+      // enabled H-interrupt then stops fail-closed at run time instead of the root widening or rejecting the build.
+      if (synchronous_vector == 28U && (discovery.primary_issue || !discovery.secondary_issues.empty())) {
+        continue;
+      }
       const M68kDiscoveryIssue *fatal_issue = nullptr;
       if (discovery.primary_issue && is_fatal_probe_failure(*discovery.primary_issue))
         fatal_issue = &*discovery.primary_issue;
@@ -3753,6 +3770,8 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   analysis.irq6_vector_in_work_ram = irq6_vector_in_work_ram;
   analysis.cartridge_sram = parse_genesis_cartridge_sram_header(program.image.bytes).descriptor;
   analysis.irq6_vector_ram_entry = irq6_vector_ram_entry_value;
+  analysis.hint_vector_in_work_ram = hint_vector_in_work_ram;
+  analysis.hint_vector_ram_entry = hint_vector_ram_entry_value;
   // SEG-007-T222 / ADR-0037: retain the build-time-resolved vector-5 handler
   // entry, mirroring `irq6_handler_entry` exactly.
   if (divide_by_zero_handler_entry_value)

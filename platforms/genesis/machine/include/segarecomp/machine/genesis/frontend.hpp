@@ -442,6 +442,10 @@ struct FrontendAnalysis { M68kFrontendProfile profile{M68kFrontendProfile::direc
   // routed to the runtime SRAM owner instead of being folded as immutable ROM.
   std::optional<GenesisCartridgeSramDescriptor> cartridge_sram;
   std::uint32_t irq6_vector_ram_entry{0};  // the work-RAM address the slot points at (valid iff the flag is set)
+  // SEG-055: the same RAM jump-table convention for the H-interrupt (vector 28, offset 0x70): no handler is rooted, the
+  // work-RAM stub address is retained so a materialized byte-guarded JMP thunk can become the compiled handler entry.
+  bool hint_vector_in_work_ram{false};
+  std::uint32_t hint_vector_ram_entry{0};
   // SEG-007-T222 / ADR-0037: the build-time-resolved MC68000 vector-5
   // (Zero Divide) handler entry (the long word at mapped cartridge image
   // vector-table offset 0x14), mirroring `irq6_handler_entry`'s own

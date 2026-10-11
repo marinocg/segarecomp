@@ -58,10 +58,10 @@ STOP_DIAGNOSTIC_PAIRS = {
     # SEG-021-T020 / ADR 0043: STOP halted the CPU and no interrupt the machine
     # can raise could ever be accepted.
     # SEG-055: `unsupported_region_timing` = a console region whose timing is not implemented (PAL) or an unknown region
-    # name; an H-interrupt without a build-resolved handler reuses the generic interrupt diagnostic of this class.
+    # name; `hint_handler_not_installed` = an enabled H-interrupt fired without a build-resolved handler.
     "unsupported_interrupt_or_scheduling_event": {"stopped_without_wake_source", "irq6_vector_in_work_ram",
                                                   "unsupported_interrupt_or_scheduling_event",
-                                                  "unsupported_region_timing"},
+                                                  "unsupported_region_timing", "hint_handler_not_installed"},
     "internal_dispatch_inconsistency": {"internal_dispatch_inconsistency"},
     # SEG-007-T252 / ADR-0040: this stop pair is now unreachable via the
     # runner-owned genesis_runtime_run path -- there is no longer any
@@ -1449,6 +1449,7 @@ GUEST_STOP_KNOWN_BUT_UNEMITTED_TARGET = 5
 GUEST_STOP_INTERNAL_DISPATCH_INCONSISTENCY = 7
 GUEST_STOP_UNSUPPORTED_INTERRUPT = 6  # ADR 0097 amendment: an IRQ6 delivery through a work-RAM vector
 IRQ6_VECTOR_OFFSET = 0x78
+HINT_VECTOR_OFFSET = 0x70  # SEG-055: the H-interrupt (level-4 autovector, vector 28) slot, same RAM jump-table convention
 
 
 def derive_copy_alias(rom: bytes, work_ram: bytes, pc: int) -> tuple[int, int, int] | None:
@@ -1596,13 +1597,24 @@ def discover_copy_aliases(emitter_command: list[str], compiler: pathlib.Path, ro
         pc = int.from_bytes(dump[0:4], "big")
         stop_class = int.from_bytes(dump[4:8], "big")
         if stop_class == GUEST_STOP_UNSUPPORTED_INTERRUPT:
-            # The cartridge's own IRQ6 vector slot (immutable data) names the work-RAM stub address.
-            vector = int.from_bytes(rom_bytes[IRQ6_VECTOR_OFFSET:IRQ6_VECTOR_OFFSET + 4], "big") & 0xFFFFFF
-            if len(rom_bytes) < IRQ6_VECTOR_OFFSET + 4 or vector < GENESIS_WORK_RAM_BEGIN:
+            # The cartridge's own vector slot (immutable data) names the work-RAM stub address. The stop does not say
+            # which interrupt it was: try the IRQ6 slot first, then (SEG-055) the H-interrupt slot, each only while its
+            # stub has not already been materialized as a thunk.
+            candidates = []
+            for slot in (IRQ6_VECTOR_OFFSET, HINT_VECTOR_OFFSET):
+                if len(rom_bytes) >= slot + 4:
+                    candidate = int.from_bytes(rom_bytes[slot:slot + 4], "big") & 0xFFFFFF
+                    covered = all(t[0] != candidate for t in thunks) and \
+                        not (slot == HINT_VECTOR_OFFSET and any(a[0] <= candidate < a[0] + a[2] for a in aliases))
+                    if candidate >= GENESIS_WORK_RAM_BEGIN and covered:
+                        candidates.append((slot, candidate))
+            if not candidates:
                 reason = ALIAS_TERMINATION_NON_ALIAS_FRONTIER
                 break
-            pc = vector
-            thunk_only = True
+            slot, pc = candidates[0]
+            # IRQ6 keeps its thunk-only rule; an H-interrupt vector may also point at a verbatim copy of immutable image
+            # code (the copied handler is then an ordinary alias-compiled entry), so the alias derivation below is tried first.
+            thunk_only = slot == IRQ6_VECTOR_OFFSET
         elif stop_class not in (GUEST_STOP_KNOWN_BUT_UNEMITTED_TARGET, GUEST_STOP_INTERNAL_DISPATCH_INCONSISTENCY):
             reason = ALIAS_TERMINATION_NON_ALIAS_FRONTIER
             break
