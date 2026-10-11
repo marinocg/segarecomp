@@ -488,6 +488,11 @@ typedef struct GenesisRasterScheduler {
   uint64_t next_line_tick;/* master tick at which the next scanline begins (skips the per-retirement division) */
   uint8_t hint_counter;   /* the VDP H-interrupt line counter */
   uint8_t hint_pending;   /* a latched H-interrupt request, cleared when the level-4 interrupt is taken */
+  /* Policy for an H-interrupt that fires while enabled but has no build-resolved handler: 0 (default) counts it as
+     undelivered and continues -- exactly what every earlier build did with the interrupt, but now observable; 1 (strict)
+     stops fail-closed with hint_handler_not_installed. Fixed before the first step like the region. */
+  uint8_t hint_strict;
+  uint64_t hint_undelivered;  /* enabled H-interrupts that could not be delivered (no handler) */
 } GenesisRasterScheduler;
 
 /* One bit per aligned work-RAM word records whether the six-byte exception
@@ -1585,6 +1590,14 @@ void genesis_runtime_set_pad2(GenesisRuntime *runtime, uint8_t mask);
  * 2 Europe PAL). Returns 0, or -1 (unchanged) for an unknown profile or once the guest has started executing. A PAL
  * profile is accepted (it has a version-register value) but genesis_runtime_run refuses to execute under it. */
 int genesis_runtime_set_region(GenesisRuntime *runtime, unsigned profile);
+/* SEG-055: H-interrupt policy for an enabled interrupt with no resolved handler: strict != 0 stops fail-closed, otherwise
+ * (the default) the request is counted in raster.hint_undelivered and dropped. Same once-before-the-first-step rule as the
+ * region; also selectable with SEGARECOMP_GENESIS_HINT=strict|skip. Returns 0, or -1 once the guest has started. */
+int genesis_runtime_set_hint_strict(GenesisRuntime *runtime, unsigned strict);
+/* SEG-055: writes one `RUNTIME_NOTES {...}` line to `stream` when the run used a non-default console region, dropped
+ * H-interrupts or rejected frames (nothing otherwise), so a host can surface what the run could not honor. */
+void genesis_runtime_write_notes(const GenesisRuntime *runtime, uint64_t frame_render_rejections,
+                                 uint64_t vram_journal_overflows, FILE *stream);
 /* Parses "usa"/"us"/"ntsc-u", "japan"/"jp"/"ntsc-j", "europe"/"eu"/"pal" (case-insensitive). 0 on success, -1 otherwise. */
 int genesis_region_profile_from_name(const char *name, unsigned *profile_out);
 /* The stable lowercase name of a profile ("usa", "japan", "europe"), or "invalid". */

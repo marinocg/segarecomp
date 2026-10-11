@@ -13,6 +13,7 @@ opcode decoding, and no second graphics engine: one renderer owns all compositio
 |---|---|---|
 | Frame source | one snapshot of the *final* VRAM/CRAM/VSRAM/registers at the VBlank onset | per-field-line register file + CRAM + VSRAM (256 B/line) captured as each active line begins, plus VRAM at the frame boundary |
 | Mid-frame palette / scroll / mode-register changes | lost (last value wins for the whole frame) | visible from the following line on; frames carry one palette slot per distinct line palette |
+| VRAM written during the active display (split-screen sprite tables, HUD swaps) | lost (only the frame-end VRAM was rendered) | journaled per line (line-0 snapshot + bounded line-tagged byte writes) and replayed as rows advance; an overflowing journal falls back to the frame-end image for that frame (counted) |
 | H-interrupt (IRQ4, vector 28) | never raised; register #0 bit 4 ignored; vector 28 handler never rooted | counter + latch + level-4 admission; vector 28 resolved/rooted like the other build-time vectors; STOP can wake on it |
 | VBlank (IRQ6) | unchanged | unchanged (same boundary, same admission, same timing); level 6 outranks level 4 |
 | Display width | H40 (320) only; everything else rejected | H40 (320) and H32 (256) |
@@ -30,8 +31,9 @@ opcode decoding, and no second graphics engine: one renderer owns all compositio
 | Region selection | none | `usa` / `japan` / `europe` profiles; `SEGARECOMP_GENESIS_REGION`, `genesis_runtime_set_region`, bridge `--region`; PAL representable but refused |
 
 Still unsupported (fail closed or documented as ignored): shadow/highlight, the sprite X = 0 mask, display-disable, sprite collision/overflow
-status flags, VRAM changes *during* the active display (VRAM is sampled at the frame boundary), 30-cell (V30) height, interlace mode 1,
-the reserved `RS0/RS1` and `LSM` combinations, horizontal-scroll mode `01`, 50 Hz/PAL timing, the HV counter.
+status flags, sub-line timing of VRAM/CRAM writes (a change is visible from the next line), 30-cell (V30) height, interlace mode 1,
+the reserved `RS0/RS1` and `LSM` combinations, horizontal-scroll mode `01`, 50 Hz/PAL timing, the HV counter. (The VDP status register's HBlank flag, bit 2, and the interlace odd-field flag, bit 4, are modelled
+as pure functions of guest time: HBlank = master ticks 228-872 (H40) / 280-860 (H32) into the line, odd field alternates per frame while `LSM0` is set.)
 
 ## 2. Raster model
 
@@ -48,6 +50,11 @@ line's start tick the runtime "enters" the line:
 3. line 224 latches the H-interrupt once more if the counter is zero;
 4. the last line (261) reloads the counter from register #10.
 
+VRAM writes made while the active display is in progress (data-port writes, memory-to-VRAM DMA, VRAM fill) are journaled the same way: line 0's entry snapshots the VRAM, and every byte
+written during lines 0-223 is appended with the line it was written on (capacity 8192 bytes per frame; a larger burst abandons the journal for that frame -- the frame-end image is then used
+and `GenesisRasterCapture::vram_journal_overflows` counts it). The renderer replays the journal as rows advance, so a handler that DMAs a different sprite attribute table in the middle of the screen
+(two-player split screens) gives each half its own table. Writes during VBlank are not journaled: the next line-0 snapshot contains them.
+
 Consequently a write made while line `L` is in progress (for example by an H-interrupt handler) is first visible on line `L + 1`, which is the
 granularity at which the interrupt scheduler already samples every other source (the state after the instruction that straddles the boundary).
 Interlace mode 2 does not change this: H-interrupts and scroll-table rows stay at field-line (low) resolution; output rows `2L` and `2L + 1` share line `L`'s state.
@@ -60,10 +67,24 @@ counter is zero (so `N = 0` yields 225 requests per frame; `N = 224` latches exa
 it is enabled; it is delivered when register #0 bit 4 is set and the interrupt mask is below 4. VBlank (level 6) has priority; after the 68000 returns from the IRQ6 handler a pending IRQ4 is
 taken at the next retirement boundary. Entry goes through the M68K-owned interrupt core exactly like IRQ6 (vector 28, six-byte frame, mask raised to 4, 44 cycles of exception processing).
 
-The handler entry is resolved at build time from the cartridge vector table like vectors 4-11 and 32-47 (`software_exception_handler_*[28]`); if the slot cannot be admitted (for example a RAM jump-table
-vector) and the interrupt is enabled and fires, the run **stops fail-closed** (`unsupported_interrupt_or_scheduling_event`) rather than silently dropping it.
+The handler entry is resolved at build time from the cartridge vector table at offset `0x70`, in the same bounded static-discovery machinery as vectors 4-11 and 32-47
+(`software_exception_handler_*[28]`), with three H-interrupt-specific rules that keep the root additive and never a new build failure:
 
-A `STOP` whose loaded mask is below 4 can be woken by the H-interrupt: virtual time then advances one scanline at a time (through the same scheduler) until a request is accepted. A `STOP` whose mask blocks level 4 keeps the single jump to the next VBlank onset with the exact pre-existing timing.
+* it is discovered with a **smaller bounded budget (96 instructions, call frames not followed)**: the handler's own straight-line body is compiled and a call or tail beyond the bound is a typed prefix-boundary frontier (fail closed if ever executed).
+  Game-specific update routines called from a handler frequently reach code that no other root reaches, which the aggregated authoritative closure cannot represent (Sonic 1's HBlank tail is the measured example);
+* a handler that is a single unresolved instruction (typically `JMP` through a RAM stub written at run time, e.g. Sonic 3) is not installed;
+* the whole general-startup analysis is attempted with the root and, if that attempt is rejected for any reason, again without it (exactly the earlier analysis). Across the 17 locally available images no analysis was rejected with the root, and the root was
+  installed for 11 of them (Sonic 1, Sonic 2 (two images), Golden Axe, Moonwalker, Cool Spot, Phantasy Star II, Land Stalker, Shining Force, Streets of Rage, Streets of Rage 2).
+
+A vector slot that points into work RAM (the common RAM jump-table convention) retains the stub address (`hint_vector_in_work_ram`) so that the existing build-time preparation (`--discover-copy-aliases`: byte-guarded JMP thunks and verbatim
+immutable-copy aliases, ADR 0049/0097) can turn it into an ordinary compiled handler entry guarded by the runtime byte-identity check. **RAM-resident code that the game constructs at run time (OutRun's H-interrupt routine is written into work RAM
+instruction by instruction, it is not a copy of cartridge bytes) can never be compiled by this architecture** (no interpreter/JIT).
+
+When an enabled H-interrupt fires with no resolved handler the default compatibility policy **counts and drops it** (`raster.hint_undelivered`; the capture/viewer hooks print a `RUNTIME_NOTES {...}` line when anything was dropped, a non-default region was used, frames were
+rejected or a VRAM journal overflowed) -- precisely what every earlier build did with the interrupt, now observable -- so titles that never needed the handler keep running. `SEGARECOMP_GENESIS_HINT=strict` (or `genesis_runtime_set_hint_strict`) makes it stop fail-closed with
+`unsupported_interrupt_or_scheduling_event` / `hint_handler_not_installed` instead. The choice is fixed before the first step.
+
+A `STOP` whose loaded mask is below 4 can be woken by an H-interrupt that can actually be delivered (handler installed, or strict policy): virtual time then advances one scanline at a time (through the same scheduler) until a request is accepted. A `STOP` whose mask blocks level 4 keeps the single jump to the next VBlank onset with the exact pre-existing timing.
 
 Evidence for the counter rules: Genesis Plus GX `core/system.c` `system_frame_gen` (public, used only as a behavioral reference; no code is copied): counter reload at the last line, per-line "zero → reload and request, else decrement" during the active display, and the request check at the start of the VBlank line. The IRQ4 priority and masking follow the MC68000 autovector rules already implemented by the CPU-owned interrupt core.
 Limitation: real-hardware sub-line timing (the H counter within a line) is not modelled; the request is latched at line granularity.

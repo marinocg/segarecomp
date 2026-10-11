@@ -166,18 +166,51 @@ void test_hint_sr_mask_and_priority() {
   check(ordered, "coincident VBlank (level 6) and H-interrupt (level 4): level 6 is taken first, level 4 right after its RTE");
 }
 
-void test_hint_missing_handler_fails_closed() {
+void test_hint_missing_handler_policy() {
+  // Default compatibility policy: an enabled H-interrupt without a resolved handler is counted and dropped (what every earlier
+  // build did, now observable); strict mode stops fail-closed with the typed diagnostic.
   auto r = make_runtime();  // no vector-28 handler installed
   r->devices.vdp.registers[0] = 0x10;
   r->devices.vdp.registers[10] = 9;
   const Trace t = drive(*r, 1);
-  check(t.stopped && t.stop.stop.stop_class == GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT &&
-            t.stop.stop.diagnostic_category == GENESIS_DIAG_HINT_HANDLER_NOT_INSTALLED,
-        "an enabled H-interrupt without a build-resolved handler stops fail-closed (never silently dropped)");
+  check(!t.stopped && t.entries.empty() && r->raster.hint_undelivered == 22u,
+        "default policy: 22 enabled H-interrupts per frame are counted as undelivered and the run continues");
+  auto s = make_runtime();
+  check(genesis_runtime_set_hint_strict(s.get(), 1) == 0, "strict policy selected before the guest starts");
+  s->devices.vdp.registers[0] = 0x10;
+  s->devices.vdp.registers[10] = 9;
+  const Trace st = drive(*s, 1);
+  check(st.stopped && st.stop.stop.stop_class == GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT &&
+            st.stop.stop.diagnostic_category == GENESIS_DIAG_HINT_HANDLER_NOT_INSTALLED,
+        "strict policy: an enabled H-interrupt without a build-resolved handler stops fail-closed (never silently dropped)");
+  auto late = make_runtime();
+  (void)genesis_runtime_retire_m68k_instruction(late.get(), 4u, kMain);
+  check(genesis_runtime_set_hint_strict(late.get(), 1) == -1 && late->raster.hint_strict == 0u,
+        "the policy cannot change once the guest has started");
   auto q = make_runtime();  // disabled: no handler is needed
   q->devices.vdp.registers[0] = 0x00;
   q->devices.vdp.registers[10] = 9;
-  check(!drive(*q, 1).stopped, "no handler is needed while the H-interrupt is disabled");
+  check(!drive(*q, 1).stopped && q->raster.hint_undelivered == 0u, "nothing is counted while the H-interrupt is disabled");
+  // STOP cannot be woken by an interrupt that cannot be delivered (default policy): explicit diagnostic, no spinning.
+  auto w = make_runtime();
+  w->devices.vdp.registers[0] = 0x10;
+  w->devices.vdp.registers[10] = 9;
+  genesis_m68k_enter_stopped_state(w.get());
+  const GenesisControlTransfer ws = genesis_runtime_retire_m68k_instruction(w.get(), 4u, kMain);
+  check(ws.kind == GENESIS_STOP && ws.stop.diagnostic_category == GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE,
+        "STOP with an undeliverable H-interrupt as the only candidate source ends with stopped_without_wake_source");
+  // Notes: nothing for a default run, a line when something could not be honored.
+  FILE *tmp = std::tmpfile();
+  genesis_runtime_write_notes(q.get(), 0, 0, tmp);
+  genesis_runtime_write_notes(r.get(), 0, 0, tmp);
+  std::rewind(tmp);
+  char buffer[512] = {0};
+  const size_t n = std::fread(buffer, 1, sizeof(buffer) - 1u, tmp);
+  std::fclose(tmp);
+  const char *first = std::strstr(buffer, "RUNTIME_NOTES");
+  check(n > 0u && first != nullptr && std::strstr(first + 1, "RUNTIME_NOTES") == nullptr &&
+            std::strstr(buffer, "\"hint_undelivered\":22") != nullptr,
+        "a single notes line reports the dropped H-interrupts; a default run writes none");
 }
 
 void test_hint_stop_wake() {
@@ -439,7 +472,7 @@ int main() {
   test_hint_counter_schedule();
   test_hint_enable_gating_and_latch();
   test_hint_sr_mask_and_priority();
-  test_hint_missing_handler_fails_closed();
+  test_hint_missing_handler_policy();
   test_hint_stop_wake();
   test_status_hblank_and_field_bits();
   test_region_profiles_and_version_register();

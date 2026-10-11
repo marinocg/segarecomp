@@ -2853,6 +2853,13 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
     /* SEG-055: H-interrupt. Entry through the M68K-owned core exactly like level 6; the latch clears once taken. A
        missing build-resolved handler (an unadmittable or RAM-resident vector) stops fail-closed -- never a silent drop. */
     if (!runtime->software_exception_handler_present[GENESIS_M68K_VECTOR_LEVEL4_AUTOVECTOR]) {
+      if (!runtime->raster.hint_strict) {
+        /* Compatibility policy (replaceable, observable): without a build-resolved handler the request cannot be
+           delivered; it is cleared and counted -- never silently -- and the program continues as every earlier build did. */
+        runtime->raster.hint_pending = 0U;
+        ++runtime->raster.hint_undelivered;
+        return 0;
+      }
       *result = (GenesisControlTransfer){0};
       result->kind = GENESIS_STOP;
       result->stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
@@ -2922,7 +2929,9 @@ static void genesis_m68k_wait_while_stopped(GenesisRuntime *runtime, GenesisCont
                              (runtime->devices.vdp.registers[1] & UINT16_C(0x0020)) != 0U);
   /* SEG-055: the H-interrupt (level 4) is a second wake source when it is enabled (register #0 bit 4) and either
      already latched or still able to latch. */
-  const int hint_source = (runtime->devices.vdp.registers[0] & UINT16_C(0x0010)) != 0U;
+  const int hint_source = (runtime->devices.vdp.registers[0] & UINT16_C(0x0010)) != 0U &&
+                          (runtime->software_exception_handler_present[GENESIS_M68K_VECTOR_LEVEL4_AUTOVECTOR] ||
+                           runtime->raster.hint_strict);
   /* STOP's loaded interrupt mask is below 4 iff a level-4 request could actually wake the CPU; otherwise the
      whole wait remains a single jump to the next VBlank onset exactly as before. */
   const int hint_wakes = hint_source && (((unsigned)runtime->sr >> 8) & 7U) < 4U;
@@ -3253,6 +3262,26 @@ const char *genesis_region_profile_name(unsigned profile) {
   }
 }
 
+int genesis_runtime_set_hint_strict(GenesisRuntime *runtime, unsigned strict) {
+  if (runtime == 0 || runtime->scheduler.master_ticks != 0U) return -1;
+  runtime->raster.hint_strict = strict != 0U ? 1U : 0U;
+  return 0;
+}
+
+void genesis_runtime_write_notes(const GenesisRuntime *runtime, uint64_t frame_render_rejections,
+                                 uint64_t vram_journal_overflows, FILE *stream) {
+  if (runtime == 0 || stream == 0) return;
+  if (runtime->region_profile == 0U && runtime->raster.hint_undelivered == 0U && frame_render_rejections == 0U &&
+      vram_journal_overflows == 0U)
+    return;
+  fprintf(stream,
+          "RUNTIME_NOTES {\"region\":\"%s\",\"hint_undelivered\":%llu,\"frame_render_rejections\":%llu,"
+          "\"vram_journal_overflows\":%llu,\"virtual_frames\":%llu}\n",
+          genesis_region_profile_name(runtime->region_profile), (unsigned long long)runtime->raster.hint_undelivered,
+          (unsigned long long)frame_render_rejections, (unsigned long long)vram_journal_overflows,
+          (unsigned long long)runtime->virtual_frame_count);
+}
+
 int genesis_runtime_set_region(GenesisRuntime *runtime, unsigned profile) {
   if (runtime == 0 || profile >= SEGARECOMP_GENESIS_REGION_PROFILE_COUNT || runtime->scheduler.master_ticks != 0U)
     return -1;
@@ -3280,6 +3309,8 @@ GenesisControlTransfer genesis_runtime_run(GenesisRuntime *runtime, GenesisDispa
      NTSC schedule: 50 Hz timing is not implemented. */
   if (!runtime->region_configured) {
     const char *name = getenv("SEGARECOMP_GENESIS_REGION");
+    const char *hint_policy = getenv("SEGARECOMP_GENESIS_HINT");
+    if (hint_policy != 0 && genesis_region_name_equals(hint_policy, "strict")) runtime->raster.hint_strict = 1U;
     unsigned profile = (unsigned)SEGARECOMP_GENESIS_REGION_USA_NTSC;
     runtime->region_configured = 1U;
     if (name != 0 && name[0] != '\0' && genesis_region_name_equals(name, "auto") == 0) {

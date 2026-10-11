@@ -61,6 +61,10 @@ static GenesisFrameCaptureResult genesis_frame_capture_finish(GenesisRuntime *ru
                                                               const GenesisLiveFrameObserver *observer) {
   if (observer != NULL) r.frames_published = observer->sequence;
   if (runtime != NULL) {
+    if (runtime->live_raster != NULL) {
+      r.render_rejections = runtime->live_raster->render_rejections;
+      r.vram_journal_overflows = runtime->live_raster->vram_journal_overflows;
+    }
     runtime->live_frame_observer = NULL;
     runtime->live_raster = NULL;
   }

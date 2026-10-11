@@ -9,9 +9,11 @@ the bridge C, which is compiled as strict C11 together with the production runti
    the mainline resumes through the handler's RTE and completes, and two runs are byte-identical. The H-interrupt count
    equals the independently derived schedule (register #10 = 9 -> 22 requests per 224-line active display).
 2. The same image with the H-interrupt DISABLED executes no handler (D7 stays 0) -- the interrupt is gated by register #0 bit 4.
-3. A work-RAM vector slot (RAM jump-table convention) builds without a handler; an enabled H-interrupt then stops fail-closed
-   with the typed `hint_handler_not_installed` diagnostic instead of being silently dropped.
-4. A vector slot that is zero (never installed) builds, and enabling the interrupt fails closed the same way.
+3. A work-RAM vector slot (RAM jump-table convention) builds without a handler. By default an enabled but undeliverable
+   H-interrupt is counted and dropped (what every earlier build did, now observable through RUNTIME_NOTES-style counters) and the
+   program continues; with SEGARECOMP_GENESIS_HINT=strict the run stops fail-closed with the typed `hint_handler_not_installed`
+   diagnostic instead.
+4. A vector slot that is zero (never installed) behaves the same way.
 """
 import pathlib
 import re
@@ -67,7 +69,7 @@ def seed(generated_c, enable, reg10):
   return seeded[:drive.end()] + instrumentation + seeded[drive.end():]
 
 
-def build_and_run(compiler, runtime_dir, source, name, budget="2000000"):
+def build_and_run(compiler, runtime_dir, source, name, budget="2000000", env=None):
   with tempfile.TemporaryDirectory() as temp:
     path = pathlib.Path(temp)
     (path / "generated.c").write_text(source)
@@ -76,8 +78,12 @@ def build_and_run(compiler, runtime_dir, source, name, budget="2000000"):
                             str(path / "generated.c"), str(runtime_dir / "runtime.c"), "-o", str(prog)],
                            text=True, capture_output=True)
     assert build.returncode == 0, build.stderr
-    first = subprocess.run([str(prog), "--instruction-budget", budget], text=True, capture_output=True)
-    second = subprocess.run([str(prog), "--instruction-budget", budget], text=True, capture_output=True)
+    import os
+    run_env = dict(os.environ)
+    run_env.pop("SEGARECOMP_GENESIS_HINT", None)
+    run_env.update(env or {})
+    first = subprocess.run([str(prog), "--instruction-budget", budget], text=True, capture_output=True, env=run_env)
+    second = subprocess.run([str(prog), "--instruction-budget", budget], text=True, capture_output=True, env=run_env)
     assert (first.returncode, first.stdout, first.stderr) == (second.returncode, second.stdout, second.stderr), \
         "generated program must be deterministic"
     return first
@@ -115,21 +121,28 @@ def main():
   disabled = build_and_run(compiler, runtime_dir, seed(resolved, False, 9), "hint-disabled")
   assert d7_of(disabled)[0] == 0, disabled.stderr
 
-  # 3. A work-RAM vector slot: the build succeeds without a handler; enabling the interrupt stops fail-closed (typed).
+  # 3. A work-RAM vector slot: the build succeeds without a handler. Default policy: the enabled interrupt is dropped (counted)
+  # and the mainline completes; strict policy: typed fail-closed stop.
   with tempfile.TemporaryDirectory() as temp:
     ram_vector = emit(executable, build_rom(0x00FFFF90), temp)
   assert "software_exception_handler_entry[28]" not in ram_vector
-  stopped = build_and_run(compiler, runtime_dir, seed(ram_vector, True, 9), "hint-ram-vector")
-  assert '"diagnostic_category":"hint_handler_not_installed"' in stopped.stdout, (stopped.stdout, stopped.stderr)
-  assert '"stop_class":"unsupported_interrupt_or_scheduling_event"' in stopped.stdout, stopped.stdout
+  skipped = build_and_run(compiler, runtime_dir, seed(ram_vector, True, 9), "hint-ram-vector")
+  assert d7_of(skipped)[0] == 0 and '"family":"reset"' in skipped.stdout, (skipped.stdout, skipped.stderr)
+  strict = build_and_run(compiler, runtime_dir, seed(ram_vector, True, 9), "hint-ram-vector-strict",
+                         env={"SEGARECOMP_GENESIS_HINT": "strict"})
+  assert '"diagnostic_category":"hint_handler_not_installed"' in strict.stdout, (strict.stdout, strict.stderr)
+  assert '"stop_class":"unsupported_interrupt_or_scheduling_event"' in strict.stdout, strict.stdout
 
-  # 4. A never-installed (zero) slot behaves the same when the program enables the interrupt anyway.
+  # 4. A never-installed (zero) slot behaves the same way.
   with tempfile.TemporaryDirectory() as temp:
     absent = emit(executable, build_rom(0), temp)
   assert "software_exception_handler_entry[28]" not in absent
-  stopped_absent = build_and_run(compiler, runtime_dir, seed(absent, True, 9), "hint-absent")
-  assert '"diagnostic_category":"hint_handler_not_installed"' in stopped_absent.stdout, stopped_absent.stdout
-  quiet = build_and_run(compiler, runtime_dir, seed(absent, False, 9), "hint-absent-disabled")
+  dropped = build_and_run(compiler, runtime_dir, seed(absent, True, 9), "hint-absent")
+  assert d7_of(dropped)[0] == 0 and '"family":"reset"' in dropped.stdout, dropped.stdout
+  strict_absent = build_and_run(compiler, runtime_dir, seed(absent, True, 9), "hint-absent-strict",
+                                env={"SEGARECOMP_GENESIS_HINT": "strict"})
+  assert '"diagnostic_category":"hint_handler_not_installed"' in strict_absent.stdout, strict_absent.stdout
+  quiet = build_and_run(compiler, runtime_dir, seed(absent, False, 9), "hint-absent-disabled", env={"SEGARECOMP_GENESIS_HINT": "strict"})
   assert d7_of(quiet)[0] == 0 and "hint_handler_not_installed" not in quiet.stdout, quiet.stdout
 
   print("genesis hint generated: ok")

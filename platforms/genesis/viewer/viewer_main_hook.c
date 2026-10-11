@@ -90,6 +90,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   GenesisViewerResult r = genesis_viewer_run(runtime, dispatch, &options, &host, &pacer,
                                                 dispatch_allowance == UINT32_MAX ? UINT64_MAX : dispatch_allowance);
   runtime->live_frame_observer = NULL;
+  genesis_runtime_write_notes(runtime, g_raster_capture.render_rejections, g_raster_capture.vram_journal_overflows, stderr);
   runtime->live_raster = NULL;
 #ifdef SEGARECOMP_GENESIS_SOUND
   genesis_sound_finish(runtime, r.outcome == GENESIS_VIEWER_GUEST_STOP);
