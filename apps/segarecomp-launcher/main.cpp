@@ -416,6 +416,7 @@ int gui() {
     if (rom.aot_policy == choice) return;
     policy_choice = choice;
     rom.aot_policy = choice;
+    if (std::string(choice) == "compatibility") { model_choice = "v1"; rom.aot_model = "v1"; }  // the experimental opt-in never survives leaving Optimized
     show_diagnostics = false;
     entry = entry_dir(rom, layout);  // the policy is part of the cache identity: the two modes never alias
     state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
@@ -600,8 +601,8 @@ int gui() {
         // Advanced: the experimental model opt-in is only offered while Optimized is selected, as one small secondary control.
         if (opt) {
           const bool g2 = rom.optimized_gen2();
-          if ((g2 ? bevel_button(centered, "model_g2", content_x + 336.0F, y, 78.0F, 26.0F, "Experimental", font_bold, 10.0F)
-                  : outline_button(centered, "model_g2", content_x + 336.0F, y, 78.0F, 26.0F, "Experimental", font_regular, 10.0F)))
+          if ((g2 ? bevel_button(centered, "model_g2", content_x + 334.0F, y, 74.0F, 26.0F, "Experimental", font_bold, 10.0F)
+                  : outline_button(centered, "model_g2", content_x + 334.0F, y, 74.0F, 26.0F, "Experimental", font_regular, 10.0F)))
             set_model(g2 ? "v1" : "gen2");
         }
       };

@@ -283,25 +283,30 @@ std::string product_policy_identity(const Layout &layout, const std::string &pol
       std::string out;
       char buffer[256];
       SDL_IOStream *stream = SDL_GetProcessOutput(process);
-      while (stream && out.size() < 4096) {
+      const Uint64 deadline = SDL_GetTicks() + 5000U;  // the tool prints one short line in milliseconds; never block the UI on a hung tool
+      bool timed_out = false;
+      while (stream) {
+        if (SDL_GetTicks() > deadline) { timed_out = true; break; }
         const std::size_t got = SDL_ReadIO(stream, buffer, sizeof(buffer));
         if (got == 0) {
           if (SDL_GetIOStatus(stream) == SDL_IO_STATUS_NOT_READY) { SDL_Delay(5); continue; }
           break;
         }
-        out.append(buffer, got);
+        if (out.size() < 4096U) out.append(buffer, got);  // keep the head, but always drain the pipe to EOF
       }
       int code = -1;
+      if (timed_out) SDL_KillProcess(process, true);
       SDL_WaitProcess(process, true, &code);
       SDL_DestroyProcess(process);
       const auto at = out.find("policy_identity=");
-      if (code == 0 && at != std::string::npos) {
+      if (!timed_out && code == 0 && at != std::string::npos) {
         const auto end = out.find_first_of(" \r\n", at);
         identity = out.substr(at + 16, end == std::string::npos ? std::string::npos : end - at - 16);
         if (identity.size() != 64U || identity.find_first_not_of("0123456789abcdef") != std::string::npos) identity.clear();
       }
     }
   }
+  if (identity.empty()) return identity;  // a failure is never memoized: the next call retries
   std::lock_guard<std::mutex> lock(memo_mutex);
   memo[key] = identity;
   return identity;
@@ -316,7 +321,8 @@ bool entry_ready_for(const fs::path &entry, const RomView &rom, const Layout &la
   if (rom.optimized()) {
     if (report.requested_model != rom.aot_model) return false;
     const std::string current = product_policy_identity(layout, "optimized", rom.aot_model);
-    if (!current.empty() && !report.policy_identity.empty() && report.policy_identity != current) return false;  // the shipped model/contract changed
+    // Fail closed: when the product identity is known, the entry must record exactly it (a missing or different one means a stale/foreign entry).
+    if (!current.empty() && report.policy_identity != current) return false;
   }
   return true;
 }

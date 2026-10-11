@@ -14,13 +14,13 @@
 - **Same semantics as the CLI.** Headless mode accepts `--aot-policy` / `--aot-model` (same validity rule) and prints the same product fields (`aot_policy_*`, including class, family,
   validator, fractions and both identities); the GUI and headless share the same core.
 - **Cache identity from the product.** The entry key adds the model family and the *product-provided* ROM-independent `policy_identity` (`segarecomp aot-policy-identity`, which binds model,
-  schema, token contract, rank policy and analysis contract), memoized per tool/policy/model; Compatibility keeps its historical key. In addition `entry_ready_for` refuses to reuse a finished
-  entry whose recorded request, requested model or `policy_identity` differ from the current request/tool, so a stale or foreign entry is rebuilt, never reused, even if it somehow shares a
+  schema, token contract, rank policy and analysis contract), memoized per tool/policy/model; Compatibility keeps its historical key. In addition `entry_ready_for` refuses (fail closed) to reuse a finished
+  entry whose recorded request, requested model or `policy_identity` differ or is missing from the current request/tool, so a stale or foreign entry is rebuilt, never reused, even if it somehow shares a
   directory. Mode and model switches recompute the entry and the Ready/RomSelected state; the old entry stays valid for its own request.
 
 ## 2. Evidence
 
-- `launcher_policy_test` (CTest, built by the SDL3 CI job on three OSes; now also takes the real CLI): v1 / gen2 / Compatibility entries never alias; a model request never changes a Compatibility or Master System
+- `launcher_policy_test` (CTest, built and run by the SDL3 CI job; now also takes the real CLI): v1 / gen2 / Compatibility entries never alias; a model request never changes a Compatibility or Master System
   entry; product identities are distinct stable 64-hex digests; seven entry-reuse cases (matching gen2/Compatibility reuse; v1-vs-gen2, gen2-vs-v1, Compatibility-vs-Optimized, Optimized-vs-Compatibility and stale-identity
   all refused); report/summary/details wording including the gen2 fallback.
 - Local headless end-to-end (fake package root with the real CLI, a gcc shim for the bundled compiler, locally built SDL3, the synthetic Genesis image): Compatibility, Optimized(v1) and Optimized+gen2 each
@@ -30,5 +30,8 @@
   for the three states (the Experimental control fits inside the panel).
 
 ## 3. Limits
+
+- The experimental choice is session-local, is reset to v1 when the user returns to Compatibility, and is offered only under Optimized. `product_policy_identity` is bounded by a 5 s wall clock (the tool is killed on timeout), drains its pipe, and never memoizes a failure; an unavailable identity degrades to the policy+model key with the staleness check off.
+- Choosing the experimental model on a build that needs ADR 0049 aliases/RAM thunks (Flicky) costs a little extra time (256 s vs 237 s measured, ADR 0104 section 3) for no benefit because it falls back; this is a known cost of the opt-in.
 
 - The graphical flow was reviewed through rendered frames and the headless core, not by an interactive session. Fallback wording is covered by tests for the report text, not for pixels.

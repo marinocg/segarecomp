@@ -97,6 +97,8 @@ int main(int argc, char **argv) {
     expect(!entry_ready_for(make_entry("r4", report("compatibility", "none", c)), optimized, layout), "a Compatibility entry is never reused for Optimized");
     expect(!entry_ready_for(make_entry("r5", report("optimized", "v1", v1)), genesis, layout), "an Optimized entry is never reused for Compatibility");
     expect(!entry_ready_for(make_entry("r6", report("optimized", "gen2", std::string(64U, '0'))), gen2, layout), "a stale policy identity (changed model/schema/contract) is rebuilt");
+    expect(!entry_ready_for(make_entry("r8", R"({"requested":"optimized","requested_model":"gen2","effective":"broad","fallback":false,"reason":"none"})"), gen2, layout),
+           "a missing recorded policy identity is refused when the product identity is known (fail closed)");
     expect(entry_ready_for(make_entry("r7", report("compatibility", "none", c)), genesis, layout), "a matching Compatibility entry is reusable");
   } else {
     expect(product_policy_identity(layout, "optimized", "gen2").empty(), "no tool, no identity (the key then still separates by policy and model)");
