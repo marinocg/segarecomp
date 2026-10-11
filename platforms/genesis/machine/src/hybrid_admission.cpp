@@ -507,7 +507,7 @@ std::string genesis_decode_token_report(std::span<const std::uint8_t> rom) {
   for (std::size_t position = 0; position < positions; ++position) {
     std::uint8_t token[genesis_decode_token_fields] = {};
     const std::size_t offset = position * 2U;
-    const DecodeSource source{CpuVariant::mc68000, {TargetAddressSpace::m68k_program, static_cast<std::uint64_t>(offset)},
+    const DecodeSource source{CpuVariant::mc68000, {TargetAddressSpace::m68k_program, static_cast<std::uint32_t>(offset)},
                               MoveqImageOffset{offset}};
     const auto result = decode_m68k_instruction(rom, source, M68kDecodeProfile::general_startup);
     if (const auto *decoded = std::get_if<M68kDecodedInstruction>(&result)) {

@@ -344,6 +344,33 @@ class Guards(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 g.verify_frozen_artifact(path)
 
+    def test_committed_results_are_aggregate_only(self):
+        """Hygiene: no address-level truth, per-cell label, ROM excerpt or instruction-address array may be committed."""
+        import re
+        results = json.load(open(os.path.join(TOOLS, "segarecomp_ml_region_gen2.results.json")))
+        self.assertIn("data_boundary", results)
+        hex8 = re.compile(r"^[0-9a-f]{8}$")
+
+        def walk(node, path="$"):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    self.assertFalse(hex8.match(str(key)), f"address-like key at {path}")
+                    if str(key).lower() in ("truth", "addresses", "starts", "labels", "cells", "rom", "bytes_hex"):
+                        self.assertIsInstance(value, (int, float), f"{path}.{key} must be a scalar count, not an array")
+                    walk(value, f"{path}.{key}")
+            elif isinstance(node, list):
+                self.assertLessEqual(len(node), 64, f"unexpectedly long array at {path} (per-cell/per-address data?)")
+                for i, value in enumerate(node):
+                    walk(value, f"{path}[{i}]")
+            elif isinstance(node, str):
+                self.assertFalse(hex8.match(node), f"address-like string at {path}")
+        walk(results)
+
+    def test_v1_baseline_decisions_unchanged_by_the_plan(self):
+        plan = json.load(open(os.path.join(TOOLS, "segarecomp_ml_region_gen2.plan.json")))
+        self.assertIn("0.00835406801187952", plan["models"]["M0"]["what"])
+        self.assertIn("SEG-047 v1 artifacts are unchanged", plan["scope"])
+
     def test_frozen_plan_file(self):
         plan = json.load(open(os.path.join(TOOLS, "segarecomp_ml_region_gen2.plan.json")))
         self.assertEqual(sorted(plan["models"]), ["M0", "M1", "M2", "M3", "M4"])
