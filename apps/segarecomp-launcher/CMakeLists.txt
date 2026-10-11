@@ -55,7 +55,9 @@ add_executable(launcher_policy_test launcher_policy_test.cpp)
 target_link_libraries(launcher_policy_test PRIVATE segarecomp_launcher_core)
 segarecomp_enable_warnings(launcher_policy_test)
 if(BUILD_TESTING)
-  add_test(NAME launcher_policy_test COMMAND launcher_policy_test)
+  # SEG-049: the real CLI provides the policy identity the launcher keys on (no launcher-side model knowledge); built as a dependency.
+  add_dependencies(launcher_policy_test segarecomp)
+  add_test(NAME launcher_policy_test COMMAND launcher_policy_test $<TARGET_FILE:segarecomp>)
   set_property(TEST launcher_policy_test APPEND PROPERTY LABELS full fast)
 endif()
 

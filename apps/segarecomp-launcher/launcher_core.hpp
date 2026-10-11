@@ -43,6 +43,10 @@ struct RomView {
   std::string aot_policy = "compatibility";
   [[nodiscard]] bool supports_optimized() const { return platform_id == "genesis"; }
   [[nodiscard]] bool optimized() const { return supports_optimized() && aot_policy == "optimized"; }
+  // SEG-049: the EXPERIMENTAL model family of Optimized ("v1" = default, "gen2" = explicit opt-in), forwarded verbatim to `segarecomp build
+  // --aot-model`. It is an opaque product option: the launcher knows no model, threshold, schema or compatibility rule.
+  std::string aot_model = "v1";
+  [[nodiscard]] bool optimized_gen2() const { return optimized() && aot_model == "gen2"; }
   bool compat_known = false;          // ROM-hash-bound analysis metadata ships with this release
   std::string error;                  // non-empty: unreadable/too large
 };
@@ -58,14 +62,28 @@ inline constexpr const char *sms_profile = "sms2_ntsc_export";
 // The machine-readable `aot_policy` member of a finished build's status.json (a thin read; no human text is parsed).
 struct PolicyReport {
   bool present = false;
-  std::string requested;  // compatibility | optimized
-  std::string effective;  // broad | ml_region | admission_plan
-  std::string reason;     // stable sanitized code (none, validator_rejected, ...)
-  bool fallback = false;  // Optimized was requested but the build is the broad (Compatibility) program
+  std::string requested;        // compatibility | optimized
+  std::string requested_model;  // none | v1 | gen2
+  std::string effective;        // broad | ml_region | ml_region_gen2 | admission_plan (the producer that actually ran)
+  std::string reason;           // stable sanitized code (none, validator_rejected, ...)
+  std::string fallback_class;   // stable class (none, producer_incompatible, producer_input, proposal_rejected, ...)
+  std::string model_family;     // none | v1 | gen2
+  std::string validator;        // accepted | rejected | not_run
+  std::string model, rank_policy, policy_identity, identity;  // product-provided identities (diagnostics / staleness only)
+  long long selected_ppm = -1, admitted_ppm = -1;             // parts per million; -1 when not reported
+  bool fallback = false;        // Optimized was requested but the build is the broad (Compatibility) program
 };
 [[nodiscard]] PolicyReport read_policy_report(const std::filesystem::path &entry);
 // User-facing wording of a report (one short line; empty when there is nothing to say).
 [[nodiscard]] std::string policy_summary(const PolicyReport &report);
+// Advanced diagnostics text (producer, model/identity, fractions, validator, fallback class/reason); sanitized product fields only.
+[[nodiscard]] std::string policy_details(const PolicyReport &report);
+// The ROM-independent policy identity printed by `segarecomp aot-policy-identity` (empty when the tool cannot be run). The launcher keys its cache on
+// it instead of reproducing any model/schema/contract compatibility rule. Memoized per (tool, policy, model).
+[[nodiscard]] std::string product_policy_identity(const Layout &layout, const std::string &policy, const std::string &model);
+// A finished entry is reusable only when it exists AND its recorded request/identity still equal the current request (a stale or foreign
+// entry that somehow shares a directory is rebuilt, never reused).
+[[nodiscard]] bool entry_ready_for(const std::filesystem::path &entry, const RomView &rom, const Layout &layout);
 [[nodiscard]] std::string read_tail(const std::filesystem::path &path, std::size_t max_bytes);
 [[nodiscard]] std::string host_description();
 

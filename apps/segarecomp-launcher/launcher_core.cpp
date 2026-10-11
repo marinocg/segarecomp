@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <map>
+#include <mutex>
 #include <sstream>
 #include <vector>
 
@@ -155,9 +157,14 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
 
 // Genesis keeps its historical key segment; Master System adds the platform, profile and declared mapper (and the sidecar
 // manifest's content digest), so a different declaration or manifest always selects a fresh cache entry.
-std::string platform_key(const RomView &rom) {
+std::string platform_key(const RomView &rom, const Layout *layout_for_key) {
   // Compatibility keeps the historical Genesis key; Optimized adds the policy, so the two never share a cache entry (ADR 0096).
-  if (rom.platform_id != "master-system") return rom.optimized() ? "genesis:aot=optimized" : "genesis";
+  if (rom.platform_id != "master-system") {
+    if (!rom.optimized()) return "genesis";
+    // The model family and the product-provided policy identity (which binds model, schema, token contract, rank policy and analysis contract) are part
+    // of the key: a different request or a changed shipped model can never select the same entry.
+    return "genesis:aot=optimized:model=" + rom.aot_model + ":pid=" + (layout_for_key != nullptr ? product_policy_identity(*layout_for_key, "optimized", rom.aot_model) : std::string());
+  }
   return std::string("master-system:") + sms_profile + ":mapper=" + rom.mapper + ":manifest=" + rom.mapper_manifest_sha256;
 }
 
@@ -168,7 +175,7 @@ fs::path entry_dir(const RomView &rom, const Layout &layout) {
   std::error_code ec;
   const auto cli_size = fs::is_regular_file(layout.cli, ec) ? fs::file_size(layout.cli, ec) : 0U;
   const auto cli_time = fs::last_write_time(layout.cli, ec).time_since_epoch().count();
-  const std::string key = rom.sha256 + "|cli-" + std::to_string(static_cast<unsigned long long>(cli_size)) + "-" + std::to_string(static_cast<long long>(cli_time)) + "|" SEGARECOMP_LAUNCHER_VERSION "|" + platform_key(rom) + "|" + host_arch() + "|" +
+  const std::string key = rom.sha256 + "|cli-" + std::to_string(static_cast<unsigned long long>(cli_size)) + "-" + std::to_string(static_cast<long long>(cli_time)) + "|" SEGARECOMP_LAUNCHER_VERSION "|" + platform_key(rom, &layout) + "|" + host_arch() + "|" +
                           SDL_GetPlatform() + "|zig-" SEGARECOMP_ZIG_VERSION "|O2|" + utf8(layout.root);
   const std::string digest = segarecomp::sha256_hex({reinterpret_cast<const std::uint8_t *>(key.data()), key.size()});
   return cache_root() / "games" / digest.substr(0, 32);
@@ -208,6 +215,20 @@ PolicyReport read_policy_report(const fs::path &entry) {
   report.requested = policy_field(object, "requested");
   report.effective = policy_field(object, "effective");
   report.reason = policy_field(object, "reason");
+  report.requested_model = policy_field(object, "requested_model");
+  report.fallback_class = policy_field(object, "fallback_class");
+  report.model_family = policy_field(object, "model_family");
+  report.validator = policy_field(object, "validator");
+  report.model = policy_field(object, "model");
+  report.rank_policy = policy_field(object, "rank_policy");
+  report.policy_identity = policy_field(object, "policy_identity");
+  report.identity = policy_field(object, "identity");
+  const auto number = [&object](const char *key) {
+    const std::string value = policy_field(object, key);
+    return value.empty() || value.find_first_not_of("0123456789") != std::string::npos ? -1LL : std::atoll(value.c_str());
+  };
+  report.selected_ppm = number("selected_ppm");
+  report.admitted_ppm = number("admitted_ppm");
   report.fallback = policy_field(object, "fallback") == "true";
   report.present = !report.requested.empty() && !report.effective.empty();
   return report;
@@ -218,7 +239,93 @@ std::string policy_summary(const PolicyReport &report) {
   if (report.requested != "optimized") return "Compatibility build";
   if (report.fallback) return "Optimized unavailable for this game: built Compatibility";
   if (report.effective == "admission_plan") return "Optimized build (exact map)";
+  if (report.effective == "ml_region_gen2") return "Optimized build (experimental model)";
   return "Optimized build";
+}
+
+std::string policy_details(const PolicyReport &r) {
+  if (!r.present) return {};
+  const auto percent = [](long long ppm) { return ppm < 0 ? std::string("n/a") : std::to_string(ppm / 10000) + "." + std::to_string((ppm / 1000) % 10) + " %"; };
+  std::string text = "Requested: " + r.requested + (r.requested == "optimized" && !r.requested_model.empty() ? " (model " + r.requested_model + ")" : "") + "\nEffective: " + r.effective;
+  if (r.fallback) text += "\nOptimized fell back to the Compatibility program. Reason: " + r.reason + " (" + r.fallback_class + ")";
+  if (!r.model_family.empty() && r.model_family != "none") text += "\nModel family: " + r.model_family + (r.rank_policy.empty() ? "" : ", rank policy " + r.rank_policy);
+  if (!r.model.empty()) text += "\nModel: " + r.model;
+  if (r.selected_ppm >= 0 || r.admitted_ppm >= 0) text += "\nSelected: " + percent(r.selected_ppm) + "   Admitted: " + percent(r.admitted_ppm);
+  if (!r.validator.empty()) text += "\nValidator: " + r.validator;
+  if (!r.identity.empty()) text += "\nBuild identity: " + r.identity.substr(0, 16) + "...";
+  if (!r.policy_identity.empty()) text += "\nPolicy identity: " + r.policy_identity.substr(0, 16) + "...";
+  return text;
+}
+
+std::string product_policy_identity(const Layout &layout, const std::string &policy, const std::string &model) {
+  static std::map<std::string, std::string> memo;
+  static std::mutex memo_mutex;
+  const std::string key = utf8(layout.cli) + "|" + policy + "|" + model;
+  {
+    std::lock_guard<std::mutex> lock(memo_mutex);
+    if (const auto found = memo.find(key); found != memo.end()) return found->second;
+  }
+  std::string identity;
+  std::error_code ec;
+  if (fs::is_regular_file(layout.cli, ec)) {
+    const std::string exe = utf8(layout.cli);
+    std::vector<const char *> argv{exe.c_str(), "aot-policy-identity", "--aot-policy", policy.c_str()};
+    if (policy == "optimized") { argv.push_back("--aot-model"); argv.push_back(model.c_str()); }
+    argv.push_back(nullptr);
+    SDL_PropertiesID props = SDL_CreateProperties();
+    SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());
+    SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
+    SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_APP);
+    SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_NULL);
+    SDL_Process *process = SDL_CreateProcessWithProperties(props);
+    SDL_DestroyProperties(props);
+    if (process) {
+      std::string out;
+      char buffer[256];
+      SDL_IOStream *stream = SDL_GetProcessOutput(process);
+      const Uint64 deadline = SDL_GetTicks() + 5000U;  // the tool prints one short line in milliseconds; never block the UI on a hung tool
+      bool timed_out = false;
+      while (stream) {
+        if (SDL_GetTicks() > deadline) { timed_out = true; break; }
+        const std::size_t got = SDL_ReadIO(stream, buffer, sizeof(buffer));
+        if (got == 0) {
+          if (SDL_GetIOStatus(stream) == SDL_IO_STATUS_NOT_READY) { SDL_Delay(5); continue; }
+          break;
+        }
+        if (out.size() < 4096U) out.append(buffer, got);  // keep the head, but always drain the pipe to EOF
+      }
+      int code = -1;
+      if (timed_out) SDL_KillProcess(process, true);
+      SDL_WaitProcess(process, true, &code);
+      SDL_DestroyProcess(process);
+      const auto at = out.find("policy_identity=");
+      if (!timed_out && code == 0 && at != std::string::npos) {
+        const auto end = out.find_first_of(" \r\n", at);
+        identity = out.substr(at + 16, end == std::string::npos ? std::string::npos : end - at - 16);
+        if (identity.size() != 64U || identity.find_first_not_of("0123456789abcdef") != std::string::npos) identity.clear();
+      }
+    }
+  }
+  if (identity.empty()) return identity;  // a failure is never memoized: the next call retries
+  std::lock_guard<std::mutex> lock(memo_mutex);
+  memo[key] = identity;
+  return identity;
+}
+
+bool entry_ready_for(const fs::path &entry, const RomView &rom, const Layout &layout) {
+  if (!entry_ready(entry)) return false;
+  if (rom.platform_id == "master-system") return true;
+  const PolicyReport report = read_policy_report(entry);
+  if (!report.present) return !rom.optimized();  // an older entry without the member is a Compatibility build
+  if (report.requested != (rom.optimized() ? "optimized" : "compatibility")) return false;
+  if (rom.optimized()) {
+    if (report.requested_model != rom.aot_model) return false;
+    const std::string current = product_policy_identity(layout, "optimized", rom.aot_model);
+    // Fail closed: an Optimized entry is reusable only when the CURRENT product identity is known and equals the recorded one. An unavailable
+    // identity (tool missing, failing, timing out or printing garbage) refuses reuse; it never makes the check optional.
+    if (current.empty() || report.policy_identity != current) return false;
+  }
+  return true;
 }
 
 std::string read_tail(const fs::path &path, std::size_t max_bytes) {
@@ -269,6 +376,7 @@ void BuildJob::run() {
     if (!rom_.mapper_manifest.empty()) args.insert(args.end(), {"--mapper-manifest", utf8(rom_.mapper_manifest)});
   }
   if (rom_.optimized()) args.insert(args.end(), {"--aot-policy", "optimized"});
+  if (rom_.optimized_gen2()) args.insert(args.end(), {"--aot-model", "gen2"});
 #if defined(_WIN32)
   // The runtime keeps whole-machine state in automatic storage; match the POSIX 8 MiB main-thread stack.
   args.insert(args.end(), {"--link-arg", "-Wl,--stack,8388608"});

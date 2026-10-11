@@ -1142,6 +1142,18 @@ target_link_libraries(genesis_ml_scorer_test PRIVATE segarecomp::machine_genesis
 segarecomp_enable_warnings(genesis_ml_scorer_test)
 add_test(NAME genesis_ml_scorer_test COMMAND genesis_ml_scorer_test)
 set_property(TEST genesis_ml_scorer_test APPEND PROPERTY LABELS full fast)
+# SEG-049-T003 (ADR 0102): native frozen gen2 M3 evaluator + B35 rank-budget selection (hermetic, synthetic bytes only).
+add_executable(genesis_ml_gen2_test genesis_ml_gen2_test.cpp)
+target_link_libraries(genesis_ml_gen2_test PRIVATE segarecomp::machine_genesis)
+segarecomp_enable_warnings(genesis_ml_gen2_test)
+add_test(NAME genesis_ml_gen2_test COMMAND genesis_ml_gen2_test)
+set_property(TEST genesis_ml_gen2_test APPEND PROPERTY LABELS full fast)
+# SEG-049-T004 (ADR 0103): the shared ML admission owner and the model/policy lifecycle (authority, fallback classes, identities).
+add_executable(genesis_ml_admission_lifecycle_test genesis_ml_admission_lifecycle_test.cpp)
+target_link_libraries(genesis_ml_admission_lifecycle_test PRIVATE segarecomp::machine_genesis)
+segarecomp_enable_warnings(genesis_ml_admission_lifecycle_test)
+add_test(NAME genesis_ml_admission_lifecycle_test COMMAND genesis_ml_admission_lifecycle_test)
+set_property(TEST genesis_ml_admission_lifecycle_test APPEND PROPERTY LABELS full fast)
 # SEG-047-T004 (ADR 0096): exact native-vs-committed-parity digests on whichever of the five parity images are held locally (skip: 77).
 add_test(NAME genesis_ml_region_native_parity_local_test
   COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/segarecomp_ml_region_native_parity.py

@@ -3,6 +3,7 @@
 #include "segarecomp/machine/master_system/cartridge.hpp"
 #include "segarecomp/machine/genesis/frontend.hpp"
 #include "segarecomp/machine/genesis/hybrid_admission.hpp"
+#include "segarecomp/machine/genesis/ml_admission.hpp"
 #include "segarecomp/machine/genesis/m68k_copy_alias.hpp"
 #include "segarecomp/machine/genesis/z80_materialization.hpp"
 #include "segarecomp/machine/master_system/emit.hpp"
@@ -207,6 +208,9 @@ struct Options {
   // any producer failure falls back to the broad universe (visible in status.json), and an explicit --admission-plan (exact map)
   // outranks it.
   std::string aot_policy = "compatibility";
+  // SEG-049-T004 (ADR 0103): the EXPERIMENTAL model family requested for `optimized`. `v1` (default) is the SEG-047 route and is never
+  // silently replaced; `gen2` is an explicit opt-in (M3 + B35). It has no meaning for `compatibility`.
+  std::string aot_model = "v1";
 };
 
 enum class Target { genesis, master_system };
@@ -259,7 +263,7 @@ void stage(const char *name, const char *state) { std::cout << "@stage " << name
 
 std::optional<Options> parse_options(int argc, char **argv) {
   Options options;
-  bool have_rom = false, have_output = false, have_runtime = false;
+  bool have_rom = false, have_output = false, have_runtime = false, aot_model_given = false;
   for (int i = 2; i < argc; i += 2) {
     const std::string_view key = argv[i];
     if (i + 1 >= argc) return std::nullopt;
@@ -283,12 +287,14 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--jobs") options.jobs = static_cast<unsigned>(std::max(0, std::atoi(value.c_str())));
     else if (key == "--admission-plan" && !options.admission_plan) options.admission_plan = fs::path(value);
     else if (key == "--aot-policy" && (value == "compatibility" || value == "optimized")) options.aot_policy = value;
+    else if (key == "--aot-model" && !aot_model_given && (value == "v1" || value == "gen2")) { options.aot_model = value; aot_model_given = true; }
     else return std::nullopt;
   }
   if (!have_rom || !have_output || !have_runtime || options.cc.empty()) return std::nullopt;
   if (options.optimize != "0" && options.optimize != "1" && options.optimize != "2") return std::nullopt;
   if (!options.runtime_optimize.empty() && options.runtime_optimize != "0" && options.runtime_optimize != "1" && options.runtime_optimize != "2") return std::nullopt;
   if (options.sdl3_include.has_value() != options.sdl3_lib.has_value()) return std::nullopt;
+  if (options.aot_model == "gen2" && options.aot_policy != "optimized") return std::nullopt;  // gen2 is an opt-in of Optimized, never a policy
   if (!options.platform.empty() && options.platform != "genesis" && options.platform != "master-system") return std::nullopt;
   return options;
 }
@@ -702,26 +708,43 @@ std::string aot_policy_json(const Options &options, const Log &log, const std::s
   }
   const auto safe = [](const std::string &value) {
     std::string out;
-    for (const char c : value) out.push_back((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' ? c : '_');
+    for (const char c : value) out.push_back((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' ? c : '_');
     return out;
   };
-  std::string json = ",\"aot_policy\":{\"requested\":\"" + options.aot_policy + "\",\"effective\":\"" + safe(effective) +
-                     "\",\"fallback\":" + (fallback ? "true" : "false") + ",\"reason\":\"" + safe(reason) + "\"";
-  if (effective == "ml_region") {
+  const bool gen2_request = options.aot_policy == "optimized" && options.aot_model == "gen2";
+  const auto requested_family = gen2_request ? segarecomp::GenesisMlModelFamily::gen2 : segarecomp::GenesisMlModelFamily::v1;
+  const bool ml_effective = effective == "ml_region" || effective == "ml_region_gen2";
+  const std::string fallback_class(segarecomp::genesis_ml_fallback_class(reason));
+  std::string json = ",\"aot_policy\":{\"requested\":\"" + options.aot_policy + "\",\"requested_model\":\"" +
+                     (options.aot_policy == "optimized" ? options.aot_model : std::string("none")) + "\",\"effective\":\"" + safe(effective) +
+                     "\",\"fallback\":" + (fallback ? "true" : "false") + ",\"reason\":\"" + safe(reason) + "\",\"fallback_class\":\"" +
+                     fallback_class + "\",\"model_family\":\"" + (ml_effective ? (effective == "ml_region_gen2" ? "gen2" : "v1") : "none") +
+                     "\",\"analysis_contract\":\"" + std::string(segarecomp::genesis_admission_analysis_contract) + "\"";
+  if (ml_effective) {
     const auto number = [&kv, &safe](const char *key) { return kv.count(key) != 0U ? safe(kv[key]) : std::string("0"); };
+    const bool v1 = effective == "ml_region";
     json += ",\"model\":\"" + safe(kv["model"]) + "\",\"schema_sha256\":\"" + safe(kv["schema"]) + "\"";
-    for (const char *key : {"windows", "ml_selected", "seed_windows", "universe", "k0", "k", "pruned", "rounds"})
-      json += std::string(",\"") + key + "\":" + number(key);
-    json += ",\"k_sha256\":\"" + safe(kv["k_sha256"]) + "\",\"validator\":\"" + safe(kv["validator"]) + "\"";
+    if (!v1)
+      json += ",\"token_contract_sha256\":\"" + safe(kv["token_contract"]) + "\",\"rank_policy\":\"" + safe(kv["rank_policy"]) +
+              "\",\"rank_plan_sha256\":\"" + safe(kv["rank_plan"]) + "\",\"weight_table_sha256\":\"" + safe(kv["weights"]) + "\"";
+    const char *unit_keys_v1[] = {"windows", "ml_selected", "seed_windows", "universe", "k0", "k", "pruned", "rounds"};
+    const char *unit_keys_gen2[] = {"cells", "ml_selected", "seed_cells", "universe", "k0", "k", "pruned", "rounds"};
+    for (const char *key : v1 ? unit_keys_v1 : unit_keys_gen2) json += std::string(",\"") + key + "\":" + number(key);
+    // Selected fraction of the decision units and admitted fraction of the broad universe, in parts per million (integers: no float text).
+    const auto ppm = [&kv](const char *num, const char *den) {
+      const unsigned long long n = std::strtoull(kv[num].c_str(), nullptr, 10), d = std::strtoull(kv[den].c_str(), nullptr, 10);
+      return d == 0U ? 0ULL : n * 1000000ULL / d;
+    };
+    json += ",\"selected_ppm\":" + std::to_string(ppm("ml_selected", v1 ? "windows" : "cells")) + ",\"admitted_ppm\":" + std::to_string(ppm("k", "universe"));
+    json += ",\"k_sha256\":\"" + safe(kv["k_sha256"]) + "\"";
   }
-  // Stable cache identity: a pure function of the image, the requested policy, the effective producer and (for the native producer)
-  // the frozen model/schema and the admitted-set digest. Compatibility and Optimized builds therefore never share an identity, and a
-  // fallback build never aliases an ML build. Sanitized: a digest only.
-  const std::string identity_text = "segarecomp.aot_policy.v1|rom=" + rom_sha256 + "|requested=" + options.aot_policy + "|effective=" + safe(effective) +
-                                    "|model=" + (effective == "ml_region" ? safe(kv["model"]) : std::string("-")) + "|schema=" +
-                                    (effective == "ml_region" ? safe(kv["schema"]) : std::string("-")) + "|k=" +
-                                    (effective == "ml_region" ? safe(kv["k_sha256"]) : std::string("-"));
-  json += ",\"identity\":\"" + segarecomp::sha256_hex({reinterpret_cast<const std::uint8_t *>(identity_text.data()), identity_text.size()}) + "\"";
+  json += ",\"validator\":\"" + (ml_effective ? safe(kv["validator"]) : (kv.count("validator") != 0U ? safe(kv["validator"]) : std::string("not_run"))) + "\"";
+  // Stable compatibility identity (ADR 0103): a pure function of the image, the requested policy/model, the effective producer and the admitted set.
+  // Compatibility and Optimized builds never share an identity, a gen2 request never aliases a v1 one, and a fallback never aliases an ML build.
+  const std::string identity = segarecomp::genesis_aot_build_identity(
+      {rom_sha256, options.aot_policy, requested_family, safe(effective), ml_effective ? safe(kv["k_sha256"]) : std::string()});
+  json += ",\"policy_identity\":\"" + segarecomp::genesis_aot_policy_identity(options.aot_policy, requested_family) + "\",\"identity\":\"" + identity +
+          "\",\"cache_reuse\":\"none\"";
   return json + "}";
 }
 
@@ -761,7 +784,8 @@ bool emit_genesis_m68k(const Options &options, Log &log, const std::string &sha,
       log.line("m68k admission: broad for this emission (the plan's alias set differs)");
     }
   }
-  if (options.aot_policy == "optimized" && !options.admission) emit_args.push_back("--immutable-rom-aot-ml-admission");
+  if (options.aot_policy == "optimized" && !options.admission)
+    emit_args.push_back(options.aot_model == "gen2" ? "--immutable-rom-aot-ml-gen2-admission" : "--immutable-rom-aot-ml-admission");
   log.admission_line.clear();
   emit_args.insert(emit_args.end(), {"--generated-c-output", route.source.string(), "--generated-c-shard-dir", route.shard_dir.string()});
   std::vector<char *> emit_argv;

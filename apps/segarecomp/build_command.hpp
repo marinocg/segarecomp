@@ -9,6 +9,7 @@ inline constexpr const char *segarecomp_build_usage =
     "                   [--platform <genesis|master-system>] [--mapper <sega|rom_only>] [--mapper-manifest <file>]\n"
     "                   [--admission-plan <file>] (Genesis M68K hybrid admission candidate, SEG-031; broad by default)\n"
     "                   [--aot-policy <compatibility|optimized>] (default compatibility; optimized = native selective admission, broad fallback)\n"
+    "                   [--aot-model <v1|gen2>] (EXPERIMENTAL opt-in, only with --aot-policy optimized; default v1 = the SEG-047 producer)\n"
     "                   (Master System: --runtime-dir is <root>/platforms/master-system; the mapper is never inferred)\n";
 
 int run_cli(int argc, char **argv);

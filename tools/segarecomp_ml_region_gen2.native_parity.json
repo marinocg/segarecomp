@@ -1,0 +1,73 @@
+{
+ "measured_vs_pytorch_float32": {
+  "five_corpus_titles_max_abs_logit_diff": 1.53e-05,
+  "five_corpus_titles_mean_abs_logit_diff_range": [
+   2.1e-06,
+   2.6e-06
+  ],
+  "five_corpus_titles_min_boundary_gap_logit": 0.00066,
+  "note": "aggregates only; PyTorch 2.14.1 CPU float32, frozen weights",
+  "synthetic_max_abs_logit_diff": 9.54e-06
+ },
+ "model_sha256": "11258708285e4427a3e38e02732e8f93b4c5d497883101f0629223d2366a98e1",
+ "numeric_contract": {
+  "gate": "tolerance on logits AND exact selected-cell-set equality; production selection is defined by the bitwise-deterministic native contract",
+  "logit_tolerance_abs_vs_reference": 0.0001,
+  "network": "IEEE-754 binary32, fixed accumulation order (bias, tap-major, input channel), no FMA, no fast-math; BatchNorm folded in binary64 then rounded",
+  "ranking": "binary32 logit descending, cell ordinal ascending; N = ceil(cells*35/100) in integers"
+ },
+ "policy": {
+  "id": "B35",
+  "percent": 35
+ },
+ "schema": "segarecomp.ml_region_gen2_native_parity.v1",
+ "synthetic_images": {
+  "lcg_150_cells_partial": {
+   "cells": 151,
+   "logits_sha256": "241df5df2cbba932c387b07ca1518d123fe642be1f37b23ada7fc9e38055308b",
+   "seed": 123,
+   "selected_cells_sha256": "bdec5eba18f3af901c5cf2a8b1327ccdde6de9bb19ffae05eb738802df523071",
+   "tokens_sha256": "76a86a994fbdca76ade68ac8ddcaf9deaa93e22386877f01f0a867e84f334b37",
+   "torch_float32_selected_equal": true,
+   "torch_max_abs_logit_diff": 9.54e-06,
+   "words": 9621
+  },
+  "lcg_24_cells": {
+   "cells": 24,
+   "logits_sha256": "4c270336cceb5e6ff8f373a05dd88a92c49f8bfcff6abc96ed18d11db2ae68da",
+   "seed": 49,
+   "selected_cells_sha256": "7134b8571ef483c88c66c051a388d0b3b1b600a8e8ca9215ed73318eb60be9ee",
+   "tokens_sha256": "01417b5eabcc120fa488fbb4f0c5c26858f9e83e31eace696f7aa8138d6c58d9",
+   "torch_float32_selected_equal": true,
+   "torch_max_abs_logit_diff": 8.58e-06,
+   "words": 1536
+  },
+  "lcg_edge_65_words": {
+   "cells": 2,
+   "logits_sha256": "38a6a226a876811aeebbd9107732e8b898c206073e7bdb45baf0ce9eb5b81847",
+   "seed": 7,
+   "selected_cells_sha256": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865",
+   "tokens_sha256": "578b5a201462160a6868d779ed6394df127828caad4a0901f228e46c57d44c15",
+   "torch_float32_selected_equal": true,
+   "torch_max_abs_logit_diff": 1.91e-06,
+   "words": 65
+  }
+ },
+ "synthetic_probes": {
+  "generator": "64-bit LCG seeded from the gen2 seed (same as ADR 0101 parity probes)",
+  "probes": [
+   {
+    "native_bits": "4115de73",
+    "reference_logit_double": 9.36680518946
+   },
+   {
+    "native_bits": "40a59536",
+    "reference_logit_double": 5.17446299332
+   },
+   {
+    "native_bits": "40ac7bd4",
+    "reference_logit_double": 5.39011494247
+   }
+  ]
+ }
+}
