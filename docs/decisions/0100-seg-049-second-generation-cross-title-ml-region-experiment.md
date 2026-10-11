@@ -1,7 +1,7 @@
 # ADR 0100: SEG-049 second-generation cross-title ML executable-region experiment
 
-- Status: experiment complete; **classification `GEN2_REPRESENTATION_VALID_CALIBRATION_UNSOLVED`**. Sections 1-9 were fixed by the committed plan
-  (`tools/segarecomp_ml_region_gen2.plan.json`, commit C1) before any M1-M4 title-held-out result existed; later sections only append results.
+- Status: experiment complete; **classification `GEN2_REPRESENTATION_VALID_CALIBRATION_UNSOLVED`**. Sections 1-4 and 6 restate what the committed plan
+  (`tools/segarecomp_ml_region_gen2.plan.json`, commit C1) fixed before any M1-M4 title-held-out result existed; sections 5 and 7-14 are results.
 - Predecessors: ADR 0093 (exact source universe), ADR 0095 (SEG-046), ADR 0096 (SEG-047 native v1), ADR 0099 (SEG-048 multi-title hardening).
 - Scope statement: **SEG-049-T001 DOES NOT CHANGE PRODUCTION OPTIMIZED AOT.** Compatibility stays broad AOT; Optimized stays the SEG-047 native v1
   model; the v1 artifacts are byte-identical (enforced by test). Everything here is offline research tooling plus one report-only C++ export seam.
@@ -54,7 +54,8 @@ sf1 1310/12288, ps2 565/6144, sk 4073/16384.
 - **Decision cell 128 bytes (64 words); context 1024 bytes (512 words)**, the cell sitting in the middle (448 bytes on each side). A cell is
   positive iff it contains at least one source-backed instruction start (a label, not an input).
 - **ROM edges**: symmetric *word-block reflection* with period 2n (bytes inside a word keep their order, so word alignment is preserved). Padding
-  is derived from ROM content, never a sentinel/zero marker, so there is no first/last-cell signal. No absolute or relative address, cell ordinal,
+  is derived from ROM content, never a sentinel/zero marker; reflection still leaves a weak mirrored-edge signature in the first/last cells
+  (the edge word is duplicated), which is not an explicit first/last marker. No absolute or relative address, cell ordinal,
   first/last marker or ROM size is an input; the leakage guard `assert_input_channels` rejects any such channel and a test mutates each.
 - **Channels**: raw bytes (hi/lo byte of each word position, learned 8-dim embedding each) and the **CPU-owned decode tokens**.
 - **Token export seam** (C++, `genesis_decode_token_report`, CLI `m68k-decode-token-report`): for every even ROM position the existing MC68000
@@ -96,8 +97,8 @@ Interpretation (small missed sample, 13 cells): what v1's representation does no
 code sits in mixed code+data cells at code/data boundaries, in windows where only one or two of the four cells are code, and the window
 aggregate (a 512-byte mean over everything including jump tables/graphics and padding) is dominated by the non-code part; instruction family,
 length and EA mix, entropy and zero/FF density do not distinguish the groups. The missed cells also lean toward the last quarter of the
-window, i.e. an arbitrary 512-byte boundary cuts through a code run. This motivates a finer decision cell and a larger sequence context, not a
-handcrafted rule.
+window, i.e. an arbitrary 512-byte boundary cuts through a code run. This motivates (post hoc: the plan was committed before this analysis, from a 13-cell sample) a finer decision cell and a larger sequence
+context, not a handcrafted rule.
 
 ## 6. Pre-registered candidate set (frozen in C1; nothing outside it was trained)
 
@@ -107,8 +108,8 @@ secondary diagnostics only.
 - **M0** frozen production v1, no retraining (each 128-byte cell inherits its 512-byte window probability). Comparator only.
 - **M1** `HistGradientBoostingClassifier(max_iter=200, max_depth=4, learning_rate=0.08, min_samples_leaf=40, l2_regularization=1.0,
   max_bins=255, early_stopping=False, class_weight=balanced, random_state=49)` over **219** multi-scale aggregates (cell 128 B, mid 512 B, context
-  1024 B) of the same representation: 6 byte statistics (entropy, zero, 0xFF, printable, unique, word-repeat), 8 byte-bucket fractions and 57
-  token-class fractions per scale. No sequence learning.
+  1024 B) of the same representation: 6 byte statistics (entropy, zero, 0xFF, printable, unique, word-repeat), 8 byte-bucket fractions and 59
+  token-class fractions per scale (the plan text says 57; the cardinalities sum to 59 and 219 = 3 x (6+8+59) is what was run - erratum, the frozen plan is not edited). No sequence learning.
 - **M2** raw-byte valid-convolution CNN (input channels 16; **72,481** trainable parameters).
 - **M3** raw-byte + token CNN, same architecture (input channels 36; **77,441** parameters) - the primary candidate.
 - **M4** M3 + hard-positive emphasis: identical to M3 for epochs 1-10; at the end of epochs 10 and 20 the TRAINING titles are scored (eval mode)
@@ -152,9 +153,9 @@ titles, M1 2 (sk), M2 15 (sf1) + 24 (sk), M0 21/101/271 (flicky/sf1/sk); top 45 
 M3 and M4.
 
 **Selected: M3** by the frozen rule (the only candidate within 0.02 of the best worst-title FRF; M4's sf1 FRF is 0.291 and M1's sk FRF is 0.388).
-Observations: the token channels are what makes the CNN generalize (M2 vs M3 on sf1: 0.960 vs 0.208; a single raw-byte-only positive cell scores
-7.6e-11); a richer-feature boosted tree (M1) already moves FRF from 0.985 to <= 0.388, i.e. most of the gain over v1 comes from the finer cell and
-multi-scale representation; hard-positive emphasis (M4) does not help (sf1 gets worse). Because FRF is set by the single lowest-scoring positive, it
+Observations (single seed, no ablations beyond M0-M4): M3 beats M2 mainly on sf1 (0.208 vs 0.960, where one raw-byte-only positive cell scores 7.6e-11),
+so the token channels help robustness there but this is one cell on one title; M1 (59 of its 73 per-scale features are token fractions) already moves
+FRF from 0.985 to <= 0.388, so the gain over v1 comes from the finer cell plus the token-aware multi-scale representation, not separable further; hard-positive emphasis (M4) does not help (sf1 gets worse). Because FRF is set by the single lowest-scoring positive, it
 is a strict and outlier-sensitive measure.
 
 ## 8. Nested title-level calibration, R stage and K stage (selected M3)
@@ -177,12 +178,12 @@ direct-control-discovery identity - the existing production seeding). Gate: `C o
 
 **No pre-registered policy passes all five folds**: Q0, Q1, Q2 fail on sf1 (one missed instruction start, which makes the existing structural
 closure prune a machine root - `machine_root_not_admitted` after 136 rounds - and the validator rejects the proposal), and every policy fails
-the selectivity half on flicky (R/ROM 0.83-0.94) and sk (0.77-0.91); Q1-Q3 also fail on s1/ps2 at the lower factors. No threshold was searched
+the selectivity half on flicky (R/ROM 0.83-0.94) and sk (0.77-0.91); s1 additionally exceeds 0.60 from Q1 on and ps2 from Q3. No threshold was searched
 after seeing these numbers.
 
 Why (diagnostics, not selections):
 - The inner models are 3-title models and are much weaker than the 4-title outer model in the same fold (inner FRF up to 0.94 on flicky/sf1 for
-  the fold holding out sk, versus outer FRF 0.269); their minimum positive scores (1e-6..1e-8) are therefore ~3-4 orders of magnitude below the
+  the fold holding out sk, versus outer FRF 0.269); their minimum positive scores (1e-6..1e-8) are therefore ~3.5-4.6 orders of magnitude below the
   outer model's minimum positive scores (0.0016..0.0495), which makes the inherited thresholds far too permissive (large R). The statistic
   "minimum positive score" is also single-cell sensitive.
 - The opposite failure is sf1: its outer model has exactly one positive cell (a lone instruction start) scoring 4.5e-6, 10x below the inner
@@ -213,7 +214,7 @@ So the ranking/representation is good; the unsolved piece is converting scores i
 - Weights: 77,441 parameters = 309,764 bytes float32 (307,972 after folding eval-mode BatchNorm into the convolutions). Peak activation memory for a
   64-cell chunk: ~1.7 MB. Reference PyTorch CPU (1 thread, 2 MiB ROM): 1.4 s.
 - Multiply-adds: 2.45 M per 128-byte cell with the shared fully-convolutional trunk (19.5 M if every cell recomputes its own context). Whole
-  ROM, shared trunk: 1 MiB 20 G, 2 MiB 40 G, 4 MiB 80 G MACs - 20/40/80 s at 1 GMAC/s scalar, 5/10/20 s at 4 GMAC/s (SIMD-friendly loops).
+  ROM, shared trunk: 1 MiB 20 G, 2 MiB 40 G, 4 MiB 80 G MACs - 20/40/80 s at 1 GMAC/s scalar, 5/10/20 s at 4 GMAC/s (SIMD-friendly loops); these are hypothetical bounds - the measured single-thread PyTorch time (1.4 s for 2 MiB) implies ~29 GMAC/s with an optimized kernel, so a tuned native kernel could be far faster than the scalar figures.
   The cost is dominated by convolution weights/activations and is bounded and deterministic; whether it pays for itself is an end-to-end build
   economics question for the follow-up task.
 - A dependency-free reference evaluator (`tools/segarecomp_ml_region_gen2_reference.py`, standard library only) reproduces the torch logit
@@ -248,4 +249,11 @@ port, UX and default-policy tasks (T003-T009) stay draft.
 
 ## 14. Independent review
 
-(Appended after the fresh-session review; see below.)
+A fresh-session adversarial validator reviewed the frozen results (it could rerun but not add models): **PASS WITH FINDINGS, no blocker, no
+major**. It independently reproduced FRF for all five M3 folds, C outside R / R/ROM for all folds and Q0-Q3 plus oracle from the stored scores,
+the model selection (M3, also under a plain lowest-worst rule), a bitwise-identical refit of an outer fold (M3/flicky) and of an inner fold
+(s1/flicky) in a scratch root, v1 artifact immutability, plan non-drift since C1, the absence of title/position/target/truth leakage and of any
+Python decoder, and that the Shining Force rejection disappears when the single missed cell is added (rejected -> accepted). Findings, all
+addressed in this ADR: status wording, the edge-signature claim, the 57/59 token-fraction erratum, post-hoc and single-seed caveats, the
+Q1-Q3 wording, the order-of-magnitude figure and the native-cost reconciliation. Remaining notes: `verify_plan` does not hash the training-loop
+code; the input-channel guards are exercised by tests (the model inputs are structurally fixed); pre-registration rests on commit order.
