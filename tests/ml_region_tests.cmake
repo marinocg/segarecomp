@@ -25,3 +25,7 @@ set_property(TEST segarecomp_ml_region_v2_test APPEND PROPERTY LABELS full fast)
 add_test(NAME segarecomp_ml_region_gen2_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_region_gen2_test.py)
 set_property(TEST segarecomp_ml_region_gen2_test APPEND PROPERTY LABELS full fast)
+# SEG-049-T002 (ADR 0101): rank-budget calibration of the frozen gen2 M3 ranking (budgets, tie-break, headroom, R/K gates, plan freeze, v1 guard).
+add_test(NAME segarecomp_ml_region_gen2_rank_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_region_gen2_rank_test.py)
+set_property(TEST segarecomp_ml_region_gen2_rank_test APPEND PROPERTY LABELS full fast)

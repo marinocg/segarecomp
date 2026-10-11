@@ -1,0 +1,105 @@
+{
+ "adr": "0101",
+ "after_static_pass": [
+  "freeze one all-five-title M3 research model with the exact T001 recipe, fit twice independently, require bitwise equal predictions",
+  "runtime differential broad vs production v1 vs gen2 held-out rank-budget explicit plan on the five source-backed titles",
+  "historical runtime-only falsifier on authorized SEG-046 titles (no static completeness claim)",
+  "economics: R/ROM, K/U, generated C, compile CPU, wall, RSS, inference time"
+ ],
+ "classes": [
+  "GEN2_CALIBRATION_READY_FOR_NATIVE_PORT",
+  "GEN2_CALIBRATION_VALID_RUNTIME_BLOCKED",
+  "GEN2_CALIBRATION_VALID_ECONOMICS_BLOCKED",
+  "GEN2_CALIBRATION_UNSOLVED"
+ ],
+ "economics_gate": {
+  "build_wall": "must not regress materially",
+  "compile_cpu_reduction_min": 0.2,
+  "generated_c_reduction_min": 0.3,
+  "research_inference_note": "RESEARCH_INFERENCE_COST_NOT_REPRESENTATIVE if PyTorch inference dominates wall"
+ },
+ "evidence_status": "the five titles are NOT blind (T001 exposed their FRF); this is calibration engineering on a known corpus, not fresh blind generalization proof",
+ "experiment": "SEG-049-T002",
+ "frozen_from": {
+  "model": "M3",
+  "outer_score_digests": {
+   "flicky": "365afbf5df2ef000b2d1044ab3f881e0f7ab4bf6a979cac828113cbc34dfe158",
+   "ps2": "22a62d7b27abc5fc94aeab6560404851101a8c7cac6500b91b97597698d1cf4d",
+   "s1": "5d1e2407fd89d854bf838692facfb7756e6d6c59486eb18393c99764016f0cfc",
+   "sf1": "454688301a0111853f7785d6c02aab19d5a0907326b6d88cfb836b1aa4d4cbc7",
+   "sk": "e94106c8603b49c81fcdd875aedecf302ce5e856d34366e07e1e5df531692b8c"
+  },
+  "representation_sha256": "cf43e758da215283c08b3f8c1271c6119fd83b44eee755974559a6cb5af40c67",
+  "score_reuse": "private T001 outer M3 score arrays are reused only if their prediction digests equal outer_score_digests",
+  "seed": 49,
+  "t001_plan_sha256": "84ab1134fe5ac5d1fa7c2af17749bd2d00854aae1350e0ad746e34eeab733af9",
+  "token_schema_sha256": "9a1f4f4fc03d26c63209128fc59fec1584b266bd1f61dbe8236f1105a1d61d75"
+ },
+ "gates": {
+  "choice": "the SMALLEST budget among B30..B50 passing every R and K gate on all five outer titles; none -> GEN2_CALIBRATION_UNSOLVED and stop",
+  "k_stage": {
+   "attribution": "C outside R separated from post-ML pruning losses (POST_ML_PRUNING_BLOCKER); M3 is never retrained to mask them",
+   "c_outside_k": 0,
+   "stage": "existing unchanged structural prune + validator (tools/segarecomp_ml_region_v2.PruneRunner)",
+   "validator": "accepted on every outer title"
+  },
+  "r_stage": {
+   "c_outside_r": 0,
+   "r_over_rom_max": 0.6,
+   "r_over_rom_preferred": 0.5,
+   "rank_headroom": "nominal budget fraction (percent/100) / FRF of the held-out fold",
+   "rank_headroom_min": 1.25
+  }
+ },
+ "not_done": [
+  "no architecture / recipe change",
+  "no probability calibration family unless every rank policy fails",
+  "no native inference, no launcher/default-policy change",
+  "no v1 artifact change"
+ ],
+ "policy": {
+  "budgets_percent": {
+   "B30": 30,
+   "B35": 35,
+   "B40": 40,
+   "B45": 45,
+   "B50": 50
+  },
+  "cell_count_rule": "N = ceil(cells * percent / 100) in integer arithmetic; cells = ceil(rom_bytes / 128)",
+  "forbidden_inputs": [
+   "title",
+   "rom",
+   "sha",
+   "truth",
+   "label",
+   "coverage",
+   "runtime",
+   "address",
+   "path",
+   "source",
+   "oracle",
+   "pc"
+  ],
+  "inputs": [
+   "scores",
+   "decision_cell_count",
+   "budget_percent"
+  ],
+  "kind": "rank budget (no absolute probability threshold)",
+  "ranking": "scores descending, then cell ordinal ascending; ordinal is a deterministic tie-break only, never a model input",
+  "region": "R = rank-selected cells UNION certain-code seed cells (cells holding a precise direct-control-discovery identity)",
+  "score": "the float64 sigmoid probability of the M3 logit as produced in T001 (identical ranking to the logit; saturated ties, if any, sit at the top of the ranking and are resolved by the ordinal tie-break)",
+  "uniform": "one budget for every ROM; no per-ROM budget; no additional budgets may be evaluated"
+ },
+ "schema": "segarecomp.ml_region_gen2_rank_plan.v1",
+ "scope": "OFFLINE research; production Optimized AOT and SEG-047 v1 artifacts are unchanged; M3 is frozen exactly as in T001",
+ "status": "FROZEN BEFORE ANY B30-B50 EVALUATION",
+ "v1_artifact_sha256": {
+  "tools/segarecomp_ml_region.frozen.json": "3ef087800bd90b1de312c901aa305f5aa4ca61e8fd013348bc0b4f5471f016e1",
+  "tools/segarecomp_ml_region.model.json": "5863742d3b84a934d7ab335695a3748426de53e43ddc9d42ca679a6fc9fab0a2",
+  "tools/segarecomp_ml_region.parity.json": "2165e2522378496d2cfa402a503622a6b0208236efb41fbdbffbcad869235ac9",
+  "tools/segarecomp_ml_region.py": "b4b801b8fe3b7ef6d3593ad454e2a4ac4123db8b760b62e084b84c34a14531e8",
+  "tools/segarecomp_ml_region_native_data.py": "df8eb816e3b79d8fcd42c9d87222de5603cce269b1251e3fb87ef495a0210cc6",
+  "tools/segarecomp_ml_region_native_parity.py": "61f2520b7322a5bebba6ef2807353d2411507618bb440721d0e17058d82da875"
+ }
+}
