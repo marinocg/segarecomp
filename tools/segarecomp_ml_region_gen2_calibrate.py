@@ -325,6 +325,45 @@ def cmd_runtime(args) -> int:
     return 0
 
 
+def cmd_assemble(args) -> int:
+    """Public, aggregate-only results record: R/K stage + runtime differential + economics. Never a digest value, address or score array."""
+    base = json.loads((tr.ROOT / "results" / "rank_evaluate.json").read_text())
+    runtime, econ = {}, {}
+    for tid in list(g.TITLE_ORDER) + list(HIST_ROMS):
+        d = json.loads((tr.ROOT / "runtime" / tid / "result.json").read_text())
+        runtime[tid] = {"corpus": tid in g.TITLE_ORDER, "validator": d["validator"], "r_over_rom": d["r_over_rom"], "k_over_rom": d["k_over_rom"],
+                        "broad_outcome": d["broad"].get("outcome"), "broad_frames": d["broad"].get("frames"),
+                        "v1_outcome": d["v1"].get("outcome"), "gen2_outcome": d["gen2"].get("outcome"),
+                        "v1_equal_to_broad": d["v1_equal_to_broad"], "gen2_equal_to_broad": d["gen2_equal_to_broad"],
+                        "gen2_equal_to_broad_all": all(d["gen2_equal_to_broad"].values()), "v1_equal_to_broad_all": all(d["v1_equal_to_broad"].values()),
+                        "broad_executed_pcs": d["broad_executed_pcs"], "broad_executed_pcs_outside_k": d["broad_executed_pcs_outside_k"],
+                        "gen2_executed_pcs_outside_broad": d["gen2_executed_pcs_outside_broad"],
+                        "broad_pcs_not_executed_by_gen2": d["broad_pcs_not_executed_by_gen2"]}
+        row = {}
+        for v in ("broad", "v1", "gen2"):
+            x = d[v]
+            row[v] = {"generated_bytes": x["generated_bytes"], "generated_lines": x["generated_lines"], "bridge_wall_seconds": x["wall_seconds"],
+                      "bridge_cpu_seconds": round(x["cpu_seconds"], 2), "peak_rss_kib": x["peak_rss_kib"]}
+        for v in ("v1", "gen2"):
+            row[f"{v}_reduction_vs_broad"] = {k: round(1 - row[v][k] / row["broad"][k], 4) for k in
+                                              ("generated_bytes", "generated_lines", "bridge_wall_seconds", "bridge_cpu_seconds", "peak_rss_kib")}
+        econ[tid] = row
+    gate = {"generated_c_reduction_min": 0.30, "compile_cpu_reduction_min": 0.20}
+    econ_pass = all(r["gen2_reduction_vs_broad"]["generated_bytes"] >= gate["generated_c_reduction_min"]
+                    and r["gen2_reduction_vs_broad"]["bridge_cpu_seconds"] >= gate["compile_cpu_reduction_min"]
+                    and r["gen2_reduction_vs_broad"]["bridge_wall_seconds"] > 0 for r in econ.values())
+    inference = json.loads((tr.ROOT / "results" / "inference_time.json").read_text())
+    base.update({"runtime_differential": runtime, "economics": econ, "economics_gate": gate, "economics_gate_pass_all_titles": econ_pass,
+                 "runtime_all_gen2_equal_to_broad": all(r["gen2_equal_to_broad_all"] for r in runtime.values()),
+                 "research_inference_seconds_pytorch_cpu": inference,
+                 "economics_note": "bridge_* = unchanged startup bridge (generate + clang compile + 600-frame bounded coverage run), single samples on one 16-core "
+                                   "host; CPU = user+sys of the whole process tree (compile-dominated)."})
+    out = TOOLS / "segarecomp_ml_region_gen2_rank.results.json"
+    out.write_text(json.dumps(base, indent=1, sort_keys=True) + "\n")
+    print(json.dumps({"runtime_all_equal": base["runtime_all_gen2_equal_to_broad"], "economics_pass": econ_pass}))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -339,6 +378,7 @@ def main() -> int:
     rt.add_argument("--variants", default="broad,v1,gen2")
     rt.add_argument("--timeout", type=int, default=2400)
     rt.set_defaults(func=cmd_runtime)
+    sub.add_parser("assemble").set_defaults(func=cmd_assemble)
     args = parser.parse_args()
     return args.func(args)
 
