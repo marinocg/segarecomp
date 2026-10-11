@@ -34,11 +34,11 @@ CPU seconds are comparable, wall seconds are not and are not reported.
 | Streets of Rage | frames_reached (600) | 2153 | yes | yes | 0 / 0 | 0.349 | 0.43x / 0.30x | 0.41x / 0.25x | 0.58x |
 | OutRun | frames_reached (600) | 2620 | yes | yes | 0 / 0 | 0.323 | 0.46x / 0.26x | 0.63x / 0.22x | 0.65x |
 
-- **Zero** broad-executed ROM PCs outside the gen2 admitted set and zero unexplained divergence on all nine titles (executed-PC sets of gen2 and broad are identical). A pre-existing hardware frontier ends Flicky
+- On all nine titles the executed ROM-PC set of gen2 equals that of broad (0 extra, 0 missing), which implies zero broad-executed PCs outside the gen2 admitted set in the observed window (a broad-executed PC outside the admitted set would make the gen2 program stop earlier), and there is no unexplained divergence in outcome, frames, final state or coverage. A pre-existing hardware frontier ends Flicky
   (26 frames) and Sonic & Knuckles (9 frames) in broad and gen2 alike; that is not an ML result. Sonic & Knuckles under v1 diverges from broad (15 broad-executed PCs are not executed; known SEG-048 gap, ADR 0099),
-  gen2 does not.
+  gen2 does not within the bounded 9-frame window (270 executed PCs; a weak, bounded observation).
 - Economics (single samples): gen2 generated C is 0.39-0.66x of broad and CPU 0.34-0.75x (0.63x OutRun); v1 is smaller/cheaper where it is accepted (generated C 0.19-0.51x of broad on eight titles; Shining Force is a v1 fallback to the broad program, 1.00x; CPU 0.14-0.78x), so gen2 keeps more
-  code than v1 on eight titles (all but Shining Force) and buys correct coverage on Sonic & Knuckles at that price (as ADR 0101 section 10 already stated). Model inference is not the dominant cost (ADR 0102/0104).
+  code than v1 on eight titles (all but Shining Force) and buys no divergence on Sonic & Knuckles (within its 9-frame window) at that price (as ADR 0101 section 10 already stated). Model inference is not the dominant cost (ADR 0102/0104).
 - Not claimed: gameplay compatibility, equivalence beyond the observed window, any title outside these nine, visual equivalence.
 
 ## 4. Packaged builds and cross-platform

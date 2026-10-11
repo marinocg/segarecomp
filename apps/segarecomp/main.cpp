@@ -294,7 +294,8 @@ int run_cli(int argc, char **argv) {
       }
       if (ml_gen2_logits_output && !ml_gen2_region_proposal_output) { print_usage(std::cerr); return 2; }
       if ((immutable_rom_aot_ml_admission || immutable_rom_aot_ml_gen2_admission) && (!immutable_rom_aot || immutable_rom_aot_admission)) {
-        std::cerr << "segarecomp: --immutable-rom-aot-ml-admission requires --immutable-rom-aot and excludes --immutable-rom-aot-admission\n";
+        std::cerr << "segarecomp: " << (immutable_rom_aot_ml_gen2_admission ? "--immutable-rom-aot-ml-gen2-admission" : "--immutable-rom-aot-ml-admission")
+                  << " requires --immutable-rom-aot and excludes --immutable-rom-aot-admission\n";
         return 2;
       }
       if (immutable_rom_aot_ml_admission && immutable_rom_aot_ml_gen2_admission) {

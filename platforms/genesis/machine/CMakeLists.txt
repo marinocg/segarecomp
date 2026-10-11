@@ -19,8 +19,9 @@ target_link_libraries(segarecomp_machine_genesis PUBLIC segarecomp::media)
 # compiled with floating-point contraction or fast-math (exact folded-scorer determinism).
 target_link_libraries(segarecomp_machine_genesis PRIVATE segarecomp_zlib)
 if(MSVC)
-  # cl.exe / clang-cl: no contraction (the gen2 binary32 evaluator's bitwise contract; the golden digests detect a violation).
-  set_source_files_properties(src/ml_region_gen2_producer.cpp PROPERTIES COMPILE_OPTIONS "/fp:precise;/fp:contract-")
+  # cl.exe / clang-cl: /fp:precise (no fast-math). MSVC is neither a supported nor a tested toolchain for this evaluator (CI and releases use clang on Windows); a
+  # contraction would be detected by the bitwise golden digests, not prevented here.
+  set_source_files_properties(src/ml_region_gen2_producer.cpp PROPERTIES COMPILE_OPTIONS "/fp:precise")
 endif()
 if(NOT MSVC)
   set_source_files_properties(src/ml_region_producer.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-fno-fast-math")

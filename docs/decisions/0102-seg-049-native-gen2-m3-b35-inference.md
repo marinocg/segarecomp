@@ -90,6 +90,8 @@ ADR 0101 section 10. Threads and intrinsics were not added (no speculative optim
 
 ## 6. Limits
 
+- Decoder drift (a semantic change of the CPU-owned token projection) is detected only by the golden CPU-token digests in CI, not by a run-time check; the token-schema pin is a label.
+
 - Known five-title corpus; no new blind evidence; no claim for other ROMs. Inference cost is real build-time work (not free) and is not yet multi-threaded.
 - The bitwise goldens assume an IEEE-754 binary32 host with the build flags above; a platform that cannot honour them must fail the golden, not be waved through.
 - The CLI seams added here (`--ml-gen2-region-proposal-output`, `--ml-gen2-logits-output`, `ml-gen2-cell-logits`, `ml-gen2-probe-report --synthetic`) are report-only and cannot alter generation.
