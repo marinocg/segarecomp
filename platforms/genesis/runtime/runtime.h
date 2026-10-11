@@ -473,6 +473,22 @@ typedef struct GenesisInterruptScheduler {
   uint64_t master_ticks; /* checked, monotonically increasing guest time */
 } GenesisInterruptScheduler;
 
+/*
+ * SEG-055: runtime-private raster scheduler state (never evidence-bearing, like `scheduler`): the guest-time scanline
+ * the schedule has reached, the VDP H-interrupt counter/latch, and the per-line capture of the mutable VDP state for
+ * the live-frame observer. Lines are 3420 master ticks (GENESIS_NTSC_MASTER_TICKS_PER_LINE); line L of a frame begins
+ * at tick frame_start + L * 3420 and the active display is lines 0-223. The H-interrupt counter follows the documented
+ * behavior (reload from register #10 at the last line of the frame; during the active display each line either
+ * decrements it or, when it is zero, reloads it and latches the H-interrupt; the transition into line 224 latches it
+ * once more when the counter is zero) -- see docs/architecture/genesis-raster-and-display-modes.md.
+ */
+typedef struct GenesisRasterScheduler {
+  uint8_t initialized;
+  uint64_t last_line;     /* the last absolute scanline whose start the schedule has processed */
+  uint8_t hint_counter;   /* the VDP H-interrupt line counter */
+  uint8_t hint_pending;   /* a latched H-interrupt request, cleared when the level-4 interrupt is taken */
+} GenesisRasterScheduler;
+
 /* One bit per aligned work-RAM word records whether the six-byte exception
  * frame beginning there was constructed for IRQ6.  The basic MC68000 frame
  * itself carries only SR and PC, so this runtime-private provenance is needed
@@ -510,6 +526,26 @@ typedef int (*GenesisFrameProducerFunction)(const uint8_t vram[GENESIS_VDP_VRAM_
  * frame wins; the sequence advances by exactly one). Absent (NULL) observer ==
  * exactly the unobserved headless behavior. Never serialized into
  * checkpoint/guest state; never read by guest semantics. */
+/* SEG-055: the scanline-aware producer. When a host attaches a `GenesisRasterCapture` (GenesisRuntime::live_raster) the
+ * runtime also captures, for every active field line, the register file / CRAM / VSRAM present when that line began, and at
+ * the frame boundary renders from that per-scanline state plus the VRAM (normally genesis_vdp_produce_frame_raster) instead
+ * of calling the observer's single-snapshot `producer`. Like the legacy producer it is a plain function pointer so
+ * runtime.c gains no link-time dependency on vdp_render.c. */
+typedef int (*GenesisRasterFrameProducerFunction)(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
+                                                  const GenesisRasterFrameState *raster,
+                                                  GenesisFrameArtifact *frame_out);
+
+/* Host-owned capture buffer (~57 KiB; the host allocates it, the runtime only fills it). `captured[L]` records that line
+ * L's start was observed during the current frame; unobserved lines (the first frame, an observer attached mid-frame)
+ * inherit the previous line's state at publication. Non-semantic: detaching it (live_raster = NULL) leaves guest state
+ * byte-identical to an unobserved run. `render_rejections` counts virtual frame boundaries whose render failed closed. */
+typedef struct GenesisRasterCapture {
+  GenesisRasterFrameProducerFunction producer;
+  GenesisRasterFrameState frame;
+  uint8_t captured[GENESIS_RASTER_MAX_LINES];
+  uint64_t render_rejections;
+} GenesisRasterCapture;
+
 typedef struct GenesisLiveFrameObserver {
   GenesisFrameProducerFunction producer;
   GenesisFrameArtifact *latest;
@@ -619,6 +655,9 @@ typedef struct GenesisExecutionHistory {
    numbers 0 .. GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT - 1. */
 #define GENESIS_M68K_SOFTWARE_EXCEPTION_VECTOR_LIMIT 48U
 #define GENESIS_M68K_VECTOR_LEVEL6_AUTOVECTOR UINT32_C(30)
+/* SEG-055: the H-interrupt (VDP register #0 bit 4) is the level-4 autovector, vector 28. Its build-time-resolved handler
+   entry lives in the software_exception_handler_* tables below (index 28), resolved by the same static discovery. */
+#define GENESIS_M68K_VECTOR_LEVEL4_AUTOVECTOR UINT32_C(28)
 typedef enum GenesisM68kEffectKind {
   GENESIS_M68K_EFFECT_WRITE = 1,
   GENESIS_M68K_EFFECT_TRAP = 2
@@ -734,6 +773,13 @@ typedef struct GenesisRuntime {
      guest-derived device state: deliberately excluded from every device
      checkpoint and first-divergence digest. */
   uint8_t pad1;
+  uint8_t pad2; /* SEG-055: Player 2 (port 2) host input mask, independent of pad1 */
+  /* SEG-055: the configured console region (SegarecompGenesisRegionProfile in controller_io_contract.h; 0 == USA NTSC,
+     the historical default of every zero-initialized runtime). Guest-visible through the version register only; fixed
+     for the whole run (set once before the first step, by the host or from SEGARECOMP_GENESIS_REGION by the runner).
+     `region_configured` records that the choice has been made so it cannot change mid-run. */
+  uint8_t region_profile;
+  uint8_t region_configured;
   uint8_t work_ram[65536];
   /* SEG-007-T077: zero-valued (NULL/0) by every existing
      `GenesisRuntime runtime = {0};` construction, so a generated program
@@ -758,6 +804,11 @@ typedef struct GenesisRuntime {
      `GenesisRuntime runtime = {0};` construction. Sibling of `devices`, never a
      member of it. */
   GenesisInterruptScheduler scheduler;
+  /* SEG-055: scanline schedule, H-interrupt state and per-line capture; and the count of virtual (guest-time) frame
+     boundaries crossed, which is the sole authority a host may use to pace presentation: it advances exactly once per
+     VBlank onset regardless of whether any frame could be rendered or published. */
+  GenesisRasterScheduler raster;
+  uint64_t virtual_frame_count;
   uint8_t exception_frame_irq6_origin[GENESIS_EXCEPTION_FRAME_ORIGIN_BYTES];
   /* SEG-007-T047 / ADR-0020 §6: the build-time-resolved MC68000 level-6
      interrupt autovector handler entry address (the long word at vector-table
@@ -839,6 +890,9 @@ typedef struct GenesisRuntime {
   GenesisDeviceCheckpoint device_checkpoint;
   /* SEG-007-T255: host-owned optional observer (NULL = absent); non-semantic. */
   GenesisLiveFrameObserver *live_frame_observer;
+  /* SEG-055: optional host-owned scanline capture for the observer above (NULL == the observer's own `producer` renders
+     the final snapshot). Non-semantic, never serialized. */
+  GenesisRasterCapture *live_raster;
   /* SEG-026-T001: host-owned optional execution-PC coverage observer (NULL = absent, the value in every
      ordinary build); non-semantic. See GenesisExecutionCoverage. */
   struct GenesisExecutionCoverage *execution_coverage;
@@ -1133,6 +1187,7 @@ typedef enum GenesisDiagnosticCategory {
   /* ADR 0098: cartridge SRAM outcomes, paired with GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS. Nothing is mutated. */
   GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_LAYOUT = 63, /* an access to a header-declared extra-memory extent whose layout is not supported */
   GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS = 64, /* SRAM extent access (width/lane) or $A130F1 write the SRAM model does not admit */
+  GENESIS_DIAG_UNSUPPORTED_REGION_TIMING = 65, /* SEG-055: a console region whose timing is not implemented (PAL), or an unknown region name */
 } GenesisDiagnosticCategory;
 
 typedef struct GenesisProvenance {
@@ -1520,6 +1575,17 @@ GenesisControlTransfer genesis_runtime_run(GenesisRuntime *runtime, GenesisDispa
 /* ADR 0098: bind the generated SRAM config and its bounded storage and give the SRAM its deterministic power-on contents. */
 void genesis_cartridge_sram_install(GenesisRuntime *runtime, const GenesisCartridgeSramConfig *config, uint8_t *storage);
 void genesis_runtime_set_pad1(GenesisRuntime *runtime, uint8_t mask);
+/* SEG-055: Player 2 input (GENESIS_PAD_* mask); port 2 reads released when never set. */
+void genesis_runtime_set_pad2(GenesisRuntime *runtime, uint8_t mask);
+
+/* SEG-055: console region selection. `profile` is a SegarecompGenesisRegionProfile value (0 USA NTSC, 1 Japan NTSC,
+ * 2 Europe PAL). Returns 0, or -1 (unchanged) for an unknown profile or once the guest has started executing. A PAL
+ * profile is accepted (it has a version-register value) but genesis_runtime_run refuses to execute under it. */
+int genesis_runtime_set_region(GenesisRuntime *runtime, unsigned profile);
+/* Parses "usa"/"us"/"ntsc-u", "japan"/"jp"/"ntsc-j", "europe"/"eu"/"pal" (case-insensitive). 0 on success, -1 otherwise. */
+int genesis_region_profile_from_name(const char *name, unsigned *profile_out);
+/* The stable lowercase name of a profile ("usa", "japan", "europe"), or "invalid". */
+const char *genesis_region_profile_name(unsigned profile);
 
 /*
  * SEG-007-T047 / ADR-0020 §9: RTE restoration, consuming exactly the six-byte

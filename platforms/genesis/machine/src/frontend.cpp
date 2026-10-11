@@ -3111,7 +3111,10 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   std::optional<Address> divide_by_zero_handler_entry_value;
   std::optional<Address> privilege_violation_handler_entry_value;
   std::map<std::uint8_t, Address> software_exception_handler_entry_values;
-  std::vector<std::uint8_t> synchronous_vectors{5U, 8U, 4U, 6U, 7U, 10U, 11U};
+  // SEG-055: vector 28 is the VDP H-interrupt (level-4 autovector). It is resolved, discovered and rooted exactly like
+  // the synchronous vectors (same NOT INSTALLED fallback: a ROM whose slot cannot be admitted builds unchanged and an
+  // enabled H-interrupt then stops fail-closed at runtime); the machine hook only sources it.
+  std::vector<std::uint8_t> synchronous_vectors{5U, 8U, 4U, 6U, 7U, 10U, 11U, 28U};
   for (std::uint8_t trap_vector = 32U; trap_vector <= 47U; ++trap_vector) synchronous_vectors.push_back(trap_vector);
   for (const auto synchronous_vector : synchronous_vectors) {
     const std::size_t kSynchronousVectorOffset = static_cast<std::size_t>(synchronous_vector) * 4U;

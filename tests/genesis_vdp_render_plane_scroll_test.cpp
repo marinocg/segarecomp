@@ -518,25 +518,37 @@ void test_h40_boundary_screen_coordinates_no_oob() {
         "boundary x=319,y=223 plane B resolves without OOB");
 }
 
-void test_unsupported_hscroll_mode_fails_closed() {
+// SEG-055: horizontal-scroll mode `10` ("scroll every tile") selects one table entry per 8-line cell row (the entry of
+// the group's first line); lines inside the group share it.
+void test_cell_hscroll_mode_is_supported() {
   uint16_t regs[GENESIS_VDP_REGISTER_COUNT];
   make_default_registers(regs);
-  // H-scroll mode bits = 10 ("scroll every tile" / per-8-line, out of scope
-  // -- see vdp_render.h's SEG-007-T050 "line" horizontal-scroll-mode
-  // citation for the full 00/01/10/11 mode table), still V=0 (full, not
-  // 2-cell).
-  regs[11] = 0x02;
+  regs[11] = 0x02;  // H-scroll mode bits = 10, V full-plane
+  regs[13] = 0x3C;  // table base 0xF000
   uint8_t vram[GENESIS_VDP_VRAM_BYTES];
   std::memset(vram, 0, sizeof(vram));
-  int32_t value = 0;
-  check(genesis_vdp_read_hscroll(vram, regs, GENESIS_VDP_PLANE_A, 0, &value) != 0,
-        "unsupported hscroll mode (every-tile) fails closed");
-
-  uint8_t vsram[GENESIS_VDP_VSRAM_BYTES];
-  std::memset(vsram, 0, sizeof(vsram));
-  GenesisVdpPlanePixelLocation loc;
-  check(genesis_vdp_resolve_plane_pixel(vram, vsram, regs, GENESIS_VDP_PLANE_A, 0, 0, &loc) != 0,
-        "resolve_plane_pixel fails closed for unsupported (every-tile) hscroll mode");
+  for (unsigned line = 0U; line < 224U; ++line) {
+    // Distinct per-line values so any wrong entry selection is visible: Plane A = line, Plane B = line + 100.
+    const uint32_t addr = 0xF000U + line * 4U;
+    vram[addr] = (uint8_t)(line >> 8);
+    vram[addr + 1U] = (uint8_t)line;
+    vram[addr + 2U] = (uint8_t)((line + 100U) >> 8);
+    vram[addr + 3U] = (uint8_t)(line + 100U);
+  }
+  check(genesis_vdp_hscroll_mode_is_cell(regs), "mode 10 is cell mode");
+  check(!genesis_vdp_hscroll_mode_is_fullscreen(regs) && !genesis_vdp_hscroll_mode_is_line(regs),
+        "mode 10 is neither fullscreen nor line");
+  int32_t value = -1;
+  for (unsigned row = 0U; row < 224U; ++row) {
+    const int32_t expected_a = (int32_t)(row & ~7U);
+    const int32_t expected_b = (int32_t)(row & ~7U) + 100;
+    check(genesis_vdp_read_hscroll(vram, regs, GENESIS_VDP_PLANE_A, row, &value) == 0 && value == expected_a,
+          "cell mode Plane A uses the first line's entry of its 8-line group");
+    check(genesis_vdp_read_hscroll(vram, regs, GENESIS_VDP_PLANE_B, row, &value) == 0 && value == expected_b,
+          "cell mode Plane B uses the first line's entry of its 8-line group");
+  }
+  check(genesis_vdp_read_hscroll(vram, regs, GENESIS_VDP_PLANE_A, 224U, &value) != 0,
+        "cell mode rejects an off-display row");
 }
 
 // SEG-007-T050: the other non-implemented non-full-screen horizontal-scroll
@@ -611,7 +623,8 @@ void test_valid_mode5_h40_noninterlace_succeeds() {
         "valid Mode5+H40+non-interlace resolves");
 }
 
-void test_h32_selected_fails_closed() {
+// SEG-055: H32 (RS0 = RS1 = 0) is a supported display width; only the reserved mixed combinations fail closed.
+void test_h32_selected_resolves_and_reserved_hres_fails_closed() {
   uint16_t regs[GENESIS_VDP_REGISTER_COUNT];
   make_default_registers(regs);
   regs[12] = 0x00; // RS0=RS1=0 -> H32
@@ -621,10 +634,22 @@ void test_h32_selected_fails_closed() {
   std::memset(vsram, 0, sizeof(vsram));
 
   GenesisVdpPlanePixelLocation loc;
+  check(genesis_vdp_resolve_plane_pixel(vram, vsram, regs, GENESIS_VDP_PLANE_A, 255, 0, &loc) == 0,
+        "H32 selected resolves");
+  GenesisVdpDisplayGeometry geometry;
+  check(genesis_vdp_display_geometry(regs, &geometry) == 0 && geometry.width == 256U && geometry.height == 224U &&
+            !geometry.h40 && !geometry.im2,
+        "H32 geometry is 256x224");
+  regs[12] = 0x80;  // RS0 only
   fill_location_sentinel(&loc);
   check(genesis_vdp_resolve_plane_pixel(vram, vsram, regs, GENESIS_VDP_PLANE_A, 0, 0, &loc) != 0,
-        "H32 selected fails closed");
-  check(location_is_sentinel(loc), "H32 rejection leaves output unmodified");
+        "reserved RS0-only combination fails closed");
+  check(location_is_sentinel(loc), "reserved RS0-only rejection leaves output unmodified");
+  regs[12] = 0x01;  // RS1 only
+  fill_location_sentinel(&loc);
+  check(genesis_vdp_resolve_plane_pixel(vram, vsram, regs, GENESIS_VDP_PLANE_A, 0, 0, &loc) != 0,
+        "reserved RS1-only combination fails closed");
+  check(location_is_sentinel(loc), "reserved RS1-only rejection leaves output unmodified");
 }
 
 void test_mode4_selected_fails_closed() {
@@ -659,14 +684,58 @@ void test_interlace_modes_fail_closed() {
         "interlace mode 1 fails closed");
   check(location_is_sentinel(loc1), "interlace mode 1 rejection leaves output unmodified");
 
-  // Interlace mode 2: LSM1=1, LSM0=1 (bit2=1, bit1=1).
+  // Reserved LSM combination: LSM1=1, LSM0=0 (bit2=1, bit1=0).
   make_default_registers(regs);
-  regs[12] = (uint16_t)(regs[12] | 0x06U);
+  regs[12] = (uint16_t)(regs[12] | 0x04U);
   GenesisVdpPlanePixelLocation loc2;
   fill_location_sentinel(&loc2);
   check(genesis_vdp_resolve_plane_pixel(vram, vsram, regs, GENESIS_VDP_PLANE_A, 0, 0, &loc2) != 0,
-        "interlace mode 2 fails closed");
-  check(location_is_sentinel(loc2), "interlace mode 2 rejection leaves output unmodified");
+        "reserved interlace combination fails closed");
+  check(location_is_sentinel(loc2), "reserved interlace rejection leaves output unmodified");
+}
+
+// SEG-055: interlace mode 2 (LSM1=1, LSM0=1) is supported: 8x16 cells, 448 output rows, 11-bit vertical scroll,
+// horizontal-scroll rows indexed by field line.
+void test_interlace_mode2_plane_addressing() {
+  uint16_t regs[GENESIS_VDP_REGISTER_COUNT];
+  make_default_registers(regs);
+  regs[12] = (uint16_t)(regs[12] | 0x06U);
+  uint8_t vram[GENESIS_VDP_VRAM_BYTES];
+  uint8_t vsram[GENESIS_VDP_VSRAM_BYTES];
+  std::memset(vram, 0, sizeof(vram));
+  std::memset(vsram, 0, sizeof(vsram));
+  GenesisVdpDisplayGeometry geometry;
+  check(genesis_vdp_display_geometry(regs, &geometry) == 0 && geometry.width == 320U && geometry.height == 448U &&
+            geometry.im2 && geometry.cell_height == 16U,
+        "interlace mode 2 geometry is 320x448 with 16-row cells");
+  GenesisVdpPlanePixelLocation loc;
+  // Output row 37 with no scroll: cell row 2 (rows 32..47), tile row 5.
+  check(genesis_vdp_resolve_plane_pixel(vram, vsram, regs, GENESIS_VDP_PLANE_A, 0, 37, &loc) == 0,
+        "interlace mode 2 resolves a plane pixel");
+  check(loc.cell_row == 2U && loc.tile_y == 5U, "cell row = row / 16, tile row = row % 16 under interlace mode 2");
+  // 11-bit vertical scroll: raw 0x7FF is -1 (not +2047) and wraps the plane's 32-cell (512-row) height.
+  vsram[0] = 0x07;
+  vsram[1] = 0xFF;
+  int32_t vs = 0;
+  check(genesis_vdp_read_vscroll(vsram, regs, GENESIS_VDP_PLANE_A, 0, &vs) == 0 && vs == -1,
+        "interlace mode 2 vertical scroll sign-extends 11 bits");
+  check(genesis_vdp_resolve_plane_pixel(vram, vsram, regs, GENESIS_VDP_PLANE_A, 0, 0, &loc) == 0 &&
+            loc.cell_row == 31U && loc.tile_y == 15U,
+        "interlace mode 2 vertical scroll -1 wraps to the last row of the plane");
+  // Line-mode horizontal scroll is per FIELD line: output rows 2n and 2n+1 share table entry n.
+  regs[11] = 0x03;
+  regs[13] = 0x3C;
+  for (unsigned line = 0U; line < 224U; ++line) {
+    vram[0xF000U + line * 4U] = 0;
+    vram[0xF000U + line * 4U + 1U] = (uint8_t)line;
+  }
+  int32_t hs_even = -1;
+  int32_t hs_odd = -1;
+  check(genesis_vdp_read_hscroll(vram, regs, GENESIS_VDP_PLANE_A, 100, &hs_even) == 0 && hs_even == 50 &&
+            genesis_vdp_read_hscroll(vram, regs, GENESIS_VDP_PLANE_A, 101, &hs_odd) == 0 && hs_odd == 50,
+        "interlace mode 2 reads the horizontal-scroll table per field line");
+  check(genesis_vdp_read_hscroll(vram, regs, GENESIS_VDP_PLANE_A, 447, &hs_odd) == 0 && hs_odd == 223,
+        "interlace mode 2 last output row maps to field line 223");
 }
 
 void test_invalid_plane_selector_hscroll_vscroll_fail_closed() {
@@ -723,7 +792,7 @@ int main() {
   test_vscroll_tile_and_wrap_boundary();
   test_combined_hv_scroll();
   test_h40_boundary_screen_coordinates_no_oob();
-  test_unsupported_hscroll_mode_fails_closed();
+  test_cell_hscroll_mode_is_supported();
   test_unsupported_hscroll_mode_eight_line_repeat_fails_closed();
   test_line_hscroll_mode_distinct_rows_per_scanline();
   test_line_hscroll_mode_plane_a_and_b_distinct_within_row();
@@ -733,9 +802,10 @@ int main() {
   test_full_plane_vscroll_mode_is_supported();
   test_reserved_plane_size_encoding_fails_closed();
   test_valid_mode5_h40_noninterlace_succeeds();
-  test_h32_selected_fails_closed();
+  test_h32_selected_resolves_and_reserved_hres_fails_closed();
   test_mode4_selected_fails_closed();
   test_interlace_modes_fail_closed();
+  test_interlace_mode2_plane_addressing();
   test_invalid_plane_selector_hscroll_vscroll_fail_closed();
 
   if (failures == 0) {

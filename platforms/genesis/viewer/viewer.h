@@ -28,6 +28,8 @@ typedef struct GenesisViewerHost {
   /* SEG-032-T009: optional. Called after every completed slice (a pure observer of the runtime, e.g. the audio drain: it must not
    * mutate guest state and never feeds host time back). NULL == none. */
   void (*after_slice)(void *ctx, GenesisRuntime *runtime);
+  /* SEG-055: Player 2 (port 2) GENESIS_PAD_* mask, independent of pad1; NULL == released. */
+  uint8_t (*pad2)(void *ctx);
 } GenesisViewerHost;
 
 typedef struct GenesisViewerOptions {
@@ -35,8 +37,8 @@ typedef struct GenesisViewerOptions {
   uint32_t slice_dispatches; /* guest dispatches per host slice, > 0 */
 } GenesisViewerOptions;
 
-/* Fixed player-1 key map (SDL3 viewer): arrows = D-pad, Z = A, X = B, C = C,
- * Return = Start. Pure translation of held-key flags to a GENESIS_PAD_* mask,
+/* Fixed key maps (SDL3 viewer). Player 1: arrows = D-pad, Z = A, X = B, C = C, Return = Start. Player 2
+ * (SEG-055): I/K/J/L = Up/Down/Left/Right, U = A, O = B, P = C, Right Shift = Start. Pure translation of held-key flags to a GENESIS_PAD_* mask,
  * kept free of SDL types so it is testable without a window. */
 typedef struct GenesisViewerKeys {
   uint8_t up, down, left, right, a, b, c, start; /* nonzero == held */
@@ -66,8 +68,8 @@ typedef struct GenesisPacer {
 void genesis_pacer_init(GenesisPacer *pacer, int unthrottled);
 uint64_t genesis_pacer_period_floor_ns(void);
 
-/* Called when a completed frame is ready. Sleeps until the accumulated
- * deadline (unless unthrottled/late), then advances the deadline by one
+/* Called once per virtual frame boundary the guest crosses (SEG-055: whether or not that frame could be rendered).
+ * Sleeps until the accumulated deadline (unless unthrottled/late), then advances the deadline by one
  * period. Returns 0 on success, -1 (state unmodified) on null args or a
  * non-monotonic clock. */
 int genesis_pacer_wait(GenesisPacer *pacer, const GenesisViewerHost *host);
@@ -87,6 +89,7 @@ typedef struct GenesisViewerResult {
   uint64_t dispatches;             /* total guest dispatches executed */
   uint32_t slices;
   uint64_t frames_presented;
+  uint64_t frames_paced; /* SEG-055: virtual frame boundaries throttled (independent of render success) */
 } GenesisViewerResult;
 
 /* Runs `runtime` in bounded slices. `runtime->live_frame_observer` must be

@@ -13,9 +13,6 @@
 
 GenesisFrameExportStatus genesis_frame_export_ppm_to_stream(const GenesisFrameArtifact *frame,
                                                              FILE *stream) {
-  size_t pixel_count;
-  size_t index;
-
   if (frame == NULL || stream == NULL) {
     return GENESIS_FRAME_EXPORT_STATUS_INVALID_ARGUMENT;
   }
@@ -23,33 +20,25 @@ GenesisFrameExportStatus genesis_frame_export_ppm_to_stream(const GenesisFrameAr
     return GENESIS_FRAME_EXPORT_STATUS_ARTIFACT_NOT_POPULATED;
   }
 
-  if (fprintf(stream, "P6\n%u %u\n255\n", (unsigned)GENESIS_FRAME_WIDTH,
-              (unsigned)GENESIS_FRAME_HEIGHT) < 0) {
-    return GENESIS_FRAME_EXPORT_STATUS_IO_ERROR;
-  }
-
-  pixel_count = (size_t)GENESIS_FRAME_WIDTH * (size_t)GENESIS_FRAME_HEIGHT;
-  for (index = 0; index < pixel_count; ++index) {
-    uint8_t palette_index = frame->pixels[index];
-    GenesisRgb888 color;
-    uint8_t rgb[3];
-
-    if (palette_index >= GENESIS_VDP_CRAM_ENTRY_COUNT) {
+  /* SEG-055: the artifact carries its own geometry (H32/H40, interlace mode 2) and per-row palettes. */
+  {
+    const unsigned width = GENESIS_FRAME_ARTIFACT_WIDTH(frame);
+    const unsigned height = GENESIS_FRAME_ARTIFACT_HEIGHT(frame);
+    uint8_t rgb[GENESIS_FRAME_MAX_WIDTH * 3U];
+    unsigned row;
+    if (width > GENESIS_FRAME_MAX_WIDTH || height > GENESIS_FRAME_MAX_HEIGHT) {
       return GENESIS_FRAME_EXPORT_STATUS_INVALID_PALETTE_INDEX;
     }
-    if (genesis_vdp_decode_cram_entry(frame->palette_snapshot, palette_index, &color) != 0) {
-      /* Defensive: genesis_vdp_decode_cram_entry only fails for a NULL
-       * argument (never true here) or an out-of-range index already
-       * rejected above; this branch is unreachable but is classified
-       * identically if it were ever reached. */
-      return GENESIS_FRAME_EXPORT_STATUS_INVALID_PALETTE_INDEX;
-    }
-
-    rgb[0] = color.r;
-    rgb[1] = color.g;
-    rgb[2] = color.b;
-    if (fwrite(rgb, 1, sizeof(rgb), stream) != sizeof(rgb)) {
+    if (fprintf(stream, "P6\n%u %u\n255\n", width, height) < 0) {
       return GENESIS_FRAME_EXPORT_STATUS_IO_ERROR;
+    }
+    for (row = 0; row < height; ++row) {
+      if (genesis_vdp_frame_row_rgb888(frame, row, rgb) != 0) {
+        return GENESIS_FRAME_EXPORT_STATUS_INVALID_PALETTE_INDEX;
+      }
+      if (fwrite(rgb, 1, (size_t)width * 3U, stream) != (size_t)width * 3U) {
+        return GENESIS_FRAME_EXPORT_STATUS_IO_ERROR;
+      }
     }
   }
 

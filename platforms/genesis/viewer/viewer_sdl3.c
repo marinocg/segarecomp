@@ -15,6 +15,8 @@ struct GenesisSdl3Viewer {
   SDL_AudioStream *audio;
   GenesisAudioSink sink;
   int closed;
+  unsigned texture_width;  /* SEG-055: the texture follows the frame geometry (H32/H40, interlace mode 2) */
+  unsigned texture_height;
 };
 
 static uint64_t sdl_now(void *ctx) { (void)ctx; return SDL_GetTicksNS(); }
@@ -41,15 +43,44 @@ static uint8_t sdl_pad1(void *ctx) {
   return genesis_viewer_pad_from_keys(&k);
 }
 
+/* SEG-055: Player 2, translated through the same pure key->mask function as Player 1. */
+static uint8_t sdl_pad2(void *ctx) {
+  (void)ctx;
+  const bool *ks = SDL_GetKeyboardState(NULL);
+  GenesisViewerKeys k;
+  k.up = ks[SDL_SCANCODE_I]; k.down = ks[SDL_SCANCODE_K];
+  k.left = ks[SDL_SCANCODE_J]; k.right = ks[SDL_SCANCODE_L];
+  k.a = ks[SDL_SCANCODE_U]; k.b = ks[SDL_SCANCODE_O]; k.c = ks[SDL_SCANCODE_P];
+  k.start = ks[SDL_SCANCODE_RSHIFT];
+  return genesis_viewer_pad_from_keys(&k);
+}
+
+static int sdl_ensure_texture(GenesisSdl3Viewer *v, unsigned width, unsigned height) {
+  if (v->texture != NULL && v->texture_width == width && v->texture_height == height) return 0;
+  if (v->texture != NULL) SDL_DestroyTexture(v->texture);
+  v->texture = SDL_CreateTexture(v->renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, (int)width,
+                                 (int)height);
+  v->texture_width = width;
+  v->texture_height = height;
+  if (v->texture == NULL) return -1;
+  SDL_SetTextureScaleMode(v->texture, SDL_SCALEMODE_NEAREST);
+  return 0;
+}
+
+/* SEG-055: the artifact carries its own geometry and per-row palettes; the window stretches whatever geometry arrives
+ * over its fixed client area (a TV does the same for H32 and interlace-mode-2 pictures). The RGB conversion is the one
+ * the headless PPM exporter uses (genesis_vdp_frame_row_rgb888), so the window and captures agree by construction. */
 static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
   GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)ctx;
-  static uint8_t rgb[GENESIS_FRAME_WIDTH * GENESIS_FRAME_HEIGHT * 3];
-  for (unsigned i = 0; i < GENESIS_FRAME_WIDTH * GENESIS_FRAME_HEIGHT; ++i) {
-    GenesisRgb888 c;
-    if (genesis_vdp_decode_cram_entry(frame->palette_snapshot, frame->pixels[i], &c) != 0) return -1;
-    rgb[i * 3] = c.r; rgb[i * 3 + 1] = c.g; rgb[i * 3 + 2] = c.b;
+  static uint8_t rgb[GENESIS_FRAME_MAX_WIDTH * GENESIS_FRAME_MAX_HEIGHT * 3];
+  const unsigned width = GENESIS_FRAME_ARTIFACT_WIDTH(frame);
+  const unsigned height = GENESIS_FRAME_ARTIFACT_HEIGHT(frame);
+  if (width == 0U || width > GENESIS_FRAME_MAX_WIDTH || height == 0U || height > GENESIS_FRAME_MAX_HEIGHT) return -1;
+  for (unsigned row = 0; row < height; ++row) {
+    if (genesis_vdp_frame_row_rgb888(frame, row, &rgb[(size_t)row * width * 3U]) != 0) return -1;
   }
-  if (!SDL_UpdateTexture(v->texture, NULL, rgb, GENESIS_FRAME_WIDTH * 3)) return -1;
+  if (sdl_ensure_texture(v, width, height) != 0) return -1;
+  if (!SDL_UpdateTexture(v->texture, NULL, rgb, (int)(width * 3U))) return -1;
   if (!SDL_RenderClear(v->renderer)) return -1;
   if (!SDL_RenderTexture(v->renderer, v->texture, NULL, NULL)) return -1;
   if (!SDL_RenderPresent(v->renderer)) return -1;
@@ -99,10 +130,7 @@ GenesisSdl3Viewer *genesis_sdl3_viewer_open(const char *title, int scale) {
                                    (int)GENESIS_FRAME_HEIGHT * scale, 0, &v->window, &v->renderer)) {
     SDL_Quit(); free(v); return NULL;
   }
-  v->texture = SDL_CreateTexture(v->renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING,
-                                 (int)GENESIS_FRAME_WIDTH, (int)GENESIS_FRAME_HEIGHT);
-  if (v->texture == NULL) { genesis_sdl3_viewer_close(v); return NULL; }
-  SDL_SetTextureScaleMode(v->texture, SDL_SCALEMODE_NEAREST);
+  if (sdl_ensure_texture(v, GENESIS_FRAME_WIDTH, GENESIS_FRAME_HEIGHT) != 0) { genesis_sdl3_viewer_close(v); return NULL; }
   return v;
 }
 
@@ -114,6 +142,7 @@ void genesis_sdl3_viewer_host(GenesisSdl3Viewer *viewer, GenesisViewerHost *host
   host->present = sdl_present;
   host->window_closed = sdl_closed;
   host->pad1 = sdl_pad1;
+  host->pad2 = sdl_pad2;
 }
 
 void genesis_sdl3_viewer_close(GenesisSdl3Viewer *v) {

@@ -16,16 +16,10 @@ typedef struct GenesisFrameCaptureSession {
 
 static GenesisFrameCaptureSession *g_capture_session;
 
-/* Producer wrapper: renders exactly like the viewer's producer, then records the frame when its
-   publication ordinal is inside the window. The runtime publishes (and increments its sequence)
-   only after a successful render, so `produced` equals the publication ordinal. */
-static int genesis_frame_capture_producer(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
-                                          const uint8_t vsram[GENESIS_VDP_VSRAM_BYTES],
-                                          const uint8_t cram[GENESIS_VDP_CRAM_BYTES],
-                                          const uint16_t registers[GENESIS_VDP_REGISTER_COUNT],
-                                          GenesisFrameArtifact *frame_out) {
+/* Records the frame when its publication ordinal is inside the window. The runtime publishes (and increments its
+   sequence) only after a successful render, so `produced` equals the publication ordinal. */
+static int genesis_frame_capture_record(int status, GenesisFrameArtifact *frame_out) {
   GenesisFrameCaptureSession *session = g_capture_session;
-  const int status = genesis_vdp_produce_frame(vram, vsram, cram, registers, frame_out);
   if (status != 0 || session == NULL) return status;
   session->produced++;
   /* After a failed write nothing more is captured, so digests stay aligned with selected ordinals. */
@@ -46,11 +40,30 @@ static int genesis_frame_capture_producer(const uint8_t vram[GENESIS_VDP_VRAM_BY
   return status;
 }
 
+/* Producer wrapper: renders exactly like the viewer's producer (the scanline-aware one, SEG-055), then records. */
+static int genesis_frame_capture_raster_producer(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
+                                                 const GenesisRasterFrameState *raster,
+                                                 GenesisFrameArtifact *frame_out) {
+  return genesis_frame_capture_record(genesis_vdp_produce_frame_raster(vram, raster, frame_out), frame_out);
+}
+
+/* The legacy single-snapshot producer remains the observer's own `producer` (used when no raster producer is set). */
+static int genesis_frame_capture_producer(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
+                                          const uint8_t vsram[GENESIS_VDP_VSRAM_BYTES],
+                                          const uint8_t cram[GENESIS_VDP_CRAM_BYTES],
+                                          const uint16_t registers[GENESIS_VDP_REGISTER_COUNT],
+                                          GenesisFrameArtifact *frame_out) {
+  return genesis_frame_capture_record(genesis_vdp_produce_frame(vram, vsram, cram, registers, frame_out), frame_out);
+}
+
 static GenesisFrameCaptureResult genesis_frame_capture_finish(GenesisRuntime *runtime, GenesisFrameCaptureResult r,
                                                               GenesisFrameCaptureOutcome outcome,
                                                               const GenesisLiveFrameObserver *observer) {
   if (observer != NULL) r.frames_published = observer->sequence;
-  if (runtime != NULL) runtime->live_frame_observer = NULL;
+  if (runtime != NULL) {
+    runtime->live_frame_observer = NULL;
+    runtime->live_raster = NULL;
+  }
   g_capture_session = NULL;
   r.outcome = outcome;
   return r;
@@ -63,6 +76,7 @@ GenesisFrameCaptureResult genesis_frame_capture_run(GenesisRuntime *runtime, Gen
   GenesisLiveFrameObserver observer;
   GenesisFrameArtifact latest;
   GenesisFrameCaptureSession session;
+  GenesisRasterCapture raster_capture; /* SEG-055: host-owned per-scanline capture buffer */
   memset(&r, 0, sizeof(r));
   if (runtime == NULL || dispatch == NULL || options == NULL || options->out_dir == NULL ||
       options->out_dir[0] == '\0' || options->first_frame == 0U || options->frame_count == 0U ||
@@ -76,6 +90,8 @@ GenesisFrameCaptureResult genesis_frame_capture_run(GenesisRuntime *runtime, Gen
   }
   memset(&latest, 0, sizeof(latest));
   memset(&session, 0, sizeof(session));
+  memset(&raster_capture, 0, sizeof(raster_capture));
+  raster_capture.producer = genesis_frame_capture_raster_producer;
   session.options = options;
   session.result = &r;
   observer.producer = genesis_frame_capture_producer;
@@ -83,6 +99,7 @@ GenesisFrameCaptureResult genesis_frame_capture_run(GenesisRuntime *runtime, Gen
   observer.sequence = 0U;
   g_capture_session = &session;
   runtime->live_frame_observer = &observer;
+  runtime->live_raster = &raster_capture;
   for (;;) {
     const uint64_t remaining = total_dispatch_allowance - r.dispatches;
     uint32_t slice;

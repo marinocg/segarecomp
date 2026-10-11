@@ -6,8 +6,8 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <string.h>
+#include <stdlib.h> /* getenv: SEGARECOMP_GENESIS_REGION (SEG-055) */
 #if defined(_WIN32)
-#include <stdlib.h>
 #include <fcntl.h>
 #include <io.h>
 #endif
@@ -109,7 +109,8 @@ static int genesis_is_device(uint32_t address) {
    connected to any pin... it will latch a value written to it") -- it
    always echoes the DATA latch's own bit 7, regardless of CTRL. Player 1
    (port 1) buttons come from the host-supplied `pad` mask (GENESIS_PAD_*,
-   SEG-011-T004); a zero mask, and port 2 always, is every button released. */
+   SEG-011-T004) and, since SEG-055, Player 2 (port 2) from its own independent mask; a zero mask is every button
+   released. */
 static uint8_t genesis_controller_io_data_port_read(uint8_t ctrl, uint8_t data, uint8_t pad) {
   const unsigned th = (ctrl & 0x40U) ? ((unsigned)(data >> 6) & 1U) : 1U;
   /* Released-state 6-bit (bits 5-0) button-group value for the current TH
@@ -136,7 +137,7 @@ static uint8_t genesis_controller_io_data_port_read(uint8_t ctrl, uint8_t data, 
   return result;
 }
 
-static int genesis_controller_io_access(GenesisDeviceState *devices, uint8_t pad1, uint32_t address,
+static int genesis_controller_io_access(GenesisDeviceState *devices, uint8_t pad1, uint8_t pad2, uint8_t region, uint32_t address,
                                           GenesisAccessWidth width,
                                           GenesisAccessDirection direction, uint32_t *value) {
   size_t index;
@@ -153,7 +154,7 @@ static int genesis_controller_io_access(GenesisDeviceState *devices, uint8_t pad
     if (data_port_slot == 0 || data_port_slot == 1) {
       *value = genesis_controller_io_data_port_read(devices->controller_io.ctrl[data_port_slot],
                                                       devices->controller_io.data[data_port_slot],
-                                                      data_port_slot == 0 ? pad1 : 0U);
+                                                      data_port_slot == 0 ? pad1 : pad2);
       return 1;
     }
     if (data_port_slot == 2) { /* DATA3 (expansion port, no device): same pin model as DATA1/DATA2 with every line released */
@@ -164,6 +165,13 @@ static int genesis_controller_io_access(GenesisDeviceState *devices, uint8_t pad
       *value = devices->controller_io.ctrl[data_port_slot - 3];
       return 1;
     }
+  }
+  /* SEG-055: the version register reports the CONFIGURED console region (default USA NTSC == the historical policy
+     value 0xA0), not a fixed constant. */
+  if (address == SEGARECOMP_GENESIS_CONTROLLER_VERSION_BYTE_ADDRESS && width == GENESIS_ACCESS_BYTE &&
+      direction == GENESIS_ACCESS_READ) {
+    *value = segarecomp_genesis_region_version_value(region);
+    return 1;
   }
   for (index = 0U; index < SEGARECOMP_GENESIS_CONTROLLER_IO_SELECTOR_COUNT; ++index) {
     const SegarecompGenesisControllerIoSelector *selector =
@@ -1498,7 +1506,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
   }
   if (genesis_is_device(address)) {
     uint32_t routed_value = (direction == GENESIS_ACCESS_WRITE) ? *value : 0U;
-    if (genesis_controller_io_access(&runtime->devices, runtime->pad1, address, width, direction, &routed_value)) {
+    if (genesis_controller_io_access(&runtime->devices, runtime->pad1, runtime->pad2, runtime->region_profile, address, width, direction, &routed_value)) {
       if (direction == GENESIS_ACCESS_READ) *value = routed_value;
       return GENESIS_ACCESS_OK;
     }
@@ -2266,6 +2274,12 @@ static SegarecompM68kVectorResolution genesis_m68k_resolve_vector(void *context,
     if (!runtime->irq6_handler_present) return SEGARECOMP_M68K_VECTOR_NOT_INSTALLED;
     *handler_entry = runtime->irq6_handler_entry;
     return SEGARECOMP_M68K_VECTOR_HANDLER;
+  case GENESIS_M68K_VECTOR_LEVEL4_AUTOVECTOR:
+    /* SEG-055: the H-interrupt autovector, resolved at build time like the software-exception vectors. */
+    if (!runtime->software_exception_handler_present[GENESIS_M68K_VECTOR_LEVEL4_AUTOVECTOR])
+      return SEGARECOMP_M68K_VECTOR_NOT_INSTALLED;
+    *handler_entry = runtime->software_exception_handler_entry[GENESIS_M68K_VECTOR_LEVEL4_AUTOVECTOR];
+    return SEGARECOMP_M68K_VECTOR_HANDLER;
   default:
     /* SEG-021-T019: the software-exception vectors, from the build-time table. */
     if (genesis_is_software_exception_vector(vector) && runtime->software_exception_handler_present[vector]) {
@@ -2445,6 +2459,106 @@ static int genesis_accept_interrupt(GenesisRuntime *runtime, uint32_t level, Gen
 
 static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m68k_cycles,
                                             int admit_interrupt, GenesisControlTransfer *result);
+
+/*
+ * SEG-055: scanline schedule, H-interrupt counter and per-line capture (see GenesisRasterScheduler in runtime.h).
+ * Line L of the active display is "entered" at the first retirement boundary at or after its start tick; the state
+ * captured for it is the state after the instruction that straddled that boundary, exactly the granularity at which
+ * the interrupt scheduler already samples every other source. Deterministic guest time only.
+ */
+static void genesis_raster_capture_state(const GenesisRuntime *runtime, GenesisRasterLine *dst) {
+  memcpy(dst->registers, runtime->devices.vdp.registers, sizeof(dst->registers));
+  memcpy(dst->cram, runtime->devices.vdp.cram, sizeof(dst->cram));
+  memcpy(dst->vsram, runtime->devices.vdp.vsram, sizeof(dst->vsram));
+}
+
+static void genesis_raster_capture_line(GenesisRuntime *runtime, unsigned line) {
+  const GenesisLiveFrameObserver *observer = runtime->live_frame_observer;
+  GenesisRasterCapture *capture = runtime->live_raster;
+  if (observer == 0 || capture == 0 || capture->producer == 0) return;
+  genesis_raster_capture_state(runtime, &capture->frame.lines[line]);
+  capture->captured[line] = 1U;
+}
+
+static void genesis_raster_enter_line(GenesisRuntime *runtime, uint64_t absolute_line) {
+  GenesisRasterScheduler *raster = &runtime->raster;
+  const unsigned line = (unsigned)(absolute_line % GENESIS_NTSC_LINES_PER_FRAME);
+  if (line == 0U && runtime->live_raster != 0) memset(runtime->live_raster->captured, 0, sizeof(runtime->live_raster->captured));
+  if (line < GENESIS_RASTER_MAX_LINES) {
+    genesis_raster_capture_line(runtime, line);
+    if (raster->hint_counter == 0U) {
+      raster->hint_counter = (uint8_t)(runtime->devices.vdp.registers[10] & UINT16_C(0x00FF));
+      raster->hint_pending = 1U;
+    } else {
+      --raster->hint_counter;
+    }
+  } else if (line == GENESIS_NTSC_VBLANK_ONSET_LINE) {
+    if (raster->hint_counter == 0U) raster->hint_pending = 1U;
+  } else if (line == GENESIS_NTSC_LINES_PER_FRAME - 1U) {
+    raster->hint_counter = (uint8_t)(runtime->devices.vdp.registers[10] & UINT16_C(0x00FF));
+  }
+}
+
+static void genesis_raster_advance(GenesisRuntime *runtime, uint64_t now_ticks) {
+  GenesisRasterScheduler *raster = &runtime->raster;
+  const uint64_t line_now = now_ticks / GENESIS_NTSC_MASTER_TICKS_PER_LINE;
+  uint64_t line;
+  if (!raster->initialized) {
+    raster->initialized = 1U;
+    raster->hint_counter = (uint8_t)(runtime->devices.vdp.registers[10] & UINT16_C(0x00FF));
+    raster->last_line = line_now;
+    /* The line the schedule starts in is entered like any other (capture, counter step), so the very first frame
+       follows the steady-state counter sequence. */
+    genesis_raster_enter_line(runtime, line_now);
+    return;
+  }
+  if (line_now <= raster->last_line) return;
+  line = raster->last_line + 1U;
+  /* A long STOP skip may cross many frames; only the most recent two frames' lines can matter. */
+  if (line_now - line > 2U * GENESIS_NTSC_LINES_PER_FRAME) line = line_now - 2U * GENESIS_NTSC_LINES_PER_FRAME;
+  for (; line <= line_now; ++line) genesis_raster_enter_line(runtime, line);
+  raster->last_line = line_now;
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+#define GENESIS_NOINLINE __attribute__((noinline))
+#else
+#define GENESIS_NOINLINE
+#endif
+
+/* Renders the frame that just ended and publishes it atomically (a failed render publishes nothing and mutates
+ * nothing but the observer's rejection counter). Kept out of line: its artifact is large and the scheduler is hot. */
+static GENESIS_NOINLINE void genesis_publish_live_frame(GenesisRuntime *runtime) {
+  GenesisLiveFrameObserver *observer = runtime->live_frame_observer;
+  GenesisFrameArtifact produced;
+  int status;
+  if (observer == 0 || observer->latest == 0 || observer->sequence == UINT64_MAX) return;
+  memset(&produced, 0, sizeof(produced));
+  if (runtime->live_raster != 0 && runtime->live_raster->producer != 0) {
+    GenesisRasterCapture *capture = runtime->live_raster;
+    unsigned line;
+    /* Lines whose start was never observed (the first frame, or an observer attached mid-frame) inherit the
+       previous line's state, or the current state for line 0. */
+    for (line = 0U; line < GENESIS_RASTER_MAX_LINES; ++line) {
+      if (capture->captured[line]) continue;
+      if (line == 0U) genesis_raster_capture_state(runtime, &capture->frame.lines[0]);
+      else capture->frame.lines[line] = capture->frame.lines[line - 1U];
+      capture->captured[line] = 1U;
+    }
+    status = capture->producer(runtime->devices.vdp.vram, &capture->frame, &produced);
+  } else if (observer->producer != 0) {
+    status = observer->producer(runtime->devices.vdp.vram, runtime->devices.vdp.vsram, runtime->devices.vdp.cram,
+                                runtime->devices.vdp.registers, &produced);
+  } else {
+    return;
+  }
+  if (status == 0) {
+    *observer->latest = produced;
+    ++observer->sequence;
+  } else {
+    if (runtime->live_raster != 0) ++runtime->live_raster->render_rejections;
+  }
+}
 
 /*
  * The synchronous (never scheduled, never masked) exception raise shared by
@@ -2636,23 +2750,18 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
       return 2;
     }
   }
+  /* SEG-055: the scanline schedule (line captures, H-interrupt counter) runs before the frame-boundary handling so the
+     frame rendered at the onset sees every active line's state. */
+  genesis_raster_advance(runtime, runtime->scheduler.master_ticks);
   /* An onset is crossed iff floor((t-onset)/frame) changes.  The addition is
      checked above, so no wrapped phase can manufacture an event. */
   if (crosses_onset) {
     /* SEG-007-T255: a genuine virtual frame boundary (never IRQ/IE0/SR/pending
-       dependent). Render the current VDP state into a local artifact and
-       publish it atomically; failure publishes nothing and mutates nothing. */
-    GenesisLiveFrameObserver *observer = runtime->live_frame_observer;
-    if (observer != 0 && observer->producer != 0 && observer->latest != 0 &&
-        observer->sequence != UINT64_MAX) {
-      GenesisFrameArtifact produced;
-      memset(&produced, 0, sizeof(produced));
-      if (observer->producer(runtime->devices.vdp.vram, runtime->devices.vdp.vsram,
-                             runtime->devices.vdp.cram, runtime->devices.vdp.registers, &produced) == 0) {
-        *observer->latest = produced;
-        ++observer->sequence;
-      }
-    }
+       dependent). Render the frame that just ended and publish it atomically;
+       failure publishes nothing and mutates nothing. SEG-055: the virtual frame counter advances regardless of the
+       render outcome -- it, not publication, is what a host paces on. */
+    ++runtime->virtual_frame_count;
+    genesis_publish_live_frame(runtime);
     /* §3: VDP register #1 bit 5 (IE0) gating -- the real, already-persisted
        register state, mirroring the existing DMA-enable (bit 4) precedent. */
     if ((runtime->devices.vdp.registers[1] & UINT16_C(0x0020)) != 0U &&
@@ -2665,8 +2774,13 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
   /* SEG-021-T020 / ADR 0043 §7: this boundary samples the machine's request
      level into the M68K-owned CPU record. Genesis wires one source: the
      pending VBlank requests level 6 (autovectored). */
-  segarecomp_m68k_interrupt_sample(&runtime->m68k_interrupt,
-                                   runtime->devices.interrupt.vblank_pending ? 6U : 0U);
+  /* SEG-055: the VDP also requests level 4 when an H-interrupt is latched and register #0 bit 4 enables it; the
+     vertical interrupt (level 6) has priority. */
+  segarecomp_m68k_interrupt_sample(
+      &runtime->m68k_interrupt,
+      runtime->devices.interrupt.vblank_pending
+          ? 6U
+          : ((runtime->raster.hint_pending && (runtime->devices.vdp.registers[0] & UINT16_C(0x0010)) != 0U) ? 4U : 0U));
   if (!admit_interrupt) return 0;                                  /* §5 step 4 */
 
   /* §4 / ADR 0043: the CPU-owned acceptance rule (level > SR mask for 1-6;
@@ -2674,6 +2788,19 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
   level = segarecomp_m68k_interrupt_recognized_level(&runtime->m68k_interrupt, runtime->sr);
   if (level == 0U) return 0;
 
+  if (level == 4U) {
+    /* SEG-055: H-interrupt. Entry through the M68K-owned core exactly like level 6; the latch clears once taken. A
+       missing build-resolved handler (an unadmittable or RAM-resident vector) stops fail-closed -- never a silent drop. */
+    if (!runtime->software_exception_handler_present[GENESIS_M68K_VECTOR_LEVEL4_AUTOVECTOR]) {
+      *result = (GenesisControlTransfer){0};
+      result->kind = GENESIS_STOP;
+      result->stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+                                         GENESIS_DIAG_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT);
+      return 2;
+    }
+    if (!genesis_accept_interrupt(runtime, level, result)) return 2;
+    runtime->raster.hint_pending = 0U;
+  } else {
   if (!runtime->irq6_handler_present) {                            /* no build-resolved handler */
     if (runtime->irq6_vector_in_work_ram) {
       /* The vector slot points at work-RAM (a RAM jump stub), which this architecture cannot execute: the recognized
@@ -2694,6 +2821,7 @@ static int genesis_irq6_scheduler_and_admit(GenesisRuntime *runtime, uint32_t m6
      successful commit, exactly as before. */
   if (!genesis_accept_interrupt(runtime, level, result)) return 2;
   runtime->devices.interrupt.vblank_pending = 0U;                  /* §3 re-arm (admission clears) */
+  }
   /* SEG-021-T022 / ADR 0043 §8: the interrupt exception-processing cost -- 44 cycles for the autovectored entry, CPU-owned --
      advances the same scheduler after the entry commits, admitting nothing at that boundary; a VBlank onset
      crossed while it is charged latches normally and is admitted at the next retirement boundary. */
@@ -2731,9 +2859,36 @@ static void genesis_m68k_wait_while_stopped(GenesisRuntime *runtime, GenesisCont
   const int vblank_source = (runtime->irq6_handler_present || runtime->irq6_vector_in_work_ram) &&
                             (runtime->devices.interrupt.vblank_pending ||
                              (runtime->devices.vdp.registers[1] & UINT16_C(0x0020)) != 0U);
+  /* SEG-055: the H-interrupt (level 4) is a second wake source when it is enabled (register #0 bit 4) and either
+     already latched or still able to latch. */
+  const int hint_source = (runtime->devices.vdp.registers[0] & UINT16_C(0x0010)) != 0U;
+  /* STOP's loaded interrupt mask is below 4 iff a level-4 request could actually wake the CPU; otherwise the
+     whole wait remains a single jump to the next VBlank onset exactly as before. */
+  const int hint_wakes = hint_source && (((unsigned)runtime->sr >> 8) & 7U) < 4U;
   uint64_t target;
   uint64_t ticks;
-  if (!segarecomp_m68k_stop_wake_possible(&runtime->m68k_interrupt, vblank_source ? 6U : 0U, runtime->sr)) {
+  if (!segarecomp_m68k_stop_wake_possible(&runtime->m68k_interrupt, vblank_source ? 6U : (hint_source ? 4U : 0U),
+                                          runtime->sr)) {
+    *result = (GenesisControlTransfer){0};
+    result->kind = GENESIS_STOP;
+    result->stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+                                       GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE);
+    return;
+  }
+  if (hint_wakes) {
+    /* With an H-interrupt in play the CPU can be woken at any scanline boundary: advance virtual time one scanline at
+       a scanline per step (still through the same scheduler) until a request is accepted. One frame plus a margin always contains
+       either a latch or a VBlank onset; if neither wakes the CPU the run ends with the explicit diagnostic. */
+    unsigned step;
+    for (step = 0U; step < 2U * GENESIS_NTSC_LINES_PER_FRAME + 4U; ++step) {
+      const uint64_t clock = runtime->scheduler.master_ticks;
+      const uint64_t next_line = (clock / GENESIS_NTSC_MASTER_TICKS_PER_LINE + 1U) * GENESIS_NTSC_MASTER_TICKS_PER_LINE;
+      const uint64_t line_ticks = next_line - clock;
+      if (genesis_irq6_scheduler_and_admit(
+              runtime, (uint32_t)((line_ticks + GENESIS_M68K_CYCLE_MASTER_TICKS - 1U) / GENESIS_M68K_CYCLE_MASTER_TICKS), 1,
+              result) != 0)
+        return;
+    }
     *result = (GenesisControlTransfer){0};
     result->kind = GENESIS_STOP;
     result->stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
@@ -2982,6 +3137,11 @@ void genesis_runtime_set_pad1(GenesisRuntime *runtime, uint8_t mask) {
   if (runtime != NULL) runtime->pad1 = mask;
 }
 
+/* SEG-055: the second controller port (DATA2/CTRL2, $A10005/$A1000B), independent of port 1. */
+void genesis_runtime_set_pad2(GenesisRuntime *runtime, uint8_t mask) {
+  if (runtime != NULL) runtime->pad2 = mask;
+}
+
 void genesis_cartridge_sram_install(GenesisRuntime *runtime, const GenesisCartridgeSramConfig *config, uint8_t *storage) {
   uint32_t index;
   if (runtime == 0 || config == 0) return;
@@ -2990,6 +3150,54 @@ void genesis_cartridge_sram_install(GenesisRuntime *runtime, const GenesisCartri
   runtime->cartridge_sram_control = 0U;
   if (storage != 0)
     for (index = 0U; index < config->storage_bytes; ++index) storage[index] = SEGARECOMP_GENESIS_CARTRIDGE_SRAM_FILL;
+}
+
+/* SEG-055: console region configuration (see controller_io_contract.h for the version-register encodings). */
+static int genesis_region_name_equals(const char *name, const char *expected) {
+  size_t i;
+  for (i = 0U; name[i] != '\0' && expected[i] != '\0'; ++i) {
+    char c = name[i];
+    if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+    if (c != expected[i]) return 0;
+  }
+  return name[i] == '\0' && expected[i] == '\0';
+}
+
+int genesis_region_profile_from_name(const char *name, unsigned *profile_out) {
+  if (name == 0 || profile_out == 0) return -1;
+  if (genesis_region_name_equals(name, "usa") || genesis_region_name_equals(name, "us") ||
+      genesis_region_name_equals(name, "ntsc-u")) {
+    *profile_out = (unsigned)SEGARECOMP_GENESIS_REGION_USA_NTSC;
+    return 0;
+  }
+  if (genesis_region_name_equals(name, "japan") || genesis_region_name_equals(name, "jp") ||
+      genesis_region_name_equals(name, "ntsc-j")) {
+    *profile_out = (unsigned)SEGARECOMP_GENESIS_REGION_JAPAN_NTSC;
+    return 0;
+  }
+  if (genesis_region_name_equals(name, "europe") || genesis_region_name_equals(name, "eu") ||
+      genesis_region_name_equals(name, "pal")) {
+    *profile_out = (unsigned)SEGARECOMP_GENESIS_REGION_EUROPE_PAL;
+    return 0;
+  }
+  return -1;
+}
+
+const char *genesis_region_profile_name(unsigned profile) {
+  switch (profile) {
+    case SEGARECOMP_GENESIS_REGION_USA_NTSC: return "usa";
+    case SEGARECOMP_GENESIS_REGION_JAPAN_NTSC: return "japan";
+    case SEGARECOMP_GENESIS_REGION_EUROPE_PAL: return "europe";
+    default: return "invalid";
+  }
+}
+
+int genesis_runtime_set_region(GenesisRuntime *runtime, unsigned profile) {
+  if (runtime == 0 || profile >= SEGARECOMP_GENESIS_REGION_PROFILE_COUNT || runtime->scheduler.master_ticks != 0U)
+    return -1;
+  runtime->region_profile = (uint8_t)profile;
+  runtime->region_configured = 1U;
+  return 0;
 }
 
 GenesisControlTransfer genesis_runtime_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
@@ -3005,6 +3213,30 @@ GenesisControlTransfer genesis_runtime_run(GenesisRuntime *runtime, GenesisDispa
 #endif
   if (runtime == 0 || dispatch == 0 || dispatch_allowance == 0U)
     return genesis_internal_dispatch_inconsistency_stop(runtime);
+  /* SEG-055: the console region is chosen exactly once, before the first guest step -- by the host through
+     genesis_runtime_set_region, else from SEGARECOMP_GENESIS_REGION (unset/empty/"auto" == the default USA NTSC console)
+     -- and is then fixed for the whole run. A PAL console (or an unrecognized name) is refused rather than run with the
+     NTSC schedule: 50 Hz timing is not implemented. */
+  if (!runtime->region_configured) {
+    const char *name = getenv("SEGARECOMP_GENESIS_REGION");
+    unsigned profile = (unsigned)SEGARECOMP_GENESIS_REGION_USA_NTSC;
+    runtime->region_configured = 1U;
+    if (name != 0 && name[0] != '\0' && genesis_region_name_equals(name, "auto") == 0) {
+      if (genesis_region_profile_from_name(name, &profile) != 0) {
+        result.kind = GENESIS_STOP;
+        result.stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+                                          GENESIS_DIAG_UNSUPPORTED_REGION_TIMING);
+        return result;
+      }
+      runtime->region_profile = (uint8_t)profile;
+    }
+  }
+  if (!segarecomp_genesis_region_is_supported(runtime->region_profile)) {
+    result.kind = GENESIS_STOP;
+    result.stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+                                      GENESIS_DIAG_UNSUPPORTED_REGION_TIMING);
+    return result;
+  }
   for (step = 0U; step < dispatch_allowance; ++step) {
     result = genesis_runtime_step(runtime, dispatch);
     if (result.kind != GENESIS_CONTINUE_AT_PC) return result;
@@ -3141,7 +3373,7 @@ int genesis_extract_checkpoint_evidence(const GenesisRuntime *runtime,
   genesis_sha256_init(&digest);
   for (index = 0U; index < bundle.transaction.transaction_count; ++index) genesis_sha_bus_access(&digest, &bundle.transaction.transactions[index]);
   genesis_sha256_final(&digest, bundle.transaction.transaction_digest);
-  genesis_sha256_init(&digest); genesis_sha_u32(&digest,bundle.schema_version); genesis_sha256_update(&digest,(const uint8_t *)bundle.identity.checkpoint_id,bundle.identity.checkpoint_id_length); genesis_sha_u8(&digest,bundle.identity.checkpoint_id_length); genesis_sha256_update(&digest,(const uint8_t *)bundle.identity.rom_sha256,64U); genesis_sha_options(&digest,&bundle.identity.options); genesis_sha256_update(&digest,bundle.identity.options_digest,32U); for(index=0U;index<8U;++index) genesis_sha_u32(&digest,bundle.cpu.d[index]); for(index=0U;index<8U;++index) genesis_sha_u32(&digest,bundle.cpu.a[index]); genesis_sha_u16(&digest,bundle.cpu.sr); genesis_sha_u8(&digest,(uint8_t)bundle.cpu.pc_class); genesis_sha256_update(&digest,bundle.ram.work_ram_digest,32U); genesis_sha_device(&digest,&bundle.device.devices); genesis_sha_u8(&digest,bundle.transaction.has_full_transactions); genesis_sha_u16(&digest,bundle.transaction.transaction_count); if(bundle.transaction.has_full_transactions) for(index=0U;index<bundle.transaction.transaction_count;++index) genesis_sha_bus_access(&digest,&bundle.transaction.transactions[index]); genesis_sha256_update(&digest,bundle.transaction.transaction_digest,32U); genesis_sha256_update(&digest,bundle.frame.pixels,sizeof(bundle.frame.pixels)); genesis_sha256_update(&digest,bundle.frame.palette_snapshot,sizeof(bundle.frame.palette_snapshot)); genesis_sha256_update(&digest,bundle.frame.frame_digest,32U); genesis_sha256_final(&digest,bundle.bundle_digest);
+  genesis_sha256_init(&digest); genesis_sha_u32(&digest,bundle.schema_version); genesis_sha256_update(&digest,(const uint8_t *)bundle.identity.checkpoint_id,bundle.identity.checkpoint_id_length); genesis_sha_u8(&digest,bundle.identity.checkpoint_id_length); genesis_sha256_update(&digest,(const uint8_t *)bundle.identity.rom_sha256,64U); genesis_sha_options(&digest,&bundle.identity.options); genesis_sha256_update(&digest,bundle.identity.options_digest,32U); for(index=0U;index<8U;++index) genesis_sha_u32(&digest,bundle.cpu.d[index]); for(index=0U;index<8U;++index) genesis_sha_u32(&digest,bundle.cpu.a[index]); genesis_sha_u16(&digest,bundle.cpu.sr); genesis_sha_u8(&digest,(uint8_t)bundle.cpu.pc_class); genesis_sha256_update(&digest,bundle.ram.work_ram_digest,32U); genesis_sha_device(&digest,&bundle.device.devices); genesis_sha_u8(&digest,bundle.transaction.has_full_transactions); genesis_sha_u16(&digest,bundle.transaction.transaction_count); if(bundle.transaction.has_full_transactions) for(index=0U;index<bundle.transaction.transaction_count;++index) genesis_sha_bus_access(&digest,&bundle.transaction.transactions[index]); genesis_sha256_update(&digest,bundle.transaction.transaction_digest,32U); genesis_sha256_update(&digest,bundle.frame.pixels,GENESIS_FRAME_ARTIFACT_WIDTH(&bundle.frame)*GENESIS_FRAME_ARTIFACT_HEIGHT(&bundle.frame)); genesis_sha256_update(&digest,bundle.frame.palette_snapshot,sizeof(bundle.frame.palette_snapshot)); genesis_sha256_update(&digest,bundle.frame.frame_digest,32U); genesis_sha256_final(&digest,bundle.bundle_digest);
   *bundle_out = bundle;
   return 1;
 }
@@ -3298,6 +3530,7 @@ static const char *genesis_diagnostic_name(GenesisDiagnosticCategory value) {
   case GENESIS_DIAG_IRQ6_VECTOR_IN_WORK_RAM: return "irq6_vector_in_work_ram";
   case GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_LAYOUT: return "unsupported_cartridge_sram_layout";
   case GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS: return "unsupported_cartridge_sram_access";
+  case GENESIS_DIAG_UNSUPPORTED_REGION_TIMING: return "unsupported_region_timing";
   default: return 0;
   }
 }
@@ -3338,7 +3571,11 @@ static int genesis_valid_stop_pair(GenesisStopClass stop_class,
     return category == GENESIS_DIAG_KNOWN_BUT_UNEMITTED_TARGET;
   case GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT:
     /* SEG-021-T020: a STOP with no possible wake source. */
-    return category == GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE || category == GENESIS_DIAG_IRQ6_VECTOR_IN_WORK_RAM;
+    /* SEG-055: an enabled H-interrupt without a resolved handler (the generic interrupt diagnostic) and a console region
+       whose timing is not implemented. */
+    return category == GENESIS_DIAG_STOPPED_WITHOUT_WAKE_SOURCE || category == GENESIS_DIAG_IRQ6_VECTOR_IN_WORK_RAM ||
+           category == GENESIS_DIAG_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT ||
+           category == GENESIS_DIAG_UNSUPPORTED_REGION_TIMING;
   case GENESIS_STOP_INTERNAL_DISPATCH_INCONSISTENCY:
     return category == GENESIS_DIAG_INTERNAL_DISPATCH_INCONSISTENCY;
   case GENESIS_STOP_INSTRUCTION_BUDGET_EXHAUSTED:

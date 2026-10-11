@@ -84,15 +84,51 @@ void test_sat_base_address_h40_bit0_ignored() {
         "highest H40 SAT base keeps all 80 sprite entries within VRAM bounds");
 }
 
-void test_sat_base_address_fails_closed_without_h40() {
+// SEG-055: H32 has its own SAT base granularity (register #5 bits 6-0, 512 bytes); only the reserved mixed RS0/RS1
+// combinations fail closed.
+void test_sat_base_address_h32_and_reserved_hres() {
   uint16_t regs[GENESIS_VDP_REGISTER_COUNT];
   make_default_registers(regs);
-  regs[12] = 0x00; // Neither RS0 nor RS1 set -> H32, not H40.
+  regs[12] = 0x00; // RS0 = RS1 = 0 -> H32
 
-  uint32_t base = 0xDEADBEEFU; // sentinel pattern.
-  check(genesis_vdp_sat_base_address(regs, &base) < 0,
-        "SAT base fails closed when H40 is not selected");
-  check(base == 0xDEADBEEFU, "SAT base leaves output unmodified on H40 gate failure");
+  regs[5] = 0x71;
+  uint32_t base = 0xDEADBEEFU;
+  check(genesis_vdp_sat_base_address(regs, &base) == 0, "H32 SAT base decodes");
+  check(base == (((uint32_t)0x71U << 9) & 0xFE00U), "H32 SAT base keeps register #5 bit 0 (512-byte granularity)");
+  regs[5] = 0x7F;
+  check(genesis_vdp_sat_base_address(regs, &base) == 0 && base == 0xFE00U &&
+            (uint64_t)base + (uint64_t)GENESIS_VDP_SAT_H32_MAX_SPRITES * GENESIS_VDP_SPRITE_ENTRY_BYTES <=
+                GENESIS_VDP_VRAM_BYTES,
+        "highest H32 SAT base keeps all 64 sprite entries within VRAM bounds");
+
+  regs[12] = 0x80; // reserved: RS0 only
+  base = 0xDEADBEEFU;
+  check(genesis_vdp_sat_base_address(regs, &base) < 0, "SAT base fails closed for a reserved RS0/RS1 combination");
+  check(base == 0xDEADBEEFU, "SAT base leaves output unmodified on the reserved-combination failure");
+}
+
+// H32 sprite index bound is 64; an out-of-range index fails and the traversal treats a link >= 64 as end-of-list.
+void test_sat_h32_limits() {
+  uint16_t regs[GENESIS_VDP_REGISTER_COUNT];
+  make_default_registers(regs);
+  regs[12] = 0x00;
+  regs[5] = 0x40;  // SAT at 0x8000
+  uint8_t vram[GENESIS_VDP_VRAM_BYTES];
+  std::memset(vram, 0, sizeof(vram));
+  GenesisVdpSpriteEntry entry;
+  check(genesis_vdp_read_sprite_entry(vram, regs, 63, &entry) == 0, "H32 sprite index 63 is readable");
+  check(genesis_vdp_read_sprite_entry(vram, regs, 64, &entry) != 0, "H32 sprite index 64 is out of range");
+  // sprite 0 links to 64 (out of range for H32): end of list after one sprite.
+  vram[0x8000 + 3] = 64;
+  unsigned visited[GENESIS_VDP_SAT_H40_MAX_SPRITES];
+  unsigned count = 0;
+  check(genesis_vdp_sat_traverse(vram, regs, visited, &count) == 0 && count == 1U,
+        "H32 traversal treats link 64 as end of list");
+  regs[12] = 0x81;  // H40: the same link is valid
+  regs[5] = 0x40;
+  vram[0x8000 + 3] = 64;
+  check(genesis_vdp_sat_traverse(vram, regs, visited, &count) == 0 && count == 2U && visited[1] == 64U,
+        "H40 traversal follows link 64");
 }
 
 void test_sprite_entry_decode_fields() {
@@ -415,7 +451,8 @@ void test_screen_bounds_clipping() {
 int main() {
   test_sat_base_address();
   test_sat_base_address_h40_bit0_ignored();
-  test_sat_base_address_fails_closed_without_h40();
+  test_sat_base_address_h32_and_reserved_hres();
+  test_sat_h32_limits();
   test_sprite_entry_decode_fields();
   test_sprite_entry_decode_non_1x1_size();
   test_sprite_entry_y_field_is_9_bits();

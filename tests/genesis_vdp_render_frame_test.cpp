@@ -193,8 +193,11 @@ void test_deterministic_across_two_calls() {
 
 void test_schema_dimensions() {
   GenesisFrameArtifact frame;
-  check(sizeof(frame.pixels) == (size_t)GENESIS_FRAME_WIDTH * (size_t)GENESIS_FRAME_HEIGHT,
-        "GenesisFrameArtifact.pixels is exactly GENESIS_FRAME_WIDTH * GENESIS_FRAME_HEIGHT bytes");
+  check(sizeof(frame.pixels) == (size_t)GENESIS_FRAME_MAX_WIDTH * (size_t)GENESIS_FRAME_MAX_HEIGHT,
+        "GenesisFrameArtifact.pixels holds the largest supported geometry (SEG-055)");
+  check((size_t)GENESIS_FRAME_WIDTH * (size_t)GENESIS_FRAME_HEIGHT <= sizeof(frame.pixels) &&
+            GENESIS_FRAME_WIDTH == GENESIS_FRAME_MAX_WIDTH,
+        "the legacy 320x224 shape is the H40 non-interlaced geometry");
   check(sizeof(frame.palette_snapshot) == (size_t)GENESIS_VDP_CRAM_BYTES,
         "GenesisFrameArtifact.palette_snapshot is exactly GENESIS_VDP_CRAM_BYTES bytes");
   check(sizeof(frame.frame_digest) == 32U, "GenesisFrameArtifact.frame_digest is exactly 32 bytes");
@@ -361,8 +364,7 @@ void test_frame_digest_matches_independently_precomputed_sha256() {
 
 void test_fails_closed_outside_bound_display_mode_leaves_sentinel_untouched() {
   Fixture f;
-  f.regs[12] = 0x00; // Neither RS0 nor RS1: H32, outside this checkpoint's bound surface
-                      // (matches the existing C2/C4 fail-closed fixture convention).
+  f.regs[12] = 0x80; // RS0 only: a reserved RS0/RS1 combination (H32 itself is supported since SEG-055).
 
   GenesisFrameArtifact frame;
   std::memset(&frame, 0xAB, sizeof(frame)); // Sentinel-prefill.

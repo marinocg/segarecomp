@@ -157,6 +157,16 @@ add_executable(genesis_vdp_render_frame_tests
 target_link_libraries(genesis_vdp_render_frame_tests PRIVATE segarecomp::runtime_genesis)
 segarecomp_enable_warnings(genesis_vdp_render_frame_tests)
 add_test(NAME genesis_vdp_render_frame_tests COMMAND genesis_vdp_render_frame_tests)
+# SEG-055: scanline-aware rendering, H32, interlace mode 2, scroll modes, Window plane, region and controllers
+# (hermetic synthetic fixtures with hand-derived expectations).
+add_executable(genesis_raster_display_modes_tests genesis_raster_display_modes_test.cpp)
+target_link_libraries(genesis_raster_display_modes_tests PRIVATE segarecomp::runtime_genesis)
+segarecomp_enable_warnings(genesis_raster_display_modes_tests)
+add_test(NAME genesis_raster_display_modes_tests COMMAND genesis_raster_display_modes_tests)
+add_executable(genesis_hint_region_controller_tests genesis_hint_region_controller_test.cpp)
+target_link_libraries(genesis_hint_region_controller_tests PRIVATE segarecomp::runtime_genesis)
+segarecomp_enable_warnings(genesis_hint_region_controller_tests)
+add_test(NAME genesis_hint_region_controller_tests COMMAND genesis_hint_region_controller_tests)
 # SEG-007-T049 checkpoint C6: independent synthetic validation of the
 # already-complete C1-C5 renderer/frame path, using a single project-
 # authored combined fixture and an independently (re-)derived expected-
@@ -961,7 +971,7 @@ add_test(NAME codegen_c11_shard_selection_tests COMMAND codegen_c11_shard_select
 set(SEGARECOMP_EXTENDED_TESTS ghidra_mcp_smoke_test
     genesis_experiment_aligned_aot_report_failure_test)
 set(SEGARECOMP_FAST_TESTS segarecomp_tests segarecomp_build_command_test moveq_tests direct_flow_tests m68k_timing_tests m68k_dynamic_timing_tests
-    genesis_runtime_run_tests genesis_vdp_render_frame_tests genesis_frame_export_tests
+    genesis_runtime_run_tests genesis_vdp_render_frame_tests genesis_raster_display_modes_tests genesis_hint_region_controller_tests genesis_frame_export_tests
     m68k_frontend_rejection_tests genesis_general_startup_cli_test architecture_dependency_test
     codegen_c11_emitter_ownership_test codegen_c11_translation_units_tests codegen_c11_shard_selection_tests restricted_files_test genesis_viewer_tests
     cpu_m68k_static_discovery_tests genesis_startup_runtime_c2_test recompiler_fake_cpu_tests recompiler_no_genesis_policy_dependency_test

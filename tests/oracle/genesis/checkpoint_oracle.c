@@ -563,7 +563,7 @@ static void oracle_sha_device(OracleSha256 *state, const GenesisDeviceState *dev
  */
 static void oracle_fill_frame(GenesisFrameArtifact *frame, const GenesisVdpState *vdp) {
   uint8_t index = (uint8_t)(vdp->registers[7] & 0x3FU);
-  memset(frame->pixels, index, sizeof(frame->pixels));
+  memset(frame->pixels, index, (size_t)GENESIS_FRAME_WIDTH * (size_t)GENESIS_FRAME_HEIGHT);
   memcpy(frame->palette_snapshot, vdp->cram, sizeof(frame->palette_snapshot));
 }
 
@@ -720,7 +720,7 @@ stable:
 
   oracle_fill_frame(&bundle.frame, &g_world.devices.vdp);
   oracle_sha256_init(&digest);
-  oracle_sha256_update(&digest, bundle.frame.pixels, sizeof(bundle.frame.pixels));
+  oracle_sha256_update(&digest, bundle.frame.pixels, GENESIS_FRAME_ARTIFACT_WIDTH(&bundle.frame) * GENESIS_FRAME_ARTIFACT_HEIGHT(&bundle.frame));
   oracle_sha256_update(&digest, bundle.frame.palette_snapshot, sizeof(bundle.frame.palette_snapshot));
   oracle_sha256_final(&digest, bundle.frame.frame_digest);
 
@@ -743,7 +743,7 @@ stable:
     for (index = 0U; index < bundle.transaction.transaction_count; ++index)
       oracle_sha_bus_access(&digest, &bundle.transaction.transactions[index]);
   oracle_sha256_update(&digest, bundle.transaction.transaction_digest, 32U);
-  oracle_sha256_update(&digest, bundle.frame.pixels, sizeof(bundle.frame.pixels));
+  oracle_sha256_update(&digest, bundle.frame.pixels, GENESIS_FRAME_ARTIFACT_WIDTH(&bundle.frame) * GENESIS_FRAME_ARTIFACT_HEIGHT(&bundle.frame));
   oracle_sha256_update(&digest, bundle.frame.palette_snapshot, sizeof(bundle.frame.palette_snapshot));
   oracle_sha256_update(&digest, bundle.frame.frame_digest, 32U);
   oracle_sha256_final(&digest, bundle.bundle_digest);

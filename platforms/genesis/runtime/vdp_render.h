@@ -361,6 +361,10 @@ GenesisRgb888 genesis_vdp_decode_cram_word(uint16_t raw_word);
 #define GENESIS_VDP_HSCROLL_MODE_MASK 0x03U         /* Register #11 bits 1-0: H/LSCR field. */
 #define GENESIS_VDP_HSCROLL_MODE_FULLSCREEN 0x00U   /* `00`: full scroll. */
 #define GENESIS_VDP_HSCROLL_MODE_LINE 0x03U         /* SEG-007-T050: `11`: scroll every line. */
+#define GENESIS_VDP_HSCROLL_MODE_CELL 0x02U         /* SEG-055: `10`: scroll every 8-line cell row. */
+#define GENESIS_VDP_VSCROLL_IM2_SIGN_BITS 11U       /* SEG-055: interlace mode 2 vertical scroll is 11 bits. */
+#define GENESIS_VDP_REG0_LEFT_BLANK_BIT 0x20U       /* SEG-055: register #0 bit 5: mask the left 8 pixels. */
+#define GENESIS_VDP_REG1_V30_BIT 0x08U              /* SEG-055: register #1 bit 3: 30-cell (240-line) display. */
 #define GENESIS_VDP_HSCROLL_TABLE_ROW_BYTES 4U      /* One h-scroll table row: Plane A word + Plane B word. */
 
 /* Selects Plane A or Plane B. The Window plane is deliberately not a member
@@ -731,9 +735,12 @@ int genesis_vdp_resolve_plane_pixel(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
   (GENESIS_VDP_SAT_H40_MAX_SPRITES * GENESIS_VDP_SPRITE_ENTRY_BYTES) /* 640. */
 #define GENESIS_VDP_SPRITE_COORD_BIAS 128       /* Documented +128 X/Y coordinate offset. */
 #define GENESIS_VDP_SPRITE_LINK_MASK 0x7FU      /* Byte +3 bits 6-0: link field. */
+#define GENESIS_VDP_SAT_H32_MAX_SPRITES 64U     /* SEG-055: H32 SAT capacity (512 / 8). */
 #define GENESIS_VDP_SPRITE_Y_MASK 0x01FFU       /* Word +0 bits 8-0: raw Y (9 bits). */
+#define GENESIS_VDP_SPRITE_Y_MASK_IM2 0x03FFU   /* SEG-055: interlace mode 2: raw Y is 10 bits (bias 2 * 128). */
 #define GENESIS_VDP_SPRITE_X_MASK 0x01FFU       /* Word +6 bits 8-0: raw X. */
 #define GENESIS_VDP_REG5_SAT_BASE_H40_MASK 0xFC00U /* H40 SAT base address mask (1024-byte granularity). */
+#define GENESIS_VDP_REG5_SAT_BASE_H32_MASK 0xFE00U /* SEG-055: H32 SAT base address mask (512-byte granularity). */
 
 /* One fully decoded Mode-5 sprite-attribute-table entry. `x`/`y` are already
  * offset-corrected (raw SAT field minus GENESIS_VDP_SPRITE_COORD_BIAS) signed
@@ -756,6 +763,7 @@ typedef struct GenesisVdpSpriteEntry {
   uint8_t v_flip;
   uint8_t palette;
   uint8_t priority;
+  uint8_t interlace_mode2; /* SEG-055: decoded under interlace mode 2 (8x16 cells, doubled Y system). */
 } GenesisVdpSpriteEntry;
 
 /*
@@ -1069,6 +1077,103 @@ int genesis_vdp_produce_frame(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
                                const uint8_t cram[GENESIS_VDP_CRAM_BYTES],
                                const uint16_t registers[GENESIS_VDP_REGISTER_COUNT],
                                GenesisFrameArtifact *frame_out);
+
+/*
+ * SEG-055: generic display modes, the Window plane, sprite limits and per-scanline state.
+ *
+ * Public hardware evidence (cross-corroborated; this project's code derives from these rules, not from any one
+ * implementation's source):
+ *
+ * - Horizontal resolution (register #12 RS0 = bit 7, RS1 = bit 0): `00` selects H32 (32 cells, 256 pixels), `11`
+ *   selects H40 (40 cells, 320 pixels); the mixed combinations are reserved/undocumented and fail closed here. In H32
+ *   the sprite table holds 64 entries (512 bytes, register #5 bits 6-0 significant) against H40's 80 entries (640
+ *   bytes, register #5 bit 0 ignored), and the per-line sprite limits are 16 sprites / 32 cells (H32) against 20
+ *   sprites / 40 cells (H40). Sources: Sega, *Genesis Technical Overview* (GTO1) display-mode and sprite chapters;
+ *   Plutiedev, "VDP registers" <https://plutiedev.com/vdp-registers>, "Sprite table"
+ *   <https://plutiedev.com/sprite-table> and its FAQ (20 sprites / 320 px per line, 80 % of that in 256 px modes); Genesis Plus GX `core/vdp_ctrl.c` (viewport width = 256 + RS1 * 64) and
+ *   `core/vdp_render.c` (`parse_satb_m5`: 16/20 sprites and 32/40 cells per line, 64/80 sprite entries).
+ * - Interlace mode 2 ("double resolution", register #12 LSM1:LSM0 = `11`): the display is 448 lines tall (each field
+ *   carries every other line of that image), patterns are 8x16 (64 bytes, rows consecutive; the nametable and sprite
+ *   tile number still counts patterns in units of one 8x16 cell, so its VRAM byte address is tile * 64), a cell row
+ *   is 16 lines, vertical scroll is 11 bits in units of those 448-line rows, the sprite Y coordinate is 10 bits with
+ *   a bias of 256 and a sprite cell is 16 lines tall; horizontal-scroll rows and the sprite X system are unchanged
+ *   and indexed per FIELD line (output row / 2). Sources: Plutiedev "Screen resolution"
+ *   <https://plutiedev.com/screen-resolution> ("both scroll and sprite vertical position are doubled in resolution",
+ *   "horizontal blank interrupts still come at the low resolution"); Plutiedev "VDP registers" (LSM bits); Genesis Plus GX `render_bg_m5_im2` / `parse_satb_m5_im2` (line =
+ *   2 * field line + odd-field, `(playfield_row_mask << 1) | 1`, `(reg[18] & 0x1F) << 4`, 11-bit VSRAM). The
+ *   single-field `LSM = 01` mode and the reserved combination remain rejected.
+ * - Horizontal scroll modes (register #11 bits 1-0): `00` one entry for the whole screen, `10` one entry per 8-line
+ *   cell row (the entry of the group's first line), `11` one entry per line; `01` is prohibited and fails closed.
+ *   Each table entry is 4 bytes (Plane A word, Plane B word) at register #13 bits 5-0 << 10. Vertical scroll
+ *   (register #11 bit 2) is one entry per plane, or one per 2-cell column group. Source: Plutiedev "Scroll"
+ *   <https://plutiedev.com/scroll> (mode `01` is described there as undocumented); GTO1.
+ * - Window plane (registers #3, #17, #18): it replaces Plane A inside its area, never scrolls, and uses its own
+ *   nametable (register #3 bits 5-1, bit 1 ignored in H40) whose row stride is the display width in cells (64/32).
+ *   Register #17 bits 4-0 give the horizontal boundary in 2-cell (16 pixel) units and bit 7 selects whether the
+ *   window is on the right (1) or the left (0) of it; register #18 bits 4-0 give the vertical boundary in cells and
+ *   bit 7 selects below (1) or above (0). A pixel belongs to the window if it is inside the vertical range OR inside
+ *   the horizontal range. Sources: Plutiedev "VDP registers" (window registers), "Layer priority" <https://plutiedev.com/layer-priority> and its FAQ ("overrides plane A wherever it's displayed (even blank tiles)"); GTO1 window chapter;
+ *   Genesis Plus GX `window_clip` and the `w == (line >= a)` rule of `render_bg_m5`.
+ * - Register #0 bit 5 masks the leftmost 8 pixels to the backdrop color.
+ * - Per-scanline state: a game may change CRAM, VSRAM and the register file between lines (typically from the
+ *   horizontal-interrupt handler); line L is displayed with the state present when scanline L began. Source: GTO1
+ *   H-interrupt chapter; Genesis Plus GX `system_frame_gen` (`render_line(line)` before the line's CPU slice).
+ *
+ * Out of scope here (still ignored, unchanged from earlier checkpoints): shadow/highlight, the sprite X = 0 mask,
+ * the display-disable bit, sprite collision/overflow status flags, mid-frame VRAM changes (VRAM is sampled at the
+ * frame boundary), 30-cell (V30) height and the single-field interlace mode.
+ */
+
+/* The geometry a register file selects. */
+typedef struct GenesisVdpDisplayGeometry {
+  unsigned width;       /* 256 (H32) or 320 (H40) active pixels */
+  unsigned height;      /* 224 rows; 448 in interlace mode 2 */
+  unsigned h40;         /* 1 for H40, 0 for H32 */
+  unsigned im2;         /* 1 for interlace mode 2 */
+  unsigned cell_height; /* 8, or 16 pixel rows in interlace mode 2 */
+} GenesisVdpDisplayGeometry;
+
+/* H32 is the documented RS0 = RS1 = 0 combination (the mixed values are reserved). */
+int genesis_vdp_hres_is_h32(const uint16_t registers[GENESIS_VDP_REGISTER_COUNT]);
+/* Interlace mode 2 is LSM1 = LSM0 = 1. */
+int genesis_vdp_interlace_is_mode2(const uint16_t registers[GENESIS_VDP_REGISTER_COUNT]);
+/* Register #11 bits 1-0 == `10` (per 8-line cell row horizontal scroll). */
+int genesis_vdp_hscroll_mode_is_cell(const uint16_t registers[GENESIS_VDP_REGISTER_COUNT]);
+
+/*
+ * Resolves the supported display geometry from `registers`: Mode 5, 30-cell height clear, H32 or H40, and
+ * non-interlaced or interlace mode 2. Returns 0 and fills `*geometry_out`, or a negative value (leaving it
+ * unmodified) for any other combination (mode 4, V30, reserved RS0/RS1, interlace mode 1 / reserved LSM).
+ */
+int genesis_vdp_display_geometry(const uint16_t registers[GENESIS_VDP_REGISTER_COUNT],
+                                 GenesisVdpDisplayGeometry *geometry_out);
+
+/* Mode-aware sprite decode; `genesis_vdp_decode_sprite_entry` is the non-interlaced (`interlace_mode2 == 0`) form. */
+GenesisVdpSpriteEntry genesis_vdp_decode_sprite_entry_ex(const uint8_t raw[GENESIS_VDP_SPRITE_ENTRY_BYTES],
+                                                         int interlace_mode2);
+
+/* True when `frame` has the legacy 320x224 single-palette shape (every pre-SEG-055 artifact and digest). */
+int genesis_vdp_frame_is_legacy_shape(const GenesisFrameArtifact *frame);
+
+/* The artifact digest rule (see GenesisFrameArtifact): legacy-shaped frames hash pixels then palette_snapshot exactly
+ * as before; every other shape also covers geometry, palette count, row->palette map and the extra palettes. */
+void genesis_vdp_frame_digest(const GenesisFrameArtifact *frame, uint8_t digest_out[32]);
+
+/*
+ * Converts one output row of `frame` (its own width, its own row palette) to packed RGB888 (`3 * width` bytes).
+ * Returns 0, or a negative value when the row is outside the artifact or any pixel index is not a valid CRAM entry.
+ * The one conversion used by the PPM exporter and the SDL viewer.
+ */
+int genesis_vdp_frame_row_rgb888(const GenesisFrameArtifact *frame, unsigned row, uint8_t *rgb_out);
+
+/*
+ * Renders one frame from the per-scanline state captured by the runtime (`raster->lines[L]` = the registers, CRAM
+ * and VSRAM present when field line L began) and the VRAM at the frame boundary. Same fail-closed contract as
+ * `genesis_vdp_produce_frame`, additionally failing when the display geometry differs between lines of the frame (a
+ * mid-frame H32/H40 or interlace switch cannot be one rectangular image); nothing is written on failure.
+ */
+int genesis_vdp_produce_frame_raster(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
+                                     const GenesisRasterFrameState *raster, GenesisFrameArtifact *frame_out);
 
 #ifdef __cplusplus
 } /* extern "C" */

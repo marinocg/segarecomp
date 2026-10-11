@@ -39,8 +39,12 @@ void f_sleep(void *c, uint64_t ns) { auto *f = (Fake *)c; f->sleeps.push_back(ns
 int f_present(void *c, const GenesisFrameArtifact *) { auto *f = (Fake *)c; ++f->presents; return f->fail_present; }
 int f_closed(void *c) { auto *f = (Fake *)c; return f->closed_after >= 0 && f->polls++ >= f->closed_after; }
 uint8_t f_pad(void *c) { return ((Fake *)c)->pad; }
+uint8_t f_pad2(void *c) { return (uint8_t)(((Fake *)c)->pad ^ 0xFFu); }  // SEG-055: an independent, distinguishable Player 2 mask
 void f_after(void *c, GenesisRuntime *) { ++((Fake *)c)->after_calls; }
-GenesisViewerHost host(Fake &f) { return {&f, f_now, f_sleep, f_present, f_closed, f.use_pad ? f_pad : nullptr, f.use_after ? f_after : nullptr}; }
+GenesisViewerHost host(Fake &f) {
+  return {&f, f_now, f_sleep, f_present, f_closed, f.use_pad ? f_pad : nullptr, f.use_after ? f_after : nullptr,
+          f.use_pad ? f_pad2 : nullptr};
+}
 
 void pacer_tests() {
   Fake f; auto h = host(f); GenesisPacer p; genesis_pacer_init(&p, 0);
@@ -67,7 +71,7 @@ void pacer_tests() {
   Fake g; auto hg = host(g); GenesisPacer u; genesis_pacer_init(&u, 1);
   for (int i = 0; i < 5; ++i) (void)genesis_pacer_wait(&u, &hg);
   check(g.sleeps.empty() && u.sleep_calls == 0, "unthrottled never sleeps");
-  GenesisViewerHost bad = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+  GenesisViewerHost bad = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
   check(genesis_pacer_wait(&p, &bad) == -1 && genesis_pacer_wait(nullptr, &h) == -1, "null args fail");
 }
 
@@ -105,8 +109,10 @@ void pad_tests() {
   Fake f; f.use_pad = 1; f.pad = GENESIS_PAD_A | GENESIS_PAD_UP; Run r;
   (void)go(r, 7, false, f, 1000000, 200);
   check(r.r.pad1 == (GENESIS_PAD_A | GENESIS_PAD_UP), "host pad reaches runtime");
+  check(r.r.pad2 == (uint8_t)((GENESIS_PAD_A | GENESIS_PAD_UP) ^ 0xFFu) && r.r.pad2 != r.r.pad1,
+        "Player 2 mask reaches the runtime independently of Player 1 (SEG-055)");
   Fake g; Run r2; (void)go(r2, 7, false, g, 1000000, 200);
-  check(r2.r.pad1 == 0, "no callback -> released");
+  check(r2.r.pad1 == 0 && r2.r.pad2 == 0, "no callback -> both ports released");
 }
 
 void run_tests() {
@@ -138,4 +144,35 @@ void run_tests() {
 }
 }  // namespace
 
-int main() { pacer_tests(); options_tests(); pad_tests(); run_tests(); return failures ? 1 : 0; }
+// SEG-055: presentation pacing follows the deterministic virtual frame counter, never frame-artifact publication.
+void pacing_decoupling_tests() {
+  // Reserved RS0/RS1 combination: every render fails closed, so nothing is ever published or presented.
+  struct Rejecting { static void setup_rejecting(GenesisRuntime &r) { setup(r); r.devices.vdp.registers[12] = 0x80; } };
+  for (int unthrottled = 0; unthrottled < 2; ++unthrottled) {
+    Fake f; Run run;
+    std::memset(&run.r, 0, sizeof(run.r)); Rejecting::setup_rejecting(run.r); attach(run.s, run.r);
+    g_count = 0; g_limit = 4000;
+    GenesisViewerOptions o{(uint8_t)unthrottled, 50}; auto h = host(f); GenesisPacer p; genesis_pacer_init(&p, (int)unthrottled);
+    auto res = genesis_viewer_run(&run.r, dispatch_fn, &o, &h, &p, 1000000);
+    check(res.outcome == GENESIS_VIEWER_GUEST_COMPLETE, "rejecting-mode run completes");
+    check(run.s.o.sequence == 0 && f.presents == 0 && res.frames_presented == 0, "a rejected display mode publishes and presents nothing");
+    check(run.r.virtual_frame_count >= 4, "virtual frames still elapse while every render is rejected");
+    check(res.frames_paced == run.r.virtual_frame_count, "every virtual frame boundary is paced even though nothing was rendered");
+    if (!unthrottled) {
+      check(f.sleeps.size() + 1u >= res.frames_paced - 1u && f.sleeps.size() >= 2u,
+            "throttled: a rejected frame does not let the guest run ahead of real time (one sleep per period)");
+    } else {
+      check(f.sleeps.empty(), "the explicit unthrottled option still never sleeps");
+    }
+  }
+  // Guest virtual time is independent of host timing: unthrottled vs throttled vs different slicing end in identical guest state.
+  Fake a, b; Run ra, rb;
+  (void)go(ra, 13, false, a, 1000000, 6000);
+  (void)go(rb, 977, true, b, 1000000, 6000);
+  ra.r.live_frame_observer = nullptr; rb.r.live_frame_observer = nullptr;
+  check(std::memcmp(&ra.r, &rb.r, sizeof(ra.r)) == 0, "guest virtual time and state do not depend on host pacing or slicing");
+  check(ra.r.virtual_frame_count == rb.r.virtual_frame_count && ra.r.scheduler.master_ticks == rb.r.scheduler.master_ticks,
+        "virtual frame counter and master ticks are host-timing independent");
+}
+
+int main() { pacer_tests(); options_tests(); pad_tests(); run_tests(); pacing_decoupling_tests(); return failures ? 1 : 0; }
