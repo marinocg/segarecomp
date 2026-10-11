@@ -280,8 +280,16 @@ GenesisRegionPruneResult prune_genesis_region_admission(const FrontendProgram &p
   // Nodes of K0 in ascending address order; indices are stable and independent of any input order.
   std::vector<std::uint32_t> nodes;
   std::vector<const FrontendAnalysis::ImmutableRomAotEntry *> node_entry;
+  // SEG-050-T002 (ADR 0111, option O1): an ADR 0049 copy-alias identity is in the region when its work-RAM execution address is (an explicitly
+  // proposed RAM range keeps its meaning) OR when the immutable cartridge address it is byte-identical to is. The descriptor and its exact
+  // byte-identity proof are existing authority; nothing is added to R, no source span is widened and no reachability is inferred. A
+  // materialized RAM thunk has no cartridge source (`alias_source_address` is its own RAM address) and so stays keyed by that RAM address.
+  const auto in_region = [&](std::uint32_t address, const FrontendAnalysis::ImmutableRomAotEntry &entry) {
+    if (genesis_hybrid_admission_contains(regions, address)) return true;
+    return entry.execution_alias && !entry.materialized_ram_thunk && genesis_hybrid_admission_contains(regions, entry.alias_source_address & bus_mask);
+  };
   for (const auto &[address, entry] : broad)
-    if (genesis_hybrid_admission_contains(regions, address)) {
+    if (in_region(address, *entry)) {
       nodes.push_back(address);
       node_entry.push_back(entry);
     }
@@ -331,7 +339,7 @@ GenesisRegionPruneResult prune_genesis_region_admission(const FrontendProgram &p
   const auto classify = [&](std::uint32_t address) { return genesis_hybrid_admission_contains(regions, address & bus_mask) ? "pruned" : "outside_region"; };
   for (const auto &[address, entry] : broad)
     if (entry->execution_alias && !kept(address)) {
-      const auto *reason = classify(address);
+      const auto *reason = in_region(address & bus_mask, *entry) ? "pruned" : "outside_region";
       reject("materialized_image_not_admitted");
       result.failure_class = reason;
       return result;

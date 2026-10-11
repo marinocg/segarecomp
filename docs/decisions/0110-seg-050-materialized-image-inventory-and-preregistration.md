@@ -180,3 +180,11 @@ Both exceed `L >= 0.30` (two independent lineages, one of them with no RAM thunk
 - Stop paths: T003/T004 stay executable (operator amendment); never substitute bounded runtime coverage for executable truth.
 
 Additional authorized inputs needed from the operator to reach a credible supervised experiment (none are downloaded or assumed): (a) further local Genesis images that **demonstrably** copy code to work RAM (screen with `tools/seg050_materialized_screen.py --screen-only`; each must show `aliases >= 1`); (b) for each, an exact byte-identical source rebuild (public disassembly + the original ROM where its build requires original assets, e.g. a Shining Force II rebuild needs the original US ROM) whose assembler listing yields instruction-start truth; (c) at least 3 such independent lineages for an exploratory frozen-M3 transfer and 8-12 (with >= 3 held out) for a separate model. No locally held image or source currently satisfies (a)+(b) other than Flicky.
+
+## 12. Errata from the independent C1 review (sections 1-4 are unchanged)
+
+- Section 10 `L` uses the post-prune admitted `K` (22,274 / 83,709), not the pre-prune `K0` of the section 4 definition; with `K0` (22,392 / 88,640) `L` is 0.652 / 0.645. Both exceed 0.30; the promotion is unaffected.
+- Section 8: the "known-corpus" statement for Flicky is supported by ADR 0101 (final M3 fit on all five titles), not ADR 0100.
+- The E mapping of `non_alias_frontier` and the class of a RAM thunk image (it DOES carry `byte_identity` verification; it lacks a cartridge SOURCE) are clarifications made at result time; class C means "work-RAM execution observed, no cartridge source / no exact executable truth". They change no label that was used as data (E and C are never labels).
+- The class assignment was applied by hand from the preparation aggregates (no code computes it); the Flicky attribution is one final-emission difference and does not apportion the 15 preparation rounds, which dominate its wall time.
+- Prior knowledge: the Flicky `prune_rejected` fallback was already known from ADR 0104 finding 3 before this ADR.

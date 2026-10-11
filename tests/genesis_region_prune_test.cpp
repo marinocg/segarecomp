@@ -92,12 +92,20 @@ Ranges r(std::initializer_list<std::pair<std::uint32_t, std::uint32_t>> values) 
   return out;
 }
 
+// The region rule the production owner applies (SEG-050-T002 O1): an alias identity is in R by its RAM address or its byte-identity source.
+bool in_region_of(const Entries &entries, const Ranges &regions, std::uint32_t pc) {
+  if (genesis_hybrid_admission_contains(regions, pc)) return true;
+  for (const auto &entry : entries)
+    if (address_of(entry) == pc) return entry.execution_alias && !entry.materialized_ram_thunk && genesis_hybrid_admission_contains(regions, entry.alias_source_address & 0xFFFFFFU);
+  return false;
+}
+
 // Independent reference: the naive "repeat until no change" greatest fixed point, written without the kernel's reverse-edge worklist.
 std::vector<std::uint32_t> reference(const Entries &entries, const Ranges &regions) {
   const auto universe = addresses(entries);
   std::set<std::uint32_t> keep;
   for (const auto pc : universe)
-    if (genesis_hybrid_admission_contains(regions, pc)) keep.insert(pc);
+    if (in_region_of(entries, regions, pc)) keep.insert(pc);
   for (bool changed = true; changed;) {
     changed = false;
     for (const auto &entry : entries) {
@@ -130,7 +138,7 @@ GenesisRegionPruneResult run(const Program &p, const Ranges &regions, const std:
   expect(std::is_sorted(result.admitted.begin(), result.admitted.end()), label + ": K sorted");
   for (const auto pc : result.admitted) {
     expect(has(universe, pc), label + ": K ⊆ U");
-    expect(genesis_hybrid_admission_contains(regions, pc), label + ": K ⊆ K0 (no widening beyond R)");
+    expect(in_region_of(p.entries, regions, pc), label + ": K ⊆ K0 (no widening beyond R)");
   }
   expect(result.admitted.size() + result.pruned_count == result.k0_count || result.failure, label + ": |K0| = |K| + pruned");
   if (!result.failure) {
@@ -304,6 +312,120 @@ void parser() {
   bad(head + "range 0000020A 00000300\nend\n", "regions_range");
 }
 
+
+// ---------------------------------------------------------------------------------------------------------------------------------
+// SEG-050-T002 (ADR 0111, option O1): an ADR 0049 copy-alias identity belongs to R when its byte-identity SOURCE is in R (or, as before, when its
+// RAM execution address is). Adversarial properties: no range is widened; a RAM thunk (no cartridge source), a partially covered copy, an alias whose
+// mandatory edge leaves K and every unproven shape stay fail-closed; the UNCHANGED production validator accepts every K; no alias => identical.
+struct AliasSpec { std::uint32_t execution, source, length; };
+
+Program build_aliases(const Image &image, std::initializer_list<AliasSpec> aliases, bool thunk = false) {
+  auto program = make_genesis_bridge_startup_program(image.bytes, 0U, 0x200U, std::nullopt);
+  Program out{*program, {}};
+  (void)apply_genesis_immutable_rom_aot(out.program);
+  for (const auto &a : aliases) expect(apply_genesis_immutable_copy_alias(out.program, a.execution, a.source, a.length), "fixture: alias descriptor accepted");
+  if (thunk) {
+    const std::uint8_t jmp[] = {0x4EU, 0xF9U, 0x00U, 0x00U, 0x03U, 0x00U};  // JMP $000300.L
+    expect(apply_genesis_materialized_ram_thunk(out.program, 0xFF0100U, jmp), "fixture: RAM thunk accepted");
+  }
+  const auto analysis = analyze_m68k_frontend(out.program);
+  if (const auto *accepted = std::get_if<FrontendAnalysis>(&analysis)) out.entries = accepted->immutable_rom_aot_entries;
+  else if (const auto *partial = std::get_if<FrontendPartialProgram>(&analysis)) out.entries = partial->accepted_prefix.immutable_rom_aot_entries;
+  return out;
+}
+
+struct Outcome { bool admitted = false; std::string failure, failure_class, plan_text; std::vector<std::uint32_t> k; };
+
+Outcome plan_of(const Program &p, const Ranges &regions, const std::string &label) {
+  GenesisRegionPruneResult result;
+  const auto plan = plan_genesis_region_admission(p.program, sha, p.entries, GenesisExecutableRegionProposal{sha, regions}, result);
+  Outcome out;
+  out.failure = result.failure.value_or("");
+  out.failure_class = result.failure_class;
+  if (!plan) {
+    expect(result.admitted.empty(), label + ": a rejected proposal exposes no K");
+    return out;
+  }
+  auto entries = p.entries;
+  const auto verdict = apply_genesis_hybrid_admission(p.program, sha, *plan, entries);
+  expect(!verdict, label + ": the unchanged production validator accepts: " + verdict.value_or(""));
+  expect(addresses(entries) == result.admitted, label + ": the validator keeps exactly K");
+  out.admitted = true;
+  out.k = result.admitted;
+  out.plan_text = format_genesis_hybrid_admission_plan(*plan);
+  return out;
+}
+
+void alias_source_mapping() {
+  auto image = skeleton();
+  image.words(0x600U, {0x4E71U, 0x4E75U, 0x4E71U, 0x4E75U});        // NOP; RTS; NOP; RTS: closed, verbatim-copyable routines
+  image.words(0x700U, {0x4E71U, 0x4EF9U, 0x0000U, 0x0420U});        // NOP; JMP $000420.L (an absolute target stays absolute in a copy)
+  image.words(0x420U, {0x4E71U, 0x4E75U});                          // the jump target: a ROM identity
+  const Ranges rom_code = r({{0x200U, 0x500U}});
+  const Ranges with_source = r({{0x200U, 0x500U}, {0x600U, 0x604U}});
+
+  // (1) a correct proven copy: admitted exactly when its source is selected; nothing is widened.
+  const auto p = build_aliases(image, {{0xFF0000U, 0x600U, 4U}});
+  expect(has(addresses(p.entries), 0xFF0000U) && has(addresses(p.entries), 0xFF0002U), "fixture: both alias identities exist");
+  const auto missing = plan_of(p, rom_code, "source outside R");
+  expect(!missing.admitted && missing.failure == "materialized_image_not_admitted" && missing.failure_class == "outside_region",
+         "a copy whose source the proposal does not contain is rejected (no widening, ADR 0104 class outside_region)");
+  const auto mapped = plan_of(p, with_source, "source inside R");
+  expect(mapped.admitted && has(mapped.k, 0xFF0000U) && has(mapped.k, 0xFF0002U), "a copy whose source is selected is admitted through its byte-identity source");
+  expect(has(mapped.k, 0x600U) && has(mapped.k, 0x602U), "the ROM identities of the selected source stay admitted (they are in R)");
+  const auto direct = plan_of(p, r({{0x200U, 0x500U}, {0xFF0000U, 0xFF0004U}}), "RAM range");
+  expect(direct.admitted, "an explicitly proposed RAM range keeps its previous meaning");
+  const auto wrong = plan_of(p, r({{0x200U, 0x500U}, {0x604U, 0x608U}}), "unrelated range");
+  expect(!wrong.admitted && wrong.failure_class == "outside_region", "an unrelated selected span does not admit the copy (the exact source decides)");
+
+  // (2) an unproven RAM target: a RAM thunk has no cartridge source; its source-free alias key never maps into R.
+  const auto t = build_aliases(image, {{0xFF0000U, 0x600U, 4U}}, true);
+  expect(has(addresses(t.entries), 0xFF0100U), "fixture: thunk identity exists");
+  const auto thunk = plan_of(t, with_source, "thunk");
+  expect(!thunk.admitted && thunk.failure == "materialized_image_not_admitted" && thunk.failure_class == "outside_region", "an unproven RAM thunk stays fail-closed");
+  const auto thunk_ok = plan_of(t, r({{0x200U, 0x500U}, {0x600U, 0x604U}, {0xFF0100U, 0xFF0106U}}), "thunk explicit");
+  expect(thunk_ok.admitted && has(thunk_ok.k, 0xFF0100U), "an explicitly proposed RAM range for the thunk keeps its previous meaning");
+
+  // (3) a wrong source span or overlapping descriptors fail closed at the descriptor validator; a partially covered copy is rejected.
+  {
+    auto program = make_genesis_bridge_startup_program(image.bytes, 0U, 0x200U, std::nullopt);
+    (void)apply_genesis_immutable_rom_aot(*program);
+    expect(!apply_genesis_immutable_copy_alias(*program, 0xFF0000U, 0x0FFEU, 8U), "a source span leaving the image is rejected by the descriptor validator");
+    expect(apply_genesis_immutable_copy_alias(*program, 0xFF0000U, 0x600U, 4U), "first descriptor accepted");
+    expect(!apply_genesis_immutable_copy_alias(*program, 0xFF0002U, 0x600U, 4U), "overlapping execution spans are rejected");
+  }
+  const auto wide = build_aliases(image, {{0xFF0000U, 0x600U, 8U}});
+  const auto partial = plan_of(wide, r({{0x200U, 0x500U}, {0x600U, 0x604U}}), "partial");
+  expect(!partial.admitted && partial.failure == "materialized_image_not_admitted" && partial.failure_class == "outside_region",
+         "a copy only partly inside R is rejected (every alias identity is a mandatory root; the span is never widened)");
+  const auto complete = plan_of(wide, r({{0x200U, 0x500U}, {0x600U, 0x608U}}), "complete");
+  expect(complete.admitted && has(complete.k, 0xFF0006U), "the same copy with its whole source selected is admitted");
+
+  // (4) an alias whose mandatory edge leaves K is eliminated and the proposal is rejected: fail closed, classified pruned, no reachability repair.
+  const auto escaping = build_aliases(image, {{0xFF0200U, 0x700U, 8U}});
+  const auto esc = plan_of(escaping, r({{0x200U, 0x410U}, {0x700U, 0x708U}}), "escaping");
+  expect(!esc.admitted && esc.failure == "materialized_image_not_admitted" && esc.failure_class == "pruned",
+         "an alias whose fixed edge escapes K is pruned: classified pruned, not outside_region");
+  const auto closed = plan_of(escaping, r({{0x200U, 0x500U}, {0x700U, 0x708U}}), "closed");
+  expect(closed.admitted && has(closed.k, 0xFF0200U), "the same alias is admitted once its absolute target is also selected");
+
+  // (5) no aliases: the result is the naive greatest fixed point of the plain region rule and the plan is deterministic.
+  const auto plain = build(skeleton());
+  const auto base = run(plain, rom_code, "no-alias");
+  const auto again = plan_of(plain, rom_code, "no-alias repeat");
+  expect(!base.failure && again.admitted && again.k == base.admitted, "without aliases the result is the plain region rule");
+
+  // (6) determinism and a later-round alias: identical input gives identical K and plan text; the plan of the alias-less emission is refused for the
+  // alias emission by the unchanged validator (the alias set must match).
+  const auto repeat = plan_of(p, with_source, "repeat");
+  expect(repeat.admitted && repeat.k == mapped.k && repeat.plan_text == mapped.plan_text, "repeated runs are identical");
+  GenesisRegionPruneResult first;
+  const auto first_plan = plan_genesis_region_admission(plain.program, sha, plain.entries, GenesisExecutableRegionProposal{sha, rom_code}, first);
+  auto stale_entries = p.entries;
+  expect(first_plan && apply_genesis_hybrid_admission(p.program, sha, *first_plan, stale_entries) == std::optional<std::string>("alias_set_mismatch"),
+         "a plan from the alias-less emission is refused for the alias emission");
+}
+
 }  // namespace
 
 int main() {
@@ -311,6 +433,7 @@ int main() {
   closed_subset_and_false_positives();
   call_continuation();
   materialized_identity();
+  alias_source_mapping();
   order_independence_and_properties();
   if (failures != 0) {
     std::cerr << failures << " failure(s)\n";

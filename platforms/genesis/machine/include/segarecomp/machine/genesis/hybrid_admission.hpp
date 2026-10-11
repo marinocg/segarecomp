@@ -111,6 +111,11 @@ struct GenesisHybridAdmissionPlan {
 // resource cap (rounds) is exhausted => REJECTED, never broadened. The product is an ordinary hybrid plan that the unchanged validator
 // accepts; there is no second validator.
 //
+// SEG-050-T002 (ADR 0111, option O1): an ADR 0049 copy-alias identity (not a RAM thunk) belongs to R when its work-RAM execution address is in R OR when
+// the immutable source address it is byte-identical to (`alias_source_address`) is. The model proposes only cartridge ranges, so before this rule
+// every alias identity was `outside_region` and the whole build fell back (ADR 0104 finding 3). No range is added to R, the structural closure and
+// the validator (every alias identity remains a mandatory root) are unchanged, and a build without aliases is byte-identical.
+//
 // Region text format (ASCII, bounded; a private artifact for a commercial input):
 //
 //   segarecomp.m68k_executable_regions.v1
