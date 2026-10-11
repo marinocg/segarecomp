@@ -14,3 +14,4 @@ tests/fixtures/ymfm-vendored-sha256.txt text eol=lf
 tests/fixtures/genesis-z80-*.json text eol=lf
 tests/fixtures/genesis-z80-forbidden-identifiers.txt text eol=lf
 tools/genesis_z80_fixture_rom.py text eol=lf
+tools/segarecomp_ml_region_gen2*.json text eol=lf

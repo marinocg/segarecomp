@@ -1,0 +1,121 @@
+{
+ "architecture": "M3 (T001 plan models.M3)",
+ "corpus": {
+  "flicky": {
+   "revision": "d9a0d4799c25fb23ba6251306508ee40a1ce9a89",
+   "rom_sha256": "4df1a91e08376ae773a6eb8e5abe310f94ca39d8f81583b91a9477fedcb68c11",
+   "source": "github.com/oranguthang/flicky_src",
+   "title": "Flicky",
+   "truth_sha256": "33916a8e6800a10aa3601a4c35ce5ca929067876994dd9e4c9b1c36e9cf8d6e0",
+   "truth_starts": 5707
+  },
+  "ps2": {
+   "revision": "c23877b8aa090473562ae2ed571ace2869289167",
+   "rom_sha256": "a0bd97f5aaa67301923ccc367511606bd3471ea9542919165311d4a23a2b696b",
+   "source": "github.com/wyatt8740/ps2disasm",
+   "title": "Phantasy Star II (REV02)",
+   "truth_sha256": "87174c5685eddc09c7ea00ac826e2ec1d5d5c470548529a2b3d25a77a17dea96",
+   "truth_starts": 19261
+  },
+  "s1": {
+   "revision": "7ebe4b3d0c182b2566026b6d3f423d33539558da",
+   "rom_sha256": "46160baa06362c711c9f1a5017cb7371026444936c8af5e93a78996cf32ff2a6",
+   "source": "github.com/sonicretro/s1disasm",
+   "title": "Sonic the Hedgehog (REV00)",
+   "truth_sha256": "fd21b96bc0d79d62152fa172e2609026822b577d126ddebe5e7f70888127fc13",
+   "truth_starts": 24180
+  },
+  "sf1": {
+   "revision": "1f466bf038a64f6bdf3113e484bace0c3c66c6f7",
+   "rom_sha256": "6c43b41b60ae8147945b4420caeb5eb266e1dd57a0d125b7496fa8fb6fde522d",
+   "source": "github.com/ShiningForceCentral/SF1DISASM",
+   "title": "Shining Force",
+   "truth_sha256": "7f5289dce66deecde1d3a9aa18e5ec7992ef055deb2fe9bee6936a4fd9387059",
+   "truth_starts": 44740
+  },
+  "sk": {
+   "revision": "044fa46725c71187399e13f5ddb70e11d32dc024",
+   "rom_sha256": "6e12e6b33c26ebfcd0be433251d21cf6284eafe9f71b027bda3767ae59affec1",
+   "source": "github.com/sonicretro/skdisasm",
+   "title": "Sonic & Knuckles",
+   "truth_sha256": "76be1cccdbb5160e4c61830fe29c41c01a213bc3c04944baded51e7cedf57b72",
+   "truth_starts": 119319
+  }
+ },
+ "deterministic_refit": {
+  "independent_fits": 2,
+  "predictions_bitwise_equal": true,
+  "torch_threads": 4,
+  "weights_bitwise_equal": true
+ },
+ "environment": {
+  "deterministic": "torch.use_deterministic_algorithms(True), fixed seed and fixed thread count",
+  "device": "CPU only",
+  "numpy": "2.5.3",
+  "python": "3.13.14",
+  "scikit_learn": "1.9.1",
+  "torch": "2.14.1"
+ },
+ "experiment": "SEG-049-T002",
+ "model_artifact": {
+  "file": "segarecomp_ml_region_gen2.model.json",
+  "sha256": "11258708285e4427a3e38e02732e8f93b4c5d497883101f0629223d2366a98e1"
+ },
+ "parity_artifact_sha256": "6a55cd994f66acafa9b3f992b73c9cb8c463dc76877f5c2e435dd567106a676c",
+ "plan_artifact": {
+  "file": "segarecomp_ml_region_gen2_rank.plan.json",
+  "sha256": "98974079a7986543005866bdd9e9b57070e8f2f399fe60ceee8bf64795d6dad4"
+ },
+ "policy": {
+  "id": "B35",
+  "kind": "rank budget",
+  "percent": 35
+ },
+ "prediction_digest_in_sample": "a25c8a378fa2792a608d67816c6b74ba16828886b7f3fbb852b3524fad158273",
+ "rank_plan_sha256": "8c4d98b9ee3874ff6a38005ce4745913c9ea01defd333d6bee9c1ea700c21e29",
+ "recipe": {
+  "betas": [
+   0.9,
+   0.999
+  ],
+  "dropout": 0.0,
+  "epoch_definition": "per training title a random cell offset in [0, 32) (seeded) partitions the title into 32-cell segments; the segment list of all training titles is shuffled and consumed in batches of 8",
+  "epochs": 30,
+  "grad_clip_norm": 5.0,
+  "hard_positive": {
+   "applies_to": "M4 only",
+   "loss_multiplier": 4.0,
+   "mining_epochs": [
+    10,
+    20
+   ],
+   "quantile": 0.1,
+   "rule": "at the end of epochs 10 and 20, score the TRAINING titles only (eval mode); training positive cells whose score is below the 10th percentile of the pooled training-positive scores get loss multiplier 4.0 (weights are reset to 1 and re-mined at each mining epoch); cell identities are runtime-only"
+  },
+  "learning_rate": 0.002,
+  "loss": "BCEWithLogits, pos_weight = (#negative cells)/(#positive cells) over the TRAINING titles, per-cell weight",
+  "lr_schedule": "cosine annealing to 0 over all steps (per-step)",
+  "optimizer": "AdamW",
+  "seed": 49,
+  "segment_cells": 32,
+  "segments_per_batch": 8,
+  "torch_threads": 4,
+  "weight_decay": 0.0001
+ },
+ "representation_sha256": "cf43e758da215283c08b3f8c1271c6119fd83b44eee755974559a6cb5af40c67",
+ "representation_version": "seg049-gen2-repr-v1",
+ "schema": "segarecomp.ml_region_gen2_frozen.v1",
+ "scope": "OFFLINE research candidate; production Optimized AOT continues to use SEG-047 v1; no native inference yet",
+ "seed": 49,
+ "status": "RESEARCH CANDIDATE (not production)",
+ "t001_plan_sha256": "84ab1134fe5ac5d1fa7c2af17749bd2d00854aae1350e0ad746e34eeab733af9",
+ "token_schema_sha256": "9a1f4f4fc03d26c63209128fc59fec1584b266bd1f61dbe8236f1105a1d61d75",
+ "trainable_parameters": 77441,
+ "training_titles": [
+  "s1",
+  "flicky",
+  "sf1",
+  "ps2",
+  "sk"
+ ]
+}
