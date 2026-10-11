@@ -38,7 +38,7 @@ CPU seconds are comparable, wall seconds are not and are not reported.
   (26 frames) and Sonic & Knuckles (9 frames) in broad and gen2 alike; that is not an ML result. Sonic & Knuckles under v1 diverges from broad (15 broad-executed PCs are not executed; known SEG-048 gap, ADR 0099),
   gen2 does not.
 - Economics (single samples): gen2 generated C is 0.39-0.66x of broad and CPU 0.34-0.75x (0.63x OutRun); v1 is smaller/cheaper where it is accepted (generated C 0.19-0.51x of broad on eight titles; Shining Force is a v1 fallback to the broad program, 1.00x; CPU 0.14-0.78x), so gen2 keeps more
-  code than v1 on seven titles and buys correct coverage on Sonic & Knuckles at that price (as ADR 0101 section 10 already stated). Model inference is not the dominant cost (ADR 0102/0104).
+  code than v1 on eight titles (all but Shining Force) and buys correct coverage on Sonic & Knuckles at that price (as ADR 0101 section 10 already stated). Model inference is not the dominant cost (ADR 0102/0104).
 - Not claimed: gameplay compatibility, equivalence beyond the observed window, any title outside these nine, visual equivalence.
 
 ## 4. Packaged builds and cross-platform
