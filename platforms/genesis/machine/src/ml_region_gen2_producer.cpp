@@ -14,6 +14,8 @@
 // pragma even when a consumer compiles this file outside the shipped build system.
 #if defined(__clang__)
 #pragma clang fp contract(off)
+#elif defined(__GNUC__)
+#pragma GCC optimize("fp-contract=off")
 #endif
 
 namespace segarecomp {
@@ -42,6 +44,16 @@ constexpr std::uint8_t kTokenCard[kTokenFields] = {3, 6, 8, 8, 13, 13, 4, 4};
 constexpr std::size_t kTokenDim[kTokenFields] = {2, 2, 3, 3, 3, 3, 2, 2};
 constexpr const float *kTokenTable[kTokenFields] = {g2_tok_0_weight, g2_tok_1_weight, g2_tok_2_weight, g2_tok_3_weight,
                                                     g2_tok_4_weight, g2_tok_5_weight, g2_tok_6_weight, g2_tok_7_weight};
+
+// The embedding tables, token dimensions and the stem input width must agree (a hand edit of one without the others fails to compile).
+static_assert(sizeof(g2_tok_0_weight) / sizeof(float) == kTokenCard[0] * kTokenDim[0] && sizeof(g2_tok_1_weight) / sizeof(float) == kTokenCard[1] * kTokenDim[1] &&
+                  sizeof(g2_tok_2_weight) / sizeof(float) == kTokenCard[2] * kTokenDim[2] && sizeof(g2_tok_3_weight) / sizeof(float) == kTokenCard[3] * kTokenDim[3] &&
+                  sizeof(g2_tok_4_weight) / sizeof(float) == kTokenCard[4] * kTokenDim[4] && sizeof(g2_tok_5_weight) / sizeof(float) == kTokenCard[5] * kTokenDim[5] &&
+                  sizeof(g2_tok_6_weight) / sizeof(float) == kTokenCard[6] * kTokenDim[6] && sizeof(g2_tok_7_weight) / sizeof(float) == kTokenCard[7] * kTokenDim[7],
+              "token embedding tables disagree with the cardinality/dimension constants");
+static_assert(16U + kTokenDim[0] + kTokenDim[1] + kTokenDim[2] + kTokenDim[3] + kTokenDim[4] + kTokenDim[5] + kTokenDim[6] + kTokenDim[7] == kIn,
+              "stem input width disagrees with the embedding dimensions");
+static_assert(sizeof(g2_emb_hi_weight) / sizeof(float) == 256U * 8U && sizeof(g2_stem_weight) / sizeof(float) == kC1 * kIn * kTaps, "table sizes");
 
 struct TensorRef {
   const float *data;

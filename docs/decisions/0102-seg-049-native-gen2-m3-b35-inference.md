@@ -29,7 +29,7 @@ only accepts `task/seg-NNN-tNNN` branches).
   `11258708285e4427a3e38e02732e8f93b4c5d497883101f0629223d2366a98e1`). No file is read at run time; there is no Python, PyTorch, ONNX, TensorFlow, JIT, download or runtime
   guest-opcode decoding. The binary never evaluates anything at guest run time.
 - Tokens come from the single CPU-owned definition `genesis_decode_tokens` (the report `m68k-decode-token-report` is now a framing wrapper of it): there is no second
-  token implementation. Token values are range-checked against the frozen field cardinalities before any table lookup (fail closed `token_range`).
+  token implementation. The token-schema pin is a label: decoder drift is detected by the golden CPU-token digests (synthetic corpus) and the unchanged token tests, not by the pin. Token values are range-checked against the frozen field cardinalities before any table lookup (fail closed `token_range`).
 - Whole-image evaluation uses a shared convolutional trunk over a reflected, padded image in chunks of 64 cells (peak scratch memory is a few MiB, independent of image
   size). Because all convolutions are valid, a cell's logit depends on exactly its 512-word context; this is tested bit-for-bit against an explicit per-context construction,
   for several chunk sizes, for ROM-edge and partial-last cells and for images shorter than the pad.
@@ -47,10 +47,10 @@ only accepts `task/seg-NNN-tNNN` branches).
    under GCC -O2, GCC -O3 -march=native (FMA hardware), clang -O3 -march=native and clang -O0; the same translation unit compiled with `-ffp-contract=fast` produces different
    digests on all three, which is why the flag is part of the contract and why a bitwise golden is asserted by every CI platform (macOS arm64 contracts by default).
 3. The logits are **not** bit-identical to the research evaluators (different summation order), so the gate against them is two-fold and neither half replaces the other:
-   (a) a documented absolute logit tolerance `1e-4` (observed against PyTorch 2.14.1 float32: max 1.53e-5 over all 40,000 cells of the five corpus titles, mean 2.1-2.6e-6, max
+   (a) a documented absolute logit tolerance `1e-4` (observed against PyTorch 2.14.1 float32: max 1.53e-5 over all 39,936 cells of the five corpus titles, mean 2.1-2.6e-6, max
    9.5e-6 on three synthetic images; against the stdlib double reference on the three ADR 0101 probes: <= 3.7e-6), and (b) **exact selected-cell-set equality**, which is the
    correctness gate. A numerical difference is acceptable only if it cannot change the selected set; the weakest logit gap across the budget cut on the five titles is 6.6e-4
-   (Sonic & Knuckles), > 6x the tolerance and > 40x the largest observed difference. A tie group is exact in both implementations (identical contexts give bitwise equal logits).
+   (Sonic & Knuckles; in-sample, margin not a guarantee for other images), > 6x the tolerance and > 40x the largest observed difference. A tie group is exact in both implementations (identical contexts give bitwise equal logits).
 4. Production selection is *defined by* the bitwise-deterministic native contract, not by the research evaluator; if a toolchain ever violated the contract, the committed
    golden digests (`tests/genesis_ml_gen2_test.cpp`, `tools/segarecomp_ml_region_gen2.native_parity.json`) fail on that platform rather than silently changing a selection.
 

@@ -17,6 +17,10 @@ target_link_libraries(segarecomp_machine_genesis PUBLIC segarecomp::media)
 # SEG-047 (ADR 0096): vendored zlib 1.3.1 deflate subset for the frozen b_zlib feature; private, and the producer must never be
 # compiled with floating-point contraction or fast-math (exact folded-scorer determinism).
 target_link_libraries(segarecomp_machine_genesis PRIVATE segarecomp_zlib)
+if(MSVC)
+  # cl.exe / clang-cl: no contraction (the gen2 binary32 evaluator's bitwise contract; the golden digests detect a violation).
+  set_source_files_properties(src/ml_region_gen2_producer.cpp PROPERTIES COMPILE_OPTIONS "/fp:precise;/fp:contract-")
+endif()
 if(NOT MSVC)
   set_source_files_properties(src/ml_region_producer.cpp PROPERTIES COMPILE_OPTIONS "-ffp-contract=off;-fno-fast-math")
   # SEG-049-T003 (ADR 0102): the gen2 binary32 evaluator has the same contract (bit-identical logits on every IEEE-754 host), and is always optimized (-O2) so the
