@@ -263,7 +263,7 @@ void stage(const char *name, const char *state) { std::cout << "@stage " << name
 
 std::optional<Options> parse_options(int argc, char **argv) {
   Options options;
-  bool have_rom = false, have_output = false, have_runtime = false;
+  bool have_rom = false, have_output = false, have_runtime = false, aot_model_given = false;
   for (int i = 2; i < argc; i += 2) {
     const std::string_view key = argv[i];
     if (i + 1 >= argc) return std::nullopt;
@@ -287,7 +287,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--jobs") options.jobs = static_cast<unsigned>(std::max(0, std::atoi(value.c_str())));
     else if (key == "--admission-plan" && !options.admission_plan) options.admission_plan = fs::path(value);
     else if (key == "--aot-policy" && (value == "compatibility" || value == "optimized")) options.aot_policy = value;
-    else if (key == "--aot-model" && (value == "v1" || value == "gen2")) options.aot_model = value;
+    else if (key == "--aot-model" && !aot_model_given && (value == "v1" || value == "gen2")) { options.aot_model = value; aot_model_given = true; }
     else return std::nullopt;
   }
   if (!have_rom || !have_output || !have_runtime || options.cc.empty()) return std::nullopt;

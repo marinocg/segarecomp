@@ -60,7 +60,7 @@ The analysis-contract string is bumped by any change to the structural prune or 
 ## 5. Fallback classification and reporting
 
 Every `optimized` build reports, machine-readably (`status.json` `aot_policy`), at least: `requested`, `requested_model`, `effective`, `fallback`, `reason`, `fallback_class`,
-`producer`, the identity components above, `selected_ppm`, `admitted_ppm`, `validator`, `identity` and `cache`. `fallback_class` is one of:
+`model_family`, the identity components above, `selected_ppm`, `admitted_ppm`, `validator`, `policy_identity`, `identity` and `cache_reuse` (`effective` names the producer that actually ran). `fallback_class` is one of:
 
 | class | reasons (stable codes) |
 | --- | --- |
@@ -79,4 +79,4 @@ read these fields and never parse human-readable log text.
 
 There is no separate inference/admission cache: the measured inference cost (ADR 0102) is small next to generation and compilation, and an admission result depends on the ROM,
 the producer identity and the analysis contract, all of which are in the compatibility identity. Reuse of a previously built program is the consumer's decision and must be keyed on the
-requested policy, requested model family and the product-provided identity inputs (`segarecomp aot-policy-identity`), never on launcher-private model knowledge.
+requested policy, requested model family and the product-provided identity inputs (`segarecomp aot-policy-identity`), never on launcher-private model knowledge. A consumer must key on `policy_identity` as well as `identity`: the frozen v1/Compatibility `identity` text predates the analysis-contract string, so a contract bump changes `policy_identity` (which includes it) but not those `identity` values.

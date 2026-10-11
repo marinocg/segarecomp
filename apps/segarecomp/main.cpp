@@ -982,14 +982,15 @@ int run_cli(int argc, char **argv) {
     if (command == "aot-policy-identity") {
       // SEG-049-T004 (ADR 0103): the product-provided, ROM-independent policy identity a consumer (the launcher) keys its cache on.
       std::string policy, model = "v1";
+      bool model_given = false;
       for (int index = 2; index < argc; index += 2) {
         if (index + 1 >= argc) { print_usage(std::cerr); return 2; }
         const std::string_view key = argv[index], value = argv[index + 1];
-        if (key == "--aot-policy" && (value == "compatibility" || value == "optimized")) policy = value;
-        else if (key == "--aot-model" && (value == "v1" || value == "gen2")) model = value;
+        if (key == "--aot-policy" && policy.empty() && (value == "compatibility" || value == "optimized")) policy = value;
+        else if (key == "--aot-model" && !model_given && (value == "v1" || value == "gen2")) { model = value; model_given = true; }
         else { print_usage(std::cerr); return 2; }
       }
-      if (policy.empty()) { print_usage(std::cerr); return 2; }
+      if (policy.empty() || (policy == "compatibility" && model_given)) { print_usage(std::cerr); return 2; }  // same rule as `build`
       const auto family = model == "gen2" ? segarecomp::GenesisMlModelFamily::gen2 : segarecomp::GenesisMlModelFamily::v1;
       std::cout << "policy_identity=" << segarecomp::genesis_aot_policy_identity(policy, family) << " requested=" << policy
                 << " requested_model=" << (policy == "optimized" ? model : std::string("none")) << " contract=" << segarecomp::genesis_admission_analysis_contract << '\n';

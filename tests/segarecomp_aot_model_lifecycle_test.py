@@ -100,7 +100,9 @@ def main():
         pid = lambda s: re.search(r"policy_identity=([0-9a-f]{64})", s).group(1)
         require(len({pid(compat_id), pid(v1_id), pid(g2_id)}) == 3, "policy identities of Compatibility, v1 and gen2 differ")
         require(ident("--aot-policy", "optimized", "--aot-model", "gen2") == (0, g2_id), "stable")
-        require(pid(ident("--aot-policy", "compatibility", "--aot-model", "gen2")[1]) == pid(compat_id), "an unused model never changes the Compatibility identity")
+        require(ident("--aot-policy", "compatibility", "--aot-model", "gen2")[0] == 2, "a model without optimized is a usage error (same rule as build)")
+        require(ident("--aot-policy", "optimized", "--aot-model", "gen2", "--aot-model", "v1")[0] == 2 and ident("--aot-policy", "optimized", "--aot-policy", "compatibility")[0] == 2,
+                "duplicate options are rejected")
         require("requested_model=gen2" in g2_id and "requested_model=v1" in v1_id and "requested_model=none" in compat_id, "identity fields")
         require(ident("--aot-policy", "turbo")[0] == 2 and ident()[0] == 2 and ident("--aot-policy", "optimized", "--aot-model", "v3")[0] == 2, "invalid arguments")
 
@@ -132,8 +134,8 @@ def main():
             require(0 < s2["selected_ppm"] <= 1000000 and 0 < s2["admitted_ppm"] <= 1000000 and s2["k"] <= s2["universe"] and s2["cells"] == (len(data) + 127) // 128, str(s2))
         else:
             require(s2["validator"] in ("not_run", "rejected"), str(s2))
-            gen_c = next(p for p in compat_out.iterdir() if p.suffix in ("", ".exe") and p.stem == "game")
-            require(gen_c.exists(), "program exists")
+        # The fixed synthetic image is admitted by gen2 (a regression that always fell back would otherwise pass unnoticed).
+        require(s2["effective"] == "ml_region_gen2" and s2["fallback"] is False, "gen2 admits the fixed synthetic image: " + str(s2))
         deterministic = tmp / "g2b"
         require(build(cli, compiler, root, rom, deterministic, ("--aot-policy", "optimized", "--aot-model", "gen2")).returncode == 0, "rebuild")
         require(status(deterministic)["identity"] == s2["identity"], "identity is deterministic across builds")

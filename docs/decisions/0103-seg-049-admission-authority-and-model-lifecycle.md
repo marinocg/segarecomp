@@ -21,7 +21,7 @@
    and v1 and uses `segarecomp.aot_policy.v2|...` for a gen2 request (including a gen2 fallback, so a gen2-requested build never aliases a v1 or Compatibility one).
    `genesis_aot_policy_identity` (printed by `segarecomp aot-policy-identity`) is the ROM-independent policy identity a consumer keys its cache on.
 5. **Incompatible model.** A producer whose pinned digests/tables do not verify fails closed (`model_identity`, class `producer_incompatible`); there is no partial use. Tested by compiling the
-   producer against nine deliberately mutated copies of the generated table (weight, BatchNorm statistic, model / token-schema / representation / rank-plan / weight-table digests, policy
+   producer against eight deliberately mutated copies of the generated table (weight, BatchNorm statistic, model / token-schema / representation / rank-plan / weight-table digests, policy
    percent) and by a synthetic incompatible producer at the owner level.
 6. **Fallback classification** is a stable table (`genesis_ml_fallback_class`); a fallback is `producer=broad fallback=1`, `validator=not_run|rejected`, and its emission is byte-identical to broad.
 7. **Embedded models only.** Nothing is read from disk or the network; a different model is a different binary with a different identity. No model registry (two static descriptors).
