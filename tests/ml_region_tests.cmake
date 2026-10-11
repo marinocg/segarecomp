@@ -49,3 +49,6 @@ set_property(TEST ml_producer_boundary_test APPEND PROPERTY LABELS full fast)
 add_test(NAME genesis_ml_gen2_identity_mutation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_ml_gen2_identity_mutation_test.py
   ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST genesis_ml_gen2_identity_mutation_test APPEND PROPERTY LABELS full fast)
+# SEG-049-T007 (ADR 0106): the release-package dependency/file policy (synthetic names; the real package is inspected by the release workflow).
+add_test(NAME packaging_dependency_check_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/packaging_dependency_check_test.py)
+set_property(TEST packaging_dependency_check_test APPEND PROPERTY LABELS full fast)

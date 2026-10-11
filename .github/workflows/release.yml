@@ -168,6 +168,9 @@ jobs:
             Windows) cmake -E tar xf "$archive"; launcher=Segarecomp/Segarecomp.exe ;;
           esac
           cd "$RUNNER_TEMP"   # leave the checkout: nothing may resolve through the source or build tree
+          # SEG-049-T007: the package needs no Python / ML framework / research model file (native dependencies of the launcher and the CLI are
+          # packaged or operating-system libraries; the frozen native models are embedded in the CLI).
+          python "$GITHUB_WORKSPACE/packaging/dependency_check.py" "$RUNNER_TEMP/extracted" "$RUNNER_TEMP/extracted/$launcher"
           python "$GITHUB_WORKSPACE/packaging/smoke_test.py" "$RUNNER_TEMP/extracted/$launcher"
 
       - uses: actions/upload-artifact@v4

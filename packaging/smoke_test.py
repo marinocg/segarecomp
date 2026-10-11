@@ -95,6 +95,80 @@ def smoke_master_system(tmp, launch):
             f"the sidecar manifest declaration must key a separate entry: {other}")
 
 
+# ---- SEG-049-T007 (ADR 0106): Optimized (v1) and the experimental gen2 model through the PACKAGED launcher and CLI ------------------------------
+# Golden values of the project-authored synthetic Genesis image of tests/genesis_ml_admission_cli_test.py in a development build; the packaged
+# build must reproduce them exactly on every platform (same model, schema, analysis contract, and bit-identical native inference).
+OPT_GOLDEN = {
+    "v1": {"effective": "ml_region", "model_family": "v1", "selected_ppm": "0", "admitted_ppm": "1000000",
+           "k_sha256": "5f299d8b8999df7b8f2917e650cc39c768ddf71a9532a5ed553846602ca6a2b2"},
+    "gen2": {"effective": "ml_region_gen2", "model_family": "gen2", "selected_ppm": "500000", "admitted_ppm": "19685",
+             "k_sha256": "882a43982be3ab33e116cfda125f5f389cb8374fdaa123b75ca967acd848bbb3"},
+}
+
+
+def optimized_image():
+    """The synthetic stop image (IMAGE) in a 512-byte cartridge with a Genesis header, so the launcher offers Optimized for it. Project-authored."""
+    image = bytearray(0x200)
+    image[:len(IMAGE)] = IMAGE
+    image[0x100:0x110] = b"SEGA GENESIS    "
+    return bytes(image)
+
+
+def expected_policy_identity(policy, model):
+    """Independent (Python, from the committed frozen records) re-derivation of `segarecomp aot-policy-identity`."""
+    import json
+    tools = pathlib.Path(__file__).resolve().parent.parent / "tools"
+    frozen = json.loads((tools / "segarecomp_ml_region_gen2.frozen.json").read_text())
+    inc = (pathlib.Path(__file__).resolve().parent.parent / "platforms/genesis/machine/src/ml_region_gen2_model_data.inc").read_text()
+    weights = re.search(r'g2_weight_table_sha256 = "([0-9a-f]{64})"', inc).group(1)
+    text = f"segarecomp.aot_policy_identity.v1|contract=segarecomp.admission_contract.v1|requested={policy}"
+    if policy == "optimized" and model == "gen2":
+        text += (f"|family=gen2|producer=ml_region_gen2|model={frozen['model_artifact']['sha256']}|schema={frozen['representation_sha256']}"
+                 f"|tokens={frozen['token_schema_sha256']}|rank=B35:{frozen['rank_plan_sha256']}|weights={weights}")
+    elif policy == "optimized":
+        text += ("|family=v1|producer=ml_region|model=seg046-features-v1|schema=d2e7c82913139c29450511326d6de76e91579ec654edde81afae16b13cd1f570"
+                 "|tokens=|rank=:|weights=")
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def smoke_optimized(tmp, launch):
+    import json
+    rom = tmp / "optimized.bin"
+    rom.write_bytes(optimized_image())
+    modes = {"compatibility": [], "v1": ["--aot-policy", "optimized"], "gen2": ["--aot-policy", "optimized", "--aot-model", "gen2"]}
+    entries, reports = {}, {}
+    for name, extra in modes.items():
+        code, first, _ = launch(rom, f"opt-{name}-1.txt", extra=extra)
+        require(code == 0 and first["build"] == "ok" and first["cache"] == "miss" and first["run"] == "exited code=0", f"{name}: build+run failed rc={code}: {first}")
+        code, second, _ = launch(rom, f"opt-{name}-2.txt", run=False, extra=extra)
+        require(code == 0 and second["cache"] == "hit" and "build" not in second and second["entry"] == first["entry"], f"{name}: expected a cache hit: {second}")
+        entries[name], reports[name] = first["entry"], second
+    require(len(set(entries.values())) == 3, f"Compatibility, Optimized (v1) and the experimental model must use separate cache entries: {entries}")
+    comp = reports["compatibility"]
+    require(comp["aot_policy_effective"] == "broad" and comp["aot_policy_fallback"] == "no" and comp["aot_policy_model_family"] == "none" and
+            comp["aot_policy_policy_identity"] == expected_policy_identity("compatibility", "none"), f"Compatibility report: {comp}")
+    for name in ("v1", "gen2"):
+        got, want = reports[name], OPT_GOLDEN[name]
+        require(got["aot_policy_requested"] == "optimized" and got["aot_policy_requested_model"] == name, f"{name}: request: {got}")
+        require(got["aot_policy_effective"] == want["effective"] and got["aot_policy_model_family"] == want["model_family"] and
+                got["aot_policy_fallback"] == "no" and got["aot_policy_reason"] == "none" and got["aot_policy_fallback_class"] == "none" and
+                got["aot_policy_validator"] == "accepted", f"{name}: the packaged build must be selective, not a fallback: {got}")
+        require(got["aot_policy_selected_ppm"] == want["selected_ppm"] and got["aot_policy_admitted_ppm"] == want["admitted_ppm"],
+                f"{name}: selected/admitted fractions differ from the development build: {got}")
+        require(got["aot_policy_policy_identity"] == expected_policy_identity("optimized", name), f"{name}: policy identity differs from the development contract: {got}")
+        status = json.loads((pathlib.Path(entries[name]) / "status.json").read_text())["aot_policy"]
+        require(status["k_sha256"] == want["k_sha256"], f"{name}: admitted-set digest differs from the development build (cross-platform determinism)")
+        require(status["analysis_contract"] == "segarecomp.admission_contract.v1" and status["cache_reuse"] == "none", f"{name}: status: {status}")
+    gen2 = json.loads((pathlib.Path(entries["gen2"]) / "status.json").read_text())["aot_policy"]
+    frozen = json.loads((pathlib.Path(__file__).resolve().parent.parent / "tools/segarecomp_ml_region_gen2.frozen.json").read_text())
+    require(gen2["model"] == frozen["model_artifact"]["sha256"] and gen2["schema_sha256"] == frozen["representation_sha256"] and
+            gen2["token_contract_sha256"] == frozen["token_schema_sha256"] and gen2["rank_plan_sha256"] == frozen["rank_plan_sha256"] and gen2["rank_policy"] == "B35",
+            f"the packaged model identity must equal the frozen research record: {gen2}")
+    # The packaged CLI reports the same product identity (it is what the launcher keyed on).
+    for policy, model, name in (("compatibility", "v1", "compatibility"), ("optimized", "v1", "v1"), ("optimized", "gen2", "gen2")):
+        require(reports[name]["aot_policy_policy_identity"] == expected_policy_identity(policy, model if policy == "optimized" else "none"), f"{name}: identity parity")
+
+
 def main():
     launcher = pathlib.Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="segarecomp-smoke-") as directory:
@@ -166,6 +240,7 @@ def main():
         code, unreadable, _ = launch(tmp / "missing.bin", "missing.txt", run=False)
         require(code == 1 and "problem" in "".join(unreadable.values()) + str(unreadable), "unreadable ROM must fail cleanly")
         smoke_master_system(tmp, launch)
+        smoke_optimized(tmp, launch)
         require(not (tmp / "decoy-used").exists(), "a host compiler on PATH was used")
     print("package smoke test: OK")
 
