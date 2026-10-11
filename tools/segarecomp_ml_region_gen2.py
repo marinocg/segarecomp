@@ -119,8 +119,9 @@ def representation_sha256() -> str:
 def v1_artifacts_unchanged(root) -> list[str]:
     """Names of production v1 artifacts whose bytes differ from the baseline digests (must be empty)."""
     base = pathlib.Path(root)
+    # Digests are of the LF-normalized text: a Windows checkout may convert line endings (core.autocrlf) without changing the artifact.
     return sorted(name for name, want in V1_ARTIFACT_SHA256.items()
-                  if not (base / name).is_file() or sha256_file(base / name) != want)
+                  if not (base / name).is_file() or sha256_bytes((base / name).read_bytes().replace(b"\r\n", b"\n")) != want)
 
 
 # ------------------------------------------------------------------------------------------------------------------- leakage guard
