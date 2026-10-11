@@ -53,4 +53,4 @@ Not adopted:
 
 ## 6. Scope statement
 
-No default or recommendation change: Compatibility stays default and gen2 stays an explicit opt-in (ADR 0103/0109). Flicky still falls back (thunks). Descriptor values are private and are not recorded.
+No default or recommendation change: Compatibility stays default and gen2 stays an explicit opt-in (ADR 0103/0109). Flicky still falls back (thunks). Descriptor addresses and offsets are private and are not recorded; only coarse aggregate sizes and counts appear. The no-alias identity is established by the explicit expectation that the result equals the plain region rule (the predicate falls through to the unchanged address test for non-alias identities) rather than against a pre-change binary.
