@@ -206,3 +206,50 @@ def verify_plan(path, t001_plan_path, outer_score_digests=None) -> dict:
     if set(committed["policy"]["budgets_percent"]) != set(BUDGET_PERCENT) or committed["policy"]["budgets_percent"] != BUDGET_PERCENT:
         raise SystemExit("rank plan drift: the budget set is not exactly B30..B50")
     return committed
+
+
+# ------------------------------------------------------------------------------------------------------------ frozen research candidate
+FROZEN_NAMES = {"model": "segarecomp_ml_region_gen2.model.json", "frozen": "segarecomp_ml_region_gen2.frozen.json",
+                "parity": "segarecomp_ml_region_gen2.parity.json", "plan": "segarecomp_ml_region_gen2_rank.plan.json"}
+PARITY_PROBES = 3
+
+
+def parity_probes(count: int = PARITY_PROBES) -> list[dict]:
+    """Deterministic SYNTHETIC 512-word contexts (hi/lo bytes + token rows) from a private 64-bit LCG: no ROM data, no random-module dependence."""
+    state = g.SEED * 6364136223846793005 + 1442695040888963407
+    probes = []
+
+    def nxt(bound):
+        nonlocal state
+        state = (state * 6364136223846793005 + 1442695040888963407) & 0xFFFFFFFFFFFFFFFF
+        return (state >> 33) % bound
+
+    for _ in range(count):
+        hi = [nxt(256) for _ in range(g.CONTEXT_WORDS)]
+        lo = [nxt(256) for _ in range(g.CONTEXT_WORDS)]
+        tok = [[nxt(g.TOKEN_CARDINALITY[f]) for f in g.TOKEN_FIELDS] for _ in range(g.CONTEXT_WORDS)]
+        probes.append({"hi": hi, "lo": lo, "tok": tok})
+    return probes
+
+
+def logits_digest(logits) -> str:
+    return g.sha256_bytes("".join(f"{x:.6e}\n" for x in logits).encode())
+
+
+def verify_frozen(directory) -> dict:
+    """Fail-closed integrity check of the frozen research candidate (record <-> model bytes <-> plan bytes <-> policy <-> parity)."""
+    base = pathlib.Path(directory)
+    frozen = g.verify_frozen_artifact(base / FROZEN_NAMES["frozen"])
+    plan = json.loads((base / FROZEN_NAMES["plan"]).read_text())
+    if frozen["policy"] != {"id": frozen["policy"]["id"], "percent": BUDGET_PERCENT[frozen["policy"]["id"]], "kind": "rank budget"}:
+        raise SystemExit("frozen policy does not match the pre-registered budget table")
+    if frozen["representation_sha256"] != g.representation_sha256() or frozen["token_schema_sha256"] != g.token_schema_sha256():
+        raise SystemExit("frozen representation identity drift")
+    if frozen["rank_plan_sha256"] != plan_digest(plan):
+        raise SystemExit("frozen record names a different rank plan")
+    parity = json.loads((base / FROZEN_NAMES["parity"]).read_text())
+    if frozen["parity_artifact_sha256"] != g.sha256_bytes((base / FROZEN_NAMES["parity"]).read_bytes().replace(b"\r\n", b"\n")):
+        raise SystemExit("parity artifact digest mismatch")
+    if parity["policy"] != frozen["policy"] or parity["model_sha256"] != frozen["model_artifact"]["sha256"]:
+        raise SystemExit("parity artifact does not describe the frozen model/policy")
+    return frozen

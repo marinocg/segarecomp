@@ -1,0 +1,36 @@
+{
+ "in_sample_prediction_digest": "a25c8a378fa2792a608d67816c6b74ba16828886b7f3fbb852b3524fad158273",
+ "in_sample_selected_cell_set_digest": {
+  "flicky": "219257d285fb31a6dbf66668a3cf1f2001a6fb3cac7071ee040cd0b42666a8ef",
+  "ps2": "6d631b2f66c34cfb91c08719b8ed5587f55f024cdfab38debb59044dc79d4727",
+  "s1": "e8c04013587120858da2a5e00fa5799312bdf1453763f13e4123458471ee6605",
+  "sf1": "d8f57faae131410fc019614002815ee2d56202598851a95b2fcbfc944f87b41c",
+  "sk": "6e162cb830085b37fe4a351d451feb6b21a733b8bb132f6e72e63b4a5346e5a6"
+ },
+ "in_sample_selected_cells": {
+  "flicky": 359,
+  "ps2": 2151,
+  "s1": 1434,
+  "sf1": 4301,
+  "sk": 5735
+ },
+ "model_sha256": "11258708285e4427a3e38e02732e8f93b4c5d497883101f0629223d2366a98e1",
+ "note": "in-sample (all five fitting titles) and aggregate/hash only: no address, per-cell score or ROM byte is stored",
+ "policy": {
+  "id": "B35",
+  "kind": "rank budget",
+  "percent": 35
+ },
+ "schema": "segarecomp.ml_region_gen2_parity.v1",
+ "synthetic_probes": {
+  "count": 3,
+  "generator": "64-bit LCG seeded from the gen2 seed (no ROM data)",
+  "max_abs_diff_reference_vs_torch": 1.2722793032438062e-06,
+  "reference_logits_6e": [
+   "9.366805e+00",
+   "5.174463e+00",
+   "5.390115e+00"
+  ],
+  "reference_logits_digest": "1036a5798d0fc919120aa8255a9d217115be4661d415860610d13f26b2db58c1"
+ }
+}

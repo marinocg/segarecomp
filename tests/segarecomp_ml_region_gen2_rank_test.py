@@ -263,5 +263,91 @@ class V1Guard(unittest.TestCase):
             self.assertEqual(g.v1_artifacts_unchanged(tmp), ["tools/segarecomp_ml_region.model.json"])
 
 
+class FrozenCandidate(unittest.TestCase):
+    def frozen(self):
+        return r.verify_frozen(TOOLS)
+
+    def test_frozen_record_identity(self):
+        f = self.frozen()
+        self.assertEqual(f["policy"], {"id": "B35", "percent": 35, "kind": "rank budget"})
+        self.assertEqual(f["training_titles"], list(g.TITLE_ORDER))
+        self.assertEqual(f["corpus"], g.CORPUS)
+        self.assertEqual(f["seed"], 49)
+        self.assertEqual(f["trainable_parameters"], 77441)
+        self.assertEqual(f["t001_plan_sha256"], r.t001_plan_digest(T001_PLAN))
+        self.assertEqual(f["model_artifact"]["sha256"], g.sha256_file(os.path.join(TOOLS, r.FROZEN_NAMES["model"])))
+        self.assertTrue(f["deterministic_refit"]["weights_bitwise_equal"] and f["deterministic_refit"]["predictions_bitwise_equal"])
+
+    def test_recipe_is_the_unchanged_t001_recipe(self):
+        with open(T001_PLAN) as handle:
+            t001 = json.load(handle)
+        self.assertEqual(self.frozen()["recipe"], t001["recipe"])
+
+    def test_model_artifact_shape_and_stdlib_reference_parity(self):
+        import segarecomp_ml_region_gen2_reference as ref
+        with open(os.path.join(TOOLS, r.FROZEN_NAMES["model"])) as handle:
+            doc = json.load(handle)
+        n = 0
+        for name, tensor in doc["weights"].items():
+            if name.endswith("running_mean") or name.endswith("running_var"):
+                continue
+            flat, todo = 0, [tensor]
+            while todo:
+                x = todo.pop()
+                if isinstance(x, list):
+                    todo.extend(x)
+                else:
+                    flat += 1
+            n += flat
+        self.assertEqual(n, 77441)  # trainable parameters only (batch-norm running statistics excluded)
+        self.assertEqual(doc["trainable_parameters"], 77441)
+        with open(os.path.join(TOOLS, r.FROZEN_NAMES["parity"])) as handle:
+            parity = json.load(handle)
+        probe = r.parity_probes(1)[0]
+        got = ref.cnn_logit(doc["weights"], probe["hi"], probe["lo"], probe["tok"])
+        self.assertEqual(f"{got:.6e}", parity["synthetic_probes"]["reference_logits_6e"][0])
+        self.assertLess(parity["synthetic_probes"]["max_abs_diff_reference_vs_torch"], 1e-5)
+        self.assertEqual(parity["synthetic_probes"]["count"], r.PARITY_PROBES)
+
+    def test_probes_are_synthetic_deterministic_and_in_range(self):
+        a, b = r.parity_probes(2), r.parity_probes(2)
+        self.assertEqual(a, b)
+        for pr in a:
+            self.assertEqual((len(pr["hi"]), len(pr["lo"]), len(pr["tok"])), (512, 512, 512))
+            self.assertTrue(all(0 <= v < 256 for v in pr["hi"] + pr["lo"]))
+            for row in pr["tok"]:
+                self.assertTrue(all(0 <= v < g.TOKEN_CARDINALITY[f] for v, f in zip(row, g.TOKEN_FIELDS)))
+
+    def test_tampered_artifacts_are_rejected(self):
+        for victim, mutate in (("model", lambda b: b + b" "), ("plan", lambda b: b + b" "), ("parity", lambda b: b.replace(b"B35", b"B30"))):
+            with tempfile.TemporaryDirectory() as tmp:
+                for name in r.FROZEN_NAMES.values():
+                    shutil.copy(os.path.join(TOOLS, name), os.path.join(tmp, name))
+                path = os.path.join(tmp, r.FROZEN_NAMES[victim])
+                with open(path, "rb") as handle:
+                    data = handle.read()
+                with open(path, "wb") as handle:
+                    handle.write(mutate(data))
+                with self.assertRaises(SystemExit, msg=victim):
+                    r.verify_frozen(tmp)
+
+    def test_policy_edit_is_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for name in r.FROZEN_NAMES.values():
+                shutil.copy(os.path.join(TOOLS, name), os.path.join(tmp, name))
+            path = os.path.join(tmp, r.FROZEN_NAMES["frozen"])
+            with open(path) as handle:
+                f = json.load(handle)
+            f["policy"]["percent"] = 30
+            with open(path, "w") as handle:
+                json.dump(f, handle)
+            with self.assertRaises(SystemExit):
+                r.verify_frozen(tmp)
+
+    def test_production_v1_untouched_by_the_frozen_candidate(self):
+        self.assertEqual(g.v1_artifacts_unchanged(ROOT), [])
+        self.assertNotIn(r.FROZEN_NAMES["model"], g.V1_ARTIFACT_SHA256)
+
+
 if __name__ == "__main__":
     unittest.main()
