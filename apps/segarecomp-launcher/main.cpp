@@ -52,6 +52,7 @@ int headless(int argc, char **argv) {
   fs::path rom_path, report_path;
   std::string mapper;                  // Master System: explicit mapper declaration (never defaulted)
   std::string aot_policy = "compatibility";  // compatibility | optimized (Genesis); Compatibility is the default
+  std::string aot_model = "v1";              // experimental opt-in of Optimized (v1 | gen2); forwarded verbatim to the product
   std::vector<std::string> game_args;  // forwarded to the launched game (automation passes a finite bound)
   bool run = false;
   for (int i = 1; i < argc; ++i) {
@@ -61,9 +62,11 @@ int headless(int argc, char **argv) {
     else if (arg == "--run") run = true;
     else if (arg == "--mapper" && i + 1 < argc) mapper = argv[++i];
     else if (arg == "--aot-policy" && i + 1 < argc && (std::string(argv[i + 1]) == "compatibility" || std::string(argv[i + 1]) == "optimized")) aot_policy = argv[++i];
+    else if (arg == "--aot-model" && i + 1 < argc && (std::string(argv[i + 1]) == "v1" || std::string(argv[i + 1]) == "gen2")) aot_model = argv[++i];
     else if (arg == "--game-arg" && i + 1 < argc) game_args.emplace_back(argv[++i]);
-    else { std::fprintf(stderr, "usage: Segarecomp [--build <rom> [--mapper <sega|rom_only>] [--aot-policy <compatibility|optimized>] [--run [--game-arg <arg>]...] [--report <file>]]\n"); return 2; }
+    else { std::fprintf(stderr, "usage: Segarecomp [--build <rom> [--mapper <sega|rom_only>] [--aot-policy <compatibility|optimized> [--aot-model <v1|gen2>]] [--run [--game-arg <arg>]...] [--report <file>]]\n"); return 2; }
   }
+  if (aot_model != "v1" && aot_policy != "optimized") { std::fprintf(stderr, "--aot-model requires --aot-policy optimized\n"); return 2; }
   std::string report;
   const auto emit = [&](const std::string &line) { report += line + "\n"; std::puts(line.c_str()); };
   int rc = 0;
@@ -74,7 +77,7 @@ int headless(int argc, char **argv) {
   else {
     RomView rom = inspect_rom_file(rom_path, layout);
     if (rom.platform_id == "master-system" && !mapper.empty()) rom.mapper = mapper;
-    if (rom.supports_optimized()) rom.aot_policy = aot_policy;
+    if (rom.supports_optimized()) { rom.aot_policy = aot_policy; rom.aot_model = aot_model; }
     if (!rom.error.empty()) { emit("result=failed problem=" + rom.error); rc = 1; }
     else {
       const fs::path entry = entry_dir(rom, layout);
@@ -83,8 +86,10 @@ int headless(int argc, char **argv) {
       if (rom.platform_id == "master-system")
         emit(std::string("mapper=") + (!rom.mapper.empty() ? rom.mapper : rom.mapper_manifest.empty() ? "undeclared" : "manifest"));
       emit(std::string("aot_policy_requested=") + rom.aot_policy);
-      emit(std::string("cache=") + (entry_ready(entry) ? "hit" : "miss"));
-      if (!entry_ready(entry)) {
+      if (rom.optimized()) emit("aot_policy_requested_model=" + rom.aot_model);
+      const bool cached = entry_ready_for(entry, rom, layout);
+      emit(std::string("cache=") + (cached ? "hit" : "miss"));
+      if (!cached) {
         BuildJob job(rom, layout);
         job.wait();
         emit(std::string("build=") + (job.succeeded() ? "ok" : "failed"));
@@ -97,6 +102,13 @@ int headless(int argc, char **argv) {
           emit("aot_policy_effective=" + policy.effective);
           emit(std::string("aot_policy_fallback=") + (policy.fallback ? "yes" : "no"));
           emit("aot_policy_reason=" + policy.reason);
+          emit("aot_policy_fallback_class=" + policy.fallback_class);
+          emit("aot_policy_model_family=" + policy.model_family);
+          emit("aot_policy_validator=" + policy.validator);
+          emit("aot_policy_selected_ppm=" + std::to_string(policy.selected_ppm));
+          emit("aot_policy_admitted_ppm=" + std::to_string(policy.admitted_ppm));
+          emit("aot_policy_policy_identity=" + policy.policy_identity);
+          emit("aot_policy_identity=" + policy.identity);
         }
       }
       if (rc == 0 && run) {
@@ -382,11 +394,12 @@ int gui() {
   std::unique_ptr<GameRun> game;
   // AOT policy chosen in this session (Compatibility is the default and the only value unless the user picks Optimized).
   std::string policy_choice = "compatibility";
+  std::string model_choice = "v1";  // experimental opt-in of Optimized ("gen2"); v1 is the default
   PolicyReport policy_report;  // of the Ready entry (read from its status.json), for the requested/effective note
   const auto refresh_report = [&] { policy_report = state == State::Ready ? read_policy_report(entry) : PolicyReport{}; };
   const auto fallback_details = [&] {
-    diagnostics = "Optimized AOT was requested but this game was built as Compatibility (the broad, always-correct program).\n"
-                  "Reason code: " + policy_report.reason + "\nThe build log and status.json in the cache folder hold the sanitized details.";
+    diagnostics = (policy_report.fallback ? "Optimized was requested but this game was built as Compatibility (the broad, always-correct program).\n" : std::string()) +
+                  policy_details(policy_report) + "\nThe build log and status.json in the cache folder hold the sanitized details.";
   };
 
   const auto select_rom = [&](const std::string &path_text) {
@@ -394,9 +407,9 @@ int gui() {
     rom = inspect_rom_file(from_u8(path_text.c_str()), layout);
     show_diagnostics = false;
     if (!rom.error.empty()) { failure = "That file could not be read: " + rom.error; diagnostics = failure; state = State::Failed; return; }
-    if (rom.supports_optimized()) rom.aot_policy = policy_choice;
+    if (rom.supports_optimized()) { rom.aot_policy = policy_choice; rom.aot_model = model_choice; }
     entry = entry_dir(rom, layout);
-    state = entry_ready(entry) ? State::Ready : State::RomSelected;
+    state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
     refresh_report();
   };
   const auto set_policy = [&](const char *choice) {
@@ -405,7 +418,16 @@ int gui() {
     rom.aot_policy = choice;
     show_diagnostics = false;
     entry = entry_dir(rom, layout);  // the policy is part of the cache identity: the two modes never alias
-    state = entry_ready(entry) ? State::Ready : State::RomSelected;
+    state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
+    refresh_report();
+  };
+  const auto set_model = [&](const char *choice) {
+    if (rom.aot_model == choice) return;
+    model_choice = choice;
+    rom.aot_model = choice;
+    show_diagnostics = false;
+    entry = entry_dir(rom, layout);  // the model family is part of the cache identity: v1 and the experimental model never alias
+    state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
     refresh_report();
   };
   const auto start_build = [&](bool force) {
@@ -418,6 +440,7 @@ int gui() {
     SDL_ShowOpenFileDialog(dialog_callback, &pending, window, filters, 3, nullptr, false);
   };
   if (const char *shot_policy = SDL_getenv("SEGARECOMP_SHOT_POLICY"); shot_policy && std::string(shot_policy) == "optimized") policy_choice = "optimized";  // review aid
+  if (const char *shot_model = SDL_getenv("SEGARECOMP_SHOT_MODEL"); shot_model && std::string(shot_model) == "gen2") model_choice = "gen2";  // review aid
   if (const char *preselect = SDL_getenv("SEGARECOMP_SHOT_ROM")) {  // review aid, see maybe_save_screenshot
     select_rom(preselect);
     if (SDL_getenv("SEGARECOMP_SHOT_BUILD") && state == State::RomSelected) start_build(false);
@@ -574,6 +597,13 @@ int gui() {
         if ((opt ? bevel_button(centered, "mode_opt", content_x + 212.0F, y, 120.0F, 26.0F, "Optimized", font_bold, 12.0F)
                  : outline_button(centered, "mode_opt", content_x + 212.0F, y, 120.0F, 26.0F, "Optimized", font_regular, 12.0F)))
           set_policy("optimized");
+        // Advanced: the experimental model opt-in is only offered while Optimized is selected, as one small secondary control.
+        if (opt) {
+          const bool g2 = rom.optimized_gen2();
+          if ((g2 ? bevel_button(centered, "model_g2", content_x + 336.0F, y, 78.0F, 26.0F, "Experimental", font_bold, 10.0F)
+                  : outline_button(centered, "model_g2", content_x + 336.0F, y, 78.0F, 26.0F, "Experimental", font_regular, 10.0F)))
+            set_model(g2 ? "v1" : "gen2");
+        }
       };
 
       if (!layout.problem.empty()) {
@@ -599,7 +629,7 @@ int gui() {
           if (declared != nullptr) {
             rom.mapper = declared;
             entry = entry_dir(rom, layout);
-            if (entry_ready(entry)) state = State::Ready; else start_build(false);
+            if (entry_ready_for(entry, rom, layout)) state = State::Ready; else start_build(false);
           }
         } else {
           if (bevel_button(centered, "recompile", content_x, row_y + 30.0F, 190.0F, 42.0F,
@@ -635,7 +665,7 @@ int gui() {
           browse();
         // Fixed control scheme (the runtime has no remapping UI yet): keep it visible right where "Play" is.
         mode_row(row_y + 80.0F);
-        if (policy_report.fallback && outline_button(centered, "fb_details", content_x + 346.0F, row_y + 80.0F, 58.0F, 26.0F, "Why?", font_regular, 12.0F)) {
+        if (policy_report.present && policy_report.requested == "optimized" && outline_button(centered, "fb_details", content_x + 346.0F, row_y + 4.0F, 62.0F, 22.0F, policy_report.fallback ? "Why?" : "Details", font_regular, 11.0F)) {
           show_diagnostics = !show_diagnostics;
           fallback_details();
         }
@@ -669,7 +699,7 @@ int gui() {
 
     // ---- below the panel: diagnostics (when asked for) or the compact legal/info panel; then the footer ----
     const float below_y = panel_y1 + 22.0F;
-    if (show_diagnostics && (state == State::Failed || (state == State::Ready && policy_report.fallback))) {
+    if (show_diagnostics && (state == State::Failed || (state == State::Ready && policy_report.present && policy_report.requested == "optimized"))) {
       const float dh = 130.0F;
       dl->AddRectFilled(centered.at(panel_x0, below_y), centered.at(panel_x1, below_y + dh), rgba(5, 9, 20, 235), centered.len(4));
       dl->AddRect(centered.at(panel_x0, below_y), centered.at(panel_x1, below_y + dh), panel_edge, centered.len(4));
