@@ -321,8 +321,9 @@ bool entry_ready_for(const fs::path &entry, const RomView &rom, const Layout &la
   if (rom.optimized()) {
     if (report.requested_model != rom.aot_model) return false;
     const std::string current = product_policy_identity(layout, "optimized", rom.aot_model);
-    // Fail closed: when the product identity is known, the entry must record exactly it (a missing or different one means a stale/foreign entry).
-    if (!current.empty() && report.policy_identity != current) return false;
+    // Fail closed: an Optimized entry is reusable only when the CURRENT product identity is known and equals the recorded one. An unavailable
+    // identity (tool missing, failing, timing out or printing garbage) refuses reuse; it never makes the check optional.
+    if (current.empty() || report.policy_identity != current) return false;
   }
   return true;
 }

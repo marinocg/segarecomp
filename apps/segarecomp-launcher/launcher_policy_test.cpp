@@ -100,6 +100,46 @@ int main(int argc, char **argv) {
     expect(!entry_ready_for(make_entry("r8", R"({"requested":"optimized","requested_model":"gen2","effective":"broad","fallback":false,"reason":"none"})"), gen2, layout),
            "a missing recorded policy identity is refused when the product identity is known (fail closed)");
     expect(entry_ready_for(make_entry("r7", report("compatibility", "none", c)), genesis, layout), "a matching Compatibility entry is reusable");
+    // ---- fail-closed identity (PR #94 correction) ----
+    const auto entry_with = [&](const std::string &name, const std::string &requested, const std::string &model, const std::string &pid) {
+      return make_entry(name, report(requested, model, pid));
+    };
+    const std::string good_v1 = v1, good_g2 = g2;
+    expect(entry_ready_for(entry_with("m1", "optimized", "v1", good_v1), optimized, layout), "matching v1 identity: reuse accepted");
+    expect(entry_ready_for(entry_with("m2", "optimized", "gen2", good_g2), gen2, layout), "matching gen2 identity: reuse accepted");
+    expect(!entry_ready_for(entry_with("m3", "optimized", "v1", good_g2), optimized, layout), "a v1 request never reuses an entry carrying the gen2 identity");
+    expect(!entry_ready_for(entry_with("m4", "optimized", "gen2", good_v1), gen2, layout), "a gen2 request never reuses an entry carrying the v1 identity");
+    expect(!entry_ready_for(entry_with("m5", "optimized", "gen2", good_g2), optimized, layout) && !entry_ready_for(entry_with("m6", "optimized", "v1", good_v1), gen2, layout),
+           "v1 and gen2 never reuse one another's entries");
+    expect(!entry_ready_for(entry_with("m7", "optimized", "v1", std::string(64U, 'f')), optimized, layout), "a different recorded identity refuses reuse");
+    // Identity unavailable: the tool path does not exist yet. Reuse is refused for v1 and gen2, Compatibility is unaffected, nothing is deleted.
+    Layout broken = layout;
+    broken.cli = dir / "no-such-tool" / "segarecomp-missing";
+    expect(product_policy_identity(broken, "optimized", "v1").empty() && product_policy_identity(broken, "optimized", "gen2").empty(), "lookup fails without the tool");
+    const fs::path keep_v1 = entry_with("u1", "optimized", "v1", good_v1), keep_g2 = entry_with("u2", "optimized", "gen2", good_g2);
+    expect(!entry_ready_for(keep_v1, optimized, broken) && !entry_ready_for(keep_g2, gen2, broken), "identity unavailable: Optimized reuse refused (v1 and gen2)");
+    expect(fs::exists(entry_executable(keep_v1)) && fs::exists(keep_v1 / "status.json"), "a failed lookup deletes nothing");
+    expect(entry_ready_for(entry_with("u3", "compatibility", "none", c), genesis, broken), "Compatibility reuse needs no product identity");
+    const fs::path legacy = write_status(dir, "u4", R"({"status":"ok"})");
+    std::ofstream(entry_executable(legacy), std::ios::binary) << "x";
+    expect(entry_ready_for(legacy, genesis, broken), "a historical Compatibility entry without the member stays reusable");
+    expect(!entry_ready_for(legacy, optimized, broken), "a historical entry never satisfies Optimized");
+    expect(entry_ready_for(entry_with("u5", "compatibility", "none", c), genesis, broken), "Compatibility regression");
+    {
+      RomView sms_rom = sms;
+      const fs::path sms_entry = write_status(dir, "u6", R"({"status":"ok"})");
+      std::ofstream(entry_executable(sms_entry), std::ios::binary) << "x";
+      expect(entry_ready_for(sms_entry, sms_rom, broken), "Master System does not depend on the product identity");
+    }
+    // Recovery: the same path becomes a working tool; the earlier failure was not memoized.
+    fs::create_directories(broken.cli.parent_path());
+    fs::copy_file(argv[1], broken.cli, fs::copy_options::overwrite_existing);
+    expect(product_policy_identity(broken, "optimized", "v1") == good_v1 && product_policy_identity(broken, "optimized", "gen2") == good_g2, "recovery: lookup succeeds later");
+    expect(entry_ready_for(keep_v1, optimized, broken) && entry_ready_for(keep_g2, gen2, broken), "recovery: the matching entries are reusable again");
+    // Cache key: an unavailable identity never selects the directory of a verified entry.
+    Layout missing = layout;
+    missing.cli = dir / "gone" / "segarecomp-missing";
+    expect(entry_dir(optimized, missing) != entry_dir(optimized, layout) && entry_dir(gen2, missing) != entry_dir(gen2, layout), "an unavailable identity selects a different directory");
   } else {
     expect(product_policy_identity(layout, "optimized", "gen2").empty(), "no tool, no identity (the key then still separates by policy and model)");
   }

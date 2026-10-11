@@ -89,6 +89,8 @@ int headless(int argc, char **argv) {
       if (rom.optimized()) emit("aot_policy_requested_model=" + rom.aot_model);
       const bool cached = entry_ready_for(entry, rom, layout);
       emit(std::string("cache=") + (cached ? "hit" : "miss"));
+      if (rom.optimized() && product_policy_identity(layout, "optimized", rom.aot_model).empty())
+        emit("cache_note=policy_identity_unavailable (cached Optimized builds are not reused; this build is fresh)");
       if (!cached) {
         BuildJob job(rom, layout);
         job.wait();
@@ -639,6 +641,9 @@ int gui() {
           if (outline_button(centered, "choose1", content_x + 204.0F, row_y + 30.0F, 170.0F, 42.0F, "Choose another...", font_regular, 14.0F))
             browse();
           if (rom.supported_platform) mode_row(row_y + 90.0F);
+          if (rom.optimized() && product_policy_identity(layout, "optimized", rom.aot_model).empty())
+            draw_text(dl, font_regular, centered.len(11), col_err, centered.at(content_x, row_y + 122.0F),
+                      "Optimized cannot verify the build tool identity: saved builds are not reused.");
         }
       } else if (state == State::Building) {
         static const char *names[BuildJob::stage_count] = {"Analyzing ROM", "Generating native C", "Compiling", "Linking"};
