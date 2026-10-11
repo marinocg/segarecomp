@@ -17,7 +17,7 @@ reported as a fallback (`platform_not_applicable`).
 
 `optimized` means the SEG-047 **v1** producer. A second-generation producer (`gen2`: frozen M3 CNN + B35 rank-budget selection, ADR 0100-0102) exists as an
 **explicit, experimental opt-in**: `--aot-model gen2` (only valid together with `--aot-policy optimized`; a usage error otherwise). It is never selected implicitly, is
-not recommended or the default (that decision belongs to SEG-049-T008, which needs fresh independent source-backed evidence), and Compatibility is unaffected. The
+not recommended or the default (SEG-049-T008 decided OPT-IN RETAINED, ADR 0109; a later promotion needs deeper unseen runtime evidence and, for a default, fresh independent source-backed evidence), and Compatibility is unaffected. The
 authority order is exact map > validated ML proposal > broad fallback and the admission validator is unchanged
 (`docs/architecture/admission-authority-and-model-lifecycle-contract.md`, ADR 0103). `segarecomp aot-policy-identity --aot-policy <p> [--aot-model <m>]` prints the
 ROM-independent policy identity a consumer should key its cache on.

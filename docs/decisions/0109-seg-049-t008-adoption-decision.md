@@ -15,7 +15,7 @@
 | Moonwalker (0.5) | guest_stop (0 frames, 6 ROM PCs) | yes | yes | 0 / 0 | 0.315 | 0.42x | 0.41x | accepted, == broad (0.30x C) |
 | Sonic 3 (2.0, 2,097,664 B) | NOT MEASURABLE: the broad immutable-ROM AOT rejects the image (`C3 block lacks terminal branch`), independent of ML | admitted (K/U 0.341) but no baseline | n/a | n/a | n/a | n/a | n/a | admitted, no baseline |
 
-Aggregates: escapes 0 of 5 measurable titles; fallbacks 0 of 6 (gen2); economics pass on all five measurable titles (C 0.41-0.53x <= 0.80x; CPU 0.35-0.47x <= 1.00x);
+Aggregates: escapes 0 of 5 measurable titles (weak: Moonwalker stops after 6 ROM PCs/0 frames, Golden Axe at 55 and Batman at 230 frames, so only the two 600-frame titles carry substantial equivalence weight); fallbacks 0 of 6 (gen2); economics pass on all five measurable titles (C 0.41-0.53x <= 0.80x; CPU 0.35-0.47x <= 1.00x);
 determinism: a second full gen2 run of Golden Axe and Batman reproduced identical admission record, generated-byte count, equivalence booleans, executed-PC count and outcome (the largest title was not re-run; the gate had already failed on criterion 5).
 Runtime depth: only **2 of 6** titles (Alien Soldier, Land Stalker) reach `frames_reached`; the other four stop early in broad and gen2 alike (three on pre-existing hardware frontiers after 0-230 frames, Sonic 3 before running because of an
 unrelated broad-AOT rejection). Pre-registered criterion 5 requires >= 4 of 6.
@@ -23,7 +23,7 @@ unrelated broad-AOT rejection). Pre-registered criterion 5 requires >= 4 of 6.
 ## 2. Gate result
 
 - G0 (fresh independent source-backed truth for frozen gen2 M3 + B35): **FAIL / absent.** No title outside the known five has source-backed executable truth; SEG-048's unsuccessful formal blind gates are not reclassified and no new result is invented. `default` is impossible.
-- G1: criteria 1-4 pass on the five measurable titles; **criterion 5 (runtime depth) fails (2 of 6 < 4)**, and one title (Sonic 3) cannot be compared at all. G1 therefore FAILS.
+- G1: criteria 1-3 pass on the five measurable titles, criterion 4 is only partially met (smallest-size titles re-run, the largest not; not decisive); **criterion 5 (runtime depth) fails (2 of 6 < 4)**, and one title (Sonic 3) cannot be compared at all. G1 therefore FAILS.
 - G2: delivered (ADR 0103-0106); not re-opened (T009 re-checks).
 
 Outcome: **opt-in retained.** Compatibility stays the default, `optimized` stays v1, gen2 stays the explicit experimental opt-in on both CLI and launcher. No presentation or code change is made; the policy owner, CLI and launcher already agree
