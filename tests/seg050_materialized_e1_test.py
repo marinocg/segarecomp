@@ -27,6 +27,13 @@ class E1(unittest.TestCase):
         self.assertTrue(a["density_limited"] and not a["full_recall"])
         b = e1.arm("x", scores, [1, 0, 0, 0, 0], [0], 35)
         self.assertTrue(b["full_recall"] and not b["density_limited"])
+        c = e1.arm("x", [0.9, 0.1], [1, 0], [0], 35)  # 2 cells: N = 1, one positive fits: not density limited although p = 0.5
+        self.assertFalse(c["density_limited"])
+        self.assertTrue(e1.arm("x", [0.9, 0.8], [1, 1], [0, 128], 35)["density_limited"])
+
+    def test_non_finite_logits_are_refused(self):
+        with self.assertRaises(SystemExit):
+            e1.finite([0.0, float("nan")], "x")
 
     def test_spearman(self):
         self.assertAlmostEqual(e1.spearman([1, 2, 3, 4], [10, 20, 30, 40]), 1.0)

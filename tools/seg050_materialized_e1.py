@@ -46,6 +46,12 @@ def load_truth(path: pathlib.Path, rom_sha256: str) -> list[int]:
     return starts
 
 
+def finite(values: list[float], what: str) -> list[float]:
+    if any(math.isnan(v) or math.isinf(v) for v in values):
+        raise SystemExit("non-finite logit in " + what)
+    return values
+
+
 def logits_of(cli: str, data: bytes, work: pathlib.Path, name: str) -> list[float]:
     source = work / (name + ".bin")
     sink = work / (name + ".logits")
@@ -54,7 +60,7 @@ def logits_of(cli: str, data: bytes, work: pathlib.Path, name: str) -> list[floa
     if done.returncode != 0:
         raise SystemExit("cell logits failed for " + name + ": " + done.stderr.strip()[-200:])
     raw = sink.read_bytes()
-    return list(struct.unpack("<%df" % (len(raw) // 4), raw))
+    return finite(list(struct.unpack("<%df" % (len(raw) // 4), raw)), name)
 
 
 def rank_select(scores: list[float], percent: int) -> list[int]:
@@ -96,7 +102,8 @@ def arm(name: str, scores: list[float], labels: list[int], starts: list[int], pe
            "selected_cells": len(selected), "proposed_fraction": round(len(selected) / len(scores), 6), "truth_starts": len(starts),
            "c_outside_r": outside, "full_recall": outside == 0, "positive_cells_missed": sum(1 for c, y in enumerate(labels) if y and c not in selected)}
     out.update(frf(scores, labels))
-    out["density_limited"] = (sum(labels) / len(labels)) > percent / 100.0  # more positive cells than the budget can hold: no ranking can reach full recall
+    # more positive cells than the budget N = ceil(cells * percent / 100) can hold (integer arithmetic): no ranking can reach full recall
+    out["density_limited"] = sum(labels) > (len(labels) * percent + 99) // 100
     return out
 
 
@@ -104,8 +111,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--segarecomp", required=True)
     ap.add_argument("--rom", required=True)
-    ap.add_argument("--truth", required=True)
-    ap.add_argument("--source", required=True, help="hex image source address in the ROM (even, 128-byte aligned)")
+    ap.add_argument("--truth", help="private .u truth artifact; omitted => structure-only mode (no recall claim)")
+    ap.add_argument("--source", required=True, help="hex image source address in the ROM (even; 128-byte aligned when --truth is given)")
     ap.add_argument("--length", required=True, help="hex image length in bytes (even)")
     ap.add_argument("--work", required=True)
     ap.add_argument("--budget-percent", type=int, default=BUDGET_PERCENT_FROZEN)
@@ -117,29 +124,35 @@ def main() -> int:
     rom = pathlib.Path(args.rom).read_bytes()
     rom_sha = hashlib.sha256(rom).hexdigest()
     source, length = int(args.source, 16), int(args.length, 16)
-    if source % CELL or source % 2 or length % 2 or length <= 0 or source + length > len(rom):
+    if source % 2 or length % 2 or length <= 0 or source + length > len(rom) or (args.truth and source % CELL):
         raise SystemExit("invalid image descriptor")
-    truth = load_truth(pathlib.Path(args.truth), rom_sha)
-    image_starts = [s - source for s in truth if source <= s < source + length]
     image = rom[source:source + length]
     image_cells = (length + CELL - 1) // CELL
+    percent = args.budget_percent
+    e1 = logits_of(args.segarecomp, image, work, "image")
+    again = logits_of(args.segarecomp, image, work, "image_repeat")
+    deterministic = e1 == again and rank_select(e1, percent) == rank_select(again, percent)  # D1
+    budget = (image_cells * percent + 99) // 100
+    result = {"image_sha256": hashlib.sha256(image).hexdigest(), "image_bytes": length, "image_cells": image_cells, "budget_cells": budget,
+              "budget_fraction": round(budget / image_cells, 6), "deterministic_d1": deterministic, "e0_broad": {"proposed_fraction": 1.0, "c_outside_r": 0}}
+    if not args.truth:
+        result["mode"] = "structure_only_no_truth"
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    truth = load_truth(pathlib.Path(args.truth), rom_sha)
+    image_starts = [s - source for s in truth if source <= s < source + length]
     labels = [0] * image_cells
     for start in image_starts:
         labels[start // CELL] = 1
-
     rom_logits = logits_of(args.segarecomp, rom, work, "rom")
     first = source // CELL
     direct = rom_logits[first:first + image_cells]
-    e1 = logits_of(args.segarecomp, image, work, "image")
     if len(direct) != image_cells or len(e1) != image_cells:
         raise SystemExit("cell count mismatch")
-
-    percent = args.budget_percent
-    result = {"image_bytes": length, "image_cells": image_cells, "truth_starts": len(image_starts),
-              "e0_broad": {"proposed_fraction": 1.0, "c_outside_r": 0},
-              "e1_image_only": arm("e1_image_only", e1, labels, image_starts, percent),
-              "direct_rom_scores_in_image": arm("direct_rom", direct, labels, image_starts, percent),
-              "spearman_image_vs_direct": round(spearman(e1, direct), 6)}
+    result.update({"truth_starts": len(image_starts),
+                   "e1_image_only": arm("e1_image_only", e1, labels, image_starts, percent),
+                   "direct_rom_scores_in_image": arm("direct_rom", direct, labels, image_starts, percent),
+                   "spearman_image_vs_direct": round(spearman(e1, direct), 6)})
     sel_e1, sel_direct = set(rank_select(e1, percent)), set(rank_select(direct, percent))
     result["selected_set_jaccard"] = round(len(sel_e1 & sel_direct) / len(sel_e1 | sel_direct), 6)
     edge = min(4, image_cells // 2)
