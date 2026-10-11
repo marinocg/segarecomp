@@ -834,6 +834,93 @@ void test_runtime_captures_scanline_palette_and_virtual_frames() {
   check(o->observer.sequence == seq3 + 1U && o->frame.width == 256U && o->frame.height == 224U, "a stable H32 frame is published with 256x224 geometry");
 }
 
+
+// ---- VRAM changes during the active display (split-screen sprite tables) --------------------------------------------
+void vdp_control(GenesisRuntime &r, unsigned word) {
+  uint32_t v = word;
+  GenesisRuntimeStop stop{};
+  check(genesis_route_access(&r, 0xC00004, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &v, &stop) == GENESIS_ACCESS_OK, "VDP control word accepted");
+}
+void vdp_data(GenesisRuntime &r, unsigned word) {
+  uint32_t v = word;
+  GenesisRuntimeStop stop{};
+  check(genesis_route_access(&r, 0xC00000, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &v, &stop) == GENESIS_ACCESS_OK, "VDP data word accepted");
+}
+// VRAM write command for `address` (CD1:CD0 = 01): first word 0x4000 | A13..A0, second word A15..A14.
+void vdp_vram_address(GenesisRuntime &r, unsigned address) {
+  vdp_control(r, 0x4000U | (address & 0x3FFFU));
+  vdp_control(r, (address >> 14) & 3U);
+}
+void put_sprite_words(GenesisRuntime &r, unsigned sat, unsigned raw_y, unsigned tile, unsigned raw_x) {
+  vdp_vram_address(r, sat);
+  vdp_data(r, raw_y);
+  vdp_data(r, 0x0000);  // 1x1 cell, link 0
+  vdp_data(r, nt_word(tile));
+  vdp_data(r, raw_x);
+}
+
+void test_vram_written_during_active_display_is_scanline_resolved() {
+  auto r = std::make_unique<GenesisRuntime>();
+  std::memset(r.get(), 0, sizeof(*r));
+  auto o = std::make_unique<Observed>();
+  Scene s;
+  base_scene(s, 0x81);
+  s.regs[7] = 0;
+  r->pc = 0x200u;
+  r->sr = 0x2000u;
+  r->a[7] = 0x00FF8000u;
+  std::memcpy(r->devices.vdp.registers, s.regs, sizeof(s.regs));
+  std::memcpy(r->devices.vdp.cram, s.cram, sizeof(s.cram));
+  r->devices.vdp.auto_increment_value = 2;
+  // Sprite A (tile 1, color 2) at screen (8, 10) in the table at 0xF800; sprite B's tile 2 is color 3.
+  Scene t;
+  solid_tile(t, 1, 2, 32U);
+  solid_tile(t, 2, 3, 32U);
+  std::memcpy(r->devices.vdp.vram, t.vram.data(), 0x100);
+  {
+    const unsigned a = 0xF800U;
+    r->devices.vdp.vram[a] = (uint8_t)((128U + 10U) >> 8);
+    r->devices.vdp.vram[a + 1U] = (uint8_t)(128U + 10U);
+    r->devices.vdp.vram[a + 4U] = (uint8_t)(nt_word(1) >> 8);
+    r->devices.vdp.vram[a + 5U] = (uint8_t)nt_word(1);
+    r->devices.vdp.vram[a + 6U] = (uint8_t)((128U + 8U) >> 8);
+    r->devices.vdp.vram[a + 7U] = (uint8_t)(128U + 8U);
+  }
+  attach_raster(*o, *r);
+  uint32_t pc = 0x200u;
+  bool swapped = false;
+  while (r->virtual_frame_count == 0U) {
+    pc = genesis_runtime_retire_m68k_instruction(r.get(), 4u, pc).next_pc;
+    if (!swapped && r->scheduler.master_ticks >= 100ull * GENESIS_NTSC_MASTER_TICKS_PER_LINE) {
+      put_sprite_words(*r, 0xF800U, 128U + 150U, 2, 128U + 8U);  // the lower screen's sprite table, written by a handler
+      swapped = true;
+    }
+  }
+  check(swapped && o->observer.sequence == 1u && o->capture.frame.has_vram_journal == 0u,
+        "the frame published; its journal is closed again for VBlank");
+  check(is_color(o->frame, 9, 12, 2U) && is_color(o->frame, 9, 16, 2U), "upper screen shows the sprite table that was in VRAM when its lines were drawn");
+  check(!is_color(o->frame, 9, 152, 2U) && is_color(o->frame, 9, 152, 3U) && is_color(o->frame, 9, 156, 3U),
+        "lower screen shows the table written mid-frame (split-screen sprite tables)");
+  check(!is_color(o->frame, 9, 12, 3U), "the table written mid-frame does not leak into the lines already drawn");
+  check(o->capture.vram_journal_overflows == 0u, "no journal overflow for a table-sized write");
+
+  // A journal that overflows is abandoned for that frame (documented fallback: the frame-end VRAM image for every line).
+  // Sprite C (above the write line, so a working journal could never show it) is written first, then enough data to overflow.
+  const uint64_t frame_before = r->virtual_frame_count;
+  bool spammed = false;
+  while (r->virtual_frame_count == frame_before) {
+    pc = genesis_runtime_retire_m68k_instruction(r.get(), 4u, pc).next_pc;
+    if (!spammed && (r->scheduler.master_ticks % GENESIS_NTSC_MASTER_TICKS_PER_FRAME) >= 110ull * GENESIS_NTSC_MASTER_TICKS_PER_LINE &&
+        (r->scheduler.master_ticks % GENESIS_NTSC_MASTER_TICKS_PER_FRAME) < 140ull * GENESIS_NTSC_MASTER_TICKS_PER_LINE) {
+      put_sprite_words(*r, 0xF800U, 128U + 30U, 1, 128U + 8U);
+      vdp_vram_address(*r, 0x4000U);
+      for (unsigned i = 0; i < 5000U; ++i) vdp_data(*r, 0x0000);  // 10000 bytes > the journal capacity
+      spammed = true;
+    }
+  }
+  check(spammed && o->capture.vram_journal_overflows == 1u, "an overflowing journal is counted and abandoned for the frame");
+  check(is_color(o->frame, 9, 32, 2U), "after an overflow the frame-end VRAM image is used for every line (the late sprite C shows above its write line)");
+}
 }  // namespace
 
 int main() {
@@ -847,6 +934,7 @@ int main() {
   test_scanline_palette_switch();
   test_export_and_presentation_agree();
   test_runtime_captures_scanline_palette_and_virtual_frames();
+  test_vram_written_during_active_display_is_scanline_resolved();
   if (failures != 0) std::printf("%d check(s) failed\n", failures);
   return failures == 0 ? 0 : 1;
 }

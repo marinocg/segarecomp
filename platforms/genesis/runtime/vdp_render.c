@@ -974,14 +974,19 @@ void genesis_vdp_frame_digest(const GenesisFrameArtifact *frame, uint8_t digest_
   genesis_sha256_final(&digest, digest_out);
 }
 
-/* The shared frame producer: `lines` holds one GenesisRasterLine per active field line (224), or NULL with `uniform`
- * describing a single static state for every line (the legacy snapshot producer). Validation happens entirely up
- * front, so a failure leaves `*frame_out` untouched and a success is never partial. */
-static int genesis_vdp_render_frame(const uint8_t *vram, const GenesisRasterLine *lines,
+/* The shared frame producer: `raster` holds one GenesisRasterLine per active field line (224) plus the optional VRAM
+ * journal, or is NULL with `uniform` describing a single static state for every line (the legacy snapshot producer).
+ * Validation happens entirely up front, so a failure leaves `*frame_out` untouched and a success is never partial. */
+static int genesis_vdp_render_frame(const uint8_t *vram, const GenesisRasterFrameState *raster,
                                     const GenesisRasterLine *uniform, GenesisFrameArtifact *frame_out) {
   GenesisVdpRenderContext ctx;
   GenesisVdpDisplayGeometry first;
   unsigned slot_of_line[GENESIS_RASTER_MAX_LINES];
+  uint8_t work_vram[GENESIS_VDP_VRAM_BYTES];
+  const GenesisRasterLine *lines = raster != NULL ? raster->lines : NULL;
+  const int journaled = raster != NULL && raster->has_vram_journal != 0U &&
+                        raster->vram_write_count <= GENESIS_RASTER_VRAM_WRITE_CAPACITY;
+  unsigned applied = 0U;
   unsigned palette_count = 0U;
   const unsigned line_count = lines != NULL ? GENESIS_RASTER_MAX_LINES : 1U;
   if (genesis_vdp_validate_line(lines != NULL ? &lines[0] : uniform, &first) != 0) return -1;
@@ -993,6 +998,12 @@ static int genesis_vdp_render_frame(const uint8_t *vram, const GenesisRasterLine
   }
   ctx.vram = vram;
   ctx.geometry = first;
+  if (journaled) {
+    /* VRAM as of line 0; the journal is replayed as the rows advance (a write made during field line k is visible from
+       line k + 1 on). */
+    memcpy(work_vram, raster->vram_start, sizeof(work_vram));
+    ctx.vram = work_vram;
+  }
   /* The artifact is a pure function of the inputs: everything beyond the active geometry/palettes is zeroed. */
   memset(frame_out->pixels + (size_t)first.width * first.height, 0,
          sizeof(frame_out->pixels) - (size_t)first.width * first.height);
@@ -1022,6 +1033,12 @@ static int genesis_vdp_render_frame(const uint8_t *vram, const GenesisRasterLine
   for (unsigned row = 0U; row < first.height; ++row) {
     const unsigned field_line = first.im2 ? row / 2U : row;
     const GenesisRasterLine *line = lines != NULL ? &lines[field_line] : uniform;
+    if (journaled) {
+      while (applied < raster->vram_write_count && (unsigned)raster->vram_writes[applied].line < field_line) {
+        work_vram[raster->vram_writes[applied].address] = raster->vram_writes[applied].value;
+        ++applied;
+      }
+    }
     genesis_vdp_render_row(&ctx, line, row, &frame_out->pixels[(size_t)row * first.width]);
     frame_out->row_palette[row] = (uint8_t)(lines != NULL ? slot_of_line[field_line] : 0U);
   }
@@ -1037,7 +1054,7 @@ int genesis_vdp_produce_frame_raster(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],
   if (vram == NULL || raster == NULL || frame_out == NULL) {
     return -1;
   }
-  return genesis_vdp_render_frame(vram, raster->lines, NULL, frame_out);
+  return genesis_vdp_render_frame(vram, raster, NULL, frame_out);
 }
 
 int genesis_vdp_produce_frame(const uint8_t vram[GENESIS_VDP_VRAM_BYTES],

@@ -545,6 +545,7 @@ typedef struct GenesisRasterCapture {
   GenesisRasterFrameState frame;
   uint8_t captured[GENESIS_RASTER_MAX_LINES];
   uint64_t render_rejections;
+  uint64_t vram_journal_overflows; /* frames whose VRAM journal overflowed and fell back to the frame-end image */
 } GenesisRasterCapture;
 
 typedef struct GenesisLiveFrameObserver {

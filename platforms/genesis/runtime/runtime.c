@@ -332,6 +332,27 @@ static int genesis_vdp_dma_source_is_routable(uint32_t address) {
   return address < UINT32_C(0x00400000) || genesis_is_work_ram(address, 2U);
 }
 
+/* SEG-055: VRAM writes made while the active display is in progress are journaled for the scanline-aware renderer (only
+   while a host attached a capture and its frame journal is open). Writes during VBlank are not journaled: the next frame's
+   line-0 snapshot already contains them. A full journal is abandoned for the frame (the renderer then uses the single
+   frame-end VRAM image), never partially trusted. */
+static void genesis_raster_journal_vram(GenesisRuntime *runtime, uint32_t address, uint8_t value) {
+  GenesisRasterCapture *capture = runtime->live_raster;
+  unsigned line;
+  if (capture == 0 || !capture->frame.has_vram_journal) return;
+  line = (unsigned)(runtime->raster.last_line % GENESIS_NTSC_LINES_PER_FRAME);
+  if (line >= GENESIS_RASTER_MAX_LINES) return;
+  if (capture->frame.vram_write_count >= GENESIS_RASTER_VRAM_WRITE_CAPACITY) {
+    capture->frame.has_vram_journal = 0U;
+    ++capture->vram_journal_overflows;
+    return;
+  }
+  capture->frame.vram_writes[capture->frame.vram_write_count].address = (uint16_t)(address & 0xFFFFU);
+  capture->frame.vram_writes[capture->frame.vram_write_count].value = value;
+  capture->frame.vram_writes[capture->frame.vram_write_count].line = (uint8_t)line;
+  ++capture->frame.vram_write_count;
+}
+
 /* SEG-007-T169: shared CD5-CD0 write-target-code -> destination-buffer
    mapping. GTO1 p. 20/p. 27's access-mode table documents VRAM WRITE = 0x01,
    CRAM WRITE = 0x03, VSRAM WRITE = 0x05 (see docs/references/genesis-vdp-
@@ -397,6 +418,10 @@ static GenesisAccessResultKind genesis_vdp_progress_dma(GenesisRuntime *runtime,
   }
   target[destination] = (uint8_t)(value >> 8);
   target[(destination + 1U) % target_size] = (uint8_t)value;
+  if (target == vdp->vram) {
+    genesis_raster_journal_vram(runtime, destination, (uint8_t)(value >> 8));
+    genesis_raster_journal_vram(runtime, (destination + 1U) % target_size, (uint8_t)value);
+  }
   vdp->addressed_pointer = (destination + vdp->auto_increment_value) % target_size;
   dma->source_address = (dma->source_address + 2U) & UINT32_C(0x00FFFFFE);
   --dma->remaining_length;
@@ -720,7 +745,7 @@ static int genesis_vdp_fill_destinations_are_valid(uint32_t pointer, uint32_t co
    such advance wraps modulo 64 KiB under the boundary-wrap compatibility
    policy above. All armed state is preflighted above, so this helper has no
    failure path after its first store. */
-static int genesis_vdp_data_port_fill_write(GenesisDeviceState *devices, uint32_t value) {
+static int genesis_vdp_data_port_fill_write(GenesisRuntime *runtime, GenesisDeviceState *devices, uint32_t value) {
   GenesisVdpState *vdp = &devices->vdp;
   GenesisVdpDmaState *dma = &vdp->dma;
   uint32_t pointer = vdp->addressed_pointer;
@@ -735,9 +760,12 @@ static int genesis_vdp_data_port_fill_write(GenesisDeviceState *devices, uint32_
     return 0;
   vdp->vram[pointer] = low;
   vdp->vram[pointer + 1U] = high;
+  genesis_raster_journal_vram(runtime, pointer, low);
+  genesis_raster_journal_vram(runtime, pointer + 1U, high);
   destination = (pointer + increment) & UINT32_C(0xFFFF);
   for (index = 0U; index < count; ++index) {
     vdp->vram[destination] = high;
+    genesis_raster_journal_vram(runtime, destination, high);
     destination = (destination + increment) & UINT32_C(0xFFFF);
   }
   vdp->addressed_pointer = destination;
@@ -812,7 +840,7 @@ static int genesis_vdp_data_port_fill_write(GenesisDeviceState *devices, uint32_
    VRAM, and the reached clear loops use an even base with auto-increment 2.
    Address wrap remains modulo the selected target's documented byte size
    (replaceable project compatibility policy, see the contract file). */
-static int genesis_vdp_data_port_target_write_halfword(GenesisVdpState *vdp, uint8_t *target,
+static int genesis_vdp_data_port_target_write_halfword(GenesisRuntime *runtime, GenesisVdpState *vdp, uint8_t *target,
                                                        uint32_t target_size, uint8_t write_code,
                                                        uint16_t halfword) {
   uint32_t dest = vdp->addressed_pointer % target_size;
@@ -823,9 +851,15 @@ static int genesis_vdp_data_port_target_write_halfword(GenesisVdpState *vdp, uin
     dest &= ~UINT32_C(1);              /* VRAM: A0 ignored for address decoding (GTO1) */
     target[dest] = low;                /* VRAM: high/low data bytes exchanged when A0 = 1 (GTO1) */
     target[dest + 1U] = high;
+    genesis_raster_journal_vram(runtime, dest, low);
+    genesis_raster_journal_vram(runtime, dest + 1U, high);
   } else {
     target[dest] = high;                            /* big-endian high byte */
     target[(dest + 1U) % target_size] = low;
+    if (target == vdp->vram) {
+      genesis_raster_journal_vram(runtime, dest, high);
+      genesis_raster_journal_vram(runtime, (dest + 1U) % target_size, low);
+    }
   }
   vdp->addressed_pointer = (vdp->addressed_pointer + vdp->auto_increment_value) % target_size;
   return 1;
@@ -849,7 +883,7 @@ static int genesis_vdp_data_port_target_write_halfword(GenesisVdpState *vdp, uin
    incomplete two-word command latch, no selected transfer code, a selected
    READ code, and (CRAM/VSRAM only) an odd current address. See
    docs/references/genesis-vdp-data-port-cpu-write-contract.md. */
-static int genesis_vdp_data_port_cpu_write(GenesisDeviceState *devices,
+static int genesis_vdp_data_port_cpu_write(GenesisRuntime *runtime, GenesisDeviceState *devices,
                                            GenesisAccessWidth width, uint32_t value) {
   GenesisVdpState *vdp = &devices->vdp;
   uint8_t *target;
@@ -888,18 +922,18 @@ static int genesis_vdp_data_port_cpu_write(GenesisDeviceState *devices,
     /* GTO1 p. 20: two sequential 16-bit writes, D31-D16 first. Same
        documented non-atomic partial-completion policy as the $C00004 LONG
        write: if the second sub-write fails, the first stays committed. */
-    if (!genesis_vdp_data_port_target_write_halfword(vdp, target, target_size, write_code,
+    if (!genesis_vdp_data_port_target_write_halfword(runtime, vdp, target, target_size, write_code,
                                                      (uint16_t)((value >> 16) & 0xFFFFU)))
       return 0;
-    accepted = genesis_vdp_data_port_target_write_halfword(vdp, target, target_size, write_code,
+    accepted = genesis_vdp_data_port_target_write_halfword(runtime, vdp, target, target_size, write_code,
                                                            (uint16_t)(value & 0xFFFFU));
   } else if (width == GENESIS_ACCESS_WORD) {
-    accepted = genesis_vdp_data_port_target_write_halfword(vdp, target, target_size, write_code,
+    accepted = genesis_vdp_data_port_target_write_halfword(runtime, vdp, target, target_size, write_code,
                                                            (uint16_t)(value & 0xFFFFU));
   } else if (width == GENESIS_ACCESS_BYTE) {
     uint8_t data_byte = (uint8_t)value;
     accepted = genesis_vdp_data_port_target_write_halfword(
-        vdp, target, target_size, write_code,
+        runtime, vdp, target, target_size, write_code,
         (uint16_t)(((uint16_t)data_byte << 8) | (uint16_t)data_byte));
   } else {
     return 0;
@@ -1126,7 +1160,7 @@ static uint16_t genesis_vdp_status_read(GenesisDeviceState *devices, uint64_t ma
   return status;
 }
 
-static int genesis_vdp_access(GenesisDeviceState *devices, uint32_t address,
+static int genesis_vdp_access(GenesisRuntime *runtime, GenesisDeviceState *devices, uint32_t address,
                               GenesisAccessWidth width, GenesisAccessDirection direction,
                               uint32_t *value, uint16_t *status_sample_out,
                               uint64_t master_ticks) {
@@ -1163,12 +1197,12 @@ static int genesis_vdp_access(GenesisDeviceState *devices, uint32_t address,
         devices->vdp.dma.kind == GENESIS_VDP_DMA_VRAM_FILL) {
       if (width == GENESIS_ACCESS_BYTE) {
         const uint32_t data_byte = *value & UINT32_C(0xFF);
-        return genesis_vdp_data_port_fill_write(devices, (data_byte << 8) | data_byte);
+        return genesis_vdp_data_port_fill_write(runtime, devices, (data_byte << 8) | data_byte);
       }
       if (width != GENESIS_ACCESS_WORD) return 0;
-      return genesis_vdp_data_port_fill_write(devices, *value);
+      return genesis_vdp_data_port_fill_write(runtime, devices, *value);
     }
-    return genesis_vdp_data_port_cpu_write(devices, width, *value);
+    return genesis_vdp_data_port_cpu_write(runtime, devices, width, *value);
   }
   if (width == GENESIS_ACCESS_WORD && address == UINT32_C(0x00C00004)) {
     return genesis_vdp_control_port_write_word(devices, (uint16_t)(*value & 0xFFFFU));
@@ -1628,7 +1662,7 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
       }
       return GENESIS_ACCESS_OK;
     }
-    if (genesis_vdp_access(&runtime->devices, address, width, direction,
+    if (genesis_vdp_access(runtime, &runtime->devices, address, width, direction,
                            &routed_value, &status_sample, runtime->scheduler.master_ticks)) {
       /* SEG-021-T040: GTO1 p. 19's VBlank status bit is now a truthful live
        * projection of the scheduler's own video-timing state (see
@@ -2494,6 +2528,12 @@ static void genesis_raster_capture_line(GenesisRuntime *runtime, unsigned line) 
   if (observer == 0 || capture == 0 || capture->producer == 0) return;
   genesis_raster_capture_state(runtime, &capture->frame.lines[line]);
   capture->captured[line] = 1U;
+  if (line == 0U) {
+    /* Open the frame's VRAM journal: the image as line 0 begins, then every write made during the active display. */
+    memcpy(capture->frame.vram_start, runtime->devices.vdp.vram, sizeof(capture->frame.vram_start));
+    capture->frame.vram_write_count = 0U;
+    capture->frame.has_vram_journal = 1U;
+  }
 }
 
 static void genesis_raster_enter_line(GenesisRuntime *runtime, uint64_t absolute_line) {
@@ -2566,6 +2606,7 @@ static GENESIS_NOINLINE void genesis_publish_live_frame(GenesisRuntime *runtime)
       capture->captured[line] = 1U;
     }
     status = capture->producer(runtime->devices.vdp.vram, &capture->frame, &produced);
+    capture->frame.has_vram_journal = 0U; /* closed until the next frame's line 0 (VBlank writes are in its snapshot) */
   } else if (observer->producer != 0) {
     status = observer->producer(runtime->devices.vdp.vram, runtime->devices.vdp.vsram, runtime->devices.vdp.cram,
                                 runtime->devices.vdp.registers, &produced);

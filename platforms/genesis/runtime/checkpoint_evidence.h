@@ -113,9 +113,25 @@ typedef struct GenesisRasterLine {
   uint8_t vsram[GENESIS_VDP_VSRAM_BYTES];
 } GenesisRasterLine;
 
-/* The per-field-line state of one completed active display period (line L = the state when scanline L began). */
+/* One VRAM byte written while the active display was in progress (a raster event). `line` is the field line during which
+ * the write happened; the renderer makes it visible from line + 1 on, exactly like a register/CRAM/VSRAM change. */
+#define GENESIS_RASTER_VRAM_WRITE_CAPACITY 8192U
+typedef struct GenesisRasterVramWrite {
+  uint16_t address;
+  uint8_t value;
+  uint8_t line;
+} GenesisRasterVramWrite;
+
+/* The per-field-line state of one completed active display period (line L = the state when scanline L began), plus the
+ * optional VRAM journal: `vram_start` is the VRAM when line 0 began and `vram_writes` every byte written during the active
+ * display, in order. Without a journal (`has_vram_journal == 0`: observer attached mid-frame, journal overflowed, or a
+ * hand-built state) the renderer uses the single VRAM image it is given for every line. */
 typedef struct GenesisRasterFrameState {
   GenesisRasterLine lines[GENESIS_RASTER_MAX_LINES];
+  uint8_t has_vram_journal;
+  uint16_t vram_write_count;
+  GenesisRasterVramWrite vram_writes[GENESIS_RASTER_VRAM_WRITE_CAPACITY];
+  uint8_t vram_start[GENESIS_VDP_VRAM_BYTES];
 } GenesisRasterFrameState;
 
 typedef struct GenesisCheckpointEvidenceBundle {
