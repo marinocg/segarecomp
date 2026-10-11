@@ -1301,6 +1301,10 @@ def run_capture(executable: pathlib.Path, root: pathlib.Path, out_dir: pathlib.P
     summary = [line for line in completed.stderr.splitlines() if line.startswith("CAPTURE_SUMMARY ")]
     for line in summary:
         sys.stderr.write(line + "\n")
+    # SEG-055: what the run could not honor (undelivered H-interrupts, rejected frames, non-default region) -- only when notable.
+    for line in completed.stderr.splitlines():
+        if line.startswith("RUNTIME_NOTES "):
+            sys.stderr.write(line + "\n")
     for ppm in sorted(frames.glob("frame-*.ppm")):
         ppm.with_suffix(".png").write_bytes(ppm_to_png(ppm.read_bytes()))
     if completed.stdout:

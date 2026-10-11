@@ -56,7 +56,11 @@ first instruction and stable for the whole run (set that variable directly for a
 *hint* from the ROM header's region-support field (overseas NTSC if declared, else Japan); an explicit choice always wins, and header metadata is never
 treated as proof of the console. `europe` is refused before any generation: 50 Hz timing is not implemented. Cartridges with a region lockout
 (for example a Japan-only image) show their own lockout screen under a console they reject -- a normal guest outcome, not an emulator error;
-select `--region japan` for such an image. The bridge prints a `REGION_PROFILE {...}` line to stderr when `--region` is given.
+select `--region japan` for such an image. The bridge prints a `REGION_PROFILE {...}` line to stderr when `--region` is given, and the capture/viewer builds print one `RUNTIME_NOTES {...}` line
+(region, undelivered H-interrupts, rejected frames, VRAM-journal overflows) only when something notable happened.
+
+H-interrupts (VDP register #0 bit 4) are now delivered when the cartridge's handler could be compiled. A handler that cannot be compiled -- for example one the game builds in work RAM at run time -- is
+counted as `hint_undelivered` and the program continues (the behavior of every earlier build, now visible); `SEGARECOMP_GENESIS_HINT=strict` stops fail-closed with `hint_handler_not_installed` instead.
 
 ## Display modes, pacing and presentation (SEG-055)
 
