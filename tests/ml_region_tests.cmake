@@ -38,3 +38,14 @@ add_test(NAME genesis_ml_gen2_native_parity_local_test
   COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/segarecomp_ml_region_gen2_native_parity.py local
     --binary $<TARGET_FILE:segarecomp> --games ${PROJECT_SOURCE_DIR}/games)
 set_tests_properties(genesis_ml_gen2_native_parity_local_test PROPERTIES SKIP_RETURN_CODE 77 LABELS full)
+# SEG-049-T004/T005 (ADR 0103/0104): CLI authority order, explicit gen2 opt-in, machine-readable policy report, identities. Synthetic images only.
+add_test(NAME segarecomp_aot_model_lifecycle_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_aot_model_lifecycle_test.py
+  $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST segarecomp_aot_model_lifecycle_test APPEND PROPERTY LABELS full fast)
+# SEG-049-T004 (ADR 0103): ML producer types never reach the validator owner, the emitter, the runtime or the launcher.
+add_test(NAME ml_producer_boundary_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/ml_producer_boundary_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST ml_producer_boundary_test APPEND PROPERTY LABELS full fast)
+# SEG-049-T004 (ADR 0103): a mutated model/schema/policy/weight table in the embedded gen2 producer fails closed (`model_identity`).
+add_test(NAME genesis_ml_gen2_identity_mutation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/genesis_ml_gen2_identity_mutation_test.py
+  ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR})
+set_property(TEST genesis_ml_gen2_identity_mutation_test APPEND PROPERTY LABELS full fast)

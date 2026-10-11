@@ -6,6 +6,7 @@ add_library(segarecomp_machine_genesis
   src/hybrid_admission.cpp
   src/ml_region_producer.cpp
   src/ml_region_gen2_producer.cpp
+  src/ml_admission.cpp
   src/reachability_challenger.cpp
   src/startup.cpp
 )
