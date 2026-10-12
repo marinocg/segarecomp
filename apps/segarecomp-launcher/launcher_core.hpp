@@ -109,6 +109,10 @@ struct PolicyReport {
 [[nodiscard]] std::string policy_details(const PolicyReport &report);
 // The ROM-independent policy identity printed by `segarecomp aot-policy-identity` (empty when the tool cannot be run). The launcher keys its cache on
 // it instead of reproducing any model/schema/contract compatibility rule. Memoized per (tool, policy, model).
+// Memo only (empty when not resolved yet or the last attempt failed); never runs the tool, so it is cheap enough for every UI frame.
+[[nodiscard]] std::string product_policy_identity_memo_lookup(const std::string &key);
+[[nodiscard]] std::string product_policy_identity_cached(const Layout &layout, const std::string &policy, const std::string &model);
+// Runs the product tool (blocking, up to a few seconds): call it from a worker, never from the UI thread.
 [[nodiscard]] std::string product_policy_identity(const Layout &layout, const std::string &policy, const std::string &model);
 // A finished entry is reusable only when it exists AND its recorded request/identity still equal the current request (a stale or foreign
 // entry that somehow shares a directory is rebuilt, never reused).

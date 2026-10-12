@@ -19,6 +19,8 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <chrono>
+#include <future>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -468,25 +470,47 @@ int gui() {
                   policy_details(policy_report) + "\nThe build log and status.json in the cache folder hold the sanitized details.";
   };
 
+  // Entry identity and the "is a matching build already there" check. For Optimized they run the product's policy-identity tool (a process
+  // that can take seconds, e.g. cold start or antivirus scan on Windows), so they run on a worker and the UI shows a spinner meanwhile.
+  struct Resolved { fs::path entry; bool ready = false; };
+  std::future<Resolved> resolve_job;
+  bool resolving = false;
+  const auto apply_resolved = [&](const Resolved &r) {
+    entry = r.entry;
+    state = r.ready ? State::Ready : State::RomSelected;
+    refresh_report();
+  };
+  const auto resolve_entry = [&] {
+    if (!rom.optimized()) {
+      const fs::path dir = entry_dir(rom, layout);
+      apply_resolved({dir, entry_ready_for(dir, rom, layout)});
+      return;
+    }
+    state = State::RomSelected;
+    resolving = true;
+    resolve_job = std::async(std::launch::async, [snapshot = rom, lay = layout] {
+      Resolved r;
+      r.entry = entry_dir(snapshot, lay);
+      r.ready = entry_ready_for(r.entry, snapshot, lay);
+      return r;
+    });
+  };
+
   const auto select_rom = [&](const std::string &path_text) {
-    if (state == State::Building || state == State::Running) return;
+    if (state == State::Building || state == State::Running || resolving) return;
     rom = inspect_rom_file(from_u8(path_text.c_str()), layout);
     show_diagnostics = false;
     if (!rom.error.empty()) { failure = "That file could not be read: " + rom.error; diagnostics = failure; state = State::Failed; return; }
     if (rom.supports_optimized()) { rom.aot_policy = policy_choice; rom.aot_model = model_choice; }
     if (rom.supports_hint_alias_discovery()) rom.hint_alias_discovery = discovery_choice;
-    entry = entry_dir(rom, layout);
-    state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
-    refresh_report();
+    resolve_entry();
   };
   const auto set_discovery = [&](bool on) {
     if (rom.hint_alias_discovery == on) return;
     discovery_choice = on;
     rom.hint_alias_discovery = on;
     show_diagnostics = false;
-    entry = entry_dir(rom, layout);  // it changes the generated program: part of the cache identity
-    state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
-    refresh_report();
+    resolve_entry();
   };
   const auto set_policy = [&](const char *choice) {
     if (rom.aot_policy == choice) return;
@@ -494,18 +518,14 @@ int gui() {
     rom.aot_policy = choice;
     if (std::string(choice) == "compatibility") { model_choice = "v1"; rom.aot_model = "v1"; }  // the experimental opt-in never survives leaving Optimized
     show_diagnostics = false;
-    entry = entry_dir(rom, layout);  // the policy is part of the cache identity: the two modes never alias
-    state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
-    refresh_report();
+    resolve_entry();
   };
   const auto set_model = [&](const char *choice) {
     if (rom.aot_model == choice) return;
     model_choice = choice;
     rom.aot_model = choice;
     show_diagnostics = false;
-    entry = entry_dir(rom, layout);  // the model family is part of the cache identity: v1 and the experimental model never alias
-    state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
-    refresh_report();
+    resolve_entry();
   };
   const auto start_build = [&](bool force) {
     if (force) { std::error_code ec; fs::remove_all(entry, ec); }
@@ -552,6 +572,10 @@ int gui() {
         show_diagnostics = true;
         state = State::Failed;
       }
+    }
+    if (resolving && resolve_job.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+      resolving = false;
+      apply_resolved(resolve_job.get());
     }
     if (state == State::Building && job->finished()) {
       if (job->succeeded()) { state = State::Ready; refresh_report(); }
@@ -644,6 +668,13 @@ int gui() {
     const auto settings_column = [&](bool draw) -> float {
       float y = row_y;
       const float lx = content_x, bx = content_x + 62.0F;  // label column / button column
+      if (resolving) {  // the Optimized lookup runs on a worker: animated feedback instead of a frozen window
+        if (draw) {
+          draw_stage_row(centered, dl, lx, y + 14.0F, rom.optimized_gen2() ? "Preparing the experimental model..." : "Preparing Optimized mode...", StageState::running, font_regular, t);
+          draw_text(dl, font_regular, centered.len(11), text_dim, centered.at(lx, y + 44.0F), "Checking the build tool; this can take a few seconds.");
+        }
+        return y + 80.0F - panel_y0;
+      }
       const auto separator = [&] {
         if (draw) dl->AddLine(centered.at(content_x, y), centered.at(content_x + content_w, y), rgba(70, 90, 140, 130), centered.len(1));
         y += 12.0F;
@@ -739,7 +770,7 @@ int gui() {
         }
         y += 32.0F;
       }
-      if (rom.optimized() && product_policy_identity(layout, "optimized", rom.aot_model).empty()) {
+      if (rom.optimized() && product_policy_identity_cached(layout, "optimized", rom.aot_model).empty()) {
         if (draw) {
           draw_text(dl, font_regular, centered.len(10.5F), col_err, centered.at(lx, y), "Optimized cannot verify the build tool identity:");
           draw_text(dl, font_regular, centered.len(10.5F), col_err, centered.at(lx, y + 14.0F), "saved Optimized builds are not reused.");

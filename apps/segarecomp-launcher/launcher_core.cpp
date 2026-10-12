@@ -366,14 +366,20 @@ std::string policy_details(const PolicyReport &r) {
   return text;
 }
 
+namespace {
+std::map<std::string, std::string> &identity_memo() { static std::map<std::string, std::string> memo; return memo; }
+std::mutex &identity_memo_mutex() { static std::mutex m; return m; }
+}  // namespace
+
+std::string product_policy_identity_memo_lookup(const std::string &key) {
+  std::lock_guard<std::mutex> lock(identity_memo_mutex());
+  const auto found = identity_memo().find(key);
+  return found == identity_memo().end() ? std::string() : found->second;
+}
+
 std::string product_policy_identity(const Layout &layout, const std::string &policy, const std::string &model) {
-  static std::map<std::string, std::string> memo;
-  static std::mutex memo_mutex;
   const std::string key = utf8(layout.cli) + "|" + policy + "|" + model;
-  {
-    std::lock_guard<std::mutex> lock(memo_mutex);
-    if (const auto found = memo.find(key); found != memo.end()) return found->second;
-  }
+  if (const std::string known = product_policy_identity_memo_lookup(key); !known.empty()) return known;
   std::string identity;
   std::error_code ec;
   if (fs::is_regular_file(layout.cli, ec)) {
@@ -416,9 +422,14 @@ std::string product_policy_identity(const Layout &layout, const std::string &pol
     }
   }
   if (identity.empty()) return identity;  // a failure is never memoized: the next call retries
-  std::lock_guard<std::mutex> lock(memo_mutex);
-  memo[key] = identity;
+  std::lock_guard<std::mutex> lock(identity_memo_mutex());
+  identity_memo()[key] = identity;
   return identity;
+}
+
+std::string product_policy_identity_cached(const Layout &layout, const std::string &policy, const std::string &model) {
+  // Same memo as product_policy_identity, but never starts the tool: safe to call every frame on the UI thread.
+  return product_policy_identity_memo_lookup(utf8(layout.cli) + "|" + policy + "|" + model);
 }
 
 bool entry_ready_for(const fs::path &entry, const RomView &rom, const Layout &layout) {
