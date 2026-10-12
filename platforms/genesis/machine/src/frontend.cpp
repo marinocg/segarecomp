@@ -3189,7 +3189,8 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
                                                                              : limits.max_instructions,
                                                   limits.max_blocks,
                                                   synchronous_vector == 28U ? 0U : limits.max_call_frame_depth};
-      auto discovery = discover_m68k_static_graph(handler_address, hint_limits, environment, exception_boundary,
+      const auto &limits = hint_limits;  // (this root's budget; the outer ceilings apply to every other root)
+      auto discovery = discover_m68k_static_graph(handler_address, limits, environment, exception_boundary,
                                                    continuation_roots);
       // SEG-055: a handler that is a single unresolved instruction (typically a JMP through a RAM stub written at run time) is
       // not installed; a longer handler is installed even with open frontiers (typed prefix boundaries, fail closed if executed).
