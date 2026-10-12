@@ -57,3 +57,8 @@ set_property(TEST packaging_dependency_check_test APPEND PROPERTY LABELS full fa
 add_test(NAME segarecomp_ml_region_z80_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_region_z80_test.py $<TARGET_FILE:segarecomp_z80_token_report>)
 set_property(TEST segarecomp_ml_region_z80_test APPEND PROPERTY LABELS full fast)
+# SEG-056 (ADR 0117): second-generation SMS Z80 experiment definitions (structural roots, byte labels, byte->cell reductions, root-aware
+# full-recall metrics, SDCC relocated-listing truth, frozen-plan integrity and sealed-cohort carry-over). Synthetic data only.
+add_test(NAME segarecomp_ml_region_z80_gen2_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_region_z80_gen2_test.py)
+set_property(TEST segarecomp_ml_region_z80_gen2_test APPEND PROPERTY LABELS full fast)

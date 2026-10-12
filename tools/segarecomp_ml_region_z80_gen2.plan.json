@@ -1,0 +1,241 @@
+{
+ "adoption_minimums": {
+  "development_lineages": 8,
+  "native_seam": "Z80 selective-admission contract (admitted-start set, typed unadmitted-PC behavior, validator) - absent today",
+  "sealed_lineages": 3
+ },
+ "attribution": "roots = A->B; byte labels/edge-aware/PAD = B->B1 (cell 32, max); context+two-scale = B1->D256/D512; hard-positive = D512->D512HP; cell size = cell32->cell16 for the same scores",
+ "candidate_selection": "among {B1,D256,D512,D512HP} x cell {32,16} x agg {max,top2}: lowest development mean retained fraction at full recall (roots included); ties by lexicographic key",
+ "classification_precedence": [
+  "Z80_ML_CORPUS_BLOCKED",
+  "Z80_ML_RECALL_BLOCKED",
+  "Z80_ML_ADMISSION_BLOCKED",
+  "Z80_ML_ADOPTION_GATES_PASSED"
+ ],
+ "conditional_stages": "native Z80 selective admission only after sealed_success and economics; launcher SMS Optimized only after native admission; otherwise neither is built",
+ "discarded_candidates": {
+  "castle_of_illusion,taz_mania,wonder_boy_3": "no public source-backed disassembly; unlabelled economics probes only",
+  "devkitsms_examples": "one library, tiny examples",
+  "smslib_examples": "one library, tiny examples",
+  "sonic2_sms": "same engine family as Sonic 1; local cartridge is a different revision",
+  "tunnel": "Game Gear target; asset conversion tools unavailable"
+ },
+ "evaluation": "leave-one-lineage-out over the 8 development lineages; per lineage: positive cells, full FRF, residual FRF after roots, retained fraction at full recall, retained for 50/90/99/99.9% recall, c_outside_r, worst residual ranks, per-seed residual FRF and its population std-dev",
+ "fixed_budget": "B_fixed = ceil_to_0.05(max over development folds of residual FRF of the selected candidate + 0.05); no adaptive estimator is developed or reused (the SEG-051 fraction(sigmoid>=0.5) rule is not validated)",
+ "gates": {
+  "development_strict": "B_fixed <= 0.65 and zero uncovered positive cells on every development fold at B_fixed",
+  "economics": "projected build CPU = -3.0 + 2.441 s/KiB * retained * KiB (ADR 0116 model, a projection until a native producer is measured); gate: reduction >= 20% on the sealed mean; real economics measured after native integration",
+  "improvement_label": "CNN_GENERALIZATION_IMPROVED if the best candidate lowers the development mean retained fraction at full recall by >= 0.10 absolute versus B refit on the same folds and does not raise the worst-lineage value",
+  "sealed_condition": "sealed cohort is opened only if development_strict passes; selected candidate refit once on all 8 development lineages; sealed scored exactly once (marker file)",
+  "sealed_success": "every source instruction-start cell of each sealed lineage inside R at B_fixed (any miss = failure) and mean sealed retained fraction (roots included) <= 0.65"
+ },
+ "historic_plan": {
+  "digest": "55fab9de84a739308661f21ac70e31f6846f607f46a5247bf7240b99a2332c89",
+  "note": "SEG-051 results and plan are frozen history; not reopened",
+  "plan_id": "seg051-z80-sms-pilot-v1"
+ },
+ "independence": {
+  "caveat": "both new lineages share the SDCC compiler and devkitSMS libraries; library/runtime code is masked and never labelled",
+  "method": "pairwise 12-byte instruction-run shingle overlap",
+  "new_lineages_max_overlap_vs_development": 0.0105,
+  "new_vs_sealed_raw_windows": 0.0
+ },
+ "labels": {
+  "audit": "every I is followed by the decoder length-1 c bytes (dev lineages: 0 mismatches, 0 orphan c)",
+  "byte": "I,c -> 1; D -> 0; A,U,Q -> masked"
+ },
+ "lineages": [
+  {
+   "id": "alexkidd",
+   "image_bytes": 131072,
+   "image_identity": "local cartridge byte-identical",
+   "image_sha256": "6667e133818e36a214c81003e543f2c4c3ab5fa018ca313e3ac222a5a6e361c5",
+   "role": "sealed",
+   "source": "lhsazevedo/akmw",
+   "source_commit": "7720fae8d6e9e9b465267a514d73fdb086e63f5e",
+   "title_class": "Alex Kidd in Miracle World (UE) rev1"
+  },
+  {
+   "id": "columns",
+   "image_bytes": 131072,
+   "image_identity": "local cartridge byte-identical",
+   "image_sha256": "4c0fc3e6cbaff5ae9e7bc1cef9af86d9cac4c039c60d7d03269bfcb0e9136727",
+   "role": "development",
+   "source": "lhsazevedo/columns",
+   "source_commit": "ec5ff6b219b11aa2e89d0f6ccc9fa748591d4027",
+   "title_class": "Columns (UE)"
+  },
+  {
+   "id": "g2048",
+   "image_bytes": 32768,
+   "image_identity": "reproducibly built reference image (rebuild deterministic)",
+   "image_sha256": "e3957c4882e7087ab93a215a4eb5db9ce6c50f1dcda35c5619ad0b7f4aa53116",
+   "role": "development",
+   "source": "grz0zrg/2048-SMS",
+   "source_commit": "f4c086d626a1cc257c35da85ca1ec24cdbcc25bc",
+   "title_class": "2048-SMS (homebrew)"
+  },
+  {
+   "id": "kots",
+   "image_bytes": 131072,
+   "image_identity": "reproducibly built reference image (3 bytes vary across rebuilds, operand/checksum only)",
+   "image_sha256": "eefc8ef3be7a33822be9e1b24e5bced52304b5e06d2473495d29569f4da5a730",
+   "role": "development",
+   "source": "hang-on/knights-of-the-square",
+   "source_commit": "e59ecb84e51eaa67b36628da58ccbdac2b888a7d",
+   "title_class": "Knights of the Square (homebrew)"
+  },
+  {
+   "id": "lots",
+   "image_bytes": 262144,
+   "image_identity": "reference image built with the listing toolchain; 194-byte divergence from the upstream-verified image; no local cartridge",
+   "image_sha256": "4e17c9212e34d31b5bae743ac931ceadda56bc88c9bbd6f5efbc59df512af027",
+   "role": "sealed",
+   "source": "Isotarge/lotsdisasm",
+   "source_commit": "f3ce2cc4967e037cc965a1c65dba49cd2ec2d813",
+   "title_class": "Lord of the Sword (SMS)"
+  },
+  {
+   "id": "ps1",
+   "image_bytes": 524288,
+   "image_identity": "source-built reference image byte-identical to the upstream-verified build; no local cartridge",
+   "image_sha256": "9e324e92bd833b45126861b6f1d2dcbb51251bdf3df6d563ab3a3ff784d8cf88",
+   "role": "development",
+   "source": "sung3r/ps1disasm",
+   "source_commit": "8efc4110adcf1a81c70d40522016393ba6f6b5ae",
+   "title_class": "Phantasy Star (SMS)"
+  },
+  {
+   "id": "solomon",
+   "image_bytes": 131072,
+   "image_identity": "source-built, SHA-1 equals the upstream-documented value; no local cartridge",
+   "image_sha256": "d18bd317dd527787adff2f706316a0ed1546bf1f50adff123519a307b92e9d17",
+   "role": "development",
+   "source": "Strugglemeat/solomonsms-disasm",
+   "source_commit": "ab066b8db7c3c224fd487783fce8fde252a273b8",
+   "title_class": "Solomon's Key (SMS)"
+  },
+  {
+   "id": "sonic1",
+   "image_bytes": 262144,
+   "image_identity": "local cartridge byte-identical (code from source, bulk data unlisted)",
+   "image_sha256": "6ad738965ece231427ee046b9905cfee470d5c01220afdd934da4673e4a2458b",
+   "role": "sealed",
+   "source": "maxim-zhao/Sonic1-Z80-ASM (= mdrubin/Sonic1-Z80-ASM)",
+   "source_commit": "f85d74b6dbc28b5f72a0ff325d5c88aa6c14c0f5",
+   "title_class": "Sonic the Hedgehog SMS (UE)"
+  },
+  {
+   "id": "supertennis",
+   "image_bytes": 32768,
+   "image_identity": "local cartridge byte-identical",
+   "image_sha256": "5fb097b508a482c29f12c2203a0a98a0dd7ce9873e7ef12fb7e0aeea250a99e2",
+   "role": "development",
+   "source": "FlorianCassayre/sms-super-tennis",
+   "source_commit": "1e42e0273aa44d68e3a86e33b73f2ff62f81a2a7",
+   "title_class": "Super Tennis (UE)"
+  },
+  {
+   "id": "duckslayer",
+   "image_bytes": 32768,
+   "image_identity": "source-built reference image (deterministic rebuild, sdcc 4.2.0, libraries rebuilt from devkitSMS 533ae573)",
+   "image_sha256": "a8a3366e3115885610b87d26037f4b80cbea6c64df8a3dd20b2635605e703247",
+   "role": "development",
+   "source": "haroldo-ok/duckslayer-adventures",
+   "source_commit": "7ddffba689b7f2a1d6dfadc619f70bd6e490297a",
+   "title_class": "Duckslayer Adventures (SDCC homebrew)",
+   "truth_rule": "sdcc relocated listing; library and runtime modules masked (U); compiler-emitted .db/.dw data = D"
+  },
+  {
+   "id": "stalactites",
+   "image_bytes": 32768,
+   "image_identity": "source-built reference image (deterministic rebuild, sdcc 4.2.0, libraries rebuilt from devkitSMS 533ae573)",
+   "image_sha256": "21160574c449f2716468ec2493e7ded63e02546d87472b05c6844c230b4adb07",
+   "role": "development",
+   "source": "haroldo-ok/stalactites-sms",
+   "source_commit": "e3064b0bc6a01aea9bc7c4d1bcb07e7f727c139d",
+   "title_class": "Stalactites (SDCC homebrew)",
+   "truth_rule": "as duckslayer"
+  }
+ ],
+ "models": {
+  "A": "historical SEG-051 C1 without roots (retained OOF scores for 6 lineages; refit with the unchanged trainer on the 8 SEG-056 folds)",
+  "B": "A plus structural roots",
+  "B1": "C1 trunk (embedding16, 4x conv k5 dil 1,2,4,8, 32ch; radius 30) with a dense per-byte head: isolates byte-level labels, edge-aware windows and the PAD token",
+  "D256": "two-scale: local path (2x conv k5, 24ch) + context path (stride-4 conv, residual dilated conv k5 dil 1,2,4,8,16; radius 250 bytes) fused by 1x1 conv, dense per-byte logit",
+  "D512": "as D256 with dilations 1,2,4,8,16,32 (radius 504 bytes)",
+  "D512HP": "D512 trained with the single pre-registered hard-positive reweighting w = pos_weight*(1+2*(1-sigmoid(z)).detach()) on positive bytes"
+ },
+ "order_statement": "This plan, its digest, the structural-root definition and the trainers/evaluators are committed and pushed before any SEG-056 model is fitted or any SEG-056 held-out result is computed. The six SEG-051 development lineages were exposed by SEG-051 and are NOT blind evidence; the two new SDCC lineages were never seen by any model. The three sealed lineages are not opened (images or labels) for design.",
+ "plan_id": "seg056-z80-sms-gen2-v1",
+ "platform": "master-system",
+ "policy": "R = structural root cells UNION top ceil(B*cells) ranked cells; retained fraction = |R|/cells (root overhead included)",
+ "reduction": {
+  "aggregators": [
+   "max",
+   "top2 (mean of the two largest byte logits)"
+  ],
+  "cell_sizes": [
+   32,
+   16
+  ]
+ },
+ "secondary_label": "CNN_GENERALIZATION_IMPROVED may qualify a Z80_ML_RECALL_BLOCKED primary outcome",
+ "split": {
+  "development": [
+   "columns",
+   "duckslayer",
+   "g2048",
+   "kots",
+   "ps1",
+   "solomon",
+   "stalactites",
+   "supertennis"
+  ],
+  "rule": "sealed set carried over unchanged from SEG-051 (sha256 order, fixed before any model existed); new lineages are development only",
+  "sealed": [
+   "alexkidd",
+   "lots",
+   "sonic1"
+  ]
+ },
+ "stage": "SECOND_GENERATION_RESEARCH (adoption minimums apply)",
+ "structural_roots": {
+  "addresses": [
+   "0x0000 reset",
+   "0x0038 maskable interrupt (IM1; IM0 reads RST 38h on SMS)",
+   "0x0066 NMI"
+  ],
+  "cells": "cells containing those offsets: 32-byte {0,1,3}; 16-byte {0,3,6}",
+  "correction": "the SEG-051 post-hoc diagnosis used cells {0,1,2}; the architectural set is {0,1,3} at 32 bytes",
+  "excluded": "RST 08h..30h and image-start bytes are not entries",
+  "independence": "title-, label- and PC-independent",
+  "mapping": "image offset == CPU address for these (first 1 KiB of ROM is permanently mapped on the Sega mapper)"
+ },
+ "training": {
+  "batch": 8,
+  "central_bytes": 2048,
+  "cpu_threads": 2,
+  "loss": "masked binary cross-entropy over labelled bytes; pos_weight = mean over training lineages of negative/positive labelled bytes",
+  "margin_bytes": 512,
+  "optimizer": "AdamW lr 0.002 (x0.1 after 80%), weight_decay 1e-4",
+  "sampling": "uniform over training lineages (independent-lineage balanced); window starts include image edges (edge-aware)",
+  "seed_aggregation": "byte logits averaged across seeds",
+  "seeds": [
+   1,
+   2,
+   3
+  ],
+  "steps": 3000
+ },
+ "unit": {
+  "cell_bytes_candidates": [
+   32,
+   16
+  ],
+  "context": "cells are decision units only; the model sees MARGIN=512 bytes either side with a distinct PAD token outside the image",
+  "masked": "otherwise",
+  "negative": "every byte D",
+  "positive": "cell contains >=1 source instruction start (I)"
+ }
+}
