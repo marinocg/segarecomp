@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -391,10 +392,19 @@ std::optional<std::vector<std::uint8_t>> read_exact(const fs::path &path, std::s
 // anything about it; every other -Wall/-Wextra/-pedantic diagnostic stays enabled. Unknown -Wno- options are ignored by GCC/Clang.
 inline const char *const kGeneratedUnitFlag = "-Wno-misleading-indentation";
 
+// SEG-055: the console region the build-time Z80 observation pass runs under. The generated M68K program and the cache identity are
+// region-independent and the region is a run-time choice, but the Z80 images (and the M68K path that reaches them) are only OBSERVABLE
+// under one console configuration: a Japan-only title observed as the default USA console stops at its own region lockout and never uploads
+// its sound driver, so the product would later fail with z80_unknown_image. The pass therefore uses the shared header-region policy
+// (segarecomp::genesis_region_hint, the same one the launcher uses for its default selection). Only that ONE region is observed: the
+// status JSON names it (`z80.observed_region`) so a consumer can tell when a run-time region differs and Z80 coverage is not established.
+std::string genesis_pass_region(const std::vector<std::uint8_t> &rom) { return segarecomp::genesis_region_hint(rom).profile; }
+
 struct GenesisSoundBuild {
   GenesisSoundBuild(const Options &opts, Log &lg) : options(opts), log(lg) {}
   const Options &options;
   Log &log;
+  std::string pass_region = "usa";  // SEGARECOMP_GENESIS_REGION of every observation pass (genesis_pass_region)
   fs::path root, runtime, viewer, psg, ym, object_dir, pass_dir, z80_dir;
   std::vector<std::string> c_base, cxx_base;
   unsigned jobs = 1;
@@ -608,6 +618,7 @@ class ProcessPassRunner final : public gz80::PassRunner {
     for (const char *name : {"pass.report", "unknown.ram", "unknown.written", "stop.ram"}) fs::remove(build_.pass_dir / name, ec);
     Environment environment{{"SEGARECOMP_MATERIALIZE_DIR", build_.pass_dir.string()},
                             {"SEGARECOMP_MATERIALIZE_FRAMES", std::to_string(gz80::kObservationFrames)}};
+    environment.emplace_back("SEGARECOMP_GENESIS_REGION", build_.pass_region);
     if (build_.options.hint_alias_discovery) environment.emplace_back("SEGARECOMP_GENESIS_HINT", "strict");
     const fs::path pass_log = build_.pass_dir / "pass.log";
     const int rc = run_process({build_.pass_executable.string(), "--instruction-budget", std::to_string(gz80::kPassInstructionBudget)},
@@ -868,6 +879,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   fs::path platform_dir = options.runtime_dir;
   if (!platform_dir.has_filename()) platform_dir = platform_dir.parent_path();  // tolerate a trailing separator
   GenesisSoundBuild build(options, log);
+  build.pass_region = genesis_pass_region(*route.rom);
   build.root = platform_dir.parent_path().parent_path();
   build.runtime = options.runtime_dir / "runtime";
   build.viewer = options.runtime_dir / "viewer";
@@ -969,6 +981,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     std::cout << "@result failed stage=z80-materialize message=" << gz80::failure_name(failed.failure) << operation << std::endl;
     return 4;
   };
+  log.line("z80 observation region: " + build.pass_region);  // the single console region the Z80 images are observed under
   gz80::MaterializationSummary summary = fixed_point();
   if (!summary.ok()) return materialize_failed(summary, "");
   stage("z80-materialize", "done");
@@ -1043,7 +1056,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   status_extra = std::string(",\"genesis_audio\":\"") + (summary.sound_fault ? "degraded" : "supported") + "\"";
   if (summary.sound_fault) status_extra += ",\"z80_audio_outcome\":\"structural_code_mismatch\"";
   status_extra += ",\"z80\":{\"outcome\":\"converged\",\"end\":\"" + std::string(gz80::pass_outcome_name(summary.end)) +
-                 "\",\"images\":" + std::to_string(summary.images) + ",\"discovery_runs\":" + std::to_string(summary.discovery_runs) +
+                 "\",\"observed_region\":\"" + build.pass_region + "\",\"images\":" + std::to_string(summary.images) + ",\"discovery_runs\":" + std::to_string(summary.discovery_runs) +
                  ",\"runs\":" + std::to_string(summary.total_runs) + ",\"epochs\":" + std::to_string(summary.epochs) +
                  ",\"window_frames\":" + std::to_string(gz80::kObservationFrames) + ",\"frames_reached\":" + std::to_string(summary.frames) +
                  ",\"units\":" + std::to_string(build.z80_units) + ",\"units_compiled\":" + std::to_string(build.z80_compiled_units) +

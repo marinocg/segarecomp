@@ -27,6 +27,9 @@ separate entries in parallel (tests/CMakeLists.txt registers one per group; the 
   smc      self-modifying code, the sound-fault isolation and degraded status, and the epoch after the observation window
   falsify  removal / mutation / relink / rebuild falsification of the produced program
   prepare  prepare() failure diagnostics (POSIX wrapper compiler)
+  region   the build-time Z80 observation runs under the ROM header's region (a Japan-only, region-gated title registers its driver), the
+           observed region is named in status.json, and the documented UNSUPPORTED cross-region case (an overseas-header ROM observed as USA,
+           run as Japan) ends with the typed z80_unknown_image instead of silently claiming coverage
 
 usage: genesis_z80_build_pipeline_test.py <segarecomp> <cc> <cxx> <source-root> [group ...]   (default: every group)
 """
@@ -43,7 +46,7 @@ cli, cc, cxx, root = sys.argv[1], sys.argv[2], sys.argv[3], pathlib.Path(sys.arg
 sys.path.insert(0, str(root / "tools"))
 import genesis_z80_fixture_rom as fx  # noqa: E402
 
-ALL_GROUPS = ("epochs", "bound", "smc", "falsify", "prepare")
+ALL_GROUPS = ("epochs", "bound", "smc", "falsify", "prepare", "region")
 GROUPS = tuple(sys.argv[5:]) or ALL_GROUPS
 assert all(g in ALL_GROUPS for g in GROUPS), GROUPS
 failures = []
@@ -74,9 +77,11 @@ def executable(out):
     return next((p for p in out.iterdir() if p.stem == "game" and p.is_file()), None)
 
 
-def run_program(exe, budget=3_000_000):
-    done = subprocess.run([str(exe), "--instruction-budget", str(budget)], text=True, capture_output=True, timeout=300,
-                          env={"SEGARECOMP_SOUND_SUMMARY": "1", "PATH": "/usr/bin:/bin"})
+def run_program(exe, budget=3_000_000, region=None):
+    env = {"SEGARECOMP_SOUND_SUMMARY": "1", "PATH": "/usr/bin:/bin"}
+    if region:
+        env["SEGARECOMP_GENESIS_REGION"] = region
+    done = subprocess.run([str(exe), "--instruction-budget", str(budget)], text=True, capture_output=True, timeout=300, env=env)
     summary = re.search(r"SOUND_SUMMARY (\{.*\})", done.stderr)
     return done, (json.loads(summary.group(1)) if summary else {})
 
@@ -119,6 +124,7 @@ def main():
             "smc": {"smc": (smc, None), "smc_fault": (smc_fault, None), "smc_fault2": (smc_fault, 1), "late": (late, None)},
             "falsify": {"raw": (raw, 2)},
             "prepare": {},
+            "region": {"domestic": (fx.build("sound_domestic_gated"), None), "overseas_header": (fx.build("sound_domestic_gated_overseas_header"), None)},
         }
         jobs = {name: job for group in GROUPS for name, job in by_group[group].items()}
         with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
@@ -265,6 +271,26 @@ def main():
             ran, summary = run_program(executable(tmp / "raw"))
             check(summary.get("epochs") == 1 and summary.get("result_kind") == 3 and summary.get("ym_writes", 0) > 0 and summary.get("sound_fault", 0) == 0,
                   "the pipeline's own (never relinked) executable shows the control behaviour, so the mutated/removed variants differ from it")
+
+        if "region" in GROUPS:
+            # ---- the observation region: the ROM's own (header) region, named in status.json; one region only ----
+            done, status = results["domestic"]
+            z = status.get("z80", {})
+            check(done.returncode == 0 and z.get("observed_region") == "japan" and z.get("images") == 1 and status.get("genesis_audio") == "supported",
+                  "a Japan-only region-gated title is observed as Japan: its driver is registered (1 image) and status.json names observed_region = japan")
+            ran, summary = run_program(executable(tmp / "domestic"), budget=6_000_000, region="japan")
+            check(summary.get("result_kind") == 3 and summary.get("bound_image") == 1 and summary.get("ym_writes", 0) > 0 and summary.get("sound_fault", 0) == 0,
+                  "run as Japan the gated driver runs (bound image, YM traffic) and never stops with z80_unknown_image")
+            ran, summary = run_program(executable(tmp / "domestic"), budget=6_000_000, region="usa")
+            check(summary.get("result_kind") == 3 and summary.get("epochs") == 0 and summary.get("ym_writes", 0) == 0,
+                  "run as USA the same title stays at its gate (the other region is simply a different guest path)")
+            done, status = results["overseas_header"]
+            z = status.get("z80", {})
+            check(done.returncode == 0 and z.get("observed_region") == "usa" and z.get("images") == 0,
+                  "an overseas-header ROM is observed as USA only: the gated driver is never seen (0 images) and the status says so")
+            ran, summary = run_program(executable(tmp / "overseas_header"), budget=6_000_000, region="japan")
+            check(summary.get("result_kind") == 1 and '"diagnostic_category":"z80_unknown_image"' in ran.stdout,
+                  "UNSUPPORTED cross-region case: run as Japan after a USA-only observation the driver is unknown and the run ends with the typed z80_unknown_image")
 
         for name in ("multi",) if "epochs" in GROUPS else ():
             z = results[name][1].get("z80", {})

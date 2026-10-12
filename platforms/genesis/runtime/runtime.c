@@ -173,6 +173,15 @@ static int genesis_controller_io_access(GenesisDeviceState *devices, uint8_t pad
     *value = segarecomp_genesis_region_version_value(region);
     return 1;
   }
+  /* A WORD read of the version register's even address ($A10000) is the TMSS/version probe some cartridges use instead of the BYTE read
+     (`move.w $A10000,d0; andi.w #$0F00,d0`). The register is wired to the odd data lane: the low byte is the version value and the even
+     (high) lane carries no register bit, which this project models as 0 -- so the common "no TMSS present" path is taken. This is a
+     project compatibility policy (the even lane's real open-bus value is not established by the cited public documents). */
+  if (address == SEGARECOMP_GENESIS_CONTROLLER_VERSION_BYTE_ADDRESS - 1U && width == GENESIS_ACCESS_WORD &&
+      direction == GENESIS_ACCESS_READ) {
+    *value = segarecomp_genesis_region_version_value(region) & 0xFFU;
+    return 1;
+  }
   for (index = 0U; index < SEGARECOMP_GENESIS_CONTROLLER_IO_SELECTOR_COUNT; ++index) {
     const SegarecompGenesisControllerIoSelector *selector =
         &segarecomp_genesis_controller_io_selectors[index];
@@ -1564,6 +1573,13 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
                                     GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_CONTROLLER_IO);
     return GENESIS_ACCESS_FAIL;
   }
+  /* A BYTE write to an EVEN address of the PSG window ($C00010/12/14/16) is accepted and discarded: the PSG is wired to the odd data lane
+     only (the references SEG-032-T006 cites -- Genesis Plus GX, ares -- agree on the four odd addresses), but real cartridges (one
+     Moonwalker revision) still write their power-on silence bytes to an even address and run on hardware, so failing closed there
+     would stop a working game. Nothing reaches the PSG and no state changes. Project compatibility policy; WORD/LONG are unaffected. */
+  if (width == GENESIS_ACCESS_BYTE && direction == GENESIS_ACCESS_WRITE && address >= UINT32_C(0x00C00010) &&
+      address <= UINT32_C(0x00C00016) && (address & 1U) == 0U)
+    return GENESIS_ACCESS_OK;
   if (genesis_is_psg_region(address)) {
     if (genesis_z80_sync(runtime, stop_out)) return GENESIS_ACCESS_FAIL; /* SEG-032-T005: shared device, Z80 time first */
     /* SEG-007-T109: the co-located PSG (SN76489) audio port at the odd byte
@@ -3276,10 +3292,11 @@ void genesis_runtime_write_notes(const GenesisRuntime *runtime, uint64_t frame_r
     return;
   fprintf(stream,
           "RUNTIME_NOTES {\"region\":\"%s\",\"hint_undelivered\":%llu,\"frame_render_rejections\":%llu,"
-          "\"vram_journal_overflows\":%llu,\"virtual_frames\":%llu}\n",
+          "\"vram_journal_overflows\":%llu,\"virtual_frames\":%llu,\"runtime_hz\":%u,\"hardware_hz\":%u}\n",
           genesis_region_profile_name(runtime->region_profile), (unsigned long long)runtime->raster.hint_undelivered,
           (unsigned long long)frame_render_rejections, (unsigned long long)vram_journal_overflows,
-          (unsigned long long)runtime->virtual_frame_count);
+          (unsigned long long)runtime->virtual_frame_count, (unsigned)segarecomp_genesis_region_runtime_hz(runtime->region_profile),
+          (unsigned)segarecomp_genesis_region_hardware_hz(runtime->region_profile));
 }
 
 int genesis_runtime_set_region(GenesisRuntime *runtime, unsigned profile) {
@@ -3287,6 +3304,37 @@ int genesis_runtime_set_region(GenesisRuntime *runtime, unsigned profile) {
     return -1;
   runtime->region_profile = (uint8_t)profile;
   runtime->region_configured = 1U;
+  return 0;
+}
+
+int genesis_runtime_configure_run(GenesisRuntime *runtime, GenesisControlTransfer *refusal) {
+  /* SEG-055: the console region is chosen exactly once, before the first guest step -- by the host through
+     genesis_runtime_set_region, else from SEGARECOMP_GENESIS_REGION (unset/empty/"auto" == the default USA NTSC console)
+     -- and is then fixed for the whole run. An unrecognized name (or a non-selectable profile) is refused. The PAL profile is
+     admitted but is an APPROXIMATION: it only changes the version register; the machine runs the 60 Hz schedule, 50 Hz timing is
+     not implemented (segarecomp_genesis_region_runtime_hz / _hardware_hz). */
+  if (!runtime->region_configured) {
+    const char *name = getenv("SEGARECOMP_GENESIS_REGION");
+    const char *hint_policy = getenv("SEGARECOMP_GENESIS_HINT");
+    if (hint_policy != 0 && genesis_region_name_equals(hint_policy, "strict")) runtime->raster.hint_strict = 1U;
+    unsigned profile = (unsigned)SEGARECOMP_GENESIS_REGION_USA_NTSC;
+    runtime->region_configured = 1U;
+    if (name != 0 && name[0] != '\0' && genesis_region_name_equals(name, "auto") == 0) {
+      if (genesis_region_profile_from_name(name, &profile) != 0) {
+        refusal->kind = GENESIS_STOP;
+        refusal->stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+                                          GENESIS_DIAG_UNSUPPORTED_REGION_TIMING);
+        return 1;
+      }
+      runtime->region_profile = (uint8_t)profile;
+    }
+  }
+  if (!segarecomp_genesis_region_is_selectable(runtime->region_profile)) {
+    refusal->kind = GENESIS_STOP;
+    refusal->stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+                                      GENESIS_DIAG_UNSUPPORTED_REGION_TIMING);
+    return 1;
+  }
   return 0;
 }
 
@@ -3303,32 +3351,7 @@ GenesisControlTransfer genesis_runtime_run(GenesisRuntime *runtime, GenesisDispa
 #endif
   if (runtime == 0 || dispatch == 0 || dispatch_allowance == 0U)
     return genesis_internal_dispatch_inconsistency_stop(runtime);
-  /* SEG-055: the console region is chosen exactly once, before the first guest step -- by the host through
-     genesis_runtime_set_region, else from SEGARECOMP_GENESIS_REGION (unset/empty/"auto" == the default USA NTSC console)
-     -- and is then fixed for the whole run. A PAL console (or an unrecognized name) is refused rather than run with the
-     NTSC schedule: 50 Hz timing is not implemented. */
-  if (!runtime->region_configured) {
-    const char *name = getenv("SEGARECOMP_GENESIS_REGION");
-    const char *hint_policy = getenv("SEGARECOMP_GENESIS_HINT");
-    if (hint_policy != 0 && genesis_region_name_equals(hint_policy, "strict")) runtime->raster.hint_strict = 1U;
-    unsigned profile = (unsigned)SEGARECOMP_GENESIS_REGION_USA_NTSC;
-    runtime->region_configured = 1U;
-    if (name != 0 && name[0] != '\0' && genesis_region_name_equals(name, "auto") == 0) {
-      if (genesis_region_profile_from_name(name, &profile) != 0) {
-        result.kind = GENESIS_STOP;
-        result.stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
-                                          GENESIS_DIAG_UNSUPPORTED_REGION_TIMING);
-        return result;
-      }
-      runtime->region_profile = (uint8_t)profile;
-    }
-  }
-  if (!segarecomp_genesis_region_is_supported(runtime->region_profile)) {
-    result.kind = GENESIS_STOP;
-    result.stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
-                                      GENESIS_DIAG_UNSUPPORTED_REGION_TIMING);
-    return result;
-  }
+  if (genesis_runtime_configure_run(runtime, &result) != 0) return result;
   for (step = 0U; step < dispatch_allowance; ++step) {
     result = genesis_runtime_step(runtime, dispatch);
     if (result.kind != GENESIS_CONTINUE_AT_PC) return result;

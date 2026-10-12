@@ -2,7 +2,8 @@
 //   * the VDP H-interrupt counter and level-4 admission (line schedule, enable gating, SR masking, IRQ6/IRQ4 priority,
 //     missing-handler fail-closed behavior, STOP wake-up),
 //   * console region profiles (Japan NTSC / USA NTSC / Europe PAL) driving the guest-visible version register, selection
-//     from the host API and from SEGARECOMP_GENESIS_REGION, PAL refusal, and a guest-visible region check taking
+//     from the host API and from SEGARECOMP_GENESIS_REGION, PAL admitted as a 60 Hz approximation (runtime_hz 60 / hardware_hz 50),
+//     the single-byte/WORD startup probe shapes and their fail-closed neighbours, and a guest-visible region check taking
 //     different compatibility branches under different hardware profiles,
 //   * independent Player 1 / Player 2 controller ports.
 // Project-authored synthetic state only; no ROM, no host clock. Interrupt-frame returns (RTE) are modelled by restoring
@@ -14,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <memory>
 #include <vector>
 
@@ -373,9 +375,13 @@ void test_region_profiles_and_version_register() {
   check(segarecomp_genesis_region_version_value(SEGARECOMP_GENESIS_REGION_EUROPE_PAL) == 0xE0u, "Europe PAL version register = 0xE0 (overseas, 50 Hz)");
   check(SEGARECOMP_GENESIS_CONTROLLER_VERSION_POLICY_VALUE == segarecomp_genesis_region_version_value(SEGARECOMP_GENESIS_REGION_USA_NTSC),
         "the historical policy value is exactly the USA NTSC profile (default compatibility)");
-  check(segarecomp_genesis_region_is_supported(SEGARECOMP_GENESIS_REGION_JAPAN_NTSC) && segarecomp_genesis_region_is_supported(SEGARECOMP_GENESIS_REGION_USA_NTSC) &&
-            !segarecomp_genesis_region_is_supported(SEGARECOMP_GENESIS_REGION_EUROPE_PAL),
-        "the two 60 Hz profiles are operational; PAL is representable but not supported");
+  check(segarecomp_genesis_region_is_selectable(SEGARECOMP_GENESIS_REGION_JAPAN_NTSC) && segarecomp_genesis_region_is_selectable(SEGARECOMP_GENESIS_REGION_USA_NTSC) &&
+            segarecomp_genesis_region_is_selectable(SEGARECOMP_GENESIS_REGION_EUROPE_PAL) && !segarecomp_genesis_region_is_selectable(3u),
+        "the three known profiles are selectable; an unknown profile value is not");
+  check(segarecomp_genesis_region_runtime_hz(SEGARECOMP_GENESIS_REGION_EUROPE_PAL) == 60u && segarecomp_genesis_region_hardware_hz(SEGARECOMP_GENESIS_REGION_EUROPE_PAL) == 50u &&
+            segarecomp_genesis_region_runtime_hz(SEGARECOMP_GENESIS_REGION_USA_NTSC) == segarecomp_genesis_region_hardware_hz(SEGARECOMP_GENESIS_REGION_USA_NTSC) &&
+            segarecomp_genesis_region_runtime_hz(SEGARECOMP_GENESIS_REGION_JAPAN_NTSC) == segarecomp_genesis_region_hardware_hz(SEGARECOMP_GENESIS_REGION_JAPAN_NTSC),
+        "PAL is an approximation: it runs at 60 Hz while its real hardware is 50 Hz; NTSC profiles match their hardware");
 
   set_env("SEGARECOMP_GENESIS_REGION", nullptr);
   auto d = make_runtime();
@@ -409,8 +415,19 @@ void test_region_profiles_and_version_register() {
   set_env("SEGARECOMP_GENESIS_REGION", "pal");
   auto pal = make_runtime();
   const GenesisControlTransfer pr = genesis_runtime_run(pal.get(), one_step_dispatch, 3u);
-  check(pr.kind == GENESIS_STOP && pr.stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_REGION_TIMING && pal->scheduler.master_ticks == 0u,
-        "a PAL console is refused honestly before any guest instruction runs (50 Hz timing is not implemented)");
+  check(pr.kind == GENESIS_RUNNER_RESOURCE_LIMIT && pal->region_profile == 2u && read_version(*pal) == 0xE0u && pal->scheduler.master_ticks != 0u,
+        "a PAL console is admitted: the guest reads the PAL version register (0xE0) and runs on the 60 Hz schedule (50 Hz is not implemented)");
+  {  // a PAL run's notes state BOTH the timing the machine ran and the real console's, so it is never read as 50 Hz-accurate
+    FILE *notes = std::tmpfile();
+    genesis_runtime_write_notes(pal.get(), 0, 0, notes);
+    std::rewind(notes);
+    char text[512] = {0};
+    const size_t got = std::fread(text, 1, sizeof(text) - 1u, notes);
+    std::fclose(notes);
+    check(got > 0u && std::strstr(text, "\"region\":\"europe\"") != nullptr && std::strstr(text, "\"runtime_hz\":60") != nullptr &&
+              std::strstr(text, "\"hardware_hz\":50") != nullptr,
+          "PAL RUNTIME_NOTES report runtime_hz 60 and hardware_hz 50");
+  }
   set_env("SEGARECOMP_GENESIS_REGION", "mars");
   auto unk = make_runtime();
   const GenesisControlTransfer ur = genesis_runtime_run(unk.get(), one_step_dispatch, 3u);
@@ -424,6 +441,18 @@ void test_region_profiles_and_version_register() {
   check(genesis_runtime_set_region(host_wins.get(), 0u) == 0 && genesis_runtime_run(host_wins.get(), one_step_dispatch, 3u).kind == GENESIS_RUNNER_RESOURCE_LIMIT &&
             host_wins->region_profile == 0u,
         "an explicit host selection outranks the environment");
+  // The build-time materialization pass steps the runtime without genesis_runtime_run; it must configure the same console.
+  set_env("SEGARECOMP_GENESIS_REGION", "japan");
+  auto pass = make_runtime();
+  GenesisControlTransfer none = {};
+  check(genesis_runtime_configure_run(pass.get(), &none) == 0 && pass->region_profile == 1u && read_version(*pass) == 0x20u,
+        "the configure-run seam selects the environment region for runners that bypass genesis_runtime_run");
+  set_env("SEGARECOMP_GENESIS_REGION", "mars");
+  auto pass_bad = make_runtime();
+  GenesisControlTransfer refusal = {};
+  check(genesis_runtime_configure_run(pass_bad.get(), &refusal) == 1 && refusal.kind == GENESIS_STOP &&
+            refusal.stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_REGION_TIMING,
+        "the configure-run seam refuses an unrecognized region with the typed stop");
   set_env("SEGARECOMP_GENESIS_REGION", nullptr);
 }
 
@@ -477,6 +506,40 @@ void write_port(GenesisRuntime &r, uint32_t address, uint32_t value) {
   check(genesis_route_access(&r, address, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK, "controller port write is routed");
 }
 
+// Two startup-probe shapes real cartridges use (one Moonwalker revision): the WORD read of the version register's even address
+// (`move.w $A10000,d0; andi.w #$0F00,d0` -> no TMSS) and PSG silence bytes written to an EVEN PSG-window address.
+void test_startup_probe_shapes() {
+  auto r = make_runtime();
+  uint32_t value = 0xDEADBEEFu;
+  GenesisRuntimeStop stop{};
+  check(genesis_route_access(r.get(), 0x00A10000u, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK && value == 0x00A0u,
+        "WORD read of $A10000 = version in the low byte, even lane 0 (the 0x0F00 TMSS probe sees no TMSS)");
+  check(genesis_runtime_set_region(r.get(), 1u) == 0, "japan region set");
+  check(genesis_route_access(r.get(), 0x00A10000u, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK && value == 0x0020u,
+        "the WORD version read follows the configured region");
+  // Neighbouring shapes of the version register stay fail-closed: only the WORD read of the even address is the added probe shape.
+  {
+    const struct { uint32_t address; GenesisAccessWidth width; GenesisAccessDirection direction; const char *what; } neighbours[] = {
+        {0x00A10000u, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, "BYTE read of the even address $A10000"},
+        {0x00A10000u, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, "WORD write of $A10000"},
+        {0x00A10000u, GENESIS_ACCESS_LONG, GENESIS_ACCESS_READ, "LONG read of $A10000"},
+        {0x00A10001u, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, "BYTE write of the read-only version register $A10001"},
+        {0x00A10001u, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, "WORD read at the odd address $A10001"},
+    };
+    for (const auto &n : neighbours) {
+      uint32_t v = 0xCAFEu;
+      GenesisRuntimeStop s{};
+      check(genesis_route_access(r.get(), n.address, n.width, n.direction, &v, &s) == GENESIS_ACCESS_FAIL,
+            (std::string("fail closed: ") + n.what).c_str());
+    }
+  }
+  value = 0x9Fu;
+  check(genesis_route_access(r.get(), 0x00C00010u, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK,
+        "a BYTE write to the even PSG-window address $C00010 is accepted (and discarded)");
+  check(genesis_route_access(r.get(), 0x00C00010u, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL,
+        "a WORD write there is still not a PSG access");
+}
+
 void test_independent_player_ports() {
   auto r = make_runtime();
   // TH pins are outputs (CTRL1/CTRL2 bit 6 = 1); DATA bit 6 selects the TH level.
@@ -517,6 +580,7 @@ int main() {
   test_hblank_exact_edges();
   test_region_profiles_and_version_register();
   test_region_sensitive_guest_branches();
+  test_startup_probe_shapes();
   test_independent_player_ports();
   if (failures != 0) std::printf("%d check(s) failed\n", failures);
   return failures == 0 ? 0 : 1;

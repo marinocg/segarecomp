@@ -158,7 +158,7 @@ def z80(source):
     return bytes(image.get(i, 0) for i in range(end))
 
 
-def header(size):
+def header(size, region=b"U  "):
     text = bytearray(b" " * 0x100)
     text[0x00:0x10] = b"SEGA MEGA DRIVE "
     text[0x10:0x20] = b"(C)SEGA 2026.OCT "[:16]
@@ -171,11 +171,11 @@ def header(size):
     text[0xA4:0xA8] = struct.pack(">I", size - 1)
     text[0xA8:0xAC] = struct.pack(">I", 0xFF0000)
     text[0xAC:0xB0] = struct.pack(">I", 0xFFFFFF)
-    text[0xF0:0xF3] = b"U  "
+    text[0xF0:0xF3] = region
     return bytes(text)
 
 
-def build_rom(code, size=ROM_SIZE):
+def build_rom(code, size=ROM_SIZE, region=b"U  "):
     rom = bytearray([0xFF]) * size
     vectors = bytearray()
     vectors += struct.pack(">I", 0x00FF0000)  # initial SSP
@@ -183,7 +183,7 @@ def build_rom(code, size=ROM_SIZE):
     for _ in range(62):
         vectors += struct.pack(">I", PROGRAM_BASE)  # every other vector: the (spinning) default
     rom[0:0x100] = vectors
-    rom[0x100:0x200] = header(size)
+    rom[0x100:0x200] = header(size, region)
     rom[PROGRAM_BASE:PROGRAM_BASE + len(code)] = code
     checksum = 0
     for i in range(0x200, size, 2):
@@ -397,7 +397,7 @@ def sound_smc_psg_driver():
                "patch:  nop\n        ld a,0x8A\n        ld (0x7F11),a\nloop:   jr loop\n")
 
 
-def build_sound(plan, programs):
+def build_sound(plan, programs, domestic_gate=False, region=b"U  "):
     m = M68k()
     # Prologue: MOVEQ #0,D0 / BEQ.W real / RESET. The 68K translator's startup prefix admits only a handful of operations and
     # takes over the whole flow when no instruction it cannot model is reachable; the (never executed) RESET fallthrough is such an
@@ -406,6 +406,13 @@ def build_sound(plan, programs):
     m.branch(0x67, "real")
     m.w(0x4E70)
     m.label("real")
+    if domestic_gate:
+        # A region-gated title: BTST #7,($A10001).L -- the overseas bit of the version register -- BNE gate_spin. An overseas console never
+        # reaches the sound-driver upload (it spins, like a region lockout), a domestic one does. Used to prove that the build-time Z80
+        # observation runs under the ROM's own region (a Japan-only title observed as the default USA console would register no image).
+        m.w(0x0839, 0x0007)
+        m.l(0xA10001)
+        m.branch(0x66, "gate_spin")
     waits = 0
     uploads = {}
     for kind, arg in plan:
@@ -430,13 +437,16 @@ def build_sound(plan, programs):
         m.move_w_imm(0x0100, Z80_RESET)
     m.label("spin")
     m.branch(0x60, "spin")
+    if domestic_gate:
+        m.label("gate_spin")
+        m.branch(0x60, "gate_spin")
     for name in sorted(uploads):
         kinds = {k for k, a in plan if a == name}
         if "raw" in kinds:
             m.data("prog_" + name, uploads[name])
         if "decoded" in kinds:
             m.data("enc_" + name, bytes(b ^ 0x5A for b in uploads[name]))
-    return build_rom(m.resolve())
+    return build_rom(m.resolve(), region=region)
 
 
 MAX_IMAGES_FOR_TESTS = 8  # the production image bound (platforms/genesis/machine z80_images.hpp kMaxImages); the bound test uses it and +1
@@ -452,6 +462,18 @@ def fixture_sound_multi_epoch():
     """A, B, a plain restart, A again (the same activation signature as the first epoch): 4 epochs, exactly 2 images."""
     return build_sound([("raw", "a"), ("delay", SOUND_DELAY), ("raw", "b"), ("delay", SOUND_DELAY), ("restart", None),
                         ("delay", SOUND_DELAY), ("raw", "a")], {"a": sound_driver(1), "b": sound_driver(2)})
+
+
+def fixture_sound_domestic_gated():
+    """A Japan-only title (header region `J`) whose sound-driver upload is only reached on a DOMESTIC console (version-register overseas bit
+    clear). The build-time Z80 observation must run under the header's region to see it."""
+    return build_sound([("raw", "a")], {"a": sound_driver(1)}, domestic_gate=True, region=b"J  ")
+
+
+def fixture_sound_domestic_gated_overseas_header():
+    """The same gated code with an overseas (`U`) header: the observation runs as USA and never sees the upload, which is the documented
+    unsupported cross-region case (a run-time Japan selection then ends with z80_unknown_image)."""
+    return build_sound([("raw", "a")], {"a": sound_driver(1)}, domestic_gate=True, region=b"U  ")
 
 
 def fixture_sound_tone():
@@ -492,7 +514,8 @@ def fixture_sound_late_epoch():
 
 FIXTURES = {"multi_epoch_dirty": fixture_multi_epoch_dirty, "bus_reset_probe": fixture_bus_reset_probe, "bus_reset_control": fixture_bus_reset_control,
             "sound_raw": fixture_sound_raw, "sound_multi_epoch": fixture_sound_multi_epoch, "sound_decoded": fixture_sound_decoded,
-            "sound_smc": fixture_sound_smc, "sound_smc_fault": fixture_sound_smc_fault, "sound_tone": fixture_sound_tone, "sound_late_epoch": fixture_sound_late_epoch}
+            "sound_smc": fixture_sound_smc, "sound_smc_fault": fixture_sound_smc_fault, "sound_tone": fixture_sound_tone, "sound_late_epoch": fixture_sound_late_epoch,
+            "sound_domestic_gated": fixture_sound_domestic_gated, "sound_domestic_gated_overseas_header": fixture_sound_domestic_gated_overseas_header}
 
 
 def build(name):

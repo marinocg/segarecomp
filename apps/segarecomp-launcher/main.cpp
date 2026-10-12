@@ -18,12 +18,17 @@
 #include "imgui_impl_sdlrenderer3.h"
 
 #include <algorithm>
+#include <cfloat>
+#include <chrono>
+#include <functional>
+#include <future>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -199,10 +204,43 @@ struct Layout2D {
 };
 
 float text_width(ImFont *font, float px, const char *text) {
-  ImGui::PushFont(font, px);
-  const float w = ImGui::CalcTextSize(text).x;
-  ImGui::PopFont();
-  return w;
+  // Measured at exactly `px` (what AddText draws), independent of any ImGui font scaling.
+  return font->CalcTextSizeA(px, FLT_MAX, 0.0F, text).x;
+}
+
+// Greedy word wrap into at most two lines of `max_px` (device pixels); an overlong last line ends in "...", an overlong word is cut.
+std::vector<std::string> wrap_two_lines(ImFont *font, float px, float max_px, const std::string &text) {
+  const auto fits = [&](const std::string &candidate) { return text_width(font, px, candidate.c_str()) <= max_px; };
+  const auto shorten = [&](std::string line, bool ellipsis) {
+    if (fits(line + (ellipsis ? "..." : ""))) return ellipsis ? line + "..." : line;
+    while (line.size() > 1 && !fits(line + (ellipsis ? "..." : ""))) line.pop_back();
+    return ellipsis ? line + "..." : line;
+  };
+  std::vector<std::string> lines;
+  std::string current, rest;
+  std::istringstream words(text);
+  std::string word;
+  bool overflow = false;
+  while (words >> word) {
+    if (overflow) { rest += (rest.empty() ? "" : " ") + word; continue; }
+    const std::string trial = current.empty() ? word : current + " " + word;
+    if (fits(trial)) { current = trial; continue; }
+    if (lines.empty()) {  // first line is full: continue on the second
+      if (current.empty()) { current = shorten(word, false); rest = word.substr(std::min(word.size(), current.size())); }
+      lines.push_back(current);
+      current.clear();
+      if (!rest.empty()) { current = rest; rest.clear(); if (!fits(current)) { overflow = true; rest = ""; } continue; }
+      current = word;
+    } else {
+      overflow = true;
+      rest = word;
+    }
+  }
+  if (!current.empty() || lines.empty()) lines.push_back(current);
+  if (overflow && lines.size() == 2) lines[1] = shorten(lines[1] + " " + rest, true);
+  else if (lines.size() == 2 && !fits(lines[1])) lines[1] = shorten(lines[1], true);
+  if (lines.size() > 2) lines.resize(2);
+  return lines;
 }
 
 void draw_text(ImDrawList *dl, ImFont *font, float px, ImU32 color, ImVec2 pos, const char *text) {
@@ -352,7 +390,23 @@ int gui() {
   // SDL_WINDOW_HIGH_PIXEL_DENSITY alone gives a full-resolution backbuffer on a Retina/HiDPI display.
   SDL_Window *window = SDL_CreateWindow("Segarecomp", static_cast<int>(LW), static_cast<int>(LH),
                                         SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
-  SDL_SetWindowMinimumSize(window, static_cast<int>(LW * 0.55F), static_cast<int>(LH * 0.55F));
+  // Initial size honours the display scale. SDL3 sizes windows in "points": on macOS a point is already a logical unit (pixel density 2),
+  // but on a DPI-aware Windows/Linux window points are physical pixels (density 1) and a 4K display at 150-200% scaling would get a tiny
+  // window. The needed factor is display scale / pixel density. The layout letterboxes to the window, so a larger window just scales it.
+  float window_scale = 1.0F;
+  if (window) {
+    const float display_scale = SDL_GetWindowDisplayScale(window);
+    const float density = SDL_GetWindowPixelDensity(window);
+    if (display_scale > 0.0F && density > 0.0F) window_scale = std::clamp(display_scale / density, 1.0F, 4.0F);
+    SDL_Rect usable{};
+    if (SDL_GetDisplayUsableBounds(SDL_GetDisplayForWindow(window), &usable) && usable.h > 0 && LH * window_scale > static_cast<float>(usable.h) * 0.92F)
+      window_scale = std::max(1.0F, static_cast<float>(usable.h) * 0.92F / LH);  // never taller than the screen
+    if (window_scale > 1.01F) {
+      SDL_SetWindowSize(window, static_cast<int>(LW * window_scale), static_cast<int>(LH * window_scale));
+      SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+    }
+    SDL_SetWindowMinimumSize(window, static_cast<int>(LW * 0.55F), static_cast<int>(LH * 0.55F));
+  }
   SDL_Renderer *renderer = window ? SDL_CreateRenderer(window, nullptr) : nullptr;
   if (!renderer) { std::fprintf(stderr, "window failed: %s\n", SDL_GetError()); return 1; }
   SDL_SetRenderVSync(renderer, 1);
@@ -363,7 +417,11 @@ int gui() {
   io.IniFilename = nullptr;
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;  // Tab/Enter/Space reach and activate the custom buttons
   ImGui::StyleColorsDark();
-  ImGui::GetStyle().FontScaleDpi = content_scale;
+  // Every size in this UI is already in final device pixels (design units * the window-fit scale, and the window itself is sized by the
+  // display scale), so ImGui must not multiply fonts again: with FontScaleDpi = display scale, ImGui::PushFont-based text (and its measured
+  // width) came out display-scale times larger than the AddText-drawn text, which shifted "centered" text left on scaled Windows displays.
+  ImGui::GetStyle().FontScaleDpi = 1.0F;
+  (void)content_scale;
   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDLRenderer3_Init(renderer);
 
@@ -406,32 +464,69 @@ int gui() {
   std::string policy_choice = "compatibility";
   bool discovery_choice = false;    // advanced H-interrupt alias discovery (default off)
   std::string model_choice = "v1";  // experimental opt-in of Optimized ("gen2"); v1 is the default
+  std::string observed_region;  // z80.observed_region of the Ready entry (build-time Z80 observation); see region_coverage_note
   PolicyReport policy_report;  // of the Ready entry (read from its status.json), for the requested/effective note
-  const auto refresh_report = [&] { policy_report = state == State::Ready ? read_policy_report(entry) : PolicyReport{}; };
+  const auto refresh_report = [&] {
+    policy_report = state == State::Ready ? read_policy_report(entry) : PolicyReport{};
+    observed_region = state == State::Ready ? read_observed_region(entry) : std::string();
+  };
   const auto fallback_details = [&] {
     diagnostics = (policy_report.fallback ? "Optimized was requested but this game was built as Compatibility (the broad, always-correct program).\n" : std::string()) +
                   policy_details(policy_report) + "\nThe build log and status.json in the cache folder hold the sanitized details.";
   };
 
+  // Entry identity and the "is a matching build already there" check. For Optimized they run the product's policy-identity tool (a process
+  // that can take seconds, e.g. cold start or antivirus scan on Windows), so they run on a worker and the UI shows a spinner meanwhile.
+  // Lifetime/staleness contract: the worker captures COPIES only (no reference into this frame), is joined before SDL_Quit, and its result
+  // carries the key of the selection it was computed for; a result whose key no longer matches the current selection is discarded and
+  // recomputed. While it runs the controls are hidden, a file picked/dropped meanwhile is deferred (not lost), and the per-frame code never
+  // starts the tool (it only reads the memo), so a failing tool is retried once per user action, never once per frame.
+  struct Resolved { fs::path entry; bool ready = false; std::string key; };
+  std::future<Resolved> resolve_job;
+  bool resolving = false;
+  std::string deferred_path;  // a ROM chosen while a lookup was running
+  const auto selection_key = [&] {
+    return rom.sha256 + "|" + rom.aot_policy + "|" + rom.aot_model + "|" + (rom.hint_alias_discovery ? "d" : "-") + "|" + rom.mapper + "|" + rom.mapper_manifest_sha256;
+  };
+  std::function<void()> resolve_entry;
+  const auto apply_resolved = [&](const Resolved &r) {
+    if (!r.key.empty() && r.key != selection_key()) { resolve_entry(); return; }  // stale: computed for another selection
+    entry = r.entry;
+    state = r.ready ? State::Ready : State::RomSelected;
+    refresh_report();
+  };
+  resolve_entry = [&] {
+    if (!rom.optimized()) {
+      const fs::path dir = entry_dir(rom, layout);
+      apply_resolved({dir, entry_ready_for(dir, rom, layout), std::string()});
+      return;
+    }
+    state = State::RomSelected;
+    resolving = true;
+    resolve_job = std::async(std::launch::async, [snapshot = rom, lay = layout, key = selection_key()] {
+      Resolved r;
+      r.entry = entry_dir(snapshot, lay);
+      r.ready = entry_ready_for(r.entry, snapshot, lay);
+      r.key = key;
+      return r;
+    });
+  };
+
   const auto select_rom = [&](const std::string &path_text) {
-    if (state == State::Building || state == State::Running) return;
+    if (state == State::Building || state == State::Running || resolving) return;
     rom = inspect_rom_file(from_u8(path_text.c_str()), layout);
     show_diagnostics = false;
     if (!rom.error.empty()) { failure = "That file could not be read: " + rom.error; diagnostics = failure; state = State::Failed; return; }
     if (rom.supports_optimized()) { rom.aot_policy = policy_choice; rom.aot_model = model_choice; }
     if (rom.supports_hint_alias_discovery()) rom.hint_alias_discovery = discovery_choice;
-    entry = entry_dir(rom, layout);
-    state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
-    refresh_report();
+    resolve_entry();
   };
   const auto set_discovery = [&](bool on) {
     if (rom.hint_alias_discovery == on) return;
     discovery_choice = on;
     rom.hint_alias_discovery = on;
     show_diagnostics = false;
-    entry = entry_dir(rom, layout);  // it changes the generated program: part of the cache identity
-    state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
-    refresh_report();
+    resolve_entry();
   };
   const auto set_policy = [&](const char *choice) {
     if (rom.aot_policy == choice) return;
@@ -439,18 +534,14 @@ int gui() {
     rom.aot_policy = choice;
     if (std::string(choice) == "compatibility") { model_choice = "v1"; rom.aot_model = "v1"; }  // the experimental opt-in never survives leaving Optimized
     show_diagnostics = false;
-    entry = entry_dir(rom, layout);  // the policy is part of the cache identity: the two modes never alias
-    state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
-    refresh_report();
+    resolve_entry();
   };
   const auto set_model = [&](const char *choice) {
     if (rom.aot_model == choice) return;
     model_choice = choice;
     rom.aot_model = choice;
     show_diagnostics = false;
-    entry = entry_dir(rom, layout);  // the model family is part of the cache identity: v1 and the experimental model never alias
-    state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
-    refresh_report();
+    resolve_entry();
   };
   const auto start_build = [&](bool force) {
     if (force) { std::error_code ec; fs::remove_all(entry, ec); }
@@ -466,6 +557,8 @@ int gui() {
   if (const char *preselect = SDL_getenv("SEGARECOMP_SHOT_ROM")) {  // review aid, see maybe_save_screenshot
     select_rom(preselect);
     if (SDL_getenv("SEGARECOMP_SHOT_BUILD") && state == State::RomSelected) start_build(false);
+    if (SDL_getenv("SEGARECOMP_SHOT_READY") && state == State::RomSelected) state = State::Ready;  // review aid: the Ready layout without a build
+    if (const char *shot_region = SDL_getenv("SEGARECOMP_SHOT_REGION"); shot_region && rom.supports_region()) rom.region = shot_region;  // review aid
   }
 
   bool running = true;
@@ -478,11 +571,17 @@ int gui() {
       if (event.type == SDL_EVENT_QUIT) running = false;
       if (event.type == SDL_EVENT_DROP_BEGIN) dragging = true;
       if (event.type == SDL_EVENT_DROP_COMPLETE) dragging = false;
-      if (event.type == SDL_EVENT_DROP_FILE && event.drop.data) select_rom(event.drop.data);
+      if (event.type == SDL_EVENT_DROP_FILE && event.drop.data) {
+        if (resolving) deferred_path = event.drop.data; else select_rom(event.drop.data);
+      }
     }
     {
       std::string chosen, dialog_error;
-      { std::lock_guard<std::mutex> lock(pending.mutex); chosen.swap(pending.path); dialog_error.swap(pending.error); }
+      if (!resolving) {  // a pick made while a lookup runs stays queued in `pending` until it finishes
+        std::lock_guard<std::mutex> lock(pending.mutex);
+        chosen.swap(pending.path);
+        dialog_error.swap(pending.error);
+      }
       if (!chosen.empty()) select_rom(chosen);
       else if (!dialog_error.empty() && state != State::Building && state != State::Running) {
         rom = RomView{};
@@ -496,6 +595,11 @@ int gui() {
         state = State::Failed;
       }
     }
+    if (resolving && resolve_job.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+      resolving = false;
+      apply_resolved(resolve_job.get());
+    }
+    if (!resolving && !deferred_path.empty()) { const std::string next = std::move(deferred_path); deferred_path.clear(); select_rom(next); }
     if (state == State::Building && job->finished()) {
       if (job->succeeded()) { state = State::Ready; refresh_report(); }
       else {
@@ -568,7 +672,157 @@ int gui() {
 
     // ---- the ROM drop / status panel: same outer frame for every state, only the inner content changes ----
     const float panel_x0 = LW * 0.10F, panel_x1 = LW * 0.90F, panel_w = panel_x1 - panel_x0;
-    const float panel_y0 = subtitle_y + 38.0F, panel_h = 256.0F, panel_y1 = panel_y0 + panel_h;
+    const float panel_y0 = subtitle_y + 38.0F;
+    const float content_x = panel_x0 + 22.0F;
+    const float content_w = panel_w - 44.0F;
+    const float center_x = (panel_x0 + panel_x1) * 0.5F;
+
+    // Game title: cleaned in the core, wrapped to at most two lines. The header block (title, platform line) pushes everything below it.
+    std::vector<std::string> title_lines;
+    if (state != State::NoRom) title_lines = wrap_two_lines(font_bold, centered.len(18), centered.len(content_w), rom.title);
+    const float title_pitch = 24.0F;
+    const float header_h = 24.0F + title_pitch * static_cast<float>(std::max<std::size_t>(title_lines.size(), 1)) + 22.0F;
+    const float row_y = panel_y0 + header_h;  // first free line below the title and platform line
+
+    const bool settings_state = layout.problem.empty() && state != State::NoRom &&
+                                ((state == State::RomSelected && rom.supported_platform && !rom.needs_mapper()) || state == State::Ready);
+    // One flowing column for the ROM-selected and Ready states: status, one aligned action row, then labelled settings rows.
+    // Run once with draw=false to measure the panel, once with draw=true to draw and handle input, so the frame always fits its content.
+    const auto settings_column = [&](bool draw) -> float {
+      float y = row_y;
+      const float lx = content_x, bx = content_x + 62.0F;  // label column / button column
+      if (resolving) {  // the Optimized lookup runs on a worker: animated feedback instead of a frozen window
+        if (draw) {
+          draw_stage_row(centered, dl, lx, y + 14.0F, rom.optimized_gen2() ? "Preparing the experimental model..." : "Preparing Optimized mode...", StageState::running, font_regular, t);
+          draw_text(dl, font_regular, centered.len(11), text_dim, centered.at(lx, y + 44.0F), "Checking the build tool; this can take a few seconds.");
+        }
+        return y + 80.0F - panel_y0;
+      }
+      const auto separator = [&] {
+        if (draw) dl->AddLine(centered.at(content_x, y), centered.at(content_x + content_w, y), rgba(70, 90, 140, 130), centered.len(1));
+        y += 12.0F;
+      };
+      if (state == State::Ready) {
+        if (draw) draw_text(dl, font_bold, centered.len(14), col_ok, centered.at(lx, y), "Native build ready");
+        if (draw && policy_report.present && policy_report.requested == "optimized" &&
+            outline_button(centered, "fb_details", content_x + content_w - 70.0F, y - 2.0F, 70.0F, 22.0F, policy_report.fallback ? "Why?" : "Details", font_regular, 11.0F)) {
+          show_diagnostics = !show_diagnostics;
+          fallback_details();
+        }
+        y += 22.0F;
+        if (const std::string note = policy_summary(policy_report); !note.empty()) {
+          if (draw) draw_text(dl, font_regular, centered.len(12), policy_report.fallback ? col_err : text_secondary, centered.at(lx, y), note.c_str());
+          y += 18.0F;
+        }
+      }
+      y += 6.0F;
+      // Actions: one row, one height, same gaps.
+      if (draw) {
+        if (state == State::Ready) {
+          if (bevel_button(centered, "play", lx, y, 126.0F, 42.0F, "Play", font_bold, 17.0F)) {
+            if (const std::string refusal = launch_refusal(rom); !refusal.empty()) { failure = refusal; diagnostics = refusal; state = State::Failed; }
+            else game = std::make_unique<GameRun>(rom, layout, entry);
+            if (!game) {}
+            else if (game->started()) state = State::Running;
+            else { failure = "The game could not be started."; diagnostics = failure; game.reset(); state = State::Failed; }
+          }
+          if (outline_button(centered, "recompile2", lx + 136.0F, y, 126.0F, 42.0F, "Recompile", font_regular, 14.0F)) start_build(true);
+          if (outline_button(centered, "choose2", lx + 272.0F, y, 126.0F, 42.0F, "Choose...", font_regular, 14.0F)) browse();
+        } else {
+          if (bevel_button(centered, "recompile", lx, y, 200.0F, 42.0F, rom.compat_known ? "Recompile & Play" : "Try anyway", font_bold, 16.0F)) start_build(false);
+          if (outline_button(centered, "choose1", lx + 210.0F, y, 190.0F, 42.0F, "Choose another...", font_regular, 14.0F)) browse();
+        }
+      }
+      y += 42.0F + 14.0F;
+      separator();
+      if (rom.supports_optimized()) {
+        if (draw) {
+          draw_text(dl, font_regular, centered.len(12), text_secondary, centered.at(lx, y + 6.0F), "Mode");
+          const bool opt = rom.optimized();
+          if (opt ? outline_button(centered, "mode_compat", bx, y, 120.0F, 26.0F, "Compatibility", font_regular, 12.0F)
+                  : bevel_button(centered, "mode_compat", bx, y, 120.0F, 26.0F, "Compatibility", font_bold, 12.0F))
+            set_policy("compatibility");
+          if (opt ? bevel_button(centered, "mode_opt", bx + 128.0F, y, 92.0F, 26.0F, "Optimized", font_bold, 12.0F)
+                  : outline_button(centered, "mode_opt", bx + 128.0F, y, 92.0F, 26.0F, "Optimized", font_regular, 12.0F))
+            set_policy("optimized");
+          if (opt) {  // advanced: the experimental model opt-in is only offered while Optimized is selected
+            const bool g2 = rom.optimized_gen2();
+            if (g2 ? bevel_button(centered, "model_g2", bx + 228.0F, y, 92.0F, 26.0F, "Experimental", font_bold, 11.0F)
+                   : outline_button(centered, "model_g2", bx + 228.0F, y, 92.0F, 26.0F, "Experimental", font_regular, 11.0F))
+              set_model(g2 ? "v1" : "gen2");
+          }
+        }
+        y += 34.0F;
+        if (rom.optimized()) {  // what the extra button is, in one quiet line
+          if (draw) draw_text(dl, font_regular, centered.len(10.5F), text_dim, centered.at(bx, y - 4.0F),
+                              rom.optimized_gen2() ? "Experimental model on (advanced); may fall back." : "Experimental: optional alternative model.");
+          y += 14.0F;
+        }
+      }
+      if (rom.supports_region()) {
+        if (draw) {
+          draw_text(dl, font_regular, centered.len(12), text_secondary, centered.at(lx, y + 6.0F), "Region");
+          const auto option = [&](const char *id, const char *value, const char *label, float x, float w) {
+            const bool on = rom.region == value;
+            if (on ? bevel_button(centered, id, bx + x, y, w, 26.0F, label, font_bold, 12.0F)
+                   : outline_button(centered, id, bx + x, y, w, 26.0F, label, font_regular, 12.0F))
+              rom.region = value;
+          };
+          option("region_usa", "usa", "USA NTSC", 0.0F, 100.0F);
+          option("region_jp", "japan", "Japan NTSC", 106.0F, 104.0F);
+          option("region_eu", "europe", "Europe PAL", 216.0F, 104.0F);
+        }
+        y += 32.0F;
+        std::vector<std::string> notes;
+        if (rom.region == "europe") notes.push_back(region_note("europe"));
+        else if (rom.region_ambiguous) notes.push_back("Header region is ambiguous; USA NTSC assumed.");
+        if (state == State::Ready)
+          if (const std::string coverage = region_coverage_note(observed_region, rom.region); !coverage.empty()) notes.push_back(coverage);
+        for (const std::string &note : notes) {
+          if (draw) draw_text(dl, font_regular, centered.len(10.5F), text_dim, centered.at(lx, y - 2.0F), note.c_str());
+          y += 14.0F;
+        }
+        if (!notes.empty()) y += 2.0F;
+      }
+      if (rom.supports_hint_alias_discovery()) {
+        if (draw) {  // advanced, default off
+          if (rom.hint_alias_discovery ? bevel_button(centered, "hint_discovery", lx, y, content_w, 26.0F, "HInt alias discovery (strict build pass): ON", font_bold, 11.0F)
+                                       : outline_button(centered, "hint_discovery", lx, y, content_w, 26.0F, "HInt alias discovery (strict build pass): off", font_regular, 11.0F))
+            set_discovery(!rom.hint_alias_discovery);
+        }
+        y += 30.0F;
+        // What the advanced toggle is for, so it is not switched on casually.
+        if (draw) {
+          draw_text(dl, font_regular, centered.len(10.5F), text_dim, centered.at(lx, y - 2.0F), "Advanced: for games whose raster/H-interrupt effects fail otherwise.");
+          draw_text(dl, font_regular, centered.len(10.5F), text_dim, centered.at(lx, y + 11.0F), "Leave off unless the game does not work; builds may take longer.");
+        }
+        y += 32.0F;
+      }
+      if (rom.optimized() && product_policy_identity_cached(layout, "optimized", rom.aot_model).empty()) {
+        if (draw) {
+          draw_text(dl, font_regular, centered.len(10.5F), col_err, centered.at(lx, y), "Optimized cannot verify the build tool identity:");
+          draw_text(dl, font_regular, centered.len(10.5F), col_err, centered.at(lx, y + 14.0F), "saved Optimized builds are not reused.");
+        }
+        y += 32.0F;
+      }
+      if (state == State::Ready) {
+        separator();
+        if (draw) {
+          draw_text(dl, font_bold, centered.len(12), text_secondary, centered.at(lx, y), "Controls");
+          if (rom.platform_id == "master-system") {
+            draw_text(dl, font_regular, centered.len(12), text_footer, centered.at(lx, y + 18.0F), "Arrows = D-Pad   Z = Button 1   X = Button 2");
+            draw_text(dl, font_regular, centered.len(12), text_footer, centered.at(lx, y + 35.0F), "P = Pause   R = Reset");
+          } else {
+            draw_text(dl, font_regular, centered.len(12), text_footer, centered.at(lx, y + 18.0F), "Arrows = D-Pad   Z = A   X = B   C = C   Enter = Start");
+          }
+        }
+        y += (rom.platform_id == "master-system" ? 56.0F : 40.0F);
+      }
+      return y - panel_y0 + 22.0F;  // panel height needed (clears the dashed inner frame)
+    };
+    const float panel_h = settings_state ? std::max(settings_column(false), 256.0F)
+                                         : 256.0F + title_pitch * static_cast<float>(title_lines.size() > 1 ? 1 : 0);
+    const float panel_y1 = panel_y0 + panel_h;
     const bool drop_hover = ImGui::IsMouseHoveringRect(centered.at(panel_x0, panel_y0), centered.at(panel_x1, panel_y1), false);
     const bool drop_active = state == State::NoRom && dragging;
     {
@@ -580,9 +834,6 @@ int gui() {
       draw_dashed_rect(dl, centered.at(panel_x0 + 16, panel_y0 + 16), centered.at(panel_x1 - 16, panel_y1 - 16),
                        drop_active ? dash_color_hover : dash_color, centered.len(2), centered.len(9), centered.len(6));
     }
-    const float content_x = panel_x0 + 22.0F;
-    const float center_x = (panel_x0 + panel_x1) * 0.5F;
-
     if (state == State::NoRom) {
       const float icon_size = 56.0F, icon_top = panel_y0 + 40.0F;
       if (tex_drop) {
@@ -599,61 +850,12 @@ int gui() {
     }
 
     if (state != State::NoRom) {
-      std::string title = rom.title;
-      while (title.size() > 4 && text_width(font_bold, centered.len(18), (title + "...").c_str()) > panel_w - 44.0F) title.resize(title.size() - 4);
-      if (title != rom.title) title += "...";
-      draw_text(dl, font_bold, centered.len(18), text_primary, centered.at(content_x, panel_y0 + 30.0F), title.c_str());
+      for (std::size_t i = 0; i < title_lines.size(); ++i)
+        draw_text(dl, font_bold, centered.len(18), text_primary, centered.at(content_x, panel_y0 + 22.0F + title_pitch * static_cast<float>(i)), title_lines[i].c_str());
       std::string meta = rom.platform;
       if (rom.supported_platform) meta += rom.compat_known ? "  -  Experimental compatibility" : "  -  Compatibility unknown";
-      draw_text(dl, font_regular, centered.len(13), text_secondary, centered.at(content_x, panel_y0 + 54.0F), meta.c_str());
-      const float row_y = panel_y0 + 86.0F;
-
-      // Mode (AOT policy): two plain options, Genesis only. No model, threshold or schema control exists.
-      const auto mode_row = [&](float y) {
-        if (!rom.supports_optimized()) return;
-        draw_text(dl, font_regular, centered.len(12), text_secondary, centered.at(content_x, y + 6.0F), "Mode");
-        const bool opt = rom.optimized();
-        if ((opt ? outline_button(centered, "mode_compat", content_x + 52.0F, y, 150.0F, 26.0F, "Compatibility", font_regular, 12.0F)
-                 : bevel_button(centered, "mode_compat", content_x + 52.0F, y, 150.0F, 26.0F, "Compatibility", font_bold, 12.0F)))
-          set_policy("compatibility");
-        if ((opt ? bevel_button(centered, "mode_opt", content_x + 212.0F, y, 120.0F, 26.0F, "Optimized", font_bold, 12.0F)
-                 : outline_button(centered, "mode_opt", content_x + 212.0F, y, 120.0F, 26.0F, "Optimized", font_regular, 12.0F)))
-          set_policy("optimized");
-        // Advanced: the experimental model opt-in is only offered while Optimized is selected, as one small secondary control.
-        if (opt) {
-          const bool g2 = rom.optimized_gen2();
-          if ((g2 ? bevel_button(centered, "model_g2", content_x + 334.0F, y, 74.0F, 26.0F, "Experimental", font_bold, 10.0F)
-                  : outline_button(centered, "model_g2", content_x + 334.0F, y, 74.0F, 26.0F, "Experimental", font_regular, 10.0F)))
-            set_model(g2 ? "v1" : "gen2");
-        }
-      };
-
-      // Console region (Genesis only): a run-time choice -- the native build serves every region, so it is not part of the cache identity.
-      // Europe (PAL) is shown but unsupported: Play explains why instead of running 50 Hz software on NTSC timing.
-      const auto region_row = [&](float y) {
-        if (!rom.supports_region()) return;
-        draw_text(dl, font_regular, centered.len(12), text_secondary, centered.at(content_x, y + 6.0F), "Region");
-        const auto option = [&](const char *id, const char *value, const char *label, float x, float w) {
-          const bool on = rom.region == value;
-          if (on ? bevel_button(centered, id, content_x + x, y, w, 26.0F, label, font_bold, 12.0F)
-                 : outline_button(centered, id, content_x + x, y, w, 26.0F, label, font_regular, 12.0F))
-            rom.region = value;
-        };
-        option("region_usa", "usa", "USA NTSC", 52.0F, 96.0F);
-        option("region_jp", "japan", "Japan NTSC", 156.0F, 104.0F);
-        option("region_eu", "europe", "Europe PAL (unsupported)", 268.0F, 190.0F);
-        if (const std::string refusal = launch_refusal(rom); !refusal.empty())
-          draw_text(dl, font_regular, centered.len(11), col_err, centered.at(content_x, y + 30.0F), "PAL (50 Hz) is not implemented: choose USA or Japan NTSC.");
-        else if (rom.region_ambiguous)
-          draw_text(dl, font_regular, centered.len(11), text_dim, centered.at(content_x, y + 30.0F), "Header region field is ambiguous; USA NTSC assumed.");
-      };
-      // Advanced (default off): strict H-interrupt build passes so a RAM-resident IRQ4 vector can be resolved via copy-alias/RAM-thunk preparation.
-      const auto discovery_row = [&](float y) {
-        if (!rom.supports_hint_alias_discovery()) return;
-        if (rom.hint_alias_discovery ? bevel_button(centered, "hint_discovery", content_x, y, 330.0F, 24.0F, "HInt alias discovery (strict build pass): ON", font_bold, 11.0F)
-                                     : outline_button(centered, "hint_discovery", content_x, y, 330.0F, 24.0F, "HInt alias discovery (strict build pass): off", font_regular, 11.0F))
-          set_discovery(!rom.hint_alias_discovery);
-      };
+      draw_text(dl, font_regular, centered.len(13), text_secondary,
+                centered.at(content_x, panel_y0 + 22.0F + title_pitch * static_cast<float>(title_lines.size()) + 2.0F), meta.c_str());
 
       if (!layout.problem.empty()) {
         ImGui::SetCursorPos(centered.at(content_x, row_y));
@@ -665,33 +867,24 @@ int gui() {
         ImGui::PopStyleColor();
         ImGui::PopTextWrapPos();
       } else if (state == State::RomSelected) {
-        if (!rom.supported_platform)
-          draw_text(dl, font_regular, centered.len(13), col_err, centered.at(content_x, row_y), "This is not a supported Genesis / Mega Drive or Master System ROM.");
-        if (rom.needs_mapper()) {
+        if (!rom.supported_platform) {
+          draw_text(dl, font_regular, centered.len(13), col_err, centered.at(content_x, row_y), "Not a supported Genesis or Master System ROM.");
+          if (outline_button(centered, "choose_u", content_x, row_y + 30.0F, 190.0F, 42.0F, "Choose another...", font_regular, 14.0F)) browse();
+        } else if (rom.needs_mapper()) {
           // The header never identifies the cartridge mapper and nothing is defaulted: the user declares it.
           draw_text(dl, font_regular, centered.len(13), text_secondary, centered.at(content_x, row_y - 2.0F),
-                    "The mapper must be declared (it cannot be detected). Choose one:");
+                    "Declare the cartridge mapper (it cannot be detected):");
           const char *declared = nullptr;
-          if (bevel_button(centered, "mapper_sega", content_x, row_y + 30.0F, 170.0F, 42.0F, "Sega mapper", font_bold, 16.0F)) declared = "sega";
-          if (outline_button(centered, "mapper_rom", content_x + 184.0F, row_y + 30.0F, 190.0F, 42.0F, "ROM only (32 KiB)", font_regular, 14.0F)) declared = "rom_only";
-          if (outline_button(centered, "choose_m", content_x + 388.0F, row_y + 30.0F, 130.0F, 42.0F, "Choose...", font_regular, 13.0F)) browse();
+          if (bevel_button(centered, "mapper_sega", content_x, row_y + 30.0F, 140.0F, 42.0F, "Sega mapper", font_bold, 16.0F)) declared = "sega";
+          if (outline_button(centered, "mapper_rom", content_x + 148.0F, row_y + 30.0F, 150.0F, 42.0F, "ROM only (32 KiB)", font_regular, 13.0F)) declared = "rom_only";
+          if (outline_button(centered, "choose_m", content_x + 306.0F, row_y + 30.0F, 90.0F, 42.0F, "Choose...", font_regular, 13.0F)) browse();
           if (declared != nullptr) {
             rom.mapper = declared;
             entry = entry_dir(rom, layout);
             if (entry_ready_for(entry, rom, layout)) state = State::Ready; else start_build(false);
           }
         } else {
-          if (bevel_button(centered, "recompile", content_x, row_y + 30.0F, 190.0F, 42.0F,
-                           rom.compat_known ? "Recompile & Play" : "Try anyway", font_bold, 16.0F))
-            start_build(false);
-          if (outline_button(centered, "choose1", content_x + 204.0F, row_y + 30.0F, 170.0F, 42.0F, "Choose another...", font_regular, 14.0F))
-            browse();
-          if (rom.supported_platform) mode_row(row_y + 90.0F);
-          if (rom.supported_platform) region_row(row_y + 118.0F);
-          if (rom.supported_platform) discovery_row(row_y + 150.0F);
-          if (rom.optimized() && product_policy_identity(layout, "optimized", rom.aot_model).empty())
-            draw_text(dl, font_regular, centered.len(11), col_err, centered.at(content_x, row_y + 178.0F),
-                      "Optimized cannot verify the build tool identity: saved builds are not reused.");
+          settings_column(true);
         }
       } else if (state == State::Building) {
         static const char *names[BuildJob::stage_count] = {"Analyzing ROM", "Generating native C", "Compiling", "Linking"};
@@ -701,37 +894,7 @@ int gui() {
         draw_text(dl, font_regular, centered.len(12), text_dim, centered.at(content_x, panel_y0 + panel_h - 34.0F),
                  "Large games can take several minutes the first time.");
       } else if (state == State::Ready) {
-        draw_text(dl, font_regular, centered.len(14), col_ok, centered.at(content_x, row_y - 6.0F), "Native build ready");
-        {
-          // Requested vs effective mode, visible: a fallback is never silent.
-          const std::string note = policy_summary(policy_report);
-          if (!note.empty())
-            draw_text(dl, font_regular, centered.len(12), policy_report.fallback ? col_err : text_secondary, centered.at(content_x, row_y + 12.0F), note.c_str());
-        }
-        if (bevel_button(centered, "play", content_x, row_y + 30.0F, 120.0F, 42.0F, "Play", font_bold, 17.0F)) {
-          if (const std::string refusal = launch_refusal(rom); !refusal.empty()) { failure = refusal; diagnostics = refusal; state = State::Failed; }
-          else game = std::make_unique<GameRun>(rom, layout, entry);
-          if (!game) {}
-          else if (game->started()) state = State::Running;
-          else { failure = "The game could not be started."; diagnostics = failure; game.reset(); state = State::Failed; }
-        }
-        if (outline_button(centered, "recompile2", content_x + 134.0F, row_y + 30.0F, 120.0F, 42.0F, "Recompile", font_regular, 14.0F))
-          start_build(true);
-        if (outline_button(centered, "choose2", content_x + 268.0F, row_y + 30.0F, 140.0F, 42.0F, "Choose...", font_regular, 14.0F))
-          browse();
-        // Fixed control scheme (the runtime has no remapping UI yet): keep it visible right where "Play" is.
-        mode_row(row_y + 80.0F);
-        region_row(row_y + 110.0F);
-        discovery_row(row_y + 142.0F);
-        if (policy_report.present && policy_report.requested == "optimized" && outline_button(centered, "fb_details", content_x + 346.0F, row_y + 4.0F, 62.0F, 22.0F, policy_report.fallback ? "Why?" : "Details", font_regular, 11.0F)) {
-          show_diagnostics = !show_diagnostics;
-          fallback_details();
-        }
-        const float controls_y = row_y + 174.0F;
-        draw_text(dl, font_bold, centered.len(13), text_secondary, centered.at(content_x, controls_y), "Controls");
-        draw_text(dl, font_regular, centered.len(13), text_footer, centered.at(content_x, controls_y + 20.0F),
-                 rom.platform_id == "master-system" ? "Arrows = D-Pad   Z = Button 1   X = Button 2   P = Pause   R = Reset"
-                                                    : "Arrows = D-Pad   Z = A   X = B   C = C   Enter = Start");
+        settings_column(true);
       } else if (state == State::Running) {
         draw_text(dl, font_bold, centered.len(16), text_primary, centered.at(content_x, row_y + 10.0F), "Playing...");
         draw_text(dl, font_regular, centered.len(13), text_secondary, centered.at(content_x, row_y + 38.0F), "Close the game window to return.");
@@ -745,20 +908,20 @@ int gui() {
         ImGui::PopStyleColor();
         ImGui::PopTextWrapPos();
         const float by = panel_y0 + panel_h - 64.0F;
-        if (rom.error.empty() && bevel_button(centered, "retry", content_x, by, 130.0F, 40.0F, "Try again", font_bold, 15.0F))
+        if (rom.error.empty() && bevel_button(centered, "retry", content_x, by, 110.0F, 40.0F, "Try again", font_bold, 15.0F))
           start_build(true);
-        if (outline_button(centered, "diag", content_x + 144.0F, by, 168.0F, 40.0F, show_diagnostics ? "Hide diagnostics" : "View diagnostics",
+        if (outline_button(centered, "diag", content_x + 120.0F, by, 150.0F, 40.0F, show_diagnostics ? "Hide diagnostics" : "View diagnostics",
                            font_regular, 13.0F))
           show_diagnostics = !show_diagnostics;
-        if (outline_button(centered, "choose3", content_x + 326.0F, by, 130.0F, 40.0F, "Choose...", font_regular, 13.0F))
+        if (outline_button(centered, "choose3", content_x + 280.0F, by, 110.0F, 40.0F, "Choose...", font_regular, 13.0F))
           browse();
       }
     }
 
     // ---- below the panel: diagnostics (when asked for) or the compact legal/info panel; then the footer ----
-    const float below_y = panel_y1 + 22.0F;
+    const float below_y = panel_y1 + 16.0F;
     if (show_diagnostics && (state == State::Failed || (state == State::Ready && policy_report.present && policy_report.requested == "optimized"))) {
-      const float dh = 130.0F;
+      const float dh = std::min(130.0F, (LH - 90.0F) - below_y);
       dl->AddRectFilled(centered.at(panel_x0, below_y), centered.at(panel_x1, below_y + dh), rgba(5, 9, 20, 235), centered.len(4));
       dl->AddRect(centered.at(panel_x0, below_y), centered.at(panel_x1, below_y + dh), panel_edge, centered.len(4));
       ImGui::SetCursorPos(centered.at(panel_x0 + 12.0F, below_y + 10.0F));
@@ -771,6 +934,15 @@ int gui() {
       ImGui::PopFont();
       ImGui::PopStyleColor();
       ImGui::PopTextWrapPos();
+    } else if (const float avail = (LH - 90.0F) - below_y; avail < 82.0F) {
+      // A tall panel (all options visible) leaves no room for the full notice: keep a compact one-line version rather than overlap the footer.
+      const float legal_h = std::min(30.0F, avail);
+      if (legal_h >= 22.0F) {
+        dl->AddRectFilled(centered.at(panel_x0, below_y), centered.at(panel_x1, below_y + legal_h), panel_fill, centered.len(4));
+        dl->AddRect(centered.at(panel_x0, below_y), centered.at(panel_x1, below_y + legal_h), panel_edge, centered.len(4), 0, centered.len(1.2F));
+        draw_text_centered(dl, font_regular, centered.len(11), text_footer, centered.at(LW * 0.5F, 0).x, centered.at(0, below_y + (legal_h - 11.0F) * 0.5F - 1.0F).y,
+                           "No ROMs included. Use only software you may legally analyze.");
+      }
     } else {
       const float legal_h = 82.0F;
       dl->AddRectFilled(centered.at(panel_x0, below_y), centered.at(panel_x1, below_y + legal_h), panel_fill, centered.len(4));
@@ -827,6 +999,7 @@ int gui() {
   ImGui::DestroyContext();
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
+  if (resolve_job.valid()) resolve_job.wait();  // the worker (bounded by the tool's own 5 s limit) must not touch SDL after SDL_Quit
   SDL_Quit();
   return 0;
 }

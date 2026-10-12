@@ -48,8 +48,8 @@ struct RomView {
   std::string aot_model = "v1";
   [[nodiscard]] bool optimized_gen2() const { return optimized() && aot_model == "gen2"; }
   // Genesis console region (SEG-055): a RUN-TIME choice exported to the game as SEGARECOMP_GENESIS_REGION; it is not part of the cache
-  // identity (one native build serves every region). "usa" (default, the historical console), "japan", or "europe" (PAL: visibly
-  // unsupported, Play refuses with an explanation instead of running 50 Hz software on NTSC timing). The initial value is a hint from
+  // identity (one native build serves every region). "usa" (default, the historical console), "japan", or "europe" (PAL: admitted, but the
+  // machine runs at 60 Hz; 50 Hz timing is not implemented and the UI says so, see region_note). The initial value is a hint from
   // the header's region field; an intrinsically ambiguous field keeps the default and is flagged (`region_ambiguous`).
   std::string region = "usa";
   bool region_ambiguous = false;
@@ -67,10 +67,19 @@ struct RomView {
 // newer single hexadecimal bitfield digit (bit0 Japan NTSC, bit2 Americas NTSC, bit3 Europe PAL). A lone "E" is valid in BOTH (Europe, or
 // the hex digit 0xE = Asia + Americas + Europe), so it is reported as ambiguous and keeps the default; the explicit selection is the override.
 struct RegionHint { std::string region = "usa"; bool ambiguous = false; };
+[[nodiscard]] std::string clean_title(const std::string &raw);  // printable ASCII, single spaces, trimmed
+// Genesis header title (domestic 0x120 / overseas 0x150, 48 bytes each) as clean ASCII: Shift-JIS full-width Latin is decoded, a field
+// holding anything else (katakana, stray bytes) is skipped, and the file name (without its (...)/[...] tags) is the last resort.
+[[nodiscard]] std::string genesis_header_title(const std::vector<std::uint8_t> &bytes, bool domestic_first, const std::string &file_stem);
+[[nodiscard]] std::string region_note(const std::string &region);
+// The region the build's Z80 observation ran under (empty for an older/Master System entry) and the note shown when the selected run-time
+// region differs from it (Z80 coverage is established for the observed region only).
+[[nodiscard]] std::string read_observed_region(const std::filesystem::path &entry);
+[[nodiscard]] std::string region_coverage_note(const std::string &observed, const std::string &selected);
 [[nodiscard]] RegionHint region_hint_from_header_field(const std::string &field);
-// Console region profiles the runtime can execute today (PAL 50 Hz timing is not implemented).
+// Region profiles the runtime accepts: usa, japan and europe (Europe PAL runs on the 60 Hz schedule; 50 Hz timing is not implemented, see region_note).
 [[nodiscard]] bool region_executable(const std::string &region);
-// Empty when the game may be launched; otherwise the plain-language reason it must not be (e.g. Europe PAL).
+// Empty when the game may be launched; otherwise the plain-language reason it must not be (an unknown region name).
 [[nodiscard]] std::string launch_refusal(const RomView &rom);
 // Applies the per-launch environment of the child game to `environment` (never the launcher's own process environment).
 void apply_game_environment(SDL_Environment *environment, const RomView &rom);
@@ -104,6 +113,10 @@ struct PolicyReport {
 [[nodiscard]] std::string policy_details(const PolicyReport &report);
 // The ROM-independent policy identity printed by `segarecomp aot-policy-identity` (empty when the tool cannot be run). The launcher keys its cache on
 // it instead of reproducing any model/schema/contract compatibility rule. Memoized per (tool, policy, model).
+// Memo only (empty when not resolved yet or the last attempt failed); never runs the tool, so it is cheap enough for every UI frame.
+[[nodiscard]] std::string product_policy_identity_memo_lookup(const std::string &key);
+[[nodiscard]] std::string product_policy_identity_cached(const Layout &layout, const std::string &policy, const std::string &model);
+// Runs the product tool (blocking, up to a few seconds): call it from a worker, never from the UI thread.
 [[nodiscard]] std::string product_policy_identity(const Layout &layout, const std::string &policy, const std::string &model);
 // A finished entry is reusable only when it exists AND its recorded request/identity still equal the current request (a stale or foreign
 // entry that somehow shares a directory is rebuilt, never reused).

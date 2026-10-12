@@ -57,7 +57,7 @@ STOP_DIAGNOSTIC_PAIRS = {
     "known_but_unemitted_target": {"known_but_unemitted_target"},
     # SEG-021-T020 / ADR 0043: STOP halted the CPU and no interrupt the machine
     # can raise could ever be accepted.
-    # SEG-055: `unsupported_region_timing` = a console region whose timing is not implemented (PAL) or an unknown region
+    # SEG-055: `unsupported_region_timing` = an unknown / non-selectable console region (PAL is selectable: 60 Hz is forced)
     # name; `hint_handler_not_installed` = an enabled H-interrupt fired without a build-resolved handler.
     "unsupported_interrupt_or_scheduling_event": {"stopped_without_wake_source", "irq6_vector_in_work_ram",
                                                   "unsupported_interrupt_or_scheduling_event",
@@ -1395,7 +1395,7 @@ def run_viewer(executable: pathlib.Path, root: pathlib.Path, instruction_budget:
 # SEG-055: console region selection. The generated program is region-agnostic; the choice reaches it through the
 # SEGARECOMP_GENESIS_REGION environment variable (the same launcher channel as the viewer/capture options), is fixed
 # before the first guest instruction, and drives only the guest-visible hardware version register ($A10001). 50 Hz (PAL)
-# timing is not implemented, so a PAL console is refused here with a clear message before any generation work.
+# timing is not implemented, so a PAL console is admitted with the 60 Hz schedule forced (a one-line notice is printed).
 REGION_CHOICES = ("usa", "japan", "europe", "auto")
 GENESIS_HEADER_REGION_FIELD = (0x1F0, 0x200)
 
@@ -1435,7 +1435,7 @@ def header_region_hint(rom: bytes) -> tuple[str, str]:
 
 def configure_region(requested: str, rom: bytes) -> tuple[str | None, dict]:
     """Resolve --region to a profile name and export it for every program run this invocation performs. Returns
-    (profile or None when refused, summary). `usa` is the default and preserves the historical behavior."""
+    (profile, summary); a PAL profile is admitted with a note that 60 Hz is forced. `usa` is the default and preserves the historical behavior."""
     source = "explicit" if requested != "auto" else "header_hint"
     profile = requested
     note = ""
@@ -1444,8 +1444,8 @@ def configure_region(requested: str, rom: bytes) -> tuple[str | None, dict]:
     summary = {"requested": requested, "profile": profile, "source": source, "note": note,
                "version_register": {"usa": "0xA0", "japan": "0x20", "europe": "0xE0"}[profile]}
     if profile == "europe":
-        summary["error"] = "europe_pal_timing_not_implemented"
-        return None, summary
+        # Admitted, but the machine still runs the 60 Hz NTSC schedule; only the version register reads as PAL.
+        summary["note"] = (note + "; " if note else "") + "PAL is enabled but 60 Hz is forced: 50 Hz timing is not supported"
     os.environ["SEGARECOMP_GENESIS_REGION"] = profile
     return profile, summary
 
@@ -2144,7 +2144,7 @@ def main() -> int:
     # SEG-007-T254: optional interactive SDL3 viewer over the same generated program.
     parser.add_argument("--region", choices=REGION_CHOICES, default="usa",
                         help="SEG-055 console region: usa (default, overseas NTSC, version register 0xA0), japan (domestic NTSC, "
-                             "0x20), europe (PAL: refused, 50 Hz timing is not implemented) or auto (a hint derived from the ROM "
+                             "0x20), europe (PAL version register 0xE0; 60 Hz is forced, 50 Hz is not implemented) or auto (a hint derived from the ROM "
                              "header's region field: overseas NTSC if declared, else Japan). Fixed for the whole run; the "
                              "generated program is unchanged (no rebuild is needed to switch regions)")
     parser.add_argument("--viewer", action="store_true",
@@ -2243,10 +2243,8 @@ def main() -> int:
     region_profile, region_summary = configure_region(args.region, rom_bytes)
     if args.region != "usa":
         sys.stderr.write("REGION_PROFILE " + json.dumps(region_summary, separators=(",", ":"), sort_keys=True) + "\n")
-    if region_profile is None:
-        sys.stderr.write("segarecomp: the Europe PAL console profile is representable (version register 0xE0) but not "
-                         "supported: 50 Hz timing is not implemented; use --region usa or --region japan\n")
-        return 2
+    if region_profile == "europe":
+        sys.stderr.write("segarecomp: PAL region enabled, but 60 Hz is forced; 50 Hz timing is not supported\n")
     if args.rom_sha256 and args.rom_sha256 != digest:
         return 4
     emitter_command = [*process_tree.script_argv(binary), "emit-general-startup-bridge-c", "--rom", str(rom)]

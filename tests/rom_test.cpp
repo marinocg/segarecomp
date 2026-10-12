@@ -133,4 +133,33 @@ void test_sha256() {
   expect(hex(std::string(64, 'a')) == "ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb", "sha256 64 bytes");
   expect(hex(std::string(1000000, 'a')) == "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0", "sha256 million a");
 }
-int main() { test_sha256(); test_provenance_and_display(); test_precedence_and_bounds(); test_reset_contract_matrix(); return failures == 0 ? 0 : 1; }
+// The single header-region policy (libs/media) against the case table the Python bridge is also checked against.
+void test_genesis_region_hint() {
+  const auto path = std::filesystem::path(__FILE__).parent_path() / "fixtures/genesis_region_hint_cases.json";
+  std::ifstream file(path);
+  expect(file.good(), "region hint case table is readable");
+  std::size_t checked = 0;
+  for (std::string line; std::getline(file, line);) {
+    const auto f = line.find("\"field\": \"");
+    if (f == std::string::npos) continue;
+    const auto begin = f + 10;
+    const auto end = line.find('"', begin);
+    std::string field = line.substr(begin, end - begin);
+    for (auto at = field.find("\\u0000"); at != std::string::npos; at = field.find("\\u0000")) field.replace(at, 6, 1, '\0');
+    const auto p = line.find("\"profile\": \"");
+    const auto pend = line.find('"', p + 12);
+    const std::string profile = line.substr(p + 12, pend - p - 12);
+    const bool ambiguous = line.find("\"ambiguous\": true") != std::string::npos;
+    std::string padded = field;
+    padded.resize(16, ' ');
+    const auto hint = segarecomp::genesis_region_hint(padded);
+    expect(hint.profile == profile && hint.ambiguous == ambiguous, "genesis_region_hint matches the shared case table: " + field);
+    std::vector<std::uint8_t> rom(0x200, 0U);
+    for (std::size_t i = 0; i < 16; ++i) rom[0x1F0 + i] = static_cast<std::uint8_t>(padded[i]);
+    expect(segarecomp::genesis_region_hint(std::span<const std::uint8_t>(rom)).profile == profile, "ROM-span overload agrees: " + field);
+    ++checked;
+  }
+  expect(checked >= 20, "the case table was parsed");
+  expect(segarecomp::genesis_region_hint(std::span<const std::uint8_t>(std::vector<std::uint8_t>(0x100, 0U))).profile == "usa", "a short image defaults to usa");
+}
+int main() { test_genesis_region_hint(); test_sha256(); test_provenance_and_display(); test_precedence_and_bounds(); test_reset_contract_matrix(); return failures == 0 ? 0 : 1; }

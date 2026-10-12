@@ -107,12 +107,35 @@ int main(void) {
     reject(&r, ports[2], GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG);
     device_accepts = 1;
     assert(r.devices.psg.write_count == 1U && seen_count == 1U);
-    /* the even neighbours are not PSG ports: the pre-existing VDP lane answers */
+    /* the even neighbours are not PSG ports: a BYTE write to each of the four even addresses is accepted and DISCARDED -- no PSG access, no
+       audio-device write, no state change at all (some cartridges write their silence bytes that way); everything else there stays rejected */
     {
-      GenesisRuntimeStop stop = {0};
-      uint32_t value = 0x55U;
-      assert(genesis_route_access(&r, UINT32_C(0x00C00010), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
-      assert(stop.diagnostic_category != GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG);
+      static const uint32_t evens[4] = {UINT32_C(0x00C00010), UINT32_C(0x00C00012), UINT32_C(0x00C00014), UINT32_C(0x00C00016)};
+      unsigned k;
+      const unsigned seen_before = seen_count;
+      for (k = 0; k < 4; ++k) {
+        GenesisRuntimeStop stop = {0};
+        uint32_t value = 0x9FU;
+        GenesisRuntime before = r;
+        assert(genesis_route_access(&r, evens[k], GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+        assert(value == 0x9FU);
+        assert(memcmp(&r, &before, sizeof(r)) == 0);                       /* PSG log, scheduler, every device: untouched */
+        assert(r.devices.psg.write_count == 1U && seen_count == seen_before); /* nothing reached the audio device */
+        /* unsupported widths and every read are still rejected, and a rejection mutates nothing */
+        assert(genesis_route_access(&r, evens[k], GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+        assert(stop.diagnostic_category != GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG);
+        assert(genesis_route_access(&r, evens[k], GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+        assert(genesis_route_access(&r, evens[k], GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+        assert(memcmp(&r, &before, sizeof(r)) == 0);
+      }
+      /* the same with NO audio device attached: still accepted and the PSG log still not advanced */
+      {
+        GenesisRuntime bare = {0};
+        GenesisRuntimeStop stop = {0};
+        uint32_t value = 0xFFU;
+        assert(genesis_route_access(&bare, evens[0], GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+        assert(bare.devices.psg.write_count == 0U);
+      }
     }
   }
 

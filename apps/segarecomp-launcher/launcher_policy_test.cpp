@@ -80,10 +80,42 @@ int main(int argc, char **argv) {
     sms_discovery.hint_alias_discovery = true;
     expect(entry_dir(sms_discovery, layout) == entry_dir(sms, layout), "Master System ignores discovery (non-Genesis paths unchanged)");
 
-    // PAL refuses cleanly; NTSC profiles and non-Genesis launches are never refused.
-    expect(launch_refusal(europe).find("PAL") != std::string::npos && launch_refusal(japan).empty() && launch_refusal(genesis).empty() && launch_refusal(sms).empty(),
-           "Europe PAL is refused with an explanation; USA, Japan and Master System are launchable");
-    expect(region_executable("usa") && region_executable("japan") && !region_executable("europe") && !region_executable("bogus"), "only the NTSC profiles execute");
+    // Every known profile (including the PAL approximation) and non-Genesis launches are launchable; only an unknown region name is refused.
+    expect(launch_refusal(europe).empty() && launch_refusal(japan).empty() && launch_refusal(genesis).empty() && launch_refusal(sms).empty(),
+           "Europe PAL, USA, Japan and Master System are launchable");
+    expect(clean_title("SONIC THE             HEDGEHOG 3                ") == "SONIC THE HEDGEHOG 3" && clean_title("  A\x01\xC3\xA9" "B \t C  ") == "A B C" &&
+               clean_title("\x01\x02").empty(), "titles lose padding, control bytes and non-ASCII noise");
+    {
+      const auto header = [](const std::string &domestic, const std::string &overseas) {
+        std::vector<std::uint8_t> rom(0x200, 0x20U);
+        std::copy(domestic.begin(), domestic.end(), rom.begin() + 0x120);
+        std::copy(overseas.begin(), overseas.end(), rom.begin() + 0x150);
+        return rom;
+      };
+      expect(genesis_header_title(header("BARE KNUCKLE", "STREETS OF RAGE"), false, "x") == "STREETS OF RAGE",
+             "the international name is preferred unless the cartridge is Japan-only");
+      expect(genesis_header_title(header("BARE KNUCKLE", "STREETS OF RAGE"), true, "x") == "BARE KNUCKLE", "Japan-only cartridges show the domestic name");
+      expect(genesis_header_title(header("\x82" "f\x82n\x82k\x82" "c\x82" "d\x82m\x81@\x82`\x82w\x82" "d", ""), true, "x") == "GOLDEN AXE",
+             "Shift-JIS full-width Latin decodes to ASCII");
+      expect(genesis_header_title(header("\x83}\x83" "C\x83P", "MICHAEL JACKSON\x85" "FS MOONWALKER"), true, "Michael Jackson's Moonwalker (JUE) [!]") ==
+                 "Michael Jackson's Moonwalker",
+             "unreadable fields fall back to the tag-free file name, never to hex escapes");
+      expect(genesis_header_title(std::vector<std::uint8_t>(0x200, 0U), false, "Game (E)") == "Game", "an empty header uses the file name");
+    }
+    expect(region_coverage_note("japan", "japan").empty() && region_coverage_note("", "usa").empty() && region_coverage_note("japan", "usa").find("not covered") != std::string::npos,
+           "a run-time region other than the observed Z80 region is flagged; unknown/older entries and the observed region are not");
+    {
+      const fs::path dir = fs::temp_directory_path() / "segarecomp-observed-region-test";
+      fs::create_directories(dir);
+      { std::ofstream(dir / "status.json") << "{\"status\":\"ok\",\"z80\":{\"outcome\":\"converged\",\"observed_region\":\"japan\",\"images\":2}}"; }
+      expect(read_observed_region(dir) == "japan", "status.json z80.observed_region is read");
+      { std::ofstream(dir / "status.json") << "{\"z80\":{\"observed_region\":\"mars\"}}"; }
+      expect(read_observed_region(dir).empty(), "an unknown observed region name is ignored");
+      fs::remove_all(dir);
+    }
+    expect(region_note(europe.region).find("60 Hz is forced") != std::string::npos && region_note("usa").empty() && region_note("japan").empty(),
+           "only PAL carries the 60 Hz-forced notice");
+    expect(region_executable("usa") && region_executable("japan") && region_executable("europe") && !region_executable("bogus"), "the three profiles execute; unknown names do not");
 
     // The child environment (injectable seam): the selection is applied to the child's environment object, not the process environment,
     // and it overrides any inherited value, including for USA.
@@ -106,7 +138,7 @@ int main(int argc, char **argv) {
     const auto hint = [](const char *text) { return region_hint_from_header_field(std::string(text)); };
     expect(hint("J").region == "japan" && !hint("J").ambiguous, "J alone selects Japan NTSC");
     expect(hint("JUE").region == "usa" && hint("U").region == "usa" && hint("JU").region == "usa", "an overseas NTSC declaration keeps USA");
-    expect(hint("1").region == "japan" && hint("4").region == "usa" && hint("5").region == "usa" && hint("8").region == "usa", "hexadecimal bitfield digits");
+    expect(hint("1").region == "japan" && hint("4").region == "usa" && hint("5").region == "usa" && hint("8").region == "europe", "hexadecimal bitfield digits (the shared libs/media policy: Europe-only -> europe)");
     expect(hint("E").region == "usa" && hint("E").ambiguous && hint("E               ").ambiguous, "a bare E is ambiguous and keeps the USA default");
     expect(hint("").region == "usa" && !hint("").ambiguous, "an empty field keeps the default");
   }
@@ -184,11 +216,17 @@ int main(int argc, char **argv) {
       std::ofstream(entry_executable(sms_entry), std::ios::binary) << "x";
       expect(entry_ready_for(sms_entry, sms_rom, broken), "Master System does not depend on the product identity");
     }
+    // The per-frame (UI-thread) query never starts the tool: a failed lookup leaves it empty (and is not memoized), and it is instantaneous.
+    expect(product_policy_identity_cached(broken, "optimized", "v1").empty() && product_policy_identity_cached(broken, "optimized", "gen2").empty(),
+           "the memo-only query is empty after a failed lookup (no negative cache, no spawn)");
     // Recovery: the same path becomes a working tool; the earlier failure was not memoized.
     fs::create_directories(broken.cli.parent_path());
     fs::copy_file(argv[1], broken.cli, fs::copy_options::overwrite_existing);
     expect(product_policy_identity(broken, "optimized", "v1") == good_v1 && product_policy_identity(broken, "optimized", "gen2") == good_g2, "recovery: lookup succeeds later");
     expect(entry_ready_for(keep_v1, optimized, broken) && entry_ready_for(keep_g2, gen2, broken), "recovery: the matching entries are reusable again");
+    expect(product_policy_identity_cached(broken, "optimized", "v1") == good_v1 && product_policy_identity_cached(broken, "optimized", "gen2") == good_g2 &&
+               product_policy_identity_cached(layout, "optimized", "other-model").empty(),
+           "the memo-only query returns exactly what a successful lookup memoized, per tool/policy/model key");
     // Cache key: an unavailable identity never selects the directory of a verified entry.
     Layout missing = layout;
     missing.cli = dir / "gone" / "segarecomp-missing";

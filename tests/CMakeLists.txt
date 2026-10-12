@@ -1206,8 +1206,10 @@ add_test(NAME genesis_z80_build_pipeline_falsify_test COMMAND ${Python3_EXECUTAB
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_build_pipeline_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR} falsify)
 add_test(NAME genesis_z80_build_pipeline_prepare_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_build_pipeline_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR} prepare)
+add_test(NAME genesis_z80_build_pipeline_region_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/genesis_z80_build_pipeline_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${CMAKE_CXX_COMPILER} ${PROJECT_SOURCE_DIR} region)
 set(_z80_pipeline_tests genesis_z80_build_pipeline_test genesis_z80_build_pipeline_bound_test genesis_z80_build_pipeline_smc_test
-  genesis_z80_build_pipeline_falsify_test genesis_z80_build_pipeline_prepare_test)
+  genesis_z80_build_pipeline_falsify_test genesis_z80_build_pipeline_prepare_test genesis_z80_build_pipeline_region_test)
 set_property(TEST ${_z80_pipeline_tests} APPEND PROPERTY LABELS full)
 set_property(TEST ${_z80_pipeline_tests} PROPERTY TIMEOUT 3000)
 set_property(TEST genesis_z80_forbidden_identifiers_test ${_z80_pipeline_tests} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")

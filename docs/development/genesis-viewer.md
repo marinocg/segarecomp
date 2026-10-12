@@ -53,11 +53,13 @@ independent three-button pads on DATA1/DATA2 and are host input, not part of dev
 version register ($A10001): `usa` = overseas NTSC `0xA0`, `japan` = domestic NTSC `0x20`, `europe` = overseas PAL `0xE0`. The generated program is the
 same for every region, so switching needs no rebuild; the choice is exported to the program as `SEGARECOMP_GENESIS_REGION`, fixed before the
 first instruction and stable for the whole run (set that variable directly for a built `segarecomp build ... --play` product). `auto` derives a
-*hint* from the ROM header's region-support field (overseas NTSC if declared, else Japan); an explicit choice always wins, and header metadata is never
-treated as proof of the console. `europe` is refused before any generation: 50 Hz timing is not implemented. Cartridges with a region lockout
+*hint* from the ROM header's region-support field (`segarecomp::genesis_region_hint`, the one shared policy: overseas NTSC if declared, else Japan,
+else Europe; a lone `E` is ambiguous and keeps `usa`); an explicit choice always wins, and header metadata is never treated as proof of the console.
+`europe` is accepted but is an **approximation**: the guest reads the PAL version register while the machine still runs the 60 Hz schedule
+(50 Hz timing is not implemented); the bridge prints a notice and `RUNTIME_NOTES` carries `runtime_hz` 60 / `hardware_hz` 50. Cartridges with a region lockout
 (for example a Japan-only image) show their own lockout screen under a console they reject -- a normal guest outcome, not an emulator error;
 select `--region japan` for such an image. The bridge prints a `REGION_PROFILE {...}` line to stderr when `--region` is given, and the capture/viewer builds print one `RUNTIME_NOTES {...}` line
-(region, undelivered H-interrupts, rejected frames, VRAM-journal overflows) only when something notable happened.
+(region, undelivered H-interrupts, rejected frames, VRAM-journal overflows, runtime_hz/hardware_hz) only when something notable happened.
 
 H-interrupts (VDP register #0 bit 4) are now delivered when the cartridge's handler could be compiled. A handler that cannot be compiled -- for example one the game builds in work RAM at run time -- is
 counted as `hint_undelivered` and the program continues (the behavior of every earlier build, now visible); `SEGARECOMP_GENESIS_HINT=strict` stops fail-closed with `hint_handler_not_installed` instead.

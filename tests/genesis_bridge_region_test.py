@@ -2,9 +2,10 @@
 """SEG-055: the bridge's console-region selection (`--region`) -- pure-Python, hermetic, no ROM and no generation.
 
 Covers: header region-support hints (old letter style and the new hexadecimal bitfield style), the documented preference order
-(overseas NTSC, else Japan, else Europe), `auto` vs explicit selection, the default console, Europe/PAL refusal, the environment
+(overseas NTSC, else Japan, else Europe), `auto` vs explicit selection, the default console, Europe/PAL admission (60 Hz forced), the environment
 variable handed to the generated program, and the new typed diagnostics accepted by the stop-pair table.
 """
+import json
 import os
 import pathlib
 import sys
@@ -42,6 +43,14 @@ def main():
   check(hint(b"\x00" * 0x100)[0] == "usa", "an image too short for the header field falls back to the default")
   check("J" in hint(rom_with_region(b"J"))[1], "the hint describes what the header declares")
 
+  # Cross-component equivalence: the bridge must agree with the single C++ policy (libs/media genesis_region_hint, also used by the launcher
+  # and `segarecomp build`) on the shared case table, which tests/rom_test.cpp checks against the C++ implementation.
+  cases = json.loads((ROOT / "tests" / "fixtures" / "genesis_region_hint_cases.json").read_text())["cases"]
+  for case in cases:
+    profile, note = hint(rom_with_region(case["field"].encode("latin-1")))
+    check(profile == case["profile"] and ("ambiguous" in note) == case["ambiguous"],
+          "bridge header_region_hint disagrees with the shared case table for %r: %s %s" % (case["field"], profile, note))
+
   saved = os.environ.get("SEGARECOMP_GENESIS_REGION")
   try:
     os.environ.pop("SEGARECOMP_GENESIS_REGION", None)
@@ -58,11 +67,11 @@ def main():
     check(os.environ["SEGARECOMP_GENESIS_REGION"] == "usa", "the default (usa) replaces an inherited value, so the run is deterministic")
     os.environ["SEGARECOMP_GENESIS_REGION"] = "japan"
     refused, summary = bridge.configure_region("europe", rom_with_region(b"JUE"))
-    check(refused is None and summary["error"] == "europe_pal_timing_not_implemented" and summary["version_register"] == "0xE0",
-          "Europe PAL is representable (0xE0) but refused honestly")
-    check(os.environ["SEGARECOMP_GENESIS_REGION"] == "japan", "a refused profile leaves the environment untouched")
-    refused_auto, _ = bridge.configure_region("auto", rom_with_region(b"8"))
-    check(refused_auto is None, "auto resolving to Europe (unambiguous new-style 8) is refused as well")
+    check(refused == "europe" and "error" not in summary and summary["version_register"] == "0xE0" and "60 Hz is forced" in summary["note"],
+          "Europe PAL is admitted (0xE0) with an honest note that 60 Hz is forced")
+    check(os.environ["SEGARECOMP_GENESIS_REGION"] == "europe", "an admitted PAL profile is exported to the run")
+    admitted_auto, _ = bridge.configure_region("auto", rom_with_region(b"8"))
+    check(admitted_auto == "europe", "auto resolving to Europe (unambiguous new-style 8) is admitted as well")
   finally:
     if saved is None:
       os.environ.pop("SEGARECOMP_GENESIS_REGION", None)

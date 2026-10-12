@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace segarecomp {
@@ -114,6 +115,18 @@ struct GenesisResetImageReport {
 [[nodiscard]] const char *outcome_name(ClassificationOutcome outcome) noexcept;
 [[nodiscard]] const char *diagnostic_name(Diagnostic diagnostic) noexcept;
 [[nodiscard]] std::string format_inspection(const RomInfo &rom);
+// The ONE interpretation of the Genesis header's region-support field ($1F0-$1FF) used by every component (launcher default selection,
+// `segarecomp build`'s observation pass, and -- checked against the same case table -- tools/genesis_startup_bridge.py `--region auto`).
+// A header is a compatibility declaration, never proof of the console: prefer an overseas NTSC declaration ("usa"), else Japan ("japan"),
+// else Europe ("europe"); a lone "E" is valid in both encodings (letter Europe / hex digit 0xE) and is reported `ambiguous` with the
+// historical "usa" default; nothing recognizable also yields "usa". `profile` is only ever "usa", "japan" or "europe" (the Europe profile
+// selects the PAL version register; the machine still runs at 60 Hz).
+struct GenesisRegionHint {
+  std::string profile{"usa"};
+  bool ambiguous{false};
+};
+[[nodiscard]] GenesisRegionHint genesis_region_hint(std::string_view region_field);
+[[nodiscard]] GenesisRegionHint genesis_region_hint(std::span<const std::uint8_t> rom);  // reads $1F0..$1FF; "usa" when too short
 [[nodiscard]] GenesisResetImageReport analyze_genesis_reset_image(std::span<const std::uint8_t> bytes);
 [[nodiscard]] const char *reset_diagnostic_name(ResetDiagnostic diagnostic) noexcept;
 [[nodiscard]] std::string format_genesis_reset_image_report(const GenesisResetImageReport &report);

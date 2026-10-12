@@ -6,6 +6,9 @@
 #include "segarecomp/sha256.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
+#include <optional>
 #include <cstdlib>
 #include <fstream>
 #include <map>
@@ -121,31 +124,82 @@ fs::path cache_root() {
   return result;
 }
 
-RegionHint region_hint_from_header_field(const std::string &raw) {
-  std::string field = raw;
-  while (!field.empty() && (field.back() == ' ' || field.back() == '\0')) field.pop_back();
-  RegionHint hint;
-  if (field == "E") { hint.ambiguous = true; return hint; }  // letter E and hex digit 0xE are both valid readings
-  bool japan = false, overseas = false;
-  if (field.find_first_of("JUE") != std::string::npos) {
-    japan = field.find('J') != std::string::npos;
-    overseas = field.find('U') != std::string::npos;
-  } else if (!field.empty() && std::isxdigit(static_cast<unsigned char>(field[0]))) {
-    const int bits = std::stoi(field.substr(0, 1), nullptr, 16);
-    japan = (bits & 1) != 0;
-    overseas = (bits & 4) != 0;
+std::string clean_title(const std::string &raw) {
+  // Header titles are fixed-width, space padded and may carry control bytes or non-ASCII garbage: keep printable ASCII only
+  // (anything else acts as a separator), collapse every whitespace run to one space and trim.
+  std::string out;
+  bool pending_space = false;
+  for (const char raw_char : raw) {
+    const auto c = static_cast<unsigned char>(raw_char);
+    if (c > 0x20 && c < 0x7F) {
+      if (pending_space && !out.empty()) out.push_back(' ');
+      pending_space = false;
+      out.push_back(static_cast<char>(c));
+    } else {
+      pending_space = true;
+    }
   }
-  // Japan only when no overseas NTSC region is declared; everything else keeps the historical USA NTSC default.
-  hint.region = (japan && !overseas) ? "japan" : "usa";
-  return hint;
+  return out;
 }
 
-bool region_executable(const std::string &region) { return region == "usa" || region == "japan"; }
+namespace {
+// One header title field as readable ASCII, or nullopt when it holds anything that cannot be shown faithfully. Besides ASCII this
+// understands the Shift-JIS full-width Latin letters, digits and space some Japanese cartridges use ("\x82`" = 'A'); katakana and every
+// other multi-byte code is not representable by the launcher's Latin font and is reported as unreadable rather than shown as escapes.
+std::optional<std::string> decode_header_title(const std::vector<std::uint8_t> &bytes, std::size_t offset, std::size_t length) {
+  if (bytes.size() < offset + length) return std::nullopt;
+  std::string out;
+  for (std::size_t i = 0; i < length; ++i) {
+    const unsigned b = bytes[offset + i];
+    if (b < 0x80U) { out.push_back(b >= 0x20U && b < 0x7FU ? static_cast<char>(b) : ' '); continue; }
+    if (i + 1 >= length) return std::nullopt;
+    const unsigned t = bytes[offset + ++i];
+    if (b == 0x81U && t == 0x40U) out.push_back(' ');
+    else if (b == 0x82U && t >= 0x4FU && t <= 0x58U) out.push_back(static_cast<char>('0' + (t - 0x4FU)));
+    else if (b == 0x82U && t >= 0x60U && t <= 0x79U) out.push_back(static_cast<char>('A' + (t - 0x60U)));
+    else if (b == 0x82U && t >= 0x81U && t <= 0x9AU) out.push_back(static_cast<char>('a' + (t - 0x81U)));
+    else return std::nullopt;
+  }
+  return out;
+}
+
+std::string strip_tags(const std::string &name) {  // "Game (JUE) [!]" -> "Game"
+  std::string out;
+  int depth = 0;
+  for (const char c : name) {
+    if (c == '(' || c == '[') ++depth;
+    else if ((c == ')' || c == ']') && depth > 0) --depth;
+    else if (depth == 0) out.push_back(c);
+  }
+  return out;
+}
+}  // namespace
+
+std::string genesis_header_title(const std::vector<std::uint8_t> &bytes, bool domestic_first, const std::string &file_stem) {
+  const auto domestic = decode_header_title(bytes, 0x120, 48);
+  const auto overseas = decode_header_title(bytes, 0x150, 48);
+  for (const auto *candidate : domestic_first ? std::array{&domestic, &overseas} : std::array{&overseas, &domestic}) {
+    if (!candidate->has_value()) continue;
+    if (const std::string title = clean_title(**candidate); !title.empty()) return title;
+  }
+  if (const std::string stem = clean_title(strip_tags(file_stem)); !stem.empty()) return stem;
+  return clean_title(file_stem);
+}
+
+RegionHint region_hint_from_header_field(const std::string &raw) {
+  const segarecomp::GenesisRegionHint hint = segarecomp::genesis_region_hint(raw);  // the single shared policy (libs/media)
+  return RegionHint{hint.profile, hint.ambiguous};
+}
+
+// Every profile executes; Europe PAL runs on the 60 Hz schedule (50 Hz timing is not implemented), see region_note.
+bool region_executable(const std::string &region) { return region == "usa" || region == "japan" || region == "europe"; }
+
+std::string region_note(const std::string &region) {
+  return region == "europe" ? "PAL enabled, but 60 Hz is forced: 50 Hz is not supported." : std::string();
+}
 
 std::string launch_refusal(const RomView &rom) {
-  if (rom.supports_region() && !region_executable(rom.region))
-    return "Europe (PAL) is not supported yet: the console would run at 50 Hz and Segarecomp only implements NTSC (60 Hz) timing. "
-           "Choose USA (NTSC) or Japan (NTSC).";
+  if (rom.supports_region() && !region_executable(rom.region)) return "Unknown console region: choose USA, Japan or Europe.";
   return {};
 }
 
@@ -166,7 +220,7 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
       view.supported_platform = true;
       view.platform_id = "master-system";
       view.platform = "Master System";
-      view.title = utf8(path.stem());
+      view.title = clean_title(utf8(path.stem()));
       const fs::path sidecar = fs::path(path).replace_extension(".mapper.json");
       std::error_code manifest_ec;
       if (fs::is_regular_file(sidecar, manifest_ec)) {
@@ -179,14 +233,14 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
     view.supported_platform = info.platform == segarecomp::Platform::genesis;
     view.platform_id = view.supported_platform ? "genesis" : "";
     view.platform = view.supported_platform ? "Genesis / Mega Drive" : "Unrecognized file";
-    view.title = info.domestic_title_display;
-    while (!view.title.empty() && view.title.back() == ' ') view.title.pop_back();
-    if (view.title.empty()) view.title = utf8(path.stem());
+    view.title = clean_title(utf8(path.stem()));
     std::error_code ec;
     if (view.supported_platform && bytes.size() >= 0x200) {
       const RegionHint hint = region_hint_from_header_field(std::string(reinterpret_cast<const char *>(&bytes[0x1F0]), 16));
       view.region = hint.region;
       view.region_ambiguous = hint.ambiguous;
+      // A Japan-only cartridge shows its domestic name first; every other one the international (overseas) name.
+      view.title = genesis_header_title(std::vector<std::uint8_t>(bytes.begin(), bytes.end()), hint.region == "japan", utf8(path.stem()));
     }
     view.compat_known = fs::is_regular_file(layout.runtime / "compat" / (view.sha256 + ".json"), ec);
   } catch (const std::exception &error) {
@@ -275,6 +329,24 @@ PolicyReport read_policy_report(const fs::path &entry) {
   return report;
 }
 
+std::string read_observed_region(const fs::path &entry) {
+  // `z80.observed_region` of status.json: the single console region the build-time Z80 observation ran under.
+  const std::string status = read_all(entry / "status.json");
+  const auto at = status.find("\"observed_region\":\"");
+  if (at == std::string::npos) return {};
+  const auto begin = at + 19;
+  const auto end = status.find('"', begin);
+  const std::string value = end == std::string::npos ? std::string() : status.substr(begin, end - begin);
+  return value == "usa" || value == "japan" || value == "europe" ? value : std::string();
+}
+
+std::string region_coverage_note(const std::string &observed, const std::string &selected) {
+  // Z80 (sound) images are materialized from ONE observed run. A different run-time region is not observed, so its sound coverage is not
+  // established (it may stop with z80_unknown_image if that region uploads a different driver).
+  if (observed.empty() || selected.empty() || observed == selected) return {};
+  return "Sound was analyzed for the " + observed + " console; " + selected + " is not covered.";
+}
+
 std::string policy_summary(const PolicyReport &report) {
   if (!report.present) return {};
   if (report.requested != "optimized") return "Compatibility build";
@@ -298,14 +370,20 @@ std::string policy_details(const PolicyReport &r) {
   return text;
 }
 
+namespace {
+std::map<std::string, std::string> &identity_memo() { static std::map<std::string, std::string> memo; return memo; }
+std::mutex &identity_memo_mutex() { static std::mutex m; return m; }
+}  // namespace
+
+std::string product_policy_identity_memo_lookup(const std::string &key) {
+  std::lock_guard<std::mutex> lock(identity_memo_mutex());
+  const auto found = identity_memo().find(key);
+  return found == identity_memo().end() ? std::string() : found->second;
+}
+
 std::string product_policy_identity(const Layout &layout, const std::string &policy, const std::string &model) {
-  static std::map<std::string, std::string> memo;
-  static std::mutex memo_mutex;
   const std::string key = utf8(layout.cli) + "|" + policy + "|" + model;
-  {
-    std::lock_guard<std::mutex> lock(memo_mutex);
-    if (const auto found = memo.find(key); found != memo.end()) return found->second;
-  }
+  if (const std::string known = product_policy_identity_memo_lookup(key); !known.empty()) return known;
   std::string identity;
   std::error_code ec;
   if (fs::is_regular_file(layout.cli, ec)) {
@@ -348,9 +426,14 @@ std::string product_policy_identity(const Layout &layout, const std::string &pol
     }
   }
   if (identity.empty()) return identity;  // a failure is never memoized: the next call retries
-  std::lock_guard<std::mutex> lock(memo_mutex);
-  memo[key] = identity;
+  std::lock_guard<std::mutex> lock(identity_memo_mutex());
+  identity_memo()[key] = identity;
   return identity;
+}
+
+std::string product_policy_identity_cached(const Layout &layout, const std::string &policy, const std::string &model) {
+  // Same memo as product_policy_identity, but never starts the tool: safe to call every frame on the UI thread.
+  return product_policy_identity_memo_lookup(utf8(layout.cli) + "|" + policy + "|" + model);
 }
 
 bool entry_ready_for(const fs::path &entry, const RomView &rom, const Layout &layout) {
