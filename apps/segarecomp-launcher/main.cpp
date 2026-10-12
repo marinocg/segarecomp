@@ -18,6 +18,7 @@
 #include "imgui_impl_sdlrenderer3.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -200,10 +201,8 @@ struct Layout2D {
 };
 
 float text_width(ImFont *font, float px, const char *text) {
-  ImGui::PushFont(font, px);
-  const float w = ImGui::CalcTextSize(text).x;
-  ImGui::PopFont();
-  return w;
+  // Measured at exactly `px` (what AddText draws), independent of any ImGui font scaling.
+  return font->CalcTextSizeA(px, FLT_MAX, 0.0F, text).x;
 }
 
 // Greedy word wrap into at most two lines of `max_px` (device pixels); an overlong last line ends in "...", an overlong word is cut.
@@ -415,7 +414,11 @@ int gui() {
   io.IniFilename = nullptr;
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;  // Tab/Enter/Space reach and activate the custom buttons
   ImGui::StyleColorsDark();
-  ImGui::GetStyle().FontScaleDpi = content_scale;
+  // Every size in this UI is already in final device pixels (design units * the window-fit scale, and the window itself is sized by the
+  // display scale), so ImGui must not multiply fonts again: with FontScaleDpi = display scale, ImGui::PushFont-based text (and its measured
+  // width) came out display-scale times larger than the AddText-drawn text, which shifted "centered" text left on scaled Windows displays.
+  ImGui::GetStyle().FontScaleDpi = 1.0F;
+  (void)content_scale;
   ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
   ImGui_ImplSDLRenderer3_Init(renderer);
 
