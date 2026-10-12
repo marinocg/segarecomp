@@ -1465,3 +1465,12 @@ The Version-register BYTE read (`$A10001`, SEG-007-T079) is no longer a build-ti
 DATA1/DATA2 reads, and the runtime returns the value of the configured console region profile (Japan NTSC `0x20`, USA NTSC `0xA0`, Europe PAL `0xE0`; default USA NTSC = the original
 policy value). The host-side selector table (`m68k_controller_io_access`) keeps the USA value for analysis-only callers. See `docs/architecture/genesis-raster-and-display-modes.md` section 5. Consequently the
 analysis can no longer prune code behind a version-dependent branch, so such branches (for example the TMSS `'SEGA'` write guarded by the hardware revision nibble) are discovered; such a path is only *executed* on a console reporting a non-zero revision nibble, which no modelled profile does, and the TMSS write to `$A14000` remains an unsupported device access (typed stop) if it ever were.
+
+## Startup probe shapes added with the launcher compatibility pass
+
+Two shapes seen in a real cartridge's startup (one Moonwalker revision) were previously fail-closed although the cartridge runs on hardware:
+
+* **WORD read of `$A10000`** (`move.w $A10000,d0; andi.w #$0F00,d0; beq`): the version register is wired to the odd data lane, so the read returns the configured region's version byte in the low byte and `0` in the even (high) lane. The high-lane value is a project policy (open bus is not established by the cited documents); it makes the usual "no TMSS" path run. The BYTE read at `$A10001` is unchanged.
+* **BYTE write to an even PSG-window address** (`$C00010/12/14/16`): accepted and discarded. Only the four odd addresses reach the PSG (unchanged); WORD/LONG writes and all reads still fail closed.
+
+Both are covered by `tests/genesis_hint_region_controller_test.cpp` and `tests/genesis_startup_runtime_psg_test.py`.

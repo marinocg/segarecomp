@@ -107,11 +107,14 @@ int main(void) {
     reject(&r, ports[2], GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS, GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG);
     device_accepts = 1;
     assert(r.devices.psg.write_count == 1U && seen_count == 1U);
-    /* the even neighbours are not PSG ports: the pre-existing VDP lane answers */
+    /* the even neighbours are not PSG ports: a BYTE write there is accepted and discarded (some cartridges write their silence bytes
+       that way), nothing reaches the PSG; a WORD write is still not a PSG access */
     {
       GenesisRuntimeStop stop = {0};
       uint32_t value = 0x55U;
-      assert(genesis_route_access(&r, UINT32_C(0x00C00010), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
+      assert(genesis_route_access(&r, UINT32_C(0x00C00010), GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK);
+      assert(r.devices.psg.write_count == 1U && seen_count == 1U);
+      assert(genesis_route_access(&r, UINT32_C(0x00C00010), GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL);
       assert(stop.diagnostic_category != GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_PSG);
     }
   }

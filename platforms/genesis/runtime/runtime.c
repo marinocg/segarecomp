@@ -173,6 +173,15 @@ static int genesis_controller_io_access(GenesisDeviceState *devices, uint8_t pad
     *value = segarecomp_genesis_region_version_value(region);
     return 1;
   }
+  /* A WORD read of the version register's even address ($A10000) is the TMSS/version probe some cartridges use instead of the BYTE read
+     (`move.w $A10000,d0; andi.w #$0F00,d0`). The register is wired to the odd data lane: the low byte is the version value and the even
+     (high) lane carries no register bit, which this project models as 0 -- so the common "no TMSS present" path is taken. This is a
+     project compatibility policy (the even lane's real open-bus value is not established by the cited public documents). */
+  if (address == SEGARECOMP_GENESIS_CONTROLLER_VERSION_BYTE_ADDRESS - 1U && width == GENESIS_ACCESS_WORD &&
+      direction == GENESIS_ACCESS_READ) {
+    *value = segarecomp_genesis_region_version_value(region) & 0xFFU;
+    return 1;
+  }
   for (index = 0U; index < SEGARECOMP_GENESIS_CONTROLLER_IO_SELECTOR_COUNT; ++index) {
     const SegarecompGenesisControllerIoSelector *selector =
         &segarecomp_genesis_controller_io_selectors[index];
@@ -1564,6 +1573,13 @@ static GenesisAccessResultKind genesis_route_access_unrecorded(GenesisRuntime *r
                                     GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_CONTROLLER_IO);
     return GENESIS_ACCESS_FAIL;
   }
+  /* A BYTE write to an EVEN address of the PSG window ($C00010/12/14/16) is accepted and discarded: the PSG is wired to the odd data lane
+     only (the references SEG-032-T006 cites -- Genesis Plus GX, ares -- agree on the four odd addresses), but real cartridges (one
+     Moonwalker revision) still write their power-on silence bytes to an even address and run on hardware, so failing closed there
+     would stop a working game. Nothing reaches the PSG and no state changes. Project compatibility policy; WORD/LONG are unaffected. */
+  if (width == GENESIS_ACCESS_BYTE && direction == GENESIS_ACCESS_WRITE && address >= UINT32_C(0x00C00010) &&
+      address <= UINT32_C(0x00C00016) && (address & 1U) == 0U)
+    return GENESIS_ACCESS_OK;
   if (genesis_is_psg_region(address)) {
     if (genesis_z80_sync(runtime, stop_out)) return GENESIS_ACCESS_FAIL; /* SEG-032-T005: shared device, Z80 time first */
     /* SEG-007-T109: the co-located PSG (SN76489) audio port at the odd byte

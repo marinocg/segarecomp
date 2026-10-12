@@ -490,6 +490,24 @@ void write_port(GenesisRuntime &r, uint32_t address, uint32_t value) {
   check(genesis_route_access(&r, address, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK, "controller port write is routed");
 }
 
+// Two startup-probe shapes real cartridges use (one Moonwalker revision): the WORD read of the version register's even address
+// (`move.w $A10000,d0; andi.w #$0F00,d0` -> no TMSS) and PSG silence bytes written to an EVEN PSG-window address.
+void test_startup_probe_shapes() {
+  auto r = make_runtime();
+  uint32_t value = 0xDEADBEEFu;
+  GenesisRuntimeStop stop{};
+  check(genesis_route_access(r.get(), 0x00A10000u, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK && value == 0x00A0u,
+        "WORD read of $A10000 = version in the low byte, even lane 0 (the 0x0F00 TMSS probe sees no TMSS)");
+  check(genesis_runtime_set_region(r.get(), 1u) == 0, "japan region set");
+  check(genesis_route_access(r.get(), 0x00A10000u, GENESIS_ACCESS_WORD, GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK && value == 0x0020u,
+        "the WORD version read follows the configured region");
+  value = 0x9Fu;
+  check(genesis_route_access(r.get(), 0x00C00010u, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_OK,
+        "a BYTE write to the even PSG-window address $C00010 is accepted (and discarded)");
+  check(genesis_route_access(r.get(), 0x00C00010u, GENESIS_ACCESS_WORD, GENESIS_ACCESS_WRITE, &value, &stop) == GENESIS_ACCESS_FAIL,
+        "a WORD write there is still not a PSG access");
+}
+
 void test_independent_player_ports() {
   auto r = make_runtime();
   // TH pins are outputs (CTRL1/CTRL2 bit 6 = 1); DATA bit 6 selects the TH level.
@@ -530,6 +548,7 @@ int main() {
   test_hblank_exact_edges();
   test_region_profiles_and_version_register();
   test_region_sensitive_guest_branches();
+  test_startup_probe_shapes();
   test_independent_player_ports();
   if (failures != 0) std::printf("%d check(s) failed\n", failures);
   return failures == 0 ? 0 : 1;

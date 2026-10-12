@@ -728,7 +728,13 @@ int gui() {
                                        : outline_button(centered, "hint_discovery", lx, y, content_w, 26.0F, "HInt alias discovery (strict build pass): off", font_regular, 11.0F))
             set_discovery(!rom.hint_alias_discovery);
         }
-        y += 34.0F;
+        y += 30.0F;
+        // What the advanced toggle is for, so it is not switched on casually.
+        if (draw) {
+          draw_text(dl, font_regular, centered.len(10.5F), text_dim, centered.at(lx, y - 2.0F), "Advanced: for games whose raster/H-interrupt effects fail otherwise.");
+          draw_text(dl, font_regular, centered.len(10.5F), text_dim, centered.at(lx, y + 11.0F), "Leave off unless the game does not work; builds may take longer.");
+        }
+        y += 32.0F;
       }
       if (rom.optimized() && product_policy_identity(layout, "optimized", rom.aot_model).empty()) {
         if (draw) {
