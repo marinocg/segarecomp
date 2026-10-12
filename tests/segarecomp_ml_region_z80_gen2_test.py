@@ -22,8 +22,9 @@ class Roots(unittest.TestCase):
         self.assertEqual(g.root_cells(1 << 15, 16), [0, 3, 6])
         self.assertEqual(g.root_cells(0x50, 32), [0, 1])  # the NMI vector lies outside a tiny image
 
-    def test_roots_do_not_depend_on_content(self):
-        self.assertEqual(g.root_cells(4096, 32), g.root_cells(4096, 32))
+    def test_roots_depend_only_on_image_length_and_cell_size(self):
+        self.assertEqual(g.root_cells(1 << 20, 32), g.root_cells(1 << 15, 32))
+        self.assertEqual(g.root_cells(0x39, 32), [0, 1])
 
 
 class Labels(unittest.TestCase):
@@ -33,7 +34,7 @@ class Labels(unittest.TestCase):
     def test_cell_labels_match_seg051(self):
         classes = "I" + "c" * 31 + "D" * 32 + "A" * 32 + "D" * 31 + "U"
         self.assertEqual(g.cell_labels(classes, 32), z1.cell_labels(classes))
-        self.assertEqual(g.cell_labels(classes, 16)[:2], [1, -1] if False else [z1.POSITIVE, z1.MASKED])
+        self.assertEqual(g.cell_labels(classes, 16)[:2], [z1.POSITIVE, z1.MASKED])
 
 
 class Aggregation(unittest.TestCase):
@@ -58,8 +59,32 @@ class Metrics(unittest.TestCase):
         self.assertEqual(g.missed_at_budget(scores, labels, [0, 1, 3], 0.125), (0, 4, 0.5))
         self.assertEqual(g.missed_at_budget(scores, labels, [], 0.125)[0], 3)
 
+    def test_budget_rounds_up_to_whole_cells(self):
+        # ceil(0.65 * 4096) = 2663 cells: a registered 0.65 budget can retain slightly more than 0.65 (sealed-gate finding)
+        scores = [float(-i) for i in range(4096)]
+        _, _, retained = g.missed_at_budget(scores, [1] * 4096, [], 0.65)
+        self.assertEqual(retained, 2663 / 4096)
+        self.assertGreater(retained, 0.65)
+
+    def test_one_pass_recall_budgets_match_definition(self):
+        scores = [0.3, 0.9, 0.1, 0.7, 0.5, 0.2, 0.8, 0.4]
+        labels = [1, -1, 1, 0, 1, 0, 1, 0]
+        m = g.metrics(scores, labels, [2])
+        # ranking: 1,6,3,4,7,0,5,2 ; positives 0,2,4,6 ; root 2 -> need 0.5*4=2 covered: root + cell 6 (rank 2) => R={1,6,2}
+        self.assertEqual(m["retained_for_recall_0.5"], 3 / 8)
+        self.assertEqual(m["retained_for_recall_0.999"], 7 / 8)  # prefix of 6 ranked cells plus the root cell outside it
+        self.assertEqual(m["residual_frf"], 6 / 8)
+
     def test_ties_break_by_lower_cell(self):
         self.assertEqual(z1.ranking([1.0, 1.0, 2.0]), [2, 0, 1])
+
+
+class SealedGateArithmetic(unittest.TestCase):
+    def test_registered_0_65_cannot_satisfy_mean_le_0_65_on_power_of_two_cells(self):
+        import math
+        for n in (1024, 4096, 8192, 16384, 32768):
+            self.assertGreater(math.ceil(0.65 * n) / n, 0.65)
+        self.assertLessEqual(math.ceil(0.60 * 8192) / 8192, 0.6002)
 
 
 class SdccTruth(unittest.TestCase):
@@ -91,6 +116,11 @@ class SdccTruth(unittest.TestCase):
         out, bad = sd.classify_listing(self.LISTING, bytes(11), True)
         self.assertEqual(bad, 6)
         self.assertEqual(out, {})
+
+    def test_header_rewrite_is_only_tolerated_mismatch(self):
+        out, bad = sd.classify_listing(self.LISTING, bytes(11), True)
+        self.assertEqual(sd.classify_listing.last_bad_offsets, [0, 2, 3, 5, 8, 10])
+        self.assertFalse([o for o in sd.classify_listing.last_bad_offsets if o in sd.HEADER_REWRITTEN])
 
     def test_handwritten_db_is_ambiguous(self):
         out, _ = sd.classify_listing(self.LISTING, self.ROM, False)
