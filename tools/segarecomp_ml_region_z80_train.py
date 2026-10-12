@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SEG-051 (ADR 0114): OFFLINE Z80 executable-region CNN pilot trainer / evaluator (private research tooling).
+"""SEG-051 (ADR 0116): OFFLINE Z80 executable-region CNN pilot trainer / evaluator (private research tooling).
 
 numpy and PyTorch are NOT product dependencies and are imported lazily; the release never needs them. All definitions
 (cells, labels, ranking, FRF, budget policies, lineage split and leakage guard) are in the stdlib-only
@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import pathlib
+import statistics
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -229,7 +230,7 @@ def main():
             res["folds"][held] = row
             print("fold", held, {k: v["frf"] for k, v in row.items()}, flush=True)
         means = {c: sum(res["folds"][h][c]["frf"] for h in dev_ids) / len(dev_ids) for c in ("C1", "C2", "LR", "RANDOM")}
-        medians = {c: sorted(res["folds"][h][c]["frf"] for h in dev_ids)[len(dev_ids) // 2] for c in means}
+        medians = {c: statistics.median(res["folds"][h][c]["frf"] for h in dev_ids) for c in means}
         selected = "C2" if means["C1"] - means["C2"] >= 0.05 else "C1"
         frfs = [res["folds"][h][selected]["frf"] for h in dev_ids]
         fixed = z.fixed_budget(frfs)

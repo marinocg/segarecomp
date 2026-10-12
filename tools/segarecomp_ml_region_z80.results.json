@@ -4,7 +4,8 @@
   "genesis": "Z80_BROAD_AOT_CHEAP_ENOUGH",
   "launcher_optimized_mode": "NOT_JUSTIFIED (launcher already offers Optimized for Genesis only)",
   "native_integration_T004": "NOT_JUSTIFIED",
-  "sms": "Z80_RECALL_FAILED (strict full recall; pilot, 6 dev lineages < 8 adoption minimum)"
+  "report_tool": "segarecomp_z80_token_report (relocated from a CLI subcommand to satisfy the ADR 0059 cpu_z80 dependency guard; output unchanged)",
+  "sms": "Z80_RECALL_FAILED (strict full recall and selectivity; pilot, 6 dev lineages < 8 adoption minimum)"
  },
  "descriptive_non_binding": {
   "budget_needed_for_positive_cell_recall_C1": {
@@ -273,8 +274,10 @@
  },
  "fixed_budget": 1.0,
  "gates": {
+  "adaptive": "NOT_CALIBRATABLE",
+  "fixed_budget_selective": "NOT_MET: the strict full-recall fixed budget is 1.0 (no selectivity)",
   "mean_retained_le_0.65": "NOT_MET (fixed budget 1.0)",
-  "median_dev_frf_le_0.60": "FAILED (0.72)",
+  "median_dev_frf_le_0.60": "MET (0.4825); an earlier draft reported the upper median 0.72 because the trainer indexed sorted()[n//2]; corrected after independent review",
   "sealed_strict_recall": "NOT_EVALUATED"
  },
  "mean_frf": {
@@ -284,9 +287,9 @@
   "RANDOM": 0.9970500000000001
  },
  "median_frf": {
-  "C1": 0.72,
-  "C2": 0.6438,
-  "LR": 0.7832,
+  "C1": 0.4825,
+  "C2": 0.505,
+  "LR": 0.6674,
   "RANDOM": 0.9968
  },
  "plan_digest": "55fab9de84a739308661f21ac70e31f6846f607f46a5247bf7240b99a2332c89",

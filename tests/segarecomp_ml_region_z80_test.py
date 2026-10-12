@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""SEG-051 (ADR 0114): hermetic tests for the Z80 executable-region experiment tooling and the Z80 decode-token report.
+"""SEG-051 (ADR 0116): hermetic tests for the Z80 executable-region experiment tooling and the Z80 decode-token report.
 
 Synthetic data only: no ROM, no truth, no commercial bytes. Stdlib tests always run; the numpy/PyTorch smoke test runs only
-where those private research packages are importable. The token-report goldens need the CLI binary (argv[1]); without it
+where those private research packages are importable. The token-report goldens need the token-report tool (argv[1]); without it
 they are skipped (the CMake registration always passes it).
 """
 import hashlib
@@ -26,13 +26,13 @@ HAVE_TORCH = all(importlib.util.find_spec(m) is not None for m in ("numpy", "tor
 def report(image: bytes):
     with tempfile.TemporaryDirectory() as d:
         open(d + "/i", "wb").write(image)
-        subprocess.check_call([CLI, "z80-decode-token-report", "--rom", d + "/i", "--output", d + "/o"])
+        subprocess.check_call([CLI, "--rom", d + "/i", "--output", d + "/o"])
         blob = open(d + "/o", "rb").read()
     kind, length, form = z.parse_token_report(blob)
     return list(zip(kind, length, form))
 
 
-@unittest.skipUnless(CLI, "segarecomp CLI binary not supplied")
+@unittest.skipUnless(CLI, "segarecomp_z80_token_report binary not supplied")
 class TokenReport(unittest.TestCase):
     def test_prefix_families_and_lengths(self):
         cases = {
@@ -72,7 +72,7 @@ class TokenReport(unittest.TestCase):
             open(d + "/i", "wb").write(data)
             outs = []
             for k in range(2):
-                subprocess.check_call([CLI, "z80-decode-token-report", "--rom", d + "/i", "--output", d + f"/o{k}"])
+                subprocess.check_call([CLI, "--rom", d + "/i", "--output", d + f"/o{k}"])
                 outs.append(open(d + f"/o{k}", "rb").read())
         self.assertEqual(outs[0], outs[1])
         self.assertEqual(len(outs[0]), 12 + 4 * len(data))

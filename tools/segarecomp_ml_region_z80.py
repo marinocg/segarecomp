@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SEG-051 (ADR 0114): stdlib-only definitions of the Z80 executable-region ranking experiment.
+"""SEG-051 (ADR 0116): stdlib-only definitions of the Z80 executable-region ranking experiment.
 
 Everything label-sensitive that must be reproducible lives here and is shared by the offline trainer
 (`segarecomp_ml_region_z80_train.py`, which imports numpy/PyTorch lazily; neither is a product dependency) and by

@@ -1,4 +1,4 @@
-# ADR 0114: SEG-051 Z80 executable-region ranking experiment (SMS pilot) and decision record
+# ADR 0116: SEG-051 Z80 executable-region ranking experiment (SMS pilot) and decision record
 
 - Status: Accepted. Protocol frozen in commit `e7a7657` (before any model was fitted); results and decisions below. Outcome: Genesis `Z80_BROAD_AOT_CHEAP_ENOUGH`; SMS `Z80_RECALL_FAILED` as a strict-recall exploratory pilot; native integration and a Z80 Optimized mode `NOT_JUSTIFIED`.
 - Related: ADR 0058/0071/0073 (Z80 AOT, owners, Genesis materialization), 0100-0103/0107/0109/0113 (M68K executable-region ML), `docs/architecture/executable-image-contract.md`.
@@ -69,14 +69,14 @@ build is Z80 and costs 2.4 CPU-seconds per KiB.
 | Solomon's Key | 4096 | 663 | 0.720 | 0.644 | 0.783 | 0.996 |
 | Phantasy Star | 16384 | 966 | 0.977 | 0.976 | 0.994 | 0.997 |
 | Super Tennis | 1024 | 429 | 0.990 | 0.985 | 0.991 | 0.999 |
-| mean / median | | | 0.543 / 0.720 | 0.550 / 0.644 | 0.688 / 0.783 | 0.997 |
+| mean / median | | | 0.543 / 0.482 | 0.550 / 0.505 | 0.688 / 0.667 | 0.997 / 0.997 |
 
 - Selection rule: C2 would replace C1 only with a 0.05 lower mean FRF; it did not (0.550 vs 0.543), so **C1 (raw bytes) is selected; the Z80 decode tokens add nothing measurable.**
-- The CNN beats the context-free byte-histogram control on every fold and the random control by a wide margin: the ranking signal is real.
-- Gates: median development FRF 0.72 > 0.60 **FAILED**; the fixed budget calibrates to `ceil_0.05(0.99+0.05) = 1.0` (no selectivity, 0% projected saving); the adaptive rule is **not calibratable** (no multiplier up to 4.0 covers the worst fold).
+- The CNN beats the context-free byte-histogram control clearly on four folds (2048, Knights, Columns, Solomon's Key) and ties it on Phantasy Star and Super Tennis; both beat the random control by a wide margin, so the ranking signal is real for the bulk of the code but not for the hardest cells.
+- Gates: median development FRF 0.482 <= 0.60 is **met** (an earlier draft reported 0.72, the upper median, because the trainer indexed `sorted()[n//2]`; corrected after independent review - the mean 0.543 and every decision are unaffected). But the strict fixed budget calibrates to `ceil_0.05(0.99+0.05) = 1.0` (no selectivity, 0% projected saving) and the adaptive rule is **not calibratable** (no multiplier up to 4.0 covers the worst fold). `Z80_RECALL_FAILED` therefore rests on strict recall and selectivity, not on the median.
 - The sealed cohort was **not evaluated** (deviation that only reduces claims): the policy was unselective and the development gate had already failed, so spending the cohort could not pass anything. It remains available for a future registered attempt.
 - Descriptive, non-binding (C1 out-of-fold): 90% of positive cells are covered at 7.8-38% of the ranking, 99% at 10-57% (median ~26%), but the last cells push FRF to 0.72-0.99. The positive-cell share, the lower bound of any full-recall selection, is 6-42%.
-- Diagnosis: Phantasy Star's 0.977 is two image-edge cells holding the reset/interrupt vectors (0.540 without them); the edge cells were never trained on by protocol (crop edges are masked) and are architecture-defined roots in any real policy. Super Tennis (0.99: a data-dominated cell with trailing instructions) and Solomon's Key (0.72: a progressive tail) are genuine ranking misses. These are hypotheses for a new registered attempt, not a retroactive pass.
+- Diagnosis: Phantasy Star's 0.977 is the first two cells (image start) holding the reset/interrupt vectors (0.540 without them); the image-edge cell 0 was never trained on by protocol (crop edges are masked), cell 1 was trainable but is also a vector cell, and both are architecture-defined roots in any real policy. Super Tennis (0.99: a data-dominated cell with trailing instructions) and Solomon's Key (0.72: a progressive tail) are genuine ranking misses. These are hypotheses for a new registered attempt, not a retroactive pass.
 - Caveat on labels: positives are a lower bound of real code (unlisted and ambiguous `.db` bytes are unknown), so even 100% labelled recall would not prove full static coverage.
 
 ## Decision
@@ -95,3 +95,11 @@ Follow-ups (separate, not done here): (1) a new registered attempt with image-ed
 budget defined with a structural closure instead of a strict ranking cut; (2) at least 2 more independent source-backed SMS lineages (8 development + 3 sealed),
 for example SDCC-built homebrew with relocated listings or further disassemblies matching legally held cartridges; (3) a Z80 selective-admission contract
 (admitted-start set, typed unadmitted-PC behavior, validator) before any native producer.
+
+## Post-freeze corrections (packaging and reporting only; the plan, its digest and every decision input are unchanged)
+
+- The report command was first a `segarecomp` subcommand; `cpu_z80_dependency_test` (ADR 0059) rejects `cpu_z80` under `apps/segarecomp`, so it is now the z80-named tool `segarecomp_z80_token_report` (`apps/z80-token-report`); the report bytes are identical. The plan text still names the report by its original command name.
+- The trainer's median used the upper median for an even fold count; it now uses `statistics.median`. Selection used the mean, so nothing decided changed.
+- ADR number 0114 collided with SEG-050's final decision; this record is 0116.
+- Token `length` saturates at 255 (documented); in the Alex Kidd truth, an instruction at a quarantine edge shows listing length 1 against decoder length 2 because its continuation byte was relabelled quarantined (benign relabelling artifact).
+- Independent review (adversarial validator on `ec6cd11`) re-derived identity, labels, lineage overlap (max 2.7%), pre-registration order, FRFs, the SMS cost model (R2 0.998) and the Genesis shares; it found the guard violation and the median error above.
