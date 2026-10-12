@@ -424,6 +424,18 @@ void test_region_profiles_and_version_register() {
   check(genesis_runtime_set_region(host_wins.get(), 0u) == 0 && genesis_runtime_run(host_wins.get(), one_step_dispatch, 3u).kind == GENESIS_RUNNER_RESOURCE_LIMIT &&
             host_wins->region_profile == 0u,
         "an explicit host selection outranks the environment");
+  // The build-time materialization pass steps the runtime without genesis_runtime_run; it must configure the same console.
+  set_env("SEGARECOMP_GENESIS_REGION", "japan");
+  auto pass = make_runtime();
+  GenesisControlTransfer none = {};
+  check(genesis_runtime_configure_run(pass.get(), &none) == 0 && pass->region_profile == 1u && read_version(*pass) == 0x20u,
+        "the configure-run seam selects the environment region for runners that bypass genesis_runtime_run");
+  set_env("SEGARECOMP_GENESIS_REGION", "pal");
+  auto pass_pal = make_runtime();
+  GenesisControlTransfer refusal = {};
+  check(genesis_runtime_configure_run(pass_pal.get(), &refusal) == 1 && refusal.kind == GENESIS_STOP &&
+            refusal.stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_REGION_TIMING,
+        "the configure-run seam refuses PAL with the typed stop");
   set_env("SEGARECOMP_GENESIS_REGION", nullptr);
 }
 

@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -391,10 +392,33 @@ std::optional<std::vector<std::uint8_t>> read_exact(const fs::path &path, std::s
 // anything about it; every other -Wall/-Wextra/-pedantic diagnostic stays enabled. Unknown -Wno- options are ignored by GCC/Clang.
 inline const char *const kGeneratedUnitFlag = "-Wno-misleading-indentation";
 
+// SEG-055: the console region the build-time observation pass runs under. The generated program is region-agnostic and the region is a
+// run-time choice, but the Z80 images (and the M68K path that reaches them) are only observable under the region the game accepts: a
+// Japan-only title observed as the default USA console stops at its own region lockout and never uploads its sound driver, so the
+// product would later fail with z80_unknown_image. The pass therefore uses the same header rule as the launcher's default selection
+// (Japan only when the header declares Japan and no overseas NTSC region; anything else keeps the historical USA NTSC console).
+std::string genesis_pass_region(const std::vector<std::uint8_t> &rom) {
+  if (rom.size() < 0x200) return "usa";
+  std::string field(reinterpret_cast<const char *>(&rom[0x1F0]), 16);
+  while (!field.empty() && (field.back() == ' ' || field.back() == '\0')) field.pop_back();
+  if (field == "E") return "usa";  // letter Europe and hex digit 0xE are both valid readings: keep the historical default
+  bool japan = false, overseas = false;
+  if (field.find_first_of("JUE") != std::string::npos) {
+    japan = field.find('J') != std::string::npos;
+    overseas = field.find('U') != std::string::npos;
+  } else if (!field.empty() && std::isxdigit(static_cast<unsigned char>(field[0]))) {
+    const int bits = std::stoi(field.substr(0, 1), nullptr, 16);
+    japan = (bits & 1) != 0;
+    overseas = (bits & 4) != 0;
+  }
+  return japan && !overseas ? "japan" : "usa";
+}
+
 struct GenesisSoundBuild {
   GenesisSoundBuild(const Options &opts, Log &lg) : options(opts), log(lg) {}
   const Options &options;
   Log &log;
+  std::string pass_region = "usa";  // SEGARECOMP_GENESIS_REGION of every observation pass (genesis_pass_region)
   fs::path root, runtime, viewer, psg, ym, object_dir, pass_dir, z80_dir;
   std::vector<std::string> c_base, cxx_base;
   unsigned jobs = 1;
@@ -608,6 +632,7 @@ class ProcessPassRunner final : public gz80::PassRunner {
     for (const char *name : {"pass.report", "unknown.ram", "unknown.written", "stop.ram"}) fs::remove(build_.pass_dir / name, ec);
     Environment environment{{"SEGARECOMP_MATERIALIZE_DIR", build_.pass_dir.string()},
                             {"SEGARECOMP_MATERIALIZE_FRAMES", std::to_string(gz80::kObservationFrames)}};
+    environment.emplace_back("SEGARECOMP_GENESIS_REGION", build_.pass_region);
     if (build_.options.hint_alias_discovery) environment.emplace_back("SEGARECOMP_GENESIS_HINT", "strict");
     const fs::path pass_log = build_.pass_dir / "pass.log";
     const int rc = run_process({build_.pass_executable.string(), "--instruction-budget", std::to_string(gz80::kPassInstructionBudget)},
@@ -868,6 +893,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   fs::path platform_dir = options.runtime_dir;
   if (!platform_dir.has_filename()) platform_dir = platform_dir.parent_path();  // tolerate a trailing separator
   GenesisSoundBuild build(options, log);
+  build.pass_region = genesis_pass_region(*route.rom);
   build.root = platform_dir.parent_path().parent_path();
   build.runtime = options.runtime_dir / "runtime";
   build.viewer = options.runtime_dir / "viewer";

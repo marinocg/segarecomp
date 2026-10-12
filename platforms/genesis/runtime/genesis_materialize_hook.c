@@ -166,6 +166,12 @@ GenesisControlTransfer genesis_sound_hook_run(GenesisRuntime *runtime, GenesisDi
   if (getenv("SEGARECOMP_Z80_COVERAGE_DIR") != NULL) z80_execution_coverage_attach(&g_z80_coverage, &machine->cpu);
 #endif
   window_ticks = frames * GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
+  /* The pass observes the console the product runs (region, H-interrupt policy), not the default one. */
+  if (genesis_runtime_configure_run(runtime, &transfer) != 0) {
+    outcome = "guest_stop";
+    if (pass_write_stop_record(runtime, (uint32_t)transfer.stop.stop_class) != 0) g_pass.io_error = 1;
+    dispatch_allowance = 0U;
+  }
   while (dispatches < dispatch_allowance) {
     transfer = genesis_runtime_step(runtime, dispatch);
     ++dispatches;

@@ -3290,6 +3290,36 @@ int genesis_runtime_set_region(GenesisRuntime *runtime, unsigned profile) {
   return 0;
 }
 
+int genesis_runtime_configure_run(GenesisRuntime *runtime, GenesisControlTransfer *refusal) {
+  /* SEG-055: the console region is chosen exactly once, before the first guest step -- by the host through
+     genesis_runtime_set_region, else from SEGARECOMP_GENESIS_REGION (unset/empty/"auto" == the default USA NTSC console)
+     -- and is then fixed for the whole run. A PAL console (or an unrecognized name) is refused rather than run with the
+     NTSC schedule: 50 Hz timing is not implemented. */
+  if (!runtime->region_configured) {
+    const char *name = getenv("SEGARECOMP_GENESIS_REGION");
+    const char *hint_policy = getenv("SEGARECOMP_GENESIS_HINT");
+    if (hint_policy != 0 && genesis_region_name_equals(hint_policy, "strict")) runtime->raster.hint_strict = 1U;
+    unsigned profile = (unsigned)SEGARECOMP_GENESIS_REGION_USA_NTSC;
+    runtime->region_configured = 1U;
+    if (name != 0 && name[0] != '\0' && genesis_region_name_equals(name, "auto") == 0) {
+      if (genesis_region_profile_from_name(name, &profile) != 0) {
+        refusal->kind = GENESIS_STOP;
+        refusal->stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+                                          GENESIS_DIAG_UNSUPPORTED_REGION_TIMING);
+        return 1;
+      }
+      runtime->region_profile = (uint8_t)profile;
+    }
+  }
+  if (!segarecomp_genesis_region_is_supported(runtime->region_profile)) {
+    refusal->kind = GENESIS_STOP;
+    refusal->stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
+                                      GENESIS_DIAG_UNSUPPORTED_REGION_TIMING);
+    return 1;
+  }
+  return 0;
+}
+
 GenesisControlTransfer genesis_runtime_run(GenesisRuntime *runtime, GenesisDispatchFunction dispatch,
                                            uint32_t dispatch_allowance) {
   GenesisControlTransfer result = {0};
@@ -3303,32 +3333,7 @@ GenesisControlTransfer genesis_runtime_run(GenesisRuntime *runtime, GenesisDispa
 #endif
   if (runtime == 0 || dispatch == 0 || dispatch_allowance == 0U)
     return genesis_internal_dispatch_inconsistency_stop(runtime);
-  /* SEG-055: the console region is chosen exactly once, before the first guest step -- by the host through
-     genesis_runtime_set_region, else from SEGARECOMP_GENESIS_REGION (unset/empty/"auto" == the default USA NTSC console)
-     -- and is then fixed for the whole run. A PAL console (or an unrecognized name) is refused rather than run with the
-     NTSC schedule: 50 Hz timing is not implemented. */
-  if (!runtime->region_configured) {
-    const char *name = getenv("SEGARECOMP_GENESIS_REGION");
-    const char *hint_policy = getenv("SEGARECOMP_GENESIS_HINT");
-    if (hint_policy != 0 && genesis_region_name_equals(hint_policy, "strict")) runtime->raster.hint_strict = 1U;
-    unsigned profile = (unsigned)SEGARECOMP_GENESIS_REGION_USA_NTSC;
-    runtime->region_configured = 1U;
-    if (name != 0 && name[0] != '\0' && genesis_region_name_equals(name, "auto") == 0) {
-      if (genesis_region_profile_from_name(name, &profile) != 0) {
-        result.kind = GENESIS_STOP;
-        result.stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
-                                          GENESIS_DIAG_UNSUPPORTED_REGION_TIMING);
-        return result;
-      }
-      runtime->region_profile = (uint8_t)profile;
-    }
-  }
-  if (!segarecomp_genesis_region_is_supported(runtime->region_profile)) {
-    result.kind = GENESIS_STOP;
-    result.stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
-                                      GENESIS_DIAG_UNSUPPORTED_REGION_TIMING);
-    return result;
-  }
+  if (genesis_runtime_configure_run(runtime, &result) != 0) return result;
   for (step = 0U; step < dispatch_allowance; ++step) {
     result = genesis_runtime_step(runtime, dispatch);
     if (result.kind != GENESIS_CONTINUE_AT_PC) return result;

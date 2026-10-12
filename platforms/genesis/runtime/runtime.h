@@ -1590,6 +1590,11 @@ void genesis_runtime_set_pad2(GenesisRuntime *runtime, uint8_t mask);
  * 2 Europe PAL). Returns 0, or -1 (unchanged) for an unknown profile or once the guest has started executing. A PAL
  * profile is accepted (it has a version-register value) but genesis_runtime_run refuses to execute under it. */
 int genesis_runtime_set_region(GenesisRuntime *runtime, unsigned profile);
+/* SEG-055: applies the run configuration the runner owns (the console region from SEGARECOMP_GENESIS_REGION unless the host set one,
+   and SEGARECOMP_GENESIS_HINT) exactly once before the first guest step, and refuses an unsupported region. Returns 0, or 1 with
+   `*refusal` set to the typed stop. Every program that steps the runtime without genesis_runtime_run (the build-time materialization
+   pass) calls it so that it observes the same console the product will run. */
+int genesis_runtime_configure_run(GenesisRuntime *runtime, GenesisControlTransfer *refusal);
 /* SEG-055: H-interrupt policy for an enabled interrupt with no resolved handler: strict != 0 stops fail-closed, otherwise
  * (the default) the request is counted in raster.hint_undelivered and dropped. Same once-before-the-first-step rule as the
  * region; also selectable with SEGARECOMP_GENESIS_HINT=strict|skip. Returns 0, or -1 once the guest has started. */
