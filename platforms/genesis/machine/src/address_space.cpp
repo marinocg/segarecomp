@@ -135,6 +135,14 @@ M68kGenesisDeviceRoutingResult m68k_route_genesis_device_access(const M68kMemory
     // DATA3 ($A10007, the expansion port with no device attached) reads back through the same pin model as DATA1/DATA2.
     if (data_port_slot == 2) return M68kDeviceRoutedAccess{request.direction};
   }
+  // SEG-055: the hardware version register ($A10001, BYTE read) reports the CONFIGURED console region (Japan NTSC /
+  // USA NTSC / Europe PAL), which is a run-time property of the console, not a build-time constant. It is therefore
+  // deferred to the runtime device owner exactly like the DATA1/DATA2 reads above, so one generated program serves
+  // every region profile and no cartridge byte or game branch is ever specialized on it. The host-side selector
+  // table (m68k_controller_io_access) keeps its USA NTSC policy value for non-routed (analysis-only) callers.
+  if (request.direction == M68kMemoryAccessDirection::read && request.width == M68kMemoryAccessWidth::byte &&
+      request.address.value == m68k_controller_io_version_register_address)
+    return M68kDeviceRoutedAccess{request.direction};
   if (request.address.value >= m68k_controller_io_region_end || end <= m68k_controller_io_region_begin)
     return DirectFlowDiagnostic::unmapped_data_access;
   const auto result = m68k_controller_io_access(request);

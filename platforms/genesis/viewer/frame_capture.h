@@ -58,6 +58,8 @@ typedef struct GenesisFrameCaptureResult {
   uint32_t frames_captured;
   uint64_t dispatches;        /* lower bound when the final slice ended with a guest stop */
   GenesisControlTransfer transfer; /* the last slice's transfer */
+  uint64_t render_rejections;      /* SEG-055: virtual frame boundaries whose render failed closed */
+  uint64_t vram_journal_overflows; /* SEG-055: frames whose VRAM journal overflowed (frame-end image used) */
   uint8_t digests[GENESIS_FRAME_CAPTURE_MAX_FRAMES][32]; /* frame_digest of each captured frame */
 } GenesisFrameCaptureResult;
 

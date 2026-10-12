@@ -492,7 +492,7 @@ void test_plane_v_flip_samples_mirrored_row() {
 
 void test_compose_fails_closed_outside_bound_display_mode() {
   Fixture f;
-  f.regs[12] = 0x00; // Neither RS0 nor RS1: H32, outside this checkpoint's bound surface.
+  f.regs[12] = 0x80; // RS0 only: a reserved RS0/RS1 combination (H32 itself is supported since SEG-055).
   GenesisRgb888 color;
   color.r = 0xAB;
   color.g = 0xCD;

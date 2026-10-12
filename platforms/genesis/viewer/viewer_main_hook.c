@@ -28,6 +28,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
                                                uint32_t dispatch_allowance);
 
 static GenesisFrameArtifact g_latest_frame;
+static GenesisRasterCapture g_raster_capture; /* SEG-055: host-owned per-scanline capture buffer */
 
 #ifdef SEGARECOMP_GENESIS_SOUND
 /* SEG-032-T009 (ADR 0075): after each slice the viewer drains what the mixer already produced into the host sink. The mixer is fed by
@@ -69,6 +70,9 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   observer.latest = &g_latest_frame;
   observer.sequence = 0;
   runtime->live_frame_observer = &observer;
+  memset(&g_raster_capture, 0, sizeof(g_raster_capture));
+  g_raster_capture.producer = genesis_vdp_produce_frame_raster; /* SEG-055: scanline-aware frames */
+  runtime->live_raster = &g_raster_capture;
 
   GenesisViewerHost host;
   GenesisPacer pacer;
@@ -86,6 +90,8 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
   GenesisViewerResult r = genesis_viewer_run(runtime, dispatch, &options, &host, &pacer,
                                                 dispatch_allowance == UINT32_MAX ? UINT64_MAX : dispatch_allowance);
   runtime->live_frame_observer = NULL;
+  genesis_runtime_write_notes(runtime, g_raster_capture.render_rejections, g_raster_capture.vram_journal_overflows, stderr);
+  runtime->live_raster = NULL;
 #ifdef SEGARECOMP_GENESIS_SOUND
   genesis_sound_finish(runtime, r.outcome == GENESIS_VIEWER_GUEST_STOP);
   viewer_after_slice(NULL, runtime);

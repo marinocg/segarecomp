@@ -98,6 +98,7 @@ GenesisControlTransfer genesis_frame_capture_hook_run(GenesisRuntime *runtime, G
     fprintf(stderr, "\"");
   }
   fprintf(stderr, "]}\n");
+  genesis_runtime_write_notes(runtime, r.render_rejections, r.vram_journal_overflows, stderr); /* SEG-055: region / undelivered H-interrupts / rejected frames, when notable */
   if (r.outcome == GENESIS_FRAME_CAPTURE_INVALID_ARGUMENT || r.outcome == GENESIS_FRAME_CAPTURE_IO_ERROR) exit(4);
   if (r.outcome == GENESIS_FRAME_CAPTURE_WINDOW_COMPLETE ||
       r.outcome == GENESIS_FRAME_CAPTURE_INCOMPLETE_RUNNER_EXHAUSTED) {

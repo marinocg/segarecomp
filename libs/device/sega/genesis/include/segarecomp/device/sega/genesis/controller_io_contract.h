@@ -25,6 +25,47 @@
 #define SEGARECOMP_GENESIS_CONTROLLER_VERSION_BYTE_ADDRESS UINT32_C(0x00A10001)
 #define SEGARECOMP_GENESIS_CONTROLLER_VERSION_POLICY_VALUE UINT32_C(0xA0)
 
+/*
+ * SEG-055: console region profiles and the guest-visible hardware version register ($A10001, BYTE read).
+ *
+ * Version register layout (Sega Genesis Technical Overview; independently corroborated by Genesis Plus GX `core/io_ctrl.c`
+ * `io_reset`, where the register is the region code plus the expansion bit, and by the public Sonic 3 disassembly
+ * `sonicretro/skdisasm` `s3.asm`, whose lockout code takes bits 7-6 as the territory id 0 = Japan NTSC, 2 = overseas NTSC,
+ * 3 = overseas PAL): bit 7 = 0 domestic (Japan) / 1 overseas, bit 6 = 0 NTSC (60 Hz) / 1 PAL (50 Hz), bit 5 = 1 when no
+ * expansion unit (Mega-CD) is attached, bits 3-0 = hardware revision (0 here). The three profiles therefore read:
+ *   Japan NTSC  (domestic, 60 Hz)  0x20
+ *   USA NTSC    (overseas, 60 Hz)  0xA0   <- the default: exactly SEGARECOMP_GENESIS_CONTROLLER_VERSION_POLICY_VALUE
+ *   Europe PAL  (overseas, 50 Hz)  0xE0
+ * The numeric profile ids are chosen so that a zero-initialized runtime is the historical USA NTSC console.
+ * The register value is a property of the CONFIGURED CONSOLE, never of the cartridge: no ROM byte is read or altered and
+ * no cartridge compatibility logic is bypassed -- the game's own region check simply sees the configured hardware.
+ */
+typedef enum SegarecompGenesisRegionProfile {
+  SEGARECOMP_GENESIS_REGION_USA_NTSC = 0,
+  SEGARECOMP_GENESIS_REGION_JAPAN_NTSC = 1,
+  SEGARECOMP_GENESIS_REGION_EUROPE_PAL = 2,
+} SegarecompGenesisRegionProfile;
+#define SEGARECOMP_GENESIS_REGION_PROFILE_COUNT 3U
+#define SEGARECOMP_GENESIS_VERSION_OVERSEAS_BIT UINT32_C(0x80)
+#define SEGARECOMP_GENESIS_VERSION_PAL_BIT UINT32_C(0x40)
+#define SEGARECOMP_GENESIS_VERSION_NO_EXPANSION_BIT UINT32_C(0x20)
+
+static inline uint32_t segarecomp_genesis_region_version_value(uint32_t profile) {
+  switch (profile) {
+    case SEGARECOMP_GENESIS_REGION_JAPAN_NTSC: return SEGARECOMP_GENESIS_VERSION_NO_EXPANSION_BIT;
+    case SEGARECOMP_GENESIS_REGION_EUROPE_PAL:
+      return SEGARECOMP_GENESIS_VERSION_OVERSEAS_BIT | SEGARECOMP_GENESIS_VERSION_PAL_BIT |
+             SEGARECOMP_GENESIS_VERSION_NO_EXPANSION_BIT;
+    case SEGARECOMP_GENESIS_REGION_USA_NTSC:
+    default: return SEGARECOMP_GENESIS_VERSION_OVERSEAS_BIT | SEGARECOMP_GENESIS_VERSION_NO_EXPANSION_BIT;
+  }
+}
+/* True when execution under the profile is supported: the 60 Hz profiles. 50 Hz timing (312 lines, PAL video) is not
+ * implemented, so a PAL console is representable (it has a version value) but refused at run time. */
+static inline int segarecomp_genesis_region_is_supported(uint32_t profile) {
+  return profile == SEGARECOMP_GENESIS_REGION_USA_NTSC || profile == SEGARECOMP_GENESIS_REGION_JAPAN_NTSC;
+}
+
 /* The complete, deliberately small set of supported selectors (four).  This
  * table is the C/C++ policy source of truth: consumers must not reproduce
  * selector literals or policy values in their own dispatches. */

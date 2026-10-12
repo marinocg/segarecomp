@@ -6485,6 +6485,18 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
         software_exception_handler_hex.emplace_back(software_vector, hex(handler.value, 8));
         break;
       }
+  // SEG-055: a work-RAM H-interrupt vector whose address carries a compiled byte-guarded entry (a materialized JMP thunk,
+  // as for IRQ6 above, or a verbatim immutable-copy alias image) is an ordinary compiled handler entry; otherwise the
+  // enabled H-interrupt stops fail-closed.
+  if (partial.accepted_prefix.hint_vector_in_work_ram &&
+      !partial.accepted_prefix.software_exception_handler_entries.contains(28U))
+    for (const auto &aot_entry : partial.accepted_prefix.immutable_rom_aot_entries)
+      if (aot_entry.decoded.provenance.source.address.value == partial.accepted_prefix.hint_vector_ram_entry) {
+        // A materialized thunk or an entry of an immutable-copy alias image (ADR 0049): both execute under the runtime
+        // per-instruction byte-identity guard, so the RAM address is an ordinary compiled handler entry.
+        software_exception_handler_hex.emplace_back(28U, hex(partial.accepted_prefix.hint_vector_ram_entry, 8));
+        break;
+      }
   sink << emit_genesis_bridge_c11_main_open(
       hex(partial.accepted_prefix.startup_ingress->initial_ssp, 8),
       hex(partial.accepted_prefix.startup_ingress->entry.value, 8), irq6_handler_hex,

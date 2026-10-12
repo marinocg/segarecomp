@@ -53,6 +53,8 @@ int headless(int argc, char **argv) {
   std::string mapper;                  // Master System: explicit mapper declaration (never defaulted)
   std::string aot_policy = "compatibility";  // compatibility | optimized (Genesis); Compatibility is the default
   std::string aot_model = "v1";              // experimental opt-in of Optimized (v1 | gen2); forwarded verbatim to the product
+  bool hint_discovery_arg = false;     // --hint-alias-discovery: advanced strict-H-interrupt preparation (default off)
+  std::string region_arg;              // --region <usa|japan>: console region (run time, not part of the build identity)
   std::vector<std::string> game_args;  // forwarded to the launched game (automation passes a finite bound)
   bool run = false;
   for (int i = 1; i < argc; ++i) {
@@ -63,8 +65,10 @@ int headless(int argc, char **argv) {
     else if (arg == "--mapper" && i + 1 < argc) mapper = argv[++i];
     else if (arg == "--aot-policy" && i + 1 < argc && (std::string(argv[i + 1]) == "compatibility" || std::string(argv[i + 1]) == "optimized")) aot_policy = argv[++i];
     else if (arg == "--aot-model" && i + 1 < argc && (std::string(argv[i + 1]) == "v1" || std::string(argv[i + 1]) == "gen2")) aot_model = argv[++i];
+    else if (arg == "--region" && i + 1 < argc && (std::string(argv[i + 1]) == "usa" || std::string(argv[i + 1]) == "japan" || std::string(argv[i + 1]) == "europe")) region_arg = argv[++i];
+    else if (arg == "--hint-alias-discovery") hint_discovery_arg = true;
     else if (arg == "--game-arg" && i + 1 < argc) game_args.emplace_back(argv[++i]);
-    else { std::fprintf(stderr, "usage: Segarecomp [--build <rom> [--mapper <sega|rom_only>] [--aot-policy <compatibility|optimized> [--aot-model <v1|gen2>]] [--run [--game-arg <arg>]...] [--report <file>]]\n"); return 2; }
+    else { std::fprintf(stderr, "usage: Segarecomp [--build <rom> [--mapper <sega|rom_only>] [--aot-policy <compatibility|optimized> [--aot-model <v1|gen2>]] [--hint-alias-discovery] [--run [--region <usa|japan|europe>] [--game-arg <arg>]...] [--report <file>]]\n"); return 2; }
   }
   if (aot_model != "v1" && aot_policy != "optimized") { std::fprintf(stderr, "--aot-model requires --aot-policy optimized\n"); return 2; }
   std::string report;
@@ -78,6 +82,8 @@ int headless(int argc, char **argv) {
     RomView rom = inspect_rom_file(rom_path, layout);
     if (rom.platform_id == "master-system" && !mapper.empty()) rom.mapper = mapper;
     if (rom.supports_optimized()) { rom.aot_policy = aot_policy; rom.aot_model = aot_model; }
+    if (!region_arg.empty() && rom.supports_region()) rom.region = region_arg;
+    if (hint_discovery_arg && rom.supports_hint_alias_discovery()) rom.hint_alias_discovery = true;
     if (!rom.error.empty()) { emit("result=failed problem=" + rom.error); rc = 1; }
     else {
       const fs::path entry = entry_dir(rom, layout);
@@ -113,7 +119,9 @@ int headless(int argc, char **argv) {
           emit("aot_policy_identity=" + policy.identity);
         }
       }
-      if (rc == 0 && run) {
+      if (rom.supports_region()) emit("region=" + rom.region);
+      if (rc == 0 && run && !launch_refusal(rom).empty()) { emit("run=refused reason=" + launch_refusal(rom)); rc = 5; }
+      else if (rc == 0 && run) {
         GameRun game(rom, layout, entry, game_args);
         if (!game.started()) { emit("run=failed_to_start"); rc = 4; }
         else {
@@ -396,6 +404,7 @@ int gui() {
   std::unique_ptr<GameRun> game;
   // AOT policy chosen in this session (Compatibility is the default and the only value unless the user picks Optimized).
   std::string policy_choice = "compatibility";
+  bool discovery_choice = false;    // advanced H-interrupt alias discovery (default off)
   std::string model_choice = "v1";  // experimental opt-in of Optimized ("gen2"); v1 is the default
   PolicyReport policy_report;  // of the Ready entry (read from its status.json), for the requested/effective note
   const auto refresh_report = [&] { policy_report = state == State::Ready ? read_policy_report(entry) : PolicyReport{}; };
@@ -410,7 +419,17 @@ int gui() {
     show_diagnostics = false;
     if (!rom.error.empty()) { failure = "That file could not be read: " + rom.error; diagnostics = failure; state = State::Failed; return; }
     if (rom.supports_optimized()) { rom.aot_policy = policy_choice; rom.aot_model = model_choice; }
+    if (rom.supports_hint_alias_discovery()) rom.hint_alias_discovery = discovery_choice;
     entry = entry_dir(rom, layout);
+    state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
+    refresh_report();
+  };
+  const auto set_discovery = [&](bool on) {
+    if (rom.hint_alias_discovery == on) return;
+    discovery_choice = on;
+    rom.hint_alias_discovery = on;
+    show_diagnostics = false;
+    entry = entry_dir(rom, layout);  // it changes the generated program: part of the cache identity
     state = entry_ready_for(entry, rom, layout) ? State::Ready : State::RomSelected;
     refresh_report();
   };
@@ -609,6 +628,33 @@ int gui() {
         }
       };
 
+      // Console region (Genesis only): a run-time choice -- the native build serves every region, so it is not part of the cache identity.
+      // Europe (PAL) is shown but unsupported: Play explains why instead of running 50 Hz software on NTSC timing.
+      const auto region_row = [&](float y) {
+        if (!rom.supports_region()) return;
+        draw_text(dl, font_regular, centered.len(12), text_secondary, centered.at(content_x, y + 6.0F), "Region");
+        const auto option = [&](const char *id, const char *value, const char *label, float x, float w) {
+          const bool on = rom.region == value;
+          if (on ? bevel_button(centered, id, content_x + x, y, w, 26.0F, label, font_bold, 12.0F)
+                 : outline_button(centered, id, content_x + x, y, w, 26.0F, label, font_regular, 12.0F))
+            rom.region = value;
+        };
+        option("region_usa", "usa", "USA NTSC", 52.0F, 96.0F);
+        option("region_jp", "japan", "Japan NTSC", 156.0F, 104.0F);
+        option("region_eu", "europe", "Europe PAL (unsupported)", 268.0F, 190.0F);
+        if (const std::string refusal = launch_refusal(rom); !refusal.empty())
+          draw_text(dl, font_regular, centered.len(11), col_err, centered.at(content_x, y + 30.0F), "PAL (50 Hz) is not implemented: choose USA or Japan NTSC.");
+        else if (rom.region_ambiguous)
+          draw_text(dl, font_regular, centered.len(11), text_dim, centered.at(content_x, y + 30.0F), "Header region field is ambiguous; USA NTSC assumed.");
+      };
+      // Advanced (default off): strict H-interrupt build passes so a RAM-resident IRQ4 vector can be resolved via copy-alias/RAM-thunk preparation.
+      const auto discovery_row = [&](float y) {
+        if (!rom.supports_hint_alias_discovery()) return;
+        if (rom.hint_alias_discovery ? bevel_button(centered, "hint_discovery", content_x, y, 330.0F, 24.0F, "HInt alias discovery (strict build pass): ON", font_bold, 11.0F)
+                                     : outline_button(centered, "hint_discovery", content_x, y, 330.0F, 24.0F, "HInt alias discovery (strict build pass): off", font_regular, 11.0F))
+          set_discovery(!rom.hint_alias_discovery);
+      };
+
       if (!layout.problem.empty()) {
         ImGui::SetCursorPos(centered.at(content_x, row_y));
         ImGui::PushTextWrapPos(centered.at(panel_x1 - 20.0F, 0).x);
@@ -641,8 +687,10 @@ int gui() {
           if (outline_button(centered, "choose1", content_x + 204.0F, row_y + 30.0F, 170.0F, 42.0F, "Choose another...", font_regular, 14.0F))
             browse();
           if (rom.supported_platform) mode_row(row_y + 90.0F);
+          if (rom.supported_platform) region_row(row_y + 118.0F);
+          if (rom.supported_platform) discovery_row(row_y + 150.0F);
           if (rom.optimized() && product_policy_identity(layout, "optimized", rom.aot_model).empty())
-            draw_text(dl, font_regular, centered.len(11), col_err, centered.at(content_x, row_y + 122.0F),
+            draw_text(dl, font_regular, centered.len(11), col_err, centered.at(content_x, row_y + 178.0F),
                       "Optimized cannot verify the build tool identity: saved builds are not reused.");
         }
       } else if (state == State::Building) {
@@ -661,8 +709,10 @@ int gui() {
             draw_text(dl, font_regular, centered.len(12), policy_report.fallback ? col_err : text_secondary, centered.at(content_x, row_y + 12.0F), note.c_str());
         }
         if (bevel_button(centered, "play", content_x, row_y + 30.0F, 120.0F, 42.0F, "Play", font_bold, 17.0F)) {
-          game = std::make_unique<GameRun>(rom, layout, entry);
-          if (game->started()) state = State::Running;
+          if (const std::string refusal = launch_refusal(rom); !refusal.empty()) { failure = refusal; diagnostics = refusal; state = State::Failed; }
+          else game = std::make_unique<GameRun>(rom, layout, entry);
+          if (!game) {}
+          else if (game->started()) state = State::Running;
           else { failure = "The game could not be started."; diagnostics = failure; game.reset(); state = State::Failed; }
         }
         if (outline_button(centered, "recompile2", content_x + 134.0F, row_y + 30.0F, 120.0F, 42.0F, "Recompile", font_regular, 14.0F))
@@ -671,11 +721,13 @@ int gui() {
           browse();
         // Fixed control scheme (the runtime has no remapping UI yet): keep it visible right where "Play" is.
         mode_row(row_y + 80.0F);
+        region_row(row_y + 110.0F);
+        discovery_row(row_y + 142.0F);
         if (policy_report.present && policy_report.requested == "optimized" && outline_button(centered, "fb_details", content_x + 346.0F, row_y + 4.0F, 62.0F, 22.0F, policy_report.fallback ? "Why?" : "Details", font_regular, 11.0F)) {
           show_diagnostics = !show_diagnostics;
           fallback_details();
         }
-        const float controls_y = row_y + 112.0F;
+        const float controls_y = row_y + 174.0F;
         draw_text(dl, font_bold, centered.len(13), text_secondary, centered.at(content_x, controls_y), "Controls");
         draw_text(dl, font_regular, centered.len(13), text_footer, centered.at(content_x, controls_y + 20.0F),
                  rom.platform_id == "master-system" ? "Arrows = D-Pad   Z = Button 1   X = Button 2   P = Pause   R = Reset"

@@ -2423,11 +2423,12 @@ void general_startup_version_byte_read_uses_the_t079_policy_selector() {
              version_result->request.width == version_request.width &&
              version_result->request.direction == version_request.direction,
          "the exact Version-register BYTE read returns the T079 policy's single observation and its request");
+  // SEG-055: the version register reports the CONFIGURED console region (Japan NTSC / USA NTSC / Europe PAL), a run-time
+  // property, so the routing seam defers the BYTE read to the runtime device owner exactly like DATA1/DATA2 instead of
+  // folding the USA constant; the host-side selector table above keeps its USA policy value for analysis-only callers.
   const auto version_routed = segarecomp::m68k_route_genesis_device_access(version_request);
-  const auto *version_routed_result = std::get_if<segarecomp::M68kControllerIoResult>(&version_routed);
-  expect(version_routed_result != nullptr && version_routed_result->value == 0xA0U &&
-             version_routed_result->policy_provenance == segarecomp::M68kControllerIoPolicyProvenance::seg_007_t079,
-         "the bounded Genesis routing seam forwards the Version-register selector's typed success result unchanged");
+  expect(std::holds_alternative<segarecomp::M68kDeviceRoutedAccess>(version_routed),
+         "the bounded Genesis routing seam defers the Version-register BYTE read to the runtime device owner (region is run-time configuration)");
 
   // Wrong width and wrong direction all retain unsupported_device_region_controller_io exactly as before.
   for (const auto rejected_request : {
@@ -2474,11 +2475,8 @@ void general_startup_version_byte_read_uses_the_t079_policy_selector() {
       rom_image, UINT32_C(0x00A10001), W::byte, D::read, provenance);
   const auto *resolved_operand = std::get_if<segarecomp::M68kAbsoluteTestOperand>(&resolved);
   expect(resolved_operand != nullptr &&
-             resolved_operand->region == segarecomp::M68kAbsoluteOperandRegion::controller_io &&
-             resolved_operand->value == 0xA0U &&
-             resolved_operand->controller_policy_provenance ==
-                 segarecomp::M68kControllerIoPolicyProvenance::seg_007_t079,
-         "the shared resolver reaches the Version selector through the same controller_io region as CTRL1/CTRL2/CTRL3");
+             resolved_operand->region == segarecomp::M68kAbsoluteOperandRegion::routed_device,
+         "the shared resolver treats the Version register as a value-free routed device operand (SEG-055: the value depends on the configured console region)");
 }
 
 // SEG-007-T111: implements exactly the SEG-007-T111 policy selector -- a

@@ -57,7 +57,11 @@ STOP_DIAGNOSTIC_PAIRS = {
     "known_but_unemitted_target": {"known_but_unemitted_target"},
     # SEG-021-T020 / ADR 0043: STOP halted the CPU and no interrupt the machine
     # can raise could ever be accepted.
-    "unsupported_interrupt_or_scheduling_event": {"stopped_without_wake_source", "irq6_vector_in_work_ram"},
+    # SEG-055: `unsupported_region_timing` = a console region whose timing is not implemented (PAL) or an unknown region
+    # name; `hint_handler_not_installed` = an enabled H-interrupt fired without a build-resolved handler.
+    "unsupported_interrupt_or_scheduling_event": {"stopped_without_wake_source", "irq6_vector_in_work_ram",
+                                                  "unsupported_interrupt_or_scheduling_event",
+                                                  "unsupported_region_timing", "hint_handler_not_installed"},
     "internal_dispatch_inconsistency": {"internal_dispatch_inconsistency"},
     # SEG-007-T252 / ADR-0040: this stop pair is now unreachable via the
     # runner-owned genesis_runtime_run path -- there is no longer any
@@ -1297,6 +1301,10 @@ def run_capture(executable: pathlib.Path, root: pathlib.Path, out_dir: pathlib.P
     summary = [line for line in completed.stderr.splitlines() if line.startswith("CAPTURE_SUMMARY ")]
     for line in summary:
         sys.stderr.write(line + "\n")
+    # SEG-055: what the run could not honor (undelivered H-interrupts, rejected frames, non-default region) -- only when notable.
+    for line in completed.stderr.splitlines():
+        if line.startswith("RUNTIME_NOTES "):
+            sys.stderr.write(line + "\n")
     for ppm in sorted(frames.glob("frame-*.ppm")):
         ppm.with_suffix(".png").write_bytes(ppm_to_png(ppm.read_bytes()))
     if completed.stdout:
@@ -1384,6 +1392,64 @@ def run_viewer(executable: pathlib.Path, root: pathlib.Path, instruction_budget:
                           cwd=root, env=env).returncode
 
 
+# SEG-055: console region selection. The generated program is region-agnostic; the choice reaches it through the
+# SEGARECOMP_GENESIS_REGION environment variable (the same launcher channel as the viewer/capture options), is fixed
+# before the first guest instruction, and drives only the guest-visible hardware version register ($A10001). 50 Hz (PAL)
+# timing is not implemented, so a PAL console is refused here with a clear message before any generation work.
+REGION_CHOICES = ("usa", "japan", "europe", "auto")
+GENESIS_HEADER_REGION_FIELD = (0x1F0, 0x200)
+
+
+def header_region_hint(rom: bytes) -> tuple[str, str]:
+    """Derive a region *hint* from the ROM header's region-support field ($1F0-$1FF). Header metadata is a compatibility
+    declaration, never proof of the console being emulated: prefer an overseas NTSC declaration (the historical default),
+    else a Japanese one, else Europe (unsupported). Returns (profile, description of what the header declares)."""
+    begin, end = GENESIS_HEADER_REGION_FIELD
+    field = rom[begin:end]
+    if len(field) < end - begin:
+        return "usa", "no header region field; default"
+    text = field.decode("ascii", errors="replace").strip()
+    if text == "E":
+        # A lone "E" is valid in BOTH documented encodings (old-style letter: Europe; new-style hex digit 0xE: Asia + Americas +
+        # Europe). It cannot be classified from the header alone, so the historical default is kept and the ambiguity is reported;
+        # an explicit --region is the reliable override.
+        return "usa", "header region field 'E' is ambiguous (letter Europe vs hex 0xE); default kept, pass --region to override"
+    letters = {c for c in text if c in "JUE"}
+    if letters:
+        old_style = "J" in letters, "U" in letters, "E" in letters
+    else:
+        try:
+            bits = int(text[0], 16) if text and all(c in "0123456789ABCDEFabcdef" for c in text) else 0
+        except ValueError:
+            bits = 0
+        old_style = bool(bits & 0x1), bool(bits & 0x4), bool(bits & 0x8)
+    declares = "".join(c for c, present in zip("JUE", old_style) if present) or "none"
+    if old_style[1]:
+        return "usa", f"header declares {declares}"
+    if old_style[0]:
+        return "japan", f"header declares {declares}"
+    if old_style[2]:
+        return "europe", f"header declares {declares}"
+    return "usa", "header declares no recognizable region; default"
+
+
+def configure_region(requested: str, rom: bytes) -> tuple[str | None, dict]:
+    """Resolve --region to a profile name and export it for every program run this invocation performs. Returns
+    (profile or None when refused, summary). `usa` is the default and preserves the historical behavior."""
+    source = "explicit" if requested != "auto" else "header_hint"
+    profile = requested
+    note = ""
+    if requested == "auto":
+        profile, note = header_region_hint(rom)
+    summary = {"requested": requested, "profile": profile, "source": source, "note": note,
+               "version_register": {"usa": "0xA0", "japan": "0x20", "europe": "0xE0"}[profile]}
+    if profile == "europe":
+        summary["error"] = "europe_pal_timing_not_implemented"
+        return None, summary
+    os.environ["SEGARECOMP_GENESIS_REGION"] = profile
+    return profile, summary
+
+
 GENESIS_WORK_RAM_BEGIN = 0xFF0000
 GENESIS_WORK_RAM_SIZE = 0x10000
 GENESIS_ALIAS_MIN_RUN = 16
@@ -1392,6 +1458,7 @@ GUEST_STOP_KNOWN_BUT_UNEMITTED_TARGET = 5
 GUEST_STOP_INTERNAL_DISPATCH_INCONSISTENCY = 7
 GUEST_STOP_UNSUPPORTED_INTERRUPT = 6  # ADR 0097 amendment: an IRQ6 delivery through a work-RAM vector
 IRQ6_VECTOR_OFFSET = 0x78
+HINT_VECTOR_OFFSET = 0x70  # SEG-055: the H-interrupt (level-4 autovector, vector 28) slot, same RAM jump-table convention
 
 
 def derive_copy_alias(rom: bytes, work_ram: bytes, pc: int) -> tuple[int, int, int] | None:
@@ -1514,7 +1581,9 @@ def discover_copy_aliases(emitter_command: list[str], compiler: pathlib.Path, ro
         dump_path.unlink(missing_ok=True)
         env = dict(os.environ)
         env.update({"SEGARECOMP_CAPTURE_DIR": str(work / "frames"), "SEGARECOMP_CAPTURE_FIRST": str(1 << 40),
-                    "SEGARECOMP_CAPTURE_COUNT": "1", "SEGARECOMP_STOP_WORK_RAM_DUMP": str(dump_path)})
+                    "SEGARECOMP_CAPTURE_COUNT": "1", "SEGARECOMP_STOP_WORK_RAM_DUMP": str(dump_path),
+                    # SEG-055: preparation needs an undeliverable H-interrupt to STOP (strict) so its RAM stub/copy can be derived
+                    "SEGARECOMP_GENESIS_HINT": "strict"})
         (work / "frames").mkdir(exist_ok=True)
         counts["run_attempts"] += 1
         completed = subprocess.run([str(executable), "--instruction-budget", str(instruction_budget)],
@@ -1539,13 +1608,24 @@ def discover_copy_aliases(emitter_command: list[str], compiler: pathlib.Path, ro
         pc = int.from_bytes(dump[0:4], "big")
         stop_class = int.from_bytes(dump[4:8], "big")
         if stop_class == GUEST_STOP_UNSUPPORTED_INTERRUPT:
-            # The cartridge's own IRQ6 vector slot (immutable data) names the work-RAM stub address.
-            vector = int.from_bytes(rom_bytes[IRQ6_VECTOR_OFFSET:IRQ6_VECTOR_OFFSET + 4], "big") & 0xFFFFFF
-            if len(rom_bytes) < IRQ6_VECTOR_OFFSET + 4 or vector < GENESIS_WORK_RAM_BEGIN:
+            # The cartridge's own vector slot (immutable data) names the work-RAM stub address. The stop does not say
+            # which interrupt it was: try the IRQ6 slot first, then (SEG-055) the H-interrupt slot, each only while its
+            # stub has not already been materialized as a thunk.
+            candidates = []
+            for slot in (IRQ6_VECTOR_OFFSET, HINT_VECTOR_OFFSET):
+                if len(rom_bytes) >= slot + 4:
+                    candidate = int.from_bytes(rom_bytes[slot:slot + 4], "big") & 0xFFFFFF
+                    covered = all(t[0] != candidate for t in thunks) and \
+                        not (slot == HINT_VECTOR_OFFSET and any(a[0] <= candidate < a[0] + a[2] for a in aliases))
+                    if candidate >= GENESIS_WORK_RAM_BEGIN and covered:
+                        candidates.append((slot, candidate))
+            if not candidates:
                 reason = ALIAS_TERMINATION_NON_ALIAS_FRONTIER
                 break
-            pc = vector
-            thunk_only = True
+            slot, pc = candidates[0]
+            # IRQ6 keeps its thunk-only rule; an H-interrupt vector may also point at a verbatim copy of immutable image
+            # code (the copied handler is then an ordinary alias-compiled entry), so the alias derivation below is tried first.
+            thunk_only = slot == IRQ6_VECTOR_OFFSET
         elif stop_class not in (GUEST_STOP_KNOWN_BUT_UNEMITTED_TARGET, GUEST_STOP_INTERNAL_DISPATCH_INCONSISTENCY):
             reason = ALIAS_TERMINATION_NON_ALIAS_FRONTIER
             break
@@ -2062,6 +2142,11 @@ def main() -> int:
     # Omitted means the generated binary's own compiled-in default (128).
     parser.add_argument("--instruction-budget", type=instruction_budget_value)
     # SEG-007-T254: optional interactive SDL3 viewer over the same generated program.
+    parser.add_argument("--region", choices=REGION_CHOICES, default="usa",
+                        help="SEG-055 console region: usa (default, overseas NTSC, version register 0xA0), japan (domestic NTSC, "
+                             "0x20), europe (PAL: refused, 50 Hz timing is not implemented) or auto (a hint derived from the ROM "
+                             "header's region field: overseas NTSC if declared, else Japan). Fixed for the whole run; the "
+                             "generated program is unchanged (no rebuild is needed to switch regions)")
     parser.add_argument("--viewer", action="store_true",
                         help="run the generated program through the SDL3 viewer (requires SDL3)")
     parser.add_argument("--viewer-unthrottled", action="store_true",
@@ -2149,9 +2234,19 @@ def main() -> int:
                else root / args.out_dir).resolve()
     if not ignored(out_dir, root):
         return 6
-    digest = hashlib.sha256(rom.read_bytes()).hexdigest()
+    rom_bytes = rom.read_bytes()
+    digest = hashlib.sha256(rom_bytes).hexdigest()
     if args.expect_sha256 and args.expect_sha256 != digest:
         return 4
+    # SEG-055: choose and export the console region before any generation/compile/run work; the default (usa) sets the
+    # variable too so an inherited value can never silently change the run.
+    region_profile, region_summary = configure_region(args.region, rom_bytes)
+    if args.region != "usa":
+        sys.stderr.write("REGION_PROFILE " + json.dumps(region_summary, separators=(",", ":"), sort_keys=True) + "\n")
+    if region_profile is None:
+        sys.stderr.write("segarecomp: the Europe PAL console profile is representable (version register 0xE0) but not "
+                         "supported: 50 Hz timing is not implemented; use --region usa or --region japan\n")
+        return 2
     if args.rom_sha256 and args.rom_sha256 != digest:
         return 4
     emitter_command = [*process_tree.script_argv(binary), "emit-general-startup-bridge-c", "--rom", str(rom)]

@@ -2259,6 +2259,19 @@ StaticCallReturnResult discover_m68k_static_call_return(const FrontendProgram &p
 // vary by calling context) and return_edges_emitted (keyed by (RTS source
 // address, call-site identity), since a return edge's target does depend on
 // which call is active).
+namespace {
+// SEG-055: the H-interrupt (vector 28) root is an optional, additive discovery root. A handler that reaches a large call
+// tree can push the AGGREGATED analysis over a bounded ceiling that the same image does not hit without it, so the
+// general-startup analysis is attempted with the root first and, if that attempt is rejected for any reason, again
+// without it (exactly the pre-existing analysis): the root can add capability but never a new build rejection.
+thread_local bool g_general_startup_hint_root = true;
+struct HintRootScope {
+  explicit HintRootScope(bool enabled) : previous(g_general_startup_hint_root) { g_general_startup_hint_root = enabled; }
+  ~HintRootScope() { g_general_startup_hint_root = previous; }
+  bool previous;
+};
+}  // namespace
+
 FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   if (!program.startup_ingress) return rejected(DirectFlowDiagnostic::unmapped_instruction_address, program);
   const auto entry = program.startup_ingress->entry;
@@ -2757,6 +2770,28 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   // per-root ceiling trips must be visible to the continuation pre-pass. Resolve
   // the raw vector here with the same guard the Phase-2 IRQ6 block uses; a
   // zero/absent/odd/unmapped slot simply contributes no pre-pass root.
+  const auto vector_pre_pass_root = [&](std::size_t vector_offset) -> std::optional<Address> {
+    constexpr std::size_t kResetPcOffset = 0x4U;
+    constexpr std::size_t kVectorTableBytes = 0x100U;
+    const auto &image_bytes = program.image.bytes;
+    if (image_bytes.size() < kVectorTableBytes || !program.startup_ingress) return std::nullopt;
+    const auto read_be32 = [&](std::size_t off) -> Address {
+      return (static_cast<Address>(image_bytes[off]) << 24) |
+             (static_cast<Address>(image_bytes[off + 1U]) << 16) |
+             (static_cast<Address>(image_bytes[off + 2U]) << 8) |
+             static_cast<Address>(image_bytes[off + 3U]);
+    };
+    if (read_be32(kResetPcOffset) != program.startup_ingress->entry.value) return std::nullopt;
+    const Address handler = read_be32(vector_offset);
+    if (handler == 0U || (handler & 1U) != 0U || handler >= UINT32_C(0x00E00000)) return std::nullopt;
+    const M68kProgramAddress handler_address{TargetAddressSpace::m68k_program, handler};
+    if (environment.admit_target(handler_address, M68kDiscoveryTargetRole::interrupt_vector)) return std::nullopt;
+    return handler;
+  };
+  // SEG-055: the H-interrupt autovector (offset 0x70) joins the continuation pre-pass exactly like IRQ6, so a handler whose
+  // call tree reaches the per-root ceiling gets the same synthesized continuation units instead of dangling exact targets.
+  const std::optional<Address> hint_pre_pass_root =
+      g_general_startup_hint_root ? vector_pre_pass_root(0x70U) : std::nullopt;
   const std::optional<Address> irq6_pre_pass_root = [&]() -> std::optional<Address> {
     constexpr std::size_t kIrq6VectorOffset = 0x78U;
     constexpr std::size_t kResetPcOffset = 0x4U;
@@ -2794,6 +2829,8 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
     std::vector<Address> pre_pass_roots;
     pre_pass_roots.push_back(entry.value);
     if (irq6_pre_pass_root) pre_pass_roots.push_back(*irq6_pre_pass_root);
+    if (hint_pre_pass_root && std::find(pre_pass_roots.begin(), pre_pass_roots.end(), *hint_pre_pass_root) == pre_pass_roots.end())
+      pre_pass_roots.push_back(*hint_pre_pass_root);
     for (const auto unit : admitted_units) pre_pass_roots.push_back(unit);
     for (const auto &seed : program.runtime_confirmed_seeds)
       if (std::find(pre_pass_roots.begin(), pre_pass_roots.end(), seed.value) == pre_pass_roots.end())
@@ -3111,11 +3148,25 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   std::optional<Address> divide_by_zero_handler_entry_value;
   std::optional<Address> privilege_violation_handler_entry_value;
   std::map<std::uint8_t, Address> software_exception_handler_entry_values;
+  bool hint_vector_in_work_ram = false;  // SEG-055: vector 28 slot resolves into work RAM (RAM jump-table convention)
+  Address hint_vector_ram_entry_value = 0U;
+  // SEG-055: vector 28 is the VDP H-interrupt (level-4 autovector). It is resolved, discovered and rooted exactly like
+  // the synchronous vectors (same NOT INSTALLED fallback: a ROM whose slot cannot be admitted builds unchanged and an
+  // enabled H-interrupt then stops fail-closed at runtime); the machine hook only sources it.
   std::vector<std::uint8_t> synchronous_vectors{5U, 8U, 4U, 6U, 7U, 10U, 11U};
+  if (g_general_startup_hint_root) synchronous_vectors.push_back(28U);
   for (std::uint8_t trap_vector = 32U; trap_vector <= 47U; ++trap_vector) synchronous_vectors.push_back(trap_vector);
   for (const auto synchronous_vector : synchronous_vectors) {
     const std::size_t kSynchronousVectorOffset = static_cast<std::size_t>(synchronous_vector) * 4U;
     if (const auto resolved_handler = resolve_vector_handler(kSynchronousVectorOffset)) {
+      if (synchronous_vector == 28U && *resolved_handler >= UINT32_C(0x00E00000)) {
+        // SEG-055: the H-interrupt vector points into work RAM like the common IRQ6 convention; there is no static
+        // handler body to root (a RAM-resident stub is not executable code in this architecture unless a byte-guarded
+        // thunk is materialized by the build-time preparation). Retain the stub address for that mechanism.
+        hint_vector_in_work_ram = true;
+        hint_vector_ram_entry_value = *resolved_handler;
+        continue;
+      }
       const Address handler = *resolved_handler;
       const M68kProgramAddress handler_address{TargetAddressSpace::m68k_program, handler};
       // Every synchronous-exception slot (5, 8, and the software-exception
@@ -3130,8 +3181,24 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
       exception_boundary.insert(synthesized_control_roots.begin(), synthesized_control_roots.end());
       exception_boundary.insert(entry.value);
       exception_boundary.erase(handler);
+      // SEG-055: the H-interrupt root is discovered with a SMALLER bounded budget and without following call frames: it is an
+      // additive root (its call tree frequently reaches code that no other root reaches, e.g. game-specific update routines,
+      // which the aggregated authoritative closure cannot represent). The handler's own straight-line body is compiled; a call
+      // or a tail beyond the bound is a typed prefix-boundary frontier (fail closed if ever executed) instead of widening the build.
+      const M68kStaticDiscoveryLimits hint_limits{synchronous_vector == 28U ? std::min<std::uint32_t>(limits.max_instructions, 96U)
+                                                                             : limits.max_instructions,
+                                                  limits.max_blocks,
+                                                  synchronous_vector == 28U ? 0U : limits.max_call_frame_depth};
+      const auto &limits = hint_limits;  // (this root's budget; the outer ceilings apply to every other root)
       auto discovery = discover_m68k_static_graph(handler_address, limits, environment, exception_boundary,
                                                    continuation_roots);
+      // SEG-055: a handler that is a single unresolved instruction (typically a JMP through a RAM stub written at run time) is
+      // not installed; a longer handler is installed even with open frontiers (typed prefix boundaries, fail closed if executed).
+      // The whole analysis is retried without the root if it is rejected, so the root never adds a rejection.
+      if (synchronous_vector == 28U && discovery.decode_order.size() <= 1U &&
+          (discovery.primary_issue || !discovery.secondary_issues.empty())) {
+        continue;
+      }
       const M68kDiscoveryIssue *fatal_issue = nullptr;
       if (discovery.primary_issue && is_fatal_probe_failure(*discovery.primary_issue))
         fatal_issue = &*discovery.primary_issue;
@@ -3146,7 +3213,11 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
       if (synchronous_vector == 5U) divide_by_zero_handler_entry_value = handler;
       else if (synchronous_vector == 8U) privilege_violation_handler_entry_value = handler;
       else software_exception_handler_entry_values[synchronous_vector] = handler;
-      merge_root_result({StaticProgramRootKind::synchronous_exception, 0U}, discovery);
+      // SEG-055: the H-interrupt is an ASYNCHRONOUS hardware interrupt like IRQ6 (it is raised by the VDP scanline
+      // counter), so its root takes the same continuation/ceiling treatment as the IRQ6 root; every other vector here is
+      // a synchronous exception.
+      merge_root_result({synchronous_vector == 28U ? StaticProgramRootKind::asynchronous_hardware
+                                                    : StaticProgramRootKind::synchronous_exception, 0U}, discovery);
     }
   }
 
@@ -3750,6 +3821,8 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
   analysis.irq6_vector_in_work_ram = irq6_vector_in_work_ram;
   analysis.cartridge_sram = parse_genesis_cartridge_sram_header(program.image.bytes).descriptor;
   analysis.irq6_vector_ram_entry = irq6_vector_ram_entry_value;
+  analysis.hint_vector_in_work_ram = hint_vector_in_work_ram;
+  analysis.hint_vector_ram_entry = hint_vector_ram_entry_value;
   // SEG-007-T222 / ADR-0037: retain the build-time-resolved vector-5 handler
   // entry, mirroring `irq6_handler_entry` exactly.
   if (divide_by_zero_handler_entry_value)
@@ -6500,14 +6573,20 @@ FrontendResult analyze_m68k_frontend(const FrontendProgram &program) {
   if (program.profile == M68kFrontendProfile::genesis_rom_startup)
     return analyze_startup_profile(program);
   if (program.profile == M68kFrontendProfile::general_startup) {
-    auto result = discover_m68k_general_startup(program);
-    bool valid = true;
-    if (auto *accepted = std::get_if<FrontendAnalysis>(&result))
-      valid = populate_immutable_rom_aot_entries(program, *accepted);
-    else if (auto *partial = std::get_if<FrontendPartialProgram>(&result))
-      valid = populate_immutable_rom_aot_entries(program, partial->accepted_prefix);
-    if (!valid) return rejected(DirectFlowDiagnostic::startup_graph_mismatch, program);
-    return result;
+    const auto attempt = [&](bool hint_root) -> FrontendResult {
+      const HintRootScope scope(hint_root);
+      auto result = discover_m68k_general_startup(program);
+      bool valid = true;
+      if (auto *accepted = std::get_if<FrontendAnalysis>(&result))
+        valid = populate_immutable_rom_aot_entries(program, *accepted);
+      else if (auto *partial = std::get_if<FrontendPartialProgram>(&result))
+        valid = populate_immutable_rom_aot_entries(program, partial->accepted_prefix);
+      if (!valid) return rejected(DirectFlowDiagnostic::startup_graph_mismatch, program);
+      return result;
+    };
+    auto with_hint_root = attempt(true);
+    if (!std::holds_alternative<FrontendRejected>(with_hint_root)) return with_hint_root;
+    return attempt(false);  // SEG-055: the root must never add a rejection
   }
   std::vector<M68kProgramAddress> seeds;
   for(const auto &seed:program.analysis_entries) if(std::none_of(seeds.begin(),seeds.end(),[&](const auto &old){return same(old,seed);})) seeds.push_back(seed);

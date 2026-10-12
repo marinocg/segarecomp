@@ -104,9 +104,13 @@ GenesisViewerResult genesis_viewer_run(GenesisRuntime *runtime, GenesisDispatchF
     return finish(r, GENESIS_VIEWER_INVALID_ARGUMENT);
   const GenesisLiveFrameObserver *obs = runtime->live_frame_observer;
   uint64_t presented_seq = obs->sequence;
+  /* SEG-055: pacing authority is the runtime's deterministic virtual frame counter, which advances at every VBlank
+   * onset whether or not a frame could be rendered. Publication (obs->sequence) only decides what is presented. */
+  uint64_t paced_boundaries = runtime->virtual_frame_count;
   for (;;) {
     if (host->window_closed(host->ctx)) return finish(r, GENESIS_VIEWER_WINDOW_CLOSED);
     genesis_runtime_set_pad1(runtime, host->pad1 != NULL ? host->pad1(host->ctx) : 0U);
+    genesis_runtime_set_pad2(runtime, host->pad2 != NULL ? host->pad2(host->ctx) : 0U);
     uint64_t remaining = total_dispatch_allowance - r.dispatches;
     if (remaining == 0) return finish(r, GENESIS_VIEWER_RUNNER_EXHAUSTED);
     uint32_t slice = remaining < options->slice_dispatches ? (uint32_t)remaining
@@ -119,9 +123,16 @@ GenesisViewerResult genesis_viewer_run(GenesisRuntime *runtime, GenesisDispatchF
       r.dispatches += t.runner_dispatch_count;
     else
       r.dispatches += 1; /* terminal slice: count is only a lower bound */
+    /* Throttle once per virtual frame boundary crossed in this slice (an unsupported/rejected frame still costs its
+     * period, so a renderer that rejects a display mode can never let the guest run ahead of real time). The
+     * unthrottled option only skips the sleeping inside genesis_pacer_wait. */
+    while (paced_boundaries != runtime->virtual_frame_count) {
+      if (genesis_pacer_wait(pacer, host) != 0) return finish(r, GENESIS_VIEWER_HOST_ERROR);
+      ++paced_boundaries;
+      r.frames_paced++;
+    }
     /* Present the newest completed frame, if a new one exists. */
     if (obs->sequence != presented_seq && genesis_frame_artifact_is_populated(obs->latest)) {
-      if (genesis_pacer_wait(pacer, host) != 0) return finish(r, GENESIS_VIEWER_HOST_ERROR);
       if (host->present(host->ctx, obs->latest) != 0) return finish(r, GENESIS_VIEWER_HOST_ERROR);
       presented_seq = obs->sequence;
       r.frames_presented++;

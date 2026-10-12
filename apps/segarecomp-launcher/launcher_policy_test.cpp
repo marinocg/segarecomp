@@ -57,6 +57,59 @@ int main(int argc, char **argv) {
   optimized.aot_policy = "optimized";
   expect(optimized.optimized(), "Optimized is selectable for Genesis");
   expect(entry_dir(optimized, layout) != compat_entry, "Compatibility and Optimized have different cache entries");
+
+  // SEG-055: console region (run-time only) and the advanced H-interrupt alias discovery (default off, part of the cache identity).
+  expect(genesis.supports_region() && !sms.supports_region() && genesis.region == "usa", "the region selector is Genesis only and defaults to USA NTSC");
+  expect(!genesis.hint_alias_discovery && genesis.supports_hint_alias_discovery() && !sms.supports_hint_alias_discovery(), "alias discovery defaults off and is Genesis only");
+  {
+    const char *before_raw = SDL_getenv("SEGARECOMP_GENESIS_REGION");
+    const std::string process_region_before_text = before_raw ? before_raw : "";
+    const char *process_region_before = before_raw ? process_region_before_text.c_str() : nullptr;
+    RomView japan = genesis, europe = genesis, discovery = genesis;
+    japan.region = "japan";
+    europe.region = "europe";
+    discovery.hint_alias_discovery = true;
+    // Region is run-time configuration: switching it reuses the same compiled artifact (identical cache entry); discovery changes the program.
+    expect(entry_dir(japan, layout) == compat_entry && entry_dir(europe, layout) == compat_entry, "switching region reuses the same compiled artifact");
+    expect(entry_dir(discovery, layout) != compat_entry, "alias discovery selects a different cache entry");
+    expect(entry_dir(discovery, layout) == entry_dir(discovery, layout), "discovery cache identity is deterministic");
+    RomView discovery_opt = discovery;
+    discovery_opt.aot_policy = "optimized";
+    expect(entry_dir(discovery_opt, layout) != entry_dir(optimized, layout), "discovery also separates Optimized entries");
+    RomView sms_discovery = sms;
+    sms_discovery.hint_alias_discovery = true;
+    expect(entry_dir(sms_discovery, layout) == entry_dir(sms, layout), "Master System ignores discovery (non-Genesis paths unchanged)");
+
+    // PAL refuses cleanly; NTSC profiles and non-Genesis launches are never refused.
+    expect(launch_refusal(europe).find("PAL") != std::string::npos && launch_refusal(japan).empty() && launch_refusal(genesis).empty() && launch_refusal(sms).empty(),
+           "Europe PAL is refused with an explanation; USA, Japan and Master System are launchable");
+    expect(region_executable("usa") && region_executable("japan") && !region_executable("europe") && !region_executable("bogus"), "only the NTSC profiles execute");
+
+    // The child environment (injectable seam): the selection is applied to the child's environment object, not the process environment,
+    // and it overrides any inherited value, including for USA.
+    SDL_Environment *inherited = SDL_CreateEnvironment(true);
+    SDL_SetEnvironmentVariable(inherited, "SEGARECOMP_GENESIS_REGION", "japan", true);
+    apply_game_environment(inherited, genesis);
+    expect(std::string(SDL_GetEnvironmentVariable(inherited, "SEGARECOMP_GENESIS_REGION")) == "usa", "USA selection overrides an inherited Japan value");
+    apply_game_environment(inherited, japan);
+    expect(std::string(SDL_GetEnvironmentVariable(inherited, "SEGARECOMP_GENESIS_REGION")) == "japan", "Japan selection reaches the child environment");
+    SDL_DestroyEnvironment(inherited);
+    SDL_Environment *clean = SDL_CreateEnvironment(false);
+    apply_game_environment(clean, sms);
+    expect(SDL_GetEnvironmentVariable(clean, "SEGARECOMP_GENESIS_REGION") == nullptr, "a Master System launch sets no region variable");
+    SDL_DestroyEnvironment(clean);
+    const char *after = SDL_getenv("SEGARECOMP_GENESIS_REGION");
+    expect((after == nullptr) == (process_region_before == nullptr) && (after == nullptr || std::string(after) == process_region_before),
+           "the launcher's own process environment is untouched by the seam");
+
+    // Header region hints: both documented encodings; the lone 'E' is intrinsically ambiguous and keeps the default (explicit selection overrides).
+    const auto hint = [](const char *text) { return region_hint_from_header_field(std::string(text)); };
+    expect(hint("J").region == "japan" && !hint("J").ambiguous, "J alone selects Japan NTSC");
+    expect(hint("JUE").region == "usa" && hint("U").region == "usa" && hint("JU").region == "usa", "an overseas NTSC declaration keeps USA");
+    expect(hint("1").region == "japan" && hint("4").region == "usa" && hint("5").region == "usa" && hint("8").region == "usa", "hexadecimal bitfield digits");
+    expect(hint("E").region == "usa" && hint("E").ambiguous && hint("E               ").ambiguous, "a bare E is ambiguous and keeps the USA default");
+    expect(hint("").region == "usa" && !hint("").ambiguous, "an empty field keeps the default");
+  }
   expect(entry_dir(optimized, layout) == entry_dir(optimized, layout), "cache identity is deterministic");
   RomView other_rom = optimized;
   other_rom.sha256 = std::string(64, 'b');

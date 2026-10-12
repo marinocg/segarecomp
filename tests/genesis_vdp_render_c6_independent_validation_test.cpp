@@ -332,7 +332,7 @@ void test_c6_complete_frame_matches_independent_oracle() {
 void test_c6_fails_closed_outside_bound_surface_leaves_sentinel_untouched() {
   Fixture f;
   build_fixture(&f);
-  f.regs[12] = 0x00; // Neither RS0 nor RS1 set -> H32, unsupported.
+  f.regs[12] = 0x80; // RS0 only: reserved RS0/RS1 combination, unsupported (H32 itself is supported since SEG-055).
 
   GenesisFrameArtifact frame;
   std::memset(&frame, 0xAB, sizeof(frame)); // Sentinel-prefill.

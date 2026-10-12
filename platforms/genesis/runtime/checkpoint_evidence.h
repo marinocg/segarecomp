@@ -11,8 +11,13 @@
 #define GENESIS_CHECKPOINT_EVIDENCE_SCHEMA_VERSION 1U
 #define GENESIS_DETERMINISTIC_OPTIONS_SCHEMA_VERSION 1U
 #define GENESIS_MAX_TRANSACTION_EVIDENCE_ENTRIES 256U
-#define GENESIS_FRAME_WIDTH 320U
-#define GENESIS_FRAME_HEIGHT 224U
+#define GENESIS_FRAME_WIDTH 320U  /* legacy/H40 non-interlaced width: the geometry of a zero-initialized artifact */
+#define GENESIS_FRAME_HEIGHT 224U /* legacy non-interlaced V28 height */
+/* SEG-055: the largest artifact geometry (H40 x interlace-mode-2) and the compact per-scanline raster state. */
+#define GENESIS_FRAME_MAX_WIDTH 320U
+#define GENESIS_FRAME_MAX_HEIGHT 448U
+#define GENESIS_FRAME_MAX_PALETTES 256U
+#define GENESIS_RASTER_MAX_LINES 224U /* active V28 field lines per frame (the NTSC schedule's VBlank onset line) */
 #define GENESIS_STABLE_FRAME_VBLANK_COUNT 2U
 #define GENESIS_MAX_NAME_LENGTH 64U
 #define GENESIS_MAX_RAW_BYTES 12U
@@ -72,11 +77,62 @@ typedef struct GenesisTransactionEvidence {
   uint8_t transaction_digest[32];
 } GenesisTransactionEvidence;
 
+/*
+ * SEG-055: the frame artifact now carries its own geometry and, when CRAM changed during active display, one
+ * palette per distinct scanline state.  `pixels` holds `width * height` CRAM indices (row stride == width).
+ * A zero-initialized artifact (width == height == 0, palette_count <= 1, every row_palette entry 0) IS the legacy
+ * 320x224 single-palette artifact, so every earlier producer, digest and consumer keeps its meaning:
+ *   - `palette_snapshot` is palette slot 0 (the palette of the first row);
+ *   - `row_palette[row]` selects the slot of an output row (slot k >= 1 lives in `extra_palettes[k - 1]`);
+ *   - `frame_digest` is SHA-256(pixels[0, w*h) || palette_snapshot) for a legacy-shaped artifact (exactly the
+ *     pre-SEG-055 digest) and additionally covers width, height, palette_count, row_palette and the extra palettes
+ *     for every other shape (see genesis_vdp_frame_digest in vdp_render.c).
+ */
 typedef struct GenesisFrameArtifact {
-  uint8_t pixels[GENESIS_FRAME_WIDTH * GENESIS_FRAME_HEIGHT];
+  uint8_t pixels[GENESIS_FRAME_MAX_WIDTH * GENESIS_FRAME_MAX_HEIGHT];
   uint8_t palette_snapshot[GENESIS_VDP_CRAM_BYTES];
   uint8_t frame_digest[32];
+  uint16_t width;
+  uint16_t height;
+  uint16_t palette_count;
+  uint8_t row_palette[GENESIS_FRAME_MAX_HEIGHT];
+  uint8_t extra_palettes[GENESIS_FRAME_MAX_PALETTES - 1U][GENESIS_VDP_CRAM_BYTES];
 } GenesisFrameArtifact;
+
+/* Active geometry of an artifact: a zero width/height means the legacy 320x224 shape (this header stays data-only, so
+ * these are expressions, not functions). The per-row palette lookup lives in vdp_render.c
+ * (genesis_vdp_frame_row_palette). */
+#define GENESIS_FRAME_ARTIFACT_WIDTH(frame) ((frame)->width != 0U ? (unsigned)(frame)->width : GENESIS_FRAME_WIDTH)
+#define GENESIS_FRAME_ARTIFACT_HEIGHT(frame) ((frame)->height != 0U ? (unsigned)(frame)->height : GENESIS_FRAME_HEIGHT)
+
+/* SEG-055: one scanline's mutable VDP state (everything the renderer reads that a game can change between lines
+ * without VRAM traffic: the register file, CRAM and VSRAM) -- 256 bytes, never a VRAM snapshot. */
+typedef struct GenesisRasterLine {
+  uint16_t registers[GENESIS_VDP_REGISTER_COUNT];
+  uint8_t cram[GENESIS_VDP_CRAM_BYTES];
+  uint8_t vsram[GENESIS_VDP_VSRAM_BYTES];
+} GenesisRasterLine;
+
+/* One VRAM byte written while the active display was in progress (a raster event). `line` is the field line during which
+ * the write happened; the renderer makes it visible from line + 1 on, exactly like a register/CRAM/VSRAM change. */
+#define GENESIS_RASTER_VRAM_WRITE_CAPACITY 8192U
+typedef struct GenesisRasterVramWrite {
+  uint16_t address;
+  uint8_t value;
+  uint8_t line;
+} GenesisRasterVramWrite;
+
+/* The per-field-line state of one completed active display period (line L = the state when scanline L began), plus the
+ * optional VRAM journal: `vram_start` is the VRAM when line 0 began and `vram_writes` every byte written during the active
+ * display, in order. Without a journal (`has_vram_journal == 0`: observer attached mid-frame, journal overflowed, or a
+ * hand-built state) the renderer uses the single VRAM image it is given for every line. */
+typedef struct GenesisRasterFrameState {
+  GenesisRasterLine lines[GENESIS_RASTER_MAX_LINES];
+  uint8_t has_vram_journal;
+  uint16_t vram_write_count;
+  GenesisRasterVramWrite vram_writes[GENESIS_RASTER_VRAM_WRITE_CAPACITY];
+  uint8_t vram_start[GENESIS_VDP_VRAM_BYTES];
+} GenesisRasterFrameState;
 
 typedef struct GenesisCheckpointEvidenceBundle {
   uint32_t schema_version;

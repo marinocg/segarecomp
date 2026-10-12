@@ -211,6 +211,10 @@ struct Options {
   // SEG-049-T004 (ADR 0103): the EXPERIMENTAL model family requested for `optimized`. `v1` (default) is the SEG-047 route and is never
   // silently replaced; `gen2` is an explicit opt-in (M3 + B35). It has no meaning for `compatibility`.
   std::string aot_model = "v1";
+  // SEG-055: run the build-time preparation passes with the strict VDP H-interrupt policy (`SEGARECOMP_GENESIS_HINT=strict`), so an enabled
+  // H-interrupt whose RAM-resident vector has no compiled handler STOPS the pass and ADR 0049 can derive its copy alias / RAM thunk.
+  // Default off: the default policy counts and drops such an interrupt. Genesis only; it changes the generated program.
+  bool hint_alias_discovery = false;
 };
 
 enum class Target { genesis, master_system };
@@ -287,6 +291,7 @@ std::optional<Options> parse_options(int argc, char **argv) {
     else if (key == "--jobs") options.jobs = static_cast<unsigned>(std::max(0, std::atoi(value.c_str())));
     else if (key == "--admission-plan" && !options.admission_plan) options.admission_plan = fs::path(value);
     else if (key == "--aot-policy" && (value == "compatibility" || value == "optimized")) options.aot_policy = value;
+    else if (key == "--hint-alias-discovery" && (value == "0" || value == "1")) options.hint_alias_discovery = value == "1";
     else if (key == "--aot-model" && !aot_model_given && (value == "v1" || value == "gen2")) { options.aot_model = value; aot_model_given = true; }
     else return std::nullopt;
   }
@@ -601,8 +606,9 @@ class ProcessPassRunner final : public gz80::PassRunner {
     gz80::PassObservation observed;
     std::error_code ec;
     for (const char *name : {"pass.report", "unknown.ram", "unknown.written", "stop.ram"}) fs::remove(build_.pass_dir / name, ec);
-    const Environment environment{{"SEGARECOMP_MATERIALIZE_DIR", build_.pass_dir.string()},
-                                  {"SEGARECOMP_MATERIALIZE_FRAMES", std::to_string(gz80::kObservationFrames)}};
+    Environment environment{{"SEGARECOMP_MATERIALIZE_DIR", build_.pass_dir.string()},
+                            {"SEGARECOMP_MATERIALIZE_FRAMES", std::to_string(gz80::kObservationFrames)}};
+    if (build_.options.hint_alias_discovery) environment.emplace_back("SEGARECOMP_GENESIS_HINT", "strict");
     const fs::path pass_log = build_.pass_dir / "pass.log";
     const int rc = run_process({build_.pass_executable.string(), "--instruction-budget", std::to_string(gz80::kPassInstructionBudget)},
                                pass_log, environment, gz80::kPassWallSeconds);
