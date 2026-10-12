@@ -1,0 +1,295 @@
+{
+ "adaptive_multiplier": null,
+ "classification": {
+  "genesis": "Z80_BROAD_AOT_CHEAP_ENOUGH",
+  "launcher_optimized_mode": "NOT_JUSTIFIED (launcher already offers Optimized for Genesis only)",
+  "native_integration_T004": "NOT_JUSTIFIED",
+  "sms": "Z80_RECALL_FAILED (strict full recall; pilot, 6 dev lineages < 8 adoption minimum)"
+ },
+ "descriptive_non_binding": {
+  "budget_needed_for_positive_cell_recall_C1": {
+   "columns": {
+    "b0.9": 0.126,
+    "b0.95": 0.133,
+    "b0.99": 0.151,
+    "b0.999": 0.245,
+    "cells": 4096,
+    "frf": 0.245,
+    "oracle_retained": 0.105,
+    "positives": 431
+   },
+   "g2048": {
+    "b0.9": 0.078,
+    "b0.95": 0.083,
+    "b0.99": 0.104,
+    "b0.999": 0.104,
+    "cells": 1024,
+    "frf": 0.104,
+    "oracle_retained": 0.086,
+    "positives": 88
+   },
+   "kots": {
+    "b0.9": 0.18,
+    "b0.95": 0.193,
+    "b0.99": 0.22,
+    "b0.999": 0.222,
+    "cells": 4096,
+    "frf": 0.222,
+    "oracle_retained": 0.181,
+    "positives": 741
+   },
+   "ps1": {
+    "b0.9": 0.099,
+    "b0.95": 0.13,
+    "b0.99": 0.292,
+    "b0.999": 0.977,
+    "cells": 16384,
+    "frf": 0.977,
+    "oracle_retained": 0.059,
+    "positives": 966
+   },
+   "solomon": {
+    "b0.9": 0.221,
+    "b0.95": 0.273,
+    "b0.99": 0.549,
+    "b0.999": 0.72,
+    "cells": 4096,
+    "frf": 0.72,
+    "oracle_retained": 0.162,
+    "positives": 663
+   },
+   "supertennis": {
+    "b0.9": 0.38,
+    "b0.95": 0.403,
+    "b0.99": 0.567,
+    "b0.999": 0.99,
+    "cells": 1024,
+    "frf": 0.99,
+    "oracle_retained": 0.419,
+    "positives": 429
+   }
+  },
+  "diagnosis": "Phantasy Star FRF 0.977 is two image-edge/vector cells (0.540 without them); Super Tennis 0.99 and Solomon 0.72 are genuine ranking misses (a data-dominated cell holding trailing instructions; a progressive tail)",
+  "frf_excluding_image_edge_and_vector_cells": {
+   "columns": 0.189,
+   "g2048": 0.1045,
+   "kots": 0.2217,
+   "ps1": 0.5402,
+   "solomon": 0.72,
+   "supertennis": 0.9902
+  },
+  "note": "oracle_retained is the positive-cell share (the lower bound of any full-recall selection at cell granularity); positives are a lower bound of real code because unlisted/ambiguous bytes are unknown"
+ },
+ "development_oof_frf": {
+  "columns": {
+   "C1": 0.2449,
+   "C2": 0.3662,
+   "LR": 0.3674,
+   "RANDOM": 0.9968,
+   "cells": 4096,
+   "negative_cells": 3265,
+   "positive_cells": 431
+  },
+  "g2048": {
+   "C1": 0.1045,
+   "C2": 0.1045,
+   "LR": 0.4395,
+   "RANDOM": 0.9961,
+   "cells": 1024,
+   "negative_cells": 327,
+   "positive_cells": 88
+  },
+  "kots": {
+   "C1": 0.2217,
+   "C2": 0.2249,
+   "LR": 0.5515,
+   "RANDOM": 0.9968,
+   "cells": 4096,
+   "negative_cells": 734,
+   "positive_cells": 741
+  },
+  "ps1": {
+   "C1": 0.9765,
+   "C2": 0.9763,
+   "LR": 0.9939,
+   "RANDOM": 0.9973,
+   "cells": 16384,
+   "negative_cells": 74,
+   "positive_cells": 966
+  },
+  "solomon": {
+   "C1": 0.72,
+   "C2": 0.6438,
+   "LR": 0.7832,
+   "RANDOM": 0.9963,
+   "cells": 4096,
+   "negative_cells": 2577,
+   "positive_cells": 663
+  },
+  "supertennis": {
+   "C1": 0.9902,
+   "C2": 0.9854,
+   "LR": 0.9912,
+   "RANDOM": 0.999,
+   "cells": 1024,
+   "negative_cells": 57,
+   "positive_cells": 429
+  }
+ },
+ "economics": {
+  "genesis_baseline_cold_builds": {
+   "goldenaxe": {
+    "cpu_max": 1214.2,
+    "cpu_med": 1213.9,
+    "cpu_min": 1213.6,
+    "epochs": 3,
+    "exe_MB": 36.0,
+    "images": 2,
+    "runs": 2,
+    "wall_med": 187.3,
+    "z80_C_MB": 11.2,
+    "z80_compile_wall_s": 10.5,
+    "z80_compile_wall_share": 0.056,
+    "z80_emit_s": 0.86,
+    "z80_materialize_stage_s": 15.3,
+    "z80_stage_share_upper_bound": 0.061
+   },
+   "sonic1": {
+    "cpu_max": 906.2,
+    "cpu_med": 864.5,
+    "cpu_min": 777.5,
+    "epochs": 3,
+    "exe_MB": 40.0,
+    "images": 2,
+    "runs": 3,
+    "wall_med": 129.0,
+    "z80_C_MB": 11.4,
+    "z80_compile_wall_s": 12.5,
+    "z80_compile_wall_share": 0.097,
+    "z80_emit_s": 0.57,
+    "z80_materialize_stage_s": 16.8,
+    "z80_stage_share_upper_bound": 0.101
+   },
+   "sor": {
+    "cpu_max": 712.5,
+    "cpu_med": 710.9,
+    "cpu_min": 697.1,
+    "epochs": 4,
+    "exe_MB": 37.1,
+    "images": 2,
+    "runs": 3,
+    "wall_med": 108.2,
+    "z80_C_MB": 11.6,
+    "z80_compile_wall_s": 12.6,
+    "z80_compile_wall_share": 0.116,
+    "z80_emit_s": 0.55,
+    "z80_materialize_stage_s": 17.0,
+    "z80_stage_share_upper_bound": 0.122
+   }
+  },
+  "genesis_conclusion": "Z80 is 6-7% of generated C and 5.6-11.6% of build wall (a hard upper bound on any Z80-only saving); below the 20% gate even at zero retained code",
+  "measured_vs_projected": "SMS/Genesis baselines are measured; any selective-compile saving is a projection because no selective Z80 producer exists",
+  "sms_baseline_cold_builds_3x": {
+   "Alex_Kidd_in_Mirac": {
+    "c_mb": 48,
+    "cpu_max": 335.9,
+    "cpu_med": 321.7,
+    "cpu_min": 321.5,
+    "entries": 132096,
+    "kib": 128,
+    "owners": 1032,
+    "rss": 1734,
+    "wall_med": 42.33
+   },
+   "Columns__UE______s": {
+    "c_mb": 52,
+    "cpu_max": 397.0,
+    "cpu_med": 314.2,
+    "cpu_min": 304.2,
+    "entries": 132096,
+    "kib": 128,
+    "owners": 1032,
+    "rss": 1625,
+    "wall_med": 41.81
+   },
+   "Mickey_Mouse___Cas": {
+    "c_mb": 96,
+    "cpu_max": 634.4,
+    "cpu_med": 617.0,
+    "cpu_min": 615.1,
+    "entries": 263168,
+    "kib": 256,
+    "owners": 2056,
+    "rss": 2588,
+    "wall_med": 81.51
+   },
+   "Sonic_the_Hedgehog": {
+    "c_mb": 93,
+    "cpu_max": 657.2,
+    "cpu_med": 634.5,
+    "cpu_min": 632.3,
+    "entries": 263168,
+    "kib": 256,
+    "owners": 2056,
+    "rss": 2582,
+    "wall_med": 82.76
+   },
+   "Super_Tennis__UE__": {
+    "c_mb": 13,
+    "cpu_max": 81.6,
+    "cpu_med": 79.7,
+    "cpu_min": 79.5,
+    "entries": 33792,
+    "kib": 32,
+    "owners": 264,
+    "rss": 1192,
+    "wall_med": 11.41
+   },
+   "Taz_Mania__UE_____": {
+    "c_mb": 95,
+    "cpu_max": 612.1,
+    "cpu_med": 592.0,
+    "cpu_min": 581.5,
+    "entries": 263168,
+    "kib": 256,
+    "owners": 2056,
+    "rss": 2609,
+    "wall_med": 77.22
+   },
+   "Wonder_Boy_3___The": {
+    "c_mb": 95,
+    "cpu_max": 627.3,
+    "cpu_med": 609.8,
+    "cpu_min": 600.6,
+    "entries": 263168,
+    "kib": 256,
+    "owners": 2056,
+    "rss": 2589,
+    "wall_med": 79.84
+   }
+  },
+  "sms_cpu_model": "build CPU = -3.0 + 2.441 s/KiB * ROM KiB (R2 0.998); Z80 is 100% of the Master System build",
+  "sms_projection": "projected CPU saving = 1 - retained fraction (slope model). Strict full-recall policy retains 1.0 -> 0%. Non-qualifying descriptive: 99% positive-cell recall would retain a median 0.26 (74% projected saving) but loses known code"
+ },
+ "fixed_budget": 1.0,
+ "gates": {
+  "mean_retained_le_0.65": "NOT_MET (fixed budget 1.0)",
+  "median_dev_frf_le_0.60": "FAILED (0.72)",
+  "sealed_strict_recall": "NOT_EVALUATED"
+ },
+ "mean_frf": {
+  "C1": 0.5429666666666667,
+  "C2": 0.5501833333333334,
+  "LR": 0.6877833333333333,
+  "RANDOM": 0.9970500000000001
+ },
+ "median_frf": {
+  "C1": 0.72,
+  "C2": 0.6438,
+  "LR": 0.7832,
+  "RANDOM": 0.9968
+ },
+ "plan_digest": "55fab9de84a739308661f21ac70e31f6846f607f46a5247bf7240b99a2332c89",
+ "result_scope": "EXPLORATORY_PILOT on 6 development lineages (leave-one-lineage-out). The sealed cohort (3 lineages) was NOT evaluated: the pre-registered development gate failed and the fixed policy collapsed to B=1.0, so a sealed run could neither pass nor inform a policy; the cohort is preserved for a future registered attempt. This is a deviation from the frozen protocol that only reduces claims.",
+ "selected_candidate": "C1"
+}
