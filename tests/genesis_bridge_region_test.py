@@ -58,11 +58,11 @@ def main():
     check(os.environ["SEGARECOMP_GENESIS_REGION"] == "usa", "the default (usa) replaces an inherited value, so the run is deterministic")
     os.environ["SEGARECOMP_GENESIS_REGION"] = "japan"
     refused, summary = bridge.configure_region("europe", rom_with_region(b"JUE"))
-    check(refused is None and summary["error"] == "europe_pal_timing_not_implemented" and summary["version_register"] == "0xE0",
-          "Europe PAL is representable (0xE0) but refused honestly")
-    check(os.environ["SEGARECOMP_GENESIS_REGION"] == "japan", "a refused profile leaves the environment untouched")
-    refused_auto, _ = bridge.configure_region("auto", rom_with_region(b"8"))
-    check(refused_auto is None, "auto resolving to Europe (unambiguous new-style 8) is refused as well")
+    check(refused == "europe" and "error" not in summary and summary["version_register"] == "0xE0" and "60 Hz is forced" in summary["note"],
+          "Europe PAL is admitted (0xE0) with an honest note that 60 Hz is forced")
+    check(os.environ["SEGARECOMP_GENESIS_REGION"] == "europe", "an admitted PAL profile is exported to the run")
+    admitted_auto, _ = bridge.configure_region("auto", rom_with_region(b"8"))
+    check(admitted_auto == "europe", "auto resolving to Europe (unambiguous new-style 8) is admitted as well")
   finally:
     if saved is None:
       os.environ.pop("SEGARECOMP_GENESIS_REGION", None)

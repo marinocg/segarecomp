@@ -48,8 +48,8 @@ struct RomView {
   std::string aot_model = "v1";
   [[nodiscard]] bool optimized_gen2() const { return optimized() && aot_model == "gen2"; }
   // Genesis console region (SEG-055): a RUN-TIME choice exported to the game as SEGARECOMP_GENESIS_REGION; it is not part of the cache
-  // identity (one native build serves every region). "usa" (default, the historical console), "japan", or "europe" (PAL: visibly
-  // unsupported, Play refuses with an explanation instead of running 50 Hz software on NTSC timing). The initial value is a hint from
+  // identity (one native build serves every region). "usa" (default, the historical console), "japan", or "europe" (PAL: admitted, but the
+  // machine runs at 60 Hz; 50 Hz timing is not implemented and the UI says so, see region_note). The initial value is a hint from
   // the header's region field; an intrinsically ambiguous field keeps the default and is flagged (`region_ambiguous`).
   std::string region = "usa";
   bool region_ambiguous = false;
@@ -67,6 +67,8 @@ struct RomView {
 // newer single hexadecimal bitfield digit (bit0 Japan NTSC, bit2 Americas NTSC, bit3 Europe PAL). A lone "E" is valid in BOTH (Europe, or
 // the hex digit 0xE = Asia + Americas + Europe), so it is reported as ambiguous and keeps the default; the explicit selection is the override.
 struct RegionHint { std::string region = "usa"; bool ambiguous = false; };
+[[nodiscard]] std::string clean_title(const std::string &raw);  // printable ASCII, single spaces, trimmed
+[[nodiscard]] std::string region_note(const std::string &region);
 [[nodiscard]] RegionHint region_hint_from_header_field(const std::string &field);
 // Console region profiles the runtime can execute today (PAL 50 Hz timing is not implemented).
 [[nodiscard]] bool region_executable(const std::string &region);

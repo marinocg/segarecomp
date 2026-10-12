@@ -374,8 +374,9 @@ void test_region_profiles_and_version_register() {
   check(SEGARECOMP_GENESIS_CONTROLLER_VERSION_POLICY_VALUE == segarecomp_genesis_region_version_value(SEGARECOMP_GENESIS_REGION_USA_NTSC),
         "the historical policy value is exactly the USA NTSC profile (default compatibility)");
   check(segarecomp_genesis_region_is_supported(SEGARECOMP_GENESIS_REGION_JAPAN_NTSC) && segarecomp_genesis_region_is_supported(SEGARECOMP_GENESIS_REGION_USA_NTSC) &&
-            !segarecomp_genesis_region_is_supported(SEGARECOMP_GENESIS_REGION_EUROPE_PAL),
-        "the two 60 Hz profiles are operational; PAL is representable but not supported");
+            segarecomp_genesis_region_is_supported(SEGARECOMP_GENESIS_REGION_EUROPE_PAL) && !segarecomp_genesis_region_is_supported(3u) &&
+            segarecomp_genesis_region_runs_at_50hz(SEGARECOMP_GENESIS_REGION_EUROPE_PAL) && !segarecomp_genesis_region_runs_at_50hz(SEGARECOMP_GENESIS_REGION_USA_NTSC),
+        "all three profiles are selectable; PAL is admitted but its 50 Hz timing is not implemented (it runs at 60 Hz)");
 
   set_env("SEGARECOMP_GENESIS_REGION", nullptr);
   auto d = make_runtime();
@@ -409,8 +410,8 @@ void test_region_profiles_and_version_register() {
   set_env("SEGARECOMP_GENESIS_REGION", "pal");
   auto pal = make_runtime();
   const GenesisControlTransfer pr = genesis_runtime_run(pal.get(), one_step_dispatch, 3u);
-  check(pr.kind == GENESIS_STOP && pr.stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_REGION_TIMING && pal->scheduler.master_ticks == 0u,
-        "a PAL console is refused honestly before any guest instruction runs (50 Hz timing is not implemented)");
+  check(pr.kind == GENESIS_RUNNER_RESOURCE_LIMIT && pal->region_profile == 2u && read_version(*pal) == 0xE0u && pal->scheduler.master_ticks != 0u,
+        "a PAL console is admitted: the guest reads the PAL version register (0xE0) and runs on the 60 Hz schedule (50 Hz is not implemented)");
   set_env("SEGARECOMP_GENESIS_REGION", "mars");
   auto unk = make_runtime();
   const GenesisControlTransfer ur = genesis_runtime_run(unk.get(), one_step_dispatch, 3u);
@@ -430,12 +431,12 @@ void test_region_profiles_and_version_register() {
   GenesisControlTransfer none = {};
   check(genesis_runtime_configure_run(pass.get(), &none) == 0 && pass->region_profile == 1u && read_version(*pass) == 0x20u,
         "the configure-run seam selects the environment region for runners that bypass genesis_runtime_run");
-  set_env("SEGARECOMP_GENESIS_REGION", "pal");
-  auto pass_pal = make_runtime();
+  set_env("SEGARECOMP_GENESIS_REGION", "mars");
+  auto pass_bad = make_runtime();
   GenesisControlTransfer refusal = {};
-  check(genesis_runtime_configure_run(pass_pal.get(), &refusal) == 1 && refusal.kind == GENESIS_STOP &&
+  check(genesis_runtime_configure_run(pass_bad.get(), &refusal) == 1 && refusal.kind == GENESIS_STOP &&
             refusal.stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_REGION_TIMING,
-        "the configure-run seam refuses PAL with the typed stop");
+        "the configure-run seam refuses an unrecognized region with the typed stop");
   set_env("SEGARECOMP_GENESIS_REGION", nullptr);
 }
 

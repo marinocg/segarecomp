@@ -121,6 +121,24 @@ fs::path cache_root() {
   return result;
 }
 
+std::string clean_title(const std::string &raw) {
+  // Header titles are fixed-width, space padded and may carry control bytes or non-ASCII garbage: keep printable ASCII only
+  // (anything else acts as a separator), collapse every whitespace run to one space and trim.
+  std::string out;
+  bool pending_space = false;
+  for (const char raw_char : raw) {
+    const auto c = static_cast<unsigned char>(raw_char);
+    if (c > 0x20 && c < 0x7F) {
+      if (pending_space && !out.empty()) out.push_back(' ');
+      pending_space = false;
+      out.push_back(static_cast<char>(c));
+    } else {
+      pending_space = true;
+    }
+  }
+  return out;
+}
+
 RegionHint region_hint_from_header_field(const std::string &raw) {
   std::string field = raw;
   while (!field.empty() && (field.back() == ' ' || field.back() == '\0')) field.pop_back();
@@ -140,12 +158,15 @@ RegionHint region_hint_from_header_field(const std::string &raw) {
   return hint;
 }
 
-bool region_executable(const std::string &region) { return region == "usa" || region == "japan"; }
+// Every profile executes; Europe PAL runs on the 60 Hz schedule (50 Hz timing is not implemented), see region_note.
+bool region_executable(const std::string &region) { return region == "usa" || region == "japan" || region == "europe"; }
+
+std::string region_note(const std::string &region) {
+  return region == "europe" ? "PAL enabled, but 60 Hz is forced: 50 Hz is not supported." : std::string();
+}
 
 std::string launch_refusal(const RomView &rom) {
-  if (rom.supports_region() && !region_executable(rom.region))
-    return "Europe (PAL) is not supported yet: the console would run at 50 Hz and Segarecomp only implements NTSC (60 Hz) timing. "
-           "Choose USA (NTSC) or Japan (NTSC).";
+  if (rom.supports_region() && !region_executable(rom.region)) return "Unknown console region: choose USA, Japan or Europe.";
   return {};
 }
 
@@ -166,7 +187,7 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
       view.supported_platform = true;
       view.platform_id = "master-system";
       view.platform = "Master System";
-      view.title = utf8(path.stem());
+      view.title = clean_title(utf8(path.stem()));
       const fs::path sidecar = fs::path(path).replace_extension(".mapper.json");
       std::error_code manifest_ec;
       if (fs::is_regular_file(sidecar, manifest_ec)) {
@@ -179,9 +200,8 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
     view.supported_platform = info.platform == segarecomp::Platform::genesis;
     view.platform_id = view.supported_platform ? "genesis" : "";
     view.platform = view.supported_platform ? "Genesis / Mega Drive" : "Unrecognized file";
-    view.title = info.domestic_title_display;
-    while (!view.title.empty() && view.title.back() == ' ') view.title.pop_back();
-    if (view.title.empty()) view.title = utf8(path.stem());
+    view.title = clean_title(info.domestic_title_display);
+    if (view.title.empty()) view.title = clean_title(utf8(path.stem()));
     std::error_code ec;
     if (view.supported_platform && bytes.size() >= 0x200) {
       const RegionHint hint = region_hint_from_header_field(std::string(reinterpret_cast<const char *>(&bytes[0x1F0]), 16));

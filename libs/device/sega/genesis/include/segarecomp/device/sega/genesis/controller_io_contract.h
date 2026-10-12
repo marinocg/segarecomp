@@ -60,10 +60,16 @@ static inline uint32_t segarecomp_genesis_region_version_value(uint32_t profile)
     default: return SEGARECOMP_GENESIS_VERSION_OVERSEAS_BIT | SEGARECOMP_GENESIS_VERSION_NO_EXPANSION_BIT;
   }
 }
-/* True when execution under the profile is supported: the 60 Hz profiles. 50 Hz timing (312 lines, PAL video) is not
- * implemented, so a PAL console is representable (it has a version value) but refused at run time. */
+/* True when the profile may be selected for execution. Every profile runs on the 60 Hz NTSC schedule: 50 Hz timing (312 lines,
+ * PAL video) is NOT implemented, so the Europe PAL profile only changes what the guest reads from the version register (0xE0) while
+ * the machine still runs at 60 Hz. Use segarecomp_genesis_region_runs_at_50hz to ask whether the profile's real hardware is 50 Hz. */
 static inline int segarecomp_genesis_region_is_supported(uint32_t profile) {
-  return profile == SEGARECOMP_GENESIS_REGION_USA_NTSC || profile == SEGARECOMP_GENESIS_REGION_JAPAN_NTSC;
+  return profile == SEGARECOMP_GENESIS_REGION_USA_NTSC || profile == SEGARECOMP_GENESIS_REGION_JAPAN_NTSC ||
+         profile == SEGARECOMP_GENESIS_REGION_EUROPE_PAL;
+}
+/* True for the profile whose real console is 50 Hz and whose timing is therefore only approximated (forced to 60 Hz). */
+static inline int segarecomp_genesis_region_runs_at_50hz(uint32_t profile) {
+  return profile == SEGARECOMP_GENESIS_REGION_EUROPE_PAL;
 }
 
 /* The complete, deliberately small set of supported selectors (four).  This

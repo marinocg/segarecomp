@@ -81,9 +81,13 @@ int main(int argc, char **argv) {
     expect(entry_dir(sms_discovery, layout) == entry_dir(sms, layout), "Master System ignores discovery (non-Genesis paths unchanged)");
 
     // PAL refuses cleanly; NTSC profiles and non-Genesis launches are never refused.
-    expect(launch_refusal(europe).find("PAL") != std::string::npos && launch_refusal(japan).empty() && launch_refusal(genesis).empty() && launch_refusal(sms).empty(),
-           "Europe PAL is refused with an explanation; USA, Japan and Master System are launchable");
-    expect(region_executable("usa") && region_executable("japan") && !region_executable("europe") && !region_executable("bogus"), "only the NTSC profiles execute");
+    expect(launch_refusal(europe).empty() && launch_refusal(japan).empty() && launch_refusal(genesis).empty() && launch_refusal(sms).empty(),
+           "Europe PAL, USA, Japan and Master System are launchable");
+    expect(clean_title("SONIC THE             HEDGEHOG 3                ") == "SONIC THE HEDGEHOG 3" && clean_title("  A\x01\xC3\xA9" "B \t C  ") == "A B C" &&
+               clean_title("\x01\x02").empty(), "titles lose padding, control bytes and non-ASCII noise");
+    expect(region_note(europe.region).find("60 Hz is forced") != std::string::npos && region_note("usa").empty() && region_note("japan").empty(),
+           "only PAL carries the 60 Hz-forced notice");
+    expect(region_executable("usa") && region_executable("japan") && region_executable("europe") && !region_executable("bogus"), "the three profiles execute; unknown names do not");
 
     // The child environment (injectable seam): the selection is applied to the child's environment object, not the process environment,
     // and it overrides any inherited value, including for USA.
