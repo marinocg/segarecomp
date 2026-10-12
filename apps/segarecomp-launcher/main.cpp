@@ -53,6 +53,7 @@ int headless(int argc, char **argv) {
   std::string mapper;                  // Master System: explicit mapper declaration (never defaulted)
   std::string aot_policy = "compatibility";  // compatibility | optimized (Genesis); Compatibility is the default
   std::string aot_model = "v1";              // experimental opt-in of Optimized (v1 | gen2); forwarded verbatim to the product
+  std::string region_arg;              // --region <usa|japan>: console region (run time, not part of the build identity)
   std::vector<std::string> game_args;  // forwarded to the launched game (automation passes a finite bound)
   bool run = false;
   for (int i = 1; i < argc; ++i) {
@@ -63,8 +64,9 @@ int headless(int argc, char **argv) {
     else if (arg == "--mapper" && i + 1 < argc) mapper = argv[++i];
     else if (arg == "--aot-policy" && i + 1 < argc && (std::string(argv[i + 1]) == "compatibility" || std::string(argv[i + 1]) == "optimized")) aot_policy = argv[++i];
     else if (arg == "--aot-model" && i + 1 < argc && (std::string(argv[i + 1]) == "v1" || std::string(argv[i + 1]) == "gen2")) aot_model = argv[++i];
+    else if (arg == "--region" && i + 1 < argc && (std::string(argv[i + 1]) == "usa" || std::string(argv[i + 1]) == "japan")) region_arg = argv[++i];
     else if (arg == "--game-arg" && i + 1 < argc) game_args.emplace_back(argv[++i]);
-    else { std::fprintf(stderr, "usage: Segarecomp [--build <rom> [--mapper <sega|rom_only>] [--aot-policy <compatibility|optimized> [--aot-model <v1|gen2>]] [--run [--game-arg <arg>]...] [--report <file>]]\n"); return 2; }
+    else { std::fprintf(stderr, "usage: Segarecomp [--build <rom> [--mapper <sega|rom_only>] [--aot-policy <compatibility|optimized> [--aot-model <v1|gen2>]] [--run [--region <usa|japan>] [--game-arg <arg>]...] [--report <file>]]\n"); return 2; }
   }
   if (aot_model != "v1" && aot_policy != "optimized") { std::fprintf(stderr, "--aot-model requires --aot-policy optimized\n"); return 2; }
   std::string report;
@@ -78,6 +80,7 @@ int headless(int argc, char **argv) {
     RomView rom = inspect_rom_file(rom_path, layout);
     if (rom.platform_id == "master-system" && !mapper.empty()) rom.mapper = mapper;
     if (rom.supports_optimized()) { rom.aot_policy = aot_policy; rom.aot_model = aot_model; }
+    if (!region_arg.empty() && rom.supports_region()) rom.region = region_arg;
     if (!rom.error.empty()) { emit("result=failed problem=" + rom.error); rc = 1; }
     else {
       const fs::path entry = entry_dir(rom, layout);
@@ -609,6 +612,20 @@ int gui() {
         }
       };
 
+      // Console region (Genesis only): a run-time choice -- the native build serves every region, so it is not part of the cache
+      // identity. USA NTSC and Japan NTSC; PAL is not offered (50 Hz timing is not implemented).
+      const auto region_row = [&](float y) {
+        if (!rom.supports_region()) return;
+        draw_text(dl, font_regular, centered.len(12), text_secondary, centered.at(content_x, y + 6.0F), "Region");
+        const bool jp = rom.region == "japan";
+        if ((jp ? outline_button(centered, "region_usa", content_x + 52.0F, y, 150.0F, 26.0F, "USA (NTSC)", font_regular, 12.0F)
+                : bevel_button(centered, "region_usa", content_x + 52.0F, y, 150.0F, 26.0F, "USA (NTSC)", font_bold, 12.0F)))
+          rom.region = "usa";
+        if ((jp ? bevel_button(centered, "region_jp", content_x + 212.0F, y, 120.0F, 26.0F, "Japan (NTSC)", font_bold, 12.0F)
+                : outline_button(centered, "region_jp", content_x + 212.0F, y, 120.0F, 26.0F, "Japan (NTSC)", font_regular, 12.0F)))
+          rom.region = "japan";
+      };
+
       if (!layout.problem.empty()) {
         ImGui::SetCursorPos(centered.at(content_x, row_y));
         ImGui::PushTextWrapPos(centered.at(panel_x1 - 20.0F, 0).x);
@@ -641,8 +658,9 @@ int gui() {
           if (outline_button(centered, "choose1", content_x + 204.0F, row_y + 30.0F, 170.0F, 42.0F, "Choose another...", font_regular, 14.0F))
             browse();
           if (rom.supported_platform) mode_row(row_y + 90.0F);
+          if (rom.supported_platform) region_row(row_y + 118.0F);
           if (rom.optimized() && product_policy_identity(layout, "optimized", rom.aot_model).empty())
-            draw_text(dl, font_regular, centered.len(11), col_err, centered.at(content_x, row_y + 122.0F),
+            draw_text(dl, font_regular, centered.len(11), col_err, centered.at(content_x, row_y + 148.0F),
                       "Optimized cannot verify the build tool identity: saved builds are not reused.");
         }
       } else if (state == State::Building) {
@@ -671,11 +689,12 @@ int gui() {
           browse();
         // Fixed control scheme (the runtime has no remapping UI yet): keep it visible right where "Play" is.
         mode_row(row_y + 80.0F);
+        region_row(row_y + 110.0F);
         if (policy_report.present && policy_report.requested == "optimized" && outline_button(centered, "fb_details", content_x + 346.0F, row_y + 4.0F, 62.0F, 22.0F, policy_report.fallback ? "Why?" : "Details", font_regular, 11.0F)) {
           show_diagnostics = !show_diagnostics;
           fallback_details();
         }
-        const float controls_y = row_y + 112.0F;
+        const float controls_y = row_y + 142.0F;
         draw_text(dl, font_bold, centered.len(13), text_secondary, centered.at(content_x, controls_y), "Controls");
         draw_text(dl, font_regular, centered.len(13), text_footer, centered.at(content_x, controls_y + 20.0F),
                  rom.platform_id == "master-system" ? "Arrows = D-Pad   Z = Button 1   X = Button 2   P = Pause   R = Reset"

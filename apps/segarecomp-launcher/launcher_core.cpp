@@ -1,5 +1,7 @@
 #include "launcher_core.hpp"
 
+#include <cctype>
+
 #include "segarecomp/rom.hpp"
 #include "segarecomp/sha256.hpp"
 
@@ -148,6 +150,21 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
     while (!view.title.empty() && view.title.back() == ' ') view.title.pop_back();
     if (view.title.empty()) view.title = utf8(path.stem());
     std::error_code ec;
+    if (view.supported_platform && bytes.size() >= 0x200) {
+      // Region-support field $1F0-$1FF: old style letters J/U/E, or one hexadecimal bitfield digit (bit0 Japan 60 Hz, bit2 Americas 60 Hz).
+      std::string field(reinterpret_cast<const char *>(&bytes[0x1F0]), 16);
+      while (!field.empty() && field.back() == ' ') field.pop_back();
+      bool japan = false, overseas = false;
+      if (field.find_first_of("JUE") != std::string::npos) {
+        japan = field.find('J') != std::string::npos;
+        overseas = field.find('U') != std::string::npos;
+      } else if (!field.empty() && std::isxdigit(static_cast<unsigned char>(field[0]))) {
+        const int bits = std::stoi(field.substr(0, 1), nullptr, 16);
+        japan = (bits & 1) != 0;
+        overseas = (bits & 4) != 0;
+      }
+      view.region = (japan && !overseas) ? "japan" : "usa";
+    }
     view.compat_known = fs::is_regular_file(layout.runtime / "compat" / (view.sha256 + ".json"), ec);
   } catch (const std::exception &error) {
     view.error = error.what();
@@ -468,12 +485,13 @@ void BuildJob::run() {
 
 // ---- GameRun ----
 
-GameRun::GameRun(const RomView &, const Layout &layout, const fs::path &entry, const std::vector<std::string> &extra_args) {
+GameRun::GameRun(const RomView &rom, const Layout &layout, const fs::path &entry, const std::vector<std::string> &extra_args) {
   const std::string exe = utf8(entry_executable(entry));
   std::vector<const char *> argv{exe.c_str()};
   for (const auto &arg : extra_args) argv.push_back(arg.c_str());
   argv.push_back(nullptr);
   SDL_Environment *environment = SDL_CreateEnvironment(true);
+  if (rom.supports_region()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GENESIS_REGION", rom.region.c_str(), true);
 #if defined(_WIN32)
   // The game links SDL3.dll; find it next to the package rather than requiring it on PATH.
   const char *old_path = SDL_getenv("PATH");

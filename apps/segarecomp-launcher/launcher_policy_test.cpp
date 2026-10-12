@@ -50,6 +50,7 @@ int main(int argc, char **argv) {
   // Compatibility is the default; Optimized is a Genesis-only policy.
   expect(genesis.aot_policy == "compatibility" && !genesis.optimized(), "Compatibility is the default");
   expect(genesis.supports_optimized() && !sms.supports_optimized(), "Optimized is offered for Genesis only");
+  expect(genesis.supports_region() && !sms.supports_region() && genesis.region == "usa", "the region selector is Genesis only and defaults to USA NTSC");
 
   // Cache identity: modes never alias; Compatibility keeps the historical key; Master System ignores the request.
   const auto compat_entry = entry_dir(genesis, layout);

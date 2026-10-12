@@ -38,6 +38,7 @@ package. No ROMs are included; use only software you are legally entitled to ana
 
 - **Experimental.** Only Genesis / Mega Drive images are supported and most games will not translate or run correctly yet.
   The launcher says "Compatibility unknown" for a ROM it has no metadata for; "Try anyway" is all it offers.
+  For a Genesis ROM it also offers a **Region** choice (USA NTSC or Japan NTSC; PAL is not offered). The initial value follows the ROM header; the choice is applied when the game starts (`SEGARECOMP_GENESIS_REGION`) and does not trigger a rebuild. Headless: `--run --region <usa|japan>`.
 - **Controls:** arrow keys, Z/X/C = A/B/C, Return = Start, Escape = quit. No remapping yet.
 - **Cache:** built games live in `%LOCALAPPDATA%\Segarecomp\` (Windows), `~/Library/Application Support/Segarecomp/` (macOS) or
   `~/.local/share/Segarecomp/` (Linux). The ROM is never copied. When a build fails, **View diagnostics** shows the log, also

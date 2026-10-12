@@ -47,6 +47,11 @@ struct RomView {
   // --aot-model`. It is an opaque product option: the launcher knows no model, threshold, schema or compatibility rule.
   std::string aot_model = "v1";
   [[nodiscard]] bool optimized_gen2() const { return optimized() && aot_model == "gen2"; }
+  // Genesis console region (SEG-055): a RUN-TIME choice exported to the game as SEGARECOMP_GENESIS_REGION; it is not part of the
+  // cache identity (one native build serves every region). "usa" (default) or "japan"; PAL is not offered (50 Hz timing is not implemented).
+  // The initial value is a hint from the header's region field (Japan only when no overseas NTSC region is declared).
+  std::string region = "usa";
+  [[nodiscard]] bool supports_region() const { return platform_id == "genesis"; }
   bool compat_known = false;          // ROM-hash-bound analysis metadata ships with this release
   std::string error;                  // non-empty: unreadable/too large
 };
