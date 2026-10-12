@@ -91,14 +91,26 @@ def metrics(scores, labels, roots):
            "retained_full_recall": round(len(set(order[:k_full]) | rootset) / n, 4)}
     worst = sorted(res_pos, key=lambda i: -rank_of[i])[:4]
     out["worst_residual_rank_fractions"] = [round(rank_of[i] / n, 4) for i in worst]
-    for q in (0.5, 0.9, 0.99, 0.999):
-        need = math.ceil(q * len(pos) - 1e-9)
-        lo = 0
-        for k in range(0, n + 1):
-            if _cover_count(order, labels, rootset, k)[1] >= need:
-                lo = k
-                break
-        out[f"retained_for_recall_{q}"] = round(_cover_count(order, labels, rootset, lo)[0] / n, 4)
+    # retained fraction (roots included) at the smallest ranking cut reaching each recall target: one pass over the ranking
+    pos_set = set(pos)
+    targets = {q: math.ceil(q * len(pos) - 1e-9) for q in (0.5, 0.9, 0.99, 0.999)}
+    covered = len(pos_set & rootset)
+    roots_in_prefix = 0
+    cuts = {}
+    for k in range(0, n + 1):
+        if k > 0:
+            c = order[k - 1]
+            if c in rootset:
+                roots_in_prefix += 1
+            elif c in pos_set:
+                covered += 1
+        for q, need in targets.items():
+            if q not in cuts and covered >= need:
+                cuts[q] = (k + len(rootset) - roots_in_prefix) / n
+        if len(cuts) == len(targets):
+            break
+    for q in targets:
+        out[f"retained_for_recall_{q}"] = round(cuts[q], 4)
     return out
 
 
