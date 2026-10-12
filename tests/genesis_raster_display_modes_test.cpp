@@ -921,6 +921,413 @@ void test_vram_written_during_active_display_is_scanline_resolved() {
   check(spammed && o->capture.vram_journal_overflows == 1u, "an overflowing journal is counted and abandoned for the frame");
   check(is_color(o->frame, 9, 32, 2U), "after an overflow the frame-end VRAM image is used for every line (the late sprite C shows above its write line)");
 }
+
+// ---- SEG-055 adversarial regression coverage: exact hardware boundaries --------------------------------------------
+// H40 sprite limits: 20 sprites and 40 cells per line, counted in link-list order; the first excluded entry is the 21st / the 41st cell.
+void test_h40_sprite_limit_boundaries() {
+  auto frame = make_frame();
+  const unsigned row = 50U;
+  // 20 versus 21 sprites on one line. Sprites 0..18 are spaced 12 px apart, #19 straddles the right edge (x = 316), #20 sits at x = 240.
+  Scene a;
+  base_scene(a, 0x81);
+  for (unsigned t = 1; t <= 14U; ++t) solid_tile(a, t, t, 32U);
+  const unsigned count = 21U;
+  for (unsigned i = 0; i < count; ++i) {
+    const unsigned x = i < 19U ? i * 12U : (i == 19U ? 316U : 240U);
+    put_sprite(a, 0xF800U, i, 128U + row, 1, 1, i + 1U == count ? 0U : i + 1U, 1U + (i % 14U), 128U + x, 0, i == 20U ? 1U : 0U);
+  }
+  check(render(a, frame.get()), "H40 21-sprite line renders");
+  bool first_twenty = true;
+  for (unsigned i = 0; i < 19U; ++i) first_twenty = first_twenty && is_color(*frame, i * 12U + 3U, row, 1U + (i % 14U));
+  check(first_twenty, "H40 draws sprites 1..19 of the list");
+  check(is_color(*frame, 316, row, 1U + (19U % 14U)) && is_color(*frame, 319, row, 1U + (19U % 14U)),
+        "the 20th sprite (last accepted) is drawn, clipped at the right edge of the 320-pixel display");
+  check(!is_color(*frame, 243, row, 1U + (20U % 14U)) && is_color(*frame, 243, row, 0U),
+        "the 21st sprite (first excluded) is not drawn although it has the highest priority bit and a free position: the cut is list order");
+  // The same 21st sprite on a line that holds only 19 other sprites is accepted: the limit is per line, not per frame.
+  put_sprite(a, 0xF800U, 20, 128U + row + 8U, 1, 1, 0, 1U + (20U % 14U), 128U + 240U, 0, 1);
+  check(render(a, frame.get()) && is_color(*frame, 243, row + 8U, 1U + (20U % 14U)) && is_color(*frame, 316, row, 1U + (19U % 14U)),
+        "moving the 21st sprite to another line makes it visible and leaves the 20 on the first line intact");
+
+  // 40 versus 41 cells. Off-screen (x = -127) cells still consume the budget.
+  const unsigned y = 72U;
+  const auto run_cells = [&](unsigned four_cell, unsigned three_cell, bool *visible_a, bool *visible_b) {
+    Scene c;
+    base_scene(c, 0x81);
+    solid_tile(c, 1, 5, 32U);
+    solid_tile(c, 2, 6, 32U);
+    unsigned n = 0;
+    std::vector<unsigned> widths;
+    for (unsigned i = 0; i < four_cell; ++i) widths.push_back(4U);
+    for (unsigned i = 0; i < three_cell; ++i) widths.push_back(3U);
+    widths.push_back(1U);  // visible probe A (cells 40 or 41 of the line)
+    widths.push_back(1U);  // visible probe B (the next cell)
+    for (unsigned i = 0; i < widths.size(); ++i, ++n) {
+      const bool probe = i + 2U >= widths.size();
+      put_sprite(c, 0xF800U, i, 128U + y, widths[i], 1, i + 1U == widths.size() ? 0U : i + 1U, probe ? (i + 2U == widths.size() ? 1U : 2U) : 3U,
+                 probe ? 128U + 100U + (i + 2U == widths.size() ? 0U : 20U) : 1U);
+    }
+    check(render(c, frame.get()), "H40 cell-budget scene renders");
+    *visible_a = is_color(*frame, 103, y + 2U, 5U);
+    *visible_b = is_color(*frame, 123, y + 2U, 6U);
+  };
+  bool a40 = false, b41 = false;
+  run_cells(9, 1, &a40, &b41);  // 36 + 3 = 39 cells before probe A: probe A is the 40th cell, probe B the 41st
+  check(a40 && !b41, "H40: the 40th cell is drawn, the 41st is excluded");
+  run_cells(10, 0, &a40, &b41);  // 40 cells already consumed: probe A is the 41st cell
+  check(!a40 && !b41, "H40: with 40 cells consumed, the next sprite (41st cell) is excluded");
+  run_cells(8, 1, &a40, &b41);  // 35 cells before the probes: both fit
+  check(a40 && b41, "H40: well under budget both probes are drawn");
+
+  // Priority and clipping at the 20-sprite boundary do not leak between lines (rows 50 and 58 above) and the H32 limit stays 16.
+  Scene h32;
+  base_scene(h32, 0x00);
+  solid_tile(h32, 1, 2, 32U);
+  for (unsigned i = 0; i < 20U; ++i) put_sprite(h32, 0xFA00U, i, 128U + 50U, 1, 1, i == 19U ? 0U : i + 1U, 1, 128U + (i % 16U) * 8U);
+  h32.regs[5] = 0x7D;
+  check(render(h32, frame.get()) && is_color(*frame, 15 * 8 + 3, 50, 2), "H32 still accepts 16 sprites after the H40 boundary tests");
+}
+
+// Interlace mode 2: the vertical scroll value is 11 bits. A 128-cell plane (reg #16 = 0x30) is 2048 interlaced rows tall, so every one of the 11 bits is
+// observable (a smaller plane would hide bit 10 modulo its height).
+void test_interlace_vscroll_full_range() {
+  auto frame = make_frame();
+  Scene s;
+  base_scene(s, 0x87);
+  s.regs[16] = 0x30;  // 32 cells wide, 128 cells tall
+  for (unsigned r = 0; r < 128U; ++r)
+    for (unsigned c = 0; c < 32U; ++c) put16(s, 0xC000U + (r * 32U + c) * 2U, nt_word(1U + (r % 7U)));
+  for (unsigned t = 0; t < 7U; ++t) split_tile_im2(s, 1U + t, 1U + t, 8U + t);
+  const auto expect_for = [&](unsigned vscroll) {
+    unsigned bad = 0;
+    for (unsigned y = 0; y < 448U; ++y) {
+      const unsigned py = (y + vscroll) % 2048U;  // 11-bit scroll over a 2048-row plane (independent of the renderer's masks)
+      const unsigned cell_row = py / 16U;
+      const unsigned color = (py % 16U < 8U) ? 1U + (cell_row % 7U) : 8U + (cell_row % 7U);
+      if (!is_color(*frame, 5, y, color)) ++bad;
+    }
+    return bad;
+  };
+  const unsigned values[] = {0x000, 0x001, 0x3FF, 0x400, 0x401, 0x5A5, 0x7FE, 0x7FF};
+  for (const unsigned v : values) {
+    s.vsram[0] = (uint8_t)(v >> 8);
+    s.vsram[1] = (uint8_t)v;
+    char message[160];
+    std::snprintf(message, sizeof(message), "interlace mode 2 renders with 11-bit vertical scroll 0x%03X", v);
+    check(render(s, frame.get()), message);
+    std::snprintf(message, sizeof(message), "interlace mode 2: vertical scroll 0x%03X shifts by exactly that many output rows (bit 10 included)", v);
+    check(expect_for(v) == 0U, message);
+  }
+  // Bits 15..11 of the VSRAM word are not part of the scroll value.
+  s.vsram[0] = 0xF8;
+  s.vsram[1] = 0x05;
+  check(render(s, frame.get()) && expect_for(5U) == 0U, "interlace mode 2: VSRAM bits above bit 10 are ignored");
+  // Non-interlaced: the same register file without LSM keeps the 10-bit, 8-row-cell behaviour (128 cells = 1024 rows).
+  Scene n;
+  base_scene(n, 0x81);
+  n.regs[16] = 0x30;
+  for (unsigned r = 0; r < 128U; ++r)
+    for (unsigned c = 0; c < 32U; ++c) put16(n, 0xC000U + (r * 32U + c) * 2U, nt_word(1U + (r % 7U)));
+  for (unsigned t = 0; t < 7U; ++t) solid_tile(n, 1U + t, 1U + t, 32U);
+  n.vsram[0] = 0x03;
+  n.vsram[1] = 0xFF;
+  check(render(n, frame.get()), "non-interlaced 128-cell plane renders");
+  unsigned bad = 0;
+  for (unsigned y = 0; y < 224U; ++y)
+    if (!is_color(*frame, 3, y, 1U + (((y + 1023U) % 1024U) / 8U) % 7U)) ++bad;
+  check(bad == 0U && frame->height == 224U, "non-interlaced: scroll 0x3FF shifts by 1023 rows of a 1024-row plane (unchanged by interlace support)");
+}
+
+// An independent SHA-256 (FIPS 180-4), so the frame-digest expectations never call the production hash or its digest rule.
+struct RefSha256 {
+  static uint32_t rotr(uint32_t x, unsigned n) { return (x >> n) | (x << (32U - n)); }
+  static void digest(const std::vector<uint8_t> &message, uint8_t out[32]) {
+    static const uint32_t k[64] = {
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be,
+        0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa,
+        0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85,
+        0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3,
+        0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f,
+        0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2};
+    uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    std::vector<uint8_t> m = message;
+    const uint64_t bits = (uint64_t)message.size() * 8U;
+    m.push_back(0x80);
+    while (m.size() % 64U != 56U) m.push_back(0);
+    for (int i = 7; i >= 0; --i) m.push_back((uint8_t)(bits >> (i * 8)));
+    for (size_t block = 0; block < m.size(); block += 64U) {
+      uint32_t w[64];
+      for (unsigned i = 0; i < 16U; ++i)
+        w[i] = ((uint32_t)m[block + i * 4U] << 24) | ((uint32_t)m[block + i * 4U + 1U] << 16) | ((uint32_t)m[block + i * 4U + 2U] << 8) |
+               m[block + i * 4U + 3U];
+      for (unsigned i = 16; i < 64U; ++i) {
+        const uint32_t s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >> 3);
+        const uint32_t s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >> 10);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+      }
+      uint32_t v[8];
+      for (unsigned i = 0; i < 8U; ++i) v[i] = h[i];
+      for (unsigned i = 0; i < 64U; ++i) {
+        const uint32_t s1 = rotr(v[4], 6) ^ rotr(v[4], 11) ^ rotr(v[4], 25);
+        const uint32_t ch = (v[4] & v[5]) ^ (~v[4] & v[6]);
+        const uint32_t t1 = v[7] + s1 + ch + k[i] + w[i];
+        const uint32_t s0 = rotr(v[0], 2) ^ rotr(v[0], 13) ^ rotr(v[0], 22);
+        const uint32_t maj = (v[0] & v[1]) ^ (v[0] & v[2]) ^ (v[1] & v[2]);
+        const uint32_t t2 = s0 + maj;
+        v[7] = v[6]; v[6] = v[5]; v[5] = v[4]; v[4] = v[3] + t1; v[3] = v[2]; v[2] = v[1]; v[1] = v[0]; v[0] = t1 + t2;
+      }
+      for (unsigned i = 0; i < 8U; ++i) h[i] += v[i];
+    }
+    for (unsigned i = 0; i < 8U; ++i) {
+      out[i * 4U] = (uint8_t)(h[i] >> 24); out[i * 4U + 1U] = (uint8_t)(h[i] >> 16); out[i * 4U + 2U] = (uint8_t)(h[i] >> 8); out[i * 4U + 3U] = (uint8_t)h[i];
+    }
+  }
+};
+
+// The documented digest rule, rebuilt from the artifact's fields with the independent hash above.
+void reference_digest(const GenesisFrameArtifact &f, uint8_t out[32]) {
+  const unsigned w = GENESIS_FRAME_ARTIFACT_WIDTH(&f), h = GENESIS_FRAME_ARTIFACT_HEIGHT(&f);
+  std::vector<uint8_t> bytes(f.pixels, f.pixels + (size_t)w * h);
+  bytes.insert(bytes.end(), f.palette_snapshot, f.palette_snapshot + GENESIS_VDP_CRAM_BYTES);
+  if (!genesis_vdp_frame_is_legacy_shape(&f)) {
+    const uint8_t header[6] = {(uint8_t)(w >> 8), (uint8_t)w, (uint8_t)(h >> 8), (uint8_t)h, (uint8_t)(f.palette_count >> 8), (uint8_t)f.palette_count};
+    bytes.insert(bytes.end(), header, header + 6);
+    bytes.insert(bytes.end(), f.row_palette, f.row_palette + h);
+    for (unsigned slot = 1; slot < f.palette_count; ++slot) bytes.insert(bytes.end(), f.extra_palettes[slot - 1U], f.extra_palettes[slot - 1U] + GENESIS_VDP_CRAM_BYTES);
+  }
+  RefSha256::digest(bytes, out);
+}
+
+void test_frame_digest_covers_row_palette_selection() {
+  Scene s;
+  base_scene(s, 0x81);
+  fill_plane_a_rows(s);
+  auto raster = std::make_unique<GenesisRasterFrameState>();
+  const auto fill_lines = [&](unsigned switch_line) {
+    for (unsigned l = 0; l < 224U; ++l) {
+      std::memcpy(raster->lines[l].registers, s.regs, sizeof(s.regs));
+      std::memset(raster->lines[l].vsram, 0, sizeof(raster->lines[l].vsram));
+      fill_cram(raster->lines[l].cram, l < switch_line ? 0 : 1);
+    }
+  };
+  auto a = make_frame(), b = make_frame();
+  fill_lines(100U);
+  check(genesis_vdp_produce_frame_raster(s.vram.data(), raster.get(), a.get()) == 0, "digest scene A renders");
+  fill_lines(150U);
+  check(genesis_vdp_produce_frame_raster(s.vram.data(), raster.get(), b.get()) == 0, "digest scene B renders");
+  check(std::memcmp(a->pixels, b->pixels, 320U * 224U) == 0 && a->palette_count == 2U && b->palette_count == 2U,
+        "the two frames are pixel-identical and use the same two palettes");
+  check(std::memcmp(a->frame_digest, b->frame_digest, 32U) != 0, "pixel-identical frames that display different palettes on rows 100-149 have distinct digests");
+  uint8_t expect[32];
+  reference_digest(*a, expect);
+  check(std::memcmp(expect, a->frame_digest, 32U) == 0, "non-legacy digest equals the independently recomputed rule (pixels, palette, geometry, per-row slots, extra palettes)");
+  // Mutate exactly one field of the digested data at a time; each change must move the digest.
+  uint8_t d0[32], d1[32];
+  genesis_vdp_frame_digest(a.get(), d0);
+  auto m = make_frame();
+  std::memcpy(m.get(), a.get(), sizeof(*a));
+  m->row_palette[120] = (uint8_t)(m->row_palette[120] ^ 1U);  // only the slot selection of one row
+  genesis_vdp_frame_digest(m.get(), d1);
+  check(std::memcmp(d0, d1, 32U) != 0, "changing only one row's palette slot changes the digest");
+  reference_digest(*m, expect);
+  check(std::memcmp(expect, d1, 32U) == 0, "and the independent rule agrees on the mutated artifact");
+  std::memcpy(m.get(), a.get(), sizeof(*a));
+  m->extra_palettes[0][2] ^= 0x02U;  // only an extra-palette byte
+  genesis_vdp_frame_digest(m.get(), d1);
+  check(std::memcmp(d0, d1, 32U) != 0, "changing only an extra palette byte changes the digest");
+  std::memcpy(m.get(), a.get(), sizeof(*a));
+  m->palette_snapshot[2] ^= 0x02U;
+  genesis_vdp_frame_digest(m.get(), d1);
+  check(std::memcmp(d0, d1, 32U) != 0, "changing only the base palette changes the digest");
+  std::memcpy(m.get(), a.get(), sizeof(*a));
+  m->pixels[5] ^= 1U;
+  genesis_vdp_frame_digest(m.get(), d1);
+  check(std::memcmp(d0, d1, 32U) != 0, "changing only a pixel changes the digest");
+  // A legacy-shaped (single palette, 320x224) frame keeps the pre-SEG-055 rule: SHA-256(pixels || palette), nothing else.
+  fill_lines(0U);
+  auto legacy = make_frame();
+  check(genesis_vdp_produce_frame_raster(s.vram.data(), raster.get(), legacy.get()) == 0 && genesis_vdp_frame_is_legacy_shape(legacy.get()),
+        "a uniform-palette frame is legacy-shaped");
+  std::vector<uint8_t> legacy_bytes(legacy->pixels, legacy->pixels + 320U * 224U);
+  legacy_bytes.insert(legacy_bytes.end(), legacy->palette_snapshot, legacy->palette_snapshot + 128U);
+  RefSha256::digest(legacy_bytes, expect);
+  check(std::memcmp(expect, legacy->frame_digest, 32U) == 0, "the legacy 320x224 single-palette digest is unchanged (independent SHA-256 of pixels || palette)");
+  // The independent hash itself: the FIPS 180-4 "abc" vector.
+  const std::vector<uint8_t> abc = {'a', 'b', 'c'};
+  RefSha256::digest(abc, expect);
+  check(expect[0] == 0xba && expect[1] == 0x78 && expect[2] == 0x16 && expect[3] == 0xbf && expect[31] == 0xad, "the reference SHA-256 matches the published test vector");
+}
+
+// ---- DMA, fill and CPU VRAM writes while the display is active: ordering and the following-scanline visibility rule ----
+struct JournalRig {
+  std::unique_ptr<GenesisRuntime> r = std::make_unique<GenesisRuntime>();
+  std::unique_ptr<Observed> o = std::make_unique<Observed>();
+  uint32_t pc = 0x200u;
+  JournalRig() {
+    std::memset(r.get(), 0, sizeof(*r));
+    Scene s;
+    base_scene(s, 0x81);
+    s.regs[7] = 0;
+    s.regs[1] = 0x14;  // DMA enable
+    r->pc = 0x200u;
+    r->sr = 0x2000u;
+    r->a[7] = 0x00FF8000u;
+    std::memcpy(r->devices.vdp.registers, s.regs, sizeof(s.regs));
+    std::memcpy(r->devices.vdp.cram, s.cram, sizeof(s.cram));
+    r->devices.vdp.auto_increment_value = 2;
+    r->devices.vdp.registers[15] = 2;
+    Scene t;
+    solid_tile(t, 1, 2, 32U);
+    solid_tile(t, 2, 3, 32U);
+    std::memcpy(r->devices.vdp.vram + 0x20, t.vram.data() + 0x20, 0x40);
+    attach_raster(*o, *r);
+  }
+  void advance_to(uint64_t ticks) {
+    while (r->scheduler.master_ticks < ticks) pc = genesis_runtime_retire_m68k_instruction(r.get(), 4u, pc).next_pc;
+  }
+  void run_until_frame(uint64_t frames) {
+    while (r->virtual_frame_count < frames) pc = genesis_runtime_retire_m68k_instruction(r.get(), 4u, pc).next_pc;
+  }
+  static uint64_t at_line(uint64_t frame, unsigned line) { return frame * GENESIS_NTSC_MASTER_TICKS_PER_FRAME + (uint64_t)line * GENESIS_NTSC_MASTER_TICKS_PER_LINE; }
+  void set_sprite0(unsigned raw_y, unsigned tile, unsigned raw_x) {
+    unsigned a = 0xF800U;
+    r->devices.vdp.vram[a] = (uint8_t)(raw_y >> 8); r->devices.vdp.vram[a + 1U] = (uint8_t)raw_y;
+    r->devices.vdp.vram[a + 2U] = 0; r->devices.vdp.vram[a + 3U] = 0;
+    r->devices.vdp.vram[a + 4U] = (uint8_t)(nt_word(tile) >> 8); r->devices.vdp.vram[a + 5U] = (uint8_t)nt_word(tile);
+    r->devices.vdp.vram[a + 6U] = (uint8_t)(raw_x >> 8); r->devices.vdp.vram[a + 7U] = (uint8_t)raw_x;
+  }
+  void dma_regs(unsigned length_words, uint32_t source, unsigned mode_bits) {
+    const uint32_t word = source >> 1;
+    vdp_control(*r, 0x8000U | (19U << 8) | (length_words & 0xFFU));
+    vdp_control(*r, 0x8000U | (20U << 8) | ((length_words >> 8) & 0xFFU));
+    vdp_control(*r, 0x8000U | (21U << 8) | (word & 0xFFU));
+    vdp_control(*r, 0x8000U | (22U << 8) | ((word >> 8) & 0xFFU));
+    vdp_control(*r, 0x8000U | (23U << 8) | (((word >> 16) & 0x7FU) | mode_bits));
+  }
+  void dma_command(unsigned vram_address) {
+    vdp_control(*r, 0x4000U | (vram_address & 0x3FFFU));
+    vdp_control(*r, 0x0080U | ((vram_address >> 14) & 3U));
+  }
+};
+
+void test_dma_fill_and_cpu_writes_follow_the_scanline_visibility_rule() {
+  const unsigned L = 100U;  // the write happens while line L is being drawn: first visible on line L + 1
+
+  // (a) Memory-to-VRAM DMA replaces the sprite table mid-frame (the table itself, 4 words).
+  {
+    JournalRig g;
+    g.set_sprite0(128U + 96U, 1, 128U + 8U);  // old sprite: rows 96..103, color 2
+    uint8_t *ram = g.r->work_ram + 0x0100;
+    const unsigned entry[4] = {128U + 160U, 0x0000U, nt_word(2), 128U + 8U};  // new sprite: rows 160..167, color 3
+    for (unsigned i = 0; i < 4U; ++i) { ram[i * 2U] = (uint8_t)(entry[i] >> 8); ram[i * 2U + 1U] = (uint8_t)entry[i]; }
+    g.advance_to(JournalRig::at_line(0, L));
+    g.dma_regs(4, 0x00FF0100u, 0x00);
+    g.dma_command(0xF800U);
+    g.run_until_frame(1);
+    check(g.o->observer.sequence == 1u && g.o->capture.vram_journal_overflows == 0u, "DMA scene publishes one frame without overflow");
+    check(is_color(g.o->frame, 9, 96, 2U) && is_color(g.o->frame, 9, L, 2U), "memory-to-VRAM DMA: rows up to and including the DMA line still draw the old table");
+    check(!is_color(g.o->frame, 9, L + 1U, 2U) && !is_color(g.o->frame, 9, 103, 2U), "memory-to-VRAM DMA: the new table is first visible on the following line");
+    check(is_color(g.o->frame, 9, 160, 3U) && is_color(g.o->frame, 9, 167, 3U) && !is_color(g.o->frame, 9, 168, 3U), "memory-to-VRAM DMA: the DMA'd entry draws below the DMA line");
+  }
+  // (b) A wrapped DMA fill: the fill starts on the last two bytes of VRAM and wraps onto tile 0 (pattern 0x11 -> palette index 1).
+  {
+    JournalRig g;
+    g.advance_to(JournalRig::at_line(0, L));
+    g.r->devices.vdp.registers[15] = 1;
+    g.r->devices.vdp.auto_increment_value = 1;
+    g.dma_regs(33, 0, 0x80);
+    g.dma_command(0xFFFEU);
+    vdp_data(*g.r, 0x1111U);
+    g.run_until_frame(1);
+    check(g.o->observer.sequence == 1u && g.o->capture.vram_journal_overflows == 0u, "wrapped fill scene publishes one frame");
+    check(is_color(g.o->frame, 200, 0, 0U) && is_color(g.o->frame, 200, L, 0U), "DMA fill: rows up to and including the fill line still show the old pattern (backdrop)");
+    check(is_color(g.o->frame, 200, L + 1U, 1U) && is_color(g.o->frame, 200, 223, 1U), "DMA fill: the wrapped destination (tile 0) is visible from the following line");
+  }
+  // (b2) A fill's own data word is written (low byte at P, high byte at P + 1) before the fill bytes: it must be journaled too.
+  {
+    JournalRig g;
+    g.advance_to(JournalRig::at_line(0, L));
+    g.r->devices.vdp.registers[15] = 1;
+    g.r->devices.vdp.auto_increment_value = 1;
+    g.dma_regs(31, 0, 0x80);
+    g.dma_command(0x0000U);
+    vdp_data(*g.r, 0x1122U);  // byte 0 = 0x22 (only the data word writes it), bytes 1..31 = 0x11
+    g.run_until_frame(1);
+    check(is_color(g.o->frame, 0, 104, 2U) && is_color(g.o->frame, 1, 104, 2U) && is_color(g.o->frame, 2, 104, 1U) && is_color(g.o->frame, 0, 100, 0U),
+          "DMA fill: the data word's own low byte is journaled and replayed from the following line");
+  }
+  // (c) Ordinary CPU data-port writes on the first and last active lines, and during VBlank.
+  const auto cpu_fill_tile0 = [](JournalRig &g) {
+    vdp_vram_address(*g.r, 0x0000U);
+    for (unsigned i = 0; i < 16U; ++i) vdp_data(*g.r, 0x1111U);
+  };
+  {
+    JournalRig g;  // first active line
+    g.advance_to(JournalRig::at_line(0, 0) + 28U);
+    cpu_fill_tile0(g);
+    g.run_until_frame(1);
+    check(is_color(g.o->frame, 200, 0, 0U) && is_color(g.o->frame, 200, 1, 1U) && is_color(g.o->frame, 200, 223, 1U),
+          "a CPU write during the first active line is visible from line 1, not on line 0");
+  }
+  {
+    JournalRig g;  // last active line: no later row exists in this frame; the next frame's line-0 snapshot contains it
+    g.advance_to(JournalRig::at_line(0, 223));
+    cpu_fill_tile0(g);
+    g.run_until_frame(1);
+    check(is_color(g.o->frame, 200, 222, 0U) && is_color(g.o->frame, 200, 223, 0U) && g.o->capture.frame.vram_write_count == 32u,
+          "a CPU write during the last active line is journaled (32 bytes) but changes no row of that frame");
+    g.run_until_frame(2);
+    check(is_color(g.o->frame, 200, 0, 1U) && is_color(g.o->frame, 200, 223, 1U), "the next frame starts from the updated image");
+  }
+  {
+    JournalRig g;  // VBlank
+    g.run_until_frame(1);
+    g.advance_to(JournalRig::at_line(0, 240));
+    cpu_fill_tile0(g);
+    g.run_until_frame(2);
+    check(g.o->capture.frame.vram_write_count == 0u && is_color(g.o->frame, 200, 0, 1U),
+          "a VBlank write is not journaled (zero entries) and is already in the next frame's line-0 snapshot");
+  }
+  // (d) Ordering: two writes to the same byte on different lines replay in order (the later one wins only on later lines).
+  {
+    JournalRig g;
+    g.advance_to(JournalRig::at_line(0, 60));
+    vdp_vram_address(*g.r, 0x0000U);
+    for (unsigned i = 0; i < 16U; ++i) vdp_data(*g.r, 0x1111U);
+    g.advance_to(JournalRig::at_line(0, 140));
+    vdp_vram_address(*g.r, 0x0000U);
+    for (unsigned i = 0; i < 16U; ++i) vdp_data(*g.r, 0x2222U);
+    g.run_until_frame(1);
+    check(is_color(g.o->frame, 200, 60, 0U) && is_color(g.o->frame, 200, 61, 1U) && is_color(g.o->frame, 200, 140, 1U) &&
+              is_color(g.o->frame, 200, 141, 2U) && is_color(g.o->frame, 200, 223, 2U),
+          "two writes to the same bytes on different lines replay in order, each from the following line");
+  }
+  // (e) Journal capacity boundary: exactly the capacity is replayed; one byte pair more abandons the journal for the frame.
+  {
+    JournalRig g;
+    g.advance_to(JournalRig::at_line(0, 60));
+    vdp_vram_address(*g.r, 0x4000U);  // harmless region (unused VRAM)
+    for (unsigned i = 0; i < GENESIS_RASTER_VRAM_WRITE_CAPACITY / 2U - 16U; ++i) vdp_data(*g.r, 0x0000U);
+    vdp_vram_address(*g.r, 0x0000U);
+    for (unsigned i = 0; i < 16U; ++i) vdp_data(*g.r, 0x1111U);  // 32 more bytes: the journal is exactly full
+    g.run_until_frame(1);
+    check(g.o->capture.vram_journal_overflows == 0u && g.o->capture.frame.vram_write_count == GENESIS_RASTER_VRAM_WRITE_CAPACITY &&
+              is_color(g.o->frame, 200, 60, 0U) && is_color(g.o->frame, 200, 61, 1U),
+          "a journal filled to exactly its capacity is replayed (no overflow, the write is line-resolved)");
+  }
+  {
+    JournalRig g;
+    g.advance_to(JournalRig::at_line(0, 60));
+    vdp_vram_address(*g.r, 0x4000U);
+    for (unsigned i = 0; i < GENESIS_RASTER_VRAM_WRITE_CAPACITY / 2U - 16U; ++i) vdp_data(*g.r, 0x0000U);
+    vdp_vram_address(*g.r, 0x0000U);
+    for (unsigned i = 0; i < 17U; ++i) vdp_data(*g.r, 0x1111U);  // one word beyond the capacity (tile 1 starts at byte 0x20: its first bytes change too)
+    g.run_until_frame(1);
+    check(g.o->capture.vram_journal_overflows == 1u && g.o->capture.frame.vram_write_count == GENESIS_RASTER_VRAM_WRITE_CAPACITY &&
+              is_color(g.o->frame, 200, 0, 1U),
+          "one word beyond the capacity abandons the journal: the frame-end image is used for every line (fallback, counted)");
+  }
+}
 }  // namespace
 
 int main() {
@@ -935,6 +1342,10 @@ int main() {
   test_export_and_presentation_agree();
   test_runtime_captures_scanline_palette_and_virtual_frames();
   test_vram_written_during_active_display_is_scanline_resolved();
+  test_h40_sprite_limit_boundaries();
+  test_interlace_vscroll_full_range();
+  test_frame_digest_covers_row_palette_selection();
+  test_dma_fill_and_cpu_writes_follow_the_scanline_visibility_rule();
   if (failures != 0) std::printf("%d check(s) failed\n", failures);
   return failures == 0 ? 0 : 1;
 }

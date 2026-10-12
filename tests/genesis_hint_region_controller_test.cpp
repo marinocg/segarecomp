@@ -307,6 +307,45 @@ void test_status_hblank_and_field_bits() {
   check((read_status_word(*n) & 0x0010u) == 0u, "non-interlaced: the odd-field flag stays clear");
 }
 
+
+// Exact edges of the horizontal-blanking window (master ticks from the start of a line): H40 [228, 872), H32 [280, 860). Both sides of each edge,
+// through WORD and BYTE status reads (bit 2 lives in the low byte, so the odd-address BYTE read carries it and the even-address one never does).
+uint32_t read_status_byte(GenesisRuntime &r, uint32_t address) {
+  uint32_t value = 0xDEADBEEFu;
+  GenesisRuntimeStop stop{};
+  check(genesis_route_access(&r, address, GENESIS_ACCESS_BYTE, GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK, "VDP status BYTE read is routed");
+  return value;
+}
+
+void test_hblank_exact_edges() {
+  const uint64_t line = GENESIS_NTSC_MASTER_TICKS_PER_LINE;
+  const struct { unsigned reg12; uint64_t start, end; const char *name; } modes[] = {{0x81u, 228u, 872u, "H40"}, {0x00u, 280u, 860u, "H32"}};
+  for (const auto &mode : modes) {
+    auto r = make_runtime();
+    r->devices.vdp.registers[12] = (uint16_t)mode.reg12;
+    const struct { uint64_t offset; bool blank; } probes[] = {{0u, false}, {mode.start - 1u, false}, {mode.start, true}, {mode.start + 1u, true},
+                                                                {mode.end - 1u, true}, {mode.end, false}, {mode.end + 1u, false}, {line - 1u, false}};
+    for (const auto &probe : probes) {
+      for (const uint64_t base : {0ull, 7ull, 223ull, 261ull}) {  // the window is a property of the position inside every line (also in VBlank)
+        r->scheduler.master_ticks = base * line + probe.offset;
+        const bool word = (read_status_word(*r) & 0x0004u) != 0u;
+        const bool low_byte = (read_status_byte(*r, 0xC00005u) & 0x04u) != 0u;
+        const bool high_byte = (read_status_byte(*r, 0xC00004u) & 0x04u) != 0u;
+        char message[160];
+        std::snprintf(message, sizeof(message), "%s HBlank flag at line %llu + %llu ticks: WORD and odd-address BYTE reads agree with the window", mode.name,
+                      (unsigned long long)base, (unsigned long long)probe.offset);
+        check(word == probe.blank && low_byte == probe.blank, message);
+        check(!high_byte, "the even-address (high byte) status read never carries the HBlank bit");
+      }
+    }
+  }
+  // Reserved width selections fall to the H32 window only where the hardware would (RS0 alone is not H40).
+  auto odd = make_runtime();
+  odd->devices.vdp.registers[12] = 0x80u;
+  odd->scheduler.master_ticks = 3ull * line + 240u;
+  check((read_status_word(*odd) & 0x0004u) == 0u, "a width selection that is not H40 uses the H32 window (240 is before its start)");
+}
+
 // ---- region ------------------------------------------------------------------------------------------------------
 void set_env(const char *name, const char *value) {
 #if defined(_WIN32)
@@ -475,6 +514,7 @@ int main() {
   test_hint_missing_handler_policy();
   test_hint_stop_wake();
   test_status_hblank_and_field_bits();
+  test_hblank_exact_edges();
   test_region_profiles_and_version_register();
   test_region_sensitive_guest_branches();
   test_independent_player_ports();
