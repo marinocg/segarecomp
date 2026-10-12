@@ -110,10 +110,24 @@ def load(np, lid, img_dir, truth_dir):
             "y": np.array(g.byte_labels(truth["classes"]), dtype=np.int64), "classes": truth["classes"], "n": len(img)}
 
 
-def fit(np, torch, train, name, seed):
+def pick_device(torch, device):
+    """'cpu' | 'cuda' | 'auto'. ROCm builds of PyTorch expose the GPU as 'cuda'. A requested-but-missing GPU fails visibly."""
+    if device == "cpu":
+        return torch.device("cpu")
+    if device == "cuda":
+        if not torch.cuda.is_available():
+            raise SystemExit("--device cuda requested but torch.cuda.is_available() is False (no silent CPU fallback)")
+        return torch.device("cuda")
+    if device == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    raise SystemExit("unknown device")
+
+
+def fit(np, torch, train, name, seed, device=None):
+    dev = device or torch.device("cpu")
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
-    model = build_model(torch, name)
+    model = build_model(torch, name).to(dev)
     hp = CANDIDATES[name][1]
     opt = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=1e-4)
     # lineage-balanced class weight: mean over training lineages of (negative bytes / positive bytes)
@@ -134,16 +148,17 @@ def fit(np, torch, train, name, seed):
             x, y = window(np, t, start, CENTRAL)
             xs.append(x)
             ys.append(y)
-        xb = torch.from_numpy(np.stack(xs))
-        yb = torch.from_numpy(np.stack(ys))
+        xb = torch.from_numpy(np.stack(xs)).to(dev)
+        yb = torch.from_numpy(np.stack(ys)).to(dev)
         logits = model(xb)
         mask = yb >= 0
         if not bool(mask.any()):
             continue
         lg, tgt = logits[mask], yb[mask].float()
-        w = torch.where(tgt > 0.5, torch.tensor(pos_weight), torch.tensor(1.0))
+        one = torch.ones((), device=dev)
+        w = torch.where(tgt > 0.5, one * pos_weight, one)
         if hp:
-            w = w * torch.where(tgt > 0.5, 1.0 + 2.0 * (1.0 - torch.sigmoid(lg)).detach(), torch.tensor(1.0))
+            w = w * torch.where(tgt > 0.5, 1.0 + 2.0 * (1.0 - torch.sigmoid(lg)).detach(), one)
         loss = (torch.nn.functional.binary_cross_entropy_with_logits(lg, tgt, reduction="none") * w).sum() / w.sum()
         opt.zero_grad()
         loss.backward()
@@ -153,14 +168,32 @@ def fit(np, torch, train, name, seed):
 
 
 def infer(np, torch, model, item):
+    dev = next(model.parameters()).device
     out = np.zeros(item["n"], dtype=np.float32)
     with torch.no_grad():
         for start in range(0, item["n"], INFER_CENTRAL):
             x, _ = window(np, {"byte": item["byte"], "y": np.full(item["n"], -1)}, start, INFER_CENTRAL)
-            lg = model(torch.from_numpy(x[None, :]))[0].numpy()
+            lg = model(torch.from_numpy(x[None, :]).to(dev))[0].float().cpu().numpy()
             m = min(INFER_CENTRAL, item["n"] - start)
             out[start:start + m] = lg[:m]
     return out
+
+
+def valid_result(np, path, n):
+    """A published score array must load, be float32 of shape (n,) and finite; anything else is recomputed."""
+    try:
+        a = np.load(path, allow_pickle=False)
+    except Exception:
+        return False
+    return a.dtype == np.float32 and a.shape == (n,) and bool(np.isfinite(a).all())
+
+
+def publish(np, path, arr):
+    """Atomic publication: write a temp file in the same directory, then rename."""
+    tmp = pathlib.Path(str(path) + ".tmp")
+    with open(tmp, "wb") as f:
+        np.save(f, arr, allow_pickle=False)
+    tmp.replace(path)
 
 
 def setup(threads):
@@ -189,9 +222,11 @@ def main():
     ap.add_argument("--held")
     ap.add_argument("--models", nargs="*", default=list(CANDIDATES))
     ap.add_argument("--threads", type=int, default=2)
+    ap.add_argument("--device", choices=["auto", "cpu", "cuda"], default="cpu")
     a = ap.parse_args()
     plan = check_plan()
     np, torch = setup(a.threads)
+    device = pick_device(torch, a.device)
     state = pathlib.Path(a.state)
     state.mkdir(parents=True, exist_ok=True)
     dev, sealed = dev_ids(plan), sealed_ids(plan)
@@ -211,11 +246,11 @@ def main():
         for name in a.models:
             for seed in SEEDS:
                 path = state / f"logit_{name}_{a.held}_s{seed}.npy"
-                if path.exists():
+                if valid_result(np, path, held["n"]):
                     continue
-                model = fit(np, torch, train, name, seed)
-                np.save(path, infer(np, torch, model, held))
-                print("fit", a.held, name, seed, flush=True)
+                model = fit(np, torch, train, name, seed, device)
+                publish(np, path, infer(np, torch, model, held))
+                print("fit", a.held, name, seed, str(device), flush=True)
         return
     raise SystemExit("eval/final: see segarecomp_ml_region_z80_gen2_eval.py")
 

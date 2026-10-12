@@ -137,5 +137,73 @@ class Model(unittest.TestCase):
         self.assertTrue((y[:64] == -1).all())  # no label outside the image
 
 
+@unittest.skipUnless(HAVE_TORCH, "numpy/PyTorch research packages not installed")
+class Device(unittest.TestCase):
+    def setUp(self):
+        import numpy as np
+        import torch
+        import segarecomp_ml_region_z80_gen2_train as T
+        self.np, self.torch, self.T = np, torch, T
+
+    def _item(self, n=6000):
+        rng = self.np.random.default_rng(3)
+        return {"name": "s", "byte": rng.integers(0, 256, n).astype(self.np.int64),
+                "y": rng.choice([-1, 0, 1], n).astype(self.np.int64), "n": n}
+
+    def test_device_selection(self):
+        T, torch = self.T, self.torch
+        self.assertEqual(T.pick_device(torch, "cpu").type, "cpu")
+        self.assertEqual(T.pick_device(torch, "auto").type, "cuda" if torch.cuda.is_available() else "cpu")
+        if not torch.cuda.is_available():
+            with self.assertRaises(SystemExit):  # an explicit GPU request never falls back silently
+                T.pick_device(torch, "cuda")
+        with self.assertRaises(SystemExit):
+            T.pick_device(torch, "tpu")
+
+    def _run(self, device):
+        np, torch, T = self.np, self.torch, self.T
+        old = T.STEPS
+        T.STEPS = 3
+        try:
+            train = [self._item(), self._item(5000)]
+            m = T.fit(np, torch, train, "D256", 1, device)
+            self.assertTrue(all(p.device.type == device.type for p in m.parameters()))
+            out = T.infer(np, torch, m, train[0])
+        finally:
+            T.STEPS = old
+        self.assertEqual((out.dtype, out.shape), (np.float32, (train[0]["n"],)))
+        self.assertTrue(np.isfinite(out).all())
+        return out
+
+    def test_cpu_training_is_seed_deterministic(self):
+        torch = self.torch
+        torch.use_deterministic_algorithms(True)
+        a = self._run(torch.device("cpu"))
+        b = self._run(torch.device("cpu"))
+        self.assertTrue((a == b).all())
+
+    def test_gpu_training_and_inference_when_available(self):
+        if not self.torch.cuda.is_available():
+            self.skipTest("no CUDA/ROCm device")
+        self._run(self.torch.device("cuda"))
+
+    def test_resume_rejects_invalid_results_and_publishes_atomically(self):
+        import tempfile, pathlib
+        np, T = self.np, self.T
+        with tempfile.TemporaryDirectory() as d:
+            p = pathlib.Path(d) / "logit.npy"
+            self.assertFalse(T.valid_result(np, p, 10))                      # missing
+            p.write_bytes(b"not an npy")
+            self.assertFalse(T.valid_result(np, p, 10))                      # corrupt
+            T.publish(np, p, np.zeros(10, dtype=np.float32))
+            self.assertTrue(T.valid_result(np, p, 10))
+            self.assertFalse(T.valid_result(np, p, 11))                      # wrong shape
+            T.publish(np, p, np.zeros(10, dtype=np.float64))
+            self.assertFalse(T.valid_result(np, p, 10))                      # wrong dtype
+            T.publish(np, p, np.full(10, np.nan, dtype=np.float32))
+            self.assertFalse(T.valid_result(np, p, 10))                      # non-finite
+            self.assertFalse(list(pathlib.Path(d).glob("*.tmp")))            # no temp residue
+
+
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])
