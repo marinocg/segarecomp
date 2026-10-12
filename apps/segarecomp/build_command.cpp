@@ -960,7 +960,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     gz80::MaterializationSummary result = gz80::materialize(registry, runner);
     const std::uint64_t ms = millis_since(started);
     materialize_ms += ms;
-    log.line("z80 materialization: observed_region=" + build.pass_region + " outcome=" + std::string(gz80::failure_name(result.failure)) + " images=" +
+    log.line("z80 materialization: outcome=" + std::string(gz80::failure_name(result.failure)) + " images=" +
              std::to_string(registry.images().size()) + " discovery_runs=" + std::to_string(result.discovery_runs) + " runs=" +
              std::to_string(result.total_runs) + " ms=" + std::to_string(ms) +
              (result.ok() ? " end=" + std::string(gz80::pass_outcome_name(result.end)) : std::string()));
@@ -981,6 +981,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     std::cout << "@result failed stage=z80-materialize message=" << gz80::failure_name(failed.failure) << operation << std::endl;
     return 4;
   };
+  log.line("z80 observation region: " + build.pass_region);  // the single console region the Z80 images are observed under
   gz80::MaterializationSummary summary = fixed_point();
   if (!summary.ok()) return materialize_failed(summary, "");
   stage("z80-materialize", "done");
