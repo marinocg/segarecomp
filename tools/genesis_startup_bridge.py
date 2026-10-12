@@ -1409,6 +1409,11 @@ def header_region_hint(rom: bytes) -> tuple[str, str]:
     if len(field) < end - begin:
         return "usa", "no header region field; default"
     text = field.decode("ascii", errors="replace").strip()
+    if text == "E":
+        # A lone "E" is valid in BOTH documented encodings (old-style letter: Europe; new-style hex digit 0xE: Asia + Americas +
+        # Europe). It cannot be classified from the header alone, so the historical default is kept and the ambiguity is reported;
+        # an explicit --region is the reliable override.
+        return "usa", "header region field 'E' is ambiguous (letter Europe vs hex 0xE); default kept, pass --region to override"
     letters = {c for c in text if c in "JUE"}
     if letters:
         old_style = "J" in letters, "U" in letters, "E" in letters

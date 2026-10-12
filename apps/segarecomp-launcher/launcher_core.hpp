@@ -47,14 +47,33 @@ struct RomView {
   // --aot-model`. It is an opaque product option: the launcher knows no model, threshold, schema or compatibility rule.
   std::string aot_model = "v1";
   [[nodiscard]] bool optimized_gen2() const { return optimized() && aot_model == "gen2"; }
-  // Genesis console region (SEG-055): a RUN-TIME choice exported to the game as SEGARECOMP_GENESIS_REGION; it is not part of the
-  // cache identity (one native build serves every region). "usa" (default) or "japan"; PAL is not offered (50 Hz timing is not implemented).
-  // The initial value is a hint from the header's region field (Japan only when no overseas NTSC region is declared).
+  // Genesis console region (SEG-055): a RUN-TIME choice exported to the game as SEGARECOMP_GENESIS_REGION; it is not part of the cache
+  // identity (one native build serves every region). "usa" (default, the historical console), "japan", or "europe" (PAL: visibly
+  // unsupported, Play refuses with an explanation instead of running 50 Hz software on NTSC timing). The initial value is a hint from
+  // the header's region field; an intrinsically ambiguous field keeps the default and is flagged (`region_ambiguous`).
   std::string region = "usa";
+  bool region_ambiguous = false;
   [[nodiscard]] bool supports_region() const { return platform_id == "genesis"; }
+  // Advanced, default OFF (changes the generated program, so it is part of the cache identity): run the build-time preparation passes
+  // with a strict VDP H-interrupt policy so a RAM-resident H-interrupt vector stops the pass and its byte-guarded copy alias / RAM thunk
+  // can be derived (ADR 0049) instead of the interrupt being counted and dropped. Forwarded as `segarecomp build --hint-alias-discovery 1`.
+  bool hint_alias_discovery = false;
+  [[nodiscard]] bool supports_hint_alias_discovery() const { return platform_id == "genesis"; }
   bool compat_known = false;          // ROM-hash-bound analysis metadata ships with this release
   std::string error;                  // non-empty: unreadable/too large
 };
+
+// The region hint of a Genesis header's region-support field ($1F0-$1FF, 16 bytes). Two encodings exist: old-style letters J/U/E and a
+// newer single hexadecimal bitfield digit (bit0 Japan NTSC, bit2 Americas NTSC, bit3 Europe PAL). A lone "E" is valid in BOTH (Europe, or
+// the hex digit 0xE = Asia + Americas + Europe), so it is reported as ambiguous and keeps the default; the explicit selection is the override.
+struct RegionHint { std::string region = "usa"; bool ambiguous = false; };
+[[nodiscard]] RegionHint region_hint_from_header_field(const std::string &field);
+// Console region profiles the runtime can execute today (PAL 50 Hz timing is not implemented).
+[[nodiscard]] bool region_executable(const std::string &region);
+// Empty when the game may be launched; otherwise the plain-language reason it must not be (e.g. Europe PAL).
+[[nodiscard]] std::string launch_refusal(const RomView &rom);
+// Applies the per-launch environment of the child game to `environment` (never the launcher's own process environment).
+void apply_game_environment(SDL_Environment *environment, const RomView &rom);
 
 [[nodiscard]] Layout locate_layout();
 [[nodiscard]] std::filesystem::path cache_root();

@@ -30,7 +30,8 @@ def main():
   check(hint(rom_with_region(b"JUE"))[0] == "usa", "JUE prefers overseas NTSC (the historical default)")
   check(hint(rom_with_region(b"JU"))[0] == "usa", "JU declares overseas NTSC")
   check(hint(rom_with_region(b"J"))[0] == "japan", "J alone (domestic only) selects Japan NTSC")
-  check(hint(rom_with_region(b"E"))[0] == "europe", "E alone selects Europe (later refused as PAL)")
+  check(hint(rom_with_region(b"E"))[0] == "usa" and "ambiguous" in hint(rom_with_region(b"E"))[1], "a lone E is ambiguous (letter vs hex) and keeps the default")
+  check(hint(rom_with_region(b"E "))[0] == "usa" and hint(rom_with_region(b"UE"))[0] == "usa" and hint(rom_with_region(b"JE"))[0] == "japan", "only the lone E is ambiguous; letter sets are unambiguous")
   check(hint(rom_with_region(b"U"))[0] == "usa", "U alone selects USA NTSC")
   # New style: one hexadecimal digit, bit 0 = Japan 60 Hz, bit 2 = Americas 60 Hz, bit 3 = Europe 50 Hz.
   check(hint(rom_with_region(b"1"))[0] == "japan", "new style 1 = Japan only")
@@ -60,8 +61,8 @@ def main():
     check(refused is None and summary["error"] == "europe_pal_timing_not_implemented" and summary["version_register"] == "0xE0",
           "Europe PAL is representable (0xE0) but refused honestly")
     check(os.environ["SEGARECOMP_GENESIS_REGION"] == "japan", "a refused profile leaves the environment untouched")
-    refused_auto, _ = bridge.configure_region("auto", rom_with_region(b"E"))
-    check(refused_auto is None, "auto resolving to Europe is refused as well")
+    refused_auto, _ = bridge.configure_region("auto", rom_with_region(b"8"))
+    check(refused_auto is None, "auto resolving to Europe (unambiguous new-style 8) is refused as well")
   finally:
     if saved is None:
       os.environ.pop("SEGARECOMP_GENESIS_REGION", None)

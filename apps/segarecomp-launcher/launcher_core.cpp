@@ -121,6 +121,39 @@ fs::path cache_root() {
   return result;
 }
 
+RegionHint region_hint_from_header_field(const std::string &raw) {
+  std::string field = raw;
+  while (!field.empty() && (field.back() == ' ' || field.back() == '\0')) field.pop_back();
+  RegionHint hint;
+  if (field == "E") { hint.ambiguous = true; return hint; }  // letter E and hex digit 0xE are both valid readings
+  bool japan = false, overseas = false;
+  if (field.find_first_of("JUE") != std::string::npos) {
+    japan = field.find('J') != std::string::npos;
+    overseas = field.find('U') != std::string::npos;
+  } else if (!field.empty() && std::isxdigit(static_cast<unsigned char>(field[0]))) {
+    const int bits = std::stoi(field.substr(0, 1), nullptr, 16);
+    japan = (bits & 1) != 0;
+    overseas = (bits & 4) != 0;
+  }
+  // Japan only when no overseas NTSC region is declared; everything else keeps the historical USA NTSC default.
+  hint.region = (japan && !overseas) ? "japan" : "usa";
+  return hint;
+}
+
+bool region_executable(const std::string &region) { return region == "usa" || region == "japan"; }
+
+std::string launch_refusal(const RomView &rom) {
+  if (rom.supports_region() && !region_executable(rom.region))
+    return "Europe (PAL) is not supported yet: the console would run at 50 Hz and Segarecomp only implements NTSC (60 Hz) timing. "
+           "Choose USA (NTSC) or Japan (NTSC).";
+  return {};
+}
+
+void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
+  // Always written for Genesis (also for USA) so an inherited SEGARECOMP_GENESIS_REGION can never override the visible selection.
+  if (rom.supports_region()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GENESIS_REGION", rom.region.c_str(), true);
+}
+
 RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
   RomView view;
   view.path = path;
@@ -151,19 +184,9 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
     if (view.title.empty()) view.title = utf8(path.stem());
     std::error_code ec;
     if (view.supported_platform && bytes.size() >= 0x200) {
-      // Region-support field $1F0-$1FF: old style letters J/U/E, or one hexadecimal bitfield digit (bit0 Japan 60 Hz, bit2 Americas 60 Hz).
-      std::string field(reinterpret_cast<const char *>(&bytes[0x1F0]), 16);
-      while (!field.empty() && field.back() == ' ') field.pop_back();
-      bool japan = false, overseas = false;
-      if (field.find_first_of("JUE") != std::string::npos) {
-        japan = field.find('J') != std::string::npos;
-        overseas = field.find('U') != std::string::npos;
-      } else if (!field.empty() && std::isxdigit(static_cast<unsigned char>(field[0]))) {
-        const int bits = std::stoi(field.substr(0, 1), nullptr, 16);
-        japan = (bits & 1) != 0;
-        overseas = (bits & 4) != 0;
-      }
-      view.region = (japan && !overseas) ? "japan" : "usa";
+      const RegionHint hint = region_hint_from_header_field(std::string(reinterpret_cast<const char *>(&bytes[0x1F0]), 16));
+      view.region = hint.region;
+      view.region_ambiguous = hint.ambiguous;
     }
     view.compat_known = fs::is_regular_file(layout.runtime / "compat" / (view.sha256 + ".json"), ec);
   } catch (const std::exception &error) {
@@ -177,10 +200,11 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
 std::string platform_key(const RomView &rom, const Layout *layout_for_key) {
   // Compatibility keeps the historical Genesis key; Optimized adds the policy, so the two never share a cache entry (ADR 0096).
   if (rom.platform_id != "master-system") {
-    if (!rom.optimized()) return "genesis";
+    const std::string discovery = rom.hint_alias_discovery ? ":hint-alias-discovery=1" : "";  // changes the generated program
+    if (!rom.optimized()) return "genesis" + discovery;
     // The model family and the product-provided policy identity (which binds model, schema, token contract, rank policy and analysis contract) are part
     // of the key: a different request or a changed shipped model can never select the same entry.
-    return "genesis:aot=optimized:model=" + rom.aot_model + ":pid=" + (layout_for_key != nullptr ? product_policy_identity(*layout_for_key, "optimized", rom.aot_model) : std::string());
+    return "genesis:aot=optimized:model=" + rom.aot_model + ":pid=" + (layout_for_key != nullptr ? product_policy_identity(*layout_for_key, "optimized", rom.aot_model) : std::string()) + discovery;
   }
   return std::string("master-system:") + sms_profile + ":mapper=" + rom.mapper + ":manifest=" + rom.mapper_manifest_sha256;
 }
@@ -392,6 +416,7 @@ void BuildJob::run() {
     if (!rom_.mapper.empty()) args.insert(args.end(), {"--mapper", rom_.mapper});
     if (!rom_.mapper_manifest.empty()) args.insert(args.end(), {"--mapper-manifest", utf8(rom_.mapper_manifest)});
   }
+  if (rom_.supports_hint_alias_discovery() && rom_.hint_alias_discovery) args.insert(args.end(), {"--hint-alias-discovery", "1"});
   if (rom_.optimized()) args.insert(args.end(), {"--aot-policy", "optimized"});
   if (rom_.optimized_gen2()) args.insert(args.end(), {"--aot-model", "gen2"});
 #if defined(_WIN32)
@@ -491,7 +516,7 @@ GameRun::GameRun(const RomView &rom, const Layout &layout, const fs::path &entry
   for (const auto &arg : extra_args) argv.push_back(arg.c_str());
   argv.push_back(nullptr);
   SDL_Environment *environment = SDL_CreateEnvironment(true);
-  if (rom.supports_region()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GENESIS_REGION", rom.region.c_str(), true);
+  apply_game_environment(environment, rom);
 #if defined(_WIN32)
   // The game links SDL3.dll; find it next to the package rather than requiring it on PATH.
   const char *old_path = SDL_getenv("PATH");
