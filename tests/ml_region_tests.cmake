@@ -52,3 +52,8 @@ set_property(TEST genesis_ml_gen2_identity_mutation_test APPEND PROPERTY LABELS 
 # SEG-049-T007 (ADR 0106): the release-package dependency/file policy (synthetic names; the real package is inspected by the release workflow).
 add_test(NAME packaging_dependency_check_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/packaging_dependency_check_test.py)
 set_property(TEST packaging_dependency_check_test APPEND PROPERTY LABELS full fast)
+# SEG-051 (ADR 0116): Z80 executable-region experiment tooling (cells, ranking, FRF, fixed/adaptive budgets, lineage split and leakage guards,
+# frozen-plan digest) and the CPU-owned Z80 decode-token report goldens (prefix families, boundaries, fail-closed). Hermetic, synthetic data only.
+add_test(NAME segarecomp_ml_region_z80_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_region_z80_test.py $<TARGET_FILE:segarecomp_z80_token_report>)
+set_property(TEST segarecomp_ml_region_z80_test APPEND PROPERTY LABELS full fast)

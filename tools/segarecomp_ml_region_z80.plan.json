@@ -1,0 +1,232 @@
+{
+ "adaptive_policy": {
+  "m": "smallest of {1.0,1.25,...,4.0} covering every development OOF FRF, else adaptive is not calibratable",
+  "rule": "B = min(1, max(0.20, m * statistic + 0.05))",
+  "statistic": "fraction of cells with sigmoid score >= 0.5"
+ },
+ "adoption_minimums": {
+  "development_lineages": 8,
+  "native_seam": "a Z80 selective-admission contract (admitted-start set, typed unadmitted-PC behavior, validator) that does not exist today",
+  "note": "6 development lineages < 8: native integration (T004) and launcher Optimized mode for Z80 are NOT_JUSTIFIED regardless of the pilot outcome",
+  "sealed_lineages": 3
+ },
+ "candidates": {
+  "C1": "byte embedding(16) -> 4x Conv1d(k=5, dilations 1,2,4,8, 32 ch, ReLU) -> per-cell [mean,max] pooling -> linear(1)",
+  "C2": "C1 plus Z80 decode tokens: kind embedding(4), total-length embedding(4), form embedding(8) from z80-decode-token-report"
+ },
+ "classification_precedence": [
+  "Z80_TRUTH_BLOCKER",
+  "Z80_RECALL_FAILED",
+  "Z80_ECONOMICS_INSUFFICIENT",
+  "Z80_PILOT_PROMISING_ADOPTION_BLOCKED"
+ ],
+ "controls": [
+  "random ranking (seeded)",
+  "linear byte-histogram logistic regression per cell (no spatial context)"
+ ],
+ "economics": {
+  "gate_cpu_reduction": 0.2,
+  "gate_total_build_improvement": "exceeds measured repeat-to-repeat noise",
+  "projection": "compile CPU is linear in image size (SMS baselines); projected CPU = intercept + slope * retained fraction * KiB. Labelled a PROJECTION: no selective Z80 producer exists to measure"
+ },
+ "excluded": {
+  "castle_of_illusion,taz_mania,wonder_boy_3,sonic2_v2_2": "no public source-backed disassembly found",
+  "columns_rev_alias,supertennis_rev0,alexkidd_rev0": "revisions of an included lineage",
+  "devkitsms_sdcc_homebrew": "prebuilt library binaries without listings and Windows-only tools; not counted (follow-up)",
+  "smslib_examples": "one library; listing text unresolved for section-heavy code; not counted",
+  "sonic2_sms": "upstream source targets a different revision than the local cartridge (37,886 bytes differ) and its repository bundles a commercial image; also the same engine family as sonic1 -> excluded"
+ },
+ "fixed_policy": "B_fixed = ceil_to_0.05(max over development OOF FRF + 0.05)",
+ "independence_evidence": "pairwise 12-byte instruction-run shingle overlap across all 9 lineages: maximum 3.3% of the smaller set (alexkidd/supertennis), all others below 2%",
+ "lineages": [
+  {
+   "ambiguous_db_bytes": 59588,
+   "confident_data_bytes": 38983,
+   "continuation_bytes": 12021,
+   "id": "alexkidd",
+   "image_bytes": 131072,
+   "image_identity": "local cartridge byte-identical",
+   "image_sha256": "6667e133818e36a214c81003e543f2c4c3ab5fa018ca313e3ac222a5a6e361c5",
+   "instruction_starts_I": 8487,
+   "quarantined_bytes": 8192,
+   "role": "sealed",
+   "source": "lhsazevedo/akmw",
+   "source_commit": "7720fae8d6e9e9b465267a514d73fdb086e63f5e",
+   "title_class": "Alex Kidd in Miracle World (UE) rev1",
+   "toolchain": "WLA-DX 7ae11df (v10 series, wlalink 5.24a)",
+   "unlisted_bytes": 3801
+  },
+  {
+   "ambiguous_db_bytes": 13121,
+   "confident_data_bytes": 105173,
+   "continuation_bytes": 6930,
+   "id": "columns",
+   "image_bytes": 131072,
+   "image_identity": "local cartridge byte-identical",
+   "image_sha256": "4c0fc3e6cbaff5ae9e7bc1cef9af86d9cac4c039c60d7d03269bfcb0e9136727",
+   "instruction_starts_I": 5796,
+   "quarantined_bytes": 0,
+   "role": "development",
+   "source": "lhsazevedo/columns",
+   "source_commit": "ec5ff6b219b11aa2e89d0f6ccc9fa748591d4027",
+   "title_class": "Columns (UE)",
+   "toolchain": "WLA-DX 7ae11df",
+   "unlisted_bytes": 52
+  },
+  {
+   "ambiguous_db_bytes": 1091,
+   "confident_data_bytes": 10513,
+   "continuation_bytes": 1241,
+   "id": "g2048",
+   "image_bytes": 32768,
+   "image_identity": "reproducibly built reference image (rebuild deterministic)",
+   "image_sha256": "e3957c4882e7087ab93a215a4eb5db9ce6c50f1dcda35c5619ad0b7f4aa53116",
+   "instruction_starts_I": 1400,
+   "quarantined_bytes": 0,
+   "role": "development",
+   "source": "grz0zrg/2048-SMS",
+   "source_commit": "f4c086d626a1cc257c35da85ca1ec24cdbcc25bc",
+   "title_class": "2048-SMS (homebrew)",
+   "toolchain": "WLA-DX 7ae11df",
+   "unlisted_bytes": 18523
+  },
+  {
+   "ambiguous_db_bytes": 48442,
+   "confident_data_bytes": 23609,
+   "continuation_bytes": 12017,
+   "id": "kots",
+   "image_bytes": 131072,
+   "image_identity": "reproducibly built reference image (3 bytes vary across rebuilds, operand/checksum only)",
+   "image_sha256": "eefc8ef3be7a33822be9e1b24e5bced52304b5e06d2473495d29569f4da5a730",
+   "instruction_starts_I": 11026,
+   "quarantined_bytes": 0,
+   "role": "development",
+   "source": "hang-on/knights-of-the-square",
+   "source_commit": "e59ecb84e51eaa67b36628da58ccbdac2b888a7d",
+   "title_class": "Knights of the Square (homebrew)",
+   "toolchain": "WLA-DX 7ae11df; case-fix symlink libraries/psglib.inc",
+   "unlisted_bytes": 35978
+  },
+  {
+   "ambiguous_db_bytes": 42713,
+   "confident_data_bytes": 166347,
+   "continuation_bytes": 16725,
+   "id": "lots",
+   "image_bytes": 262144,
+   "image_identity": "reference image built with the listing toolchain; 194-byte divergence from the upstream-verified image; no local cartridge",
+   "image_sha256": "4e17c9212e34d31b5bae743ac931ceadda56bc88c9bbd6f5efbc59df512af027",
+   "instruction_starts_I": 12671,
+   "quarantined_bytes": 0,
+   "role": "sealed",
+   "source": "Isotarge/lotsdisasm",
+   "source_commit": "f3ce2cc4967e037cc965a1c65dba49cd2ec2d813",
+   "title_class": "Lord of the Sword (SMS)",
+   "toolchain": "WLA-DX 7ae11df (v9.8 reproduces the upstream image; v10 differs in 194 bytes)",
+   "unlisted_bytes": 23688
+  },
+  {
+   "ambiguous_db_bytes": 487807,
+   "confident_data_bytes": 3958,
+   "continuation_bytes": 15459,
+   "id": "ps1",
+   "image_bytes": 524288,
+   "image_identity": "source-built reference image byte-identical to the upstream-verified build; no local cartridge",
+   "image_sha256": "9e324e92bd833b45126861b6f1d2dcbb51251bdf3df6d563ab3a3ff784d8cf88",
+   "instruction_starts_I": 14194,
+   "quarantined_bytes": 0,
+   "role": "development",
+   "source": "sung3r/ps1disasm",
+   "source_commit": "8efc4110adcf1a81c70d40522016393ba6f6b5ae",
+   "title_class": "Phantasy Star (SMS)",
+   "toolchain": "WLA-DX 7ae11df with 33 label renames (name clash with .define, no byte effect); WLA-DX v9.8 builds the repository-documented image",
+   "unlisted_bytes": 2870
+  },
+  {
+   "ambiguous_db_bytes": 25467,
+   "confident_data_bytes": 85361,
+   "continuation_bytes": 10867,
+   "id": "solomon",
+   "image_bytes": 131072,
+   "image_identity": "source-built, SHA-1 equals the upstream-documented value; no local cartridge",
+   "image_sha256": "d18bd317dd527787adff2f706316a0ed1546bf1f50adff123519a307b92e9d17",
+   "instruction_starts_I": 9377,
+   "quarantined_bytes": 0,
+   "role": "development",
+   "source": "Strugglemeat/solomonsms-disasm",
+   "source_commit": "ab066b8db7c3c224fd487783fce8fde252a273b8",
+   "title_class": "Solomon's Key (SMS)",
+   "toolchain": "WLA-DX 7ae11df",
+   "unlisted_bytes": 0
+  },
+  {
+   "ambiguous_db_bytes": 28143,
+   "confident_data_bytes": 23250,
+   "continuation_bytes": 18697,
+   "id": "sonic1",
+   "image_bytes": 262144,
+   "image_identity": "local cartridge byte-identical (code from source, bulk data unlisted)",
+   "image_sha256": "6ad738965ece231427ee046b9905cfee470d5c01220afdd934da4673e4a2458b",
+   "instruction_starts_I": 15259,
+   "quarantined_bytes": 0,
+   "role": "sealed",
+   "source": "maxim-zhao/Sonic1-Z80-ASM (= mdrubin/Sonic1-Z80-ASM)",
+   "source_commit": "f85d74b6dbc28b5f72a0ff325d5c88aa6c14c0f5",
+   "title_class": "Sonic the Hedgehog SMS (UE)",
+   "toolchain": "WLA-DX 7ae11df; data banks .incbin from the local cartridge",
+   "unlisted_bytes": 176795
+  },
+  {
+   "ambiguous_db_bytes": 17450,
+   "confident_data_bytes": 2573,
+   "continuation_bytes": 6461,
+   "id": "supertennis",
+   "image_bytes": 32768,
+   "image_identity": "local cartridge byte-identical",
+   "image_sha256": "5fb097b508a482c29f12c2203a0a98a0dd7ce9873e7ef12fb7e0aeea250a99e2",
+   "instruction_starts_I": 6280,
+   "quarantined_bytes": 0,
+   "role": "development",
+   "source": "FlorianCassayre/sms-super-tennis",
+   "source_commit": "1e42e0273aa44d68e3a86e33b73f2ff62f81a2a7",
+   "title_class": "Super Tennis (UE)",
+   "toolchain": "WLA-DX 7ae11df",
+   "unlisted_bytes": 4
+  }
+ ],
+ "order_statement": "This plan, its digest and the trainer are committed and pushed before any model is fitted or any held-out result is computed.",
+ "plan_id": "seg051-z80-sms-pilot-v1",
+ "platform": "master-system",
+ "policy_selection": "C2 replaces C1 only if its development out-of-fold mean FRF is lower than C1 by at least 0.05 absolute; otherwise C1",
+ "protocol": [
+  "development folds: leave-one-lineage-out over the 6 development lineages (train on 5, score the held-out one) -> OOF scores, FRF, calibrations",
+  "final: fit the selected candidate on all 6 development lineages; score the 3 sealed lineages exactly once with the frozen budget policies"
+ ],
+ "sealed_rule": "sealed = the first 3 lineages ordered by sha256(\"seg051-sealed-v1:\"+id); fixed before any model exists",
+ "stage": "EXPLORATORY_PILOT (not an adoption candidate; adoption minimums below are NOT met by this corpus)",
+ "success_pilot": {
+  "development": "median development OOF FRF <= 0.60",
+  "sealed_strict_recall": "every source instruction-start cell of every sealed lineage is inside the policy selection (any miss = RECALL_FAILED)",
+  "selectivity": "mean retained fraction on sealed lineages <= 0.65"
+ },
+ "training": {
+  "crop_bytes": 4096,
+  "epochs": 30,
+  "loss": "binary cross-entropy with pos_weight = negatives/positives of the training cells, labelled cells only, crop edge cells excluded",
+  "lr": 0.002,
+  "optimizer": "AdamW",
+  "seed_aggregation": "cell logits averaged across the three seeds",
+  "seeds": [
+   1,
+   2,
+   3
+  ],
+  "weight_decay": 0.0001
+ },
+ "unit": {
+  "cell_bytes": 32,
+  "context_bytes_per_side": 32,
+  "masked": "otherwise (A, U, Q, continuation-only)",
+  "negative": "every byte of the cell is confident data (D)",
+  "positive": "cell contains >=1 source instruction start"
+ }
+}
