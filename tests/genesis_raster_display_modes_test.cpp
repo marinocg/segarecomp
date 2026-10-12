@@ -1256,6 +1256,16 @@ void test_dma_fill_and_cpu_writes_follow_the_scanline_visibility_rule() {
     check(is_color(g.o->frame, 0, 104, 2U) && is_color(g.o->frame, 1, 104, 2U) && is_color(g.o->frame, 2, 104, 1U) && is_color(g.o->frame, 0, 100, 0U),
           "DMA fill: the data word's own low byte is journaled and replayed from the following line");
   }
+  // (b3) An odd-address VRAM data write (A0 = 1): the byte pair is exchanged at the even base; both bytes are journaled.
+  {
+    JournalRig g;
+    g.advance_to(JournalRig::at_line(0, L));
+    vdp_vram_address(*g.r, 0x0001U);
+    vdp_data(*g.r, 0x1122U);  // byte 0 = 0x22, byte 1 = 0x11 (exchanged)
+    g.run_until_frame(1);
+    check(g.o->capture.vram_journal_overflows == 0u && is_color(g.o->frame, 0, 104, 2U) && is_color(g.o->frame, 2, 104, 1U) && is_color(g.o->frame, 0, 100, 0U),
+          "an odd-address VRAM write is journaled with its exchanged bytes and replayed from the following line");
+  }
   // (c) Ordinary CPU data-port writes on the first and last active lines, and during VBlank.
   const auto cpu_fill_tile0 = [](JournalRig &g) {
     vdp_vram_address(*g.r, 0x0000U);

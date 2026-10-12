@@ -2,7 +2,7 @@
 
 - Status: accepted (SEG-055-T001, one combined product PR).
 - Contract: `docs/architecture/genesis-raster-and-display-modes.md` (behavior, capability matrix, references).
-- Context: six reported multi-game compatibility problems -- mid-screen palette switches (Sonic 1 water), interlace-mode-2 two-player split screen (Sonic 2), road scrolling glitches (OutRun), H32 (Flicky, Sonic 2 special stage), a "playable only on NTSC systems" lockout (Sonic 3 Japan), and a missing HUD (Streets of Rage, Window plane) -- all trace to missing *generic* hardware behavior, not game logic.
+- Context: six reported multi-game compatibility problems -- mid-screen palette switches (water-style splits), interlace-mode-2 two-player split screen, road-scroll glitches, H32 display, a "playable only on NTSC systems" lockout on a domestic-only image, and a missing HUD (Window plane) -- all trace to missing *generic* hardware behavior, not game logic.
 
 ## Decisions
 

@@ -62,6 +62,9 @@ int main(int argc, char **argv) {
   expect(genesis.supports_region() && !sms.supports_region() && genesis.region == "usa", "the region selector is Genesis only and defaults to USA NTSC");
   expect(!genesis.hint_alias_discovery && genesis.supports_hint_alias_discovery() && !sms.supports_hint_alias_discovery(), "alias discovery defaults off and is Genesis only");
   {
+    const char *before_raw = SDL_getenv("SEGARECOMP_GENESIS_REGION");
+    const std::string process_region_before_text = before_raw ? before_raw : "";
+    const char *process_region_before = before_raw ? process_region_before_text.c_str() : nullptr;
     RomView japan = genesis, europe = genesis, discovery = genesis;
     japan.region = "japan";
     europe.region = "europe";
@@ -95,7 +98,9 @@ int main(int argc, char **argv) {
     apply_game_environment(clean, sms);
     expect(SDL_GetEnvironmentVariable(clean, "SEGARECOMP_GENESIS_REGION") == nullptr, "a Master System launch sets no region variable");
     SDL_DestroyEnvironment(clean);
-    expect(SDL_getenv("SEGARECOMP_GENESIS_REGION") == nullptr || true, "the launcher's own process environment is untouched by the seam");
+    const char *after = SDL_getenv("SEGARECOMP_GENESIS_REGION");
+    expect((after == nullptr) == (process_region_before == nullptr) && (after == nullptr || std::string(after) == process_region_before),
+           "the launcher's own process environment is untouched by the seam");
 
     // Header region hints: both documented encodings; the lone 'E' is intrinsically ambiguous and keeps the default (explicit selection overrides).
     const auto hint = [](const char *text) { return region_hint_from_header_field(std::string(text)); };
