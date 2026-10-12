@@ -6,6 +6,9 @@
 #include "segarecomp/sha256.hpp"
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
+#include <optional>
 #include <cstdlib>
 #include <fstream>
 #include <map>
@@ -139,6 +142,50 @@ std::string clean_title(const std::string &raw) {
   return out;
 }
 
+namespace {
+// One header title field as readable ASCII, or nullopt when it holds anything that cannot be shown faithfully. Besides ASCII this
+// understands the Shift-JIS full-width Latin letters, digits and space some Japanese cartridges use ("\x82`" = 'A'); katakana and every
+// other multi-byte code is not representable by the launcher's Latin font and is reported as unreadable rather than shown as escapes.
+std::optional<std::string> decode_header_title(const std::vector<std::uint8_t> &bytes, std::size_t offset, std::size_t length) {
+  if (bytes.size() < offset + length) return std::nullopt;
+  std::string out;
+  for (std::size_t i = 0; i < length; ++i) {
+    const unsigned b = bytes[offset + i];
+    if (b < 0x80U) { out.push_back(b >= 0x20U && b < 0x7FU ? static_cast<char>(b) : ' '); continue; }
+    if (i + 1 >= length) return std::nullopt;
+    const unsigned t = bytes[offset + ++i];
+    if (b == 0x81U && t == 0x40U) out.push_back(' ');
+    else if (b == 0x82U && t >= 0x4FU && t <= 0x58U) out.push_back(static_cast<char>('0' + (t - 0x4FU)));
+    else if (b == 0x82U && t >= 0x60U && t <= 0x79U) out.push_back(static_cast<char>('A' + (t - 0x60U)));
+    else if (b == 0x82U && t >= 0x81U && t <= 0x9AU) out.push_back(static_cast<char>('a' + (t - 0x81U)));
+    else return std::nullopt;
+  }
+  return out;
+}
+
+std::string strip_tags(const std::string &name) {  // "Game (JUE) [!]" -> "Game"
+  std::string out;
+  int depth = 0;
+  for (const char c : name) {
+    if (c == '(' || c == '[') ++depth;
+    else if ((c == ')' || c == ']') && depth > 0) --depth;
+    else if (depth == 0) out.push_back(c);
+  }
+  return out;
+}
+}  // namespace
+
+std::string genesis_header_title(const std::vector<std::uint8_t> &bytes, bool domestic_first, const std::string &file_stem) {
+  const auto domestic = decode_header_title(bytes, 0x120, 48);
+  const auto overseas = decode_header_title(bytes, 0x150, 48);
+  for (const auto *candidate : domestic_first ? std::array{&domestic, &overseas} : std::array{&overseas, &domestic}) {
+    if (!candidate->has_value()) continue;
+    if (const std::string title = clean_title(**candidate); !title.empty()) return title;
+  }
+  if (const std::string stem = clean_title(strip_tags(file_stem)); !stem.empty()) return stem;
+  return clean_title(file_stem);
+}
+
 RegionHint region_hint_from_header_field(const std::string &raw) {
   std::string field = raw;
   while (!field.empty() && (field.back() == ' ' || field.back() == '\0')) field.pop_back();
@@ -200,13 +247,14 @@ RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
     view.supported_platform = info.platform == segarecomp::Platform::genesis;
     view.platform_id = view.supported_platform ? "genesis" : "";
     view.platform = view.supported_platform ? "Genesis / Mega Drive" : "Unrecognized file";
-    view.title = clean_title(info.domestic_title_display);
-    if (view.title.empty()) view.title = clean_title(utf8(path.stem()));
+    view.title = clean_title(utf8(path.stem()));
     std::error_code ec;
     if (view.supported_platform && bytes.size() >= 0x200) {
       const RegionHint hint = region_hint_from_header_field(std::string(reinterpret_cast<const char *>(&bytes[0x1F0]), 16));
       view.region = hint.region;
       view.region_ambiguous = hint.ambiguous;
+      // A Japan-only cartridge shows its domestic name first; every other one the international (overseas) name.
+      view.title = genesis_header_title(std::vector<std::uint8_t>(bytes.begin(), bytes.end()), hint.region == "japan", utf8(path.stem()));
     }
     view.compat_known = fs::is_regular_file(layout.runtime / "compat" / (view.sha256 + ".json"), ec);
   } catch (const std::exception &error) {

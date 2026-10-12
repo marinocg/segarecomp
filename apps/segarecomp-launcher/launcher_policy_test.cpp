@@ -85,6 +85,23 @@ int main(int argc, char **argv) {
            "Europe PAL, USA, Japan and Master System are launchable");
     expect(clean_title("SONIC THE             HEDGEHOG 3                ") == "SONIC THE HEDGEHOG 3" && clean_title("  A\x01\xC3\xA9" "B \t C  ") == "A B C" &&
                clean_title("\x01\x02").empty(), "titles lose padding, control bytes and non-ASCII noise");
+    {
+      const auto header = [](const std::string &domestic, const std::string &overseas) {
+        std::vector<std::uint8_t> rom(0x200, 0x20U);
+        std::copy(domestic.begin(), domestic.end(), rom.begin() + 0x120);
+        std::copy(overseas.begin(), overseas.end(), rom.begin() + 0x150);
+        return rom;
+      };
+      expect(genesis_header_title(header("BARE KNUCKLE", "STREETS OF RAGE"), false, "x") == "STREETS OF RAGE",
+             "the international name is preferred unless the cartridge is Japan-only");
+      expect(genesis_header_title(header("BARE KNUCKLE", "STREETS OF RAGE"), true, "x") == "BARE KNUCKLE", "Japan-only cartridges show the domestic name");
+      expect(genesis_header_title(header("\x82" "f\x82n\x82k\x82" "c\x82" "d\x82m\x81@\x82`\x82w\x82" "d", ""), true, "x") == "GOLDEN AXE",
+             "Shift-JIS full-width Latin decodes to ASCII");
+      expect(genesis_header_title(header("\x83}\x83" "C\x83P", "MICHAEL JACKSON\x85" "FS MOONWALKER"), true, "Michael Jackson's Moonwalker (JUE) [!]") ==
+                 "Michael Jackson's Moonwalker",
+             "unreadable fields fall back to the tag-free file name, never to hex escapes");
+      expect(genesis_header_title(std::vector<std::uint8_t>(0x200, 0U), false, "Game (E)") == "Game", "an empty header uses the file name");
+    }
     expect(region_note(europe.region).find("60 Hz is forced") != std::string::npos && region_note("usa").empty() && region_note("japan").empty(),
            "only PAL carries the 60 Hz-forced notice");
     expect(region_executable("usa") && region_executable("japan") && region_executable("europe") && !region_executable("bogus"), "the three profiles execute; unknown names do not");

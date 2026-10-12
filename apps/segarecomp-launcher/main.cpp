@@ -696,6 +696,11 @@ int gui() {
           }
         }
         y += 34.0F;
+        if (rom.optimized()) {  // what the extra button is, in one quiet line
+          if (draw) draw_text(dl, font_regular, centered.len(10.5F), text_dim, centered.at(bx, y - 4.0F),
+                              rom.optimized_gen2() ? "Experimental model on (advanced); may fall back." : "Experimental: optional alternative model.");
+          y += 14.0F;
+        }
       }
       if (rom.supports_region()) {
         if (draw) {
@@ -726,8 +731,11 @@ int gui() {
         y += 34.0F;
       }
       if (rom.optimized() && product_policy_identity(layout, "optimized", rom.aot_model).empty()) {
-        if (draw) draw_text(dl, font_regular, centered.len(11), col_err, centered.at(lx, y), "Optimized cannot verify the build tool identity: saved builds are not reused.");
-        y += 18.0F;
+        if (draw) {
+          draw_text(dl, font_regular, centered.len(10.5F), col_err, centered.at(lx, y), "Optimized cannot verify the build tool identity:");
+          draw_text(dl, font_regular, centered.len(10.5F), col_err, centered.at(lx, y + 14.0F), "saved Optimized builds are not reused.");
+        }
+        y += 32.0F;
       }
       if (state == State::Ready) {
         separator();
@@ -843,7 +851,7 @@ int gui() {
     }
 
     // ---- below the panel: diagnostics (when asked for) or the compact legal/info panel; then the footer ----
-    const float below_y = panel_y1 + 22.0F;
+    const float below_y = panel_y1 + 16.0F;
     if (show_diagnostics && (state == State::Failed || (state == State::Ready && policy_report.present && policy_report.requested == "optimized"))) {
       const float dh = std::min(130.0F, (LH - 90.0F) - below_y);
       dl->AddRectFilled(centered.at(panel_x0, below_y), centered.at(panel_x1, below_y + dh), rgba(5, 9, 20, 235), centered.len(4));
@@ -858,6 +866,15 @@ int gui() {
       ImGui::PopFont();
       ImGui::PopStyleColor();
       ImGui::PopTextWrapPos();
+    } else if (const float avail = (LH - 90.0F) - below_y; avail < 82.0F) {
+      // A tall panel (all options visible) leaves no room for the full notice: keep a compact one-line version rather than overlap the footer.
+      const float legal_h = std::min(30.0F, avail);
+      if (legal_h >= 22.0F) {
+        dl->AddRectFilled(centered.at(panel_x0, below_y), centered.at(panel_x1, below_y + legal_h), panel_fill, centered.len(4));
+        dl->AddRect(centered.at(panel_x0, below_y), centered.at(panel_x1, below_y + legal_h), panel_edge, centered.len(4), 0, centered.len(1.2F));
+        draw_text_centered(dl, font_regular, centered.len(11), text_footer, centered.at(LW * 0.5F, 0).x, centered.at(0, below_y + (legal_h - 11.0F) * 0.5F - 1.0F).y,
+                           "No ROMs included. Use only software you may legally analyze.");
+      }
     } else {
       const float legal_h = 82.0F;
       dl->AddRectFilled(centered.at(panel_x0, below_y), centered.at(panel_x1, below_y + legal_h), panel_fill, centered.len(4));

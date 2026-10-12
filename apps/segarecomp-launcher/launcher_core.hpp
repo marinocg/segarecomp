@@ -68,6 +68,9 @@ struct RomView {
 // the hex digit 0xE = Asia + Americas + Europe), so it is reported as ambiguous and keeps the default; the explicit selection is the override.
 struct RegionHint { std::string region = "usa"; bool ambiguous = false; };
 [[nodiscard]] std::string clean_title(const std::string &raw);  // printable ASCII, single spaces, trimmed
+// Genesis header title (domestic 0x120 / overseas 0x150, 48 bytes each) as clean ASCII: Shift-JIS full-width Latin is decoded, a field
+// holding anything else (katakana, stray bytes) is skipped, and the file name (without its (...)/[...] tags) is the last resort.
+[[nodiscard]] std::string genesis_header_title(const std::vector<std::uint8_t> &bytes, bool domestic_first, const std::string &file_stem);
 [[nodiscard]] std::string region_note(const std::string &region);
 [[nodiscard]] RegionHint region_hint_from_header_field(const std::string &field);
 // Console region profiles the runtime can execute today (PAL 50 Hz timing is not implemented).
