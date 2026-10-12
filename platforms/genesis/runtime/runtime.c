@@ -3292,10 +3292,11 @@ void genesis_runtime_write_notes(const GenesisRuntime *runtime, uint64_t frame_r
     return;
   fprintf(stream,
           "RUNTIME_NOTES {\"region\":\"%s\",\"hint_undelivered\":%llu,\"frame_render_rejections\":%llu,"
-          "\"vram_journal_overflows\":%llu,\"virtual_frames\":%llu}\n",
+          "\"vram_journal_overflows\":%llu,\"virtual_frames\":%llu,\"runtime_hz\":%u,\"hardware_hz\":%u}\n",
           genesis_region_profile_name(runtime->region_profile), (unsigned long long)runtime->raster.hint_undelivered,
           (unsigned long long)frame_render_rejections, (unsigned long long)vram_journal_overflows,
-          (unsigned long long)runtime->virtual_frame_count);
+          (unsigned long long)runtime->virtual_frame_count, (unsigned)segarecomp_genesis_region_runtime_hz(runtime->region_profile),
+          (unsigned)segarecomp_genesis_region_hardware_hz(runtime->region_profile));
 }
 
 int genesis_runtime_set_region(GenesisRuntime *runtime, unsigned profile) {
@@ -3309,8 +3310,9 @@ int genesis_runtime_set_region(GenesisRuntime *runtime, unsigned profile) {
 int genesis_runtime_configure_run(GenesisRuntime *runtime, GenesisControlTransfer *refusal) {
   /* SEG-055: the console region is chosen exactly once, before the first guest step -- by the host through
      genesis_runtime_set_region, else from SEGARECOMP_GENESIS_REGION (unset/empty/"auto" == the default USA NTSC console)
-     -- and is then fixed for the whole run. A PAL console (or an unrecognized name) is refused rather than run with the
-     NTSC schedule: 50 Hz timing is not implemented. */
+     -- and is then fixed for the whole run. An unrecognized name (or a non-selectable profile) is refused. The PAL profile is
+     admitted but is an APPROXIMATION: it only changes the version register; the machine runs the 60 Hz schedule, 50 Hz timing is
+     not implemented (segarecomp_genesis_region_runtime_hz / _hardware_hz). */
   if (!runtime->region_configured) {
     const char *name = getenv("SEGARECOMP_GENESIS_REGION");
     const char *hint_policy = getenv("SEGARECOMP_GENESIS_HINT");
@@ -3327,7 +3329,7 @@ int genesis_runtime_configure_run(GenesisRuntime *runtime, GenesisControlTransfe
       runtime->region_profile = (uint8_t)profile;
     }
   }
-  if (!segarecomp_genesis_region_is_supported(runtime->region_profile)) {
+  if (!segarecomp_genesis_region_is_selectable(runtime->region_profile)) {
     refusal->kind = GENESIS_STOP;
     refusal->stop = genesis_access_stop(GENESIS_STOP_UNSUPPORTED_INTERRUPT_OR_SCHEDULING_EVENT,
                                       GENESIS_DIAG_UNSUPPORTED_REGION_TIMING);

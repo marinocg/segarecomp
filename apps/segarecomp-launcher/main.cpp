@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <chrono>
+#include <functional>
 #include <future>
 #include <cmath>
 #include <cstdint>
@@ -463,8 +464,12 @@ int gui() {
   std::string policy_choice = "compatibility";
   bool discovery_choice = false;    // advanced H-interrupt alias discovery (default off)
   std::string model_choice = "v1";  // experimental opt-in of Optimized ("gen2"); v1 is the default
+  std::string observed_region;  // z80.observed_region of the Ready entry (build-time Z80 observation); see region_coverage_note
   PolicyReport policy_report;  // of the Ready entry (read from its status.json), for the requested/effective note
-  const auto refresh_report = [&] { policy_report = state == State::Ready ? read_policy_report(entry) : PolicyReport{}; };
+  const auto refresh_report = [&] {
+    policy_report = state == State::Ready ? read_policy_report(entry) : PolicyReport{};
+    observed_region = state == State::Ready ? read_observed_region(entry) : std::string();
+  };
   const auto fallback_details = [&] {
     diagnostics = (policy_report.fallback ? "Optimized was requested but this game was built as Compatibility (the broad, always-correct program).\n" : std::string()) +
                   policy_details(policy_report) + "\nThe build log and status.json in the cache folder hold the sanitized details.";
@@ -472,26 +477,37 @@ int gui() {
 
   // Entry identity and the "is a matching build already there" check. For Optimized they run the product's policy-identity tool (a process
   // that can take seconds, e.g. cold start or antivirus scan on Windows), so they run on a worker and the UI shows a spinner meanwhile.
-  struct Resolved { fs::path entry; bool ready = false; };
+  // Lifetime/staleness contract: the worker captures COPIES only (no reference into this frame), is joined before SDL_Quit, and its result
+  // carries the key of the selection it was computed for; a result whose key no longer matches the current selection is discarded and
+  // recomputed. While it runs the controls are hidden, a file picked/dropped meanwhile is deferred (not lost), and the per-frame code never
+  // starts the tool (it only reads the memo), so a failing tool is retried once per user action, never once per frame.
+  struct Resolved { fs::path entry; bool ready = false; std::string key; };
   std::future<Resolved> resolve_job;
   bool resolving = false;
+  std::string deferred_path;  // a ROM chosen while a lookup was running
+  const auto selection_key = [&] {
+    return rom.sha256 + "|" + rom.aot_policy + "|" + rom.aot_model + "|" + (rom.hint_alias_discovery ? "d" : "-") + "|" + rom.mapper + "|" + rom.mapper_manifest_sha256;
+  };
+  std::function<void()> resolve_entry;
   const auto apply_resolved = [&](const Resolved &r) {
+    if (!r.key.empty() && r.key != selection_key()) { resolve_entry(); return; }  // stale: computed for another selection
     entry = r.entry;
     state = r.ready ? State::Ready : State::RomSelected;
     refresh_report();
   };
-  const auto resolve_entry = [&] {
+  resolve_entry = [&] {
     if (!rom.optimized()) {
       const fs::path dir = entry_dir(rom, layout);
-      apply_resolved({dir, entry_ready_for(dir, rom, layout)});
+      apply_resolved({dir, entry_ready_for(dir, rom, layout), std::string()});
       return;
     }
     state = State::RomSelected;
     resolving = true;
-    resolve_job = std::async(std::launch::async, [snapshot = rom, lay = layout] {
+    resolve_job = std::async(std::launch::async, [snapshot = rom, lay = layout, key = selection_key()] {
       Resolved r;
       r.entry = entry_dir(snapshot, lay);
       r.ready = entry_ready_for(r.entry, snapshot, lay);
+      r.key = key;
       return r;
     });
   };
@@ -555,11 +571,17 @@ int gui() {
       if (event.type == SDL_EVENT_QUIT) running = false;
       if (event.type == SDL_EVENT_DROP_BEGIN) dragging = true;
       if (event.type == SDL_EVENT_DROP_COMPLETE) dragging = false;
-      if (event.type == SDL_EVENT_DROP_FILE && event.drop.data) select_rom(event.drop.data);
+      if (event.type == SDL_EVENT_DROP_FILE && event.drop.data) {
+        if (resolving) deferred_path = event.drop.data; else select_rom(event.drop.data);
+      }
     }
     {
       std::string chosen, dialog_error;
-      { std::lock_guard<std::mutex> lock(pending.mutex); chosen.swap(pending.path); dialog_error.swap(pending.error); }
+      if (!resolving) {  // a pick made while a lookup runs stays queued in `pending` until it finishes
+        std::lock_guard<std::mutex> lock(pending.mutex);
+        chosen.swap(pending.path);
+        dialog_error.swap(pending.error);
+      }
       if (!chosen.empty()) select_rom(chosen);
       else if (!dialog_error.empty() && state != State::Building && state != State::Running) {
         rom = RomView{};
@@ -577,6 +599,7 @@ int gui() {
       resolving = false;
       apply_resolved(resolve_job.get());
     }
+    if (!resolving && !deferred_path.empty()) { const std::string next = std::move(deferred_path); deferred_path.clear(); select_rom(next); }
     if (state == State::Building && job->finished()) {
       if (job->succeeded()) { state = State::Ready; refresh_report(); }
       else {
@@ -750,11 +773,16 @@ int gui() {
           option("region_eu", "europe", "Europe PAL", 216.0F, 104.0F);
         }
         y += 32.0F;
-        const std::string note = rom.region == "europe" ? region_note("europe") : (rom.region_ambiguous ? std::string("Header region is ambiguous; USA NTSC assumed.") : std::string());
-        if (!note.empty()) {
-          if (draw) draw_text(dl, font_regular, centered.len(10.5F), rom.region == "europe" ? text_secondary : text_dim, centered.at(lx, y - 2.0F), note.c_str());
-          y += 16.0F;
+        std::vector<std::string> notes;
+        if (rom.region == "europe") notes.push_back(region_note("europe"));
+        else if (rom.region_ambiguous) notes.push_back("Header region is ambiguous; USA NTSC assumed.");
+        if (state == State::Ready)
+          if (const std::string coverage = region_coverage_note(observed_region, rom.region); !coverage.empty()) notes.push_back(coverage);
+        for (const std::string &note : notes) {
+          if (draw) draw_text(dl, font_regular, centered.len(10.5F), text_dim, centered.at(lx, y - 2.0F), note.c_str());
+          y += 14.0F;
         }
+        if (!notes.empty()) y += 2.0F;
       }
       if (rom.supports_hint_alias_discovery()) {
         if (draw) {  // advanced, default off
@@ -971,6 +999,7 @@ int gui() {
   ImGui::DestroyContext();
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
+  if (resolve_job.valid()) resolve_job.wait();  // the worker (bounded by the tool's own 5 s limit) must not touch SDL after SDL_Quit
   SDL_Quit();
   return 0;
 }

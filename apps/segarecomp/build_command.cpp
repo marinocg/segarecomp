@@ -392,27 +392,13 @@ std::optional<std::vector<std::uint8_t>> read_exact(const fs::path &path, std::s
 // anything about it; every other -Wall/-Wextra/-pedantic diagnostic stays enabled. Unknown -Wno- options are ignored by GCC/Clang.
 inline const char *const kGeneratedUnitFlag = "-Wno-misleading-indentation";
 
-// SEG-055: the console region the build-time observation pass runs under. The generated program is region-agnostic and the region is a
-// run-time choice, but the Z80 images (and the M68K path that reaches them) are only observable under the region the game accepts: a
-// Japan-only title observed as the default USA console stops at its own region lockout and never uploads its sound driver, so the
-// product would later fail with z80_unknown_image. The pass therefore uses the same header rule as the launcher's default selection
-// (Japan only when the header declares Japan and no overseas NTSC region; anything else keeps the historical USA NTSC console).
-std::string genesis_pass_region(const std::vector<std::uint8_t> &rom) {
-  if (rom.size() < 0x200) return "usa";
-  std::string field(reinterpret_cast<const char *>(&rom[0x1F0]), 16);
-  while (!field.empty() && (field.back() == ' ' || field.back() == '\0')) field.pop_back();
-  if (field == "E") return "usa";  // letter Europe and hex digit 0xE are both valid readings: keep the historical default
-  bool japan = false, overseas = false;
-  if (field.find_first_of("JUE") != std::string::npos) {
-    japan = field.find('J') != std::string::npos;
-    overseas = field.find('U') != std::string::npos;
-  } else if (!field.empty() && std::isxdigit(static_cast<unsigned char>(field[0]))) {
-    const int bits = std::stoi(field.substr(0, 1), nullptr, 16);
-    japan = (bits & 1) != 0;
-    overseas = (bits & 4) != 0;
-  }
-  return japan && !overseas ? "japan" : "usa";
-}
+// SEG-055: the console region the build-time Z80 observation pass runs under. The generated M68K program and the cache identity are
+// region-independent and the region is a run-time choice, but the Z80 images (and the M68K path that reaches them) are only OBSERVABLE
+// under one console configuration: a Japan-only title observed as the default USA console stops at its own region lockout and never uploads
+// its sound driver, so the product would later fail with z80_unknown_image. The pass therefore uses the shared header-region policy
+// (segarecomp::genesis_region_hint, the same one the launcher uses for its default selection). Only that ONE region is observed: the
+// status JSON names it (`z80.observed_region`) so a consumer can tell when a run-time region differs and Z80 coverage is not established.
+std::string genesis_pass_region(const std::vector<std::uint8_t> &rom) { return segarecomp::genesis_region_hint(rom).profile; }
 
 struct GenesisSoundBuild {
   GenesisSoundBuild(const Options &opts, Log &lg) : options(opts), log(lg) {}
@@ -974,7 +960,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     gz80::MaterializationSummary result = gz80::materialize(registry, runner);
     const std::uint64_t ms = millis_since(started);
     materialize_ms += ms;
-    log.line("z80 materialization: outcome=" + std::string(gz80::failure_name(result.failure)) + " images=" +
+    log.line("z80 materialization: observed_region=" + build.pass_region + " outcome=" + std::string(gz80::failure_name(result.failure)) + " images=" +
              std::to_string(registry.images().size()) + " discovery_runs=" + std::to_string(result.discovery_runs) + " runs=" +
              std::to_string(result.total_runs) + " ms=" + std::to_string(ms) +
              (result.ok() ? " end=" + std::string(gz80::pass_outcome_name(result.end)) : std::string()));
@@ -1069,7 +1055,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   status_extra = std::string(",\"genesis_audio\":\"") + (summary.sound_fault ? "degraded" : "supported") + "\"";
   if (summary.sound_fault) status_extra += ",\"z80_audio_outcome\":\"structural_code_mismatch\"";
   status_extra += ",\"z80\":{\"outcome\":\"converged\",\"end\":\"" + std::string(gz80::pass_outcome_name(summary.end)) +
-                 "\",\"images\":" + std::to_string(summary.images) + ",\"discovery_runs\":" + std::to_string(summary.discovery_runs) +
+                 "\",\"observed_region\":\"" + build.pass_region + "\",\"images\":" + std::to_string(summary.images) + ",\"discovery_runs\":" + std::to_string(summary.discovery_runs) +
                  ",\"runs\":" + std::to_string(summary.total_runs) + ",\"epochs\":" + std::to_string(summary.epochs) +
                  ",\"window_frames\":" + std::to_string(gz80::kObservationFrames) + ",\"frames_reached\":" + std::to_string(summary.frames) +
                  ",\"units\":" + std::to_string(build.z80_units) + ",\"units_compiled\":" + std::to_string(build.z80_compiled_units) +

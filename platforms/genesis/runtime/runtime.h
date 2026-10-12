@@ -1194,7 +1194,7 @@ typedef enum GenesisDiagnosticCategory {
   /* ADR 0098: cartridge SRAM outcomes, paired with GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS. Nothing is mutated. */
   GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_LAYOUT = 63, /* an access to a header-declared extra-memory extent whose layout is not supported */
   GENESIS_DIAG_UNSUPPORTED_CARTRIDGE_SRAM_ACCESS = 64, /* SRAM extent access (width/lane) or $A130F1 write the SRAM model does not admit */
-  GENESIS_DIAG_UNSUPPORTED_REGION_TIMING = 65, /* SEG-055: a console region whose timing is not implemented (PAL), or an unknown region name */
+  GENESIS_DIAG_UNSUPPORTED_REGION_TIMING = 65, /* SEG-055: an unknown / non-selectable console region name or profile (PAL is selectable; it runs on the 60 Hz schedule) */
   GENESIS_DIAG_HINT_HANDLER_NOT_INSTALLED = 66, /* SEG-055: an enabled H-interrupt fired but no handler was resolved at build time (unadmittable/RAM-resident vector slot) */
 } GenesisDiagnosticCategory;
 
@@ -1587,11 +1587,12 @@ void genesis_runtime_set_pad1(GenesisRuntime *runtime, uint8_t mask);
 void genesis_runtime_set_pad2(GenesisRuntime *runtime, uint8_t mask);
 
 /* SEG-055: console region selection. `profile` is a SegarecompGenesisRegionProfile value (0 USA NTSC, 1 Japan NTSC,
- * 2 Europe PAL). Returns 0, or -1 (unchanged) for an unknown profile or once the guest has started executing. A PAL
- * profile is accepted (it has a version-register value) but genesis_runtime_run refuses to execute under it. */
+ * 2 Europe PAL). Returns 0, or -1 (unchanged) for an unknown profile or once the guest has started executing. The PAL
+ * profile is accepted and executes: it only changes the version-register value the guest reads (0xE0); the machine still runs
+ * the 60 Hz NTSC schedule (50 Hz timing is not implemented), see segarecomp_genesis_region_runtime_hz / _hardware_hz. */
 int genesis_runtime_set_region(GenesisRuntime *runtime, unsigned profile);
 /* SEG-055: applies the run configuration the runner owns (the console region from SEGARECOMP_GENESIS_REGION unless the host set one,
-   and SEGARECOMP_GENESIS_HINT) exactly once before the first guest step, and refuses an unsupported region. Returns 0, or 1 with
+   and SEGARECOMP_GENESIS_HINT) exactly once before the first guest step, and refuses a non-selectable (unknown) region. Returns 0, or 1 with
    `*refusal` set to the typed stop. Every program that steps the runtime without genesis_runtime_run (the build-time materialization
    pass) calls it so that it observes the same console the product will run. */
 int genesis_runtime_configure_run(GenesisRuntime *runtime, GenesisControlTransfer *refusal);
@@ -1600,7 +1601,9 @@ int genesis_runtime_configure_run(GenesisRuntime *runtime, GenesisControlTransfe
  * region; also selectable with SEGARECOMP_GENESIS_HINT=strict|skip. Returns 0, or -1 once the guest has started. */
 int genesis_runtime_set_hint_strict(GenesisRuntime *runtime, unsigned strict);
 /* SEG-055: writes one `RUNTIME_NOTES {...}` line to `stream` when the run used a non-default console region, dropped
- * H-interrupts or rejected frames (nothing otherwise), so a host can surface what the run could not honor. */
+ * H-interrupts or rejected frames (nothing otherwise), so a host can surface what the run could not honor. The line states both
+ * `runtime_hz` (what this machine executed, always 60) and `hardware_hz` (what that region's real console runs: 50 for Europe PAL),
+ * so a PAL run is never read as 50 Hz-accurate. */
 void genesis_runtime_write_notes(const GenesisRuntime *runtime, uint64_t frame_render_rejections,
                                  uint64_t vram_journal_overflows, FILE *stream);
 /* Parses "usa"/"us"/"ntsc-u", "japan"/"jp"/"ntsc-j", "europe"/"eu"/"pal" (case-insensitive). 0 on success, -1 otherwise. */

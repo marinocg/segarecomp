@@ -297,4 +297,34 @@ std::string format_genesis_reset_image_report(const GenesisResetImageReport &rep
   out << ",\"pc_alignment\":\"" << check_status_name(report.pc_alignment) << "\",\"pc_mapping\":\"" << check_status_name(report.pc_mapping) << "\",\"source_provenance\":{\"input\":\"raw_image\",\"byte_order\":\"big_endian\",\"source_ids\":[\"M1\",\"M2\",\"M3\",\"S1\",\"S2\"],\"ssp\":"; write_vector(out, report.ssp); out << ",\"pc\":"; write_vector(out, report.pc); out << "}}";
   return out.str();
 }
+
+GenesisRegionHint genesis_region_hint(std::string_view raw) {
+  while (!raw.empty() && (raw.back() == ' ' || raw.back() == '\0' || raw.back() == '\t' || raw.back() == '\r' || raw.back() == '\n')) raw.remove_suffix(1);
+  while (!raw.empty() && (raw.front() == ' ' || raw.front() == '\t' || raw.front() == '\r' || raw.front() == '\n')) raw.remove_prefix(1);
+  GenesisRegionHint hint;
+  if (raw == "E") {
+    hint.ambiguous = true;
+    return hint;
+  }
+  bool japan = false, usa = false, europe = false;
+  if (raw.find_first_of("JUE") != std::string_view::npos) {
+    japan = raw.find('J') != std::string_view::npos;
+    usa = raw.find('U') != std::string_view::npos;
+    europe = raw.find('E') != std::string_view::npos;
+  } else if (!raw.empty() && std::all_of(raw.begin(), raw.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); })) {
+    const char d = raw.front();
+    const unsigned bits = d <= '9' ? static_cast<unsigned>(d - '0') : static_cast<unsigned>((d | 0x20) - 'a' + 10);
+    japan = (bits & 1U) != 0U;
+    usa = (bits & 4U) != 0U;
+    europe = (bits & 8U) != 0U;
+  }
+  hint.profile = usa ? "usa" : japan ? "japan" : europe ? "europe" : "usa";
+  return hint;
+}
+
+GenesisRegionHint genesis_region_hint(std::span<const std::uint8_t> rom) {
+  if (!has_range(rom, 0x1F0, 16)) return {};
+  return genesis_region_hint(std::string_view(reinterpret_cast<const char *>(rom.data() + 0x1F0), 16));
+}
+
 } // namespace segarecomp

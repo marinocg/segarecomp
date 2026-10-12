@@ -57,7 +57,7 @@ STOP_DIAGNOSTIC_PAIRS = {
     "known_but_unemitted_target": {"known_but_unemitted_target"},
     # SEG-021-T020 / ADR 0043: STOP halted the CPU and no interrupt the machine
     # can raise could ever be accepted.
-    # SEG-055: `unsupported_region_timing` = a console region whose timing is not implemented (PAL) or an unknown region
+    # SEG-055: `unsupported_region_timing` = an unknown / non-selectable console region (PAL is selectable: 60 Hz is forced)
     # name; `hint_handler_not_installed` = an enabled H-interrupt fired without a build-resolved handler.
     "unsupported_interrupt_or_scheduling_event": {"stopped_without_wake_source", "irq6_vector_in_work_ram",
                                                   "unsupported_interrupt_or_scheduling_event",

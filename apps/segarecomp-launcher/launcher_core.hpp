@@ -72,10 +72,14 @@ struct RegionHint { std::string region = "usa"; bool ambiguous = false; };
 // holding anything else (katakana, stray bytes) is skipped, and the file name (without its (...)/[...] tags) is the last resort.
 [[nodiscard]] std::string genesis_header_title(const std::vector<std::uint8_t> &bytes, bool domestic_first, const std::string &file_stem);
 [[nodiscard]] std::string region_note(const std::string &region);
+// The region the build's Z80 observation ran under (empty for an older/Master System entry) and the note shown when the selected run-time
+// region differs from it (Z80 coverage is established for the observed region only).
+[[nodiscard]] std::string read_observed_region(const std::filesystem::path &entry);
+[[nodiscard]] std::string region_coverage_note(const std::string &observed, const std::string &selected);
 [[nodiscard]] RegionHint region_hint_from_header_field(const std::string &field);
-// Console region profiles the runtime can execute today (PAL 50 Hz timing is not implemented).
+// Region profiles the runtime accepts: usa, japan and europe (Europe PAL runs on the 60 Hz schedule; 50 Hz timing is not implemented, see region_note).
 [[nodiscard]] bool region_executable(const std::string &region);
-// Empty when the game may be launched; otherwise the plain-language reason it must not be (e.g. Europe PAL).
+// Empty when the game may be launched; otherwise the plain-language reason it must not be (an unknown region name).
 [[nodiscard]] std::string launch_refusal(const RomView &rom);
 // Applies the per-launch environment of the child game to `environment` (never the launcher's own process environment).
 void apply_game_environment(SDL_Environment *environment, const RomView &rom);

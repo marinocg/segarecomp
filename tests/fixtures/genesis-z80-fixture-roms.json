@@ -16,6 +16,14 @@
       "sha256": "fdc20c805185a13384271b939285963eeb939ec2dd8b276d4d6315b33afbe983",
       "size": 16384
     },
+    "sound_domestic_gated": {
+      "sha256": "5d199911c946bd990d48a286db5130ca1bf729cc50093259274fca5f5720f1e7",
+      "size": 16384
+    },
+    "sound_domestic_gated_overseas_header": {
+      "sha256": "b116e85a467217e2ffb798471009cb8af869f87d1451fa3ea5ceacd79cecf616",
+      "size": 16384
+    },
     "sound_late_epoch": {
       "sha256": "f63df333a14cba9afb5fe4802f9d30d275a68e09ec5170c774e231e41b71cb60",
       "size": 16384

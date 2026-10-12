@@ -2,9 +2,10 @@
 """SEG-055: the bridge's console-region selection (`--region`) -- pure-Python, hermetic, no ROM and no generation.
 
 Covers: header region-support hints (old letter style and the new hexadecimal bitfield style), the documented preference order
-(overseas NTSC, else Japan, else Europe), `auto` vs explicit selection, the default console, Europe/PAL refusal, the environment
+(overseas NTSC, else Japan, else Europe), `auto` vs explicit selection, the default console, Europe/PAL admission (60 Hz forced), the environment
 variable handed to the generated program, and the new typed diagnostics accepted by the stop-pair table.
 """
+import json
 import os
 import pathlib
 import sys
@@ -41,6 +42,14 @@ def main():
   check(hint(rom_with_region(b"0"))[0] == "usa", "an empty declaration falls back to the default")
   check(hint(b"\x00" * 0x100)[0] == "usa", "an image too short for the header field falls back to the default")
   check("J" in hint(rom_with_region(b"J"))[1], "the hint describes what the header declares")
+
+  # Cross-component equivalence: the bridge must agree with the single C++ policy (libs/media genesis_region_hint, also used by the launcher
+  # and `segarecomp build`) on the shared case table, which tests/rom_test.cpp checks against the C++ implementation.
+  cases = json.loads((ROOT / "tests" / "fixtures" / "genesis_region_hint_cases.json").read_text())["cases"]
+  for case in cases:
+    profile, note = hint(rom_with_region(case["field"].encode("latin-1")))
+    check(profile == case["profile"] and ("ambiguous" in note) == case["ambiguous"],
+          "bridge header_region_hint disagrees with the shared case table for %r: %s %s" % (case["field"], profile, note))
 
   saved = os.environ.get("SEGARECOMP_GENESIS_REGION")
   try:

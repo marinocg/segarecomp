@@ -187,22 +187,8 @@ std::string genesis_header_title(const std::vector<std::uint8_t> &bytes, bool do
 }
 
 RegionHint region_hint_from_header_field(const std::string &raw) {
-  std::string field = raw;
-  while (!field.empty() && (field.back() == ' ' || field.back() == '\0')) field.pop_back();
-  RegionHint hint;
-  if (field == "E") { hint.ambiguous = true; return hint; }  // letter E and hex digit 0xE are both valid readings
-  bool japan = false, overseas = false;
-  if (field.find_first_of("JUE") != std::string::npos) {
-    japan = field.find('J') != std::string::npos;
-    overseas = field.find('U') != std::string::npos;
-  } else if (!field.empty() && std::isxdigit(static_cast<unsigned char>(field[0]))) {
-    const int bits = std::stoi(field.substr(0, 1), nullptr, 16);
-    japan = (bits & 1) != 0;
-    overseas = (bits & 4) != 0;
-  }
-  // Japan only when no overseas NTSC region is declared; everything else keeps the historical USA NTSC default.
-  hint.region = (japan && !overseas) ? "japan" : "usa";
-  return hint;
+  const segarecomp::GenesisRegionHint hint = segarecomp::genesis_region_hint(raw);  // the single shared policy (libs/media)
+  return RegionHint{hint.profile, hint.ambiguous};
 }
 
 // Every profile executes; Europe PAL runs on the 60 Hz schedule (50 Hz timing is not implemented), see region_note.
@@ -341,6 +327,24 @@ PolicyReport read_policy_report(const fs::path &entry) {
   report.fallback = policy_field(object, "fallback") == "true";
   report.present = !report.requested.empty() && !report.effective.empty();
   return report;
+}
+
+std::string read_observed_region(const fs::path &entry) {
+  // `z80.observed_region` of status.json: the single console region the build-time Z80 observation ran under.
+  const std::string status = read_all(entry / "status.json");
+  const auto at = status.find("\"observed_region\":\"");
+  if (at == std::string::npos) return {};
+  const auto begin = at + 19;
+  const auto end = status.find('"', begin);
+  const std::string value = end == std::string::npos ? std::string() : status.substr(begin, end - begin);
+  return value == "usa" || value == "japan" || value == "europe" ? value : std::string();
+}
+
+std::string region_coverage_note(const std::string &observed, const std::string &selected) {
+  // Z80 (sound) images are materialized from ONE observed run. A different run-time region is not observed, so its sound coverage is not
+  // established (it may stop with z80_unknown_image if that region uploads a different driver).
+  if (observed.empty() || selected.empty() || observed == selected) return {};
+  return "Sound was analyzed for the " + observed + " console; " + selected + " is not covered.";
 }
 
 std::string policy_summary(const PolicyReport &report) {

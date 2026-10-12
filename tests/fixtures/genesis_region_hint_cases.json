@@ -1,0 +1,28 @@
+{
+  "schema": "segarecomp.genesis_region_hint_cases.v1",
+  "note": "One case per line. `field` is the header region-support field ($1F0..$1FF) without padding; `profile` is the single authoritative result (libs/media genesis_region_hint) that the launcher, `segarecomp build` and tools/genesis_startup_bridge.py (`--region auto`) must all agree with. \\u0000 is a NUL byte.",
+  "cases": [
+    {"field": "J", "profile": "japan", "ambiguous": false},
+    {"field": "U", "profile": "usa", "ambiguous": false},
+    {"field": "E", "profile": "usa", "ambiguous": true},
+    {"field": "JUE", "profile": "usa", "ambiguous": false},
+    {"field": "JU", "profile": "usa", "ambiguous": false},
+    {"field": "UE", "profile": "usa", "ambiguous": false},
+    {"field": "JE", "profile": "japan", "ambiguous": false},
+    {"field": "EJ", "profile": "japan", "ambiguous": false},
+    {"field": "1", "profile": "japan", "ambiguous": false},
+    {"field": "4", "profile": "usa", "ambiguous": false},
+    {"field": "5", "profile": "usa", "ambiguous": false},
+    {"field": "8", "profile": "europe", "ambiguous": false},
+    {"field": "9", "profile": "japan", "ambiguous": false},
+    {"field": "A", "profile": "europe", "ambiguous": false},
+    {"field": "C", "profile": "usa", "ambiguous": false},
+    {"field": "c", "profile": "usa", "ambiguous": false},
+    {"field": "F", "profile": "usa", "ambiguous": false},
+    {"field": "0", "profile": "usa", "ambiguous": false},
+    {"field": "", "profile": "usa", "ambiguous": false},
+    {"field": "Z", "profile": "usa", "ambiguous": false},
+    {"field": "\u0000\u0000", "profile": "usa", "ambiguous": false},
+    {"field": "  J", "profile": "japan", "ambiguous": false}
+  ]
+}
