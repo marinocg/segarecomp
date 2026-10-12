@@ -1328,6 +1328,37 @@ void test_dma_fill_and_cpu_writes_follow_the_scanline_visibility_rule() {
           "one word beyond the capacity abandons the journal: the frame-end image is used for every line (fallback, counted)");
   }
 }
+
+// Tile upload through LONG data-port writes (the staging-buffer loop `MOVE.L (A1)+,$C00000` a game uses to load font tiles): the four bytes land
+// in VRAM in big-endian order, and the renderer decodes the resulting pattern pixel for pixel (a VDP-side check that a tile whose contents look
+// wrong on screen was wrong in the guest's staging buffer, not altered by the write path or the decoder).
+void test_long_data_port_tile_upload_round_trips_to_pixels() {
+  JournalRig g;
+  const uint32_t pattern[8] = {0x77377377u, 0x73777373u, 0x77773377u, 0x73373777u, 0x77773373u, 0x77737377u, 0x77377777u, 0x77777777u};
+  vdp_vram_address(*g.r, 0x3000U);  // tile 0x180
+  for (const uint32_t word : pattern) {
+    uint32_t v = word;
+    GenesisRuntimeStop stop{};
+    check(genesis_route_access(g.r.get(), 0xC00000, GENESIS_ACCESS_LONG, GENESIS_ACCESS_WRITE, &v, &stop) == GENESIS_ACCESS_OK, "LONG data-port write accepted");
+  }
+  bool bytes = true;
+  for (unsigned i = 0; i < 8U; ++i)
+    bytes = bytes && g.r->devices.vdp.vram[0x3000U + i * 4U] == (uint8_t)(pattern[i] >> 24) && g.r->devices.vdp.vram[0x3001U + i * 4U] == (uint8_t)(pattern[i] >> 16) &&
+            g.r->devices.vdp.vram[0x3002U + i * 4U] == (uint8_t)(pattern[i] >> 8) && g.r->devices.vdp.vram[0x3003U + i * 4U] == (uint8_t)pattern[i];
+  check(bytes, "a LONG data-port write stores its four bytes in big-endian order and the address advances by four");
+  // Plane A cell (0, 0) uses tile 0x180; every pattern nibble becomes that pixel's palette index (7 or 3 here).
+  Scene s;
+  base_scene(s, 0x81);
+  std::memcpy(s.vram.data() + 0x3000, g.r->devices.vdp.vram + 0x3000, 32);
+  put16(s, 0xC000U, nt_word(0x180));
+  auto frame = make_frame();
+  check(render(s, frame.get()), "the uploaded tile renders");
+  unsigned bad = 0;
+  for (unsigned row = 0; row < 8U; ++row)
+    for (unsigned x = 0; x < 8U; ++x)
+      if (!is_color(*frame, x, row, (pattern[row] >> (28U - 4U * x)) & 0xFU)) ++bad;
+  check(bad == 0U, "every pixel of the uploaded tile decodes to its pattern nibble (high nibble = left pixel)");
+}
 }  // namespace
 
 int main() {
@@ -1346,6 +1377,7 @@ int main() {
   test_interlace_vscroll_full_range();
   test_frame_digest_covers_row_palette_selection();
   test_dma_fill_and_cpu_writes_follow_the_scanline_visibility_rule();
+  test_long_data_port_tile_upload_round_trips_to_pixels();
   if (failures != 0) std::printf("%d check(s) failed\n", failures);
   return failures == 0 ? 0 : 1;
 }
