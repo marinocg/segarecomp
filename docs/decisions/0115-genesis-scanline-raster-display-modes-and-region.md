@@ -17,7 +17,7 @@
 ## Consequences
 
 * The generated code gains one extra analysis root (vector 28) in every build; builds whose slot cannot be admitted are unchanged. Generated programs that read `$A10001` now route the byte read through the runtime device owner (previously folded), so builds that exercise it differ textually while remaining behavior-identical in the default USA profile.
-* Titles that enable the H-interrupt now observe it (Sonic 1/2/3 water and split screens, OutRun per-line effects, Streets of Rage); titles whose H-interrupt vector is RAM-resident stop at the first request (previously it was silently never raised), which is the honest signal for a follow-up that resolves RAM jump-table vectors the way IRQ6 does.
+* Titles that enable the H-interrupt now observe it when its handler could be compiled; titles whose H-interrupt vector is RAM-resident have the request counted as undelivered by default (previously it was silently never raised; strict mode stops), which is the honest signal for a follow-up that resolves RAM jump-table vectors the way IRQ6 does.
 * The frame artifact is ~176 KiB (was ~72 KiB); it remains plain data copied only at frame boundaries.
 * Limitations (section 1 of the architecture contract): no shadow/highlight, no sprite X = 0 mask, no display-disable, no sub-line timing of any write or of the H-interrupt, V30 and PAL unsupported; an H-interrupt vector reached through a RAM stub is resolved only when the build-time preparation materializes a byte-guarded thunk or copy alias for it (otherwise an enabled H-interrupt stops fail-closed).
 

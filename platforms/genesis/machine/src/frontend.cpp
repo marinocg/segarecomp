@@ -3191,10 +3191,9 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
                                                   synchronous_vector == 28U ? 0U : limits.max_call_frame_depth};
       auto discovery = discover_m68k_static_graph(handler_address, hint_limits, environment, exception_boundary,
                                                    continuation_roots);
-      // SEG-055: the H-interrupt root is installed only when its handler is discovered COMPLETELY (no frontier of any
-      // kind). A handler that leaves an open control edge -- typically a jump through a RAM stub written at run time --
-      // is treated exactly like an unadmittable slot: the build and every other root's analysis stay unchanged, and an
-      // enabled H-interrupt then stops fail-closed at run time instead of the root widening or rejecting the build.
+      // SEG-055: a handler that is a single unresolved instruction (typically a JMP through a RAM stub written at run time) is
+      // not installed; a longer handler is installed even with open frontiers (typed prefix boundaries, fail closed if executed).
+      // The whole analysis is retried without the root if it is rejected, so the root never adds a rejection.
       if (synchronous_vector == 28U && discovery.decode_order.size() <= 1U &&
           (discovery.primary_issue || !discovery.secondary_issues.empty())) {
         continue;

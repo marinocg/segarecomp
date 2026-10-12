@@ -1576,7 +1576,9 @@ def discover_copy_aliases(emitter_command: list[str], compiler: pathlib.Path, ro
         dump_path.unlink(missing_ok=True)
         env = dict(os.environ)
         env.update({"SEGARECOMP_CAPTURE_DIR": str(work / "frames"), "SEGARECOMP_CAPTURE_FIRST": str(1 << 40),
-                    "SEGARECOMP_CAPTURE_COUNT": "1", "SEGARECOMP_STOP_WORK_RAM_DUMP": str(dump_path)})
+                    "SEGARECOMP_CAPTURE_COUNT": "1", "SEGARECOMP_STOP_WORK_RAM_DUMP": str(dump_path),
+                    # SEG-055: preparation needs an undeliverable H-interrupt to STOP (strict) so its RAM stub/copy can be derived
+                    "SEGARECOMP_GENESIS_HINT": "strict"})
         (work / "frames").mkdir(exist_ok=True)
         counts["run_attempts"] += 1
         completed = subprocess.run([str(executable), "--instruction-budget", str(instruction_budget)],

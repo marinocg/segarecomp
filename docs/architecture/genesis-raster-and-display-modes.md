@@ -71,14 +71,13 @@ The handler entry is resolved at build time from the cartridge vector table at o
 (`software_exception_handler_*[28]`), with three H-interrupt-specific rules that keep the root additive and never a new build failure:
 
 * it is discovered with a **smaller bounded budget (96 instructions, call frames not followed)**: the handler's own straight-line body is compiled and a call or tail beyond the bound is a typed prefix-boundary frontier (fail closed if ever executed).
-  Game-specific update routines called from a handler frequently reach code that no other root reaches, which the aggregated authoritative closure cannot represent (Sonic 1's HBlank tail is the measured example);
-* a handler that is a single unresolved instruction (typically `JMP` through a RAM stub written at run time, e.g. Sonic 3) is not installed;
-* the whole general-startup analysis is attempted with the root and, if that attempt is rejected for any reason, again without it (exactly the earlier analysis). Across the 17 locally available images no analysis was rejected with the root, and the root was
-  installed for 11 of them (Sonic 1, Sonic 2 (two images), Golden Axe, Moonwalker, Cool Spot, Phantasy Star II, Land Stalker, Shining Force, Streets of Rage, Streets of Rage 2).
+  Game-specific update routines called from a handler frequently reach code that no other root reaches, which the aggregated authoritative closure cannot represent (a handler tail calling a deep update routine is the measured case);
+* a handler that is a single unresolved instruction (typically `JMP` through a RAM stub written at run time) is not installed;
+* the whole general-startup analysis is attempted with the root and, if that attempt is rejected for any reason, again without it (exactly the earlier analysis). Across the locally available images no analysis was rejected with the root, and the root was
+  installed for a majority of them (a majority of them).
 
 A vector slot that points into work RAM (the common RAM jump-table convention) retains the stub address (`hint_vector_in_work_ram`) so that the existing build-time preparation (`--discover-copy-aliases`: byte-guarded JMP thunks and verbatim
-immutable-copy aliases, ADR 0049/0097) can turn it into an ordinary compiled handler entry guarded by the runtime byte-identity check. **RAM-resident code that the game constructs at run time (OutRun's H-interrupt routine is written into work RAM
-instruction by instruction, it is not a copy of cartridge bytes) can never be compiled by this architecture** (no interpreter/JIT).
+immutable-copy aliases, ADR 0049/0097) can turn it into an ordinary compiled handler entry guarded by the runtime byte-identity check. **RAM-resident code that the game constructs at run time (a handler written into work RAM instruction by instruction is not a copy of cartridge bytes) can never be compiled by this architecture** (no interpreter/JIT).
 
 When an enabled H-interrupt fires with no resolved handler the default compatibility policy **counts and drops it** (`raster.hint_undelivered`; the capture/viewer hooks print a `RUNTIME_NOTES {...}` line when anything was dropped, a non-default region was used, frames were
 rejected or a VRAM journal overflowed) -- precisely what every earlier build did with the interrupt, now observable -- so titles that never needed the handler keep running. `SEGARECOMP_GENESIS_HINT=strict` (or `genesis_runtime_set_hint_strict`) makes it stop fail-closed with
@@ -134,8 +133,8 @@ Selection is made once, before the first guest step, and is then immutable for t
 ### Sonic 3 (Japan) -- investigation summary
 
 The public `sonicretro/skdisasm` source (`s3.asm`) contains the standard Sega lockout at reset: it reads the hardware version register, takes bits 7-6 as a territory id (`0` = 'J' domestic NTSC, `2` = 'U' overseas NTSC, `3` = 'E' overseas PAL; `1` is "tampering") and
-compares the resulting letter with the 16-byte country field of its own ROM header; on a mismatch it draws the "DEVELOPED FOR USE ONLY WITH NTSC MEGA DRIVE ... SYSTEMS" screen and loops forever. The local Japan/Korea image declares a domestic-only country field, so the hard-coded USA profile (`0xA0` => 'U') can never match it, while the Japan NTSC profile (`0x20` => 'J') does.
-The cause is therefore the configured console region (version register), **not** 60 Hz video timing. No ROM edit, game fingerprint or lockout bypass is involved. (Hypothesis from the task confirmed from the public source and the local header; see the task evidence for the authorized local run outcome.)
+compares the resulting letter with the 16-byte country field of its own ROM header; on a mismatch it draws the "DEVELOPED FOR USE ONLY WITH NTSC MEGA DRIVE ... SYSTEMS" screen and loops forever. A Japan-only image declares a domestic-only country field, so the hard-coded USA profile (`0xA0` => 'U') can never match it, while the Japan NTSC profile (`0x20` => 'J') does.
+The cause is therefore the configured console region (version register), **not** 60 Hz video timing. No ROM edit, game fingerprint or lockout bypass is involved. (Hypothesis from the task confirmed from the public source; the authorized local run outcome is recorded as a classification in the task evidence.)
 
 ## 6. Controllers
 

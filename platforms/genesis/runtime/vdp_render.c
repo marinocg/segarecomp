@@ -771,6 +771,7 @@ static void genesis_vdp_prepare_row_plane(const GenesisVdpRenderContext *ctx, co
   unsigned height_cells = 0U;
   (void)genesis_vdp_decode_plane_size(line->registers, &width_cells, &height_cells);
   (void)genesis_vdp_plane_base_address(line->registers, plane, &out->base);
+  out->hscroll = 0;
   (void)genesis_vdp_read_hscroll(ctx->vram, line->registers, plane, row, &out->hscroll);
   out->width_cells = width_cells;
   out->width_px = width_cells * GENESIS_VDP_TILE_WIDTH;
