@@ -263,7 +263,7 @@ int main(int argc, char **argv) {
     // a) Compatibility is the default
     fs::path builds = fresh_cache("cache_a");
     auto r = run_launcher({}, {}, rc);
-    expect(rc == 0 && r["aot_policy_requested"] == "compatibility" && r["cache"] == "miss" && r["build"] == "ok" && r["run"].find("code=0 mode=compatibility") != std::string::npos,
+    expect(rc == 0 && r["aot_policy_requested"] == "compatibility" && r["cache"] == "miss" && r["build"] == "ok" && r["run"] == "exited code=0" && r["run_mode"] == "compatibility",
            "a) default request is Compatibility and runs");
     expect(r["aot_policy_effective"] == "broad" && r.count("fallback") == 0, "a) Compatibility builds the broad program");
     r = run_launcher({}, {}, rc);
@@ -273,7 +273,7 @@ int main(int argc, char **argv) {
     r = run_launcher({"--aot-policy", "optimized"}, {}, rc);
     const std::string compat_entry = r["entry"];
     expect(rc == 0 && r["aot_policy_requested"] == "optimized" && r["cache"] == "miss" && r["aot_policy_effective"] == "ml_region_z80" && r["aot_policy_fallback"] == "no" &&
-               r["run"].find("code=0 mode=optimized") != std::string::npos && r.count("fallback") == 0 && line_count(builds) == 2,
+               r["run"] == "exited code=0" && r["run_mode"] == "optimized" && r.count("fallback") == 0 && line_count(builds) == 2,
            "b) Optimized builds its own entry (miss) and runs without a restart");
     r = run_launcher({"--aot-policy", "optimized"}, {}, rc);
     expect(rc == 0 && r["cache"] == "hit" && line_count(builds) == 2, "b) the second Optimized run reuses its entry");
@@ -283,7 +283,7 @@ int main(int argc, char **argv) {
     builds = fresh_cache("cache_c");
     r = run_launcher({"--aot-policy", "optimized"}, {{"FAKE_OPT_EXIT", "7"}}, rc);
     expect(rc == 0, "c) the run ends successfully after the restart (rc " + std::to_string(rc) + ")");
-    expect(r["run"].find("code=0 mode=compatibility") != std::string::npos, "c) the final run is the Compatibility program");
+    expect(r["run"] == "exited code=0" && r["run_mode"] == "compatibility", "c) the final run is the Compatibility program");
     expect(r["fallback"] == "compatibility_restart" && r.count("notice") == 1 && r["notice"].find("Compatibility") != std::string::npos, "c) the restart is reported with its notice");
     expect(r["fallback_aot_policy_requested"] == "compatibility" && r["fallback_cache"] == "miss" && r["fallback_build"] == "ok", "c) the Compatibility build is made");
     expect(line_count(builds) == 2, "c) exactly one Optimized and one Compatibility build");
@@ -300,7 +300,7 @@ int main(int argc, char **argv) {
     // e) other runtime errors do not restart
     builds = fresh_cache("cache_e");
     r = run_launcher({"--aot-policy", "optimized"}, {{"FAKE_OPT_EXIT", "3"}}, rc);
-    expect(rc == 4 && r["run"].find("code=3 mode=optimized") != std::string::npos && r.count("fallback") == 0 && line_count(builds) == 1, "e) a generic guest fault is not a restart");
+    expect(rc == 4 && r["run"] == "exited code=3" && r["run_mode"] == "optimized" && r.count("fallback") == 0 && line_count(builds) == 1, "e) a generic guest fault is not a restart");
     r = run_launcher({"--aot-policy", "optimized"}, {{"FAKE_OPT_EXIT", "139"}}, rc);
     expect(rc == 4 && r.count("fallback") == 0, "e) a crash status is not a restart");
     r = run_launcher({}, {{"FAKE_COMPAT_EXIT", "7"}}, rc);

@@ -143,7 +143,8 @@ int headless(int argc, char **argv) {
           GameRun game(current, layout, entry, game_args);
           if (!game.started()) { emit("run=failed_to_start"); rc = 4; break; }
           while (!game.poll()) SDL_Delay(50);
-          emit("run=exited code=" + std::to_string(game.exit_code()) + " mode=" + current.aot_policy);
+          emit("run=exited code=" + std::to_string(game.exit_code()));  // the historical line, unchanged
+          emit("run_mode=" + current.aot_policy);
           const RestartDecision next = decide_after_exit(current, game.exit_code(), restarted);
           if (!next.restart) { if (game.exit_code() != 0) rc = 4; break; }
           emit("run=unadmitted_pc");
