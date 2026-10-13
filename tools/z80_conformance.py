@@ -481,6 +481,8 @@ def emit_image(tc, spec_text, workdir, stem="z80_image", list_owners=False):
             stats = {k: int(v) for k, v in (t.split("=") for t in line.split()[1:])}
         elif line.startswith("shape "):
             stats.update({"shape_" + k: int(v) for k, v in (t.split("=") for t in line.split()[1:])})
+        elif line.startswith("admission "):  # SEG-057: selective emission only
+            stats.update({"adm_" + k: int(v) for k, v in (t.split("=") for t in line.split()[1:])})
         elif line.startswith("owner "):
             _, ident, key, kind, variants, form, rel, bound = line.split()
             owners.append({"identity": int(ident), "key": int(key, 16), "kind": kind, "variants": int(variants),

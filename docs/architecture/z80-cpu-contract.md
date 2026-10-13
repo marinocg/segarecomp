@@ -284,3 +284,11 @@ structure and every outcome are unchanged. What a RAM-backed image adds, at the 
 - operand payload mutation of an unchanged form is supported; structural self-modifying code is not: a structural difference is a stop,
   never a re-decode, and no multi-form dispatch exists.
 Immutable images emit exactly as before (golden-digest regression in `z80_live_guard_test.py`).
+
+### Selective admission (SEG-057, ADR 0118)
+
+The emitter optionally accepts an explicit, identity-and-digest-bound set of admitted instruction starts per code image
+(`EmitOptions::admission`). Absent, the broad AOT is emitted byte for byte. Present, only admitted starts get exact entries, owners, groups and
+bodies; the CPU library's decoding, legal forms and instruction semantics are unchanged. A dispatcher miss on an exposed start the plan
+omitted stops with the fail-closed `Z80_ERROR_UNADMITTED_PC` (`unadmitted_pc`), `state.pc` at that start and no instruction effect; every
+other miss keeps `no_owner`. This establishes structural correctness only: it does not assert that the omitted starts are never executed.

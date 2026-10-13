@@ -19,6 +19,8 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -57,6 +59,30 @@ struct ImageSet {
   std::vector<CodeImage> images;
 };
 
+// Selective admission (SEG-057, ADR 0118). An optional, explicitly supplied set of instruction starts per code image. The emitter
+// emits exactly the owners of the admitted starts that have a lowering row; every other exposed start is rejected at run time with
+// `Z80_ERROR_UNADMITTED_PC` (state.pc = that start, no instruction effect). Without a plan the emission is the broad immutable-image
+// AOT, byte for byte. The plan is a structural subset claim: it never asserts that the omitted starts are unreachable (execution
+// completeness) and a producer such as a learned ranker is not the correctness authority. The emitter validates the plan fail-closed:
+//   * every image of the set appears exactly once, no plan entry names an unknown identity;
+//   * `byte_count`/`content_digest` equal the image the plan is applied to (a plan made for other bytes is rejected);
+//   * `offsets` are strictly increasing image offsets, each exposed by at least one window of the image.
+struct ImageAdmission {
+  std::uint32_t identity = 0;
+  std::uint32_t byte_count = 0;
+  std::uint64_t content_digest = 0;
+  std::vector<std::uint32_t> offsets;  // admitted image offsets (the owner key space: base + offset is the logical address)
+};
+
+struct AdmissionPlan {
+  std::vector<ImageAdmission> images;
+};
+
+// FNV-1a 64 over the image bytes: a binding checksum against applying a plan to other bytes, not a security primitive.
+[[nodiscard]] std::uint64_t image_content_digest(std::span<const std::uint8_t> bytes);
+// Binds `offsets` to `image` (identity, size, digest). Offsets are validated by the emitter, not here.
+[[nodiscard]] ImageAdmission bind_admission(const CodeImage& image, std::vector<std::uint32_t> offsets);
+
 enum class OwnerKind : std::uint8_t { full, prefix_lock, stub_mutable_code, stub_unresolved_fetch_mapping, stub_excluded_form };
 const char* owner_kind_name(OwnerKind kind);
 
@@ -90,6 +116,7 @@ struct EmitOptions {
   std::size_t entry_chunk_entries = 65536;
   bool share_bodies = true;  // PC-independent instruction effects are emitted once and called (SEG-033-T005); false = reference
   std::size_t owner_group_entries = kOwnerGroupEntries;  // >= 1; tests and the differential gate pin 1 (reference) vs N
+  std::optional<AdmissionPlan> admission;  // selective emission (above); nullopt = broad AOT, the default
 };
 
 // full_/prefix_lock_/stub_owners, variant_owners and bound_successors are legacy names: they count exact entries. `entries` is the
@@ -106,6 +133,10 @@ struct EmitStats {
   std::size_t variant_owners = 0;    // window-relative owners with a per-base switch
   std::size_t bound_successors = 0;
   std::size_t translation_units = 0;
+  // Selective emission only (zero when broad). `unlowered_starts` then counts admitted starts without a lowering row.
+  std::size_t admitted_offsets = 0;  // offsets named by the plan
+  std::size_t omitted_offsets = 0;   // exposed offsets the plan omitted
+  std::size_t omitted_ranges = 0;    // maximal runs of omitted offsets (size of the generated rejection table)
 };
 
 struct EmitResult {
