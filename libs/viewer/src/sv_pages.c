@@ -451,10 +451,17 @@ static void truncate_to(char *dst, size_t cap, const char *src, int max_chars) {
 
 void sv_pages_draw(SvHost *h, int out_w, int out_h) {
   SvPage *page = sv_menu_top(&h->menu);
-  const int ui = sv_host_ui_scale(out_w, out_h), cw = 8 * ui, row_h = 13 * ui, pad = 6 * ui, title_h = 16 * ui, foot_h = 26 * ui;
-  int panel_w = 52 * cw / 1, rows, visible, i, x, y, panel_h, value_x;
   const int preview = sv_pages_wants_preview(h);
+  int ui = sv_host_ui_scale(out_w, out_h);
+  int cols, cw, row_h, pad, title_h, foot_h, panel_w, rows, visible, i, x, y, panel_h, value_x;
   char line[160];
+  if (preview) { /* keep the picture visible next to the panel: at most ~46% of the window */
+    const int fit = out_w * 46 / 100 / (40 * 8);
+    if (fit < ui) ui = fit < 1 ? 1 : fit;
+  }
+  cw = 8 * ui; row_h = 13 * ui; pad = 6 * ui; title_h = 16 * ui; foot_h = 38 * ui;
+  cols = preview ? 40 : ((page != NULL && (page->page_id == PAGE_MAIN || page->page_id >= PAGE_CONFIRM_QUIT)) ? 40 : 52);
+  panel_w = cols * cw;
   if (page == NULL) return;
   if (panel_w > out_w - 2 * pad) panel_w = out_w - 2 * pad;
   rows = page->count;
@@ -469,7 +476,7 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
   sv_host_bevel(h, x, y, panel_w, panel_h, ui, c_panel, c_edge, c_hi, c_shadow);
   sv_host_draw_text(h, (float)(x + pad + 2 * ui), (float)(y + 5 * ui), ui, c_text, page->title);
   { const SDL_Color rule = {35, 62, 120, 255}; sv_host_fill(h, x + pad, y + title_h, panel_w - 2 * pad, ui, rule); }
-  value_x = x + panel_w - pad - 24 * cw;
+  value_x = x + panel_w - pad - (cols >= 52 ? 24 : 22) * cw;
   h->ui_rows = 0;
   for (i = 0; i < visible; ++i) {
     const int idx = page->scroll + i;
@@ -490,7 +497,7 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
       { SDL_FRect ring; ring.x = (float)(rx - 2 * ui); ring.y = (float)(ry - 2 * ui); ring.w = (float)(rw + 4 * ui); ring.h = (float)(row_h + 2 * ui);
         SDL_SetRenderDrawColor(h->renderer, c_focus.r, c_focus.g, c_focus.b, 255); SDL_RenderRect(h->renderer, &ring); }
     }
-    truncate_to(line, sizeof line, it->label, (value_x - rx) / cw - 1);
+    truncate_to(line, sizeof line, it->label, (it->kind == SV_ITEM_LABEL ? 17 : (value_x - rx) / cw - 1));
     sv_host_draw_text(h, (float)(rx + 3 * ui), (float)(ry + 2 * ui), ui, tc, line);
     switch (it->kind) {
       case SV_ITEM_SLIDER: {
@@ -521,10 +528,13 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
         truncate_to(line, sizeof line, it->text, 22);
         sv_host_draw_text(h, (float)(value_x), (float)(ry + 2 * ui), ui, focused ? c_btn_text : (it->enabled ? c_text2 : c_dim), line);
         break;
-      case SV_ITEM_LABEL:
-        truncate_to(line, sizeof line, it->text, 24);
-        sv_host_draw_text(h, (float)(value_x), (float)(ry + 2 * ui), ui, c_text2, line);
+      case SV_ITEM_LABEL: {
+        /* read-only rows get a wider value column (a 64-digit hash fits as two 32-digit rows) */
+        const int lx = x + pad + 18 * cw;
+        truncate_to(line, sizeof line, it->text, (panel_w - 2 * pad - 18 * cw) / cw - 1);
+        sv_host_draw_text(h, (float)(lx), (float)(ry + 2 * ui), ui, c_text2, line);
         break;
+      }
       case SV_ITEM_BUTTON: break;
     }
   }
@@ -544,11 +554,29 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
       sv_host_draw_text(h, (float)(x + pad), (float)(fy + 2 * ui), ui, c_focus, line);
     } else {
       if (cur != NULL && cur->hint[0] != '\0') {
-        truncate_to(line, sizeof line, cur->hint, max_chars);
-        sv_host_draw_text(h, (float)(x + pad), (float)fy, ui, cur->enabled ? c_text2 : c_err, line);
+        /* the explanation of the focused item wraps onto a second line instead of being cut off */
+        const char *hint = cur->hint;
+        size_t len = strlen(hint), cut = len;
+        const SDL_Color hc = cur->enabled ? c_text2 : c_err;
+        if ((int)len > max_chars) {
+          cut = (size_t)max_chars;
+          while (cut > 8u && hint[cut] != ' ') --cut;
+        }
+        snprintf(line, sizeof line, "%.*s", (int)cut, hint);
+        sv_host_draw_text(h, (float)(x + pad), (float)fy, ui, hc, line);
+        if (cut < len) {
+          const char *rest = hint + cut + (hint[cut] == ' ' ? 1 : 0);
+          truncate_to(line, sizeof line, rest, max_chars);
+          sv_host_draw_text(h, (float)(x + pad), (float)(fy + 11 * ui), ui, hc, line);
+        }
       }
-      truncate_to(line, sizeof line, h->last_input_pad ? "Pad: D-pad move  A select  B back  Back/Start resume" : "Keys: Up/Down move  Left/Right change  Enter select  Esc back", max_chars);
-      sv_host_draw_text(h, (float)(x + pad), (float)(fy + 11 * ui), ui, c_dim, line);
+      {
+        const int wide = max_chars >= 50;
+        const char *cues = h->last_input_pad ? (wide ? "D-pad move & change  A select  B back  Back resume" : "D-pad  A select  B back")
+                                              : (wide ? "Up/Down move  Left/Right change  Enter OK  Esc back" : "Up/Down  Enter OK  Esc back");
+        truncate_to(line, sizeof line, cues, max_chars);
+      }
+      sv_host_draw_text(h, (float)(x + pad), (float)(fy + 24 * ui), ui, c_dim, line);
     }
   }
   /* confirm pages explain the consequence above the buttons */
