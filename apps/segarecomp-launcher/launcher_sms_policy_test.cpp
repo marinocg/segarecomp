@@ -9,6 +9,7 @@
 //   * the headless `--build --run` flow (the same core as the window): success, cached vs uncached, unadmitted_pc -> Compatibility build/reuse
 //     -> restart from reset, broad build failure (no retry loop), other runtime errors (no restart), unavailable Optimized.
 // Project-authored synthetic files and product/program doubles only.
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -46,7 +47,9 @@ std::string read_file(const fs::path &path) {
   std::ifstream in(path, std::ios::binary);
   std::ostringstream text;
   text << in.rdbuf();
-  return text.str();
+  std::string out = text.str();
+  out.erase(std::remove(out.begin(), out.end(), '\r'), out.end());  // the doubles write text files: CRLF on Windows
+  return out;
 }
 
 #if defined(_WIN32)

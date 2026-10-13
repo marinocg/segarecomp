@@ -1429,7 +1429,10 @@ add_test(NAME sms_optimized_policy_test_cli COMMAND ${Python3_EXECUTABLE}
 add_test(NAME sms_optimized_policy_test_runtime COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/sms_optimized_policy_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
   $<TARGET_FILE:sms_admission_emit> runtime)
-set(_sms_optimized_tests sms_optimized_policy_test_cli sms_optimized_policy_test_runtime)
+add_test(NAME sms_optimized_policy_test_viewer COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_optimized_policy_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  $<TARGET_FILE:sms_admission_emit> viewer)
+set(_sms_optimized_tests sms_optimized_policy_test_cli sms_optimized_policy_test_runtime sms_optimized_policy_test_viewer)
 set_property(TEST ${_sms_optimized_tests} APPEND PROPERTY LABELS full)
 set_property(TEST ${_sms_optimized_tests} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST ${_sms_optimized_tests} PROPERTY TIMEOUT 3600)
