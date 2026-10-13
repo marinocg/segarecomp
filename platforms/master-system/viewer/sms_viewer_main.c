@@ -53,7 +53,9 @@ int main(int argc, char **argv) {
       status = 64;
     }
   }
+  if (result.outcome == SMS_VIEWER_GUEST_ERROR && result.stop.kind == SMS_STOP_Z80_ERROR)
+    printf("z80_outcome %s pc %04X identity %u\n", z80_outcome_name(result.stop.z80_outcome), (unsigned)result.stop.pc, (unsigned)result.stop.image_identity);
   if (status != 0) return status;
-  if (result.outcome == SMS_VIEWER_GUEST_ERROR) return 3;
+  if (result.outcome == SMS_VIEWER_GUEST_ERROR) return sms_stop_is_unadmitted_pc(&result.stop) ? SMS_EXIT_Z80_UNADMITTED_PC : 3;
   return result.outcome == SMS_VIEWER_FRAME_LIMIT || result.outcome == SMS_VIEWER_QUIT ? 0 : 5;
 }

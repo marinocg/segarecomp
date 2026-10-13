@@ -170,6 +170,61 @@ def smoke_optimized(tmp, launch):
         require(reports[name]["aot_policy_policy_identity"] == expected_policy_identity(policy, model if policy == "optimized" else "none"), f"{name}: identity parity")
 
 
+# ---- SEG-057-T002 (ADR 0119): the experimental Master System Optimized policy through the PACKAGED launcher and CLI ---------------------------
+# Golden values of the 32 KiB synthetic cartridge below (captured from the Linux package of this checkpoint): the native D512HP inference is
+# bit-identical on every IEEE-754 host, so every platform's package must select exactly the same cells and plan (a divergence fails the job).
+SMS_OPT_GOLDEN = {"cells": "1024", "ml_selected": "666", "selected_ppm": "650390", "admitted_ppm": "657196",
+                  "plan_sha256": "ad4c411a1e377949820cb837081fa4fa85e5f0ce7db523674a9913b927ed178d"}
+
+
+def sms_image():
+    """A synthetic 32 KiB Master System cartridge: deterministic bytes and a `TMR SEGA` header (project-authored, no game data)."""
+    image = bytearray((i * 31 + 7) & 0xFF for i in range(0x8000))
+    image[0x7FF0:0x7FF8] = b"TMR SEGA"
+    image[0x7FFF] = 0x4C  # SMS export, 32 KiB
+    return bytes(image)
+
+
+def expected_sms_policy_identity(policy):
+    """Independent (Python, from the committed weight record) re-derivation of `segarecomp aot-policy-identity --platform master-system`."""
+    import json
+    meta = json.loads((pathlib.Path(__file__).resolve().parent.parent / "tools/segarecomp_ml_region_z80_gen2.weights.json").read_text())
+    text = f"segarecomp.sms_aot_policy_identity.v1|requested={policy}"
+    if policy == "optimized":
+        text += ("|sms_z80_d512hp:6bee77726a93ad33504522c35b84aaa6d89ed3c5327ff5fae6bff1e9558a4f11:D512HP/3seeds:"
+                 "cell32-top2mean-roots(0000,0038,0066)-budget65-ceil-tie:lower-index:sgz80w01/tokens256+pad/logit-per-byte/context512:"
+                 f"segarecomp.z80_admission.v1|artifact={meta['blob_sha256']}")
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def smoke_sms_optimized(tmp, launch):
+    import json
+    rom = tmp / "sms-optimized.sms"
+    rom.write_bytes(sms_image())
+    modes = {"compatibility": [], "optimized": ["--aot-policy", "optimized"]}
+    entries, reports = {}, {}
+    for name, extra in modes.items():
+        code, first, _ = launch(rom, f"sms-{name}-1.txt", run=False, extra=["--mapper", "sega", *extra])
+        require(code == 0 and first["build"] == "ok" and first["cache"] == "miss", f"SMS {name}: build failed rc={code}: {first}")
+        code, second, _ = launch(rom, f"sms-{name}-2.txt", run=False, extra=["--mapper", "sega", *extra])
+        require(code == 0 and second["cache"] == "hit" and "build" not in second and second["entry"] == first["entry"], f"SMS {name}: expected a cache hit: {second}")
+        entries[name], reports[name] = first["entry"], second
+    require(entries["compatibility"] != entries["optimized"], f"SMS Compatibility and Optimized must use separate cache entries: {entries}")
+    comp, opt = reports["compatibility"], reports["optimized"]
+    require(comp["aot_policy_requested"] == "compatibility" and comp["aot_policy_effective"] == "broad" and comp["aot_policy_fallback"] == "no" and
+            comp["aot_policy_policy_identity"] == expected_sms_policy_identity("compatibility"), f"SMS Compatibility report: {comp}")
+    require(opt["aot_policy_requested"] == "optimized" and opt["aot_policy_effective"] == "ml_region_z80" and opt["aot_policy_model_family"] == "sms_z80_d512hp" and
+            opt["aot_policy_fallback"] == "no" and opt["aot_policy_reason"] == "none" and opt["aot_policy_validator"] == "accepted",
+            f"SMS: the packaged build must be selective, not a fallback: {opt}")
+    require(opt["aot_policy_policy_identity"] == expected_sms_policy_identity("optimized"), f"SMS: policy identity differs from the development contract: {opt}")
+    status = json.loads((pathlib.Path(entries["optimized"]) / "status.json").read_text())["aot_policy"]
+    require(status["model"] == "6bee77726a93ad33504522c35b84aaa6d89ed3c5327ff5fae6bff1e9558a4f11" and
+            status["artifact_sha256"] == "81434de0da4755654e14c370fc32de7898532193cbc5a514033268ba6669c2ac", f"SMS: embedded model identity: {status}")
+    for key, want in SMS_OPT_GOLDEN.items():
+        require(str(status[key]) == want, f"SMS: {key} differs from the development build (cross-platform determinism): {status[key]} != {want}")
+    require(status["analysis_contract"] == "segarecomp.z80_admission.v1" and status["cache_reuse"] == "none", f"SMS: status: {status}")
+
+
 def main():
     launcher = pathlib.Path(sys.argv[1]).resolve()
     with tempfile.TemporaryDirectory(prefix="segarecomp-smoke-") as directory:
@@ -242,6 +297,7 @@ def main():
         require(code == 1 and "problem" in "".join(unreadable.values()) + str(unreadable), "unreadable ROM must fail cleanly")
         smoke_master_system(tmp, launch)
         smoke_optimized(tmp, launch)
+        smoke_sms_optimized(tmp, launch)
         require(not (tmp / "decoy-used").exists(), "a host compiler on PATH was used")
     print("package smoke test: OK")
 

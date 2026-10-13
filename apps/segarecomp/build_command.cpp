@@ -7,6 +7,7 @@
 #include "segarecomp/machine/genesis/m68k_copy_alias.hpp"
 #include "segarecomp/machine/genesis/z80_materialization.hpp"
 #include "segarecomp/machine/master_system/emit.hpp"
+#include "segarecomp/machine/master_system/ml_region_z80_producer.hpp"
 #include "segarecomp/rom.hpp"
 #include "segarecomp/sha256.hpp"
 
@@ -224,6 +225,7 @@ struct Log {
   std::ofstream file;
   bool plan_applied = false;   // the last emission applied the explicit --admission-plan (alias set matched)
   std::string admission_line;  // SEG-047: the last emission's sanitized `m68k admission: requested=optimized ...` report
+  segarecomp::machine::master_system::AdmissionReport sms_admission;  // SEG-057-T002: the SMS Optimized request's resolution
   void line(const std::string &text) { file << text << '\n'; file.flush(); }
   void append_file(const fs::path &path) {
     // Not `file << in.rdbuf()`: that sets failbit on an empty source and silently drops every later line.
@@ -702,7 +704,42 @@ bool admission_applies(const segarecomp::GenesisHybridAdmissionPlan &plan, const
 // SEG-047 (ADR 0096): the machine-readable `aot_policy` status member: requested policy, effective producer, fallback and a stable
 // sanitized reason, plus (when the native producer ran) the model identity and aggregate candidate/admitted metrics. No address, byte or
 // per-window datum. Always present, so a consumer never parses text.
+std::string sms_aot_policy_json(const Options &options, const Log &log, const std::string &rom_sha256) {
+  namespace sms_ml = segarecomp::machine::master_system;
+  const sms_ml::AdmissionReport &r = log.sms_admission;
+  const bool optimized = options.aot_policy == "optimized";
+  const auto ppm = [](unsigned long long n, unsigned long long d) { return d == 0U ? 0ULL : n * 1000000ULL / d; };
+  // The launcher reads this flat object without a JSON parser (it ends the object at the first '}'): every string is reduced to a safe alphabet.
+  const auto safe = [](const std::string &value) {
+    std::string out;
+    for (const char c : value)
+      out.push_back((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.' || c == ':' || c == '/' || c == '(' || c == ')' || c == ',' || c == '+' ? c : '_');
+    return out;
+  };
+  const std::string effective = optimized ? r.effective : std::string("broad");
+  std::string json = ",\"aot_policy\":{\"requested\":\"" + options.aot_policy + "\",\"requested_model\":\"" + (optimized ? "d512hp" : "none") +
+                     "\",\"effective\":\"" + effective + "\",\"fallback\":" + (optimized && r.fallback ? "true" : "false") + ",\"reason\":\"" +
+                     (optimized ? r.reason : std::string("none")) + "\",\"fallback_class\":\"" + (optimized ? std::string(sms_ml::ml_fallback_class(r.reason)) : std::string("none")) +
+                     "\",\"model_family\":\"" + (effective == "ml_region_z80" ? "sms_z80_d512hp" : "none") + "\",\"analysis_contract\":\"" +
+                     std::string(sms_ml::ml_identity().contract) + "\"";
+  if (effective == "ml_region_z80") {
+    const sms_ml::MlIdentity &id = sms_ml::ml_identity();
+    json += ",\"model\":\"" + std::string(id.ensemble_sha256) + "\",\"artifact_sha256\":\"" + std::string(id.artifact_sha256) +
+            "\",\"architecture\":\"" + safe(std::string(id.architecture)) + "\",\"rank_policy\":\"" + safe(std::string(id.rank_policy)) +
+            "\",\"schema\":\"" + safe(std::string(id.schema)) + "\",\"cells\":" + std::to_string(r.cells) + ",\"ml_selected\":" +
+            std::to_string(r.selected_cells) + ",\"image_offsets\":" + std::to_string(r.image_offsets) + ",\"admitted_offsets\":" +
+            std::to_string(r.admitted_offsets) + ",\"selected_ppm\":" + std::to_string(ppm(r.selected_cells, r.cells)) + ",\"admitted_ppm\":" +
+            std::to_string(ppm(r.admitted_offsets, r.image_offsets)) + ",\"inference_ms\":" + std::to_string(static_cast<long long>(r.inference_seconds * 1000.0)) +
+            ",\"plan_sha256\":\"" + r.plan_sha256 + "\"";
+  }
+  json += std::string(",\"validator\":\"") + (effective == "ml_region_z80" ? "accepted" : "not_run") + "\"";
+  json += ",\"policy_identity\":\"" + sms_ml::sms_aot_policy_identity(options.aot_policy) + "\",\"identity\":\"" +
+          sms_ml::sms_aot_build_identity(rom_sha256, options.aot_policy, effective, r.plan_sha256) + "\",\"cache_reuse\":\"none\"";
+  return json + "}";
+}
+
 std::string aot_policy_json(const Options &options, const Log &log, const std::string &rom_sha256, bool genesis) {
+  if (!genesis) return sms_aot_policy_json(options, log, rom_sha256);
   std::map<std::string, std::string> kv;
   {
     std::istringstream tokens(log.admission_line);
@@ -714,8 +751,7 @@ std::string aot_policy_json(const Options &options, const Log &log, const std::s
   std::string effective = "broad", reason = "none";
   bool fallback = false;
   if (options.aot_policy == "optimized") {
-    if (!genesis) { fallback = true; reason = "platform_not_applicable"; }
-    else if (options.admission) {
+    if (options.admission) {
       effective = log.plan_applied ? "admission_plan" : "broad";
       reason = log.plan_applied ? "exact_plan_precedence" : "plan_alias_set_mismatch";
       fallback = !log.plan_applied;
@@ -1139,6 +1175,9 @@ int segarecomp_build_command(int argc, char **argv) {
     sms::IngestOptions ingest_options;
     if (target == Target::master_system && options.admission)
       return fail(options, log, sha, "analyze", 1, "A hybrid admission plan applies only to Genesis images.", "ADMISSION_NOT_APPLICABLE");
+    // SEG-057-T002: the Genesis model families (v1, gen2) are not Z80 model names; the SMS Optimized policy has exactly one frozen model.
+    if (target == Target::master_system && options.aot_model != "v1")
+      return fail(options, log, sha, "analyze", 1, "--aot-model applies only to Genesis images.", "MODEL_NOT_APPLICABLE");
     if (target == Target::master_system) {
       log.line("platform=master-system");
       ingest_options.explicit_profile = options.platform == "master-system";
@@ -1203,6 +1242,7 @@ int segarecomp_build_command(int argc, char **argv) {
       sms::EmitRequest request;
       request.directory = shard_dir;
       request.stem = "sms";
+      request.propose_admission = options.aot_policy == "optimized";  // SEG-057-T002: experimental; any failure emits the broad AOT
       const auto outcome = sms::emit_cartridge(bytes, ingest_options, request);
       if (!outcome.ok()) {
         log.line("emit diagnostic: " + outcome.error);
@@ -1213,6 +1253,11 @@ int segarecomp_build_command(int argc, char **argv) {
       }
       log.line("emitted units=" + std::to_string(outcome.stats.translation_units) + " full_owners=" +
                std::to_string(outcome.stats.full_owners));
+      log.sms_admission = outcome.admission;
+      if (outcome.admission.requested)
+        log.line("sms admission: requested=optimized effective=" + outcome.admission.effective + " fallback=" + (outcome.admission.fallback ? "1" : "0") +
+                 " reason=" + outcome.admission.reason + " cells=" + std::to_string(outcome.admission.cells) + " selected=" +
+                 std::to_string(outcome.admission.selected_cells) + " admitted_offsets=" + std::to_string(outcome.admission.admitted_offsets));
       // SEG-028 (ADR 0077): sanitized executable-image provenance counts only (no address, byte or hash).
       const std::string images = "{\"z80\":" + segarecomp::format_image_provenance_json(outcome.provenance) + "}";
       log.line("executable_images: " + images);

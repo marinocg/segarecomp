@@ -10,7 +10,7 @@ CI glue (not shipped). Checks, on the extracted package of the running platform:
      statically linked, ADR 0096);
   2. the package contains no Python source/bytecode/interpreter, no ML framework file and no research model/weights file (`*.model.json`, `*.onnx`,
      `*.pt`, `*.npz`, ...);
-  3. the frozen native models are embedded in `segarecomp`: the v1 feature-schema digest and the gen2 model digest are present in the binary.
+  3. the frozen native models are embedded in `segarecomp`: the v1 feature-schema digest, the gen2 model digest and the SMS Z80 D512HP digests are present in the binary.
 It prints an aggregate JSON report; exit 1 on any violation.
 """
 import json
@@ -26,6 +26,9 @@ FORBIDDEN_FILE = re.compile(r"(\.pyc?$|\.pyd$|\.npz?$|\.onnx$|\.pt$|\.pth$|\.saf
 MODEL_DIGESTS = {  # embedded in `segarecomp` (the frozen native models), see ADR 0096 / 0102
     "gen2 model": b"11258708285e4427a3e38e02732e8f93b4c5d497883101f0629223d2366a98e1",
     "v1 feature schema": b"d2e7c82913139c29450511326d6de76e91579ec654edde81afae16b13cd1f570",
+    # SEG-057-T002 (ADR 0119): the frozen SMS Z80 D512HP ensemble (digest of the original SEG-056 ensemble and of the embedded artifact).
+    "sms z80 d512hp ensemble": b"6bee77726a93ad33504522c35b84aaa6d89ed3c5327ff5fae6bff1e9558a4f11",
+    "sms z80 d512hp artifact": b"81434de0da4755654e14c370fc32de7898532193cbc5a514033268ba6669c2ac",
 }
 
 

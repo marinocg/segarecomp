@@ -19,7 +19,7 @@
  * is identical with and without it.
  *
  * Exit status: 0 frame target reached (or the guest stopped normally with no bound); 2 cycle budget reached first;
- * 3 fail-closed Z80 outcome; 4 SMS_ERROR_*; 64 usage. Plain C11; the ROM is the build-time embedded array. */
+ * 3 fail-closed Z80 outcome; 4 SMS_ERROR_*; 7 the typed Z80_ERROR_UNADMITTED_PC of an Optimized (selective) build; 64 usage. Plain C11; the ROM is the build-time embedded array. */
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -302,7 +302,7 @@ int main(int argc, char **argv) {
     return 64;
   }
   switch (stop.kind) {
-    case SMS_STOP_Z80_ERROR: return 3;
+    case SMS_STOP_Z80_ERROR: return sms_stop_is_unadmitted_pc(&stop) ? SMS_EXIT_Z80_UNADMITTED_PC : 3;
     case SMS_STOP_PLATFORM_ERROR: return 4;
     case SMS_STOP_CYCLE_BUDGET: return 2;
     default: return 0;

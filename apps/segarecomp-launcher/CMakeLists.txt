@@ -54,11 +54,30 @@ endif()
 add_executable(launcher_policy_test launcher_policy_test.cpp)
 target_link_libraries(launcher_policy_test PRIVATE segarecomp_launcher_core)
 segarecomp_enable_warnings(launcher_policy_test)
+# SEG-057-T002 (ADR 0119): product-CLI and generated-program doubles for the launcher's end-to-end restart tests (test-only, not installed).
+add_executable(fake_segarecomp fake_segarecomp.cpp)
+add_executable(fake_game fake_game.cpp)
+target_compile_features(fake_segarecomp PRIVATE cxx_std_20)
+target_compile_features(fake_game PRIVATE cxx_std_20)
+segarecomp_enable_warnings(fake_segarecomp)
+segarecomp_enable_warnings(fake_game)
 if(BUILD_TESTING)
   # SEG-049: the real CLI provides the policy identity the launcher keys on (no launcher-side model knowledge); built as a dependency.
   add_dependencies(launcher_policy_test segarecomp)
   add_test(NAME launcher_policy_test COMMAND launcher_policy_test $<TARGET_FILE:segarecomp>)
   set_property(TEST launcher_policy_test APPEND PROPERTY LABELS full fast)
+endif()
+
+# SEG-057-T002 (ADR 0119): the Master System Optimized contract of the launcher: product-stated availability, cache separation, the typed
+# unadmitted_pc restart decision and the end-to-end headless flow (build, run, one-shot Compatibility restart) against product/program doubles.
+add_executable(launcher_sms_policy_test launcher_sms_policy_test.cpp)
+target_link_libraries(launcher_sms_policy_test PRIVATE segarecomp_launcher_core)
+segarecomp_enable_warnings(launcher_sms_policy_test)
+if(BUILD_TESTING)
+  add_dependencies(launcher_sms_policy_test segarecomp fake_segarecomp fake_game segarecomp-launcher)
+  add_test(NAME launcher_sms_policy_test COMMAND launcher_sms_policy_test $<TARGET_FILE:segarecomp>
+    ${PROJECT_SOURCE_DIR}/platforms/master-system/runtime/sms_machine.h $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
+  set_property(TEST launcher_sms_policy_test APPEND PROPERTY LABELS full fast)
 endif()
 
 include(${PROJECT_SOURCE_DIR}/packaging/install.cmake)

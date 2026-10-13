@@ -485,6 +485,10 @@ PSG placement: a platform-neutral `libs/device/sega/psg` (ADR 0063).
   [cap:exec.error_surface].
 - Headless driver: finite `--cycle-budget <T>` and/or `--frames <N>` (the SMS form of the ADR 0050 amendment's
   finite-budget rule; there is no instruction-count budget, see ADR 0064), `--input <script>`, artifact outputs [cap:exec.headless_budget] [cap:exec.state_digest] [cap:exec.mapper_trace].
+- Process exit status (headless and viewer drivers): a generated program that stops on the typed selective-admission outcome
+  `Z80_ERROR_UNADMITTED_PC` (SEG-057; only an Optimized build can produce it) prints `z80_outcome unadmitted_pc pc <hex4> identity <n>` and exits
+  `SMS_EXIT_Z80_UNADMITTED_PC` = 7, distinct from every other stop (headless 0 / 2 cycle budget / 3 other Z80 outcome / 4 SMS error / 64 usage; viewer
+  0 / 3 other guest error / 4 SMS error / 5 host error / 64 usage), so a launcher can recognise exactly this stop without reading a log (ADR 0119).
 - Viewer and headless share one guest loop; the viewer only paces, presents and samples input at frame boundaries
   [cap:view.pacing] [cap:view.input_frames] [cap:view.audio_out] [cap:view.equivalence].
 

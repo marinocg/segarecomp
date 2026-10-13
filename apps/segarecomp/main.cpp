@@ -11,6 +11,7 @@
 #include "segarecomp/sha256.hpp"
 #include "segarecomp/machine/genesis/reachability_challenger.hpp"
 #include "build_command.hpp"
+#include "segarecomp/machine/master_system/ml_region_z80_producer.hpp"
 #include "segarecomp/rom.hpp"
 
 #if defined(_WIN32)
@@ -44,7 +45,7 @@ void print_usage(std::ostream &output) {
                "  segarecomp m68k-frontend <image> <source-id> <entry> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                "  segarecomp emit-m68k-frontend-c <image> <source-id> <analysis-entry> <execution-entry> <sr> <budget> <d0> <d1> <d2> <d3> <d4> <d5> <d6> <d7> <claim-name> <target-begin> <target-end> <image-begin> <image-end> [... ]\n"
                 "  segarecomp genesis-rom-startup <image>\n  segarecomp emit-genesis-rom-startup-c <image>\n"
-                "  segarecomp genesis-general-startup <image>\n  segarecomp m68k-decode-token-report --rom <image> --output <path>\n  segarecomp ml-gen2-cell-logits --rom <image> --output <path>\n  segarecomp ml-gen2-probe-report --synthetic\n  segarecomp aot-policy-identity --aot-policy <compatibility|optimized> [--aot-model <v1|gen2>]\n"
+                "  segarecomp genesis-general-startup <image>\n  segarecomp m68k-decode-token-report --rom <image> --output <path>\n  segarecomp ml-gen2-cell-logits --rom <image> --output <path>\n  segarecomp ml-gen2-probe-report --synthetic\n  segarecomp aot-policy-identity --aot-policy <compatibility|optimized> [--aot-model <v1|gen2>] [--platform <genesis|master-system>]\n"
                   "  segarecomp emit-general-startup-bridge-c --rom <image> (--reset-entry [--analysis-seed <address-hex8>]... | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> [--external-hints <path>] [--immutable-aot-address-report <path>] [--direct-control-address-report <path>] [--window-feature-report <path> --window-feature-bytes <256|512>] [--ml-region-proposal-output <path>] [--ml-gen2-region-proposal-output <path> [--ml-gen2-logits-output <path>]] [--immutable-aot-region-proposal <path> --region-admission-plan-output <path>] [--legacy-aot-entries] [--immutable-rom-aot [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--ram-thunk <execution-hex8>:<hex-bytes>]... [--immutable-rom-aot-admission <plan> | --immutable-rom-aot-ml-admission | --immutable-rom-aot-ml-gen2-admission]] [--provenance-diagnostics] [--generated-c-output <path>] [--generated-c-shard-dir <dir>]\n"
                  "  segarecomp genesis-reachability-challenger --rom <image> (--reset-entry | --entry <address-hex8> --mapping-base <address-hex8>) --rom-sha256 <sha256> --private-output <path> [--immutable-copy-alias <execution-hex8>:<source-hex8>:<length-hex8>]... [--exception-model strict|normal-resumption] [--pea-continuations] [--pc-index-recovery [--pc-index-width-domains]] [--universe] [--classify-pcs <path> --classify-output <path>]\n"
                  "  segarecomp emit-genesis-pc-relative-offset-table-proposals --rom <image> --reset-entry --rom-sha256 <sha256> [--external-hints <path>]\n"
@@ -982,16 +983,30 @@ int run_cli(int argc, char **argv) {
     }
     if (command == "aot-policy-identity") {
       // SEG-049-T004 (ADR 0103): the product-provided, ROM-independent policy identity a consumer (the launcher) keys its cache on.
-      std::string policy, model = "v1";
-      bool model_given = false;
+      // SEG-057-T002: `--platform master-system` selects the Master System identity; success of
+      // `--platform master-system --aot-policy optimized` is also the product's statement that the SMS Optimized producer is available.
+      std::string policy, model = "v1", platform = "genesis";
+      bool model_given = false, platform_given = false;
       for (int index = 2; index < argc; index += 2) {
         if (index + 1 >= argc) { print_usage(std::cerr); return 2; }
         const std::string_view key = argv[index], value = argv[index + 1];
         if (key == "--aot-policy" && policy.empty() && (value == "compatibility" || value == "optimized")) policy = value;
         else if (key == "--aot-model" && !model_given && (value == "v1" || value == "gen2")) { model = value; model_given = true; }
+        else if (key == "--platform" && !platform_given && (value == "genesis" || value == "master-system")) { platform = value; platform_given = true; }
         else { print_usage(std::cerr); return 2; }
       }
       if (policy.empty() || (policy == "compatibility" && model_given)) { print_usage(std::cerr); return 2; }  // same rule as `build`
+      if (platform == "master-system") {
+        if (model_given) { print_usage(std::cerr); return 2; }  // a Genesis model family is never a Z80 model name
+        if (policy == "optimized" && !segarecomp::machine::master_system::ml_identity_failure().empty()) {
+          std::cerr << "segarecomp: the Master System Optimized producer is unavailable (model_identity)\n";
+          return 3;
+        }
+        std::cout << "policy_identity=" << segarecomp::machine::master_system::sms_aot_policy_identity(policy) << " requested=" << policy
+                  << " requested_model=" << (policy == "optimized" ? "d512hp" : "none") << " contract="
+                  << segarecomp::machine::master_system::ml_identity().contract << " platform=master-system\n";
+        return 0;
+      }
       const auto family = model == "gen2" ? segarecomp::GenesisMlModelFamily::gen2 : segarecomp::GenesisMlModelFamily::v1;
       std::cout << "policy_identity=" << segarecomp::genesis_aot_policy_identity(policy, family) << " requested=" << policy
                 << " requested_model=" << (policy == "optimized" ? model : std::string("none")) << " contract=" << segarecomp::genesis_admission_analysis_contract << '\n';

@@ -11,7 +11,7 @@
 Optimized never weakens correctness: the generated program is still static native code (no interpreter, JIT or runtime decoder, no ML at
 run time); a region that misses code makes the program stop fail-closed (typed stop), never execute wrongly. An explicit
 `--admission-plan` (an exact source/recomp-map plan) outranks Optimized. Master System images have no Optimized producer: the request is
-reported as a fallback (`platform_not_applicable`).
+reported as a fallback (`platform_not_applicable`) **until SEG-057-T002, which adds the experimental Master System policy described below**.
 
 ### Experimental model opt-in (SEG-049)
 
@@ -52,6 +52,32 @@ Every successful build writes `status.json` with an always-present `aot_policy` 
 ```
 `identity` is a pure function of the inputs: Compatibility, v1 and gen2 builds of the same image never share it, and a fallback build never aliases a successful
 Optimized build. The Compatibility and v1 `identity` values are frozen at their SEG-047 text. No address, byte or per-unit datum is reported.
+
+## Master System Optimized (EXPERIMENTAL, SEG-057-T002, ADR 0119)
+
+`segarecomp build --platform master-system --aot-policy optimized` runs the native frozen D512HP ensemble (SEG-056) at **build time**, proposes the
+Z80 instruction starts to compile (32-byte cells, top-two logit mean, structural root cells, 65% budget) and hands the proposal to the SEG-057
+admission contract, which validates its identity and integrity. It does **not** prove that omitted starts are never executed: the generated program
+stops with the typed `Z80_ERROR_UNADMITTED_PC` the moment it reaches one. Compatibility (the broad immutable-image AOT) remains the default.
+
+- `--aot-model` is a Genesis option: it is refused for Master System (`MODEL_NOT_APPLICABLE`); there is exactly one frozen Z80 model, embedded in the
+  binary (no model file). Genesis `v1`/`gen2` are never Z80 model names.
+- Any build-time failure (`model_identity`, `producer_input`, `inference`, `admission_rejected`) emits the broad program byte for byte and reports the
+  reason and class (`producer_incompatible`, `producer_input`, `producer_failed`, `proposal_rejected`) in `status.json`; the launcher publishes a cache
+  entry only after a fully successful build.
+- `segarecomp aot-policy-identity --platform master-system --aot-policy <p>` prints the ROM-independent identity (model, rank policy, schema and
+  admission contract bound in); exit status 3 means the producer is unavailable, so a launcher must not offer it.
+- `status.json` `aot_policy` for an applied Optimized build: `effective` `ml_region_z80`, `model_family` `sms_z80_d512hp`, `model` (ensemble digest),
+  `artifact_sha256`, `architecture`, `rank_policy`, `schema`, `cells`, `ml_selected`, `image_offsets`, `admitted_offsets`, `selected_ppm`,
+  `admitted_ppm`, `inference_ms`, `plan_sha256` (identity of the admitted set), `validator`, `policy_identity`, `identity`. No address or byte.
+- Runtime: a generated Master System program that stops on the omitted start prints `z80_outcome unadmitted_pc pc <hex4> identity <n>` and exits with
+  the **dedicated status 7** (`SMS_EXIT_Z80_UNADMITTED_PC`; every other stop keeps its status: 0 ok, 2 cycle budget, 3 other Z80 outcome, 4 SMS
+  error, 5 viewer host error, 64 usage). The launcher recognizes exactly this status (no log scanning).
+- Launcher: the Mode control offers Optimized for Master System only when the product states it is available. An Optimized run that exits with
+  status 7 shows a notice, switches to Compatibility, reuses a matching Compatibility build or builds one, and restarts the program **from reset**,
+  once per Play (a failing Compatibility build is reported, not retried). No machine state is carried over.
+  The Running label and the headless `run_mode` report the **effective** program (an Optimized request that fell back at build time runs and is labelled
+  Compatibility; `run_requested_mode` keeps the request); the historical `run=exited code=N` line is unchanged.
 
 ## Alias and RAM-thunk builds (ADR 0111)
 
