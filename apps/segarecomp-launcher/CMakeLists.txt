@@ -47,9 +47,9 @@ target_compile_definitions(segarecomp_launcher_ui_support PUBLIC
   SEGARECOMP_LAUNCHER_SOURCE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
 segarecomp_enable_warnings(segarecomp_launcher_ui_support)
 
-add_executable(segarecomp-launcher WIN32 main.cpp app.cpp app_screens.cpp app_pages.cpp ui_kit.cpp)
+add_executable(segarecomp-launcher WIN32 main.cpp app.cpp app_screens.cpp app_pages.cpp app_input.cpp ui_kit.cpp)
 target_include_directories(segarecomp-launcher SYSTEM PRIVATE ${_stb_dir})
-target_link_libraries(segarecomp-launcher PRIVATE segarecomp_imgui segarecomp_launcher_core segarecomp_launcher_ui_support segarecomp::viewer_core segarecomp::media)
+target_link_libraries(segarecomp-launcher PRIVATE segarecomp_imgui segarecomp_launcher_core segarecomp_launcher_ui_support segarecomp::viewer_core segarecomp::viewer_input segarecomp::media)
 set_target_properties(segarecomp-launcher PROPERTIES OUTPUT_NAME Segarecomp)
 segarecomp_enable_warnings(segarecomp-launcher)
 
@@ -107,6 +107,13 @@ if(BUILD_TESTING)
   add_test(NAME launcher_gui_navigation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_gui_navigation_test.py $<TARGET_FILE:segarecomp-launcher>)
   set_property(TEST launcher_gui_navigation_test APPEND PROPERTY LABELS full fast)
   set_property(TEST launcher_gui_navigation_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+endif()
+
+# SEG-058 corrective delivery: the Input diagnostics classes A-F against real SDL events from virtual joysticks (never a physical-device claim).
+if(BUILD_TESTING)
+  add_test(NAME launcher_input_diagnostics_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_input_diagnostics_test.py $<TARGET_FILE:segarecomp-launcher>)
+  set_property(TEST launcher_input_diagnostics_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_input_diagnostics_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 endif()
 
 # SEG-058: the persistent library catalog (no window, no product CLI).

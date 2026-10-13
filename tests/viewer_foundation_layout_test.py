@@ -11,7 +11,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SV = ROOT / "libs" / "viewer"
-FILES = ("sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_host.c", "sv_pages.c")
+FILES = ("sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_input_state.c", "sv_input_diag.c", "sv_host.c", "sv_pages.c")
 failures = []
 
 
@@ -32,7 +32,7 @@ def code(path):
 
 
 # 1. the pure core never mentions SDL
-for name in ("src/sv_settings.c", "src/sv_layout.c", "src/sv_menu.c", "include/sv_settings.h", "include/sv_layout.h", "include/sv_menu.h"):
+for name in ("src/sv_settings.c", "src/sv_layout.c", "src/sv_menu.c", "src/sv_input_state.c", "include/sv_settings.h", "include/sv_layout.h", "include/sv_menu.h", "include/sv_input_state.h"):
     check(not re.search(r"SDL3?/|SDL_|SDL3::", code(SV / name)), f"{name} must stay SDL-free")
 # ... and the host header only forward-declares SDL types
 check("#include <SDL3" not in code(SV / "include" / "sv_host.h"), "sv_host.h must not include SDL headers (adapters and CMake-only consumers stay light)")
@@ -64,7 +64,8 @@ for name, body in lists.items():
     for f in FILES:
         check(f in body, f"{name} must list {f}")
 bc = lists["apps/segarecomp/build_command.cpp"]
-check(len(re.findall(r'"sv_settings\.c", "sv_layout\.c", "sv_menu\.c", "sv_host\.c", "sv_pages\.c"', bc)) == 2, "build_command.cpp must compile the five files in BOTH the Genesis and the Master System recipes")
+check(len(re.findall(r"for \(const char \*name : kViewerFoundationSources\)", bc)) == 2, "build_command.cpp must compile the shared foundation list in BOTH the Genesis and the Master System recipes")
+check(all(f'"{f}"' in bc.split("kViewerFoundationSources[]")[1].split("};")[0] for f in FILES), "kViewerFoundationSources must list every foundation file")
 check('"libs" / "viewer" / "include"' in bc or '"viewer" / "include"' in bc, "build_command.cpp must add the viewer include directories")
 install = text(ROOT / "packaging/install.cmake")
 check("libs/viewer/" in install and "runtime/libs/viewer" in install.replace("${_rt}", "runtime"), "packaging/install.cmake must install libs/viewer into the runtime tree")
@@ -72,7 +73,7 @@ core = text(ROOT / "apps/segarecomp-launcher/launcher_core.cpp")
 check('"sv_host.c"' in core, "launcher_core must refuse a package without the viewer foundation")
 # CMake: SDL3 is linked only by the host target, never by the core
 cm = text(SV / "CMakeLists.txt")
-check("SDL3::SDL3" not in cm.split("if(SEGARECOMP_ENABLE_SDL3_VIEWER)")[0], "the pure core target must not link SDL3")
+check("SDL3::SDL3" not in cm.split("# Input diagnostics")[0], "the pure core target must not link SDL3")
 check("segarecomp_viewer_host" not in text(ROOT / "libs/CMakeLists.txt"), "the host target is declared in libs/viewer only")
 
 # 6. the adapters keep the console loops: the shared host is entered at the sampling point only

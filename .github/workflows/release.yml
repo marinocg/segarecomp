@@ -89,10 +89,10 @@ jobs:
           sudo apt-get update && sudo apt-get install -y ninja-build pkg-config libx11-dev libxext-dev libxrandr-dev
           libxcursor-dev libxi-dev libxfixes-dev libxss-dev libxtst-dev libxkbcommon-dev libwayland-dev
           libdrm-dev libgbm-dev libgl1-mesa-dev libegl1-mesa-dev libasound2-dev libpulse-dev libudev-dev
-          libdbus-1-dev libdecor-0-dev libibus-1.0-dev wayland-protocols
+          libdbus-1-dev libdecor-0-dev libibus-1.0-dev wayland-protocols libusb-1.0-0-dev
       - name: Build tools (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja
+        run: brew install ninja libusb
       - name: Windows MSVC environment (for the LLVM/Clang route)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
@@ -100,7 +100,9 @@ jobs:
       - name: "SDL3 (macOS/Linux, pinned source build, shared)"
         if: runner.os != 'Windows'
         run: |
-          packaging/build-sdl3.sh "$WORK/sdl" "$WORK/sdl3"
+          # libusb development files are installed above: SDL then compiles its Nintendo Switch 2 USB driver (libusb is loaded from the system at run time,
+          # never bundled). SDL_REQUIRE_LIBUSB makes a build without the driver fail instead of silently shipping without it.
+          SDL_REQUIRE_LIBUSB=1 packaging/build-sdl3.sh "$WORK/sdl" "$WORK/sdl3"
           echo "SDL3_PREFIX=$WORK/sdl3" >> "$GITHUB_ENV"
           echo "SDL3_PKG_PREFIX=$WORK/sdl3" >> "$GITHUB_ENV"
           echo "SDL3_LICENSE=$WORK/sdl3/LICENSE.txt" >> "$GITHUB_ENV"
@@ -120,6 +122,9 @@ jobs:
           echo "SDL3_PKG_PREFIX=$WORK/mingw/SDL3-${SDL_VERSION}/x86_64-w64-mingw32" >> "$GITHUB_ENV"
           echo "SDL3_LICENSE=$WORK/SDL3-${SDL_VERSION}/LICENSE.txt" >> "$GITHUB_ENV"
           echo "SDL3_DLL=$WORK/SDL3-${SDL_VERSION}/lib/x64/SDL3.dll" >> "$GITHUB_ENV"
+          # Informational (never fails): SDL's official Windows build carries no Nintendo Switch 2 driver (it needs libusb and a WinUSB driver binding, which the
+          # launcher will not install). 0 = absent, as verified for 3.4.16 (docs/testing/input-diagnostics.md).
+          echo "official SDL3.dll Switch 2 driver hint occurrences: $(grep -c -a SDL_JOYSTICK_HIDAPI_SWITCH2 "$WORK/SDL3-${SDL_VERSION}/lib/x64/SDL3.dll" || true)"
 
       - name: Configure
         run: |

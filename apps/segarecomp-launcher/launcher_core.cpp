@@ -113,6 +113,7 @@ Layout locate_layout() {
   for (const auto &required : {layout.cli, layout.cc, layout.runtime / "runtime" / "runtime.c",
                                layout.runtime / "viewer" / "viewer_sdl3.c",
                                layout.runtime_sms / "viewer" / "sms_viewer_sdl3.c", layout.root / "runtime" / "libs" / "viewer" / "src" / "sv_host.c",
+                               layout.root / "runtime" / "libs" / "viewer" / "src" / "sv_input_diag.c",
                                layout.sdl_include / "SDL3" / "SDL.h"}) {
     if (!fs::exists(required, ec)) { layout.problem = "This Segarecomp installation is incomplete (missing " + utf8(required.filename()) + "). Please download it again."; break; }
   }

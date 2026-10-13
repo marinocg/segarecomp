@@ -52,6 +52,10 @@ namespace m68k_alias = segarecomp::machine::genesis::m68k_alias;
 
 namespace {
 
+// SEG-058 (ADR 0120): the shared SDL3 viewer foundation, one list for the Genesis and the Master System recipes (settings, layout/CRT math, menu
+// model, input state and diagnostics, host and pause pages), compiled as strict C11 next to the console adapter.
+constexpr const char *kViewerFoundationSources[] = {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_input_state.c", "sv_input_diag.c", "sv_host.c", "sv_pages.c"};
+
 // Narrow strings are the platform's native argv encoding (the ANSI code page on Windows, as for the rest of the CLI).
 // ---- process helper: run argv, stdout+stderr -> log file, return the exit code (-1: could not start) ----
 
@@ -973,7 +977,7 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
     add(final_only, build.runtime / "vdp_render.c", "vdp-render");
     for (const char *name : {"viewer.c", "viewer_sdl3.c"}) add(final_only, build.viewer / name, std::string("viewer-") + name);
     // SEG-058 (ADR 0120): the shared SDL3 viewer foundation (settings, layout/CRT math, menu model, host, pause pages), strict C11 like the rest.
-    for (const char *name : {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_host.c", "sv_pages.c"})
+    for (const char *name : kViewerFoundationSources)
       add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name);
     add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", {"-DSEGARECOMP_GENESIS_SOUND"});
   } else {
@@ -1326,7 +1330,7 @@ int segarecomp_build_command(int argc, char **argv) {
                                  options.sdl3_include->string()});
         for (const char *name : {"sms_viewer.c", "sms_viewer_sdl3.c", "sms_viewer_main.c"}) compile.push_back({viewer / name, {}});
         // SEG-058 (ADR 0120): the shared SDL3 viewer foundation, compiled with the game exactly like the console adapter above.
-        for (const char *name : {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_host.c", "sv_pages.c"}) compile.push_back({viewer_lib / "src" / name, {}});
+        for (const char *name : kViewerFoundationSources) compile.push_back({viewer_lib / "src" / name, {}});
       } else {
         base.insert(base.end(), {"-I", headless.string()});
         for (const char *name : {"sms_audio.c", "sms_headless.c", "sms_devices_vdp.c"}) compile.push_back({headless / name, {}});

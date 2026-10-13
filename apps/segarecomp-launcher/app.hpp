@@ -10,6 +10,7 @@
 #include "ui_kit.hpp"
 
 extern "C" {
+#include "sv_input_diag.h"
 #include "sv_settings.h"
 }
 
@@ -95,6 +96,10 @@ private:
   void draw_import(float w, float h);
   void draw_storage(float w, float h);
   void draw_settings(float w, float h);
+  void draw_input_diagnostics(float w);
+  void update_input_diag();
+  [[nodiscard]] SvPadState input_state() const;
+  [[nodiscard]] std::string input_report() const;
   void draw_modal(float w, float h);
   void draw_toasts(float w, float h);
   // ---- data / actions ----
@@ -144,6 +149,14 @@ private:
   Catalog catalog_;
   LauncherSettings settings_;
   SvSettings viewer_settings_{};
+  // ---- input diagnostics (one engine shared with the viewer; see libs/viewer/include/sv_input_diag.h) ----
+  SvDiag *diag_ = nullptr;
+  std::vector<SvDiagHid> hid_;
+  int hid_state_ = -2;            // -2 not scanned, -1 failed, otherwise the number of Nintendo HID devices
+  std::string hid_error_;
+  int nav_taps_ = 0;              // the input page's menu test: activations seen by the launcher's own navigation
+  std::string nav_last_source_;
+  bool input_seen_gamepad_nav_ = false;
   BusyGuard busy_;
   std::string catalog_notice_;
   // ---- navigation / library view ----

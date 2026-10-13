@@ -658,9 +658,9 @@ void App::draw_settings(float full_w, float h) {
   const float tabs_w = ctx_.u(176.0F), tab_gap = ctx_.u(18.0F);
   const ImVec2 origin = ImGui::GetCursorScreenPos();
   {
-    static const char *labels[] = {"Library", "Metadata & Covers", "Build & Runtime", "Video & Controls", "Advanced / About"};
-    static const char *icons[] = {"library", "folder", "settings", "video", "info"};
-    for (int i = 0; i < 5; ++i) {
+    static const char *labels[] = {"Library", "Metadata & Covers", "Build & Runtime", "Video & Controls", "Input Diagnostics", "Advanced / About"};
+    static const char *icons[] = {"library", "folder", "settings", "video", "controller", "info"};
+    for (int i = 0; i < 6; ++i) {
       ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + static_cast<float>(i) * ctx_.u(40.0F)));
       ImGui::PushID(i);
       const bool pressed = ui::nav_button("##tab", ImVec2(tabs_w, ctx_.u(34.0F)));
@@ -816,6 +816,8 @@ void App::draw_settings(float full_w, float h) {
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Volume is playback gain only; the console's generated sound is unchanged. Genesis has two ports (Player 2: I/K/J/L, U/O/P, Right Shift); Master System Player 2 uses the same keys. The Master System Pause button is P, separate from the menu key (Esc).");
     if (button(ctx_, "viewer_defaults", "Restore video defaults", ImVec2(ctx_.u(240.0F), ctx_.u(30.0F)), Style::secondary)) { SvVideoSettings keep = v; sv_video_defaults(&v); v.window_w = keep.window_w; v.window_h = keep.window_h; viewer_settings_.audio.volume = 100; viewer_settings_.audio.muted = 0; v_changed = true; }
     if (v_changed) viewer_settings_changed();
+  } else if (settings_tab_ == 4) {
+    draw_input_diagnostics(w);
   } else {
     heading(ctx_, "Advanced / About");
     const float vw = w - lw;

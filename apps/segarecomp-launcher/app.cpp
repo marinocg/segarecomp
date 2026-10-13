@@ -133,9 +133,21 @@ void App::viewer_settings_changed() {
 // ---------------------------------------------------------------- window / UI setup
 
 bool App::init_window() {
+  diag_ = sv_diag_create();
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
+    const std::string why = SDL_GetError();
     if (!SDL_Init(SDL_INIT_VIDEO)) { std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError()); return false; }
+    sv_diag_note_init(diag_, 1, 0, why.c_str());  // visible on the Input diagnostics page and logged: the launcher continues keyboard/mouse-only
   }
+  {
+    // A user-supplied gamecontrollerdb.txt (library folder, or SEGARECOMP_GAMEPAD_MAPPINGS) turns a raw joystick into an explicit gamepad.
+    const char *env = SDL_getenv("SEGARECOMP_GAMEPAD_MAPPINGS");
+    std::error_code ec;
+    if (env != nullptr && *env != '\0') (void)sv_diag_load_mapping_file(env);
+    else if (fs::is_regular_file(library_dir_ / "gamecontrollerdb.txt", ec)) (void)sv_diag_load_mapping_file(u8s(library_dir_ / "gamecontrollerdb.txt").c_str());
+  }
+  sv_diag_scan(diag_);
+  sv_diag_log_summary(diag_, "launcher start");
   const float base_w = 1080.0F, base_h = 740.0F;
   window_ = SDL_CreateWindow("Segarecomp", static_cast<int>(base_w), static_cast<int>(base_h), SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (window_ == nullptr) { std::fprintf(stderr, "window failed: %s\n", SDL_GetError()); return false; }
@@ -162,6 +174,7 @@ void App::init_ui() {
   ImGuiIO &io = ImGui::GetIO();
   io.IniFilename = nullptr;
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
+  ImGui::GetCurrentContext()->ConfigNavWindowingWithGamepad = false;  // holding West/Y must not open Dear ImGui's "(Untitled)" window switcher over a single-window UI
   ImGui::StyleColorsDark();
   ImGui::GetStyle().FontScaleDpi = 1.0F;
   ImGuiStyle &style = ImGui::GetStyle();
@@ -206,6 +219,8 @@ void App::shutdown() {
   }
   if (renderer_ != nullptr) SDL_DestroyRenderer(renderer_);
   if (window_ != nullptr) SDL_DestroyWindow(window_);
+  sv_diag_destroy(diag_);
+  diag_ = nullptr;
   SDL_Quit();
 }
 
@@ -604,6 +619,8 @@ void App::finish_run() {
 void App::process_events(bool &running) {
   SDL_Event event;
   while (SDL_PollEvent(&event)) {
+    sv_diag_event(diag_, &event);
+    if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST) sv_diag_release(diag_);
     ImGui_ImplSDL3_ProcessEvent(&event);
     if (event.type == SDL_EVENT_QUIT) running = false;
     if (event.type == SDL_EVENT_DROP_BEGIN) dragging_ = true;
@@ -759,11 +776,40 @@ void App::run_script() {
     script_pad_ = SDL_AttachVirtualJoystick(&desc);
     script_joy_ = script_pad_ != 0 ? SDL_OpenJoystick(script_pad_) : nullptr;
     script_wait_ = 20;
+  } else if (cmd == "pad_detach") {
+    if (script_joy_ != nullptr) { SDL_CloseJoystick(script_joy_); script_joy_ = nullptr; }
+    if (script_pad_ != 0) { SDL_DetachVirtualJoystick(script_pad_); script_pad_ = 0; }
+    script_wait_ = 12;
+  } else if (cmd == "pad_raw_attach") {  // a joystick SDL has no gamepad mapping for (input diagnostics state B)
+    SDL_VirtualJoystickDesc desc;
+    SDL_INIT_INTERFACE(&desc);
+    desc.type = SDL_JOYSTICK_TYPE_UNKNOWN;
+    desc.naxes = 4;
+    desc.nbuttons = 12;
+    desc.vendor_id = 0x1234;
+    desc.product_id = 0x0001;
+    desc.name = "Script Raw Stick";
+    script_pad_ = SDL_AttachVirtualJoystick(&desc);
+    script_joy_ = script_pad_ != 0 ? SDL_OpenJoystick(script_pad_) : nullptr;
+    script_wait_ = 20;
+  } else if (cmd == "pad_lock") {  // SDL_OpenGamepad will fail for the next gamepad (input diagnostics state C)
+    if (arg == "on") sv_diag_set_open_hook([](SDL_JoystickID) -> SDL_Gamepad * { SDL_SetError("simulated: the device is locked by another program"); return nullptr; });
+    else sv_diag_set_open_hook(nullptr);
+  } else if (cmd == "pad_axis" && script_joy_ != nullptr) {  // pad_axis <leftx|lefty|rightx|righty> <-32768..32767>
+    const std::string name = arg.substr(0, arg.find(' '));
+    const int value = std::atoi(arg.substr(arg.find(' ') + 1).c_str());
+    const int axis = name == "leftx" ? SDL_GAMEPAD_AXIS_LEFTX : (name == "lefty" ? SDL_GAMEPAD_AXIS_LEFTY : (name == "rightx" ? SDL_GAMEPAD_AXIS_RIGHTX : SDL_GAMEPAD_AXIS_RIGHTY));
+    SDL_SetJoystickVirtualAxis(script_joy_, axis, static_cast<Sint16>(value));
+    script_wait_ = 2;
+  } else if (cmd == "settings_tab") {
+    settings_tab_ = std::atoi(arg.c_str());
+    go(Page::settings);
   } else if (cmd == "pad" && script_joy_ != nullptr) {
     const std::string name = arg.substr(0, arg.find(' '));
     const bool down = arg.size() < name.size() + 3 || arg.substr(name.size() + 1) != "up";
     static const std::pair<const char *, int> buttons[] = {{"south", SDL_GAMEPAD_BUTTON_SOUTH}, {"east", SDL_GAMEPAD_BUTTON_EAST}, {"dpad_up", SDL_GAMEPAD_BUTTON_DPAD_UP}, {"dpad_down", SDL_GAMEPAD_BUTTON_DPAD_DOWN},
-                                                           {"dpad_left", SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {"dpad_right", SDL_GAMEPAD_BUTTON_DPAD_RIGHT}, {"start", SDL_GAMEPAD_BUTTON_START}, {"back", SDL_GAMEPAD_BUTTON_BACK}};
+                                                           {"dpad_left", SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {"dpad_right", SDL_GAMEPAD_BUTTON_DPAD_RIGHT}, {"start", SDL_GAMEPAD_BUTTON_START}, {"back", SDL_GAMEPAD_BUTTON_BACK}, {"west", SDL_GAMEPAD_BUTTON_WEST}, {"north", SDL_GAMEPAD_BUTTON_NORTH},
+                                                           {"lshoulder", SDL_GAMEPAD_BUTTON_LEFT_SHOULDER}, {"rshoulder", SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER}};
     for (const auto &b : buttons)
       if (name == b.first) SDL_SetJoystickVirtualButton(script_joy_, b.second, down);
     script_wait_ = down ? 2 : 3;  // a press is one frame long: a longer hold would auto-repeat in real time
@@ -774,6 +820,11 @@ void App::run_script() {
     else if (key == "visible") actual = std::to_string(visible_entries().size());
     else if (key == "focus") actual = focus_label_;
     else if (key == "modal") actual = modal_.kind == Modal::Kind::none ? "0" : "1";
+    else if (key == "input_state") actual = sv_pad_state_code(input_state());
+    else if (key == "pad_count") actual = std::to_string(sv_diag_count(diag_));
+    else if (key == "pad_events") { unsigned long total = 0; for (int i = 0; i < sv_diag_count(diag_); ++i) total += sv_diag_device(diag_, i)->events; actual = std::to_string(total); }
+    else if (key == "pad_error") actual = sv_diag_count(diag_) > 0 ? sv_diag_device(diag_, 0)->open_error : "";
+    else if (key == "nav_taps") actual = std::to_string(nav_taps_);
     trace(std::string("expect ") + (actual == value ? "ok " : "FAIL ") + arg + " actual=" + actual);
   } else if (cmd == "dump") {
     const ImGuiContext &g = *ImGui::GetCurrentContext();
@@ -880,6 +931,7 @@ int App::run() {
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    update_input_diag();
     focus_label_.clear();
     draw();
     ImGui::Render();
