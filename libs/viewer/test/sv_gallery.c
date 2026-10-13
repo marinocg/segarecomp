@@ -1,7 +1,7 @@
 /* SEG-058: renders the shared viewer's screens from a FICTIONAL synthetic picture (no game, no ROM) under the dummy video driver, for
  * documentation screenshots and manual review. Not a test (nothing is asserted) and never shipped.
  *
- *   sv_gallery <out-dir> <genesis|sms> [WxH]
+ *   sv_gallery <out-dir> <genesis|sms|sms224> [WxH]   (sms224: the Master System's 224-line mode)
  *
  * WxH is the window (output) size in pixels (default: the viewer's own default window). SEGARECOMP_ASSETS points at the launcher assets (icons, wordmark);
  * SV_GALLERY_PAD = none | live | raw | locked picks the virtual controller shown on the Controller status page (live: a gamepad with some buttons held;
@@ -113,10 +113,10 @@ int main(int argc, char **argv) {
   SDL_JoystickID pad_id = 0;
   SDL_Joystick *pad_joy = NULL;
   const char *pad_mode = SDL_getenv("SV_GALLERY_PAD");
-  if (argc < 3) { fprintf(stderr, "usage: %s <out-dir> <genesis|sms> [WxH]\n", argv[0]); return 2; }
+  if (argc < 3) { fprintf(stderr, "usage: %s <out-dir> <genesis|sms|sms224> [WxH]\n", argv[0]); return 2; }
   if (argc > 3 && sscanf(argv[3], "%dx%d", &win_w, &win_h) != 2) { fprintf(stderr, "bad size %s\n", argv[3]); return 2; }
   g_out = argv[1];
-  sms = strcmp(argv[2], "sms") == 0;
+  sms = strcmp(argv[2], "sms") == 0 || strcmp(argv[2], "sms224") == 0;
 #if SDL_VERSION_ATLEAST(3, 4, 0)
   g_ext = "png";
 #else
@@ -137,7 +137,7 @@ int main(int argc, char **argv) {
   SDL_setenv_unsafe("SEGARECOMP_VIEWER_SETTINGS", settings, 1);
   SDL_setenv_unsafe("SEGARECOMP_ROM_SHA256", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", 1);
   SDL_setenv_unsafe("SEGARECOMP_LAUNCHED", "1", 1);
-  w = sms ? 256 : 320; h = sms ? 192 : 224;
+  w = sms ? 256 : 320; h = sms ? (strcmp(argv[2], "sms224") == 0 ? 224 : 192) : 224;
   memset(&cfg, 0, sizeof cfg);
   cfg.system = sms ? SV_SYSTEM_SMS : SV_SYSTEM_GENESIS;
   cfg.title = "gallery";

@@ -900,7 +900,18 @@ int App::run() {
     const std::size_t index = static_cast<std::size_t>(std::atoi(shot_page_.c_str() + 8));
     const auto visible = visible_entries();
     if (index < visible.size()) open_details(visible[index]->id());
+    if (SDL_getenv("SEGARECOMP_SHOT_LOG") != nullptr) show_log_ = true;  // review aid: the log panel expanded
   } else if (shot_page_ == "list") { settings_.view = "list"; }
+  if (const char *drop = SDL_getenv("SEGARECOMP_SHOT_DROP")) {  // review aid: import several files at once, as a drag-and-drop would
+    std::vector<std::string> paths;
+    for (std::string rest = drop; !rest.empty();) {
+      const std::size_t cut = rest.find(';');
+      paths.push_back(rest.substr(0, cut));
+      rest = cut == std::string::npos ? std::string() : rest.substr(cut + 1);
+    }
+    start_import(std::move(paths), false);
+    go(Page::import_page);
+  }
   if (SDL_getenv("SEGARECOMP_SHOT_SELECT")) { select_mode_ = true; for (const auto *e : visible_entries()) { selected_.insert(e->id()); if (selected_.size() >= 2) break; } }
   bool running = true;
   while (running) {
@@ -942,7 +953,7 @@ int App::run() {
     SDL_SetRenderDrawColor(renderer_, 8, 11, 26, 255);
     SDL_RenderClear(renderer_);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_);
-    if (!shot_path_.empty() && frame_ >= shot_frame_ && !status_pending_ && !scanning_ && !job_) {
+    if (!shot_path_.empty() && frame_ >= shot_frame_ && !status_pending_ && !scanning_ && (!job_ || SDL_getenv("SEGARECOMP_SHOT_DURING_BUILD") != nullptr) && !import_job_.valid()) {
       if (SDL_Surface *surface = SDL_RenderReadPixels(renderer_, nullptr)) { SDL_SaveBMP(surface, shot_path_.c_str()); SDL_DestroySurface(surface); }
       running = false;
     }

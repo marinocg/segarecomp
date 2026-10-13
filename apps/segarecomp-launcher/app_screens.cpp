@@ -93,6 +93,7 @@ void App::draw() {
     const float display_scale = SDL_GetWindowDisplayScale(window_), density = SDL_GetWindowPixelDensity(window_);
     float s = (display_scale > 0.0F && density > 0.0F) ? std::clamp(display_scale / density, 1.0F, 4.0F) : 1.0F;
     if (SDL_getenv("SEGARECOMP_SHOT_SIZE")) s = 1.0F;
+    if (const char *forced = SDL_getenv("SEGARECOMP_SHOT_SCALE")) s = std::clamp(static_cast<float>(std::atof(forced)), 0.5F, 4.0F);  // review aid: a HiDPI display scale
     ctx_.S = settings_.compact ? s * 0.88F : s;
   }
   ImGui::SetNextWindowPos(ImVec2(0, 0));

@@ -242,9 +242,9 @@ void App::draw_details(float w, float h) {
     ImGui::SetCursorScreenPos(ImVec2(rx.x, p.y + ctx_.u(34.0F)));
   }
   {
-    const float bh = ctx_.u(36.0F);
+    const float bh = ctx_.u(40.0F);
     const bool can_play = info.status == GameStatus::ready && !game_ && !job_ && !maintenance_running_;
-    if (button(ctx_, "play", "Play", ImVec2(ctx_.u(110.0F), bh), Style::primary, can_play, ctx_.icon("play"))) { restarted_this_play_ = false; notices_.erase(entry->id()); show_log_ = false; launch(entry->id(), false); }
+    if (button(ctx_, "play", "Play", ImVec2(ctx_.u(130.0F), bh), Style::primary, can_play, ctx_.icon("play"))) { restarted_this_play_ = false; notices_.erase(entry->id()); show_log_ = false; launch(entry->id(), false); }
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     const char *build_label = info.status == GameStatus::ready ? "Rebuild" : (info.status == GameStatus::metadata_only ? "Rebuild" : (info.status == GameStatus::failed ? "Try again" : (info.status == GameStatus::stale ? "Recompile" : "Build")));
     const bool mapper_needed = entry->platform_id == "master-system" && entry->mapper.empty() && entry->mapper_manifest_sha256.empty();

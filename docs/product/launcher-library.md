@@ -123,22 +123,14 @@ the Master System/Genesis review hooks (`SEGARECOMP_SHOT_ROM`, `..._POLICY`, `..
 
 ## Screenshots (fictional fixtures)
 
-All images are rendered from fictional, project-authored data: synthetic ROMs built through the packaged launcher (`tools/launcher_ui_fixture.py`), procedurally drawn covers, and a synthetic picture for the viewer (`libs/viewer/test/sv_gallery.c`). No commercial ROM, cover or screenshot is involved. The statuses, sizes and paths in them are real measurements of that fixture; "last played" times are set by the fixture script.
+All images are real captures of the built binaries, rendered from fictional, project-authored data: synthetic ROMs built through the packaged launcher
+(`tools/launcher_ui_fixture.py`, procedurally drawn covers for some games and none for others) and a synthetic picture for the viewer
+(`libs/viewer/test/sv_gallery.c`). No commercial ROM, cover or screenshot is involved; the design concept boards are not part of the repository.
 
-| Launcher | |
-|---|---|
-| Library home (grid) | `screenshots/launcher/01_library_home.png` |
-| Library (list) / select mode | `02_library_list.png`, `12_library_select.png` |
-| Game details | `03_game_details.png` |
-| Import ROMs | `04_import.png` |
-| Storage management / cleanup confirmation | `06_storage.png`, `05_storage_cleanup_dialog.png` |
-| Settings tabs | `07_settings_library.png` ... `11_settings_about.png` |
-
-| In-game viewer (Genesis; Master System in `viewer-sms/`) | |
-|---|---|
-| Gameplay, pause menu, quick settings | `screenshots/viewer-genesis/01_gameplay.png`, `02_pause_menu.png`, `03_quick_settings.png` |
-| Video & display with live preview, controls, audio, system, quit confirmation | `04_video_display.png`, `05_controls.png`, `06_audio.png`, `07_system.png`, `08_quit_confirmation.png` |
-| CRT presets on the same picture | `crt_pixel_perfect.png`, `crt_soft.png`, `crt_classic.png`, `crt_arcade.png` |
-| Toast | `09_toast.png` |
-
-The viewer menu uses a generated bitmap font (ProggyClean for text, Silkscreen Bold for headings; `tools/gen_viewer_font.py`) scaled by whole numbers; the launcher uses the embedded scalable face for text and Silkscreen Bold for titles.
+* `screenshots/launcher/` - 1080x740: library grid/list/select, details, import, storage and its cleanup dialog, all settings tabs including Input Diagnostics.
+  `launcher-small/` - 720x520 (the minimum size). `launcher-states/` - ready, metadata-only, stale, ROM missing, failed (with log), not built, several files
+  imported at once, a build in progress.
+* `screenshots/viewer-genesis/` (1920x1080), `viewer-sms/` (768x576, 192 lines), `viewer-sms-224/` (224-line mode): gameplay, HUD, pause menu, quick settings,
+  video and display with live preview, controls, controller status, audio, system, quit confirmation, toast, the four CRT presets.
+* `screenshots/input-diagnostics/` - launcher states A (no controller), B (joystick without mapping), C (open failure), OK (live virtual gamepad) and the viewer's
+  Controller status page for the same cases. **These use SDL virtual joysticks, not a physical Switch 2 Pro Controller.**
