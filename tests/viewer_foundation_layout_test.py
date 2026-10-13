@@ -11,7 +11,7 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SV = ROOT / "libs" / "viewer"
-FILES = ("sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_input_state.c", "sv_input_diag.c", "sv_host.c", "sv_pages.c")
+FILES = ("sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c", "sv_host.c", "sv_pages.c", "sv_draw.c")
 failures = []
 
 
@@ -32,10 +32,14 @@ def code(path):
 
 
 # 1. the pure core never mentions SDL
-for name in ("src/sv_settings.c", "src/sv_layout.c", "src/sv_menu.c", "src/sv_input_state.c", "include/sv_settings.h", "include/sv_layout.h", "include/sv_menu.h", "include/sv_input_state.h"):
+for name in ("src/sv_settings.c", "src/sv_layout.c", "src/sv_menu.c", "src/sv_input_state.c", "src/sv_font.c", "src/sv_font_data.c", "include/sv_font.h", "include/sv_settings.h", "include/sv_layout.h", "include/sv_menu.h", "include/sv_input_state.h"):
     check(not re.search(r"SDL3?/|SDL_|SDL3::", code(SV / name)), f"{name} must stay SDL-free")
 # ... and the host header only forward-declares SDL types
 check("#include <SDL3" not in code(SV / "include" / "sv_host.h"), "sv_host.h must not include SDL headers (adapters and CMake-only consumers stay light)")
+
+# 1b. the normal UI never uses SDL's built-in 8x8 debug typeface (readable bitmap font from the project's licensed fonts instead)
+for path in sorted((SV / "src").glob("*.c")):
+    check("SDL_RenderDebugText" not in code(path), f"{path.name} must not use SDL_RenderDebugText (the viewer UI uses sv_font)")
 
 # 2. every source file exists and is C11 strict-friendly (no C++ in libs/viewer/src)
 for f in FILES:

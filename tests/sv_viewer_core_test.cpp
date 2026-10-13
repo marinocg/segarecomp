@@ -7,6 +7,8 @@
 #include <vector>
 
 extern "C" {
+#include "sv_font.h"
+#include "sv_input_state.h"
 #include "sv_layout.h"
 #include "sv_menu.h"
 #include "sv_settings.h"
@@ -242,6 +244,93 @@ void menu_tests() {
   check(sv_menu_navigate(&closed, SV_NAV_ACCEPT).kind == SV_EVENT_NONE, "a closed menu ignores input");
 }
 
+
+void font_tests() {
+  // metrics come from the generated atlas: proportional heading face, 7-pixel body face, '?' for anything outside printable ASCII
+  check(sv_font_glyph(SV_FONT_BODY, 'A')->advance > 0 && sv_font_glyph(SV_FONT_BODY, 0xE9)->advance == sv_font_glyph(SV_FONT_BODY, '?')->advance, "non-ASCII bytes draw as '?'");
+  check(sv_font_glyph(SV_FONT_HEAD, 'i')->advance < sv_font_glyph(SV_FONT_HEAD, 'W')->advance, "the heading face is proportional (i is narrower than W)");
+  check(sv_font_text_width(SV_FONT_BODY, "") == 0 && sv_font_text_width(SV_FONT_BODY, nullptr) == 0, "empty text has no width");
+  check(sv_font_text_width(SV_FONT_BODY, "Resume Game") > sv_font_text_width(SV_FONT_BODY, "Resume"), "width grows with the text");
+  check(sv_font_line_height(SV_FONT_BODY) >= 13, "the body line height is the readable 13 px class, not the 8 px debug cell");
+  for (int ch = SV_FONT_FIRST; ch <= SV_FONT_LAST; ++ch)
+    for (int face = 0; face < SV_FONT_COUNT; ++face) {
+      const SvGlyph *g = sv_font_glyph(static_cast<SvFontId>(face), static_cast<unsigned char>(ch));
+      check(g->x >= 0 && g->y >= 0 && g->x + g->w <= sv_font_atlas_w && g->y + g->h <= sv_font_atlas_h && g->advance > 0, "every glyph lies inside the atlas and advances");
+    }
+  // ellipsis never exceeds the budget, at any scale
+  for (int scale = 1; scale <= 4; ++scale)
+    for (int budget = 12; budget < 300; budget += 17) {
+      char out[128];
+      const int w = sv_font_ellipsize(SV_FONT_BODY, "A very long game title that cannot possibly fit", scale, budget, out, sizeof out);
+      check(w <= budget || w <= sv_font_glyph(SV_FONT_BODY, '.')->advance * 3 * scale, "an ellipsized string fits its budget");
+      check(sv_font_text_width(SV_FONT_BODY, out) * scale == w, "the reported width is the real width");
+    }
+  {
+    char out[64];
+    sv_font_ellipsize(SV_FONT_BODY, "Short", 1, 400, out, sizeof out);
+    check(std::string(out) == "Short", "text that fits is untouched");
+  }
+  // wrapping: every line within the width (a single over-long word is hard-cut), words are not split, truncation is reported
+  const char *text = "Esc or a gamepad's Back/Select (Nintendo -) opens this menu. Start is a game button, never the menu.";
+  for (int width = 90; width <= 420; width += 33) {
+    int start[8], len[8], truncated = 0;
+    const int n = sv_font_wrap(SV_FONT_BODY, text, 1, width, 8, start, len, &truncated);
+    check(n >= 1 && n <= 8, "wrap yields lines");
+    for (int i = 0; i < n; ++i) {
+      check(sv_font_text_width_n(SV_FONT_BODY, text + start[i], len[i]) <= width, "a wrapped line fits the width");
+      if (i + 1 < n && text[start[i] + len[i]] != ' ' && text[start[i] + len[i] - 1] != ' ') check(false, "a break falls on a space");
+    }
+  }
+  {
+    int start[2], len[2], truncated = 0;
+    const int n = sv_font_wrap(SV_FONT_BODY, text, 1, 120, 2, start, len, &truncated);
+    check(n == 2 && truncated == 1, "a text that needs more lines than allowed reports truncation");
+  }
+}
+
+void input_state_tests() {
+  SvPadFacts f{};
+  check(sv_pad_classify(&f) == SV_PAD_NO_JOYSTICK, "nothing enumerated: A");
+  f.enumerated = 1;
+  check(sv_pad_classify(&f) == SV_PAD_NOT_A_GAMEPAD, "a joystick without a mapping: B");
+  f.is_gamepad = 1; f.open_attempted = 1; f.open_ok = 0;
+  check(sv_pad_classify(&f) == SV_PAD_OPEN_FAILED, "a recognised pad that cannot be opened: C");
+  f.open_ok = 1;
+  check(sv_pad_classify(&f) == SV_PAD_NO_EVENTS, "opened but silent is not working: D");
+  f.events = 3;
+  check(sv_pad_classify(&f) == SV_PAD_LIVE, "events arrived: working");
+  f.bindings_checked = 1; f.bindings_missing = 1;
+  check(sv_pad_classify(&f) == SV_PAD_BINDINGS, "live input with a missing binding: E");
+  f.bindings_missing = 0; f.bindings_conflicts = 1;
+  check(sv_pad_classify(&f) == SV_PAD_BINDINGS, "live input with a conflicting binding: E");
+  f.bindings_conflicts = 0; f.nav_checked = 1; f.nav_ok = 0;
+  check(sv_pad_classify(&f) == SV_PAD_MENU_NAV, "SDL input the menu navigation never saw: F");
+  f.nav_ok = 1;
+  check(sv_pad_classify(&f) == SV_PAD_LIVE, "navigation reacted: working");
+  check(std::string(sv_pad_state_code(SV_PAD_NOT_A_GAMEPAD)) == "B" && std::string(sv_pad_state_code(SV_PAD_LIVE)) == "OK", "state codes");
+  for (int i = 0; i < SV_PAD_STATE_COUNT; ++i) check(std::string(sv_pad_state_advice(static_cast<SvPadState>(i))).size() > 20 && std::string(sv_pad_state_advice(static_cast<SvPadState>(i))).size() < 290, "every state has bounded advice text");
+  // the binding audit follows the console's real actions
+  SvSettings s = defaults();
+  int missing = -1, conflicts = -1;
+  sv_pad_binding_audit(&s, SV_SYSTEM_GENESIS, 0, &missing, &conflicts);
+  check(missing == 0 && conflicts == 0, "default Genesis bindings are clean");
+  sv_pad_binding_audit(&s, SV_SYSTEM_SMS, 0, &missing, &conflicts);
+  check(missing == 0 && conflicts == 0, "default Master System bindings are clean (the Pause button counts)");
+  s.bind[SV_SYSTEM_SMS].pad[0][SV_ACT_PAUSE] = -1;
+  sv_pad_binding_audit(&s, SV_SYSTEM_SMS, 0, &missing, &conflicts);
+  check(missing == 1, "an unbound Master System Pause button is reported");
+  sv_pad_binding_audit(&s, SV_SYSTEM_SMS, 1, &missing, &conflicts);
+  check(missing == 0, "Player 2 has no Pause button to be missing");
+  s = defaults();
+  s.bind[SV_SYSTEM_GENESIS].pad[0][SV_ACT_BUTTON2] = s.bind[SV_SYSTEM_GENESIS].pad[0][SV_ACT_BUTTON1];
+  sv_pad_binding_audit(&s, SV_SYSTEM_GENESIS, 0, &missing, &conflicts);
+  check(conflicts == 1, "one button driving two actions is a conflict");
+  // positional names and the printed Nintendo labels
+  check(std::string(sv_pad_position_name(SV_PAD_SOUTH)) == "South" && std::string(sv_pad_nintendo_label(SV_PAD_SOUTH)) == "B" && std::string(sv_pad_nintendo_label(SV_PAD_EAST)) == "A" &&
+            std::string(sv_pad_nintendo_label(SV_PAD_START)) == "+" && std::string(sv_pad_nintendo_label(SV_PAD_BACK)) == "-" && sv_pad_nintendo_label(SV_PAD_DPAD_UP) == nullptr,
+        "SDL positions versus printed Nintendo labels");
+}
+
 } // namespace
 
 int main() {
@@ -250,6 +339,8 @@ int main() {
   layout_tests();
   crt_tests();
   menu_tests();
+  font_tests();
+  input_state_tests();
   if (failures != 0) return 1;
   std::printf("sv_viewer_core_test: ok\n");
   return 0;

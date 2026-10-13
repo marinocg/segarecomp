@@ -279,7 +279,7 @@ void Catalog::record_build(LibraryEntry &entry, const BuildRecord &record) {
   entry.builds.push_back(record);
   if (entry.builds.size() > max_builds) entry.builds.erase(entry.builds.begin(), entry.builds.end() - static_cast<std::ptrdiff_t>(max_builds));
   entry.current_build_key = record.key;
-  entry.last_built_at = record.built_at;
+  if (record.built_at > 0) entry.last_built_at = record.built_at;  // an adopted build whose time is unknown never erases a recorded one
   entry.archived = false;
 }
 

@@ -72,6 +72,13 @@ int main() {
     b.key = key32('1'); b.built_at = 500; b.mode = "compatibility"; b.version = "1.0"; b.toolchain = "zig 0.15.2";
     c.record_build(e, b);
     c.record_run(e, 0, "clean", 600);
+    {  // an adopted build whose file time is unknown (0) must not erase the recorded build time
+      BuildRecord adopted;
+      adopted.key = key32('2'); adopted.built_at = 0; adopted.mode = "compatibility";
+      LibraryEntry copy = e;
+      c.record_build(copy, adopted);
+      expect(copy.last_built_at == 500 && copy.current_build_key == key32('2'), "an unknown build time keeps the known last-built time");
+    }
     expect(c.save(), "save with data");
     Catalog d(file);
     expect(d.load() == CatalogLoad::loaded && d.entries().size() == 2, "reload keeps both games");

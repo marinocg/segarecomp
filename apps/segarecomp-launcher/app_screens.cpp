@@ -59,11 +59,11 @@ SDL_Texture *App::cover_texture(const LibraryEntry &entry) {
         cover_cache_[entry.cover] = texture;
         if (texture != nullptr) return texture;
       } else {
-        return ctx_.asset("ui/cover-placeholder.png");
+        return nullptr;  // decoded on a later frame (the caller draws a plain tile meanwhile)
       }
     }
   }
-  return ctx_.asset("ui/cover-placeholder.png");
+  return nullptr;
 }
 
 // ---------------------------------------------------------------- frame
@@ -81,22 +81,6 @@ const char *plan_category(const PlanItem &item) {
 }
 
 } // namespace
-
-void App::draw_background(float w, float h) {
-  ImDrawList *dl = ImGui::GetWindowDrawList();
-  dl->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), rgba(3, 8, 22));
-  // The original sunset artwork as the title band, fading into the page.
-  const float band = ctx_.u(92.0F);
-  if (SDL_Texture *bg = ctx_.asset("background.png")) {
-    float bw = 0, bh = 0;
-    SDL_GetTextureSize(bg, &bw, &bh);
-    const float frac = (bw / (w / band)) / bh;  // the source rows that fill the band at full width
-    const float v0 = 0.285F, v1 = std::min(1.0F, v0 + frac);
-    dl->AddImage(reinterpret_cast<ImTextureID>(bg), ImVec2(0, 0), ImVec2(w, band), ImVec2(0, v0), ImVec2(1, v1));
-  }
-  dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(w, band), rgba(3, 8, 22, 40), rgba(3, 8, 22, 40), rgba(3, 8, 22, 255), rgba(3, 8, 22, 255));
-  dl->AddRectFilledMultiColor(ImVec2(0, 0), ImVec2(w * 0.55F, band), rgba(3, 8, 22, 170), rgba(3, 8, 22, 0), rgba(3, 8, 22, 200), rgba(3, 8, 22, 0));
-}
 
 void App::draw_topbar(float, float, float, float) {}
 
@@ -120,19 +104,33 @@ void App::draw() {
   ImGui::PopStyleColor();
   draw_background(win_w_, win_h_);
   ImDrawList *dl = ImGui::GetWindowDrawList();
-  const float m = ctx_.u(12.0F), band = ctx_.u(92.0F);
-  if (SDL_Texture *wm = ctx_.asset("wordmark.png")) {
-    float tw = 0, th = 0;
-    SDL_GetTextureSize(wm, &tw, &th);
-    const float hh = ctx_.u(86.0F), ww2 = hh * tw / th;
-    dl->AddImage(reinterpret_cast<ImTextureID>(wm), ImVec2(m, ctx_.u(2.0F)), ImVec2(m + ww2, ctx_.u(2.0F) + hh));
-  }
+  const float hero = hero_height(win_w_, win_h_);
+  const float m = ctx_.u(12.0F);
   {
-    const char *tag = "RECOMPILE   *   PRESERVE   *   PLAY";
-    const float px = ctx_.u(11.0F);
-    if (win_w_ > ctx_.u(820.0F)) draw_text(dl, ctx_.display, px, rgba(190, 215, 255), ImVec2(win_w_ - m - text_width(ctx_.display, px, tag), band * 0.5F - px * 0.5F), tag);
+    float wm_h = 0.0F, wm_w = 0.0F;
+    if (SDL_Texture *wm = ctx_.asset("wordmark.png")) {
+      float tw = 0, th = 0;
+      SDL_GetTextureSize(wm, &tw, &th);
+      wm_h = std::min(hero * 0.62F, ctx_.u(112.0F));
+      wm_w = wm_h * tw / th;
+      const float top_y = std::max(ctx_.u(6.0F), hero * 0.5F - wm_h * 0.62F);
+      dl->AddImage(reinterpret_cast<ImTextureID>(wm), ImVec2(m + ctx_.u(4.0F), top_y), ImVec2(m + ctx_.u(4.0F) + wm_w, top_y + wm_h));
+      const char *tag = "RECOMPILE   *   PRESERVE   *   PLAY";
+      const float px = std::clamp(wm_h * 0.115F, ctx_.u(8.0F), ctx_.u(11.5F));
+      const float tx = m + ctx_.u(4.0F) + wm_w * 0.07F;
+      const float ty = top_y + wm_h * 0.93F;
+      if (hero > ctx_.u(118.0F)) {
+        float cx = tx;
+        for (const char *c = tag; *c != '\0'; ++c) {  // letter-spaced Silkscreen like the concept board
+          const char one[2] = {*c, '\0'};
+          draw_text(dl, ctx_.display, px, rgba(3, 8, 22, 230), ImVec2(cx + ctx_.u(1.0F), ty + ctx_.u(1.0F)), one);
+          draw_text(dl, ctx_.display, px, rgba(214, 228, 255), ImVec2(cx, ty), one);
+          cx += text_width(ctx_.display, px, one) + px * 0.28F;
+        }
+      }
+    }
   }
-  const float top = band - ctx_.u(8.0F);
+  const float top = hero - ctx_.u(22.0F);
   const ImVec2 pa(m, top), pb(win_w_ - m, win_h_ - m);
   panel(ctx_, dl, pa, pb);
   const float sw = win_w_ < ctx_.u(900.0F) ? ctx_.u(62.0F) : ctx_.u(196.0F);
@@ -288,15 +286,7 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   const float pad = ctx_.u(8.0F);
   const float cw = w - 2 * pad, chh = cw * 0.92F;
   const ImVec2 ca(x + pad, y + pad), cb(x + pad + cw, y + pad + chh);
-  if (SDL_Texture *cover = cover_texture(entry)) {
-    float tw = 0, th = 0;
-    SDL_GetTextureSize(cover, &tw, &th);
-    const float frame_ratio = cw / chh, tex_ratio = tw / th;
-    ImVec2 uv0(0, 0), uv1(1, 1);
-    if (tex_ratio > frame_ratio) { const float k = frame_ratio / tex_ratio; uv0.x = (1 - k) * 0.5F; uv1.x = uv0.x + k; }
-    else { const float k = tex_ratio / frame_ratio; uv0.y = (1 - k) * 0.5F; uv1.y = uv0.y + k; }
-    dl->AddImageRounded(reinterpret_cast<ImTextureID>(cover), ca, cb, uv0, uv1, info.status == GameStatus::ready ? IM_COL32_WHITE : rgba(200, 208, 230), ctx_.u(4.0F));
-  }
+  draw_cover(dl, entry, ca, cb, ctx_.u(4.0F), info.status == GameStatus::ready ? IM_COL32_WHITE : rgba(200, 208, 230));
   {
     const float fs_ = ctx_.u(22.0F);
     ImGui::SetCursorScreenPos(ImVec2(cb.x - fs_ - ctx_.u(4.0F), ca.y + ctx_.u(4.0F)));
@@ -311,7 +301,9 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   }
   const float tpx = ctx_.u(13.5F), spx = ctx_.u(11.0F);
   float ty = cb.y + ctx_.u(9.0F);
-  draw_text(dl, ctx_.bold, tpx, col::text, ImVec2(ca.x, ty), ellipsize(ctx_.bold, tpx, cw, entry.title()).c_str());
+  const std::string shown_title = ellipsize(ctx_.bold, tpx, cw, entry.title());
+  draw_text(dl, ctx_.bold, tpx, col::text, ImVec2(ca.x, ty), shown_title.c_str());
+  if (shown_title != entry.title() && hovered) tooltip(ctx_, entry.title().c_str());
   ty += tpx + ctx_.u(7.0F);
   ImVec2 psize;
   pill(ctx_, dl, ImVec2(ca.x, ty), platform_short(entry.platform_id), col::info, ctx_.icon("controller"), ctx_.u(11.0F), &psize);
@@ -364,7 +356,7 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
     if (checkbox(ctx_, "sel", "", &on)) { if (on) selected_.insert(entry.id()); else selected_.erase(entry.id()); }
     x += ctx_.u(30.0F);
   }
-  if (SDL_Texture *cover = cover_texture(entry)) dl->AddImageRounded(reinterpret_cast<ImTextureID>(cover), ImVec2(x, a.y + pad), ImVec2(x + tw, a.y + pad + th), ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, ctx_.u(3.0F));
+  draw_cover(dl, entry, ImVec2(x, a.y + pad), ImVec2(x + tw, a.y + pad + th), ctx_.u(3.0F));
   x += tw + pad * 1.5F;
   const float px = ctx_.u(13.5F), spx = ctx_.u(11.5F);
   const float title_w = std::max(ctx_.u(120.0F), w * 0.30F);
@@ -418,14 +410,16 @@ void App::draw_library(float w, float h) {
     static const char *sort_ids[] = {"last_played", "title", "last_built", "added", "size"};
     int sort = 0;
     for (int i = 0; i < 5; ++i) if (settings_.sort == sort_ids[i]) sort = i;
-    const float dw = ctx_.u(160.0F);
-    if (dropdown(ctx_, "pf", {"All Platforms", "Genesis", "Master System"}, &platform, dw, ctx_.icon("controller"))) platform_filter_ = platform;
+    const bool narrow = w < ctx_.u(640.0F);
+    const float tools = ctx_.u(34.0F) * 2 + ctx_.u(8.0F) + ctx_.u(88.0F) + ctx_.u(4.0F);
+    const float dw = narrow ? std::max(ctx_.u(104.0F), (w - ctx_.u(16.0F)) / 3.0F) : ctx_.u(160.0F);
+    if (dropdown(ctx_, "pf", {"All Platforms", "Genesis", "Master System"}, &platform, dw, narrow ? nullptr : ctx_.icon("controller"))) platform_filter_ = platform;
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (dropdown(ctx_, "sf", {"All Statuses", "Built", "Needs build", "Failed", "Missing ROM"}, &status, dw)) status_filter_ = status;
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (dropdown(ctx_, "so", {"Last Played", "Title", "Last Built", "Date Added", "Size"}, &sort, dw)) { settings_.sort = sort_ids[sort]; save_settings(); }
-    const float tools = ctx_.u(34.0F) * 2 + ctx_.u(8.0F) + ctx_.u(88.0F) + ctx_.u(4.0F);
-    ImGui::SameLine(std::max(ImGui::GetCursorPosX() + ctx_.u(8.0F), w - tools + ctx_.u(18.0F)), 0.0F);
+    if (narrow) { ImGui::Dummy(ImVec2(1, ctx_.u(2.0F))); }  // the view switches wrap under the filters in a narrow window
+    else ImGui::SameLine(std::max(ImGui::GetCursorPosX() + ctx_.u(8.0F), w - tools + ctx_.u(18.0F)), 0.0F);
     if (icon_button(ctx_, "view_grid", ctx_.icon("library"), bh, settings_.view == "grid", true, "Grid view")) { settings_.view = "grid"; save_settings(); }
     ImGui::SameLine(0.0F, ctx_.u(4.0F));
     if (icon_button(ctx_, "view_list", ctx_.icon("file"), bh, settings_.view == "list", true, "List view")) { settings_.view = "list"; save_settings(); }

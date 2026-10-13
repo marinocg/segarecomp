@@ -54,7 +54,7 @@ namespace {
 
 // SEG-058 (ADR 0120): the shared SDL3 viewer foundation, one list for the Genesis and the Master System recipes (settings, layout/CRT math, menu
 // model, input state and diagnostics, host and pause pages), compiled as strict C11 next to the console adapter.
-constexpr const char *kViewerFoundationSources[] = {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_input_state.c", "sv_input_diag.c", "sv_host.c", "sv_pages.c"};
+constexpr const char *kViewerFoundationSources[] = {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_input_state.c", "sv_input_diag.c", "sv_font.c", "sv_font_data.c", "sv_ui.c", "sv_host.c", "sv_pages.c", "sv_draw.c"};
 
 // Narrow strings are the platform's native argv encoding (the ANSI code page on Windows, as for the rest of the CLI).
 // ---- process helper: run argv, stdout+stderr -> log file, return the exit code (-1: could not start) ----

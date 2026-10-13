@@ -50,13 +50,7 @@ static void resolve_settings_path(SvHost *h) {
   }
 }
 
-void sv_host_draw_text(SvHost *h, float x, float y, int scale, SDL_Color c, const char *text) {
-  const float s = (float)(scale < 1 ? 1 : scale);
-  SDL_SetRenderScale(h->renderer, s, s);
-  SDL_SetRenderDrawColor(h->renderer, c.r, c.g, c.b, c.a);
-  SDL_RenderDebugText(h->renderer, x / s, y / s, text);
-  SDL_SetRenderScale(h->renderer, 1.0f, 1.0f);
-}
+void sv_host_draw_text(SvHost *h, float x, float y, int scale, SDL_Color c, const char *text) { sv_ui_text(h, SV_FONT_BODY, scale, (int)x, (int)y, c, text); }
 
 void sv_host_fill(SvHost *h, int x, int y, int w, int ht, SDL_Color c) {
   SDL_FRect r;
@@ -136,23 +130,34 @@ void sv_host_round_stroke(SvHost *h, float x, float y, float w, float hh, float 
   }
 }
 
+/* Loads `<SEGARECOMP_ASSETS>/<relative>` as a nearest-filtered texture; NULL when the assets folder or the file is missing (the caller omits the graphic). */
+SDL_Texture *sv_host_load_asset(SvHost *h, const char *relative) {
+  SDL_Texture *tex = NULL;
+#if SDL_VERSION_ATLEAST(3, 4, 0)
+  const char *dir = SDL_getenv("SEGARECOMP_ASSETS");
+  if (dir != NULL && *dir != '\0' && relative != NULL) {
+    char path[900];
+    SDL_Surface *s;
+    snprintf(path, sizeof path, "%s/%s", dir, relative);
+    s = SDL_LoadSurface(path);
+    if (s != NULL) { tex = SDL_CreateTextureFromSurface(h->renderer, s); SDL_DestroySurface(s); }
+    if (tex != NULL) SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
+  }
+#else
+  (void)h; (void)relative;
+#endif
+  return tex;
+}
+
 static SDL_Texture *load_icon(SvHost *h, const char *name) {
   int i;
   for (i = 0; i < h->icon_count; ++i) if (strcmp(h->icon_names[i], name) == 0) return h->icons[i];
   if (h->icon_count >= 24) return NULL;
   {
-    SDL_Texture *tex = NULL;
-#if SDL_VERSION_ATLEAST(3, 4, 0)
-    const char *dir = SDL_getenv("SEGARECOMP_ASSETS");
-    if (dir != NULL && *dir != '\0') {
-      char path[900];
-      SDL_Surface *s;
-      snprintf(path, sizeof path, "%s/ui/icon-%s.png", dir, name);
-      s = SDL_LoadSurface(path);
-      if (s != NULL) { tex = SDL_CreateTextureFromSurface(h->renderer, s); SDL_DestroySurface(s); }
-      if (tex != NULL) SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
-    }
-#endif
+    char rel[96];
+    SDL_Texture *tex;
+    snprintf(rel, sizeof rel, "ui/icon-%s.png", name);
+    tex = sv_host_load_asset(h, rel);
     snprintf(h->icon_names[h->icon_count], sizeof h->icon_names[0], "%s", name);
     h->icons[h->icon_count++] = tex; /* a missing icon is remembered as NULL: the UI simply omits it */
     return tex;
@@ -181,12 +186,14 @@ void sv_host_draw_picture(SvHost *h, float x, float y, float w, float hh) {
   SDL_RenderTexture(h->renderer, h->frame_tex, NULL, &d);
 }
 
+/* Whole-number UI scale from the OUTPUT size in pixels (so a 4K or a 1.5x-DPI window grows its text with the display): 13-pixel body text at 1x up to 540 px of
+ * window height, 2x from ~900, 3x from ~1440, ... A wide-but-short window (the Master System's 256x192 default is 768x576) stays at 1x. */
 int sv_host_ui_scale(int out_w, int out_h) {
-  const int by_w = (int)((double)out_w * 0.92 / 380.0);
-  const int by_h = (out_h + 140) / 300;
-  int s = by_w < by_h ? by_w : by_h;
+  int s = (out_h + 180) / 540;
+  const int by_w = out_w / 330;   /* the narrowest page (the main menu) is ~330 units wide */
+  if (by_w < s) s = by_w;
   if (s < 1) s = 1;
-  if (s > 5) s = 5;
+  if (s > 6) s = 6;
   return s;
 }
 
@@ -355,39 +362,39 @@ static SDL_Texture *make_rgba_texture(SvHost *h, int w, int hgt, SDL_TextureAcce
   return t;
 }
 
-static void ensure_crt_targets(SvHost *h, SvRect dest, int src_h) {
+static void ensure_crt_targets(SvHost *h, SvCrtState *c, SvRect dest, int src_h) {
   const SvVideoSettings *v = &h->settings.video;
-  if (h->rt == NULL || h->rt_w != dest.w || h->rt_h != dest.h) {
-    if (h->rt != NULL) SDL_DestroyTexture(h->rt);
-    h->rt = make_rgba_texture(h, dest.w, dest.h, SDL_TEXTUREACCESS_TARGET, SDL_BLENDMODE_NONE);
-    h->rt_w = dest.w;
-    h->rt_h = dest.h;
+  if (c->rt == NULL || c->rt_w != dest.w || c->rt_h != dest.h) {
+    if (c->rt != NULL) SDL_DestroyTexture(c->rt);
+    c->rt = make_rgba_texture(h, dest.w, dest.h, SDL_TEXTUREACCESS_TARGET, SDL_BLENDMODE_NONE);
+    c->rt_w = dest.w;
+    c->rt_h = dest.h;
   }
-  if (v->scanlines > 0 && (h->scan_tex == NULL || h->scan_h != dest.h || h->scan_src_h != src_h || h->scan_strength != v->scanlines)) {
+  if (v->scanlines > 0 && (c->scan_tex == NULL || c->scan_h != dest.h || c->scan_src_h != src_h || c->scan_strength != v->scanlines)) {
     const float period = (float)dest.h / (float)src_h;
     uint32_t *pixels = (uint32_t *)malloc((size_t)dest.h * sizeof *pixels);
     int y;
-    if (h->scan_tex != NULL) SDL_DestroyTexture(h->scan_tex);
-    h->scan_tex = NULL;
+    if (c->scan_tex != NULL) SDL_DestroyTexture(c->scan_tex);
+    c->scan_tex = NULL;
     if (pixels != NULL) {
       for (y = 0; y < dest.h; ++y) {
         const uint8_t a = sv_crt_scanline_alpha(y, period, v->scanlines);
         const uint8_t bytes[4] = {0, 0, 0, a};
         memcpy(&pixels[y], bytes, 4); /* RGBA32 byte order: R,G,B,A */
       }
-      h->scan_tex = make_rgba_texture(h, 1, dest.h, SDL_TEXTUREACCESS_STATIC, SDL_BLENDMODE_BLEND);
-      if (h->scan_tex != NULL) SDL_UpdateTexture(h->scan_tex, NULL, pixels, 4);
+      c->scan_tex = make_rgba_texture(h, 1, dest.h, SDL_TEXTUREACCESS_STATIC, SDL_BLENDMODE_BLEND);
+      if (c->scan_tex != NULL) SDL_UpdateTexture(c->scan_tex, NULL, pixels, 4);
       free(pixels);
     }
-    h->scan_h = dest.h;
-    h->scan_src_h = src_h;
-    h->scan_strength = v->scanlines;
+    c->scan_h = dest.h;
+    c->scan_src_h = src_h;
+    c->scan_strength = v->scanlines;
   }
-  if (v->mask > 0 && (h->mask_tex == NULL || h->mask_w != dest.w || h->mask_strength != v->mask)) {
+  if (v->mask > 0 && (c->mask_tex == NULL || c->mask_w != dest.w || c->mask_strength != v->mask)) {
     uint8_t *pixels = (uint8_t *)malloc((size_t)dest.w * 4u);
     int x;
-    if (h->mask_tex != NULL) SDL_DestroyTexture(h->mask_tex);
-    h->mask_tex = NULL;
+    if (c->mask_tex != NULL) SDL_DestroyTexture(c->mask_tex);
+    c->mask_tex = NULL;
     if (pixels != NULL) {
       for (x = 0; x < dest.w; ++x) {
         pixels[x * 4 + 0] = sv_crt_mask_value(x, 0, v->mask);
@@ -395,54 +402,60 @@ static void ensure_crt_targets(SvHost *h, SvRect dest, int src_h) {
         pixels[x * 4 + 2] = sv_crt_mask_value(x, 2, v->mask);
         pixels[x * 4 + 3] = 255;
       }
-      h->mask_tex = make_rgba_texture(h, dest.w, 1, SDL_TEXTUREACCESS_STATIC, SDL_BLENDMODE_MOD);
-      if (h->mask_tex != NULL) SDL_UpdateTexture(h->mask_tex, NULL, pixels, dest.w * 4);
+      c->mask_tex = make_rgba_texture(h, dest.w, 1, SDL_TEXTUREACCESS_STATIC, SDL_BLENDMODE_MOD);
+      if (c->mask_tex != NULL) SDL_UpdateTexture(c->mask_tex, NULL, pixels, dest.w * 4);
       free(pixels);
     }
-    h->mask_w = dest.w;
-    h->mask_strength = v->mask;
+    c->mask_w = dest.w;
+    c->mask_strength = v->mask;
   }
 }
 
-/* Draws the picture into the back buffer. Pixel Perfect (identity settings) is a single nearest-neighbour copy; every other preset renders
- * through a window-sized target with real scanline, mask, bloom, brightness and curvature passes. */
-static void render_game(SvHost *h, int out_w, int out_h) {
+static void crt_state_destroy(SvCrtState *c) {
+  if (c->rt != NULL) SDL_DestroyTexture(c->rt);
+  if (c->scan_tex != NULL) SDL_DestroyTexture(c->scan_tex);
+  if (c->mask_tex != NULL) SDL_DestroyTexture(c->mask_tex);
+  memset(c, 0, sizeof *c);
+}
+
+/* Draws `src` (NULL = the whole picture) of the last frame into `d` with the current video settings. Pixel Perfect (identity settings) is a single
+ * nearest-neighbour copy; every other preset renders through a destination-sized target with real scanline, mask, bloom, brightness and curvature
+ * passes. `src_rows` is the number of source lines `d` covers (it sets the scanline period). The main picture and the Video page's live preview share this
+ * path and differ only in the target state `c`, the source crop and the destination. */
+static void render_picture(SvHost *h, SvCrtState *c, const SDL_FRect *src, SDL_FRect d, int src_rows) {
   const SvVideoSettings *v = &h->settings.video;
   SvRect dest;
-  SDL_FRect d;
-  if (h->frame_tex == NULL || h->last_w <= 0) return;
-  dest = sv_layout_dest(out_w, out_h, h->last_w, h->last_h, v->aspect, v->scale);
-  d.x = (float)dest.x; d.y = (float)dest.y; d.w = (float)dest.w; d.h = (float)dest.h;
+  dest.x = (int)d.x; dest.y = (int)d.y; dest.w = (int)d.w; dest.h = (int)d.h;
   SDL_SetTextureScaleMode(h->frame_tex, SDL_SCALEMODE_NEAREST);
   SDL_SetTextureColorMod(h->frame_tex, 255, 255, 255);
   SDL_SetTextureAlphaMod(h->frame_tex, 255);
   SDL_SetTextureBlendMode(h->frame_tex, SDL_BLENDMODE_NONE);
   if (sv_crt_is_identity(&h->settings.video)) {
-    SDL_RenderTexture(h->renderer, h->frame_tex, NULL, &d);
+    SDL_RenderTexture(h->renderer, h->frame_tex, src, &d);
     return;
   }
-  ensure_crt_targets(h, dest, h->last_h);
-  if (h->rt == NULL) { SDL_RenderTexture(h->renderer, h->frame_tex, NULL, &d); return; }
+  ensure_crt_targets(h, c, dest, src_rows);
+  if (c->rt == NULL) { SDL_RenderTexture(h->renderer, h->frame_tex, src, &d); return; }
   {
     SDL_FRect full;
     full.x = 0.0f; full.y = 0.0f; full.w = (float)dest.w; full.h = (float)dest.h;
-    SDL_SetRenderTarget(h->renderer, h->rt);
+    SDL_SetRenderTarget(h->renderer, c->rt);
     SDL_SetRenderDrawColor(h->renderer, 0, 0, 0, 255);
     SDL_SetRenderDrawBlendMode(h->renderer, SDL_BLENDMODE_NONE);
     SDL_RenderClear(h->renderer);
     { /* base picture, darkened when brightness < 100 */
-      const int c = v->brightness < 100 ? 255 * v->brightness / 100 : 255;
-      SDL_SetTextureColorMod(h->frame_tex, (Uint8)c, (Uint8)c, (Uint8)c);
-      SDL_RenderTexture(h->renderer, h->frame_tex, NULL, &full);
+      const int cc = v->brightness < 100 ? 255 * v->brightness / 100 : 255;
+      SDL_SetTextureColorMod(h->frame_tex, (Uint8)cc, (Uint8)cc, (Uint8)cc);
+      SDL_RenderTexture(h->renderer, h->frame_tex, src, &full);
     }
     SDL_SetTextureColorMod(h->frame_tex, 255, 255, 255);
     SDL_SetTextureBlendMode(h->frame_tex, SDL_BLENDMODE_ADD);
     if (v->brightness > 100) { /* add the picture to itself: color * (1 + a) */
       SDL_SetTextureAlphaMod(h->frame_tex, (Uint8)((v->brightness - 100) * 255 / 100));
-      SDL_RenderTexture(h->renderer, h->frame_tex, NULL, &full);
+      SDL_RenderTexture(h->renderer, h->frame_tex, src, &full);
     }
     if (v->bloom > 0) { /* soft glow: four offset, linearly filtered, additive taps */
-      const float spread = fmaxf(1.0f, (float)dest.h / (float)h->last_h * 0.7f);
+      const float spread = fmaxf(1.0f, (float)dest.h / (float)src_rows * 0.7f);
       const Uint8 alpha = (Uint8)(v->bloom * 255 * 16 / 10000);
       static const float off[4][2] = {{-1.0f, 0.0f}, {1.0f, 0.0f}, {0.0f, -1.0f}, {0.0f, 1.0f}};
       int i;
@@ -452,19 +465,19 @@ static void render_game(SvHost *h, int out_w, int out_h) {
         SDL_FRect t = full;
         t.x += off[i][0] * spread * 2.0f;
         t.y += off[i][1] * spread * 2.0f;
-        SDL_RenderTexture(h->renderer, h->frame_tex, NULL, &t);
+        SDL_RenderTexture(h->renderer, h->frame_tex, src, &t);
       }
       SDL_SetTextureScaleMode(h->frame_tex, SDL_SCALEMODE_NEAREST);
     }
     SDL_SetTextureAlphaMod(h->frame_tex, 255);
     SDL_SetTextureBlendMode(h->frame_tex, SDL_BLENDMODE_NONE);
-    if (v->scanlines > 0 && h->scan_tex != NULL) SDL_RenderTexture(h->renderer, h->scan_tex, NULL, &full);
-    if (v->mask > 0 && h->mask_tex != NULL) SDL_RenderTexture(h->renderer, h->mask_tex, NULL, &full);
+    if (v->scanlines > 0 && c->scan_tex != NULL) SDL_RenderTexture(h->renderer, c->scan_tex, NULL, &full);
+    if (v->mask > 0 && c->mask_tex != NULL) SDL_RenderTexture(h->renderer, c->mask_tex, NULL, &full);
     SDL_SetRenderTarget(h->renderer, NULL);
   }
   if (v->curvature <= 0) {
-    SDL_SetTextureScaleMode(h->rt, SDL_SCALEMODE_NEAREST);
-    SDL_RenderTexture(h->renderer, h->rt, NULL, &d);
+    SDL_SetTextureScaleMode(c->rt, SDL_SCALEMODE_NEAREST);
+    SDL_RenderTexture(h->renderer, c->rt, NULL, &d);
     return;
   }
   { /* barrel-warped mesh of the finished picture */
@@ -472,7 +485,7 @@ static void render_game(SvHost *h, int out_w, int out_h) {
     SDL_Vertex verts[(N + 1) * (N + 1)];
     int indices[N * N * 6];
     int i, j, n = 0;
-    SDL_SetTextureScaleMode(h->rt, SDL_SCALEMODE_LINEAR);
+    SDL_SetTextureScaleMode(c->rt, SDL_SCALEMODE_LINEAR);
     for (j = 0; j <= N; ++j)
       for (i = 0; i <= N; ++i) {
         float wx, wy, vig;
@@ -487,43 +500,84 @@ static void render_game(SvHost *h, int out_w, int out_h) {
       }
     for (j = 0; j < N; ++j)
       for (i = 0; i < N; ++i) {
-        const int a = j * (N + 1) + i, b = a + 1, c = a + (N + 1), e = c + 1;
-        indices[n++] = a; indices[n++] = b; indices[n++] = c; indices[n++] = b; indices[n++] = e; indices[n++] = c;
+        const int a = j * (N + 1) + i, b = a + 1, cc = a + (N + 1), e = cc + 1;
+        indices[n++] = a; indices[n++] = b; indices[n++] = cc; indices[n++] = b; indices[n++] = e; indices[n++] = cc;
       }
-    SDL_RenderGeometry(h->renderer, h->rt, verts, (N + 1) * (N + 1), indices, n);
+    SDL_RenderGeometry(h->renderer, c->rt, verts, (N + 1) * (N + 1), indices, n);
   }
 }
 
+static void render_game(SvHost *h, int out_w, int out_h) {
+  const SvVideoSettings *v = &h->settings.video;
+  SvRect dest;
+  SDL_FRect d;
+  if (h->frame_tex == NULL || h->last_w <= 0) return;
+  dest = sv_layout_dest(out_w, out_h, h->last_w, h->last_h, v->aspect, v->scale);
+  d.x = (float)dest.x; d.y = (float)dest.y; d.w = (float)dest.w; d.h = (float)dest.h;
+  render_picture(h, &h->crt, NULL, d, h->last_h);
+}
+
+/* The Video page's live preview: a centre crop of the picture (about 112 source pixels wide, so the scanlines and the mask are resolved) rendered with the
+ * CURRENT settings through the same pipeline as the game. */
+void sv_host_draw_preview(SvHost *h, int x, int y, int w, int hh) {
+  SDL_FRect src, d;
+  int cw, ch;
+  if (h->frame_tex == NULL || h->last_w <= 0 || w < 8 || hh < 8) return;
+  cw = h->last_w < 112 ? h->last_w : 112;
+  ch = (int)((double)cw * (double)hh / (double)w + 0.5);
+  if (ch > h->last_h) { ch = h->last_h; cw = (int)((double)ch * (double)w / (double)hh + 0.5); if (cw > h->last_w) cw = h->last_w; }
+  if (ch < 1) ch = 1;
+  src.x = (float)((h->last_w - cw) / 2); src.y = (float)((h->last_h - ch) / 2); src.w = (float)cw; src.h = (float)ch;
+  d.x = (float)x; d.y = (float)y; d.w = (float)w; d.h = (float)hh;
+  render_picture(h, &h->crt_preview, &src, d, ch);
+}
+
+/* The two always-available overlays: the optional FPS/status box (top left) and the transient notification (top right). Both use the bitmap font and the
+ * stepped frames of the menu, scale with the display and never cover more than a small corner of the picture. */
 static void draw_hud(SvHost *h, int out_w, int out_h) {
-  const SDL_Color text = {220, 232, 255, 255}, dim = {150, 168, 205, 255}, box = {5, 12, 30, 215}, edge = {46, 104, 214, 255};
-  const int ui = sv_host_ui_scale(out_w, out_h) > 1 ? sv_host_ui_scale(out_w, out_h) - 1 : 1;
-  (void)out_h;
+  const SDL_Color text = {220, 232, 255, 255}, dim = {169, 183, 221, 255}, box = {5, 12, 30, 224}, edge = {35, 62, 120, 255}, light = {77, 103, 167, 255};
+  const int u = sv_host_ui_scale(out_w, out_h);
+  const int lh = sv_ui_line_h(SV_FONT_BODY, u);
   if (h->settings.video.show_fps && !h->menu_open) {
     char l1[64], l2[64], l3[64];
     const char *aspect = h->settings.video.aspect == SV_ASPECT_4_3 ? "4:3" : "Square pixels";
     int w, k;
-    snprintf(l1, sizeof l1, "System: %s    %.0f FPS", h->cfg.system == SV_SYSTEM_SMS ? "MASTER SYSTEM" : "GENESIS", h->fps);
+    snprintf(l1, sizeof l1, "System: %s   %.0f FPS", h->cfg.system == SV_SYSTEM_SMS ? "MASTER SYSTEM" : "GENESIS", h->fps);
     snprintf(l2, sizeof l2, "Aspect: %s", aspect);
     snprintf(l3, sizeof l3, "Effect: %s", sv_crt_preset_name(h->settings.video.preset));
-    w = (int)strlen(l1) * 8 * ui;
-    k = (int)strlen(l2) * 8 * ui; if (k > w) w = k;
-    k = (int)strlen(l3) * 8 * ui; if (k > w) w = k;
-    w += 12 * ui;
-    sv_host_round_fill(h, (float)(6 * ui), (float)(6 * ui), (float)w, (float)(40 * ui), (float)(3 * ui), box);
-    sv_host_round_stroke(h, (float)(6 * ui), (float)(6 * ui), (float)w, (float)(40 * ui), (float)(3 * ui), 1, edge);
-    sv_host_draw_text(h, (float)(12 * ui), (float)(10 * ui), ui, text, l1);
-    sv_host_draw_text(h, (float)(12 * ui), (float)(21 * ui), ui, dim, l2);
-    sv_host_draw_text(h, (float)(12 * ui), (float)(32 * ui), ui, dim, l3);
+    w = sv_ui_text_w(SV_FONT_BODY, u, l1);
+    k = sv_ui_text_w(SV_FONT_BODY, u, l2); if (k > w) w = k;
+    k = sv_ui_text_w(SV_FONT_BODY, u, l3); if (k > w) w = k;
+    w += 16 * u;
+    sv_ui_frame(h, 8 * u, 8 * u, w, 3 * lh + 12 * u, u, box, edge, light, 0);
+    sv_ui_text_shadow(h, SV_FONT_BODY, u, 16 * u, 14 * u, text, l1);
+    sv_ui_text_shadow(h, SV_FONT_BODY, u, 16 * u, 14 * u + lh, dim, l2);
+    sv_ui_text_shadow(h, SV_FONT_BODY, u, 16 * u, 14 * u + 2 * lh, dim, l3);
   }
   if (h->toast[0] != '\0' && SDL_GetTicks() < h->toast_until) {
-    const int tui = sv_host_ui_scale(out_w, out_h);
-    const int icon = strncmp(h->toast, "Screenshot", 10) == 0;
-    const int w = (int)strlen(h->toast) * 8 * tui + 34 * tui, hh = 22 * tui;
-    const int bx = out_w - w - 10 * tui, by = 10 * tui;
-    sv_host_round_fill(h, (float)bx, (float)by, (float)w, (float)hh, (float)(4 * tui), box);
-    sv_host_round_stroke(h, (float)bx, (float)by, (float)w, (float)hh, (float)(4 * tui), 1, edge);
-    sv_host_icon_draw(h, icon ? "screenshot" : "info", (float)(bx + 7 * tui), (float)(by + 4 * tui), (float)(14 * tui), text);
-    sv_host_draw_text(h, (float)(bx + 26 * tui), (float)(by + 7 * tui), tui, text, h->toast);
+    char title[96], sub[96];
+    const char *colon = strstr(h->toast, ": ");
+    const int shot = strncmp(h->toast, "Screenshot", 10) == 0;
+    const int icon_w = 22 * u;
+    int w, tw, sw = 0, bx, by = 8 * u, bh;
+    int avail = out_w - 24 * u - icon_w - 20 * u;
+    if (avail < 40 * u) avail = 40 * u;
+    if (colon != NULL && (size_t)(colon - h->toast) < sizeof title) {
+      snprintf(title, sizeof title, "%.*s", (int)(colon - h->toast), h->toast);
+      snprintf(sub, sizeof sub, "%s", colon + 2);
+    } else { snprintf(title, sizeof title, "%s", h->toast); sub[0] = '\0'; }
+    { char t2[96]; sv_font_ellipsize(SV_FONT_BODY, title, u, avail, t2, (int)sizeof t2); snprintf(title, sizeof title, "%s", t2); }
+    if (sub[0] != '\0') { char s2[96]; sv_font_ellipsize(SV_FONT_BODY, sub, u, avail, s2, (int)sizeof s2); snprintf(sub, sizeof sub, "%s", s2); }
+    tw = sv_ui_text_w(SV_FONT_BODY, u, title);
+    if (sub[0] != '\0') sw = sv_ui_text_w(SV_FONT_BODY, u, sub);
+    if (sw > tw) tw = sw;
+    w = tw + icon_w + 22 * u;
+    bh = (sub[0] != '\0' ? 2 : 1) * lh + 14 * u;
+    bx = out_w - w - 8 * u;
+    sv_ui_frame(h, bx, by, w, bh, u, box, edge, light, 1);
+    sv_host_icon_draw(h, shot ? "screenshot" : "info", (float)(bx + 8 * u), (float)(by + (bh - 16 * u) / 2), (float)(16 * u), text);
+    sv_ui_text_shadow(h, SV_FONT_BODY, u, bx + icon_w + 12 * u, by + 7 * u, text, title);
+    if (sub[0] != '\0') sv_ui_text_shadow(h, SV_FONT_BODY, u, bx + icon_w + 12 * u, by + 7 * u + lh, dim, sub);
   }
 }
 
@@ -671,9 +725,11 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
     w = h->settings.video.window_w > 0 ? h->settings.video.window_w : cfg->picture_w * scale;
     hh = h->settings.video.window_h > 0 ? h->settings.video.window_h : cfg->picture_h * scale;
   }
-  if (SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) && usable.w > 0 && usable.h > 0) {
+  { const char *drv = SDL_GetCurrentVideoDriver(); const int headless = drv != NULL && (strcmp(drv, "dummy") == 0 || strcmp(drv, "offscreen") == 0); /* no real display to fit into */
+  if (!headless && SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) && usable.w > 0 && usable.h > 0) {
     if (w > usable.w * 9 / 10) { hh = hh * (usable.w * 9 / 10) / w; w = usable.w * 9 / 10; }
     if (hh > usable.h * 9 / 10) { w = w * (usable.h * 9 / 10) / hh; hh = usable.h * 9 / 10; }
+  }
   }
   h->window = SDL_CreateWindow(cfg->title != NULL ? cfg->title : "Segarecomp", w, hh, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (h->window == NULL) { sv_diag_destroy(h->diag); SDL_Quit(); free(h); return NULL; }
@@ -697,9 +753,9 @@ void sv_host_close(SvHost *h) {
   save_settings_if_dirty(h);
   sv_diag_destroy(h->diag);
   if (h->frame_tex != NULL) SDL_DestroyTexture(h->frame_tex);
-  if (h->rt != NULL) SDL_DestroyTexture(h->rt);
-  if (h->scan_tex != NULL) SDL_DestroyTexture(h->scan_tex);
-  if (h->mask_tex != NULL) SDL_DestroyTexture(h->mask_tex);
+  crt_state_destroy(&h->crt);
+  crt_state_destroy(&h->crt_preview);
+  sv_ui_destroy(h);
   if (h->renderer != NULL) SDL_DestroyRenderer(h->renderer);
   if (h->window != NULL) SDL_DestroyWindow(h->window);
   { int k; for (k = 0; k < h->icon_count; ++k) if (h->icons[k] != NULL) SDL_DestroyTexture(h->icons[k]); }
@@ -837,12 +893,13 @@ static void run_menu(SvHost *h) {
           const float mx = e.type == SDL_EVENT_MOUSE_MOTION ? e.motion.x : e.button.x, my = e.type == SDL_EVENT_MOUSE_MOTION ? e.motion.y : e.button.y;
           h->mouse_x = mx;
           h->mouse_y = my;
+          if (!(e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT && h->listen.kind == SV_LISTEN_NONE && sv_pages_click(h, mx, my)))
           for (i = 0; i < h->ui_rows; ++i)
             if (mx >= (float)h->ui_item_rect[i][0] && mx < (float)(h->ui_item_rect[i][0] + h->ui_item_rect[i][2]) && my >= (float)h->ui_item_rect[i][1] &&
                 my < (float)(h->ui_item_rect[i][1] + h->ui_item_rect[i][3])) {
               SvPage *page = sv_menu_top(&h->menu);
               if (page != NULL) {
-                const int index = page->scroll + i;
+                const int index = h->ui_item_index[i];
                 if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN && e.button.button == SDL_BUTTON_LEFT && h->listen.kind == SV_LISTEN_NONE)
                   sv_pages_apply(h, sv_menu_pick(&h->menu, index, 1));
                 else if (e.type == SDL_EVENT_MOUSE_MOTION) sv_menu_pick(&h->menu, index, 0);

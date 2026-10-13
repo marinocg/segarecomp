@@ -24,6 +24,7 @@ STOP_IMAGE = bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x70, 0x00, 
 
 GENESIS = [("Fictional Quest", 11), ("Neon Harbor Demo", 23), ("Pixel Orchard", 37)]
 SMS = [("Coastal Drift (Fictional)", 5), ("Summit Chase (Fictional)", 17)]
+COVERED = (0, 1, 3, 4)  # indexes of the fixture games that get a fictional cover; the rest show the neutral cartridge
 PALETTES = [((20, 30, 90), (255, 140, 60), (30, 140, 90)), ((10, 10, 40), (80, 200, 240), (200, 60, 120)), ((60, 20, 80), (250, 220, 90), (40, 160, 110)),
             ((12, 40, 70), (240, 120, 90), (90, 200, 160)), ((30, 50, 20), (200, 230, 120), (240, 180, 60))]
 
@@ -56,30 +57,94 @@ def png(width: int, height: int, rgb: bytes) -> bytes:
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b"")
 
 
+class Canvas:
+    """A tiny 96x128 RGB pixel canvas for the fictional covers (rectangles, circles and stepped gradients only)."""
+
+    def __init__(self, w=96, h=128):
+        self.w, self.h = w, h
+        self.px = [[(0, 0, 0)] * w for _ in range(h)]
+
+    def gradient(self, y0, y1, top, bottom, steps=10):
+        for y in range(y0, y1):
+            t = int((y - y0) / max(1, y1 - y0) * steps) / steps  # stepped: pixel art, not a smooth ramp
+            colour = tuple(int(top[c] * (1 - t) + bottom[c] * t) for c in range(3))
+            for x in range(self.w):
+                self.px[y][x] = colour
+
+    def rect(self, x0, y0, x1, y1, colour):
+        for y in range(max(0, y0), min(self.h, y1)):
+            for x in range(max(0, x0), min(self.w, x1)):
+                self.px[y][x] = colour
+
+    def disc(self, cx, cy, r, colour):
+        for y in range(self.h):
+            for x in range(self.w):
+                if (x - cx) ** 2 + (y - cy) ** 2 <= r * r:
+                    self.px[y][x] = colour
+
+    def png(self):
+        big = bytearray()
+        for y in range(self.h * 2):
+            row = bytearray()
+            for x in range(self.w * 2):
+                row += bytes(self.px[y // 2][x // 2])
+            big += row
+        return png(self.w * 2, self.h * 2, bytes(big))
+
+
 def cover(index: int) -> bytes:
-    """A fictional 96x128 'box art' (pixel-stepped sky gradient, a sun and two hills), upscaled 2x by the launcher."""
-    w, h = 96, 128
-    sky, sun, hill = PALETTES[index % len(PALETTES)]
-    px = bytearray(w * h * 3)
-    for y in range(h):
-        for x in range(w):
-            t = y / h
-            band = int(t * 8) / 8  # stepped gradient: pixel art, not a smooth ramp
-            colour = [int(sky[c] * (1 - band) + sun[c] * band * 0.6) for c in range(3)]
-            if (x - 62) ** 2 + (y - 40) ** 2 < 14 ** 2:
-                colour = list(sun)
-            if y > 84 + int(10 * ((x // 8) % 3 == 0)) - (x // 6) % 5:
-                colour = [int(hill[c] * (0.65 + 0.35 * ((x // 12 + y // 10) % 2))) for c in range(3)]
-            if y > 112:
-                colour = [int(c * 0.55) for c in colour]
-            px[(y * w + x) * 3:(y * w + x) * 3 + 3] = bytes(colour)
-    big = bytearray()
-    for y in range(h * 2):
-        row = bytearray()
-        for x in range(w * 2):
-            row += px[((y // 2) * w + (x // 2)) * 3:((y // 2) * w + (x // 2)) * 3 + 3]
-        big += row
-    return png(w * 2, h * 2, bytes(big))
+    """A fictional 96x128 'box art', one distinct scene per index (peaks, night city, ruins, coast), upscaled 2x by the launcher. Original
+    rectangles only: no game, character or trademark is depicted."""
+    c = Canvas()
+    kind = index % 4
+    if kind == 0:  # snowy peaks at dusk
+        c.gradient(0, 128, (26, 42, 112), (250, 150, 96))
+        c.disc(70, 46, 11, (255, 226, 150))
+        for k, (x0, top, width) in enumerate(((-10, 52, 70), (30, 38, 80), (62, 60, 50))):
+            for y in range(top, 128):
+                half = (y - top) * width // (128 - top) // 2 + 1
+                mid = x0 + width // 2
+                shade = (40 + k * 12, 52 + k * 10, 110 + k * 14)
+                c.rect(mid - half, y, mid + half, y + 1, shade)
+                if y < top + 12:
+                    c.rect(mid - half // 2, y, mid + half // 2, y + 1, (232, 238, 255))
+        c.rect(0, 108, 96, 128, (24, 70, 80))
+    elif kind == 1:  # night skyline
+        c.gradient(0, 128, (8, 10, 42), (62, 40, 120), 8)
+        c.disc(24, 26, 8, (236, 240, 255))
+        for sx, sy in ((50, 10), (68, 22), (82, 8), (40, 44), (88, 40)):
+            c.rect(sx, sy, sx + 1, sy + 1, (230, 235, 255))
+        x = 0
+        seed = 7
+        while x < 96:
+            seed = (seed * 37 + 11) % 97
+            width, height = 8 + seed % 9, 30 + seed % 44
+            c.rect(x, 128 - height, x + width - 1, 128, (10 + seed % 14, 14 + seed % 12, 40 + seed % 20))
+            for wy in range(128 - height + 4, 124, 6):
+                for wx in range(x + 2, x + width - 3, 4):
+                    if (wx * 7 + wy * 13 + seed) % 5 < 2:
+                        c.rect(wx, wy, wx + 2, wy + 3, (250, 214, 110))
+            x += width
+        c.rect(0, 116, 96, 128, (14, 30, 90))
+    elif kind == 2:  # ruins in a green valley with a waterfall
+        c.gradient(0, 128, (44, 96, 120), (170, 214, 150), 8)
+        for k in range(5):
+            c.rect(6 + k * 20, 40 + (k % 2) * 8, 16 + k * 20, 100, (60, 54, 86))
+            c.rect(4 + k * 20, 36 + (k % 2) * 8, 18 + k * 20, 42 + (k % 2) * 8, (84, 76, 116))
+        c.rect(38, 60, 52, 128, (150, 210, 240))
+        c.rect(40, 60, 42, 128, (230, 246, 255))
+        for k in range(14):
+            c.rect(k * 8 - 4, 96 + (k * 5) % 9, k * 8 + 9, 128, (24, 90 + (k % 3) * 14, 52))
+    else:  # sun over the sea with palm silhouettes
+        c.gradient(0, 70, (60, 30, 110), (255, 140, 80), 9)
+        c.disc(48, 66, 18, (255, 222, 130))
+        c.gradient(70, 128, (30, 70, 160), (10, 24, 80), 7)
+        for k in range(7):
+            c.rect(28 + k * 6 - (k % 2) * 4, 76 + k * 7, 68 - k * 6, 78 + k * 7, (255, 200, 120))
+        c.rect(12, 56, 16, 128, (26, 22, 38))
+        for dx, dy in ((-14, 4), (-8, -2), (0, -4), (8, -2), (14, 4)):
+            c.rect(14 + dx - 6, 56 + dy, 14 + dx + 6, 59 + dy, (22, 70, 52))
+    return c.png()
 
 
 def run(cmd, env):
@@ -130,11 +195,13 @@ def main():
     for game in catalog["games"]:
         for path, title, platform, index in entries:
             if hashlib.sha256(path.read_bytes()).hexdigest() == game["sha256"]:
-                (lib / "covers" / (game["sha256"] + ".png")).write_bytes(cover(index))
-                game["cover"] = game["sha256"] + ".png"
+                if index in COVERED:  # the others keep the launcher's neutral cartridge (no cover chosen)
+                    (lib / "covers" / (game["sha256"] + ".png")).write_bytes(cover(index))
+                    game["cover"] = game["sha256"] + ".png"
                 game["display_title"] = title
                 game["last_played_at"] = now - 86400 * (index * 2 + 1) if index < 4 else 0
                 game["favorite"] = index in (0, 3)
+                game["last_built_at"] = now - 86400 * (index * 3 + 2) if index < len(GENESIS) + len(SMS) else 0
     (lib / "library.json").write_text(json.dumps(catalog, indent=2))
     print(f"SEGARECOMP_CACHE_DIR={cache}")
 

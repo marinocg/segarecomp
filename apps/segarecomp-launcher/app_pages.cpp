@@ -162,14 +162,7 @@ void App::draw_details(float w, float h) {
   {  // cover column
     const float ch = cover_w * 1.32F;
     const ImVec2 a(top.x, top.y), b(top.x + cover_w, top.y + ch);
-    if (SDL_Texture *cover = cover_texture(*entry)) {
-      float tw = 0, th = 0;
-      SDL_GetTextureSize(cover, &tw, &th);
-      const float fr = cover_w / ch, tr = tw / th;
-      ImVec2 uv0(0, 0), uv1(1, 1);
-      if (tr > fr) { const float k = fr / tr; uv0.x = (1 - k) * 0.5F; uv1.x = uv0.x + k; } else { const float k = tr / fr; uv0.y = (1 - k) * 0.5F; uv1.y = uv0.y + k; }
-      dl->AddImageRounded(reinterpret_cast<ImTextureID>(cover), a, b, uv0, uv1, IM_COL32_WHITE, ctx_.u(5.0F));
-    }
+    draw_cover(dl, *entry, a, b, ctx_.u(5.0F));
     dl->AddRect(a, b, col::glow, ctx_.u(5.0F), 0, std::max(1.0F, ctx_.u(1.5F)));
     float y = b.y + ctx_.u(8.0F);
     ImGui::SetCursorScreenPos(ImVec2(top.x, y));
@@ -301,8 +294,16 @@ void App::draw_details(float w, float h) {
     if (entry->rom_paths.empty()) label_value(ctx_, lw, vw, "ROM file", entry->rom_path_unknown ? "not recorded (older cache record)" : "none", col::warn);
     for (std::size_t i = 0; i < entry->rom_paths.size(); ++i) {
       std::error_code ec;
-      const bool exists = fs::is_regular_file(fs::path(std::u8string(reinterpret_cast<const char8_t *>(entry->rom_paths[i].c_str()))), ec);
-      label_value(ctx_, lw, vw, i == 0 ? "ROM file" : "", entry->rom_paths[i] + (exists ? "" : "  (missing)"), exists ? col::text : col::warn);
+      const fs::path rom_file = fs::path(std::u8string(reinterpret_cast<const char8_t *>(entry->rom_paths[i].c_str())));
+      const bool exists = fs::is_regular_file(rom_file, ec);
+      const std::uintmax_t rom_size = exists ? fs::file_size(rom_file, ec) : 0U;
+      const ImVec2 row = ImGui::GetCursorScreenPos();
+      label_value(ctx_, lw, vw, i == 0 ? "ROM file" : "", u8s(rom_file.filename()) + (exists ? "  (" + format_bytes(rom_size) + ")" : "  (missing)"), exists ? col::text : col::warn);
+      ImGui::SetCursorScreenPos(ImVec2(row.x + lw, ImGui::GetCursorScreenPos().y - ctx_.u(2.0F)));
+      const std::string folder = ellipsize(ctx_.regular, ctx_.u(10.5F), vw, u8s(rom_file.parent_path()));
+      draw_text(dl, ctx_.regular, ctx_.u(10.5F), col::dim, ImGui::GetCursorScreenPos(), folder.c_str());
+      ImGui::Dummy(ImVec2(vw, ctx_.u(15.0F)));
+      if (ImGui::IsMouseHoveringRect(row, ImVec2(row.x + lw + vw, ImGui::GetCursorScreenPos().y))) tooltip(ctx_, entry->rom_paths[i].c_str());
     }
     if (entry->platform_id == "genesis") label_value(ctx_, lw, vw, "Region", entry->region == "japan" ? "Japan NTSC" : (entry->region == "europe" ? "Europe PAL (runs at 60 Hz)" : "USA NTSC"));
     else label_value(ctx_, lw, vw, "Mapper", entry->mapper.empty() ? (entry->mapper_manifest_sha256.empty() ? "undeclared" : "declared by sidecar manifest") : (entry->mapper == "sega" ? "Sega" : "ROM only (32 KiB)"));
@@ -542,7 +543,7 @@ void App::draw_storage(float w, float h) {
       ImGui::SetCursorScreenPos(ImVec2(a.x + ctx_.u(12.0F), a.y + (rh - ctx_.u(22.0F)) * 0.5F));
       if (checkbox(ctx_, "sel", "", &on)) { if (on) storage_selected_.insert(e->id()); else storage_selected_.erase(e->id()); }
       ImGui::PopID();
-      if (SDL_Texture *c = cover_texture(*e)) cl->AddImageRounded(reinterpret_cast<ImTextureID>(c), ImVec2(x0 - top.x + a.x - ctx_.u(6.0F), a.y + ctx_.u(5.0F)), ImVec2(x0 - top.x + a.x + ctx_.u(26.0F), a.y + rh - ctx_.u(5.0F)), ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, ctx_.u(3.0F));
+      draw_cover(cl, *e, ImVec2(x0 - top.x + a.x - ctx_.u(6.0F), a.y + ctx_.u(4.0F)), ImVec2(x0 - top.x + a.x + ctx_.u(28.0F), a.y + rh - ctx_.u(4.0F)), ctx_.u(3.0F));
       const float nx = x0 - top.x + a.x + ctx_.u(34.0F);
       draw_text(cl, ctx_.bold, ctx_.u(12.5F), col::text, ImVec2(nx, a.y + ctx_.u(5.0F)), ellipsize(ctx_.bold, ctx_.u(12.5F), name_w - ctx_.u(40.0F), e->title()).c_str());
       pill(ctx_, cl, ImVec2(nx, a.y + ctx_.u(21.0F)), platform_short(e->platform_id), col::info, nullptr, ctx_.u(9.5F));
@@ -572,7 +573,7 @@ void App::draw_storage(float w, float h) {
     card(ctx_, dl, a, b, false, false, rgba(7, 17, 40));
     draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text2, ImVec2(a.x + ctx_.u(14.0F), a.y + ctx_.u(10.0F)), storage_selected_.size() > 1 ? "Selected Games" : "Selected Game");
     if (sel != nullptr) {
-      if (SDL_Texture *c = cover_texture(*sel)) dl->AddImageRounded(reinterpret_cast<ImTextureID>(c), ImVec2(a.x + ctx_.u(14.0F), a.y + ctx_.u(34.0F)), ImVec2(a.x + ctx_.u(14.0F) + ctx_.u(58.0F), a.y + ctx_.u(34.0F) + ctx_.u(58.0F)), ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, ctx_.u(4.0F));
+      draw_cover(dl, *sel, ImVec2(a.x + ctx_.u(14.0F), a.y + ctx_.u(34.0F)), ImVec2(a.x + ctx_.u(14.0F) + ctx_.u(58.0F), a.y + ctx_.u(34.0F) + ctx_.u(58.0F)), ctx_.u(4.0F));
       draw_text(dl, ctx_.bold, ctx_.u(14.0F), col::text, ImVec2(a.x + ctx_.u(82.0F), a.y + ctx_.u(36.0F)), ellipsize(ctx_.bold, ctx_.u(14.0F), side_w - ctx_.u(96.0F), sel->title()).c_str());
       pill(ctx_, dl, ImVec2(a.x + ctx_.u(82.0F), a.y + ctx_.u(58.0F)), platform_short(sel->platform_id), col::info, nullptr, ctx_.u(10.0F));
       std::uintmax_t total = 0;
@@ -619,8 +620,8 @@ void App::draw_storage(float w, float h) {
       {"a_old", "Remove old builds", "Builds of earlier releases or options; the current build stays", "trash", have, Style::secondary, [&] { open_plan(plan_superseded(report_, ids, busy_), "Remove old builds?"); }},
       {"a_failed", "Clean failed / abandoned builds", "Verified *.failed and *.partial folders of all games", "warning", any, Style::secondary, [&] { Plan p = plan_failed_partial(report_, keep_failed_logs_, busy_); open_plan(p, "Clean failed / abandoned builds?"); modal_.keep_logs = keep_failed_logs_; }},
       {"a_archive", "Keep metadata only", "Deletes the selection's builds; the library entry stays", "trash", have, Style::danger, [&] { open_plan(plan_archive(report_, ids, busy_), "Keep metadata only (delete builds)?"); }}};
-  const int per_row = w > ctx_.u(800.0F) ? 3 : 2;
-  const float aw = (w - ctx_.u(10.0F) * static_cast<float>(per_row - 1)) / static_cast<float>(per_row), ah = ctx_.u(52.0F);
+  const int per_row = w > ctx_.u(1000.0F) ? 3 : 2;
+  const float aw = (w - ctx_.u(10.0F) * static_cast<float>(per_row - 1)) / static_cast<float>(per_row), ah = ctx_.u(60.0F);
   const ImVec2 ao = ImGui::GetCursorScreenPos();
   for (std::size_t i = 0; i < acts.size(); ++i) {
     const Act &act = acts[i];
@@ -638,7 +639,10 @@ void App::draw_storage(float w, float h) {
     dl->AddRect(a, b, !act.enabled ? rgba(30, 50, 96) : (danger ? col::danger_top : (hov ? col::btn_top : rgba(46, 96, 190))), ctx_.u(6.0F), 0, std::max(1.0F, ctx_.u(1.3F)));
     icon_image(dl, ctx_.icon(act.icon), ImVec2(a.x + ctx_.u(12.0F), a.y + (ah - ctx_.u(20.0F)) * 0.5F), ctx_.u(20.0F), !act.enabled ? rgba(90, 105, 140) : (danger ? col::err : IM_COL32_WHITE));
     draw_text(dl, ctx_.bold, ctx_.u(12.5F), act.enabled ? col::text : col::dim, ImVec2(a.x + ctx_.u(44.0F), a.y + ctx_.u(9.0F)), ellipsize(ctx_.bold, ctx_.u(12.5F), aw - ctx_.u(54.0F), act.title).c_str());
-    draw_text(dl, ctx_.regular, ctx_.u(10.5F), col::dim, ImVec2(a.x + ctx_.u(44.0F), a.y + ctx_.u(27.0F)), ellipsize(ctx_.regular, ctx_.u(10.5F), aw - ctx_.u(54.0F), act.caption).c_str());
+    {
+      const auto lines = wrap(ctx_.regular, ctx_.u(10.5F), aw - ctx_.u(54.0F), act.caption);
+      for (std::size_t li = 0; li < lines.size() && li < 2; ++li) draw_text(dl, ctx_.regular, ctx_.u(10.5F), act.enabled ? col::text2 : col::dim, ImVec2(a.x + ctx_.u(44.0F), a.y + ctx_.u(26.0F) + static_cast<float>(li) * ctx_.u(13.0F)), li == 1 && lines.size() > 2 ? ellipsize(ctx_.regular, ctx_.u(10.5F), aw - ctx_.u(54.0F), lines[li] + " ...").c_str() : lines[li].c_str());
+    }
     if (foc) focus_ring(ctx_, dl, a, b);
     if (pressed && act.enabled) act.fn();
   }

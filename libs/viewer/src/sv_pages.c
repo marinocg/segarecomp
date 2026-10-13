@@ -6,21 +6,6 @@
 
 #include "sv_internal.h"
 
-enum {
-  PAGE_MAIN = 1, PAGE_QUICK, PAGE_VIDEO, PAGE_CONTROLS, PAGE_AUDIO, PAGE_SYSTEM, PAGE_PADSTATUS, PAGE_CONFIRM_QUIT, PAGE_CONFIRM_RESET, PAGE_CONFIRM_VIDEO, PAGE_CONFIRM_CONTROLS
-};
-enum {
-  I_RESUME = 1, I_GO_QUICK, I_GO_VIDEO, I_GO_CONTROLS, I_GO_AUDIO, I_GO_SYSTEM, I_QUIT,
-  I_FULLSCREEN, I_SCALE, I_ASPECT, I_PRESET, I_VSYNC, I_FPS, I_SCANLINES, I_MASK, I_CURVE, I_BLOOM, I_BRIGHT, I_VIDEO_DEFAULTS,
-  I_VOLUME, I_MUTE, I_AUDIO_NOTE,
-  I_SHOT, I_RESET, I_INFO,
-  I_PLAYER, I_PAD, I_PAD_ASSIGNED, I_DEADZONE, I_MENUKEY, I_CTRL_DEFAULTS, I_GO_PADSTATUS, I_PAD_RESCAN, I_PAD_HID,
-  I_YES, I_NO,
-  I_BIND = 100 /* + action (one row per action: keyboard and gamepad columns) */
-};
-
-static const SDL_Color c_text = {220, 232, 255, 255}, c_text2 = {169, 183, 221, 255}, c_dim = {120, 133, 170, 255}, c_btn_hi = {64, 191, 245, 255}, c_btn_text = {244, 247, 255, 255},
-                       c_focus = {140, 224, 255, 255}, c_err = {255, 129, 119, 255};
 
 /* ---- naming ---- */
 
@@ -34,20 +19,6 @@ static const char *key_name(int sc) {
   if (sc <= 0) return "Unbound";
   n = SDL_GetScancodeName((SDL_Scancode)sc);
   return (n != NULL && *n != '\0') ? n : "Key";
-}
-
-static void truncate_to(char *dst, size_t cap, const char *src, int max_chars) {
-  size_t n = strlen(src);
-  if (max_chars < 1) max_chars = 1;
-  if ((int)n > max_chars) {
-    n = (size_t)max_chars;
-    if (n >= cap) n = cap - 1u;
-    memcpy(dst, src, n);
-    if (n >= 3u) { dst[n - 1u] = '.'; dst[n - 2u] = '.'; dst[n - 3u] = '.'; }
-    dst[n] = '\0';
-  } else {
-    snprintf(dst, cap, "%s", src);
-  }
 }
 
 /* ---- presets ---- */
@@ -94,6 +65,7 @@ static void add_choice(SvPage *p, int id, const char *label, int value, int coun
 }
 
 static void build_video_core(SvHost *h, SvPage *p, int full) {
+  SvItem *item_vsync, *item_fps;
   static const char *const scale[] = {"Fit to Window", "Integer"}, *const aspect[] = {"Square pixels", "4:3 (corrected)"};
   static const char *const preset[] = {"Pixel Perfect", "CRT Soft", "CRT Classic", "CRT Arcade", "Custom"};
   const SvVideoSettings *v = &h->settings.video;
@@ -101,6 +73,11 @@ static void build_video_core(SvHost *h, SvPage *p, int full) {
   add_choice(p, I_SCALE, "Scaling", (int)v->scale, 2, scale, "Fit uses any size; Integer keeps whole-number pixel multiples when they fit.");
   add_choice(p, I_ASPECT, "Aspect Ratio", (int)v->aspect, 2, aspect, "Original keeps square pixels; 4:3 stretches to the aspect of a TV picture.");
   add_choice(p, I_PRESET, "Video Effect / CRT", (int)v->preset, v->preset == SV_CRT_CUSTOM ? 5 : 4, preset, "Pixel Perfect is the untouched picture. CRT presets add real scanline/mask/glow/curve passes.");
+  if (!full) { /* Quick Settings: the design board's icon rows */
+    int k;
+    static const char *const icons[] = {"fullscreen", "video", "video", "settings"};
+    for (k = 0; k < 4 && k < p->count; ++k) sv_item_set_icon(&p->items[k], icons[k]);
+  }
   if (full) {
     add_slider(p, I_SCANLINES, "Scanlines", v->scanlines, 0, 100, 5, "%", "Darkens the gap between source lines (needs a window at least 1.5x the picture).");
     add_slider(p, I_MASK, "Phosphor mask", v->mask, 0, 100, 5, "%", "RGB stripe mask over the picture.");
@@ -108,8 +85,9 @@ static void build_video_core(SvHost *h, SvPage *p, int full) {
     add_slider(p, I_BLOOM, "Bloom", v->bloom, 0, 100, 5, "%", "Soft glow around bright pixels.");
     add_slider(p, I_BRIGHT, "Brightness", v->brightness, 50, 150, 5, "%", "Picture brightness; values above 100 brighten to compensate for scanlines.");
   }
-  add_toggle(p, I_VSYNC, "VSync", v->vsync, "Syncs presentation to the display. Game speed is paced by the console clock either way.");
-  add_toggle(p, I_FPS, "Show FPS Counter", v->show_fps, "Shows the presentation rate on the game screen.");
+  item_vsync = add_toggle(p, I_VSYNC, "VSync", v->vsync, "Syncs presentation to the display. Game speed is paced by the console clock either way.");
+  item_fps = add_toggle(p, I_FPS, "Show FPS Counter", v->show_fps, "Shows the presentation rate on the game screen.");
+  if (!full) { if (item_vsync != NULL) sv_item_set_icon(item_vsync, "reset"); if (item_fps != NULL) sv_item_set_icon(item_fps, "info"); }
   if (full) sv_page_add(p, SV_ITEM_BUTTON, I_VIDEO_DEFAULTS, "Restore video defaults");
 }
 
@@ -278,31 +256,38 @@ static void build_system(SvHost *h, SvPage *p) {
   if (h->cfg.diagnostics != NULL) h->cfg.diagnostics(h->cfg.diagnostics_ctx, &d);
   SDL_GetCurrentRenderOutputSize(h->renderer, &out_w, &out_h);
   dest = sv_layout_dest(out_w, out_h, h->last_w, h->last_h, h->settings.video.aspect, h->settings.video.scale);
-#define ROW(label, ...) do { item = sv_page_add(p, SV_ITEM_LABEL, I_INFO, label); if (item != NULL) { snprintf(buf, sizeof buf, __VA_ARGS__); sv_item_set_text(item, buf); } } while (0)
-  add_section(p, "Game Information");
-  ROW("System", "%s", sv_system_name(h->cfg.system));
-  if (h->cfg.rom_sha256 != NULL && strlen(h->cfg.rom_sha256) == 64u) {
-    char half[40];
-    snprintf(half, sizeof half, "%.32s", h->cfg.rom_sha256);
-    item = sv_page_add(p, SV_ITEM_LABEL, I_INFO, "ROM SHA-256"); sv_item_set_text(item, half);
-    snprintf(half, sizeof half, "%.32s", h->cfg.rom_sha256 + 32);
-    item = sv_page_add(p, SV_ITEM_LABEL, I_INFO, ""); sv_item_set_text(item, half);
-  }
-  ROW("Session Time", "%02u:%02u:%02u", secs / 3600u, (secs / 60u) % 60u, secs % 60u);
-  add_section(p, "Runtime Information");
-  ROW("Renderer", "%s", sv_host_renderer_name(h));
-  ROW("Picture / Output", "%dx%d -> %dx%d", h->last_w, h->last_h, dest.w, dest.h);
-  ROW("Frame Rate", "%.1f FPS (%.1f ms)", h->fps, h->frame_ms);
-  if (d.audio_active) ROW("Audio Queue", "%u ms, %llu dropped", (unsigned)d.audio_queued_ms, (unsigned long long)d.audio_dropped);
-  else ROW("Audio", "no device (silent)");
-  ROW("Gamepads", "%d connected", h->pad_count);
-  add_section(p, "Actions");
+  /* left column: the actions (all real); right column: the information */
   item = sv_page_add(p, SV_ITEM_BUTTON, I_SHOT, "Take Screenshot");
   if (item != NULL) { sv_item_set_icon(item, "screenshot"); sv_item_set_hint(item, h->last_screenshot[0] != '\0' ? h->last_screenshot : "Saves the game picture (without menus or effects) as an image."); }
   item = sv_page_add(p, SV_ITEM_BUTTON, I_RESET, "Reset Game");
   if (item != NULL) sv_item_set_icon(item, "reset");
   if (item != NULL && !h->cfg.can_reset) sv_item_disable(item, "Not available: this console's viewer has no proven reset seam.");
   else if (item != NULL) sv_item_set_hint(item, "Restarts the machine from power-on (the recorded input restarts too).");
+  item = sv_page_add(p, SV_ITEM_BUTTON, I_GO_PADSTATUS, "Controller status & test");
+  if (item != NULL) { sv_item_set_icon(item, "controller"); sv_item_set_hint(item, "What SDL sees (also controllers it cannot use), live buttons, and the exact reason a pad does not work."); }
+  item = sv_page_add(p, SV_ITEM_TOGGLE, I_FPS, "Show FPS / status box");
+  if (item != NULL) { item->value = h->settings.video.show_fps != 0; sv_item_set_text(item, item->value ? "On" : "Off"); sv_item_set_icon(item, "info"); sv_item_set_hint(item, "A small box on the game screen: system, frame rate, aspect and effect."); }
+#define ROW(label, ...) do { item = sv_page_add(p, SV_ITEM_LABEL, I_INFO, label); if (item != NULL) { item->column = 1; snprintf(buf, sizeof buf, __VA_ARGS__); sv_item_set_text(item, buf); } } while (0)
+#define SECTION(title) do { item = sv_page_add(p, SV_ITEM_LABEL, 0, title); if (item != NULL) { item->column = 1; sv_item_set_icon(item, "section"); } } while (0)
+  SECTION("Game Information");
+  ROW("System", "%s", sv_system_name(h->cfg.system));
+  if (h->cfg.rom_sha256 != NULL && strlen(h->cfg.rom_sha256) == 64u) {
+    char half[40];
+    snprintf(half, sizeof half, "%.16s", h->cfg.rom_sha256);
+    item = sv_page_add(p, SV_ITEM_LABEL, I_INFO, "ROM SHA-256"); if (item != NULL) { item->column = 1; sv_item_set_text(item, half); }
+  }
+  ROW("Session Time", "%02u:%02u:%02u", secs / 3600u, (secs / 60u) % 60u, secs % 60u);
+  SECTION("Runtime Information");
+  ROW("Renderer", "%s", sv_host_renderer_name(h));
+  ROW("Picture / Output", "%dx%d -> %dx%d", h->last_w, h->last_h, dest.w, dest.h);
+  ROW("Frame Rate", "%.1f FPS (%.1f ms)", h->fps, h->frame_ms);
+  if (d.audio_active) ROW("Audio Queue", "%u ms, %llu dropped", (unsigned)d.audio_queued_ms, (unsigned long long)d.audio_dropped);
+  else ROW("Audio", "no device (silent)");
+  {
+    const SvPadState st = sv_diag_overall(h->diag, NULL);
+    ROW("Controllers", "%d usable, state %s", h->pad_count, sv_pad_state_code(st));
+  }
+#undef SECTION
 #undef ROW
 }
 
@@ -320,7 +305,9 @@ void sv_pages_rebuild(SvHost *h) {
   p->count = 0;
   switch (p->page_id) {
     case PAGE_MAIN:
-      sv_item_set_icon(sv_page_add(p, SV_ITEM_BUTTON, I_RESUME, "Resume Game"), "play");
+      item = sv_page_add(p, SV_ITEM_BUTTON, I_RESUME, "Resume Game");
+      sv_item_set_icon(item, "play");
+      sv_item_set_hint(item, "Esc or a gamepad's Back/Select (Nintendo -) opens this menu. Start is a game button.");
       sv_item_set_icon(sv_page_add(p, SV_ITEM_BUTTON, I_GO_QUICK, "Quick Settings"), "settings");
       sv_item_set_icon(sv_page_add(p, SV_ITEM_BUTTON, I_GO_VIDEO, "Video & Display"), "video");
       sv_item_set_icon(sv_page_add(p, SV_ITEM_BUTTON, I_GO_CONTROLS, "Controls"), "controller");
@@ -554,319 +541,3 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
   sv_host_mark_dirty(h);
 }
 
-/* ---- drawing (the concept boards: branded rounded panel, icon rows, switches, knobs, button-glyph footer) ---- */
-
-static const SDL_Color k_panel = {6, 16, 40, 238}, k_row = {12, 28, 62, 255}, k_cell = {5, 12, 30, 255}, k_line = {34, 70, 140, 255}, k_sel = {52, 128, 238, 255},
-                       k_sel_edge = {120, 190, 255, 255}, k_glow = {46, 104, 214, 255}, k_on = {52, 140, 245, 255}, k_green = {64, 200, 140, 255}, k_red = {235, 80, 80, 255},
-                       k_warn = {255, 197, 109, 255};
-
-static int text_w(const char *s, int ui) { return (int)strlen(s) * 8 * ui; }
-
-static void panel_frame(SvHost *h, float x, float y, float w, float hh, int ui) {
-  const SDL_Color soft = {46, 104, 214, 60};
-  sv_host_round_fill(h, x - (float)ui, y - (float)ui, w + 2.0f * (float)ui, hh + 2.0f * (float)ui, (float)(6 * ui), soft);
-  sv_host_round_fill(h, x, y, w, hh, (float)(5 * ui), k_panel);
-  sv_host_round_stroke(h, x, y, w, hh, (float)(5 * ui), ui > 1 ? 2 : 1, k_glow);
-}
-
-static void keycap(SvHost *h, int x, int y, const char *label, int ui) {
-  const int w = text_w(label, ui) + 8 * ui, hh = 12 * ui;
-  sv_host_round_fill(h, (float)x, (float)y, (float)w, (float)hh, (float)(2 * ui), k_line);
-  sv_host_draw_text(h, (float)(x + 4 * ui), (float)(y + 2 * ui), ui, c_text, label);
-}
-
-/* Right-aligned footer cues: coloured A/B circles after gamepad input, key caps after keyboard input. */
-static void draw_cues(SvHost *h, int right, int y, int ui, int back_label) {
-  const char *sel = "Select", *bk = back_label ? "Back" : "Close";
-  const int pad_mode = h->last_input_pad;
-  const int glyph1 = pad_mode ? 11 * ui : text_w("Enter", ui) + 8 * ui, glyph2 = pad_mode ? 11 * ui : text_w("Esc", ui) + 8 * ui;
-  const int total = glyph1 + 4 * ui + text_w(sel, ui) + 10 * ui + glyph2 + 4 * ui + text_w(bk, ui);
-  int x = right - total;
-  if (pad_mode) {
-    sv_host_round_fill(h, (float)x, (float)y, (float)glyph1, (float)glyph1, (float)(5 * ui), k_green);
-    sv_host_draw_text(h, (float)(x + 2 * ui + ui / 2), (float)(y + 2 * ui), ui, c_btn_text, "A");
-  } else keycap(h, x, y, "Enter", ui);
-  x += glyph1 + 4 * ui;
-  sv_host_draw_text(h, (float)x, (float)(y + 2 * ui), ui, c_text2, sel);
-  x += text_w(sel, ui) + 10 * ui;
-  if (pad_mode) {
-    sv_host_round_fill(h, (float)x, (float)y, (float)glyph2, (float)glyph2, (float)(5 * ui), k_red);
-    sv_host_draw_text(h, (float)(x + 2 * ui + ui / 2), (float)(y + 2 * ui), ui, c_btn_text, "B");
-  } else keycap(h, x, y, "Esc", ui);
-  x += glyph2 + 4 * ui;
-  sv_host_draw_text(h, (float)x, (float)(y + 2 * ui), ui, c_text2, bk);
-}
-
-static int item_rows(const SvItem *it) { return strcmp(it->icon, "note") == 0 ? 5 : 1; }
-
-void sv_pages_draw(SvHost *h, int out_w, int out_h) {
-  SvPage *page = sv_menu_top(&h->menu);
-  const int preview = sv_pages_wants_preview(h);
-  int ui = sv_host_ui_scale(out_w, out_h), cols, cw, row_h, pad, head_h, foot_h, panel_w, panel_h, x, y, i, drawn, avail, used, rx, rwid, left_w;
-  const int is_confirm = page != NULL && page->page_id >= PAGE_CONFIRM_QUIT;
-  const int video = page != NULL && page->page_id == PAGE_VIDEO;
-  char line[160];
-  if (page == NULL) return;
-  cols = is_confirm ? 60 : (page->page_id == PAGE_MAIN ? 40 : (video ? 76 : (page->page_id == PAGE_CONTROLS ? 56 : (page->page_id == PAGE_SYSTEM ? 54 : 50))));
-  {
-    const int fit = out_w * 94 / 100 / (cols * 8);
-    if (fit < ui) ui = fit < 1 ? 1 : fit;
-  }
-  cw = 8 * ui; row_h = 15 * ui; pad = 8 * ui; head_h = is_confirm ? 0 : 22 * ui; foot_h = is_confirm ? 8 * ui : 30 * ui;
-  panel_w = cols * cw;
-  if (panel_w > out_w - 2 * pad) panel_w = out_w - 2 * pad;
-  left_w = video ? panel_w * 57 / 100 : panel_w;
-  /* how many rows fit */
-  avail = out_h - 2 * pad - head_h - foot_h - 2 * pad;
-  if (avail < 4 * row_h) avail = 4 * row_h;
-  {
-    int est = 0;
-    for (i = page->scroll, used = 0; i < page->count && used + item_rows(&page->items[i]) * row_h <= avail; ++i) { used += item_rows(&page->items[i]) * row_h; ++est; }
-    if (est < 1) est = 1;
-    sv_menu_ensure_visible(page, est);
-  }
-  for (i = page->scroll, used = 0, drawn = 0; i < page->count && used + item_rows(&page->items[i]) * row_h <= avail; ++i) { used += item_rows(&page->items[i]) * row_h; ++drawn; }
-  if (drawn < 1) drawn = 1;
-  panel_h = head_h + used + foot_h + 2 * pad;
-  if (is_confirm) panel_h = 46 * ui + (page->count) * (row_h + 4 * ui) + 10 * ui;
-  x = (out_w - panel_w) / 2;
-  y = (out_h - panel_h) / 2;
-  if (preview && !video) { x = pad; }
-  if (y < pad) y = pad;
-  panel_frame(h, (float)x, (float)y, (float)panel_w, (float)panel_h, ui);
-  h->ui_rows = 0;
-  if (!is_confirm) {
-    sv_host_icon_draw(h, "controller", (float)(x + pad), (float)(y + 4 * ui), (float)(16 * ui), c_btn_hi);
-    sv_host_draw_text(h, (float)(x + pad + 20 * ui), (float)(y + 8 * ui), ui, c_text, "SEGARECOMP");
-    sv_host_draw_text(h, (float)(x + pad + 20 * ui + 1), (float)(y + 8 * ui), ui, c_text, "SEGARECOMP");
-    sv_host_draw_text(h, (float)(x + panel_w - pad - text_w(page->title, ui)), (float)(y + 8 * ui), ui, c_text2, page->title);
-    { const SDL_Color rule = {34, 70, 140, 255}; sv_host_fill(h, x + pad, y + head_h, panel_w - 2 * pad, ui, rule); }
-  }
-  rwid = left_w - 2 * pad;
-  rx = x + pad;
-  if (is_confirm) {
-    const char *msg = page->page_id == PAGE_CONFIRM_QUIT ? (SDL_getenv("SEGARECOMP_LAUNCHED") != NULL ? "Return to the launcher and close the game?" : "Close the game?") :
-                      page->page_id == PAGE_CONFIRM_RESET ? "Restart the game from power-on?" : "Reset these settings to their defaults?";
-    const char *sub = page->page_id == PAGE_CONFIRM_QUIT ? "Any unsaved progress will be lost: there are no save states." : (page->page_id == PAGE_CONFIRM_RESET ? "Progress since the last power-on is lost." : "Your other settings are kept.");
-    sv_host_icon_draw(h, "warning", (float)(x + 14 * ui), (float)(y + 10 * ui), (float)(16 * ui), k_warn);
-    sv_host_draw_text(h, (float)(x + 34 * ui), (float)(y + 14 * ui), ui, c_text, page->title);
-    sv_host_draw_text(h, (float)(x + 14 * ui), (float)(y + 30 * ui), ui, c_text2, sub);
-    (void)msg;
-  }
-  {
-    int cy = is_confirm ? y + 46 * ui : y + head_h + pad;
-    for (i = 0; i < drawn; ++i) {
-      const int idx = page->scroll + i;
-      const SvItem *it = &page->items[idx];
-      const int rows = item_rows(it), hh = rows * row_h;
-      const int focused = idx == page->focus;
-      SDL_Color tc = it->enabled ? c_text : c_dim;
-      const int ty = cy + (row_h - 8 * ui) / 2;
-      const int is_note = strcmp(it->icon, "note") == 0, is_section = strcmp(it->icon, "section") == 0;
-      if (h->ui_rows < SV_MENU_MAX_ITEMS) { h->ui_item_rect[h->ui_rows][0] = rx; h->ui_item_rect[h->ui_rows][1] = cy; h->ui_item_rect[h->ui_rows][2] = rwid; h->ui_item_rect[h->ui_rows][3] = hh; h->ui_rows++; }
-      if (is_note) {
-        sv_host_round_fill(h, (float)rx, (float)cy + (float)ui, (float)rwid, (float)(hh - 2 * ui), (float)(3 * ui), k_row);
-        sv_host_icon_draw(h, "info", (float)(rx + 6 * ui), (float)(cy + 6 * ui), (float)(14 * ui), c_focus);
-        {
-          const char *s = it->hint;
-          int line_no = 0;
-          const int maxc = (rwid - 32 * ui) / cw;
-          while (*s != '\0' && line_no < 6) {
-            size_t take = strlen(s);
-            if ((int)take > maxc) { take = (size_t)maxc; while (take > 8u && s[take] != ' ') --take; }
-            snprintf(line, sizeof line, "%.*s", (int)take, s);
-            sv_host_draw_text(h, (float)(rx + 26 * ui), (float)(cy + 6 * ui + line_no * 10 * ui), ui, c_text2, line);
-            s += take; while (*s == ' ') ++s;
-            ++line_no;
-          }
-        }
-        cy += hh;
-        continue;
-      }
-      if (is_section) {
-        sv_host_draw_text(h, (float)(rx + 2 * ui), (float)(ty + ui), ui, c_focus, it->label);
-        { const SDL_Color r = {34, 70, 140, 255}; sv_host_fill(h, rx, cy + row_h - 2 * ui, rwid, ui, r); }
-        cy += hh;
-        continue;
-      }
-      if (focused && it->kind != SV_ITEM_LABEL) {
-        sv_host_round_fill(h, (float)rx, (float)cy, (float)rwid, (float)(row_h - ui), (float)(3 * ui), k_sel);
-        sv_host_round_stroke(h, (float)rx, (float)cy, (float)rwid, (float)(row_h - ui), (float)(3 * ui), 1, k_sel_edge);
-        tc = c_btn_text;
-      } else if (it->kind == SV_ITEM_BUTTON) {
-        sv_host_round_fill(h, (float)rx, (float)cy, (float)rwid, (float)(row_h - ui), (float)(3 * ui), k_row);
-      }
-      {
-        int lx = rx + 6 * ui;
-        if (it->icon[0] != '\0') { sv_host_icon_draw(h, it->icon, (float)lx, (float)(cy + (row_h - 12 * ui) / 2 - ui / 2), (float)(12 * ui), focused ? c_btn_text : c_text); lx += 18 * ui; }
-        else if (it->kind == SV_ITEM_BUTTON) lx += 2 * ui;
-        { const int lab_w = (it->kind == SV_ITEM_BUTTON ? rwid : rwid * 46 / 100) - (lx - rx) - 4 * ui; truncate_to(line, sizeof line, it->label, lab_w / cw);
-          sv_host_draw_text(h, (float)lx, (float)ty, ui, it->kind == SV_ITEM_LABEL ? c_text2 : tc, line); }
-      }
-      {
-        const int vx0 = rx + rwid * 48 / 100, vw = rx + rwid - 6 * ui - vx0;
-        switch (it->kind) {
-          case SV_ITEM_TOGGLE: {
-            const int sw = 22 * ui, sh = 11 * ui, sx = rx + rwid - 8 * ui - sw, sy = cy + (row_h - sh) / 2 - ui / 2;
-            sv_host_round_fill(h, (float)sx, (float)sy, (float)sw, (float)sh, (float)(sh / 2), it->value ? k_on : k_line);
-            sv_host_round_fill(h, (float)(it->value ? sx + sw - sh + ui : sx + ui), (float)(sy + ui), (float)(sh - 2 * ui), (float)(sh - 2 * ui), (float)(sh / 2), c_btn_text);
-            sv_host_draw_text(h, (float)(sx - 8 * ui - text_w(it->text, ui)), (float)ty, ui, focused ? c_btn_text : c_text2, it->text);
-            break;
-          }
-          case SV_ITEM_CHOICE:
-            if (it->id == I_PLAYER) {  /* player tabs */
-              int t;
-              const int tw = vw / 2;
-              for (t = 0; t < 2; ++t) {
-                const int tx = vx0 + t * tw;
-                const SDL_Color f = t == it->value ? k_sel : k_cell;
-                sv_host_round_fill(h, (float)(tx + ui), (float)(cy + ui), (float)(tw - 2 * ui), (float)(row_h - 3 * ui), (float)(3 * ui), f);
-                sv_host_round_stroke(h, (float)(tx + ui), (float)(cy + ui), (float)(tw - 2 * ui), (float)(row_h - 3 * ui), (float)(3 * ui), 1, t == it->value ? k_sel_edge : k_line);
-                sv_host_draw_text(h, (float)(tx + (tw - text_w(t == 0 ? "Player 1" : "Player 2", ui)) / 2), (float)ty, ui, t == it->value ? c_btn_text : c_text2, t == 0 ? "Player 1" : "Player 2");
-              }
-            } else {
-              const int cxm = vx0 + vw / 2;
-              truncate_to(line, sizeof line, it->text, (vw - 24 * ui) / cw);
-              sv_host_draw_text(h, (float)(cxm - text_w(line, ui) / 2), (float)ty, ui, focused ? c_btn_text : c_text, line);
-              sv_host_draw_text(h, (float)(vx0 + 2 * ui), (float)ty, ui, focused ? c_btn_text : c_dim, "<");
-              sv_host_draw_text(h, (float)(vx0 + vw - 10 * ui), (float)ty, ui, focused ? c_btn_text : c_dim, ">");
-            }
-            break;
-          case SV_ITEM_SLIDER: {
-            const int pct_w = 6 * cw, tx = vx0, tw = vw - pct_w - 4 * ui, ty2 = cy + row_h / 2 - ui;
-            const int span = it->max - it->min > 0 ? it->max - it->min : 1, fillw = (it->value - it->min) * tw / span;
-            sv_host_round_fill(h, (float)tx, (float)(ty2 - ui), (float)tw, (float)(3 * ui), (float)ui, k_line);
-            sv_host_round_fill(h, (float)tx, (float)(ty2 - ui), (float)fillw, (float)(3 * ui), (float)ui, k_on);
-            sv_host_round_fill(h, (float)(tx + fillw - 3 * ui), (float)(ty2 - 3 * ui), (float)(7 * ui), (float)(7 * ui), (float)(3 * ui), c_btn_text);
-            truncate_to(line, sizeof line, it->text, 6);
-            sv_host_draw_text(h, (float)(rx + rwid - 6 * ui - text_w(line, ui)), (float)ty, ui, focused ? c_btn_text : c_text, line);
-            break;
-          }
-          case SV_ITEM_LABEL:
-            truncate_to(line, sizeof line, it->text, (rwid * 7 / 10) / cw);
-            sv_host_draw_text(h, (float)(rx + rwid - 6 * ui - text_w(line, ui)), (float)ty, ui, c_text, line);
-            break;
-          case SV_ITEM_BINDING: {
-            const int cell_w = (vw - 6 * ui) / 2;
-            int t;
-            for (t = 0; t < 2; ++t) {
-              const int tx = vx0 + t * (cell_w + 6 * ui);
-              const int on = focused && it->value == t;
-              const char *txt = t == 0 ? it->text : it->text2;
-              if (it->text2[0] == '\0' && t == 1) break;
-              sv_host_round_fill(h, (float)tx, (float)(cy + ui), (float)cell_w, (float)(row_h - 3 * ui), (float)(3 * ui), on ? k_cell : k_cell);
-              sv_host_round_stroke(h, (float)tx, (float)(cy + ui), (float)cell_w, (float)(row_h - 3 * ui), (float)(3 * ui), 1, on ? k_sel_edge : k_line);
-              truncate_to(line, sizeof line, txt, (cell_w - 8 * ui) / cw);
-              sv_host_draw_text(h, (float)(tx + (cell_w - text_w(line, ui)) / 2), (float)ty, ui, on ? c_btn_text : c_text2, line);
-            }
-            break;
-          }
-          case SV_ITEM_BUTTON: break;
-        }
-      }
-      cy += hh + (is_confirm ? 4 * ui : 0);
-    }
-    if (page->count > drawn && drawn > 0) {  /* scroll bar */
-      const SDL_Color track = {7, 16, 38, 255};
-      const int tx = x + panel_w - 4 * ui, ty = y + head_h + pad, th = used, kh = th * drawn / page->count > 8 * ui ? th * drawn / page->count : 8 * ui;
-      sv_host_fill(h, tx, ty, 2 * ui, th, track);
-      sv_host_fill(h, tx, ty + (th - kh) * page->scroll / (page->count - drawn), 2 * ui, kh, k_glow);
-    }
-  }
-  if (video) {  /* LIVE PREVIEW column */
-    const int px0 = x + left_w, pw = panel_w - left_w - pad, py0 = y + head_h + pad;
-    const int pic_h = pw * 9 / 16 > 70 * ui ? 70 * ui : pw * 9 / 16;
-    int p;
-    sv_host_fill(h, px0 - ui, py0, ui, used, (SDL_Color){34, 70, 140, 255});
-    sv_host_draw_text(h, (float)(px0 + 6 * ui), (float)py0, ui, c_focus, "LIVE PREVIEW");
-    sv_host_round_fill(h, (float)(px0 + 6 * ui), (float)(py0 + 12 * ui), (float)(pw - 6 * ui), (float)pic_h, (float)(2 * ui), k_cell);
-    sv_host_draw_picture(h, (float)(px0 + 8 * ui), (float)(py0 + 14 * ui), (float)(pw - 10 * ui), (float)(pic_h - 4 * ui));
-    sv_host_round_stroke(h, (float)(px0 + 6 * ui), (float)(py0 + 12 * ui), (float)(pw - 6 * ui), (float)pic_h, (float)(2 * ui), 1, k_glow);
-    for (p = 0; p < 4; ++p) {
-      const int bw = (pw - 6 * ui - 4 * ui) / 2, bx = px0 + 6 * ui + (p % 2) * (bw + 4 * ui), by = py0 + 16 * ui + pic_h + (p / 2) * (14 * ui);
-      const int on = (int)h->settings.video.preset == p;
-      sv_host_round_fill(h, (float)bx, (float)by, (float)bw, (float)(12 * ui), (float)(2 * ui), on ? k_sel : k_row);
-      sv_host_round_stroke(h, (float)bx, (float)by, (float)bw, (float)(12 * ui), (float)(2 * ui), 1, on ? k_sel_edge : k_line);
-      { const char *nm = sv_crt_preset_name((SvCrtPreset)p); truncate_to(line, sizeof line, nm, (bw - 4 * ui) / cw); sv_host_draw_text(h, (float)(bx + (bw - text_w(line, ui)) / 2), (float)(by + 2 * ui), ui, on ? c_btn_text : c_text2, line); }
-    }
-    {
-      static const char *const desc[] = {"The untouched picture: nearest-neighbour pixels, no filter.", "Subtle scanline gaps and a gentle glow.", "Scanlines, an RGB mask, glow and slight curvature.", "A stronger arcade-monitor look: heavy scanlines, mask and curve."};
-      const char *d = h->settings.video.preset == SV_CRT_CUSTOM ? "Custom: your own scanline, mask, curvature, bloom and brightness values." : desc[h->settings.video.preset];
-      const int maxc = (pw - 6 * ui) / cw;
-      int ly = py0 + 62 * ui + pic_h;
-      sv_host_draw_text(h, (float)(px0 + 6 * ui), (float)(ly - 14 * ui), ui, c_text, sv_crt_preset_name(h->settings.video.preset));
-      while (*d != '\0') {
-        size_t take = strlen(d);
-        if ((int)take > maxc) { take = (size_t)maxc; while (take > 8u && d[take] != ' ') --take; }
-        snprintf(line, sizeof line, "%.*s", (int)take, d);
-        sv_host_draw_text(h, (float)(px0 + 6 * ui), (float)ly, ui, c_text2, line);
-        d += take; while (*d == ' ') ++d;
-        ly += 10 * ui;
-      }
-    }
-  }
-  /* footer */
-  {
-    const int fy = y + panel_h - foot_h + (is_confirm ? 0 : 2 * ui), max_chars = (panel_w - 2 * pad) / cw;
-    const SvItem *cur = page->focus >= 0 && page->focus < page->count ? &page->items[page->focus] : NULL;
-    if (!is_confirm) {
-      const SDL_Color rule = {34, 70, 140, 255};
-      sv_host_fill(h, x + pad, y + panel_h - foot_h, panel_w - 2 * pad, ui, rule);
-    }
-    if (h->listen.kind != SV_LISTEN_NONE) {
-      const unsigned left = 8u - (unsigned)((SDL_GetTicks() - h->listen.started) / 1000u);
-      snprintf(line, sizeof line, h->listen.kind == SV_LISTEN_PAD ? "Press a gamepad button (%us)   Esc cancel   Backspace clear" : "Press a key (%us)   Esc cancel   Backspace clear", left > 8u ? 0u : left);
-      sv_host_draw_text(h, (float)(x + pad), (float)(fy + 8 * ui), ui, c_focus, line);
-    } else if (!is_confirm) {
-      const int cues_w = 70 * ui + text_w("Select", ui) + text_w("Close", ui) + 20 * ui;
-      if (h->conflict_msg[0] != '\0' && page->page_id == PAGE_CONTROLS) {
-        sv_host_round_fill(h, (float)(x + pad), (float)(fy - 24 * ui), (float)(panel_w - 2 * pad), (float)(20 * ui), (float)(3 * ui), (SDL_Color){70, 54, 14, 255});
-        sv_host_round_stroke(h, (float)(x + pad), (float)(fy - 24 * ui), (float)(panel_w - 2 * pad), (float)(20 * ui), (float)(3 * ui), 1, k_warn);
-        sv_host_icon_draw(h, "warning", (float)(x + pad + 4 * ui), (float)(fy - 21 * ui), (float)(12 * ui), k_warn);
-        truncate_to(line, sizeof line, h->conflict_msg, (panel_w - 2 * pad - 24 * ui) / cw);
-        sv_host_draw_text(h, (float)(x + pad + 20 * ui), (float)(fy - 18 * ui), ui, c_text, line);
-      }
-      if (cur != NULL && cur->hint[0] != '\0') {
-        const char *hint = cur->hint;
-        const int maxh = (panel_w - 2 * pad - cues_w) / cw;
-        size_t len = strlen(hint), cut = len;
-        const SDL_Color hc = cur->enabled ? c_text2 : c_err;
-        if ((int)len > maxh) { cut = (size_t)(maxh > 8 ? maxh : 8); while (cut > 8u && hint[cut] != ' ') --cut; }
-        snprintf(line, sizeof line, "%.*s", (int)cut, hint);
-        sv_host_draw_text(h, (float)(x + pad), (float)(fy + 2 * ui), ui, hc, line);
-        if (cut < len) { const char *rest = hint + cut + (hint[cut] == ' ' ? 1 : 0); truncate_to(line, sizeof line, rest, maxh); sv_host_draw_text(h, (float)(x + pad), (float)(fy + 12 * ui), ui, hc, line); }
-      }
-      (void)max_chars;
-      draw_cues(h, x + panel_w - pad, fy + 8 * ui, ui, h->menu.depth > 1);
-    }
-  }
-}
-
-void sv_draw_stop_screen(SvHost *h, int out_w, int out_h, const char *title, const char *detail) {
-  const int ui = sv_host_ui_scale(out_w, out_h), cw = 8 * ui, pad = 10 * ui;
-  const int chars = (out_w * 9 / 10) / cw > 56 ? 56 : (out_w * 9 / 10) / cw - 4;
-  const SDL_Color dim = {4, 8, 20, 190};
-  char lines[12][72];
-  int n = 0, i, panel_w, panel_h, x, y;
-  const char *s = detail != NULL ? detail : "";
-  sv_host_fill(h, 0, 0, out_w, out_h, dim);
-  while (*s != '\0' && n < 10) {
-    size_t take = strlen(s);
-    if ((int)take > chars) { take = (size_t)chars; while (take > 8u && s[take] != ' ') --take; }
-    if (take >= sizeof lines[0]) take = sizeof lines[0] - 1u;
-    memcpy(lines[n], s, take);
-    lines[n][take] = '\0';
-    ++n;
-    s += take;
-    while (*s == ' ') ++s;
-  }
-  panel_w = (chars + 6) * cw;
-  panel_h = (n + 5) * 11 * ui + 2 * pad;
-  x = (out_w - panel_w) / 2;
-  y = (out_h - panel_h) / 2;
-  panel_frame(h, (float)x, (float)y, (float)panel_w, (float)panel_h, ui);
-  sv_host_icon_draw(h, "warning", (float)(x + pad), (float)(y + pad - 2 * ui), (float)(16 * ui), k_warn);
-  sv_host_draw_text(h, (float)(x + pad + 22 * ui), (float)(y + pad + 2 * ui), ui, c_text, title != NULL ? title : "The game stopped");
-  for (i = 0; i < n; ++i) sv_host_draw_text(h, (float)(x + pad), (float)(y + pad + (3 + i) * 11 * ui), ui, c_text2, lines[i]);
-  draw_cues(h, x + panel_w - pad, y + panel_h - pad - 12 * ui, ui, 0);
-}

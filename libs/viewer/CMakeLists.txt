@@ -1,6 +1,6 @@
 # SEG-058: shared in-game viewer foundation (settings, layout/CRT math and menu model are SDL-free; the host is SDL3).
 # Strict C11 (the same dialect the per-game packaged build compiles with). Never linked by headless targets.
-add_library(segarecomp_viewer_core STATIC src/sv_settings.c src/sv_layout.c src/sv_menu.c src/sv_input_state.c)
+add_library(segarecomp_viewer_core STATIC src/sv_settings.c src/sv_layout.c src/sv_menu.c src/sv_input_state.c src/sv_font.c src/sv_font_data.c)
 add_library(segarecomp::viewer_core ALIAS segarecomp_viewer_core)
 target_include_directories(segarecomp_viewer_core PUBLIC include)
 set_target_properties(segarecomp_viewer_core PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
@@ -21,7 +21,7 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER OR SEGARECOMP_BUILD_LAUNCHER)
 endif()
 
 if(SEGARECOMP_ENABLE_SDL3_VIEWER)
-  add_library(segarecomp_viewer_host STATIC src/sv_host.c src/sv_pages.c)
+  add_library(segarecomp_viewer_host STATIC src/sv_host.c src/sv_pages.c src/sv_draw.c src/sv_ui.c)
   add_library(segarecomp::viewer_host ALIAS segarecomp_viewer_host)
   target_include_directories(segarecomp_viewer_host PUBLIC include PRIVATE src)
   target_link_libraries(segarecomp_viewer_host PUBLIC segarecomp::viewer_core segarecomp::viewer_input SDL3::SDL3)

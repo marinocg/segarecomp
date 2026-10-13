@@ -85,6 +85,9 @@ private:
   void update_jobs();
   void draw();
   void draw_background(float w, float h);
+  [[nodiscard]] float hero_height(float w, float h) const;
+  // A real cover when the user chose one, else the neutral hand-drawn cartridge (initials of the title, no game art).
+  void draw_cover(ImDrawList *dl, const LibraryEntry &entry, ImVec2 a, ImVec2 b, float rounding, ImU32 tint = IM_COL32_WHITE);
   void draw_sidebar(float x, float y, float w, float h);
   void draw_topbar(float x, float y, float w, float h);
   void draw_library(float w, float h);

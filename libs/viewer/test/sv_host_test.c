@@ -68,6 +68,42 @@ static SvHost *open_host(SvSystem system, const char *settings_file, int can_res
 
 static void set_window(SvHost *host, int w, int h) { (void)host; (void)w; (void)h; }
 
+/* ---- Video page: the preset buttons are real controls, and the page lays out from pixels at every size ---- */
+typedef struct PresetScript { int step; int rect[4]; int found; int chosen; } PresetScript;
+static void click_at(float x, float y) {
+  SDL_Event e;
+  SDL_zero(e);
+  e.type = SDL_EVENT_MOUSE_MOTION;
+  e.common.timestamp = SDL_GetTicksNS();
+  e.motion.x = x; e.motion.y = y;
+  SDL_PushEvent(&e);
+  SDL_zero(e);
+  e.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+  e.common.timestamp = SDL_GetTicksNS();
+  e.button.button = SDL_BUTTON_LEFT; e.button.down = true; e.button.clicks = 1; e.button.x = x; e.button.y = y;
+  SDL_PushEvent(&e);
+}
+static int preset_hook(void *ctx, SvHost *host, int iteration) {
+  PresetScript *p = (PresetScript *)ctx;
+  (void)iteration;
+  switch (p->step++) {
+    case 0: tap(SV_KEY_DOWN); tap(SV_KEY_DOWN); tap(SV_KEY_RETURN); return 0;   /* Video & Display */
+    case 1:
+      p->found = sv_host_ui_preset_rect(host, 3, p->rect);
+      if (p->found) click_at((float)(p->rect[0] + p->rect[2] / 2), (float)(p->rect[1] + p->rect[3] / 2));  /* "CRT Arcade" */
+      return 0;
+    case 2: p->chosen = (int)sv_host_settings(host)->video.preset; tap(SV_KEY_ESCAPE); tap(SV_KEY_ESCAPE); return 0;
+    default: return 1;
+  }
+}
+
+static void ui_scale_tests(void) {
+  CHECK(sv_host_ui_scale(320, 240) == 1 && sv_host_ui_scale(768, 576) == 1 && sv_host_ui_scale(1280, 720) == 1, "small and 720p windows use 1x text (13 px)");
+  CHECK(sv_host_ui_scale(1920, 1080) == 2 && sv_host_ui_scale(2560, 1440) == 3 && sv_host_ui_scale(3840, 2160) == 4, "the text grows with the display: 2x at 1080p, 3x at 1440p, 4x at 4K");
+  CHECK(sv_host_ui_scale(600, 2000) == 1, "a narrow window never scales past what fits");
+}
+
+
 /* ---- gamepad remap script: one step per drawn overlay frame ---- */
 typedef struct PadScript { SDL_Joystick *joy; SvHost *host; int step; int activation_ignored; int north_bound; int conflict_moved; int a_stayed_south; } PadScript;
 static void pad_button(PadScript *p, int button, int down) { SDL_SetJoystickVirtualButton(p->joy, button, down != 0); }
@@ -80,7 +116,7 @@ static int pad_hook(void *ctx, SvHost *host, int iteration) {
     case 0:
       for (i = 0; i < 3; ++i) tap(SV_KEY_DOWN);
       tap(SV_KEY_RETURN);                       /* Controls */
-      for (i = 0; i < 5; ++i) tap(SV_KEY_DOWN); /* Player, (Device label skipped), Up, Down, Left, Right, A */
+      for (i = 0; i < 6; ++i) tap(SV_KEY_DOWN); /* Player, (Device label skipped), Controller status button, Up, Down, Left, Right, A */
       tap(SV_KEY_RIGHT);                         /* the gamepad column of the A row */
       return 0;
     case 1: pad_button(p, SDL_GAMEPAD_BUTTON_SOUTH, 1); return 0;        /* activate "A pad" with the PAD itself */
@@ -432,6 +468,26 @@ int main(void) {
       sv_host_service(host, &smp);
       CHECK(smp.pad[0] == 0, "unplugging releases the pad");
     }
+    sv_host_close(host);
+  }
+  /* ---- Video page preset buttons (mouse), and the UI scale ---- */
+  ui_scale_tests();
+  remove(settings_file);
+  host = open_host(SV_SYSTEM_GENESIS, settings_file, 0);
+  CHECK(host != NULL, "reopen for the preset test");
+  if (host != NULL) {
+    PresetScript ps;
+    SvSample smp;
+    memset(&ps, 0, sizeof ps);
+    fill_pattern(frame, 320, 224);
+    sv_host_present(host, frame, 320, 224, 960);
+    CHECK(sv_host_settings(host)->video.preset == SV_CRT_PIXEL_PERFECT, "starts on Pixel Perfect");
+    sv_host_set_loop_hook(host, preset_hook, &ps);
+    tap(SV_KEY_ESCAPE);
+    sv_host_service(host, &smp);
+    sv_host_set_loop_hook(host, NULL, NULL);
+    CHECK(ps.found, "the Video page draws four preset buttons with real hit rectangles");
+    CHECK(ps.chosen == SV_CRT_ARCADE, "clicking a preset button selects that preset (it is a real control, not decoration)");
     sv_host_close(host);
   }
   free(frame);
