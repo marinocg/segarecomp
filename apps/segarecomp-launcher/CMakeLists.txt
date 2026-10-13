@@ -57,6 +57,8 @@ segarecomp_enable_warnings(launcher_policy_test)
 # SEG-057-T002 (ADR 0119): product-CLI and generated-program doubles for the launcher's end-to-end restart tests (test-only, not installed).
 add_executable(fake_segarecomp fake_segarecomp.cpp)
 add_executable(fake_game fake_game.cpp)
+target_compile_features(fake_segarecomp PRIVATE cxx_std_20)
+target_compile_features(fake_game PRIVATE cxx_std_20)
 segarecomp_enable_warnings(fake_segarecomp)
 segarecomp_enable_warnings(fake_game)
 if(BUILD_TESTING)

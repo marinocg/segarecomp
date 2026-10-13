@@ -113,7 +113,11 @@ int headless(int argc, char **argv) {
           BuildJob job(view, layout);
           job.wait();
           emit(std::string(tag) + "build=" + (job.succeeded() ? "ok" : "failed"));
-          if (!job.succeeded()) { emit(std::string(tag) + "message=" + job.message()); return {}; }
+          if (!job.succeeded()) {
+            emit(std::string(tag) + "message=" + job.message());
+            emit(std::string(tag) + "entry=" + u8s(entry));  // as before: the (absent) entry is still reported after a failed build
+            return {};
+          }
         }
         emit(std::string(tag) + "entry=" + u8s(entry));
         const PolicyReport policy = read_policy_report(entry);
