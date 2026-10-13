@@ -78,6 +78,109 @@ void sv_host_bevel(SvHost *h, int x, int y, int w, int ht, int step, SDL_Color f
   sv_host_fill(h, x + 2 * step, y + 2 * step, w - 4 * step, ht - 4 * step, fill);
 }
 
+void sv_host_round_fill(SvHost *h, float x, float y, float w, float hh, float r, SDL_Color c) {
+  enum { SEG = 6 };
+  SDL_Vertex v[1 + (SEG + 1)];
+  int corner, i;
+  SDL_FColor fc;
+  if (r > w * 0.5f) r = w * 0.5f;
+  if (r > hh * 0.5f) r = hh * 0.5f;
+  fc.r = (float)c.r / 255.0f; fc.g = (float)c.g / 255.0f; fc.b = (float)c.b / 255.0f; fc.a = (float)c.a / 255.0f;
+  SDL_SetRenderDrawBlendMode(h->renderer, SDL_BLENDMODE_BLEND);
+  {
+    SDL_FRect a = {x + r, y, w - 2 * r, hh}, b = {x, y + r, r, hh - 2 * r}, d = {x + w - r, y + r, r, hh - 2 * r};
+    SDL_SetRenderDrawColor(h->renderer, c.r, c.g, c.b, c.a);
+    SDL_RenderFillRect(h->renderer, &a);
+    SDL_RenderFillRect(h->renderer, &b);
+    SDL_RenderFillRect(h->renderer, &d);
+  }
+  for (corner = 0; corner < 4; ++corner) {
+    const float cx = (corner & 1) ? x + w - r : x + r, cy = (corner & 2) ? y + hh - r : y + r;
+    const float start = (float)(corner == 0 ? 180 : corner == 1 ? 270 : corner == 2 ? 90 : 0) * 3.14159265f / 180.0f;
+    int idx[SEG * 3];
+    v[0].position.x = cx; v[0].position.y = cy; v[0].color = fc; v[0].tex_coord.x = v[0].tex_coord.y = 0.0f;
+    for (i = 0; i <= SEG; ++i) {
+      const float ang = start + (float)i * (3.14159265f * 0.5f) / (float)SEG;
+      v[1 + i].position.x = cx + r * SDL_cosf(ang); v[1 + i].position.y = cy + r * SDL_sinf(ang);
+      v[1 + i].color = fc; v[1 + i].tex_coord.x = v[1 + i].tex_coord.y = 0.0f;
+    }
+    for (i = 0; i < SEG; ++i) { idx[i * 3] = 0; idx[i * 3 + 1] = 1 + i; idx[i * 3 + 2] = 2 + i; }
+    SDL_RenderGeometry(h->renderer, NULL, v, 1 + SEG + 1, idx, SEG * 3);
+  }
+}
+
+void sv_host_round_stroke(SvHost *h, float x, float y, float w, float hh, float r, int th, SDL_Color c) {
+  /* an outline as an outer round fill with an inner fill punched back to the background is not possible with alpha, so draw the four straight
+   * sides and the corner arcs as short lines */
+  enum { SEG = 6 };
+  int corner, i, t;
+  SDL_SetRenderDrawBlendMode(h->renderer, SDL_BLENDMODE_BLEND);
+  SDL_SetRenderDrawColor(h->renderer, c.r, c.g, c.b, c.a);
+  if (r > w * 0.5f) r = w * 0.5f;
+  if (r > hh * 0.5f) r = hh * 0.5f;
+  for (t = 0; t < th; ++t) {
+    const float o = (float)t;
+    SDL_FRect top = {x + r, y + o, w - 2 * r, 1}, bot = {x + r, y + hh - 1 - o, w - 2 * r, 1}, lef = {x + o, y + r, 1, hh - 2 * r}, rig = {x + w - 1 - o, y + r, 1, hh - 2 * r};
+    SDL_RenderFillRect(h->renderer, &top); SDL_RenderFillRect(h->renderer, &bot); SDL_RenderFillRect(h->renderer, &lef); SDL_RenderFillRect(h->renderer, &rig);
+    for (corner = 0; corner < 4; ++corner) {
+      const float cx = (corner & 1) ? x + w - r : x + r, cy = (corner & 2) ? y + hh - r : y + r;
+      const float start = (float)(corner == 0 ? 180 : corner == 1 ? 270 : corner == 2 ? 90 : 0) * 3.14159265f / 180.0f;
+      float px_ = cx + (r - o) * SDL_cosf(start), py = cy + (r - o) * SDL_sinf(start);
+      for (i = 1; i <= SEG; ++i) {
+        const float ang = start + (float)i * (3.14159265f * 0.5f) / (float)SEG;
+        const float nx = cx + (r - o) * SDL_cosf(ang), ny = cy + (r - o) * SDL_sinf(ang);
+        SDL_RenderLine(h->renderer, px_, py, nx, ny);
+        px_ = nx; py = ny;
+      }
+    }
+  }
+}
+
+static SDL_Texture *load_icon(SvHost *h, const char *name) {
+  int i;
+  for (i = 0; i < h->icon_count; ++i) if (strcmp(h->icon_names[i], name) == 0) return h->icons[i];
+  if (h->icon_count >= 24) return NULL;
+  {
+    SDL_Texture *tex = NULL;
+#if SDL_VERSION_ATLEAST(3, 4, 0)
+    const char *dir = SDL_getenv("SEGARECOMP_ASSETS");
+    if (dir != NULL && *dir != '\0') {
+      char path[900];
+      SDL_Surface *s;
+      snprintf(path, sizeof path, "%s/ui/icon-%s.png", dir, name);
+      s = SDL_LoadSurface(path);
+      if (s != NULL) { tex = SDL_CreateTextureFromSurface(h->renderer, s); SDL_DestroySurface(s); }
+      if (tex != NULL) SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
+    }
+#endif
+    snprintf(h->icon_names[h->icon_count], sizeof h->icon_names[0], "%s", name);
+    h->icons[h->icon_count++] = tex; /* a missing icon is remembered as NULL: the UI simply omits it */
+    return tex;
+  }
+}
+
+void sv_host_icon_draw(SvHost *h, const char *name, float x, float y, float size, SDL_Color tint) {
+  SDL_Texture *tex = (name != NULL && *name != '\0') ? load_icon(h, name) : NULL;
+  SDL_FRect d;
+  if (tex == NULL) return;
+  d.x = x; d.y = y; d.w = size; d.h = size;
+  SDL_SetTextureColorMod(tex, tint.r, tint.g, tint.b);
+  SDL_SetTextureAlphaMod(tex, tint.a);
+  SDL_RenderTexture(h->renderer, tex, NULL, &d);
+}
+
+void sv_host_draw_picture(SvHost *h, float x, float y, float w, float hh) {
+  SvRect r;
+  SDL_FRect d;
+  if (h->frame_tex == NULL || h->last_w <= 0) return;
+  r = sv_layout_dest((int)w, (int)hh, h->last_w, h->last_h, SV_ASPECT_ORIGINAL, SV_SCALE_FIT);
+  d.x = x + (float)r.x; d.y = y + (float)r.y; d.w = (float)r.w; d.h = (float)r.h;
+  SDL_SetTextureColorMod(h->frame_tex, 255, 255, 255);
+  SDL_SetTextureAlphaMod(h->frame_tex, 255);
+  SDL_SetTextureBlendMode(h->frame_tex, SDL_BLENDMODE_NONE);
+  SDL_RenderTexture(h->renderer, h->frame_tex, NULL, &d);
+}
+
 int sv_host_ui_scale(int out_w, int out_h) {
   const int by_w = (int)((double)out_w * 0.92 / 380.0);
   const int by_h = (out_h + 140) / 300;
@@ -379,21 +482,35 @@ static void render_game(SvHost *h, int out_w, int out_h) {
 }
 
 static void draw_hud(SvHost *h, int out_w, int out_h) {
-  const SDL_Color text = {220, 232, 255, 255}, fill = {8, 20, 47, 220}, edge = {35, 62, 120, 255}, hi = {77, 103, 167, 255}, sh = {7, 16, 38, 255};
+  const SDL_Color text = {220, 232, 255, 255}, dim = {150, 168, 205, 255}, box = {5, 12, 30, 215}, edge = {46, 104, 214, 255};
   const int ui = sv_host_ui_scale(out_w, out_h) > 1 ? sv_host_ui_scale(out_w, out_h) - 1 : 1;
   (void)out_h;
   if (h->settings.video.show_fps && !h->menu_open) {
-    char line[64];
-    const int w = (int)(strlen("000.0 FPS  00.0 ms") * 8u) * ui + 8 * ui;
-    snprintf(line, sizeof line, "%5.1f FPS %5.1f ms", h->fps, h->frame_ms);
-    sv_host_bevel(h, 6, 6, w, 8 * ui + 8 * ui, ui, fill, edge, hi, sh);
-    sv_host_draw_text(h, (float)(6 + 5 * ui), (float)(6 + 4 * ui + ui), ui, text, line);
+    char l1[64], l2[64], l3[64];
+    const char *aspect = h->settings.video.aspect == SV_ASPECT_4_3 ? "4:3" : "Square pixels";
+    int w, k;
+    snprintf(l1, sizeof l1, "System: %s    %.0f FPS", h->cfg.system == SV_SYSTEM_SMS ? "MASTER SYSTEM" : "GENESIS", h->fps);
+    snprintf(l2, sizeof l2, "Aspect: %s", aspect);
+    snprintf(l3, sizeof l3, "Effect: %s", sv_crt_preset_name(h->settings.video.preset));
+    w = (int)strlen(l1) * 8 * ui;
+    k = (int)strlen(l2) * 8 * ui; if (k > w) w = k;
+    k = (int)strlen(l3) * 8 * ui; if (k > w) w = k;
+    w += 12 * ui;
+    sv_host_round_fill(h, (float)(6 * ui), (float)(6 * ui), (float)w, (float)(40 * ui), (float)(3 * ui), box);
+    sv_host_round_stroke(h, (float)(6 * ui), (float)(6 * ui), (float)w, (float)(40 * ui), (float)(3 * ui), 1, edge);
+    sv_host_draw_text(h, (float)(12 * ui), (float)(10 * ui), ui, text, l1);
+    sv_host_draw_text(h, (float)(12 * ui), (float)(21 * ui), ui, dim, l2);
+    sv_host_draw_text(h, (float)(12 * ui), (float)(32 * ui), ui, dim, l3);
   }
   if (h->toast[0] != '\0' && SDL_GetTicks() < h->toast_until) {
     const int tui = sv_host_ui_scale(out_w, out_h);
-    const int w = (int)strlen(h->toast) * 8 * tui + 12 * tui, hh = 8 * tui + 10 * tui;
-    sv_host_bevel(h, (out_w - w) / 2, out_h - hh - 12 * tui, w, hh, tui, fill, edge, hi, sh);
-    sv_host_draw_text(h, (float)((out_w - w) / 2 + 6 * tui), (float)(out_h - hh - 12 * tui + 5 * tui), tui, text, h->toast);
+    const int icon = strncmp(h->toast, "Screenshot", 10) == 0;
+    const int w = (int)strlen(h->toast) * 8 * tui + 34 * tui, hh = 22 * tui;
+    const int bx = out_w - w - 10 * tui, by = 10 * tui;
+    sv_host_round_fill(h, (float)bx, (float)by, (float)w, (float)hh, (float)(4 * tui), box);
+    sv_host_round_stroke(h, (float)bx, (float)by, (float)w, (float)hh, (float)(4 * tui), 1, edge);
+    sv_host_icon_draw(h, icon ? "screenshot" : "info", (float)(bx + 7 * tui), (float)(by + 4 * tui), (float)(14 * tui), text);
+    sv_host_draw_text(h, (float)(bx + 26 * tui), (float)(by + 7 * tui), tui, text, h->toast);
   }
 }
 
@@ -529,6 +646,7 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
   h->last_rgb = (uint8_t *)malloc((size_t)(cfg->max_w > 0 ? cfg->max_w : 320) * (size_t)(cfg->max_h > 0 ? cfg->max_h : 240) * 3u);
   if (h->last_rgb == NULL) { sv_host_close(h); return NULL; }
   sv_host_apply_video(h);
+  h->session_start = SDL_GetTicks();
   ids = SDL_GetGamepads(&count);
   if (ids != NULL) { for (i = 0; i < count; ++i) pad_open(h, ids[i]); SDL_free(ids); }
   return h;
@@ -545,6 +663,7 @@ void sv_host_close(SvHost *h) {
   if (h->mask_tex != NULL) SDL_DestroyTexture(h->mask_tex);
   if (h->renderer != NULL) SDL_DestroyRenderer(h->renderer);
   if (h->window != NULL) SDL_DestroyWindow(h->window);
+  { int k; for (k = 0; k < h->icon_count; ++k) if (h->icons[k] != NULL) SDL_DestroyTexture(h->icons[k]); }
   free(h->last_rgb);
   SDL_Quit();
   free(h);

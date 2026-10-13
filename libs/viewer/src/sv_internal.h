@@ -54,7 +54,13 @@ struct SvHost {
   int last_input_pad;          /* hint footer shows gamepad cues after pad input */
   int bind_player;             /* controls page: player being edited */
   struct { SvListenKind kind; int player; SvAction action; Uint64 started; Uint64 after_ts; } listen;
+  unsigned char bind_col[16];  /* Controls: the focused column (0 keyboard, 1 gamepad) per binding row, kept across page rebuilds */
   char toast[96];
+  char conflict_msg[120];     /* Controls page: the last binding conflict, shown until the next change */
+  SDL_Texture *icons[24];
+  char icon_names[24][16];
+  int icon_count;
+  Uint64 session_start;
   Uint64 toast_until;
   /* pacing statistics */
   Uint64 fps_window_start;
@@ -96,5 +102,9 @@ void sv_host_draw_text(SvHost *host, float x, float y, int scale, SDL_Color colo
 void sv_host_fill(SvHost *host, int x, int y, int w, int h, SDL_Color color);
 void sv_host_bevel(SvHost *host, int x, int y, int w, int h, int step, SDL_Color fill, SDL_Color edge, SDL_Color highlight, SDL_Color shadow);
 int sv_host_ui_scale(int out_w, int out_h);
+void sv_host_round_fill(SvHost *host, float x, float y, float w, float h, float r, SDL_Color color);
+void sv_host_round_stroke(SvHost *host, float x, float y, float w, float h, float r, int thickness, SDL_Color color);
+void sv_host_icon_draw(SvHost *host, const char *name, float x, float y, float size, SDL_Color tint);
+void sv_host_draw_picture(SvHost *host, float x, float y, float w, float h); /* the last picture, aspect-fitted, no effects */
 
 #endif

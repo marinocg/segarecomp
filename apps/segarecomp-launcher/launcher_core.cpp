@@ -222,6 +222,13 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
   SDL_SetEnvironmentVariable(environment, "SEGARECOMP_LAUNCHED", "1", true);
   const std::string viewer_settings = utf8(library_root() / "viewer-settings.cfg");
   SDL_SetEnvironmentVariable(environment, "SEGARECOMP_VIEWER_SETTINGS", viewer_settings.c_str(), true);
+  {  // the launcher's UI icons, which the viewer menu shows when present (decorative: the menu works without them)
+    const char *base = SDL_GetBasePath();
+    const fs::path exe_dir = base != nullptr ? path_from_utf8(base) : fs::path{};
+    std::error_code ec;
+    for (const fs::path &candidate : {exe_dir.parent_path() / "Resources" / "assets", exe_dir / "assets"})
+      if (fs::is_directory(candidate / "ui", ec)) { SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ASSETS", utf8(candidate).c_str(), true); break; }
+  }
   if (rom.sha256.size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ROM_SHA256", rom.sha256.c_str(), true);
   if (!rom.title.empty()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GAME_TITLE", rom.title.c_str(), true);
 }

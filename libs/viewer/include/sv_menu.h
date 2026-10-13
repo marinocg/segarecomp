@@ -23,6 +23,8 @@ typedef struct SvItem {
   int min, max, step;   /* choice: 0..count-1; slider range */
   char label[40];
   char text[48];        /* value text shown at the right (choice name, binding, label text) */
+  char text2[32];       /* binding rows: the gamepad column (text is the keyboard column); `value` is the focused column 0/1 */
+  char icon[16];        /* optional icon name (assets/ui/icon-<name>.png) */
   char hint[112];       /* one-line explanation shown while focused (always filled for a disabled item) */
 } SvItem;
 
@@ -53,6 +55,8 @@ void sv_menu_pop(SvMenu *menu);
 /* Appends an item to a page; returns it, or NULL when full. */
 SvItem *sv_page_add(SvPage *page, SvItemKind kind, int id, const char *label);
 void sv_item_set_text(SvItem *item, const char *text);
+void sv_item_set_icon(SvItem *item, const char *icon);
+void sv_item_set_text2(SvItem *item, const char *text);
 void sv_item_set_hint(SvItem *item, const char *hint);
 void sv_item_disable(SvItem *item, const char *reason);
 /* Keeps the same logical focus (by item id) across a rebuild of the page. */

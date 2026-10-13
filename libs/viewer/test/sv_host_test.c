@@ -80,7 +80,8 @@ static int pad_hook(void *ctx, SvHost *host, int iteration) {
     case 0:
       for (i = 0; i < 3; ++i) tap(SV_KEY_DOWN);
       tap(SV_KEY_RETURN);                       /* Controls */
-      for (i = 0; i < 14; ++i) tap(SV_KEY_DOWN); /* Player, Gamepad, 8 key rows, then the pad rows: Up, Down, Left, Right, A */
+      for (i = 0; i < 5; ++i) tap(SV_KEY_DOWN); /* Player, (Device label skipped), Up, Down, Left, Right, A */
+      tap(SV_KEY_RIGHT);                         /* the gamepad column of the A row */
       return 0;
     case 1: pad_button(p, SDL_GAMEPAD_BUTTON_SOUTH, 1); return 0;        /* activate "A pad" with the PAD itself */
     case 2:
@@ -90,7 +91,7 @@ static int pad_hook(void *ctx, SvHost *host, int iteration) {
     case 3: pad_button(p, SDL_GAMEPAD_BUTTON_NORTH, 1); return 0;
     case 4:
       p->north_bound = st->bind[SV_SYSTEM_GENESIS].pad[0][SV_ACT_BUTTON1] == SV_PAD_NORTH;
-      pad_button(p, SDL_GAMEPAD_BUTTON_NORTH, 0); tap(SV_KEY_DOWN); return 0;   /* now on "B pad" */
+      pad_button(p, SDL_GAMEPAD_BUTTON_NORTH, 0); tap(SV_KEY_DOWN); tap(SV_KEY_RIGHT); return 0;   /* now on the B row, gamepad column */
     case 5: pad_button(p, SDL_GAMEPAD_BUTTON_SOUTH, 1); return 0;
     case 6: pad_button(p, SDL_GAMEPAD_BUTTON_SOUTH, 0); return 0;
     case 7: pad_button(p, SDL_GAMEPAD_BUTTON_WEST, 1); return 0;              /* WEST is Genesis C by default: a duplicate */
@@ -125,6 +126,7 @@ int main(void) {
   snprintf(dir, sizeof dir, "%s/sv_host_test_%d", tmp, (int)SDL_GetTicks());
   SDL_CreateDirectory(dir);
   snprintf(settings_file, sizeof settings_file, "%s/viewer-settings.cfg", dir);
+  remove(settings_file); /* a previous run may have left a remapped file: every run starts from the defaults */
   snprintf(shots, sizeof shots, "%s/shots", dir);
   SDL_setenv_unsafe("SDL_VIDEODRIVER", "dummy", 1);
   SDL_setenv_unsafe("SDL_AUDIODRIVER", "dummy", 1);

@@ -39,6 +39,8 @@ SvItem *sv_page_add(SvPage *page, SvItemKind kind, int id, const char *label) {
 }
 
 void sv_item_set_text(SvItem *item, const char *text) { copy_text(item->text, sizeof item->text, text); }
+void sv_item_set_icon(SvItem *item, const char *icon) { copy_text(item->icon, sizeof item->icon, icon); }
+void sv_item_set_text2(SvItem *item, const char *text) { copy_text(item->text2, sizeof item->text2, text); }
 void sv_item_set_hint(SvItem *item, const char *hint) { copy_text(item->hint, sizeof item->hint, hint); }
 void sv_item_disable(SvItem *item, const char *reason) { item->enabled = 0; copy_text(item->hint, sizeof item->hint, reason); }
 
@@ -83,8 +85,14 @@ SvMenuEvent sv_menu_navigate(SvMenu *menu, SvNav nav) {
   if (!focusable(item)) return ev;
   ev.item_id = item->id;
   switch (item->kind) {
-    case SV_ITEM_BUTTON: case SV_ITEM_BINDING:
+    case SV_ITEM_BUTTON:
       if (nav == SV_NAV_ACCEPT) ev.kind = SV_EVENT_ACTIVATE;
+      break;
+    case SV_ITEM_BINDING:
+      /* two columns (keyboard / gamepad): Left/Right pick one, Accept activates it (the column is reported in `value`) */
+      if (nav == SV_NAV_LEFT) item->value = 0;
+      else if (nav == SV_NAV_RIGHT) item->value = 1;
+      else if (nav == SV_NAV_ACCEPT) { ev.kind = SV_EVENT_ACTIVATE; ev.value = item->value; }
       break;
     case SV_ITEM_TOGGLE:
       if (nav == SV_NAV_ACCEPT || nav == SV_NAV_LEFT || nav == SV_NAV_RIGHT) { item->value = !item->value; ev.kind = SV_EVENT_CHANGED; ev.value = item->value; }
