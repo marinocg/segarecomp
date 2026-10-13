@@ -497,7 +497,7 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
       { SDL_FRect ring; ring.x = (float)(rx - 2 * ui); ring.y = (float)(ry - 2 * ui); ring.w = (float)(rw + 4 * ui); ring.h = (float)(row_h + 2 * ui);
         SDL_SetRenderDrawColor(h->renderer, c_focus.r, c_focus.g, c_focus.b, 255); SDL_RenderRect(h->renderer, &ring); }
     }
-    truncate_to(line, sizeof line, it->label, (it->kind == SV_ITEM_LABEL ? 17 : (value_x - rx) / cw - 1));
+    truncate_to(line, sizeof line, it->label, it->kind == SV_ITEM_LABEL ? 17 : (it->kind == SV_ITEM_BUTTON ? rw / cw - 1 : (value_x - rx) / cw - 1));
     sv_host_draw_text(h, (float)(rx + 3 * ui), (float)(ry + 2 * ui), ui, tc, line);
     switch (it->kind) {
       case SV_ITEM_SLIDER: {
