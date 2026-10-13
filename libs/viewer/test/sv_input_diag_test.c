@@ -93,7 +93,7 @@ int main(void) {
     f = fopen(path, "wb");
     CHECK(f != NULL, "the mapping file can be written");
     if (f != NULL && v != NULL) {
-      snprintf(line, sizeof line, "%s,Fictional Raw Stick,a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,platform:Linux,\n", v->guid);
+      snprintf(line, sizeof line, "%s,Fictional Raw Stick,a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,leftx:a0,lefty:a1,platform:%s,\n", v->guid, SDL_GetPlatform()); /* SDL ignores mapping lines of another platform */
       fputs(line, f);
       fclose(f);
       CHECK(sv_diag_load_mapping_file(path) >= 1, "the user's mapping file loads");
