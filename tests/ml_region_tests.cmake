@@ -62,3 +62,6 @@ set_property(TEST segarecomp_ml_region_z80_test APPEND PROPERTY LABELS full fast
 add_test(NAME segarecomp_ml_region_z80_gen2_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_region_z80_gen2_test.py)
 set_property(TEST segarecomp_ml_region_z80_gen2_test APPEND PROPERTY LABELS full fast)
+add_test(NAME segarecomp_ml_region_z80_gen2_weights_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_region_z80_gen2_weights_test.py)
+set_property(TEST segarecomp_ml_region_z80_gen2_weights_test APPEND PROPERTY LABELS full fast)

@@ -1,0 +1,49 @@
+{
+ "architecture": "D512HP",
+ "blob_bytes": 527278,
+ "blob_sha256": "81434de0da4755654e14c370fc32de7898532193cbc5a514033268ba6669c2ac",
+ "byte_order": "little-endian",
+ "cell_aggregation": {
+  "cell_bytes": 32,
+  "frozen_ranking_budget": 0.65,
+  "reduction": "top2 (mean of the two largest byte logits in the cell)",
+  "structural_root_addresses": [
+   "0x0000",
+   "0x0038",
+   "0x0066"
+  ]
+ },
+ "format": "SGZ80W01",
+ "format_version": 1,
+ "forward": "see segarecomp_ml_region_z80_gen2_train.build_model (D512HP: stride-4 dilated residual context path (1,2,4,8,16,32), local conv path, 1x1 fuse, 1x1 head)",
+ "input_schema": {
+  "context_margin_bytes": 512,
+  "embedding": [
+   257,
+   16
+  ],
+  "ensemble": "arithmetic mean of the three per-byte logits",
+  "image_independent": true,
+  "output": "one float32 logit per image byte",
+  "tokens": "image bytes 0..255; PAD token 256 outside the image"
+ },
+ "note": "SEG-056 research model. Not adopted: no Z80 selective-admission contract exists and the literal sealed retained-fraction clause failed (ADR 0117). Weights recovered by deterministic refit (ADR 0117 recovery note).",
+ "parameters_per_model": 43809,
+ "plan_digest": "21db1afb2634e4d1765ecd5a0da8578a0d388029ef1d75f55bb87b0a3ab1a852",
+ "seeds": [
+  1,
+  2,
+  3
+ ],
+ "status": "experimental-not-production-adopted",
+ "tensor_dtype": "float32",
+ "training": {
+  "batch": 8,
+  "device": "cpu",
+  "lineages": "eight development lineages",
+  "steps": 3000,
+  "threads": 8
+ },
+ "weights_sha256": "6bee77726a93ad33504522c35b84aaa6d89ed3c5327ff5fae6bff1e9558a4f11",
+ "weights_sha256_algorithm": "per model in seed order, per tensor sorted by name: name bytes then raw little-endian float32 bytes"
+}
