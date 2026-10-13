@@ -32,13 +32,14 @@ would be the larger cost. The launcher, separately, only knew "one ROM at a time
 
 The packaged route compiles the viewer **per game** with the bundled Zig in strict C11. Linking Dear ImGui into every game would add a C++ compile
 (many seconds cold per game on the pinned toolchain), a C/C++ boundary and font/asset packaging to a program whose menu needs a list, toggles, sliders and
-choices. The host therefore draws with `SDL_Renderer` (rect fills in the launcher's palette) and `SDL_RenderDebugText` (SDL's built-in 8x8 pixel font,
-integer-scaled), adding five small C files (about 1,800 lines) and no dependency. The launcher keeps Dear ImGui (it is a long-lived C++ app that
+choices. The host therefore draws with `SDL_Renderer` (rect fills in the launcher's palette) and, since the corrective delivery (addendum below), a
+generated bitmap font atlas (the first version used SDL's built-in 8x8 debug typeface, which was too small and ungainly for a product UI), adding a
+handful of small C files and no dependency. The launcher keeps Dear ImGui (it is a long-lived C++ app that
 already ships it). Both use the same palette and pixel-stepped bevel geometry.
 
 ### 3. Build-list contract (not only CMake)
 
-The five `libs/viewer/src/sv_*.c` files are part of four independent source lists, which `tests/viewer_foundation_layout_test.py` pins together:
+The `libs/viewer/src/sv_*.c` files (the list lives in `kViewerFoundationSources` of `build_command.cpp`) are part of four independent source lists, which `tests/viewer_foundation_layout_test.py` pins together:
 `apps/segarecomp/build_command.cpp` (Genesis and Master System recipes), `tools/genesis_startup_bridge.py` (`--viewer`), `packaging/install.cmake`
 (shipped under `runtime/libs/viewer`) and the CMake `segarecomp_viewer_*` targets. `launcher_core` refuses a package that lacks `sv_host.c`. The cache
 identity (`entry_dir`) is unchanged: the launcher version, product CLI identity, toolchain and host already key every build, and the viewer sources are
@@ -77,3 +78,31 @@ screenshots are not reachable by any plan. Tests: `storage_test` (fake trees, sy
 * A per-game compile compiles five more small C files (a few seconds on the bundled Zig, cached by the Zig cache).
 * Known limits: no `SDL_GPU` shaders; audio output device selection is not offered (SDL follows the OS default; gain/mute are); Genesis has no reset
   seam so Reset is Master System only; the launcher cannot download covers (see `docs/product/launcher-library.md`).
+
+## Addendum: corrective delivery (hardware input, readable UI, art-led launcher)
+
+Review of the first delivery found that a physical Nintendo Switch 2 Pro Controller did nothing, that the viewer menu used SDL's 8x8 debug font, that the launcher
+was almost flat navy with a 92 px art band and algorithmic placeholder covers, and that `ci_shard_guard_test` failed when SDL3 was enabled. Decisions:
+
+1. **One input detection engine, not two.** `sv_input_diag` (SDL3, no window) is linked by the launcher and by every game; `sv_input_state` (SDL free) holds the
+   classification. A controller is classified A (no joystick) / B (joystick without a gamepad mapping) / C (open failed, SDL's error kept) / D (opened, silent) /
+   E (live but game bindings broken) / F (SDL live, launcher navigation not receiving) / OK, and is never reported working from enumeration alone. An
+   `SDL_INIT_GAMEPAD` or `SDL_OpenGamepad` failure is logged and shown instead of silently falling back. Raw joysticks are never reinterpreted as gameplay input; a
+   user-supplied `gamecontrollerdb.txt` is the explicit route. The viewer's pad slots borrow the gamepads the engine opens (one owner of the SDL handles).
+2. **Root cause of the physical failure** (details and evidence in `docs/testing/input-diagnostics.md`): SDL 3.4's Switch 2 driver is USB-only and exists only in an
+   SDL built with libusb; neither the official Windows DLL nor our own Linux/macOS builds contained it. The release workflow now installs the libusb development
+   package and `build-sdl3.sh` verifies (and with `SDL_REQUIRE_LIBUSB=1` enforces) that the driver is compiled in; libusb stays a run-time system library (no LGPL
+   bundling). Bluetooth is unsupported upstream, and Windows keeps the official DLL (no driver binding is installed by us). Physical support remains **NOT VERIFIED**.
+3. **Viewer text is a generated bitmap font** (`tools/gen_viewer_font.py`, Pillow, run offline, output committed as `sv_font_data.c`, 1.8 KB of 1-bit atlas): ProggyClean
+   (MIT) for body text and Silkscreen Bold (OFL, already in the repository) for headings. Text widths and wrapping come from glyph advances, the UI scale is a whole
+   number from the output height (13 px text at 1x up to 4x at 4K), nothing is loaded from disk and no font library or Dear ImGui enters the per-game C11 build.
+   `SDL_RenderDebugText` is banned from `libs/viewer/src` by `viewer_foundation_layout_test.py`. Pages use stepped (pixel-chamfered) frames in the repository palette and
+   the real wordmark when the assets folder is present (a Silkscreen title otherwise).
+4. **Video page**: the live preview renders a centre crop of the current picture through the same CRT pipeline as the game (`SvCrtState` is now instantiated twice), so
+   scanlines, mask, bloom and curvature in the preview are the real passes at a resolvable scale; the four preset buttons are real controls (mouse and menu).
+5. **Launcher art**: the existing `background.png` is composed responsively (hero strip from the horizon rows, dimmed water, foliage frame) behind the whole window; a game
+   without a cover shows a neutral hand-drawn cartridge with the title's initials. The design kit's `cover_placeholder.png` and the 9-slice PNGs were evaluated and **not**
+   shipped: the placeholder depicts a recognisable platform-game scene (not neutral), and the kit's own README recommends code-drawn controls in the same palette; the repository's
+   icons, Silkscreen and wordmark are reused as the kit requires.
+6. **CI shard guard**: `tests/ci_shards.cmake` scanned only `tests/`; the SDL3 viewer/launcher suites (registered in `libs/viewer` and `apps/`) were never sharded, so
+   `ci_shard_guard_test` failed whenever SDL3 was enabled. It now labels the tests of every directory (CMake >= 3.28 for the cross-directory property form).

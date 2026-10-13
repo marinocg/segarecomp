@@ -28,6 +28,7 @@ SvDiag *sv_diag_create(void) {
   if (d != NULL) {
     const char *t = SDL_getenv("SEGARECOMP_INPUT_TRACE");
     d->trace = (t != NULL && *t != '\0' && *t != '0');
+    if (d->trace) SDL_SetLogPriority(SDL_LOG_CATEGORY_INPUT, SDL_LOG_PRIORITY_DEBUG); /* SDL's own HIDAPI/libusb messages (for example "Couldn't load libusb") */
     d->video_ok = 1;
     d->gamepad_ok = 1;
   }

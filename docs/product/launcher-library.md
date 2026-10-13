@@ -6,9 +6,9 @@ This is the user-facing description of what ships in the consumer launcher (`Seg
 ## What the launcher is
 
 A resizable window (default 1080x740, minimum about 720x520, HiDPI aware, compact mode) with five areas: **Library**, **Import ROMs**, **Storage**,
-**Settings** and a per-game **Details** page. Everything it shows is read from the library file, the build cache or the product: no placeholder values.
+**Settings** (including **Input Diagnostics**) and a per-game **Details** page. The repository's sunset artwork forms the header banner and the dimmed scenery behind the window. Everything it shows is read from the library file, the build cache or the product: no placeholder values.
 
-* **Library** - grid or list, search, platform/status filters, sort (last played, title, last built, added, size), favorites, multi-select
+* **Library** - grid or list (a game without a cover shows a neutral cartridge with its initials; a cover is only ever an image you chose), search, platform/status filters, sort (last played, title, last built, added, size), favorites, multi-select
   (Select mode) for storage actions and removal. An empty library shows the ROM drop zone.
 * **Import** - drag and drop or Browse (several files). Each file is classified by the same media classifier as before, de-duplicated by SHA-256
   (the same game elsewhere only adds a tracked location), and listed with a reason when refused. Importing never builds (an explicit checkbox builds
@@ -88,7 +88,7 @@ needs developer credentials).
 Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button opens the host pause menu (the guest does not advance):
 
 * Resume; **Quick Settings** (fullscreen, scaling, aspect, display preset, VSync, FPS counter); **Video & Display** (plus scanline/mask/curvature/bloom/
-  brightness sliders with the picture previewed beside the menu); **Controls**; **Audio** (volume/mute, gain only); **System & Diagnostics** (system,
+  brightness sliders, a live preview that applies the current settings through the real CRT pipeline, and clickable preset buttons); **Controls** (with a **Controller status & test** page: what SDL sees, live buttons, the reason a pad does not work); **Audio** (volume/mute, gain only); **System & Diagnostics** (system,
   ROM digest when started from the launcher, FPS, renderer, picture/output size, audio queue and dropped chunks, screenshot, Reset on Master System);
   **Return to Launcher** (or Quit outside the launcher), with a confirmation.
 * Scaling: *Fit* or *Integer* (whole-number multiples, falling back to fit below 1x); aspect *Original* (square pixels) or *4:3 corrected*; windowed
@@ -99,6 +99,7 @@ Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button ope
   stick doubles as the D-pad), conflict handling (a duplicate binding moves from its previous owner and says so), reserved keys (Esc, F-keys, the menu
   key), a rebindable menu key (Esc always works), restore defaults. The listener waits for a *fresh* press: the press that activated it is ignored.
   Held inputs are released when the window loses focus and when the menu opens or closes.
+* Menu button: **Back/Select** (Nintendo "-"), **Home/Guide** or **Esc** opens the menu. **Start** ("+") is a game button (Genesis Start / Master System Pause), so it does not open the menu. Nintendo controllers show their printed labels in the cues (South is the Nintendo B, East the A).
 * Hotkeys: F11 / Alt+Enter fullscreen, F12 screenshot (the game picture only, PNG, in `Pictures/Segarecomp` or `SEGARECOMP_SCREENSHOT_DIR`).
 * Capability matrix: Genesis is a three-button pad (A/B/C/Start; no X/Y/Z/Mode), two ports, no Reset. Master System has two buttons, the console's
   **Pause** button (an NMI edge, distinct from the host menu) and Reset in the System page. Audio device selection follows the OS default.
@@ -108,6 +109,10 @@ Full-window picture, no permanent UI. **Esc** or the gamepad **Back** button ope
 Environment variables the launcher sets for the game: `SEGARECOMP_LAUNCHED`, `SEGARECOMP_VIEWER_SETTINGS`, `SEGARECOMP_ROM_SHA256`, `SEGARECOMP_GAME_TITLE`,
 and (Genesis) `SEGARECOMP_GENESIS_REGION`. Unchanged: `SEGARECOMP_VIEWER_UNTHROTTLED`, `SEGARECOMP_VIEWER_SLICE`, `SEGARECOMP_VIEWER_MUTE`, the Master System
 `--viewer-*` options including `--viewer-record`.
+
+## Controller input
+
+See `docs/testing/input-diagnostics.md` for the A-F diagnostic states, the Switch 2 Pro Controller findings (SDL's driver is USB-only and needs libusb; Bluetooth is unsupported by SDL 3.4; real-device support is NOT VERIFIED) and the manual validation procedure.
 
 ## Headless
 
@@ -136,4 +141,4 @@ All images are rendered from fictional, project-authored data: synthetic ROMs bu
 | CRT presets on the same picture | `crt_pixel_perfect.png`, `crt_soft.png`, `crt_classic.png`, `crt_arcade.png` |
 | Toast | `09_toast.png` |
 
-The viewer menu uses SDL's built-in 8x8 pixel font (the per-game C build has no font rasterizer); the launcher uses the embedded scalable face for text and the repository's Silkscreen Bold for titles.
+The viewer menu uses a generated bitmap font (ProggyClean for text, Silkscreen Bold for headings; `tools/gen_viewer_font.py`) scaled by whole numbers; the launcher uses the embedded scalable face for text and Silkscreen Bold for titles.
