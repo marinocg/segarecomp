@@ -76,6 +76,8 @@ stops with the typed `Z80_ERROR_UNADMITTED_PC` the moment it reaches one. Compat
 - Launcher: the Mode control offers Optimized for Master System only when the product states it is available. An Optimized run that exits with
   status 7 shows a notice, switches to Compatibility, reuses a matching Compatibility build or builds one, and restarts the program **from reset**,
   once per Play (a failing Compatibility build is reported, not retried). No machine state is carried over.
+  The Running label and the headless `run_mode` report the **effective** program (an Optimized request that fell back at build time runs and is labelled
+  Compatibility; `run_requested_mode` keeps the request); the historical `run=exited code=N` line is unchanged.
 
 ## Alias and RAM-thunk builds (ADR 0111)
 

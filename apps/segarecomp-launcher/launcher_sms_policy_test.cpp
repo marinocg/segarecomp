@@ -158,6 +158,42 @@ int main(int argc, char **argv) {
     expect(!decide_after_exit(opt, 3, false).restart && !decide_after_exit(opt, 0, false).restart, "no restart for other ends");
   }
 
+  // ---- requested vs effective: the running program is what the entry's status says it is ----
+  {
+    const PolicyReport applied = read_policy_report([&] {
+      const fs::path e = dir / "eff_applied"; fs::create_directories(e);
+      std::ofstream(e / "status.json") << R"({"status":"ok","aot_policy":{"requested":"optimized","requested_model":"d512hp","effective":"ml_region_z80","fallback":false,"reason":"none","fallback_class":"none","model_family":"sms_z80_d512hp"}})";
+      return e; }());
+    const PolicyReport fell = read_policy_report([&] {
+      const fs::path e = dir / "eff_fell"; fs::create_directories(e);
+      std::ofstream(e / "status.json") << R"({"status":"ok","aot_policy":{"requested":"optimized","requested_model":"d512hp","effective":"broad","fallback":true,"reason":"inference","fallback_class":"producer_failed","model_family":"none"}})";
+      return e; }());
+    const PolicyReport compat = read_policy_report([&] {
+      const fs::path e = dir / "eff_compat"; fs::create_directories(e);
+      std::ofstream(e / "status.json") << R"({"status":"ok","aot_policy":{"requested":"compatibility","effective":"broad","fallback":false,"reason":"none"}})";
+      return e; }());
+    expect(applied.present && fell.present && compat.present, "status fixtures parse");
+    expect(effective_optimized(applied) && effective_mode(applied) == "optimized", "an applied Optimized build is effectively Optimized");
+    expect(!effective_optimized(fell) && effective_mode(fell) == "compatibility", "a build-time fallback is effectively Compatibility");
+    expect(!effective_optimized(compat) && effective_mode(compat) == "compatibility", "a Compatibility build is Compatibility");
+    expect(!effective_optimized(PolicyReport{}) && effective_mode(PolicyReport{}) == "compatibility", "an entry without a report is Compatibility");
+    expect(running_label(applied, false) == "Playing... (Optimized, experimental)", "label: applied Optimized");
+    const std::string fell_label = running_label(fell, false);
+    expect(fell_label.find("Optimized, experimental") == std::string::npos && fell_label.find("Compatibility") != std::string::npos && fell_label.find("fell back") != std::string::npos,
+           "label: a build-time fallback names Compatibility and says Optimized fell back: " + fell_label);
+    expect(running_label(compat, false) == "Playing... (Compatibility)", "label: Compatibility");
+    expect(running_label(compat, true) == "Playing... (Compatibility, restarted)", "label: the runtime restart wording is separate");
+    expect(running_label(fell, true) == "Playing... (Compatibility, restarted)", "label: a restarted run says restarted");
+    // The restart decision is about the program that runs, never the request.
+    RomView requested = sms;
+    requested.sms_optimized_available = true;
+    requested.aot_policy = "optimized";
+    requested.aot_model = "v1";
+    expect(!decide_after_exit(running_view(requested, fell), sms_exit_unadmitted_pc, false).restart, "a fallen-back (broad) program never triggers the unadmitted_pc restart");
+    expect(decide_after_exit(running_view(requested, applied), sms_exit_unadmitted_pc, false).restart, "an applied Optimized program does");
+    expect(running_view(requested, fell).aot_policy == "compatibility" && requested.aot_policy == "optimized", "running_view does not change the request");
+  }
+
   // ---- real product CLI: availability and identities ----
   {
     Layout layout;
@@ -328,6 +364,16 @@ int main(int argc, char **argv) {
                r["aot_policy_effective"] == "broad",
            "g) a build-time fallback and its reason are reported");
 
+    // i) build-time fallback followed by execution: the requested policy stays visible, the running program is Compatibility, nothing restarts
+    builds = fresh_cache("cache_i");
+    r = run_launcher({"--aot-policy", "optimized"}, {{"FAKE_OPT_FALLBACK", "1"}, {"FAKE_OPT_EXIT", "7"}}, rc);
+    expect(rc == 0 && r["aot_policy_requested"] == "optimized" && r["aot_policy_effective"] == "broad" && r["aot_policy_fallback"] == "yes" && r["run"] == "exited code=0" &&
+               r["run_requested_mode"] == "optimized" && r["run_mode"] == "compatibility" && r.count("fallback") == 0 && line_count(builds) == 1,
+           "i) fallen-back build runs as Compatibility, reports requested optimized / effective compatibility, no restart");
+    r = run_launcher({"--aot-policy", "optimized"}, {{"FAKE_OPT_FALLBACK", "1"}, {"FAKE_COMPAT_EXIT", "7"}}, rc);
+    expect(rc == 4 && r["run"] == "exited code=7" && r["run_mode"] == "compatibility" && r.count("fallback") == 0,
+           "i) status 7 from a fallen-back (broad) program is a plain failure, not a restart");
+
     // h) --aot-model is a Genesis option
     builds = fresh_cache("cache_h");
     r = run_launcher({"--aot-policy", "optimized", "--aot-model", "gen2"}, {}, rc);
@@ -420,6 +466,17 @@ int main(int argc, char **argv) {
     g = gui("optimized", {{"FAKE_SMS_OPTIMIZED", "0"}}, "gcache_6", true);
     expect(has(g, "autoplay=build mode=compatibility") && !has(g, "mode=optimized") && builds_of("gcache_6") == 1 && read_file(dir / "gcache_6-builds.txt") == "compatibility\n",
            "G6: Optimized is not offered when the product does not provide it");
+    // G8: build-time fallback followed by execution: the Running label and mode name the EFFECTIVE program
+    g = gui("optimized", {{"FAKE_OPT_FALLBACK", "1"}, {"FAKE_OPT_EXIT", "7"}}, "gcache_8", true);
+    expect(has(g, "run=started mode=compatibility restarted=0 requested=optimized label=Playing... (Compatibility; Optimized fell back at build)") && !has(g, "Optimized, experimental") &&
+               !has(g, "restart=") && has(g, "run=exited code=0 mode=compatibility") && has(g, "final=ready mode=optimized restarted=0 entry_requested=optimized effective=compatibility"),
+           "G8: a build-time fallback runs and is labelled Compatibility (request stays visible), no restart");
+    g = gui("optimized", {}, "gcache_8b", true);
+    expect(has(g, "run=started mode=optimized restarted=0 requested=optimized label=Playing... (Optimized, experimental)"), "G8: an applied Optimized build is labelled Optimized");
+    g = gui("optimized", {{"FAKE_OPT_EXIT", "7"}}, "gcache_8c", true);
+    expect(has(g, "restart=compatibility") && has(g, "run=started mode=compatibility restarted=1 requested=compatibility label=Playing... (Compatibility, restarted)"),
+           "G8: the runtime restart keeps its own label");
+
     // G7: returning to Compatibility and reopening with another policy never collides
     g = gui("", {}, "gcache_7", true);
     g = gui("optimized", {}, "gcache_7", false);

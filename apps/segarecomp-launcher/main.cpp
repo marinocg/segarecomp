@@ -148,8 +148,10 @@ int headless(int argc, char **argv) {
           if (!game.started()) { emit("run=failed_to_start"); rc = 4; break; }
           while (!game.poll()) SDL_Delay(50);
           emit("run=exited code=" + std::to_string(game.exit_code()));  // the historical line, unchanged
-          emit("run_mode=" + current.aot_policy);
-          const RestartDecision next = decide_after_exit(current, game.exit_code(), restarted);
+          const PolicyReport ran = read_policy_report(entry);
+          emit("run_requested_mode=" + current.aot_policy);  // what was asked for
+          emit("run_mode=" + effective_mode(ran));           // what actually ran (a build-time fallback runs Compatibility)
+          const RestartDecision next = decide_after_exit(running_view(current, ran), game.exit_code(), restarted);
           if (!next.restart) { if (game.exit_code() != 0) rc = 4; break; }
           emit("run=unadmitted_pc");
           emit("fallback=compatibility_restart");
@@ -602,7 +604,8 @@ int gui() {
   const auto launch_game = [&] {
     if (const std::string refusal = launch_refusal(rom); !refusal.empty()) { failure = refusal; diagnostics = refusal; state = State::Failed; return; }
     game = std::make_unique<GameRun>(rom, layout, entry);
-    if (game->started()) { state = State::Running; trace(std::string("run=started mode=") + rom.aot_policy + " restarted=" + (restarted_this_play ? "1" : "0")); }
+    if (game->started()) { state = State::Running; trace(std::string("run=started mode=") + effective_mode(policy_report) + " restarted=" + (restarted_this_play ? "1" : "0") + " requested=" + rom.aot_policy +
+                                                   " label=" + running_label(policy_report, restarted_this_play)); }
     else { failure = "The game could not be started."; diagnostics = failure; game.reset(); state = State::Failed; }
   };
   const auto browse = [&] {
@@ -679,9 +682,9 @@ int gui() {
     }
     if (state == State::Running && game->poll()) {
       const int exit_code = game->exit_code();
-      const RestartDecision next = decide_after_exit(rom, exit_code, restarted_this_play);
+      const RestartDecision next = decide_after_exit(running_view(rom, policy_report), exit_code, restarted_this_play);
       game.reset();
-      trace("run=exited code=" + std::to_string(exit_code) + " mode=" + rom.aot_policy);
+      trace("run=exited code=" + std::to_string(exit_code) + " mode=" + effective_mode(policy_report));
       if (exit_code == 0) state = State::Ready;
       else if (next.restart) {
         // The typed unadmitted_pc stop of an Optimized program: tell the user, switch to Compatibility, and restart from reset (once).
@@ -714,7 +717,7 @@ int gui() {
         start_build(false);  // the "Recompile & Play" press for a game with no matching build
       } else if (autoplay_started && !restart_pending && (state == State::Ready || state == State::Failed)) {
         trace(std::string("final=") + (state == State::Ready ? "ready" : "failed") + " mode=" + rom.aot_policy + " restarted=" + (restarted_this_play ? "1" : "0") +
-              " entry_requested=" + policy_report.requested);
+              " entry_requested=" + policy_report.requested + " effective=" + effective_mode(policy_report));
         autoplay_started = false;  // reported once
         SDL_Event quit; quit.type = SDL_EVENT_QUIT; SDL_PushEvent(&quit);
       }
@@ -1017,7 +1020,7 @@ int gui() {
         settings_column(true);
       } else if (state == State::Running) {
         draw_text(dl, font_bold, centered.len(16), text_primary, centered.at(content_x, row_y + 10.0F),
-                  rom.optimized() ? "Playing... (Optimized, experimental)" : (restarted_this_play ? "Playing... (Compatibility, restarted)" : "Playing... (Compatibility)"));
+                  running_label(policy_report, restarted_this_play).c_str());  // the EFFECTIVE program, from the entry's status.json
         draw_text(dl, font_regular, centered.len(13), text_secondary, centered.at(content_x, row_y + 38.0F), "Close the game window to return.");
         if (restarted_this_play && !restart_notice.empty()) {
           ImGui::SetCursorPos(centered.at(content_x, row_y + 62.0F));

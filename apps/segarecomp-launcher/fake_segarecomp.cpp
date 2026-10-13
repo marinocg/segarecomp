@@ -80,7 +80,7 @@ int main(int argc, char **argv) {
                                        << "\",\"fallback_class\":\"" << (fallback ? "producer_failed" : "none") << "\",\"model_family\":\""
                                        << (effective == "ml_region_z80" ? "sms_z80_d512hp" : "none") << "\",\"validator\":\"not_run\",\"selected_ppm\":650000,\"admitted_ppm\":650000"
                                        << ",\"policy_identity\":\"" << identity(policy, platform) << "\",\"identity\":\"" << hex64("b|" + out.string()) << "\"}}\n";
-    std::ofstream(out / "policy.txt") << policy;
+    std::ofstream(out / "policy.txt") << (fallback ? std::string("compatibility") : policy);  // the program that was really built
 #if defined(_WIN32)
     const char *suffix = ".exe";
 #else

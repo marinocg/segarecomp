@@ -472,6 +472,25 @@ RomView compatibility_view(RomView rom) {
   return rom;
 }
 
+bool effective_optimized(const PolicyReport &report) {
+  return report.present && report.requested == "optimized" && !report.fallback && report.effective != "broad";
+}
+
+std::string effective_mode(const PolicyReport &report) { return effective_optimized(report) ? "optimized" : "compatibility"; }
+
+RomView running_view(RomView rom, const PolicyReport &report) {
+  rom.aot_policy = effective_mode(report);
+  if (rom.aot_policy == "compatibility") rom.aot_model = "v1";
+  return rom;
+}
+
+std::string running_label(const PolicyReport &report, bool restarted) {
+  if (effective_optimized(report)) return "Playing... (Optimized, experimental)";
+  if (restarted) return "Playing... (Compatibility, restarted)";
+  if (report.present && report.requested == "optimized" && report.fallback) return "Playing... (Compatibility; Optimized fell back at build)";
+  return "Playing... (Compatibility)";
+}
+
 RestartDecision decide_after_exit(const RomView &rom, int exit_code, bool already_restarted) {
   RestartDecision decision;
   if (!already_restarted && classify_game_exit(rom, exit_code) == RunVerdict::unadmitted_pc) {

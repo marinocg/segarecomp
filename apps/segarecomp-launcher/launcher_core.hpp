@@ -146,6 +146,14 @@ enum class RunVerdict { clean, unadmitted_pc, failed };
 // The same ROM with the Compatibility policy (the one-shot restart target). Never carries a Genesis model.
 [[nodiscard]] RomView compatibility_view(RomView rom);
 [[nodiscard]] std::string unadmitted_restart_notice();
+// REQUESTED vs EFFECTIVE (the entry's status.json is the single source of truth, read through PolicyReport): the program that actually runs is
+// Optimized only when the build really applied the selective policy. A build-time fallback (requested optimized, effective broad) runs Compatibility.
+[[nodiscard]] bool effective_optimized(const PolicyReport &report);
+[[nodiscard]] std::string effective_mode(const PolicyReport &report);  // "optimized" | "compatibility"
+// The view whose policy is what RUNS (the restart decision is about the running program, never about the request).
+[[nodiscard]] RomView running_view(RomView rom, const PolicyReport &report);
+// The Running-screen label: names the effective program, says when an Optimized request fell back at build time, and keeps the restart wording apart.
+[[nodiscard]] std::string running_label(const PolicyReport &report, bool restarted);
 // What to do when a run ends: the single decision shared by the window and the headless `--run`. `already_restarted` makes the restart
 // one-shot per user request (a Compatibility program can never classify as unadmitted_pc, and a second request is never made).
 struct RestartDecision { bool restart = false; RomView next; std::string notice; };
