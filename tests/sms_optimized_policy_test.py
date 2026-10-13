@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """SEG-057-T002 (ADR 0119): the experimental Master System Optimized policy through the real product CLI and real generated programs.
 
-usage: sms_optimized_policy_test.py <segarecomp-cli> <cc> <product-root> <sms_admission_emit> [cli|runtime]
+usage: sms_optimized_policy_test.py <segarecomp-cli> <cc> <product-root> <sms_admission_emit> [cli|runtime|viewer <sdl3-include> <sdl3-lib>]
 
   cli      `aot-policy-identity` per platform, the machine-readable `aot_policy` status of Compatibility and Optimized builds (requested /
            effective / fallback / reason / model and plan identities / selected fraction), determinism, cache identities that never collide,
@@ -9,6 +9,9 @@ usage: sms_optimized_policy_test.py <segarecomp-cli> <cc> <product-root> <sms_ad
   runtime  a real generated program built from an explicit plan: an adequate plan reproduces the broad run's machine-state digest; an
            inadequate plan stops with the typed Z80_ERROR_UNADMITTED_PC, printed as `z80_outcome unadmitted_pc` and exiting with the
            dedicated status 7 (not 3), before the omitted instruction has any effect.
+
+  viewer   (SDL3 job only) the same typed stop through the real SDL3 VIEWER program under SDL's dummy video/audio drivers: exit status 7 for an
+           omitted start and 0 for an adequate plan, so the program the launcher actually starts speaks the same contract.
 
 Hermetic: the project-authored `machine_e2e` fixture only; no commercial ROM, no model file, no PyTorch.
 """
@@ -23,7 +26,8 @@ import sys
 import tempfile
 
 CLI, CC, ROOT, PLAN_EMIT = sys.argv[1], sys.argv[2], pathlib.Path(sys.argv[3]).resolve(), sys.argv[4]
-GROUPS = tuple(sys.argv[5:]) or ("cli", "runtime")
+GROUPS = tuple(a for a in sys.argv[5:5 + 1]) or ("cli", "runtime")
+SDL_INCLUDE, SDL_LIB = (sys.argv[6], sys.argv[7]) if len(sys.argv) > 7 else (None, None)
 sys.path.insert(0, str(ROOT / "tests"))
 import sms_e2e_common as c  # noqa: E402
 from sms_e2e_common import builder  # noqa: E402
@@ -123,18 +127,21 @@ def cli_group(tmp, rom):
     check(build(rom, tmp / "bad2", "--aot-model", "gen2").returncode != 0, "--aot-model without --aot-policy optimized is still a usage error")
 
 
-def compile_program(emit_dir, work):
+def compile_program(emit_dir, work, viewer=False):
     units = [emit_dir / n for n in (emit_dir / "sms.units").read_text().split()]
     rt, hl, psg = ROOT / "platforms/master-system/runtime", ROOT / "platforms/master-system/headless", ROOT / "libs/device/sega/psg"
+    vw = ROOT / "platforms/master-system/viewer"
     sources = units + [rt / n for n in ("sms_memory.c", "sms_sha256.c", "sms_input.c", "sms_machine.c", "sms_psg.c", "sms_pad.c", "sms_vdp.c", "sms_render.c")] + \
-        [psg / "src/sn76489.c"] + [hl / n for n in ("sms_audio.c", "sms_headless.c", "sms_devices_vdp.c")]
-    base = [CC, "-std=c11", "-O0", "-w", "-I", str(ROOT / "libs/codegen/c11/include"), "-I", str(rt), "-I", str(psg / "include"), "-I", str(emit_dir), "-I", str(hl)]
+        [psg / "src/sn76489.c"] + ([vw / n for n in ("sms_viewer.c", "sms_viewer_sdl3.c", "sms_viewer_main.c")] if viewer else
+                                   [hl / n for n in ("sms_audio.c", "sms_headless.c", "sms_devices_vdp.c")])
+    base = [CC, "-std=c11", "-O0", "-w", "-I", str(ROOT / "libs/codegen/c11/include"), "-I", str(rt), "-I", str(psg / "include"), "-I", str(emit_dir),
+            *(["-I", str(vw), "-I", SDL_INCLUDE] if viewer else ["-I", str(hl)])]
     objects = [work / ("%d.o" % i) for i in range(len(sources))]
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         codes = list(pool.map(lambda p: subprocess.run(base + ["-c", "-o", str(p[1]), str(p[0])], capture_output=True).returncode, zip(sources, objects)))
     check(all(code == 0 for code in codes), "the plan-built program must compile")
     exe = work / "program"
-    link = subprocess.run([CC, *map(str, objects), "-o", str(exe)], capture_output=True)
+    link = subprocess.run([CC, *map(str, objects), "-o", str(exe), *(["-L" + SDL_LIB, "-lSDL3", "-Wl,-rpath," + SDL_LIB] if viewer else [])], capture_output=True)
     check(link.returncode == 0, "the plan-built program must link")
     return exe
 
@@ -174,6 +181,29 @@ def runtime_group(tmp, rom):
     check(r.returncode == 2, "a cycle-budget stop keeps status 2 (got %d)" % r.returncode)
 
 
+def viewer_group(tmp, rom):
+    env = {**__import__("os").environ, "SDL_VIDEODRIVER": "dummy", "SDL_AUDIODRIVER": "dummy", "SDL_RENDER_DRIVER": "software"}
+
+    def plan_viewer(name, lines):
+        plan = tmp / (name + ".plan")
+        plan.write_text("\n".join(lines) + "\n")
+        directory = tmp / name
+        directory.mkdir()
+        r = subprocess.run([PLAN_EMIT, str(rom), str(directory), "sms", "--plan", str(plan)], text=True, capture_output=True)
+        check(r.returncode == 0, "%s emission failed: %s" % (name, r.stdout + r.stderr))
+        return compile_program(directory, directory, viewer=True) if r.returncode == 0 else None
+
+    adequate = plan_viewer("v_adequate", ["1 0 1024"] + ["%d 0 2048" % (2 + bank) for bank in range(8)])
+    if adequate:
+        r = subprocess.run([str(adequate), "--viewer-unthrottled", "--viewer-mute", "--viewer-frames", "8"], text=True, capture_output=True, timeout=300, env=env)
+        check(r.returncode == 0, "the viewer with an adequate plan ends cleanly (rc %d): %s" % (r.returncode, (r.stdout + r.stderr)[-300:]))
+    inadequate = plan_viewer("v_inadequate", ["1 0 256"])
+    if inadequate:
+        r = subprocess.run([str(inadequate), "--viewer-unthrottled", "--viewer-mute", "--viewer-frames", "8"], text=True, capture_output=True, timeout=300, env=env)
+        check(r.returncode == EXIT_UNADMITTED_PC, "the viewer exits with the dedicated status %d for an omitted start, not %d: %s" % (EXIT_UNADMITTED_PC, r.returncode, (r.stdout + r.stderr)[-300:]))
+        check(re.search(r"^z80_outcome unadmitted_pc pc [0-9A-F]{4} identity \d+$", r.stdout, re.M) is not None, "the viewer prints the structured outcome line: %s" % r.stdout[-300:])
+
+
 def main():
     with tempfile.TemporaryDirectory(prefix="sms-optimized-policy-") as directory:
         tmp = pathlib.Path(directory)
@@ -183,6 +213,8 @@ def main():
             cli_group(tmp, rom)
         if "runtime" in GROUPS:
             runtime_group(tmp, rom)
+        if "viewer" in GROUPS:
+            viewer_group(tmp, rom)
     if FAILED:
         print("\n".join(FAILED[:20]))
         return 1
