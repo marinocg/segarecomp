@@ -15,7 +15,7 @@ static int failures = 0;
 static void key_event(int scancode, int down, int mod) {
   SDL_Event e;
   SDL_zero(e);
-  e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+  e.type = (Uint32)(down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP);
   e.common.timestamp = SDL_GetTicksNS();
   e.key.scancode = (SDL_Scancode)scancode;
   e.key.down = down != 0;
@@ -23,7 +23,7 @@ static void key_event(int scancode, int down, int mod) {
   SDL_PushEvent(&e);
 }
 static void tap(int scancode) { key_event(scancode, 1, 0); key_event(scancode, 0, 0); }
-static void window_event(SDL_EventType type) { SDL_Event e; SDL_zero(e); e.type = type; e.common.timestamp = SDL_GetTicksNS(); SDL_PushEvent(&e); }
+static void window_event(SDL_EventType type) { SDL_Event e; SDL_zero(e); e.type = (Uint32)type; e.common.timestamp = SDL_GetTicksNS(); SDL_PushEvent(&e); }
 
 static void fill_pattern(uint8_t *rgb, int w, int h) {
   int x, y;

@@ -33,7 +33,7 @@ static void key(int sc) {
   int i;
   for (i = 0; i < 2; ++i) {
     SDL_zero(e);
-    e.type = i == 0 ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+    e.type = (Uint32)(i == 0 ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP);
     e.common.timestamp = SDL_GetTicksNS();
     e.key.scancode = (SDL_Scancode)sc;
     e.key.down = i == 0;

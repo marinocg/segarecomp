@@ -100,9 +100,9 @@ static void build_video_core(SvHost *h, SvPage *p, int full) {
   static const char *const preset[] = {"Pixel Perfect", "CRT Soft", "CRT Classic", "CRT Arcade", "Custom"};
   const SvVideoSettings *v = &h->settings.video;
   add_toggle(p, I_FULLSCREEN, "Fullscreen", v->fullscreen, "Borderless desktop fullscreen; no display mode change. F11 also toggles.");
-  add_choice(p, I_SCALE, "Scaling", v->scale, 2, scale, "Fit uses any size; Integer keeps whole-number pixel multiples when they fit.");
-  add_choice(p, I_ASPECT, "Aspect Ratio", v->aspect, 2, aspect, "Original keeps square pixels; 4:3 stretches to the aspect of a TV picture.");
-  add_choice(p, I_PRESET, "Video Effect / CRT", v->preset, v->preset == SV_CRT_CUSTOM ? 5 : 4, preset, "Pixel Perfect is the untouched picture. CRT presets add real scanline/mask/glow/curve passes.");
+  add_choice(p, I_SCALE, "Scaling", (int)v->scale, 2, scale, "Fit uses any size; Integer keeps whole-number pixel multiples when they fit.");
+  add_choice(p, I_ASPECT, "Aspect Ratio", (int)v->aspect, 2, aspect, "Original keeps square pixels; 4:3 stretches to the aspect of a TV picture.");
+  add_choice(p, I_PRESET, "Video Effect / CRT", (int)v->preset, v->preset == SV_CRT_CUSTOM ? 5 : 4, preset, "Pixel Perfect is the untouched picture. CRT presets add real scanline/mask/glow/curve passes.");
   if (full) {
     add_slider(p, I_SCANLINES, "Scanlines", v->scanlines, 0, 100, 5, "%", "Darkens the gap between source lines (needs a window at least 1.5x the picture).");
     add_slider(p, I_MASK, "Phosphor mask", v->mask, 0, 100, 5, "%", "RGB stripe mask over the picture.");
