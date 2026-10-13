@@ -32,7 +32,9 @@ typedef enum Z80Outcome {
   Z80_ERROR_UNKNOWN_IMAGE_IDENTITY = 19,
   Z80_ERROR_EXCLUDED_FORM = 20,
   Z80_ERROR_IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE = 21,
-  Z80_ERROR_CODE_MISMATCH = 22 /* RAM-backed image: the live bytes of an instruction differ from the compiled ones */
+  Z80_ERROR_CODE_MISMATCH = 22, /* RAM-backed image: the live bytes of an instruction differ from the compiled ones */
+  Z80_ERROR_UNADMITTED_PC = 23  /* selective emission (SEG-057, ADR 0118): the PC is an exposed code start the supplied admission plan omitted;
+                                   state.pc is that start and the instruction had no effect. Never emitted without an admission plan. */
 } Z80Outcome;
 
 static inline int z80_outcome_is_resumable(Z80Outcome outcome) {
@@ -53,6 +55,7 @@ static inline const char *z80_outcome_name(Z80Outcome outcome) {
     case Z80_ERROR_EXCLUDED_FORM: return "excluded_form";
     case Z80_ERROR_IM0_UNSUPPORTED_ACKNOWLEDGE_BYTE: return "im0_unsupported_acknowledge_byte";
     case Z80_ERROR_CODE_MISMATCH: return "code_mismatch";
+    case Z80_ERROR_UNADMITTED_PC: return "unadmitted_pc";
   }
   return "invalid";
 }

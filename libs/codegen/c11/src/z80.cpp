@@ -324,6 +324,21 @@ void emit_group(std::ostream& out, const std::vector<Plan>& plans, const Group& 
 
 }  // namespace
 
+std::uint64_t image_content_digest(std::span<const std::uint8_t> bytes) {
+  std::uint64_t hash = 0xcbf29ce484222325ull;
+  for (const std::uint8_t byte : bytes) hash = (hash ^ byte) * 0x100000001b3ull;
+  return hash;
+}
+
+ImageAdmission bind_admission(const CodeImage& image, std::vector<std::uint32_t> offsets) {
+  ImageAdmission admission;
+  admission.identity = image.identity;
+  admission.byte_count = static_cast<std::uint32_t>(image.bytes.size());
+  admission.content_digest = image_content_digest(image.bytes);
+  admission.offsets = std::move(offsets);
+  return admission;
+}
+
 const char* owner_kind_name(OwnerKind kind) {
   switch (kind) {
     case OwnerKind::full: return "full";
@@ -366,6 +381,45 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
       // Windows of one image may expose different sub-ranges (ADR 0058: SMS slot 0 exposes 0x0400-0x3FFF of a bank whose
       // other slots expose all of it). The owner key is the image offset, so it is well defined for any such set.
     }
+  }
+
+  // ---- selective admission (SEG-057, ADR 0118): validate the plan against the image set ----
+  const bool selective = options.admission.has_value();
+  std::vector<std::vector<char>> admitted(images.size());  // per sorted image: 1 = admitted image offset
+  std::vector<std::vector<std::pair<std::uint32_t, std::uint32_t>>> omitted(images.size());  // exposed-but-omitted [lo, hi)
+  if (selective) {
+    std::vector<bool> covered(images.size(), false);
+    for (const ImageAdmission& entry : options.admission->images) {
+      const auto found = std::ranges::find_if(images, [&](const CodeImage* image) { return image->identity == entry.identity; });
+      if (found == images.end()) return fail("admission plan names an unknown code-image identity");
+      const auto n = static_cast<std::size_t>(found - images.begin());
+      if (covered[n]) return fail("admission plan lists a code-image identity twice");
+      covered[n] = true;
+      const CodeImage& image = **found;
+      if (entry.byte_count != image.bytes.size() || entry.content_digest != image_content_digest(image.bytes))
+        return fail("admission plan was made for different image bytes");
+      std::vector<char> exposed(image.bytes.size(), 0);
+      for (const CodeWindow& w : image.windows)
+        std::fill(exposed.begin() + w.first_offset, exposed.begin() + w.first_offset + w.length, char{1});
+      admitted[n].assign(image.bytes.size(), 0);
+      std::uint64_t previous = 0;
+      for (std::size_t k = 0; k < entry.offsets.size(); ++k) {
+        const std::uint32_t offset = entry.offsets[k];
+        if (k > 0 && offset <= previous) return fail("admission offsets must be strictly increasing");
+        if (offset >= image.bytes.size() || !exposed[offset]) return fail("admission offset is not exposed by any window of its image");
+        admitted[n][offset] = 1;
+        previous = offset;
+      }
+      result.stats.admitted_offsets += entry.offsets.size();
+      for (std::uint32_t o = 0; o < exposed.size(); ++o) {
+        if (!exposed[o] || admitted[n][o]) continue;
+        ++result.stats.omitted_offsets;
+        if (!omitted[n].empty() && omitted[n].back().second == o) ++omitted[n].back().second;
+        else omitted[n].emplace_back(o, o + 1);
+      }
+      result.stats.omitted_ranges += omitted[n].size();
+    }
+    if (std::ranges::find(covered, false) != covered.end()) return fail("admission plan does not cover every code image");
   }
 
   // ---- logical code mapping classes ----
@@ -416,8 +470,11 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
   for (std::size_t n = 0; n < images.size(); ++n) {
     const CodeImage& image = *images[n];
     const CodeWindow& first = image.windows.front();
+    std::uint64_t rank = 0;  // selective: admitted starts so far, so translation-unit sharding scales with the admitted count
     if (image.kind == ImageKind::invariant) {
       for (std::uint32_t o = first.first_offset; o < first.first_offset + first.length; ++o) {
+        if (selective && !admitted[n][o]) continue;
+        const std::uint64_t slot = selective ? rank++ : o - first.first_offset;
         const auto address = static_cast<std::uint16_t>(first.base + o);
         Variant v = make_variant(invariant_classes[address]);
         if (v.absent) {
@@ -428,7 +485,7 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
         plan.identity = image.identity;
         plan.key = address;
         plan.invariant = true;
-        plan.dense = dense + (o - first.first_offset);
+        plan.dense = dense + slot;
         plan.variants.push_back(std::move(v));
         plan_of_invariant_address.emplace(image.identity << 16 | address, plans.size());
         plans.push_back(std::move(plan));
@@ -446,11 +503,13 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
         hi = std::max(hi, w.first_offset + w.length);
       }
       for (std::uint32_t o = lo; o < hi; ++o) {
+        if (selective && !admitted[n][o]) continue;
+        const std::uint64_t slot = selective ? rank++ : o - lo;
         Plan plan;
         plan.identity = image.identity;
         plan.live = image.live_bytes;
         plan.relative = relative;
-        plan.dense = dense + (o - lo);
+        plan.dense = dense + slot;
         plan.key = relative ? static_cast<std::uint16_t>(o) : static_cast<std::uint16_t>(first.base + o);
         for (std::size_t j = 0; j < image.windows.size(); ++j) {
           const CodeWindow& w = image.windows[j];
@@ -501,10 +560,10 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
         }
         plans.push_back(std::move(plan));
       }
-      dense += hi - lo;
+      dense += selective ? rank : hi - lo;
       continue;
     }
-    dense += first.length;
+    dense += selective ? rank : first.length;
   }
 
   // Direct binding (pass 2): an invariant owner's fall-through to an emitted invariant-window owner.
@@ -650,6 +709,35 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
       << "  while (low < high) {\n    const size_t middle = low + (high - low) / 2U;\n"
       << "    if (z80_identity_ids[middle] < identity) low = middle + 1U; else high = middle;\n  }\n"
       << "  return (low < sizeof(z80_identity_ids) / sizeof(z80_identity_ids[0]) && z80_identity_ids[low] == identity) ? z80_identity_kinds[low] : 0U;\n}\n\n";
+  if (selective) {
+    // Rejection table (ADR 0118): the exposed offsets the plan omitted, as sorted [lo, hi) image-offset runs per image (identity
+    // order). It is consulted only when the exact entry lookup misses, to tell an omitted start (`unadmitted_pc`) from every other
+    // miss (`no_owner`: an admitted start without a lowering row, or an address no window exposes).
+    std::vector<std::size_t> first_run{0};
+    std::ostringstream runs;
+    std::ostringstream bases;
+    for (std::size_t n = 0; n < images.size(); ++n) {
+      for (const auto& [lo, hi] : omitted[n]) runs << "  UINT32_C(" << lo << "), UINT32_C(" << hi << "),\n";
+      first_run.push_back(first_run.back() + omitted[n].size());
+      bases << "  " << hex_literal(images[n]->kind == ImageKind::banked && images[n]->windows.size() > 1 ? 0 : images[n]->windows.front().base, 4)
+            << ",\n";
+    }
+    out << "static const size_t z80_omit_first[] = {\n";
+    for (const std::size_t first : first_run) out << "  " << first << "u,\n";
+    out << "};\nstatic const uint16_t z80_omit_bases[] = { /* absolute-PC images: window base; window-relative images: 0 (run-time base) */\n"
+        << bases.str() << "};\nstatic const uint32_t z80_omit_runs[] = { /* [lo, hi) image offsets, sorted */\n"
+        << runs.str() << "  UINT32_C(0)\n};\n"
+        << "static int z80_omitted_start(uint32_t identity, uint16_t pc, uint16_t window_base) {\n"
+        << "  size_t low = 0U;\n  size_t high = sizeof(z80_identity_ids) / sizeof(z80_identity_ids[0]);\n"
+        << "  while (low < high) {\n    const size_t middle = low + (high - low) / 2U;\n"
+        << "    if (z80_identity_ids[middle] < identity) low = middle + 1U; else high = middle;\n  }\n"
+        << "  if (low >= sizeof(z80_identity_ids) / sizeof(z80_identity_ids[0]) || z80_identity_ids[low] != identity) return 0;\n"
+        << "  const uint32_t offset = (uint16_t)(pc - (z80_identity_kinds[low] == 2U ? window_base : z80_omit_bases[low]));\n"
+        << "  size_t first = z80_omit_first[low];\n  size_t last = z80_omit_first[low + 1U];\n"
+        << "  while (first < last) {\n    const size_t middle = first + (last - first) / 2U;\n"
+        << "    if (z80_omit_runs[2U * middle + 1U] <= offset) first = middle + 1U; else last = middle;\n  }\n"
+        << "  return first < z80_omit_first[low + 1U] && z80_omit_runs[2U * first] <= offset;\n}\n\n";
+  }
   CompiledEntryTableNames names;
   names.entry_type = "Z80Owner";
   names.lookup = "z80_entry_lookup";
@@ -671,7 +759,8 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
       << "    if (kind == 0U) return rt->outcome = Z80_ERROR_UNKNOWN_IMAGE_IDENTITY;\n"
       << "    const uint16_t key = kind == 2U ? (uint16_t)(s->pc - image.window_base) : s->pc;\n"
       << "    const Z80Owner owner = z80_entry_lookup((image.identity << 16) | key);\n"
-      << "    if (owner == NULL) return rt->outcome = Z80_ERROR_NO_OWNER;\n"
+      << (selective ? "    if (owner == NULL) return rt->outcome = z80_omitted_start(image.identity, s->pc, image.window_base) ? Z80_ERROR_UNADMITTED_PC : Z80_ERROR_NO_OWNER;\n"
+                    : "    if (owner == NULL) return rt->outcome = Z80_ERROR_NO_OWNER;\n")
       << "    struct Z80OwnerRef ref = owner(rt, image.window_base);\n"
       << "    while (ref.next != NULL) ref = ref.next(rt, 0U);\n"
       << "    if (rt->outcome != Z80_OUTCOME_NONE) return rt->outcome;\n"

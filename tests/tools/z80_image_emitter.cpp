@@ -12,11 +12,20 @@
 //   bytes  <identity> <hex-bytes>          (appended; may repeat)
 //   fill   <identity> <byte-hex> <count-hex>
 //   live   <identity>                      (SEG-032-T003: mark a banked one-window image RAM-backed: every entry is byte-guarded)
+//   selective 0                            (SEG-057: selective emission; an image without `admit` lines admits nothing)
+//   admit  <identity> <lo-hex> [<hi-hex>]  (admit image offsets [lo, hi), or just lo; repeatable, merged, sorted)
+//   admit_bad_digest <identity>            (test hook: corrupt the plan's content digest of that image)
+//   admit_unsorted <identity> <hex>...     (test hook: replace that image's offsets by the literal, unsorted list)
+//   admit_omit_image <identity>            (test hook: leave that image out of the plan)
+//   admit_extra_image <identity>           (test hook: add a plan entry for an identity the image set does not contain)
+//   admit_duplicate_image <identity>       (test hook: list that image's plan entry twice)
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <algorithm>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -39,6 +48,10 @@ int main(int argc, char** argv) {
   std::size_t entry_chunk = 0;
   std::size_t owner_group = 0;
   int share_bodies = -1;  // -1: the emitter default
+  bool selective = false;
+  std::map<unsigned long, std::set<std::uint32_t>> admitted;
+  std::set<unsigned long> bad_digest, omit_image, extra_image, duplicate_image;
+  std::map<unsigned long, std::vector<std::uint32_t>> literal_offsets;
   std::map<unsigned long, std::size_t> index;
   const auto image_of = [&](unsigned long identity) -> CodeImage& { return set.images.at(index.at(identity)); };
   for (std::string line; std::getline(spec, line);) {
@@ -73,6 +86,25 @@ int main(int argc, char** argv) {
       owner_group = static_cast<std::size_t>(identity);
     } else if (verb == "share") {  // `share <0|1>`: shared PC-independent effect bodies (0 = the reference emission)
       share_bodies = static_cast<int>(identity);
+    } else if (verb == "selective") {
+      selective = true;
+    } else if (verb == "admit") {
+      std::string lo, hi;
+      in >> lo >> hi;
+      const auto first = static_cast<std::uint32_t>(std::stoul(lo, nullptr, 16));
+      const auto last = hi.empty() ? first + 1 : static_cast<std::uint32_t>(std::stoul(hi, nullptr, 16));
+      for (std::uint32_t o = first; o < last; ++o) admitted[identity].insert(o);
+    } else if (verb == "admit_bad_digest") {
+      bad_digest.insert(identity);
+    } else if (verb == "admit_extra_image") {
+      extra_image.insert(identity);
+    } else if (verb == "admit_duplicate_image") {
+      duplicate_image.insert(identity);
+    } else if (verb == "admit_omit_image") {
+      omit_image.insert(identity);
+    } else if (verb == "admit_unsorted") {
+      std::string value;
+      while (in >> value) literal_offsets[identity].push_back(static_cast<std::uint32_t>(std::stoul(value, nullptr, 16)));
     } else if (verb == "live") {
       image_of(identity).live_bytes = true;
     } else if (verb == "fill") {
@@ -92,6 +124,26 @@ int main(int argc, char** argv) {
   if (entry_chunk != 0) options.entry_chunk_entries = entry_chunk;
   if (owner_group != 0) options.owner_group_entries = owner_group;
   if (share_bodies >= 0) options.share_bodies = share_bodies != 0;
+  if (selective) {
+    AdmissionPlan plan;
+    for (const CodeImage& image : set.images) {
+      if (omit_image.contains(image.identity)) continue;
+      const auto& wanted = admitted[image.identity];
+      std::vector<std::uint32_t> offsets = literal_offsets.contains(image.identity)
+                                               ? literal_offsets[image.identity]
+                                               : std::vector<std::uint32_t>(wanted.begin(), wanted.end());
+      ImageAdmission entry = bind_admission(image, std::move(offsets));
+      if (bad_digest.contains(image.identity)) entry.content_digest ^= 1;
+      if (duplicate_image.contains(image.identity)) plan.images.push_back(entry);
+      plan.images.push_back(std::move(entry));
+    }
+    for (const unsigned long identity : extra_image) {
+      ImageAdmission entry;
+      entry.identity = static_cast<std::uint32_t>(identity);
+      plan.images.push_back(std::move(entry));
+    }
+    options.admission = std::move(plan);
+  }
   const EmitResult result = emit_image_set(set, options);
   if (!result.error.empty()) {
     std::cout << "error " << result.error << "\n";
@@ -103,6 +155,9 @@ int main(int argc, char** argv) {
               result.stats.translation_units);
   std::printf("shape entries=%zu owners=%zu max_group=%zu shared_bodies=%zu\n", result.stats.entries, result.stats.owners,
               result.stats.max_group_entries, result.stats.shared_bodies);
+  if (selective)
+    std::printf("admission admitted=%zu omitted=%zu runs=%zu\n", result.stats.admitted_offsets, result.stats.omitted_offsets,
+                result.stats.omitted_ranges);
   for (const OwnerRecord& r : result.owners) {
     std::printf("owner %u %04X %s %u %s %d %d\n", r.identity, r.key, owner_kind_name(r.kind), r.variants,
                 r.form == segarecomp::cpu::z80::kNoForm ? "-" : segarecomp::cpu::z80::form_name(r.form).c_str(),

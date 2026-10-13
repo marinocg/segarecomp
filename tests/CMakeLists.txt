@@ -1314,6 +1314,18 @@ add_test(NAME z80_owner_group_differential_test_forms COMMAND ${Python3_EXECUTAB
 set_property(TEST z80_owner_group_differential_test_forms APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 set_property(TEST z80_owner_group_differential_test_forms APPEND PROPERTY LABELS extended)
 set_property(TEST z80_owner_group_differential_test_forms APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
+# SEG-057 (ADR 0118): Z80 selective-admission contract: structural correctness against the broad AOT over the grouped-owner
+# differential corpus (hermetic; no ROM, model or oracle checkout). Two disjoint slices; `static` carries the image-independent checks.
+add_test(NAME z80_selective_admission_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_selective_admission_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  wrap64,dd64,two_image,reloc,t007_small,group_cross,static)
+add_test(NAME z80_selective_admission_test_slice2 COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/z80_selective_admission_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  t007_prog,sms_map,rnd_invariant,rnd_sms)
+set(_z80_selective_slices z80_selective_admission_test z80_selective_admission_test_slice2)
+set_property(TEST ${_z80_selective_slices} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST ${_z80_selective_slices} APPEND PROPERTY LABELS full)
+set_property(TEST ${_z80_selective_slices} APPEND PROPERTY ENVIRONMENT "SEGARECOMP_Z80_BUILD_CACHE=${CMAKE_CURRENT_BINARY_DIR}/z80_build_cache")
 add_test(NAME z80_timing_closure_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/z80_timing_closure_test.py $<TARGET_FILE:z80_image_emitter> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR})
 set_property(TEST z80_timing_closure_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
@@ -1391,6 +1403,11 @@ set_property(TEST genesis_z80_fixture_rom_test genesis_z80_oracle_smoke_test gen
 
 # SEG-009-T002: SMS cartridge ingestion, memory map/mapper, ImageSet declaration and the declaration-vs-run-time mapper
 # contract (hermetic, synthetic ROMs), plus the test-side SMS generation CLI and generated-native bank-crossing host.
+# SEG-057: the SMS generation route with an explicit Z80 admission plan (economics benchmark; ADR 0118). Test-side, not shipped.
+add_executable(sms_admission_emit tools/sms_admission_emit.cpp)
+target_link_libraries(sms_admission_emit PRIVATE segarecomp::machine_master_system)
+segarecomp_enable_warnings(sms_admission_emit)
+
 add_executable(sms_machine_tests sms_machine_test.cpp)
 target_link_libraries(sms_machine_tests PRIVATE segarecomp::machine_master_system segarecomp::runtime_master_system)
 segarecomp_enable_warnings(sms_machine_tests)
