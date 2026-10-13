@@ -117,7 +117,7 @@ Inference producer cost (bounded, offline, no training or labels; recovered D512
 | Gate | Result |
 | --- | --- |
 | E1 wall >= 20% (worse of dist:65, clus:65) | PASS: 32.4% (128), 36.1% (256), 36.0% (512) synthetic; conservative (best broad vs worst selective repeat) 31.4%, 35.4%, 35.6% |
-| E2 CPU <= 1.00x | PASS: 0.62-0.66x at 65%, linear in the admitted count |
+| E2 CPU <= 1.00x | PASS: 0.64-0.66x at 65%, linear in the admitted count |
 | E3 generated C <= 0.80x | PASS: 0.654-0.661x (fine:65 0.675x) |
 | E4 peak per-compiler RSS <= 1.10x | PASS: 0.90x / 0.97x / 0.93x (worst shape; fine:65 at 128 KiB is 1.00x) |
 | E5 executable <= 1.00x | PASS: 0.67x at 65% |
@@ -129,7 +129,16 @@ Inference producer cost (bounded, offline, no training or labels; recovered D512
 
 ### Findings that qualify the headline
 
-- **Cost is linear in the admitted count and has no large fixed floor.** Wall, CPU, generated C and executable size all fall by roughly the omitted fraction (35% omitted: 32-37%; 65% omitted: 62-66%). Grouped-owner packing and shared-body reuse do not erode the savings: `dist` (32-byte cells), `clus` (4 KiB blocks) and `fine` (single bytes) agree within 2 points. Shared bodies fall with the admitted count (9,222 to 6,869 at 65% / 128 KiB), so the pool is not a floor. The dominant build cost is the owner/body translation units, not the entry table.
+- **Cost is linear in the admitted count and has no large fixed floor.** Wall, CPU, generated C and executable size all fall by roughly the omitted fraction (35% omitted: 32-37%; 65% omitted: 62-66%). Grouped-owner packing and shared-body reuse do not erode the savings: `dist` (32-byte cells), `clus` (4 KiB blocks) and `fine` (single bytes) agree within 2 points. Shared bodies fall with the admitted count (9,222 to 6,869 at 65% / 128 KiB), so the pool is not a floor. The compile CPU is almost entirely owner translation units (table below); the entry table and the main unit are negligible.
+- **Where the compile CPU goes** (512 KiB synthetic image, one compile of every unit with the product flags, CPU seconds; owner units are always 48 because the shard count is capped, so each unit shrinks instead of the count):
+
+  | Config | Owner units | Shared-body units | Entry-table units | Main + ROM | Total |
+  | --- | ---: | ---: | ---: | ---: | ---: |
+  | broad | 1,074.9 | 56.5 | 2.4 | 0.5 | 1,134.3 |
+  | dist:65 | 679.5 | 42.0 | 1.6 | 0.7 | 723.8 |
+  | clus:35 | 376.8 | 29.1 | 0.9 | 0.7 | 407.5 |
+
+  Owner units are 94.8% of broad compile CPU, shared bodies 5.0%, the entry table 0.2%. Owner and body CPU scale with the admitted count (owner 0.63x at 65%, 0.35x at 35%; bodies 0.74x and 0.52x, so the shared-body pool does shrink, just less than linearly because bodies are shared across starts), which is why neither grouped-owner packing, nor shared bodies, nor entry-table compilation is a floor.
 - **Per-compiler peak memory barely moves** (0.90-1.00x): it is set by the largest translation unit, which selective emission does not shrink at 65%.
 - **The extra machinery costs nothing measurable:** `dist:100` equals `broad` within noise in wall, CPU, generated size and run time.
 - **The benefit scales with the admitted fraction, not with ranking quality.** A model that needs a fuller budget to be safe buys proportionally less, and a mask below the true executed set buys a typed stop, not a faster game.
