@@ -470,7 +470,7 @@ struct GenesisSoundBuild {
     command.insert(command.end(), options.cc_args.begin(), options.cc_args.end());
     command.insert(command.end(), {"-o", executable.string()});
     for (const auto &object : objects) command.push_back(object.string());
-    if (with_sdl) { command.push_back("-L" + options.sdl3_lib->string()); command.push_back("-lSDL3"); }
+    if (with_sdl) { command.push_back("-L" + options.sdl3_lib->string()); command.push_back("-lSDL3"); command.push_back("-lm"); }
     command.insert(command.end(), options.link_args.begin(), options.link_args.end());
     const fs::path link_log = object_dir / (executable.filename().string() + ".link.log");
     const int rc = run_process(command, link_log);
@@ -938,7 +938,9 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   build.c_base.insert(build.c_base.end(), {"-std=c11", "-Wall", "-Wextra", "-pedantic", opt, "-I", build.runtime.string(),
                                            "-I", (build.root / "libs" / "codegen" / "c11" / "include").string(),
                                            "-I", (build.psg / "include").string(), "-I", (build.ym / "include").string()});
-  if (build.play) build.c_base.insert(build.c_base.end(), {"-I", build.viewer.string(), "-I", options.sdl3_include->string()});
+  if (build.play)
+    build.c_base.insert(build.c_base.end(), {"-I", build.viewer.string(), "-I", (build.root / "libs" / "viewer" / "include").string(), "-I",
+                                             (build.root / "libs" / "viewer" / "src").string(), "-I", options.sdl3_include->string()});
   build.cxx_base = {options.cxx};
   build.cxx_base.insert(build.cxx_base.end(), options.cxx_args.begin(), options.cxx_args.end());
   build.cxx_base.insert(build.cxx_base.end(), {"-std=c++14", "-fno-exceptions", "-fno-rtti", opt, "-I", (build.ym / "include").string()});
@@ -970,6 +972,9 @@ int build_genesis_program(Options &options, Log &log, const std::string &sha, co
   if (build.play) {
     add(final_only, build.runtime / "vdp_render.c", "vdp-render");
     for (const char *name : {"viewer.c", "viewer_sdl3.c"}) add(final_only, build.viewer / name, std::string("viewer-") + name);
+    // SEG-058 (ADR 0120): the shared SDL3 viewer foundation (settings, layout/CRT math, menu model, host, pause pages), strict C11 like the rest.
+    for (const char *name : {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_host.c", "sv_pages.c"})
+      add(final_only, build.root / "libs" / "viewer" / "src" / name, std::string("sv-") + name);
     add(final_only, build.viewer / "viewer_main_hook.c", "viewer-main-hook", {"-DSEGARECOMP_GENESIS_SOUND"});
   } else {
     add(final_only, build.runtime / "genesis_sound_hook.c", "hook-sound");
@@ -1316,8 +1321,12 @@ int segarecomp_build_command(int argc, char **argv) {
         compile.push_back({runtime / name, {}});
       compile.push_back({psg / "src" / "sn76489.c", {}});
       if (play) {
-        base.insert(base.end(), {"-I", viewer.string(), "-I", options.sdl3_include->string()});
+        const fs::path viewer_lib = root / "libs" / "viewer";
+        base.insert(base.end(), {"-I", viewer.string(), "-I", (viewer_lib / "include").string(), "-I", (viewer_lib / "src").string(), "-I",
+                                 options.sdl3_include->string()});
         for (const char *name : {"sms_viewer.c", "sms_viewer_sdl3.c", "sms_viewer_main.c"}) compile.push_back({viewer / name, {}});
+        // SEG-058 (ADR 0120): the shared SDL3 viewer foundation, compiled with the game exactly like the console adapter above.
+        for (const char *name : {"sv_settings.c", "sv_layout.c", "sv_menu.c", "sv_host.c", "sv_pages.c"}) compile.push_back({viewer_lib / "src" / name, {}});
       } else {
         base.insert(base.end(), {"-I", headless.string()});
         for (const char *name : {"sms_audio.c", "sms_headless.c", "sms_devices_vdp.c"}) compile.push_back({headless / name, {}});
@@ -1368,7 +1377,7 @@ int segarecomp_build_command(int argc, char **argv) {
     link.insert(link.end(), options.cc_args.begin(), options.cc_args.end());
     link.insert(link.end(), {"-o", executable.string()});
     for (const auto &object : objects) link.push_back(object.string());
-    if (play) { link.push_back("-L" + options.sdl3_lib->string()); link.push_back("-lSDL3"); }
+    if (play) { link.push_back("-L" + options.sdl3_lib->string()); link.push_back("-lSDL3"); link.push_back("-lm"); }
     link.insert(link.end(), options.link_args.begin(), options.link_args.end());
     const fs::path link_log = object_dir / "link.log";
     const int link_rc = run_process(link, link_log);

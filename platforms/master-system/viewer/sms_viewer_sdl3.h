@@ -12,6 +12,8 @@ SmsSdl3Viewer *sms_sdl3_viewer_open(const char *title, int scale, int want_audio
 void sms_sdl3_viewer_host(SmsSdl3Viewer *viewer, SmsViewerHost *host);
 /* 1 when an audio stream is open; `overruns` (optional) counts chunks dropped because the queue was full. */
 int sms_sdl3_viewer_audio_active(const SmsSdl3Viewer *viewer, uint64_t *overruns);
+/* Shows why the guest stopped instead of a blank window; blocks until dismissed (no-op on a headless video driver). */
+void sms_sdl3_viewer_stop_screen(SmsSdl3Viewer *viewer, const char *title, const char *detail);
 void sms_sdl3_viewer_close(SmsSdl3Viewer *viewer);
 #ifdef __cplusplus
 }

@@ -1659,6 +1659,13 @@ set_property(TEST genesis_m68k_alias_build_test APPEND PROPERTY LABELS full)
 set_property(TEST genesis_m68k_alias_build_test PROPERTY TIMEOUT 1800)
 set_property(TEST genesis_m68k_alias_build_test genesis_m68k_copy_alias_parity_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
 
+# SEG-058: SDL-free logic of the shared viewer foundation (settings, bindings, layout/CRT math, menu model).
+add_executable(sv_viewer_core_test sv_viewer_core_test.cpp)
+target_link_libraries(sv_viewer_core_test PRIVATE segarecomp::viewer_core)
+segarecomp_enable_warnings(sv_viewer_core_test)
+add_test(NAME sv_viewer_core_test COMMAND sv_viewer_core_test)
+set_property(TEST sv_viewer_core_test APPEND PROPERTY LABELS full fast)
+
 # CI sharding (see ci_shards.cmake, which also registers its guard test): must come after the LAST add_test and label assignment so
 # every tier test is partitioned.
 include(${CMAKE_CURRENT_SOURCE_DIR}/ci_shards.cmake)

@@ -1,0 +1,87 @@
+#ifndef SEGARECOMP_VIEWER_SV_HOST_H
+#define SEGARECOMP_VIEWER_SV_HOST_H
+
+/*
+ * The shared SDL3 host of the in-game viewers (Genesis and Master System).
+ *
+ * It owns the window, the event pump, persistent settings, gamepads, the video presenter (layout, nearest/integer scaling, CRT presets),
+ * the pause overlay, screenshots and playback-only audio gain. It does NOT own any guest execution: the console adapters keep their own
+ * run loops and call sv_host_service() at their existing deterministic sampling points and sv_host_present() with a finished RGB frame.
+ * While the pause menu is open the call to sv_host_service() simply does not return, so the guest does not advance.
+ *
+ * Headless targets never link this library.
+ */
+#include <stddef.h>
+#include <stdint.h>
+
+#include "sv_settings.h"
+
+struct SDL_AudioStream;
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct SvHost SvHost;
+
+typedef struct SvDiagnostics {
+  int audio_active;            /* an audio device is open */
+  uint32_t audio_queued_ms;    /* playback queue, 0 when unknown */
+  uint64_t audio_dropped;      /* chunks the adapter had to drop */
+  uint64_t guest_frames;       /* frames the adapter has run (0 = not reported) */
+} SvDiagnostics;
+typedef void (*SvDiagnosticsFn)(void *ctx, SvDiagnostics *out);
+
+typedef struct SvHostConfig {
+  SvSystem system;
+  const char *title;           /* window title */
+  int picture_w, picture_h;    /* nominal picture size (initial window size) */
+  int max_w, max_h;            /* largest picture the adapter will present */
+  int default_scale;           /* initial window = picture * scale when no window size was saved; 0 = 3 */
+  int can_reset;               /* 1 only where the adapter has a proven safe reset seam */
+  const char *rom_sha256;      /* optional, 64 hex characters, shown in System */
+  SvDiagnosticsFn diagnostics; /* optional */
+  void *diagnostics_ctx;
+} SvHostConfig;
+
+/* Opens SDL video (+ gamepad when available), the window and the renderer, and loads the persistent settings. NULL on failure. */
+SvHost *sv_host_open(const SvHostConfig *config);
+/* Saves settings if changed and tears everything down (including SDL_Quit). */
+void sv_host_close(SvHost *host);
+
+typedef struct SvSample {
+  uint16_t pad[SV_PLAYERS]; /* SV_ACTION_BIT masks; the SMS Pause bit is true for a held press or a tap since the previous sample */
+  int quit;                 /* the window was closed or Quit/Return was confirmed */
+  int reset;                /* a confirmed reset (only when config.can_reset) */
+  int menu_was_open;        /* the pause overlay ran during this call (the guest was not advanced meanwhile) */
+} SvSample;
+
+/* Pumps events and samples input. Opens the pause overlay (blocking) on the menu key / gamepad Back button. */
+void sv_host_service(SvHost *host, SvSample *out);
+/* Presents one finished frame (RGB24, `pitch` bytes per row). Returns 0 on success. */
+int sv_host_present(SvHost *host, const uint8_t *rgb24, int width, int height, int pitch);
+/* Registers the adapter's playback stream so volume/mute (gain only) and pause apply; NULL unregisters. */
+void sv_host_set_audio(SvHost *host, struct SDL_AudioStream *stream);
+/* Shows the final state of a stopped guest instead of a blank window and waits for a key/button/close. Returns immediately on a
+ * headless video driver or when SEGARECOMP_VIEWER_NO_STOP_SCREEN is set. */
+void sv_host_stop_screen(SvHost *host, const char *title, const char *detail);
+/* Transient on-screen message (screenshot saved, binding changed, ...). */
+void sv_host_toast(SvHost *host, const char *text);
+const SvSettings *sv_host_settings(const SvHost *host);
+/* Replaces the settings as if they were edited in the menu (applies fullscreen/VSync/gain, sanitizes, persists). For automation and tests. */
+void sv_host_apply_settings(SvHost *host, const SvSettings *settings);
+/* Automation seam: `hook` is called once per frame while the pause overlay (or stop screen) is shown, with the finished overlay in the
+ * back buffer (sv_host_capture_output reads it). Returning nonzero closes the overlay. NULL removes it. */
+void sv_host_set_loop_hook(SvHost *host, int (*hook)(void *ctx, SvHost *host, int iteration), void *ctx);
+/* Test/automation seams. */
+const char *sv_host_renderer_name(const SvHost *host);
+int sv_host_menu_open(const SvHost *host);
+/* Renders the current frame + overlays into the back buffer and returns the pixels of the output (caller frees with SDL_DestroySurface). */
+struct SDL_Surface *sv_host_capture_output(SvHost *host);
+/* Saves the last presented game picture (game pixels only) as PNG (BMP on older SDL); fills `path_out`. 0 == ok. */
+int sv_host_screenshot(SvHost *host, char *path_out, size_t cap);
+
+#ifdef __cplusplus
+}
+#endif
+#endif

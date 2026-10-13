@@ -6,70 +6,43 @@
 #include <string.h>
 
 #include "genesis_audio_format.h"
+#include "sv_host.h"
 #include "vdp_render.h"
 
 struct GenesisSdl3Viewer {
-  SDL_Window *window;
-  SDL_Renderer *renderer;
-  SDL_Texture *texture;
+  SvHost *host;            /* the shared viewer host (libs/viewer): window, input, settings, pause overlay, presenter */
   SDL_AudioStream *audio;
   GenesisAudioSink sink;
-  int closed;
-  unsigned texture_width;  /* SEG-055: the texture follows the frame geometry (H32/H40, interlace mode 2) */
-  unsigned texture_height;
+  SvSample sample;         /* the input sampled by the latest window_closed() call (once per host slice, as before) */
+  const uint64_t *audio_dropped;
 };
 
 static uint64_t sdl_now(void *ctx) { (void)ctx; return SDL_GetTicksNS(); }
 static void sdl_sleep(void *ctx, uint64_t ns) { (void)ctx; SDL_DelayNS(ns); }
 
+/* The host's once-per-slice poll: pumps events, samples the mapped input and, when the user opens the pause overlay, blocks here -- so
+ * the guest does not advance while the menu is open and the host sleeps no wall time into guest state. */
 static int sdl_closed(void *ctx) {
   GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)ctx;
-  SDL_Event e;
-  while (SDL_PollEvent(&e)) {
-    if (e.type == SDL_EVENT_QUIT || e.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) v->closed = 1;
-    if (e.type == SDL_EVENT_KEY_DOWN && e.key.key == SDLK_ESCAPE) v->closed = 1;
-  }
-  return v->closed;
+  sv_host_service(v->host, &v->sample);
+  return v->sample.quit;
 }
 
-static uint8_t sdl_pad1(void *ctx) {
-  (void)ctx;
-  const bool *ks = SDL_GetKeyboardState(NULL);
+/* Console mapping of the shared action masks: BUTTON1/2/3 are the Genesis A/B/C buttons. */
+static uint8_t pad_of(uint16_t actions) {
   GenesisViewerKeys k;
-  k.up = ks[SDL_SCANCODE_UP]; k.down = ks[SDL_SCANCODE_DOWN];
-  k.left = ks[SDL_SCANCODE_LEFT]; k.right = ks[SDL_SCANCODE_RIGHT];
-  k.a = ks[SDL_SCANCODE_Z]; k.b = ks[SDL_SCANCODE_X]; k.c = ks[SDL_SCANCODE_C];
-  k.start = ks[SDL_SCANCODE_RETURN];
+  k.up = (actions & SV_ACTION_BIT(SV_ACT_UP)) != 0; k.down = (actions & SV_ACTION_BIT(SV_ACT_DOWN)) != 0;
+  k.left = (actions & SV_ACTION_BIT(SV_ACT_LEFT)) != 0; k.right = (actions & SV_ACTION_BIT(SV_ACT_RIGHT)) != 0;
+  k.a = (actions & SV_ACTION_BIT(SV_ACT_BUTTON1)) != 0; k.b = (actions & SV_ACTION_BIT(SV_ACT_BUTTON2)) != 0;
+  k.c = (actions & SV_ACTION_BIT(SV_ACT_BUTTON3)) != 0; k.start = (actions & SV_ACTION_BIT(SV_ACT_START)) != 0;
   return genesis_viewer_pad_from_keys(&k);
 }
+static uint8_t sdl_pad1(void *ctx) { return pad_of(((GenesisSdl3Viewer *)ctx)->sample.pad[0]); }
+static uint8_t sdl_pad2(void *ctx) { return pad_of(((GenesisSdl3Viewer *)ctx)->sample.pad[1]); }
 
-/* SEG-055: Player 2, translated through the same pure key->mask function as Player 1. */
-static uint8_t sdl_pad2(void *ctx) {
-  (void)ctx;
-  const bool *ks = SDL_GetKeyboardState(NULL);
-  GenesisViewerKeys k;
-  k.up = ks[SDL_SCANCODE_I]; k.down = ks[SDL_SCANCODE_K];
-  k.left = ks[SDL_SCANCODE_J]; k.right = ks[SDL_SCANCODE_L];
-  k.a = ks[SDL_SCANCODE_U]; k.b = ks[SDL_SCANCODE_O]; k.c = ks[SDL_SCANCODE_P];
-  k.start = ks[SDL_SCANCODE_RSHIFT];
-  return genesis_viewer_pad_from_keys(&k);
-}
-
-static int sdl_ensure_texture(GenesisSdl3Viewer *v, unsigned width, unsigned height) {
-  if (v->texture != NULL && v->texture_width == width && v->texture_height == height) return 0;
-  if (v->texture != NULL) SDL_DestroyTexture(v->texture);
-  v->texture = SDL_CreateTexture(v->renderer, SDL_PIXELFORMAT_RGB24, SDL_TEXTUREACCESS_STREAMING, (int)width,
-                                 (int)height);
-  v->texture_width = width;
-  v->texture_height = height;
-  if (v->texture == NULL) return -1;
-  SDL_SetTextureScaleMode(v->texture, SDL_SCALEMODE_NEAREST);
-  return 0;
-}
-
-/* SEG-055: the artifact carries its own geometry and per-row palettes; the window stretches whatever geometry arrives
- * over its fixed client area (a TV does the same for H32 and interlace-mode-2 pictures). The RGB conversion is the one
- * the headless PPM exporter uses (genesis_vdp_frame_row_rgb888), so the window and captures agree by construction. */
+/* SEG-055: the artifact carries its own geometry and per-row palettes; the shared presenter fits whatever geometry arrives (a TV does the
+ * same for H32 and interlace-mode-2 pictures). The RGB conversion is the one the headless PPM exporter uses
+ * (genesis_vdp_frame_row_rgb888), so the window and captures agree by construction. */
 static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
   GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)ctx;
   static uint8_t rgb[GENESIS_FRAME_MAX_WIDTH * GENESIS_FRAME_MAX_HEIGHT * 3];
@@ -79,12 +52,17 @@ static int sdl_present(void *ctx, const GenesisFrameArtifact *frame) {
   for (unsigned row = 0; row < height; ++row) {
     if (genesis_vdp_frame_row_rgb888(frame, row, &rgb[(size_t)row * width * 3U]) != 0) return -1;
   }
-  if (sdl_ensure_texture(v, width, height) != 0) return -1;
-  if (!SDL_UpdateTexture(v->texture, NULL, rgb, (int)(width * 3U))) return -1;
-  if (!SDL_RenderClear(v->renderer)) return -1;
-  if (!SDL_RenderTexture(v->renderer, v->texture, NULL, NULL)) return -1;
-  if (!SDL_RenderPresent(v->renderer)) return -1;
-  return 0;
+  return sv_host_present(v->host, rgb, (int)width, (int)height, (int)(width * 3U));
+}
+
+static void sdl_diagnostics(void *ctx, SvDiagnostics *out) {
+  const GenesisSdl3Viewer *v = (const GenesisSdl3Viewer *)ctx;
+  out->audio_active = v->audio != NULL;
+  if (v->audio != NULL) {
+    const int bytes = SDL_GetAudioStreamQueued(v->audio);
+    out->audio_queued_ms = bytes > 0 ? (uint32_t)((uint64_t)bytes * 1000U / (GENESIS_MIXER_CHANNELS * 2U * GENESIS_MIXER_RATE_HZ)) : 0U;
+  }
+  out->audio_dropped = v->audio_dropped != NULL ? *v->audio_dropped : 0U;
 }
 
 /* SEG-032-T009 (ADR 0075): a one-way sink. Queue, overrun, underrun and mute policy lives in genesis_audio_present.c. */
@@ -114,6 +92,7 @@ const GenesisAudioSink *genesis_sdl3_viewer_audio_open(GenesisSdl3Viewer *v) {
     return NULL;
   }
   SDL_ResumeAudioStreamDevice(v->audio);
+  sv_host_set_audio(v->host, v->audio); /* volume/mute are playback gain on this stream; the mixer output is untouched */
   v->sink.context = v;
   v->sink.queued_frames = sdl_audio_queued;
   v->sink.put = sdl_audio_put;
@@ -121,17 +100,33 @@ const GenesisAudioSink *genesis_sdl3_viewer_audio_open(GenesisSdl3Viewer *v) {
 }
 
 GenesisSdl3Viewer *genesis_sdl3_viewer_open(const char *title, int scale) {
-  if (scale < 1) scale = 2;
-  if (scale > INT_MAX / (int)GENESIS_FRAME_WIDTH || scale > INT_MAX / (int)GENESIS_FRAME_HEIGHT) return NULL;
+  SvHostConfig cfg;
+  const char *sha = SDL_getenv("SEGARECOMP_ROM_SHA256");
   GenesisSdl3Viewer *v = (GenesisSdl3Viewer *)calloc(1, sizeof(*v));
   if (v == NULL) return NULL;
-  if (!SDL_Init(SDL_INIT_VIDEO)) { free(v); return NULL; }
-  if (!SDL_CreateWindowAndRenderer(title ? title : "segarecomp", (int)GENESIS_FRAME_WIDTH * scale,
-                                   (int)GENESIS_FRAME_HEIGHT * scale, 0, &v->window, &v->renderer)) {
-    SDL_Quit(); free(v); return NULL;
-  }
-  if (sdl_ensure_texture(v, GENESIS_FRAME_WIDTH, GENESIS_FRAME_HEIGHT) != 0) { genesis_sdl3_viewer_close(v); return NULL; }
+  memset(&cfg, 0, sizeof cfg);
+  cfg.system = SV_SYSTEM_GENESIS;
+  cfg.title = title ? title : "segarecomp";
+  cfg.picture_w = (int)GENESIS_FRAME_WIDTH;
+  cfg.picture_h = (int)GENESIS_FRAME_HEIGHT;
+  cfg.max_w = (int)GENESIS_FRAME_MAX_WIDTH;
+  cfg.max_h = (int)GENESIS_FRAME_MAX_HEIGHT;
+  cfg.default_scale = scale >= 1 ? scale : 3;
+  cfg.can_reset = 0; /* the Genesis viewer has no proven safe reset seam */
+  cfg.rom_sha256 = sha != NULL && strlen(sha) == 64U ? sha : NULL;
+  cfg.diagnostics = sdl_diagnostics;
+  cfg.diagnostics_ctx = v;
+  v->host = sv_host_open(&cfg);
+  if (v->host == NULL) { free(v); return NULL; }
   return v;
+}
+
+void genesis_sdl3_viewer_report_audio_drops(GenesisSdl3Viewer *v, const uint64_t *overrun_dropped) {
+  if (v != NULL) v->audio_dropped = overrun_dropped;
+}
+
+void genesis_sdl3_viewer_stop_screen(GenesisSdl3Viewer *v, const char *title, const char *detail) {
+  if (v != NULL) sv_host_stop_screen(v->host, title, detail);
 }
 
 void genesis_sdl3_viewer_host(GenesisSdl3Viewer *viewer, GenesisViewerHost *host) {
@@ -147,10 +142,7 @@ void genesis_sdl3_viewer_host(GenesisSdl3Viewer *viewer, GenesisViewerHost *host
 
 void genesis_sdl3_viewer_close(GenesisSdl3Viewer *v) {
   if (v == NULL) return;
-  if (v->audio) SDL_DestroyAudioStream(v->audio);
-  if (v->texture) SDL_DestroyTexture(v->texture);
-  if (v->renderer) SDL_DestroyRenderer(v->renderer);
-  if (v->window) SDL_DestroyWindow(v->window);
-  SDL_Quit();
+  if (v->audio) { sv_host_set_audio(v->host, NULL); SDL_DestroyAudioStream(v->audio); }
+  sv_host_close(v->host); /* includes SDL_Quit */
   free(v);
 }

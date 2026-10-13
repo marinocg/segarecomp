@@ -59,7 +59,12 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
 #ifdef SEGARECOMP_GENESIS_SOUND
   (void)genesis_sound_attach(runtime); /* the Z80 machine and the shared PSG/YM2612, identical to the headless program */
 #endif
-  GenesisSdl3Viewer *sdl = genesis_sdl3_viewer_open("segarecomp Genesis viewer", 2);
+  char window_title[160];
+  const char *game_title = getenv("SEGARECOMP_GAME_TITLE");
+  GenesisSdl3Viewer *sdl;
+  if (game_title != NULL && *game_title != '\0') snprintf(window_title, sizeof window_title, "%.100s - Segarecomp", game_title);
+  else snprintf(window_title, sizeof window_title, "segarecomp Genesis viewer");
+  sdl = genesis_sdl3_viewer_open(window_title, 3);
   if (sdl == NULL) {
     fprintf(stderr, "viewer: SDL3 window could not be opened\n");
     exit(3);
@@ -83,6 +88,7 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
     const int muted = mute != NULL && strcmp(mute, "1") == 0;
     /* A failed open, a missing audio subsystem or mute leaves the viewer silent; the ring is still drained. */
     genesis_audio_presenter_init(&g_presenter, muted ? NULL : genesis_sdl3_viewer_audio_open(sdl), muted);
+    genesis_sdl3_viewer_report_audio_drops(sdl, &g_presenter.overrun_dropped);
     host.after_slice = viewer_after_slice;
   }
 #endif
@@ -111,6 +117,12 @@ GenesisControlTransfer genesis_viewer_hook_run(GenesisRuntime *runtime, GenesisD
             (unsigned long long)g_presenter.refused, (unsigned long long)g_presenter.discarded, (unsigned long long)g_presenter.underruns);
   }
 #endif
+  if (r.outcome == GENESIS_VIEWER_GUEST_STOP || r.outcome == GENESIS_VIEWER_HOST_ERROR) {
+    char detail[160];
+    snprintf(detail, sizeof detail, "The generated program stopped with a typed guest stop (code %d) at 68000 PC %06X. Nothing was lost: the machine fails closed rather than guess.",
+             (int)r.transfer.kind, (unsigned)runtime->pc);
+    genesis_sdl3_viewer_stop_screen(sdl, r.outcome == GENESIS_VIEWER_GUEST_STOP ? "The game stopped" : "The viewer stopped", detail);
+  }
   genesis_sdl3_viewer_close(sdl);
 
   const char *name = r.outcome == GENESIS_VIEWER_GUEST_STOP        ? "guest_stop"

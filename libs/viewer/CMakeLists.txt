@@ -1,0 +1,30 @@
+# SEG-058: shared in-game viewer foundation (settings, layout/CRT math and menu model are SDL-free; the host is SDL3).
+# Strict C11 (the same dialect the per-game packaged build compiles with). Never linked by headless targets.
+add_library(segarecomp_viewer_core STATIC src/sv_settings.c src/sv_layout.c src/sv_menu.c)
+add_library(segarecomp::viewer_core ALIAS segarecomp_viewer_core)
+target_include_directories(segarecomp_viewer_core PUBLIC include)
+set_target_properties(segarecomp_viewer_core PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+if(NOT WIN32)
+  target_link_libraries(segarecomp_viewer_core PUBLIC m)
+endif()
+segarecomp_enable_warnings(segarecomp_viewer_core)
+
+if(SEGARECOMP_ENABLE_SDL3_VIEWER)
+  find_package(SDL3 REQUIRED CONFIG)
+  add_library(segarecomp_viewer_host STATIC src/sv_host.c src/sv_pages.c)
+  add_library(segarecomp::viewer_host ALIAS segarecomp_viewer_host)
+  target_include_directories(segarecomp_viewer_host PUBLIC include PRIVATE src)
+  target_link_libraries(segarecomp_viewer_host PUBLIC segarecomp::viewer_core SDL3::SDL3)
+  set_target_properties(segarecomp_viewer_host PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  segarecomp_enable_warnings(segarecomp_viewer_host)
+endif()
+
+if(SEGARECOMP_ENABLE_SDL3_VIEWER AND BUILD_TESTING)
+  # The SDL3 host under the dummy video driver, the software renderer and virtual gamepads (no display, audio device or ROM).
+  add_executable(sv_host_test test/sv_host_test.c)
+  target_link_libraries(sv_host_test PRIVATE segarecomp::viewer_host)
+  set_target_properties(sv_host_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
+  segarecomp_enable_warnings(sv_host_test)
+  add_test(NAME sv_host_test COMMAND sv_host_test)
+  set_property(TEST sv_host_test APPEND PROPERTY LABELS full fast)
+endif()
