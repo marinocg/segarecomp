@@ -238,6 +238,26 @@ void test_plan_mapping() {
   wrong.admission = proposal.plan;
   check(!z80::emit_image_set(build_image_set(other_cartridge), wrong).error.empty(), "a plan made for different bytes is rejected");
   std::filesystem::remove_all(dir);
+  // rom_only: one image (identity 1) holding the whole 32 KiB ROM at logical 0: offsets are ROM offsets
+  {
+    const std::vector<std::uint8_t> small = synthetic_rom(0x8000, 3);
+    IngestOptions rom_only;
+    rom_only.explicit_profile = true;
+    rom_only.declarations.push_back({"rom_only", DeclarationSource::build_option});
+    const IngestResult plain = ingest_cartridge(small, rom_only);
+    check(plain.ok(), "rom_only cartridge ingests");
+    const z80::ImageSet one = build_image_set(plain);
+    const MlProposal flat = ml_propose(plain, one, 2);
+    check(flat.ok && flat.plan.images.size() == 1 && one.images.size() == 1 && one.images[0].identity == 1, "rom_only: one image, identity 1");
+    if (flat.ok && !flat.plan.images.empty()) {
+      const std::vector<float> sc = ml_cell_scores(ml_byte_logits(plain.rom, 2));
+      std::vector<char> kept(sc.size(), 0);
+      for (const std::uint32_t c : ml_select_cells(sc)) kept[c] = 1;
+      std::vector<std::uint32_t> expect_offsets;
+      for (std::size_t o = 0; o < 0x8000; ++o) if (kept[o / 32]) expect_offsets.push_back(static_cast<std::uint32_t>(o));
+      check(flat.plan.images[0].offsets == expect_offsets, "rom_only: image offsets are ROM offsets (base 0)");
+    }
+  }
   // Failure classes
   IngestResult broken;
   broken.error = SMS_ERROR_MAPPER_UNDECLARED;
@@ -321,6 +341,13 @@ void test_build_fallbacks() {
   std::filesystem::remove_all(base);
 }
 
+void test_fallback_classes() {
+  check(ml_fallback_class("model_identity") == "producer_incompatible" && ml_fallback_class("producer_input") == "producer_input" &&
+            ml_fallback_class("inference") == "producer_failed" && ml_fallback_class("admission_rejected") == "proposal_rejected" &&
+            ml_fallback_class("none") == "none" && ml_fallback_class("anything_else") == "none",
+        "stable fallback classes");
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
@@ -335,6 +362,7 @@ int main(int argc, char **argv) {
   test_determinism_and_chunking();
   test_plan_mapping();
   test_build_fallbacks();
+  test_fallback_classes();
   if (failures != 0) {
     std::printf("%d failure(s)\n", failures);
     return 1;

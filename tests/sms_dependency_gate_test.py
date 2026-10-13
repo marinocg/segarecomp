@@ -49,7 +49,9 @@ ALLOWED_CLOSURE = {
     "segarecomp_machine_master_system": {"segarecomp_media", "segarecomp_base", "segarecomp_codegen_c11", "segarecomp_codegen_c11_z80",
                                          "segarecomp_cpu_z80", "segarecomp_runtime_master_system", PSG,
                                          # SEG-028 (ADR 0077): the CPU-neutral executable-image artifact and its Z80 projection.
-                                         "segarecomp_codegen_c11_z80_image", "segarecomp_recompiler"},
+                                         "segarecomp_codegen_c11_z80_image", "segarecomp_recompiler",
+                                         # SEG-057-T002 (ADR 0119): the native producer runs its independent scoring windows on std::thread.
+                                         "Threads::Threads"},
     "segarecomp_headless_master_system": {"segarecomp_runtime_master_system", PSG},
     "segarecomp_viewer_master_system": {"segarecomp_runtime_master_system", PSG},
     "segarecomp_viewer_master_system_main_check": {"segarecomp_viewer_master_system", "segarecomp_runtime_master_system", PSG},

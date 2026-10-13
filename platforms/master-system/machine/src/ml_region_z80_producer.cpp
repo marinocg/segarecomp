@@ -255,6 +255,14 @@ std::string ml_verify_blob(std::span<const std::uint8_t> blob) {
 
 std::string ml_identity_failure() { return model().ok ? std::string() : std::string("model_identity"); }
 
+std::string_view ml_fallback_class(std::string_view reason) noexcept {
+  if (reason == "model_identity") return "producer_incompatible";
+  if (reason == "producer_input") return "producer_input";
+  if (reason == "inference") return "producer_failed";
+  if (reason == "admission_rejected") return "proposal_rejected";
+  return "none";
+}
+
 std::size_t ml_budget_cells(std::size_t cells, unsigned percent) noexcept {
   if (cells == 0 || percent == 0 || percent > 100) return 0;
   return (cells * percent + 99U) / 100U;
@@ -294,7 +302,13 @@ std::vector<float> ml_byte_logits(std::span<const std::uint8_t> rom, unsigned th
     }
   };
   std::vector<std::thread> pool;
-  for (unsigned t = 1; t < count; ++t) pool.emplace_back(worker);
+  for (unsigned t = 1; t < count; ++t) {
+    try {
+      pool.emplace_back(worker);
+    } catch (...) {
+      break;  // no more threads available: the calling thread (and those started) drain the window queue; the result does not depend on it
+    }
+  }
   worker();
   for (std::thread &t : pool) t.join();
   for (const float v : out)

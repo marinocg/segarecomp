@@ -75,6 +75,14 @@ def cli_group(tmp, rom):
     rc_c, compat, _ = identity("--platform", "master-system", "--aot-policy", "compatibility")
     rc_o, opt, text = identity("--platform", "master-system", "--aot-policy", "optimized")
     check(rc_c == 0 and rc_o == 0 and compat and opt and compat != opt, "SMS Compatibility and Optimized identities exist and differ")
+    # Independent re-derivation (from the committed weight record, not from the C++): every component of the model, rank policy, schema and contract
+    # is part of the Optimized identity, and Compatibility's identity carries none of them.
+    meta = json.loads((ROOT / "tools/segarecomp_ml_region_z80_gen2.weights.json").read_text())
+    want_opt = hashlib.sha256(("segarecomp.sms_aot_policy_identity.v1|requested=optimized|sms_z80_d512hp:6bee77726a93ad33504522c35b84aaa6d89ed3c5327ff5fae6bff1e9558a4f11:"
+                               "D512HP/3seeds:cell32-top2mean-roots(0000,0038,0066)-budget65-ceil-tie:lower-index:sgz80w01/tokens256+pad/logit-per-byte/context512:"
+                               "segarecomp.z80_admission.v1|artifact=" + meta["blob_sha256"]).encode()).hexdigest()
+    want_compat = hashlib.sha256(b"segarecomp.sms_aot_policy_identity.v1|requested=compatibility").hexdigest()
+    check(opt == want_opt and compat == want_compat, "the SMS policy identities equal their independent re-derivation")
     check("requested_model=d512hp" in text and "platform=master-system" in text, "SMS identity line names its model and platform: " + text)
     _, g_opt, _ = identity("--aot-policy", "optimized")
     _, g_opt_explicit, _ = identity("--platform", "genesis", "--aot-policy", "optimized")

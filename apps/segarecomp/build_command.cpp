@@ -708,13 +708,6 @@ std::string sms_aot_policy_json(const Options &options, const Log &log, const st
   namespace sms_ml = segarecomp::machine::master_system;
   const sms_ml::AdmissionReport &r = log.sms_admission;
   const bool optimized = options.aot_policy == "optimized";
-  const auto fallback_class = [](const std::string &reason) -> std::string {
-    if (reason == "model_identity") return "producer_incompatible";
-    if (reason == "producer_input") return "producer_input";
-    if (reason == "inference") return "producer_failed";
-    if (reason == "admission_rejected") return "proposal_rejected";
-    return "none";
-  };
   const auto ppm = [](unsigned long long n, unsigned long long d) { return d == 0U ? 0ULL : n * 1000000ULL / d; };
   // The launcher reads this flat object without a JSON parser (it ends the object at the first '}'): every string is reduced to a safe alphabet.
   const auto safe = [](const std::string &value) {
@@ -726,7 +719,7 @@ std::string sms_aot_policy_json(const Options &options, const Log &log, const st
   const std::string effective = optimized ? r.effective : std::string("broad");
   std::string json = ",\"aot_policy\":{\"requested\":\"" + options.aot_policy + "\",\"requested_model\":\"" + (optimized ? "d512hp" : "none") +
                      "\",\"effective\":\"" + effective + "\",\"fallback\":" + (optimized && r.fallback ? "true" : "false") + ",\"reason\":\"" +
-                     (optimized ? r.reason : std::string("none")) + "\",\"fallback_class\":\"" + (optimized ? fallback_class(r.reason) : std::string("none")) +
+                     (optimized ? r.reason : std::string("none")) + "\",\"fallback_class\":\"" + (optimized ? std::string(sms_ml::ml_fallback_class(r.reason)) : std::string("none")) +
                      "\",\"model_family\":\"" + (effective == "ml_region_z80" ? "sms_z80_d512hp" : "none") + "\",\"analysis_contract\":\"" +
                      std::string(sms_ml::ml_identity().contract) + "\"";
   if (effective == "ml_region_z80") {

@@ -124,6 +124,8 @@ struct PolicyReport {
 // Runs the product tool (blocking, up to a few seconds): call it from a worker, never from the UI thread.
 [[nodiscard]] std::string product_policy_identity(const Layout &layout, const std::string &policy, const std::string &model,
                                                   const std::string &platform = "genesis");
+// Forgets every memoized product identity (test seam: lets a test model a changed shipped model for the same tool path).
+void reset_policy_identity_memo_for_tests();
 // The identity a ROM's Optimized request is keyed on (platform-aware: Genesis passes its model family, Master System none), blocking / memo-only.
 [[nodiscard]] std::string rom_policy_identity(const Layout &layout, const RomView &rom);
 [[nodiscard]] std::string rom_policy_identity_cached(const Layout &layout, const RomView &rom);

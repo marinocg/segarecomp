@@ -204,9 +204,11 @@ int main(int argc, char **argv) {
            "a build-time fallback and its reason are reported");
   }
 
-  // ---- fake package: cache separation on a changed model identity ----
+  // ---- fake package: cache separation on a changed model identity (same package, same tool path: only the product identity differs) ----
   {
-    set_env("FAKE_MODEL", "m1");
+    const auto ship = [&](const char *model) { std::ofstream(dir / "pkgA" / "bin" / "model.txt") << model; reset_policy_identity_memo_for_tests(); };
+    fs::create_directories(dir / "pkgA" / "bin");
+    ship("m1");
     Layout a;
     a.root = make_package(dir / "pkgA", fake_cli);
     a.cli = a.root / "bin" / (std::string("segarecomp") + exe);
@@ -214,12 +216,16 @@ int main(int argc, char **argv) {
     rom.sms_optimized_available = true;
     rom.aot_policy = "optimized";
     const fs::path before = entry_dir(rom, a);
-    set_env("FAKE_MODEL", "m2");
-    Layout b;
-    b.root = make_package(dir / "pkgB", fake_cli);
-    b.cli = b.root / "bin" / (std::string("segarecomp") + exe);
-    expect(entry_dir(rom, b) != before, "a different shipped model identity selects a different cache entry");
-    set_env("FAKE_MODEL", "m1");
+    expect(entry_dir(rom, a) == before, "the entry is stable for an unchanged product identity");
+    ship("m2");
+    expect(entry_dir(rom, a) != before, "a different shipped model identity selects a different cache entry (same package and tool path)");
+    RomView compat = compatibility_view(rom);
+    ship("m1");
+    const fs::path compat_before = entry_dir(compat, a);
+    ship("m2");
+    expect(entry_dir(compat, a) == compat_before, "a Compatibility entry does not depend on the Optimized model identity");
+    fs::remove(dir / "pkgA" / "bin" / "model.txt");
+    reset_policy_identity_memo_for_tests();
   }
 
   // ---- end to end: the headless launcher against the product/program doubles ----

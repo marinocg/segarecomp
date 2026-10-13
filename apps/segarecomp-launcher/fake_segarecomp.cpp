@@ -1,7 +1,8 @@
 // SEG-057-T002: test double of the product CLI for the launcher tests (never shipped). It implements only what the launcher consumes:
 // `aot-policy-identity` and `build`. Behaviour is selected by environment variables so one binary serves every scenario:
 //   FAKE_SMS_OPTIMIZED=0  the Master System Optimized policy is unavailable (the identity query fails)
-//   FAKE_MODEL=<text>     part of the Optimized identity (a different value models a changed shipped model)
+//   FAKE_MODEL=<text>     part of the Optimized identity (a different value models a changed shipped model); a file `model.txt` next to the
+//                         executable takes precedence (it models the model that is SHIPPED with this tool, and reaches children spawned by SDL)
 //   FAKE_GAME_BIN=<path>  the program a successful build installs as <output>/game
 //   FAKE_BUILD_LOG=<file> one line is appended per `build`: "<requested policy>"
 //   FAKE_BUILD_FAIL=compatibility|optimized  that policy's build fails
@@ -33,11 +34,20 @@ static std::string hex64(const std::string &text) {
   return out;
 }
 
+static std::string shipped_model(const char *argv0) {
+  std::string model;
+  std::ifstream(fs::path(argv0).parent_path() / "model.txt") >> model;
+  return model.empty() ? env("FAKE_MODEL", "m1") : model;
+}
+
+static std::string g_model;
+
 static std::string identity(const std::string &policy, const std::string &platform) {
-  return hex64("id|" + policy + "|" + platform + "|" + (policy == "optimized" ? env("FAKE_MODEL", "m1") : std::string()));
+  return hex64("id|" + policy + "|" + platform + "|" + (policy == "optimized" ? g_model : std::string()));
 }
 
 int main(int argc, char **argv) {
+  g_model = shipped_model(argv[0]);
   const std::string command = argc > 1 ? argv[1] : "";
   std::vector<std::string> args(argv + 2, argv + argc);
   const auto option = [&](const std::string &key) {

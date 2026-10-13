@@ -442,6 +442,11 @@ std::string product_policy_identity_cached(const Layout &layout, const std::stri
   return product_policy_identity_memo_lookup(utf8(layout.cli) + "|" + policy + "|" + model + (platform == "genesis" ? std::string() : "|" + platform));
 }
 
+void reset_policy_identity_memo_for_tests() {
+  std::lock_guard<std::mutex> lock(identity_memo_mutex());
+  identity_memo().clear();
+}
+
 std::string rom_policy_identity(const Layout &layout, const RomView &rom) {
   return rom.platform_id == "master-system" ? product_policy_identity(layout, "optimized", "", "master-system")
                                             : product_policy_identity(layout, "optimized", rom.aot_model);

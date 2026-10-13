@@ -65,6 +65,10 @@ struct MlIdentity {
 // The same verification applied to an arbitrary byte string (the test seam for mutated / truncated / non-finite artifacts).
 [[nodiscard]] std::string ml_verify_blob(std::span<const std::uint8_t> blob);
 
+// The stable fallback class of a producer/emitter reason (model_identity -> producer_incompatible, producer_input -> producer_input,
+// inference -> producer_failed, admission_rejected -> proposal_rejected, anything else -> none).
+[[nodiscard]] std::string_view ml_fallback_class(std::string_view reason) noexcept;
+
 // N = ceil(cells * percent / 100) in integer arithmetic (0 for cells == 0 or percent outside 1..100).
 [[nodiscard]] std::size_t ml_budget_cells(std::size_t cells, unsigned percent) noexcept;
 
