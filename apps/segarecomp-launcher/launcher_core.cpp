@@ -24,6 +24,11 @@ namespace fs = std::filesystem;
 #ifndef SEGARECOMP_ZIG_VERSION
 #define SEGARECOMP_ZIG_VERSION "unknown"
 #endif
+// Linux: the glibc the generated program links against. Release builds keep 2.35 (the bundled SDL3 is built on Ubuntu 22.04); a developer
+// who built SDL3 on a newer distribution passes -DSEGARECOMP_ZIG_GLIBC=<version> so a locally staged package links and runs.
+#ifndef SEGARECOMP_ZIG_GLIBC
+#define SEGARECOMP_ZIG_GLIBC "2.35"
+#endif
 
 namespace launcher {
 namespace {
@@ -45,9 +50,9 @@ const char *zig_target() {
 // Linux: the bundled libSDL3.so is built on Ubuntu 22.04 (glibc 2.35) and references symbols up to GLIBC_2.34, so
 // the generated program must be linked against at least that glibc (release builds require glibc >= 2.35).
 #elif defined(__aarch64__)
-  return "aarch64-linux-gnu.2.35";
+  return "aarch64-linux-gnu." SEGARECOMP_ZIG_GLIBC;
 #else
-  return "x86_64-linux-gnu.2.35";
+  return "x86_64-linux-gnu." SEGARECOMP_ZIG_GLIBC;
 #endif
 }
 

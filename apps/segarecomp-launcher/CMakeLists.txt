@@ -28,9 +28,13 @@ target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 add_library(segarecomp_launcher_core STATIC launcher_core.cpp json_lite.cpp library_catalog.cpp storage.cpp)
 target_include_directories(segarecomp_launcher_core PUBLIC .)
 target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media)
+# Linux only: the glibc the generated programs link against (release default 2.35 = the bundled SDL3's baseline; a developer who built SDL3 on a
+# newer distribution overrides it so a locally staged package links).
+set(SEGARECOMP_ZIG_GLIBC "2.35" CACHE STRING "Linux glibc version the generated programs target")
 target_compile_definitions(segarecomp_launcher_core PUBLIC
   SEGARECOMP_LAUNCHER_VERSION="${SEGARECOMP_RELEASE_VERSION}"
-  SEGARECOMP_ZIG_VERSION="${SEGARECOMP_ZIG_VERSION}")
+  SEGARECOMP_ZIG_VERSION="${SEGARECOMP_ZIG_VERSION}"
+  SEGARECOMP_ZIG_GLIBC="${SEGARECOMP_ZIG_GLIBC}")
 segarecomp_enable_warnings(segarecomp_launcher_core)
 
 add_executable(segarecomp-launcher WIN32 pixel_assets.cpp main.cpp)
