@@ -57,6 +57,13 @@ struct Plan {
   std::vector<std::uint8_t> guard;  // RAM-backed image: the compiled instruction bytes (snapshotted live, structural ones verified)
   unsigned structural = 0;          // RAM-backed image: bit i set = byte i is statically defining (not a displacement/immediate payload)
   bool live = false;                // RAM-backed image entry
+  // Straddling invariant start: the structural bytes (prefixes/opcode) are in the invariant window but a displacement/immediate
+  // payload byte lies in a runtime-mapped (banked) slot right after it. `fetch[k]` = byte k is read from the bus at the start of
+  // the instruction (ROM reads are pure); the others are the compiled constants in `bytes[k]`. Operands come from `rt->live_code`.
+  bool straddle = false;
+  std::vector<std::uint8_t> bytes;
+  std::vector<char> fetch;
+  bool live_operands() const { return live || straddle; }
   std::uint32_t identity = 0;
   std::uint16_t key = 0;
   bool relative = false;
@@ -174,8 +181,8 @@ void share_body(const Plan& plan, Variant& v, BodyPool& pool) {
   const DecodedInstruction& insn = v.classification.instruction;
   const cpu::z80::FormDescriptor& form = cpu::z80::form_descriptor(insn.form);
   const Pcs pc = pcs_for(plan, v.classification, plan.key);
-  const Lowered real = v.row->lower(LowerContext{insn, form, pc.start, pc.next, plan.live});
-  const Lowered probe = v.row->lower(LowerContext{insn, form, "0x7777u", "0x7779u", plan.live});
+  const Lowered real = v.row->lower(LowerContext{insn, form, pc.start, pc.next, plan.live_operands()});
+  const Lowered probe = v.row->lower(LowerContext{insn, form, "0x7777u", "0x7779u", plan.live_operands()});
   if (probe.statements != real.statements || probe.cycles_expression != real.cycles_expression ||
       probe.writes_flags != real.writes_flags || probe.flow != real.flow)
     return;
@@ -210,7 +217,7 @@ bool emit_variant_body(std::ostream& out, const Plan& plan, const Variant& v, st
   } else {
     const DecodedInstruction& insn = v.classification.instruction;
     const cpu::z80::FormDescriptor& form = cpu::z80::form_descriptor(insn.form);
-    const Lowered lowered = v.row->lower(LowerContext{insn, form, pc.start, pc.next, plan.live});
+    const Lowered lowered = v.row->lower(LowerContext{insn, form, pc.start, pc.next, plan.live_operands()});
     out << effect_text(insn, lowered, indent);
     flow = lowered.flow;
   }
@@ -257,6 +264,13 @@ bool emit_entry(std::ostream& out, const Plan& plan, const std::string& indent, 
     }
   } else if (!lock) {
     out << indent << "if (z80_owner_prologue(rt, " << pc.start << ")) return Z80_OWNER_STOP;\n";
+  }
+  if (plan.straddle) {
+    for (std::size_t k = 0; k < plan.bytes.size(); ++k) {
+      out << indent << "rt->live_code[" << k << "] = ";
+      if (plan.fetch[k]) out << "z80_read(rt, (uint16_t)(" << pc.start << " + " << k << "u));\n";
+      else out << static_cast<unsigned>(plan.bytes[k]) << "u;\n";
+    }
   }
   if (plan.variants.size() == 1 && !plan.partial) return emit_variant_body(out, plan, first, plan.key, indent, successor, bodies);
   out << indent << "switch (window_base) {\n";
@@ -461,11 +475,23 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
   // ---- plans (pass 1) ----
   std::vector<Plan> plans;
   std::uint64_t dense = 0;
-  const std::vector<StartClassification> invariant_classes = [&] {
-    for (const CodeImage* image : images)
-      if (image->kind == ImageKind::invariant) return cpu::z80::classify_all(base_table);
-    return std::vector<StartClassification>{};
-  }();
+  // A start in the invariant window may have displacement/immediate payload bytes in the runtime-mapped (banked) slot right after the
+  // window (for example a CALL whose high operand byte is the first byte of the banked slot). Those bytes decode as placeholders
+  // (never trusted: they are read from the bus when the instruction begins); a placeholder in a structural position stays unresolved.
+  std::vector<char> placeholder(kSpace, 0);
+  TableFetch invariant_table = base_table;
+  for (std::size_t a = 0; a < kSpace; ++a) {
+    if (info[a].klass != AddrClass::invariant) continue;
+    for (std::size_t d = 1; d <= 3; ++d) {
+      const std::size_t b = (a + d) % kSpace;
+      if (info[b].klass != AddrClass::banked || placeholder[b]) continue;
+      placeholder[b] = 1;
+      invariant_table.set(static_cast<std::uint16_t>(b), {cpu::z80::FetchKind::byte, 0, 0, 0});
+    }
+  }
+  // The ordinary classification stays authoritative; the placeholder table only refines a start the ordinary one left unresolved.
+  const bool has_invariant = std::ranges::any_of(images, [](const CodeImage* image) { return image->kind == ImageKind::invariant; });
+  const std::vector<StartClassification> invariant_classes = has_invariant ? cpu::z80::classify_all(base_table) : std::vector<StartClassification>{};
   std::map<std::uint32_t, std::size_t> plan_of_invariant_address;  // (identity << 16 | address) -> plan index
   for (std::size_t n = 0; n < images.size(); ++n) {
     const CodeImage& image = *images[n];
@@ -476,12 +502,41 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
         if (selective && !admitted[n][o]) continue;
         const std::uint64_t slot = selective ? rank++ : o - first.first_offset;
         const auto address = static_cast<std::uint16_t>(first.base + o);
-        Variant v = make_variant(invariant_classes[address]);
+        StartClassification c = invariant_classes[address];
+        Plan plan;
+        // Eligible only when the blocking byte is a placeholder within three bytes of the start (16-bit wrapping), so at most three
+        // prefix bytes precede it and the on-demand decode below does constant work per start.
+        if (c.kind == StartKind::unresolved_fetch_mapping && placeholder[c.blocking_address] &&
+            static_cast<std::uint16_t>(c.blocking_address - address) <= 3) {
+          const StartClassification candidate = cpu::z80::decode_at(invariant_table, static_cast<std::uint16_t>(address));
+          // Bounded: at most four logical bytes are ever examined, so no shift or scan depends on a prefix-run length.
+          const std::uint32_t length = candidate.instruction.provenance.logical_byte_count;
+          if (candidate.kind == StartKind::decoded && length <= 4) {
+            unsigned placeholders = 0;
+            for (std::uint32_t k = 0; k < length; ++k) placeholders |= placeholder[static_cast<std::uint16_t>(address + k)] ? 1u << k : 0u;
+            // Statically defining bytes: every logical byte except the descriptor displacement and immediate payload.
+            const cpu::z80::FormDescriptor& form = cpu::z80::form_descriptor(candidate.instruction.form);
+            const std::uint32_t extra = candidate.instruction.extra_prefix_count;
+            unsigned structural = (1u << length) - 1u;
+            if (form.displacement_index != cpu::z80::kNoIndex) structural &= ~(1u << (extra + form.displacement_index));
+            if (form.immediate_index != cpu::z80::kNoIndex)
+              for (unsigned k = 0; k < form.immediate_size; ++k) structural &= ~(1u << (extra + form.immediate_index + k));
+            if (placeholders != 0 && (structural & placeholders) == 0) {
+              c = candidate;
+              plan.straddle = true;
+              for (std::uint32_t k = 0; k < length; ++k) {
+                const auto at = static_cast<std::uint16_t>(address + k);
+                plan.fetch.push_back(placeholder[at]);
+                plan.bytes.push_back(placeholder[at] ? 0 : invariant_table.fetch(at).value);
+              }
+            }
+          }
+        }
+        Variant v = make_variant(c);
         if (v.absent) {
           ++result.stats.unlowered_starts;
           continue;
         }
-        Plan plan;
         plan.identity = image.identity;
         plan.key = address;
         plan.invariant = true;

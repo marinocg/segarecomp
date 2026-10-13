@@ -5990,7 +5990,7 @@
    }
   },
   {
-   "name": "sms_invariant_end_crosses_into_slot0",
+   "name": "sms_invariant_end_operand_in_slot0",
    "image": "sms_map",
    "steps": [
     {
@@ -6003,8 +6003,8 @@
    },
    "expect": [
     {
-     "out": "unresolved_fetch_mapping",
-     "pc": "03FF"
+     "out": "deadline",
+     "pc": "0401"
     }
    ],
    "oracle": false,
