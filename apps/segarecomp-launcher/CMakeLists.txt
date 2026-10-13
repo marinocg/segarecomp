@@ -25,7 +25,7 @@ target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 
 # The launcher's non-UI core (layout, cache identity, `segarecomp build` orchestration, status reading) is a separate target so its
 # policy/cache-identity contract is unit-testable without a window.
-add_library(segarecomp_launcher_core STATIC launcher_core.cpp)
+add_library(segarecomp_launcher_core STATIC launcher_core.cpp json_lite.cpp library_catalog.cpp storage.cpp)
 target_include_directories(segarecomp_launcher_core PUBLIC .)
 target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media)
 target_compile_definitions(segarecomp_launcher_core PUBLIC
@@ -78,6 +78,24 @@ if(BUILD_TESTING)
   add_test(NAME launcher_sms_policy_test COMMAND launcher_sms_policy_test $<TARGET_FILE:segarecomp>
     ${PROJECT_SOURCE_DIR}/platforms/master-system/runtime/sms_machine.h $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
   set_property(TEST launcher_sms_policy_test APPEND PROPERTY LABELS full fast)
+endif()
+
+# SEG-058: the persistent library catalog (no window, no product CLI).
+add_executable(library_catalog_test library_catalog_test.cpp)
+target_link_libraries(library_catalog_test PRIVATE segarecomp_launcher_core)
+segarecomp_enable_warnings(library_catalog_test)
+if(BUILD_TESTING)
+  add_test(NAME library_catalog_test COMMAND library_catalog_test)
+  set_property(TEST library_catalog_test APPEND PROPERTY LABELS full fast)
+endif()
+
+# SEG-058: cache maintenance on fake trees (symlink escapes, forged plans, busy entries).
+add_executable(storage_test storage_test.cpp)
+target_link_libraries(storage_test PRIVATE segarecomp_launcher_core)
+segarecomp_enable_warnings(storage_test)
+if(BUILD_TESTING)
+  add_test(NAME storage_test COMMAND storage_test)
+  set_property(TEST storage_test APPEND PROPERTY LABELS full fast)
 endif()
 
 include(${PROJECT_SOURCE_DIR}/packaging/install.cmake)

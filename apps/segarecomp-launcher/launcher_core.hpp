@@ -90,6 +90,9 @@ void apply_game_environment(SDL_Environment *environment, const RomView &rom);
 
 [[nodiscard]] Layout locate_layout();
 [[nodiscard]] std::filesystem::path cache_root();
+// Per-user persistent data: the library catalog, covers, viewer settings and screenshots. It lives beside, never inside, the disposable
+// build folders (`games/`, `zig-cache/`) that cache maintenance is allowed to touch. SEGARECOMP_LIBRARY_DIR overrides it.
+[[nodiscard]] std::filesystem::path library_root();
 [[nodiscard]] RomView inspect_rom_file(const std::filesystem::path &path, const Layout &layout);
 // The Master System baseline profile the launcher builds for (mirrors the machine library's one profile name).
 inline constexpr const char *sms_profile = "sms2_ntsc_export";

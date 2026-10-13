@@ -124,6 +124,11 @@ fs::path cache_root() {
   return result;
 }
 
+fs::path library_root() {
+  if (const char *override_dir = SDL_getenv("SEGARECOMP_LIBRARY_DIR")) return path_from_utf8(override_dir);
+  return cache_root() / "library";
+}
+
 std::string clean_title(const std::string &raw) {
   // Header titles are fixed-width, space padded and may carry control bytes or non-ASCII garbage: keep printable ASCII only
   // (anything else acts as a separator), collapse every whitespace run to one space and trim.
