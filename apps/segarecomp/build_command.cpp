@@ -716,6 +716,13 @@ std::string sms_aot_policy_json(const Options &options, const Log &log, const st
     return "none";
   };
   const auto ppm = [](unsigned long long n, unsigned long long d) { return d == 0U ? 0ULL : n * 1000000ULL / d; };
+  // The launcher reads this flat object without a JSON parser (it ends the object at the first '}'): every string is reduced to a safe alphabet.
+  const auto safe = [](const std::string &value) {
+    std::string out;
+    for (const char c : value)
+      out.push_back((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' || c == '.' || c == ':' || c == '/' || c == '(' || c == ')' || c == ',' || c == '+' ? c : '_');
+    return out;
+  };
   const std::string effective = optimized ? r.effective : std::string("broad");
   std::string json = ",\"aot_policy\":{\"requested\":\"" + options.aot_policy + "\",\"requested_model\":\"" + (optimized ? "d512hp" : "none") +
                      "\",\"effective\":\"" + effective + "\",\"fallback\":" + (optimized && r.fallback ? "true" : "false") + ",\"reason\":\"" +
@@ -725,8 +732,8 @@ std::string sms_aot_policy_json(const Options &options, const Log &log, const st
   if (effective == "ml_region_z80") {
     const sms_ml::MlIdentity &id = sms_ml::ml_identity();
     json += ",\"model\":\"" + std::string(id.ensemble_sha256) + "\",\"artifact_sha256\":\"" + std::string(id.artifact_sha256) +
-            "\",\"architecture\":\"" + std::string(id.architecture) + "\",\"rank_policy\":\"" + std::string(id.rank_policy) +
-            "\",\"schema\":\"" + std::string(id.schema) + "\",\"cells\":" + std::to_string(r.cells) + ",\"ml_selected\":" +
+            "\",\"architecture\":\"" + safe(std::string(id.architecture)) + "\",\"rank_policy\":\"" + safe(std::string(id.rank_policy)) +
+            "\",\"schema\":\"" + safe(std::string(id.schema)) + "\",\"cells\":" + std::to_string(r.cells) + ",\"ml_selected\":" +
             std::to_string(r.selected_cells) + ",\"image_offsets\":" + std::to_string(r.image_offsets) + ",\"admitted_offsets\":" +
             std::to_string(r.admitted_offsets) + ",\"selected_ppm\":" + std::to_string(ppm(r.selected_cells, r.cells)) + ",\"admitted_ppm\":" +
             std::to_string(ppm(r.admitted_offsets, r.image_offsets)) + ",\"inference_ms\":" + std::to_string(static_cast<long long>(r.inference_seconds * 1000.0)) +

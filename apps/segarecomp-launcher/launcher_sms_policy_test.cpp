@@ -179,7 +179,7 @@ int main(int argc, char **argv) {
     const fs::path genesis_compat_key = entry_dir(genesis, layout);
     expect(!genesis_compat_key.empty(), "Genesis Compatibility key still resolves");
     // The status of a finished entry decides reuse.
-    const std::string good = std::string("{\"status\":\"ok\",\"aot_policy\":{\"requested\":\"optimized\",\"requested_model\":\"d512hp\",\"effective\":\"ml_region_z80\",\"fallback\":false,\"reason\":\"none\",\"policy_identity\":\"") + opt + "\",\"identity\":\"x\"}}";
+    const std::string good = std::string("{\"status\":\"ok\",\"aot_policy\":{\"requested\":\"optimized\",\"requested_model\":\"d512hp\",\"effective\":\"ml_region_z80\",\"fallback\":false,\"reason\":\"none\",\"fallback_class\":\"none\",\"model_family\":\"sms_z80_d512hp\",\"analysis_contract\":\"segarecomp.z80_admission.v1\",\"model\":\"6bee77726a93ad33504522c35b84aaa6d89ed3c5327ff5fae6bff1e9558a4f11\",\"architecture\":\"D512HP/3seeds\",\"rank_policy\":\"cell32-top2mean-roots(0000,0038,0066)-budget65-ceil-tie:lower-index\",\"schema\":\"sgz80w01/tokens256+pad/logit-per-byte/context512\",\"selected_ppm\":650390,\"admitted_ppm\":657196,\"validator\":\"accepted\",\"policy_identity\":\"") + opt + "\",\"identity\":\"x\",\"cache_reuse\":\"none\"}}";
     const auto make_entry = [&](const std::string &name, const std::string &status) {
       const fs::path entry = dir / name;
       fs::create_directories(entry);

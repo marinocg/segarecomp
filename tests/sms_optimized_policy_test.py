@@ -93,6 +93,15 @@ def cli_group(tmp, rom):
         return
     sd, sc, so, so2 = (status(d) for d in (out_default, out_compat, out_opt, out_opt2))
     check(tree(out_default / "generated") == tree(out_compat / "generated"), "the default build is the Compatibility build byte for byte")
+    # The launcher reads the aot_policy object WITHOUT a JSON parser (it ends the object at the first '}'): no string value may contain a brace, and a
+    # flat read must still find the identities that decide cache reuse (a regression of exactly this broke package cache reuse).
+    for name, d in (("compat", out_compat), ("opt", out_opt)):
+        raw = (d / "status.json").read_text()
+        start = raw.index('"aot_policy":{')
+        flat = raw[start:raw.index("}", start) + 1]
+        parsed = json.loads("{" + flat + "}")["aot_policy"]
+        check(parsed == json.loads(raw)["aot_policy"], "%s: the flat object (to the first brace) must be the whole aot_policy object" % name)
+        check('"policy_identity":"' in flat and '"identity":"' in flat, "%s: a flat read must reach the identities" % name)
     pd, pc, po = sd["aot_policy"], sc["aot_policy"], so["aot_policy"]
     check(pd["requested"] == "compatibility" and pd["effective"] == "broad" and pd["fallback"] is False and pd["reason"] == "none", "default request: %s" % pd)
     check(pc["policy_identity"] == compat and po["policy_identity"] == opt, "the status carries the CLI's policy identities")

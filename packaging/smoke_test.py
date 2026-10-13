@@ -192,7 +192,7 @@ def expected_sms_policy_identity(policy):
     text = f"segarecomp.sms_aot_policy_identity.v1|requested={policy}"
     if policy == "optimized":
         text += ("|sms_z80_d512hp:6bee77726a93ad33504522c35b84aaa6d89ed3c5327ff5fae6bff1e9558a4f11:D512HP/3seeds:"
-                 "cell32-top2mean-roots{0x0000,0x0038,0x0066}-budget65-ceil-tie:lower-index:sgz80w01/tokens256+pad/logit-per-byte/context512:"
+                 "cell32-top2mean-roots(0000,0038,0066)-budget65-ceil-tie:lower-index:sgz80w01/tokens256+pad/logit-per-byte/context512:"
                  f"segarecomp.z80_admission.v1|artifact={meta['blob_sha256']}")
     return hashlib.sha256(text.encode()).hexdigest()
 

@@ -224,7 +224,7 @@ const MlIdentity &ml_identity() noexcept {
                                    kArtifactSha256,
                                    kEnsembleSha256,
                                    "D512HP/3seeds",
-                                   "cell32-top2mean-roots{0x0000,0x0038,0x0066}-budget65-ceil-tie:lower-index",
+                                   "cell32-top2mean-roots(0000,0038,0066)-budget65-ceil-tie:lower-index",
                                    "sgz80w01/tokens256+pad/logit-per-byte/context512",
                                    "segarecomp.z80_admission.v1"};
   return identity;
