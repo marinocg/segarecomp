@@ -210,6 +210,59 @@ def main():
                     check(r_s["outcome"] == "halted" and r_s.get("ram", b"\0" * 256)[0xF0] == want,
                           "invariant straddle, %s: expected operand %02X, got %r" % (label, want, r_s.get("ram", b"\0" * 256)[0xF0:0xF1].hex() + " " + r_s["outcome"]))
 
+        # --- 16-bit immediate crossing, structural crossing and a long prefix run at the invariant window end ----------------------
+        def straddle_rom(name, edit):
+            rom = bytearray(crossing.read_bytes())
+            edit(rom)
+            path = tmp / (name + ".sms")
+            path.write_bytes(bytes(rom))
+            out = tmp / (name + "_gen")
+            r = emit(path, out, "sms", "--mapper", "sega", "--list")
+            check(r.returncode == 0, "%s emission: %s" % (name, (r.stdout + r.stderr)[:300]))
+            if r.returncode != 0:
+                return None, None, None
+            kinds = {int(l.split()[2], 16): l.split()[3] for l in r.stdout.splitlines() if l.startswith("owner ") and l.split()[1] == "1"}
+            exe, error = compile_program(out, "sms")
+            check(exe is not None, "%s did not compile as strict C11: %s" % (name, error))
+            return kinds, exe, r.stdout
+
+        def call_edit(rom):
+            rom[0x3FB:0x400] = bytes([0x31, 0xF0, 0xDF, 0xCD, 0x00])  # ld sp,0xDFF0 (a push at SP 0 would hit the mapper registers) ; call nn  # call nn: low operand byte is invariant, high byte is slot-0 bank offset 0x400
+            for bank, high, mark in ((0, 0x05, 0xB0), (2, 0x06, 0xB2)):
+                base = bank * 0x4000
+                rom[base + 0x400] = high
+                dest = base + high * 0x100
+                rom[dest:dest + 5] = bytes([0x3E, mark, 0x32, 0xF0, 0xC2])  # ld a,mark ; ld (0xC2F0),a
+                rom[dest + 5] = 0x76  # halt
+        kinds, c_exe, _ = straddle_rom("straddle_call", call_edit)
+        if c_exe is not None:
+            check(kinds.get(0x3FE) == "full", "call nn crossing into slot 0 is a full owner: %r" % kinds.get(0x3FE))
+            for label, extra, want, dest, ident in (("bank 0", [], 0xB0, 0x0500, 2), ("bank 2", ["--write", "FFFD=2"], 0xB2, 0x0600, 4)):
+                r_c = execute(c_exe, "--cycle-budget", "200000", "--pc", "03FB", *extra)
+                check(r_c["outcome"] == "halted" and r_c["ram"][0xF0] == want, "call straddle, slot 0 = %s: %r %02X" % (label, r_c["outcome"], r_c["ram"][0xF0]))
+                check((0x03FB, 1, 0) in r_c["ci"] and (dest, ident, 0) in r_c["ci"],
+                      "call straddle, slot 0 = %s: same invariant owner then bank code at %04X: %r" % (label, dest, r_c["ci"]))
+
+        for name, lead in (("straddle_ed", 0xED), ("straddle_cb", 0xCB), ("straddle_dd", 0xDD)):
+            def structural_edit(rom, lead=lead):
+                rom[0x3FF] = lead  # prefix in the invariant window, its opcode in the next slot
+                rom[0x400] = 0x00
+            kinds, x_exe, _ = straddle_rom(name, structural_edit)
+            if x_exe is not None:
+                check(kinds.get(0x3FF) == "stub_unresolved_fetch_mapping", "%s: a prefix with its opcode in the next slot stays a typed stub: %r" % (name, kinds.get(0x3FF)))
+                r_x = execute(x_exe, "--cycle-budget", "200000", "--pc", "03FF")
+                check(r_x["outcome"] == "unresolved_fetch_mapping" and r_x["pc"] == "03FF", "%s: %r" % (name, r_x))
+
+        def prefix_edit(rom):
+            rom[0x3D0:0x400] = bytes([0xDD, 0xFD] * 24)  # 48 consecutive prefixes ending at the window edge
+            rom[0x400] = 0x21  # LD IX,nn would need an opcode; in any case bytes beyond the window are never fabricated
+        kinds, p_exe, _ = straddle_rom("straddle_prefix_run", prefix_edit)
+        if p_exe is not None:
+            check(all(kinds.get(a) == "stub_unresolved_fetch_mapping" for a in range(0x3D0, 0x400)),
+                  "a long prefix run at the window edge stays typed stubs: %r" % sorted(set(kinds.get(a) for a in range(0x3D0, 0x400))))
+            r_p = execute(p_exe, "--cycle-budget", "200000", "--pc", "03D0")
+            check(r_p["outcome"] == "unresolved_fetch_mapping" and r_p["pc"] == "03D0", "long prefix run: %r" % r_p)
+
         # --- rom_only through the same route ----------------------------------------------------------------------
         t_out = tmp / "trivial_gen"
         rt = emit(trivial, t_out, "sms", "--manifest", str(trivial_manifest))

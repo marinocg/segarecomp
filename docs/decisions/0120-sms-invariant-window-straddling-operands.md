@@ -4,22 +4,22 @@
 Accepted.
 
 ## Context
-On the Sega mapper the fixed first 1 KiB is one invariant code image and the bytes from $0400 on belong to whichever
-bank slot 0 maps at run time. Real software (Wonder Boy III, Castle of Illusion) has an instruction in the last bytes
-of the fixed window, for example `CALL nn` at $03FE, whose operand bytes lie in slot 0. The emitter classified every
-such start as `unresolved_fetch_mapping`, so both games stopped with that typed outcome the first time the path ran
-(Optimized and Compatibility alike: the start is exposed in both).
+On the Sega mapper the fixed first 1 KiB is one invariant code image; the bytes from $0400 on belong to whichever bank slot 0
+maps at run time. An instruction whose opcode is in the last bytes of the fixed window but whose immediate or displacement
+bytes lie in slot 0 (for example `CALL nn` at $03FE) was classified `unresolved_fetch_mapping`, so generated programs stopped
+the first time it ran. Real software uses this shape.
 
 ## Decision
-For a start in an invariant window, up to three bytes after the window that belong to a banked slot decode as
-placeholders. If every placeholder is a displacement/immediate payload byte (never a prefix or opcode byte) and the
-instruction is at most four bytes, the start is a full owner whose operands come from `rt->live_code`; the owner fills
-it at the instruction start (static bytes as constants, placeholder bytes with `z80_read`, a pure ROM read). The existing
-`live_operands` lowering contract is reused, so the effect is exact for whichever bank slot 0 maps. A placeholder in a
-structural position (a prefix or opcode byte in the next slot) stays a typed `unresolved_fetch_mapping` stub. Banked-window
-straddles and RAM operands are unchanged.
+The ordinary classification of the invariant window stays authoritative. Only a start it left `unresolved_fetch_mapping`
+because of a banked byte directly after the window is re-examined with those (at most three) bytes as placeholders. The
+candidate is accepted only if its logical length is at most four bytes (checked before any mask is formed) and every
+placeholder byte is a displacement/immediate payload byte according to the Z80 form descriptor. It then becomes a full owner
+whose operands come from `rt->live_code`: static bytes as constants and placeholder bytes via `z80_read` (a pure ROM read) at the
+instruction start, reusing the `live_operands` lowering contract. Anything else (a prefix or opcode in the next slot, a long
+prefix run) keeps the original typed stop. Work per start is constant, so classification stays linear. Banked-window straddles
+and RAM operands are unchanged.
 
 ## Consequences
-No runtime decoding and no new runtime ABI. Generated output is unchanged for every start that does not straddle.
-Covered by `sms_bank_crossing_test` (both slot-0 banks), the conformance scenario
-`sms_invariant_end_operand_in_slot0`, and the two commercial games run in both policies.
+No runtime decoding and no new runtime ABI; output is unchanged for every start that does not straddle. Covered by
+`sms_bank_crossing_test` (8-bit and 16-bit immediates under two slot-0 banks, prefix/opcode crossings, a 48-prefix run, sanitizer
+clean), the conformance scenario `sms_invariant_end_operand_in_slot0`, and commercial runs in both AOT policies.

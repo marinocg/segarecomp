@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <bit>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -490,11 +489,10 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
       invariant_table.set(static_cast<std::uint16_t>(b), {cpu::z80::FetchKind::byte, 0, 0, 0});
     }
   }
-  const std::vector<StartClassification> invariant_classes = [&] {
-    for (const CodeImage* image : images)
-      if (image->kind == ImageKind::invariant) return cpu::z80::classify_all(invariant_table);
-    return std::vector<StartClassification>{};
-  }();
+  // The ordinary classification stays authoritative; the placeholder table only refines a start the ordinary one left unresolved.
+  const bool has_invariant = std::ranges::any_of(images, [](const CodeImage* image) { return image->kind == ImageKind::invariant; });
+  const std::vector<StartClassification> invariant_classes = has_invariant ? cpu::z80::classify_all(base_table) : std::vector<StartClassification>{};
+  const std::vector<StartClassification> placeholder_classes = has_invariant ? cpu::z80::classify_all(invariant_table) : std::vector<StartClassification>{};
   std::map<std::uint32_t, std::size_t> plan_of_invariant_address;  // (identity << 16 | address) -> plan index
   for (std::size_t n = 0; n < images.size(); ++n) {
     const CodeImage& image = *images[n];
@@ -507,23 +505,22 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
         const auto address = static_cast<std::uint16_t>(first.base + o);
         StartClassification c = invariant_classes[address];
         Plan plan;
-        if (c.kind == StartKind::decoded) {
-          const std::uint32_t length = c.instruction.provenance.logical_byte_count;
-          std::uint32_t placeholders = 0;
-          for (std::uint32_t k = 0; k < length; ++k) placeholders |= placeholder[static_cast<std::uint16_t>(address + k)] ? 1u << k : 0u;
-          if (placeholders != 0) {
+        if (c.kind == StartKind::unresolved_fetch_mapping && placeholder[c.blocking_address]) {
+          const StartClassification& candidate = placeholder_classes[address];
+          // Bounded: at most four logical bytes are ever examined, so no shift or scan depends on a prefix-run length.
+          const std::uint32_t length = candidate.instruction.provenance.logical_byte_count;
+          if (candidate.kind == StartKind::decoded && length <= 4) {
+            unsigned placeholders = 0;
+            for (std::uint32_t k = 0; k < length; ++k) placeholders |= placeholder[static_cast<std::uint16_t>(address + k)] ? 1u << k : 0u;
             // Statically defining bytes: every logical byte except the descriptor displacement and immediate payload.
-            const cpu::z80::FormDescriptor& form = cpu::z80::form_descriptor(c.instruction.form);
-            const std::uint32_t extra = c.instruction.extra_prefix_count;
+            const cpu::z80::FormDescriptor& form = cpu::z80::form_descriptor(candidate.instruction.form);
+            const std::uint32_t extra = candidate.instruction.extra_prefix_count;
             unsigned structural = (1u << length) - 1u;
             if (form.displacement_index != cpu::z80::kNoIndex) structural &= ~(1u << (extra + form.displacement_index));
             if (form.immediate_index != cpu::z80::kNoIndex)
               for (unsigned k = 0; k < form.immediate_size; ++k) structural &= ~(1u << (extra + form.immediate_index + k));
-            if (length > 4 || (structural & placeholders) != 0) {
-              c = StartClassification{};
-              c.kind = StartKind::unresolved_fetch_mapping;
-              c.blocking_address = static_cast<std::uint16_t>(address + std::countr_zero(structural & placeholders ? structural & placeholders : placeholders));
-            } else {
+            if (placeholders != 0 && (structural & placeholders) == 0) {
+              c = candidate;
               plan.straddle = true;
               for (std::uint32_t k = 0; k < length; ++k) {
                 const auto at = static_cast<std::uint16_t>(address + k);
