@@ -160,7 +160,7 @@ void App::draw_details(float w, float h) {
   }
   const float left_bottom = ImGui::GetCursorScreenPos().y;
   // ---- right ----
-  if (two_col) ImGui::SetCursorScreenPos(ImVec2(top.x + left_w + gap, top.y));
+  if (two_col) { ImGui::Indent(left_w + gap); ImGui::SetCursorScreenPos(ImVec2(top.x + left_w + gap, top.y)); }
   else ImGui::SetCursorScreenPos(ImVec2(top.x, left_bottom + ctx_.u(10.0F)));
   const ImVec2 rx = ImGui::GetCursorScreenPos();
   // title row
@@ -222,18 +222,25 @@ void App::draw_details(float w, float h) {
     const float sh = ctx_.u(28.0F);
     std::error_code ec;
     const bool has_dir = fs::is_directory(info.entry, ec);
-    if (button(ctx_, "open_dir", "Open build folder", ImVec2(ctx_.u(164.0F), sh), Style::ghost, has_dir, ctx_.icon("folder"))) SDL_OpenURL(("file://" + u8s(info.entry)).c_str());
-    ImGui::SameLine(0.0F, ctx_.u(6.0F));
-    if (button(ctx_, "logs", show_log_ ? "Hide logs" : "View logs", ImVec2(ctx_.u(120.0F), sh), Style::ghost, true, ctx_.icon("file"))) show_log_ = !show_log_;
-    ImGui::SameLine(0.0F, ctx_.u(6.0F));
-    if (button(ctx_, "cleanup", "Storage cleanup", ImVec2(ctx_.u(160.0F), sh), Style::ghost, true, ctx_.icon("storage"))) { storage_selected_ = {entry->id()}; go(Page::storage); }
-    ImGui::SameLine(0.0F, ctx_.u(6.0F));
-    if (button(ctx_, "remove", "Remove from library", ImVec2(ctx_.u(180.0F), sh), Style::ghost, true, ctx_.icon("trash"))) {
+    float fx = 0.0F, fy = ImGui::GetCursorScreenPos().y;
+    const auto flow_button = [&](const char *id, const char *label, float width, bool enabled, const char *icon) {
+      if (fx > 0.0F && fx + width > rw) { fx = 0.0F; fy += sh + ctx_.u(6.0F); }
+      ImGui::SetCursorScreenPos(ImVec2(rx.x + fx, fy));
+      const bool pressed = button(ctx_, id, label, ImVec2(width, sh), Style::ghost, enabled, ctx_.icon(icon));
+      fx += width + ctx_.u(6.0F);
+      return pressed;
+    };
+    if (flow_button("open_dir", "Open build folder", ctx_.u(172.0F), has_dir, "folder")) SDL_OpenURL(("file://" + u8s(info.entry)).c_str());
+    if (flow_button("logs", show_log_ ? "Hide logs" : "View logs", ctx_.u(122.0F), true, "file")) show_log_ = !show_log_;
+    if (flow_button("cleanup", "Storage cleanup", ctx_.u(172.0F), true, "storage")) { storage_selected_ = {entry->id()}; go(Page::storage); }
+    if (flow_button("remove", "Remove from library", ctx_.u(196.0F), true, "trash")) {
       modal_ = Modal{};
       modal_.kind = Modal::Kind::remove_entries;
       modal_.ids = {entry->id()};
       modal_.title = "Remove \"" + ellipsize(ctx_.bold, ctx_.u(15.0F), ctx_.u(300.0F), entry->title()) + "\" from the library?";
     }
+    ImGui::SetCursorScreenPos(ImVec2(rx.x, fy + sh + ctx_.u(6.0F)));
+    ImGui::Dummy(ImVec2(rw, 1));
     ImGui::SetCursorScreenPos(ImVec2(rx.x, ImGui::GetCursorScreenPos().y + ctx_.u(8.0F)));
   }
   // state notes
@@ -290,10 +297,11 @@ void App::draw_details(float w, float h) {
     else label_value(ctx_, lw, vw, "Mapper", entry->mapper.empty() ? (entry->mapper_manifest_sha256.empty() ? "undeclared" : "declared by sidecar manifest") : (entry->mapper == "sega" ? "Sega" : "ROM only (32 KiB)"));
     {
       const std::string digest = entry->sha256.substr(0, 16) + "..." + entry->sha256.substr(56);
+      const ImVec2 row = ImGui::GetCursorScreenPos();
       label_value(ctx_, lw, vw - ctx_.u(70.0F), "ROM SHA-256", digest);
-      ImGui::SameLine(lw + vw - ctx_.u(60.0F));
-      ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, ImGui::GetCursorScreenPos().y - ctx_.u(24.0F)));
+      ImGui::SetCursorScreenPos(ImVec2(row.x + lw + text_width(ctx_.regular, ctx_.u(12.0F), digest.c_str()) + ctx_.u(12.0F), row.y - ctx_.u(4.0F)));
       if (button(ctx_, "copy_sha", "Copy", ImVec2(ctx_.u(60.0F), ctx_.u(22.0F)), Style::ghost)) { SDL_SetClipboardText(entry->sha256.c_str()); toast("SHA-256 copied."); }
+      ImGui::SetCursorScreenPos(ImVec2(row.x, row.y + ctx_.u(26.0F)));
       ImGui::Dummy(ImVec2(1, ctx_.u(2.0F)));
     }
     if (entry->rom_paths.empty()) label_value(ctx_, lw, vw, "ROM file", entry->rom_path_unknown ? "not recorded (older cache record)" : "none", col::warn);
@@ -348,6 +356,7 @@ void App::draw_details(float w, float h) {
   }
   // make sure the scroll area covers the taller of the two columns
   if (two_col) {
+    ImGui::Unindent(left_w + gap);
     const float bottom = std::max(left_bottom, ImGui::GetCursorScreenPos().y);
     ImGui::SetCursorScreenPos(ImVec2(top.x, bottom));
   }
@@ -476,7 +485,7 @@ void App::draw_storage(float w, float h) {
     ImGui::SetCursorScreenPos(ImVec2(a.x, a.y + rh + ctx_.u(3.0F)));
     ImGui::Dummy(ImVec2(w, 1));
   };
-  const float table_h = std::min(static_cast<float>(games.size()) * (rh + ctx_.u(3.0F)) + ctx_.u(4.0F), std::max(ctx_.u(150.0F), h * 0.34F));
+  const float table_h = std::min(static_cast<float>(games.size()) * (rh + ctx_.u(3.0F)) + ctx_.u(16.0F), std::max(ctx_.u(150.0F), h * 0.48F));
   if (games.empty()) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "The library is empty: no games, nothing to clean.");
   else {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, rgba(0, 0, 0, 0));

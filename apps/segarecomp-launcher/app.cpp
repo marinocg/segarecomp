@@ -735,7 +735,7 @@ int App::run() {
   }
   if (shot_page_ == "storage") go(Page::storage);
   else if (shot_page_ == "import") go(Page::import_page);
-  else if (shot_page_.rfind("settings", 0) == 0) { settings_tab_ = shot_page_.size() > 9 ? std::atoi(shot_page_.c_str() + 9) : 0; go(Page::settings); }
+  else if (shot_page_.rfind("settings", 0) == 0) { settings_tab_ = shot_page_.size() > 8 ? std::atoi(shot_page_.c_str() + 8) : 0; go(Page::settings); }
   else if (shot_page_.rfind("details:", 0) == 0) {
     const std::size_t index = static_cast<std::size_t>(std::atoi(shot_page_.c_str() + 8));
     const auto visible = visible_entries();

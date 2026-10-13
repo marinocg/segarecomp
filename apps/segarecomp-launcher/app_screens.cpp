@@ -77,7 +77,7 @@ void App::draw_background(float w, float h) {
   } else {
     dl->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), rgba(8, 11, 26));
   }
-  dl->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), rgba(4, 8, 20, 178));  // readability scrim over the artwork
+  dl->AddRectFilled(ImVec2(0, 0), ImVec2(w, h), rgba(4, 8, 20, 96));  // readability scrim over the artwork
 }
 
 void App::draw() {
@@ -509,8 +509,9 @@ void App::draw_library(float w, float h) {
       for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) draw_list_row(*visible[static_cast<std::size_t>(i)], w, row_h);
   } else {
     const float gap = ctx_.u(12.0F), card_w = ctx_.u(settings_.compact ? 128.0F : 158.0F);
-    const int columns = std::max(1, static_cast<int>((w + gap) / (card_w + gap)));
-    const float cw = card_w + (w + gap - static_cast<float>(columns) * (card_w + gap)) / static_cast<float>(columns);  // spread the leftover width
+    const float usable = w - ctx_.u(16.0F);  // leave room for the scroll bar
+    const int columns = std::max(1, static_cast<int>((usable + gap) / (card_w + gap)));
+    const float cw = card_w + (usable + gap - static_cast<float>(columns) * (card_w + gap)) / static_cast<float>(columns);  // spread the leftover width
     const float card_h = (cw - ctx_.u(16.0F)) * 4.0F / 3.0F + ctx_.u(88.0F);
     const int rows = (static_cast<int>(visible.size()) + columns - 1) / columns;
     const ImVec2 origin = ImGui::GetCursorScreenPos();

@@ -16,7 +16,7 @@ namespace ui {
 // Palette (apps/segarecomp-launcher/main.cpp's original constants, extended only where a new state needs a color).
 inline ImU32 rgba(int r, int g, int b, int a = 255) { return IM_COL32(r, g, b, a); }
 namespace col {
-const ImU32 panel = rgba(8, 20, 47, 240), panel_solid = rgba(8, 20, 47), panel_hover = rgba(13, 28, 62), panel_dark = rgba(5, 12, 30, 245);
+const ImU32 panel = rgba(8, 20, 47, 214), panel_solid = rgba(8, 20, 47), panel_hover = rgba(13, 28, 62), panel_dark = rgba(5, 12, 30, 245);
 const ImU32 border_dark = rgba(7, 16, 38), edge = rgba(35, 62, 120), highlight = rgba(77, 103, 167), dash = rgba(94, 132, 209, 215), dash_hover = rgba(70, 220, 255);
 const ImU32 text = rgba(220, 232, 255), text2 = rgba(169, 183, 221), dim = rgba(120, 133, 170), footer = rgba(202, 211, 235);
 const ImU32 ok = rgba(104, 224, 158), err = rgba(255, 129, 119), warn = rgba(255, 197, 109), info = rgba(64, 191, 245);

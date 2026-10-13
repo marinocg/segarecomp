@@ -7,6 +7,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <ctime>
 #include <filesystem>
@@ -100,7 +101,9 @@ inline void heading(Ctx &ctx, const char *text, ImU32 color = col::text) {
 
 inline void rule(Ctx &ctx, float w) {
   const ImVec2 origin = ImGui::GetCursorScreenPos();
-  ImGui::GetWindowDrawList()->AddLine(ImVec2(origin.x, origin.y + ctx.u(4.0F)), ImVec2(origin.x + w, origin.y + ctx.u(4.0F)), IM_COL32(70, 90, 140, 130), std::max(1.0F, ctx.u(1.0F)));
+  // A filled rectangle on whole pixels: a 1-px AddLine at a fractional y rasterizes with gaps on the software renderer.
+  const float y = std::floor(origin.y + ctx.u(4.0F)), thick = std::max(1.0F, std::round(ctx.u(1.0F)));
+  ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(std::floor(origin.x), y), ImVec2(std::floor(origin.x + w), y + thick), IM_COL32(70, 90, 140, 130));
   ImGui::Dummy(ImVec2(w, ctx.u(10.0F)));
 }
 
