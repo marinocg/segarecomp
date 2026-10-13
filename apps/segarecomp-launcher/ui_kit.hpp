@@ -25,6 +25,9 @@ const ImU32 danger = rgba(160, 48, 56), danger_hover = rgba(190, 62, 70), danger
 const ImU32 focus = rgba(140, 224, 255), selected = rgba(57, 124, 219), inactive = rgba(11, 32, 72), scrim = rgba(4, 8, 20, 190);
 }
 
+// ImGui 1.92's InvisibleButton opts OUT of keyboard/gamepad navigation unless asked: every launcher control is reachable with Tab/arrows/D-pad.
+inline bool nav_button(const char *id, ImVec2 size) { return ImGui::InvisibleButton(id, size, ImGuiButtonFlags_EnableNav); }
+
 struct Ctx {
   ImFont *regular = nullptr, *bold = nullptr;  // body text: the scalable embedded font; `bold` draws it twice for weight
   ImFont *display = nullptr;                  // the repository's Silkscreen Bold: titles and section headings

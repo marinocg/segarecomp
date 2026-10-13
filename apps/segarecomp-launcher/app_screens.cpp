@@ -3,6 +3,7 @@
 #include "app.hpp"
 
 #include "app_helpers.hpp"
+#include "imgui_internal.h"
 #include "covers.hpp"
 #include "pixel_assets.hpp"
 
@@ -155,7 +156,7 @@ void App::draw() {
   ImGui::End();
   draw_modal(win_w_, win_h_);
   draw_toasts(win_w_, win_h_);
-  if (modal_.kind == Modal::Kind::none && !ImGui::GetIO().WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+  if (modal_.kind == Modal::Kind::none && !ImGui::GetIO().WantTextInput && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) {
     if (page_ == Page::details) page_ = previous_page_ == Page::details ? Page::library : previous_page_;
     else if (page_ != Page::library) page_ = Page::library;
   }
@@ -198,14 +199,16 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     const bool active = page_ == item.page;
     const bool enabled = !is_details || !catalog_.entries().empty();
     ImGui::SetCursorScreenPos(ImVec2(x + pad, cy));
-    const ImVec2 size(w - 2 * pad, ctx_.u(38.0F));
+    const ImVec2 size(w - 2 * pad, ctx_.u(46.0F));  // contiguous hit boxes: Down/Up stay inside the sidebar instead of jumping to the content beside it
     ImGui::PushID(item.label);
     if (!enabled) ImGui::BeginDisabled();
-    const bool pressed = ImGui::InvisibleButton("##nav", size);
+    const bool pressed = ui::nav_button("##nav", size);
     if (!enabled) ImGui::EndDisabled();
     const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused();
+    if (active && nav_reset_) ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());  // keyboard/gamepad focus starts on the current page's entry
+    if (focused) focus_label_ = item.label;
     ImGui::PopID();
-    const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+    const ImVec2 a = ImGui::GetItemRectMin(), b = ImVec2(ImGui::GetItemRectMax().x, ImGui::GetItemRectMin().y + ctx_.u(38.0F));
     dl->AddRectFilled(a, b, active ? rgba(52, 128, 238) : (hovered ? col::panel_hover : rgba(10, 24, 56)), ctx_.u(5.0F));
     dl->AddRect(a, b, active ? rgba(120, 190, 255) : rgba(34, 70, 140), ctx_.u(5.0F), 0, std::max(1.0F, ctx_.u(1.2F)));
     const float isz = ctx_.u(16.0F);
@@ -220,6 +223,7 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     }
     cy += ctx_.u(46.0F);
   }
+  nav_reset_ = false;
   const float px = ctx_.u(12.0F);
   float by = y + h - pad;
   if (wide) {
@@ -235,6 +239,7 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     }
     ImGui::SetCursorScreenPos(ImVec2(x + w - pad - ctx_.u(28.0F), by - ctx_.u(2.0F)));
     if (icon_button(ctx_, "open_cache", ctx_.icon("folder"), ctx_.u(28.0F), false, true, "Open the cache folder")) SDL_OpenURL(("file://" + u8s(cache_dir_)).c_str());
+    if (ImGui::IsItemFocused()) focus_label_ = "Cache folder";
     char version[64];
     std::snprintf(version, sizeof version, "v%s", SEGARECOMP_LAUNCHER_VERSION);
     draw_text(dl, ctx_.regular, ctx_.u(10.5F), col::dim, ImVec2(x + pad, by + ctx_.u(32.0F)), version);
@@ -276,7 +281,7 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   ImGui::SetCursorScreenPos(ImVec2(x, y));
   ImGui::PushID(entry.id().c_str());
   ImGui::SetNextItemAllowOverlap();
-  const bool pressed = ImGui::InvisibleButton("##card", ImVec2(w, h));
+  const bool pressed = ui::nav_button("##card", ImVec2(w, h));
   const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused();
   const ImVec2 a(x, y), b(x + w, y + h);
   card(ctx_, dl, a, b, selected || focused, hovered);
@@ -347,7 +352,7 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   const bool selected = select_mode_ && selected_.count(entry.id()) != 0;
   ImGui::PushID(entry.id().c_str());
   ImGui::SetNextItemAllowOverlap();
-  const bool pressed = ImGui::InvisibleButton("##row", ImVec2(w, h));
+  const bool pressed = ui::nav_button("##row", ImVec2(w, h));
   const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused();
   const ImVec2 b(a.x + w, a.y + h);
   card(ctx_, dl, a, b, selected || focused, hovered);

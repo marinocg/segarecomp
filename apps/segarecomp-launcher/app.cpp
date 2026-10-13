@@ -5,6 +5,7 @@
 
 #include "imgui_impl_sdl3.h"
 #include "imgui_internal.h"
+#include "imgui_internal.h"
 #include "imgui_impl_sdlrenderer3.h"
 
 #include <algorithm>
@@ -424,6 +425,7 @@ void App::poll_import() {
 
 void App::open_details(const std::string &id) {
   detail_id_ = id;
+  nav_reset_ = true;
   editing_title_ = false;
   show_log_ = false;
   show_fallback_details_ = false;
@@ -435,6 +437,7 @@ void App::go(Page page) {
   if (page == page_) return;
   if (page_ != Page::details) previous_page_ = page_;
   page_ = page;
+  nav_reset_ = true;
   editing_title_ = false;
   if (page == Page::storage) request_scan();
 }
@@ -758,23 +761,28 @@ void App::run_script() {
     script_wait_ = 20;
   } else if (cmd == "pad" && script_joy_ != nullptr) {
     const std::string name = arg.substr(0, arg.find(' '));
-    const bool down = arg.find("up") == std::string::npos;
+    const bool down = arg.size() < name.size() + 3 || arg.substr(name.size() + 1) != "up";
     static const std::pair<const char *, int> buttons[] = {{"south", SDL_GAMEPAD_BUTTON_SOUTH}, {"east", SDL_GAMEPAD_BUTTON_EAST}, {"dpad_up", SDL_GAMEPAD_BUTTON_DPAD_UP}, {"dpad_down", SDL_GAMEPAD_BUTTON_DPAD_DOWN},
                                                            {"dpad_left", SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {"dpad_right", SDL_GAMEPAD_BUTTON_DPAD_RIGHT}, {"start", SDL_GAMEPAD_BUTTON_START}, {"back", SDL_GAMEPAD_BUTTON_BACK}};
     for (const auto &b : buttons)
       if (name == b.first) SDL_SetJoystickVirtualButton(script_joy_, b.second, down);
-    script_wait_ = down ? 6 : 3;
+    script_wait_ = down ? 1 : 3;  // a press is one frame long: a longer hold would auto-repeat in real time
   } else if (cmd == "expect") {
     const std::string key = arg.substr(0, arg.find('=')), value = arg.substr(arg.find('=') + 1);
     std::string actual;
     if (key == "page") actual = page_name();
     else if (key == "visible") actual = std::to_string(visible_entries().size());
+    else if (key == "focus") actual = focus_label_;
     else if (key == "modal") actual = modal_.kind == Modal::Kind::none ? "0" : "1";
     trace(std::string("expect ") + (actual == value ? "ok " : "FAIL ") + arg + " actual=" + actual);
   } else if (cmd == "dump") {
     const ImGuiContext &g = *ImGui::GetCurrentContext();
     trace(std::string("dump nav_window=") + (g.NavWindow != nullptr ? g.NavWindow->Name : "-") + " nav_id=" + std::to_string(g.NavId) + " nav_active=" + std::to_string(g.NavCursorVisible ? 1 : 0) +
-          " want_text=" + std::to_string(ImGui::GetIO().WantTextInput ? 1 : 0));
+          " want_text=" + std::to_string(ImGui::GetIO().WantTextInput ? 1 : 0) + " focus=" + focus_label_);
+  } else if (cmd == "dump") {
+    const ImGuiContext &g = *ImGui::GetCurrentContext();
+    trace(std::string("dump nav_window=") + (g.NavWindow != nullptr ? g.NavWindow->Name : "-") + " nav_id=" + std::to_string(g.NavId) + " nav_cursor=" + std::to_string(g.NavCursorVisible ? 1 : 0) +
+          " want_text=" + std::to_string(ImGui::GetIO().WantTextInput ? 1 : 0) + " focus=" + focus_label_);
   } else if (cmd == "quit") {
     SDL_Event quit;
     quit.type = SDL_EVENT_QUIT;
@@ -852,6 +860,7 @@ int App::run() {
         e.common.timestamp = SDL_GetTicksNS();
         e.key.windowID = SDL_GetWindowID(window_);
         e.key.scancode = static_cast<SDL_Scancode>(it->second);
+        e.key.key = SDL_GetKeyFromScancode(e.key.scancode, SDL_KMOD_NONE, false);
         e.key.down = false;
         SDL_PushEvent(&e);
         it = script_key_up_.erase(it);
@@ -861,6 +870,7 @@ int App::run() {
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
+    focus_label_.clear();
     draw();
     ImGui::Render();
     int win_w_pt = 0, win_h_pt = 0, output_w = 0, output_h = 0;

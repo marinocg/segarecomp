@@ -118,7 +118,7 @@ void progress_bar(Ctx &ctx, ImDrawList *dl, ImVec2 a, ImVec2 b, float fraction, 
 bool button(Ctx &ctx, const char *id, const char *label, ImVec2 size, Style style, bool enabled, SDL_Texture *icon) {
   ImGui::PushID(id);
   if (!enabled) ImGui::BeginDisabled();
-  const bool pressed = ImGui::InvisibleButton("##b", size);
+  const bool pressed = ui::nav_button("##b", size);
   if (!enabled) ImGui::EndDisabled();
   const bool hovered = ImGui::IsItemHovered() && enabled, active = ImGui::IsItemActive() && enabled, focused = ImGui::IsItemFocused();
   ImGui::PopID();
@@ -150,7 +150,7 @@ bool button(Ctx &ctx, const char *id, const char *label, ImVec2 size, Style styl
 bool icon_button(Ctx &ctx, const char *id, SDL_Texture *icon, float size, bool active, bool enabled, const char *tip) {
   ImGui::PushID(id);
   if (!enabled) ImGui::BeginDisabled();
-  const bool pressed = ImGui::InvisibleButton("##i", ImVec2(size, size));
+  const bool pressed = ui::nav_button("##i", ImVec2(size, size));
   if (!enabled) ImGui::EndDisabled();
   const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused();
   ImGui::PopID();
@@ -170,7 +170,7 @@ bool chip(Ctx &ctx, const char *id, const char *label, bool active, float height
   const float px = ctx.u(12.0F), h = height > 0.0F ? height : ctx.u(26.0F);
   const float w = text_width(ctx.bold, px, label) + ctx.u(22.0F);
   ImGui::PushID(id);
-  const bool pressed = ImGui::InvisibleButton("##c", ImVec2(w, h));
+  const bool pressed = ui::nav_button("##c", ImVec2(w, h));
   const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused();
   ImGui::PopID();
   ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -187,7 +187,7 @@ bool checkbox(Ctx &ctx, const char *id, const char *label, bool *value, bool ena
   const float w = box + ctx.u(8.0F) + text_width(ctx.regular, px, label);
   ImGui::PushID(id);
   if (!enabled) ImGui::BeginDisabled();
-  const bool pressed = ImGui::InvisibleButton("##k", ImVec2(w, box + ctx.u(4.0F)));
+  const bool pressed = ui::nav_button("##k", ImVec2(w, box + ctx.u(4.0F)));
   if (!enabled) ImGui::EndDisabled();
   const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused();
   ImGui::PopID();
@@ -207,7 +207,7 @@ bool toggle(Ctx &ctx, const char *id, const char *label, bool *value, float widt
   const float px = ctx.u(13.0F), sw = ctx.u(38.0F), sh = ctx.u(20.0F);
   ImGui::PushID(id);
   if (!enabled) ImGui::BeginDisabled();
-  const bool pressed = ImGui::InvisibleButton("##t", ImVec2(width, ctx.u(26.0F)));
+  const bool pressed = ui::nav_button("##t", ImVec2(width, ctx.u(26.0F)));
   if (!enabled) ImGui::EndDisabled();
   const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused();
   ImGui::PopID();
@@ -227,7 +227,7 @@ bool dropdown(Ctx &ctx, const char *id, const std::vector<std::string> &items, i
   bool changed = false;
   ImGui::PushID(id);
   const float h = ctx.u(32.0F), px = ctx.u(13.0F);
-  const bool pressed = ImGui::InvisibleButton("##d", ImVec2(width, h));
+  const bool pressed = ui::nav_button("##d", ImVec2(width, h));
   const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused();
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
@@ -251,7 +251,7 @@ bool dropdown(Ctx &ctx, const char *id, const std::vector<std::string> &items, i
     for (std::size_t i = 0; i < items.size(); ++i) {
       ImGui::PushID(static_cast<int>(i));
       const bool on = static_cast<int>(i) == *selected;
-      const bool click = ImGui::InvisibleButton("##o", ImVec2(width - ctx.u(8.0F), ctx.u(28.0F)));
+      const bool click = ui::nav_button("##o", ImVec2(width - ctx.u(8.0F), ctx.u(28.0F)));
       const ImVec2 oa = ImGui::GetItemRectMin(), ob = ImGui::GetItemRectMax();
       ImDrawList *pl = ImGui::GetWindowDrawList();
       if (on || ImGui::IsItemHovered()) pl->AddRectFilled(oa, ob, on ? col::btn : col::panel_hover, ctx.u(4.0F));
@@ -274,7 +274,7 @@ bool segmented(Ctx &ctx, const char *id, const std::vector<std::string> &items, 
     if (i != 0) ImGui::SameLine(0.0F, ctx.u(5.0F));
     const float px = ctx.u(12.0F), w = item_w > 0.0F ? item_w : text_width(ctx.bold, px, items[i].c_str()) + ctx.u(24.0F);
     ImGui::PushID(static_cast<int>(i));
-    const bool pressed = ImGui::InvisibleButton("##s", ImVec2(w, ctx.u(28.0F)));
+    const bool pressed = ui::nav_button("##s", ImVec2(w, ctx.u(28.0F)));
     const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused(), on = static_cast<int>(i) == *selected;
     ImGui::PopID();
     ImDrawList *dl = ImGui::GetWindowDrawList();

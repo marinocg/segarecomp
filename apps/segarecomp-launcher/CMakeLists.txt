@@ -101,6 +101,14 @@ if(BUILD_TESTING)
   set_property(TEST launcher_ui_support_test APPEND PROPERTY LABELS full fast)
 endif()
 
+# SEG-058: keyboard and gamepad navigation of the real window (dummy video driver, virtual gamepad).
+if(BUILD_TESTING)
+  find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME launcher_gui_navigation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_gui_navigation_test.py $<TARGET_FILE:segarecomp-launcher>)
+  set_property(TEST launcher_gui_navigation_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_gui_navigation_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+endif()
+
 # SEG-058: the persistent library catalog (no window, no product CLI).
 add_executable(library_catalog_test library_catalog_test.cpp)
 target_link_libraries(library_catalog_test PRIVATE segarecomp_launcher_core)

@@ -628,7 +628,7 @@ void App::draw_storage(float w, float h) {
     ImGui::SetCursorScreenPos(a);
     ImGui::PushID(act.id);
     if (!act.enabled) ImGui::BeginDisabled();
-    const bool pressed = ImGui::InvisibleButton("##a", ImVec2(aw, ah));
+    const bool pressed = ui::nav_button("##a", ImVec2(aw, ah));
     if (!act.enabled) ImGui::EndDisabled();
     const bool hov = ImGui::IsItemHovered() && act.enabled, foc = ImGui::IsItemFocused();
     ImGui::PopID();
@@ -663,7 +663,7 @@ void App::draw_settings(float full_w, float h) {
     for (int i = 0; i < 5; ++i) {
       ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + static_cast<float>(i) * ctx_.u(40.0F)));
       ImGui::PushID(i);
-      const bool pressed = ImGui::InvisibleButton("##tab", ImVec2(tabs_w, ctx_.u(34.0F)));
+      const bool pressed = ui::nav_button("##tab", ImVec2(tabs_w, ctx_.u(34.0F)));
       const bool hov = ImGui::IsItemHovered(), foc = ImGui::IsItemFocused(), on = settings_tab_ == i;
       ImGui::PopID();
       const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
