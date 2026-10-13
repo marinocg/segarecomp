@@ -1,0 +1,94 @@
+{
+ "candidate": "D512HP",
+ "cell_bytes": 32,
+ "device": "cpu",
+ "fixed_budget": 0.65,
+ "mean_retained_fraction": 0.65,
+ "plan_digest": "21db1afb2634e4d1765ecd5a0da8578a0d388029ef1d75f55bb87b0a3ab1a852",
+ "reduction": "top2",
+ "sealed": {
+  "alexkidd": {
+   "cells": 4096,
+   "fixed": {
+    "budget": 0.65,
+    "c_outside_r": 0,
+    "positive_cells": 679,
+    "retained_fraction": 0.6501,
+    "strict_recall": true
+   },
+   "frf": 0.3235,
+   "positive_cells": 679,
+   "positive_fraction": 0.1658,
+   "positives_in_roots": 3,
+   "residual_frf": 0.3235,
+   "retained_for_recall_0.5": 0.1335,
+   "retained_for_recall_0.9": 0.2258,
+   "retained_for_recall_0.99": 0.2512,
+   "retained_for_recall_0.999": 0.3235,
+   "retained_full_recall": 0.3235,
+   "root_cells": 3,
+   "worst_residual_rank_fractions": [
+    0.3235,
+    0.3005,
+    0.2605,
+    0.2563
+   ]
+  },
+  "lots": {
+   "cells": 8192,
+   "fixed": {
+    "budget": 0.65,
+    "c_outside_r": 0,
+    "positive_cells": 954,
+    "retained_fraction": 0.65,
+    "strict_recall": true
+   },
+   "frf": 0.1425,
+   "positive_cells": 954,
+   "positive_fraction": 0.1165,
+   "positives_in_roots": 3,
+   "residual_frf": 0.1381,
+   "retained_for_recall_0.5": 0.0585,
+   "retained_for_recall_0.9": 0.1084,
+   "retained_for_recall_0.99": 0.1318,
+   "retained_for_recall_0.999": 0.1382,
+   "retained_full_recall": 0.1382,
+   "root_cells": 3,
+   "worst_residual_rank_fractions": [
+    0.1381,
+    0.1378,
+    0.1361,
+    0.1356
+   ]
+  },
+  "sonic1": {
+   "cells": 8192,
+   "fixed": {
+    "budget": 0.65,
+    "c_outside_r": 0,
+    "positive_cells": 1204,
+    "retained_fraction": 0.65,
+    "strict_recall": true
+   },
+   "frf": 0.2137,
+   "positive_cells": 1204,
+   "positive_fraction": 0.147,
+   "positives_in_roots": 3,
+   "residual_frf": 0.2137,
+   "retained_for_recall_0.5": 0.0824,
+   "retained_for_recall_0.9": 0.1511,
+   "retained_for_recall_0.99": 0.187,
+   "retained_for_recall_0.999": 0.2095,
+   "retained_full_recall": 0.2137,
+   "root_cells": 3,
+   "worst_residual_rank_fractions": [
+    0.2137,
+    0.2095,
+    0.2089,
+    0.1927
+   ]
+  }
+ },
+ "sealed_success": false,
+ "weights_sha256": "6bee77726a93ad33504522c35b84aaa6d89ed3c5327ff5fae6bff1e9558a4f11"
+}
