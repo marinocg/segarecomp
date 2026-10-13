@@ -766,7 +766,7 @@ void App::run_script() {
                                                            {"dpad_left", SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {"dpad_right", SDL_GAMEPAD_BUTTON_DPAD_RIGHT}, {"start", SDL_GAMEPAD_BUTTON_START}, {"back", SDL_GAMEPAD_BUTTON_BACK}};
     for (const auto &b : buttons)
       if (name == b.first) SDL_SetJoystickVirtualButton(script_joy_, b.second, down);
-    script_wait_ = down ? 1 : 3;  // a press is one frame long: a longer hold would auto-repeat in real time
+    script_wait_ = down ? 2 : 3;  // a press is one frame long: a longer hold would auto-repeat in real time
   } else if (cmd == "expect") {
     const std::string key = arg.substr(0, arg.find('=')), value = arg.substr(arg.find('=') + 1);
     std::string actual;

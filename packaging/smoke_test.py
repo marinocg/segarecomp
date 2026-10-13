@@ -268,6 +268,15 @@ def main():
         build_log = (entry / "build.log").read_text(encoding="utf-8")
         require(f"cc={compiler}" in build_log, "build.log must show the bundled compiler was configured")
         require(hermetic_compile_lines(build_log, compiler), "every compile command must invoke the bundled compiler")
+        # SEG-058: the launcher's headless `--import` adds the ROM to the persistent library (a reference, never a copy), twice is a duplicate,
+        # and the build already made is adopted for the same identity.
+        imp = subprocess.run([str(launcher), "--import", str(rom)], env=env, text=True, capture_output=True, timeout=120)
+        require(imp.returncode == 0 and "import=added" in imp.stdout and digest in imp.stdout, f"--import must add the ROM: {imp.stdout} {imp.stderr}")
+        imp2 = subprocess.run([str(launcher), "--import", str(rom)], env=env, text=True, capture_output=True, timeout=120)
+        require("import=duplicate" in imp2.stdout, f"importing the same content again must be a duplicate: {imp2.stdout}")
+        catalog_file = next((tmp / "cache" / "library").glob("library.json"), None)
+        require(catalog_file is not None and digest in catalog_file.read_text(encoding="utf-8"), "library.json must record the game")
+        require(str(rom) in catalog_file.read_text(encoding="utf-8") and not list((tmp / "cache").rglob("synthetic.bin")), "the ROM is referenced by path and never copied into the cache")
         run_log = (entry / "run.log").read_text(encoding="utf-8")
         require("VIEWER_SUMMARY" in run_log and '"result":"stop"' in run_log and digest in run_log,
                 "the launched program must reach the synthetic checkpoint (sanitized stop report)")

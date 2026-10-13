@@ -121,7 +121,7 @@ int main(void) {
   SDL_Surface *a;
   int r, g, bl, x, y, ok, k = 1, dest_w_cache = 0;
   SvRect dest = {0, 0, 0, 0};
-  const char *tmp = SDL_getenv("TMPDIR") ? SDL_getenv("TMPDIR") : "/tmp";
+  const char *tmp = SDL_getenv("TMPDIR") ? SDL_getenv("TMPDIR") : (SDL_getenv("TEMP") ? SDL_getenv("TEMP") : "/tmp");
   (void)set_window; (void)fill_flat;
   snprintf(dir, sizeof dir, "%s/sv_host_test_%d", tmp, (int)SDL_GetTicks());
   SDL_CreateDirectory(dir);
