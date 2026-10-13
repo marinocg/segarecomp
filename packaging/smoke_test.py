@@ -281,7 +281,10 @@ def main():
         require(bad.returncode != 0 and "import=failed" in bad.stdout, f"an unsupported file must be refused: {bad.stdout}")
         catalog_file = next((tmp / "cache" / "library").glob("library.json"), None)
         require(catalog_file is not None and lib_digest in catalog_file.read_text(encoding="utf-8"), "library.json must record the game")
-        require(str(lib_rom) in catalog_file.read_text(encoding="utf-8") and not list((tmp / "cache").rglob("library-game.md")), "the ROM is referenced by path and never copied into the cache")
+        import json as _json
+        games = _json.loads(catalog_file.read_text(encoding="utf-8"))["games"]
+        require(any(pathlib.Path(p) == lib_rom for g in games for p in g["rom_paths"]) and not list((tmp / "cache").rglob("library-game.md")),
+                "the ROM is referenced by path and never copied into the cache")
         run_log = (entry / "run.log").read_text(encoding="utf-8")
         require("VIEWER_SUMMARY" in run_log and '"result":"stop"' in run_log and digest in run_log,
                 "the launched program must reach the synthetic checkpoint (sanitized stop report)")
