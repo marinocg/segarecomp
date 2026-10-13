@@ -33,7 +33,8 @@ set(SEGARECOMP_CI_TEST_COSTS
   sms_emission_budget_test=40 genesis_audio_artifact_test=39 segarecomp_build_command_test=34 genesis_audio_equivalence_test=20
   genesis_z80_build_pipeline_falsify_test=20 sms_machine_tests=19 cpu_z80_decode_tests=18 genesis_audio_ym_test=18 z80_control_stack_dispatch_test=17
   genesis_z80_images_test=16 m68k_batch_c_static_slice_test=16 genesis_z80_build_pipeline_prepare_test=10 sms_native_build_failclosed_test=9
-  sms_psg_differential_test=7 ci_shard_guard_test=1)  # RUN_SERIAL: sonic_startup_inventory_adapter_failure_test runs alone, so it occupies all four cores
+  sms_psg_differential_test=7 ci_shard_guard_test=1
+  launcher_input_diagnostics_test=25 launcher_sms_policy_test=20 launcher_gui_navigation_test=12)  # SDL3 viewer/launcher suites (only registered when SDL3 is enabled)  # RUN_SERIAL: sonic_startup_inventory_adapter_failure_test runs alone, so it occupies all four cores
 
 # The guard runs inside the shard it is assigned to (it only lists tests, so it is cheap) and must exist before the partition below.
 add_test(NAME ci_shard_guard_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/ci_shard_guard_test.py

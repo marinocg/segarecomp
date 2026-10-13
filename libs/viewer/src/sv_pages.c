@@ -108,16 +108,24 @@ static void build_controls(SvHost *h, SvPage *p) {
     item->kind = SV_ITEM_CHOICE; item->enabled = 1; item->id = I_PAD; item->min = 0; item->max = h->pad_count; item->value = current;
     sv_item_set_text(item, names[current]);
     sv_item_set_hint(item, "Choose which connected gamepad plays Player 1 (the next one plays Player 2).");
+  } else if (slot >= 0) {
+    /* the device and what has been PROVEN about it (never "connected" alone) */
+    SvDiagContext ctx;
+    char txt[56];
+    const SvDiagDevice *dev = NULL;
+    int k;
+    for (k = 0; k < sv_diag_count(h->diag); ++k) if (sv_diag_device(h->diag, k)->id == h->pads[slot].id) dev = sv_diag_device(h->diag, k);
+    ctx.settings = &h->settings; ctx.system = h->cfg.system; ctx.player = player; ctx.nav_checked = 0;
+    snprintf(txt, sizeof txt, "%.34s - %s", h->pads[slot].name, dev != NULL && sv_diag_state_of(h->diag, dev, &ctx) == SV_PAD_LIVE ? "input OK" : "press a button");
+    sv_item_set_text(item, txt);
+  } else if (h->pad_count > 0) {
+    sv_item_set_text(item, "Keyboard (no spare pad)");
   } else {
-    if (slot >= 0) sv_item_set_text(item, h->pads[slot].name);
-    else if (h->pad_count > 0) sv_item_set_text(item, "Keyboard (no spare pad)");
-    else {
-      char txt[48];
-      const SvPadState st = sv_diag_overall(h->diag, NULL);
-      if (sv_diag_count(h->diag) == 0) snprintf(txt, sizeof txt, "Keyboard (no controller seen)");
-      else snprintf(txt, sizeof txt, "Keyboard (controller: state %s)", sv_pad_state_code(st));
-      sv_item_set_text(item, txt);
-    }
+    char txt[48];
+    const SvPadState st = sv_diag_overall(h->diag, NULL);
+    if (sv_diag_count(h->diag) == 0) snprintf(txt, sizeof txt, "Keyboard (no controller seen)");
+    else snprintf(txt, sizeof txt, "Keyboard (controller: state %s)", sv_pad_state_code(st));
+    sv_item_set_text(item, txt);
   }
   item = sv_page_add(p, SV_ITEM_BUTTON, I_GO_PADSTATUS, "Controller status & test");
   if (item != NULL) { sv_item_set_icon(item, "controller"); sv_item_set_hint(item, "Shows what SDL sees (also controllers it cannot use), live buttons and the exact reason a pad does not work."); }
@@ -129,7 +137,8 @@ static void build_controls(SvHost *h, SvPage *p) {
     snprintf(item->label, sizeof item->label, "%s", label);
     sv_item_set_text(item, key_name(b->key[player][a]));
     sv_item_set_text2(item, slot >= 0 || b->pad[player][a] >= 0 ? pad_button_name(b->pad[player][a]) : "No pad");
-    sv_item_set_hint(item, "Left/Right: keyboard or gamepad column. Enter: press the new input. Backspace while listening clears it.");
+    sv_item_set_hint(item, a == SV_ACT_PAUSE ? "The console's own Pause button (a game input, never the menu). Left/Right: keyboard or gamepad column; Enter: press the new input."
+                                              : "Left/Right: keyboard or gamepad column. Enter: press the new input. Backspace while listening clears it.");
   }
   add_slider(p, I_DEADZONE, "Stick dead zone", h->settings.deadzone, 5, 60, 5, "%", "Analog stick travel ignored before a direction registers.");
   item = sv_page_add(p, SV_ITEM_BINDING, I_MENUKEY, "Menu key");

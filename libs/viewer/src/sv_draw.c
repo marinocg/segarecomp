@@ -246,12 +246,15 @@ static void draw_item(SvHost *h, const SvPage *page, int idx, int x, int y, int 
           const int tx = vx + t * (cell_w + 6 * u), on = focused && it->value == t;
           const char *txt = t == 0 ? it->text : it->text2;
           char buf[96];
+          /* binding capture: the cell being edited says so (and the footer counts down) */
+          const int capture = h->listen.kind != SV_LISTEN_NONE && ((it->id == I_MENUKEY && h->listen.kind == SV_LISTEN_MENU_KEY && t == 0) ||
+                              (it->id == I_BIND + (int)h->listen.action && ((h->listen.kind == SV_LISTEN_KEY && t == 0) || (h->listen.kind == SV_LISTEN_PAD && t == 1))));
           int tw2;
           if (t == 1 && it->text2[0] == '\0') break;
-          sv_ui_chamfer(h, tx, y + 2 * u, cell_w, row_h(u) - 6 * u, 2 * u, on ? K_SEL_EDGE : K_ROW_EDGE);
-          sv_ui_chamfer(h, tx + u, y + 3 * u, cell_w - 2 * u, row_h(u) - 8 * u, u, on ? K_SEL_SOFT : K_FIELD);
-          tw2 = ellipsized(txt, u, cell_w - 12 * u, buf, (int)sizeof buf, SV_FONT_BODY);
-          sv_ui_text(h, SV_FONT_BODY, u, tx + (cell_w - tw2) / 2, ty, on ? K_WHITE : K_TEXT2, buf);
+          sv_ui_chamfer(h, tx, y + 2 * u, cell_w, row_h(u) - 6 * u, 2 * u, capture ? K_WARN : (on ? K_SEL_EDGE : K_ROW_EDGE));
+          sv_ui_chamfer(h, tx + u, y + 3 * u, cell_w - 2 * u, row_h(u) - 8 * u, u, capture ? K_BANNER : (on ? K_SEL_SOFT : K_FIELD));
+          tw2 = ellipsized(capture ? "Press now..." : txt, u, cell_w - 12 * u, buf, (int)sizeof buf, SV_FONT_BODY);
+          sv_ui_text(h, SV_FONT_BODY, u, tx + (cell_w - tw2) / 2, ty, capture ? K_WARN : (on ? K_WHITE : K_TEXT2), buf);
         }
         break;
       }

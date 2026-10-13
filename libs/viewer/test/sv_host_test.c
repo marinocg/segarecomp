@@ -490,6 +490,62 @@ int main(void) {
     CHECK(ps.chosen == SV_CRT_ARCADE, "clicking a preset button selects that preset (it is a real control, not decoration)");
     sv_host_close(host);
   }
+  /* ---- two gamepads: controller order, the persisted Player 1 choice, hot-unplug of the preferred one ---- */
+  remove(settings_file);
+  {
+    SDL_VirtualJoystickDesc da, db;
+    SDL_JoystickID ida, idb;
+    SDL_Joystick *ja, *jb;
+    SvSample smp;
+    SDL_INIT_INTERFACE(&da); SDL_INIT_INTERFACE(&db);
+    da.type = db.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+    da.naxes = db.naxes = SDL_GAMEPAD_AXIS_COUNT; da.nbuttons = db.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+    da.name = "Fictional Pad A"; db.name = "Fictional Pad B";
+    da.vendor_id = 0x1111; da.product_id = 0x0001; db.vendor_id = 0x2222; db.product_id = 0x0002; /* distinct ids: SDL derives the gamepad name from the mapping */
+    ida = SDL_AttachVirtualJoystick(&da); idb = SDL_AttachVirtualJoystick(&db);
+    ja = SDL_OpenJoystick(ida); jb = SDL_OpenJoystick(idb);
+    CHECK(ida != 0 && idb != 0 && ja != NULL && jb != NULL, "two virtual gamepads attach");
+    host = open_host(SV_SYSTEM_GENESIS, settings_file, 0);
+    CHECK(host != NULL, "open with two controllers already connected");
+    if (host != NULL && ja != NULL && jb != NULL) {
+      SvSettings st;
+      sv_host_service(host, &smp);
+      SDL_SetJoystickVirtualButton(ja, SDL_GAMEPAD_BUTTON_SOUTH, true); SDL_UpdateJoysticks(); sv_host_service(host, &smp);
+      CHECK((smp.pad[0] & SV_ACTION_BIT(SV_ACT_BUTTON1)) && !(smp.pad[1] & SV_ACTION_BIT(SV_ACT_BUTTON1)), "without a preference the first connected pad is Player 1");
+      SDL_SetJoystickVirtualButton(ja, SDL_GAMEPAD_BUTTON_SOUTH, false); SDL_SetJoystickVirtualButton(jb, SDL_GAMEPAD_BUTTON_SOUTH, true); SDL_UpdateJoysticks(); sv_host_service(host, &smp);
+      CHECK((smp.pad[1] & SV_ACTION_BIT(SV_ACT_BUTTON1)) && !(smp.pad[0] & SV_ACTION_BIT(SV_ACT_BUTTON1)), "the second pad is Player 2 (truthful port wiring)");
+      SDL_SetJoystickVirtualButton(jb, SDL_GAMEPAD_BUTTON_SOUTH, false); SDL_UpdateJoysticks(); sv_host_service(host, &smp);
+      st = *sv_host_settings(host);
+      snprintf(st.pad_name, sizeof st.pad_name, "Fictional Pad B");
+      sv_host_apply_settings(host, &st);
+      SDL_SetJoystickVirtualButton(jb, SDL_GAMEPAD_BUTTON_SOUTH, true); SDL_UpdateJoysticks(); sv_host_service(host, &smp);
+      CHECK((smp.pad[0] & SV_ACTION_BIT(SV_ACT_BUTTON1)) && !(smp.pad[1] & SV_ACTION_BIT(SV_ACT_BUTTON1)), "the chosen device becomes Player 1 and the other one Player 2");
+      SDL_SetJoystickVirtualButton(jb, SDL_GAMEPAD_BUTTON_SOUTH, false); SDL_UpdateJoysticks(); sv_host_service(host, &smp);
+      sv_host_close(host);  /* SDL_Quit: the virtual pads vanish with it (their handles are stale from here on) */
+      ja = jb = NULL;
+      /* the choice is persisted: the same two pads plugged in again, then a restart */
+      ida = SDL_AttachVirtualJoystick(&da); idb = SDL_AttachVirtualJoystick(&db);
+      ja = SDL_OpenJoystick(ida); jb = SDL_OpenJoystick(idb);
+      host = open_host(SV_SYSTEM_GENESIS, settings_file, 0);
+      CHECK(host != NULL && ja != NULL && jb != NULL, "reopen with the pads connected");
+      if (host != NULL && ja != NULL && jb != NULL) {
+        sv_host_service(host, &smp);
+        CHECK(strcmp(sv_host_settings(host)->pad_name, "Fictional Pad B") == 0, "the Player 1 device choice persists across restarts");
+        SDL_SetJoystickVirtualButton(jb, SDL_GAMEPAD_BUTTON_SOUTH, true); SDL_UpdateJoysticks(); sv_host_service(host, &smp);
+        CHECK(smp.pad[0] & SV_ACTION_BIT(SV_ACT_BUTTON1), "after the restart the persisted device is Player 1 again");
+        /* unplug the preferred one while a button is held: it releases, Player 1 falls back to the remaining pad */
+        SDL_CloseJoystick(jb); jb = NULL;
+        SDL_DetachVirtualJoystick(idb);
+        idb = 0;
+        sv_host_service(host, &smp);
+        CHECK(!(smp.pad[0] & SV_ACTION_BIT(SV_ACT_BUTTON1)), "unplugging the pad releases what it was holding");
+        SDL_SetJoystickVirtualButton(ja, SDL_GAMEPAD_BUTTON_SOUTH, true); SDL_UpdateJoysticks(); sv_host_service(host, &smp);
+        CHECK(smp.pad[0] & SV_ACTION_BIT(SV_ACT_BUTTON1), "with the preferred pad gone Player 1 falls back to the remaining one");
+      }
+      if (host != NULL) sv_host_close(host);
+      host = NULL;
+    } else if (host != NULL) sv_host_close(host);
+  }
   free(frame);
   if (failures != 0) { printf("sv_host_test: %d failure(s)\n", failures); return 1; }
   printf("sv_host_test: ok\n");
