@@ -61,7 +61,7 @@ constexpr const char *exe = "";
 // A synthetic package: empty files where the launcher only checks existence, the product double as `bin/segarecomp`.
 fs::path make_package(const fs::path &root, const fs::path &fake_cli) {
   for (const char *file : {"toolchain/zig", "runtime/platforms/genesis/runtime/runtime.c", "runtime/platforms/genesis/viewer/viewer_sdl3.c",
-                           "runtime/platforms/master-system/viewer/sms_viewer_sdl3.c", "runtime/libs/viewer/src/sv_host.c", "sdl3/include/SDL3/SDL.h"}) {
+                           "runtime/platforms/master-system/viewer/sms_viewer_sdl3.c", "runtime/libs/viewer/src/sv_host.c", "runtime/libs/viewer/src/sv_input_diag.c", "sdl3/include/SDL3/SDL.h"}) {
     const fs::path path = root / (std::string(file) + (std::string(file) == "toolchain/zig" ? exe : ""));
     fs::create_directories(path.parent_path());
     std::ofstream(path) << "x";
