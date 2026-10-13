@@ -492,7 +492,6 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
   // The ordinary classification stays authoritative; the placeholder table only refines a start the ordinary one left unresolved.
   const bool has_invariant = std::ranges::any_of(images, [](const CodeImage* image) { return image->kind == ImageKind::invariant; });
   const std::vector<StartClassification> invariant_classes = has_invariant ? cpu::z80::classify_all(base_table) : std::vector<StartClassification>{};
-  const std::vector<StartClassification> placeholder_classes = has_invariant ? cpu::z80::classify_all(invariant_table) : std::vector<StartClassification>{};
   std::map<std::uint32_t, std::size_t> plan_of_invariant_address;  // (identity << 16 | address) -> plan index
   for (std::size_t n = 0; n < images.size(); ++n) {
     const CodeImage& image = *images[n];
@@ -505,8 +504,11 @@ EmitResult emit_image_set(const ImageSet& set, const EmitOptions& options) {
         const auto address = static_cast<std::uint16_t>(first.base + o);
         StartClassification c = invariant_classes[address];
         Plan plan;
-        if (c.kind == StartKind::unresolved_fetch_mapping && placeholder[c.blocking_address]) {
-          const StartClassification& candidate = placeholder_classes[address];
+        // Eligible only when the blocking byte is a placeholder within three bytes of the start (16-bit wrapping), so at most three
+        // prefix bytes precede it and the on-demand decode below does constant work per start.
+        if (c.kind == StartKind::unresolved_fetch_mapping && placeholder[c.blocking_address] &&
+            static_cast<std::uint16_t>(c.blocking_address - address) <= 3) {
+          const StartClassification candidate = cpu::z80::decode_at(invariant_table, static_cast<std::uint16_t>(address));
           // Bounded: at most four logical bytes are ever examined, so no shift or scan depends on a prefix-run length.
           const std::uint32_t length = candidate.instruction.provenance.logical_byte_count;
           if (candidate.kind == StartKind::decoded && length <= 4) {
