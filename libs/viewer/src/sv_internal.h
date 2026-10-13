@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 
 #include "sv_host.h"
+#include "sv_input_diag.h"
 #include "sv_layout.h"
 #include "sv_menu.h"
 
@@ -11,7 +12,6 @@
 
 typedef struct SvPadSlot {
   SDL_JoystickID id;
-  SDL_Gamepad *pad;
   char name[64];
   uint32_t buttons;
   uint32_t latched;            /* presses since the previous sample (a tap shorter than a sample still counts for Pause) */
@@ -43,6 +43,9 @@ struct SvHost {
   uint8_t key_held[512];
   uint8_t key_latch[512];
   SvPadSlot pads[SV_MAX_PADS];
+  SvDiagHid hid[SV_DIAG_MAX_HID];
+  int hid_count, hid_scanned;  /* the last on-demand OS-level Nintendo HID scan */
+  SvDiag *diag;                /* the one detection engine (shared with the launcher): owns the opened gamepads */
   int pad_count;
   int quit;
   int reset;

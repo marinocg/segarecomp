@@ -199,28 +199,39 @@ static void pad_slot_release(SvPadSlot *slot) {
 }
 
 static void pad_open(SvHost *h, SDL_JoystickID id) {
-  SDL_Gamepad *pad;
+  const SvDiagDevice *dev;
   int i;
   if (h->pad_count >= SV_MAX_PADS) return;
   for (i = 0; i < h->pad_count; ++i) if (h->pads[i].id == id) return;
-  pad = SDL_OpenGamepad(id);
-  if (pad == NULL) return;
+  dev = sv_diag_find(h->diag, id);
+  if (dev == NULL) { sv_diag_scan(h->diag); dev = sv_diag_find(h->diag, id); }
+  if (dev == NULL || !dev->open_ok || sv_diag_gamepad(h->diag, id) == NULL) return; /* the diagnostics recorded and logged why */
   memset(&h->pads[h->pad_count], 0, sizeof h->pads[0]);
   h->pads[h->pad_count].id = id;
-  h->pads[h->pad_count].pad = pad;
-  snprintf(h->pads[h->pad_count].name, sizeof h->pads[0].name, "%s", SDL_GetGamepadName(pad) != NULL ? SDL_GetGamepadName(pad) : "Gamepad");
+  snprintf(h->pads[h->pad_count].name, sizeof h->pads[0].name, "%s", dev->name[0] != '\0' ? dev->name : "Gamepad");
   h->pad_count++;
 }
 
-static void pad_close(SvHost *h, SDL_JoystickID id) {
+static void pad_close(SvHost *h, SDL_JoystickID id) { /* the diagnostics close the SDL handle when the device vanishes */
   int i;
   for (i = 0; i < h->pad_count; ++i) {
     if (h->pads[i].id != id) continue;
-    SDL_CloseGamepad(h->pads[i].pad);
     memmove(&h->pads[i], &h->pads[i + 1], (size_t)(h->pad_count - i - 1) * sizeof h->pads[0]);
     h->pad_count--;
     return;
   }
+}
+
+/* Tell the user right away about a controller that is present but unusable (the failure must be visible, never silent). */
+static void announce_pad_problem(SvHost *h, SDL_JoystickID id, int hot_plug) {
+  const SvDiagDevice *dev = sv_diag_find(h->diag, id);
+  char note[96];
+  if (dev == NULL) return;
+  if (!dev->is_gamepad) snprintf(note, sizeof note, "Controller \"%.28s\" is not a recognised gamepad (see Controls)", dev->name);
+  else if (!dev->open_ok) snprintf(note, sizeof note, "Controller \"%.28s\" could not be opened (see Controls)", dev->name);
+  else if (hot_plug) snprintf(note, sizeof note, "Controller connected: %.40s", dev->name);
+  else return;
+  sv_host_toast(h, note);
 }
 
 int sv_host_pad_assigned(const SvHost *h, int player) {
@@ -257,10 +268,11 @@ static void handle_pad_button(SvHost *h, SDL_JoystickID id, int button, int down
  * may also interpret (the held tables are already updated). */
 static void common_event(SvHost *h, const SDL_Event *e) {
   h->event_ts = e->common.timestamp;
+  sv_diag_event(h->diag, e); /* first: opens/closes the gamepads, counts the events */
   switch (e->type) {
     case SDL_EVENT_QUIT:
     case SDL_EVENT_WINDOW_CLOSE_REQUESTED: h->quit = 1; break;
-    case SDL_EVENT_WINDOW_FOCUS_LOST: sv_host_release_inputs(h); break; /* nothing stays "held" behind the user's back */
+    case SDL_EVENT_WINDOW_FOCUS_LOST: sv_host_release_inputs(h); sv_diag_release(h->diag); break; /* nothing stays "held" behind the user's back */
     case SDL_EVENT_WINDOW_RESIZED:
       if ((SDL_GetWindowFlags(h->window) & SDL_WINDOW_FULLSCREEN) == 0 && e->window.data1 > 0 && e->window.data2 > 0) {
         h->settings.video.window_w = e->window.data1;
@@ -268,7 +280,8 @@ static void common_event(SvHost *h, const SDL_Event *e) {
         sv_host_mark_dirty(h);
       }
       break;
-    case SDL_EVENT_GAMEPAD_ADDED: pad_open(h, e->gdevice.which); break;
+    case SDL_EVENT_JOYSTICK_ADDED: announce_pad_problem(h, e->jdevice.which, 0); break;
+    case SDL_EVENT_GAMEPAD_ADDED: pad_open(h, e->gdevice.which); announce_pad_problem(h, e->gdevice.which, 1); break;
     case SDL_EVENT_GAMEPAD_REMOVED: pad_close(h, e->gdevice.which); break;
     case SDL_EVENT_KEY_DOWN:
       if (e->key.scancode < 512) {
@@ -614,6 +627,24 @@ void sv_host_take_screenshot(SvHost *h) {
 
 /* ------------------------------------------------------------------------------------------------------------------ open / close */
 
+/* A user-supplied gamecontrollerdb.txt next to the viewer settings (or SEGARECOMP_GAMEPAD_MAPPINGS) lets a joystick SDL has no mapping for become an
+ * explicit gamepad. Nothing is shipped or guessed. */
+static void load_user_mappings(SvHost *h) {
+  const char *env = SDL_getenv("SEGARECOMP_GAMEPAD_MAPPINGS");
+  char path[1100];
+  (void)h;
+  if (env != NULL && *env != '\0') { (void)sv_diag_load_mapping_file(env); return; }
+  if (h->settings_path[0] != '\0') {
+    const char *slash = strrchr(h->settings_path, '/');
+    const size_t dir_len = slash != NULL ? (size_t)(slash - h->settings_path) : 0;
+    if (dir_len > 0 && dir_len < 1000) {
+      SDL_PathInfo info;
+      snprintf(path, sizeof path, "%.*s/gamecontrollerdb.txt", (int)dir_len, h->settings_path);
+      if (SDL_GetPathInfo(path, &info) && info.type == SDL_PATHTYPE_FILE) (void)sv_diag_load_mapping_file(path);
+    }
+  }
+}
+
 SvHost *sv_host_open(const SvHostConfig *cfg) {
   SvHost *h;
   int w, hh, count = 0, i;
@@ -626,9 +657,15 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
   sv_settings_defaults(&h->settings);
   resolve_settings_path(h);
   (void)sv_settings_load(&h->settings, h->settings_path);
+  h->diag = sv_diag_create();
+  if (h->diag == NULL) { free(h); return NULL; }
   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
-    if (!SDL_Init(SDL_INIT_VIDEO)) { free(h); return NULL; } /* no gamepad subsystem: keyboard only */
+    char why[160];
+    snprintf(why, sizeof why, "%s", SDL_GetError());
+    if (!SDL_Init(SDL_INIT_VIDEO)) { sv_diag_destroy(h->diag); free(h); return NULL; }
+    sv_diag_note_init(h->diag, 1, 0, why); /* no gamepad subsystem: keyboard only, and it is logged and shown in Controls */
   }
+  load_user_mappings(h);
   {
     const int scale = cfg->default_scale > 0 && cfg->default_scale <= 16 ? cfg->default_scale : 3;
     w = h->settings.video.window_w > 0 ? h->settings.video.window_w : cfg->picture_w * scale;
@@ -639,24 +676,26 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
     if (hh > usable.h * 9 / 10) { w = w * (usable.h * 9 / 10) / hh; hh = usable.h * 9 / 10; }
   }
   h->window = SDL_CreateWindow(cfg->title != NULL ? cfg->title : "Segarecomp", w, hh, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
-  if (h->window == NULL) { SDL_Quit(); free(h); return NULL; }
+  if (h->window == NULL) { sv_diag_destroy(h->diag); SDL_Quit(); free(h); return NULL; }
   SDL_SetWindowMinimumSize(h->window, cfg->picture_w / 2 > 160 ? cfg->picture_w / 2 : 160, cfg->picture_h / 2 > 120 ? cfg->picture_h / 2 : 120);
   h->renderer = SDL_CreateRenderer(h->window, NULL);
-  if (h->renderer == NULL) { SDL_DestroyWindow(h->window); SDL_Quit(); free(h); return NULL; }
+  if (h->renderer == NULL) { SDL_DestroyWindow(h->window); sv_diag_destroy(h->diag); SDL_Quit(); free(h); return NULL; }
   h->last_rgb = (uint8_t *)malloc((size_t)(cfg->max_w > 0 ? cfg->max_w : 320) * (size_t)(cfg->max_h > 0 ? cfg->max_h : 240) * 3u);
   if (h->last_rgb == NULL) { sv_host_close(h); return NULL; }
   sv_host_apply_video(h);
   h->session_start = SDL_GetTicks();
+  sv_diag_scan(h->diag);
   ids = SDL_GetGamepads(&count);
   if (ids != NULL) { for (i = 0; i < count; ++i) pad_open(h, ids[i]); SDL_free(ids); }
+  { int k; for (k = 0; k < sv_diag_count(h->diag); ++k) { const SvDiagDevice *dv = sv_diag_device(h->diag, k); if (dv != NULL && (!dv->is_gamepad || !dv->open_ok)) announce_pad_problem(h, dv->id, 0); } }
+  sv_diag_log_summary(h->diag, "viewer start");
   return h;
 }
 
 void sv_host_close(SvHost *h) {
-  int i;
   if (h == NULL) return;
   save_settings_if_dirty(h);
-  for (i = 0; i < h->pad_count; ++i) SDL_CloseGamepad(h->pads[i].pad);
+  sv_diag_destroy(h->diag);
   if (h->frame_tex != NULL) SDL_DestroyTexture(h->frame_tex);
   if (h->rt != NULL) SDL_DestroyTexture(h->rt);
   if (h->scan_tex != NULL) SDL_DestroyTexture(h->scan_tex);

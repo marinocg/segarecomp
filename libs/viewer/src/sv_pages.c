@@ -7,14 +7,14 @@
 #include "sv_internal.h"
 
 enum {
-  PAGE_MAIN = 1, PAGE_QUICK, PAGE_VIDEO, PAGE_CONTROLS, PAGE_AUDIO, PAGE_SYSTEM, PAGE_CONFIRM_QUIT, PAGE_CONFIRM_RESET, PAGE_CONFIRM_VIDEO, PAGE_CONFIRM_CONTROLS
+  PAGE_MAIN = 1, PAGE_QUICK, PAGE_VIDEO, PAGE_CONTROLS, PAGE_AUDIO, PAGE_SYSTEM, PAGE_PADSTATUS, PAGE_CONFIRM_QUIT, PAGE_CONFIRM_RESET, PAGE_CONFIRM_VIDEO, PAGE_CONFIRM_CONTROLS
 };
 enum {
   I_RESUME = 1, I_GO_QUICK, I_GO_VIDEO, I_GO_CONTROLS, I_GO_AUDIO, I_GO_SYSTEM, I_QUIT,
   I_FULLSCREEN, I_SCALE, I_ASPECT, I_PRESET, I_VSYNC, I_FPS, I_SCANLINES, I_MASK, I_CURVE, I_BLOOM, I_BRIGHT, I_VIDEO_DEFAULTS,
   I_VOLUME, I_MUTE, I_AUDIO_NOTE,
   I_SHOT, I_RESET, I_INFO,
-  I_PLAYER, I_PAD, I_PAD_ASSIGNED, I_DEADZONE, I_MENUKEY, I_CTRL_DEFAULTS,
+  I_PLAYER, I_PAD, I_PAD_ASSIGNED, I_DEADZONE, I_MENUKEY, I_CTRL_DEFAULTS, I_GO_PADSTATUS, I_PAD_RESCAN, I_PAD_HID,
   I_YES, I_NO,
   I_BIND = 100 /* + action (one row per action: keyboard and gamepad columns) */
 };
@@ -25,10 +25,8 @@ static const SDL_Color c_text = {220, 232, 255, 255}, c_text2 = {169, 183, 221, 
 /* ---- naming ---- */
 
 static const char *pad_button_name(int b) {
-  static const char *const names[] = {"South", "East", "West", "North", "Back", "Guide", "Start", "L-Stick", "R-Stick", "L-Shoulder", "R-Shoulder",
-                                      "DPad Up", "DPad Down", "DPad Left", "DPad Right"};
   if (b < 0) return "Unbound";
-  return b < (int)(sizeof names / sizeof names[0]) ? names[b] : "Button";
+  return sv_pad_position_name(b);
 }
 
 static const char *key_name(int sc) {
@@ -133,8 +131,18 @@ static void build_controls(SvHost *h, SvPage *p) {
     sv_item_set_text(item, names[current]);
     sv_item_set_hint(item, "Choose which connected gamepad plays Player 1 (the next one plays Player 2).");
   } else {
-    sv_item_set_text(item, slot >= 0 ? h->pads[slot].name : (h->pad_count == 0 ? "Keyboard (no gamepad)" : "Keyboard (no spare pad)"));
+    if (slot >= 0) sv_item_set_text(item, h->pads[slot].name);
+    else if (h->pad_count > 0) sv_item_set_text(item, "Keyboard (no spare pad)");
+    else {
+      char txt[48];
+      const SvPadState st = sv_diag_overall(h->diag, NULL);
+      if (sv_diag_count(h->diag) == 0) snprintf(txt, sizeof txt, "Keyboard (no controller seen)");
+      else snprintf(txt, sizeof txt, "Keyboard (controller: state %s)", sv_pad_state_code(st));
+      sv_item_set_text(item, txt);
+    }
   }
+  item = sv_page_add(p, SV_ITEM_BUTTON, I_GO_PADSTATUS, "Controller status & test");
+  if (item != NULL) { sv_item_set_icon(item, "controller"); sv_item_set_hint(item, "Shows what SDL sees (also controllers it cannot use), live buttons and the exact reason a pad does not work."); }
   for (a = 0; a < SV_ACT_COUNT; ++a) {
     char label[24];
     if (!sv_action_available(h->cfg.system, player, (SvAction)a)) continue;
@@ -150,6 +158,88 @@ static void build_controls(SvHost *h, SvPage *p) {
   if (item != NULL) { sv_item_set_text(item, key_name(h->settings.menu_key)); sv_item_set_text2(item, "Back"); sv_item_set_hint(item, "Opens this menu. Esc and the gamepad Back button always work as fallbacks."); }
   item = sv_page_add(p, SV_ITEM_BUTTON, I_CTRL_DEFAULTS, "Restore defaults");
   if (item != NULL) sv_item_set_icon(item, "reset");
+}
+
+static void add_section(SvPage *p, const char *title);
+static void add_note(SvPage *p, const char *text);
+
+static SvItem *status_row(SvPage *p, const char *label, const char *text) {
+  SvItem *i = sv_page_add(p, SV_ITEM_LABEL, I_INFO, label);
+  if (i != NULL) sv_item_set_text(i, text);
+  return i;
+}
+
+static const char *conn_name(int c) {
+  switch (c) {
+    case SDL_JOYSTICK_CONNECTION_WIRED: return "wired (USB)";
+    case SDL_JOYSTICK_CONNECTION_WIRELESS: return "wireless";
+    case SV_DIAG_NOT_OPENED: return "not opened";
+    default: return "unknown";
+  }
+}
+
+static void build_padstatus(SvHost *h, SvPage *p) {
+  SvDiagContext ctx;
+  SvPadState overall;
+  char buf[96];
+  int i, b;
+  SvItem *item;
+  ctx.settings = &h->settings; ctx.system = h->cfg.system; ctx.player = h->bind_player; ctx.nav_checked = 0;
+  overall = sv_diag_overall(h->diag, &ctx);
+  add_section(p, "Controller status");
+  snprintf(buf, sizeof buf, "[%s] %s", sv_pad_state_code(overall), sv_pad_state_title(overall));
+  item = status_row(p, "State", buf);
+  add_note(p, sv_pad_state_advice(overall));
+  sv_diag_sdl_version(buf, sizeof buf);
+  status_row(p, "SDL", buf);
+  if (!sv_diag_gamepad_subsystem_ok(h->diag)) {
+    snprintf(buf, sizeof buf, "FAILED: %.80s", sv_diag_gamepad_init_error(h->diag)[0] != '\0' ? sv_diag_gamepad_init_error(h->diag) : "no SDL error text");
+    item = status_row(p, "Gamepad subsystem", buf);
+  }
+  if (sv_diag_count(h->diag) == 0) status_row(p, "Devices", "none");
+  for (i = 0; i < sv_diag_count(h->diag) && i < 2; ++i) {
+    const SvDiagDevice *d = sv_diag_device(h->diag, i);
+    const SvPadState st = sv_diag_state_of(h->diag, d, &ctx);
+    char held[96] = "";
+    add_section(p, d->name);
+    snprintf(buf, sizeof buf, "[%s] %s", sv_pad_state_code(st), d->is_gamepad ? (d->open_ok ? "gamepad, open" : "gamepad, OPEN FAILED") : "raw joystick (no mapping)");
+    status_row(p, "State", buf);
+    snprintf(buf, sizeof buf, "%04x:%04x  %s", d->vendor, d->product, conn_name(d->connection));
+    status_row(p, "VID:PID / link", buf);
+    snprintf(buf, sizeof buf, "%.32s", d->guid);
+    status_row(p, "GUID", buf);
+    if (d->open_error[0] != '\0') { snprintf(buf, sizeof buf, "%.46s", d->open_error); status_row(p, "SDL error", buf); }
+    snprintf(buf, sizeof buf, "%lu event(s)%s", d->is_gamepad ? d->events : d->raw_events, d->is_gamepad ? "" : " (raw)");
+    status_row(p, "Input", buf);
+    for (b = 0; b < 21; ++b) {
+      if (!((d->buttons >> (unsigned)b) & 1u)) continue;
+      if (strlen(held) + 20u < sizeof held) {
+        const char *nl = sv_pad_nintendo_label(b);
+        snprintf(held + strlen(held), sizeof held - strlen(held), "%s%s", held[0] != '\0' ? ", " : "", sv_pad_position_name(b));
+        if (nl != NULL && strlen(held) + 6u < sizeof held) snprintf(held + strlen(held), sizeof held - strlen(held), "(%s)", nl);
+      }
+    }
+    status_row(p, "Pressed now", held[0] != '\0' ? held : "(nothing: press a button)");
+    snprintf(buf, sizeof buf, "x %+d%%  y %+d%%", d->axis[SDL_GAMEPAD_AXIS_LEFTX] * 100 / 32767, d->axis[SDL_GAMEPAD_AXIS_LEFTY] * 100 / 32767);
+    status_row(p, "Left stick", buf);
+  }
+  add_section(p, "Menu button");
+  add_note(p, "The pause menu opens with Back (Select, Nintendo -) or Guide (Home), or Esc. Start (Nintendo +) is a game button: Genesis Start / Master System Pause. "
+              "Positions are SDL's: South/East are Nintendo B/A.");
+  item = sv_page_add(p, SV_ITEM_BUTTON, I_PAD_RESCAN, "Rescan controllers");
+  if (item != NULL) sv_item_set_icon(item, "reset");
+  item = sv_page_add(p, SV_ITEM_BUTTON, I_PAD_HID, "Scan OS devices (Nintendo)");
+  if (item != NULL) sv_item_set_hint(item, "Read-only: lists Nintendo HID devices the OS exposes (USB or Bluetooth), even ones SDL does not offer.");
+  for (i = 0; i < h->hid_count && i < 4; ++i) {
+    const SvDiagHid *hd = &h->hid[i];
+    snprintf(buf, sizeof buf, "%04x:%04x %s %s%s", hd->vendor, hd->product, hd->bus == 1 ? "USB" : (hd->bus == 2 ? "Bluetooth" : "bus ?"), hd->family[0] != '\0' ? hd->family : hd->product_string,
+             hd->matched_joystick ? " (seen by SDL)" : " (NOT a joystick in SDL)");
+    status_row(p, "OS device", buf);
+  }
+  if (h->hid_scanned) {
+    if (h->hid_count < 0) status_row(p, "OS scan", "failed");
+    else if (h->hid_count == 0) status_row(p, "OS scan", "no Nintendo HID device found");
+  }
 }
 
 static void add_section(SvPage *p, const char *title) {
@@ -243,6 +333,7 @@ void sv_pages_rebuild(SvHost *h) {
     case PAGE_QUICK: build_video_core(h, p, 0); break;
     case PAGE_VIDEO: build_video_core(h, p, 1); break;
     case PAGE_CONTROLS: build_controls(h, p); break;
+    case PAGE_PADSTATUS: build_padstatus(h, p); break;
     case PAGE_AUDIO: build_audio(h, p); break;
     case PAGE_SYSTEM: build_system(h, p); break;
     case PAGE_CONFIRM_QUIT:
@@ -391,6 +482,15 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
       case I_GO_QUICK: open_page(h, PAGE_QUICK, "QUICK SETTINGS"); return;
       case I_GO_VIDEO: open_page(h, PAGE_VIDEO, "VIDEO & DISPLAY SETTINGS"); return;
       case I_GO_CONTROLS: open_page(h, PAGE_CONTROLS, "CONTROLS"); return;
+      case I_GO_PADSTATUS: open_page(h, PAGE_PADSTATUS, "CONTROLLER STATUS"); return;
+      case I_PAD_RESCAN: sv_diag_scan(h->diag); sv_host_toast(h, "Rescanned controllers"); return;
+      case I_PAD_HID: {
+        char err[96];
+        h->hid_count = sv_diag_hid_scan(h->diag, h->hid, SV_DIAG_MAX_HID, err, sizeof err);
+        h->hid_scanned = 1;
+        if (h->hid_count < 0) sv_host_toast(h, err[0] != '\0' ? err : "OS device scan failed");
+        return;
+      }
       case I_GO_AUDIO: open_page(h, PAGE_AUDIO, "AUDIO"); return;
       case I_GO_SYSTEM: open_page(h, PAGE_SYSTEM, "SYSTEM / DIAGNOSTICS"); return;
       case I_QUIT: open_page(h, PAGE_CONFIRM_QUIT, SDL_getenv("SEGARECOMP_LAUNCHED") != NULL ? "Return to Launcher?" : "Quit the game?"); return;

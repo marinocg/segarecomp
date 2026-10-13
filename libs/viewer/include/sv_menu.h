@@ -25,7 +25,7 @@ typedef struct SvItem {
   char text[48];        /* value text shown at the right (choice name, binding, label text) */
   char text2[32];       /* binding rows: the gamepad column (text is the keyboard column); `value` is the focused column 0/1 */
   char icon[16];        /* optional icon name (assets/ui/icon-<name>.png) */
-  char hint[112];       /* one-line explanation shown while focused (always filled for a disabled item) */
+  char hint[300];       /* explanation shown while focused (always filled for a disabled item); notes use it as their body text */
 } SvItem;
 
 typedef struct SvPage {
