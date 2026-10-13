@@ -25,7 +25,7 @@ target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 
 # The launcher's non-UI core (layout, cache identity, `segarecomp build` orchestration, status reading) is a separate target so its
 # policy/cache-identity contract is unit-testable without a window.
-add_library(segarecomp_launcher_core STATIC launcher_core.cpp json_lite.cpp library_catalog.cpp storage.cpp)
+add_library(segarecomp_launcher_core STATIC launcher_core.cpp json_lite.cpp library_catalog.cpp storage.cpp launcher_settings.cpp)
 target_include_directories(segarecomp_launcher_core PUBLIC .)
 target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media)
 # Linux only: the glibc the generated programs link against (release default 2.35 = the bundled SDL3's baseline; a developer who built SDL3 on a
@@ -37,11 +37,19 @@ target_compile_definitions(segarecomp_launcher_core PUBLIC
   SEGARECOMP_ZIG_GLIBC="${SEGARECOMP_ZIG_GLIBC}")
 segarecomp_enable_warnings(segarecomp_launcher_core)
 
-add_executable(segarecomp-launcher WIN32 pixel_assets.cpp main.cpp)
-target_include_directories(segarecomp-launcher SYSTEM PRIVATE ${_stb_dir})
-target_link_libraries(segarecomp-launcher PRIVATE segarecomp_imgui segarecomp_launcher_core segarecomp::media)
-target_compile_definitions(segarecomp-launcher PRIVATE
+# Image loading (the launcher's pixel-art assets and user-chosen covers) and the cover/Libretro naming helpers; no window needed.
+add_library(segarecomp_launcher_ui_support STATIC pixel_assets.cpp covers.cpp)
+target_include_directories(segarecomp_launcher_ui_support SYSTEM PRIVATE ${_stb_dir})
+target_include_directories(segarecomp_launcher_ui_support PUBLIC .)
+target_link_libraries(segarecomp_launcher_ui_support PUBLIC SDL3::SDL3)
+target_compile_features(segarecomp_launcher_ui_support PUBLIC cxx_std_20)
+target_compile_definitions(segarecomp_launcher_ui_support PUBLIC
   SEGARECOMP_LAUNCHER_SOURCE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+segarecomp_enable_warnings(segarecomp_launcher_ui_support)
+
+add_executable(segarecomp-launcher WIN32 main.cpp app.cpp app_screens.cpp app_pages.cpp ui_kit.cpp)
+target_include_directories(segarecomp-launcher SYSTEM PRIVATE ${_stb_dir})
+target_link_libraries(segarecomp-launcher PRIVATE segarecomp_imgui segarecomp_launcher_core segarecomp_launcher_ui_support segarecomp::viewer_core segarecomp::media)
 set_target_properties(segarecomp-launcher PROPERTIES OUTPUT_NAME Segarecomp)
 segarecomp_enable_warnings(segarecomp-launcher)
 
@@ -82,6 +90,15 @@ if(BUILD_TESTING)
   add_test(NAME launcher_sms_policy_test COMMAND launcher_sms_policy_test $<TARGET_FILE:segarecomp>
     ${PROJECT_SOURCE_DIR}/platforms/master-system/runtime/sms_machine.h $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
   set_property(TEST launcher_sms_policy_test APPEND PROPERTY LABELS full fast)
+endif()
+
+# SEG-058: covers, Libretro candidate naming and launcher settings.
+add_executable(launcher_ui_support_test launcher_ui_support_test.cpp)
+target_link_libraries(launcher_ui_support_test PRIVATE segarecomp_launcher_core segarecomp_launcher_ui_support)
+segarecomp_enable_warnings(launcher_ui_support_test)
+if(BUILD_TESTING)
+  add_test(NAME launcher_ui_support_test COMMAND launcher_ui_support_test)
+  set_property(TEST launcher_ui_support_test APPEND PROPERTY LABELS full fast)
 endif()
 
 # SEG-058: the persistent library catalog (no window, no product CLI).

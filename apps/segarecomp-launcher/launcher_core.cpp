@@ -217,6 +217,13 @@ std::string launch_refusal(const RomView &rom) {
 void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
   // Always written for Genesis (also for USA) so an inherited SEGARECOMP_GENESIS_REGION can never override the visible selection.
   if (rom.supports_region()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GENESIS_REGION", rom.region.c_str(), true);
+  // The shared viewer (libs/viewer): where its persistent settings live, that it was started by the launcher (the menu says "Return to
+  // Launcher"), and the identity shown in its System page. None of this reaches the guest; it is host presentation only.
+  SDL_SetEnvironmentVariable(environment, "SEGARECOMP_LAUNCHED", "1", true);
+  const std::string viewer_settings = utf8(library_root() / "viewer-settings.cfg");
+  SDL_SetEnvironmentVariable(environment, "SEGARECOMP_VIEWER_SETTINGS", viewer_settings.c_str(), true);
+  if (rom.sha256.size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ROM_SHA256", rom.sha256.c_str(), true);
+  if (!rom.title.empty()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GAME_TITLE", rom.title.c_str(), true);
 }
 
 RomView inspect_rom_file(const fs::path &path, const Layout &layout) {
