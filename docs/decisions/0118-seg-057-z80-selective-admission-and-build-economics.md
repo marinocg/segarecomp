@@ -117,7 +117,7 @@ Inference producer cost (bounded, offline, no training or labels; recovered D512
 | Gate | Result |
 | --- | --- |
 | E1 wall >= 20% (worse of dist:65, clus:65) | PASS: 32.4% (128), 36.1% (256), 36.0% (512) synthetic; conservative (best broad vs worst selective repeat) 31.4%, 35.4%, 35.6% |
-| E2 CPU <= 1.00x | PASS: 0.64-0.66x at 65%, linear in the admitted count |
+| E2 CPU <= 1.00x | PASS: 0.63-0.66x at 65%, linear in the admitted count |
 | E3 generated C <= 0.80x | PASS: 0.654-0.661x (fine:65 0.675x) |
 | E4 peak per-compiler RSS <= 1.10x | PASS: 0.90x / 0.97x / 0.93x (worst shape; fine:65 at 128 KiB is 1.00x) |
 | E5 executable <= 1.00x | PASS: 0.67x at 65% |

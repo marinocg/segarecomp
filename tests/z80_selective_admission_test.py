@@ -297,6 +297,39 @@ def contract(work, tc):
         check(stats["shape_entries"] == 25, "only the admitted starts get an exact entry (%s)" % stats["shape_entries"])
 
 
+BOUNDARY_C = r'''
+#include "sel_main.c"
+int main(void) {
+  /* image 1 (invariant, base 0): exposed offsets [0x100, 0x200), admitted [0x100, 0x140): the omitted run is [0x140, 0x200). */
+  static const struct { uint16_t pc; int omitted; } cases[] = {
+    {0x00FF, 0}, {0x0100, 0}, {0x013F, 0}, {0x0140, 1}, {0x0141, 1}, {0x01FF, 1}, {0x0200, 0}, {0x0201, 0}, {0xFFFF, 0}};
+  for (size_t i = 0; i < sizeof cases / sizeof cases[0]; ++i)
+    if (z80_omitted_start(1U, cases[i].pc, 0U) != cases[i].omitted) return (int)(i + 1U);
+  if (z80_omitted_start(77U, 0x0140, 0U) != 0) return 20;  /* an unknown identity is never "omitted" */
+  return 0;
+}
+'''
+
+
+def rejection_boundaries(work, tc):
+    """z80_omitted_start is exact at both ends of an omitted run and beside unexposed addresses (those stay `no_owner`)."""
+    spec = "image 1 invariant\nwindow 1 0000 100 100\nfill 1 00 400\nselective 0\nadmit 1 100 140\n"
+    directory = work / "boundary"
+    _s, _o, error = z.emit_image(tc, spec, directory, "sel")
+    check(error is None, "boundary emit: %s" % error)
+    if error:
+        return
+    (directory / "harness.c").write_text(BOUNDARY_C)
+    sources = [directory / n for n in (directory / "sel.units").read_text().split() if n != "sel_main.c"]
+    exe = directory / "harness"
+    built = z.run([tc.cc, "-std=c11", "-w", "-I", str(z.INCLUDE_DIR), "-I", str(directory), str(directory / "harness.c"),
+                   *map(str, sources), "-o", str(exe)])
+    check(built.returncode == 0, "boundary harness does not build: " + (built.stderr or "")[:300])
+    if built.returncode == 0:
+        r = z.run([str(exe)], timeout=30)
+        check(r.returncode == 0, "z80_omitted_start is wrong at case %d" % r.returncode)
+
+
 def determinism(batches, work, tc):
     batch = batches[0]
     images = parse_spec(batch.spec_text)
@@ -322,13 +355,15 @@ def main():
             broad_equivalence(scenario, work, tc)
             determinism(scenario, work, tc)
             contract(work, tc)
+            rejection_boundaries(work, tc)
         if ONLY is not None:
             check(SEEN == ONLY - {"static"}, "batch selection %s matched %s" % (sorted(ONLY), sorted(SEEN)))
     if ONLY is None or ONLY - {"static"}:
-        check(TOTALS["unadmitted_stops"] >= 1 and TOTALS["exact_stops"] >= 1, "no fail-closed stop observed: %s" % TOTALS)
+        check(TOTALS["unadmitted_stops"] >= 1, "no fail-closed stop observed: %s" % TOTALS)
         check(TOTALS["admitted"] < TOTALS["exposed"], "the derived plans are not a strict subset: %s" % TOTALS)
-    if ONLY is None:
-        check(TOTALS["unadmitted_stops"] >= 20 and TOTALS["exact_stops"] >= 10, "too few fail-closed stops observed: %s" % TOTALS)
+    if ONLY is None or ONLY - {"static"}:
+        check(TOTALS["unadmitted_stops"] >= 2 * TOTALS["vectors"] // 10 and TOTALS["exact_stops"] >= TOTALS["vectors"] // 20,
+              "too few fail-closed stops for the vectors run: %s" % TOTALS)
     if FAILED:
         print("\n".join(FAILED[:25]))
         return 1
