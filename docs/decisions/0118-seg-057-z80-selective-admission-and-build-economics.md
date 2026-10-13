@@ -1,6 +1,6 @@
 # ADR 0118: SEG-057 Z80 selective-admission contract and measured build economics
 
-- Status: Accepted. Contract and economics protocol **frozen** in product commit `75379a7` (before any SEG-057 timing was taken). Final classification: **`Z80_SELECTIVE_AOT_FEASIBLE_AND_ECONOMIC`** (with one recorded noise-rule deviation, below). Native CNN inference is now economically worth building; SMS Optimized mode is **not** enabled and execution completeness is **not** established.
+- Status: Accepted. Contract and economics protocol **frozen** in product commit `75379a7` (before any SEG-057 timing was taken). **Formal protocol classification: `Z80_SELECTIVE_ECONOMICS_INCONCLUSIVE`** (gate E7 is inconclusive under the registered noise rule; see "Classification"). **Engineering assessment: the structural contract is sound and the measured savings (30-37% of full build wall at the 65% budget) are practically large**, so a bounded native-inference experiment is justified. SMS Optimized mode is not enabled by this ADR and execution completeness is **not** established.
 - Related: ADR 0058/0071/0073 (Z80 broad immutable-image AOT, owners, shared bodies), 0116/0117 (SEG-051/SEG-056 ML experiments, frozen history, not reopened), 0108 (economics reference `generated C <= 0.80x`, `CPU <= 1.00x`).
 
 ## Context
@@ -122,10 +122,10 @@ Inference producer cost (bounded, offline, no training or labels; recovered D512
 | E4 peak per-compiler RSS <= 1.10x | PASS: 0.90x / 0.97x / 0.93x (worst shape; fine:65 at 128 KiB is 1.00x) |
 | E5 executable <= 1.00x | PASS: 0.67x at 65% |
 | E6 runtime | PASS: digest identical, run wall +2% |
-| E7 real-image confirmation | PASS on reduction: 512 KiB 36.9% / 35.1%; 128 KiB 31.6% / 31.9% (set 1) and 30.0% / 32.2% (set 2). **Noise-rule deviation, below** |
-| Noise | Literal rule satisfied everywhere except the real 128 KiB confirmation (see below) |
+| E7 real-image confirmation | **INCONCLUSIVE under the registered noise rule.** Primary (registered, 3-repeat) set: reductions 36.9% / 35.1% (512 KiB, noise rule satisfied) and 31.6% / 31.9% (128 KiB, noise rule NOT satisfied: spread 6.1% vs half-gap 5.8%). The supplementary 128 KiB set (30.0% / 32.2%) was added after seeing the primary set, is not pre-registered, and does not retroactively satisfy the gate |
+| Noise | Literal rule satisfied everywhere except the real 128 KiB confirmation, which makes E7 (and therefore the all-gates classification) inconclusive |
 
-**Recorded deviation.** The frozen sub-rule (spread <= half of the gap to 20%) flagged the real 128 KiB cells: set 1 broad spread 6.1% against a half-gap of 5.8%; supplementary set 2 (three more repeats, declared after seeing set 1, same host) `dist:65` spread 6.1% against 5.0%, caused by one slower first repeat. Neither set changes the sign or the size of the effect: the smallest single-repeat comparison anywhere (best broad repeat versus worst selective repeat) is 26% at 128 KiB real, more than six points above the threshold, and every other cell, including the real 512 KiB image and all synthetic cells, satisfies the literal rule. The classification therefore does not rest on that sub-rule, but the flag is recorded rather than redefined. A reader who insists on the literal rule should read the real 128 KiB confirmation as "flagged, far from the threshold".
+**Noise-rule finding (not a waiver).** The frozen sub-rule (spread <= half of the gap to 20%) flagged the real 128 KiB cells: set 1 broad spread 6.1% against a half-gap of 5.8%; supplementary set 2 (three more repeats, declared after seeing set 1, same host) `dist:65` spread 6.1% against 5.0%, caused by one slower first repeat. Neither set changes the sign or the size of the effect: the smallest single-repeat comparison anywhere (best broad repeat versus worst selective repeat) is 26% at 128 KiB real, more than six points above the threshold, and every other cell, including the real 512 KiB image and all synthetic cells, satisfies the literal rule. The registered gate is nevertheless not satisfied: no threshold, rule or repeat has been changed, and the supplementary set is reported as unregistered supporting data. The effect is practically large and far from the threshold, which supports the engineering assessment but does not convert the formal result.
 
 ### Findings that qualify the headline
 
@@ -145,7 +145,9 @@ Inference producer cost (bounded, offline, no training or labels; recovered D512
 
 ### Classification
 
-**`Z80_SELECTIVE_AOT_FEASIBLE_AND_ECONOMIC`.** The structural contract is sound and tested (the emission contains exactly the admitted starts and fails closed on the others); actual native build savings are 31-37% of full build wall at the 65% budget on every size, far above the 20% threshold and without memory, size or runtime regressions. This does **not** mean SMS Optimized mode can be enabled.
+**Formal (registered taxonomy): `Z80_SELECTIVE_ECONOMICS_INCONCLUSIVE`.** `Z80_SELECTIVE_AOT_FEASIBLE_AND_ECONOMIC` required E1-E7 to pass, and E7 (real 128 KiB confirmation) is inconclusive under the registered noise rule. E1-E6 passed, as did E7 at 512 KiB.
+
+**Engineering assessment (not a protocol label).** The structural contract is sound and tested (the emission contains exactly the admitted starts and fails closed on the others), and the measured savings are 30-37% of full build wall at the 65% budget on every size, synthetic and real, without memory, size or runtime regressions; the smallest single-repeat comparison anywhere is 26%. That is ample practical justification for a bounded native-inference experiment. It does **not** mean SMS Optimized mode is safe or complete.
 
 ## What is still required before an SMS CNN Optimized mode
 
