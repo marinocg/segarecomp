@@ -186,6 +186,30 @@ def main():
         bad_ctl = execute(exe, "--cycle-budget", "200000", "--write", "FFFC=10")
         check(bad_ctl["sms_error"] == "SMS_ERROR_CONTROL_BIT_UNSUPPORTED", "unsupported $FFFC bit: %r" % bad_ctl)
 
+        # --- an invariant-window instruction whose operand lies in the slot-0 bank (Mickey Mouse / Wonder Boy III idiom) -----------
+        # `ld a,n` at 0x03FF: the opcode is in the fixed first 1 KiB, the immediate is the first byte of the slot-0 bank, so it must be
+        # read from whichever bank slot 0 maps when the instruction begins (never a typed unresolved_fetch_mapping stop).
+        patched = bytearray(crossing.read_bytes())
+        patched[0x3FF] = 0x3E
+        for bank, operand in ((0, 0x5A), (2, 0xA5)):
+            base = bank * 0x4000 + 0x400
+            patched[base:base + 5] = bytes([operand, 0x32, 0xF0, 0xC2, 0x76])  # operand; ld (0xC2F0),a ; halt
+        patched_path = tmp / "straddle_invariant.sms"
+        patched_path.write_bytes(bytes(patched))
+        s_out = tmp / "straddle_gen"
+        rs = emit(patched_path, s_out, "sms", "--mapper", "sega", "--list")
+        check(rs.returncode == 0, "invariant straddle emission: " + (rs.stdout + rs.stderr)[:300])
+        if rs.returncode == 0:
+            owner_3ff = [l.split() for l in rs.stdout.splitlines() if l.startswith("owner ") and l.split()[1] == "1" and int(l.split()[2], 16) == 0x3FF]
+            check(owner_3ff and owner_3ff[0][3] == "full", "an invariant start with a banked operand is a full owner: %r" % owner_3ff)
+            s_exe, error = compile_program(s_out, "sms")
+            check(s_exe is not None, "invariant straddle image did not compile as strict C11: %s" % error)
+            if s_exe is not None:
+                for label, extra, want in (("slot 0 = bank 0", [], 0x5A), ("slot 0 = bank 2", ["--write", "FFFD=2"], 0xA5)):
+                    r_s = execute(s_exe, "--cycle-budget", "200000", "--pc", "03FF", *extra)
+                    check(r_s["outcome"] == "halted" and r_s.get("ram", b"\0" * 256)[0xF0] == want,
+                          "invariant straddle, %s: expected operand %02X, got %r" % (label, want, r_s.get("ram", b"\0" * 256)[0xF0:0xF1].hex() + " " + r_s["outcome"]))
+
         # --- rom_only through the same route ----------------------------------------------------------------------
         t_out = tmp / "trivial_gen"
         rt = emit(trivial, t_out, "sms", "--manifest", str(trivial_manifest))
