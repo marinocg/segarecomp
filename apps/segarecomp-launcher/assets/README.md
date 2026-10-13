@@ -19,3 +19,5 @@ generated C or committed as generated/binary launcher state.
 has none) are original textures authored for the SEG-058 launcher overhaul in the palette of the launcher's own source constants
 (`#08142F` panel, `#233E78` border, `#1557C9` primary, ...). They contain no commercial art. Buttons, panels and bevels are drawn in code with the same
 colors; only icons and the placeholder are loaded from files. Text is always dynamic (Silkscreen).
+
+The launcher draws titles and section headings with Silkscreen Bold and body text with Dear ImGui's embedded scalable face (`AddFontDefaultVector`); no other font file ships.

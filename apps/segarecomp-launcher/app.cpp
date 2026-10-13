@@ -838,7 +838,10 @@ int App::run() {
       if (SDL_getenv("SEGARECOMP_SHOT_BUILD")) { while (status_pending_) { poll_status_refresh(); SDL_Delay(5); } start_build(entry.id()); }
     }
   }
-  if (shot_page_ == "storage") go(Page::storage);
+  if (shot_page_ == "storage" || shot_page_ == "storage-modal") {
+    go(Page::storage);
+    if (const auto vis = visible_entries(); shot_page_ == "storage-modal" || SDL_getenv("SEGARECOMP_SHOT_SELECT")) for (std::size_t i = 0; i < vis.size() && i < 2; ++i) storage_selected_.insert(vis[i]->id());
+  }
   else if (shot_page_ == "import") go(Page::import_page);
   else if (shot_page_.rfind("settings", 0) == 0) { settings_tab_ = shot_page_.size() > 8 ? std::atoi(shot_page_.c_str() + 8) : 0; go(Page::settings); }
   else if (shot_page_.rfind("details:", 0) == 0) {
@@ -867,6 +870,12 @@ int App::run() {
       } else ++it;
     }
     run_script();
+    if (shot_page_ == "storage-modal" && report_valid_ && !scanning_ && modal_.kind == Modal::Kind::none && !shot_modal_done_) {  // review aid: the confirmation sheet of a real plan
+      shot_modal_done_ = true;
+      modal_.kind = Modal::Kind::plan;
+      modal_.title = "Remove build intermediates?";
+      modal_.plan = plan_intermediates(report_, std::vector<std::string>(storage_selected_.begin(), storage_selected_.end()), busy_);
+    }
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();

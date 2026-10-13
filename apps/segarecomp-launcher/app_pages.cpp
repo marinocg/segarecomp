@@ -630,7 +630,7 @@ void App::draw_storage(float w, float h) {
     if (!act.enabled) ImGui::BeginDisabled();
     const bool pressed = ui::nav_button("##a", ImVec2(aw, ah));
     if (!act.enabled) ImGui::EndDisabled();
-    const bool hov = ImGui::IsItemHovered() && act.enabled, foc = ImGui::IsItemFocused();
+    const bool hov = ImGui::IsItemHovered() && act.enabled, foc = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
     ImGui::PopID();
     const ImVec2 b(a.x + aw, a.y + ah);
     const bool danger = act.style == Style::danger;
@@ -664,7 +664,7 @@ void App::draw_settings(float full_w, float h) {
       ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + static_cast<float>(i) * ctx_.u(40.0F)));
       ImGui::PushID(i);
       const bool pressed = ui::nav_button("##tab", ImVec2(tabs_w, ctx_.u(34.0F)));
-      const bool hov = ImGui::IsItemHovered(), foc = ImGui::IsItemFocused(), on = settings_tab_ == i;
+      const bool hov = ImGui::IsItemHovered(), foc = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible, on = settings_tab_ == i;
       ImGui::PopID();
       const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
       dl->AddRectFilled(a, b, on ? rgba(52, 128, 238) : (hov ? col::panel_hover : rgba(10, 24, 56)), ctx_.u(5.0F));

@@ -115,3 +115,25 @@ and (Genesis) `SEGARECOMP_GENESIS_REGION`. Unchanged: `SEGARECOMP_VIEWER_UNTHROT
 (not features): `SEGARECOMP_SHOT=<file.bmp>` with `SEGARECOMP_SHOT_PAGE` (`library|list|details:<n>|import|storage|settings<tab>`) and `SEGARECOMP_SHOT_SIZE=WxH`;
 the Master System/Genesis review hooks (`SEGARECOMP_SHOT_ROM`, `..._POLICY`, `..._MODEL`, `..._REGION`, `SEGARECOMP_GUI_AUTOPLAY`, `SEGARECOMP_GUI_TRACE`) behave as before.
 `tools/launcher_ui_fixture.py` builds the fictional fixture library used for the screenshots.
+
+## Screenshots (fictional fixtures)
+
+All images are rendered from fictional, project-authored data: synthetic ROMs built through the packaged launcher (`tools/launcher_ui_fixture.py`), procedurally drawn covers, and a synthetic picture for the viewer (`libs/viewer/test/sv_gallery.c`). No commercial ROM, cover or screenshot is involved. The statuses, sizes and paths in them are real measurements of that fixture; "last played" times are set by the fixture script.
+
+| Launcher | |
+|---|---|
+| Library home (grid) | `screenshots/launcher/01_library_home.png` |
+| Library (list) / select mode | `02_library_list.png`, `12_library_select.png` |
+| Game details | `03_game_details.png` |
+| Import ROMs | `04_import.png` |
+| Storage management / cleanup confirmation | `06_storage.png`, `05_storage_cleanup_dialog.png` |
+| Settings tabs | `07_settings_library.png` ... `11_settings_about.png` |
+
+| In-game viewer (Genesis; Master System in `viewer-sms/`) | |
+|---|---|
+| Gameplay, pause menu, quick settings | `screenshots/viewer-genesis/01_gameplay.png`, `02_pause_menu.png`, `03_quick_settings.png` |
+| Video & display with live preview, controls, audio, system, quit confirmation | `04_video_display.png`, `05_controls.png`, `06_audio.png`, `07_system.png`, `08_quit_confirmation.png` |
+| CRT presets on the same picture | `crt_pixel_perfect.png`, `crt_soft.png`, `crt_classic.png`, `crt_arcade.png` |
+| Toast | `09_toast.png` |
+
+The viewer menu uses SDL's built-in 8x8 pixel font (the per-game C build has no font rasterizer); the launcher uses the embedded scalable face for text and the repository's Silkscreen Bold for titles.

@@ -232,6 +232,7 @@ private:
   SDL_JoystickID script_pad_ = 0;
   SDL_Joystick *script_joy_ = nullptr;
   std::vector<std::pair<int, int>> script_key_up_;  // (frame, scancode) key releases to deliver
+  bool shot_modal_done_ = false;
   bool nav_reset_ = true;  // put keyboard/gamepad focus on the active sidebar entry (start-up and page changes)
   std::string focus_label_;  // the sidebar entry holding keyboard/gamepad focus (script `expect focus=`)
   void run_script();

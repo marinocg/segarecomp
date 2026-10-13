@@ -204,7 +204,7 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     if (!enabled) ImGui::BeginDisabled();
     const bool pressed = ui::nav_button("##nav", size);
     if (!enabled) ImGui::EndDisabled();
-    const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused();
+    const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
     if (active && nav_reset_) ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());  // keyboard/gamepad focus starts on the current page's entry
     if (focused) focus_label_ = item.label;
     ImGui::PopID();
@@ -282,7 +282,7 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   ImGui::PushID(entry.id().c_str());
   ImGui::SetNextItemAllowOverlap();
   const bool pressed = ui::nav_button("##card", ImVec2(w, h));
-  const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused();
+  const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
   const ImVec2 a(x, y), b(x + w, y + h);
   card(ctx_, dl, a, b, selected || focused, hovered);
   const float pad = ctx_.u(8.0F);
@@ -353,7 +353,7 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   ImGui::PushID(entry.id().c_str());
   ImGui::SetNextItemAllowOverlap();
   const bool pressed = ui::nav_button("##row", ImVec2(w, h));
-  const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused();
+  const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
   const ImVec2 b(a.x + w, a.y + h);
   card(ctx_, dl, a, b, selected || focused, hovered);
   const float pad = ctx_.u(7.0F), th = h - 2 * pad, tw = th * 0.9F;
@@ -389,6 +389,7 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   }
   ImGui::PopID();
   ImGui::SetCursorScreenPos(ImVec2(a.x, b.y + ctx_.u(5.0F)));
+  ImGui::Dummy(ImVec2(w, 1));
   if (pressed) {
     if (select_mode_) { if (selected) selected_.erase(entry.id()); else selected_.insert(entry.id()); }
     else open_details(entry.id());
