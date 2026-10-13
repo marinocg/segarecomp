@@ -812,6 +812,7 @@ int App::run() {
     for (std::string line; std::getline(in, line);)
       if (!line.empty() && line[0] != '#') script_.push_back(line);
     script_wait_ = 10;
+    ImGui::GetIO().KeyRepeatDelay = 30.0F;  // a scripted press is frame-counted: never let real elapsed time auto-repeat it on a slow runner
   }
   if (const char *shot = SDL_getenv("SEGARECOMP_SHOT")) shot_path_ = shot;
   if (const char *page = SDL_getenv("SEGARECOMP_SHOT_PAGE")) shot_page_ = page;
