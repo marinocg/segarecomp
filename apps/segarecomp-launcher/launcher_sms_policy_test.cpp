@@ -325,6 +325,100 @@ int main(int argc, char **argv) {
     expect(rc == 2 && line_count(builds) == 0, "h) a Genesis model name is refused for Master System before any build");
   }
 
+  // ---- end to end: the real window loop (SDL dummy video driver, automated Play, state trace) ----
+#if defined(__linux__)
+  {
+    const fs::path package = dir / "pkg";  // the package of the headless section (product double installed)
+    const fs::path rom_path = dir / "synthetic.sms";
+    {  // the mapper is declared by a sidecar manifest, exactly as a user would
+      const std::string sha = [&] {
+        std::ostringstream hex;
+        const auto view = inspect_rom_file(rom_path, locate_layout());
+        return view.sha256;
+      }();
+      std::ofstream(dir / "synthetic.mapper.json") << "{\"mapper\":\"sega\",\"sha256\":\"" << sha << "\"}";
+    }
+    set_env("SDL_VIDEODRIVER", "dummy");
+    set_env("SDL_RENDER_DRIVER", "software");
+    set_env("SEGARECOMP_HOME", package.string());
+    set_env("FAKE_GAME_BIN", fake_game.string());
+    int scenario = 0;
+    const auto gui = [&](const std::string &policy, std::map<std::string, std::string> env_overrides, const char *cache_name, bool fresh) {
+      ++scenario;
+      const fs::path cache = dir / cache_name;
+      if (fresh) { fs::remove_all(cache); fs::create_directories(cache); fs::remove(dir / (std::string(cache_name) + "-builds.txt")); }
+      set_env("SEGARECOMP_CACHE_DIR", cache.string());
+      set_env("FAKE_BUILD_LOG", (dir / (std::string(cache_name) + "-builds.txt")).string());
+      for (const char *name : {"FAKE_SMS_OPTIMIZED", "FAKE_OPT_EXIT", "FAKE_COMPAT_EXIT", "FAKE_BUILD_FAIL", "FAKE_OPT_FALLBACK", "SEGARECOMP_SHOT_POLICY"}) set_env(name, "");
+      for (const auto &[name, value] : env_overrides) set_env(name.c_str(), value);
+      if (!policy.empty()) set_env("SEGARECOMP_SHOT_POLICY", policy);
+      const fs::path trace = dir / ("gui-trace" + std::to_string(scenario) + ".txt");
+      set_env("SEGARECOMP_SHOT_ROM", rom_path.string());
+      set_env("SEGARECOMP_GUI_AUTOPLAY", "1");
+      set_env("SEGARECOMP_GUI_TRACE", trace.string());
+      const std::string command = "timeout 120 \"" + launcher_exe.string() + "\" > /dev/null 2>&1";
+      const int status = std::system(command.c_str());
+      std::vector<std::string> lines;
+      std::istringstream in(read_file(trace));
+      for (std::string line; std::getline(in, line);) lines.push_back(line);
+      expect(status == 0, "gui scenario " + std::to_string(scenario) + ": the window process must exit normally");
+      return lines;
+    };
+    const auto has = [](const std::vector<std::string> &lines, const std::string &prefix) {
+      for (const auto &line : lines) if (line.rfind(prefix, 0) == 0) return true;
+      return false;
+    };
+    const auto index_of = [](const std::vector<std::string> &lines, const std::string &prefix) {
+      for (std::size_t i = 0; i < lines.size(); ++i) if (lines[i].rfind(prefix, 0) == 0) return static_cast<int>(i);
+      return -1;
+    };
+    const auto builds_of = [&](const char *cache_name) { return line_count(dir / (std::string(cache_name) + "-builds.txt")); };
+
+    // G1: Compatibility is the default for a Master System ROM, even though the product offers Optimized
+    auto g = gui("", {}, "gcache_1", true);
+    expect(has(g, "run=started mode=compatibility restarted=0") && has(g, "final=ready mode=compatibility restarted=0") && !has(g, "restart="), "G1: default is Compatibility");
+    // G2: explicit Optimized, uncached then cached
+    g = gui("optimized", {}, "gcache_2", true);
+    expect(has(g, "autoplay=build mode=optimized") && has(g, "run=started mode=optimized restarted=0") && has(g, "final=ready mode=optimized restarted=0 entry_requested=optimized") && !has(g, "restart="),
+           "G2: Optimized builds and runs");
+    expect(builds_of("gcache_2") == 1, "G2: one Optimized build");
+    g = gui("optimized", {}, "gcache_2", false);
+    expect(!has(g, "autoplay=build") && has(g, "run=started mode=optimized") && builds_of("gcache_2") == 1, "G2: a cached Optimized entry is reused (no build)");
+    // G3: the typed stop: visible notice, Compatibility build, restart from reset, once
+    g = gui("optimized", {{"FAKE_OPT_EXIT", "7"}}, "gcache_3", true);
+    expect(index_of(g, "run=exited code=7 mode=optimized") >= 0 && index_of(g, "restart=compatibility notice=Optimized stopped") > index_of(g, "run=exited code=7 mode=optimized") &&
+               index_of(g, "build=started mode=compatibility") > index_of(g, "restart=compatibility") && index_of(g, "run=started mode=compatibility restarted=1") > index_of(g, "build=started mode=compatibility") &&
+               has(g, "run=exited code=0 mode=compatibility") && has(g, "final=ready mode=compatibility restarted=1"),
+           "G3: unadmitted_pc -> notice -> Compatibility build -> restart");
+    expect(builds_of("gcache_3") == 2, "G3: one Optimized and one Compatibility build");
+    int restarts = 0;
+    for (const auto &line : g) restarts += line.rfind("restart=", 0) == 0 ? 1 : 0;
+    expect(restarts == 1, "G3: exactly one restart");
+    g = gui("optimized", {{"FAKE_OPT_EXIT", "7"}}, "gcache_3", false);
+    expect(has(g, "restart=compatibility") && !has(g, "build=started") && builds_of("gcache_3") == 2, "G3: a matching Compatibility build is reused on the next fallback");
+    // G4: the Compatibility build fails: the real failure, no loop
+    g = gui("optimized", {{"FAKE_OPT_EXIT", "7"}, {"FAKE_BUILD_FAIL", "compatibility"}}, "gcache_4", true);
+    expect(has(g, "restart=compatibility") && has(g, "build=failed restart_pending=1 message=The fake build failed") && has(g, "final=failed") && builds_of("gcache_4") == 2,
+           "G4: a failing Compatibility build is shown once, never retried");
+    // G5: other runtime errors do not restart
+    g = gui("optimized", {{"FAKE_OPT_EXIT", "3"}}, "gcache_5", true);
+    expect(has(g, "run=exited code=3 mode=optimized") && has(g, "state=failed") && !has(g, "restart=") && builds_of("gcache_5") == 1, "G5: another guest error is a failure, not a restart");
+    g = gui("optimized", {{"FAKE_OPT_EXIT", "139"}}, "gcache_5", false);
+    expect(has(g, "run=exited code=139") && !has(g, "restart="), "G5: a crash status is not a restart");
+    g = gui("", {{"FAKE_COMPAT_EXIT", "7"}}, "gcache_5b", true);
+    expect(has(g, "run=exited code=7 mode=compatibility") && has(g, "state=failed") && !has(g, "restart="), "G5: status 7 from a Compatibility program is not a restart");
+    // G6: unavailable Optimized is not offered: a request for it is not honoured
+    g = gui("optimized", {{"FAKE_SMS_OPTIMIZED", "0"}}, "gcache_6", true);
+    expect(has(g, "autoplay=build mode=compatibility") && !has(g, "mode=optimized") && builds_of("gcache_6") == 1 && read_file(dir / "gcache_6-builds.txt") == "compatibility\n",
+           "G6: Optimized is not offered when the product does not provide it");
+    // G7: returning to Compatibility and reopening with another policy never collides
+    g = gui("", {}, "gcache_7", true);
+    g = gui("optimized", {}, "gcache_7", false);
+    g = gui("", {}, "gcache_7", false);
+    expect(builds_of("gcache_7") == 2 && has(g, "run=started mode=compatibility") && !has(g, "autoplay=build"), "G7: one build per policy, Compatibility reused after Optimized");
+  }
+#endif
+
   fs::remove_all(dir);
   if (failures != 0) return 1;
   std::cout << "launcher_sms_policy_test: ok\n";

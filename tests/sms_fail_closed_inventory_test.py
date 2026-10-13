@@ -33,6 +33,7 @@ SOURCES = {
     "sms_machine_scheduler_test": "sms_machine_scheduler_test.py",
     "sms_vdp_tests": "sms_vdp_test.cpp",
     "sms_psg_native_test": "sms_psg_native_test.py",
+    "sms_optimized_policy_test_runtime": "sms_optimized_policy_test.py",
 }
 
 SMS_ERRORS = {  # SmsError -> (ctest, hermetic evidence)
@@ -62,8 +63,9 @@ Z80_ERRORS = {
                                                    "the SMS acknowledge byte is always $FF (RST 38h); IM0/IM1/IM2 accepted in the runtime test"),
     "Z80_ERROR_CODE_MISMATCH": ("unreachable", "z80_live_guard_test", "code_mismatch",
                                 "only RAM-backed images (Genesis sound RAM, SEG-032) emit the guard; every SMS image is immutable"),
-    "Z80_ERROR_UNADMITTED_PC": ("unreachable", "z80_selective_admission_test", "unadmitted_pc",
-                                "only emitted with an explicit selective admission plan (SEG-057); the SMS build never supplies one"),
+    "Z80_ERROR_UNADMITTED_PC": ("tested", "sms_optimized_policy_test_runtime", "unadmitted_pc",
+                                "SEG-057: emitted only when an explicit admission plan (the experimental Optimized policy) omits a start; the generated program exits "
+                                "with the dedicated status 7 and a structured z80_outcome line"),
 }
 
 

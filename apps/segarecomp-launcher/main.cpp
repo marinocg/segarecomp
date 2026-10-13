@@ -492,6 +492,15 @@ int gui() {
   // The Optimized -> Compatibility restart (one-shot per Play): the visible notice, and a pending automatic start of the Compatibility program.
   std::string restart_notice;
   bool restart_pending = false, restarted_this_play = false;
+  // Review/automation aids (like SEGARECOMP_SHOT_*): SEGARECOMP_GUI_AUTOPLAY=1 presses Play once the selected game is Ready and quits when the run
+  // (including a Compatibility restart) is over; SEGARECOMP_GUI_TRACE=<file> appends one `key=value` line per window state change, so the real
+  // window state machine can be tested without a display server. Neither is a user feature.
+  const bool gui_autoplay = SDL_getenv("SEGARECOMP_GUI_AUTOPLAY") != nullptr;
+  bool autoplay_pending = gui_autoplay, autoplay_started = false;
+  const char *gui_trace_path = SDL_getenv("SEGARECOMP_GUI_TRACE");
+  const auto trace = [&](const std::string &line) {
+    if (gui_trace_path) std::ofstream(gui_trace_path, std::ios::app) << line << '\n';
+  };
   bool discovery_choice = false;    // advanced H-interrupt alias discovery (default off)
   std::string model_choice = "v1";  // experimental opt-in of Optimized ("gen2"); v1 is the default
   std::string observed_region;  // z80.observed_region of the Ready entry (build-time Z80 observation); see region_coverage_note
@@ -582,21 +591,23 @@ int gui() {
     if (force) { std::error_code ec; fs::remove_all(entry, ec); }
     job = std::make_unique<BuildJob>(rom, layout);
     state = State::Building;
+    trace(std::string("build=started mode=") + rom.aot_policy);
   };
   // Starts the native program of the Ready entry (a new process, so always from reset).
   const auto launch_game = [&] {
     if (const std::string refusal = launch_refusal(rom); !refusal.empty()) { failure = refusal; diagnostics = refusal; state = State::Failed; return; }
     game = std::make_unique<GameRun>(rom, layout, entry);
-    if (game->started()) state = State::Running;
+    if (game->started()) { state = State::Running; trace(std::string("run=started mode=") + rom.aot_policy + " restarted=" + (restarted_this_play ? "1" : "0")); }
     else { failure = "The game could not be started."; diagnostics = failure; game.reset(); state = State::Failed; }
   };
   const auto browse = [&] {
     static const SDL_DialogFileFilter filters[] = {{"Genesis / Mega Drive ROMs", "md;bin;gen;smd"}, {"Master System ROMs", "sms"}, {"All files", "*"}};
     SDL_ShowOpenFileDialog(dialog_callback, &pending, window, filters, 3, nullptr, false);
   };
-  if (const char *shot_policy = SDL_getenv("SEGARECOMP_SHOT_POLICY"); shot_policy && std::string(shot_policy) == "optimized") policy_choice = "optimized";  // review aid
+  if (const char *shot_policy = SDL_getenv("SEGARECOMP_SHOT_POLICY"); shot_policy && std::string(shot_policy) == "optimized") policy_choice = sms_policy_choice = "optimized";  // review aid
   if (const char *shot_model = SDL_getenv("SEGARECOMP_SHOT_MODEL"); shot_model && std::string(shot_model) == "gen2") model_choice = "gen2";  // review aid
   if (const char *preselect = SDL_getenv("SEGARECOMP_SHOT_ROM")) {  // review aid, see maybe_save_screenshot
+    if (sms_probe.valid()) sms_optimized_available = sms_probe.get();  // the availability probe must have answered before the ROM is inspected
     select_rom(preselect);
     if (SDL_getenv("SEGARECOMP_SHOT_BUILD") && state == State::RomSelected) start_build(false);
     if (SDL_getenv("SEGARECOMP_SHOT_READY") && state == State::RomSelected) state = State::Ready;  // review aid: the Ready layout without a build
@@ -655,6 +666,7 @@ int gui() {
         failure = job->message();
         diagnostics = (restart_pending ? restart_notice + "\nThe Compatibility build then failed:\n" : std::string()) +
                       read_tail(entry.parent_path() / (entry.filename().string() + ".failed") / "build.log", 24000);
+        trace(std::string("build=failed restart_pending=") + (restart_pending ? "1" : "0") + " message=" + failure);
         restart_pending = false;  // never retried automatically: the real failure is shown
         state = State::Failed;
       }
@@ -664,10 +676,12 @@ int gui() {
       const int exit_code = game->exit_code();
       const RestartDecision next = decide_after_exit(rom, exit_code, restarted_this_play);
       game.reset();
+      trace("run=exited code=" + std::to_string(exit_code) + " mode=" + rom.aot_policy);
       if (exit_code == 0) state = State::Ready;
       else if (next.restart) {
         // The typed unadmitted_pc stop of an Optimized program: tell the user, switch to Compatibility, and restart from reset (once).
         restart_notice = next.notice;
+        trace("restart=compatibility notice=" + next.notice);
         restarted_this_play = true;
         rom = next.next;
         chosen_policy() = "compatibility";
@@ -679,7 +693,25 @@ int gui() {
       } else {
         failure = "The game stopped unexpectedly.";
         diagnostics = read_tail(entry / "run.log", 24000);
+        trace("state=failed reason=game_stopped_unexpectedly");
         state = State::Failed;
+      }
+    }
+    // Automation: press Play once when the selected game is Ready; quit when the run is over.
+    if (gui_autoplay && !resolving) {
+      if (autoplay_pending && state == State::Ready) {
+        autoplay_pending = false;
+        autoplay_started = true;
+        trace(std::string("autoplay=press mode=") + rom.aot_policy);
+        launch_game();
+      } else if (autoplay_pending && state == State::RomSelected && rom.error.empty() && !rom.needs_mapper() && rom.supported_platform) {
+        trace(std::string("autoplay=build mode=") + rom.aot_policy);
+        start_build(false);  // the "Recompile & Play" press for a game with no matching build
+      } else if (autoplay_started && !restart_pending && (state == State::Ready || state == State::Failed)) {
+        trace(std::string("final=") + (state == State::Ready ? "ready" : "failed") + " mode=" + rom.aot_policy + " restarted=" + (restarted_this_play ? "1" : "0") +
+              " entry_requested=" + policy_report.requested);
+        autoplay_started = false;  // reported once
+        SDL_Event quit; quit.type = SDL_EVENT_QUIT; SDL_PushEvent(&quit);
       }
     }
 

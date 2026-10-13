@@ -1409,12 +1409,30 @@ target_link_libraries(sms_admission_emit PRIVATE segarecomp::machine_master_syst
 segarecomp_enable_warnings(sms_admission_emit)
 
 # SEG-057-T002 (ADR 0119): the native SMS Z80 D512HP proposal producer (hermetic: synthetic inputs and a committed synthetic PyTorch reference).
+if(UNIX)
+  # Measurement CLI for the native producer (inference time / peak memory); not a test, not shipped.
+  add_executable(sms_ml_infer_bench tools/sms_ml_infer_bench.cpp)
+  target_link_libraries(sms_ml_infer_bench PRIVATE segarecomp::machine_master_system)
+  segarecomp_enable_warnings(sms_ml_infer_bench)
+endif()
 add_executable(sms_ml_region_z80_test sms_ml_region_z80_test.cpp)
 target_link_libraries(sms_ml_region_z80_test PRIVATE segarecomp::machine_master_system)
 segarecomp_enable_warnings(sms_ml_region_z80_test)
 add_test(NAME sms_ml_region_z80_test COMMAND sms_ml_region_z80_test
   ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sms-ml-z80/parity.smsmlp ${PROJECT_SOURCE_DIR}/tools/segarecomp_ml_region_z80_gen2.weights.sgz80w)
 set_property(TEST sms_ml_region_z80_test APPEND PROPERTY LABELS full fast)
+
+# SEG-057-T002 (ADR 0119): the experimental Optimized policy through the real CLI and real generated programs (two disjoint groups).
+add_test(NAME sms_optimized_policy_test_cli COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_optimized_policy_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  $<TARGET_FILE:sms_admission_emit> cli)
+add_test(NAME sms_optimized_policy_test_runtime COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/sms_optimized_policy_test.py $<TARGET_FILE:segarecomp> ${CMAKE_C_COMPILER} ${PROJECT_SOURCE_DIR}
+  $<TARGET_FILE:sms_admission_emit> runtime)
+set(_sms_optimized_tests sms_optimized_policy_test_cli sms_optimized_policy_test_runtime)
+set_property(TEST ${_sms_optimized_tests} APPEND PROPERTY LABELS full)
+set_property(TEST ${_sms_optimized_tests} APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+set_property(TEST ${_sms_optimized_tests} PROPERTY TIMEOUT 3600)
 
 add_executable(sms_machine_tests sms_machine_test.cpp)
 target_link_libraries(sms_machine_tests PRIVATE segarecomp::machine_master_system segarecomp::runtime_master_system)
