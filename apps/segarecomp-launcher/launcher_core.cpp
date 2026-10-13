@@ -260,7 +260,11 @@ std::string platform_key(const RomView &rom, const Layout *layout_for_key) {
     // of the key: a different request or a changed shipped model can never select the same entry.
     return "genesis:aot=optimized:model=" + rom.aot_model + ":pid=" + (layout_for_key != nullptr ? product_policy_identity(*layout_for_key, "optimized", rom.aot_model) : std::string()) + discovery;
   }
-  return std::string("master-system:") + sms_profile + ":mapper=" + rom.mapper + ":manifest=" + rom.mapper_manifest_sha256;
+  // SEG-057-T002: an Optimized Master System build never shares an entry with a Compatibility one, and the product-provided policy identity (which
+  // binds the model, rank policy, schema and admission contract) keys it, so a changed shipped model selects a fresh entry.
+  const std::string base = std::string("master-system:") + sms_profile + ":mapper=" + rom.mapper + ":manifest=" + rom.mapper_manifest_sha256;
+  if (!rom.optimized()) return base;
+  return base + ":aot=optimized:pid=" + (layout_for_key != nullptr ? rom_policy_identity(*layout_for_key, rom) : std::string());
 }
 
 fs::path entry_dir(const RomView &rom, const Layout &layout) {
@@ -353,6 +357,7 @@ std::string policy_summary(const PolicyReport &report) {
   if (report.fallback) return "Optimized unavailable for this game: built Compatibility";
   if (report.effective == "admission_plan") return "Optimized build (exact map)";
   if (report.effective == "ml_region_gen2") return "Optimized build (experimental model)";
+  if (report.effective == "ml_region_z80") return "Optimized build (experimental CNN)";
   return "Optimized build";
 }
 
@@ -381,15 +386,16 @@ std::string product_policy_identity_memo_lookup(const std::string &key) {
   return found == identity_memo().end() ? std::string() : found->second;
 }
 
-std::string product_policy_identity(const Layout &layout, const std::string &policy, const std::string &model) {
-  const std::string key = utf8(layout.cli) + "|" + policy + "|" + model;
+std::string product_policy_identity(const Layout &layout, const std::string &policy, const std::string &model, const std::string &platform) {
+  const std::string key = utf8(layout.cli) + "|" + policy + "|" + model + (platform == "genesis" ? std::string() : "|" + platform);
   if (const std::string known = product_policy_identity_memo_lookup(key); !known.empty()) return known;
   std::string identity;
   std::error_code ec;
   if (fs::is_regular_file(layout.cli, ec)) {
     const std::string exe = utf8(layout.cli);
     std::vector<const char *> argv{exe.c_str(), "aot-policy-identity", "--aot-policy", policy.c_str()};
-    if (policy == "optimized") { argv.push_back("--aot-model"); argv.push_back(model.c_str()); }
+    if (platform != "genesis") { argv.push_back("--platform"); argv.push_back(platform.c_str()); }
+    if (policy == "optimized" && platform == "genesis") { argv.push_back("--aot-model"); argv.push_back(model.c_str()); }
     argv.push_back(nullptr);
     SDL_PropertiesID props = SDL_CreateProperties();
     SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, argv.data());
@@ -431,20 +437,58 @@ std::string product_policy_identity(const Layout &layout, const std::string &pol
   return identity;
 }
 
-std::string product_policy_identity_cached(const Layout &layout, const std::string &policy, const std::string &model) {
+std::string product_policy_identity_cached(const Layout &layout, const std::string &policy, const std::string &model, const std::string &platform) {
   // Same memo as product_policy_identity, but never starts the tool: safe to call every frame on the UI thread.
-  return product_policy_identity_memo_lookup(utf8(layout.cli) + "|" + policy + "|" + model);
+  return product_policy_identity_memo_lookup(utf8(layout.cli) + "|" + policy + "|" + model + (platform == "genesis" ? std::string() : "|" + platform));
+}
+
+std::string rom_policy_identity(const Layout &layout, const RomView &rom) {
+  return rom.platform_id == "master-system" ? product_policy_identity(layout, "optimized", "", "master-system")
+                                            : product_policy_identity(layout, "optimized", rom.aot_model);
+}
+
+std::string rom_policy_identity_cached(const Layout &layout, const RomView &rom) {
+  return rom.platform_id == "master-system" ? product_policy_identity_cached(layout, "optimized", "", "master-system")
+                                            : product_policy_identity_cached(layout, "optimized", rom.aot_model);
+}
+
+bool sms_optimized_available_blocking(const Layout &layout) { return !product_policy_identity(layout, "optimized", "", "master-system").empty(); }
+bool sms_optimized_available_cached(const Layout &layout) { return !product_policy_identity_cached(layout, "optimized", "", "master-system").empty(); }
+
+RunVerdict classify_game_exit(const RomView &rom, int exit_code) {
+  if (exit_code == 0) return RunVerdict::clean;
+  if (rom.platform_id == "master-system" && rom.optimized() && exit_code == sms_exit_unadmitted_pc) return RunVerdict::unadmitted_pc;
+  return RunVerdict::failed;
+}
+
+RomView compatibility_view(RomView rom) {
+  rom.aot_policy = "compatibility";
+  rom.aot_model = "v1";
+  return rom;
+}
+
+RestartDecision decide_after_exit(const RomView &rom, int exit_code, bool already_restarted) {
+  RestartDecision decision;
+  if (!already_restarted && classify_game_exit(rom, exit_code) == RunVerdict::unadmitted_pc) {
+    decision.restart = true;
+    decision.next = compatibility_view(rom);
+    decision.notice = unadmitted_restart_notice();
+  }
+  return decision;
+}
+
+std::string unadmitted_restart_notice() {
+  return "Optimized stopped: the game reached code outside the selected set. Restarting from the beginning in Compatibility.";
 }
 
 bool entry_ready_for(const fs::path &entry, const RomView &rom, const Layout &layout) {
   if (!entry_ready(entry)) return false;
-  if (rom.platform_id == "master-system") return true;
   const PolicyReport report = read_policy_report(entry);
   if (!report.present) return !rom.optimized();  // an older entry without the member is a Compatibility build
   if (report.requested != (rom.optimized() ? "optimized" : "compatibility")) return false;
   if (rom.optimized()) {
-    if (report.requested_model != rom.aot_model) return false;
-    const std::string current = product_policy_identity(layout, "optimized", rom.aot_model);
+    if (rom.platform_id == "genesis" && report.requested_model != rom.aot_model) return false;
+    const std::string current = rom_policy_identity(layout, rom);
     // Fail closed: an Optimized entry is reusable only when the CURRENT product identity is known and equals the recorded one. An unavailable
     // identity (tool missing, failing, timing out or printing garbage) refuses reuse; it never makes the check optional.
     if (current.empty() || report.policy_identity != current) return false;

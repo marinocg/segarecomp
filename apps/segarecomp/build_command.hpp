@@ -10,6 +10,8 @@ inline constexpr const char *segarecomp_build_usage =
     "                   [--admission-plan <file>] (Genesis M68K hybrid admission candidate, SEG-031; broad by default)\n"
     "                   [--aot-policy <compatibility|optimized>] (default compatibility; optimized = native selective admission, broad fallback)\n"
     "                   [--aot-model <v1|gen2>] (EXPERIMENTAL opt-in, only with --aot-policy optimized; default v1 = the SEG-047 producer)\n"
+    "                   (Master System: optimized = EXPERIMENTAL native D512HP selective admission, SEG-057; any failure builds the broad program;\n"
+    "                    --aot-model is a Genesis option and is refused for Master System; a start the build omitted stops the program with a typed outcome)\n"
     "                   (Master System: --runtime-dir is <root>/platforms/master-system; the mapper is never inferred)\n";
 
 int run_cli(int argc, char **argv);

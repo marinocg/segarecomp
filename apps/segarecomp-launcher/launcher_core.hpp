@@ -38,15 +38,19 @@ struct RomView {
   std::filesystem::path mapper_manifest;  // sidecar manifest when present
   std::string mapper_manifest_sha256;
   [[nodiscard]] bool needs_mapper() const { return platform_id == "master-system" && mapper.empty() && mapper_manifest.empty(); }
-  // AOT optimization policy (ADR 0096), the same two values as `segarecomp build --aot-policy`. Compatibility is the default; Optimized
-  // is a Genesis M68K policy (a Master System image has no Optimized producer). The launcher never sees a model, threshold or schema.
+  // AOT optimization policy (ADR 0096), the same two values as `segarecomp build --aot-policy`. Compatibility is the default for every
+  // platform. Optimized is Genesis M68K (ADR 0096) and, SEG-057-T002 (ADR 0119), an EXPERIMENTAL Master System policy that is offered only
+  // when the product CLI itself states it is available (`sms_optimized_available`, from `aot-policy-identity --platform master-system`):
+  // nothing the product does not support is advertised. The launcher never sees a model, threshold or schema.
   std::string aot_policy = "compatibility";
-  [[nodiscard]] bool supports_optimized() const { return platform_id == "genesis"; }
+  bool sms_optimized_available = false;
+  [[nodiscard]] bool supports_optimized() const { return platform_id == "genesis" || (platform_id == "master-system" && sms_optimized_available); }
   [[nodiscard]] bool optimized() const { return supports_optimized() && aot_policy == "optimized"; }
-  // SEG-049: the EXPERIMENTAL model family of Optimized ("v1" = default, "gen2" = explicit opt-in), forwarded verbatim to `segarecomp build
-  // --aot-model`. It is an opaque product option: the launcher knows no model, threshold, schema or compatibility rule.
+  // SEG-049: the EXPERIMENTAL model family of Genesis Optimized ("v1" = default, "gen2" = explicit opt-in), forwarded verbatim to `segarecomp
+  // build --aot-model`. It is an opaque product option: the launcher knows no model, threshold, schema or compatibility rule. It is a Genesis
+  // option only: a Master System request never carries or displays it.
   std::string aot_model = "v1";
-  [[nodiscard]] bool optimized_gen2() const { return optimized() && aot_model == "gen2"; }
+  [[nodiscard]] bool optimized_gen2() const { return platform_id == "genesis" && optimized() && aot_model == "gen2"; }
   // Genesis console region (SEG-055): a RUN-TIME choice exported to the game as SEGARECOMP_GENESIS_REGION; it is not part of the cache
   // identity (one native build serves every region). "usa" (default, the historical console), "japan", or "europe" (PAL: admitted, but the
   // machine runs at 60 Hz; 50 Hz timing is not implemented and the UI says so, see region_note). The initial value is a hint from
@@ -115,12 +119,35 @@ struct PolicyReport {
 // it instead of reproducing any model/schema/contract compatibility rule. Memoized per (tool, policy, model).
 // Memo only (empty when not resolved yet or the last attempt failed); never runs the tool, so it is cheap enough for every UI frame.
 [[nodiscard]] std::string product_policy_identity_memo_lookup(const std::string &key);
-[[nodiscard]] std::string product_policy_identity_cached(const Layout &layout, const std::string &policy, const std::string &model);
+[[nodiscard]] std::string product_policy_identity_cached(const Layout &layout, const std::string &policy, const std::string &model,
+                                                         const std::string &platform = "genesis");
 // Runs the product tool (blocking, up to a few seconds): call it from a worker, never from the UI thread.
-[[nodiscard]] std::string product_policy_identity(const Layout &layout, const std::string &policy, const std::string &model);
+[[nodiscard]] std::string product_policy_identity(const Layout &layout, const std::string &policy, const std::string &model,
+                                                  const std::string &platform = "genesis");
+// The identity a ROM's Optimized request is keyed on (platform-aware: Genesis passes its model family, Master System none), blocking / memo-only.
+[[nodiscard]] std::string rom_policy_identity(const Layout &layout, const RomView &rom);
+[[nodiscard]] std::string rom_policy_identity_cached(const Layout &layout, const RomView &rom);
+// The product CLI's statement that the experimental Master System Optimized policy is available (blocking, worker only / memo-only).
+[[nodiscard]] bool sms_optimized_available_blocking(const Layout &layout);
+[[nodiscard]] bool sms_optimized_available_cached(const Layout &layout);
 // A finished entry is reusable only when it exists AND its recorded request/identity still equal the current request (a stale or foreign
 // entry that somehow shares a directory is rebuilt, never reused).
 [[nodiscard]] bool entry_ready_for(const std::filesystem::path &entry, const RomView &rom, const Layout &layout);
+// ---- SEG-057-T002 (ADR 0119): the Optimized -> Compatibility restart contract (shared by the window and the headless `--run`) ----
+// A generated Master System program that stops on the typed selective-admission outcome (Z80_ERROR_UNADMITTED_PC) exits with this status
+// (platforms/master-system/runtime/sms_machine.h SMS_EXIT_Z80_UNADMITTED_PC; pinned equal by launcher_policy_test). No other end of a run
+// produces it: a crash, a signal, any other guest or platform error, a host error and a user quit all have other statuses.
+inline constexpr int sms_exit_unadmitted_pc = 7;
+enum class RunVerdict { clean, unadmitted_pc, failed };
+// `unadmitted_pc` only for a Master System program that was built Optimized and exited with exactly sms_exit_unadmitted_pc.
+[[nodiscard]] RunVerdict classify_game_exit(const RomView &rom, int exit_code);
+// The same ROM with the Compatibility policy (the one-shot restart target). Never carries a Genesis model.
+[[nodiscard]] RomView compatibility_view(RomView rom);
+[[nodiscard]] std::string unadmitted_restart_notice();
+// What to do when a run ends: the single decision shared by the window and the headless `--run`. `already_restarted` makes the restart
+// one-shot per user request (a Compatibility program can never classify as unadmitted_pc, and a second request is never made).
+struct RestartDecision { bool restart = false; RomView next; std::string notice; };
+[[nodiscard]] RestartDecision decide_after_exit(const RomView &rom, int exit_code, bool already_restarted);
 [[nodiscard]] std::string read_tail(const std::filesystem::path &path, std::size_t max_bytes);
 [[nodiscard]] std::string host_description();
 

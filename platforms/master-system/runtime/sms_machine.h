@@ -118,6 +118,15 @@ static inline int sms_stop_is_resumable(SmsStopKind kind) {
 }
 const char *sms_stop_kind_name(SmsStopKind kind);
 
+/* SEG-057-T002 (ADR 0119): the process exit status of a generated program that stopped on the typed selective-admission outcome
+ * Z80_ERROR_UNADMITTED_PC (a start the Optimized build's plan omitted). It is distinct from every other driver status (headless: 0 ok,
+ * 2 cycle budget, 3 other fail-closed Z80 outcome, 4 SMS error, 64 usage; viewer: 0 ok, 3 other guest error, 4 SMS error, 5 host error,
+ * 64 usage), so a launcher can recognise exactly this stop without reading any log. */
+#define SMS_EXIT_Z80_UNADMITTED_PC 7
+static inline int sms_stop_is_unadmitted_pc(const SmsStop *stop) {
+  return stop->kind == SMS_STOP_Z80_ERROR && stop->z80_outcome == Z80_ERROR_UNADMITTED_PC;
+}
+
 /* ---- machine -------------------------------------------------------------------------------------------------- */
 
 typedef struct SmsMachine {

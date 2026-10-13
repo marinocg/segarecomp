@@ -1408,6 +1408,14 @@ add_executable(sms_admission_emit tools/sms_admission_emit.cpp)
 target_link_libraries(sms_admission_emit PRIVATE segarecomp::machine_master_system)
 segarecomp_enable_warnings(sms_admission_emit)
 
+# SEG-057-T002 (ADR 0119): the native SMS Z80 D512HP proposal producer (hermetic: synthetic inputs and a committed synthetic PyTorch reference).
+add_executable(sms_ml_region_z80_test sms_ml_region_z80_test.cpp)
+target_link_libraries(sms_ml_region_z80_test PRIVATE segarecomp::machine_master_system)
+segarecomp_enable_warnings(sms_ml_region_z80_test)
+add_test(NAME sms_ml_region_z80_test COMMAND sms_ml_region_z80_test
+  ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/sms-ml-z80/parity.smsmlp ${PROJECT_SOURCE_DIR}/tools/segarecomp_ml_region_z80_gen2.weights.sgz80w)
+set_property(TEST sms_ml_region_z80_test APPEND PROPERTY LABELS full fast)
+
 add_executable(sms_machine_tests sms_machine_test.cpp)
 target_link_libraries(sms_machine_tests PRIVATE segarecomp::machine_master_system segarecomp::runtime_master_system)
 segarecomp_enable_warnings(sms_machine_tests)

@@ -6,6 +6,7 @@
 
 #include "segarecomp/codegen/c11/z80_executable_image.hpp"
 #include "segarecomp/machine/master_system/image_set.hpp"
+#include "segarecomp/machine/master_system/ml_region_z80_producer.hpp"
 
 namespace segarecomp::machine::master_system {
 namespace {
@@ -75,11 +76,39 @@ EmitOutcome emit_cartridge(std::span<const std::uint8_t> rom, const IngestOption
     return outcome;
   }
   outcome.provenance = count_image_provenance(images);
-  const codegen::z80::EmitResult emitted = codegen::z80::emit_image_set(projected.set, codegen);
+  AdmissionReport &report = outcome.admission;
+  report.requested = request.propose_admission && !codegen.admission;
+  for (const codegen::z80::CodeImage &image : projected.set.images) report.image_offsets += image.bytes.size();
+  if (report.requested) {
+    MlProposal proposal = request.proposer ? request.proposer(cartridge, projected.set) : ml_propose(cartridge, projected.set);
+    report.cells = proposal.cells;
+    report.selected_cells = proposal.selected_cells;
+    report.inference_seconds = proposal.inference_seconds;
+    if (proposal.ok) {
+      report.admitted_offsets = proposal.admitted_offsets;
+      report.plan_sha256 = ml_plan_sha256(proposal.plan);
+      codegen.admission = std::move(proposal.plan);
+    } else {
+      report.fallback = true;
+      report.reason = proposal.failure;
+    }
+  }
+  codegen::z80::EmitResult emitted = codegen::z80::emit_image_set(projected.set, codegen);
+  if (!emitted.error.empty() && report.requested && codegen.admission) {
+    // The emitter validates the proposal (identity, size, digest, offsets). A rejected proposal is a classified fallback to the broad AOT;
+    // the failed emission left nothing behind.
+    codegen.admission.reset();
+    report.fallback = true;
+    report.reason = "admission_rejected";
+    report.admitted_offsets = 0;
+    report.plan_sha256.clear();
+    emitted = codegen::z80::emit_image_set(projected.set, codegen);
+  }
   if (!emitted.error.empty()) {
     outcome.error = emitted.error;
     return outcome;
   }
+  if (report.requested && !report.fallback) report.effective = "ml_region_z80";
   outcome.stats = emitted.stats;
   outcome.owners = emitted.owners;
   const auto rom_path = request.directory / (request.stem + "_rom.c");

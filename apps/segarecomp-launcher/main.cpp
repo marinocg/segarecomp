@@ -86,53 +86,73 @@ int headless(int argc, char **argv) {
   else {
     RomView rom = inspect_rom_file(rom_path, layout);
     if (rom.platform_id == "master-system" && !mapper.empty()) rom.mapper = mapper;
-    if (rom.supports_optimized()) { rom.aot_policy = aot_policy; rom.aot_model = aot_model; }
+    // The product CLI states whether the experimental Master System Optimized policy exists; a request for it is honoured only then.
+    if (rom.platform_id == "master-system" && aot_model != "v1") { emit("result=failed problem=--aot-model is a Genesis option"); rc = 2; }
+    if (rc == 0 && rom.platform_id == "master-system" && aot_policy == "optimized") rom.sms_optimized_available = sms_optimized_available_blocking(layout);
+    if (rom.supports_optimized()) { rom.aot_policy = aot_policy; if (rom.platform_id == "genesis") rom.aot_model = aot_model; }
+    else if (aot_policy == "optimized") emit("aot_policy_unavailable=Optimized is not available for this platform (building Compatibility)");
     if (!region_arg.empty() && rom.supports_region()) rom.region = region_arg;
     if (hint_discovery_arg && rom.supports_hint_alias_discovery()) rom.hint_alias_discovery = true;
-    if (!rom.error.empty()) { emit("result=failed problem=" + rom.error); rc = 1; }
+    if (rc != 0) {}
+    else if (!rom.error.empty()) { emit("result=failed problem=" + rom.error); rc = 1; }
     else {
-      const fs::path entry = entry_dir(rom, layout);
       emit("rom_sha256=" + rom.sha256);
       emit("platform=" + (rom.platform_id.empty() ? std::string("unsupported") : rom.platform_id));
       if (rom.platform_id == "master-system")
         emit(std::string("mapper=") + (!rom.mapper.empty() ? rom.mapper : rom.mapper_manifest.empty() ? "undeclared" : "manifest"));
-      emit(std::string("aot_policy_requested=") + rom.aot_policy);
-      if (rom.optimized()) emit("aot_policy_requested_model=" + rom.aot_model);
-      const bool cached = entry_ready_for(entry, rom, layout);
-      emit(std::string("cache=") + (cached ? "hit" : "miss"));
-      if (rom.optimized() && product_policy_identity(layout, "optimized", rom.aot_model).empty())
-        emit("cache_note=policy_identity_unavailable (cached Optimized builds are not reused; this build is fresh)");
-      if (!cached) {
-        BuildJob job(rom, layout);
-        job.wait();
-        emit(std::string("build=") + (job.succeeded() ? "ok" : "failed"));
-        if (!job.succeeded()) { emit("message=" + job.message()); rc = 3; }
-      }
-      emit("entry=" + u8s(entry));
-      if (rc == 0) {
+      // Build (or reuse) the entry of `view` and report its machine-readable policy; returns the entry or an empty path on failure.
+      const auto prepare = [&](const RomView &view, const char *tag) -> fs::path {
+        const fs::path entry = entry_dir(view, layout);
+        emit(std::string(tag) + "aot_policy_requested=" + view.aot_policy);
+        if (view.optimized() && view.platform_id == "genesis") emit(std::string(tag) + "aot_policy_requested_model=" + view.aot_model);
+        const bool cached = entry_ready_for(entry, view, layout);
+        emit(std::string(tag) + "cache=" + (cached ? "hit" : "miss"));
+        if (view.optimized() && rom_policy_identity(layout, view).empty())
+          emit(std::string(tag) + "cache_note=policy_identity_unavailable (cached Optimized builds are not reused; this build is fresh)");
+        if (!cached) {
+          BuildJob job(view, layout);
+          job.wait();
+          emit(std::string(tag) + "build=" + (job.succeeded() ? "ok" : "failed"));
+          if (!job.succeeded()) { emit(std::string(tag) + "message=" + job.message()); return {}; }
+        }
+        emit(std::string(tag) + "entry=" + u8s(entry));
         const PolicyReport policy = read_policy_report(entry);
         if (policy.present) {
-          emit("aot_policy_effective=" + policy.effective);
-          emit(std::string("aot_policy_fallback=") + (policy.fallback ? "yes" : "no"));
-          emit("aot_policy_reason=" + policy.reason);
-          emit("aot_policy_fallback_class=" + policy.fallback_class);
-          emit("aot_policy_model_family=" + policy.model_family);
-          emit("aot_policy_validator=" + policy.validator);
-          emit("aot_policy_selected_ppm=" + std::to_string(policy.selected_ppm));
-          emit("aot_policy_admitted_ppm=" + std::to_string(policy.admitted_ppm));
-          emit("aot_policy_policy_identity=" + policy.policy_identity);
-          emit("aot_policy_identity=" + policy.identity);
+          emit(std::string(tag) + "aot_policy_effective=" + policy.effective);
+          emit(std::string(tag) + "aot_policy_fallback=" + (policy.fallback ? "yes" : "no"));
+          emit(std::string(tag) + "aot_policy_reason=" + policy.reason);
+          emit(std::string(tag) + "aot_policy_fallback_class=" + policy.fallback_class);
+          emit(std::string(tag) + "aot_policy_model_family=" + policy.model_family);
+          emit(std::string(tag) + "aot_policy_validator=" + policy.validator);
+          emit(std::string(tag) + "aot_policy_selected_ppm=" + std::to_string(policy.selected_ppm));
+          emit(std::string(tag) + "aot_policy_admitted_ppm=" + std::to_string(policy.admitted_ppm));
+          emit(std::string(tag) + "aot_policy_policy_identity=" + policy.policy_identity);
+          emit(std::string(tag) + "aot_policy_identity=" + policy.identity);
         }
-      }
+        return entry;
+      };
+      fs::path entry = prepare(rom, "");
+      if (entry.empty()) rc = 3;
       if (rom.supports_region()) emit("region=" + rom.region);
       if (rc == 0 && run && !launch_refusal(rom).empty()) { emit("run=refused reason=" + launch_refusal(rom)); rc = 5; }
       else if (rc == 0 && run) {
-        GameRun game(rom, layout, entry, game_args);
-        if (!game.started()) { emit("run=failed_to_start"); rc = 4; }
-        else {
+        // Run; a Master System Optimized program that stops on the typed unadmitted_pc outcome restarts ONCE, from reset, in Compatibility.
+        RomView current = rom;
+        bool restarted = false;
+        for (;;) {
+          GameRun game(current, layout, entry, game_args);
+          if (!game.started()) { emit("run=failed_to_start"); rc = 4; break; }
           while (!game.poll()) SDL_Delay(50);
-          emit("run=exited code=" + std::to_string(game.exit_code()));
-          if (game.exit_code() != 0) rc = 4;
+          emit("run=exited code=" + std::to_string(game.exit_code()) + " mode=" + current.aot_policy);
+          const RestartDecision next = decide_after_exit(current, game.exit_code(), restarted);
+          if (!next.restart) { if (game.exit_code() != 0) rc = 4; break; }
+          emit("run=unadmitted_pc");
+          emit("fallback=compatibility_restart");
+          emit("notice=" + next.notice);
+          restarted = true;
+          current = next.next;
+          entry = prepare(current, "fallback_");
+          if (entry.empty()) { rc = 3; break; }
         }
       }
     }
@@ -461,7 +481,17 @@ int gui() {
   std::unique_ptr<BuildJob> job;
   std::unique_ptr<GameRun> game;
   // AOT policy chosen in this session (Compatibility is the default and the only value unless the user picks Optimized).
-  std::string policy_choice = "compatibility";
+  std::string policy_choice = "compatibility";      // Genesis
+  std::string sms_policy_choice = "compatibility";  // Master System (experimental Optimized): never inherits the Genesis choice
+  const auto chosen_policy = [&]() -> std::string& { return rom.platform_id == "master-system" ? sms_policy_choice : policy_choice; };
+  // SEG-057-T002: whether the product CLI offers the experimental Master System Optimized policy. Probed once on a worker at start-up; until
+  // (and unless) the product says yes, the control is not shown. The window never decides availability itself.
+  bool sms_optimized_available = false;
+  std::future<bool> sms_probe;
+  if (layout.problem.empty()) sms_probe = std::async(std::launch::async, [lay = layout] { return sms_optimized_available_blocking(lay); });
+  // The Optimized -> Compatibility restart (one-shot per Play): the visible notice, and a pending automatic start of the Compatibility program.
+  std::string restart_notice;
+  bool restart_pending = false, restarted_this_play = false;
   bool discovery_choice = false;    // advanced H-interrupt alias discovery (default off)
   std::string model_choice = "v1";  // experimental opt-in of Optimized ("gen2"); v1 is the default
   std::string observed_region;  // z80.observed_region of the Ready entry (build-time Z80 observation); see region_coverage_note
@@ -517,7 +547,11 @@ int gui() {
     rom = inspect_rom_file(from_u8(path_text.c_str()), layout);
     show_diagnostics = false;
     if (!rom.error.empty()) { failure = "That file could not be read: " + rom.error; diagnostics = failure; state = State::Failed; return; }
-    if (rom.supports_optimized()) { rom.aot_policy = policy_choice; rom.aot_model = model_choice; }
+    restart_notice.clear();
+    restart_pending = false;
+    restarted_this_play = false;
+    rom.sms_optimized_available = sms_optimized_available;
+    if (rom.supports_optimized()) { rom.aot_policy = chosen_policy(); if (rom.platform_id == "genesis") rom.aot_model = model_choice; }
     if (rom.supports_hint_alias_discovery()) rom.hint_alias_discovery = discovery_choice;
     resolve_entry();
   };
@@ -530,9 +564,10 @@ int gui() {
   };
   const auto set_policy = [&](const char *choice) {
     if (rom.aot_policy == choice) return;
-    policy_choice = choice;
+    chosen_policy() = choice;
     rom.aot_policy = choice;
-    if (std::string(choice) == "compatibility") { model_choice = "v1"; rom.aot_model = "v1"; }  // the experimental opt-in never survives leaving Optimized
+    restart_notice.clear();
+    if (std::string(choice) == "compatibility" && rom.platform_id == "genesis") { model_choice = "v1"; rom.aot_model = "v1"; }  // the experimental opt-in never survives leaving Optimized
     show_diagnostics = false;
     resolve_entry();
   };
@@ -547,6 +582,13 @@ int gui() {
     if (force) { std::error_code ec; fs::remove_all(entry, ec); }
     job = std::make_unique<BuildJob>(rom, layout);
     state = State::Building;
+  };
+  // Starts the native program of the Ready entry (a new process, so always from reset).
+  const auto launch_game = [&] {
+    if (const std::string refusal = launch_refusal(rom); !refusal.empty()) { failure = refusal; diagnostics = refusal; state = State::Failed; return; }
+    game = std::make_unique<GameRun>(rom, layout, entry);
+    if (game->started()) state = State::Running;
+    else { failure = "The game could not be started."; diagnostics = failure; game.reset(); state = State::Failed; }
   };
   const auto browse = [&] {
     static const SDL_DialogFileFilter filters[] = {{"Genesis / Mega Drive ROMs", "md;bin;gen;smd"}, {"Master System ROMs", "sms"}, {"All files", "*"}};
@@ -600,22 +642,45 @@ int gui() {
       apply_resolved(resolve_job.get());
     }
     if (!resolving && !deferred_path.empty()) { const std::string next = std::move(deferred_path); deferred_path.clear(); select_rom(next); }
+    if (sms_probe.valid() && sms_probe.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+      sms_optimized_available = sms_probe.get();
+      rom.sms_optimized_available = sms_optimized_available;
+    }
     if (state == State::Building && job->finished()) {
-      if (job->succeeded()) { state = State::Ready; refresh_report(); }
-      else {
+      if (job->succeeded()) {
+        state = State::Ready;
+        refresh_report();
+        if (restart_pending) { restart_pending = false; launch_game(); }  // the Compatibility restart: start it as soon as it is built
+      } else {
         failure = job->message();
-        diagnostics = read_tail(entry.parent_path() / (entry.filename().string() + ".failed") / "build.log", 24000);
+        diagnostics = (restart_pending ? restart_notice + "\nThe Compatibility build then failed:\n" : std::string()) +
+                      read_tail(entry.parent_path() / (entry.filename().string() + ".failed") / "build.log", 24000);
+        restart_pending = false;  // never retried automatically: the real failure is shown
         state = State::Failed;
       }
       job->wait();
     }
     if (state == State::Running && game->poll()) {
-      if (game->exit_code() != 0) {
+      const int exit_code = game->exit_code();
+      const RestartDecision next = decide_after_exit(rom, exit_code, restarted_this_play);
+      game.reset();
+      if (exit_code == 0) state = State::Ready;
+      else if (next.restart) {
+        // The typed unadmitted_pc stop of an Optimized program: tell the user, switch to Compatibility, and restart from reset (once).
+        restart_notice = next.notice;
+        restarted_this_play = true;
+        rom = next.next;
+        chosen_policy() = "compatibility";
+        show_diagnostics = false;
+        restart_pending = true;
+        resolve_entry();  // Compatibility is synchronous: Ready (reuse) or RomSelected (build)
+        if (state == State::Ready) { restart_pending = false; launch_game(); }
+        else if (state == State::RomSelected) start_build(false);
+      } else {
         failure = "The game stopped unexpectedly.";
         diagnostics = read_tail(entry / "run.log", 24000);
         state = State::Failed;
-      } else state = State::Ready;
-      game.reset();
+      }
     }
 
     const float t = static_cast<float>(SDL_GetTicks()) / 1000.0F;
@@ -714,17 +779,28 @@ int gui() {
           if (draw) draw_text(dl, font_regular, centered.len(12), policy_report.fallback ? col_err : text_secondary, centered.at(lx, y), note.c_str());
           y += 18.0F;
         }
+        if (!restart_notice.empty()) {  // the Optimized program stopped on omitted code: say so, and that Compatibility is what ran after it
+          if (draw) {
+            ImGui::SetCursorPos(centered.at(lx, y));
+            ImGui::PushTextWrapPos(centered.at(content_x + content_w, 0).x);
+            ImGui::PushStyleColor(ImGuiCol_Text, col_err);
+            ImGui::PushFont(font_regular, centered.len(11));
+            ImGui::TextUnformatted(restart_notice.c_str());
+            ImGui::PopFont();
+            ImGui::PopStyleColor();
+            ImGui::PopTextWrapPos();
+          }
+          y += 42.0F;
+        }
       }
       y += 6.0F;
       // Actions: one row, one height, same gaps.
       if (draw) {
         if (state == State::Ready) {
           if (bevel_button(centered, "play", lx, y, 126.0F, 42.0F, "Play", font_bold, 17.0F)) {
-            if (const std::string refusal = launch_refusal(rom); !refusal.empty()) { failure = refusal; diagnostics = refusal; state = State::Failed; }
-            else game = std::make_unique<GameRun>(rom, layout, entry);
-            if (!game) {}
-            else if (game->started()) state = State::Running;
-            else { failure = "The game could not be started."; diagnostics = failure; game.reset(); state = State::Failed; }
+            restart_notice.clear();
+            restarted_this_play = false;
+            launch_game();
           }
           if (outline_button(centered, "recompile2", lx + 136.0F, y, 126.0F, 42.0F, "Recompile", font_regular, 14.0F)) start_build(true);
           if (outline_button(centered, "choose2", lx + 272.0F, y, 126.0F, 42.0F, "Choose...", font_regular, 14.0F)) browse();
@@ -745,7 +821,7 @@ int gui() {
           if (opt ? bevel_button(centered, "mode_opt", bx + 128.0F, y, 92.0F, 26.0F, "Optimized", font_bold, 12.0F)
                   : outline_button(centered, "mode_opt", bx + 128.0F, y, 92.0F, 26.0F, "Optimized", font_regular, 12.0F))
             set_policy("optimized");
-          if (opt) {  // advanced: the experimental model opt-in is only offered while Optimized is selected
+          if (opt && rom.platform_id == "genesis") {  // advanced: the experimental model opt-in is only offered while Genesis Optimized is selected
             const bool g2 = rom.optimized_gen2();
             if (g2 ? bevel_button(centered, "model_g2", bx + 228.0F, y, 92.0F, 26.0F, "Experimental", font_bold, 11.0F)
                    : outline_button(centered, "model_g2", bx + 228.0F, y, 92.0F, 26.0F, "Experimental", font_regular, 11.0F))
@@ -753,7 +829,13 @@ int gui() {
           }
         }
         y += 34.0F;
-        if (rom.optimized()) {  // what the extra button is, in one quiet line
+        if (rom.optimized() && rom.platform_id == "master-system") {  // the Master System mode is a single experimental choice, with its caveat
+          if (draw) {
+            draw_text(dl, font_regular, centered.len(10.5F), text_dim, centered.at(bx, y - 4.0F), "Experimental CNN compilation.");
+            draw_text(dl, font_regular, centered.len(10.5F), text_dim, centered.at(bx, y + 9.0F), "May restart in Compatibility if omitted code is reached.");
+          }
+          y += 28.0F;
+        } else if (rom.optimized()) {  // what the extra button is, in one quiet line
           if (draw) draw_text(dl, font_regular, centered.len(10.5F), text_dim, centered.at(bx, y - 4.0F),
                               rom.optimized_gen2() ? "Experimental model on (advanced); may fall back." : "Experimental: optional alternative model.");
           y += 14.0F;
@@ -798,7 +880,7 @@ int gui() {
         }
         y += 32.0F;
       }
-      if (rom.optimized() && product_policy_identity_cached(layout, "optimized", rom.aot_model).empty()) {
+      if (rom.optimized() && rom_policy_identity_cached(layout, rom).empty()) {
         if (draw) {
           draw_text(dl, font_regular, centered.len(10.5F), col_err, centered.at(lx, y), "Optimized cannot verify the build tool identity:");
           draw_text(dl, font_regular, centered.len(10.5F), col_err, centered.at(lx, y + 14.0F), "saved Optimized builds are not reused.");
@@ -888,7 +970,8 @@ int gui() {
         }
       } else if (state == State::Building) {
         static const char *names[BuildJob::stage_count] = {"Analyzing ROM", "Generating native C", "Compiling", "Linking"};
-        draw_text(dl, font_bold, centered.len(15), text_primary, centered.at(content_x, row_y - 6.0F), "Preparing game...");
+        draw_text(dl, font_bold, centered.len(15), text_primary, centered.at(content_x, row_y - 6.0F),
+                  restart_pending ? "Preparing Compatibility build..." : "Preparing game...");
         for (int i = 0; i < BuildJob::stage_count; ++i)
           draw_stage_row(centered, dl, content_x, row_y + 20.0F + 23.0F * static_cast<float>(i), names[i], job->stage(i), font_regular, t);
         draw_text(dl, font_regular, centered.len(12), text_dim, centered.at(content_x, panel_y0 + panel_h - 34.0F),
@@ -896,8 +979,19 @@ int gui() {
       } else if (state == State::Ready) {
         settings_column(true);
       } else if (state == State::Running) {
-        draw_text(dl, font_bold, centered.len(16), text_primary, centered.at(content_x, row_y + 10.0F), "Playing...");
+        draw_text(dl, font_bold, centered.len(16), text_primary, centered.at(content_x, row_y + 10.0F),
+                  rom.optimized() ? "Playing... (Optimized, experimental)" : (restarted_this_play ? "Playing... (Compatibility, restarted)" : "Playing... (Compatibility)"));
         draw_text(dl, font_regular, centered.len(13), text_secondary, centered.at(content_x, row_y + 38.0F), "Close the game window to return.");
+        if (restarted_this_play && !restart_notice.empty()) {
+          ImGui::SetCursorPos(centered.at(content_x, row_y + 62.0F));
+          ImGui::PushTextWrapPos(centered.at(panel_x1 - 20.0F, 0).x);
+          ImGui::PushStyleColor(ImGuiCol_Text, col_err);
+          ImGui::PushFont(font_regular, centered.len(11));
+          ImGui::TextUnformatted(restart_notice.c_str());
+          ImGui::PopFont();
+          ImGui::PopStyleColor();
+          ImGui::PopTextWrapPos();
+        }
       } else if (state == State::Failed) {
         ImGui::SetCursorPos(centered.at(content_x, row_y - 6.0F));
         ImGui::PushTextWrapPos(centered.at(panel_x1 - 20.0F, 0).x);
