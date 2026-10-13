@@ -174,7 +174,7 @@ static void build_audio(SvHost *h, SvPage *p) {
   } else {
     sv_item_set_text(item, "None (silent)");
   }
-  add_note(p, "Audio settings do not affect the console's sound generation or its accuracy; they only change how the sound is played on your device. The output device follows your operating system's default.");
+  add_note(p, "These settings only change how the sound is played on your device (gain). The console's sound itself is unchanged. The output device follows the OS default.");
 }
 
 static void build_system(SvHost *h, SvPage *p) {
@@ -497,7 +497,7 @@ static void draw_cues(SvHost *h, int right, int y, int ui, int back_label) {
   sv_host_draw_text(h, (float)x, (float)(y + 2 * ui), ui, c_text2, bk);
 }
 
-static int item_rows(const SvItem *it) { return strcmp(it->icon, "note") == 0 ? 4 : 1; }
+static int item_rows(const SvItem *it) { return strcmp(it->icon, "note") == 0 ? 5 : 1; }
 
 void sv_pages_draw(SvHost *h, int out_w, int out_h) {
   SvPage *page = sv_menu_top(&h->menu);
@@ -507,7 +507,7 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
   const int video = page != NULL && page->page_id == PAGE_VIDEO;
   char line[160];
   if (page == NULL) return;
-  cols = is_confirm ? 44 : (page->page_id == PAGE_MAIN ? 40 : (video ? 76 : (page->page_id == PAGE_CONTROLS ? 56 : (page->page_id == PAGE_SYSTEM ? 54 : 50))));
+  cols = is_confirm ? 60 : (page->page_id == PAGE_MAIN ? 40 : (video ? 76 : (page->page_id == PAGE_CONTROLS ? 56 : (page->page_id == PAGE_SYSTEM ? 54 : 50))));
   {
     const int fit = out_w * 94 / 100 / (cols * 8);
     if (fit < ui) ui = fit < 1 ? 1 : fit;
@@ -528,7 +528,7 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
   for (i = page->scroll, used = 0, drawn = 0; i < page->count && used + item_rows(&page->items[i]) * row_h <= avail; ++i) { used += item_rows(&page->items[i]) * row_h; ++drawn; }
   if (drawn < 1) drawn = 1;
   panel_h = head_h + used + foot_h + 2 * pad;
-  if (is_confirm) panel_h = 44 * ui + (page->count) * (row_h + 4 * ui) + 20 * ui;
+  if (is_confirm) panel_h = 46 * ui + (page->count) * (row_h + 4 * ui) + 10 * ui;
   x = (out_w - panel_w) / 2;
   y = (out_h - panel_h) / 2;
   if (preview && !video) { x = pad; }
@@ -552,10 +552,9 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
     sv_host_draw_text(h, (float)(x + 34 * ui), (float)(y + 14 * ui), ui, c_text, page->title);
     sv_host_draw_text(h, (float)(x + 14 * ui), (float)(y + 30 * ui), ui, c_text2, sub);
     (void)msg;
-    y += 12 * ui;
   }
   {
-    int cy = y + head_h + pad;
+    int cy = is_confirm ? y + 46 * ui : y + head_h + pad;
     for (i = 0; i < drawn; ++i) {
       const int idx = page->scroll + i;
       const SvItem *it = &page->items[idx];
@@ -644,7 +643,7 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
             break;
           }
           case SV_ITEM_LABEL:
-            truncate_to(line, sizeof line, it->text, (rwid / 2) / cw);
+            truncate_to(line, sizeof line, it->text, (rwid * 7 / 10) / cw);
             sv_host_draw_text(h, (float)(rx + rwid - 6 * ui - text_w(line, ui)), (float)ty, ui, c_text, line);
             break;
           case SV_ITEM_BINDING: {
@@ -665,7 +664,7 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
           case SV_ITEM_BUTTON: break;
         }
       }
-      cy += hh;
+      cy += hh + (is_confirm ? 4 * ui : 0);
     }
     if (page->count > drawn && drawn > 0) {  /* scroll bar */
       const SDL_Color track = {7, 16, 38, 255};
