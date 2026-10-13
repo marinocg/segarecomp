@@ -1666,6 +1666,10 @@ segarecomp_enable_warnings(sv_viewer_core_test)
 add_test(NAME sv_viewer_core_test COMMAND sv_viewer_core_test)
 set_property(TEST sv_viewer_core_test APPEND PROPERTY LABELS full fast)
 
+add_test(NAME viewer_foundation_layout_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/viewer_foundation_layout_test.py)
+set_property(TEST viewer_foundation_layout_test APPEND PROPERTY LABELS full fast)
+set_property(TEST viewer_foundation_layout_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+
 # CI sharding (see ci_shards.cmake, which also registers its guard test): must come after the LAST add_test and label assignment so
 # every tier test is partitioned.
 include(${CMAKE_CURRENT_SOURCE_DIR}/ci_shards.cmake)

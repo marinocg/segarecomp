@@ -4,6 +4,7 @@
 #include "pixel_assets.hpp"
 
 #include "imgui_impl_sdl3.h"
+#include "imgui_internal.h"
 #include "imgui_impl_sdlrenderer3.h"
 
 #include <algorithm>
@@ -171,17 +172,16 @@ void App::init_ui() {
   style.Colors[ImGuiCol_NavHighlight] = ImColor(0, 0, 0, 0);  // the widgets draw their own focus ring
   ImGui_ImplSDL3_InitForSDLRenderer(window_, renderer_);
   ImGui_ImplSDLRenderer3_Init(renderer_);
-  ImFont *builtin = io.Fonts->AddFontDefault();
-  const auto load_font = [&](const char *relative) -> ImFont * {
-    const fs::path path = asset_path(relative);
+  // Body text: the scalable embedded font (readable mixed case at any size). Titles and section headings: the repository's Silkscreen Bold.
+  ctx_.regular = io.Fonts->AddFontDefaultVector();
+  ctx_.bold = io.Fonts->AddFontDefaultVector();  // a second instance of the same face: draw_text draws it twice for weight
+  ui::bold_font = ctx_.bold;
+  {
+    const fs::path path = asset_path("fonts/Silkscreen-Bold.ttf");
     std::error_code ec;
-    if (!fs::is_regular_file(path, ec)) return nullptr;
-    return io.Fonts->AddFontFromFileTTF(path.string().c_str(), 0.0F);
-  };
-  ctx_.bold = load_font("fonts/Silkscreen-Bold.ttf");
-  ctx_.regular = load_font("fonts/Silkscreen-Regular.ttf");
-  if (ctx_.bold == nullptr) ctx_.bold = builtin;
-  if (ctx_.regular == nullptr) ctx_.regular = builtin;
+    if (fs::is_regular_file(path, ec)) ctx_.display = io.Fonts->AddFontFromFileTTF(path.string().c_str(), 0.0F);
+    if (ctx_.display == nullptr) ctx_.display = ctx_.regular;
+  }
   ctx_.renderer = renderer_;
 }
 
@@ -692,6 +692,96 @@ void App::update_jobs() {
   }
 }
 
+const char *App::page_name() const {
+  switch (page_) {
+    case Page::library: return "library";
+    case Page::details: return "details";
+    case Page::import_page: return "import";
+    case Page::storage: return "storage";
+    case Page::settings: return "settings";
+  }
+  return "?";
+}
+
+// One command per few frames. Commands: `key <Tab|Return|Escape|Down|Up|Left|Right|Space|F>` (F with Ctrl), `text <string>`, `frames <n>`,
+// `pad_attach`, `pad <south|east|dpad_up|dpad_down|dpad_left|dpad_right|start|back> [down|up]`, `expect page=<name>`, `expect visible=<n>`, `expect modal=<0|1>`, `quit`.
+void App::run_script() {
+  if (script_at_ >= script_.size()) return;
+  if (script_wait_ > 0) { --script_wait_; return; }
+  const std::string line = script_[script_at_++];
+  script_wait_ = 4;
+  std::string cmd = line.substr(0, line.find(' ')), arg = line.find(' ') == std::string::npos ? std::string() : line.substr(line.find(' ') + 1);
+  const auto push_key = [&](SDL_Scancode sc, bool down, SDL_Keymod mod = SDL_KMOD_NONE) {
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = down ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+    e.common.timestamp = SDL_GetTicksNS();
+    e.key.windowID = SDL_GetWindowID(window_);
+    e.key.scancode = sc;
+    e.key.key = SDL_GetKeyFromScancode(sc, mod, false);
+    e.key.mod = mod;
+    e.key.down = down;
+    SDL_PushEvent(&e);
+  };
+  if (cmd == "key") {
+    SDL_Scancode sc = SDL_SCANCODE_UNKNOWN;
+    SDL_Keymod mod = SDL_KMOD_NONE;
+    if (arg == "Tab") sc = SDL_SCANCODE_TAB; else if (arg == "Return") sc = SDL_SCANCODE_RETURN; else if (arg == "Escape") sc = SDL_SCANCODE_ESCAPE;
+    else if (arg == "Down") sc = SDL_SCANCODE_DOWN; else if (arg == "Up") sc = SDL_SCANCODE_UP; else if (arg == "Left") sc = SDL_SCANCODE_LEFT;
+    else if (arg == "Right") sc = SDL_SCANCODE_RIGHT; else if (arg == "Space") sc = SDL_SCANCODE_SPACE; else if (arg == "F") { sc = SDL_SCANCODE_F; mod = SDL_KMOD_LCTRL; }
+    if (sc == SDL_SCANCODE_UNKNOWN) { trace("script=unknown_key " + arg); return; }
+    if (mod != SDL_KMOD_NONE) push_key(SDL_SCANCODE_LCTRL, true, SDL_KMOD_LCTRL);
+    push_key(sc, true, mod);
+    script_key_up_.push_back({frame_ + 2, static_cast<int>(sc)});
+    if (mod != SDL_KMOD_NONE) script_key_up_.push_back({frame_ + 3, static_cast<int>(SDL_SCANCODE_LCTRL)});
+  } else if (cmd == "text") {
+    SDL_Event e;
+    SDL_zero(e);
+    e.type = SDL_EVENT_TEXT_INPUT;
+    e.common.timestamp = SDL_GetTicksNS();
+    e.text.windowID = SDL_GetWindowID(window_);
+    static std::string keep;
+    keep = arg;
+    e.text.text = keep.c_str();
+    SDL_PushEvent(&e);
+  } else if (cmd == "frames") {
+    script_wait_ = std::max(1, std::atoi(arg.c_str()));
+  } else if (cmd == "pad_attach") {
+    SDL_VirtualJoystickDesc desc;
+    SDL_INIT_INTERFACE(&desc);
+    desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+    desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
+    desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+    desc.name = "Script Pad";
+    script_pad_ = SDL_AttachVirtualJoystick(&desc);
+    script_joy_ = script_pad_ != 0 ? SDL_OpenJoystick(script_pad_) : nullptr;
+    script_wait_ = 20;
+  } else if (cmd == "pad" && script_joy_ != nullptr) {
+    const std::string name = arg.substr(0, arg.find(' '));
+    const bool down = arg.find("up") == std::string::npos;
+    static const std::pair<const char *, int> buttons[] = {{"south", SDL_GAMEPAD_BUTTON_SOUTH}, {"east", SDL_GAMEPAD_BUTTON_EAST}, {"dpad_up", SDL_GAMEPAD_BUTTON_DPAD_UP}, {"dpad_down", SDL_GAMEPAD_BUTTON_DPAD_DOWN},
+                                                           {"dpad_left", SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {"dpad_right", SDL_GAMEPAD_BUTTON_DPAD_RIGHT}, {"start", SDL_GAMEPAD_BUTTON_START}, {"back", SDL_GAMEPAD_BUTTON_BACK}};
+    for (const auto &b : buttons)
+      if (name == b.first) SDL_SetJoystickVirtualButton(script_joy_, b.second, down);
+    script_wait_ = down ? 6 : 3;
+  } else if (cmd == "expect") {
+    const std::string key = arg.substr(0, arg.find('=')), value = arg.substr(arg.find('=') + 1);
+    std::string actual;
+    if (key == "page") actual = page_name();
+    else if (key == "visible") actual = std::to_string(visible_entries().size());
+    else if (key == "modal") actual = modal_.kind == Modal::Kind::none ? "0" : "1";
+    trace(std::string("expect ") + (actual == value ? "ok " : "FAIL ") + arg + " actual=" + actual);
+  } else if (cmd == "dump") {
+    const ImGuiContext &g = *ImGui::GetCurrentContext();
+    trace(std::string("dump nav_window=") + (g.NavWindow != nullptr ? g.NavWindow->Name : "-") + " nav_id=" + std::to_string(g.NavId) + " nav_active=" + std::to_string(g.NavCursorVisible ? 1 : 0) +
+          " want_text=" + std::to_string(ImGui::GetIO().WantTextInput ? 1 : 0));
+  } else if (cmd == "quit") {
+    SDL_Event quit;
+    quit.type = SDL_EVENT_QUIT;
+    SDL_PushEvent(&quit);
+  }
+}
+
 int App::run() {
   if (!init_window()) return 1;
   init_ui();
@@ -709,10 +799,17 @@ int App::run() {
   autoplay_ = SDL_getenv("SEGARECOMP_GUI_AUTOPLAY") != nullptr;
   autoplay_pending_ = autoplay_;
   trace_path_ = SDL_getenv("SEGARECOMP_GUI_TRACE");
+  if (const char *script = SDL_getenv("SEGARECOMP_GUI_SCRIPT")) {
+    std::ifstream in(script);
+    for (std::string line; std::getline(in, line);)
+      if (!line.empty() && line[0] != '#') script_.push_back(line);
+    script_wait_ = 10;
+  }
   if (const char *shot = SDL_getenv("SEGARECOMP_SHOT")) shot_path_ = shot;
   if (const char *page = SDL_getenv("SEGARECOMP_SHOT_PAGE")) shot_page_ = page;
   if (const char *frames = SDL_getenv("SEGARECOMP_SHOT_FRAMES")) shot_frame_ = std::max(2, std::atoi(frames));
   request_status_refresh();
+  request_scan();  // sizes for the library cards (bounded, read-only, background)
   // Review/automation aids (not user features): preselect a ROM, optionally with a policy/model/region, like the original window did.
   if (const char *preselect = SDL_getenv("SEGARECOMP_SHOT_ROM")) {
     if (sms_probe_.valid()) { sms_optimized_available_ = sms_probe_.get(); }
@@ -747,6 +844,20 @@ int App::run() {
     ++frame_;
     process_events(running);
     update_jobs();
+    for (auto it = script_key_up_.begin(); it != script_key_up_.end();) {
+      if (frame_ >= it->first) {
+        SDL_Event e;
+        SDL_zero(e);
+        e.type = SDL_EVENT_KEY_UP;
+        e.common.timestamp = SDL_GetTicksNS();
+        e.key.windowID = SDL_GetWindowID(window_);
+        e.key.scancode = static_cast<SDL_Scancode>(it->second);
+        e.key.down = false;
+        SDL_PushEvent(&e);
+        it = script_key_up_.erase(it);
+      } else ++it;
+    }
+    run_script();
     ImGui_ImplSDLRenderer3_NewFrame();
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();

@@ -225,6 +225,15 @@ private:
   std::string shot_page_;
   int shot_frame_ = 14;
   bool restart_pending_ = false;
+  // GUI script driver (SEGARECOMP_GUI_SCRIPT): synthetic keys / gamepad presses for the keyboard- and gamepad-navigation tests.
+  std::vector<std::string> script_;
+  std::size_t script_at_ = 0;
+  int script_wait_ = 0;
+  SDL_JoystickID script_pad_ = 0;
+  SDL_Joystick *script_joy_ = nullptr;
+  std::vector<std::pair<int, int>> script_key_up_;  // (frame, scancode) key releases to deliver
+  void run_script();
+  [[nodiscard]] const char *page_name() const;
 };
 
 } // namespace launcher

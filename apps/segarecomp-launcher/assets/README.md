@@ -12,3 +12,10 @@ licensed under the [SIL Open Font License 1.1](fonts/Silkscreen-OFL.txt) (`fonts
 All assets here are loaded at runtime (`SDL_LoadFileFromPath` + `stb_image.h` for images,
 `ImGui::AddFontFromFileTTF` for fonts) via `segarecomp_launcher_asset_path`, never baked into
 generated C or committed as generated/binary launcher state.
+
+## UI textures (`ui/`)
+
+`ui/icon-*.png` (16x16 pixel icons, tinted/upscaled with nearest-neighbour sampling) and `ui/cover-placeholder.png` (the generic cover shown when a game
+has none) are original textures authored for the SEG-058 launcher overhaul in the palette of the launcher's own source constants
+(`#08142F` panel, `#233E78` border, `#1557C9` primary, ...). They contain no commercial art. Buttons, panels and bevels are drawn in code with the same
+colors; only icons and the placeholder are loaded from files. Text is always dynamic (Silkscreen).

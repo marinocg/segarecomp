@@ -94,10 +94,19 @@ inline void label_value(Ctx &ctx, float label_w, float value_w, const char *labe
 
 inline void heading(Ctx &ctx, const char *text, ImU32 color = col::text) {
   const ImVec2 origin = ImGui::GetCursorScreenPos();
-  const float px = ctx.u(15.0F);
-  draw_text(ImGui::GetWindowDrawList(), ctx.bold, px, color, origin, text);
-  ImGui::Dummy(ImVec2(10.0F, px + ctx.u(8.0F)));
+  const float px = ctx.u(12.5F);
+  draw_text(ImGui::GetWindowDrawList(), ctx.display, px, color == col::text ? rgba(120, 205, 255) : color, origin, text);
+  ImGui::Dummy(ImVec2(10.0F, px + ctx.u(12.0F)));
 }
+
+inline void page_header(Ctx &ctx, float w, const char *title, const char *subtitle) {
+  const ImVec2 p = ImGui::GetCursorScreenPos();
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  draw_text(dl, ctx.display, ctx.u(15.0F), rgba(120, 205, 255), p, title);
+  draw_text(dl, ctx.regular, ctx.u(12.5F), col::text2, ImVec2(p.x + text_width(ctx.display, ctx.u(15.0F), title) + ctx.u(14.0F), p.y + ctx.u(1.0F)), subtitle);
+  ImGui::Dummy(ImVec2(w, ctx.u(26.0F)));
+}
+
 
 inline void rule(Ctx &ctx, float w) {
   const ImVec2 origin = ImGui::GetCursorScreenPos();
