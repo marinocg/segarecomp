@@ -39,7 +39,9 @@ Good to know
   exactly what goes and what stays. "Cache folder" opens it.
 * If a build fails open the game and choose "View logs"; the same text is in build.log inside the cache folder
   (games/<id>.failed/). Attach it to bug reports.
-* Covers: Change cover picks a local image (PNG or JPEG). Segarecomp downloads nothing.
+* Covers: Change cover picks a local image (PNG or JPEG). "Download cover (Libretro)" in a game's menu, or
+  Settings > Metadata > "Download missing covers", fetches box art from Libretro's public thumbnails through
+  this computer's curl, only when you ask; only the game's name is sent, never ROM data or hashes.
 * On Windows keep the package path to characters in your system code page.
 * macOS: the app is not notarized. On first launch use right-click > Open, or run
   xattr -dr com.apple.quarantine Segarecomp.app

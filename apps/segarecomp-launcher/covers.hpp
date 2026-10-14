@@ -1,8 +1,7 @@
 #pragma once
 
-// Library covers: user-chosen local images (validated, copied into the library's covers folder) and the conservative Libretro
-// thumbnail naming used to point the user at a public image. The launcher downloads nothing (see docs/product/launcher-library.md):
-// no HTTPS client is packaged for all three platforms, so the supported route is a local file, optionally found via the browser.
+// Library covers: images validated and copied into the library's covers folder, whether chosen locally or downloaded from Libretro on an
+// explicit request (cover_download.hpp; see docs/product/launcher-library.md). Every cover goes through import_cover.
 
 #include <filesystem>
 #include <string>
@@ -25,12 +24,9 @@ bool remove_cover_file(const std::filesystem::path &covers_dir, const std::strin
 // A cover already stored for this ROM digest (e.g. after the entry was removed and imported again), or "".
 [[nodiscard]] std::string existing_cover_for(const std::filesystem::path &covers_dir, const std::string &sha256);
 
-// ---- Libretro thumbnails (https://thumbnails.libretro.com/), conservative exact-name candidates ----
+// ---- Libretro thumbnails (https://thumbnails.libretro.com/), naming (cover_download.hpp finds the name) ----
 // Directory name of the system tree ("" for an unknown platform).
 [[nodiscard]] std::string libretro_system_dir(const std::string &platform_id);
-// Names follow the No-Intro style "Title (Region)"; a ROM header does not tell the exact set name, so these are CANDIDATES in the user's
-// preferred region order, never a verified match. `title` is the display title; characters Libretro replaces (&*/:`<>?\|) become '_'.
-[[nodiscard]] std::vector<std::string> libretro_candidate_names(const std::string &title, const std::vector<std::string> &preferred_regions);
 // https://thumbnails.libretro.com/<system>/Named_Boxarts/<percent-encoded name>.png ("" when the platform or title is unusable).
 [[nodiscard]] std::string libretro_candidate_url(const std::string &platform_id, const std::string &name);
 [[nodiscard]] std::string percent_encode(const std::string &text);

@@ -1,5 +1,6 @@
 // Covers, Libretro candidate naming and launcher settings: hostile and offline-safe. No window, no network.
 
+#include "cover_download.hpp"
 #include "covers.hpp"
 #include "launcher_settings.hpp"
 #include "library_catalog.hpp"
@@ -12,6 +13,8 @@
 #include <algorithm>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <set>
 #include <sstream>
 #include <vector>
 
@@ -120,16 +123,95 @@ int main() {
     if (!ec) expect(!remove_cover_file(covers, "link.png") && fs::exists(dir / "outside.txt"), "a symlink is never followed or deleted");
     expect(remove_cover_file(covers, "x.png") && !fs::exists(covers / "x.png"), "a plain cover file is removed");
   }
-  {  // Libretro candidate naming: conservative, preferred-region ordered, never claimed as a match
-    const auto names = libretro_candidate_names("Fictional  Game: The Sequel", {"Europe", "USA"});
-    expect(names.size() == 2 && names[0] == "Fictional Game_ The Sequel (Europe)" && names[1] == "Fictional Game_ The Sequel (USA)", "region order and Libretro's replacement of reserved characters");
-    expect(libretro_candidate_names("", {"USA"}).empty(), "no title, no candidate");
-    expect(libretro_candidate_names("Game", {}).empty(), "no region preference, no guessed region");
-    expect(libretro_candidate_names("Game", {"USA", "USA"}).size() == 1, "duplicate regions collapse");
+  {  // Libretro naming: system trees and https URLs
     expect(libretro_system_dir("genesis") == "Sega - Mega Drive - Genesis" && libretro_system_dir("master-system") == "Sega - Master System - Mark III" && libretro_system_dir("saturn").empty(), "system trees");
     expect(libretro_candidate_url("genesis", "Fictional Game (USA)") == "https://thumbnails.libretro.com/Sega%20-%20Mega%20Drive%20-%20Genesis/Named_Boxarts/Fictional%20Game%20%28USA%29.png", "percent-encoded https URL");
     expect(libretro_candidate_url("saturn", "x").empty() && libretro_candidate_url("genesis", "").empty(), "unusable inputs give no URL");
     expect(libretro_candidate_url("genesis", "a b").rfind("https://", 0) == 0, "only https is ever produced");
+    expect(libretro_safe_name("A&B*C/D:E`F<G>H?I\\J|K") == "A_B_C_D_E_F_G_H_I_J_K", "Libretro's reserved characters become '_'");
+  }
+  {  // Libretro candidates: ROM file names first, Title Case for upper-case headers, multi-region tags in the user's order
+    CoverQuery q{"genesis", {"FICTIONAL  RACER II", "Fictional Racer: Turbo"}, {"/roms/Fictional Racer II (USA, Europe) (Rev 1).md", "/lib/roms/" + std::string(64, 'a') + ".md"}, {"Europe", "USA"}};
+    const auto names = libretro_cover_candidates(q);
+    expect(!names.empty() && names[0] == "Fictional Racer II (USA, Europe) (Rev 1)", "a tagged No-Intro file name is tried first, exactly");
+    expect(std::none_of(names.begin(), names.end(), [](const std::string &n) { return n.find("aaaaaaaa") != std::string::npos; }), "extracted copies (digest names) are never used as titles");
+    expect(std::find(names.begin(), names.end(), "Fictional Racer II (USA, Europe)") != names.end(), "the tag-less file name gets region tags too");
+    const auto at = [&](const std::string &n) { return std::find(names.begin(), names.end(), n) - names.begin(); };
+    expect(at("Fictional Racer II (Europe)") < at("Fictional Racer II (USA)"), "preferred region order: Europe before USA");
+    expect(at("Fictional Racer II (USA, Europe)") < at("Fictional Racer II (Japan)"), "multi-region tags are tried before other regions");
+    expect(std::find(names.begin(), names.end(), "Fictional Racer_ Turbo (USA, Europe)") != names.end(), "titles are safe-named");
+    expect(names.size() <= 24 && std::set<std::string>(names.begin(), names.end()).size() == names.size(), "bounded and unique");
+    CoverQuery caps{"genesis", {"SPACE   PILOT"}, {}, {"USA"}};
+    const auto cn = libretro_cover_candidates(caps);
+    expect(!cn.empty() && cn[0] == "Space Pilot (USA, Europe)", "an upper-case header title becomes Title Case: " + (cn.empty() ? std::string() : cn[0]));
+    expect(std::find(cn.begin(), cn.end(), "SPACE PILOT (USA)") != cn.end(), "the title as written is still tried");
+    const auto minor = libretro_cover_candidates(CoverQuery{"genesis", {"THE STREETS OF THE CITY 2"}, {}, {"USA"}});
+    expect(minor.size() >= 2 && minor[0] == "The Streets of the City 2 (USA, Europe)" && minor[1] == "The Streets Of The City 2 (USA, Europe)", "both No-Intro capitalisations of minor words are tried");
+    expect(libretro_cover_candidates(CoverQuery{"genesis", {""}, {}, {"USA"}}).empty(), "no title, no candidate");
+  }
+  {  // Libretro directory listing and name picking (offline: a synthetic listing)
+    const std::string html = "<html><body><a href=\"../\">../</a>\n<a href=\"Space%20Pilot%20%28Japan%29.png\">x</a>\n"
+                             "<a href=\"Space%20Pilot%20%28USA%2C%20Europe%29%20%28Beta%29.png\">x</a>\n<a href=\"Space%20Pilot%20%28Europe%29.png\">x</a>\n"
+                             "<a href=\"Lion%20Tale%2C%20The%20%28World%29.png\">x</a>\n<a href=\"Hero%20_%20Sidekick%20%28USA%29.png\">x</a>\n"
+                             "<a href=\"Tom%20&amp;%20Co%20%28USA%29.png\">x</a>\n<a href=\"sub/Nested.png\">x</a>\n<a href=\"notes.txt\">x</a></body></html>";
+    const auto listing = parse_libretro_listing(html);
+    expect(listing.size() == 6 && listing[0] == "Space Pilot (Japan)" && listing[5] == "Tom & Co (USA)", "png entries of this folder, percent- and entity-decoded");
+    expect(libretro_base_key("Lion Tale, The (World)") == libretro_base_key("THE LION TALE") && libretro_base_key("Hero _ Sidekick (USA)") == libretro_base_key("Hero and Sidekick"),
+           "base keys ignore case, tags, trailing articles and '&'");
+    expect(pick_libretro_name(CoverQuery{"genesis", {"SPACE PILOT"}, {}, {"Europe"}}, listing) == "Space Pilot (Europe)", "an exact candidate wins");
+    expect(pick_libretro_name(CoverQuery{"genesis", {"SPACE-PILOT"}, {}, {"USA", "Europe", "Japan"}}, listing) == "Space Pilot (Europe)", "fuzzy match: a release before a beta, then region preference");
+    expect(pick_libretro_name(CoverQuery{"genesis", {"SPACE-PILOT"}, {}, {"Japan", "USA"}}, listing) == "Space Pilot (Japan)", "the user's region order decides");
+    expect(pick_libretro_name(CoverQuery{"genesis", {"THE LION TALE"}, {}, {"USA"}}, listing) == "Lion Tale, The (World)", "No-Intro article order is matched");
+    expect(pick_libretro_name(CoverQuery{"genesis", {"Hero & Sidekick"}, {}, {"USA"}}, listing) == "Hero _ Sidekick (USA)", "'&' titles match their '_' thumbnails");
+    expect(pick_libretro_name(CoverQuery{"genesis", {"Unknown Game"}, {}, {"USA"}}, listing).empty(), "no match is no guess");
+  }
+  {  // the download sequence, with a fake transport: listing first, official host before the mirror, 404 final, unreachable hosts skipped
+    const fs::path work = dir / "cover-work";
+    std::vector<std::string> calls;
+    std::map<std::string, int> answers;
+    const HttpGet fake = [&](const std::string &url, const fs::path &out) {
+      calls.push_back(url);
+      expect(url.rfind("https://", 0) == 0, "only https is requested: " + url);
+      const auto it = answers.find(url);
+      const int r = it == answers.end() ? 1 : it->second;
+      if (r == 0) spit(out, url.back() == '/' ? "<a href=\"Space%20Pilot%20%28Europe%29.png\">" : "PNG");
+      return r;
+    };
+    const std::string listing_url = "https://thumbnails.libretro.com/Sega%20-%20Mega%20Drive%20-%20Genesis/Named_Boxarts/";
+    const std::string official = listing_url + "Space%20Pilot%20%28Europe%29.png";
+    const std::string mirror = "https://raw.githubusercontent.com/libretro-thumbnails/Sega_-_Mega_Drive_-_Genesis/master/Named_Boxarts/Space%20Pilot%20%28Europe%29.png";
+    const CoverQuery q{"genesis", {"SPACE PILOT"}, {}, {"Europe"}};
+    answers = {{listing_url, 0}, {official, 0}};
+    CoverFetch f = fetch_libretro_cover(q, work, fake);
+    expect(f.ok && f.used_index && f.matched_name == "Space Pilot (Europe)" && f.source == "thumbnails.libretro.com" && slurp(f.image) == "PNG", "listing match downloaded from Libretro: " + f.error);
+    expect(calls.size() == 2 && calls[0] == listing_url && calls[1] == official, "one listing request, one image request");
+    expect(fs::exists(work / "libretro-genesis.txt") && !fs::exists(work / "listing.html"), "the listing is cached, the page is not kept");
+    calls.clear();
+    answers = {{official, 2}, {mirror, 0}};
+    f = fetch_libretro_cover(q, work, fake);
+    expect(f.ok && f.used_index && f.source.find("raw.githubusercontent.com") == 0, "cached listing reused; unreachable Libretro falls back to the mirror");
+    expect(calls.size() == 2 && calls[0] == official && calls[1] == mirror, "no second listing request within a week");
+    calls.clear();
+    answers = {{official, 1}, {mirror, 0}};
+    f = fetch_libretro_cover(q, work, fake);
+    expect(!f.ok && calls.size() == 1 && !fs::exists(work / "download.img"), "a 404 from Libretro is final (the mirror is not asked), no file left: " + f.error);
+    calls.clear();
+    fs::remove(work / "libretro-genesis.txt");
+    answers = {};  // no listing (e.g. blocked): candidate probing; every name 404 on Libretro
+    f = fetch_libretro_cover(q, work, fake);
+    expect(!f.ok && !f.used_index && calls.size() == 1 + libretro_cover_candidates(q).size() && f.error.find("No Libretro box art") == 0, "probing tries each candidate once");
+    calls.clear();
+    answers = {{listing_url, 2}};
+    for (const auto &name : libretro_cover_candidates(q)) answers[listing_url + percent_encode(name) + ".png"] = 2;
+    answers["https://raw.githubusercontent.com/libretro-thumbnails/Sega_-_Mega_Drive_-_Genesis/master/Named_Boxarts/" + percent_encode(libretro_cover_candidates(q)[2]) + ".png"] = 0;
+    f = fetch_libretro_cover(q, work, fake);
+    expect(f.ok && !f.used_index && f.matched_name == libretro_cover_candidates(q)[2] && calls.size() == 1 + 1 + 3, "Libretro unreachable: asked once, then the mirror probes in order");
+    calls.clear();
+    const HttpGet down = [&](const std::string &url, const fs::path &) { calls.push_back(url); return 2; };
+    f = fetch_libretro_cover(q, work, down);
+    expect(!f.ok && calls.size() == 3 && f.error.find("could not be reached") != std::string::npos, "both hosts down: three requests, then a plain reason");
+    expect(!fetch_libretro_cover(CoverQuery{"saturn", {"X"}, {}, {}}, work, down).ok, "unknown platform refused");
+    fs::remove_all(work);
   }
   {  // launcher settings: defaults, round trip, damaged file, clamps
     const fs::path file = dir / "library" / "launcher-settings.json";

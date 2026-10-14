@@ -1,5 +1,6 @@
 #include "app.hpp"
 
+#include "cover_download.hpp"
 #include "covers.hpp"
 #include "pixel_assets.hpp"
 #include "rom_zip.hpp"
@@ -218,6 +219,8 @@ void App::shutdown() {
   if (maint_job_.valid()) maint_job_.wait();
   if (sms_probe_.valid()) sms_probe_.wait();
   if (hid_job_.valid()) hid_job_.wait();
+  cover_cancel_ = true;
+  if (cover_job_.valid()) cover_job_.wait();
   trace("shutdown=textures");
   for (auto &entry : cover_cache_)
     if (entry.second != nullptr) SDL_DestroyTexture(entry.second);
@@ -391,6 +394,87 @@ void App::browse_locate(const std::string &id) {
 void App::browse_cover(const std::string &id) {
   static const SDL_DialogFileFilter filters[] = {{"Images (PNG, JPEG)", "png;jpg;jpeg"}};
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "cover", id}, window_, filters, 1, nullptr, false);
+}
+
+bool App::cover_download_possible(const LibraryEntry &entry) const {
+  return !cover_job_.valid() && !libretro_system_dir(entry.platform_id).empty() && !entry.title().empty();
+}
+
+void App::start_cover_download(const std::vector<std::string> &ids) {
+  if (cover_job_.valid()) return;
+  std::vector<std::pair<std::string, std::pair<std::string, CoverQuery>>> work;  // id -> (sha256, query)
+  for (const auto &id : ids) {
+    const LibraryEntry *entry = catalog_.find_id(id);
+    if (entry == nullptr || !cover_download_possible(*entry)) continue;
+    CoverQuery q;
+    q.platform_id = entry->platform_id;
+    if (!entry->display_title.empty()) q.titles.push_back(entry->display_title);
+    if (!entry->detected_title.empty()) q.titles.push_back(entry->detected_title);
+    for (const auto &rom : entry->rom_paths) q.rom_names.push_back(rom);  // only the file name is used
+    q.preferred_regions = settings_.preferred_regions;
+    work.push_back({id, {entry->sha256, std::move(q)}});
+  }
+  if (work.empty()) { toast("No game here can be looked up on Libretro."); return; }
+  cover_total_ = static_cast<int>(work.size());
+  cover_done_ = 0;
+  cover_cancel_ = false;
+  trace("cover=started count=" + std::to_string(work.size()));
+  cover_job_ = std::async(std::launch::async, [work = std::move(work), dir = cache_dir_ / "cover-downloads", covers = covers_dir_, done = &cover_done_, cancel = &cover_cancel_] {
+    std::vector<CoverDownload> results;
+    const HttpGet get = curl_http_get();
+    const bool have_curl = !system_curl().empty();
+    for (const auto &[id, item] : work) {
+      if (cancel->load()) break;
+      CoverDownload r;
+      r.id = id;
+      if (!have_curl) r.error = "curl is not available on this computer, so nothing can be downloaded. Choose a local image instead.";
+      else {
+        const CoverFetch fetched = fetch_libretro_cover(item.second, dir, get);
+        r.matched_name = fetched.matched_name;
+        r.source = fetched.source;
+        if (!fetched.ok) r.error = fetched.error;
+        else {  // the same validation as a local image (PNG/JPEG signature, size and dimensions), then an atomic copy
+          const CoverImport imported = import_cover(fetched.image, covers, item.first);
+          if (imported.ok) r.file_name = imported.file_name;
+          else r.error = "The downloaded image cannot be used: " + imported.error;
+          std::error_code ec;
+          fs::remove(fetched.image, ec);
+        }
+      }
+      results.push_back(std::move(r));
+      ++*done;
+    }
+    return results;
+  });
+}
+
+void App::poll_cover_download() {
+  if (!cover_job_.valid() || cover_job_.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
+  const std::vector<CoverDownload> results = cover_job_.get();
+  int added = 0;
+  std::vector<std::string> problems;
+  for (const auto &r : results) {
+    LibraryEntry *entry = catalog_.find_id(r.id);
+    if (!r.error.empty() || entry == nullptr) {
+      trace("cover=failed id=" + r.id + " reason=" + r.error);
+      if (entry != nullptr) problems.push_back(entry->title() + ": " + r.error);
+      continue;
+    }
+    if (!entry->cover.empty() && entry->cover != r.file_name) remove_cover_file(covers_dir_, entry->cover);
+    entry->cover = r.file_name;
+    if (auto it = cover_cache_.find(r.file_name); it != cover_cache_.end()) { if (it->second) SDL_DestroyTexture(it->second); cover_cache_.erase(it); }
+    cover_missing_.erase(r.file_name);
+    trace("cover=downloaded id=" + r.id + " name=" + r.matched_name + " source=" + r.source);
+    ++added;
+  }
+  if (added > 0) save_catalog();
+  if (results.size() == 1) {
+    if (added == 1) toast("Cover downloaded: \"" + results[0].matched_name + "\" from " + results[0].source + ".");
+    else if (!problems.empty()) show_message("No cover was downloaded", {problems[0]});
+  } else if (!results.empty()) {
+    toast(std::to_string(added) + " of " + std::to_string(results.size()) + " covers downloaded.", added == 0);
+    if (!problems.empty()) { problems.resize(std::min<std::size_t>(problems.size(), 8)); show_message("Some covers were not downloaded", problems); }
+  }
 }
 
 void App::start_import(std::vector<std::string> paths, bool build_after) {
@@ -701,6 +785,7 @@ void App::update_jobs() {
   poll_scan();
   poll_import();
   poll_maintenance();
+  poll_cover_download();
   if (sms_probe_.valid() && sms_probe_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
     sms_optimized_available_ = sms_probe_.get();
     request_status_refresh();

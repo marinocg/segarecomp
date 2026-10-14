@@ -68,31 +68,6 @@ std::string libretro_system_dir(const std::string &platform_id) {
   return {};
 }
 
-std::vector<std::string> libretro_candidate_names(const std::string &title, const std::vector<std::string> &preferred_regions) {
-  std::string clean;
-  for (const char c : title) {
-    if (std::string("&*/:`<>?\\|\"").find(c) != std::string::npos) clean.push_back('_');
-    else clean.push_back(c);
-  }
-  // collapse whitespace, trim
-  std::string collapsed;
-  bool space = false;
-  for (const char c : clean) {
-    if (std::isspace(static_cast<unsigned char>(c))) { space = true; continue; }
-    if (space && !collapsed.empty()) collapsed.push_back(' ');
-    space = false;
-    collapsed.push_back(c);
-  }
-  std::vector<std::string> names;
-  if (collapsed.empty()) return names;
-  for (const auto &region : preferred_regions) {
-    if (region.empty() || region.size() > 24) continue;
-    const std::string name = collapsed + " (" + region + ")";
-    if (std::find(names.begin(), names.end(), name) == names.end()) names.push_back(name);
-  }
-  return names;
-}
-
 std::string percent_encode(const std::string &text) {
   static const char *hex = "0123456789ABCDEF";
   std::string out;

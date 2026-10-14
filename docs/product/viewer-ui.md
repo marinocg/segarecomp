@@ -54,8 +54,8 @@ pause menu next to 1x settings pages at 1080x740 would make the pages jump in si
 
 Earlier, launcher visuals were unchanged by the viewer phase. Its only source changes
 here are asynchronous HID diagnostics and cached/no-passive-I/O diagnostic facts.
-Cover HTTPS downloading and build cancellation remain **unsupported**; manual
-local covers and the explicitly labelled browser lookup remain available.
+Build cancellation remains **unsupported**. Covers are local images, an explicit
+Libretro download (only on request, see `launcher-library.md`) or the browser lookup.
 
 ## New-binary synthetic captures
 

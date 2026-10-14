@@ -38,7 +38,7 @@ target_compile_definitions(segarecomp_launcher_core PUBLIC
 segarecomp_enable_warnings(segarecomp_launcher_core)
 
 # Image loading (the launcher's pixel-art assets and user-chosen covers) and the cover/Libretro naming helpers; no window needed.
-add_library(segarecomp_launcher_ui_support STATIC pixel_assets.cpp covers.cpp rom_zip.cpp)
+add_library(segarecomp_launcher_ui_support STATIC pixel_assets.cpp covers.cpp cover_download.cpp rom_zip.cpp)
 target_include_directories(segarecomp_launcher_ui_support SYSTEM PRIVATE ${_stb_dir})
 target_include_directories(segarecomp_launcher_ui_support PUBLIC .)
 target_link_libraries(segarecomp_launcher_ui_support PUBLIC SDL3::SDL3 segarecomp_launcher_core)

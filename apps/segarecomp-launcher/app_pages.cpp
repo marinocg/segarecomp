@@ -383,14 +383,24 @@ void App::draw_settings(float full_w, float h) {
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Restoring defaults and clearing the library are separate actions. Neither deletes ROMs or build folders.");
   } else if (settings_tab_ == 1) {
     section("METADATA & COVERS");
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "Titles come from the ROM header or file name and can be renamed on the game's page. Covers are images you choose; the generic placeholder is shown otherwise.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "Titles come from the ROM header or file name and can be renamed on the game's page. Covers are images you choose or download from Libretro; the placeholder is shown otherwise.");
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     row_label("Online lookup");
-    paragraph(ctx_, ctx_.bold, ctx_.u(13.0F), col::info, w, "Offline / manual cover mode");
-    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::warn, w, "Not offered: a trusted HTTPS client that works in all three self-contained releases is not packaged, and shelling out to curl or using plain HTTP would be unsafe. No ROM bytes or hashes are ever sent anywhere. Supported instead: Change cover (local image) and 'Find cover online' (opens your browser).");
+    paragraph(ctx_, ctx_.bold, ctx_.u(13.0F), col::info, w, "Libretro box art, on request only");
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::text2, w, "Nothing is downloaded unless you ask: 'Download cover (Libretro)' in a game's menu, or the button below. Only the thumbnail file name (the game's title and region) is requested, over HTTPS, through this computer's curl; no ROM bytes or hashes are ever sent. Every image is checked like a local one before it is used.");
+    {
+      std::size_t without = 0;
+      std::vector<std::string> ids;
+      for (const auto &e : catalog_.entries())
+        if (e.cover.empty() && !libretro_system_dir(e.platform_id).empty()) { ++without; ids.push_back(e.id()); }
+      const std::string label = cover_job_.valid() ? "Downloading " + std::to_string(cover_done_.load()) + " / " + std::to_string(cover_total_) + "..."
+                                                   : "Download missing covers (" + std::to_string(without) + ")";
+      if (button(ctx_, "dl_covers", label.c_str(), ImVec2(ctx_.u(280.0F), ctx_.u(30.0F)), Style::secondary, !cover_job_.valid() && without > 0, ctx_.icon("import")))
+        start_cover_download(ids);
+    }
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Provider");
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text, w - lw, "Libretro thumbnails (thumbnails.libretro.com): Named_Boxarts under 'Sega - Mega Drive - Genesis' and 'Sega - Master System - Mark III'. Images belong to their rights holders and the provider's terms apply; Segarecomp bundles none.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text, w - lw, "Libretro thumbnails (thumbnails.libretro.com, or its libretro-thumbnails mirror on raw.githubusercontent.com when it cannot be reached): Named_Boxarts under 'Sega - Mega Drive - Genesis' and 'Sega - Master System - Mark III'. Images belong to their rights holders and the provider's terms apply; Segarecomp bundles none.");
     row_label("Preferred regions");
     {
       std::string text;
@@ -401,10 +411,10 @@ void App::draw_settings(float full_w, float h) {
       if (button(ctx_, "rot", "Rotate order", ImVec2(ctx_.u(140.0F), ctx_.u(28.0F)), Style::secondary)) { std::rotate(settings_.preferred_regions.begin(), settings_.preferred_regions.begin() + 1, settings_.preferred_regions.end()); save = true; }
       ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
     }
-    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Used only to order the guessed file names ('Title (USA)', 'Title (Europe)', ...) when you open the Libretro page. A guess is never presented as a verified match.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Orders the regions when a game's box art is looked up ('Title (USA)', 'Title (Europe)', ...). A beta, prototype or unlicensed cover is chosen only when nothing else exists.");
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Offline");
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w - lw, "Everything works offline. Covers you choose are stored in the covers folder next to the library and survive cleanups; removing a cover returns the placeholder.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w - lw, "Everything else works offline. Covers are stored in the covers folder next to the library and survive cleanups; removing a cover returns the placeholder.");
     if (button(ctx_, "open_covers", "Open covers folder", ImVec2(ctx_.u(200.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("folder"))) { std::error_code ec; fs::create_directories(covers_dir_, ec); SDL_OpenURL(("file://" + u8s(covers_dir_)).c_str()); }
   } else if (settings_tab_ == 2) {
     section("BUILD & RUNTIME");

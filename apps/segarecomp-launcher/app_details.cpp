@@ -10,6 +10,8 @@
 
 #include "app.hpp"
 
+#include "cover_download.hpp"
+
 #include "app_helpers.hpp"
 #include "covers.hpp"
 
@@ -128,10 +130,14 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
     save_catalog();
     toast("Cover removed; the placeholder is shown.");
   }
+  if (menu_item(ctx_, "m_dl_cover", cover_job_.valid() ? "Downloading cover..." : "Download cover (Libretro)", "Looks up the box art by name only", ctx_.icon("import"), mw, cover_download_possible(*entry)))
+    start_cover_download({id});
   {
-    const auto names = libretro_candidate_names(entry->title(), settings_.preferred_regions);
+    CoverQuery q{entry->platform_id, {entry->title(), entry->detected_title}, {}, settings_.preferred_regions};
+    for (const auto &rom : entry->rom_paths) q.rom_names.push_back(rom);  // only the file name is used
+    const auto names = libretro_cover_candidates(q, 1);
     const std::string url = names.empty() ? std::string() : libretro_candidate_url(entry->platform_id, names.front());
-    if (menu_item(ctx_, "m_web", "Find cover online", "Opens a Libretro name guess in your browser", ctx_.icon("search"), mw, !url.empty())) SDL_OpenURL(url.c_str());
+    if (menu_item(ctx_, "m_web", "Find cover online", "Opens your web browser", ctx_.icon("search"), mw, !url.empty())) SDL_OpenURL(url.c_str());
   }
   if (menu_item(ctx_, "m_sha", "Copy ROM SHA-256", nullptr, ctx_.icon("file"), mw)) { SDL_SetClipboardText(entry->sha256.c_str()); toast("SHA-256 copied."); }
   if (info.rom_missing && menu_item(ctx_, "m_locate", "Locate ROM...", "Re-link a moved ROM (same SHA-256)", ctx_.icon("folder"), mw)) browse_locate(id);

@@ -77,7 +77,7 @@ screenshots are not reachable by any plan. Tests: `storage_test` (fake trees, sy
 * The two viewers share ~1,800 lines instead of duplicating them; the console adapters shrink slightly.
 * A per-game compile compiles five more small C files (a few seconds on the bundled Zig, cached by the Zig cache).
 * Known limits: no `SDL_GPU` shaders; audio output device selection is not offered (SDL follows the OS default; gain/mute are); Genesis has no reset
-  seam so Reset is Master System only; the launcher cannot download covers (see `docs/product/launcher-library.md`).
+  seam so Reset is Master System only; covers are downloaded only on an explicit request, through the system curl, by name (see `docs/product/launcher-library.md`).
 
 ## Addendum: corrective delivery (hardware input, readable UI, art-led launcher)
 

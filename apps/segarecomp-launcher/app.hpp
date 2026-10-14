@@ -152,6 +152,10 @@ private:
   void browse_import();
   void browse_locate(const std::string &id);
   void browse_cover(const std::string &id);
+  // Libretro box art, only on an explicit request: one game (menus) or every game without a cover (Settings > Metadata), on a worker.
+  void start_cover_download(const std::vector<std::string> &ids);
+  void poll_cover_download();
+  [[nodiscard]] bool cover_download_possible(const LibraryEntry &entry) const;
   void trace(const std::string &line);
   [[nodiscard]] std::vector<const LibraryEntry *> visible_entries() const;
   SDL_Texture *cover_texture(const LibraryEntry &entry);
@@ -215,6 +219,11 @@ private:
   bool status_pending_ = false, status_again_ = false;
   std::map<std::string, SDL_Texture *> cover_cache_;
   std::map<std::string, bool> cover_missing_;
+  struct CoverDownload { std::string id, file_name, matched_name, source, error; };
+  std::future<std::vector<CoverDownload>> cover_job_;
+  std::atomic<int> cover_done_{0};
+  std::atomic<bool> cover_cancel_{false};
+  int cover_total_ = 0;
   // ---- sms probe (experimental Optimized availability, asked of the product CLI once) ----
   bool sms_optimized_available_ = false;
   std::future<bool> sms_probe_;

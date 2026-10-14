@@ -94,14 +94,31 @@ are excluded) or a soft limit that only reminds you. The default is *never*.
 
 ## Covers and metadata provider
 
-Covers are local images you choose (PNG or JPEG, up to 2 MiB and 2048 px, validated by content and fully decoded) copied into `library/covers/<sha256>.<ext>`.
-They survive cleanup and re-import. **Segarecomp does not download covers.** The Libretro thumbnail trees (`Sega - Mega Drive - Genesis`,
-`Sega - Master System - Mark III`, `Named_Boxarts` at `https://thumbnails.libretro.com/`) are public, but a trusted HTTPS client that works inside the
-self-contained Windows, macOS and Linux packages is not available without adding a TLS dependency, and shelling out to `curl`, plain HTTP or embedded
-keys are not acceptable. So the supported route is *Change cover*, plus *Find cover online*, which opens your browser at a **name guess**
-(`Title (USA)` in your preferred region order, reserved characters replaced as Libretro does); the guess may not exist and is never presented as a
-match. ROM bytes and hashes are never sent anywhere. Images belong to their rights holders; none is bundled or committed. ScreenScraper is not used (it
-needs developer credentials).
+Covers are images (PNG or JPEG, up to 2 MiB and 2048 px, validated by content and fully decoded) copied into `library/covers/<sha256>.<ext>`.
+They survive cleanup and re-import. There are three ways to get one:
+
+* **Change cover** picks a local image.
+* **Download cover (Libretro)** (a game's *More* / context menu) and **Download missing covers** (Settings > Metadata) fetch the box art from the
+  public Libretro thumbnail trees (`Sega - Mega Drive - Genesis`, `Sega - Master System - Mark III`, `Named_Boxarts`). This happens **only on that
+  explicit action**, on a worker thread, and the downloaded file goes through the same validation as a local image before it is used.
+* **Find cover online** opens your browser at the likeliest Libretro name.
+
+How the name is found (`cover_download.cpp`): Libretro names thumbnails like No-Intro sets (`Streets of Rage 2 (USA)`, `Sonic The Hedgehog (USA, Europe)`),
+and a ROM header does not carry that name, which is why the earlier single exact guess (`<title> (<first region>)`) usually missed. The lookup now
+tries, in order: the tracked ROM file names (No-Intro sets are named exactly like the thumbnails; extracted ZIP copies, named by digest, are skipped),
+then the display and header titles as written and in Title Case (upper-case Genesis headers; both No-Intro capitalisations of minor words), each with
+the multi-region tags Libretro uses (`(USA, Europe)`, `(World)`, `(Japan, USA)`, ...) in your preferred region order. When Libretro's directory
+listing of box arts can be read (fetched at most once a week and cached in the cache folder), the best listed name whose base (case, tags, `&`/`and`
+and a trailing `, The` ignored) matches is chosen, preferring released versions over betas, prototypes and unlicensed sets and then your region
+order; with no listing the candidate names are probed one by one (at most 24).
+
+Transport: the operating system's `curl` (Windows 10 and later, macOS and Linux distributions ship it; looked up at fixed system paths, never through
+`PATH`), started with a fixed argument vector (no shell), `https` only also across redirects, at most 5 redirects, an 8 MiB and 45 s limit, and the
+HTTP status checked (only 200 is a file, only 404/410 mean "no such cover"; anything else, such as a proxy refusal, means "unreachable").
+`thumbnails.libretro.com` is asked first; while it cannot be reached the `libretro-thumbnails` mirror on `raw.githubusercontent.com` is used. Only
+the thumbnail file name is requested: **ROM bytes and hashes are never sent anywhere**. Without curl nothing is downloaded and the reason is shown.
+Images belong to their rights holders and the provider's terms apply; none is bundled or committed. ScreenScraper is not used (it needs developer
+credentials).
 
 ## In-game viewer (Genesis and Master System)
 
@@ -191,6 +208,6 @@ python3 tools/launcher_visual_capture.py --launcher <staged-package>/Segarecomp 
   `SDL_Quit`, so its last line went to a garbage file name in the working directory.
 
 Remaining differences from the concepts, with reasons: long pages still scroll at the minimum size and below the Details configuration (provenance is
-secondary by design); there are no invented compatibility ratings, build percentages, storage figures, cover downloads or commercial covers. **Cover
-downloads remain unsupported** (manual local art and an explicit browser lookup). **SDL_GPU is not implemented**; SDL_Renderer remains the presenter.
+secondary by design); there are no invented compatibility ratings, build percentages, storage figures or bundled commercial covers. Cover
+downloads happen only on an explicit request (see *Covers and metadata provider*). **SDL_GPU is not implemented**; SDL_Renderer remains the presenter.
 **Audio device selection is not implemented**. **Build cancellation is not implemented**; no Cancel button is offered and closing waits for the build.
