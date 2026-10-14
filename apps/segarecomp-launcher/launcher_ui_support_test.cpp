@@ -31,9 +31,9 @@ int main() {
   fs::create_directories(dir);
   const fs::path covers = dir / "library" / "covers";
   const std::string sha(64, 'a');
-  const fs::path good = asset_path("ui/cover-placeholder.png");  // a real 192x256 PNG shipped with the launcher
+  const fs::path good = asset_path("icon-drop.png");  // a real PNG shipped with the launcher
 
-  expect(fs::is_regular_file(good), "the placeholder cover asset exists");
+  expect(fs::is_regular_file(good), "a shipped PNG asset exists");
   {  // a valid image is validated and copied; the original is untouched
     const std::string before = slurp(good);
     const CoverImport r = import_cover(good, covers, sha);

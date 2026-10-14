@@ -236,6 +236,10 @@ def main():
                         shutil.rmtree(cache / "games" / game["current_build_key"], ignore_errors=True)
                     game["archived"] = True
     (lib / "library.json").write_text(json.dumps(catalog, indent=2))
+    # Summit Chase's ROM was moved after it was archived: the library shows the missing-ROM recovery (Locate ROM) for a metadata-only game
+    summit = entries[len(GENESIS) + 1][0]
+    if summit.exists():
+        summit.rename(summit.with_name(summit.stem + " (moved away).sms"))
     print(f"SEGARECOMP_CACHE_DIR={cache}")
 
 

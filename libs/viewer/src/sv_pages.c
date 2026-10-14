@@ -325,6 +325,7 @@ void sv_pages_rebuild(SvHost *h) {
       sv_item_set_icon(sv_page_add(p, SV_ITEM_BUTTON, I_GO_CONTROLS, "Controls"), "controller");
       sv_item_set_icon(sv_page_add(p, SV_ITEM_BUTTON, I_GO_AUDIO, "Audio"), "audio");
       sv_item_set_icon(sv_page_add(p, SV_ITEM_BUTTON, I_GO_SYSTEM, "System"), "info");
+      sv_item_set_icon(sv_page_add(p, SV_ITEM_LABEL, 0, ""), "divider");  /* leaving the game is set apart from the settings pages */
       item = sv_page_add(p, SV_ITEM_BUTTON, I_QUIT, exit_label(h));
       if (item != NULL) sv_item_set_icon(item, "quit");
       if (item != NULL) sv_item_set_hint(item, "The game is not saved: this viewer has no save states.");

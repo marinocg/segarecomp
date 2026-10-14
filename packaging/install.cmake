@@ -46,7 +46,7 @@ install(DIRECTORY ${_src}/libs/device/sega/ym2612/ DESTINATION ${_rt}/libs/devic
 install(FILES ${_src}/libs/device/sega/ym2612/third_party/ymfm/LICENSE DESTINATION ${_res}/licenses RENAME ymfm-BSD-3-Clause.txt)
 
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/apps/segarecomp-launcher/assets/ DESTINATION ${_res}/assets
-  PATTERN "README.md" EXCLUDE PATTERN "Silkscreen-OFL.txt" EXCLUDE)
+  PATTERN "README.md" EXCLUDE PATTERN "manifest.json" EXCLUDE PATTERN "Silkscreen-OFL.txt" EXCLUDE)
 
 install(FILES ${PROJECT_SOURCE_DIR}/LICENSE DESTINATION ${_res}/licenses RENAME MPL-2.0.txt)
 install(FILES ${PROJECT_SOURCE_DIR}/apps/segarecomp-launcher/assets/fonts/Silkscreen-OFL.txt DESTINATION ${_res}/licenses RENAME Silkscreen-OFL.txt)

@@ -196,6 +196,8 @@ private:
   std::string focus_card_request_;     // script aid: give this card focus when it is drawn
   std::string context_id_;             // the game of the open context menu
   bool open_context_ = false;
+  bool menu_on_focus_ = false;         // review aid: open the context menu of the card that receives the requested focus
+  ImVec2 context_anchor_{0, 0};        // where the context menu opens: the mouse for a right click, beside the card for keyboard/gamepad
   bool show_advanced_ = false;         // Details: the Advanced build options section is expanded
   int settings_tab_ = 0;
   bool focus_search_ = false;

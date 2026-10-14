@@ -968,7 +968,7 @@ int App::run() {
     go(Page::import_page);
   }
   if (SDL_getenv("SEGARECOMP_SHOT_MENU") != nullptr && page_ == Page::library)  // review aid: the context menu of the first game
-    if (const auto vis = visible_entries(); !vis.empty()) { context_id_ = vis.front()->id(); open_context_ = true; }
+    if (const auto vis = visible_entries(); !vis.empty()) { focus_card_request_ = vis.front()->id(); menu_on_focus_ = true; }
   if (SDL_getenv("SEGARECOMP_SHOT_SELECT")) { select_mode_ = true; for (const auto *e : visible_entries()) { selected_.insert(e->id()); if (selected_.size() >= 2) break; } }
   bool running = true;
   trace("startup=ready");

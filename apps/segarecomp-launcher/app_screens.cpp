@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <utility>
 
 namespace fs = std::filesystem;
 using namespace ui;
@@ -275,15 +276,17 @@ void App::draw_sidebar(float x, float y, float w, float h) {
 void App::draw_drop_zone(float w, float h, bool compact_box) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 origin = ImGui::GetCursorScreenPos();
-  const float bw = w, bh = compact_box ? ctx_.u(win_h_ < ctx_.u(600.0F) ? 200.0F : 322.0F) : std::max(ctx_.u(260.0F), h - ctx_.u(110.0F));
+  // once there are import results the drop zone shrinks so the results are visible without scrolling
+  const float bw = w, bh = compact_box ? ctx_.u(!import_results_.empty() ? 150.0F : (win_h_ < ctx_.u(600.0F) ? 200.0F : 322.0F)) : std::max(ctx_.u(260.0F), h - ctx_.u(110.0F));
   const ImVec2 a(origin.x, origin.y), b(a.x + bw, a.y + bh);
   const bool hover = ImGui::IsMouseHoveringRect(a, b, false);
   const bool active = dragging_;
   dl->AddRectFilled(a, b, active ? rgba(10, 34, 70) : (hover ? col::panel_hover : rgba(8, 18, 42)), ctx_.u(8.0F));
   dashed_rect(dl, ImVec2(a.x + ctx_.u(6.0F), a.y + ctx_.u(6.0F)), ImVec2(b.x - ctx_.u(6.0F), b.y - ctx_.u(6.0F)), active ? col::dash_hover : col::dash, std::max(1.0F, std::round(ctx_.u(2.0F))), ctx_.u(10.0F), ctx_.u(7.0F));
   const float cx = (a.x + b.x) * 0.5F;
-  float cy = a.y + (bh - (compact_box ? ctx_.u(170.0F) : ctx_.u(210.0F))) * 0.5F;
-  if (SDL_Texture *drop = ctx_.asset("icon-drop.png")) { const float isz = ctx_.u(compact_box ? 52.0F : 64.0F); icon_image(dl, drop, ImVec2(cx - isz * 0.5F, cy), isz, active ? rgba(150, 235, 255) : IM_COL32_WHITE); cy += isz + ctx_.u(10.0F); }
+  const bool tiny = bh < ctx_.u(170.0F);
+  float cy = a.y + (bh - (tiny ? ctx_.u(108.0F) : (compact_box ? ctx_.u(170.0F) : ctx_.u(210.0F)))) * 0.5F;
+  if (SDL_Texture *drop = tiny ? nullptr : ctx_.asset("icon-drop.png")) { const float isz = ctx_.u(compact_box ? 52.0F : 64.0F); icon_image(dl, drop, ImVec2(cx - isz * 0.5F, cy), isz, active ? rgba(150, 235, 255) : IM_COL32_WHITE); cy += isz + ctx_.u(10.0F); }
   const char *headline = active ? "Release to add the ROMs" : "Drag & drop ROM files here";
   const float hpx = ctx_.u(compact_box ? 18.0F : 21.0F);
   draw_text(dl, ctx_.bold, hpx, col::text, ImVec2(cx - text_width(ctx_.bold, hpx, headline) * 0.5F, cy), headline);
@@ -334,7 +337,8 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   card_focus_bookkeeping(entry.id(), return_focus_id_, focus_card_request_);
   const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
   if (ImGui::IsItemFocused()) focus_label_ = "card:" + entry.title();
-  if (ImGui::IsItemClicked(ImGuiMouseButton_Right) || (ImGui::IsItemFocused() && (ImGui::IsKeyPressed(ImGuiKey_Menu, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false)))) { context_id_ = entry.id(); open_context_ = true; }
+  if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) { context_id_ = entry.id(); open_context_ = true; context_anchor_ = ImGui::GetMousePos(); }
+  else if (ImGui::IsItemFocused() && (ImGui::IsKeyPressed(ImGuiKey_Menu, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false) || std::exchange(menu_on_focus_, false))) { context_id_ = entry.id(); open_context_ = true; context_anchor_ = ImVec2(ImGui::GetItemRectMin().x + ctx_.u(24.0F), ImGui::GetItemRectMin().y + ctx_.u(24.0F)); }
   const ImVec2 a(x, y), b(x + w, y + h);
   card(ctx_, dl, a, b, selected || focused, hovered);
   const long long now = std::time(nullptr);
@@ -420,7 +424,8 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   card_focus_bookkeeping(entry.id(), return_focus_id_, focus_card_request_);
   const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
   if (ImGui::IsItemFocused()) focus_label_ = "card:" + entry.title();
-  if (ImGui::IsItemClicked(ImGuiMouseButton_Right) || (ImGui::IsItemFocused() && (ImGui::IsKeyPressed(ImGuiKey_Menu, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false)))) { context_id_ = entry.id(); open_context_ = true; }
+  if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) { context_id_ = entry.id(); open_context_ = true; context_anchor_ = ImGui::GetMousePos(); }
+  else if (ImGui::IsItemFocused() && (ImGui::IsKeyPressed(ImGuiKey_Menu, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false) || std::exchange(menu_on_focus_, false))) { context_id_ = entry.id(); open_context_ = true; context_anchor_ = ImVec2(ImGui::GetItemRectMin().x + ctx_.u(24.0F), ImGui::GetItemRectMin().y + ctx_.u(24.0F)); }
   const ImVec2 b(a.x + w, a.y + h);
   card(ctx_, dl, a, b, selected || focused, hovered);
   const float pad = ctx_.u(7.0F), th = h - 2 * pad, tw = th * 0.78F;
@@ -575,7 +580,13 @@ void App::draw_library(float w, float h) {
   }
   ImGui::EndChild();
   ImGui::PopStyleColor();
-  if (open_context_) { ImGui::OpenPopup("##game_menu"); open_context_ = false; }
+  if (open_context_) {
+    ImGui::OpenPopup("##game_menu");
+    open_context_ = false;
+    // keep the menu inside the window (it is about 250 x 470 points)
+    const ImVec2 at(std::min(context_anchor_.x, win_w_ - ctx_.u(270.0F)), std::clamp(context_anchor_.y, ctx_.u(8.0F), std::max(ctx_.u(8.0F), win_h_ - ctx_.u(480.0F))));
+    ImGui::SetNextWindowPos(at, ImGuiCond_Always);
+  }
   draw_game_menu("##game_menu", context_id_, true);
   {
     const ImVec2 p = ImGui::GetCursorScreenPos();

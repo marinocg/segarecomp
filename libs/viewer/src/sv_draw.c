@@ -112,11 +112,16 @@ static int draw_cues(SvHost *h, int right, int cy, int u, int back_label) {
 
 static int is_note(const SvItem *it) { return it->kind == SV_ITEM_LABEL && strcmp(it->icon, "note") == 0; }
 static int is_section(const SvItem *it) { return it->kind == SV_ITEM_LABEL && strcmp(it->icon, "section") == 0; }
+static int is_divider(const SvItem *it) { return it->kind == SV_ITEM_LABEL && strcmp(it->icon, "divider") == 0; }
 
-static int row_h(int u) { return 26 * u; }
+/* Row height in font units: the short navigation pages (pause menu, confirmations) use taller rows, like the launcher's sidebar; dense
+ * settings pages keep the compact rows that let them fit without scrolling. Set once per draw from the page being drawn. */
+static int s_row_units = 26;
+static int row_h(int u) { return s_row_units * u; }
 
 static int item_height(const SvItem *it, int u, int inner_w) {
   if (is_section(it)) return 24 * u;
+  if (is_divider(it)) return 12 * u;
   if (is_note(it)) {
     int start[8], len[8], truncated, n = sv_font_wrap(SV_FONT_BODY, it->hint, u, inner_w - 40 * u, 8, start, len, &truncated);
     if (n < 1) n = 1;
@@ -157,6 +162,10 @@ static void draw_item(SvHost *h, const SvPage *page, int idx, int x, int y, int 
   const int cx = x + 10 * u, enabled = it->enabled;
   const SDL_Color base = enabled ? K_TEXT : K_DIM, tc = focused && enabled ? K_WHITE : base;
   rect_out[0] = x; rect_out[1] = y; rect_out[2] = w; rect_out[3] = rh;
+  if (is_divider(it)) {
+    sv_host_fill(h, x + 4 * u, y + 5 * u, w - 8 * u, u, K_RULE);
+    return;
+  }
   if (is_section(it)) {
     sv_ui_text(h, SV_FONT_BODY, u, x + 2 * u, y + 5 * u, K_FOCUS, it->label);
     sv_host_fill(h, x, y + 20 * u, w, u, K_RULE);
@@ -321,7 +330,7 @@ static void draw_preview_column(SvHost *h, int x, int y, int w, int body_h, int 
 
 static int page_units(int page_id) {
   switch (page_id) {
-    case PAGE_MAIN: return 330;
+    case PAGE_MAIN: return 360;
     case PAGE_QUICK: return 440;
     case PAGE_VIDEO: return 640;
     case PAGE_CONTROLS: return 600;
@@ -380,6 +389,7 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
   int two_col;
   if (page == NULL) return;
   units = page_units(page->page_id);
+  s_row_units = page->page_id == PAGE_MAIN || is_confirm ? 30 : 26;
   while (u > 1 && units * u > out_w - 16 * u) --u;
 layout_retry:
   lh = sv_ui_line_h(SV_FONT_BODY, u);

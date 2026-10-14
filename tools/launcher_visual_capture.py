@@ -17,7 +17,8 @@ from PIL import Image, ImageDraw
 
 # (file name, SEGARECOMP_SHOT_PAGE, extra review-aid environment). The fixture's visible order (last played first): 0 Fictional Quest (Genesis,
 # Compatibility, ready), 1 Neon Harbor Demo (Optimized selected after a Compatibility build), 2 Pixel Orchard (built Optimized), 3 Coastal Drift
-# (Master System, ready), 4 Broken Vector (a real failed build), 5 Mystery Cart (Master System, mapper not declared), 6 Summit Chase (metadata only).
+# (Master System, ready), 4 Broken Vector (a real failed build), 5 Mystery Cart (Master System, mapper not declared), 6 Summit Chase (metadata only,
+# its ROM moved away: the missing-ROM recovery).
 PAGES = [
     ("01_library_home", "library", {}), ("02_library_list", "list", {}),
     ("03_game_details", "details:0", {}), ("03b_details_genesis_optimized", "details:2", {}),
@@ -91,6 +92,29 @@ def main():
                 sheet.paste(image, (0, reference.height + 56))
                 a.comparisons.mkdir(parents=True, exist_ok=True)
                 sheet.save(a.comparisons / f"{size}-{name}.png")
+        with tempfile.TemporaryDirectory(prefix="segarecomp-import-capture-") as scratch:  # import results on a throw-away copy of the fixture
+            import shutil
+            shutil.copytree(a.fixture.resolve() / "cache", Path(scratch) / "cache", ignore=shutil.ignore_patterns("zig-cache", "obj", "generated*"))
+            fresh = Path(scratch) / "Harbor Lights (Fictional).md"
+            image = bytearray(0x200)
+            image[:12] = bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x70, 0x00, 0x4E, 0x70))
+            image[0x100:0x110] = b"SEGA GENESIS    "
+            image[0x120:0x130] = b"HARBOR LIGHTS   "
+            image[0x1E0] = 77
+            fresh.write_bytes(bytes(image))
+            refused = Path(scratch) / "notes.txt"
+            refused.write_text("not a cartridge\n")
+            duplicate = next((a.fixture.resolve() / "roms").glob("Fictional Quest*.md"))
+            bmp = out / "04b_import_results.bmp"
+            env.update(SEGARECOMP_CACHE_DIR=str(Path(scratch) / "cache"), SEGARECOMP_LIBRARY_DIR=str(Path(scratch) / "cache" / "library"),
+                       SEGARECOMP_SHOT_PAGE="import", SEGARECOMP_SHOT=str(bmp.resolve()), SEGARECOMP_SHOT_DROP=";".join(str(x) for x in (fresh, duplicate, refused)))
+            for key in extra:
+                env.pop(key, None)
+            subprocess.run([str(binary)], env=env, capture_output=True, timeout=60, check=True)
+            env.pop("SEGARECOMP_SHOT_DROP", None)
+            Image.open(bmp).convert("RGB").save(out / "04b_import_results.png")
+            bmp.unlink()
+            metadata["captures"].append(f"{directory}/04b_import_results.png")
         with tempfile.TemporaryDirectory(prefix="segarecomp-empty-capture-") as scratch:  # a first start: the empty library
             bmp = out / "22_empty_library.bmp"
             env.update(SEGARECOMP_CACHE_DIR=str(Path(scratch) / "cache"), SEGARECOMP_LIBRARY_DIR=str(Path(scratch) / "cache" / "library"),
