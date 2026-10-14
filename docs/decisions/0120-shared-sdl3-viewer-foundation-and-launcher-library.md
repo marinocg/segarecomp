@@ -128,3 +128,16 @@ This is the UI ADR with number 0120; the separate SMS invariant-window operand A
 Renderer limits remain explicit: no SDL_GPU path or offline shader binaries; curvature is a mesh approximation, bloom is four additive taps rather than a
 thresholded HDR/multipass shader, and the pause background is dimmed, not blurred. Audio follows the OS default; no device chooser or buffer-tuning facade.
 There is no packaged HTTPS cover client and no build cancellation. See `docs/product/viewer-ui.md` for current captures and validation limits.
+
+### Final design correction (contextual Details)
+
+* **Navigation model.** The launcher's primary navigation is exactly Library, Import ROMs, Storage and Settings. Game Details is a contextual destination
+  (card, list-row action, context menu via right click / Menu key / gamepad North) and Back restores the library's search, filters, sort, view, scroll and
+  focused card. A page that is not an application area no longer occupies, or disables itself in, the sidebar.
+* **Build configuration is first-class on Details.** Build mode and the Genesis region (or the Master System mapper) are large option tiles inside the first
+  1080x740 viewport. The card distinguishes the selection from the executable on disk (`status.json`'s effective policy and fallback) and from a build of
+  the other mode still on disk (computed by the status worker with the same `entry_ready_for` check, so a switch is shown as non-destructive only when it
+  really is). Region stays a run-time choice outside the cache identity; mode, model, H-interrupt discovery and mapper remain identity inputs.
+* **Art and covers.** The repository's own artwork remains the only scenery. The v2 kit's fallback backgrounds and cover placeholders were audited and not
+  shipped (`apps/segarecomp-launcher/assets/manifest.json`). A game without a cover shows a code-drawn title card (tinted crop of the repository art, the
+  platform, the title, "NO COVER ART"), which cannot be mistaken for identified box art.

@@ -47,7 +47,12 @@ their requested I/O. Normal UI has no SDL debug-font calls. Bitmap atlas fonts
 are embedded C data; packages ship ProggyClean's full MIT and Silkscreen's OFL
 notices. Only viewer `src/` and `include/` ship, not gallery/test sources.
 
-Launcher visuals are unchanged by this viewer phase. Its only source changes
+**Final design pass (SEG-058).** The pause menu and the confirmation sheets use taller 30-unit rows (the launcher sidebar's rhythm), the pause
+menu is slightly wider and sets *Return to Launcher / Quit* apart with a divider. Dense settings pages keep their 26-unit rows so they still fit without
+scrolling; the integer UI-scale rule and the bitmap fonts are unchanged (1x up to 720p-class windows, 2x at 1080p, 3x at 1440p, 4x at 4K), because a 2x
+pause menu next to 1x settings pages at 1080x740 would make the pages jump in size. Captures were refreshed with the new gallery binary.
+
+Earlier, launcher visuals were unchanged by the viewer phase. Its only source changes
 here are asynchronous HID diagnostics and cached/no-passive-I/O diagnostic facts.
 Cover HTTPS downloading and build cancellation remain **unsupported**; manual
 local covers and the explicitly labelled browser lookup remain available.
@@ -91,7 +96,7 @@ path on Windows. This review used Linux's SDL dummy driver and software renderer
 Doubling output dimensions exercises layout/text scaling, **not actual OS HiDPI,
 display timing, physical-controller or three-OS release validation**.
 
-## Focused validation of this reconciliation
+## Focused validation of the earlier reconciliation
 
 Nine distinct CTest cases passed: `sv_host_test`, `sv_input_diag_test`,
 `sv_viewer_core_test`, `viewer_foundation_layout_test`, `ci_shard_guard_test`,

@@ -31,7 +31,7 @@ void App::draw_import(float w, float h) {
 
 void App::draw_import_body(float w, float h) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
-  const bool two = w > ctx_.u(700.0F);
+  const bool two = w > ctx_.u(700.0F) && import_results_.empty();  // once there are results they take the guide's place
   const float steps_w = two ? ctx_.u(240.0F) : 0.0F, gap = ctx_.u(18.0F);
   const float drop_w = two ? w - steps_w - gap : w;
   const ImVec2 top = ImGui::GetCursorScreenPos();

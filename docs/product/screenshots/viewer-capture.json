@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "binary_sha256": "6ee261a12df36fd484cf68af923de4e07036c5a81f7742c335098c539d27e7d2",
+  "binary_sha256": "4262222ee31ba679b1203dd9f401f557c31d1c80324a72df04ecee707adf6043",
   "fixture": "project-authored fictional RGB scene; virtual controllers, never physical hardware",
   "hidpi": "output-pixel simulations at 2x logical sizes; not an OS/display HiDPI test",
   "reproduce": "python3 tools/viewer_visual_capture.py --gallery build/dev/libs/viewer/sv_gallery --assets apps/segarecomp-launcher/assets --out build/visual-review/viewer --publish docs/product/screenshots",
@@ -13,7 +13,7 @@
     },
     {
       "path": "viewer-genesis-small/02_pause_menu.png",
-      "sha256": "a3fa022aff5f746e09a3b60fc1fdea09310f60b457268c9860a2e896d7f3cc84"
+      "sha256": "ab6b04fc48bc8bbbfdb347b3b5fa31f00544c767f2e858495bcd9ab017d76841"
     },
     {
       "path": "viewer-genesis-small/03_quick_settings.png",
@@ -41,7 +41,7 @@
     },
     {
       "path": "viewer-genesis-small/05e_controls_restore.png",
-      "sha256": "701c3077d07ebb148986b101705bf1d7f86d63797dded9a7a8721bd5dc889dec"
+      "sha256": "d167f0de2d8479d3c982310b3f71205e82262a6c81e2ad558b8814397802e106"
     },
     {
       "path": "viewer-genesis-small/06_audio.png",
@@ -49,11 +49,11 @@
     },
     {
       "path": "viewer-genesis-small/07_system.png",
-      "sha256": "2315ec80abcda3207add01bf91e8275e2626b0366b989634e029e5a7b1d390cb"
+      "sha256": "cd2fc55ec6a301c6f688408656a08b4bbd4ab888178c282f3d2773dacfa56f7b"
     },
     {
       "path": "viewer-genesis-small/08_quit_confirmation.png",
-      "sha256": "1caab395fff7c44384fc6ce646c153e18328a5a9a05f5ff9ceac5f0d6f07c252"
+      "sha256": "3e938ed35b69b34e27a203d61aa637b5feda0ba347ebe017698546161c4109a2"
     },
     {
       "path": "viewer-genesis-small/09_toast.png",
@@ -85,7 +85,7 @@
     },
     {
       "path": "viewer-genesis/02_pause_menu.png",
-      "sha256": "46e50b87df30cb57647702df8b0887e7108c401fbf32c404b405ee5e4d804791"
+      "sha256": "32a7e79a98d812af1a3b45b0874b8eaedce6b875fc1a66e4618fc66c622d48d9"
     },
     {
       "path": "viewer-genesis/03_quick_settings.png",
@@ -117,7 +117,7 @@
     },
     {
       "path": "viewer-genesis/05e_controls_restore.png",
-      "sha256": "9f37cc63f16c9e4e1198ed694fa5cda901a4ce2529a58f3d8ac534f05f88c969"
+      "sha256": "a11b17c9fb1518042ba62ab4c9d371ee8806ada63012e31c2fb6888004b170a8"
     },
     {
       "path": "viewer-genesis/06_audio.png",
@@ -129,7 +129,7 @@
     },
     {
       "path": "viewer-genesis/08_quit_confirmation.png",
-      "sha256": "c02417b104d4f2b9c721791d4d167e355d158b6885c7b2addeb14ca3e5d5e95b"
+      "sha256": "d5058b2fbcc97a1465ddcf38b2c6c83160aeeb6a9567b25835704a1182e77986"
     },
     {
       "path": "viewer-genesis/09_toast.png",
@@ -173,7 +173,7 @@
     },
     {
       "path": "viewer-sms-small/02_pause_menu.png",
-      "sha256": "e7aadbe6fb29ba1bafde5a1cf6d32cb7540c19b04f7a57ffd5af0ce585f71c78"
+      "sha256": "99e63639fb008bc29449eb47c37869e89e5366e4951f27a8c6ad5bf990ec4f3b"
     },
     {
       "path": "viewer-sms-small/03_quick_settings.png",
@@ -201,7 +201,7 @@
     },
     {
       "path": "viewer-sms-small/05e_controls_restore.png",
-      "sha256": "b051848f2f020f4f4bda57327cf714194b3b5b5aa4717593647a7152d3b87a09"
+      "sha256": "0b2c81f8808a9bb62eca8e0c40f0eb83672bb4c63e58891a171cd841e5266d9b"
     },
     {
       "path": "viewer-sms-small/06_audio.png",
@@ -209,15 +209,15 @@
     },
     {
       "path": "viewer-sms-small/07_system.png",
-      "sha256": "2f2822695665988155f6924de43359e46ccd5b6c211571d6332b5a44c615bbb1"
+      "sha256": "813ec6abb555e43cb691f2568f07b9873d5e277ef2b9c0c4de130aaeb4e072b7"
     },
     {
       "path": "viewer-sms-small/07b_reset_confirmation.png",
-      "sha256": "7f17bdf1a1a126d10e9885f61197cd3787b5a10caa39fd4dd40fc7da88b0a93f"
+      "sha256": "a46fb51c8674f694433a5ab42995741eb9cd863be32345ad439e40b4791443be"
     },
     {
       "path": "viewer-sms-small/08_quit_confirmation.png",
-      "sha256": "4fa48a8d4a2511ec51240298a9a647fc275588bf095583576f89c1c59dec10d7"
+      "sha256": "05d15d294306e61b73f15c2ffc5765b99f31a884ef92343302fe4591a1e4eaa8"
     },
     {
       "path": "viewer-sms-small/09_toast.png",
@@ -249,7 +249,7 @@
     },
     {
       "path": "viewer-sms/02_pause_menu.png",
-      "sha256": "953e427f1a45cc550f3b5a25d932c25ea2e86f7d8def5b2447a974d3e5c7128e"
+      "sha256": "406a6eaf6f038da5dd35d540e8732140edf75bf0958785fafff4b29fad3d0b30"
     },
     {
       "path": "viewer-sms/03_quick_settings.png",
@@ -281,7 +281,7 @@
     },
     {
       "path": "viewer-sms/05e_controls_restore.png",
-      "sha256": "73c077bd1f6a035118e9018d000e53fa2e76ca513f50a584a8c739ddb9146a7a"
+      "sha256": "c5268f24695a4e6acb4390ff9292028b83823c25f0e9ca69368fcb3440665c6e"
     },
     {
       "path": "viewer-sms/06_audio.png",
@@ -293,11 +293,11 @@
     },
     {
       "path": "viewer-sms/07b_reset_confirmation.png",
-      "sha256": "b32239405953a2bb94163bcb62eb4f7379f727541bf1521c5ea3e4dbf0a1dbca"
+      "sha256": "496e7ccaf4ac72addad4db66883e21565b40a3c66b238d1d61490ef275598b97"
     },
     {
       "path": "viewer-sms/08_quit_confirmation.png",
-      "sha256": "8a7cb4c7e09a68abe0101ac0c71a017c1291d75a19dbfe15d12b8fd7c14aeb02"
+      "sha256": "230ea8c28288ef54d05f521f85eb73c978b5a433198e4d84f8742fd2cf7b6816"
     },
     {
       "path": "viewer-sms/09_toast.png",
@@ -341,7 +341,7 @@
     },
     {
       "path": "viewer-sms-224-small/02_pause_menu.png",
-      "sha256": "c4437d7a74b9bbd28e231e164c0e8a4bccf1e651eb20cf544d7a70c50ae98c55"
+      "sha256": "6c186370b5d62c2529944aa33e91ef7e717ebf929c381f254431de2b6c7d8344"
     },
     {
       "path": "viewer-sms-224-small/03_quick_settings.png",
@@ -369,7 +369,7 @@
     },
     {
       "path": "viewer-sms-224-small/05e_controls_restore.png",
-      "sha256": "85ffddca18bc19b79fdb221e2365f32258c4e9d988a5332c8f206e6531f203bb"
+      "sha256": "f5cab36e491dcb3a91c17ebeb6e1dd03a3a276f2f42d6648802b993cced2ab7f"
     },
     {
       "path": "viewer-sms-224-small/06_audio.png",
@@ -381,11 +381,11 @@
     },
     {
       "path": "viewer-sms-224-small/07b_reset_confirmation.png",
-      "sha256": "d5a8f29a238a82dd182bfec2437a8fcb872b6307d4f796b2d676a73aec42fe1c"
+      "sha256": "5c67311acb60eb1aaae9023f8b23c5c1f6c1305120f9c9b8484159399008d283"
     },
     {
       "path": "viewer-sms-224-small/08_quit_confirmation.png",
-      "sha256": "b6ac74bac1f96f2382b553dd4f643ba76d8631a5788d0c2de8cf8b4df46893ca"
+      "sha256": "84a3d2673bd7be9bb052d3c8b8e68ec9ea5c71ee56149ff98f4d1b394e386d0f"
     },
     {
       "path": "viewer-sms-224-small/09_toast.png",
@@ -417,7 +417,7 @@
     },
     {
       "path": "viewer-sms-224/02_pause_menu.png",
-      "sha256": "52c2c40f13d799438c1e5ec1c28f2e2e6db6c83fc0741273ee0de4636efc6649"
+      "sha256": "43534c4e24b85abec7dc3d60a53cf76675cfbc224a4c6e7de641461ad2a3b4f4"
     },
     {
       "path": "viewer-sms-224/03_quick_settings.png",
@@ -449,7 +449,7 @@
     },
     {
       "path": "viewer-sms-224/05e_controls_restore.png",
-      "sha256": "90ad69283c1947792fbb3ef8be51f5e1a132746a6de1a5cb792765c64fa44759"
+      "sha256": "f1eba992825404c5482a0fe48be948ba30ec65f5646c1779ff0322cec8522e36"
     },
     {
       "path": "viewer-sms-224/06_audio.png",
@@ -461,11 +461,11 @@
     },
     {
       "path": "viewer-sms-224/07b_reset_confirmation.png",
-      "sha256": "312058dc80de1bed9fa3ae8b04763de822d8b63dc0264d441b9e3a9c48b48c29"
+      "sha256": "8b2d7432b56846358c2ddd1929bdc5b62d6612f620e2bd77113bc4731b320c0f"
     },
     {
       "path": "viewer-sms-224/08_quit_confirmation.png",
-      "sha256": "66a0ce8e00f025a9278ac28fe7a10dd0276595c101bfe2583798faf6a2411cf0"
+      "sha256": "771f42b99d34396678cdee1977a650d0e94cc4c4cdac0e57f02eca12d3f4e456"
     },
     {
       "path": "viewer-sms-224/09_toast.png",

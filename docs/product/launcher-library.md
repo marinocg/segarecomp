@@ -5,22 +5,34 @@ This is the user-facing description of what ships in the consumer launcher (`Seg
 
 ## What the launcher is
 
-A resizable window (default 1080x740, minimum about 720x520, HiDPI aware, compact mode) with five areas: **Library**, **Import ROMs**, **Storage**,
-**Settings** (including **Input Diagnostics**) and a per-game **Details** page. The repository's sunset artwork forms the header banner and the dimmed scenery behind the window. Everything it shows is read from the library file, the build cache or the product: no placeholder values.
+A resizable window (default 1080x740, minimum about 720x520, HiDPI aware, compact mode) whose primary navigation is exactly four areas: **Library**,
+**Import ROMs**, **Storage** and **Settings** (including **Input Diagnostics**). A game's **Details** page is contextual, not a sidebar entry: a card, a
+list row's Details button or the game's context menu (right click, the Menu key or the gamepad's North button) opens it, and **Back** (the button, Esc or the
+gamepad's East button) returns to exactly the library state it came from: search text, platform/status filters, sort, grid/list view, scroll position and the
+focused card. The repository's sunset artwork forms the header banner and the dimmed scenery behind the window. Everything it shows is read from the library
+file, the build cache or the product: no placeholder values.
 
-* **Library** - grid or list (a game without a cover shows a neutral cartridge with its initials; a cover is only ever an image you chose), search, platform/status filters, sort (last played, title, last built, added, size), favorites, multi-select
+* **Library** - grid or list (a game without a cover shows a title card: a tinted crop of the launcher's own artwork, the platform, the title and "NO COVER ART";
+  a cover is only ever an image you chose), each card with its build state, platform and last activity, search, platform/status filters, sort (last played, title, last built, added, size), favorites, multi-select
   (Select mode) for storage actions and removal. An empty library shows the ROM drop zone.
 * **Import** - drag and drop or Browse (several files). Each file is classified by the same media classifier as before, de-duplicated by SHA-256
   (the same game elsewhere only adds a tracked location), and listed with a reason when refused. Importing never builds (an explicit checkbox builds
   the new games). ROMs are referenced, never copied, moved or uploaded.
-* **Details** - cover (change/remove; the generic placeholder otherwise), editable display name (the header name is kept), favorite, platform,
-  region/mapper, ROM digest and link health, first added / last built / last played / last run result, toolchain and product version of the build,
-  output size by kind (executable, generated C, objects, logs, metadata), and the actions Play, Build/Recompile/Rebuild, Locate ROM, Open build folder,
-  View logs, Storage cleanup, Remove from library. Build options keep the previous capabilities: Genesis region, H-interrupt alias discovery,
-  Compatibility/Optimized (and the experimental Genesis model), the Master System mapper declaration (never defaulted) and the experimental Master
-  System Optimized mode when the product offers it, with the one-shot visible Compatibility restart.
-* **Status** is computed from the build identity, never from a title: *Built*, *Not built*, *Metadata only* (you removed the build on purpose; "rebuild
-  required"), *Stale build* (made by another release or option set; never started), *Build failed*, plus a *ROM missing* badge. Play is offered only for a build
+* **Details** - top to bottom, inside the first 1080x740 view: the cover (change from its corner), editable display name (the header name is kept),
+  favorite, platform, build state and ROM link health, one sentence of what matters now, and the two dominant actions **Play** (only for an executable whose
+  identity matches the configuration exactly) and **Build / Recompile / Rebuild / Try again** (a missing ROM makes **Locate ROM** the primary action instead).
+  Rarer actions are in **More**: build log, open build folder, manage storage, change/remove cover, find cover online, copy SHA-256, locate ROM and (set
+  apart) remove from library. The **Build Configuration** card follows: **Build mode** (Compatibility | Optimized) and, for Genesis, the **console region**
+  (USA NTSC | Japan NTSC | Europe PAL, applied at launch, never a rebuild; PAL still runs on the 60 Hz schedule), or for Master System the **cartridge
+  mapper** (nothing preselected, never guessed; a sidecar manifest declares it) and the one console profile. A state line says what the executable on disk
+  actually is (from `status.json`: effective policy and any Optimized fallback), whether the selection matches it, and when a mode switch left the other
+  mode's executable on disk ("switch back to play it"). **Advanced build options** (the experimental Genesis Optimized model and H-interrupt alias
+  discovery) sit behind an expander with their consequences. Below: **Build provenance** (SHA-256 with Copy, ROM file and folder, last recompiled, last
+  played and last run result, build version and toolchain, build identity with the selected options, effective policy details, diagnostics) and the build
+  log. A **storage** rail shows the game's measured footprint (native executable, generated C, objects, logs, metadata, other build files) with *Clean
+  intermediates* and *Manage storage*; for a metadata-only game it says the history is kept and a new build is needed to play.
+* **Status** is computed from the build identity, never from a title: *Ready*, *Not built*, *Metadata only* (you removed the build on purpose; "rebuild
+  required"), *Needs rebuild* (made by another release or option set, or a build mode whose executable is not built yet; never started), *Build failed*, plus a *ROM missing* badge. Play is offered only for a build
   whose identity matches exactly.
 * **Build** shows the real `@stage` messages (analyze, generate, compile, link) and the tail of the build log. There is no percentage because the
   build tool reports none, and no Cancel because killing a build mid-way is not safe (closing the window waits for it).
@@ -117,7 +129,8 @@ See `docs/testing/input-diagnostics.md` for the A-F diagnostic states, the Switc
 ## Headless
 
 `Segarecomp --build <rom> [--mapper ...] [--run ...]` is unchanged. `Segarecomp --import <rom>...` adds ROMs to the library without building. Review aids
-(not features): `SEGARECOMP_SHOT=<file.bmp>` with `SEGARECOMP_SHOT_PAGE` (`library|list|details:<n>|import|storage|settings<tab>`) and `SEGARECOMP_SHOT_SIZE=WxH`;
+(not features): `SEGARECOMP_SHOT=<file.bmp>` with `SEGARECOMP_SHOT_PAGE` (`library|list|details:<n>|import|storage|settings<tab>`) and `SEGARECOMP_SHOT_SIZE=WxH`
+(`SEGARECOMP_SHOT_SCALE` forces a UI scale, `SEGARECOMP_SHOT_LOG` expands the build log, `SEGARECOMP_SHOT_MENU` opens the first game's context menu);
 the Master System/Genesis review hooks (`SEGARECOMP_SHOT_ROM`, `..._POLICY`, `..._MODEL`, `..._REGION`, `SEGARECOMP_GUI_AUTOPLAY`, `SEGARECOMP_GUI_TRACE`) behave as before.
 `tools/launcher_ui_fixture.py` builds the fictional fixture library used for the screenshots.
 `tools/launcher_visual_capture.py` captures an existing synthetic fixture with the **specified binary**, at both supported sizes. It requires Pillow
@@ -127,52 +140,50 @@ cache; it never runs the resulting game. `SEGARECOMP_SHOT_SCROLL=bottom` capture
 ## Screenshots (fictional fixtures)
 
 All images are real captures of the built binaries, rendered from fictional, project-authored data: synthetic ROMs built through the packaged launcher
-(`tools/launcher_ui_fixture.py`, procedurally drawn covers for some games and none for others) and a synthetic picture for the viewer
-(`libs/viewer/test/sv_gallery.c`). No commercial ROM, cover or screenshot is involved; the design concept boards are not part of the repository.
+(`tools/launcher_ui_fixture.py`) and a synthetic picture for the viewer (`libs/viewer/test/sv_gallery.c`). No commercial ROM, cover or screenshot is involved;
+the design concept boards are not part of the repository. The fixture holds real states, never forged flags: a Compatibility build, a real Optimized build,
+an Optimized selection made after a Compatibility build (its Compatibility executable kept), a Master System game with and one without a declared mapper, a
+metadata-only game whose ROM was moved away, and a deliberately invalid cartridge whose build really fails. Two games carry fictional user-chosen covers; the
+others show the launcher's title card.
 
-* `screenshots/launcher/` - 1080x740; `launcher-small/` - 720x520 (the minimum size). These are **42 refreshed launcher captures**: library grid/list/select,
-  details with chosen art and without art, import, storage, the real intermediate-cleanup confirmation, all six settings sections, lower-page views and a
-  real build in progress. `screenshots/launcher-capture.json` records the captured binary SHA-256 and exact file list. These captures use SDL's dummy video
-  driver and software renderer on Linux, not a physical display or controller. The existing fixture builds correctly appear **stale** when their recorded
-  build identity does not match; no screenshot readiness flag is forged. The two build-progress captures use fresh temporary caches and real producer stages.
-* `launcher-states/` is **historical evidence from the earlier binary**, not refreshed by the launcher visual correction: ready, metadata-only, stale,
-  ROM missing, failed (with log), not built, multiple imports and build progress. Do not use it as proof of the current layout.
-* `screenshots/viewer-genesis/`, `viewer-sms/` (192 lines), `viewer-sms-224/` (224-line mode) now contain new-binary **1080x740** captures, with
-  matching `-small/` directories at **720x520**. See [viewer UI review](viewer-ui.md) and `screenshots/viewer-capture.json` for all pages, input cases,
-  hashes, scale simulations and honest validation limits.
-* `screenshots/input-diagnostics/` - launcher states A (no controller), B (joystick without mapping), C (open failure), OK (live virtual gamepad) and the viewer's
-  Controller status page for the same cases. **These use SDL virtual joysticks, not a physical Switch 2 Pro Controller.**
+* `screenshots/launcher/` - 1080x740 and `launcher-small/` - 720x520 (the minimum): library grid/list/select and context menu, every Details state
+  (`03*`: Genesis Compatibility, Genesis Optimized, mode switch awaiting a build, Master System mapper selection, metadata only + missing ROM, failed build and
+  its log, Master System ready), import with real results (added, duplicate, refused), the empty library, storage and its cleanup confirmation, all settings
+  sections, lower-page views and a real build in progress. `launcher-hidpi/` - the same layout at a forced 2x UI scale in 2160x1480 output pixels (a
+  simulation, not an OS HiDPI test). `screenshots/launcher-capture.json` records the captured binary SHA-256 and the exact file list.
+* `screenshots/review/before/` - the principal screens of the previous binary (branch commit 034393d) captured the same way, for before/after review.
+* `screenshots/viewer-*` - the shared viewer (Genesis, Master System 192 and 224 lines) at 1080x740 with `-small/` 720x520 counterparts; see
+  [viewer UI review](viewer-ui.md) and `screenshots/viewer-capture.json`.
+* `screenshots/input-diagnostics/` - launcher states A (no controller), B (joystick without mapping), C (open failure, injected through the test seam) and OK
+  (live virtual gamepad), and the viewer's Controller status page for the same cases. **These use SDL virtual joysticks, not a physical controller.**
 
-### Launcher visual correction review
-
-The original repository sunset and wordmark remain the runtime art. The aspect-preserving hero is now 180–240 logical pixels high (about 215 at
-1080x740, 180 at 720x520), with no content-panel overlap. No new background, cover landscape, font binary or kit concept artwork was added. A missing
-cover uses a neutral code-drawn cartridge with title initials. The fictional chosen covers in the fixture are explicit local-art examples, not fallbacks.
-Short windows use horizontal compact grid cards that keep title, platform and build status visible; the normal grid returns when height permits.
-
-Settings use bounded, independently scrollable content, labelled rows and wrapping option groups; at narrow widths the section selector becomes a dropdown.
-Details wrap secondary actions and put build progress before metadata. Storage prioritizes build status and total size in narrow tables, retaining measured
-breakdowns in the selection panel. Long paths/digests wrap at character boundaries. Confirmation scope lists scroll while Cancel and the destructive action
-remain fixed inside the window. Sidebar arrows/D-pad stay within the navigation group regardless of hero height.
-
-Local comparison sheets were made for the seven individual launcher design crops at **both sizes**. They are review-only, ignored build output, never runtime
-assets or release contents. To reproduce with a locally supplied kit (keep comparison output ignored):
+These captures use SDL's dummy video driver and software renderer on Linux, not a physical display or controller. To reproduce:
 
 ```sh
-python3 tools/launcher_visual_capture.py --launcher <new-built-Segarecomp> --home <staged-package> \
-  --fixture <synthetic-fixture> --out docs/product/screenshots \
-  --references <kit>/references/launcher_screens --comparisons build/visual-review/comparisons \
-  --build-rom <project-authored-synthetic-ROM>
+python3 tools/launcher_ui_fixture.py --launcher <staged-package>/Segarecomp --out <tmp>/fixture
+python3 tools/launcher_visual_capture.py --launcher <staged-package>/Segarecomp --home <staged-package> --fixture <tmp>/fixture \
+  --out docs/product/screenshots --build-rom <project-authored-synthetic-ROM> [--references <kit>/references/launcher_screens --comparisons <ignored dir>]
 ```
 
-Validation: the seven focused launcher/library/storage CTest tests passed. After the final layout adjustment, the navigation test passed again with
-9 keyboard/gamepad assertions and 24 real-window responsive render smoke cases. This is not pixel-perfect visual automation, HiDPI hardware validation,
-physical-gamepad validation, a three-OS release test, or a final fast gate. The validator owns the latter. No viewer source changed in this phase, and the
-  viewer correction is now documented separately in [viewer UI review](viewer-ui.md); this paragraph's validation counts describe only the launcher visual phase.
+### Launcher design correction (SEG-058, final pass)
 
-Remaining intentional differences from the concepts: long pages require scrolling, particularly at minimum size; there are no invented compatibility
-ratings, build percentages, storage figures or commercial covers. **Cover downloads remain unsupported** (manual local art and an explicit browser lookup,
-labelled `Web lookup`, are available). **SDL_GPU is not implemented**; SDL_Renderer remains the presenter. **Audio device selection is not implemented**;
-the default output device is used. **Build cancellation is not implemented**; no Cancel button is offered and closing waits for the build. These are capability
-  limits, not capabilities supplied by this visual correction. The subsequent viewer reconciliation audits overlay hierarchy, video preview/CRT presentation,
-  controls/remap focus, audio limitations and confirmation layouts against the individual viewer crops; launcher captures do not validate those behaviors.
+* **Navigation.** Exactly four primary areas; Details is contextual (card, row action, context menu). Back restores the library state; the navigation test
+  asserts the four entries, keyboard and gamepad walks, and Details round trips that keep search, platform filter, view, scroll position and card focus.
+* **Details hierarchy.** Identity and the two dominant actions first, the Build Configuration card next (Build mode and region or mapper as large option
+  tiles, fully visible at 1080x740 for Genesis; for Master System the mapper and build mode are visible and the expander sits at the fold), provenance and
+  the build log below, a measured storage rail on the right (below the configuration in narrow windows). The configuration states what the executable on
+  disk is (from `status.json`), not only what is selected.
+* **Art.** The repository's sunset remains the only scenery: the hero is about 163 points high at 1080x740 (114 at 720x520), cover-scaled so the whole sun
+  disc, mountains and waterfalls stay visible, with readable scrims. The v2 kit's backgrounds and covers were audited and not shipped (see
+  `apps/segarecomp-launcher/assets/manifest.json`): its four covers are one bright landscape (two files byte-identical, the others within 24/255 per pixel)
+  that would read as identified box art, and its backgrounds are smooth 47k-141k-colour renders. A game without a cover shows a title card made from a
+  different tinted crop of the repository art per game, with the platform band, the title and "NO COVER ART".
+* **Cards and screens.** Cards show the art, a build-state badge, title, platform and last activity (size and dates moved to the list, storage and
+  Details). Settings groups are titled section cards. The empty library shows the import guide. Import results replace the guide when present.
+* **Fixes found while reviewing captures.** Build records adopted at start-up for existing entries were not saved; the GUI trace path dangled after
+  `SDL_Quit`, so its last line went to a garbage file name in the working directory.
+
+Remaining differences from the concepts, with reasons: long pages still scroll at the minimum size and below the Details configuration (provenance is
+secondary by design); there are no invented compatibility ratings, build percentages, storage figures, cover downloads or commercial covers. **Cover
+downloads remain unsupported** (manual local art and an explicit browser lookup). **SDL_GPU is not implemented**; SDL_Renderer remains the presenter.
+**Audio device selection is not implemented**. **Build cancellation is not implemented**; no Cancel button is offered and closing waits for the build.
