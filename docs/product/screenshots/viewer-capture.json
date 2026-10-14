@@ -1,11 +1,11 @@
 {
   "schema": 1,
-  "binary_sha256": "cc81f5484a08fdf1efb15e5bf5aed5847c8c3fa01782057d0a59a20f51e95506",
+  "binary_sha256": "4eb841a619f0d8a839529e2bcb439c2f0299f14db105a77088920fdaa74391e7",
   "fixture": "project-authored fictional RGB scene; virtual controllers, never physical hardware",
   "hidpi": "output-pixel simulations at 2x logical sizes; not an OS/display HiDPI test",
   "reproduce": "python3 tools/viewer_visual_capture.py --gallery build/dev/libs/viewer/sv_gallery --assets apps/segarecomp-launcher/assets --out build/visual-review/viewer --publish docs/product/screenshots",
   "runs": 24,
-  "total_review_screenshots": 448,
+  "total_review_screenshots": 472,
   "captures": [
     {
       "path": "viewer-genesis-small/01_gameplay.png",
@@ -14,6 +14,10 @@
     {
       "path": "viewer-genesis-small/02_pause_menu.png",
       "sha256": "ed98ba91b44ce2ac7df3255f1065a7fcd8bff9192e989163032c2bd6032907a2"
+    },
+    {
+      "path": "viewer-genesis-small/02b_pause_menu_pad_cues.png",
+      "sha256": "83f0a2cac77c7d9ba9e269897668e40aa762235cfd3cd0acb9420af582577543"
     },
     {
       "path": "viewer-genesis-small/03_quick_settings.png",
@@ -88,6 +92,10 @@
       "sha256": "94d2ab0b0d739c0f1a0bfa6118d3c2f708be57ddee16905ed4d73fccb968c011"
     },
     {
+      "path": "viewer-genesis/02b_pause_menu_pad_cues.png",
+      "sha256": "8d16e8d3ac2fe7868365b00ad3912b510bc68f486367994b28efd7400e8019c9"
+    },
+    {
       "path": "viewer-genesis/03_quick_settings.png",
       "sha256": "3d34b234dc2a5085e5947b549ebebee401662743de4b0a0c169ea9a4a4a07be6"
     },
@@ -125,7 +133,7 @@
     },
     {
       "path": "viewer-genesis/07_system.png",
-      "sha256": "1aebbdcf2083f52e1d3e4e61081782484b6a2cce3d785c43e86b0a0365e70429"
+      "sha256": "18422e8607f0503f2ac17c7c09d93017988a13d58386057dc91d2a8e9617cd35"
     },
     {
       "path": "viewer-genesis/08_quit_confirmation.png",
@@ -174,6 +182,10 @@
     {
       "path": "viewer-sms-small/02_pause_menu.png",
       "sha256": "898e61020a6dfa5093a888784877e119977a1015f07cb8aa9b375d9f8864990e"
+    },
+    {
+      "path": "viewer-sms-small/02b_pause_menu_pad_cues.png",
+      "sha256": "b9f8e5a2c4bf4110d89bcb240873fa5f25c9eeadcc04e38dacc4b1656f7255c5"
     },
     {
       "path": "viewer-sms-small/03_quick_settings.png",
@@ -250,6 +262,10 @@
     {
       "path": "viewer-sms/02_pause_menu.png",
       "sha256": "45ee53c53ed3b23763afe796bd4110840033c5b2397fbeaa23ed7463fb035624"
+    },
+    {
+      "path": "viewer-sms/02b_pause_menu_pad_cues.png",
+      "sha256": "0a90d8fac7c55cd266b623591ce01c8fae21bd44bdf20cace0d57c86b3329967"
     },
     {
       "path": "viewer-sms/03_quick_settings.png",
@@ -344,6 +360,10 @@
       "sha256": "fd76f5792e7019efa1842f2fcba1a0da5a67f76080553b7825e0c42f4179cb05"
     },
     {
+      "path": "viewer-sms-224-small/02b_pause_menu_pad_cues.png",
+      "sha256": "6fd0428dd62cf212354036160285f81d57c7fed109a2b04c069a12344e18fa2f"
+    },
+    {
       "path": "viewer-sms-224-small/03_quick_settings.png",
       "sha256": "e677d996b0376409fac716ff5def387fef0e03ea7a20619442b89ccf1206c3cf"
     },
@@ -420,6 +440,10 @@
       "sha256": "5989d533e310a8ebf3dfa61d4b530c3d581c5df77fdf93cabceca2a3a002d57e"
     },
     {
+      "path": "viewer-sms-224/02b_pause_menu_pad_cues.png",
+      "sha256": "3f1566e4aad739983d894f1a155d2da23b8e5c6329cbebbb54bfca6db44e93b9"
+    },
+    {
       "path": "viewer-sms-224/03_quick_settings.png",
       "sha256": "e64b164492af6e468ac8c5eefb477284eb9b7c35b4c9ebd7f8f2247c5540fb88"
     },
@@ -457,7 +481,7 @@
     },
     {
       "path": "viewer-sms-224/07_system.png",
-      "sha256": "bd464765a1fe3905d75a47b4e7a111457aad3c70ce4850f4c67b1032dbfd1893"
+      "sha256": "1a64caa9036ab55849abca9c564c5af4b07ee7ab0e70ab760715be5403c87c0b"
     },
     {
       "path": "viewer-sms-224/07b_reset_confirmation.png",

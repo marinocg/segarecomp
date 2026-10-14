@@ -6,7 +6,7 @@
  * WxH is the window (output) size in pixels (default: the viewer's own default window). SEGARECOMP_ASSETS points at the launcher assets (icons, wordmark);
  * SV_GALLERY_PAD = none | live | raw | locked picks the virtual controller shown on the Controller status page (live: a gamepad with some buttons held;
  * raw: a joystick SDL has no mapping for; locked: a gamepad whose SDL_OpenGamepad fails).
- * Writes 01_gameplay, 02_pause_menu, 03_quick_settings, 04_video_display, 05_controls, 05b_controller_status, 06_audio, 07_system, 08_quit_confirmation, 09_toast,
+ * Writes 01_gameplay, 02_pause_menu, 02b_pause_menu_pad_cues, 03_quick_settings, 04_video_display, 05_controls, 05b_controller_status, 06_audio, 07_system, 08_quit_confirmation, 09_toast,
  * 10_hud and crt_<preset> images (PNG with SDL >= 3.4, BMP otherwise). */
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -88,6 +88,11 @@ static int hook(void *ctx, SvHost *host, int iteration) {
     sv_pages_rebuild(host); /* labels and preview must describe the same immediately applied settings */
   }
   save(sv_host_capture_output(host), script[c->step].capture);
+  if (c->step == 0) { /* the same pause menu after gamepad input: the footer shows face-button cues instead of keycaps */
+    host->last_input_pad = 1;
+    save(sv_host_capture_output(host), "02b_pause_menu_pad_cues");
+    host->last_input_pad = 0;
+  }
   if (c->step == 3) {
     SvMenu menu = host->menu;
     /* Show capture, conflict, and the safe default of the restore confirmation on the actual Controls page. */
