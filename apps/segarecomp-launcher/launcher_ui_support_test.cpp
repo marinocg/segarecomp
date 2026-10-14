@@ -380,6 +380,8 @@ int run_tests() {
       expect(!r.ok && fs::is_empty(dir / "real-roms"), "a roms folder that is a link is refused, nothing is written through it");
     }
 #endif
+    step("zip: a folder at the content-addressed name");
+    fs::remove(target);            // the repaired ROM (the link block above, which also clears it, does not run on Windows)
     fs::create_directory(target);  // a folder in its place is refused too (and kept)
     r = extract_zip_rom(dir / "deflated.zip", roms);
     expect(!r.ok && fs::is_directory(target), "a folder in place of the extracted ROM is refused and left alone");
