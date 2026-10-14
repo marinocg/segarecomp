@@ -17,9 +17,13 @@ file, the build cache or the product: no placeholder values.
   (Select mode) for storage actions and removal. An empty library shows the ROM drop zone.
 * **Import** - drag and drop or Browse (several files, plain ROMs or `.zip` archives). Each file is classified by the same media classifier as before, de-duplicated by SHA-256
   (the same game elsewhere only adds a tracked location), and listed with a reason when refused. Importing never builds (an explicit checkbox builds
-  the new games). ROMs are referenced, never copied, moved or uploaded. **Zipped ROMs**: a `.zip` holding exactly one `.md/.bin/.gen/.smd/.sms`
+  the new games). ROM files are added by reference: never copied, moved, modified or uploaded. **Zipped ROMs**: a `.zip` holding exactly one `.md/.bin/.gen/.smd/.sms`
   (stored or deflate, CRC-checked; no zip64 or encryption) is unpacked once into `<library>/roms/<sha256>.<ext>` and that copy is what the library
-  tracks and builds; the archive is only read. A zip with no ROM or several ROMs is refused with the reason. The same ROM zipped or not is one game.
+  tracks and builds; the archive is only read. Decoding writes into a buffer of exactly the declared size (at most 16 MiB) and stops if the stream would
+  exceed it; an existing copy is reused only when its own SHA-256 matches its name (a damaged copy is replaced, a link or folder in its place is refused);
+  writes go through a temporary file and a rename. A zip with no ROM or several ROMs is refused with the reason.
+  **Extracted copies are kept**: clearing build caches, keeping metadata only and removing a game from the library do not delete them (delete them from
+  the `roms` folder yourself if you want). The same ROM zipped or not is one game.
   Works for drag and drop, Browse, Locate ROM and the headless `--import` / `--build`. A sidecar `.mapper.json` inside a zip is not read (declare the
   Master System mapper on the game's page).
 * **Details** - top to bottom, inside the first 1080x740 view: the cover (change from its corner), editable display name (the header name is kept),
@@ -83,7 +87,7 @@ the exact scope, reclaimable bytes, what stays and what cannot be undone.
 | Clear shared compiler cache | the contents of `zig-cache/` | all builds; the next Recompile is slower |
 | Remove from library | the library entry (optionally also its build folders) | the ROM, covers |
 
-Never touched: original ROMs, covers, screenshots, `library.json`, unknown folders in the cache (reported, not deleted), a running game or build. Cleanup is
+Never touched: original ROMs, ROM copies extracted from ZIP archives (`library/roms/`), covers, screenshots, `library.json`, unknown folders in the cache (reported, not deleted), a running game or build. Cleanup is
 refused while a build or game runs (one busy guard). Settings > Build & Runtime offers an **automatic policy** after a successful build: never,
 remove intermediates, keep the newest N playable games (older ones are reduced to metadata only; favorites, running games and the game being built
 are excluded) or a soft limit that only reminds you. The default is *never*.

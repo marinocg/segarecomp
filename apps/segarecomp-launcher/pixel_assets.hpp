@@ -31,4 +31,7 @@ struct ImageInfo {
 // Validates a candidate cover: PNG or JPEG by content (not extension), at most `max_bytes`, 16..2048 pixels per side, and fully decodable.
 [[nodiscard]] ImageInfo probe_image(const std::filesystem::path &path, std::size_t max_bytes = 2U << 20U);
 
+// Total bytes stb_image has requested from its allocator in this process (a test aid: the zip decoder must never allocate).
+[[nodiscard]] std::size_t stb_requested_bytes_for_tests();
+
 } // namespace launcher

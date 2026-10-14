@@ -291,7 +291,7 @@ void App::draw_drop_zone(float w, float h, bool compact_box) {
   const float hpx = ctx_.u(compact_box ? 18.0F : 21.0F);
   draw_text(dl, ctx_.bold, hpx, col::text, ImVec2(cx - text_width(ctx_.bold, hpx, headline) * 0.5F, cy), headline);
   cy += hpx + ctx_.u(8.0F);
-  const char *note = "Genesis / Mega Drive and Master System";
+  const char *note = "Genesis / Mega Drive and Master System ROMs, or ZIP archives";
   const float npx = ctx_.u(12.0F);
   draw_text(dl, ctx_.regular, npx, col::text2, ImVec2(cx - text_width(ctx_.regular, npx, note) * 0.5F, cy), note);
   cy += npx + ctx_.u(16.0F);
@@ -629,10 +629,10 @@ void App::draw_modal(float w, float h) {
     notes.push_back("This cannot be undone. Original ROM files are never touched.");
   } else if (modal_.kind == Modal::Kind::remove_entries) {
     subtitle = "The selected games are removed from the library (titles, history, settings, last played).";
-    keeps = {"Your ROM files (never deleted)", "Cover images in the covers folder"};
+    keeps = {"Your ROM files (never deleted)", "ROM copies extracted from ZIP archives (kept in the library's roms folder)", "Cover images in the covers folder"};
   } else if (modal_.kind == Modal::Kind::clear_library) {
     subtitle = "Every game is removed from the library and the launcher forgets its history.";
-    keeps = {"Build folders in the cache (use Storage to delete them)", "Your ROM files"};
+    keeps = {"Build folders in the cache (use Storage to delete them)", "Your ROM files", "ROM copies extracted from ZIP archives"};
   } else if (modal_.kind == Modal::Kind::restore_defaults) {
     subtitle = "Launcher preferences (view, sort, compact mode, cleanup policy, region order) return to their defaults.";
     keeps = {"The library and builds", "Viewer controls and video settings"};

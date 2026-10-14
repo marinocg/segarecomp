@@ -135,7 +135,7 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
   if (menu_item(ctx_, "m_sha", "Copy ROM SHA-256", nullptr, ctx_.icon("file"), mw)) { SDL_SetClipboardText(entry->sha256.c_str()); toast("SHA-256 copied."); }
   if (info.rom_missing && menu_item(ctx_, "m_locate", "Locate ROM...", "Re-link a moved ROM (same SHA-256)", ctx_.icon("folder"), mw)) browse_locate(id);
   menu_separator(ctx_, mw);
-  if (menu_item(ctx_, "m_remove", "Remove from library...", "ROM files are never deleted", ctx_.icon("trash"), mw, !game_ || game_id_ != id, true)) ask_remove(*entry);
+  if (menu_item(ctx_, "m_remove", "Remove from library...", "ROM files and extracted copies stay", ctx_.icon("trash"), mw, !game_ || game_id_ != id, true)) ask_remove(*entry);
   end_menu();
 }
 

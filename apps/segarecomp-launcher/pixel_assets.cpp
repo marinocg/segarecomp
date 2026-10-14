@@ -1,5 +1,18 @@
 #include "pixel_assets.hpp"
 
+#include <atomic>
+#include <cstdlib>
+
+// stb's allocations are counted (bytes requested by malloc/realloc), so tests can prove that zip extraction's bounded decoder never allocates.
+namespace {
+std::atomic<std::size_t> g_stb_requested{0};
+void *stb_counted_malloc(std::size_t n) { g_stb_requested += n; return std::malloc(n); }
+void *stb_counted_realloc(void *p, std::size_t n) { g_stb_requested += n; return std::realloc(p, n); }
+} // namespace
+#define STBI_MALLOC(sz) stb_counted_malloc(sz)
+#define STBI_REALLOC(p, newsz) stb_counted_realloc(p, newsz)
+#define STBI_FREE(p) std::free(p)
+
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_STDIO
 #define STBI_ONLY_PNG
@@ -13,6 +26,8 @@
 #endif
 
 namespace fs = std::filesystem;
+
+std::size_t launcher::stb_requested_bytes_for_tests() { return g_stb_requested.load(); }
 
 namespace launcher {
 

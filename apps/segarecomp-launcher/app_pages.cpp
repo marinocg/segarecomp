@@ -53,7 +53,7 @@ void App::draw_import_body(float w, float h) {
       for (const auto &l : lines) { draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::text2, ImVec2(a.x + ctx_.u(52.0F), ly), l.c_str()); ly += ctx_.u(15.0F); }
       y += ch + ctx_.u(8.0F);
     }
-    const auto info_lines = wrap(ctx_.regular, ctx_.u(11.5F), steps_w - ctx_.u(52.0F), "Your original ROM files are never copied, moved, modified or uploaded. Segarecomp only reads them and remembers where they are.");
+    const auto info_lines = wrap(ctx_.regular, ctx_.u(11.5F), steps_w - ctx_.u(52.0F), "ROM files are added by reference. Segarecomp doesn't modify or upload your original files.\n\nZIP archives are read without modification. Segarecomp extracts the ROM into your local library so it can be built and played.");
     const float ih = static_cast<float>(info_lines.size()) * ctx_.u(15.0F) + ctx_.u(22.0F);
     card(ctx_, dl, ImVec2(a.x, y), ImVec2(a.x + steps_w, y + ih), false, false, rgba(10, 30, 66));
     icon_image(dl, ctx_.icon("info"), ImVec2(a.x + ctx_.u(12.0F), y + ctx_.u(12.0F)), ctx_.u(20.0F), col::info);
@@ -62,7 +62,7 @@ void App::draw_import_body(float w, float h) {
     side_bottom = y + ih;
   }
   ImGui::SetCursorScreenPos(ImVec2(top.x, std::max(after_drop, side_bottom) + ctx_.u(10.0F)));
-  if (!two) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "1. Add ROMs   2. Review the detected system   3. Choose Build, then Play. Original ROMs are referenced, never copied or uploaded.");
+  if (!two) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "1. Add ROMs   2. Review the detected system   3. Choose Build, then Play. ROM files are added by reference and never modified or uploaded; from a ZIP archive the ROM is extracted into your local library.");
   checkbox(ctx_, "import_build", "Also build each newly added game (can take several minutes per game)", &import_build_option_);
   paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, w, "Off by default. Duplicates are detected by the ROM's SHA-256: the same game found in another place only adds a second tracked location.");
   if (import_job_.valid()) {
@@ -280,6 +280,7 @@ void App::draw_storage(float w, float h) {
   checkbox(ctx_, "keep_logs", "When cleaning failed builds, keep build.log and status.json", &keep_failed_logs_);
   if (maintenance) paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::warn, w, maintenance_running_ ? "A cleanup is running..." : "Cleanup is unavailable while a build or game is running.");
   paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Cleanup only touches the Segarecomp cache. Your ROM files, covers, screenshots and the library itself are never deleted. Playing never cleans anything. Cache: " + u8s(cache_dir_));
+  paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "ROMs extracted from ZIP archives are stored separately from generated builds, in the library's roms folder. Clearing build caches or keeping only metadata does not remove those ROM copies.");
 }
 
 // ---------------------------------------------------------------- settings
@@ -491,7 +492,7 @@ void App::draw_settings(float full_w, float h) {
     section("WHERE THINGS LIVE");
     label_value(ctx_, lw, vw, "Installation", u8s(layout_.root) + (layout_.problem.empty() ? "" : "  (incomplete)"), layout_.problem.empty() ? col::text : col::err);
     label_value(ctx_, lw, vw, "Cache (disposable)", u8s(cache_dir_) + "  - games/ and zig-cache/ only");
-    label_value(ctx_, lw, vw, "Library (kept)", u8s(library_dir_) + "  - library.json, covers, settings");
+    label_value(ctx_, lw, vw, "Library (kept)", u8s(library_dir_) + "  - library.json, covers, settings, ROMs extracted from ZIPs");
     label_value(ctx_, lw, vw, "Viewer settings", u8s(viewer_settings_file_));
     if (!layout_.problem.empty()) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::err, w, layout_.problem);
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));

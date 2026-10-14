@@ -79,7 +79,7 @@ int headless(int argc, char **argv) {
   std::string report;
   const auto emit = [&](const std::string &line) { report += line + "\n"; std::puts(line.c_str()); };
   if (!imports.empty()) {
-    // Add ROMs to the persistent library without building (never copies or modifies them). Same classification as the window.
+    // Add ROMs to the persistent library without building (never modifies them; a ZIP's ROM is extracted into the library). Same classification as the window.
     const Layout import_layout = locate_layout();
     Catalog catalog(library_root() / "library.json");
     catalog.load();

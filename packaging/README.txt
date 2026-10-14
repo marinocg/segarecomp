@@ -8,7 +8,8 @@ Quick start
 1. Extract this archive anywhere you can write to (do not run it from inside the archive).
 2. Open Segarecomp (Segarecomp.exe on Windows, Segarecomp.app on macOS, ./Segarecomp on Linux).
 3. Drop your ROMs onto the window, or click "Import ROM" (several files at once are fine). They are added to your
-   library; adding a game does not build it and never copies it.
+   library; adding a game does not build it. ROM files are added by reference and never modified or uploaded.
+   ZIP archives (one ROM inside) are read without modification: the ROM is extracted into your local library.
 4. Open a game and click "Build" (or "Recompile"), then "Play". The first build of a game can take a few minutes;
    later launches are instant. Each game's page shows its real status, size and build details.
 
@@ -31,7 +32,9 @@ Good to know
     Windows: %LOCALAPPDATA%\Segarecomp\
     macOS:   ~/Library/Application Support/Segarecomp/
     Linux:   ~/.local/share/Segarecomp/
-  The library lives in a `library` folder inside it (never cleaned by Storage). Your ROM is never copied there.
+  The library lives in a `library` folder inside it (never cleaned by Storage). A ROM file you add is never copied there;
+  a ROM extracted from a ZIP archive is kept in its `roms` folder. Clearing build caches, keeping metadata only or
+  removing a game from the library does not delete those extracted copies.
   Use Storage to see what each game uses and to reclaim space safely; nothing is deleted without a confirmation that lists
   exactly what goes and what stays. "Cache folder" opens it.
 * If a build fails open the game and choose "View logs"; the same text is in build.log inside the cache folder

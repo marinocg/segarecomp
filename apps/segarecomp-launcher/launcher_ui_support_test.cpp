@@ -2,12 +2,14 @@
 
 #include "covers.hpp"
 #include "launcher_settings.hpp"
+#include "library_catalog.hpp"
 #include "pixel_assets.hpp"
 #include "rom_zip.hpp"
 #include "segarecomp/sha256.hpp"
 
 #include "zlib.h"  // the vendored deflate subset: the test builds real deflated archives
 
+#include <algorithm>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -27,7 +29,9 @@ std::string slurp(const fs::path &p) { std::ifstream in(p, std::ios::binary); st
 void put16(std::string &s, unsigned v) { s.push_back(static_cast<char>(v & 0xFFU)); s.push_back(static_cast<char>((v >> 8U) & 0xFFU)); }
 void put32(std::string &s, std::size_t v) { put16(s, static_cast<unsigned>(v & 0xFFFFU)); put16(s, static_cast<unsigned>((v >> 16U) & 0xFFFFU)); }
 
-struct ZipFile { std::string name, data; bool deflate = false; unsigned flags = 0; unsigned method_override = 0xFFFF; long crc_delta = 0; };
+// One archive member. `declared` overrides the uncompressed size written in the headers (0: the real size); `cut` drops bytes from the end of
+// the stored body (a truncated stream); `crc_delta` corrupts the recorded CRC-32.
+struct ZipFile { std::string name, data; bool deflate = false; unsigned flags = 0; unsigned method_override = 0xFFFF; long crc_delta = 0; std::size_t declared = 0; std::size_t cut = 0; };
 
 std::string raw_deflate(const std::string &data) {
   z_stream z{};
@@ -47,16 +51,18 @@ std::string raw_deflate(const std::string &data) {
 std::string make_zip(const std::vector<ZipFile> &files) {
   std::string zip, cd;
   for (const auto &f : files) {
-    const std::string body = f.deflate ? raw_deflate(f.data) : f.data;
+    std::string body = f.deflate ? raw_deflate(f.data) : f.data;
+    body.resize(body.size() - std::min(f.cut, body.size()));
+    const std::size_t usize = f.declared != 0 ? f.declared : f.data.size();
     const std::size_t crc = (static_cast<std::size_t>(crc32(0, reinterpret_cast<const Bytef *>(f.data.data()), static_cast<uInt>(f.data.size()))) + static_cast<std::size_t>(f.crc_delta)) & 0xFFFFFFFFU;
     const unsigned method = f.method_override != 0xFFFF ? f.method_override : (f.deflate ? 8U : 0U);
     const std::size_t offset = zip.size();
     std::string local;
     put32(local, 0x04034b50U); put16(local, 20); put16(local, f.flags); put16(local, method); put16(local, 0); put16(local, 0);
-    put32(local, crc); put32(local, body.size()); put32(local, f.data.size()); put16(local, static_cast<unsigned>(f.name.size())); put16(local, 0);
+    put32(local, crc); put32(local, body.size()); put32(local, usize); put16(local, static_cast<unsigned>(f.name.size())); put16(local, 0);
     zip += local + f.name + body;
     put32(cd, 0x02014b50U); put16(cd, 20); put16(cd, 20); put16(cd, f.flags); put16(cd, method); put16(cd, 0); put16(cd, 0);
-    put32(cd, crc); put32(cd, body.size()); put32(cd, f.data.size()); put16(cd, static_cast<unsigned>(f.name.size())); put16(cd, 0); put16(cd, 0);
+    put32(cd, crc); put32(cd, body.size()); put32(cd, usize); put16(cd, static_cast<unsigned>(f.name.size())); put16(cd, 0); put16(cd, 0);
     put16(cd, 0); put16(cd, 0); put32(cd, 0); put32(cd, offset);
     cd += f.name;
   }
@@ -139,27 +145,67 @@ int main() {
     spit(file, "not json at all");
     expect(load_launcher_settings(file).view == "grid", "a damaged file loads as defaults");
   }
-  {  // zipped ROMs: one ROM inside, stored or deflated, extracted by digest; everything else refused with a reason
+  {  // zipped ROMs: one ROM inside, stored or deflated, decoded into a buffer of exactly its declared size, extracted by digest
     std::string rom(0x8000, '\0');
     for (std::size_t i = 0; i < rom.size(); ++i) rom[i] = static_cast<char>((i * 37U + 11U) & 0xFFU);
     rom.replace(0x7FF0, 8, "TMR SEGA");
+    rom[0x7FFF] = 0x4C;  // header region/size byte (export, 32 KiB), as the launcher fixture's synthetic cartridges have
     const std::string digest = segarecomp::sha256_hex({reinterpret_cast<const std::uint8_t *>(rom.data()), rom.size()});
     const fs::path roms = dir / "library" / "roms";
+    const fs::path target = roms / (digest + ".sms");
+    const auto count_files = [&] { std::size_t n = 0; std::error_code ec; for (const auto &e : fs::directory_iterator(roms, ec)) { (void)e; ++n; } return n; };
     expect(is_zip_path("a/Game.ZIP") && !is_zip_path("a/game.sms") && !is_zip_path("zip"), "zip detection by extension, case-insensitive");
+
+    // valid stored and deflated archives; the deflated one expands to exactly its declared size
     spit(dir / "stored.zip", make_zip({{"readme.txt", "fictional", false}, {"Fictional Cart.sms", rom, false}}));
     ZipRom r = extract_zip_rom(dir / "stored.zip", roms);
-    expect(r.ok && r.extracted == roms / (digest + ".sms") && slurp(r.extracted) == rom && r.inner_name == "Fictional Cart.sms", "a stored ROM is extracted by digest, byte-exact");
+    expect(r.ok && r.extracted == target && slurp(r.extracted) == rom && r.inner_name == "Fictional Cart.sms", "a stored ROM is extracted by digest, byte-exact");
+    expect(r.output_capacity == rom.size(), "the stored ROM buffer is exactly its declared size");
+    fs::remove(target);
     spit(dir / "deflated.zip", make_zip({{"Folder/", "", false}, {"Folder/Fictional Cart.sms", rom, true}, {"__MACOSX/Folder/._Fictional Cart.sms", "x", false}}));
     const std::string deflated = slurp(dir / "deflated.zip");
     expect(deflated.size() < rom.size(), "the test archive really is compressed");
+    const std::size_t stb_before = stb_requested_bytes_for_tests();
     r = extract_zip_rom(dir / "deflated.zip", roms);
-    expect(r.ok && slurp(r.extracted) == rom, "a deflated ROM is inflated byte-exact (resource forks and folders ignored)");
+    expect(r.ok && slurp(r.extracted) == rom && r.output_capacity == rom.size(), "a deflated ROM expanding to exactly its declared size is inflated byte-exact");
+    expect(stb_requested_bytes_for_tests() == stb_before, "the deflate decoder allocates nothing of its own (output goes to the bounded buffer)");
     expect(slurp(dir / "deflated.zip") == deflated, "the archive itself is never modified");
+
     const auto refused = [&](const std::string &name, const std::string &bytes, const std::string &needle) {
       spit(dir / name, bytes);
+      const std::size_t files_before = count_files();
+      const std::size_t stb_at = stb_requested_bytes_for_tests();
       const ZipRom z = extract_zip_rom(dir / name, roms);
       expect(!z.ok && z.error.find(needle) != std::string::npos, name + " is refused (" + needle + "): " + z.error);
+      expect(stb_requested_bytes_for_tests() == stb_at, name + ": no decoder allocation");
+      expect(count_files() == files_before, name + ": nothing is written to the roms folder");
+      return z;
     };
+    // a stream that expands beyond its declared size: decoding stops at the buffer end, nothing larger is ever allocated
+    ZipFile over{"c.sms", rom, true};
+    over.declared = rom.size() - 1;
+    ZipRom z = refused("over.zip", make_zip({over}), "larger than its declared size");
+    expect(z.output_capacity == rom.size() - 1, "the over-long stream got a buffer of its declared size only");
+    // a "bomb": declares 1 KiB, deflates 8 MiB of zeros
+    ZipFile bomb{"bomb.md", std::string(8U << 20U, '\0'), true};
+    bomb.declared = 1024;
+    const std::string bomb_zip = make_zip({bomb});
+    expect(bomb_zip.size() < 64U * 1024U, "the bomb archive is small");
+    z = refused("bomb.zip", bomb_zip, "larger than its declared size");
+    expect(z.output_capacity == 1024, "the bomb is decoded into 1 KiB at most, never its real 8 MiB");
+    // a stream that ends before its declared size, and a truncated compressed body
+    ZipFile under{"c.sms", rom, true};
+    under.declared = rom.size() + 4096;
+    refused("under.zip", make_zip({under}), "");
+    ZipFile cut{"c.sms", rom, true};
+    cut.cut = 40;
+    refused("cut.zip", make_zip({cut}), "");
+    // declared output above the maximum: refused before any buffer exists
+    ZipFile huge{"c.md", "tiny", false};
+    huge.declared = static_cast<std::size_t>(kMaxZipRomBytes) + 1U;
+    z = refused("huge.zip", make_zip({huge}), "implausible size");
+    expect(z.output_capacity == 0, "an over-limit declaration allocates no output buffer");
+    // archive-level refusals
     refused("none.zip", make_zip({{"notes.txt", "fictional", true}}), "contains no");
     refused("two.zip", make_zip({{"a.md", rom, false}, {"b.sms", rom, true}}), "contains 2 ROMs");
     ZipFile encrypted{"c.sms", rom, false};
@@ -174,9 +220,70 @@ int main() {
     const std::string whole = make_zip({{"c.sms", rom, true}});
     refused("truncated.zip", whole.substr(0, 40) + whole.substr(whole.size() - 22), "");
     refused("garbage.zip", std::string(300, 'z'), "not a zip");
-    std::size_t files = 0;
-    for (const auto &e : fs::directory_iterator(roms)) { (void)e; ++files; }
-    expect(files == 1, "refused archives leave nothing behind; the same ROM twice is one file");
+
+    // an existing extracted copy is trusted only when its own SHA-256 matches
+    expect(fs::is_regular_file(target), "the deflated ROM is in place");
+    const auto mtime = fs::last_write_time(target);
+    r = extract_zip_rom(dir / "deflated.zip", roms);
+    expect(r.ok && r.extracted == target && slurp(target) == rom && fs::last_write_time(target) == mtime, "a correct existing copy is reused (idempotent re-import)");
+    std::string damaged = rom;
+    damaged[0x100] = static_cast<char>(damaged[0x100] ^ 0x5A);
+    spit(target, damaged);
+    r = extract_zip_rom(dir / "deflated.zip", roms);
+    expect(r.ok && slurp(target) == rom, "a same-size damaged copy is not trusted: it is replaced by the verified contents");
+    spit(target, rom.substr(0, 1000));
+    r = extract_zip_rom(dir / "deflated.zip", roms);
+    expect(r.ok && slurp(target) == rom, "a different-size copy is not trusted: it is replaced");
+    // a failed write never exposes a partial ROM (nor a temporary file)
+    fs::remove(target);
+    set_zip_write_failure_for_tests(true);
+    r = extract_zip_rom(dir / "deflated.zip", roms);
+    set_zip_write_failure_for_tests(false);
+    expect(!r.ok && !fs::exists(target) && !fs::exists(roms / (digest + ".partial")), "a failed extraction leaves neither a ROM nor a partial file");
+    spit(target, damaged);
+    set_zip_write_failure_for_tests(true);
+    r = extract_zip_rom(dir / "deflated.zip", roms);
+    set_zip_write_failure_for_tests(false);
+    expect(!r.ok && slurp(target) == damaged && !fs::exists(roms / (digest + ".partial")), "a failed replacement leaves the old file untouched and nothing partial");
+    r = extract_zip_rom(dir / "deflated.zip", roms);
+    expect(r.ok && slurp(target) == rom, "the next import repairs it");
+#if !defined(_WIN32)
+    {  // a link at the content-addressed name is refused: never followed, never deleted, the file it points to is untouched
+      fs::remove(target);
+      spit(dir / "elsewhere.sms", "outside the roms folder");
+      fs::create_symlink(dir / "elsewhere.sms", target);
+      r = extract_zip_rom(dir / "deflated.zip", roms);
+      expect(!r.ok && r.error.find("unexpected item") != std::string::npos, "a symlink in place of the extracted ROM is refused: " + r.error);
+      expect(fs::is_symlink(target) && slurp(dir / "elsewhere.sms") == "outside the roms folder", "the link and its target are left untouched");
+      fs::remove(target);
+      // a roms folder that is itself a link is refused
+      const fs::path linked_roms = dir / "linked-library" / "roms";
+      fs::create_directories(linked_roms.parent_path());
+      fs::create_directories(dir / "real-roms");
+      fs::create_directory_symlink(dir / "real-roms", linked_roms);
+      r = extract_zip_rom(dir / "deflated.zip", linked_roms);
+      expect(!r.ok && fs::is_empty(dir / "real-roms"), "a roms folder that is a link is refused, nothing is written through it");
+    }
+#endif
+    fs::create_directory(target);  // a folder in its place is refused too (and kept)
+    r = extract_zip_rom(dir / "deflated.zip", roms);
+    expect(!r.ok && fs::is_directory(target), "a folder in place of the extracted ROM is refused and left alone");
+    fs::remove(target);
+
+    {  // the same ROM imported plain and zipped is one logical game (unchanged library de-duplication)
+      spit(dir / "Fictional Cart.sms", rom);
+      Catalog catalog(dir / "library" / "dedup.json");
+      catalog.load();
+      const Layout layout{};
+      const auto plain = catalog.import_rom(inspect_rom_or_zip(dir / "Fictional Cart.sms", layout, roms), 1);
+      const auto zipped = catalog.import_rom(inspect_rom_or_zip(dir / "stored.zip", layout, roms), 2);
+      const auto again = catalog.import_rom(inspect_rom_or_zip(dir / "deflated.zip", layout, roms), 3);
+      expect(plain.error.empty() && zipped.error.empty(), "plain and zipped copies are recognized: " + plain.error + " / " + zipped.error);
+      expect(plain.added && zipped.entry != nullptr && !zipped.added && again.entry != nullptr && !again.added && catalog.entries().size() == 1,
+             "plain, stored-zip and deflated-zip imports of one ROM are one library entry");
+      expect(catalog.entries().size() == 1 && catalog.entries()[0].sha256 == digest, "its identity is the ROM's SHA-256");
+    }
+    expect(count_files() == 1, "one extracted file for one ROM, however often and however it was zipped");
   }
   fs::remove_all(dir);
   if (failures != 0) return 1;

@@ -20,7 +20,20 @@ namespace launcher {
 namespace {
 
 constexpr std::uintmax_t kMaxZipBytes = 64U << 20U;     // the whole archive is read into memory
-constexpr std::uint32_t kMaxRomBytes = 16U << 20U;       // far above any Genesis or Master System cartridge
+constexpr std::uint32_t kMaxRomBytes = kMaxZipRomBytes;
+
+bool g_fail_writes_for_tests = false;
+
+// SHA-256 of a file already in the extraction folder (empty when it cannot be read in full or exceeds the ROM limit).
+std::string file_sha256(const fs::path &path) {
+  std::error_code ec;
+  const std::uintmax_t size = fs::file_size(path, ec);
+  if (ec || size > kMaxRomBytes) return {};
+  std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+  std::ifstream in(path, std::ios::binary);
+  if (!in.read(reinterpret_cast<char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()))) return {};
+  return segarecomp::sha256_hex({bytes.data(), bytes.size()});
+}
 
 std::uint32_t le16(const std::vector<std::uint8_t> &b, std::size_t at) { return static_cast<std::uint32_t>(b[at]) | static_cast<std::uint32_t>(b[at + 1]) << 8U; }
 std::uint32_t le32(const std::vector<std::uint8_t> &b, std::size_t at) { return le16(b, at) | le16(b, at + 2) << 16U; }
@@ -108,33 +121,55 @@ ZipRom extract_zip_rom(const fs::path &zip, const fs::path &roms_dir) {
   if (static_cast<std::uint64_t>(e.local) + 30 > bytes.size() || le32(bytes, e.local) != 0x04034b50U) { out.error = "the archive's ROM entry is damaged"; return out; }
   const std::size_t data = static_cast<std::size_t>(e.local) + 30 + le16(bytes, e.local + 26) + le16(bytes, e.local + 28);
   if (static_cast<std::uint64_t>(data) + e.csize > bytes.size()) { out.error = "the archive is truncated"; return out; }
-  std::vector<std::uint8_t> rom;
+  // The output buffer is exactly the declared (already range-checked) size and never grows: stb's buffer decoder is non-expandable and fails
+  // with "output buffer limit" the moment a stream would write past it, so a small declared size can never turn into a large allocation.
+  std::vector<std::uint8_t> rom(e.usize);
+  out.output_capacity = rom.size();
   if (e.method == 0) {
     if (e.csize != e.usize) { out.error = "the archive's ROM entry is damaged"; return out; }
-    rom.assign(bytes.begin() + static_cast<std::ptrdiff_t>(data), bytes.begin() + static_cast<std::ptrdiff_t>(data + e.usize));
+    std::copy_n(bytes.begin() + static_cast<std::ptrdiff_t>(data), e.usize, rom.begin());
   } else {
-    int got = 0;
-    char *inflated = stbi_zlib_decode_noheader_malloc(reinterpret_cast<const char *>(&bytes[data]), static_cast<int>(e.csize), &got);
-    if (inflated == nullptr || static_cast<std::uint32_t>(got) != e.usize) { stbi_image_free(inflated); out.error = "the ROM inside could not be decompressed"; return out; }
-    rom.assign(reinterpret_cast<std::uint8_t *>(inflated), reinterpret_cast<std::uint8_t *>(inflated) + got);
-    stbi_image_free(inflated);
+    const int got = stbi_zlib_decode_noheader_buffer(reinterpret_cast<char *>(rom.data()), static_cast<int>(rom.size()),
+                                                     reinterpret_cast<const char *>(&bytes[data]), static_cast<int>(e.csize));
+    if (got < 0) { out.error = "the ROM inside could not be decompressed (damaged, truncated or larger than its declared size)"; return out; }
+    if (static_cast<std::uint32_t>(got) != e.usize) { out.error = "the ROM inside is shorter than its declared size (damaged archive)"; return out; }
   }
   if (crc32_of(rom.data(), rom.size()) != e.crc) { out.error = "the ROM inside fails its CRC check (damaged archive)"; return out; }
   const std::string digest = segarecomp::sha256_hex({rom.data(), rom.size()});
-  fs::create_directories(roms_dir, ec);
+  // The extraction folder must be a real directory; an existing file at the content-addressed name is reused only when its own SHA-256
+  // matches (never because of its size). Links and other objects are refused, never followed and never deleted.
+  if (fs::exists(fs::symlink_status(roms_dir, ec))) {
+    if (!fs::is_directory(fs::symlink_status(roms_dir, ec))) { out.error = "the library's roms folder is not a plain folder"; return out; }
+  } else if (!fs::create_directories(roms_dir, ec) && !fs::is_directory(fs::symlink_status(roms_dir, ec))) {
+    out.error = "the library's roms folder cannot be created";
+    return out;
+  }
   const fs::path target = roms_dir / (digest + "." + lower_ext(e.name));
-  if (fs::is_regular_file(target, ec) && fs::file_size(target, ec) == rom.size()) { out.ok = true; out.extracted = target; return out; }
-  const fs::path temp = roms_dir / (digest + ".tmp");
+  const fs::file_status existing = fs::symlink_status(target, ec);
+  if (fs::exists(existing)) {
+    if (!fs::is_regular_file(existing)) { out.error = "an unexpected item (link or folder) occupies " + target.filename().string() + " in the library's roms folder; remove it and import again"; return out; }
+    if (file_sha256(target) == digest) { out.ok = true; out.extracted = target; return out; }
+    // a damaged or modified copy: replaced below by the verified archive contents (atomically)
+  }
+  const fs::path temp = roms_dir / (digest + ".partial");
+  if (fs::exists(fs::symlink_status(temp, ec)) && !fs::is_regular_file(fs::symlink_status(temp, ec))) fs::remove(temp, ec);  // a stray link: removed, never followed
+  bool written = false;
   {
     std::ofstream file(temp, std::ios::binary | std::ios::trunc);
-    if (!file.write(reinterpret_cast<const char *>(rom.data()), static_cast<std::streamsize>(rom.size()))) { fs::remove(temp, ec); out.error = "the ROM could not be written to the library folder"; return out; }
+    const std::size_t amount = g_fail_writes_for_tests ? rom.size() / 2 : rom.size();
+    written = file.write(reinterpret_cast<const char *>(rom.data()), static_cast<std::streamsize>(amount)) && !g_fail_writes_for_tests;
+    file.close();
+    written = written && !file.fail();
   }
+  if (!written || file_sha256(temp) != digest) { fs::remove(temp, ec); out.error = "the ROM could not be written to the library folder"; return out; }
   fs::rename(temp, target, ec);
   if (ec) { fs::remove(temp, ec); out.error = "the ROM could not be written to the library folder"; return out; }
   out.ok = true;
   out.extracted = target;
   return out;
 }
+
+void set_zip_write_failure_for_tests(bool fail) { g_fail_writes_for_tests = fail; }
 
 RomView inspect_rom_or_zip(const fs::path &path, const Layout &layout, const fs::path &roms_dir) {
   if (!is_zip_path(path)) return inspect_rom_file(path, layout);
