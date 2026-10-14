@@ -46,7 +46,7 @@ std::string initials(const std::string &title) {
 
 } // namespace
 
-float App::hero_height(float, float h) const { return std::clamp(h * 0.25F, ctx_.u(112.0F), ctx_.u(236.0F)); }
+float App::hero_height(float, float h) const { return std::clamp(h * 0.29F, ctx_.u(180.0F), ctx_.u(240.0F)); }
 
 void App::draw_background(float w, float h) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
@@ -100,10 +100,7 @@ void App::draw_cover(ImDrawList *dl, const LibraryEntry &entry, ImVec2 a, ImVec2
   }
   // ---- the neutral cartridge ----
   const bool sms = entry.platform_id == "master-system";
-  static const ImU32 accents[] = {rgba(64, 140, 230), rgba(88, 190, 200), rgba(120, 150, 235), rgba(210, 130, 120), rgba(230, 180, 90)};
-  unsigned hash = 2166136261U;
-  for (const char c : entry.title()) hash = (hash ^ static_cast<unsigned char>(c)) * 16777619U;
-  const ImU32 accent = sms ? rgba(214, 110, 112) : accents[hash % 3U];
+  const ImU32 accent = sms ? rgba(155, 161, 180) : rgba(120, 160, 195);
   const ImU32 accent_dark = rgba(static_cast<int>((accent >> 0U) & 0xFFU) * 40 / 100, static_cast<int>((accent >> 8U) & 0xFFU) * 40 / 100, static_cast<int>((accent >> 16U) & 0xFFU) * 40 / 100);
   dl->AddRectFilled(a, b, rgba(11, 25, 58), rounding);
   dl->PushClipRect(ImVec2(a.x + rounding * 0.3F, a.y + rounding * 0.3F), ImVec2(b.x - rounding * 0.3F, b.y - rounding * 0.3F), true);

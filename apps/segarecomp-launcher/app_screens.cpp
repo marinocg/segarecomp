@@ -131,7 +131,7 @@ void App::draw() {
       }
     }
   }
-  const float top = hero - ctx_.u(22.0F);
+  const float top = hero;
   const ImVec2 pa(m, top), pb(win_w_ - m, win_h_ - m);
   panel(ctx_, dl, pa, pb);
   const float sw = win_w_ < ctx_.u(900.0F) ? ctx_.u(62.0F) : ctx_.u(196.0F);
@@ -141,6 +141,7 @@ void App::draw() {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ctx_.u(18.0F), ctx_.u(14.0F)));
   ImGui::SetCursorScreenPos(ImVec2(cx, cy));
   ImGui::BeginChild("##content", ImVec2(cw, ch), ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoBackground);
+  if (SDL_getenv("SEGARECOMP_SHOT_SCROLL") && page_ != Page::settings) ImGui::SetScrollY(ImGui::GetScrollMaxY());  // review aid: lower part of a long page
   const float inner_w = cw - ctx_.u(36.0F) - ctx_.u(8.0F);
   switch (page_) {
     case Page::library: draw_library(inner_w, ch); break;
@@ -193,7 +194,11 @@ void App::draw_sidebar(float x, float y, float w, float h) {
   float cy = y + pad + ctx_.u(2.0F);
   struct Nav { Page page; const char *label; const char *icon; };
   const Nav items[] = {{Page::library, "Library", "library"}, {Page::import_page, "Import ROMs", "import"}, {Page::details, "Game Details", "info"}, {Page::storage, "Storage", "storage"}, {Page::settings, "Settings", "settings"}};
-  for (const auto &item : items) {
+  ImGuiID nav_ids[5]{};
+  ImRect nav_rects[5];
+  int nav_target = -1;
+  for (int index = 0; index < 5; ++index) {
+    const auto &item = items[index];
     const bool is_details = item.page == Page::details;
     const bool active = page_ == item.page;
     const bool enabled = !is_details || !catalog_.entries().empty();
@@ -204,6 +209,19 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     const bool pressed = ui::nav_button("##nav", size);
     if (!enabled) ImGui::EndDisabled();
     const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+    nav_ids[index] = ImGui::GetItemID();
+    nav_rects[index] = ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
+    // The footer and content children are spatial neighbours, not navigation siblings.
+    // Keep vertical navigation in this fixed menu independent of hero/window height.
+    if (focused) {
+      int step = 0;
+      if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown)) step = 1;
+      if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadUp)) step = -1;
+      if (step != 0) {
+        nav_target = std::clamp(index + step, 0, 4);
+        if (nav_target == 2 && catalog_.entries().empty()) nav_target += step;
+      }
+    }
     if (active && nav_reset_) ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());  // keyboard/gamepad focus starts on the current page's entry
     if (focused) focus_label_ = item.label;
     ImGui::PopID();
@@ -221,6 +239,16 @@ void App::draw_sidebar(float x, float y, float w, float h) {
       } else go(item.page);
     }
     cy += ctx_.u(46.0F);
+  }
+  if (nav_target >= 0) {
+    ImGui::NavMoveRequestCancel();
+    ImGui::SetFocusID(nav_ids[nav_target], ImGui::GetCurrentWindow());
+    ImGuiContext &g = *ImGui::GetCurrentContext();
+    g.NavCursorVisible = true;
+    g.NavHighlightItemUnderNav = true;
+    ImRect relative = nav_rects[nav_target];
+    relative.Translate(ImVec2(-ImGui::GetWindowPos().x, -ImGui::GetWindowPos().y));
+    ImGui::GetCurrentWindow()->NavRectRel[ImGuiNavLayer_Main] = relative;
   }
   nav_reset_ = false;
   const float px = ctx_.u(12.0F);
@@ -250,7 +278,7 @@ void App::draw_sidebar(float x, float y, float w, float h) {
 void App::draw_drop_zone(float w, float h, bool compact_box) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 origin = ImGui::GetCursorScreenPos();
-  const float bw = w, bh = compact_box ? ctx_.u(322.0F) : std::max(ctx_.u(260.0F), h - ctx_.u(110.0F));
+  const float bw = w, bh = compact_box ? ctx_.u(win_h_ < ctx_.u(600.0F) ? 200.0F : 322.0F) : std::max(ctx_.u(260.0F), h - ctx_.u(110.0F));
   const ImVec2 a(origin.x, origin.y), b(a.x + bw, a.y + bh);
   const bool hover = ImGui::IsMouseHoveringRect(a, b, false);
   const bool active = dragging_;
@@ -263,7 +291,7 @@ void App::draw_drop_zone(float w, float h, bool compact_box) {
   const float hpx = ctx_.u(compact_box ? 18.0F : 21.0F);
   draw_text(dl, ctx_.bold, hpx, col::text, ImVec2(cx - text_width(ctx_.bold, hpx, headline) * 0.5F, cy), headline);
   cy += hpx + ctx_.u(8.0F);
-  const char *note = "Supports Genesis / Mega Drive (.md .gen .bin .smd) and Master System (.sms)";
+  const char *note = "Genesis / Mega Drive and Master System";
   const float npx = ctx_.u(12.0F);
   draw_text(dl, ctx_.regular, npx, col::text2, ImVec2(cx - text_width(ctx_.regular, npx, note) * 0.5F, cy), note);
   cy += npx + ctx_.u(16.0F);
@@ -284,6 +312,24 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
   const ImVec2 a(x, y), b(x + w, y + h);
   card(ctx_, dl, a, b, selected || focused, hovered);
+  if (win_h_ < ctx_.u(600.0F)) {
+    // Short windows retain a real grid, but use compact horizontal cards so title,
+    // platform and build status are visible without first scrolling past box art.
+    const float pad = ctx_.u(8.0F), art_w = ctx_.u(46.0F);
+    draw_cover(dl, entry, ImVec2(x + pad, y + pad), ImVec2(x + pad + art_w, y + h - pad), ctx_.u(3.0F));
+    const float tx = x + art_w + pad * 2, available = w - art_w - pad * 3;
+    draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(tx, y + pad), ellipsize(ctx_.bold, ctx_.u(13.0F), available, entry.title()).c_str());
+    draw_text(dl, ctx_.regular, ctx_.u(11.0F), col::info, ImVec2(tx, y + ctx_.u(30.0F)), platform_short(entry.platform_id));
+    draw_text(dl, ctx_.bold, ctx_.u(11.5F), status_color(info), ImVec2(tx, y + ctx_.u(49.0F)), status_label(info).c_str());
+    if (info.rom_missing) draw_text(dl, ctx_.regular, ctx_.u(10.5F), col::warn, ImVec2(tx, y + ctx_.u(65.0F)), "ROM missing");
+    if (focused) focus_ring(ctx_, dl, a, b);
+    ImGui::PopID();
+    if (pressed) {
+      if (select_mode_) { if (selected) selected_.erase(entry.id()); else selected_.insert(entry.id()); }
+      else open_details(entry.id());
+    }
+    return;
+  }
   const float pad = ctx_.u(8.0F);
   const float cw = w - 2 * pad, chh = cw * 0.92F;
   const ImVec2 ca(x + pad, y + pad), cb(x + pad + cw, y + pad + chh);
@@ -440,7 +486,7 @@ void App::draw_library(float w, float h) {
     if (button(ctx_, "sel_none", "Clear", ImVec2(ctx_.u(80.0F), ctx_.u(28.0F)), Style::secondary)) selected_.clear();
     ImGui::SameLine(0.0F, ctx_.u(6.0F));
     if (button(ctx_, "sel_storage", ("Manage storage (" + std::to_string(selected_.size()) + ")").c_str(), ImVec2(ctx_.u(200.0F), ctx_.u(28.0F)), Style::secondary, !selected_.empty(), ctx_.icon("storage"))) { storage_selected_ = selected_; go(Page::storage); }
-    ImGui::SameLine(0.0F, ctx_.u(6.0F));
+    if (w > ctx_.u(640.0F)) ImGui::SameLine(0.0F, ctx_.u(6.0F));
     if (button(ctx_, "sel_remove", "Remove from library", ImVec2(ctx_.u(190.0F), ctx_.u(28.0F)), Style::danger, !selected_.empty(), ctx_.icon("trash"))) {
       modal_ = Modal{};
       modal_.kind = Modal::Kind::remove_entries;
@@ -462,11 +508,12 @@ void App::draw_library(float w, float h) {
     while (clipper.Step())
       for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) draw_list_row(*visible[static_cast<std::size_t>(i)], w, row_h);
   } else {
-    const float gap = ctx_.u(14.0F), card_w = ctx_.u(settings_.compact ? 140.0F : 178.0F);
+    const bool short_window = win_h_ < ctx_.u(600.0F);
+    const float gap = ctx_.u(14.0F), card_w = ctx_.u(short_window ? 250.0F : (settings_.compact ? 140.0F : 178.0F));
     const float usable = w - ctx_.u(14.0F);
     const int columns = std::max(1, static_cast<int>((usable + gap) / (card_w + gap)));
     const float cw = card_w + (usable + gap - static_cast<float>(columns) * (card_w + gap)) / static_cast<float>(columns);
-    const float card_h = (cw - ctx_.u(16.0F)) * 0.92F + ctx_.u(132.0F);
+    const float card_h = short_window ? ctx_.u(88.0F) : (cw - ctx_.u(16.0F)) * 0.92F + ctx_.u(132.0F);
     const int rows = (static_cast<int>(visible.size()) + columns - 1) / columns;
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGuiListClipper clipper;
@@ -544,12 +591,18 @@ void App::draw_modal(float w, float h) {
   if (modal_.kind == Modal::Kind::remove_entries || (is_plan && modal_.plan.kind == PlanKind::failed_partial)) ph += ctx_.u(34.0F);
   if (is_plan) ph += ctx_.u(46.0F);
   ph += ctx_.u(70.0F);
+  ph = std::min(ph, h - ctx_.u(24.0F));
   const ImVec2 a((w - pw) * 0.5F, std::max(ctx_.u(10.0F), (h - ph) * 0.5F)), b(a.x + pw, a.y + ph);
   dl->AddRectFilled(ImVec2(a.x - ctx_.u(2.0F), a.y - ctx_.u(2.0F)), ImVec2(b.x + ctx_.u(2.0F), b.y + ctx_.u(2.0F)), col::glow_soft, ctx_.u(10.0F));
   dl->AddRectFilled(a, b, rgba(9, 21, 48), ctx_.u(8.0F));
   dl->AddRect(a, b, col::glow, ctx_.u(8.0F), 0, std::max(1.0F, ctx_.u(1.5F)));
-  float y = a.y + ctx_.u(22.0F);
   const float lx = a.x + ctx_.u(24.0F);
+  // Long scope/exclusion lists scroll inside the sheet; confirmation controls never leave the window.
+  ImGui::SetCursorScreenPos(ImVec2(lx, a.y + ctx_.u(22.0F)));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+  ImGui::BeginChild("##confirmation_scope", ImVec2(inner, ph - ctx_.u(100.0F)), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+  dl = ImGui::GetWindowDrawList();
+  float y = ImGui::GetCursorScreenPos().y;
   if (modal_.kind != Modal::Kind::message) {
     const bool destructive = is_plan || modal_.kind == Modal::Kind::remove_entries || modal_.kind == Modal::Kind::clear_library;
     const float isz = ctx_.u(40.0F);
@@ -594,7 +647,12 @@ void App::draw_modal(float w, float h) {
     const std::string total = format_bytes(modal_.plan.bytes);
     const float tpx = ctx_.u(26.0F);
     draw_text(dl, ctx_.bold, tpx, col::info, ImVec2(lx + inner - text_width(ctx_.bold, tpx, total.c_str()), y), total.c_str());
+    y += ctx_.u(46.0F);
   }
+  ImGui::SetCursorScreenPos(ImVec2(lx, y));
+  ImGui::Dummy(ImVec2(inner, ctx_.u(8.0F)));
+  ImGui::EndChild();
+  ImGui::PopStyleVar();
   const float bw = (inner - ctx_.u(12.0F)) * 0.5F, bh = ctx_.u(38.0F), by = b.y - ctx_.u(24.0F) - bh;
   bool confirm = false, cancel = false;
   if (modal_.kind != Modal::Kind::message) {

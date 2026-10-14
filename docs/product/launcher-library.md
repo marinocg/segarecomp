@@ -120,6 +120,9 @@ See `docs/testing/input-diagnostics.md` for the A-F diagnostic states, the Switc
 (not features): `SEGARECOMP_SHOT=<file.bmp>` with `SEGARECOMP_SHOT_PAGE` (`library|list|details:<n>|import|storage|settings<tab>`) and `SEGARECOMP_SHOT_SIZE=WxH`;
 the Master System/Genesis review hooks (`SEGARECOMP_SHOT_ROM`, `..._POLICY`, `..._MODEL`, `..._REGION`, `SEGARECOMP_GUI_AUTOPLAY`, `SEGARECOMP_GUI_TRACE`) behave as before.
 `tools/launcher_ui_fixture.py` builds the fictional fixture library used for the screenshots.
+`tools/launcher_visual_capture.py` captures an existing synthetic fixture with the **specified binary**, at both supported sizes. It requires Pillow
+(review tooling only, not a runtime dependency). `--build-rom` optionally captures an actual build of a project-authored synthetic cartridge in a temporary
+cache; it never runs the resulting game. `SEGARECOMP_SHOT_SCROLL=bottom` captures the lower part of a long page without saving a scroll preference.
 
 ## Screenshots (fictional fixtures)
 
@@ -127,10 +130,48 @@ All images are real captures of the built binaries, rendered from fictional, pro
 (`tools/launcher_ui_fixture.py`, procedurally drawn covers for some games and none for others) and a synthetic picture for the viewer
 (`libs/viewer/test/sv_gallery.c`). No commercial ROM, cover or screenshot is involved; the design concept boards are not part of the repository.
 
-* `screenshots/launcher/` - 1080x740: library grid/list/select, details, import, storage and its cleanup dialog, all settings tabs including Input Diagnostics.
-  `launcher-small/` - 720x520 (the minimum size). `launcher-states/` - ready, metadata-only, stale, ROM missing, failed (with log), not built, several files
-  imported at once, a build in progress.
+* `screenshots/launcher/` - 1080x740; `launcher-small/` - 720x520 (the minimum size). These are **42 refreshed launcher captures**: library grid/list/select,
+  details with chosen art and without art, import, storage, the real intermediate-cleanup confirmation, all six settings sections, lower-page views and a
+  real build in progress. `screenshots/launcher-capture.json` records the captured binary SHA-256 and exact file list. These captures use SDL's dummy video
+  driver and software renderer on Linux, not a physical display or controller. The existing fixture builds correctly appear **stale** when their recorded
+  build identity does not match; no screenshot readiness flag is forged. The two build-progress captures use fresh temporary caches and real producer stages.
+* `launcher-states/` is **historical evidence from the earlier binary**, not refreshed by the launcher visual correction: ready, metadata-only, stale,
+  ROM missing, failed (with log), not built, multiple imports and build progress. Do not use it as proof of the current layout.
 * `screenshots/viewer-genesis/` (1920x1080), `viewer-sms/` (768x576, 192 lines), `viewer-sms-224/` (224-line mode): gameplay, HUD, pause menu, quick settings,
   video and display with live preview, controls, controller status, audio, system, quit confirmation, toast, the four CRT presets.
 * `screenshots/input-diagnostics/` - launcher states A (no controller), B (joystick without mapping), C (open failure), OK (live virtual gamepad) and the viewer's
   Controller status page for the same cases. **These use SDL virtual joysticks, not a physical Switch 2 Pro Controller.**
+
+### Launcher visual correction review
+
+The original repository sunset and wordmark remain the runtime art. The aspect-preserving hero is now 180–240 logical pixels high (about 215 at
+1080x740, 180 at 720x520), with no content-panel overlap. No new background, cover landscape, font binary or kit concept artwork was added. A missing
+cover uses a neutral code-drawn cartridge with title initials. The fictional chosen covers in the fixture are explicit local-art examples, not fallbacks.
+Short windows use horizontal compact grid cards that keep title, platform and build status visible; the normal grid returns when height permits.
+
+Settings use bounded, independently scrollable content, labelled rows and wrapping option groups; at narrow widths the section selector becomes a dropdown.
+Details wrap secondary actions and put build progress before metadata. Storage prioritizes build status and total size in narrow tables, retaining measured
+breakdowns in the selection panel. Long paths/digests wrap at character boundaries. Confirmation scope lists scroll while Cancel and the destructive action
+remain fixed inside the window. Sidebar arrows/D-pad stay within the navigation group regardless of hero height.
+
+Local comparison sheets were made for the seven individual launcher design crops at **both sizes**. They are review-only, ignored build output, never runtime
+assets or release contents. To reproduce with a locally supplied kit (keep comparison output ignored):
+
+```sh
+python3 tools/launcher_visual_capture.py --launcher <new-built-Segarecomp> --home <staged-package> \
+  --fixture <synthetic-fixture> --out docs/product/screenshots \
+  --references <kit>/references/launcher_screens --comparisons build/visual-review/comparisons \
+  --build-rom <project-authored-synthetic-ROM>
+```
+
+Validation: the seven focused launcher/library/storage CTest tests passed. After the final layout adjustment, the navigation test passed again with
+9 keyboard/gamepad assertions and 24 real-window responsive render smoke cases. This is not pixel-perfect visual automation, HiDPI hardware validation,
+physical-gamepad validation, a three-OS release test, or a final fast gate. The validator owns the latter. No viewer source changed in this phase, and the
+viewer captures above remain earlier evidence pending the viewer correction phase.
+
+Remaining intentional differences from the concepts: long pages require scrolling, particularly at minimum size; there are no invented compatibility
+ratings, build percentages, storage figures or commercial covers. **Cover downloads remain unsupported** (manual local art and an explicit browser lookup,
+labelled `Web lookup`, are available). **SDL_GPU is not implemented**; SDL_Renderer remains the presenter. **Audio device selection is not implemented**;
+the default output device is used. **Build cancellation is not implemented**; no Cancel button is offered and closing waits for the build. These are capability
+limits, not capabilities supplied by this visual correction. The next viewer phase must separately audit overlay hierarchy, video preview/CRT presentation,
+controls/remap focus, audio limitations and confirmation layouts against the individual viewer crops; launcher captures do not validate those behaviors.

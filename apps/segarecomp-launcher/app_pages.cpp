@@ -154,8 +154,8 @@ void App::draw_details(float w, float h) {
     if (button(ctx_, "back", "Back", ImVec2(ctx_.u(92.0F), ctx_.u(28.0F)), Style::secondary, true, ctx_.icon("back"))) { page_ = previous_page_ == Page::details ? Page::library : previous_page_; return; }
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + ctx_.u(34.0F)));
   }
-  const bool three_col = w > ctx_.u(740.0F), two_col = w > ctx_.u(560.0F);
-  const float cover_w = two_col ? ctx_.u(170.0F) : std::min(w, ctx_.u(170.0F)), gap = ctx_.u(18.0F), usage_w = three_col ? ctx_.u(230.0F) : 0.0F;
+  const bool three_col = w > ctx_.u(740.0F), two_col = w > ctx_.u(480.0F);
+  const float cover_w = two_col ? ctx_.u(130.0F) : std::min(w, ctx_.u(130.0F)), gap = ctx_.u(18.0F), usage_w = three_col ? ctx_.u(220.0F) : 0.0F;
   const float mid_w = two_col ? w - cover_w - gap - (three_col ? usage_w + gap : 0.0F) : w;
   const ImVec2 top = ImGui::GetCursorScreenPos();
   float left_bottom = top.y;
@@ -183,7 +183,7 @@ void App::draw_details(float w, float h) {
       const auto names = libretro_candidate_names(entry->title(), settings_.preferred_regions);
       const std::string url = names.empty() ? std::string() : libretro_candidate_url(entry->platform_id, names.front());
       ImGui::SetCursorScreenPos(ImVec2(top.x, y));
-      if (button(ctx_, "cover_web", "Find cover online", ImVec2(cover_w, ctx_.u(28.0F)), Style::ghost, !url.empty(), ctx_.icon("search"))) SDL_OpenURL(url.c_str());
+      if (button(ctx_, "cover_web", "Web lookup", ImVec2(cover_w, ctx_.u(28.0F)), Style::ghost, !url.empty(), ctx_.icon("search"))) SDL_OpenURL(url.c_str());
       y += ctx_.u(34.0F);
       ImGui::SetCursorScreenPos(ImVec2(top.x, y));
       y += paragraph(ctx_, ctx_.regular, ctx_.u(10.5F), col::dim, cover_w, "Opens your browser at a Libretro thumbnail name guess (it may not exist). Save an image and use Change cover. Segarecomp downloads nothing.");
@@ -241,7 +241,7 @@ void App::draw_details(float w, float h) {
     if (info.rom_missing) { pill(ctx_, dl, p, entry->rom_path_unknown ? "ROM path not recorded" : "ROM file missing", col::warn, ctx_.icon("warning"), ctx_.u(11.0F), &size); p.x += size.x + ctx_.u(8.0F); }
     ImGui::SetCursorScreenPos(ImVec2(rx.x, p.y + ctx_.u(34.0F)));
   }
-  {
+  if (!is_building) {
     const float bh = ctx_.u(40.0F);
     const bool can_play = info.status == GameStatus::ready && !game_ && !job_ && !maintenance_running_;
     if (button(ctx_, "play", "Play", ImVec2(ctx_.u(130.0F), bh), Style::primary, can_play, ctx_.icon("play"))) { restarted_this_play_ = false; notices_.erase(entry->id()); show_log_ = false; launch(entry->id(), false); }
@@ -250,11 +250,12 @@ void App::draw_details(float w, float h) {
     const bool mapper_needed = entry->platform_id == "master-system" && entry->mapper.empty() && entry->mapper_manifest_sha256.empty();
     const bool can_build = !job_ && !game_ && !maintenance_running_ && !info.rom_missing && !mapper_needed;
     if (button(ctx_, "build", build_label, ImVec2(ctx_.u(116.0F), bh), info.status == GameStatus::ready ? Style::secondary : Style::primary, can_build, ctx_.icon("reset"))) { notices_.erase(entry->id()); start_build(entry->id()); }
-    ImGui::SameLine(0.0F, ctx_.u(8.0F));
+    // File actions are secondary to Play / Build and wrap before they collide.
+    if (rw > ctx_.u(430.0F)) ImGui::SameLine(0.0F, ctx_.u(8.0F));
     std::error_code ec;
     if (button(ctx_, "open_dir", "Open build folder", ImVec2(ctx_.u(160.0F), bh), Style::secondary, fs::is_directory(info.entry, ec), ctx_.icon("folder"))) SDL_OpenURL(("file://" + u8s(info.entry)).c_str());
     if (info.rom_missing) {
-      ImGui::SameLine(0.0F, ctx_.u(8.0F));
+      if (rw > ctx_.u(580.0F)) ImGui::SameLine(0.0F, ctx_.u(8.0F));
       if (button(ctx_, "locate", "Locate ROM...", ImVec2(ctx_.u(140.0F), bh), Style::secondary, true, ctx_.icon("folder"))) browse_locate(entry->id());
     }
     ImGui::SetCursorScreenPos(ImVec2(rx.x, ImGui::GetCursorScreenPos().y + ctx_.u(8.0F)));
@@ -278,6 +279,25 @@ void App::draw_details(float w, float h) {
     ImGui::SetCursorScreenPos(ImVec2(rx.x, fy + sh + ctx_.u(10.0F)));
     ImGui::Dummy(ImVec2(rw, 1));
   }
+  if (is_building) {
+    heading(ctx_, "BUILDING", col::warn);
+    static const char *names[BuildJob::stage_count] = {"Analyzing ROM", "Generating native C", "Compiling", "Linking"};
+    for (int i = 0; i < BuildJob::stage_count; ++i) { stage_row(ctx_, dl, ImGui::GetCursorScreenPos(), names[i], job_->stage(i)); ImGui::Dummy(ImVec2(rw, ctx_.u(23.0F))); }
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, rw, "Large games can take several minutes the first time. The build cannot be cancelled safely; closing the launcher waits for it.");
+    if (SDL_GetTicks() - live_log_at_ > 700U) {
+      live_log_at_ = SDL_GetTicks();
+      live_log_ = read_tail(fs::path(job_->entry()).parent_path() / (u8s(job_->entry().filename()) + ".partial") / "build.log", 700);
+    }
+    if (!live_log_.empty()) paragraph(ctx_, ctx_.regular, ctx_.u(10.5F), col::dim, rw, live_log_, 2.0F);
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+  } else if (info.status != GameStatus::ready) {
+    const char *message = info.status == GameStatus::metadata_only ? "Metadata only: rebuild required to play."
+                        : info.status == GameStatus::stale ? "Build identity changed. Recompile before playing."
+                        : info.status == GameStatus::failed ? "Build failed. View logs, then try again."
+                        : "Imported, not built. Choose Build to prepare a native program.";
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), status_color(info), rw, message);
+    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
+  }
   // key facts, like the concept board
   {
     const float lw = ctx_.u(92.0F), vw = rw - lw;
@@ -285,8 +305,8 @@ void App::draw_details(float w, float h) {
     label_value(ctx_, lw, vw, "Compiled", entry->last_built_at > 0 ? fmt_date(entry->last_built_at) + (info.build_known && info.build.version.empty() ? " (file time)" : "") : "never recorded");
     const ImVec2 row = ImGui::GetCursorScreenPos();
     const std::string digest = entry->sha256.substr(0, 10) + "..." + entry->sha256.substr(58) + "  (SHA-256)";
-    label_value(ctx_, lw, vw, "ROM hash", digest);
-    ImGui::SetCursorScreenPos(ImVec2(row.x + lw + text_width(ctx_.regular, ctx_.u(12.0F), digest.c_str()) + ctx_.u(10.0F), row.y - ctx_.u(4.0F)));
+    label_value(ctx_, lw, vw - ctx_.u(64.0F), "ROM hash", digest);
+    ImGui::SetCursorScreenPos(ImVec2(row.x + rw - ctx_.u(54.0F), row.y - ctx_.u(4.0F)));
     if (button(ctx_, "copy_sha", "Copy", ImVec2(ctx_.u(54.0F), ctx_.u(22.0F)), Style::ghost)) { SDL_SetClipboardText(entry->sha256.c_str()); toast("SHA-256 copied."); }
     ImGui::SetCursorScreenPos(ImVec2(row.x, row.y + ctx_.u(24.0F)));
     ImGui::Dummy(ImVec2(1, ctx_.u(2.0F)));
@@ -313,18 +333,7 @@ void App::draw_details(float w, float h) {
     label_value(ctx_, lw, vw, "Experimental", info.compat_known ? "Experimental compatibility metadata ships with this release" : "Compatibility unknown for this ROM");
   }
   ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-  if (is_building) {
-    heading(ctx_, "BUILDING", col::warn);
-    static const char *names[BuildJob::stage_count] = {"Analyzing ROM", "Generating native C", "Compiling", "Linking"};
-    for (int i = 0; i < BuildJob::stage_count; ++i) { stage_row(ctx_, dl, ImGui::GetCursorScreenPos(), names[i], job_->stage(i)); ImGui::Dummy(ImVec2(rw, ctx_.u(23.0F))); }
-    paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, rw, "Large games can take several minutes the first time. The build cannot be cancelled safely; closing the launcher waits for it.");
-    if (SDL_GetTicks() - live_log_at_ > 700U) {
-      live_log_at_ = SDL_GetTicks();
-      live_log_ = read_tail(fs::path(job_->entry()).parent_path() / (u8s(job_->entry().filename()) + ".partial") / "build.log", 700);
-    }
-    if (!live_log_.empty()) paragraph(ctx_, ctx_.regular, ctx_.u(10.5F), col::dim, rw, live_log_, 2.0F);
-    ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
-  } else if (is_running) {
+  if (is_running) {
     paragraph(ctx_, ctx_.bold, ctx_.u(15.0F), col::ok, rw, running_label(game_report_, restarted_this_play_));
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, rw, "Close the game window (or use Return to Launcher in its menu) to come back.");
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
@@ -405,8 +414,8 @@ void App::draw_details(float w, float h) {
 void App::draw_import(float w, float h) {
   page_header(ctx_, w, "IMPORT ROMS", "Drag and drop ROM files to add them to your library.");
   ImDrawList *dl = ImGui::GetWindowDrawList();
-  const bool two = w > ctx_.u(760.0F);
-  const float steps_w = two ? ctx_.u(300.0F) : 0.0F, gap = ctx_.u(18.0F);
+  const bool two = w > ctx_.u(700.0F);
+  const float steps_w = two ? ctx_.u(240.0F) : 0.0F, gap = ctx_.u(18.0F);
   const float drop_w = two ? w - steps_w - gap : w;
   const ImVec2 top = ImGui::GetCursorScreenPos();
   draw_drop_zone(drop_w, h, true);
@@ -436,6 +445,7 @@ void App::draw_import(float w, float h) {
     side_bottom = y + ih;
   }
   ImGui::SetCursorScreenPos(ImVec2(top.x, std::max(after_drop, side_bottom) + ctx_.u(10.0F)));
+  if (!two) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "1. Add ROMs   2. Review the detected system   3. Choose Build, then Play. Original ROMs are referenced, never copied or uploaded.");
   checkbox(ctx_, "import_build", "Also build each newly added game (can take several minutes per game)", &import_build_option_);
   paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, w, "Off by default. Duplicates are detected by the ROM's SHA-256: the same game found in another place only adds a second tracked location.");
   if (import_job_.valid()) {
@@ -511,6 +521,7 @@ void App::draw_storage(float w, float h) {
   });
   const bool side = w > ctx_.u(700.0F);
   const float side_w = side ? ctx_.u(236.0F) : 0.0F, gap = ctx_.u(14.0F), tw = side ? w - side_w - gap : w;
+  const bool compact_table = tw < ctx_.u(640.0F);
   const ImVec2 top = ImGui::GetCursorScreenPos();
   // ---- table ----
   const float rh = ctx_.u(42.0F), hh = ctx_.u(28.0F);
@@ -518,14 +529,14 @@ void App::draw_storage(float w, float h) {
   card(ctx_, dl, top, ImVec2(top.x + tw, top.y + table_h), false, false, rgba(7, 17, 40));
   {
     const float x0 = top.x + ctx_.u(40.0F), name_w = std::max(ctx_.u(130.0F), tw * 0.34F);
-    const float cols[4] = {x0 + name_w + ctx_.u(40.0F), x0 + name_w + ctx_.u(130.0F), x0 + name_w + ctx_.u(235.0F), x0 + name_w + ctx_.u(330.0F)};
+    const float cols[4] = {x0 + name_w + ctx_.u(20.0F), compact_table ? top.x + tw - ctx_.u(124.0F) : x0 + name_w + ctx_.u(130.0F), x0 + name_w + ctx_.u(235.0F), x0 + name_w + ctx_.u(330.0F)};
     bool all = !games.empty() && std::all_of(games.begin(), games.end(), [&](const LibraryEntry *e) { return storage_selected_.count(e->id()) != 0; });
     ImGui::SetCursorScreenPos(ImVec2(top.x + ctx_.u(10.0F), top.y + ctx_.u(4.0F)));
     if (checkbox(ctx_, "st_all", "", &all)) { if (all) for (const auto *e : games) storage_selected_.insert(e->id()); else storage_selected_.clear(); }
     const float hpx = ctx_.u(11.5F);
     draw_text(dl, ctx_.bold, hpx, col::text2, ImVec2(x0, top.y + ctx_.u(8.0F)), "Game");
-    const char *heads[] = {"Total Size", "Executable", "Intermediate", "Status"};
-    for (int i = 0; i < 4; ++i) if (cols[i] + ctx_.u(60.0F) < top.x + tw) draw_text(dl, ctx_.bold, hpx, col::text2, ImVec2(cols[i], top.y + ctx_.u(8.0F)), heads[i]);
+    const char *heads[] = {"Total Size", compact_table ? "Status" : "Executable", "Intermediate", "Status"};
+    for (int i = 0; i < (compact_table ? 2 : 4); ++i) if (cols[i] + ctx_.u(60.0F) < top.x + tw) draw_text(dl, ctx_.bold, hpx, col::text2, ImVec2(cols[i], top.y + ctx_.u(8.0F)), heads[i]);
     dl->AddRectFilled(ImVec2(top.x + 1, top.y + hh), ImVec2(top.x + tw - 1, top.y + hh + 1), rgba(34, 70, 140));
     ImGui::SetCursorScreenPos(ImVec2(top.x, top.y + hh + ctx_.u(3.0F)));
     ImGui::PushStyleColor(ImGuiCol_ChildBg, rgba(0, 0, 0, 0));
@@ -551,9 +562,9 @@ void App::draw_storage(float w, float h) {
       const float ox = a.x - top.x;
       const auto cell = [&](int i, const std::string &t, ImU32 c) { if (cols[i] + ctx_.u(60.0F) < top.x + tw) draw_text(cl, ctx_.regular, ctx_.u(12.0F), c, ImVec2(cols[i] + ox, a.y + rh * 0.5F - ctx_.u(7.0F)), t.c_str()); };
       cell(0, u ? format_bytes(u->total.total()) : "-", col::text);
-      cell(1, u ? format_bytes(u->total.executable) : "-", col::text2);
-      cell(2, u ? format_bytes(u->intermediates) : "-", col::text2);
-      if (cols[3] + ctx_.u(60.0F) < top.x + tw) {
+      cell(1, compact_table ? status_label(info) : (u ? format_bytes(u->total.executable) : "-"), compact_table ? status_color(info) : col::text2);
+      if (!compact_table) cell(2, u ? format_bytes(u->intermediates) : "-", col::text2);
+      if (!compact_table && cols[3] + ctx_.u(60.0F) < top.x + tw) {
         cl->AddCircleFilled(ImVec2(cols[3] + ox + ctx_.u(5.0F), a.y + rh * 0.5F), ctx_.u(4.0F), status_color(info));
         draw_text(cl, ctx_.regular, ctx_.u(12.0F), status_color(info), ImVec2(cols[3] + ox + ctx_.u(14.0F), a.y + rh * 0.5F - ctx_.u(7.0F)), status_label(info).c_str());
       }
@@ -659,12 +670,14 @@ void App::draw_storage(float w, float h) {
 void App::draw_settings(float full_w, float h) {
   page_header(ctx_, full_w, "SETTINGS", "Configure the library, metadata, builds and in-game defaults.");
   ImDrawList *dl = ImGui::GetWindowDrawList();
-  const float tabs_w = ctx_.u(176.0F), tab_gap = ctx_.u(18.0F);
+  const bool narrow = full_w < ctx_.u(760.0F);
+  const float tabs_w = narrow ? 0.0F : ctx_.u(176.0F), tab_gap = narrow ? 0.0F : ctx_.u(18.0F);
   const ImVec2 origin = ImGui::GetCursorScreenPos();
   {
     static const char *labels[] = {"Library", "Metadata & Covers", "Build & Runtime", "Video & Controls", "Input Diagnostics", "Advanced / About"};
     static const char *icons[] = {"library", "folder", "settings", "video", "controller", "info"};
-    for (int i = 0; i < 6; ++i) {
+    if (narrow) dropdown(ctx_, "settings_section", {labels[0], labels[1], labels[2], labels[3], labels[4], labels[5]}, &settings_tab_, full_w);
+    for (int i = 0; !narrow && i < 6; ++i) {
       ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + static_cast<float>(i) * ctx_.u(40.0F)));
       ImGui::PushID(i);
       const bool pressed = ui::nav_button("##tab", ImVec2(tabs_w, ctx_.u(34.0F)));
@@ -679,12 +692,15 @@ void App::draw_settings(float full_w, float h) {
       if (pressed) settings_tab_ = i;
     }
   }
-  ImGui::SetCursorScreenPos(ImVec2(origin.x + tabs_w + tab_gap, origin.y));
-  ImGui::Indent(tabs_w + tab_gap);
-  const float w = full_w - tabs_w - tab_gap;
+  ImGui::SetCursorScreenPos(ImVec2(origin.x + tabs_w + tab_gap, origin.y + (narrow ? ctx_.u(44.0F) : 0.0F)));
+  const float w = full_w - tabs_w - tab_gap - ctx_.u(18.0F);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+  ImGui::BeginChild("##settings_body", ImVec2(w + ctx_.u(18.0F), std::max(ctx_.u(120.0F), ImGui::GetContentRegionAvail().y)), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+  if (SDL_getenv("SEGARECOMP_SHOT_SCROLL")) ImGui::SetScrollY(ImGui::GetScrollMaxY());  // review aid, never a persisted preference
+  dl = ImGui::GetWindowDrawList();
   bool save = false;
   const float lw = ctx_.u(170.0F);
-  const auto row_label = [&](const char *label) { const ImVec2 p = ImGui::GetCursorScreenPos(); draw_text(dl, ctx_.regular, ctx_.u(12.0F), col::text2, ImVec2(p.x, p.y + ctx_.u(8.0F)), label); ImGui::SetCursorScreenPos(ImVec2(p.x + lw, p.y)); };
+  const auto row_label = [&](const char *label) { paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, label); };
   const auto next_row = [&] { ImGui::SetCursorScreenPos(ImVec2(ImGui::GetWindowPos().x + ctx_.u(14.0F) - ImGui::GetScrollX(), ImGui::GetCursorScreenPos().y + ctx_.u(6.0F))); };
   (void)next_row;
   if (settings_tab_ == 0) {
@@ -711,13 +727,13 @@ void App::draw_settings(float full_w, float h) {
     for (const auto &[id, info] : statuses_) if (info.rom_missing) ++missing;
     const ImVec2 p = ImGui::GetCursorScreenPos();
     draw_text(dl, ctx_.regular, ctx_.u(12.0F), col::text, ImVec2(p.x, p.y + ctx_.u(8.0F)), (std::to_string(catalog_.entries().size()) + " game(s), " + std::to_string(missing) + " without a reachable ROM").c_str());
-    ImGui::SetCursorScreenPos(ImVec2(p.x + ctx_.u(300.0F), p.y));
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + ctx_.u(28.0F)));
     if (button(ctx_, "recheck", "Re-check", ImVec2(ctx_.u(110.0F), ctx_.u(28.0F)), Style::secondary)) { request_status_refresh(); toast("Checking ROM links..."); }
     ImGui::Dummy(ImVec2(1, ctx_.u(14.0F)));
     rule(ctx_, w);
     heading(ctx_, "Reset");
     if (button(ctx_, "restore", "Restore launcher defaults", ImVec2(ctx_.u(260.0F), ctx_.u(32.0F)), Style::secondary)) { modal_ = Modal{}; modal_.kind = Modal::Kind::restore_defaults; modal_.title = "Restore launcher defaults?"; }
-    ImGui::SameLine(0.0F, ctx_.u(10.0F));
+    if (w > ctx_.u(480.0F)) ImGui::SameLine(0.0F, ctx_.u(10.0F));
     if (button(ctx_, "clear_lib", "Clear library...", ImVec2(ctx_.u(200.0F), ctx_.u(32.0F)), Style::danger, !catalog_.entries().empty())) { modal_ = Modal{}; modal_.kind = Modal::Kind::clear_library; modal_.title = "Clear the whole library?"; }
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Restoring defaults and clearing the library are separate actions. Neither deletes ROMs or build folders.");
   } else if (settings_tab_ == 1) {
@@ -725,8 +741,7 @@ void App::draw_settings(float full_w, float h) {
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "Titles come from the ROM header or file name and can be renamed on the game's page. Covers are images you choose; the generic placeholder is shown otherwise.");
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     row_label("Online lookup");
-    bool off = false;
-    checkbox(ctx_, "lookup", "Download covers (unavailable in this build)", &off, false);
+    paragraph(ctx_, ctx_.bold, ctx_.u(13.0F), col::info, w, "Offline / manual cover mode");
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::warn, w, "Not offered: a trusted HTTPS client that works in all three self-contained releases is not packaged, and shelling out to curl or using plain HTTP would be unsafe. No ROM bytes or hashes are ever sent anywhere. Supported instead: Change cover (local image) and 'Find cover online' (opens your browser).");
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Provider");
@@ -737,7 +752,7 @@ void App::draw_settings(float full_w, float h) {
       for (const auto &r : settings_.preferred_regions) text += (text.empty() ? "" : " > ") + r;
       const ImVec2 p = ImGui::GetCursorScreenPos();
       draw_text(dl, ctx_.regular, ctx_.u(12.0F), col::text, ImVec2(p.x, p.y + ctx_.u(8.0F)), text.c_str());
-      ImGui::SetCursorScreenPos(ImVec2(p.x + ctx_.u(250.0F), p.y));
+      ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + ctx_.u(28.0F)));
       if (button(ctx_, "rot", "Rotate order", ImVec2(ctx_.u(140.0F), ctx_.u(28.0F)), Style::secondary)) { std::rotate(settings_.preferred_regions.begin(), settings_.preferred_regions.begin() + 1, settings_.preferred_regions.end()); save = true; }
       ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
     }
@@ -783,6 +798,7 @@ void App::draw_settings(float full_w, float h) {
     if (button(ctx_, "go_storage", "Manage Storage", ImVec2(ctx_.u(200.0F), ctx_.u(32.0F)), Style::secondary, true, ctx_.icon("storage"))) go(Page::storage);
   } else if (settings_tab_ == 3) {
     heading(ctx_, "Video & Controls defaults");
+    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, "SDL_Renderer presentation; SDL_GPU is not implemented. Audio uses the default output device; device selection is not implemented.");
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "These are the same settings as the game's in-game menu (Esc), stored in the viewer settings file. They apply the next time a game starts. Key and gamepad bindings are remapped in the game's Controls page.");
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     bool v_changed = false;
@@ -806,7 +822,7 @@ void App::draw_settings(float full_w, float h) {
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Presentation");
     if (toggle(ctx_, "vs", "VSync", &vsync, ctx_.u(150.0F))) { v.vsync = vsync; v_changed = true; }
-    ImGui::SameLine(0.0F, ctx_.u(18.0F));
+    if (w > ctx_.u(360.0F)) ImGui::SameLine(0.0F, ctx_.u(18.0F));
     if (toggle(ctx_, "fp", "FPS counter", &fps, ctx_.u(190.0F))) { v.show_fps = fps; v_changed = true; }
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Audio");
@@ -852,7 +868,8 @@ void App::draw_settings(float full_w, float h) {
     }
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Errors are shown where they happen (build failures on the game's page with the sanitized log). Nothing is sent anywhere; Segarecomp makes no network requests.");
   }
-  ImGui::Unindent(tabs_w + tab_gap);
+  ImGui::EndChild();
+  ImGui::PopStyleVar();
   if (save) save_settings();
   ImGui::Dummy(ImVec2(w, ctx_.u(12.0F)));
   (void)h;

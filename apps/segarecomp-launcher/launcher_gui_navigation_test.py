@@ -10,6 +10,7 @@ usage: launcher_gui_navigation_test.py <path to the Segarecomp executable>
 import os
 import pathlib
 import subprocess
+import struct
 import sys
 import tempfile
 
@@ -53,10 +54,24 @@ def main():
         failures += [l for l in trace if l.startswith("expect FAIL")]
         if sum(1 for l in trace if l.startswith("expect ok")) != 4:
             failures.append("gamepad: not every expectation ran: %r" % trace)
+        # Responsive screen smoke: render the actual widgets, including the nested settings
+        # scroller and confirmation sheet, at both supported sizes. No builds or guest runs.
+        pages = ["library", "list", "details:0", "import", "storage", "storage-modal"] + [f"settings{i}" for i in range(6)]
+        for size in ("1080x740", "720x520"):
+            for page in pages:
+                shot = tmp / "responsive.bmp"
+                shot.unlink(missing_ok=True)
+                e = dict(env, SEGARECOMP_SHOT=str(shot), SEGARECOMP_SHOT_PAGE=page,
+                         SEGARECOMP_SHOT_SIZE=size, SEGARECOMP_SHOT_FRAMES="4")
+                subprocess.run([exe], env=e, timeout=60, check=True, capture_output=True)
+                bmp = shot.read_bytes()
+                width, height = struct.unpack_from("<ii", bmp, 18)
+                if bmp[:2] != b"BM" or (width, abs(height)) != tuple(map(int, size.split("x"))):
+                    failures.append(f"responsive capture failed: {page} at {size}")
     if failures:
         print("\n".join("FAIL: " + f for f in failures))
         return 1
-    print("launcher_gui_navigation_test: ok")
+    print("launcher_gui_navigation_test: ok (9 navigation assertions, 24 responsive screen captures)")
     return 0
 
 

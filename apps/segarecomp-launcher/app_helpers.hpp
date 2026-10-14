@@ -50,10 +50,27 @@ inline std::string fmt_relative(long long secs, long long now) {
 }
 
 inline std::vector<std::string> wrap(ImFont *font, float px, float max_w, const std::string &text) {
+  max_w = std::max(1.0F, max_w);
   std::vector<std::string> lines;
   std::string line, word;
   const auto flush_word = [&] {
     if (word.empty()) return;
+    // Digests and paths have no spaces. Split at UTF-8 boundaries rather than letting them
+    // paint over adjacent columns (or trimming a multibyte character in half).
+    if (text_width(font, px, word.c_str()) > max_w) {
+      if (!line.empty()) { lines.push_back(line); line.clear(); }
+      while (text_width(font, px, word.c_str()) > max_w) {
+        std::size_t end = 0, fit = 0;
+        while (end < word.size()) {
+          ++end;
+          while (end < word.size() && (static_cast<unsigned char>(word[end]) & 0xC0U) == 0x80U) ++end;
+          if (fit != 0 && text_width(font, px, word.substr(0, end).c_str()) > max_w) break;
+          fit = end;
+        }
+        lines.push_back(word.substr(0, fit));
+        word.erase(0, fit);
+      }
+    }
     const std::string trial = line.empty() ? word : line + " " + word;
     if (text_width(font, px, trial.c_str()) <= max_w || line.empty()) line = trial;
     else { lines.push_back(line); line = word; }
@@ -103,7 +120,9 @@ inline void page_header(Ctx &ctx, float w, const char *title, const char *subtit
   const ImVec2 p = ImGui::GetCursorScreenPos();
   ImDrawList *dl = ImGui::GetWindowDrawList();
   draw_text(dl, ctx.display, ctx.u(15.0F), rgba(120, 205, 255), p, title);
-  draw_text(dl, ctx.regular, ctx.u(12.5F), col::text2, ImVec2(p.x + text_width(ctx.display, ctx.u(15.0F), title) + ctx.u(14.0F), p.y + ctx.u(1.0F)), subtitle);
+  // Keep the header height stable so page-specific actions can share its first row.
+  // A long descriptive subtitle belongs in the page body, not behind the Back / sort controls.
+  (void)subtitle;
   ImGui::Dummy(ImVec2(w, ctx.u(26.0F)));
 }
 

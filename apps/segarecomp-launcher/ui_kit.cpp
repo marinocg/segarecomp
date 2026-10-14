@@ -184,10 +184,12 @@ bool chip(Ctx &ctx, const char *id, const char *label, bool active, float height
 
 bool checkbox(Ctx &ctx, const char *id, const char *label, bool *value, bool enabled) {
   const float px = ctx.u(13.0F), box = ctx.u(18.0F);
-  const float w = box + ctx.u(8.0F) + text_width(ctx.regular, px, label);
+  const float text_w = std::max(ctx.u(40.0F), ImGui::GetContentRegionAvail().x - box - ctx.u(8.0F));
+  const ImVec2 measured = ctx.regular->CalcTextSizeA(px, FLT_MAX, text_w, label);
+  const float w = box + ctx.u(8.0F) + measured.x;
   ImGui::PushID(id);
   if (!enabled) ImGui::BeginDisabled();
-  const bool pressed = ui::nav_button("##k", ImVec2(w, box + ctx.u(4.0F)));
+  const bool pressed = ui::nav_button("##k", ImVec2(w, std::max(box + ctx.u(4.0F), measured.y + ctx.u(4.0F))));
   if (!enabled) ImGui::EndDisabled();
   const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
   ImGui::PopID();
@@ -197,7 +199,7 @@ bool checkbox(Ctx &ctx, const char *id, const char *label, bool *value, bool ena
   dl->AddRectFilled(b0, b1, *value && enabled ? col::btn : col::field, ctx.u(4.0F));
   dl->AddRect(b0, b1, *value ? col::btn_top : (hovered ? col::highlight : rgba(46, 96, 190)), ctx.u(4.0F), 0, std::max(1.0F, ctx.u(1.2F)));
   if (*value) icon_image(dl, ctx.icon("check"), ImVec2(b0.x + ctx.u(1.0F), b0.y + ctx.u(1.0F)), box - ctx.u(2.0F), enabled ? IM_COL32_WHITE : rgba(120, 133, 170));
-  draw_text(dl, ctx.regular, px, enabled ? col::text : col::dim, ImVec2(b1.x + ctx.u(8.0F), (b0.y + b1.y) * 0.5F - px * 0.6F), label);
+  dl->AddText(ctx.regular, px, ImVec2(b1.x + ctx.u(8.0F), a.y + ctx.u(3.0F)), enabled ? col::text : col::dim, label, nullptr, text_w);
   if (focused) focus_ring(ctx, dl, b0, ImVec2(a.x + w, b1.y));
   if (pressed && enabled) { *value = !*value; return true; }
   return false;
@@ -205,15 +207,18 @@ bool checkbox(Ctx &ctx, const char *id, const char *label, bool *value, bool ena
 
 bool toggle(Ctx &ctx, const char *id, const char *label, bool *value, float width, bool enabled) {
   const float px = ctx.u(13.0F), sw = ctx.u(38.0F), sh = ctx.u(20.0F);
+  width = std::max(sw + ctx.u(60.0F), std::min(width, ImGui::GetContentRegionAvail().x));
+  const float text_w = width - sw - ctx.u(12.0F);
+  const float text_h = ctx.regular->CalcTextSizeA(px, FLT_MAX, text_w, label).y;
   ImGui::PushID(id);
   if (!enabled) ImGui::BeginDisabled();
-  const bool pressed = ui::nav_button("##t", ImVec2(width, ctx.u(26.0F)));
+  const bool pressed = ui::nav_button("##t", ImVec2(width, std::max(ctx.u(26.0F), text_h + ctx.u(8.0F))));
   if (!enabled) ImGui::EndDisabled();
   const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
   ImGui::PopID();
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
-  draw_text(dl, ctx.regular, px, enabled ? col::text : col::dim, ImVec2(a.x, (a.y + b.y) * 0.5F - px * 0.6F), label);
+  dl->AddText(ctx.regular, px, ImVec2(a.x, (a.y + b.y - text_h) * 0.5F), enabled ? col::text : col::dim, label, nullptr, text_w);
   const ImVec2 s0(b.x - sw, (a.y + b.y) * 0.5F - sh * 0.5F), s1(b.x, s0.y + sh);
   dl->AddRectFilled(s0, s1, *value ? (enabled ? col::btn_hover : rgba(40, 60, 100)) : rgba(20, 36, 72), sh * 0.5F);
   dl->AddRect(s0, s1, *value ? col::btn_top : (hovered ? col::highlight : rgba(60, 90, 150)), sh * 0.5F, 0, std::max(1.0F, ctx.u(1.2F)));
@@ -269,10 +274,14 @@ bool dropdown(Ctx &ctx, const char *id, const std::vector<std::string> &items, i
 
 bool segmented(Ctx &ctx, const char *id, const std::vector<std::string> &items, int *selected, float item_w) {
   bool changed = false;
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+  const float available = ImGui::GetContentRegionAvail().x;
+  float x = origin.x, y = origin.y;
   ImGui::PushID(id);
   for (std::size_t i = 0; i < items.size(); ++i) {
-    if (i != 0) ImGui::SameLine(0.0F, ctx.u(5.0F));
-    const float px = ctx.u(12.0F), w = item_w > 0.0F ? item_w : text_width(ctx.bold, px, items[i].c_str()) + ctx.u(24.0F);
+    const float px = ctx.u(12.0F), w = std::min(available, item_w > 0.0F ? item_w : text_width(ctx.bold, px, items[i].c_str()) + ctx.u(24.0F));
+    if (i != 0 && x + w > origin.x + available) { x = origin.x; y += ctx.u(33.0F); }
+    ImGui::SetCursorScreenPos(ImVec2(x, y));
     ImGui::PushID(static_cast<int>(i));
     const bool pressed = ui::nav_button("##s", ImVec2(w, ctx.u(28.0F)));
     const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible, on = static_cast<int>(i) == *selected;
@@ -285,6 +294,7 @@ bool segmented(Ctx &ctx, const char *id, const std::vector<std::string> &items, 
     draw_text(dl, ctx.bold, px, on ? col::btn_text : col::text2, ImVec2((a.x + b.x) * 0.5F - text_width(ctx.bold, px, shown.c_str()) * 0.5F, (a.y + b.y) * 0.5F - px * 0.55F), shown.c_str());
     if (focused) focus_ring(ctx, dl, a, b);
     if (pressed && !on) { *selected = static_cast<int>(i); changed = true; }
+    x += w + ctx.u(5.0F);
   }
   ImGui::PopID();
   return changed;
