@@ -1616,8 +1616,8 @@ struct M68kEaFieldOutcome {
 }
 } // namespace
 
-M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, DecodeSource source,
-                                          M68kDecodeProfile profile) {
+static M68kDecodeResult decode_m68k_instruction_raw(std::span<const std::uint8_t> image, DecodeSource source,
+                                                    M68kDecodeProfile profile) {
   const auto image_size = static_cast<std::uint64_t>(image.size());
   const auto available = source.image_offset.value > image_size ? 0U : image_size - source.image_offset.value;
   if (source.cpu_variant != CpuVariant::mc68000)
@@ -1914,6 +1914,22 @@ M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, De
     return reject_word(DecodeOutcome::valid_but_unsupported_instruction, 4U);
   }
   return reject_word(DecodeOutcome::valid_but_unsupported_instruction, 2U);
+}
+
+// The 68000 drives only A1..A23, so the sign-extended spelling of a top-half 24-bit address (high byte $FF with bit 23 set,
+// as `abs.W` already yields) names the same location. Data operands are canonicalized to the 24-bit address; any other nonzero
+// high byte, and every JMP/JSR control target (a deliberate, separately pinned policy), keep their raw value and stay
+// fail-closed (effective_address_not_24bit) downstream.
+M68kDecodeResult decode_m68k_instruction(std::span<const std::uint8_t> image, DecodeSource source,
+                                          M68kDecodeProfile profile) {
+  auto result = decode_m68k_instruction_raw(image, source, profile);
+  auto *instruction = std::get_if<M68kDecodedInstruction>(&result);
+  if (instruction == nullptr || instruction->kind == M68kInstructionKind::jmp || instruction->kind == M68kInstructionKind::jsr)
+    return result;
+  for (auto *ea : {&instruction->source_ea, &instruction->destination_ea})
+    if (ea->mode == M68kEaMode::absolute_long && (ea->absolute_address & UINT32_C(0xFF800000)) == UINT32_C(0xFF800000))
+      ea->absolute_address &= UINT32_C(0x00FFFFFF);
+  return result;
 }
 
 } // namespace segarecomp

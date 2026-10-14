@@ -244,6 +244,41 @@ void addition_forms_decode_and_share_flags() {
                instruction->source_ea.mode == segarecomp::M68kEaMode::address_register,
             "ADD.W/L An,Dn retain ordinary ADD identity");
   }
+  // The 68000 drives only A1..A23: the sign-extended spelling of a top-half 24-bit address (`BTST #4,($FFC00004).L`)
+  // decodes as the 24-bit address; any other nonzero high byte keeps its raw value (fail-closed downstream).
+  {
+    const auto sign_extended = segarecomp::decode_m68k_instruction(
+        std::vector<std::uint8_t>{0x08U, 0x39U, 0x00U, 0x04U, 0xFFU, 0xC0U, 0x00U, 0x04U}, source(),
+        segarecomp::M68kDecodeProfile::general_startup);
+    const auto *canonical = std::get_if<segarecomp::M68kDecodedInstruction>(&sign_extended);
+    expect(canonical != nullptr && canonical->kind == segarecomp::M68kInstructionKind::btst &&
+               canonical->destination_ea.mode == segarecomp::M68kEaMode::absolute_long &&
+               canonical->destination_ea.absolute_address == 0x00C00004U,
+           "a sign-extended absolute-long operand ($FFC00004) is canonicalized to its 24-bit address");
+    const auto not_sign_extended = segarecomp::decode_m68k_instruction(
+        std::vector<std::uint8_t>{0x08U, 0x39U, 0x00U, 0x04U, 0x7FU, 0xC0U, 0x00U, 0x04U}, source(),
+        segarecomp::M68kDecodeProfile::general_startup);
+    const auto *raw = std::get_if<segarecomp::M68kDecodedInstruction>(&not_sign_extended);
+    expect(raw != nullptr && raw->destination_ea.absolute_address == 0x7FC00004U,
+           "a non-sign-extended nonzero high byte is not canonicalized");
+  }
+  // Routing seam: the runtime-owned VDP status BYTE lanes and the HV counter are deferred, like the WORD read.
+  for (const std::uint32_t vdp_read : {0x00C00004U, 0x00C00005U, 0x00C00008U, 0x00C0000BU, 0x00C0000FU}) {
+    segarecomp::M68kMemoryAccessRequest req{};
+    req.address = {segarecomp::TargetAddressSpace::m68k_program, vdp_read};
+    req.width = segarecomp::M68kMemoryAccessWidth::byte;
+    req.direction = segarecomp::M68kMemoryAccessDirection::read;
+    expect(std::holds_alternative<segarecomp::M68kVdpRoutedRead>(segarecomp::m68k_route_genesis_device_access(req)),
+           "VDP status/HV BYTE reads are deferred to the runtime");
+  }
+  {
+    segarecomp::M68kMemoryAccessRequest req{};
+    req.address = {segarecomp::TargetAddressSpace::m68k_program, 0x00C00006U};
+    req.width = segarecomp::M68kMemoryAccessWidth::byte;
+    req.direction = segarecomp::M68kMemoryAccessDirection::read;
+    expect(!std::holds_alternative<segarecomp::M68kVdpRoutedRead>(segarecomp::m68k_route_genesis_device_access(req)),
+           "other VDP BYTE reads stay an unmapped-data frontier");
+  }
   const auto adda_result = segarecomp::decode_m68k_instruction(
       std::vector<std::uint8_t>{0xD2U, 0xC0U}, source(), segarecomp::M68kDecodeProfile::general_startup);
   const auto *adda = std::get_if<segarecomp::M68kDecodedInstruction>(&adda_result);
@@ -13561,7 +13596,9 @@ void general_startup_retains_a_vdp_static_memory_fact_for_a_routed_word_read() {
     const auto *diagnostic = std::get_if<segarecomp::DirectFlowDiagnostic>(&routed);
     return diagnostic != nullptr && *diagnostic == segarecomp::DirectFlowDiagnostic::unmapped_data_access;
   };
-  expect(is_unmapped(segarecomp::m68k_route_genesis_device_access(request(0x00C00004U, W::byte, D::read))) &&
+  expect(// The status-port BYTE lanes ($C00004/$C00005) and the HV counter are the routed BYTE reads (below); every other BYTE read stays.
+             is_unmapped(segarecomp::m68k_route_genesis_device_access(request(0x00C00006U, W::byte, D::read))) &&
+             is_unmapped(segarecomp::m68k_route_genesis_device_access(request(0x00C00010U, W::byte, D::read))) &&
              is_unmapped(segarecomp::m68k_route_genesis_device_access(request(0x00C00004U, W::long_word, D::read))) &&
              is_unmapped(segarecomp::m68k_route_genesis_device_access(request(0x00C00004U, W::byte, D::write))) &&
              is_unmapped(segarecomp::m68k_route_genesis_device_access(request(0x00C00020U, W::word, D::read))) &&
@@ -13592,8 +13629,16 @@ void general_startup_retains_a_vdp_static_memory_fact_for_a_routed_word_read() {
                write_operand->value == 0U && write_operand->bytes == std::array<std::uint8_t, 4>{},
            "m68k_resolve_absolute_test_operand yields a value-free vdp-region operand for the WORD/LONG store shape");
   }
+  // The runtime-owned status-port BYTE lanes resolve to the same value-free vdp-region operand as the WORD read.
+  for (const auto byte_address : {0x00C00004U, 0x00C00005U, 0x00C00009U}) {
+    const auto resolved_byte = segarecomp::m68k_resolve_absolute_test_operand(
+        image, byte_address, W::byte, D::read, std::nullopt);
+    const auto *byte_operand = std::get_if<segarecomp::M68kAbsoluteTestOperand>(&resolved_byte);
+    expect(byte_operand != nullptr && byte_operand->region == segarecomp::M68kAbsoluteOperandRegion::vdp,
+           "a VDP status/HV BYTE read resolves to the value-free vdp-region operand");
+  }
   expect(std::get<segarecomp::DirectFlowDiagnostic>(segarecomp::m68k_resolve_absolute_test_operand(
-             image, 0x00C00004U, W::byte, D::read, std::nullopt)) ==
+             image, 0x00C00006U, W::byte, D::read, std::nullopt)) ==
                  segarecomp::DirectFlowDiagnostic::unmapped_data_access &&
              std::get<segarecomp::DirectFlowDiagnostic>(segarecomp::m68k_resolve_absolute_test_operand(
                  image, 0x00C00004U, W::long_word, D::read, std::nullopt)) ==
@@ -19708,16 +19753,26 @@ void absolute_word_preserves_decoded_sign_extension_at_the_genesis_bus_seam() {
              segarecomp::m68k_canonical_ea_address(decoded.source_ea) == UINT32_C(0x00FF8000),
          "absolute-word decode retains sign extension while the Genesis bus seam canonicalizes it");
 
+  // Absolute-long: the sign-extended spelling of a top-half 24-bit address is the same bus address (the 68000 drives only
+  // A1..A23) and is canonicalized at decode, like absolute-word; any other nonzero upper byte still fails closed.
   const std::vector<std::uint8_t> absolute_long_bytes{0x4AU, 0xB9U, 0xFFU, 0xFFU, 0x80U, 0x00U};
   const auto absolute_long = std::get<segarecomp::M68kDecodedInstruction>(
       segarecomp::decode_m68k_instruction(absolute_long_bytes, source(),
                                            segarecomp::M68kDecodeProfile::general_startup));
   expect(absolute_long.source_ea.mode == segarecomp::M68kEaMode::absolute_long &&
-             segarecomp::m68k_canonical_ea_address(absolute_long.source_ea) == UINT32_C(0xFFFF8000) &&
+             segarecomp::m68k_canonical_ea_address(absolute_long.source_ea) == UINT32_C(0x00FF8000) &&
+             !segarecomp::m68k_startup_absolute_operand_alignment(
+                 segarecomp::m68k_canonical_ea_address(absolute_long.source_ea), absolute_long.size),
+         "a sign-extended absolute-long value names its 24-bit bus address");
+  const std::vector<std::uint8_t> non_sign_extended_bytes{0x4AU, 0xB9U, 0x01U, 0xFFU, 0x80U, 0x00U};
+  const auto non_sign_extended = std::get<segarecomp::M68kDecodedInstruction>(
+      segarecomp::decode_m68k_instruction(non_sign_extended_bytes, source(),
+                                           segarecomp::M68kDecodeProfile::general_startup));
+  expect(non_sign_extended.source_ea.mode == segarecomp::M68kEaMode::absolute_long &&
              segarecomp::m68k_startup_absolute_operand_alignment(
-                 segarecomp::m68k_canonical_ea_address(absolute_long.source_ea), absolute_long.size) ==
+                 segarecomp::m68k_canonical_ea_address(non_sign_extended.source_ea), non_sign_extended.size) ==
                  segarecomp::DirectFlowDiagnostic::effective_address_not_24bit,
-         "absolute-long values retain their upper byte at the Genesis bus seam");
+         "any other nonzero absolute-long upper byte still fails closed at the Genesis bus seam");
 }
 
 int emit_general_startup_runtime_c2_source() {

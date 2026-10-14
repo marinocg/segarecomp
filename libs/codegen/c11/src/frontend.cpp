@@ -6001,7 +6001,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   // membership set as any other RTS in this program.
   const std::vector<std::uint32_t> immutable_rom_aot_runtime_return_targets(
       runtime_return_target_set.begin(), runtime_return_target_set.end());
-  // SEG-021-T041 / ADR 0048: push-then-RTS computed jump. From every admitted `MOVE.L <src>,-(A7)` identity a
+  // SEG-021-T041 / ADR 0048: push-then-RTS computed jump. From every admitted `MOVE.L <src>,-(A7)` (or `,(A7)`) identity a
   // bounded forward walk (both arms of direct conditional branches, direct BRA, at most
   // `computed_jump_window` instructions) follows admitted identities that neither touch the stack nor write A7
   // (complete register footprint, no stack effect, sequential or direct-branch PC effect). An admitted RTS
@@ -6015,7 +6015,11 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
   for (const auto &[push_address, push_entry] : *aot_entries) {
     const auto &push_op = push_entry->operation;
     if (push_op.kind != M68kIrKind::write_move || push_op.size != M68kMemoryAccessWidth::long_word ||
-        push_op.destination_ea.mode != M68kEaMode::address_predec || push_op.destination_ea.reg != 7U)
+        (push_op.destination_ea.mode != M68kEaMode::address_predec &&
+         // `MOVE.L <src>,(A7)` rewrites the saved return address in place (the inline-data-argument idiom: advance the
+         // return address past data that follows the call, then RTS): the RTS that pops it is the same computed jump.
+         push_op.destination_ea.mode != M68kEaMode::address_indirect) ||
+        push_op.destination_ea.reg != 7U)
       continue;
     std::deque<std::pair<Address, unsigned>> walk;
     std::set<Address> visited;
@@ -6451,6 +6455,16 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
     for (const auto &block : partial.accepted_prefix.static_blocks)
       if (block.id.entry.value == handler) { irq6_handler_hex = hex(handler, 8); break; }
   }
+  // Immutable-ROM AOT: a handler whose body is not a retained static block (e.g. a `push.l abs; rts` trampoline that the
+  // static discovery cannot close) is still an ordinary compiled AOT entry at that exact cartridge address, so the
+  // CPU-owned interrupt entry can deliver to it. Without this the recognized IRQ6 was silently never delivered.
+  if (irq6_handler_hex.empty() && partial.accepted_prefix.irq6_handler_entry)
+    for (const auto &aot_entry : partial.accepted_prefix.immutable_rom_aot_entries)
+      if (!aot_entry.execution_alias && !aot_entry.materialized_ram_thunk &&
+          aot_entry.decoded.provenance.source.address.value == partial.accepted_prefix.irq6_handler_entry->value) {
+        irq6_handler_hex = hex(partial.accepted_prefix.irq6_handler_entry->value, 8);
+        break;
+      }
   // ADR 0097 amendment: a work-RAM IRQ6 vector whose stub address carries a materialized, byte-guarded JMP thunk entry is an
   // ordinary compiled handler entry: the CPU-owned exception entry delivers the interrupt to the stub address and the stub
   // instruction retires normally. Without such an entry the typed irq6_vector_in_work_ram stop remains.

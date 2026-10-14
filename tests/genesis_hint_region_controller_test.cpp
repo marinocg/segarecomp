@@ -570,6 +570,52 @@ void test_independent_player_ports() {
 }
 }  // namespace
 
+// ---- VDP HV counter ($C00008-$C0000F) -------------------------------------------------------------------------------
+bool read_hv(GenesisRuntime &r, uint32_t address, GenesisAccessWidth width, uint32_t *value) {
+  GenesisRuntimeStop stop{};
+  *value = 0xDEADBEEFu;
+  return genesis_route_access(&r, address, width, GENESIS_ACCESS_READ, value, &stop) == GENESIS_ACCESS_OK;
+}
+
+void test_hv_counter() {
+  const uint64_t line = GENESIS_NTSC_MASTER_TICKS_PER_LINE;
+  auto r = make_runtime();
+  uint32_t value = 0;
+  r->devices.vdp.registers[12] = 0x81;  // H40
+  r->scheduler.master_ticks = 10ull * line;
+  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_WORD, &value) && value == 0x0A00u, "HV word read: line 10, start of line");
+  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_BYTE, &value) && value == 0x0Au, "HV BYTE read of the V counter lane");
+  check(read_hv(*r, 0xC00009, GENESIS_ACCESS_BYTE, &value) && value == 0x00u, "HV BYTE read of the H counter lane");
+  check(read_hv(*r, 0xC0000C, GENESIS_ACCESS_WORD, &value) && value == 0x0A00u, "HV counter mirrors through $C0000F");
+  // The V counter runs $00-$EA, then continues $E5-$FF over the 262-line NTSC frame.
+  r->scheduler.master_ticks = 234ull * line;
+  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_BYTE, &value) && value == 0xEAu, "V counter reaches $EA on line 234");
+  r->scheduler.master_ticks = 235ull * line;
+  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_BYTE, &value) && value == 0xE5u, "V counter wraps to $E5 on line 235");
+  r->scheduler.master_ticks = 261ull * line;
+  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_BYTE, &value) && value == 0xFFu, "V counter ends at $FF on the last line");
+  // H counter: $00 at the line start, last value $FF in both widths ($E4-$FF tail in H40, $E9-$FF in H32).
+  r->scheduler.master_ticks = 10ull * line + (line - 1u);
+  check(read_hv(*r, 0xC00009, GENESIS_ACCESS_BYTE, &value) && value == 0xFFu, "H40 H counter ends at $FF");
+  r->devices.vdp.registers[12] = 0x00;  // H32
+  check(read_hv(*r, 0xC00009, GENESIS_ACCESS_BYTE, &value) && value == 0xFFu, "H32 H counter ends at $FF");
+  // Monotonic within a line (the counter only skips forward at its documented gap).
+  uint32_t previous = 0u;
+  bool monotonic = true;
+  for (uint64_t tick = 0; tick < line; tick += 7u) {
+    r->scheduler.master_ticks = 10ull * line + tick;
+    monotonic = monotonic && read_hv(*r, 0xC00009, GENESIS_ACCESS_BYTE, &value) && value >= previous;
+    previous = value;
+  }
+  check(monotonic, "the H counter never decreases within a scanline");
+  // Not modeled: the HV latch (register #0 bit 1), interlace and the 240-line mode stay fail-closed.
+  for (const auto &unmodeled : {std::pair<int, uint16_t>{0, 0x0002}, {12, 0x0086}, {1, 0x0008}}) {
+    auto u = make_runtime();
+    u->devices.vdp.registers[unmodeled.first] = unmodeled.second;
+    check(!read_hv(*u, 0xC00008, GENESIS_ACCESS_WORD, &value), "unmodeled HV counter configuration stays fail-closed");
+  }
+}
+
 int main() {
   test_hint_counter_schedule();
   test_hint_enable_gating_and_latch();
@@ -577,6 +623,7 @@ int main() {
   test_hint_missing_handler_policy();
   test_hint_stop_wake();
   test_status_hblank_and_field_bits();
+  test_hv_counter();
   test_hblank_exact_edges();
   test_region_profiles_and_version_register();
   test_region_sensitive_guest_branches();
