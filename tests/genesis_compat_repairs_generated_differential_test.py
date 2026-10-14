@@ -127,7 +127,7 @@ def generated_harness(scn, max_steps=64):
     for addr, length in scn["observe"]:
         lines.append(f'  printf("ram_{addr:X}="); for (i = 0; i < {length}; ++i) printf("%02X", r.work_ram[0x{addr - RAM:X} + i]); printf("\\n");')
     lines += ["  return 0;", "}"]
-    return "\n".join(lines)
+    return "\n".join(lines) + "\n"
 
 
 def run_generated(emitter, compiler, root, scn, temp, tag):
