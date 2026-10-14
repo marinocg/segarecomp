@@ -178,12 +178,23 @@ def main():
     undeclared = roms / "Mystery Cart (Fictional).sms"
     undeclared.write_bytes(sms_rom(41))
     entries.append((undeclared, "Mystery Cart (Fictional)", "master-system", len(GENESIS) + len(SMS)))
+    # a Genesis header with an odd reset program counter: the product refuses it, so the library shows a real failed build with its log
+    broken = roms / "Broken Vector (Fictional).md"
+    image = bytearray(genesis_rom("BROKEN VECTOR", 99))
+    image[4:8] = bytes((0x00, 0x10, 0x00, 0x01))
+    broken.write_bytes(bytes(image))
+    failing = (broken, "Broken Vector (Fictional)", "genesis", len(GENESIS) + len(SMS) + 1)
+    entries.append(failing)
     for path, title, platform, index in entries:
         rc, text = run([args.launcher, "--import", str(path)], env)
         if rc != 0:
             sys.exit(f"import failed for {title}: {text}")
     if not args.no_build:
-        for path, title, platform, index in entries[:-1]:
+        rc, text = run([args.launcher, "--build", str(broken)], env)
+        print(f"build {failing[1]}: rc={rc} (a failure is expected)")
+        if rc == 0:
+            sys.exit("the deliberately broken cartridge built")
+        for path, title, platform, index in entries[:-2]:
             rc, text = run([args.launcher, "--build", str(path)], env)
             print(f"build {title}: rc={rc}")
             if rc != 0:

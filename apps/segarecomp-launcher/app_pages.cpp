@@ -26,6 +26,10 @@ struct Slice { const char *name; ImU32 color; std::uintmax_t bytes; };
 
 void App::draw_import(float w, float h) {
   page_header(ctx_, w, "IMPORT ROMS", "Drag and drop ROM files to add them to your library.");
+  draw_import_body(w, h);
+}
+
+void App::draw_import_body(float w, float h) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const bool two = w > ctx_.u(700.0F);
   const float steps_w = two ? ctx_.u(240.0F) : 0.0F, gap = ctx_.u(18.0F);
@@ -306,18 +310,46 @@ void App::draw_settings(float full_w, float h) {
     }
   }
   ImGui::SetCursorScreenPos(ImVec2(origin.x + tabs_w + tab_gap, origin.y + (narrow ? ctx_.u(44.0F) : 0.0F)));
-  const float w = full_w - tabs_w - tab_gap - ctx_.u(18.0F);
+  const float w_outer = full_w - tabs_w - tab_gap - ctx_.u(18.0F);
+  // Settings groups are titled section cards, the same card language as the Details page (Input Diagnostics draws its own structure).
+  const bool carded = settings_tab_ != 4;
+  const float sec_pad = carded ? ctx_.u(16.0F) : 0.0F;
+  const float w = w_outer - 2 * sec_pad;
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-  ImGui::BeginChild("##settings_body", ImVec2(w + ctx_.u(18.0F), std::max(ctx_.u(120.0F), ImGui::GetContentRegionAvail().y)), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+  ImGui::BeginChild("##settings_body", ImVec2(w_outer + ctx_.u(18.0F), std::max(ctx_.u(120.0F), ImGui::GetContentRegionAvail().y)), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
   if (SDL_getenv("SEGARECOMP_SHOT_SCROLL")) ImGui::SetScrollY(ImGui::GetScrollMaxY());  // review aid, never a persisted preference
   dl = ImGui::GetWindowDrawList();
+  ImVec2 sec_origin(0, 0);
+  bool sec_open = false;
+  const auto section_end = [&] {
+    if (!sec_open) return;
+    ImGui::Unindent(sec_pad);
+    const float end_y = ImGui::GetCursorScreenPos().y + ctx_.u(6.0F);
+    dl->ChannelsSetCurrent(0);
+    card(ctx_, dl, sec_origin, ImVec2(sec_origin.x + w_outer, end_y), false, false, rgba(8, 19, 46, 240));
+    dl->ChannelsMerge();
+    ImGui::SetCursorScreenPos(ImVec2(sec_origin.x, end_y + ctx_.u(12.0F)));
+    ImGui::Dummy(ImVec2(w_outer, 0.0F));
+    sec_open = false;
+  };
+  const auto section = [&](const char *title) {
+    section_end();
+    sec_origin = ImGui::GetCursorScreenPos();
+    dl->ChannelsSplit(2);
+    dl->ChannelsSetCurrent(1);
+    draw_text(dl, ctx_.display, ctx_.u(12.5F), rgba(120, 205, 255), ImVec2(sec_origin.x + sec_pad, sec_origin.y + ctx_.u(13.0F)), title);
+    ImGui::SetCursorScreenPos(ImVec2(sec_origin.x, sec_origin.y + ctx_.u(38.0F)));
+    ImGui::Indent(sec_pad);
+    ImGui::SetCursorScreenPos(ImVec2(sec_origin.x + sec_pad, sec_origin.y + ctx_.u(38.0F)));
+    sec_open = true;
+  };
   bool save = false;
   const float lw = ctx_.u(170.0F);
   const auto row_label = [&](const char *label) { paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, label); };
   const auto next_row = [&] { ImGui::SetCursorScreenPos(ImVec2(ImGui::GetWindowPos().x + ctx_.u(14.0F) - ImGui::GetScrollX(), ImGui::GetCursorScreenPos().y + ctx_.u(6.0F))); };
   (void)next_row;
   if (settings_tab_ == 0) {
-    heading(ctx_, "Library");
+    section("LIBRARY");
     row_label("View");
     int view = settings_.view == "list" ? 1 : 0;
     if (segmented(ctx_, "v", {"Grid", "List"}, &view, ctx_.u(90.0F))) { settings_.view = view == 1 ? "list" : "grid"; save = true; }
@@ -343,14 +375,13 @@ void App::draw_settings(float full_w, float h) {
     ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + ctx_.u(28.0F)));
     if (button(ctx_, "recheck", "Re-check", ImVec2(ctx_.u(110.0F), ctx_.u(28.0F)), Style::secondary)) { request_status_refresh(); toast("Checking ROM links..."); }
     ImGui::Dummy(ImVec2(1, ctx_.u(14.0F)));
-    rule(ctx_, w);
-    heading(ctx_, "Reset");
+    section("RESET");
     if (button(ctx_, "restore", "Restore launcher defaults", ImVec2(ctx_.u(260.0F), ctx_.u(32.0F)), Style::secondary)) { modal_ = Modal{}; modal_.kind = Modal::Kind::restore_defaults; modal_.title = "Restore launcher defaults?"; }
     if (w > ctx_.u(480.0F)) ImGui::SameLine(0.0F, ctx_.u(10.0F));
     if (button(ctx_, "clear_lib", "Clear library...", ImVec2(ctx_.u(200.0F), ctx_.u(32.0F)), Style::danger, !catalog_.entries().empty())) { modal_ = Modal{}; modal_.kind = Modal::Kind::clear_library; modal_.title = "Clear the whole library?"; }
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Restoring defaults and clearing the library are separate actions. Neither deletes ROMs or build folders.");
   } else if (settings_tab_ == 1) {
-    heading(ctx_, "Metadata & Covers");
+    section("METADATA & COVERS");
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "Titles come from the ROM header or file name and can be renamed on the game's page. Covers are images you choose; the generic placeholder is shown otherwise.");
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     row_label("Online lookup");
@@ -375,14 +406,13 @@ void App::draw_settings(float full_w, float h) {
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w - lw, "Everything works offline. Covers you choose are stored in the covers folder next to the library and survive cleanups; removing a cover returns the placeholder.");
     if (button(ctx_, "open_covers", "Open covers folder", ImVec2(ctx_.u(200.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("folder"))) { std::error_code ec; fs::create_directories(covers_dir_, ec); SDL_OpenURL(("file://" + u8s(covers_dir_)).c_str()); }
   } else if (settings_tab_ == 2) {
-    heading(ctx_, "Build & Runtime");
+    section("BUILD & RUNTIME");
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "Compatibility, Optimized, the Genesis region, the Master System mapper and H-interrupt discovery are chosen per game on its page (they are part of what a build is). Toolchain: bundled Zig " SEGARECOMP_ZIG_VERSION ".");
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Master System Optimized");
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), sms_optimized_available_ ? col::ok : col::dim, w - lw, sms_optimized_available_ ? "Offered by this product build (experimental)." : "Not offered by this product build.");
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
-    rule(ctx_, w);
-    heading(ctx_, "After a successful build");
+    section("AFTER A SUCCESSFUL BUILD");
     int mode = 0;
     static const char *modes[] = {"never", "intermediates", "keep_last_n", "soft_limit"};
     for (int i = 0; i < 4; ++i) if (settings_.cleanup.mode == modes[i]) mode = i;
@@ -410,7 +440,7 @@ void App::draw_settings(float full_w, float h) {
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), settings_.cleanup.mode == "keep_last_n" ? col::warn : col::text2, w, describe_policy(settings_.cleanup));
     if (button(ctx_, "go_storage", "Manage Storage", ImVec2(ctx_.u(200.0F), ctx_.u(32.0F)), Style::secondary, true, ctx_.icon("storage"))) go(Page::storage);
   } else if (settings_tab_ == 3) {
-    heading(ctx_, "Video & Controls defaults");
+    section("VIDEO & CONTROLS DEFAULTS");
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, "SDL_Renderer presentation; SDL_GPU is not implemented. Audio uses the default output device; device selection is not implemented.");
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "These are the same settings as the game's in-game menu (Esc), stored in the viewer settings file. They apply the next time a game starts. Key and gamepad bindings are remapped in the game's Controls page.");
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
@@ -452,14 +482,13 @@ void App::draw_settings(float full_w, float h) {
   } else if (settings_tab_ == 4) {
     draw_input_diagnostics(w);
   } else {
-    heading(ctx_, "Advanced / About");
+    section("ABOUT");
     const float vw = w - lw;
     label_value(ctx_, lw, vw, "Version", std::string("Segarecomp ") + SEGARECOMP_LAUNCHER_VERSION);
     label_value(ctx_, lw, vw, "Toolchain", std::string("Zig ") + SEGARECOMP_ZIG_VERSION + " (bundled, used only to compile generated C)");
     label_value(ctx_, lw, vw, "SDL", std::to_string(SDL_VERSIONNUM_MAJOR(SDL_GetVersion())) + "." + std::to_string(SDL_VERSIONNUM_MINOR(SDL_GetVersion())) + "." + std::to_string(SDL_VERSIONNUM_MICRO(SDL_GetVersion())) + ", renderer " + (SDL_GetRendererName(renderer_) != nullptr ? SDL_GetRendererName(renderer_) : "?"));
     label_value(ctx_, lw, vw, "Host", host_description());
-    rule(ctx_, w);
-    heading(ctx_, "Where things live");
+    section("WHERE THINGS LIVE");
     label_value(ctx_, lw, vw, "Installation", u8s(layout_.root) + (layout_.problem.empty() ? "" : "  (incomplete)"), layout_.problem.empty() ? col::text : col::err);
     label_value(ctx_, lw, vw, "Cache (disposable)", u8s(cache_dir_) + "  - games/ and zig-cache/ only");
     label_value(ctx_, lw, vw, "Library (kept)", u8s(library_dir_) + "  - library.json, covers, settings");
@@ -469,8 +498,7 @@ void App::draw_settings(float full_w, float h) {
     if (button(ctx_, "open_cache", "Open cache folder", ImVec2(ctx_.u(190.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("folder"))) SDL_OpenURL(("file://" + u8s(cache_dir_)).c_str());
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (button(ctx_, "open_lib", "Open library folder", ImVec2(ctx_.u(200.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("folder"))) { std::error_code ec; fs::create_directories(library_dir_, ec); SDL_OpenURL(("file://" + u8s(library_dir_)).c_str()); }
-    rule(ctx_, w);
-    heading(ctx_, "Diagnostics");
+    section("DIAGNOSTICS");
     label_value(ctx_, lw, vw, "Library", std::to_string(catalog_.entries().size()) + " game(s), schema " + std::to_string(Catalog::schema_version) + (catalog_.read_only() ? " (read-only: written by a newer release)" : ""));
     if (!catalog_notice_.empty()) label_value(ctx_, lw, vw, "Notice", catalog_notice_, col::warn);
     if (button(ctx_, "adopt_now", "Adopt existing builds now", ImVec2(ctx_.u(250.0F), ctx_.u(30.0F)), Style::secondary, !catalog_.read_only())) {
@@ -481,6 +509,7 @@ void App::draw_settings(float full_w, float h) {
     }
     paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Errors are shown where they happen (build failures on the game's page with the sanitized log). Nothing is sent anywhere; Segarecomp makes no network requests.");
   }
+  section_end();
   ImGui::EndChild();
   ImGui::PopStyleVar();
   if (save) save_settings();

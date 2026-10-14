@@ -100,6 +100,7 @@ private:
   void draw_list_row(const LibraryEntry &entry, float w, float h);
   void draw_details(float w, float h);
   void draw_import(float w, float h);
+  void draw_import_body(float w, float h);  // drop zone, the three-step guide, results (also the empty library's page)
   void draw_storage(float w, float h);
   void draw_settings(float w, float h);
   void draw_input_diagnostics(float w);

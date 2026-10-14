@@ -146,14 +146,14 @@ void App::draw_cover(ImDrawList *dl, const LibraryEntry &entry, ImVec2 a, ImVec2
     const float cap = std::clamp(h * 0.045F, ctx_.u(7.0F), ctx_.u(9.0F));
     // under the platform band: the lower part of the card stays free for the library's build-state badge
     float ty = a.y + band + std::max(ctx_.u(10.0F), h * 0.07F);
-    dl->AddRectFilledMultiColor(ImVec2(a.x, a.y + band), ImVec2(b.x, ty + static_cast<float>(lines.size()) * (px + ctx_.u(3.0F)) + ctx_.u(14.0F)), rgba(4, 10, 28, 170), rgba(4, 10, 28, 170), rgba(4, 10, 28, 0), rgba(4, 10, 28, 0));
+    dl->AddRectFilledMultiColor(ImVec2(a.x, a.y + band), ImVec2(b.x, ty + static_cast<float>(lines.size()) * (px + ctx_.u(3.0F)) + cap + ctx_.u(22.0F)), rgba(4, 10, 28, 170), rgba(4, 10, 28, 170), rgba(4, 10, 28, 0), rgba(4, 10, 28, 0));
     for (const auto &l : lines) {
       draw_text(dl, ctx_.display, px, rgba(2, 6, 18, 230), ImVec2(a.x + ctx_.u(9.0F), ty + ctx_.u(1.5F)), l.c_str());
       draw_text(dl, ctx_.display, px, rgba(236, 244, 255), ImVec2(a.x + ctx_.u(8.0F), ty), l.c_str());
       ty += px + ctx_.u(3.0F);
     }
     const char *note = "NO COVER ART";
-    draw_text(dl, ctx_.display, cap, rgba(150, 168, 210, 220), ImVec2(b.x - ctx_.u(8.0F) - text_width(ctx_.display, cap, note), b.y - ctx_.u(9.0F) - cap), note);
+    draw_text(dl, ctx_.display, cap, rgba(150, 168, 210, 220), ImVec2(a.x + ctx_.u(8.0F), ty + ctx_.u(3.0F)), note);
   } else {
     // thumbnails: the initials only
     const std::string text = initials(entry.title());

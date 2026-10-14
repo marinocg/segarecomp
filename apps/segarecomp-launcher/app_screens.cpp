@@ -477,15 +477,26 @@ void App::draw_library(float w, float h) {
   page_header(ctx_, w, "LIBRARY HOME", "Browse, search and manage your recompiled games.");
   if (all.empty()) {
     if (!catalog_notice_.empty() || catalog_.read_only()) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w, catalog_.notice());
-    draw_drop_zone(w, h - ctx_.u(60.0F), false);
+    draw_import_body(w, h);
     return;
   }
   const float bh = ctx_.u(34.0F);
+  const bool narrow = w < ctx_.u(640.0F);
+  const auto view_tools = [&] {
+    if (icon_button(ctx_, "view_grid", ctx_.icon("library"), bh, settings_.view == "grid", true, "Grid view")) { settings_.view = "grid"; save_settings(); }
+    ImGui::SameLine(0.0F, ctx_.u(4.0F));
+    if (icon_button(ctx_, "view_list", ctx_.icon("file"), bh, settings_.view == "list", true, "List view")) { settings_.view = "list"; save_settings(); }
+    ImGui::SameLine(0.0F, ctx_.u(8.0F));
+    if (button(ctx_, "select_mode", select_mode_ ? "Done" : "Select", ImVec2(ctx_.u(80.0F), bh), select_mode_ ? Style::primary : Style::secondary)) { select_mode_ = !select_mode_; if (!select_mode_) selected_.clear(); }
+  };
+  const float tools = bh * 2 + ctx_.u(4.0F) + ctx_.u(8.0F) + ctx_.u(80.0F);
   {
     if (focus_search_) { ImGui::SetKeyboardFocusHere(); focus_search_ = false; }
-    const float import_w = ctx_.u(132.0F);
-    input_text(ctx_, "search", search_, sizeof search_, std::max(ctx_.u(140.0F), w - import_w - ctx_.u(12.0F)), "Search games...  (Ctrl+F)");
-    ImGui::SameLine(0.0F, ctx_.u(12.0F));
+    const float import_w = ctx_.u(narrow ? 120.0F : 132.0F);
+    // a narrow window keeps the view switches on the search row, so the game list does not lose a whole toolbar row
+    input_text(ctx_, "search", search_, sizeof search_, std::max(ctx_.u(140.0F), w - import_w - ctx_.u(12.0F) - (narrow ? tools + ctx_.u(10.0F) : 0.0F)), "Search games...  (Ctrl+F)");
+    if (narrow) { ImGui::SameLine(0.0F, ctx_.u(10.0F)); view_tools(); }
+    ImGui::SameLine(0.0F, ctx_.u(narrow ? 8.0F : 12.0F));
     if (button(ctx_, "lib_import", "Import ROMs", ImVec2(import_w, ctx_.u(36.0F)), Style::primary, !import_job_.valid(), ctx_.icon("import"))) browse_import();
   }
   ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
@@ -494,21 +505,16 @@ void App::draw_library(float w, float h) {
     static const char *sort_ids[] = {"last_played", "title", "last_built", "added", "size"};
     int sort = 0;
     for (int i = 0; i < 5; ++i) if (settings_.sort == sort_ids[i]) sort = i;
-    const bool narrow = w < ctx_.u(640.0F);
-    const float tools = ctx_.u(34.0F) * 2 + ctx_.u(8.0F) + ctx_.u(88.0F) + ctx_.u(4.0F);
     const float dw = narrow ? std::max(ctx_.u(104.0F), (w - ctx_.u(16.0F)) / 3.0F) : ctx_.u(160.0F);
     if (dropdown(ctx_, "pf", {"All Platforms", "Genesis", "Master System"}, &platform, dw, narrow ? nullptr : ctx_.icon("controller"))) platform_filter_ = platform;
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
-    if (dropdown(ctx_, "sf", {"All Statuses", "Built", "Needs build", "Failed", "Missing ROM"}, &status, dw)) status_filter_ = status;
+    if (dropdown(ctx_, "sf", {"All Statuses", "Ready", "Needs build", "Failed", "Missing ROM"}, &status, dw)) status_filter_ = status;
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (dropdown(ctx_, "so", {"Last Played", "Title", "Last Built", "Date Added", "Size"}, &sort, dw)) { settings_.sort = sort_ids[sort]; save_settings(); }
-    if (narrow) { ImGui::Dummy(ImVec2(1, ctx_.u(2.0F))); }  // the view switches wrap under the filters in a narrow window
-    else ImGui::SameLine(std::max(ImGui::GetCursorPosX() + ctx_.u(8.0F), w - tools + ctx_.u(18.0F)), 0.0F);
-    if (icon_button(ctx_, "view_grid", ctx_.icon("library"), bh, settings_.view == "grid", true, "Grid view")) { settings_.view = "grid"; save_settings(); }
-    ImGui::SameLine(0.0F, ctx_.u(4.0F));
-    if (icon_button(ctx_, "view_list", ctx_.icon("file"), bh, settings_.view == "list", true, "List view")) { settings_.view = "list"; save_settings(); }
-    ImGui::SameLine(0.0F, ctx_.u(8.0F));
-    if (button(ctx_, "select_mode", select_mode_ ? "Done" : "Select", ImVec2(ctx_.u(88.0F), bh), select_mode_ ? Style::primary : Style::secondary)) { select_mode_ = !select_mode_; if (!select_mode_) selected_.clear(); }
+    if (!narrow) {
+      ImGui::SameLine(std::max(ImGui::GetCursorPosX() + ctx_.u(8.0F), w - tools + ctx_.u(18.0F)), 0.0F);
+      view_tools();
+    }
   }
   if (soft_limit_exceeded_) {
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
