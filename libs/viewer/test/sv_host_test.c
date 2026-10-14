@@ -199,6 +199,9 @@ int main(void) {
   s.video.scale = SV_SCALE_INTEGER;
   sv_host_apply_settings(host, &s);
   CHECK(sv_host_present(host, frame, 320, 224, 320 * 3) == 0, "present a 320x224 frame");
+  CHECK(strstr(host->toast, "Pause menu: Esc") != NULL && strstr(host->toast, "Back") != NULL && host->toast_until > SDL_GetTicks(),
+        "the first picture shows a hint naming the keys that open the pause menu");
+  sv_host_toast(host, ""); /* the byte-exact check below is about the picture, not the overlay */
   a = sv_host_capture_output(host);
   CHECK(a != NULL && a->w >= 640 && a->h >= 448, "the window is at least 2x the picture");
   ok = a != NULL;
@@ -425,8 +428,9 @@ int main(void) {
     CHECK((smp.pad[1] & SV_ACTION_BIT(SV_ACT_LEFT)) && (smp.pad[1] & SV_ACTION_BIT(SV_ACT_BUTTON1)) && !(smp.pad[0] & SV_ACTION_BIT(SV_ACT_LEFT)), "SMS Player 2 keys reach the second port");
     key_event(SV_KEY_J, 0, 0); key_event(SV_KEY_U, 0, 0);
     sv_host_service(host, &smp);
-    /* geometry of the two active heights */
-    sv_host_present(host, sms, 256, 192, 256 * 3);
+    /* geometry of the two active heights (measured on the picture: the start-up hint toast is cleared first) */
+    sv_host_present(host, sms, 256, 192, 256 * 3); /* this host's first picture: it raises the hint */
+    sv_host_toast(host, "");
     a = sv_host_capture_output(host);
     { int minx = 9999, maxx = -1, miny = 9999, maxy = -1;
       for (y = 0; y < a->h; ++y) for (x = 0; x < a->w; ++x) { px(a, x, y, &r, &g, &bl); if (r > 128) { if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y; } }

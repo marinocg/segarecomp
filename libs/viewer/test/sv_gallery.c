@@ -200,7 +200,8 @@ int main(int argc, char **argv) {
   rgb = (uint8_t *)malloc((size_t)w * (size_t)h * 3u);
   scene(rgb, w, h);
   sv_host_present(host, rgb, w, h, w * 3);
-  save(sv_host_capture_output(host), "01_gameplay");
+  save(sv_host_capture_output(host), "01_gameplay");  /* with the start-up hint toast (how to open the pause menu) */
+  sv_host_toast(host, "");                           /* the other captures show the picture and menus without it */
   /* the CRT presets on the same picture */
   s = *sv_host_settings(host);
   for (i = 0; i < 4; ++i) {

@@ -814,6 +814,12 @@ int sv_host_present(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch) {
   h->last_w = w;
   h->last_h = hgt;
   h->frames_presented++;
+  if (h->frames_presented == 1 && h->toast[0] == '\0') { /* first picture: say once how to reach the pause menu (the keys that actually open it) */
+    const char *custom = h->settings.menu_key > 0 && h->settings.menu_key != SV_KEY_ESCAPE ? SDL_GetScancodeName((SDL_Scancode)h->settings.menu_key) : NULL;
+    if (custom != NULL && *custom != '\0') snprintf(h->toast, sizeof h->toast, "Pause menu: Esc, %.24s or the gamepad's Back button", custom);
+    else snprintf(h->toast, sizeof h->toast, "Pause menu: Esc or the gamepad's Back button");
+    h->toast_until = SDL_GetTicks() + 6000u;
+  }
   if (h->last_present_ns != 0) h->frame_ms = h->frame_ms * 0.9 + (double)(now - h->last_present_ns) / 1.0e6 * 0.1;
   h->last_present_ns = now;
   h->fps_frames++;

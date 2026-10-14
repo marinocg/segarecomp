@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "binary_sha256": "4eb841a619f0d8a839529e2bcb439c2f0299f14db105a77088920fdaa74391e7",
+  "binary_sha256": "ec411dfbce586ede26436c4f36e93dd33d794771315f6adf5cca72a3f0faa83c",
   "fixture": "project-authored fictional RGB scene; virtual controllers, never physical hardware",
   "hidpi": "output-pixel simulations at 2x logical sizes; not an OS/display HiDPI test",
   "reproduce": "python3 tools/viewer_visual_capture.py --gallery build/dev/libs/viewer/sv_gallery --assets apps/segarecomp-launcher/assets --out build/visual-review/viewer --publish docs/product/screenshots",
@@ -9,7 +9,7 @@
   "captures": [
     {
       "path": "viewer-genesis-small/01_gameplay.png",
-      "sha256": "d3c88b9fa43eee3daf25117951dd8a201bb95a2dce5b084357237dc57fd6e21d"
+      "sha256": "cd1f260ea9511b4a22189b91c8d6e66a05efde81022ca9fdebc20d789f433878"
     },
     {
       "path": "viewer-genesis-small/02_pause_menu.png",
@@ -85,7 +85,7 @@
     },
     {
       "path": "viewer-genesis/01_gameplay.png",
-      "sha256": "4738c25ebc4b14bf5b6559461b62ff84f29c81f3f21b68cf8e6baf9377e3f5ed"
+      "sha256": "bc1adadbe33c6d17cab6c57c5d4ec15eefd695c0e1a3307e32f84b4898d5c82e"
     },
     {
       "path": "viewer-genesis/02_pause_menu.png",
@@ -133,7 +133,7 @@
     },
     {
       "path": "viewer-genesis/07_system.png",
-      "sha256": "18422e8607f0503f2ac17c7c09d93017988a13d58386057dc91d2a8e9617cd35"
+      "sha256": "1aebbdcf2083f52e1d3e4e61081782484b6a2cce3d785c43e86b0a0365e70429"
     },
     {
       "path": "viewer-genesis/08_quit_confirmation.png",
@@ -177,7 +177,7 @@
     },
     {
       "path": "viewer-sms-small/01_gameplay.png",
-      "sha256": "a16b987b34fbd17ab183d77642b308eb250e92aa4dd5d6e9bbc2bb41a8ada315"
+      "sha256": "11fe4b7ed14381e2fac6c4f817d8729fd699e782bfb42f55effbff54503c9019"
     },
     {
       "path": "viewer-sms-small/02_pause_menu.png",
@@ -257,7 +257,7 @@
     },
     {
       "path": "viewer-sms/01_gameplay.png",
-      "sha256": "8cdf59707cf32603ae977882d0f7b30fbf40eec8929d4a5109f5a0a093cc5d72"
+      "sha256": "3ef0da57eec3775de5fb08011c2b8701ffc2dcd1f552038c03d2d78493b8f29b"
     },
     {
       "path": "viewer-sms/02_pause_menu.png",
@@ -305,7 +305,7 @@
     },
     {
       "path": "viewer-sms/07_system.png",
-      "sha256": "f03ac9a25e6d87c99ed1b0906907235eec3e3ab6d18031ff4e95ba7f65877b74"
+      "sha256": "481bb90fdcb4501b7ae1af0c2eab6c1603c84347e112f1d6981ad4dec54c9997"
     },
     {
       "path": "viewer-sms/07b_reset_confirmation.png",
@@ -353,7 +353,7 @@
     },
     {
       "path": "viewer-sms-224-small/01_gameplay.png",
-      "sha256": "f4a024ca7e8fada6e503c3b69ac5a816f5d65368b87797e47cc017bb9c2f3ae2"
+      "sha256": "851abcc3a14d02d0114230e55662d8100d12bae8711e00bd95ee415baae9e37a"
     },
     {
       "path": "viewer-sms-224-small/02_pause_menu.png",
@@ -433,7 +433,7 @@
     },
     {
       "path": "viewer-sms-224/01_gameplay.png",
-      "sha256": "94bc9b248f2f16cfe3e3670a604d735532720f1d4d0e0a0844bcdf759da4639d"
+      "sha256": "d10d1aba8550f1f3e5ffa850d77381c4b42bdfc0927c4f783abdf73a7407ae66"
     },
     {
       "path": "viewer-sms-224/02_pause_menu.png",
@@ -481,7 +481,7 @@
     },
     {
       "path": "viewer-sms-224/07_system.png",
-      "sha256": "1a64caa9036ab55849abca9c564c5af4b07ee7ab0e70ab760715be5403c87c0b"
+      "sha256": "bd464765a1fe3905d75a47b4e7a111457aad3c70ce4850f4c67b1032dbfd1893"
     },
     {
       "path": "viewer-sms-224/07b_reset_confirmation.png",
