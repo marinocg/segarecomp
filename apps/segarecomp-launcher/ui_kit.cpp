@@ -300,6 +300,117 @@ bool segmented(Ctx &ctx, const char *id, const std::vector<std::string> &items, 
   return changed;
 }
 
+bool option_tiles(Ctx &ctx, const char *id, const std::vector<std::string> &titles, const std::vector<std::string> &descriptions, int *selected,
+                  float width, float height, const std::vector<bool> &enabled) {
+  bool changed = false;
+  const ImVec2 origin = ImGui::GetCursorScreenPos();
+  const float gap = ctx.u(8.0F), n = static_cast<float>(titles.size());
+  const float tw = std::floor((width - gap * (n - 1.0F)) / n);
+  ImGui::PushID(id);
+  for (std::size_t i = 0; i < titles.size(); ++i) {
+    const bool on_enabled = i >= enabled.size() || enabled[i];
+    const ImVec2 a(origin.x + static_cast<float>(i) * (tw + gap), origin.y), b(a.x + tw, a.y + height);
+    ImGui::SetCursorScreenPos(a);
+    ImGui::PushID(static_cast<int>(i));
+    if (!on_enabled) ImGui::BeginDisabled();
+    const bool pressed = ui::nav_button("##tile", ImVec2(tw, height));
+    if (!on_enabled) ImGui::EndDisabled();
+    const bool hovered = ImGui::IsItemHovered() && on_enabled, focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+    ImGui::PopID();
+    const bool on = static_cast<int>(i) == *selected;
+    ImDrawList *dl = ImGui::GetWindowDrawList();
+    const float r = ctx.u(6.0F);
+    if (on) dl->AddRectFilled(ImVec2(a.x - ctx.u(2.0F), a.y - ctx.u(2.0F)), ImVec2(b.x + ctx.u(2.0F), b.y + ctx.u(2.0F)), rgba(64, 191, 245, 60), r + ctx.u(2.0F));
+    const ImU32 fill = !on_enabled ? rgba(8, 17, 38) : (on ? rgba(22, 74, 170) : (hovered ? col::panel_hover : rgba(11, 26, 60)));
+    dl->AddRectFilled(a, b, fill, r);
+    if (on) dl->AddLine(ImVec2(a.x + r, a.y + ctx.u(1.5F)), ImVec2(b.x - r, a.y + ctx.u(1.5F)), rgba(160, 220, 255, 140), 1.0F);
+    dl->AddRect(a, b, !on_enabled ? rgba(30, 50, 96) : (on ? col::btn_top : (hovered ? col::highlight : rgba(46, 96, 190))), r, 0, std::max(1.0F, ctx.u(on ? 2.0F : 1.2F)));
+    // radio mark
+    const bool has_desc = i < descriptions.size() && !descriptions[i].empty();
+    const float tpx = ctx.u(has_desc ? 14.5F : 13.0F), dpx = ctx.u(11.5F);
+    const float rx = a.x + ctx.u(16.0F), ry = has_desc ? a.y + ctx.u(10.0F) + tpx * 0.5F : (a.y + b.y) * 0.5F;
+    dl->AddCircle(ImVec2(rx, ry), ctx.u(6.5F), !on_enabled ? rgba(60, 76, 120) : (on ? col::btn_text : col::text2), 20, std::max(1.0F, ctx.u(1.5F)));
+    if (on) dl->AddCircleFilled(ImVec2(rx, ry), ctx.u(3.5F), col::btn_text, 16);
+    const float tx = a.x + ctx.u(30.0F);
+    const std::string shown = ellipsize(ctx.bold, tpx, b.x - tx - ctx.u(8.0F), titles[i]);
+    draw_text(dl, ctx.bold, tpx, !on_enabled ? col::dim : (on ? col::btn_text : col::text), ImVec2(tx, ry - tpx * 0.58F), shown.c_str());
+    if (has_desc) {
+      float y = ry + tpx * 0.5F + ctx.u(4.0F);
+      std::vector<std::string> lines;
+      {  // greedy two-line wrap (the caller keeps descriptions short)
+        std::string line, word;
+        const float max_w = b.x - tx - ctx.u(10.0F);
+        const std::string text = descriptions[i] + " ";
+        for (const char c : text) {
+          if (c != ' ') { word.push_back(c); continue; }
+          const std::string trial = line.empty() ? word : line + " " + word;
+          if (!line.empty() && text_width(ctx.regular, dpx, trial.c_str()) > max_w) { lines.push_back(line); line = word; }
+          else line = trial;
+          word.clear();
+        }
+        if (!line.empty()) lines.push_back(line);
+        if (lines.size() > 2) { lines.resize(2); lines[1] = ellipsize(ctx.regular, dpx, max_w, lines[1] + " ..."); }
+      }
+      for (const auto &l : lines) {
+        if (y + dpx > b.y - ctx.u(2.0F)) break;
+        draw_text(dl, ctx.regular, dpx, !on_enabled ? rgba(90, 104, 140) : (on ? rgba(214, 230, 255) : col::text2), ImVec2(tx, y), l.c_str());
+        y += dpx + ctx.u(3.0F);
+      }
+    }
+    if (focused) focus_ring(ctx, dl, a, b);
+    if (pressed && on_enabled && !on) { *selected = static_cast<int>(i); changed = true; }
+  }
+  ImGui::PopID();
+  ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + height));
+  ImGui::Dummy(ImVec2(width, 0.0F));
+  return changed;
+}
+
+bool begin_menu(Ctx &ctx, const char *popup_id) {
+  ImGui::PushStyleColor(ImGuiCol_PopupBg, col::panel_dark);
+  ImGui::PushStyleColor(ImGuiCol_Border, col::glow);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ctx.u(6.0F), ctx.u(6.0F)));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, ctx.u(6.0F));
+  ImGui::PushStyleVar(ImGuiStyleVar_PopupBorderSize, std::max(1.0F, ctx.u(1.3F)));
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ctx.u(4.0F), ctx.u(2.0F)));
+  const bool open = ImGui::BeginPopup(popup_id);
+  if (!open) { ImGui::PopStyleVar(4); ImGui::PopStyleColor(2); }
+  return open;
+}
+
+void end_menu() {
+  ImGui::EndPopup();
+  ImGui::PopStyleVar(4);
+  ImGui::PopStyleColor(2);
+}
+
+bool menu_item(Ctx &ctx, const char *id, const char *label, const char *hint, SDL_Texture *icon, float width, bool enabled, bool danger) {
+  const float h = ctx.u(hint != nullptr ? 42.0F : 30.0F);
+  ImGui::PushID(id);
+  if (!enabled) ImGui::BeginDisabled();
+  const bool pressed = ui::nav_button("##mi", ImVec2(width, h));
+  if (!enabled) ImGui::EndDisabled();
+  const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+  ImGui::PopID();
+  ImDrawList *dl = ImGui::GetWindowDrawList();
+  const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+  if (hovered || focused) dl->AddRectFilled(a, b, danger ? rgba(70, 22, 34) : col::panel_hover, ctx.u(4.0F));
+  if (focused) dl->AddRect(a, b, col::focus, ctx.u(4.0F), 0, std::max(1.0F, ctx.u(1.5F)));
+  const ImU32 tint = !enabled ? rgba(90, 105, 140) : (danger ? col::err : col::text);
+  if (icon != nullptr) icon_image(dl, icon, ImVec2(a.x + ctx.u(9.0F), a.y + (hint != nullptr ? ctx.u(8.0F) : (h - ctx.u(16.0F)) * 0.5F)), ctx.u(16.0F), !enabled ? rgba(90, 105, 140) : (danger ? col::err : IM_COL32_WHITE));
+  const float px = ctx.u(13.0F);
+  draw_text(dl, ctx.bold, px, tint, ImVec2(a.x + ctx.u(34.0F), a.y + (hint != nullptr ? ctx.u(6.0F) : (h - px) * 0.5F - ctx.u(1.0F))), label);
+  if (hint != nullptr) draw_text(dl, ctx.regular, ctx.u(11.0F), enabled ? col::dim : rgba(80, 92, 125), ImVec2(a.x + ctx.u(34.0F), a.y + ctx.u(24.0F)), ellipsize(ctx.regular, ctx.u(11.0F), width - ctx.u(42.0F), hint).c_str());
+  if (pressed && enabled) { ImGui::CloseCurrentPopup(); return true; }
+  return false;
+}
+
+void menu_separator(Ctx &ctx, float width) {
+  const ImVec2 p = ImGui::GetCursorScreenPos();
+  ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(p.x + ctx.u(6.0F), std::floor(p.y + ctx.u(3.0F))), ImVec2(p.x + width - ctx.u(6.0F), std::floor(p.y + ctx.u(3.0F)) + 1.0F), rgba(46, 80, 150, 160));
+  ImGui::Dummy(ImVec2(width, ctx.u(6.0F)));
+}
+
 void badge(Ctx &ctx, ImDrawList *dl, ImVec2 pos, const char *text, ImU32 color, float px, ImVec2 *size_out) { pill(ctx, dl, pos, text, color, nullptr, px, size_out); }
 
 bool input_text(Ctx &ctx, const char *id, char *buffer, std::size_t capacity, float width, const char *hint, bool *active) {

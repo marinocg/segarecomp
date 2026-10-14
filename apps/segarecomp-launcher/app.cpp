@@ -8,6 +8,7 @@
 #include "imgui_impl_sdlrenderer3.h"
 
 #include <algorithm>
+#include <cmath>
 #include <chrono>
 #include <cstdio>
 #include <fstream>
@@ -60,6 +61,13 @@ std::map<std::string, StatusInfo> compute_statuses(std::vector<LibraryEntry> ent
       info.status = GameStatus::stale;
     } else {
       info.status = GameStatus::not_built;
+    }
+    if (!mapper_needed && view.supports_optimized()) {
+      RomView other = view;
+      other.aot_policy = view.optimized() ? "compatibility" : "optimized";
+      if (other.aot_policy == "compatibility") other.aot_model = "v1";
+      info.other_mode_supported = true;
+      info.other_mode_ready = entry_ready_for(entry_dir(other, layout), other, layout);
     }
     out[e.id()] = info;
   }
@@ -251,9 +259,9 @@ const StatusInfo &App::status_of(const std::string &id) const {
 
 std::string App::status_label(const StatusInfo &info) const {
   switch (info.status) {
-    case GameStatus::ready: return "Built";
+    case GameStatus::ready: return "Ready";
     case GameStatus::metadata_only: return "Metadata only";
-    case GameStatus::stale: return "Stale build";
+    case GameStatus::stale: return "Needs rebuild";
     case GameStatus::failed: return "Build failed";
     case GameStatus::not_built: return "Not built";
   }
@@ -443,17 +451,36 @@ void App::poll_import() {
 }
 
 void App::open_details(const std::string &id) {
+  if (page_ == Page::details && detail_id_ == id) return;
   detail_id_ = id;
   nav_reset_ = true;
   editing_title_ = false;
   show_log_ = false;
   show_fallback_details_ = false;
+  show_advanced_ = false;
   if (page_ != Page::details) previous_page_ = page_;
   page_ = Page::details;
+  trace("details=open title=" + (catalog_.find_id(id) != nullptr ? catalog_.find_id(id)->title() : std::string("?")));
+}
+
+void App::close_details() {
+  if (page_ != Page::details) return;
+  editing_title_ = false;
+  page_ = previous_page_ == Page::details ? Page::library : previous_page_;
+  if (page_ == Page::library) {
+    // Back to exactly where the user was: search, filters, sort and view are untouched members; scroll and focus are restored here.
+    restore_library_scroll_ = true;
+    return_focus_id_ = detail_id_;
+    nav_reset_ = false;
+  } else {
+    nav_reset_ = true;
+  }
+  trace(std::string("details=close page=") + page_name());
 }
 
 void App::go(Page page) {
   if (page == page_) return;
+  if (page_ == Page::details && page == previous_page_) { close_details(); return; }
   if (page_ != Page::details) previous_page_ = page_;
   page_ = page;
   nav_reset_ = true;
@@ -805,6 +832,17 @@ void App::run_script() {
     const int axis = name == "leftx" ? SDL_GAMEPAD_AXIS_LEFTX : (name == "lefty" ? SDL_GAMEPAD_AXIS_LEFTY : (name == "rightx" ? SDL_GAMEPAD_AXIS_RIGHTX : SDL_GAMEPAD_AXIS_RIGHTY));
     SDL_SetJoystickVirtualAxis(script_joy_, axis, static_cast<Sint16>(value));
     script_wait_ = 2;
+  } else if (cmd == "focus_card") {  // give card/row <n> of the visible list keyboard focus (then `key Return` activates it the normal way)
+    const auto vis = visible_entries();
+    const std::size_t n = static_cast<std::size_t>(std::atoi(arg.c_str()));
+    if (n < vis.size()) focus_card_request_ = vis[n]->id();
+  } else if (cmd == "scroll_library") {
+    library_scroll_ = static_cast<float>(std::atof(arg.c_str()));
+    restore_library_scroll_ = true;
+  } else if (cmd == "platform_filter") {
+    platform_filter_ = std::atoi(arg.c_str());
+  } else if (cmd == "view") {
+    settings_.view = arg == "list" ? "list" : "grid";
   } else if (cmd == "settings_tab") {
     settings_tab_ = std::atoi(arg.c_str());
     go(Page::settings);
@@ -829,6 +867,13 @@ void App::run_script() {
     else if (key == "pad_events") { unsigned long total = 0; for (int i = 0; i < sv_diag_count(diag_); ++i) total += sv_diag_device(diag_, i)->events; actual = std::to_string(total); }
     else if (key == "pad_error") actual = sv_diag_count(diag_) > 0 ? sv_diag_device(diag_, 0)->open_error : "";
     else if (key == "nav_taps") actual = std::to_string(nav_taps_);
+    else if (key == "search") actual = search_;
+    else if (key == "view") actual = settings_.view;
+    else if (key == "platform_filter") actual = std::to_string(platform_filter_);
+    else if (key == "library_scroll") actual = std::to_string(static_cast<int>(std::lround(library_scroll_)));
+    else if (key == "detail") actual = page_ == Page::details && catalog_.find_id(detail_id_) != nullptr ? catalog_.find_id(detail_id_)->title() : "-";
+    else if (key == "nav_items") actual = nav_items_;
+    else if (key == "menu") actual = ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) ? "1" : "0";
     trace(std::string("expect ") + (actual == value ? "ok " : "FAIL ") + arg + " actual=" + actual);
   } else if (cmd == "dump") {
     const ImGuiContext &g = *ImGui::GetCurrentContext();
@@ -859,7 +904,10 @@ int App::run() {
   sv_settings_defaults(&viewer_settings_);
   (void)sv_settings_load(&viewer_settings_, u8s(viewer_settings_file_).c_str());
   if (settings_.adopt_cache_on_start && !catalog_.read_only()) {
-    if (catalog_.migrate_cache(cache_dir_, now_seconds()) != 0) save_catalog();
+    // Adoption can add new entries or only new build records to existing entries: persist either (records were lost on exit before).
+    const auto records = [&] { std::size_t n = 0; for (const auto &e : catalog_.entries()) n += e.builds.size(); return n; };
+    const std::size_t before = records();
+    if (catalog_.migrate_cache(cache_dir_, now_seconds()) != 0 || records() != before) save_catalog();
   }
   if (layout_.problem.empty()) sms_probe_ = std::async(std::launch::async, [lay = layout_] { return sms_optimized_available_blocking(lay); });
   if (!catalog_notice_.empty()) toast(catalog_notice_, true);

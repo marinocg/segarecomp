@@ -47,6 +47,10 @@ struct StatusInfo {
   std::string observed_region;    // of a ready build
   bool adopt = false;             // a ready build the catalog does not know yet (recorded by the UI thread)
   long long file_time = 0;        // modification time of its status.json (unix seconds), 0 when unknown
+  // The build of the OTHER build mode (Compatibility <-> Optimized) for the same ROM and options: a mode switch is non-destructive, and when
+  // that build is still on disk and valid, switching back makes the game playable again without recompiling.
+  bool other_mode_supported = false;
+  bool other_mode_ready = false;
 };
 
 struct ImportItem {
@@ -95,7 +99,6 @@ private:
   void draw_card(const LibraryEntry &entry, float x, float y, float w, float h);
   void draw_list_row(const LibraryEntry &entry, float w, float h);
   void draw_details(float w, float h);
-  void draw_build_options(LibraryEntry &entry, const StatusInfo &info, float w);
   void draw_import(float w, float h);
   void draw_storage(float w, float h);
   void draw_settings(float w, float h);
@@ -116,7 +119,20 @@ private:
   void start_import(std::vector<std::string> paths, bool build_after);
   void poll_import();
   void open_details(const std::string &id);
+  // Leaves the contextual Details page for the page it was opened from; the library keeps its search, filters, sort, view, scroll and focus.
+  void close_details();
   void go(Page page);
+  // The Details page's build-identity facts and sections.
+  void draw_details_identity(LibraryEntry &entry, const StatusInfo &info, float w, float cover_w);
+  float draw_build_config(LibraryEntry &entry, const StatusInfo &info, float w);
+  void draw_provenance(LibraryEntry &entry, const StatusInfo &info, float w);
+  float draw_storage_rail(const LibraryEntry &entry, const StatusInfo &info, ImVec2 a, float w);
+  void draw_game_menu(const std::string &popup_id, const std::string &id, bool include_details);
+  [[nodiscard]] std::string build_action_label(const StatusInfo &info) const;
+  [[nodiscard]] bool can_build(const LibraryEntry &entry, const StatusInfo &info) const;
+  [[nodiscard]] bool can_play(const StatusInfo &info) const;
+  void play(const std::string &id);
+  void ask_remove(const LibraryEntry &entry);
   void toast(const std::string &text, bool error = false);
   void show_message(const std::string &title, const std::vector<std::string> &lines);
   [[nodiscard]] RomView view_for(const LibraryEntry &entry) const;
@@ -173,6 +189,13 @@ private:
   int status_filter_ = 0;     // 0 all, 1 ready, 2 needs build, 3 failed, 4 missing ROM
   bool select_mode_ = false;
   std::set<std::string> selected_;
+  float library_scroll_ = 0.0F;        // the game grid/list scroll offset, restored when Details closes
+  bool restore_library_scroll_ = false;
+  std::string return_focus_id_;        // the card/row that opened Details regains keyboard/gamepad focus on return
+  std::string focus_card_request_;     // script aid: give this card focus when it is drawn
+  std::string context_id_;             // the game of the open context menu
+  bool open_context_ = false;
+  bool show_advanced_ = false;         // Details: the Advanced build options section is expanded
   int settings_tab_ = 0;
   bool focus_search_ = false;
   char title_edit_[200] = "";
@@ -252,6 +275,7 @@ private:
   std::vector<std::pair<int, int>> script_key_up_;  // (frame, scancode) key releases to deliver
   bool shot_modal_done_ = false;
   bool nav_reset_ = true;  // put keyboard/gamepad focus on the active sidebar entry (start-up and page changes)
+  std::string nav_items_;    // the primary navigation entries drawn this frame (script `expect nav_items=`)
   std::string focus_label_;  // the sidebar entry holding keyboard/gamepad focus (script `expect focus=`)
   void run_script();
   [[nodiscard]] const char *page_name() const;

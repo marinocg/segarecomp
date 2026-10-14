@@ -135,6 +135,12 @@ inline void rule(Ctx &ctx, float w) {
   ImGui::Dummy(ImVec2(w, ctx.u(10.0F)));
 }
 
+inline void spinner(Ctx &ctx, ImDrawList *dl, ImVec2 c, float r, ImU32 color) {
+  const float t = static_cast<float>(SDL_GetTicks()) / 1000.0F;
+  dl->PathArcTo(c, r, t * 6.0F, t * 6.0F + 4.2F, 16);
+  dl->PathStroke(color, 0, std::max(1.0F, ctx.u(2.0F)));
+}
+
 inline const char *platform_short(const std::string &platform_id) { return platform_id == "master-system" ? "Master System" : "Genesis"; }
 
 

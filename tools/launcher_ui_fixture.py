@@ -24,7 +24,7 @@ STOP_IMAGE = bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x70, 0x00, 
 
 GENESIS = [("Fictional Quest", 11), ("Neon Harbor Demo", 23), ("Pixel Orchard", 37)]
 SMS = [("Coastal Drift (Fictional)", 5), ("Summit Chase (Fictional)", 17)]
-COVERED = (0, 1, 3, 4)  # indexes of the fixture games that get a fictional cover; the rest show the neutral cartridge
+COVERED = (0, 3)  # indexes of the fixture games that get a fictional user-chosen cover; the rest show the launcher's title card
 PALETTES = [((20, 30, 90), (255, 140, 60), (30, 140, 90)), ((10, 10, 40), (80, 200, 240), (200, 60, 120)), ((60, 20, 80), (250, 220, 90), (40, 160, 110)),
             ((12, 40, 70), (240, 120, 90), (90, 200, 160)), ((30, 50, 20), (200, 230, 120), (240, 180, 60))]
 
@@ -188,6 +188,19 @@ def main():
             print(f"build {title}: rc={rc}")
             if rc != 0:
                 sys.exit(text)
+        # Pixel Orchard is also built with the Optimized policy (a real build: the product decides the effective policy and any fallback)
+        path = entries[2][0]
+        rc, text = run([args.launcher, "--build", str(path), "--aot-policy", "optimized"], env)
+        print(f"build {entries[2][1]} (optimized): rc={rc}")
+        if rc != 0:
+            sys.exit(text)
+    if not args.no_build:
+        # One headless start of the launcher adopts the finished builds into the library (build records, current build key), exactly as a user's
+        # first start would; the per-game choices below are then made on top of real records.
+        shot = out / "adopt.bmp"
+        subprocess.run([args.launcher], env=dict(env, SEGARECOMP_SHOT=str(shot), SEGARECOMP_SHOT_PAGE="library", SEGARECOMP_SHOT_FRAMES="6",
+                                                 SDL_RENDER_DRIVER="software"), capture_output=True, timeout=300)
+        shot.unlink(missing_ok=True)
     lib = cache / "library"
     catalog = json.loads((lib / "library.json").read_text())
     now = int(__import__("time").time())
@@ -195,13 +208,22 @@ def main():
     for game in catalog["games"]:
         for path, title, platform, index in entries:
             if hashlib.sha256(path.read_bytes()).hexdigest() == game["sha256"]:
-                if index in COVERED:  # the others keep the launcher's neutral cartridge (no cover chosen)
+                if index in COVERED:  # the others keep the launcher's title card (no cover chosen)
                     (lib / "covers" / (game["sha256"] + ".png")).write_bytes(cover(index))
                     game["cover"] = game["sha256"] + ".png"
                 game["display_title"] = title
                 game["last_played_at"] = now - 86400 * (index * 2 + 1) if index < 4 else 0
                 game["favorite"] = index in (0, 3)
                 game["last_built_at"] = now - 86400 * (index * 3 + 2) if index < len(GENESIS) + len(SMS) else 0
+                if index in (1, 2):  # Neon Harbor: Optimized selected after a Compatibility build; Pixel Orchard: really built Optimized
+                    game["aot_policy"] = "optimized"
+                if index == 4 and not args.no_build:  # Summit Chase: kept as metadata only (its build folders deleted, as Storage's archive does)
+                    import shutil
+                    for build in game.get("builds", []):
+                        shutil.rmtree(cache / "games" / build["key"], ignore_errors=True)
+                    if game.get("current_build_key"):
+                        shutil.rmtree(cache / "games" / game["current_build_key"], ignore_errors=True)
+                    game["archived"] = True
     (lib / "library.json").write_text(json.dumps(catalog, indent=2))
     print(f"SEGARECOMP_CACHE_DIR={cache}")
 

@@ -156,11 +156,11 @@ void App::draw() {
   ImGui::End();
   draw_modal(win_w_, win_h_);
   draw_toasts(win_w_, win_h_);
-  if (modal_.kind == Modal::Kind::none && !ImGui::GetIO().WantTextInput && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) {
-    if (page_ == Page::details) page_ = previous_page_ == Page::details ? Page::library : previous_page_;
-    else if (page_ != Page::library) page_ = Page::library;
+  if (modal_.kind == Modal::Kind::none && !ImGui::GetIO().WantTextInput && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId) && (ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceRight, false))) {
+    if (page_ == Page::details) close_details();
+    else if (page_ != Page::library) go(Page::library);
   }
-  if (!ImGui::GetIO().WantTextInput && modal_.kind == Modal::Kind::none && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false)) { page_ = Page::library; focus_search_ = true; }
+  if (!ImGui::GetIO().WantTextInput && modal_.kind == Modal::Kind::none && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_F, false)) { if (page_ == Page::details) close_details(); go(Page::library); focus_search_ = true; }
 }
 
 void App::draw_toasts(float w, float h) {
@@ -192,23 +192,25 @@ void App::draw_sidebar(float x, float y, float w, float h) {
   const bool wide = w > ctx_.u(100.0F);
   const float pad = ctx_.u(10.0F);
   float cy = y + pad + ctx_.u(2.0F);
+  // The primary navigation is exactly the four application areas. Game Details is contextual (a card, a row action or a context menu opens it)
+  // and never a sidebar entry; while it is open, the area it was opened from stays highlighted.
   struct Nav { Page page; const char *label; const char *icon; };
-  const Nav items[] = {{Page::library, "Library", "library"}, {Page::import_page, "Import ROMs", "import"}, {Page::details, "Game Details", "info"}, {Page::storage, "Storage", "storage"}, {Page::settings, "Settings", "settings"}};
-  ImGuiID nav_ids[5]{};
-  ImRect nav_rects[5];
+  constexpr int kNav = 4;
+  const Nav items[kNav] = {{Page::library, "Library", "library"}, {Page::import_page, "Import ROMs", "import"}, {Page::storage, "Storage", "storage"}, {Page::settings, "Settings", "settings"}};
+  const Page highlighted = page_ == Page::details ? (previous_page_ == Page::details ? Page::library : previous_page_) : page_;
+  ImGuiID nav_ids[kNav]{};
+  ImRect nav_rects[kNav];
   int nav_target = -1;
-  for (int index = 0; index < 5; ++index) {
+  nav_items_.clear();
+  for (int index = 0; index < kNav; ++index) {
     const auto &item = items[index];
-    const bool is_details = item.page == Page::details;
-    const bool active = page_ == item.page;
-    const bool enabled = !is_details || !catalog_.entries().empty();
+    nav_items_ += (index == 0 ? "" : ",") + std::string(item.label);
+    const bool active = highlighted == item.page;
     ImGui::SetCursorScreenPos(ImVec2(x + pad, cy));
     const ImVec2 size(w - 2 * pad, ctx_.u(46.0F));  // contiguous hit boxes: Down/Up stay inside the sidebar instead of jumping to the content beside it
     ImGui::PushID(item.label);
-    if (!enabled) ImGui::BeginDisabled();
     const bool pressed = ui::nav_button("##nav", size);
-    if (!enabled) ImGui::EndDisabled();
-    const bool hovered = ImGui::IsItemHovered() && enabled, focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+    const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
     nav_ids[index] = ImGui::GetItemID();
     nav_rects[index] = ImRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax());
     // The footer and content children are spatial neighbours, not navigation siblings.
@@ -217,27 +219,22 @@ void App::draw_sidebar(float x, float y, float w, float h) {
       int step = 0;
       if (ImGui::IsKeyPressed(ImGuiKey_DownArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown)) step = 1;
       if (ImGui::IsKeyPressed(ImGuiKey_UpArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadUp)) step = -1;
-      if (step != 0) {
-        nav_target = std::clamp(index + step, 0, 4);
-        if (nav_target == 2 && catalog_.entries().empty()) nav_target += step;
-      }
+      if (step != 0) nav_target = std::clamp(index + step, 0, kNav - 1);
     }
     if (active && nav_reset_) ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());  // keyboard/gamepad focus starts on the current page's entry
     if (focused) focus_label_ = item.label;
     ImGui::PopID();
     const ImVec2 a = ImGui::GetItemRectMin(), b = ImVec2(ImGui::GetItemRectMax().x, ImGui::GetItemRectMin().y + ctx_.u(38.0F));
-    dl->AddRectFilled(a, b, active ? rgba(52, 128, 238) : (hovered ? col::panel_hover : rgba(10, 24, 56)), ctx_.u(5.0F));
-    dl->AddRect(a, b, active ? rgba(120, 190, 255) : rgba(34, 70, 140), ctx_.u(5.0F), 0, std::max(1.0F, ctx_.u(1.2F)));
+    const bool current = page_ == item.page;  // on Details the origin area is marked, but not as the open page
+    dl->AddRectFilled(a, b, current ? rgba(52, 128, 238) : (active ? rgba(20, 52, 112) : (hovered ? col::panel_hover : rgba(10, 24, 56))), ctx_.u(5.0F));
+    dl->AddRect(a, b, current ? rgba(120, 190, 255) : (active ? rgba(64, 140, 230) : rgba(34, 70, 140)), ctx_.u(5.0F), 0, std::max(1.0F, ctx_.u(1.2F)));
+    if (current) dl->AddLine(ImVec2(a.x + ctx_.u(5.0F), a.y + ctx_.u(1.5F)), ImVec2(b.x - ctx_.u(5.0F), a.y + ctx_.u(1.5F)), rgba(170, 225, 255, 130), 1.0F);
     const float isz = ctx_.u(16.0F);
-    icon_image(dl, ctx_.icon(item.icon), ImVec2(wide ? a.x + ctx_.u(12.0F) : (a.x + b.x) * 0.5F - isz * 0.5F, (a.y + b.y) * 0.5F - isz * 0.5F), isz, enabled ? IM_COL32_WHITE : rgba(90, 105, 140));
-    if (wide) draw_text(dl, ctx_.bold, ctx_.u(13.0F), active ? col::btn_text : (enabled ? col::text : col::dim), ImVec2(a.x + ctx_.u(40.0F), (a.y + b.y) * 0.5F - ctx_.u(13.0F) * 0.55F), item.label);
+    icon_image(dl, ctx_.icon(item.icon), ImVec2(wide ? a.x + ctx_.u(12.0F) : (a.x + b.x) * 0.5F - isz * 0.5F, (a.y + b.y) * 0.5F - isz * 0.5F), isz);
+    if (wide) draw_text(dl, ctx_.bold, ctx_.u(13.0F), current ? col::btn_text : col::text, ImVec2(a.x + ctx_.u(40.0F), (a.y + b.y) * 0.5F - ctx_.u(13.0F) * 0.55F), item.label);
+    if (!wide && hovered) tooltip(ctx_, item.label);
     if (focused) focus_ring(ctx_, dl, a, b);
-    if (pressed) {
-      if (is_details) {
-        if (!detail_id_.empty() && catalog_.find_id(detail_id_) != nullptr) open_details(detail_id_);
-        else if (const auto vis = visible_entries(); !vis.empty()) open_details(vis.front()->id());
-      } else go(item.page);
-    }
+    if (pressed) go(item.page);
     cy += ctx_.u(46.0F);
   }
   if (nav_target >= 0) {
@@ -301,6 +298,31 @@ void App::draw_drop_zone(float w, float h, bool compact_box) {
   ImGui::Dummy(ImVec2(w, ctx_.u(2.0F)));
 }
 
+namespace {
+
+// One short line of recent activity for a card or row: what the user did last with this game.
+std::string activity_line(const LibraryEntry &entry, long long now) {
+  if (entry.last_played_at > 0) return "Played " + fmt_relative(entry.last_played_at, now);
+  if (entry.last_built_at > 0) return "Built " + fmt_relative(entry.last_built_at, now);
+  if (entry.added_at > 0) return "Added " + fmt_relative(entry.added_at, now);
+  return "Never played";
+}
+
+} // namespace
+
+// Shared by cards and rows: focus bookkeeping, the restored focus after Details closes, and the context menu request.
+static void card_focus_bookkeeping(const std::string &id, std::string &return_focus_id, std::string &focus_request) {
+  if (return_focus_id == id || focus_request == id) {
+    ImGui::SetFocusID(ImGui::GetItemID(), ImGui::GetCurrentWindow());
+    ImGuiContext &g = *ImGui::GetCurrentContext();
+    g.NavCursorVisible = true;
+    g.NavHighlightItemUnderNav = true;
+    ImGui::ScrollToItem(ImGuiScrollFlags_KeepVisibleEdgeY);
+    return_focus_id.clear();
+    focus_request.clear();
+  }
+}
+
 void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float h) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const StatusInfo &info = status_of(entry.id());
@@ -309,19 +331,25 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   ImGui::PushID(entry.id().c_str());
   ImGui::SetNextItemAllowOverlap();
   const bool pressed = ui::nav_button("##card", ImVec2(w, h));
+  card_focus_bookkeeping(entry.id(), return_focus_id_, focus_card_request_);
   const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+  if (ImGui::IsItemFocused()) focus_label_ = "card:" + entry.title();
+  if (ImGui::IsItemClicked(ImGuiMouseButton_Right) || (ImGui::IsItemFocused() && (ImGui::IsKeyPressed(ImGuiKey_Menu, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false)))) { context_id_ = entry.id(); open_context_ = true; }
   const ImVec2 a(x, y), b(x + w, y + h);
   card(ctx_, dl, a, b, selected || focused, hovered);
+  const long long now = std::time(nullptr);
   if (win_h_ < ctx_.u(600.0F)) {
     // Short windows retain a real grid, but use compact horizontal cards so title,
     // platform and build status are visible without first scrolling past box art.
-    const float pad = ctx_.u(8.0F), art_w = ctx_.u(46.0F);
+    const float pad = ctx_.u(8.0F), art_w = ctx_.u(52.0F);
     draw_cover(dl, entry, ImVec2(x + pad, y + pad), ImVec2(x + pad + art_w, y + h - pad), ctx_.u(3.0F));
     const float tx = x + art_w + pad * 2, available = w - art_w - pad * 3;
-    draw_text(dl, ctx_.bold, ctx_.u(13.0F), col::text, ImVec2(tx, y + pad), ellipsize(ctx_.bold, ctx_.u(13.0F), available, entry.title()).c_str());
-    draw_text(dl, ctx_.regular, ctx_.u(11.0F), col::info, ImVec2(tx, y + ctx_.u(30.0F)), platform_short(entry.platform_id));
-    draw_text(dl, ctx_.bold, ctx_.u(11.5F), status_color(info), ImVec2(tx, y + ctx_.u(49.0F)), status_label(info).c_str());
-    if (info.rom_missing) draw_text(dl, ctx_.regular, ctx_.u(10.5F), col::warn, ImVec2(tx, y + ctx_.u(65.0F)), "ROM missing");
+    draw_text(dl, ctx_.bold, ctx_.u(13.5F), col::text, ImVec2(tx, y + pad), ellipsize(ctx_.bold, ctx_.u(13.5F), available - (entry.favorite ? ctx_.u(18.0F) : 0.0F), entry.title()).c_str());
+    if (entry.favorite) icon_image(dl, ctx_.icon("star"), ImVec2(b.x - pad - ctx_.u(14.0F), y + pad), ctx_.u(14.0F), col::warn);
+    draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::info, ImVec2(tx, y + ctx_.u(29.0F)), platform_short(entry.platform_id));
+    dl->AddCircleFilled(ImVec2(tx + ctx_.u(4.0F), y + ctx_.u(53.0F)), ctx_.u(4.0F), status_color(info));
+    draw_text(dl, ctx_.bold, ctx_.u(12.0F), status_color(info), ImVec2(tx + ctx_.u(13.0F), y + ctx_.u(46.0F)), status_label(info).c_str());
+    draw_text(dl, ctx_.regular, ctx_.u(11.0F), info.rom_missing ? col::warn : col::dim, ImVec2(tx, y + ctx_.u(64.0F)), info.rom_missing ? "ROM file missing" : activity_line(entry, now).c_str());
     if (focused) focus_ring(ctx_, dl, a, b);
     ImGui::PopID();
     if (pressed) {
@@ -331,12 +359,12 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
     return;
   }
   const float pad = ctx_.u(8.0F);
-  const float cw = w - 2 * pad, chh = cw * 0.92F;
+  const float cw = w - 2 * pad, chh = cw * 1.02F;
   const ImVec2 ca(x + pad, y + pad), cb(x + pad + cw, y + pad + chh);
-  draw_cover(dl, entry, ca, cb, ctx_.u(4.0F), info.status == GameStatus::ready ? IM_COL32_WHITE : rgba(200, 208, 230));
-  {
-    const float fs_ = ctx_.u(22.0F);
-    ImGui::SetCursorScreenPos(ImVec2(cb.x - fs_ - ctx_.u(4.0F), ca.y + ctx_.u(4.0F)));
+  draw_cover(dl, entry, ca, cb, ctx_.u(4.0F), info.status == GameStatus::ready ? IM_COL32_WHITE : rgba(196, 204, 228));
+  if (entry.favorite || hovered || focused) {
+    const float fs_ = ctx_.u(24.0F);
+    ImGui::SetCursorScreenPos(ImVec2(cb.x - fs_ - ctx_.u(5.0F), ca.y + ctx_.u(5.0F)));
     if (icon_button(ctx_, "fav", ctx_.icon("star"), fs_, entry.favorite, true, entry.favorite ? "Remove from favorites" : "Add to favorites")) {
       if (LibraryEntry *e = catalog_.find_id(entry.id())) { e->favorite = !e->favorite; save_catalog(); }
     }
@@ -346,36 +374,33 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
     ImGui::SetCursorScreenPos(ImVec2(ca.x + ctx_.u(5.0F), ca.y + ctx_.u(5.0F)));
     if (checkbox(ctx_, "sel", "", &on)) { if (on) selected_.insert(entry.id()); else selected_.erase(entry.id()); }
   }
-  const float tpx = ctx_.u(13.5F), spx = ctx_.u(11.0F);
+  // the build state sits on the art's lower edge, where a box-art library shows it
+  {
+    const std::string label = info.rom_missing && info.status != GameStatus::ready ? "ROM missing" : status_label(info);
+    const ImU32 c = info.rom_missing && info.status != GameStatus::ready ? col::warn : status_color(info);
+    const float px = ctx_.u(11.5F), bw = text_width(ctx_.bold, px, label.c_str()) + ctx_.u(26.0F), bh = px + ctx_.u(10.0F);
+    const ImVec2 p0(ca.x + ctx_.u(6.0F), cb.y - bh - ctx_.u(6.0F));
+    dl->AddRectFilled(p0, ImVec2(p0.x + bw, p0.y + bh), rgba(4, 10, 26, 225), ctx_.u(4.0F));
+    dl->AddRect(p0, ImVec2(p0.x + bw, p0.y + bh), (c & 0x00FFFFFFU) | 0x90000000U, ctx_.u(4.0F));
+    dl->AddCircleFilled(ImVec2(p0.x + ctx_.u(10.0F), p0.y + bh * 0.5F), ctx_.u(3.5F), c);
+    draw_text(dl, ctx_.bold, px, c, ImVec2(p0.x + ctx_.u(18.0F), p0.y + (bh - px) * 0.5F - ctx_.u(1.0F)), label.c_str());
+  }
+  const float tpx = ctx_.u(14.0F), spx = ctx_.u(11.5F);
   float ty = cb.y + ctx_.u(9.0F);
   const std::string shown_title = ellipsize(ctx_.bold, tpx, cw, entry.title());
   draw_text(dl, ctx_.bold, tpx, col::text, ImVec2(ca.x, ty), shown_title.c_str());
   if (shown_title != entry.title() && hovered) tooltip(ctx_, entry.title().c_str());
-  ty += tpx + ctx_.u(7.0F);
-  ImVec2 psize;
-  pill(ctx_, dl, ImVec2(ca.x, ty), platform_short(entry.platform_id), col::info, ctx_.icon("controller"), ctx_.u(11.0F), &psize);
-  ty += psize.y + ctx_.u(7.0F);
-  const auto kv = [&](const char *k, const std::string &v) {
-    draw_text(dl, ctx_.regular, spx, col::dim, ImVec2(ca.x, ty), k);
-    draw_text(dl, ctx_.regular, spx, col::text2, ImVec2(ca.x + ctx_.u(80.0F), ty), ellipsize(ctx_.regular, spx, cw - ctx_.u(80.0F), v).c_str());
-    ty += spx + ctx_.u(4.0F);
-  };
-  kv("Last played", fmt_relative(entry.last_played_at, std::time(nullptr)));
-  kv("Compiled", entry.last_built_at > 0 ? fmt_date(entry.last_built_at).substr(0, 10) : "-");
-  ty += ctx_.u(3.0F);
-  dl->AddCircleFilled(ImVec2(ca.x + ctx_.u(5.0F), ty + spx * 0.55F), ctx_.u(4.5F), status_color(info));
-  draw_text(dl, ctx_.bold, spx, status_color(info), ImVec2(ca.x + ctx_.u(15.0F), ty), ellipsize(ctx_.bold, spx, cw * 0.55F, status_label(info)).c_str());
-  if (report_valid_)
-    if (const EntryUsage *u = report_.find(entry.id()); u != nullptr && u->total.total() > 0) {
-      const std::string size = format_bytes(u->total.total());
-      const float sw = text_width(ctx_.bold, ctx_.u(10.5F), size.c_str()) + ctx_.u(34.0F);
-      pill(ctx_, dl, ImVec2(cb.x - sw, ty - ctx_.u(3.0F)), size.c_str(), col::text2, ctx_.icon("storage"), ctx_.u(10.5F));
-    }
-  if (info.rom_missing && !entry.rom_path_unknown) draw_text(dl, ctx_.regular, spx, col::warn, ImVec2(ca.x, ty + spx + ctx_.u(6.0F)), "ROM file missing");
-  if (info.status == GameStatus::ready && !select_mode_ && hovered) {
-    const float ps = ctx_.u(30.0F);
+  ty += tpx + ctx_.u(8.0F);
+  icon_image(dl, ctx_.icon("controller"), ImVec2(ca.x, ty - ctx_.u(1.0F)), ctx_.u(14.0F), col::info);
+  const std::string act = activity_line(entry, now);
+  const std::string act_shown = ellipsize(ctx_.regular, spx, cw * 0.52F, act);
+  const float act_w = text_width(ctx_.regular, spx, act_shown.c_str());
+  draw_text(dl, ctx_.regular, spx, col::info, ImVec2(ca.x + ctx_.u(19.0F), ty), ellipsize(ctx_.regular, spx, cw - act_w - ctx_.u(27.0F), platform_short(entry.platform_id)).c_str());
+  draw_text(dl, ctx_.regular, spx, col::dim, ImVec2(cb.x - text_width(ctx_.regular, spx, act_shown.c_str()), ty), act_shown.c_str());
+  if (info.status == GameStatus::ready && !select_mode_ && (hovered || focused)) {
+    const float ps = ctx_.u(40.0F);
     ImGui::SetCursorScreenPos(ImVec2(ca.x + (cw - ps) * 0.5F, ca.y + (chh - ps) * 0.5F));
-    if (icon_button(ctx_, "play", ctx_.icon("play"), ps, true, !game_ && !job_, "Play")) { restarted_this_play_ = false; notices_.erase(entry.id()); launch(entry.id(), false); }
+    if (icon_button(ctx_, "play", ctx_.icon("play"), ps, true, !game_ && !job_, "Play")) play(entry.id());
   }
   ImGui::PopID();
   if (pressed) {
@@ -392,10 +417,13 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   ImGui::PushID(entry.id().c_str());
   ImGui::SetNextItemAllowOverlap();
   const bool pressed = ui::nav_button("##row", ImVec2(w, h));
+  card_focus_bookkeeping(entry.id(), return_focus_id_, focus_card_request_);
   const bool hovered = ImGui::IsItemHovered(), focused = ImGui::IsItemFocused() && ImGui::GetIO().NavVisible;
+  if (ImGui::IsItemFocused()) focus_label_ = "card:" + entry.title();
+  if (ImGui::IsItemClicked(ImGuiMouseButton_Right) || (ImGui::IsItemFocused() && (ImGui::IsKeyPressed(ImGuiKey_Menu, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false)))) { context_id_ = entry.id(); open_context_ = true; }
   const ImVec2 b(a.x + w, a.y + h);
   card(ctx_, dl, a, b, selected || focused, hovered);
-  const float pad = ctx_.u(7.0F), th = h - 2 * pad, tw = th * 0.9F;
+  const float pad = ctx_.u(7.0F), th = h - 2 * pad, tw = th * 0.78F;
   float x = a.x + pad;
   if (select_mode_) {
     bool on = selected;
@@ -404,30 +432,39 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
     x += ctx_.u(30.0F);
   }
   draw_cover(dl, entry, ImVec2(x, a.y + pad), ImVec2(x + tw, a.y + pad + th), ctx_.u(3.0F));
-  x += tw + pad * 1.5F;
-  const float px = ctx_.u(13.5F), spx = ctx_.u(11.5F);
-  const float title_w = std::max(ctx_.u(120.0F), w * 0.30F);
-  draw_text(dl, ctx_.bold, px, col::text, ImVec2(x, a.y + h * 0.5F - px * 1.05F), ellipsize(ctx_.bold, px, title_w, entry.title()).c_str());
-  ImVec2 ps;
-  pill(ctx_, dl, ImVec2(x, a.y + h * 0.5F + ctx_.u(1.0F)), platform_short(entry.platform_id), col::info, nullptr, ctx_.u(10.0F), &ps);
+  x += tw + pad * 1.6F;
+  const float px = ctx_.u(14.0F), spx = ctx_.u(11.5F);
+  const float actions_w = ctx_.u(info.status == GameStatus::ready && !select_mode_ ? 74.0F : 40.0F);
+  const bool wide_row = w > ctx_.u(640.0F);
+  const float title_w = std::max(ctx_.u(120.0F), w * (wide_row ? 0.32F : 0.38F));
+  draw_text(dl, ctx_.bold, px, col::text, ImVec2(x, a.y + h * 0.5F - px * 1.1F), ellipsize(ctx_.bold, px, title_w - (entry.favorite ? ctx_.u(20.0F) : 0.0F), entry.title()).c_str());
+  if (entry.favorite) icon_image(dl, ctx_.icon("star"), ImVec2(x + std::min(title_w - ctx_.u(16.0F), text_width(ctx_.bold, px, entry.title().c_str()) + ctx_.u(6.0F)), a.y + h * 0.5F - px * 1.1F), ctx_.u(14.0F), col::warn);
+  draw_text(dl, ctx_.regular, spx, col::info, ImVec2(x, a.y + h * 0.5F + ctx_.u(3.0F)), platform_short(entry.platform_id));
   x += title_w + pad;
-  dl->AddCircleFilled(ImVec2(x + ctx_.u(5.0F), a.y + h * 0.5F), ctx_.u(4.5F), status_color(info));
-  draw_text(dl, ctx_.bold, spx, status_color(info), ImVec2(x + ctx_.u(15.0F), a.y + h * 0.5F - spx * 0.55F), status_label(info).c_str());
-  x += ctx_.u(140.0F);
-  if (w > ctx_.u(640.0F)) {
-    draw_text(dl, ctx_.regular, spx, col::text2, ImVec2(x, a.y + h * 0.5F - spx * 0.55F), ("Played " + fmt_relative(entry.last_played_at, std::time(nullptr))).c_str());
-    x += ctx_.u(130.0F);
+  const std::string label = info.rom_missing && info.status != GameStatus::ready ? "ROM missing" : status_label(info);
+  const ImU32 sc = info.rom_missing && info.status != GameStatus::ready ? col::warn : status_color(info);
+  dl->AddCircleFilled(ImVec2(x + ctx_.u(5.0F), a.y + h * 0.5F), ctx_.u(4.5F), sc);
+  draw_text(dl, ctx_.bold, ctx_.u(12.5F), sc, ImVec2(x + ctx_.u(15.0F), a.y + h * 0.5F - ctx_.u(12.5F) * 0.55F), label.c_str());
+  x += ctx_.u(150.0F);
+  if (wide_row) {
+    draw_text(dl, ctx_.regular, spx, col::text2, ImVec2(x, a.y + h * 0.5F - spx * 0.55F), activity_line(entry, std::time(nullptr)).c_str());
+    x += ctx_.u(140.0F);
   }
-  if (report_valid_ && w > ctx_.u(520.0F))
-    if (const EntryUsage *u = report_.find(entry.id())) pill(ctx_, dl, ImVec2(x, a.y + (h - ctx_.u(21.0F)) * 0.5F), format_bytes(u->total.total()).c_str(), col::text2, ctx_.icon("storage"), ctx_.u(10.5F));
-  if (entry.favorite) icon_image(dl, ctx_.icon("star"), ImVec2(b.x - ctx_.u(86.0F), a.y + h * 0.5F - ctx_.u(8.0F)), ctx_.u(16.0F), col::warn);
+  if (report_valid_ && x + ctx_.u(80.0F) < b.x - actions_w)
+    if (const EntryUsage *u = report_.find(entry.id()); u != nullptr && u->total.total() > 0) draw_text(dl, ctx_.regular, spx, col::dim, ImVec2(x, a.y + h * 0.5F - spx * 0.55F), format_bytes(u->total.total()).c_str());
+  const float ps2 = ctx_.u(30.0F);
+  float bx = b.x - pad - ps2;
+  if (!select_mode_) {
+    ImGui::SetCursorScreenPos(ImVec2(bx, a.y + (h - ps2) * 0.5F));
+    if (icon_button(ctx_, "details", ctx_.icon("info"), ps2, false, true, "Details")) open_details(entry.id());
+    bx -= ps2 + ctx_.u(6.0F);
+  }
   if (info.status == GameStatus::ready && !select_mode_) {
-    const float ps2 = ctx_.u(28.0F);
-    ImGui::SetCursorScreenPos(ImVec2(b.x - ps2 - pad, a.y + (h - ps2) * 0.5F));
-    if (icon_button(ctx_, "play", ctx_.icon("play"), ps2, true, !game_ && !job_, "Play")) { restarted_this_play_ = false; notices_.erase(entry.id()); launch(entry.id(), false); }
+    ImGui::SetCursorScreenPos(ImVec2(bx, a.y + (h - ps2) * 0.5F));
+    if (icon_button(ctx_, "play", ctx_.icon("play"), ps2, true, !game_ && !job_, "Play")) play(entry.id());
   }
   ImGui::PopID();
-  ImGui::SetCursorScreenPos(ImVec2(a.x, b.y + ctx_.u(5.0F)));
+  ImGui::SetCursorScreenPos(ImVec2(a.x, b.y + ctx_.u(6.0F)));
   ImGui::Dummy(ImVec2(w, 1));
   if (pressed) {
     if (select_mode_) { if (selected) selected_.erase(entry.id()); else selected_.insert(entry.id()); }
@@ -501,10 +538,12 @@ void App::draw_library(float w, float h) {
   const float avail_h = ImGui::GetWindowPos().y + ImGui::GetWindowHeight() - start.y - ctx_.u(30.0F);
   ImGui::PushStyleColor(ImGuiCol_ChildBg, rgba(0, 0, 0, 0));
   ImGui::BeginChild("##games", ImVec2(w + ctx_.u(10.0F), std::max(avail_h, ctx_.u(120.0F))), ImGuiChildFlags_None, ImGuiWindowFlags_NoBackground);
+  if (restore_library_scroll_) { ImGui::SetScrollY(library_scroll_); restore_library_scroll_ = false; }
+  else library_scroll_ = ImGui::GetScrollY();
   if (settings_.view == "list") {
-    const float row_h = ctx_.u(settings_.compact ? 44.0F : 56.0F);
+    const float row_h = ctx_.u(settings_.compact ? 48.0F : 60.0F);
     ImGuiListClipper clipper;
-    clipper.Begin(static_cast<int>(visible.size()), row_h + ctx_.u(5.0F));
+    clipper.Begin(static_cast<int>(visible.size()), row_h + ctx_.u(6.0F));
     while (clipper.Step())
       for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) draw_list_row(*visible[static_cast<std::size_t>(i)], w, row_h);
   } else {
@@ -513,7 +552,7 @@ void App::draw_library(float w, float h) {
     const float usable = w - ctx_.u(14.0F);
     const int columns = std::max(1, static_cast<int>((usable + gap) / (card_w + gap)));
     const float cw = card_w + (usable + gap - static_cast<float>(columns) * (card_w + gap)) / static_cast<float>(columns);
-    const float card_h = short_window ? ctx_.u(88.0F) : (cw - ctx_.u(16.0F)) * 0.92F + ctx_.u(132.0F);
+    const float card_h = short_window ? ctx_.u(88.0F) : (cw - ctx_.u(16.0F)) * 1.02F + ctx_.u(66.0F);
     const int rows = (static_cast<int>(visible.size()) + columns - 1) / columns;
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGuiListClipper clipper;
@@ -530,6 +569,8 @@ void App::draw_library(float w, float h) {
   }
   ImGui::EndChild();
   ImGui::PopStyleColor();
+  if (open_context_) { ImGui::OpenPopup("##game_menu"); open_context_ = false; }
+  draw_game_menu("##game_menu", context_id_, true);
   {
     const ImVec2 p = ImGui::GetCursorScreenPos();
     std::string text = std::to_string(visible.size()) + (visible.size() == 1 ? " game" : " games");

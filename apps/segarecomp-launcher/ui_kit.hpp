@@ -71,6 +71,15 @@ bool dropdown(Ctx &ctx, const char *id, const std::vector<std::string> &items, i
 bool toggle(Ctx &ctx, const char *id, const char *label, bool *value, float width, bool enabled = true);
 void progress_bar(Ctx &ctx, ImDrawList *dl, ImVec2 a, ImVec2 b, float fraction, ImU32 color);
 bool segmented(Ctx &ctx, const char *id, const std::vector<std::string> &items, int *selected, float item_w);
+// Large mutually exclusive option tiles (Build Mode, Region, Mapper): a radio mark, a bold title and an optional one/two-line description each.
+// `*selected` may be -1 (nothing chosen yet: nothing is ever preselected for the caller). A disabled tile cannot be chosen. Returns true on change.
+bool option_tiles(Ctx &ctx, const char *id, const std::vector<std::string> &titles, const std::vector<std::string> &descriptions, int *selected,
+                  float width, float height, const std::vector<bool> &enabled = {});
+// Popup menus (overflow / context): styled like the drop-down list. Items return true when chosen and close the popup.
+bool begin_menu(Ctx &ctx, const char *popup_id);
+void end_menu();
+bool menu_item(Ctx &ctx, const char *id, const char *label, const char *hint, SDL_Texture *icon, float width, bool enabled = true, bool danger = false);
+void menu_separator(Ctx &ctx, float width);
 void badge(Ctx &ctx, ImDrawList *dl, ImVec2 pos, const char *text, ImU32 color, float px, ImVec2 *size_out = nullptr);
 bool input_text(Ctx &ctx, const char *id, char *buffer, size_t capacity, float width, const char *hint = nullptr, bool *active = nullptr);
 void tooltip(Ctx &ctx, const char *text);

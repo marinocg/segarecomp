@@ -3,7 +3,7 @@
 
 Drives the real window loop through the SEGARECOMP_GUI_SCRIPT automation hook (synthetic key events and virtual-joystick buttons) and checks the
 window's own trace: focus moves through the sidebar with Tab / arrow keys / the D-pad, Return / the South button activate, Escape / the East button
-go back, and the page changes accordingly. Needs no ROM, package or display.
+go back, and the page changes accordingly. Game Details is contextual (not in the sidebar); Back returns to the same library state. Needs no ROM, package or display.
 
 usage: launcher_gui_navigation_test.py <path to the Segarecomp executable>
 """
@@ -33,31 +33,56 @@ def main():
         tmp = pathlib.Path(d)
         env = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", SDL_RENDER_DRIVER="software", SEGARECOMP_CACHE_DIR=str(tmp / "cache"),
                    SEGARECOMP_HOME=str(tmp / "no-package"))
-        # one fictional synthetic cartridge in the library, so every sidebar entry (including Game Details) is enabled
-        rom = tmp / "Fictional Nav Test.md"
-        image = bytearray(0x200)
-        image[:12] = bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x70, 0x00, 0x4E, 0x70))
-        image[0x100:0x110] = b"SEGA GENESIS    "
-        rom.write_bytes(bytes(image))
-        subprocess.run([exe, "--import", str(rom)], env=env, timeout=60, check=True, capture_output=True)
+        # Fictional synthetic cartridges (distinct digests): enough cards that the library grid scrolls.
+        titles = ["Fictional Nav Test"] + [f"Synthetic Card {i:02d}" for i in range(1, 13)]
+        for index, title in enumerate(titles):
+            rom = tmp / (title + ".md")
+            image = bytearray(0x200)
+            image[:12] = bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x70, 0x00, 0x4E, 0x70))
+            image[0x100:0x110] = b"SEGA GENESIS    "
+            image[0x1E0] = index
+            rom.write_bytes(bytes(image))
+            subprocess.run([exe, "--import", str(rom)], env=env, timeout=60, check=True, capture_output=True)
+
+        def check(name, script, expected):
+            trace = run(exe, env, script, tmp)
+            failures.extend(f"{name}: {l}" for l in trace if l.startswith("expect FAIL"))
+            ok = sum(1 for l in trace if l.startswith("expect ok"))
+            if ok != expected:
+                failures.append(f"{name}: {ok} of {expected} expectations ran: {trace!r}")
+            return ok
+
+        assertions = 0
+        # The primary navigation is exactly the four application areas; Game Details is not one of them.
+        assertions += check("primary navigation", ["expect nav_items=Library,Import ROMs,Storage,Settings", "expect page=library", "quit"], 2)
         # keyboard: Tab focuses the active entry, arrows walk the sidebar, Return activates, Escape returns to the library
-        trace = run(exe, env, ["expect page=library", "key Tab", "frames 2", "key Down", "frames 2", "expect focus=Import ROMs", "key Down", "frames 2", "key Down", "frames 2",
-                               "expect focus=Storage", "key Return", "frames 6", "expect page=storage", "key Escape", "frames 6", "expect page=library", "quit"], tmp)
-        failures += [l for l in trace if l.startswith("expect FAIL")]
-        if sum(1 for l in trace if l.startswith("expect ok")) != 5:
-            failures.append("keyboard: not every expectation ran: %r" % trace)
+        assertions += check("keyboard", ["expect page=library", "key Tab", "frames 2", "key Down", "frames 2", "expect focus=Import ROMs", "key Down", "frames 2",
+                                         "expect focus=Storage", "key Down", "frames 2", "expect focus=Settings", "key Down", "frames 2", "expect focus=Settings",
+                                         "key Up", "frames 2", "key Return", "frames 6", "expect page=storage", "key Escape", "frames 6", "expect page=library", "quit"], 7)
         # gamepad: a virtual SDL gamepad (hot-plugged after start) does the same with the D-pad, South and East
         pad = ["expect page=library", "pad_attach", "frames 20"]
-        for _ in range(3):
+        for _ in range(2):
             pad += ["pad dpad_down down", "pad dpad_down up", "frames 3"]
         pad += ["expect focus=Storage", "pad south down", "pad south up", "frames 10", "expect page=storage", "pad east down", "pad east up", "frames 10", "expect page=library", "quit"]
-        trace = run(exe, env, pad, tmp)
-        failures += [l for l in trace if l.startswith("expect FAIL")]
-        if sum(1 for l in trace if l.startswith("expect ok")) != 4:
-            failures.append("gamepad: not every expectation ran: %r" % trace)
+        assertions += check("gamepad", pad, 4)
+        # Details is contextual: a card opens it with Return, Back (Escape) returns to the SAME library state - search, filter, view, focus.
+        state = ["key F", "frames 4", "text Synthetic Card 0", "frames 6", "expect search=Synthetic Card 0", "expect visible=9", "key Tab", "frames 2",
+                 "platform_filter 1", "view list", "frames 4", "focus_card 2", "frames 4", "expect focus=card:Synthetic Card 03", "key Return", "frames 8",
+                 "expect page=details", "expect detail=Synthetic Card 03", "key Escape", "frames 8", "expect page=library", "expect search=Synthetic Card 0",
+                 "expect platform_filter=1", "expect view=list", "expect visible=9", "expect focus=card:Synthetic Card 03", "quit"]
+        assertions += check("details round trip (keyboard)", state, 11)
+        # the same with a gamepad: South opens the focused card, East goes back; the grid's scroll position is restored too
+        state = ["pad_attach", "frames 20", "scroll_library 180", "frames 6", "expect library_scroll=180", "focus_card 6", "frames 4", "expect focus=card:Synthetic Card 06",
+                 "pad south down", "pad south up", "frames 10", "expect page=details", "expect detail=Synthetic Card 06", "pad east down", "pad east up", "frames 10",
+                 "expect page=library", "expect library_scroll=180", "expect focus=card:Synthetic Card 06", "quit"]
+        assertions += check("details round trip (gamepad)", state, 7)
+        # the context menu of a card (gamepad North / the Menu key) offers Details; choosing it opens the page, Back returns to the library
+        state = ["pad_attach", "frames 20", "focus_card 0", "frames 4", "pad north down", "pad north up", "frames 6", "expect menu=1", "pad south down", "pad south up", "frames 10",
+                 "expect page=details", "pad east down", "pad east up", "frames 10", "expect page=library", "quit"]
+        assertions += check("context menu", state, 3)
         # Responsive screen smoke: render the actual widgets, including the nested settings
         # scroller and confirmation sheet, at both supported sizes. No builds or guest runs.
-        pages = ["library", "list", "details:0", "import", "storage", "storage-modal"] + [f"settings{i}" for i in range(6)]
+        pages = ["library", "list", "details:0", "details:1", "import", "storage", "storage-modal"] + [f"settings{i}" for i in range(6)]
         for size in ("1080x740", "720x520"):
             for page in pages:
                 shot = tmp / "responsive.bmp"
@@ -81,7 +106,7 @@ def main():
     if failures:
         print("\n".join("FAIL: " + f for f in failures))
         return 1
-    print("launcher_gui_navigation_test: ok (9 navigation assertions, 24 responsive screen captures)")
+    print(f"launcher_gui_navigation_test: ok ({assertions} navigation/state assertions, {len(pages) * 2} responsive screen captures)")
     return 0
 
 
