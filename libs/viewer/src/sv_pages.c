@@ -40,7 +40,7 @@ static void reclassify_preset(SvVideoSettings *v) {
 
 static SvItem *add_toggle(SvPage *p, int id, const char *label, int value, const char *hint) {
   SvItem *i = sv_page_add(p, SV_ITEM_TOGGLE, id, label);
-  if (i != NULL) { i->value = value != 0; sv_item_set_text(i, value ? "ON" : "OFF"); sv_item_set_hint(i, hint); }
+  if (i != NULL) { i->value = value != 0; sv_item_set_text(i, value ? "On" : "Off"); sv_item_set_hint(i, hint); }
   return i;
 }
 
@@ -65,30 +65,39 @@ static void add_choice(SvPage *p, int id, const char *label, int value, int coun
 }
 
 static void build_video_core(SvHost *h, SvPage *p, int full) {
-  SvItem *item_vsync, *item_fps;
+  SvItem *item;
   static const char *const scale[] = {"Fit to Window", "Integer"}, *const aspect[] = {"Square pixels", "4:3 (corrected)"};
   static const char *const preset[] = {"Pixel Perfect", "CRT Soft", "CRT Classic", "CRT Arcade", "Custom"};
   const SvVideoSettings *v = &h->settings.video;
+  int k;
+  /* the picture and the window first, the CRT effect and its strengths after (a section of their own on the full page) */
   add_toggle(p, I_FULLSCREEN, "Fullscreen", v->fullscreen, "Borderless desktop fullscreen; no display mode change. F11 also toggles.");
   add_choice(p, I_SCALE, "Scaling", (int)v->scale, 2, scale, "Fit uses any size; Integer keeps whole-number pixel multiples when they fit.");
   add_choice(p, I_ASPECT, "Aspect Ratio", (int)v->aspect, 2, aspect, "Original keeps square pixels; 4:3 stretches to the aspect of a TV picture.");
-  add_choice(p, I_PRESET, "Video Effect / CRT", (int)v->preset, v->preset == SV_CRT_CUSTOM ? 5 : 4, preset, "Pixel Perfect is the untouched picture. CRT presets add real scanline/mask/glow/curve passes.");
-  if (!full) { /* Quick Settings: the design board's icon rows */
-    int k;
-    static const char *const icons[] = {"fullscreen", "video", "video", "settings"};
-    for (k = 0; k < 4 && k < p->count; ++k) sv_item_set_icon(&p->items[k], icons[k]);
+  if (full) {
+    add_toggle(p, I_VSYNC, "VSync", v->vsync, "Syncs presentation to the display. Game speed is paced by the console clock either way.");
+    add_toggle(p, I_FPS, "Show FPS Counter", v->show_fps, "Shows the presentation rate on the game screen.");
+    item = sv_page_add(p, SV_ITEM_LABEL, 0, "CRT effect");
+    if (item != NULL) sv_item_set_icon(item, "section");
   }
+  add_choice(p, I_PRESET, "Video Effect", (int)v->preset, v->preset == SV_CRT_CUSTOM ? 5 : 4, preset, "Pixel Perfect is the untouched picture. CRT presets add real scanline/mask/glow/curve passes.");
   if (full) {
     add_slider(p, I_SCANLINES, "Scanlines", v->scanlines, 0, 100, 5, "%", "Darkens the gap between source lines (needs a window at least 1.5x the picture).");
     add_slider(p, I_MASK, "Phosphor mask", v->mask, 0, 100, 5, "%", "RGB stripe mask over the picture.");
     add_slider(p, I_CURVE, "Curvature", v->curvature, 0, 100, 5, "%", "Barrel distortion of the picture with corner falloff.");
     add_slider(p, I_BLOOM, "Bloom", v->bloom, 0, 100, 5, "%", "Soft glow around bright pixels.");
     add_slider(p, I_BRIGHT, "Brightness", v->brightness, 50, 150, 5, "%", "Picture brightness; values above 100 brighten to compensate for scanlines.");
+    item = sv_page_add(p, SV_ITEM_BUTTON, I_VIDEO_DEFAULTS, "Restore video defaults");
+    if (item != NULL) sv_item_set_icon(item, "reset");
+    return;
   }
-  item_vsync = add_toggle(p, I_VSYNC, "VSync", v->vsync, "Syncs presentation to the display. Game speed is paced by the console clock either way.");
-  item_fps = add_toggle(p, I_FPS, "Show FPS Counter", v->show_fps, "Shows the presentation rate on the game screen.");
-  if (!full) { if (item_vsync != NULL) sv_item_set_icon(item_vsync, "reset"); if (item_fps != NULL) sv_item_set_icon(item_fps, "info"); }
-  if (full) sv_page_add(p, SV_ITEM_BUTTON, I_VIDEO_DEFAULTS, "Restore video defaults");
+  /* Quick Settings: the design board's icon rows */
+  add_toggle(p, I_VSYNC, "VSync", v->vsync, "Syncs presentation to the display. Game speed is paced by the console clock either way.");
+  add_toggle(p, I_FPS, "Show FPS Counter", v->show_fps, "Shows the presentation rate on the game screen.");
+  for (k = 0; k < p->count; ++k) {
+    const int id = p->items[k].id;
+    sv_item_set_icon(&p->items[k], id == I_FULLSCREEN ? "fullscreen" : (id == I_SCALE || id == I_ASPECT ? "video" : (id == I_PRESET ? "settings" : (id == I_VSYNC ? "reset" : "info"))));
+  }
 }
 
 static void build_controls(SvHost *h, SvPage *p) {
@@ -480,7 +489,7 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
     switch (ev.item_id) {
       case I_RESUME: sv_pages_close(h); return;
       case I_GO_QUICK: open_page(h, PAGE_QUICK, "QUICK SETTINGS"); return;
-      case I_GO_VIDEO: open_page(h, PAGE_VIDEO, "VIDEO & DISPLAY SETTINGS"); return;
+      case I_GO_VIDEO: open_page(h, PAGE_VIDEO, "VIDEO & DISPLAY"); return;
       case I_GO_CONTROLS: open_page(h, PAGE_CONTROLS, "CONTROLS"); return;
       case I_GO_PADSTATUS: open_page(h, PAGE_PADSTATUS, "CONTROLLER STATUS"); return;
       case I_PAD_RESCAN: sv_diag_scan(h->diag); sv_host_toast(h, "Rescanned controllers"); return;

@@ -166,7 +166,7 @@ static SDL_Texture *load_icon(SvHost *h, const char *name) {
 
 /* File reads belong to host setup, never the presentation/event hot path. */
 static void preload_ui_assets(SvHost *h) {
-  static const char *const names[] = {"controller", "fullscreen", "video", "settings", "reset", "info", "audio", "screenshot", "play", "quit", "warning"};
+  static const char *const names[] = {"controller", "fullscreen", "video", "settings", "reset", "info", "audio", "screenshot", "play", "quit", "warning", "check"};
   size_t i;
   (void)sv_ui_wordmark(h);
   for (i = 0; i < sizeof names / sizeof names[0]; ++i) (void)load_icon(h, names[i]);
@@ -601,7 +601,9 @@ static void draw_scene(SvHost *h, int overlay) {
   SDL_RenderClear(h->renderer);
   render_game(h, out_w, out_h);
   if (overlay && h->menu_open) {
+    const SvPage *top = sv_menu_top(&h->menu);
     SDL_Color dim = {4, 8, 20, 150};
+    if (top != NULL && top->page_id >= PAGE_CONFIRM_QUIT) dim.a = 196; /* a decision: the game recedes further */
     if (!sv_pages_wants_preview(h)) sv_host_fill(h, 0, 0, out_w, out_h, dim);
     sv_pages_draw(h, out_w, out_h);
   }

@@ -310,7 +310,8 @@ int main(void) {
   }
 
   /* ---- pause overlay: scripted navigation (the guest does not advance: service() does not return until the menu closes) ---- */
-  { static const int to_video_and_back[] = {SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_RETURN /* Video & Display */, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_RIGHT /* preset */,
+  { static const int to_video_and_back[] = {SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_RETURN /* Video & Display */, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN, SV_KEY_DOWN,
+                                            SV_KEY_RIGHT /* Video Effect: after Fullscreen, Scaling, Aspect, VSync, FPS (the "CRT effect" heading is not focusable) */,
                                             SV_KEY_ESCAPE /* back to main */, SV_KEY_ESCAPE /* resume */};
     Script sc;
     SvSample smp;
