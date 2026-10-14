@@ -11,7 +11,7 @@ third-party inputs (`install.cmake`). `.github/workflows/release.yml` does exact
 | --- | --- | --- |
 | Zig (bundled `zig cc`) | 0.15.2 | official archives, SHA-256 in `release.yml`; MIT; used only to compile generated C |
 | ymfm (vendored) | 81aec25 | YM2612 core, BSD-3-Clause; compiled with `zig c++` and linked without a C++ runtime (shim) |
-| SDL3 | 3.4.16 | macOS/Linux built from the official source tarball (shared); Windows: official `VC` devel (launcher, DLL) and `mingw` devel (import lib for Zig) |
+| SDL3 | 3.4.16 | macOS/Linux built from the official source tarball (shared) with the libusb development files present, so SDL compiles its Nintendo Switch 2 USB driver (`SDL_REQUIRE_LIBUSB=1` fails the build otherwise; libusb itself is loaded from the OS at run time and not bundled); Windows: official `VC` devel (launcher, DLL) and `mingw` devel (import lib for Zig). The official Windows DLL has no Switch 2 driver (see `docs/testing/input-diagnostics.md`) |
 | Dear ImGui | 1.92.9b | fetched at configure time with a pinned hash (`apps/segarecomp-launcher/CMakeLists.txt`) |
 | stb_image.h | pinned commit | fetched at configure time with a pinned hash; decodes the launcher's own PNG assets only |
 | Silkscreen font | Google Fonts release | `apps/segarecomp-launcher/assets/fonts/`, SIL OFL 1.1 |

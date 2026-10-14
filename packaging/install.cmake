@@ -28,6 +28,10 @@ install(DIRECTORY ${_src}/platforms/genesis/machine/include/ DESTINATION ${_rt}/
 install(DIRECTORY ${_src}/libs/device/sega/genesis/include/ DESTINATION ${_rt}/libs/device/sega/genesis/include FILES_MATCHING PATTERN "*.h")
 install(DIRECTORY ${_src}/libs/cpu/m68k/include/ DESTINATION ${_rt}/libs/cpu/m68k/include FILES_MATCHING PATTERN "*.h")
 
+# SEG-058 (ADR 0120): the shared SDL3 viewer foundation is compiled into every game by the bundled compiler, next to the console adapter.
+install(DIRECTORY ${_src}/libs/viewer/src/ DESTINATION ${_rt}/libs/viewer/src FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
+install(DIRECTORY ${_src}/libs/viewer/include/ DESTINATION ${_rt}/libs/viewer/include FILES_MATCHING PATTERN "*.h")
+
 # Master System (SEG-009-T010): the tree mirrors the repository, `segarecomp build --runtime-dir <...>/platforms/master-system`
 # derives the shared library sources (PSG device, Z80 runtime ABI header) from the same root. No machine/codegen C++ ships here.
 foreach(_sms_dir runtime headless viewer)
@@ -42,7 +46,7 @@ install(DIRECTORY ${_src}/libs/device/sega/ym2612/ DESTINATION ${_rt}/libs/devic
 install(FILES ${_src}/libs/device/sega/ym2612/third_party/ymfm/LICENSE DESTINATION ${_res}/licenses RENAME ymfm-BSD-3-Clause.txt)
 
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/apps/segarecomp-launcher/assets/ DESTINATION ${_res}/assets
-  PATTERN "README.md" EXCLUDE PATTERN "Silkscreen-OFL.txt" EXCLUDE)
+  PATTERN "README.md" EXCLUDE PATTERN "manifest.json" EXCLUDE PATTERN "Silkscreen-OFL.txt" EXCLUDE)
 
 install(FILES ${PROJECT_SOURCE_DIR}/LICENSE DESTINATION ${_res}/licenses RENAME MPL-2.0.txt)
 install(FILES ${PROJECT_SOURCE_DIR}/apps/segarecomp-launcher/assets/fonts/Silkscreen-OFL.txt DESTINATION ${_res}/licenses RENAME Silkscreen-OFL.txt)

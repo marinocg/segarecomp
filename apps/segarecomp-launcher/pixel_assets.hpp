@@ -20,4 +20,18 @@ namespace launcher {
 // that by omitting the graphic, never by crashing -- a missing decorative asset is not a fatal error.
 [[nodiscard]] SDL_Texture *load_pixel_texture(SDL_Renderer *renderer, const std::string &relative);
 
+// Loads any PNG/JPEG file (a cover) as a texture; nullptr on a missing/oversized/undecodable image. `nearest` for pixel art, linear otherwise.
+[[nodiscard]] SDL_Texture *load_file_texture(SDL_Renderer *renderer, const std::filesystem::path &path, bool nearest);
+
+struct ImageInfo {
+  bool ok = false, png = false, jpeg = false;
+  int width = 0, height = 0;
+  std::string error;  // a plain-language reason when !ok
+};
+// Validates a candidate cover: PNG or JPEG by content (not extension), at most `max_bytes`, 16..2048 pixels per side, and fully decodable.
+[[nodiscard]] ImageInfo probe_image(const std::filesystem::path &path, std::size_t max_bytes = 2U << 20U);
+
+// Total bytes stb_image has requested from its allocator in this process (a test aid: the zip decoder must never allocate).
+[[nodiscard]] std::size_t stb_requested_bytes_for_tests();
+
 } // namespace launcher

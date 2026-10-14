@@ -33,7 +33,8 @@ set(SEGARECOMP_CI_TEST_COSTS
   sms_emission_budget_test=40 genesis_audio_artifact_test=39 segarecomp_build_command_test=34 genesis_audio_equivalence_test=20
   genesis_z80_build_pipeline_falsify_test=20 sms_machine_tests=19 cpu_z80_decode_tests=18 genesis_audio_ym_test=18 z80_control_stack_dispatch_test=17
   genesis_z80_images_test=16 m68k_batch_c_static_slice_test=16 genesis_z80_build_pipeline_prepare_test=10 sms_native_build_failclosed_test=9
-  sms_psg_differential_test=7 ci_shard_guard_test=1)  # RUN_SERIAL: sonic_startup_inventory_adapter_failure_test runs alone, so it occupies all four cores
+  sms_psg_differential_test=7 ci_shard_guard_test=1
+  launcher_input_diagnostics_test=25 launcher_sms_policy_test=20 launcher_gui_navigation_test=12)  # SDL3 viewer/launcher suites (only registered when SDL3 is enabled)  # RUN_SERIAL: sonic_startup_inventory_adapter_failure_test runs alone, so it occupies all four cores
 
 # The guard runs inside the shard it is assigned to (it only lists tests, so it is cheap) and must exist before the partition below.
 add_test(NAME ci_shard_guard_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/ci_shard_guard_test.py
@@ -50,11 +51,41 @@ foreach(_entry IN LISTS SEGARECOMP_CI_TEST_COSTS)
   set(_segarecomp_cost_${CMAKE_MATCH_1} ${CMAKE_MATCH_2})
 endforeach()
 
+# Every directory's tests take part: the SDL3 viewer and launcher suites (libs/viewer, apps/segarecomp-launcher) register their tests in their
+# own directories, and a directory-scoped scan would silently leave them unsharded (the guard test then fails the SDL3-enabled configuration).
+# Assigning a label or cost to a test of another directory needs CMake 3.28's `set_property(TEST ... DIRECTORY ...)`.
+function(_segarecomp_collect_tests dir out)
+  get_property(_own DIRECTORY ${dir} PROPERTY TESTS)
+  set(_acc)
+  foreach(_t IN LISTS _own)
+    list(APPEND _acc "${dir}|${_t}")
+  endforeach()
+  get_property(_subs DIRECTORY ${dir} PROPERTY SUBDIRECTORIES)
+  foreach(_s IN LISTS _subs)
+    _segarecomp_collect_tests(${_s} _sub_acc)
+    list(APPEND _acc ${_sub_acc})
+  endforeach()
+  set(${out} "${_acc}" PARENT_SCOPE)
+endfunction()
+_segarecomp_collect_tests("${PROJECT_SOURCE_DIR}" _segarecomp_ci_all_entries)
+set(_segarecomp_ci_all_tests)
+foreach(_e IN LISTS _segarecomp_ci_all_entries)
+  string(REGEX MATCH "^(.*)\\|(.*)$" _m "${_e}")
+  set(_dir_of_${CMAKE_MATCH_2} "${CMAKE_MATCH_1}")
+  list(APPEND _segarecomp_ci_all_tests "${CMAKE_MATCH_2}")
+  if(NOT "${CMAKE_MATCH_1}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}" AND CMAKE_VERSION VERSION_LESS 3.28)
+    message(FATAL_ERROR "ci_shards.cmake: test ${CMAKE_MATCH_2} (${CMAKE_MATCH_1}) is registered outside tests/; labelling it for CI shards needs CMake >= 3.28")
+  endif()
+endforeach()
+
 # Sort key: the cost zero-padded so that a string sort is a numeric sort; the name breaks ties deterministically.
-get_property(_segarecomp_ci_all_tests DIRECTORY PROPERTY TESTS)
 set(_segarecomp_ci_keys)
 foreach(_t IN LISTS _segarecomp_ci_all_tests)
-  get_test_property(${_t} LABELS _labels)
+  set(_dir_arg)
+  if(NOT "${_dir_of_${_t}}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}")
+    set(_dir_arg DIRECTORY "${_dir_of_${_t}}")
+  endif()
+  get_property(_labels TEST ${_t} ${_dir_arg} PROPERTY LABELS)
   if("full" IN_LIST _labels)
     if(DEFINED _segarecomp_cost_${_t})
       set(_cost ${_segarecomp_cost_${_t}})
@@ -83,7 +114,11 @@ foreach(_key IN LISTS _segarecomp_ci_keys)
     endif()
   endforeach()
   math(EXPR _segarecomp_ci_load_${_best} "${_segarecomp_ci_load_${_best}} + ${_cost}")
-  set_property(TEST ${_t} APPEND PROPERTY LABELS shard-${_best})
-  set_property(TEST ${_t} PROPERTY COST ${_cost})
+  set(_dir_arg)
+  if(NOT "${_dir_of_${_t}}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}")
+    set(_dir_arg DIRECTORY "${_dir_of_${_t}}")
+  endif()
+  set_property(TEST ${_t} ${_dir_arg} APPEND PROPERTY LABELS shard-${_best})
+  set_property(TEST ${_t} ${_dir_arg} PROPERTY COST ${_cost})
 endforeach()
 

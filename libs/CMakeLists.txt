@@ -12,3 +12,7 @@ add_subdirectory(device/sega/ym2612)
 add_subdirectory(media)
 add_subdirectory(codegen/c11)
 add_subdirectory(legacy_compat)
+# SEG-058: option must exist before libs/viewer (declared again, harmlessly, by platforms/genesis/viewer).
+option(SEGARECOMP_ENABLE_SDL3_VIEWER "Build the optional SDL3 Genesis viewer presenter" OFF)
+option(SEGARECOMP_BUILD_LAUNCHER "Build the consumer launcher (SDL3 + Dear ImGui)" OFF) # also read by libs/viewer (input diagnostics); apps/ declares it again, harmlessly
+add_subdirectory(viewer)

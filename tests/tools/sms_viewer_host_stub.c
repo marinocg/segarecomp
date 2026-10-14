@@ -33,6 +33,9 @@ void sms_sdl3_viewer_host(SmsSdl3Viewer *viewer, SmsViewerHost *host) {
   host->poll = stub_poll;
   host->present = stub_present;
 }
+void sms_sdl3_viewer_stop_screen(SmsSdl3Viewer *viewer, const char *title, const char *detail) {
+  (void)viewer; (void)title; (void)detail; /* no window: nothing to show */
+}
 int sms_sdl3_viewer_audio_active(const SmsSdl3Viewer *viewer, uint64_t *overruns) {
   (void)viewer;
   if (overruns != NULL) *overruns = 0u;

@@ -55,7 +55,7 @@ ALLOWED_CLOSURE = {
     "segarecomp_headless_master_system": {"segarecomp_runtime_master_system", PSG},
     "segarecomp_viewer_master_system": {"segarecomp_runtime_master_system", PSG},
     "segarecomp_viewer_master_system_main_check": {"segarecomp_viewer_master_system", "segarecomp_runtime_master_system", PSG},
-    "segarecomp_viewer_master_system_sdl3": {"segarecomp_viewer_master_system", "segarecomp_runtime_master_system", PSG, "SDL3::SDL3"},
+    "segarecomp_viewer_master_system_sdl3": {"segarecomp_viewer_master_system", "segarecomp_runtime_master_system", PSG, "SDL3::SDL3", "segarecomp_viewer_host", "segarecomp_viewer_input", "segarecomp_viewer_core", "m"},  # SEG-058: the shared SDL3 viewer foundation (host + input diagnostics)
 }
 
 

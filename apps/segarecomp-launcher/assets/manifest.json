@@ -1,0 +1,135 @@
+{
+  "schema": 1,
+  "purpose": "Runtime art of the Segarecomp launcher and the shared in-game viewer, and the audit of the SEG-058 v2 implementation-kit textures. Text is never baked into a texture; panels, buttons, bevels, toggles, sliders and focus rings are drawn in code from the palette below.",
+  "palette": {
+    "panel": "#08142F",
+    "panel_hover": "#0F224A",
+    "border": "#233E78",
+    "highlight": "#4D67A7",
+    "primary": "#1557C9",
+    "primary_hover": "#1B6FE7",
+    "cyan": "#40BFF5",
+    "focus": "#8CE0FF",
+    "text": "#DCE8FF",
+    "muted": "#A9B7DD",
+    "ok": "#68E09E",
+    "error": "#FF8177",
+    "warning": "#FFC56D"
+  },
+  "runtime_assets": {
+    "background.png": {
+      "size": [
+        675,
+        900
+      ],
+      "mode": "RGB",
+      "role": "the scenery: hero banner (sun, horizon, waterfalls; cover-scaled, 80 % above the horizon so the sun is never cut), the dimmed water behind the window and the foliage frame",
+      "sampling": "linear (scaled by arbitrary fractions)",
+      "authority": "primary"
+    },
+    "wordmark.png": {
+      "size": [
+        1200,
+        400
+      ],
+      "mode": "RGBA",
+      "role": "SEGARECOMP logotype in the hero and the viewer's page headers",
+      "sampling": "linear",
+      "authority": "primary"
+    },
+    "icon-drop.png": {
+      "size": [
+        128,
+        128
+      ],
+      "mode": "RGBA",
+      "role": "drop-zone glyph (import page, empty library)"
+    },
+    "icon-folder.png": {
+      "size": [
+        128,
+        128
+      ],
+      "mode": "RGBA",
+      "role": "legacy large folder glyph"
+    },
+    "icon-info.png": {
+      "size": [
+        128,
+        128
+      ],
+      "mode": "RGBA",
+      "role": "legacy large info glyph"
+    },
+    "ui/icon-*.png": {
+      "count": 28,
+      "size": [
+        16,
+        16
+      ],
+      "mode": "RGBA",
+      "role": "UI icons (tinted, nearest-neighbour upscaled); byte-identical to the kit's textures/icons/*.png",
+      "sampling": "nearest"
+    },
+    "fonts/Silkscreen-Bold.ttf": {
+      "role": "titles, section headings, platform bands and the no-cover tag",
+      "license": "SIL OFL 1.1 (fonts/Silkscreen-OFL.txt)"
+    },
+    "fonts/Silkscreen-Regular.ttf": {
+      "role": "available pixel face",
+      "license": "SIL OFL 1.1"
+    },
+    "covers/placeholder-1..4.png": {
+      "size": [
+        192,
+        256
+      ],
+      "mode": "RGB",
+      "role": "cover placeholders for games without a chosen cover: one of four distinct fictional paintings (coast with loop, sunset bay, night city, jungle temple) picked from the ROM digest, always shown under the platform band and a NO COVER ART tag so it is never mistaken for identified box art",
+      "sampling": "nearest",
+      "source": "segarecomp-4-library-placeholders.zip supplied by the project owner (project-owned fictional art; no commercial cover)"
+    }
+  },
+  "removed": {
+    "ui/cover-placeholder.png": "192x256 procedural placeholder of the first kit; unused at runtime and superseded by covers/placeholder-1..4.png. The cover-import test now uses icon-drop.png as its real PNG."
+  },
+  "kit_v2_audit": {
+    "textures/icons/*.png": {
+      "decision": "already adopted (identical to ui/icon-*.png)"
+    },
+    "textures/backgrounds/launcher_header_panorama_fallback.png": {
+      "size": [
+        1280,
+        320
+      ],
+      "colors": 141620,
+      "decision": "not shipped: fallback only, and the repository background is available; a smooth 141k-colour render rather than palette pixel art, so it would not match the nearest-neighbour UI"
+    },
+    "textures/backgrounds/launcher_page_fallback.png": {
+      "size": [
+        1280,
+        720
+      ],
+      "colors": 90279,
+      "decision": "not shipped: same reasons; the page background is composed from background.png"
+    },
+    "textures/backgrounds/sunset_strip_fallback.png": {
+      "size": [
+        640,
+        128
+      ],
+      "colors": 47723,
+      "decision": "not shipped: superseded by the kit itself and by the repository art"
+    },
+    "textures/chrome/*, textures/buttons/*, textures/controls/*": {
+      "decision": "not shipped: the same shapes are drawn in code at any scale (nine-slice insets of 8 px would blur or step at the launcher's fractional HiDPI scales); colours match the palette above"
+    },
+    "references/*.png": {
+      "decision": "review material only, never runtime art; not committed"
+    },
+    "textures/covers/cover_placeholder*.png": {
+      "decision": "superseded by the owner-supplied set of four distinct placeholders now shipped as covers/placeholder-1..4.png (the v2 kit's four were one image)"
+    }
+  },
+  "packaging": "packaging/install.cmake installs this directory into <package>/assets (README.md, this manifest and the font licence excluded; the licence ships in licenses/). The viewer reads wordmark.png and ui/icon-*.png through SEGARECOMP_ASSETS or the package layout."
+}

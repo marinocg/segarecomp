@@ -24,6 +24,11 @@ namespace fs = std::filesystem;
 #ifndef SEGARECOMP_ZIG_VERSION
 #define SEGARECOMP_ZIG_VERSION "unknown"
 #endif
+// Linux: the glibc the generated program links against. Release builds keep 2.35 (the bundled SDL3 is built on Ubuntu 22.04); a developer
+// who built SDL3 on a newer distribution passes -DSEGARECOMP_ZIG_GLIBC=<version> so a locally staged package links and runs.
+#ifndef SEGARECOMP_ZIG_GLIBC
+#define SEGARECOMP_ZIG_GLIBC "2.35"
+#endif
 
 namespace launcher {
 namespace {
@@ -45,9 +50,9 @@ const char *zig_target() {
 // Linux: the bundled libSDL3.so is built on Ubuntu 22.04 (glibc 2.35) and references symbols up to GLIBC_2.34, so
 // the generated program must be linked against at least that glibc (release builds require glibc >= 2.35).
 #elif defined(__aarch64__)
-  return "aarch64-linux-gnu.2.35";
+  return "aarch64-linux-gnu." SEGARECOMP_ZIG_GLIBC;
 #else
-  return "x86_64-linux-gnu.2.35";
+  return "x86_64-linux-gnu." SEGARECOMP_ZIG_GLIBC;
 #endif
 }
 
@@ -107,7 +112,9 @@ Layout locate_layout() {
   std::error_code ec;
   for (const auto &required : {layout.cli, layout.cc, layout.runtime / "runtime" / "runtime.c",
                                layout.runtime / "viewer" / "viewer_sdl3.c",
-                               layout.runtime_sms / "viewer" / "sms_viewer_sdl3.c", layout.sdl_include / "SDL3" / "SDL.h"}) {
+                               layout.runtime_sms / "viewer" / "sms_viewer_sdl3.c", layout.root / "runtime" / "libs" / "viewer" / "src" / "sv_host.c",
+                               layout.root / "runtime" / "libs" / "viewer" / "src" / "sv_input_diag.c",
+                               layout.sdl_include / "SDL3" / "SDL.h"}) {
     if (!fs::exists(required, ec)) { layout.problem = "This Segarecomp installation is incomplete (missing " + utf8(required.filename()) + "). Please download it again."; break; }
   }
   return layout;
@@ -122,6 +129,11 @@ fs::path cache_root() {
   fs::path result = pref ? path_from_utf8(pref) : fs::temp_directory_path() / "Segarecomp";
   SDL_free(pref);
   return result;
+}
+
+fs::path library_root() {
+  if (const char *override_dir = SDL_getenv("SEGARECOMP_LIBRARY_DIR")) return path_from_utf8(override_dir);
+  return cache_root() / "library";
 }
 
 std::string clean_title(const std::string &raw) {
@@ -206,6 +218,20 @@ std::string launch_refusal(const RomView &rom) {
 void apply_game_environment(SDL_Environment *environment, const RomView &rom) {
   // Always written for Genesis (also for USA) so an inherited SEGARECOMP_GENESIS_REGION can never override the visible selection.
   if (rom.supports_region()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GENESIS_REGION", rom.region.c_str(), true);
+  // The shared viewer (libs/viewer): where its persistent settings live, that it was started by the launcher (the menu says "Return to
+  // Launcher"), and the identity shown in its System page. None of this reaches the guest; it is host presentation only.
+  SDL_SetEnvironmentVariable(environment, "SEGARECOMP_LAUNCHED", "1", true);
+  const std::string viewer_settings = utf8(library_root() / "viewer-settings.cfg");
+  SDL_SetEnvironmentVariable(environment, "SEGARECOMP_VIEWER_SETTINGS", viewer_settings.c_str(), true);
+  {  // the launcher's UI icons, which the viewer menu shows when present (decorative: the menu works without them)
+    const char *base = SDL_GetBasePath();
+    const fs::path exe_dir = base != nullptr ? path_from_utf8(base) : fs::path{};
+    std::error_code ec;
+    for (const fs::path &candidate : {exe_dir.parent_path() / "Resources" / "assets", exe_dir / "assets"})
+      if (fs::is_directory(candidate / "ui", ec)) { SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ASSETS", utf8(candidate).c_str(), true); break; }
+  }
+  if (rom.sha256.size() == 64U) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_ROM_SHA256", rom.sha256.c_str(), true);
+  if (!rom.title.empty()) SDL_SetEnvironmentVariable(environment, "SEGARECOMP_GAME_TITLE", rom.title.c_str(), true);
 }
 
 RomView inspect_rom_file(const fs::path &path, const Layout &layout) {

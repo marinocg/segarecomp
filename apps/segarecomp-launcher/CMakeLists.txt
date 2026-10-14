@@ -25,19 +25,31 @@ target_link_libraries(segarecomp_imgui PUBLIC SDL3::SDL3)
 
 # The launcher's non-UI core (layout, cache identity, `segarecomp build` orchestration, status reading) is a separate target so its
 # policy/cache-identity contract is unit-testable without a window.
-add_library(segarecomp_launcher_core STATIC launcher_core.cpp)
+add_library(segarecomp_launcher_core STATIC launcher_core.cpp json_lite.cpp library_catalog.cpp storage.cpp launcher_settings.cpp)
 target_include_directories(segarecomp_launcher_core PUBLIC .)
 target_link_libraries(segarecomp_launcher_core PUBLIC SDL3::SDL3 segarecomp::media)
+# Linux only: the glibc the generated programs link against (release default 2.35 = the bundled SDL3's baseline; a developer who built SDL3 on a
+# newer distribution overrides it so a locally staged package links).
+set(SEGARECOMP_ZIG_GLIBC "2.35" CACHE STRING "Linux glibc version the generated programs target")
 target_compile_definitions(segarecomp_launcher_core PUBLIC
   SEGARECOMP_LAUNCHER_VERSION="${SEGARECOMP_RELEASE_VERSION}"
-  SEGARECOMP_ZIG_VERSION="${SEGARECOMP_ZIG_VERSION}")
+  SEGARECOMP_ZIG_VERSION="${SEGARECOMP_ZIG_VERSION}"
+  SEGARECOMP_ZIG_GLIBC="${SEGARECOMP_ZIG_GLIBC}")
 segarecomp_enable_warnings(segarecomp_launcher_core)
 
-add_executable(segarecomp-launcher WIN32 pixel_assets.cpp main.cpp)
-target_include_directories(segarecomp-launcher SYSTEM PRIVATE ${_stb_dir})
-target_link_libraries(segarecomp-launcher PRIVATE segarecomp_imgui segarecomp_launcher_core segarecomp::media)
-target_compile_definitions(segarecomp-launcher PRIVATE
+# Image loading (the launcher's pixel-art assets and user-chosen covers) and the cover/Libretro naming helpers; no window needed.
+add_library(segarecomp_launcher_ui_support STATIC pixel_assets.cpp covers.cpp cover_download.cpp rom_zip.cpp)
+target_include_directories(segarecomp_launcher_ui_support SYSTEM PRIVATE ${_stb_dir})
+target_include_directories(segarecomp_launcher_ui_support PUBLIC .)
+target_link_libraries(segarecomp_launcher_ui_support PUBLIC SDL3::SDL3 segarecomp_launcher_core)
+target_compile_features(segarecomp_launcher_ui_support PUBLIC cxx_std_20)
+target_compile_definitions(segarecomp_launcher_ui_support PUBLIC
   SEGARECOMP_LAUNCHER_SOURCE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
+segarecomp_enable_warnings(segarecomp_launcher_ui_support)
+
+add_executable(segarecomp-launcher WIN32 main.cpp app.cpp app_screens.cpp app_pages.cpp app_details.cpp app_input.cpp app_art.cpp ui_kit.cpp)
+target_include_directories(segarecomp-launcher SYSTEM PRIVATE ${_stb_dir})
+target_link_libraries(segarecomp-launcher PRIVATE segarecomp_imgui segarecomp_launcher_core segarecomp_launcher_ui_support segarecomp::viewer_core segarecomp::viewer_input segarecomp::media)
 set_target_properties(segarecomp-launcher PROPERTIES OUTPUT_NAME Segarecomp)
 segarecomp_enable_warnings(segarecomp-launcher)
 
@@ -78,6 +90,49 @@ if(BUILD_TESTING)
   add_test(NAME launcher_sms_policy_test COMMAND launcher_sms_policy_test $<TARGET_FILE:segarecomp>
     ${PROJECT_SOURCE_DIR}/platforms/master-system/runtime/sms_machine.h $<TARGET_FILE:segarecomp-launcher> $<TARGET_FILE:fake_segarecomp> $<TARGET_FILE:fake_game>)
   set_property(TEST launcher_sms_policy_test APPEND PROPERTY LABELS full fast)
+endif()
+
+# SEG-058: covers, Libretro candidate naming and launcher settings.
+add_executable(launcher_ui_support_test launcher_ui_support_test.cpp)
+target_link_libraries(launcher_ui_support_test PRIVATE segarecomp_launcher_core segarecomp_launcher_ui_support segarecomp_zlib)
+segarecomp_enable_warnings(launcher_ui_support_test)
+if(BUILD_TESTING)
+  add_test(NAME launcher_ui_support_test COMMAND launcher_ui_support_test)
+  set_property(TEST launcher_ui_support_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_ui_support_test PROPERTY TIMEOUT 300)  # seconds of work at most; never the 25-minute default
+endif()
+
+# SEG-058: keyboard and gamepad navigation of the real window (dummy video driver, virtual gamepad).
+if(BUILD_TESTING)
+  find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
+  add_test(NAME launcher_gui_navigation_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_gui_navigation_test.py $<TARGET_FILE:segarecomp-launcher>)
+  set_property(TEST launcher_gui_navigation_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_gui_navigation_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+endif()
+
+# SEG-058 corrective delivery: the Input diagnostics classes A-F against real SDL events from virtual joysticks (never a physical-device claim).
+if(BUILD_TESTING)
+  add_test(NAME launcher_input_diagnostics_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/launcher_input_diagnostics_test.py $<TARGET_FILE:segarecomp-launcher>)
+  set_property(TEST launcher_input_diagnostics_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_input_diagnostics_test APPEND PROPERTY ENVIRONMENT_MODIFICATION "PYTHONUTF8=set:1")
+endif()
+
+# SEG-058: the persistent library catalog (no window, no product CLI).
+add_executable(library_catalog_test library_catalog_test.cpp)
+target_link_libraries(library_catalog_test PRIVATE segarecomp_launcher_core)
+segarecomp_enable_warnings(library_catalog_test)
+if(BUILD_TESTING)
+  add_test(NAME library_catalog_test COMMAND library_catalog_test)
+  set_property(TEST library_catalog_test APPEND PROPERTY LABELS full fast)
+endif()
+
+# SEG-058: cache maintenance on fake trees (symlink escapes, forged plans, busy entries).
+add_executable(storage_test storage_test.cpp)
+target_link_libraries(storage_test PRIVATE segarecomp_launcher_core)
+segarecomp_enable_warnings(storage_test)
+if(BUILD_TESTING)
+  add_test(NAME storage_test COMMAND storage_test)
+  set_property(TEST storage_test APPEND PROPERTY LABELS full fast)
 endif()
 
 include(${PROJECT_SOURCE_DIR}/packaging/install.cmake)

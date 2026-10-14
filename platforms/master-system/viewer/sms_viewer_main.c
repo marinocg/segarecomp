@@ -2,7 +2,8 @@
  *
  *   <game> [--viewer-unthrottled] [--viewer-mute] [--viewer-frames <n>] [--viewer-scale <n>] [--viewer-record <file>]
  *
- * Keys: arrows = D-pad, Z = button 1, X = button 2, P = pause, R = reset, Esc/close = quit. `--viewer-record` writes the
+ * Keys (rebindable in the pause menu): arrows = D-pad, Z = button 1, X = button 2, P = the console Pause button; Esc / gamepad Back opens the
+ * host pause menu (Resume, Quick Settings, Video, Controls, Audio, System incl. Reset, Return/Quit); window close = quit. `--viewer-record` writes the
  * input stream the run consumed as a headless `--input` script (the run since the last reset). Exit: 0 quit or frame
  * limit; 3 guest stop; 4 SMS_ERROR at start; 5 viewer/host failure; 64 usage. The ROM is the build-time embedded array. */
 #include <stdio.h>
@@ -41,6 +42,8 @@ int main(int argc, char **argv) {
   sms_sdl3_viewer_host(viewer, &host);
   sms_pacer_init(&pacer, options.unthrottled);
   result = sms_viewer_run(&rig, &host, &pacer, options.frames);
+  if (result.outcome == SMS_VIEWER_GUEST_ERROR && options.frames == SMS_NO_LIMIT && !sms_stop_is_unadmitted_pc(&result.stop))
+    sms_sdl3_viewer_stop_screen(viewer, "The game stopped", "The generated program stopped with a typed guest error. The machine fails closed instead of guessing; the run log has the stable error class.");
   sms_sdl3_viewer_close(viewer);
   printf("viewer outcome %d frames %llu presented %llu audio_samples %llu audio_failures %llu resets %u\n", (int)result.outcome,
          (unsigned long long)result.frames, (unsigned long long)result.frames_presented,
