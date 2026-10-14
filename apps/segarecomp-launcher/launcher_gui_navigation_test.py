@@ -13,6 +13,7 @@ import subprocess
 import struct
 import sys
 import tempfile
+import time
 
 
 def run(exe, env, script, tmp):
@@ -61,9 +62,18 @@ def main():
             for page in pages:
                 shot = tmp / "responsive.bmp"
                 shot.unlink(missing_ok=True)
+                trace_path = tmp / "capture-trace.txt"
+                trace_path.unlink(missing_ok=True)
                 e = dict(env, SEGARECOMP_SHOT=str(shot), SEGARECOMP_SHOT_PAGE=page,
-                         SEGARECOMP_SHOT_SIZE=size, SEGARECOMP_SHOT_FRAMES="4")
-                subprocess.run([exe], env=e, timeout=60, check=True, capture_output=True)
+                         SEGARECOMP_SHOT_SIZE=size, SEGARECOMP_SHOT_FRAMES="4", SEGARECOMP_GUI_TRACE=str(trace_path))
+                started = time.monotonic()
+                print(f"capture start: {page} at {size}", flush=True)
+                try:
+                    subprocess.run([exe], env=e, timeout=60, check=True, capture_output=True)
+                except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as error:
+                    progress = trace_path.read_text() if trace_path.exists() else "no startup trace"
+                    raise RuntimeError(f"capture {page} at {size}; bmp_exists={shot.exists()}; progress:\n{progress}; stderr={error.stderr!r}") from error
+                print(f"capture done: {page} at {size} in {time.monotonic() - started:.2f}s", flush=True)
                 bmp = shot.read_bytes()
                 width, height = struct.unpack_from("<ii", bmp, 18)
                 if bmp[:2] != b"BM" or (width, abs(height)) != tuple(map(int, size.split("x"))):

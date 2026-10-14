@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
 
 #if !defined(_WIN32)
 #include <unistd.h>
@@ -202,6 +203,77 @@ int main() {
       expect(!r.ok() && fs::exists(victim) && fs::exists(cache / "games" / "mystery" / "keep.me") && fs::exists(cache / "games"), "forged item refused: " + path.string());
     }
   }
+  {  // Legitimate plans become stale: links INTO the cache are not ownership.
+    const fs::path protected_dir = cache / "library";
+    spit(protected_dir / "generated.c", "protected sentinel");
+    spit(protected_dir / "obj" / "keep.rom", "protected ROM");
+    const fs::path owned = cache / "games" / key32('1');
+    make_build(owned);
+    const Plan original = plan_intermediates(scan_storage(catalog, cache, library), {ida}, busy);
+    fs::rename(owned, cache / "saved-build");
+    std::error_code ec;
+    fs::create_directory_symlink(protected_dir, owned, ec);
+    if (!ec) {
+      busy.try_begin_maintenance();
+      const auto r = execute_plan(original, cache, busy);
+      busy.end_maintenance();
+      expect(!r.ok() && fs::exists(protected_dir / "generated.c") && fs::exists(protected_dir / "obj" / "keep.rom"), "original intermediates plan rejects in-cache ancestor link");
+      fs::remove(owned);
+    }
+    fs::rename(cache / "saved-build", owned);
+    // All deletion kinds use the same traversal, including games/ and zig-cache/ ancestors.
+    const auto rep = scan_storage(catalog, cache, library);
+    spit(cache / "games" / (key32('1') + ".failed") / "generated.c", "failed intermediate");
+    const auto failed_report = scan_storage(catalog, cache, library);
+    const std::vector<Plan> plans = {plan_intermediates(rep, {ida}, busy), plan_archive(rep, {ida}, busy), plan_superseded(rep, {ida}, busy), plan_remove_from_library(rep, {ida}, true, busy),
+                                  plan_failed_partial(failed_report, true, busy), plan_failed_partial(failed_report, false, busy)};
+    spit(protected_dir / key32('1') / "generated.c", "protected");
+    fs::rename(cache / "games", cache / "saved-games");
+    fs::create_directory_symlink(protected_dir, cache / "games", ec);
+    if (!ec) {
+      for (const auto &plan : plans) {
+        busy.try_begin_maintenance(); const auto r = execute_plan(plan, cache, busy); busy.end_maintenance();
+        expect(!r.ok() && fs::exists(protected_dir / key32('1') / "generated.c"), "every games deletion kind rejects ancestor link");
+      }
+      fs::remove(cache / "games");
+    }
+    fs::rename(cache / "saved-games", cache / "games");
+    spit(cache / "zig-cache" / "generated.c", "compiler intermediate");
+    const auto zig = plan_zig_cache(rep, cache, busy);
+    fs::rename(cache / "zig-cache", cache / "saved-zig");
+    fs::create_directory_symlink(protected_dir, cache / "zig-cache", ec);
+    if (!ec) {
+      busy.try_begin_maintenance(); const auto r = execute_plan(zig, cache, busy); busy.end_maintenance();
+      expect(!r.ok() && fs::exists(protected_dir / "generated.c"), "compiler cache rejects ancestor link into library");
+      fs::remove(cache / "zig-cache");
+    }
+    fs::rename(cache / "saved-zig", cache / "zig-cache");
+  }
+#if !defined(_WIN32)
+  {  // Bounded concurrent rename/link replacement of a managed ancestor.
+    const fs::path owned = cache / "games" / key32('7'), saved = cache / "racing-build", protected_dir = cache / "library";
+    spit(owned / "generated.c", "intermediate");
+    Plan plan;
+    plan.items.push_back({owned / "generated.c", 12, false});
+    std::atomic<bool> started{false};
+    std::thread attacker([&] {
+      for (int i = 0; i < 300; ++i) {
+        fs::rename(owned, saved);
+        fs::create_directory_symlink(protected_dir, owned);
+        started = true;
+        std::this_thread::yield();
+        fs::remove(owned);
+        fs::rename(saved, owned);
+      }
+    });
+    while (!started.load()) std::this_thread::yield();
+    busy.try_begin_maintenance();
+    for (int i = 0; i < 300; ++i) (void)execute_plan(plan, cache, busy);
+    busy.end_maintenance();
+    attacker.join();
+    expect(fs::exists(protected_dir / "generated.c") && fs::file_size(protected_dir / "generated.c") == 18, "concurrent ancestor link swaps never delete the protected target");
+  }
+#endif
   {  // archive + catalog consequence; ROM and cover untouched
     report = scan_storage(catalog, cache, library);
     Plan plan = plan_archive(report, {ida}, busy);

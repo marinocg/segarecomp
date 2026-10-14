@@ -261,11 +261,12 @@ int sv_settings_save(const SvSettings *settings, const char *path) {
 
 /* ---- conflicts ---- */
 
-static int find_conflict(const int table[SV_PLAYERS][SV_ACT_COUNT], SvSystem system, int none, int code, int player, SvAction action, SvBindingOwner *owner) {
+static int find_conflict(const int table[SV_PLAYERS][SV_ACT_COUNT], SvSystem system, int none, int code, int player, SvAction action, int same_player, SvBindingOwner *owner) {
   int p, a;
   if (code == none) return 0;
   for (p = 0; p < SV_PLAYERS; ++p)
     for (a = 0; a < SV_ACT_COUNT; ++a) {
+      if (same_player && p != player) continue;
       if ((p == player && a == (int)action) || !sv_action_available(system, p, (SvAction)a)) continue;
       if (table[p][a] == code) { if (owner != NULL) { owner->player = p; owner->action = (SvAction)a; } return 1; }
     }
@@ -273,10 +274,10 @@ static int find_conflict(const int table[SV_PLAYERS][SV_ACT_COUNT], SvSystem sys
 }
 
 int sv_find_key_conflict(const SvSettings *s, SvSystem system, int key, int player, SvAction action, SvBindingOwner *owner) {
-  return find_conflict(s->bind[system].key, system, 0, key, player, action, owner);
+  return find_conflict(s->bind[system].key, system, 0, key, player, action, 0, owner);
 }
 int sv_find_pad_conflict(const SvSettings *s, SvSystem system, int button, int player, SvAction action, SvBindingOwner *owner) {
-  return find_conflict(s->bind[system].pad, system, -1, button, player, action, owner);
+  return find_conflict(s->bind[system].pad, system, -1, button, player, action, 1, owner);
 }
 
 int sv_assign_key(SvSettings *s, SvSystem system, int player, SvAction action, int key, SvBindingOwner *moved_from, int *had_conflict) {
@@ -302,7 +303,6 @@ int sv_assign_pad(SvSettings *s, SvSystem system, int player, SvAction action, i
   if (button < 0 || button > 30) return -1;
   conflict = sv_find_pad_conflict(s, system, button, player, action, &owner);
   /* Two PLAYERS may legitimately share a pad layout (each reads its own device): only a clash inside the same player is a conflict. */
-  if (conflict && owner.player != player) conflict = 0;
   if (conflict) { s->bind[system].pad[owner.player][owner.action] = -1; if (moved_from != NULL) *moved_from = owner; }
   if (had_conflict != NULL) *had_conflict = conflict;
   s->bind[system].pad[player][action] = button;

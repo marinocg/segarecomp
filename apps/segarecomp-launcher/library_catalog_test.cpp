@@ -2,6 +2,8 @@
 // records, and the rule that nothing unverifiable is ever treated as a playable game. No window, no product CLI.
 
 #include "library_catalog.hpp"
+#include "json_lite.hpp"
+#include <limits>
 
 #include <fstream>
 #include <iostream>
@@ -38,6 +40,23 @@ int main() {
   fs::remove_all(dir);
   fs::create_directories(dir);
   const fs::path file = dir / "library" / "library.json";
+  {
+    for (const char *number : {"1e999", "-1e999", "9223372036854775808", "-9223372036854775809"})
+      expect(!json::parse(std::string("{\"schema\":") + number + "}"), "nonfinite or out-of-range JSON number rejected");
+    for (const char *number : {"1.5", "9.223372036854776e18", "-9.223372036854778e18"}) {
+      const auto value = json::parse(std::string("{\"schema\":") + number + "}");
+      expect(value && value->num("schema", -1) == -1, "invalid integer field safely returns fallback");
+    }
+    const auto endpoints = json::parse("{\"min\":-9223372036854775808,\"max\":9223372036854775807,\"whole\":1e0}");
+    expect(endpoints && endpoints->num("min") == std::numeric_limits<long long>::min() && endpoints->num("max") == std::numeric_limits<long long>::max() && endpoints->num("whole") == 1,
+           "exact signed integer endpoints and integral exponent survive");
+    json::Value nonfinite = json::Value::make_object(), real;
+    real.kind = json::Value::Kind::real;
+    for (double n : {std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+      real.real = n; nonfinite.set("schema", real);
+      expect(nonfinite.num("schema", -1) == -1, "programmatically supplied nonfinite real never reaches integer cast");
+    }
+  }
 
   {  // empty catalog: a missing file is a new library; saving then loading round-trips
     Catalog c(file);
@@ -131,6 +150,14 @@ int main() {
     expect(c.load() == CatalogLoad::read_only_newer && c.read_only() && c.entries().size() == 1, "newer schema opens read-only");
     expect(!c.save() && slurp(file) == before, "a read-only catalog is never written");
     expect(!c.import_rom(rom("genesis", 'g', "/x"), 1).error.empty(), "read-only catalog refuses imports");
+  }
+  {
+    const fs::path invalid = dir / "invalid-schema.json";
+    for (const char *number : {"1e999", "1.5", "9.223372036854776e18"}) {
+      spit(invalid, std::string("{\"schema\":") + number + ",\"games\":[]}");
+      Catalog c(invalid);
+      expect(c.load() == CatalogLoad::recovered_empty && !c.notice().empty(), "invalid schema follows catalog corruption contract");
+    }
   }
   {  // migration of existing cache records: only verified finished builds, no invented ROM path, idempotent
     const fs::path cache = dir / "cache";

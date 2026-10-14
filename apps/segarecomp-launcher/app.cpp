@@ -199,6 +199,7 @@ void App::init_ui() {
 }
 
 void App::shutdown() {
+  trace("shutdown=workers");
   if (job_) job_->wait();
   game_.reset();
   scan_cancel_ = true;
@@ -208,6 +209,7 @@ void App::shutdown() {
   if (maint_job_.valid()) maint_job_.wait();
   if (sms_probe_.valid()) sms_probe_.wait();
   if (hid_job_.valid()) hid_job_.wait();
+  trace("shutdown=textures");
   for (auto &entry : cover_cache_)
     if (entry.second != nullptr) SDL_DestroyTexture(entry.second);
   cover_cache_.clear();
@@ -219,8 +221,10 @@ void App::shutdown() {
   }
   if (renderer_ != nullptr) SDL_DestroyRenderer(renderer_);
   if (window_ != nullptr) SDL_DestroyWindow(window_);
+  trace("shutdown=input");
   sv_diag_destroy(diag_);
   diag_ = nullptr;
+  trace("shutdown=sdl");
   SDL_Quit();
 }
 
@@ -842,8 +846,12 @@ void App::run_script() {
 }
 
 int App::run() {
+  trace_path_ = SDL_getenv("SEGARECOMP_GUI_TRACE");
+  trace("startup=window");
   if (!init_window()) return 1;
+  trace("startup=ui");
   init_ui();
+  trace("startup=catalog");
   // Library: load the persistent catalog, then (once, read-only) adopt verifiable finished builds of the product-owned cache folder.
   catalog_.load();
   catalog_notice_ = catalog_.notice();
@@ -857,7 +865,6 @@ int App::run() {
   if (!catalog_notice_.empty()) toast(catalog_notice_, true);
   autoplay_ = SDL_getenv("SEGARECOMP_GUI_AUTOPLAY") != nullptr;
   autoplay_pending_ = autoplay_;
-  trace_path_ = SDL_getenv("SEGARECOMP_GUI_TRACE");
   if (const char *script = SDL_getenv("SEGARECOMP_GUI_SCRIPT")) {
     std::ifstream in(script);
     for (std::string line; std::getline(in, line);)
@@ -914,10 +921,14 @@ int App::run() {
   }
   if (SDL_getenv("SEGARECOMP_SHOT_SELECT")) { select_mode_ = true; for (const auto *e : visible_entries()) { selected_.insert(e->id()); if (selected_.size() >= 2) break; } }
   bool running = true;
+  trace("startup=ready");
   while (running) {
     ++frame_;
+    const bool capture_trace = !shot_path_.empty() && (frame_ <= shot_frame_ || (frame_ & (frame_ - 1)) == 0);
+    if (capture_trace) trace("frame=" + std::to_string(frame_) + " phase=events");
     process_events(running);
     update_jobs();
+    if (capture_trace) trace("frame=" + std::to_string(frame_) + " phase=jobs status=" + std::to_string(status_pending_) + " scan=" + std::to_string(scanning_));
     for (auto it = script_key_up_.begin(); it != script_key_up_.end();) {
       if (frame_ >= it->first) {
         SDL_Event e;
@@ -945,6 +956,7 @@ int App::run() {
     update_input_diag();
     focus_label_.clear();
     draw();
+    if (capture_trace) trace("frame=" + std::to_string(frame_) + " phase=drawn");
     ImGui::Render();
     int win_w_pt = 0, win_h_pt = 0, output_w = 0, output_h = 0;
     SDL_GetWindowSize(window_, &win_w_pt, &win_h_pt);
@@ -954,12 +966,17 @@ int App::run() {
     SDL_RenderClear(renderer_);
     ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer_);
     if (!shot_path_.empty() && frame_ >= shot_frame_ && !status_pending_ && !scanning_ && (!job_ || SDL_getenv("SEGARECOMP_SHOT_DURING_BUILD") != nullptr) && !import_job_.valid()) {
+      trace("capture=read_pixels page=" + shot_page_);
       if (SDL_Surface *surface = SDL_RenderReadPixels(renderer_, nullptr)) { SDL_SaveBMP(surface, shot_path_.c_str()); SDL_DestroySurface(surface); }
+      trace("capture=saved");
       running = false;
     }
     SDL_RenderPresent(renderer_);
+    if (capture_trace) trace("frame=" + std::to_string(frame_) + " phase=presented");
   }
+  trace("shutdown=begin");
   shutdown();
+  trace("shutdown=done");
   return 0;
 }
 

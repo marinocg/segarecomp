@@ -108,6 +108,16 @@ void binding_tests() {
         "a duplicate pad button inside one player moves the binding");
   check(sv_assign_pad(&p, SV_SYSTEM_GENESIS, 0, SV_ACT_BUTTON1, 99, nullptr, nullptr) == -1, "an invalid button is refused");
   // axis helper
+  for (SvSystem sys : {SV_SYSTEM_SMS, SV_SYSTEM_GENESIS}) {
+    SvSettings second = defaults();
+    check(sv_find_pad_conflict(&second, sys, SV_PAD_EAST, 1, SV_ACT_BUTTON1, &moved) == 1 && moved.player == 1 && moved.action == SV_ACT_BUTTON2,
+          "pad lookup searches the requested player's device, not P1 first");
+    check(sv_assign_pad(&second, sys, 1, SV_ACT_BUTTON1, SV_PAD_EAST, &moved, &conflict) == 0 && conflict && moved.player == 1 && moved.action == SV_ACT_BUTTON2 &&
+              second.bind[sys].pad[1][SV_ACT_BUTTON2] == -1 && second.bind[sys].pad[1][SV_ACT_BUTTON1] == SV_PAD_EAST &&
+              second.bind[sys].pad[0][SV_ACT_BUTTON2] == SV_PAD_EAST,
+          "P2 conflict moves only P2's binding, including generic Genesis configuration");
+    check(sv_assign_pad(&second, sys, 1, SV_ACT_BUTTON1, SV_PAD_EAST, &moved, &conflict) == 0 && !conflict, "reassigning the same pad action has no conflict");
+  }
   check(sv_axis_direction(0, 25) == 0 && sv_axis_direction(8000, 25) == 0 && sv_axis_direction(9000, 25) == 1 && sv_axis_direction(-9000, 25) == -1 && sv_axis_direction(32767, 25) == 1, "stick dead zone");
   check(sv_axis_direction(9000, 60) == 0, "a larger dead zone ignores more travel");
   // sanitize drops reserved bindings from a loaded file

@@ -3,6 +3,19 @@
 #include <algorithm>
 #include <cstdio>
 #include <map>
+#include <memory>
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
+#include <cerrno>
+#include <dirent.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -374,40 +387,7 @@ Plan plan_remove_from_library(const StorageReport &report, const std::vector<std
 // ---- execution ----
 namespace {
 
-struct Remover {
-  ExecResult &result;
-  void tree(const fs::path &dir, int depth) {
-    if (depth > max_depth) { result.problems.push_back("too deep: " + utf8_of(dir.filename())); return; }
-    std::error_code ec;
-    bool left_behind = false;
-    for (fs::directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec)) {
-      std::error_code sec;
-      const auto status = it->symlink_status(sec);
-      if (sec) { left_behind = true; result.problems.push_back("cannot inspect " + utf8_of(it->path().filename())); continue; }
-      if (status.type() == fs::file_type::symlink) { left_behind = true; result.problems.push_back("skipped link " + utf8_of(it->path().filename())); continue; }
-      if (status.type() == fs::file_type::directory) { tree(it->path(), depth + 1); continue; }
-      if (status.type() == fs::file_type::regular) { file(it->path()); continue; }
-      left_behind = true;
-      result.problems.push_back("skipped unexpected item " + utf8_of(it->path().filename()));
-    }
-    if (ec) result.problems.push_back("cannot list " + utf8_of(dir.filename()) + ": " + ec.message());
-    if (left_behind) return;
-    std::error_code rec;
-    fs::remove(dir, rec);
-    if (rec && fs::exists(dir, rec)) result.problems.push_back("cannot remove folder " + utf8_of(dir.filename()));
-  }
-  void file(const fs::path &path) {
-    std::error_code ec;
-    const auto size = fs::file_size(path, ec);
-    if (fs::remove(path, ec)) { result.bytes_freed += ec ? 0 : size; ++result.removed; return; }
-    // A read-only file inside the managed tree: lift the flag on this one file and retry once.
-    std::error_code pec;
-    fs::permissions(path, fs::perms::owner_write, fs::perm_options::add, pec);
-    ec.clear();
-    if (fs::remove(path, ec)) { result.bytes_freed += size; ++result.removed; return; }
-    result.problems.push_back("denied " + utf8_of(path.filename()) + (ec ? ": " + ec.message() : std::string()));
-  }
-};
+#include "storage_remover.hpp"
 
 // The only shapes a plan item may take, relative to the cache root.
 bool item_shape_allowed(const fs::path &relative) {
@@ -429,8 +409,12 @@ bool item_shape_allowed(const fs::path &relative) {
 ExecResult execute_plan(const Plan &plan, const fs::path &cache_root, const BusyGuard &busy) {
   ExecResult result;
   std::error_code ec;
-  const fs::path canonical_root = fs::weakly_canonical(cache_root, ec);
-  if (ec || canonical_root.empty()) { result.problems.push_back("the cache folder cannot be resolved"); return result; }
+  // Resolve only the trusted prefix OUTSIDE the cache (e.g. macOS /tmp).
+  // The cache itself and every descendant must be opened without following links.
+  const fs::path absolute_root = fs::absolute(cache_root, ec).lexically_normal();
+  const fs::path parent_root = fs::canonical(absolute_root.parent_path(), ec);
+  if (ec || parent_root.empty()) { result.problems.push_back("the cache folder cannot be resolved"); return result; }
+  const fs::path anchored_root = parent_root / absolute_root.filename();
   if (!busy.maintenance()) { result.problems.push_back("internal: cleanup must hold the maintenance lock"); return result; }
   for (const auto &item : plan.items) {
     const std::string label = utf8_of(item.path.filename());
@@ -438,10 +422,6 @@ ExecResult execute_plan(const Plan &plan, const fs::path &cache_root, const Busy
     if (!is_within(cache_root.lexically_normal(), normal)) { result.problems.push_back("refused (outside the cache): " + label); continue; }
     const fs::path relative = normal.lexically_relative(cache_root.lexically_normal());
     if (!item_shape_allowed(relative)) { result.problems.push_back("refused (not a managed item): " + label); continue; }
-    // The parent chain must resolve inside the canonical root (a symlinked games/ or entry folder would escape it).
-    std::error_code pec;
-    const fs::path parent_canonical = fs::weakly_canonical(normal.parent_path(), pec);
-    if (pec || !(parent_canonical == canonical_root || is_within(canonical_root, parent_canonical))) { result.problems.push_back("refused (path escapes the cache): " + label); continue; }
     const auto first = relative.begin();
     if (*first == "games") {
       auto it = relative.begin();
@@ -452,20 +432,8 @@ ExecResult execute_plan(const Plan &plan, const fs::path &cache_root, const Busy
       result.problems.push_back("busy: the compiler cache is in use");
       continue;
     }
-    std::error_code sec;
-    const auto status = fs::symlink_status(normal, sec);
-    if (sec) continue;  // already gone
-    if (status.type() == fs::file_type::symlink) { result.problems.push_back("refused (link): " + label); continue; }
     Remover remover{result};
-    if (status.type() == fs::file_type::directory) {
-      if (!item.directory) { result.problems.push_back("refused (unexpected type): " + label); continue; }
-      remover.tree(normal, 0);
-    } else if (status.type() == fs::file_type::regular) {
-      if (item.directory) { result.problems.push_back("refused (unexpected type): " + label); continue; }
-      remover.file(normal);
-    } else {
-      result.problems.push_back("refused (unexpected type): " + label);
-    }
+    remover.remove(anchored_root, relative, item.directory);
   }
   return result;
 }

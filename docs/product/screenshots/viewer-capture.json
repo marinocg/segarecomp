@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "binary_sha256": "eb47e213a4d47480d73ad3d04019e9fdb3ddbb3e3a8dfa038ab689096706b70d",
+  "binary_sha256": "6ee261a12df36fd484cf68af923de4e07036c5a81f7742c335098c539d27e7d2",
   "fixture": "project-authored fictional RGB scene; virtual controllers, never physical hardware",
   "hidpi": "output-pixel simulations at 2x logical sizes; not an OS/display HiDPI test",
   "reproduce": "python3 tools/viewer_visual_capture.py --gallery build/dev/libs/viewer/sv_gallery --assets apps/segarecomp-launcher/assets --out build/visual-review/viewer --publish docs/product/screenshots",

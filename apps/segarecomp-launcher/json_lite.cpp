@@ -3,6 +3,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cmath>
+#include <charconv>
+#include <limits>
 
 namespace launcher::json {
 
@@ -22,7 +25,10 @@ long long Value::num(std::string_view key, long long fallback) const {
   const Value *v = get(key);
   if (v == nullptr) return fallback;
   if (v->kind == Kind::integer) return v->integer;
-  if (v->kind == Kind::real) return static_cast<long long>(v->real);
+  // The upper bound is exclusive: LLONG_MAX rounds UP to 2^63 as a double.
+  if (v->kind == Kind::real && std::isfinite(v->real) && std::trunc(v->real) == v->real &&
+      v->real >= static_cast<double>(std::numeric_limits<long long>::min()) &&
+      v->real < -static_cast<double>(std::numeric_limits<long long>::min())) return static_cast<long long>(v->real);
   return fallback;
 }
 
@@ -155,8 +161,15 @@ struct Parser {
       while (at < text.size() && text[at] >= '0' && text[at] <= '9') ++at;
     }
     const std::string token(text.substr(begin, at - begin));
-    if (!real && token.size() <= 18) { out.kind = Value::Kind::integer; out.integer = std::strtoll(token.c_str(), nullptr, 10); }
-    else { out.kind = Value::Kind::real; out.real = std::strtod(token.c_str(), nullptr); }
+    if (!real) {
+      const auto result = std::from_chars(token.data(), token.data() + token.size(), out.integer);
+      if (result.ec != std::errc{}) return fail("integer out of range");
+      out.kind = Value::Kind::integer;
+    } else {
+      out.kind = Value::Kind::real;
+      out.real = std::strtod(token.c_str(), nullptr);
+      if (!std::isfinite(out.real)) return fail("nonfinite number");
+    }
     return true;
   }
   bool value(Value &out, int depth) {
