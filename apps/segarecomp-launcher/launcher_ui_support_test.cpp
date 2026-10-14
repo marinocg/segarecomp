@@ -25,7 +25,7 @@ void spit(const fs::path &p, const std::string &s) { fs::create_directories(p.pa
 std::string slurp(const fs::path &p) { std::ifstream in(p, std::ios::binary); std::ostringstream o; o << in.rdbuf(); return o.str(); }
 
 void put16(std::string &s, unsigned v) { s.push_back(static_cast<char>(v & 0xFFU)); s.push_back(static_cast<char>((v >> 8U) & 0xFFU)); }
-void put32(std::string &s, unsigned long v) { put16(s, static_cast<unsigned>(v & 0xFFFFU)); put16(s, static_cast<unsigned>((v >> 16U) & 0xFFFFU)); }
+void put32(std::string &s, std::size_t v) { put16(s, static_cast<unsigned>(v & 0xFFFFU)); put16(s, static_cast<unsigned>((v >> 16U) & 0xFFFFU)); }
 
 struct ZipFile { std::string name, data; bool deflate = false; unsigned flags = 0; unsigned method_override = 0xFFFF; long crc_delta = 0; };
 
@@ -48,21 +48,21 @@ std::string make_zip(const std::vector<ZipFile> &files) {
   std::string zip, cd;
   for (const auto &f : files) {
     const std::string body = f.deflate ? raw_deflate(f.data) : f.data;
-    const unsigned long crc = (crc32(0, reinterpret_cast<const Bytef *>(f.data.data()), static_cast<uInt>(f.data.size())) + static_cast<unsigned long>(f.crc_delta)) & 0xFFFFFFFFUL;
+    const std::size_t crc = (static_cast<std::size_t>(crc32(0, reinterpret_cast<const Bytef *>(f.data.data()), static_cast<uInt>(f.data.size()))) + static_cast<std::size_t>(f.crc_delta)) & 0xFFFFFFFFU;
     const unsigned method = f.method_override != 0xFFFF ? f.method_override : (f.deflate ? 8U : 0U);
-    const unsigned long offset = zip.size();
+    const std::size_t offset = zip.size();
     std::string local;
-    put32(local, 0x04034b50UL); put16(local, 20); put16(local, f.flags); put16(local, method); put16(local, 0); put16(local, 0);
+    put32(local, 0x04034b50U); put16(local, 20); put16(local, f.flags); put16(local, method); put16(local, 0); put16(local, 0);
     put32(local, crc); put32(local, body.size()); put32(local, f.data.size()); put16(local, static_cast<unsigned>(f.name.size())); put16(local, 0);
     zip += local + f.name + body;
-    put32(cd, 0x02014b50UL); put16(cd, 20); put16(cd, 20); put16(cd, f.flags); put16(cd, method); put16(cd, 0); put16(cd, 0);
+    put32(cd, 0x02014b50U); put16(cd, 20); put16(cd, 20); put16(cd, f.flags); put16(cd, method); put16(cd, 0); put16(cd, 0);
     put32(cd, crc); put32(cd, body.size()); put32(cd, f.data.size()); put16(cd, static_cast<unsigned>(f.name.size())); put16(cd, 0); put16(cd, 0);
     put16(cd, 0); put16(cd, 0); put32(cd, 0); put32(cd, offset);
     cd += f.name;
   }
-  const unsigned long cd_offset = zip.size();
+  const std::size_t cd_offset = zip.size();
   zip += cd;
-  put32(zip, 0x06054b50UL); put16(zip, 0); put16(zip, 0); put16(zip, static_cast<unsigned>(files.size())); put16(zip, static_cast<unsigned>(files.size()));
+  put32(zip, 0x06054b50U); put16(zip, 0); put16(zip, 0); put16(zip, static_cast<unsigned>(files.size())); put16(zip, static_cast<unsigned>(files.size()));
   put32(zip, cd.size()); put32(zip, cd_offset); put16(zip, 0);
   return zip;
 }
