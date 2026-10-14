@@ -132,11 +132,17 @@ int main(void) {
          stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP &&
          value == UINT32_C(0xFFFFFFFF));
 
-  /* The HV COUNTER ($C00008) answers WORD and BYTE reads (ADR 0121); a LONG read of it remains fail-closed. */
+  /* The HV COUNTER ($C00008) answers WORD and BYTE reads in the Mega Drive display mode (ADR 0121); outside it (register #1
+     bit 2 clear, the power-on state) and for a LONG read it remains fail-closed. */
+  value = UINT32_C(0xFFFFFFFF);
+  assert(genesis_route_access(&runtime, UINT32_C(0x00C00008), GENESIS_ACCESS_WORD,
+                               GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
+  runtime.devices.vdp.registers[1] = UINT16_C(0x0004);
   value = UINT32_C(0xFFFFFFFF);
   assert(genesis_route_access(&runtime, UINT32_C(0x00C00008), GENESIS_ACCESS_WORD,
                                GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
   assert(value <= UINT32_C(0xFFFF));
+  runtime.devices.vdp.registers[1] = UINT16_C(0x0000); /* restore the power-on register state for the unchanged-state checks below */
   value = UINT32_C(0xFFFFFFFF);
   assert(genesis_route_access(&runtime, UINT32_C(0x00C00008), GENESIS_ACCESS_LONG,
                                GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);

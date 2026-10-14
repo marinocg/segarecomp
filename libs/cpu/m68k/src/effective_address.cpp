@@ -34,4 +34,14 @@ std::uint32_t m68k_canonical_ea_address(const M68kEffectiveAddress &ea) noexcept
   return ea.absolute_address;
 }
 
+std::uint32_t m68k_data_access_ea_address(const M68kEffectiveAddress &ea) noexcept {
+  // The decoded absolute-long operand stays the raw 32-bit value (LEA/PEA use it architecturally). The 68000 drives only
+  // A1..A23, so for a DATA access the sign-extended spelling of a top-half address (high byte $FF, bit 23 set -- what
+  // abs.W already yields) names the same 24-bit location. Any other nonzero high byte is returned unchanged and is rejected
+  // downstream (effective_address_not_24bit). Control targets keep m68k_canonical_ea_address.
+  if (ea.mode == M68kEaMode::absolute_long && (ea.absolute_address & UINT32_C(0xFF800000)) == UINT32_C(0xFF800000))
+    return ea.absolute_address & UINT32_C(0x00FFFFFF);
+  return m68k_canonical_ea_address(ea);
+}
+
 } // namespace segarecomp

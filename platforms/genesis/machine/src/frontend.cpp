@@ -725,7 +725,7 @@ std::optional<DirectFlowDiagnostic> m68k_resolve_static_general_operand(
   // Preserve ea.absolute_address itself as decoded/lifted provenance.  This
   // is the sole static EA-to-Genesis-bus handoff before alignment and region
   // resolution, so only absolute.w receives 24-bit canonicalization.
-  const auto address = m68k_canonical_ea_address(ea);
+  const auto address = m68k_data_access_ea_address(ea);
   if (const auto misaligned = m68k_startup_absolute_operand_alignment(address, width)) return *misaligned;
   return m68k_classify_general_memory_access(program, address, width, direction, provenance);
 }
@@ -4545,7 +4545,7 @@ FrontendResult discover_m68k_general_startup(const FrontendProgram &program) {
     const auto retain_fact = [&](const M68kDecodedInstruction &decoded, const M68kEffectiveAddress &ea,
                                  M68kStaticMemoryFactRole role, M68kMemoryAccessDirection direction) {
       if (!m68k_is_statically_foldable_control_ea(ea)) return;
-      const auto address = m68k_canonical_ea_address(ea);
+      const auto address = m68k_data_access_ea_address(ea);
       M68kStaticMemoryFact fact{};
       fact.operation = decoded.provenance;
       fact.role = role;

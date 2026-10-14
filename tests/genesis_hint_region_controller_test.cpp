@@ -581,38 +581,69 @@ void test_hv_counter() {
   const uint64_t line = GENESIS_NTSC_MASTER_TICKS_PER_LINE;
   auto r = make_runtime();
   uint32_t value = 0;
+  r->devices.vdp.registers[1] = 0x04;   // Mega Drive display mode, 224 lines
   r->devices.vdp.registers[12] = 0x81;  // H40
   r->scheduler.master_ticks = 10ull * line;
-  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_WORD, &value) && value == 0x0A00u, "HV word read: line 10, start of line");
+  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_WORD, &value) && value == 0x0AA5u, "HV word read: line 10, line origin (H40 $A5)");
   check(read_hv(*r, 0xC00008, GENESIS_ACCESS_BYTE, &value) && value == 0x0Au, "HV BYTE read of the V counter lane");
-  check(read_hv(*r, 0xC00009, GENESIS_ACCESS_BYTE, &value) && value == 0x00u, "HV BYTE read of the H counter lane");
-  check(read_hv(*r, 0xC0000C, GENESIS_ACCESS_WORD, &value) && value == 0x0A00u, "HV counter mirrors through $C0000F");
-  // The V counter runs $00-$EA, then continues $E5-$FF over the 262-line NTSC frame.
-  r->scheduler.master_ticks = 234ull * line;
-  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_BYTE, &value) && value == 0xEAu, "V counter reaches $EA on line 234");
-  r->scheduler.master_ticks = 235ull * line;
-  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_BYTE, &value) && value == 0xE5u, "V counter wraps to $E5 on line 235");
-  r->scheduler.master_ticks = 261ull * line;
-  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_BYTE, &value) && value == 0xFFu, "V counter ends at $FF on the last line");
-  // H counter: $00 at the line start, last value $FF in both widths ($E4-$FF tail in H40, $E9-$FF in H32).
-  r->scheduler.master_ticks = 10ull * line + (line - 1u);
-  check(read_hv(*r, 0xC00009, GENESIS_ACCESS_BYTE, &value) && value == 0xFFu, "H40 H counter ends at $FF");
-  r->devices.vdp.registers[12] = 0x00;  // H32
-  check(read_hv(*r, 0xC00009, GENESIS_ACCESS_BYTE, &value) && value == 0xFFu, "H32 H counter ends at $FF");
-  // Monotonic within a line (the counter only skips forward at its documented gap).
-  uint32_t previous = 0u;
-  bool monotonic = true;
-  for (uint64_t tick = 0; tick < line; tick += 7u) {
-    r->scheduler.master_ticks = 10ull * line + tick;
-    monotonic = monotonic && read_hv(*r, 0xC00009, GENESIS_ACCESS_BYTE, &value) && value >= previous;
-    previous = value;
+  check(read_hv(*r, 0xC00009, GENESIS_ACCESS_BYTE, &value) && value == 0xA5u, "HV BYTE read of the H counter lane");
+  check(read_hv(*r, 0xC0000C, GENESIS_ACCESS_WORD, &value) && value == 0x0AA5u, "HV counter mirrors through $C0000F");
+  check(!read_hv(*r, 0xC00008, GENESIS_ACCESS_LONG, &value), "a LONG HV counter read stays fail-closed");
+  check(!read_hv(*r, 0xC00009, GENESIS_ACCESS_WORD, &value), "an odd-address WORD HV counter read stays fail-closed");
+  // Independent reference: Genesis Plus GX core/hvc.h cycle2hc32 / cycle2hc40 sampled at every counter discontinuity, both sides of
+  // the span where the H40 pixel clock changes (right blanking .. left blanking), the line start and the line end.
+  struct HSample { uint32_t tick; uint32_t h; };
+  static const HSample h40_samples[] = {{0,0xA5}, {1,0xA5}, {15,0xA5}, {16,0xA6}, {31,0xA6}, {32,0xA7}, {47,0xA7}, {48,0xA8}, {271,0xB5}, {272,0xB6}, {279,0xB6}, {280,0xE4}, {287,0xE4}, {288,0xE5}, {303,0xE5}, {304,0xE6}, {320,0xE6}, {321,0xE7}, {340,0xE7}, {341,0xE8}, {360,0xE8}, {361,0xE9}, {380,0xE9}, {381,0xEA}, {398,0xEA}, {399,0xEB}, {418,0xEB}, {419,0xEC}, {438,0xEC}, {439,0xED}, {458,0xED}, {459,0xEE}, {477,0xEE}, {478,0xEF}, {496,0xEF}, {497,0xF0}, {516,0xF0}, {517,0xF1}, {536,0xF1}, {537,0xF2}, {556,0xF2}, {557,0xF3}, {574,0xF3}, {575,0xF4}, {594,0xF4}, {595,0xF5}, {614,0xF5}, {615,0xF6}, {634,0xF6}, {635,0xF7}, {651,0xF7}, {652,0xF8}, {779,0xFF}, {780,0x00}, {2827,0x7F}, {2828,0x80}, {3419,0xA4}};
+  static const HSample h32_samples[] = {{0,0x85}, {1,0x85}, {19,0x85}, {20,0x86}, {39,0x86}, {40,0x87}, {59,0x87}, {60,0x88}, {299,0x93}, {300,0xE9}, {759,0xFF}, {760,0x00}, {3319,0x7F}, {3320,0x80}, {3419,0x84}};
+  for (int h40 = 0; h40 < 2; ++h40) {
+    r->devices.vdp.registers[12] = h40 ? 0x81 : 0x00;
+    const HSample *samples = h40 ? h40_samples : h32_samples;
+    const size_t count = h40 ? sizeof(h40_samples) / sizeof(h40_samples[0]) : sizeof(h32_samples) / sizeof(h32_samples[0]);
+    for (size_t i = 0; i < count; ++i) {
+      r->scheduler.master_ticks = 10ull * line + samples[i].tick;
+      check(read_hv(*r, 0xC00009, GENESIS_ACCESS_BYTE, &value) && value == samples[i].h,
+            h40 ? "H40 H counter matches the reference table" : "H32 H counter matches the reference table");
+      check(read_hv(*r, 0xC00008, GENESIS_ACCESS_WORD, &value) && value == (0x0A00u | samples[i].h),
+            "WORD and BYTE lanes agree on the same sample");
+    }
   }
-  check(monotonic, "the H counter never decreases within a scanline");
-  // Not modeled: the HV latch (register #0 bit 1), interlace and the 240-line mode stay fail-closed.
-  for (const auto &unmodeled : {std::pair<int, uint16_t>{0, 0x0002}, {12, 0x0086}, {1, 0x0008}}) {
-    auto u = make_runtime();
-    u->devices.vdp.registers[unmodeled.first] = unmodeled.second;
-    check(!read_hv(*u, 0xC00008, GENESIS_ACCESS_WORD, &value), "unmodeled HV counter configuration stays fail-closed");
+  // V counter: increments at the line origin, $00-$EA then $E5-$FF over the 262-line frame, and wraps with the frame.
+  r->devices.vdp.registers[12] = 0x81;
+  r->scheduler.master_ticks = 234ull * line + (line - 1u);
+  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_BYTE, &value) && value == 0xEAu, "V counter is $EA through the end of line 234");
+  r->scheduler.master_ticks = 235ull * line;
+  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_BYTE, &value) && value == 0xE5u, "V counter continues at $E5 on line 235");
+  r->scheduler.master_ticks = 261ull * line + (line - 1u);
+  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_WORD, &value) && value == 0xFFA4u, "last tick of the frame: V $FF, H40 $A4");
+  r->scheduler.master_ticks = GENESIS_NTSC_MASTER_TICKS_PER_FRAME;
+  check(read_hv(*r, 0xC00008, GENESIS_ACCESS_WORD, &value) && value == 0x00A5u, "the next frame restarts at V $00, H40 $A5");
+  r->scheduler.master_ticks = 3ull * GENESIS_NTSC_MASTER_TICKS_PER_FRAME + 5ull * line + 100ull;
+  {
+    uint32_t again = 0;
+    check(read_hv(*r, 0xC00008, GENESIS_ACCESS_WORD, &value) && read_hv(*r, 0xC00008, GENESIS_ACCESS_WORD, &again) && value == again,
+          "a read never advances guest time: repeated reads are identical");
+  }
+  // Not modeled, so fail-closed: the HV latch (register #0 bit 1), interlace (register #12 bits 1-2), the 240-line mode
+  // (register #1 bit 3), Master System mode 4 (register #1 bit 2 clear) and a mixed width selection (one of register #12 bits 7/0).
+  struct Unmodeled { int reg; uint16_t value; const char *why; };
+  static const Unmodeled unmodeled[] = {{0, 0x0002, "HV latch"}, {12, 0x0086, "interlace"}, {12, 0x0084, "interlace mode 2 with H32"},
+                                         {1, 0x000C, "240-line mode"}, {1, 0x0000, "mode 4"}, {12, 0x0001, "mixed width: RS1 only"},
+                                         {12, 0x0080, "mixed width: RS0 only"}};
+  for (const auto &u : unmodeled) {
+    auto fresh = make_runtime();
+    fresh->devices.vdp.registers[1] = 0x04;
+    fresh->devices.vdp.registers[12] = 0x81;
+    fresh->devices.vdp.registers[u.reg] = u.value;
+    check(!read_hv(*fresh, 0xC00008, GENESIS_ACCESS_WORD, &value), u.why);
+    check(!read_hv(*fresh, 0xC00009, GENESIS_ACCESS_BYTE, &value), u.why);
+  }
+  // Supported neighbours that are not part of the width/mode selection leave the counter unchanged (shadow/highlight, window bits).
+  {
+    auto fresh = make_runtime();
+    fresh->devices.vdp.registers[1] = 0x64;   // display + vblank interrupt enable + M5
+    fresh->devices.vdp.registers[12] = 0x89;  // H40 + shadow/highlight
+    fresh->scheduler.master_ticks = 10ull * line;
+    check(read_hv(*fresh, 0xC00008, GENESIS_ACCESS_WORD, &value) && value == 0x0AA5u, "shadow/highlight and display-enable bits do not change the counter");
   }
 }
 

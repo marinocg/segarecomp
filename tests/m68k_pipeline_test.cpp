@@ -244,23 +244,25 @@ void addition_forms_decode_and_share_flags() {
                instruction->source_ea.mode == segarecomp::M68kEaMode::address_register,
             "ADD.W/L An,Dn retain ordinary ADD identity");
   }
-  // The 68000 drives only A1..A23: the sign-extended spelling of a top-half 24-bit address (`BTST #4,($FFC00004).L`)
-  // decodes as the 24-bit address; any other nonzero high byte keeps its raw value (fail-closed downstream).
+  // The decoder preserves the raw 32-bit absolute-long operand (LEA/PEA use it architecturally); the 24-bit data-bus
+  // address is derived at the effective-address seam: only the sign-extended top-half spelling is canonicalized.
   {
     const auto sign_extended = segarecomp::decode_m68k_instruction(
         std::vector<std::uint8_t>{0x08U, 0x39U, 0x00U, 0x04U, 0xFFU, 0xC0U, 0x00U, 0x04U}, source(),
         segarecomp::M68kDecodeProfile::general_startup);
-    const auto *canonical = std::get_if<segarecomp::M68kDecodedInstruction>(&sign_extended);
-    expect(canonical != nullptr && canonical->kind == segarecomp::M68kInstructionKind::btst &&
-               canonical->destination_ea.mode == segarecomp::M68kEaMode::absolute_long &&
-               canonical->destination_ea.absolute_address == 0x00C00004U,
-           "a sign-extended absolute-long operand ($FFC00004) is canonicalized to its 24-bit address");
+    const auto *raw_sign = std::get_if<segarecomp::M68kDecodedInstruction>(&sign_extended);
+    expect(raw_sign != nullptr && raw_sign->kind == segarecomp::M68kInstructionKind::btst &&
+               raw_sign->destination_ea.mode == segarecomp::M68kEaMode::absolute_long &&
+               raw_sign->destination_ea.absolute_address == 0xFFC00004U &&
+               segarecomp::m68k_data_access_ea_address(raw_sign->destination_ea) == 0x00C00004U,
+           "a sign-extended absolute-long operand ($FFC00004) decodes raw; its data-bus address is $C00004");
     const auto not_sign_extended = segarecomp::decode_m68k_instruction(
         std::vector<std::uint8_t>{0x08U, 0x39U, 0x00U, 0x04U, 0x7FU, 0xC0U, 0x00U, 0x04U}, source(),
         segarecomp::M68kDecodeProfile::general_startup);
     const auto *raw = std::get_if<segarecomp::M68kDecodedInstruction>(&not_sign_extended);
-    expect(raw != nullptr && raw->destination_ea.absolute_address == 0x7FC00004U,
-           "a non-sign-extended nonzero high byte is not canonicalized");
+    expect(raw != nullptr && raw->destination_ea.absolute_address == 0x7FC00004U &&
+               segarecomp::m68k_data_access_ea_address(raw->destination_ea) == 0x7FC00004U,
+           "a non-sign-extended nonzero high byte is never canonicalized");
   }
   // Routing seam: the runtime-owned VDP status BYTE lanes and the HV counter are deferred, like the WORD read.
   for (const std::uint32_t vdp_read : {0x00C00004U, 0x00C00005U, 0x00C00008U, 0x00C0000BU, 0x00C0000FU}) {
@@ -10032,6 +10034,65 @@ FrontendProgram program_with() {
 }
 }  // namespace push_then_rts_fixture
 
+// SEG-059: parameterized synthetic immutable-ROM AOT emitter for the generated-native Musashi differential tests
+// (`--emit-synthetic-aot-source <base-hex> <image-hex>`): project-authored bytes mapped as cartridge ROM at <base>, startup
+// ingress at <base>, whole-image AOT enumeration. The image is data-driven so each differential test carries its own program.
+int emit_synthetic_aot_source(const char *base_hex, const char *image_hex) {
+  using namespace segarecomp;
+  const std::string text = image_hex;
+  if (text.empty() || text.size() % 2U != 0U) return 2;
+  std::vector<std::uint8_t> bytes;
+  for (std::size_t i = 0; i < text.size(); i += 2U) bytes.push_back(static_cast<std::uint8_t>(std::stoul(text.substr(i, 2U), nullptr, 16)));
+  const auto base = static_cast<std::uint32_t>(std::stoul(base_hex, nullptr, 16));
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-059/aot", bytes, bytes.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, base}, {{}, static_cast<std::uint32_t>(base + bytes.size())}, {0U}, {bytes.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, base}, 0x00FF0100U};
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) {
+    if (const auto *rejected = std::get_if<FrontendRejected>(&result))
+      std::cerr << "rejected: " << m68k_direct_flow_diagnostic_name(rejected->category) << "\n";
+    return 5;
+  }
+  const auto emitted = expand_entry_rows(emit_m68k_general_startup_runtime_c(*partial));
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
+// SEG-059: parameterized synthetic IRQ6 bridge emitter (`--emit-synthetic-irq6-aot-bridge <handler-hex> <code-hex>`): a 0x200-byte
+// MC68000 vector table (SSP $00FF8000, reset PC $200, level-6 autovector = <handler>) followed by project-authored code at $200
+// (cartridge ROM from $0), whole-image immutable-ROM AOT, emitted as the generated bridge program.
+int emit_synthetic_irq6_aot_bridge(const char *handler_hex, const char *code_hex) {
+  using namespace segarecomp;
+  const std::string text = code_hex;
+  if (text.empty() || text.size() % 2U != 0U) return 2;
+  std::vector<std::uint8_t> img(0x200U, 0x00U);
+  for (std::size_t i = 0; i < text.size(); i += 2U) img.push_back(static_cast<std::uint8_t>(std::stoul(text.substr(i, 2U), nullptr, 16)));
+  const auto be32 = [&](std::size_t off, std::uint32_t v) {
+    for (unsigned b = 0; b < 4U; ++b) img[off + b] = static_cast<std::uint8_t>(v >> (24U - 8U * b));
+  };
+  be32(0x0U, 0x00FF8000U);
+  be32(0x4U, 0x200U);
+  be32(0x78U, static_cast<std::uint32_t>(std::stoul(handler_hex, nullptr, 16)));
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-059/irq6-aot", img, img.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, 0U}, {{}, static_cast<std::uint32_t>(img.size())}, {0U}, {img.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0x200U}, 0x00FF8000U};
+  if (!apply_genesis_immutable_rom_aot(program)) return 4;
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  if (partial == nullptr) return 5;
+  const auto emitted = emit_m68k_general_startup_bridge_c(*partial, std::string(64U, 'a'));
+  if (emitted.starts_with("/* translation rejected:")) return 6;
+  std::cout << emitted;
+  return 0;
+}
+
 int emit_push_then_rts_source() {
   using namespace segarecomp;
   auto program = push_then_rts_fixture::program_with();
@@ -19753,26 +19814,85 @@ void absolute_word_preserves_decoded_sign_extension_at_the_genesis_bus_seam() {
              segarecomp::m68k_canonical_ea_address(decoded.source_ea) == UINT32_C(0x00FF8000),
          "absolute-word decode retains sign extension while the Genesis bus seam canonicalizes it");
 
-  // Absolute-long: the sign-extended spelling of a top-half 24-bit address is the same bus address (the 68000 drives only
-  // A1..A23) and is canonicalized at decode, like absolute-word; any other nonzero upper byte still fails closed.
+  // Absolute-long: the decoded value stays the raw 32-bit operand and the control-target canonicalization is unchanged; a DATA
+  // access names the sign-extended top-half spelling's 24-bit bus address (the 68000 drives only A1..A23); any other nonzero
+  // upper byte still fails closed.
   const std::vector<std::uint8_t> absolute_long_bytes{0x4AU, 0xB9U, 0xFFU, 0xFFU, 0x80U, 0x00U};
   const auto absolute_long = std::get<segarecomp::M68kDecodedInstruction>(
       segarecomp::decode_m68k_instruction(absolute_long_bytes, source(),
                                            segarecomp::M68kDecodeProfile::general_startup));
   expect(absolute_long.source_ea.mode == segarecomp::M68kEaMode::absolute_long &&
-             segarecomp::m68k_canonical_ea_address(absolute_long.source_ea) == UINT32_C(0x00FF8000) &&
+             absolute_long.source_ea.absolute_address == UINT32_C(0xFFFF8000) &&
+             segarecomp::m68k_canonical_ea_address(absolute_long.source_ea) == UINT32_C(0xFFFF8000) &&
+             segarecomp::m68k_data_access_ea_address(absolute_long.source_ea) == UINT32_C(0x00FF8000) &&
              !segarecomp::m68k_startup_absolute_operand_alignment(
-                 segarecomp::m68k_canonical_ea_address(absolute_long.source_ea), absolute_long.size),
-         "a sign-extended absolute-long value names its 24-bit bus address");
+                 segarecomp::m68k_data_access_ea_address(absolute_long.source_ea), absolute_long.size),
+         "a sign-extended absolute-long value is decoded raw and names its 24-bit bus address for data access");
   const std::vector<std::uint8_t> non_sign_extended_bytes{0x4AU, 0xB9U, 0x01U, 0xFFU, 0x80U, 0x00U};
   const auto non_sign_extended = std::get<segarecomp::M68kDecodedInstruction>(
       segarecomp::decode_m68k_instruction(non_sign_extended_bytes, source(),
                                            segarecomp::M68kDecodeProfile::general_startup));
   expect(non_sign_extended.source_ea.mode == segarecomp::M68kEaMode::absolute_long &&
              segarecomp::m68k_startup_absolute_operand_alignment(
-                 segarecomp::m68k_canonical_ea_address(non_sign_extended.source_ea), non_sign_extended.size) ==
+                 segarecomp::m68k_data_access_ea_address(non_sign_extended.source_ea), non_sign_extended.size) ==
                  segarecomp::DirectFlowDiagnostic::effective_address_not_24bit,
          "any other nonzero absolute-long upper byte still fails closed at the Genesis bus seam");
+}
+
+// SEG-059: IRQ6 delivery to an immutable-ROM AOT trampoline handler requires the handler to be a member of the final compiled-entry
+// set (the validated AOT entry map the dispatch table is emitted from), never merely of an intermediate candidate collection.
+void irq6_aot_trampoline_delivery_requires_a_final_compiled_entry() {
+  using namespace segarecomp;
+  std::vector<std::uint8_t> img(0x200U, 0x00U);
+  const auto put = [&](std::size_t off, std::initializer_list<std::uint8_t> bytes) {
+    if (img.size() < off + bytes.size()) img.resize(off + bytes.size(), 0x00U);
+    std::copy(bytes.begin(), bytes.end(), img.begin() + static_cast<std::ptrdiff_t>(off));
+  };
+  put(0x0U, {0x00U, 0xFFU, 0x80U, 0x00U, 0x00U, 0x00U, 0x02U, 0x00U});
+  put(0x78U, {0x00U, 0x00U, 0x02U, 0x40U});
+  put(0x200U, {0x4EU, 0xB9U, 0x00U, 0x00U, 0x02U, 0x10U, 0x30U, 0x3CU, 0x10U, 0x00U, 0x51U, 0xC8U, 0xFFU, 0xFEU, 0x4EU, 0x70U, 0x4EU, 0x75U});  // JSR $210; MOVE.W #$1000,D0; DBRA D0,*; RESET; RTS
+  put(0x240U, {0x2FU, 0x3CU, 0x00U, 0x00U, 0x02U, 0x60U, 0x4EU, 0x75U});                      // MOVE.L #$260,-(A7); RTS (trampoline)
+  put(0x260U, {0x7EU, 0x55U, 0x4EU, 0x73U});                                                  // MOVEQ #$55,D7; RTE
+  FrontendProgram program{};
+  program.profile = M68kFrontendProfile::general_startup;
+  program.image = {"synthetic/SEG-059/irq6-final-set", img, img.size()};
+  program.mapping_claims = {{"raw_cartridge_rom", {{}, 0U}, {{}, static_cast<std::uint32_t>(img.size())}, {0U}, {img.size()}}};
+  program.startup_ingress = M68kStartupIngress{{{}, 0x200U}, 0x00FF8000U};
+  expect(apply_genesis_immutable_rom_aot(program), "the IRQ6 trampoline fixture is whole-image AOT enumerable");
+  const auto result = analyze_m68k_frontend(program);
+  const auto *partial = std::get_if<FrontendPartialProgram>(&result);
+  expect(partial != nullptr && partial->accepted_prefix.irq6_handler_entry.has_value() &&
+             partial->accepted_prefix.irq6_handler_entry->value == 0x240U,
+         "the IRQ6 autovector resolves to the trampoline handler");
+  if (partial == nullptr) return;
+  const auto wired = [](const FrontendPartialProgram &candidate) {
+    const auto text = emit_m68k_general_startup_bridge_c(candidate, std::string(64U, 'a'));
+    return text.find("runtime.irq6_handler_present = 1;") != std::string::npos ||
+           text.find("irq6_handler_present = 1;") != std::string::npos;
+  };
+  const auto handler_is_aot = [](const FrontendPartialProgram &candidate) {
+    return std::any_of(candidate.accepted_prefix.immutable_rom_aot_entries.begin(),
+                       candidate.accepted_prefix.immutable_rom_aot_entries.end(), [](const auto &entry) {
+                         return entry.decoded.provenance.source.address.value == 0x240U && !entry.execution_alias &&
+                                !entry.materialized_ram_thunk;
+                       });
+  };
+  expect(handler_is_aot(*partial) && wired(*partial),
+         "a trampoline handler that is a compiled immutable-ROM AOT entry is delivered (wired into the generated main)");
+  {
+    auto forged = *partial;  // the handler's entry is absent from the final compiled set
+    std::erase_if(forged.accepted_prefix.immutable_rom_aot_entries,
+                  [](const auto &entry) { return entry.decoded.provenance.source.address.value == 0x240U; });
+    std::erase_if(forged.accepted_prefix.static_blocks, [](const auto &block) { return block.id.entry.value == 0x240U; });
+    expect(!wired(forged), "a handler missing from the final compiled set is never reported as deliverable");
+  }
+  {
+    auto forged = *partial;  // an execution alias / RAM thunk identity is not a cartridge handler entry
+    for (auto &entry : forged.accepted_prefix.immutable_rom_aot_entries)
+      if (entry.decoded.provenance.source.address.value == 0x240U) entry.execution_alias = true;
+    std::erase_if(forged.accepted_prefix.static_blocks, [](const auto &block) { return block.id.entry.value == 0x240U; });
+    expect(!wired(forged), "a non-cartridge identity at the handler address is never reported as deliverable");
+  }
 }
 
 int emit_general_startup_runtime_c2_source() {
@@ -30847,6 +30967,10 @@ int main(int argc, char **argv) {
     return emit_pea_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-jmp-pc-indexed-word-aot")
     return emit_jmp_pc_indexed_word_aot_source();
+  if (argc == 4 && std::string_view(argv[1]) == "--emit-synthetic-irq6-aot-bridge")
+    return emit_synthetic_irq6_aot_bridge(argv[2], argv[3]);
+  if (argc == 4 && std::string_view(argv[1]) == "--emit-synthetic-aot-source")
+    return emit_synthetic_aot_source(argv[2], argv[3]);
   if (argc == 2 && std::string_view(argv[1]) == "--emit-jmp-an-indirect-aot")
     return emit_jmp_an_indirect_aot_source();
   if (argc == 2 && std::string_view(argv[1]) == "--emit-div-aot")
@@ -31590,6 +31714,7 @@ int main(int argc, char **argv) {
   general_startup_reads_static_rom_through_nonidentity_mapping();
   general_startup_cmpi_static_destination_uses_shared_operand_resolver();
   absolute_word_preserves_decoded_sign_extension_at_the_genesis_bus_seam();
+  irq6_aot_trampoline_delivery_requires_a_final_compiled_entry();
   general_startup_ctrl3_word_read_uses_the_t038_policy_selector();
   general_startup_version_byte_read_uses_the_t079_policy_selector();
   general_startup_ctrl3_byte_read_uses_the_t111_policy_selector();

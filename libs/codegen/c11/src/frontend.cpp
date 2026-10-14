@@ -879,11 +879,11 @@ std::string emit_m68k_general_startup_runtime_c_with_policy_to(
       const bool source_read = fact.role == M68kStaticMemoryFactRole::source_read &&
           fact.direction == M68kMemoryAccessDirection::read &&
           move.source_ea.mode == M68kEaMode::absolute_long &&
-          fact.address.value == m68k_canonical_ea_address(move.source_ea);
+          fact.address.value == m68k_data_access_ea_address(move.source_ea);
       const bool destination_write = fact.role == M68kStaticMemoryFactRole::destination_write &&
           fact.direction == M68kMemoryAccessDirection::write &&
           move.destination_ea.mode == M68kEaMode::absolute_long &&
-          fact.address.value == m68k_canonical_ea_address(move.destination_ea);
+          fact.address.value == m68k_data_access_ea_address(move.destination_ea);
       if (!source_read && !destination_write)
         return "/* translation rejected: invalid C3 static memory fact */\n";
     }
@@ -1737,7 +1737,7 @@ bool valid_c4_static_memory_fact(
   }
   if (expected_ea == nullptr || !m68k_is_statically_foldable_control_ea(*expected_ea) ||
       fact.direction != expected_direction ||
-      fact.address.value != m68k_canonical_ea_address(*expected_ea))
+      fact.address.value != m68k_data_access_ea_address(*expected_ea))
     return false;
 
   const bool is_ram = m68k_startup_ram_range_in_range(
@@ -2574,7 +2574,7 @@ bool m68k_c4_lacks_runtime_routing(const M68kIrOperation &operation, const std::
       !m68k_is_statically_foldable_control_ea(operation.source_ea))
     return false;
   return m68k_frontier_region_class_name(
-             m68k_canonical_ea_address(operation.source_ea),
+             m68k_data_access_ea_address(operation.source_ea),
              static_cast<std::uint32_t>(operation.size), mapping_claims) ==
          "raw_cartridge_rom";
 }
@@ -3489,7 +3489,7 @@ std::string emit_m68k_general_startup_runtime_c_to(std::ostream &out, std::strin
     default: break;
     }
     if (expected_ea == nullptr || !m68k_is_statically_foldable_control_ea(*expected_ea) ||
-        fact.direction != expected_direction || fact.address.value != m68k_canonical_ea_address(*expected_ea) ||
+        fact.direction != expected_direction || fact.address.value != m68k_data_access_ea_address(*expected_ea) ||
         !facts.emplace(std::make_pair(fact.operation.source.address.value, fact.role), &fact).second)
       return "/* translation rejected: invalid C4 static memory fact */\n";
     const bool is_ram = m68k_startup_ram_range_in_range(fact.address.value, static_cast<std::uint32_t>(fact.width));
@@ -6457,14 +6457,18 @@ std::string emit_m68k_general_startup_bridge_c_to(std::ostream &sink, const Fron
   }
   // Immutable-ROM AOT: a handler whose body is not a retained static block (e.g. a `push.l abs; rts` trampoline that the
   // static discovery cannot close) is still an ordinary compiled AOT entry at that exact cartridge address, so the
-  // CPU-owned interrupt entry can deliver to it. Without this the recognized IRQ6 was silently never delivered.
-  if (irq6_handler_hex.empty() && partial.accepted_prefix.irq6_handler_entry)
-    for (const auto &aot_entry : partial.accepted_prefix.immutable_rom_aot_entries)
-      if (!aot_entry.execution_alias && !aot_entry.materialized_ram_thunk &&
-          aot_entry.decoded.provenance.source.address.value == partial.accepted_prefix.irq6_handler_entry->value) {
-        irq6_handler_hex = hex(partial.accepted_prefix.irq6_handler_entry->value, 8);
-        break;
-      }
+  // CPU-owned interrupt entry can deliver to it. The membership test uses the same validated entry map the runtime emitter
+  // just emitted its compiled-entry dispatch table from (not the raw candidate collection), and excludes work-RAM thunk
+  // and execution-alias identities: an absent or non-cartridge handler keeps the runtime IRQ6 mechanism inert (fail-safe).
+  if (irq6_handler_hex.empty() && partial.accepted_prefix.irq6_handler_entry) {
+    const auto final_aot_entries = validated_immutable_rom_aot_entries(partial.accepted_prefix);
+    if (final_aot_entries) {
+      const auto handler = partial.accepted_prefix.irq6_handler_entry->value;
+      const auto found = final_aot_entries->find(handler);
+      if (found != final_aot_entries->end() && !found->second->execution_alias && !found->second->materialized_ram_thunk)
+        irq6_handler_hex = hex(handler, 8);
+    }
+  }
   // ADR 0097 amendment: a work-RAM IRQ6 vector whose stub address carries a materialized, byte-guarded JMP thunk entry is an
   // ordinary compiled handler entry: the CPU-owned exception entry delivers the interrupt to the stub address and the stub
   // instruction retires normally. Without such an entry the typed irq6_vector_in_work_ram stop remains.

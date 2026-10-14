@@ -1170,29 +1170,55 @@ static uint16_t genesis_vdp_status_read(GenesisDeviceState *devices, uint64_t ma
 }
 
 /* The HV counter ($C00008-$C0000F, mirrored; WORD read or either BYTE lane: V counter in the high byte, H counter in
-   the low byte) as a pure function of deterministic guest time, like the status bits above. NTSC non-interlaced
-   224-line geometry (262 lines): the V counter runs $00-$EA then continues $E5-$FF; the 8-bit H counter runs $00-$B6
-   then $E4-$FF in H40 (211 steps per 3420 master ticks) and $00-$93 then $E9-$FF in H32 (171 steps) -- the public
-   Genesis Plus GX `core/vdp_ctrl.c` counter tables. The HV latch (register #0 bit 1), interlace and the 240-line mode
-   are not modeled and stay fail-closed (the caller reports the unsupported VDP region). */
+   the low byte) as a pure function of deterministic guest time, like the status bits above.
+
+   Timing contract (NTSC schedule, 262 lines of 3420 master ticks, the same line origin as the HBlank/VBlank flags above:
+   tick 0 of a line is the end of the active display, where the V counter increments). The reference is the public
+   Genesis Plus GX `core/hvc.h` H-counter tables (`cycle2hc32`/`cycle2hc40`, one value per master tick of a line) and
+   `core/vdp_ctrl.c` (`vc_table`, `vdp_hvc_r`). The 8-bit H counter is the sequence
+     H32: $85..$93, $E9..$FF, $00..$84   -- 171 values, each held 20 master ticks;
+     H40: $A5..$B6, $E4..$FF, $00..$A4   -- 211 values, each held 16 master ticks except values index 17..37
+                                            (the horizontal-sync slow-clock span), whose hold lengths are listed below;
+   the V counter runs $00-$EA then continues $E5-$FF over the 262 lines of the 224-line mode.
+
+   Supported (everything else stays fail-closed, the caller reports the unsupported VDP region): Mega Drive display mode
+   (register #1 bit 2 set), 224 lines (register #1 bit 3 clear), no HV latch (register #0 bit 1 clear), no interlace
+   (register #12 bits 1-2 clear), and a consistent width selection: register #12 bits 7 and 0 both set (H40) or both clear
+   (H32). A mixed selection (one of the two bits), Master System mode 4, the latched counter, interlace and the 240-line
+   mode are not modeled. The machine always executes the 60 Hz schedule, in every region profile, so the counter follows
+   the schedule actually executed. */
+static const uint8_t genesis_hv_h40_slow_span[21] = {8, 8, 16, 17, 20, 20, 20, 18, 20, 20, 20, 19, 19, 20, 20, 20, 18, 20, 20, 20, 17};
+
+static uint32_t genesis_hv_h_counter(uint32_t in_line, int h40) {
+  uint32_t step;
+  if (!h40) {
+    step = in_line / 20U; /* 0..170 */
+    return step <= 14U ? 0x85U + step : step <= 37U ? 0xE9U + (step - 15U) : step - 38U;
+  }
+  {
+    uint32_t remaining = in_line;
+    step = 0U;
+    for (;;) {
+      const uint32_t hold = (step >= 17U && step < 38U) ? genesis_hv_h40_slow_span[step - 17U] : 16U;
+      if (remaining < hold || step == 210U) break;
+      remaining -= hold;
+      ++step;
+    }
+  }
+  return step <= 17U ? 0xA5U + step : step <= 45U ? 0xE4U + (step - 18U) : step - 46U;
+}
+
 static int genesis_vdp_hv_counter_read(const GenesisDeviceState *devices, uint64_t master_ticks, uint16_t *hv_out) {
   const uint32_t line = (uint32_t)((master_ticks % GENESIS_NTSC_MASTER_TICKS_PER_FRAME) / GENESIS_NTSC_MASTER_TICKS_PER_LINE);
   const uint32_t in_line = (uint32_t)(master_ticks % GENESIS_NTSC_MASTER_TICKS_PER_LINE);
-  const int h40 = (devices->vdp.registers[12] & UINT16_C(0x0081)) == UINT16_C(0x0081);
+  const uint16_t width = (uint16_t)(devices->vdp.registers[12] & UINT16_C(0x0081));
   uint32_t v;
-  uint32_t h;
   if ((devices->vdp.registers[0] & UINT16_C(0x0002)) != 0U || (devices->vdp.registers[12] & UINT16_C(0x0006)) != 0U ||
-      (devices->vdp.registers[1] & UINT16_C(0x0008)) != 0U)
+      (devices->vdp.registers[1] & UINT16_C(0x0008)) != 0U || (devices->vdp.registers[1] & UINT16_C(0x0004)) == 0U ||
+      (width != UINT16_C(0x0000) && width != UINT16_C(0x0081)))
     return 0;
   v = line <= 0xEAU ? line : line - 6U;
-  if (h40) {
-    h = (in_line * 211U) / GENESIS_NTSC_MASTER_TICKS_PER_LINE;
-    h = h <= 0xB6U ? h : h - 183U + 0xE4U;
-  } else {
-    h = (in_line * 171U) / GENESIS_NTSC_MASTER_TICKS_PER_LINE;
-    h = h <= 0x93U ? h : h - 148U + 0xE9U;
-  }
-  *hv_out = (uint16_t)((v << 8) | h);
+  *hv_out = (uint16_t)((v << 8) | genesis_hv_h_counter(in_line, width == UINT16_C(0x0081)));
   return 1;
 }
 

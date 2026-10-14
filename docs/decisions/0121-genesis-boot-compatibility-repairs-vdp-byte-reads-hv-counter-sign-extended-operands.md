@@ -1,4 +1,4 @@
-# ADR 0121: Genesis boot compatibility repairs (sign-extended absolute operands, VDP byte reads, HV counter, IRQ6 trampolines, in-place return rewrite)
+# ADR 0121: Genesis boot compatibility repairs (sign-extended absolute data operands, VDP byte reads, HV counter, IRQ6 trampolines, in-place return rewrite)
 
 ## Status
 Accepted.
@@ -14,31 +14,60 @@ was found with the ordinary stop diagnostics and none needs a new architecture:
    of the control-port status alias (`$C00004`/`$C00005`), so a status poll with a byte read (`BTST`/`TST.B`) was an
    `unmapped_data_access` frontier.
 3. The HV counter (`$C00008`-`$C0000F`) was not implemented, so a program that reads it stopped on an unsupported VDP access.
-4. A vertical-interrupt handler that is a `push.l abs; rts` trampoline is not a retained static block, so the build did not
-   install it as the IRQ6 handler and the runtime silently never delivered the interrupt (the game then waited forever for a
+4. A vertical-interrupt handler that is a `MOVE.L #abs,-(A7); RTS` trampoline is not a retained static block, so the build did
+   not install it as the IRQ6 handler and the runtime silently never delivered the interrupt (the game then waited forever for a
    flag the handler sets). In immutable-ROM AOT mode that handler address is nevertheless an ordinary compiled entry.
-5. The inline-data-argument idiom (a routine advances its own saved return address with `MOVE.L An,(A7)` and then `RTS`) was
+5. The inline-data-argument idiom (a routine advances its own saved return address with `MOVE.L <src>,(A7)` and then `RTS`) was
    a `return_target_mismatch`, because the popped value is not a JSR continuation. ADR 0048 already validates the identical
    situation for `MOVE.L <src>,-(A7)` followed by `RTS`.
 
 ## Decision
-1. Decoded absolute-long operands whose high byte is $FF with bit 23 set are canonicalized to the 24-bit address, for every
-   instruction except JMP/JSR, whose separately pinned control-target policy is unchanged. Any other nonzero high byte keeps
-   its raw value and stays `effective_address_not_24bit`.
+1. **Layer ownership of absolute-long.** The decoder preserves the raw 32-bit operand (`M68kEffectiveAddress::absolute_address`);
+   it never rewrites it. The architectural effective address is therefore exact for LEA and PEA, which write/push
+   `absolute_address` unchanged (`LEA ($FFFF8000).L,A0` leaves `$FFFF8000` in A0; `PEA ($FFFF8000).L` pushes `$FFFF8000`).
+   The 24-bit bus address of a **data** access is derived at the existing effective-address seam, in
+   `m68k_data_access_ea_address` beside `m68k_canonical_ea_address`: an absolute-long operand whose high byte is `$FF` with
+   bit 23 set (the sign-extended spelling that absolute-word already yields) names the same A1..A23 location. Static
+   data-address validation (discovery, the machine frontend, C3/C4 fact retention and re-verification) and the emitted
+   runtime accesses call this one function, so they cannot disagree. JMP/JSR control targets keep
+   `m68k_canonical_ea_address` (policy unchanged), and any other nonzero high byte stays `effective_address_not_24bit`.
 2. The seam defers BYTE reads of `$C00004`/`$C00005` and of `$C00008`-`$C0000F` exactly as it defers the WORD read; every other
    VDP BYTE read stays an unmapped-data frontier.
-3. The runtime answers the HV counter (WORD, or either BYTE lane; V in the high byte, H in the low byte) as a pure function of
-   deterministic guest time over the 262-line NTSC frame: V runs $00-$EA then $E5-$FF; H runs $00-$B6 then $E4-$FF in H40 (211
-   steps per line) and $00-$93 then $E9-$FF in H32 (171 steps), after the public Genesis Plus GX `core/vdp_ctrl.c` tables. The
-   HV latch (register #0 bit 1), interlace and the 240-line mode are not modeled and stay fail-closed.
-4. When no static block exists at the IRQ6 handler address, an immutable-ROM AOT entry (not an alias, not a thunk) at exactly
-   that address qualifies as the build-resolved handler.
-5. The ADR 0048 computed-jump seed set is widened from `MOVE.L <src>,-(A7)` to also include `MOVE.L <src>,(A7)`; the RTS that
-   follows still pops the real stack slot and its target must be a final compiled identity.
+3. **HV counter.** The runtime answers it (WORD, or either BYTE lane; V in the high byte, H in the low byte) as a pure
+   function of deterministic guest time, using the same line origin as the HBlank/VBlank status flags (tick 0 of a line is the
+   end of the active display, where V increments). The reference is the public Genesis Plus GX `core/hvc.h` tables
+   (`cycle2hc32`/`cycle2hc40`) and `core/vdp_ctrl.c`. H32 steps through `$85..$93, $E9..$FF, $00..$84`, each value held 20
+   master ticks (171 values). H40 steps through `$A5..$B6, $E4..$FF, $00..$A4` (211 values), each held 16 ticks except the
+   horizontal-sync span (values 17..37) whose hold lengths come from the table. V runs `$00-$EA` then `$E5-$FF` over the 262
+   lines. Earlier text and an earlier implementation scaled the line linearly from `$00` at tick 0; that is not equivalent
+   (the counter at the line origin is `$85`/`$A5`, and H40 is not uniform) and was corrected in the same PR.
+   Supported: Mega Drive display mode (register #1 bit 2), 224 lines, no HV latch, no interlace, and register #12 bits 7 and
+   0 both set (H40) or both clear (H32). Everything else - the latched counter, interlace, the 240-line mode, Master System
+   mode 4 and a mixed width selection - is not modeled and fails closed as an unsupported VDP access. The machine runs the
+   60 Hz schedule in every region profile, so the counter follows the executed schedule, not the nominal region rate.
+4. **IRQ6 trampolines.** When no static block exists at the IRQ6 handler address, an entry of the final validated
+   immutable-ROM AOT entry map (the same map the dispatch table is emitted from; not an alias, not a work-RAM thunk) at
+   exactly that cartridge address qualifies as the build-resolved handler. The CPU-owned exception entry delivers to it; no
+   second delivery mechanism exists. A vector that is unmapped/odd rejects the build; a work-RAM vector without an admitted
+   guarded entry keeps the typed `irq6_vector_in_work_ram` stop.
+5. **In-place return rewrite.** The ADR 0048 computed-jump seed set is widened from `MOVE.L <src>,-(A7)` to also include
+   exactly `MOVE.L <src>,(A7)` (long write, destination mode address-indirect, register A7). Both seeds write the slot that
+   the following RTS pops; the bounded forward walk (at most 8 identities, both arms of direct branches, any identity that
+   writes A7, touches the stack or is not fully classified ends the path) is unchanged. The RTS still reads the real stack
+   slot and its target must be a member of the final compiled-entry lookup; every other RTS keeps the stricter JSR-continuation
+   validation. The mechanism only applies to RTS identities that are AOT-only (not reached by the static graph).
 
 ## Consequences
 No interpreter, runtime decoding or new ABI. Static discovery, JMP/JSR target policy and every unmodeled VDP shape are
-unchanged. Covered by `m68k_pipeline_tests` (decode canonicalization incl. the non-sign-extended negative, seam shapes and
-their unmapped neighbours) and `genesis_hint_region_controller_tests` (HV counter geometry in H40/H32, mirrors, byte lanes,
-monotonicity, fail-closed configurations). Observed locally (classifications only): two titles that stopped in their first
-frame now run their intro, and a third now reaches and renders its title/intro sequence.
+unchanged. Covered by `m68k_pipeline_tests` (raw decode of absolute-long, the data-access seam function, seam shapes and their
+unmapped neighbours, the final-compiled-set IRQ6 membership), `genesis_hint_region_controller_tests` (HV counter against
+reference-table samples at every discontinuity in H40/H32, V discontinuity and frame wrap, mirrors, byte lanes, fail-closed
+configurations) and `genesis_compat_repairs_generated_differential_test` (generated-native LEA/PEA/BTST/MOVE, in-place return
+rewrite and its negatives, the typed rejections and the IRQ6 `MOVE.L #abs,-(A7); RTS` trampoline through exception entry and
+RTE, each compared with the pinned Musashi core when its checkout is configured). Observed locally (classifications only):
+two titles that stopped in their first frame now run their intro, and a third now reaches and renders its title/intro
+sequence.
+
+Known limits: the mixed-width and mode-4 HV configurations are refused rather than approximated, and a statically reached
+RTS keeps the static return-frame authority, so the rewrite idiom is admitted only where the callee is not statically
+reached.

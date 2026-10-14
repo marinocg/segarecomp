@@ -70,6 +70,30 @@ images per address is the common shape. A general interpreter or JIT is excluded
 - Acceptance criterion for the proposal: the synthetic fixture matches the oracle bit for bit over at least 100 alternations,
   with unchanged output for every existing title.
 
+## Review of assumptions and unresolved risks (SEG-059; the proposal stays Proposed)
+- **Path-dependent observation.** The variant set is whatever the build-time pass happened to execute. A passing run proves only
+  those images; completeness is unprovable and the first unobserved image stops the run. The proposal must not be described as
+  covering a title, only as failing closed outside the observed images.
+- **Finite coverage.** A bound (initially 4) turns an unbounded self-modifying handler into a deterministic stop, but it also
+  makes behavior depend on a tuning constant; the bound must be justified by a synthetic fixture, not by one title.
+- **Prefetch and self-modification visibility.** The 68000 prefetches two words; a store to an instruction that is already
+  prefetched is architecturally visible only after the prefetch queue refills. The whole-instruction execution model reads the
+  RAM bytes at instruction entry, so a store into the next one or two words of the executing instruction stream can differ from
+  hardware. The synthetic acceptance fixture must include a store to the immediately following instruction and compare with
+  the pinned Musashi core (whose limited prefetch cache is a reference point, not a hardware proof); until the behavior is understood, the guard chain cannot be accepted.
+- **Per-instruction guard authority.** The guard compares the bytes of one instruction per fetch; a variant chain compares one
+  per variant. It never validates a multi-instruction image as a unit, so a partially overwritten image falls to the
+  fail-closed stop at the first differing instruction, which may already have retired earlier instructions of the run. Whether
+  that is acceptable for interrupt handlers (an interrupted run observed mid-way) is open.
+- **Interrupt handling.** Making a work-RAM vector deliverable changes interrupt timing for every title with a RAM vector; the
+  current count-and-drop default must remain available until the generalized path is proven equivalent, and level 6 must not
+  be enabled before level 4.
+- **Fail-closed execution of unobserved variants.** The design relies on the stop being committed-nothing; each admitted
+  entry needs a test that an unseen image stops with unchanged architectural state.
+
+This section records risks only. No RAM-code materialization, multi-variant guard, runtime-selected code variant or
+generalized RAM interrupt handler is implemented by SEG-059.
+
 ## Open questions
 - Is a variant bound of 4 sufficient for the observed class, or should it be derived from the pass?
 - Should the generalized thunk path be extended to level 6 vectors immediately or after level 4 is proven?
