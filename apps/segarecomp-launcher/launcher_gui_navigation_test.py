@@ -99,6 +99,12 @@ def main():
                  "pad south down", "pad south up", "frames 10", "expect page=details", "expect detail=Synthetic Card 06", "pad east down", "pad east up", "frames 10",
                  "expect page=library", "expect library_scroll=180", "expect focus=card:Synthetic Card 06", "quit"]
         assertions += check("details round trip (gamepad)", state, 7)
+        # Mouse: the buttons drawn over a card (favorite star, Play) stay put while the pointer moves onto them, and a click on them is theirs:
+        # it must not fall through to the card (which would open Details).
+        state = ["frames 6", "mouse_card 1", "frames 6", "mouse_fav 1", "frames 6", "mouse_fav 1", "frames 4", "click", "frames 10",
+                 "expect page=library", "expect favorites=1", "mouse_fav 1", "frames 4", "click", "frames 10", "expect page=library", "expect favorites=0",
+                 "mouse_card 1", "frames 4", "click", "frames 10", "expect page=details", "quit"]
+        assertions += check("card overlay buttons (mouse)", state, 5)
         # the context menu of a card (gamepad North / the Menu key) offers Details; choosing it opens the page, Back returns to the library
         state = ["pad_attach", "frames 20", "focus_card 0", "frames 4", "pad north down", "pad north up", "frames 6", "expect menu=1", "pad south down", "pad south up", "frames 10",
                  "expect page=details", "pad east down", "pad east up", "frames 10", "expect page=library", "quit"]

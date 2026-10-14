@@ -340,7 +340,11 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) { context_id_ = entry.id(); open_context_ = true; context_anchor_ = ImGui::GetMousePos(); }
   else if (ImGui::IsItemFocused() && (ImGui::IsKeyPressed(ImGuiKey_Menu, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false) || std::exchange(menu_on_focus_, false))) { context_id_ = entry.id(); open_context_ = true; context_anchor_ = ImVec2(ImGui::GetItemRectMin().x + ctx_.u(24.0F), ImGui::GetItemRectMin().y + ctx_.u(24.0F)); }
   const ImVec2 a(x, y), b(x + w, y + h);
-  card(ctx_, dl, a, b, selected || focused, hovered);
+  // The card's own item loses hover to the Play / favorite buttons drawn over it, so their visibility follows the pointer being inside the
+  // card's rectangle: keying it on the card item's hover made them flicker away under the pointer and the click fell through to Details.
+  const bool pointer_over = ImGui::IsMouseHoveringRect(a, b) && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+  card_rects_[entry.id()] = ImRect(a, b);
+  card(ctx_, dl, a, b, selected || focused, hovered || pointer_over);
   const long long now = std::time(nullptr);
   if (win_h_ < ctx_.u(600.0F)) {
     // Short windows retain a real grid, but use compact horizontal cards so title,
@@ -366,9 +370,10 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   const float cw = w - 2 * pad, chh = cw * 1.02F;
   const ImVec2 ca(x + pad, y + pad), cb(x + pad + cw, y + pad + chh);
   draw_cover(dl, entry, ca, cb, ctx_.u(4.0F), info.status == GameStatus::ready ? IM_COL32_WHITE : rgba(196, 204, 228));
-  if (entry.favorite || hovered || focused) {
+  if (entry.favorite || pointer_over || focused) {
     const float fs_ = ctx_.u(24.0F);
     ImGui::SetCursorScreenPos(ImVec2(cb.x - fs_ - ctx_.u(5.0F), ca.y + ctx_.u(5.0F)));
+    fav_rects_[entry.id()] = ImRect(ImGui::GetCursorScreenPos(), ImVec2(ImGui::GetCursorScreenPos().x + fs_, ImGui::GetCursorScreenPos().y + fs_));
     if (icon_button(ctx_, "fav", ctx_.icon("star"), fs_, entry.favorite, true, entry.favorite ? "Remove from favorites" : "Add to favorites")) {
       if (LibraryEntry *e = catalog_.find_id(entry.id())) { e->favorite = !e->favorite; save_catalog(); }
     }
@@ -401,9 +406,10 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   const float act_w = text_width(ctx_.regular, spx, act_shown.c_str());
   draw_text(dl, ctx_.regular, spx, col::info, ImVec2(ca.x + ctx_.u(19.0F), ty), ellipsize(ctx_.regular, spx, cw - act_w - ctx_.u(27.0F), platform_short(entry.platform_id)).c_str());
   draw_text(dl, ctx_.regular, spx, col::dim, ImVec2(cb.x - text_width(ctx_.regular, spx, act_shown.c_str()), ty), act_shown.c_str());
-  if (info.status == GameStatus::ready && !select_mode_ && (hovered || focused)) {
+  if (info.status == GameStatus::ready && !select_mode_ && (pointer_over || focused)) {
     const float ps = ctx_.u(40.0F);
     ImGui::SetCursorScreenPos(ImVec2(ca.x + (cw - ps) * 0.5F, ca.y + (chh - ps) * 0.5F));
+    play_rects_[entry.id()] = ImRect(ImGui::GetCursorScreenPos(), ImVec2(ImGui::GetCursorScreenPos().x + ps, ImGui::GetCursorScreenPos().y + ps));
     if (icon_button(ctx_, "play", ctx_.icon("play"), ps, true, !game_ && !job_, "Play")) play(entry.id());
   }
   ImGui::PopID();

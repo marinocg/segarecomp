@@ -838,6 +838,37 @@ void App::run_script() {
     const auto vis = visible_entries();
     const std::size_t n = static_cast<std::size_t>(std::atoi(arg.c_str()));
     if (n < vis.size()) focus_card_request_ = vis[n]->id();
+  } else if (cmd == "mouse_card" || cmd == "mouse_fav" || cmd == "mouse_play") {  // move the pointer to card <n>'s centre / favorite star / Play button
+    const auto vis = visible_entries();
+    const std::size_t n = static_cast<std::size_t>(std::atoi(arg.c_str()));
+    const auto &rects = cmd == "mouse_card" ? card_rects_ : (cmd == "mouse_fav" ? fav_rects_ : play_rects_);
+    if (n < vis.size()) {
+      if (const auto found = rects.find(vis[n]->id()); found != rects.end()) {
+        script_mouse_ = found->second.GetCenter();
+        SDL_Event e;
+        SDL_zero(e);
+        e.type = SDL_EVENT_MOUSE_MOTION;
+        e.common.timestamp = SDL_GetTicksNS();
+        e.motion.windowID = SDL_GetWindowID(window_);
+        e.motion.x = script_mouse_.x;
+        e.motion.y = script_mouse_.y;
+        SDL_PushEvent(&e);
+      } else trace("script=no_rect " + cmd + " " + arg);
+    }
+  } else if (cmd == "click") {  // a left click at the pointer: press now, release a few frames later
+    for (const bool down : {true, false}) {
+      SDL_Event e;
+      SDL_zero(e);
+      e.type = down ? SDL_EVENT_MOUSE_BUTTON_DOWN : SDL_EVENT_MOUSE_BUTTON_UP;
+      e.common.timestamp = SDL_GetTicksNS();
+      e.button.windowID = SDL_GetWindowID(window_);
+      e.button.button = SDL_BUTTON_LEFT;
+      e.button.down = down;
+      e.button.clicks = 1;
+      e.button.x = script_mouse_.x;
+      e.button.y = script_mouse_.y;
+      if (down) SDL_PushEvent(&e); else script_mouse_up_ = {frame_ + 3, e};
+    }
   } else if (cmd == "scroll_library") {
     library_scroll_ = static_cast<float>(std::atof(arg.c_str()));
     restore_library_scroll_ = true;
@@ -870,6 +901,7 @@ void App::run_script() {
     else if (key == "pad_error") actual = sv_diag_count(diag_) > 0 ? sv_diag_device(diag_, 0)->open_error : "";
     else if (key == "nav_taps") actual = std::to_string(nav_taps_);
     else if (key == "search") actual = search_;
+    else if (key == "favorites") actual = std::to_string(std::count_if(catalog_.entries().begin(), catalog_.entries().end(), [](const LibraryEntry &e) { return e.favorite; }));
     else if (key == "view") actual = settings_.view;
     else if (key == "platform_filter") actual = std::to_string(platform_filter_);
     else if (key == "library_scroll") actual = std::to_string(static_cast<int>(std::lround(library_scroll_)));
@@ -995,6 +1027,7 @@ int App::run() {
         it = script_key_up_.erase(it);
       } else ++it;
     }
+    if (script_mouse_up_.first >= 0 && frame_ >= script_mouse_up_.first) { SDL_PushEvent(&script_mouse_up_.second); script_mouse_up_.first = -1; }
     run_script();
     if (shot_page_ == "storage-modal" && report_valid_ && !scanning_ && modal_.kind == Modal::Kind::none && !shot_modal_done_) {  // review aid: the confirmation sheet of a real plan
       shot_modal_done_ = true;

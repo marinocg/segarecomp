@@ -17,6 +17,7 @@ extern "C" {
 #include <SDL3/SDL.h>
 
 #include "imgui.h"
+#include "imgui_internal.h"  // ImRect
 
 #include <atomic>
 #include <ctime>
@@ -196,7 +197,10 @@ private:
   std::string focus_card_request_;     // script aid: give this card focus when it is drawn
   std::string context_id_;             // the game of the open context menu
   bool open_context_ = false;
-  bool menu_on_focus_ = false;         // review aid: open the context menu of the card that receives the requested focus
+  bool menu_on_focus_ = false;
+  std::map<std::string, ImRect> card_rects_, fav_rects_, play_rects_;  // last drawn rectangles (script aids: `mouse_card`, `mouse_fav`, `mouse_play`)
+  ImVec2 script_mouse_{0, 0};
+  std::pair<int, SDL_Event> script_mouse_up_{-1, SDL_Event{}};         // review aid: open the context menu of the card that receives the requested focus
   ImVec2 context_anchor_{0, 0};        // where the context menu opens: the mouse for a right click, beside the card for keyboard/gamepad
   bool show_advanced_ = false;         // Details: the Advanced build options section is expanded
   int settings_tab_ = 0;

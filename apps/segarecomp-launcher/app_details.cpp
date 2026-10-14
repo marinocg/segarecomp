@@ -87,6 +87,7 @@ bool App::can_build(const LibraryEntry &entry, const StatusInfo &info) const {
 bool App::can_play(const StatusInfo &info) const { return info.status == GameStatus::ready && !game_ && !job_ && !maintenance_running_; }
 
 void App::play(const std::string &id) {
+  trace("play=requested title=" + (catalog_.find_id(id) != nullptr ? catalog_.find_id(id)->title() : std::string("?")));
   restarted_this_play_ = false;
   notices_.erase(id);
   show_log_ = false;
