@@ -47,7 +47,7 @@ if(SEGARECOMP_ENABLE_SDL3_VIEWER AND BUILD_TESTING)
   set_target_properties(sv_host_test PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
   segarecomp_enable_warnings(sv_host_test)
   # Documentation/review tool, not a test: renders the viewer's screens from a fictional picture.
-  add_executable(sv_gallery test/sv_gallery.c)
+  add_executable(sv_gallery test/sv_gallery.c test/sv_gallery_scene.c)  # review art: this tool only, never the library or a package
   target_link_libraries(sv_gallery PRIVATE segarecomp::viewer_host)
   set_target_properties(sv_gallery PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED YES C_EXTENSIONS NO)
   segarecomp_enable_warnings(sv_gallery)
