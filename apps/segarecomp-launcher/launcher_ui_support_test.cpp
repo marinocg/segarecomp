@@ -89,7 +89,7 @@ const unsigned char tiny_png[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A
                                   0x1F, 0x00, 0x05, 0x00, 0x01, 0xFF, 0x89, 0x99, 0x3D, 0x1D, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82};
 }
 
-int main() {
+int run_tests() {
 #if defined(_WIN32)
   // Debug CRT: report assertions and abort() on stderr and exit, instead of a modal dialog that blocks until the CTest timeout.
   _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
@@ -345,7 +345,11 @@ int main() {
     expect(r.ok && slurp(target) == rom, "a different-size copy is not trusted: it is replaced");
     step("zip: a failed write never exposes a partial ROM (nor ");
     // a failed write never exposes a partial ROM (nor a temporary file)
-    fs::remove(target);
+    {
+      std::error_code ec;
+      fs::remove(target, ec);
+      expect(!ec && !fs::exists(target), "the test can remove the extracted ROM: " + ec.message());
+    }
     set_zip_write_failure_for_tests(true);
     r = extract_zip_rom(dir / "deflated.zip", roms);
     set_zip_write_failure_for_tests(false);
@@ -401,4 +405,13 @@ int main() {
   if (failures != 0) return 1;
   std::cout << "launcher_ui_support_test: ok\n";
   return 0;
+}
+
+int main() {
+  try {
+    return run_tests();
+  } catch (const std::exception &e) {  // name the failure instead of terminating silently
+    std::cerr << "FAIL: unexpected exception: " << e.what() << "\n";
+    return 1;
+  }
 }
