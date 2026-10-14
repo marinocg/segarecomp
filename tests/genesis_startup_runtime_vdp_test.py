@@ -132,10 +132,13 @@ int main(void) {
          stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP &&
          value == UINT32_C(0xFFFFFFFF));
 
-  /* The HV COUNTER ($C00008), a neighboring VDP-area sub-offset, remains
-     unconditionally fail-closed. */
+  /* The HV COUNTER ($C00008) answers WORD and BYTE reads (ADR 0121); a LONG read of it remains fail-closed. */
   value = UINT32_C(0xFFFFFFFF);
   assert(genesis_route_access(&runtime, UINT32_C(0x00C00008), GENESIS_ACCESS_WORD,
+                               GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_OK);
+  assert(value <= UINT32_C(0xFFFF));
+  value = UINT32_C(0xFFFFFFFF);
+  assert(genesis_route_access(&runtime, UINT32_C(0x00C00008), GENESIS_ACCESS_LONG,
                                GENESIS_ACCESS_READ, &value, &stop) == GENESIS_ACCESS_FAIL);
   assert(stop.stop_class == GENESIS_STOP_UNSUPPORTED_DEVICE_ACCESS &&
          stop.diagnostic_category == GENESIS_DIAG_UNSUPPORTED_DEVICE_REGION_VDP &&
