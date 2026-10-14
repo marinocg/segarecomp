@@ -499,7 +499,7 @@ void App::draw_library(float w, float h) {
     if (focus_search_) { ImGui::SetKeyboardFocusHere(); focus_search_ = false; }
     const float import_w = ctx_.u(narrow ? 120.0F : 132.0F);
     // a narrow window keeps the view switches on the search row, so the game list does not lose a whole toolbar row
-    input_text(ctx_, "search", search_, sizeof search_, std::max(ctx_.u(140.0F), w - import_w - ctx_.u(12.0F) - (narrow ? tools + ctx_.u(10.0F) : 0.0F)), "Search games...  (Ctrl+F)");
+    input_text(ctx_, "search", search_, sizeof search_, std::max(ctx_.u(140.0F), w - import_w - ctx_.u(12.0F) - (narrow ? tools + ctx_.u(10.0F) : 0.0F)), ImGui::GetIO().ConfigMacOSXBehaviors ? "Search games...  (Cmd+F)" : "Search games...  (Ctrl+F)");
     if (narrow) { ImGui::SameLine(0.0F, ctx_.u(10.0F)); view_tools(); }
     ImGui::SameLine(0.0F, ctx_.u(narrow ? 8.0F : 12.0F));
     if (button(ctx_, "lib_import", "Import ROMs", ImVec2(import_w, ctx_.u(36.0F)), Style::primary, !import_job_.valid(), ctx_.icon("import"))) browse_import();

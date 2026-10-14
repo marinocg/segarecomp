@@ -780,12 +780,13 @@ void App::run_script() {
     SDL_Keymod mod = SDL_KMOD_NONE;
     if (arg == "Tab") sc = SDL_SCANCODE_TAB; else if (arg == "Return") sc = SDL_SCANCODE_RETURN; else if (arg == "Escape") sc = SDL_SCANCODE_ESCAPE;
     else if (arg == "Down") sc = SDL_SCANCODE_DOWN; else if (arg == "Up") sc = SDL_SCANCODE_UP; else if (arg == "Left") sc = SDL_SCANCODE_LEFT;
-    else if (arg == "Right") sc = SDL_SCANCODE_RIGHT; else if (arg == "Space") sc = SDL_SCANCODE_SPACE; else if (arg == "F") { sc = SDL_SCANCODE_F; mod = SDL_KMOD_LCTRL; }
+    else if (arg == "Right") sc = SDL_SCANCODE_RIGHT; else if (arg == "Space") sc = SDL_SCANCODE_SPACE; else if (arg == "F") { sc = SDL_SCANCODE_F; mod = ImGui::GetIO().ConfigMacOSXBehaviors ? SDL_KMOD_LGUI : SDL_KMOD_LCTRL; }  // the shortcut modifier: Cmd on macOS (ImGui swaps Ctrl/Cmd), Ctrl elsewhere
     if (sc == SDL_SCANCODE_UNKNOWN) { trace("script=unknown_key " + arg); return; }
-    if (mod != SDL_KMOD_NONE) push_key(SDL_SCANCODE_LCTRL, true, SDL_KMOD_LCTRL);
+    const SDL_Scancode mod_key = mod == SDL_KMOD_LGUI ? SDL_SCANCODE_LGUI : SDL_SCANCODE_LCTRL;
+    if (mod != SDL_KMOD_NONE) push_key(mod_key, true, mod);
     push_key(sc, true, mod);
     script_key_up_.push_back({frame_ + 2, static_cast<int>(sc)});
-    if (mod != SDL_KMOD_NONE) script_key_up_.push_back({frame_ + 3, static_cast<int>(SDL_SCANCODE_LCTRL)});
+    if (mod != SDL_KMOD_NONE) script_key_up_.push_back({frame_ + 3, static_cast<int>(mod_key)});
   } else if (cmd == "text") {
     SDL_Event e;
     SDL_zero(e);
