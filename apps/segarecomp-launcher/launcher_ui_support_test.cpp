@@ -3,10 +3,15 @@
 #include "covers.hpp"
 #include "launcher_settings.hpp"
 #include "pixel_assets.hpp"
+#include "rom_zip.hpp"
+#include "segarecomp/sha256.hpp"
+
+#include "zlib.h"  // the vendored deflate subset: the test builds real deflated archives
 
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 namespace fs = std::filesystem;
 using namespace launcher;
@@ -18,6 +23,49 @@ void expect(bool ok, const std::string &what) {
 }
 void spit(const fs::path &p, const std::string &s) { fs::create_directories(p.parent_path()); std::ofstream(p, std::ios::binary) << s; }
 std::string slurp(const fs::path &p) { std::ifstream in(p, std::ios::binary); std::ostringstream o; o << in.rdbuf(); return o.str(); }
+
+void put16(std::string &s, unsigned v) { s.push_back(static_cast<char>(v & 0xFFU)); s.push_back(static_cast<char>((v >> 8U) & 0xFFU)); }
+void put32(std::string &s, unsigned long v) { put16(s, static_cast<unsigned>(v & 0xFFFFU)); put16(s, static_cast<unsigned>((v >> 16U) & 0xFFFFU)); }
+
+struct ZipFile { std::string name, data; bool deflate = false; unsigned flags = 0; unsigned method_override = 0xFFFF; long crc_delta = 0; };
+
+std::string raw_deflate(const std::string &data) {
+  z_stream z{};
+  deflateInit2(&z, 6, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY);
+  std::string out(deflateBound(&z, static_cast<uLong>(data.size())) + 64, '\0');
+  z.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(data.data()));
+  z.avail_in = static_cast<uInt>(data.size());
+  z.next_out = reinterpret_cast<Bytef *>(out.data());
+  z.avail_out = static_cast<uInt>(out.size());
+  deflate(&z, Z_FINISH);
+  out.resize(z.total_out);
+  deflateEnd(&z);
+  return out;
+}
+
+// A classic zip archive written byte by byte (local headers, central directory, end record).
+std::string make_zip(const std::vector<ZipFile> &files) {
+  std::string zip, cd;
+  for (const auto &f : files) {
+    const std::string body = f.deflate ? raw_deflate(f.data) : f.data;
+    const unsigned long crc = (crc32(0, reinterpret_cast<const Bytef *>(f.data.data()), static_cast<uInt>(f.data.size())) + static_cast<unsigned long>(f.crc_delta)) & 0xFFFFFFFFUL;
+    const unsigned method = f.method_override != 0xFFFF ? f.method_override : (f.deflate ? 8U : 0U);
+    const unsigned long offset = zip.size();
+    std::string local;
+    put32(local, 0x04034b50UL); put16(local, 20); put16(local, f.flags); put16(local, method); put16(local, 0); put16(local, 0);
+    put32(local, crc); put32(local, body.size()); put32(local, f.data.size()); put16(local, static_cast<unsigned>(f.name.size())); put16(local, 0);
+    zip += local + f.name + body;
+    put32(cd, 0x02014b50UL); put16(cd, 20); put16(cd, 20); put16(cd, f.flags); put16(cd, method); put16(cd, 0); put16(cd, 0);
+    put32(cd, crc); put32(cd, body.size()); put32(cd, f.data.size()); put16(cd, static_cast<unsigned>(f.name.size())); put16(cd, 0); put16(cd, 0);
+    put16(cd, 0); put16(cd, 0); put32(cd, 0); put32(cd, offset);
+    cd += f.name;
+  }
+  const unsigned long cd_offset = zip.size();
+  zip += cd;
+  put32(zip, 0x06054b50UL); put16(zip, 0); put16(zip, 0); put16(zip, static_cast<unsigned>(files.size())); put16(zip, static_cast<unsigned>(files.size()));
+  put32(zip, cd.size()); put32(zip, cd_offset); put16(zip, 0);
+  return zip;
+}
 
 // A valid 1x1 PNG (too small for a cover).
 const unsigned char tiny_png[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
@@ -90,6 +138,45 @@ int main() {
     expect(h.view == "grid" && h.sort == "last_played" && h.cleanup.mode == "never" && h.cleanup.keep_last_n == 1 && h.cleanup.soft_limit_mb == 256 && h.preferred_regions.size() == 1, "hostile values fall back to safe ones");
     spit(file, "not json at all");
     expect(load_launcher_settings(file).view == "grid", "a damaged file loads as defaults");
+  }
+  {  // zipped ROMs: one ROM inside, stored or deflated, extracted by digest; everything else refused with a reason
+    std::string rom(0x8000, '\0');
+    for (std::size_t i = 0; i < rom.size(); ++i) rom[i] = static_cast<char>((i * 37U + 11U) & 0xFFU);
+    rom.replace(0x7FF0, 8, "TMR SEGA");
+    const std::string digest = segarecomp::sha256_hex({reinterpret_cast<const std::uint8_t *>(rom.data()), rom.size()});
+    const fs::path roms = dir / "library" / "roms";
+    expect(is_zip_path("a/Game.ZIP") && !is_zip_path("a/game.sms") && !is_zip_path("zip"), "zip detection by extension, case-insensitive");
+    spit(dir / "stored.zip", make_zip({{"readme.txt", "fictional", false}, {"Fictional Cart.sms", rom, false}}));
+    ZipRom r = extract_zip_rom(dir / "stored.zip", roms);
+    expect(r.ok && r.extracted == roms / (digest + ".sms") && slurp(r.extracted) == rom && r.inner_name == "Fictional Cart.sms", "a stored ROM is extracted by digest, byte-exact");
+    spit(dir / "deflated.zip", make_zip({{"Folder/", "", false}, {"Folder/Fictional Cart.sms", rom, true}, {"__MACOSX/Folder/._Fictional Cart.sms", "x", false}}));
+    const std::string deflated = slurp(dir / "deflated.zip");
+    expect(deflated.size() < rom.size(), "the test archive really is compressed");
+    r = extract_zip_rom(dir / "deflated.zip", roms);
+    expect(r.ok && slurp(r.extracted) == rom, "a deflated ROM is inflated byte-exact (resource forks and folders ignored)");
+    expect(slurp(dir / "deflated.zip") == deflated, "the archive itself is never modified");
+    const auto refused = [&](const std::string &name, const std::string &bytes, const std::string &needle) {
+      spit(dir / name, bytes);
+      const ZipRom z = extract_zip_rom(dir / name, roms);
+      expect(!z.ok && z.error.find(needle) != std::string::npos, name + " is refused (" + needle + "): " + z.error);
+    };
+    refused("none.zip", make_zip({{"notes.txt", "fictional", true}}), "contains no");
+    refused("two.zip", make_zip({{"a.md", rom, false}, {"b.sms", rom, true}}), "contains 2 ROMs");
+    ZipFile encrypted{"c.sms", rom, false};
+    encrypted.flags = 1;
+    refused("encrypted.zip", make_zip({encrypted}), "encrypted");
+    ZipFile bzip{"c.sms", rom, false};
+    bzip.method_override = 12;
+    refused("bzip2.zip", make_zip({bzip}), "compression method");
+    ZipFile bad_crc{"c.sms", rom, true};
+    bad_crc.crc_delta = 1;
+    refused("crc.zip", make_zip({bad_crc}), "CRC");
+    const std::string whole = make_zip({{"c.sms", rom, true}});
+    refused("truncated.zip", whole.substr(0, 40) + whole.substr(whole.size() - 22), "");
+    refused("garbage.zip", std::string(300, 'z'), "not a zip");
+    std::size_t files = 0;
+    for (const auto &e : fs::directory_iterator(roms)) { (void)e; ++files; }
+    expect(files == 1, "refused archives leave nothing behind; the same ROM twice is one file");
   }
   fs::remove_all(dir);
   if (failures != 0) return 1;

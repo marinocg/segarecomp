@@ -1,5 +1,5 @@
 // The launcher's art: the repository's own sunset artwork composed responsively behind the window (hero banner, calm water, restrained foliage), and the
-// title card shown for a game that has no cover (a tinted crop of the same artwork, the platform, the title and an explicit no-cover mark). Nothing here is game art, a game screenshot or fabricated metadata.
+// placeholder painting shown for a game that has no cover (one of four, chosen by digest, under a platform band and an explicit no-cover tag). Nothing here is game art, a game screenshot or fabricated metadata.
 
 #include "app.hpp"
 
@@ -30,18 +30,6 @@ SDL_Texture *art_texture(Ctx &ctx) {
     smoothed = true;
   }
   return bg;
-}
-
-std::string initials(const std::string &title) {
-  std::string out;
-  bool start = true;
-  for (const char c : title) {
-    if (std::isalnum(static_cast<unsigned char>(c)) != 0) {
-      if (start && out.size() < 3) out.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
-      start = false;
-    } else if (c == ' ' || c == '-' || c == '_' || c == ':') start = true;
-  }
-  return out.empty() ? "?" : out;
 }
 
 } // namespace
@@ -100,72 +88,44 @@ void App::draw_cover(ImDrawList *dl, const LibraryEntry &entry, ImVec2 a, ImVec2
     dl->AddImageRounded(reinterpret_cast<ImTextureID>(cover), a, b, uv0, uv1, tint, rounding);
     return;
   }
-  // ---- no cover chosen: an honest title card ----
-  // A crop of the repository's own scenery (a different window per game, from its digest), tinted to the launcher navy so it reads as a
-  // launcher-made card and never as identified box art, with the platform band, the title and an explicit "no cover art" mark.
+  // ---- no cover chosen: one of the four supplied placeholder paintings ----
+  // Chosen per game from its digest (stable, and neighbouring cards differ), shown under a platform band and an explicit "NO COVER ART" tag so a
+  // placeholder is never mistaken for the game's identified box art.
   const bool sms = entry.platform_id == "master-system";
   const ImU32 accent = sms ? rgba(255, 186, 96) : rgba(64, 191, 245);
   dl->AddRectFilled(a, b, rgba(9, 20, 48), rounding);
   unsigned seed = 0;
   for (std::size_t i = 0; i < entry.sha256.size() && i < 8; ++i) seed = seed * 16U + static_cast<unsigned>(std::isdigit(static_cast<unsigned char>(entry.sha256[i])) ? entry.sha256[i] - '0' : (std::tolower(static_cast<unsigned char>(entry.sha256[i])) - 'a' + 10) & 15);
-  if (SDL_Texture *bg = art_texture(ctx_); bg != nullptr && w > ctx_.u(24.0F)) {
-    // windows of the artwork with a strong silhouette: left palms and cliff, the sun, the waterfalls, the lower palms
-    static const float windows[][2] = {{0.00F, 0.12F}, {0.30F, 0.22F}, {0.62F, 0.20F}, {0.70F, 0.62F}, {0.00F, 0.62F}, {0.18F, 0.26F}};
-    const auto &win = windows[seed % 6U];
-    const float crop_w = 0.42F + static_cast<float>((seed >> 4U) % 4U) * 0.04F;           // fraction of the art width
-    const float crop_h = crop_w * kArtW / kArtH * (h / w);                                // keeps the art's aspect inside the card
-    const float u0 = std::min(win[0], 1.0F - crop_w), v0 = std::min(win[1], 1.0F - crop_h);
-    const bool mirror = ((seed >> 7U) & 1U) != 0U;
-    const ImVec2 uv0(mirror ? u0 + crop_w : u0, v0), uv1(mirror ? u0 : u0 + crop_w, v0 + crop_h);
-    dl->AddImageRounded(reinterpret_cast<ImTextureID>(bg), a, b, uv0, uv1, sms ? rgba(118, 100, 132) : rgba(84, 104, 160), rounding);
+  char name[40];
+  std::snprintf(name, sizeof name, "covers/placeholder-%u.png", seed % 4U + 1U);
+  if (SDL_Texture *art = ctx_.asset(name)) {
+    float tw = 0, th = 0;
+    SDL_GetTextureSize(art, &tw, &th);
+    const float frame_ratio = w / h, tex_ratio = tw / th;
+    ImVec2 uv0(0, 0), uv1(1, 1);
+    if (tex_ratio > frame_ratio) { const float k = frame_ratio / tex_ratio; uv0.x = (1 - k) * 0.5F; uv1.x = uv0.x + k; }
+    else { const float k = tex_ratio / frame_ratio; uv0.y = (1 - k) * 0.5F; uv1.y = uv0.y + k; }
+    dl->AddImageRounded(reinterpret_cast<ImTextureID>(art), a, b, uv0, uv1, tint, rounding);
   }
-  dl->PushClipRect(a, b, true);
-  dl->AddRectFilledMultiColor(ImVec2(a.x, a.y + h * 0.35F), b, rgba(6, 14, 36, 40), rgba(6, 14, 36, 40), rgba(6, 14, 36, 235), rgba(6, 14, 36, 235));
-  const float band = std::max(ctx_.u(3.0F), std::floor(h * 0.11F));
   if (w > ctx_.u(70.0F)) {
-    dl->AddRectFilled(a, ImVec2(b.x, a.y + band), rgba(4, 10, 26, 235), rounding, ImDrawFlags_RoundCornersTop);
+    dl->PushClipRect(a, b, true);
+    const float band = std::max(ctx_.u(3.0F), std::floor(h * 0.10F));
+    dl->AddRectFilled(a, ImVec2(b.x, a.y + band), rgba(4, 10, 26, 225), rounding, ImDrawFlags_RoundCornersTop);
     dl->AddRectFilled(ImVec2(a.x, a.y + band), ImVec2(b.x, a.y + band + std::max(1.0F, ctx_.u(2.0F))), accent);
     const char *system = sms ? "MASTER SYSTEM" : "GENESIS";
     float spx = std::min(band * 0.52F, ctx_.u(10.0F));
-    while (spx > 5.0F && text_width(ctx_.display, spx, system) > w - ctx_.u(12.0F)) spx -= 0.5F;
-    draw_text(dl, ctx_.display, spx, with_alpha(accent, 235), ImVec2(a.x + ctx_.u(7.0F), a.y + (band - spx) * 0.5F), system);
+    while (spx > 5.0F && text_width(ctx_.display, spx, system) > w * 0.6F) spx -= 0.5F;
+    draw_text(dl, ctx_.display, spx, with_alpha(accent, 240), ImVec2(a.x + ctx_.u(7.0F), a.y + (band - spx) * 0.5F), system);
+    const char *note = "NO COVER ART";
+    const float cap = std::clamp(h * 0.042F, ctx_.u(7.0F), ctx_.u(8.5F));
+    const float nw = text_width(ctx_.display, cap, note) + ctx_.u(10.0F), ny = a.y + band + ctx_.u(6.0F);
+    dl->AddRectFilled(ImVec2(b.x - nw - ctx_.u(6.0F), ny), ImVec2(b.x - ctx_.u(6.0F), ny + cap + ctx_.u(8.0F)), rgba(4, 10, 26, 200), ctx_.u(3.0F));
+    draw_text(dl, ctx_.display, cap, rgba(200, 212, 240), ImVec2(b.x - nw - ctx_.u(1.0F), ny + ctx_.u(4.0F)), note);
+    dl->PopClipRect();
   } else {
     dl->AddRectFilled(a, ImVec2(b.x, a.y + std::max(2.0F, ctx_.u(2.0F))), accent);
   }
-  if (w > ctx_.u(70.0F)) {
-    // the title, wrapped in up to three Silkscreen lines in the lower part of the card
-    float px = std::clamp(w * 0.115F, ctx_.u(9.0F), ctx_.u(18.0F));
-    std::vector<std::string> lines;
-    for (; px >= ctx_.u(8.0F); px -= 1.0F) {
-      lines = uih::wrap(ctx_.display, px, w - ctx_.u(16.0F), entry.title());
-      bool fits = lines.size() <= 3;
-      for (const auto &l : lines) if (text_width(ctx_.display, px, l.c_str()) > w - ctx_.u(16.0F)) fits = false;
-      if (fits) break;
-    }
-    if (lines.size() > 3) { lines.resize(3); lines[2] = ellipsize(ctx_.display, px, w - ctx_.u(16.0F), lines[2] + "..."); }
-    const float cap = std::clamp(h * 0.045F, ctx_.u(7.0F), ctx_.u(9.0F));
-    // under the platform band: the lower part of the card stays free for the library's build-state badge
-    float ty = a.y + band + std::max(ctx_.u(10.0F), h * 0.07F);
-    dl->AddRectFilledMultiColor(ImVec2(a.x, a.y + band), ImVec2(b.x, ty + static_cast<float>(lines.size()) * (px + ctx_.u(3.0F)) + cap + ctx_.u(22.0F)), rgba(4, 10, 28, 170), rgba(4, 10, 28, 170), rgba(4, 10, 28, 0), rgba(4, 10, 28, 0));
-    for (const auto &l : lines) {
-      draw_text(dl, ctx_.display, px, rgba(2, 6, 18, 230), ImVec2(a.x + ctx_.u(9.0F), ty + ctx_.u(1.5F)), l.c_str());
-      draw_text(dl, ctx_.display, px, rgba(236, 244, 255), ImVec2(a.x + ctx_.u(8.0F), ty), l.c_str());
-      ty += px + ctx_.u(3.0F);
-    }
-    const char *note = "NO COVER ART";
-    draw_text(dl, ctx_.display, cap, rgba(150, 168, 210, 220), ImVec2(a.x + ctx_.u(8.0F), ty + ctx_.u(3.0F)), note);
-  } else {
-    // thumbnails: the initials only
-    const std::string text = initials(entry.title());
-    float px = std::min(h * 0.32F, w * 0.42F);
-    while (px > ctx_.u(7.0F) && text_width(ctx_.display, px, text.c_str()) > w - ctx_.u(6.0F)) px -= 1.0F;
-    const ImVec2 tp((a.x + b.x) * 0.5F - text_width(ctx_.display, px, text.c_str()) * 0.5F, b.y - px - h * 0.16F);
-    draw_text(dl, ctx_.display, px, rgba(2, 6, 18, 230), ImVec2(tp.x + 1.0F, tp.y + 1.0F), text.c_str());
-    draw_text(dl, ctx_.display, px, rgba(236, 244, 255), tp, text.c_str());
-  }
-  dl->PopClipRect();
   dl->AddRect(a, b, with_alpha(accent, 110), rounding, 0, std::max(1.0F, ctx_.u(1.0F)));
-  (void)tint;
 }
 
 } // namespace launcher

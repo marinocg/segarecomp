@@ -38,10 +38,10 @@ target_compile_definitions(segarecomp_launcher_core PUBLIC
 segarecomp_enable_warnings(segarecomp_launcher_core)
 
 # Image loading (the launcher's pixel-art assets and user-chosen covers) and the cover/Libretro naming helpers; no window needed.
-add_library(segarecomp_launcher_ui_support STATIC pixel_assets.cpp covers.cpp)
+add_library(segarecomp_launcher_ui_support STATIC pixel_assets.cpp covers.cpp rom_zip.cpp)
 target_include_directories(segarecomp_launcher_ui_support SYSTEM PRIVATE ${_stb_dir})
 target_include_directories(segarecomp_launcher_ui_support PUBLIC .)
-target_link_libraries(segarecomp_launcher_ui_support PUBLIC SDL3::SDL3)
+target_link_libraries(segarecomp_launcher_ui_support PUBLIC SDL3::SDL3 segarecomp_launcher_core)
 target_compile_features(segarecomp_launcher_ui_support PUBLIC cxx_std_20)
 target_compile_definitions(segarecomp_launcher_ui_support PUBLIC
   SEGARECOMP_LAUNCHER_SOURCE_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets")
@@ -94,7 +94,7 @@ endif()
 
 # SEG-058: covers, Libretro candidate naming and launcher settings.
 add_executable(launcher_ui_support_test launcher_ui_support_test.cpp)
-target_link_libraries(launcher_ui_support_test PRIVATE segarecomp_launcher_core segarecomp_launcher_ui_support)
+target_link_libraries(launcher_ui_support_test PRIVATE segarecomp_launcher_core segarecomp_launcher_ui_support segarecomp_zlib)
 segarecomp_enable_warnings(launcher_ui_support_test)
 if(BUILD_TESTING)
   add_test(NAME launcher_ui_support_test COMMAND launcher_ui_support_test)

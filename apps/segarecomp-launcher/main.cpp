@@ -3,6 +3,7 @@
 
 #include "launcher_core.hpp"
 #include "library_catalog.hpp"
+#include "rom_zip.hpp"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -84,7 +85,7 @@ int headless(int argc, char **argv) {
     catalog.load();
     int bad = 0;
     for (const auto &path : imports) {
-      const RomView view = inspect_rom_file(path, import_layout);
+      const RomView view = inspect_rom_or_zip(path, import_layout, library_root() / "roms");
       const auto result = catalog.import_rom(view, static_cast<long long>(std::time(nullptr)));
       if (result.entry == nullptr) { emit("import=failed path=" + u8s(path) + " reason=" + result.error); ++bad; }
       else emit(std::string("import=") + (result.added ? "added" : (result.path_added ? "location" : "duplicate")) + " id=" + result.entry->id() + " title=" + result.entry->title());
@@ -99,7 +100,7 @@ int headless(int argc, char **argv) {
   emit("compiler=" + u8s(layout.cc));
   if (!layout.problem.empty()) { emit("result=failed problem=" + layout.problem); rc = 1; }
   else {
-    RomView rom = inspect_rom_file(rom_path, layout);
+    RomView rom = inspect_rom_or_zip(rom_path, layout, library_root() / "roms");
     if (rom.platform_id == "master-system" && !mapper.empty()) rom.mapper = mapper;
     // The product CLI states whether the experimental Master System Optimized policy exists; a request for it is honoured only then.
     if (rom.platform_id == "master-system" && aot_model != "v1") { emit("result=failed problem=--aot-model is a Genesis option"); rc = 2; }

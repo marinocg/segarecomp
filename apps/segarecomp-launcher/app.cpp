@@ -2,6 +2,7 @@
 
 #include "covers.hpp"
 #include "pixel_assets.hpp"
+#include "rom_zip.hpp"
 
 #include "imgui_impl_sdl3.h"
 #include "imgui_internal.h"
@@ -378,12 +379,12 @@ void App::poll_maintenance() {
 // ---------------------------------------------------------------- import
 
 void App::browse_import() {
-  static const SDL_DialogFileFilter filters[] = {{"Genesis / Mega Drive ROMs", "md;bin;gen;smd"}, {"Master System ROMs", "sms"}, {"All files", "*"}};
-  SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "import", ""}, window_, filters, 3, nullptr, true);
+  static const SDL_DialogFileFilter filters[] = {{"ROMs and zipped ROMs", "md;bin;gen;smd;sms;zip"}, {"Genesis / Mega Drive ROMs", "md;bin;gen;smd"}, {"Master System ROMs", "sms"}, {"Zipped ROMs", "zip"}, {"All files", "*"}};
+  SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "import", ""}, window_, filters, 5, nullptr, true);
 }
 
 void App::browse_locate(const std::string &id) {
-  static const SDL_DialogFileFilter filters[] = {{"ROMs", "md;bin;gen;smd;sms"}, {"All files", "*"}};
+  static const SDL_DialogFileFilter filters[] = {{"ROMs", "md;bin;gen;smd;sms;zip"}, {"All files", "*"}};
   SDL_ShowOpenFileDialog(dialog_trampoline, new DialogCtx{this, "locate", id}, window_, filters, 2, nullptr, false);
 }
 
@@ -399,10 +400,10 @@ void App::start_import(std::vector<std::string> paths, bool build_after) {
   import_done_ = 0;
   import_build_after_ = build_after;
   import_results_.clear();
-  import_job_ = std::async(std::launch::async, [paths = std::move(paths), lay = layout_, done = &import_done_] {
+  import_job_ = std::async(std::launch::async, [paths = std::move(paths), lay = layout_, roms = library_dir_ / "roms", done = &import_done_] {
     std::vector<std::pair<std::string, RomView>> out;
     for (const auto &p : paths) {
-      out.emplace_back(p, inspect_rom_file(from_u8(p), lay));
+      out.emplace_back(p, inspect_rom_or_zip(from_u8(p), lay, roms));
       done->fetch_add(1);
     }
     return out;
@@ -674,11 +675,11 @@ void App::update_jobs() {
       }
       if (e.purpose == "import") start_import(e.paths, import_build_option_);
       else if (e.purpose == "locate" && !e.paths.empty()) {
-        const RomView view = inspect_rom_file(from_u8(e.paths[0]), layout_);
+        const RomView view = inspect_rom_or_zip(from_u8(e.paths[0]), layout_, library_dir_ / "roms");
         LibraryEntry *entry = catalog_.find_id(e.key);
         if (entry == nullptr) continue;
         if (!view.error.empty()) show_message("The file could not be read", {view.error});
-        else if (!catalog_.relocate(*entry, from_u8(e.paths[0]), view.sha256)) show_message("That is a different ROM", {"The chosen file does not match this game (its SHA-256 differs).", "Pick the original file, or import it as a separate game."});
+        else if (!catalog_.relocate(*entry, view.path, view.sha256)) show_message("That is a different ROM", {"The chosen file does not match this game (its SHA-256 differs).", "Pick the original file, or import it as a separate game."});
         else { save_catalog(); request_status_refresh(); toast("ROM location updated."); }
       } else if (e.purpose == "cover" && !e.paths.empty()) {
         LibraryEntry *entry = catalog_.find_id(e.key);

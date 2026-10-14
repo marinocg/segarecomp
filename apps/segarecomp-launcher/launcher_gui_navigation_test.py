@@ -44,6 +44,29 @@ def main():
             rom.write_bytes(bytes(image))
             subprocess.run([exe, "--import", str(rom)], env=env, timeout=60, check=True, capture_output=True)
 
+        # A zipped ROM imports like a plain one (extracted once by digest); the same ROM zipped again is the same game.
+        import zipfile
+        image = bytearray(0x200)
+        image[:12] = bytes((0x00, 0xFF, 0x00, 0x04, 0x00, 0x00, 0x00, 0x08, 0x70, 0x00, 0x4E, 0x70))
+        image[0x100:0x110] = b"SEGA GENESIS    "
+        image[0x1E0] = 200
+        for name in ("Zipped Nav Test.zip", "Zipped Again.zip"):
+            with zipfile.ZipFile(tmp / name, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("readme.txt", "fictional")
+                archive.writestr("Zipped Nav Test.md", bytes(image))
+        first = subprocess.run([exe, "--import", str(tmp / "Zipped Nav Test.zip")], env=env, timeout=60, capture_output=True, text=True)
+        again = subprocess.run([exe, "--import", str(tmp / "Zipped Again.zip")], env=env, timeout=60, capture_output=True, text=True)
+        if "import=added" not in first.stdout or "title=Zipped Nav Test" not in first.stdout:
+            failures.append(f"zip import: {first.stdout!r} {first.stderr!r}")
+        if "import=duplicate" not in again.stdout:
+            failures.append(f"zip re-import is not the same game: {again.stdout!r}")
+        with zipfile.ZipFile(tmp / "Two Roms.zip", "w") as archive:
+            archive.writestr("a.md", bytes(image))
+            archive.writestr("b.sms", bytes(image))
+        two = subprocess.run([exe, "--import", str(tmp / "Two Roms.zip")], env=env, timeout=60, capture_output=True, text=True)
+        if two.returncode == 0 or "contains 2 ROMs" not in two.stdout:
+            failures.append(f"a zip with two ROMs must be refused: {two.stdout!r}")
+
         def check(name, script, expected):
             trace = run(exe, env, script, tmp)
             failures.extend(f"{name}: {l}" for l in trace if l.startswith("expect FAIL"))

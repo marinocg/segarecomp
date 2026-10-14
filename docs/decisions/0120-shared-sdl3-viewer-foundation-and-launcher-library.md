@@ -138,6 +138,11 @@ There is no packaged HTTPS cover client and no build cancellation. See `docs/pro
   1080x740 viewport. The card distinguishes the selection from the executable on disk (`status.json`'s effective policy and fallback) and from a build of
   the other mode still on disk (computed by the status worker with the same `entry_ready_for` check, so a switch is shown as non-destructive only when it
   really is). Region stays a run-time choice outside the cache identity; mode, model, H-interrupt discovery and mapper remain identity inputs.
-* **Art and covers.** The repository's own artwork remains the only scenery. The v2 kit's fallback backgrounds and cover placeholders were audited and not
-  shipped (`apps/segarecomp-launcher/assets/manifest.json`). A game without a cover shows a code-drawn title card (tinted crop of the repository art, the
-  platform, the title, "NO COVER ART"), which cannot be mistaken for identified box art.
+* **Art and covers.** The repository's own artwork remains the only scenery; the v2 kit's fallback backgrounds were audited and not shipped
+  (`apps/segarecomp-launcher/assets/manifest.json`). A game without a cover shows one of four owner-supplied fictional placeholder paintings, chosen by
+  digest, under the platform band and a "NO COVER ART" tag, so it cannot be mistaken for identified box art.
+* **Experimental model placement.** The Genesis experimental Optimized model is part of the Optimized choice: a checkbox directly under the Optimized
+  tile while Optimized is selected, not inside the Advanced expander.
+* **Zipped ROMs.** No new dependency: the central directory is read by a small parser and deflate entries are inflated by the zlib decoder already compiled
+  into the launcher with `stb_image.h`. Exactly one ROM per archive, CRC-checked; the ROM is unpacked once into `<library>/roms/<sha256>.<ext>` (outside
+  every folder Storage cleans) and the library tracks that copy, so identity, builds and de-duplication are unchanged.

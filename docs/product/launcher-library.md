@@ -12,22 +12,26 @@ gamepad's East button) returns to exactly the library state it came from: search
 focused card. The repository's sunset artwork forms the header banner and the dimmed scenery behind the window. Everything it shows is read from the library
 file, the build cache or the product: no placeholder values.
 
-* **Library** - grid or list (a game without a cover shows a title card: a tinted crop of the launcher's own artwork, the platform, the title and "NO COVER ART";
-  a cover is only ever an image you chose), each card with its build state, platform and last activity, search, platform/status filters, sort (last played, title, last built, added, size), favorites, multi-select
+* **Library** - grid or list (a game without a cover shows one of four fictional placeholder paintings, picked from its digest, under the platform band and a
+  "NO COVER ART" tag; a cover is only ever an image you chose), each card with its build state, platform and last activity, search, platform/status filters, sort (last played, title, last built, added, size), favorites, multi-select
   (Select mode) for storage actions and removal. An empty library shows the ROM drop zone.
-* **Import** - drag and drop or Browse (several files). Each file is classified by the same media classifier as before, de-duplicated by SHA-256
+* **Import** - drag and drop or Browse (several files, plain ROMs or `.zip` archives). Each file is classified by the same media classifier as before, de-duplicated by SHA-256
   (the same game elsewhere only adds a tracked location), and listed with a reason when refused. Importing never builds (an explicit checkbox builds
-  the new games). ROMs are referenced, never copied, moved or uploaded.
+  the new games). ROMs are referenced, never copied, moved or uploaded. **Zipped ROMs**: a `.zip` holding exactly one `.md/.bin/.gen/.smd/.sms`
+  (stored or deflate, CRC-checked; no zip64 or encryption) is unpacked once into `<library>/roms/<sha256>.<ext>` and that copy is what the library
+  tracks and builds; the archive is only read. A zip with no ROM or several ROMs is refused with the reason. The same ROM zipped or not is one game.
+  Works for drag and drop, Browse, Locate ROM and the headless `--import` / `--build`. A sidecar `.mapper.json` inside a zip is not read (declare the
+  Master System mapper on the game's page).
 * **Details** - top to bottom, inside the first 1080x740 view: the cover (change from its corner), editable display name (the header name is kept),
   favorite, platform, build state and ROM link health, one sentence of what matters now, and the two dominant actions **Play** (only for an executable whose
   identity matches the configuration exactly) and **Build / Recompile / Rebuild / Try again** (a missing ROM makes **Locate ROM** the primary action instead).
   Rarer actions are in **More**: build log, open build folder, manage storage, change/remove cover, find cover online, copy SHA-256, locate ROM and (set
-  apart) remove from library. The **Build Configuration** card follows: **Build mode** (Compatibility | Optimized) and, for Genesis, the **console region**
+  apart) remove from library. The **Build Configuration** card follows: **Build mode** (Compatibility | Optimized; for Genesis an **Experimental model** checkbox appears right under the Optimized tile while
+  Optimized is selected) and, for Genesis, the **console region**
   (USA NTSC | Japan NTSC | Europe PAL, applied at launch, never a rebuild; PAL still runs on the 60 Hz schedule), or for Master System the **cartridge
   mapper** (nothing preselected, never guessed; a sidecar manifest declares it) and the one console profile. A state line says what the executable on disk
   actually is (from `status.json`: effective policy and any Optimized fallback), whether the selection matches it, and when a mode switch left the other
-  mode's executable on disk ("switch back to play it"). **Advanced build options** (the experimental Genesis Optimized model and H-interrupt alias
-  discovery) sit behind an expander with their consequences. Below: **Build provenance** (SHA-256 with Copy, ROM file and folder, last recompiled, last
+  mode's executable on disk ("switch back to play it"). **Advanced build options** (H-interrupt alias discovery) sit behind an expander with their consequences. Below: **Build provenance** (SHA-256 with Copy, ROM file and folder, last recompiled, last
   played and last run result, build version and toolchain, build identity with the selected options, effective policy details, diagnostics) and the build
   log. A **storage** rail shows the game's measured footprint (native executable, generated C, objects, logs, metadata, other build files) with *Clean
   intermediates* and *Manage storage*; for a metadata-only game it says the history is kept and a new build is needed to play.
@@ -43,7 +47,7 @@ file, the build cache or the product: no placeholder values.
 |---|---|---|
 | Built games, logs | `<cache>/games/<id>[.partial|.failed]/` | yes (by plan) |
 | Shared Zig compiler cache | `<cache>/zig-cache/` | yes (Clear shared compiler cache) |
-| Library, covers, launcher + viewer settings, screenshots dir default | `<cache>/library/` (`library.json`, `covers/`, `launcher-settings.json`, `viewer-settings.cfg`) | never |
+| Library, covers, ROMs unpacked from zips, launcher + viewer settings, screenshots dir default | `<cache>/library/` (`library.json`, `covers/`, `roms/`, `launcher-settings.json`, `viewer-settings.cfg`) | never |
 | Your ROMs | where they are | never |
 
 `<cache>` is `SEGARECOMP_CACHE_DIR`, `%LOCALAPPDATA%\Segarecomp`, or the SDL preference path (`~/Library/Application Support/Segarecomp`, `~/.local/share/Segarecomp`).
@@ -144,7 +148,7 @@ All images are real captures of the built binaries, rendered from fictional, pro
 the design concept boards are not part of the repository. The fixture holds real states, never forged flags: a Compatibility build, a real Optimized build,
 an Optimized selection made after a Compatibility build (its Compatibility executable kept), a Master System game with and one without a declared mapper, a
 metadata-only game whose ROM was moved away, and a deliberately invalid cartridge whose build really fails. Two games carry fictional user-chosen covers; the
-others show the launcher's title card.
+others show the placeholder paintings.
 
 * `screenshots/launcher/` - 1080x740 and `launcher-small/` - 720x520 (the minimum): library grid/list/select and context menu, every Details state
   (`03*`: Genesis Compatibility, Genesis Optimized, mode switch awaiting a build, Master System mapper selection, metadata only + missing ROM, failed build and
@@ -174,10 +178,9 @@ python3 tools/launcher_visual_capture.py --launcher <staged-package>/Segarecomp 
   the build log below, a measured storage rail on the right (below the configuration in narrow windows). The configuration states what the executable on
   disk is (from `status.json`), not only what is selected.
 * **Art.** The repository's sunset remains the only scenery: the hero is about 163 points high at 1080x740 (114 at 720x520), cover-scaled so the whole sun
-  disc, mountains and waterfalls stay visible, with readable scrims. The v2 kit's backgrounds and covers were audited and not shipped (see
-  `apps/segarecomp-launcher/assets/manifest.json`): its four covers are one bright landscape (two files byte-identical, the others within 24/255 per pixel)
-  that would read as identified box art, and its backgrounds are smooth 47k-141k-colour renders. A game without a cover shows a title card made from a
-  different tinted crop of the repository art per game, with the platform band, the title and "NO COVER ART".
+  disc, mountains and waterfalls stay visible, with readable scrims. The v2 kit's backgrounds were audited and not shipped (smooth 47k-141k-colour
+  renders; see `apps/segarecomp-launcher/assets/manifest.json`) and its four covers were one image. A game without a cover shows one of the four distinct
+  placeholder paintings supplied afterwards by the project owner (chosen by digest) under the platform band and a "NO COVER ART" tag.
 * **Cards and screens.** Cards show the art, a build-state badge, title, platform and last activity (size and dates moved to the list, storage and
   Details). Settings groups are titled section cards. The empty library shows the import guide. Import results replace the guide when present.
 * **Fixes found while reviewing captures.** Build records adopted at start-up for existing entries were not saved; the GUI trace path dangled after

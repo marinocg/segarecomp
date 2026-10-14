@@ -125,7 +125,7 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
     if (auto it = cover_cache_.find(entry->cover); it != cover_cache_.end()) { if (it->second) SDL_DestroyTexture(it->second); cover_cache_.erase(it); }
     entry->cover.clear();
     save_catalog();
-    toast("Cover removed; the title card is shown.");
+    toast("Cover removed; the placeholder is shown.");
   }
   {
     const auto names = libretro_candidate_names(entry->title(), settings_.preferred_regions);
@@ -152,7 +152,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     draw_cover(dl, entry, a, b, ctx_.u(5.0F));
     dl->AddRect(a, b, col::glow, ctx_.u(5.0F), 0, std::max(1.0F, ctx_.u(1.5F)));
     const float bs = ctx_.u(26.0F);
-    ImGui::SetCursorScreenPos(ImVec2(b.x - bs - ctx_.u(5.0F), a.y + ctx_.u(5.0F)));
+    ImGui::SetCursorScreenPos(ImVec2(b.x - bs - ctx_.u(5.0F), b.y - bs - ctx_.u(5.0F)));
     if (icon_button(ctx_, "cover_change", ctx_.icon("edit"), bs, false, true, "Change cover (local image)")) browse_cover(entry.id());
   }
   const float x0 = top.x + cover_w + ctx_.u(18.0F), tw = w - cover_w - ctx_.u(18.0F);
@@ -336,6 +336,19 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     }
     ImGui::EndDisabled();
     y += tile_h + ctx_.u(8.0F);
+    // Genesis Optimized: the experimental model is part of the Optimized choice, so it sits right under the Optimized tile while Optimized is
+    // selected (never hidden in the Advanced section).
+    if (!sms && entry.aot_policy == "optimized" && probe.supports_optimized()) {
+      const float tile_w = std::floor((ctl_w - ctx_.u(8.0F)) / 2.0F), ox = cx + tile_w + ctx_.u(8.0F);
+      ImGui::SetCursorScreenPos(ImVec2(ox, y - ctx_.u(2.0F)));
+      bool experimental = entry.aot_model == "gen2";
+      ImGui::BeginDisabled(busy_now);
+      if (checkbox(ctx_, "model_exp", "Experimental model", &experimental)) { entry.aot_model = experimental ? "gen2" : "v1"; changed = true; }
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered()) tooltip(ctx_, "The experimental Optimized model family: may admit different code and may fall back to Compatibility. Changes the build.");
+      if (ImGui::IsItemFocused()) focus_label_ = "Experimental model";
+      y += ctx_.u(30.0F);
+    }
   }
   // what the executable actually is, versus what is selected
   {
@@ -398,7 +411,7 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
     else dl->AddTriangleFilled(ImVec2(c.x - ctx_.u(3.0F), c.y - ctx_.u(5.0F)), ImVec2(c.x + ctx_.u(4.0F), c.y), ImVec2(c.x - ctx_.u(3.0F), c.y + ctx_.u(5.0F)), col::text2);
     draw_text(dl, ctx_.bold, ctx_.u(12.5F), col::text, ImVec2(ra.x + ctx_.u(24.0F), c.y - ctx_.u(7.5F)), "Advanced build options");
     std::string summary;
-    if (!sms) summary = std::string(entry.aot_model == "gen2" && entry.aot_policy == "optimized" ? "Experimental model" : "Standard model") + (entry.hint_alias_discovery ? " / H-int discovery on" : " / H-int discovery off");
+    if (!sms) summary = entry.hint_alias_discovery ? "H-int discovery on" : "H-int discovery off";
     else summary = "none for this console";
     const std::string sum_shown = ellipsize(ctx_.regular, ctx_.u(11.5F), inner * 0.5F, summary);
     draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::dim, ImVec2(rb.x - ctx_.u(8.0F) - text_width(ctx_.regular, ctx_.u(11.5F), sum_shown.c_str()), c.y - ctx_.u(7.0F)), sum_shown.c_str());
@@ -410,18 +423,6 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
         draw_text(dl, ctx_.regular, ctx_.u(12.0F), col::text2, ImVec2(a.x + pad, y), "Master System builds have no further options: the mapper and build mode above are the build identity.");
         y += ctx_.u(22.0F);
       } else {
-        // Experimental Optimized model (Genesis)
-        ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-        draw_text(dl, ctx_.bold, ctx_.u(12.0F), col::text, ImVec2(a.x + pad, y + ctx_.u(6.0F)), "Optimized model");
-        ImGui::SetCursorScreenPos(ImVec2(a.x + pad + ctx_.u(140.0F), y));
-        int model = entry.aot_model == "gen2" ? 1 : 0;
-        const bool model_enabled = entry.aot_policy == "optimized" && !busy_now;
-        ImGui::BeginDisabled(!model_enabled);
-        if (segmented(ctx_, "model", {"Standard", "Experimental model"}, &model, 0.0F)) { entry.aot_model = model == 1 ? "gen2" : "v1"; changed = true; }
-        ImGui::EndDisabled();
-        y = ImGui::GetCursorScreenPos().y + ctx_.u(4.0F);
-        ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-        y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner, entry.aot_policy == "optimized" ? "The experimental model family may admit different code and may fall back to Compatibility. It changes the build." : "Only used by Optimized builds. Select Optimized to change it.") + ctx_.u(6.0F);
         ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
         bool on = entry.hint_alias_discovery;
         ImGui::BeginDisabled(busy_now);
@@ -432,7 +433,7 @@ float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float 
         y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, inner, "Default off. For games whose raster / H-interrupt effects fail otherwise: the build stops on a RAM-resident H-interrupt vector to derive its alias. Builds may take longer. It changes the build.") + ctx_.u(4.0F);
       }
       ImGui::SetCursorScreenPos(ImVec2(a.x + pad, y));
-      y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, "Build mode, model, H-interrupt discovery and the mapper are part of the build identity: changing them needs a new build, and the previous executable is kept until Storage cleans it. Region applies at launch.") + ctx_.u(4.0F);
+      y += paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::text2, inner, "Build mode, the experimental model, H-interrupt discovery and the mapper are part of the build identity: changing them needs a new build, and the previous executable is kept until Storage cleans it. Region applies at launch.") + ctx_.u(4.0F);
     }
   }
   if (entry.aot_policy == "optimized" && rom_policy_identity_cached(layout_, probe).empty() && !status_pending_) {
