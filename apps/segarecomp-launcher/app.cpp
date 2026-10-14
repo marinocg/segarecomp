@@ -105,7 +105,7 @@ App::~App() = default;
 long long App::now_seconds() { return static_cast<long long>(std::time(nullptr)); }
 
 void App::trace(const std::string &line) {
-  if (trace_path_ != nullptr) std::ofstream(trace_path_, std::ios::app) << line << '\n';
+  if (!trace_path_.empty()) std::ofstream(trace_path_, std::ios::app) << line << '\n';
 }
 
 void App::toast(const std::string &text, bool error) {
@@ -891,7 +891,7 @@ void App::run_script() {
 }
 
 int App::run() {
-  trace_path_ = SDL_getenv("SEGARECOMP_GUI_TRACE");
+  if (const char *path = SDL_getenv("SEGARECOMP_GUI_TRACE")) trace_path_ = path;
   trace("startup=window");
   if (!init_window()) return 1;
   trace("startup=ui");

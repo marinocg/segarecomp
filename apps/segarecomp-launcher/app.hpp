@@ -261,7 +261,7 @@ private:
   std::vector<std::string> deferred_paths_;
   // ---- automation (review/test aids, not user features) ----
   bool autoplay_ = false, autoplay_pending_ = false, autoplay_started_ = false, autoplay_build_tried_ = false;
-  const char *trace_path_ = nullptr;
+  std::string trace_path_;  // owned copy: SDL_getenv's pointer does not survive SDL_Quit, and the last trace lines are written after it
   std::string shot_path_;
   std::string shot_page_;
   int shot_frame_ = 14;
