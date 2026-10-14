@@ -54,6 +54,11 @@ struct SvHost {
   SvPadSlot pads[SV_MAX_PADS];
   SvDiagHid hid[SV_DIAG_MAX_HID];
   int hid_count, hid_scanned;  /* the last on-demand OS-level Nintendo HID scan */
+  SDL_Thread *hid_thread;
+  SDL_AtomicInt hid_done;
+  SvDiagHid hid_pending[SV_DIAG_MAX_HID]; /* worker-owned until hid_done is published */
+  int hid_pending_count;
+  char hid_error[96];
   SvDiag *diag;                /* the one detection engine (shared with the launcher): owns the opened gamepads */
   int pad_count;
   int quit;
@@ -98,7 +103,7 @@ enum {
 enum {
   I_RESUME = 1, I_GO_QUICK, I_GO_VIDEO, I_GO_CONTROLS, I_GO_AUDIO, I_GO_SYSTEM, I_QUIT,
   I_FULLSCREEN, I_SCALE, I_ASPECT, I_PRESET, I_VSYNC, I_FPS, I_SCANLINES, I_MASK, I_CURVE, I_BLOOM, I_BRIGHT, I_VIDEO_DEFAULTS,
-  I_VOLUME, I_MUTE, I_AUDIO_NOTE,
+  I_VOLUME, I_MUTE, I_AUDIO_NOTE, I_AUDIO_DEFAULTS,
   I_SHOT, I_RESET, I_INFO,
   I_PLAYER, I_PAD, I_PAD_ASSIGNED, I_DEADZONE, I_MENUKEY, I_CTRL_DEFAULTS, I_GO_PADSTATUS, I_PAD_RESCAN, I_PAD_HID,
   I_YES, I_NO,
@@ -128,6 +133,7 @@ void sv_host_release_inputs(SvHost *host);
 int sv_host_pad_assigned(const SvHost *host, int player); /* slot index or -1 */
 void sv_host_toggle_fullscreen(SvHost *host);
 void sv_host_take_screenshot(SvHost *host);
+void sv_host_start_hid_scan(SvHost *host);
 void sv_host_draw_text(SvHost *host, float x, float y, int scale, SDL_Color color, const char *text); /* BODY face at an integer scale (legacy entry point) */
 /* sv_ui.c: bitmap-font text and stepped-frame primitives. (x, y) is the top-left of the text line box; widths come from the real glyph advances. */
 void sv_ui_text(SvHost *host, SvFontId face, int scale, int x, int y, SDL_Color color, const char *text);

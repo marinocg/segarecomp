@@ -157,6 +157,8 @@ private:
   std::vector<SvDiagHid> hid_;
   int hid_state_ = -2;            // -2 not scanned, -1 failed, otherwise the number of Nintendo HID devices
   std::string hid_error_;
+  struct HidResult { std::vector<SvDiagHid> devices; int count = 0; std::string error; };
+  std::future<HidResult> hid_job_;
   int nav_taps_ = 0;              // the input page's menu test: activations seen by the launcher's own navigation
   std::string nav_last_source_;
   bool input_seen_gamepad_nav_ = false;

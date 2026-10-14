@@ -52,7 +52,7 @@ scale (tested by reading the output back). The CRT presets are real passes in a 
 mask (`SDL_BLENDMODE_MOD`), four-tap additive bloom, an additive brightness lift, and a barrel-warped mesh with corner falloff
 (`SDL_RenderGeometry`). Four presets plus Custom are parameter sets over these passes, so no label is backed by the same effect. An `SDL_GPU` shader
 path is **not shipped**: it needs offline-compiled SPIR-V/DXIL/MSL binaries from a vetted toolchain per platform, and the CPU/renderer path is already
-complete and fast on the software renderer. It remains a possible later enhancement; nothing in the interface precludes it.
+   implemented on the software renderer. This is not evidence of real-display/GPU performance on every host. It remains a possible later enhancement; nothing in the interface precludes it.
 
 ### 5. Persistent library (launcher)
 
@@ -105,4 +105,26 @@ was almost flat navy with a 92 px art band and algorithmic placeholder covers, a
    shipped: the placeholder depicts a recognisable platform-game scene (not neutral), and the kit's own README recommends code-drawn controls in the same palette; the repository's
    icons, Silkscreen and wordmark are reused as the kit requires.
 6. **CI shard guard**: `tests/ci_shards.cmake` scanned only `tests/`; the SDL3 viewer/launcher suites (registered in `libs/viewer` and `apps/`) were never sharded, so
-   `ci_shard_guard_test` failed whenever SDL3 was enabled. It now labels the tests of every directory (CMake >= 3.28 for the cross-directory property form).
+    `ci_shard_guard_test` failed whenever SDL3 was enabled. It now labels the tests of every directory (CMake >= 3.28 for the cross-directory property form).
+
+### Viewer reconciliation
+
+This is the UI ADR with number 0120; the separate SMS invariant-window operand ADR is unrelated.
+
+* All wordmark/icon file reads happen during host setup. Drawing uses cached textures, including cached misses; textures are destroyed before their owning renderer.
+* The libusb availability probe is cached at diagnostic-engine creation. Diagnostic drawing and hotplug summaries do not repeatedly load/unload a shared library.
+  OS HID enumeration is explicit and asynchronous in both hosts. Workers return isolated result buffers; the UI thread matches them against its current SDL device
+  records. Workers finish before SDL shutdown. Closing may therefore wait for an outstanding OS scan; this is not a cancellation feature.
+* Start/Plus never opens or closes the host menu; Back/Select and Guide/Home are the menu buttons. SMS Pause remains a latched guest input. Audio defaults restore
+  only playback gain/mute, without regenerating PCM. Destructive confirmations default to No and share the keyboard/gamepad footer.
+* Wide two-column pages reduce their integer UI scale when needed to keep the rows inside the available height. Small windows scroll instead of reserving four
+  rows that cannot fit. The output-size simulations cover 1x/2x/3x text and doubled logical review sizes; they are not physical HiDPI validation.
+* Gallery open-failure injection is real through the diagnostic test seam, and virtual input is pressed only after SDL enumerates/opens it. Requested states are
+  checked before capture. Video rows are rebuilt after applying the preview preset, so the labels and picture agree. Captures and comparison sheets use only the
+  fictional RGB fixture; reference sheets stay ignored. The manifest records binary/image hashes and bounded reproduction commands.
+* The atlas remains strict C11 in the CLI's two consumer recipes, the development bridge and installed runtime sources. The package ships the complete ProggyClean
+  MIT notice and the existing Silkscreen OFL notice; review/test executables and test C sources are not installed as game runtime sources.
+
+Renderer limits remain explicit: no SDL_GPU path or offline shader binaries; curvature is a mesh approximation, bloom is four additive taps rather than a
+thresholded HDR/multipass shader, and the pause background is dimmed, not blurred. Audio follows the OS default; no device chooser or buffer-tuning facade.
+There is no packaged HTTPS cover client and no build cancellation. See `docs/product/viewer-ui.md` for current captures and validation limits.

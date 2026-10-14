@@ -16,8 +16,16 @@ every game (**pause menu > Controls > Controller status & test**, also **System*
 * live buttons by SDL **position** (South/East/West/North/Back/Guide/Start/...) plus, for Nintendo controllers, the label printed on the button
   ("B" for South, "A" for East, "-" for Back, "+" for Start, "Home" for Guide), live stick/trigger values with the dead zone, event counts and the time of
   the last event;
-* on demand, a read-only list of the Nintendo HID devices **the operating system** exposes (`SDL_hid_enumerate`, vendor 057E) with the bus (USB or
-  Bluetooth), which explains a controller the OS sees but SDL does not expose.
+* on demand, a read-only SDL HIDAPI view of Nintendo devices (`SDL_hid_enumerate`, vendor 057E) with the bus (USB or Bluetooth). This is not an exhaustive independent OS inventory. Matching by VID/PID is model-level correlation, not individual-device identification.
+
+The OS scan runs in a background worker in both UIs. It returns an isolated snapshot;
+SDL device matching is done on the UI thread, not against concurrently changing records.
+The libusb availability probe is cached at startup (restart after changing system
+libraries). Diagnostic rendering does not load libusb or stat the mapping file on
+each frame. Shutdown waits for an outstanding scan; cancellation is not offered.
+The viewer gallery now verifies its requested states, and produces live input only
+after SDL opens its virtual device. Its injected open-failure fixture is labelled
+synthetic, never evidence of an actual locked physical controller.
 
 A controller is **never reported as working because it was enumerated**. The classification (`sv_input_state.c`, SDL free, unit tested):
 
@@ -38,11 +46,11 @@ Investigated against the **pinned SDL 3.4.16** (the version in `packaging/`). Ev
 1. **SDL's Switch 2 driver is USB-only.** `src/joystick/hidapi/SDL_hidapi_switch2.c` talks to the controller through libusb bulk endpoints;
    its Bluetooth initialiser is `return SDL_SetError("Nintendo Switch2 controllers not supported over Bluetooth")` with a `FIXME: Need to add Bluetooth
    support`. Upstream tracks this in libsdl-org/SDL issue 15963 ("Nintendo Switch 2 Pro Controller Bluetooth Implementation", open). **A controller
-   connected by Bluetooth cannot work through SDL 3.4.x**, whatever Segarecomp does.
+   connected by Bluetooth is not supported by the pinned SDL 3.4.16 native Switch 2 driver**. External translation paths are outside this claim.
 2. **The driver is only compiled into an SDL built with libusb.** In `SDL_hidapijoystick_c.h` `SDL_JOYSTICK_HIDAPI_SWITCH2` is defined under
    `#ifdef HAVE_LIBUSB`, and libusb is found at SDL *build* time by `find_package(LibUSB)`. libusb itself is loaded at **run time** (`dlopen`), so the
-   package does not need to bundle it. Upstream issue 14742 documents the same requirement on Windows.
-3. **Before this change no Segarecomp release could ever have produced input from this controller.**
+    package need not bundle it, but it must be available on the host for this native USB driver. Upstream issue 14742 documents Windows build/link requirements (closed as a discussion redirect, not a support fix).
+3. **The previously inspected release binaries lacked the native Switch 2 driver.** This does not exclude third-party input translation paths.
    * The release workflow built SDL on Linux/macOS without libusb development files: `HAVE_LIBUSB` was undefined (checked with a local build of the
      pinned tarball: `strings libSDL3.so | grep -c SDL_JOYSTICK_HIDAPI_SWITCH2` -> `0`).
    * The official Windows `SDL3.dll` 3.4.16 (`SDL3-devel-3.4.16-VC.zip`, SHA-256 pinned in `release.yml`) contains **no** Switch 2 driver and no libusb loader
@@ -51,18 +59,20 @@ Investigated against the **pinned SDL 3.4.16** (the version in `packaging/`). Ev
    now installs `libusb-1.0-0-dev` on Linux and `libusb` on macOS), fails when it was not. Verified locally against the pinned tarball with libusb headers
    present: the hint string appears once and the library lists `libusb-1.0.so.0` as its dynamically loaded dependency; without them the script fails
    as intended. The runtime hint `SDL_HINT_JOYSTICK_HIDAPI_SWITCH2` is on by default whenever HIDAPI is, so no override is set.
-5. **Windows is unchanged and is stated as a limitation.** Wired Switch 2 support in SDL needs libusb and a WinUSB driver binding for the device
-   (what upstream issue 14742 describes). The launcher will not replace USB drivers or ask for privileged tools; the official prebuilt DLL has no driver.
-6. **Linux needs device permissions.** Upstream issue 15245 shows a Switch 2 Pro that is listed but silent without access to the device node (a udev
-   rule); the diagnostics surface this as state C (open error) or D (opened, silent) and the OS-level scan as "NOT a joystick in SDL".
+5. **Windows remains a limitation.** The inspected official prebuilt DLL has no native driver. Issue 14742 establishes libusb build/link requirements, not a reason to replace a user's USB driver. The launcher neither changes drivers nor requests elevated execution.
+6. **Linux needs device permissions.** Open issue 15245 implicates permissions, but the reporter's proposed udev rule was insufficient. C/D are possible diagnostic classifications, not a proven attribution. Do not run Segarecomp as root to work around it.
+
+Direct sources checked 2026-10-14: [15963 (open)](https://github.com/libsdl-org/SDL/issues/15963), [14742 (closed, not planned)](https://github.com/libsdl-org/SDL/issues/14742), [15245 (open)](https://github.com/libsdl-org/SDL/issues/15245), [pinned USB/Bluetooth initialization](https://github.com/libsdl-org/SDL/blob/release-3.4.16/src/joystick/hidapi/SDL_hidapi_switch2.c#L323-L391), and [libusb compile guard](https://github.com/libsdl-org/SDL/blob/release-3.4.16/src/joystick/hidapi/SDL_hidapijoystick_c.h#L38-L40).
+
+The local configured `sdl3-prefix` and existing staged Linux SDL are 3.4.16 **without** `HAVE_LIBUSB`/the native Switch 2 driver. A separate libusb-enabled build contains it; the updated release recipe requires it on Linux/macOS. Recipe intent is not proof about an arbitrary shipped binary. A loadable libusb library or enabled hint alone does not prove SDL compiled the driver. This WSL2 session exposes no input/USB/HID device nodes and SDL enumerates zero joysticks; that says nothing about controllers connected to the Windows host.
 
 ### Status matrix
 
 | OS | USB | Bluetooth |
 | --- | --- | --- |
-| Linux | driver compiled in (needs libusb-1.0 at run time and device permissions) - **NOT VERIFIED on hardware** | not supported by SDL 3.4.x |
-| macOS | driver compiled in (needs libusb at run time, for example Homebrew) - **NOT VERIFIED on hardware** | not supported by SDL 3.4.x |
-| Windows | not supported by the official SDL binary we ship | not supported by SDL 3.4.x |
+| Linux | release recipe requires driver; verify actual artifact, runtime libusb and permissions — **NOT VERIFIED on hardware** | no native pinned-driver support |
+| macOS | release recipe requires driver; verify actual artifact and runtime libusb — **NOT VERIFIED on hardware** | no native pinned-driver support |
+| Windows | inspected official SDL binary lacks native driver | no native pinned-driver support |
 
 **Real-device support is NOT VERIFIED.** No physical Switch 2 Pro was available to this work; automated tests use SDL **virtual** joysticks and prove the
 code paths (classification, hot-plug, open failure, raw-joystick handling, user mapping files, navigation), not that a physical controller works.
@@ -83,21 +93,31 @@ page say so. SDL names buttons by position: South is the Nintendo **B**, East is
 
 ## Manual validation procedure (physical controller)
 
-Please run this and send the report; nothing in it uploads anything, and the report contains no ROM names or file paths.
+Nothing is uploaded automatically. Review/redact the copied report and verbose logs before sharing: SDL error text may include device paths or identifying information. ROM data is not collected by the diagnostics engine.
 
 1. Note the OS and version, whether the controller is connected by **USB cable** or **Bluetooth**, and the release you run.
 2. Linux only: `lsusb | grep 057e` (expect `057e:2069` for the Switch 2 Pro) and `ls -l /dev/bus/usb/*/*` for the matching node; `ldconfig -p | grep libusb-1.0`.
 3. Start the launcher. Open **Settings > Input Diagnostics** *before* connecting, then connect the controller (press a button to wake it).
 4. Click **Scan OS devices**. Record whether `057e:2069` appears, the bus (USB/Bluetooth) and whether it says "SDL exposes a joystick for it".
 5. Press every button and move both sticks. Record the state letter, the pressed-button chips (SDL position and "prints X"), and the stick values.
-6. Use **Menu test** (A/South, Enter) and note "activated Nx, last via gamepad".
+6. Use **Menu test** (South, Nintendo B, or Enter) and note "activated Nx, last via gamepad".
 7. Click **Copy report** and paste it into the report.
-8. Start any game, press **Back/Select**: the menu should open. Open **Controls > Controller status & test** and compare.
+8. Start an already-built viewer using the bounded command below, immediately press **Esc** or **Back/Select**, then open **Controls > Controller status & test** and compare. Start/Plus is still a guest button.
 9. For opt-in verbose tracing start from a terminal with `SEGARECOMP_INPUT_TRACE=1` (logs every pad event and SDL's input messages; no ROM data).
 
 What to report: OS, transport, `lsusb`/Device Manager vendor:product, the state letter, the OS-scan lines, whether any chip lights, and the copied report.
-A result of "OS scan lists 057e:2069 on USB, SDL exposes NO joystick" on Linux/macOS means the libusb driver did not load (look at the
-libusb-1.0 line and permissions); on Windows it is the expected limitation above.
+A result of "OS scan lists 057e:2069 on USB, SDL exposes NO joystick" is consistent with missing/disabled native support, library/permission problems or initialization failure; it does not identify the cause by itself.
+
+On Linux, use the normal desktop user and substitute actual executable paths:
+
+```sh
+# Launcher-only diagnostic session; do not click Play during this bounded check.
+SEGARECOMP_INPUT_TRACE=1 timeout --kill-after=5s 180s "/path/to/package/Segarecomp"
+# Already-built generated viewer: both wall time and guest execution are bounded.
+SEGARECOMP_INPUT_TRACE=1 timeout --kill-after=5s 180s "/path/to/generated-viewer" --instruction-budget 100000000
+```
+
+Repeat USB and Bluetooth separately, recording any external bridge. Budget exhaustion or guest stop is not by itself an input failure. On other hosts use an equivalent wall-clock watchdog and the same finite guest instruction budget.
 
 ## Where each claim is tested
 

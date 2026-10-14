@@ -381,10 +381,11 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
   if (page == NULL) return;
   units = page_units(page->page_id);
   while (u > 1 && units * u > out_w - 16 * u) --u;
+layout_retry:
   lh = sv_ui_line_h(SV_FONT_BODY, u);
   pad = 14 * u;
   head_h = is_confirm ? 0 : 42 * u;
-  foot_h = is_confirm ? 12 * u : 2 * lh + 36 * u;
+   foot_h = is_confirm ? 12 * u : (out_h < 320 * u ? lh + 32 * u : 2 * lh + 36 * u);
   panel_w = units * u;
   if (panel_w > out_w - 12 * u) panel_w = out_w - 12 * u;
   two_col = (video || system) && panel_w >= 440 * u;
@@ -392,7 +393,7 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
   body_x = 0; body_w = panel_w - 2 * pad;
   if (h->conflict_msg[0] != '\0' && page->page_id == PAGE_CONTROLS) banner_h = 30 * u;
   avail_h = out_h - 12 * u - head_h - foot_h - 2 * pad - banner_h;
-  if (avail_h < 4 * row_h(u)) avail_h = 4 * row_h(u);
+  if (avail_h < row_h(u)) avail_h = row_h(u);
   (void)body_x;
   h->ui_rows = 0;
   memset(h->ui_preset_rect, 0, sizeof h->ui_preset_rect);
@@ -405,6 +406,7 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
       if (video || !it->column) lh_used += item_height(it, u, w); else rh_used += item_height(it, u, w);
     }
     used = lh_used > rh_used ? lh_used : rh_used;
+    if (used > avail_h && u > 1) { --u; goto layout_retry; }
     if (video) { const int min_prev = 150 * u; if (used < min_prev) used = min_prev; }
     drawn = page->count;
   } else {
@@ -418,7 +420,7 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
   body_h = used;
   if (is_confirm) {
     int n = page->count;
-    panel_h = 60 * u + n * (row_h(u) + 6 * u) + 14 * u;
+    panel_h = 60 * u + n * (row_h(u) + 6 * u) + 40 * u;
     if (page->page_id == PAGE_CONFIRM_QUIT || page->page_id == PAGE_CONFIRM_RESET || page->page_id == PAGE_CONFIRM_VIDEO || page->page_id == PAGE_CONFIRM_CONTROLS) panel_h += 24 * u;
   } else {
     panel_h = head_h + pad + body_h + banner_h + pad + foot_h;
@@ -451,6 +453,7 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
       if (h->ui_rows < SV_MENU_MAX_ITEMS) { memcpy(h->ui_item_rect[h->ui_rows], rect, sizeof rect); h->ui_item_index[h->ui_rows] = i; h->ui_rows++; }
       body_y += row_h(u) + 6 * u;
     }
+    draw_cues(h, x + panel_w - pad, y + panel_h - 16 * u, u, 1);
   } else if (two_col) {
     int ly = body_y, ry = body_y;
     const int lx = x + pad, rx = x + pad + left_w + 14 * u, rw = body_w - left_w - 14 * u;
@@ -512,7 +515,7 @@ void sv_pages_draw(SvHost *h, int out_w, int out_h) {
       if (cur != NULL && cur->hint[0] != '\0' && !is_note(cur)) {
         char line[200];
         const SDL_Color hc = cur->enabled ? K_TEXT2 : K_ERR;
-        n = sv_font_wrap(SV_FONT_BODY, cur->hint, u, panel_w - 2 * pad, 2, start, len, &truncated);
+        n = sv_font_wrap(SV_FONT_BODY, cur->hint, u, panel_w - 2 * pad, out_h < 320 * u ? 1 : 2, start, len, &truncated);
         for (k = 0; k < n; ++k) {
           snprintf(line, sizeof line, "%.*s", len[k] < 190 ? len[k] : 190, cur->hint + start[k]);
           if (k == n - 1 && truncated) text_in(h, SV_FONT_BODY, u, x + pad, fy + 7 * u + k * lh, panel_w - 2 * pad, hc, cur->hint + start[k]); /* the rest of the text, cut with "..." */
@@ -529,6 +532,7 @@ int sv_pages_click(SvHost *h, float mx, float my) {
     const int *r = h->ui_preset_rect[p];
     if (r[2] > 0 && mx >= (float)r[0] && mx < (float)(r[0] + r[2]) && my >= (float)r[1] && my < (float)(r[1] + r[3])) {
       sv_apply_crt_preset(&h->settings.video, (SvCrtPreset)p);
+      sv_host_toast(h, sv_crt_preset_name((SvCrtPreset)p));
       sv_settings_sanitize(&h->settings);
       sv_host_mark_dirty(h);
       return 1;

@@ -29,7 +29,8 @@ install(DIRECTORY ${_src}/libs/device/sega/genesis/include/ DESTINATION ${_rt}/l
 install(DIRECTORY ${_src}/libs/cpu/m68k/include/ DESTINATION ${_rt}/libs/cpu/m68k/include FILES_MATCHING PATTERN "*.h")
 
 # SEG-058 (ADR 0120): the shared SDL3 viewer foundation is compiled into every game by the bundled compiler, next to the console adapter.
-install(DIRECTORY ${_src}/libs/viewer/ DESTINATION ${_rt}/libs/viewer FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
+install(DIRECTORY ${_src}/libs/viewer/src/ DESTINATION ${_rt}/libs/viewer/src FILES_MATCHING PATTERN "*.c" PATTERN "*.h")
+install(DIRECTORY ${_src}/libs/viewer/include/ DESTINATION ${_rt}/libs/viewer/include FILES_MATCHING PATTERN "*.h")
 
 # Master System (SEG-009-T010): the tree mirrors the repository, `segarecomp build --runtime-dir <...>/platforms/master-system`
 # derives the shared library sources (PSG device, Z80 runtime ABI header) from the same root. No machine/codegen C++ ships here.

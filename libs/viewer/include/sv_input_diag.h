@@ -95,6 +95,8 @@ const char *sv_diag_gamepad_init_error(const SvDiag *diag);
 int sv_diag_hid_scan(const SvDiag *diag, SvDiagHid *out, int cap, char *error, size_t error_cap);
 /* Whether a shared libusb-1.0 can be loaded (the SDL driver for Switch 2 controllers talks USB through it). */
 int sv_diag_libusb_loadable(void);
+/* Cached setup probe: safe to display every frame (does not load a library). */
+int sv_diag_libusb_available(const SvDiag *diag);
 /* Whether the SDL build contains a given HIDAPI driver switch (hint is known to SDL); text such as "enabled/disabled/default". */
 const char *sv_diag_switch2_hint_state(void);
 /* "SDL 3.4.16 (compiled 3.4.16)". */

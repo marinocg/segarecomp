@@ -8,6 +8,7 @@
 
 #include "sv_host.h"
 #include "sv_layout.h"
+#include "../src/sv_internal.h"
 
 static int failures = 0;
 #define CHECK(cond, what) do { if (!(cond)) { ++failures; printf("FAIL: %s (line %d)\n", what, __LINE__); } } while (0)
@@ -101,6 +102,23 @@ static void ui_scale_tests(void) {
   CHECK(sv_host_ui_scale(320, 240) == 1 && sv_host_ui_scale(768, 576) == 1 && sv_host_ui_scale(1280, 720) == 1, "small and 720p windows use 1x text (13 px)");
   CHECK(sv_host_ui_scale(1920, 1080) == 2 && sv_host_ui_scale(2560, 1440) == 3 && sv_host_ui_scale(3840, 2160) == 4, "the text grows with the display: 2x at 1080p, 3x at 1440p, 4x at 4K");
   CHECK(sv_host_ui_scale(600, 2000) == 1, "a narrow window never scales past what fits");
+}
+
+static void page_fit_tests(SvHost *host) {
+  static const int sizes[][2] = {{720, 520}, {1080, 740}, {1440, 1040}, {2160, 1480}, {1920, 1080}, {2560, 1440}};
+  int size, page, i;
+  for (size = 0; size < (int)(sizeof sizes / sizeof sizes[0]); ++size)
+    for (page = PAGE_MAIN; page <= PAGE_CONFIRM_CONTROLS; ++page) {
+      sv_menu_reset(&host->menu);
+      sv_menu_push(&host->menu, page, "REVIEW PAGE");
+      sv_pages_rebuild(host);
+      sv_pages_draw(host, sizes[size][0], sizes[size][1]);
+      for (i = 0; i < host->ui_rows; ++i) {
+        const int *r = host->ui_item_rect[i];
+        CHECK(r[0] >= 0 && r[1] >= 0 && r[2] > 0 && r[3] > 0 && r[0] + r[2] <= sizes[size][0] && r[1] + r[3] <= sizes[size][1], "responsive page hit rectangles stay inside the output at logical/HiDPI review sizes");
+      }
+    }
+  sv_menu_reset(&host->menu);
 }
 
 
@@ -361,6 +379,30 @@ int main(void) {
   if (host != NULL) {
     SvSample smp;
     uint8_t *sms = (uint8_t *)malloc(256u * 224u * 3u);
+    { SDL_VirtualJoystickDesc desc;
+      SDL_JoystickID id;
+      SDL_Joystick *joy;
+      SDL_INIT_INTERFACE(&desc);
+      desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+      desc.naxes = SDL_GAMEPAD_AXIS_COUNT; desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+      desc.name = "Fictional SMS Pause Pad";
+      id = SDL_AttachVirtualJoystick(&desc);
+      joy = id ? SDL_OpenJoystick(id) : NULL;
+      CHECK(joy != NULL, "virtual SMS gamepad opens");
+      sv_host_service(host, &smp);
+      if (joy != NULL) {
+        SDL_SetJoystickVirtualButton(joy, SDL_GAMEPAD_BUTTON_START, true); SDL_UpdateJoysticks();
+        SDL_SetJoystickVirtualButton(joy, SDL_GAMEPAD_BUTTON_START, false); SDL_UpdateJoysticks();
+        sv_host_service(host, &smp);
+        CHECK(!smp.menu_was_open && (smp.pad[0] & SV_ACTION_BIT(SV_ACT_PAUSE)), "SMS Start/Plus short tap is latched guest Pause, never host menu");
+        sv_host_service(host, &smp);
+        CHECK(!(smp.pad[0] & SV_ACTION_BIT(SV_ACT_PAUSE)), "SMS virtual Pause tap releases after one sample");
+        SDL_CloseJoystick(joy);
+      }
+      if (id) SDL_DetachVirtualJoystick(id);
+      sv_host_service(host, &smp);
+      sv_host_toast(host, ""); /* presentation geometry below measures game pixels, not the hotplug notification */
+    }
     fill_flat(sms, 256, 224, 255, 255, 255);
     tap(SV_KEY_P);   /* a tap shorter than a sample */
     sv_host_service(host, &smp);
@@ -437,6 +479,11 @@ int main(void) {
       SDL_UpdateJoysticks();
       sv_host_service(host, &smp);
       CHECK(smp.pad[0] & SV_ACTION_BIT(SV_ACT_BUTTON1), "the gamepad's South button is Genesis A");
+      SDL_SetJoystickVirtualButton(joy, SDL_GAMEPAD_BUTTON_START, true);
+      SDL_UpdateJoysticks();
+      sv_host_service(host, &smp);
+      CHECK(!smp.menu_was_open && (smp.pad[0] & SV_ACTION_BIT(SV_ACT_START)), "Start/Plus reaches Genesis Start, never the host menu");
+      SDL_SetJoystickVirtualButton(joy, SDL_GAMEPAD_BUTTON_START, false);
       SDL_SetJoystickVirtualButton(joy, SDL_GAMEPAD_BUTTON_SOUTH, false);
       SDL_SetJoystickVirtualAxis(joy, SDL_GAMEPAD_AXIS_LEFTX, 30000);
       SDL_UpdateJoysticks();
@@ -463,6 +510,18 @@ int main(void) {
         SDL_SetJoystickVirtualButton(joy, SDL_GAMEPAD_BUTTON_BACK, false);
         SDL_UpdateJoysticks();
       }
+      { Script sc;
+        memset(&sc, 0, sizeof sc);
+        SDL_SetJoystickVirtualButton(joy, SDL_GAMEPAD_BUTTON_GUIDE, true);
+        SDL_UpdateJoysticks();
+        sv_host_set_loop_hook(host, menu_hook, &sc);
+        sv_host_service(host, &smp);
+        sv_host_set_loop_hook(host, NULL, NULL);
+        CHECK(smp.menu_was_open, "Guide/Home also opens the menu (real virtual setter events)");
+        if (sc.first != NULL) SDL_DestroySurface(sc.first);
+        SDL_SetJoystickVirtualButton(joy, SDL_GAMEPAD_BUTTON_GUIDE, false);
+        SDL_UpdateJoysticks();
+      }
       SDL_CloseJoystick(joy);
       SDL_DetachVirtualJoystick(id);
       sv_host_service(host, &smp);
@@ -480,6 +539,13 @@ int main(void) {
     SvSample smp;
     memset(&ps, 0, sizeof ps);
     fill_pattern(frame, 320, 224);
+    page_fit_tests(host);
+    host->settings.audio.volume = 35; host->settings.audio.muted = 1;
+    sv_pages_open_main(host);
+    sv_pages_apply(host, (SvMenuEvent){SV_EVENT_ACTIVATE, I_GO_AUDIO, 0});
+    sv_pages_apply(host, (SvMenuEvent){SV_EVENT_ACTIVATE, I_AUDIO_DEFAULTS, 0});
+    CHECK(host->settings.audio.volume == 100 && !host->settings.audio.muted, "audio restore resets gain/mute through the actual page action, even without an audio device");
+    sv_menu_reset(&host->menu);
     sv_host_present(host, frame, 320, 224, 960);
     CHECK(sv_host_settings(host)->video.preset == SV_CRT_PIXEL_PERFECT, "starts on Pixel Perfect");
     sv_host_set_loop_hook(host, preset_hook, &ps);

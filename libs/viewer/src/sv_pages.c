@@ -217,6 +217,7 @@ static void build_padstatus(SvHost *h, SvPage *p) {
   if (item != NULL) sv_item_set_icon(item, "reset");
   item = sv_page_add(p, SV_ITEM_BUTTON, I_PAD_HID, "Scan OS devices (Nintendo)");
   if (item != NULL) sv_item_set_hint(item, "Read-only: lists Nintendo HID devices the OS exposes (USB or Bluetooth), even ones SDL does not offer.");
+  if (item != NULL && h->hid_thread != NULL) sv_item_disable(item, "Scanning in the background; menus remain responsive.");
   for (i = 0; i < h->hid_count && i < 4; ++i) {
     const SvDiagHid *hd = &h->hid[i];
     snprintf(buf, sizeof buf, "%04x:%04x %s %s%s", hd->vendor, hd->product, hd->bus == 1 ? "USB" : (hd->bus == 2 ? "Bluetooth" : "bus ?"), hd->family[0] != '\0' ? hd->family : hd->product_string,
@@ -252,6 +253,8 @@ static void build_audio(SvHost *h, SvPage *p) {
     sv_item_set_text(item, "None (silent)");
   }
   add_note(p, "These settings only change how the sound is played on your device (gain). The console's sound itself is unchanged. The output device follows the OS default.");
+  item = sv_page_add(p, SV_ITEM_BUTTON, I_AUDIO_DEFAULTS, "Restore audio defaults");
+  if (item != NULL) sv_item_set_icon(item, "reset");
 }
 
 static void build_system(SvHost *h, SvPage *p) {
@@ -480,14 +483,11 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
       case I_GO_CONTROLS: open_page(h, PAGE_CONTROLS, "CONTROLS"); return;
       case I_GO_PADSTATUS: open_page(h, PAGE_PADSTATUS, "CONTROLLER STATUS"); return;
       case I_PAD_RESCAN: sv_diag_scan(h->diag); sv_host_toast(h, "Rescanned controllers"); return;
-      case I_PAD_HID: {
-        char err[96];
-        h->hid_count = sv_diag_hid_scan(h->diag, h->hid, SV_DIAG_MAX_HID, err, sizeof err);
-        h->hid_scanned = 1;
-        if (h->hid_count < 0) sv_host_toast(h, err[0] != '\0' ? err : "OS device scan failed");
-        return;
-      }
+      case I_PAD_HID: sv_host_start_hid_scan(h); return;
       case I_GO_AUDIO: open_page(h, PAGE_AUDIO, "AUDIO"); return;
+      case I_AUDIO_DEFAULTS:
+        h->settings.audio.volume = 100; h->settings.audio.muted = 0;
+        sv_host_apply_audio(h); sv_host_mark_dirty(h); sv_host_toast(h, "Audio settings restored"); return;
       case I_GO_SYSTEM: open_page(h, PAGE_SYSTEM, "SYSTEM / DIAGNOSTICS"); return;
       case I_QUIT: open_page(h, PAGE_CONFIRM_QUIT, SDL_getenv("SEGARECOMP_LAUNCHED") != NULL ? "Return to Launcher?" : "Quit the game?"); return;
       case I_SHOT: sv_host_take_screenshot(h); return;
@@ -531,7 +531,7 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
     case I_FULLSCREEN: v->fullscreen = ev.value; sv_host_apply_video(h); break;
     case I_SCALE: v->scale = (SvScaleMode)ev.value; break;
     case I_ASPECT: v->aspect = (SvAspect)ev.value; break;
-    case I_PRESET: sv_apply_crt_preset(v, (SvCrtPreset)ev.value); break;
+    case I_PRESET: sv_apply_crt_preset(v, (SvCrtPreset)ev.value); sv_host_toast(h, sv_crt_preset_name(v->preset)); break;
     case I_VSYNC: v->vsync = ev.value; sv_host_apply_video(h); break;
     case I_FPS: v->show_fps = ev.value; break;
     case I_SCANLINES: v->scanlines = ev.value; reclassify_preset(v); break;
@@ -549,4 +549,3 @@ void sv_pages_apply(SvHost *h, SvMenuEvent ev) {
   sv_settings_sanitize(&h->settings);
   sv_host_mark_dirty(h);
 }
-

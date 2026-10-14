@@ -15,18 +15,26 @@
 
 #include "sv_host.h"
 #include "sv_input_diag.h"
+#include "../src/sv_internal.h" /* review fixture: drive real page construction, never a guest */
 
 static const char *g_out;
 static const char *g_ext;
+static int failures;
+
+static SDL_Gamepad *fail_open(SDL_JoystickID id) {
+  (void)id;
+  SDL_SetError("Synthetic open failure (review fixture, not physical hardware)");
+  return NULL;
+}
 
 static void save(SDL_Surface *s, const char *name) {
   char path[600];
-  if (s == NULL) return;
+  if (s == NULL) { ++failures; return; }
   snprintf(path, sizeof path, "%s/%s.%s", g_out, name, g_ext);
 #if SDL_VERSION_ATLEAST(3, 4, 0)
-  SDL_SavePNG(s, path);
+  if (!SDL_SavePNG(s, path)) ++failures;
 #else
-  SDL_SaveBMP(s, path);
+  if (!SDL_SaveBMP(s, path)) ++failures;
 #endif
   SDL_DestroySurface(s);
   printf("wrote %s\n", path);
@@ -92,8 +100,33 @@ static int hook(void *ctx, SvHost *host, int iteration) {
     SvSettings s = *sv_host_settings(host);
     sv_apply_crt_preset(&s.video, c->step == 2 ? SV_CRT_CLASSIC : SV_CRT_PIXEL_PERFECT);
     sv_host_apply_settings(host, &s);
+    sv_pages_rebuild(host); /* labels and preview must describe the same immediately applied settings */
   }
   save(sv_host_capture_output(host), script[c->step].capture);
+  if (c->step == 3) {
+    SvMenu menu = host->menu;
+    /* Show capture, conflict, and the safe default of the restore confirmation on the actual Controls page. */
+    sv_page_restore_focus(sv_menu_top(&host->menu), I_BIND + SV_ACT_BUTTON1);
+    host->listen.kind = SV_LISTEN_KEY;
+    host->listen.action = SV_ACT_BUTTON1;
+    host->listen.started = SDL_GetTicks();
+    save(sv_host_capture_output(host), "05c_controls_capture");
+    host->listen.kind = SV_LISTEN_NONE;
+    snprintf(host->conflict_msg, sizeof host->conflict_msg, "Conflict: X was B (P1); that binding is now unbound");
+    save(sv_host_capture_output(host), "05d_controls_conflict");
+    host->conflict_msg[0] = '\0';
+    sv_pages_apply(host, (SvMenuEvent){SV_EVENT_ACTIVATE, I_CTRL_DEFAULTS, 0});
+    save(sv_host_capture_output(host), "05e_controls_restore");
+    host->menu = menu;
+  }
+  if (c->step == 6) {
+    SvMenu menu = host->menu;
+    if (host->cfg.can_reset) {
+      sv_pages_apply(host, (SvMenuEvent){SV_EVENT_ACTIVATE, I_RESET, 0});
+      save(sv_host_capture_output(host), "07b_reset_confirmation");
+      host->menu = menu;
+    }
+  }
   for (i = 0; script[c->step].keys[i] != 0; ++i) key(script[c->step].keys[i]);
   c->step++;
   c->wait = 2; /* let the pushed events run and the next page draw */
@@ -144,7 +177,7 @@ int main(int argc, char **argv) {
   cfg.picture_w = w; cfg.picture_h = h; cfg.max_w = 320; cfg.max_h = 240; cfg.default_scale = 3;
   cfg.can_reset = sms;
   cfg.rom_sha256 = SDL_getenv("SEGARECOMP_ROM_SHA256");
-  if (pad_mode != NULL && strcmp(pad_mode, "locked") == 0) sv_diag_set_open_hook(NULL); /* replaced below once SDL is up */
+  if (pad_mode != NULL && strcmp(pad_mode, "locked") == 0) sv_diag_set_open_hook(fail_open);
   host = sv_host_open(&cfg);
   if (host == NULL) { fprintf(stderr, "cannot open the host\n"); return 1; }
   if (pad_mode != NULL && strcmp(pad_mode, "none") != 0 && *pad_mode != '\0') {
@@ -157,12 +190,22 @@ int main(int argc, char **argv) {
     desc.product_id = strcmp(pad_mode, "live") == 0 ? 0x2009 : 0x0001;
     pad_id = SDL_AttachVirtualJoystick(&desc);
     pad_joy = pad_id != 0 ? SDL_OpenJoystick(pad_id) : NULL;
+    sv_host_service(host, &smp); /* enumerate/open first, then generate fresh setter events */
     if (pad_joy != NULL && strcmp(pad_mode, "live") == 0) {
       SDL_SetJoystickVirtualButton(pad_joy, SDL_GAMEPAD_BUTTON_EAST, true);
       SDL_SetJoystickVirtualButton(pad_joy, SDL_GAMEPAD_BUTTON_START, true);
       SDL_SetJoystickVirtualAxis(pad_joy, SDL_GAMEPAD_AXIS_LEFTX, 21000);
     }
+    if (pad_joy != NULL && strcmp(pad_mode, "raw") == 0) SDL_SetJoystickVirtualButton(pad_joy, 0, true);
     SDL_UpdateJoysticks();
+    sv_host_service(host, &smp);
+    {
+      const SvPadState expected = strcmp(pad_mode, "live") == 0 ? SV_PAD_LIVE : (strcmp(pad_mode, "raw") == 0 ? SV_PAD_NOT_A_GAMEPAD : SV_PAD_OPEN_FAILED);
+      if (sv_diag_overall(host->diag, NULL) != expected) {
+        fprintf(stderr, "gallery did not reach requested controller state %s\n", pad_mode);
+        ++failures;
+      }
+    }
   }
   rgb = (uint8_t *)malloc((size_t)w * (size_t)h * 3u);
   scene(rgb, w, h);
@@ -196,6 +239,7 @@ int main(int argc, char **argv) {
   if (pad_joy != NULL) SDL_CloseJoystick(pad_joy);
   if (pad_id != 0) SDL_DetachVirtualJoystick(pad_id);
   sv_host_close(host);
+  sv_diag_set_open_hook(NULL);
   free(rgb);
-  return 0;
+  return failures ? 1 : 0;
 }

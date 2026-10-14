@@ -1,0 +1,507 @@
+{
+  "schema": 1,
+  "binary_sha256": "eb47e213a4d47480d73ad3d04019e9fdb3ddbb3e3a8dfa038ab689096706b70d",
+  "fixture": "project-authored fictional RGB scene; virtual controllers, never physical hardware",
+  "hidpi": "output-pixel simulations at 2x logical sizes; not an OS/display HiDPI test",
+  "reproduce": "python3 tools/viewer_visual_capture.py --gallery build/dev/libs/viewer/sv_gallery --assets apps/segarecomp-launcher/assets --out build/visual-review/viewer --publish docs/product/screenshots",
+  "runs": 24,
+  "total_review_screenshots": 448,
+  "captures": [
+    {
+      "path": "viewer-genesis-small/01_gameplay.png",
+      "sha256": "7ed6ce023cf34ad3886da2efd09fb43c615682c5f50543403d2bc466ccac0c23"
+    },
+    {
+      "path": "viewer-genesis-small/02_pause_menu.png",
+      "sha256": "a3fa022aff5f746e09a3b60fc1fdea09310f60b457268c9860a2e896d7f3cc84"
+    },
+    {
+      "path": "viewer-genesis-small/03_quick_settings.png",
+      "sha256": "9c61638550aaedd63bce4390f0a88460f79eb4fb4992a00e87f7087673166e12"
+    },
+    {
+      "path": "viewer-genesis-small/04_video_display.png",
+      "sha256": "32a061b8abeaf83efaa849e46c813e5f0cbdf7385198acdb5996927dbec2b570"
+    },
+    {
+      "path": "viewer-genesis-small/05_controls.png",
+      "sha256": "e00976cbc01d699931c6302e9a507dd6577775596f6fe168196c662f1203ebac"
+    },
+    {
+      "path": "viewer-genesis-small/05b_controller_status.png",
+      "sha256": "549a4e34d5ab788a024dd51f14bb59e4e3e23a4fedbcb28ee431874a2141ddac"
+    },
+    {
+      "path": "viewer-genesis-small/05c_controls_capture.png",
+      "sha256": "a10aa017c2db1222b2a1e6b29e1a2299acebe3f31565030d358bd1d907836231"
+    },
+    {
+      "path": "viewer-genesis-small/05d_controls_conflict.png",
+      "sha256": "f8eee78f48c6820cd96f707e3ac92425326e38db0e57fc6948a186c315e2bfa5"
+    },
+    {
+      "path": "viewer-genesis-small/05e_controls_restore.png",
+      "sha256": "701c3077d07ebb148986b101705bf1d7f86d63797dded9a7a8721bd5dc889dec"
+    },
+    {
+      "path": "viewer-genesis-small/06_audio.png",
+      "sha256": "eac6a1fe2e8766b362854dc053955359e49e3edc5146791b245084891f6699e6"
+    },
+    {
+      "path": "viewer-genesis-small/07_system.png",
+      "sha256": "2315ec80abcda3207add01bf91e8275e2626b0366b989634e029e5a7b1d390cb"
+    },
+    {
+      "path": "viewer-genesis-small/08_quit_confirmation.png",
+      "sha256": "1caab395fff7c44384fc6ce646c153e18328a5a9a05f5ff9ceac5f0d6f07c252"
+    },
+    {
+      "path": "viewer-genesis-small/09_toast.png",
+      "sha256": "ad3a592a2d46b3ba85ea5bcf5303f7c6f9946a3c796924abdb09a625667454f8"
+    },
+    {
+      "path": "viewer-genesis-small/10_hud.png",
+      "sha256": "eb4522ae0da3f3f989fdac163b56fc4233853fee76f8856f5ac1eca2e9924a27"
+    },
+    {
+      "path": "viewer-genesis-small/crt_arcade.png",
+      "sha256": "41dd9564875ff7ebbd0bfff3310d95733c914e74ca067ffa82f63b15c91e6abf"
+    },
+    {
+      "path": "viewer-genesis-small/crt_classic.png",
+      "sha256": "f23b89acfaf75693d55e49e3ef2026b75afffd2711a9321a4641fa5d7d2aecb2"
+    },
+    {
+      "path": "viewer-genesis-small/crt_pixel_perfect.png",
+      "sha256": "7ed6ce023cf34ad3886da2efd09fb43c615682c5f50543403d2bc466ccac0c23"
+    },
+    {
+      "path": "viewer-genesis-small/crt_soft.png",
+      "sha256": "43ce38af7c2728996c7939c9c4d0d98bb6cf5e3ffacdcdcf50a869a5862b92e3"
+    },
+    {
+      "path": "viewer-genesis/01_gameplay.png",
+      "sha256": "b51568cebadece38a9fa5646f1413b89c8fcab92695243a802ff49ffe052d2bc"
+    },
+    {
+      "path": "viewer-genesis/02_pause_menu.png",
+      "sha256": "46e50b87df30cb57647702df8b0887e7108c401fbf32c404b405ee5e4d804791"
+    },
+    {
+      "path": "viewer-genesis/03_quick_settings.png",
+      "sha256": "b0e1b4b70a0ab61f490b2aad9e693d1a2ebb6710c10156eb97d2a2a7459cc844"
+    },
+    {
+      "path": "viewer-genesis/04_video_display.png",
+      "sha256": "1d3b56b8087d6cf4666215e14426b6b1d50a54e115bc6ae8273e6535f72c0b06"
+    },
+    {
+      "path": "viewer-genesis/05_controls.png",
+      "sha256": "1a3402d1e36105bb78348b1c43f5c8cddab87639e5414139e41274a477967df1"
+    },
+    {
+      "path": "viewer-genesis/05b_controller_status.png",
+      "sha256": "34c55fe00ebe60e62ad2787d54c63297014720595f01e75f317d1524904fc146"
+    },
+    {
+      "path": "input-diagnostics/viewer_controller_status_none.png",
+      "sha256": "34c55fe00ebe60e62ad2787d54c63297014720595f01e75f317d1524904fc146"
+    },
+    {
+      "path": "viewer-genesis/05c_controls_capture.png",
+      "sha256": "d2c5ab7a5cb3835f88ab327cb9871c567d352a4b7c2b7a1e1cc4f17508b31b71"
+    },
+    {
+      "path": "viewer-genesis/05d_controls_conflict.png",
+      "sha256": "cb7e7196cbd94970e0185b07ae91808240dad574e226106c2d58dcbe00e322fe"
+    },
+    {
+      "path": "viewer-genesis/05e_controls_restore.png",
+      "sha256": "9f37cc63f16c9e4e1198ed694fa5cda901a4ce2529a58f3d8ac534f05f88c969"
+    },
+    {
+      "path": "viewer-genesis/06_audio.png",
+      "sha256": "5c3a301e61f45980a94e76ba2b45d95911ac561293d220483754138d1b130435"
+    },
+    {
+      "path": "viewer-genesis/07_system.png",
+      "sha256": "49a6c6daa4ddedbc1cf4ed9f11640ac3dfba958d415383a201680810d01eb274"
+    },
+    {
+      "path": "viewer-genesis/08_quit_confirmation.png",
+      "sha256": "c02417b104d4f2b9c721791d4d167e355d158b6885c7b2addeb14ca3e5d5e95b"
+    },
+    {
+      "path": "viewer-genesis/09_toast.png",
+      "sha256": "79e001c94b5491a361fec57e27c200c3cf8f86daf34aed17d5da73eb80c83cc0"
+    },
+    {
+      "path": "viewer-genesis/10_hud.png",
+      "sha256": "b1b6007e105fcf22e593d757dcf0c315912560f94df6f96c1855c915c17df9a4"
+    },
+    {
+      "path": "viewer-genesis/crt_arcade.png",
+      "sha256": "aa6c9deb61c91215359e12039919695d2f618c225d4445ed050e38ec7c0958d7"
+    },
+    {
+      "path": "viewer-genesis/crt_classic.png",
+      "sha256": "de935529e055e9338c02117b0751d6daa5c8ae80116263d5c7e42bae5c70696b"
+    },
+    {
+      "path": "viewer-genesis/crt_pixel_perfect.png",
+      "sha256": "b51568cebadece38a9fa5646f1413b89c8fcab92695243a802ff49ffe052d2bc"
+    },
+    {
+      "path": "viewer-genesis/crt_soft.png",
+      "sha256": "82321127758ba7eb5090ed3644ab256266777372d523fc549dfc09e6a95fff7d"
+    },
+    {
+      "path": "input-diagnostics/viewer_controller_status_raw.png",
+      "sha256": "1ac2d46468e30f0912fbb259cd687342b812531d5f1a67d138e4a057f6d27299"
+    },
+    {
+      "path": "input-diagnostics/viewer_controller_status_locked.png",
+      "sha256": "0c587ed04b198d4804be7b37da93370a7ad83971e41b6223a3a3255b3ac787e3"
+    },
+    {
+      "path": "input-diagnostics/viewer_controller_status_live.png",
+      "sha256": "e0dbfc5227aebedf6db8e8b12d2f8f7cb76632c84771c134c6ff3468155ba153"
+    },
+    {
+      "path": "viewer-sms-small/01_gameplay.png",
+      "sha256": "b7ee1cbae36eada98ad34cfa38b2eff64037500ddd6a7b849ed5e714d90f6eb5"
+    },
+    {
+      "path": "viewer-sms-small/02_pause_menu.png",
+      "sha256": "e7aadbe6fb29ba1bafde5a1cf6d32cb7540c19b04f7a57ffd5af0ce585f71c78"
+    },
+    {
+      "path": "viewer-sms-small/03_quick_settings.png",
+      "sha256": "d89240e09a7289638771de4c2cade2306e970f75bc9d96a35069a4c15e225271"
+    },
+    {
+      "path": "viewer-sms-small/04_video_display.png",
+      "sha256": "a115f9c83dcfb4b05530323dac3b413dadb09a886337fd383f3dc177d1236b97"
+    },
+    {
+      "path": "viewer-sms-small/05_controls.png",
+      "sha256": "779b9679a4fe3e84264795ad66247b801cf060d6475a5984ec9252916e7a733f"
+    },
+    {
+      "path": "viewer-sms-small/05b_controller_status.png",
+      "sha256": "09d2ec93f12dfeec5f49207de6a9772236275d43f9179bb312857589e3eb4cbb"
+    },
+    {
+      "path": "viewer-sms-small/05c_controls_capture.png",
+      "sha256": "c5b2523ac6bc522808901f87d694c24635995e8a1af13d6a6a724cf69bc8476a"
+    },
+    {
+      "path": "viewer-sms-small/05d_controls_conflict.png",
+      "sha256": "3f11a35db76196a688a3c043ca489bdb08be5000a953de2fea5f22724e4246b8"
+    },
+    {
+      "path": "viewer-sms-small/05e_controls_restore.png",
+      "sha256": "b051848f2f020f4f4bda57327cf714194b3b5b5aa4717593647a7152d3b87a09"
+    },
+    {
+      "path": "viewer-sms-small/06_audio.png",
+      "sha256": "fceaf8130763facddeb6ea08e2408fb1f39d614df7ceb30f7cc877d0d84cff30"
+    },
+    {
+      "path": "viewer-sms-small/07_system.png",
+      "sha256": "2f2822695665988155f6924de43359e46ccd5b6c211571d6332b5a44c615bbb1"
+    },
+    {
+      "path": "viewer-sms-small/07b_reset_confirmation.png",
+      "sha256": "7f17bdf1a1a126d10e9885f61197cd3787b5a10caa39fd4dd40fc7da88b0a93f"
+    },
+    {
+      "path": "viewer-sms-small/08_quit_confirmation.png",
+      "sha256": "4fa48a8d4a2511ec51240298a9a647fc275588bf095583576f89c1c59dec10d7"
+    },
+    {
+      "path": "viewer-sms-small/09_toast.png",
+      "sha256": "a4e30cbed267f012023c4eb47ec8663066c93a9b60b18ec0d174809cc4a2ad04"
+    },
+    {
+      "path": "viewer-sms-small/10_hud.png",
+      "sha256": "78496aa6f6c0b7585ad4f4db34970fb8bd40fcd4f9bf4a5fa98da1660dac26db"
+    },
+    {
+      "path": "viewer-sms-small/crt_arcade.png",
+      "sha256": "23e8a412c11c67ee1a6b7064ca66c40c9b9e8d0d9c8ce19720b717d7a788468c"
+    },
+    {
+      "path": "viewer-sms-small/crt_classic.png",
+      "sha256": "2a5f22fa7caf7f460fd4b41505e08d19363ceebb9f47cf16adbcfc64c653c467"
+    },
+    {
+      "path": "viewer-sms-small/crt_pixel_perfect.png",
+      "sha256": "b7ee1cbae36eada98ad34cfa38b2eff64037500ddd6a7b849ed5e714d90f6eb5"
+    },
+    {
+      "path": "viewer-sms-small/crt_soft.png",
+      "sha256": "4dbfa9f8ef549c221a45df602e47eb42c9fcc877205221aa4c834e9085449751"
+    },
+    {
+      "path": "viewer-sms/01_gameplay.png",
+      "sha256": "1eefa675d3a31689746f8b2c79aa77be111782817ce2ef3260a26494c5e9c322"
+    },
+    {
+      "path": "viewer-sms/02_pause_menu.png",
+      "sha256": "953e427f1a45cc550f3b5a25d932c25ea2e86f7d8def5b2447a974d3e5c7128e"
+    },
+    {
+      "path": "viewer-sms/03_quick_settings.png",
+      "sha256": "640dc1031c1bfafdef7fddae5aff6f08e74c0ad5a21dc968cdedf3a668d1c99c"
+    },
+    {
+      "path": "viewer-sms/04_video_display.png",
+      "sha256": "ef0ddecf0b1f7d7caf66607376685950ed6304948deac767f13871e469a2dd7e"
+    },
+    {
+      "path": "viewer-sms/05_controls.png",
+      "sha256": "58b5d1198932fc3fe45c8932fa685d91984cbdb2a55516ce2ab180ec49162fe9"
+    },
+    {
+      "path": "viewer-sms/05b_controller_status.png",
+      "sha256": "b46e5b9e5d3a2dda79608735adef31646a9850727818ad1639eccf192f5c66d4"
+    },
+    {
+      "path": "input-diagnostics/viewer-sms_controller_status_none.png",
+      "sha256": "b46e5b9e5d3a2dda79608735adef31646a9850727818ad1639eccf192f5c66d4"
+    },
+    {
+      "path": "viewer-sms/05c_controls_capture.png",
+      "sha256": "61ae0afa28f031db55d648049a181bcdf4549d9b4e24950cabe65c7f590cb237"
+    },
+    {
+      "path": "viewer-sms/05d_controls_conflict.png",
+      "sha256": "7c27b7860c1155c2865099c38c4044946ddc402b0dd3fa0fcf43d0d6c5facd01"
+    },
+    {
+      "path": "viewer-sms/05e_controls_restore.png",
+      "sha256": "73c077bd1f6a035118e9018d000e53fa2e76ca513f50a584a8c739ddb9146a7a"
+    },
+    {
+      "path": "viewer-sms/06_audio.png",
+      "sha256": "87170b8cc2751ccecbe335bd88b64af347f00eabf902640bcf619e08ca0c7a1d"
+    },
+    {
+      "path": "viewer-sms/07_system.png",
+      "sha256": "b95bc850d3d7948e30335e48264bc3c71f53c2e898fbbd18d4327258babe893f"
+    },
+    {
+      "path": "viewer-sms/07b_reset_confirmation.png",
+      "sha256": "b32239405953a2bb94163bcb62eb4f7379f727541bf1521c5ea3e4dbf0a1dbca"
+    },
+    {
+      "path": "viewer-sms/08_quit_confirmation.png",
+      "sha256": "8a7cb4c7e09a68abe0101ac0c71a017c1291d75a19dbfe15d12b8fd7c14aeb02"
+    },
+    {
+      "path": "viewer-sms/09_toast.png",
+      "sha256": "42746bdd733d1e1e769030f7ce978d3c1af27f5fa28fb8e76fdb79acecfce0aa"
+    },
+    {
+      "path": "viewer-sms/10_hud.png",
+      "sha256": "cf409e62b94962bfdeb7004b5abb0f7b0794b2f5bc469198a81d9fedbd8c8976"
+    },
+    {
+      "path": "viewer-sms/crt_arcade.png",
+      "sha256": "ce4a5d5aa0ac85bccea15f3daa37e464b20a0869f177a10829be5fe0739ffdf9"
+    },
+    {
+      "path": "viewer-sms/crt_classic.png",
+      "sha256": "1dc29195709c598051cfcdf21a647bc8c1c0c40e627dffadd2c0d5816bf8458f"
+    },
+    {
+      "path": "viewer-sms/crt_pixel_perfect.png",
+      "sha256": "1eefa675d3a31689746f8b2c79aa77be111782817ce2ef3260a26494c5e9c322"
+    },
+    {
+      "path": "viewer-sms/crt_soft.png",
+      "sha256": "a1d49e8573996412ad39e99710ff95862d01e280c970ba8f8767591eb67bb76e"
+    },
+    {
+      "path": "input-diagnostics/viewer-sms_controller_status_raw.png",
+      "sha256": "7c39866b6965b2229b5dc5d0585b273d0b06d5e902ff55bb3dd0dd6876fbab72"
+    },
+    {
+      "path": "input-diagnostics/viewer-sms_controller_status_locked.png",
+      "sha256": "570e776c4470a29a8a19a1a7a46b3730d51e897702b52cf98fd0c632714b5673"
+    },
+    {
+      "path": "input-diagnostics/viewer-sms_controller_status_live.png",
+      "sha256": "f0f70189316c04783b91079db13a02d2579b4955edfd33ffc4dd6ed745e32064"
+    },
+    {
+      "path": "viewer-sms-224-small/01_gameplay.png",
+      "sha256": "a11b2ebce9fd413e696e9a35f4adb0a127175fb6e5ae6fea81d5e887bf283891"
+    },
+    {
+      "path": "viewer-sms-224-small/02_pause_menu.png",
+      "sha256": "c4437d7a74b9bbd28e231e164c0e8a4bccf1e651eb20cf544d7a70c50ae98c55"
+    },
+    {
+      "path": "viewer-sms-224-small/03_quick_settings.png",
+      "sha256": "e323d274ab832dbdbdacf88651b7f0f1214fa3b0a975af87b1e3577ea8b93cb0"
+    },
+    {
+      "path": "viewer-sms-224-small/04_video_display.png",
+      "sha256": "9d304a96244ac17af93e528f110a4b41d07074e03301c62b22adc055005932cf"
+    },
+    {
+      "path": "viewer-sms-224-small/05_controls.png",
+      "sha256": "842dc06b6836b367fb54351aa20aa3e77141eb99a5c7b5cee1e2d051ba1f56ed"
+    },
+    {
+      "path": "viewer-sms-224-small/05b_controller_status.png",
+      "sha256": "d89ad38eca13ab598b5c81a59b54ee5a86710b24ed751c3988b23fe74b71a88e"
+    },
+    {
+      "path": "viewer-sms-224-small/05c_controls_capture.png",
+      "sha256": "c55d8902a107c4d23675b3c415f1835cd571960dc374d40a6e21ce2d7b086b27"
+    },
+    {
+      "path": "viewer-sms-224-small/05d_controls_conflict.png",
+      "sha256": "c007010f0558d32fb8608d301d591cd86445164de7d522a201c0d9e067881b57"
+    },
+    {
+      "path": "viewer-sms-224-small/05e_controls_restore.png",
+      "sha256": "85ffddca18bc19b79fdb221e2365f32258c4e9d988a5332c8f206e6531f203bb"
+    },
+    {
+      "path": "viewer-sms-224-small/06_audio.png",
+      "sha256": "864044b505aa0ac0993ee5d0ac8d7528c0ea13e5a3b8043696e8eae7b97e5daf"
+    },
+    {
+      "path": "viewer-sms-224-small/07_system.png",
+      "sha256": "0d77b42a5b0ff69cd5b5c5da0db4cd091ced9d4bc01a7cb549d7a19731deede3"
+    },
+    {
+      "path": "viewer-sms-224-small/07b_reset_confirmation.png",
+      "sha256": "d5a8f29a238a82dd182bfec2437a8fcb872b6307d4f796b2d676a73aec42fe1c"
+    },
+    {
+      "path": "viewer-sms-224-small/08_quit_confirmation.png",
+      "sha256": "b6ac74bac1f96f2382b553dd4f643ba76d8631a5788d0c2de8cf8b4df46893ca"
+    },
+    {
+      "path": "viewer-sms-224-small/09_toast.png",
+      "sha256": "b5dca92ea92577aacd94787e8968c750d392bb8f33f8971130a59b5601fba3ed"
+    },
+    {
+      "path": "viewer-sms-224-small/10_hud.png",
+      "sha256": "d99900ddb9232d4651afe2417c02e8764a40232092080df433e0d5060f6d052a"
+    },
+    {
+      "path": "viewer-sms-224-small/crt_arcade.png",
+      "sha256": "a94374d9f513cdb9f395ff76a71d609d3d0957c48977cea0ca863681510d34a1"
+    },
+    {
+      "path": "viewer-sms-224-small/crt_classic.png",
+      "sha256": "a432534c7f296bca22277edd19c5576de1637cd13d65e0089c63b380992aae3a"
+    },
+    {
+      "path": "viewer-sms-224-small/crt_pixel_perfect.png",
+      "sha256": "a11b2ebce9fd413e696e9a35f4adb0a127175fb6e5ae6fea81d5e887bf283891"
+    },
+    {
+      "path": "viewer-sms-224-small/crt_soft.png",
+      "sha256": "870e360d6b1c6d63d46e2450dd8f805255df0c177b66b635a2b56d228387024f"
+    },
+    {
+      "path": "viewer-sms-224/01_gameplay.png",
+      "sha256": "6b5a044d433efeb71a8345229b60a50541c662a121c052da47b2accdbb074092"
+    },
+    {
+      "path": "viewer-sms-224/02_pause_menu.png",
+      "sha256": "52c2c40f13d799438c1e5ec1c28f2e2e6db6c83fc0741273ee0de4636efc6649"
+    },
+    {
+      "path": "viewer-sms-224/03_quick_settings.png",
+      "sha256": "c3b61f77e06be82292d4e0663dc0c0827bce7f4a02fa947980b6f40186d23ebd"
+    },
+    {
+      "path": "viewer-sms-224/04_video_display.png",
+      "sha256": "71a145fe3c9c53429f60b209233f3ea83a054ec889964d185246416796d32a41"
+    },
+    {
+      "path": "viewer-sms-224/05_controls.png",
+      "sha256": "2a012e01b6abad2f2e91a4e8d7705f51ff37de314ea1b7a448fc6d9f138bf487"
+    },
+    {
+      "path": "viewer-sms-224/05b_controller_status.png",
+      "sha256": "5dcb3bb20c9448416a399080fe36c9aa1fc02a3e54048095ca9efc723194bc1b"
+    },
+    {
+      "path": "input-diagnostics/viewer-sms224_controller_status_none.png",
+      "sha256": "5dcb3bb20c9448416a399080fe36c9aa1fc02a3e54048095ca9efc723194bc1b"
+    },
+    {
+      "path": "viewer-sms-224/05c_controls_capture.png",
+      "sha256": "70cac6c58e91fc23170e9a15f05be1a47e06d2868091da0b293765de5e8e6295"
+    },
+    {
+      "path": "viewer-sms-224/05d_controls_conflict.png",
+      "sha256": "70fd578d957aa04e9f3c6e8547be83195f5f73e5a903fdcf707be245ef79ba8c"
+    },
+    {
+      "path": "viewer-sms-224/05e_controls_restore.png",
+      "sha256": "90ad69283c1947792fbb3ef8be51f5e1a132746a6de1a5cb792765c64fa44759"
+    },
+    {
+      "path": "viewer-sms-224/06_audio.png",
+      "sha256": "b21ad58063bf55de7f1da3d9f7df39e4bfd1f6f95340a4f7810ca577a80cfcf7"
+    },
+    {
+      "path": "viewer-sms-224/07_system.png",
+      "sha256": "53a2752cb2151f6beca69f50d9662c355c51d5cb9d8149db2b7299c3630c76a8"
+    },
+    {
+      "path": "viewer-sms-224/07b_reset_confirmation.png",
+      "sha256": "312058dc80de1bed9fa3ae8b04763de822d8b63dc0264d441b9e3a9c48b48c29"
+    },
+    {
+      "path": "viewer-sms-224/08_quit_confirmation.png",
+      "sha256": "66a0ce8e00f025a9278ac28fe7a10dd0276595c101bfe2583798faf6a2411cf0"
+    },
+    {
+      "path": "viewer-sms-224/09_toast.png",
+      "sha256": "ac20781e42cd0923416b39d1f44a074879ec3554331a2fb7dbf2852b3479f83b"
+    },
+    {
+      "path": "viewer-sms-224/10_hud.png",
+      "sha256": "f5052d759e4864fee3e249de1fae5f6834c54446e49ec9630582fec56df368b8"
+    },
+    {
+      "path": "viewer-sms-224/crt_arcade.png",
+      "sha256": "7ca0b4ac00829e2461afc240bdd64c651d5b9727cdeb8f912e221c94d2b53883"
+    },
+    {
+      "path": "viewer-sms-224/crt_classic.png",
+      "sha256": "0e7d638ddc3e1c60a11aef616bb5fcef137cce46203eaf7114fd46a0f0892d58"
+    },
+    {
+      "path": "viewer-sms-224/crt_pixel_perfect.png",
+      "sha256": "6b5a044d433efeb71a8345229b60a50541c662a121c052da47b2accdbb074092"
+    },
+    {
+      "path": "viewer-sms-224/crt_soft.png",
+      "sha256": "302c13b7ed6a3fae039370af159009af802510c32ae9d53f95e81ca098009243"
+    },
+    {
+      "path": "input-diagnostics/viewer-sms224_controller_status_raw.png",
+      "sha256": "774673e46ca27b6d31ae9859c4002acd559351af70c12dadc0442b7243879a3e"
+    },
+    {
+      "path": "input-diagnostics/viewer-sms224_controller_status_locked.png",
+      "sha256": "31d09373931db21e0c7b469069ec7be0b45ad0d0fde0aa662df0eb0edb9d21f6"
+    },
+    {
+      "path": "input-diagnostics/viewer-sms224_controller_status_live.png",
+      "sha256": "c50997588afdec5fa01146f29f8a51a5dc4bf34105ebfccde23cf5ecd96b2ba4"
+    }
+  ]
+}

@@ -12,6 +12,7 @@ struct SvDiag {
   int video_ok, gamepad_ok;
   char gamepad_error[160];
   int trace;
+  int libusb_loadable; /* probed once at setup, never during hotplug/event logging */
 };
 
 static SDL_Gamepad *(*g_open_hook)(SDL_JoystickID id) = NULL;
@@ -26,6 +27,7 @@ static void copy_text(char *dst, size_t cap, const char *src) {
 SvDiag *sv_diag_create(void) {
   SvDiag *d = (SvDiag *)calloc(1, sizeof *d);
   if (d != NULL) {
+    d->libusb_loadable = sv_diag_libusb_loadable();
     const char *t = SDL_getenv("SEGARECOMP_INPUT_TRACE");
     d->trace = (t != NULL && *t != '\0' && *t != '0');
     if (d->trace) SDL_SetLogPriority(SDL_LOG_CATEGORY_INPUT, SDL_LOG_PRIORITY_DEBUG); /* SDL's own HIDAPI/libusb messages (for example "Couldn't load libusb") */
@@ -343,6 +345,8 @@ int sv_diag_hid_scan(const SvDiag *d, SvDiagHid *out, int cap, char *error, size
   return n;
 }
 
+int sv_diag_libusb_available(const SvDiag *d) { return d != NULL && d->libusb_loadable; }
+
 int sv_diag_libusb_loadable(void) {
 #if defined(_WIN32)
   static const char *names[] = {"libusb-1.0.dll", "libusb-1.0"};
@@ -407,7 +411,7 @@ size_t sv_diag_summary(const SvDiag *d, char *out, size_t cap) {
   sv_diag_sdl_version(ver, sizeof ver);
   ADD("%s; video %s; gamepad subsystem %s%s%s\n", ver, sv_diag_video_ok(d) ? "ok" : "FAILED", sv_diag_gamepad_subsystem_ok(d) ? "ok" : "FAILED",
       sv_diag_gamepad_subsystem_ok(d) ? "" : ": ", sv_diag_gamepad_subsystem_ok(d) ? "" : sv_diag_gamepad_init_error(d));
-  ADD("Switch 2 HIDAPI hint: %s; libusb-1.0 loadable: %s; devices: %d\n", sv_diag_switch2_hint_state(), sv_diag_libusb_loadable() ? "yes" : "no", sv_diag_count(d));
+  ADD("Switch 2 HIDAPI hint: %s; libusb-1.0 loadable: %s; devices: %d\n", sv_diag_switch2_hint_state(), d != NULL && d->libusb_loadable ? "yes" : "no", sv_diag_count(d));
   for (i = 0; i < sv_diag_count(d); ++i) {
     const SvDiagDevice *v = sv_diag_device(d, i);
     ADD("[%d] \"%s\" id=%u vid:pid=%04x:%04x guid=%s %s, %s, %s", i, v->name, (unsigned)v->id, v->vendor, v->product, v->guid, v->is_gamepad ? "gamepad" : "raw joystick (no gamepad mapping)",

@@ -207,6 +207,7 @@ void App::shutdown() {
   if (import_job_.valid()) import_job_.wait();
   if (maint_job_.valid()) maint_job_.wait();
   if (sms_probe_.valid()) sms_probe_.wait();
+  if (hid_job_.valid()) hid_job_.wait();
   for (auto &entry : cover_cache_)
     if (entry.second != nullptr) SDL_DestroyTexture(entry.second);
   cover_cache_.clear();

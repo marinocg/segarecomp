@@ -137,8 +137,9 @@ All images are real captures of the built binaries, rendered from fictional, pro
   build identity does not match; no screenshot readiness flag is forged. The two build-progress captures use fresh temporary caches and real producer stages.
 * `launcher-states/` is **historical evidence from the earlier binary**, not refreshed by the launcher visual correction: ready, metadata-only, stale,
   ROM missing, failed (with log), not built, multiple imports and build progress. Do not use it as proof of the current layout.
-* `screenshots/viewer-genesis/` (1920x1080), `viewer-sms/` (768x576, 192 lines), `viewer-sms-224/` (224-line mode): gameplay, HUD, pause menu, quick settings,
-  video and display with live preview, controls, controller status, audio, system, quit confirmation, toast, the four CRT presets.
+* `screenshots/viewer-genesis/`, `viewer-sms/` (192 lines), `viewer-sms-224/` (224-line mode) now contain new-binary **1080x740** captures, with
+  matching `-small/` directories at **720x520**. See [viewer UI review](viewer-ui.md) and `screenshots/viewer-capture.json` for all pages, input cases,
+  hashes, scale simulations and honest validation limits.
 * `screenshots/input-diagnostics/` - launcher states A (no controller), B (joystick without mapping), C (open failure), OK (live virtual gamepad) and the viewer's
   Controller status page for the same cases. **These use SDL virtual joysticks, not a physical Switch 2 Pro Controller.**
 
@@ -167,11 +168,11 @@ python3 tools/launcher_visual_capture.py --launcher <new-built-Segarecomp> --hom
 Validation: the seven focused launcher/library/storage CTest tests passed. After the final layout adjustment, the navigation test passed again with
 9 keyboard/gamepad assertions and 24 real-window responsive render smoke cases. This is not pixel-perfect visual automation, HiDPI hardware validation,
 physical-gamepad validation, a three-OS release test, or a final fast gate. The validator owns the latter. No viewer source changed in this phase, and the
-viewer captures above remain earlier evidence pending the viewer correction phase.
+  viewer correction is now documented separately in [viewer UI review](viewer-ui.md); this paragraph's validation counts describe only the launcher visual phase.
 
 Remaining intentional differences from the concepts: long pages require scrolling, particularly at minimum size; there are no invented compatibility
 ratings, build percentages, storage figures or commercial covers. **Cover downloads remain unsupported** (manual local art and an explicit browser lookup,
 labelled `Web lookup`, are available). **SDL_GPU is not implemented**; SDL_Renderer remains the presenter. **Audio device selection is not implemented**;
 the default output device is used. **Build cancellation is not implemented**; no Cancel button is offered and closing waits for the build. These are capability
-limits, not capabilities supplied by this visual correction. The next viewer phase must separately audit overlay hierarchy, video preview/CRT presentation,
-controls/remap focus, audio limitations and confirmation layouts against the individual viewer crops; launcher captures do not validate those behaviors.
+  limits, not capabilities supplied by this visual correction. The subsequent viewer reconciliation audits overlay hierarchy, video preview/CRT presentation,
+  controls/remap focus, audio limitations and confirmation layouts against the individual viewer crops; launcher captures do not validate those behaviors.

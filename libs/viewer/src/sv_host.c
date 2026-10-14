@@ -164,9 +164,20 @@ static SDL_Texture *load_icon(SvHost *h, const char *name) {
   }
 }
 
+/* File reads belong to host setup, never the presentation/event hot path. */
+static void preload_ui_assets(SvHost *h) {
+  static const char *const names[] = {"controller", "fullscreen", "video", "settings", "reset", "info", "audio", "screenshot", "play", "quit", "warning"};
+  size_t i;
+  (void)sv_ui_wordmark(h);
+  for (i = 0; i < sizeof names / sizeof names[0]; ++i) (void)load_icon(h, names[i]);
+}
+
 void sv_host_icon_draw(SvHost *h, const char *name, float x, float y, float size, SDL_Color tint) {
-  SDL_Texture *tex = (name != NULL && *name != '\0') ? load_icon(h, name) : NULL;
+  SDL_Texture *tex = NULL;
+  int i;
   SDL_FRect d;
+  for (i = 0; name != NULL && i < h->icon_count; ++i)
+    if (strcmp(name, h->icon_names[i]) == 0) { tex = h->icons[i]; break; }
   if (tex == NULL) return;
   d.x = x; d.y = y; d.w = size; d.h = size;
   SDL_SetTextureColorMod(tex, tint.r, tint.g, tint.b);
@@ -291,12 +302,12 @@ static void common_event(SvHost *h, const SDL_Event *e) {
     case SDL_EVENT_GAMEPAD_ADDED: pad_open(h, e->gdevice.which); announce_pad_problem(h, e->gdevice.which, 1); break;
     case SDL_EVENT_GAMEPAD_REMOVED: pad_close(h, e->gdevice.which); break;
     case SDL_EVENT_KEY_DOWN:
-      if (e->key.scancode < 512) {
+      if ((int)e->key.scancode >= 0 && e->key.scancode < 512) {
         if (!e->key.repeat) h->key_latch[e->key.scancode] = 1;
         h->key_held[e->key.scancode] = 1;
       }
       break;
-    case SDL_EVENT_KEY_UP: if (e->key.scancode < 512) h->key_held[e->key.scancode] = 0; break;
+    case SDL_EVENT_KEY_UP: if ((int)e->key.scancode >= 0 && e->key.scancode < 512) h->key_held[e->key.scancode] = 0; break;
     case SDL_EVENT_GAMEPAD_BUTTON_DOWN: handle_pad_button(h, e->gbutton.which, e->gbutton.button, 1); break;
     case SDL_EVENT_GAMEPAD_BUTTON_UP: handle_pad_button(h, e->gbutton.which, e->gbutton.button, 0); break;
     case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
@@ -739,6 +750,7 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
   h->last_rgb = (uint8_t *)malloc((size_t)(cfg->max_w > 0 ? cfg->max_w : 320) * (size_t)(cfg->max_h > 0 ? cfg->max_h : 240) * 3u);
   if (h->last_rgb == NULL) { sv_host_close(h); return NULL; }
   sv_host_apply_video(h);
+  preload_ui_assets(h);
   h->session_start = SDL_GetTicks();
   sv_diag_scan(h->diag);
   ids = SDL_GetGamepads(&count);
@@ -750,15 +762,16 @@ SvHost *sv_host_open(const SvHostConfig *cfg) {
 
 void sv_host_close(SvHost *h) {
   if (h == NULL) return;
+  if (h->hid_thread != NULL) SDL_WaitThread(h->hid_thread, NULL);
   save_settings_if_dirty(h);
   sv_diag_destroy(h->diag);
   if (h->frame_tex != NULL) SDL_DestroyTexture(h->frame_tex);
   crt_state_destroy(&h->crt);
   crt_state_destroy(&h->crt_preview);
   sv_ui_destroy(h);
+  { int k; for (k = 0; k < h->icon_count; ++k) if (h->icons[k] != NULL) SDL_DestroyTexture(h->icons[k]); }
   if (h->renderer != NULL) SDL_DestroyRenderer(h->renderer);
   if (h->window != NULL) SDL_DestroyWindow(h->window);
-  { int k; for (k = 0; k < h->icon_count; ++k) if (h->icons[k] != NULL) SDL_DestroyTexture(h->icons[k]); }
   free(h->last_rgb);
   SDL_Quit();
   free(h);
@@ -838,6 +851,37 @@ static SvNav button_to_nav(int b) {
   }
 }
 
+static int SDLCALL hid_worker(void *ctx) {
+  SvHost *h = (SvHost *)ctx;
+  /* No shared live diagnostic tables in the worker. Match against SDL on the host thread after completion. */
+  h->hid_pending_count = sv_diag_hid_scan(NULL, h->hid_pending, SV_DIAG_MAX_HID, h->hid_error, sizeof h->hid_error);
+  SDL_SetAtomicInt(&h->hid_done, 1);
+  return 0;
+}
+
+void sv_host_start_hid_scan(SvHost *h) {
+  if (h->hid_thread != NULL) return;
+  SDL_SetAtomicInt(&h->hid_done, 0);
+  h->hid_thread = SDL_CreateThread(hid_worker, "viewer-hid-scan", h);
+  if (h->hid_thread == NULL) sv_host_toast(h, "Could not start OS device scan");
+}
+
+static void finish_hid_scan(SvHost *h) {
+  int i, k;
+  if (h->hid_thread == NULL || !SDL_GetAtomicInt(&h->hid_done)) return;
+  SDL_WaitThread(h->hid_thread, NULL);
+  h->hid_thread = NULL;
+  h->hid_count = h->hid_pending_count;
+  h->hid_scanned = 1;
+  memcpy(h->hid, h->hid_pending, sizeof h->hid);
+  for (i = 0; i < h->hid_count; ++i)
+    for (k = 0; k < sv_diag_count(h->diag); ++k) {
+      const SvDiagDevice *d = sv_diag_device(h->diag, k);
+      if (d->vendor == h->hid[i].vendor && d->product == h->hid[i].product) h->hid[i].matched_joystick = 1;
+    }
+  if (h->hid_count < 0) sv_host_toast(h, h->hid_error[0] ? h->hid_error : "OS device scan failed");
+}
+
 /* Runs the pause overlay until it is closed. The caller (the console adapter) is blocked here, so the guest does not advance. */
 static void run_menu(SvHost *h) {
   SDL_Event e;
@@ -872,7 +916,7 @@ static void run_menu(SvHost *h) {
         const int b = e.gbutton.button;
         h->last_input_pad = 1;
         if (h->listen.kind != SV_LISTEN_NONE) sv_pages_listen_pad(h, b);
-        else if (b == SDL_GAMEPAD_BUTTON_BACK || b == SDL_GAMEPAD_BUTTON_START || b == SDL_GAMEPAD_BUTTON_GUIDE) sv_pages_close(h);
+        else if (b == SDL_GAMEPAD_BUTTON_BACK || b == SDL_GAMEPAD_BUTTON_GUIDE) sv_pages_close(h);
         else if (button_to_nav(b) == SV_NAV_BACK) sv_pages_back(h);
         else if (button_to_nav(b) != SV_NAV_NONE) sv_pages_apply(h, sv_menu_navigate(&h->menu, button_to_nav(b)));
       } else if (e.type == SDL_EVENT_GAMEPAD_AXIS_MOTION && h->listen.kind == SV_LISTEN_NONE) {
@@ -914,6 +958,7 @@ static void run_menu(SvHost *h) {
     }
     if (h->listen.kind != SV_LISTEN_NONE && SDL_GetTicks() - h->listen.started > 8000u) sv_pages_listen_cancel(h, "Binding cancelled (no input)");
     if (h->menu_open) {
+      finish_hid_scan(h);
       sv_pages_rebuild(h);
       draw_scene(h, 1);
       if (h->hook != NULL && h->hook(h->hook_ctx, h, iteration++) != 0) sv_pages_close(h);

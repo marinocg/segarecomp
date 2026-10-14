@@ -109,6 +109,17 @@ std::string App::input_report() const {
 }
 
 void App::draw_input_diagnostics(float w) {
+  if (hid_job_.valid() && hid_job_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+    auto result = hid_job_.get();
+    hid_ = std::move(result.devices);
+    hid_state_ = result.count;
+    hid_error_ = std::move(result.error);
+    for (auto &h : hid_)
+      for (int i = 0; i < sv_diag_count(diag_); ++i) {
+        const auto *d = sv_diag_device(diag_, i);
+        if (d->vendor == h.vendor && d->product == h.product) h.matched_joystick = 1;
+      }
+  }
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const float pad = ctx_.u(14.0F), lw = ctx_.u(150.0F);
   const SvPadState overall = input_state();
@@ -139,7 +150,7 @@ void App::draw_input_diagnostics(float w) {
     const ImVec2 row0 = ImGui::GetCursorScreenPos();
     if (button(ctx_, "in_rescan", "Rescan", ImVec2(ctx_.u(110.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("reset"))) { sv_diag_scan(diag_); toast("Rescanned controllers."); }
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
-    if (button(ctx_, "in_copy", "Copy report", ImVec2(ctx_.u(130.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("file"))) { SDL_SetClipboardText(input_report().c_str()); toast("Diagnostic report copied (no ROM names or file paths)."); }
+    if (button(ctx_, "in_copy", "Copy report", ImVec2(ctx_.u(130.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("file"))) { SDL_SetClipboardText(input_report().c_str()); toast("Report copied. Review device errors before sharing."); }
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (button(ctx_, "in_menu_test", "Menu test: press A / South or Enter", ImVec2(ctx_.u(290.0F), ctx_.u(30.0F)), Style::ghost)) {
       ++nav_taps_;
@@ -160,7 +171,7 @@ void App::draw_input_diagnostics(float w) {
     label_value(ctx_, lw, w - lw, "Gamepad subsystem", sv_diag_gamepad_subsystem_ok(diag_) ? "initialised" : std::string("FAILED: ") + (sv_diag_gamepad_init_error(diag_)[0] != '\0' ? sv_diag_gamepad_init_error(diag_) : "no SDL error text"),
                 sv_diag_gamepad_subsystem_ok(diag_) ? col::text : col::err);
     label_value(ctx_, lw, w - lw, "Switch 2 driver hint", std::string(sv_diag_switch2_hint_state()) + "  (SDL_JOYSTICK_HIDAPI_SWITCH2; on by default when HIDAPI is)");
-    label_value(ctx_, lw, w - lw, "libusb-1.0", sv_diag_libusb_loadable() ? "found on this system (SDL loads it at run time)" : "not found on this system", sv_diag_libusb_loadable() ? col::text : col::warn);
+    label_value(ctx_, lw, w - lw, "libusb-1.0", sv_diag_libusb_available(diag_) ? "found at startup (SDL loads it at run time)" : "not found at startup", sv_diag_libusb_available(diag_) ? col::text : col::warn);
   }
   rule(ctx_, w);
   heading(ctx_, sv_diag_count(diag_) == 0 ? "Controllers (none seen by SDL)" : "Controllers seen by SDL");
@@ -244,12 +255,16 @@ void App::draw_input_diagnostics(float w) {
   heading(ctx_, "Operating-system view (Nintendo, read-only)");
   paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, w,
             "Lists the Nintendo HID devices the OS exposes, with the bus (USB or Bluetooth), even when SDL offers no joystick for them. It opens nothing and installs nothing.");
-  if (button(ctx_, "in_hid", "Scan OS devices", ImVec2(ctx_.u(170.0F), ctx_.u(30.0F)), Style::secondary, true, ctx_.icon("search"))) {
-    hid_.assign(SV_DIAG_MAX_HID, SvDiagHid{});
-    char err[160];
-    hid_state_ = sv_diag_hid_scan(diag_, hid_.data(), SV_DIAG_MAX_HID, err, sizeof err);
-    hid_error_ = err;
-    if (hid_state_ >= 0) hid_.resize(static_cast<std::size_t>(hid_state_));
+  if (button(ctx_, "in_hid", hid_job_.valid() ? "Scanning..." : "Scan OS devices", ImVec2(ctx_.u(170.0F), ctx_.u(30.0F)), Style::secondary, !hid_job_.valid(), ctx_.icon("search"))) {
+    hid_job_ = std::async(std::launch::async, [] {
+      HidResult r;
+      r.devices.resize(SV_DIAG_MAX_HID);
+      char err[160];
+      r.count = sv_diag_hid_scan(nullptr, r.devices.data(), SV_DIAG_MAX_HID, err, sizeof err);
+      r.error = err;
+      r.devices.resize(r.count >= 0 ? static_cast<std::size_t>(r.count) : 0);
+      return r;
+    });
   }
   ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
   bool switch2_seen = false, switch2_bluetooth = false, switch2_hidden = false;
@@ -270,16 +285,14 @@ void App::draw_input_diagnostics(float w) {
               std::string("A Nintendo Switch 2 controller is visible to the OS but SDL exposes no joystick for it. In the SDL 3.4 series Switch 2 controllers are supported by a USB-only driver that loads libusb at run time ") +
                   "(over Bluetooth SDL reports \"not supported over Bluetooth\"), and the driver is only compiled into an SDL built with libusb. " +
                   (switch2_bluetooth ? "This one is on Bluetooth: connect it by USB cable, or use another controller. " : "") + std::string("libusb-1.0 on this system: ") +
-                  (sv_diag_libusb_loadable() ? "found" : "NOT found") + ". Segarecomp does not install drivers or change USB driver bindings. See docs/testing/input-diagnostics.md.");
+                   (sv_diag_libusb_available(diag_) ? "found at startup" : "NOT found at startup") + ". Segarecomp does not install drivers or change USB driver bindings. See docs/testing/input-diagnostics.md.");
   }
   rule(ctx_, w);
   heading(ctx_, "Mapping file (for a controller SDL lists as a joystick only)");
   {
     const std::string path = u8s(library_dir_ / "gamecontrollerdb.txt");
-    std::error_code ec;
-    const bool exists = fs::is_regular_file(library_dir_ / "gamecontrollerdb.txt", ec);
-    paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, w, "A mapping line for the GUID above, in SDL's gamecontrollerdb.txt format, turns a raw joystick into an explicit gamepad. Segarecomp ships no mapping database and never guesses one. File: " + path + (exists ? "" : "  (does not exist)"));
-    if (button(ctx_, "in_map_reload", "Reload mapping file", ImVec2(ctx_.u(190.0F), ctx_.u(30.0F)), Style::secondary, exists)) {
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.5F), col::dim, w, "A mapping line for the GUID above, in SDL's gamecontrollerdb.txt format, turns a raw joystick into an explicit gamepad. Segarecomp ships no mapping database and never guesses one. File (checked on Reload): " + path);
+    if (button(ctx_, "in_map_reload", "Reload mapping file", ImVec2(ctx_.u(190.0F), ctx_.u(30.0F)), Style::secondary, true)) {
       const int n = sv_diag_load_mapping_file(path.c_str());
       sv_diag_scan(diag_);
       toast(n < 0 ? "The mapping file could not be read." : "Loaded " + std::to_string(n) + " mapping line(s).", n < 0);
