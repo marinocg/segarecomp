@@ -99,6 +99,7 @@ segarecomp_enable_warnings(launcher_ui_support_test)
 if(BUILD_TESTING)
   add_test(NAME launcher_ui_support_test COMMAND launcher_ui_support_test)
   set_property(TEST launcher_ui_support_test APPEND PROPERTY LABELS full fast)
+  set_property(TEST launcher_ui_support_test PROPERTY TIMEOUT 300)  # seconds of work at most; never the 25-minute default
 endif()
 
 # SEG-058: keyboard and gamepad navigation of the real window (dummy video driver, virtual gamepad).

@@ -10,6 +10,11 @@
 
 #include "zlib.h"  // the vendored deflate subset: the test builds real deflated archives
 
+#if defined(_WIN32)
+#include <crtdbg.h>
+#include <stdlib.h>
+#endif
+
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -23,6 +28,8 @@ using namespace launcher;
 
 namespace {
 int failures = 0;
+// Progress on stderr (unbuffered): a hang or crash in CI then names the step it happened in.
+void step(const std::string &what) { std::cerr << "step: " << what << std::endl; }
 void expect(bool ok, const std::string &what) {
   if (!ok) { ++failures; std::cerr << "FAIL: " << what << "\n"; }
 }
@@ -83,6 +90,15 @@ const unsigned char tiny_png[] = {0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A
 }
 
 int main() {
+#if defined(_WIN32)
+  // Debug CRT: report assertions and abort() on stderr and exit, instead of a modal dialog that blocks until the CTest timeout.
+  _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+  for (const int type : {_CRT_WARN, _CRT_ERROR, _CRT_ASSERT}) {
+    _CrtSetReportMode(type, _CRTDBG_MODE_FILE);
+    _CrtSetReportFile(type, _CRTDBG_FILE_STDERR);
+    (void)type;  // the two calls are empty macros without the debug CRT
+  }
+#endif
   const fs::path dir = fs::temp_directory_path() / "segarecomp_ui_support_test";
   fs::remove_all(dir);
   fs::create_directories(dir);
@@ -91,6 +107,7 @@ int main() {
   const fs::path good = asset_path("icon-drop.png");  // a real PNG shipped with the launcher
 
   expect(fs::is_regular_file(good), "a shipped PNG asset exists");
+  step("a valid image is validated and copied; the original is untou");
   {  // a valid image is validated and copied; the original is untouched
     const std::string before = slurp(good);
     const CoverImport r = import_cover(good, covers, sha);
@@ -99,6 +116,7 @@ int main() {
     expect(existing_cover_for(covers, sha) == sha + ".png", "the stored cover is found again by digest (re-import re-associates it)");
     expect(!fs::exists(covers / (sha + ".png.tmp")), "no temporary file is left behind");
   }
+  step("invalid images are refused with a plain reason and never sto");
   {  // invalid images are refused with a plain reason and never stored
     spit(dir / "not_image.png", "this is not an image");
     spit(dir / "truncated.png", slurp(good).substr(0, 60));
@@ -113,6 +131,7 @@ int main() {
     expect(existing_cover_for(covers, other).empty(), "nothing is stored for a refused image");
     expect(!import_cover(good, covers, "../../escape").ok, "a hostile identity is refused");
   }
+  step("cover removal only touches plain files with a bare name");
   {  // cover removal only touches plain files with a bare name
     spit(covers / "x.png", "x");
     spit(dir / "outside.txt", "keep");
@@ -123,6 +142,7 @@ int main() {
     if (!ec) expect(!remove_cover_file(covers, "link.png") && fs::exists(dir / "outside.txt"), "a symlink is never followed or deleted");
     expect(remove_cover_file(covers, "x.png") && !fs::exists(covers / "x.png"), "a plain cover file is removed");
   }
+  step("Libretro naming");
   {  // Libretro naming: system trees and https URLs
     expect(libretro_system_dir("genesis") == "Sega - Mega Drive - Genesis" && libretro_system_dir("master-system") == "Sega - Master System - Mark III" && libretro_system_dir("saturn").empty(), "system trees");
     expect(libretro_candidate_url("genesis", "Fictional Game (USA)") == "https://thumbnails.libretro.com/Sega%20-%20Mega%20Drive%20-%20Genesis/Named_Boxarts/Fictional%20Game%20%28USA%29.png", "percent-encoded https URL");
@@ -130,6 +150,7 @@ int main() {
     expect(libretro_candidate_url("genesis", "a b").rfind("https://", 0) == 0, "only https is ever produced");
     expect(libretro_safe_name("A&B*C/D:E`F<G>H?I\\J|K") == "A_B_C_D_E_F_G_H_I_J_K", "Libretro's reserved characters become '_'");
   }
+  step("Libretro candidates");
   {  // Libretro candidates: ROM file names first, Title Case for upper-case headers, multi-region tags in the user's order
     CoverQuery q{"genesis", {"FICTIONAL  RACER II", "Fictional Racer: Turbo"}, {"/roms/Fictional Racer II (USA, Europe) (Rev 1).md", "/lib/roms/" + std::string(64, 'a') + ".md"}, {"Europe", "USA"}};
     const auto names = libretro_cover_candidates(q);
@@ -149,6 +170,7 @@ int main() {
     expect(minor.size() >= 2 && minor[0] == "The Streets of the City 2 (USA, Europe)" && minor[1] == "The Streets Of The City 2 (USA, Europe)", "both No-Intro capitalisations of minor words are tried");
     expect(libretro_cover_candidates(CoverQuery{"genesis", {""}, {}, {"USA"}}).empty(), "no title, no candidate");
   }
+  step("Libretro directory listing and name picking (offline");
   {  // Libretro directory listing and name picking (offline: a synthetic listing)
     const std::string html = "<html><body><a href=\"../\">../</a>\n<a href=\"Space%20Pilot%20%28Japan%29.png\">x</a>\n"
                              "<a href=\"Space%20Pilot%20%28USA%2C%20Europe%29%20%28Beta%29.png\">x</a>\n<a href=\"Space%20Pilot%20%28Europe%29.png\">x</a>\n"
@@ -165,6 +187,7 @@ int main() {
     expect(pick_libretro_name(CoverQuery{"genesis", {"Hero & Sidekick"}, {}, {"USA"}}, listing) == "Hero _ Sidekick (USA)", "'&' titles match their '_' thumbnails");
     expect(pick_libretro_name(CoverQuery{"genesis", {"Unknown Game"}, {}, {"USA"}}, listing).empty(), "no match is no guess");
   }
+  step("the download sequence, with a fake transport");
   {  // the download sequence, with a fake transport: listing first, official host before the mirror, 404 final, unreachable hosts skipped
     const fs::path work = dir / "cover-work";
     std::vector<std::string> calls;
@@ -213,6 +236,7 @@ int main() {
     expect(!fetch_libretro_cover(CoverQuery{"saturn", {"X"}, {}, {}}, work, down).ok, "unknown platform refused");
     fs::remove_all(work);
   }
+  step("launcher settings");
   {  // launcher settings: defaults, round trip, damaged file, clamps
     const fs::path file = dir / "library" / "launcher-settings.json";
     LauncherSettings d = load_launcher_settings(file);
@@ -227,6 +251,7 @@ int main() {
     spit(file, "not json at all");
     expect(load_launcher_settings(file).view == "grid", "a damaged file loads as defaults");
   }
+  step("zipped ROMs");
   {  // zipped ROMs: one ROM inside, stored or deflated, decoded into a buffer of exactly its declared size, extracted by digest
     std::string rom(0x8000, '\0');
     for (std::size_t i = 0; i < rom.size(); ++i) rom[i] = static_cast<char>((i * 37U + 11U) & 0xFFU);
@@ -254,6 +279,7 @@ int main() {
     expect(slurp(dir / "deflated.zip") == deflated, "the archive itself is never modified");
 
     const auto refused = [&](const std::string &name, const std::string &bytes, const std::string &needle) {
+      step("zip refusal: " + name);
       spit(dir / name, bytes);
       const std::size_t files_before = count_files();
       const std::size_t stb_at = stb_requested_bytes_for_tests();
@@ -303,6 +329,7 @@ int main() {
     refused("truncated.zip", whole.substr(0, 40) + whole.substr(whole.size() - 22), "");
     refused("garbage.zip", std::string(300, 'z'), "not a zip");
 
+    step("zip: an existing extracted copy is trusted only when ");
     // an existing extracted copy is trusted only when its own SHA-256 matches
     expect(fs::is_regular_file(target), "the deflated ROM is in place");
     const auto mtime = fs::last_write_time(target);
@@ -316,6 +343,7 @@ int main() {
     spit(target, rom.substr(0, 1000));
     r = extract_zip_rom(dir / "deflated.zip", roms);
     expect(r.ok && slurp(target) == rom, "a different-size copy is not trusted: it is replaced");
+    step("zip: a failed write never exposes a partial ROM (nor ");
     // a failed write never exposes a partial ROM (nor a temporary file)
     fs::remove(target);
     set_zip_write_failure_for_tests(true);
@@ -330,6 +358,7 @@ int main() {
     r = extract_zip_rom(dir / "deflated.zip", roms);
     expect(r.ok && slurp(target) == rom, "the next import repairs it");
 #if !defined(_WIN32)
+    step("zip: a link at the content-addressed name is refus");
     {  // a link at the content-addressed name is refused: never followed, never deleted, the file it points to is untouched
       fs::remove(target);
       spit(dir / "elsewhere.sms", "outside the roms folder");
@@ -352,6 +381,7 @@ int main() {
     expect(!r.ok && fs::is_directory(target), "a folder in place of the extracted ROM is refused and left alone");
     fs::remove(target);
 
+    step("zip: the same ROM imported plain and zipped is one");
     {  // the same ROM imported plain and zipped is one logical game (unchanged library de-duplication)
       spit(dir / "Fictional Cart.sms", rom);
       Catalog catalog(dir / "library" / "dedup.json");
