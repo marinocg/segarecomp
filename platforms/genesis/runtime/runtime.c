@@ -1183,7 +1183,8 @@ static uint16_t genesis_vdp_status_read(GenesisDeviceState *devices, uint64_t ma
 
    Supported (everything else stays fail-closed, the caller reports the unsupported VDP region): Mega Drive display mode
    (register #1 bit 2 set), 224 lines (register #1 bit 3 clear), no HV latch (register #0 bit 1 clear), no interlace
-   (register #12 bits 1-2 clear), and a consistent width selection: register #12 bits 7 and 0 both set (H40) or both clear
+   (register #12 bits 1-2 clear), no forced HSYNC (register #12 bit 5 clear: a nonstandard clock configuration the counter
+   model does not account for), and a consistent width selection: register #12 bits 7 and 0 both set (H40) or both clear
    (H32). A mixed selection (one of the two bits), Master System mode 4, the latched counter, interlace and the 240-line
    mode are not modeled. The machine always executes the 60 Hz schedule, in every region profile, so the counter follows
    the schedule actually executed. */
@@ -1213,7 +1214,7 @@ static int genesis_vdp_hv_counter_read(const GenesisDeviceState *devices, uint64
   const uint32_t in_line = (uint32_t)(master_ticks % GENESIS_NTSC_MASTER_TICKS_PER_LINE);
   const uint16_t width = (uint16_t)(devices->vdp.registers[12] & UINT16_C(0x0081));
   uint32_t v;
-  if ((devices->vdp.registers[0] & UINT16_C(0x0002)) != 0U || (devices->vdp.registers[12] & UINT16_C(0x0006)) != 0U ||
+  if ((devices->vdp.registers[0] & UINT16_C(0x0002)) != 0U || (devices->vdp.registers[12] & UINT16_C(0x0026)) != 0U ||
       (devices->vdp.registers[1] & UINT16_C(0x0008)) != 0U || (devices->vdp.registers[1] & UINT16_C(0x0004)) == 0U ||
       (width != UINT16_C(0x0000) && width != UINT16_C(0x0081)))
     return 0;

@@ -41,8 +41,10 @@ was found with the ordinary stop diagnostics and none needs a new architecture:
    horizontal-sync span (values 17..37) whose hold lengths come from the table. V runs `$00-$EA` then `$E5-$FF` over the 262
    lines. Earlier text and an earlier implementation scaled the line linearly from `$00` at tick 0; that is not equivalent
    (the counter at the line origin is `$85`/`$A5`, and H40 is not uniform) and was corrected in the same PR.
-   Supported: Mega Drive display mode (register #1 bit 2), 224 lines, no HV latch, no interlace, and register #12 bits 7 and
-   0 both set (H40) or both clear (H32). Everything else - the latched counter, interlace, the 240-line mode, Master System
+   Supported: Mega Drive display mode (register #1 bit 2), 224 lines, no HV latch, no interlace, register #12 bit 5 clear
+   (forced HSYNC is a nonstandard clock configuration that the tick-indexed model does not account for, so `reg12=$20` and
+   `$A1` are refused rather than read as ordinary H32/H40), and register #12 bits 7 and 0 both set (H40) or both clear (H32).
+   Everything else - the latched counter, interlace, forced HSYNC, the 240-line mode, Master System
    mode 4 and a mixed width selection - is not modeled and fails closed as an unsupported VDP access. The machine runs the
    60 Hz schedule in every region profile, so the counter follows the executed schedule, not the nominal region rate.
 4. **IRQ6 trampolines.** When no static block exists at the IRQ6 handler address, an entry of the final validated
@@ -67,6 +69,18 @@ rewrite and its negatives, the typed rejections and the IRQ6 `MOVE.L #abs,-(A7);
 RTE, each compared with the pinned Musashi core when its checkout is configured). Observed locally (classifications only):
 two titles that stopped in their first frame now run their intro, and a third now reaches and renders its title/intro
 sequence.
+
+Pinned-Musashi result (local run, Linux, GCC 13.3, checkout at the pinned revision `313ebf1bd9f4d0d93341eb5ce21fd8a119e9dbdd`
+with a clean tree, `SEGARECOMP_M68K_COMPAT_REPAIRS_MUSASHI_CHECKOUT`): `genesis_compat_repairs_generated_differential_test`
+printed `OK (Musashi compared)`. Compared bit for bit (D0-D7, A0-A7, CCR, the observed RAM ranges, final PC) between generated
+native C and Musashi: five scenarios - absolute-long LEA/PEA/BTST/MOVE, in-place rewrite with an immediate source, in-place
+rewrite with an address-register source, the previous `-(A7)` push form, and ordinary JSR/RTS. For IRQ6 only the handler-visible
+exception frame was compared (SR inside the handler `$2600`, stacked SR `$2000`, stacked PC `$210`, handler marker `$55`); the
+full-state comparison and the interrupt timing were not. NOT compared with Musashi (it has no compiled-entry set, VDP or
+rejection model): the typed rejections, the fail-closed RTS cases, the IRQ6 negatives and the HV counter, which are checked
+against hand-derived values and the Genesis Plus GX reference tables. Without the checkout the test still runs those
+hand-derived expectations and reports `no Musashi checkout`; CI does not configure the checkout, so the Musashi comparison is a
+local result, not a CI result.
 
 Known limits: the mixed-width and mode-4 HV configurations are refused rather than approximated, and a statically reached
 RTS keeps the static return-frame authority, so the rewrite idiom is admitted only where the callee is not statically

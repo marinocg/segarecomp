@@ -628,7 +628,8 @@ void test_hv_counter() {
   struct Unmodeled { int reg; uint16_t value; const char *why; };
   static const Unmodeled unmodeled[] = {{0, 0x0002, "HV latch"}, {12, 0x0086, "interlace"}, {12, 0x0084, "interlace mode 2 with H32"},
                                          {1, 0x000C, "240-line mode"}, {1, 0x0000, "mode 4"}, {12, 0x0001, "mixed width: RS1 only"},
-                                         {12, 0x0080, "mixed width: RS0 only"}};
+                                         {12, 0x0080, "mixed width: RS0 only"},
+                                         {12, 0x0020, "forced HSYNC (reg12=0x20), H32 width"}, {12, 0x00A1, "forced HSYNC (reg12=0xA1), H40 width"}};
   for (const auto &u : unmodeled) {
     auto fresh = make_runtime();
     fresh->devices.vdp.registers[1] = 0x04;
