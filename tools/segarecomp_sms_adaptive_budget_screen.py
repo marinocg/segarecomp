@@ -5,7 +5,8 @@ Reads only the committed SEG-056 development results (no ROM, truth, logits or n
 (`positive_fraction`, `retained_for_recall_*`, per-seed worst ranks) is derived from source-backed LABELS, so it is an
 ORACLE input that an inference-time estimator could not observe. The screen asks: even with these oracle inputs, does a
 simple leave-one-lineage-out (LOLO) rule bound each held-out lineage's full-recall retention below the fixed 0.65 budget?
-If it cannot, a score-derived estimator (strictly less informed) cannot either.
+If it cannot, density-type and recall-point-type estimators are insufficient; this says nothing about estimators built from
+other score-derived features (tail shape, gaps, knee, seed agreement), which this screen does not evaluate.
 """
 from __future__ import annotations
 
