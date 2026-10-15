@@ -4,6 +4,9 @@
 #   SEGARECOMP_PACKAGE_SDL3_PREFIX  SDL3 prefix providing include/SDL3 and lib/ (libSDL3.so/.dylib or libSDL3.dll.a)
 #   SEGARECOMP_PACKAGE_SDL3_LICENSE SDL3 license text
 #   SEGARECOMP_PACKAGE_SDL3_DLL     Windows only: SDL3.dll shipped beside the launcher and in sdl3/lib
+#   SEGARECOMP_PACKAGE_LIBUSB_DIR   Windows only: directory with libusb-1.0.dll, COPYING.txt and the libusb source archive (packaging/build-sdl3.sh).
+#                                   SDL3.dll loads libusb-1.0.dll lazily by name (LoadLibrary: the executable's directory, then PATH). It is therefore
+#                                   shipped next to the launcher AND in sdl3/lib, the directory the launcher puts on PATH for generated games.
 # Without them only the project's own files are staged (developer use).
 
 if(APPLE)
@@ -107,5 +110,18 @@ if(SEGARECOMP_PACKAGE_SDL3_PREFIX)
   if(WIN32 AND SEGARECOMP_PACKAGE_SDL3_DLL)
     install(FILES ${SEGARECOMP_PACKAGE_SDL3_DLL} DESTINATION .)
     install(FILES ${SEGARECOMP_PACKAGE_SDL3_DLL} DESTINATION sdl3/lib)
+  endif()
+  if(WIN32 AND SEGARECOMP_PACKAGE_LIBUSB_DIR)
+    # LGPL-2.1 libusb, unmodified and replaceable (a separate DLL, loaded at run time): license text and the corresponding source archive ship with it.
+    foreach(_libusb_file libusb-1.0.dll COPYING.txt)
+      if(NOT EXISTS "${SEGARECOMP_PACKAGE_LIBUSB_DIR}/${_libusb_file}")
+        message(FATAL_ERROR "expected libusb file not found: ${SEGARECOMP_PACKAGE_LIBUSB_DIR}/${_libusb_file}")
+      endif()
+    endforeach()
+    install(FILES ${SEGARECOMP_PACKAGE_LIBUSB_DIR}/libusb-1.0.dll DESTINATION .)
+    install(FILES ${SEGARECOMP_PACKAGE_LIBUSB_DIR}/libusb-1.0.dll DESTINATION sdl3/lib)
+    install(FILES ${SEGARECOMP_PACKAGE_LIBUSB_DIR}/COPYING.txt DESTINATION ${_res}/licenses RENAME libusb-LGPL-2.1.txt)
+    file(GLOB _libusb_source "${SEGARECOMP_PACKAGE_LIBUSB_DIR}/libusb-*-source.tar.bz2")
+    install(FILES ${_libusb_source} DESTINATION ${_res}/licenses)
   endif()
 endif()

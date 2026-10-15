@@ -22,6 +22,8 @@ import subprocess
 import sys
 
 FORBIDDEN_LIB = re.compile(r"python|libtorch|torch_|libc10|(^|[/\\])c10\.dll|numpy|onnx|tensorflow|sklearn|scipy|libmkl|mkl_|openblas|libblas|liblapack|cudart|cublas|cudnn|(^|[/\\])libz[.\-]|zlib1|libz\.|(^|[/\\])z\.dll", re.I)
+# Windows: a redistributable C/C++ runtime is never assumed on a clean machine (the CRT is linked statically; libusb is the MinGW build).
+REDISTRIBUTABLE_DLL = re.compile(r"^(vcruntime|msvcp|msvcr\d|concrt|vccorlib|libgcc|libstdc|libwinpthread)", re.I)  # msvcrt.dll is an OS component
 FORBIDDEN_FILE = re.compile(r"(\.pyc?$|\.pyd$|\.npz?$|\.onnx$|\.pt$|\.pth$|\.safetensors$|\.gguf$|\.tflite$|\.h5$|\.pkl$|\.joblib$|\.ckpt$|\.pb$|\.model\.json$|^python[0-9.]*(\.exe)?$|(^|[/\\])site-packages|segarecomp_ml_region|libpython|torch|numpy|sklearn)", re.I)
 MODEL_DIGESTS = {  # embedded in `segarecomp` (the frozen native models), see ADR 0096 / 0102
     "gen2 model": b"11258708285e4427a3e38e02732e8f93b4c5d497883101f0629223d2366a98e1",
@@ -99,12 +101,17 @@ def main():
     root, launcher = pathlib.Path(sys.argv[1]).resolve(), pathlib.Path(sys.argv[2]).resolve()
     cli = next(p for p in root.rglob("*") if p.is_file() and p.name in ("segarecomp", "segarecomp.exe") and p.parent.name == "bin")
     problems, report = [], {"binaries": {}}
-    for label, path in (("launcher", launcher), ("cli", cli)):
+    binaries = [("launcher", launcher), ("cli", cli)]
+    if os.name == "nt":  # the packaged SDL3 and libusb DLLs (beside the launcher and in sdl3/lib) obey the same rules
+        binaries += [(p.relative_to(root).as_posix(), p) for p in sorted(list(root.glob("*.dll")) + list((root / "sdl3" / "lib").glob("*.dll")))]
+    for label, path in binaries:
         deps = dependencies(path, root)
         report["binaries"][label] = [{"name": n, "kind": k} for n, k in deps]
         for name, kind in deps:
             if FORBIDDEN_LIB.search(name):
                 problems.append(f"{label}: forbidden dependency {name}")
+            if os.name == "nt" and REDISTRIBUTABLE_DLL.match(name):
+                problems.append(f"{label}: depends on the redistributable runtime {name}")
             if kind == "unresolved":
                 problems.append(f"{label}: dependency {name} is neither packaged nor an operating-system library")
     files = [p for p in root.rglob("*") if p.is_file() or p.is_symlink()]  # dangling symlinks count

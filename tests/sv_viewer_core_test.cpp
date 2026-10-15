@@ -319,6 +319,87 @@ void input_state_tests() {
   check(sv_pad_classify(&f) == SV_PAD_LIVE, "navigation reacted: working");
   check(std::string(sv_pad_state_code(SV_PAD_NOT_A_GAMEPAD)) == "B" && std::string(sv_pad_state_code(SV_PAD_LIVE)) == "OK", "state codes");
   for (int i = 0; i < SV_PAD_STATE_COUNT; ++i) check(std::string(sv_pad_state_advice(static_cast<SvPadState>(i))).size() > 20 && std::string(sv_pad_state_advice(static_cast<SvPadState>(i))).size() < 290, "every state has bounded advice text");
+  // Switch 2: the first broken link of the native chain (pure; the SDL facts are gathered in sv_input_diag.c)
+  {
+    SvSwitch2Facts t{};
+    char text[1536];
+    check(sv_switch2_assess(&t) == SV_S2_NOT_SEEN && sv_switch2_message(&t, nullptr, text, sizeof text) == 0 && text[0] == '\0', "no Switch 2 seen: nothing to say");
+    t.seen = 1; t.state = SV_PAD_NOT_A_GAMEPAD;
+    check(sv_switch2_assess(&t) == SV_S2_DRIVER_ABSENT, "a raw Switch 2 on an SDL without the driver: driver absent");
+    t.driver_declared = 1;
+    check(sv_switch2_assess(&t) == SV_S2_LIBUSB_MISSING, "driver compiled, libusb runtime missing");
+    t.libusb_loadable = 1;
+    check(sv_switch2_assess(&t) == SV_S2_USB_NOT_CLAIMED, "driver and libusb present, still not a gamepad: USB interface not claimed");
+    sv_switch2_message(&t, nullptr, text, sizeof text);
+    check(std::string(text).find("Native USB support is available in this SDL build.") != std::string::npos && std::string(text).find("libusb runtime: available.") != std::string::npos &&
+              std::string(text).find("WinUSB") != std::string::npos && std::string(text).find("Connection:") == std::string::npos,
+          "the USB message names the available driver and libusb, the possible driver binding, and invents no connection type");
+    std::snprintf(t.setup_trace, sizeof t.setup_trace, "begin iface=0 | stage=no_driver (switch2_driver_enabled=1)");
+    check(sv_switch2_assess(&t) == SV_S2_SETUP_FAILED, "SDL's own trace of a missing driver selects the setup verdict");
+    std::snprintf(t.setup_trace, sizeof t.setup_trace, "begin iface=0 | stage=open_path FAILED error=\"libusb_claim_interface(0) failed: libusb error -3\" | x: -12 | stage=init_device FAILED error=\"Couldn't claim interface 1: -12\"");
+    sv_switch2_message(&t, nullptr, text, sizeof text);
+    check(std::string(text).find("libusb error -3 (ACCESS)") != std::string::npos && std::string(text).find("interface 1: -12 (NOT_SUPPORTED)") != std::string::npos &&
+              std::string(text).find("begin iface=0\nstage=open_path FAILED") != std::string::npos && std::string(text).find("x: -12 (NOT_SUPPORTED)") != std::string::npos,
+          "the setup trace is shown one step per line with libusb error names");
+    std::snprintf(t.setup_trace, sizeof t.setup_trace, "begin iface=0 class=3 | stage=open_path FAILED error=\"libusb_open failed for interface 0: libusb error -3\"");
+    sv_switch2_message(&t, nullptr, text, sizeof text);
+    check(std::string(text).find("(ACCESS)") != std::string::npos && std::string(text).find("Access denied while libusb opened the device") != std::string::npos && std::string(text).find("Steam") != std::string::npos,
+          "the measured Windows failure (libusb_open -> ACCESS) is named with the possible cause, not asserted as the cause");
+    {
+      std::string whole(text);  // each line still fits one viewer note
+      for (std::size_t at = 0; at < whole.size();) {
+        const std::size_t nl = whole.find('\n', at);
+        check((nl == std::string::npos ? whole.size() : nl) - at < 290, "ACCESS message lines fit one viewer note");
+        if (nl == std::string::npos) break;
+        at = nl + 1;
+      }
+    }
+    std::snprintf(t.setup_trace, sizeof t.setup_trace, "begin iface=0 | stage=init_device ok driver=Switch2");
+    check(sv_switch2_assess(&t) == SV_S2_USB_NOT_CLAIMED, "a trace without a failure keeps the generic verdict");
+    t.setup_trace[0] = '\0';
+    check(std::string(sv_libusb_error_name(-3)) == "ACCESS" && std::string(sv_libusb_error_name(-12)) == "NOT_SUPPORTED" && std::string(sv_libusb_error_name(7)).empty(), "libusb error names");
+    t.transport = 2;
+    check(sv_switch2_assess(&t) == SV_S2_BLUETOOTH, "Bluetooth: unsupported by the pinned driver, whatever else is present");
+    sv_switch2_message(&t, nullptr, text, sizeof text);
+    check(std::string(text).find("Connection: Bluetooth.") != std::string::npos && std::string(text).find("Steam Input") != std::string::npos, "the Bluetooth message states the connection and the alternatives");
+    t.transport = 1; t.state = SV_PAD_OPEN_FAILED;
+    check(sv_switch2_assess(&t) == SV_S2_OPEN_FAILED, "open failed");
+    sv_switch2_message(&t, "libusb error -3", text, sizeof text);
+    check(std::string(text).find("Gamepad initialization: failed.") != std::string::npos && std::string(text).find("Details: libusb error -3") != std::string::npos &&
+              std::string(text).find("Connection: USB.") != std::string::npos,
+          "the open-failure message carries SDL's own text");
+    t.state = SV_PAD_NO_EVENTS;
+    check(sv_switch2_assess(&t) == SV_S2_NO_EVENTS, "opened but silent");
+    t.state = SV_PAD_BINDINGS;
+    check(sv_switch2_assess(&t) == SV_S2_BINDINGS, "events with broken bindings");
+    t.state = SV_PAD_MENU_NAV;
+    check(sv_switch2_assess(&t) == SV_S2_NAV_PENDING, "events, launcher navigation not yet confirmed");
+    t.state = SV_PAD_LIVE;
+    check(sv_switch2_assess(&t) == SV_S2_WORKING, "events arriving: working");
+    for (int v = SV_S2_BLUETOOTH; v < SV_S2_VERDICT_COUNT; ++v) {  // every line fits one viewer note (299 characters), for every verdict
+      SvSwitch2Facts u{};
+      u.seen = 1; u.driver_declared = 1; u.libusb_loadable = 1;
+      u.state = v == SV_S2_OPEN_FAILED ? SV_PAD_OPEN_FAILED : v == SV_S2_NO_EVENTS ? SV_PAD_NO_EVENTS : v == SV_S2_BINDINGS ? SV_PAD_BINDINGS : v == SV_S2_NAV_PENDING ? SV_PAD_MENU_NAV : v == SV_S2_WORKING ? SV_PAD_LIVE : SV_PAD_NOT_A_GAMEPAD;
+      u.transport = v == SV_S2_BLUETOOTH ? 2 : 0;
+      if (v == SV_S2_SETUP_FAILED) std::snprintf(u.setup_trace, sizeof u.setup_trace, "begin iface=0 | stage=open_path ok backed_by_libusb=1 | usb: libusb loaded | stage=init_device FAILED driver=Switch2 error=\"Couldn't claim interface 1: -12\"");
+      u.driver_declared = v != SV_S2_DRIVER_ABSENT; u.libusb_loadable = v != SV_S2_LIBUSB_MISSING;
+      char big[1536];
+      check(sv_switch2_assess(&u) == v, "the synthetic facts select the intended verdict");
+      sv_switch2_message(&u, "details", big, sizeof big);
+      std::string whole(big);
+      check(!whole.empty() && whole.size() < 1535, "every verdict has bounded text");
+      for (std::size_t at = 0; at < whole.size();) {
+        const std::size_t nl = whole.find('\n', at);
+        const std::size_t len = (nl == std::string::npos ? whole.size() : nl) - at;
+        check(len < 280, "each message line fits one viewer note");
+        if (nl == std::string::npos) break;
+        at = nl + 1;
+      }
+    }
+    char small[8];
+    check(sv_switch2_message(&t, nullptr, small, sizeof small) < sizeof small, "the message respects a small buffer");
+    check(sv_switch2_is_product(0x057e, 0x2069) && !sv_switch2_is_product(0x057e, 0x2009) && !sv_switch2_is_product(0x045e, 0x2069), "only Switch 2 products match");
+  }
   // the binding audit follows the console's real actions
   SvSettings s = defaults();
   int missing = -1, conflicts = -1;

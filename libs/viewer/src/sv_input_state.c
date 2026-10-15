@@ -1,4 +1,7 @@
 #include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "sv_input_state.h"
 
@@ -125,4 +128,130 @@ const char *sv_pad_position_name(int b) {
     case 20: return "Touchpad";
     default: return "Button";
   }
+}
+
+/* ------------------------------------------------------------------------------------------------------------------ Switch 2 */
+
+int sv_switch2_is_product(unsigned vendor, unsigned product) { return vendor == 0x057eu && product >= 0x2066u && product <= 0x2073u; }
+
+SvSwitch2Verdict sv_switch2_assess(const SvSwitch2Facts *f) {
+  if (f == NULL || !f->seen) return SV_S2_NOT_SEEN;
+  switch (f->state) {
+    case SV_PAD_OPEN_FAILED: return SV_S2_OPEN_FAILED;
+    case SV_PAD_NO_EVENTS: return SV_S2_NO_EVENTS;
+    case SV_PAD_BINDINGS: return SV_S2_BINDINGS;
+    case SV_PAD_MENU_NAV: return SV_S2_NAV_PENDING;
+    case SV_PAD_LIVE: return SV_S2_WORKING;
+    default: break; /* SV_PAD_NO_JOYSTICK / SV_PAD_NOT_A_GAMEPAD: SDL has no gamepad for it */
+  }
+  if (f->transport == 2) return SV_S2_BLUETOOTH;
+  if (!f->driver_declared) return SV_S2_DRIVER_ABSENT;
+  if (!f->libusb_loadable) return SV_S2_LIBUSB_MISSING;
+  if (f->setup_trace[0] != '\0' && (strstr(f->setup_trace, "FAILED") != NULL || strstr(f->setup_trace, "no_driver") != NULL)) return SV_S2_SETUP_FAILED;
+  return SV_S2_USB_NOT_CLAIMED;
+}
+
+const char *sv_libusb_error_name(int code) {
+  switch (code) {
+    case -1: return "IO";
+    case -2: return "INVALID_PARAM";
+    case -3: return "ACCESS";
+    case -4: return "NO_DEVICE";
+    case -5: return "NOT_FOUND";
+    case -6: return "BUSY";
+    case -7: return "TIMEOUT";
+    case -8: return "OVERFLOW";
+    case -9: return "PIPE";
+    case -10: return "INTERRUPTED";
+    case -11: return "NO_MEM";
+    case -12: return "NOT_SUPPORTED";
+    case -99: return "OTHER";
+    default: return "";
+  }
+}
+
+static void put_char(char *out, size_t cap, size_t *used, char c) {
+  if (*used + 1 < cap) out[(*used)++] = c;
+}
+
+/* Copies SDL's setup trace as one line per " | " step and names each libusb error code that follows ": " or "error " ("error -12" -> "error -12 (NOT_SUPPORTED)"). */
+static size_t append_trace(char *out, size_t cap, size_t used, const char *trace) {
+  const char *p = trace;
+  while (*p != '\0') {
+    if (p[0] == ' ' && p[1] == '|' && p[2] == ' ') { put_char(out, cap, &used, '\n'); p += 3; continue; }
+    if (p[0] == '-' && p[1] >= '0' && p[1] <= '9' && ((p - trace >= 2 && p[-2] == ':' && p[-1] == ' ') || (p - trace >= 6 && strncmp(p - 6, "error ", 6) == 0))) {
+      char *end = NULL;
+      const long code = strtol(p, &end, 10);
+      const char *name = sv_libusb_error_name((int)code);
+      for (; p < end; ++p) put_char(out, cap, &used, *p);
+      if (*name != '\0') {
+        put_char(out, cap, &used, ' '); put_char(out, cap, &used, '(');
+        for (; *name != '\0'; ++name) put_char(out, cap, &used, *name);
+        put_char(out, cap, &used, ')');
+      }
+      continue;
+    }
+    put_char(out, cap, &used, *p++);
+  }
+  if (cap > 0) out[used < cap ? used : cap - 1] = '\0';
+  return used;
+}
+
+size_t sv_switch2_message(const SvSwitch2Facts *f, const char *detail, char *out, size_t cap) {
+  size_t used = 0;
+  SvSwitch2Verdict v;
+#define ADD(...) do { if (used < cap) { const int w = snprintf(out + used, cap - used, __VA_ARGS__); if (w > 0) used += (size_t)w < cap - used ? (size_t)w : cap - used - 1; } } while (0)
+  if (cap == 0) return 0;
+  out[0] = '\0';
+  v = sv_switch2_assess(f);
+  if (v == SV_S2_NOT_SEEN) return 0;
+  ADD("Nintendo Switch 2 controller detected.\n");
+  if (f->transport == 1 || f->transport == 2) ADD("Connection: %s.\n", f->transport == 2 ? "Bluetooth" : "USB");
+  switch (v) {
+    case SV_S2_BLUETOOTH:
+      ADD("This SDL version does not provide native Switch 2 Bluetooth support. Connect the controller with a USB-C cable, or use Steam Input or a "
+          "compatible controller bridge instead.");
+      break;
+    case SV_S2_DRIVER_ABSENT:
+      ADD("Native USB support: NOT declared by this SDL build (the official SDL binaries for Windows do not contain the Switch 2 driver). Use the SDL "
+          "that ships in the Segarecomp package, or Steam Input or a compatible controller bridge.");
+      break;
+    case SV_S2_LIBUSB_MISSING:
+      ADD("Native USB support is available in this SDL build.\nlibusb runtime: NOT found, so the driver cannot start. Keep libusb-1.0 where SDL can load it "
+          "(the Windows package ships libusb-1.0.dll beside the launcher and in sdl3/lib).");
+      break;
+    case SV_S2_SETUP_FAILED:
+      ADD("Native USB support is available in this SDL build.\nlibusb runtime: available.\nSDL's Switch 2 driver did not start. SDL's own setup trace follows (the last step names the failure):\n");
+      used = append_trace(out, cap, used, f->setup_trace);
+      if (strstr(f->setup_trace, "libusb_open failed") != NULL && strstr(f->setup_trace, "error -3") != NULL) /* measured on a physical controller, see docs */
+        ADD("\nAccess denied while libusb opened the device. Observed cause on a physical controller: another program (Steam) held the controller's WinUSB interface (Windows lets one program use it at a time).\n"
+            "Quit Steam and any other controller software, including background processes, and retry. LIBUSB_DEBUG=4 in the environment makes libusb print the interface and Windows error.");
+      break;
+    case SV_S2_USB_NOT_CLAIMED:
+      ADD("Native USB support is available in this SDL build.\nlibusb runtime: available.\nSDL did not turn the controller into a gamepad. The USB interface may not be "
+          "accessible to libusb (on Windows it must be bound to WinUSB; Segarecomp never installs or changes drivers; on Linux check udev), or another program "
+          "holds it.\nRun with SEGARECOMP_INPUT_TRACE=1 for SDL's own message.");
+      break;
+    case SV_S2_OPEN_FAILED:
+      if (f->driver_declared) ADD("Native USB support is available in this SDL build.\nlibusb runtime: %s\n", f->libusb_loadable ? "available." : "NOT found.");
+      ADD("Gamepad initialization: failed.\nDetails: %s", detail != NULL && detail[0] != '\0' ? detail : "SDL gave no error text");
+      break;
+    case SV_S2_NO_EVENTS:
+      ADD("Gamepad initialization: succeeded. No button or stick event has arrived yet: press a button. If nothing ever arrives the driver opened the "
+          "device but receives no input.");
+      break;
+    case SV_S2_BINDINGS:
+      ADD("Input events arrive, but the game bindings are missing or conflicting. Fix them in Controls (or Restore Defaults).");
+      break;
+    case SV_S2_NAV_PENDING:
+      ADD("Input events arrive. Use the menu test to confirm that the launcher's own navigation receives them.");
+      break;
+    case SV_S2_WORKING:
+      ADD("Gamepad initialization: succeeded; button and stick events are arriving through SDL's gamepad layer%s.",
+          f->driver_declared ? " (this SDL build includes the native Switch 2 USB driver)" : "");
+      break;
+    default: break;
+  }
+#undef ADD
+  return used;
 }

@@ -188,6 +188,20 @@ static void build_padstatus(SvHost *h, SvPage *p) {
   add_note(p, sv_pad_state_advice(overall));
   sv_diag_sdl_version(buf, sizeof buf);
   status_row(p, "SDL", buf);
+  {
+    char s2[1536];
+    if (sv_diag_switch2_message(h->diag, &ctx, h->hid, h->hid_count > 0 ? h->hid_count : 0, s2, sizeof s2) != SV_S2_NOT_SEEN) {
+      char *line = s2, *end;
+      add_section(p, "Nintendo Switch 2 controller");
+      while (*line != '\0') { /* one note per line: a note holds 299 characters */
+        end = strchr(line, '\n');
+        if (end != NULL) *end = '\0';
+        add_note(p, line);
+        if (end == NULL) break;
+        line = end + 1;
+      }
+    }
+  }
   if (!sv_diag_gamepad_subsystem_ok(h->diag)) {
     snprintf(buf, sizeof buf, "FAILED: %.80s", sv_diag_gamepad_init_error(h->diag)[0] != '\0' ? sv_diag_gamepad_init_error(h->diag) : "no SDL error text");
     item = status_row(p, "Gamepad subsystem", buf);

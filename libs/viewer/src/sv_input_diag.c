@@ -12,6 +12,9 @@ struct SvDiag {
   int video_ok, gamepad_ok;
   char gamepad_error[160];
   int trace;
+  int yielded;         /* sv_diag_yield_exclusive_devices is in effect */
+  char saved_hint[16]; /* the Switch 2 driver hint before the yield; "" = it was unset */
+  int saved_hint_set;
   int libusb_loadable; /* probed once at setup, never during hotplug/event logging */
 };
 
@@ -374,6 +377,45 @@ const char *sv_diag_switch2_hint_state(void) {
 #endif
 }
 
+int sv_diag_switch2_driver_declared(void) {
+  const char *rev = SDL_GetRevision();
+  return rev != NULL && strstr(rev, "segarecomp-switch2-usb") != NULL;
+}
+
+SvSwitch2Verdict sv_diag_switch2_message(const SvDiag *d, const SvDiagContext *ctx, const SvDiagHid *hid, int hid_count, char *out, size_t cap) {
+  SvSwitch2Facts f;
+  const char *detail = NULL;
+  int i;
+  memset(&f, 0, sizeof f);
+  f.state = SV_PAD_NO_JOYSTICK;
+  f.driver_declared = sv_diag_switch2_driver_declared();
+  f.libusb_loadable = d != NULL && d->libusb_loadable;
+  for (i = 0x2066; i <= 0x2073; ++i) { /* the patched Segarecomp SDL publishes how Switch 2 driver setup went, per product, as a hint */
+    char name[48];
+    const char *trace;
+    snprintf(name, sizeof name, "SEGARECOMP_HIDAPI_SETUP_057e_%04x", (unsigned)i);
+    trace = SDL_GetHint(name);
+    if (trace != NULL && *trace != '\0') { copy_text(f.setup_trace, sizeof f.setup_trace, trace); f.seen = 1; break; }
+  }
+  for (i = 0; hid != NULL && i < hid_count; ++i) {
+    if (!sv_switch2_is_product(hid[i].vendor, hid[i].product)) continue;
+    f.seen = 1;
+    if (f.transport != 1 && (hid[i].bus == 1 || hid[i].bus == 2)) f.transport = hid[i].bus; /* USB wins when both buses are listed */
+  }
+  for (i = 0; d != NULL && i < d->count; ++i) {
+    const SvDiagDevice *v = &d->dev[i];
+    if (!sv_switch2_is_product(v->vendor, v->product)) continue;
+    f.seen = 1;
+    f.state = sv_diag_state_of(d, v, ctx);
+    if (v->connection == SDL_JOYSTICK_CONNECTION_WIRED) f.transport = 1;
+    else if (v->connection == SDL_JOYSTICK_CONNECTION_WIRELESS) f.transport = 2;
+    detail = v->open_error;
+    break;
+  }
+  if (out != NULL && cap > 0) (void)sv_switch2_message(&f, detail, out, cap);
+  return sv_switch2_assess(&f);
+}
+
 void sv_diag_sdl_version(char *out, size_t cap) {
   const int v = SDL_GetVersion();
   snprintf(out, cap, "SDL %d.%d.%d (built against %d.%d.%d)", SDL_VERSIONNUM_MAJOR(v), SDL_VERSIONNUM_MINOR(v), SDL_VERSIONNUM_MICRO(v), SDL_MAJOR_VERSION, SDL_MINOR_VERSION,
@@ -411,7 +453,8 @@ size_t sv_diag_summary(const SvDiag *d, char *out, size_t cap) {
   sv_diag_sdl_version(ver, sizeof ver);
   ADD("%s; video %s; gamepad subsystem %s%s%s\n", ver, sv_diag_video_ok(d) ? "ok" : "FAILED", sv_diag_gamepad_subsystem_ok(d) ? "ok" : "FAILED",
       sv_diag_gamepad_subsystem_ok(d) ? "" : ": ", sv_diag_gamepad_subsystem_ok(d) ? "" : sv_diag_gamepad_init_error(d));
-  ADD("Switch 2 HIDAPI hint: %s; libusb-1.0 loadable: %s; devices: %d\n", sv_diag_switch2_hint_state(), d != NULL && d->libusb_loadable ? "yes" : "no", sv_diag_count(d));
+  ADD("Switch 2 HIDAPI hint: %s; native Switch 2 USB driver declared by this SDL build: %s; libusb-1.0 loadable: %s; devices: %d\n", sv_diag_switch2_hint_state(),
+      sv_diag_switch2_driver_declared() ? "yes" : "no", d != NULL && d->libusb_loadable ? "yes" : "no", sv_diag_count(d));
   for (i = 0; i < sv_diag_count(d); ++i) {
     const SvDiagDevice *v = sv_diag_device(d, i);
     ADD("[%d] \"%s\" id=%u vid:pid=%04x:%04x guid=%s %s, %s, %s", i, v->name, (unsigned)v->id, v->vendor, v->product, v->guid, v->is_gamepad ? "gamepad" : "raw joystick (no gamepad mapping)",
@@ -419,13 +462,52 @@ size_t sv_diag_summary(const SvDiag *d, char *out, size_t cap) {
     if (v->open_error[0] != '\0') ADD(" [%s]", v->open_error);
     ADD(", events=%lu%s\n", v->is_gamepad ? v->events : v->raw_events, v->is_gamepad ? "" : " (raw)");
   }
+  {
+    char s2[1536];
+    SvDiagContext ctx;
+    memset(&ctx, 0, sizeof ctx);
+    if (sv_diag_switch2_message(d, &ctx, NULL, 0, s2, sizeof s2) != SV_S2_NOT_SEEN) ADD("%s\n", s2);
+  }
 #undef ADD
   return used;
 }
 
 void sv_diag_log_summary(const SvDiag *d, const char *why) {
-  char text[1500];
+  char text[2600];
   if (d == NULL) return;
   (void)sv_diag_summary(d, text, sizeof text);
   SDL_Log("input diagnostics (%s):\n%s", why != NULL ? why : "summary", text);
 }
+
+/* ------------------------------------------------------------------------------------------------------------------ exclusive devices */
+
+void sv_diag_yield_exclusive_devices(SvDiag *d) {
+#ifdef SDL_HINT_JOYSTICK_HIDAPI_SWITCH2
+  const char *prior;
+  if (d == NULL || d->yielded) return;
+  prior = SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH2);
+  d->saved_hint_set = prior != NULL;
+  copy_text(d->saved_hint, sizeof d->saved_hint, prior);
+  d->yielded = 1;
+  (void)SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_HIDAPI_SWITCH2, "0", SDL_HINT_OVERRIDE);
+  SDL_UpdateJoysticks(); /* SDL applies a driver hint change during a joystick update: the libusb handle is closed before this returns */
+  SDL_Log("input: released exclusive (libusb) controllers for the game process");
+#else
+  (void)d;
+#endif
+}
+
+void sv_diag_reclaim_exclusive_devices(SvDiag *d) {
+#ifdef SDL_HINT_JOYSTICK_HIDAPI_SWITCH2
+  if (d == NULL || !d->yielded) return;
+  d->yielded = 0;
+  if (d->saved_hint_set) (void)SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_HIDAPI_SWITCH2, d->saved_hint, SDL_HINT_OVERRIDE);
+  else (void)SDL_ResetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH2);
+  SDL_UpdateJoysticks();
+  SDL_Log("input: took the exclusive (libusb) controllers back from the game process");
+#else
+  (void)d;
+#endif
+}
+
+int sv_diag_exclusive_devices_yielded(const SvDiag *d) { return d != NULL && d->yielded; }

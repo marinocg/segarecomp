@@ -96,7 +96,7 @@ void App::update_input_diag() {
 }
 
 std::string App::input_report() const {
-  char text[2400];
+  char text[4000];
   (void)sv_diag_summary(diag_, text, sizeof text);
   std::string out = std::string("Segarecomp ") + SEGARECOMP_LAUNCHER_VERSION + "\n" + text;
   out += std::string("Host: ") + SDL_GetPlatform() + "\n";
@@ -105,6 +105,13 @@ std::string App::input_report() const {
     for (const auto &h : hid_)
       out += "OS device " + hex4(h.vendor) + ":" + hex4(h.product) + " " + (h.bus == 1 ? "USB" : (h.bus == 2 ? "Bluetooth" : "bus unknown")) + " " + h.family + (h.matched_joystick ? " (SDL exposes a joystick)" : " (SDL exposes NO joystick for it)") + "\n";
   } else if (hid_state_ == -1) out += "OS device scan failed: " + hid_error_ + "\n";
+  {  // a Switch 2 controller only the OS scan sees is not in the SDL summary above
+    SvDiagContext ctx{};
+    char text[1536];
+    if (sv_diag_switch2_message(diag_, &ctx, nullptr, 0, text, sizeof text) == SV_S2_NOT_SEEN && hid_state_ > 0 &&
+        sv_diag_switch2_message(diag_, &ctx, hid_.data(), static_cast<int>(hid_.size()), text, sizeof text) != SV_S2_NOT_SEEN)
+      out += std::string(text) + "\n";
+  }
   return out;
 }
 
@@ -171,9 +178,22 @@ void App::draw_input_diagnostics(float w) {
     label_value(ctx_, lw, w - lw, "Gamepad subsystem", sv_diag_gamepad_subsystem_ok(diag_) ? "initialised" : std::string("FAILED: ") + (sv_diag_gamepad_init_error(diag_)[0] != '\0' ? sv_diag_gamepad_init_error(diag_) : "no SDL error text"),
                 sv_diag_gamepad_subsystem_ok(diag_) ? col::text : col::err);
     label_value(ctx_, lw, w - lw, "Switch 2 driver hint", std::string(sv_diag_switch2_hint_state()) + "  (SDL_JOYSTICK_HIDAPI_SWITCH2; on by default when HIDAPI is)");
+    label_value(ctx_, lw, w - lw, "Switch 2 USB driver", sv_diag_switch2_driver_declared() ? "declared by this SDL build (compiled in; Segarecomp's build recipe checks it)" : "NOT declared by this SDL build (a stock SDL, such as the official Windows binary, has none)",
+                sv_diag_switch2_driver_declared() ? col::text : col::warn);
     label_value(ctx_, lw, w - lw, "libusb-1.0", sv_diag_libusb_available(diag_) ? "found at startup (SDL loads it at run time)" : "not found at startup", sv_diag_libusb_available(diag_) ? col::text : col::warn);
   }
   rule(ctx_, w);
+  {  // Nintendo Switch 2 controller: the first broken link of the native chain, in plain words (only when one is visible to SDL or to the OS scan)
+    SvDiagContext s2ctx{};
+    s2ctx.settings = &viewer_settings_; s2ctx.system = SV_SYSTEM_GENESIS; s2ctx.player = 0; s2ctx.nav_checked = 1;
+    char text[1536];
+    const SvSwitch2Verdict verdict = sv_diag_switch2_message(diag_, &s2ctx, hid_.data(), static_cast<int>(hid_.size()), text, sizeof text);
+    if (verdict != SV_S2_NOT_SEEN) {
+      heading(ctx_, "Nintendo Switch 2 controller");
+      paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), verdict == SV_S2_WORKING ? col::ok : (verdict == SV_S2_OPEN_FAILED ? col::err : col::warn), w, text);
+      rule(ctx_, w);
+    }
+  }
   heading(ctx_, sv_diag_count(diag_) == 0 ? "Controllers (none seen by SDL)" : "Controllers seen by SDL");
   for (int i = 0; i < sv_diag_count(diag_); ++i) {
     const SvDiagDevice *d = sv_diag_device(diag_, i);
@@ -267,25 +287,13 @@ void App::draw_input_diagnostics(float w) {
     });
   }
   ImGui::Dummy(ImVec2(1, ctx_.u(4.0F)));
-  bool switch2_seen = false, switch2_bluetooth = false, switch2_hidden = false;
   if (hid_state_ == -1) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::err, w, "The OS scan failed: " + hid_error_);
   else if (hid_state_ == 0) paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::text2, w, "No Nintendo HID device is visible to the OS right now.");
   for (const auto &h : hid_) {
-    const bool s2 = h.product >= 0x2066U && h.product <= 0x2073U;
-    switch2_seen = switch2_seen || s2;
-    switch2_bluetooth = switch2_bluetooth || (s2 && h.bus == 2);
-    switch2_hidden = switch2_hidden || (s2 && !h.matched_joystick);
     label_value(ctx_, lw, w - lw, (hex4(h.vendor) + ":" + hex4(h.product)).c_str(),
                 std::string(h.bus == 1 ? "USB" : (h.bus == 2 ? "Bluetooth" : "bus not reported")) + ", " + (h.family[0] != '\0' ? h.family : (h.product_string[0] != '\0' ? h.product_string : "Nintendo device")) +
                     (h.matched_joystick ? " - SDL exposes a joystick for it" : " - SDL exposes NO joystick for it"),
                 h.matched_joystick ? col::ok : col::warn);
-  }
-  if (switch2_seen && switch2_hidden) {
-    paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), col::warn, w,
-              std::string("A Nintendo Switch 2 controller is visible to the OS but SDL exposes no joystick for it. In the SDL 3.4 series Switch 2 controllers are supported by a USB-only driver that loads libusb at run time ") +
-                  "(over Bluetooth SDL reports \"not supported over Bluetooth\"), and the driver is only compiled into an SDL built with libusb. " +
-                  (switch2_bluetooth ? "This one is on Bluetooth: connect it by USB cable, or use another controller. " : "") + std::string("libusb-1.0 on this system: ") +
-                   (sv_diag_libusb_available(diag_) ? "found at startup" : "NOT found at startup") + ". Segarecomp does not install drivers or change USB driver bindings. See docs/testing/input-diagnostics.md.");
   }
   rule(ctx_, w);
   heading(ctx_, "Mapping file (for a controller SDL lists as a joystick only)");

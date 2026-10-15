@@ -99,6 +99,12 @@ int sv_diag_libusb_loadable(void);
 int sv_diag_libusb_available(const SvDiag *diag);
 /* Whether the SDL build contains a given HIDAPI driver switch (hint is known to SDL); text such as "enabled/disabled/default". */
 const char *sv_diag_switch2_hint_state(void);
+/* Whether this SDL build identifies itself (SDL_GetRevision) as built with the Switch 2 USB driver by Segarecomp's recipe, which gates that against the
+ * binary. A stock SDL reports 0: the driver is then likely absent, but this is a declaration, not a run-time proof. */
+int sv_diag_switch2_driver_declared(void);
+/* The first broken link for a Switch 2 controller (SDL joystick matched by vendor/product, or only seen by the OS scan: pass `hid` and `hid_count`,
+ * NULL/0 without a scan). Fills `out` with the actionable text and returns the verdict; SV_S2_NOT_SEEN leaves `out` empty. Cheap: no hardware access. */
+SvSwitch2Verdict sv_diag_switch2_message(const SvDiag *diag, const SvDiagContext *context, const SvDiagHid *hid, int hid_count, char *out, size_t cap);
 /* "SDL 3.4.16 (compiled 3.4.16)". */
 void sv_diag_sdl_version(char *out, size_t cap);
 
@@ -109,6 +115,14 @@ int sv_diag_load_mapping_file(const char *path);
 size_t sv_diag_summary(const SvDiag *diag, char *out, size_t cap);
 /* SDL_Log()s the summary (SEGARECOMP_INPUT_TRACE=1 additionally logs every event). Called once at start-up and on every hot-plug. */
 void sv_diag_log_summary(const SvDiag *diag, const char *why);
+
+/* A controller whose SDL driver talks to it through libusb (Nintendo Switch 2 over USB) is opened by ONE process at a time: on Windows WinUSB refuses a second opener
+ * with libusb error -3 (ACCESS), which is what a game launched from the launcher saw. The launcher therefore yields the device before it starts a game process and takes it
+ * back when that process has ended. Implemented by switching SDL's Switch 2 HIDAPI driver hint off/on (SDL then closes/reopens its libusb handle on the next joystick
+ * update, done here synchronously); the hint's earlier value is restored. Both calls are idempotent and cheap; a controller without that driver is unaffected. */
+void sv_diag_yield_exclusive_devices(SvDiag *diag);
+void sv_diag_reclaim_exclusive_devices(SvDiag *diag);
+int sv_diag_exclusive_devices_yielded(const SvDiag *diag);
 
 /* Test seam: replaces SDL_OpenGamepad (NULL restores it) so the "recognised but cannot be opened" state can be produced deterministically. */
 void sv_diag_set_open_hook(SDL_Gamepad *(*hook)(SDL_JoystickID id));
