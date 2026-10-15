@@ -199,8 +199,19 @@ int main(void) {
   s.video.scale = SV_SCALE_INTEGER;
   sv_host_apply_settings(host, &s);
   CHECK(sv_host_present(host, frame, 320, 224, 320 * 3) == 0, "present a 320x224 frame");
-  CHECK(strstr(host->toast, "Pause menu: Esc") != NULL && strstr(host->toast, "Back") != NULL && host->toast_until > SDL_GetTicks(),
+  CHECK(host->toast_count >= 1 && strstr(host->toasts[host->toast_count - 1].text, "Pause menu: Esc") != NULL && strstr(host->toasts[host->toast_count - 1].text, "Back") != NULL &&
+            host->toasts[host->toast_count - 1].until > SDL_GetTicks(),
         "the first picture shows a hint naming the keys that open the pause menu");
+  /* notifications stack: a second one never hides the first, the same text refreshes in place, a full stack drops only the oldest */
+  sv_host_toast(host, "");
+  sv_host_toast(host, "Controller connected: Pad");
+  sv_host_toast(host, "Second: toast");
+  CHECK(host->toast_count == 2 && strstr(host->toasts[0].text, "Controller connected") != NULL && strstr(host->toasts[1].text, "Second") != NULL, "two toasts coexist");
+  sv_host_toast(host, "Second: toast");
+  CHECK(host->toast_count == 2, "the same text refreshes instead of duplicating");
+  sv_host_toast(host, "Third");
+  sv_host_toast(host, "Fourth");
+  CHECK(host->toast_count == 3 && strcmp(host->toasts[0].text, "Second: toast") == 0 && strcmp(host->toasts[2].text, "Fourth") == 0, "a full stack drops only the oldest");
   sv_host_toast(host, ""); /* the byte-exact check below is about the picture, not the overlay */
   a = sv_host_capture_output(host);
   CHECK(a != NULL && a->w >= 640 && a->h >= 448, "the window is at least 2x the picture");

@@ -19,6 +19,11 @@ namespace launcher {
 
 using namespace uih;
 
+namespace {
+// "Genesis - USA": the platform with the game's region, as shown on library cards and rows.
+std::string platform_region(const LibraryEntry &entry) { return std::string(platform_short(entry.platform_id)) + " - " + region_label(entry.platform_id, entry.region); }
+} // namespace
+
 // ---------------------------------------------------------------- data views
 
 std::vector<const LibraryEntry *> App::visible_entries() const {
@@ -255,6 +260,15 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     std::error_code ec;
     const auto space = fs::space(fs::exists(cache_dir_, ec) ? cache_dir_ : cache_dir_.parent_path(), ec);
     by -= ctx_.u(34.0F);
+    {
+      // Build activity (running + queued) sits directly above the free-space bar; builds never lock the rest of the UI.
+      const int running = job_ ? 1 : 0, queued = static_cast<int>(build_queue_.size());
+      std::string text = "No builds running";
+      if (running + queued > 0) text = std::to_string(running + queued) + (running + queued == 1 ? " build" : " builds") + " (" + std::to_string(running) + " running, " + std::to_string(queued) + " queued)";
+      const float bpx = ctx_.u(11.5F), ty = by - ctx_.u(24.0F);
+      if (running > 0) spinner(ctx_, dl, ImVec2(x + pad + ctx_.u(5.0F), ty + bpx * 0.55F), ctx_.u(5.0F), col::warn);
+      draw_text(dl, ctx_.regular, bpx, running + queued > 0 ? col::warn : col::dim, ImVec2(x + pad + (running > 0 ? ctx_.u(16.0F) : 0.0F), ty), ellipsize(ctx_.regular, bpx, w - 2 * pad - ctx_.u(16.0F), text).c_str());
+    }
     if (!ec && space.capacity > 0) {
       const bool low = space.available < (2ULL << 30U);
       const std::string free_text = format_bytes(space.available) + " free" + (low ? " - low" : "");
@@ -354,9 +368,11 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
     const float tx = x + art_w + pad * 2, available = w - art_w - pad * 3;
     draw_text(dl, ctx_.bold, ctx_.u(13.5F), col::text, ImVec2(tx, y + pad), ellipsize(ctx_.bold, ctx_.u(13.5F), available - (entry.favorite ? ctx_.u(18.0F) : 0.0F), entry.title()).c_str());
     if (entry.favorite) icon_image(dl, ctx_.icon("star"), ImVec2(b.x - pad - ctx_.u(14.0F), y + pad), ctx_.u(14.0F), col::warn);
-    draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::info, ImVec2(tx, y + ctx_.u(29.0F)), platform_short(entry.platform_id));
-    dl->AddCircleFilled(ImVec2(tx + ctx_.u(4.0F), y + ctx_.u(53.0F)), ctx_.u(4.0F), status_color(info));
-    draw_text(dl, ctx_.bold, ctx_.u(12.0F), status_color(info), ImVec2(tx + ctx_.u(13.0F), y + ctx_.u(46.0F)), status_label(info).c_str());
+    draw_text(dl, ctx_.regular, ctx_.u(11.5F), col::info, ImVec2(tx, y + ctx_.u(29.0F)), platform_region(entry).c_str());
+    const Badge short_badge = badge_for(entry, info);
+    if (short_badge.spinner) spinner(ctx_, dl, ImVec2(tx + ctx_.u(5.0F), y + ctx_.u(53.0F)), ctx_.u(4.5F), short_badge.color);
+    else dl->AddCircleFilled(ImVec2(tx + ctx_.u(4.0F), y + ctx_.u(53.0F)), ctx_.u(4.0F), short_badge.color);
+    draw_text(dl, ctx_.bold, ctx_.u(12.0F), short_badge.color, ImVec2(tx + ctx_.u(13.0F), y + ctx_.u(46.0F)), short_badge.label.c_str());
     draw_text(dl, ctx_.regular, ctx_.u(11.0F), info.rom_missing ? col::warn : col::dim, ImVec2(tx, y + ctx_.u(64.0F)), info.rom_missing ? "ROM file missing" : activity_line(entry, now).c_str());
     if (focused) focus_ring(ctx_, dl, a, b);
     ImGui::PopID();
@@ -367,7 +383,7 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
     return;
   }
   const float pad = ctx_.u(8.0F);
-  const float cw = w - 2 * pad, chh = cw * 1.02F;
+  const float cw = w - 2 * pad, chh = cw / kCoverAspect;
   const ImVec2 ca(x + pad, y + pad), cb(x + pad + cw, y + pad + chh);
   draw_cover(dl, entry, ca, cb, ctx_.u(4.0F), info.status == GameStatus::ready ? IM_COL32_WHITE : rgba(196, 204, 228));
   if (entry.favorite || pointer_over || focused) {
@@ -385,13 +401,15 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   }
   // the build state sits on the art's lower edge, where a box-art library shows it
   {
-    const std::string label = info.rom_missing && info.status != GameStatus::ready ? "ROM missing" : status_label(info);
-    const ImU32 c = info.rom_missing && info.status != GameStatus::ready ? col::warn : status_color(info);
+    const Badge badge = badge_for(entry, info);
+    const std::string &label = badge.label;
+    const ImU32 c = badge.color;
     const float px = ctx_.u(11.5F), bw = text_width(ctx_.bold, px, label.c_str()) + ctx_.u(26.0F), bh = px + ctx_.u(10.0F);
     const ImVec2 p0(ca.x + ctx_.u(6.0F), cb.y - bh - ctx_.u(6.0F));
     dl->AddRectFilled(p0, ImVec2(p0.x + bw, p0.y + bh), rgba(4, 10, 26, 225), ctx_.u(4.0F));
     dl->AddRect(p0, ImVec2(p0.x + bw, p0.y + bh), (c & 0x00FFFFFFU) | 0x90000000U, ctx_.u(4.0F));
-    dl->AddCircleFilled(ImVec2(p0.x + ctx_.u(10.0F), p0.y + bh * 0.5F), ctx_.u(3.5F), c);
+    if (badge.spinner) spinner(ctx_, dl, ImVec2(p0.x + ctx_.u(10.0F), p0.y + bh * 0.5F), ctx_.u(4.0F), c);
+    else dl->AddCircleFilled(ImVec2(p0.x + ctx_.u(10.0F), p0.y + bh * 0.5F), ctx_.u(3.5F), c);
     draw_text(dl, ctx_.bold, px, c, ImVec2(p0.x + ctx_.u(18.0F), p0.y + (bh - px) * 0.5F - ctx_.u(1.0F)), label.c_str());
   }
   const float tpx = ctx_.u(14.0F), spx = ctx_.u(11.5F);
@@ -401,16 +419,18 @@ void App::draw_card(const LibraryEntry &entry, float x, float y, float w, float 
   if (shown_title != entry.title() && hovered) tooltip(ctx_, entry.title().c_str());
   ty += tpx + ctx_.u(8.0F);
   icon_image(dl, ctx_.icon("controller"), ImVec2(ca.x, ty - ctx_.u(1.0F)), ctx_.u(14.0F), col::info);
+  // The platform and region take what they need (they identify the game); the "last played / added" text uses what remains.
+  const std::string where = ellipsize(ctx_.regular, spx, cw - ctx_.u(19.0F), platform_region(entry));
+  const float where_w = text_width(ctx_.regular, spx, where.c_str());
   const std::string act = activity_line(entry, now);
-  const std::string act_shown = ellipsize(ctx_.regular, spx, cw * 0.52F, act);
-  const float act_w = text_width(ctx_.regular, spx, act_shown.c_str());
-  draw_text(dl, ctx_.regular, spx, col::info, ImVec2(ca.x + ctx_.u(19.0F), ty), ellipsize(ctx_.regular, spx, cw - act_w - ctx_.u(27.0F), platform_short(entry.platform_id)).c_str());
+  const std::string act_shown = ellipsize(ctx_.regular, spx, std::max(0.0F, cw - ctx_.u(19.0F) - where_w - ctx_.u(8.0F)), act);
+  draw_text(dl, ctx_.regular, spx, col::info, ImVec2(ca.x + ctx_.u(19.0F), ty), where.c_str());
   draw_text(dl, ctx_.regular, spx, col::dim, ImVec2(cb.x - text_width(ctx_.regular, spx, act_shown.c_str()), ty), act_shown.c_str());
   if (info.status == GameStatus::ready && !select_mode_ && (pointer_over || focused)) {
     const float ps = ctx_.u(40.0F);
     ImGui::SetCursorScreenPos(ImVec2(ca.x + (cw - ps) * 0.5F, ca.y + (chh - ps) * 0.5F));
     play_rects_[entry.id()] = ImRect(ImGui::GetCursorScreenPos(), ImVec2(ImGui::GetCursorScreenPos().x + ps, ImGui::GetCursorScreenPos().y + ps));
-    if (icon_button(ctx_, "play", ctx_.icon("play"), ps, true, !game_ && !job_, "Play")) play(entry.id());
+    if (icon_button(ctx_, "play", ctx_.icon("play"), ps, true, can_play(info), "Play")) play(entry.id());
   }
   ImGui::PopID();
   if (pressed) {
@@ -434,7 +454,7 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   else if (ImGui::IsItemFocused() && (ImGui::IsKeyPressed(ImGuiKey_Menu, false) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceUp, false) || std::exchange(menu_on_focus_, false))) { context_id_ = entry.id(); open_context_ = true; context_anchor_ = ImVec2(ImGui::GetItemRectMin().x + ctx_.u(24.0F), ImGui::GetItemRectMin().y + ctx_.u(24.0F)); }
   const ImVec2 b(a.x + w, a.y + h);
   card(ctx_, dl, a, b, selected || focused, hovered);
-  const float pad = ctx_.u(7.0F), th = h - 2 * pad, tw = th * 0.78F;
+  const float pad = ctx_.u(7.0F), th = h - 2 * pad, tw = th * kCoverAspect;
   float x = a.x + pad;
   if (select_mode_) {
     bool on = selected;
@@ -450,11 +470,13 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   const float title_w = std::max(ctx_.u(120.0F), w * (wide_row ? 0.32F : 0.38F));
   draw_text(dl, ctx_.bold, px, col::text, ImVec2(x, a.y + h * 0.5F - px * 1.1F), ellipsize(ctx_.bold, px, title_w - (entry.favorite ? ctx_.u(20.0F) : 0.0F), entry.title()).c_str());
   if (entry.favorite) icon_image(dl, ctx_.icon("star"), ImVec2(x + std::min(title_w - ctx_.u(16.0F), text_width(ctx_.bold, px, entry.title().c_str()) + ctx_.u(6.0F)), a.y + h * 0.5F - px * 1.1F), ctx_.u(14.0F), col::warn);
-  draw_text(dl, ctx_.regular, spx, col::info, ImVec2(x, a.y + h * 0.5F + ctx_.u(3.0F)), platform_short(entry.platform_id));
+  draw_text(dl, ctx_.regular, spx, col::info, ImVec2(x, a.y + h * 0.5F + ctx_.u(3.0F)), platform_region(entry).c_str());
   x += title_w + pad;
-  const std::string label = info.rom_missing && info.status != GameStatus::ready ? "ROM missing" : status_label(info);
-  const ImU32 sc = info.rom_missing && info.status != GameStatus::ready ? col::warn : status_color(info);
-  dl->AddCircleFilled(ImVec2(x + ctx_.u(5.0F), a.y + h * 0.5F), ctx_.u(4.5F), sc);
+  const Badge row_badge = badge_for(entry, info);
+  const std::string &label = row_badge.label;
+  const ImU32 sc = row_badge.color;
+  if (row_badge.spinner) spinner(ctx_, dl, ImVec2(x + ctx_.u(5.0F), a.y + h * 0.5F), ctx_.u(5.0F), sc);
+  else dl->AddCircleFilled(ImVec2(x + ctx_.u(5.0F), a.y + h * 0.5F), ctx_.u(4.5F), sc);
   draw_text(dl, ctx_.bold, ctx_.u(12.5F), sc, ImVec2(x + ctx_.u(15.0F), a.y + h * 0.5F - ctx_.u(12.5F) * 0.55F), label.c_str());
   x += ctx_.u(150.0F);
   if (wide_row) {
@@ -472,7 +494,7 @@ void App::draw_list_row(const LibraryEntry &entry, float w, float h) {
   }
   if (info.status == GameStatus::ready && !select_mode_) {
     ImGui::SetCursorScreenPos(ImVec2(bx, a.y + (h - ps2) * 0.5F));
-    if (icon_button(ctx_, "play", ctx_.icon("play"), ps2, true, !game_ && !job_, "Play")) play(entry.id());
+    if (icon_button(ctx_, "play", ctx_.icon("play"), ps2, true, can_play(info), "Play")) play(entry.id());
   }
   ImGui::PopID();
   ImGui::SetCursorScreenPos(ImVec2(a.x, b.y + ctx_.u(6.0F)));
@@ -569,7 +591,7 @@ void App::draw_library(float w, float h) {
     const float usable = w - ctx_.u(14.0F);
     const int columns = std::max(1, static_cast<int>((usable + gap) / (card_w + gap)));
     const float cw = card_w + (usable + gap - static_cast<float>(columns) * (card_w + gap)) / static_cast<float>(columns);
-    const float card_h = short_window ? ctx_.u(88.0F) : (cw - ctx_.u(16.0F)) * 1.02F + ctx_.u(66.0F);
+    const float card_h = short_window ? ctx_.u(88.0F) : (cw - ctx_.u(16.0F)) / kCoverAspect + ctx_.u(66.0F);
     const int rows = (static_cast<int>(visible.size()) + columns - 1) / columns;
     const ImVec2 origin = ImGui::GetCursorScreenPos();
     ImGuiListClipper clipper;

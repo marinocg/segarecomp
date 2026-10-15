@@ -565,30 +565,39 @@ static void draw_hud(SvHost *h, int out_w, int out_h) {
     sv_ui_text_shadow(h, SV_FONT_BODY, u, 16 * u, 14 * u + lh, dim, l2);
     sv_ui_text_shadow(h, SV_FONT_BODY, u, 16 * u, 14 * u + 2 * lh, dim, l3);
   }
-  if (h->toast[0] != '\0' && SDL_GetTicks() < h->toast_until) {
-    char title[96], sub[96];
-    const char *colon = strstr(h->toast, ": ");
-    const int shot = strncmp(h->toast, "Screenshot", 10) == 0;
-    const int icon_w = 22 * u;
-    int w, tw, sw = 0, bx, by = 8 * u, bh;
-    int avail = out_w - 24 * u - icon_w - 20 * u;
-    if (avail < 40 * u) avail = 40 * u;
-    if (colon != NULL && (size_t)(colon - h->toast) < sizeof title) {
-      snprintf(title, sizeof title, "%.*s", (int)(colon - h->toast), h->toast);
-      snprintf(sub, sizeof sub, "%s", colon + 2);
-    } else { snprintf(title, sizeof title, "%s", h->toast); sub[0] = '\0'; }
-    { char t2[96]; sv_font_ellipsize(SV_FONT_BODY, title, u, avail, t2, (int)sizeof t2); snprintf(title, sizeof title, "%s", t2); }
-    if (sub[0] != '\0') { char s2[96]; sv_font_ellipsize(SV_FONT_BODY, sub, u, avail, s2, (int)sizeof s2); snprintf(sub, sizeof sub, "%s", s2); }
-    tw = sv_ui_text_w(SV_FONT_BODY, u, title);
-    if (sub[0] != '\0') sw = sv_ui_text_w(SV_FONT_BODY, u, sub);
-    if (sw > tw) tw = sw;
-    w = tw + icon_w + 22 * u;
-    bh = (sub[0] != '\0' ? 2 : 1) * lh + 14 * u;
-    bx = out_w - w - 8 * u;
-    sv_ui_frame(h, bx, by, w, bh, u, box, edge, light, 1);
-    sv_host_icon_draw(h, shot ? "screenshot" : "info", (float)(bx + 8 * u), (float)(by + (bh - 16 * u) / 2), (float)(16 * u), text);
-    sv_ui_text_shadow(h, SV_FONT_BODY, u, bx + icon_w + 12 * u, by + 7 * u, text, title);
-    if (sub[0] != '\0') sv_ui_text_shadow(h, SV_FONT_BODY, u, bx + icon_w + 12 * u, by + 7 * u + lh, dim, sub);
+  {
+    int by = 8 * u, i, live = 0;
+    const Uint64 now_ms = SDL_GetTicks();
+    for (i = 0; i < h->toast_count; ++i) /* drop the expired ones, keep the order */
+      if (now_ms < h->toasts[i].until) { if (live != i) h->toasts[live] = h->toasts[i]; ++live; }
+    h->toast_count = live;
+    for (i = 0; i < h->toast_count; ++i) {
+      const char *text_in = h->toasts[i].text;
+      char title[96], sub[96];
+      const char *colon = strstr(text_in, ": ");
+      const int shot = strncmp(text_in, "Screenshot", 10) == 0;
+      const int icon_w = 22 * u;
+      int w, tw, sw = 0, bx, bh;
+      int avail = out_w - 24 * u - icon_w - 20 * u;
+      if (avail < 40 * u) avail = 40 * u;
+      if (colon != NULL && (size_t)(colon - text_in) < sizeof title) {
+        snprintf(title, sizeof title, "%.*s", (int)(colon - text_in), text_in);
+        snprintf(sub, sizeof sub, "%s", colon + 2);
+      } else { snprintf(title, sizeof title, "%s", text_in); sub[0] = '\0'; }
+      { char t2[96]; sv_font_ellipsize(SV_FONT_BODY, title, u, avail, t2, (int)sizeof t2); snprintf(title, sizeof title, "%s", t2); }
+      if (sub[0] != '\0') { char s2[96]; sv_font_ellipsize(SV_FONT_BODY, sub, u, avail, s2, (int)sizeof s2); snprintf(sub, sizeof sub, "%s", s2); }
+      tw = sv_ui_text_w(SV_FONT_BODY, u, title);
+      if (sub[0] != '\0') sw = sv_ui_text_w(SV_FONT_BODY, u, sub);
+      if (sw > tw) tw = sw;
+      w = tw + icon_w + 22 * u;
+      bh = (sub[0] != '\0' ? 2 : 1) * lh + 14 * u;
+      bx = out_w - w - 8 * u;
+      sv_ui_frame(h, bx, by, w, bh, u, box, edge, light, 1);
+      sv_host_icon_draw(h, shot ? "screenshot" : "info", (float)(bx + 8 * u), (float)(by + (bh - 16 * u) / 2), (float)(16 * u), text);
+      sv_ui_text_shadow(h, SV_FONT_BODY, u, bx + icon_w + 12 * u, by + 7 * u, text, title);
+      if (sub[0] != '\0') sv_ui_text_shadow(h, SV_FONT_BODY, u, bx + icon_w + 12 * u, by + 7 * u + lh, dim, sub);
+      by += bh + 4 * u;
+    }
   }
 }
 
@@ -632,10 +641,21 @@ void sv_host_set_loop_hook(SvHost *h, int (*hook)(void *ctx, SvHost *host, int i
   h->hook_ctx = ctx;
 }
 
-void sv_host_toast(SvHost *h, const char *text) {
-  snprintf(h->toast, sizeof h->toast, "%s", text);
-  h->toast_until = SDL_GetTicks() + 2600u;
+static void push_toast(SvHost *h, const char *text, Uint64 ms) {
+  int i;
+  if (text == NULL || *text == '\0') { h->toast_count = 0; return; } /* an empty text clears every notification */
+  for (i = 0; i < h->toast_count; ++i) /* the same text again refreshes it in place */
+    if (strcmp(h->toasts[i].text, text) == 0) { h->toasts[i].until = SDL_GetTicks() + ms; return; }
+  if (h->toast_count == (int)(sizeof h->toasts / sizeof h->toasts[0])) { /* full: the oldest makes room, the newest are never dropped */
+    memmove(&h->toasts[0], &h->toasts[1], sizeof h->toasts[0] * (size_t)(h->toast_count - 1));
+    h->toast_count--;
+  }
+  snprintf(h->toasts[h->toast_count].text, sizeof h->toasts[0].text, "%s", text);
+  h->toasts[h->toast_count].until = SDL_GetTicks() + ms;
+  h->toast_count++;
 }
+
+void sv_host_toast(SvHost *h, const char *text) { push_toast(h, text, 2600u); }
 
 /* ------------------------------------------------------------------------------------------------------------------ screenshots */
 
@@ -814,11 +834,12 @@ int sv_host_present(SvHost *h, const uint8_t *rgb, int w, int hgt, int pitch) {
   h->last_w = w;
   h->last_h = hgt;
   h->frames_presented++;
-  if (h->frames_presented == 1 && h->toast[0] == '\0') { /* first picture: say once how to reach the pause menu (the keys that actually open it) */
+  if (h->frames_presented == 1) { /* first picture: say once how to reach the pause menu (the keys that actually open it); shown beside any other toast */
     const char *custom = h->settings.menu_key > 0 && h->settings.menu_key != SV_KEY_ESCAPE ? SDL_GetScancodeName((SDL_Scancode)h->settings.menu_key) : NULL;
-    if (custom != NULL && *custom != '\0') snprintf(h->toast, sizeof h->toast, "Pause menu: Esc, %.24s or the gamepad's Back button", custom);
-    else snprintf(h->toast, sizeof h->toast, "Pause menu: Esc or the gamepad's Back button");
-    h->toast_until = SDL_GetTicks() + 6000u;
+    char hint[96];
+    if (custom != NULL && *custom != '\0') snprintf(hint, sizeof hint, "Pause menu: Esc, %.24s or the gamepad's Back button", custom);
+    else snprintf(hint, sizeof hint, "Pause menu: Esc or the gamepad's Back button");
+    push_toast(h, hint, 6000u);
   }
   if (h->last_present_ns != 0) h->frame_ms = h->frame_ms * 0.9 + (double)(now - h->last_present_ns) / 1.0e6 * 0.1;
   h->last_present_ns = now;

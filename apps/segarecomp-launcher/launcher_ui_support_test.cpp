@@ -4,6 +4,7 @@
 #include "covers.hpp"
 #include "launcher_settings.hpp"
 #include "library_catalog.hpp"
+#include "library_view.hpp"
 #include "pixel_assets.hpp"
 #include "rom_zip.hpp"
 #include "segarecomp/sha256.hpp"
@@ -16,6 +17,7 @@
 #endif
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -250,6 +252,39 @@ int run_tests() {
     expect(h.view == "grid" && h.sort == "last_played" && h.cleanup.mode == "never" && h.cleanup.keep_last_n == 1 && h.cleanup.soft_limit_mb == 256 && h.preferred_regions.size() == 1, "hostile values fall back to safe ones");
     spit(file, "not json at all");
     expect(load_launcher_settings(file).view == "grid", "a damaged file loads as defaults");
+    // SEG-067: a recompile deletes the game's older builds by default; "keep old build artifacts" opts out and persists
+    expect(!load_launcher_settings(dir / "library" / "missing.json").keep_old_artifacts, "keep_old_artifacts defaults to off (old artifacts are deleted)");
+    LauncherSettings keep;
+    keep.keep_old_artifacts = true;
+    expect(save_launcher_settings(keep, file) && load_launcher_settings(file).keep_old_artifacts, "keep_old_artifacts round trips");
+    spit(file, "{\"keep_old_artifacts\":\"yes\"}");
+    expect(!load_launcher_settings(file).keep_old_artifacts, "a non-boolean keep_old_artifacts falls back to off");
+  }
+  step("library view helpers");
+  {  // box-art frame, region column, build queue (SEG-067)
+    const float frame_w = 162.0F, frame_h = frame_w / kCoverAspect;
+    expect(std::abs(kCoverAspect - 479.0F / 680.0F) < 1e-6F && frame_h > frame_w * 1.41F && frame_h < frame_w * 1.43F, "the cover frame has the 479x680 proportion");
+    FitRect f = fit_inside(frame_w, frame_h, 479.0F, 680.0F);
+    expect(f.x0 < 0.01F && f.y0 < 0.01F && std::abs(f.x1 - frame_w) < 0.01F && std::abs(f.y1 - frame_h) < 0.01F, "a standard 479x680 cover fills the frame");
+    f = fit_inside(frame_w, frame_h, 600.0F, 600.0F);  // square: letterboxed top/bottom, whole width
+    expect(std::abs(f.x0) < 0.01F && std::abs(f.x1 - frame_w) < 0.01F && f.y0 > 0.0F && std::abs((f.y1 - f.y0) - frame_w) < 0.01F && std::abs(f.y0 - (frame_h - f.y1)) < 0.01F, "a wide image is fitted whole, centred, not cropped");
+    f = fit_inside(frame_w, frame_h, 200.0F, 1000.0F);  // very tall: pillarboxed, whole height
+    expect(f.x0 > 0.0F && std::abs(f.y0) < 0.01F && std::abs(f.y1 - frame_h) < 0.01F && (f.x1 - f.x0) < frame_w, "a tall image is fitted whole, centred, not cropped");
+    f = fit_inside(frame_w, frame_h, 100.0F, 142.0F);  // small: scaled up, aspect preserved
+    expect(std::abs((f.x1 - f.x0) / (f.y1 - f.y0) - 100.0F / 142.0F) < 0.001F, "aspect is preserved when scaling");
+    f = fit_inside(frame_w, frame_h, 0.0F, 0.0F);
+    expect(f.x1 == frame_w && f.y1 == frame_h, "a degenerate texture size falls back to the frame");
+
+    expect(std::string(region_label("genesis", "usa")) == "USA" && std::string(region_label("genesis", "japan")) == "Japan" && std::string(region_label("genesis", "europe")) == "Europe", "Genesis regions are named");
+    expect(std::string(region_label("genesis", "")) == "Unknown" && std::string(region_label("genesis", "mars")) == "Unknown" && std::string(region_label("saturn", "usa")) == "Unknown", "an unavailable region reads Unknown");
+    expect(std::string(region_label("master-system", "usa")) == "Export", "Master System shows its export baseline");
+
+    BuildQueue q;
+    expect(q.empty() && q.size() == 0, "the queue starts empty");
+    expect(q.push("a") && q.push("b") && q.push("c") && !q.push("b") && q.size() == 3, "ids are queued once, in order");
+    expect(q.contains("b") && !q.contains("z"), "membership");
+    expect(q.remove("b") && !q.remove("b") && q.size() == 2, "a queued build can be removed");
+    expect(q.pop_front() == "a" && q.pop_front() == "c" && q.empty(), "FIFO order is kept");
   }
   step("zipped ROMs");
   {  // zipped ROMs: one ROM inside, stored or deflated, decoded into a buffer of exactly its declared size, extracted by digest

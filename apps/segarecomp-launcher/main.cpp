@@ -250,6 +250,15 @@ void enable_dpi_awareness() {
   }
   SetProcessDPIAware();  // last-resort fallback, present since Windows Vista
 }
+
+// The GUI-subsystem launcher has no console, so every console-subsystem child it starts (the build driver, the bundled compiler, curl,
+// the product tools) would get a NEW visible console window and pop up around the screen. Owning one hidden console makes every child
+// inherit it instead. Skipped when the process already has a console (started from a terminal): that console is the user's own.
+void hide_child_console_windows() {
+  if (GetConsoleWindow() != nullptr) return;
+  if (!AllocConsole()) return;
+  if (HWND console = GetConsoleWindow()) ShowWindow(console, SW_HIDE);
+}
 } // namespace
 #endif
 
@@ -259,5 +268,8 @@ int main(int argc, char **argv) {
 #endif
   if (argc == 2 && std::string(argv[1]) == "--input-report") return input_report();
   if (argc > 1) return headless(argc, argv);
+#if defined(_WIN32)
+  hide_child_console_windows();
+#endif
   return gui_main();
 }

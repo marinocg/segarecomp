@@ -387,7 +387,7 @@ void App::draw_settings(float full_w, float h) {
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     row_label("Online lookup");
     paragraph(ctx_, ctx_.bold, ctx_.u(13.0F), col::info, w, "Libretro box art, on request only");
-    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::text2, w, "Nothing is downloaded unless you ask: 'Download cover (Libretro)' in a game's menu, or the button below. Only the thumbnail file name (the game's title and region) is requested, over HTTPS, through this computer's curl; no ROM bytes or hashes are ever sent. Every image is checked like a local one before it is used.");
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::text2, w, "A newly added game's cover is looked up automatically (silently skipped when none is found or the network is unavailable); you can also ask: 'Download cover (Libretro)' in a game's menu, or the button below. Set SEGARECOMP_NO_COVER_FETCH=1 to disable the automatic lookup. Only the thumbnail file name (the game's title and region) is requested, over HTTPS, through this computer's curl; no ROM bytes or hashes are ever sent. Every image is checked like a local one before it is used.");
     {
       std::size_t without = 0;
       std::vector<std::string> ids;
@@ -422,6 +422,10 @@ void App::draw_settings(float full_w, float h) {
     ImGui::Dummy(ImVec2(1, ctx_.u(6.0F)));
     row_label("Master System Optimized");
     paragraph(ctx_, ctx_.regular, ctx_.u(12.0F), sms_optimized_available_ ? col::ok : col::dim, w - lw, sms_optimized_available_ ? "Offered by this product build (experimental)." : "Not offered by this product build.");
+    ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
+    row_label("Recompiling");
+    if (toggle(ctx_, "keep_old", "Keep old build artifacts when a game is recompiled", &settings_.keep_old_artifacts, ctx_.u(420.0F))) save = true;
+    paragraph(ctx_, ctx_.regular, ctx_.u(11.0F), col::dim, w, "Off (default): after a successful recompile the game's older builds (earlier releases, options or modes) are deleted; the new build stays. Turn it on to keep them, e.g. to switch back to an earlier build without recompiling.");
     ImGui::Dummy(ImVec2(1, ctx_.u(8.0F)));
     section("AFTER A SUCCESSFUL BUILD");
     int mode = 0;

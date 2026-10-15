@@ -95,9 +95,9 @@ def main():
                  "expect platform_filter=1", "expect view=list", "expect visible=9", "expect focus=card:Synthetic Card 03", "quit"]
         assertions += check("details round trip (keyboard)", state, 11)
         # the same with a gamepad: South opens the focused card, East goes back; the grid's scroll position is restored too
-        state = ["pad_attach", "frames 20", "scroll_library 180", "frames 6", "expect library_scroll=180", "focus_card 6", "frames 4", "expect focus=card:Synthetic Card 06",
+        state = ["pad_attach", "frames 20", "scroll_library 270", "frames 6", "expect library_scroll=270", "focus_card 6", "frames 4", "expect focus=card:Synthetic Card 06",
                  "pad south down", "pad south up", "frames 10", "expect page=details", "expect detail=Synthetic Card 06", "pad east down", "pad east up", "frames 10",
-                 "expect page=library", "expect library_scroll=180", "expect focus=card:Synthetic Card 06", "quit"]
+                 "expect page=library", "expect library_scroll=270", "expect focus=card:Synthetic Card 06", "quit"]
         assertions += check("details round trip (gamepad)", state, 7)
         # Mouse: the buttons drawn over a card (favorite star, Play) stay put while the pointer moves onto them, and a click on them is theirs:
         # it must not fall through to the card (which would open Details).

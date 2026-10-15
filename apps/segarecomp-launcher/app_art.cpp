@@ -81,11 +81,11 @@ void App::draw_cover(ImDrawList *dl, const LibraryEntry &entry, ImVec2 a, ImVec2
   if (cover != nullptr) {
     float tw = 0, th = 0;
     SDL_GetTextureSize(cover, &tw, &th);
-    const float frame_ratio = w / h, tex_ratio = tw / th;
-    ImVec2 uv0(0, 0), uv1(1, 1);
-    if (tex_ratio > frame_ratio) { const float k = frame_ratio / tex_ratio; uv0.x = (1 - k) * 0.5F; uv1.x = uv0.x + k; }
-    else { const float k = tex_ratio / frame_ratio; uv0.y = (1 - k) * 0.5F; uv1.y = uv0.y + k; }
-    dl->AddImageRounded(reinterpret_cast<ImTextureID>(cover), a, b, uv0, uv1, tint, rounding);
+    // A chosen cover is shown whole (fitted, never cropped); the frame is the 479x680 box-art proportion, so a standard cover fills it.
+    const FitRect fit = fit_inside(w, h, tw, th);
+    const bool fills = fit.x0 < 0.75F && fit.y0 < 0.75F;
+    if (!fills) dl->AddRectFilled(a, b, rgba(9, 20, 48), rounding);
+    dl->AddImageRounded(reinterpret_cast<ImTextureID>(cover), ImVec2(a.x + fit.x0, a.y + fit.y0), ImVec2(a.x + fit.x1, a.y + fit.y1), ImVec2(0, 0), ImVec2(1, 1), tint, fills ? rounding : 0.0F);
     return;
   }
   // ---- no cover chosen: one of the four supplied placeholder paintings ----

@@ -83,10 +83,10 @@ std::string App::build_action_label(const StatusInfo &info) const {
 
 bool App::can_build(const LibraryEntry &entry, const StatusInfo &info) const {
   const bool mapper_needed = entry.platform_id == "master-system" && entry.mapper.empty() && entry.mapper_manifest_sha256.empty();
-  return !job_ && !game_ && !maintenance_running_ && !info.rom_missing && !mapper_needed;
+  return !game_ && !is_building(entry.id()) && !is_queued(entry.id()) && !info.rom_missing && !mapper_needed;
 }
 
-bool App::can_play(const StatusInfo &info) const { return info.status == GameStatus::ready && !game_ && !job_ && !maintenance_running_; }
+bool App::can_play(const StatusInfo &info) const { return info.status == GameStatus::ready && !game_ && !maintenance_running_ && !(job_ && job_key_ == info.key); }
 
 void App::play(const std::string &id) {
   trace("play=requested title=" + (catalog_.find_id(id) != nullptr ? catalog_.find_id(id)->title() : std::string("?")));
@@ -114,7 +114,8 @@ void App::draw_game_menu(const std::string &popup_id, const std::string &id, boo
   if (include_details) {
     if (menu_item(ctx_, "m_details", "Details", nullptr, ctx_.icon("info"), mw)) open_details(id);
     if (menu_item(ctx_, "m_play", "Play", nullptr, ctx_.icon("play"), mw, can_play(info))) play(id);
-    if (menu_item(ctx_, "m_build", build_action_label(info).c_str(), nullptr, ctx_.icon("reset"), mw, can_build(*entry, info))) { notices_.erase(id); start_build(id); }
+    if (menu_item(ctx_, "m_build", build_action_label(info).c_str(), nullptr, ctx_.icon("reset"), mw, can_build(*entry, info))) { notices_.erase(id); request_build(id); }
+    if (is_queued(id) && menu_item(ctx_, "m_unqueue", "Remove from build queue", nullptr, ctx_.icon("trash"), mw)) dequeue_build(id);
     if (menu_item(ctx_, "m_fav", entry->favorite ? "Remove from favorites" : "Add to favorites", nullptr, ctx_.icon("star"), mw)) { entry->favorite = !entry->favorite; save_catalog(); }
     menu_separator(ctx_, mw);
   }
@@ -248,7 +249,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
     if (ImGui::IsItemHovered() && !can_play(info) && !locate_primary) tooltip(ctx_, info.status == GameStatus::ready ? "Wait for the running game or build to finish." : "No executable matches the current build configuration yet.");
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     const bool prominent_build = info.status != GameStatus::ready;
-    if (button(ctx_, "build", build_action_label(info).c_str(), ImVec2(build_w, bh), prominent_build && !locate_primary ? Style::primary : Style::secondary, can_build(entry, info), ctx_.icon("reset"))) { notices_.erase(entry.id()); start_build(entry.id()); }
+    if (button(ctx_, "build", is_queued(entry.id()) ? "Queued" : build_action_label(info).c_str(), ImVec2(build_w, bh), prominent_build && !locate_primary ? Style::primary : Style::secondary, can_build(entry, info), ctx_.icon("reset"))) { notices_.erase(entry.id()); request_build(entry.id()); }
     if (ImGui::IsItemHovered()) tooltip(ctx_, info.status == GameStatus::ready ? "Recompile the native program with the current configuration." : "Recompile with the configuration below.");
     ImGui::SameLine(0.0F, ctx_.u(8.0F));
     if (button(ctx_, "more", "More", ImVec2(more_w, bh), Style::ghost, true, ctx_.icon("more"))) ImGui::OpenPopup("##details_more");
@@ -266,7 +267,7 @@ void App::draw_details_identity(LibraryEntry &entry, const StatusInfo &info, flo
 float App::draw_build_config(LibraryEntry &entry, const StatusInfo &info, float w) {
   ImDrawList *dl = ImGui::GetWindowDrawList();
   const ImVec2 a = ImGui::GetCursorScreenPos();
-  const bool busy_now = job_ != nullptr || game_ != nullptr || maintenance_running_;
+  const bool busy_now = is_building(entry.id()) || is_queued(entry.id()) || game_ != nullptr || maintenance_running_;  // other games' builds never lock this game's options
   const bool sms = entry.platform_id == "master-system";
   const RomView probe = view_for(entry);
   const float pad = ctx_.u(16.0F), inner = w - 2 * pad;

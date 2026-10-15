@@ -403,6 +403,12 @@ int main(int argc, char **argv) {
       const fs::path cache = dir / cache_name;
       if (fresh) { fs::remove_all(cache); fs::create_directories(cache); fs::remove(dir / (std::string(cache_name) + "-builds.txt")); }
       set_env("SEGARECOMP_CACHE_DIR", cache.string());
+      // SEG-067: a recompile deletes the game's older builds by default. These scenarios exercise cache REUSE across policies, so they opt in to
+      // "Keep old build artifacts" (Settings > Build & Runtime); the G9 scenario below runs with the default instead.
+      const bool keep_default = env_overrides.erase("__default_settings") != 0;
+      fs::create_directories(cache / "library");
+      if (keep_default) fs::remove(cache / "library" / "launcher-settings.json");
+      else std::ofstream(cache / "library" / "launcher-settings.json", std::ios::binary | std::ios::trunc) << "{\"keep_old_artifacts\":true}";
       set_env("FAKE_BUILD_LOG", (dir / (std::string(cache_name) + "-builds.txt")).string());
       for (const char *name : {"FAKE_SMS_OPTIMIZED", "FAKE_OPT_EXIT", "FAKE_COMPAT_EXIT", "FAKE_BUILD_FAIL", "FAKE_OPT_FALLBACK", "SEGARECOMP_SHOT_POLICY"}) set_env(name, "");
       for (const auto &[name, value] : env_overrides) set_env(name.c_str(), value);
@@ -482,6 +488,20 @@ int main(int argc, char **argv) {
     g = gui("optimized", {}, "gcache_7", false);
     g = gui("", {}, "gcache_7", false);
     expect(builds_of("gcache_7") == 2 && has(g, "run=started mode=compatibility") && !has(g, "autoplay=build"), "G7: one build per policy, Compatibility reused after Optimized");
+    // G9 (SEG-067): with the default settings a recompile in another mode deletes the game's previous build; the new one stays and runs
+    const auto build_dirs = [&](const char *cache_name) {
+      std::size_t n = 0;
+      std::error_code ec;
+      for (const auto &e : fs::directory_iterator(dir / cache_name / "games", ec)) n += e.is_directory() ? 1U : 0U;
+      return n;
+    };
+    g = gui("optimized", {{"__default_settings", ""}}, "gcache_9", true);
+    expect(builds_of("gcache_9") == 1 && build_dirs("gcache_9") == 1, "G9: the first build is the only build folder");
+    g = gui("", {{"__default_settings", ""}}, "gcache_9", false);
+    expect(has(g, "autoplay=build mode=compatibility") && has(g, "run=started mode=compatibility") && builds_of("gcache_9") == 2 && build_dirs("gcache_9") == 1,
+           "G9: by default the recompile deletes the older (Optimized) build and keeps the new one");
+    g = gui("optimized", {}, "gcache_9", false);
+    expect(has(g, "autoplay=build mode=optimized") && builds_of("gcache_9") == 3 && build_dirs("gcache_9") == 2, "G9: with Keep old build artifacts on, the older build is kept");
   }
 #endif
 
