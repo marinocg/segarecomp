@@ -65,3 +65,7 @@ set_property(TEST segarecomp_ml_region_z80_gen2_test APPEND PROPERTY LABELS full
 add_test(NAME segarecomp_ml_region_z80_gen2_weights_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_ml_region_z80_gen2_weights_test.py)
 set_property(TEST segarecomp_ml_region_z80_gen2_weights_test APPEND PROPERTY LABELS full fast)
+# SEG-060 (ADR 0123): oracle-bound screen of the adaptive retention-budget premise (stdlib only, committed SEG-056 results).
+add_test(NAME segarecomp_sms_adaptive_budget_screen_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_sms_adaptive_budget_screen_test.py)
+set_property(TEST segarecomp_sms_adaptive_budget_screen_test APPEND PROPERTY LABELS full fast)

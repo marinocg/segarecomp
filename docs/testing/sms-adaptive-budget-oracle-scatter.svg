@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="300" font-family="sans-serif" font-size="10">
+<rect width="360" height="300" fill="white"/>
+<line x1="40" y1="55.7" x2="320" y2="55.7" stroke="#c00" stroke-dasharray="4"/>
+<text x="42" y="52.7" fill="#c00">fixed 0.65</text>
+<line x1="40" y1="260" x2="320" y2="260" stroke="black"/><line x1="40" y1="40" x2="40" y2="260" stroke="black"/>
+<text x="120" y="292">true code-cell fraction (label oracle)</text>
+<text x="4" y="30">full-recall retention</text>
+<circle cx="98.9" cy="210.0" r="3" fill="#06c"/>
+<text x="103.9" y="213.0">columns</text>
+<circle cx="117.7" cy="160.9" r="3" fill="#06c"/>
+<text x="122.7" y="163.9">duckslayer</text>
+<circle cx="88.1" cy="225.3" r="3" fill="#06c"/>
+<text x="93.1" y="228.3">g2048</text>
+<circle cx="141.3" cy="196.6" r="3" fill="#06c"/>
+<text x="146.3" y="199.6">kots</text>
+<circle cx="73.0" cy="211.8" r="3" fill="#06c"/>
+<text x="78.0" y="214.8">ps1</text>
+<circle cx="130.7" cy="98.8" r="3" fill="#06c"/>
+<text x="135.7" y="101.8">solomon</text>
+<circle cx="197.5" cy="146.1" r="3" fill="#06c"/>
+<text x="202.5" y="149.1">stalactites</text>
+<circle cx="274.6" cy="74.0" r="3" fill="#06c"/>
+<text x="279.6" y="77.0">supertennis</text>
+</svg>
