@@ -17,6 +17,9 @@ namespace launcher {
 
 namespace {
 
+// banner.png is 2172x724 (the wide sunset hero): its sun/horizon line sits at row ~450.
+constexpr float kBannerW = 2172.0F, kBannerH = 724.0F, kBannerHorizon = 450.0F;
+
 // background.png is 675x900; its sun/horizon line sits near row 368 and the foliage frame fills the last ~140 rows.
 constexpr float kArtW = 675.0F, kArtH = 900.0F, kHorizon = 368.0F;
 
@@ -30,6 +33,13 @@ SDL_Texture *art_texture(Ctx &ctx) {
     smoothed = true;
   }
   return bg;
+}
+
+SDL_Texture *banner_texture(Ctx &ctx) {
+  SDL_Texture *banner = ctx.asset("banner.png");
+  static bool smoothed = false;
+  if (banner != nullptr && !smoothed) { SDL_SetTextureScaleMode(banner, SDL_SCALEMODE_LINEAR); smoothed = true; }
+  return banner;
 }
 
 } // namespace
@@ -50,7 +60,15 @@ void App::draw_background(float w, float h) {
   // 1. hero: the whole sun, the mountains and the horizon (rows around the horizon line, 80 % above it, so the sun's disc is never cut)
   const float above = hero * 0.80F / s, below = hero * 0.20F / s;
   const float v0 = std::max(0.0F, kHorizon - above) / kArtH, v1 = std::min(kArtH, kHorizon + below) / kArtH;
-  dl->AddImage(tex, ImVec2(0, 0), ImVec2(w, hero), ImVec2(0, v0), ImVec2(1, v1));
+  if (SDL_Texture *banner = banner_texture(ctx_)) {
+    // the dedicated wide banner (sharp at any window width): same framing rule, scaled to the window width
+    const float bs = w / kBannerW;
+    const float b_above = hero * 0.80F / bs, b_below = hero * 0.20F / bs;
+    const float b0 = std::max(0.0F, kBannerHorizon - b_above) / kBannerH, b1 = std::min(kBannerH, kBannerHorizon + b_below) / kBannerH;
+    dl->AddImage(reinterpret_cast<ImTextureID>(banner), ImVec2(0, 0), ImVec2(w, hero), ImVec2(0, b0), ImVec2(1, b1));
+  } else {
+    dl->AddImage(tex, ImVec2(0, 0), ImVec2(w, hero), ImVec2(0, v0), ImVec2(1, v1));
+  }
   // 2. calm water for the rest of the page: the artwork continues below the horizon, dimmed so content stays legible
   const float water_top = hero;
   const float row0 = kHorizon + below;
@@ -81,11 +99,11 @@ void App::draw_cover(ImDrawList *dl, const LibraryEntry &entry, ImVec2 a, ImVec2
   if (cover != nullptr) {
     float tw = 0, th = 0;
     SDL_GetTextureSize(cover, &tw, &th);
-    const float frame_ratio = w / h, tex_ratio = tw / th;
-    ImVec2 uv0(0, 0), uv1(1, 1);
-    if (tex_ratio > frame_ratio) { const float k = frame_ratio / tex_ratio; uv0.x = (1 - k) * 0.5F; uv1.x = uv0.x + k; }
-    else { const float k = tex_ratio / frame_ratio; uv0.y = (1 - k) * 0.5F; uv1.y = uv0.y + k; }
-    dl->AddImageRounded(reinterpret_cast<ImTextureID>(cover), a, b, uv0, uv1, tint, rounding);
+    // A chosen cover is shown whole (fitted, never cropped); the frame is the 479x680 box-art proportion, so a standard cover fills it.
+    const FitRect fit = fit_inside(w, h, tw, th);
+    const bool fills = fit.x0 < 0.75F && fit.y0 < 0.75F;
+    if (!fills) dl->AddRectFilled(a, b, rgba(9, 20, 48), rounding);
+    dl->AddImageRounded(reinterpret_cast<ImTextureID>(cover), ImVec2(a.x + fit.x0, a.y + fit.y0), ImVec2(a.x + fit.x1, a.y + fit.y1), ImVec2(0, 0), ImVec2(1, 1), tint, fills ? rounding : 0.0F);
     return;
   }
   // ---- no cover chosen: one of the four supplied placeholder paintings ----

@@ -15,6 +15,7 @@ struct LauncherSettings {
   std::string view = "grid";            // grid | list
   std::string sort = "last_played";     // last_played | title | last_built | added | size
   bool compact = false;
+  bool keep_old_artifacts = false;      // a recompile deletes the game's older build folders unless this is on
   bool adopt_cache_on_start = true;     // read the product-owned cache folder once at start and adopt verifiable finished builds
   CleanupPolicy cleanup;
   std::vector<std::string> preferred_regions = {"USA", "Europe", "Japan"};

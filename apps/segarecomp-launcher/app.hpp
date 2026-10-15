@@ -6,6 +6,7 @@
 #include "launcher_core.hpp"
 #include "launcher_settings.hpp"
 #include "library_catalog.hpp"
+#include "library_view.hpp"
 #include "storage.hpp"
 #include "ui_kit.hpp"
 
@@ -143,17 +144,29 @@ private:
   [[nodiscard]] std::string status_label(const StatusInfo &info) const;
   [[nodiscard]] ImU32 status_color(const StatusInfo &info) const;
   bool start_build(const std::string &id, bool restart_after = false);
+  // The user-facing way to build: starts now when idle, otherwise joins the FIFO queue (one build at a time; the UI stays usable).
+  void request_build(const std::string &id);
+  void dequeue_build(const std::string &id);
+  [[nodiscard]] bool is_building(const std::string &id) const { return job_ && job_id_ == id; }
+  [[nodiscard]] bool is_queued(const std::string &id) const { return build_queue_.contains(id); }
+  [[nodiscard]] int build_count() const { return (job_ ? 1 : 0) + static_cast<int>(build_queue_.size()); }
+  // Library badge of a game: Building / Queued while in the build flow, else the stored build status (+ spinner for Building).
+  struct Badge { std::string label; ImU32 color; bool spinner; };
+  [[nodiscard]] Badge badge_for(const LibraryEntry &entry, const StatusInfo &info) const;
   void finish_build();
   bool launch(const std::string &id, bool restarted);
   void finish_run();
   void run_plan(const Plan &plan);
   void poll_maintenance();
   void evaluate_policy_after_scan();
+  void pump_cleanup();
   void browse_import();
   void browse_locate(const std::string &id);
   void browse_cover(const std::string &id);
   // Libretro box art, only on an explicit request: one game (menus) or every game without a cover (Settings > Metadata), on a worker.
-  void start_cover_download(const std::vector<std::string> &ids);
+  void start_cover_download(const std::vector<std::string> &ids, bool silent = false);
+  // A newly added game gets its cover looked up on Libretro automatically; every failure is silent (no toast, no dialog).
+  void queue_auto_covers(const std::vector<std::string> &ids);
   void poll_cover_download();
   [[nodiscard]] bool cover_download_possible(const LibraryEntry &entry) const;
   void trace(const std::string &line);
@@ -221,6 +234,8 @@ private:
   std::map<std::string, bool> cover_missing_;
   struct CoverDownload { std::string id, file_name, matched_name, source, error; };
   std::future<std::vector<CoverDownload>> cover_job_;
+  bool cover_silent_ = false;                   // the running download is an automatic one: report nothing
+  std::vector<std::string> auto_cover_pending_;  // new games waiting for the (single) download worker
   std::atomic<int> cover_done_{0};
   std::atomic<bool> cover_cancel_{false};
   int cover_total_ = 0;
@@ -232,7 +247,7 @@ private:
   std::string job_id_, job_key_;
   RomView job_view_;
   bool job_restart_after_ = false;
-  std::vector<std::string> build_queue_;
+  BuildQueue build_queue_;
   std::map<std::string, std::string> failures_;      // id -> message
   std::map<std::string, std::string> diagnostics_;   // id -> log text
   std::map<std::string, std::string> notices_;       // id -> restart notice
@@ -266,6 +281,7 @@ private:
   bool keep_failed_logs_ = true;
   bool soft_limit_exceeded_ = false;
   bool policy_eval_pending_ = false;
+  std::set<std::string> pending_cleanup_ids_;   // finished builds whose older builds / intermediates still have to be removed
   // maintenance (cleanup runs on a worker under the busy guard)
   std::future<ExecResult> maint_job_;
   Plan maint_plan_;

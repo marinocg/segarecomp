@@ -72,13 +72,13 @@ struct SvHost {
   int bind_player;             /* controls page: player being edited */
   struct { SvListenKind kind; int player; SvAction action; Uint64 started; Uint64 after_ts; } listen;
   unsigned char bind_col[16];  /* Controls: the focused column (0 keyboard, 1 gamepad) per binding row, kept across page rebuilds */
-  char toast[96];
+  struct { char text[96]; Uint64 until; } toasts[3]; /* concurrent notifications, oldest first: one never hides another */
+  int toast_count;
   char conflict_msg[120];     /* Controls page: the last binding conflict, shown until the next change */
   SDL_Texture *icons[24];
   char icon_names[24][16];
   int icon_count;
   Uint64 session_start;
-  Uint64 toast_until;
   /* pacing statistics */
   Uint64 fps_window_start;
   unsigned fps_frames;

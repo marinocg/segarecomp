@@ -48,6 +48,15 @@ target_compile_definitions(segarecomp_launcher_ui_support PUBLIC
 segarecomp_enable_warnings(segarecomp_launcher_ui_support)
 
 add_executable(segarecomp-launcher WIN32 main.cpp app.cpp app_screens.cpp app_pages.cpp app_details.cpp app_input.cpp app_art.cpp ui_kit.cpp)
+if(WIN32)
+  # The executable's own icon (Explorer, taskbar, shortcuts): a resource script embedding packaging/windows/Segarecomp.ico, when a resource compiler exists.
+  include(CheckLanguage)
+  check_language(RC)
+  if(CMAKE_RC_COMPILER)
+    enable_language(RC)
+    target_sources(segarecomp-launcher PRIVATE ${PROJECT_SOURCE_DIR}/packaging/windows/segarecomp.rc)
+  endif()
+endif()
 target_include_directories(segarecomp-launcher SYSTEM PRIVATE ${_stb_dir})
 target_link_libraries(segarecomp-launcher PRIVATE segarecomp_imgui segarecomp_launcher_core segarecomp_launcher_ui_support segarecomp::viewer_core segarecomp::viewer_input segarecomp::media)
 set_target_properties(segarecomp-launcher PROPERTIES OUTPUT_NAME Segarecomp)

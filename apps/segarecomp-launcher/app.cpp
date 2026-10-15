@@ -160,6 +160,13 @@ bool App::init_window() {
   const float base_w = 1080.0F, base_h = 740.0F;
   window_ = SDL_CreateWindow("Segarecomp", static_cast<int>(base_w), static_cast<int>(base_h), SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (window_ == nullptr) { std::fprintf(stderr, "window failed: %s\n", SDL_GetError()); return false; }
+  // The application icon (title bar / taskbar / dock): the largest size first, smaller sizes as alternates the OS picks from.
+  if (SDL_Surface *icon = load_asset_surface("icons/Segarecomp-256.png")) {
+    for (const char *alt : {"icons/Segarecomp-128.png", "icons/Segarecomp-48.png", "icons/Segarecomp-32.png", "icons/Segarecomp-16.png"})
+      if (SDL_Surface *s = load_asset_surface(alt)) { SDL_AddSurfaceAlternateImage(icon, s); SDL_DestroySurface(s); }
+    SDL_SetWindowIcon(window_, icon);
+    SDL_DestroySurface(icon);
+  }
   // SDL3 sizes windows in points: on a DPI-aware Windows/Linux window a point is a physical pixel, so the default size follows the display scale.
   float window_scale = 1.0F;
   const float display_scale = SDL_GetWindowDisplayScale(window_), density = SDL_GetWindowPixelDensity(window_);
@@ -332,8 +339,32 @@ void App::poll_scan() {
   report_valid_ = report_.complete;
   if (settings_.cleanup.mode == "soft_limit") soft_limit_exceeded_ = report_.builds_total() > static_cast<std::uintmax_t>(settings_.cleanup.soft_limit_mb) * 1024U * 1024U;
   else soft_limit_exceeded_ = false;
-  if (scan_again_) { scan_again_ = false; request_scan(); return; }
-  if (policy_eval_pending_) { policy_eval_pending_ = false; evaluate_policy_after_scan(); }
+  if (scan_again_) { scan_again_ = false; request_scan(); }
+}
+
+// Sequential post-build maintenance, one step per call: (1) the finished games' cleanup, (2) the keep-last-N policy on a fresh scan. Each step waits
+// (its flag stays set) until the maintenance guard is available; nothing is dropped, and nothing blocks gameplay or starts another worker.
+void App::pump_cleanup() {
+  if (maintenance_running_ || busy_.any_activity()) return;
+  if (!pending_cleanup_ids_.empty()) {
+    const std::vector<std::string> ids(pending_cleanup_ids_.begin(), pending_cleanup_ids_.end());
+    pending_cleanup_ids_.clear();
+    Catalog copy{fs::path{}};
+    copy.entries() = catalog_.entries();
+    const StorageReport fresh = scan_storage(copy, cache_dir_, library_dir_);
+    Plan plan;
+    plan.kind = settings_.keep_old_artifacts ? PlanKind::intermediates : PlanKind::superseded;
+    // Recompiling replaces the game's older builds (Settings > Build & Runtime > "Keep old build artifacts" opts out); the build just produced
+    // is the current one and stays. Intermediates inside a folder that is deleted whole are not scheduled twice.
+    if (!settings_.keep_old_artifacts) plan = plan_superseded(fresh, ids, busy_);
+    if (settings_.cleanup.mode == "intermediates") plan = merge_plans_non_overlapping(std::move(plan), plan_intermediates(fresh, ids, busy_));
+    if (!plan.items.empty()) run_plan(plan);
+    return;  // the policy step waits for this cleanup and the rescan that follows it
+  }
+  if (policy_eval_pending_ && !scanning_ && !scan_again_) {
+    policy_eval_pending_ = false;
+    if (report_valid_) evaluate_policy_after_scan();
+  }
 }
 
 void App::evaluate_policy_after_scan() {
@@ -401,7 +432,14 @@ bool App::cover_download_possible(const LibraryEntry &entry) const {
   return !cover_job_.valid() && !libretro_system_dir(entry.platform_id).empty() && !entry.title().empty();
 }
 
-void App::start_cover_download(const std::vector<std::string> &ids) {
+void App::queue_auto_covers(const std::vector<std::string> &ids) {
+  // Automation (GUI scripts, screenshots, autoplay) and SEGARECOMP_NO_COVER_FETCH never touch the network.
+  if (SDL_getenv("SEGARECOMP_NO_COVER_FETCH") != nullptr || !script_.empty() || autoplay_ || !shot_path_.empty()) return;
+  for (const auto &id : ids)
+    if (std::find(auto_cover_pending_.begin(), auto_cover_pending_.end(), id) == auto_cover_pending_.end()) auto_cover_pending_.push_back(id);
+}
+
+void App::start_cover_download(const std::vector<std::string> &ids, bool silent) {
   if (cover_job_.valid()) return;
   std::vector<std::pair<std::string, std::pair<std::string, CoverQuery>>> work;  // id -> (sha256, query)
   for (const auto &id : ids) {
@@ -415,7 +453,8 @@ void App::start_cover_download(const std::vector<std::string> &ids) {
     q.preferred_regions = settings_.preferred_regions;
     work.push_back({id, {entry->sha256, std::move(q)}});
   }
-  if (work.empty()) { toast("No game here can be looked up on Libretro."); return; }
+  if (work.empty()) { if (!silent) toast("No game here can be looked up on Libretro."); return; }
+  cover_silent_ = silent;
   cover_total_ = static_cast<int>(work.size());
   cover_done_ = 0;
   cover_cancel_ = false;
@@ -469,6 +508,7 @@ void App::poll_cover_download() {
     ++added;
   }
   if (added > 0) save_catalog();
+  if (cover_silent_) return;  // automatic lookups fail silently
   if (results.size() == 1) {
     if (added == 1) toast("Cover downloaded: \"" + results[0].matched_name + "\" from " + results[0].source + ".");
     else if (!problems.empty()) show_message("No cover was downloaded", {problems[0]});
@@ -528,7 +568,8 @@ void App::poll_import() {
   save_catalog();
   request_status_refresh();
   request_scan();
-  if (import_build_after_) for (const auto &id : buildable) build_queue_.push_back(id);
+  if (import_build_after_) for (const auto &id : buildable) build_queue_.push(id);
+  queue_auto_covers(added_ids);
   const int ok = static_cast<int>(std::count_if(import_results_.begin(), import_results_.end(), [](const ImportItem &i) { return !i.entry_id.empty(); }));
   if (import_results_.size() == 1 && ok == 1) { open_details(import_results_[0].entry_id); toast(import_results_[0].message); }
   else { go(Page::import_page); toast(std::to_string(added_ids.size()) + " added, " + std::to_string(import_results_.size() - added_ids.size()) + " skipped or already present."); }
@@ -614,6 +655,27 @@ bool App::start_build(const std::string &id, bool restart_after) {
   return true;
 }
 
+void App::dequeue_build(const std::string &id) {
+  build_queue_.remove(id);
+}
+
+void App::request_build(const std::string &id) {
+  if (is_building(id) || is_queued(id)) return;
+  if (job_ || !build_queue_.empty() || maintenance_running_) {
+    build_queue_.push(id);
+    if (const LibraryEntry *e = catalog_.find_id(id)) toast("Queued: " + e->title() + " (build " + std::to_string(build_count()) + ").");
+    return;
+  }
+  start_build(id);
+}
+
+App::Badge App::badge_for(const LibraryEntry &entry, const StatusInfo &info) const {
+  if (is_building(entry.id())) return {"Building", ui::col::warn, true};
+  if (is_queued(entry.id())) return {"Queued", ui::col::info, false};
+  if (info.rom_missing && info.status != GameStatus::ready) return {"ROM missing", ui::col::warn, false};
+  return {status_label(info), status_color(info), false};
+}
+
 void App::finish_build() {
   job_->wait();
   const bool ok = job_->succeeded();
@@ -638,17 +700,10 @@ void App::finish_build() {
     }
     request_status_refresh();
     request_scan();
-    if (settings_.cleanup.mode == "intermediates") {
-      // Exact, validated plan for this build only; runs under the busy guard like every cleanup.
-      policy_eval_pending_ = false;
-      Catalog copy{fs::path{}};
-      copy.entries() = catalog_.entries();
-      const StorageReport fresh = scan_storage(copy, cache_dir_, library_dir_);
-      const Plan plan = plan_intermediates(fresh, {id}, busy_);
-      if (!plan.items.empty()) run_plan(plan);
-    } else if (settings_.cleanup.mode == "keep_last_n" || settings_.cleanup.mode == "soft_limit") {
-      policy_eval_pending_ = true;
-    }
+    // Post-build cleanup is DEFERRED work, retained until it has run: it needs the maintenance guard, which is unavailable while any game runs
+    // (the UI lets you play another game during a build). pump_cleanup() performs it, then the keep-last-N policy, strictly in that order.
+    if (!settings_.keep_old_artifacts || settings_.cleanup.mode == "intermediates") pending_cleanup_ids_.insert(id);
+    if (settings_.cleanup.mode == "keep_last_n" || settings_.cleanup.mode == "soft_limit") policy_eval_pending_ = true;
     if (restart) { restart_pending_ = false; launch(id, true); }
   } else {
     failures_[id] = message;
@@ -790,16 +845,22 @@ void App::update_jobs() {
   poll_import();
   poll_maintenance();
   poll_cover_download();
+  if (!cover_job_.valid() && !auto_cover_pending_.empty()) {
+    std::vector<std::string> ids;
+    ids.swap(auto_cover_pending_);
+    ids.erase(std::remove_if(ids.begin(), ids.end(), [this](const std::string &id) { const LibraryEntry *e = catalog_.find_id(id); return e == nullptr || !e->cover.empty(); }), ids.end());
+    if (!ids.empty()) start_cover_download(ids, true);
+  }
   if (sms_probe_.valid() && sms_probe_.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
     sms_optimized_available_ = sms_probe_.get();
     request_status_refresh();
   }
   if (job_ && job_->finished()) finish_build();
   if (game_ && game_->poll()) finish_run();
+  pump_cleanup();
   if (!job_ && !build_queue_.empty() && !maintenance_running_ && modal_.kind == Modal::Kind::none) {
-    const std::string next = build_queue_.front();
-    build_queue_.erase(build_queue_.begin());
-    if (statuses_.count(next) == 0 || status_of(next).status != GameStatus::ready) start_build(next);
+    const std::string next = build_queue_.pop_front();
+    start_build(next);
   }
   // Automation: press Play once the selected game is ready (building first when there is no matching build); quit when the run is over.
   if (autoplay_ && !status_pending_ && !detail_id_.empty() && !job_ && !game_ && !maintenance_running_ && !restart_pending_) {

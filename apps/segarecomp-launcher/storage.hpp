@@ -101,6 +101,9 @@ struct Plan {
 [[nodiscard]] Plan plan_intermediates(const StorageReport &report, const std::vector<std::string> &ids, const BusyGuard &busy);
 [[nodiscard]] Plan plan_archive(const StorageReport &report, const std::vector<std::string> &ids, const BusyGuard &busy);
 [[nodiscard]] Plan plan_superseded(const StorageReport &report, const std::vector<std::string> &ids, const BusyGuard &busy);
+// One plan from two: `primary` plus every item of `extra` that is not the same path as, or inside, a directory `primary` already deletes
+// (a parent and its child must never both be scheduled: the child would be gone when its turn comes). Notes/remains/exclusions are merged.
+[[nodiscard]] Plan merge_plans_non_overlapping(Plan primary, const Plan &extra);
 [[nodiscard]] Plan plan_failed_partial(const StorageReport &report, bool keep_diagnostics, const BusyGuard &busy);
 [[nodiscard]] Plan plan_zig_cache(const StorageReport &report, const std::filesystem::path &cache_root, const BusyGuard &busy);
 [[nodiscard]] Plan plan_remove_from_library(const StorageReport &report, const std::vector<std::string> &ids, bool delete_cache, const BusyGuard &busy);

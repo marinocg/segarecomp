@@ -20,6 +20,9 @@ namespace launcher {
 // that by omitting the graphic, never by crashing -- a missing decorative asset is not a fatal error.
 [[nodiscard]] SDL_Texture *load_pixel_texture(SDL_Renderer *renderer, const std::string &relative);
 
+// Loads `assets/<relative>` as an RGBA32 SDL_Surface (the window icon); nullptr (logged) when missing/undecodable. Caller destroys it.
+[[nodiscard]] SDL_Surface *load_asset_surface(const std::string &relative);
+
 // Loads any PNG/JPEG file (a cover) as a texture; nullptr on a missing/oversized/undecodable image. `nearest` for pixel art, linear otherwise.
 [[nodiscard]] SDL_Texture *load_file_texture(SDL_Renderer *renderer, const std::filesystem::path &path, bool nearest);
 

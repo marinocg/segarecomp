@@ -42,6 +42,22 @@ fs::path asset_path(const std::string &relative) {
   return fs::path(SEGARECOMP_LAUNCHER_SOURCE_ASSETS_DIR) / relative;
 }
 
+SDL_Surface *load_asset_surface(const std::string &relative) {
+  const fs::path path = asset_path(relative);
+  std::size_t size = 0;
+  void *bytes = SDL_LoadFile(reinterpret_cast<const char *>(path.u8string().c_str()), &size);
+  if (!bytes) { std::fprintf(stderr, "launcher: cannot read asset %s: %s\n", path.string().c_str(), SDL_GetError()); return nullptr; }
+  int w = 0, h = 0, channels = 0;
+  stbi_uc *pixels = stbi_load_from_memory(static_cast<const stbi_uc *>(bytes), static_cast<int>(size), &w, &h, &channels, 4);
+  SDL_free(bytes);
+  if (!pixels) { std::fprintf(stderr, "launcher: cannot decode asset %s: %s\n", path.string().c_str(), stbi_failure_reason()); return nullptr; }
+  SDL_Surface *view = SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, pixels, w * 4);
+  SDL_Surface *copy = view ? SDL_DuplicateSurface(view) : nullptr;  // own the pixels: stb's buffer is freed below
+  if (view) SDL_DestroySurface(view);
+  stbi_image_free(pixels);
+  return copy;
+}
+
 SDL_Texture *load_pixel_texture(SDL_Renderer *renderer, const std::string &relative) {
   const fs::path path = asset_path(relative);
   std::size_t size = 0;

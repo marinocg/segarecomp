@@ -80,6 +80,7 @@ int main() {
   spit(cache / "games" / (key32('1') + ".failed") / "obj" / "x.o", std::string(30, 'f'));
   spit(cache / "games" / (key32('9') + ".partial") / "obj" / "y.o", std::string(40, 'p'));   // unowned partial
   spit(cache / "games" / "mystery" / "keep.me", "unknown");                                 // unrecognized folder
+  spit(cache / "games" / key32('1') / "Game.PDB", std::string(70, 'd'));                      // debug symbols beside the executable (an intermediate)
   spit(cache / "zig-cache" / "o" / "blob", std::string(900, 'z'));
   spit(cache / "zig-cache" / "h" / "blob2", std::string(100, 'z'));
 
@@ -88,20 +89,42 @@ int main() {
   expect(report.complete, "scan completes");
   const EntryUsage *ua = report.find(ida);
   expect(ua != nullptr && ua->dirs.size() == 3, "A owns current, superseded and failed folders");
-  expect(ua != nullptr && ua->intermediates == (200 + 300 + 50 + 400) * 2 && report.zig_cache == 1000, "intermediates and zig cache sized exactly");
+  expect(ua != nullptr && ua->intermediates == (200 + 300 + 50 + 400) * 2 + 70 && report.zig_cache == 1000, "intermediates and zig cache sized exactly");
   expect(report.unlinked.size() == 2 && report.failed_partial == 100 + 40, "unrecognized and unowned partial folders are reported as unlinked; failed/partial sized");
   expect(report.catalog_and_covers >= 5, "library data is accounted separately");
 
+  {  // SEG-067: "delete old builds" and "remove intermediates" together: one non-overlapping plan that executes cleanly (on a copy of the cache)
+    const fs::path cache_b = dir / "cache_b";
+    fs::remove_all(cache_b);
+    fs::create_directories(cache_b);
+    fs::copy(cache / "games", cache_b / "games", fs::copy_options::recursive);
+    BusyGuard busy_b;
+    const StorageReport rep_b = scan_storage(catalog, cache_b, library);
+    const Plan sup = plan_superseded(rep_b, {ida}, busy_b), inter = plan_intermediates(rep_b, {ida}, busy_b);
+    const Plan merged = merge_plans_non_overlapping(sup, inter);
+    bool overlap = false;
+    for (const auto &x : merged.items)
+      for (const auto &y : merged.items)
+        if (&x != &y && y.directory && (x.path == y.path || is_within(y.path, x.path))) overlap = true;
+    expect(!sup.items.empty() && inter.items.size() > sup.items.size() && merged.items.size() < sup.items.size() + inter.items.size(), "the intermediates inside the deleted old build are dropped from the merged plan");
+    expect(!overlap && merged.items.size() > sup.items.size(), "no item is inside another planned directory; the current build's intermediates stay in the plan");
+    expect(busy_b.try_begin_maintenance(), "maintenance lock (merged plan)");
+    const ExecResult merged_result = execute_plan(merged, cache_b, busy_b);
+    busy_b.end_maintenance();
+    expect(merged_result.ok() && merged_result.bytes_freed == merged.bytes, "the combined plan executes without a partial-failure report");
+    expect(!fs::exists(cache_b / "games" / key32('2')) && !fs::exists(cache_b / "games" / key32('1') / "obj") && entry_ready(cache_b / "games" / key32('1')), "old build gone, current build keeps its executable");
+    fs::remove_all(cache_b);
+  }
   {  // intermediates: executable survives, game stays ready
     Plan plan = plan_intermediates(report, {ida}, busy);
-    expect(plan.bytes == (200 + 300 + 50 + 400) * 2, "plan bytes = exactly the generated C and objects of every tracked build");
+    expect(plan.bytes == (200 + 300 + 50 + 400) * 2 + 70, "plan bytes = exactly the generated C, objects and .pdb files of every tracked build");
     expect(busy.try_begin_maintenance(), "maintenance lock");
     ExecResult r = execute_plan(plan, cache, busy);
     busy.end_maintenance();
     expect(r.ok() && r.bytes_freed == plan.bytes, "freed what was planned");
     expect(entry_ready(cache / "games" / key32('1')) && fs::exists(cache / "games" / key32('1') / "build.log") && !fs::exists(cache / "games" / key32('1') / "obj") &&
-               !fs::exists(cache / "games" / key32('1') / "generated.c") && !fs::exists(cache / "games" / key32('1') / "generated"),
-           "executable and status survive, intermediates are gone");
+               !fs::exists(cache / "games" / key32('1') / "generated.c") && !fs::exists(cache / "games" / key32('1') / "generated") && !fs::exists(cache / "games" / key32('1') / "Game.PDB"),
+           "executable and status survive, intermediates (including the .pdb) are gone");
     expect(fs::exists(cache / "games" / key32('3') / "obj"), "other games are untouched");
   }
   report = scan_storage(catalog, cache, library);
