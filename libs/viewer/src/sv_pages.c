@@ -189,7 +189,7 @@ static void build_padstatus(SvHost *h, SvPage *p) {
   sv_diag_sdl_version(buf, sizeof buf);
   status_row(p, "SDL", buf);
   {
-    char s2[640];
+    char s2[1536];
     if (sv_diag_switch2_message(h->diag, &ctx, h->hid, h->hid_count > 0 ? h->hid_count : 0, s2, sizeof s2) != SV_S2_NOT_SEEN) {
       char *line = s2, *end;
       add_section(p, "Nintendo Switch 2 controller");

@@ -29,6 +29,10 @@ mkdir -p "$work"; cd "$work"
 curl -fsSL -o sdl.tar.gz "https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL3-${SDL_VERSION}.tar.gz"
 sha_check "${SDL_SOURCE_SHA256}" sdl.tar.gz
 tar xzf sdl.tar.gz
+# Diagnostics only (no behaviour change): SDL silently discards a controller whose HIDAPI driver fails to initialise. The patch records how far Nintendo
+# Switch 2 setup got, with SDL's/libusb's own error, and publishes it as the hint SEGARECOMP_HIDAPI_SETUP_057e_<pid> for the input diagnostics.
+# `patch` fails loudly if a hunk does not apply, so a changed SDL pin cannot silently drop it.
+patch -p1 -d "SDL3-${SDL_VERSION}" < "$here/sdl-switch2-diagnostics.patch"
 extra=()
 if [ "$(uname -s)" = "Darwin" ]; then extra+=("-DCMAKE_OSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-12.0}"); fi
 
@@ -75,7 +79,7 @@ if [ "${SDL_CONFIGURE_ONLY:-0}" = "1" ]; then exit 0; fi
 have_libusb=0
 if grep -q '^#define HAVE_LIBUSB 1' "$config_header"; then have_libusb=1; fi
 # A build that carries the driver says so in SDL_GetRevision(), which the input diagnostics read to tell "driver missing from this SDL" from other causes.
-if [ "$have_libusb" = 1 ]; then configure "-DSDL_VENDOR_INFO=segarecomp-switch2-usb"; fi
+if [ "$have_libusb" = 1 ]; then configure "-DSDL_VENDOR_INFO=segarecomp-switch2-usb setup-trace"; fi
 cmake --build sdl-build
 cmake --install sdl-build
 cp "SDL3-${SDL_VERSION}/LICENSE.txt" "$prefix/LICENSE.txt"

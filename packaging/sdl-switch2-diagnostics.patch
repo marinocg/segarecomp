@@ -1,0 +1,163 @@
+diff -ru a/src/hidapi/libusb/hid.c b/src/hidapi/libusb/hid.c
+--- a/src/hidapi/libusb/hid.c	2026-10-15 20:06:09.748383987 +0200
++++ b/src/hidapi/libusb/hid.c	2026-10-15 20:06:28.462431083 +0200
+@@ -1519,6 +1519,9 @@
+ 	res = libusb_claim_interface(dev->device_handle, intf_desc->bInterfaceNumber);
+ 	if (res < 0) {
+ 		LOG("can't claim interface %d: (%d) %s\n", intf_desc->bInterfaceNumber, res, libusb_error_name(res));
++#ifdef HIDAPI_USING_SDL_RUNTIME
++		SDL_SetError("libusb_claim_interface(%d) failed: libusb error %d", intf_desc->bInterfaceNumber, res);
++#endif
+ 
+ #ifdef DETACH_KERNEL_DRIVER
+ 		if (dev->is_driver_detached) {
+@@ -1650,6 +1653,9 @@
+ 						res = libusb_open(usb_dev, &dev->device_handle);
+ 						if (res < 0) {
+ 							LOG("can't open device\n");
++#ifdef HIDAPI_USING_SDL_RUNTIME
++							SDL_SetError("libusb_open failed for interface %d: libusb error %d", intf_desc->bInterfaceNumber, res);
++#endif
+ 							break;
+ 						}
+ 						good_open = hidapi_initialize_device(dev, intf_desc, conf_desc);
+diff -ru a/src/joystick/hidapi/SDL_hidapi_switch2.c b/src/joystick/hidapi/SDL_hidapi_switch2.c
+--- a/src/joystick/hidapi/SDL_hidapi_switch2.c	2026-10-15 20:06:09.765975277 +0200
++++ b/src/joystick/hidapi/SDL_hidapi_switch2.c	2026-10-15 20:06:28.462108817 +0200
+@@ -373,14 +373,17 @@
+         return false;
+     }
+ 
++    HIDAPI_SegarecompTrace(device, "usb: libusb loaded");
+     ctx->device_handle = (libusb_device_handle *)SDL_GetPointerProperty(SDL_hid_get_properties(device->dev), SDL_PROP_HIDAPI_LIBUSB_DEVICE_HANDLE_POINTER, NULL);
+     if (!ctx->device_handle) {
+         return SDL_SetError("Couldn't get libusb device handle");
+     }
++    HIDAPI_SegarecompTrace(device, "usb: handle is libusb-backed");
+ 
+     if (!FindBulkEndpoints(ctx->libusb, ctx->device_handle, &ctx->interface_number, &ctx->out_endpoint, &ctx->in_endpoint)) {
+         return SDL_SetError("Couldn't find bulk endpoints");
+     }
++    HIDAPI_SegarecompTrace(device, "usb: bulk endpoints interface=%d out=0x%02x in=0x%02x", (int)ctx->interface_number, (unsigned)ctx->out_endpoint, (unsigned)ctx->in_endpoint);
+ 
+     ctx->libusb->set_auto_detach_kernel_driver(ctx->device_handle, true);
+     int res = ctx->libusb->claim_interface(ctx->device_handle, ctx->interface_number);
+@@ -388,6 +391,7 @@
+         return SDL_SetError("Couldn't claim interface %d: %d\n", ctx->interface_number, res);
+     }
+     ctx->interface_claimed = true;
++    HIDAPI_SegarecompTrace(device, "usb: interface %d claimed", (int)ctx->interface_number);
+ 
+     const Uint8 *init_sequence[] = {
+         (Uint8[]) { // Unknown purpose
+@@ -498,10 +502,11 @@
+     for (int i = 0; init_sequence[i]; i++) {
+         res = SendBulkData(ctx, init_sequence[i], init_sequence[i][5] + 8);
+         if (res < 0) {
+-            return SDL_SetError("Couldn't send initialization data: %d\n", res);
++            return SDL_SetError("Couldn't send initialization data: %d (step %d)\n", res, i);
+         }
+         RecvBulkData(ctx, calibration_data, 0x40);
+     }
++    HIDAPI_SegarecompTrace(device, "usb: initialization sequence sent");
+ 
+     return true;
+ }
+diff -ru a/src/joystick/hidapi/SDL_hidapijoystick.c b/src/joystick/hidapi/SDL_hidapijoystick.c
+--- a/src/joystick/hidapi/SDL_hidapijoystick.c	2026-10-15 20:06:09.766266251 +0200
++++ b/src/joystick/hidapi/SDL_hidapijoystick.c	2026-10-15 20:06:28.461719972 +0200
+@@ -439,6 +439,27 @@
+     return device;
+ }
+ 
++// Segarecomp diagnostics (packaging/sdl-switch2-diagnostics.patch): SDL silently drops a device whose driver fails to initialise. For Nintendo Switch 2
++// controllers, record how far setup got and SDL's own error text, and publish it as a hint that the application can read.
++void HIDAPI_SegarecompTrace(SDL_HIDAPI_Device *device, const char *fmt, ...)
++{
++    char step[200], name[64];
++    size_t used;
++    va_list ap;
++
++    if (!device || device->vendor_id != USB_VENDOR_NINTENDO || device->product_id < 0x2066 || device->product_id > 0x2073) {
++        return;
++    }
++    va_start(ap, fmt);
++    SDL_vsnprintf(step, sizeof(step), fmt, ap);
++    va_end(ap);
++    used = SDL_strlen(device->segarecomp_trace);
++    SDL_snprintf(device->segarecomp_trace + used, sizeof(device->segarecomp_trace) - used, "%s%s", used ? " | " : "", step);
++    SDL_snprintf(name, sizeof(name), "SEGARECOMP_HIDAPI_SETUP_%04x_%04x", device->vendor_id, device->product_id);
++    SDL_SetHintWithPriority(name, device->segarecomp_trace, SDL_HINT_OVERRIDE);
++    SDL_LogDebug(SDL_LOG_CATEGORY_INPUT, "Switch 2 setup trace [%s]: %s", device->path ? device->path : "?", device->segarecomp_trace);
++}
++
+ static void HIDAPI_CleanupDeviceDriver(SDL_HIDAPI_Device *device)
+ {
+     if (!device->driver) {
+@@ -499,6 +520,8 @@
+         return; // Already setup
+     }
+ 
++    device->segarecomp_trace[0] = '\0';
++    HIDAPI_SegarecompTrace(device, "begin iface=%d class=%d usage_page=0x%04x usage=0x%04x bluetooth=%d", device->interface_number, device->interface_class, device->usage_page, device->usage, device->is_bluetooth);
+     if (HIDAPI_GetDeviceDriver(device)) {
+         // We might have a device driver for this device, try opening it and see
+         if (device->num_children == 0) {
+@@ -513,9 +536,11 @@
+                 SDL_LogDebug(SDL_LOG_CATEGORY_INPUT,
+                              "HIDAPI_SetupDeviceDriver() couldn't open %s: %s",
+                              device->path, SDL_GetError());
++                HIDAPI_SegarecompTrace(device, "stage=open_path FAILED error=\"%s\"", SDL_GetError());
+                 return;
+             }
+             SDL_hid_set_nonblocking(dev, 1);
++            HIDAPI_SegarecompTrace(device, "stage=open_path ok libusb_backed=%d", SDL_GetPointerProperty(SDL_hid_get_properties(dev), SDL_PROP_HIDAPI_LIBUSB_DEVICE_HANDLE_POINTER, NULL) != NULL);
+ 
+             device->dev = dev;
+         }
+@@ -524,7 +549,10 @@
+ 
+         // Initialize the device, which may cause a connected event
+         if (device->driver && !device->driver->InitDevice(device)) {
++            HIDAPI_SegarecompTrace(device, "stage=init_device FAILED driver=%s error=\"%s\"", device->driver->name, SDL_GetError());
+             HIDAPI_CleanupDeviceDriver(device);
++        } else if (device->driver) {
++            HIDAPI_SegarecompTrace(device, "stage=init_device ok driver=%s", device->driver->name);
+         }
+ 
+         if (!device->driver && device->dev) {
+@@ -532,6 +560,12 @@
+             SDL_hid_close(device->dev);
+             device->dev = NULL;
+         }
++    } else {
++#ifdef SDL_JOYSTICK_HIDAPI_SWITCH2
++        HIDAPI_SegarecompTrace(device, "stage=no_driver (switch2_driver_enabled=%d, ignored=%d, usage_filter_applies=%d)", SDL_HIDAPI_DriverSwitch2.enabled ? 1 : 0, SDL_ShouldIgnoreJoystick(device->vendor_id, device->product_id, device->version, device->name) ? 1 : 0, (device->usage_page != 0 && device->usage_page != 1) ? 1 : 0);
++#else
++        HIDAPI_SegarecompTrace(device, "stage=no_driver (switch2 driver not compiled)");
++#endif
+     }
+ }
+ 
+diff -ru a/src/joystick/hidapi/SDL_hidapijoystick_c.h b/src/joystick/hidapi/SDL_hidapijoystick_c.h
+--- a/src/joystick/hidapi/SDL_hidapijoystick_c.h	2026-10-15 20:06:09.766328126 +0200
++++ b/src/joystick/hidapi/SDL_hidapijoystick_c.h	2026-10-15 20:06:10.129435721 +0200
+@@ -115,6 +115,8 @@
+     // This can happen on Windows with Bluetooth devices that have turned off
+     bool broken;
+ 
++    char segarecomp_trace[480]; // Segarecomp diagnostics: how far device setup got (published as a hint, see HIDAPI_SegarecompTrace)
++
+     struct SDL_HIDAPI_Device *parent;
+     int num_children;
+     struct SDL_HIDAPI_Device **children;
+@@ -146,6 +148,9 @@
+ 
+ } SDL_HIDAPI_DeviceDriver;
+ 
++// Segarecomp diagnostics: append one step to the device's setup trace and publish it as the hint SEGARECOMP_HIDAPI_SETUP_<vid>_<pid> (Nintendo Switch 2 only)
++extern void HIDAPI_SegarecompTrace(SDL_HIDAPI_Device *device, const char *fmt, ...);
++
+ // HIDAPI device support
+ extern SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverCombined;
+ extern SDL_HIDAPI_DeviceDriver SDL_HIDAPI_DriverGameCube;

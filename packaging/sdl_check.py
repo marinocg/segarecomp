@@ -25,6 +25,7 @@ DRIVER_LITERALS = (
     b"SDL_JOYSTICK_HIDAPI_SWITCH2",
     b"Nintendo Switch2 controllers not supported over Bluetooth",
     b"Couldn't find bulk endpoints",
+    b"SEGARECOMP_HIDAPI_SETUP_%04x_%04x",  # packaging/sdl-switch2-diagnostics.patch (setup trace for the input diagnostics) is applied
 )
 FORBIDDEN_RUNTIME = re.compile(r"^(vcruntime|msvcp|msvcr\d|concrt|vccorlib|ucrtbase|libgcc|libstdc|libwinpthread|libusb)", re.I)
 REQUIRED_SDL_EXPORTS = ("SDL_Init", "SDL_OpenGamepad", "SDL_GetJoysticks", "SDL_hid_enumerate", "SDL_GetGamepadConnectionState", "SDL_CreateWindow")

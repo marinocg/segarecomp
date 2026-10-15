@@ -387,6 +387,13 @@ SvSwitch2Verdict sv_diag_switch2_message(const SvDiag *d, const SvDiagContext *c
   f.state = SV_PAD_NO_JOYSTICK;
   f.driver_declared = sv_diag_switch2_driver_declared();
   f.libusb_loadable = d != NULL && d->libusb_loadable;
+  for (i = 0x2066; i <= 0x2073; ++i) { /* the patched Segarecomp SDL publishes how Switch 2 driver setup went, per product, as a hint */
+    char name[48];
+    const char *trace;
+    snprintf(name, sizeof name, "SEGARECOMP_HIDAPI_SETUP_057e_%04x", (unsigned)i);
+    trace = SDL_GetHint(name);
+    if (trace != NULL && *trace != '\0') { copy_text(f.setup_trace, sizeof f.setup_trace, trace); f.seen = 1; break; }
+  }
   for (i = 0; hid != NULL && i < hid_count; ++i) {
     if (!sv_switch2_is_product(hid[i].vendor, hid[i].product)) continue;
     f.seen = 1;
@@ -453,7 +460,7 @@ size_t sv_diag_summary(const SvDiag *d, char *out, size_t cap) {
     ADD(", events=%lu%s\n", v->is_gamepad ? v->events : v->raw_events, v->is_gamepad ? "" : " (raw)");
   }
   {
-    char s2[640];
+    char s2[1536];
     SvDiagContext ctx;
     memset(&ctx, 0, sizeof ctx);
     if (sv_diag_switch2_message(d, &ctx, NULL, 0, s2, sizeof s2) != SV_S2_NOT_SEEN) ADD("%s\n", s2);

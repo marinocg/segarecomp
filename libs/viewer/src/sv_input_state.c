@@ -1,5 +1,7 @@
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "sv_input_state.h"
 
@@ -145,7 +147,54 @@ SvSwitch2Verdict sv_switch2_assess(const SvSwitch2Facts *f) {
   if (f->transport == 2) return SV_S2_BLUETOOTH;
   if (!f->driver_declared) return SV_S2_DRIVER_ABSENT;
   if (!f->libusb_loadable) return SV_S2_LIBUSB_MISSING;
+  if (f->setup_trace[0] != '\0' && (strstr(f->setup_trace, "FAILED") != NULL || strstr(f->setup_trace, "no_driver") != NULL)) return SV_S2_SETUP_FAILED;
   return SV_S2_USB_NOT_CLAIMED;
+}
+
+const char *sv_libusb_error_name(int code) {
+  switch (code) {
+    case -1: return "IO";
+    case -2: return "INVALID_PARAM";
+    case -3: return "ACCESS";
+    case -4: return "NO_DEVICE";
+    case -5: return "NOT_FOUND";
+    case -6: return "BUSY";
+    case -7: return "TIMEOUT";
+    case -8: return "OVERFLOW";
+    case -9: return "PIPE";
+    case -10: return "INTERRUPTED";
+    case -11: return "NO_MEM";
+    case -12: return "NOT_SUPPORTED";
+    case -99: return "OTHER";
+    default: return "";
+  }
+}
+
+static void put_char(char *out, size_t cap, size_t *used, char c) {
+  if (*used + 1 < cap) out[(*used)++] = c;
+}
+
+/* Copies SDL's setup trace as one line per " | " step and names each libusb error code that follows ": " or "error " ("error -12" -> "error -12 (NOT_SUPPORTED)"). */
+static size_t append_trace(char *out, size_t cap, size_t used, const char *trace) {
+  const char *p = trace;
+  while (*p != '\0') {
+    if (p[0] == ' ' && p[1] == '|' && p[2] == ' ') { put_char(out, cap, &used, '\n'); p += 3; continue; }
+    if (p[0] == '-' && p[1] >= '0' && p[1] <= '9' && ((p - trace >= 2 && p[-2] == ':' && p[-1] == ' ') || (p - trace >= 6 && strncmp(p - 6, "error ", 6) == 0))) {
+      char *end = NULL;
+      const long code = strtol(p, &end, 10);
+      const char *name = sv_libusb_error_name((int)code);
+      for (; p < end; ++p) put_char(out, cap, &used, *p);
+      if (*name != '\0') {
+        put_char(out, cap, &used, ' '); put_char(out, cap, &used, '(');
+        for (; *name != '\0'; ++name) put_char(out, cap, &used, *name);
+        put_char(out, cap, &used, ')');
+      }
+      continue;
+    }
+    put_char(out, cap, &used, *p++);
+  }
+  if (cap > 0) out[used < cap ? used : cap - 1] = '\0';
+  return used;
 }
 
 size_t sv_switch2_message(const SvSwitch2Facts *f, const char *detail, char *out, size_t cap) {
@@ -170,6 +219,10 @@ size_t sv_switch2_message(const SvSwitch2Facts *f, const char *detail, char *out
     case SV_S2_LIBUSB_MISSING:
       ADD("Native USB support is available in this SDL build.\nlibusb runtime: NOT found, so the driver cannot start. Keep libusb-1.0 where SDL can load it "
           "(the Windows package ships libusb-1.0.dll beside the launcher and in sdl3/lib).");
+      break;
+    case SV_S2_SETUP_FAILED:
+      ADD("Native USB support is available in this SDL build.\nlibusb runtime: available.\nSDL's Switch 2 driver did not start. SDL's own setup trace follows (the last step names the failure):\n");
+      used = append_trace(out, cap, used, f->setup_trace);
       break;
     case SV_S2_USB_NOT_CLAIMED:
       ADD("Native USB support is available in this SDL build.\nlibusb runtime: available.\nSDL did not turn the controller into a gamepad. The USB interface may not be "

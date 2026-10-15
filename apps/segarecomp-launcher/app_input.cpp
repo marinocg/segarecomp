@@ -96,7 +96,7 @@ void App::update_input_diag() {
 }
 
 std::string App::input_report() const {
-  char text[2400];
+  char text[4000];
   (void)sv_diag_summary(diag_, text, sizeof text);
   std::string out = std::string("Segarecomp ") + SEGARECOMP_LAUNCHER_VERSION + "\n" + text;
   out += std::string("Host: ") + SDL_GetPlatform() + "\n";
@@ -107,7 +107,7 @@ std::string App::input_report() const {
   } else if (hid_state_ == -1) out += "OS device scan failed: " + hid_error_ + "\n";
   {  // a Switch 2 controller only the OS scan sees is not in the SDL summary above
     SvDiagContext ctx{};
-    char text[640];
+    char text[1536];
     if (sv_diag_switch2_message(diag_, &ctx, nullptr, 0, text, sizeof text) == SV_S2_NOT_SEEN && hid_state_ > 0 &&
         sv_diag_switch2_message(diag_, &ctx, hid_.data(), static_cast<int>(hid_.size()), text, sizeof text) != SV_S2_NOT_SEEN)
       out += std::string(text) + "\n";
@@ -186,7 +186,7 @@ void App::draw_input_diagnostics(float w) {
   {  // Nintendo Switch 2 controller: the first broken link of the native chain, in plain words (only when one is visible to SDL or to the OS scan)
     SvDiagContext s2ctx{};
     s2ctx.settings = &viewer_settings_; s2ctx.system = SV_SYSTEM_GENESIS; s2ctx.player = 0; s2ctx.nav_checked = 1;
-    char text[640];
+    char text[1536];
     const SvSwitch2Verdict verdict = sv_diag_switch2_message(diag_, &s2ctx, hid_.data(), static_cast<int>(hid_.size()), text, sizeof text);
     if (verdict != SV_S2_NOT_SEEN) {
       heading(ctx_, "Nintendo Switch 2 controller");

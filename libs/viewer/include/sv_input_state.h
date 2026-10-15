@@ -56,7 +56,8 @@ typedef enum SvSwitch2Verdict {
   SV_S2_BLUETOOTH,      /* on Bluetooth: SDL 3.4's Switch 2 driver is USB only */
   SV_S2_DRIVER_ABSENT,  /* this SDL build does not declare the native USB driver */
   SV_S2_LIBUSB_MISSING, /* driver declared, but the libusb runtime cannot be loaded */
-  SV_S2_USB_NOT_CLAIMED,/* driver and libusb present, yet SDL did not turn the device into a gamepad (USB interface not accessible?) */
+  SV_S2_SETUP_FAILED,   /* driver and libusb present, SDL's own setup trace names the failing step (open, claim, initialise, or no driver) */
+  SV_S2_USB_NOT_CLAIMED,/* driver and libusb present, yet SDL did not turn the device into a gamepad and reported no setup trace */
   SV_S2_OPEN_FAILED,    /* SDL recognised a gamepad but SDL_OpenGamepad failed */
   SV_S2_NO_EVENTS,      /* opened, no input yet */
   SV_S2_BINDINGS,       /* events arrive, the game bindings are missing/conflicting */
@@ -70,11 +71,14 @@ typedef struct SvSwitch2Facts {
   int driver_declared;
   int libusb_loadable;
   int transport;         /* 0 not determined, 1 USB (wired), 2 Bluetooth: only when SDL or the OS scan actually reported it */
+  char setup_trace[480]; /* SDL's setup trace of the patched Segarecomp SDL (hint SEGARECOMP_HIDAPI_SETUP_057e_<pid>), "" when none */
   SvPadState state;      /* the generic classification of the SDL device (SV_PAD_NO_JOYSTICK when only the OS scan sees it) */
 } SvSwitch2Facts;
 
 int sv_switch2_is_product(unsigned vendor, unsigned product);
 SvSwitch2Verdict sv_switch2_assess(const SvSwitch2Facts *facts);
+/* Names a libusb error code (-3 -> "ACCESS"), "" when unknown. */
+const char *sv_libusb_error_name(int code);
 /* Multi-line actionable text (empty for SV_S2_NOT_SEEN); `detail` is SDL's own error text for SV_S2_OPEN_FAILED (may be NULL). Returns the length. */
 size_t sv_switch2_message(const SvSwitch2Facts *facts, const char *detail, char *out, size_t cap);
 

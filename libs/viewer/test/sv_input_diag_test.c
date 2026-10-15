@@ -166,7 +166,7 @@ int main(void) {
   /* Switch 2 diagnostics from the same facts (a virtual device with the Switch 2 Pro vendor/product proves the DIAGNOSTIC chain only, never the
    * Nintendo protocol or a physical controller). Gamepad opened and live: the working verdict, no failure text. */
   {
-    char msg[640];
+    char msg[1536];
     CHECK(sv_diag_switch2_message(d, &ctx, NULL, 0, msg, sizeof msg) == SV_S2_WORKING && strstr(msg, "events are arriving") != NULL, "Switch 2: an opened, live pad is the working verdict");
     CHECK(strstr(msg, "Connection:") == NULL, "Switch 2: no connection type is invented when SDL does not report one");
     sv_diag_summary(d, text, sizeof text);
@@ -194,7 +194,7 @@ int main(void) {
   SDL_DetachVirtualJoystick(pad);
   pump(d);
   {
-    char msg[640];
+    char msg[1536];
     SvDiagHid hid;
     SDL_JoystickID s2 = attach(SDL_JOYSTICK_TYPE_UNKNOWN, "Virtual Switch 2 Pro (diagnostic path only)", 0x057e, 0x2069);
     const SvSwitch2Verdict expected = !sv_diag_switch2_driver_declared() ? SV_S2_DRIVER_ABSENT : (!sv_diag_libusb_available(d) ? SV_S2_LIBUSB_MISSING : SV_S2_USB_NOT_CLAIMED);
@@ -205,6 +205,10 @@ int main(void) {
     hid.vendor = 0x057e; hid.product = 0x2069; hid.bus = 2;
     CHECK(sv_diag_switch2_message(d, &ctx, &hid, 1, msg, sizeof msg) == SV_S2_BLUETOOTH && strstr(msg, "Connection: Bluetooth.") != NULL && strstr(msg, "does not provide native Switch 2 Bluetooth") != NULL,
           "Switch 2: a Bluetooth OS-scan entry yields the Bluetooth message");
+    SDL_SetHint("SEGARECOMP_HIDAPI_SETUP_057e_2069", "begin iface=0 | stage=init_device FAILED driver=Switch2 error=\"Couldn't claim interface 1: -12\"");
+    CHECK(sv_diag_switch2_message(d, &ctx, NULL, 0, msg, sizeof msg) == (expected == SV_S2_USB_NOT_CLAIMED ? SV_S2_SETUP_FAILED : expected), "Switch 2: SDL's published setup trace selects the setup verdict only when driver and libusb are present");
+    if (expected == SV_S2_USB_NOT_CLAIMED) CHECK(strstr(msg, "interface 1: -12 (NOT_SUPPORTED)") != NULL, "Switch 2: the trace reaches the message with the libusb error named");
+    SDL_ResetHint("SEGARECOMP_HIDAPI_SETUP_057e_2069");
     hid.bus = 1;
     CHECK(sv_diag_switch2_message(d, &ctx, &hid, 1, msg, sizeof msg) == expected && strstr(msg, "Connection: USB.") != NULL, "Switch 2: a USB OS-scan entry keeps the chain and states the connection");
     SDL_DetachVirtualJoystick(s2);

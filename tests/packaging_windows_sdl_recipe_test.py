@@ -36,6 +36,9 @@ check("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded" in script and "CC=cl" in scri
 check("SDL_REQUIRE_LIBUSB=1" in script and "SDL_CONFIGURE_ONLY" in script and "HAVE_LIBUSB" in script, "the configure-time gate exists and can be exercised on its own")
 check('sdl_check.py" driver' in script and 'sdl_check.py" windows' in script and "dlltool" in script, "post-build gates and the Zig import library come from the built DLL")
 check("segarecomp-switch2-usb" in script, "a build that carries the driver declares it in SDL_GetRevision() for the diagnostics")
+check('patch -p1 -d "SDL3-${SDL_VERSION}" < "$here/sdl-switch2-diagnostics.patch"' in script and (ROOT / "packaging/sdl-switch2-diagnostics.patch").is_file() and
+      "SEGARECOMP_HIDAPI_SETUP_" in read("packaging/sdl-switch2-diagnostics.patch") and "SEGARECOMP_HIDAPI_SETUP_%04x_%04x" in read("packaging/sdl_check.py"),
+      "the diagnostics-only SDL patch is applied at packaging time and its presence is gated on the built binary")
 check("SDL3-devel" not in workflow and "SDL_VC_SHA256" not in workflow, "the Windows release no longer ships the official SDL binaries")
 check("SDL_CONFIGURE_ONLY=1" in workflow and "SDL_HIDAPI_LIBUSB=OFF" in workflow and "ACCEPTED an SDL build without libusb" in workflow, "the workflow proves the gate rejects a build without libusb")
 check("sdl_check.py" in workflow and "cmp \"$SDL3_DLL\"" in workflow and "SEGARECOMP_PACKAGE_LIBUSB_DIR" in workflow, "the extracted package is checked against the built binaries")

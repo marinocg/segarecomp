@@ -123,6 +123,29 @@ Sources checked 2026-10-15: [14742](https://github.com/libsdl-org/SDL/issues/147
 [15245](https://github.com/libsdl-org/SDL/issues/15245) (open), [pinned driver](https://github.com/libsdl-org/SDL/blob/release-3.4.16/src/joystick/hidapi/SDL_hidapi_switch2.c#L323-L391),
 [libusb compile guard](https://github.com/libsdl-org/SDL/blob/release-3.4.16/src/joystick/hidapi/SDL_hidapijoystick_c.h#L38-L40).
 
+### Follow-up: `driver = NONE (DISABLED)` for `057e:2069` on Windows (real trace)
+
+Reported by the owner of a physical controller: interfaces MI_00 = HidUsb, MI_01 = WinUSB, MI_02 = usbaudio; SDL (`SDL_HINT_EVENT_LOGGING`/debug) says
+`Added HIDAPI device 'Nintendo Switch Pro Controller' ... bluetooth 0 ... interface 0 ... path = 1-7:1.0, driver = NONE (DISABLED)`; driver compiled, libusb loads, joystick still unmapped.
+So the **driver is compiled, libusb loads and Windows already binds WinUSB to interface 1**: the "WinUSB binding" suspicion of the first version is not the cause. What the log cannot say, from the SDL 3.4.16 source:
+
+* `driver = NONE` is printed after `HIDAPI_SetupDeviceDriver()`; `(DISABLED)` is only the literal for "no driver object", not the hint's state. Four code paths end there silently: (1) `HIDAPI_GetDeviceDriver()` returns NULL (switch-2 hint off, `SDL_ShouldIgnoreJoystick`, usage-page filter); (2) `SDL_hid_open_path()` fails, logged only at DEBUG and without cleanup; (3) `InitDevice()` fails and `HIDAPI_CleanupDeviceDriver()` runs, discarding `SDL_GetError()`; (4) it never got that far.
+* The device SDL lists is the **HID interface 0** (`path 1-7:1.0`, the libusb backend enumerates HID-class interfaces only, `libusb/hid.c should_enumerate_interface`). `SDL_hid_open_path` therefore does `libusb_open` + **`libusb_claim_interface(0)`** on a HidUsb-bound interface (`hidapi_initialize_device`), and only afterwards the Switch 2 driver looks for the bulk endpoints of interface **1** and claims it on that same handle. Whether the claim of interface 0, the claim of interface 1 or the init sequence fails on Windows is exactly what the source cannot tell.
+
+**Diagnostic build.** `packaging/sdl-switch2-diagnostics.patch` (applied by `build-sdl3.sh` with `patch`, which fails if a hunk does not apply; the built DLL is checked for it) changes no behaviour. It records, per Nintendo Switch 2 device, every setup step with SDL's/libusb's own error text *before* failed cleanup, and
+publishes it as the hint `SEGARECOMP_HIDAPI_SETUP_057e_<pid>`; libusb's open/claim failures become `SDL_SetError` texts with the numeric libusb code (`-3` ACCESS, `-5` NOT_FOUND, `-6` BUSY, `-12` NOT_SUPPORTED, ...). The Input Diagnostics page, the copied report and the in-game status page show it as a **setup trace**, one step per line, codes named:
+
+| Trace step | Meaning |
+| --- | --- |
+| `begin iface=.. class=.. usage_page=..` | what SDL enumerated (interface, class, usage) |
+| `stage=no_driver (switch2_driver_enabled=0/1, ignored=0/1, usage_filter_applies=0/1)` | path (1): hint disabled, ignored, or usage filter |
+| `stage=open_path FAILED error="libusb_open failed..." / "libusb_claim_interface(0) failed: libusb error N"` | path (2): the libusb HID open, i.e. claiming the HID interface |
+| `stage=open_path ok libusb_backed=0/1` | the SDL HID handle is (not) libusb-backed |
+| `usb: libusb loaded` / `handle is libusb-backed` / `bulk endpoints interface=1 out=0x.. in=0x..` / `interface 1 claimed` / `initialization sequence sent` | driver progress (`FindBulkEndpoints`, claim, init) |
+| `stage=init_device FAILED driver=.. error="..."` | path (3): the real `InitDevice` error |
+
+Reproduction status: the patched SDL builds and its diagnostics logic is unit tested (including synthetic traces). The failing operation itself **cannot be reproduced without the physical controller on Windows**; the development artifact of this PR is built to expose it. No Windows driver is touched, no protocol code is copied into Segarecomp, no mapping is added, and no workaround is attempted until the trace names the failure.
+
 ### Packaging decisions
 
 * **libusb is loaded dynamically and shipped as a separate DLL** (static linking would put LGPL-2.1 code inside SDL3.dll and require relinkable object files; a separate unmodified,
