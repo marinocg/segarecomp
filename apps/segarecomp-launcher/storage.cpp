@@ -1,6 +1,7 @@
 #include "storage.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -59,10 +60,18 @@ void measure_tree(const fs::path &dir, Measure &m, int depth, const std::atomic<
 
 enum class Category { executable, generated_c, objects, logs, metadata, other };
 
+// Debug-symbol files (game.pdb and the like) beside the executable are build intermediates too: nothing at run time needs them.
+bool is_pdb(const std::string &name) {
+  if (name.size() < 5) return false;
+  std::string ext = name.substr(name.size() - 4);
+  for (char &c : ext) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return ext == ".pdb";
+}
+
 Category categorize(const std::string &name) {
   if (name == "game" || name == "game.exe") return Category::executable;
   if (name == "generated.c" || name == "generated" || name == "generated-z80") return Category::generated_c;
-  if (name == "obj") return Category::objects;
+  if (name == "obj" || is_pdb(name)) return Category::objects;
   if (name == "build.log" || name == "run.log") return Category::logs;
   if (name == "status.json" || name == "metadata.json") return Category::metadata;
   return Category::other;
@@ -279,10 +288,17 @@ Plan plan_intermediates(const StorageReport &report, const std::vector<std::stri
         if (ec || (status.type() != fs::file_type::regular && status.type() != fs::file_type::directory)) continue;
         add_item(plan, path, status.type() == fs::file_type::directory, measure_path(path));
       }
+      std::error_code lec;  // debug-symbol (.pdb) files next to the executable
+      for (fs::directory_iterator it(d.path, lec), end; !lec && it != end; it.increment(lec)) {
+        std::error_code sec;
+        const auto status = it->symlink_status(sec);
+        if (sec || status.type() != fs::file_type::regular || !is_pdb(utf8_of(it->path().filename()))) continue;
+        add_item(plan, it->path(), false, measure_path(it->path()));
+      }
     }
   }
   plan.remains = {"Native executables (games stay playable)", "Library entries, covers and settings", "Build status and logs"};
-  plan.notes = {"Generated C sources and object files are deleted. They are recreated by the next Recompile."};
+  plan.notes = {"Generated C sources, object files and debug-symbol (.pdb) files are deleted. They are recreated by the next Recompile."};
   return plan;
 }
 

@@ -80,6 +80,7 @@ int main() {
   spit(cache / "games" / (key32('1') + ".failed") / "obj" / "x.o", std::string(30, 'f'));
   spit(cache / "games" / (key32('9') + ".partial") / "obj" / "y.o", std::string(40, 'p'));   // unowned partial
   spit(cache / "games" / "mystery" / "keep.me", "unknown");                                 // unrecognized folder
+  spit(cache / "games" / key32('1') / "Game.PDB", std::string(70, 'd'));                      // debug symbols beside the executable (an intermediate)
   spit(cache / "zig-cache" / "o" / "blob", std::string(900, 'z'));
   spit(cache / "zig-cache" / "h" / "blob2", std::string(100, 'z'));
 
@@ -88,20 +89,20 @@ int main() {
   expect(report.complete, "scan completes");
   const EntryUsage *ua = report.find(ida);
   expect(ua != nullptr && ua->dirs.size() == 3, "A owns current, superseded and failed folders");
-  expect(ua != nullptr && ua->intermediates == (200 + 300 + 50 + 400) * 2 && report.zig_cache == 1000, "intermediates and zig cache sized exactly");
+  expect(ua != nullptr && ua->intermediates == (200 + 300 + 50 + 400) * 2 + 70 && report.zig_cache == 1000, "intermediates and zig cache sized exactly");
   expect(report.unlinked.size() == 2 && report.failed_partial == 100 + 40, "unrecognized and unowned partial folders are reported as unlinked; failed/partial sized");
   expect(report.catalog_and_covers >= 5, "library data is accounted separately");
 
   {  // intermediates: executable survives, game stays ready
     Plan plan = plan_intermediates(report, {ida}, busy);
-    expect(plan.bytes == (200 + 300 + 50 + 400) * 2, "plan bytes = exactly the generated C and objects of every tracked build");
+    expect(plan.bytes == (200 + 300 + 50 + 400) * 2 + 70, "plan bytes = exactly the generated C, objects and .pdb files of every tracked build");
     expect(busy.try_begin_maintenance(), "maintenance lock");
     ExecResult r = execute_plan(plan, cache, busy);
     busy.end_maintenance();
     expect(r.ok() && r.bytes_freed == plan.bytes, "freed what was planned");
     expect(entry_ready(cache / "games" / key32('1')) && fs::exists(cache / "games" / key32('1') / "build.log") && !fs::exists(cache / "games" / key32('1') / "obj") &&
-               !fs::exists(cache / "games" / key32('1') / "generated.c") && !fs::exists(cache / "games" / key32('1') / "generated"),
-           "executable and status survive, intermediates are gone");
+               !fs::exists(cache / "games" / key32('1') / "generated.c") && !fs::exists(cache / "games" / key32('1') / "generated") && !fs::exists(cache / "games" / key32('1') / "Game.PDB"),
+           "executable and status survive, intermediates (including the .pdb) are gone");
     expect(fs::exists(cache / "games" / key32('3') / "obj"), "other games are untouched");
   }
   report = scan_storage(catalog, cache, library);
