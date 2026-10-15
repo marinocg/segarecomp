@@ -339,8 +339,32 @@ void App::poll_scan() {
   report_valid_ = report_.complete;
   if (settings_.cleanup.mode == "soft_limit") soft_limit_exceeded_ = report_.builds_total() > static_cast<std::uintmax_t>(settings_.cleanup.soft_limit_mb) * 1024U * 1024U;
   else soft_limit_exceeded_ = false;
-  if (scan_again_) { scan_again_ = false; request_scan(); return; }
-  if (policy_eval_pending_) { policy_eval_pending_ = false; evaluate_policy_after_scan(); }
+  if (scan_again_) { scan_again_ = false; request_scan(); }
+}
+
+// Sequential post-build maintenance, one step per call: (1) the finished games' cleanup, (2) the keep-last-N policy on a fresh scan. Each step waits
+// (its flag stays set) until the maintenance guard is available; nothing is dropped, and nothing blocks gameplay or starts another worker.
+void App::pump_cleanup() {
+  if (maintenance_running_ || busy_.any_activity()) return;
+  if (!pending_cleanup_ids_.empty()) {
+    const std::vector<std::string> ids(pending_cleanup_ids_.begin(), pending_cleanup_ids_.end());
+    pending_cleanup_ids_.clear();
+    Catalog copy{fs::path{}};
+    copy.entries() = catalog_.entries();
+    const StorageReport fresh = scan_storage(copy, cache_dir_, library_dir_);
+    Plan plan;
+    plan.kind = settings_.keep_old_artifacts ? PlanKind::intermediates : PlanKind::superseded;
+    // Recompiling replaces the game's older builds (Settings > Build & Runtime > "Keep old build artifacts" opts out); the build just produced
+    // is the current one and stays. Intermediates inside a folder that is deleted whole are not scheduled twice.
+    if (!settings_.keep_old_artifacts) plan = plan_superseded(fresh, ids, busy_);
+    if (settings_.cleanup.mode == "intermediates") plan = merge_plans_non_overlapping(std::move(plan), plan_intermediates(fresh, ids, busy_));
+    if (!plan.items.empty()) run_plan(plan);
+    return;  // the policy step waits for this cleanup and the rescan that follows it
+  }
+  if (policy_eval_pending_ && !scanning_ && !scan_again_) {
+    policy_eval_pending_ = false;
+    if (report_valid_) evaluate_policy_after_scan();
+  }
 }
 
 void App::evaluate_policy_after_scan() {
@@ -676,23 +700,10 @@ void App::finish_build() {
     }
     request_status_refresh();
     request_scan();
-    const bool drop_old = !settings_.keep_old_artifacts, drop_intermediates = settings_.cleanup.mode == "intermediates";
-    if (drop_old || drop_intermediates) {
-      // Exact, validated plan for this game only; runs under the busy guard like every cleanup. Recompiling replaces the game's older
-      // builds (Settings > Build & Runtime > "Keep old build artifacts" opts out); the build just produced is the current one and stays.
-      if (drop_intermediates) policy_eval_pending_ = false;
-      Catalog copy{fs::path{}};
-      copy.entries() = catalog_.entries();
-      const StorageReport fresh = scan_storage(copy, cache_dir_, library_dir_);
-      Plan plan = drop_old ? plan_superseded(fresh, {id}, busy_) : plan_intermediates(fresh, {id}, busy_);
-      if (drop_old && drop_intermediates) {
-        const Plan more = plan_intermediates(fresh, {id}, busy_);
-        plan.items.insert(plan.items.end(), more.items.begin(), more.items.end());
-        plan.bytes += more.bytes;
-      }
-      if (!plan.items.empty()) run_plan(plan);
-    }
-    if (!drop_intermediates && (settings_.cleanup.mode == "keep_last_n" || settings_.cleanup.mode == "soft_limit")) policy_eval_pending_ = true;
+    // Post-build cleanup is DEFERRED work, retained until it has run: it needs the maintenance guard, which is unavailable while any game runs
+    // (the UI lets you play another game during a build). pump_cleanup() performs it, then the keep-last-N policy, strictly in that order.
+    if (!settings_.keep_old_artifacts || settings_.cleanup.mode == "intermediates") pending_cleanup_ids_.insert(id);
+    if (settings_.cleanup.mode == "keep_last_n" || settings_.cleanup.mode == "soft_limit") policy_eval_pending_ = true;
     if (restart) { restart_pending_ = false; launch(id, true); }
   } else {
     failures_[id] = message;
@@ -846,6 +857,7 @@ void App::update_jobs() {
   }
   if (job_ && job_->finished()) finish_build();
   if (game_ && game_->poll()) finish_run();
+  pump_cleanup();
   if (!job_ && !build_queue_.empty() && !maintenance_running_ && modal_.kind == Modal::Kind::none) {
     const std::string next = build_queue_.pop_front();
     start_build(next);

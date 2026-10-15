@@ -302,6 +302,27 @@ Plan plan_intermediates(const StorageReport &report, const std::vector<std::stri
   return plan;
 }
 
+Plan merge_plans_non_overlapping(Plan primary, const Plan &extra) {
+  const auto inside = [](const fs::path &path, const fs::path &dir) {
+    const fs::path rel = path.lexically_relative(dir);
+    return !rel.empty() && *rel.begin() != "..";  // "." (the same path) is inside too
+  };
+  const std::size_t primary_count = primary.items.size();
+  for (const auto &item : extra.items) {
+    bool covered = false;
+    for (std::size_t i = 0; i < primary_count && !covered; ++i)
+      if (primary.items[i].directory && inside(item.path, primary.items[i].path)) covered = true;
+    if (covered) continue;
+    primary.items.push_back(item);
+    primary.bytes += item.bytes;
+  }
+  for (const auto &id : extra.entry_ids)
+    if (std::find(primary.entry_ids.begin(), primary.entry_ids.end(), id) == primary.entry_ids.end()) primary.entry_ids.push_back(id);
+  for (const auto &x : extra.excluded) primary.excluded.push_back(x);
+  for (const auto &n : extra.notes) if (std::find(primary.notes.begin(), primary.notes.end(), n) == primary.notes.end()) primary.notes.push_back(n);
+  return primary;
+}
+
 Plan plan_archive(const StorageReport &report, const std::vector<std::string> &ids, const BusyGuard &busy) {
   Plan plan;
   plan.kind = PlanKind::archive;

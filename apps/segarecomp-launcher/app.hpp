@@ -159,6 +159,7 @@ private:
   void run_plan(const Plan &plan);
   void poll_maintenance();
   void evaluate_policy_after_scan();
+  void pump_cleanup();
   void browse_import();
   void browse_locate(const std::string &id);
   void browse_cover(const std::string &id);
@@ -280,6 +281,7 @@ private:
   bool keep_failed_logs_ = true;
   bool soft_limit_exceeded_ = false;
   bool policy_eval_pending_ = false;
+  std::set<std::string> pending_cleanup_ids_;   // finished builds whose older builds / intermediates still have to be removed
   // maintenance (cleanup runs on a worker under the busy guard)
   std::future<ExecResult> maint_job_;
   Plan maint_plan_;
