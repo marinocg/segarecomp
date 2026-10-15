@@ -81,8 +81,8 @@ What this change fixes (compile + package): a pinned SDL built **with** the driv
 | --- | --- | --- |
 | **Driver compiled into SDL** | `build-sdl3.sh` configure gate (`HAVE_LIBUSB`, lazy `libusb-1.0.dll`) and `sdl_check.py driver` on the built binary (3 independent driver literals, not only the hint name); negative control: the same recipe with libusb disabled fails; verified on Linux locally and by CI on all three hosts | verified by CI |
 | **Runtime dependency available** | the extracted package ships `libusb-1.0.dll` beside the launcher and in `sdl3/lib` (byte-identical to the built one); the package smoke test runs `Segarecomp --input-report` and the generated Genesis and Master System games from the extracted package under a scrubbed `PATH` and requires the packaged SDL path, the driver declaration and `libusb-1.0 loadable: yes` | verified by CI |
-| **Controller successfully initialised** | owner's physical test: launcher yes (Steam closed), generated game **no** | **partial: launcher only** |
-| **Actual physical input verified** | launcher works; a game does not | **NOT achieved for games** |
+| **Controller successfully initialised** | owner's physical test: launcher and generated games work (Steam closed) | **user-reported success, one controller** |
+| **Actual physical input verified** | owner reports it works in the launcher and in games; per-step results (Genesis/SMS buttons, hot-plug) not itemised | **user-reported, not itemised** |
 
 Automated tests use SDL **virtual** joysticks. They prove the diagnostic paths, hot-plug, remapping and navigation; they cannot prove the Nintendo protocol, the Windows USB
 binding or a physical controller, and no virtual "Switch 2" test is offered as such.
@@ -159,7 +159,7 @@ process, unplug and replug the controller, then start from `cmd.exe` with `set L
 `could not open` (they name the interface and the Windows error). If it still reports ACCESS with nothing else running, that identifies a driver/permission cause and the smallest correction is decided from that line.
 
 **Same failure inside a game (physical trace, Steam closed).** The game's own log and its Controller status page show the identical trace (`libusb_open failed ... libusb error -3 (ACCESS)`, `driver = NONE`), while the launcher, started first, had the controller. WinUSB admits one opener, so the launcher process holding the interface is the consistent explanation; the owner's cross-check (start the game executable with the launcher closed) was not run, so it remains an inference until the artifact below is tested.
-**Correction (smallest change):** the launcher yields exclusive libusb-driven controllers before it spawns a game process and reclaims them when the game ends (`sv_diag_yield_exclusive_devices` / `sv_diag_reclaim_exclusive_devices`): it switches SDL's Switch 2 driver hint off, which makes SDL close its libusb handle on the next joystick update, and restores the earlier value afterwards. The launcher's controller briefly disappears while a game runs (a normal hot-unplug for its UI) and returns afterwards. Regression guards: hint round-trip test (`sv_input_diag_test`), static ordering test (`packaging_windows_sdl_recipe_test`). Whether the game now gets the controller is **NOT VERIFIED ON PHYSICAL HARDWARE** until the owner tests it.
+**Correction (smallest change):** the launcher yields exclusive libusb-driven controllers before it spawns a game process and reclaims them when the game ends (`sv_diag_yield_exclusive_devices` / `sv_diag_reclaim_exclusive_devices`): it switches SDL's Switch 2 driver hint off, which makes SDL close its libusb handle on the next joystick update, and restores the earlier value afterwards. The launcher's controller briefly disappears while a game runs (a normal hot-unplug for its UI) and returns afterwards. Regression guards: hint round-trip test (`sv_input_diag_test`), static ordering test (`packaging_windows_sdl_recipe_test`). **Owner's physical result: with this change the controller works inside games** (user-reported; Steam fully closed; individual per-step results were not itemised).
 
 ### Packaging decisions
 
@@ -175,7 +175,7 @@ process, unplug and replug the controller, then start from `cmd.exe` with `set L
 
 | OS | USB-C / USB | Bluetooth |
 | --- | --- | --- |
-| Windows 10/11 | SDL with the driver + libusb **built and packaged, verified by CI**; **user-reported: works in the launcher only while Steam is fully closed; FAILS inside generated games** (cause not yet established) | not supported by the pinned SDL driver; Steam Input / a bridge still work |
+| Windows 10/11 | SDL with the driver + libusb **built and packaged, verified by CI**; **user-reported physical success in the launcher and inside generated games, only while Steam is fully closed** (Steam holds the WinUSB interface otherwise; the launcher yields it to a game process) | not supported by the pinned SDL driver; Steam Input / a bridge still work |
 | Linux | release recipe requires the driver; needs OS libusb and udev permissions: **NOT VERIFIED on hardware** | not supported |
 | macOS | release recipe requires the driver; needs OS libusb: **NOT VERIFIED on hardware** | not supported |
 
@@ -195,7 +195,7 @@ In a game the pause menu opens with **Back/Select (Nintendo "-")**, **Guide (Hom
 Pause button), so pressing "+" to open the menu does nothing menu-related by design; the Controls page, the Controller status page and the first menu
 page say so. SDL names buttons by position: South is the Nintendo **B**, East is **A**; the cue glyphs follow the connected controller's printed labels.
 
-## Physical test on Windows (Switch 2 Pro Controller over USB-C) — launcher works with Steam closed, games do not
+## Physical test on Windows (Switch 2 Pro Controller over USB-C) — user-reported success with Steam closed
 
 No physical controller or Windows machine was available to the author, so everything below is the procedure for the person who owns one. Download the Windows development
 artifact: open the pull request's **release** workflow run (Actions tab) and download `segarecomp-windows-x86_64` (a ZIP of the package, built from the PR head; it is
