@@ -69,3 +69,6 @@ set_property(TEST segarecomp_ml_region_z80_gen2_weights_test APPEND PROPERTY LAB
 add_test(NAME segarecomp_sms_adaptive_budget_screen_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_sms_adaptive_budget_screen_test.py)
 set_property(TEST segarecomp_sms_adaptive_budget_screen_test APPEND PROPERTY LABELS full fast)
+add_test(NAME segarecomp_m68k_adaptive_budget_test COMMAND ${Python3_EXECUTABLE}
+  ${CMAKE_CURRENT_SOURCE_DIR}/segarecomp_m68k_adaptive_budget_test.py)
+set_property(TEST segarecomp_m68k_adaptive_budget_test APPEND PROPERTY LABELS full fast)
