@@ -81,8 +81,8 @@ What this change fixes (compile + package): a pinned SDL built **with** the driv
 | --- | --- | --- |
 | **Driver compiled into SDL** | `build-sdl3.sh` configure gate (`HAVE_LIBUSB`, lazy `libusb-1.0.dll`) and `sdl_check.py driver` on the built binary (3 independent driver literals, not only the hint name); negative control: the same recipe with libusb disabled fails; verified on Linux locally and by CI on all three hosts | verified by CI |
 | **Runtime dependency available** | the extracted package ships `libusb-1.0.dll` beside the launcher and in `sdl3/lib` (byte-identical to the built one); the package smoke test runs `Segarecomp --input-report` and the generated Genesis and Master System games from the extracted package under a scrubbed `PATH` and requires the packaged SDL path, the driver declaration and `libusb-1.0 loadable: yes` | verified by CI |
-| **Controller successfully initialised** | needs a real controller whose USB interface is accessible to libusb | **NOT VERIFIED ON PHYSICAL HARDWARE** |
-| **Actual physical input verified** | the manual procedure below | **NOT VERIFIED ON PHYSICAL HARDWARE** |
+| **Controller successfully initialised** | owner's physical test, Steam closed (SDL driver started; before that, Steam held the interface) | **user-reported success, one controller** |
+| **Actual physical input verified** | owner reports it "works"; the per-step procedure below was not itemised | **user-reported, not itemised; launcher/Genesis/SMS/hot-plug steps unrecorded** |
 
 Automated tests use SDL **virtual** joysticks. They prove the diagnostic paths, hot-plug, remapping and navigation; they cannot prove the Nintendo protocol, the Windows USB
 binding or a physical controller, and no virtual "Switch 2" test is offered as such.
@@ -152,7 +152,7 @@ Reproduction status: the patched SDL builds and its diagnostics logic is unit te
 WinUSB-bound interfaces first and returns their error, while an access error on the HID interface (MI_00) is deliberately ignored. An ACCESS result therefore points at the **WinUSB interface MI_01** being
 refused by `CreateFile` (`ERROR_ACCESS_DENIED`), not at the HID interface. This is derived from reading libusb's source and is **not yet confirmed on the device**. A known property of WinUSB is that
 an interface can be opened by one program at a time, so another program holding it (Steam's controller support is the obvious candidate; a leftover Segarecomp instance is another) is a *candidate*, not a finding.
-Not established: who holds it, or whether a clean machine without such a program succeeds.
+**Confirmed by the owner's physical test:** after exiting Steam completely the controller worked with this build. Steam (running in the background) was the program holding the WinUSB interface; one controller, one machine.
 
 Next physical test (no code change, no driver change): exit Steam completely (tray icon > Exit; check Task Manager for `steam.exe`/`steamwebhelper.exe`), close any other controller software and every Segarecomp
 process, unplug and replug the controller, then start from `cmd.exe` with `set LIBUSB_DEBUG=4` and `set SEGARECOMP_INPUT_TRACE=1` and run `Segarecomp.exe 2> libusb.txt`. Report the setup trace and the `libusb.txt` lines containing
@@ -172,7 +172,7 @@ process, unplug and replug the controller, then start from `cmd.exe` with `set L
 
 | OS | USB-C / USB | Bluetooth |
 | --- | --- | --- |
-| Windows 10/11 | SDL with the driver + libusb **built and packaged, verified by CI**; controller initialisation depends on the interface being bound to WinUSB: **NOT VERIFIED ON PHYSICAL HARDWARE** | not supported by the pinned SDL driver; Steam Input / a bridge still work |
+| Windows 10/11 | SDL with the driver + libusb **built and packaged, verified by CI**; **user-reported physical success** (Switch 2 Pro over USB-C, Windows binds WinUSB to interface 1 automatically) **only while Steam is fully closed**: Steam holds the interface otherwise. Which individual steps of the physical procedure passed was not itemised | not supported by the pinned SDL driver; Steam Input / a bridge still work |
 | Linux | release recipe requires the driver; needs OS libusb and udev permissions: **NOT VERIFIED on hardware** | not supported |
 | macOS | release recipe requires the driver; needs OS libusb: **NOT VERIFIED on hardware** | not supported |
 
@@ -192,13 +192,13 @@ In a game the pause menu opens with **Back/Select (Nintendo "-")**, **Guide (Hom
 Pause button), so pressing "+" to open the menu does nothing menu-related by design; the Controls page, the Controller status page and the first menu
 page say so. SDL names buttons by position: South is the Nintendo **B**, East is **A**; the cue glyphs follow the connected controller's printed labels.
 
-## Physical test on Windows (Switch 2 Pro Controller over USB-C) — NOT VERIFIED ON PHYSICAL HARDWARE
+## Physical test on Windows (Switch 2 Pro Controller over USB-C) — user-reported success with Steam fully closed
 
 No physical controller or Windows machine was available to the author, so everything below is the procedure for the person who owns one. Download the Windows development
 artifact: open the pull request's **release** workflow run (Actions tab) and download `segarecomp-windows-x86_64` (a ZIP of the package, built from the PR head; it is
 never published as a release). Extract it into an empty folder you can write to (not onto the Steam folder), then:
 
-1. Close Steam, or disable Steam Input for this controller (Steam > Settings > Controller), so Steam does not capture it.
+1. **Exit Steam completely** (tray icon > Exit; no `steam.exe`/`steamwebhelper.exe` in Task Manager). Disabling Steam Input for the controller was not enough: a running Steam holds the controller's WinUSB interface and libusb fails with ACCESS.
 2. Connect the Switch 2 Pro Controller with a USB-C cable. Do not use Bluetooth for this test.
 3. Start `Segarecomp.exe` normally (double-click), not through Steam.
 4. Open **Settings > Input Diagnostics**. In the **SDL** block expect `Switch 2 USB driver: declared by this SDL build` and `libusb-1.0: found at startup`. Click **Scan OS devices**.
