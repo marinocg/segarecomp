@@ -11,7 +11,8 @@ third-party inputs (`install.cmake`). `.github/workflows/release.yml` does exact
 | --- | --- | --- |
 | Zig (bundled `zig cc`) | 0.15.2 | official archives, SHA-256 in `release.yml`; MIT; used only to compile generated C |
 | ymfm (vendored) | 81aec25 | YM2612 core, BSD-3-Clause; compiled with `zig c++` and linked without a C++ runtime (shim) |
-| SDL3 | 3.4.16 | macOS/Linux built from the official source tarball (shared) with the libusb development files present, so SDL compiles its Nintendo Switch 2 USB driver (`SDL_REQUIRE_LIBUSB=1` fails the build otherwise; libusb itself is loaded from the OS at run time and not bundled); Windows: official `VC` devel (launcher, DLL) and `mingw` devel (import lib for Zig). The official Windows DLL has no Switch 2 driver (see `docs/testing/input-diagnostics.md`) |
+| SDL3 | 3.4.16 | built from the official source tarball (shared) on every OS by `build-sdl3.sh`, with libusb so SDL compiles its Nintendo Switch 2 USB driver (`SDL_REQUIRE_LIBUSB=1` and the Windows build fail without it; post-build `sdl_check.py` checks the binary). Windows: MSVC `SDL3.dll` + `SDL3.lib` (launcher) and a `libSDL3.dll.a` generated from the same DLL (bundled Zig). See `docs/testing/input-diagnostics.md` |
+| libusb | 1.0.29 (Windows only) | LGPL-2.1; the official MinGW `libusb-1.0.dll` (SHA-256 in `build-sdl3.sh`) is shipped unmodified beside the launcher and in `sdl3/lib`, with its license and source archive in `licenses/`; Linux/macOS use the OS libusb at run time |
 | Dear ImGui | 1.92.9b | fetched at configure time with a pinned hash (`apps/segarecomp-launcher/CMakeLists.txt`) |
 | stb_image.h | pinned commit | fetched at configure time with a pinned hash; decodes the launcher's own PNG assets only |
 | Silkscreen font | Google Fonts release | `apps/segarecomp-launcher/assets/fonts/`, SIL OFL 1.1 |
@@ -57,7 +58,7 @@ fill if an asset is missing.
 ```text
 Windows / Linux                       macOS
 Segarecomp[.exe]  (launcher)          Segarecomp.app/Contents/MacOS/Segarecomp
-SDL3.dll (Windows)                    Segarecomp.app/Contents/Resources/   (everything below)
+SDL3.dll, libusb-1.0.dll (Windows)    Segarecomp.app/Contents/Resources/   (everything below)
 bin/segarecomp[.exe]  (build driver)  bin/  toolchain/  runtime/  sdl3/  licenses/
 toolchain/  (Zig)   sdl3/{include,lib}  runtime/{platforms,libs}  licenses/  README.txt
 ```
@@ -84,8 +85,14 @@ cmake --build build/launcher && cmake --install build/launcher --prefix stage
 python3 packaging/smoke_test.py stage/Segarecomp.app/Contents/MacOS/Segarecomp
 ```
 
-The launcher also has a non-interactive mode used by the smoke test:
-`Segarecomp --build <rom> [--run] [--report <file>]`. `SEGARECOMP_CACHE_DIR` overrides the cache location.
+Windows uses the same script from Git Bash inside a Visual Studio developer environment, with the pinned Zig on hand (it generates the MinGW import library):
+`ZIG=<zig dir>/zig packaging/build-sdl3.sh <work> <prefix>`, then configure with `-DCMAKE_PREFIX_PATH=<prefix> -DSEGARECOMP_PACKAGE_SDL3_PREFIX=<prefix>
+-DSEGARECOMP_PACKAGE_SDL3_DLL=<prefix>/bin/SDL3.dll -DSEGARECOMP_PACKAGE_LIBUSB_DIR=<prefix>/libusb` (see `release.yml`, which is the reference). Both gates in the script
+(`SDL_REQUIRE_LIBUSB=1`, `sdl_check.py`) are always on there. The libusb runtime and its LGPL-2.1 obligations are described in `THIRD-PARTY-NOTICES.txt`.
+
+The launcher also has non-interactive modes used by the smoke test:
+`Segarecomp --build <rom> [--run] [--report <file>]` and `Segarecomp --input-report` (the SDL library actually loaded, the Switch 2 driver declaration, libusb
+loadability and the input diagnostics summary, with no window). `SEGARECOMP_CACHE_DIR` overrides the cache location.
 
 ## Deferred (deliberately out of the first release)
 

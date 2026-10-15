@@ -28,6 +28,9 @@ Good to know
   Default controls (Genesis): arrow keys = D-pad, Z = A, X = B, C = C, Return = Start; Player 2: I/K/J/L, U = A, O = B,
   P = C, Right Shift = Start. Master System: arrow keys = D-pad, Z = button 1, X = button 2, P = the console's Pause button
   (distinct from the pause menu). Gamepads work too (South/East/West = A/B/C or buttons 1/2, Start).
+  Settings > Input Diagnostics explains why a controller does not work. Nintendo Switch 2 controllers: USB only (Bluetooth
+  is not supported by SDL's driver); on Windows the controller's USB interface must be usable by libusb (WinUSB), which
+  Segarecomp never installs. Steam Input keeps working. Details: docs/testing/input-diagnostics.md in the source repository.
 * Built games are cached per user, and your library (the list of games, covers, settings) is kept next to the cache:
     Windows: %LOCALAPPDATA%\Segarecomp\
     macOS:   ~/Library/Application Support/Segarecomp/

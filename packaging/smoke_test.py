@@ -47,6 +47,30 @@ def parse(report):
     return dict(line.split("=", 1) for line in report.read_text(encoding="utf-8").splitlines() if "=" in line)
 
 
+def smoke_input(launcher, env, package_root):
+    """The packaged SDL is the one that is loaded (never a development-machine copy) and it carries the Switch 2 USB driver declaration; on Windows the
+    packaged libusb-1.0.dll is resolvable the way SDL3.dll loads it (executable directory, scrubbed PATH). Windowless: `Segarecomp --input-report`.
+    This proves the library and runtime-dependency claims only; it says nothing about a physical controller."""
+    result = subprocess.run([str(launcher), "--input-report"], env=env, text=True, capture_output=True, timeout=120)
+    require(result.returncode == 0, f"--input-report failed rc={result.returncode}: {result.stdout} {result.stderr}")
+    report = dict(line.split("=", 1) for line in result.stdout.splitlines()[:4] if "=" in line)
+    library = pathlib.Path(report["sdl_library"]).resolve()
+    require(package_root in library.parents, f"the launcher must load the PACKAGED SDL, not another copy: {library} (package {package_root})")
+    require(report["switch2_driver_declared"] == "yes" and "segarecomp-switch2-usb" in report["sdl_revision"],
+            f"the packaged SDL must declare the native Switch 2 USB driver: {report}")
+    if os.name == "nt":
+        require(report["libusb_loadable"] == "yes", f"the packaged libusb-1.0.dll must be loadable from the package: {report}")
+    print(f"input report: {library.name} declares the Switch 2 USB driver; libusb loadable: {report['libusb_loadable']}")
+
+
+def smoke_game_input_log(run_log, label):
+    """The generated game's own start-up diagnostics (the same SDL, loaded from the package by the game process)."""
+    require("input diagnostics (viewer start)" in run_log and "native Switch 2 USB driver declared by this SDL build: yes" in run_log,
+            f"{label}: the game must log the packaged SDL's Switch 2 driver declaration at start: {run_log[:800]}")
+    if os.name == "nt":
+        require("libusb-1.0 loadable: yes" in run_log, f"{label}: the game process must resolve the packaged libusb-1.0.dll: {run_log[:800]}")
+
+
 def smoke_master_system(tmp, launch):
     """Master System through the same launcher core, with the project-authored `machine_e2e` fixture (built from
     tools/sms_fixture_rom.py, never committed). The mapper is declared, never defaulted; the viewer run is finite."""
@@ -82,6 +106,7 @@ def smoke_master_system(tmp, launch):
             "SMS build.log must record the toolchain, mapper and declaration source")
     require(hermetic_compile_lines(build_log, compiler), "every SMS compile command must invoke the bundled compiler")
     require("viewer outcome 1 frames 60" in (entry / "run.log").read_text(encoding="utf-8"), "the SMS viewer must run its 60 frames")
+    smoke_game_input_log((entry / "run.log").read_text(encoding="utf-8"), "SMS")
     meta = (entry / "metadata.json").read_text(encoding="utf-8")
     require('"platform":"master-system"' in meta and '"mapper":"sega"' in meta and '"profile":"sms2_ntsc_export"' in meta and str(rom) not in meta,
             f"SMS metadata provenance: {meta}")
@@ -286,6 +311,8 @@ def main():
         require(any(pathlib.Path(p) == lib_rom for g in games for p in g["rom_paths"]) and not list((tmp / "cache").rglob("library-game.md")),
                 "the ROM is referenced by path and never copied into the cache")
         run_log = (entry / "run.log").read_text(encoding="utf-8")
+        smoke_game_input_log(run_log, "Genesis")
+        smoke_input(launcher, env, package_root)
         require("VIEWER_SUMMARY" in run_log and '"result":"stop"' in run_log and digest in run_log,
                 "the launched program must reach the synthetic checkpoint (sanitized stop report)")
         require("rom_path" in (entry / "metadata.json").read_text() and str(rom) not in (entry / "metadata.json").read_text(),

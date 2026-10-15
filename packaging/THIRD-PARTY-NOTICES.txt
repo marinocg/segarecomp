@@ -16,9 +16,13 @@ This package redistributes or incorporates the following third-party components 
 * stb_image.h (launcher PNG asset decoding), public domain / MIT       -> compiled in, not redistributed as a
   separate file; see https://github.com/nothings/stb
 * Silkscreen font (launcher UI typeface), SIL Open Font License 1.1    -> Silkscreen-OFL.txt
-* libusb-1.0 (LGPL-2.1): NOT redistributed. The Linux/macOS SDL3 in this package can load the operating system's own
-  libusb-1.0 at run time (dlopen) to talk to Nintendo Switch 2 controllers over USB; when it is absent the driver is
-  simply unavailable. See docs/testing/input-diagnostics.md.
+* libusb-1.0 1.0.29 (LGPL-2.1) -> libusb-LGPL-2.1.txt
+  Windows: libusb-1.0.dll (the official MinGW x86-64 build from https://github.com/libusb/libusb/releases/tag/v1.0.29,
+  unmodified) is shipped as a separate DLL that SDL3.dll loads at run time to talk to Nintendo Switch 2 controllers over
+  USB. You may replace it with another libusb-1.0 build of the same ABI. The corresponding source,
+  libusb-1.0.29-source.tar.bz2 (SHA-256 5977fc950f8d1395ccea9bd48c06b3f808fd3c2c961b44b0c2e6e29fc3a70a85), ships in this
+  licenses folder. Linux/macOS: NOT redistributed; SDL3 loads the operating system's own libusb-1.0 (dlopen) and the
+  driver is simply unavailable when it is absent. See docs/testing/input-diagnostics.md.
 * Original Segarecomp pixel-art (background, wordmark, icons)          -> apps/segarecomp-launcher/assets/README.md
 
 Source for Zig and SDL3 is available from https://ziglang.org and https://libsdl.org at the pinned versions

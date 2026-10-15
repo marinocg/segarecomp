@@ -99,6 +99,12 @@ int sv_diag_libusb_loadable(void);
 int sv_diag_libusb_available(const SvDiag *diag);
 /* Whether the SDL build contains a given HIDAPI driver switch (hint is known to SDL); text such as "enabled/disabled/default". */
 const char *sv_diag_switch2_hint_state(void);
+/* Whether this SDL build identifies itself (SDL_GetRevision) as built with the Switch 2 USB driver by Segarecomp's recipe, which gates that against the
+ * binary. A stock SDL reports 0: the driver is then likely absent, but this is a declaration, not a run-time proof. */
+int sv_diag_switch2_driver_declared(void);
+/* The first broken link for a Switch 2 controller (SDL joystick matched by vendor/product, or only seen by the OS scan: pass `hid` and `hid_count`,
+ * NULL/0 without a scan). Fills `out` with the actionable text and returns the verdict; SV_S2_NOT_SEEN leaves `out` empty. Cheap: no hardware access. */
+SvSwitch2Verdict sv_diag_switch2_message(const SvDiag *diag, const SvDiagContext *context, const SvDiagHid *hid, int hid_count, char *out, size_t cap);
 /* "SDL 3.4.16 (compiled 3.4.16)". */
 void sv_diag_sdl_version(char *out, size_t cap);
 

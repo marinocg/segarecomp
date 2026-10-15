@@ -1278,6 +1278,12 @@ set_property(TEST packaging_trim_zig_test APPEND PROPERTY LABELS full)
 add_test(NAME packaging_smoke_hermeticity_test COMMAND ${Python3_EXECUTABLE}
   ${CMAKE_CURRENT_SOURCE_DIR}/packaging_smoke_hermeticity_test.py ${PROJECT_SOURCE_DIR})
 set_property(TEST packaging_smoke_hermeticity_test APPEND PROPERTY LABELS full fast)
+add_test(NAME packaging_sdl_check_test COMMAND ${Python3_EXECUTABLE} -I
+  ${CMAKE_CURRENT_SOURCE_DIR}/packaging_sdl_check_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST packaging_sdl_check_test APPEND PROPERTY LABELS full fast)
+add_test(NAME packaging_windows_sdl_recipe_test COMMAND ${Python3_EXECUTABLE} -I
+  ${CMAKE_CURRENT_SOURCE_DIR}/packaging_windows_sdl_recipe_test.py ${PROJECT_SOURCE_DIR})
+set_property(TEST packaging_windows_sdl_recipe_test APPEND PROPERTY LABELS full fast)
 set_property(TEST z80_live_guard_test z80_live_operand_test genesis_z80_images_test genesis_z80_view_test genesis_z80_machine_test genesis_audio_psg_test
   genesis_ym2612_device_test genesis_audio_ym_test APPEND PROPERTY LABELS full)
 set_property(TEST codegen_c11_z80_dependency_test z80_generated_pipeline_test z80_conformance_harness_test

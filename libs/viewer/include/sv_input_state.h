@@ -7,6 +7,8 @@
  *   OS/SDL sees a joystick -> SDL has a gamepad mapping -> SDL_OpenGamepad works -> events arrive -> the game bindings use them
  * has been proven.
  */
+#include <stddef.h>
+
 #include "sv_settings.h"
 
 #ifdef __cplusplus
@@ -43,6 +45,38 @@ SvPadState sv_pad_overall(const SvPadState *states, int count);
 const char *sv_pad_state_code(SvPadState state);
 const char *sv_pad_state_title(SvPadState state);
 const char *sv_pad_state_advice(SvPadState state);
+
+/*
+ * Nintendo Switch 2 controllers: which link of the native chain is the first broken one. The facts are gathered by sv_input_diag.c; the verdict
+ * and its user-facing text are pure (unit tested). "Driver declared" means this SDL build identifies itself as built with the libusb Switch 2
+ * driver (Segarecomp's own recipe checks that against the binary); it is not a run-time proof, and a loadable libusb is not a working controller.
+ */
+typedef enum SvSwitch2Verdict {
+  SV_S2_NOT_SEEN = 0,   /* no Switch 2 controller is visible to SDL or to the OS scan */
+  SV_S2_BLUETOOTH,      /* on Bluetooth: SDL 3.4's Switch 2 driver is USB only */
+  SV_S2_DRIVER_ABSENT,  /* this SDL build does not declare the native USB driver */
+  SV_S2_LIBUSB_MISSING, /* driver declared, but the libusb runtime cannot be loaded */
+  SV_S2_USB_NOT_CLAIMED,/* driver and libusb present, yet SDL did not turn the device into a gamepad (USB interface not accessible?) */
+  SV_S2_OPEN_FAILED,    /* SDL recognised a gamepad but SDL_OpenGamepad failed */
+  SV_S2_NO_EVENTS,      /* opened, no input yet */
+  SV_S2_BINDINGS,       /* events arrive, the game bindings are missing/conflicting */
+  SV_S2_NAV_PENDING,    /* events arrive, the launcher's own navigation has not reacted yet */
+  SV_S2_WORKING,        /* opened and events arrive */
+  SV_S2_VERDICT_COUNT
+} SvSwitch2Verdict;
+
+typedef struct SvSwitch2Facts {
+  int seen;              /* an SDL joystick or an OS-scan device with a Switch 2 product id exists */
+  int driver_declared;
+  int libusb_loadable;
+  int transport;         /* 0 not determined, 1 USB (wired), 2 Bluetooth: only when SDL or the OS scan actually reported it */
+  SvPadState state;      /* the generic classification of the SDL device (SV_PAD_NO_JOYSTICK when only the OS scan sees it) */
+} SvSwitch2Facts;
+
+int sv_switch2_is_product(unsigned vendor, unsigned product);
+SvSwitch2Verdict sv_switch2_assess(const SvSwitch2Facts *facts);
+/* Multi-line actionable text (empty for SV_S2_NOT_SEEN); `detail` is SDL's own error text for SV_S2_OPEN_FAILED (may be NULL). Returns the length. */
+size_t sv_switch2_message(const SvSwitch2Facts *facts, const char *detail, char *out, size_t cap);
 
 /* Audits one player's gamepad bindings of a console: actions the console exposes but leaves unbound, and buttons bound twice. */
 void sv_pad_binding_audit(const SvSettings *settings, SvSystem system, int player, int *missing, int *conflicts);

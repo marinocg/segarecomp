@@ -14,15 +14,15 @@ on:
       - "packaging/**"
       - "apps/segarecomp-launcher/**"
       - "apps/segarecomp/**"
+      - "libs/viewer/**"
+      - "tests/packaging_*"
 
 permissions:
   contents: read
 
 env:
   ZIG_VERSION: "0.15.2"
-  SDL_VERSION: "3.4.16"
-  SDL_VC_SHA256: 1a784cb2a5c64d56fe7a62090fe9d242d9865f235e4ea9678f1a6ba4e693e7de
-  SDL_MINGW_SHA256: 9828bb735cf8a007bcf0ac5aa9f01f3fcb54b7ca67c932e775c905c5d5053a60
+  # SDL3 (3.4.16) and libusb (1.0.29, Windows) are pinned with their SHA-256 in packaging/build-sdl3.sh, the one place both are built for every OS.
   SOURCE_DATE_EPOCH: "1767225600"  # 2026-01-01T00:00:00Z: normalized archive timestamps
 
 jobs:
@@ -97,34 +97,32 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: "SDL3 (macOS/Linux, pinned source build, shared)"
-        if: runner.os != 'Windows'
+      - name: "SDL3 required-support gate rejects a build without libusb (negative control, configure only)"
         run: |
-          # libusb development files are installed above: SDL then compiles its Nintendo Switch 2 USB driver (libusb is loaded from the system at run time,
-          # never bundled). SDL_REQUIRE_LIBUSB makes a build without the driver fail instead of silently shipping without it.
-          SDL_REQUIRE_LIBUSB=1 packaging/build-sdl3.sh "$WORK/sdl" "$WORK/sdl3"
+          # The same recipe configured with libusb disabled must FAIL its gate: proof that a silently driver-less SDL cannot be shipped.
+          if SDL_REQUIRE_LIBUSB=1 SDL_CONFIGURE_ONLY=1 SDL_EXTRA_CMAKE_ARGS="-DSDL_HIDAPI_LIBUSB=OFF" ZIG="$ZIG_DIR/zig" \
+              packaging/build-sdl3.sh "$WORK/sdl-negative" "$WORK/sdl3-negative" > "$WORK/negative-gate.log" 2>&1; then
+            echo "the gate ACCEPTED an SDL build without libusb"; cat "$WORK/negative-gate.log"; exit 1
+          fi
+          grep -q "SDL_REQUIRE_LIBUSB=1: failing" "$WORK/negative-gate.log" || { echo "the gate failed for another reason:"; cat "$WORK/negative-gate.log"; exit 1; }
+          echo "negative control OK: a build without libusb is rejected"
+
+      - name: "SDL3 (pinned source build WITH the Nintendo Switch 2 USB driver; SDL_REQUIRE_LIBUSB fails the build without it)"
+        run: |
+          # macOS/Linux: libusb development files are installed above and libusb is loaded from the system at run time (never bundled).
+          # Windows: one SDL3.dll for the launcher (SDL3.lib, MSVC) and the bundled Zig (libSDL3.dll.a generated from that same DLL), plus the pinned
+          # MinGW libusb-1.0.dll that SDL3.dll loads lazily; build-sdl3.sh gates driver presence, lazy libusb, import-library/export parity and runtime deps.
+          SDL_REQUIRE_LIBUSB=1 ZIG="$ZIG_DIR/zig" packaging/build-sdl3.sh "$WORK/sdl" "$WORK/sdl3"
           echo "SDL3_PREFIX=$WORK/sdl3" >> "$GITHUB_ENV"
           echo "SDL3_PKG_PREFIX=$WORK/sdl3" >> "$GITHUB_ENV"
           echo "SDL3_LICENSE=$WORK/sdl3/LICENSE.txt" >> "$GITHUB_ENV"
-          echo "SDL3_DLL=" >> "$GITHUB_ENV"
-
-      - name: "SDL3 (Windows, pinned official VC devel for the launcher and mingw devel for the bundled compiler)"
-        if: runner.os == 'Windows'
-        run: |
-          cd "$WORK"
-          curl -fsSL -o sdl-vc.zip "https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL3-devel-${SDL_VERSION}-VC.zip"
-          curl -fsSL -o sdl-mingw.zip "https://github.com/libsdl-org/SDL/releases/download/release-${SDL_VERSION}/SDL3-devel-${SDL_VERSION}-mingw.zip"
-          echo "${SDL_VC_SHA256}  sdl-vc.zip" | sha256sum -c -
-          echo "${SDL_MINGW_SHA256}  sdl-mingw.zip" | sha256sum -c -
-          cmake -E tar xf sdl-vc.zip
-          mkdir mingw && (cd mingw && cmake -E tar xf ../sdl-mingw.zip)
-          echo "SDL3_PREFIX=$WORK/SDL3-${SDL_VERSION}" >> "$GITHUB_ENV"
-          echo "SDL3_PKG_PREFIX=$WORK/mingw/SDL3-${SDL_VERSION}/x86_64-w64-mingw32" >> "$GITHUB_ENV"
-          echo "SDL3_LICENSE=$WORK/SDL3-${SDL_VERSION}/LICENSE.txt" >> "$GITHUB_ENV"
-          echo "SDL3_DLL=$WORK/SDL3-${SDL_VERSION}/lib/x64/SDL3.dll" >> "$GITHUB_ENV"
-          # Informational (never fails): SDL's official Windows build carries no Nintendo Switch 2 driver (it needs libusb and a WinUSB driver binding, which the
-          # launcher will not install). 0 = absent, as verified for 3.4.16 (docs/testing/input-diagnostics.md).
-          echo "official SDL3.dll Switch 2 driver hint occurrences: $(grep -c -a SDL_JOYSTICK_HIDAPI_SWITCH2 "$WORK/SDL3-${SDL_VERSION}/lib/x64/SDL3.dll" || true)"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            echo "SDL3_DLL=$WORK/sdl3/bin/SDL3.dll" >> "$GITHUB_ENV"
+            echo "LIBUSB_DIR=$WORK/sdl3/libusb" >> "$GITHUB_ENV"
+          else
+            echo "SDL3_DLL=" >> "$GITHUB_ENV"
+            echo "LIBUSB_DIR=" >> "$GITHUB_ENV"
+          fi
 
       - name: Configure
         run: |
@@ -140,7 +138,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="$SDL3_PREFIX" \
             -DSEGARECOMP_ZIG_VERSION="$ZIG_VERSION" -DSEGARECOMP_RELEASE_VERSION="$VERSION" \
             -DSEGARECOMP_PACKAGE_ZIG_DIR="$ZIG_DIR" -DSEGARECOMP_PACKAGE_SDL3_PREFIX="$SDL3_PKG_PREFIX" \
-            -DSEGARECOMP_PACKAGE_SDL3_LICENSE="$SDL3_LICENSE" -DSEGARECOMP_PACKAGE_SDL3_DLL="$SDL3_DLL"
+            -DSEGARECOMP_PACKAGE_SDL3_LICENSE="$SDL3_LICENSE" -DSEGARECOMP_PACKAGE_SDL3_DLL="$SDL3_DLL" -DSEGARECOMP_PACKAGE_LIBUSB_DIR="$LIBUSB_DIR"
       - name: Build
         run: cmake --build build/release
 
@@ -173,6 +171,18 @@ jobs:
             Windows) cmake -E tar xf "$archive"; launcher=Segarecomp/Segarecomp.exe ;;
           esac
           cd "$RUNNER_TEMP"   # leave the checkout: nothing may resolve through the source or build tree
+          # The EXTRACTED package carries the SDL that was built and gated above, byte for byte (never a development-machine copy), with the driver compiled in.
+          case "$RUNNER_OS" in
+            Windows)
+              pkg="$RUNNER_TEMP/extracted/Segarecomp"
+              for dll in "$pkg/SDL3.dll" "$pkg/sdl3/lib/SDL3.dll"; do cmp "$SDL3_DLL" "$dll"; done
+              for dll in "$pkg/libusb-1.0.dll" "$pkg/sdl3/lib/libusb-1.0.dll"; do cmp "$LIBUSB_DIR/libusb-1.0.dll" "$dll"; done
+              test -f "$pkg/licenses/libusb-LGPL-2.1.txt" && ls "$pkg"/licenses/libusb-*-source.tar.bz2
+              python "$GITHUB_WORKSPACE/packaging/sdl_check.py" driver "$pkg/SDL3.dll" --dynamic-libusb libusb-1.0.dll
+              python "$GITHUB_WORKSPACE/packaging/sdl_check.py" windows "$pkg/SDL3.dll" "$pkg/libusb-1.0.dll" "$SDL3_PREFIX/lib/SDL3.lib" "$pkg/sdl3/lib/libSDL3.dll.a" ;;
+            Linux)  python "$GITHUB_WORKSPACE/packaging/sdl_check.py" driver "$RUNNER_TEMP/extracted/Segarecomp/sdl3/lib/libSDL3.so.0" ;;
+            macOS)  python "$GITHUB_WORKSPACE/packaging/sdl_check.py" driver "$RUNNER_TEMP/extracted/Segarecomp.app/Contents/Resources/sdl3/lib/libSDL3.0.dylib" ;;
+          esac
           # SEG-049-T007: the package needs no Python / ML framework / research model file (native dependencies of the launcher and the CLI are
           # packaged or operating-system libraries; the frozen native models are embedded in the CLI).
           python "$GITHUB_WORKSPACE/packaging/dependency_check.py" "$RUNNER_TEMP/extracted" "$RUNNER_TEMP/extracted/$launcher"

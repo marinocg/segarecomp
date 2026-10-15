@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <stdio.h>
 
 #include "sv_input_state.h"
 
@@ -125,4 +126,76 @@ const char *sv_pad_position_name(int b) {
     case 20: return "Touchpad";
     default: return "Button";
   }
+}
+
+/* ------------------------------------------------------------------------------------------------------------------ Switch 2 */
+
+int sv_switch2_is_product(unsigned vendor, unsigned product) { return vendor == 0x057eu && product >= 0x2066u && product <= 0x2073u; }
+
+SvSwitch2Verdict sv_switch2_assess(const SvSwitch2Facts *f) {
+  if (f == NULL || !f->seen) return SV_S2_NOT_SEEN;
+  switch (f->state) {
+    case SV_PAD_OPEN_FAILED: return SV_S2_OPEN_FAILED;
+    case SV_PAD_NO_EVENTS: return SV_S2_NO_EVENTS;
+    case SV_PAD_BINDINGS: return SV_S2_BINDINGS;
+    case SV_PAD_MENU_NAV: return SV_S2_NAV_PENDING;
+    case SV_PAD_LIVE: return SV_S2_WORKING;
+    default: break; /* SV_PAD_NO_JOYSTICK / SV_PAD_NOT_A_GAMEPAD: SDL has no gamepad for it */
+  }
+  if (f->transport == 2) return SV_S2_BLUETOOTH;
+  if (!f->driver_declared) return SV_S2_DRIVER_ABSENT;
+  if (!f->libusb_loadable) return SV_S2_LIBUSB_MISSING;
+  return SV_S2_USB_NOT_CLAIMED;
+}
+
+size_t sv_switch2_message(const SvSwitch2Facts *f, const char *detail, char *out, size_t cap) {
+  size_t used = 0;
+  SvSwitch2Verdict v;
+#define ADD(...) do { if (used < cap) { const int w = snprintf(out + used, cap - used, __VA_ARGS__); if (w > 0) used += (size_t)w < cap - used ? (size_t)w : cap - used - 1; } } while (0)
+  if (cap == 0) return 0;
+  out[0] = '\0';
+  v = sv_switch2_assess(f);
+  if (v == SV_S2_NOT_SEEN) return 0;
+  ADD("Nintendo Switch 2 controller detected.\n");
+  if (f->transport == 1 || f->transport == 2) ADD("Connection: %s.\n", f->transport == 2 ? "Bluetooth" : "USB");
+  switch (v) {
+    case SV_S2_BLUETOOTH:
+      ADD("This SDL version does not provide native Switch 2 Bluetooth support. Connect the controller with a USB-C cable, or use Steam Input or a "
+          "compatible controller bridge instead.");
+      break;
+    case SV_S2_DRIVER_ABSENT:
+      ADD("Native USB support: NOT declared by this SDL build (the official SDL binaries for Windows do not contain the Switch 2 driver). Use the SDL "
+          "that ships in the Segarecomp package, or Steam Input or a compatible controller bridge.");
+      break;
+    case SV_S2_LIBUSB_MISSING:
+      ADD("Native USB support is available in this SDL build.\nlibusb runtime: NOT found, so the driver cannot start. Keep libusb-1.0 where SDL can load it "
+          "(the Windows package ships libusb-1.0.dll beside the launcher and in sdl3/lib).");
+      break;
+    case SV_S2_USB_NOT_CLAIMED:
+      ADD("Native USB support is available in this SDL build.\nlibusb runtime: available.\nSDL did not turn the controller into a gamepad. The USB interface may not be "
+          "accessible to libusb (on Windows it must be bound to WinUSB; Segarecomp never installs or changes drivers; on Linux check udev), or another program "
+          "holds it.\nRun with SEGARECOMP_INPUT_TRACE=1 for SDL's own message.");
+      break;
+    case SV_S2_OPEN_FAILED:
+      if (f->driver_declared) ADD("Native USB support is available in this SDL build.\nlibusb runtime: %s\n", f->libusb_loadable ? "available." : "NOT found.");
+      ADD("Gamepad initialization: failed.\nDetails: %s", detail != NULL && detail[0] != '\0' ? detail : "SDL gave no error text");
+      break;
+    case SV_S2_NO_EVENTS:
+      ADD("Gamepad initialization: succeeded. No button or stick event has arrived yet: press a button. If nothing ever arrives the driver opened the "
+          "device but receives no input.");
+      break;
+    case SV_S2_BINDINGS:
+      ADD("Input events arrive, but the game bindings are missing or conflicting. Fix them in Controls (or Restore Defaults).");
+      break;
+    case SV_S2_NAV_PENDING:
+      ADD("Input events arrive. Use the menu test to confirm that the launcher's own navigation receives them.");
+      break;
+    case SV_S2_WORKING:
+      ADD("Gamepad initialization: succeeded; button and stick events are arriving through SDL's gamepad layer%s.",
+          f->driver_declared ? " (this SDL build includes the native Switch 2 USB driver)" : "");
+      break;
+    default: break;
+  }
+#undef ADD
+  return used;
 }

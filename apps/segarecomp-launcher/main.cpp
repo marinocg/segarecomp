@@ -14,6 +14,11 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include "sv_input_diag.h"
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#endif
+
 #include <algorithm>
 #include <cfloat>
 #include <chrono>
@@ -184,6 +189,34 @@ int headless(int argc, char **argv) {
   return rc;
 }
 
+// ---- `Segarecomp --input-report`: the input diagnostics without a window (package smoke test, support) ----
+// Prints which SDL library this process really loaded, what that build declares about the Switch 2 USB driver, whether libusb can be loaded the way
+// SDL loads it, and the same copyable summary the Input diagnostics page shows. It opens no window and never touches a ROM.
+int input_report() {
+  std::string library = "unknown";
+#if defined(_WIN32)
+  if (HMODULE module = GetModuleHandleW(L"SDL3.dll")) {
+    wchar_t buffer[MAX_PATH * 4];
+    const DWORD n = GetModuleFileNameW(module, buffer, static_cast<DWORD>(sizeof buffer / sizeof buffer[0]));
+    if (n > 0 && n < sizeof buffer / sizeof buffer[0]) library = u8s(fs::path(std::wstring(buffer, n)));
+  }
+#else
+  Dl_info info{};
+  if (dladdr(reinterpret_cast<void *>(&SDL_Init), &info) != 0 && info.dli_fname != nullptr) library = info.dli_fname;
+#endif
+  const bool ok = SDL_Init(SDL_INIT_GAMEPAD | SDL_INIT_EVENTS);
+  SvDiag *diag = sv_diag_create();
+  sv_diag_note_init(diag, 1, ok ? 1 : 0, ok ? nullptr : SDL_GetError());
+  if (ok) sv_diag_scan(diag);
+  char text[2600];
+  (void)sv_diag_summary(diag, text, sizeof text);
+  std::printf("sdl_library=%s\nsdl_revision=%s\nswitch2_driver_declared=%s\nlibusb_loadable=%s\n%s", library.c_str(), SDL_GetRevision(),
+              sv_diag_switch2_driver_declared() ? "yes" : "no", sv_diag_libusb_available(diag) ? "yes" : "no", text);
+  sv_diag_destroy(diag);
+  SDL_Quit();
+  return ok ? 0 : 1;
+}
+
 // ---- GUI: see app.cpp (library, details, import, storage, settings) ----
 
 } // namespace
@@ -224,6 +257,7 @@ int main(int argc, char **argv) {
 #if defined(_WIN32)
   enable_dpi_awareness();
 #endif
+  if (argc == 2 && std::string(argv[1]) == "--input-report") return input_report();
   if (argc > 1) return headless(argc, argv);
   return gui_main();
 }

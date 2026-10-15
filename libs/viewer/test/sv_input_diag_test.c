@@ -163,6 +163,15 @@ int main(void) {
   CHECK(sv_diag_state_of(d, sv_diag_find(d, pad), &ctx) == SV_PAD_LIVE, "F: cleared once navigation reacted");
   ctx.settings = &settings; ctx.nav_checked = 0;
 
+  /* Switch 2 diagnostics from the same facts (a virtual device with the Switch 2 Pro vendor/product proves the DIAGNOSTIC chain only, never the
+   * Nintendo protocol or a physical controller). Gamepad opened and live: the working verdict, no failure text. */
+  {
+    char msg[640];
+    CHECK(sv_diag_switch2_message(d, &ctx, NULL, 0, msg, sizeof msg) == SV_S2_WORKING && strstr(msg, "events are arriving") != NULL, "Switch 2: an opened, live pad is the working verdict");
+    CHECK(strstr(msg, "Connection:") == NULL, "Switch 2: no connection type is invented when SDL does not report one");
+    sv_diag_summary(d, text, sizeof text);
+    CHECK(strstr(text, "Nintendo Switch 2 controller detected.") != NULL, "Switch 2: the copyable summary carries the verdict");
+  }
   /* unplug / replug keeps working and does not leak the old slot */
   SDL_CloseJoystick(handle);
   SDL_DetachVirtualJoystick(pad);
@@ -180,6 +189,38 @@ int main(void) {
     SDL_DetachVirtualJoystick(second);
     pump(d);
     CHECK(sv_diag_count(d) == 1, "removing one leaves the other");
+  }
+  /* Switch 2 chain with a raw (no gamepad mapping) device and with a failing open; transport only when reported */
+  SDL_DetachVirtualJoystick(pad);
+  pump(d);
+  {
+    char msg[640];
+    SvDiagHid hid;
+    SDL_JoystickID s2 = attach(SDL_JOYSTICK_TYPE_UNKNOWN, "Virtual Switch 2 Pro (diagnostic path only)", 0x057e, 0x2069);
+    const SvSwitch2Verdict expected = !sv_diag_switch2_driver_declared() ? SV_S2_DRIVER_ABSENT : (!sv_diag_libusb_available(d) ? SV_S2_LIBUSB_MISSING : SV_S2_USB_NOT_CLAIMED);
+    pump(d);
+    CHECK(sv_diag_switch2_message(d, &ctx, NULL, 0, msg, sizeof msg) == expected, "Switch 2: a raw joystick is attributed to the first missing link (driver, libusb, USB claim)");
+    CHECK(strstr(msg, "Connection:") == NULL, "Switch 2: transport is not guessed without a report");
+    memset(&hid, 0, sizeof hid);
+    hid.vendor = 0x057e; hid.product = 0x2069; hid.bus = 2;
+    CHECK(sv_diag_switch2_message(d, &ctx, &hid, 1, msg, sizeof msg) == SV_S2_BLUETOOTH && strstr(msg, "Connection: Bluetooth.") != NULL && strstr(msg, "does not provide native Switch 2 Bluetooth") != NULL,
+          "Switch 2: a Bluetooth OS-scan entry yields the Bluetooth message");
+    hid.bus = 1;
+    CHECK(sv_diag_switch2_message(d, &ctx, &hid, 1, msg, sizeof msg) == expected && strstr(msg, "Connection: USB.") != NULL, "Switch 2: a USB OS-scan entry keeps the chain and states the connection");
+    SDL_DetachVirtualJoystick(s2);
+    pump(d);
+    CHECK(sv_diag_switch2_message(d, &ctx, NULL, 0, msg, sizeof msg) == SV_S2_NOT_SEEN && msg[0] == '\0', "Switch 2: nothing is reported when no Switch 2 device is visible");
+    CHECK(sv_diag_switch2_message(d, &ctx, &hid, 1, msg, sizeof msg) == expected, "Switch 2: an OS-scan-only controller is still attributed");
+    sv_diag_set_open_hook(failing_open);
+    s2 = attach(SDL_JOYSTICK_TYPE_GAMEPAD, "Virtual Switch 2 Pro (diagnostic path only)", 0x057e, 0x2069);
+    pump(d);
+    CHECK(sv_diag_switch2_message(d, &ctx, NULL, 0, msg, sizeof msg) == SV_S2_OPEN_FAILED && strstr(msg, "Gamepad initialization: failed.") != NULL && strstr(msg, "Details: simulated: access to the device was denied") != NULL,
+          "Switch 2: an open failure shows SDL's own error text");
+    SDL_DetachVirtualJoystick(s2);
+    pump(d);
+    sv_diag_set_open_hook(NULL);
+    pad = attach(SDL_JOYSTICK_TYPE_GAMEPAD, "Fictional Live Pad", 0x057e, 0x2069);
+    pump(d);
   }
   /* the state ranking: the most advanced device wins */
   {
