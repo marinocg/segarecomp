@@ -3,6 +3,8 @@
 Original pixel-art produced for Segarecomp (not derived from Sega trademarked material):
 
 - `background.png` -- sunset scenery background (portrait, cover-cropped to the window)
+- `banner.png` -- wide sunset banner of the window header (2172x724)
+- `icons/Segarecomp-{16..512}.png` -- the application icon (window/taskbar/dock; also packaged as `.ico`/`.icns`)
 - `wordmark.png` -- SEGARECOMP pixel-art logotype (transparent)
 - `icon-drop.png`, `icon-info.png`, `icon-folder.png` -- UI icons (transparent)
 

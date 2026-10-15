@@ -6,6 +6,7 @@
   <key>CFBundleDisplayName</key><string>Segarecomp</string>
   <key>CFBundleIdentifier</key><string>io.github.marinocg.segarecomp</string>
   <key>CFBundleExecutable</key><string>Segarecomp</string>
+  <key>CFBundleIconFile</key><string>Segarecomp</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleVersion</key><string>@SEGARECOMP_BUNDLE_VERSION@</string>
   <key>CFBundleShortVersionString</key><string>@SEGARECOMP_BUNDLE_VERSION@</string>

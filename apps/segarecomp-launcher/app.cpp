@@ -160,6 +160,13 @@ bool App::init_window() {
   const float base_w = 1080.0F, base_h = 740.0F;
   window_ = SDL_CreateWindow("Segarecomp", static_cast<int>(base_w), static_cast<int>(base_h), SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
   if (window_ == nullptr) { std::fprintf(stderr, "window failed: %s\n", SDL_GetError()); return false; }
+  // The application icon (title bar / taskbar / dock): the largest size first, smaller sizes as alternates the OS picks from.
+  if (SDL_Surface *icon = load_asset_surface("icons/Segarecomp-256.png")) {
+    for (const char *alt : {"icons/Segarecomp-128.png", "icons/Segarecomp-48.png", "icons/Segarecomp-32.png", "icons/Segarecomp-16.png"})
+      if (SDL_Surface *s = load_asset_surface(alt)) { SDL_AddSurfaceAlternateImage(icon, s); SDL_DestroySurface(s); }
+    SDL_SetWindowIcon(window_, icon);
+    SDL_DestroySurface(icon);
+  }
   // SDL3 sizes windows in points: on a DPI-aware Windows/Linux window a point is a physical pixel, so the default size follows the display scale.
   float window_scale = 1.0F;
   const float display_scale = SDL_GetWindowDisplayScale(window_), density = SDL_GetWindowPixelDensity(window_);
