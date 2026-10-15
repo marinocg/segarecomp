@@ -12,6 +12,9 @@ struct SvDiag {
   int video_ok, gamepad_ok;
   char gamepad_error[160];
   int trace;
+  int yielded;         /* sv_diag_yield_exclusive_devices is in effect */
+  char saved_hint[16]; /* the Switch 2 driver hint before the yield; "" = it was unset */
+  int saved_hint_set;
   int libusb_loadable; /* probed once at setup, never during hotplug/event logging */
 };
 
@@ -475,3 +478,36 @@ void sv_diag_log_summary(const SvDiag *d, const char *why) {
   (void)sv_diag_summary(d, text, sizeof text);
   SDL_Log("input diagnostics (%s):\n%s", why != NULL ? why : "summary", text);
 }
+
+/* ------------------------------------------------------------------------------------------------------------------ exclusive devices */
+
+void sv_diag_yield_exclusive_devices(SvDiag *d) {
+#ifdef SDL_HINT_JOYSTICK_HIDAPI_SWITCH2
+  const char *prior;
+  if (d == NULL || d->yielded) return;
+  prior = SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH2);
+  d->saved_hint_set = prior != NULL;
+  copy_text(d->saved_hint, sizeof d->saved_hint, prior);
+  d->yielded = 1;
+  (void)SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_HIDAPI_SWITCH2, "0", SDL_HINT_OVERRIDE);
+  SDL_UpdateJoysticks(); /* SDL applies a driver hint change during a joystick update: the libusb handle is closed before this returns */
+  SDL_Log("input: released exclusive (libusb) controllers for the game process");
+#else
+  (void)d;
+#endif
+}
+
+void sv_diag_reclaim_exclusive_devices(SvDiag *d) {
+#ifdef SDL_HINT_JOYSTICK_HIDAPI_SWITCH2
+  if (d == NULL || !d->yielded) return;
+  d->yielded = 0;
+  if (d->saved_hint_set) (void)SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_HIDAPI_SWITCH2, d->saved_hint, SDL_HINT_OVERRIDE);
+  else (void)SDL_ResetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH2);
+  SDL_UpdateJoysticks();
+  SDL_Log("input: took the exclusive (libusb) controllers back from the game process");
+#else
+  (void)d;
+#endif
+}
+
+int sv_diag_exclusive_devices_yielded(const SvDiag *d) { return d != NULL && d->yielded; }

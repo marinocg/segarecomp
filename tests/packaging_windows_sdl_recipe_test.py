@@ -48,6 +48,11 @@ check("libusb-*-source.tar.bz2" in install, "the corresponding libusb source shi
 check("1.0.29" in notices and source_sha in notices and "libusb-LGPL-2.1.txt" in notices, "the notices name the pinned libusb and its source archive")
 check("NOT redistributed" in notices and "Windows:" in notices, "the notices distinguish Windows (bundled) from Linux/macOS (OS libusb)")
 
+app = read("apps/segarecomp-launcher/app.cpp")
+a, g = app.find("sv_diag_yield_exclusive_devices(diag_)"), app.find("game_ = std::make_unique<GameRun>")
+check(0 <= a < g, "the launcher yields exclusive (libusb) controllers BEFORE it starts the game process")
+check(app.count("sv_diag_reclaim_exclusive_devices(diag_)") >= 3, "the launcher takes them back on a failed start, when the game ends and at shutdown")
+
 if failures:
     print("\n".join("FAIL: " + f for f in failures))
     sys.exit(1)

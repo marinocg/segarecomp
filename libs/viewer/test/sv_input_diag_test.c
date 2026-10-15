@@ -237,6 +237,23 @@ int main(void) {
   CHECK(!sv_diag_gamepad_subsystem_ok(d) && strstr(text, "gamepad subsystem FAILED") != NULL && strstr(text, "simulated: no gamepad support") != NULL, "an SDL_INIT_GAMEPAD failure is part of the summary");
   CHECK(strstr(text, "SDL ") != NULL, "the SDL version is part of the summary");
   CHECK(strstr(text, "/") == NULL || strstr(text, ".z64") == NULL, "the summary carries no file paths");
+  /* yielding exclusive (libusb) controllers: the Switch 2 driver hint is switched off and restored exactly, idempotently; the virtual pads are untouched */
+  {
+    const int pads_before = sv_diag_count(d);
+    SDL_SetHintWithPriority(SDL_HINT_JOYSTICK_HIDAPI_SWITCH2, "1", SDL_HINT_OVERRIDE);
+    sv_diag_yield_exclusive_devices(d);
+    sv_diag_yield_exclusive_devices(d);
+    CHECK(sv_diag_exclusive_devices_yielded(d) && strcmp(SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH2), "0") == 0, "yield switches the Switch 2 driver off once");
+    sv_diag_reclaim_exclusive_devices(d);
+    sv_diag_reclaim_exclusive_devices(d);
+    CHECK(!sv_diag_exclusive_devices_yielded(d) && strcmp(SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH2), "1") == 0, "reclaim restores the earlier hint value");
+    pump(d);
+    CHECK(sv_diag_count(d) == pads_before, "yield/reclaim does not disturb devices that are not libusb-driven");
+    SDL_ResetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH2);
+    sv_diag_yield_exclusive_devices(d);
+    sv_diag_reclaim_exclusive_devices(d);
+    CHECK(SDL_GetHint(SDL_HINT_JOYSTICK_HIDAPI_SWITCH2) == NULL, "an unset hint is unset again afterwards");
+  }
   /* the OS-level scan is read-only and must not crash with no Nintendo hardware */
   {
     SvDiagHid hid[SV_DIAG_MAX_HID];

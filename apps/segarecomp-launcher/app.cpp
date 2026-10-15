@@ -212,6 +212,7 @@ void App::shutdown() {
   trace("shutdown=workers");
   if (job_) job_->wait();
   game_.reset();
+  sv_diag_reclaim_exclusive_devices(diag_);
   scan_cancel_ = true;
   if (scan_job_.valid()) scan_job_.wait();
   if (status_job_.valid()) status_job_.wait();
@@ -675,8 +676,10 @@ bool App::launch(const std::string &id, bool restarted) {
   }
   const std::string key = u8s(dir.filename());
   if (!busy_.try_begin_run(key)) { toast("Cleanup is running; try again in a moment.", true); return false; }
+  sv_diag_yield_exclusive_devices(diag_);  // a libusb-driven controller can be opened by one process only: free it for the game
   game_ = std::make_unique<GameRun>(view, layout_, dir);
   if (!game_->started()) {
+    sv_diag_reclaim_exclusive_devices(diag_);
     busy_.end_run(key);
     game_.reset();
     failures_[id] = "The game could not be started.";
@@ -702,6 +705,7 @@ void App::finish_run() {
   const PolicyReport report = game_report_;
   const RestartDecision next = decide_after_exit(running_view(ran, report), exit_code, restarted_this_play_);
   game_.reset();
+  sv_diag_reclaim_exclusive_devices(diag_);
   busy_.end_run(game_key_);
   game_id_.clear();
   trace("run=exited code=" + std::to_string(exit_code) + " mode=" + effective_mode(report));
