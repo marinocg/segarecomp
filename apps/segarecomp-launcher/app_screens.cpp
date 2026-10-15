@@ -263,11 +263,19 @@ void App::draw_sidebar(float x, float y, float w, float h) {
     {
       // Build activity (running + queued) sits directly above the free-space bar; builds never lock the rest of the UI.
       const int running = job_ ? 1 : 0, queued = static_cast<int>(build_queue_.size());
-      std::string text = "No builds running";
-      if (running + queued > 0) text = std::to_string(running + queued) + (running + queued == 1 ? " build" : " builds") + " (" + std::to_string(running) + " running, " + std::to_string(queued) + " queued)";
-      const float bpx = ctx_.u(11.5F), ty = by - ctx_.u(24.0F);
-      if (running > 0) spinner(ctx_, dl, ImVec2(x + pad + ctx_.u(5.0F), ty + bpx * 0.55F), ctx_.u(5.0F), col::warn);
-      draw_text(dl, ctx_.regular, bpx, running + queued > 0 ? col::warn : col::dim, ImVec2(x + pad + (running > 0 ? ctx_.u(16.0F) : 0.0F), ty), ellipsize(ctx_.regular, bpx, w - 2 * pad - ctx_.u(16.0F), text).c_str());
+      // One short line per fact so nothing is truncated: what is running, then how many wait.
+      std::vector<std::string> lines;
+      if (running > 0) lines.push_back("Building 1 game");
+      if (queued > 0) lines.push_back(std::to_string(queued) + (queued == 1 ? " build queued" : " builds queued"));
+      if (lines.empty()) lines.push_back("No builds running");
+      const float bpx = ctx_.u(11.5F), lh = bpx + ctx_.u(4.0F);
+      float ty = by - ctx_.u(10.0F) - lh * static_cast<float>(lines.size());
+      for (const auto &line : lines) {
+        const bool active = running + queued > 0;
+        if (running > 0 && &line == &lines.front()) spinner(ctx_, dl, ImVec2(x + pad + ctx_.u(5.0F), ty + bpx * 0.55F), ctx_.u(5.0F), col::warn);
+        draw_text(dl, ctx_.regular, bpx, active ? col::warn : col::dim, ImVec2(x + pad + (running > 0 && &line == &lines.front() ? ctx_.u(16.0F) : 0.0F), ty), ellipsize(ctx_.regular, bpx, w - 2 * pad - ctx_.u(16.0F), line).c_str());
+        ty += lh;
+      }
     }
     if (!ec && space.capacity > 0) {
       const bool low = space.available < (2ULL << 30U);
