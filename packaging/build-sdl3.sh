@@ -41,7 +41,13 @@ if [ "$windows" = 1 ]; then
   sha_check "${LIBUSB_BINARY_SHA256}" libusb.7z
   curl -fsSL -o libusb-source.tar.bz2 "https://github.com/libusb/libusb/releases/download/v${LIBUSB_VERSION}/libusb-${LIBUSB_VERSION}.tar.bz2"
   sha_check "${LIBUSB_SOURCE_SHA256}" libusb-source.tar.bz2
-  rm -rf libusb-bin && mkdir libusb-bin && (cd libusb-bin && cmake -E tar xf ../libusb.7z)
+  # The release asset is a 7z archive that CMake's bundled libarchive cannot read on the Windows runners ("Lzma library error"); 7-Zip is preinstalled there.
+  sevenzip=""
+  for candidate in 7z 7zz 7za "/c/Program Files/7-Zip/7z.exe" "C:/Program Files/7-Zip/7z.exe"; do
+    if command -v "$candidate" >/dev/null 2>&1; then sevenzip="$candidate"; break; fi
+  done
+  [ -n "$sevenzip" ] || { echo "7-Zip is required to unpack the pinned libusb release asset" >&2; exit 1; }
+  rm -rf libusb-bin && mkdir libusb-bin && "$sevenzip" x -y -olibusb-bin libusb.7z >/dev/null
   extra+=("-DLibUSB_INCLUDE_PATH=$work/libusb-bin/include" "-DLibUSB_LIBRARY=$work/libusb-bin/VS2022/MS64/dll/libusb-1.0.lib")
   # Static CRT: no Visual C++ redistributable on a clean machine (same rule as the launcher). cl, not clang: the toolchain SDL's official Windows builds use.
   extra+=("-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded")
