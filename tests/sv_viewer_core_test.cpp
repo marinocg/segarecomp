@@ -341,6 +341,19 @@ void input_state_tests() {
     check(std::string(text).find("libusb error -3 (ACCESS)") != std::string::npos && std::string(text).find("interface 1: -12 (NOT_SUPPORTED)") != std::string::npos &&
               std::string(text).find("begin iface=0\nstage=open_path FAILED") != std::string::npos && std::string(text).find("x: -12 (NOT_SUPPORTED)") != std::string::npos,
           "the setup trace is shown one step per line with libusb error names");
+    std::snprintf(t.setup_trace, sizeof t.setup_trace, "begin iface=0 class=3 | stage=open_path FAILED error=\"libusb_open failed for interface 0: libusb error -3\"");
+    sv_switch2_message(&t, nullptr, text, sizeof text);
+    check(std::string(text).find("(ACCESS)") != std::string::npos && std::string(text).find("Access denied while libusb opened the device") != std::string::npos && std::string(text).find("Steam") != std::string::npos,
+          "the measured Windows failure (libusb_open -> ACCESS) is named with the possible cause, not asserted as the cause");
+    {
+      std::string whole(text);  // each line still fits one viewer note
+      for (std::size_t at = 0; at < whole.size();) {
+        const std::size_t nl = whole.find('\n', at);
+        check((nl == std::string::npos ? whole.size() : nl) - at < 290, "ACCESS message lines fit one viewer note");
+        if (nl == std::string::npos) break;
+        at = nl + 1;
+      }
+    }
     std::snprintf(t.setup_trace, sizeof t.setup_trace, "begin iface=0 | stage=init_device ok driver=Switch2");
     check(sv_switch2_assess(&t) == SV_S2_USB_NOT_CLAIMED, "a trace without a failure keeps the generic verdict");
     t.setup_trace[0] = '\0';

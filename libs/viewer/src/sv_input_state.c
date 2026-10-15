@@ -223,6 +223,9 @@ size_t sv_switch2_message(const SvSwitch2Facts *f, const char *detail, char *out
     case SV_S2_SETUP_FAILED:
       ADD("Native USB support is available in this SDL build.\nlibusb runtime: available.\nSDL's Switch 2 driver did not start. SDL's own setup trace follows (the last step names the failure):\n");
       used = append_trace(out, cap, used, f->setup_trace);
+      if (strstr(f->setup_trace, "libusb_open failed") != NULL && strstr(f->setup_trace, "error -3") != NULL) /* measured on a physical controller, see docs */
+        ADD("\nAccess denied while libusb opened the device. A possible cause: another program holds the controller's WinUSB interface (Windows lets one program use it at a time).\n"
+            "Quit Steam and any other controller software, including background processes, and retry. LIBUSB_DEBUG=4 in the environment makes libusb print the interface and Windows error.");
       break;
     case SV_S2_USB_NOT_CLAIMED:
       ADD("Native USB support is available in this SDL build.\nlibusb runtime: available.\nSDL did not turn the controller into a gamepad. The USB interface may not be "

@@ -146,6 +146,18 @@ publishes it as the hint `SEGARECOMP_HIDAPI_SETUP_057e_<pid>`; libusb's open/cla
 
 Reproduction status: the patched SDL builds and its diagnostics logic is unit tested (including synthetic traces). The failing operation itself **cannot be reproduced without the physical controller on Windows**; the development artifact of this PR is built to expose it. No Windows driver is touched, no protocol code is copied into Segarecomp, no mapping is added, and no workaround is attempted until the trace names the failure.
 
+**Measured trace (physical Switch 2 Pro, Windows, USB-C, diagnostic build):**
+`begin iface=0 class=3 ... | stage=open_path FAILED error="libusb_open failed for interface 0: libusb error -3 (ACCESS)"`. So: the driver is enabled and selected (not path 1), the failing operation is
+`libusb_open()` of the device inside `SDL_hid_open_path`, **before** any interface claim, bulk-endpoint discovery or Nintendo init. libusb 1.0.29's Windows backend (`composite_open`) opens the
+WinUSB-bound interfaces first and returns their error, while an access error on the HID interface (MI_00) is deliberately ignored. An ACCESS result therefore points at the **WinUSB interface MI_01** being
+refused by `CreateFile` (`ERROR_ACCESS_DENIED`), not at the HID interface. This is derived from reading libusb's source and is **not yet confirmed on the device**. A known property of WinUSB is that
+an interface can be opened by one program at a time, so another program holding it (Steam's controller support is the obvious candidate; a leftover Segarecomp instance is another) is a *candidate*, not a finding.
+Not established: who holds it, or whether a clean machine without such a program succeeds.
+
+Next physical test (no code change, no driver change): exit Steam completely (tray icon > Exit; check Task Manager for `steam.exe`/`steamwebhelper.exe`), close any other controller software and every Segarecomp
+process, unplug and replug the controller, then start from `cmd.exe` with `set LIBUSB_DEBUG=4` and `set SEGARECOMP_INPUT_TRACE=1` and run `Segarecomp.exe 2> libusb.txt`. Report the setup trace and the `libusb.txt` lines containing
+`could not open` (they name the interface and the Windows error). If it still reports ACCESS with nothing else running, that identifies a driver/permission cause and the smallest correction is decided from that line.
+
 ### Packaging decisions
 
 * **libusb is loaded dynamically and shipped as a separate DLL** (static linking would put LGPL-2.1 code inside SDL3.dll and require relinkable object files; a separate unmodified,
