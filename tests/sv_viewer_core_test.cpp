@@ -368,7 +368,7 @@ void input_state_tests() {
       u.seen = 1; u.driver_declared = 1; u.libusb_loadable = 1;
       u.state = v == SV_S2_OPEN_FAILED ? SV_PAD_OPEN_FAILED : v == SV_S2_NO_EVENTS ? SV_PAD_NO_EVENTS : v == SV_S2_BINDINGS ? SV_PAD_BINDINGS : v == SV_S2_NAV_PENDING ? SV_PAD_MENU_NAV : v == SV_S2_WORKING ? SV_PAD_LIVE : SV_PAD_NOT_A_GAMEPAD;
       u.transport = v == SV_S2_BLUETOOTH ? 2 : 0;
-      if (v == SV_S2_SETUP_FAILED) std::snprintf(u.setup_trace, sizeof u.setup_trace, "begin iface=0 | stage=open_path ok libusb_backed=1 | usb: libusb loaded | stage=init_device FAILED driver=Switch2 error=\"Couldn't claim interface 1: -12\"");
+      if (v == SV_S2_SETUP_FAILED) std::snprintf(u.setup_trace, sizeof u.setup_trace, "begin iface=0 | stage=open_path ok backed_by_libusb=1 | usb: libusb loaded | stage=init_device FAILED driver=Switch2 error=\"Couldn't claim interface 1: -12\"");
       u.driver_declared = v != SV_S2_DRIVER_ABSENT; u.libusb_loadable = v != SV_S2_LIBUSB_MISSING;
       char big[1536];
       check(sv_switch2_assess(&u) == v, "the synthetic facts select the intended verdict");

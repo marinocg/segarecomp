@@ -111,7 +111,7 @@ diff -ru a/src/joystick/hidapi/SDL_hidapijoystick.c b/src/joystick/hidapi/SDL_hi
                  return;
              }
              SDL_hid_set_nonblocking(dev, 1);
-+            HIDAPI_SegarecompTrace(device, "stage=open_path ok libusb_backed=%d", SDL_GetPointerProperty(SDL_hid_get_properties(dev), SDL_PROP_HIDAPI_LIBUSB_DEVICE_HANDLE_POINTER, NULL) != NULL);
++            HIDAPI_SegarecompTrace(device, "stage=open_path ok backed_by_libusb=%d", SDL_GetPointerProperty(SDL_hid_get_properties(dev), SDL_PROP_HIDAPI_LIBUSB_DEVICE_HANDLE_POINTER, NULL) != NULL);
  
              device->dev = dev;
          }

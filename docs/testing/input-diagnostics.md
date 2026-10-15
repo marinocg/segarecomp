@@ -140,7 +140,7 @@ publishes it as the hint `SEGARECOMP_HIDAPI_SETUP_057e_<pid>`; libusb's open/cla
 | `begin iface=.. class=.. usage_page=..` | what SDL enumerated (interface, class, usage) |
 | `stage=no_driver (switch2_driver_enabled=0/1, ignored=0/1, usage_filter_applies=0/1)` | path (1): hint disabled, ignored, or usage filter |
 | `stage=open_path FAILED error="libusb_open failed..." / "libusb_claim_interface(0) failed: libusb error N"` | path (2): the libusb HID open, i.e. claiming the HID interface |
-| `stage=open_path ok libusb_backed=0/1` | the SDL HID handle is (not) libusb-backed |
+| `stage=open_path ok backed_by_libusb=0/1` | the SDL HID handle is (not) libusb-backed |
 | `usb: libusb loaded` / `handle is libusb-backed` / `bulk endpoints interface=1 out=0x.. in=0x..` / `interface 1 claimed` / `initialization sequence sent` | driver progress (`FindBulkEndpoints`, claim, init) |
 | `stage=init_device FAILED driver=.. error="..."` | path (3): the real `InitDevice` error |
 
